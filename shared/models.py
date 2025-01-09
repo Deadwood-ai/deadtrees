@@ -2,7 +2,7 @@ from typing import Optional, List, Dict
 from enum import Enum
 from datetime import datetime
 
-from pydantic import BaseModel, field_serializer, field_validator
+from pydantic import BaseModel, field_serializer, field_validator, model_validator
 from pydantic_geojson import MultiPolygonModel
 from pydantic_partial import PartialModelMixin
 from pydantic_settings import BaseSettings
@@ -74,7 +74,6 @@ class TaskTypeEnum(str, Enum):
 	cog = 'cog'
 	thumbnail = 'thumbnail'
 	deadwood_segmentation = 'deadwood_segmentation'
-	all = 'all'
 	convert_geotiff = 'convert_geotiff'
 
 
@@ -86,7 +85,7 @@ class TaskPayload(BaseModel):
 	build_args: ProcessOptions = ProcessOptions()
 	is_processing: bool = False
 	created_at: Optional[datetime] = None
-	task_type: TaskTypeEnum
+	task_types: List[TaskTypeEnum]
 
 
 class QueueTask(BaseModel):
@@ -98,7 +97,18 @@ class QueueTask(BaseModel):
 	is_processing: bool
 	current_position: int
 	estimated_time: float | None = None
-	task_type: TaskTypeEnum  # 'cog', 'thumbnail', or 'all'
+	task_types: List[TaskTypeEnum]
+	task_type: Optional[TaskTypeEnum] = None
+
+	@model_validator(mode='before')
+	def convert_task_type_to_types(cls, values):
+		"""Convert old task_type to task_types if necessary"""
+		if isinstance(values, dict):
+			if 'task_type' in values and 'task_types' not in values:
+				values['task_types'] = [values['task_type']] if values['task_type'] else []
+			elif 'task_types' not in values:
+				values['task_types'] = []
+		return values
 
 
 class Thumbnail(BaseModel):

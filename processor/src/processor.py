@@ -1,7 +1,7 @@
 import shutil
 
 from processor.src.process_geotiff import process_geotiff
-from shared.models import QueueTask, StatusEnum, Dataset
+from shared.models import QueueTask, StatusEnum, Dataset, TaskTypeEnum
 from shared.settings import settings
 from shared.supabase import use_client, login, verify_token
 from shared.logger import logger
@@ -75,40 +75,46 @@ def process_task(task: QueueTask, token: str):
 	if not user:
 		raise AuthenticationError('Invalid token', token=token, task_id=task.id)
 
-	if task.task_type in ['convert_geotiff', 'all']:
+	# Process convert_geotiff first if it's in the list
+	if TaskTypeEnum.convert_geotiff in task.task_types:
 		try:
 			process_geotiff(task, settings.processing_path)
 		except Exception as e:
 			raise ProcessingError(str(e), task_type='convert_geotiff', task_id=task.id, dataset_id=task.dataset_id)
 
-	# Process based on task type
-	if task.task_type in ['cog', 'all']:
+	# Process cog if requested
+	if TaskTypeEnum.cog in task.task_types:
 		try:
 			logger.info(f'processing cog to {settings.processing_path}')
 			process_cog(task, settings.processing_path)
 		except Exception as e:
 			raise ProcessingError(str(e), task_type='cog', task_id=task.id, dataset_id=task.dataset_id)
 
-	if task.task_type in ['thumbnail', 'all']:
+	# Process thumbnail if requested
+	if TaskTypeEnum.thumbnail in task.task_types:
 		try:
 			logger.info(f'processing thumbnail to {settings.processing_path}')
 			process_thumbnail(task, settings.processing_path)
 		except Exception as e:
 			raise ProcessingError(str(e), task_type='thumbnail', task_id=task.id, dataset_id=task.dataset_id)
-	# if task.task_type in ['deadwood_segmentation', 'all']:
-	# 	try:
-	# 		process_deadwood_segmentation(task, token, settings.processing_path)
-	# 	except Exception as e:
-	# 		raise ProcessingError(
-	# 			str(e), task_type='deadwood_segmentation', task_id=task.id, dataset_id=task.dataset_id
-	# 		)
+
+	# Process deadwood_segmentation if requested
+	if TaskTypeEnum.deadwood_segmentation in task.task_types:
+		try:
+			process_deadwood_segmentation(task, token, settings.processing_path)
+		except Exception as e:
+			raise ProcessingError(
+				str(e), task_type='deadwood_segmentation', task_id=task.id, dataset_id=task.dataset_id
+			)
 
 	# Delete task after successful processing
 	try:
 		with use_client(token) as client:
 			client.table(settings.queue_table).delete().eq('id', task.id).execute()
 	except Exception as e:
-		raise ProcessorError(f'Failed to delete completed task: {str(e)}', task_type=task.task_type, task_id=task.id)
+		raise ProcessorError(
+			f'Failed to delete completed task: {str(e)}', task_type=str(task.task_types), task_id=task.id
+		)
 
 	if not settings.DEV_MODE:
 		shutil.rmtree(settings.processing_path, ignore_errors=True)

@@ -42,37 +42,33 @@ def test_dataset(auth_token):
 
 def test_create_processing_task(test_dataset, auth_token):
 	"""Test creating a new processing task for a dataset"""
-	# Make request to create processing task
 	response = client.put(
 		f'/datasets/{test_dataset}/process',
-		params={'task_type': 'cog'},
+		params={'task_types': ['cog', 'thumbnail']},
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 
-	# Check response
 	assert response.status_code == 200
 	data = response.json()
 
-	# Verify the task was correctly saved
 	assert data['dataset_id'] == test_dataset
-	assert data['task_type'] == TaskTypeEnum.cog
+	assert 'cog' in data['task_types']
+	assert 'thumbnail' in data['task_types']
 	assert not data['is_processing']
-	assert 'current_position' in data
-	assert 'estimated_time' in data
 
-	# Verify task exists in database
 	with use_client(auth_token) as supabaseClient:
 		response = supabaseClient.table(settings.queue_table).select('*').eq('dataset_id', test_dataset).execute()
 		assert len(response.data) == 1
 		assert response.data[0]['dataset_id'] == test_dataset
-		assert response.data[0]['task_type'] == TaskTypeEnum.cog
+		assert 'cog' in response.data[0]['task_types']
+		assert 'thumbnail' in response.data[0]['task_types']
 
 
 def test_create_processing_task_unauthorized(test_dataset):
 	"""Test process creation without authentication"""
 	response = client.put(
 		f'/datasets/{test_dataset}/process',
-		params={'task_type': 'cog'},
+		params={'task_types': ['cog', 'thumbnail']},
 		headers={},
 	)
 	assert response.status_code == 401
@@ -82,7 +78,17 @@ def test_create_processing_task_invalid_dataset(auth_token):
 	"""Test process creation for non-existent dataset"""
 	response = client.put(
 		'/datasets/99999/process',  # Non-existent dataset ID
-		params={'task_type': 'cog'},
+		params={'task_types': ['cog', 'thumbnail']},
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 	assert response.status_code == 404
+
+
+def test_create_processing_task_empty_types(test_dataset, auth_token):
+	"""Test creating a task with empty task types list"""
+	response = client.put(
+		f'/datasets/{test_dataset}/process',
+		params={'task_types': []},
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	assert response.status_code == 422

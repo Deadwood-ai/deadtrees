@@ -1,8 +1,5 @@
-from typing import Optional, Annotated
-# from pathlib import Path
-# import time
-
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional, Annotated, List
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordBearer
 
 from shared.supabase import verify_token, use_client
@@ -22,15 +19,21 @@ def create_processing_task(
 	dataset_id: int,
 	token: Annotated[str, Depends(oauth2_scheme)],
 	options: Optional[ProcessOptions] = None,
-	task_type: str = 'cog',  # New parameter, default to "cog" for backward compatibility
+	task_types: List[str] = Query(),  # Removed default value
 ):
 	# Verify the token
 	user = verify_token(token)
 	if not user:
 		raise HTTPException(status_code=401, detail='Invalid token')
 
-	# Validate task_type
-	task_type = TaskTypeEnum(task_type)
+	# Validate task_types
+	if not task_types:
+		raise HTTPException(status_code=400, detail='At least one task type must be specified')
+
+	try:
+		validated_task_types = [TaskTypeEnum(t) for t in task_types]
+	except ValueError as e:
+		raise HTTPException(status_code=400, detail=f'Invalid task type: {str(e)}')
 
 	# Load the dataset info
 	try:
@@ -50,7 +53,7 @@ def create_processing_task(
 		dataset_id=dataset_id,
 		user_id=user.id,
 		build_args=options or ProcessOptions(),
-		task_type=task_type,
+		task_types=validated_task_types,
 		priority=2,
 		is_processing=False,
 	)
@@ -63,12 +66,12 @@ def create_processing_task(
 			task = TaskPayload(**response.data[0])
 
 		logger.info(
-			f'Added {task_type} task for dataset {dataset_id} to queue.',
+			f'Added {task_types} task for dataset {dataset_id} to queue.',
 			extra={'token': token, 'dataset_id': dataset_id, 'user_id': user.id},
 		)
 
 	except Exception as e:
-		msg = f'Error adding {task_type} task to queue: {str(e)}'
+		msg = f'Error adding {task_types} task to queue: {str(e)}'
 		logger.error(msg, extra={'token': token, 'user_id': user.id, 'dataset_id': dataset_id})
 		raise HTTPException(status_code=500, detail=msg)
 
@@ -109,6 +112,7 @@ def create_processing_task(
 					is_processing=False,
 					current_position=-1,
 					estimated_time=0.0,
+					task_types=validated_task_types,
 				)
 
 				return task
@@ -337,6 +341,7 @@ def create_processing_task(
 # 					is_processing=False,
 # 					current_position=-1,
 # 					estimated_time=0.0,
+# 					task_types=validated_task_types,
 # 				)
 # 	except Exception as e:
 # 		# Log the error to the database
