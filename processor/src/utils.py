@@ -70,21 +70,21 @@ def push_file_to_storage_server(local_file_path: str, remote_file_path: str, tok
 		)
 
 		with ssh.open_sftp() as sftp:
-			# remote_dir = os.path.dirname(remote_file_path)
 			temp_remote_path = f'{remote_file_path}.tmp'
-
-			# try:
-			# 	# Create directory if it doesn't exist (creates all parent directories)
-			# 	sftp.mkdir(remote_dir, mode=0o755)
-			# 	logger.info(f'Created directory {remote_dir}', extra={'token': token})
-			# except IOError:
-			# 	# Directory already exists, continue
-			# 	pass
 
 			try:
 				# Upload to temporary location first
 				logger.info(f'Uploading file to temporary location: {temp_remote_path}', extra={'token': token})
 				sftp.put(local_file_path, temp_remote_path)
+
+				# Move existing file to bin directory if it exists
+				try:
+					bin_path = settings.bin_path / Path(remote_file_path).name
+					sftp.rename(remote_file_path, str(bin_path))
+					logger.info(f'Moved existing file to bin: {bin_path}', extra={'token': token})
+				except IOError:
+					# File does not exist, no need to move
+					pass
 
 				# Atomic rename from temp to final location
 				logger.info(f'Moving file to final location: {remote_file_path}', extra={'token': token})

@@ -1,5 +1,6 @@
 import shutil
 
+from processor.src.process_geotiff import process_geotiff
 from shared.models import QueueTask, StatusEnum, Dataset
 from shared.settings import settings
 from shared.supabase import use_client, login, verify_token
@@ -69,19 +70,16 @@ def is_dataset_uploaded_or_processed(task: QueueTask, token: str) -> bool:
 
 
 def process_task(task: QueueTask, token: str):
-	# try:
 	# Verify token
 	user = verify_token(token)
 	if not user:
 		raise AuthenticationError('Invalid token', token=token, task_id=task.id)
 
-	# Load dataset
-	# try:
-	# 	with use_client(token) as client:
-	# 		response = client.table(settings.datasets_table).select('*').eq('id', task.dataset_id).execute()
-	# 		dataset = Dataset(**response.data[0])
-	# except Exception as e:
-	# 	raise DatasetError(f'Failed to fetch dataset: {str(e)}', dataset_id=task.dataset_id, task_id=task.id)
+	if task.task_type in ['convert_geotiff', 'all']:
+		try:
+			process_geotiff(task, settings.processing_path)
+		except Exception as e:
+			raise ProcessingError(str(e), task_type='convert_geotiff', task_id=task.id, dataset_id=task.dataset_id)
 
 	# Process based on task type
 	if task.task_type in ['cog', 'all']:
@@ -112,22 +110,6 @@ def process_task(task: QueueTask, token: str):
 	except Exception as e:
 		raise ProcessorError(f'Failed to delete completed task: {str(e)}', task_type=task.task_type, task_id=task.id)
 
-	# except (AuthenticationError, DatasetError, ProcessingError, StorageError) as e:
-	# 	logger.error(
-	# 		str(e),
-	# 		extra={
-	# 'token': token,
-	# 'task_id': getattr(e, 'task_id', None),
-	# 'dataset_id': getattr(e, 'dataset_id', None),
-	# 'error_type': e.__class__.__name__,
-	# 		},
-	# 	)
-	# 	raise
-	# except Exception as e:
-	# 	msg = f'Unexpected error: {str(e)}'
-	# 	logger.error(msg, extra={'token': token, 'task_id': task.id})
-	# 	raise ProcessorError(msg, task_type=task.task_type, task_id=task.id) from e
-	# finally:
 	if not settings.DEV_MODE:
 		shutil.rmtree(settings.processing_path, ignore_errors=True)
 

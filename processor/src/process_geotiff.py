@@ -8,8 +8,8 @@ from shared.models import StatusEnum, Dataset, QueueTask
 from shared.logger import logger
 from .utils import update_status, pull_file_from_storage_server, push_file_to_storage_server
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
-from .geotiff.geotiff import convert_geotiff, verify_geotiff
-from shared.geotiff import create_geotiff_info_entry
+from .geotiff.convert_geotiff import convert_geotiff, verify_geotiff
+from shared.geotiff_info import create_geotiff_info_entry
 
 
 def process_geotiff(task: QueueTask, temp_dir: Path):
@@ -26,7 +26,7 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 	except Exception as e:
 		raise DatasetError(f'Failed to fetch dataset: {str(e)}', dataset_id=task.dataset_id, task_id=task.id)
 
-	update_status(token, dataset_id=dataset.id, status=StatusEnum.converting)
+	update_status(token, dataset_id=dataset.id, status=StatusEnum.processing)
 
 	try:
 		# Setup paths

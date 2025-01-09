@@ -51,6 +51,7 @@ class Settings(BaseSettings):
 	COG_DIR: str = 'cogs'
 	THUMBNAIL_DIR: str = 'thumbnails'
 	LABEL_OBJECTS_DIR: str = 'label_objects'
+	BIN_DIR: str = 'bin'
 
 	# Temporary processing directory
 	# tmp_processing_path: str = str(Path(tempfile.mkdtemp(prefix='processing')))
@@ -129,6 +130,14 @@ class Settings(BaseSettings):
 	@property
 	def user_label_path(self) -> Path:
 		path = self.base_path / self.LABEL_OBJECTS_DIR
+		if not path.exists():
+			path.mkdir(parents=True, exist_ok=True)
+
+		return path
+
+	@property
+	def bin_path(self) -> Path:
+		path = self.base_path / self.BIN_DIR
 		if not path.exists():
 			path.mkdir(parents=True, exist_ok=True)
 

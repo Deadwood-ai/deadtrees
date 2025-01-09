@@ -75,6 +75,7 @@ class TaskTypeEnum(str, Enum):
 	thumbnail = 'thumbnail'
 	deadwood_segmentation = 'deadwood_segmentation'
 	all = 'all'
+	convert_geotiff = 'convert_geotiff'
 
 
 class TaskPayload(BaseModel):
