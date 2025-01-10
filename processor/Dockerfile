@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     python3-venv \
     build-essential \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Create and activate virtual environment
@@ -18,26 +19,24 @@ RUN echo "GDAL_VERSION=$(gdal-config --version)" >> /etc/environment
 ENV CPLUS_INCLUDE_PATH=/usr/include/gdal \
     C_INCLUDE_PATH=/usr/include/gdal
 
-# Install PyTorch - it will automatically detect GPU availability
-RUN pip3 install --no-cache-dir \
-    torch \
-    torchvision
-
-# Set up the application
+# Set up the application maintaining local structure
 WORKDIR /app
+RUN mkdir -p /app/processor/src/deadwood_segmentation/deadtreesmodels/data
 RUN mkdir -p /data
 
-# Copy and install requirements
-COPY processor/requirements.txt requirements.txt
-RUN pip3 install --no-cache-dir -r requirements.txt && \
-    rm requirements.txt
+# Copy deadtreesmodels requirements and install
+COPY processor/src/deadwood_segmentation/deadtreesmodels/requirements.txt /app/processor/src/deadwood_segmentation/deadtreesmodels/requirements.txt
+RUN pip3 install --no-cache-dir -r /app/processor/src/deadwood_segmentation/deadtreesmodels/requirements.txt
+
+# Copy and install main requirements
+COPY processor/requirements.txt /app/processor/requirements.txt
+RUN pip3 install --no-cache-dir -r /app/processor/requirements.txt
 
 # Copy application files
-COPY ./processor/src /app/processor/src
+COPY ./processor /app/processor
 COPY ./shared /app/shared
 
-# Copy model file
-COPY ./processor/src/deadwood_segmentation/models/model.safetensors /app/processor/src/deadwood_segmentation/models/model.safetensors
+# Set working directory for execution
+WORKDIR /app
 
-# Run the processor script
-CMD ["python3", "-m", "processor.src.processor"]
+# Note: Model file should be mounted at runtime
