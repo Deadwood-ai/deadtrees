@@ -15,7 +15,6 @@ def upload_to_supabase(dataset_id, label, aoi, label_type, label_source, label_q
 		raise AuthenticationError('Invalid token')
 
 	try:
-		# print(f'Uploading to supabase: {api_endpoint}')
 		with use_client(token) as client:
 			headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
 			data = {

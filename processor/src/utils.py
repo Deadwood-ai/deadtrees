@@ -79,7 +79,7 @@ def push_file_to_storage_server(local_file_path: str, remote_file_path: str, tok
 
 				# Move existing file to bin directory if it exists
 				try:
-					bin_path = settings.bin_path / Path(remote_file_path).name
+					bin_path = settings.trash_path / Path(remote_file_path).name
 					sftp.rename(remote_file_path, str(bin_path))
 					logger.info(f'Moved existing file to bin: {bin_path}', extra={'token': token})
 				except IOError:

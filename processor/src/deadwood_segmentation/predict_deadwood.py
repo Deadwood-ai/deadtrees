@@ -18,7 +18,10 @@ def predict_deadwood(dataset_id, file_path):
 
 		logger.info('Transforming polygons')
 		# Note: transform_mask is now handled inside inference_deadwood
-		transformed_polygons = {'type': 'MultiPolygon', 'coordinates': [p.exterior.coords[:] for p in polygons]}
+		if polygons is not None:
+			transformed_polygons = {'type': 'MultiPolygon', 'coordinates': [p.exterior.coords[:] for p in polygons]}
+		else:
+			transformed_polygons = None
 
 		# logger.info('Extracting bbox')
 		# with rasterio.open(file_path) as src:
