@@ -1,10 +1,14 @@
-version: '3.8'
-
 services:
   processor-test:
     build:
       context: .
       dockerfile: processor/Dockerfile
+    healthcheck:
+      test: curl --fail http://127.0.0.1:5678/ || exit 1
+      interval: 15s
+      timeout: 1s
+      retries: 5
+      start_period: 2s
     ports:
       - '5678:5678'
     volumes:
@@ -33,6 +37,12 @@ services:
     build:
       context: .
       dockerfile: api/Dockerfile
+    healthcheck:
+      test: curl --fail http://127.0.0.1:5679/ || exit 1
+      interval: 15s
+      timeout: 1s
+      retries: 5
+      start_period: 2s
     ports:
       - '5679:5679'
     volumes:
@@ -56,3 +66,19 @@ services:
       - DEV_MODE=true
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
       - GADM_DATA_PATH=${GADM_DATA_PATH} # big file
+  
+  nginx:
+    image: nginx
+    ports:
+     - 8080:80    # for local and testing we do not bind to port 80 and 443
+    links:
+      - api-test
+      - processor-test
+    depends_on:
+      api-test:
+        condition: service_healthy
+      processor-test:
+        condition: service_healthy
+    volumes:
+      - ./nginx/conf:/etc/nginx/conf.d:ro
+      - ./api/tests/test_data:/data
