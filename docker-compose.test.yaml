@@ -82,8 +82,8 @@ services:
       retries: 5
       start_period: 3s
     volumes:
-      - ./nginx/conf:/etc/nginx/conf.d:ro
-      - ./assets/test_data:/data:ro
+      - ./nginx/conf:/etc/nginx/conf.d/:ro
+      - ./assets/test_data:/data/:ro
   
   tests:
     build:
@@ -95,6 +95,9 @@ services:
     depends_on:
       nginx:
         condition: service_healthy
+    environment:
+      COG_URL: http://nginx:80/cogs/v1
     volumes:
-      - ./assets/test_data:/app/tests/data:ro
-
+      - ./assets/test_data:/app/tests/data/:ro
+      - ./tests:/app/tests    # dev only, no rebuild needed
+    command: pytest -s test_performance.py
