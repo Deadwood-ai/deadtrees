@@ -29,7 +29,7 @@ def test_dataset(auth_token):
 @pytest.fixture
 def test_file():
 	"""Fixture to provide test GeoTIFF file path"""
-	file_path = Path(__file__).parent.parent / 'test_data' / 'test-data-small.tif'
+	file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data-small.tif'
 	if not file_path.exists():
 		pytest.skip('Test file not found')
 	return file_path

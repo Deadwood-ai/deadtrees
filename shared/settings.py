@@ -35,14 +35,16 @@ _dev_tables = {
 }
 
 
-BASE = Path(__file__).parent.parent / 'data'
+BASE = Path(__file__).parent.parent
+ASSETS_DIR = BASE / 'assets'
 
 
 # load the settings from environment variables
 class Settings(BaseSettings):
 	# base directory for the storage app
 	BASE_DIR: str = str(BASE)
-	GADM_DATA_PATH: str = ''
+	# Default GADM path in assets, can be overridden by env var
+	GADM_DATA_PATH: str = str(ASSETS_DIR / 'gadm' / 'gadm_410.gpkg')
 	DEV_MODE: bool = False
 	CONCURRENT_TASKS: int = 2
 

@@ -13,7 +13,7 @@ DATASET_ID = 275
 @pytest.fixture
 def test_file():
 	"""Fixture to provide test GeoTIFF file path"""
-	file_path = Path(__file__).parent / 'test_data' / 'test-data-small.tif'
+	file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data-small.tif'
 	if not file_path.exists():
 		pytest.skip('Test file not found')
 	return file_path
@@ -42,3 +42,14 @@ def mock_data_directory(test_file):
 		with patch('shared.settings.Settings.base_path', new_callable=property, fget=get_base_path):
 			with patch('shared.settings.Settings.archive_path', new_callable=property, fget=get_archive_path):
 				yield temp_path  # Return the temp_path instead of temp_dir
+
+
+@pytest.fixture(autouse=True)
+def ensure_gadm_data():
+	"""Ensure GADM data is available for tests"""
+	gadm_path = Path(settings.GADM_DATA_PATH)
+	if not gadm_path.exists():
+		pytest.skip(
+			f'GADM data not found at {gadm_path}. ' 'Run `make download-assets` to download required data files.'
+		)
+	return gadm_path

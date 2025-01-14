@@ -10,9 +10,16 @@ from fastapi import HTTPException
 
 # Define the path to the GADM database
 GADM_PATH = Path(settings.GADM_DATA_PATH)
-# raise error if the file does not exist
-if not GADM_PATH.exists():
-	raise FileNotFoundError(f'GADM data file not found at {GADM_PATH}')
+
+
+def get_gadm_path():
+	"""Get GADM path, downloading if necessary"""
+	if not GADM_PATH.exists():
+		raise FileNotFoundError(
+			f'GADM data file not found at {GADM_PATH}. '
+			'Please run `make download-assets` to download required data files.'
+		)
+	return GADM_PATH
 
 
 def get_admin_tags(point: Tuple[float, float]) -> List[Optional[str]]:
