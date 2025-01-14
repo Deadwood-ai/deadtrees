@@ -23,4 +23,4 @@ COPY ./tests /app/tests
 RUN pip install -r /app/tests/requirements.txt
 
 WORKDIR /app/tests/src
-CMD ["python", "pytest"]
+CMD ["pytest"]
