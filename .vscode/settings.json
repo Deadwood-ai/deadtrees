@@ -1,13 +1,35 @@
 {
-    "python.testing.pytestEnabled": true,
-    "python.testing.unittestEnabled": false,
-    "python.testing.nosetestsEnabled": false,
-    "python.testing.pytestArgs": [
-        "processor/tests",
-        "api/tests"
-    ],
-    "python.defaultInterpreterPath": "/usr/local/bin/python3",
-    "python.testing.cwd": "${workspaceFolder}",
-    "python.testing.autoTestDiscoverOnSaveEnabled": false,
-    "debugpy.debugJustMyCode": false
+  "[typescript]": {
+    "editor.defaultFormatter": "denoland.vscode-deno"
+  },
+  "debugpy.debugJustMyCode": false,
+  "deno.enablePaths": [
+    "supabase/functions"
+  ],
+  "deno.lint": true,
+  "deno.unstable": [
+    "bare-node-builtins",
+    "byonm",
+    "sloppy-imports",
+    "unsafe-proto",
+    "webgpu",
+    "broadcast-channel",
+    "worker-options",
+    "cron",
+    "kv",
+    "ffi",
+    "fs",
+    "http",
+    "net"
+  ],
+  "python.defaultInterpreterPath": "/usr/local/bin/python3",
+  "python.testing.autoTestDiscoverOnSaveEnabled": false,
+  "python.testing.cwd": "${workspaceFolder}",
+  "python.testing.nosetestsEnabled": false,
+  "python.testing.pytestArgs": [
+    "processor/tests",
+    "api/tests"
+  ],
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false
 }
