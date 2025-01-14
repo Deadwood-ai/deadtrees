@@ -51,6 +51,8 @@ services:
       - ./assets:/app/assets
     environment:
       - PYTHONPATH=/app
+      - UVICORN_HOST=0.0.0.0
+      - UVICORN_PORT=5679
       - PYTEST_ADDOPTS=--color=yes
       - STORAGE_SERVER_IP=data.deadtrees.earth
       - STORAGE_SERVER_USERNAME=${STORAGE_SERVER_USERNAME}
@@ -74,7 +76,7 @@ services:
       api-test:
         condition: service_healthy
     healthcheck:
-      test: curl --fail http://127.0.0.1:8080/api/v1 || exit 1
+      test: ["CMD", "service", "nginx", "status"]
       interval: 15s
       timeout: 2s
       retries: 5
