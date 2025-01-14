@@ -3,12 +3,12 @@ services:
     build:
       context: .
       dockerfile: processor/Dockerfile
-    healthcheck:
-      test: curl --fail http://127.0.0.1:5678/ || exit 1
-      interval: 15s
-      timeout: 1s
-      retries: 5
-      start_period: 2s
+    # healthcheck:
+    #   test: curl --fail http://127.0.0.1:5678/ || exit 1
+    #   interval: 15s
+    #   timeout: 1s
+    #   retries: 5
+    #   start_period: 2s
     ports:
       - '5678:5678'
     volumes:
@@ -70,12 +70,29 @@ services:
       - 8080:80 # for local and testing we do not bind to port 80 and 443
     links:
       - api-test
-      - processor-test
     depends_on:
       api-test:
         condition: service_healthy
-      processor-test:
-        condition: service_healthy
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/api/v1 || exit 1
+      interval: 15s
+      timeout: 2s
+      retries: 5
+      start_period: 3s
     volumes:
       - ./nginx/conf:/etc/nginx/conf.d:ro
-      - ./assets/test_data:/data
+      - ./assets/test_data:/data:ro
+  
+  tests:
+    build:
+      context: .
+      dockerfile: tests/Dockerfile
+    links:
+      - nginx
+      - api-test
+    depends_on:
+      nginx:
+        condition: service_healthy
+    volumes:
+      - ./assets/test_data:/app/tests/data:ro
+
