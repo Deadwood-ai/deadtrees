@@ -1,6 +1,5 @@
 # testdata
-test_data/*
-api/gadm/*
+assets/*
 api/tests/test_data/*
 processor/src/deadwood_segmentation/models/*
 
