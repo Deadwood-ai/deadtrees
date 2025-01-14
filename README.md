@@ -58,8 +58,8 @@ docker compose -f docker-compose.test.yaml run api-test pytest api/tests/
 
 ```bash
 /assets      - Downloaded data and models
-/gadm        - GADM geographic data
-/models      - ML models for deadwood segmentation
+  /gadm        - GADM geographic data
+  /models      - ML models for deadwood segmentation
 /test_data   - Test GeoTIFF files
 
 /api         - FastAPI application
