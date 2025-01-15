@@ -54,9 +54,7 @@ docker compose -f docker-compose.test.yaml run processor-test pytest processor/t
 docker compose -f docker-compose.test.yaml run api-test pytest api/tests/
 ```
 
-### Local supabase setup
-
-maybe just running `supabase start` will work. If not, try the following:
+### Local supabase setup and development
 
 ```bash
 # Start Supabase
@@ -68,11 +66,23 @@ supabase init
 # Link to project
 supabase link --project-ref <project-ref>
 
-# Pull database schema
-supabase db pull
-
 # Start Supabase
 supabase start
+
+# Create initial migration file
+# supabase db diff --use-migra initial_schema -f initial_schema --linked
+supabase db pull
+
+# Apply the migration
+supabase migration up
+
+# to reset the database
+supabase db reset
+
+# set new env varialbes based on the output of supabase start
+SUPABASE_URL=your_supabase_url
+SUPABASE_KEY=your_supabase_key
+
 ```
 
 ## Project structure
