@@ -76,7 +76,7 @@ services:
       api-test:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "service", "nginx", "status"]
+      test: ['CMD', 'service', 'nginx', 'status']
       interval: 15s
       timeout: 2s
       retries: 5
@@ -84,7 +84,7 @@ services:
     volumes:
       - ./nginx/conf:/etc/nginx/conf.d/:ro
       - ./data:/data/:ro
-  
+
   tests:
     build:
       context: .
@@ -98,6 +98,8 @@ services:
     environment:
       COG_URL: http://nginx:80/cogs/v1
     volumes:
-      - ./data:/app/tests/data/:ro
-      - ./tests:/app/tests    # dev only, no rebuild needed
+      - ./data:/app/tests/data/
+      - ./assets:/app/assets/:ro
+      - ./tests:/app/tests # dev only, no rebuild needed
     command: pytest -s test_performance.py
+    # command: tail -f /dev/null # Keeps container running indefinitely
