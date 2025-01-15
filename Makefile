@@ -17,7 +17,7 @@ MODEL := $(MODELS_DIR)/segformer_b5_fold_0_epoch_74.safetensors
 GADM := $(GADM_DIR)/gadm_410.gpkg
 GADM_ZIP := $(GADM_DIR)/gadm_410-gpkg.zip
 
-.PHONY: all clean setup-dirs download-assets
+.PHONY: all clean setup-dirs create-dirs symlinks
 
 all: setup-dirs download-assets
 
@@ -26,23 +26,46 @@ setup-dirs:
 	mkdir -p $(MODELS_DIR)
 	mkdir -p $(GADM_DIR)
 
-download-assets: $(TEST_DATA) $(TEST_DATA_SMALL) $(MODEL) $(GADM)
+create-dirs:
+	@echo "Creating data directories..."
+	@mkdir -p $(ASSETS_DIR)
+	@mkdir -p data/archive
+	@mkdir -p data/cogs
+	@mkdir -p data/thumbnails
+	@mkdir -p data/label_objects
+	@mkdir -p data/bin
+
+download-assets: create-dirs $(TEST_DATA) $(TEST_DATA_SMALL) $(MODEL) $(GADM)
 
 $(TEST_DATA):
+	@echo "Downloading test data..."
 	curl -L -o $@ "$(TEST_DATA_URL)"
 
 $(TEST_DATA_SMALL):
+	@echo "Downloading small test data..."
 	curl -L -o $@ "$(TEST_DATA_SMALL_URL)"
 
 $(MODEL):
+	@echo "Downloading model..."
 	curl -L -o $@ "$(MODEL_URL)"
 
 $(GADM): $(GADM_ZIP)
-	unzip -j $< -d $(GADM_DIR)
-	rm $<
+	@if [ ! -f $@ ]; then \
+		echo "Extracting GADM data..." && \
+		unzip -j $< -d $(GADM_DIR) && \
+		rm $<; \
+	else \
+		echo "GADM data already exists at $(GADM), skipping extraction"; \
+	fi
 
 $(GADM_ZIP):
-	curl -L -o $@ "$(GADM_URL)"
+	@if [ ! -f $(GADM) ]; then \
+		echo "Downloading GADM data..." && \
+		curl -L -o $@ "$(GADM_URL)"; \
+	else \
+		echo "GADM data already exists, skipping download"; \
+		touch $@; \
+	fi
 
 clean:
 	rm -rf $(ASSETS_DIR)/*
