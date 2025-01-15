@@ -31,18 +31,20 @@ services:
       - SSH_PRIVATE_KEY_PASSPHRASE=${SSH_PRIVATE_KEY_PASSPHRASE}
       - DEV_MODE=true
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
+    command: python -m debugpy --listen 0.0.0.0:5678 -c "print('Call the Processor Debugger individually.')"
 
   api-test:
     build:
       context: .
       dockerfile: api/Dockerfile
     healthcheck:
-      test: curl --fail http://127.0.0.1:5679/ || exit 1
+      test: curl --fail http://127.0.0.1:8017/ || exit 1
       interval: 15s
       timeout: 1s
       retries: 5
       start_period: 2s
     ports:
+      - '8017:8017'
       - '5679:5679'
     volumes:
       - ./data:/data
@@ -52,7 +54,7 @@ services:
     environment:
       - PYTHONPATH=/app
       - UVICORN_HOST=0.0.0.0
-      - UVICORN_PORT=5679
+      - UVICORN_PORT=8017
       - PYTEST_ADDOPTS=--color=yes
       - STORAGE_SERVER_IP=data.deadtrees.earth
       - STORAGE_SERVER_USERNAME=${STORAGE_SERVER_USERNAME}
@@ -65,6 +67,7 @@ services:
       - BASE_DIR=/data
       - DEV_MODE=true
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
+    command: python -m debugpy --listen 0.0.0.0:5679 run.py server --reload=True
 
   nginx:
     image: nginx
