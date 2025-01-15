@@ -31,6 +31,8 @@ services:
       - SSH_PRIVATE_KEY_PASSPHRASE=${SSH_PRIVATE_KEY_PASSPHRASE}
       - DEV_MODE=true
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     command: python -m debugpy --listen 0.0.0.0:5678 -c "print('Call the Processor Debugger individually.')"
 
   api-test:
@@ -67,7 +69,9 @@ services:
       - BASE_DIR=/data
       - DEV_MODE=true
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
-    command: python -m debugpy --listen 0.0.0.0:5679 run.py server --reload=True
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    # command: python -m debugpy --listen 0.0.0.0:5679 run.py server --reload=True
 
   nginx:
     image: nginx
@@ -79,7 +83,7 @@ services:
       api-test:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "service", "nginx", "status"]
+      test: ['CMD', 'service', 'nginx', 'status']
       interval: 15s
       timeout: 2s
       retries: 5
@@ -87,7 +91,7 @@ services:
     volumes:
       - ./nginx/conf:/etc/nginx/conf.d/:ro
       - ./data:/data/:ro
-  
+
   tests:
     build:
       context: .
@@ -100,7 +104,9 @@ services:
         condition: service_healthy
     environment:
       COG_URL: http://nginx:80/cogs/v1
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     volumes:
       - ./data:/app/tests/data/:ro
-      - ./tests:/app/tests    # dev only, no rebuild needed
+      - ./tests:/app/tests # dev only, no rebuild needed
     command: pytest -s test_performance.py

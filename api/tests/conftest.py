@@ -5,9 +5,29 @@ from pathlib import Path
 from shared.supabase import use_client, login
 from shared.settings import settings
 from unittest.mock import patch
-
+from supabase import create_client
 
 DATASET_ID = 275
+
+
+@pytest.fixture(scope='session', autouse=True)
+def create_processor_user():
+	"""Create the processor user in the database if it doesn't exist"""
+	supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+	try:
+		# Try to sign up the processor user
+		supabase.auth.sign_up(
+			{
+				'email': settings.PROCESSOR_USERNAME,
+				'password': settings.PROCESSOR_PASSWORD,
+			}
+		)
+	except Exception as e:
+		# If user already exists, that's fine - just log it
+		print(f'Note: Processor user setup - {str(e)}')
+
+	# Yield None to make it a fixture
+	yield
 
 
 @pytest.fixture
