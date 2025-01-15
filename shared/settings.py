@@ -53,7 +53,7 @@ class Settings(BaseSettings):
 	COG_DIR: str = 'cogs'
 	THUMBNAIL_DIR: str = 'thumbnails'
 	LABEL_OBJECTS_DIR: str = 'label_objects'
-	TRASH_DIR: str = 'bin'
+	TRASH_DIR: str = 'trash'
 
 	# Temporary processing directory
 	# tmp_processing_path: str = str(Path(tempfile.mkdtemp(prefix='processing')))
