@@ -33,7 +33,7 @@ create-dirs:
 	@mkdir -p data/cogs
 	@mkdir -p data/thumbnails
 	@mkdir -p data/label_objects
-	@mkdir -p data/bin
+	@mkdir -p data/trash
 
 download-assets: create-dirs $(TEST_DATA) $(TEST_DATA_SMALL) $(MODEL) $(GADM)
 
