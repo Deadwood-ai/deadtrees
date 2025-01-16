@@ -62,19 +62,27 @@ def ensure_gadm_data():
 	return gadm_path
 
 
-@pytest.fixture(scope='session')
+@pytest.fixture(scope='session', autouse=True)
 def data_directory():
 	"""Create and manage the data directory structure for tests"""
 	# Create the data directory structure
 	data_dir = Path(settings.BASE_DIR)
-	# archive_dir = data_dir / settings.ARCHIVE_DIR
-	# archive_dir.mkdir(parents=True, exist_ok=True)
+	archive_dir = data_dir / settings.ARCHIVE_DIR
+	cogs_dir = data_dir / settings.COG_DIR
+	thumbnails_dir = data_dir / settings.THUMBNAIL_DIR
+	label_objects_dir = data_dir / settings.LABEL_OBJECTS_DIR
+
+	# Create all directories
+	for directory in [archive_dir, cogs_dir, thumbnails_dir, label_objects_dir]:
+		directory.mkdir(parents=True, exist_ok=True)
 
 	yield data_dir
 
 	# Cleanup after all tests
-	# if data_dir.exists():
-	# shutil.rmtree(data_dir)
+	for directory in [archive_dir, cogs_dir, thumbnails_dir, label_objects_dir]:
+		if directory.exists():
+			shutil.rmtree(directory)
+			directory.mkdir(parents=True, exist_ok=True)
 
 
 @pytest.fixture(scope='session')
@@ -130,3 +138,28 @@ def test_user():
 def auth_token():
 	"""Provide authentication token for tests"""
 	return login('test@example.com', 'test123456')
+
+
+@pytest.fixture(scope='session', autouse=True)
+def cleanup_database(auth_token):
+	"""Clean up database tables after all tests"""
+	yield
+
+	with use_client(auth_token) as client:
+		# Clean up all test tables in reverse order of dependencies
+		tables = [
+			settings.queue_table,
+			settings.label_objects_table,
+			settings.labels_table,
+			settings.thumbnails_table,
+			settings.cogs_table,
+			settings.geotiff_info_table,
+			settings.metadata_table,
+			settings.datasets_table,
+		]
+
+		for table in tables:
+			try:
+				client.table(table).delete().neq('id', 0).execute()
+			except Exception as e:
+				print(f'Warning: Failed to clean up table {table}: {str(e)}')

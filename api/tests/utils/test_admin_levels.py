@@ -4,6 +4,7 @@ from api.src.utils.admin_levels import get_admin_tags, update_metadata_admin_lev
 from shared.models import Dataset
 from shared.settings import settings
 from shared.supabase import use_client, login
+import shutil
 
 # Test data points (real coordinates that exist in GADM data)
 TEST_POINTS = [
@@ -16,25 +17,47 @@ TEST_POINTS = [
 ]
 
 
-@pytest.fixture(scope='session')
-def test_dataset(auth_token):
-	"""Get the test dataset ID from the database.
-	Expects a dataset with file_alias = 'test-data.tif' to exist.
-	"""
+@pytest.fixture(scope='function')
+def test_dataset(auth_token, data_directory, test_geotiff, test_user):
+	"""Create a temporary test dataset for admin level testing"""
 	with use_client(auth_token) as client:
-		response = client.table(settings.datasets_table).select('id').eq('file_alias', 'test-data.tif').execute()
+		# Copy test file to archive directory
+		file_name = 'test-admin.tif'
+		archive_path = data_directory / settings.ARCHIVE_DIR / file_name
+		shutil.copy2(test_geotiff, archive_path)
 
-		if not response.data:
-			pytest.skip('Test dataset not found in database')
-
+		# Create test dataset
+		dataset_data = {
+			'file_name': file_name,
+			'file_alias': file_name,
+			'file_size': archive_path.stat().st_size,
+			'copy_time': 123,
+			'user_id': test_user,
+			'status': 'uploaded',
+		}
+		response = client.table(settings.datasets_table).insert(dataset_data).execute()
 		dataset_id = response.data[0]['id']
 
-		yield dataset_id  # Return the dataset ID for the test
+		# Create metadata entry with required fields
+		metadata_data = {
+			'dataset_id': dataset_id,
+			'user_id': test_user,
+			'name': 'Test Admin Dataset',
+			'platform': 'drone',
+			'data_access': 'public',
+			'authors': 'Test Author',
+		}
+		client.table(settings.metadata_table).insert(metadata_data).execute()
 
-		# Cleanup after all tests are done
-		client.table(settings.metadata_table).update(
-			{'admin_level_1': None, 'admin_level_2': None, 'admin_level_3': None}
-		).eq('dataset_id', dataset_id).execute()
+		try:
+			yield dataset_id
+		finally:
+			# Cleanup database entries
+			client.table(settings.metadata_table).delete().eq('dataset_id', dataset_id).execute()
+			client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
+			# Cleanup file
+			if archive_path.exists():
+				archive_path.unlink()
 
 
 @pytest.mark.parametrize('point,expected', TEST_POINTS)
