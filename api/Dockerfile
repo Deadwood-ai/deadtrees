@@ -18,7 +18,7 @@ RUN pip install --upgrade pip && \
 WORKDIR /app
 COPY ./shared /app/shared
 COPY ./api/src /app/api/src
-COPY ./run.py /app/run.py
+# COPY ./run.py /app/run.py
 
 # Create mount points with appropriate permissions
 RUN mkdir -p /gadm_data && \
@@ -29,4 +29,4 @@ WORKDIR /app
 
 # run the application
 #CMD ["uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
-CMD ["python", "run.py", "server"]
+CMD ["python", "api/src/run.py", "server"]
