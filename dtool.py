@@ -42,18 +42,14 @@ class DeadwoodTool:
 		if port is None:
 			port = 5679 if service == 'api-test' else 5678
 
-		# Ensure containers are up
-		self.up()
-		time.sleep(2)  # Give containers time to start
-
-		# Build the pytest command
+		# Build the pytest command with test_path at the end
 		cmd = [
 			'docker',
 			'compose',
 			'-f',
 			self.test_compose_file,
 			'exec',
-			service,
+			service,  # Service name comes here
 			'python',
 			'-m',
 			'debugpy',
@@ -65,12 +61,41 @@ class DeadwoodTool:
 			'-v',
 		]
 
+		# Add test path if specified (after the pytest command)
+		if test_path:
+			cmd.append(test_path)  # Test path goes at the end of the command
+
+		print(f'Starting debug session on port {port}')
+		print('Waiting for debugger to attach...')
+		self._run_command(cmd)
+
+	def test(self, service: str = 'api-test', test_path: Optional[str] = None):
+		"""
+		Run tests without debugging
+
+		Args:
+			service: Service to test (api-test or processor-test)
+			test_path: Specific test file or directory to run
+		"""
+		# Build the pytest command
+		cmd = [
+			'docker',
+			'compose',
+			'-f',
+			self.test_compose_file,
+			'exec',
+			service,
+			'python',
+			'-m',
+			'pytest',
+			'-v',
+		]
+
 		# Add test path if specified
 		if test_path:
 			cmd.append(test_path)
 
-		print(f'Starting debug session on port {port}')
-		print(f'Waiting for debugger to attach...')
+		print(f'Running tests for {service}...')
 		self._run_command(cmd)
 
 
