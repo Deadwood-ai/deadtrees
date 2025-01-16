@@ -42,7 +42,7 @@ async def upload_geotiff_chunk(
 	chunk_index = int(chunk_index)
 	chunks_total = int(chunks_total)
 
-	upload_file_name = f'{upload_id}.tif'
+	upload_file_name = f'{upload_id}.tif.tmp'
 	upload_target_path = settings.archive_path / upload_file_name
 
 	# Write chunk and update hash
@@ -55,8 +55,8 @@ async def upload_geotiff_chunk(
 	if chunk_index == chunks_total - 1:
 		try:
 			# rename file
-			uid = str(uuid.uuid4())
-			file_name = f'{uid}_{Path(filename).stem}.tif'
+			uid = str(uuid.uuid4())[:8]
+			file_name = f'{uid}_ortho.tif'
 			target_path = settings.archive_path / file_name
 			upload_target_path.rename(target_path)
 
