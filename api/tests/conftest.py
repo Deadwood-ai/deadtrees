@@ -52,12 +52,6 @@ def create_processor_user():
 
 
 @pytest.fixture(scope='session')
-def auth_token():
-	"""Provide authentication token for tests"""
-	return login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-
-
-@pytest.fixture(autouse=True)
 def ensure_gadm_data():
 	"""Ensure GADM data is available for tests"""
 	gadm_path = Path(settings.GADM_DATA_PATH)
@@ -130,3 +124,9 @@ def test_user():
 			supabase.auth.admin.delete_user(user_id)
 		except Exception as e:
 			print(f'Failed to delete test user: {str(e)}')
+
+
+@pytest.fixture(scope='session')
+def auth_token():
+	"""Provide authentication token for tests"""
+	return login('test@example.com', 'test123456')
