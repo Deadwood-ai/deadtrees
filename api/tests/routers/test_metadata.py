@@ -10,7 +10,7 @@ client = TestClient(app)
 
 
 @pytest.fixture(scope='function')
-def test_dataset(auth_token):
+def test_dataset(auth_token, test_user):
 	"""Create a temporary test dataset for metadata testing"""
 	# Create test dataset
 	with use_client(auth_token) as client:
@@ -19,7 +19,7 @@ def test_dataset(auth_token):
 			'file_alias': 'test-metadata.tif',
 			'file_size': 1000,
 			'copy_time': 123,
-			'user_id': '484d53be-2fee-4449-ad36-a6b083aab663',
+			'user_id': test_user,
 			'status': 'uploaded',
 		}
 		response = client.table(settings.datasets_table).insert(dataset_data).execute()
