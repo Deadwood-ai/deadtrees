@@ -43,6 +43,22 @@ LOGFIRE_TOKEN=your_logfire_token
 make
 ```
 
+### Use the CLI tool to manage the development environment:
+
+```bash
+# Start the development environment
+./dtool.py up
+
+# Stop the development environment
+./dtool.py down
+
+# Run API tests
+./dtool.py test test-api api/tests/routers/test_download.py
+
+# Debug API testsj
+./dtool.py debug test-api api/tests/routers/test_download.py
+```
+
 ### Run the application with Docker Compose:
 
 ```bash
