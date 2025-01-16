@@ -12,22 +12,43 @@ DATASET_ID = 275
 
 @pytest.fixture(scope='session', autouse=True)
 def create_processor_user():
-	"""Create the processor user in the database if it doesn't exist"""
+	"""Create the processor user in the database if it doesn't exist and clean up after tests"""
 	supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+	user_id = None
+
 	try:
 		# Try to sign up the processor user
-		supabase.auth.sign_up(
+		response = supabase.auth.sign_up(
 			{
 				'email': settings.PROCESSOR_USERNAME,
 				'password': settings.PROCESSOR_PASSWORD,
 			}
 		)
+		user_id = response.user.id if response.user else None
 	except Exception as e:
-		# If user already exists, that's fine - just log it
-		print(f'Note: Processor user setup - {str(e)}')
+		# If user already exists, try to get the user ID
+		try:
+			response = supabase.auth.sign_in_with_password(
+				{
+					'email': settings.PROCESSOR_USERNAME,
+					'password': settings.PROCESSOR_PASSWORD,
+				}
+			)
+			user_id = response.user.id if response.user else None
+		except Exception as sign_in_error:
+			print(f'Note: Processor user setup - {str(sign_in_error)}')
 
-	# Yield None to make it a fixture
+	# Yield to run tests
 	yield
+
+	# Cleanup: Delete the processor user if we have their ID
+	if user_id:
+		try:
+			# Need admin token to delete user
+			supabase.auth.admin.delete_user(user_id)
+			print(f'Successfully deleted processor user with ID: {user_id}')
+		except Exception as e:
+			print(f'Failed to delete processor user: {str(e)}')
 
 
 @pytest.fixture
