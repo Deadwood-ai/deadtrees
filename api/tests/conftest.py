@@ -51,38 +51,10 @@ def create_processor_user():
 			print(f'Failed to delete processor user: {str(e)}')
 
 
-@pytest.fixture
-def test_file():
-	"""Fixture to provide test GeoTIFF file path"""
-	file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data-small.tif'
-	if not file_path.exists():
-		pytest.skip('Test file not found')
-	return file_path
-
-
 @pytest.fixture(scope='session')
 def auth_token():
 	"""Provide authentication token for tests"""
 	return login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-
-
-@pytest.fixture(autouse=True)
-def mock_data_directory(test_file):
-	"""Replace /data with a temporary directory during tests"""
-	with tempfile.TemporaryDirectory() as temp_dir:
-		temp_path = Path(temp_dir)
-
-		# Create a mock property that returns our temp path
-		def get_base_path(self):
-			return temp_path
-
-		def get_archive_path(self):
-			return temp_path
-
-		# Patch both properties
-		with patch('shared.settings.Settings.base_path', new_callable=property, fget=get_base_path):
-			with patch('shared.settings.Settings.archive_path', new_callable=property, fget=get_archive_path):
-				yield temp_path  # Return the temp_path instead of temp_dir
 
 
 @pytest.fixture(autouse=True)
@@ -94,3 +66,67 @@ def ensure_gadm_data():
 			f'GADM data not found at {gadm_path}. ' 'Run `make download-assets` to download required data files.'
 		)
 	return gadm_path
+
+
+@pytest.fixture(scope='session')
+def data_directory():
+	"""Create and manage the data directory structure for tests"""
+	# Create the data directory structure
+	data_dir = Path(settings.BASE_DIR)
+	# archive_dir = data_dir / settings.ARCHIVE_DIR
+	# archive_dir.mkdir(parents=True, exist_ok=True)
+
+	yield data_dir
+
+	# Cleanup after all tests
+	# if data_dir.exists():
+	# shutil.rmtree(data_dir)
+
+
+@pytest.fixture(scope='session')
+def test_geotiff():
+	"""Provide the test GeoTIFF file path from assets"""
+	file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data-small.tif'
+	if not file_path.exists():
+		pytest.skip('Test file not found in assets. Run `make download-assets` first.')
+	return file_path
+
+
+@pytest.fixture(scope='session', autouse=True)
+def test_user():
+	"""Create a test user for all tests and clean up afterwards"""
+	supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+	test_email = 'test@example.com'
+	test_password = 'test123456'
+	user_id = None
+
+	try:
+		# Try to sign up the test user
+		response = supabase.auth.sign_up(
+			{
+				'email': test_email,
+				'password': test_password,
+			}
+		)
+		user_id = response.user.id if response.user else None
+	except Exception:
+		# If user exists, try to get the user ID
+		try:
+			response = supabase.auth.sign_in_with_password(
+				{
+					'email': test_email,
+					'password': test_password,
+				}
+			)
+			user_id = response.user.id if response.user else None
+		except Exception as e:
+			pytest.fail(f'Could not create or retrieve test user: {str(e)}')
+
+	yield user_id
+
+	# Cleanup: Delete the test user
+	if user_id:
+		try:
+			supabase.auth.admin.delete_user(user_id)
+		except Exception as e:
+			print(f'Failed to delete test user: {str(e)}')

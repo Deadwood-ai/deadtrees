@@ -49,7 +49,7 @@ services:
       - '8017:8017'
       - '5679:5679'
     volumes:
-      - ./data:/data
+      - ./data:/data:rw
       - ./api:/app/api # dev only, no rebuild needed
       - ./shared:/app/shared # dev only, no rebuild needed
       - ./assets:/app/assets

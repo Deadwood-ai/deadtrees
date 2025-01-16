@@ -13,13 +13,13 @@ client = TestClient(app)
 
 
 @pytest.fixture(scope='function')
-def test_dataset_for_download(auth_token, mock_data_directory, test_file):
+def test_dataset_for_download(auth_token, data_directory, test_geotiff, test_user):
 	"""Create a temporary test dataset for download testing"""
 	with use_client(auth_token) as client:
-		# Copy test file to mock archive directory
+		# Copy test file to archive directory
 		file_name = 'test-download.tif'
-		archive_path = mock_data_directory / file_name
-		shutil.copy2(test_file, archive_path)
+		archive_path = data_directory / settings.ARCHIVE_DIR / file_name
+		shutil.copy2(test_geotiff, archive_path)
 
 		# Create test dataset
 		dataset_data = {
@@ -27,7 +27,7 @@ def test_dataset_for_download(auth_token, mock_data_directory, test_file):
 			'file_alias': file_name,
 			'file_size': archive_path.stat().st_size,
 			'copy_time': 123,
-			'user_id': '484d53be-2fee-4449-ad36-a6b083aab663',
+			'user_id': test_user,
 			'status': 'uploaded',
 		}
 		response = client.table(settings.datasets_table).insert(dataset_data).execute()
@@ -37,7 +37,7 @@ def test_dataset_for_download(auth_token, mock_data_directory, test_file):
 		metadata_data = {
 			'dataset_id': dataset_id,
 			'name': 'Test Dataset',
-			'user_id': '484d53be-2fee-4449-ad36-a6b083aab663',
+			'user_id': test_user,
 			'authors': 'Test Author',
 			'platform': 'drone',
 			'data_access': 'public',
@@ -48,11 +48,15 @@ def test_dataset_for_download(auth_token, mock_data_directory, test_file):
 		}
 		client.table(settings.metadata_table).insert(metadata_data).execute()
 
-		yield dataset_id
-
-		# Cleanup
-		client.table(settings.metadata_table).delete().eq('dataset_id', dataset_id).execute()
-		client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
+		try:
+			yield dataset_id
+		finally:
+			# Cleanup database entries
+			client.table(settings.metadata_table).delete().eq('dataset_id', dataset_id).execute()
+			client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
+			# Cleanup file
+			if archive_path.exists():
+				archive_path.unlink()
 
 
 def test_download_dataset(auth_token, test_dataset_for_download):
@@ -90,21 +94,20 @@ def test_download_dataset(auth_token, test_dataset_for_download):
 
 
 @pytest.fixture(scope='function')
-def test_dataset_with_label(auth_token, mock_data_directory, test_file):
+def test_dataset_with_label(auth_token, data_directory, test_geotiff, test_user):
 	"""Create a temporary test dataset with metadata and label for testing downloads"""
-	# Create test dataset
 	with use_client(auth_token) as client:
-		# Copy test file to mock archive directory with the same name we're using
+		# Copy test file to archive directory
 		file_name = 'test-download-label.tif'
-		archive_path = mock_data_directory / file_name
-		shutil.copy2(test_file, archive_path)
+		archive_path = data_directory / settings.ARCHIVE_DIR / file_name
+		shutil.copy2(test_geotiff, archive_path)
 
 		dataset_data = {
-			'file_name': file_name,  # Use the same filename
+			'file_name': file_name,
 			'file_alias': file_name,
 			'file_size': archive_path.stat().st_size,
 			'copy_time': 123,
-			'user_id': '484d53be-2fee-4449-ad36-a6b083aab663',
+			'user_id': test_user,
 			'status': 'uploaded',
 		}
 		response = client.table(settings.datasets_table).insert(dataset_data).execute()
@@ -114,7 +117,7 @@ def test_dataset_with_label(auth_token, mock_data_directory, test_file):
 		metadata_data = {
 			'dataset_id': dataset_id,
 			'name': 'Test Dataset',
-			'user_id': '484d53be-2fee-4449-ad36-a6b083aab663',
+			'user_id': test_user,
 			'authors': 'Test Author',
 			'admin_level_1': 'Test Admin Level 1',
 			'admin_level_2': 'Test Admin Level 2',
@@ -142,7 +145,7 @@ def test_dataset_with_label(auth_token, mock_data_directory, test_file):
 		# Create label
 		label_data = {
 			'dataset_id': dataset_id,
-			'user_id': '484d53be-2fee-4449-ad36-a6b083aab663',
+			'user_id': test_user,
 			'aoi': multipolygon_geojson,
 			'label': label_multipolygon,
 			'label_source': 'visual_interpretation',
