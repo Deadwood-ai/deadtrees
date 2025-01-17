@@ -38,9 +38,6 @@ from rio_cogeo.cogeo import cog_info, cog_validate
 def calculate_cog(
 	tiff_file_path: str,
 	cog_target_path: str,
-	# compress='jpeg',
-	# overviews=None,
-	# quality=75,
 	skip_recreate: bool = False,
 	token: str = None,
 ):
@@ -72,6 +69,8 @@ def calculate_cog(
 		'Byte',
 		'-of',
 		'COG',
+		'-a_nodata',
+		'0',
 		'-co',
 		'COMPRESS=JPEG',
 		'-co',
