@@ -25,24 +25,3 @@ services:
       UVICORN_HOST: 0.0.0.0
       LOGFIRE_TOKEN: ${LOGFIRE_TOKEN}
 
-  migrate:
-    build:
-      context: .
-      dockerfile: api/Dockerfile
-    volumes:
-      - ./data:/data
-      - ./src:/app/src
-    links:
-      - api
-    command: echo "Run migration service as 'docker compose run --rm migrate bash'"
-    environment:
-      BASE_DIR: /data
-      SUPABASE_URL: ${SUPABASE_URL}
-      SUPABASE_KEY: ${SUPABASE_KEY}
-      PROCESSOR_USERNAME: processor@deadtrees.earth
-      PROCESSOR_PASSWORD: ${PROCESSOR_PASSWORD}
-      OLD_ARCHIVE_PATH: /data/to_migrate
-      API_URL: http://api:8762
-
-      # migration metadata
-      MIGRATION_TABLE: migrate_v1
