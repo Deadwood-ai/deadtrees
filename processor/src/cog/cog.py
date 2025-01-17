@@ -73,9 +73,9 @@ def calculate_cog(
 		'-of',
 		'COG',
 		'-co',
-		f'COMPRESS={compress.upper()}',
+		'COMPRESS=JPEG',
 		'-co',
-		f'QUALITY={quality}',
+		'QUALITY=75',
 		'-co',
 		'OVERVIEW_COMPRESS=JPEG',
 		'-co',
@@ -95,8 +95,8 @@ def calculate_cog(
 		'GDAL_GTIFF_SRS_SOURCE',
 		'EPSG',
 	]
-	if overviews is not None:
-		cmd_translate.extend(['-co', f'OVERVIEW_COUNT={overviews}'])
+	# if overviews is not None:
+	# 	cmd_translate.extend(['-co', f'OVERVIEW_COUNT={overviews}'])
 
 	# apply
 	try:

@@ -38,21 +38,20 @@ def process_cog(task: QueueTask, temp_dir: Path):
 		pull_file_from_storage_server(storage_server_file_path, str(input_path), token)
 
 		# Get options and setup output paths
-		options = task.build_args
 		cog_folder = Path(dataset.file_name).stem
 		file_name = f'{dataset.id}_cog.tif'
 		output_path = Path(temp_dir) / file_name
 
 		# Generate COG
-		logger.info(f'Calculating COG for dataset {dataset.id} with options: {options}', extra={'token': token})
+		# logger.info(f'Calculating COG for dataset {dataset.id} with options: {options}', extra={'token': token})
 		t1 = time.time()
 		info = calculate_cog(
 			str(input_path),
 			str(output_path),
-			profile=options.profile,
-			quality=options.quality,
-			skip_recreate=not options.force_recreate,
-			tiling_scheme=options.tiling_scheme,
+			# profile=options.profile,
+			# quality=options.quality,
+			# skip_recreate=,
+			# tiling_scheme=options.tiling_scheme,
 			token=token,
 		)
 		logger.info(f'COG created for dataset {dataset.id}: {info}', extra={'token': token})
@@ -72,11 +71,12 @@ def process_cog(task: QueueTask, temp_dir: Path):
 			cog_size=max(1, int((output_path.stat().st_size / 1024 / 1024))),  # in MB
 			runtime=t2 - t1,
 			user_id=task.user_id,
-			compression=options.profile,
+			compression=info.Compression,
 			overviews=overviews,
-			tiling_scheme=options.tiling_scheme,
-			resolution=int(options.resolution * 100),
-			blocksize=info.IFD[0].Blocksize[0],
+			# tiling_scheme=info.tiling_scheme,
+			# resolution=int(options.resolution * 100),
+			# blocksize=info.IFD[0].Blocksize[0],
+			info=info.model_dump(),
 		)
 		cog = Cog(**meta)
 

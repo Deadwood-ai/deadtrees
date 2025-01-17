@@ -96,17 +96,16 @@ class QueueTask(BaseModel):
 	current_position: int
 	estimated_time: float | None = None
 	task_types: List[TaskTypeEnum]
-	task_type: Optional[TaskTypeEnum] = None
 
-	@model_validator(mode='before')
-	def convert_task_type_to_types(cls, values):
-		"""Convert old task_type to task_types if necessary"""
-		if isinstance(values, dict):
-			if 'task_type' in values and 'task_types' not in values:
-				values['task_types'] = [values['task_type']] if values['task_type'] else []
-			elif 'task_types' not in values:
-				values['task_types'] = []
-		return values
+	# @model_validator(mode='before')
+	# def convert_task_type_to_types(cls, values):
+	# 	"""Convert old task_type to task_types if necessary"""
+	# 	if isinstance(values, dict):
+	# 		if 'task_type' in values and 'task_types' not in values:
+	# 			values['task_types'] = [values['task_type']] if values['task_type'] else []
+	# 		elif 'task_types' not in values:
+	# 			values['task_types'] = []
+	# 	return values
 
 
 class Thumbnail(BaseModel):
@@ -205,10 +204,11 @@ class Cog(BaseModel):
 	# COG options
 	compression: str
 	overviews: int
-	resolution: int
+	resolution: Optional[int] = None
 	blocksize: Optional[int] = None
 	compression_level: Optional[str] = None
 	tiling_scheme: Optional[str] = None
+	info: Optional[dict] = None
 
 	created_at: Optional[datetime] = None
 

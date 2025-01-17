@@ -14,12 +14,12 @@ def cog_task(test_dataset_for_processing, test_processor_user):
 		id=1,
 		dataset_id=test_dataset_for_processing,
 		user_id=test_processor_user,
-		task_type=TaskTypeEnum.cog,
+		task_types=[TaskTypeEnum.cog],
 		priority=1,
 		is_processing=False,
 		current_position=1,
 		estimated_time=0.0,
-		build_args={'profile': 'jpeg', 'tiling_scheme': '512', 'quality': 75},
+		# build_args={'profile': 'jpeg', 'tiling_scheme': '512', 'quality': 75},
 	)
 
 
@@ -38,6 +38,7 @@ def test_process_cog_success(cog_task, auth_token):
 		assert cog_data['dataset_id'] == cog_task.dataset_id
 		assert cog_data['cog_name'].endswith('cog.tif')
 		assert cog_data['cog_size'] > 0
+		assert cog_data['info'] is not None
 
 		# Verify COG file exists in correct location (storage server)
 		cog_path = Path(settings.BASE_DIR) / settings.COG_DIR / cog_data['cog_name']
