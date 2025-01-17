@@ -12,7 +12,7 @@ services:
     ports:
       - '5678:5678'
     volumes:
-      - ./data:/data
+      - ./data:/data # need it for testing (pulling and pushing files to storage server)
       - ${SSH_PRIVATE_KEY_PATH}:/app/ssh_key
       - ./processor:/app/processor
       - ./shared:/app/shared
@@ -20,20 +20,22 @@ services:
     environment:
       - PYTHONPATH=/app
       - PYTEST_ADDOPTS=--color=yes
-      - STORAGE_SERVER_IP=data.deadtrees.earth
-      - STORAGE_SERVER_USERNAME=${STORAGE_SERVER_USERNAME}
-      - STORAGE_SERVER_DATA_PATH=/apps/storage-server/production
+      - STORAGE_SERVER_IP=nginx
+      - STORAGE_SERVER_USERNAME=root
+      - STORAGE_SERVER_DATA_PATH=/data
       - PROCESSOR_USERNAME=processor@deadtrees.earth
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_KEY=${SUPABASE_KEY}
       - BASE_DIR=/data
       - PROCESSOR_PASSWORD=${PROCESSOR_PASSWORD}
+      - SSH_PRIVATE_KEY_PATH=/app/ssh_key
       - SSH_PRIVATE_KEY_PASSPHRASE=${SSH_PRIVATE_KEY_PASSPHRASE}
       - DEV_MODE=true
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     # command: python -m debugpy --listen 0.0.0.0:5678 -c "print('Call the Processor Debugger individually.')"
+    command: tail -f /dev/null
 
   api-test:
     build:
@@ -58,12 +60,6 @@ services:
       - UVICORN_HOST=0.0.0.0
       - UVICORN_PORT=8017
       - PYTEST_ADDOPTS=--color=yes
-      - STORAGE_SERVER_IP=data.deadtrees.earth
-      - STORAGE_SERVER_USERNAME=${STORAGE_SERVER_USERNAME}
-      - STORAGE_SERVER_DATA_PATH=/apps/storage-server/production
-      - PROCESSOR_USERNAME=processor@deadtrees.earth
-      - PROCESSOR_PASSWORD=${PROCESSOR_PASSWORD}
-      - SSH_PRIVATE_KEY_PASSPHRASE=${SSH_PRIVATE_KEY_PASSPHRASE}
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_KEY=${SUPABASE_KEY}
       - BASE_DIR=/data
@@ -77,7 +73,8 @@ services:
   nginx:
     image: nginx
     ports:
-      - 8080:80 # for local and testing we do not bind to port 80 and 443
+      - 8080:80
+      - '2222:22'
     links:
       - api-test
     depends_on:
@@ -92,6 +89,16 @@ services:
     volumes:
       - ./nginx/conf:/etc/nginx/conf.d/:ro
       - ./data:/data/:ro
+      - ${SSH_PRIVATE_KEY_PATH}.pub:/root/.ssh/authorized_keys:rw
+    command: >
+      sh -c "apt-get update &&
+             apt-get install -y openssh-server &&
+             mkdir -p /run/sshd &&
+             mkdir -p /root/.ssh &&
+             chmod 700 /root/.ssh &&
+             chmod 600 /root/.ssh/authorized_keys &&
+             /usr/sbin/sshd &&
+             nginx -g 'daemon off;'"
 
   tests:
     build:
@@ -112,3 +119,7 @@ services:
       - ./tests:/app/tests # dev only, no rebuild needed
     # command: pytest -s test_performance.py
     # command: tail -f /dev/null # Keeps container running indefinitely
+
+networks:
+  default:
+    name: deadwood_network

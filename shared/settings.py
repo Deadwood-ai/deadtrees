@@ -83,19 +83,16 @@ class Settings(BaseSettings):
 	SSH_PRIVATE_KEY_PATH: str = '/app/ssh_key'
 	SSH_PRIVATE_KEY_PASSPHRASE: str = ''
 
-	processing_dir: str = 'processing'
-
-	_PROCESSING_PATH: Optional[Path] = None
-
+	PROCESSING_DIR: Path = BASE / 'processing_dir'
 	# monitoring
 	LOGFIRE_TOKEN: str = None
 	LOGFIRE_PYDANTIC_PLUGIN_RECORD: str = 'all'
 
 	@property
 	def processing_path(self) -> Path:
-		if self._PROCESSING_PATH is None:
-			self._PROCESSING_PATH = Path(tempfile.mkdtemp(prefix='processing_'))
-		return self._PROCESSING_PATH
+		if not self.PROCESSING_DIR.exists():
+			self.PROCESSING_DIR.mkdir(parents=True, exist_ok=True)
+		return self.PROCESSING_DIR
 
 	@property
 	def base_path(self) -> Path:
