@@ -88,7 +88,7 @@ services:
       start_period: 3s
     volumes:
       - ./nginx/conf:/etc/nginx/conf.d/:ro
-      - ./data:/data/:ro
+      - ./data:/data/
       - ${SSH_PRIVATE_KEY_PATH}.pub:/root/.ssh/authorized_keys:rw
     command: >
       sh -c "apt-get update &&
