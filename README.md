@@ -9,7 +9,7 @@ Main FastAPI application for the deadwood backend. This repository contains both
 
 ---
 
-## Setup
+## Local setup
 
 ### Clone the repository with submodules:
 
@@ -118,4 +118,77 @@ SUPABASE_KEY=your_supabase_key
   /tests     - Processor tests
 
 /shared      - Shared code between API and processor
+```
+
+
+## API - Deployment
+
+### Additional requirements
+
+So far I found the following packages missing on the Hetzner ubuntu image:
+
+```bash
+apt install -y make unzip 
+```
+
+### Setup user
+
+create a user for everyone to log in (using root)
+
+```bash
+useradd dendro
+usermod -aG docker dendro
+```
+
+### Init git and download repo
+
+Next upload SSH keys for developers to `home/dendro/.ssh/authorized_keys`
+**Add Env variables to the key, to set the git user for each developer**
+
+```
+command="export $GIT_AUTHOR_NAME='yourname' && export $GIT_AUTHOR_EMAIL='your-email';exec $SHELL -l" key
+```
+
+Next change the `/home/dendro/.bashrc` to configure git, add to the end:
+
+```
+if  [[ -n "$GIT_AUTHOR_NAME" && -n "$GIT_AUTHOR_EMAIL" ]]; then
+        git config --global user.name "$GIT_AUTHOR_NAME"
+        git config --global user.email "$GIT_AUTHOR_EMAIL"
+fi
+```
+
+Now, you can download the repo, including the private repo.
+
+```bash
+# Clone the repository
+git clone git@github.com:deadtrees/deadwood-api.git
+cd deadwood-api
+
+# Initialize and update submodules
+git submodule update --init --recursive
+```
+
+### Create a .env file with required environment variables:
+
+On the Storage server, only the necessary env is set
+```
+SUPABASE_URL=your_supabase_url
+SUPABASE_KEY=your_supabase_key
+LOGFIRE_TOKEN=your_logfire_token
+```
+
+### Download required assets:
+
+```bash
+# Create assets directory and download test data, models, and GADM data
+make
+```
+
+### Build the repo
+
+Optionally, you can alias the call of the correct docker compose file. Add to `.bashrc`
+
+```
+alias serv='docker compose -f docker-compose.api.yaml'
 ```
