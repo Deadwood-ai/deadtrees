@@ -59,6 +59,21 @@ make
 ./dtool.py debug test-api api/tests/routers/test_download.py
 ```
 
+### Accessing services
+
+```bash
+# nginx
+http://localhost:8080/cogs/v1/
+http://localhost:8080/thumbnails/v1/
+
+# API docs
+http://localhost:8017/docs
+
+# supabase studio
+http://localhost:54323
+
+```
+
 ### Run the application with Docker Compose:
 
 ```bash
