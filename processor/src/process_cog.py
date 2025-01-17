@@ -40,7 +40,7 @@ def process_cog(task: QueueTask, temp_dir: Path):
 		# Get options and setup output paths
 		options = task.build_args
 		cog_folder = Path(dataset.file_name).stem
-		file_name = f'{cog_folder}_cog_{options.profile}_ts_{options.tiling_scheme}_q{options.quality}.tif'
+		file_name = f'{dataset.id}_cog.tif'
 		output_path = Path(temp_dir) / file_name
 
 		# Generate COG
@@ -58,7 +58,7 @@ def process_cog(task: QueueTask, temp_dir: Path):
 		logger.info(f'COG created for dataset {dataset.id}: {info}', extra={'token': token})
 
 		# Push generated COG
-		storage_server_cog_path = f'{settings.STORAGE_SERVER_DATA_PATH}/cogs/{cog_folder}/{file_name}'
+		storage_server_cog_path = f'{settings.STORAGE_SERVER_DATA_PATH}/cogs/{file_name}'
 		push_file_to_storage_server(str(output_path), storage_server_cog_path, token)
 		t2 = time.time()
 
@@ -68,8 +68,8 @@ def process_cog(task: QueueTask, temp_dir: Path):
 			dataset_id=dataset.id,
 			cog_folder=cog_folder,
 			cog_name=file_name,
-			cog_url=f'{cog_folder}/{file_name}',
-			cog_size=output_path.stat().st_size,
+			cog_url=f'{file_name}',
+			cog_size=max(1, int((output_path.stat().st_size / 1024 / 1024))),  # in MB
 			runtime=t2 - t1,
 			user_id=task.user_id,
 			compression=options.profile,
