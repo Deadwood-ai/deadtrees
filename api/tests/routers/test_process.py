@@ -44,7 +44,7 @@ def test_create_processing_task(test_dataset, auth_token):
 	"""Test creating a new processing task for a dataset"""
 	response = client.put(
 		f'/datasets/{test_dataset}/process',
-		params={'task_types': ['cog', 'thumbnail']},
+		json={'task_types': ['cog', 'thumbnail']},
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 
@@ -77,8 +77,8 @@ def test_create_processing_task_unauthorized(test_dataset):
 def test_create_processing_task_invalid_dataset(auth_token):
 	"""Test process creation for non-existent dataset"""
 	response = client.put(
-		'/datasets/99999/process',  # Non-existent dataset ID
-		params={'task_types': ['cog', 'thumbnail']},
+		'/datasets/99999/process',
+		json={'task_types': ['cog', 'thumbnail']},
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 	assert response.status_code == 404
@@ -88,7 +88,7 @@ def test_create_processing_task_empty_types(test_dataset, auth_token):
 	"""Test creating a task with empty task types list"""
 	response = client.put(
 		f'/datasets/{test_dataset}/process',
-		params={'task_types': []},
+		json={'task_types': []},
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
-	assert response.status_code == 422
+	assert response.status_code == 400

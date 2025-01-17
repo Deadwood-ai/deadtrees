@@ -1,10 +1,11 @@
 from typing import Optional, Annotated, List
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Body
 from fastapi.security import OAuth2PasswordBearer
+from pydantic import BaseModel
 
 from shared.supabase import verify_token, use_client
 from shared.settings import settings
-from shared.models import ProcessOptions, TaskPayload, QueueTask, TaskTypeEnum
+from shared.models import TaskPayload, QueueTask, TaskTypeEnum
 from shared.logger import logger
 
 # create the router for the processing
@@ -14,12 +15,15 @@ router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token')
 
 
+class ProcessRequest(BaseModel):
+	task_types: List[str]
+
+
 @router.put('/datasets/{dataset_id}/process')
 def create_processing_task(
 	dataset_id: int,
 	token: Annotated[str, Depends(oauth2_scheme)],
-	options: Optional[ProcessOptions] = None,
-	task_types: List[str] = Query(),  # Removed default value
+	request: ProcessRequest,
 ):
 	# Verify the token
 	user = verify_token(token)
@@ -27,11 +31,11 @@ def create_processing_task(
 		raise HTTPException(status_code=401, detail='Invalid token')
 
 	# Validate task_types
-	if not task_types:
+	if not request.task_types:
 		raise HTTPException(status_code=400, detail='At least one task type must be specified')
 
 	try:
-		validated_task_types = [TaskTypeEnum(t) for t in task_types]
+		validated_task_types = [TaskTypeEnum(t) for t in request.task_types]
 	except ValueError as e:
 		raise HTTPException(status_code=400, detail=f'Invalid task type: {str(e)}')
 
@@ -52,7 +56,6 @@ def create_processing_task(
 	payload = TaskPayload(
 		dataset_id=dataset_id,
 		user_id=user.id,
-		build_args=options or ProcessOptions(),
 		task_types=validated_task_types,
 		priority=2,
 		is_processing=False,
@@ -66,12 +69,12 @@ def create_processing_task(
 			task = TaskPayload(**response.data[0])
 
 		logger.info(
-			f'Added {task_types} task for dataset {dataset_id} to queue.',
+			f'Added {request.task_types} task for dataset {dataset_id} to queue.',
 			extra={'token': token, 'dataset_id': dataset_id, 'user_id': user.id},
 		)
 
 	except Exception as e:
-		msg = f'Error adding {task_types} task to queue: {str(e)}'
+		msg = f'Error adding {request.task_types} task to queue: {str(e)}'
 		logger.error(msg, extra={'token': token, 'user_id': user.id, 'dataset_id': dataset_id})
 		raise HTTPException(status_code=500, detail=msg)
 
@@ -107,7 +110,6 @@ def create_processing_task(
 					id=payload.id,
 					dataset_id=dataset_id,
 					user_id=user.id,
-					build_args=options,
 					priority=2,
 					is_processing=False,
 					current_position=-1,

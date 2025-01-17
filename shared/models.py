@@ -34,7 +34,7 @@ class StatusEnum(str, Enum):
 	deadwood_errored = 'deadwood_errored'
 	errored = 'errored'
 	cog_processing = 'cog_processing'
-	cog_errored = 'errored'
+	cog_errored = 'cog_errored'
 	thumbnail_processing = 'thumbnail_processing'
 	thumbnail_errored = 'thumbnail_errored'
 	processed = 'processed'
@@ -61,13 +61,13 @@ class LabelTypeEnum(str, Enum):
 	semantic_segmentation = 'semantic_segmentation'
 
 
-class ProcessOptions(BaseSettings):
-	# overviews: Optional[int] = 8
-	resolution: Optional[float] = 0.04
-	profile: Optional[str] = 'jpeg'
-	quality: Optional[int] = 75
-	force_recreate: Optional[bool] = False
-	tiling_scheme: Optional[str] = 'web-optimized'
+# class ProcessOptions(BaseSettings):
+# overviews: Optional[int] = 8
+# resolution: Optional[float] = 0.04
+# profile: Optional[str] = 'jpeg'
+# quality: Optional[int] = 75
+# force_recreate: Optional[bool] = False
+# tiling_scheme: Optional[str] = 'web-optimized'
 
 
 class TaskTypeEnum(str, Enum):
@@ -82,7 +82,6 @@ class TaskPayload(BaseModel):
 	dataset_id: int
 	user_id: str
 	priority: int = 2
-	build_args: ProcessOptions = ProcessOptions()
 	is_processing: bool = False
 	created_at: Optional[datetime] = None
 	task_types: List[TaskTypeEnum]
@@ -92,7 +91,6 @@ class QueueTask(BaseModel):
 	id: int
 	dataset_id: int
 	user_id: str
-	build_args: ProcessOptions
 	priority: int
 	is_processing: bool
 	current_position: int
