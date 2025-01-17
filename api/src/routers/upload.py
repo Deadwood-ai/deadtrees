@@ -54,29 +54,36 @@ async def upload_geotiff_chunk(
 	# Process final chunk
 	if chunk_index == chunks_total - 1:
 		try:
-			# rename file
-			uid = str(uuid.uuid4())[:8]
-			file_name = f'{uid}_ortho.tif'
-			target_path = settings.archive_path / file_name
-			upload_target_path.rename(target_path)
-
 			# Get final hash
-			final_sha256 = get_file_identifier(target_path)
+			final_sha256 = get_file_identifier(upload_target_path)
 
 			# Get bounds
-			bbox = get_transformed_bounds(target_path)
+			bbox = get_transformed_bounds(upload_target_path)
 
-			# Update dataset entry
+			# Create initial dataset entry with temporary filename
 			dataset = create_initial_dataset_entry(
-				filename=file_name,
+				filename=upload_file_name,  # Use temporary filename initially
 				file_alias=filename,
 				user_id=user.id,
 				copy_time=copy_time,
 				token=token,
-				file_size=target_path.stat().st_size,
+				file_size=upload_target_path.stat().st_size,
 				bbox=bbox,
 				sha256=final_sha256,
 			)
+
+			# Now rename the file using the dataset ID
+			file_name = f'{dataset.id}_ortho.tif'
+			target_path = settings.archive_path / file_name
+			upload_target_path.rename(target_path)
+
+			# Update the filename in the database
+			with use_client(token) as client:
+				client.table(settings.datasets_table).update({'file_name': file_name}).eq('id', dataset.id).execute()
+
+			# Update the dataset object with new filename
+			dataset.file_name = file_name
+
 			try:
 				geotiff_info = create_geotiff_info_entry(target_path, dataset.id, token)
 				logger.info(

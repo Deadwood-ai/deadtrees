@@ -57,8 +57,10 @@ def test_upload_geotiff_chunk(test_geotiff, auth_token, test_user):
 				assert dataset['sha256'] is not None
 				assert dataset['user_id'] == test_user
 
-				# Verify file exists in archive directory
-				archive_path = Path(settings.BASE_DIR) / settings.ARCHIVE_DIR / dataset['file_name']
+				# Verify file exists in archive directory and has correct ID-based name
+				expected_filename = f'{dataset_id}_ortho.tif'
+				assert dataset['file_name'] == expected_filename
+				archive_path = Path(settings.BASE_DIR) / settings.ARCHIVE_DIR / expected_filename
 				assert archive_path.exists()
 				assert archive_path.stat().st_size == file_size
 
