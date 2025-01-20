@@ -97,15 +97,16 @@ def data_directory():
 	cogs_dir = data_dir / settings.COG_DIR
 	thumbnails_dir = data_dir / settings.THUMBNAIL_DIR
 	label_objects_dir = data_dir / settings.LABEL_OBJECTS_DIR
+	trash_dir = data_dir / settings.TRASH_DIR
 
 	# Create all directories
-	for directory in [archive_dir, cogs_dir, thumbnails_dir, label_objects_dir]:
+	for directory in [archive_dir, cogs_dir, thumbnails_dir, label_objects_dir, trash_dir]:
 		directory.mkdir(parents=True, exist_ok=True)
 
 	yield data_dir
 
 	# Cleanup after all tests
-	for directory in [archive_dir, cogs_dir, thumbnails_dir, label_objects_dir]:
+	for directory in [archive_dir, cogs_dir, thumbnails_dir, label_objects_dir, trash_dir]:
 		if directory.exists():
 			shutil.rmtree(directory)
 			directory.mkdir(parents=True, exist_ok=True)

@@ -20,6 +20,7 @@ def create_geotiff_info_entry(file_path: Path, dataset_id: int, token: str) -> G
 	    GeoTiffInfo: Object containing the extracted metadata
 	"""
 	try:
+		# TODO: Use cog_info instead of rasterio?
 		with rasterio.open(str(file_path)) as src:
 			# Determine if the file is tiled by checking block shapes
 			block_shapes = src.block_shapes[0]
