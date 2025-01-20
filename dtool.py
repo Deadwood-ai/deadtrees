@@ -22,8 +22,8 @@ class DeadwoodTool:
 			raise
 
 	def up(self):
-		"""Start the test environment"""
-		self._run_command(['docker', 'compose', '-f', self.test_compose_file, 'up', '-d'])
+		"""Start the test environment and rebuild containers if needed"""
+		self._run_command(['docker', 'compose', '-f', self.test_compose_file, 'up', '-d', '--build'])
 
 	def down(self):
 		"""Stop the test environment"""

@@ -1,10 +1,8 @@
 import pytest
-import tempfile
 import shutil
 from pathlib import Path
 from shared.supabase import use_client, login
 from shared.settings import settings
-from unittest.mock import patch
 from supabase import create_client
 
 
@@ -51,20 +49,18 @@ def test_geotiff():
 	return file_path
 
 
-@pytest.fixture(scope='session', autouse=True)
+@pytest.fixture(scope='session')
 def test_user():
 	"""Create a test user for all tests and clean up afterwards"""
 	supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-	test_email = 'test@example.com'
-	test_password = 'test123456'
 	user_id = None
 
 	try:
 		# Try to sign up the test user
 		response = supabase.auth.sign_up(
 			{
-				'email': test_email,
-				'password': test_password,
+				'email': settings.TEST_USER_EMAIL,
+				'password': settings.TEST_USER_PASSWORD,
 			}
 		)
 		user_id = response.user.id if response.user else None
@@ -73,8 +69,8 @@ def test_user():
 		try:
 			response = supabase.auth.sign_in_with_password(
 				{
-					'email': test_email,
-					'password': test_password,
+					'email': settings.TEST_USER_EMAIL,
+					'password': settings.TEST_USER_PASSWORD,
 				}
 			)
 			user_id = response.user.id if response.user else None
@@ -84,17 +80,18 @@ def test_user():
 	yield user_id
 
 	# Cleanup: Delete the test user
-	if user_id:
-		try:
-			supabase.auth.admin.delete_user(user_id)
-		except Exception as e:
-			print(f'Failed to delete test user: {str(e)}')
+	# if user_id:
+	# 	try:
+	# 		admin_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
+	# 		admin_client.auth.admin.delete_user(user_id)
+	# 	except Exception as e:
+	# 		print(f'Failed to delete test user: {str(e)}')
 
 
 @pytest.fixture(scope='session')
-def auth_token():
+def auth_token(test_user):
 	"""Provide authentication token for tests"""
-	return login('test@example.com', 'test123456')
+	return login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD)
 
 
 @pytest.fixture(scope='session', autouse=True)

@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 from pathlib import Path
 import tempfile
+import os
 
 # load an .env file if it exists
 load_dotenv()
@@ -87,6 +88,10 @@ class Settings(BaseSettings):
 	# monitoring
 	LOGFIRE_TOKEN: str = None
 	LOGFIRE_PYDANTIC_PLUGIN_RECORD: str = 'all'
+
+	# Test settings
+	TEST_USER_EMAIL: str = 'test@example.com'
+	TEST_USER_PASSWORD: str = 'test123456'
 
 	@property
 	def processing_path(self) -> Path:

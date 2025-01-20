@@ -68,8 +68,7 @@ services:
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     # command: python -m debugpy --listen 0.0.0.0:5679 run.py server --reload=True
-    command: python run.py server --reload=True
-
+    command: python api/src/run.py server --reload=True
   nginx:
     image: nginx
     ports:
@@ -103,7 +102,7 @@ services:
   tests:
     build:
       context: .
-      dockerfile: tests/Dockerfile
+      dockerfile: end2end_tests/Dockerfile
     links:
       - nginx
       - api-test
@@ -116,7 +115,7 @@ services:
       - 'host.docker.internal:host-gateway'
     volumes:
       - ./assets:/app/assets/:ro
-      - ./tests:/app/tests # dev only, no rebuild needed
+      - ./end2end_tests:/app/tests # dev only, no rebuild needed
     # command: pytest -s test_performance.py
     # command: tail -f /dev/null # Keeps container running indefinitely
 

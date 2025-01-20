@@ -19,7 +19,7 @@ RUN mkdir -p /app/tests
 #     pip install -r /app/processor/requirements.txt
 
 # make the dedicated test location
-COPY ./tests /app/tests
+COPY ./end2end_tests /app/tests
 RUN pip install -r /app/tests/requirements.txt
 
 WORKDIR /app/tests/src
