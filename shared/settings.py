@@ -18,8 +18,8 @@ _tables = {
 	'label_objects': 'v1_label_objects',
 	'logs': 'v2_logs',
 	'statuses': 'v2_statuses',
-	'queue': 'v1_queue',
-	'queue_positions': 'v1_queue_positions',
+	'queue': 'v2_queue',
+	'queue_positions': 'v2_queue_positions',
 }
 
 # _dev_tables = {

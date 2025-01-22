@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from api.src.server import app
 from shared.supabase import use_client
 from shared.settings import settings
-from shared.models import TaskTypeEnum
+from shared.models import TaskTypeEnum, LicenseEnum, PlatformEnum, DatasetAccessEnum
 
 client = TestClient(app)
 
@@ -19,11 +19,14 @@ def test_dataset(auth_token, test_user):
 		with use_client(auth_token) as supabaseClient:
 			dataset_data = {
 				'file_name': 'test-process.tif',
-				'file_alias': 'test-process.tif',
-				'file_size': 1000,
-				'copy_time': 123,
 				'user_id': test_user,
-				'status': 'uploaded',
+				'license': LicenseEnum.cc_by,
+				'platform': PlatformEnum.drone,
+				'authors': ['Test Author'],
+				'data_access': DatasetAccessEnum.public,
+				'aquisition_year': 2024,
+				'aquisition_month': 1,
+				'aquisition_day': 1,
 			}
 			response = supabaseClient.table(settings.datasets_table).insert(dataset_data).execute()
 			dataset_id = response.data[0]['id']
