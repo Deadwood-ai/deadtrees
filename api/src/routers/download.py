@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 import pandas as pd
@@ -78,12 +78,7 @@ def info():
 @download_app.get('/datasets/{dataset_id}/dataset.zip')
 async def download_dataset(dataset_id: str, background_tasks: BackgroundTasks):
 	"""
-	Download the full dataset with the given ID.
-	This will create a ZIP file containing:
-	- The original ortho GeoTIFF
-	- Dataset metadata in CSV and PARQUET format
-	- CITATION.cff and LICENSE.txt files
-	- Labels if available (as GeoPackage)
+	Prepare dataset bundle and return nginx URL for download
 	"""
 	# Load the dataset using direct database query
 	with use_client() as client:
@@ -98,26 +93,43 @@ async def download_dataset(dataset_id: str, background_tasks: BackgroundTasks):
 			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no ortho file.')
 		ortho = ortho_response.data[0]
 
-	# Build the file path
+	# Build the file paths
 	archive_file_name = (settings.archive_path / ortho['ortho_file_name']).resolve()
+	download_dir = settings.downloads_path / dataset_id
+	download_file = download_dir / f'{dataset_id}.zip'
+
+	# Create download directory if it doesn't exist
+	download_dir.mkdir(parents=True, exist_ok=True)
 
 	# Load labels if they exist
 	with use_client() as client:
 		label_response = client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).execute()
 		label = Label(**label_response.data[0]) if label_response.data else None
 
-	# Create temporary ZIP file
-	target = tempfile.NamedTemporaryFile(suffix='.zip', delete_on_close=False)
 	try:
-		bundle_dataset(target.name, archive_file_name, dataset=dataset, label=label)
+		# Bundle dataset directly to downloads directory
+		bundle_dataset(str(download_file), archive_file_name, dataset=dataset, label=label)
+
+		# Schedule cleanup after 1 hour (3600 seconds)
+		def cleanup_download(path: Path):
+			if path.exists():
+				path.unlink()
+			if path.parent.exists():
+				try:
+					path.parent.rmdir()  # This will only remove if directory is empty
+				except OSError:
+					pass  # Directory not empty, skip removal
+
+		background_tasks.add_task(cleanup_download, download_file, delay=3600)
+
+		# Return redirect to nginx URL
+		return RedirectResponse(url=f'/downloads/v1/{dataset_id}/{dataset_id}.zip', status_code=303)
+
 	except Exception as e:
+		if download_file.exists():
+			download_file.unlink()
 		msg = f'Failed to bundle dataset <ID={dataset_id}>: {str(e)}'
 		raise HTTPException(status_code=500, detail=msg)
-	finally:
-		# Remove temporary file after download
-		background_tasks.add_task(lambda: Path(target.name).unlink())
-
-	return FileResponse(target.name, media_type='application/zip', filename=f'{dataset_id}.zip')
 
 
 @download_app.get('/datasets/{dataset_id}/ortho.tif')

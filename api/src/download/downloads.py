@@ -49,9 +49,12 @@ def create_citation_file(metadata: Metadata, filestream=None) -> str:
 
 	# check if the authors can be split into first and last names
 	author_list = []
-	authors = metadata.authors.split(', ')
-	for author in authors:
-		author_list.append({'name': author})
+	if len(metadata.authors) > 1:
+		authors = metadata.authors.split(', ')
+		for author in authors:
+			author_list.append({'name': author})
+	else:
+		author_list.append({'name': metadata.authors})
 
 	# add all authors defined in the template
 	author_list = [*author_list, *template['authors']]
