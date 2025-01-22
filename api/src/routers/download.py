@@ -13,6 +13,7 @@ from shared.__version__ import __version__
 from shared.models import Dataset, Label, Metadata
 from shared.settings import settings
 from api.src.download.downloads import bundle_dataset, label_to_geopackage
+from shared.supabase import use_client
 
 # first approach to implement a rate limit
 CONNECTED_IPS = {}
@@ -78,42 +79,44 @@ def info():
 async def download_dataset(dataset_id: str, background_tasks: BackgroundTasks):
 	"""
 	Download the full dataset with the given ID.
-	This will create a ZIP file contianing the archived
-	original GeoTiff, along with a JSON of the metadata and
-	(for dev purpose now) a json schema of the metadata.
-	If available, a GeoPackage with the labels will be added.
-
+	This will create a ZIP file containing:
+	- The original ortho GeoTIFF
+	- Dataset metadata in CSV and PARQUET format
+	- CITATION.cff and LICENSE.txt files
+	- Labels if available (as GeoPackage)
 	"""
-	# load the dataset
-	dataset = Dataset.by_id(dataset_id)
-	if dataset is None:
-		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
+	# Load the dataset using direct database query
+	with use_client() as client:
+		dataset_response = client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute()
+		if not dataset_response.data:
+			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
+		dataset = Dataset(**dataset_response.data[0])
 
-	# load the metadata
-	metadata = Metadata.by_id(dataset_id)
-	if metadata is None:
-		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no associated Metadata entry.')
+		# Get the ortho file information
+		ortho_response = client.table(settings.orthos_table).select('*').eq('dataset_id', dataset_id).execute()
+		if not ortho_response.data:
+			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no ortho file.')
+		ortho = ortho_response.data[0]
 
-	# load the label
-	# TODO: this loads immer nur das erste Label!!!
-	label = Label.by_id(dataset_id)
+	# Build the file path
+	archive_file_name = (settings.archive_path / ortho['ortho_file_name']).resolve()
 
-	# build the file name
-	archive_file_name = (settings.archive_path / dataset.file_name).resolve()
+	# Load labels if they exist
+	with use_client() as client:
+		label_response = client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).execute()
+		label = Label(**label_response.data[0]) if label_response.data else None
 
-	# build a temporary zip location
-	# TODO: we can use a caching here
+	# Create temporary ZIP file
 	target = tempfile.NamedTemporaryFile(suffix='.zip', delete_on_close=False)
 	try:
-		bundle_dataset(target.name, archive_file_name, metadata=metadata, label=label)
+		bundle_dataset(target.name, archive_file_name, dataset=dataset, label=label)
 	except Exception as e:
 		msg = f'Failed to bundle dataset <ID={dataset_id}>: {str(e)}'
 		raise HTTPException(status_code=500, detail=msg)
 	finally:
-		# remove the temporary file as a background_task
+		# Remove temporary file after download
 		background_tasks.add_task(lambda: Path(target.name).unlink())
 
-	# now stream the file to the user
 	return FileResponse(target.name, media_type='application/zip', filename=f'{dataset_id}.zip')
 
 

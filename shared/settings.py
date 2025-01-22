@@ -14,7 +14,7 @@ _tables = {
 	'orthos': 'v2_orthos',
 	'cogs': 'v2_cogs',
 	'thumbnails': 'v2_thumbnails',
-	'labels': 'v2_labels',
+	'labels': 'v1_labels',
 	'label_objects': 'v1_label_objects',
 	'logs': 'v2_logs',
 	'statuses': 'v2_statuses',

@@ -8,7 +8,7 @@ import geopandas as gpd
 import yaml
 import pandas as pd
 
-from shared.models import Metadata, Label
+from shared.models import Metadata, Label, Dataset, LicenseEnum
 
 TEMPLATE_PATH = Path(__file__).parent / 'templates'
 
@@ -43,7 +43,9 @@ def create_citation_file(metadata: Metadata, filestream=None) -> str:
 		template = yaml.safe_load(f)
 
 	# fill the template
-	template['title'] = f'Deadwood Training Dataset: {metadata.name}'
+	template['title'] = (
+		f'Deadwood Training Dataset: {metadata.file_name}'  # TODO: replace this with the actual dataset name
+	)
 
 	# check if the authors can be split into first and last names
 	author_list = []
@@ -95,57 +97,60 @@ def get_formatted_filename(metadata: Metadata, dataset_id: int, label_id: int = 
 		return f'ortho_{dataset_id}_{admin1}_{admin3}_{date_str}'
 
 
+def create_license_file(license_enum: LicenseEnum) -> str:
+	"""Create license file content based on the license type"""
+	license_file = TEMPLATE_PATH / f'{license_enum.value.replace(" ", "-")}.txt'
+	if not license_file.exists():
+		raise ValueError(f'License template file not found for {license_enum.value}')
+
+	with open(license_file, 'r') as f:
+		return f.read()
+
+
 def bundle_dataset(
 	target_path: str,
 	archive_file_path: str,
-	metadata: Metadata,
-	file_name: str | None = None,
+	dataset: Dataset,
 	label: Label | None = None,
 ):
-	# Generate formatted filenames
-	base_filename = get_formatted_filename(metadata, metadata.dataset_id)
+	"""Bundle dataset files into a ZIP archive"""
+	# Generate formatted filename base
+	base_filename = f'ortho_{dataset.id}'
 
-	# create the zip archive
+	# Create the ZIP archive
 	with zipfile.ZipFile(target_path, 'w', zipfile.ZIP_STORED) as archive:
-		# add the main file to the archive with new name
+		# Add the ortho file
 		archive.write(archive_file_path, arcname=f'{base_filename}.tif')
 
-		# Convert metadata to DataFrame
-		df = pd.DataFrame([metadata.model_dump()])
+		# Convert dataset to DataFrame for metadata
+		df = pd.DataFrame([dataset.model_dump(exclude={'id', 'created_at'})])
 
 		# Create temporary files for metadata formats
 		with tempfile.NamedTemporaryFile(suffix='.csv') as csv_file, tempfile.NamedTemporaryFile(
 			suffix='.parquet'
 		) as parquet_file:
-			# Save metadata in both formats
 			df.to_csv(csv_file.name, index=False)
 			df.to_parquet(parquet_file.name, index=False)
 
-			# Add both files to archive
 			archive.write(csv_file.name, arcname='METADATA.csv')
 			archive.write(parquet_file.name, arcname='METADATA.parquet')
 
-	# write the labels into a geopackage if present
-	if label is not None:
-		label_filename = get_formatted_filename(metadata, metadata.dataset_id, label.id)
+		# Add license file
+		license_content = create_license_file(dataset.license)
+		archive.writestr('LICENSE.txt', license_content)
 
+		# Add citation file
+		citation_buffer = io.StringIO()
+		create_citation_file(dataset, citation_buffer)
+		archive.writestr('CITATION.cff', citation_buffer.getvalue())
+
+	# Add labels if present
+	if label is not None:
+		label_filename = f'labels_{dataset.id}'
 		with tempfile.NamedTemporaryFile(suffix='.gpkg') as label_file:
 			label_to_geopackage(label_file.name, label)
 
 			with zipfile.ZipFile(target_path, 'a', zipfile.ZIP_STORED) as archive:
 				archive.write(label_file.name, arcname=f'{label_filename}.gpkg')
-
-	# Add license if available
-	if metadata.license is not None:
-		license_file = TEMPLATE_PATH / f'{metadata.license.value.replace(" ", "-")}.txt'
-		if license_file.exists():
-			with zipfile.ZipFile(target_path, 'a', zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-				archive.write(license_file, arcname='LICENSE.txt')
-
-	# create the citation file
-	with tempfile.NamedTemporaryFile('w', suffix='.cff') as citation_file:
-		create_citation_file(metadata, citation_file.file)
-		with zipfile.ZipFile(target_path, 'a', zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-			archive.write(citation_file.name, arcname='CITATION.cff')
 
 	return target_path
