@@ -69,35 +69,23 @@ services:
       - 'host.docker.internal:host-gateway'
     # command: python -m debugpy --listen 0.0.0.0:5679 run.py server --reload=True
     command: python api/src/run.py server --reload=True
+
   nginx:
-    image: nginx
-    ports:
-      - 8080:80
-      - '2222:22'
-    links:
-      - api-test
-    depends_on:
-      api-test:
-        condition: service_healthy
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
     healthcheck:
       test: ['CMD', 'service', 'nginx', 'status']
       interval: 15s
-      timeout: 2s
+      timeout: 1s
       retries: 5
-      start_period: 3s
+      start_period: 2s
+    ports:
+      - 8080:80
+      - '2222:22'
     volumes:
-      - ./nginx/conf:/etc/nginx/conf.d/:ro
       - ./data:/data/:rw
       - ${SSH_PRIVATE_KEY_PATH}.pub:/root/.ssh/authorized_keys:rw
-    command: >
-      sh -c "apt-get update &&
-             apt-get install -y openssh-server &&
-             mkdir -p /run/sshd &&
-             mkdir -p /root/.ssh &&
-             chmod 700 /root/.ssh &&
-             chmod 600 /root/.ssh/authorized_keys &&
-             /usr/sbin/sshd &&
-             nginx -g 'daemon off;'"
 
   tests:
     build:

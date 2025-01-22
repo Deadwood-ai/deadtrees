@@ -26,22 +26,14 @@ class LicenseEnum(str, Enum):
 
 
 class StatusEnum(str, Enum):
-	pending = 'pending'
+	idle = 'idle'
 	uploading = 'uploading'
-	uploaded = 'uploaded'
-	processing = 'processing'
-	errored = 'errored'
-	deadwood_prediction = 'deadwood_prediction'
-	deadwood_errored = 'deadwood_errored'
+	ortho_processing = 'ortho_processing'
 	cog_processing = 'cog_processing'
-	cog_errored = 'cog_errored'
 	thumbnail_processing = 'thumbnail_processing'
-	thumbnail_errored = 'thumbnail_errored'
-	convert_processing = 'convert_processing'
-	convert_errored = 'convert_errored'
-	processed = 'processed'
-	audited = 'audited'
-	audit_failed = 'audit_failed'
+	deadwood_segmentation = 'deadwood_segmentation'
+	forest_cover_segmentation = 'forest_cover_segmentation'
+	audit_in_progress = 'audit_in_progress'
 
 
 class DatasetAccessEnum(str, Enum):
@@ -61,15 +53,6 @@ class LabelTypeEnum(str, Enum):
 	segmentation = 'segmentation'
 	instance_segmentation = 'instance_segmentation'
 	semantic_segmentation = 'semantic_segmentation'
-
-
-# class ProcessOptions(BaseSettings):
-# overviews: Optional[int] = 8
-# resolution: Optional[float] = 0.04
-# profile: Optional[str] = 'jpeg'
-# quality: Optional[int] = 75
-# force_recreate: Optional[bool] = False
-# tiling_scheme: Optional[str] = 'web-optimized'
 
 
 class TaskTypeEnum(str, Enum):
@@ -99,15 +82,32 @@ class QueueTask(BaseModel):
 	estimated_time: float | None = None
 	task_types: List[TaskTypeEnum]
 
-	# @model_validator(mode='before')
-	# def convert_task_type_to_types(cls, values):
-	# 	"""Convert old task_type to task_types if necessary"""
-	# 	if isinstance(values, dict):
-	# 		if 'task_type' in values and 'task_types' not in values:
-	# 			values['task_types'] = [values['task_type']] if values['task_type'] else []
-	# 		elif 'task_types' not in values:
-	# 			values['task_types'] = []
-	# 	return values
+
+class Status(BaseModel):
+	"""
+	Tracks the processing status and completion states for a dataset
+	"""
+
+	id: Optional[int] = None
+	dataset_id: int
+	current_status: StatusEnum = StatusEnum.idle
+	is_upload_done: bool = False
+	is_ortho_done: bool = False
+	is_cog_done: bool = False
+	is_thumbnail_done: bool = False
+	is_deadwood_done: bool = False
+	is_forest_cover_done: bool = False
+	is_audited: bool = False
+	has_error: bool = False
+	error_message: Optional[str] = None
+	created_at: Optional[datetime] = None
+	updated_at: Optional[datetime] = None
+
+	@field_serializer('created_at', 'updated_at', mode='plain')
+	def datetime_to_isoformat(field: datetime | None) -> str | None:
+		if field is None:
+			return None
+		return field.isoformat()
 
 
 class Thumbnail(BaseModel):
@@ -119,24 +119,91 @@ class Thumbnail(BaseModel):
 
 class Dataset(PartialModelMixin, BaseModel):
 	"""
-	The Dataset class is the base class for each Dataset object in the database.
-	It contains the minimum required metadata to upload a GeoTiff and start processing.
-	It also contains the metadata, that cannot be changed after the upload by the user anymore.
-
-	Additionally, it will be linked to the Metadata record, which is updatable for the user,
-	and links the Labels with a 1:m cardinality.
+	V2Dataset combines the previous Dataset and Metadata models into a single model
+	with only user-provided information that doesn't change after creation.
 	"""
 
 	id: Optional[int] = None
-	file_name: Optional[str] = None
-	file_alias: Optional[str] = None
-	file_size: Optional[int] = None
-	copy_time: Optional[float] = None
-	sha256: Optional[str] = None
-	bbox: Optional[BoundingBox] = None
-	status: Optional[StatusEnum] = None
-	user_id: Optional[str] = None
+	user_id: str
 	created_at: Optional[datetime] = None
+	file_name: str
+	license: LicenseEnum
+	platform: PlatformEnum
+	project_id: Optional[str] = None
+	authors: List[str]
+	aquisition_year: Optional[int] = None
+	aquisition_month: Optional[int] = None
+	aquisition_day: Optional[int] = None
+	additional_information: Optional[str] = None
+	data_access: DatasetAccessEnum = DatasetAccessEnum.public
+	citation_doi: Optional[str] = None
+
+	@field_serializer('created_at', mode='plain')
+	def datetime_to_isoformat(field: datetime | None) -> str | None:
+		if field is None:
+			return None
+		return field.isoformat()
+
+	@field_validator('aquisition_year')
+	@classmethod
+	def validate_year(cls, v: Optional[int]) -> Optional[int]:
+		if v is not None and (v < 1980 or v > 2099):
+			raise ValueError('Year must be between 1980 and 2099')
+		return v
+
+	@field_validator('aquisition_month')
+	@classmethod
+	def validate_month(cls, v: Optional[int]) -> Optional[int]:
+		if v is not None and (v < 1 or v > 12):
+			raise ValueError('Month must be between 1 and 12')
+		return v
+
+	@field_validator('aquisition_day')
+	@classmethod
+	def validate_day(cls, v: Optional[int]) -> Optional[int]:
+		if v is not None and (v < 1 or v > 31):
+			raise ValueError('Day must be between 1 and 31')
+		return v
+
+
+class Cog(BaseModel):
+	"""
+	Represents the cloud optimized geotiff processing results
+	"""
+
+	dataset_id: int
+	file_size: int
+	cog_file_name: str
+	cog_path: str
+	version: int
+	created_at: Optional[datetime] = None
+	cog_info: Optional[Dict] = None
+	cog_processing_runtime: Optional[float] = None
+
+	@field_serializer('created_at', mode='plain')
+	def datetime_to_isoformat(field: datetime | None) -> str | None:
+		if field is None:
+			return None
+		return field.isoformat()
+
+
+class Ortho(BaseModel):
+	"""
+	Represents the orthophoto processing results
+	"""
+
+	dataset_id: int
+	ortho_file_name: str
+	version: int
+	created_at: Optional[datetime] = None
+	file_size: int
+	bbox: Optional[BoundingBox] = None
+	sha256: Optional[str] = None
+	ortho_info: Optional[Dict] = None
+	ortho_upload_runtime: Optional[float] = None
+	ortho_processing: bool = False
+	ortho_processed: bool = False
+	ortho_processing_runtime: Optional[float] = None
 
 	@field_serializer('created_at', mode='plain')
 	def datetime_to_isoformat(field: datetime | None) -> str | None:
@@ -150,7 +217,6 @@ class Dataset(PartialModelMixin, BaseModel):
 		if raw_string is None:
 			return None
 		if isinstance(raw_string, str):
-			# parse the string
 			s = raw_string.replace('BOX(', '').replace(')', '')
 			ll, ur = s.split(',')
 			left, bottom = ll.strip().split(' ')
@@ -161,116 +227,13 @@ class Dataset(PartialModelMixin, BaseModel):
 				right=float(right),
 				top=float(top),
 			)
-		else:
-			return raw_string
+		return raw_string
 
 	@field_serializer('bbox', mode='plain')
 	def bbox_to_postgis(self, bbox: Optional[BoundingBox]) -> Optional[str]:
 		if bbox is None:
 			return None
 		return f'BOX({bbox.left} {bbox.bottom},{bbox.right} {bbox.top})'
-
-	@property
-	def centroid(self):
-		if self.bbox is None:
-			return None
-		return (self.bbox.left + self.bbox.right) / 2, (self.bbox.bottom + self.bbox.top) / 2
-
-	@classmethod
-	def by_id(cls, id: int, token: str | None = None) -> 'Dataset':
-		# instatiate a reader
-		reader = SupabaseReader(Model=cls, table=settings.datasets_table, token=token)
-
-		return reader.by_id(id)
-
-
-class Cog(BaseModel):
-	"""
-	The Cog class is the base class for the cloud optimized geotiff.
-	Currently it is modelled using a 1:1 cardinality. It is not in its own table
-	as the user_id is the processor which created the file (the user cannot change
-	the properties of the COG, but we can)
-	"""
-
-	# primary key
-	dataset_id: int
-	cog_folder: str
-	cog_name: str
-
-	# basic metadata
-	cog_url: str
-	cog_size: int
-	runtime: float
-	user_id: str
-
-	# COG options
-	compression: str
-	overviews: int
-	resolution: Optional[int] = None
-	blocksize: Optional[int] = None
-	compression_level: Optional[str] = None
-	tiling_scheme: Optional[str] = None
-	info: Optional[dict] = None
-
-	created_at: Optional[datetime] = None
-
-	@field_serializer('created_at', mode='plain')
-	def datetime_to_isoformat(field: datetime | None) -> str | None:
-		if field is None:
-			return None
-		return field.isoformat()
-
-
-class MetadataPayloadData(PartialModelMixin, BaseModel):
-	# now the metadata
-	name: Optional[str] = None
-	license: Optional[LicenseEnum] = None
-	data_access: Optional[DatasetAccessEnum] = None
-	platform: Optional[PlatformEnum] = None
-	project_id: Optional[str] = None
-	authors: Optional[str] = None
-	spectral_properties: Optional[str] = None
-	citation_doi: Optional[str] = None
-	additional_information: Optional[str] = None
-
-	# OSM admin levels
-	admin_level_1: Optional[str] = None
-	admin_level_2: Optional[str] = None
-	admin_level_3: Optional[str] = None
-
-	aquisition_year: Optional[int] = None
-	aquisition_month: Optional[int] = None
-	aquisition_day: Optional[int] = None
-
-
-class Metadata(MetadataPayloadData):
-	"""
-	Class for additional Metadata in the database. It has to be connected to a Dataset object
-	using a 1:1 cardinality.
-	This is separated, so that different RLS policies can apply. Additionally, this is the
-	metadata that can potentially be
-	"""
-
-	# primary key
-	dataset_id: int
-
-	# link to a user
-	user_id: str
-
-	# make some field non-optional
-	name: str
-	data_access: DatasetAccessEnum
-	# license: LicenseEnum
-	platform: PlatformEnum
-	# only the aquisition_year is necessary
-	aquisition_year: int
-
-	@classmethod
-	def by_id(cls, dataset_id: int, token: str | None = None) -> 'Metadata':
-		# instatiate a reader
-		reader = SupabaseReader(Model=cls, table=settings.metadata_table, token=token)
-
-		return reader.by_id(dataset_id)
 
 
 class LabelPayloadData(PartialModelMixin, BaseModel):
@@ -330,55 +293,127 @@ class Label(LabelPayloadData):
 		return reader.by_id(dataset_id)
 
 
-class GeoTiffInfo(BaseModel):
+# class GeoTiffInfo(BaseModel):
+# 	"""
+# 	Model for storing detailed GeoTIFF metadata for debugging and context.
+# 	This information is extracted using GDAL and stored separately from the main dataset.
+# 	"""
+
+# 	# Primary key linking to dataset
+# 	dataset_id: int
+
+# 	# Basic file info
+# 	driver: str  # e.g., "GTiff/GeoTIFF"
+# 	size_width: int
+# 	size_height: int
+# 	file_size_gb: float
+
+# 	# CRS and projection info
+# 	crs: str  # Full CRS string
+# 	crs_code: Optional[str]  # e.g., "EPSG:4326"
+# 	geodetic_datum: Optional[str]  # e.g., "WGS 84"
+
+# 	# Pixel and tiling info
+# 	pixel_size_x: float
+# 	pixel_size_y: float
+# 	block_size_x: int
+# 	block_size_y: int
+# 	is_tiled: bool
+
+# 	# Compression and format info
+# 	compression: Optional[str]  # e.g., "DEFLATE"
+# 	interleave: Optional[str]  # e.g., "PIXEL"
+# 	is_bigtiff: bool
+
+# 	# Band information
+# 	band_count: int
+# 	band_types: List[str]  # e.g., ["Byte", "Byte", "Byte"]
+# 	band_interpretations: List[str]  # e.g., ["Red", "Green", "Blue"]
+# 	band_nodata_values: List[Optional[float]]
+
+# 	# Bounds information
+# 	origin_x: float
+# 	origin_y: float
+
+# 	# Additional metadata
+# 	extra_metadata: Optional[Dict[str, str]]  # For any additional metadata tags
+
+# 	created_at: Optional[datetime] = None
+
+# 	@field_serializer('created_at', mode='plain')
+# 	def datetime_to_isoformat(field: datetime | None) -> str | None:
+# 		if field is None:
+# 			return None
+# 		return field.isoformat()
+
+
+class MetadataPayloadData(PartialModelMixin, BaseModel):
+	# now the metadata
+	name: Optional[str] = None
+	license: Optional[LicenseEnum] = None
+	data_access: Optional[DatasetAccessEnum] = None
+	platform: Optional[PlatformEnum] = None
+	project_id: Optional[str] = None
+	authors: Optional[str] = None
+	spectral_properties: Optional[str] = None
+	citation_doi: Optional[str] = None
+	additional_information: Optional[str] = None
+
+	# OSM admin levels
+	admin_level_1: Optional[str] = None
+	admin_level_2: Optional[str] = None
+	admin_level_3: Optional[str] = None
+
+	aquisition_year: Optional[int] = None
+	aquisition_month: Optional[int] = None
+	aquisition_day: Optional[int] = None
+
+
+class Metadata(MetadataPayloadData):
 	"""
-	Model for storing detailed GeoTIFF metadata for debugging and context.
-	This information is extracted using GDAL and stored separately from the main dataset.
+	Class for additional Metadata in the database. It has to be connected to a Dataset object
+	using a 1:1 cardinality.
+	This is separated, so that different RLS policies can apply. Additionally, this is the
+	metadata that can potentially be
 	"""
 
-	# Primary key linking to dataset
+	# primary key
 	dataset_id: int
 
-	# Basic file info
-	driver: str  # e.g., "GTiff/GeoTIFF"
-	size_width: int
-	size_height: int
-	file_size_gb: float
+	# link to a user
+	user_id: str
 
-	# CRS and projection info
-	crs: str  # Full CRS string
-	crs_code: Optional[str]  # e.g., "EPSG:4326"
-	geodetic_datum: Optional[str]  # e.g., "WGS 84"
+	# make some field non-optional
+	name: str
+	data_access: DatasetAccessEnum
+	# license: LicenseEnum
+	platform: PlatformEnum
+	# only the aquisition_year is necessary
+	aquisition_year: int
 
-	# Pixel and tiling info
-	pixel_size_x: float
-	pixel_size_y: float
-	block_size_x: int
-	block_size_y: int
-	is_tiled: bool
+	@classmethod
+	def by_id(cls, dataset_id: int, token: str | None = None) -> 'Metadata':
+		# instatiate a reader
+		reader = SupabaseReader(Model=cls, table=settings.metadata_table, token=token)
 
-	# Compression and format info
-	compression: Optional[str]  # e.g., "DEFLATE"
-	interleave: Optional[str]  # e.g., "PIXEL"
-	is_bigtiff: bool
+		return reader.by_id(dataset_id)
 
-	# Band information
-	band_count: int
-	band_types: List[str]  # e.g., ["Byte", "Byte", "Byte"]
-	band_interpretations: List[str]  # e.g., ["Red", "Green", "Blue"]
-	band_nodata_values: List[Optional[float]]
 
-	# Bounds information
-	origin_x: float
-	origin_y: float
+# class ProcessOptions(BaseSettings):
+# overviews: Optional[int] = 8
+# resolution: Optional[float] = 0.04
+# profile: Optional[str] = 'jpeg'
+# quality: Optional[int] = 75
+# force_recreate: Optional[bool] = False
+# tiling_scheme: Optional[str] = 'web-optimized'
 
-	# Additional metadata
-	extra_metadata: Optional[Dict[str, str]]  # For any additional metadata tags
 
-	created_at: Optional[datetime] = None
-
-	@field_serializer('created_at', mode='plain')
-	def datetime_to_isoformat(field: datetime | None) -> str | None:
-		if field is None:
-			return None
-		return field.isoformat()
+# @model_validator(mode='before')
+# def convert_task_type_to_types(cls, values):
+# 	"""Convert old task_type to task_types if necessary"""
+# 	if isinstance(values, dict):
+# 		if 'task_type' in values and 'task_types' not in values:
+# 			values['task_types'] = [values['task_type']] if values['task_type'] else []
+# 		elif 'task_types' not in values:
+# 			values['task_types'] = []
+# 	return values

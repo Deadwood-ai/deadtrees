@@ -9,31 +9,31 @@ import os
 load_dotenv()
 
 
-_production_tables = {
-	'datasets': 'v1_datasets',
-	'metadata': 'v1_metadata',
-	'cogs': 'v1_cogs',
-	'labels': 'v1_labels',
-	'thumbnails': 'v1_thumbnails',
-	'logs': 'logs',
+_tables = {
+	'datasets': 'v2_datasets',
+	'orthos': 'v2_orthos',
+	'cogs': 'v2_cogs',
+	'thumbnails': 'v2_thumbnails',
+	'labels': 'v2_labels',
 	'label_objects': 'v1_label_objects',
+	'logs': 'v2_logs',
+	'statuses': 'v2_statuses',
 	'queue': 'v1_queue',
-	'geotiff_info': 'v1_geotiff_info',
 	'queue_positions': 'v1_queue_positions',
 }
 
-_dev_tables = {
-	'datasets': 'dev_datasets',
-	'metadata': 'dev_metadata',
-	'cogs': 'dev_cogs',
-	'labels': 'dev_labels',
-	'thumbnails': 'dev_thumbnails',
-	'logs': 'dev_logs',
-	'label_objects': 'dev_label_objects',
-	'queue': 'dev_queue',
-	'queue_positions': 'dev_queue_positions',
-	'geotiff_info': 'dev_geotiff_info',
-}
+# _dev_tables = {
+# 	'datasets': 'dev_datasets',
+# 	'metadata': 'dev_metadata',
+# 	'cogs': 'dev_cogs',
+# 	'labels': 'dev_labels',
+# 	'thumbnails': 'dev_thumbnails',
+# 	'logs': 'dev_logs',
+# 	'label_objects': 'dev_label_objects',
+# 	'queue': 'dev_queue',
+# 	'queue_positions': 'dev_queue_positions',
+# 	'geotiff_info': 'dev_geotiff_info',
+# }
 
 
 BASE = Path(__file__).parent.parent
@@ -149,15 +149,15 @@ class Settings(BaseSettings):
 
 	@property
 	def _tables(self) -> dict:
-		return _dev_tables if self.DEV_MODE else _production_tables
+		return _tables
 
 	@property
 	def datasets_table(self) -> str:
 		return self._tables['datasets']
 
 	@property
-	def metadata_table(self) -> str:
-		return self._tables['metadata']
+	def orthos_table(self) -> str:
+		return self._tables['orthos']
 
 	@property
 	def cogs_table(self) -> str:
@@ -188,8 +188,8 @@ class Settings(BaseSettings):
 		return self._tables['queue_positions']
 
 	@property
-	def geotiff_info_table(self) -> str:
-		return self._tables['geotiff_info']
+	def statuses_table(self) -> str:
+		return self._tables['statuses']
 
 
 settings = Settings()

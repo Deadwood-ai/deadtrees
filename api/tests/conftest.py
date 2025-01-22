@@ -100,20 +100,8 @@ def cleanup_database(auth_token):
 	yield
 
 	with use_client(auth_token) as client:
-		# Clean up all test tables in reverse order of dependencies
-		tables = [
-			settings.queue_table,
-			settings.label_objects_table,
-			settings.labels_table,
-			settings.thumbnails_table,
-			settings.cogs_table,
-			settings.geotiff_info_table,
-			settings.metadata_table,
-			settings.datasets_table,
-		]
-
-		for table in tables:
-			try:
-				client.table(table).delete().neq('id', 0).execute()
-			except Exception as e:
-				print(f'Warning: Failed to clean up table {table}: {str(e)}')
+		# With CASCADE delete, we only need to clean the parent table
+		try:
+			client.table(settings.datasets_table).delete().neq('id', 0).execute()
+		except Exception as e:
+			print(f'Warning: Failed to clean up datasets: {str(e)}')

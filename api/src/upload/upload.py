@@ -1,13 +1,14 @@
 from pathlib import Path
 import rasterio
 import hashlib
+from typing import List, Optional
 
 from rasterio.env import Env
 from rasterio.warp import transform_bounds
 
 from fastapi import HTTPException
 
-from shared.models import Dataset, StatusEnum
+from shared.models import Dataset, Ortho, StatusEnum, LicenseEnum, PlatformEnum, DatasetAccessEnum
 from shared.supabase import use_client
 from shared.settings import settings
 from shared.logger import logger
@@ -65,32 +66,89 @@ def get_file_identifier(file_path: Path, sample_size: int = 10 * 1024 * 1024) ->
 	return hasher.hexdigest()
 
 
-def create_initial_dataset_entry(
-	filename: str, file_alias: str, user_id: str, copy_time: int, file_size: int, sha256: str, bbox, token: str
+def create_dataset_entry(
+	user_id: str,
+	file_name: str,
+	license: LicenseEnum,
+	platform: PlatformEnum,
+	authors: List[str],
+	project_id: Optional[str],
+	aquisition_year: Optional[int],
+	aquisition_month: Optional[int],
+	aquisition_day: Optional[int],
+	additional_information: Optional[str],
+	data_access: DatasetAccessEnum,
+	citation_doi: Optional[str],
+	token: str,
 ) -> Dataset:
-	"""Create an initial dataset entry with available information."""
-	data = dict(
-		file_name=filename,
-		file_alias=file_alias,
-		status=StatusEnum.uploaded,
-		user_id=user_id,
-		copy_time=copy_time,
-		file_size=file_size,
-		sha256=sha256,
-		bbox=bbox,
-	)
+	"""Create a new dataset entry in the database"""
+	data = {
+		'user_id': user_id,
+		'file_name': file_name,
+		'license': license,
+		'platform': platform,
+		'authors': authors,
+		'project_id': project_id,
+		'aquisition_year': aquisition_year,
+		'aquisition_month': aquisition_month,
+		'aquisition_day': aquisition_day,
+		'additional_information': additional_information,
+		'data_access': data_access,
+		'citation_doi': citation_doi,
+	}
+
 	dataset = Dataset(**data)
-	print(dataset)
 
 	with use_client(token) as client:
 		try:
 			send_data = {k: v for k, v in dataset.model_dump().items() if k != 'id' and v is not None}
 			response = client.table(settings.datasets_table).insert(send_data).execute()
+			return Dataset(**response.data[0])
 		except Exception as e:
-			logger.exception(f'Error creating initial dataset entry: {str(e)}', extra={'token': token})
-			raise HTTPException(status_code=400, detail=f'Error creating initial dataset entry: {str(e)}')
+			logger.exception(f'Error creating dataset entry: {str(e)}', extra={'token': token})
+			raise HTTPException(status_code=400, detail=f'Error creating dataset entry: {str(e)}')
 
-	return Dataset(**response.data[0])
+
+def create_ortho_entry(
+	dataset_id: int,
+	file_path: Path,
+	ortho_upload_runtime: float,
+	bbox: tuple,
+	ortho_info: dict,
+	version: int,
+	sha256: str,
+	token: str,
+) -> None:
+	"""Create a new ortho entry in the database"""
+
+	if bbox and len(bbox) == 4:
+		bbox_string = f'BOX({bbox[0]} {bbox[1]},{bbox[2]} {bbox[3]})'
+	else:
+		bbox_string = None
+
+	ortho_data = {
+		'dataset_id': dataset_id,
+		'ortho_file_name': file_path.name,
+		'version': version,
+		'file_size': file_path.stat().st_size,
+		'bbox': bbox_string,
+		'sha256': sha256,
+		'ortho_info': dict(ortho_info),
+		'ortho_upload_runtime': ortho_upload_runtime,
+		'ortho_processing': False,
+		'ortho_processed': False,
+	}
+
+	ortho = Ortho(**ortho_data)
+
+	with use_client(token) as client:
+		try:
+			send_data = {k: v for k, v in ortho.model_dump().items() if k != 'id' and v is not None}
+			response = client.table(settings.orthos_table).insert(send_data).execute()
+			return Ortho(**response.data[0])
+		except Exception as e:
+			logger.exception(f'Error creating ortho entry: {str(e)}', extra={'token': token})
+			raise HTTPException(status_code=400, detail=f'Error creating ortho entry: {str(e)}')
 
 
 # def update_dataset_entry(dataset_id: int, file_size: int, sha256: str, bbox):

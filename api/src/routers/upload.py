@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Optional
 from pathlib import Path
 import hashlib
 import uuid
@@ -6,18 +6,20 @@ import time
 import aiofiles
 from fastapi import UploadFile, Depends, HTTPException, Form, APIRouter
 from fastapi.security import OAuth2PasswordBearer
+from rio_cogeo.cogeo import cog_info
 
-from shared.models import Metadata, MetadataPayloadData
-from shared.supabase import use_client, verify_token
+from shared.models import StatusEnum, LicenseEnum, PlatformEnum, DatasetAccessEnum
+from shared.supabase import verify_token, use_client
 from shared.settings import settings
 from shared.logger import logger
+from shared.status import update_status
 
 from ..upload.upload import (
-	create_initial_dataset_entry,
 	get_transformed_bounds,
 	get_file_identifier,
+	create_dataset_entry,
+	create_ortho_entry,
 )
-from shared.geotiff_info import create_geotiff_info_entry
 
 router = APIRouter()
 
@@ -29,15 +31,28 @@ async def upload_geotiff_chunk(
 	file: UploadFile,
 	chunk_index: Annotated[int, Form()],
 	chunks_total: Annotated[int, Form()],
-	filename: Annotated[str, Form()],
-	copy_time: Annotated[int, Form()],
 	upload_id: Annotated[str, Form()],
 	token: Annotated[str, Depends(oauth2_scheme)],
+	# Dataset required fields
+	license: Annotated[LicenseEnum, Form()],
+	platform: Annotated[PlatformEnum, Form()],
+	authors: Annotated[str, Form()],  # Comma-separated list
+	# Dataset optional fields
+	project_id: Annotated[Optional[str], Form()] = None,
+	aquisition_year: Annotated[Optional[int], Form()] = None,
+	aquisition_month: Annotated[Optional[int], Form()] = None,
+	aquisition_day: Annotated[Optional[int], Form()] = None,
+	additional_information: Annotated[Optional[str], Form()] = None,
+	data_access: Annotated[DatasetAccessEnum, Form()] = DatasetAccessEnum.public,
+	citation_doi: Annotated[Optional[str], Form()] = None,
 ):
 	"""Handle chunked upload of a GeoTIFF file with incremental hash computation"""
 	user = verify_token(token)
 	if not user:
 		raise HTTPException(status_code=401, detail='Invalid token')
+
+	# Start upload timer
+	t1 = time.time()
 
 	chunk_index = int(chunk_index)
 	chunks_total = int(chunks_total)
@@ -45,7 +60,8 @@ async def upload_geotiff_chunk(
 	upload_file_name = f'{upload_id}.tif.tmp'
 	upload_target_path = settings.archive_path / upload_file_name
 
-	# Write chunk and update hash
+	# For first chunk, create initial status entry
+	# Write chunk
 	content = await file.read()
 	mode = 'wb' if chunk_index == 0 else 'ab'
 	async with aiofiles.open(upload_target_path, mode) as buffer:
@@ -54,51 +70,69 @@ async def upload_geotiff_chunk(
 	# Process final chunk
 	if chunk_index == chunks_total - 1:
 		try:
-			# Get final hash
-			final_sha256 = get_file_identifier(upload_target_path)
-
-			# Get bounds
-			bbox = get_transformed_bounds(upload_target_path)
-
-			# Create initial dataset entry with temporary filename
-			dataset = create_initial_dataset_entry(
-				filename=upload_file_name,  # Use temporary filename initially
-				file_alias=filename,
+			# Calculate upload runtime
+			t2 = time.time()
+			ortho_upload_runtime = t2 - t1
+			authors_list = [author.strip() for author in authors.split(',')]
+			# Create dataset entry
+			dataset = create_dataset_entry(
 				user_id=user.id,
-				copy_time=copy_time,
+				file_name=file.filename,
+				license=license,
+				platform=platform,
+				authors=authors_list,  # TODO: Check authors in db, how to handle input?
+				project_id=project_id,
+				aquisition_year=aquisition_year,
+				aquisition_month=aquisition_month,
+				aquisition_day=aquisition_day,
+				additional_information=additional_information,
+				data_access=data_access,
+				citation_doi=citation_doi,
 				token=token,
-				file_size=upload_target_path.stat().st_size,
-				bbox=bbox,
-				sha256=final_sha256,
 			)
 
-			# Now rename the file using the dataset ID
+			# Rename file with dataset ID
 			file_name = f'{dataset.id}_ortho.tif'
 			target_path = settings.archive_path / file_name
 			upload_target_path.rename(target_path)
 
-			# Update the filename in the database
-			with use_client(token) as client:
-				client.table(settings.datasets_table).update({'file_name': file_name}).eq('id', dataset.id).execute()
+			# Create ortho entry
+			sha256 = get_file_identifier(target_path)
+			bbox = get_transformed_bounds(target_path)
+			ortho_info = cog_info(target_path)
 
-			# Update the dataset object with new filename
-			dataset.file_name = file_name
+			create_ortho_entry(
+				dataset_id=dataset.id,
+				file_path=target_path,
+				ortho_upload_runtime=ortho_upload_runtime,
+				bbox=bbox,
+				ortho_info=ortho_info,
+				version=1,
+				sha256=sha256,
+				token=token,
+			)
 
-			try:
-				geotiff_info = create_geotiff_info_entry(target_path, dataset.id, token)
-				logger.info(
-					f'Extracted GeoTIFF info for dataset {dataset.id}, {geotiff_info}',
-					extra={'token': token},
-				)
-			except Exception as e:
-				logger.error(
-					f'Error extracting GeoTIFF info for dataset {dataset.id}: {str(e)}',
-					extra={'token': token},
-				)
+			# Update status to indicate upload completion
+			update_status(
+				token=token,
+				dataset_id=dataset.id,
+				current_status=StatusEnum.idle,
+				is_upload_done=True,
+				has_error=False,
+			)
 
+			# Update dataset object with new filename
 			return dataset
 
 		except Exception as e:
+			# Update status to indicate error
+			update_status(
+				token=token,
+				dataset_id=dataset.id,
+				current_status=StatusEnum.uploading,
+				has_error=True,
+				error_message=str(e),
+			)
 			logger.exception(f'Error processing final chunk: {e}', extra={'token': token})
 			raise HTTPException(status_code=500, detail=str(e))
 
