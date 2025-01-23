@@ -29,6 +29,7 @@ class StatusEnum(str, Enum):
 	uploading = 'uploading'
 	ortho_processing = 'ortho_processing'
 	cog_processing = 'cog_processing'
+	metadata_processing = 'metadata_processing'
 	thumbnail_processing = 'thumbnail_processing'
 	deadwood_segmentation = 'deadwood_segmentation'
 	forest_cover_segmentation = 'forest_cover_segmentation'
@@ -97,6 +98,7 @@ class Status(BaseModel):
 	is_thumbnail_done: bool = False
 	is_deadwood_done: bool = False
 	is_forest_cover_done: bool = False
+	is_metadata_done: bool = False
 	is_audited: bool = False
 	has_error: bool = False
 	error_message: Optional[str] = None
@@ -113,8 +115,10 @@ class Status(BaseModel):
 class Thumbnail(BaseModel):
 	dataset_id: int
 	thumbnail_path: str
-	user_id: str
-	runtime: float
+	thumbnail_file_name: str
+	thumbnail_file_size: int
+	version: int
+	thumbnail_processing_runtime: float
 
 
 class Dataset(PartialModelMixin, BaseModel):
@@ -172,7 +176,7 @@ class Cog(BaseModel):
 	"""
 
 	dataset_id: int
-	file_size: int
+	cog_file_size: int
 	cog_file_name: str
 	cog_path: str
 	version: int
@@ -201,7 +205,6 @@ class Ortho(BaseModel):
 	sha256: Optional[str] = None
 	ortho_info: Optional[Dict] = None
 	ortho_upload_runtime: Optional[float] = None
-	ortho_processing: bool = False
 	ortho_processed: bool = False
 	ortho_processing_runtime: Optional[float] = None
 

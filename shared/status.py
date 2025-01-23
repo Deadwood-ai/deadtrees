@@ -15,6 +15,7 @@ def update_status(
 	is_thumbnail_done: Optional[bool] = None,
 	is_deadwood_done: Optional[bool] = None,
 	is_forest_cover_done: Optional[bool] = None,
+	is_metadata_done: Optional[bool] = None,
 	is_audited: Optional[bool] = None,
 	has_error: Optional[bool] = None,
 	error_message: Optional[str] = None,
@@ -32,6 +33,7 @@ def update_status(
 	    is_thumbnail_done (bool, optional): Thumbnail generation completion status
 	    is_deadwood_done (bool, optional): Deadwood segmentation completion status
 	    is_forest_cover_done (bool, optional): Forest cover completion status
+	    is_metadata_done (bool, optional): Metadata processing completion status
 	    is_audited (bool, optional): Audit completion status
 	    has_error (bool, optional): Error status flag
 	    error_message (str, optional): Error message if any
@@ -52,6 +54,8 @@ def update_status(
 			update_data['is_deadwood_done'] = is_deadwood_done
 		if is_forest_cover_done is not None:
 			update_data['is_forest_cover_done'] = is_forest_cover_done
+		if is_metadata_done is not None:
+			update_data['is_metadata_done'] = is_metadata_done
 		if is_audited is not None:
 			update_data['is_audited'] = is_audited
 		if has_error is not None:

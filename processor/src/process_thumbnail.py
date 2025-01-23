@@ -6,8 +6,9 @@ from shared.settings import settings
 from shared.models import StatusEnum, Dataset, QueueTask, Thumbnail
 from shared.logger import logger
 from .thumbnail.thumbnail import calculate_thumbnail
-from .utils.ssh import update_status, pull_file_from_storage_server, push_file_to_storage_server
+from .utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
 from .exceptions import AuthenticationError, DatasetError, ProcessingError, StorageError
+from shared.status import update_status
 
 
 def process_thumbnail(task: QueueTask, temp_dir: Path):
@@ -28,7 +29,7 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 		raise DatasetError(f'Failed to fetch dataset: {str(e)}', dataset_id=task.dataset_id, task_id=task.id)
 
 	# update the status to processing
-	update_status(token, dataset_id=dataset.id, status=StatusEnum.thumbnail_processing)
+	update_status(token, dataset_id=dataset.id, current_status=StatusEnum.thumbnail_processing)
 
 	try:
 		# get local file paths
@@ -56,16 +57,19 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 		push_file_to_storage_server(str(output_path), storage_server_thumbnail_path, token)
 		t2 = time.time()
 
-		# Create thumbnail metadata
+		# Prepare metadata
 		meta = dict(
 			dataset_id=dataset.id,
-			user_id=task.user_id,
+			thumbnail_file_size=max(1, int((output_path.stat().st_size))),
+			thumbnail_file_name=thumbnail_file_name,
 			thumbnail_path=thumbnail_file_name,
-			runtime=t2 - t1,
+			version=1,
+			thumbnail_processing_runtime=t2 - t1,
 		)
 		thumbnail = Thumbnail(**meta)
 
 	except Exception as e:
+		update_status(token, dataset_id=dataset.id, has_error=True, error_message=str(e))
 		raise ProcessingError(str(e), task_type='thumbnail', task_id=task.id, dataset_id=dataset.id)
 
 	# Save thumbnail metadata to database
@@ -81,13 +85,12 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 				thumbnail.model_dump(),
 				on_conflict='dataset_id',
 			).execute()
-	except DatasetError as e:
-		raise DatasetError(f'Failed to save thumbnail metadata: {str(e)}', dataset_id=dataset.id, task_id=task.id)
 	except Exception as e:
+		update_status(token, dataset_id=dataset.id, has_error=True, error_message=str(e))
 		raise DatasetError(f'Failed to save thumbnail metadata: {str(e)}', dataset_id=dataset.id, task_id=task.id)
 
 	# Update final status
-	update_status(token, dataset.id, StatusEnum.processed)
+	update_status(token, dataset_id=dataset.id, current_status=StatusEnum.idle, is_thumbnail_done=True)
 	logger.info(
 		f'Finished creating thumbnail for dataset {dataset.id}.',
 		extra={'token': token},

@@ -2,7 +2,8 @@ from pathlib import Path
 import time
 from typing import Dict, Any
 
-from shared.db import use_client, login, verify_token, update_status
+from shared.db import use_client, login, verify_token
+from shared.status import update_status
 from shared.settings import settings
 from shared.models import StatusEnum, Dataset, QueueTask, MetadataType, DatasetMetadata, AdminBoundariesMetadata, Ortho
 from shared.logger import logger
@@ -23,6 +24,8 @@ def process_metadata(task: QueueTask, temp_dir: Path):
 		with use_client(token) as client:
 			response = client.table(settings.orthos_table).select('*').eq('dataset_id', task.dataset_id).execute()
 			ortho = Ortho(**response.data[0])
+
+		update_status(token, task.dataset_id, current_status=StatusEnum.metadata_processing)
 
 		# Process admin boundaries metadata
 		t1 = time.time()
@@ -59,4 +62,8 @@ def process_metadata(task: QueueTask, temp_dir: Path):
 		)
 
 	except Exception as e:
+		update_status(token, task.dataset_id, has_error=True, error_message=str(e))
 		raise ProcessingError(str(e), task_type='metadata', task_id=task.id, dataset_id=task.dataset_id)
+
+	# Update final status
+	update_status(token, task.dataset_id, current_status=StatusEnum.idle, is_metadata_done=True)

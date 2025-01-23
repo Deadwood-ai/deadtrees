@@ -158,7 +158,6 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 				'file_size': archive_path.stat().st_size,
 				'bbox': 'BOX(13.4050 52.5200,13.4150 52.5300)',  # Example bbox for Berlin
 				'ortho_upload_runtime': 0.1,
-				'ortho_processing': False,
 				'ortho_processed': False,
 			}
 			client.table(settings.orthos_table).insert(ortho_data).execute()
@@ -180,3 +179,5 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 
 		if archive_path.exists():
 			archive_path.unlink()
+		# clean processing directory
+		shutil.rmtree(settings.processing_path)
