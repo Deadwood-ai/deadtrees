@@ -1,5 +1,4 @@
 import pytest
-from pathlib import Path
 
 from shared.db import use_client
 from shared.settings import settings

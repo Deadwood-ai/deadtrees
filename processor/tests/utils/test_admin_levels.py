@@ -1,11 +1,9 @@
 import pytest
-from pathlib import Path
-from processor.src.utils.admin_levels import get_admin_tags, update_metadata_admin_level
-from shared.models import Dataset, MetadataType, AdminBoundariesMetadata
+from processor.src.utils.admin_levels import get_admin_tags
 from shared.settings import settings
-from shared.db import use_client, login
+from shared.db import use_client
 import shutil
-import time
+
 
 # Test data points (real coordinates that exist in GADM data)
 TEST_POINTS = [

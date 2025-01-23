@@ -11,6 +11,11 @@ from rasterio.coords import BoundingBox
 from .settings import settings
 
 
+class LabelDataEnum(str, Enum):
+	deadwood = 'deadwood'
+	forest_cover = 'forest_cover'
+
+
 class PlatformEnum(str, Enum):
 	drone = 'drone'
 	airborne = 'airborne'
@@ -244,14 +249,31 @@ class LabelPayloadData(PartialModelMixin, BaseModel):
 	The LabelPayloadData class is the base class for the payload of the label.
 	This is the user provided data, before the Labels are validated and saved to
 	the database.
-
 	"""
 
-	aoi: Optional[MultiPolygonModel] = None
-	label: Optional[MultiPolygonModel]
+	# AOI related fields
+	aoi_geometry: Optional[MultiPolygonModel] = None
+	aoi_is_whole_image: bool = False
+	aoi_image_quality: Optional[int] = None
+	aoi_notes: Optional[str] = None
+
+	# Label related fields
+	dataset_id: int
 	label_source: LabelSourceEnum
-	label_quality: int
 	label_type: LabelTypeEnum
+	label_data: LabelDataEnum
+	label_quality: Optional[int] = None
+	model_config: Optional[Dict[str, Any]] = None
+
+	# Label geometry
+	geometry: MultiPolygonModel
+	properties: Optional[Dict[str, Any]] = None
+
+	@field_validator('aoi_image_quality', 'label_quality')
+	def validate_quality(cls, v):
+		if v is not None and not 1 <= v <= 3:
+			raise ValueError('Quality must be between 1 and 3')
+		return v
 
 
 PartialLabelPayloadData = LabelPayloadData.model_as_partial()
@@ -267,19 +289,60 @@ class UserLabelObject(BaseModel):
 	audited: bool
 
 
-class Label(LabelPayloadData):
-	"""
-	The Label class represents one set of a label - aoi combination.
-	Both need to be a single MULTIPOLYGON.
-	"""
+class LabelDataEnum(str, Enum):
+	deadwood = 'deadwood'
+	forest_cover = 'forest_cover'
 
-	# primary key
+
+class AOI(BaseModel):
+	"""Area of Interest model for v2_aois table"""
+
 	id: Optional[int] = None
-
-	# the label
 	dataset_id: int
 	user_id: str
+	geometry: MultiPolygonModel
+	is_whole_image: bool = False
+	image_quality: Optional[int] = None
+	notes: Optional[str] = None
+	created_at: Optional[datetime] = None
+	updated_at: Optional[datetime] = None
 
+	@field_validator('image_quality')
+	def validate_image_quality(cls, v):
+		if v is not None and not 1 <= v <= 3:
+			raise ValueError('Image quality must be between 1 and 3')
+		return v
+
+
+class Label(BaseModel):
+	"""Label model for v2_labels table"""
+
+	id: Optional[int] = None
+	dataset_id: int
+	aoi_id: Optional[int] = None
+	user_id: str
+	label_source: LabelSourceEnum
+	label_type: LabelTypeEnum
+	label_data: LabelDataEnum
+	label_quality: Optional[int] = None
+	# model_config: Optional[Dict[str, Any]] = None
+	created_at: Optional[datetime] = None
+	updated_at: Optional[datetime] = None
+
+	@field_validator('label_quality')
+	def validate_label_quality(cls, v):
+		if v is not None and not 1 <= v <= 3:
+			raise ValueError('Label quality must be between 1 and 3')
+		return v
+
+
+class LabelGeometry(BaseModel):
+	"""Label geometry model for v2_label_geometries table"""
+
+	id: Optional[int] = None
+	label_id: int
+	geometry: MultiPolygonModel
+	properties: Optional[Dict[str, Any]] = None
 	created_at: Optional[datetime] = None
 
 	@field_serializer('created_at', mode='plain')
@@ -288,120 +351,57 @@ class Label(LabelPayloadData):
 			return None
 		return field.isoformat()
 
-	@classmethod
-	def by_id(cls, dataset_id: int, token: str | None = None) -> 'Label':
-		from .db import SupabaseReader
 
-		# instatiate a reader
-		reader = SupabaseReader(Model=cls, table=settings.labels_table, token=token)
+# class MetadataPayloadData(PartialModelMixin, BaseModel):
+# 	# now the metadata
+# 	name: Optional[str] = None
+# 	license: Optional[LicenseEnum] = None
+# 	data_access: Optional[DatasetAccessEnum] = None
+# 	platform: Optional[PlatformEnum] = None
+# 	project_id: Optional[str] = None
+# 	authors: Optional[str] = None
+# 	spectral_properties: Optional[str] = None
+# 	citation_doi: Optional[str] = None
+# 	additional_information: Optional[str] = None
 
-		return reader.by_id(dataset_id)
+# 	# OSM admin levels
+# 	admin_level_1: Optional[str] = None
+# 	admin_level_2: Optional[str] = None
+# 	admin_level_3: Optional[str] = None
+
+# 	aquisition_year: Optional[int] = None
+# 	aquisition_month: Optional[int] = None
+# 	aquisition_day: Optional[int] = None
 
 
-# class GeoTiffInfo(BaseModel):
+# class Metadata(MetadataPayloadData):
 # 	"""
-# 	Model for storing detailed GeoTIFF metadata for debugging and context.
-# 	This information is extracted using GDAL and stored separately from the main dataset.
+# 	Class for additional Metadata in the database. It has to be connected to a Dataset object
+# 	using a 1:1 cardinality.
+# 	This is separated, so that different RLS policies can apply. Additionally, this is the
+# 	metadata that can potentially be
 # 	"""
 
-# 	# Primary key linking to dataset
+# 	# primary key
 # 	dataset_id: int
 
-# 	# Basic file info
-# 	driver: str  # e.g., "GTiff/GeoTIFF"
-# 	size_width: int
-# 	size_height: int
-# 	file_size_gb: float
+# 	# link to a user
+# 	user_id: str
 
-# 	# CRS and projection info
-# 	crs: str  # Full CRS string
-# 	crs_code: Optional[str]  # e.g., "EPSG:4326"
-# 	geodetic_datum: Optional[str]  # e.g., "WGS 84"
+# 	# make some field non-optional
+# 	name: str
+# 	data_access: DatasetAccessEnum
+# 	# license: LicenseEnum
+# 	platform: PlatformEnum
+# 	# only the aquisition_year is necessary
+# 	aquisition_year: int
 
-# 	# Pixel and tiling info
-# 	pixel_size_x: float
-# 	pixel_size_y: float
-# 	block_size_x: int
-# 	block_size_y: int
-# 	is_tiled: bool
+# 	@classmethod
+# 	def by_id(cls, dataset_id: int, token: str | None = None) -> 'Metadata':
+# 		# instatiate a reader
+# 		reader = SupabaseReader(Model=cls, table=settings.metadata_table, token=token)
 
-# 	# Compression and format info
-# 	compression: Optional[str]  # e.g., "DEFLATE"
-# 	interleave: Optional[str]  # e.g., "PIXEL"
-# 	is_bigtiff: bool
-
-# 	# Band information
-# 	band_count: int
-# 	band_types: List[str]  # e.g., ["Byte", "Byte", "Byte"]
-# 	band_interpretations: List[str]  # e.g., ["Red", "Green", "Blue"]
-# 	band_nodata_values: List[Optional[float]]
-
-# 	# Bounds information
-# 	origin_x: float
-# 	origin_y: float
-
-# 	# Additional metadata
-# 	extra_metadata: Optional[Dict[str, str]]  # For any additional metadata tags
-
-# 	created_at: Optional[datetime] = None
-
-# 	@field_serializer('created_at', mode='plain')
-# 	def datetime_to_isoformat(field: datetime | None) -> str | None:
-# 		if field is None:
-# 			return None
-# 		return field.isoformat()
-
-
-class MetadataPayloadData(PartialModelMixin, BaseModel):
-	# now the metadata
-	name: Optional[str] = None
-	license: Optional[LicenseEnum] = None
-	data_access: Optional[DatasetAccessEnum] = None
-	platform: Optional[PlatformEnum] = None
-	project_id: Optional[str] = None
-	authors: Optional[str] = None
-	spectral_properties: Optional[str] = None
-	citation_doi: Optional[str] = None
-	additional_information: Optional[str] = None
-
-	# OSM admin levels
-	admin_level_1: Optional[str] = None
-	admin_level_2: Optional[str] = None
-	admin_level_3: Optional[str] = None
-
-	aquisition_year: Optional[int] = None
-	aquisition_month: Optional[int] = None
-	aquisition_day: Optional[int] = None
-
-
-class Metadata(MetadataPayloadData):
-	"""
-	Class for additional Metadata in the database. It has to be connected to a Dataset object
-	using a 1:1 cardinality.
-	This is separated, so that different RLS policies can apply. Additionally, this is the
-	metadata that can potentially be
-	"""
-
-	# primary key
-	dataset_id: int
-
-	# link to a user
-	user_id: str
-
-	# make some field non-optional
-	name: str
-	data_access: DatasetAccessEnum
-	# license: LicenseEnum
-	platform: PlatformEnum
-	# only the aquisition_year is necessary
-	aquisition_year: int
-
-	@classmethod
-	def by_id(cls, dataset_id: int, token: str | None = None) -> 'Metadata':
-		# instatiate a reader
-		reader = SupabaseReader(Model=cls, table=settings.metadata_table, token=token)
-
-		return reader.by_id(dataset_id)
+# 		return reader.by_id(dataset_id)
 
 
 # class ProcessOptions(BaseSettings):

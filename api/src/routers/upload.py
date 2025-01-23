@@ -1,7 +1,5 @@
 from typing import Annotated, Optional
-from pathlib import Path
-import hashlib
-import uuid
+
 import time
 import aiofiles
 from fastapi import UploadFile, Depends, HTTPException, Form, APIRouter
@@ -9,7 +7,7 @@ from fastapi.security import OAuth2PasswordBearer
 from rio_cogeo.cogeo import cog_info
 
 from shared.models import StatusEnum, LicenseEnum, PlatformEnum, DatasetAccessEnum
-from shared.db import verify_token, use_client
+from shared.db import verify_token
 from shared.settings import settings
 from shared.logger import logger
 from shared.status import update_status

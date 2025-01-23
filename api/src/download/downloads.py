@@ -8,7 +8,7 @@ import geopandas as gpd
 import yaml
 import pandas as pd
 
-from shared.models import Metadata, Label, Dataset, LicenseEnum
+from shared.models import Label, Dataset, LicenseEnum, Ortho
 
 TEMPLATE_PATH = Path(__file__).parent / 'templates'
 
@@ -37,36 +37,30 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 	return label_file
 
 
-def create_citation_file(metadata: Metadata, filestream=None) -> str:
+def create_citation_file(dataset: Dataset, filestream=None) -> str:
 	# load the template
 	with open(TEMPLATE_PATH / 'CITATION.cff', 'r') as f:
 		template = yaml.safe_load(f)
 
 	# fill the template
-	template['title'] = (
-		f'Deadwood Training Dataset: {metadata.file_name}'  # TODO: replace this with the actual dataset name
-	)
+	template['title'] = f'Deadwood Training Dataset: {dataset.file_name}'
 
 	# check if the authors can be split into first and last names
 	author_list = []
-	if len(metadata.authors) > 1:
-		authors = metadata.authors.split(', ')
-		for author in authors:
-			author_list.append({'name': author})
-	else:
-		author_list.append({'name': metadata.authors})
+	for author in dataset.authors:
+		author_list.append({'name': author})
 
 	# add all authors defined in the template
 	author_list = [*author_list, *template['authors']]
 
 	# check if there is a DOI
-	if metadata.citation_doi is not None:
+	if dataset.citation_doi is not None:
 		template['identifiers'] = [
-			{'type': 'doi', 'value': metadata.citation_doi, 'description': 'The DOI of the original dataset.'}
+			{'type': 'doi', 'value': dataset.citation_doi, 'description': 'The DOI of the original dataset.'}
 		]
 
 	# add the license
-	template['license'] = f'{metadata.license.value}-4.0'.upper()
+	template['license'] = f'{dataset.license.value}-4.0'.upper()
 
 	# create a buffer to write to
 	if filestream is None:
@@ -76,28 +70,28 @@ def create_citation_file(metadata: Metadata, filestream=None) -> str:
 	return filestream
 
 
-def get_formatted_filename(metadata: Metadata, dataset_id: int, label_id: int = None) -> str:
+def get_formatted_filename(dataset: Dataset, ortho: Ortho, label_id: int = None) -> str:
 	"""Generate formatted filename with admin levels and date"""
-	# Get admin levels (default to 'unknown' if not set)
-	admin1 = metadata.admin_level_1 or 'unknown'
-	admin3 = metadata.admin_level_3 or 'unknown'
+	# Get admin levels from metadata (default to 'unknown' if not set)
+	admin1 = ortho.admin_level_1 or 'unknown'
+	admin3 = ortho.admin_level_3 or 'unknown'
 
 	# Clean admin names (remove spaces and special chars)
 	admin1 = ''.join(c for c in admin1 if c.isalnum())
 	admin3 = ''.join(c for c in admin3 if c.isalnum())
 
 	# Format date string
-	date_str = f'{metadata.aquisition_year}'
-	if metadata.aquisition_month:
-		date_str += f'{metadata.aquisition_month:02d}'
-	if metadata.aquisition_day:
-		date_str += f'{metadata.aquisition_day:02d}'
+	date_str = f'{dataset.aquisition_year}'
+	if dataset.aquisition_month:
+		date_str += f'{dataset.aquisition_month:02d}'
+	if dataset.aquisition_day:
+		date_str += f'{dataset.aquisition_day:02d}'
 
 	# Build base filename
 	if label_id:
-		return f'labels_{dataset_id}_{admin1}_{admin3}_{label_id}'
+		return f'labels_{dataset.id}_{admin1}_{admin3}_{label_id}'
 	else:
-		return f'ortho_{dataset_id}_{admin1}_{admin3}_{date_str}'
+		return f'ortho_{dataset.id}_{admin1}_{admin3}_{date_str}'
 
 
 def create_license_file(license_enum: LicenseEnum) -> str:

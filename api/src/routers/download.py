@@ -10,7 +10,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 import pandas as pd
 
 from shared.__version__ import __version__
-from shared.models import Dataset, Label, Metadata
+from shared.models import Dataset, Label
 from shared.settings import settings
 from api.src.download.downloads import bundle_dataset, label_to_geopackage
 from shared.db import use_client
@@ -132,71 +132,71 @@ async def download_dataset(dataset_id: str, background_tasks: BackgroundTasks):
 		raise HTTPException(status_code=500, detail=msg)
 
 
-@download_app.get('/datasets/{dataset_id}/ortho.tif')
-async def download_geotiff(dataset_id: str):
-	"""
-	Download the original GeoTiff of the dataset with the given ID.
-	"""
-	# load the dataset
-	dataset = Dataset.by_id(dataset_id)
+# @download_app.get('/datasets/{dataset_id}/ortho.tif')
+# async def download_geotiff(dataset_id: str):
+# 	"""
+# 	Download the original GeoTiff of the dataset with the given ID.
+# 	"""
+# 	# load the dataset
+# 	dataset = Dataset.by_id(dataset_id)
 
-	if dataset is None:
-		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
+# 	if dataset is None:
+# 		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
 
-	# here we can add the monitoring
-	# monitoring.download_ortho.inc()
+# 	# here we can add the monitoring
+# 	# monitoring.download_ortho.inc()
 
-	# build the file name
-	path = settings.archive_path / dataset.file_name
+# 	# build the file name
+# 	path = settings.archive_path / dataset.file_name
 
-	return FileResponse(path, media_type='image/tiff', filename=dataset.file_name)
-
-
-@download_app.get('/datasets/{dataset_id}/metadata.{file_format}')
-async def get_metadata(dataset_id: str, file_format: MetadataFormat, background_tasks: BackgroundTasks):
-	"""
-	Download the metadata of the dataset with the given ID.
-	"""
-	# load the metadata
-	metadata = Metadata.by_id(dataset_id)
-	if metadata is None:
-		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no Metadata entry.')
-
-	# switch the format
-	if file_format == MetadataFormat.json:
-		return metadata.model_dump_json()
-	elif file_format == MetadataFormat.csv:
-		# build a DataFrame
-		df = pd.DataFrame.from_records([metadata.model_dump()])
-
-		# create a temporary file
-		target = tempfile.NamedTemporaryFile(suffix='.csv', delete_on_close=False)
-		df.to_csv(target.name, index=False)
-
-		# add a background task to remove the file after download
-		background_tasks.add_task(lambda: Path(target.name).unlink())
-
-		return FileResponse(target.name, media_type='text/csv', filename='metadata.csv')
+# 	return FileResponse(path, media_type='image/tiff', filename=dataset.file_name)
 
 
-@download_app.get('/datasets/{dataset_id}/labels.gpkg')
-async def get_labels(dataset_id: str, background_tasks: BackgroundTasks):
-	"""
-	Download the labels of the dataset with the given ID.
-	"""
-	# load the labels
-	label = Label.by_id(dataset_id=dataset_id)
-	if label is None:
-		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no labels.')
+# @download_app.get('/datasets/{dataset_id}/metadata.{file_format}')
+# async def get_metadata(dataset_id: str, file_format: MetadataFormat, background_tasks: BackgroundTasks):
+# 	"""
+# 	Download the metadata of the dataset with the given ID.
+# 	"""
+# 	# load the metadata
+# 	metadata = Metadata.by_id(dataset_id)
+# 	if metadata is None:
+# 		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no Metadata entry.')
 
-	# create a temporary file
-	target = tempfile.NamedTemporaryFile(suffix='.gpkg', delete_on_close=False)
+# 	# switch the format
+# 	if file_format == MetadataFormat.json:
+# 		return metadata.model_dump_json()
+# 	elif file_format == MetadataFormat.csv:
+# 		# build a DataFrame
+# 		df = pd.DataFrame.from_records([metadata.model_dump()])
 
-	# remove the file after download
-	background_tasks.add_task(lambda: Path(target.name).unlink())
+# 		# create a temporary file
+# 		target = tempfile.NamedTemporaryFile(suffix='.csv', delete_on_close=False)
+# 		df.to_csv(target.name, index=False)
 
-	# write the labels
-	label_to_geopackage(target.name, label)
+# 		# add a background task to remove the file after download
+# 		background_tasks.add_task(lambda: Path(target.name).unlink())
 
-	# return the file
-	return FileResponse(target.name, media_type='application/geopackage+sqlite', filename='labels.gpkg')
+# 		return FileResponse(target.name, media_type='text/csv', filename='metadata.csv')
+
+
+# @download_app.get('/datasets/{dataset_id}/labels.gpkg')
+# async def get_labels(dataset_id: str, background_tasks: BackgroundTasks):
+# 	"""
+# 	Download the labels of the dataset with the given ID.
+# 	"""
+# 	# load the labels
+# 	label = Label.by_id(dataset_id=dataset_id)
+# 	if label is None:
+# 		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no labels.')
+
+# 	# create a temporary file
+# 	target = tempfile.NamedTemporaryFile(suffix='.gpkg', delete_on_close=False)
+
+# 	# remove the file after download
+# 	background_tasks.add_task(lambda: Path(target.name).unlink())
+
+# 	# write the labels
+# 	label_to_geopackage(target.name, label)
+
+# 	# return the file
+# 	return FileResponse(target.name, media_type='application/geopackage+sqlite', filename='labels.gpkg')
