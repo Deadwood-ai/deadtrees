@@ -13,10 +13,10 @@ from shared.db import verify_token, use_client
 from shared.settings import settings
 from shared.logger import logger
 from shared.status import update_status
+from shared.hash import get_file_identifier
 
 from ..upload.upload import (
 	get_transformed_bounds,
-	get_file_identifier,
 	create_dataset_entry,
 	create_ortho_entry,
 )

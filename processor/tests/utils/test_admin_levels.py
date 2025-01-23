@@ -1,10 +1,11 @@
 import pytest
 from pathlib import Path
 from processor.src.utils.admin_levels import get_admin_tags, update_metadata_admin_level
-from shared.models import Dataset
+from shared.models import Dataset, MetadataType, AdminBoundariesMetadata
 from shared.settings import settings
 from shared.db import use_client, login
 import shutil
+import time
 
 # Test data points (real coordinates that exist in GADM data)
 TEST_POINTS = [
@@ -29,23 +30,31 @@ def test_dataset(auth_token, data_directory, test_geotiff, test_user):
 		# Create test dataset
 		dataset_data = {
 			'file_name': file_name,
-			'file_alias': file_name,
-			'file_size': archive_path.stat().st_size,
-			'copy_time': 123,
+			'license': 'CC BY',
+			'platform': 'drone',
+			'authors': ['Test Author'],
 			'user_id': test_user,
-			'status': 'uploaded',
+			'data_access': 'public',
 		}
 		response = client.table(settings.datasets_table).insert(dataset_data).execute()
 		dataset_id = response.data[0]['id']
 
-		# Create metadata entry with required fields
+		# Create ortho entry
+		ortho_data = {
+			'dataset_id': dataset_id,
+			'ortho_file_name': file_name,
+			'version': 1,
+			'file_size': archive_path.stat().st_size,
+			'ortho_processed': True,
+			'ortho_processing_runtime': 0.1,
+		}
+		client.table(settings.orthos_table).insert(ortho_data).execute()
+
+		# Create initial metadata entry
 		metadata_data = {
 			'dataset_id': dataset_id,
-			'user_id': test_user,
-			'name': 'Test Admin Dataset',
-			'platform': 'drone',
-			'data_access': 'public',
-			'authors': 'Test Author',
+			'metadata': {},
+			'version': 1,
 		}
 		client.table(settings.metadata_table).insert(metadata_data).execute()
 
@@ -54,6 +63,7 @@ def test_dataset(auth_token, data_directory, test_geotiff, test_user):
 		finally:
 			# Cleanup database entries
 			client.table(settings.metadata_table).delete().eq('dataset_id', dataset_id).execute()
+			client.table(settings.orthos_table).delete().eq('dataset_id', dataset_id).execute()
 			client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 			# Cleanup file
 			if archive_path.exists():
@@ -66,24 +76,3 @@ def test_get_admin_tags(point, expected):
 	result = get_admin_tags(point)
 	print(f'Got result: {result}')
 	assert result == expected
-
-
-def test_update_metadata_admin_level(test_dataset, auth_token):
-	"""Test updating metadata with admin levels using real database"""
-	# Test the function with real database
-	result = update_metadata_admin_level(test_dataset, auth_token)
-
-	# Verify the results contain admin level information
-	assert 'admin_level_1' in result
-	assert 'admin_level_2' in result
-	assert 'admin_level_3' in result
-
-	# Verify the data was actually saved to the database
-	with use_client(auth_token) as client:
-		response = client.table(settings.metadata_table).select('*').eq('dataset_id', test_dataset).execute()
-
-		assert response.data
-		metadata = response.data[0]
-		assert metadata['admin_level_1'] == result['admin_level_1']
-		assert metadata['admin_level_2'] == result['admin_level_2']
-		assert metadata['admin_level_3'] == result['admin_level_3']

@@ -3,7 +3,6 @@ import pytest
 pytestmark = pytest.mark.skip(reason='Skip all segmentations, since integration is in progress')
 from pathlib import Path
 
-from conftest import DATASET_ID
 from shared.db import use_client
 from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask
