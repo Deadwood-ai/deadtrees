@@ -1,6 +1,6 @@
 import logging
 
-from shared.supabase import use_client
+from shared.db import use_client
 from shared.__version__ import __version__
 from shared.settings import settings
 

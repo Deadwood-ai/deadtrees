@@ -4,7 +4,7 @@ import zipfile
 from shapely.geometry import Polygon
 import shutil
 
-from shared.supabase import use_client
+from shared.db import use_client
 from shared.settings import settings
 from fastapi.testclient import TestClient
 from api.src.server import app

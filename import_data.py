@@ -11,7 +11,7 @@ import uuid
 import fire
 from typing import List
 
-from shared.supabase import login, verify_token
+from shared.db import login, verify_token
 from shared.settings import settings
 from shared.models import MetadataPayloadData
 from shared.logger import logger

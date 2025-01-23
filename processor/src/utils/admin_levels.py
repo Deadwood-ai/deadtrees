@@ -3,10 +3,9 @@ import geopandas as gpd
 from pathlib import Path
 from shapely.geometry import Point
 from shared.logger import logger
-from shared.supabase import use_client
+from shared.db import use_client
 from shared.settings import settings
 from shared.models import Dataset
-from fastapi import HTTPException
 
 # Define the path to the GADM database
 GADM_PATH = Path(settings.GADM_DATA_PATH)
@@ -96,4 +95,4 @@ def update_metadata_admin_level(dataset_id: int, token: str):
 
 	except Exception as e:
 		logger.exception(f'Error updating admin levels for dataset {dataset_id}: {str(e)}', extra={'token': token})
-		raise HTTPException(status_code=400, detail=f'Error updating admin levels for dataset {dataset_id}: {str(e)}')
+		raise Exception(f'Error updating admin levels for dataset {dataset_id}: {str(e)}')

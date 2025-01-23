@@ -1,7 +1,7 @@
 from pathlib import Path
 import rasterio
 
-from shared.supabase import use_client
+from shared.db import use_client
 from shared.settings import settings
 from shared.models import GeoTiffInfo
 from shared.logger import logger

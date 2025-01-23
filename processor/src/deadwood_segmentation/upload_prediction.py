@@ -1,6 +1,6 @@
 import requests
 
-from shared.supabase import login, verify_token, use_client
+from shared.db import login, verify_token, use_client
 from shared.logger import logger
 from shared.settings import settings
 from ..exceptions import AuthenticationError

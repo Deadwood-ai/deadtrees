@@ -9,7 +9,7 @@ from rasterio.warp import transform_bounds
 from fastapi import HTTPException
 
 from shared.models import Dataset, Ortho, StatusEnum, LicenseEnum, PlatformEnum, DatasetAccessEnum
-from shared.supabase import use_client
+from shared.db import use_client
 from shared.settings import settings
 from shared.logger import logger
 

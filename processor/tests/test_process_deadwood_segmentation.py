@@ -4,7 +4,7 @@ pytestmark = pytest.mark.skip(reason='Skip all segmentations, since integration 
 from pathlib import Path
 
 from conftest import DATASET_ID
-from shared.supabase import use_client
+from shared.db import use_client
 from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask
 from processor.src.process_deadwood_segmentation import process_deadwood_segmentation

@@ -1,19 +1,21 @@
 import pytest
 
+from conftest import DATASET_ID
 from shared.db import use_client
 from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask
 from processor.src.process_geotiff import process_geotiff
+from shared.models import GeoTiffInfo
 
 
 @pytest.fixture
-def convert_task(test_dataset_for_processing, test_processor_user):
-	"""Create a test task for GeoTIFF conversion"""
+def convert_task(patch_test_file):
+	"""Create a testtask specifically for GeoTIFF conversion"""
 	return QueueTask(
 		id=1,
-		dataset_id=test_dataset_for_processing,
-		user_id=test_processor_user,
-		task_types=[TaskTypeEnum.convert_geotiff],
+		dataset_id=DATASET_ID,
+		user_id='484d53be-2fee-4449-ad36-a6b083aab663',
+		task_type=TaskTypeEnum.convert,
 		priority=1,
 		is_processing=False,
 		current_position=1,
@@ -35,7 +37,6 @@ def test_process_geotiff_success(convert_task, auth_token):
 		geotiff_info = response.data[0]
 
 		# Verify essential GeoTIFF info fields
-		# TODO: Add check for the filesystem processor and nginx
 		assert geotiff_info['dataset_id'] == convert_task.dataset_id
 		assert geotiff_info['driver'] == 'GTiff'
 		assert geotiff_info['size_width'] > 0
@@ -56,3 +57,20 @@ def test_process_geotiff_success(convert_task, auth_token):
 
 		# Clean up by removing the test entry
 		client.table(settings.geotiff_info_table).delete().eq('dataset_id', convert_task.dataset_id).execute()
+
+
+def test_process_geotiff_invalid_file(convert_task, auth_token, tmp_path):
+	"""Test GeoTIFF conversion with an invalid file"""
+	# Create an invalid file
+	invalid_file = tmp_path / 'invalid.tif'
+	invalid_file.write_text('This is not a GeoTIFF')
+
+	with pytest.raises(Exception):
+		process_geotiff(convert_task, tmp_path)
+
+	# Verify no GeoTIFF info was created
+	with use_client(auth_token) as client:
+		response = (
+			client.table(settings.geotiff_info_table).select('*').eq('dataset_id', convert_task.dataset_id).execute()
+		)
+		assert len(response.data) == 0

@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Body
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 
-from shared.supabase import verify_token, use_client
+from shared.db import verify_token, use_client
 from shared.settings import settings
 from shared.models import TaskPayload, QueueTask, TaskTypeEnum
 from shared.logger import logger

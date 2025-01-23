@@ -4,7 +4,7 @@ import tempfile
 import shutil
 from fastapi.testclient import TestClient
 from api.src.server import app
-from shared.supabase import login, use_client
+from shared.db import login, use_client
 from shared.settings import settings
 from shared.models import StatusEnum, LicenseEnum, PlatformEnum, DatasetAccessEnum
 

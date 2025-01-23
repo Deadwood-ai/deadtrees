@@ -5,7 +5,7 @@ from fastapi import APIRouter, Request, UploadFile, Depends
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 
-from shared.supabase import verify_token
+from shared.db import verify_token
 
 
 class InfoResponse(BaseModel):

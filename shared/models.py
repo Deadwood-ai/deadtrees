@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from enum import Enum
 from datetime import datetime
 
@@ -8,7 +8,6 @@ from pydantic_partial import PartialModelMixin
 from pydantic_settings import BaseSettings
 from rasterio.coords import BoundingBox
 
-from .supabase import SupabaseReader
 from .settings import settings
 
 
@@ -56,10 +55,11 @@ class LabelTypeEnum(str, Enum):
 
 
 class TaskTypeEnum(str, Enum):
-	cog = 'cog'
-	thumbnail = 'thumbnail'
-	deadwood_segmentation = 'deadwood_segmentation'
-	convert_geotiff = 'convert_geotiff'
+	cog = 'cog'  # Generate cloud optimized geotiff
+	thumbnail = 'thumbnail'  # Generate thumbnail image
+	deadwood = 'deadwood'  # Run deadwood segmentation
+	geotiff = 'geotiff'  # Convert to geotiff
+	metadata = 'metadata'  # Extract metadata
 
 
 class TaskPayload(BaseModel):
@@ -287,6 +287,8 @@ class Label(LabelPayloadData):
 
 	@classmethod
 	def by_id(cls, dataset_id: int, token: str | None = None) -> 'Label':
+		from .db import SupabaseReader
+
 		# instatiate a reader
 		reader = SupabaseReader(Model=cls, table=settings.labels_table, token=token)
 
@@ -417,3 +419,34 @@ class Metadata(MetadataPayloadData):
 # 		elif 'task_types' not in values:
 # 			values['task_types'] = []
 # 	return values
+
+
+class MetadataType(str, Enum):
+	GADM = 'gadm'
+	# Add more types as needed
+
+
+class AdminBoundariesMetadata(BaseModel):
+	"""Structure for GADM administrative boundaries metadata"""
+
+	admin_level_1: Optional[str] = None  # Country
+	admin_level_2: Optional[str] = None  # State/Province
+	admin_level_3: Optional[str] = None  # District
+	source: str = 'GADM'
+	version: str = '4.1.0'  # GADM version
+
+
+class DatasetMetadata(BaseModel):
+	"""Model for the v2_metadata table"""
+
+	dataset_id: int
+	metadata: Dict[str, Any]  # Each key is a MetadataType
+	version: int
+	created_at: Optional[datetime] = None
+	processing_runtime: Optional[float] = None
+
+	@field_serializer('created_at', mode='plain')
+	def datetime_to_isoformat(field: datetime | None) -> str | None:
+		if field is None:
+			return None
+		return field.isoformat()

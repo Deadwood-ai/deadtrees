@@ -3,7 +3,7 @@ import shutil
 from processor.src.process_geotiff import process_geotiff
 from shared.models import QueueTask, StatusEnum, Dataset, TaskTypeEnum
 from shared.settings import settings
-from shared.supabase import use_client, login, verify_token
+from shared.db import use_client, login, verify_token
 from shared.logger import logger
 from .process_thumbnail import process_thumbnail
 from .process_cog import process_cog

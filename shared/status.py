@@ -1,6 +1,6 @@
 from typing import Optional
 from .models import Status, StatusEnum
-from .supabase import use_client
+from .db import use_client
 from .settings import settings
 from .logger import logger
 

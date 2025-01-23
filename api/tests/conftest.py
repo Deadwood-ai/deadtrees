@@ -1,7 +1,7 @@
 import pytest
 import shutil
 from pathlib import Path
-from shared.supabase import use_client, login
+from shared.db import use_client, login
 from shared.settings import settings
 from supabase import create_client
 

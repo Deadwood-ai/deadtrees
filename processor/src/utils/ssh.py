@@ -109,22 +109,3 @@ def push_file_to_storage_server(local_file_path: str, remote_file_path: str, tok
 
 				logger.error(f'Failed to push file to {remote_file_path}: {str(e)}', extra={'token': token})
 				raise
-
-
-def update_status(token: str, dataset_id: int, status: StatusEnum):
-	"""Function to update the status field of a dataset about the cog calculation process.
-
-	Args:
-	    token (str): Supabase client session token
-	    dataset_id (int): Unique id of the dataset
-	    status (StatusEnum): The current status of the cog calculation process to set the dataset to
-	"""
-	try:
-		with use_client(token) as client:
-			client.table(settings.datasets_table).update(
-				{
-					'status': status.value,
-				}
-			).eq('id', dataset_id).execute()
-	except Exception as e:
-		logger.error(f'Error updating status: {e}', extra={'token': token})

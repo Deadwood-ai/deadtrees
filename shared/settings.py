@@ -14,6 +14,7 @@ _tables = {
 	'orthos': 'v2_orthos',
 	'cogs': 'v2_cogs',
 	'thumbnails': 'v2_thumbnails',
+	'metadata': 'v2_metadata',
 	'labels': 'v1_labels',
 	'label_objects': 'v1_label_objects',
 	'logs': 'v2_logs',
@@ -45,7 +46,7 @@ class Settings(BaseSettings):
 	# base directory for the storage app
 	BASE_DIR: str = str(BASE)
 	# Default GADM path in assets, can be overridden by env var
-	GADM_DATA_PATH: str = str(ASSETS_DIR / 'gadm' / 'gadm_410.gpkg')
+	GADM_DATA_PATH: str = str(Path('/app/assets/gadm/gadm_410.gpkg'))
 	DEV_MODE: bool = False
 	CONCURRENT_TASKS: int = 2
 
@@ -178,6 +179,10 @@ class Settings(BaseSettings):
 	@property
 	def thumbnails_table(self) -> str:
 		return self._tables['thumbnails']
+
+	@property
+	def metadata_table(self) -> str:
+		return self._tables['metadata']
 
 	@property
 	def logs_table(self) -> str:

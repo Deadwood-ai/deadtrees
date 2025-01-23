@@ -1,9 +1,9 @@
 import pytest
 from pathlib import Path
-from api.src.utils.admin_levels import get_admin_tags, update_metadata_admin_level
+from processor.src.utils.admin_levels import get_admin_tags, update_metadata_admin_level
 from shared.models import Dataset
 from shared.settings import settings
-from shared.supabase import use_client, login
+from shared.db import use_client, login
 import shutil
 
 # Test data points (real coordinates that exist in GADM data)

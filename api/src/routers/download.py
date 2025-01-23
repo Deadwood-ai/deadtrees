@@ -13,7 +13,7 @@ from shared.__version__ import __version__
 from shared.models import Dataset, Label, Metadata
 from shared.settings import settings
 from api.src.download.downloads import bundle_dataset, label_to_geopackage
-from shared.supabase import use_client
+from shared.db import use_client
 
 # first approach to implement a rate limit
 CONNECTED_IPS = {}

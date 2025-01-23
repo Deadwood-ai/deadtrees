@@ -2,11 +2,11 @@ from pathlib import Path
 import time
 import uuid
 
-from shared.supabase import use_client, login, verify_token
+from shared.db import use_client, login, verify_token
 from shared.settings import settings
 from shared.models import StatusEnum, Dataset, QueueTask
 from shared.logger import logger
-from .utils import update_status, pull_file_from_storage_server, push_file_to_storage_server
+from .utils.ssh import update_status, pull_file_from_storage_server, push_file_to_storage_server
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
 from .geotiff.convert_geotiff import convert_geotiff, verify_geotiff
 from shared.geotiff_info import create_geotiff_info_entry

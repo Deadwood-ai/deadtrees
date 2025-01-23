@@ -1,12 +1,12 @@
 from pathlib import Path
 import time
 
-from shared.supabase import use_client, login, verify_token
+from shared.db import use_client, login, verify_token
 from shared.settings import settings
 from shared.models import StatusEnum, Dataset, QueueTask, Cog
 from shared.logger import logger
 from .cog.cog import calculate_cog
-from .utils import update_status, pull_file_from_storage_server, push_file_to_storage_server
+from .utils.ssh import update_status, pull_file_from_storage_server, push_file_to_storage_server
 from .exceptions import AuthenticationError, DatasetError, ProcessingError, StorageError
 
 

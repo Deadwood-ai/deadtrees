@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 
 from api.src.server import app
-from shared.supabase import use_client
+from shared.db import use_client
 from shared.settings import settings
 from shared.models import LabelPayloadData, LabelSourceEnum, LabelTypeEnum
 

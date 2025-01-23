@@ -3,7 +3,8 @@ import shutil
 from pathlib import Path
 
 
-from shared.supabase import use_client, login, create_client
+from supabase import create_client
+from shared.db import login, use_client
 from shared.settings import settings
 
 
@@ -22,7 +23,7 @@ def test_processor_user():
 			}
 		)
 		user_id = response.user.id if response.user else None
-	except Exception as e:
+	except Exception:
 		# If user already exists, try to get the user ID
 		try:
 			response = supabase.auth.sign_in_with_password(
@@ -118,23 +119,11 @@ def cleanup_database(auth_token):
 	yield
 
 	with use_client(auth_token) as client:
-		# Clean up all test tables in reverse order of dependencies
-		tables = [
-			settings.queue_table,
-			settings.label_objects_table,
-			settings.labels_table,
-			settings.thumbnails_table,
-			settings.cogs_table,
-			settings.geotiff_info_table,
-			settings.metadata_table,
-			settings.datasets_table,
-		]
-
-		for table in tables:
-			try:
-				client.table(table).delete().neq('id', 0).execute()
-			except Exception as e:
-				print(f'Warning: Failed to clean up table {table}: {str(e)}')
+		# With CASCADE delete, we only need to clean the parent table
+		try:
+			client.table(settings.datasets_table).delete().neq('id', 0).execute()
+		except Exception as e:
+			print(f'Warning: Failed to clean up datasets: {str(e)}')
 
 
 @pytest.fixture(scope='function')
@@ -152,14 +141,34 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 		with use_client(auth_token) as client:
 			dataset_data = {
 				'file_name': file_name,
-				'file_alias': file_name,
-				'file_size': archive_path.stat().st_size,
-				'copy_time': 123,
+				'license': 'CC BY',
+				'platform': 'drone',
+				'authors': ['Test Author'],
 				'user_id': test_processor_user,
-				'status': 'uploaded',
+				'data_access': 'public',
 			}
 			response = client.table(settings.datasets_table).insert(dataset_data).execute()
 			dataset_id = response.data[0]['id']
+
+			# Add ortho entry
+			ortho_data = {
+				'dataset_id': dataset_id,
+				'ortho_file_name': file_name,
+				'version': 1,
+				'file_size': archive_path.stat().st_size,
+				'bbox': 'BOX(13.4050 52.5200,13.4150 52.5300)',  # Example bbox for Berlin
+				'ortho_upload_runtime': 0.1,
+				'ortho_processing': False,
+				'ortho_processed': False,
+			}
+			client.table(settings.orthos_table).insert(ortho_data).execute()
+
+			# Create initial status entry
+			status_data = {
+				'dataset_id': dataset_id,
+				'current_status': 'idle',
+			}
+			client.table(settings.statuses_table).insert(status_data).execute()
 
 			yield dataset_id
 
@@ -167,7 +176,6 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 		# Cleanup
 		if dataset_id:
 			with use_client(auth_token) as client:
-				client.table(settings.cogs_table).delete().eq('dataset_id', dataset_id).execute()
 				client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 
 		if archive_path.exists():
