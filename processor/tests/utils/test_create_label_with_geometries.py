@@ -1,4 +1,3 @@
-from http.client import HTTPException
 import pytest
 from pathlib import Path
 import geopandas as gpd
@@ -16,7 +15,7 @@ from shared.models import (
 	LicenseEnum,
 	DatasetAccessEnum,
 )
-from api.src.labels.labels import create_label_with_geometries
+from shared.labels import create_label_with_geometries
 
 
 @pytest.fixture
@@ -34,18 +33,18 @@ def test_geometries():
 
 
 @pytest.fixture
-def test_dataset_with_label(auth_token, data_directory, test_geotiff, test_user):
+def test_dataset_with_label(auth_token, data_directory, test_file, test_processor_user):
 	"""Create a temporary test dataset for label testing"""
 	with use_client(auth_token) as client:
 		# Copy test file to archive directory
 		file_name = 'test-labels-geom.tif'
 		archive_path = data_directory / settings.ARCHIVE_DIR / file_name
-		shutil.copy2(test_geotiff, archive_path)
+		shutil.copy2(test_file, archive_path)
 
 		# Create test dataset
 		dataset_data = {
 			'file_name': file_name,
-			'user_id': test_user,
+			'user_id': test_processor_user,
 			'license': LicenseEnum.cc_by.value,
 			'platform': PlatformEnum.drone.value,
 			'authors': ['Test Author'],
@@ -69,7 +68,9 @@ def test_dataset_with_label(auth_token, data_directory, test_geotiff, test_user)
 
 
 @pytest.mark.asyncio
-async def test_create_label_with_chunked_geometries(test_dataset_with_label, test_geometries, test_user, auth_token):
+async def test_create_label_with_chunked_geometries(
+	test_dataset_with_label, test_geometries, test_processor_user, auth_token
+):
 	"""Test creating a label with geometries that exceed chunk size"""
 	# Create label payload
 	payload = LabelPayloadData(
@@ -87,11 +88,11 @@ async def test_create_label_with_chunked_geometries(test_dataset_with_label, tes
 	)
 
 	# Create label
-	label = await create_label_with_geometries(payload, test_user, auth_token)
+	label = await create_label_with_geometries(payload, test_processor_user, auth_token)
 
 	# Verify label was created
 	assert label.dataset_id == test_dataset_with_label
-	assert label.user_id == test_user
+	assert label.user_id == test_processor_user
 	assert label.label_source == LabelSourceEnum.visual_interpretation
 	assert label.label_type == LabelTypeEnum.segmentation
 	assert label.label_data == LabelDataEnum.deadwood
@@ -119,25 +120,83 @@ async def test_create_label_with_chunked_geometries(test_dataset_with_label, tes
 		# assert combined_geom == test_geometries
 
 
-# @pytest.mark.asyncio
-# async def test_create_label_with_invalid_geometry(test_dataset_with_label, test_user, auth_token):
-# 	"""Test creating a label with invalid geometry"""
-# 	# Create invalid geometry (self-intersecting polygon)
-# 	invalid_geometry = Polygon([(0, 0), (2, 2), (0, 2), (2, 0), (0, 0)])
+@pytest.mark.asyncio
+async def test_create_label_with_real_geometries(test_dataset_with_label, test_processor_user, auth_token):
+	"""Test creating a label with geometries from a real GeoPackage file"""
+	# Load geometries from test GeoPackage
+	test_file = (
+		Path(__file__).parent.parent.parent.parent
+		/ 'assets'
+		/ 'test_data'
+		/ 'label_upload'
+		/ 'yanspain_crop_124_polygons.gpkg'
+	)
 
-# 	# Convert to proper GeoJSON format
-# 	geojson = {'type': 'MultiPolygon', 'coordinates': [[list(map(list, invalid_geometry.exterior.coords))]]}
+	# Read both layers
+	deadwood = gpd.read_file(test_file, layer='standing_deadwood').to_crs(epsg=4326)
+	aoi = gpd.read_file(test_file, layer='aoi').to_crs(epsg=4326)
 
-# 	payload = LabelPayloadData(
-# 		dataset_id=test_dataset_with_label,
-# 		label_source=LabelSourceEnum.visual_interpretation,
-# 		label_type=LabelTypeEnum.segmentation,
-# 		label_data=LabelDataEnum.deadwood,
-# 		label_quality=1,
-# 		geometry=geojson,
-# 	)
+	# Convert deadwood geometries to MultiPolygon GeoJSON
+	deadwood_geojson = {
+		'type': 'MultiPolygon',
+		'coordinates': [
+			[[[float(x), float(y)] for x, y in poly.exterior.coords]]
+			for geom in deadwood.geometry
+			for poly in (geom if isinstance(geom, MultiPolygon) else [geom])
+		],
+	}
 
-# 	with pytest.raises(HTTPException) as exc_info:
-# 		await create_label_with_geometries(payload, test_user, auth_token)
+	# Convert AOI to MultiPolygon GeoJSON
+	aoi_geojson = {
+		'type': 'MultiPolygon',
+		'coordinates': [
+			[[[float(x), float(y)] for x, y in poly.exterior.coords]]
+			for geom in aoi.geometry
+			for poly in (geom if isinstance(geom, MultiPolygon) else [geom])
+		],
+	}
 
-# 	assert exc_info.value.status_code == 400
+	# Create label payload
+	payload = LabelPayloadData(
+		dataset_id=test_dataset_with_label,
+		label_source=LabelSourceEnum.model_prediction,
+		label_type=LabelTypeEnum.segmentation,
+		label_data=LabelDataEnum.deadwood,
+		label_quality=3,
+		geometry=deadwood_geojson,
+		properties={'source': 'test_prediction'},
+		aoi_geometry=aoi_geojson,
+		aoi_image_quality=1,
+		aoi_notes='Test AOI from real data',
+	)
+
+	# Create label
+	label = await create_label_with_geometries(payload, test_processor_user, auth_token)
+
+	# Verify label was created
+	assert label.dataset_id == test_dataset_with_label
+	assert label.user_id == test_processor_user
+	assert label.label_source == LabelSourceEnum.model_prediction
+	assert label.label_type == LabelTypeEnum.segmentation
+	assert label.label_data == LabelDataEnum.deadwood
+	assert label.label_quality == 3
+
+	# Verify geometries were saved correctly
+	with use_client(auth_token) as client:
+		# Check AOI
+		aoi_response = client.table(settings.aois_table).select('*').eq('id', label.aoi_id).execute()
+		assert len(aoi_response.data) == 1
+		assert aoi_response.data[0]['image_quality'] == 1
+		assert aoi_response.data[0]['notes'] == 'Test AOI from real data'
+
+		# Check geometries
+		geom_response = client.table(settings.deadwood_geometries_table).select('*').eq('label_id', label.id).execute()
+
+		# Verify all geometries were saved
+		all_geometries = []
+		for geom_record in geom_response.data:
+			assert geom_record['properties'] == {'source': 'test_prediction'}
+			all_geometries.append(shape(geom_record['geometry']))
+
+		# Verify we have geometries
+		assert len(all_geometries) > 0

@@ -22,5 +22,6 @@ safetensors
 opencv-python
 pytest
 pytest-cov
+pytest-asyncio
 debugpy
 logfire[fastapi,system-metrics]

@@ -7,12 +7,14 @@ GADM_DIR := $(ASSETS_DIR)/gadm
 # URLs for assets
 TEST_DATA_URL := https://ijuphmnaebfdzsfrnsrn.supabase.co/storage/v1/object/public/assets/test-data.tif?t=2025-01-14T08%3A30%3A31.937Z
 TEST_DATA_SMALL_URL := https://ijuphmnaebfdzsfrnsrn.supabase.co/storage/v1/object/public/assets/test-data-small.tif?t=2025-01-14T08%3A30%3A20.146Z
+TEST_DATA_REAL_LABELS_URL := https://ijuphmnaebfdzsfrnsrn.supabase.co/storage/v1/object/public/assets/yanspain_crop_124_polygons.gpkg?t=2025-01-24T13%3A19%3A53.744Z
 MODEL_URL := https://ijuphmnaebfdzsfrnsrn.supabase.co/storage/v1/object/public/assets/segformer_b5_fold_0_epoch_74.safetensors?t=2025-01-14T08%3A30%3A40.378Z
 GADM_URL := https://geodata.ucdavis.edu/gadm/gadm4.1/gadm_410-gpkg.zip
 
 # Target files
 TEST_DATA := $(TEST_DATA_DIR)/test-data.tif
 TEST_DATA_SMALL := $(TEST_DATA_DIR)/test-data-small.tif
+TEST_DATA_REAL_LABELS := $(TEST_DATA_DIR)/yanspain_crop_124_polygons.gpkg
 MODEL := $(MODELS_DIR)/segformer_b5_fold_0_epoch_74.safetensors
 GADM := $(GADM_DIR)/gadm_410.gpkg
 GADM_ZIP := $(GADM_DIR)/gadm_410-gpkg.zip
@@ -35,7 +37,7 @@ create-dirs:
 	@mkdir -p data/label_objects
 	@mkdir -p data/trash
 
-download-assets: create-dirs $(TEST_DATA) $(TEST_DATA_SMALL) $(MODEL) $(GADM)
+download-assets: create-dirs $(TEST_DATA) $(TEST_DATA_SMALL) $(MODEL) $(GADM) $(TEST_DATA_REAL_LABELS)
 
 $(TEST_DATA):
 	@echo "Downloading test data..."
@@ -48,6 +50,10 @@ $(TEST_DATA_SMALL):
 $(MODEL):
 	@echo "Downloading model..."
 	curl -L -o $@ "$(MODEL_URL)"
+
+$(TEST_DATA_REAL_LABELS):
+	@echo "Downloading real labels..."
+	curl -L -o $@ "$(TEST_DATA_REAL_LABELS_URL)"
 
 $(GADM): $(GADM_ZIP)
 	@if [ ! -f $@ ]; then \

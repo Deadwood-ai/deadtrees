@@ -23,4 +23,3 @@ debugpy
 fastapi[testclient]
 logfire[fastapi,system-metrics]
 pyarrow
-pytest-asyncio

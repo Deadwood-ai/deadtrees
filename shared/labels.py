@@ -1,7 +1,6 @@
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
-from fastapi import HTTPException
 from shapely.geometry import shape, MultiPolygon, Polygon
 from shapely import wkb
 
@@ -54,7 +53,7 @@ async def create_label_with_geometries(payload: LabelPayloadData, user_id: str, 
 					aoi_id = response.data[0]['id']
 				except Exception as e:
 					logger.error(f'Error creating AOI: {str(e)}', extra={'token': token, 'user_id': user_id})
-					raise HTTPException(status_code=400, detail=f'Error creating AOI: {str(e)}')
+					raise Exception(f'Error creating AOI: {str(e)}')
 
 	# Create label entry
 	label = Label(
@@ -125,7 +124,7 @@ async def create_label_with_geometries(payload: LabelPayloadData, user_id: str, 
 
 		except Exception as e:
 			logger.error(f'Error creating label: {str(e)}', extra={'token': token, 'user_id': user_id})
-			raise HTTPException(status_code=400, detail=f'Error creating label: {str(e)}')
+			raise Exception(f'Error creating label: {str(e)}')
 
 
 async def upload_geometry_chunk(
@@ -156,4 +155,4 @@ async def upload_geometry_chunk(
 		client.table(table).insert(geometry_records).execute()
 	except Exception as e:
 		logger.error(f'Error uploading geometry chunk: {str(e)}', extra={'token': token})
-		raise HTTPException(status_code=400, detail=f'Error uploading geometry chunk: {str(e)}')
+		raise Exception(f'Error uploading geometry chunk: {str(e)}')
