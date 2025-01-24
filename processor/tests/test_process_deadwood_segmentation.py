@@ -1,27 +1,25 @@
 import pytest
-
-pytestmark = pytest.mark.skip(reason='Skip all segmentations, since integration is in progress')
 from pathlib import Path
 
 from shared.db import use_client
 from shared.settings import settings
-from shared.models import TaskTypeEnum, QueueTask
+from shared.models import TaskTypeEnum, QueueTask, LabelDataEnum
 from processor.src.process_deadwood_segmentation import process_deadwood_segmentation
 
 
+
 @pytest.fixture
-def deadwood_task(patch_test_file):
+def deadwood_task(test_dataset_for_processing, test_processor_user):
 	"""Create a test task specifically for deadwood segmentation processing"""
 	return QueueTask(
 		id=1,
-		dataset_id=DATASET_ID,
-		user_id='484d53be-2fee-4449-ad36-a6b083aab663',
-		task_type=TaskTypeEnum.deadwood_segmentation,
+		dataset_id=test_dataset_for_processing,
+		user_id=test_processor_user,
+		task_types=[TaskTypeEnum.deadwood],
 		priority=1,
 		is_processing=False,
 		current_position=1,
 		estimated_time=0.0,
-		build_args={},
 	)
 
 
@@ -32,6 +30,13 @@ def cleanup_labels(auth_token, deadwood_task):
 
 	# Cleanup will run after each test
 	with use_client(auth_token) as client:
+		# Get all labels for the dataset
+		response = client.table(settings.labels_table).select('id').eq('dataset_id', deadwood_task.dataset_id).execute()
+		
+		# Delete all associated geometries and labels
+		for label in response.data:
+			client.table(settings.deadwood_geometries_table).delete().eq('label_id', label['id']).execute()
+		
 		client.table(settings.labels_table).delete().eq('dataset_id', deadwood_task.dataset_id).execute()
 
 
@@ -40,28 +45,29 @@ def test_process_deadwood_segmentation_success(deadwood_task, auth_token):
 	process_deadwood_segmentation(deadwood_task, auth_token, settings.processing_path)
 
 	with use_client(auth_token) as client:
+		# Get label
 		response = client.table(settings.labels_table).select('*').eq('dataset_id', deadwood_task.dataset_id).execute()
-		data = response.data[0]
+		label = response.data[0]
 
-		# Basic response checks
+		# Basic label checks
 		assert len(response.data) == 1
-		assert data['dataset_id'] == deadwood_task.dataset_id
+		assert label['dataset_id'] == deadwood_task.dataset_id
+		assert label['label_source'] == 'model_prediction'
+		assert label['label_type'] == 'segmentation'
+		assert label['label_data'] == LabelDataEnum.deadwood
+		assert label['label_quality'] == 3
 
-		# Check label structure
-		assert 'label' in data
-		assert data['label']['type'] == 'MultiPolygon'
-		assert 'coordinates' in data['label']
-		assert len(data['label']['coordinates']) > 0  # Should have actual predictions
-
-		# Check AOI structure
-		assert 'aoi' in data
-		assert data['aoi']['type'] == 'MultiPolygon'
-		assert 'coordinates' in data['aoi']
-
-		# Check metadata
-		assert data['label_type'] == 'segmentation'
-		assert data['label_source'] == 'model_prediction'
-		assert data['label_quality'] == 3
+		# Check geometries
+		geom_response = client.table(settings.deadwood_geometries_table).select('*').eq('label_id', label['id']).execute()
+		
+		# Verify we have geometries
+		assert len(geom_response.data) > 0
+		
+		# Check first geometry structure
+		first_geom = geom_response.data[0]
+		assert first_geom['geometry']['type'] == 'Polygon'
+		assert 'coordinates' in first_geom['geometry']
+		assert first_geom['properties'] == {'source': 'model_prediction'}
 
 
 def test_process_deadwood_segmentation_invalid_file(deadwood_task, auth_token):

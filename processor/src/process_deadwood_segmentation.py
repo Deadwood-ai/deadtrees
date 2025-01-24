@@ -38,14 +38,14 @@ def process_deadwood_segmentation(task: QueueTask, token: str, temp_dir: Path):
 
 	try:
 		logger.info(
-			f'Running deadwood segmentation for dataset {task.dataset_id} with file path {str(file_path)} with command:',
+			f'Running deadwood segmentation for dataset {task.dataset_id} with file path {str(file_path)}',
 			extra={'token': token},
 		)
-		predict_deadwood(task.dataset_id, file_path)
+		predict_deadwood(task.dataset_id, file_path, user.id, token)
 
 		# Update successful completion status
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-		update_status(token, dataset_id=dataset.id, current_status=StatusEnum.processed, is_deadwood_done=True)
+		update_status(token, dataset_id=dataset.id, current_status=StatusEnum.idle, is_deadwood_done=True)
 
 		logger.info(f'Deadwood segmentation completed for dataset {task.dataset_id}', extra={'token': token})
 

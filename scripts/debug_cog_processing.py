@@ -15,7 +15,6 @@ config = dict(
 cog_profile = cog_profiles.get('jpeg')
 # cog_profile = cog_profiles.get("deflate")
 
-
 # Call cog_translate with the required arguments
 cog_translate(
 	'/data/archive/bbac672f-749d-4644-a499-1d2021633819_debug-cog.tif',  # Source file
