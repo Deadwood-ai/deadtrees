@@ -13,7 +13,7 @@ services:
       - '5678:5678'
     volumes:
       - ./data:/data # need it for testing (pulling and pushing files to storage server)
-      - ${SSH_PRIVATE_KEY_PATH}:/app/ssh_key
+      - nginx_ssh:/root/.ssh:ro
       - ./processor:/app/processor
       - ./shared:/app/shared
       - ./assets:/app/assets
@@ -28,8 +28,8 @@ services:
       - SUPABASE_KEY=${SUPABASE_KEY}
       - BASE_DIR=/data
       - PROCESSOR_PASSWORD=${PROCESSOR_PASSWORD}
-      - SSH_PRIVATE_KEY_PATH=/app/ssh_key
-      - SSH_PRIVATE_KEY_PASSPHRASE=${SSH_PRIVATE_KEY_PASSPHRASE}
+      - SSH_PRIVATE_KEY_PATH=/root/.ssh/id_rsa
+      - SSH_PRIVATE_KEY_PASSPHRASE=
       - DEV_MODE=true
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
     extra_hosts:
@@ -85,7 +85,7 @@ services:
       - '2222:22'
     volumes:
       - ./data:/data/:rw
-      - ${SSH_PRIVATE_KEY_PATH}.pub:/root/.ssh/authorized_keys:rw
+      - nginx_ssh:/root/.ssh
 
   tests:
     build:
@@ -110,3 +110,6 @@ services:
 networks:
   default:
     name: deadwood_network
+
+volumes:
+  nginx_ssh:

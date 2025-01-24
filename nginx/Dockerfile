@@ -9,6 +9,9 @@ RUN apt-get update && \
     mkdir -p /run/sshd && \
     mkdir -p /root/.ssh && \
     chmod 700 /root/.ssh && \
+    # Configure sshd
+    echo "PermitRootLogin yes" >> /etc/ssh/sshd_config && \
+    echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config && \
     # Remove default nginx site
     rm -f /etc/nginx/sites-enabled/default && \
     apt-get clean && \
@@ -16,9 +19,10 @@ RUN apt-get update && \
 
 # Copy your nginx configuration if needed
 COPY conf /etc/nginx/conf.d/
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # Expose ports
 EXPOSE 80 22
 
-# Start both nginx and sshd
-CMD service ssh start && nginx -g 'daemon off;'
+ENTRYPOINT ["/entrypoint.sh"]
