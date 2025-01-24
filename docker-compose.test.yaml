@@ -41,10 +41,11 @@ services:
       dockerfile: api/Dockerfile
     healthcheck:
       test: curl --fail http://127.0.0.1:8017/ || exit 1
-      interval: 15s
-      timeout: 1s
+      interval: 30s
+      timeout: 10s
       retries: 5
-      start_period: 2s
+      start_period: 1m30s
+      start_interval: 1s
     ports:
       - '8017:8017'
       - '5679:5679'
@@ -85,12 +86,13 @@ services:
         condition: service_healthy
     healthcheck:
       test: ['CMD', 'service', 'nginx', 'status']
-      interval: 15s
-      timeout: 2s
+      interval: 30s
+      timeout: 10s
       retries: 5
-      start_period: 3s
+      start_period: 1m30s
+      start_interval: 1s
     volumes:
-      - ./nginx/conf:/etc/nginx/conf.d/:ro
+      - ./nginx/test-conf:/etc/nginx/conf.d/:ro
       - ./data:/data/:ro
 
   tests:
