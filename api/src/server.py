@@ -40,7 +40,7 @@ app.include_router(auth.router)
 app.include_router(process.router)
 
 # add the labels to the app
-app.include_router(labels.router)
+# app.include_router(labels.router)
 
 # add thumbnail route to the app
 # app.include_router(thumbnail.router)

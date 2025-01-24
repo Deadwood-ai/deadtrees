@@ -3,7 +3,7 @@ from enum import Enum
 from datetime import datetime
 
 from pydantic import BaseModel, field_serializer, field_validator, model_validator
-from pydantic_geojson import MultiPolygonModel
+from pydantic_geojson import MultiPolygonModel, PolygonModel
 from pydantic_partial import PartialModelMixin
 from pydantic_settings import BaseSettings
 from rasterio.coords import BoundingBox
@@ -263,7 +263,7 @@ class LabelPayloadData(PartialModelMixin, BaseModel):
 	label_type: LabelTypeEnum
 	label_data: LabelDataEnum
 	label_quality: Optional[int] = None
-	model_config: Optional[Dict[str, Any]] = None
+	# model_config: Optional[Dict[str, Any]] = None
 
 	# Label geometry
 	geometry: MultiPolygonModel
@@ -287,11 +287,6 @@ class UserLabelObject(BaseModel):
 	file_path: str
 	label_description: str
 	audited: bool
-
-
-class LabelDataEnum(str, Enum):
-	deadwood = 'deadwood'
-	forest_cover = 'forest_cover'
 
 
 class AOI(BaseModel):
@@ -336,12 +331,12 @@ class Label(BaseModel):
 		return v
 
 
-class LabelGeometry(BaseModel):
-	"""Label geometry model for v2_label_geometries table"""
+class DeadwoodGeometry(BaseModel):
+	"""Label geometry model for v2_deadwood_geometries table"""
 
 	id: Optional[int] = None
 	label_id: int
-	geometry: MultiPolygonModel
+	geometry: PolygonModel
 	properties: Optional[Dict[str, Any]] = None
 	created_at: Optional[datetime] = None
 
@@ -352,76 +347,20 @@ class LabelGeometry(BaseModel):
 		return field.isoformat()
 
 
-# class MetadataPayloadData(PartialModelMixin, BaseModel):
-# 	# now the metadata
-# 	name: Optional[str] = None
-# 	license: Optional[LicenseEnum] = None
-# 	data_access: Optional[DatasetAccessEnum] = None
-# 	platform: Optional[PlatformEnum] = None
-# 	project_id: Optional[str] = None
-# 	authors: Optional[str] = None
-# 	spectral_properties: Optional[str] = None
-# 	citation_doi: Optional[str] = None
-# 	additional_information: Optional[str] = None
+class ForestCoverGeometry(BaseModel):
+	"""Label geometry model for v2_forest_cover_geometries table"""
 
-# 	# OSM admin levels
-# 	admin_level_1: Optional[str] = None
-# 	admin_level_2: Optional[str] = None
-# 	admin_level_3: Optional[str] = None
+	id: Optional[int] = None
+	label_id: int
+	geometry: PolygonModel
+	properties: Optional[Dict[str, Any]] = None
+	created_at: Optional[datetime] = None
 
-# 	aquisition_year: Optional[int] = None
-# 	aquisition_month: Optional[int] = None
-# 	aquisition_day: Optional[int] = None
-
-
-# class Metadata(MetadataPayloadData):
-# 	"""
-# 	Class for additional Metadata in the database. It has to be connected to a Dataset object
-# 	using a 1:1 cardinality.
-# 	This is separated, so that different RLS policies can apply. Additionally, this is the
-# 	metadata that can potentially be
-# 	"""
-
-# 	# primary key
-# 	dataset_id: int
-
-# 	# link to a user
-# 	user_id: str
-
-# 	# make some field non-optional
-# 	name: str
-# 	data_access: DatasetAccessEnum
-# 	# license: LicenseEnum
-# 	platform: PlatformEnum
-# 	# only the aquisition_year is necessary
-# 	aquisition_year: int
-
-# 	@classmethod
-# 	def by_id(cls, dataset_id: int, token: str | None = None) -> 'Metadata':
-# 		# instatiate a reader
-# 		reader = SupabaseReader(Model=cls, table=settings.metadata_table, token=token)
-
-# 		return reader.by_id(dataset_id)
-
-
-# class ProcessOptions(BaseSettings):
-# overviews: Optional[int] = 8
-# resolution: Optional[float] = 0.04
-# profile: Optional[str] = 'jpeg'
-# quality: Optional[int] = 75
-# force_recreate: Optional[bool] = False
-# tiling_scheme: Optional[str] = 'web-optimized'
-
-
-# @model_validator(mode='before')
-# def convert_task_type_to_types(cls, values):
-# 	"""Convert old task_type to task_types if necessary"""
-# 	if isinstance(values, dict):
-# 		if 'task_type' in values and 'task_types' not in values:
-# 			values['task_types'] = [values['task_type']] if values['task_type'] else []
-# 		elif 'task_types' not in values:
-# 			values['task_types'] = []
-# 	return values
+	@field_serializer('created_at', mode='plain')
+	def datetime_to_isoformat(field: datetime | None) -> str | None:
+		if field is None:
+			return None
+		return field.isoformat()
 
 
 class MetadataType(str, Enum):

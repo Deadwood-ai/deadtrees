@@ -15,7 +15,10 @@ _tables = {
 	'cogs': 'v2_cogs',
 	'thumbnails': 'v2_thumbnails',
 	'metadata': 'v2_metadata',
-	'labels': 'v1_labels',
+	'labels': 'v2_labels',
+	'aois': 'v2_aois',
+	'deadwood_geometries': 'v2_deadwood_geometries',
+	'forest_cover_geometries': 'v2_forest_cover_geometries',
 	'label_objects': 'v1_label_objects',
 	'logs': 'v2_logs',
 	'statuses': 'v2_statuses',
@@ -175,6 +178,18 @@ class Settings(BaseSettings):
 	@property
 	def labels_table(self) -> str:
 		return self._tables['labels']
+
+	@property
+	def aois_table(self) -> str:
+		return self._tables['aois']
+
+	@property
+	def deadwood_geometries_table(self) -> str:
+		return self._tables['deadwood_geometries']
+
+	@property
+	def forest_cover_geometries_table(self) -> str:
+		return self._tables['forest_cover_geometries']
 
 	@property
 	def thumbnails_table(self) -> str:
