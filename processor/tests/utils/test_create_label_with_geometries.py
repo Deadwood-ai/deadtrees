@@ -128,7 +128,6 @@ async def test_create_label_with_real_geometries(test_dataset_with_label, test_p
 		Path(__file__).parent.parent.parent.parent
 		/ 'assets'
 		/ 'test_data'
-		/ 'label_upload'
 		/ 'yanspain_crop_124_polygons.gpkg'
 	)
 

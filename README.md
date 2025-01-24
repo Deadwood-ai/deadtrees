@@ -88,6 +88,9 @@ docker compose -f docker-compose.test.yaml run api-test pytest api/tests/
 ### Local supabase setup and development
 
 ```bash
+## install supabase cli
+brew install supabase
+
 # Start Supabase
 supabase login
 
