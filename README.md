@@ -192,3 +192,41 @@ Optionally, you can alias the call of the correct docker compose file. Add to `.
 ```
 alias serv='docker compose -f docker-compose.api.yaml'
 ```
+
+### Certificate issueing & renewal
+
+The certbot service can be used to issue a certificate. For that, the ACME challange 
+has to be served by a temporary nginx:
+
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+    server_name default_server;
+    server_tokens off;
+
+    # add ACME challange for certbot
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+}
+```
+
+Then run the certbot service with all the mounts as configured in the `docker-compose.api.yaml`:
+
+```bash
+serv certbot certonly
+```
+
+Once successfull, you can start a cronjob to renew the certificate:
+
+```bash
+crontab -e
+```
+
+And add the following cronjob to run every Sunday night at 1:30. Currently we are not notified if this
+fails and thus needs to be monitored for now:
+
+```
+30 1  * * 0 docker compose -f /apps/deadtrees/docker-compose.api.yaml run --rm certbot renew
+```
