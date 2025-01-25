@@ -10,20 +10,22 @@ services:
       - /data:/data
       - ./assets/gdam/gdam_410.gpkg:/gadm_data/gadm_410.gpkg
     
-    # healthcheck:
-    #   test: curl --fail http://127.0.0.1:40831/ || exit 1
-    #   interval: 1m
-    #   timeout: 10s
-    #   retries: 5
-    #   start_period: 1m30s
-    #   start_interval: 1s
+    healthcheck:
+      test: curl --fail http://127.0.0.1:40831/ || exit 1
+      interval: 1m
+      timeout: 10s
+      retries: 5
+      start_period: 1m30s
+      start_interval: 1s
 
     environment:
       BASE_DIR: /data
+      PYTHONPATH: /app
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_KEY: ${SUPABASE_KEY}
       DEV_MODE: false
       GADM_DATA_PATH: /gadm_data/gadm_410.gpkg
+      UVICORN_ROOT_PATH: /api/v1
       UVICORN_PORT: 40831
       UVICORN_HOST: 0.0.0.0
       LOGFIRE_TOKEN: ${LOGFIRE_TOKEN}
@@ -37,18 +39,18 @@ services:
       - 80:80
       - 443:443
 
-    # links:
-    #   - api
-    # depends_on:
-    #   api:
-    #     condition: service_healthy
-    # healthcheck:
-    #   test: ['CMD', 'service', 'nginx', 'status']
-    #   interval: 30s
-    #   timeout: 10s
-    #   retries: 5
-    #   start_period: 1m30s
-    #   start_interval: 1s
+    links:
+      - api
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'service', 'nginx', 'status']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1m30s
+      start_interval: 1s
 
     volumes:
       - ./nginx/api-conf:/etc/nginx/conf.d/:ro
