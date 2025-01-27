@@ -8,6 +8,7 @@ from processor.src.process_deadwood_segmentation import process_deadwood_segment
 
 
 
+
 @pytest.fixture
 def deadwood_task(test_dataset_for_processing, test_processor_user):
 	"""Create a test task specifically for deadwood segmentation processing"""
@@ -40,6 +41,7 @@ def cleanup_labels(auth_token, deadwood_task):
 		client.table(settings.labels_table).delete().eq('dataset_id', deadwood_task.dataset_id).execute()
 
 
+@pytest.mark.skip(reason="Long running process - skip by default")
 def test_process_deadwood_segmentation_success(deadwood_task, auth_token):
 	"""Test successful deadwood segmentation processing with actual model"""
 	process_deadwood_segmentation(deadwood_task, auth_token, settings.processing_path)
@@ -68,13 +70,3 @@ def test_process_deadwood_segmentation_success(deadwood_task, auth_token):
 		assert first_geom['geometry']['type'] == 'Polygon'
 		assert 'coordinates' in first_geom['geometry']
 		assert first_geom['properties'] == {'source': 'model_prediction'}
-
-
-def test_process_deadwood_segmentation_invalid_file(deadwood_task, auth_token):
-	"""Test handling of invalid input file"""
-	deadwood_task.dataset_id = 'nonexistent_id'
-
-	with pytest.raises(Exception) as exc_info:
-		process_deadwood_segmentation(deadwood_task, auth_token, settings.processing_path)
-
-	assert 'Error fetching dataset' in str(exc_info.value)

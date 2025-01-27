@@ -6,6 +6,7 @@ from .deadtreesmodels.deadwood import DeadwoodInference
 from ..exceptions import ProcessingError
 import rasterio
 import asyncio
+from .deadtreesmodels.common.common import reproject_polygons
 
 # Get base project directory (where assets folder is located)
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
@@ -25,9 +26,15 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 		logger.info('Running deadwood inference')
 		polygons = deadwood_model.inference_deadwood(str(file_path))
 
-		if not polygons:
+
+		if not any(polygons):
 			logger.warning('No deadwood polygons detected')
 			return
+
+		with rasterio.open(str(file_path)) as src:
+			src_crs = src.crs
+		# Reproject polygons to WGS 84
+		polygons = reproject_polygons(polygons, src_crs, 'EPSG:4326')
 
 		# Convert polygons to GeoJSON MultiPolygon format
 		deadwood_geojson = {

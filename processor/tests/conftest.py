@@ -60,7 +60,7 @@ def auth_token(test_processor_user):
 def test_file():
 	"""Fixture to provide test GeoTIFF file path"""
 	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data-small.tif'
-	file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'deadwood.tif'
+	file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data.tif'
 	if not file_path.exists():
 		pytest.skip('Test file not found')
 	return file_path
