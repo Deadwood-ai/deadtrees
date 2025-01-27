@@ -96,6 +96,19 @@ class DeadwoodTool:
 		print(f'Running tests for {service}...')
 		self._run_command(cmd)
 
+	def run_dev(self):
+		"""Start the complete test environment with continuous processor queue checking"""
+		# Build and start all services
+		self._run_command(['docker', 'compose', '-f', self.test_compose_file, 'up', '-d', '--build'])
+		
+		# Start the processor in continuous mode
+		self._run_command([
+			'docker', 'compose', '-f', self.test_compose_file, 'exec',
+			'processor-test',
+			'python', '-m', 'debugpy', '--listen', '0.0.0.0:5678',
+			'-m', 'processor.src.continuous_processor'
+		])
+
 
 if __name__ == '__main__':
 	fire.Fire(DeadwoodTool)
