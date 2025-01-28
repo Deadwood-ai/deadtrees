@@ -49,7 +49,6 @@
             "args": [
                 "-v",
                 "deadtrees-cli/tests/",
-                "--pdb"
             ],
             "cwd": "${workspaceFolder}",
             "justMyCode": false
