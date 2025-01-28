@@ -15,13 +15,13 @@ client = TestClient(app)
 
 
 @pytest.fixture(scope='function')
-def test_dataset_for_download(auth_token, data_directory, test_geotiff, test_user):
+def test_dataset_for_download(auth_token, data_directory, test_file, test_user):
 	"""Create a temporary test dataset for download testing"""
 	with use_client(auth_token) as client:
 		# Copy test file to archive directory
 		file_name = 'test-download.tif'
 		archive_path = data_directory / settings.ARCHIVE_DIR / file_name
-		shutil.copy2(test_geotiff, archive_path)
+		shutil.copy2(test_file, archive_path)
 
 		# Create test dataset with combined metadata fields
 		dataset_data = {

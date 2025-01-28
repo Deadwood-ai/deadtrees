@@ -30,7 +30,7 @@ services:
       - PROCESSOR_PASSWORD=${PROCESSOR_PASSWORD}
       - SSH_PRIVATE_KEY_PATH=/root/.ssh/id_rsa
       - SSH_PRIVATE_KEY_PASSPHRASE=
-      - DEV_MODE=true
+      - ENV=development
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
     extra_hosts:
       - 'host.docker.internal:host-gateway'
@@ -63,7 +63,7 @@ services:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_KEY=${SUPABASE_KEY}
       - BASE_DIR=/data
-      - DEV_MODE=true
+      - ENV=development
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
     extra_hosts:
       - 'host.docker.internal:host-gateway'

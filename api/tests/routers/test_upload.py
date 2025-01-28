@@ -11,11 +11,11 @@ from shared.models import StatusEnum, LicenseEnum, PlatformEnum, DatasetAccessEn
 client = TestClient(app)
 
 
-def test_upload_geotiff_chunk(test_geotiff, auth_token, test_user):
+def test_upload_geotiff_chunk(test_file, auth_token, test_user):
 	"""Test chunked upload of a GeoTIFF file"""
 	# Setup
 	chunk_size = 1024 * 256  # 256KB chunks for testing
-	file_size = test_geotiff.stat().st_size
+	file_size = test_file.stat().st_size
 	chunks_total = (file_size + chunk_size - 1) // chunk_size
 	upload_id = 'test-upload-id'
 
@@ -34,17 +34,17 @@ def test_upload_geotiff_chunk(test_geotiff, auth_token, test_user):
 	dataset_id = None
 	# try:
 	# Read file in chunks and upload each chunk
-	with open(test_geotiff, 'rb') as f:
+	with open(test_file, 'rb') as f:
 		for chunk_index in range(chunks_total):
 			chunk_data = f.read(chunk_size)
 
 			# Prepare multipart form data
-			files = {'file': (f'{test_geotiff.name}', chunk_data, 'application/octet-stream')}
+			files = {'file': (f'{test_file.name}', chunk_data, 'application/octet-stream')}
 			data = {
 				'chunk_index': str(chunk_index),
 				'chunks_total': str(chunks_total),
 				'upload_id': upload_id,
-				'file': test_geotiff.name,
+				'file': test_file.name,
 				**form_data,
 			}
 
@@ -72,7 +72,7 @@ def test_upload_geotiff_chunk(test_geotiff, auth_token, test_user):
 				assert dataset['aquisition_year'] == int(form_data['aquisition_year'])
 
 				# Verify file exists with correct name
-				assert dataset['file_name'] == test_geotiff.name
+				assert dataset['file_name'] == test_file.name
 				expected_filename = f'{dataset_id}_ortho.tif'
 				archive_path = settings.archive_path / expected_filename
 				assert archive_path.exists()

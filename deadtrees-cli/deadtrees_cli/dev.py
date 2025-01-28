@@ -109,4 +109,33 @@ class DevCommands:
             '0.0.0.0:5678',
             '-m', 
             'processor.src.continuous_processor'
-        ]) 
+        ])
+
+    def debug_cli(self, test_path: Optional[str] = None, port: int = 5680):
+        """
+        Debug CLI tests
+        
+        Args:
+            test_path: Specific test file or directory to run
+            port: Debug port (default: 5680)
+        """
+        cmd = [
+            'python',
+            '-m',
+            'debugpy',
+            '--listen',
+            f'0.0.0.0:{port}',
+            '--wait-for-client',
+            '-m',
+            'pytest',
+            '-v',
+        ]
+
+        if test_path:
+            cmd.append(test_path)
+        else:
+            cmd.append('deadtrees-cli/tests/')
+
+        print(f'Starting CLI debug session on port {port}')
+        print('Waiting for debugger to attach...')
+        self._run_command(cmd) 

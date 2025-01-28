@@ -8,6 +8,9 @@ import os
 # load an .env file if it exists
 load_dotenv()
 
+# Determine environment
+ENV = os.getenv('ENV', 'development')
+IS_DEVELOPMENT = ENV == 'development'
 
 _tables = {
 	'datasets': 'v2_datasets',
@@ -26,19 +29,6 @@ _tables = {
 	'queue_positions': 'v2_queue_positions',
 }
 
-# _dev_tables = {
-# 	'datasets': 'dev_datasets',
-# 	'metadata': 'dev_metadata',
-# 	'cogs': 'dev_cogs',
-# 	'labels': 'dev_labels',
-# 	'thumbnails': 'dev_thumbnails',
-# 	'logs': 'dev_logs',
-# 	'label_objects': 'dev_label_objects',
-# 	'queue': 'dev_queue',
-# 	'queue_positions': 'dev_queue_positions',
-# 	'geotiff_info': 'dev_geotiff_info',
-# }
-
 
 BASE = Path(__file__).parent.parent
 ASSETS_DIR = BASE / 'assets'
@@ -46,7 +36,11 @@ ASSETS_DIR = BASE / 'assets'
 
 # load the settings from environment variables
 class Settings(BaseSettings):
-	# base directory for the storage app
+	# Environment indicator
+	ENV: str = ENV
+	DEV_MODE: bool = IS_DEVELOPMENT
+
+	# Base paths and directories
 	BASE_DIR: str = str(BASE)
 	# Default GADM path in assets, can be overridden by env var
 	GADM_DATA_PATH: str = str(Path('/app/assets/gadm/gadm_410.gpkg'))
@@ -64,12 +58,12 @@ class Settings(BaseSettings):
 	# tmp_processing_path: str = str(Path(tempfile.mkdtemp(prefix='processing')))
 
 	# supabase settings for supabase authentication
-	SUPABASE_URL: Optional[str] = None
-	SUPABASE_KEY: Optional[str] = None
+	SUPABASE_URL: str
+	SUPABASE_KEY: str
 
 	# some basic settings for the UVICORN server
-	UVICORN_HOST: str = '127.0.0.1'
-	UVICORN_PORT: int = 8000
+	UVICORN_HOST: str = '127.0.0.1' if IS_DEVELOPMENT else '0.0.0.0'
+	UVICORN_PORT: int = 8017 if IS_DEVELOPMENT else 8000
 	UVICORN_ROOT_PATH: str = ''
 	UVICORN_PROXY_HEADERS: bool = True
 
@@ -79,7 +73,7 @@ class Settings(BaseSettings):
 	STORAGE_SERVER_DATA_PATH: str = ''
 
 	# api endpoint
-	API_ENDPOINT: str = 'https://data.deadtrees.earth/api/v1/'
+	API_ENDPOINT: str = 'http://localhost:8017/api/v1/' if IS_DEVELOPMENT else 'https://data.deadtrees.earth/api/v1/'
 	API_ENTPOINT_DATASETS: str = API_ENDPOINT + 'datasets/'
 
 	# processor settings

@@ -27,6 +27,12 @@ setup(
         "pydantic-partial>=0.3.1",
         "pydantic-settings>=2.0.0"
     ],
+    extras_require={
+        'test': [
+            'pytest>=7.0.0',
+            'debugpy>=1.8.0',
+        ]
+    },
     entry_points={
         'console_scripts': [
             'deadtrees=deadtrees_cli.cli:main',
