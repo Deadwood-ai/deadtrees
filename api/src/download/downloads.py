@@ -27,12 +27,13 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 	label_gdf.set_crs('EPSG:4326', inplace=True)
 	label_gdf.to_file(label_file, driver='GPKG', layer='labels')
 
-	# create a layer for the aoi
-	aoi_gdf = gpd.GeoDataFrame.from_features(
-		[{'type': 'Feature', 'geometry': label.aoi.model_dump(), 'properties': {'dataset_id': label.dataset_id}}]
-	)
-	aoi_gdf.set_crs('EPSG:4326', inplace=True)
-	aoi_gdf.to_file(label_file, driver='GPKG', layer='aoi')
+	# create a layer for the aoi if it is not None
+	if label.aoi is not None:
+		aoi_gdf = gpd.GeoDataFrame.from_features(
+			[{'type': 'Feature', 'geometry': label.aoi.model_dump(), 'properties': {'dataset_id': label.dataset_id}}]
+		)
+		aoi_gdf.set_crs('EPSG:4326', inplace=True)
+		aoi_gdf.to_file(label_file, driver='GPKG', layer='aoi')
 
 	return label_file
 
