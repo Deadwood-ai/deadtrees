@@ -1,5 +1,7 @@
 import subprocess
+import os
 from typing import Optional, List
+from datetime import datetime
 
 
 class DevCommands:
@@ -17,11 +19,66 @@ class DevCommands:
 			print(f'Error: {str(e)}')
 			raise
 
-	def up(self):
-		"""Start the test environment and rebuild containers if needed"""
-		self._run_command(['docker', 'compose', '-f', self.test_compose_file, 'up', '-d', '--build'])
+	def _check_rebuild_needed(self) -> List[str]:
+		"""Check which services need rebuilding by comparing image and dockerfile timestamps"""
+		services_to_rebuild = []
 
-	def down(self):
+		# Get list of all services
+		result = subprocess.run(
+			['docker', 'compose', '-f', self.test_compose_file, 'config', '--services'],
+			capture_output=True,
+			text=True,
+			check=True,
+		)
+		services = result.stdout.strip().split('\n')
+
+		for service in services:
+			# Check if image exists
+			result = subprocess.run(
+				['docker', 'compose', '-f', self.test_compose_file, 'images', '-q', service],
+				capture_output=True,
+				text=True,
+				check=False,
+			)
+
+			if not result.stdout.strip():
+				services_to_rebuild.append(service)
+				continue
+
+			# Get Dockerfile timestamp if it exists
+			dockerfile_path = f'./{service}/Dockerfile'
+			if os.path.exists(dockerfile_path):
+				dockerfile_mtime = os.path.getmtime(dockerfile_path)
+
+				# Get image creation timestamp
+				result = subprocess.run(
+					['docker', 'inspect', '-f', '{{.Created}}', f'deadwood_network-{service}'],
+					capture_output=True,
+					text=True,
+					check=False,
+				)
+
+				if result.returncode == 0:
+					image_timestamp = datetime.fromisoformat(result.stdout.strip().replace('Z', '+00:00'))
+					if dockerfile_mtime > image_timestamp.timestamp():
+						services_to_rebuild.append(service)
+
+		return services_to_rebuild
+
+	def start(self, force_rebuild: bool = False):
+		"""Start the test environment and rebuild containers if needed"""
+		if force_rebuild:
+			services_to_rebuild = ['--build']
+		else:
+			services_to_rebuild = self._check_rebuild_needed()
+			if services_to_rebuild:
+				print(f'Rebuilding services: {", ".join(services_to_rebuild)}')
+				services_to_rebuild = ['--build'] + services_to_rebuild
+
+		cmd = ['docker', 'compose', '-f', self.test_compose_file, 'up', '-d'] + services_to_rebuild
+		self._run_command(cmd)
+
+	def stop(self):
 		"""Stop the test environment"""
 		self._run_command(['docker', 'compose', '-f', self.test_compose_file, 'down'])
 

@@ -24,7 +24,7 @@ services:
       - STORAGE_SERVER_USERNAME=root
       - STORAGE_SERVER_DATA_PATH=/data
       - PROCESSOR_USERNAME=processor@deadtrees.earth
-      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_URL=http://host.docker.internal:54321
       - SUPABASE_KEY=${SUPABASE_KEY}
       - BASE_DIR=/data
       - PROCESSOR_PASSWORD=${PROCESSOR_PASSWORD}
@@ -60,7 +60,7 @@ services:
       - UVICORN_HOST=0.0.0.0
       - UVICORN_PORT=8017
       - PYTEST_ADDOPTS=--color=yes
-      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_URL=http://host.docker.internal:54321
       - SUPABASE_KEY=${SUPABASE_KEY}
       - BASE_DIR=/data
       - ENV=development

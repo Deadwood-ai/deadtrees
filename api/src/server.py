@@ -2,6 +2,7 @@ from fastapi import FastAPI, Response
 from starlette.middleware.cors import CORSMiddleware
 
 from shared import monitoring
+import logging
 
 from shared.__version__ import __version__
 from .routers import process, upload, info, auth, labels, download
@@ -10,19 +11,26 @@ app = FastAPI(
 	title='Deadwood-AI API',
 	description='This is the Deadwood-AI API. It is used to manage files uploads to the Deadwood-AI backend and the preprocessing of uploads. Note that the download is managed by a sub-application at `/download/`.',
 	version=__version__,
+	root_path='/api/v1',
 )
 
 monitoring.logfire.instrument_fastapi(app)
+logging.basicConfig(level=logging.INFO)
 
-
-# add CORS middleware
+# Comprehensive CORS configuration
 app.add_middleware(
 	CORSMiddleware,
-	allow_origins=['https://deadtrees.earth', 'https://www.deadtrees.earth'],
-	allow_origin_regex='https://deadwood-d4a4b.*|http://(127\\.0\\.0\\.1|localhost)(:\\d+)?',
+	allow_origins=[
+		'https://deadtrees.earth',
+		'https://www.deadtrees.earth',
+		'http://10.4.113.132:5173',
+		'http://localhost:5173',
+	],
 	allow_credentials=True,
-	allow_methods=['OPTIONS', 'GET', 'POST', 'PUT'],
-	allow_headers=['Content-Type', 'Authorization', 'Origin', 'Accept'],
+	allow_methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+	allow_headers=['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+	expose_headers=['Content-Length', 'Content-Range'],
+	max_age=3600,
 )
 
 
