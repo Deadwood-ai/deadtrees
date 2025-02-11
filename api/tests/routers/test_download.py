@@ -20,7 +20,7 @@ def test_dataset_for_download(auth_token, data_directory, test_file, test_user):
 	with use_client(auth_token) as client:
 		# Copy test file to archive directory
 		file_name = 'test-download.tif'
-		archive_path = data_directory / settings.ARCHIVE_DIR / file_name
+		archive_path = data_directory / settings.archive_path / file_name
 		shutil.copy2(test_file, archive_path)
 
 		# Create test dataset with combined metadata fields
@@ -75,7 +75,7 @@ def test_download_dataset(auth_token, test_dataset_for_download):
 	"""Test downloading a complete dataset ZIP bundle"""
 	# Make request to download endpoint using TestClient
 	response = client.get(
-		f'/download/datasets/{test_dataset_for_download}/dataset.zip',
+		f'/api/v1/download/datasets/{test_dataset_for_download}/dataset.zip',
 		headers={'Authorization': f'Bearer {auth_token}'},
 		follow_redirects=False,  # Don't follow redirects to check the nginx URL
 	)
@@ -103,7 +103,7 @@ def test_download_cleanup(auth_token, test_dataset_for_download):
 	"""Test that downloaded files are cleaned up properly"""
 	# Make initial download request
 	response = client.get(
-		f'/download/datasets/{test_dataset_for_download}/dataset.zip',
+		f'/api/v1/download/datasets/{test_dataset_for_download}/dataset.zip',
 		headers={'Authorization': f'Bearer {auth_token}'},
 		follow_redirects=False,
 	)

@@ -90,6 +90,10 @@ http://localhost:8080/api/v1/docs
 # Upload Chunks
 http://localhost:8080/api/v1/datasets/chunk
 
+# Download Endpoint
+http://localhost:8080/api/v1/download/docs
+http://localhost:8080/api/v1/download/datasets/1/dataset.zip
+
 # supabase studio
 http://127.0.0.1:54323
 
