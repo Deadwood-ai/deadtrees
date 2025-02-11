@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from api.src.server import app
 from shared.db import use_client
 from shared.settings import settings
-from shared.models import TaskTypeEnum, LicenseEnum, PlatformEnum, DatasetAccessEnum
+from shared.models import TaskTypeEnum, LicenseEnum, PlatformEnum, DatasetAccessEnum, StatusEnum
 
 client = TestClient(app)
 
@@ -17,6 +17,7 @@ def test_dataset(auth_token, test_user):
 	try:
 		# Create test dataset
 		with use_client(auth_token) as supabaseClient:
+			# Create dataset
 			dataset_data = {
 				'file_name': 'test-process.tif',
 				'user_id': test_user,
@@ -31,6 +32,14 @@ def test_dataset(auth_token, test_user):
 			response = supabaseClient.table(settings.datasets_table).insert(dataset_data).execute()
 			dataset_id = response.data[0]['id']
 
+			# Create initial status entry
+			status_data = {
+				'dataset_id': dataset_id,
+				'is_upload_done': True,  # Set to True so processing can begin
+				'current_status': StatusEnum.idle,
+			}
+			supabaseClient.table(settings.statuses_table).insert(status_data).execute()
+
 			yield dataset_id
 
 	finally:
@@ -39,6 +48,8 @@ def test_dataset(auth_token, test_user):
 			with use_client(auth_token) as supabaseClient:
 				# Delete from queue table first (this will cascade to queue_positions view)
 				supabaseClient.table(settings.queue_table).delete().eq('dataset_id', dataset_id).execute()
+				# Delete the status entry
+				supabaseClient.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
 				# Delete the dataset
 				supabaseClient.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 

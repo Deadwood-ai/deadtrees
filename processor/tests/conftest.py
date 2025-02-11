@@ -5,7 +5,7 @@ from pathlib import Path
 
 from shared.db import use_client
 from shared.settings import settings
-
+from shared.models import StatusEnum
 from shared.testing.fixtures import (
 	auth_token,
 	test_file,
@@ -60,10 +60,19 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 			}
 			client.table(settings.orthos_table).insert(ortho_data).execute()
 
-			# Create initial status entry
+			# Create initial status entry with is_upload_done set to True
 			status_data = {
 				'dataset_id': dataset_id,
-				'current_status': 'idle',
+				'current_status': StatusEnum.idle,
+				'is_upload_done': True,  # This is needed for processing to begin
+				'is_ortho_done': False,
+				'is_cog_done': False,
+				'is_thumbnail_done': False,
+				'is_deadwood_done': False,
+				'is_forest_cover_done': False,
+				'is_metadata_done': False,
+				'is_audited': False,
+				'has_error': False,
 			}
 			client.table(settings.statuses_table).insert(status_data).execute()
 

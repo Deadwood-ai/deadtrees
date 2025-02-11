@@ -64,7 +64,7 @@ class Settings(BaseSettings):
 	# some basic settings for the UVICORN server
 	UVICORN_HOST: str = '127.0.0.1' if IS_DEVELOPMENT else '0.0.0.0'
 	UVICORN_PORT: int = 8017 if IS_DEVELOPMENT else 8000
-	UVICORN_ROOT_PATH: str = ''
+	UVICORN_ROOT_PATH: str = '/api/v1'
 	UVICORN_PROXY_HEADERS: bool = True
 
 	# storage server settings

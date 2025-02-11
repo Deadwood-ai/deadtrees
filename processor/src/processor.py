@@ -8,6 +8,7 @@ from shared.logger import logger
 from .process_thumbnail import process_thumbnail
 from .process_cog import process_cog
 from .process_deadwood_segmentation import process_deadwood_segmentation
+from .process_metadata import process_metadata
 from .exceptions import ProcessorError, AuthenticationError, DatasetError, ProcessingError, StorageError
 
 
@@ -60,13 +61,31 @@ def get_next_task(token: str) -> QueueTask:
 
 
 def is_dataset_uploaded_or_processed(task: QueueTask, token: str) -> bool:
+	"""Check if a dataset is ready for processing by verifying its upload status.
+
+	Args:
+	    task (QueueTask): The task to check
+	    token (str): Authentication token
+
+	Returns:
+	    bool: True if dataset is uploaded and ready for processing
+	"""
 	with use_client(token) as client:
-		response = client.table(settings.datasets_table).select('*').eq('id', task.dataset_id).execute()
-		msg = f'dataset status: {response.data[0]["status"]}'
+		response = (
+			client.table(settings.statuses_table).select('is_upload_done').eq('dataset_id', task.dataset_id).execute()
+		)
+
+		if not response.data:
+			logger.warning(
+				f'No status found for dataset {task.dataset_id}', extra={'token': token, 'dataset_id': task.dataset_id}
+			)
+			return False
+
+		is_uploaded = response.data[0]['is_upload_done']
+		msg = f'dataset upload status: {is_uploaded}'
 		logger.info(msg, extra={'token': token})
-	if response.data[0]['status'] in [StatusEnum.uploaded, StatusEnum.processed]:
-		return True
-	return False
+
+		return is_uploaded
 
 
 def process_task(task: QueueTask, token: str):
@@ -76,11 +95,11 @@ def process_task(task: QueueTask, token: str):
 		raise AuthenticationError('Invalid token', token=token, task_id=task.id)
 
 	# Process convert_geotiff first if it's in the list
-	if TaskTypeEnum.convert_geotiff in task.task_types:
+	if TaskTypeEnum.geotiff in task.task_types:
 		try:
 			process_geotiff(task, settings.processing_path)
 		except Exception as e:
-			raise ProcessingError(str(e), task_type='convert_geotiff', task_id=task.id, dataset_id=task.dataset_id)
+			raise ProcessingError(str(e), task_type='geotiff', task_id=task.id, dataset_id=task.dataset_id)
 
 	# Process cog if requested
 	if TaskTypeEnum.cog in task.task_types:
@@ -98,8 +117,16 @@ def process_task(task: QueueTask, token: str):
 		except Exception as e:
 			raise ProcessingError(str(e), task_type='thumbnail', task_id=task.id, dataset_id=task.dataset_id)
 
+	# Process metadata if requested
+	if TaskTypeEnum.metadata in task.task_types:
+		try:
+			logger.info('processing metadata')
+			process_metadata(task, settings.processing_path)
+		except Exception as e:
+			raise ProcessingError(str(e), task_type='metadata', task_id=task.id, dataset_id=task.dataset_id)
+
 	# Process deadwood_segmentation if requested
-	if TaskTypeEnum.deadwood_segmentation in task.task_types:
+	if TaskTypeEnum.deadwood in task.task_types:
 		try:
 			process_deadwood_segmentation(task, token, settings.processing_path)
 		except Exception as e:
