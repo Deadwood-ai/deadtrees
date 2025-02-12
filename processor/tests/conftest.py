@@ -1,11 +1,11 @@
 import pytest
-
+from datetime import datetime
 import shutil
 from pathlib import Path
 
 from shared.db import use_client
 from shared.settings import settings
-from shared.models import StatusEnum
+from shared.models import StatusEnum, Ortho
 from shared.testing.fixtures import (
 	auth_token,
 	test_file,
@@ -57,8 +57,10 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 				'bbox': 'BOX(13.4050 52.5200,13.4150 52.5300)',  # Example bbox for Berlin
 				'ortho_upload_runtime': 0.1,
 				'ortho_processed': False,
+				'created_at': datetime.now(),
 			}
-			client.table(settings.orthos_table).insert(ortho_data).execute()
+			ortho = Ortho(**ortho_data)
+			client.table(settings.orthos_table).insert(ortho.model_dump()).execute()
 
 			# Create initial status entry with is_upload_done set to True
 			status_data = {

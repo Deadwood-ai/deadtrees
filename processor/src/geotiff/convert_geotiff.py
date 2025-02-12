@@ -1,6 +1,7 @@
 from datetime import datetime
 import subprocess
 from pathlib import Path
+from shared.utils import get_transformed_bounds
 from rio_cogeo.cogeo import cog_info
 from shared.settings import settings
 from shared.db import use_client
@@ -58,6 +59,7 @@ def update_ortho_table(file_path: Path, dataset_id: int, ortho_processing_runtim
 	try:
 		info = cog_info(str(file_path))
 		sha256 = get_file_identifier(file_path)
+		bbox = get_transformed_bounds(file_path)
 		ortho = Ortho(
 			dataset_id=dataset_id,
 			ortho_file_name=file_path.name,

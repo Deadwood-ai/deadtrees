@@ -1,7 +1,7 @@
 import os
 import paramiko
 from pathlib import Path
-
+from datetime import datetime
 from shared.logger import logger
 from shared.settings import settings
 from shared.models import StatusEnum
@@ -84,8 +84,10 @@ def push_file_to_storage_server(local_file_path: str, remote_file_path: str, tok
 					logger.info(f'Uploading file to temporary location: {temp_remote_path}', extra={'token': token})
 					sftp.put(local_file_path, temp_remote_path)
 
-					# Move existing file to trash directory
-					trash_path = settings.trash_path / Path(remote_file_path).name
+					# Move existing file to trash directory with timestamp in the filename
+					timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+					trash_filename = f'{Path(remote_file_path).stem}_{timestamp}{Path(remote_file_path).suffix}'
+					trash_path = settings.trash_path / trash_filename
 					sftp.rename(remote_file_path, str(trash_path))
 					logger.info(f'Moved existing file to trash: {trash_path}', extra={'token': token})
 

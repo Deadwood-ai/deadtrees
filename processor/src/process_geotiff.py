@@ -1,15 +1,17 @@
 from pathlib import Path
 import time
-import uuid
 
 from shared.db import use_client, login, verify_token
 from shared.status import update_status
 from shared.settings import settings
 from shared.models import StatusEnum, Ortho, QueueTask
 from shared.logger import logger
+from shared.ortho import upsert_ortho_entry
 from .utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
-from .geotiff.convert_geotiff import convert_geotiff, verify_geotiff, update_ortho_table
+from .geotiff.convert_geotiff import convert_geotiff, verify_geotiff
+from rio_cogeo.cogeo import cog_info
+from shared.hash import get_file_identifier
 
 
 def process_geotiff(task: QueueTask, temp_dir: Path):
@@ -61,8 +63,20 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 		# If verification successful, replace original file on storage server
 		push_file_to_storage_server(str(path_converted), storage_server_path, token)
 
-		# Update GeoTiff info using the existing function
-		update_ortho_table(path_converted, ortho.dataset_id, ortho_processing_runtime, token)
+		# Update ortho entry with processing information
+		sha256 = get_file_identifier(path_converted)
+		ortho_info = cog_info(str(path_converted))
+
+		upsert_ortho_entry(
+			dataset_id=ortho.dataset_id,
+			file_path=path_converted,
+			ortho_processing_runtime=ortho_processing_runtime,
+			ortho_info=ortho_info.model_dump(),
+			version=1,
+			sha256=sha256,
+			ortho_processed=True,
+			token=token,
+		)
 
 		# Log conversion time
 		logger.info(

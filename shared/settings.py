@@ -54,6 +54,8 @@ class Settings(BaseSettings):
 	LABEL_OBJECTS_DIR: str = 'label_objects'
 	TRASH_DIR: str = 'trash'
 	DOWNLOADS_DIR: str = 'downloads'
+	PROCESSING_DIR: str = 'processing_dir'
+
 	# Temporary processing directory
 	# tmp_processing_path: str = str(Path(tempfile.mkdtemp(prefix='processing')))
 
@@ -82,7 +84,6 @@ class Settings(BaseSettings):
 	SSH_PRIVATE_KEY_PATH: str = '/app/ssh_key'
 	SSH_PRIVATE_KEY_PASSPHRASE: str = ''
 
-	PROCESSING_DIR: Path = BASE / 'processing_dir'
 	# monitoring
 	LOGFIRE_TOKEN: str = None
 	LOGFIRE_PYDANTIC_PLUGIN_RECORD: str = 'all'
@@ -92,14 +93,16 @@ class Settings(BaseSettings):
 	TEST_USER_PASSWORD: str = 'test123456'
 
 	@property
-	def processing_path(self) -> Path:
-		if not self.PROCESSING_DIR.exists():
-			self.PROCESSING_DIR.mkdir(parents=True, exist_ok=True)
-		return self.PROCESSING_DIR
-
-	@property
 	def base_path(self) -> Path:
 		path = Path(self.BASE_DIR)
+		if not path.exists():
+			path.mkdir(parents=True, exist_ok=True)
+
+		return path
+
+	@property
+	def processing_path(self) -> Path:
+		path = self.base_path / self.PROCESSING_DIR
 		if not path.exists():
 			path.mkdir(parents=True, exist_ok=True)
 

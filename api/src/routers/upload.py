@@ -12,12 +12,10 @@ from shared.settings import settings
 from shared.logger import logger
 from shared.status import update_status
 from shared.hash import get_file_identifier
+from shared.ortho import upsert_ortho_entry
 
-from ..upload.upload import (
-	get_transformed_bounds,
-	create_dataset_entry,
-	create_ortho_entry,
-)
+from ..upload.upload import create_dataset_entry
+
 
 router = APIRouter()
 
@@ -96,14 +94,12 @@ async def upload_geotiff_chunk(
 
 			# Create ortho entry
 			sha256 = get_file_identifier(target_path)
-			bbox = get_transformed_bounds(target_path)
 			ortho_info = cog_info(target_path)
 
-			create_ortho_entry(
+			upsert_ortho_entry(
 				dataset_id=dataset.id,
 				file_path=target_path,
 				ortho_upload_runtime=ortho_upload_runtime,
-				bbox=bbox,
 				ortho_info=ortho_info,
 				version=1,
 				sha256=sha256,

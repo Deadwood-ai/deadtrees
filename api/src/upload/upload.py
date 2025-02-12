@@ -90,46 +90,46 @@ def create_dataset_entry(
 			raise HTTPException(status_code=400, detail=f'Error creating dataset entry: {str(e)}')
 
 
-def create_ortho_entry(
-	dataset_id: int,
-	file_path: Path,
-	ortho_upload_runtime: float,
-	bbox: tuple,
-	ortho_info: dict,
-	version: int,
-	sha256: str,
-	token: str,
-) -> None:
-	"""Create a new ortho entry in the database"""
+# def create_ortho_entry(
+# 	dataset_id: int,
+# 	file_path: Path,
+# 	ortho_upload_runtime: float,
+# 	bbox: tuple,
+# 	ortho_info: dict,
+# 	version: int,
+# 	sha256: str,
+# 	token: str,
+# ) -> None:
+# 	"""Create a new ortho entry in the database"""
 
-	if bbox and len(bbox) == 4:
-		bbox_string = f'BOX({bbox[0]} {bbox[1]},{bbox[2]} {bbox[3]})'
-	else:
-		bbox_string = None
+# 	if bbox and len(bbox) == 4:
+# 		bbox_string = f'BOX({bbox[0]} {bbox[1]},{bbox[2]} {bbox[3]})'
+# 	else:
+# 		bbox_string = None
 
-	ortho_data = {
-		'dataset_id': dataset_id,
-		'ortho_file_name': file_path.name,
-		'version': version,
-		'file_size': file_path.stat().st_size,
-		'bbox': bbox_string,
-		'sha256': sha256,
-		'ortho_info': dict(ortho_info),
-		'ortho_upload_runtime': ortho_upload_runtime,
-		'ortho_processing': False,
-		'ortho_processed': False,
-	}
+# 	ortho_data = {
+# 		'dataset_id': dataset_id,
+# 		'ortho_file_name': file_path.name,
+# 		'version': version,
+# 		'file_size': file_path.stat().st_size,
+# 		'bbox': bbox_string,
+# 		'sha256': sha256,
+# 		'ortho_info': dict(ortho_info),
+# 		'ortho_upload_runtime': ortho_upload_runtime,
+# 		'ortho_processing': False,
+# 		'ortho_processed': False,
+# 	}
 
-	ortho = Ortho(**ortho_data)
+# 	ortho = Ortho(**ortho_data)
 
-	with use_client(token) as client:
-		try:
-			send_data = {k: v for k, v in ortho.model_dump().items() if k != 'id' and v is not None}
-			response = client.table(settings.orthos_table).insert(send_data).execute()
-			return Ortho(**response.data[0])
-		except Exception as e:
-			logger.exception(f'Error creating ortho entry: {str(e)}', extra={'token': token})
-			raise HTTPException(status_code=400, detail=f'Error creating ortho entry: {str(e)}')
+# 	with use_client(token) as client:
+# 		try:
+# 			send_data = {k: v for k, v in ortho.model_dump().items() if k != 'id' and v is not None}
+# 			response = client.table(settings.orthos_table).insert(send_data).execute()
+# 			return Ortho(**response.data[0])
+# 		except Exception as e:
+# 			logger.exception(f'Error creating ortho entry: {str(e)}', extra={'token': token})
+# 			raise HTTPException(status_code=400, detail=f'Error creating ortho entry: {str(e)}')
 
 
 # def update_dataset_entry(dataset_id: int, file_size: int, sha256: str, bbox):
