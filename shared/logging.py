@@ -17,6 +17,7 @@ class LogCategory(Enum):
 	ADD_PROCESS = 'add_process'  # Add processing operations
 
 	# Processing Pipeline
+	PROCESS = 'process'  # Processing operations
 	ORTHO = 'ortho'  # Orthophoto processing
 	COG = 'cog'  # COG generation
 	THUMBNAIL = 'thumb'  # Thumbnail creation

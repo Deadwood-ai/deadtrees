@@ -13,6 +13,9 @@ from .exceptions import AuthenticationError, DatasetError, ProcessingError
 
 
 def process_deadwood_segmentation(task: QueueTask, token: str, temp_dir: Path):
+	# Move import inside function so it's only loaded when needed
+	import torch
+
 	# login with the processor
 	token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 
@@ -47,6 +50,10 @@ def process_deadwood_segmentation(task: QueueTask, token: str, temp_dir: Path):
 		)
 		predict_deadwood(task.dataset_id, file_path, user.id, token)
 
+		# Force CUDA cache cleanup if using GPU
+		if torch.cuda.is_available():
+			torch.cuda.empty_cache()
+
 		# Update successful completion status
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 		update_status(token, dataset_id=dataset.id, current_status=StatusEnum.idle, is_deadwood_done=True)
@@ -54,6 +61,8 @@ def process_deadwood_segmentation(task: QueueTask, token: str, temp_dir: Path):
 		logger.info(f'Deadwood segmentation completed for dataset {task.dataset_id}', extra={'token': token})
 
 	except Exception as e:
+		if torch.cuda.is_available():
+			torch.cuda.empty_cache()
 		logger.error(
 			f'Error in deadwood segmentation: {e}',
 			LogContext(category=LogCategory.ERROR, dataset_id=dataset.id, user_id=user.id, token=token),
