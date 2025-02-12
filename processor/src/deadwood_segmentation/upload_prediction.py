@@ -4,6 +4,7 @@ from shared.db import login, verify_token, use_client
 from shared.logger import logger
 from shared.settings import settings
 from ..exceptions import AuthenticationError
+from shared.logging import LogContext, LogCategory
 
 
 def upload_to_supabase(dataset_id, label, aoi, label_type, label_source, label_quality):
@@ -30,6 +31,7 @@ def upload_to_supabase(dataset_id, label, aoi, label_type, label_source, label_q
 			return response
 	except Exception as e:
 		logger.error(
-			f'Error: {e}, {response.text}, {response.status_code}, {response.headers}, {response.json()}, {api_endpoint}'
+			f'Error uploading prediction: {e}',
+			LogContext(category=LogCategory.ERROR, dataset_id=dataset_id, user_id=user.id, token=token),
 		)
 		return None

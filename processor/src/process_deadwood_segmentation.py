@@ -5,6 +5,7 @@ from shared.settings import settings
 from shared.models import StatusEnum, Dataset, QueueTask
 from shared.logger import logger
 from shared.status import update_status
+from shared.logging import LogContext, LogCategory
 
 from .utils.ssh import pull_file_from_storage_server
 from .deadwood_segmentation.predict_deadwood import predict_deadwood
@@ -24,7 +25,10 @@ def process_deadwood_segmentation(task: QueueTask, token: str, temp_dir: Path):
 			response = client.table(settings.datasets_table).select('*').eq('id', task.dataset_id).execute()
 			dataset = Dataset(**response.data[0])
 	except Exception as e:
-		logger.error(f'Error: {e}')
+		logger.error(
+			f'Error: {e}',
+			LogContext(category=LogCategory.ERROR, dataset_id=task.dataset_id, user_id=user.id, token=token),
+		)
 		raise DatasetError(f'Error fetching dataset: {e}')
 
 	# Update initial status
@@ -39,7 +43,7 @@ def process_deadwood_segmentation(task: QueueTask, token: str, temp_dir: Path):
 	try:
 		logger.info(
 			f'Running deadwood segmentation for dataset {task.dataset_id} with file path {str(file_path)}',
-			extra={'token': token},
+			LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=user.id, token=token),
 		)
 		predict_deadwood(task.dataset_id, file_path, user.id, token)
 
@@ -50,6 +54,9 @@ def process_deadwood_segmentation(task: QueueTask, token: str, temp_dir: Path):
 		logger.info(f'Deadwood segmentation completed for dataset {task.dataset_id}', extra={'token': token})
 
 	except Exception as e:
-		logger.error(f'Error: {e}', extra={'token': token})
+		logger.error(
+			f'Error in deadwood segmentation: {e}',
+			LogContext(category=LogCategory.ERROR, dataset_id=dataset.id, user_id=user.id, token=token),
+		)
 		update_status(token, dataset_id=dataset.id, has_error=True, error_message=str(e))
 		raise ProcessingError(str(e), task_type='deadwood_segmentation', task_id=task.id, dataset_id=dataset.id)

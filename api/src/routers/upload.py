@@ -9,10 +9,10 @@ from rio_cogeo.cogeo import cog_info
 from shared.models import StatusEnum, LicenseEnum, PlatformEnum, DatasetAccessEnum
 from shared.db import verify_token
 from shared.settings import settings
-from shared.logger import logger
 from shared.status import update_status
 from shared.hash import get_file_identifier
 from shared.ortho import upsert_ortho_entry
+from shared.logging import LogCategory, LogContext, UnifiedLogger, SupabaseHandler
 
 from ..upload.upload import create_dataset_entry
 
@@ -20,6 +20,11 @@ from ..upload.upload import create_dataset_entry
 router = APIRouter()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token')
+
+# Create logger instance
+logger = UnifiedLogger(__name__)
+# Add Supabase handler after initialization
+logger.add_supabase_handler(SupabaseHandler())
 
 
 @router.post('/datasets/chunk')
@@ -45,6 +50,7 @@ async def upload_geotiff_chunk(
 	"""Handle chunked upload of a GeoTIFF file with incremental hash computation"""
 	user = verify_token(token)
 	if not user:
+		logger.error('Invalid token provided for upload', LogContext(category=LogCategory.AUDIT, token=token))
 		raise HTTPException(status_code=401, detail='Invalid token')
 
 	# Start upload timer
@@ -56,12 +62,34 @@ async def upload_geotiff_chunk(
 	upload_file_name = f'{upload_id}.tif.tmp'
 	upload_target_path = settings.archive_path / upload_file_name
 
-	# For first chunk, create initial status entry
+	# Log chunk upload start
+	logger.info(
+		f'Processing chunk {chunk_index + 1}/{chunks_total} for file {file.filename}',
+		LogContext(
+			category=LogCategory.UPLOAD,
+			user_id=user.id,
+			token=token,
+			extra={'upload_id': upload_id, 'chunk_index': chunk_index, 'chunks_total': chunks_total},
+		),
+	)
+
 	# Write chunk
-	content = await file.read()
-	mode = 'wb' if chunk_index == 0 else 'ab'
-	async with aiofiles.open(upload_target_path, mode) as buffer:
-		await buffer.write(content)
+	try:
+		content = await file.read()
+		mode = 'wb' if chunk_index == 0 else 'ab'
+		async with aiofiles.open(upload_target_path, mode) as buffer:
+			await buffer.write(content)
+	except Exception as e:
+		logger.error(
+			f'Error writing chunk {chunk_index}: {str(e)}',
+			LogContext(
+				category=LogCategory.ERROR,
+				user_id=user.id,
+				token=token,
+				extra={'upload_id': upload_id, 'chunk_index': chunk_index},
+			),
+		)
+		raise HTTPException(status_code=500, detail=f'Error writing chunk: {str(e)}')
 
 	# Process final chunk
 	if chunk_index == chunks_total - 1:
@@ -70,13 +98,24 @@ async def upload_geotiff_chunk(
 			t2 = time.time()
 			ortho_upload_runtime = t2 - t1
 			authors_list = [author.strip() for author in authors.split(',')]
+
+			logger.info(
+				f'Creating dataset entry for {file.filename}',
+				LogContext(
+					category=LogCategory.SYSTEM,
+					user_id=user.id,
+					token=token,
+					extra={'upload_id': upload_id, 'file_name': file.filename},
+				),
+			)
+
 			# Create dataset entry
 			dataset = create_dataset_entry(
 				user_id=user.id,
 				file_name=file.filename,
 				license=license,
 				platform=platform,
-				authors=authors_list,  # TODO: Check authors in db, how to handle input?
+				authors=authors_list,
 				project_id=project_id,
 				aquisition_year=aquisition_year,
 				aquisition_month=aquisition_month,
@@ -95,6 +134,17 @@ async def upload_geotiff_chunk(
 			# Create ortho entry
 			sha256 = get_file_identifier(target_path)
 			ortho_info = cog_info(target_path)
+
+			logger.info(
+				f'Creating ortho entry for dataset {dataset.id}',
+				LogContext(
+					category=LogCategory.ORTHO,
+					user_id=user.id,
+					dataset_id=dataset.id,
+					token=token,
+					extra={'file_name': file_name},
+				),
+			)
 
 			upsert_ortho_entry(
 				dataset_id=dataset.id,
@@ -115,19 +165,44 @@ async def upload_geotiff_chunk(
 				has_error=False,
 			)
 
+			logger.info(
+				f'Upload completed successfully for dataset {dataset.id}',
+				LogContext(
+					category=LogCategory.UPLOAD,
+					user_id=user.id,
+					dataset_id=dataset.id,
+					token=token,
+					extra={
+						'file_size': target_path.stat().st_size,
+						'upload_time': ortho_upload_runtime,
+						'file_name': file_name,
+					},
+				),
+			)
+
 			# Update dataset object with new filename
 			return dataset
 
 		except Exception as e:
-			# Update status to indicate error
-			update_status(
-				token=token,
-				dataset_id=dataset.id,
-				current_status=StatusEnum.uploading,
-				has_error=True,
-				error_message=str(e),
+			logger.error(
+				f'Error processing final chunk: {str(e)}',
+				LogContext(
+					category=LogCategory.ERROR,
+					user_id=user.id,
+					dataset_id=dataset.id if 'dataset' in locals() else None,
+					token=token,
+					extra={'upload_id': upload_id, 'file_name': file.filename, 'error': str(e)},
+				),
 			)
-			logger.exception(f'Error processing final chunk: {e}', extra={'token': token})
+			# Update status to indicate error
+			if 'dataset' in locals():
+				update_status(
+					token=token,
+					dataset_id=dataset.id,
+					current_status=StatusEnum.uploading,
+					has_error=True,
+					error_message=str(e),
+				)
 			raise HTTPException(status_code=500, detail=str(e))
 
 	return {'message': f'Chunk {chunk_index} of {chunks_total} received'}

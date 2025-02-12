@@ -7,6 +7,7 @@ from shared.db import verify_token, use_client
 from shared.settings import settings
 from shared.models import TaskPayload, QueueTask, TaskTypeEnum
 from shared.logger import logger
+from shared.logging import LogContext, LogCategory
 
 # create the router for the processing
 router = APIRouter()
@@ -49,7 +50,7 @@ def create_processing_task(
 		raise  # Re-raise HTTP exceptions directly
 	except Exception as e:
 		msg = f'Error loading dataset {dataset_id}: {str(e)}'
-		logger.error(msg, extra={'token': token, 'user_id': user.id, 'dataset_id': dataset_id})
+		logger.error(msg, LogContext(category=LogCategory.ERROR, user_id=user.id, dataset_id=dataset_id, token=token))
 		raise HTTPException(status_code=500, detail=msg)
 
 	# Create the task payload
@@ -70,12 +71,12 @@ def create_processing_task(
 
 		logger.info(
 			f'Added {request.task_types} task for dataset {dataset_id} to queue.',
-			extra={'token': token, 'dataset_id': dataset_id, 'user_id': user.id},
+			LogContext(category=LogCategory.PROCESS, user_id=user.id, dataset_id=dataset_id, token=token),
 		)
 
 	except Exception as e:
 		msg = f'Error adding {request.task_types} task to queue: {str(e)}'
-		logger.error(msg, extra={'token': token, 'user_id': user.id, 'dataset_id': dataset_id})
+		logger.error(msg, LogContext(category=LogCategory.ERROR, user_id=user.id, dataset_id=dataset_id, token=token))
 		raise HTTPException(status_code=500, detail=msg)
 
 	# Load the current position assigned to this task
@@ -89,22 +90,14 @@ def create_processing_task(
 				task = QueueTask(**task_data)
 				logger.info(
 					f'Loaded task position for task ID {task.id}',
-					extra={
-						'token': token,
-						'user_id': user.id,
-						'dataset_id': dataset_id,
-					},
+					LogContext(category=LogCategory.PROCESS, user_id=user.id, dataset_id=dataset_id, token=token),
 				)
 				return task
 			else:
 				# Handle the case where no task data is found
 				logger.warning(
 					f'No task position found for task ID {payload.id}',
-					extra={
-						'token': token,
-						'user_id': user.id,
-						'dataset_id': dataset_id,
-					},
+					LogContext(category=LogCategory.WARNING, user_id=user.id, dataset_id=dataset_id, token=token),
 				)
 				task = QueueTask(
 					id=payload.id,
@@ -116,11 +109,11 @@ def create_processing_task(
 					estimated_time=0.0,
 					task_types=validated_task_types,
 				)
-
 				return task
+
 	except Exception as e:
 		msg = f'Error loading task position: {str(e)}'
-		logger.error(msg, extra={'token': token, 'user_id': user.id, 'dataset_id': dataset_id})
+		logger.error(msg, LogContext(category=LogCategory.ERROR, user_id=user.id, dataset_id=dataset_id, token=token))
 		raise HTTPException(status_code=500, detail=msg)
 
 

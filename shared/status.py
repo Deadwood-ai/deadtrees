@@ -3,6 +3,7 @@ from .models import Status, StatusEnum
 from .db import use_client
 from .settings import settings
 from .logger import logger
+from shared.logging import LogContext, LogCategory
 
 
 def update_status(
@@ -76,5 +77,7 @@ def update_status(
 					client.table(settings.statuses_table).update(update_data).eq('dataset_id', dataset_id).execute()
 
 	except Exception as e:
-		logger.error(f'Error updating status: {e}', extra={'token': token, 'dataset_id': dataset_id})
+		logger.error(
+			f'Error updating status: {e}', LogContext(category=LogCategory.ERROR, dataset_id=dataset_id, token=token)
+		)
 		raise

@@ -10,6 +10,11 @@ from .process_cog import process_cog
 from .process_deadwood_segmentation import process_deadwood_segmentation
 from .process_metadata import process_metadata
 from .exceptions import ProcessorError, AuthenticationError, DatasetError, ProcessingError, StorageError
+from shared.logging import LogContext, LogCategory
+from shared.monitoring import setup_monitoring
+
+# Initialize monitoring at the start
+setup_monitoring()
 
 
 def current_running_tasks(token: str) -> int:
@@ -178,11 +183,7 @@ def background_process():
 		if task is not None and is_uploaded:
 			logger.info(
 				f'Start a new background process for queued task: {task}.',
-				extra={
-					'token': token,
-					# 'user_id': task.user_id,
-					'dataset_id': task.dataset_id,
-				},
+				LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 			)
 			process_task(task, token=token)
 
@@ -191,15 +192,11 @@ def background_process():
 		else:
 			# we expected a task here, but there was None
 			logger.error(
-				'Task was expected to be uploaded, but was not.',
-				extra={'token': token},
+				'Task was expected to be uploaded, but was not.', LogContext(category=LogCategory.ERROR, token=token)
 			)
 	else:
 		# inform no spot available
-		logger.debug(
-			'No spot available for new task.',
-			extra={'token': token},
-		)
+		logger.debug('No spot available for new task.', LogContext(category=LogCategory.DEBUG, token=token))
 		return
 		# restart this process after the configured delay
 		# Timer(interval=settings.task_retry_delay, function=background_process).start()

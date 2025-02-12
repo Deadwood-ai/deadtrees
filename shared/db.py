@@ -1,17 +1,18 @@
 from typing import Union, Literal, Optional, Generator
 from contextlib import contextmanager
 import time
+import logging
 
 from pydantic import BaseModel
 from shared.logging import get_logger
 from shared.models import StatusEnum
 from supabase import create_client, ClientOptions, Client
 from gotrue import User
+from shared.settings import settings
+from shared.db_client import use_client
 
-from .settings import settings
-
-# Create logger instance
-logger = get_logger(__name__)
+# Create logger instance at module level
+logger = logging.getLogger(__name__)
 
 # Global variable to store the cached session
 cached_session = None
