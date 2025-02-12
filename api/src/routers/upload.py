@@ -50,7 +50,7 @@ async def upload_geotiff_chunk(
 	"""Handle chunked upload of a GeoTIFF file with incremental hash computation"""
 	user = verify_token(token)
 	if not user:
-		logger.error('Invalid token provided for upload', LogContext(category=LogCategory.AUDIT, token=token))
+		logger.error('Invalid token provided for upload', LogContext(category=LogCategory.AUTH, token=token))
 		raise HTTPException(status_code=401, detail='Invalid token')
 
 	# Start upload timer
@@ -83,7 +83,7 @@ async def upload_geotiff_chunk(
 		logger.error(
 			f'Error writing chunk {chunk_index}: {str(e)}',
 			LogContext(
-				category=LogCategory.ERROR,
+				category=LogCategory.UPLOAD,
 				user_id=user.id,
 				token=token,
 				extra={'upload_id': upload_id, 'chunk_index': chunk_index},
@@ -102,7 +102,7 @@ async def upload_geotiff_chunk(
 			logger.info(
 				f'Creating dataset entry for {file.filename}',
 				LogContext(
-					category=LogCategory.SYSTEM,
+					category=LogCategory.UPLOAD,
 					user_id=user.id,
 					token=token,
 					extra={'upload_id': upload_id, 'file_name': file.filename},
@@ -138,7 +138,7 @@ async def upload_geotiff_chunk(
 			logger.info(
 				f'Creating ortho entry for dataset {dataset.id}',
 				LogContext(
-					category=LogCategory.ORTHO,
+					category=LogCategory.UPLOAD,
 					user_id=user.id,
 					dataset_id=dataset.id,
 					token=token,
@@ -187,7 +187,7 @@ async def upload_geotiff_chunk(
 			logger.error(
 				f'Error processing final chunk: {str(e)}',
 				LogContext(
-					category=LogCategory.ERROR,
+					category=LogCategory.UPLOAD,
 					user_id=user.id,
 					dataset_id=dataset.id if 'dataset' in locals() else None,
 					token=token,

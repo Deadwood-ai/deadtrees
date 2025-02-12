@@ -27,8 +27,6 @@ class LogCategory(Enum):
 	# System Operations
 	QUEUE = 'queue'  # Queue management
 	STATUS = 'status'  # Status updates
-	SYSTEM = 'system'  # System operations
-	ERROR = 'error'  # Error tracking
 
 
 class LogContext:
