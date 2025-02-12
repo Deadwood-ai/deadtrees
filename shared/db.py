@@ -4,12 +4,10 @@ import time
 import logging
 
 from pydantic import BaseModel
-from shared.logging import get_logger
 from shared.models import StatusEnum
 from supabase import create_client, ClientOptions, Client
 from gotrue import User
 from shared.settings import settings
-from shared.db_client import use_client
 
 # Create logger instance at module level
 logger = logging.getLogger(__name__)
@@ -112,8 +110,6 @@ def use_client(access_token: Optional[str] = None) -> Generator[Client, None, No
 
 		yield client
 	finally:
-		# client.auth.sign_out()
-		# client.auth.close()
 		pass
 
 

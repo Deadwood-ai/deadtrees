@@ -1,10 +1,11 @@
 import logging
+import time
 from typing import Any, Dict, Optional
 from enum import Enum
 import logfire
 from shared.settings import settings
 from shared.__version__ import __version__
-from shared.db_client import use_client
+from shared.db import use_client
 
 
 class LogCategory(Enum):
@@ -13,6 +14,7 @@ class LogCategory(Enum):
 	DATASET = 'dataset'  # Dataset management
 	LABEL = 'label'  # Label operations
 	AUTH = 'auth'  # Authentication events
+	ADD_PROCESS = 'add_process'  # Add processing operations
 
 	# Processing Pipeline
 	ORTHO = 'ortho'  # Orthophoto processing
@@ -52,8 +54,11 @@ class SupabaseHandler(logging.Handler):
 
 	def emit(self, record: logging.LogRecord) -> None:
 		try:
-			# Extract context from record
-			context = getattr(record, 'context', {})
+			token = None
+			if hasattr(record, 'token'):
+				token = record.token
+			elif hasattr(record, 'extra') and isinstance(record.extra, dict):
+				token = record.extra.get('token')
 
 			# Build log entry
 			log_entry = {
@@ -71,7 +76,7 @@ class SupabaseHandler(logging.Handler):
 
 			# Insert into v2_logs table
 			with self.use_client(getattr(record, 'token', None)) as client:
-				client.table('v2_logs').insert(log_entry).execute()
+				client.table(settings.logs_table).insert(log_entry).execute()
 
 		except Exception as e:
 			# Fallback to print if logging fails
@@ -107,6 +112,7 @@ class UnifiedLogger(logging.Logger):
 			}
 			kwargs['extra'] = extra
 
+		# Add small delay before any logging to ensure DB operations complete
 		self.log(level, msg, *args, **kwargs)
 
 	def info(self, msg: str, context: Optional[LogContext] = None, *args: Any, **kwargs: Any) -> None:
