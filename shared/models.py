@@ -205,7 +205,7 @@ class Ortho(BaseModel):
 	ortho_file_name: str
 	version: int
 	created_at: Optional[datetime] = None
-	file_size: int
+	ortho_file_size: int
 	bbox: Optional[BoundingBox] = None
 	sha256: Optional[str] = None
 	ortho_info: Optional[Dict] = None

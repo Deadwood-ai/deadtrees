@@ -99,7 +99,7 @@ class UnifiedLogger(logging.Logger):
 			self.addHandler(console_handler)
 
 			# Set base level to DEBUG in dev mode, INFO in production
-			self.setLevel(logging.DEBUG if settings.DEV_MODE else logging.INFO)
+			self.setLevel(logging.INFO if settings.DEV_MODE else logging.INFO)
 
 	def _log_with_context(self, level: int, msg: str, context: LogContext, *args: Any, **kwargs: Any) -> None:
 		if isinstance(context, LogContext):

@@ -37,14 +37,14 @@ def test_processor_user():
 	# Yield to run tests
 	yield user_id
 
-	# Cleanup: Delete the processor user if we have their ID
-	if user_id:
-		try:
-			# Need admin token to delete user
-			supabase.auth.admin.delete_user(user_id)
-			print(f'Successfully deleted processor user with ID: {user_id}')
-		except Exception as e:
-			print(f'Failed to delete processor user: {str(e)}')
+	# # Cleanup: Delete the processor user if we have their ID
+	# if user_id:
+	# 	try:
+	# 		# Need admin token to delete user
+	# 		supabase.auth.admin.delete_user(user_id)
+	# 		print(f'Successfully deleted processor user with ID: {user_id}')
+	# 	except Exception as e:
+	# 		print(f'Failed to delete processor user: {str(e)}')
 
 
 @pytest.fixture(scope='session')

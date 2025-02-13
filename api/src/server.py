@@ -15,7 +15,7 @@ app = FastAPI(
 )
 
 # monitoring.logfire.instrument_fastapi(app)
-logging.basicConfig(level=logging.INFO)
+# logging.basicConfig(level=logging.INFO)
 
 # Comprehensive CORS configuration
 app.add_middleware(

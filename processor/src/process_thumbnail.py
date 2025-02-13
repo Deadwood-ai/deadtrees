@@ -41,11 +41,10 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 
 	try:
 		# get local file paths
-		file_name = ortho.ortho_file_name
-		thumbnail_file_name = file_name.replace('.tif', '.jpg')
+		thumbnail_file_name = ortho.ortho_file_name.replace('_ortho.tif', '_thumbnail.jpg')
 
 		# Always use temp_dir for both input and output
-		input_path = temp_dir / file_name
+		input_path = temp_dir / ortho.ortho_file_name
 		output_path = temp_dir / thumbnail_file_name
 
 		logger.info(
@@ -60,7 +59,7 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 		)
 
 		# get the remote file path and pull file
-		storage_server_file_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{file_name}'
+		storage_server_file_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{ortho.ortho_file_name}'
 		pull_file_from_storage_server(storage_server_file_path, str(input_path), token, task.dataset_id)
 
 		# Generate thumbnail

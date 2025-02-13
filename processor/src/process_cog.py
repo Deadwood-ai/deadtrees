@@ -59,7 +59,7 @@ def process_cog(task: QueueTask, temp_dir: Path):
 		# Prepare metadata
 		meta = dict(
 			dataset_id=ortho.dataset_id,
-			cog_file_size=max(1, int((output_path.stat().st_size))),
+			cog_file_size=max(1, int((output_path.stat().st_size / 1024 / 1024))),  # in MB
 			cog_file_name=file_name,
 			cog_path=file_name,
 			version=1,

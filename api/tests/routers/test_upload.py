@@ -87,7 +87,7 @@ def test_upload_geotiff_chunk(test_file, auth_token, test_user):
 					ortho = ortho_response.data[0]
 					assert ortho['dataset_id'] == dataset_id
 					assert ortho['ortho_file_name'] == expected_filename
-					assert ortho['file_size'] == file_size
+					assert ortho['ortho_file_size'] == max(1, int((file_size / 1024 / 1024)))  # in MB
 					assert ortho['bbox'] is not None
 					assert ortho['sha256'] is not None
 					assert ortho['version'] == 1

@@ -31,7 +31,7 @@ def upsert_ortho_entry(
 			'dataset_id': dataset_id,
 			'ortho_file_name': file_path.name,
 			'version': version,
-			'file_size': file_path.stat().st_size,
+			'ortho_file_size': max(1, int((file_path.stat().st_size / 1024 / 1024))),  # in MB
 			'bbox': bbox_string,
 			'sha256': sha256,
 			'ortho_info': dict(ortho_info),

@@ -44,7 +44,7 @@ def test_dataset_for_download(auth_token, data_directory, test_file, test_user):
 			'dataset_id': dataset_id,
 			'ortho_file_name': file_name,
 			'version': 1,
-			'file_size': archive_path.stat().st_size,
+			'ortho_file_size': max(1, int((archive_path.stat().st_size / 1024 / 1024))),  # in MB
 			'ortho_upload_runtime': 0.1,
 			'ortho_processed': True,
 		}

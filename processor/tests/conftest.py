@@ -56,7 +56,7 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 				'dataset_id': dataset_id,
 				'ortho_file_name': ortho_file_name,
 				'version': 1,
-				'file_size': test_file.stat().st_size,
+				'ortho_file_size': max(1, int((test_file.stat().st_size / 1024 / 1024))),  # in MB
 				'bbox': 'BOX(13.4050 52.5200,13.4150 52.5300)',  # Example bbox for Berlin
 				'ortho_upload_runtime': 0.1,
 				'ortho_processed': False,
