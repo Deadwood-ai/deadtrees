@@ -5,6 +5,7 @@ from shared.db import use_client
 from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask
 from processor.src.process_thumbnail import process_thumbnail
+from processor.src.utils.ssh import check_file_exists_on_storage
 
 
 @pytest.fixture
@@ -35,10 +36,11 @@ def test_process_thumbnail_success(thumbnail_task, auth_token):
 		thumbnail_data = response.data[0]
 		assert thumbnail_data['dataset_id'] == thumbnail_task.dataset_id
 
-		# Verify thumbnail file exists in the correct location
-		thumbnail_path = Path(settings.BASE_DIR) / settings.THUMBNAIL_DIR / thumbnail_data['thumbnail_path']
-		assert thumbnail_path.exists()
-		assert thumbnail_path.stat().st_size > 0
+		# Verify thumbnail file exists on storage server
+		storage_server_path = f'{settings.STORAGE_SERVER_DATA_PATH}/thumbnails/{thumbnail_data["thumbnail_path"]}'
+		assert check_file_exists_on_storage(storage_server_path, auth_token), (
+			'Thumbnail file not found on storage server'
+		)
 
 		# Clean up by removing the test entry
 		client.table(settings.thumbnails_table).delete().eq('dataset_id', thumbnail_task.dataset_id).execute()

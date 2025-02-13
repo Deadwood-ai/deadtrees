@@ -28,6 +28,7 @@ class LogCategory(Enum):
 	# System Operations
 	QUEUE = 'queue'  # Queue management
 	STATUS = 'status'  # Status updates
+	SSH = 'ssh'  # SSH operations
 
 
 class LogContext:

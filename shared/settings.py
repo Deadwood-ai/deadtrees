@@ -44,7 +44,6 @@ class Settings(BaseSettings):
 	BASE_DIR: str = str(BASE)
 	# Default GADM path in assets, can be overridden by env var
 	GADM_DATA_PATH: str = str(Path('/app/assets/gadm/gadm_410.gpkg'))
-	DEV_MODE: bool = False
 	CONCURRENT_TASKS: int = 2
 
 	# directly specify the locations for several files
@@ -64,8 +63,8 @@ class Settings(BaseSettings):
 	SUPABASE_KEY: str
 
 	# some basic settings for the UVICORN server
-	UVICORN_HOST: str = '127.0.0.1' if IS_DEVELOPMENT else '0.0.0.0'
-	UVICORN_PORT: int = 8017 if IS_DEVELOPMENT else 8000
+	UVICORN_HOST: str = '127.0.0.1' if DEV_MODE else '0.0.0.0'
+	UVICORN_PORT: int = 8017 if DEV_MODE else 8000
 	UVICORN_ROOT_PATH: str = '/api/v1'
 	UVICORN_PROXY_HEADERS: bool = True
 
@@ -75,7 +74,7 @@ class Settings(BaseSettings):
 	STORAGE_SERVER_DATA_PATH: str = ''
 
 	# api endpoint
-	API_ENDPOINT: str = 'http://localhost:8017/' if IS_DEVELOPMENT else 'https://data.deadtrees.earth/api/v1/'
+	API_ENDPOINT: str = 'http://localhost:8017/' if DEV_MODE else 'https://data.deadtrees.earth/api/v1/'
 	API_ENTPOINT_DATASETS: str = API_ENDPOINT + 'datasets/chunk'
 
 	# processor settings

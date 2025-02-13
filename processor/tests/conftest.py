@@ -2,12 +2,13 @@ import pytest
 from datetime import datetime
 import shutil
 from pathlib import Path
+import logging
 
 
 from shared.db import use_client
 from shared.settings import settings
 from shared.models import StatusEnum, Ortho
-from processor.src.utils.ssh import push_file_to_storage_server
+from processor.src.utils.ssh import push_file_to_storage_server, cleanup_storage_server_directory
 from shared.testing.fixtures import (
 	auth_token,
 	test_file,
@@ -48,7 +49,7 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 			ortho_file_name = f'{dataset_id}_ortho.tif'
 
 			ortho_path = Path(settings.BASE_DIR) / settings.ARCHIVE_DIR / ortho_file_name
-			push_file_to_storage_server(test_file, str(ortho_path), auth_token)
+			push_file_to_storage_server(test_file, str(ortho_path), auth_token, dataset_id)
 
 			# Add ortho entry
 			ortho_data = {
@@ -95,3 +96,74 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 		# 	archive_path.unlink()
 		# clean processing directory
 		shutil.rmtree(settings.processing_path)
+
+
+@pytest.fixture(autouse=True)
+def cleanup_storage():
+	"""Clean up storage before and after each test"""
+	# Safety check to prevent running in production
+	if not settings.ENV.lower() == 'development':
+		pytest.skip('Cleanup fixture should only run in development environment')
+		return
+
+	if not settings.DEV_MODE:
+		pytest.skip('Cleanup fixture should only run in development mode')
+		return
+
+	token = auth_token
+
+	# Paths to clean
+	paths = [
+		f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.ARCHIVE_DIR}',
+		# f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.PROCESSING_DIR}',
+		f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.COG_DIR}',
+		f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.THUMBNAIL_DIR}',
+		f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.TRASH_DIR}',
+	]
+
+	# Clean before test
+	for path in paths:
+		try:
+			cleanup_storage_server_directory(path, token)
+		except Exception as e:
+			print(f'Pre-test cleanup warning: {str(e)}', extra={'token': token})
+
+	yield
+
+	# Clean after test
+	for path in paths:
+		try:
+			cleanup_storage_server_directory(path, token)
+		except Exception as e:
+			print(f'Post-test cleanup warning: {str(e)}', extra={'token': token})
+
+	# Clean local processing directory
+	if Path(settings.processing_path).exists():
+		shutil.rmtree(settings.processing_path, ignore_errors=True)
+
+
+@pytest.fixture(scope='session', autouse=True)
+def handle_logging_cleanup():
+	"""Ensure logging handlers are properly cleaned up after all tests."""
+	yield
+
+	# Get all loggers
+	loggers = [logging.getLogger(name) for name in logging.root.manager.loggerDict]
+
+	# Remove handlers carefully
+	for logger in loggers:
+		if hasattr(logger, 'handlers'):
+			for handler in logger.handlers[:]:
+				# Prevent handler from closing if it's still needed
+				try:
+					handler.acquire()
+					handler.flush()
+					handler.close()
+				except (OSError, ValueError):
+					pass  # Ignore errors from already closed handlers
+				finally:
+					handler.release()
+					logger.removeHandler(handler)
+
+	# Reset logging configuration
+	logging.shutdown()

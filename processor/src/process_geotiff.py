@@ -43,7 +43,7 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 		storage_server_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{ortho.ortho_file_name}'
 
 		# Pull original file
-		pull_file_from_storage_server(storage_server_path, str(path_original), token)
+		pull_file_from_storage_server(storage_server_path, str(path_original), token, task.dataset_id)
 
 		# Start conversion
 		t1 = time.time()
@@ -75,7 +75,7 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 			'Pushing converted file to storage server',
 			LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
 		)
-		push_file_to_storage_server(str(path_converted), storage_server_path, token)
+		push_file_to_storage_server(str(path_converted), storage_server_path, token, task.dataset_id)
 
 		# Update ortho entry with processing information
 		sha256 = get_file_identifier(path_converted)

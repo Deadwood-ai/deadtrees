@@ -36,7 +36,7 @@ def process_cog(task: QueueTask, temp_dir: Path):
 		storage_server_file_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{ortho.ortho_file_name}'
 
 		# Pull source file
-		pull_file_from_storage_server(storage_server_file_path, str(input_path), token)
+		pull_file_from_storage_server(storage_server_file_path, str(input_path), token, task.dataset_id)
 
 		# Get options and setup output paths
 		file_name = f'{ortho.dataset_id}_cog.tif'
@@ -53,7 +53,7 @@ def process_cog(task: QueueTask, temp_dir: Path):
 
 		# Push generated COG
 		storage_server_cog_path = f'{settings.STORAGE_SERVER_DATA_PATH}/cogs/{file_name}'
-		push_file_to_storage_server(str(output_path), storage_server_cog_path, token)
+		push_file_to_storage_server(str(output_path), storage_server_cog_path, token, task.dataset_id)
 		t2 = time.time()
 
 		# Prepare metadata

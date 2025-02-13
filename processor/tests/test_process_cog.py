@@ -5,6 +5,7 @@ from shared.db import use_client
 from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask
 from processor.src.process_cog import process_cog
+from processor.src.utils.ssh import check_file_exists_on_storage
 
 
 @pytest.fixture
@@ -41,7 +42,6 @@ def test_process_cog_success(cog_task, auth_token):
 		assert cog_data['cog_info'] is not None
 		assert cog_data['cog_info']['Profile']['Nodata'] == 0
 
-		# Verify COG file exists in correct location (storage server)
-		cog_path = Path(settings.BASE_DIR) / settings.COG_DIR / cog_data['cog_file_name']
-		assert cog_path.exists()
-		assert cog_path.stat().st_size > 0
+		# Verify COG file exists on storage server
+		remote_path = f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.COG_DIR}/{cog_data["cog_file_name"]}'
+		assert check_file_exists_on_storage(remote_path, auth_token)
