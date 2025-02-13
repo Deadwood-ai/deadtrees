@@ -58,16 +58,16 @@ deadtrees dev start --force-rebuild
 deadtrees dev run-dev
 
 # Run API tests
-deadtrees dev test api-test api/tests/routers/test_download.py
+deadtrees dev test api api/tests/routers/test_download.py
 
 # Debug API tests
-deadtrees dev debug api-test api/tests/routers/test_download.py
+deadtrees dev debug api api/tests/routers/test_download.py
 
 # Run processor tests
-deadtrees dev test processor-test processor/tests/test_processor.py
+deadtrees dev test processor processor/tests/test_processor.py
 
 # Debug processor tests
-deadtrees dev debug processor-test processor/tests/test_processor.py
+deadtrees dev debug processor processor/tests/test_processor.py
 
 ```
 
