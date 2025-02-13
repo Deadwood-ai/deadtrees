@@ -7,6 +7,7 @@ from pathlib import Path
 from shared.db import use_client
 from shared.settings import settings
 from shared.models import StatusEnum, Ortho
+from processor.src.utils.ssh import push_file_to_storage_server
 from shared.testing.fixtures import (
 	auth_token,
 	test_file,
@@ -32,10 +33,6 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 	file_name = 'test-process.tif'
 
 	try:
-		# Copy test file to archive directory
-		archive_path = Path(settings.BASE_DIR) / settings.ARCHIVE_DIR / file_name
-		shutil.copy2(test_file, archive_path)
-
 		# Create test dataset in database
 		with use_client(auth_token) as client:
 			dataset_data = {
@@ -48,13 +45,17 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 			}
 			response = client.table(settings.datasets_table).insert(dataset_data).execute()
 			dataset_id = response.data[0]['id']
+			ortho_file_name = f'{dataset_id}_ortho.tif'
+
+			ortho_path = Path(settings.BASE_DIR) / settings.ARCHIVE_DIR / ortho_file_name
+			push_file_to_storage_server(test_file, str(ortho_path), auth_token)
 
 			# Add ortho entry
 			ortho_data = {
 				'dataset_id': dataset_id,
-				'ortho_file_name': file_name,
+				'ortho_file_name': ortho_file_name,
 				'version': 1,
-				'file_size': archive_path.stat().st_size,
+				'file_size': test_file.stat().st_size,
 				'bbox': 'BOX(13.4050 52.5200,13.4150 52.5300)',  # Example bbox for Berlin
 				'ortho_upload_runtime': 0.1,
 				'ortho_processed': False,
@@ -87,7 +88,10 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 			with use_client(auth_token) as client:
 				client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 
-		if archive_path.exists():
-			archive_path.unlink()
+				# delete logs table all entries
+				client.table(settings.logs_table).delete().neq('id', 1).execute()
+
+		# if archive_path.exists():
+		# 	archive_path.unlink()
 		# clean processing directory
 		shutil.rmtree(settings.processing_path)

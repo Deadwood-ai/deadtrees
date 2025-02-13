@@ -35,7 +35,7 @@ def test_process_geotiff_success(convert_task, auth_token):
 		# Verify essential GeoTIFF info fields
 		# TODO: Add check for the filesystem processor and nginx
 		assert data['dataset_id'] == convert_task.dataset_id
-		assert data['ortho_file_name'] == 'test-process.tif'
+		assert data['ortho_file_name'].endswith('ortho.tif')
 		assert data['ortho_processed'] is True
 		assert data['ortho_processing_runtime'] > 0
 		assert data['ortho_info']['Compression'] == 'DEFLATE'

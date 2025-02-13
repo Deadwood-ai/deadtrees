@@ -82,7 +82,7 @@ class DevCommands:
 		"""Stop the test environment"""
 		self._run_command(['docker', 'compose', '-f', self.test_compose_file, 'down'])
 
-	def debug(self, service: str = 'api-test', test_path: Optional[str] = None, port: Optional[int] = None):
+	def debug(self, service: str = 'api', test_path: Optional[str] = None, port: Optional[int] = None):
 		"""
 		Start a debug session for tests
 
@@ -93,7 +93,13 @@ class DevCommands:
 		"""
 		# Set default port based on service
 		if port is None:
-			port = 5679 if service == 'api-test' else 5678
+			port = 5679 if service == 'api' else 5678
+		if service == 'api':
+			service = 'api-test'
+		elif service == 'processor':
+			service = 'processor-test'
+		else:
+			raise ValueError(f'Invalid service: {service}')
 
 		# Build the pytest command with test_path at the end
 		cmd = [
@@ -129,6 +135,13 @@ class DevCommands:
 		    service: Service to test (api-test or processor-test)
 		    test_path: Specific test file or directory to run
 		"""
+		if service == 'api':
+			service = 'api-test'
+		elif service == 'processor':
+			service = 'processor-test'
+		else:
+			raise ValueError(f'Invalid service: {service}')
+
 		cmd = [
 			'docker',
 			'compose',

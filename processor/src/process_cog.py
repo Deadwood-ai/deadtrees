@@ -3,7 +3,7 @@ import time
 
 from shared.db import use_client, login, verify_token
 from shared.settings import settings
-from shared.models import StatusEnum, Dataset, QueueTask, Cog
+from shared.models import StatusEnum, QueueTask, Cog, Ortho
 from shared.logger import logger
 from .cog.cog import calculate_cog
 from .utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
