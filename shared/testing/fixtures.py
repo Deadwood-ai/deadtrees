@@ -71,10 +71,8 @@ def cleanup_database(auth_token):
 
 	with use_client(auth_token) as client:
 		# With CASCADE delete, we only need to clean the parent table
-		try:
-			client.table(settings.datasets_table).delete().neq('id', 0).execute()
-		except Exception as e:
-			print(f'Warning: Failed to clean up datasets: {str(e)}')
+		client.table(settings.datasets_table).delete().neq('id', 0).execute()
+		client.table(settings.logs_table).delete().neq('id', 1).execute()
 
 
 @pytest.fixture(scope='session', autouse=True)
