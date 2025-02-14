@@ -99,6 +99,7 @@ http://127.0.0.1:54323
 
 # supabase API
 http://127.0.0.1:54323/api/v1/
+
 ```
 
 ### Run the application with Docker Compose:

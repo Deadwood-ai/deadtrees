@@ -7,8 +7,6 @@ from shared.models import TaskTypeEnum, QueueTask, LabelDataEnum
 from processor.src.process_deadwood_segmentation import process_deadwood_segmentation
 
 
-
-
 @pytest.fixture
 def deadwood_task(test_dataset_for_processing, test_processor_user):
 	"""Create a test task specifically for deadwood segmentation processing"""
@@ -33,15 +31,15 @@ def cleanup_labels(auth_token, deadwood_task):
 	with use_client(auth_token) as client:
 		# Get all labels for the dataset
 		response = client.table(settings.labels_table).select('id').eq('dataset_id', deadwood_task.dataset_id).execute()
-		
+
 		# Delete all associated geometries and labels
 		for label in response.data:
 			client.table(settings.deadwood_geometries_table).delete().eq('label_id', label['id']).execute()
-		
+
 		client.table(settings.labels_table).delete().eq('dataset_id', deadwood_task.dataset_id).execute()
 
 
-@pytest.mark.skip(reason="Long running process - skip by default")
+# @pytest.mark.skip(reason="Long running process - skip by default")
 def test_process_deadwood_segmentation_success(deadwood_task, auth_token):
 	"""Test successful deadwood segmentation processing with actual model"""
 	process_deadwood_segmentation(deadwood_task, auth_token, settings.processing_path)
@@ -60,11 +58,13 @@ def test_process_deadwood_segmentation_success(deadwood_task, auth_token):
 		assert label['label_quality'] == 3
 
 		# Check geometries
-		geom_response = client.table(settings.deadwood_geometries_table).select('*').eq('label_id', label['id']).execute()
-		
+		geom_response = (
+			client.table(settings.deadwood_geometries_table).select('*').eq('label_id', label['id']).execute()
+		)
+
 		# Verify we have geometries
 		assert len(geom_response.data) > 0
-		
+
 		# Check first geometry structure
 		first_geom = geom_response.data[0]
 		assert first_geom['geometry']['type'] == 'Polygon'
