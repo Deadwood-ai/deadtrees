@@ -15,20 +15,20 @@ def data_directory():
 	settings.BASE_DIR = str(test_dir)
 
 	# Create directory structure
-	archive_dir = test_dir / settings.ARCHIVE_DIR
-	cogs_dir = test_dir / settings.COG_DIR
-	thumbnails_dir = test_dir / settings.THUMBNAIL_DIR
-	label_objects_dir = test_dir / settings.LABEL_OBJECTS_DIR
-	trash_dir = test_dir / settings.TRASH_DIR
-	downloads_dir = test_dir / settings.DOWNLOADS_DIR
+	# archive_dir = test_dir / settings.ARCHIVE_DIR
+	# cogs_dir = test_dir / settings.COG_DIR
+	# thumbnails_dir = test_dir / settings.THUMBNAIL_DIR
+	# label_objects_dir = test_dir / settings.LABEL_OBJECTS_DIR
+	# trash_dir = test_dir / settings.TRASH_DIR
+	# downloads_dir = test_dir / settings.DOWNLOADS_DIR
 
 	# Create all directories
-	for directory in [archive_dir, cogs_dir, thumbnails_dir, label_objects_dir, trash_dir, downloads_dir]:
-		directory.mkdir(parents=True, exist_ok=True)
+	# for directory in [archive_dir, cogs_dir, thumbnails_dir, label_objects_dir, trash_dir, downloads_dir]:
+	# 	directory.mkdir(parents=True, exist_ok=True)
 
 	yield test_dir
 
 	# Cleanup and restore settings
-	settings.BASE_DIR = original_base
-	if test_dir.exists():
-		shutil.rmtree(test_dir)
+	# settings.BASE_DIR = original_base
+	# if test_dir.exists():
+	# 	shutil.rmtree(test_dir)
