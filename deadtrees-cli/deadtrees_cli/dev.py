@@ -185,7 +185,7 @@ class DevCommands:
 			]
 		)
 
-	def debug_cli(self, test_path: Optional[str] = None, port: int = 5680):
+	def debug_data(self, test_path: Optional[str] = None, port: int = 5680):
 		"""
 		Debug CLI tests
 
@@ -215,7 +215,7 @@ class DevCommands:
 		print('Waiting for debugger to attach...')
 		self._run_command(cmd)
 
-	def test_cli(self, test_path: Optional[str] = None):
+	def test_data(self, test_path: Optional[str] = None):
 		"""
 		Run CLI tests without debugging
 

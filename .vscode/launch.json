@@ -42,7 +42,7 @@
             "justMyCode": false
         },
         {
-            "name": "Debug CLI Tests",
+            "name": "Debug DATA Tests",
             "type": "debugpy",
             "request": "launch",
             "module": "pytest",
@@ -54,7 +54,7 @@
             "justMyCode": false
         },
         {
-            "name": "CLI Tests",
+            "name": "DATA Tests",
             "type": "debugpy",
             "request": "attach",
             "connect": {

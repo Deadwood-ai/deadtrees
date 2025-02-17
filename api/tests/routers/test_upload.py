@@ -23,7 +23,7 @@ def test_upload_geotiff_chunk(test_file, auth_token, test_user):
 	form_data = {
 		'license': LicenseEnum.cc_by.value,
 		'platform': PlatformEnum.drone.value,
-		'authors': 'Test Author 1, Test Author 2',
+		'authors': ['Test Author 1', 'Test Author 2'],
 		'data_access': DatasetAccessEnum.public.value,
 		'aquisition_year': '2023',
 		'aquisition_month': '12',

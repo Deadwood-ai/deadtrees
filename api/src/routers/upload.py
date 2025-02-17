@@ -1,4 +1,4 @@
-from typing import Annotated, Optional
+from typing import Annotated, Optional, List
 
 import time
 import aiofiles
@@ -37,7 +37,7 @@ async def upload_geotiff_chunk(
 	# Dataset required fields
 	license: Annotated[LicenseEnum, Form()],
 	platform: Annotated[PlatformEnum, Form()],
-	authors: Annotated[str, Form()],  # Comma-separated list
+	authors: Annotated[List[str], Form()],  # List of authors
 	# Dataset optional fields
 	project_id: Annotated[Optional[str], Form()] = None,
 	aquisition_year: Annotated[Optional[int], Form()] = None,
@@ -97,7 +97,6 @@ async def upload_geotiff_chunk(
 			# Calculate upload runtime
 			t2 = time.time()
 			ortho_upload_runtime = t2 - t1
-			authors_list = [author.strip() for author in authors.split(',')]
 
 			logger.info(
 				f'Creating dataset entry for {file.filename}',
@@ -115,7 +114,7 @@ async def upload_geotiff_chunk(
 				file_name=file.filename,
 				license=license,
 				platform=platform,
-				authors=authors_list,
+				authors=authors,
 				project_id=project_id,
 				aquisition_year=aquisition_year,
 				aquisition_month=aquisition_month,

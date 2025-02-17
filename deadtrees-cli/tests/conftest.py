@@ -9,7 +9,7 @@ def data_directory():
 	"""Override base directory for CLI tests"""
 	# Create test directory under deadtrees-cli/tests/data
 	test_dir = Path(__file__).parent.parent.parent / 'data'
-	original_base = settings.BASE_DIR
+	# original_base = settings.BASE_DIR
 
 	# Override settings
 	settings.BASE_DIR = str(test_dir)

@@ -29,7 +29,7 @@ class DataCommands:
 	def upload(
 		self,
 		file_path: str,
-		authors: str,
+		authors: List[str],
 		platform: str = 'drone',
 		data_access: str = 'public',
 		license: str = 'CC BY',
@@ -52,9 +52,6 @@ class DataCommands:
 		except ValueError as e:
 			raise ValueError(f'Invalid enum value: {str(e)}')
 
-		# Split authors string into list
-		authors_list = [author.strip() for author in authors.split(',')]
-
 		# Start upload process
 		logger.info(f'Uploading file: {file_path}')
 		dataset = self._chunked_upload(
@@ -62,7 +59,7 @@ class DataCommands:
 			token=token,
 			license=license_enum,
 			platform=platform_enum,
-			authors=authors_list,
+			authors=authors,
 			data_access=access_enum,
 			aquisition_year=aquisition_year,
 			aquisition_month=aquisition_month,

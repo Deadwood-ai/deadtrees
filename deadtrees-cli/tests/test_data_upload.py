@@ -18,7 +18,7 @@ def test_upload_basic(data_commands, test_file):
 	try:
 		result = data_commands.upload(
 			file_path=str(test_file),
-			authors='Test Author',
+			authors=['Test Author'],
 			platform='drone',
 			data_access='public',
 			start_processing=False,
@@ -51,13 +51,18 @@ def test_upload_basic(data_commands, test_file):
 				client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
 				client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 
+				# Clean up files
+				archive_path = settings.archive_path / f'{dataset_id}_ortho.tif'
+				if archive_path.exists():
+					archive_path.unlink()
+
 
 def test_upload_with_metadata(data_commands, test_file):
 	"""Test file upload with full metadata"""
 	try:
 		result = data_commands.upload(
 			file_path=str(test_file),
-			authors='Test Author 1, Test Author 2',
+			authors=['Test Author 1', 'Test Author 2'],
 			platform='drone',
 			data_access='public',
 			license='CC BY',
@@ -87,3 +92,8 @@ def test_upload_with_metadata(data_commands, test_file):
 			with use_client(token) as client:
 				client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
 				client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
+
+				# Clean up files
+				archive_path = settings.archive_path / f'{dataset_id}_ortho.tif'
+				if archive_path.exists():
+					archive_path.unlink()
