@@ -138,6 +138,25 @@ def process_task(task: QueueTask, token: str):
 			)
 			raise ProcessingError(str(e), task_type='geotiff', task_id=task.id, dataset_id=task.dataset_id)
 
+	# Process metadata if requested
+	if TaskTypeEnum.metadata in task.task_types:
+		try:
+			logger.info(
+				'processing metadata',
+				LogContext(
+					category=LogCategory.METADATA, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+				),
+			)
+			process_metadata(task, settings.processing_path)
+		except Exception as e:
+			logger.error(
+				f'Metadata processing failed: {str(e)}',
+				LogContext(
+					category=LogCategory.METADATA, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+				),
+			)
+			raise ProcessingError(str(e), task_type='metadata', task_id=task.id, dataset_id=task.dataset_id)
+
 	# Process cog if requested
 	if TaskTypeEnum.cog in task.task_types:
 		try:
@@ -171,25 +190,6 @@ def process_task(task: QueueTask, token: str):
 				),
 			)
 			raise ProcessingError(str(e), task_type='thumbnail', task_id=task.id, dataset_id=task.dataset_id)
-
-	# Process metadata if requested
-	if TaskTypeEnum.metadata in task.task_types:
-		try:
-			logger.info(
-				'processing metadata',
-				LogContext(
-					category=LogCategory.METADATA, dataset_id=task.dataset_id, user_id=task.user_id, token=token
-				),
-			)
-			process_metadata(task, settings.processing_path)
-		except Exception as e:
-			logger.error(
-				f'Metadata processing failed: {str(e)}',
-				LogContext(
-					category=LogCategory.METADATA, dataset_id=task.dataset_id, user_id=task.user_id, token=token
-				),
-			)
-			raise ProcessingError(str(e), task_type='metadata', task_id=task.id, dataset_id=task.dataset_id)
 
 	# Process deadwood_segmentation if requested
 	if TaskTypeEnum.deadwood in task.task_types:

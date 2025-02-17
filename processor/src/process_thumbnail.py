@@ -127,6 +127,8 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 				thumbnail.model_dump(),
 				on_conflict='dataset_id',
 			).execute()
+
+			update_status(token, dataset_id=ortho.dataset_id, current_status=StatusEnum.idle, is_thumbnail_done=True)
 			logger.info(
 				'Thumbnail metadata saved to database',
 				LogContext(

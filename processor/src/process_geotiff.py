@@ -91,7 +91,7 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 			ortho_processed=True,
 			token=token,
 		)
-
+		update_status(token, dataset_id=ortho.dataset_id, current_status=StatusEnum.idle, is_ortho_done=True)
 		# Log conversion time
 		logger.info(
 			f'GeoTIFF conversion completed in {t2 - t1:.2f} seconds',

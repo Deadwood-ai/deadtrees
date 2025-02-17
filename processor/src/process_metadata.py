@@ -76,7 +76,7 @@ def process_metadata(task: QueueTask, temp_dir: Path):
 			version=1,
 			processing_runtime=runtime,
 		)
-
+		update_status(token, task.dataset_id, current_status=StatusEnum.idle, is_metadata_done=True)
 		# Save to database, excluding created_at to use DB default
 		logger.info(
 			'Saving metadata to database',

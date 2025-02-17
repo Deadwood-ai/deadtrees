@@ -1,7 +1,7 @@
 from pathlib import Path
 import subprocess
+import rasterio
 from shared.logger import logger
-
 from rio_cogeo.cogeo import cog_info, cog_validate
 # from rio_cogeo.profiles import cog_profiles
 
@@ -46,19 +46,21 @@ def calculate_cog(
 	Args:
 	    tiff_file_path (str): Path to the geotiff file to be processed
 	    cog_target_path (str): Path for the finished cog file to save to
-	    compress (str, optional): Optional base compression profile for the cog calculation. Defaults to "jpeg".
-	    overviews (_type_, optional): Optional overview number. Defaults to None.
-	    quality (int, optional): Optional overall quality setting (between 0 and 100). Defaults to 75.
 	    skip_recreate (bool, optional): Option to skip recreate. Defaults to False.
+	    token (str, optional): Optional token for logging. Defaults to None.
 
 	Returns:
-	    Info: Returns general infos and validation for the calculated Cloud Optimized Geotiff (using the rio_cogeo package)
+	    Info: Returns general infos and validation for the calculated Cloud Optimized Geotiff
 	"""
 	# check if the COG already exists
 	if skip_recreate and Path(cog_target_path).exists():
 		return cog_info(cog_target_path)
 
-	# build the gdal command
+	# Get number of bands from input file
+	with rasterio.open(tiff_file_path) as src:
+		num_bands = src.count
+
+	# Build base gdal command
 	cmd_translate = [
 		'gdal_translate',
 		tiff_file_path,
@@ -69,8 +71,6 @@ def calculate_cog(
 		'Byte',
 		'-of',
 		'COG',
-		'-a_nodata',
-		'0',
 		'-co',
 		'COMPRESS=JPEG',
 		'-co',
@@ -93,19 +93,39 @@ def calculate_cog(
 		'--config',
 		'GDAL_GTIFF_SRS_SOURCE',
 		'EPSG',
+		'-a_nodata',
+		'0',  # Set nodata value to 0 instead of 255
 	]
-	# if overviews is not None:
-	# 	cmd_translate.extend(['-co', f'OVERVIEW_COUNT={overviews}'])
 
-	# apply
+	# Handle band selection based on number of bands
+	if num_bands == 3:
+		# Standard RGB image - add alpha channel
+		cmd_translate.extend(['-co', 'ALPHA=YES'])
+	elif num_bands == 4:
+		# RGBA image - keep all bands
+		band_args = []
+		for i in range(1, 5):
+			band_args.extend(['-b', str(i)])
+		cmd_translate[2:2] = band_args
+		cmd_translate.extend(['-co', 'ALPHA=YES'])
+	else:
+		# Multi-band image - select first three bands and add alpha
+		band_args = []
+		for i in range(1, 4):
+			band_args.extend(['-b', str(i)])
+		cmd_translate[2:2] = band_args
+		cmd_translate.extend(['-co', 'ALPHA=YES'])
+
+	# Try to process with original CRS first
 	try:
-		logger.info('Running COG processing with gdal_translate assuming EPSG:3857', extra={'token': token})
+		logger.info('Running COG processing with original CRS', extra={'token': token})
 		result = subprocess.run(cmd_translate, check=True, capture_output=True, text=True)
 		logger.info(f'gdal_translate output:\n{result.stdout}', extra={'token': token})
 	except subprocess.CalledProcessError as e:
 		logger.error(f'Error gdal_translate: {e}', extra={'token': token})
-		logger.info('Retrying setting EPSG:3857', extra={'token': token})
+		logger.info('Retrying with EPSG:3857', extra={'token': token})
 		try:
+			# Add explicit CRS setting
 			cmd_translate.extend(['-a_srs', 'EPSG:3857'])
 			result = subprocess.run(cmd_translate, check=True, capture_output=True, text=True)
 			logger.info(f'gdal_translate output (with EPSG:3857):\n{result.stdout}', extra={'token': token})

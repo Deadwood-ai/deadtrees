@@ -29,6 +29,8 @@ def convert_geotiff(input_path: str, output_path: str, token: str = None) -> boo
 		'Byte',
 		'-dstnodata',
 		'0',
+		'-co',
+		'ALPHA=YES',
 		input_path,
 		output_path,
 	]

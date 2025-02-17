@@ -11,6 +11,8 @@ TEST_POINTS = [
 	((13.4050, 52.5200), ['Germany', 'Berlin', 'Berlin']),
 	# Paris, France
 	((2.3522, 48.8566), ['France', 'Paris', 'Paris, 4e arrondissement']),
+	# Toronto, Canada
+	((-79.3832, 43.6532), ['Canada', 'Toronto', '']),
 	# Invalid point (middle of ocean)
 	((0.0, 0.0), [None, None, None]),
 ]
