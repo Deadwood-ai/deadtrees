@@ -74,11 +74,11 @@ def calculate_cog(
 		'-co',
 		'COMPRESS=JPEG',
 		'-co',
-		'QUALITY=75',
+		'QUALITY=95',
 		'-co',
 		'OVERVIEW_COMPRESS=JPEG',
 		'-co',
-		'OVERVIEW_QUALITY=75',
+		'OVERVIEW_QUALITY=95',
 		'-co',
 		'TILING_SCHEME=GoogleMapsCompatible',
 		'--config',
@@ -93,12 +93,13 @@ def calculate_cog(
 		'--config',
 		'GDAL_GTIFF_SRS_SOURCE',
 		'EPSG',
-		'-a_nodata',
-		'0',  # Set nodata value to 0 instead of 255
+		# '-a_nodata',
+		# '0',  # Set nodata value to 0 instead of 255
 	]
 
 	# Handle band selection based on number of bands
 	if num_bands == 3:
+		pass
 		# Standard RGB image - add alpha channel
 		cmd_translate.extend(['-co', 'ALPHA=YES'])
 	elif num_bands == 4:

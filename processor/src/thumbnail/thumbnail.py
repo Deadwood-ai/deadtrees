@@ -29,23 +29,24 @@ def calculate_thumbnail(tiff_file_path: str, thumbnail_file_path: str, size=(256
 			out_width = int(src.width * scale_factor)
 			out_height = int(src.height * scale_factor)
 
-			# Read the data at the new resolution
+			# Read all bands including alpha
 			data = src.read(out_shape=(src.count, out_height, out_width), resampling=Resampling.lanczos)
 
-			# Normalize the data to 0-255 range for each band
-			rgb_data = []
-			for band in data:
-				band_min = band.min()
-				band_max = band.max()
-				# Check if band has valid range to avoid division by zero
-				if band_max == band_min:
-					band_norm = np.zeros_like(band, dtype=np.uint8)
-				else:
-					band_norm = ((band - band_min) * (255.0 / (band_max - band_min))).astype(np.uint8)
-				rgb_data.append(band_norm)
+			# Create RGB array
+			rgb_array = data[:3]  # First 3 bands are RGB
 
-			# Stack bands and transpose to correct shape for PIL
-			rgb_array = np.dstack(rgb_data[:3])  # Only use first 3 bands (RGB)
+			# Get alpha band (4th band) if it exists, otherwise use mask
+			if src.count == 4:
+				alpha = data[3]
+			else:
+				alpha = src.read_masks(1, out_shape=(out_height, out_width), resampling=Resampling.lanczos)
+
+			# Create white background where alpha is 0
+			for band in rgb_array:
+				band[alpha == 0] = 255
+
+			# Stack bands for PIL
+			rgb_array = np.dstack(rgb_array)
 
 			# Create PIL image
 			img = Image.fromarray(rgb_array)

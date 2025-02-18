@@ -9,7 +9,7 @@ from shared.logger import logger
 from shared.ortho import upsert_ortho_entry
 from .utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
-from .geotiff.convert_geotiff import convert_geotiff, verify_geotiff
+from .geotiff.standardise_geotiff import standardise_geotiff, verify_geotiff
 from rio_cogeo.cogeo import cog_info
 from shared.hash import get_file_identifier
 from shared.logging import LogContext, LogCategory
@@ -52,7 +52,7 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 			LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
 		)
 
-		if not convert_geotiff(str(path_original), str(path_converted), token):
+		if not standardise_geotiff(str(path_original), str(path_converted), token):
 			raise ProcessingError(
 				'Conversion failed', task_type='convert', task_id=task.id, dataset_id=ortho.dataset_id
 			)
@@ -85,7 +85,7 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 			dataset_id=ortho.dataset_id,
 			file_path=path_converted,
 			ortho_processing_runtime=ortho_processing_runtime,
-			ortho_info=ortho_info.model_dump(),
+			ortho_processed_info=ortho_info.model_dump(),
 			version=1,
 			sha256=sha256,
 			ortho_processed=True,
