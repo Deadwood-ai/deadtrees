@@ -90,6 +90,7 @@ def test_upload_geotiff_chunk(test_file, auth_token, test_user):
 					assert ortho['ortho_file_size'] == max(1, int((file_size / 1024 / 1024)))  # in MB
 					assert ortho['bbox'] is not None
 					assert ortho['sha256'] is not None
+					assert ortho['ortho_original_info'] is not None
 					assert ortho['version'] == 1
 
 				# Verify final status

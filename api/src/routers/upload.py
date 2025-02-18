@@ -149,7 +149,7 @@ async def upload_geotiff_chunk(
 				dataset_id=dataset.id,
 				file_path=target_path,
 				ortho_upload_runtime=ortho_upload_runtime,
-				ortho_info=ortho_info,
+				ortho_original_info=ortho_info,
 				version=1,
 				sha256=sha256,
 				token=token,

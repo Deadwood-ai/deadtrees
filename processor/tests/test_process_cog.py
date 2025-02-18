@@ -40,6 +40,7 @@ def test_process_cog_success(cog_task, auth_token):
 		assert cog_data['cog_file_name'].endswith('cog.tif')
 		assert cog_data['cog_file_size'] > 0
 		assert cog_data['cog_info'] is not None
+
 		assert cog_data['cog_info']['Profile']['Nodata'] == 0
 
 		# Verify COG file exists on storage server

@@ -208,7 +208,8 @@ class Ortho(BaseModel):
 	ortho_file_size: int
 	bbox: Optional[BoundingBox] = None
 	sha256: Optional[str] = None
-	ortho_info: Optional[Dict] = None
+	ortho_original_info: Optional[Dict] = None
+	ortho_processed_info: Optional[Dict] = None
 	ortho_upload_runtime: Optional[float] = None
 	ortho_processed: bool = False
 	ortho_processing_runtime: Optional[float] = None
