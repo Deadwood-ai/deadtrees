@@ -16,7 +16,14 @@ def find_nodata_value(src, num_bands):
 	"""Helper function to determine current nodata value from the source image"""
 	# First check if nodata is explicitly set
 	if src.nodata is not None:
-		return src.nodata
+		try:
+			if not np.isnan(src.nodata):
+				return src.nodata
+			else:
+				return None
+		except Exception as e:
+			logger.error(f'Error finding nodata value: {e}')
+			pass
 
 	# Check if we have an alpha band (band 4 in RGBA)
 	if num_bands == 4:
@@ -63,8 +70,8 @@ def standardise_geotiff(input_path: str, output_path: str, token: str = None) ->
 
 			# Determine nodata value (default to 0 if none detected)
 			current_nodata = find_nodata_value(src, num_bands)
-			if current_nodata is None:
-				current_nodata = 0
+			# if current_nodata is None:
+			# current_nodata = 0
 			logger.info(f'Detected current nodata value: {current_nodata}', extra={'token': token})
 
 			# Compute statistics if not uint8
@@ -106,17 +113,18 @@ def standardise_geotiff(input_path: str, output_path: str, token: str = None) ->
 			'--config',
 			'GDAL_NUM_THREADS',
 			'ALL_CPUS',
-			'-dstalpha',  # Create a true alpha band
 		]
 
 		# Add nodata handling
 		if current_nodata is not None:
 			cmd.extend(['-srcnodata', str(current_nodata)])
 			cmd.extend(['-dstnodata', '0'])  # Set output nodata to 0
+			cmd.extend(['-dstalpha'])  # Create a true alpha band
 
 		# Add scaling and data type conversion if not uint8
 		if src_dtype != 'uint8':
 			cmd.extend(['-ot', 'Byte'])
+			# cmd.extend(['-scale'])
 			for i, (min_val, max_val) in enumerate(stats, 1):
 				if min_val != max_val:  # Avoid division by zero in scaling
 					cmd.extend(['-scale_' + str(i), str(min_val), str(max_val), '1', '255'])
