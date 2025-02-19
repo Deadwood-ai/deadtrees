@@ -56,103 +56,138 @@ def find_nodata_value(src, num_bands):
 
 def standardise_geotiff(input_path: str, output_path: str, token: str = None) -> bool:
 	"""
-	Standardise a GeoTIFF so that:
-	  - It is converted to 8-bit if needed (with scaling),
-	  - A true alpha channel is created using internal TIFF masks
-	  - Nodata values are properly handled with transparency
+	Standardise a GeoTIFF by:
+	1. Converting to 8-bit with auto-scaling if needed
+	2. Creating a true alpha channel using internal TIFF masks
+	3. Handling nodata values with transparency
+
+	Args:
+		input_path (str): Path to input GeoTIFF file
+		output_path (str): Path for output standardized GeoTIFF
+		token (str, optional): Authentication token for logging
+
+	Returns:
+		bool: True if successful, False otherwise
 	"""
 	try:
-		# Open source to read metadata and determine nodata
+		# Step 1: Validate and extract source image properties
+		src_properties = _get_source_properties(input_path, token)
+		if not src_properties:
+			return False
+
+		# Step 2: Handle bit depth conversion if needed
+		processed_input = _handle_bit_depth_conversion(input_path, output_path, src_properties['dtype'], token)
+		if not processed_input:
+			return False
+
+		# Step 3: Apply final transformations with gdalwarp
+		success = _apply_final_transformations(
+			processed_input, output_path, src_properties['nodata'], src_properties['num_bands'], token
+		)
+
+		# Step 4: Clean up temporary file if it exists
+		if processed_input != input_path:
+			Path(processed_input).unlink()
+
+		return success
+
+	except Exception as e:
+		logger.error(f'Unexpected error in standardise_geotiff: {e}', extra={'token': token})
+		return False
+
+
+def _get_source_properties(input_path: str, token: str) -> dict:
+	"""Extract and validate source image properties."""
+	try:
 		with rasterio.open(input_path) as src:
-			src_dtype = src.profile['dtype']
-			num_bands = src.count
-			src_crs = src.crs
+			properties = {
+				'dtype': src.profile['dtype'],
+				'num_bands': src.count,
+				'crs': src.crs,
+				'nodata': find_nodata_value(src, src.count),
+			}
 
-			# Determine nodata value (default to 0 if none detected)
-			current_nodata = find_nodata_value(src, num_bands)
-			# if current_nodata is None:
-			# current_nodata = 0
-			logger.info(f'Detected current nodata value: {current_nodata}', extra={'token': token})
-
-			# Compute statistics if not uint8
-			if src_dtype != 'uint8':
-				stats = []
-				for i in range(1, min(num_bands, 4)):  # Only process up to 3 bands (RGB)
-					band = src.read(i)
-					if current_nodata is not None:
-						band = band[band != current_nodata]
-					if band.size > 0:
-						min_val = band.min()
-						max_val = band.max()
-					else:
-						min_val = 0
-						max_val = 255
-					stats.append((min_val, max_val))
-				logger.info(f'Band statistics: {stats}', extra={'token': token})
-
-			if not src_crs:
+			if not properties['crs']:
 				logger.warning('No CRS found in source file', extra={'token': token})
-				return False
+				return None
 
-		# Base command using gdalwarp for better handling of alpha channel
-		cmd = [
-			'gdalwarp',
-			'-of',
-			'GTiff',
-			'-co',
-			'TILED=YES',
-			'-co',
-			'COMPRESS=DEFLATE',
-			'-co',
-			'PREDICTOR=2',
-			'-co',
-			'BIGTIFF=YES',
-			'--config',
-			'GDAL_TIFF_INTERNAL_MASK',
-			'YES',
-			'--config',
-			'GDAL_NUM_THREADS',
-			'ALL_CPUS',
-		]
+			logger.info(
+				f'Source properties - dtype: {properties["dtype"]}, bands: {properties["num_bands"]}, '
+				f'nodata: {properties["nodata"]}',
+				extra={'token': token},
+			)
+			return properties
 
-		# Add nodata handling
-		if current_nodata is not None:
-			cmd.extend(['-srcnodata', str(current_nodata)])
-			cmd.extend(['-dstnodata', '0'])  # Set output nodata to 0
-			cmd.extend(['-dstalpha'])  # Create a true alpha band
+	except Exception as e:
+		logger.error(f'Error reading source properties: {e}', extra={'token': token})
+		return None
 
-		# Add scaling and data type conversion if not uint8
-		if src_dtype != 'uint8':
-			cmd.extend(['-ot', 'Byte'])
-			# cmd.extend(['-scale'])
-			for i, (min_val, max_val) in enumerate(stats, 1):
-				if min_val != max_val:  # Avoid division by zero in scaling
-					cmd.extend(['-scale_' + str(i), str(min_val), str(max_val), '1', '255'])
 
-		# Handle band selection based on number of bands
-		if num_bands > 3:
-			# Select first three bands for RGB
-			cmd.extend(['-b', '1', '-b', '2', '-b', '3'])
+def _handle_bit_depth_conversion(input_path: str, output_path: str, src_dtype: str, token: str) -> str:
+	"""Convert non-uint8 images to 8-bit using gdal_translate."""
+	if src_dtype == 'uint8':
+		return input_path
 
-		# Add input and output paths
-		cmd.extend([input_path, output_path])
+	temp_output = f'{output_path}.temp.tif'
+	translate_cmd = [
+		'gdal_translate',
+		'-ot',
+		'Byte',
+		'-scale',  # Auto-scale
+		input_path,
+		temp_output,
+	]
 
+	try:
+		logger.info('Running gdal_translate for scaling: ' + ' '.join(translate_cmd), extra={'token': token})
+		result = subprocess.run(translate_cmd, check=True, capture_output=True, text=True)
+		logger.info(f'gdal_translate output:\n{result.stdout}', extra={'token': token})
+		return temp_output
+	except subprocess.CalledProcessError as e:
+		logger.error(f'Error in bit depth conversion: {e}', extra={'token': token})
+		return None
+
+
+def _apply_final_transformations(input_path: str, output_path: str, nodata: float, num_bands: int, token: str) -> bool:
+	"""Apply final transformations using gdalwarp."""
+	cmd = [
+		'gdalwarp',
+		'-of',
+		'GTiff',
+		'-co',
+		'TILED=YES',
+		'-co',
+		'COMPRESS=DEFLATE',
+		'-co',
+		'PREDICTOR=2',
+		'-co',
+		'BIGTIFF=YES',
+		'--config',
+		'GDAL_TIFF_INTERNAL_MASK',
+		'YES',
+		'--config',
+		'GDAL_NUM_THREADS',
+		'ALL_CPUS',
+	]
+
+	# Add nodata handling
+	if nodata is not None:
+		cmd.extend(['-srcnodata', str(nodata), '-dstnodata', '0', '-dstalpha'])
+
+	# Handle band selection for RGB
+	if num_bands > 3:
+		cmd.extend(['-b', '1', '-b', '2', '-b', '3'])
+
+	cmd.extend([input_path, output_path])
+
+	try:
 		logger.info('Running gdalwarp conversion: ' + ' '.join(cmd), extra={'token': token})
 		result = subprocess.run(cmd, check=True, capture_output=True, text=True)
 		logger.info(f'gdalwarp output:\n{result.stdout}', extra={'token': token})
 
-		# Verify the output
-		if not verify_geotiff(output_path, token):
-			logger.error('Output file verification failed', extra={'token': token})
-			return False
-
-		return True
-
+		return verify_geotiff(output_path, token)
 	except subprocess.CalledProcessError as e:
-		logger.error(f'Error during gdalwarp conversion: {e}', extra={'token': token})
-		return False
-	except Exception as e:
-		logger.error(f'Unexpected error: {e}', extra={'token': token})
+		logger.error(f'Error in final transformation: {e}', extra={'token': token})
 		return False
 
 
