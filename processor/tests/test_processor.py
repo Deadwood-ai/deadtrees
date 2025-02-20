@@ -99,7 +99,13 @@ def sequential_task(test_dataset_for_processing, test_processor_user):
 		id=1,
 		dataset_id=test_dataset_for_processing,
 		user_id=test_processor_user,
-		task_types=[TaskTypeEnum.geotiff, TaskTypeEnum.cog, TaskTypeEnum.thumbnail, TaskTypeEnum.metadata],
+		task_types=[
+			TaskTypeEnum.geotiff,
+			TaskTypeEnum.cog,
+			TaskTypeEnum.thumbnail,
+			TaskTypeEnum.metadata,
+			TaskTypeEnum.deadwood,
+		],
 		priority=1,
 		is_processing=False,
 		current_position=1,
@@ -146,6 +152,12 @@ def test_sequential_processing(sequential_task, auth_token):
 		assert metadata_response.data[0]['processing_runtime'] > 0
 		assert 'gadm' in metadata_response.data[0]['metadata']
 
+		# Check deadwood processing
+		deadwood_response = (
+			client.table(settings.labels_table).select('*').eq('dataset_id', sequential_task.dataset_id).execute()
+		)
+		assert len(deadwood_response.data) == 1
+
 		# Verify final status
 		status_response = (
 			client.table(settings.statuses_table).select('*').eq('dataset_id', sequential_task.dataset_id).execute()
@@ -158,6 +170,7 @@ def test_sequential_processing(sequential_task, auth_token):
 		assert status['is_thumbnail_done'] is True
 		assert status['is_metadata_done'] is True
 		assert not status['has_error']
+		assert status['is_deadwood_done'] is True
 
 		# Verify task was removed from queue
 		queue_response = client.table(settings.queue_table).select('*').eq('id', sequential_task.id).execute()
