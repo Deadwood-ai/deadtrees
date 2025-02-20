@@ -14,7 +14,7 @@ client = TestClient(app)
 def test_upload_geotiff_chunk(test_file, auth_token, test_user):
 	"""Test chunked upload of a GeoTIFF file"""
 	# Setup
-	chunk_size = 1024 * 256  # 256KB chunks for testing
+	chunk_size = 1024 * 1024 * 1  # 1MB chunks for testing
 	file_size = test_file.stat().st_size
 	chunks_total = (file_size + chunk_size - 1) // chunk_size
 	upload_id = 'test-upload-id'
