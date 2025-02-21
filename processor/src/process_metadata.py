@@ -5,11 +5,20 @@ from typing import Dict, Any
 from shared.db import use_client, login, verify_token
 from shared.status import update_status
 from shared.settings import settings
-from shared.models import StatusEnum, QueueTask, MetadataType, DatasetMetadata, AdminBoundariesMetadata, Ortho
+from shared.models import (
+	StatusEnum,
+	QueueTask,
+	MetadataType,
+	DatasetMetadata,
+	AdminBoundariesMetadata,
+	Ortho,
+	BiomeMetadata,
+)
 from shared.logger import logger
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
 from .utils.admin_levels import get_admin_tags
 from shared.logging import LogContext, LogCategory
+from .utils.biome import get_biome_data
 
 
 def process_metadata(task: QueueTask, temp_dir: Path):
@@ -63,16 +72,21 @@ def process_metadata(task: QueueTask, temp_dir: Path):
 		)
 
 		admin_levels = get_admin_tags(bbox_centroid)
-		runtime = time.time() - t1
 
 		admin_metadata = AdminBoundariesMetadata(
 			admin_level_1=admin_levels[0], admin_level_2=admin_levels[1], admin_level_3=admin_levels[2]
 		)
 
-		# Create metadata entry
+		# Get biome data
+		biome_name, biome_id = get_biome_data(bbox_centroid)
+		biome_metadata = BiomeMetadata(biome_name=biome_name, biome_id=biome_id)
+
+		# Create metadata entry with both GADM and biome data
+		runtime = time.time() - t1
+
 		metadata = DatasetMetadata(
 			dataset_id=task.dataset_id,
-			metadata={MetadataType.GADM: admin_metadata.model_dump()},
+			metadata={MetadataType.GADM: admin_metadata.model_dump(), MetadataType.BIOME: biome_metadata.model_dump()},
 			version=1,
 			processing_runtime=runtime,
 		)

@@ -46,6 +46,25 @@ class Settings(BaseSettings):
 	GADM_DATA_PATH: str = str(Path('/app/assets/gadm/gadm_410.gpkg'))
 	CONCURRENT_TASKS: int = 2
 
+	BIOME_DATA_PATH: str = str(Path('/app/assets/biom/terres_ecosystems.gpkg'))
+
+	BIOME_DICT: dict[int, str] = {
+		1: 'Tropical and Subtropical Moist Broadleaf Forests',
+		2: 'Tropical and Subtropical Dry Broadleaf Forests',
+		3: 'Tropical and Subtropical Coniferous Forests',
+		4: 'Temperate Broadleaf and Mixed Forests',
+		5: 'Temperate Coniferous Forests',
+		6: 'Boreal Forests/Taiga',
+		7: 'Tropical and Subtropical Grasslands, Savannas, and Shrublands',
+		8: 'Temperate Grasslands, Savannas, and Shrublands',
+		9: 'Flooded Grasslands and Savannas',
+		10: 'Montane Grasslands and Shrublands',
+		11: 'Tundra',
+		12: 'Mediterranean Forests, Woodlands, and Scrub',
+		13: 'Deserts and Xeric Shrublands',
+		14: 'Mangroves',
+	}
+
 	# directly specify the locations for several files
 	ARCHIVE_DIR: str = 'archive'
 	COG_DIR: str = 'cogs'
