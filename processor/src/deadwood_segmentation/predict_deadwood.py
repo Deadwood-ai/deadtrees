@@ -52,7 +52,7 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 
 		# Create label with geometries
 		logger.info('Creating label with geometries')
-		label = asyncio.run(create_label_with_geometries(payload, user_id, token))
+		label = create_label_with_geometries(payload, user_id, token)
 		logger.info(f'Created label {label.id} with geometries')
 
 	except Exception as e:

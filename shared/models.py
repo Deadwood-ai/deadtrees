@@ -296,7 +296,7 @@ class AOI(BaseModel):
 	id: Optional[int] = None
 	dataset_id: int
 	user_id: str
-	geometry: MultiPolygonModel
+	geometry: Dict  # Changed from MultiPolygonModel to Dict
 	is_whole_image: bool = False
 	image_quality: Optional[int] = None
 	notes: Optional[str] = None

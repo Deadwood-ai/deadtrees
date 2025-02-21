@@ -88,7 +88,7 @@ async def test_create_label_with_chunked_geometries(
 	)
 
 	# Create label
-	label = await create_label_with_geometries(payload, test_processor_user, auth_token)
+	label = create_label_with_geometries(payload, test_processor_user, auth_token)
 
 	# Verify label was created
 	assert label.dataset_id == test_dataset_with_label
@@ -124,12 +124,7 @@ async def test_create_label_with_chunked_geometries(
 async def test_create_label_with_real_geometries(test_dataset_with_label, test_processor_user, auth_token):
 	"""Test creating a label with geometries from a real GeoPackage file"""
 	# Load geometries from test GeoPackage
-	test_file = (
-		Path(__file__).parent.parent.parent.parent
-		/ 'assets'
-		/ 'test_data'
-		/ 'yanspain_crop_124_polygons.gpkg'
-	)
+	test_file = Path(__file__).parent.parent.parent.parent / 'assets' / 'test_data' / 'yanspain_crop_124_polygons.gpkg'
 
 	# Read both layers
 	deadwood = gpd.read_file(test_file, layer='standing_deadwood').to_crs(epsg=4326)
@@ -170,7 +165,7 @@ async def test_create_label_with_real_geometries(test_dataset_with_label, test_p
 	)
 
 	# Create label
-	label = await create_label_with_geometries(payload, test_processor_user, auth_token)
+	label = create_label_with_geometries(payload, test_processor_user, auth_token)
 
 	# Verify label was created
 	assert label.dataset_id == test_dataset_with_label
