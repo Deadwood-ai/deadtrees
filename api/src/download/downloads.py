@@ -8,31 +8,68 @@ import geopandas as gpd
 import yaml
 import pandas as pd
 
-from shared.models import Label, Dataset, LicenseEnum, Ortho
+from shared.settings import settings
+from shared.db import use_client
+from shared.models import Label, Dataset, LicenseEnum, Ortho, LabelDataEnum
 
 TEMPLATE_PATH = Path(__file__).parent / 'templates'
 
 
 def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
-	# create a GeoDataFrame from the label
-	label_gdf = gpd.GeoDataFrame.from_features(
-		[
-			{
-				'type': 'Feature',
-				'geometry': label.label.model_dump(),
-				'properties': {'source': label.label_source, 'type': label.label_type, 'quality': label.label_quality},
-			}
-		]
-	)
-	label_gdf.set_crs('EPSG:4326', inplace=True)
-	label_gdf.to_file(label_file, driver='GPKG', layer='labels')
+	# Get geometries from the database
+	with use_client() as client:
+		if label.label_data == LabelDataEnum.deadwood:
+			geom_table = settings.deadwood_geometries_table
+		else:
+			geom_table = settings.forest_cover_geometries_table
 
-	# create a layer for the aoi
-	aoi_gdf = gpd.GeoDataFrame.from_features(
-		[{'type': 'Feature', 'geometry': label.aoi.model_dump(), 'properties': {'dataset_id': label.dataset_id}}]
-	)
-	aoi_gdf.set_crs('EPSG:4326', inplace=True)
-	aoi_gdf.to_file(label_file, driver='GPKG', layer='aoi')
+		# Get geometries for this label
+		geom_response = client.table(geom_table).select('*').eq('label_id', label.id).execute()
+
+		if not geom_response.data:
+			raise ValueError(f'No geometries found for label {label.id}')
+
+		# Create features from geometries
+		features = []
+		for geom in geom_response.data:
+			features.append(
+				{
+					'type': 'Feature',
+					'geometry': geom['geometry'],
+					'properties': {
+						'source': label.label_source,
+						'type': label.label_type,
+						'quality': label.label_quality,
+						**geom.get('properties', {}),
+					},
+				}
+			)
+
+		# Create GeoDataFrame
+		label_gdf = gpd.GeoDataFrame.from_features(features)
+		label_gdf.set_crs('EPSG:4326', inplace=True)
+		label_gdf.to_file(label_file, driver='GPKG', layer='labels')
+
+		# Get AOI data only if aoi_id exists
+		if label.aoi_id is not None:
+			aoi_response = client.table(settings.aois_table).select('*').eq('id', label.aoi_id).execute()
+			if aoi_response.data:
+				aoi = aoi_response.data[0]
+				aoi_gdf = gpd.GeoDataFrame.from_features(
+					[
+						{
+							'type': 'Feature',
+							'geometry': aoi['geometry'],
+							'properties': {
+								'dataset_id': label.dataset_id,
+								'image_quality': aoi.get('image_quality'),
+								'notes': aoi.get('notes'),
+							},
+						}
+					]
+				)
+				aoi_gdf.set_crs('EPSG:4326', inplace=True)
+				aoi_gdf.to_file(label_file, driver='GPKG', layer='aoi')
 
 	return label_file
 
@@ -123,9 +160,10 @@ def bundle_dataset(
 		df = pd.DataFrame([dataset.model_dump(exclude={'id', 'created_at'})])
 
 		# Create temporary files for metadata formats
-		with tempfile.NamedTemporaryFile(suffix='.csv') as csv_file, tempfile.NamedTemporaryFile(
-			suffix='.parquet'
-		) as parquet_file:
+		with (
+			tempfile.NamedTemporaryFile(suffix='.csv') as csv_file,
+			tempfile.NamedTemporaryFile(suffix='.parquet') as parquet_file,
+		):
 			df.to_csv(csv_file.name, index=False)
 			df.to_parquet(parquet_file.name, index=False)
 

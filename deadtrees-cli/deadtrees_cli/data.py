@@ -1,13 +1,27 @@
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 import time
 import httpx
 from tqdm import tqdm
 import uuid
+import geopandas as gpd
+from shapely.geometry import MultiPolygon
 
 from shared.db import login, verify_token, use_client
 from shared.settings import settings
-from shared.models import Dataset, TaskTypeEnum, PlatformEnum, DatasetAccessEnum, Label, LabelDataEnum, LicenseEnum
+from shared.models import (
+	Dataset,
+	TaskTypeEnum,
+	PlatformEnum,
+	DatasetAccessEnum,
+	Label,
+	LabelDataEnum,
+	LicenseEnum,
+	LabelSourceEnum,
+	LabelTypeEnum,
+	LabelPayloadData,
+)
+from shared.labels import create_label_with_geometries
 from shared.logger import logger
 
 
@@ -185,3 +199,115 @@ class DataCommands:
 		except Exception as e:
 			logger.error(f'Unexpected error starting processing: {str(e)}')
 			raise
+
+	def upload_label(
+		self,
+		dataset_id: int,
+		labels_gdf: gpd.GeoDataFrame,
+		label_source: str,
+		label_type: str,
+		label_data: str,
+		label_quality: int,
+		properties: Optional[Dict[str, Any]] = None,
+		aoi_gdf: Optional[gpd.GeoDataFrame] = None,
+		aoi_image_quality: Optional[int] = None,
+		aoi_notes: Optional[str] = None,
+	) -> Label:
+		"""Upload a label to an existing dataset
+
+		Args:
+			dataset_id: ID of the dataset
+			labels_gdf: GeoDataFrame containing the label geometries
+			label_source: Source of the label (e.g., 'visual_interpretation', 'model_prediction')
+			label_type: Type of label (e.g., 'segmentation')
+			label_data: Type of data (e.g., 'deadwood', 'forest_cover')
+			label_quality: Quality score (1-3)
+			properties: Additional properties to store with the geometries
+			aoi_gdf: Optional GeoDataFrame containing the AOI geometry
+			aoi_image_quality: Quality score for the AOI image (1-3)
+			aoi_notes: Additional notes for the AOI
+		"""
+		token = self._ensure_auth()
+
+		# Convert labels to MultiPolygon GeoJSON
+		labels_geojson = {
+			'type': 'MultiPolygon',
+			'coordinates': [
+				[[[float(x), float(y)] for x, y in poly.exterior.coords]]
+				for geom in labels_gdf.geometry
+				for poly in (geom if isinstance(geom, MultiPolygon) else [geom])
+			],
+		}
+
+		# Prepare AOI if provided
+		aoi_geojson = None
+		if aoi_gdf is not None and not aoi_gdf.empty:
+			aoi_geojson = {
+				'type': 'MultiPolygon',
+				'coordinates': [
+					[[[float(x), float(y)] for x, y in poly.exterior.coords]]
+					for geom in aoi_gdf.geometry
+					for poly in (geom if isinstance(geom, MultiPolygon) else [geom])
+				],
+			}
+
+		# Create label payload
+		payload = LabelPayloadData(
+			dataset_id=dataset_id,
+			label_source=LabelSourceEnum(label_source),
+			label_type=LabelTypeEnum(label_type),
+			label_data=LabelDataEnum(label_data),
+			label_quality=label_quality,
+			geometry=labels_geojson,
+			properties=properties,
+			aoi_geometry=aoi_geojson,
+			aoi_image_quality=aoi_image_quality,
+			aoi_notes=aoi_notes,
+		)
+
+		# Get user ID from token
+		user = verify_token(token)
+		if not user:
+			raise ValueError('Invalid token')
+
+		# Create label with geometries
+		return create_label_with_geometries(payload, user.id, token)
+
+	def upload_label_from_gpkg(
+		self,
+		dataset_id: int,
+		gpkg_path: Union[str, Path],
+		label_source: str,
+		label_type: str,
+		label_data: str,
+		label_quality: int,
+		properties: Optional[Dict[str, Any]] = None,
+		labels_layer: str = 'labels',
+		aoi_layer: Optional[str] = 'aoi',
+		aoi_image_quality: Optional[int] = None,
+		aoi_notes: Optional[str] = None,
+	) -> Label:
+		"""Upload a label from a GeoPackage file"""
+		# Read labels layer
+		labels_gdf = gpd.read_file(gpkg_path, layer=labels_layer).to_crs(epsg=4326)
+
+		# Read AOI layer if specified
+		aoi_gdf = None
+		if aoi_layer:
+			try:
+				aoi_gdf = gpd.read_file(gpkg_path, layer=aoi_layer).to_crs(epsg=4326)
+			except Exception:
+				logger.warning(f'AOI layer "{aoi_layer}" not found in GeoPackage')
+
+		return self.upload_label(
+			dataset_id=dataset_id,
+			labels_gdf=labels_gdf,
+			label_source=label_source,
+			label_type=label_type,
+			label_data=label_data,
+			label_quality=label_quality,
+			properties=properties,
+			aoi_gdf=aoi_gdf,
+			aoi_image_quality=aoi_image_quality,
+			aoi_notes=aoi_notes,
+		)

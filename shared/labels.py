@@ -12,7 +12,7 @@ from shared.logger import logger
 MAX_CHUNK_SIZE = 1024 * 1024  # 1MB per chunk
 
 
-async def create_label_with_geometries(payload: LabelPayloadData, user_id: str, token: str) -> Label:
+def create_label_with_geometries(payload: LabelPayloadData, user_id: str, token: str) -> Label:
 	"""Creates a label with associated AOI and geometries, handling large geometry uploads
 	through chunking.
 	"""
@@ -23,7 +23,7 @@ async def create_label_with_geometries(payload: LabelPayloadData, user_id: str, 
 		aoi = AOI(
 			dataset_id=payload.dataset_id,
 			user_id=user_id,
-			geometry=payload.aoi_geometry,
+			geometry=payload.aoi_geometry.model_dump(),  # Convert to GeoJSON dict
 			is_whole_image=payload.aoi_is_whole_image,
 			image_quality=payload.aoi_image_quality,
 			notes=payload.aoi_notes,
@@ -105,7 +105,7 @@ async def create_label_with_geometries(payload: LabelPayloadData, user_id: str, 
 
 				if current_chunk_size + geom_size > MAX_CHUNK_SIZE and current_chunk:
 					# Upload current chunk
-					await upload_geometry_chunk(
+					upload_geometry_chunk(
 						client, geom_table, GeometryModel, label_id, current_chunk, payload.properties, token
 					)
 					current_chunk = []
@@ -116,7 +116,7 @@ async def create_label_with_geometries(payload: LabelPayloadData, user_id: str, 
 
 			# Upload remaining geometries
 			if current_chunk:
-				await upload_geometry_chunk(
+				upload_geometry_chunk(
 					client, geom_table, GeometryModel, label_id, current_chunk, payload.properties, token
 				)
 
@@ -127,7 +127,7 @@ async def create_label_with_geometries(payload: LabelPayloadData, user_id: str, 
 			raise Exception(f'Error creating label: {str(e)}')
 
 
-async def upload_geometry_chunk(
+def upload_geometry_chunk(
 	client,
 	table: str,
 	GeometryModel: type[DeadwoodGeometry] | type[ForestCoverGeometry],

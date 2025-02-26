@@ -296,7 +296,7 @@ class AOI(BaseModel):
 	id: Optional[int] = None
 	dataset_id: int
 	user_id: str
-	geometry: MultiPolygonModel
+	geometry: Dict  # Changed from MultiPolygonModel to Dict
 	is_whole_image: bool = False
 	image_quality: Optional[int] = None
 	notes: Optional[str] = None
@@ -366,6 +366,7 @@ class ForestCoverGeometry(BaseModel):
 
 class MetadataType(str, Enum):
 	GADM = 'gadm'
+	BIOME = 'biome'
 	# Add more types as needed
 
 
@@ -377,6 +378,15 @@ class AdminBoundariesMetadata(BaseModel):
 	admin_level_3: Optional[str] = None  # District
 	source: str = 'GADM'
 	version: str = '4.1.0'  # GADM version
+
+
+class BiomeMetadata(BaseModel):
+	"""Structure for WWF Terrestrial Ecoregions biome metadata"""
+
+	biome_name: Optional[str] = None
+	biome_id: Optional[int] = None
+	source: str = 'WWF Terrestrial Ecoregions'
+	version: str = '2.0'  # WWF Ecoregions version
 
 
 class DatasetMetadata(BaseModel):

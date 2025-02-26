@@ -1,0 +1,139 @@
+---
+description: Generel information about the project Structure
+globs: 
+alwaysApply: false
+---
+# Project Structure Overview
+
+├── api                          # FastAPI backend service
+│   ├── Dockerfile              # API service containerization
+│   ├── requirements.txt        # API-specific Python dependencies
+│   ├── src                     # API source code
+│   └── tests                   # API unit tests
+
+├── assets                      # Static and reference data
+│   ├── biom                    # Biometric data assets
+│   ├── gadm                    # Geographic administrative data
+│   ├── models                  # ML/AI model files
+│   └── test_data              # Test datasets
+
+├── data                        # Data storage and processing directories
+│   ├── archive                 # Historical/archived data
+│   ├── cogs                    # Cloud Optimized GeoTIFFs
+│   ├── downloads              # Downloaded raw data
+│   ├── label_objects          # Labeled training data
+│   ├── processing_dir         # Temporary processing workspace
+│   ├── thumbnails             # Image thumbnails
+│   └── trash                  # Soft-deleted items
+
+├── deadtrees-cli              # Command Line Interface package
+│   ├── deadtrees_cli         # CLI source code
+│   ├── setup.py              # CLI package configuration
+│   └── tests                 # CLI unit tests
+
+├── docker-compose.*.yaml      # Docker compose files for different environments
+                              # (api, processor, test)
+
+├── end2end_tests             # Integration/E2E testing
+│   ├── Dockerfile            # Test environment container
+│   ├── requirements.txt      # Test dependencies
+│   └── src                   # Test source code
+
+├── nginx                     # Reverse proxy and load balancer
+│   ├── conf                  # Nginx configuration
+│   └── entrypoint.sh        # Container startup script
+
+├── processor                 # Data processing service
+│   ├── Dockerfile           # Processor container definition
+│   ├── src                  # Processing logic source code
+│   └── tests                # Processor unit tests
+
+├── scripts                   # Utility and maintenance scripts
+│   ├── debug_cog_processing.py  # COG processing debugger
+│   └── issues               # Issue-specific scripts
+
+├── shared                    # Shared utilities and models
+│   ├── db.py                # Database connection handling
+│   ├── hash.py              # Hashing utilities
+│   ├── labels.py            # Label management
+│   ├── logger.py            # Logging configuration
+│   ├── models.py            # Shared data models
+│   ├── monitoring.py        # System monitoring
+│   ├── ortho.py            # Orthographic processing
+│   ├── settings.py          # Global settings
+│   ├── status.py           # Status tracking
+│   ├── testing             # Shared test utilities
+│   └── utils.py            # Common utilities
+
+└── supabase                 # Database management
+    ├── config.toml         # Supabase configuration
+    └── migrations         # Database migrations
+
+# Key Components:
+
+1. API Service (./api):
+   - FastAPI-based REST API
+   - Handles client requests and data serving
+   - Containerized service
+
+2. Data Processor (./processor):
+   - Handles heavy data processing tasks
+   - Processes geographic and image data
+   - Runs as separate containerized service
+
+3. Shared Code (./shared):
+   - Common utilities used across services
+   - Database interfaces
+   - Logging and monitoring
+   - Core business logic models
+
+4. Data Management:
+   - Structured data storage in Supabase
+   - File-based storage for assets and processed data
+   - Migration management for database schema
+
+5. Testing:
+   - Unit tests within each component
+   - End-to-end tests for integration testing
+   - Test data and fixtures
+
+6. Infrastructure:
+   - Nginx for reverse proxy
+   - Docker containerization
+   - Multiple environment configurations
+
+# Development Workflow:
+- Services run in containers orchestrated by docker-compose
+- Shared code ensures consistency across services
+- Separate development, testing, and production environments
+- Database migrations managed through Supabase
+
+
+# Shared Code Conventions
+
+## Code Organization
+- Place all shared utilities in the shared/ directory
+- Keep shared code minimal and focused
+- Document all shared functions thoroughly
+- Version shared components carefully
+
+## Dependency Management
+- Minimize external dependencies in shared code
+- Document any required dependencies clearly
+- Use consistent versions across all services
+- Handle circular dependencies carefully
+
+## Usage Guidelines
+- Import shared utilities using absolute imports
+- Don't modify shared code without cross-service testing
+- Keep backwards compatibility in mind
+- Document breaking changes
+
+
+
+
+
+
+
+
+
