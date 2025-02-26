@@ -10,7 +10,6 @@ Main FastAPI application for the deadwood backend. This repository contains both
 ---
 
 ## Setup
-
 ### Clone the repository with submodules:
 
 ```bash
