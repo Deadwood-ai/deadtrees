@@ -118,6 +118,7 @@ class DevCommands:
 			'-m',
 			'pytest',
 			'-v',
+			'--ignore=processor/src/treecover/tcd/tests',
 		]
 
 		if test_path:
@@ -153,6 +154,7 @@ class DevCommands:
 			'-m',
 			'pytest',
 			'-v',
+			'--ignore=processor/src/treecover/tcd/tests',
 		]
 
 		if test_path:

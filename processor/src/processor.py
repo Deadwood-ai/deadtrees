@@ -1,6 +1,7 @@
 import atexit
 import shutil
 from threading import Timer
+from pathlib import Path
 
 from processor.src.process_geotiff import process_geotiff
 from shared.models import QueueTask, StatusEnum, Dataset, TaskTypeEnum
@@ -13,6 +14,7 @@ from .process_deadwood_segmentation import process_deadwood_segmentation
 from .process_metadata import process_metadata
 from .exceptions import ProcessorError, AuthenticationError, DatasetError, ProcessingError, StorageError
 from shared.logging import LogContext, LogCategory, UnifiedLogger, SupabaseHandler
+from .process_treecover import process_treecover
 
 # Initialize logger with proper cleanup
 logger = UnifiedLogger(__name__)
@@ -211,6 +213,22 @@ def process_task(task: QueueTask, token: str):
 			raise ProcessingError(
 				str(e), task_type='deadwood_segmentation', task_id=task.id, dataset_id=task.dataset_id
 			)
+
+	# Match task types
+	if TaskTypeEnum.forest_cover in task.task_types:
+		try:
+			logger.info(
+				'Processing forest cover',
+				LogContext(category=LogCategory.FOREST_COVER, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+			)
+			process_treecover(task=task, token=token, temp_dir=settings.processing_path)
+		except Exception as e:
+			logger.error(
+				f'Forest cover processing failed: {str(e)}',
+				LogContext(category=LogCategory.FOREST_COVER, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+			)
+			raise ProcessingError(str(e), task_type='forest_cover', task_id=task.id, dataset_id=task.dataset_id)
+
 
 	# Delete task after successful processing
 	try:

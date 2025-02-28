@@ -55,7 +55,7 @@ class LabelSourceEnum(str, Enum):
 
 class LabelTypeEnum(str, Enum):
 	point_observation = 'point_observation'
-	segmentation = 'segmentation'
+	# segmentation = 'segmentation'
 	instance_segmentation = 'instance_segmentation'
 	semantic_segmentation = 'semantic_segmentation'
 
@@ -66,6 +66,7 @@ class TaskTypeEnum(str, Enum):
 	deadwood = 'deadwood'  # Run deadwood segmentation
 	geotiff = 'geotiff'  # Convert to geotiff
 	metadata = 'metadata'  # Extract metadata
+	forest_cover = 'forest_cover'  # Run tree cover detection
 
 
 class TaskPayload(BaseModel):

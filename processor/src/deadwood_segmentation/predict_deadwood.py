@@ -43,7 +43,7 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 		payload = LabelPayloadData(
 			dataset_id=dataset_id,
 			label_source=LabelSourceEnum.model_prediction,
-			label_type=LabelTypeEnum.segmentation,
+			label_type=LabelTypeEnum.semantic_segmentation,
 			label_data=LabelDataEnum.deadwood,
 			label_quality=3,
 			geometry=deadwood_geojson,

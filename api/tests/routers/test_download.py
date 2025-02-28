@@ -172,7 +172,7 @@ def test_dataset_with_label(auth_token, test_dataset_for_download, test_user):
 	payload = LabelPayloadData(
 		dataset_id=test_dataset_for_download,
 		label_source=LabelSourceEnum.visual_interpretation,
-		label_type=LabelTypeEnum.segmentation,
+		label_type=LabelTypeEnum.semantic_segmentation,
 		label_data=LabelDataEnum.deadwood,
 		label_quality=1,
 		geometry=deadwood_geojson,
@@ -276,7 +276,7 @@ def test_dataset_with_label_no_aoi(auth_token, test_dataset_for_download, test_u
 	payload = LabelPayloadData(
 		dataset_id=test_dataset_for_download,
 		label_source=LabelSourceEnum.visual_interpretation,
-		label_type=LabelTypeEnum.segmentation,
+		label_type=LabelTypeEnum.semantic_segmentation,
 		label_data=LabelDataEnum.deadwood,
 		label_quality=1,
 		geometry=deadwood_geojson,

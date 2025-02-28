@@ -76,7 +76,7 @@ async def test_create_label_with_chunked_geometries(
 	payload = LabelPayloadData(
 		dataset_id=test_dataset_with_label,
 		label_source=LabelSourceEnum.visual_interpretation,
-		label_type=LabelTypeEnum.segmentation,
+		label_type=LabelTypeEnum.semantic_segmentation,
 		label_data=LabelDataEnum.deadwood,
 		label_quality=1,
 		geometry=test_geometries.__geo_interface__,
@@ -94,7 +94,7 @@ async def test_create_label_with_chunked_geometries(
 	assert label.dataset_id == test_dataset_with_label
 	assert label.user_id == test_processor_user
 	assert label.label_source == LabelSourceEnum.visual_interpretation
-	assert label.label_type == LabelTypeEnum.segmentation
+	assert label.label_type == LabelTypeEnum.semantic_segmentation
 	assert label.label_data == LabelDataEnum.deadwood
 	assert label.label_quality == 1
 
@@ -154,7 +154,7 @@ async def test_create_label_with_real_geometries(test_dataset_with_label, test_p
 	payload = LabelPayloadData(
 		dataset_id=test_dataset_with_label,
 		label_source=LabelSourceEnum.model_prediction,
-		label_type=LabelTypeEnum.segmentation,
+		label_type=LabelTypeEnum.semantic_segmentation,
 		label_data=LabelDataEnum.deadwood,
 		label_quality=3,
 		geometry=deadwood_geojson,
@@ -171,7 +171,7 @@ async def test_create_label_with_real_geometries(test_dataset_with_label, test_p
 	assert label.dataset_id == test_dataset_with_label
 	assert label.user_id == test_processor_user
 	assert label.label_source == LabelSourceEnum.model_prediction
-	assert label.label_type == LabelTypeEnum.segmentation
+	assert label.label_type == LabelTypeEnum.semantic_segmentation
 	assert label.label_data == LabelDataEnum.deadwood
 	assert label.label_quality == 3
 
