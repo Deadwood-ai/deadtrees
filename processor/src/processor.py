@@ -219,13 +219,13 @@ def process_task(task: QueueTask, token: str):
 		try:
 			logger.info(
 				'Processing forest cover',
-				LogContext(category=LogCategory.FOREST_COVER, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+				LogContext(category=LogCategory.FOREST, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 			)
 			process_treecover(task=task, token=token, temp_dir=settings.processing_path)
 		except Exception as e:
 			logger.error(
 				f'Forest cover processing failed: {str(e)}',
-				LogContext(category=LogCategory.FOREST_COVER, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+				LogContext(category=LogCategory.FOREST, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 			)
 			raise ProcessingError(str(e), task_type='forest_cover', task_id=task.id, dataset_id=task.dataset_id)
 

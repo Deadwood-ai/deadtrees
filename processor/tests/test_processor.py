@@ -3,11 +3,11 @@ from pathlib import Path
 
 from shared.db import use_client
 from shared.settings import settings
-from shared.models import TaskTypeEnum, QueueTask, StatusEnum
+from shared.models import TaskTypeEnum, QueueTask, StatusEnum, LabelTypeEnum
 from processor.src.processor import background_process, process_task
 
 
-@pytest.fixture
+@pytest.fixture	
 def processor_task(test_dataset_for_processing, test_processor_user, auth_token):
 	"""Create a test task for processor testing"""
 	task_id = None
@@ -105,6 +105,7 @@ def sequential_task(test_dataset_for_processing, test_processor_user):
 			TaskTypeEnum.thumbnail,
 			TaskTypeEnum.metadata,
 			TaskTypeEnum.deadwood,
+			TaskTypeEnum.forest_cover,
 		],
 		priority=1,
 		is_processing=False,
@@ -154,9 +155,19 @@ def test_sequential_processing(sequential_task, auth_token):
 
 		# Check deadwood processing
 		deadwood_response = (
-			client.table(settings.labels_table).select('*').eq('dataset_id', sequential_task.dataset_id).execute()
+			client.table(settings.labels_table).select('*').eq('dataset_id', sequential_task.dataset_id).eq('label_type', LabelTypeEnum.deadwood).execute()
 		)
 		assert len(deadwood_response.data) == 1
+
+		# Check tree cover processing
+		tree_cover_response = (
+			client.table(settings.labels_table)
+			.select('*')
+			.eq('dataset_id', sequential_task.dataset_id)
+			.eq('label_type', LabelTypeEnum.forest_cover)
+			.execute()
+		)
+		assert len(tree_cover_response.data) == 1
 
 		# Verify final status
 		status_response = (
@@ -171,6 +182,7 @@ def test_sequential_processing(sequential_task, auth_token):
 		assert status['is_metadata_done'] is True
 		assert not status['has_error']
 		assert status['is_deadwood_done'] is True
+		assert status['is_forest_cover_done'] is True
 
 		# Verify task was removed from queue
 		queue_response = client.table(settings.queue_table).select('*').eq('id', sequential_task.id).execute()
