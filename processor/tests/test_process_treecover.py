@@ -57,7 +57,7 @@ def test_process_treecover_success(treecover_task, auth_token):
 		assert label['label_source'] == LabelSourceEnum.model_prediction
 		assert label['label_type'] == LabelTypeEnum.semantic_segmentation
 		assert label['label_data'] == LabelDataEnum.forest_cover
-		assert label['label_quality'] is 3  # Tree cover doesn't set a quality rating
+		assert label['label_quality'] == 3  # Tree cover doesn't set a quality rating
 
 		# Check geometries
 		geom_response = (

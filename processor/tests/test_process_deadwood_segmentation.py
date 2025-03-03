@@ -3,7 +3,7 @@ from pathlib import Path
 
 from shared.db import use_client
 from shared.settings import settings
-from shared.models import TaskTypeEnum, QueueTask, LabelDataEnum
+from shared.models import TaskTypeEnum, QueueTask, LabelDataEnum, LabelTypeEnum, LabelSourceEnum
 from processor.src.process_deadwood_segmentation import process_deadwood_segmentation
 
 
@@ -52,8 +52,8 @@ def test_process_deadwood_segmentation_success(deadwood_task, auth_token):
 		# Basic label checks
 		assert len(response.data) == 1
 		assert label['dataset_id'] == deadwood_task.dataset_id
-		assert label['label_source'] == 'model_prediction'
-		assert label['label_type'] == 'segmentation'
+		assert label['label_source'] == LabelSourceEnum.model_prediction
+		assert label['label_type'] == LabelTypeEnum.semantic_segmentation
 		assert label['label_data'] == LabelDataEnum.deadwood
 		assert label['label_quality'] == 3
 
