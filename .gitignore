@@ -5,6 +5,8 @@ processor/src/deadwood_segmentation/models/*
 
 processor/tests/test_data/*
 
+supabase/data/*
+
 .cursorrules
 # Byte-compiled / optimized / DLL files
 __pycache__/
