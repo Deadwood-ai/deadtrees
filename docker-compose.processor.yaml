@@ -5,11 +5,12 @@ services:
       context: .
       dockerfile: processor/Dockerfile
     network_mode: host
+    command: python -m processor.src.processor
     deploy:
       resources:
         limits:
-          cpus: '12'
-          memory: '64G'
+          cpus: '30'
+          memory: '96G'
         reservations:
           devices:
             - driver: nvidia
@@ -17,7 +18,9 @@ services:
               capabilities: [gpu]
     runtime: nvidia
     volumes:
-      - ./data:/data
+      - ./processor:/app/processor
+      - ./shared:/app/shared
+      - ./assets:/app/assets
       - ${SSH_PRIVATE_KEY_PATH}:/app/ssh_key
     environment:
       BASE_DIR: /data
