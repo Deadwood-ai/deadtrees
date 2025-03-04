@@ -249,6 +249,7 @@ def background_process():
 
 	# is there is nothing in the queue, just stop the process and log
 	if queued_tasks == 0:
+		print('No tasks in the queue.')
 		# logger.info('No tasks in the queue.', extra={'token': token})
 		return
 
