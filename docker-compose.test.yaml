@@ -85,7 +85,7 @@ services:
   nginx:
     build:
       context: ./nginx
-      dockerfile: Dockerfile
+      dockerfile: test-conf/Dockerfile
     healthcheck:
       test: ['CMD', 'service', 'nginx', 'status']
       interval: 15s

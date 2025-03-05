@@ -19,7 +19,7 @@ RUN apt-get update && \
 
 # Copy your nginx configuration if needed
 COPY test-conf /etc/nginx/conf.d/
-COPY entrypoint.sh /entrypoint.sh
+COPY test-conf/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Expose ports
