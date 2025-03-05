@@ -4,6 +4,7 @@ api/tests/test_data/*
 processor/src/deadwood_segmentation/models/*
 
 processor/tests/test_data/*
+.vscode/*
 
 supabase/data/*
 
