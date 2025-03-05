@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     build-essential \
     git \
+    openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Create and activate virtual environment
@@ -36,7 +37,17 @@ RUN pip3 install --no-cache-dir -r /app/processor/requirements.txt
 COPY ./processor /app/processor
 COPY ./shared /app/shared
 
+# Copy entrypoint script and make it executable
+COPY processor/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Set working directory for execution
 WORKDIR /app
+
+# Set entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Default command
+CMD ["python", "-m", "processor.src.processor"]
 
 # Note: Model file should be mounted at runtime

@@ -13,10 +13,12 @@ services:
       - '5678:5678'
     volumes:
       # - ./data:/data # need it for testing (pulling and pushing files to storage server)
-      - nginx_ssh:/root/.ssh:ro
       - ./processor:/app/processor
       - ./shared:/app/shared
       - ./assets:/app/assets
+      # Mount your Ed25519 key directly
+      - ~/.ssh/processing-to-storage:/root/.ssh/processing-to-storage:ro
+      - ~/.ssh/processing-to-storage.pub:/root/.ssh/processing-to-storage.pub:ro
     environment:
       - PYTHONPATH=/app
       - PYTEST_ADDOPTS=--color=yes
@@ -28,7 +30,8 @@ services:
       - SUPABASE_KEY=${SUPABASE_KEY}
       - BASE_DIR=/data
       - PROCESSOR_PASSWORD=${PROCESSOR_PASSWORD}
-      - SSH_PRIVATE_KEY_PATH=/root/.ssh/id_rsa
+      # Update the path to use your Ed25519 key
+      - SSH_PRIVATE_KEY_PATH=/root/.ssh/processing-to-storage
       - SSH_PRIVATE_KEY_PASSPHRASE=
       - ENV=development
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
@@ -97,7 +100,8 @@ services:
       - '2222:22'
     volumes:
       - ./data:/data/:rw
-      - nginx_ssh:/root/.ssh
+      # Mount your Ed25519 public key for authorized_keys
+      - ~/.ssh/processing-to-storage.pub:/root/.ssh/authorized_keys:ro
       - ./nginx/test-conf:/etc/nginx/conf.d/:ro
 
 
@@ -126,4 +130,4 @@ networks:
     name: deadwood_network
 
 volumes:
-  nginx_ssh:
+  # nginx_ssh:  # This can be removed if not used by other services

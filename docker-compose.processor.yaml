@@ -5,8 +5,8 @@ services:
       context: .
       dockerfile: processor/Dockerfile
     network_mode: host
-    # command: python -m debugpy --listen 0.0.0.0:5678 --wait-for-client -m processor.src.processor
-    command: python -m processor.src.processor
+    command: python -m debugpy --listen 0.0.0.0:5678 --wait-for-client -m processor.src.processor
+    # command: python -m processor.src.processor
     deploy:
       resources:
         limits:
@@ -22,21 +22,22 @@ services:
       - ./processor:/app/processor
       - ./shared:/app/shared
       - ./assets:/app/assets
-      - ~/.ssh/processing-to-storage:/root/.ssh/processing-to-storage:ro
-      - ~/.ssh/processing-to-storage.pub:/root/.ssh/processing-to-storage.pub:ro
+      - ~/.ssh/processing-to-storage:/tmp/ssh-keys/processing-to-storage:ro
+      - ~/.ssh/processing-to-storage.pub:/tmp/ssh-keys/processing-to-storage.pub:ro
     environment:
       BASE_DIR: /data
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_KEY: ${SUPABASE_KEY}
       STORAGE_SERVER_IP: data2.deadtrees.earth
-      STORAGE_SERVER_USERNAME: dendro
+      STORAGE_SERVER_USERNAME: root
       STORAGE_SERVER_DATA_PATH: ${STORAGE_SERVER_DATA_PATH}
       PROCESSOR_USERNAME: processor@deadtrees.earth
       PROCESSOR_PASSWORD: ${PROCESSOR_PASSWORD}
       SSH_PRIVATE_KEY_PASSPHRASE: ${SSH_PRIVATE_KEY_PASSPHRASE}
+      SSH_PRIVATE_KEY_PATH: /root/.ssh/processing-to-storage
       DEV_MODE: "false"
       LOGFIRE_TOKEN: ${LOGFIRE_TOKEN}
       SSH_KEY_PATH: /root/.ssh/processing-to-storage
-    # ports:
-      # - "5678:5678"
+    ports:
+      - "5678:5678"
 
