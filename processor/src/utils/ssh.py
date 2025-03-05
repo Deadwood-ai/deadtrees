@@ -29,7 +29,7 @@ def pull_file_from_storage_server(remote_file_path: str, local_file_path: str, t
 			hostname=settings.STORAGE_SERVER_IP,
 			username=settings.STORAGE_SERVER_USERNAME,
 			pkey=pkey,
-			port=2222,  # Add this line to specify the default SSH port
+			port=22,  # Add this line to specify the default SSH port
 		)
 
 		with ssh.open_sftp() as sftp:
@@ -83,7 +83,7 @@ def push_file_to_storage_server(local_file_path: str, remote_file_path: str, tok
 			hostname=settings.STORAGE_SERVER_IP,
 			username=settings.STORAGE_SERVER_USERNAME,
 			pkey=pkey,
-			port=2222,
+			port=22,
 		)
 
 		with ssh.open_sftp() as sftp:
@@ -204,15 +204,14 @@ def cleanup_storage_server_directory(directory_path: str, token: str):
 	"""Clean up a directory on the storage server via SSH"""
 	with paramiko.SSHClient() as ssh:
 		ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-		pkey = paramiko.Ed25519Key.from_private_key_file(
-			settings.SSH_PRIVATE_KEY_PATH)
+		pkey = paramiko.Ed25519Key.from_private_key_file(settings.SSH_PRIVATE_KEY_PATH)
 
 		try:
 			ssh.connect(
 				hostname=settings.STORAGE_SERVER_IP,
 				username=settings.STORAGE_SERVER_USERNAME,
 				pkey=pkey,
-				port=2222,
+				port=22,
 			)
 
 			# Execute rm command for all files in directory
@@ -249,7 +248,7 @@ def check_file_exists_on_storage(remote_file_path: str, token: str) -> bool:
 			hostname=settings.STORAGE_SERVER_IP,
 			username=settings.STORAGE_SERVER_USERNAME,
 			pkey=pkey,
-			port=2222,
+			port=22,
 		)
 
 		with ssh.open_sftp() as sftp:

@@ -17,8 +17,8 @@ services:
       - ./shared:/app/shared
       - ./assets:/app/assets
       # Mount your Ed25519 key directly
-      - ~/.ssh/processing-to-storage:/root/.ssh/processing-to-storage:ro
-      - ~/.ssh/processing-to-storage.pub:/root/.ssh/processing-to-storage.pub:ro
+      - ~/.ssh/processing-to-storage:/tmp/ssh-keys/processing-to-storage:ro
+      - ~/.ssh/processing-to-storage.pub:/tmp/ssh-keys/processing-to-storage.pub:ro
     environment:
       - PYTHONPATH=/app
       - PYTEST_ADDOPTS=--color=yes
@@ -97,11 +97,12 @@ services:
       start_period: 2s
     ports:
       - 8080:80
-      - '2222:22'
+      # - 2222:22
     volumes:
       - ./data:/data/:rw
       # Mount your Ed25519 public key for authorized_keys
-      - ~/.ssh/processing-to-storage.pub:/root/.ssh/authorized_keys:ro
+      # - ~/.ssh/processing-to-storage.pub:/root/.ssh/authorized_keys:ro
+      - ~/.ssh/processing-to-storage.pub:/tmp/ssh-keys/processing-to-storage.pub:ro
       - ./nginx/test-conf:/etc/nginx/conf.d/:ro
 
 

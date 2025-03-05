@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     ports:
       - 127.0.0.1:40831:40831
-      - 22:22  # Expose SSH port
+      # - 22:22  # Expose SSH port
     volumes:
       - /data:/data
       - ./assets/gdam/gdam_410.gpkg:/gadm_data/gadm_410.gpkg
@@ -42,7 +42,7 @@ services:
     ports:
       - 80:80
       - 443:443
-      - 2222:22  # Expose SSH port (optional)
+      # - 2222:22  # Expose SSH port (optional)
 
     links:
       - api
