@@ -54,10 +54,11 @@ services:
       dockerfile: api/Dockerfile
     healthcheck:
       test: curl --fail http://127.0.0.1:8017/ || exit 1
-      interval: 15s
-      timeout: 1s
+      interval: 30s
+      timeout: 10s
       retries: 5
-      start_period: 2s
+      start_period: 1m30s
+      start_interval: 1s
     ports:
       - '8017:8017'
       - '5679:5679'
@@ -97,6 +98,8 @@ services:
     volumes:
       - ./data:/data/:rw
       - nginx_ssh:/root/.ssh
+      - ./nginx/test-conf:/etc/nginx/conf.d/:ro
+
 
   tests:
     build:

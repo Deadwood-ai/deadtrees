@@ -3,46 +3,67 @@ services:
     build:
       context: .
       dockerfile: api/Dockerfile
+    restart: unless-stopped
     ports:
-      - 8762:8762
+      - 127.0.0.1:40831:40831
     volumes:
-      - ./data:/data
-      - ./src:/app/src
-      - ${GADM_DATA_PATH}:/gadm_data/gadm_410.gpkg
+      - /data:/data
+      - ./assets/gdam/gdam_410.gpkg:/gadm_data/gadm_410.gpkg
+    
+    healthcheck:
+      test: curl --fail http://127.0.0.1:40831/ || exit 1
+      interval: 1m
+      timeout: 10s
+      retries: 5
+      start_period: 1m30s
+      start_interval: 1s
 
     environment:
       BASE_DIR: /data
+      PYTHONPATH: /app
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_KEY: ${SUPABASE_KEY}
-      STORAGE_SERVER_IP: ${STORAGE_SERVER_IP}
-      STORAGE_SERVER_USERNAME: ${STORAGE_SERVER_USERNAME}
-      STORAGE_SERVER_DATA_PATH: ${STORAGE_SERVER_DATA_PATH}
-      DEV_MODE: ${DEV_MODE}
+      DEV_MODE: false
       GADM_DATA_PATH: /gadm_data/gadm_410.gpkg
-      PROCESSOR_USERNAME: processor@deadtrees.earth
-      PROCESSOR_PASSWORD: ${PROCESSOR_PASSWORD}
-      UVICORN_PORT: 8762
+      UVICORN_ROOT_PATH: /api/v1
+      UVICORN_PORT: 40831
       UVICORN_HOST: 0.0.0.0
       LOGFIRE_TOKEN: ${LOGFIRE_TOKEN}
 
-  migrate:
-    build:
-      context: .
-      dockerfile: api/Dockerfile
-    volumes:
-      - ./data:/data
-      - ./src:/app/src
+    # command: python run.py server --reload=False
+
+  nginx:
+    image: nginx
+    restart: unless-stopped
+    ports:
+      - 80:80
+      - 443:443
+
     links:
       - api
-    command: echo "Run migration service as 'docker compose run --rm migrate bash'"
-    environment:
-      BASE_DIR: /data
-      SUPABASE_URL: ${SUPABASE_URL}
-      SUPABASE_KEY: ${SUPABASE_KEY}
-      PROCESSOR_USERNAME: processor@deadtrees.earth
-      PROCESSOR_PASSWORD: ${PROCESSOR_PASSWORD}
-      OLD_ARCHIVE_PATH: /data/to_migrate
-      API_URL: http://api:8762
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'service', 'nginx', 'status']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1m30s
+      start_interval: 1s
 
-      # migration metadata
-      MIGRATION_TABLE: migrate_v1
+    volumes:
+      - ./nginx/api-conf:/etc/nginx/conf.d/:ro
+      - /data:/data/:ro
+      - ./nginx/logs:/var/log/nginx
+      - ./certbot/www:/var/www/certbot:ro
+      - ./certbot/conf:/etc/nginx/ssl/:ro
+  
+  certbot:
+    image: certbot/certbot:latest
+    volumes:
+      - ./certbot/www/:/var/www/certbot/:rw
+      - ./certbot/conf/:/etc/letsencrypt:rw
+    depends_on:
+      - nginx
+        

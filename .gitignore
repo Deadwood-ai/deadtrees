@@ -179,3 +179,7 @@ data/*
 
 # debugging scripts
 scripts/*
+
+# deployment ignores
+certbot/conf
+certbot/www
