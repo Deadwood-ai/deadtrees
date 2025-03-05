@@ -22,19 +22,21 @@ services:
       - ./processor:/app/processor
       - ./shared:/app/shared
       - ./assets:/app/assets
-      - ${SSH_PRIVATE_KEY_PATH}:/app/ssh_key
+      - ~/.ssh/processing-to-storage:/root/.ssh/processing-to-storage:ro
+      - ~/.ssh/processing-to-storage.pub:/root/.ssh/processing-to-storage.pub:ro
     environment:
       BASE_DIR: /data
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_KEY: ${SUPABASE_KEY}
-      STORAGE_SERVER_IP: ${STORAGE_SERVER_IP}
-      STORAGE_SERVER_USERNAME: ${STORAGE_SERVER_USERNAME}
+      STORAGE_SERVER_IP: data2.deadtrees.earth
+      STORAGE_SERVER_USERNAME: dendro
       STORAGE_SERVER_DATA_PATH: ${STORAGE_SERVER_DATA_PATH}
       PROCESSOR_USERNAME: processor@deadtrees.earth
       PROCESSOR_PASSWORD: ${PROCESSOR_PASSWORD}
       SSH_PRIVATE_KEY_PASSPHRASE: ${SSH_PRIVATE_KEY_PASSPHRASE}
       DEV_MODE: "false"
       LOGFIRE_TOKEN: ${LOGFIRE_TOKEN}
+      SSH_KEY_PATH: /root/.ssh/processing-to-storage
     # ports:
       # - "5678:5678"
 

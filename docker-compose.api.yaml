@@ -6,9 +6,11 @@ services:
     restart: unless-stopped
     ports:
       - 127.0.0.1:40831:40831
+      - 22:22  # Expose SSH port
     volumes:
       - /data:/data
       - ./assets/gdam/gdam_410.gpkg:/gadm_data/gadm_410.gpkg
+      - ~/.ssh/authorized_keys:/home/dendro/.ssh/authorized_keys:ro
     
     healthcheck:
       test: curl --fail http://127.0.0.1:40831/ || exit 1
@@ -33,11 +35,14 @@ services:
     # command: python run.py server --reload=False
 
   nginx:
-    image: nginx
+    build:
+      context: ./nginx/api-conf
+      dockerfile: Dockerfile
     restart: unless-stopped
     ports:
       - 80:80
       - 443:443
+      - 2222:22  # Expose SSH port (optional)
 
     links:
       - api
@@ -58,6 +63,7 @@ services:
       - ./nginx/logs:/var/log/nginx
       - ./certbot/www:/var/www/certbot:ro
       - ./certbot/conf:/etc/nginx/ssl/:ro
+      - ~/.ssh:/root/.ssh:ro  # Mount the host's SSH directory
   
   certbot:
     image: certbot/certbot:latest
@@ -66,4 +72,7 @@ services:
       - ./certbot/conf/:/etc/letsencrypt:rw
     depends_on:
       - nginx
+
+volumes:
+  nginx_ssh:  # Define the volume for SSH keys
         
