@@ -9,8 +9,7 @@ Main FastAPI application for the deadwood backend. This repository contains both
 
 ---
 
-## Local setup
-
+## Setup
 ### Clone the repository with submodules:
 
 ```bash
@@ -47,16 +46,59 @@ make
 
 ```bash
 # Start the development environment
-./dtool.py up
-
+deadtrees dev start
 # Stop the development environment
-./dtool.py down
+deadtrees dev stop
+
+# Rebuild the development environment
+deadtrees dev start --force-rebuild
+
+# Run development environment with continuous processor queue checking
+deadtrees dev run-dev
 
 # Run API tests
-./dtool.py test test-api api/tests/routers/test_download.py
+deadtrees dev test api api/tests/routers/test_download.py
 
-# Debug API testsj
-./dtool.py debug test-api api/tests/routers/test_download.py
+# Debug API tests
+deadtrees dev debug api api/tests/routers/test_download.py
+
+# Run processor tests
+deadtrees dev test processor processor/tests/test_processor.py
+
+# Debug processor tests
+deadtrees dev debug processor processor/tests/test_processor.py
+
+```
+
+### Accessing services
+
+the nginx acts as a reverse proxy for the API and processor services.
+
+```bash
+# nginx
+http://localhost:8080/cogs/v1/
+http://localhost:8080/thumbnails/v1/
+http://localhost:8080/downloads/v1/
+
+# API Endpoints
+http://localhost:8080/api/v1/
+
+# API docs
+http://localhost:8080/api/v1/docs
+
+# Upload Chunks
+http://localhost:8080/api/v1/datasets/chunk
+
+# Download Endpoint
+http://localhost:8080/api/v1/download/docs
+http://localhost:8080/api/v1/download/datasets/1/dataset.zip
+
+# supabase studio
+http://127.0.0.1:54323
+
+# supabase API
+http://127.0.0.1:54323/api/v1/
+
 ```
 
 ### Run the application with Docker Compose:
@@ -73,6 +115,9 @@ docker compose -f docker-compose.test.yaml run api-test pytest api/tests/
 ### Local supabase setup and development
 
 ```bash
+## install supabase cli
+brew install supabase
+
 # Start Supabase
 supabase login
 

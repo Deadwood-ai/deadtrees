@@ -1,13 +1,14 @@
 from pathlib import Path
 import time
 
-from shared.supabase import use_client, login, verify_token
+from shared.db import use_client, login, verify_token
 from shared.settings import settings
-from shared.models import StatusEnum, Dataset, QueueTask, Cog
+from shared.models import StatusEnum, QueueTask, Cog, Ortho
 from shared.logger import logger
 from .cog.cog import calculate_cog
-from .utils import update_status, pull_file_from_storage_server, push_file_to_storage_server
-from .exceptions import AuthenticationError, DatasetError, ProcessingError, StorageError
+from .utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
+from .exceptions import AuthenticationError, DatasetError, ProcessingError
+from shared.status import update_status
 
 
 def process_cog(task: QueueTask, temp_dir: Path):
@@ -21,67 +22,56 @@ def process_cog(task: QueueTask, temp_dir: Path):
 	# Load dataset
 	try:
 		with use_client(token) as client:
-			response = client.table(settings.datasets_table).select('*').eq('id', task.dataset_id).execute()
-			dataset = Dataset(**response.data[0])
+			response = client.table(settings.orthos_table).select('*').eq('dataset_id', task.dataset_id).execute()
+			ortho = Ortho(**response.data[0])
 	except Exception as e:
 		raise DatasetError(f'Failed to fetch dataset: {str(e)}', dataset_id=task.dataset_id, task_id=task.id)
 
 	# Update status to processing
-	update_status(token, dataset_id=dataset.id, status=StatusEnum.cog_processing)
+	update_status(token, dataset_id=ortho.dataset_id, current_status=StatusEnum.cog_processing)
 
 	try:
 		# Setup paths
-		input_path = Path(temp_dir) / dataset.file_name
-		storage_server_file_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{dataset.file_name}'
+		input_path = Path(temp_dir) / ortho.ortho_file_name
+		storage_server_file_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{ortho.ortho_file_name}'
 
 		# Pull source file
-		pull_file_from_storage_server(storage_server_file_path, str(input_path), token)
+		pull_file_from_storage_server(storage_server_file_path, str(input_path), token, task.dataset_id)
 
 		# Get options and setup output paths
-		options = task.build_args
-		cog_folder = Path(dataset.file_name).stem
-		file_name = f'{cog_folder}_cog_{options.profile}_ts_{options.tiling_scheme}_q{options.quality}.tif'
+		file_name = f'{ortho.dataset_id}_cog.tif'
 		output_path = Path(temp_dir) / file_name
 
 		# Generate COG
-		logger.info(f'Calculating COG for dataset {dataset.id} with options: {options}', extra={'token': token})
 		t1 = time.time()
 		info = calculate_cog(
 			str(input_path),
 			str(output_path),
-			profile=options.profile,
-			quality=options.quality,
-			skip_recreate=not options.force_recreate,
-			tiling_scheme=options.tiling_scheme,
 			token=token,
 		)
-		logger.info(f'COG created for dataset {dataset.id}: {info}', extra={'token': token})
+		logger.info(f'COG created for dataset {ortho.dataset_id}: {info}', extra={'token': token})
 
 		# Push generated COG
-		storage_server_cog_path = f'{settings.STORAGE_SERVER_DATA_PATH}/cogs/{cog_folder}/{file_name}'
-		push_file_to_storage_server(str(output_path), storage_server_cog_path, token)
+		storage_server_cog_path = f'{settings.STORAGE_SERVER_DATA_PATH}/cogs/{file_name}'
+		push_file_to_storage_server(str(output_path), storage_server_cog_path, token, task.dataset_id)
 		t2 = time.time()
 
 		# Prepare metadata
-		overviews = len(info.IFD) - 1  # since first IFD is the main image
 		meta = dict(
-			dataset_id=dataset.id,
-			cog_folder=cog_folder,
-			cog_name=file_name,
-			cog_url=f'{cog_folder}/{file_name}',
-			cog_size=output_path.stat().st_size,
-			runtime=t2 - t1,
-			user_id=task.user_id,
-			compression=options.profile,
-			overviews=overviews,
-			tiling_scheme=options.tiling_scheme,
-			resolution=int(options.resolution * 100),
-			blocksize=info.IFD[0].Blocksize[0],
+			dataset_id=ortho.dataset_id,
+			cog_file_size=max(1, int((output_path.stat().st_size / 1024 / 1024))),  # in MB
+			cog_file_name=file_name,
+			cog_path=file_name,
+			version=1,
+			cog_info=info.model_dump(),
+			cog_processing_runtime=t2 - t1,
 		)
 		cog = Cog(**meta)
 
 	except Exception as e:
-		raise ProcessingError(str(e), task_type='cog', task_id=task.id, dataset_id=dataset.id)
+		# Update status with error
+		update_status(token, dataset_id=ortho.dataset_id, has_error=True, error_message=str(e))
+		raise ProcessingError(str(e), task_type='cog', task_id=task.id, dataset_id=ortho.dataset_id)
 
 	# Save metadata to database
 	try:
@@ -93,22 +83,20 @@ def process_cog(task: QueueTask, temp_dir: Path):
 
 		with use_client(token) as client:
 			send_data = {k: v for k, v in cog.model_dump().items() if v is not None}
-			client.table(settings.cogs_table).upsert(send_data).execute()
+			client.table(settings.cogs_table).upsert(send_data, on_conflict='dataset_id').execute()
 
 		# Update final status
-		update_status(token, dataset.id, StatusEnum.processed)
+		update_status(token, dataset_id=ortho.dataset_id, current_status=StatusEnum.idle, is_cog_done=True)
 
 	except AuthenticationError:
 		raise
 	except Exception as e:
-		raise DatasetError(f'Failed to save COG metadata: {str(e)}', dataset_id=dataset.id, task_id=task.id)
-
-	# Update monitoring metrics
-	# monitoring.cog_counter.inc()
-	# monitoring.cog_time.observe(cog.runtime)
-	# monitoring.cog_size.observe(cog.cog_size)
+		update_status(
+			token, dataset_id=ortho.dataset_id, has_error=True, error_message=f'Failed to save COG metadata: {str(e)}'
+		)
+		raise DatasetError(f'Failed to save COG metadata: {str(e)}', dataset_id=ortho.dataset_id, task_id=task.id)
 
 	logger.info(
-		f'Finished creating new COG for dataset {dataset.id}.',
+		f'Finished creating new COG for dataset {ortho.dataset_id}.',
 		extra={'token': token},
 	)

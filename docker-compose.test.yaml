@@ -12,28 +12,41 @@ services:
     ports:
       - '5678:5678'
     volumes:
-      - ./data:/data
-      - ${SSH_PRIVATE_KEY_PATH}:/app/ssh_key
+      # - ./data:/data # need it for testing (pulling and pushing files to storage server)
+      - nginx_ssh:/root/.ssh:ro
       - ./processor:/app/processor
       - ./shared:/app/shared
       - ./assets:/app/assets
     environment:
       - PYTHONPATH=/app
       - PYTEST_ADDOPTS=--color=yes
-      - STORAGE_SERVER_IP=data.deadtrees.earth
-      - STORAGE_SERVER_USERNAME=${STORAGE_SERVER_USERNAME}
-      - STORAGE_SERVER_DATA_PATH=/apps/storage-server/production
+      - STORAGE_SERVER_IP=nginx
+      - STORAGE_SERVER_USERNAME=root
+      - STORAGE_SERVER_DATA_PATH=/data
       - PROCESSOR_USERNAME=processor@deadtrees.earth
-      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_URL=http://host.docker.internal:54321
       - SUPABASE_KEY=${SUPABASE_KEY}
       - BASE_DIR=/data
       - PROCESSOR_PASSWORD=${PROCESSOR_PASSWORD}
-      - SSH_PRIVATE_KEY_PASSPHRASE=${SSH_PRIVATE_KEY_PASSPHRASE}
-      - DEV_MODE=true
+      - SSH_PRIVATE_KEY_PATH=/root/.ssh/id_rsa
+      - SSH_PRIVATE_KEY_PASSPHRASE=
+      - ENV=development
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     # command: python -m debugpy --listen 0.0.0.0:5678 -c "print('Call the Processor Debugger individually.')"
+    command: tail -f /dev/null
+    deploy:
+      resources:
+        limits:
+          cpus: '12'
+          memory: '64G'
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    runtime: nvidia
 
   api-test:
     build:
@@ -59,46 +72,39 @@ services:
       - UVICORN_HOST=0.0.0.0
       - UVICORN_PORT=8017
       - PYTEST_ADDOPTS=--color=yes
-      - STORAGE_SERVER_IP=data.deadtrees.earth
-      - STORAGE_SERVER_USERNAME=${STORAGE_SERVER_USERNAME}
-      - STORAGE_SERVER_DATA_PATH=/apps/storage-server/production
-      - PROCESSOR_USERNAME=processor@deadtrees.earth
-      - PROCESSOR_PASSWORD=${PROCESSOR_PASSWORD}
-      - SSH_PRIVATE_KEY_PASSPHRASE=${SSH_PRIVATE_KEY_PASSPHRASE}
-      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_URL=http://host.docker.internal:54321
       - SUPABASE_KEY=${SUPABASE_KEY}
       - BASE_DIR=/data
-      - DEV_MODE=true
+      - ENV=development
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     # command: python -m debugpy --listen 0.0.0.0:5679 run.py server --reload=True
-    command: python run.py server --reload=True
+    command: python api/src/run.py server --reload=True
 
   nginx:
-    image: nginx
-    ports:
-      - 8080:80 # for local and testing we do not bind to port 80 and 443
-    links:
-      - api-test
-    depends_on:
-      api-test:
-        condition: service_healthy
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
     healthcheck:
       test: ['CMD', 'service', 'nginx', 'status']
-      interval: 30s
-      timeout: 10s
+      interval: 15s
+      timeout: 1s
       retries: 5
-      start_period: 1m30s
-      start_interval: 1s
+      start_period: 2s
+    ports:
+      - 8080:80
+      - '2222:22'
     volumes:
+      - ./data:/data/:rw
+      - nginx_ssh:/root/.ssh
       - ./nginx/test-conf:/etc/nginx/conf.d/:ro
-      - ./data:/data/:ro
+
 
   tests:
     build:
       context: .
-      dockerfile: tests/Dockerfile
+      dockerfile: end2end_tests/Dockerfile
     links:
       - nginx
       - api-test
@@ -111,6 +117,13 @@ services:
       - 'host.docker.internal:host-gateway'
     volumes:
       - ./assets:/app/assets/:ro
-      - ./tests:/app/tests # dev only, no rebuild needed
+      - ./end2end_tests:/app/tests # dev only, no rebuild needed
     # command: pytest -s test_performance.py
     # command: tail -f /dev/null # Keeps container running indefinitely
+
+networks:
+  default:
+    name: deadwood_network
+
+volumes:
+  nginx_ssh:

@@ -1,77 +1,137 @@
 from pathlib import Path
 import time
-import uuid
 
-from shared.supabase import use_client, login, verify_token
+from shared.db import use_client, login, verify_token
+from shared.status import update_status
 from shared.settings import settings
-from shared.models import StatusEnum, Dataset, QueueTask
+from shared.models import StatusEnum, Ortho, QueueTask
 from shared.logger import logger
-from .utils import update_status, pull_file_from_storage_server, push_file_to_storage_server
+from shared.ortho import upsert_ortho_entry
+from .utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
-from .geotiff.convert_geotiff import convert_geotiff, verify_geotiff
-from shared.geotiff_info import create_geotiff_info_entry
+from .geotiff.standardise_geotiff import standardise_geotiff, verify_geotiff
+from rio_cogeo.cogeo import cog_info
+from shared.hash import get_file_identifier
+from shared.logging import LogContext, LogCategory
 
 
 def process_geotiff(task: QueueTask, temp_dir: Path):
 	token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-
 	user = verify_token(token)
 	if not user:
 		raise AuthenticationError('Invalid processor token', token=token, task_id=task.id)
 
+	# Update initial status
+	update_status(token, dataset_id=task.dataset_id, current_status=StatusEnum.ortho_processing)
+
 	try:
 		with use_client(token) as client:
-			response = client.table(settings.datasets_table).select('*').eq('id', task.dataset_id).execute()
-			dataset = Dataset(**response.data[0])
+			response = client.table(settings.orthos_table).select('*').eq('dataset_id', task.dataset_id).execute()
+			ortho = Ortho(**response.data[0])
 	except Exception as e:
+		update_status(
+			token, dataset_id=task.dataset_id, has_error=True, error_message=f'Failed to fetch dataset: {str(e)}'
+		)
 		raise DatasetError(f'Failed to fetch dataset: {str(e)}', dataset_id=task.dataset_id, task_id=task.id)
-
-	update_status(token, dataset_id=dataset.id, status=StatusEnum.processing)
 
 	try:
 		# Setup paths
-		input_path = temp_dir / dataset.file_name
-		temp_uuid = uuid.uuid4()
-		converted_path = temp_dir / f'converted_{temp_uuid}.tif'
+		path_original = temp_dir / f'original_{ortho.ortho_file_name}'
+		path_converted = temp_dir / f'{ortho.ortho_file_name}'
 
 		# Get storage server path
-		storage_server_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{dataset.file_name}'
+		storage_server_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{ortho.ortho_file_name}'
 
 		# Pull original file
-		pull_file_from_storage_server(storage_server_path, str(input_path), token)
+		pull_file_from_storage_server(storage_server_path, str(path_original), token, task.dataset_id)
 
 		# Start conversion
 		t1 = time.time()
-		if not convert_geotiff(str(input_path), str(converted_path), token):
-			raise ProcessingError('Conversion failed', task_type='convert', task_id=task.id, dataset_id=dataset.id)
+		logger.info(
+			'Starting GeoTIFF conversion',
+			LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
+		)
 
-		# Verify converted file
-		if not verify_geotiff(str(converted_path), token):
+		if not standardise_geotiff(str(path_original), str(path_converted), token):
 			raise ProcessingError(
-				'Converted file verification failed', task_type='convert', task_id=task.id, dataset_id=dataset.id
+				'Conversion failed', task_type='convert', task_id=task.id, dataset_id=ortho.dataset_id
 			)
 
-		# If verification successful, replace original file on storage server
-		push_file_to_storage_server(str(converted_path), storage_server_path, token)
+		# Verify converted file
+		logger.info(
+			'Verifying converted GeoTIFF',
+			LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
+		)
+		if not verify_geotiff(str(path_converted), token):
+			raise ProcessingError(
+				'Converted file verification failed', task_type='convert', task_id=task.id, dataset_id=ortho.dataset_id
+			)
+
 		t2 = time.time()
+		ortho_processing_runtime = t2 - t1
 
-		# Update GeoTiff info using the existing function
-		create_geotiff_info_entry(converted_path, dataset.id, token)
+		# If verification successful, replace original file on storage server
+		logger.info(
+			'Pushing converted file to storage server',
+			LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
+		)
+		# push_file_to_storage_server(str(path_converted), storage_server_path, token, task.dataset_id)
 
+		# Update ortho entry with processing information
+		sha256 = get_file_identifier(path_converted)
+		ortho_info = cog_info(str(path_converted))
+
+		upsert_ortho_entry(
+			dataset_id=ortho.dataset_id,
+			file_path=path_converted,
+			ortho_processing_runtime=ortho_processing_runtime,
+			ortho_processed_info=ortho_info.model_dump(),
+			version=1,
+			sha256=sha256,
+			ortho_processed=True,
+			token=token,
+		)
+		update_status(token, dataset_id=ortho.dataset_id, current_status=StatusEnum.idle, is_ortho_done=True)
 		# Log conversion time
 		logger.info(
-			f'GeoTIFF conversion completed in {t2 - t1:.2f} seconds', extra={'token': token, 'dataset_id': dataset.id}
+			f'GeoTIFF conversion completed in {t2 - t1:.2f} seconds',
+			LogContext(
+				category=LogCategory.ORTHO,
+				dataset_id=ortho.dataset_id,
+				user_id=user.id,
+				token=token,
+				extra={'processing_time': t2 - t1},
+			),
 		)
-		# Replace locally pulled file with converted file
-		input_path.unlink()
-		converted_path.rename(input_path)
+
+		# Clean up local files
+		path_original.unlink()
 
 	except Exception as e:
-		raise ProcessingError(str(e), task_type='convert', task_id=task.id, dataset_id=dataset.id)
-	finally:
-		if converted_path.exists():
-			converted_path.unlink()
+		# Update error status
+		update_status(token, dataset_id=ortho.dataset_id, has_error=True, error_message=str(e))
+		# Clean up files on error
+		if path_original.exists():
+			path_original.unlink()
+		if path_converted.exists():
+			path_converted.unlink()
+
+		logger.error(
+			f'GeoTIFF processing failed: {str(e)}',
+			LogContext(
+				category=LogCategory.ORTHO,
+				dataset_id=ortho.dataset_id,
+				user_id=user.id,
+				token=token,
+				extra={'error': str(e)},
+			),
+		)
+		raise ProcessingError(str(e), task_type='convert', task_id=task.id, dataset_id=ortho.dataset_id)
 
 	# Update final status
-	update_status(token, dataset.id, StatusEnum.processed)
-	logger.info(f'Finished converting dataset {dataset.id}', extra={'token': token})
+	update_status(token, dataset_id=ortho.dataset_id, current_status=StatusEnum.idle, is_ortho_done=True)
+
+	logger.info(
+		f'Finished converting dataset {ortho.dataset_id}',
+		LogContext(category=LogCategory.ORTHO, dataset_id=ortho.dataset_id, user_id=user.id, token=token),
+	)

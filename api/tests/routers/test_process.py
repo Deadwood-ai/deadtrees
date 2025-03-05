@@ -2,9 +2,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.src.server import app
-from shared.supabase import use_client
+from shared.db import use_client
 from shared.settings import settings
-from shared.models import TaskTypeEnum
+from shared.models import TaskTypeEnum, LicenseEnum, PlatformEnum, DatasetAccessEnum, StatusEnum
 
 client = TestClient(app)
 
@@ -17,16 +17,28 @@ def test_dataset(auth_token, test_user):
 	try:
 		# Create test dataset
 		with use_client(auth_token) as supabaseClient:
+			# Create dataset
 			dataset_data = {
 				'file_name': 'test-process.tif',
-				'file_alias': 'test-process.tif',
-				'file_size': 1000,
-				'copy_time': 123,
 				'user_id': test_user,
-				'status': 'uploaded',
+				'license': LicenseEnum.cc_by,
+				'platform': PlatformEnum.drone,
+				'authors': ['Test Author'],
+				'data_access': DatasetAccessEnum.public,
+				'aquisition_year': 2024,
+				'aquisition_month': 1,
+				'aquisition_day': 1,
 			}
 			response = supabaseClient.table(settings.datasets_table).insert(dataset_data).execute()
 			dataset_id = response.data[0]['id']
+
+			# Create initial status entry
+			status_data = {
+				'dataset_id': dataset_id,
+				'is_upload_done': True,  # Set to True so processing can begin
+				'current_status': StatusEnum.idle,
+			}
+			supabaseClient.table(settings.statuses_table).insert(status_data).execute()
 
 			yield dataset_id
 
@@ -36,6 +48,8 @@ def test_dataset(auth_token, test_user):
 			with use_client(auth_token) as supabaseClient:
 				# Delete from queue table first (this will cascade to queue_positions view)
 				supabaseClient.table(settings.queue_table).delete().eq('dataset_id', dataset_id).execute()
+				# Delete the status entry
+				supabaseClient.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
 				# Delete the dataset
 				supabaseClient.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 
@@ -44,7 +58,7 @@ def test_create_processing_task(test_dataset, auth_token):
 	"""Test creating a new processing task for a dataset"""
 	response = client.put(
 		f'/datasets/{test_dataset}/process',
-		params={'task_types': ['cog', 'thumbnail']},
+		json={'task_types': ['cog', 'thumbnail']},
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 
@@ -77,8 +91,8 @@ def test_create_processing_task_unauthorized(test_dataset):
 def test_create_processing_task_invalid_dataset(auth_token):
 	"""Test process creation for non-existent dataset"""
 	response = client.put(
-		'/datasets/99999/process',  # Non-existent dataset ID
-		params={'task_types': ['cog', 'thumbnail']},
+		'/datasets/99999/process',
+		json={'task_types': ['cog', 'thumbnail']},
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 	assert response.status_code == 404
@@ -88,7 +102,7 @@ def test_create_processing_task_empty_types(test_dataset, auth_token):
 	"""Test creating a task with empty task types list"""
 	response = client.put(
 		f'/datasets/{test_dataset}/process',
-		params={'task_types': []},
+		json={'task_types': []},
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
-	assert response.status_code == 422
+	assert response.status_code == 400

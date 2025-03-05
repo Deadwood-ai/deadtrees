@@ -1,0 +1,134 @@
+---
+description: Generel python rules
+globs: 
+alwaysApply: false
+---
+# Python General Coding Standards
+
+## Type Hints and Validation
+- Use type hints for all function parameters and return values
+- Use Pydantic models for data validation and serialization
+- Prefer composition over inheritance
+- Use dataclasses for internal data structures
+
+## Code Organization
+- Follow PEP 8 style guide
+- Maximum line length: 88 characters (Black formatter standard)
+- Use absolute imports over relative imports
+- Order imports as:
+  1. Standard library
+  2. Third-party packages
+  3. Local application imports
+- Group imports by type with a blank line between groups
+
+# Error Handling and Logging Standards
+
+## Logging Structure
+- Use the shared UnifiedLogger for consistent logging across the application
+- Implement proper log categories using LogCategory enum:
+  ```python
+  class LogCategory(Enum):
+      # API Operations
+      UPLOAD = 'upload'
+      DATASET = 'dataset'
+      LABEL = 'label'
+      AUTH = 'auth'
+      ADD_PROCESS = 'add_process'
+
+      # Processing Pipeline
+      PROCESS = 'process'
+      ORTHO = 'ortho'
+      COG = 'cog'
+      THUMBNAIL = 'thumb'
+      DEADWOOD = 'deadwood'
+      FOREST = 'forest'
+      METADATA = 'metadata'
+
+      # System Operations
+      QUEUE = 'queue'
+      STATUS = 'status'
+      SSH = 'ssh'
+  ```
+
+## Contextual Logging
+- Always use LogContext for structured logging:
+  ```python
+  context = LogContext(
+      category=LogCategory.PROCESS,
+      dataset_id=dataset_id,
+      user_id=user_id,
+      extra={'operation': 'specific_operation'}
+  )
+  logger.info("Processing started", context=context)
+  ```
+
+## Error Handling Hierarchy
+1. Application-Specific Exceptions
+   - Define custom exceptions for domain-specific errors
+   - Include error codes and categories
+   - Map to appropriate HTTP status codes (for API)
+
+2. Resource Management
+   - Use context managers (with statements) for all resources
+   - Implement proper cleanup in finally blocks
+   - Handle connection pools and file handles explicitly
+
+3. Error Recovery
+   - Implement retry mechanisms for transient failures
+   - Use circuit breakers for external services
+   - Include fallback mechanisms where appropriate
+
+## Logging Levels
+- ERROR: Use for unrecoverable errors that require immediate attention
+- WARNING: Use for recoverable errors or unexpected conditions
+- INFO: Use for normal operation milestones
+- DEBUG: Use for detailed troubleshooting information
+
+## Error Context
+- Include relevant context in error messages:
+  ```python
+  try:
+      process_dataset(dataset_id)
+  except ProcessingError as e:
+      logger.error(
+          "Dataset processing failed",
+          context=LogContext(
+              category=LogCategory.PROCESS,
+              dataset_id=dataset_id,
+              extra={
+                  'error_type': type(e).__name__,
+                  'error_details': str(e),
+                  'stack_trace': traceback.format_exc()
+              }
+          )
+      )
+  ```
+
+## Database Logging
+- Use SupabaseHandler for persistent log storage
+- Include version information in logs
+- Log all database operations with appropriate context
+- Track operation duration and performance metrics
+
+## Error Response Format
+- Maintain consistent error response structure:
+  ```python
+  {
+      "error": {
+          "code": "ERROR_CODE",
+          "message": "User-friendly message",
+          "details": {
+              "technical_details": "...",
+              "suggestion": "..."
+          }
+      }
+  }
+  ```
+
+
+## Documentation
+- Document all public functions and classes with docstrings
+- Follow Google docstring format
+- Include type information in docstrings
+- Document exceptions that may be raised
+- Add inline comments for complex logic

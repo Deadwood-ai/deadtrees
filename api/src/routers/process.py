@@ -1,11 +1,12 @@
 from typing import Optional, Annotated, List
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Body
 from fastapi.security import OAuth2PasswordBearer
+from pydantic import BaseModel
 
-from shared.supabase import verify_token, use_client
+from shared.db import verify_token, use_client
 from shared.settings import settings
-from shared.models import ProcessOptions, TaskPayload, QueueTask, TaskTypeEnum
-from shared.logger import logger
+from shared.models import TaskPayload, QueueTask, TaskTypeEnum
+from shared.logging import LogContext, LogCategory, UnifiedLogger, SupabaseHandler
 
 # create the router for the processing
 router = APIRouter()
@@ -13,26 +14,61 @@ router = APIRouter()
 # create the OAuth2 password scheme for supabase login
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token')
 
+# Create logger instance
+logger = UnifiedLogger(__name__)
+# Add Supabase handler
+logger.add_supabase_handler(SupabaseHandler())
+
+
+class ProcessRequest(BaseModel):
+	task_types: List[str]
+
 
 @router.put('/datasets/{dataset_id}/process')
 def create_processing_task(
 	dataset_id: int,
 	token: Annotated[str, Depends(oauth2_scheme)],
-	options: Optional[ProcessOptions] = None,
-	task_types: List[str] = Query(),  # Removed default value
+	request: ProcessRequest,
 ):
 	# Verify the token
 	user = verify_token(token)
 	if not user:
+		logger.warning('Invalid token attempt', LogContext(category=LogCategory.AUTH, token=token))
 		raise HTTPException(status_code=401, detail='Invalid token')
 
+	# Log process request
+	logger.info(
+		f'Processing request received for dataset {dataset_id}',
+		LogContext(
+			category=LogCategory.ADD_PROCESS,
+			user_id=user.id,
+			dataset_id=dataset_id,
+			token=token,
+			extra={'task_types': request.task_types},
+		),
+	)
+
 	# Validate task_types
-	if not task_types:
+	if not request.task_types:
+		logger.warning(
+			'Empty task types list provided',
+			LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token),
+		)
 		raise HTTPException(status_code=400, detail='At least one task type must be specified')
 
 	try:
-		validated_task_types = [TaskTypeEnum(t) for t in task_types]
+		validated_task_types = [TaskTypeEnum(t) for t in request.task_types]
 	except ValueError as e:
+		logger.warning(
+			f'Invalid task type provided: {str(e)}',
+			LogContext(
+				category=LogCategory.ADD_PROCESS,
+				user_id=user.id,
+				dataset_id=dataset_id,
+				token=token,
+				extra={'invalid_task_types': request.task_types},
+			),
+		)
 		raise HTTPException(status_code=400, detail=f'Invalid task type: {str(e)}')
 
 	# Load the dataset info
@@ -40,19 +76,24 @@ def create_processing_task(
 		with use_client(token) as client:
 			response = client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute()
 			if not response.data:
+				logger.warning(
+					f'Dataset not found: {dataset_id}',
+					LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token),
+				)
 				raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
 	except HTTPException:
-		raise  # Re-raise HTTP exceptions directly
+		raise
 	except Exception as e:
 		msg = f'Error loading dataset {dataset_id}: {str(e)}'
-		logger.error(msg, extra={'token': token, 'user_id': user.id, 'dataset_id': dataset_id})
+		logger.error(
+			msg, LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token)
+		)
 		raise HTTPException(status_code=500, detail=msg)
 
 	# Create the task payload
 	payload = TaskPayload(
 		dataset_id=dataset_id,
 		user_id=user.id,
-		build_args=options or ProcessOptions(),
 		task_types=validated_task_types,
 		priority=2,
 		is_processing=False,
@@ -66,13 +107,21 @@ def create_processing_task(
 			task = TaskPayload(**response.data[0])
 
 		logger.info(
-			f'Added {task_types} task for dataset {dataset_id} to queue.',
-			extra={'token': token, 'dataset_id': dataset_id, 'user_id': user.id},
+			f'Added task to queue for dataset {dataset_id}',
+			LogContext(
+				category=LogCategory.ADD_PROCESS,
+				user_id=user.id,
+				dataset_id=dataset_id,
+				token=token,
+				extra={'task_id': task.id, 'task_types': request.task_types},
+			),
 		)
 
 	except Exception as e:
-		msg = f'Error adding {task_types} task to queue: {str(e)}'
-		logger.error(msg, extra={'token': token, 'user_id': user.id, 'dataset_id': dataset_id})
+		msg = f'Error adding task to queue: {str(e)}'
+		logger.error(
+			msg, LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token)
+		)
 		raise HTTPException(status_code=500, detail=msg)
 
 	# Load the current position assigned to this task
@@ -81,44 +130,41 @@ def create_processing_task(
 			response = client.table(settings.queue_position_table).select('*').eq('id', task.id).execute()
 			if response.data:
 				task_data = response.data[0]
-				# Handle the case where estimated_time might be None
 				task_data['estimated_time'] = task_data.get('estimated_time') or 0.0
 				task = QueueTask(**task_data)
 				logger.info(
-					f'Loaded task position for task ID {task.id}',
-					extra={
-						'token': token,
-						'user_id': user.id,
-						'dataset_id': dataset_id,
-					},
+					f'Task position loaded for task {task.id}',
+					LogContext(
+						category=LogCategory.ADD_PROCESS,
+						user_id=user.id,
+						dataset_id=dataset_id,
+						token=token,
+						extra={'position': task.current_position, 'estimated_time': task.estimated_time},
+					),
 				)
 				return task
 			else:
-				# Handle the case where no task data is found
 				logger.warning(
-					f'No task position found for task ID {payload.id}',
-					extra={
-						'token': token,
-						'user_id': user.id,
-						'dataset_id': dataset_id,
-					},
+					f'No task position found for task {task.id}',
+					LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token),
 				)
 				task = QueueTask(
-					id=payload.id,
+					id=task.id,
 					dataset_id=dataset_id,
 					user_id=user.id,
-					build_args=options,
 					priority=2,
 					is_processing=False,
 					current_position=-1,
 					estimated_time=0.0,
 					task_types=validated_task_types,
 				)
-
 				return task
+
 	except Exception as e:
 		msg = f'Error loading task position: {str(e)}'
-		logger.error(msg, extra={'token': token, 'user_id': user.id, 'dataset_id': dataset_id})
+		logger.error(
+			msg, LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token)
+		)
 		raise HTTPException(status_code=500, detail=msg)
 
 

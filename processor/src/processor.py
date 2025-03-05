@@ -1,14 +1,22 @@
+import atexit
 import shutil
+from threading import Timer
 
 from processor.src.process_geotiff import process_geotiff
 from shared.models import QueueTask, StatusEnum, Dataset, TaskTypeEnum
 from shared.settings import settings
-from shared.supabase import use_client, login, verify_token
+from shared.db import use_client, login, verify_token
 from shared.logger import logger
 from .process_thumbnail import process_thumbnail
 from .process_cog import process_cog
 from .process_deadwood_segmentation import process_deadwood_segmentation
+from .process_metadata import process_metadata
 from .exceptions import ProcessorError, AuthenticationError, DatasetError, ProcessingError, StorageError
+from shared.logging import LogContext, LogCategory, UnifiedLogger, SupabaseHandler
+
+# Initialize logger with proper cleanup
+logger = UnifiedLogger(__name__)
+logger.add_supabase_handler(SupabaseHandler())
 
 
 def current_running_tasks(token: str) -> int:
@@ -60,49 +68,146 @@ def get_next_task(token: str) -> QueueTask:
 
 
 def is_dataset_uploaded_or_processed(task: QueueTask, token: str) -> bool:
+	"""Check if a dataset is ready for processing by verifying its upload status.
+
+	Args:
+	    task (QueueTask): The task to check
+	    token (str): Authentication token
+
+	Returns:
+	    bool: True if dataset is uploaded and ready for processing
+	"""
 	with use_client(token) as client:
-		response = client.table(settings.datasets_table).select('*').eq('id', task.dataset_id).execute()
-		msg = f'dataset status: {response.data[0]["status"]}'
+		response = (
+			client.table(settings.statuses_table).select('is_upload_done').eq('dataset_id', task.dataset_id).execute()
+		)
+
+		if not response.data:
+			logger.warning(
+				f'No status found for dataset {task.dataset_id}', extra={'token': token, 'dataset_id': task.dataset_id}
+			)
+			return False
+
+		is_uploaded = response.data[0]['is_upload_done']
+		msg = f'dataset upload status: {is_uploaded}'
 		logger.info(msg, extra={'token': token})
-	if response.data[0]['status'] in [StatusEnum.uploaded, StatusEnum.processed]:
-		return True
-	return False
+
+		return is_uploaded
 
 
 def process_task(task: QueueTask, token: str):
 	# Verify token
 	user = verify_token(token)
 	if not user:
+		logger.error(
+			'Invalid token for processing',
+			LogContext(category=LogCategory.AUTH, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+		)
 		raise AuthenticationError('Invalid token', token=token, task_id=task.id)
 
+	# Log start of processing
+	logger.info(
+		f'Starting processing for task {task.id}',
+		LogContext(
+			category=LogCategory.PROCESS,
+			dataset_id=task.dataset_id,
+			user_id=task.user_id,
+			token=token,
+			extra={'task_types': [t.value for t in task.task_types]},
+		),
+	)
+
 	# Process convert_geotiff first if it's in the list
-	if TaskTypeEnum.convert_geotiff in task.task_types:
+	if TaskTypeEnum.geotiff in task.task_types:
 		try:
+			logger.info(
+				'Starting GeoTIFF conversion',
+				LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+			)
 			process_geotiff(task, settings.processing_path)
 		except Exception as e:
-			raise ProcessingError(str(e), task_type='convert_geotiff', task_id=task.id, dataset_id=task.dataset_id)
+			logger.error(
+				f'GeoTIFF conversion failed: {str(e)}',
+				LogContext(
+					category=LogCategory.ORTHO,
+					dataset_id=task.dataset_id,
+					user_id=task.user_id,
+					token=token,
+					extra={'error': str(e)},
+				),
+			)
+			raise ProcessingError(str(e), task_type='geotiff', task_id=task.id, dataset_id=task.dataset_id)
+
+	# Process metadata if requested
+	if TaskTypeEnum.metadata in task.task_types:
+		try:
+			logger.info(
+				'processing metadata',
+				LogContext(
+					category=LogCategory.METADATA, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+				),
+			)
+			process_metadata(task, settings.processing_path)
+		except Exception as e:
+			logger.error(
+				f'Metadata processing failed: {str(e)}',
+				LogContext(
+					category=LogCategory.METADATA, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+				),
+			)
+			raise ProcessingError(str(e), task_type='metadata', task_id=task.id, dataset_id=task.dataset_id)
 
 	# Process cog if requested
 	if TaskTypeEnum.cog in task.task_types:
 		try:
-			logger.info(f'processing cog to {settings.processing_path}')
+			logger.info(
+				f'processing cog to {settings.processing_path}',
+				LogContext(category=LogCategory.COG, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+			)
 			process_cog(task, settings.processing_path)
 		except Exception as e:
+			logger.error(
+				f'COG processing failed: {str(e)}',
+				LogContext(category=LogCategory.COG, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+			)
 			raise ProcessingError(str(e), task_type='cog', task_id=task.id, dataset_id=task.dataset_id)
 
 	# Process thumbnail if requested
 	if TaskTypeEnum.thumbnail in task.task_types:
 		try:
-			logger.info(f'processing thumbnail to {settings.processing_path}')
+			logger.info(
+				f'processing thumbnail to {settings.processing_path}',
+				LogContext(
+					category=LogCategory.THUMBNAIL, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+				),
+			)
 			process_thumbnail(task, settings.processing_path)
 		except Exception as e:
+			logger.error(
+				f'Thumbnail processing failed: {str(e)}',
+				LogContext(
+					category=LogCategory.THUMBNAIL, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+				),
+			)
 			raise ProcessingError(str(e), task_type='thumbnail', task_id=task.id, dataset_id=task.dataset_id)
 
 	# Process deadwood_segmentation if requested
-	if TaskTypeEnum.deadwood_segmentation in task.task_types:
+	if TaskTypeEnum.deadwood in task.task_types:
 		try:
+			logger.info(
+				'processing deadwood segmentation',
+				LogContext(
+					category=LogCategory.DEADWOOD, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+				),
+			)
 			process_deadwood_segmentation(task, token, settings.processing_path)
 		except Exception as e:
+			logger.error(
+				f'Deadwood segmentation failed: {str(e)}',
+				LogContext(
+					category=LogCategory.DEADWOOD, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+				),
+			)
 			raise ProcessingError(
 				str(e), task_type='deadwood_segmentation', task_id=task.id, dataset_id=task.dataset_id
 			)
@@ -112,6 +217,10 @@ def process_task(task: QueueTask, token: str):
 		with use_client(token) as client:
 			client.table(settings.queue_table).delete().eq('id', task.id).execute()
 	except Exception as e:
+		logger.error(
+			f'Failed to delete completed task: {str(e)}',
+			LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+		)
 		raise ProcessorError(
 			f'Failed to delete completed task: {str(e)}', task_type=str(task.task_types), task_id=task.id
 		)
@@ -140,6 +249,7 @@ def background_process():
 
 	# is there is nothing in the queue, just stop the process and log
 	if queued_tasks == 0:
+		print('No tasks in the queue.')
 		# logger.info('No tasks in the queue.', extra={'token': token})
 		return
 
@@ -151,11 +261,7 @@ def background_process():
 		if task is not None and is_uploaded:
 			logger.info(
 				f'Start a new background process for queued task: {task}.',
-				extra={
-					'token': token,
-					# 'user_id': task.user_id,
-					'dataset_id': task.dataset_id,
-				},
+				LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 			)
 			process_task(task, token=token)
 
@@ -164,15 +270,11 @@ def background_process():
 		else:
 			# we expected a task here, but there was None
 			logger.error(
-				'Task was expected to be uploaded, but was not.',
-				extra={'token': token},
+				'Task was expected to be uploaded, but was not.', LogContext(category=LogCategory.ERROR, token=token)
 			)
 	else:
 		# inform no spot available
-		logger.debug(
-			'No spot available for new task.',
-			extra={'token': token},
-		)
+		logger.debug('No spot available for new task.', LogContext(category=LogCategory.DEBUG, token=token))
 		return
 		# restart this process after the configured delay
 		# Timer(interval=settings.task_retry_delay, function=background_process).start()

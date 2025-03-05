@@ -5,7 +5,7 @@ from pathlib import Path
 from shared.logger import logger
 from shared.settings import settings
 from shared.models import StatusEnum
-from shared.supabase import use_client
+from shared.db import use_client
 
 
 def pull_file_from_storage_server(remote_file_path: str, local_file_path: str, token: str):
@@ -49,10 +49,6 @@ def pull_file_from_storage_server(remote_file_path: str, local_file_path: str, t
 
 
 def push_file_to_storage_server(local_file_path: str, remote_file_path: str, token: str):
-	if settings.DEV_MODE:
-		logger.info(f'Skipping push to storage server in dev mode: {local_file_path} -> {remote_file_path}')
-		return
-
 	with paramiko.SSHClient() as ssh:
 		ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 		pkey = paramiko.RSAKey.from_private_key_file(
@@ -73,22 +69,34 @@ def push_file_to_storage_server(local_file_path: str, remote_file_path: str, tok
 			temp_remote_path = f'{remote_file_path}.tmp'
 
 			try:
-				# Upload to temporary location first
-				logger.info(f'Uploading file to temporary location: {temp_remote_path}', extra={'token': token})
-				sftp.put(local_file_path, temp_remote_path)
-
-				# Move existing file to bin directory if it exists
+				# Check if file exists on remote host
 				try:
-					bin_path = settings.trash_path / Path(remote_file_path).name
-					sftp.rename(remote_file_path, str(bin_path))
-					logger.info(f'Moved existing file to bin: {bin_path}', extra={'token': token})
+					sftp.stat(remote_file_path)
+					file_exists = True
 				except IOError:
-					# File does not exist, no need to move
-					pass
+					file_exists = False
 
-				# Atomic rename from temp to final location
-				logger.info(f'Moving file to final location: {remote_file_path}', extra={'token': token})
-				sftp.posix_rename(temp_remote_path, remote_file_path)
+				if file_exists:
+					# If file exists on remote, use atomic rename approach
+					logger.info('File exists on remote, using atomic rename approach', extra={'token': token})
+
+					# Upload to temporary location first
+					logger.info(f'Uploading file to temporary location: {temp_remote_path}', extra={'token': token})
+					sftp.put(local_file_path, temp_remote_path)
+
+					# Move existing file to trash directory
+					trash_path = settings.trash_path / Path(remote_file_path).name
+					sftp.rename(remote_file_path, str(trash_path))
+					logger.info(f'Moved existing file to trash: {trash_path}', extra={'token': token})
+
+					# Atomic rename from temp to final location
+					logger.info(f'Moving file to final location: {remote_file_path}', extra={'token': token})
+					sftp.posix_rename(temp_remote_path, remote_file_path)
+				else:
+					# If file doesn't exist, directly upload to final location
+					logger.info('File does not exist on remote, uploading directly', extra={'token': token})
+					sftp.put(local_file_path, remote_file_path)
+
 				logger.info(f'File successfully pushed to: {remote_file_path}', extra={'token': token})
 
 			except Exception as e:

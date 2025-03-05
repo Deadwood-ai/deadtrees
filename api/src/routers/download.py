@@ -4,15 +4,16 @@ import tempfile
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 import pandas as pd
 
 from shared.__version__ import __version__
-from shared.models import Dataset, Label, Metadata
+from shared.models import Dataset, Label
 from shared.settings import settings
 from api.src.download.downloads import bundle_dataset, label_to_geopackage
+from shared.db import use_client
 
 # first approach to implement a rate limit
 CONNECTED_IPS = {}
@@ -77,111 +78,125 @@ def info():
 @download_app.get('/datasets/{dataset_id}/dataset.zip')
 async def download_dataset(dataset_id: str, background_tasks: BackgroundTasks):
 	"""
-	Download the full dataset with the given ID.
-	This will create a ZIP file contianing the archived
-	original GeoTiff, along with a JSON of the metadata and
-	(for dev purpose now) a json schema of the metadata.
-	If available, a GeoPackage with the labels will be added.
-
+	Prepare dataset bundle and return nginx URL for download
 	"""
-	# load the dataset
-	dataset = Dataset.by_id(dataset_id)
-	if dataset is None:
-		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
+	# Load the dataset using direct database query
+	with use_client() as client:
+		dataset_response = client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute()
+		if not dataset_response.data:
+			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
+		dataset = Dataset(**dataset_response.data[0])
 
-	# load the metadata
-	metadata = Metadata.by_id(dataset_id)
-	if metadata is None:
-		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no associated Metadata entry.')
+		# Get the ortho file information
+		ortho_response = client.table(settings.orthos_table).select('*').eq('dataset_id', dataset_id).execute()
+		if not ortho_response.data:
+			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no ortho file.')
+		ortho = ortho_response.data[0]
 
-	# load the label
-	# TODO: this loads immer nur das erste Label!!!
-	label = Label.by_id(dataset_id)
+	# Build the file paths
+	archive_file_name = (settings.archive_path / ortho['ortho_file_name']).resolve()
+	download_dir = settings.downloads_path / dataset_id
+	download_file = download_dir / f'{dataset_id}.zip'
 
-	# build the file name
-	archive_file_name = (settings.archive_path / dataset.file_name).resolve()
+	# Create download directory if it doesn't exist
+	download_dir.mkdir(parents=True, exist_ok=True)
 
-	# build a temporary zip location
-	# TODO: we can use a caching here
-	target = tempfile.NamedTemporaryFile(suffix='.zip', delete_on_close=False)
+	# Load labels if they exist
+	with use_client() as client:
+		label_response = client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).execute()
+		label = Label(**label_response.data[0]) if label_response.data else None
+
 	try:
-		bundle_dataset(target.name, archive_file_name, metadata=metadata, label=label)
+		# Bundle dataset directly to downloads directory
+		bundle_dataset(str(download_file), archive_file_name, dataset=dataset, label=label)
+
+		# Schedule cleanup after 1 hour (3600 seconds)
+		def cleanup_download(path: Path):
+			if path.exists():
+				path.unlink()
+			if path.parent.exists():
+				try:
+					path.parent.rmdir()  # This will only remove if directory is empty
+				except OSError:
+					pass  # Directory not empty, skip removal
+
+		background_tasks.add_task(cleanup_download, download_file, delay=3600)
+
+		# Return redirect to nginx URL
+		return RedirectResponse(url=f'/downloads/v1/{dataset_id}/{dataset_id}.zip', status_code=303)
+
 	except Exception as e:
+		if download_file.exists():
+			download_file.unlink()
 		msg = f'Failed to bundle dataset <ID={dataset_id}>: {str(e)}'
 		raise HTTPException(status_code=500, detail=msg)
-	finally:
-		# remove the temporary file as a background_task
-		background_tasks.add_task(lambda: Path(target.name).unlink())
-
-	# now stream the file to the user
-	return FileResponse(target.name, media_type='application/zip', filename=f'{dataset_id}.zip')
 
 
-@download_app.get('/datasets/{dataset_id}/ortho.tif')
-async def download_geotiff(dataset_id: str):
-	"""
-	Download the original GeoTiff of the dataset with the given ID.
-	"""
-	# load the dataset
-	dataset = Dataset.by_id(dataset_id)
+# @download_app.get('/datasets/{dataset_id}/ortho.tif')
+# async def download_geotiff(dataset_id: str):
+# 	"""
+# 	Download the original GeoTiff of the dataset with the given ID.
+# 	"""
+# 	# load the dataset
+# 	dataset = Dataset.by_id(dataset_id)
 
-	if dataset is None:
-		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
+# 	if dataset is None:
+# 		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
 
-	# here we can add the monitoring
-	# monitoring.download_ortho.inc()
+# 	# here we can add the monitoring
+# 	# monitoring.download_ortho.inc()
 
-	# build the file name
-	path = settings.archive_path / dataset.file_name
+# 	# build the file name
+# 	path = settings.archive_path / dataset.file_name
 
-	return FileResponse(path, media_type='image/tiff', filename=dataset.file_name)
-
-
-@download_app.get('/datasets/{dataset_id}/metadata.{file_format}')
-async def get_metadata(dataset_id: str, file_format: MetadataFormat, background_tasks: BackgroundTasks):
-	"""
-	Download the metadata of the dataset with the given ID.
-	"""
-	# load the metadata
-	metadata = Metadata.by_id(dataset_id)
-	if metadata is None:
-		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no Metadata entry.')
-
-	# switch the format
-	if file_format == MetadataFormat.json:
-		return metadata.model_dump_json()
-	elif file_format == MetadataFormat.csv:
-		# build a DataFrame
-		df = pd.DataFrame.from_records([metadata.model_dump()])
-
-		# create a temporary file
-		target = tempfile.NamedTemporaryFile(suffix='.csv', delete_on_close=False)
-		df.to_csv(target.name, index=False)
-
-		# add a background task to remove the file after download
-		background_tasks.add_task(lambda: Path(target.name).unlink())
-
-		return FileResponse(target.name, media_type='text/csv', filename='metadata.csv')
+# 	return FileResponse(path, media_type='image/tiff', filename=dataset.file_name)
 
 
-@download_app.get('/datasets/{dataset_id}/labels.gpkg')
-async def get_labels(dataset_id: str, background_tasks: BackgroundTasks):
-	"""
-	Download the labels of the dataset with the given ID.
-	"""
-	# load the labels
-	label = Label.by_id(dataset_id=dataset_id)
-	if label is None:
-		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no labels.')
+# @download_app.get('/datasets/{dataset_id}/metadata.{file_format}')
+# async def get_metadata(dataset_id: str, file_format: MetadataFormat, background_tasks: BackgroundTasks):
+# 	"""
+# 	Download the metadata of the dataset with the given ID.
+# 	"""
+# 	# load the metadata
+# 	metadata = Metadata.by_id(dataset_id)
+# 	if metadata is None:
+# 		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no Metadata entry.')
 
-	# create a temporary file
-	target = tempfile.NamedTemporaryFile(suffix='.gpkg', delete_on_close=False)
+# 	# switch the format
+# 	if file_format == MetadataFormat.json:
+# 		return metadata.model_dump_json()
+# 	elif file_format == MetadataFormat.csv:
+# 		# build a DataFrame
+# 		df = pd.DataFrame.from_records([metadata.model_dump()])
 
-	# remove the file after download
-	background_tasks.add_task(lambda: Path(target.name).unlink())
+# 		# create a temporary file
+# 		target = tempfile.NamedTemporaryFile(suffix='.csv', delete_on_close=False)
+# 		df.to_csv(target.name, index=False)
 
-	# write the labels
-	label_to_geopackage(target.name, label)
+# 		# add a background task to remove the file after download
+# 		background_tasks.add_task(lambda: Path(target.name).unlink())
 
-	# return the file
-	return FileResponse(target.name, media_type='application/geopackage+sqlite', filename='labels.gpkg')
+# 		return FileResponse(target.name, media_type='text/csv', filename='metadata.csv')
+
+
+# @download_app.get('/datasets/{dataset_id}/labels.gpkg')
+# async def get_labels(dataset_id: str, background_tasks: BackgroundTasks):
+# 	"""
+# 	Download the labels of the dataset with the given ID.
+# 	"""
+# 	# load the labels
+# 	label = Label.by_id(dataset_id=dataset_id)
+# 	if label is None:
+# 		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no labels.')
+
+# 	# create a temporary file
+# 	target = tempfile.NamedTemporaryFile(suffix='.gpkg', delete_on_close=False)
+
+# 	# remove the file after download
+# 	background_tasks.add_task(lambda: Path(target.name).unlink())
+
+# 	# write the labels
+# 	label_to_geopackage(target.name, label)
+
+# 	# return the file
+# 	return FileResponse(target.name, media_type='application/geopackage+sqlite', filename='labels.gpkg')
