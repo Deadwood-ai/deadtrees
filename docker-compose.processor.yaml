@@ -5,11 +5,13 @@ services:
       context: .
       dockerfile: processor/Dockerfile
     network_mode: host
+    # command: python -m debugpy --listen 0.0.0.0:5678 --wait-for-client -m processor.src.processor
+    command: python -m processor.src.processor
     deploy:
       resources:
         limits:
-          cpus: '12'
-          memory: '64G'
+          cpus: '30'
+          memory: '96G'
         reservations:
           devices:
             - driver: nvidia
@@ -17,7 +19,9 @@ services:
               capabilities: [gpu]
     runtime: nvidia
     volumes:
-      - ./data:/data
+      - ./processor:/app/processor
+      - ./shared:/app/shared
+      - ./assets:/app/assets
       - ${SSH_PRIVATE_KEY_PATH}:/app/ssh_key
     environment:
       BASE_DIR: /data
@@ -29,6 +33,8 @@ services:
       PROCESSOR_USERNAME: processor@deadtrees.earth
       PROCESSOR_PASSWORD: ${PROCESSOR_PASSWORD}
       SSH_PRIVATE_KEY_PASSPHRASE: ${SSH_PRIVATE_KEY_PASSPHRASE}
-      DEV_MODE: ${DEV_MODE}
+      DEV_MODE: "false"
       LOGFIRE_TOKEN: ${LOGFIRE_TOKEN}
+    # ports:
+      # - "5678:5678"
 

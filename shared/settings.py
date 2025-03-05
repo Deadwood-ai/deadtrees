@@ -93,7 +93,7 @@ class Settings(BaseSettings):
 	STORAGE_SERVER_DATA_PATH: str = ''
 
 	# api endpoint
-	API_ENDPOINT: str = 'http://localhost:8080/api/v1/' if DEV_MODE else 'https://data.deadtrees.earth/api/v1/'
+	API_ENDPOINT: str = 'http://localhost:8080/api/v1/' if DEV_MODE else 'https://data2.deadtrees.earth/api/v1/'
 	API_ENTPOINT_DATASETS: str = API_ENDPOINT + 'datasets/chunk'
 
 	# processor settings
