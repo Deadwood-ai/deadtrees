@@ -129,5 +129,5 @@ networks:
   default:
     name: deadwood_network
 
-volumes:
+# volumes:
   # nginx_ssh:  # This can be removed if not used by other services
