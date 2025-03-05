@@ -18,7 +18,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy your nginx configuration if needed
-COPY conf /etc/nginx/conf.d/
+COPY test-conf /etc/nginx/conf.d/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
