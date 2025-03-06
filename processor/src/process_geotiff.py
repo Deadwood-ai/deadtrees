@@ -52,7 +52,7 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 			LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
 		)
 
-		if not standardise_geotiff(str(path_original), str(path_converted), token):
+		if not standardise_geotiff(str(path_original), str(path_converted), token, task.dataset_id):
 			raise ProcessingError(
 				'Conversion failed', task_type='convert', task_id=task.id, dataset_id=ortho.dataset_id
 			)
@@ -62,7 +62,7 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 			'Verifying converted GeoTIFF',
 			LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
 		)
-		if not verify_geotiff(str(path_converted), token):
+		if not verify_geotiff(str(path_converted), token, task.dataset_id):
 			raise ProcessingError(
 				'Converted file verification failed', task_type='convert', task_id=task.id, dataset_id=ortho.dataset_id
 			)
