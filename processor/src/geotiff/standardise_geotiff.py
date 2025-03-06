@@ -8,6 +8,7 @@ from shared.db import use_client
 from shared.hash import get_file_identifier
 from shared.logger import logger
 from shared.models import Ortho
+from shared.logging import LogContext, LogCategory
 import rasterio
 import numpy as np
 
@@ -22,7 +23,10 @@ def find_nodata_value(src, num_bands):
 			else:
 				return None
 		except Exception as e:
-			logger.error(f'Error finding nodata value: {e}')
+			logger.error(
+				f'Error finding nodata value: {e}',
+				LogContext(category=LogCategory.ORTHO, extra={'error': str(e)})
+			)
 			pass
 
 	# Check if we have an alpha band (band 4 in RGBA)
@@ -54,7 +58,7 @@ def find_nodata_value(src, num_bands):
 	return None  # Return None if no clear nodata value is found
 
 
-def standardise_geotiff(input_path: str, output_path: str, token: str = None) -> bool:
+def standardise_geotiff(input_path: str, output_path: str, token: str = None, dataset_id: int = None, user_id: str = None) -> bool:
 	"""
 	Standardise a GeoTIFF by:
 	1. Converting to 8-bit with auto-scaling if needed
@@ -65,24 +69,26 @@ def standardise_geotiff(input_path: str, output_path: str, token: str = None) ->
 		input_path (str): Path to input GeoTIFF file
 		output_path (str): Path for output standardized GeoTIFF
 		token (str, optional): Authentication token for logging
+		dataset_id (int, optional): Dataset ID for logging context
+		user_id (str, optional): User ID for logging context
 
 	Returns:
 		bool: True if successful, False otherwise
 	"""
 	try:
 		# Step 1: Validate and extract source image properties
-		src_properties = _get_source_properties(input_path, token)
+		src_properties = _get_source_properties(input_path, token, dataset_id, user_id)
 		if not src_properties:
 			return False
 
 		# Step 2: Handle bit depth conversion if needed
-		processed_input = _handle_bit_depth_conversion(input_path, output_path, src_properties['dtype'], token)
+		processed_input = _handle_bit_depth_conversion(input_path, output_path, src_properties['dtype'], token, dataset_id, user_id)
 		if not processed_input:
 			return False
 
 		# Step 3: Apply final transformations with gdalwarp
 		success = _apply_final_transformations(
-			processed_input, output_path, src_properties['nodata'], src_properties['num_bands'], token
+			processed_input, output_path, src_properties['nodata'], src_properties['num_bands'], token, dataset_id, user_id
 		)
 
 		# Step 4: Clean up temporary file if it exists
@@ -92,11 +98,20 @@ def standardise_geotiff(input_path: str, output_path: str, token: str = None) ->
 		return success
 
 	except Exception as e:
-		logger.error(f'Unexpected error in standardise_geotiff: {e}', extra={'token': token})
+		logger.error(
+			f'Unexpected error in standardise_geotiff: {e}',
+			LogContext(
+				category=LogCategory.ORTHO,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'error': str(e)}
+			)
+		)
 		return False
 
 
-def _get_source_properties(input_path: str, token: str) -> dict:
+def _get_source_properties(input_path: str, token: str, dataset_id: int = None, user_id: str = None) -> dict:
 	"""Extract and validate source image properties."""
 	try:
 		with rasterio.open(input_path) as src:
@@ -108,22 +123,49 @@ def _get_source_properties(input_path: str, token: str) -> dict:
 			}
 
 			if not properties['crs']:
-				logger.warning('No CRS found in source file', extra={'token': token})
+				logger.warning(
+					'No CRS found in source file',
+					LogContext(
+						category=LogCategory.ORTHO,
+						dataset_id=dataset_id,
+						user_id=user_id,
+						token=token
+					)
+				)
 				return None
 
 			logger.info(
 				f'Source properties - dtype: {properties["dtype"]}, bands: {properties["num_bands"]}, '
 				f'nodata: {properties["nodata"]}',
-				extra={'token': token},
+				LogContext(
+					category=LogCategory.ORTHO,
+					dataset_id=dataset_id,
+					user_id=user_id,
+					token=token,
+					extra={
+						'dtype': properties["dtype"],
+						'bands': properties["num_bands"],
+						'nodata': properties["nodata"]
+					}
+				)
 			)
 			return properties
 
 	except Exception as e:
-		logger.error(f'Error reading source properties: {e}', extra={'token': token})
+		logger.error(
+			f'Error reading source properties: {e}',
+			LogContext(
+				category=LogCategory.ORTHO,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'error': str(e)}
+			)
+		)
 		return None
 
 
-def _handle_bit_depth_conversion(input_path: str, output_path: str, src_dtype: str, token: str) -> str:
+def _handle_bit_depth_conversion(input_path: str, output_path: str, src_dtype: str, token: str, dataset_id: int = None, user_id: str = None) -> str:
 	"""Convert non-uint8 images to 8-bit using gdal_translate."""
 	if src_dtype == 'uint8':
 		return input_path
@@ -139,16 +181,42 @@ def _handle_bit_depth_conversion(input_path: str, output_path: str, src_dtype: s
 	]
 
 	try:
-		logger.info('Running gdal_translate for scaling: ' + ' '.join(translate_cmd), extra={'token': token})
+		logger.info(
+			'Running gdal_translate for scaling: ' + ' '.join(translate_cmd),
+			LogContext(
+				category=LogCategory.ORTHO,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'command': ' '.join(translate_cmd)}
+			)
+		)
 		result = subprocess.run(translate_cmd, check=True, capture_output=True, text=True)
-		logger.info(f'gdal_translate output:\n{result.stdout}', extra={'token': token})
+		logger.info(
+			f'gdal_translate output:\n{result.stdout}',
+			LogContext(
+				category=LogCategory.ORTHO,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token
+			)
+		)
 		return temp_output
 	except subprocess.CalledProcessError as e:
-		logger.error(f'Error in bit depth conversion: {e}', extra={'token': token})
+		logger.error(
+			f'Error in bit depth conversion: {e}',
+			LogContext(
+				category=LogCategory.ORTHO,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'error': str(e), 'stderr': e.stderr}
+			)
+		)
 		return None
 
 
-def _apply_final_transformations(input_path: str, output_path: str, nodata: float, num_bands: int, token: str) -> bool:
+def _apply_final_transformations(input_path: str, output_path: str, nodata: float, num_bands: int, token: str, dataset_id: int = None, user_id: str = None) -> bool:
 	"""Apply final transformations using gdalwarp."""
 	cmd = [
 		'gdalwarp',
@@ -181,28 +249,87 @@ def _apply_final_transformations(input_path: str, output_path: str, nodata: floa
 	cmd.extend([input_path, output_path])
 
 	try:
-		logger.info('Running gdalwarp conversion: ' + ' '.join(cmd), extra={'token': token})
+		logger.info(
+			'Running gdalwarp conversion: ' + ' '.join(cmd),
+			LogContext(
+				category=LogCategory.ORTHO,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'command': ' '.join(cmd)}
+			)
+		)
 		result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-		logger.info(f'gdalwarp output:\n{result.stdout}', extra={'token': token})
+		logger.info(
+			f'gdalwarp output:\n{result.stdout}',
+			LogContext(
+				category=LogCategory.ORTHO,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token
+			)
+		)
 
-		return verify_geotiff(output_path, token)
+		return verify_geotiff(output_path, token, dataset_id, user_id)
 	except subprocess.CalledProcessError as e:
-		logger.error(f'Error in final transformation: {e}', extra={'token': token})
+		logger.error(
+			f'Error in final transformation: {e}',
+			LogContext(
+				category=LogCategory.ORTHO,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'error': str(e), 'stderr': e.stderr}
+			)
+		)
 		return False
 
 
-def verify_geotiff(file_path: str, token: str = None) -> bool:
+def verify_geotiff(file_path: str, token: str = None, dataset_id: int = None, user_id: str = None) -> bool:
 	"""Verify GeoTIFF file integrity"""
 	try:
 		cmd = ['gdalinfo', file_path]
 		result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-		return 'ERROR' not in result.stdout and 'FAILURE' not in result.stdout
+		verification_result = 'ERROR' not in result.stdout and 'FAILURE' not in result.stdout
+		
+		if verification_result:
+			logger.info(
+				f'GeoTIFF verification successful: {file_path}',
+				LogContext(
+					category=LogCategory.ORTHO,
+					dataset_id=dataset_id,
+					user_id=user_id,
+					token=token
+				)
+			)
+		else:
+			logger.error(
+				f'GeoTIFF verification failed: {file_path}',
+				LogContext(
+					category=LogCategory.ORTHO,
+					dataset_id=dataset_id,
+					user_id=user_id,
+					token=token,
+					extra={'stdout': result.stdout}
+				)
+			)
+		
+		return verification_result
 	except subprocess.CalledProcessError as e:
-		logger.error(f'File verification failed: {e}', extra={'token': token})
+		logger.error(
+			f'File verification failed: {e}',
+			LogContext(
+				category=LogCategory.ORTHO,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'error': str(e), 'stderr': e.stderr}
+			)
+		)
 		return False
 
 
-def update_ortho_table(file_path: Path, dataset_id: int, ortho_processing_runtime: float, token: str):
+def update_ortho_table(file_path: Path, dataset_id: int, ortho_processing_runtime: float, token: str, user_id: str = None):
 	"""Update the ortho table with the new ortho file information"""
 	try:
 		info = cog_info(str(file_path))
@@ -222,7 +349,32 @@ def update_ortho_table(file_path: Path, dataset_id: int, ortho_processing_runtim
 
 		with use_client(token) as client:
 			client.table(settings.orthos_table).upsert(ortho.model_dump()).execute()
+			
+			logger.info(
+				f'Updated ortho table for dataset {dataset_id}',
+				LogContext(
+					category=LogCategory.ORTHO,
+					dataset_id=dataset_id,
+					user_id=user_id,
+					token=token,
+					extra={
+						'file_name': file_path.name,
+						'file_size': file_path.stat().st_size,
+						'processing_runtime': ortho_processing_runtime
+					}
+				)
+			)
+			
 			return ortho
 	except Exception as e:
-		logger.error(f'Error updating ortho table: {e}', extra={'token': token})
+		logger.error(
+			f'Error updating ortho table: {e}',
+			LogContext(
+				category=LogCategory.ORTHO,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'error': str(e)}
+			)
+		)
 		return None
