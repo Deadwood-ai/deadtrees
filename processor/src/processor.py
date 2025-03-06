@@ -1,7 +1,7 @@
 import atexit
 import shutil
 from threading import Timer
-
+from pathlib import Path
 from processor.src.process_geotiff import process_geotiff
 from shared.models import QueueTask, StatusEnum, Dataset, TaskTypeEnum
 from shared.settings import settings
@@ -116,6 +116,9 @@ def process_task(task: QueueTask, token: str):
 			extra={'task_types': [t.value for t in task.task_types]},
 		),
 	)
+	# remove processing path if it exists
+	if Path(settings.processing_path).exists():
+		shutil.rmtree(settings.processing_path, ignore_errors=True)
 
 	# Process convert_geotiff first if it's in the list
 	if TaskTypeEnum.geotiff in task.task_types:
