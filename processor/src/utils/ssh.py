@@ -178,7 +178,7 @@ def push_file_to_storage_server(local_file_path: str, remote_file_path: str, tok
 							category=LogCategory.SSH,
 							token=token,
 							dataset_id=dataset_id,
-							extra={'temp_path': temp_remote_path},
+							extra={'temp_path': temp_remote_path, 'error': str(e)},
 						),
 					)
 				except IOError:
