@@ -12,6 +12,8 @@ RUN apt-get update && \
     # Configure sshd
     echo "PermitRootLogin yes" >> /etc/ssh/sshd_config && \
     echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config && \
+    # Configure SSH to listen on port 2222 instead of 22
+    echo "Port 2222" >> /etc/ssh/sshd_config && \
     # Remove default nginx site
     rm -f /etc/nginx/sites-enabled/default && \
     apt-get clean && \
@@ -22,7 +24,7 @@ COPY test-conf /etc/nginx/conf.d/
 COPY test-conf/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Expose ports
-EXPOSE 80 22
+# Expose ports - change 22 to 2222
+EXPOSE 80 2222
 
 ENTRYPOINT ["/entrypoint.sh"]

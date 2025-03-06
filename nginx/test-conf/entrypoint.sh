@@ -18,8 +18,8 @@ fi
 service ssh start
 sleep 3  # Give SSH time to fully initialize
 
-# Verify SSH is running and listening on port 22
-ss -tuln | grep ":22 " || (echo "SSH not listening on port 22" && service ssh restart && sleep 2)
+# Verify SSH is running and listening on port 2222 instead of 22
+ss -tuln | grep ":2222 " || (echo "SSH not listening on port 2222" && service ssh restart && sleep 2)
 
 # Start nginx in foreground
 nginx -g 'daemon off;' 

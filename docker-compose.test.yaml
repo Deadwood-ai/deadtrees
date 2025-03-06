@@ -97,7 +97,7 @@ services:
       start_period: 2s
     ports:
       - 8080:80
-      # - 2222:22
+      - 2222:22
     volumes:
       - ./data:/data/:rw
       # Mount your Ed25519 public key for authorized_keys
