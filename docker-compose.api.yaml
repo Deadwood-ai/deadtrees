@@ -59,7 +59,7 @@ services:
 
     volumes:
       - ./nginx/api-conf:/etc/nginx/conf.d/:ro
-      - /data:/data/:ro
+      - /data:/data/:rw
       - ./nginx/logs:/var/log/nginx
       - ./certbot/www:/var/www/certbot:ro
       - ./certbot/conf:/etc/nginx/ssl/:ro
