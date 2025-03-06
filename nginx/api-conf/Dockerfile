@@ -18,8 +18,8 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy your nginx configuration if needed
-COPY api-conf /etc/nginx/conf.d/
-COPY api-conf/entrypoint.sh /entrypoint.sh
+COPY . /etc/nginx/conf.d/
+COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Expose ports
