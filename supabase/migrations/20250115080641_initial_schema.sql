@@ -1,5 +1,4 @@
-create extension if not exists "postgis" with schema "extensions";
-
+CREATE EXTENSION IF NOT EXISTS postgis WITH SCHEMA public;
 
 create type "public"."LabelSource" as enum ('visual_interpretation', 'model_prediction', 'fixed_model_prediction');
 
