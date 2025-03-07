@@ -5,8 +5,8 @@ services:
       context: .
       dockerfile: processor/Dockerfile
     network_mode: host
-    command: python -m debugpy --listen 0.0.0.0:5678 --wait-for-client -m processor.src.processor
-    # command: python -m processor.src.processor
+    # command: python -m debugpy --listen 0.0.0.0:5678 --wait-for-client -m processor.src.processor
+    command: python -m processor.src.processor
     deploy:
       resources:
         limits:
