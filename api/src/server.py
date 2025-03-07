@@ -26,6 +26,7 @@ app.add_middleware(
 		'http://10.4.113.132:5173',
 		'http://localhost:5173',
 	],
+    allow_origin_regex='https://deadwood-d4a4b.*|http://(127\\.0\\.0\\.1|localhost)(:\\d+)?',
 	allow_credentials=True,
 	allow_methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 	allow_headers=['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
