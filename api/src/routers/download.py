@@ -1,12 +1,16 @@
+import asyncio
 from typing import Callable
 from enum import Enum
 import tempfile
 from pathlib import Path
+import time
+import shutil
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.concurrency import run_in_threadpool
 import pandas as pd
 
 from shared.__version__ import __version__
@@ -109,18 +113,6 @@ async def download_dataset(dataset_id: str, background_tasks: BackgroundTasks):
 	try:
 		# Bundle dataset directly to downloads directory
 		bundle_dataset(str(download_file), archive_file_name, dataset=dataset, label=label)
-
-		# Schedule cleanup after 1 hour (3600 seconds)
-		def cleanup_download(path: Path):
-			if path.exists():
-				path.unlink()
-			if path.parent.exists():
-				try:
-					path.parent.rmdir()  # This will only remove if directory is empty
-				except OSError:
-					pass  # Directory not empty, skip removal
-
-		background_tasks.add_task(cleanup_download, download_file, delay=3600)
 
 		# Return redirect to nginx URL
 		return RedirectResponse(url=f'/downloads/v1/{dataset_id}/{dataset_id}.zip', status_code=303)
