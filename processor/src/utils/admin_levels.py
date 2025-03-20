@@ -40,15 +40,19 @@ def get_admin_tags(point: Tuple[float, float]) -> List[Optional[str]]:
 		columns = ['NAME_0', 'NAME_2', 'NAME_4', 'geometry']
 		gdf = gpd.read_file(
 			GADM_PATH,
-			mask=point_geom.buffer(0.1),  # Small buffer to optimize spatial query
+			mask=point_geom.buffer(0.1),  # Increased from 0.1 to 2.0 degrees
 			columns=columns,
 		)
 
 		if not gdf.empty:
-			# Find the polygon containing our point
-			mask = gdf.geometry.contains(point_geom)
+			mask = gdf.geometry.intersects(point_geom.buffer(0.1))
 			if mask.any():
-				row = gdf[mask].iloc[0]
+				# Get all intersecting polygons
+				intersecting = gdf[mask]
+				# Calculate distances to the point
+				distances = intersecting.geometry.distance(point_geom)
+				# Get the row with minimum distance
+				row = intersecting.iloc[distances.argmin()]
 				return [row['NAME_0'], row['NAME_2'], row['NAME_4']]
 
 		return [None, None, None]

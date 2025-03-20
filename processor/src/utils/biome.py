@@ -43,10 +43,18 @@ def get_biome_data(point: Tuple[float, float]) -> Tuple[Optional[str], Optional[
 		)
 
 		if not gdf.empty:
-			# Find the polygon containing our point
-			mask = gdf.geometry.contains(point_geom)
+			# Find intersecting polygons
+			mask = gdf.geometry.intersects(point_geom.buffer(0.1))
 			if mask.any():
-				row = gdf[mask].iloc[0]
+				intersecting = gdf[mask]
+				if len(intersecting) == 1:
+					# If only one intersection, take it directly
+					row = intersecting.iloc[0]
+				else:
+					# Multiple intersections, find the closest one
+					distances = intersecting.geometry.distance(point_geom)
+					row = intersecting.iloc[distances.argmin()]
+				
 				biome_id = int(row['BIOME'])
 				biome_name = settings.BIOME_DICT[biome_id]
 
