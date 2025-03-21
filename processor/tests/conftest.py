@@ -59,8 +59,7 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 				'ortho_file_size': max(1, int((test_file.stat().st_size / 1024 / 1024))),  # in MB
 				'bbox': 'BOX(13.4050 52.5200,13.4150 52.5300)',  # Example bbox for Berlin
 				'ortho_upload_runtime': 0.1,
-				'ortho_processed': False,
-				'ortho_original_info': {'Driver': 'GTiff', 'Size': [1024, 1024]},
+				'ortho_info': {'Driver': 'GTiff', 'Size': [1024, 1024]},
 				'created_at': datetime.now(),
 			}
 			ortho = Ortho(**ortho_data)

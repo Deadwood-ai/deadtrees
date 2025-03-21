@@ -96,7 +96,7 @@ async def upload_geotiff_chunk(
 		try:
 			# Calculate upload runtime
 			t2 = time.time()
-			ortho_upload_runtime = t2 - t1
+			upload_runtime = t2 - t1
 
 			logger.info(
 				f'Creating dataset entry for {file.filename}',
@@ -148,8 +148,8 @@ async def upload_geotiff_chunk(
 			upsert_ortho_entry(
 				dataset_id=dataset.id,
 				file_path=target_path,
-				ortho_upload_runtime=ortho_upload_runtime,
-				ortho_original_info=ortho_info,
+				ortho_upload_runtime=upload_runtime,
+				ortho_info=ortho_info,
 				version=1,
 				sha256=sha256,
 				token=token,
@@ -173,13 +173,12 @@ async def upload_geotiff_chunk(
 					token=token,
 					extra={
 						'file_size': target_path.stat().st_size,
-						'upload_time': ortho_upload_runtime,
+						'upload_time': upload_runtime,
 						'file_name': file_name,
 					},
 				),
 			)
 
-			# Update dataset object with new filename
 			return dataset
 
 		except Exception as e:

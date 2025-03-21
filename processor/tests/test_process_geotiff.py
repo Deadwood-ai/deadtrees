@@ -28,16 +28,20 @@ def test_process_geotiff_success(convert_task, auth_token):
 
 	# Verify GeoTIFF info was created
 	with use_client(auth_token) as client:
-		response = client.table(settings.orthos_table).select('*').eq('dataset_id', convert_task.dataset_id).execute()
+		response = (
+			client.table(settings.orthos_processed_table)
+			.select('*')
+			.eq('dataset_id', convert_task.dataset_id)
+			.execute()
+		)
 		assert len(response.data) == 1
 		data = response.data[0]
 
 		# Verify essential GeoTIFF info fields
 		assert data['dataset_id'] == convert_task.dataset_id
 		assert data['ortho_file_name'].endswith('ortho.tif')
-		assert data['ortho_processed'] is True
 		assert data['ortho_processing_runtime'] > 0
-		assert data['ortho_processed_info']['Compression'] == 'DEFLATE'
+		assert data['ortho_info']['Compression'] == 'DEFLATE'
 
 		# Clean up by removing the test entry
-		client.table(settings.orthos_table).delete().eq('dataset_id', convert_task.dataset_id).execute()
+		client.table(settings.orthos_processed_table).delete().eq('dataset_id', convert_task.dataset_id).execute()

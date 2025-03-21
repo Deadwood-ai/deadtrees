@@ -6,7 +6,7 @@ from shared.status import update_status
 from shared.settings import settings
 from shared.models import StatusEnum, Ortho, QueueTask
 from shared.logger import logger
-from shared.ortho import upsert_ortho_entry
+from shared.ortho import upsert_processed_ortho_entry
 from .utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
 from .geotiff.standardise_geotiff import standardise_geotiff, verify_geotiff
@@ -25,6 +25,7 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 	update_status(token, dataset_id=task.dataset_id, current_status=StatusEnum.ortho_processing)
 
 	try:
+		# Fetch original ortho information
 		with use_client(token) as client:
 			response = client.table(settings.orthos_table).select('*').eq('dataset_id', task.dataset_id).execute()
 			ortho = Ortho(**response.data[0])
@@ -77,30 +78,31 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 		)
 		# push_file_to_storage_server(str(path_converted), storage_server_path, token, task.dataset_id)
 
-		# Update ortho entry with processing information
+		# Update processed ortho entry with processing information
 		sha256 = get_file_identifier(path_converted)
-		ortho_info = cog_info(str(path_converted))
+		processed_info = cog_info(str(path_converted))
 
-		upsert_ortho_entry(
+		upsert_processed_ortho_entry(
 			dataset_id=ortho.dataset_id,
 			file_path=path_converted,
 			ortho_processing_runtime=ortho_processing_runtime,
-			ortho_processed_info=ortho_info.model_dump(),
+			ortho_info=processed_info.model_dump(),
 			version=1,
 			sha256=sha256,
-			ortho_processed=True,
 			token=token,
 		)
+
 		update_status(token, dataset_id=ortho.dataset_id, current_status=StatusEnum.idle, is_ortho_done=True)
+
 		# Log conversion time
 		logger.info(
-			f'GeoTIFF conversion completed in {t2 - t1:.2f} seconds',
+			f'GeoTIFF conversion completed in {ortho_processing_runtime:.2f} seconds',
 			LogContext(
 				category=LogCategory.ORTHO,
 				dataset_id=ortho.dataset_id,
 				user_id=user.id,
 				token=token,
-				extra={'processing_time': t2 - t1},
+				extra={'processing_time': ortho_processing_runtime},
 			),
 		)
 

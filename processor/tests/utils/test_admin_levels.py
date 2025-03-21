@@ -46,8 +46,7 @@ def test_dataset(auth_token, data_directory, test_geotiff, test_user):
 			'dataset_id': dataset_id,
 			'ortho_file_name': file_name,
 			'version': 1,
-			'file_size': archive_path.stat().st_size,
-			'ortho_processed': True,
+			'ortho_file_size': archive_path.stat().st_size,
 			'ortho_processing_runtime': 0.1,
 		}
 		client.table(settings.orthos_table).insert(ortho_data).execute()

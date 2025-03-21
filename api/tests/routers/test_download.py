@@ -61,7 +61,6 @@ def test_dataset_for_download(auth_token, data_directory, test_file, test_user):
 			'version': 1,
 			'ortho_file_size': max(1, int((archive_path.stat().st_size / 1024 / 1024))),  # in MB
 			'ortho_upload_runtime': 0.1,
-			'ortho_processed': True,
 		}
 		client.table(settings.orthos_table).insert(ortho_data).execute()
 

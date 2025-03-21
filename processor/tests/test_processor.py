@@ -122,10 +122,12 @@ def test_sequential_processing(sequential_task, auth_token):
 	with use_client(auth_token) as client:
 		# Check GeoTIFF processing
 		ortho_response = (
-			client.table(settings.orthos_table).select('*').eq('dataset_id', sequential_task.dataset_id).execute()
+			client.table(settings.orthos_processed_table)
+			.select('*')
+			.eq('dataset_id', sequential_task.dataset_id)
+			.execute()
 		)
 		assert len(ortho_response.data) == 1
-		assert ortho_response.data[0]['ortho_processed'] is True
 		assert ortho_response.data[0]['ortho_processing_runtime'] > 0
 
 		# Check COG processing
@@ -151,6 +153,7 @@ def test_sequential_processing(sequential_task, auth_token):
 		assert len(metadata_response.data) == 1
 		assert metadata_response.data[0]['processing_runtime'] > 0
 		assert 'gadm' in metadata_response.data[0]['metadata']
+		assert 'biome' in metadata_response.data[0]['metadata']
 
 		# Check deadwood processing
 		deadwood_response = (

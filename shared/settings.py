@@ -15,6 +15,7 @@ IS_DEVELOPMENT = ENV == 'development'
 _tables = {
 	'datasets': 'v2_datasets',
 	'orthos': 'v2_orthos',
+	'orthos_processed': 'v2_orthos_processed',
 	'cogs': 'v2_cogs',
 	'thumbnails': 'v2_thumbnails',
 	'metadata': 'v2_metadata',
@@ -185,6 +186,10 @@ class Settings(BaseSettings):
 	@property
 	def orthos_table(self) -> str:
 		return self._tables['orthos']
+
+	@property
+	def orthos_processed_table(self) -> str:
+		return self._tables['orthos_processed']
 
 	@property
 	def cogs_table(self) -> str:

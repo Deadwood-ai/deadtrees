@@ -198,20 +198,65 @@ class Cog(BaseModel):
 
 class Ortho(BaseModel):
 	"""
-	Represents the orthophoto processing results
+	Represents the original orthophoto file information
 	"""
 
+	# id: Optional[int] = None
 	dataset_id: int
 	ortho_file_name: str
+	ortho_file_size: int
 	version: int
 	created_at: Optional[datetime] = None
-	ortho_file_size: int
 	bbox: Optional[BoundingBox] = None
 	sha256: Optional[str] = None
-	ortho_original_info: Optional[Dict] = None
-	ortho_processed_info: Optional[Dict] = None
+	ortho_info: Optional[Dict] = None
 	ortho_upload_runtime: Optional[float] = None
-	ortho_processed: bool = False
+
+	@field_serializer('created_at', mode='plain')
+	def datetime_to_isoformat(field: datetime | None) -> str | None:
+		if field is None:
+			return None
+		return field.isoformat()
+
+	@field_validator('bbox', mode='before')
+	@classmethod
+	def transform_bbox(cls, raw_string: Optional[str | BoundingBox]) -> Optional[BoundingBox]:
+		if raw_string is None:
+			return None
+		if isinstance(raw_string, str):
+			s = raw_string.replace('BOX(', '').replace(')', '')
+			ll, ur = s.split(',')
+			left, bottom = ll.strip().split(' ')
+			right, top = ur.strip().split(' ')
+			return BoundingBox(
+				left=float(left),
+				bottom=float(bottom),
+				right=float(right),
+				top=float(top),
+			)
+		return raw_string
+
+	@field_serializer('bbox', mode='plain')
+	def bbox_to_postgis(self, bbox: Optional[BoundingBox]) -> Optional[str]:
+		if bbox is None:
+			return None
+		return f'BOX({bbox.left} {bbox.bottom},{bbox.right} {bbox.top})'
+
+
+class ProcessedOrtho(BaseModel):
+	"""
+	Represents the processed orthophoto file information
+	"""
+
+	# id: Optional[int] = None
+	dataset_id: int
+	ortho_file_name: str
+	ortho_file_size: int
+	version: int
+	created_at: Optional[datetime] = None
+	bbox: Optional[BoundingBox] = None
+	sha256: Optional[str] = None
+	ortho_info: Optional[Dict] = None
 	ortho_processing_runtime: Optional[float] = None
 
 	@field_serializer('created_at', mode='plain')
