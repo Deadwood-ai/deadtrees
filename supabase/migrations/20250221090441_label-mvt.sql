@@ -1,6 +1,6 @@
 set check_function_bodies = off;
 
-CREATE OR REPLACE FUNCTION public.get_deadwood_vector_tiles(z integer, x integer, y integer, resolution integer DEFAULT 4096)
+CREATE OR REPLACE FUNCTION public.get_deadwood_vector_tiles(z integer, x integer, y integer, label_id integer DEFAULT NULL, resolution integer DEFAULT 4096)
  RETURNS text
  LANGUAGE plpgsql
  IMMUTABLE
@@ -27,7 +27,8 @@ BEGIN
                 label_id,
                 properties
             FROM public.v2_deadwood_geometries
-            WHERE ST_Intersects(
+            WHERE (label_id IS NULL OR public.v2_deadwood_geometries.label_id = label_id)
+            AND ST_Intersects(
                 geometry, 
                 ST_Transform(bbox, ST_SRID(geometry))
             )
