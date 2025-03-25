@@ -16,6 +16,7 @@ from shared.testing.fixtures import (
 	cleanup_database,
 	data_directory,
 )
+from shared.testing.safety import test_environment_only
 
 
 @pytest.fixture(scope='session')
@@ -99,23 +100,14 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 
 
 @pytest.fixture(autouse=True)
+@test_environment_only
 def cleanup_storage():
 	"""Clean up storage before and after each test"""
-	# Safety check to prevent running in production
-	if not settings.ENV.lower() == 'development':
-		pytest.skip('Cleanup fixture should only run in development environment')
-		return
-
-	if not settings.DEV_MODE:
-		pytest.skip('Cleanup fixture should only run in development mode')
-		return
-
 	token = auth_token
 
 	# Paths to clean
 	paths = [
 		f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.ARCHIVE_DIR}',
-		# f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.PROCESSING_DIR}',
 		f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.COG_DIR}',
 		f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.THUMBNAIL_DIR}',
 		f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.TRASH_DIR}',
@@ -143,6 +135,7 @@ def cleanup_storage():
 
 
 @pytest.fixture(scope='session', autouse=True)
+@test_environment_only
 def handle_logging_cleanup():
 	"""Ensure logging handlers are properly cleaned up after all tests."""
 	yield

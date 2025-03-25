@@ -4,6 +4,7 @@ from supabase import create_client
 from shared.settings import settings
 from shared.db import login, use_client
 import shutil
+from .safety import test_environment_only
 
 
 @pytest.fixture(scope='session', autouse=True)
@@ -71,6 +72,7 @@ def test_file():
 
 
 @pytest.fixture(scope='session', autouse=True)
+@test_environment_only
 def cleanup_database(auth_token):
 	"""Clean up database tables after all tests"""
 	yield
@@ -82,6 +84,7 @@ def cleanup_database(auth_token):
 
 
 @pytest.fixture(scope='session', autouse=True)
+@test_environment_only
 def data_directory():
 	"""Create and manage the data directory structure for tests"""
 	# Create the data directory structure
@@ -97,10 +100,11 @@ def data_directory():
 	for directory in [archive_dir, cogs_dir, thumbnails_dir, label_objects_dir, trash_dir, downloads_dir]:
 		directory.mkdir(parents=True, exist_ok=True)
 
-	yield data_dir
-
-	# Cleanup after all tests
-	for directory in [archive_dir, cogs_dir, thumbnails_dir, label_objects_dir, trash_dir, downloads_dir]:
-		if directory.exists():
-			shutil.rmtree(directory)
-			directory.mkdir(parents=True, exist_ok=True)
+	try:
+		return data_dir  # Return instead of yield
+	finally:
+		# Cleanup after all tests
+		for directory in [archive_dir, cogs_dir, thumbnails_dir, label_objects_dir, trash_dir, downloads_dir]:
+			if directory.exists():
+				shutil.rmtree(directory)
+				directory.mkdir(parents=True, exist_ok=True)

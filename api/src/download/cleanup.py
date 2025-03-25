@@ -2,6 +2,7 @@ from pathlib import Path
 import time
 from shared.settings import settings
 import logging
+from shared.testing.safety import test_environment_only
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +11,7 @@ logger = logging.getLogger(__name__)
 # it is scheduled in the download router
 
 
+@test_environment_only
 def cleanup_downloads_directory(max_age_hours: int = 1):
 	"""Remove files older than max_age_hours from downloads directory"""
 	downloads_dir = settings.downloads_path

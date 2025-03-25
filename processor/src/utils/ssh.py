@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import datetime
 from shared.logger import logger
 from shared.settings import settings
+from shared.testing.safety import test_environment_only
 
 from shared.logging import LogContext, LogCategory
 
@@ -203,6 +204,7 @@ def push_file_to_storage_server(local_file_path: str, remote_file_path: str, tok
 				raise
 
 
+@test_environment_only
 def cleanup_storage_server_directory(directory_path: str, token: str):
 	"""Clean up a directory on the storage server via SSH"""
 	with paramiko.SSHClient() as ssh:
@@ -246,7 +248,7 @@ def check_file_exists_on_storage(remote_file_path: str, token: str) -> bool:
 	with paramiko.SSHClient() as ssh:
 		ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 		pkey = paramiko.Ed25519Key.from_private_key_file(settings.SSH_PRIVATE_KEY_PATH)
-		
+
 		port = 2222 if settings.DEV_MODE else 22
 
 		ssh.connect(
