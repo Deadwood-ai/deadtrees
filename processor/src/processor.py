@@ -126,7 +126,9 @@ def process_task(task: QueueTask, token: str):
 			try:
 				logger.info(
 					'Starting GeoTIFF conversion',
-					LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+					LogContext(
+						category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+					),
 				)
 				process_geotiff(task, settings.processing_path)
 			except Exception as e:

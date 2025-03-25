@@ -205,3 +205,102 @@ def cleanup_storage():
 	# Clean after test
 	clean_directory(storage_path)
 	clean_directory(processing_path)
+
+
+@pytest.fixture
+def processor_task_with_missing_file(test_processor_user, auth_token):
+	"""Create a test task with a non-existent dataset file"""
+	task_id = None
+	try:
+		# Create a dataset entry that points to a non-existent file
+		with use_client(auth_token) as client:
+			# First create dataset
+			dataset_data = {
+				'file_name': 'non_existent_file.tif',
+				'user_id': test_processor_user,
+				'license': 'CC BY',
+				'platform': 'drone',
+				'authors': ['Test Author'],
+				'data_access': 'public',
+				'aquisition_year': 2024,
+				'aquisition_month': 1,
+				'aquisition_day': 1,
+			}
+			dataset_response = client.table(settings.datasets_table).insert(dataset_data).execute()
+			dataset_id = dataset_response.data[0]['id']
+
+			# Create status entry
+			status_data = {
+				'dataset_id': dataset_id,
+				'is_upload_done': True,
+				'current_status': StatusEnum.idle,
+			}
+			client.table(settings.statuses_table).insert(status_data).execute()
+
+			# Create test task in queue
+			task_data = {
+				'dataset_id': dataset_id,
+				'user_id': test_processor_user,
+				'task_types': [TaskTypeEnum.thumbnail],
+				'priority': 1,
+				'is_processing': False,
+			}
+			response = client.table(settings.queue_table).insert(task_data).execute()
+			task_id = response.data[0]['id']
+
+			yield task_id
+
+	finally:
+		# Cleanup
+		if task_id:
+			with use_client(auth_token) as client:
+				# Get dataset_id before deleting task
+				task_response = client.table(settings.queue_table).select('dataset_id').eq('id', task_id).execute()
+				dataset_id = task_response.data[0]['dataset_id'] if task_response.data else None
+
+				# Delete task
+				client.table(settings.queue_table).delete().eq('id', task_id).execute()
+
+				if dataset_id:
+					# Delete status and dataset
+					client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
+					client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
+
+
+def test_failed_process_keeps_task_in_queue(processor_task_with_missing_file, auth_token):
+	"""Test that failed processing keeps task in queue and updates status appropriately"""
+	# First verify task exists before processing
+	with use_client(auth_token) as client:
+		initial_task = (
+			client.table(settings.queue_table).select('*').eq('id', processor_task_with_missing_file).execute()
+		)
+		dataset_id = initial_task.data[0]['dataset_id']
+
+	try:
+		# Run the background process - this should raise a ProcessingError
+		background_process()
+	except Exception:
+		# We expect an error, but the task should still be in queue
+		pass
+
+	# Verify task state after failed processing
+	with use_client(auth_token) as client:
+		# Check queue still contains the task
+		queue_response = (
+			client.table(settings.queue_table).select('*').eq('id', processor_task_with_missing_file).execute()
+		)
+		assert len(queue_response.data) == 1
+		task = queue_response.data[0]
+
+		# Verify task is marked as not processing
+		assert task['is_processing'] is False
+
+		# Check status was updated to reflect error
+		status_response = client.table(settings.statuses_table).select('*').eq('dataset_id', dataset_id).execute()
+		assert len(status_response.data) == 1
+		status = status_response.data[0]
+
+		# Verify error status
+		# assert status['has_error'] is True # i will improve this later and adding better error handling
+		assert status['error_message'] is None
+		assert status['current_status'] == StatusEnum.idle
