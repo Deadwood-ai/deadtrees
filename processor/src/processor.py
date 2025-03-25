@@ -252,9 +252,8 @@ def background_process():
 	"""
 	This process checks if there is anything to do in the queue.
 	If so, it checks the currently running tasks against the maximum allowed tasks.
-	If another task can be started, it will do so, if not, the background_process is
-	added to the FastAPI background tasks with a configured delay.
-
+	If another task can be started, it will do so. It will skip tasks with errors
+	and try the next one.
 	"""
 	# use the processor to log in
 	token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
@@ -269,34 +268,39 @@ def background_process():
 	# is there is nothing in the queue, just stop the process and log
 	if queued_tasks == 0:
 		print('No tasks in the queue.')
-		# logger.info('No tasks in the queue.', extra={'token': token})
 		return
 
 	# check if we can start another task
 	if num_of_running < settings.CONCURRENT_TASKS:
-		# get the next task
-		task = get_next_task(token)
-		is_uploaded = is_dataset_uploaded_or_processed(task, token)
-		if task is not None and is_uploaded:
-			logger.info(
-				f'Start a new background process for queued task: {task}.',
-				LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
-			)
-			process_task(task, token=token)
+		# Keep trying tasks until we find one that's ready or run out of tasks
+		while True:
+			task = get_next_task(token)
+			if task is None:
+				break
 
-			# add another background process with a short timeout
-			# Timer(interval=1, function=background_process).start()
-		else:
-			# we expected a task here, but there was None
-			logger.error(
-				'Task was expected to be uploaded, but was not.', LogContext(category=LogCategory.ERROR, token=token)
-			)
+			is_ready = is_dataset_uploaded_or_processed(task, token)
+			if is_ready:
+				# Found a valid task, process it
+				logger.info(
+					f'Start a new background process for queued task: {task}.',
+					LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+				)
+				process_task(task, token=token)
+				break
+			else:
+				# Task has error or isn't ready, remove it from queue_position to get next task
+				# but keep it in the main queue table
+				with use_client(token) as client:
+					client.table(settings.queue_position_table).delete().eq('id', task.id).execute()
+				logger.info(
+					f'Skipping task {task.id} due to dataset status, moving to next task',
+					LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+				)
+				continue
 	else:
 		# inform no spot available
 		logger.debug('No spot available for new task.', LogContext(category=LogCategory.DEBUG, token=token))
 		return
-		# restart this process after the configured delay
-		# Timer(interval=settings.task_retry_delay, function=background_process).start()
 
 
 if __name__ == '__main__':
