@@ -29,7 +29,7 @@ services:
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_KEY: ${SUPABASE_KEY}
       STORAGE_SERVER_IP: data2.deadtrees.earth
-      STORAGE_SERVER_USERNAME: root
+      STORAGE_SERVER_USERNAME: dendro
       STORAGE_SERVER_DATA_PATH: ${STORAGE_SERVER_DATA_PATH}
       PROCESSOR_USERNAME: processor@deadtrees.earth
       PROCESSOR_PASSWORD: ${PROCESSOR_PASSWORD}
@@ -37,7 +37,7 @@ services:
       SSH_PRIVATE_KEY_PATH: /root/.ssh/processing-to-storage
       DEV_MODE: "false"
       LOGFIRE_TOKEN: ${LOGFIRE_TOKEN}
-      SSH_KEY_PATH: /root/.ssh/processing-to-storage
+      # SSH_KEY_PATH: /root/.ssh/processing-to-storage
     ports:
       - "5678:5678"
 
