@@ -178,7 +178,7 @@ data/*
 
 
 # debugging scripts
-scripts/*
+# scripts/*
 
 # deployment ignores
 certbot/conf

@@ -52,7 +52,6 @@ class DataCommands:
 		aquisition_day: Optional[int] = None,
 		additional_information: Optional[str] = None,
 		citation_doi: Optional[str] = None,
-		start_processing: bool = True,
 	):
 		"""Upload a dataset to the API"""
 		token = self._ensure_auth()
@@ -81,9 +80,6 @@ class DataCommands:
 			additional_information=additional_information,
 			citation_doi=citation_doi,
 		)
-
-		if start_processing:
-			self.process(dataset['id'])
 
 		return dataset
 
