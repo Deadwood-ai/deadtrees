@@ -68,27 +68,40 @@ def get_next_task(token: str) -> QueueTask:
 
 
 def is_dataset_uploaded_or_processed(task: QueueTask, token: str) -> bool:
-	"""Check if a dataset is ready for processing by verifying its upload status.
+	"""Check if a dataset is ready for processing by verifying its upload status and error status.
 
 	Args:
 	    task (QueueTask): The task to check
 	    token (str): Authentication token
 
 	Returns:
-	    bool: True if dataset is uploaded and ready for processing
+	    bool: True if dataset is uploaded and ready for processing (no errors)
 	"""
 	with use_client(token) as client:
 		response = (
-			client.table(settings.statuses_table).select('is_upload_done').eq('dataset_id', task.dataset_id).execute()
+			client.table(settings.statuses_table)
+			.select('is_upload_done,has_error')
+			.eq('dataset_id', task.dataset_id)
+			.execute()
 		)
 
 		if not response.data:
 			logger.warning(
-				f'No status found for dataset {task.dataset_id}', extra={'token': token, 'dataset_id': task.dataset_id}
+				f'No status found for dataset {task.dataset_id}', 
+				extra={'token': token, 'dataset_id': task.dataset_id}
 			)
 			return False
 
 		is_uploaded = response.data[0]['is_upload_done']
+		has_error = response.data[0].get('has_error', False)  # Default to False if field doesn't exist
+
+		if has_error:
+			logger.warning(
+				f'Dataset {task.dataset_id} has errors, skipping processing',
+				extra={'token': token, 'dataset_id': task.dataset_id}
+			)
+			return False
+
 		msg = f'dataset upload status: {is_uploaded}'
 		logger.info(msg, extra={'token': token})
 
