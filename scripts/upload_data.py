@@ -47,7 +47,7 @@ def get_data_access(is_public: bool) -> str:
     return "public" if is_public else "private"
 
 def main():
-    # Initialize DataCommands
+    # Initialize DataCommands once for file existence checks
     data_commands = DataCommands()
     
     # Read database metadata
@@ -72,6 +72,9 @@ def main():
     
     # Process each row
     for _, row in tqdm(df.iterrows(), total=df.shape[0]):
+        # Create new DataCommands instance for each row to ensure fresh token
+        row_data_commands = DataCommands()
+        
         # Determine file path
         if row["has_labels"]:
             file_path = DATABASE_PATH / "orthophotos" / row["filename"]
@@ -85,8 +88,8 @@ def main():
             continue
             
         try:
-            # Upload the dataset with metadata
-            result = data_commands.upload(
+            # Upload the dataset with metadata using fresh instance
+            result = row_data_commands.upload(
                 file_path=str(file_path),
                 authors=row["authors_image"],
                 platform=row["image_platform"],
@@ -103,9 +106,9 @@ def main():
                 dataset_id = result['id']
                 print(f"Successfully uploaded {file_path} with dataset ID: {dataset_id}")
                 
-                # Start processing tasks
+                # Start processing tasks with same instance
                 try:
-                    process_result = data_commands.process(
+                    process_result = row_data_commands.process(
                         dataset_id=dataset_id,
                         task_types=['geotiff', 'metadata', 'cog', 'thumbnail']
                     )

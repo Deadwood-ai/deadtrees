@@ -37,7 +37,10 @@ class DataCommands:
 		if not self._token:
 			self._token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 			if not verify_token(self._token):
-				raise ValueError('Authentication failed')
+				try: 
+					self._token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
+				except Exception as e:
+					raise ValueError('Authentication failed')
 		return self._token
 
 	def upload(
