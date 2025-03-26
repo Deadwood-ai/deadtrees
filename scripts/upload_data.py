@@ -86,6 +86,11 @@ def main():
             print(f"Skipping {file_path.name} - already exists in database")
             skipped_files.append(file_path.name)
             continue
+
+        # replace airplane with airborne
+        if row["image_platform"] == "airplane":
+            print(f"Replacing airplane with airborne for {file_path.name}")
+            row["image_platform"] = "airborne"
             
         try:
             # Upload the dataset with metadata using fresh instance
