@@ -232,6 +232,7 @@ def process_task(task: QueueTask, token: str):
 				)
 
 		# Only delete task if all processing completed successfully
+		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 		with use_client(token) as client:
 			client.table(settings.queue_table).delete().eq('id', task.id).execute()
 
