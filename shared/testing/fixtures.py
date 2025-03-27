@@ -65,6 +65,13 @@ def test_file():
 	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'utm.tif'
 	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'debugging' / 'ortho_3824_geonadir_location_problem.tif'
 	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'debugging' / 'fva_no_segmentation.tif'
+	# file_path = (
+	# 	Path(__file__).parent.parent.parent
+	# 	/ 'assets'
+	# 	/ 'test_data'
+	# 	/ 'debugging'
+	# 	/ 'Beutelsdorf_20160926_reordered-upload-error.tif'
+	# )
 
 	if not file_path.exists():
 		pytest.skip('Test file not found')

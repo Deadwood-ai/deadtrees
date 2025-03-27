@@ -10,13 +10,14 @@ from shared.models import StatusEnum, LicenseEnum, PlatformEnum, DatasetAccessEn
 
 client = TestClient(app)
 
+CHUNK_SIZE = 1024 * 1024 * 1  # 10MB chunks for testing
+
 
 def test_upload_geotiff_chunk(test_file, auth_token, test_user):
 	"""Test chunked upload of a GeoTIFF file"""
 	# Setup
-	chunk_size = 1024 * 1024 * 1  # 1MB chunks for testing
 	file_size = test_file.stat().st_size
-	chunks_total = (file_size + chunk_size - 1) // chunk_size
+	chunks_total = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
 	upload_id = 'test-upload-id'
 
 	# Required form data
@@ -36,7 +37,7 @@ def test_upload_geotiff_chunk(test_file, auth_token, test_user):
 	# Read file in chunks and upload each chunk
 	with open(test_file, 'rb') as f:
 		for chunk_index in range(chunks_total):
-			chunk_data = f.read(chunk_size)
+			chunk_data = f.read(CHUNK_SIZE)
 
 			# Prepare multipart form data
 			files = {'file': (f'{test_file.name}', chunk_data, 'application/octet-stream')}

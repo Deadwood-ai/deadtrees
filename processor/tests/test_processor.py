@@ -17,7 +17,7 @@ def processor_task(test_dataset_for_processing, test_processor_user, auth_token)
 			task_data = {
 				'dataset_id': test_dataset_for_processing,
 				'user_id': test_processor_user,
-				'task_types': [TaskTypeEnum.thumbnail],
+				'task_types': [TaskTypeEnum.metadata],
 				'priority': 1,
 				'is_processing': False,
 			}
@@ -53,7 +53,7 @@ def test_background_process_success(processor_task, auth_token, test_dataset_for
 
 		# Verify status updates
 		assert status['current_status'] == StatusEnum.idle
-		assert status['is_thumbnail_done'] is True
+		assert status['is_metadata_done'] is True
 		assert not status['has_error']
 
 
@@ -241,7 +241,7 @@ def processor_task_with_missing_file(test_processor_user, auth_token):
 			task_data = {
 				'dataset_id': dataset_id,
 				'user_id': test_processor_user,
-				'task_types': [TaskTypeEnum.thumbnail],
+				'task_types': [TaskTypeEnum.metadata],
 				'priority': 1,
 				'is_processing': False,
 			}
@@ -302,5 +302,5 @@ def test_failed_process_keeps_task_in_queue(processor_task_with_missing_file, au
 
 		# Verify error status
 		# assert status['has_error'] is True # i will improve this later and adding better error handling
-		assert status['error_message'] is None
+		assert status['error_message'] is not None
 		assert status['current_status'] == StatusEnum.idle
