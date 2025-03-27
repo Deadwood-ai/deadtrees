@@ -9,6 +9,19 @@ from shared.logger import logger
 from shared.utils import get_transformed_bounds, format_bbox_string
 
 
+def sanitize_json_data(data):
+	"""Recursively sanitize data to ensure JSON compliance by converting non-compliant values to strings."""
+	if isinstance(data, dict):
+		return {k: sanitize_json_data(v) for k, v in data.items()}
+	elif isinstance(data, (list, tuple)):
+		return [sanitize_json_data(item) for item in data]
+	elif isinstance(data, float) and (str(data) == 'nan' or str(data) == 'inf' or str(data) == '-inf'):
+		return str(data)
+	elif hasattr(data, '__dict__'):
+		return sanitize_json_data(data.__dict__)
+	return data
+
+
 def upsert_ortho_entry(
 	dataset_id: int,
 	file_path: Path,
@@ -24,6 +37,9 @@ def upsert_ortho_entry(
 		bbox = get_transformed_bounds(file_path)
 		bbox_string = format_bbox_string(bbox)
 
+		# Sanitize ortho_info if present
+		sanitized_ortho_info = sanitize_json_data(ortho_info) if ortho_info is not None else None
+
 		# Prepare ortho data
 		ortho_data = {
 			'dataset_id': dataset_id,
@@ -32,7 +48,7 @@ def upsert_ortho_entry(
 			'ortho_file_size': max(1, int((file_path.stat().st_size / 1024 / 1024))),  # in MB
 			'bbox': bbox_string,
 			'sha256': sha256,
-			'ortho_info': dict(ortho_info) if ortho_info is not None else None,
+			'ortho_info': sanitized_ortho_info,
 			'ortho_upload_runtime': ortho_upload_runtime,
 		}
 
@@ -65,6 +81,9 @@ def upsert_processed_ortho_entry(
 		bbox = get_transformed_bounds(file_path)
 		bbox_string = format_bbox_string(bbox)
 
+		# Sanitize ortho_info if present
+		sanitized_ortho_info = sanitize_json_data(ortho_info) if ortho_info is not None else None
+
 		# Prepare processed ortho data
 		processed_ortho_data = {
 			'dataset_id': dataset_id,
@@ -73,7 +92,7 @@ def upsert_processed_ortho_entry(
 			'ortho_file_size': max(1, int((file_path.stat().st_size / 1024 / 1024))),  # in MB
 			'bbox': bbox_string,
 			'sha256': sha256,
-			'ortho_info': dict(ortho_info) if ortho_info is not None else None,
+			'ortho_info': sanitized_ortho_info,
 			'ortho_processing_runtime': ortho_processing_runtime,
 		}
 
