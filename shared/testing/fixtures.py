@@ -78,8 +78,8 @@ def test_file():
 	return file_path
 
 
-@pytest.fixture(scope='session', autouse=True)
 @test_environment_only
+@pytest.fixture(scope='session', autouse=True)
 def cleanup_database(auth_token):
 	"""Clean up database tables after all tests"""
 	yield
@@ -90,34 +90,27 @@ def cleanup_database(auth_token):
 		client.table(settings.logs_table).delete().neq('id', 1).execute()
 
 
-@pytest.fixture(scope='session', autouse=True)
 @test_environment_only
-def data_directory(request):
+@pytest.fixture(scope='session', autouse=True)
+def data_directory():
 	"""Create and manage the data directory structure for tests"""
 	# Create the data directory structure
 	data_dir = Path(settings.BASE_DIR)
-	directories = [
-		data_dir / settings.ARCHIVE_DIR,
-		data_dir / settings.COG_DIR,
-		data_dir / settings.THUMBNAIL_DIR,
-		data_dir / settings.LABEL_OBJECTS_DIR,
-		data_dir / settings.TRASH_DIR,
-		data_dir / settings.DOWNLOADS_DIR,
-	]
+	archive_dir = data_dir / settings.ARCHIVE_DIR
+	cogs_dir = data_dir / settings.COG_DIR
+	thumbnails_dir = data_dir / settings.THUMBNAIL_DIR
+	label_objects_dir = data_dir / settings.LABEL_OBJECTS_DIR
+	trash_dir = data_dir / settings.TRASH_DIR
+	downloads_dir = data_dir / settings.DOWNLOADS_DIR
 
 	# Create all directories
-	for directory in directories:
+	for directory in [archive_dir, cogs_dir, thumbnails_dir, label_objects_dir, trash_dir, downloads_dir]:
 		directory.mkdir(parents=True, exist_ok=True)
 
-	# Register cleanup function to run at the end of session
-	def cleanup():
-		for directory in directories:
-			if directory.exists():
-				shutil.rmtree(directory)
-				directory.mkdir(parents=True, exist_ok=True)
+	yield data_dir
 
-	# Register the cleanup to run at the end of the session
-	request.addfinalizer(cleanup)
-
-	# Return the Path object directly
-	return data_dir
+	# Cleanup after all tests
+	for directory in [archive_dir, cogs_dir, thumbnails_dir, label_objects_dir, trash_dir, downloads_dir]:
+		if directory.exists():
+			shutil.rmtree(directory)
+			directory.mkdir(parents=True, exist_ok=True)

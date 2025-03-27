@@ -99,8 +99,8 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 		shutil.rmtree(settings.processing_path)
 
 
-@pytest.fixture(autouse=True)
 @test_environment_only
+@pytest.fixture(autouse=True)
 def cleanup_storage():
 	"""Clean up storage before and after each test"""
 	token = auth_token
@@ -134,8 +134,8 @@ def cleanup_storage():
 		shutil.rmtree(settings.processing_path, ignore_errors=True)
 
 
-@pytest.fixture(scope='session', autouse=True)
 @test_environment_only
+@pytest.fixture(scope='session', autouse=True)
 def handle_logging_cleanup():
 	"""Ensure logging handlers are properly cleaned up after all tests."""
 	yield
