@@ -20,6 +20,7 @@ from shared.models import (
 	LabelSourceEnum,
 	LabelTypeEnum,
 	LabelPayloadData,
+	AOI,
 )
 from shared.labels import create_label_with_geometries
 from shared.logger import logger
@@ -37,7 +38,7 @@ class DataCommands:
 		if not self._token:
 			self._token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 			if not verify_token(self._token):
-				try: 
+				try:
 					self._token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 				except Exception as e:
 					raise ValueError('Authentication failed')
@@ -232,9 +233,9 @@ class DataCommands:
 		labels_geojson = {
 			'type': 'MultiPolygon',
 			'coordinates': [
-				[[[float(x), float(y)] for x, y in poly.exterior.coords]]
+				[[[float(x), float(y)] for x, y in polygon.exterior.coords]]
 				for geom in labels_gdf.geometry
-				for poly in (geom if isinstance(geom, MultiPolygon) else [geom])
+				for polygon in (geom.geoms if isinstance(geom, MultiPolygon) else [geom])
 			],
 		}
 
@@ -246,7 +247,7 @@ class DataCommands:
 				'coordinates': [
 					[[[float(x), float(y)] for x, y in poly.exterior.coords]]
 					for geom in aoi_gdf.geometry
-					for poly in (geom if isinstance(geom, MultiPolygon) else [geom])
+					for poly in (geom.geoms if isinstance(geom, MultiPolygon) else [geom])
 				],
 			}
 
@@ -310,3 +311,74 @@ class DataCommands:
 			aoi_image_quality=aoi_image_quality,
 			aoi_notes=aoi_notes,
 		)
+
+	def upload_aoi_from_gpkg(
+		self,
+		dataset_id: int,
+		gpkg_path: Union[str, Path],
+		aoi_layer: str = 'aoi',
+		aoi_image_quality: Optional[int] = None,
+		aoi_notes: Optional[str] = None,
+	) -> Optional[AOI]:
+		"""Upload only an AOI from a GeoPackage file
+
+		Args:
+			dataset_id: ID of the dataset
+			gpkg_path: Path to the GeoPackage file
+			aoi_layer: Name of the AOI layer in the GeoPackage
+			aoi_image_quality: Quality score for the AOI image (1-3)
+			aoi_notes: Additional notes for the AOI
+		"""
+		token = self._ensure_auth()
+
+		# Read AOI layer
+		try:
+			aoi_gdf = gpd.read_file(gpkg_path, layer=aoi_layer).to_crs(epsg=4326)
+		except Exception as e:
+			logger.warning(f'Error reading AOI layer "{aoi_layer}": {str(e)}')
+			return None
+
+		if aoi_gdf.empty:
+			logger.warning(f'AOI layer "{aoi_layer}" is empty')
+			return None
+
+		# Convert AOI to MultiPolygon GeoJSON
+		aoi_geojson = {
+			'type': 'MultiPolygon',
+			'coordinates': [
+				[[[float(x), float(y)] for x, y in poly.exterior.coords]]
+				for geom in aoi_gdf.geometry
+				for poly in (geom if isinstance(geom, MultiPolygon) else [geom])
+			],
+		}
+
+		# Get user ID from token
+		user = verify_token(token)
+		if not user:
+			raise ValueError('Invalid token')
+
+		# Create AOI object
+		aoi = AOI(
+			dataset_id=dataset_id,
+			user_id=user.id,
+			geometry=aoi_geojson,
+			image_quality=aoi_image_quality,
+			notes=aoi_notes,
+		)
+
+		# Save to database
+		with use_client(token) as client:
+			try:
+				response = (
+					client.table(settings.aois_table)
+					.insert(aoi.model_dump(exclude={'id', 'created_at', 'updated_at'}))
+					.execute()
+				)
+				if response.data:
+					aoi.id = response.data[0]['id']
+					return aoi
+			except Exception as e:
+				logger.error(f'Error creating AOI: {str(e)}')
+				raise
+
+		return None
