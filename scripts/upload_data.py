@@ -80,7 +80,11 @@ def main():
             file_path = DATABASE_PATH / "orthophotos" / row["filename"]
         else:
             file_path = DATABASE_PATH / "unlabeled_orthophotos" / row["project_id"] / row["filename"]
-            
+
+        # skip to big files like: bavarianationalpark.tif    
+        if file_path.name == "bavarianationalpark.tif":
+            print(f"Skipping {file_path.name} - too big")
+            continue
         # Check if file already exists in database
         if file_exists_in_db(data_commands, file_path.name):
             print(f"Skipping {file_path.name} - already exists in database")
@@ -91,6 +95,8 @@ def main():
         if row["image_platform"] == "airplane":
             print(f"Replacing airplane with airborne for {file_path.name}")
             row["image_platform"] = "airborne"
+        if row["image_platform"] == "fixed wing":
+            row["image_platform"] = "drone"
             
         try:
             # Upload the dataset with metadata using fresh instance
@@ -140,16 +146,16 @@ def main():
     
     # Save failed files to resume later if needed
     if failed_files:
-        with open('failed_uploads.txt', 'w') as f:
+        with open('failed_uploads_2.txt', 'w') as f:
             for file in failed_files:
                 f.write(f"{file}\n")
-        print("\nFailed uploads have been saved to 'failed_uploads.txt'")
+        print("\nFailed uploads have been saved to 'failed_uploads_2.txt'")
     
     if processing_failed:
-        with open('failed_processing.txt', 'w') as f:
+        with open('failed_processing_2.txt', 'w') as f:
             for file, dataset_id in processing_failed:
                 f.write(f"{file},{dataset_id}\n")
-        print("\nFailed processing starts have been saved to 'failed_processing.txt'")
+        print("\nFailed processing starts have been saved to 'failed_processing_2.txt'")
 
 if __name__ == "__main__":
     main() 
