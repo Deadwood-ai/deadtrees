@@ -229,27 +229,38 @@ class DataCommands:
 		"""
 		token = self._ensure_auth()
 
+		# Filter out rows with empty or null geometries
+		valid_labels_gdf = labels_gdf[~labels_gdf.geometry.isna()]
+
+		if valid_labels_gdf.empty:
+			logger.warning('No valid geometries found in labels GeoDataFrame')
+			return None
+
 		# Convert labels to MultiPolygon GeoJSON
 		labels_geojson = {
 			'type': 'MultiPolygon',
 			'coordinates': [
-				[[[float(x), float(y)] for x, y in polygon.exterior.coords]]
-				for geom in labels_gdf.geometry
+				[[[float(coord[0]), float(coord[1])] for coord in polygon.exterior.coords]]
+				for geom in valid_labels_gdf.geometry
 				for polygon in (geom.geoms if isinstance(geom, MultiPolygon) else [geom])
+				if geom is not None  # Additional check for None geometries
 			],
 		}
 
 		# Prepare AOI if provided
 		aoi_geojson = None
 		if aoi_gdf is not None and not aoi_gdf.empty:
-			aoi_geojson = {
-				'type': 'MultiPolygon',
-				'coordinates': [
-					[[[float(x), float(y)] for x, y in poly.exterior.coords]]
-					for geom in aoi_gdf.geometry
-					for poly in (geom.geoms if isinstance(geom, MultiPolygon) else [geom])
-				],
-			}
+			valid_aoi_gdf = aoi_gdf[~aoi_gdf.geometry.isna()]
+			if not valid_aoi_gdf.empty:
+				aoi_geojson = {
+					'type': 'MultiPolygon',
+					'coordinates': [
+						[[[float(coord[0]), float(coord[1])] for coord in poly.exterior.coords]]
+						for geom in valid_aoi_gdf.geometry
+						for poly in (geom.geoms if isinstance(geom, MultiPolygon) else [geom])
+						if geom is not None  # Additional check for None geometries
+					],
+				}
 
 		# Create label payload
 		payload = LabelPayloadData(
@@ -346,9 +357,10 @@ class DataCommands:
 		aoi_geojson = {
 			'type': 'MultiPolygon',
 			'coordinates': [
-				[[[float(x), float(y)] for x, y in poly.exterior.coords]]
+				[[[float(coord[0]), float(coord[1])] for coord in polygon.exterior.coords]]
 				for geom in aoi_gdf.geometry
-				for poly in (geom if isinstance(geom, MultiPolygon) else [geom])
+				for polygon in (geom.geoms if isinstance(geom, MultiPolygon) else [geom])
+				if geom is not None  # Additional check for None geometries
 			],
 		}
 

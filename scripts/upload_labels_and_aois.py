@@ -132,6 +132,18 @@ def main():
 			# Check if we have labels layer
 			if 'standing_deadwood' in available_layers:
 				# Try uploading labels (which will also upload AOI if present)
+				# clean data (switzerland plots)
+				aoi_note = None
+				if row['label_source'] == 'visual_interpretation/circles':
+					row['label_source'] = 'visual_interpretation'
+					row['label_type'] = 'point_observation'
+				if row['label_source'] == 'visual_interpretation/lidar_derived':
+					row['label_source'] = 'visual_interpretation'
+					aoi_note = 'Lidar derived'
+				if row['filename'] == 'berchtesgarten_rgb_2020.tif':
+					row['label_source'] = 'visual_interpretation'
+					row['label_type'] = 'point_observation'
+
 				result = row_data_commands.upload_label_from_gpkg(
 					dataset_id=dataset_id,
 					gpkg_path=str(label_path),
@@ -141,6 +153,7 @@ def main():
 					label_quality=row['label_quality'],
 					labels_layer='standing_deadwood',
 					aoi_layer='aoi',
+					aoi_notes=aoi_note,
 				)
 				upload_success = bool(result)
 				if upload_success:
