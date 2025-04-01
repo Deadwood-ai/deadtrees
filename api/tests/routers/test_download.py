@@ -24,7 +24,7 @@ from shared.models import (
 )
 from api.src.download.cleanup import cleanup_downloads_directory
 from shared.labels import create_label_with_geometries
-# from shared.testing.fixtures import test_processor_user, auth_token as processor_auth_token
+from shared.testing.fixtures import login
 
 client = TestClient(app)
 
@@ -279,7 +279,7 @@ def test_dataset_with_label_no_aoi(auth_token, test_dataset_for_download, test_u
 		label_data=LabelDataEnum.deadwood,
 		label_quality=1,
 		geometry=deadwood_geojson,
-		properties={'source': 'test_data'},
+		# properties={'source': 'test_data'}, # fix error based by having properties null
 	)
 
 	# Create label using the create_label_with_geometries function
@@ -339,8 +339,62 @@ def test_download_dataset_with_labels_no_aoi(auth_token, test_dataset_with_label
 			# Verify labels layer exists and has content
 			gdf_labels = gpd.read_file(gpkg_path, layer='labels')
 			assert len(gdf_labels) > 0  # Should have deadwood polygons
-			assert gdf_labels.iloc[0]['source'] == 'test_data'
+			assert gdf_labels.iloc[0]['source'] == 'visual_interpretation'
 
 			# Verify AOI layer doesn't exist
 			with pytest.raises(pyogrio.errors.DataLayerError, match="Layer 'aoi' could not be opened"):
 				gpd.read_file(gpkg_path, layer='aoi')
+
+
+# def test_download_dataset_with_null_aoi(auth_token, test_dataset_for_download, test_user):
+# 	"""Test downloading a dataset with a label that has NULL aoi_id"""
+# 	# Get processor credentials
+# 	processor_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
+
+# 	# Create label with NULL aoi_id using processor credentials
+# 	with use_client(processor_token) as db_client:  # renamed to db_client for clarity
+# 		label_data = {
+# 			'dataset_id': test_dataset_for_download,
+# 			'aoi_id': None,  # Explicitly NULL
+# 			'label_source': 'model_prediction',
+# 			'label_type': 'semantic_segmentation',
+# 			'label_data': 'deadwood',
+# 			'label_quality': 3,
+# 			'user_id': test_user,  # Important: set the user_id to maintain ownership
+# 		}
+# 		response = db_client.table(settings.labels_table).insert(label_data).execute()
+# 		assert response.data, 'Failed to create test label'
+
+# 	with use_client(auth_token) as db_client:
+# 		# Use TestClient for HTTP requests
+# 		response = client.get(  # This is the global TestClient from the test file
+# 			f'/api/v1/download/datasets/{test_dataset_for_download}/dataset.zip',
+# 			headers={'Authorization': f'Bearer {auth_token}'},
+# 			follow_redirects=False,
+# 		)
+
+# 	# Check redirect response
+# 	assert response.status_code == 303
+# 	assert response.headers['location'] == f'/downloads/v1/{test_dataset_for_download}/{test_dataset_for_download}.zip'
+
+# 	# Verify the file exists in downloads directory
+# 	download_file = settings.downloads_path / str(test_dataset_for_download) / f'{test_dataset_for_download}.zip'
+# 	assert download_file.exists()
+
+
+# def test_download_dataset_with_no_aoi(test_dataset_with_label_no_aoi, auth_token):
+# 	"""Test downloading a dataset that has labels but no AOI"""
+# 	dataset_id = test_dataset_with_label_no_aoi
+
+# 	response = client.get(
+# 		f'/api/v1/download/datasets/{dataset_id}/dataset.zip',
+# 		headers={'Authorization': f'Bearer {auth_token}'},
+# 		follow_redirects=False,
+# 	)
+
+# 	assert response.status_code == 303
+# 	assert response.headers['location'] == f'/downloads/v1/{dataset_id}/{dataset_id}.zip'
+
+# 	# Verify the file exists in downloads directory
+# 	download_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}.zip'
+# 	assert download_file.exists()

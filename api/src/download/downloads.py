@@ -32,6 +32,8 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 		# Create features from geometries
 		features = []
 		for geom in geom_response.data:
+			# Get properties with a default empty dict and filter out None values
+			geom_properties = geom.get('properties', {}) or {}
 			features.append(
 				{
 					'type': 'Feature',
@@ -40,7 +42,7 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 						'source': label.label_source,
 						'type': label.label_type,
 						'quality': label.label_quality,
-						**geom.get('properties', {}),
+						**geom_properties,
 					},
 				}
 			)
