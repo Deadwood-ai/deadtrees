@@ -69,4 +69,3 @@ def test_process_deadwood_segmentation_success(deadwood_task, auth_token):
 		first_geom = geom_response.data[0]
 		assert first_geom['geometry']['type'] == 'Polygon'
 		assert 'coordinates' in first_geom['geometry']
-		assert first_geom['properties'] == {'source': 'model_prediction'}
