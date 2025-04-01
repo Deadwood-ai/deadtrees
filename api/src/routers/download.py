@@ -5,6 +5,8 @@ import tempfile
 from pathlib import Path
 import time
 import shutil
+import zipfile
+import io
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
@@ -16,7 +18,7 @@ import pandas as pd
 from shared.__version__ import __version__
 from shared.models import Dataset, Label
 from shared.settings import settings
-from api.src.download.downloads import bundle_dataset, label_to_geopackage
+from api.src.download.downloads import bundle_dataset, label_to_geopackage, create_citation_file
 from shared.db import use_client
 
 # first approach to implement a rate limit
@@ -171,24 +173,45 @@ async def download_dataset(dataset_id: str, background_tasks: BackgroundTasks):
 # 		return FileResponse(target.name, media_type='text/csv', filename='metadata.csv')
 
 
-# @download_app.get('/datasets/{dataset_id}/labels.gpkg')
-# async def get_labels(dataset_id: str, background_tasks: BackgroundTasks):
-# 	"""
-# 	Download the labels of the dataset with the given ID.
-# 	"""
-# 	# load the labels
-# 	label = Label.by_id(dataset_id=dataset_id)
-# 	if label is None:
-# 		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no labels.')
+@download_app.get('/datasets/{dataset_id}/labels.gpkg')
+async def get_labels(dataset_id: str, background_tasks: BackgroundTasks):
+	"""
+	Download the labels of the dataset with the given ID.
+	"""
+	# load the labels using use_client
+	with use_client() as client:
+		# Get label data
+		label_response = client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).execute()
+		if not label_response.data:
+			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no labels.')
+		label = Label(**label_response.data[0])
 
-# 	# create a temporary file
-# 	target = tempfile.NamedTemporaryFile(suffix='.gpkg', delete_on_close=False)
+		# Get dataset data for citation
+		dataset_response = client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute()
+		if not dataset_response.data:
+			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
+		dataset = Dataset(**dataset_response.data[0])
 
-# 	# remove the file after download
-# 	background_tasks.add_task(lambda: Path(target.name).unlink())
+	# Create a temporary directory for files
+	temp_dir = tempfile.mkdtemp()
+	background_tasks.add_task(lambda: shutil.rmtree(temp_dir))
 
-# 	# write the labels
-# 	label_to_geopackage(target.name, label)
+	# Create temporary files
+	gpkg_file = Path(temp_dir) / 'labels.gpkg'
+	zip_file = Path(temp_dir) / 'labels_with_citation.zip'
 
-# 	# return the file
-# 	return FileResponse(target.name, media_type='application/geopackage+sqlite', filename='labels.gpkg')
+	# Write the labels to GeoPackage
+	label_to_geopackage(str(gpkg_file), label)
+
+	# Create ZIP archive with GeoPackage and citation
+	with zipfile.ZipFile(zip_file, 'w', zipfile.ZIP_STORED) as archive:
+		# Add GeoPackage
+		archive.write(gpkg_file, arcname=f'labels_{dataset_id}.gpkg')
+
+		# Add citation file
+		citation_buffer = io.StringIO()
+		create_citation_file(dataset, citation_buffer)
+		archive.writestr('CITATION.cff', citation_buffer.getvalue())
+
+	# Return the ZIP file
+	return FileResponse(zip_file, media_type='application/zip', filename=f'labels_{dataset_id}.zip')

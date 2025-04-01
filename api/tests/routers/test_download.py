@@ -398,3 +398,105 @@ def test_download_dataset_with_labels_no_aoi(auth_token, test_dataset_with_label
 # 	# Verify the file exists in downloads directory
 # 	download_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}.zip'
 # 	assert download_file.exists()
+
+
+def test_download_labels_with_aoi(auth_token, test_dataset_with_label):
+	"""Test downloading just the labels with AOI for a dataset"""
+	dataset_id = test_dataset_with_label
+
+	response = client.get(
+		f'/api/v1/download/datasets/{dataset_id}/labels.gpkg',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	# Check response
+	assert response.status_code == 200
+	assert response.headers['content-type'] == 'application/zip'
+	assert response.headers['content-disposition'] == f'attachment; filename="labels_{dataset_id}.zip"'
+
+	# Save response content to temporary file and verify
+	with tempfile.TemporaryDirectory() as tmpdir:
+		zip_path = Path(tmpdir) / f'labels_{dataset_id}.zip'
+		zip_path.write_bytes(response.content)
+
+		with zipfile.ZipFile(zip_path) as zf:
+			# Check for expected files
+			files = zf.namelist()
+			assert f'labels_{dataset_id}.gpkg' in files
+			assert 'CITATION.cff' in files
+
+			# Extract and verify the GeoPackage
+			gpkg_path = Path(tmpdir) / f'labels_{dataset_id}.gpkg'
+			zf.extract(f'labels_{dataset_id}.gpkg', tmpdir)
+
+			# Verify layers in GeoPackage
+			gdf_labels = gpd.read_file(gpkg_path, layer='labels')
+			gdf_aoi = gpd.read_file(gpkg_path, layer='aoi')
+
+			assert len(gdf_labels) > 0  # Should have deadwood polygons
+			assert len(gdf_aoi) == 1  # Should have one AOI polygon
+
+			# Verify properties
+			assert gdf_labels.iloc[0]['source'] == 'test_data'
+			assert gdf_aoi.iloc[0]['image_quality'] == 1
+			assert gdf_aoi.iloc[0]['notes'] == 'Test AOI from real data'
+
+			# Verify citation file
+			citation_content = zf.read('CITATION.cff').decode('utf-8')
+			assert 'cff-version: 1.2.0' in citation_content
+			assert 'deadtrees.earth' in citation_content
+
+
+def test_download_labels_without_aoi(auth_token, test_dataset_with_label_no_aoi):
+	"""Test downloading just the labels without AOI for a dataset"""
+	dataset_id = test_dataset_with_label_no_aoi
+
+	response = client.get(
+		f'/api/v1/download/datasets/{dataset_id}/labels.gpkg',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	# Check response
+	assert response.status_code == 200
+	assert response.headers['content-type'] == 'application/zip'
+	assert response.headers['content-disposition'] == f'attachment; filename="labels_{dataset_id}.zip"'
+
+	# Save response content to temporary file and verify
+	with tempfile.TemporaryDirectory() as tmpdir:
+		zip_path = Path(tmpdir) / f'labels_{dataset_id}.zip'
+		zip_path.write_bytes(response.content)
+
+		with zipfile.ZipFile(zip_path) as zf:
+			# Check for expected files
+			files = zf.namelist()
+			assert f'labels_{dataset_id}.gpkg' in files
+			assert 'CITATION.cff' in files
+
+			# Extract and verify the GeoPackage
+			gpkg_path = Path(tmpdir) / f'labels_{dataset_id}.gpkg'
+			zf.extract(f'labels_{dataset_id}.gpkg', tmpdir)
+
+			# Verify labels layer exists and has content
+			gdf_labels = gpd.read_file(gpkg_path, layer='labels')
+			assert len(gdf_labels) > 0  # Should have deadwood polygons
+			assert gdf_labels.iloc[0]['source'] == 'visual_interpretation'
+
+			# Verify AOI layer doesn't exist
+			with pytest.raises(pyogrio.errors.DataLayerError, match="Layer 'aoi' could not be opened"):
+				gpd.read_file(gpkg_path, layer='aoi')
+
+			# Verify citation file
+			citation_content = zf.read('CITATION.cff').decode('utf-8')
+			assert 'cff-version: 1.2.0' in citation_content
+			assert 'deadtrees.earth' in citation_content
+
+
+def test_download_labels_not_found(auth_token, test_dataset_for_download):
+	"""Test attempting to download labels for a dataset that has none"""
+	response = client.get(
+		f'/api/v1/download/datasets/{test_dataset_for_download}/labels.gpkg',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 404
+	assert 'has no labels' in response.json()['detail']
