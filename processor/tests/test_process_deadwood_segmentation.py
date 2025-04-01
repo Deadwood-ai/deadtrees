@@ -53,7 +53,7 @@ def test_process_deadwood_segmentation_success(deadwood_task, auth_token):
 		assert len(response.data) == 1
 		assert label['dataset_id'] == deadwood_task.dataset_id
 		assert label['label_source'] == 'model_prediction'
-		assert label['label_type'] == 'segmentation'
+		assert label['label_type'] == 'semantic_segmentation'
 		assert label['label_data'] == LabelDataEnum.deadwood
 		assert label['label_quality'] == 3
 
