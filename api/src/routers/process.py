@@ -1,7 +1,7 @@
 from typing import Optional, Annotated, List
 from fastapi import APIRouter, Depends, HTTPException, Body
 from fastapi.security import OAuth2PasswordBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, validator
 
 from shared.db import verify_token, use_client
 from shared.settings import settings
@@ -22,6 +22,13 @@ logger.add_supabase_handler(SupabaseHandler())
 
 class ProcessRequest(BaseModel):
 	task_types: List[str]
+	priority: Optional[int] = Field(default=2, ge=1, le=5, description='Task priority (1=highest, 5=lowest)')
+
+	@validator('priority')
+	def validate_priority(cls, v):
+		if v < 1 or v > 5:
+			raise ValueError('Priority must be between 1 (highest) and 5 (lowest)')
+		return v
 
 
 @router.put('/datasets/{dataset_id}/process')
@@ -95,7 +102,7 @@ def create_processing_task(
 		dataset_id=dataset_id,
 		user_id=user.id,
 		task_types=validated_task_types,
-		priority=2,
+		priority=request.priority,
 		is_processing=False,
 	)
 
@@ -113,14 +120,25 @@ def create_processing_task(
 				user_id=user.id,
 				dataset_id=dataset_id,
 				token=token,
-				extra={'task_id': task.id, 'task_types': request.task_types},
+				extra={
+					'task_id': task.id,
+					'task_types': request.task_types,
+					'priority': request.priority,  # Add priority to logging
+				},
 			),
 		)
 
 	except Exception as e:
 		msg = f'Error adding task to queue: {str(e)}'
 		logger.error(
-			msg, LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token)
+			msg,
+			LogContext(
+				category=LogCategory.ADD_PROCESS,
+				user_id=user.id,
+				dataset_id=dataset_id,
+				token=token,
+				extra={'priority': request.priority},  # Add priority to error logging
+			),
 		)
 		raise HTTPException(status_code=500, detail=msg)
 

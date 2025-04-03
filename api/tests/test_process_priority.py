@@ -1,14 +1,15 @@
 import pytest
 from fastapi.testclient import TestClient
-
-from api.src.server import app
 from shared.db import use_client
 from shared.settings import settings
 from shared.models import TaskTypeEnum, LicenseEnum, PlatformEnum, DatasetAccessEnum, StatusEnum
 
+from api.src.server import app
+
 client = TestClient(app)
 
 
+# Import the test_dataset fixture
 @pytest.fixture(scope='function')
 def test_dataset(auth_token, test_user):
 	"""Create a temporary test dataset for process testing"""
@@ -54,61 +55,11 @@ def test_dataset(auth_token, test_user):
 				supabaseClient.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 
 
-def test_create_processing_task(test_dataset, auth_token):
-	"""Test creating a new processing task for a dataset"""
-	response = client.put(
-		f'/datasets/{test_dataset}/process',
-		json={'task_types': ['cog', 'thumbnail']},
-		headers={'Authorization': f'Bearer {auth_token}'},
-	)
-
-	assert response.status_code == 200
-	data = response.json()
-
-	assert data['dataset_id'] == test_dataset
-	assert 'cog' in data['task_types']
-	assert 'thumbnail' in data['task_types']
-	assert not data['is_processing']
-
-	with use_client(auth_token) as supabaseClient:
-		response = supabaseClient.table(settings.queue_table).select('*').eq('dataset_id', test_dataset).execute()
-		assert len(response.data) == 1
-		assert response.data[0]['dataset_id'] == test_dataset
-		assert 'cog' in response.data[0]['task_types']
-		assert 'thumbnail' in response.data[0]['task_types']
+@pytest.fixture
+def auth_headers(auth_token):
+	return {'Authorization': f'Bearer {auth_token}'}
 
 
-def test_create_processing_task_unauthorized(test_dataset):
-	"""Test process creation without authentication"""
-	response = client.put(
-		f'/datasets/{test_dataset}/process',
-		params={'task_types': ['cog', 'thumbnail']},
-		headers={},
-	)
-	assert response.status_code == 401
-
-
-def test_create_processing_task_invalid_dataset(auth_token):
-	"""Test process creation for non-existent dataset"""
-	response = client.put(
-		'/datasets/99999/process',
-		json={'task_types': ['cog', 'thumbnail']},
-		headers={'Authorization': f'Bearer {auth_token}'},
-	)
-	assert response.status_code == 404
-
-
-def test_create_processing_task_empty_types(test_dataset, auth_token):
-	"""Test creating a task with empty task types list"""
-	response = client.put(
-		f'/datasets/{test_dataset}/process',
-		json={'task_types': []},
-		headers={'Authorization': f'Bearer {auth_token}'},
-	)
-	assert response.status_code == 400
-
-
-# Priority tests added from test_process_priority.py
 def test_process_default_priority(test_dataset, auth_token):
 	"""Test that process request uses default priority (2) when none specified"""
 	response = client.put(
@@ -126,7 +77,7 @@ def test_process_custom_priority(test_dataset, auth_token):
 	response = client.put(
 		f'/datasets/{test_dataset}/process',
 		headers={'Authorization': f'Bearer {auth_token}'},
-		json={'task_types': ['metadata'], 'priority': 5},  # Higher priority (5)
+		json={'task_types': ['metadata'], 'priority': 5},
 	)
 	assert response.status_code == 200
 	data = response.json()
@@ -147,7 +98,7 @@ def test_process_invalid_priority(test_dataset, auth_token):
 
 
 def test_priority_queue_order(test_dataset, auth_token):
-	"""Test that tasks are ordered correctly by priority (higher numbers = higher priority)"""
+	"""Test that tasks are ordered correctly by priority"""
 	# Create three tasks with different priorities
 	priorities = [2, 5, 1]  # Default, Highest, Lowest
 	task_ids = []

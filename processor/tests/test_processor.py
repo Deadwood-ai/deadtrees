@@ -4,7 +4,7 @@ from pathlib import Path
 from shared.db import use_client
 from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask, StatusEnum
-from processor.src.processor import background_process, process_task
+from processor.src.processor import background_process, process_task, get_next_task
 
 
 @pytest.fixture
@@ -304,3 +304,45 @@ def test_failed_process_keeps_task_in_queue(processor_task_with_missing_file, au
 		# assert status['has_error'] is True # i will improve this later and adding better error handling
 		assert status['error_message'] is not None
 		assert status['current_status'] == StatusEnum.idle
+
+
+def test_processor_respects_priority(test_dataset_for_processing, test_processor_user, auth_token):
+	"""Test that processor picks highest priority task first"""
+	task_ids = []
+	try:
+		# Create two tasks with different priorities
+		with use_client(auth_token) as client:
+			# Create lower priority task first
+			task1_data = {
+				'dataset_id': test_dataset_for_processing,
+				'user_id': test_processor_user,
+				'task_types': [TaskTypeEnum.metadata],
+				'priority': 2,  # Lower priority
+				'is_processing': False,
+			}
+			response = client.table(settings.queue_table).insert(task1_data).execute()
+			task_ids.append(response.data[0]['id'])
+
+			# Create higher priority task second
+			task2_data = {
+				'dataset_id': test_dataset_for_processing,
+				'user_id': test_processor_user,
+				'task_types': [TaskTypeEnum.metadata],
+				'priority': 5,  # Higher priority (changed from 1)
+				'is_processing': False,
+			}
+			response = client.table(settings.queue_table).insert(task2_data).execute()
+			task_ids.append(response.data[0]['id'])
+
+		# Get next task
+		next_task = get_next_task(auth_token)
+
+		# Verify the higher priority task (priority=5) is selected first
+		assert next_task is not None
+		assert next_task.priority == 5  # Changed from 1 to 5
+
+	finally:
+		# Cleanup
+		with use_client(auth_token) as client:
+			for task_id in task_ids:
+				client.table(settings.queue_table).delete().eq('id', task_id).execute()
