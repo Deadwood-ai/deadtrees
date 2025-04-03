@@ -72,6 +72,13 @@ def test_file():
 	# 	/ 'debugging'
 	# 	/ 'Beutelsdorf_20160926_reordered-upload-error.tif'
 	# )
+	file_path = (
+		Path(__file__).parent.parent.parent
+		/ 'assets'
+		/ 'test_data'
+		/ 'debugging'
+		/ '20220517_SASMDD0012_p1_ortho_01_cog.tif'
+	)
 
 	if not file_path.exists():
 		pytest.skip('Test file not found')
