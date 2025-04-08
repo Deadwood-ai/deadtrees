@@ -153,13 +153,14 @@ class DataCommands:
 					logger.error(f'Error uploading chunk {chunk_index}: {e}')
 					raise
 
-	def process(self, dataset_id: int, task_types: Optional[List[str]] = None):
+	def process(self, dataset_id: int, task_types: Optional[List[str]] = None, priority: Optional[int] = 2):
 		"""
 		Start processing tasks for a dataset
 
 		Args:
-		    dataset_id: ID of the dataset to process
-		    task_types: List of task types to process. Defaults to ['cog', 'thumbnail']
+			dataset_id: ID of the dataset to process
+			task_types: List of task types to process. Defaults to ['cog', 'thumbnail']
+			priority: Task priority (1=highest, 5=lowest). Defaults to 2.
 		"""
 		token = self._ensure_auth()
 
@@ -173,13 +174,19 @@ class DataCommands:
 		except ValueError as e:
 			raise ValueError(f'Invalid task type: {str(e)}')
 
-		logger.info(f'Starting processing for dataset {dataset_id} with tasks: {validated_task_types}')
+		# Validate priority
+		if priority < 1 or priority > 5:
+			raise ValueError('Priority must be between 1 (highest) and 5 (lowest)')
+
+		logger.info(
+			f'Starting processing for dataset {dataset_id} with tasks: {validated_task_types}, priority: {priority}'
+		)
 
 		try:
 			with httpx.Client() as client:
 				response = client.put(
 					f'{settings.API_ENDPOINT}/datasets/{dataset_id}/process',
-					json={'task_types': validated_task_types},
+					json={'task_types': validated_task_types, 'priority': priority},
 					headers={'Authorization': f'Bearer {token}'},
 				)
 				response.raise_for_status()
