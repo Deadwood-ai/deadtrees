@@ -25,6 +25,7 @@ setup(
 		'logfire>=0.8.0',
 		'pydantic-partial>=0.3.1',
 		'pydantic-settings>=2.0.0',
+		'fiona>=1.9.0',
 	],
 	extras_require={
 		'test': [

@@ -3,19 +3,25 @@ import io
 import json
 import tempfile
 from pathlib import Path
+from typing import List, Dict
 
 import geopandas as gpd
 import yaml
 import pandas as pd
 
+from shared.logging import UnifiedLogger, LogCategory, LogContext
 from shared.settings import settings
 from shared.db import use_client
 from shared.models import Label, Dataset, LicenseEnum, Ortho, LabelDataEnum
 
 TEMPLATE_PATH = Path(__file__).parent / 'templates'
 
+# Create a proper logger
+logger = UnifiedLogger(__name__)
+
 
 def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
+	"""Convert a single label to GeoPackage format"""
 	# Get geometries from the database
 	with use_client() as client:
 		if label.label_data == LabelDataEnum.deadwood:
@@ -42,6 +48,7 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 						'source': label.label_source,
 						'type': label.label_type,
 						'quality': label.label_quality,
+						'label_id': label.id,
 						**geom_properties,
 					},
 				}
@@ -50,7 +57,11 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 		# Create GeoDataFrame
 		label_gdf = gpd.GeoDataFrame.from_features(features)
 		label_gdf.set_crs('EPSG:4326', inplace=True)
-		label_gdf.to_file(label_file, driver='GPKG', layer='labels')
+
+		# Create a unique layer name including the label ID to avoid conflicts
+		# when multiple labels of the same type are present
+		layer_name = f'{label.label_data}_{label.id}'
+		label_gdf.to_file(label_file, driver='GPKG', layer=layer_name)
 
 		# Get AOI data only if aoi_id exists
 		if label.aoi_id is not None:
@@ -66,14 +77,53 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 								'dataset_id': label.dataset_id,
 								'image_quality': aoi.get('image_quality'),
 								'notes': aoi.get('notes'),
+								'label_id': label.id,
 							},
 						}
 					]
 				)
 				aoi_gdf.set_crs('EPSG:4326', inplace=True)
-				aoi_gdf.to_file(label_file, driver='GPKG', layer='aoi')
+				aoi_gdf.to_file(label_file, driver='GPKG', layer=f'aoi_{label.id}')
 
 	return label_file
+
+
+def get_all_dataset_labels(dataset_id: int) -> List[Label]:
+	"""Get all labels for a dataset"""
+	with use_client() as client:
+		label_response = client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).execute()
+		if not label_response.data:
+			return []
+		return [Label(**label_data) for label_data in label_response.data]
+
+
+def create_labels_geopackages(dataset_id: int) -> Dict[str, Path]:
+	"""Create GeoPackage files for all labels of a dataset, grouped by label type"""
+	labels = get_all_dataset_labels(dataset_id)
+	if not labels:
+		return {}
+
+	# Group labels by label_data type
+	label_files = {}
+	with tempfile.TemporaryDirectory() as temp_dir:
+		# Create a separate GeoPackage for each label type
+		for label_type in set(label.label_data for label in labels):
+			type_labels = [label for label in labels if label.label_data == label_type]
+
+			# Skip if no labels of this type
+			if not type_labels:
+				continue
+
+			gpkg_path = Path(temp_dir) / f'{label_type}_{dataset_id}.gpkg'
+
+			# Process each label into the same GeoPackage but different layers
+			for label in type_labels:
+				label_to_geopackage(str(gpkg_path), label)
+
+			# Store the file path for later use
+			label_files[label_type] = gpkg_path
+
+	return label_files
 
 
 def create_citation_file(dataset: Dataset, filestream=None) -> str:
@@ -147,9 +197,8 @@ def bundle_dataset(
 	target_path: str,
 	archive_file_path: str,
 	dataset: Dataset,
-	label: Label | None = None,
 ):
-	"""Bundle dataset files into a ZIP archive"""
+	"""Bundle dataset files into a ZIP archive including all labels"""
 	# Generate formatted filename base
 	base_filename = f'ortho_{dataset.id}'
 
@@ -181,13 +230,29 @@ def bundle_dataset(
 		create_citation_file(dataset, citation_buffer)
 		archive.writestr('CITATION.cff', citation_buffer.getvalue())
 
-	# Add labels if present
-	if label is not None:
-		label_filename = f'labels_{dataset.id}'
-		with tempfile.NamedTemporaryFile(suffix='.gpkg') as label_file:
-			label_to_geopackage(label_file.name, label)
+		# Get and add all labels
+		with tempfile.TemporaryDirectory() as temp_dir:
+			# Get all labels for this dataset
+			labels = get_all_dataset_labels(dataset.id)
 
-			with zipfile.ZipFile(target_path, 'a', zipfile.ZIP_STORED) as archive:
-				archive.write(label_file.name, arcname=f'{label_filename}.gpkg')
+			if labels:
+				# Process each type of label
+				for label_type in set(label.label_data for label in labels):
+					# Create temporary file for this label type
+					label_file = Path(temp_dir) / f'{label_type.value}_{dataset.id}.gpkg'
+
+					# Filter labels of this type
+					type_labels = [label for label in labels if label.label_data == label_type]
+
+					# Process each label into the GeoPackage
+					for label in type_labels:
+						label_to_geopackage(str(label_file), label)
+
+					# Add to archive with appropriate name
+					archive_name = f'labels_{label_type.value}_{dataset.id}.gpkg'
+					archive.write(label_file, arcname=archive_name)
+
+					# Use logger without context if needed
+					logger.info(f'Added {label_type} labels to bundle for dataset {dataset.id}')
 
 	return target_path

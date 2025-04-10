@@ -1,6 +1,6 @@
 import asyncio
 from typing import Callable
-from enum import Enum
+from enum import Enum, auto
 import tempfile
 from pathlib import Path
 import time
@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel
 import pandas as pd
 
 from shared.__version__ import __version__
@@ -20,6 +20,7 @@ from shared.models import Dataset, Label
 from shared.settings import settings
 from api.src.download.downloads import bundle_dataset, label_to_geopackage, create_citation_file
 from shared.db import use_client
+from shared.logger import logger
 
 # first approach to implement a rate limit
 CONNECTED_IPS = {}
@@ -80,11 +81,28 @@ def info():
 	pass
 
 
-# main download route
-@download_app.get('/datasets/{dataset_id}/dataset.zip')
+# Define models for download status
+class DownloadStatusEnum(str, Enum):
+	PENDING = 'pending'
+	PROCESSING = 'processing'
+	COMPLETED = 'completed'
+	FAILED = 'failed'
+
+
+class DownloadStatus(BaseModel):
+	"""Model for download job status responses"""
+
+	status: DownloadStatusEnum
+	job_id: str
+	message: str = ''
+	download_path: str = ''
+
+
+# Updated download route with background processing
+@download_app.get('/datasets/{dataset_id}/dataset.zip', response_model=DownloadStatus)
 async def download_dataset(dataset_id: str, background_tasks: BackgroundTasks):
 	"""
-	Prepare dataset bundle and return nginx URL for download
+	Prepare dataset bundle in the background and return job status
 	"""
 	# Load the dataset using direct database query
 	with use_client() as client:
@@ -100,30 +118,85 @@ async def download_dataset(dataset_id: str, background_tasks: BackgroundTasks):
 		ortho = ortho_response.data[0]
 
 	# Build the file paths
-	archive_file_name = (settings.archive_path / ortho['ortho_file_name']).resolve()
 	download_dir = settings.downloads_path / dataset_id
 	download_file = download_dir / f'{dataset_id}.zip'
+
+	# Check if file already exists
+	if download_file.exists():
+		# File already exists, return completed status (not the direct URL)
+		return DownloadStatus(
+			status=DownloadStatusEnum.COMPLETED,
+			job_id=dataset_id,
+			message='Dataset bundle is ready for download',
+			download_path=f'/downloads/v1/{dataset_id}/{dataset_id}.zip',
+		)
 
 	# Create download directory if it doesn't exist
 	download_dir.mkdir(parents=True, exist_ok=True)
 
-	# Load labels if they exist
+	# Start background task to create the archive
+	background_tasks.add_task(create_dataset_bundle_background, dataset_id=dataset_id, dataset=dataset, ortho=ortho)
+
+	# Return processing status response
+	return DownloadStatus(
+		status=DownloadStatusEnum.PROCESSING, job_id=dataset_id, message='Dataset bundle is being prepared'
+	)
+
+
+@download_app.get('/datasets/{dataset_id}/status', response_model=DownloadStatus)
+async def check_download_status(dataset_id: str):
+	"""Check the status of a dataset bundle job"""
+	download_dir = settings.downloads_path / dataset_id
+	download_file = download_dir / f'{dataset_id}.zip'
+
+	# Load the dataset to verify it exists
 	with use_client() as client:
-		label_response = client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).execute()
-		label = Label(**label_response.data[0]) if label_response.data else None
+		dataset_response = client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute()
+		if not dataset_response.data:
+			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
 
+	if download_file.exists():
+		return DownloadStatus(
+			status=DownloadStatusEnum.COMPLETED,
+			job_id=dataset_id,
+			message='Dataset bundle is ready for download',
+			download_path=f'/downloads/v1/{dataset_id}/{dataset_id}.zip',
+		)
+	else:
+		return DownloadStatus(
+			status=DownloadStatusEnum.PROCESSING, job_id=dataset_id, message='Dataset bundle is being prepared'
+		)
+
+
+@download_app.get('/datasets/{dataset_id}/download', response_class=RedirectResponse)
+async def download_dataset_file(dataset_id: str):
+	"""Redirect to the actual download file once it's ready"""
+	download_file = settings.downloads_path / dataset_id / f'{dataset_id}.zip'
+
+	if not download_file.exists():
+		raise HTTPException(status_code=404, detail=f'Download file for dataset <ID={dataset_id}> not found')
+
+	return RedirectResponse(url=f'/downloads/v1/{dataset_id}/{dataset_id}.zip', status_code=303)
+
+
+async def create_dataset_bundle_background(dataset_id: str, dataset: Dataset, ortho: dict):
+	"""Background task to create dataset bundle"""
 	try:
-		# Bundle dataset directly to downloads directory
-		bundle_dataset(str(download_file), archive_file_name, dataset=dataset, label=label)
+		# Build the file paths
+		archive_file_name = (settings.archive_path / ortho['ortho_file_name']).resolve()
+		download_dir = settings.downloads_path / dataset_id
+		download_file = download_dir / f'{dataset_id}.zip'
 
-		# Return redirect to nginx URL
-		return RedirectResponse(url=f'/downloads/v1/{dataset_id}/{dataset_id}.zip', status_code=303)
+		# Bundle dataset directly to downloads directory - no need to pass label anymore
+		bundle_dataset(str(download_file), archive_file_name, dataset=dataset)
+
+		logger.info(f'Dataset bundle completed for dataset {dataset_id}')
 
 	except Exception as e:
+		logger.error(f'Error in background dataset bundling: {str(e)}', extra={'dataset_id': dataset_id})
+		# Remove failed file if it exists
 		if download_file.exists():
 			download_file.unlink()
-		msg = f'Failed to bundle dataset <ID={dataset_id}>: {str(e)}'
-		raise HTTPException(status_code=500, detail=msg)
 
 
 # @download_app.get('/datasets/{dataset_id}/ortho.tif')
@@ -176,37 +249,46 @@ async def download_dataset(dataset_id: str, background_tasks: BackgroundTasks):
 @download_app.get('/datasets/{dataset_id}/labels.gpkg')
 async def get_labels(dataset_id: str, background_tasks: BackgroundTasks):
 	"""
-	Download the labels of the dataset with the given ID.
+	Download all the labels of the dataset with the given ID.
 	"""
-	# load the labels using use_client
+	# Load the dataset to verify it exists
 	with use_client() as client:
-		# Get label data
-		label_response = client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).execute()
-		if not label_response.data:
-			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no labels.')
-		label = Label(**label_response.data[0])
-
-		# Get dataset data for citation
+		# Get dataset data
 		dataset_response = client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute()
 		if not dataset_response.data:
 			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
 		dataset = Dataset(**dataset_response.data[0])
 
+		# Check if dataset has any labels
+		label_response = client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).execute()
+		if not label_response.data:
+			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no labels.')
+
+		# Convert to Label objects
+		labels = [Label(**label_data) for label_data in label_response.data]
+
 	# Create a temporary directory for files
 	temp_dir = tempfile.mkdtemp()
 	background_tasks.add_task(lambda: shutil.rmtree(temp_dir))
 
-	# Create temporary files
-	gpkg_file = Path(temp_dir) / 'labels.gpkg'
-	zip_file = Path(temp_dir) / 'labels_with_citation.zip'
+	# Create ZIP archive
+	zip_file = Path(temp_dir) / f'labels_{dataset_id}.zip'
 
-	# Write the labels to GeoPackage
-	label_to_geopackage(str(gpkg_file), label)
-
-	# Create ZIP archive with GeoPackage and citation
 	with zipfile.ZipFile(zip_file, 'w', zipfile.ZIP_STORED) as archive:
-		# Add GeoPackage
-		archive.write(gpkg_file, arcname=f'labels_{dataset_id}.gpkg')
+		# Group labels by type
+		label_types = set(label.label_data for label in labels)
+
+		for label_type in label_types:
+			# Create GeoPackage for this label type
+			type_labels = [label for label in labels if label.label_data == label_type]
+			gpkg_file = Path(temp_dir) / f'{label_type}_{dataset_id}.gpkg'
+
+			# Process each label into the GeoPackage
+			for label in type_labels:
+				label_to_geopackage(str(gpkg_file), label)
+
+			# Add to archive
+			archive.write(gpkg_file, arcname=f'labels_{label_type}_{dataset_id}.gpkg')
 
 		# Add citation file
 		citation_buffer = io.StringIO()
