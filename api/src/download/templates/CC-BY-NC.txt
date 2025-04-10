@@ -1,6 +1,6 @@
 Creative Commons Legal Code
 
-Attribution 3.0 Unported
+Attribution-NonCommercial 3.0 Unported
 
     CREATIVE COMMONS CORPORATION IS NOT A LAW FIRM AND DOES NOT PROVIDE
     LEGAL SERVICES. DISTRIBUTION OF THIS LICENSE DOES NOT CREATE AN
@@ -123,29 +123,13 @@ exercise the rights in the Work as stated below:
  c. to Distribute and Publicly Perform the Work including as incorporated
     in Collections; and,
  d. to Distribute and Publicly Perform Adaptations.
- e. For the avoidance of doubt:
-
-     i. Non-waivable Compulsory License Schemes. In those jurisdictions in
-        which the right to collect royalties through any statutory or
-        compulsory licensing scheme cannot be waived, the Licensor
-        reserves the exclusive right to collect such royalties for any
-        exercise by You of the rights granted under this License;
-    ii. Waivable Compulsory License Schemes. In those jurisdictions in
-        which the right to collect royalties through any statutory or
-        compulsory licensing scheme can be waived, the Licensor waives the
-        exclusive right to collect such royalties for any exercise by You
-        of the rights granted under this License; and,
-   iii. Voluntary License Schemes. The Licensor waives the right to
-        collect royalties, whether individually or, in the event that the
-        Licensor is a member of a collecting society that administers
-        voluntary licensing schemes, via that society, from any exercise
-        by You of the rights granted under this License.
 
 The above rights may be exercised in all media and formats whether now
 known or hereafter devised. The above rights include the right to make
 such modifications as are technically necessary to exercise the rights in
 other media and formats. Subject to Section 8(f), all rights not expressly
-granted by Licensor are hereby reserved.
+granted by Licensor are hereby reserved, including but not limited to the
+rights set forth in Section 4(d).
 
 4. Restrictions. The license granted in Section 3 above is expressly made
 subject to and limited by the following restrictions:
@@ -168,11 +152,19 @@ subject to and limited by the following restrictions:
     apart from the Work itself to be made subject to the terms of this
     License. If You create a Collection, upon notice from any Licensor You
     must, to the extent practicable, remove from the Collection any credit
-    as required by Section 4(b), as requested. If You create an
+    as required by Section 4(c), as requested. If You create an
     Adaptation, upon notice from any Licensor You must, to the extent
     practicable, remove from the Adaptation any credit as required by
-    Section 4(b), as requested.
- b. If You Distribute, or Publicly Perform the Work or any Adaptations or
+    Section 4(c), as requested.
+ b. You may not exercise any of the rights granted to You in Section 3
+    above in any manner that is primarily intended for or directed toward
+    commercial advantage or private monetary compensation. The exchange of
+    the Work for other copyrighted works by means of digital file-sharing
+    or otherwise shall not be considered to be intended for or directed
+    toward commercial advantage or private monetary compensation, provided
+    there is no payment of any monetary compensation in connection with
+    the exchange of copyrighted works.
+ c. If You Distribute, or Publicly Perform the Work or any Adaptations or
     Collections, You must, unless a request has been made pursuant to
     Section 4(a), keep intact all copyright notices for the Work and
     provide, reasonable to the medium or means You are utilizing: (i) the
@@ -185,11 +177,11 @@ subject to and limited by the following restrictions:
     extent reasonably practicable, the URI, if any, that Licensor
     specifies to be associated with the Work, unless such URI does not
     refer to the copyright notice or licensing information for the Work;
-    and (iv) , consistent with Section 3(b), in the case of an Adaptation,
+    and, (iv) consistent with Section 3(b), in the case of an Adaptation,
     a credit identifying the use of the Work in the Adaptation (e.g.,
     "French translation of the Work by Original Author," or "Screenplay
     based on original Work by Original Author"). The credit required by
-    this Section 4 (b) may be implemented in any reasonable manner;
+    this Section 4(c) may be implemented in any reasonable manner;
     provided, however, that in the case of a Adaptation or Collection, at
     a minimum such credit will appear, if a credit for all contributing
     authors of the Adaptation or Collection appears, then as part of these
@@ -203,7 +195,30 @@ subject to and limited by the following restrictions:
     use of the Work, without the separate, express prior written
     permission of the Original Author, Licensor and/or Attribution
     Parties.
- c. Except as otherwise agreed in writing by the Licensor or as may be
+ d. For the avoidance of doubt:
+
+     i. Non-waivable Compulsory License Schemes. In those jurisdictions in
+        which the right to collect royalties through any statutory or
+        compulsory licensing scheme cannot be waived, the Licensor
+        reserves the exclusive right to collect such royalties for any
+        exercise by You of the rights granted under this License;
+    ii. Waivable Compulsory License Schemes. In those jurisdictions in
+        which the right to collect royalties through any statutory or
+        compulsory licensing scheme can be waived, the Licensor reserves
+        the exclusive right to collect such royalties for any exercise by
+        You of the rights granted under this License if Your exercise of
+        such rights is for a purpose or use which is otherwise than
+        noncommercial as permitted under Section 4(b) and otherwise waives
+        the right to collect royalties through any statutory or compulsory
+        licensing scheme; and,
+   iii. Voluntary License Schemes. The Licensor reserves the right to
+        collect royalties, whether individually or, in the event that the
+        Licensor is a member of a collecting society that administers
+        voluntary licensing schemes, via that society, from any exercise
+        by You of the rights granted under this License that is for a
+        purpose or use which is otherwise than noncommercial as permitted
+        under Section 4(c).
+ e. Except as otherwise agreed in writing by the Licensor or as may be
     otherwise permitted by applicable law, if You Reproduce, Distribute or
     Publicly Perform the Work either by itself or as part of any
     Adaptations or Collections, You must not distort, mutilate, modify or
@@ -314,6 +329,6 @@ Creative Commons Notice
     compliance with Creative Commons' then-current trademark usage
     guidelines, as may be published on its website or otherwise made
     available upon request from time to time. For the avoidance of doubt,
-    this trademark restriction does not form part of this License.
+    this trademark restriction does not form part of the License.
 
     Creative Commons may be contacted at http://creativecommons.org/.
