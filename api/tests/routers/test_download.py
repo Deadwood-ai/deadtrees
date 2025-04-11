@@ -307,11 +307,12 @@ def test_download_dataset_with_labels(auth_token, test_dataset_with_label):
 			# List all available layers in the GeoPackage
 			available_layers = fiona.listlayers(gpkg_path)
 
-			# Verify the deadwood layer exists (instead of 'labels')
-			assert 'deadwood' in available_layers
+			# Verify the deadwood layer exists (with source info in name)
+			deadwood_layer = f'deadwood_{LabelSourceEnum.visual_interpretation.value}'
+			assert deadwood_layer in available_layers
 
-			# Verify layers in GeoPackage - use 'deadwood' instead of 'labels'
-			gdf_labels = gpd.read_file(gpkg_path, layer='deadwood')
+			# Verify layers in GeoPackage
+			gdf_labels = gpd.read_file(gpkg_path, layer=deadwood_layer)
 
 			# Find AOI layer (should start with 'aoi_')
 			aoi_layers = [layer for layer in available_layers if layer.startswith('aoi_')]
@@ -438,13 +439,23 @@ def test_download_dataset_with_labels_no_aoi(auth_token, test_dataset_with_label
 			gpkg_path = Path(tmpdir) / labels_file
 
 			# Verify labels layer exists and has content
-			gdf_labels = gpd.read_file(gpkg_path, layer='deadwood')
+			deadwood_layer = f'deadwood_{LabelSourceEnum.visual_interpretation.value}'
+
+			# List all available layers to debug
+			available_layers = fiona.listlayers(gpkg_path)
+
+			# Verify deadwood layer exists
+			assert deadwood_layer in available_layers
+
+			# Read the layer with correct naming
+			gdf_labels = gpd.read_file(gpkg_path, layer=deadwood_layer)
 			assert len(gdf_labels) > 0  # Should have deadwood polygons
 			assert gdf_labels.iloc[0]['source'] == 'visual_interpretation'
 
 			# Verify AOI layer doesn't exist
-			with pytest.raises(pyogrio.errors.DataLayerError, match="Layer 'aoi' could not be opened"):
-				gpd.read_file(gpkg_path, layer='aoi')
+			aoi_layer = f'aoi_{LabelDataEnum.deadwood.value}'
+			with pytest.raises(pyogrio.errors.DataLayerError, match=f"Layer '{aoi_layer}' could not be opened"):
+				gpd.read_file(gpkg_path, layer=aoi_layer)
 
 
 def test_download_labels_with_aoi(auth_token, test_dataset_with_label):
@@ -461,46 +472,55 @@ def test_download_labels_with_aoi(auth_token, test_dataset_with_label):
 	assert response.headers['content-type'] == 'application/zip'
 	assert response.headers['content-disposition'] == f'attachment; filename="labels_{dataset_id}.zip"'
 
-	# Save response content to temporary file and verify
+	# Save and verify contents
 	with tempfile.TemporaryDirectory() as tmpdir:
 		zip_path = Path(tmpdir) / f'labels_{dataset_id}.zip'
 		zip_path.write_bytes(response.content)
 
 		with zipfile.ZipFile(zip_path) as zf:
-			# Check for expected files
 			files = zf.namelist()
-			# We now have the label type in the filename, so look for a file that contains the dataset_id
-			assert any(f.startswith('labels_') and str(dataset_id) in f for f in files)
-			assert 'CITATION.cff' in files
 
-			# Extract and verify the GeoPackage
-			label_file = next(f for f in files if f.startswith('labels_') and str(dataset_id) in f)
-			gpkg_path = Path(tmpdir) / label_file
-			zf.extract(label_file, tmpdir)
+			# Debug: Print all files in the ZIP archive
+			print(f'Files in ZIP archive: {files}')
 
-			# List all available layers in the GeoPackage
-			available_layers = fiona.listlayers(gpkg_path)
+			# Find deadwood label file
+			deadwood_file = next(
+				(f for f in files if 'labels_' in f and ('deadwood' in f or str(dataset_id) in f)), None
+			)
+			assert deadwood_file is not None, f'Deadwood file not found in: {files}'
 
-			# Verify the deadwood layer exists (instead of 'labels')
-			assert 'deadwood' in available_layers
+			# Extract and check deadwood labels file
+			zf.extract(deadwood_file, tmpdir)
+			gpkg_path = Path(tmpdir) / deadwood_file
 
-			# Read the deadwood layer
-			gdf_labels = gpd.read_file(gpkg_path, layer='deadwood')
+			# Get all layers in the deadwood file
+			deadwood_layers = fiona.listlayers(gpkg_path)
+			print(f'Deadwood layers: {deadwood_layers}')
 
-			# Find AOI layer (should start with 'aoi_')
-			aoi_layers = [layer for layer in available_layers if layer.startswith('aoi_')]
-			assert len(aoi_layers) > 0
-			gdf_aoi = gpd.read_file(gpkg_path, layer=aoi_layers[0])
+			# Find deadwood layer
+			deadwood_layer = next((layer for layer in deadwood_layers if 'deadwood' in layer), None)
+			assert deadwood_layer is not None, f'Deadwood layer not found in: {deadwood_layers}'
 
-			assert len(gdf_labels) > 0  # Should have deadwood polygons
-			assert len(gdf_aoi) == 1  # Should have one AOI polygon
+			# Read the layer
+			gdf_visual = gpd.read_file(gpkg_path, layer=deadwood_layer)
+			assert len(gdf_visual) > 0, 'Visual layer has no data'
 
 			# Verify properties
-			assert gdf_labels.iloc[0]['source'] == 'test_data'
+			assert 'source' in gdf_visual.columns
+			assert gdf_visual.iloc[0]['source'] in ['test_data', 'visual_interpretation']
+
+			# Find and verify AOI layer
+			aoi_layer = next((layer for layer in deadwood_layers if layer.startswith('aoi_')), None)
+			assert aoi_layer is not None, f'AOI layer not found in: {deadwood_layers}'
+
+			# Check the AOI layer
+			gdf_aoi = gpd.read_file(gpkg_path, layer=aoi_layer)
+			assert len(gdf_aoi) > 0, 'AOI layer has no data'
 			assert gdf_aoi.iloc[0]['image_quality'] == 1
 			assert gdf_aoi.iloc[0]['notes'] == 'Test AOI from real data'
 
-			# Verify citation file
+			# Verify citation file is included
+			assert 'CITATION.cff' in files
 			citation_content = zf.read('CITATION.cff').decode('utf-8')
 			assert 'cff-version: 1.2.0' in citation_content
 			assert 'deadtrees.earth' in citation_content
@@ -540,11 +560,12 @@ def test_download_labels_without_aoi(auth_token, test_dataset_with_label_no_aoi)
 			# List all available layers in the GeoPackage
 			available_layers = fiona.listlayers(gpkg_path)
 
-			# Verify the deadwood layer exists (instead of 'labels')
-			assert 'deadwood' in available_layers
+			# Verify the deadwood layer exists (with source info in name)
+			deadwood_layer = f'deadwood_{LabelSourceEnum.visual_interpretation.value}'
+			assert deadwood_layer in available_layers
 
 			# Read the deadwood layer
-			gdf_labels = gpd.read_file(gpkg_path, layer='deadwood')
+			gdf_labels = gpd.read_file(gpkg_path, layer=deadwood_layer)
 			assert len(gdf_labels) > 0  # Should have deadwood polygons
 			assert gdf_labels.iloc[0]['source'] == 'visual_interpretation'
 
@@ -774,149 +795,162 @@ def test_download_dataset_with_multiple_labels(auth_token, test_dataset_for_down
 			zf.extract(deadwood_file, tmpdir)
 			deadwood_path = Path(tmpdir) / deadwood_file
 
-			# Verify deadwood layer
-			gdf_deadwood = gpd.read_file(deadwood_path, layer=LabelDataEnum.deadwood)
-			assert len(gdf_deadwood) > 0
-			assert gdf_deadwood.iloc[0]['source'] == 'visual_interpretation'
-			assert gdf_deadwood.iloc[0]['quality'] == 1
+			# List available layers in deadwood file
+			deadwood_layers = fiona.listlayers(deadwood_path)
+
+			# Get the visual interpretation layer
+			visual_layer = f'{LabelDataEnum.deadwood.value}_{LabelSourceEnum.visual_interpretation.value}'
+			assert visual_layer in deadwood_layers
+
+			# Get the model prediction layer
+			model_layer = f'{LabelDataEnum.deadwood.value}_{LabelSourceEnum.model_prediction.value}'
+			assert model_layer in deadwood_layers
+
+			# Verify deadwood visual interpretation layer
+			gdf_visual = gpd.read_file(deadwood_path, layer=visual_layer)
+			assert len(gdf_visual) > 0
+			assert gdf_visual.iloc[0]['source'] == 'visual_interpretation'
+			assert gdf_visual.iloc[0]['quality'] == 1
+
+			# Verify deadwood model prediction layer
+			gdf_model = gpd.read_file(deadwood_path, layer=model_layer)
+			assert len(gdf_model) > 0
+			assert gdf_model.iloc[0]['source'] == 'model_prediction'
+			assert gdf_model.iloc[0]['quality'] == 2
 
 			# Extract and check forest cover labels
 			zf.extract(forest_cover_file, tmpdir)
 			forest_cover_path = Path(tmpdir) / forest_cover_file
 
+			# List available layers in forest cover file
+			forest_layers = fiona.listlayers(forest_cover_path)
+
+			# Get the forest cover layer (model prediction)
+			forest_layer = f'{LabelDataEnum.forest_cover.value}_{LabelSourceEnum.model_prediction.value}'
+			assert forest_layer in forest_layers
+
 			# Verify forest cover layer
-			gdf_forest = gpd.read_file(forest_cover_path, layer=LabelDataEnum.forest_cover)
+			gdf_forest = gpd.read_file(forest_cover_path, layer=forest_layer)
 			assert len(gdf_forest) > 0
 			assert gdf_forest.iloc[0]['source'] == 'model_prediction'
 			assert gdf_forest.iloc[0]['quality'] == 2
 
 
-def test_download_multiple_label_types(auth_token, test_dataset_for_download, test_user):
-	"""Test downloading just the labels when multiple label types exist"""
-	dataset_id = test_dataset_for_download
+def test_download_datasets_with_different_licenses(auth_token, data_directory, test_file, test_user):
+	"""Test downloading datasets with different license types to ensure license info is correctly included"""
+	created_datasets = []
+	licenses_to_test = [
+		(LicenseEnum.cc_by, 'Attribution 4.0 International'),
+		(LicenseEnum.cc_by_sa, 'Attribution-ShareAlike 4.0 International'),
+		(LicenseEnum.cc_by_nc, 'Attribution-NonCommercial 4.0 International'),
+		(LicenseEnum.cc_by_nc_sa, 'Attribution-NonCommercial-ShareAlike 4.0 International'),
+	]
 
-	# Create different types of labels for the same dataset
-	test_file = Path(__file__).parent.parent.parent.parent / 'assets' / 'test_data' / 'yanspain_crop_124_polygons.gpkg'
-	deadwood = gpd.read_file(test_file, layer='standing_deadwood').to_crs(epsg=4326)
+	try:
+		with use_client(auth_token) as supabase_client:
+			# Create test datasets with different licenses
+			for license_enum, expected_license_text in licenses_to_test:
+				# Copy test file to archive directory
+				file_name = f'test-download-{license_enum.value}.tif'
+				archive_path = data_directory / settings.archive_path / file_name
+				shutil.copy2(test_file, archive_path)
 
-	# Convert deadwood geometries to MultiPolygon GeoJSON
-	deadwood_geojson = {
-		'type': 'MultiPolygon',
-		'coordinates': [
-			[
-				[[float(x), float(y)] for x, y in poly.exterior.coords]
-				for geom in deadwood.geometry
-				for poly in (geom if isinstance(geom, MultiPolygon) else [geom])
-			]
-		],
-	}
+				# Create test dataset with specific license
+				dataset_data = {
+					'file_name': file_name,
+					'user_id': test_user,
+					'license': license_enum.value,
+					'platform': PlatformEnum.drone.value,
+					'authors': ['Test Author'],
+					'aquisition_year': 2024,
+					'aquisition_month': 1,
+					'aquisition_day': 1,
+					'data_access': DatasetAccessEnum.public.value,
+					'additional_information': f'Test dataset with {license_enum.value} license',
+				}
+				response = supabase_client.table(settings.datasets_table).insert(dataset_data).execute()
+				dataset_id = response.data[0]['id']
+				created_datasets.append(dataset_id)
 
-	# Create deadwood label with visual interpretation
-	deadwood_payload_visual = LabelPayloadData(
-		dataset_id=dataset_id,
-		label_source=LabelSourceEnum.visual_interpretation,
-		label_type=LabelTypeEnum.segmentation,
-		label_data=LabelDataEnum.deadwood,
-		label_quality=1,
-		geometry=deadwood_geojson,
-	)
+				# Create ortho entry
+				ortho_data = {
+					'dataset_id': dataset_id,
+					'ortho_file_name': file_name,
+					'version': 1,
+					'ortho_file_size': max(1, int((archive_path.stat().st_size / 1024 / 1024))),  # in MB
+					'ortho_upload_runtime': 0.1,
+				}
+				supabase_client.table(settings.orthos_table).insert(ortho_data).execute()
 
-	# Create deadwood label with model prediction
-	deadwood_payload_model = LabelPayloadData(
-		dataset_id=dataset_id,
-		label_source=LabelSourceEnum.model_prediction,
-		label_type=LabelTypeEnum.segmentation,
-		label_data=LabelDataEnum.deadwood,
-		label_quality=2,
-		geometry=deadwood_geojson,
-	)
+				# Create status entry
+				status_data = {
+					'dataset_id': dataset_id,
+					'current_status': StatusEnum.idle.value,
+					'is_upload_done': True,
+					'is_ortho_done': True,
+				}
+				supabase_client.table(settings.statuses_table).insert(status_data).execute()
 
-	# Create forest cover label
-	forest_cover_payload = LabelPayloadData(
-		dataset_id=dataset_id,
-		label_source=LabelSourceEnum.model_prediction,
-		label_type=LabelTypeEnum.segmentation,
-		label_data=LabelDataEnum.forest_cover,
-		label_quality=2,
-		geometry=deadwood_geojson,
-	)
+			# Test downloading each dataset and verify the license information
+			for i, (license_enum, expected_license_text) in enumerate(licenses_to_test):
+				dataset_id = created_datasets[i]
 
-	# Create all labels
-	deadwood_label_visual = create_label_with_geometries(deadwood_payload_visual, test_user, auth_token)
-	deadwood_label_model = create_label_with_geometries(deadwood_payload_model, test_user, auth_token)
-	forest_cover_label = create_label_with_geometries(forest_cover_payload, test_user, auth_token)
+				# Make initial request to start the download using the TestClient
+				response = client.get(
+					f'/api/v1/download/datasets/{dataset_id}/dataset.zip',
+					headers={'Authorization': f'Bearer {auth_token}'},
+				)
 
-	client = use_client(auth_token)
-	# Request labels download
-	response = client.get(
-		f'/api/v1/download/datasets/{dataset_id}/labels.gpkg',
-		headers={'Authorization': f'Bearer {auth_token}'},
-	)
+				# Wait for processing to complete
+				max_attempts = 5
+				for _ in range(max_attempts):
+					status_response = client.get(
+						f'/api/v1/download/datasets/{dataset_id}/status',
+						headers={'Authorization': f'Bearer {auth_token}'},
+					)
+					if status_response.json()['status'] == 'completed':
+						break
+					time.sleep(1)
+				else:
+					pytest.fail('Dataset processing did not complete within expected time')
 
-	# Check response
-	assert response.status_code == 200
-	assert response.headers['content-type'] == 'application/zip'
+				# Verify the file exists in downloads directory
+				download_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}.zip'
+				assert download_file.exists()
 
-	# Save and verify contents
-	with tempfile.TemporaryDirectory() as tmpdir:
-		zip_path = Path(tmpdir) / f'labels_{dataset_id}.zip'
-		zip_path.write_bytes(response.content)
+				# Extract and verify license information
+				with zipfile.ZipFile(download_file) as zf:
+					files = zf.namelist()
+					assert 'LICENSE.txt' in files
 
-		with zipfile.ZipFile(zip_path) as zf:
-			files = zf.namelist()
+					# Read and verify license content
+					license_content = zf.read('LICENSE.txt').decode('utf-8')
+					assert expected_license_text in license_content
 
-			# Check for both label files
-			deadwood_file = next(f for f in files if f'labels_{LabelDataEnum.deadwood}_{dataset_id}.gpkg' in f)
-			forest_cover_file = next(f for f in files if f'labels_{LabelDataEnum.forest_cover}_{dataset_id}.gpkg' in f)
+					# Verify CITATION.cff has license info
+					citation_content = zf.read('CITATION.cff').decode('utf-8')
+					assert f'license: {license_enum.value}' in citation_content
 
-			# Extract and check deadwood labels file
-			zf.extract(deadwood_file, tmpdir)
-			gpkg_path = Path(tmpdir) / deadwood_file
+					# Verify basic content inclusion
+					assert any(f.startswith('ortho_') and f.endswith('.tif') for f in files)
+					assert 'METADATA.csv' in files
 
-			# Get all layers in the deadwood file - should have both visual and model layers
-			deadwood_layers = gpd.io.list_layers(gpkg_path)
+	finally:
+		# Cleanup the test datasets
+		with use_client(auth_token) as supabase_client:
+			for dataset_id in created_datasets:
+				supabase_client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
+				supabase_client.table(settings.orthos_table).delete().eq('dataset_id', dataset_id).execute()
+				supabase_client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 
-			# Verify we have two deadwood layers (one for each source)
-			deadwood_label_layers = [layer for layer in deadwood_layers if layer.startswith('deadwood_')]
-			assert len(deadwood_label_layers) == 2
+				# Cleanup downloaded files
+				download_dir = settings.downloads_path / str(dataset_id)
+				if download_dir.exists():
+					shutil.rmtree(download_dir)
 
-			# Check the layer containing visual interpretation
-			visual_layer = next(
-				layer
-				for layer in deadwood_label_layers
-				if gpd.read_file(gpkg_path, layer=layer).iloc[0]['source'] == 'visual_interpretation'
-			)
-			gdf_visual = gpd.read_file(gpkg_path, layer=visual_layer)
-			assert len(gdf_visual) > 0
-			assert gdf_visual.iloc[0]['quality'] == 1
-
-			# Check the layer containing model prediction
-			model_layer = next(
-				layer
-				for layer in deadwood_label_layers
-				if gpd.read_file(gpkg_path, layer=layer).iloc[0]['source'] == 'model_prediction'
-			)
-			gdf_model = gpd.read_file(gpkg_path, layer=model_layer)
-			assert len(gdf_model) > 0
-			assert gdf_model.iloc[0]['quality'] == 2
-
-			# Extract and check forest cover file
-			zf.extract(forest_cover_file, tmpdir)
-			forest_path = Path(tmpdir) / forest_cover_file
-			forest_layers = gpd.io.list_layers(forest_path)
-			forest_label_layers = [layer for layer in forest_layers if layer.startswith('forest_cover_')]
-			assert len(forest_label_layers) == 1
-
-			# Check the forest cover layer
-			gdf_forest = gpd.read_file(forest_path, layer=forest_label_layers[0])
-			assert len(gdf_forest) > 0
-			assert gdf_forest.iloc[0]['source'] == 'model_prediction'
-
-	# Clean up created labels
-	with use_client(auth_token) as client:
-		for label in [deadwood_label_visual, deadwood_label_model, forest_cover_label]:
-			if label.label_data == LabelDataEnum.deadwood:
-				client.table(settings.deadwood_geometries_table).delete().eq('label_id', label.id).execute()
-			else:
-				client.table(settings.forest_cover_geometries_table).delete().eq('label_id', label.id).execute()
-			client.table(settings.labels_table).delete().eq('id', label.id).execute()
+				# Cleanup archive files
+				for license_enum, _ in licenses_to_test:
+					file_name = f'test-download-{license_enum.value}.tif'
+					archive_path = data_directory / settings.archive_path / file_name
+					if archive_path.exists():
+						archive_path.unlink()

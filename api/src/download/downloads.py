@@ -58,10 +58,36 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 		label_gdf = gpd.GeoDataFrame.from_features(features)
 		label_gdf.set_crs('EPSG:4326', inplace=True)
 
-		# Create a unique layer name including the label ID to avoid conflicts
-		# when multiple labels of the same type are present
-		layer_name = f'{label.label_data}_{label.id}'
-		label_gdf.to_file(label_file, driver='GPKG', layer=layer_name)
+		# Check if file already exists to determine if we need to append
+		path = Path(label_file)
+		file_exists = path.exists()
+
+		# Create a layer name based on label type and source to group similar labels
+		# This allows us to have separate layers for visual_interpretation and model_prediction
+		layer_name = f'{label.label_data.value}_{label.label_source.value}'
+
+		# Check if this layer already exists in the file
+		existing_layers = []
+		if file_exists:
+			try:
+				import fiona
+
+				existing_layers = fiona.listlayers(label_file)
+			except Exception:
+				# File might exist but not be a valid GeoPackage yet
+				pass
+
+		# If layer exists, read existing data and append the new data
+		if layer_name in existing_layers:
+			# Read existing layer
+			existing_gdf = gpd.read_file(label_file, layer=layer_name)
+			# Append new data
+			combined_gdf = pd.concat([existing_gdf, label_gdf], ignore_index=True)
+			# Write back combined data, overwriting the layer
+			combined_gdf.to_file(label_file, driver='GPKG', layer=layer_name)
+		else:
+			# Write to a new layer
+			label_gdf.to_file(label_file, driver='GPKG', layer=layer_name)
 
 		# Get AOI data only if aoi_id exists
 		if label.aoi_id is not None:
@@ -83,7 +109,16 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 					]
 				)
 				aoi_gdf.set_crs('EPSG:4326', inplace=True)
-				aoi_gdf.to_file(label_file, driver='GPKG', layer=f'aoi_{label.id}')
+
+				# Use a consistent layer name for AOI - aoi_{label_data}
+				aoi_layer_name = f'aoi_{label.label_data.value}'
+
+				# Check if AOI layer already exists
+				if aoi_layer_name in existing_layers:
+					# Skip adding duplicate AOI since we only need one per label type
+					pass
+				else:
+					aoi_gdf.to_file(label_file, driver='GPKG', layer=aoi_layer_name)
 
 	return label_file
 
