@@ -281,14 +281,14 @@ async def get_labels(dataset_id: str, background_tasks: BackgroundTasks):
 		for label_type in label_types:
 			# Create GeoPackage for this label type
 			type_labels = [label for label in labels if label.label_data == label_type]
-			gpkg_file = Path(temp_dir) / f'{label_type}_{dataset_id}.gpkg'
+			gpkg_file = Path(temp_dir) / f'{label_type.value}_{dataset_id}.gpkg'
 
 			# Process each label into the GeoPackage
 			for label in type_labels:
 				label_to_geopackage(str(gpkg_file), label)
 
 			# Add to archive
-			archive.write(gpkg_file, arcname=f'labels_{label_type}_{dataset_id}.gpkg')
+			archive.write(gpkg_file, arcname=f'labels_{label_type.value}_{dataset_id}.gpkg')
 
 		# Add citation file
 		citation_buffer = io.StringIO()

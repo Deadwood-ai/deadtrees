@@ -149,7 +149,7 @@ def create_labels_geopackages(dataset_id: int) -> Dict[str, Path]:
 			if not type_labels:
 				continue
 
-			gpkg_path = Path(temp_dir) / f'{label_type}_{dataset_id}.gpkg'
+			gpkg_path = Path(temp_dir) / f'{label_type.value}_{dataset_id}.gpkg'
 
 			# Process each label into the same GeoPackage but different layers
 			for label in type_labels:
@@ -288,6 +288,6 @@ def bundle_dataset(
 					archive.write(label_file, arcname=archive_name)
 
 					# Use logger without context if needed
-					logger.info(f'Added {label_type} labels to bundle for dataset {dataset.id}')
+					logger.info(f'Added {label_type.value} labels to bundle for dataset {dataset.id}')
 
 	return target_path
