@@ -78,7 +78,6 @@ def test_upload_basic(data_commands, test_file):
 			authors=['Test Author'],
 			platform='drone',
 			data_access='public',
-			start_processing=False,
 			aquisition_year=2024,
 		)
 
@@ -128,7 +127,6 @@ def test_upload_with_metadata(data_commands, test_file):
 			aquisition_day=15,
 			additional_information='Test upload with metadata',
 			citation_doi='10.5281/zenodo.12345678',
-			start_processing=False,
 		)
 
 		assert result is not None
