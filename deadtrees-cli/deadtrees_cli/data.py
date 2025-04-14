@@ -243,11 +243,12 @@ class DataCommands:
 			logger.warning('No valid geometries found in labels GeoDataFrame')
 			return None
 
-		# Convert labels to MultiPolygon GeoJSON
+		# Convert labels to MultiPolygon GeoJSON with holes
 		labels_geojson = {
 			'type': 'MultiPolygon',
 			'coordinates': [
 				[[[float(coord[0]), float(coord[1])] for coord in polygon.exterior.coords]]
+				+ [[[float(coord[0]), float(coord[1])] for coord in interior.coords] for interior in polygon.interiors]
 				for geom in valid_labels_gdf.geometry
 				for polygon in (geom.geoms if isinstance(geom, MultiPolygon) else [geom])
 				if geom is not None  # Additional check for None geometries
@@ -263,6 +264,10 @@ class DataCommands:
 					'type': 'MultiPolygon',
 					'coordinates': [
 						[[[float(coord[0]), float(coord[1])] for coord in poly.exterior.coords]]
+						+ [
+							[[float(coord[0]), float(coord[1])] for coord in interior.coords]
+							for interior in poly.interiors
+						]
 						for geom in valid_aoi_gdf.geometry
 						for poly in (geom.geoms if isinstance(geom, MultiPolygon) else [geom])
 						if geom is not None  # Additional check for None geometries
@@ -360,11 +365,12 @@ class DataCommands:
 			logger.warning(f'AOI layer "{aoi_layer}" is empty')
 			return None
 
-		# Convert AOI to MultiPolygon GeoJSON
+		# Convert AOI to MultiPolygon GeoJSON with holes
 		aoi_geojson = {
 			'type': 'MultiPolygon',
 			'coordinates': [
 				[[[float(coord[0]), float(coord[1])] for coord in polygon.exterior.coords]]
+				+ [[[float(coord[0]), float(coord[1])] for coord in interior.coords] for interior in polygon.interiors]
 				for geom in aoi_gdf.geometry
 				for polygon in (geom.geoms if isinstance(geom, MultiPolygon) else [geom])
 				if geom is not None  # Additional check for None geometries

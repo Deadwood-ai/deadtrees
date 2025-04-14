@@ -33,10 +33,14 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 		# Reproject polygons to WGS 84
 		polygons = reproject_polygons(polygons, src_crs, 'EPSG:4326')
 
-		# Convert polygons to GeoJSON MultiPolygon format
+		# Convert polygons to GeoJSON MultiPolygon format with holes
 		deadwood_geojson = {
 			'type': 'MultiPolygon',
-			'coordinates': [[[[float(x), float(y)] for x, y in poly.exterior.coords]] for poly in polygons],
+			'coordinates': [
+				[[[float(x), float(y)] for x, y in poly.exterior.coords]]
+				+ [[[float(x), float(y)] for x, y in interior.coords] for interior in poly.interiors]
+				for poly in polygons
+			],
 		}
 
 		# Create label payload

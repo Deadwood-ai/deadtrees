@@ -12,7 +12,7 @@ from shared.testing.fixtures import (
 )
 from deadtrees_cli.data import DataCommands
 import geopandas as gpd
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, MultiPolygon
 from shared.models import LabelSourceEnum, LabelTypeEnum, LabelDataEnum
 
 
@@ -208,3 +208,87 @@ def test_upload_label_without_aoi(data_commands, test_dataset_for_upload):
 	assert label.label_data == LabelDataEnum.deadwood
 	assert label.label_quality == 1
 	assert label.aoi_id is None
+
+
+def test_upload_label_with_polygon_holes(data_commands, test_dataset_for_upload):
+	"""Test that polygons with holes are correctly processed in GeoJSON conversion"""
+	# Create a polygon with a hole
+	exterior = [(0, 0), (0, 10), (10, 10), (10, 0), (0, 0)]
+	interior = [(2, 2), (2, 8), (8, 8), (8, 2), (2, 2)]
+	poly_with_hole = Polygon(exterior, [interior])
+
+	# Create another polygon with multiple holes
+	exterior2 = [(20, 20), (20, 40), (40, 40), (40, 20), (20, 20)]
+	interior2_1 = [(25, 25), (25, 30), (30, 30), (30, 25), (25, 25)]
+	interior2_2 = [(32, 32), (32, 37), (37, 37), (37, 32), (32, 32)]
+	poly_with_multiple_holes = Polygon(exterior2, [interior2_1, interior2_2])
+
+	# Create a GeoDataFrame with these polygons
+	labels_gdf = gpd.GeoDataFrame(geometry=[poly_with_hole, poly_with_multiple_holes])
+
+	# Upload label using the existing test infrastructure
+	label = data_commands.upload_label(
+		dataset_id=test_dataset_for_upload,
+		labels_gdf=labels_gdf,
+		label_source='visual_interpretation',
+		label_type='segmentation',
+		label_data='deadwood',
+		label_quality=1,
+	)
+
+	# Verify label was created correctly
+	assert label.dataset_id == test_dataset_for_upload
+	assert label.label_source == LabelSourceEnum.visual_interpretation
+	assert label.label_type == LabelTypeEnum.segmentation
+	assert label.label_data == LabelDataEnum.deadwood
+	assert label.label_quality == 1
+
+	# Get the geometries from the deadwood_geometries table and verify they have holes
+	token = data_commands._ensure_auth()
+	with use_client(token) as client:
+		# Fetch geometries for this label from the deadwood_geometries table
+		geom_response = client.table(settings.deadwood_geometries_table).select('*').eq('label_id', label.id).execute()
+
+		# Verify we got geometries back
+		assert len(geom_response.data) > 0
+
+		# Convert the returned geometries to Shapely objects
+		from shapely.geometry import shape
+
+		geometries = [shape(geom_record['geometry']) for geom_record in geom_response.data]
+
+		# Verify we have the expected number of polygons
+		assert len(geometries) == 2
+
+		# Check that each polygon has the correct number of interior rings (holes)
+		# The first polygon should have 1 interior ring
+		assert len(list(geometries[0].interiors)) == 1
+
+		# The second polygon should have 2 interior rings
+		assert len(list(geometries[1].interiors)) == 2
+
+		# Verify the coordinates of the first polygon's hole
+		first_hole_coords = list(geometries[0].interiors)[0].coords
+		# Convert to list of tuples for easier comparison
+		first_hole_points = [(round(x, 1), round(y, 1)) for x, y in first_hole_coords]
+		# The first hole should contain these points (approximately)
+		assert (2.0, 2.0) in first_hole_points
+		assert (8.0, 8.0) in first_hole_points
+
+		# Verify the coordinates of the second polygon's holes
+		second_holes = list(geometries[1].interiors)
+		second_hole_points = [[(round(x, 1), round(y, 1)) for x, y in hole.coords] for hole in second_holes]
+
+		# Find which hole is which (they could be in any order)
+		first_interior_hole = next(
+			hole for hole in second_hole_points if any(p[0] == 25.0 and p[1] == 25.0 for p in hole)
+		)
+		second_interior_hole = next(
+			hole for hole in second_hole_points if any(p[0] == 32.0 and p[1] == 32.0 for p in hole)
+		)
+
+		# Verify hole coordinates
+		assert (25.0, 25.0) in first_interior_hole
+		assert (30.0, 30.0) in first_interior_hole
+		assert (32.0, 32.0) in second_interior_hole
+		assert (37.0, 37.0) in second_interior_hole
