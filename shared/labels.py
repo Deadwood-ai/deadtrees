@@ -4,7 +4,15 @@ from datetime import datetime
 from shapely.geometry import shape, MultiPolygon, Polygon
 from shapely import wkb
 
-from shared.models import LabelPayloadData, Label, AOI, DeadwoodGeometry, ForestCoverGeometry, LabelDataEnum
+from shared.models import (
+	LabelPayloadData,
+	Label,
+	AOI,
+	DeadwoodGeometry,
+	ForestCoverGeometry,
+	LabelDataEnum,
+	LabelSourceEnum,
+)
 from shared.db import use_client
 from shared.settings import settings
 from shared.logger import logger
@@ -156,3 +164,61 @@ def upload_geometry_chunk(
 	except Exception as e:
 		logger.error(f'Error uploading geometry chunk: {str(e)}', extra={'token': token})
 		raise Exception(f'Error uploading geometry chunk: {str(e)}')
+
+
+def delete_model_prediction_labels(dataset_id: int, label_data: LabelDataEnum, token: str) -> int:
+	"""Deletes all model prediction labels for a dataset with the specified label data type.
+
+	Args:
+		dataset_id: The ID of the dataset to delete labels for
+		label_data: The label data type (e.g., deadwood, forest_cover)
+		token: Authentication token
+
+	Returns:
+		int: Number of labels deleted
+	"""
+	deleted_count = 0
+
+	with use_client(token) as client:
+		try:
+			# First, get all model prediction labels for this dataset with the specified label data type
+			response = (
+				client.table(settings.labels_table)
+				.select('id')
+				.eq('dataset_id', dataset_id)
+				.eq('label_source', LabelSourceEnum.model_prediction.value)
+				.eq('label_data', label_data.value)
+				.execute()
+			)
+
+			if not response.data:
+				# No existing labels found
+				return 0
+
+			# Get label IDs to delete
+			label_ids = [label['id'] for label in response.data]
+			deleted_count = len(label_ids)
+
+			# Determine geometry table based on label_data
+			# geom_table = (
+			# 	settings.deadwood_geometries_table
+			# 	if label_data == LabelDataEnum.deadwood
+			# 	else settings.forest_cover_geometries_table
+			# )
+
+			# Delete all geometries for these labels
+			# Note: This isn't strictly necessary due to ON DELETE CASCADE, but being explicit
+			# for label_id in label_ids:
+			# client.table(geom_table).delete().eq('label_id', label_id).execute()
+
+			# Delete the labels themselves
+			client.table(settings.labels_table).delete().in_('id', label_ids).execute()
+
+			logger.info(f'Deleted {deleted_count} existing model prediction labels for dataset {dataset_id}')
+			return deleted_count
+
+		except Exception as e:
+			logger.error(
+				f'Error deleting model prediction labels: {str(e)}', extra={'token': token, 'dataset_id': dataset_id}
+			)
+			raise Exception(f'Error deleting model prediction labels: {str(e)}')

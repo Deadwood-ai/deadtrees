@@ -1,7 +1,7 @@
 from pathlib import Path
 from shared.logger import logger
 from shared.models import LabelPayloadData, LabelSourceEnum, LabelTypeEnum, LabelDataEnum
-from shared.labels import create_label_with_geometries
+from shared.labels import create_label_with_geometries, delete_model_prediction_labels
 from .deadtreesmodels.deadwood import DeadwoodInference
 from ..exceptions import ProcessingError
 import rasterio
@@ -18,6 +18,9 @@ MODEL_PATH = str(ASSETS_DIR / 'models' / 'segformer_b5_full_epoch_100.safetensor
 
 def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str):
 	try:
+		# First, check and delete any existing model prediction labels for deadwood
+		logger.info(f'Checking for existing deadwood prediction labels for dataset {dataset_id}')
+
 		logger.info('Initializing deadwood inference model')
 		deadwood_model = DeadwoodInference(config_path=CONFIG_PATH, model_path=MODEL_PATH)
 
@@ -51,8 +54,14 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 			label_data=LabelDataEnum.deadwood,
 			label_quality=3,
 			geometry=deadwood_geojson,
-			# properties={'source': 'model_prediction'},
 		)
+
+		# Delete existing deadwood prediction labels
+		deleted_count = delete_model_prediction_labels(
+			dataset_id=dataset_id, label_data=LabelDataEnum.deadwood, token=token
+		)
+		if deleted_count > 0:
+			logger.info(f'Deleted {deleted_count} existing deadwood prediction labels')
 
 		# Create label with geometries
 		logger.info('Creating label with geometries')
