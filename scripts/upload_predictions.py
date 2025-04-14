@@ -82,6 +82,47 @@ def get_available_layers(gpkg_path: Path) -> List[str]:
 	return fiona.listlayers(str(gpkg_path))
 
 
+def delete_existing_predictions(data_commands, dataset_id: int) -> bool:
+	"""Delete existing model predictions for a dataset
+
+	Args:
+	    data_commands: DataCommands instance
+	    dataset_id: Dataset ID
+
+	Returns:
+	    bool: True if deletion was successful, False otherwise
+	"""
+	token = data_commands._ensure_auth()
+	try:
+		with use_client(token) as client:
+			# Find labels from model predictions
+			response = (
+				client.table('v2_labels')
+				.select('id')
+				.eq('dataset_id', dataset_id)
+				.eq('label_source', LabelSourceEnum.model_prediction.value)
+				.eq('label_data', LabelDataEnum.deadwood.value)
+				.execute()
+			)
+
+			if not response.data:
+				print(f'No existing predictions found for dataset {dataset_id}')
+				return True
+
+			label_ids = [label['id'] for label in response.data]
+			print(f'Found {len(label_ids)} existing prediction labels to delete for dataset {dataset_id}')
+
+			# Delete labels (will cascade to delete geometries due to foreign key constraints)
+			for label_id in label_ids:
+				client.table('v2_labels').delete().eq('id', label_id).execute()
+
+			print(f'Successfully deleted {len(label_ids)} existing prediction labels for dataset {dataset_id}')
+			return True
+	except Exception as e:
+		print(f'Error deleting existing predictions for dataset {dataset_id}: {str(e)}')
+		return False
+
+
 def main():
 	# Initialize DataCommands
 	data_commands = DataCommands()
@@ -92,8 +133,9 @@ def main():
 	# Filter only rows with labels
 	# df = df[df['has_labels']]
 
-	# Load set of already processed files
-	processed_files = load_processed_files()
+	# Load set of already processed files - we'll ignore this for reuploading
+	# processed_files = load_processed_files()
+	processed_files = set()  # Empty set to process all files
 
 	# Keep track of failed files
 	failed_files = []
@@ -101,12 +143,6 @@ def main():
 
 	# Process each row
 	for _, row in tqdm(df.iterrows(), total=df.shape[0]):
-		# Skip if already processed
-		if row['filename'] in processed_files:
-			print(f"Skipping {row['filename']} - already processed")
-			skipped_files.append(row['filename'])
-			continue
-
 		# Create new DataCommands instance for each row to ensure fresh token
 		row_data_commands = DataCommands()
 
@@ -129,6 +165,13 @@ def main():
 		print(f"Available layers in {row['filename']}: {available_layers}")
 
 		try:
+			# Delete existing model predictions for this dataset
+			delete_success = delete_existing_predictions(row_data_commands, dataset_id)
+			if not delete_success:
+				print(f"Failed to delete existing predictions for {row['filename']}")
+				failed_files.append(row['filename'])
+				continue
+
 			upload_success = False
 
 			result = row_data_commands.upload_label_from_gpkg(

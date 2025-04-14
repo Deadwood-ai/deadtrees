@@ -3,6 +3,9 @@ assets/*
 api/tests/test_data/*
 processor/src/deadwood_segmentation/models/*
 
+#logs for scripts
+scripts/logs/*
+
 processor/tests/test_data/*
 .vscode/*
 
