@@ -62,8 +62,14 @@ def test_file():
 	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'fva_offset_bug.tif'
 	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data-small.tif'
 	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'corrupted-crs-small.tif'
-	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'utm.tif'
-	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'debugging' / 'ortho_3824_geonadir_location_problem.tif'
+	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'utm.tif' # huge file
+	# file_path = (
+	# 	Path(__file__).parent.parent.parent
+	# 	/ 'assets'
+	# 	/ 'test_data'
+	# 	/ 'debugging'
+	# 	/ 'ortho_3824_geonadir_location_problem.tif'
+	# )
 	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'debugging' / 'fva_no_segmentation.tif'
 	# file_path = (
 	# 	Path(__file__).parent.parent.parent
@@ -78,6 +84,9 @@ def test_file():
 	# 	/ 'test_data'
 	# 	/ 'debugging'
 	# 	/ '20220517_SASMDD0012_p1_ortho_01_cog.tif'
+	# )
+	# file_path = (
+	# 	Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'debugging' / 'ortho_3114_segmentation_error.tif'
 	# )
 
 	if not file_path.exists():
