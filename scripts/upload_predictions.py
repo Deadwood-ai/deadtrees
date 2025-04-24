@@ -6,14 +6,16 @@ import geopandas as gpd
 from shared.settings import settings
 from shared.db import use_client
 from shared.models import LabelSourceEnum, LabelTypeEnum, LabelDataEnum
-from typing import List
+from typing import List, Optional
 
 # Database path configuration
 DATABASE_PATH = Path('/Users/januschvajna-jehle/projects/deadwood-upload-labels/data')
 # File to track processed labels
-PROCESSED_LABELS_FILE = Path('processed_predictions.txt')
+PROCESSED_LABELS_FILE = Path('processed_predictions_remaining.txt')
 
-DATA_FOLDER = 'deadwood_segmentation_predictions_full_120'
+DATA_FOLDER = 'deadwood_segmentation_predictions_full_120_remaining'
+
+DELETE_EXISTING_PREDICTIONS = False
 
 
 def load_processed_files() -> set:
@@ -82,20 +84,19 @@ def get_available_layers(gpkg_path: Path) -> List[str]:
 	return fiona.listlayers(str(gpkg_path))
 
 
-def delete_existing_predictions(data_commands, dataset_id: int) -> bool:
-	"""Delete existing model predictions for a dataset
+def check_existing_predictions(data_commands, dataset_id: int) -> Optional[int]:
+	"""Check if existing model predictions exist for a dataset
 
 	Args:
 	    data_commands: DataCommands instance
 	    dataset_id: Dataset ID
 
 	Returns:
-	    bool: True if deletion was successful, False otherwise
+	    int: return label id if existing, None otherwise
 	"""
 	token = data_commands._ensure_auth()
 	try:
 		with use_client(token) as client:
-			# Find labels from model predictions
 			response = (
 				client.table('v2_labels')
 				.select('id')
@@ -104,22 +105,34 @@ def delete_existing_predictions(data_commands, dataset_id: int) -> bool:
 				.eq('label_data', LabelDataEnum.deadwood.value)
 				.execute()
 			)
+			if len(response.data) > 0:
+				return response.data[0]['id']
+			else:
+				return None
+	except Exception as e:
+		print(f'Error checking existing predictions for dataset {dataset_id}: {str(e)}')
+		return None
 
-			if not response.data:
-				print(f'No existing predictions found for dataset {dataset_id}')
-				return True
 
-			label_ids = [label['id'] for label in response.data]
-			print(f'Found {len(label_ids)} existing prediction labels to delete for dataset {dataset_id}')
+def delete_existing_prediction(data_commands, label_id: int) -> bool:
+	"""Delete existing model predictions for a dataset
 
-			# Delete labels (will cascade to delete geometries due to foreign key constraints)
-			for label_id in label_ids:
-				client.table('v2_labels').delete().eq('id', label_id).execute()
+	Args:
+	    data_commands: DataCommands instance
+	    label_id: Label ID
 
-			print(f'Successfully deleted {len(label_ids)} existing prediction labels for dataset {dataset_id}')
+	Returns:
+	    bool: True if deletion was successful, False otherwise
+	"""
+	token = data_commands._ensure_auth()
+	try:
+		with use_client(token) as client:
+			# Find labels from model predictions
+			response = client.table('v2_labels').delete().eq('id', label_id).execute()
+			print(f'Successfully deleted existing prediction label {label_id}')
 			return True
 	except Exception as e:
-		print(f'Error deleting existing predictions for dataset {dataset_id}: {str(e)}')
+		print(f'Error deleting existing predictions for label {label_id}: {str(e)}')
 		return False
 
 
@@ -166,11 +179,20 @@ def main():
 
 		try:
 			# Delete existing model predictions for this dataset
-			delete_success = delete_existing_predictions(row_data_commands, dataset_id)
-			if not delete_success:
-				print(f"Failed to delete existing predictions for {row['filename']}")
-				failed_files.append(row['filename'])
-				continue
+			label_id = check_existing_predictions(row_data_commands, dataset_id)
+			if label_id is not None:
+				if DELETE_EXISTING_PREDICTIONS:
+					delete_success = delete_existing_prediction(row_data_commands, label_id)
+					if not delete_success:
+						print(f"Failed to delete existing predictions for {row['filename']}")
+						failed_files.append(row['filename'])
+						continue
+				else:
+					print(
+						f"Skipping upload for {row['filename']} - existing prediction found and DELETE_EXISTING_PREDICTIONS is False"
+					)
+					skipped_files.append(row['filename'])
+					continue
 
 			upload_success = False
 
