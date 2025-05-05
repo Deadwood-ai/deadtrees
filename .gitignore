@@ -5,6 +5,8 @@ processor/src/deadwood_segmentation/models/*
 
 #logs for scripts
 scripts/logs/*
+scripts/area_m2_update.sh
+scripts/helpers/get_file_from_remote.md
 
 processor/tests/test_data/*
 .vscode/*
