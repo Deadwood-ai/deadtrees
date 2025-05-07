@@ -38,6 +38,14 @@ services:
       DEV_MODE: "false"
       LOGFIRE_TOKEN: ${LOGFIRE_TOKEN}
       # SSH_KEY_PATH: /root/.ssh/processing-to-storage
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
     ports:
       - "5678:5678"
+    devices:
+      - /dev/nvidia0:/dev/nvidia0
+      - /dev/nvidiactl:/dev/nvidiactl
+      - /dev/nvidia-modeset:/dev/nvidia-modeset
+      - /dev/nvidia-uvm:/dev/nvidia-uvm
+      - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
 
