@@ -88,6 +88,7 @@ def test_file():
 	# file_path = (
 	# 	Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'debugging' / 'ortho_3114_segmentation_error.tif'
 	# )
+	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'debugging' / '3357_ortho.tif'
 
 	if not file_path.exists():
 		pytest.skip('Test file not found')
