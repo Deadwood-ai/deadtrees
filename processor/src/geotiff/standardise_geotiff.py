@@ -294,39 +294,23 @@ def _apply_final_transformations(
 
 
 def verify_geotiff(file_path: str, token: str = None, dataset_id: int = None, user_id: str = None) -> bool:
-	"""Verify GeoTIFF file integrity"""
+	"""Verify GeoTIFF file integrity using rio_cogeo.cog_info"""
 	try:
-		cmd = ['gdalinfo', file_path]
-		result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-		verification_result = 'ERROR' not in result.stdout and 'FAILURE' not in result.stdout
+		# Verify the GeoTIFF by attempting to get its info
+		info = cog_info(file_path)
 
-		if verification_result:
-			logger.info(
-				f'GeoTIFF verification successful: {file_path}',
-				LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
-			)
-		else:
-			logger.error(
-				f'GeoTIFF verification failed: {file_path}',
-				LogContext(
-					category=LogCategory.ORTHO,
-					dataset_id=dataset_id,
-					user_id=user_id,
-					token=token,
-					extra={'stdout': result.stdout},
-				),
-			)
+		# If we get here, the file is valid
+		logger.info(
+			f'GeoTIFF verification successful: {file_path}',
+			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
+		return True
 
-		return verification_result
-	except subprocess.CalledProcessError as e:
+	except Exception as e:
 		logger.error(
-			f'File verification failed: {e}',
+			f'GeoTIFF verification failed: {e}',
 			LogContext(
-				category=LogCategory.ORTHO,
-				dataset_id=dataset_id,
-				user_id=user_id,
-				token=token,
-				extra={'error': str(e), 'stderr': e.stderr},
+				category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token, extra={'error': str(e)}
 			),
 		)
 		return False
