@@ -3,11 +3,11 @@ import time
 
 from shared.db import use_client, login, verify_token
 from shared.settings import settings
-from shared.models import StatusEnum, Ortho, QueueTask, Thumbnail
+from shared.models import StatusEnum, Ortho, QueueTask, Thumbnail, Cog
 from shared.logger import logger
-from .thumbnail.thumbnail import calculate_thumbnail
+from .thumbnail.thumbnail import calculate_thumbnail_from_cog
 from .utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
-from .exceptions import AuthenticationError, DatasetError, ProcessingError, StorageError
+from .exceptions import AuthenticationError, DatasetError, ProcessingError
 from shared.status import update_status
 from shared.logging import LogContext, LogCategory
 
@@ -24,17 +24,44 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 		)
 		raise AuthenticationError('Invalid processor token', token=token, task_id=task.id)
 
-	# load the dataset
+	# load the dataset and check if COG exists
 	try:
 		with use_client(token) as client:
+			# Load ortho data
 			response = client.table(settings.orthos_table).select('*').eq('dataset_id', task.dataset_id).execute()
+			if not response.data:
+				raise DatasetError(
+					f'No ortho data found for dataset {task.dataset_id}', dataset_id=task.dataset_id, task_id=task.id
+				)
 			ortho = Ortho(**response.data[0])
+
+			# Check for COG data
+			cog_response = client.table(settings.cogs_table).select('*').eq('dataset_id', task.dataset_id).execute()
+			if not cog_response.data:
+				logger.error(
+					'No COG data found for this dataset',
+					LogContext(
+						category=LogCategory.THUMBNAIL, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+					),
+				)
+				raise ProcessingError(
+					'COG processing must be completed before thumbnail generation',
+					task_type='thumbnail',
+					task_id=task.id,
+					dataset_id=task.dataset_id,
+				)
+
+			cog = Cog(**cog_response.data[0])
+	except ProcessingError:
+		raise
 	except Exception as e:
 		logger.error(
-			f'Failed to fetch dataset: {str(e)}',
+			f'Failed to fetch dataset or COG data: {str(e)}',
 			LogContext(category=LogCategory.DATASET, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 		)
-		raise DatasetError(f'Failed to fetch dataset: {str(e)}', dataset_id=task.dataset_id, task_id=task.id)
+		raise DatasetError(
+			f'Failed to fetch dataset or COG data: {str(e)}', dataset_id=task.dataset_id, task_id=task.id
+		)
 
 	# update the status to processing
 	update_status(token, dataset_id=ortho.dataset_id, current_status=StatusEnum.thumbnail_processing)
@@ -43,35 +70,35 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 		# get local file paths
 		thumbnail_file_name = ortho.ortho_file_name.replace('_ortho.tif', '_thumbnail.jpg')
 
-		# Always use temp_dir for both input and output
-		input_path = temp_dir / ortho.ortho_file_name
+		# Setup paths
+		cog_file_path = temp_dir / cog.cog_file_name
 		output_path = temp_dir / thumbnail_file_name
 
 		logger.info(
-			'Processing thumbnail paths',
+			'Processing thumbnail from COG',
 			LogContext(
 				category=LogCategory.THUMBNAIL,
 				dataset_id=task.dataset_id,
 				user_id=task.user_id,
 				token=token,
-				extra={'temp_dir': str(temp_dir), 'input': str(input_path), 'output': str(output_path)},
+				extra={'temp_dir': str(temp_dir), 'cog_input': str(cog_file_path), 'output': str(output_path)},
 			),
 		)
 
-		# get the remote file path and pull file
-		storage_server_file_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{ortho.ortho_file_name}'
-		pull_file_from_storage_server(storage_server_file_path, str(input_path), token, task.dataset_id)
+		# Pull COG file from storage server
+		storage_server_cog_path = f'{settings.STORAGE_SERVER_DATA_PATH}/cogs/{cog.cog_file_name}'
+		pull_file_from_storage_server(storage_server_cog_path, str(cog_file_path), token, task.dataset_id)
 
-		# Generate thumbnail
+		# Generate thumbnail from COG
 		t1 = time.time()
 		logger.info(
-			'Starting thumbnail generation',
+			'Starting thumbnail generation from COG',
 			LogContext(category=LogCategory.THUMBNAIL, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 		)
-		calculate_thumbnail(str(input_path), str(output_path))
+		calculate_thumbnail_from_cog(str(cog_file_path), str(output_path))
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 		logger.info(
-			'Thumbnail generated successfully',
+			'Thumbnail generated successfully from COG',
 			LogContext(
 				category=LogCategory.THUMBNAIL,
 				dataset_id=task.dataset_id,
@@ -157,7 +184,7 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 	# Update final status
 	update_status(token, dataset_id=ortho.dataset_id, current_status=StatusEnum.idle, is_thumbnail_done=True)
 	logger.info(
-		'Thumbnail processing completed successfully',
+		'Thumbnail processing from COG completed successfully',
 		LogContext(
 			category=LogCategory.THUMBNAIL,
 			dataset_id=task.dataset_id,

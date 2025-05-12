@@ -57,8 +57,8 @@ def auth_token(test_processor_user):
 @pytest.fixture
 def test_file():
 	"""Fixture to provide test GeoTIFF file path"""
-	file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data.tif'
-	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'float-ortho-poland.tif'
+	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data.tif'
+	file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'float-ortho-poland.tif'
 	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'fva_offset_bug.tif'
 	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data-small.tif'
 	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'corrupted-crs-small.tif'
@@ -88,7 +88,7 @@ def test_file():
 	# file_path = (
 	# 	Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'debugging' / 'ortho_3114_segmentation_error.tif'
 	# )
-	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'debugging' / '3357_ortho.tif'
+	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'debugging' / '3332_ortho.tif'
 
 	if not file_path.exists():
 		pytest.skip('Test file not found')
