@@ -87,8 +87,7 @@ def is_dataset_uploaded_or_processed(task: QueueTask, token: str) -> bool:
 
 		if not response.data:
 			logger.warning(
-				f'No status found for dataset {task.dataset_id}', 
-				extra={'token': token, 'dataset_id': task.dataset_id}
+				f'No status found for dataset {task.dataset_id}', extra={'token': token, 'dataset_id': task.dataset_id}
 			)
 			return False
 
@@ -98,7 +97,7 @@ def is_dataset_uploaded_or_processed(task: QueueTask, token: str) -> bool:
 		if has_error:
 			logger.warning(
 				f'Dataset {task.dataset_id} has errors, skipping processing',
-				extra={'token': token, 'dataset_id': task.dataset_id}
+				extra={'token': token, 'dataset_id': task.dataset_id},
 			)
 			return False
 
@@ -284,7 +283,9 @@ def background_process():
 				# Found a valid task, process it
 				logger.info(
 					f'Start a new background process for queued task: {task}.',
-					LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+					LogContext(
+						category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+					),
 				)
 				process_task(task, token=token)
 				break
@@ -295,7 +296,9 @@ def background_process():
 					client.table(settings.queue_position_table).delete().eq('id', task.id).execute()
 				logger.info(
 					f'Skipping task {task.id} due to dataset status, moving to next task',
-					LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+					LogContext(
+						category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+					),
 				)
 				continue
 	else:
