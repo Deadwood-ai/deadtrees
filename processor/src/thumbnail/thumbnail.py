@@ -30,7 +30,7 @@ def calculate_thumbnail(tiff_file_path: str, thumbnail_file_path: str, size=(256
 			out_height = int(src.height * scale_factor)
 
 			# Read all bands including alpha
-			data = src.read(out_shape=(src.count, out_height, out_width), resampling=Resampling.lanczos)
+			data = src.read(out_shape=(src.count, out_height, out_width), resampling=Resampling.nearest)
 
 			# Create RGB array
 			rgb_array = data[:3]  # First 3 bands are RGB
@@ -39,7 +39,7 @@ def calculate_thumbnail(tiff_file_path: str, thumbnail_file_path: str, size=(256
 			if src.count == 4:
 				alpha = data[3]
 			else:
-				alpha = src.read_masks(1, out_shape=(out_height, out_width), resampling=Resampling.lanczos)
+				alpha = src.read_masks(1, out_shape=(out_height, out_width), resampling=Resampling.nearest)
 
 			# Create white background where alpha is 0
 			for band in rgb_array:
