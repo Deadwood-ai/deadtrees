@@ -2,10 +2,11 @@ import pytest
 from shared.db import use_client, login
 from shared.settings import settings
 from shared.models import DatasetAccessEnum, LicenseEnum, PlatformEnum
+from shared.testing.fixtures import test_processor_user
 
 
 @pytest.fixture(scope='function')
-def datasets_with_mixed_access(auth_token, test_user):
+def datasets_with_mixed_access(auth_token, test_user, test_processor_user):
 	"""Create test datasets with different access levels"""
 	datasets = []
 
@@ -78,7 +79,7 @@ def test_rls_policy_for_private_datasets(datasets_with_mixed_access, auth_token)
 		assert len(response.data) == 1
 
 	# Processor should be able to see all datasets
-	processor_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
+	processor_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD, use_cached_session=False)
 	with use_client(processor_token) as supabase_client:
 		# Processor can see public dataset
 		response = (
@@ -112,6 +113,73 @@ def test_rls_policy_for_private_datasets(datasets_with_mixed_access, auth_token)
 		# Public cannot see private dataset
 		response = (
 			public_client.table(settings.datasets_table)
+			.select('*')
+			.eq('id', datasets_with_mixed_access['private_id'])
+			.execute()
+		)
+		assert len(response.data) == 0
+
+
+def test_rls_policy_for_view_with_private_datasets(datasets_with_mixed_access, auth_token):
+	"""Test that the RLS policy works correctly with the v2_full_dataset_view"""
+	# Get user token - this is the owner of the datasets
+	user_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD)
+
+	# Owner should be able to see their own datasets (both public and private) through the view
+	with use_client(user_token) as supabase_client:
+		# Owner can see public dataset through the view
+		response = (
+			supabase_client.from_('v2_full_dataset_view')
+			.select('*')
+			.eq('id', datasets_with_mixed_access['public_id'])
+			.execute()
+		)
+		assert len(response.data) == 1
+
+		# Owner can see private dataset through the view
+		response = (
+			supabase_client.from_('v2_full_dataset_view')
+			.select('*')
+			.eq('id', datasets_with_mixed_access['private_id'])
+			.execute()
+		)
+		assert len(response.data) == 1
+
+	# Processor should be able to see all datasets through the view
+	processor_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
+	with use_client(processor_token) as supabase_client:
+		# Processor can see public dataset through the view
+		response = (
+			supabase_client.from_('v2_full_dataset_view')
+			.select('*')
+			.eq('id', datasets_with_mixed_access['public_id'])
+			.execute()
+		)
+		assert len(response.data) == 1
+
+		# Processor can see private dataset through the view
+		response = (
+			supabase_client.from_('v2_full_dataset_view')
+			.select('*')
+			.eq('id', datasets_with_mixed_access['private_id'])
+			.execute()
+		)
+		assert len(response.data) == 1
+
+	# Public/anonymous access - create a client without authentication
+	with use_client() as public_client:
+		# Public can see public dataset through the view
+		response = (
+			public_client.from_('v2_full_dataset_view')
+			.select('*')
+			.eq('id', datasets_with_mixed_access['public_id'])
+			.execute()
+		)
+		assert len(response.data) == 1
+
+		# Public cannot see private dataset through the view
+		response = (
+			public_client.from_('v2_full_dataset_view')
 			.select('*')
 			.eq('id', datasets_with_mixed_access['private_id'])
 			.execute()
