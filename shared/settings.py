@@ -110,6 +110,8 @@ class Settings(BaseSettings):
 	# Test settings
 	TEST_USER_EMAIL: str = 'test@example.com'
 	TEST_USER_PASSWORD: str = 'test123456'
+	TEST_USER_EMAIL2: str = 'test2@example.com'
+	TEST_USER_PASSWORD2: str = 'test2123456'
 
 	@property
 	def base_path(self) -> Path:

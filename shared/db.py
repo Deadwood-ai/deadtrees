@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 cached_session = None
 
 
-def login(user: str, password: str) -> str:
+def login(user: str, password: str, use_cached_session: bool = True) -> str:
 	"""
 	Creates a supabase client instance, authorizes the user with login and password,
 	and manages session caching and refreshing.
@@ -39,7 +39,7 @@ def login(user: str, password: str) -> str:
 	current_time = int(time.time())
 	threshold = 60 * 20  # 20 minutes before expiration
 
-	if cached_session:
+	if cached_session and use_cached_session:
 		print('found cached session')
 		if cached_session.session.expires_at > (current_time + threshold):
 			print('session is still valid')
