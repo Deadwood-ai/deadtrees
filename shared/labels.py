@@ -17,7 +17,7 @@ from shared.db import use_client
 from shared.settings import settings
 from shared.logger import logger
 
-MAX_CHUNK_SIZE = 1024 * 256  # 256KB per chunk
+MAX_CHUNK_SIZE = 1024 * 1024 * 5  # 5MB per chunk
 
 
 def create_label_with_geometries(payload: LabelPayloadData, user_id: str, token: str) -> Label:
