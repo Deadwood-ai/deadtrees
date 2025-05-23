@@ -44,6 +44,9 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 				'authors': ['Test Author'],
 				'user_id': test_processor_user,
 				'data_access': 'public',
+				'aquisition_year': 2024,
+				'aquisition_month': 1,
+				'aquisition_day': 1,
 			}
 			response = client.table(settings.datasets_table).insert(dataset_data).execute()
 			dataset_id = response.data[0]['id']
