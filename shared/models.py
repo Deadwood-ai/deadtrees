@@ -61,6 +61,12 @@ class LabelTypeEnum(str, Enum):
 	semantic_segmentation = 'semantic_segmentation'
 
 
+class PredictionQualityEnum(str, Enum):
+	great = 'great'
+	sentinel_ok = 'sentinel_ok'
+	bad = 'bad'
+
+
 class TaskTypeEnum(str, Enum):
 	cog = 'cog'  # Generate cloud optimized geotiff
 	thumbnail = 'thumbnail'  # Generate thumbnail image
@@ -445,6 +451,35 @@ class DatasetMetadata(BaseModel):
 	processing_runtime: Optional[float] = None
 
 	@field_serializer('created_at', mode='plain')
+	def datetime_to_isoformat(field: datetime | None) -> str | None:
+		if field is None:
+			return None
+		return field.isoformat()
+
+
+class DatasetAudit(BaseModel):
+	"""Model for the dataset_audit table"""
+
+	dataset_id: int
+	audit_date: Optional[datetime] = None
+	is_georeferenced: Optional[bool] = None
+	has_valid_acquisition_date: Optional[bool] = None
+	acquisition_date_notes: Optional[str] = None
+	has_valid_phenology: Optional[bool] = None
+	phenology_notes: Optional[str] = None
+	deadwood_quality: Optional[PredictionQualityEnum] = None
+	deadwood_notes: Optional[str] = None
+	forest_cover_quality: Optional[PredictionQualityEnum] = None
+	forest_cover_notes: Optional[str] = None
+	aoi_done: Optional[bool] = None
+	has_cog_issue: Optional[bool] = None
+	cog_issue_notes: Optional[str] = None
+	has_thumbnail_issue: Optional[bool] = None
+	thumbnail_issue_notes: Optional[str] = None
+	audited_by: Optional[str] = None  # UUID as string
+	notes: Optional[str] = None
+
+	@field_serializer('audit_date', mode='plain')
 	def datetime_to_isoformat(field: datetime | None) -> str | None:
 		if field is None:
 			return None
