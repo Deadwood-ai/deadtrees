@@ -18,28 +18,33 @@ def find_nodata_value(src, num_bands):
 	try:
 		# First check if nodata is explicitly set
 		if src.nodata is not None:
-			try:
-				if not np.isnan(src.nodata):
-					return src.nodata
-			except:
-				pass
+			if np.isnan(src.nodata):
+				# This is our main problem case - NaN nodata
+				logger.info(
+					'Detected NaN nodata in source file',
+					LogContext(category=LogCategory.ORTHO, extra={'nodata_type': 'nan'}),
+				)
+				return 'nan'  # Return string to distinguish from numeric values
+			else:
+				return src.nodata
+
+		# For the rest of the function, we need to be careful about NaN values
+		# when reading sample data
 
 		# Check if we have an alpha band (band 4 in RGBA)
 		if num_bands == 4:
 			try:
-				# Read just a small window of the alpha band instead of the whole band
 				window = rasterio.windows.Window(0, 0, min(100, src.width), min(100, src.height))
 				alpha_band = src.read(4, window=window)
-				if (alpha_band == 0).any():  # If alpha band has any zero values
+				if (alpha_band == 0).any():
 					return 0
 			except Exception as e:
 				logger.warning(
 					f'Error reading alpha band: {e}', LogContext(category=LogCategory.ORTHO, extra={'error': str(e)})
 				)
 
-		# Try to read edges in smaller chunks to avoid reading corrupted areas
+		# Sample edges to detect nodata, being careful with NaN values
 		try:
-			# Read just the first few pixels of edges instead of entire edges
 			top = src.read(1, window=rasterio.windows.Window(0, 0, min(100, src.width), 1))
 			bottom = src.read(1, window=rasterio.windows.Window(0, max(0, src.height - 1), min(100, src.width), 1))
 			left = src.read(1, window=rasterio.windows.Window(0, 0, 1, min(100, src.height)))
@@ -47,12 +52,28 @@ def find_nodata_value(src, num_bands):
 
 			edges = np.concatenate([top.flatten(), bottom.flatten(), left.flatten(), right.flatten()])
 
-			# Find most common value in edges
-			values, counts = np.unique(edges, return_counts=True)
+			# Check for NaN in edges
+			nan_count = np.sum(np.isnan(edges))
+			total_count = len(edges)
+			nan_percentage = nan_count / total_count
+
+			if nan_percentage > 0.5:  # If more than 50% of edges are NaN
+				logger.info(
+					f'High NaN percentage in edges: {nan_percentage * 100:.1f}%',
+					LogContext(category=LogCategory.ORTHO, extra={'nan_percentage': nan_percentage}),
+				)
+				return 'nan'
+
+			# Continue with existing logic for non-NaN edges
+			edges_clean = edges[~np.isnan(edges)]
+
+			if len(edges_clean) == 0:
+				return 'nan'  # All edges are NaN
+
+			values, counts = np.unique(edges_clean, return_counts=True)
 			most_common_value = values[np.argmax(counts)]
 
-			# If the most common value appears significantly more than others, it's likely nodata
-			if np.max(counts) > len(edges) * 0.3:  # If value appears in more than 30% of edge pixels
+			if np.max(counts) > len(edges_clean) * 0.3:
 				return most_common_value
 
 		except Exception as e:
@@ -60,7 +81,7 @@ def find_nodata_value(src, num_bands):
 				f'Error reading image edges: {e}', LogContext(category=LogCategory.ORTHO, extra={'error': str(e)})
 			)
 
-		return None  # Return None if no clear nodata value is found or if errors occurred
+		return None
 
 	except Exception as e:
 		logger.error(
@@ -94,18 +115,19 @@ def standardise_geotiff(
 		if not src_properties:
 			return False
 
-		# Step 2: Handle bit depth conversion if needed
-		processed_input = _handle_bit_depth_conversion(
+		# Step 2: Handle bit depth conversion if needed (now returns nodata value)
+		processed_input, final_nodata_value = _handle_bit_depth_conversion(
 			input_path, output_path, src_properties['dtype'], token, dataset_id, user_id
 		)
 		if not processed_input:
 			return False
 
-		# Step 3: Apply final transformations with gdalwarp
+		# Step 3: Apply final transformations with gdalwarp (pass the actual nodata value)
 		success = _apply_final_transformations(
 			processed_input,
 			output_path,
 			src_properties['nodata'],
+			final_nodata_value,  # Pass the actual nodata value from intermediate file
 			src_properties['num_bands'],
 			token,
 			dataset_id,
@@ -175,30 +197,150 @@ def _get_source_properties(input_path: str, token: str, dataset_id: int = None, 
 
 def _handle_bit_depth_conversion(
 	input_path: str, output_path: str, src_dtype: str, token: str, dataset_id: int = None, user_id: str = None
-) -> str:
-	"""Convert non-uint8 images to 8-bit using gdal_translate."""
+) -> tuple:
+	"""Convert non-uint8 images to 8-bit using gdal_translate with proper nodata handling."""
 	if src_dtype == 'uint8':
-		return input_path
+		# For uint8 files, we still need to detect and return the nodata value
+		with rasterio.open(input_path) as src:
+			detected_nodata = find_nodata_value(src, src.count)
+			explicit_nodata = src.nodata
+
+			# Return the original nodata value for transparency handling
+			final_nodata = explicit_nodata if explicit_nodata is not None else detected_nodata
+			return input_path, final_nodata
 
 	temp_output = f'{output_path}.temp.tif'
-	translate_cmd = [
-		'gdal_translate',
-		'-ot',
-		'Byte',
-		'-scale',  # Auto-scale
-		input_path,
-		temp_output,
-	]
 
-	try:
+	# Get nodata information and calculate proper scaling
+	with rasterio.open(input_path) as src:
+		detected_nodata = find_nodata_value(src, src.count)
+		explicit_nodata = src.nodata
+
+		# Calculate scaling parameters by reading actual data (excluding NaN/nodata)
 		logger.info(
-			'Running gdal_translate for scaling: ' + ' '.join(translate_cmd),
+			'Calculating scaling parameters from actual data',
+			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
+
+		# Read a sample to calculate min/max excluding NaN and nodata
+		sample_window = rasterio.windows.Window(0, 0, min(1000, src.width), min(1000, src.height))
+		sample_data = src.read(window=sample_window)
+
+		# Remove NaN values and any detected nodata for proper min/max calculation
+		valid_mask = ~np.isnan(sample_data)
+
+		# Exclude explicit nodata values from scaling calculation
+		if explicit_nodata is not None and not np.isnan(explicit_nodata):
+			valid_mask = valid_mask & (sample_data != explicit_nodata)
+
+		# Exclude detected nodata values (if numeric)
+		if detected_nodata is not None and detected_nodata != 'nan':
+			try:
+				detected_numeric = float(detected_nodata)
+				valid_mask = valid_mask & (sample_data != detected_numeric)
+			except (ValueError, TypeError):
+				pass  # detected_nodata is not numeric
+
+		valid_data = sample_data[valid_mask]
+
+		if len(valid_data) > 0:
+			data_min = float(np.min(valid_data))
+			data_max = float(np.max(valid_data))
+			logger.info(
+				f'Calculated data range (excluding nodata): {data_min:.3f} - {data_max:.3f}',
+				LogContext(
+					category=LogCategory.ORTHO,
+					dataset_id=dataset_id,
+					user_id=user_id,
+					token=token,
+					extra={'data_min': data_min, 'data_max': data_max},
+				),
+			)
+		else:
+			# Fallback if no valid data found
+			data_min, data_max = 0.0, 255.0
+			logger.warning(
+				'No valid data found for scaling, using default range',
+				LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+			)
+
+		# Log nodata detection results
+		logger.info(
+			f'NoData analysis - explicit: {explicit_nodata}, detected: {detected_nodata}',
 			LogContext(
 				category=LogCategory.ORTHO,
 				dataset_id=dataset_id,
 				user_id=user_id,
 				token=token,
-				extra={'command': ' '.join(translate_cmd)},
+				extra={'explicit_nodata': str(explicit_nodata), 'detected_nodata': str(detected_nodata)},
+			),
+		)
+
+	# Build translate command - PRESERVE original nodata values
+	translate_cmd = ['gdal_translate', '-ot', 'Byte']
+
+	# Determine what nodata value to preserve in the output
+	final_nodata_value = None
+
+	if explicit_nodata is not None and np.isnan(explicit_nodata):
+		# NaN nodata - convert to 0 (since Byte format can't store NaN)
+		logger.info(
+			'Converting NaN nodata to 0 (Byte format limitation)',
+			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
+		translate_cmd.extend(['-a_nodata', '0'])
+		final_nodata_value = 0
+	elif detected_nodata == 'nan':
+		# Detected NaN nodata - convert to 0
+		logger.info(
+			'Converting detected NaN nodata to 0 (Byte format limitation)',
+			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
+		translate_cmd.extend(['-a_nodata', '0'])
+		final_nodata_value = 0
+	elif explicit_nodata is not None:
+		# Preserve explicit numeric nodata value
+		nodata_int = int(explicit_nodata)
+		logger.info(
+			f'Preserving explicit nodata value: {nodata_int}',
+			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
+		translate_cmd.extend(['-a_nodata', str(nodata_int)])
+		final_nodata_value = nodata_int
+	elif detected_nodata is not None and detected_nodata != 'nan':
+		# Preserve detected numeric nodata value
+		try:
+			nodata_int = int(float(detected_nodata))
+			logger.info(
+				f'Preserving detected nodata value: {nodata_int}',
+				LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+			)
+			translate_cmd.extend(['-a_nodata', str(nodata_int)])
+			final_nodata_value = nodata_int
+		except (ValueError, TypeError):
+			logger.warning(
+				f'Could not convert detected nodata to integer: {detected_nodata}',
+				LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+			)
+	else:
+		logger.info(
+			'No nodata values detected',
+			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
+
+	# Add EXPLICIT scaling
+	translate_cmd.extend(['-scale', str(data_min), str(data_max), '0', '255'])
+	translate_cmd.extend([input_path, temp_output])
+
+	try:
+		logger.info(
+			'Running gdal_translate preserving original nodata: ' + ' '.join(translate_cmd),
+			LogContext(
+				category=LogCategory.ORTHO,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'command': ' '.join(translate_cmd), 'final_nodata': final_nodata_value},
 			),
 		)
 		result = subprocess.run(translate_cmd, check=True, capture_output=True, text=True)
@@ -206,7 +348,8 @@ def _handle_bit_depth_conversion(
 			f'gdal_translate output:\n{result.stdout}',
 			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
 		)
-		return temp_output
+		return temp_output, final_nodata_value
+
 	except subprocess.CalledProcessError as e:
 		logger.error(
 			f'Error in bit depth conversion: {e}',
@@ -215,16 +358,17 @@ def _handle_bit_depth_conversion(
 				dataset_id=dataset_id,
 				user_id=user_id,
 				token=token,
-				extra={'error': str(e), 'stderr': e.stderr},
+				extra={'error': str(e), 'stderr': e.stderr if hasattr(e, 'stderr') else 'No stderr available'},
 			),
 		)
-		return None
+		return None, None
 
 
 def _apply_final_transformations(
 	input_path: str,
 	output_path: str,
-	nodata: float,
+	original_nodata: float,
+	final_nodata_value: int,  # The actual nodata value in the intermediate file
 	num_bands: int,
 	token: str,
 	dataset_id: int = None,
@@ -251,9 +395,18 @@ def _apply_final_transformations(
 		'ALL_CPUS',
 	]
 
-	# Add nodata handling
-	if nodata is not None:
-		cmd.extend(['-srcnodata', str(nodata), '-dstnodata', '0', '-dstalpha'])
+	# Use the actual nodata value from the intermediate file
+	if final_nodata_value is not None:
+		logger.info(
+			f'Creating alpha channel for transparency (using actual nodata: {final_nodata_value})',
+			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
+		cmd.extend(['-srcnodata', str(final_nodata_value), '-dstalpha'])
+	else:
+		logger.info(
+			'No nodata handling needed',
+			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
 
 	# Handle band selection for RGB
 	if num_bands > 3:

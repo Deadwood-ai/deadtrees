@@ -1,0 +1,117 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Processor Architecture Documentation
+
+## Overview
+
+The processor is a containerized system that handles various types of orthophoto processing tasks in a sequential pipeline. It processes raw orthophotos through standardization, COG creation, thumbnail generation, deadwood segmentation, and metadata extraction.
+
+## Core Architecture Principles
+
+### 1. Sequential Processing Pipeline
+All processing happens **sequentially within a single container** in the following order:
+1. **GeoTIFF Standardization** (`process_geotiff`) - Always runs first
+2. **Metadata Processing** (`process_metadata`) 
+3. **COG Creation** (`process_cog`)
+4. **Thumbnail Generation** (`process_thumbnail`)
+5. **Deadwood Segmentation** (`process_deadwood_segmentation`)
+
+### 2. Local File Reuse Strategy
+- **First process** downloads raw file from storage server
+- **Subsequent processes** automatically reuse local files via SSH utility
+- **No redundant downloads** within the same processing session
+- **Temporary processing directory** cleaned up after completion
+
+### 3. Data Transformation Flow
+
+## Detailed Process Flow
+
+### Phase 1: GeoTIFF Standardization (`process_geotiff`)
+
+**Purpose**: Convert problematic raw orthophotos into standardized, processing-ready format.
+
+**Key Operations**:
+1. **Download** raw file as `original_{filename}`
+2. **Analyze** data properties (dtype, nodata, value ranges)
+3. **Handle NoData values** (especially NaN → 0 conversion)
+4. **Apply intelligent scaling** (compressed dynamic range → full 0-255)
+5. **Create alpha channels** for transparency
+6. **Save standardized file** as `{filename}` (original name)
+7. **Clean up** original file, **keep standardized version**
+
+**Critical Fix**: 
+- **NaN NoData Handling**: Explicit `-a_nodata nan -dstnodata 0` for proper transparency
+- **Dynamic Range Scaling**: Auto-scaling after NoData exclusion ensures full brightness range utilization
+
+### Phase 2: Subsequent Process Execution
+
+**SSH Utility Smart Caching**:
+```python
+def pull_file_from_storage_server(remote_file_path: str, local_file_path: str, token: str, dataset_id: int):
+    # Check if the file already exists locally
+    if os.path.exists(local_file_path):
+        logger.info(f'File already exists locally at: {local_file_path}')
+        return  # Skip download, use local file
+```
+
+**Process Behavior**:
+- Each process calls `pull_file_from_storage_server()`
+- SSH utility detects local standardized file exists
+- **Automatic fallback** to local file instead of server download
+- All processes benefit from standardized data **without code changes**
+
+### Phase 3: Output Generation
+
+**COG Processing** (`process_cog`):
+- Uses standardized input → proper brightness COGs
+- No more dark/black output issues
+- Maintains spatial reference and compression
+
+**Thumbnail Generation** (`process_thumbnail`):
+- Uses standardized input → bright, properly contrasted thumbnails
+- Proper alpha channel handling for transparent areas
+
+**Deadwood Segmentation** (`process_deadwood_segmentation`):
+- Uses clean, standardized input → better model performance
+- No interference from NaN values or scaling issues
+
+## Critical Issue Resolution
+
+### Problem: Dark/Black COG Output
+
+**Root Cause Analysis**:
+- Raw images: Float32 format with compressed dynamic range (0-70 instead of 0-255)
+- Massive NaN values (68% of pixels)
+- COG processing: Direct Float32→Byte conversion without scaling
+- Result: 70/255 = 27% max brightness → extremely dark images
+
+**Solution Architecture**:
+1. **Detect NaN NoData** in `find_nodata_value()`
+2. **Handle explicitly** in `_handle_bit_depth_conversion()` with `-a_nodata nan`
+3. **Apply auto-scaling** after NoData exclusion
+4. **Propagate benefits** to all subsequent processes via file reuse
+
+### Implementation Details
+
+**Enhanced NoData Detection**:
+```python
+def find_nodata_value(src, num_bands):
+    if src.nodata is not None and np.isnan(src.nodata):
+        return 'nan'  # Explicit NaN detection
+    # Additional edge analysis for implicit NoData detection
+```
+
+**Intelligent Bit Depth Conversion**:
+```python
+def _handle_bit_depth_conversion(input_path: str, output_path: str, src_dtype: str, ...):
+    if explicit_nodata is not None and np.isnan(explicit_nodata):
+        translate_cmd.extend(['-a_nodata', 'nan', '-dstnodata', '0'])
+    translate_cmd.extend(['-scale', input_path, temp_output])  # Auto-scale after NoData handling
+```
+
+## File Lifecycle Management
+
+### Processing Session Lifecycle
