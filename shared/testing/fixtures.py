@@ -57,7 +57,7 @@ def auth_token(test_processor_user):
 @pytest.fixture
 def test_file():
 	"""Fixture to provide test GeoTIFF file path"""
-	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data.tif'
+	file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data.tif'
 	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'float-ortho-poland.tif'
 	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'fva_offset_bug.tif'
 	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data-small.tif'
@@ -88,7 +88,7 @@ def test_file():
 	# file_path = (
 	# 	Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'debugging' / 'ortho_3114_segmentation_error.tif'
 	# )
-	file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'debugging' / '3776_ortho_red.tif'
+	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'debugging' / '3885_ortho_black.tif'
 
 	if not file_path.exists():
 		pytest.skip('Test file not found')
@@ -108,7 +108,7 @@ def cleanup_database(auth_token):
 
 
 @test_environment_only
-@pytest.fixture(scope='session', autouse=True)
+@pytest.fixture(scope='session')
 def data_directory():
 	"""Create and manage the data directory structure for tests"""
 	# Create the data directory structure
