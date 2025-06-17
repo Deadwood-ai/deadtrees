@@ -216,14 +216,19 @@ def _handle_bit_depth_conversion(
 		detected_nodata = find_nodata_value(src, src.count)
 		explicit_nodata = src.nodata
 
-		# Calculate scaling parameters by reading actual data (excluding NaN/nodata)
+		# Calculate scaling parameters by reading from center of image
 		logger.info(
-			'Calculating scaling parameters from actual data',
+			'Calculating scaling parameters from center region',
 			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
 		)
 
-		# Read a sample to calculate min/max excluding NaN and nodata
-		sample_window = rasterio.windows.Window(0, 0, min(1000, src.width), min(1000, src.height))
+		# Sample from center quarter of the image to avoid edge nodata
+		center_x = src.width // 4
+		center_y = src.height // 4
+		center_width = src.width // 2
+		center_height = src.height // 2
+
+		sample_window = rasterio.windows.Window(center_x, center_y, center_width, center_height)
 		sample_data = src.read(window=sample_window)
 
 		# Remove NaN values and any detected nodata for proper min/max calculation
