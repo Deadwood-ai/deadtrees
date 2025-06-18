@@ -1,0 +1,253 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# PostgreSQL MCP Tools Usage Guidelines
+
+## CRITICAL CONSTRAINT: READ-ONLY OPERATIONS ONLY
+⚠️ **NEVER perform write operations (INSERT, UPDATE, DELETE, CREATE, DROP, ALTER) to the database**
+- Only use SELECT, EXPLAIN, and analysis operations
+- This is a strict requirement for data safety
+- Use only read operations like mcp_pg_execute_query with operation="select"/"count"/"exists"
+- Use mcp_pg_manage_schema with operation="get_info" for schema exploration
+
+## Database Schema Exploration
+
+### 1. Get All Tables in Database
+```
+mcp_postgresql-mcp_pg_manage_schema:
+  operation: "get_info"
+  # Returns list of all tables
+```
+
+### 2. Get Detailed Table Information
+```
+mcp_postgresql-mcp_pg_manage_schema:
+  operation: "get_info"
+  tableName: "table_name"
+  # Returns columns, constraints, indexes, data types
+```
+
+### 3. Get Schema for Multiple Tables (Parallel)
+Always run multiple schema queries in parallel for efficiency:
+```
+# Example: Get schema for related tables simultaneously
+- v2_datasets
+- v2_labels  
+- v2_metadata
+- v2_cogs
+- v2_thumbnails
+- v2_logs
+```
+
+## Table Debugging Techniques
+
+### 1. Data Exploration Pattern
+```sql
+-- Check if record exists
+SELECT 1 FROM table_name WHERE id = <value>
+
+-- Get sample data
+SELECT * FROM table_name LIMIT 5
+
+-- Count records
+SELECT COUNT(*) FROM table_name WHERE condition
+
+-- Get specific record
+SELECT * FROM table_name WHERE id = <value>
+```
+
+### 2. Relationship Exploration
+```sql
+-- Join related tables to get complete picture
+SELECT d.*, m.metadata, l.label_data 
+FROM v2_datasets d
+LEFT JOIN v2_metadata m ON d.id = m.dataset_id
+LEFT JOIN v2_labels l ON d.id = l.dataset_id
+WHERE d.id = <dataset_id>
+
+-- Count related records
+SELECT COUNT(*) FROM child_table WHERE parent_id = <value>
+```
+
+### 3. JSON/JSONB Column Analysis
+```sql
+-- Explore JSON structure
+SELECT jsonb_pretty(json_column) FROM table_name WHERE id = <value>
+
+-- Extract specific JSON keys
+SELECT json_column->>'key' FROM table_name
+SELECT json_column->'nested'->'key' FROM table_name
+```
+
+## Common Table Patterns in DeadTrees Database
+
+### Core Dataset Tables
+- **v2_datasets**: Main dataset information (id, file_name, user_id, license, platform, etc.)
+- **v2_metadata**: Geographic and biome metadata (GADM, WWF data)
+- **v2_labels**: Label information (label_source, label_type, label_data, quality)
+- **v2_cogs**: Cloud Optimized GeoTIFF information
+- **v2_thumbnails**: Thumbnail metadata
+- **v2_orthos**: Original orthophoto information
+- **v2_logs**: Processing logs and operations
+- **v2_statuses**: Processing status tracking
+
+### Specialized Tables
+- **v2_deadwood_geometries**: Deadwood detection results (linked via label_id)
+- **v2_forest_cover_geometries**: Forest cover analysis
+- **v2_aois**: Areas of Interest
+- **v2_queue**: Processing queue
+- **user_info**: User profile information
+
+### Legacy Tables
+- **dev_***: Development/testing tables
+- **v1_***: Version 1 legacy tables
+
+## Dataset Investigation Workflow
+
+### Step 1: Verify Dataset Exists
+```sql
+SELECT 1 FROM v2_datasets WHERE id = <dataset_id>
+-- Also check dev_datasets and v1_datasets if needed
+```
+
+### Step 2: Get Core Dataset Information
+```sql
+SELECT * FROM v2_datasets WHERE id = <dataset_id>
+```
+
+### Step 3: Get All Related Information (Parallel Queries)
+```sql
+-- Metadata
+SELECT * FROM v2_metadata WHERE dataset_id = <dataset_id>
+
+-- Labels
+SELECT * FROM v2_labels WHERE dataset_id = <dataset_id>
+
+-- COG info
+SELECT * FROM v2_cogs WHERE dataset_id = <dataset_id>
+
+-- Thumbnails
+SELECT * FROM v2_thumbnails WHERE dataset_id = <dataset_id>
+
+-- Ortho info
+SELECT * FROM v2_orthos WHERE dataset_id = <dataset_id>
+
+-- Processing status
+SELECT * FROM v2_statuses WHERE dataset_id = <dataset_id>
+
+-- Recent logs
+SELECT * FROM v2_logs WHERE dataset_id = <dataset_id> ORDER BY created_at DESC LIMIT 10
+```
+
+### Step 4: Get Geometry Data (if applicable)
+```sql
+-- Deadwood geometries count and area
+SELECT COUNT(*) as geometry_count, SUM(area_m2) as total_area_m2
+FROM v2_deadwood_geometries dg 
+JOIN v2_labels l ON dg.label_id = l.id 
+WHERE l.dataset_id = <dataset_id>
+
+-- Sample geometry (with WKT format)
+SELECT id, area_m2, ST_AsText(geometry) as geometry_wkt, properties
+FROM v2_deadwood_geometries dg
+JOIN v2_labels l ON dg.label_id = l.id
+WHERE l.dataset_id = <dataset_id>
+LIMIT 1
+```
+
+## Debugging Common Issues
+
+### 1. Dataset Not Found
+- Check v2_datasets, dev_datasets, v1_datasets
+- Verify dataset ID format (usually numeric)
+
+### 2. Missing Related Data
+- Check foreign key relationships
+- Look for NULL values in linking columns
+- Verify processing completion status
+
+### 3. JSON/JSONB Analysis
+```sql
+-- Pretty print JSON for readability
+SELECT jsonb_pretty(metadata) FROM v2_metadata WHERE dataset_id = <id>
+
+-- Check for specific keys
+SELECT metadata ? 'biome' as has_biome FROM v2_metadata WHERE dataset_id = <id>
+```
+
+### 4. Geometry Issues
+```sql
+-- Check geometry validity
+SELECT ST_IsValid(geometry) FROM v2_deadwood_geometries WHERE id = <id>
+
+-- Get geometry bounds
+SELECT ST_Extent(geometry) FROM v2_deadwood_geometries dg
+JOIN v2_labels l ON dg.label_id = l.id
+WHERE l.dataset_id = <dataset_id>
+```
+
+## Query Performance Tips
+
+### 1. Use Appropriate Indexes
+- Most tables have indexes on id, dataset_id, user_id, created_at
+- Use EXPLAIN to check query performance
+
+### 2. Limit Large Result Sets
+- Always use LIMIT for exploratory queries
+- Use COUNT(*) to check data volume first
+
+### 3. Parallel Queries
+- Run multiple independent queries simultaneously
+- Don't wait for one result before starting the next query
+
+## Error Handling
+
+### Common Error Patterns
+- Column doesn't exist: Check table schema first
+- Table doesn't exist: Verify table name spelling and version (v1/v2/dev)
+- Permission denied: Ensure read-only operations only
+- Geometry errors: Use ST_IsValid() to check geometry data
+
+### Best Practices
+- Always start with schema exploration
+- Use EXISTS queries before complex JOINs
+- Check for NULL values in critical columns
+- Use jsonb_pretty() for readable JSON output
+
+## Tool Usage Examples
+
+### Schema Exploration
+```
+mcp_postgresql-mcp_pg_manage_schema:
+  operation: "get_info"
+  tableName: "v2_datasets"
+```
+
+### Data Queries
+```
+mcp_postgresql-mcp_pg_execute_query:
+  operation: "select"
+  query: "SELECT * FROM v2_datasets WHERE id = $1"
+  parameters: [3896]
+  limit: 10
+```
+
+### Count Queries
+```
+mcp_postgresql-mcp_pg_execute_query:
+  operation: "count" 
+  query: "SELECT COUNT(*) FROM v2_labels WHERE dataset_id = $1"
+  parameters: [3896]
+```
+
+### Existence Checks
+```
+mcp_postgresql-mcp_pg_execute_query:
+  operation: "exists"
+  query: "SELECT 1 FROM v2_datasets WHERE id = $1"
+  parameters: [3896]
+```
+
+Remember: Always prioritize parallel tool execution when gathering multiple pieces of information simultaneously.
