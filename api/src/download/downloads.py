@@ -29,15 +29,44 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 		else:
 			geom_table = settings.forest_cover_geometries_table
 
-		# Get geometries for this label
-		geom_response = client.table(geom_table).select('*').eq('label_id', label.id).execute()
+		# Get geometries for this label using pagination to handle large datasets
+		all_geometries = []
+		batch_size = 800  # Conservative batch size to avoid memory issues with large geometries
+		offset = 0
 
-		if not geom_response.data:
+		while True:
+			# Fetch geometries in batches
+			geom_response = (
+				client.table(geom_table)
+				.select('*')
+				.eq('label_id', label.id)
+				.range(offset, offset + batch_size - 1)
+				.execute()
+			)
+
+			if not geom_response.data:
+				break
+
+			all_geometries.extend(geom_response.data)
+
+			# If we got fewer than batch_size results, we've reached the end
+			if len(geom_response.data) < batch_size:
+				break
+
+			offset += batch_size
+
+			# Log progress for large datasets
+			if len(all_geometries) % 5000 == 0:
+				logger.info(f'Fetched {len(all_geometries)} geometries for label {label.id}')
+
+		if not all_geometries:
 			raise ValueError(f'No geometries found for label {label.id}')
+
+		logger.info(f'Successfully fetched {len(all_geometries)} geometries for label {label.id}')
 
 		# Create features from geometries
 		features = []
-		for geom in geom_response.data:
+		for geom in all_geometries:
 			# Get properties with a default empty dict and filter out None values
 			geom_properties = geom.get('properties', {}) or {}
 			features.append(
@@ -124,12 +153,38 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 
 
 def get_all_dataset_labels(dataset_id: int) -> List[Label]:
-	"""Get all labels for a dataset"""
+	"""Get all labels for a dataset using pagination"""
 	with use_client() as client:
-		label_response = client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).execute()
-		if not label_response.data:
+		all_labels = []
+		batch_size = 300  # Conservative batch size to avoid memory issues
+		offset = 0
+
+		while True:
+			# Fetch labels in batches
+			label_response = (
+				client.table(settings.labels_table)
+				.select('*')
+				.eq('dataset_id', dataset_id)
+				.range(offset, offset + batch_size - 1)
+				.execute()
+			)
+
+			if not label_response.data:
+				break
+
+			all_labels.extend(label_response.data)
+
+			# If we got fewer than batch_size results, we've reached the end
+			if len(label_response.data) < batch_size:
+				break
+
+			offset += batch_size
+
+		if not all_labels:
 			return []
-		return [Label(**label_data) for label_data in label_response.data]
+
+		logger.info(f'Successfully fetched {len(all_labels)} labels for dataset {dataset_id}')
+		return [Label(**label_data) for label_data in all_labels]
 
 
 def create_labels_geopackages(dataset_id: int) -> Dict[str, Path]:

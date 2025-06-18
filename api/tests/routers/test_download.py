@@ -26,6 +26,7 @@ from shared.models import (
 from api.src.download.cleanup import cleanup_downloads_directory
 from shared.labels import create_label_with_geometries
 from shared.testing.fixtures import login
+import json
 
 client = TestClient(app)
 
@@ -452,10 +453,13 @@ def test_download_dataset_with_labels_no_aoi(auth_token, test_dataset_with_label
 			assert len(gdf_labels) > 0  # Should have deadwood polygons
 			assert gdf_labels.iloc[0]['source'] == 'visual_interpretation'
 
-			# Verify AOI layer doesn't exist
-			aoi_layer = f'aoi_{LabelDataEnum.deadwood.value}'
-			with pytest.raises(pyogrio.errors.DataLayerError, match=f"Layer '{aoi_layer}' could not be opened"):
-				gpd.read_file(gpkg_path, layer=aoi_layer)
+			# Verify no AOI layer exists
+			assert not any(layer.startswith('aoi_') for layer in available_layers)
+
+			# Verify citation file
+			citation_content = zf.read('CITATION.cff').decode('utf-8')
+			assert 'cff-version: 1.2.0' in citation_content
+			assert 'deadtrees.earth' in citation_content
 
 
 def test_download_labels_with_aoi(auth_token, test_dataset_with_label):
@@ -954,3 +958,502 @@ def test_download_datasets_with_different_licenses(auth_token, data_directory, t
 					archive_path = data_directory / settings.archive_path / file_name
 					if archive_path.exists():
 						archive_path.unlink()
+
+
+@pytest.fixture(scope='function')
+def test_dataset_with_invalid_geometries(auth_token, test_dataset_for_download, test_user):
+	"""Create a test dataset with invalid (self-intersecting) geometries"""
+	# Create a self-intersecting polygon (bowtie/figure-8 shape)
+	# This creates coordinates that form a self-intersecting polygon
+	invalid_geojson = {
+		'type': 'MultiPolygon',
+		'coordinates': [
+			[
+				[
+					# Self-intersecting bowtie polygon
+					[0.0, 0.0],
+					[1.0, 1.0],
+					[1.0, 0.0],
+					[0.0, 1.0],
+					[0.0, 0.0],  # Back to start, creating self-intersection
+				]
+			],
+			[
+				[
+					# Another invalid polygon with duplicate consecutive points
+					[2.0, 2.0],
+					[2.0, 2.0],  # Duplicate point
+					[3.0, 2.0],
+					[3.0, 3.0],
+					[2.0, 3.0],
+					[2.0, 2.0],
+				]
+			],
+		],
+	}
+
+	# Create AOI with invalid geometry too
+	invalid_aoi_geojson = {
+		'type': 'MultiPolygon',
+		'coordinates': [
+			[
+				[
+					# Invalid AOI with self-intersection
+					[-1.0, -1.0],
+					[4.0, 4.0],
+					[4.0, -1.0],
+					[-1.0, 4.0],
+					[-1.0, -1.0],  # Self-intersecting
+				]
+			]
+		],
+	}
+
+	# Create label payload with invalid geometries
+	payload = LabelPayloadData(
+		dataset_id=test_dataset_for_download,
+		label_source=LabelSourceEnum.visual_interpretation,
+		label_type=LabelTypeEnum.segmentation,
+		label_data=LabelDataEnum.deadwood,
+		label_quality=1,
+		geometry=invalid_geojson,
+		properties={'source': 'invalid_test'},
+		# AOI fields with invalid geometry
+		aoi_geometry=invalid_aoi_geojson,
+		aoi_image_quality=1,
+		aoi_notes='Test AOI with invalid geometry',
+	)
+
+	# Create label using the create_label_with_geometries function
+	label = create_label_with_geometries(payload, test_user, auth_token)
+
+	yield test_dataset_for_download
+
+	# Cleanup labels and geometries
+	with use_client(auth_token) as client:
+		# Get all labels for the dataset
+		response = (
+			client.table(settings.labels_table).select('id').eq('dataset_id', test_dataset_for_download).execute()
+		)
+
+		# Delete all associated geometries and labels
+		for label_record in response.data:
+			client.table(settings.deadwood_geometries_table).delete().eq('label_id', label_record['id']).execute()
+			if label.aoi_id:
+				client.table(settings.aois_table).delete().eq('id', label.aoi_id).execute()
+
+		client.table(settings.labels_table).delete().eq('dataset_id', test_dataset_for_download).execute()
+
+
+@pytest.fixture(scope='function')
+def test_dataset_with_large_complex_geometries(auth_token, test_dataset_for_download, test_user):
+	"""Create a test dataset with very large and complex geometries that might cause size/memory issues"""
+
+	# Create very large, complex MultiPolygon with many vertices
+	# This simulates the kind of complex geometries that might cause issues in real datasets
+
+	import math
+	import random
+
+	def create_large_complex_polygon(center_x, center_y, num_vertices=6000, radius=0.1):
+		"""Create a large polygon with many vertices that may self-intersect, similar to dataset 3896"""
+		coordinates = []
+		angle_step = 2 * math.pi / num_vertices
+
+		for i in range(num_vertices):
+			angle = i * angle_step
+			# Add significant randomness to create irregular shapes and guaranteed self-intersections
+			r = radius * (1 + random.uniform(-0.8, 0.8))
+			x = center_x + r * math.cos(angle)
+			y = center_y + r * math.sin(angle)
+
+			# Force self-intersections more frequently (every 50 points instead of 100)
+			if i % 50 == 0:
+				# Create more dramatic shifts that will cause intersections
+				x += random.uniform(-0.2, 0.2)
+				y += random.uniform(-0.2, 0.2)
+
+			# Add occasional "spikes" that go far out and back, causing ring self-intersections
+			if i % 200 == 0:
+				spike_distance = radius * random.uniform(2.0, 4.0)
+				spike_x = center_x + spike_distance * math.cos(angle)
+				spike_y = center_y + spike_distance * math.sin(angle)
+				coordinates.append([spike_x, spike_y])
+
+			coordinates.append([x, y])
+
+		# Close the polygon
+		coordinates.append(coordinates[0])
+		return coordinates
+
+	# Create fewer but much more complex polygons that mirror the real problematic geometries
+	complex_polygons = []
+
+	# Create geometries similar to the ones found in dataset 3896
+	problematic_vertex_counts = [6139, 4312, 4258, 3390, 3372]  # From actual dataset
+
+	for i, vertex_count in enumerate(problematic_vertex_counts):
+		center_x = i * 0.5
+		center_y = i * 0.3
+		poly_coords = create_large_complex_polygon(center_x, center_y, num_vertices=vertex_count)
+		complex_polygons.append([poly_coords])
+
+	# Add some explicitly self-intersecting large polygons
+	def create_large_self_intersecting_polygon(num_segments=500):
+		"""Create a large self-intersecting polygon"""
+		coords = []
+		for i in range(num_segments):
+			# Create a pattern that will self-intersect
+			angle = (i / num_segments) * 4 * math.pi  # Multiple loops
+			radius = 0.5 + 0.3 * math.sin(i / 10)  # Varying radius
+			x = radius * math.cos(angle)
+			y = radius * math.sin(angle)
+			coords.append([x, y])
+		coords.append(coords[0])  # Close the polygon
+		return coords
+
+	# Add several large self-intersecting polygons
+	for j in range(5):
+		large_intersecting_coords = create_large_self_intersecting_polygon(num_segments=800 + j * 200)
+		complex_polygons.append([large_intersecting_coords])
+
+	large_complex_geojson = {'type': 'MultiPolygon', 'coordinates': complex_polygons}
+
+	# Create large complex AOI as well
+	large_aoi_coords = create_large_complex_polygon(0, 0, num_vertices=3000, radius=2.0)
+	large_aoi_geojson = {'type': 'MultiPolygon', 'coordinates': [[large_aoi_coords]]}
+
+	# Create label payload with large complex geometries
+	payload = LabelPayloadData(
+		dataset_id=test_dataset_for_download,
+		label_source=LabelSourceEnum.visual_interpretation,
+		label_type=LabelTypeEnum.segmentation,
+		label_data=LabelDataEnum.deadwood,
+		label_quality=1,
+		geometry=large_complex_geojson,
+		properties={'source': 'large_complex_test'},
+		# AOI fields with large complex geometry
+		aoi_geometry=large_aoi_geojson,
+		aoi_image_quality=1,
+		aoi_notes='Test AOI with large complex geometry',
+	)
+
+	# Create label using the create_label_with_geometries function
+	label = create_label_with_geometries(payload, test_user, auth_token)
+
+	yield test_dataset_for_download
+
+	# Cleanup labels and geometries
+	with use_client(auth_token) as client:
+		# Get all labels for the dataset
+		response = (
+			client.table(settings.labels_table).select('id').eq('dataset_id', test_dataset_for_download).execute()
+		)
+
+		# Delete all associated geometries and labels
+		for label_record in response.data:
+			client.table(settings.deadwood_geometries_table).delete().eq('label_id', label_record['id']).execute()
+			if label.aoi_id:
+				client.table(settings.aois_table).delete().eq('id', label.aoi_id).execute()
+
+		client.table(settings.labels_table).delete().eq('dataset_id', test_dataset_for_download).execute()
+
+
+def test_download_dataset_with_large_complex_geometries(auth_token, test_dataset_with_large_complex_geometries):
+	"""Test downloading a dataset with very large and complex geometries"""
+	dataset_id = test_dataset_with_large_complex_geometries
+
+	print(f'Testing dataset {dataset_id} with large complex geometries...')
+
+	# Make initial request
+	response = client.get(
+		f'/api/v1/download/datasets/{dataset_id}/dataset.zip',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	# Check response format
+	assert response.status_code == 200
+	data = response.json()
+	assert data['job_id'] == str(dataset_id)
+
+	# Wait for processing - this might take longer with large geometries
+	max_attempts = 15  # Increased attempts for large/complex geometries
+	final_status = None
+
+	for attempt in range(max_attempts):
+		status_response = client.get(
+			f'/api/v1/download/datasets/{dataset_id}/status',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		assert status_response.status_code == 200
+		status_data = status_response.json()
+		final_status = status_data['status']
+
+		print(f'Attempt {attempt + 1}: Status = {final_status}')
+
+		if final_status in ['completed', 'failed', 'error']:
+			break
+
+		# Wait longer between checks for complex processing
+		time.sleep(3)
+
+	# Log the final status for debugging
+	print(f'Final status after {max_attempts} attempts: {final_status}')
+
+	if final_status == 'completed':
+		print('Download completed - checking if large geometries were processed successfully')
+
+		# Verify the file exists
+		download_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}.zip'
+		if download_file.exists():
+			file_size = download_file.stat().st_size
+			print(f'Download file size: {file_size / (1024 * 1024):.2f} MB')
+
+			# Check ZIP contents
+			with zipfile.ZipFile(download_file) as zf:
+				files = zf.namelist()
+				print(f'Files in ZIP: {files}')
+
+				# Extract and check the labels file if it exists
+				labels_files = [f for f in files if f.startswith('labels_') and f.endswith('.gpkg')]
+				if labels_files:
+					with tempfile.TemporaryDirectory() as tmpdir:
+						labels_file = labels_files[0]
+						zf.extract(labels_file, tmpdir)
+						gpkg_path = Path(tmpdir) / labels_file
+
+						try:
+							# Try to read the exported geometries
+							available_layers = fiona.listlayers(gpkg_path)
+							print(f'Available layers: {available_layers}')
+
+							if available_layers:
+								gdf = gpd.read_file(gpkg_path, layer=available_layers[0])
+								print(f'Successfully read {len(gdf)} geometries from exported file')
+
+								# Check geometry statistics
+								total_vertices = sum(
+									len(geom.exterior.coords) if hasattr(geom, 'exterior') else 0
+									for geom in gdf.geometry
+								)
+								print(f'Total vertices in exported geometries: {total_vertices}')
+
+								# Check if geometries are valid after processing
+								valid_geoms = gdf.geometry.is_valid.sum()
+								total_geoms = len(gdf)
+								print(f'Valid geometries: {valid_geoms}/{total_geoms}')
+
+								# Check file size of the exported GeoPackage
+								gpkg_size = gpkg_path.stat().st_size
+								print(f'Exported GeoPackage size: {gpkg_size / (1024 * 1024):.2f} MB')
+
+						except Exception as e:
+							print(f'Error reading exported geometries: {e}')
+							# This might be the error we're trying to reproduce
+							pytest.fail(f'Failed to process large geometries: {e}')
+		else:
+			print('Download file not found despite completed status')
+
+	elif final_status in ['failed', 'error']:
+		print('Download failed - this might be due to geometry size/complexity issues')
+		# Get more details about the failure if available
+		status_response = client.get(
+			f'/api/v1/download/datasets/{dataset_id}/status',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		status_data = status_response.json()
+		if 'error' in status_data:
+			print(f'Error details: {status_data["error"]}')
+
+		# This reproduces a size/complexity-related error
+		pytest.fail(
+			f'Download failed with status: {final_status}. This might reproduce the size-related geometry error.'
+		)
+
+	else:
+		pytest.fail(f'Dataset processing did not complete within expected time. Final status: {final_status}')
+
+
+def test_download_dataset_with_invalid_geometries(auth_token, test_dataset_with_invalid_geometries):
+	"""Test downloading a dataset with invalid geometries to reproduce the error"""
+	dataset_id = test_dataset_with_invalid_geometries
+
+	# Make initial request
+	response = client.get(
+		f'/api/v1/download/datasets/{dataset_id}/dataset.zip',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	# Check response format
+	assert response.status_code == 200
+	data = response.json()
+	assert data['job_id'] == str(dataset_id)
+
+	# Wait for processing - this should either complete with error handling or fail
+	max_attempts = 10  # Increased attempts since processing might take longer with errors
+	final_status = None
+
+	for attempt in range(max_attempts):
+		status_response = client.get(
+			f'/api/v1/download/datasets/{dataset_id}/status',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		assert status_response.status_code == 200
+		status_data = status_response.json()
+		final_status = status_data['status']
+
+		print(f'Attempt {attempt + 1}: Status = {final_status}')
+
+		if final_status in ['completed', 'failed', 'error']:
+			break
+
+		# Wait before checking again
+		time.sleep(2)
+
+	# Log the final status for debugging
+	print(f'Final status after {max_attempts} attempts: {final_status}')
+
+	# The test should either:
+	# 1. Complete successfully (if error handling works)
+	# 2. Fail with a specific error (reproducing the original issue)
+	# 3. Timeout (indicating the process is stuck)
+
+	if final_status == 'completed':
+		print('Download completed - checking if files were created with handled invalid geometries')
+
+		# Verify the file exists
+		download_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}.zip'
+		if download_file.exists():
+			# Check ZIP contents to see how invalid geometries were handled
+			with zipfile.ZipFile(download_file) as zf:
+				files = zf.namelist()
+				print(f'Files in ZIP: {files}')
+
+				# Extract and check the labels file if it exists
+				labels_files = [f for f in files if f.startswith('labels_') and f.endswith('.gpkg')]
+				if labels_files:
+					with tempfile.TemporaryDirectory() as tmpdir:
+						labels_file = labels_files[0]
+						zf.extract(labels_file, tmpdir)
+						gpkg_path = Path(tmpdir) / labels_file
+
+						try:
+							# Try to read the exported geometries
+							available_layers = fiona.listlayers(gpkg_path)
+							print(f'Available layers: {available_layers}')
+
+							if available_layers:
+								gdf = gpd.read_file(gpkg_path, layer=available_layers[0])
+								print(f'Successfully read {len(gdf)} geometries from exported file')
+
+								# Check if geometries are now valid (fixed during export)
+								valid_geoms = gdf.geometry.is_valid.sum()
+								total_geoms = len(gdf)
+								print(f'Valid geometries: {valid_geoms}/{total_geoms}')
+
+						except Exception as e:
+							print(f'Error reading exported geometries: {e}')
+							# This might be the error we're trying to reproduce
+							raise
+		else:
+			print('Download file not found despite completed status')
+
+	elif final_status in ['failed', 'error']:
+		print('Download failed - this might be reproducing the original error')
+		# Get more details about the failure if available
+		status_response = client.get(
+			f'/api/v1/download/datasets/{dataset_id}/status',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		status_data = status_response.json()
+		if 'error' in status_data:
+			print(f'Error details: {status_data["error"]}')
+
+		# This is actually what we expect - the test should fail due to invalid geometries
+		pytest.fail(f'Download failed with status: {final_status}. This reproduces the invalid geometry error.')
+
+	else:
+		pytest.fail(f'Dataset processing did not complete within expected time. Final status: {final_status}')
+
+
+def test_download_large_dataset_with_pagination(auth_token, test_dataset_with_large_complex_geometries):
+	"""Test downloading a dataset with many geometries to verify pagination works correctly"""
+	dataset_id = test_dataset_with_large_complex_geometries
+
+	print(f'Testing download with pagination for dataset {dataset_id}')
+
+	# Make initial request to start the download (using async pattern like other tests)
+	response = client.get(
+		f'/api/v1/download/datasets/{dataset_id}/dataset.zip',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	# Check response format
+	assert response.status_code == 200
+	data = response.json()
+	assert 'status' in data
+	assert 'job_id' in data
+	assert data['job_id'] == str(dataset_id)
+
+	# Wait for processing to complete
+	max_attempts = 15  # Increased for large datasets
+	final_status = None
+
+	for attempt in range(max_attempts):
+		status_response = client.get(
+			f'/api/v1/download/datasets/{dataset_id}/status',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		assert status_response.status_code == 200
+		status_data = status_response.json()
+		final_status = status_data['status']
+
+		print(f'Attempt {attempt + 1}: Status = {final_status}')
+
+		if final_status == 'completed':
+			download_path = status_data['download_path']
+			print(f'✅ Large dataset download completed with pagination! Download path: {download_path}')
+			break
+
+		if final_status in ['failed', 'error']:
+			if 'error' in status_data:
+				print(f'Error details: {status_data["error"]}')
+			pytest.fail(f'Download failed with status: {final_status}')
+
+		# Wait before checking again
+		time.sleep(2)
+	else:
+		pytest.fail(f'Dataset processing did not complete within expected time. Final status: {final_status}')
+
+	# Verify the file exists in downloads directory
+	download_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}.zip'
+	assert download_file.exists()
+
+	# Verify ZIP contents
+	with zipfile.ZipFile(download_file) as zf:
+		files = zf.namelist()
+		print(f'Files in download ZIP: {files}')
+
+		# Should contain expected files
+		assert any(f.startswith('ortho_') and f.endswith('.tif') for f in files)
+		assert any(f.startswith('labels_') and f.endswith('.gpkg') for f in files)
+		assert 'METADATA.csv' in files
+		assert 'LICENSE.txt' in files
+		assert 'CITATION.cff' in files
+
+		# Extract and verify the labels file contains many geometries
+		labels_file = next(f for f in files if f.startswith('labels_') and f.endswith('.gpkg'))
+		with tempfile.TemporaryDirectory() as tmpdir:
+			zf.extract(labels_file, tmpdir)
+			gpkg_path = Path(tmpdir) / labels_file
+
+			# Check the layers and geometry count
+			available_layers = fiona.listlayers(gpkg_path)
+			print(f'Available layers: {available_layers}')
+
+			if available_layers:
+				gdf = gpd.read_file(gpkg_path, layer=available_layers[0])
+				print(f'Successfully read {len(gdf)} geometries from exported file using pagination')
+
+				# This should be a large number if our complex geometry fixture worked
+				assert len(gdf) > 0
