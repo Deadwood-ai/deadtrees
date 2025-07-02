@@ -11,9 +11,11 @@ alwaysApply: false
 - Running tests or debugging test failures
 - Working with CLI commands or container orchestration
 - Troubleshooting development environment issues
+- Implementing real data testing patterns
 
 ## 🎯 **CORE PRINCIPLE**
 **ALWAYS use `deadtrees` CLI commands. NEVER run pytest directly - always use `deadtrees dev test` commands.**
+**Use real data and fixtures instead of mocking for geospatial and utility functions.**
 
 ## ⚡ **ESSENTIAL COMMANDS**
 
@@ -21,13 +23,14 @@ alwaysApply: false
 ```bash
 deadtrees dev start                    # Start development environment
 deadtrees dev stop                     # Stop all containers
-deadtrees dev start --force-rebuild   # Force rebuild containers
+deadtrees dev start --force-rebuild   # Force rebuild containers (after dependency changes)
 ```
 
 ### Testing
 ```bash
 deadtrees dev test api                 # Run API tests
 deadtrees dev test processor           # Run processor tests
+deadtrees dev test processor --test-path=processor/tests/utils/test_phenology.py  # Specific test file
 deadtrees dev debug api               # Debug with breakpoints
 deadtrees dev debug api --test-path=specific_test.py  # Debug specific test
 ```
@@ -35,7 +38,7 @@ deadtrees dev debug api --test-path=specific_test.py  # Debug specific test
 ### Environment Setup
 ```bash
 supabase db reset                      # Reset database (always run before tests)
-make download-assets                   # Download test data
+make download-assets                   # Download test data and geospatial assets
 make symlinks                          # Create legacy symlinks
 ```
 
@@ -67,11 +70,69 @@ pytest -m comprehensive
 pytest -m "slow and comprehensive"
 ```
 
+### Real Data Testing (Preferred Pattern)
+```python
+# Use real geographic coordinates and datasets
+TEST_POINTS_WITH_DATA = [
+    # Black Forest, Germany (temperate forest)
+    (48.0, 8.0),
+    # Eastern Canada (temperate forest)  
+    (45.0, -75.0),
+    # Northern Michigan, USA (temperate forest)
+    (45.8, -84.5),
+    # Central Europe (temperate)
+    (50.0, 10.0),
+]
+
+# Test points where no data should exist (ocean locations)
+TEST_POINTS_NO_DATA = [
+    # Atlantic Ocean
+    (30.0, -30.0),
+    # Pacific Ocean  
+    (0.0, -150.0),
+    # Southern Ocean
+    (-30.0, 150.0),
+]
+
+@pytest.mark.parametrize('lat,lon', TEST_POINTS_WITH_DATA)
+def test_utility_function_with_data(lat, lon):
+    """Test utility function for locations with expected data."""
+    result = get_data_for_location(lat, lon)
+    
+    if result is not None:  # Some locations might not have data
+        assert isinstance(result, list)
+        assert len(result) == EXPECTED_LENGTH
+        assert all(isinstance(val, int) for val in result)
+        assert all(0 <= val <= MAX_VALUE for val in result)
+        # Should have some variation (not all same values)
+        assert len(set(result)) > 1
+
+@pytest.mark.parametrize('lat,lon', TEST_POINTS_NO_DATA)
+def test_utility_function_no_data(lat, lon):
+    """Test utility function for ocean locations (should return None)."""
+    result = get_data_for_location(lat, lon)
+    # Ocean locations should return None (no data)
+    assert result is None
+```
+
 ### Test Structure
 ```python
 @pytest.fixture
 def sample_dataset():
     return Dataset(id=1, name="test_dataset")
+
+@pytest.fixture
+def metadata_task(test_dataset_for_processing, test_processor_user):
+    """Create a metadata task for testing"""
+    return QueueTask(
+        id=1,
+        dataset_id=test_dataset_for_processing,
+        user_id=test_processor_user,
+        task_types=[TaskTypeEnum.metadata],
+        priority=1,
+        is_processing=False,
+        current_position=0,
+    )
 
 @pytest.mark.slow
 def test_comprehensive_processing():
@@ -82,6 +143,29 @@ def test_comprehensive_processing():
 def test_full_pipeline():
     """Comprehensive end-to-end test"""
     pass
+```
+
+### Integration Testing Pattern
+```python
+def test_metadata_processing_integration(metadata_task, auth_token):
+    """Test that new metadata is properly integrated."""
+    # Process metadata
+    process_metadata(metadata_task, settings.processing_path)
+    
+    # Verify metadata was saved
+    with use_client(auth_token) as client:
+        response = client.table(settings.metadata_table).select('*').eq('dataset_id', metadata_task.dataset_id).execute()
+        
+    assert response.data
+    metadata = response.data[0]['metadata']
+    
+    # Check if new metadata was included (conditional - depends on data availability)
+    if MetadataType.NEW_TYPE in metadata:
+        new_metadata = metadata[MetadataType.NEW_TYPE]
+        assert 'data_field' in new_metadata
+        assert len(new_metadata['data_field']) == EXPECTED_LENGTH
+        assert new_metadata['source'] == 'Expected Source'
+        assert new_metadata['version'] == '1.0'
 ```
 
 ### Authentication Testing
@@ -111,6 +195,23 @@ def test_processor_trigger_handling():
     # Should not be empty - indicates trigger fired correctly
     history = get_edit_history(dataset_id) 
     assert len(history) > 0, "Processor user should trigger audit logging"
+```
+
+### Missing Dependencies After Rebuild
+```bash
+# If new dependencies added to requirements.txt
+deadtrees dev start --force-rebuild  # Force rebuild to install new packages
+
+# Check if scientific computing packages installed
+docker-compose -f docker-compose.test.yaml exec processor-test python -c "import xarray, zarr, numpy; print('Dependencies OK')"
+```
+
+### Path Resolution Issues
+```python
+# Always use settings.base_path for asset paths
+DATASET_PATH = settings.base_path / "assets" / "data" / "dataset.zarr"
+
+# Not: hardcoded paths like Path("/app/assets/...")
 ```
 
 ### Container State Issues
@@ -154,18 +255,87 @@ def debug_database_state():
         print(f"Datasets with errors: {[d['dataset_id'] for d in errors.data]}")
 ```
 
+### Real Data Validation
+```python
+def test_real_data_accessibility():
+    """Verify real datasets are accessible for testing"""
+    dataset_path = settings.base_path / "assets" / "data" / "dataset.zarr"
+    assert dataset_path.exists(), f"Test dataset not found at {dataset_path}"
+    
+    # Test data access
+    import xarray as xr
+    ds = xr.open_zarr(dataset_path)
+    assert 'data_variable' in ds.variables, "Expected data variable not found"
+```
+
 ## 📁 **TEST DATA MANAGEMENT**
 ```
-assets/test_data/debugging/testcases/
-├── small/          # Small test files for comprehensive testing
-└── original/       # Original large test files
+assets/
+├── test_data/debugging/testcases/
+│   ├── small/          # Small test files for comprehensive testing
+│   └── original/       # Original large test files
+├── pheno/              # Phenology datasets
+│   └── modispheno_aggregated_normalized.zarr/
+├── gadm/               # GADM administrative boundaries
+└── biom/               # Biome classification data
 ```
 
 ### Asset Commands
 ```bash
-make download-assets    # Download required assets
+make download-assets    # Download required assets (GADM, biome, phenology data)
 make symlinks          # Create legacy compatibility links  
 make clean             # Clean downloaded assets
+```
+
+### Asset Verification
+```bash
+# Verify assets are downloaded correctly
+ls -la assets/pheno/modispheno_aggregated_normalized.zarr/
+ls -la assets/gadm/gadm_410.gpkg
+ls -la assets/biom/terres_ecosystems.gpkg
+```
+
+## ⚠️ **ANTI-PATTERNS TO AVOID**
+
+### ❌ Don't Mock Geospatial Functions
+```python
+# BAD: Mocking geospatial data access
+@patch('processor.src.utils.phenology.xr.open_zarr')
+def test_phenology_with_mock(mock_open_zarr):
+    mock_ds = MagicMock()
+    mock_ds.sel.return_value.data.values = [1, 2, 3]
+    # This doesn't test real coordinate transformation or data access
+```
+
+### ✅ Do Use Real Data Testing
+```python
+# GOOD: Testing with real coordinates and datasets
+def test_phenology_with_real_data():
+    """Test phenology retrieval for Black Forest coordinates"""
+    lat, lon = 48.0, 8.0  # Real coordinates
+    result = get_phenology_curve(lat, lon)
+    
+    if result is not None:
+        assert len(result) == 365
+        assert all(0 <= val <= 255 for val in result)
+```
+
+### ❌ Don't Use Hardcoded Paths
+```python
+# BAD: Hardcoded paths
+DATASET_PATH = Path("/app/assets/pheno/modispheno_aggregated_normalized.zarr")
+
+# GOOD: Use settings
+DATASET_PATH = settings.base_path / "assets" / "pheno" / "modispheno_aggregated_normalized.zarr"
+```
+
+### ❌ Don't Run pytest Directly
+```bash
+# BAD: Direct pytest
+pytest processor/tests/
+
+# GOOD: Use CLI
+deadtrees dev test processor
 ```
 
 ## 🎯 **BEST PRACTICES**
@@ -174,3 +344,8 @@ make clean             # Clean downloaded assets
 3. **Test both authentication patterns** (regular user + processor)
 4. **Mark slow tests** with `@pytest.mark.slow`
 5. **Clean up test data** after test runs
+6. **Use real data testing** for geospatial and utility functions
+7. **Force rebuild** after adding new dependencies
+8. **Use parametrized tests** with real coordinates
+9. **Test graceful degradation** for optional data sources
+10. **Verify asset availability** before running tests that depend on external datasets
