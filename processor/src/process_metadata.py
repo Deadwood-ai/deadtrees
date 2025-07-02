@@ -13,12 +13,14 @@ from shared.models import (
 	AdminBoundariesMetadata,
 	Ortho,
 	BiomeMetadata,
+	PhenologyMetadata,
 )
 from shared.logger import logger
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
 from .utils.admin_levels import get_admin_tags
 from shared.logging import LogContext, LogCategory
 from .utils.biome import get_biome_data
+from .utils.phenology import get_phenology_metadata
 
 
 def process_metadata(task: QueueTask, temp_dir: Path):
@@ -81,12 +83,37 @@ def process_metadata(task: QueueTask, temp_dir: Path):
 		biome_name, biome_id = get_biome_data(bbox_centroid)
 		biome_metadata = BiomeMetadata(biome_name=biome_name, biome_id=biome_id)
 
-		# Create metadata entry with both GADM and biome data
+		# Get phenology data
+		logger.info(
+			'Processing phenology metadata',
+			LogContext(
+				category=LogCategory.METADATA,
+				dataset_id=task.dataset_id,
+				user_id=task.user_id,
+				token=token,
+				extra={'bbox_centroid': bbox_centroid},
+			),
+		)
+
+		phenology_metadata = get_phenology_metadata(
+			lat=bbox_centroid[1],  # latitude
+			lon=bbox_centroid[0],  # longitude
+		)
+
+		# Create metadata entry with GADM, biome, and phenology data
 		runtime = time.time() - t1
+
+		metadata_dict = {
+			MetadataType.GADM: admin_metadata.model_dump(),
+			MetadataType.BIOME: biome_metadata.model_dump(),
+		}
+
+		if phenology_metadata:
+			metadata_dict[MetadataType.PHENOLOGY] = phenology_metadata.model_dump()
 
 		metadata = DatasetMetadata(
 			dataset_id=task.dataset_id,
-			metadata={MetadataType.GADM: admin_metadata.model_dump(), MetadataType.BIOME: biome_metadata.model_dump()},
+			metadata=metadata_dict,
 			version=1,
 			processing_runtime=runtime,
 		)

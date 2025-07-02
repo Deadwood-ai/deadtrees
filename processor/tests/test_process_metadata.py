@@ -48,6 +48,24 @@ def test_process_metadata_success(metadata_task, auth_token):
 		assert gadm_metadata['source'] == 'GADM'
 		assert gadm_metadata['version'] == '4.1.0'
 
+		# Verify biome metadata
+		assert MetadataType.BIOME in metadata['metadata']
+		biome_metadata = metadata['metadata'][MetadataType.BIOME]
+		assert isinstance(biome_metadata, dict)
+		assert 'biome_name' in biome_metadata
+		assert 'biome_id' in biome_metadata
+		assert biome_metadata['source'] == 'WWF Terrestrial Ecoregions'
+		assert biome_metadata['version'] == '2.0'
+
+		# Check if phenology metadata was included (optional - depends on data availability)
+		if MetadataType.PHENOLOGY in metadata['metadata']:
+			phenology_metadata = metadata['metadata'][MetadataType.PHENOLOGY]
+			assert isinstance(phenology_metadata, dict)
+			assert 'phenology_curve' in phenology_metadata
+			assert len(phenology_metadata['phenology_curve']) == 365
+			assert phenology_metadata['source'] == 'MODIS Phenology'
+			assert phenology_metadata['version'] == '1.0'
+
 		# Verify other fields
 		assert 'version' in metadata
 		assert metadata['processing_runtime'] > 0
