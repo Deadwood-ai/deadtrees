@@ -1,0 +1,133 @@
+---
+description: Dataset investigation and MCP database debugging workflows
+globs: 
+alwaysApply: false
+---
+# Data Debugging & Dataset Investigation
+
+## 📋 **WHEN TO USE THIS RULE**
+**Agent should request this rule when:**
+- Investigating failed or problematic datasets (like dataset 3904)
+- Debugging data processing pipeline issues
+- Using MCP tools to examine production database
+- Analyzing dataset status, errors, or processing failures
+
+## 🎯 **CORE PRINCIPLE**
+**ALWAYS use MCP tools for production database investigation. NEVER use deadtrees CLI for database connections.**
+
+## ⚡ **QUICK START: Essential Investigation Query**
+```sql
+-- Run this FIRST for any dataset issue
+SELECT 
+  d.id, d.file_name, d.created_at,
+  s.current_status, s.has_error, s.error_message,
+  s.is_upload_done, s.is_ortho_done, s.is_cog_done, 
+  s.is_thumbnail_done, s.is_deadwood_done, s.is_forest_cover_done
+FROM v2_datasets d 
+JOIN v2_statuses s ON d.id = s.dataset_id 
+WHERE d.id = ?;
+```
+
+## 🔧 **MCP INVESTIGATION TOOLS**
+```bash
+# Essential MCP commands
+mcp_deadtrees-prod_execute_sql           # Query database
+mcp_deadtrees-prod_get_object_details    # Table schema
+mcp_deadtrees-prod_explain_query         # Performance analysis
+mcp_deadtrees-prod_analyze_db_health     # System health
+```
+
+## 🚨 **COMMON ISSUE PATTERNS**
+
+### File Corruption (Dataset 3904, Issue #194)
+**Symptoms:** Tiny file sizes vs large dimensions, `has_error: true` with `error_message: null`
+```sql
+-- Check file size anomalies
+SELECT dataset_id, ortho_file_size,
+  ortho_info->'Profile'->>'Width' as width,
+  ortho_info->'Profile'->>'Height' as height,
+  ortho_file_size::float / ((ortho_info->'Profile'->>'Width')::int * (ortho_info->'Profile'->>'Height')::int) as bytes_per_pixel
+FROM v2_orthos WHERE dataset_id = ?;
+```
+
+### Missing CRS (Issue #184)
+**Symptoms:** "No CRS found" errors, stuck in `ortho_processing`
+```sql
+-- Check CRS information
+SELECT dataset_id, ortho_info->'GEO'->>'CRS' as crs
+FROM v2_orthos WHERE dataset_id = ?;
+```
+
+### Segmentation Failures (Issue #161)
+**Symptoms:** `_TIFFPartialReadStripArray` errors, `IReadBlock failed`
+```sql
+-- Check segmentation results
+SELECT l.id, l.dataset_id, COUNT(dg.id) as geometry_count
+FROM v2_labels l 
+LEFT JOIN v2_deadwood_geometries dg ON l.id = dg.label_id 
+WHERE l.dataset_id = ? GROUP BY l.id;
+```
+
+## 📝 **5-STEP INVESTIGATION WORKFLOW**
+
+### 1. Dataset Overview
+```sql
+SELECT d.*, s.current_status, s.has_error, s.error_message
+FROM v2_datasets d JOIN v2_statuses s ON d.id = s.dataset_id 
+WHERE d.id = ?;
+```
+
+### 2. File Analysis
+```sql
+SELECT dataset_id, ortho_file_size, ortho_info->'COG_errors' as errors
+FROM v2_orthos WHERE dataset_id = ?;
+```
+
+### 3. Processing Results
+```sql
+SELECT dataset_id, cog_file_size, thumbnail_file_size
+FROM v2_cogs c JOIN v2_thumbnails t USING(dataset_id) 
+WHERE dataset_id = ?;
+```
+
+### 4. Error Analysis
+```sql
+SELECT level, message, created_at, category
+FROM v2_logs WHERE dataset_id = ? AND level = 'ERROR'
+ORDER BY created_at DESC LIMIT 10;
+```
+
+### 5. System Health
+```bash
+# Use MCP tool
+mcp_deadtrees-prod_analyze_db_health: health_type="all"
+```
+
+## 🔧 **EMERGENCY PROCEDURES**
+```sql
+-- Reset stuck dataset (with proper authorization)
+UPDATE v2_statuses 
+SET current_status = 'idle', has_error = false 
+WHERE dataset_id = ? AND current_status != 'idle';
+
+-- Remove from processing queue
+DELETE FROM v2_queue WHERE dataset_id = ?;
+```
+
+## 📊 **MONITORING QUERIES**
+```sql
+-- Find stuck processing (> 1 hour)
+SELECT d.id, d.file_name, s.current_status, 
+  EXTRACT(EPOCH FROM (NOW() - s.updated_at))/3600 as hours_stuck
+FROM v2_datasets d JOIN v2_statuses s ON d.id = s.dataset_id 
+WHERE s.current_status != 'idle' 
+AND s.updated_at < NOW() - INTERVAL '1 hour';
+
+-- Error rate summary
+SELECT 
+  COUNT(*) FILTER (WHERE has_error = true) as error_count,
+  COUNT(*) as total_count,
+  ROUND(100.0 * COUNT(*) FILTER (WHERE has_error = true) / COUNT(*), 2) as error_rate
+FROM v2_statuses s JOIN v2_datasets d ON s.dataset_id = d.id
+WHERE d.created_at > NOW() - INTERVAL '24 hours';
+``` 

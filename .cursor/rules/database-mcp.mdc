@@ -1,0 +1,196 @@
+---
+description: Database operations, MCP tools, and migration management
+globs: 
+alwaysApply: false
+---
+# Database Operations & MCP Tools
+
+## 📋 **WHEN TO USE THIS RULE**
+**Agent should request this rule when:**
+- Working with database schema or migrations
+- Using MCP tools for database investigation
+- Setting up database connections or authentication
+- Troubleshooting database-related issues
+
+## 🎯 **CORE PRINCIPLES**
+- **MCP for Investigation**: Use MCP tools for all production database exploration
+- **Direct Connection (5432)** for migrations and administrative operations
+- **Pooler Connection (6543)** for application runtime connections
+- **Dual Authentication**: Handle both regular users and processor user patterns
+
+## ⚡ **ESSENTIAL MCP TOOLS**
+```bash
+# Core MCP commands
+mcp_deadtrees-prod_execute_sql           # Run queries
+mcp_deadtrees-prod_list_schemas          # List schemas
+mcp_deadtrees-prod_list_objects          # List tables/views
+mcp_deadtrees-prod_get_object_details    # Table structure
+mcp_deadtrees-prod_explain_query         # Query performance
+mcp_deadtrees-prod_analyze_db_health     # System health
+```
+
+## 🗄️ **DATABASE STRUCTURE**
+
+### Table Naming Convention
+```sql
+-- Current production tables
+v2_datasets, v2_statuses, v2_logs, v2_orthos, v2_cogs
+v2_thumbnails, v2_metadata, v2_labels, v2_deadwood_geometries
+
+-- Legacy (deprecated)
+v1_* tables
+
+-- Development/testing
+dev_* tables
+```
+
+### Environment Configuration
+```python
+# Development
+SUPABASE_URL = "http://host.docker.internal:54321"
+SUPABASE_KEY = "dev_key"
+
+# Production (via environment variables)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+```
+
+## 🔐 **DUAL AUTHENTICATION PATTERN**
+
+### Database Functions
+```sql
+-- Handle both regular users and processor user
+DECLARE
+  current_user_id uuid;
+BEGIN
+  IF (auth.jwt() ->> 'email'::text) = 'processor@deadtrees.earth'::text THEN
+    -- Processor user: lookup by email
+    SELECT id INTO current_user_id FROM auth.users WHERE email = 'processor@deadtrees.earth';
+  ELSE
+    -- Regular users: use auth.uid()
+    current_user_id := auth.uid();
+  END IF;
+END;
+```
+
+### RLS Policy Pattern
+```sql
+-- Standard pattern for processor + user access
+using (((auth.jwt() ->> 'email'::text) = 'processor@deadtrees.earth'::text) OR (auth.uid() = user_id))
+```
+
+## 🔧 **MIGRATION WORKFLOWS**
+
+### Connection Management
+```bash
+# Migrations: ALWAYS use direct connection (port 5432)
+supabase migration up --db-url 'postgresql://user:pass@host:5432/postgres'
+
+# Runtime: Use pooler connection (port 6543)
+# Application connections via SUPABASE_URL
+```
+
+### View Dependencies
+```sql
+-- When altering columns referenced by views:
+-- 1. Drop dependent views first
+drop view if exists "public"."dependent_view";
+
+-- 2. Alter column types  
+alter table "public"."table" alter column "col" type new_type;
+
+-- 3. Recreate views with complete definitions
+create or replace view "public"."dependent_view" as 
+SELECT col1, col2, col3 FROM table WHERE condition;
+```
+
+### Common Migration Commands
+```bash
+# Debug migrations
+supabase migration up --debug --db-url 'postgresql://...:5432/postgres'
+
+# Reset local database for testing
+supabase db reset
+
+# Test migrations
+deadtrees dev test api
+```
+
+## 🚨 **ERROR CODE REFERENCE**
+
+### Common Issues & Solutions
+```bash
+# SQLSTATE 42P05: Prepared statement exists
+# Solution: Use direct connection (port 5432) instead of pooler
+
+# SQLSTATE 0A000: View dependency conflict  
+# Solution: Drop views before altering referenced columns
+
+# SQLSTATE 42703: Column doesn't exist
+# Solution: Check migration sequence and dependencies
+
+# SQLSTATE 42P07: Object already exists
+# Solution: Use IF NOT EXISTS or OR REPLACE
+```
+
+## 🔄 **TRIGGER PATTERNS**
+
+### Edit History Triggers
+```sql
+CREATE OR REPLACE FUNCTION log_changes() RETURNS trigger AS $$
+DECLARE
+  current_user_id uuid;
+BEGIN
+  -- Handle dual authentication
+  IF (auth.jwt() ->> 'email'::text) = 'processor@deadtrees.earth'::text THEN
+    SELECT id INTO current_user_id FROM auth.users WHERE email = 'processor@deadtrees.earth';
+  ELSE
+    current_user_id := auth.uid();
+  END IF;
+  
+  -- Only proceed if we have a valid user
+  IF current_user_id IS NOT NULL THEN
+    INSERT INTO v2_dataset_edit_history (dataset_id, user_id, changes)
+    VALUES (NEW.id, current_user_id, jsonb_build_object('action', 'update'));
+  END IF;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+```
+
+## 📊 **DATABASE OPERATIONS**
+
+### Connection Patterns
+```python
+from supabase import create_client
+
+# Standard connection
+client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Query with error handling
+try:
+    result = client.table("v2_datasets").select("*").eq("id", dataset_id).execute()
+    return result.data[0] if result.data else None
+except Exception as e:
+    logger.error(f"Database query failed: {e}")
+    raise
+```
+
+### Health Monitoring
+```sql
+-- Check database health via MCP
+-- mcp_deadtrees-prod_analyze_db_health: health_type="all"
+
+-- Check table sizes
+SELECT schemaname, tablename, 
+  pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size
+FROM pg_tables WHERE schemaname = 'public' ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+```
+
+## 🎯 **BEST PRACTICES**
+1. **Use MCP tools** for all production database investigation
+2. **Use direct connection (5432)** for migrations and admin operations  
+3. **Test dual authentication** in all database functions and triggers
+4. **Drop views before** altering referenced columns
+5. **Always include complete view definitions** in migrations

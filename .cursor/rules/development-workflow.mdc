@@ -1,0 +1,176 @@
+---
+description: Development environment management and testing workflows
+globs: 
+alwaysApply: false
+---
+# Development Workflow & Testing
+
+## 📋 **WHEN TO USE THIS RULE**
+**Agent should request this rule when:**
+- Setting up or managing development environment
+- Running tests or debugging test failures
+- Working with CLI commands or container orchestration
+- Troubleshooting development environment issues
+
+## 🎯 **CORE PRINCIPLE**
+**ALWAYS use `deadtrees` CLI commands. NEVER run pytest directly - always use `deadtrees dev test` commands.**
+
+## ⚡ **ESSENTIAL COMMANDS**
+
+### Environment Management
+```bash
+deadtrees dev start                    # Start development environment
+deadtrees dev stop                     # Stop all containers
+deadtrees dev start --force-rebuild   # Force rebuild containers
+```
+
+### Testing
+```bash
+deadtrees dev test api                 # Run API tests
+deadtrees dev test processor           # Run processor tests
+deadtrees dev debug api               # Debug with breakpoints
+deadtrees dev debug api --test-path=specific_test.py  # Debug specific test
+```
+
+### Environment Setup
+```bash
+supabase db reset                      # Reset database (always run before tests)
+make download-assets                   # Download test data
+make symlinks                          # Create legacy symlinks
+```
+
+## 🐳 **CONTAINER SERVICES**
+```yaml
+# docker-compose.test.yaml services
+api-test:         # Port 8017, Debug 5679
+processor-test:   # Debug 5678, GPU support  
+nginx:           # Port 8080, SSH 2222
+```
+
+**Debug Ports:**
+- API: 5679
+- Processor: 5678  
+- CLI: 5680
+
+## 🧪 **TESTING PATTERNS**
+
+### Test Execution
+```bash
+# Default (excludes slow tests)
+deadtrees dev test api
+
+# Include comprehensive tests
+deadtrees dev test api --include-comprehensive
+
+# Specific test categories
+pytest -m comprehensive
+pytest -m "slow and comprehensive"
+```
+
+### Test Structure
+```python
+@pytest.fixture
+def sample_dataset():
+    return Dataset(id=1, name="test_dataset")
+
+@pytest.mark.slow
+def test_comprehensive_processing():
+    """Marked as slow for optional execution"""
+    pass
+
+@pytest.mark.comprehensive  
+def test_full_pipeline():
+    """Comprehensive end-to-end test"""
+    pass
+```
+
+### Authentication Testing
+```python
+def test_regular_user_operations():
+    """Test with standard authenticated user"""
+    user_token = login(TEST_USER_EMAIL, TEST_USER_PASSWORD)
+    # Test with auth.uid() pattern
+    
+def test_processor_user_operations():
+    """Test with processor user (email-based auth)"""
+    processor_token = login(PROCESSOR_USERNAME, PROCESSOR_PASSWORD)
+    # Test with auth.jwt() email pattern
+```
+
+## 🚨 **COMMON TEST FAILURES**
+
+### Database Trigger Issues
+```python
+# Issue: auth.uid() returns NULL for processor user
+# Solution: Check trigger handles dual authentication
+
+def test_processor_trigger_handling():
+    processor_token = login(PROCESSOR_USERNAME, PROCESSOR_PASSWORD)
+    result = update_dataset_with_token(processor_token, dataset_id, changes)
+    
+    # Should not be empty - indicates trigger fired correctly
+    history = get_edit_history(dataset_id) 
+    assert len(history) > 0, "Processor user should trigger audit logging"
+```
+
+### Container State Issues
+```bash
+# Reset test environment
+deadtrees dev stop
+deadtrees dev start
+
+# Check logs
+docker-compose -f docker-compose.test.yaml logs api-test
+docker-compose -f docker-compose.test.yaml logs processor-test
+```
+
+## 🔧 **DEBUGGING WORKFLOWS**
+
+### Failed Tests
+```bash
+# Get detailed output
+deadtrees dev test api 2>&1 | tee test_output.log
+
+# Debug specific test
+deadtrees dev debug api --test-path=path/to/failing_test.py
+
+# Connect to container
+docker-compose -f docker-compose.test.yaml exec api-test bash
+```
+
+### Database State Debugging
+```python
+def debug_database_state():
+    """Helper for debugging database issues during tests"""
+    datasets = client.table('v2_datasets').select('*').execute()
+    statuses = client.table('v2_statuses').select('*').execute()
+    
+    print(f"Datasets: {len(datasets.data)}")
+    print(f"Statuses: {len(statuses.data)}")
+    
+    # Check for errors
+    errors = client.table('v2_statuses').select('*').eq('has_error', True).execute()
+    if errors.data:
+        print(f"Datasets with errors: {[d['dataset_id'] for d in errors.data]}")
+```
+
+## 📁 **TEST DATA MANAGEMENT**
+```
+assets/test_data/debugging/testcases/
+├── small/          # Small test files for comprehensive testing
+└── original/       # Original large test files
+```
+
+### Asset Commands
+```bash
+make download-assets    # Download required assets
+make symlinks          # Create legacy compatibility links  
+make clean             # Clean downloaded assets
+```
+
+## 🎯 **BEST PRACTICES**
+1. **Always reset database** before running tests (`supabase db reset`)
+2. **Use CLI commands** for all development tasks
+3. **Test both authentication patterns** (regular user + processor)
+4. **Mark slow tests** with `@pytest.mark.slow`
+5. **Clean up test data** after test runs

@@ -1,0 +1,312 @@
+---
+description: Essential programming standards, API patterns, and error handling
+globs: 
+alwaysApply: false
+---
+# Code Standards & Best Practices
+
+## 📋 **WHEN TO USE THIS RULE**
+**Agent should request this rule when:**
+- Writing or reviewing Python code
+- Building FastAPI endpoints or services
+- Implementing error handling and logging
+- Working with data models or validation
+
+## 🎯 **CORE PRINCIPLES**
+- **Functional Programming**: Prefer functions over classes where possible
+- **Type Safety**: Use Pydantic models and comprehensive type hints
+- **Error-First Design**: Handle errors at function entry, use early returns
+- **RORO Pattern**: Receive an Object, Return an Object
+- **Async-First**: Use async/await for I/O operations, sync for CPU-bound
+
+## 📝 **PYTHON STANDARDS**
+
+### Code Style
+```python
+# PEP 8 with project settings: max line length 120, single quotes, tabs
+from typing import Optional, List, Dict, Any
+from pydantic import BaseModel
+
+def process_dataset(dataset_id: int, options: Optional[Dict[str, Any]] = None) -> ProcessingResult:
+    """Process dataset with optional configuration."""
+    # Error handling first
+    if dataset_id <= 0:
+        raise ValueError("Dataset ID must be positive")
+    
+    if not dataset_exists(dataset_id):
+        raise DatasetNotFoundError(f"Dataset {dataset_id} not found")
+    
+    # Happy path
+    return perform_processing(dataset_id, options or {})
+```
+
+### Type Hints & Validation
+```python
+from pydantic import BaseModel, Field
+from typing import Optional, List
+
+class DatasetRequest(BaseModel):
+    file_name: str = Field(..., min_length=1)
+    user_id: str = Field(..., description="User UUID")
+    metadata: Optional[Dict[str, Any]] = None
+
+class ProcessingResponse(BaseModel):
+    success: bool
+    dataset_id: Optional[int] = None
+    error_message: Optional[str] = None
+```
+
+### Error Handling Pattern
+```python
+# Custom exception hierarchy
+class DeadTreesError(Exception):
+    """Base exception for DeadTrees operations"""
+    pass
+
+class DatasetNotFoundError(DeadTreesError):
+    """Dataset does not exist"""
+    pass
+
+class ProcessingError(DeadTreesError):
+    """Processing operation failed"""
+    pass
+
+# Error-first function design
+def process_file(file_path: str) -> ProcessingResult:
+    # Validate inputs first
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+    
+    if not file_path.endswith(('.tif', '.tiff')):
+        raise ValueError("Only TIFF files are supported")
+    
+    # Process with structured error handling
+    try:
+        result = perform_processing(file_path)
+        return ProcessingResult(success=True, result=result)
+    except Exception as e:
+        logger.error(f"Processing failed for {file_path}: {e}")
+        raise ProcessingError(f"Failed to process {file_path}") from e
+```
+
+## 🚀 **FASTAPI PATTERNS**
+
+### Endpoint Structure
+```python
+from fastapi import FastAPI, HTTPException, Depends
+from pydantic import BaseModel
+
+app = FastAPI()
+
+@app.post("/datasets", response_model=DatasetResponse)
+async def create_dataset(request: DatasetRequest) -> DatasetResponse:
+    """Create new dataset with validation."""
+    # Input validation (automatic via Pydantic)
+    # Additional validation if needed
+    if not await user_exists(request.user_id):
+        raise HTTPException(status_code=400, detail="Invalid user ID")
+    
+    # Business logic
+    try:
+        dataset = await create_dataset_record(request)
+        return DatasetResponse(success=True, dataset_id=dataset.id)
+    except Exception as e:
+        logger.error(f"Dataset creation failed: {e}")
+        raise HTTPException(status_code=500, detail="Dataset creation failed")
+```
+
+### Async/Sync Patterns
+```python
+# Use async for I/O-bound operations
+async def fetch_dataset(dataset_id: int) -> Dataset:
+    """Fetch dataset from database."""
+    async with get_db_client() as client:
+        result = await client.table('v2_datasets').select('*').eq('id', dataset_id).execute()
+        return Dataset(**result.data[0]) if result.data else None
+
+# Use sync for CPU-bound operations  
+def process_image(image_data: bytes) -> ProcessedImage:
+    """Process image data synchronously."""
+    # CPU-intensive image processing
+    return perform_image_processing(image_data)
+```
+
+### Error Response Structure
+```python
+# Consistent error responses
+@app.exception_handler(DeadTreesError)
+async def deadtrees_error_handler(request: Request, exc: DeadTreesError):
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": {
+                "code": exc.__class__.__name__,
+                "message": str(exc)
+            }
+        }
+    )
+```
+
+## 📊 **STRUCTURED LOGGING**
+
+### Logging Pattern
+```python
+from shared.logging import UnifiedLogger, LogContext, LogCategory
+
+logger = UnifiedLogger()
+
+def process_dataset(dataset_id: int, user_id: str) -> ProcessingResult:
+    context = LogContext(
+        category=LogCategory.PROCESS,
+        dataset_id=dataset_id,
+        user_id=user_id
+    )
+    
+    logger.info("Processing started", context=context)
+    
+    try:
+        result = perform_processing(dataset_id)
+        logger.info("Processing completed", context=context.with_extra({
+            'processing_time': result.processing_time,
+            'output_size': result.output_size
+        }))
+        return result
+    except Exception as e:
+        logger.error("Processing failed", context=context.with_extra({
+            'error_type': type(e).__name__,
+            'error_details': str(e)
+        }))
+        raise
+```
+
+### Log Categories
+```python
+from enum import Enum
+
+class LogCategory(Enum):
+    UPLOAD = "upload"
+    PROCESS = "process"
+    COG = "cog"
+    THUMBNAIL = "thumbnail"
+    METADATA = "metadata"
+    DEADWOOD = "deadwood"
+```
+
+## 🔄 **RESOURCE MANAGEMENT**
+
+### Context Managers
+```python
+from contextlib import contextmanager
+import tempfile
+import shutil
+
+@contextmanager
+def temporary_directory():
+    """Context manager for temporary directory cleanup."""
+    temp_dir = tempfile.mkdtemp()
+    try:
+        yield temp_dir
+    finally:
+        shutil.rmtree(temp_dir)
+
+# Database connections
+@contextmanager
+async def database_transaction():
+    """Async context manager for database transactions."""
+    async with get_db_client() as client:
+        transaction = await client.begin()
+        try:
+            yield client
+            await transaction.commit()
+        except Exception:
+            await transaction.rollback()
+            raise
+```
+
+### Memory Management
+```python
+def process_large_file_in_chunks(file_path: str, chunk_size: int = 8192) -> Iterator[bytes]:
+    """Process large files in memory-efficient chunks."""
+    with open(file_path, 'rb') as f:
+        while chunk := f.read(chunk_size):
+            yield chunk
+```
+
+## 📚 **CONFIGURATION MANAGEMENT**
+
+### Settings Pattern
+```python
+from pydantic_settings import BaseSettings
+from typing import Optional
+
+class Settings(BaseSettings):
+    # Database
+    supabase_url: str
+    supabase_key: str
+    
+    # Processing  
+    max_concurrent_tasks: int = 2
+    processing_timeout: int = 3600
+    
+    # Development
+    debug_mode: bool = False
+    log_level: str = "INFO"
+    
+    # Optional
+    logfire_token: Optional[str] = None
+    
+    class Config:
+        env_file = ".env"
+        case_sensitive = False
+
+# Global settings instance
+settings = Settings()
+```
+
+## 📋 **DOCUMENTATION STANDARDS**
+
+### Docstring Format
+```python
+def process_geospatial_data(
+    input_path: str, 
+    output_path: str, 
+    options: Optional[ProcessingOptions] = None
+) -> ProcessingResult:
+    """Process geospatial data with specified options.
+    
+    Args:
+        input_path: Path to input geospatial file
+        output_path: Path where processed file will be saved
+        options: Optional processing configuration
+        
+    Returns:
+        ProcessingResult containing operation details and metrics
+        
+    Raises:
+        FileNotFoundError: If input file doesn't exist
+        ValidationError: If input file format is invalid
+        ProcessingError: If processing operation fails
+    """
+    pass
+```
+
+## 🎯 **BEST PRACTICES SUMMARY**
+
+### Code Quality
+1. **Use comprehensive type hints** for all function signatures
+2. **Implement error-first design** with early returns
+3. **Use Pydantic models** for data validation and configuration
+4. **Follow PEP 8** with project-specific formatting rules
+5. **Write descriptive docstrings** with examples and error documentation
+
+### Performance  
+1. **Use async/await** for I/O-bound operations
+2. **Process large files in chunks** to manage memory
+3. **Use context managers** for resource cleanup
+4. **Implement proper connection pooling** for external services
+
+### Error Handling
+1. **Create custom exception hierarchies** for domain-specific errors
+2. **Use structured logging** with LogContext for all operations
+3. **Distinguish between temporary and permanent errors**
+4. **Handle resource cleanup** properly in error scenarios
