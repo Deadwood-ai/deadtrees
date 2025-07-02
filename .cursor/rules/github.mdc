@@ -1,0 +1,209 @@
+---
+description: GitHub CLI & Issue Management
+globs: 
+alwaysApply: false
+---
+github
+
+GitHub CLI workflows, issue management, and project operations
+
+# GitHub CLI & Issue Management
+
+## 📋 **WHEN TO USE THIS RULE**
+**Agent should request this rule when:**
+- Managing GitHub issues, pull requests, or projects
+- Using GitHub CLI for repository operations
+- Working with the Deadwood-ai organization
+- Automating GitHub workflows via command line
+
+## 🎯 **CORE PRINCIPLES**
+- **Primary Repository**: `Deadwood-ai/deadtrees` is the main project repository
+- **Organization Focus**: All work centers around the Deadwood-ai organization
+- **CLI-First Approach**: Use GitHub CLI for efficiency and automation
+- **Project Integration**: Always connect issues to the "Deadtrees.earth" project
+
+## ⚡ **ESSENTIAL GITHUB CLI COMMANDS**
+
+### Authentication & Setup
+```bash
+# Initial authentication
+gh auth login
+
+# Refresh authentication with required scopes
+gh auth refresh -s project,read:project
+
+# Check authentication status
+gh auth status
+```
+
+### Issue Management
+```bash
+# Search for issues with specific terms
+gh issue list --repo Deadwood-ai/deadtrees --search "phenology" --state all
+gh issue list --repo Deadwood-ai/deadtrees --search "metadata" --state all
+
+# View detailed issue information
+gh issue view 163 --repo Deadwood-ai/deadtrees
+gh issue view 163 --repo Deadwood-ai/deadtrees --comments
+
+# Create new issue
+gh issue create --repo Deadwood-ai/deadtrees --title "Issue Title" --body "Issue description"
+
+# Edit existing issue
+gh issue edit 163 --repo Deadwood-ai/deadtrees --add-assignee @me
+gh issue edit 163 --repo Deadwood-ai/deadtrees --add-label "high-priority"
+gh issue edit 163 --repo Deadwood-ai/deadtrees --milestone "v1.0"
+
+# Close/reopen issues
+gh issue close 163 --repo Deadwood-ai/deadtrees
+gh issue reopen 163 --repo Deadwood-ai/deadtrees
+```
+
+### Project Management
+```bash
+# List available projects
+gh project list --owner Deadwood-ai
+
+# Add issue to project (Project #5 = "Deadtrees.earth")
+gh project item-add 5 --owner Deadwood-ai --url https://github.com/Deadwood-ai/deadtrees/issues/163
+
+# List project fields and their IDs
+gh project field-list 5 --owner Deadwood-ai
+
+# Edit project item properties
+gh project item-edit --project-id PVT_kwDOCXGnk84A2rfH --id ITEM_ID --field-id FIELD_ID --single-select-option-id OPTION_ID
+```
+
+### Repository Operations
+```bash
+# Clone the main repository
+gh repo clone Deadwood-ai/deadtrees
+
+# List repository information
+gh repo view Deadwood-ai/deadtrees
+
+# Create pull request
+gh pr create --repo Deadwood-ai/deadtrees --title "PR Title" --body "PR description"
+
+# View pull requests
+gh pr list --repo Deadwood-ai/deadtrees
+gh pr view PR_NUMBER --repo Deadwood-ai/deadtrees
+```
+
+## 🏗️ **DEADWOOD PROJECT STRUCTURE**
+
+### Main Repository
+- **Deadwood-ai/deadtrees**: Primary FastAPI application for deadwood backend
+- **45+ Open Issues**: Active development with metadata, phenology, and processing issues
+- **Technologies**: FastAPI, Python, Docker, Supabase
+- **Key Areas**: API, Processor, Shared components
+
+### Project Organization
+```
+Project: "Deadtrees.earth" (ID: 5)
+├── Priority Field: Available for issue prioritization
+├── Status Field: Track progress states
+├── Assignees: Team member assignments
+└── Labels: Categorization and filtering
+```
+
+## 🔧 **COMMON WORKFLOWS**
+
+### Adding New Issues to Project
+```bash
+# 1. Create issue
+gh issue create --repo Deadwood-ai/deadtrees --title "New Feature" --body "Description"
+
+# 2. Assign to yourself
+gh issue edit ISSUE_NUMBER --repo Deadwood-ai/deadtrees --add-assignee @me
+
+# 3. Add to project
+gh project item-add 5 --owner Deadwood-ai --url https://github.com/Deadwood-ai/deadtrees/issues/ISSUE_NUMBER
+
+# 4. Set priority (requires project item ID)
+# gh project item-edit --project-id PVT_kwDOCXGnk84A2rfH --id ITEM_ID --field-id PRIORITY_FIELD_ID --single-select-option-id HIGH_PRIORITY_ID
+```
+
+### Phenology Issue Management
+```bash
+# Search for phenology-related issues
+gh issue list --repo Deadwood-ai/deadtrees --search "phenology OR metadata OR season" --state all
+
+# View current phenology issue (#163)
+gh issue view 163 --repo Deadwood-ai/deadtrees --comments
+
+# Track related metadata issues
+gh issue list --repo Deadwood-ai/deadtrees --search "metadata" --state open
+```
+
+### Daily Issue Management
+```bash
+# Check assigned issues
+gh issue list --repo Deadwood-ai/deadtrees --assignee @me --state open
+
+# Check recent activity
+gh issue list --repo Deadwood-ai/deadtrees --limit 10
+
+# View project board
+gh project view 5 --owner Deadwood-ai
+```
+
+## 📊 **KEY PROJECT IDENTIFIERS**
+
+### Repository
+- **Org**: Deadwood-ai
+- **Repo**: deadtrees
+- **Full Name**: Deadwood-ai/deadtrees
+
+### Project Information
+- **Project Name**: "Deadtrees.earth"
+- **Project Number**: 5
+- **Project ID**: PVT_kwDOCXGnk84A2rfH
+
+### Important Issue Examples
+- **#163**: Phenology metadata integration (active, high priority)
+- **#153**: Disturbance causes metadata
+- **#68**: Acquisition date hour metadata
+- **#69**: Metadata export functionality
+
+## 🚨 **AUTHENTICATION TROUBLESHOOTING**
+
+### Common Authentication Issues
+```bash
+# Missing project scopes
+gh auth refresh -s project
+
+# Missing read permissions
+gh auth refresh -s read:project
+
+# Full scope refresh (use carefully)
+gh auth refresh -s repo,project,read:project,workflow
+```
+
+### Error Messages & Solutions
+```bash
+# "your authentication token is missing required scopes [project]"
+# Solution: gh auth refresh -s project
+
+# "your authentication token is missing required scopes [read:project]"
+# Solution: gh auth refresh -s read:project
+
+# "The scopes requested are invalid: write:project"
+# Solution: Use 'project' scope instead of 'write:project'
+```
+
+## 🎯 **BEST PRACTICES**
+1. **Always specify repository**: Use `--repo Deadwood-ai/deadtrees` for clarity
+2. **Use issue numbers**: Reference issues by number for traceability
+3. **Assign yourself**: Use `--add-assignee @me` for personal issues
+4. **Add to project**: Connect all issues to the main project for visibility
+5. **Search effectively**: Use multiple search terms for comprehensive results
+6. **Check authentication**: Verify scopes before running project commands
+7. **Document decisions**: Use issue comments to track discussion and decisions
+
+## 🔗 **INTEGRATION WITH DEVELOPMENT WORKFLOW**
+- **Issues drive development**: All work should be tied to GitHub issues
+- **Project board visibility**: Use the project board for sprint planning
+- **CLI automation**: Leverage GitHub CLI for repetitive tasks
+- **Cross-reference**: Link issues to commits, PRs, and other issues
+- **Milestone tracking**: Use milestones for release planning 
