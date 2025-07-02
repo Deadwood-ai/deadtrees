@@ -419,6 +419,7 @@ class ForestCoverGeometry(BaseModel):
 class MetadataType(str, Enum):
 	GADM = 'gadm'
 	BIOME = 'biome'
+	PHENOLOGY = 'phenology'
 	# Add more types as needed
 
 
@@ -439,6 +440,22 @@ class BiomeMetadata(BaseModel):
 	biome_id: Optional[int] = None
 	source: str = 'WWF Terrestrial Ecoregions'
 	version: str = '2.0'  # WWF Ecoregions version
+
+
+class PhenologyMetadata(BaseModel):
+	"""Structure for MODIS phenology metadata"""
+
+	phenology_curve: List[int]  # 365-day array (0-255 values)
+	source: str = 'MODIS Phenology'
+	version: str = '1.0'
+
+	@field_validator('phenology_curve')
+	@classmethod
+	def validate_curve_length(cls, v: List[int]) -> List[int]:
+		"""Validate phenology curve has exactly 365 values"""
+		if not v or len(v) != 365:
+			raise ValueError('Phenology curve must have exactly 365 values')
+		return v
 
 
 class DatasetMetadata(BaseModel):

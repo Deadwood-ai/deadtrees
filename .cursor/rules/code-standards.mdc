@@ -11,6 +11,7 @@ alwaysApply: false
 - Building FastAPI endpoints or services
 - Implementing error handling and logging
 - Working with data models or validation
+- Adding new metadata types or geospatial processing
 
 ## 🎯 **CORE PRINCIPLES**
 - **Functional Programming**: Prefer functions over classes where possible
@@ -18,6 +19,7 @@ alwaysApply: false
 - **Error-First Design**: Handle errors at function entry, use early returns
 - **RORO Pattern**: Receive an Object, Return an Object
 - **Async-First**: Use async/await for I/O operations, sync for CPU-bound
+- **Real Data Testing**: Use real datasets and fixtures, avoid mocking where possible
 
 ## 📝 **PYTHON STANDARDS**
 
@@ -87,6 +89,125 @@ def process_file(file_path: str) -> ProcessingResult:
     except Exception as e:
         logger.error(f"Processing failed for {file_path}: {e}")
         raise ProcessingError(f"Failed to process {file_path}") from e
+```
+
+
+
+### Dataset Access Pattern
+```python
+import xarray as xr
+from pathlib import Path
+
+def get_dataset_path() -> Path:
+    """Get dataset path with existence validation."""
+    dataset_path = settings.base_path / "assets" / "data" / "dataset.zarr"
+    if not dataset_path.exists():
+        raise FileNotFoundError(f'Dataset not found at {dataset_path}')
+    return dataset_path
+
+```
+
+## 📊 **METADATA EXTENSION PATTERN**
+
+### Adding New Metadata Types
+```python
+# 1. Add to MetadataType enum
+class MetadataType(str, Enum):
+    GADM = 'gadm'
+    BIOME = 'biome'
+    PHENOLOGY = 'phenology'  # New type
+    
+# 2. Create metadata model with validation
+class NewMetadata(BaseModel):
+    """Structure for new metadata type"""
+    data_field: List[int]
+    source: str = 'Data Source'
+    version: str = '1.0'
+    
+    @field_validator('data_field')
+    @classmethod
+    def validate_data(cls, v: List[int]) -> List[int]:
+        """Custom validation logic"""
+        if not v or len(v) != EXPECTED_LENGTH:
+            raise ValueError("Data must have expected length")
+        return v
+
+# 3. Create utility functions
+def get_new_metadata(lat: float, lon: float) -> Optional[NewMetadata]:
+    """Get new metadata for location."""
+    data = get_data_for_location(lat, lon)
+    return NewMetadata(data_field=data) if data else None
+
+# 4. Integrate into metadata processing
+def process_metadata(task: QueueTask, temp_dir: Path):
+    # ... existing processing ...
+    
+    # Add new metadata type
+    new_metadata = get_new_metadata(lat=bbox_centroid[1], lon=bbox_centroid[0])
+    
+    metadata_dict = {
+        MetadataType.GADM: admin_metadata.model_dump(),
+        MetadataType.BIOME: biome_metadata.model_dump()
+    }
+    
+    # Conditional inclusion
+    if new_metadata:
+        metadata_dict[MetadataType.NEW_TYPE] = new_metadata.model_dump()
+```
+
+## 🧪 **TESTING PATTERNS**
+
+### Real Data Testing (Preferred over Mocking)
+```python
+# Use real datasets and coordinates
+TEST_POINTS_WITH_DATA = [
+    (48.0, 8.0, "Black Forest, Germany"),
+    (45.0, -75.0, "Eastern Canada"),
+    (35.0, -120.0, "California"),
+]
+
+TEST_POINTS_NO_DATA = [
+    (30.0, -30.0, "Atlantic Ocean"),
+    (0.0, -150.0, "Pacific Ocean"),
+]
+
+@pytest.mark.parametrize('lat,lon,location', TEST_POINTS_WITH_DATA)
+def test_data_retrieval_with_real_coordinates(lat, lon, location):
+    """Test data retrieval for real geographic locations."""
+    result = get_data_for_location(lat, lon)
+    
+    if result is not None:
+        assert isinstance(result, list)
+        assert len(result) == EXPECTED_LENGTH
+        assert all(isinstance(val, int) for val in result)
+        assert all(0 <= val <= MAX_VALUE for val in result)
+        
+@pytest.mark.parametrize('lat,lon,location', TEST_POINTS_NO_DATA)  
+def test_data_retrieval_no_data_locations(lat, lon, location):
+    """Test graceful handling of locations without data."""
+    result = get_data_for_location(lat, lon)
+    assert result is None, f"Should return None for {location}"
+```
+
+### Integration Testing Pattern
+```python
+def test_metadata_processing_integration(metadata_task, auth_token):
+    """Test that new metadata is properly integrated."""
+    # Process metadata
+    process_metadata(metadata_task, settings.processing_path)
+    
+    # Verify database storage
+    with use_client(auth_token) as client:
+        response = client.table(settings.metadata_table).select('*').eq('dataset_id', metadata_task.dataset_id).execute()
+        
+    metadata = response.data[0]['metadata']
+    
+    # Check new metadata type (conditional)
+    if MetadataType.NEW_TYPE in metadata:
+        new_data = metadata[MetadataType.NEW_TYPE]
+        assert 'data_field' in new_data
+        assert len(new_data['data_field']) == EXPECTED_LENGTH
+        assert new_data['source'] == 'Expected Source'
 ```
 
 ## 🚀 **FASTAPI PATTERNS**
@@ -298,6 +419,19 @@ def process_geospatial_data(
 3. **Use Pydantic models** for data validation and configuration
 4. **Follow PEP 8** with project-specific formatting rules
 5. **Write descriptive docstrings** with examples and error documentation
+
+### Geospatial & Scientific Data
+1. **Use real data testing** instead of mocking for geospatial functions
+2. **Handle coordinate transformations** explicitly with proper CRS definitions
+3. **Implement graceful degradation** for optional data sources
+4. **Use parametrized tests** with real geographic coordinates
+5. **Validate data length and ranges** for scientific datasets
+
+### Metadata Extension
+1. **Follow the 4-step pattern** for adding new metadata types
+2. **Use conditional inclusion** for optional metadata
+3. **Implement proper validation** in Pydantic models
+4. **Test integration** with the full metadata processing pipeline
 
 ### Performance  
 1. **Use async/await** for I/O-bound operations

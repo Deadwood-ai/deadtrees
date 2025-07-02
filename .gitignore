@@ -3,6 +3,8 @@ assets/*
 api/tests/test_data/*
 processor/src/deadwood_segmentation/models/*
 
+/scratchpad/*
+
 #logs for scripts
 scripts/logs/*
 scripts/area_m2_update.sh
