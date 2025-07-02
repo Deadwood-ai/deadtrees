@@ -124,10 +124,14 @@ def cleanup_database(auth_token):
 		client.table(settings.logs_table).delete().neq('id', 1).execute()
 
 
-@test_environment_only
 @pytest.fixture(scope='session')
 def data_directory():
 	"""Create and manage the data directory structure for tests"""
+	# Ensure test environment before proceeding
+	from .safety import ensure_test_environment
+
+	ensure_test_environment()
+
 	# Create the data directory structure
 	data_dir = Path(settings.BASE_DIR)
 	archive_dir = data_dir / settings.ARCHIVE_DIR
