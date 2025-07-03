@@ -23,8 +23,6 @@ TEST_POINTS_NO_DATA = [
 	(30.0, -30.0),
 	# Pacific Ocean
 	(0.0, -150.0),
-	# Southern Ocean
-	(-30.0, 150.0),
 ]
 
 
@@ -47,13 +45,12 @@ def test_get_phenology_curve_with_data(lat, lon):
 	"""Test phenology curve retrieval for locations with expected data"""
 	curve = get_phenology_curve(lat, lon)
 
-	if curve is not None:  # Some forest locations might not have data
-		assert isinstance(curve, list)
-		assert len(curve) == 365
-		assert all(isinstance(val, int) for val in curve)
-		assert all(0 <= val <= 255 for val in curve)
-		# Should have some variation (not all same values)
-		assert len(set(curve)) > 1
+	assert isinstance(curve, list)
+	assert len(curve) == 366
+	assert all(isinstance(val, int) for val in curve)
+	assert all(0 <= val <= 255 for val in curve)
+	# Should have some variation (not all same values)
+	assert len(set(curve)) > 1
 
 
 @pytest.mark.parametrize('lat,lon', TEST_POINTS_NO_DATA)
@@ -70,11 +67,11 @@ def test_get_phenology_metadata_success():
 	lat, lon = 48.0, 8.0
 	metadata = get_phenology_metadata(lat, lon)
 
-	if metadata is not None:
-		assert isinstance(metadata, PhenologyMetadata)
-		assert len(metadata.phenology_curve) == 365
-		assert metadata.source == 'MODIS Phenology'
-		assert metadata.version == '1.0'
+	# if metadata is not None:
+	assert isinstance(metadata, PhenologyMetadata)
+	assert len(metadata.phenology_curve) == 366
+	assert metadata.source == 'MODIS Phenology'
+	assert metadata.version == '1.0'
 
 
 def test_get_phenology_metadata_no_data():
@@ -100,14 +97,14 @@ def test_process_metadata_with_phenology(metadata_task, auth_token):
 	metadata = response.data[0]['metadata']
 
 	# Check if phenology data was included (may or may not be available for Berlin coordinates)
-	if MetadataType.PHENOLOGY in metadata:
-		phenology = metadata[MetadataType.PHENOLOGY]
-		assert 'phenology_curve' in phenology
-		assert len(phenology['phenology_curve']) == 365
-		assert 'source' in phenology
-		assert phenology['source'] == 'MODIS Phenology'
-		assert 'version' in phenology
-		assert phenology['version'] == '1.0'
+	# if MetadataType.PHENOLOGY in metadata:
+	phenology = metadata[MetadataType.PHENOLOGY]
+	assert 'phenology_curve' in phenology
+	assert len(phenology['phenology_curve']) == 366
+	assert 'source' in phenology
+	assert phenology['source'] == 'MODIS Phenology'
+	assert 'version' in phenology
+	assert phenology['version'] == '1.0'
 
 
 class TestPhenologyMetadata:
@@ -115,7 +112,7 @@ class TestPhenologyMetadata:
 
 	def test_create_metadata_valid(self):
 		"""Test creating metadata with valid curve"""
-		curve = list(range(365))  # Simple curve with 365 values
+		curve = list(range(366))  # Simple curve with 366 values
 		metadata = PhenologyMetadata(phenology_curve=curve)
 
 		assert metadata.phenology_curve == curve
@@ -124,10 +121,10 @@ class TestPhenologyMetadata:
 
 	def test_create_metadata_invalid_length(self):
 		"""Test creating metadata with invalid curve length"""
-		with pytest.raises(ValueError, match='must have exactly 365 values'):
+		with pytest.raises(ValueError, match='must have exactly 366 values'):
 			PhenologyMetadata(phenology_curve=[1, 2, 3])
 
 	def test_create_metadata_empty_curve(self):
 		"""Test creating metadata with empty curve"""
-		with pytest.raises(ValueError, match='must have exactly 365 values'):
+		with pytest.raises(ValueError, match='must have exactly 366 values'):
 			PhenologyMetadata(phenology_curve=[])

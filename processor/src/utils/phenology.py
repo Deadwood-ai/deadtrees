@@ -8,7 +8,6 @@ from shared.models import PhenologyMetadata
 from shared.settings import settings
 
 # Dataset path
-PHENOLOGY_PATH = settings.base_path / 'assets' / 'pheno' / 'modispheno_aggregated_normalized.zarr'
 
 # MODIS Sinusoidal projection
 MODIS_CRS = crs.CRS.from_string("""PROJCS["unnamed",
@@ -26,11 +25,12 @@ UNIT["Meter",1]]""")
 
 def get_phenology_path() -> Path:
 	"""Get phenology data path, checking if it exists"""
-	if not PHENOLOGY_PATH.exists():
+
+	if not Path(settings.PHENOLOGY_DATA_PATH).exists():
 		raise FileNotFoundError(
-			f'Phenology data file not found at {PHENOLOGY_PATH}. Please ensure the dataset is available.'
+			f'Phenology data file not found at {settings.PHENOLOGY_DATA_PATH}. Please ensure the dataset is available.'
 		)
-	return PHENOLOGY_PATH
+	return Path(settings.PHENOLOGY_DATA_PATH)
 
 
 def get_phenology_curve(lat: float, lon: float) -> Optional[List[int]]:
@@ -42,7 +42,7 @@ def get_phenology_curve(lat: float, lon: float) -> Optional[List[int]]:
 	    lon: Longitude in decimal degrees
 
 	Returns:
-	    List of 365 integers (0-255) or None if no data available
+	    List of 366 integers (0-255) or None if no data available
 	"""
 	try:
 		# Transform lat/lon to MODIS coordinates
@@ -52,11 +52,11 @@ def get_phenology_curve(lat: float, lon: float) -> Optional[List[int]]:
 		ds = xr.open_zarr(get_phenology_path())
 
 		# Get the nearest pixel
-		ds_nearest = ds.sel(x=x[0], y=y[0], method='nearest')
+		ds_nearest = ds.sel(x=x, y=y, method='nearest')
 
 		# Extract phenology data
-		pheno = ds_nearest.phenology.values
-		is_nan = ds_nearest.nan_mask.values
+		pheno = ds_nearest.phenology.values[0][0]
+		is_nan = ds_nearest.nan_mask.values[0][0]
 
 		if is_nan:
 			logger.debug(f'No phenology data available for coordinates ({lat}, {lon})')
@@ -65,7 +65,7 @@ def get_phenology_curve(lat: float, lon: float) -> Optional[List[int]]:
 		# Convert to list of integers
 		phenology_curve = pheno.astype(int).tolist()
 
-		if len(phenology_curve) != 365:
+		if len(phenology_curve) != 366:
 			logger.warning(f'Unexpected phenology curve length: {len(phenology_curve)}')
 			return None
 

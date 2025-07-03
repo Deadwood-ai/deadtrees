@@ -452,9 +452,9 @@ class PhenologyMetadata(BaseModel):
 	@field_validator('phenology_curve')
 	@classmethod
 	def validate_curve_length(cls, v: List[int]) -> List[int]:
-		"""Validate phenology curve has exactly 365 values"""
-		if not v or len(v) != 365:
-			raise ValueError('Phenology curve must have exactly 365 values')
+		"""Validate phenology curve has exactly 366 values"""
+		if not v or len(v) != 366:
+			raise ValueError('Phenology curve must have exactly 366 values')
 		return v
 
 

@@ -66,6 +66,8 @@ class Settings(BaseSettings):
 		14: 'Mangroves',
 	}
 
+	PHENOLOGY_DATA_PATH: str = str(Path('/app/assets/pheno/modispheno_aggregated_normalized.zarr'))
+
 	# directly specify the locations for several files
 	ARCHIVE_DIR: str = 'archive'
 	COG_DIR: str = 'cogs'
