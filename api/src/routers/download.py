@@ -1,5 +1,5 @@
 import asyncio
-from typing import Callable
+from typing import Callable, Optional
 from enum import Enum, auto
 import tempfile
 from pathlib import Path
@@ -8,7 +8,7 @@ import shutil
 import zipfile
 import io
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response, Header
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -21,6 +21,7 @@ from shared.settings import settings
 from api.src.download.downloads import bundle_dataset, label_to_geopackage, create_citation_file
 from shared.db import use_client
 from shared.logger import logger
+from api.src.auth.dataset_access import check_dataset_access
 
 # first approach to implement a rate limit
 CONNECTED_IPS = {}
@@ -38,7 +39,7 @@ download_app.add_middleware(
 	allow_origins=['*'],
 	allow_credentials=False,
 	allow_methods=['OPTIONS', 'GET'],
-	allow_headers=['Content-Type', 'Accept', 'Accept-Encoding'],
+	allow_headers=['Content-Type', 'Accept', 'Accept-Encoding', 'Authorization'],
 )
 
 
@@ -100,22 +101,19 @@ class DownloadStatus(BaseModel):
 
 # Updated download route with background processing
 @download_app.get('/datasets/{dataset_id}/dataset.zip', response_model=DownloadStatus)
-async def download_dataset(dataset_id: str, background_tasks: BackgroundTasks):
+async def download_dataset(
+	dataset_id: str, background_tasks: BackgroundTasks, authorization: Optional[str] = Header(None)
+):
 	"""
 	Prepare dataset bundle in the background and return job status
 	"""
-	# Load the dataset using direct database query
-	with use_client() as client:
-		dataset_response = client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute()
-		if not dataset_response.data:
-			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
-		dataset = Dataset(**dataset_response.data[0])
+	# Check dataset access with authentication
+	access_result = await check_dataset_access(dataset_id, authorization)
+	dataset = access_result.dataset
+	ortho = access_result.ortho
 
-		# Get the ortho file information
-		ortho_response = client.table(settings.orthos_table).select('*').eq('dataset_id', dataset_id).execute()
-		if not ortho_response.data:
-			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no ortho file.')
-		ortho = ortho_response.data[0]
+	if not ortho:
+		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no ortho file.')
 
 	# Build the file paths
 	download_dir = settings.downloads_path / dataset_id
@@ -144,16 +142,13 @@ async def download_dataset(dataset_id: str, background_tasks: BackgroundTasks):
 
 
 @download_app.get('/datasets/{dataset_id}/status', response_model=DownloadStatus)
-async def check_download_status(dataset_id: str):
+async def check_download_status(dataset_id: str, authorization: Optional[str] = Header(None)):
 	"""Check the status of a dataset bundle job"""
 	download_dir = settings.downloads_path / dataset_id
 	download_file = download_dir / f'{dataset_id}.zip'
 
-	# Load the dataset to verify it exists
-	with use_client() as client:
-		dataset_response = client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute()
-		if not dataset_response.data:
-			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
+	# Check dataset access with authentication
+	access_result = await check_dataset_access(dataset_id, authorization)
 
 	if download_file.exists():
 		return DownloadStatus(
@@ -169,8 +164,11 @@ async def check_download_status(dataset_id: str):
 
 
 @download_app.get('/datasets/{dataset_id}/download', response_class=RedirectResponse)
-async def download_dataset_file(dataset_id: str):
+async def download_dataset_file(dataset_id: str, authorization: Optional[str] = Header(None)):
 	"""Redirect to the actual download file once it's ready"""
+	# Check dataset access with authentication
+	access_result = await check_dataset_access(dataset_id, authorization)
+
 	download_file = settings.downloads_path / dataset_id / f'{dataset_id}.zip'
 
 	if not download_file.exists():
@@ -247,25 +245,30 @@ async def create_dataset_bundle_background(dataset_id: str, dataset: Dataset, or
 
 
 @download_app.get('/datasets/{dataset_id}/labels.gpkg')
-async def get_labels(dataset_id: str, background_tasks: BackgroundTasks):
+async def get_labels(dataset_id: str, background_tasks: BackgroundTasks, authorization: Optional[str] = Header(None)):
 	"""
 	Download all the labels of the dataset with the given ID.
 	"""
-	# Load the dataset to verify it exists
-	with use_client() as client:
-		# Get dataset data
-		dataset_response = client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute()
-		if not dataset_response.data:
-			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
-		dataset = Dataset(**dataset_response.data[0])
+	# Check dataset access with authentication
+	access_result = await check_dataset_access(dataset_id, authorization)
+	dataset = access_result.dataset
 
-		# Check if dataset has any labels
-		label_response = client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).execute()
-		if not label_response.data:
-			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no labels.')
+	# Get labels for the dataset - use appropriate client based on access
+	if access_result.is_public:
+		# For public datasets, use unauthenticated client
+		with use_client() as client:
+			label_response = client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).execute()
+	else:
+		# For private datasets, use authenticated client with user's token
+		user_token = authorization[7:] if authorization else None  # Remove "Bearer " prefix
+		with use_client(user_token) as client:
+			label_response = client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).execute()
 
-		# Convert to Label objects
-		labels = [Label(**label_data) for label_data in label_response.data]
+	if not label_response.data:
+		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no labels.')
+
+	# Convert to Label objects
+	labels = [Label(**label_data) for label_data in label_response.data]
 
 	# Create a temporary directory for files
 	temp_dir = tempfile.mkdtemp()
