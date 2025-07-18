@@ -41,8 +41,14 @@ download_app = FastAPI(
 # add cors
 download_app.add_middleware(
 	CORSMiddleware,
-	allow_origins=['*'],
-	allow_credentials=False,
+	allow_origins=[
+		'https://deadtrees.earth',
+		'https://www.deadtrees.earth',
+		'http://10.4.113.132:5173',
+		'http://localhost:5173',
+	],
+	allow_origin_regex='https://deadwood-d4a4b.*|http://(127\\.0\\.0\\.1|localhost)(:\\d+)?',
+	allow_credentials=True,
 	allow_methods=['OPTIONS', 'GET'],
 	allow_headers=['Content-Type', 'Accept', 'Accept-Encoding', 'Authorization'],
 )
