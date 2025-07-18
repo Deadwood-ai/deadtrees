@@ -3,7 +3,7 @@ import io
 import json
 import tempfile
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 import geopandas as gpd
 import yaml
@@ -12,7 +12,7 @@ import pandas as pd
 from shared.logging import UnifiedLogger, LogCategory, LogContext
 from shared.settings import settings
 from shared.db import use_client
-from shared.models import Label, Dataset, LicenseEnum, Ortho, LabelDataEnum
+from shared.models import Label, Dataset, LicenseEnum, Ortho, LabelDataEnum, LabelSourceEnum
 
 TEMPLATE_PATH = Path(__file__).parent / 'templates'
 
@@ -20,10 +20,11 @@ TEMPLATE_PATH = Path(__file__).parent / 'templates'
 logger = UnifiedLogger(__name__)
 
 
-def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
+def label_to_geopackage(label_file, label: Label, user_token: Optional[str] = None) -> io.BytesIO:
 	"""Convert a single label to GeoPackage format"""
 	# Get geometries from the database
-	with use_client() as client:
+	client_context = use_client(user_token) if user_token else use_client()
+	with client_context as client:
 		if label.label_data == LabelDataEnum.deadwood:
 			geom_table = settings.deadwood_geometries_table
 		else:
@@ -152,9 +153,10 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 	return label_file
 
 
-def get_all_dataset_labels(dataset_id: int) -> List[Label]:
+def get_all_dataset_labels(dataset_id: int, user_token: Optional[str] = None) -> List[Label]:
 	"""Get all labels for a dataset using pagination"""
-	with use_client() as client:
+	client_context = use_client(user_token) if user_token else use_client()
+	with client_context as client:
 		all_labels = []
 		batch_size = 300  # Conservative batch size to avoid memory issues
 		offset = 0
@@ -346,3 +348,126 @@ def bundle_dataset(
 					logger.info(f'Added {label_type.value} labels to bundle for dataset {dataset.id}')
 
 	return target_path
+
+
+def export_dataset_aois(dataset_id: int, gpkg_file: str, user_token: Optional[str] = None):
+	"""Export all AOIs for a dataset to 'aoi' layer in geopackage"""
+
+	# Use appropriate client based on whether we have a user token
+	client_context = use_client(user_token) if user_token else use_client()
+
+	with client_context as client:
+		# Query all AOIs for dataset using pagination if needed
+		all_aois = []
+		batch_size = 300  # Conservative batch size to avoid memory issues
+		offset = 0
+
+		while True:
+			# Fetch AOIs in batches
+			aoi_response = (
+				client.table(settings.aois_table)
+				.select('*')
+				.eq('dataset_id', dataset_id)
+				.range(offset, offset + batch_size - 1)
+				.execute()
+			)
+
+			if not aoi_response.data:
+				break
+
+			all_aois.extend(aoi_response.data)
+
+			# If we got fewer than batch_size results, we've reached the end
+			if len(aoi_response.data) < batch_size:
+				break
+
+			offset += batch_size
+
+		if not all_aois:
+			logger.info(f'No AOIs found for dataset {dataset_id}')
+			return  # No AOIs to export
+
+		logger.info(f'Successfully fetched {len(all_aois)} AOIs for dataset {dataset_id}')
+
+		# Create features from AOI data
+		features = []
+		for aoi in all_aois:
+			features.append(
+				{
+					'type': 'Feature',
+					'geometry': aoi['geometry'],
+					'properties': {
+						'dataset_id': aoi['dataset_id'],
+						'image_quality': aoi.get('image_quality'),
+						'notes': aoi.get('notes'),
+						'is_whole_image': aoi.get('is_whole_image'),
+						'aoi_id': aoi['id'],
+					},
+				}
+			)
+
+		# Create GeoDataFrame from AOI data
+		aoi_gdf = gpd.GeoDataFrame.from_features(features)
+		aoi_gdf.set_crs('EPSG:4326', inplace=True)
+
+		# Check if file already exists to determine existing layers
+		path = Path(gpkg_file)
+		existing_layers = []
+		if path.exists():
+			try:
+				import fiona
+
+				existing_layers = fiona.listlayers(gpkg_file)
+			except Exception:
+				# File might exist but not be a valid GeoPackage yet
+				pass
+
+		# Write to 'aoi' layer in geopackage
+		aoi_gdf.to_file(gpkg_file, driver='GPKG', layer='aoi')
+		logger.info(f'Added AOI layer with {len(features)} features to geopackage')
+
+
+def create_consolidated_geopackage(dataset_id: int, user_token: Optional[str] = None) -> Path:
+	"""Create single GeoPackage with multiple layers for a dataset
+
+	Args:
+		dataset_id: The dataset ID to export
+		user_token: Optional user token for private dataset access
+
+	Returns:
+		Path to the created GeoPackage file
+
+	Raises:
+		ValueError: If no labels found for dataset
+	"""
+	# Get all labels for the dataset
+	all_labels = get_all_dataset_labels(dataset_id, user_token)
+
+	if not all_labels:
+		raise ValueError(f'No labels found for dataset {dataset_id}')
+
+	# Filter labels to only include model_prediction and visual_interpretation sources
+	target_sources = [LabelSourceEnum.model_prediction, LabelSourceEnum.visual_interpretation]
+	filtered_labels = [label for label in all_labels if label.label_source in target_sources]
+
+	if not filtered_labels:
+		raise ValueError(
+			f'No labels with target sources (model_prediction, visual_interpretation) found for dataset {dataset_id}'
+		)
+
+	logger.info(f'Processing {len(filtered_labels)} labels for dataset {dataset_id}')
+
+	# Create temporary geopackage file
+	temp_dir = tempfile.mkdtemp()
+	gpkg_file = Path(temp_dir) / f'dataset_{dataset_id}_labels.gpkg'
+
+	# Process each label using existing logic
+	for label in filtered_labels:
+		# Pass user_token to label_to_geopackage for proper authentication
+		label_to_geopackage(str(gpkg_file), label, user_token)
+
+	# Add unified AOI layer
+	export_dataset_aois(dataset_id, str(gpkg_file), user_token)
+
+	logger.info(f'Created consolidated geopackage for dataset {dataset_id} at {gpkg_file}')
+	return gpkg_file

@@ -18,7 +18,12 @@ import pandas as pd
 from shared.__version__ import __version__
 from shared.models import Dataset, Label
 from shared.settings import settings
-from api.src.download.downloads import bundle_dataset, label_to_geopackage, create_citation_file
+from api.src.download.downloads import (
+	bundle_dataset,
+	label_to_geopackage,
+	create_citation_file,
+	create_consolidated_geopackage,
+)
 from shared.db import use_client
 from shared.logger import logger
 from api.src.auth.dataset_access import check_dataset_access
@@ -247,56 +252,25 @@ async def create_dataset_bundle_background(dataset_id: str, dataset: Dataset, or
 @download_app.get('/datasets/{dataset_id}/labels.gpkg')
 async def get_labels(dataset_id: str, background_tasks: BackgroundTasks, authorization: Optional[str] = Header(None)):
 	"""
-	Download all the labels of the dataset with the given ID.
+	Download consolidated labels and AOI data as single GeoPackage
 	"""
 	# Check dataset access with authentication
 	access_result = await check_dataset_access(dataset_id, authorization)
 	dataset = access_result.dataset
 
-	# Get labels for the dataset - use appropriate client based on access
-	if access_result.is_public:
-		# For public datasets, use unauthenticated client
-		with use_client() as client:
-			label_response = client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).execute()
-	else:
-		# For private datasets, use authenticated client with user's token
-		user_token = authorization[7:] if authorization else None  # Remove "Bearer " prefix
-		with use_client(user_token) as client:
-			label_response = client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).execute()
+	# Extract user token for private datasets
+	user_token = authorization[7:] if authorization and not access_result.is_public else None  # Remove "Bearer " prefix
 
-	if not label_response.data:
-		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no labels.')
+	# Create consolidated geopackage
+	try:
+		gpkg_file = create_consolidated_geopackage(int(dataset_id), user_token)
+	except ValueError as e:
+		raise HTTPException(status_code=404, detail=str(e))
 
-	# Convert to Label objects
-	labels = [Label(**label_data) for label_data in label_response.data]
+	# Setup cleanup for temporary file
+	background_tasks.add_task(lambda: shutil.rmtree(gpkg_file.parent))
 
-	# Create a temporary directory for files
-	temp_dir = tempfile.mkdtemp()
-	background_tasks.add_task(lambda: shutil.rmtree(temp_dir))
-
-	# Create ZIP archive
-	zip_file = Path(temp_dir) / f'labels_{dataset_id}.zip'
-
-	with zipfile.ZipFile(zip_file, 'w', zipfile.ZIP_STORED) as archive:
-		# Group labels by type
-		label_types = set(label.label_data for label in labels)
-
-		for label_type in label_types:
-			# Create GeoPackage for this label type
-			type_labels = [label for label in labels if label.label_data == label_type]
-			gpkg_file = Path(temp_dir) / f'{label_type.value}_{dataset_id}.gpkg'
-
-			# Process each label into the GeoPackage
-			for label in type_labels:
-				label_to_geopackage(str(gpkg_file), label)
-
-			# Add to archive
-			archive.write(gpkg_file, arcname=f'labels_{label_type.value}_{dataset_id}.gpkg')
-
-		# Add citation file
-		citation_buffer = io.StringIO()
-		create_citation_file(dataset, citation_buffer)
-		archive.writestr('CITATION.cff', citation_buffer.getvalue())
-
-	# Return the ZIP file
-	return FileResponse(zip_file, media_type='application/zip', filename=f'labels_{dataset_id}.zip')
+	# Return single geopackage file
+	return FileResponse(
+		str(gpkg_file), media_type='application/geopackage+sqlite3', filename=f'dataset_{dataset_id}_labels.gpkg'
+	)

@@ -463,7 +463,7 @@ def test_download_dataset_with_labels_no_aoi(auth_token, test_dataset_with_label
 
 
 def test_download_labels_with_aoi(auth_token, test_dataset_with_label):
-	"""Test downloading just the labels with AOI for a dataset"""
+	"""Test downloading consolidated labels and AOI as single GeoPackage"""
 	dataset_id = test_dataset_with_label
 
 	response = client.get(
@@ -473,65 +473,42 @@ def test_download_labels_with_aoi(auth_token, test_dataset_with_label):
 
 	# Check response
 	assert response.status_code == 200
-	assert response.headers['content-type'] == 'application/zip'
-	assert response.headers['content-disposition'] == f'attachment; filename="labels_{dataset_id}.zip"'
+	assert response.headers['content-type'] == 'application/geopackage+sqlite3'
+	assert response.headers['content-disposition'] == f'attachment; filename="dataset_{dataset_id}_labels.gpkg"'
 
 	# Save and verify contents
 	with tempfile.TemporaryDirectory() as tmpdir:
-		zip_path = Path(tmpdir) / f'labels_{dataset_id}.zip'
-		zip_path.write_bytes(response.content)
+		gpkg_path = Path(tmpdir) / f'dataset_{dataset_id}_labels.gpkg'
+		gpkg_path.write_bytes(response.content)
 
-		with zipfile.ZipFile(zip_path) as zf:
-			files = zf.namelist()
+		# Get all layers in the consolidated geopackage
+		layers = fiona.listlayers(gpkg_path)
+		print(f'Layers in consolidated geopackage: {layers}')
 
-			# Debug: Print all files in the ZIP archive
-			print(f'Files in ZIP archive: {files}')
+		# Find deadwood layer (should be deadwood_visual_interpretation based on the test data)
+		deadwood_layer = f'deadwood_{LabelSourceEnum.visual_interpretation.value}'
+		assert deadwood_layer in layers, f'Deadwood layer {deadwood_layer} not found in: {layers}'
 
-			# Find deadwood label file
-			deadwood_file = next(
-				(f for f in files if 'labels_' in f and ('deadwood' in f or str(dataset_id) in f)), None
-			)
-			assert deadwood_file is not None, f'Deadwood file not found in: {files}'
+		# Read the deadwood layer
+		gdf_visual = gpd.read_file(gpkg_path, layer=deadwood_layer)
+		assert len(gdf_visual) > 0, 'Visual layer has no data'
 
-			# Extract and check deadwood labels file
-			zf.extract(deadwood_file, tmpdir)
-			gpkg_path = Path(tmpdir) / deadwood_file
+		# Verify properties
+		assert 'source' in gdf_visual.columns
+		assert gdf_visual.iloc[0]['source'] in ['test_data', 'visual_interpretation']
 
-			# Get all layers in the deadwood file
-			deadwood_layers = fiona.listlayers(gpkg_path)
-			print(f'Deadwood layers: {deadwood_layers}')
+		# Verify unified AOI layer exists
+		assert 'aoi' in layers, f'AOI layer not found in: {layers}'
 
-			# Find deadwood layer
-			deadwood_layer = next((layer for layer in deadwood_layers if 'deadwood' in layer), None)
-			assert deadwood_layer is not None, f'Deadwood layer not found in: {deadwood_layers}'
-
-			# Read the layer
-			gdf_visual = gpd.read_file(gpkg_path, layer=deadwood_layer)
-			assert len(gdf_visual) > 0, 'Visual layer has no data'
-
-			# Verify properties
-			assert 'source' in gdf_visual.columns
-			assert gdf_visual.iloc[0]['source'] in ['test_data', 'visual_interpretation']
-
-			# Find and verify AOI layer
-			aoi_layer = next((layer for layer in deadwood_layers if layer.startswith('aoi_')), None)
-			assert aoi_layer is not None, f'AOI layer not found in: {deadwood_layers}'
-
-			# Check the AOI layer
-			gdf_aoi = gpd.read_file(gpkg_path, layer=aoi_layer)
-			assert len(gdf_aoi) > 0, 'AOI layer has no data'
-			assert gdf_aoi.iloc[0]['image_quality'] == 1
-			assert gdf_aoi.iloc[0]['notes'] == 'Test AOI from real data'
-
-			# Verify citation file is included
-			assert 'CITATION.cff' in files
-			citation_content = zf.read('CITATION.cff').decode('utf-8')
-			assert 'cff-version: 1.2.0' in citation_content
-			assert 'deadtrees.earth' in citation_content
+		# Check the AOI layer
+		gdf_aoi = gpd.read_file(gpkg_path, layer='aoi')
+		assert len(gdf_aoi) > 0, 'AOI layer has no data'
+		assert gdf_aoi.iloc[0]['image_quality'] == 1
+		assert gdf_aoi.iloc[0]['notes'] == 'Test AOI from real data'
 
 
 def test_download_labels_without_aoi(auth_token, test_dataset_with_label_no_aoi):
-	"""Test downloading just the labels without AOI for a dataset"""
+	"""Test downloading consolidated labels without AOI as single GeoPackage"""
 	dataset_id = test_dataset_with_label_no_aoi
 
 	response = client.get(
@@ -541,45 +518,150 @@ def test_download_labels_without_aoi(auth_token, test_dataset_with_label_no_aoi)
 
 	# Check response
 	assert response.status_code == 200
-	assert response.headers['content-type'] == 'application/zip'
-	assert response.headers['content-disposition'] == f'attachment; filename="labels_{dataset_id}.zip"'
+	assert response.headers['content-type'] == 'application/geopackage+sqlite3'
+	assert response.headers['content-disposition'] == f'attachment; filename="dataset_{dataset_id}_labels.gpkg"'
 
 	# Save response content to temporary file and verify
 	with tempfile.TemporaryDirectory() as tmpdir:
-		zip_path = Path(tmpdir) / f'labels_{dataset_id}.zip'
-		zip_path.write_bytes(response.content)
+		gpkg_path = Path(tmpdir) / f'dataset_{dataset_id}_labels.gpkg'
+		gpkg_path.write_bytes(response.content)
 
-		with zipfile.ZipFile(zip_path) as zf:
-			# Check for expected files
-			files = zf.namelist()
-			# We now have the label type in the filename, so look for a file that contains the dataset_id
-			assert any(f.startswith('labels_') and str(dataset_id) in f for f in files)
-			assert 'CITATION.cff' in files
+		# List all available layers in the consolidated GeoPackage
+		available_layers = fiona.listlayers(gpkg_path)
+		print(f'Layers in consolidated geopackage: {available_layers}')
 
-			# Extract and verify the GeoPackage
-			label_file = next(f for f in files if f.startswith('labels_') and str(dataset_id) in f)
-			gpkg_path = Path(tmpdir) / label_file
-			zf.extract(label_file, tmpdir)
+		# Verify the deadwood layer exists (with source info in name)
+		deadwood_layer = f'deadwood_{LabelSourceEnum.visual_interpretation.value}'
+		assert deadwood_layer in available_layers
 
-			# List all available layers in the GeoPackage
-			available_layers = fiona.listlayers(gpkg_path)
+		# Read the deadwood layer
+		gdf_labels = gpd.read_file(gpkg_path, layer=deadwood_layer)
+		assert len(gdf_labels) > 0  # Should have deadwood polygons
+		assert gdf_labels.iloc[0]['source'] == 'visual_interpretation'
 
-			# Verify the deadwood layer exists (with source info in name)
-			deadwood_layer = f'deadwood_{LabelSourceEnum.visual_interpretation.value}'
-			assert deadwood_layer in available_layers
+		# Verify no AOI layer exists (since this dataset has no AOI)
+		assert 'aoi' not in available_layers
 
-			# Read the deadwood layer
-			gdf_labels = gpd.read_file(gpkg_path, layer=deadwood_layer)
-			assert len(gdf_labels) > 0  # Should have deadwood polygons
-			assert gdf_labels.iloc[0]['source'] == 'visual_interpretation'
 
-			# Verify no AOI layer exists
-			assert not any(layer.startswith('aoi_') for layer in available_layers)
+def test_download_consolidated_labels_multiple_types(auth_token, test_dataset_for_download, test_user):
+	"""Test downloading consolidated labels with multiple label types and sources in single GeoPackage"""
+	dataset_id = test_dataset_for_download
 
-			# Verify citation file
-			citation_content = zf.read('CITATION.cff').decode('utf-8')
-			assert 'cff-version: 1.2.0' in citation_content
-			assert 'deadtrees.earth' in citation_content
+	# Create test geometries
+	test_file = Path(__file__).parent.parent.parent.parent / 'assets' / 'test_data' / 'yanspain_crop_124_polygons.gpkg'
+	deadwood = gpd.read_file(test_file, layer='standing_deadwood').to_crs(epsg=4326)
+
+	# Convert deadwood geometries to MultiPolygon GeoJSON
+	deadwood_geojson = {
+		'type': 'MultiPolygon',
+		'coordinates': [
+			[
+				[[float(x), float(y)] for x, y in poly.exterior.coords]
+				for geom in deadwood.geometry
+				for poly in (geom if isinstance(geom, MultiPolygon) else [geom])
+			]
+		],
+	}
+
+	# Create multiple labels with different sources and data types
+	# 1. Deadwood visual interpretation
+	deadwood_visual_payload = LabelPayloadData(
+		dataset_id=dataset_id,
+		label_source=LabelSourceEnum.visual_interpretation,
+		label_type=LabelTypeEnum.segmentation,
+		label_data=LabelDataEnum.deadwood,
+		label_quality=1,
+		geometry=deadwood_geojson,
+	)
+
+	# 2. Deadwood model prediction
+	deadwood_model_payload = LabelPayloadData(
+		dataset_id=dataset_id,
+		label_source=LabelSourceEnum.model_prediction,
+		label_type=LabelTypeEnum.segmentation,
+		label_data=LabelDataEnum.deadwood,
+		label_quality=2,
+		geometry=deadwood_geojson,
+	)
+
+	# 3. Forest cover model prediction
+	forest_cover_model_payload = LabelPayloadData(
+		dataset_id=dataset_id,
+		label_source=LabelSourceEnum.model_prediction,
+		label_type=LabelTypeEnum.segmentation,
+		label_data=LabelDataEnum.forest_cover,
+		label_quality=2,
+		geometry=deadwood_geojson,
+	)
+
+	# 4. Fixed model prediction (should be filtered out)
+	deadwood_fixed_payload = LabelPayloadData(
+		dataset_id=dataset_id,
+		label_source=LabelSourceEnum.fixed_model_prediction,
+		label_type=LabelTypeEnum.segmentation,
+		label_data=LabelDataEnum.deadwood,
+		label_quality=3,
+		geometry=deadwood_geojson,
+	)
+
+	# Create all labels
+	deadwood_visual_label = create_label_with_geometries(deadwood_visual_payload, test_user, auth_token)
+	deadwood_model_label = create_label_with_geometries(deadwood_model_payload, test_user, auth_token)
+	forest_cover_model_label = create_label_with_geometries(forest_cover_model_payload, test_user, auth_token)
+	deadwood_fixed_label = create_label_with_geometries(deadwood_fixed_payload, test_user, auth_token)
+
+	# Download consolidated labels
+	response = client.get(
+		f'/api/v1/download/datasets/{dataset_id}/labels.gpkg',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	# Check response
+	assert response.status_code == 200
+	assert response.headers['content-type'] == 'application/geopackage+sqlite3'
+	assert response.headers['content-disposition'] == f'attachment; filename="dataset_{dataset_id}_labels.gpkg"'
+
+	# Save and verify contents
+	with tempfile.TemporaryDirectory() as tmpdir:
+		gpkg_path = Path(tmpdir) / f'dataset_{dataset_id}_labels.gpkg'
+		gpkg_path.write_bytes(response.content)
+
+		# Get all layers in the consolidated geopackage
+		layers = fiona.listlayers(gpkg_path)
+		print(f'Layers in consolidated geopackage: {layers}')
+
+		# Expected layers (filtered to exclude fixed_model_prediction)
+		expected_layers = [
+			'deadwood_visual_interpretation',
+			'deadwood_model_prediction',
+			'forest_cover_model_prediction',
+		]
+
+		# Verify expected layers exist
+		for expected_layer in expected_layers:
+			assert expected_layer in layers, f'Expected layer {expected_layer} not found in: {layers}'
+
+		# Verify fixed_model_prediction layer is NOT included
+		assert 'deadwood_fixed_model_prediction' not in layers, 'Fixed model prediction layer should be filtered out'
+
+		# Verify each layer contains data and correct properties
+		# Check deadwood visual interpretation
+		gdf_deadwood_visual = gpd.read_file(gpkg_path, layer='deadwood_visual_interpretation')
+		assert len(gdf_deadwood_visual) > 0
+		assert gdf_deadwood_visual.iloc[0]['source'] == 'visual_interpretation'
+		assert gdf_deadwood_visual.iloc[0]['quality'] == 1
+
+		# Check deadwood model prediction
+		gdf_deadwood_model = gpd.read_file(gpkg_path, layer='deadwood_model_prediction')
+		assert len(gdf_deadwood_model) > 0
+		assert gdf_deadwood_model.iloc[0]['source'] == 'model_prediction'
+		assert gdf_deadwood_model.iloc[0]['quality'] == 2
+
+		# Check forest cover model prediction
+		gdf_forest_model = gpd.read_file(gpkg_path, layer='forest_cover_model_prediction')
+		assert len(gdf_forest_model) > 0
+		assert gdf_forest_model.iloc[0]['source'] == 'model_prediction'
+		assert gdf_forest_model.iloc[0]['quality'] == 2
 
 
 def test_download_labels_not_found(auth_token, test_dataset_for_download):
@@ -590,7 +672,7 @@ def test_download_labels_not_found(auth_token, test_dataset_for_download):
 	)
 
 	assert response.status_code == 404
-	assert 'has no labels' in response.json()['detail']
+	assert 'No labels found for dataset' in response.json()['detail']
 
 
 def test_download_dataset_async(auth_token, test_dataset_for_download):
