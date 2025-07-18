@@ -31,6 +31,8 @@ services:
       UVICORN_PORT: 40831
       UVICORN_HOST: 0.0.0.0
       LOGFIRE_TOKEN: ${LOGFIRE_TOKEN}
+      PROCESSOR_USERNAME: ${PROCESSOR_USERNAME}
+      PROCESSOR_PASSWORD: ${PROCESSOR_PASSWORD}
 
     # command: python run.py server --reload=False
 
