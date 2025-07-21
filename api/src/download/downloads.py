@@ -20,11 +20,10 @@ TEMPLATE_PATH = Path(__file__).parent / 'templates'
 logger = UnifiedLogger(__name__)
 
 
-def label_to_geopackage(label_file, label: Label, user_token: Optional[str] = None) -> io.BytesIO:
+def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 	"""Convert a single label to GeoPackage format"""
 	# Get geometries from the database
-	client_context = use_client(user_token) if user_token else use_client()
-	with client_context as client:
+	with use_client() as client:
 		if label.label_data == LabelDataEnum.deadwood:
 			geom_table = settings.deadwood_geometries_table
 		else:
@@ -153,10 +152,9 @@ def label_to_geopackage(label_file, label: Label, user_token: Optional[str] = No
 	return label_file
 
 
-def get_all_dataset_labels(dataset_id: int, user_token: Optional[str] = None) -> List[Label]:
+def get_all_dataset_labels(dataset_id: int) -> List[Label]:
 	"""Get all labels for a dataset using pagination"""
-	client_context = use_client(user_token) if user_token else use_client()
-	with client_context as client:
+	with use_client() as client:
 		all_labels = []
 		batch_size = 300  # Conservative batch size to avoid memory issues
 		offset = 0
@@ -350,13 +348,11 @@ def bundle_dataset(
 	return target_path
 
 
-def export_dataset_aois(dataset_id: int, gpkg_file: str, user_token: Optional[str] = None):
+def export_dataset_aois(dataset_id: int, gpkg_file: str):
 	"""Export all AOIs for a dataset to 'aoi' layer in geopackage"""
 
-	# Use appropriate client based on whether we have a user token
-	client_context = use_client(user_token) if user_token else use_client()
-
-	with client_context as client:
+	# Use default client (no user token needed for public datasets)
+	with use_client() as client:
 		# Query all AOIs for dataset using pagination if needed
 		all_aois = []
 		batch_size = 300  # Conservative batch size to avoid memory issues
@@ -427,12 +423,11 @@ def export_dataset_aois(dataset_id: int, gpkg_file: str, user_token: Optional[st
 		logger.info(f'Added AOI layer with {len(features)} features to geopackage')
 
 
-def create_consolidated_geopackage(dataset_id: int, user_token: Optional[str] = None) -> Path:
+def create_consolidated_geopackage(dataset_id: int) -> Path:
 	"""Create single GeoPackage with multiple layers for a dataset
 
 	Args:
 		dataset_id: The dataset ID to export
-		user_token: Optional user token for private dataset access
 
 	Returns:
 		Path to the created GeoPackage file
@@ -441,7 +436,7 @@ def create_consolidated_geopackage(dataset_id: int, user_token: Optional[str] = 
 		ValueError: If no labels found for dataset
 	"""
 	# Get all labels for the dataset
-	all_labels = get_all_dataset_labels(dataset_id, user_token)
+	all_labels = get_all_dataset_labels(dataset_id)
 
 	if not all_labels:
 		raise ValueError(f'No labels found for dataset {dataset_id}')
@@ -463,11 +458,11 @@ def create_consolidated_geopackage(dataset_id: int, user_token: Optional[str] = 
 
 	# Process each label using existing logic
 	for label in filtered_labels:
-		# Pass user_token to label_to_geopackage for proper authentication
-		label_to_geopackage(str(gpkg_file), label, user_token)
+		# No user_token needed for public datasets
+		label_to_geopackage(str(gpkg_file), label)
 
 	# Add unified AOI layer
-	export_dataset_aois(dataset_id, str(gpkg_file), user_token)
+	export_dataset_aois(dataset_id, str(gpkg_file))
 
 	logger.info(f'Created consolidated geopackage for dataset {dataset_id} at {gpkg_file}')
 	return gpkg_file
