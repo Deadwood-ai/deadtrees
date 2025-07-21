@@ -36,8 +36,12 @@ CREATE TABLE "public"."v2_raw_images" (
     "dataset_id" bigint NOT NULL REFERENCES "public"."v2_datasets"(id) ON DELETE CASCADE,
     "raw_image_count" integer NOT NULL,
     "raw_image_size_mb" integer NOT NULL,
-    "raw_images_path" text NOT NULL,
+    "raw_images_path" text NOT NULL, -- Contains both images and RTK files
     "camera_metadata" jsonb,
+    "has_rtk_data" boolean NOT NULL DEFAULT false,
+    "rtk_precision_cm" numeric(4,2),
+    "rtk_quality_indicator" integer,
+    "rtk_file_count" integer DEFAULT 0,
     "version" integer NOT NULL DEFAULT 1,
     "created_at" timestamp with time zone NOT NULL DEFAULT now()
 );
@@ -127,8 +131,12 @@ class RawImages(BaseModel):
     dataset_id: int
     raw_image_count: int
     raw_image_size_mb: int
-    raw_images_path: str
+    raw_images_path: str  # Contains both images and RTK files
     camera_metadata: Optional[Dict[str, Any]] = None
+    has_rtk_data: bool = False
+    rtk_precision_cm: Optional[float] = None
+    rtk_quality_indicator: Optional[int] = None
+    rtk_file_count: int = 0
     version: int = 1
     created_at: Optional[datetime] = None
     
@@ -200,9 +208,10 @@ class Status(BaseModel):
 
 - [ ] Implement ZIP extraction and validation
   - Extract to temporary directory using Python `zipfile`
-  - Validate file formats: JPEG, JPG, TIF (case-insensitive)
+  - Validate file formats: JPEG, JPG, TIF (case-insensitive) and RTK files (.RTK, .MRK, .RTL, .RTB, .RPOS, .RTS, .IMU)
   - Minimum 3 images requirement validation
   - Calculate total file size and image count
+  - Detect and count RTK auxiliary files
 
 - [ ] Create `api/src/upload/exif_utils.py`
   - Function: `extract_comprehensive_exif(image_path: Path) -> Dict[str, Any]`
@@ -211,15 +220,25 @@ class Status(BaseModel):
   - Extract camera make/model, GPS coordinates, flight details, image settings
   - Handle missing/corrupted EXIF gracefully
 
-- [ ] Implement SSH transfer for raw images
+- [ ] Create `api/src/upload/rtk_utils.py`
+  - Function: `detect_rtk_files(zip_files: List[str]) -> Dict[str, Any]`
+  - Function: `parse_rtk_timestamp_file(mrk_path: Path) -> Dict[str, Any]`
+  - Detect RTK file extensions (.RTK, .MRK, .RTL, .RTB, .RPOS, .RTS, .IMU)
+  - Parse .MRK timestamp files to extract precision indicators and quality metrics
+  - Extract RTK precision values (horizontal/vertical accuracy in centimeters)
+  - Extract RTK quality indicators (Q values: 50=excellent RTK fix)
+
+- [ ] Implement SSH transfer for raw images and RTK files
   - Use existing SSH utilities from `processor/src/utils/ssh.py`
-  - Transfer to `raw_images/{dataset_id}/images/` directory structure
+  - Transfer all ZIP contents to unified `raw_images/{dataset_id}/images/` directory structure
+  - Preserve original ZIP structure with images and RTK files together
   - Follow established SSH connection and error handling patterns
 
 - [ ] Create enhanced dataset and raw images database entries
   - Create v2_datasets entry with acquisition date from EXIF extraction
   - Create separate v2_raw_images entry with metadata and counts
   - Store comprehensive EXIF data in **v2_raw_images.camera_metadata** JSONB field
+  - Store RTK metadata: has_rtk_data, rtk_precision_cm, rtk_quality_indicator, rtk_file_count
   - Link via foreign key: v2_raw_images.dataset_id → v2_datasets.id
 
 **Implementation Context:**
@@ -259,25 +278,40 @@ class Status(BaseModel):
   - Follow existing processing function patterns
   - Use established authentication and logging patterns
 
-- [ ] Implement raw image retrieval
-  - Use existing SSH utilities to pull raw images from storage
-  - Pull from `raw_images/{dataset_id}/images/` directory
+- [ ] Implement raw image and RTK data retrieval
+  - Use existing SSH utilities to pull all files from storage (images + RTK files)
+  - Pull from unified `raw_images/{dataset_id}/images/` directory
+  - Preserve original ZIP structure with RTK files alongside images
   - Follow file transfer patterns from other processors
 
 - [ ] Implement ODM Docker container execution using Docker-in-Docker
   - Use Docker API (docker-py) for container management
-  - Mount temporary directory for image access
+  - Mount temporary directory for image and RTK file access
   - Configure GPU support with device requests (GPU sharing confirmed to work)
-  - Use command: `["--fast-orthophoto", "--project-path", "/project", str(dataset_id)]`
+  - Query database for RTK metadata to adapt ODM command parameters
+  - Use RTK-aware command construction with `--force-gps` and `--gps-accuracy` flags
 
 ```python
 import docker
+from shared.models import RawImages
 
 def process_odm(task: QueueTask, temp_dir: Path):
+    # Query RTK metadata from database
+    raw_images = get_raw_images_by_dataset_id(task.dataset_id)
+    
+    # Build RTK-aware ODM command
+    command = ["--fast-orthophoto", "--project-path", "/project", str(dataset_id)]
+    
+    if raw_images.has_rtk_data:
+        command.extend([
+            "--force-gps",  # Use high-precision GPS over GCPs
+            "--gps-accuracy", str(raw_images.rtk_precision_cm / 100)  # Convert cm to meters
+        ])
+    
     client = docker.from_env()
     container = client.containers.run(
         image="opendronemap/odm",
-        command=["--fast-orthophoto", "--project-path", "/project", str(dataset_id)],
+        command=command,
         volumes={str(project_dir): {"bind": "/project", "mode": "rw"}},
         device_requests=[docker.types.DeviceRequest(count=-1, capabilities=[["gpu"]])],
         detach=True,
@@ -477,12 +511,13 @@ processor-test:
 **Context:** Create minimal real test data following existing patterns in `assets/test_data/` and `shared/testing/fixtures.py`.
 
 **Subtasks:**
-- [ ] Create test drone image ZIP files from available 277 DJI images (~2.6GB total)
-  - `test_minimal_3_images.zip` - Minimal valid set (3 images, ~30MB)
-  - `test_small_10_images.zip` - Development testing (10 images, ~100MB)
-  - `test_medium_25_images.zip` - Comprehensive testing (25 images, ~250MB)
-  - `test_invalid_2_images.zip` - Error testing (2 images, insufficient for ODM)
-  - Source: `assets/test_data/raw_drone_images/DJI_202504031231_008_hartheimwithbuffer60m/` (277 DJI images available)
+- [ ] Create test drone image ZIP files from available 277 DJI images + RTK data (~2.6GB total)
+  - `test_minimal_3_images.zip` - Minimal valid set (3 images + RTK files, ~30MB)
+  - `test_small_10_images.zip` - Development testing (10 images + RTK files, ~100MB)
+  - `test_medium_25_images.zip` - Comprehensive testing (25 images + RTK files, ~250MB)
+  - `test_invalid_2_images.zip` - Error testing (2 images + RTK files, insufficient for ODM)
+  - `test_no_rtk_3_images.zip` - Testing without RTK data (3 images only, for comparison)
+  - Source: `assets/test_data/raw_drone_images/DJI_202504031231_008_hartheimwithbuffer60m/` (277 DJI images + RTK files available)
 
 - [ ] Create ODM test fixtures following existing patterns
   ```python
@@ -505,10 +540,11 @@ processor-test:
 
   @pytest.fixture
   def test_dataset_with_raw_images(auth_token, test_raw_images_zip_minimal, test_processor_user):
-      """Create dataset with raw images (follows test_dataset_for_processing pattern)"""
+      """Create dataset with raw images and RTK data (follows test_dataset_for_processing pattern)"""
       # Create v2_datasets entry (acquisition date: 2025-04-03 from DJI EXIF)
-      # Extract ZIP and create v2_raw_images entry (3 images, ~30MB)
-      # Transfer images to storage server: raw_images/{dataset_id}/images/
+      # Extract ZIP and create v2_raw_images entry (3 images + RTK files, ~30MB)
+      # Set RTK metadata: has_rtk_data=True, rtk_precision_cm=2.0, rtk_quality_indicator=50
+      # Transfer all files to storage server: raw_images/{dataset_id}/images/
       # Yield dataset_id
       # Cleanup in finally block
   ```

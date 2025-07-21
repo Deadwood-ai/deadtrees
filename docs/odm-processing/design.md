@@ -33,8 +33,12 @@ CREATE TABLE "public"."v2_raw_images" (
     "dataset_id" bigint NOT NULL REFERENCES "public"."v2_datasets"(id) ON DELETE CASCADE,
     "raw_image_count" integer NOT NULL,
     "raw_image_size_mb" integer NOT NULL, 
-    "raw_images_path" text NOT NULL,
+    "raw_images_path" text NOT NULL, -- Contains both images and RTK files
     "camera_metadata" jsonb,
+    "has_rtk_data" boolean NOT NULL DEFAULT false,
+    "rtk_precision_cm" numeric(4,2),
+    "rtk_quality_indicator" integer,
+    "rtk_file_count" integer DEFAULT 0,
     "version" integer NOT NULL DEFAULT 1,
     "created_at" timestamp with time zone NOT NULL DEFAULT now()
 );
@@ -62,9 +66,9 @@ ALTER TABLE "public"."v2_statuses" ADD COLUMN "is_odm_done" boolean NOT NULL DEF
 - **Monitoring ready**: Integrates with existing status monitoring
 
 **Storage Path Convention:**
-- Raw images: `raw_images/{dataset_id}/images/`
+- Raw images + RTK files: `raw_images/{dataset_id}/images/` (unified directory for all ZIP contents)
 - Generated ortho: `raw_images/{dataset_id}/odm_orthophoto.tif`
-- Matches existing storage patterns
+- Matches existing storage patterns and preserves original ZIP structure
 
 ### **Frontend EXIF Extraction - Smart UX**
 ```typescript
@@ -269,13 +273,20 @@ Storage Server:
 └── raw_images/
     └── {dataset_id}/
         └── images/
-            ├── DJI_001.JPG        # ZIP uploads only
-            └── ...
+            ├── DJI_001.JPG        # ZIP uploads - drone images
+            ├── DJI_002.JPG        
+            ├── DJI_timestamp.MRK  # RTK timestamp data
+            ├── DJI_rtk.RTK        # RTK positioning data
+            ├── DJI_rtk.RTL        # RTK auxiliary files
+            └── ...                # All ZIP contents together
 
 Processing Server (temporary):
 └── processing_dir/
     └── odm_{dataset_id}/
-        ├── images/                # Pulled from storage
+        ├── images/                # Pulled from storage (all files)
+        │   ├── DJI_001.JPG        # Images for ODM processing
+        │   ├── DJI_timestamp.MRK  # RTK data available to ODM
+        │   └── ...
         └── {dataset_id}/
             └── odm_orthophoto/
                 └── odm_orthophoto.tif

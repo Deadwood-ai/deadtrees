@@ -68,6 +68,16 @@ Backend integration of OpenDroneMap (ODM) for processing raw drone images into o
 - **And** the system shall handle missing or invalid EXIF data gracefully
 - **Response** metadata extraction within 10 seconds per image during upload
 
+**US-ODM-005: RTK High-Precision Processing**
+- **Given** a ZIP file contains RTK positioning data files (.RTK, .MRK, .RTL, .RTB, .RPOS)
+- **When** the ZIP is uploaded and processed
+- **Then** the system shall automatically detect RTK data presence
+- **And** the system shall extract RTK precision indicators from timestamp files (.MRK)
+- **And** the system shall transfer RTK files to storage server alongside images
+- **And** the system shall execute ODM with high-precision GPS flags (--force-gps, --gps-accuracy)
+- **And** the system shall achieve centimeter-level absolute positioning accuracy
+- **Response** RTK detection and parameter extraction within 5 seconds during upload
+
 ---
 
 ## 🗄️ **DATABASE SCHEMA CHANGES**
@@ -81,8 +91,12 @@ CREATE TABLE "public"."v2_raw_images" (
     "dataset_id" bigint NOT NULL REFERENCES "public"."v2_datasets"(id) ON DELETE CASCADE,
     "raw_image_count" integer NOT NULL,
     "raw_image_size_mb" integer NOT NULL,
-    "raw_images_path" text NOT NULL,
+    "raw_images_path" text NOT NULL, -- Contains both images and RTK files
     "camera_metadata" jsonb,
+    "has_rtk_data" boolean NOT NULL DEFAULT false,
+    "rtk_precision_cm" numeric(4,2),
+    "rtk_quality_indicator" integer,
+    "rtk_file_count" integer DEFAULT 0,
     "version" integer NOT NULL DEFAULT 1,
     "created_at" timestamp with time zone NOT NULL DEFAULT now()
 );
@@ -180,19 +194,33 @@ class Status(BaseModel):
 - System shall populate **basic acquisition date** in existing **v2_datasets** fields (aquisition_year, aquisition_month, aquisition_day)
 - System shall handle missing or corrupted EXIF data gracefully
 
+### **FR-ODM-002A: RTK Data Detection and Processing**
+- System shall automatically detect RTK positioning files in ZIP uploads (.RTK, .MRK, .RTL, .RTB, .RPOS, .RTS, .IMU)
+- System shall parse RTK timestamp files (.MRK) to extract precision indicators and quality metrics
+- System shall extract RTK precision values (horizontal/vertical accuracy in centimeters)
+- System shall extract RTK quality indicators (Q values: 50=excellent, 0-49=varying quality)
+- System shall store RTK metadata in v2_raw_images table (has_rtk_data, rtk_precision_cm, rtk_quality_indicator)
+- System shall transfer RTK auxiliary files to storage server alongside images
+
 ### **FR-ODM-003: ODM Container Integration** 
 - System shall execute OpenDroneMap via GPU-accelerated Docker container using Docker-in-Docker
 - System shall mount Docker socket for container execution within processor
 - System shall use `--fast-orthophoto` processing mode for efficiency
 - System shall handle ODM container lifecycle and resource management
 - System shall use sequential processing (one ODM task at a time with full GPU access)
+- System shall detect RTK data availability and adapt ODM command parameters accordingly
+- System shall use `--force-gps` flag when RTK data is present to prioritize high-precision coordinates
+- System shall set `--gps-accuracy` to centimeter values (0.01-0.05) based on detected RTK precision
+- System shall transfer RTK auxiliary files to ODM project directory for potential processing use
 
 ### **FR-ODM-004: Storage Server Integration**
 - System shall transfer raw images between storage and processing servers via SSH
 - System shall use existing SSH utilities for file operations  
-- System shall maintain directory structure: `raw_images/{dataset_id}/images/`
-- System shall support chunked upload for large ZIP files
-- System shall maintain permanent storage of raw images (no automatic deletion)
+- System shall maintain unified directory structure: `raw_images/{dataset_id}/images/` containing both image and RTK files
+- System shall preserve original ZIP file structure by storing RTK files alongside corresponding images
+- System shall support chunked upload for large ZIP files containing images and RTK data
+- System shall maintain permanent storage of raw images and RTK files (no automatic deletion)
+- System shall preserve RTK file relationships and naming conventions for future reference
 
 ### **FR-ODM-005: Enhanced Queue System Integration**
 - System shall add ODM processing to existing queue system with normal priority
@@ -314,5 +342,5 @@ class Status(BaseModel):
 
 **Document Status**: FINAL  
 **Implementation Scope**: Backend integration only, minimal user interface changes  
-**Technical Details**: See `design-consolidated.md` for implementation specifications and database schemas  
+**Technical Details**: See `design.md` for implementation see `implementation.md` specifications and database schemas  
 **EXIF Data Strategy**: No separate EXIF table needed - capture only acquisition date in existing v2_raw_images and v2_datasets tables 
