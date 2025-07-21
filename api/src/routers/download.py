@@ -8,7 +8,7 @@ import shutil
 import zipfile
 import io
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response, Header
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -26,7 +26,6 @@ from api.src.download.downloads import (
 )
 from shared.db import use_client
 from shared.logger import logger
-from api.src.auth.dataset_access import check_dataset_access
 
 # first approach to implement a rate limit
 CONNECTED_IPS = {}
@@ -41,16 +40,10 @@ download_app = FastAPI(
 # add cors
 download_app.add_middleware(
 	CORSMiddleware,
-	allow_origins=[
-		'https://deadtrees.earth',
-		'https://www.deadtrees.earth',
-		'http://10.4.113.132:5173',
-		'http://localhost:5173',
-	],
-	allow_origin_regex='https://deadwood-d4a4b.*|http://(127\\.0\\.0\\.1|localhost)(:\\d+)?',
-	allow_credentials=True,
+	allow_origins=['*'],
+	allow_credentials=False,
 	allow_methods=['OPTIONS', 'GET'],
-	allow_headers=['Content-Type', 'Accept', 'Accept-Encoding', 'Authorization'],
+	allow_headers=['Content-Type', 'Accept', 'Accept-Encoding'],
 )
 
 
@@ -110,18 +103,36 @@ class DownloadStatus(BaseModel):
 	download_path: str = ''
 
 
+async def get_public_dataset(dataset_id: str) -> tuple[Dataset, dict]:
+	"""Get dataset and ortho data, but only if it's publicly accessible"""
+	with use_client() as client:
+		# Get dataset
+		dataset_response = client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute()
+
+		if not dataset_response.data:
+			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
+
+		dataset = Dataset(**dataset_response.data[0])
+
+		# Only allow access to public datasets
+		if dataset.data_access.value == 'private':
+			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
+
+		# Get ortho data
+		ortho_response = client.table(settings.orthos_table).select('*').eq('dataset_id', dataset_id).execute()
+		ortho = ortho_response.data[0] if ortho_response.data else None
+
+		return dataset, ortho
+
+
 # Updated download route with background processing
 @download_app.get('/datasets/{dataset_id}/dataset.zip', response_model=DownloadStatus)
-async def download_dataset(
-	dataset_id: str, background_tasks: BackgroundTasks, authorization: Optional[str] = Header(None)
-):
+async def download_dataset(dataset_id: str, background_tasks: BackgroundTasks):
 	"""
 	Prepare dataset bundle in the background and return job status
 	"""
-	# Check dataset access with authentication
-	access_result = await check_dataset_access(dataset_id, authorization)
-	dataset = access_result.dataset
-	ortho = access_result.ortho
+	# Check dataset exists and is public
+	dataset, ortho = await get_public_dataset(dataset_id)
 
 	if not ortho:
 		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no ortho file.')
@@ -153,13 +164,13 @@ async def download_dataset(
 
 
 @download_app.get('/datasets/{dataset_id}/status', response_model=DownloadStatus)
-async def check_download_status(dataset_id: str, authorization: Optional[str] = Header(None)):
+async def check_download_status(dataset_id: str):
 	"""Check the status of a dataset bundle job"""
 	download_dir = settings.downloads_path / dataset_id
 	download_file = download_dir / f'{dataset_id}.zip'
 
-	# Check dataset access with authentication
-	access_result = await check_dataset_access(dataset_id, authorization)
+	# Check dataset exists and is public
+	dataset, ortho = await get_public_dataset(dataset_id)
 
 	if download_file.exists():
 		return DownloadStatus(
@@ -175,10 +186,10 @@ async def check_download_status(dataset_id: str, authorization: Optional[str] = 
 
 
 @download_app.get('/datasets/{dataset_id}/download', response_class=RedirectResponse)
-async def download_dataset_file(dataset_id: str, authorization: Optional[str] = Header(None)):
+async def download_dataset_file(dataset_id: str):
 	"""Redirect to the actual download file once it's ready"""
-	# Check dataset access with authentication
-	access_result = await check_dataset_access(dataset_id, authorization)
+	# Check dataset exists and is public
+	dataset, ortho = await get_public_dataset(dataset_id)
 
 	download_file = settings.downloads_path / dataset_id / f'{dataset_id}.zip'
 
@@ -256,20 +267,16 @@ async def create_dataset_bundle_background(dataset_id: str, dataset: Dataset, or
 
 
 @download_app.get('/datasets/{dataset_id}/labels.gpkg')
-async def get_labels(dataset_id: str, background_tasks: BackgroundTasks, authorization: Optional[str] = Header(None)):
+async def get_labels(dataset_id: str, background_tasks: BackgroundTasks):
 	"""
 	Download consolidated labels and AOI data as single GeoPackage
 	"""
-	# Check dataset access with authentication
-	access_result = await check_dataset_access(dataset_id, authorization)
-	dataset = access_result.dataset
+	# Check dataset exists and is public
+	dataset, ortho = await get_public_dataset(dataset_id)
 
-	# Extract user token for private datasets
-	user_token = authorization[7:] if authorization and not access_result.is_public else None  # Remove "Bearer " prefix
-
-	# Create consolidated geopackage
+	# Create consolidated geopackage (no user_token needed for public datasets)
 	try:
-		gpkg_file = create_consolidated_geopackage(int(dataset_id), user_token)
+		gpkg_file = create_consolidated_geopackage(int(dataset_id))
 	except ValueError as e:
 		raise HTTPException(status_code=404, detail=str(e))
 
