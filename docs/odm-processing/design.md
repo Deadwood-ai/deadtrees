@@ -312,6 +312,175 @@ volumes:
 
 ---
 
+## 🧪 **TESTING STRATEGY**
+
+### **Test-Driven Development Approach**
+Following established codebase patterns for integration-focused testing with real data:
+
+**Core Principle**: Focus on critical path testing with real drone images, not exhaustive unit testing.
+
+### **Critical Test Coverage**
+
+#### **1. ZIP Upload & Extraction Test**
+```python
+# api/tests/routers/test_upload_odm.py
+def test_zip_upload_and_extraction(test_raw_images_zip, auth_token, test_user):
+    """Test ZIP upload creates dataset and raw_images entries"""
+    # Follow existing chunked upload pattern
+    # Verify v2_datasets entry created
+    # Verify v2_raw_images entry with correct metadata
+    # Verify images transferred to storage server
+```
+
+#### **2. ODM Container Integration Test**
+```python
+# processor/tests/test_process_odm.py
+def test_odm_docker_execution(test_dataset_with_raw_images, auth_token):
+    """Test ODM container execution with real images"""
+    # Use existing test_dataset_for_processing pattern
+    # Test Docker container execution
+    # Verify orthomosaic generation
+    # Verify status tracking (is_odm_done=True)
+```
+
+#### **3. Complete Pipeline Test**
+```python
+# processor/tests/test_odm_pipeline.py  
+def test_complete_odm_pipeline(test_raw_images_zip, auth_token):
+    """Test full ZIP → ODM → GeoTIFF → COG → Thumbnail workflow"""
+    # Follow comprehensive testing pattern from test_process_cog.py
+    # Process all task types: ['odm_processing', 'geotiff', 'cog', 'thumbnail', 'metadata']
+    # Verify database entries in all tables
+    # Verify final status: all is_*_done flags = True
+```
+
+### **Test Data & Fixtures**
+
+#### **Real Drone Images**
+**Available Data**: 277 DJI drone images from `DJI_202504031231_008_hartheimwithbuffer60m/` (~2.6GB total)
+
+**Test Subsets to Create**:
+```
+assets/test_data/raw_drone_images/
+├── test_minimal_3_images.zip         # Images 0001-0003 (minimal valid ODM set)
+├── test_small_10_images.zip          # Images 0001-0010 (fast development testing)
+├── test_medium_25_images.zip         # Images 0001-0025 (comprehensive testing)
+└── test_invalid_2_images.zip         # Images 0001-0002 (error testing - insufficient)
+```
+
+**Creation Script**:
+```bash
+# Run the provided script to create all test ZIP files from the 277 available DJI images
+./scripts/create_odm_test_data.sh
+
+# This creates:
+# - test_minimal_3_images.zip: 3 images (~30MB) - fastest testing
+# - test_small_10_images.zip: 10 images (~100MB) - development testing  
+# - test_medium_25_images.zip: 25 images (~250MB) - comprehensive testing
+# - test_invalid_2_images.zip: 2 images (~20MB) - error testing
+```
+
+#### **Test Fixtures**
+```python
+@pytest.fixture
+def test_raw_images_zip_minimal():
+    """Provide minimal ZIP file (3 images ~30MB) for fast testing"""
+    zip_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'raw_drone_images' / 'test_minimal_3_images.zip'
+    if not zip_path.exists():
+        pytest.skip('Minimal drone images ZIP not found - run creation script')
+    return zip_path
+
+@pytest.fixture
+def test_raw_images_zip_small():
+    """Provide small ZIP file (10 images ~100MB) for development testing"""
+    zip_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'raw_drone_images' / 'test_small_10_images.zip'
+    if not zip_path.exists():
+        pytest.skip('Small drone images ZIP not found - run creation script')
+    return zip_path
+
+@pytest.fixture
+def test_raw_images_zip_invalid():
+    """Provide invalid ZIP file (2 images) for error testing"""
+    zip_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'raw_drone_images' / 'test_invalid_2_images.zip'
+    if not zip_path.exists():
+        pytest.skip('Invalid drone images ZIP not found - run creation script')
+    return zip_path
+
+@pytest.fixture  
+def test_dataset_with_raw_images(auth_token, test_raw_images_zip_minimal, test_processor_user):
+    """Create dataset with raw images entry (follows existing pattern)"""
+    # Extract ZIP and store in test location
+    # Create v2_datasets entry (with acquisition date: 2025-04-03)
+    # Create v2_raw_images entry (3 images, ~30MB)
+    # Transfer images to storage server: raw_images/{dataset_id}/images/
+    # Yield dataset_id
+    # Cleanup in finally block
+```
+
+### **Error Testing Strategy**
+
+#### **Critical Failure Points**
+```python
+def test_odm_container_failure(test_dataset_with_insufficient_images):
+    """Test ODM failure with insufficient overlap"""
+    # Verify error handling
+    # Verify cleanup occurs
+    # Verify status: has_error=True, error_message populated
+
+def test_docker_socket_unavailable():
+    """Test graceful handling when Docker socket not accessible"""
+    # Mock Docker client failure
+    # Verify error propagation
+    # Verify no orphaned containers
+```
+
+### **Performance & Resource Testing**
+
+#### **Resource Management**
+```python
+@pytest.mark.slow
+def test_odm_resource_limits():
+    """Test ODM with large image sets"""
+    # Use larger test ZIP (10+ images)
+    # Monitor memory usage
+    # Verify cleanup after completion
+    # Verify no resource leaks
+```
+
+### **Test Execution Strategy**
+
+#### **Development Testing**
+```bash
+# Quick critical path tests
+deadtrees dev test api --test-path=api/tests/routers/test_upload_odm.py::test_zip_upload_basic
+
+# ODM integration tests
+deadtrees dev test processor --test-path=processor/tests/test_process_odm.py::test_odm_execution
+
+# Complete pipeline test
+deadtrees dev test processor --test-path=processor/tests/test_odm_pipeline.py::test_complete_pipeline
+```
+
+#### **Comprehensive Testing**
+```bash
+# Full ODM test suite (marked as comprehensive)
+pytest -m "odm and comprehensive" processor/tests/
+
+# All tests including slow ODM tests  
+pytest -m "" processor/tests/test_*odm*.py
+```
+
+### **Test Markers & Organization**
+```python
+# Test markers following existing patterns
+@pytest.mark.odm                    # ODM-specific tests
+@pytest.mark.slow                   # Long-running tests
+@pytest.mark.comprehensive          # Complete pipeline tests
+@pytest.mark.docker                 # Requires Docker functionality
+```
+
+---
+
 ## 📋 **DEPENDENCIES**
 
 ### **New Package Requirements**

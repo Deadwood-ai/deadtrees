@@ -443,90 +443,134 @@ processor-test:
 
 ## 🧪 **PHASE 4: TESTING & VALIDATION**
 
-### **Task 4.1: Unit Testing Implementation**
+### **Task 4.1: Critical Path Testing**
 
-**Context:** Testing uses pytest with real test files. Existing tests in `api/tests/` and `processor/tests/` follow established patterns.
-
-**Subtasks:**
-- [ ] Create ZIP upload tests in `api/tests/routers/test_upload.py`
-  - Test ZIP file detection and processing
-  - Test EXIF date extraction
-  - Test raw images table creation
-  - Use existing test fixtures and patterns
-
-- [ ] Create ODM processing tests in `processor/tests/`
-  - Test ODM container execution
-  - Test file transfer operations
-  - Test error handling scenarios
-  - Mock Docker operations for unit tests
-
-- [ ] Create integration tests
-  - Test complete ZIP → ODM → GeoTIFF → COG workflow
-  - Test error recovery and cleanup
-  - Use real drone image test data
-
-**Implementation Context:**
-- Follow existing test patterns and fixtures
-- Use established cleanup procedures for test data
-- Maintain test database isolation patterns
-- Use existing SSH and storage server test utilities
-
-### **Task 4.2: System Integration Testing**
-
-**Context:** System testing requires coordination between API, processor, and storage components. Existing integration tests provide patterns.
+**Context:** Follow established integration-focused testing patterns using real data. Focus on most critical functionality for fast error detection during development.
 
 **Subtasks:**
-- [ ] Test chunked ZIP upload workflow
-  - Upload real drone image ZIP files
-  - Verify raw images storage and database entries
-  - Test EXIF extraction accuracy
+- [ ] Create `api/tests/routers/test_upload_odm.py`
+  - **Primary Test**: `test_zip_upload_creates_entries()` - ZIP chunked upload → v2_datasets + v2_raw_images creation
+  - **EXIF Test**: `test_zip_acquisition_date_extraction()` - Verify acquisition date from ZIP images
+  - **Storage Test**: `test_zip_images_transferred_to_storage()` - SSH transfer verification
+  - Use existing chunked upload test patterns from `test_upload.py`
 
-- [ ] Test ODM processing integration
-  - Verify ODM container execution
-  - Test GPU utilization and performance
-  - Validate generated orthomosaic quality
+- [ ] Create `processor/tests/test_process_odm.py`
+  - **Core Test**: `test_odm_container_execution()` - Docker-in-Docker ODM execution
+  - **Integration Test**: `test_odm_generates_orthomosaic()` - Verify output file creation and transfer
+  - **Status Test**: `test_odm_status_tracking()` - Verify `is_odm_done` flag updates
+  - Follow existing processor test patterns from `test_process_cog.py`
 
-- [ ] Test complete processing pipeline
-  - End-to-end: ZIP upload → ODM → GeoTIFF → COG → Thumbnail → Metadata
-  - Test error scenarios and recovery
-  - Validate final dataset accessibility
+- [ ] Create `processor/tests/test_odm_pipeline.py` 
+  - **Pipeline Test**: `test_complete_zip_to_cog_pipeline()` - Full workflow test
+  - Use comprehensive testing pattern from `test_process_cog.py::test_comprehensive_all_small_files_pipeline`
+  - Process task types: `['odm_processing', 'geotiff', 'cog', 'thumbnail', 'metadata']`
+  - Verify all database tables updated correctly
 
 **Implementation Context:**
-- Use existing test environments and data
-- Follow established testing procedures
-- Maintain test isolation and cleanup
-- Document performance benchmarks
+- Use existing `test_dataset_for_processing` fixture pattern
+- Follow established cleanup procedures with try/finally blocks
+- Use real drone image ZIP files from `assets/test_data/raw_drone_images/`
+- Apply existing test markers: `@pytest.mark.odm`, `@pytest.mark.slow`, `@pytest.mark.comprehensive`
 
-### **Task 4.3: Deployment Preparation**
+### **Task 4.2: Test Data & Fixtures Setup**
 
-**Context:** System deployment uses Docker Compose with separate api and processor services. Storage server requires SSH connectivity.
+**Context:** Create minimal real test data following existing patterns in `assets/test_data/` and `shared/testing/fixtures.py`.
 
 **Subtasks:**
-- [ ] Prepare database migrations
-  - Test migration scripts on staging environment
-  - Validate enum additions don't break existing code
-  - Plan rollback procedures
+- [ ] Create test drone image ZIP files from available 277 DJI images (~2.6GB total)
+  - `test_minimal_3_images.zip` - Minimal valid set (3 images, ~30MB)
+  - `test_small_10_images.zip` - Development testing (10 images, ~100MB)
+  - `test_medium_25_images.zip` - Comprehensive testing (25 images, ~250MB)
+  - `test_invalid_2_images.zip` - Error testing (2 images, insufficient for ODM)
+  - Source: `assets/test_data/raw_drone_images/DJI_202504031231_008_hartheimwithbuffer60m/` (277 DJI images available)
 
-- [ ] Configure storage server directories
-  - Create `raw_images/` directory structure
-  - Set appropriate permissions for SSH access
-  - Plan storage capacity monitoring
+- [ ] Create ODM test fixtures following existing patterns
+  ```python
+  # processor/tests/conftest.py - ADD
+  @pytest.fixture
+  def test_raw_images_zip_minimal():
+      """Provide minimal ZIP file (3 DJI images ~30MB)"""
+      zip_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'raw_drone_images' / 'test_minimal_3_images.zip'
+      if not zip_path.exists():
+          pytest.skip('Minimal drone images ZIP not found - run creation script')
+      return zip_path
 
-- [ ] Update environment configuration
-  - Configure ODM Docker image access
-  - Set up GPU access on processing server
-  - Update SSH key management
+  @pytest.fixture
+  def test_raw_images_zip_small():
+      """Provide small ZIP file (10 DJI images ~100MB) for development"""
+      zip_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'raw_drone_images' / 'test_small_10_images.zip'
+      if not zip_path.exists():
+          pytest.skip('Small drone images ZIP not found - run creation script')
+      return zip_path
 
-- [ ] Create deployment documentation
-  - Document new environment variables
-  - Update API documentation for new upload types
-  - Create operational procedures for ODM processing
+  @pytest.fixture
+  def test_dataset_with_raw_images(auth_token, test_raw_images_zip_minimal, test_processor_user):
+      """Create dataset with raw images (follows test_dataset_for_processing pattern)"""
+      # Create v2_datasets entry (acquisition date: 2025-04-03 from DJI EXIF)
+      # Extract ZIP and create v2_raw_images entry (3 images, ~30MB)
+      # Transfer images to storage server: raw_images/{dataset_id}/images/
+      # Yield dataset_id
+      # Cleanup in finally block
+  ```
 
 **Implementation Context:**
-- Follow existing deployment patterns and procedures
-- Maintain system reliability and monitoring
-- Plan gradual rollout strategy
-- Document troubleshooting procedures
+- Follow existing fixture patterns from `processor/tests/conftest.py::test_dataset_for_processing`
+- Use established cleanup patterns with database cascade deletes
+- Maintain test environment safety checks from `shared/testing/safety.py`
+
+### **Task 4.3: Error & Performance Testing**
+
+**Context:** Test critical failure scenarios and resource management following existing error testing patterns.
+
+**Subtasks:**
+- [ ] Create error handling tests
+  - `test_odm_container_failure()` - Invalid image sets, insufficient overlap
+  - `test_docker_socket_unavailable()` - Docker daemon not accessible
+  - `test_storage_transfer_failure()` - SSH connection issues
+  - Follow existing error testing patterns from processor tests
+
+- [ ] Create performance tests (marked as `@pytest.mark.slow`)
+  - `test_odm_with_large_image_set()` - Resource usage monitoring
+  - `test_odm_cleanup_after_failure()` - Verify no resource leaks
+  - Follow existing slow test patterns from `test_process_cog.py`
+
+**Implementation Context:**
+- Use existing error handling verification from processor tests
+- Follow established performance testing patterns
+- Maintain existing test isolation between test runs
+
+### **Task 4.4: Test Execution Strategy**
+
+**Context:** Enable fast development feedback and comprehensive validation using established CLI patterns.
+
+**Development Testing:**
+```bash
+# Quick critical path during development (uses test_minimal_3_images.zip ~30MB)
+deadtrees dev test api --test-path=api/tests/routers/test_upload_odm.py::test_zip_upload_creates_entries
+
+# ODM core functionality (uses test_minimal_3_images.zip ~30MB)
+deadtrees dev test processor --test-path=processor/tests/test_process_odm.py::test_odm_container_execution
+
+# Complete workflow verification (uses test_small_10_images.zip ~100MB for faster processing)
+deadtrees dev test processor --test-path=processor/tests/test_odm_pipeline.py::test_complete_zip_to_cog_pipeline
+```
+
+**Comprehensive Testing:**
+```bash
+# All ODM tests (excludes slow tests by default)
+pytest processor/tests/test_*odm*.py
+
+# Include slow/comprehensive tests
+pytest -m "odm and comprehensive" processor/tests/
+
+# Full pipeline validation (like existing comprehensive tests)
+pytest -m comprehensive
+```
+
+**Implementation Context:**
+- Follow existing test execution patterns from `deadtrees-cli/deadtrees_cli/dev.py`
+- Use established test markers and filtering
+- Maintain existing test environment management
 
 ---
 
