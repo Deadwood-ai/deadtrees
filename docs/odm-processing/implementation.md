@@ -29,6 +29,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 - RTK ODM Parameters: When RTK data is detected, ODM must use `--force-gps` flag and `--gps-accuracy` set to centimeter values (0.01-0.05) based on detected RTK precision
 - Storage Paths: Use exact path structure - raw images at `raw_images/{dataset_id}/images/` and generated ortho at `raw_images/{dataset_id}/odm_orthophoto.tif`
 - RTK File Extensions: Detect all RTK file types including `.RTK, .MRK, .RTL, .RTB, .RPOS, .RTS, .IMU` extensions
+- Database RLS Policies: New v2 tables must have RLS policies created separately - standard pattern requires "Enable insert for authenticated users only", "Enable read access for all users", and "Enable update for processor" policies
 
 ---
 
@@ -96,7 +97,7 @@ This document outlines the step-by-step implementation plan for integrating Open
   - Test Status model includes is_odm_done field
      - **Run Test**: `deadtrees dev test api shared/tests/test_odm_models.py`
 
-- [ ] **CREATE** `api/tests/test_odm_database.py` 
+- [x] **CREATE** `api/tests/test_odm_database.py` 
   - Test v2_raw_images table creation and constraints
   - Test enum extensions (odm_processing in both enums)
   - Test foreign key relationships work correctly
