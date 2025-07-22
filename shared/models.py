@@ -36,6 +36,7 @@ class StatusEnum(str, Enum):
 	ortho_processing = 'ortho_processing'
 	cog_processing = 'cog_processing'
 	metadata_processing = 'metadata_processing'
+	odm_processing = 'odm_processing'
 	thumbnail_processing = 'thumbnail_processing'
 	deadwood_segmentation = 'deadwood_segmentation'
 	forest_cover_segmentation = 'forest_cover_segmentation'

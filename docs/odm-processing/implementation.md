@@ -112,7 +112,7 @@ class TaskTypeEnum(str, Enum):
     thumbnail = 'thumbnail'            # Existing
 ```
 
-- [ ] **ADD** `odm_processing` to `StatusEnum` in `shared/models.py`  
+- [x] **ADD** `odm_processing` to `StatusEnum` in `shared/models.py`  
   - Add `odm_processing = 'odm_processing'`
   - Follow existing status naming patterns
 
