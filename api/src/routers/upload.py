@@ -15,6 +15,7 @@ from shared.ortho import upsert_ortho_entry
 from shared.logging import LogCategory, LogContext, UnifiedLogger, SupabaseHandler
 
 from ..upload.upload import create_dataset_entry
+from ..utils.file_utils import UploadType
 
 
 router = APIRouter()

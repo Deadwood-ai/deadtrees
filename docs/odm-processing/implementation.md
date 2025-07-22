@@ -30,6 +30,8 @@ This document outlines the step-by-step implementation plan for integrating Open
 - Storage Paths: Use exact path structure - raw images at `raw_images/{dataset_id}/images/` and generated ortho at `raw_images/{dataset_id}/odm_orthophoto.tif`
 - RTK File Extensions: Detect all RTK file types including `.RTK, .MRK, .RTL, .RTB, .RPOS, .RTS, .IMU` extensions
 - Database RLS Policies: New v2 tables must have RLS policies created separately - standard pattern requires "Enable insert for authenticated users only", "Enable read access for all users", and "Enable update for processor" policies
+- ODM Test Data Creation: The `./scripts/create_odm_test_data.sh` script requires `zip` command - install with `sudo apt install -y zip` if missing
+- Import Requirements: Future tasks must import `UploadType` and `detect_upload_type()` from `api/src/utils/file_utils.py` (not from routers) to avoid circular dependencies
 
 ---
 
@@ -39,7 +41,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 **Context:** Need real drone image test files for testing throughout implementation.
 
 **Subtasks:**
-- [ ] **RUN** test data creation script to generate ZIP files
+- [x] **RUN** test data creation script to generate ZIP files
   - Execute: `./scripts/create_odm_test_data.sh`
   - Verify creation of test ZIP files in `assets/test_data/raw_drone_images/`
   - Required files: `test_minimal_3_images.zip` (~30MB), `test_small_10_images.zip` (~100MB)
@@ -91,21 +93,21 @@ This document outlines the step-by-step implementation plan for integrating Open
 **Context:** Validate database schema and models work correctly before building on them.
 
 **Subtasks:**
-- [x] **CREATE** `shared/tests/test_odm_models.py`
+- [x] **CREATE** `shared/tests/db/test_odm_models.py`
   - Test RawImages model validation and serialization
   - Test TaskTypeEnum and StatusEnum include new values
   - Test Status model includes is_odm_done field
-     - **Run Test**: `deadtrees dev test api shared/tests/test_odm_models.py`
+     - **Run Test**: `deadtrees dev test api shared/db/tests/test_odm_models.py`
 
-- [x] **CREATE** `api/tests/test_odm_database.py` 
+- [x] **CREATE** `api/tests/db/test_odm_database.py` 
   - Test v2_raw_images table creation and constraints
   - Test enum extensions (odm_processing in both enums)
   - Test foreign key relationships work correctly
-  - **Run Test**: `deadtrees dev test api api/tests/test_odm_database.py`
+  - **Run Test**: `deadtrees dev test api api/tests/db/test_odm_database.py`
 
 - [x] **VERIFY** Phase 1 Complete
-  - All models tests pass: `deadtrees dev test api shared/tests/test_odm_models.py`
-  - All database tests pass: `deadtrees dev test api api/tests/test_odm_database.py`
+  - All models tests pass: `deadtrees dev test api shared/db/tests/test_odm_models.py`
+  - All database tests pass: `deadtrees dev test api api/db/tests/test_odm_database.py`
   - **STOP** - Do not proceed until Phase 1 tests are passing
 
 ---
@@ -117,7 +119,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 **Context:** Current endpoint at `api/src/routers/upload.py` handles chunked GeoTIFF uploads. Need to add smart file type detection and routing.
 
 **Subtasks:**
-- [ ] **CREATE** `UploadType` enum in `api/src/routers/upload.py`
+- [x] **CREATE** `UploadType` enum in `api/src/routers/upload.py`
   - Values: `GEOTIFF = 'geotiff'`, `RAW_IMAGES_ZIP = 'raw_images_zip'`
 
 - [ ] **ADD** `detect_upload_type()` function in upload router
