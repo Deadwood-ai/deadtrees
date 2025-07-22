@@ -33,7 +33,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 **Context:** The system uses v2_ prefixed tables with Supabase PostgreSQL. Current task types: `cog`, `thumbnail`, `deadwood`, `geotiff`, `metadata`.
 
 **Subtasks:**
-- [ ] Create sql commands to create the tables, so that i can run them in the supabase editor. 
+- [x] Create sql commands to create the tables, so that i can run them in the supabase editor. 
   - Create new v2_raw_images table following established v2_* patterns
   - Include proper indexing and foreign key constraints
   - Reference existing migration patterns in `supabase/migrations/`
