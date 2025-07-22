@@ -73,6 +73,7 @@ class TaskTypeEnum(str, Enum):
 	deadwood = 'deadwood'  # Run deadwood segmentation
 	geotiff = 'geotiff'  # Convert to geotiff
 	metadata = 'metadata'  # Extract metadata
+	odm_processing = 'odm_processing'  # ODM raw image processing
 
 
 class TaskPayload(BaseModel):

@@ -24,6 +24,8 @@ This document outlines the step-by-step implementation plan for integrating Open
 
 ## Rules & Tips
 
+- The `shared/models.py` file uses tab indentation (not spaces) - maintain consistency when adding new enum values or model fields
+
 
 
 ## 🗂️ **PHASE 1: DATABASE & MODEL FOUNDATION**
@@ -95,7 +97,7 @@ ALTER TABLE "public"."v2_statuses" ADD COLUMN "is_odm_done" boolean NOT NULL DEF
 **Context:** Models in `shared/models.py` use Pydantic with enum validation. Current TaskTypeEnum has 5 values: cog, thumbnail, deadwood, geotiff, metadata.
 
 **Subtasks:**
-- [ ] **ADD** `odm_processing` to `TaskTypeEnum` in `shared/models.py`
+- [x] **ADD** `odm_processing` to `TaskTypeEnum` in `shared/models.py`
   - Add `odm_processing = 'odm_processing'`
   - Maintain alphabetical order for consistency
   - **NOTE**: `geotiff` task type already exists and will be used for ODM output standardization
