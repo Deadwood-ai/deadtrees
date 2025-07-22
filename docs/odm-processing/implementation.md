@@ -32,6 +32,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 - Database RLS Policies: New v2 tables must have RLS policies created separately - standard pattern requires "Enable insert for authenticated users only", "Enable read access for all users", and "Enable update for processor" policies
 - ODM Test Data Creation: The `./scripts/create_odm_test_data.sh` script requires `zip` command - install with `sudo apt install -y zip` if missing
 - Import Requirements: Future tasks must import `UploadType` and `detect_upload_type()` from `api/src/utils/file_utils.py` (not from routers) to avoid circular dependencies
+- Upload Endpoint Testing: When testing chunk upload endpoints with mock data, use intermediate chunks (chunks_total > 1) to avoid final chunk processing that requires valid file formats
 
 ---
 
@@ -127,7 +128,7 @@ This document outlines the step-by-step implementation plan for integrating Open
   - Return appropriate UploadType enum
   - Handle unsupported file types with HTTPException
 
-- [ ] **ENHANCE** `/datasets/chunk` endpoint with optional upload_type parameter
+- [x] **ENHANCE** `/datasets/chunk` endpoint with optional upload_type parameter
   - Add `upload_type: Annotated[Optional[UploadType], Form()] = None`
   - Maintain backward compatibility (auto-detect if not provided)
   - Route to appropriate processing logic based on detected type
@@ -136,7 +137,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 **Context:** Test the enhanced upload endpoint with real ZIP files before building ZIP processing.
 
 **Subtasks:**
-- [ ] **CREATE** `api/tests/routers/test_upload_odm_detection.py`
+- [x] **CREATE** `api/tests/routers/test_upload_odm_detection.py`
   - Test `detect_upload_type()` with .tif and .zip files
   - Test enhanced chunk endpoint accepts upload_type parameter
   - Test backward compatibility (existing GeoTIFF uploads unchanged)

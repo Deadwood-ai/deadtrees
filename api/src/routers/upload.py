@@ -47,6 +47,7 @@ async def upload_geotiff_chunk(
 	additional_information: Annotated[Optional[str], Form()] = None,
 	data_access: Annotated[DatasetAccessEnum, Form()] = DatasetAccessEnum.public,
 	citation_doi: Annotated[Optional[str], Form()] = None,
+	upload_type: Annotated[Optional[UploadType], Form()] = None,
 ):
 	"""Handle chunked upload of a GeoTIFF file with incremental hash computation"""
 	user = verify_token(token)
@@ -54,6 +55,16 @@ async def upload_geotiff_chunk(
 		logger.error('Invalid token provided for upload', LogContext(category=LogCategory.AUTH, token=token))
 		raise HTTPException(status_code=401, detail='Invalid token')
 
+	# Auto-detect upload type if not provided (backward compatibility)
+	if upload_type is None:
+		upload_type = detect_upload_type(file.filename)
+
+	# Route to appropriate processing logic based on detected type
+	if upload_type == UploadType.RAW_IMAGES_ZIP:
+		# TODO: Route to ZIP processing logic in future task
+		raise HTTPException(status_code=501, detail='ZIP processing not yet implemented')
+
+	# Continue with existing GeoTIFF processing logic
 	# Start upload timer
 	t1 = time.time()
 
