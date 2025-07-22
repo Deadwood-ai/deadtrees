@@ -122,20 +122,25 @@ async def upload_chunk(
         detected_type = upload_type or detect_upload_type(upload_target_path)
         
         if detected_type == UploadType.GEOTIFF:
+            # Route to extracted GeoTIFF processor (refactored from router)
             return await process_geotiff_upload(...)
         elif detected_type == UploadType.RAW_IMAGES_ZIP:
+            # Route to ZIP processor (new functionality)
             return await process_raw_images_upload(...)
 ```
 
-### **2. Upload Processing Functions**
+### **2. Upload Processing Functions - Clean Architecture**
+**Design Principle**: Router handles chunked upload coordination, processors handle final file processing.
 ```python
 # api/src/upload/geotiff_processor.py
 async def process_geotiff_upload(...) -> Dataset:
-    """Extract existing GeoTIFF upload logic from upload.py"""
+    """Refactored GeoTIFF upload logic extracted from upload router"""
     # 1. Create dataset entry
-    # 2. Rename file, create ortho entry
-    # 3. Update status is_upload_done=True
-    # 4. Frontend calls /process endpoint separately
+    # 2. Rename file to {dataset_id}_ortho.tif in archive directory
+    # 3. Calculate SHA256 hash and extract ortho info with cog_info()
+    # 4. Create ortho entry via upsert_ortho_entry()
+    # 5. Update status is_upload_done=True
+    # 6. Return dataset (maintains identical behavior to original)
 
 # api/src/upload/raw_images_processor.py  
 async def process_raw_images_upload(...) -> Dataset:
@@ -147,6 +152,13 @@ async def process_raw_images_upload(...) -> Dataset:
     # 5. Update status is_upload_done=True
     # 6. Return dataset (NO task queueing here)
 ```
+
+**Refactoring Benefits:**
+- **Separation of Concerns**: Router handles chunked upload, processors handle file-specific logic  
+- **Consistency**: Both GeoTIFF and ZIP follow same architectural pattern
+- **Testability**: Processors can be unit tested independently of upload logic
+- **Maintainability**: File processing logic encapsulated in dedicated modules
+- **No Functional Changes**: GeoTIFF uploads maintain identical behavior after refactoring
 
 ### **3. Configurable Process Endpoint**
 ```python

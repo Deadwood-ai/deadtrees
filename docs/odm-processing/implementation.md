@@ -35,6 +35,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 - Upload Endpoint Testing: When testing chunk upload endpoints with mock data, use intermediate chunks (chunks_total > 1) to avoid final chunk processing that requires valid file formats
 - Raw Images Processor Structure: The main process_raw_images_upload() function coordinates all processing steps, with placeholder implementations for EXIF extraction and SSH transfer that will be completed in future tasks
 - Storage Architecture Change: ZIP extraction now follows the same pattern as GeoTIFF uploads - direct extraction to mounted storage (raw_images/{dataset_id}/) instead of SSH transfer during upload, storing both original ZIP and extracted contents
+- Upload Processing Refactoring: Both GeoTIFF and ZIP upload logic should be extracted into separate processor functions (geotiff_processor.py and raw_images_processor.py) for clean architecture, leaving only chunked upload coordination in the router
 
 ---
 
@@ -185,6 +186,43 @@ This document outlines the step-by-step implementation plan for integrating Open
   - Upload detection tests pass: `deadtrees dev test api api/tests/routers/test_upload_odm_detection.py`
   - ZIP processing tests pass: `deadtrees dev test api api/tests/routers/test_upload_odm_zip.py`
   - **STOP** - Do not proceed until Phase 2 tests are passing
+
+### **Task 2.4A: Refactor GeoTIFF Upload Logic**
+
+**Context:** Extract existing GeoTIFF upload logic into a separate processor function for consistency with ZIP processing architecture.
+
+**Subtasks:**
+- [ ] **CREATE** `api/src/upload/geotiff_processor.py`
+  - Function: `async def process_geotiff_upload(...) -> Dataset`
+  - Extract logic from upload router: dataset creation, file renaming, hash calculation, ortho entry creation
+  - Handle error cases with proper status updates
+  - Follow same pattern as `process_raw_images_upload()`
+
+- [ ] **REFACTOR** `/datasets/chunk` endpoint in `api/src/routers/upload.py`
+  - Import and call `process_geotiff_upload()` for final chunk processing
+  - Route both GeoTIFF and ZIP processing to their respective processor functions
+  - Keep chunked upload logic in router, extract final processing logic
+  - Maintain identical functionality and error handling
+
+- [ ] **UPDATE** imports in upload router
+  - Import `process_geotiff_upload` from `..upload.geotiff_processor`
+  - Import `process_raw_images_upload` from `..upload.raw_images_processor`
+  - Clean up unused imports after refactoring
+
+### **Task 2.4B: Test Refactored Upload Logic**
+
+**Context:** Verify that the refactored GeoTIFF upload maintains identical functionality.
+
+**Subtasks:**
+- [ ] **RUN** existing GeoTIFF upload tests to verify no regressions
+  - Execute: `deadtrees dev test api api/tests/routers/test_upload.py`
+  - All existing tests must pass with identical behavior
+  - Verify file naming, ortho creation, status updates remain unchanged
+
+- [ ] **CREATE** `api/tests/upload/test_geotiff_processor.py` (optional)
+  - Test `process_geotiff_upload()` function directly
+  - Test error handling and cleanup scenarios
+  - **Run Test**: `deadtrees dev test api api/tests/upload/test_geotiff_processor.py`
 
 ### **Task 2.5: Configurable Process Endpoint**
 
