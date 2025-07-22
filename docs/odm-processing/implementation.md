@@ -122,7 +122,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 - [x] **CREATE** `UploadType` enum in `api/src/routers/upload.py`
   - Values: `GEOTIFF = 'geotiff'`, `RAW_IMAGES_ZIP = 'raw_images_zip'`
 
-- [ ] **ADD** `detect_upload_type()` function in upload router
+- [x] **ADD** `detect_upload_type()` function in upload router
   - Check file extensions (.tif, .tiff, .zip)
   - Return appropriate UploadType enum
   - Handle unsupported file types with HTTPException
