@@ -15,14 +15,13 @@
    d. Mark the task as complete by changing `[ ]` to `[x]` in `implementation.md`. _(Do not commit plan.md; it is in .gitignore.)_
    e. Summarize what changed, mentioning affected files and key logic.
 6. **Reflect on learnings from this step:**
-   - Write down **only** _general_, _project-wide_ insights, patterns, or new constraints that are **beneficial for executing future tasks**.
-   - Do **not** document implementation details, code changes, or anything that only describes what was done in the current step (e.g. "Migrated to TypeScript", "Added Winston logging", "Created .gitignore", etc.). Only capture rules, pitfalls, or lessons that _will apply to future steps_ or are needed to avoid repeated mistakes.
-   - Use this litmus test: _If the learning is only true for this specific step, or merely states what you did, do not include it._
-   - Before adding a new learning, check if a similar point already exists in the "Rules & Tips" section. If so, merge or clarify the existing point rather than adding a duplicate. Do not remove unique prior rules & tips.
-   - Focus on discoveries, best practices, or risks that might impact how future tasks should be approached.
-   - **Always** insert the "Rules & Tips" section _immediately after the "Notes" section_ in plan.md (never at the end of the file). If "Rules & Tips" does not exist, create it directly after "Notes".
-   - Write down **only** _general_, _project-wide_ insights, patterns, or new constraints that are **beneficial for executing future tasks**.
-   - Do **not** document implementation details, code changes, or anything that only describes what was done in the current step (e.g. "Migrated to TypeScript", "Added Winston logging", "Created .gitignore", etc.). Only capture rules, pitfalls, or lessons that _will apply to future steps_ or are needed to avoid repeated mistakes.
+   - **ONLY** add to "Rules & Tips" if you discovered specific constraints, patterns, or gotchas that **future tasks in this same implementation.md** will need to know to succeed.
+   - **DO NOT** add general documentation of what was done, generic best practices, or information already covered in requirements.md, design.md, or the implementation.md task descriptions.
+   - Use this litmus test: _"Will a future task in this implementation plan fail or be done incorrectly without knowing this specific technical constraint or pattern?"_
+   - Examples of what TO include: "Database enum updates require dropping dependent views first", "Status columns must follow is_*_done naming pattern", "Function X must be called before function Y"
+   - Examples of what NOT to include: "Added logging", "Created new table", "Updated models", general coding standards, or anything that describes what you accomplished
+   - Before adding, check if similar information already exists in "Rules & Tips" and merge/clarify instead of duplicating.
+   - **Always** insert "Rules & Tips" section _immediately after the "Notes" section_ in implementation.md (never at the end).
 
 7. STOP — do not proceed to the next task.
 

@@ -71,7 +71,7 @@ ALTER TABLE "public"."v2_raw_images" ADD CONSTRAINT "v2_raw_images_pkey" PRIMARY
 - No impact on existing v2_datasets semantics or queries
 - Scalable for different upload volumes (more orthos vs raw uploads)
 
-- [ ] Create `supabase/migrations/YYYYMMDDHHMMSS_add_odm_status_tracking.sql`
+- [x] Create `supabase/migrations/YYYYMMDDHHMMSS_add_odm_status_tracking.sql`
   - Add `odm_processing` to v2_status enum type
   - Add `is_odm_done` boolean flag to v2_statuses table
   - Follow pattern from existing status migrations (20250123150750_adding_new_metadata_status.sql)
