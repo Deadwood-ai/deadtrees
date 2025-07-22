@@ -184,6 +184,27 @@ class Dataset(PartialModelMixin, BaseModel):
 		return v
 
 
+class RawImages(BaseModel):
+	id: Optional[int] = None
+	dataset_id: int
+	raw_image_count: int
+	raw_image_size_mb: int
+	raw_images_path: str  # Contains both images and RTK files
+	camera_metadata: Optional[Dict[str, Any]] = None
+	has_rtk_data: bool = False
+	rtk_precision_cm: Optional[float] = None
+	rtk_quality_indicator: Optional[int] = None
+	rtk_file_count: int = 0
+	version: int = 1
+	created_at: Optional[datetime] = None
+
+	@field_serializer('created_at', mode='plain')
+	def datetime_to_isoformat(field: datetime | None) -> str | None:
+		if field is None:
+			return None
+		return field.isoformat()
+
+
 class Cog(BaseModel):
 	"""
 	Represents the cloud optimized geotiff processing results

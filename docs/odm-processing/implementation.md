@@ -25,6 +25,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 ## Rules & Tips
 
 - The `shared/models.py` file uses tab indentation (not spaces) - maintain consistency when adding new enum values or model fields
+- When adding new Pydantic models in `shared/models.py`, place them near related models - RawImages was placed after Dataset since they are related v2_* table models
 
 
 
@@ -130,7 +131,7 @@ class StatusEnum(str, Enum):
     odm_processing = 'odm_processing'                # NEW
 ```
 
-- [ ] **ADD** `RawImages` Pydantic model in `shared/models.py`
+- [x] **ADD** `RawImages` Pydantic model in `shared/models.py`
   - Create new RawImages model for separate v2_raw_images table
   - Include proper field validation and serializers
   - Follow existing model patterns from other v2_* models
