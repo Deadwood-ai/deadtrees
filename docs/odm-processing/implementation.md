@@ -24,6 +24,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 
 ## Rules & Tips
 - check out `design.md` and `requirements.md` for more context for the given task. 
+
 - The `shared/models.py` file uses tab indentation (not spaces) - maintain consistency when adding new enum values or model fields
 - EXIF Extraction Strategy: Requirements specify frontend EXIF extraction for immediate UX, but implementation tasks focus on backend extraction - clarify if both approaches are needed or if backend-only is sufficient
 - RTK ODM Parameters: When RTK data is detected, ODM must use `--force-gps` flag and `--gps-accuracy` set to centimeter values (0.01-0.05) based on detected RTK precision
@@ -157,7 +158,7 @@ This document outlines the step-by-step implementation plan for integrating Open
   - Create v2_datasets and v2_raw_images entries
   - **NO task queueing** - only file handling and database creation
 
-- [ ] **CREATE** `api/src/upload/exif_utils.py`
+- [x] **CREATE** `api/src/upload/exif_utils.py`
   - Function: `extract_comprehensive_exif(image_path: Path) -> Dict[str, Any]`
   - Function: `extract_acquisition_date(image_path: Path) -> Optional[datetime]`
   - Use PIL for EXIF extraction, handle missing data gracefully
