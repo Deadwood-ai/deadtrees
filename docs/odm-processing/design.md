@@ -66,9 +66,10 @@ ALTER TABLE "public"."v2_statuses" ADD COLUMN "is_odm_done" boolean NOT NULL DEF
 - **Monitoring ready**: Integrates with existing status monitoring
 
 **Storage Path Convention:**
-- Raw images + RTK files: `raw_images/{dataset_id}/images/` (unified directory for all ZIP contents)
+- Original ZIP file: `raw_images/{dataset_id}/{dataset_id}_raw_images.zip`
+- Raw images + RTK files: `raw_images/{dataset_id}/images/` (extracted ZIP contents)
 - Generated ortho: `raw_images/{dataset_id}/odm_orthophoto.tif`
-- Matches existing storage patterns and preserves original ZIP structure
+- Matches existing storage patterns with direct mounted storage (no SSH transfer during upload)
 
 ### **Frontend EXIF Extraction - Smart UX**
 ```typescript
@@ -138,12 +139,13 @@ async def process_geotiff_upload(...) -> Dataset:
 
 # api/src/upload/raw_images_processor.py  
 async def process_raw_images_upload(...) -> Dataset:
-    """New ZIP processing - file handling only"""
+    """New ZIP processing - direct storage like GeoTIFF uploads"""
     # 1. Create dataset entry
-    # 2. Extract ZIP, validate images, transfer to storage
-    # 3. Create raw_images entry
-    # 4. Update status is_upload_done=True
-    # 5. Return dataset (NO task queueing here)
+    # 2. Extract ZIP directly to mounted storage (raw_images/{dataset_id}/)
+    # 3. Store both original ZIP and extracted contents
+    # 4. Create raw_images entry with storage paths
+    # 5. Update status is_upload_done=True
+    # 6. Return dataset (NO task queueing here)
 ```
 
 ### **3. Configurable Process Endpoint**
@@ -269,16 +271,17 @@ def extract_acquisition_date(image_path: Path) -> Optional[datetime]:
 ```
 Storage Server:
 ├── archive/
-│   └── {dataset_id}_ortho.tif     # Final orthomosaics (both workflows)
+│   └── {dataset_id}_ortho.tif         # Final orthomosaics (both workflows)
 └── raw_images/
     └── {dataset_id}/
+        ├── {dataset_id}_raw_images.zip # Original ZIP file (preserved)
         └── images/
-            ├── DJI_001.JPG        # ZIP uploads - drone images
+            ├── DJI_001.JPG            # Extracted drone images
             ├── DJI_002.JPG        
-            ├── DJI_timestamp.MRK  # RTK timestamp data
-            ├── DJI_rtk.RTK        # RTK positioning data
-            ├── DJI_rtk.RTL        # RTK auxiliary files
-            └── ...                # All ZIP contents together
+            ├── DJI_timestamp.MRK      # RTK timestamp data
+            ├── DJI_rtk.RTK            # RTK positioning data
+            ├── DJI_rtk.RTL            # RTK auxiliary files
+            └── ...                    # All extracted ZIP contents
 
 Processing Server (temporary):
 └── processing_dir/

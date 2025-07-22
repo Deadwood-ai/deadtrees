@@ -76,6 +76,7 @@ class Settings(BaseSettings):
 	TRASH_DIR: str = 'trash'
 	DOWNLOADS_DIR: str = 'downloads'
 	PROCESSING_DIR: str = 'processing_dir'
+	RAW_IMAGES_DIR: str = 'raw_images'
 
 	# Temporary processing directory
 	# tmp_processing_path: str = str(Path(tempfile.mkdtemp(prefix='processing')))
@@ -174,6 +175,14 @@ class Settings(BaseSettings):
 	@property
 	def downloads_path(self) -> Path:
 		path = self.base_path / self.DOWNLOADS_DIR
+		if not path.exists():
+			path.mkdir(parents=True, exist_ok=True)
+
+		return path
+
+	@property
+	def raw_images_path(self) -> Path:
+		path = self.base_path / self.RAW_IMAGES_DIR
 		if not path.exists():
 			path.mkdir(parents=True, exist_ok=True)
 

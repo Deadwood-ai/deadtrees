@@ -23,7 +23,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 ---
 
 ## Rules & Tips
-
+- check out `design.md` and `requirements.md` for more context for the given task. 
 - The `shared/models.py` file uses tab indentation (not spaces) - maintain consistency when adding new enum values or model fields
 - EXIF Extraction Strategy: Requirements specify frontend EXIF extraction for immediate UX, but implementation tasks focus on backend extraction - clarify if both approaches are needed or if backend-only is sufficient
 - RTK ODM Parameters: When RTK data is detected, ODM must use `--force-gps` flag and `--gps-accuracy` set to centimeter values (0.01-0.05) based on detected RTK precision
@@ -33,6 +33,8 @@ This document outlines the step-by-step implementation plan for integrating Open
 - ODM Test Data Creation: The `./scripts/create_odm_test_data.sh` script requires `zip` command - install with `sudo apt install -y zip` if missing
 - Import Requirements: Future tasks must import `UploadType` and `detect_upload_type()` from `api/src/utils/file_utils.py` (not from routers) to avoid circular dependencies
 - Upload Endpoint Testing: When testing chunk upload endpoints with mock data, use intermediate chunks (chunks_total > 1) to avoid final chunk processing that requires valid file formats
+- Raw Images Processor Structure: The main process_raw_images_upload() function coordinates all processing steps, with placeholder implementations for EXIF extraction and SSH transfer that will be completed in future tasks
+- Storage Architecture Change: ZIP extraction now follows the same pattern as GeoTIFF uploads - direct extraction to mounted storage (raw_images/{dataset_id}/) instead of SSH transfer during upload, storing both original ZIP and extracted contents
 
 ---
 
@@ -148,7 +150,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 **Context:** Create ZIP extraction, validation, and transfer logic. Store raw images and create database entries.
 
 **Subtasks:**
-- [ ] **CREATE** `api/src/upload/raw_images_processor.py`
+- [x] **CREATE** `api/src/upload/raw_images_processor.py`
   - Function: `async def process_raw_images_upload(...) -> Dataset`
   - Handle ZIP extraction, validation, SSH transfer
   - Create v2_datasets and v2_raw_images entries
