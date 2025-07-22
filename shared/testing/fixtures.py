@@ -118,7 +118,9 @@ def cleanup_database(auth_token):
 	"""Clean up database tables after all tests"""
 	yield
 
-	with use_client(auth_token) as client:
+	processor_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD, use_cached_session=False)
+
+	with use_client(processor_token) as client:
 		# With CASCADE delete, we only need to clean the parent table
 		client.table(settings.datasets_table).delete().neq('id', 0).execute()
 		client.table(settings.logs_table).delete().neq('id', 1).execute()
