@@ -113,6 +113,7 @@ class Status(BaseModel):
 	is_deadwood_done: bool = False
 	is_forest_cover_done: bool = False
 	is_metadata_done: bool = False
+	is_odm_done: bool = False
 	is_audited: bool = False
 	has_error: bool = False
 	error_message: Optional[str] = None

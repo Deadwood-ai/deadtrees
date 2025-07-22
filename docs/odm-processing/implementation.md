@@ -25,7 +25,6 @@ This document outlines the step-by-step implementation plan for integrating Open
 ## Rules & Tips
 
 - The `shared/models.py` file uses tab indentation (not spaces) - maintain consistency when adding new enum values or model fields
-- When adding new Pydantic models in `shared/models.py`, place them near related models - RawImages was placed after Dataset since they are related v2_* table models
 
 
 
@@ -158,7 +157,7 @@ class RawImages(BaseModel):
         return field.isoformat()
 ```
 
-- [ ] **EXTEND** `Status` Pydantic model in `shared/models.py`
+- [x] **EXTEND** `Status` Pydantic model in `shared/models.py`
   - Add `is_odm_done: bool = False` field
   - Follow existing boolean flag pattern (is_cog_done, is_thumbnail_done, etc.)
 
