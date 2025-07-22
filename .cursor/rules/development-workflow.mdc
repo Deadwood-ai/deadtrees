@@ -1,7 +1,5 @@
 ---
-description: Development environment management and testing workflows
-globs: 
-alwaysApply: false
+alwaysApply: true
 ---
 # Development Workflow & Testing
 
@@ -13,9 +11,129 @@ alwaysApply: false
 - Troubleshooting development environment issues
 - Implementing real data testing patterns
 
-## 🎯 **CORE PRINCIPLE**
+## 🎯 **CORE PRINCIPLES**
 **ALWAYS use `deadtrees` CLI commands. NEVER run pytest directly - always use `deadtrees dev test` commands.**
 **Use real data and fixtures instead of mocking for geospatial and utility functions.**
+**PREFER FUNCTIONAL PROGRAMMING over classes throughout the codebase.**
+
+## 🚨 **FUNCTIONAL PROGRAMMING REQUIREMENTS**
+
+### **❌ NEVER Use Test Classes**
+```python
+# BAD: Test classes are not allowed
+class TestUploadFunctionality:
+    def test_upload_zip_processing(self):
+        pass
+    
+    def test_upload_geotiff_processing(self):
+        pass
+
+# GOOD: Use functions instead
+def test_upload_zip_processing():
+    """Test ZIP upload processing functionality"""
+    pass
+
+def test_upload_geotiff_processing():
+    """Test GeoTIFF upload processing functionality"""
+    pass
+```
+
+### **✅ Functional Test Structure (Required Pattern)**
+```python
+# Always use function-based tests with descriptive names
+def test_process_raw_images_upload_creates_dataset(temp_test_zip, test_user, auth_token):
+    """Test that ZIP upload creates v2_datasets entry correctly"""
+    dataset = await process_raw_images_upload(
+        user_id=test_user,
+        file_path=temp_test_zip,
+        file_name='test_minimal_3_images.zip',
+        license=LicenseEnum.cc_by,
+        platform=PlatformEnum.drone,
+        authors=['Test Author'],
+        token=auth_token,
+    )
+    
+    assert dataset is not None
+    assert isinstance(dataset, Dataset)
+
+def test_exif_extraction_populates_acquisition_date(temp_test_zip, test_user, auth_token):
+    """Test that EXIF extraction works with real data"""
+    # Test real functionality without mocks
+    dataset = await process_raw_images_upload(...)
+    assert dataset is not None
+
+@pytest.mark.parametrize('lat,lon', TEST_POINTS_WITH_DATA)
+def test_phenology_with_real_coordinates(lat, lon):
+    """Test phenology function with real geographic coordinates"""
+    result = get_phenology_curve(lat, lon)
+    if result is not None:
+        assert len(result) == 365
+        assert all(0 <= val <= 255 for val in result)
+```
+
+### **✅ Business Logic: Functions Over Classes**
+```python
+# GOOD: Processing functions (existing codebase pattern)
+def process_metadata(task: QueueTask, temp_dir: Path):
+    """Process and store metadata for a dataset"""
+    # Processing logic here
+    pass
+
+def process_cog(task: QueueTask, temp_dir: Path):
+    """Process COG generation for a dataset"""
+    # COG processing logic
+    pass
+
+def standardise_geotiff(input_path: str, output_path: str, token: str = None) -> bool:
+    """Standardise a GeoTIFF file"""
+    # Standardization logic
+    return True
+
+# GOOD: Utility functions
+def get_biome_data(bbox_centroid) -> tuple:
+    """Get biome data for coordinates"""
+    return biome_name, biome_id
+
+def extract_comprehensive_exif(image_path: Path) -> Dict[str, Any]:
+    """Extract EXIF metadata from image"""
+    return exif_dict
+
+# BAD: Don't create classes for business logic
+class MetadataProcessor:  # ❌ Avoid this pattern
+    def process(self, task):
+        pass
+
+class BiomeExtractor:  # ❌ Avoid this pattern  
+    def extract(self, coordinates):
+        pass
+```
+
+### **✅ When Classes ARE Appropriate**
+```python
+# GOOD: Data models (Pydantic models)
+class Dataset(BaseModel):
+    id: Optional[int] = None
+    user_id: str
+    file_name: str
+    # ... other fields
+
+class RawImages(BaseModel):
+    id: Optional[int] = None
+    dataset_id: int
+    # ... other fields
+
+# GOOD: Enums
+class TaskTypeEnum(Enum):
+    cog = 'cog'
+    thumbnail = 'thumbnail'
+    odm_processing = 'odm_processing'
+
+# GOOD: Exception classes (when needed)
+class ProcessingError(Exception):
+    def __init__(self, message: str, task_type: str, **kwargs):
+        self.task_type = task_type
+        super().__init__(f'{task_type} processing failed: {message}')
+```
 
 ## ⚡ **ESSENTIAL COMMANDS**
 
@@ -115,7 +233,7 @@ def test_utility_function_no_data(lat, lon):
     assert result is None
 ```
 
-### Test Structure
+### Functional Test Structure (Required)
 ```python
 @pytest.fixture
 def sample_dataset():
@@ -297,6 +415,45 @@ ls -la assets/biom/terres_ecosystems.gpkg
 
 ## ⚠️ **ANTI-PATTERNS TO AVOID**
 
+### ❌ Don't Use Test Classes
+```python
+# BAD: Test classes (never use these)
+class TestZipUploadProcessing:
+    def test_zip_upload_creates_dataset(self):
+        pass
+    
+    def test_zip_upload_creates_raw_images_entry(self):
+        pass
+
+# GOOD: Use functions instead
+def test_zip_upload_creates_dataset():
+    """Test ZIP upload creates v2_datasets entry correctly"""
+    pass
+
+def test_zip_upload_creates_raw_images_entry():
+    """Test ZIP upload creates v2_raw_images entry correctly"""
+    pass
+```
+
+### ❌ Don't Create Classes for Business Logic
+```python
+# BAD: Classes for processing logic
+class MetadataProcessor:
+    def __init__(self, task, temp_dir):
+        self.task = task
+        self.temp_dir = temp_dir
+    
+    def process(self):
+        # processing logic
+        pass
+
+# GOOD: Use functions instead
+def process_metadata(task: QueueTask, temp_dir: Path):
+    """Process and store metadata for a dataset"""
+    # processing logic
+    pass
+```
+
 ### ❌ Don't Mock Geospatial Functions
 ```python
 # BAD: Mocking geospatial data access
@@ -349,3 +506,6 @@ deadtrees dev test processor
 8. **Use parametrized tests** with real coordinates
 9. **Test graceful degradation** for optional data sources
 10. **Verify asset availability** before running tests that depend on external datasets
+11. **NEVER use test classes** - always use functions
+12. **PREFER functions over classes** throughout the codebase
+13. **Use classes only for data models, enums, and exceptions**
