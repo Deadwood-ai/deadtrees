@@ -37,6 +37,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 - Raw Images Processor Structure: The main process_raw_images_upload() function coordinates all processing steps, with placeholder implementations for EXIF extraction and SSH transfer that will be completed in future tasks
 - Storage Architecture Change: ZIP extraction now follows the same pattern as GeoTIFF uploads - direct extraction to mounted storage (raw_images/{dataset_id}/) instead of SSH transfer during upload, storing both original ZIP and extracted contents
 - Upload Processing Refactoring: Both GeoTIFF and ZIP upload logic should be extracted into separate processor functions (geotiff_processor.py and raw_images_processor.py) for clean architecture, leaving only chunked upload coordination in the router
+- Logging Pattern: Use `logger.method('message', LogContext(category=LogCategory.CATEGORY))` syntax - LogContext is a class requiring instantiation, not an enum with attributes like .PROCESSING
 
 ---
 
@@ -164,7 +165,7 @@ This document outlines the step-by-step implementation plan for integrating Open
   - Use PIL for EXIF extraction, handle missing data gracefully
   - **NOTE**: Requirements suggest frontend EXIF extraction for immediate UX, but this implements backend extraction - clarify if both approaches are needed
 
-- [ ] **CREATE** `api/src/upload/rtk_utils.py`
+- [x] **CREATE** `api/src/upload/rtk_utils.py`
   - Function: `detect_rtk_files(zip_files: List[str]) -> Dict[str, Any]`
   - Function: `parse_rtk_timestamp_file(mrk_path: Path) -> Dict[str, Any]`
   - Detect and parse RTK positioning files (.RTK, .MRK, .RTL, .RTB, .RPOS, .RTS, .IMU)
@@ -175,7 +176,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 **Context:** Test ZIP processing with real drone image files and verify all functionality.
 
 **Subtasks:**
-- [ ] **CREATE** `api/tests/routers/test_upload_odm_zip.py`
+- [x] **CREATE** `api/tests/routers/test_upload_odm_zip.py`
   - Test ZIP upload creates v2_datasets and v2_raw_images entries
   - Test EXIF extraction populates acquisition date correctly
   - Test RTK detection identifies RTK files and metadata
@@ -183,7 +184,7 @@ This document outlines the step-by-step implementation plan for integrating Open
   - **Use**: `test_minimal_3_images.zip` from test data
      - **Run Test**: `deadtrees dev test api api/tests/routers/test_upload_odm_zip.py`
 
-- [ ] **VERIFY** Phase 2 Upload Complete
+- [x] **VERIFY** Phase 2 Upload Complete
   - Upload detection tests pass: `deadtrees dev test api api/tests/routers/test_upload_odm_detection.py`
   - ZIP processing tests pass: `deadtrees dev test api api/tests/routers/test_upload_odm_zip.py`
   - **STOP** - Do not proceed until Phase 2 tests are passing

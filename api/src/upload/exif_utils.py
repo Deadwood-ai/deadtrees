@@ -35,11 +35,7 @@ def extract_comprehensive_exif(image_path: Path) -> Dict[str, Any]:
 	    Returns empty dict if extraction fails or no EXIF data available
 	"""
 	if Image is None:
-		logger.warning(
-			'PIL/Pillow not available - EXIF extraction disabled',
-			context=LogContext.PROCESSING,
-			category=LogCategory.WARNING,
-		)
+		logger.warning('PIL/Pillow not available - EXIF extraction disabled', LogContext(category=LogCategory.UPLOAD))
 		return {}
 
 	try:
@@ -47,11 +43,7 @@ def extract_comprehensive_exif(image_path: Path) -> Dict[str, Any]:
 			exif_data = img._getexif()
 
 			if exif_data is None:
-				logger.debug(
-					f'No EXIF data found in image: {image_path}',
-					context=LogContext.PROCESSING,
-					category=LogCategory.INFO,
-				)
+				logger.debug(f'No EXIF data found in image: {image_path}', LogContext(category=LogCategory.UPLOAD))
 				return {}
 
 			# Convert numeric EXIF tags to human-readable names
@@ -76,18 +68,14 @@ def extract_comprehensive_exif(image_path: Path) -> Dict[str, Any]:
 					exif_dict[tag_name] = value
 
 			logger.debug(
-				f'Extracted {len(exif_dict)} EXIF tags from {image_path}',
-				context=LogContext.PROCESSING,
-				category=LogCategory.INFO,
+				f'Extracted {len(exif_dict)} EXIF tags from {image_path}', LogContext(category=LogCategory.UPLOAD)
 			)
 
 			return exif_dict
 
 	except Exception as e:
 		logger.error(
-			f'Failed to extract EXIF data from {image_path}: {str(e)}',
-			context=LogContext.PROCESSING,
-			category=LogCategory.ERROR,
+			f'Failed to extract EXIF data from {image_path}: {str(e)}', LogContext(category=LogCategory.UPLOAD)
 		)
 		return {}
 
@@ -134,8 +122,7 @@ def extract_acquisition_date(image_path: Path) -> Optional[datetime]:
 							acquisition_date = datetime.strptime(date_string, fmt)
 							logger.debug(
 								f'Extracted acquisition date from {field}: {acquisition_date}',
-								context=LogContext.PROCESSING,
-								category=LogCategory.INFO,
+								LogContext(category=LogCategory.UPLOAD),
 							)
 							return acquisition_date
 						except ValueError:
@@ -144,14 +131,9 @@ def extract_acquisition_date(image_path: Path) -> Optional[datetime]:
 			except Exception as e:
 				logger.warning(
 					f"Failed to parse date from {field} field '{date_string}': {str(e)}",
-					context=LogContext.PROCESSING,
-					category=LogCategory.WARNING,
+					LogContext(category=LogCategory.UPLOAD),
 				)
 				continue
 
-	logger.debug(
-		f'No acquisition date found in EXIF data for {image_path}',
-		context=LogContext.PROCESSING,
-		category=LogCategory.INFO,
-	)
+	logger.debug(f'No acquisition date found in EXIF data for {image_path}', LogContext(category=LogCategory.UPLOAD))
 	return None
