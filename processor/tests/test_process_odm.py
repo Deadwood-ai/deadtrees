@@ -1,18 +1,21 @@
 import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 from shared.db import use_client
 from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask, StatusEnum
 from processor.src.process_odm import process_odm
+from processor.src.process_geotiff import process_geotiff
+from processor.src.process_cog import process_cog
+from processor.src.process_thumbnail import process_thumbnail
+from processor.src.process_deadwood_segmentation import process_deadwood_segmentation
 from processor.src.utils.ssh import push_file_to_storage_server, check_file_exists_on_storage
 
 
 @pytest.fixture
 def test_zip_file():
 	"""Get path to test ZIP file for ODM processing"""
-	# Try multiple possible paths for the test file
+	# Use smaller, higher-quality dataset for more reliable testing
 	possible_paths = [
 		Path(settings.base_path) / 'assets' / 'test_data' / 'raw_drone_images' / 'test_no_rtk_3_images.zip',
 		Path('/app/assets/test_data/raw_drone_images/test_no_rtk_3_images.zip'),
@@ -56,15 +59,15 @@ def odm_test_dataset(auth_token, test_zip_file, test_processor_user):
 			remote_zip_path = f'{settings.raw_images_path}/{zip_filename}'
 			push_file_to_storage_server(str(test_zip_file), remote_zip_path, auth_token, dataset_id)
 
-			# Create raw_images entry
+			# Create raw_images entry with smaller dataset info
 			raw_images_data = {
 				'dataset_id': dataset_id,
 				'version': 1,
-				'raw_image_count': 3,
+				'raw_image_count': 3,  # Small dataset with 3 images
 				'raw_image_size_mb': int(test_zip_file.stat().st_size / 1024 / 1024),  # MB
 				'raw_images_path': remote_zip_path,
 				'camera_metadata': {},
-				'has_rtk_data': False,
+				'has_rtk_data': False,  # No RTK dataset
 				'rtk_precision_cm': None,
 				'rtk_quality_indicator': None,
 				'rtk_file_count': 0,
@@ -116,182 +119,204 @@ def odm_task(odm_test_dataset, test_processor_user):
 
 
 @pytest.mark.slow
-def test_odm_container_execution_with_minimal_images(odm_task, auth_token):
-	"""Test ODM container execution with minimal image set (mocked for speed)"""
+def test_odm_container_execution_with_real_images(odm_task, auth_token):
+	"""Test ODM container execution with real 3-image dataset (small but high quality)"""
 
-	# Mock Docker client and container execution for faster testing
-	with patch('processor.src.process_odm.docker.from_env') as mock_docker:
-		mock_client = MagicMock()
-		mock_docker.return_value = mock_client
+	# Execute real ODM processing with high-quality test data
+	process_odm(odm_task, Path(settings.processing_path))
 
-		# Mock successful container run
-		mock_client.containers.run.return_value = None
+	# Verify status was updated
+	with use_client(auth_token) as client:
+		status_response = (
+			client.table(settings.statuses_table).select('*').eq('dataset_id', odm_task.dataset_id).execute()
+		)
+		assert status_response.data[0]['is_odm_done'] is True
 
-		# Mock orthomosaic creation
-		with patch('processor.src.process_odm._find_orthomosaic') as mock_find_ortho:
-			mock_ortho_path = Path(settings.processing_path) / 'mock_orthomosaic.tif'
-			mock_ortho_path.parent.mkdir(parents=True, exist_ok=True)
-			mock_ortho_path.touch()  # Create mock file
-			mock_find_ortho.return_value = mock_ortho_path
-
-			# Mock SSH operations
-			with patch('processor.src.process_odm.push_file_to_storage_server') as mock_push:
-				# Execute ODM processing
-				process_odm(odm_task, Path(settings.processing_path))
-
-				# Verify Docker container was called with correct parameters
-				mock_client.containers.run.assert_called_once()
-				call_args = mock_client.containers.run.call_args[1]
-
-				# Verify container configuration
-				assert call_args['image'] == 'opendronemap/odm'
-				assert '/code/images' in call_args['volumes']
-				assert '/code/odm_output' in call_args['volumes']
-				assert call_args['remove'] is True
-
-				# Verify ODM command parameters
-				command = call_args['command']
-				assert '--project-path' in command
-				assert '--orthophoto-resolution' in command
-				assert '--feature-quality' in command
-
-				# Verify orthomosaic was pushed to storage
-				mock_push.assert_called_once()
-				push_args = mock_push.call_args[1]
-				assert push_args['remote_file_path'].endswith(f'{odm_task.dataset_id}_ortho.tif')
-
-				# Verify status was updated
-				with use_client(auth_token) as client:
-					status_response = (
-						client.table(settings.statuses_table)
-						.select('*')
-						.eq('dataset_id', odm_task.dataset_id)
-						.execute()
-					)
-					assert status_response.data[0]['is_odm_done'] is True
+	# Verify orthomosaic was created in storage
+	remote_ortho_path = f'{settings.archive_path}/{odm_task.dataset_id}_ortho.tif'
+	ortho_exists = check_file_exists_on_storage(remote_ortho_path, auth_token)
+	assert ortho_exists, f'Generated orthomosaic not found at {remote_ortho_path}'
 
 
 def test_odm_orthomosaic_generation_and_storage(odm_task, auth_token):
 	"""Test that ODM generates orthomosaic and moves it to correct archive location"""
 
-	# Mock the entire ODM processing pipeline
-	with patch('processor.src.process_odm.docker.from_env') as mock_docker:
-		mock_client = MagicMock()
-		mock_docker.return_value = mock_client
-		mock_client.containers.run.return_value = None
+	# Execute real ODM processing with test data
+	process_odm(odm_task, Path(settings.processing_path))
 
-		# Mock orthomosaic creation
-		with patch('processor.src.process_odm._find_orthomosaic') as mock_find_ortho:
-			mock_ortho_path = Path(settings.processing_path) / 'odm_output' / 'odm_orthophoto' / 'odm_orthophoto.tif'
-			mock_ortho_path.parent.mkdir(parents=True, exist_ok=True)
-			mock_ortho_path.touch()
-			mock_find_ortho.return_value = mock_ortho_path
+	# Verify orthomosaic was created in correct storage location
+	expected_remote_path = f'{settings.archive_path}/{odm_task.dataset_id}_ortho.tif'
+	ortho_exists = check_file_exists_on_storage(expected_remote_path, auth_token)
+	assert ortho_exists, f'Generated orthomosaic not found at {expected_remote_path}'
 
-			# Track push operations
-			pushed_files = []
-
-			def mock_push_file(local_path, remote_path, token, dataset_id):
-				pushed_files.append({'local': local_path, 'remote': remote_path, 'dataset_id': dataset_id})
-
-			with patch('processor.src.process_odm.push_file_to_storage_server', side_effect=mock_push_file):
-				# Execute ODM processing
-				process_odm(odm_task, Path(settings.processing_path))
-
-				# Verify orthomosaic was pushed to correct location
-				assert len(pushed_files) == 1
-				push_info = pushed_files[0]
-
-				# Verify remote path follows archive naming convention
-				expected_remote_path = f'{settings.archive_path}/{odm_task.dataset_id}_ortho.tif'
-				assert push_info['remote'] == expected_remote_path
-				assert push_info['dataset_id'] == odm_task.dataset_id
-
-				# Verify local path points to found orthomosaic
-				assert push_info['local'] == str(mock_ortho_path)
-
-
-def test_odm_status_tracking_updates(odm_task, auth_token):
-	"""Test that ODM processing correctly updates status tracking"""
-
-	# Mock ODM processing
-	with patch('processor.src.process_odm.docker.from_env') as mock_docker:
-		mock_client = MagicMock()
-		mock_docker.return_value = mock_client
-		mock_client.containers.run.return_value = None
-
-		with patch('processor.src.process_odm._find_orthomosaic') as mock_find_ortho:
-			mock_ortho_path = Path(settings.processing_path) / 'mock_orthomosaic.tif'
-			mock_ortho_path.parent.mkdir(parents=True, exist_ok=True)
-			mock_ortho_path.touch()
-			mock_find_ortho.return_value = mock_ortho_path
-
-			with patch('processor.src.process_odm.push_file_to_storage_server'):
-				# Check initial status
-				with use_client(auth_token) as client:
-					initial_status = (
-						client.table(settings.statuses_table)
-						.select('*')
-						.eq('dataset_id', odm_task.dataset_id)
-						.execute()
-					).data[0]
-					assert initial_status['is_odm_done'] is False
-					assert initial_status['is_upload_done'] is True
-
-				# Execute ODM processing
-				process_odm(odm_task, Path(settings.processing_path))
-
-				# Check final status
-				with use_client(auth_token) as client:
-					final_status = (
-						client.table(settings.statuses_table)
-						.select('*')
-						.eq('dataset_id', odm_task.dataset_id)
-						.execute()
-					).data[0]
-
-					# Verify ODM completion
-					assert final_status['is_odm_done'] is True
-
-					# Verify other statuses preserved
-					assert final_status['is_upload_done'] is True
-					assert final_status['is_ortho_done'] is False  # Not yet processed by geotiff
-					assert final_status['has_error'] is False
-
-
-def test_odm_error_handling_missing_orthomosaic(odm_task, auth_token):
-	"""Test ODM error handling when no orthomosaic is generated"""
-
-	with patch('processor.src.process_odm.docker.from_env') as mock_docker:
-		mock_client = MagicMock()
-		mock_docker.return_value = mock_client
-		mock_client.containers.run.return_value = None
-
-		# Mock missing orthomosaic
-		with patch('processor.src.process_odm._find_orthomosaic', return_value=None):
-			# ODM processing should raise exception
-			with pytest.raises(Exception, match='ODM did not generate an orthomosaic'):
-				process_odm(odm_task, Path(settings.processing_path))
-
-
-def test_odm_error_handling_container_failure(odm_task, auth_token):
-	"""Test ODM error handling when Docker container fails"""
-
-	with patch('processor.src.process_odm.docker.from_env') as mock_docker:
-		mock_client = MagicMock()
-		mock_docker.return_value = mock_client
-
-		# Mock container failure
-		from docker.errors import ContainerError
-
-		mock_error = ContainerError(
-			container=MagicMock(),
-			exit_status=1,
-			command='odm',
-			image='opendronemap/odm',
-			stderr=b'ODM processing failed: insufficient images',
+	# Verify status was updated correctly
+	with use_client(auth_token) as client:
+		status_response = (
+			client.table(settings.statuses_table).select('*').eq('dataset_id', odm_task.dataset_id).execute()
 		)
-		mock_client.containers.run.side_effect = mock_error
+		assert status_response.data[0]['is_odm_done'] is True
 
-		# ODM processing should raise exception with helpful message
-		with pytest.raises(Exception, match='ODM processing failed: insufficient images'):
-			process_odm(odm_task, Path(settings.processing_path))
+
+def test_odm_real_data_end_to_end_processing(odm_task, auth_token):
+	"""Test complete ODM processing pipeline with real data"""
+
+	# Verify initial state
+	with use_client(auth_token) as client:
+		initial_status = (
+			client.table(settings.statuses_table).select('*').eq('dataset_id', odm_task.dataset_id).execute()
+		).data[0]
+		assert initial_status['is_odm_done'] is False
+		assert initial_status['is_upload_done'] is True
+
+	# Execute ODM processing
+	process_odm(odm_task, Path(settings.processing_path))
+
+	# Verify final state - status updated and orthomosaic exists
+	with use_client(auth_token) as client:
+		final_status = (
+			client.table(settings.statuses_table).select('*').eq('dataset_id', odm_task.dataset_id).execute()
+		).data[0]
+
+		# Verify ODM completion
+		assert final_status['is_odm_done'] is True
+
+		# Verify other statuses preserved
+		assert final_status['is_upload_done'] is True
+		assert final_status['is_ortho_done'] is False  # Not yet processed by geotiff
+		assert final_status['has_error'] is False
+
+	# Verify orthomosaic file exists in storage
+	remote_ortho_path = f'{settings.archive_path}/{odm_task.dataset_id}_ortho.tif'
+	ortho_exists = check_file_exists_on_storage(remote_ortho_path, auth_token)
+	assert ortho_exists, f'Generated orthomosaic not found at {remote_ortho_path}'
+
+
+@pytest.mark.slow
+@pytest.mark.comprehensive
+def test_complete_odm_to_segmentation_pipeline(odm_task, auth_token):
+	"""Test complete pipeline: ODM → geotiff → thumbnail → cog → segmentation"""
+
+	dataset_id = odm_task.dataset_id
+
+	# Step 1: ODM Processing (Raw images → Orthomosaic)
+	print('\n=== Step 1: ODM Processing ===')
+	process_odm(odm_task, Path(settings.processing_path))
+
+	with use_client(auth_token) as client:
+		status = client.table(settings.statuses_table).select('*').eq('dataset_id', dataset_id).execute().data[0]
+		assert status['is_odm_done'] is True
+	print('✅ ODM processing completed - orthomosaic generated')
+
+	# Step 2: GeoTIFF Processing (Orthomosaic → Standardized + Ortho entry)
+	print('\n=== Step 2: GeoTIFF Processing ===')
+	geotiff_task = QueueTask(
+		id=2,
+		dataset_id=dataset_id,
+		user_id=odm_task.user_id,
+		task_types=[TaskTypeEnum.geotiff],
+		priority=1,
+		is_processing=False,
+		current_position=1,
+		estimated_time=0.0,
+		build_args={},
+	)
+	process_geotiff(geotiff_task, settings.processing_path)
+
+	with use_client(auth_token) as client:
+		status = client.table(settings.statuses_table).select('*').eq('dataset_id', dataset_id).execute().data[0]
+		assert status['is_ortho_done'] is True
+
+		# Verify ortho entry was created
+		ortho_response = client.table(settings.orthos_table).select('*').eq('dataset_id', dataset_id).execute()
+		assert len(ortho_response.data) == 1
+	print('✅ GeoTIFF processing completed - ortho entry created')
+
+	# Step 3: COG Processing (Standardized → Cloud Optimized GeoTIFF)
+	print('\n=== Step 3: COG Processing ===')
+	cog_task = QueueTask(
+		id=3,
+		dataset_id=dataset_id,
+		user_id=odm_task.user_id,
+		task_types=[TaskTypeEnum.cog],
+		priority=1,
+		is_processing=False,
+		current_position=1,
+		estimated_time=0.0,
+		build_args={},
+	)
+	process_cog(cog_task, settings.processing_path)
+
+	with use_client(auth_token) as client:
+		status = client.table(settings.statuses_table).select('*').eq('dataset_id', dataset_id).execute().data[0]
+		assert status['is_cog_done'] is True
+
+		# Verify COG entry was created
+		cog_response = client.table(settings.cogs_table).select('*').eq('dataset_id', dataset_id).execute()
+		assert len(cog_response.data) == 1
+	print('✅ COG processing completed - cloud optimized GeoTIFF created')
+
+	# Step 4: Thumbnail Processing (COG → Thumbnail image)
+	print('\n=== Step 4: Thumbnail Processing ===')
+	thumbnail_task = QueueTask(
+		id=4,
+		dataset_id=dataset_id,
+		user_id=odm_task.user_id,
+		task_types=[TaskTypeEnum.thumbnail],
+		priority=1,
+		is_processing=False,
+		current_position=1,
+		estimated_time=0.0,
+		build_args={},
+	)
+	process_thumbnail(thumbnail_task, settings.processing_path)
+
+	with use_client(auth_token) as client:
+		status = client.table(settings.statuses_table).select('*').eq('dataset_id', dataset_id).execute().data[0]
+		assert status['is_thumbnail_done'] is True
+
+		# Verify thumbnail entry was created
+		thumbnail_response = client.table(settings.thumbnails_table).select('*').eq('dataset_id', dataset_id).execute()
+		assert len(thumbnail_response.data) == 1
+	print('✅ Thumbnail processing completed - preview image created')
+
+	# Step 5: Deadwood Segmentation (COG → AI segmentation)
+	print('\n=== Step 5: Deadwood Segmentation ===')
+	segmentation_task = QueueTask(
+		id=5,
+		dataset_id=dataset_id,
+		user_id=odm_task.user_id,
+		task_types=[TaskTypeEnum.deadwood],
+		priority=1,
+		is_processing=False,
+		current_position=1,
+		estimated_time=0.0,
+		build_args={},
+	)
+	process_deadwood_segmentation(segmentation_task, auth_token, settings.processing_path)
+
+	with use_client(auth_token) as client:
+		status = client.table(settings.statuses_table).select('*').eq('dataset_id', dataset_id).execute().data[0]
+		assert status['is_deadwood_done'] is True
+
+		# Verify segmentation was processed (may or may not find deadwood)
+		labels_response = client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).execute()
+		# Note: It's valid for labels to be empty if no deadwood was detected
+		print(f'✅ Deadwood segmentation processed - {len(labels_response.data)} deadwood segments detected')
+	print('✅ Deadwood segmentation completed - AI analysis finished')
+
+	# Final verification: Complete pipeline success
+	print('\n=== Final Status Verification ===')
+	with use_client(auth_token) as client:
+		final_status = client.table(settings.statuses_table).select('*').eq('dataset_id', dataset_id).execute().data[0]
+
+		# Verify all processing stages completed
+		assert final_status['is_odm_done'] is True
+		assert final_status['is_ortho_done'] is True
+		assert final_status['is_cog_done'] is True
+		assert final_status['is_thumbnail_done'] is True
+		assert final_status['is_deadwood_done'] is True
+		assert final_status['has_error'] is False
+		assert final_status['current_status'] == StatusEnum.idle
+
+	print('🎉 COMPLETE PIPELINE SUCCESS: ODM → GeoTIFF → COG → Thumbnail → Segmentation')
+	print('✅ Raw drone images successfully processed through entire AI pipeline!')

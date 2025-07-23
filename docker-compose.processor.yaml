@@ -24,6 +24,10 @@ services:
       - ./assets:/app/assets
       - ~/.ssh/processing-to-storage:/tmp/ssh-keys/processing-to-storage:ro
       - ~/.ssh/processing-to-storage.pub:/tmp/ssh-keys/processing-to-storage.pub:ro
+      # CRITICAL: Mount Docker socket for ODM processing (Docker-in-Docker)
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount /data for processing directory access
+      - /data:/data
     environment:
       BASE_DIR: /data
       SUPABASE_URL: ${SUPABASE_URL}

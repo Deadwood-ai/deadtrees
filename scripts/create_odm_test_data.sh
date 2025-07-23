@@ -57,8 +57,9 @@ create_zip() {
         return 1
     fi
     
-    # Create ZIP file with images
-    find . -name "$pattern" | head -n $image_count > /tmp/zip_files.txt
+    # Create ZIP file with CONSECUTIVE images (sorted by filename to ensure overlap)
+    # This ensures ODM gets images with good overlap for photogrammetry reconstruction
+    find . -name "$pattern" | sort | head -n $image_count > /tmp/zip_files.txt
     
     # Add RTK files if requested
     if [ "$include_rtk" = "true" ]; then

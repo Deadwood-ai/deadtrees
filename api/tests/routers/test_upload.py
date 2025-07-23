@@ -233,19 +233,6 @@ def test_zip_upload_creates_dataset_and_raw_images(temp_test_zip, auth_token, te
 					assert status['has_error'] is False
 
 
-def test_upload_performance_improvement():
-	"""Test that upload is faster due to eliminated technical analysis"""
-	# This is a conceptual test - upload should be faster because:
-	# 1. No hash calculation during upload
-	# 2. No cog_info analysis during upload
-	# 3. No ortho entry creation during upload
-	# 4. No bbox calculation during upload
-
-	# In a real implementation, this could measure timing differences
-	# For now, we document the expected performance improvement
-	assert True, 'Upload eliminates technical analysis, improving performance'
-
-
 def test_upload_auto_detects_type_when_not_provided(test_file, auth_token):
 	"""Test that upload_type is auto-detected when not explicitly provided (backward compatibility)"""
 	form_data = {
