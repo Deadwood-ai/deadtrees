@@ -5,11 +5,6 @@ from shared.settings import settings
 from shared.models import LicenseEnum, PlatformEnum, DatasetAccessEnum, StatusEnum, TaskTypeEnum
 
 
-# ============================================================================
-# ODM Database Schema Tests
-# ============================================================================
-
-
 def test_v2_raw_images_table_exists(auth_token):
 	"""Test that v2_raw_images table exists with correct structure"""
 	with use_client(auth_token) as client:

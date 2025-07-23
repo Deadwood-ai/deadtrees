@@ -112,7 +112,7 @@ def test_file():
 	return file_path
 
 
-@test_environment_only
+# @test_environment_only
 @pytest.fixture(scope='session', autouse=True)
 def cleanup_database(auth_token):
 	"""Clean up database tables after all tests"""
