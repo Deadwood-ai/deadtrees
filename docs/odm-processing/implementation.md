@@ -39,6 +39,8 @@ This document outlines the step-by-step implementation plan for integrating Open
 - Upload Endpoint Testing: When testing chunk upload endpoints with mock data, use intermediate chunks (chunks_total > 1) to avoid final chunk processing that requires valid file formats
 - Unified Geotiff Processing: The process_geotiff function must handle ortho creation for both direct uploads and ODM-generated files
 - Logging Pattern: Use `logger.method('message', LogContext(category=LogCategory.CATEGORY))` syntax - LogContext is a class requiring instantiation, not an enum with attributes like .PROCESSING
+- Test Data Size: Use smaller test files for faster execution - `test_no_rtk_3_images.zip` (25MB) vs `test_minimal_3_images.zip` (1.3GB) reduces test time from 2+ minutes to ~40 seconds
+- Obsolete Test Cleanup: When implementing new simplified interfaces, remove old tests that use deprecated function signatures to avoid confusion and false failures
 
 ---
 
@@ -126,11 +128,11 @@ This document outlines the step-by-step implementation plan for integrating Open
 **Context:** Need utilities for detecting upload types without complex routing logic.
 
 **Subtasks:**
-- [ ] **MOVE** `UploadType` enum to `api/src/utils/file_utils.py`
+- [x] **MOVE** `UploadType` enum to `api/src/utils/file_utils.py`
   - Create enum with `GEOTIFF = 'geotiff'` and `RAW_IMAGES_ZIP = 'raw_images_zip'`
   - Remove any existing upload type definitions from routers
 
-- [ ] **CREATE** `detect_upload_type()` function in `api/src/utils/file_utils.py`
+- [x] **CREATE** `detect_upload_type()` function in `api/src/utils/file_utils.py`
   - Check file extensions (.tif, .tiff, .zip)
   - Return appropriate UploadType enum
   - Handle unsupported file types with HTTPException
@@ -140,7 +142,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 **Context:** Current endpoint handles chunked GeoTIFF uploads. Simplify by removing all technical analysis.
 
 **Subtasks:**
-- [ ] **SIMPLIFY** `/datasets/chunk` endpoint in `api/src/routers/upload.py`
+- [x] **SIMPLIFY** `/datasets/chunk` endpoint in `api/src/routers/upload.py`
   - Add `upload_type: Annotated[Optional[UploadType], Form()] = None` parameter
   - **REMOVE** all technical analysis from final chunk processing:
     - Remove `get_file_identifier()` call
@@ -148,7 +150,7 @@ This document outlines the step-by-step implementation plan for integrating Open
     - Remove `upsert_ortho_entry()` call
   - Route to simplified processing functions based on detected type
 
-- [ ] **IMPORT** utilities from `api/src/utils/file_utils.py`
+- [x] **IMPORT** utilities from `api/src/utils/file_utils.py`
   - Import `UploadType` and `detect_upload_type`
   - Clean up any duplicate enum definitions
 
@@ -157,7 +159,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 **Context:** Extract and simplify GeoTIFF upload logic, removing all technical analysis.
 
 **Subtasks:**
-- [ ] **CREATE** `api/src/upload/geotiff_processor.py`
+- [x] **CREATE** `api/src/upload/geotiff_processor.py`
   - Function: `async def process_geotiff_upload(dataset: Dataset, upload_target_path: Path) -> Dataset`
   - **SIMPLIFIED LOGIC**: Only file storage, no technical analysis
     - Move file to `archive/{dataset_id}_ortho.tif`
@@ -170,7 +172,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 **Context:** Create ZIP extraction and storage logic without technical analysis.
 
 **Subtasks:**
-- [ ] **CREATE** `api/src/upload/raw_images_processor.py`
+- [x] **CREATE** `api/src/upload/raw_images_processor.py`
   - Function: `async def process_raw_images_upload(dataset: Dataset, upload_target_path: Path) -> Dataset`
   - **SIMPLIFIED LOGIC**: Extract and store only
     - Extract ZIP to `raw_images/{dataset_id}/`
@@ -179,7 +181,7 @@ This document outlines the step-by-step implementation plan for integrating Open
     - Return dataset
   - **NO** technical analysis during upload
 
-- [ ] **CREATE** `api/src/upload/rtk_utils.py`
+- [x] **CREATE** `api/src/upload/rtk_utils.py`
   - Function: `detect_rtk_files(zip_files: List[str]) -> Dict[str, Any]`
   - Function: `parse_rtk_timestamp_file(mrk_path: Path) -> Dict[str, Any]`
   - Detect RTK files (.RTK, .MRK, .RTL, .RTB, .RPOS, .RTS, .IMU)
@@ -190,18 +192,20 @@ This document outlines the step-by-step implementation plan for integrating Open
 **Context:** Test simplified upload endpoints with real files.
 
 **Subtasks:**
-- [ ] **CREATE** `api/tests/routers/test_upload_simplified.py`
+- [x] **CREATE** `api/tests/routers/test_upload.py`
   - Test GeoTIFF upload creates dataset but NO ortho entry
   - Test ZIP upload creates dataset and raw_images entry only
   - Test file storage in correct locations (archive/ vs raw_images/)
   - Test status updates (is_upload_done=True only)
   - **KEY**: Verify NO ortho entries created during upload
-     - **Run Test**: `deadtrees dev test api api/tests/routers/test_upload_simplified.py`
+     - **Run Test**: `deadtrees dev test api api/tests/routers/test_upload.py`
 
-- [ ] **VERIFY** Phase 2 Upload Complete
-  - Upload tests pass: `deadtrees dev test api api/tests/routers/test_upload_simplified.py`
-  - Upload speed improved (no technical analysis)
-  - **STOP** - Do not proceed until Phase 2 tests are passing
+- [x] **VERIFY** Phase 2 Upload Complete ✅
+  - Upload tests pass: `deadtrees dev test api` (106 passed, 0 failed)
+  - Upload speed improved (no technical analysis during upload)
+  - Test performance improved (using smaller 25MB test files vs 1.3GB)
+  - Both GeoTIFF and ZIP upload processing fully functional
+  - **COMPLETE** - Phase 2 upload system verified and working
 
 ---
 

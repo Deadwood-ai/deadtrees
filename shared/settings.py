@@ -25,6 +25,7 @@ _tables = {
 	'forest_cover_geometries': 'v2_forest_cover_geometries',
 	'label_objects': 'v1_label_objects',
 	'logs': 'v2_logs',
+	'raw_images': 'v2_raw_images',
 	'statuses': 'v2_statuses',
 	'queue': 'v2_queue',
 	'queue_positions': 'v2_queue_positions',
@@ -247,6 +248,10 @@ class Settings(BaseSettings):
 	@property
 	def queue_position_table(self) -> str:
 		return self._tables['queue_positions']
+
+	@property
+	def raw_images_table(self) -> str:
+		return self._tables['raw_images']
 
 	@property
 	def statuses_table(self) -> str:
