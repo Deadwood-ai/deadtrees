@@ -1,20 +1,21 @@
 # ODM Raw Drone Image Processing - Implementation Plan
 
-**Version:** 1.0  
+**Version:** 2.0  
 **Date:** December 2024  
-**Status:** Ready for Implementation
+**Status:** Ready for Implementation - Processor-Centric Architecture
 
 ---
 
 ## 📋 **IMPLEMENTATION OVERVIEW**
 
-This document outlines the step-by-step implementation plan for integrating OpenDroneMap (ODM) processing into the DeadTrees platform. The implementation follows a **test-driven, atomic approach** where each feature is immediately tested with real data before proceeding.
+This document outlines the step-by-step implementation plan for integrating OpenDroneMap (ODM) processing into the DeadTrees platform using a **processor-centric architecture** where upload focuses on file storage and all technical analysis happens during processing.
 
 **Key Implementation Principles:**
+- **Simplified Upload**: Upload endpoints focus only on file storage, no technical analysis
+- **Unified Processing**: Both GeoTIFF and ZIP paths converge at geotiff processing
 - **Test-Driven Development**: Each feature is tested immediately after implementation
 - **Real Data Testing**: Use actual drone images and coordinates, not mocks
 - **Atomic Changes**: One feature + test per task, fully validated before continuing
-- **Incremental Deployment**: Build on existing systems without breaking changes
 
 ---
 
@@ -23,20 +24,20 @@ This document outlines the step-by-step implementation plan for integrating Open
 ---
 
 ## Rules & Tips
-- check out `design.md` and `requirements.md` for more context for the given task. 
+- Always check out `./design.md` and `./requirements.md` for more context. 
 
 - The `shared/models.py` file uses tab indentation (not spaces) - maintain consistency when adding new enum values or model fields
-- EXIF Extraction Strategy: Requirements specify frontend EXIF extraction for immediate UX, but implementation tasks focus on backend extraction - clarify if both approaches are needed or if backend-only is sufficient
-- RTK ODM Parameters: When RTK data is detected, ODM must use `--force-gps` flag and `--gps-accuracy` set to centimeter values (0.01-0.05) based on detected RTK precision
-- Storage Paths: Use exact path structure - raw images at `raw_images/{dataset_id}/images/` and generated ortho at `raw_images/{dataset_id}/odm_orthophoto.tif`
+- Upload Simplification: Remove all technical analysis (cog_info, get_file_identifier, upsert_ortho_entry) from upload endpoints
+- Processor Enhancement: All ortho entry creation moves to geotiff processing task
+- Task Requirements: Both upload types MUST include 'geotiff' in processing task list
+- Storage Paths: GeoTIFF uploads to `archive/{dataset_id}_ortho.tif`, ZIP extraction to `raw_images/{dataset_id}/`
+- Database Consistency: Both upload types must result in identical database state after geotiff processing
 - RTK File Extensions: Detect all RTK file types including `.RTK, .MRK, .RTL, .RTB, .RPOS, .RTS, .IMU` extensions
 - Database RLS Policies: New v2 tables must have RLS policies created separately - standard pattern requires "Enable insert for authenticated users only", "Enable read access for all users", and "Enable update for processor" policies
 - ODM Test Data Creation: The `./scripts/create_odm_test_data.sh` script requires `zip` command - install with `sudo apt install -y zip` if missing
 - Import Requirements: Future tasks must import `UploadType` and `detect_upload_type()` from `api/src/utils/file_utils.py` (not from routers) to avoid circular dependencies
 - Upload Endpoint Testing: When testing chunk upload endpoints with mock data, use intermediate chunks (chunks_total > 1) to avoid final chunk processing that requires valid file formats
-- Raw Images Processor Structure: The main process_raw_images_upload() function coordinates all processing steps, with placeholder implementations for EXIF extraction and SSH transfer that will be completed in future tasks
-- Storage Architecture Change: ZIP extraction now follows the same pattern as GeoTIFF uploads - direct extraction to mounted storage (raw_images/{dataset_id}/) instead of SSH transfer during upload, storing both original ZIP and extracted contents
-- Upload Processing Refactoring: Both GeoTIFF and ZIP upload logic should be extracted into separate processor functions (geotiff_processor.py and raw_images_processor.py) for clean architecture, leaving only chunked upload coordination in the router
+- Unified Geotiff Processing: The process_geotiff function must handle ortho creation for both direct uploads and ODM-generated files
 - Logging Pattern: Use `logger.method('message', LogContext(category=LogCategory.CATEGORY))` syntax - LogContext is a class requiring instantiation, not an enum with attributes like .PROCESSING
 
 ---
@@ -80,7 +81,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 - [x] **ADD** `odm_processing` to `TaskTypeEnum` in `shared/models.py`
   - Add `odm_processing = 'odm_processing'`
   - Maintain alphabetical order for consistency
-  - **NOTE**: `geotiff` task type already exists and will be used for ODM output standardization
+  - **NOTE**: `geotiff` task type already exists and will handle ortho creation for both sources
 
 - [x] **ADD** `odm_processing` to `StatusEnum` in `shared/models.py`  
   - Add `odm_processing = 'odm_processing'`
@@ -118,198 +119,161 @@ This document outlines the step-by-step implementation plan for integrating Open
 
 ---
 
-## 🚀 **PHASE 2: UPLOAD SYSTEM ENHANCEMENT**
+## 🚀 **PHASE 2: SIMPLIFIED UPLOAD SYSTEM**
 
-### **Task 2.1: Enhanced Upload Endpoint**
+### **Task 2.1: File Type Detection Utilities**
 
-**Context:** Current endpoint at `api/src/routers/upload.py` handles chunked GeoTIFF uploads. Need to add smart file type detection and routing.
+**Context:** Need utilities for detecting upload types without complex routing logic.
 
 **Subtasks:**
-- [x] **CREATE** `UploadType` enum in `api/src/routers/upload.py`
-  - Values: `GEOTIFF = 'geotiff'`, `RAW_IMAGES_ZIP = 'raw_images_zip'`
+- [ ] **MOVE** `UploadType` enum to `api/src/utils/file_utils.py`
+  - Create enum with `GEOTIFF = 'geotiff'` and `RAW_IMAGES_ZIP = 'raw_images_zip'`
+  - Remove any existing upload type definitions from routers
 
-- [x] **ADD** `detect_upload_type()` function in upload router
+- [ ] **CREATE** `detect_upload_type()` function in `api/src/utils/file_utils.py`
   - Check file extensions (.tif, .tiff, .zip)
   - Return appropriate UploadType enum
   - Handle unsupported file types with HTTPException
 
-- [x] **ENHANCE** `/datasets/chunk` endpoint with optional upload_type parameter
-  - Add `upload_type: Annotated[Optional[UploadType], Form()] = None`
-  - Maintain backward compatibility (auto-detect if not provided)
-  - Route to appropriate processing logic based on detected type
+### **Task 2.2: Simplified Upload Router Enhancement**
 
-### **Task 2.2: Test Upload Endpoint Enhancement**
-**Context:** Test the enhanced upload endpoint with real ZIP files before building ZIP processing.
+**Context:** Current endpoint handles chunked GeoTIFF uploads. Simplify by removing all technical analysis.
 
 **Subtasks:**
-- [x] **CREATE** `api/tests/routers/test_upload_odm_detection.py`
-  - Test `detect_upload_type()` with .tif and .zip files
-  - Test enhanced chunk endpoint accepts upload_type parameter
-  - Test backward compatibility (existing GeoTIFF uploads unchanged)
-  - **Run Test**: `deadtrees dev test api api/tests/routers/test_upload_odm_detection.py`
+- [ ] **SIMPLIFY** `/datasets/chunk` endpoint in `api/src/routers/upload.py`
+  - Add `upload_type: Annotated[Optional[UploadType], Form()] = None` parameter
+  - **REMOVE** all technical analysis from final chunk processing:
+    - Remove `get_file_identifier()` call
+    - Remove `cog_info()` call  
+    - Remove `upsert_ortho_entry()` call
+  - Route to simplified processing functions based on detected type
 
-### **Task 2.3: ZIP Processing Implementation**
+- [ ] **IMPORT** utilities from `api/src/utils/file_utils.py`
+  - Import `UploadType` and `detect_upload_type`
+  - Clean up any duplicate enum definitions
 
-**Context:** Create ZIP extraction, validation, and transfer logic. Store raw images and create database entries.
+### **Task 2.3: Simplified GeoTIFF Upload Processing**
 
-**Subtasks:**
-- [x] **CREATE** `api/src/upload/raw_images_processor.py`
-  - Function: `async def process_raw_images_upload(...) -> Dataset`
-  - Handle ZIP extraction, validation, SSH transfer
-  - Create v2_datasets and v2_raw_images entries
-  - **NO task queueing** - only file handling and database creation
-
-- [x] **CREATE** `api/src/upload/exif_utils.py`
-  - Function: `extract_comprehensive_exif(image_path: Path) -> Dict[str, Any]`
-  - Function: `extract_acquisition_date(image_path: Path) -> Optional[datetime]`
-  - Use PIL for EXIF extraction, handle missing data gracefully
-  - **NOTE**: Requirements suggest frontend EXIF extraction for immediate UX, but this implements backend extraction - clarify if both approaches are needed
-
-- [x] **CREATE** `api/src/upload/rtk_utils.py`
-  - Function: `detect_rtk_files(zip_files: List[str]) -> Dict[str, Any]`
-  - Function: `parse_rtk_timestamp_file(mrk_path: Path) -> Dict[str, Any]`
-  - Detect and parse RTK positioning files (.RTK, .MRK, .RTL, .RTB, .RPOS, .RTS, .IMU)
-  - Extract RTK precision values and quality indicators from .MRK files
-  - Store files to exact path: `raw_images/{dataset_id}/images/` alongside images
-
-### **Task 2.4: Test ZIP Processing**
-**Context:** Test ZIP processing with real drone image files and verify all functionality.
-
-**Subtasks:**
-- [x] **CREATE** `api/tests/routers/test_upload_odm_zip.py`
-  - Test ZIP upload creates v2_datasets and v2_raw_images entries
-  - Test EXIF extraction populates acquisition date correctly
-  - Test RTK detection identifies RTK files and metadata
-  - Test images transferred to storage server via SSH
-  - **Use**: `test_minimal_3_images.zip` from test data
-     - **Run Test**: `deadtrees dev test api api/tests/routers/test_upload_odm_zip.py`
-
-- [x] **VERIFY** Phase 2 Upload Complete
-  - Upload detection tests pass: `deadtrees dev test api api/tests/routers/test_upload_odm_detection.py`
-  - ZIP processing tests pass: `deadtrees dev test api api/tests/routers/test_upload_odm_zip.py`
-  - **STOP** - Do not proceed until Phase 2 tests are passing
-
-### **Task 2.4A: Refactor GeoTIFF Upload Logic**
-
-**Context:** Extract existing GeoTIFF upload logic into a separate processor function for consistency with ZIP processing architecture.
+**Context:** Extract and simplify GeoTIFF upload logic, removing all technical analysis.
 
 **Subtasks:**
 - [ ] **CREATE** `api/src/upload/geotiff_processor.py`
-  - Function: `async def process_geotiff_upload(...) -> Dataset`
-  - Extract logic from upload router: dataset creation, file renaming, hash calculation, ortho entry creation
-  - Handle error cases with proper status updates
-  - Follow same pattern as `process_raw_images_upload()`
+  - Function: `async def process_geotiff_upload(dataset: Dataset, upload_target_path: Path) -> Dataset`
+  - **SIMPLIFIED LOGIC**: Only file storage, no technical analysis
+    - Move file to `archive/{dataset_id}_ortho.tif`
+    - Update status `is_upload_done=True`
+    - Return dataset
+  - **NO** ortho entry creation, hash calculation, or cog_info analysis
 
-- [ ] **REFACTOR** `/datasets/chunk` endpoint in `api/src/routers/upload.py`
-  - Import and call `process_geotiff_upload()` for final chunk processing
-  - Route both GeoTIFF and ZIP processing to their respective processor functions
-  - Keep chunked upload logic in router, extract final processing logic
-  - Maintain identical functionality and error handling
+### **Task 2.4: Simplified ZIP Upload Processing**
 
-- [ ] **UPDATE** imports in upload router
-  - Import `process_geotiff_upload` from `..upload.geotiff_processor`
-  - Import `process_raw_images_upload` from `..upload.raw_images_processor`
-  - Clean up unused imports after refactoring
-
-### **Task 2.4B: Test Refactored Upload Logic**
-
-**Context:** Verify that the refactored GeoTIFF upload maintains identical functionality.
+**Context:** Create ZIP extraction and storage logic without technical analysis.
 
 **Subtasks:**
-- [ ] **RUN** existing GeoTIFF upload tests to verify no regressions
-  - Execute: `deadtrees dev test api api/tests/routers/test_upload.py`
-  - All existing tests must pass with identical behavior
-  - Verify file naming, ortho creation, status updates remain unchanged
+- [ ] **CREATE** `api/src/upload/raw_images_processor.py`
+  - Function: `async def process_raw_images_upload(dataset: Dataset, upload_target_path: Path) -> Dataset`
+  - **SIMPLIFIED LOGIC**: Extract and store only
+    - Extract ZIP to `raw_images/{dataset_id}/`
+    - Create basic raw_images database entry
+    - Update status `is_upload_done=True`
+    - Return dataset
+  - **NO** technical analysis during upload
 
-- [ ] **CREATE** `api/tests/upload/test_geotiff_processor.py` (optional)
-  - Test `process_geotiff_upload()` function directly
-  - Test error handling and cleanup scenarios
-  - **Run Test**: `deadtrees dev test api api/tests/upload/test_geotiff_processor.py`
+- [ ] **CREATE** `api/src/upload/rtk_utils.py`
+  - Function: `detect_rtk_files(zip_files: List[str]) -> Dict[str, Any]`
+  - Function: `parse_rtk_timestamp_file(mrk_path: Path) -> Dict[str, Any]`
+  - Detect RTK files (.RTK, .MRK, .RTL, .RTB, .RPOS, .RTS, .IMU)
+  - Store basic RTK metadata in raw_images entry
+  - **NO** complex technical analysis
 
-### **Task 2.5: Configurable Process Endpoint**
-
-**Context:** Enhance `/datasets/{dataset_id}/process` endpoint to accept task lists from frontend, making it configurable.
-
-**Subtasks:**
-- [ ] **CREATE** `ProcessRequest` Pydantic model
-  - Field: `task_types: List[TaskTypeEnum]`
-  - Validate task types are supported
-
-- [ ] **ENHANCE** `/datasets/{dataset_id}/process` endpoint
-  - Accept POST request with ProcessRequest body
-  - Build TaskPayload from provided task list
-  - Maintain backward compatibility for GET requests
-
-### **Task 2.6: Test Process Endpoint Enhancement**
-**Context:** Test the enhanced process endpoint accepts task lists and queues them correctly.
+### **Task 2.5: Test Simplified Upload System**
+**Context:** Test simplified upload endpoints with real files.
 
 **Subtasks:**
-- [ ] **CREATE** `api/tests/routers/test_process_odm.py`
-  - Test process endpoint accepts task list: `['odm_processing', 'geotiff', 'cog']`
-  - Test TaskPayload created correctly from request
-  - Test tasks inserted into queue with correct order
-     - **Run Test**: `deadtrees dev test api api/tests/routers/test_process_odm.py`
+- [ ] **CREATE** `api/tests/routers/test_upload_simplified.py`
+  - Test GeoTIFF upload creates dataset but NO ortho entry
+  - Test ZIP upload creates dataset and raw_images entry only
+  - Test file storage in correct locations (archive/ vs raw_images/)
+  - Test status updates (is_upload_done=True only)
+  - **KEY**: Verify NO ortho entries created during upload
+     - **Run Test**: `deadtrees dev test api api/tests/routers/test_upload_simplified.py`
+
+- [ ] **VERIFY** Phase 2 Upload Complete
+  - Upload tests pass: `deadtrees dev test api api/tests/routers/test_upload_simplified.py`
+  - Upload speed improved (no technical analysis)
+  - **STOP** - Do not proceed until Phase 2 tests are passing
 
 ---
 
-## ⚙️ **PHASE 3: ODM PROCESSING INTEGRATION**
+## ⚙️ **PHASE 3: ENHANCED PROCESSOR SYSTEM**
 
-### **Task 3.1: ODM Processing Function**
+### **Task 3.1: Enhanced GeoTIFF Processing (Critical)**
 
-**Context:** Create ODM processing function that executes ODM containers using Docker-in-Docker with GPU support.
+**Context:** Enhance existing geotiff processing to handle ortho creation for both direct uploads and ODM-generated files.
+
+**Subtasks:**
+- [ ] **ENHANCE** `processor/src/process_geotiff.py`
+  - **ADD** ortho entry creation logic at start of function:
+    - Find orthomosaic at `archive/{dataset_id}_ortho.tif`
+    - Calculate SHA256 hash with `get_file_identifier()`
+    - Extract ortho info with `cog_info()`
+    - Create ortho entry with `upsert_ortho_entry()`
+  - **MAINTAIN** existing standardization logic
+  - **HANDLE** both direct upload and ODM-generated files identically
+
+- [ ] **UPDATE** error handling in geotiff processing
+  - Add check for missing orthomosaic file
+  - Provide clear error messages for missing files
+  - Ensure proper cleanup on failures
+
+### **Task 3.2: ODM Processing Function**
+
+**Context:** Create ODM processing function that generates orthomosaic and moves to standard location.
 
 **Subtasks:**
 - [ ] **CREATE** `processor/src/process_odm.py`
   - Function: `def process_odm(task: QueueTask, temp_dir: Path)`
-  - Pull raw images from storage via SSH from `raw_images/{dataset_id}/images/`
-  - Execute ODM Docker container with GPU acceleration using `--fast-orthophoto`
-  - Adapt ODM parameters based on RTK detection:
-    - Use `--force-gps` flag when RTK data is present
-    - Set `--gps-accuracy` to centimeter values (0.01-0.05) based on detected RTK precision
-    - Transfer RTK files to ODM project directory for processing use
-  - Push generated orthomosaic to storage server at `raw_images/{dataset_id}/odm_orthophoto.tif`
-  - Update status tracking (is_odm_done=True)
+  - Pull raw images from storage via SSH from `raw_images/{dataset_id}/`
+  - Execute ODM Docker container with GPU acceleration
+  - Move generated orthomosaic to `archive/{dataset_id}_ortho.tif`
+  - Update status `is_odm_done=True`
+  - **NO** ortho entry creation (delegated to geotiff processing)
 
 - [ ] **UPDATE** `processor/requirements.txt`
   - Add `docker>=6.1.0` for Docker API access
 
-### **Task 3.2: Test ODM Processing Function**
-**Context:** Test ODM container execution with real drone images and verify orthomosaic generation.
-
-**Subtasks:**
-- [ ] **CREATE** `processor/tests/test_process_odm.py`
-  - Test ODM container execution with minimal image set
-  - Test RTK detection and parameter adaptation
-  - Test orthomosaic generation and storage transfer
-  - Test status tracking updates correctly
-  - **Use**: `test_minimal_3_images.zip` fixture
-     - **Run Test**: `deadtrees dev test processor processor/tests/test_process_odm.py`
-
 ### **Task 3.3: Processor Integration**
 
-**Context:** Integrate ODM processing into main processor execution chain as first step.
+**Context:** Integrate enhanced processing into main processor execution chain.
 
 **Subtasks:**
 - [ ] **ENHANCE** `processor/src/processor.py`
-  - Add ODM processing as FIRST step in task execution chain
-  - Maintain existing fail-fast error handling pattern
-  - Import and call process_odm function
+  - Add ODM processing as FIRST step when `odm_processing` in task types
+  - **ENSURE** geotiff processing ALWAYS executes for both upload types
+  - Maintain existing fail-fast error handling
+  - Import and call enhanced process_geotiff and new process_odm
 
 - [ ] **UPDATE** `shared/status.py`
   - Add `is_odm_done: Optional[bool] = None` parameter to update_status function
   - Follow existing parameter pattern
 
-### **Task 3.4: Test Complete ODM Pipeline**
-**Context:** Test full pipeline from raw images through ODM to final processing steps.
+### **Task 3.4: Test Enhanced Processor System**
+**Context:** Test unified processing system with both upload types.
 
 **Subtasks:**
-- [ ] **CREATE** `processor/tests/test_odm_pipeline.py`
-  - Test complete pipeline: `['odm_processing', 'geotiff', 'cog', 'thumbnail', 'metadata']`
-  - Test all database tables updated correctly
-  - Test all status flags set correctly
-  - Test fail-fast behavior on errors
-  - **Use**: `test_small_10_images.zip` for comprehensive testing
-     - **Run Test**: `deadtrees dev test processor processor/tests/test_odm_pipeline.py`
+- [ ] **CREATE** `processor/tests/test_unified_geotiff_processing.py`
+  - Test geotiff processing creates ortho entry for direct upload
+  - Test geotiff processing creates ortho entry for ODM-generated file
+  - Test identical database state after processing regardless of source
+  - **KEY**: Verify unified ortho creation logic
+     - **Run Test**: `deadtrees dev test processor processor/tests/test_unified_geotiff_processing.py`
+
+- [ ] **CREATE** `processor/tests/test_process_odm.py`
+  - Test ODM container execution with minimal image set
+  - Test orthomosaic generation and movement to archive/
+  - Test status tracking updates correctly
+  - **Use**: `test_minimal_3_images.zip` fixture
+     - **Run Test**: `deadtrees dev test processor processor/tests/test_process_odm.py`
 
 ### **Task 3.5: Docker Configuration**
 
@@ -320,14 +284,6 @@ This document outlines the step-by-step implementation plan for integrating Open
   - Add Docker socket mount: `/var/run/docker.sock:/var/run/docker.sock`
   - Ensure GPU access configuration maintained
 
-- [ ] **UPDATE** processor Dockerfile (if needed)
-  - Ensure Docker client available for container execution
-  - Maintain existing GDAL and processing environment
-
-### **Task 3.6: Test Docker Configuration**
-**Context:** Verify Docker-in-Docker configuration works correctly in test environment.
-
-**Subtasks:**
 - [ ] **CREATE** `processor/tests/test_docker_config.py`
   - Test Docker socket accessibility from processor container
   - Test ODM image can be pulled and executed
@@ -335,77 +291,82 @@ This document outlines the step-by-step implementation plan for integrating Open
      - **Run Test**: `deadtrees dev test processor processor/tests/test_docker_config.py`
 
 - [ ] **VERIFY** Phase 3 Complete
+  - Unified geotiff processing tests pass: `deadtrees dev test processor processor/tests/test_unified_geotiff_processing.py`
   - ODM processing tests pass: `deadtrees dev test processor processor/tests/test_process_odm.py`
-  - Complete pipeline tests pass: `deadtrees dev test processor processor/tests/test_odm_pipeline.py`
   - Docker configuration tests pass: `deadtrees dev test processor processor/tests/test_docker_config.py`
   - **STOP** - Do not proceed until Phase 3 tests are passing
 
 ---
 
-## 🧪 **PHASE 4: INTEGRATION & VALIDATION**
+## 🧪 **PHASE 4: COMPLETE PIPELINE INTEGRATION**
 
-### **Task 4.1: End-to-End Integration Test**
+### **Task 4.1: Complete Pipeline Tests**
 
-**Context:** Validate complete workflow from ZIP upload through all processing steps with real data.
+**Context:** Validate complete workflow from upload through all processing steps with real data.
 
 **Subtasks:**
-- [ ] **CREATE** `integration/tests/test_odm_complete_workflow.py`
-  - Test ZIP upload → ODM processing → standardization → segmentation
-  - Test both RTK and non-RTK workflows
-  - Test error handling and recovery
+- [ ] **CREATE** `processor/tests/test_complete_pipeline.py`
+  - Test complete GeoTIFF pipeline: upload → geotiff → cog → thumbnail → metadata
+  - Test complete ZIP pipeline: upload → odm → geotiff → cog → thumbnail → metadata
+  - Test identical final database state for both paths
   - **Use**: `test_medium_25_images.zip` for comprehensive validation
-     - **Run Test**: `deadtrees dev test processor integration/tests/test_odm_complete_workflow.py`
+     - **Run Test**: `deadtrees dev test processor processor/tests/test_complete_pipeline.py`
 
-### **Task 4.2: Performance & Error Testing**
+### **Task 4.2: Frontend Task Queue Requirements**
 
-**Context:** Test resource management, error scenarios, and performance characteristics.
+**Context:** Ensure frontend includes correct task types for both upload types.
 
 **Subtasks:**
-- [ ] **CREATE** `processor/tests/test_odm_error_handling.py`
-  - Test ODM failure with insufficient images (use `test_invalid_2_images.zip`) - validate minimum 3 images requirement
-  - Test Docker socket unavailable scenarios
-  - Test storage transfer failures (SSH connection issues with retry mechanism)
-  - Test GPU resource unavailability (sequential processing, task queuing)
-  - Test invalid ZIP files and unsupported image formats
-  - Test cleanup after failures and orphaned container handling
-     - **Run Test**: `deadtrees dev test processor processor/tests/test_odm_error_handling.py`
+- [ ] **DOCUMENT** required task lists for frontend:
+  - **GeoTIFF uploads**: `['geotiff', 'cog', 'thumbnail', 'metadata']`
+  - **ZIP uploads**: `['odm_processing', 'geotiff', 'cog', 'thumbnail', 'metadata']`
+  - **Critical**: Both must include 'geotiff' for ortho entry creation
 
-- [ ] **CREATE** `processor/tests/test_odm_performance.py` (marked as slow)
-  - Test resource usage monitoring
-  - Test processing time benchmarks
-  - Test memory and GPU usage
-  - **Mark**: `@pytest.mark.slow` for optional execution
-  - **Run Test**: `deadtrees dev test processor processor/tests/test_odm_performance.py`
+- [ ] **CREATE** validation in process endpoint
+  - Verify 'geotiff' included in task list for all uploads
+  - Provide clear error if geotiff task missing
+  - Add helpful documentation in API responses
 
 ### **Task 4.3: Backward Compatibility Verification**
 
-**Context:** Ensure existing GeoTIFF upload workflow remains unchanged.
+**Context:** Ensure existing workflows continue working with enhanced processing.
 
 **Subtasks:**
 - [ ] **CREATE** `api/tests/test_backward_compatibility.py`
-  - Test existing GeoTIFF upload workflow unchanged (direct ortho creation → standard pipeline)
-  - Test existing processing pipeline unaffected (COG → Thumbnail → Metadata → Segmentation)
+  - Test existing GeoTIFF upload workflow (now simplified)
+  - Test processing pipeline produces identical results
   - Test API responses maintain same format
-  - Verify GeoTIFF uploads bypass ODM processing entirely
-  - Test performance matches existing workflow requirements
+  - Verify performance improvements from simplified upload
      - **Run Test**: `deadtrees dev test api api/tests/test_backward_compatibility.py`
 
-### **Task 4.4: Final Validation**
+### **Task 4.4: Error Handling and Edge Cases**
+
+**Context:** Test error scenarios and edge cases for robust operation.
+
+**Subtasks:**
+- [ ] **CREATE** `processor/tests/test_error_handling.py`
+  - Test missing orthomosaic file in archive/ directory
+  - Test ODM failure with insufficient images
+  - Test Docker socket unavailable scenarios
+  - Test cleanup after failures
+     - **Run Test**: `deadtrees dev test processor processor/tests/test_error_handling.py`
+
+### **Task 4.5: Final Integration Validation**
 
 **Context:** Run comprehensive test suite to validate all functionality before deployment.
 
 **Subtasks:**
-- [ ] **RUN** Complete ODM Test Suite
+- [ ] **RUN** Complete Test Suite
   - Execute: `deadtrees dev test api -m comprehensive`
   - Execute: `deadtrees dev test processor -m comprehensive`
-  - Verify all tests pass including slow/comprehensive tests
+  - Verify all tests pass including performance improvements
 
 - [ ] **VERIFY** All Features Working
-  - ZIP upload and processing working
-  - ODM container execution successful
+  - Simplified upload endpoints functional
+  - Unified geotiff processing creates ortho entries for both sources  
   - Complete pipeline processing functional
   - Error handling and cleanup working
-  - Backward compatibility maintained
+  - Performance improvements measurable
 
 ---
 
@@ -417,7 +378,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 docker>=6.1.0
 
 # api/requirements.txt  
-Pillow>=10.0.0
+# No new requirements needed
 ```
 
 ### **Infrastructure Requirements**
@@ -432,20 +393,41 @@ Pillow>=10.0.0
 
 ### **Each Phase Completion Criteria**
 - [ ] **Phase 1**: Database and model tests pass
-- [ ] **Phase 2**: Upload and ZIP processing tests pass
-- [ ] **Phase 3**: ODM processing and pipeline tests pass  
-- [ ] **Phase 4**: Integration, performance, and compatibility tests pass
+- [ ] **Phase 2**: Simplified upload tests pass, performance improved
+- [ ] **Phase 3**: Unified processing tests pass, both sources handled identically  
+- [ ] **Phase 4**: Integration tests pass, backward compatibility maintained
 
 ### **Final Success Criteria**
-- [ ] Users can upload ZIP archive with drone images
-- [ ] ODM generates orthomosaic and processes through complete pipeline
-- [ ] Acquisition date extracted automatically from EXIF data
-- [ ] RTK data detected and used for high-precision processing
+- [ ] Both GeoTIFF and ZIP uploads work with simplified, fast upload process
+- [ ] All technical analysis happens in processor, eliminating code duplication
+- [ ] Both upload types result in identical database state after geotiff processing
+- [ ] ODM generates orthomosaic and integrates seamlessly with processing pipeline
+- [ ] Upload performance improved due to eliminated technical analysis
+- [ ] Processing behavior identical regardless of orthomosaic source
 - [ ] All tests passing including comprehensive test suite
-- [ ] Existing GeoTIFF workflow unchanged and functional
+
+---
+
+## 🔄 **ARCHITECTURAL BENEFITS**
+
+### **Upload Simplification**
+- **Faster uploads**: No technical analysis during upload
+- **Higher reliability**: Fewer failure points during upload
+- **Cleaner code**: Upload focused on file storage only
+
+### **Unified Processing**
+- **No code duplication**: Single technical analysis logic in processor
+- **Consistent behavior**: Identical processing regardless of source
+- **Easier maintenance**: Single code path for ortho creation
+
+### **Database Consistency**
+- **Unified state**: Both upload types result in identical database state
+- **Predictable behavior**: Same processing pipeline for both sources
+- **Simpler testing**: Single set of validation logic
 
 ---
 
 **Next Steps:** Begin with Task 0.1 - Create ODM test data, then proceed through phases atomically
 **Testing Strategy:** Each task immediately tested before proceeding to next
 **Development Workflow:** Use `deadtrees dev test` commands exclusively 
+**Architecture Principle:** Upload stores files, processor creates ortho entries and performs all technical analysis 

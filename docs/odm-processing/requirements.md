@@ -1,31 +1,31 @@
 # ODM Raw Drone Image Processing - Requirements Document
 
-**Version:** 2.0  
+**Version:** 2.1  
 **Date:** December 2024  
 **Project:** DeadTrees Platform - OpenDroneMap Integration  
-**Status:** ✅ UPDATED - Unified Upload Approach
+**Status:** ✅ UPDATED - Processor-Centric Architecture
 
 ---
 
 ## 📋 **OVERVIEW**
 
-Backend integration of OpenDroneMap (ODM) for processing raw drone images into orthomosaics within the existing DeadTrees processing pipeline using a **unified chunked upload endpoint**.
+Backend integration of OpenDroneMap (ODM) for processing raw drone images into orthomosaics within the existing DeadTrees processing pipeline using a **processor-centric architecture** where all technical analysis and ortho table population occurs during processing, not upload.
 
 ### **System Boundary**
 - **Frontend**: Enhanced upload interface supporting both GeoTIFF and ZIP files
-- **Backend API**: Enhanced existing chunked upload endpoint with smart file type routing
-- **Processing Server**: ODM Docker container execution with GPU acceleration
-- **Storage Server**: Raw image storage and file transfer via SSH
+- **Backend API**: Simplified upload endpoints focused on file storage only
+- **Processing Server**: All technical analysis, ortho table creation, and standardization
+- **Storage Server**: File storage and transfer via SSH during processing
 - **Database**: Extended queue system and raw image metadata tracking
 
-### **Unified Processing Flow**
-1. **Upload**: Users upload GeoTIFF or ZIP via same chunked upload interface
-2. **Detection**: Backend automatically detects file type (.tif or .zip)
-3. **Routing**: Smart routing to appropriate processing logic
-4. **Processing**: 
-   - **GeoTIFF**: Direct ortho creation → standard pipeline
-   - **ZIP**: Extract → validate → store → ODM → standard pipeline
-5. **Pipeline**: Both paths converge at standard processing (COG → Thumbnail → Metadata → Segmentation)
+### **Unified Processing Flow (Processor-Centric)**
+1. **Upload**: Users upload GeoTIFF or ZIP - files stored with minimal processing
+   - **GeoTIFF**: Store in `archive/{dataset_id}_ortho.tif` - NO ortho entry creation
+   - **ZIP**: Extract to `raw_images/{dataset_id}/` - create raw_images entry only
+2. **Processing**: ALL technical analysis happens in processor
+   - **GeoTIFF Path**: Process existing ortho → create ortho entry → standardize → pipeline
+   - **ZIP Path**: ODM processing → generate ortho → create ortho entry → standardize → pipeline
+3. **Convergence**: Both paths identical after ortho entry creation and standardization
 
 ---
 
@@ -34,7 +34,7 @@ Backend integration of OpenDroneMap (ODM) for processing raw drone images into o
 **US-ODM-001: Raw Image Upload**
 - **Given** a user has raw drone images from a flight in ZIP format
 - **When** the user uploads the ZIP archive via chunked upload
-- **Then** the system shall extract and store images on storage server
+- **Then** the system shall extract and store images in raw_images directory
 - **And** the system shall validate image formats (JPEG/JPG/TIF)
 - **And** the system shall extract acquisition date from EXIF data automatically
 - **And** the system shall create dataset and raw image database entries
@@ -51,14 +51,14 @@ Backend integration of OpenDroneMap (ODM) for processing raw drone images into o
 - **And** the system shall queue remaining processing tasks (COG, thumbnail, metadata)
 - **Response** processing time varies (1-24 hours depending on image count and complexity)
 
-**US-ODM-003: Legacy Workflow Preservation**
+**US-ODM-003: Legacy Workflow Enhancement**
 - **Given** a user has pre-processed orthomosaic
 - **When** using existing direct orthomosaic upload workflow
-- **Then** the system shall continue supporting direct orthomosaic upload unchanged
-- **And** the system shall bypass ODM processing for direct uploads
-- **And** the system shall process via existing GeoTIFF → COG → Thumbnail pipeline
-- **And** the system shall maintain identical performance and behavior
-- **Response** same performance as current workflow
+- **Then** the system shall store orthomosaic in archive directory (NO immediate ortho entry)
+- **And** the system shall require geotiff processing task to create ortho entry
+- **And** the system shall process via unified GeoTIFF → COG → Thumbnail pipeline
+- **And** the system shall maintain consistent processing behavior for both upload types
+- **Response** consistent processing behavior regardless of upload source
 
 **US-ODM-004: Acquisition Date Automation**
 - **Given** raw drone images contain EXIF metadata
@@ -71,12 +71,12 @@ Backend integration of OpenDroneMap (ODM) for processing raw drone images into o
 **US-ODM-005: RTK High-Precision Processing**
 - **Given** a ZIP file contains RTK positioning data files (.RTK, .MRK, .RTL, .RTB, .RPOS)
 - **When** the ZIP is uploaded and processed
-- **Then** the system shall automatically detect RTK data presence
+- **Then** the system shall automatically detect RTK data presence during upload
 - **And** the system shall extract RTK precision indicators from timestamp files (.MRK)
-- **And** the system shall transfer RTK files to storage server alongside images
-- **And** the system shall execute ODM with high-precision GPS flags (--force-gps, --gps-accuracy)
+- **And** the system shall store RTK files alongside images in raw_images directory
+- **And** the system shall execute ODM with high-precision GPS flags during processing
 - **And** the system shall achieve centimeter-level absolute positioning accuracy
-- **Response** RTK detection and parameter extraction within 5 seconds during upload
+- **Response** RTK detection and storage within 5 seconds during upload
 
 ---
 
@@ -117,230 +117,139 @@ ALTER TYPE "public"."v2_status" ADD VALUE 'odm_processing';
 ALTER TABLE "public"."v2_statuses" ADD COLUMN "is_odm_done" boolean NOT NULL DEFAULT false;
 ```
 
-### **Status System Benefits**
-- **Consistent tracking**: Uses established v2_statuses pattern
-- **Unified error handling**: Leverages existing has_error/error_message fields
-- **Queue integration**: Works with existing task execution order
-- **Clean separation**: Raw image metadata separate from status tracking
+### **Ortho Table Population Strategy**
+**Key Change**: Ortho entries created ONLY during processing, never during upload:
+
+- **GeoTIFF uploads**: File stored in archive/, ortho entry created during geotiff processing task
+- **ZIP uploads**: Files extracted to raw_images/, ortho entry created after ODM generates orthomosaic
+- **Unified processing**: Both paths use identical ortho creation logic in processor
 
 ### **Frontend EXIF Extraction Strategy**
 - Extract acquisition date **in frontend** during ZIP selection/preview
 - Populate v2_datasets.aquisition_* fields directly via upload API
 - Store comprehensive camera metadata in v2_raw_images.camera_metadata
-- **Benefits**: Immediate validation, lighter server load, better UX
+- **Benefits**: Immediate validation, lighter server load, better UX, no technical analysis during upload
 
-### **Enum Extensions**
-```python
-# shared/models.py - CURRENT TaskTypeEnum:
-class TaskTypeEnum(str, Enum):
-    cog = 'cog'                        # Existing
-    deadwood = 'deadwood'              # Existing  
-    geotiff = 'geotiff'                # Existing - will standardize ODM outputs
-    metadata = 'metadata'              # Existing
-    odm_processing = 'odm_processing'  # NEW - Always first in execution
-    thumbnail = 'thumbnail'            # Existing
-
-# shared/models.py - CURRENT StatusEnum with addition:
-class StatusEnum(str, Enum):
-    idle = 'idle'                                    # Existing
-    uploading = 'uploading'                          # Existing
-    ortho_processing = 'ortho_processing'            # Existing
-    cog_processing = 'cog_processing'                # Existing
-    metadata_processing = 'metadata_processing'      # Existing
-    thumbnail_processing = 'thumbnail_processing'    # Existing
-    deadwood_segmentation = 'deadwood_segmentation'  # Existing
-    forest_cover_segmentation = 'forest_cover_segmentation'  # Existing
-    audit_in_progress = 'audit_in_progress'          # Existing
-    odm_processing = 'odm_processing'                # NEW
-
-# Add RawImages Pydantic model
-class RawImages(BaseModel):
-    id: Optional[int] = None
-    dataset_id: int
-    raw_image_count: int
-    raw_image_size_mb: int
-    raw_images_path: str
-    camera_metadata: Optional[Dict[str, Any]] = None
-    version: int = 1
-    created_at: Optional[datetime] = None
-
-# Extend Status model
-class Status(BaseModel):
-    # ... existing fields ...
-    is_odm_done: bool = False  # NEW
-```
-
-### **Clean Separation Benefits**
-- **v2_datasets**: Final processed data only (user-facing)
-- **v2_raw_images**: Input material metadata (processing-focused)  
-- **Frontend EXIF**: Immediate acquisition date without server processing
-- **Backwards Compatible**: No changes to existing v2_datasets table
-- **Scalable**: Handles volume differences (more orthos than raw uploads)
+### **Task Execution Requirements**
+**Critical**: Both upload types MUST include `geotiff` processing task:
+- **GeoTIFF uploads**: Queue `['geotiff', 'cog', 'thumbnail', 'metadata']`
+- **ZIP uploads**: Queue `['odm_processing', 'geotiff', 'cog', 'thumbnail', 'metadata']`
+- **Processor ensures**: GeoTIFF processing always creates ortho entry before other tasks
 
 ---
 
 ## 🔧 **FUNCTIONAL REQUIREMENTS**
 
-### **FR-ODM-001: ZIP Upload Support**
-- System shall accept ZIP files via chunked upload (similar to existing upload mechanism)
-- System shall support JPEG/JPG/TIF image formats
-- System shall validate minimum 3 images for ODM processing
-- System shall extract and store images on storage server using SSH transfer
+### **FR-ODM-001: Simplified Upload Processing**
+- System shall accept both GeoTIFF and ZIP files via chunked upload
+- System shall focus upload processing on file storage only (NO technical analysis)
+- System shall store GeoTIFF files directly in archive directory without ortho entry creation
+- System shall extract ZIP files to raw_images directory and create raw_images database entry
+- System shall defer all technical analysis (hash calculation, cog_info, bbox extraction) to processing phase
 
 ### **FR-ODM-002: Enhanced EXIF Data Management**
-- System shall extract comprehensive EXIF data from raw images during upload processing
-- System shall capture camera make/model, GPS coordinates, flight altitude, image dimensions
-- System shall store **comprehensive EXIF data** in **v2_raw_images.camera_metadata** JSONB field
-- System shall populate **basic acquisition date** in existing **v2_datasets** fields (aquisition_year, aquisition_month, aquisition_day)
-- System shall handle missing or corrupted EXIF data gracefully
+- System shall extract basic acquisition date in frontend during upload for immediate UX
+- System shall store comprehensive EXIF data in v2_raw_images.camera_metadata during upload processing
+- System shall handle missing or corrupted EXIF data gracefully without blocking upload
+- System shall perform detailed technical analysis only during processing phase
 
-### **FR-ODM-002A: RTK Data Detection and Processing**
+### **FR-ODM-002A: RTK Data Detection and Storage**
 - System shall automatically detect RTK positioning files in ZIP uploads (.RTK, .MRK, .RTL, .RTB, .RPOS, .RTS, .IMU)
-- System shall parse RTK timestamp files (.MRK) to extract precision indicators and quality metrics
-- System shall extract RTK precision values (horizontal/vertical accuracy in centimeters)
-- System shall extract RTK quality indicators (Q values: 50=excellent, 0-49=varying quality)
+- System shall parse RTK timestamp files (.MRK) to extract precision indicators during upload
 - System shall store RTK metadata in v2_raw_images table (has_rtk_data, rtk_precision_cm, rtk_quality_indicator)
-- System shall transfer RTK auxiliary files to storage server alongside images
+- System shall store RTK files alongside images in raw_images directory for processing access
 
-### **FR-ODM-003: ODM Container Integration** 
+### **FR-ODM-003: ODM Container Integration with Ortho Creation** 
 - System shall execute OpenDroneMap via GPU-accelerated Docker container using Docker-in-Docker
-- System shall mount Docker socket for container execution within processor
-- System shall use `--fast-orthophoto` processing mode for efficiency
-- System shall handle ODM container lifecycle and resource management
-- System shall use sequential processing (one ODM task at a time with full GPU access)
-- System shall detect RTK data availability and adapt ODM command parameters accordingly
-- System shall use `--force-gps` flag when RTK data is present to prioritize high-precision coordinates
-- System shall set `--gps-accuracy` to centimeter values (0.01-0.05) based on detected RTK precision
-- System shall transfer RTK auxiliary files to ODM project directory for potential processing use
+- System shall adapt ODM parameters based on detected RTK data (--force-gps, --gps-accuracy flags)
+- System shall generate orthomosaic and move to standard archive location (archive/{dataset_id}_ortho.tif)
+- System shall NOT create ortho database entry (delegated to geotiff processing task)
+- System shall update ODM completion status only (is_odm_done=True)
 
-### **FR-ODM-004: Storage Server Integration**
-- System shall transfer raw images between storage and processing servers via SSH
-- System shall use existing SSH utilities for file operations  
-- System shall maintain unified directory structure: `raw_images/{dataset_id}/images/` containing both image and RTK files
-- System shall preserve original ZIP file structure by storing RTK files alongside corresponding images
-- System shall support chunked upload for large ZIP files containing images and RTK data
-- System shall maintain permanent storage of raw images and RTK files (no automatic deletion)
-- System shall preserve RTK file relationships and naming conventions for future reference
+### **FR-ODM-004: Unified Ortho Processing Pipeline**
+- System shall ensure geotiff processing task included for ALL upload types
+- System shall create ortho database entries ONLY during geotiff processing (never during upload)
+- System shall perform all technical analysis in processor (hash, cog_info, bbox extraction)
+- System shall standardize ALL orthomosaics (both direct upload and ODM-generated)
+- System shall use identical ortho creation logic regardless of orthomosaic source
 
 ### **FR-ODM-005: Enhanced Queue System Integration**
-- System shall add ODM processing to existing queue system with normal priority
-- System shall **allow the frontend to queue ODM tasks via the /process endpoint** by providing a specific task list
+- System shall require frontend to explicitly queue geotiff processing for GeoTIFF uploads
+- System shall ensure ODM tasks execute before geotiff processing within same dataset
 - System shall execute tasks in strict order: ODM → GeoTIFF → COG → Thumbnail → Metadata → Deadwood
-- System shall apply GeoTIFF standardization to ODM outputs for quality assurance
-- System shall maintain fail-fast behavior: if any step fails, entire task fails
-- System shall handle task failures with appropriate error recovery and cleanup
+- System shall maintain fail-fast behavior with proper error recovery and cleanup
+- System shall handle both upload types through identical processing pipeline after ortho creation
 
-### **FR-ODM-006: Generated Orthomosaic Handling**
-- System shall transfer generated orthomosaics to storage server
-- System shall create ortho database entries for ODM-generated files
-- System shall trigger standard processing pipeline automatically
-- System shall handle acquisition date preservation from raw images to final dataset
-
----
-
-## 🚨 **EDGE CASES & CONSTRAINTS**
-
-### **EC-ODM-001: Invalid Image Sets**
-- **Scenario**: Insufficient images or poor overlap for ODM processing
-- **Handling**: ODM failure logged, task marked as failed, user notified via status
-
-### **EC-ODM-002: Large File Handling**
-- **Scenario**: ZIP archives approaching storage or processing limits
-- **Handling**: Chunked upload support, progress tracking, timeout handling
-
-### **EC-ODM-003: Storage Server Connectivity**
-- **Scenario**: SSH connection failures during file transfer
-- **Handling**: Retry mechanism, detailed error logging, task failure on persistent issues
-
-### **EC-ODM-004: GPU Resource Availability**
-- **Scenario**: GPU unavailable or insufficient memory
-- **Handling**: Sequential ODM processing, task queuing until resources available
-
-### **EC-ODM-005: Processing Failures**
-- **Scenario**: ODM container fails during processing
-- **Handling**: Mark task as failed, cleanup temporary files, detailed error logging
+### **FR-ODM-006: Consistent Orthomosaic Handling**
+- System shall store ALL orthomosaics in archive directory regardless of source
+- System shall use identical file naming convention: {dataset_id}_ortho.tif
+- System shall create ortho database entries with identical structure and metadata
+- System shall enable seamless processing pipeline regardless of orthomosaic origin
 
 ---
 
 ## 📋 **NON-FUNCTIONAL REQUIREMENTS**
 
 ### **Performance**
-- ZIP upload: ≤ 2 minutes per GB via chunked upload
+- ZIP upload: ≤ 2 minutes per GB via chunked upload (file storage only)
+- GeoTIFF upload: ≤ 30 seconds per GB (file storage only, no technical analysis)
 - ODM processing: Variable (1-24 hours depending on image count and complexity)
-- File transfer: ≤ 5 minutes for 1GB between servers via SSH
+- Technical analysis: ≤ 5 minutes per orthomosaic during geotiff processing
 
 ### **Storage**
-- Raw images: Permanent retention (no automatic deletion)
-- Generated orthomosaics: Follow existing retention policies
-- Storage server: Plan for significant growth in raw image storage requirements
+- Raw images: Permanent retention in raw_images directory
+- Generated orthomosaics: Standard archive directory with existing retention policies
+- Unified storage: Both upload types follow identical storage patterns after processing
 
 ### **Reliability**
+- Upload reliability: ≥ 99.5% (simplified processing reduces failure points)
 - ODM success rate: ≥ 90% for valid image sets with proper overlap
-- File transfer: ≥ 99% success rate with SSH retry mechanism
+- Processing consistency: Identical behavior for both upload types after ortho creation
 - Queue integration: No disruption to existing processing workflows
 
 ### **Scalability**
-- Support up to 10 concurrent raw image uploads
+- Support up to 10 concurrent uploads (both types)
 - Sequential ODM processing (one container at a time with full GPU resources)
-- Storage growth planning for raw image accumulation
+- Unified processing: Single pipeline handles both sources efficiently
 
 ---
 
 ## 🔄 **INTEGRATION POINTS**
 
 ### **Modified Components**
-- **Upload API**: Enhanced existing chunked upload endpoint with smart file type routing
-- **Processor**: Add ODM processing step before existing tasks
-- **Queue System**: Ensure ODM tasks execute before other processing within same dataset
-- **SSH Utilities**: Leverage existing file transfer capabilities for raw images
-- **Status Tracking**: Extend for ODM processing states and raw image management
+- **Upload API**: Simplified to focus on file storage only (no technical analysis)
+- **Processor**: Enhanced geotiff processing to handle ortho creation for both sources
+- **Queue System**: Ensure geotiff processing included for all upload types
+- **Status Tracking**: Consistent tracking regardless of orthomosaic source
 
 ### **Unchanged Components**
-- **Existing upload workflow**: Direct orthomosaic upload continues working
-- **Processing pipeline**: COG, thumbnail, metadata, segmentation unchanged
+- **Processing pipeline**: COG, thumbnail, metadata, segmentation unchanged after ortho creation
 - **Database structure**: Minimal extensions (new raw_images table only)
-- **User interface**: Only upload method changes (add ZIP option for raw images)
+- **User interface**: Upload methods enhanced but processing interface unchanged
+- **Download and access**: Identical behavior regardless of orthomosaic source
 
 ### **New Components**
 - **Raw Images Table**: Track metadata for uploaded raw image sets
-- **ODM Processing Function**: Handle Docker container execution and file management
-- **ZIP Processing Logic**: Extract, validate, and transfer raw images
-- **Volume Mounting**: Enable ODM container access to image files
+- **ODM Processing Function**: Handle Docker container execution and orthomosaic generation
+- **Unified Ortho Creation**: Single logic path for ortho entry creation in processor
+- **Enhanced GeoTIFF Processing**: Handles ortho creation for both direct and ODM-generated files
 
 ---
 
 ## ✅ **SUCCESS CRITERIA**
 
-1. **Users can upload ZIP archive with 50+ drone images via chunked upload**
-2. **ODM generates high-quality orthomosaic and enters existing processing pipeline**
-3. **Acquisition date extracted automatically from EXIF data without user input**
-4. **Processing queue handles ODM tasks with correct execution order**
-5. **Raw images stored permanently on storage server for future reference**
-6. **Existing direct orthomosaic upload continues working unchanged**
-7. **GPU-accelerated processing provides reasonable performance for typical datasets**
-8. **System handles processing failures gracefully with clear error messaging**
+1. **Users can upload both GeoTIFF and ZIP files with consistent, fast upload experience**
+2. **All technical analysis and ortho creation happens in processor for both upload types**
+3. **ODM generates orthomosaic and integrates seamlessly with existing processing pipeline**
+4. **Both upload types result in identical database state after geotiff processing**
+5. **Existing GeoTIFF workflow enhanced with consistent processor-centric approach**
+6. **No code duplication between upload and processing technical analysis**
+7. **Processing pipeline behavior identical regardless of orthomosaic source**
+8. **System handles processing failures gracefully with unified error handling**
 
 ---
 
-## 📝 **ASSUMPTIONS & DEPENDENCIES**
-
-### **Assumptions**
-- Raw drone images have GPS EXIF data for georeferencing
-- ZIP archives contain images from single flight/project
-- Users understand drone image capture requirements for successful ODM processing
-- Existing storage server has capacity for raw image growth
-- GPU hardware available on processing server for ODM acceleration
-
-### **Dependencies**
-- OpenDroneMap Docker image with GPU support
-- NVIDIA Container Toolkit on processing server
-- Docker socket access for processor container
-- Additional storage capacity planning for raw images
-- Existing SSH connectivity between processing and storage servers
-
----
-
-**Document Status**: FINAL  
-**Implementation Scope**: Backend integration only, minimal user interface changes  
-**Technical Details**: See `design.md` for implementation see `implementation.md` specifications and database schemas  
-**EXIF Data Strategy**: No separate EXIF table needed - capture only acquisition date in existing v2_raw_images and v2_datasets tables 
+**Document Status**: UPDATED - Processor-Centric Architecture  
+**Implementation Scope**: Backend integration with simplified upload and enhanced processing  
+**Technical Details**: See `design.md` for implementation specifications and `implementation.md` for step-by-step tasks  
+**Architecture Principle**: Upload stores files, processor creates ortho entries and performs all technical analysis 

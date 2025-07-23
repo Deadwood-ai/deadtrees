@@ -1,24 +1,31 @@
 # ODM Raw Drone Image Processing - Technical Design
 
-**Version:** 2.0  
+**Version:** 2.1  
 **Date:** December 2024  
-**Status:** ✅ Ready for Implementation
+**Status:** ✅ Ready for Implementation - Processor-Centric Architecture
 
 ---
 
 ## 🏗️ **ARCHITECTURE OVERVIEW**
 
 ### **Core Decisions**
-- **Unified Upload**: Enhance existing `/datasets/chunk` endpoint for both GeoTIFF and ZIP
-- **Smart Routing**: Automatic file type detection (.tif vs .zip) 
-- **Quality Pipeline**: Keep GeoTIFF standardization for ODM outputs
-- **No EXIF Table**: Capture acquisition date in existing tables only
+- **Processor-Centric**: ALL technical analysis and ortho creation happens in processor
+- **Simplified Upload**: Upload endpoints focus only on file storage
+- **Unified Processing**: Both GeoTIFF and ZIP paths converge at ortho creation
+- **No Code Duplication**: Single technical analysis logic in processor
 
-### **Processing Flows**
+### **Processing Flows (Processor-Centric)**
 ```
-GeoTIFF: .tif → [geotiff→cog→thumb→metadata→deadwood]
-ZIP:     .zip → [odm→geotiff→cog→thumb→metadata→deadwood]
+GeoTIFF: Upload (store only) → [geotiff→cog→thumb→metadata→deadwood]
+ZIP:     Upload (extract only) → [odm→geotiff→cog→thumb→metadata→deadwood]
+
+Both paths converge at geotiff processing where ortho entries are created
 ```
+
+### **Key Architectural Changes**
+- **Upload**: No `cog_info()`, no `get_file_identifier()`, no `upsert_ortho_entry()`
+- **Processor**: Enhanced `geotiff` processing handles ortho creation for both sources
+- **Consistency**: Identical technical analysis logic regardless of orthomosaic origin
 
 ---
 
@@ -59,17 +66,16 @@ ALTER TYPE "public"."v2_status" ADD VALUE 'odm_processing';
 ALTER TABLE "public"."v2_statuses" ADD COLUMN "is_odm_done" boolean NOT NULL DEFAULT false;
 ```
 
-**Status Integration Benefits:**
-- **Consistent tracking**: Same pattern as is_cog_done, is_thumbnail_done, etc.
-- **Unified error handling**: Uses existing has_error/error_message system
-- **Queue compatible**: Works with current task execution flow
-- **Monitoring ready**: Integrates with existing status monitoring
+**Ortho Table Population (Critical Change):**
+- **Upload Phase**: NO ortho entries created (GeoTIFF or ZIP)
+- **Processing Phase**: ALL ortho entries created during `geotiff` processing task
+- **Unified Logic**: Single `upsert_ortho_entry()` call location in processor
 
 **Storage Path Convention:**
-- Original ZIP file: `raw_images/{dataset_id}/{dataset_id}_raw_images.zip`
-- Raw images + RTK files: `raw_images/{dataset_id}/images/` (extracted ZIP contents)
-- Generated ortho: `raw_images/{dataset_id}/odm_orthophoto.tif`
-- Matches existing storage patterns with direct mounted storage (no SSH transfer during upload)
+- GeoTIFF uploads: `archive/{dataset_id}_ortho.tif` (no ortho entry until processing)
+- ZIP uploads: `raw_images/{dataset_id}/` (extracted contents) 
+- ODM output: `archive/{dataset_id}_ortho.tif` (moved from ODM temp location)
+- Processing: Creates ortho entries for files found in `archive/` directory
 
 ### **Frontend EXIF Extraction - Smart UX**
 ```typescript
@@ -94,7 +100,7 @@ const extractAcquisitionDate = (imageFile: File) => {
 
 ## 🔧 **IMPLEMENTATION COMPONENTS**
 
-### **1. Enhanced Upload Endpoint**
+### **1. Simplified Upload Endpoints**
 ```python
 # api/src/routers/upload.py
 
@@ -110,180 +116,169 @@ def detect_upload_type(file_path: Path) -> UploadType:
     else:
         raise HTTPException(400, f"Unsupported file type: {file_path.suffix}")
 
-@router.post('/datasets/chunk')  # ENHANCED existing endpoint
+@router.post('/datasets/chunk')
 async def upload_chunk(
     # ... existing parameters ...
-    upload_type: Annotated[Optional[UploadType], Form()] = None,  # NEW
+    upload_type: Annotated[Optional[UploadType], Form()] = None,
 ):
     # ... existing chunk logic ...
     
-    # Final chunk processing with smart routing
+    # Final chunk processing - SIMPLIFIED (no technical analysis)
     if chunk_index == chunks_total - 1:
         detected_type = upload_type or detect_upload_type(upload_target_path)
         
+        dataset = create_dataset_entry(...)  # Same for both types
+        
         if detected_type == UploadType.GEOTIFF:
-            # Route to extracted GeoTIFF processor (refactored from router)
-            return await process_geotiff_upload(...)
+            # Store file only - NO ortho entry creation
+            target_path = settings.archive_path / f"{dataset.id}_ortho.tif"
+            upload_target_path.rename(target_path)
+            
         elif detected_type == UploadType.RAW_IMAGES_ZIP:
-            # Route to ZIP processor (new functionality)
-            return await process_raw_images_upload(...)
+            # Extract and store - NO technical analysis
+            extract_zip_to_raw_images(dataset.id, upload_target_path)
+            create_raw_images_entry(dataset.id, ...)
+        
+        update_status(token, dataset.id, is_upload_done=True)
+        return dataset
 ```
 
-### **2. Upload Processing Functions - Clean Architecture**
-**Design Principle**: Router handles chunked upload coordination, processors handle final file processing.
+### **2. Enhanced Processor Components**
+
+#### **Unified GeoTIFF Processing (Key Component)**
 ```python
-# api/src/upload/geotiff_processor.py
-async def process_geotiff_upload(...) -> Dataset:
-    """Refactored GeoTIFF upload logic extracted from upload router"""
-    # 1. Create dataset entry
-    # 2. Rename file to {dataset_id}_ortho.tif in archive directory
-    # 3. Calculate SHA256 hash and extract ortho info with cog_info()
-    # 4. Create ortho entry via upsert_ortho_entry()
-    # 5. Update status is_upload_done=True
-    # 6. Return dataset (maintains identical behavior to original)
-
-# api/src/upload/raw_images_processor.py  
-async def process_raw_images_upload(...) -> Dataset:
-    """New ZIP processing - direct storage like GeoTIFF uploads"""
-    # 1. Create dataset entry
-    # 2. Extract ZIP directly to mounted storage (raw_images/{dataset_id}/)
-    # 3. Store both original ZIP and extracted contents
-    # 4. Create raw_images entry with storage paths
-    # 5. Update status is_upload_done=True
-    # 6. Return dataset (NO task queueing here)
+# processor/src/process_geotiff.py - NOW handles ortho creation for both sources
+def process_geotiff(task: QueueTask, temp_dir: Path):
+    """Enhanced to handle ortho creation for both direct upload and ODM-generated files"""
+    
+    # 1. Find orthomosaic file (could be direct upload or ODM output)
+    ortho_file_path = settings.archive_path / f"{task.dataset_id}_ortho.tif"
+    
+    if not ortho_file_path.exists():
+        raise ProcessingError(f"No orthomosaic found for dataset {task.dataset_id}")
+    
+    # 2. Create ortho entry (moved from upload logic)
+    sha256 = get_file_identifier(ortho_file_path)
+    ortho_info = cog_info(ortho_file_path)
+    
+    upsert_ortho_entry(
+        dataset_id=task.dataset_id,
+        file_path=ortho_file_path,
+        version=1,
+        sha256=sha256,
+        ortho_info=ortho_info,
+        ortho_upload_runtime=0.0,  # Set during upload in old flow, now N/A
+        token=token,
+    )
+    
+    # 3. Continue with standardization (existing logic)
+    standardise_geotiff(str(ortho_file_path), str(processed_path), token, task.dataset_id)
+    
+    # 4. Create processed ortho entry (existing logic)
+    upsert_processed_ortho_entry(...)
+    
+    update_status(token, task.dataset_id, is_ortho_done=True)
 ```
 
-**Refactoring Benefits:**
-- **Separation of Concerns**: Router handles chunked upload, processors handle file-specific logic  
-- **Consistency**: Both GeoTIFF and ZIP follow same architectural pattern
-- **Testability**: Processors can be unit tested independently of upload logic
-- **Maintainability**: File processing logic encapsulated in dedicated modules
-- **No Functional Changes**: GeoTIFF uploads maintain identical behavior after refactoring
-
-### **3. Configurable Process Endpoint**
-```python
-# api/src/routers/process.py (or equivalent)
-
-class ProcessRequest(BaseModel):
-    task_types: List[TaskTypeEnum]
-
-@router.post('/datasets/{dataset_id}/process') # ENHANCED
-async def queue_processing_tasks(
-    dataset_id: int,
-    process_request: ProcessRequest,
-    # ... existing dependencies
-):
-    """Queues tasks for a dataset based on a list provided by the client."""
-    # 1. Validate dataset exists
-    # 2. Create TaskPayload using process_request.task_types
-    # 3. Insert into queue table
-    # 4. Return success
-```
-
-### **4. ODM Processing Function with Docker-in-Docker**
+#### **Simplified ODM Processing**
 ```python
 # processor/src/process_odm.py
 def process_odm(task: QueueTask, temp_dir: Path):
-    """Execute ODM container using Docker-in-Docker"""
-    import docker
+    """Generate ODM orthomosaic and move to standard location"""
     
-    # 1. Pull raw images from storage server (SSH)
-    # 2. Setup ODM container with volume mounts and GPU access
-    client = docker.from_env()
-    container = client.containers.run(
-        image="opendronemap/odm",
-        command=["--fast-orthophoto", "--project-path", "/project", str(dataset_id)],
-        volumes={str(project_dir): {"bind": "/project", "mode": "rw"}},
-        device_requests=[docker.types.DeviceRequest(count=-1, capabilities=[["gpu"]])],
-        detach=True,
-        remove=True
-    )
-    # 3. Wait for completion and handle results
-    # 4. Push generated orthomosaic to storage server
-    # 5. Create ortho entry (original, before standardization)
-    # 6. Update status (is_odm_done=True)
-
-# processor/src/processor.py modifications
-# ADD odm_processing to the existing fail-fast chain
-def process_task(task: QueueTask, token: str):
-    # Process tasks in strict order with fail-fast behavior
-    try:
-        # Add ODM processing as the FIRST step in the chain
-        if TaskTypeEnum.odm_processing in task.task_types:
-            try:
-                process_odm(task, settings.processing_path)
-            except Exception as e:
-                raise ProcessingError(str(e), task_type='odm_processing', ...)
-
-        # Existing GeoTIFF processing is next
-        if TaskTypeEnum.geotiff in task.task_types:
-            process_geotiff(task, settings.processing_path)  # Existing function
-        
-        # ... other tasks follow in the existing fail-fast chain
+    # 1. Pull raw images from storage
+    raw_images_dir = temp_dir / f"raw_images_{task.dataset_id}"
+    pull_raw_images_from_storage(task.dataset_id, raw_images_dir)
+    
+    # 2. Execute ODM container
+    odm_output_dir = temp_dir / f"odm_{task.dataset_id}"
+    execute_odm_container(raw_images_dir, odm_output_dir, task.dataset_id)
+    
+    # 3. Move generated orthomosaic to standard archive location
+    odm_ortho = odm_output_dir / task.dataset_id / "odm_orthophoto" / "odm_orthophoto.tif"
+    final_ortho = settings.archive_path / f"{task.dataset_id}_ortho.tif"
+    
+    shutil.move(str(odm_ortho), str(final_ortho))
+    
+    # 4. Update status only - NO ortho entry creation (geotiff processor will handle)
+    update_status(token, task.dataset_id, is_odm_done=True)
+    
+    # NOTE: geotiff processing task will find the file and create ortho entry
 ```
 
-### **5. Comprehensive EXIF Extraction**
+### **3. Upload Processing Functions - Simplified Architecture**
 ```python
-# api/src/upload/exif_utils.py
-def extract_comprehensive_exif(image_path: Path) -> Dict[str, Any]:
-    """Extract comprehensive EXIF data for camera metadata"""
-    from PIL import Image
-    from PIL.ExifTags import TAGS, GPSTAGS
+# api/src/upload/geotiff_processor.py - SIMPLIFIED
+async def process_geotiff_upload(dataset: Dataset, upload_target_path: Path) -> Dataset:
+    """Simplified GeoTIFF upload - file storage only"""
+    # 1. Move to standard location - NO technical analysis
+    final_path = settings.archive_path / f"{dataset.id}_ortho.tif"
+    upload_target_path.rename(final_path)
     
-    try:
-        with Image.open(image_path) as img:
-            exif = img._getexif()
-            if not exif:
-                return {}
-                
-            metadata = {}
-            
-            # Basic camera info
-            metadata['camera_make'] = exif.get('Make')
-            metadata['camera_model'] = exif.get('Model')
-            metadata['camera_serial'] = exif.get('SerialNumber')
-            
-            # Image settings
-            metadata['iso'] = exif.get('ISOSpeedRatings')
-            metadata['aperture'] = exif.get('FNumber')
-            metadata['shutter_speed'] = exif.get('ExposureTime')
-            metadata['focal_length'] = exif.get('FocalLength')
-            
-            # Image dimensions
-            metadata['width'] = exif.get('ExifImageWidth')
-            metadata['height'] = exif.get('ExifImageHeight')
-            
-            # GPS data
-            gps_info = exif.get('GPSInfo')
-            if gps_info:
-                metadata['gps'] = extract_gps_coordinates(gps_info)
-                metadata['altitude'] = gps_info.get('GPSAltitude')
-                
-            # Datetime
-            datetime_str = exif.get('DateTimeOriginal')
-            if datetime_str:
-                metadata['acquisition_datetime'] = datetime.strptime(datetime_str, '%Y:%m:%d %H:%M:%S')
-                
-            return metadata
-            
-    except Exception as e:
-        logger.warning(f"EXIF extraction failed for {image_path}: {str(e)}")
-        return {}
+    # 2. Update status - NO ortho entry creation
+    update_status(token, dataset.id, is_upload_done=True)
+    
+    return dataset
 
-def extract_acquisition_date(image_path: Path) -> Optional[datetime]:
-    """Extract acquisition date for v2_datasets fields"""
-    metadata = extract_comprehensive_exif(image_path)
-    return metadata.get('acquisition_datetime')
+# api/src/upload/raw_images_processor.py - SIMPLIFIED  
+async def process_raw_images_upload(dataset: Dataset, upload_target_path: Path) -> Dataset:
+    """Simplified ZIP upload - extraction and storage only"""
+    # 1. Extract ZIP - NO technical analysis during extraction
+    raw_images_dir = settings.raw_images_path / str(dataset.id)
+    extract_zip_safely(upload_target_path, raw_images_dir)
+    
+    # 2. Create raw_images entry - basic metadata only
+    create_raw_images_entry(dataset.id, raw_images_dir)
+    
+    # 3. Update status - NO technical analysis
+    update_status(token, dataset.id, is_upload_done=True)
+    
+    return dataset
+```
+
+### **4. Task Execution Requirements**
+```python
+# processor/src/processor.py - Updated execution order
+def process_task(task: QueueTask, token: str):
+    """Process tasks with unified ortho creation"""
+    
+    # 1. ODM processing (if ZIP upload)
+    if TaskTypeEnum.odm_processing in task.task_types:
+        process_odm(task, temp_dir)
+    
+    # 2. GeoTIFF processing (ALWAYS - creates ortho entry for both sources)
+    if TaskTypeEnum.geotiff in task.task_types:  # Required for both upload types
+        process_geotiff(task, temp_dir)  # NOW handles ortho creation
+    
+    # 3. Rest of pipeline continues identically
+    if TaskTypeEnum.cog in task.task_types:
+        process_cog(task, temp_dir)
+    
+    # ... other tasks unchanged
+```
+
+### **5. Queue Management Requirements**
+```python
+# Frontend must ensure geotiff processing included for ALL uploads:
+
+# GeoTIFF upload task list:
+task_types = ['geotiff', 'cog', 'thumbnail', 'metadata']
+
+# ZIP upload task list:  
+task_types = ['odm_processing', 'geotiff', 'cog', 'thumbnail', 'metadata']
+
+# Both include 'geotiff' - ensures ortho entry creation
 ```
 
 ---
 
 ## 📁 **STORAGE ARCHITECTURE**
 
+### **Simplified Upload Storage**
 ```
-Storage Server:
+Upload Results (No Technical Analysis):
 ├── archive/
-│   └── {dataset_id}_ortho.tif         # Final orthomosaics (both workflows)
+│   └── {dataset_id}_ortho.tif         # GeoTIFF uploads (no ortho entry yet)
 └── raw_images/
     └── {dataset_id}/
         ├── {dataset_id}_raw_images.zip # Original ZIP file (preserved)
@@ -291,20 +286,24 @@ Storage Server:
             ├── DJI_001.JPG            # Extracted drone images
             ├── DJI_002.JPG        
             ├── DJI_timestamp.MRK      # RTK timestamp data
-            ├── DJI_rtk.RTK            # RTK positioning data
-            ├── DJI_rtk.RTL            # RTK auxiliary files
             └── ...                    # All extracted ZIP contents
+```
 
-Processing Server (temporary):
-└── processing_dir/
-    └── odm_{dataset_id}/
-        ├── images/                # Pulled from storage (all files)
-        │   ├── DJI_001.JPG        # Images for ODM processing
-        │   ├── DJI_timestamp.MRK  # RTK data available to ODM
-        │   └── ...
-        └── {dataset_id}/
-            └── odm_orthophoto/
-                └── odm_orthophoto.tif
+### **Processing Storage (Where Technical Analysis Happens)**
+```
+Processing Server:
+├── temp_dir/
+│   ├── raw_images_{dataset_id}/       # Pulled from storage for ODM
+│   ├── odm_{dataset_id}/             # ODM working directory
+│   └── processed_files/              # Standardization output
+└── Archive Updates:
+    └── archive/
+        └── {dataset_id}_ortho.tif   # ODM moves output here, GeoTIFF already here
+
+Final Result After Processing:
+├── v2_datasets (unchanged)
+├── v2_raw_images (ZIP uploads only)
+└── v2_orthos (created during geotiff processing for BOTH sources)
 ```
 
 ---
@@ -313,7 +312,7 @@ Processing Server (temporary):
 
 ### **ODM Container Execution**
 ```python
-# ODM command
+# ODM command remains the same
 container = client.containers.run(
     image="opendronemap/odm",
     command=["--fast-orthophoto", "--project-path", "/project", str(dataset_id)],
@@ -327,14 +326,7 @@ container = client.containers.run(
 ### **Processor Container Requirements**
 - Mount `/var/run/docker.sock` for Docker-in-Docker
 - GPU access for ODM containers
-- SSH keys for storage server access
-
-### **Required Docker Compose Changes**
-```yaml
-# docker-compose.processor.yaml - ADD:
-volumes:
-  - /var/run/docker.sock:/var/run/docker.sock  # Enable Docker-in-Docker
-```
+- SSH keys for storage server access (during processing only)
 
 ---
 
@@ -343,41 +335,101 @@ volumes:
 ### **Test-Driven Development Approach**
 Following established codebase patterns for integration-focused testing with real data:
 
-**Core Principle**: Focus on critical path testing with real drone images, not exhaustive unit testing.
+**Core Principle**: Focus on critical path testing with real drone images, emphasizing the new unified processing flow.
 
 ### **Critical Test Coverage**
 
-#### **1. ZIP Upload & Extraction Test**
+#### **1. Simplified Upload Tests**
 ```python
-# api/tests/routers/test_upload_odm.py
-def test_zip_upload_and_extraction(test_raw_images_zip, auth_token, test_user):
-    """Test ZIP upload creates dataset and raw_images entries"""
-    # Follow existing chunked upload pattern
-    # Verify v2_datasets entry created
-    # Verify v2_raw_images entry with correct metadata
-    # Verify images transferred to storage server
+# api/tests/routers/test_upload_simplified.py
+def test_geotiff_upload_no_ortho_creation(test_geotiff_file, auth_token, test_user):
+    """Test GeoTIFF upload creates dataset but NO ortho entry"""
+    dataset = upload_geotiff_chunked(test_geotiff_file, auth_token)
+    
+    # Verify dataset created
+    assert dataset is not None
+    
+    # Verify file stored in archive
+    ortho_file = settings.archive_path / f"{dataset.id}_ortho.tif"
+    assert ortho_file.exists()
+    
+    # Verify NO ortho entry created (key change)
+    with use_client(auth_token) as client:
+        response = client.table(settings.orthos_table).select('*').eq('dataset_id', dataset.id).execute()
+        assert len(response.data) == 0  # No ortho entry during upload
+
+def test_zip_upload_no_technical_analysis(test_raw_images_zip, auth_token, test_user):
+    """Test ZIP upload creates dataset and raw_images entry only"""
+    dataset = upload_zip_chunked(test_raw_images_zip, auth_token)
+    
+    # Verify dataset created
+    assert dataset is not None
+    
+    # Verify raw_images entry created
+    with use_client(auth_token) as client:
+        response = client.table('v2_raw_images').select('*').eq('dataset_id', dataset.id).execute()
+        assert len(response.data) == 1
+        
+    # Verify NO ortho entry created (key change)
+    with use_client(auth_token) as client:
+        response = client.table(settings.orthos_table).select('*').eq('dataset_id', dataset.id).execute()
+        assert len(response.data) == 0  # No ortho entry during upload
 ```
 
-#### **2. ODM Container Integration Test**
+#### **2. Unified Processor Tests**
 ```python
-# processor/tests/test_process_odm.py
-def test_odm_docker_execution(test_dataset_with_raw_images, auth_token):
-    """Test ODM container execution with real images"""
-    # Use existing test_dataset_for_processing pattern
-    # Test Docker container execution
-    # Verify orthomosaic generation
-    # Verify status tracking (is_odm_done=True)
+# processor/tests/test_unified_geotiff_processing.py
+def test_geotiff_processing_creates_ortho_entry(test_dataset_geotiff_upload, auth_token):
+    """Test geotiff processing creates ortho entry for direct upload"""
+    # Setup: Dataset exists with file in archive/, no ortho entry
+    task = create_task(['geotiff'], test_dataset_geotiff_upload)
+    
+    # Execute geotiff processing
+    process_geotiff(task, temp_dir)
+    
+    # Verify ortho entry created
+    with use_client(auth_token) as client:
+        response = client.table(settings.orthos_table).select('*').eq('dataset_id', task.dataset_id).execute()
+        assert len(response.data) == 1
+        ortho = response.data[0]
+        assert ortho['sha256'] is not None
+        assert ortho['ortho_info'] is not None
+
+def test_geotiff_processing_after_odm(test_dataset_with_odm_output, auth_token):
+    """Test geotiff processing creates ortho entry for ODM-generated file"""
+    # Setup: ODM has moved file to archive/, no ortho entry yet
+    task = create_task(['geotiff'], test_dataset_with_odm_output)
+    
+    # Execute geotiff processing
+    process_geotiff(task, temp_dir)
+    
+    # Verify ortho entry created (same logic as direct upload)
+    with use_client(auth_token) as client:
+        response = client.table(settings.orthos_table).select('*').eq('dataset_id', task.dataset_id).execute()
+        assert len(response.data) == 1
+        # Same verification as direct upload test
 ```
 
-#### **3. Complete Pipeline Test**
+#### **3. Complete Pipeline Tests**
 ```python
-# processor/tests/test_odm_pipeline.py  
-def test_complete_odm_pipeline(test_raw_images_zip, auth_token):
-    """Test full ZIP → ODM → GeoTIFF → COG → Thumbnail workflow"""
-    # Follow comprehensive testing pattern from test_process_cog.py
-    # Process all task types: ['odm_processing', 'geotiff', 'cog', 'thumbnail', 'metadata']
-    # Verify database entries in all tables
-    # Verify final status: all is_*_done flags = True
+# processor/tests/test_complete_pipeline.py  
+def test_complete_geotiff_pipeline(test_geotiff_upload, auth_token):
+    """Test complete pipeline starting from uploaded GeoTIFF"""
+    task = create_task(['geotiff', 'cog', 'thumbnail', 'metadata'], test_geotiff_upload)
+    
+    process_task(task, auth_token)
+    
+    # Verify all database entries created
+    verify_complete_pipeline_state(task.dataset_id, auth_token)
+
+def test_complete_odm_pipeline(test_zip_upload, auth_token):
+    """Test complete pipeline starting from ZIP upload"""
+    task = create_task(['odm_processing', 'geotiff', 'cog', 'thumbnail', 'metadata'], test_zip_upload)
+    
+    process_task(task, auth_token)
+    
+    # Verify identical end state as GeoTIFF pipeline
+    verify_complete_pipeline_state(task.dataset_id, auth_token)
 ```
 
 ### **Test Data & Fixtures**
@@ -394,115 +446,21 @@ assets/test_data/raw_drone_images/
 └── test_invalid_2_images.zip         # Images 0001-0002 (error testing - insufficient)
 ```
 
-**Creation Script**:
-```bash
-# Run the provided script to create all test ZIP files from the 277 available DJI images
-./scripts/create_odm_test_data.sh
-
-# This creates:
-# - test_minimal_3_images.zip: 3 images (~30MB) - fastest testing
-# - test_small_10_images.zip: 10 images (~100MB) - development testing  
-# - test_medium_25_images.zip: 25 images (~250MB) - comprehensive testing
-# - test_invalid_2_images.zip: 2 images (~20MB) - error testing
-```
-
-#### **Test Fixtures**
+#### **Test Fixtures (Updated for New Architecture)**
 ```python
 @pytest.fixture
-def test_raw_images_zip_minimal():
-    """Provide minimal ZIP file (3 images ~30MB) for fast testing"""
-    zip_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'raw_drone_images' / 'test_minimal_3_images.zip'
-    if not zip_path.exists():
-        pytest.skip('Minimal drone images ZIP not found - run creation script')
-    return zip_path
+def test_geotiff_upload_no_ortho():
+    """Dataset with GeoTIFF uploaded but no ortho entry (new behavior)"""
+    # Create dataset entry and store file in archive/
+    # Do NOT create ortho entry (simulates new upload behavior)
+    return dataset_id
 
 @pytest.fixture
-def test_raw_images_zip_small():
-    """Provide small ZIP file (10 images ~100MB) for development testing"""
-    zip_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'raw_drone_images' / 'test_small_10_images.zip'
-    if not zip_path.exists():
-        pytest.skip('Small drone images ZIP not found - run creation script')
-    return zip_path
-
-@pytest.fixture
-def test_raw_images_zip_invalid():
-    """Provide invalid ZIP file (2 images) for error testing"""
-    zip_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'raw_drone_images' / 'test_invalid_2_images.zip'
-    if not zip_path.exists():
-        pytest.skip('Invalid drone images ZIP not found - run creation script')
-    return zip_path
-
-@pytest.fixture  
-def test_dataset_with_raw_images(auth_token, test_raw_images_zip_minimal, test_processor_user):
-    """Create dataset with raw images entry (follows existing pattern)"""
-    # Extract ZIP and store in test location
-    # Create v2_datasets entry (with acquisition date: 2025-04-03)
-    # Create v2_raw_images entry (3 images, ~30MB)
-    # Transfer images to storage server: raw_images/{dataset_id}/images/
-    # Yield dataset_id
-    # Cleanup in finally block
-```
-
-### **Error Testing Strategy**
-
-#### **Critical Failure Points**
-```python
-def test_odm_container_failure(test_dataset_with_insufficient_images):
-    """Test ODM failure with insufficient overlap"""
-    # Verify error handling
-    # Verify cleanup occurs
-    # Verify status: has_error=True, error_message populated
-
-def test_docker_socket_unavailable():
-    """Test graceful handling when Docker socket not accessible"""
-    # Mock Docker client failure
-    # Verify error propagation
-    # Verify no orphaned containers
-```
-
-### **Performance & Resource Testing**
-
-#### **Resource Management**
-```python
-@pytest.mark.slow
-def test_odm_resource_limits():
-    """Test ODM with large image sets"""
-    # Use larger test ZIP (10+ images)
-    # Monitor memory usage
-    # Verify cleanup after completion
-    # Verify no resource leaks
-```
-
-### **Test Execution Strategy**
-
-#### **Development Testing**
-```bash
-# Quick critical path tests
-deadtrees dev test api --test-path=api/tests/routers/test_upload_odm.py::test_zip_upload_basic
-
-# ODM integration tests
-deadtrees dev test processor --test-path=processor/tests/test_process_odm.py::test_odm_execution
-
-# Complete pipeline test
-deadtrees dev test processor --test-path=processor/tests/test_odm_pipeline.py::test_complete_pipeline
-```
-
-#### **Comprehensive Testing**
-```bash
-# Full ODM test suite (marked as comprehensive)
-pytest -m "odm and comprehensive" processor/tests/
-
-# All tests including slow ODM tests  
-pytest -m "" processor/tests/test_*odm*.py
-```
-
-### **Test Markers & Organization**
-```python
-# Test markers following existing patterns
-@pytest.mark.odm                    # ODM-specific tests
-@pytest.mark.slow                   # Long-running tests
-@pytest.mark.comprehensive          # Complete pipeline tests
-@pytest.mark.docker                 # Requires Docker functionality
+def test_odm_output_ready():
+    """Dataset with ODM output moved to archive, ready for geotiff processing"""
+    # Create raw_images entry and place ODM output in archive/
+    # Do NOT create ortho entry (simulates ODM completion)
+    return dataset_id
 ```
 
 ---
@@ -515,37 +473,37 @@ pytest -m "" processor/tests/test_*odm*.py
 docker>=6.1.0
 
 # api/requirements.txt  
-Pillow>=10.0.0
+Pillow>=10.0.0  # Only if EXIF processing kept in backend
 ```
 
 ### **Infrastructure Requirements**
 - OpenDroneMap Docker image with GPU support
 - NVIDIA Container Toolkit on processing server
 - Docker socket access for processor container
-- Additional storage capacity for raw images
-- SSH connectivity between processing and storage servers
+- Simplified upload processing (faster, more reliable)
 
 ---
 
 ## ⚠️ **CRITICAL CONSIDERATIONS**
 
-### **Security**
-- Docker socket mounting requires security review
-- Raw image file validation (prevent malicious uploads)
-- Resource limits for ODM containers
+### **Database State Consistency**
+- **Critical**: Both upload types must result in identical database state after geotiff processing
+- **Verification**: Same ortho table structure regardless of source
+- **Testing**: Comprehensive validation of unified processing paths
 
-### **Performance**  
-- Sequential ODM processing (one container at a time)
-- 24-hour timeout for ODM processing
-- Storage growth monitoring for raw images
+### **Task Queue Requirements**  
+- **Frontend responsibility**: Must include 'geotiff' in task list for ALL uploads
+- **Processor validation**: Ensure geotiff processing always executes before other tasks
+- **Error handling**: Clear messaging if geotiff task missing from queue
 
-### **Error Handling**
-- ODM container failures → mark task as failed
-- SSH connection failures → retry mechanism
-- Invalid ZIP files → clear user error messages
-- Insufficient images (< 3) → validation error
+### **Performance Benefits**
+- **Upload speed**: Faster uploads due to eliminated technical analysis
+- **Reliability**: Fewer upload failure points
+- **Consistency**: Identical processing behavior regardless of source
+- **Maintainability**: Single technical analysis code path
 
 ---
 
 **Implementation Status**: Ready to begin Phase 1  
-**Next Step**: Create v2_raw_images table migration 
+**Architecture Benefits**: Simplified upload, unified processing, eliminated code duplication  
+**Next Step**: Update implementation.md with revised task breakdown 
