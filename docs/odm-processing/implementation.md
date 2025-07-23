@@ -38,6 +38,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 - Import Requirements: Future tasks must import `UploadType` and `detect_upload_type()` from `api/src/utils/file_utils.py` (not from routers) to avoid circular dependencies
 - Upload Endpoint Testing: When testing chunk upload endpoints with mock data, use intermediate chunks (chunks_total > 1) to avoid final chunk processing that requires valid file formats
 - Unified Geotiff Processing: The process_geotiff function must handle ortho creation for both direct uploads and ODM-generated files
+- Geotiff Metadata Recalculation: Enhanced geotiff processing ALWAYS recalculates and overwrites SHA256 and ortho_info, regardless of whether ortho entry exists or has existing metadata - this ensures consistent, fresh metadata for all processing paths
 - Logging Pattern: Use `logger.method('message', LogContext(category=LogCategory.CATEGORY))` syntax - LogContext is a class requiring instantiation, not an enum with attributes like .PROCESSING
 - Test Data Size: Use smaller test files for faster execution - `test_no_rtk_3_images.zip` (25MB) vs `test_minimal_3_images.zip` (1.3GB) reduces test time from 2+ minutes to ~40 seconds
 - Obsolete Test Cleanup: When implementing new simplified interfaces, remove old tests that use deprecated function signatures to avoid confusion and false failures
@@ -217,7 +218,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 **Context:** Enhance existing geotiff processing to handle ortho creation for both direct uploads and ODM-generated files.
 
 **Subtasks:**
-- [ ] **ENHANCE** `processor/src/process_geotiff.py`
+- [x] **ENHANCE** `processor/src/process_geotiff.py`
   - **ADD** ortho entry creation logic at start of function:
     - Find orthomosaic at `archive/{dataset_id}_ortho.tif`
     - Calculate SHA256 hash with `get_file_identifier()`
@@ -226,7 +227,7 @@ This document outlines the step-by-step implementation plan for integrating Open
   - **MAINTAIN** existing standardization logic
   - **HANDLE** both direct upload and ODM-generated files identically
 
-- [ ] **UPDATE** error handling in geotiff processing
+- [x] **UPDATE** error handling in geotiff processing
   - Add check for missing orthomosaic file
   - Provide clear error messages for missing files
   - Ensure proper cleanup on failures
