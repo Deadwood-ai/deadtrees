@@ -27,18 +27,13 @@ This document outlines the step-by-step implementation plan for integrating Open
 - Always check out `./design.md` and `./requirements.md` for more context. 
 
 - The `shared/models.py` file uses tab indentation (not spaces) - maintain consistency when adding new enum values or model fields
-- Upload Simplification: Remove all technical analysis (cog_info, get_file_identifier, upsert_ortho_entry) from upload endpoints
-- Processor Enhancement: All ortho entry creation moves to geotiff processing task
 - Task Requirements: Both upload types MUST include 'geotiff' in processing task list
 - Storage Paths: GeoTIFF uploads to `archive/{dataset_id}_ortho.tif`, ZIP extraction to `raw_images/{dataset_id}/`
-- Database Consistency: Both upload types must result in identical database state after geotiff processing
 - RTK File Extensions: Detect all RTK file types including `.RTK, .MRK, .RTL, .RTB, .RPOS, .RTS, .IMU` extensions
 - Database RLS Policies: New v2 tables must have RLS policies created separately - standard pattern requires "Enable insert for authenticated users only", "Enable read access for all users", and "Enable update for processor" policies
 - ODM Test Data Creation: The `./scripts/create_odm_test_data.sh` script requires `zip` command - install with `sudo apt install -y zip` if missing
 - Import Requirements: Future tasks must import `UploadType` and `detect_upload_type()` from `api/src/utils/file_utils.py` (not from routers) to avoid circular dependencies
 - Upload Endpoint Testing: When testing chunk upload endpoints with mock data, use intermediate chunks (chunks_total > 1) to avoid final chunk processing that requires valid file formats
-- Unified Geotiff Processing: The process_geotiff function must handle ortho creation for both direct uploads and ODM-generated files
-- Geotiff Metadata Recalculation: Enhanced geotiff processing ALWAYS recalculates and overwrites SHA256 and ortho_info, regardless of whether ortho entry exists or has existing metadata - this ensures consistent, fresh metadata for all processing paths
 - Logging Pattern: Use `logger.method('message', LogContext(category=LogCategory.CATEGORY))` syntax - LogContext is a class requiring instantiation, not an enum with attributes like .PROCESSING
 - Test Data Size: Use smaller test files for faster execution - `test_no_rtk_3_images.zip` (25MB) vs `test_minimal_3_images.zip` (1.3GB) reduces test time from 2+ minutes to ~40 seconds
 - Obsolete Test Cleanup: When implementing new simplified interfaces, remove old tests that use deprecated function signatures to avoid confusion and false failures
