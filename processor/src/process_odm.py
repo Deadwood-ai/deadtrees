@@ -66,20 +66,25 @@ def process_odm(task: QueueTask, temp_dir: Path):
 			zip_ref.extractall(extraction_dir)
 
 		# Step 3: Execute ODM Docker container
-		# Use temp_dir (which is /data/processing_dir) for ODM output
-		odm_output_dir = temp_dir / f'odm_temp_{dataset_id}'
-		odm_output_dir.mkdir(exist_ok=True)
+		# For Docker-in-Docker, we need a path that's accessible from the host
+		# Use /app/processor/temp (mounted from host) for ODM, then copy results to /data
+		odm_host_temp_dir = Path('/app/processor') / 'temp' / f'odm_temp_{dataset_id}'
+		odm_host_temp_dir.mkdir(parents=True, exist_ok=True)
+
+		# Regular temp directory for non-ODM operations (stays in /data)
+		regular_temp_dir = temp_dir / f'odm_temp_{dataset_id}'
+		regular_temp_dir.mkdir(exist_ok=True)
 
 		logger.info(
 			f'Starting ODM processing with Docker container',
 			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
 		)
 
-		_run_odm_container(images_dir=extraction_dir, output_dir=odm_output_dir, token=token, dataset_id=dataset_id)
+		_run_odm_container(images_dir=extraction_dir, output_dir=odm_host_temp_dir, token=token, dataset_id=dataset_id)
 
 		# Step 4: Move generated orthomosaic to standard location
 		project_name = f'dataset_{dataset_id}'
-		orthomosaic_path = _find_orthomosaic(odm_output_dir, project_name)
+		orthomosaic_path = _find_orthomosaic(odm_host_temp_dir, project_name)
 		if not orthomosaic_path:
 			raise Exception('ODM did not generate an orthomosaic')
 
@@ -107,12 +112,12 @@ def process_odm(task: QueueTask, temp_dir: Path):
 		)
 
 		# Step 6: Cleanup temporary ODM directory
-		if odm_output_dir.exists():
+		if odm_host_temp_dir.exists():
 			import shutil
 
-			shutil.rmtree(odm_output_dir)
+			shutil.rmtree(odm_host_temp_dir)
 			logger.info(
-				f'Cleaned up temporary ODM directory: {odm_output_dir}',
+				f'Cleaned up temporary ODM directory: {odm_host_temp_dir}',
 				LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
 			)
 
@@ -123,12 +128,12 @@ def process_odm(task: QueueTask, temp_dir: Path):
 		)
 
 		# Cleanup temporary ODM directory even on failure
-		if 'odm_output_dir' in locals() and odm_output_dir.exists():
+		if 'odm_host_temp_dir' in locals() and odm_host_temp_dir.exists():
 			import shutil
 
-			shutil.rmtree(odm_output_dir)
+			shutil.rmtree(odm_host_temp_dir)
 			logger.info(
-				f'Cleaned up temporary ODM directory after failure: {odm_output_dir}',
+				f'Cleaned up temporary ODM directory after failure: {odm_host_temp_dir}',
 				LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
 			)
 
@@ -221,17 +226,24 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		)
 
 		# Convert container path to host path for Docker-in-Docker
-		# The processor container has /data mounted from host, so we need to use the host path
 		container_path = str(output_dir)
-		if container_path.startswith('/data/'):
-			# For /data paths, mount directly since /data is mounted from host to processor
+		if container_path.startswith('/app/processor/'):
+			# In test environment: /app/processor is mounted from host ./processor
+			# The docker-compose is run from the project root, so we need that path
+			# For now, use a known project structure since we're in development
+			relative_path = container_path.replace('/app/processor/', 'processor/')
+			# In test environment, assume project root is /home/jj1049/dev/deadtrees
+			# This could be made configurable via environment variable later
+			host_path = f'/home/jj1049/dev/deadtrees/{relative_path}'
+		elif container_path.startswith('/data/'):
+			# In production: /data is mounted from host
 			host_path = container_path
 		else:
 			# Fallback to container path
 			host_path = container_path
 
 		logger.info(
-			f'Mounting host path {host_path} as /odm_data in ODM container',
+			f'Mounting host path {host_path} as /odm_data in ODM container (container path: {container_path})',
 			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
 		)
 
