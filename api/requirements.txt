@@ -17,7 +17,6 @@ aiofiles
 httpx
 tqdm
 pytest
-pytest-asyncio
 pytest-mock
 pytest-cov
 debugpy

@@ -18,6 +18,19 @@ alwaysApply: true
 
 ## 🚨 **FUNCTIONAL PROGRAMMING REQUIREMENTS**
 
+### **🔄 SYNC TESTS ONLY (Critical)**
+**ALL tests must be synchronous (sync) functions - NO async/await in tests:**
+- ✅ `def test_function():` - Always use sync test functions
+- ❌ `async def test_function():` - Never use async test functions  
+- ❌ `@pytest.mark.asyncio` - Never use async test markers
+- ❌ `await` - Never use await in test functions
+
+**Why sync tests:**
+- **Reliable cleanup**: Sync fixtures have predictable lifecycle
+- **No event loop issues**: Eliminates timing problems
+- **Simpler debugging**: Straightforward execution flow
+- **FastAPI compatibility**: TestClient handles async endpoints with sync tests
+
 ### **❌ NEVER Use Test Classes**
 ```python
 # BAD: Test classes are not allowed
@@ -40,10 +53,10 @@ def test_upload_geotiff_processing():
 
 ### **✅ Functional Test Structure (Required Pattern)**
 ```python
-# Always use function-based tests with descriptive names
+# Always use function-based tests with descriptive names - ALL SYNC (no async/await)
 def test_process_raw_images_upload_creates_dataset(temp_test_zip, test_user, auth_token):
     """Test that ZIP upload creates v2_datasets entry correctly"""
-    dataset = await process_raw_images_upload(
+    dataset = process_raw_images_upload(  # ← SYNC call, no await
         user_id=test_user,
         file_path=temp_test_zip,
         file_name='test_minimal_3_images.zip',
@@ -58,8 +71,8 @@ def test_process_raw_images_upload_creates_dataset(temp_test_zip, test_user, aut
 
 def test_exif_extraction_populates_acquisition_date(temp_test_zip, test_user, auth_token):
     """Test that EXIF extraction works with real data"""
-    # Test real functionality without mocks
-    dataset = await process_raw_images_upload(...)
+    # Test real functionality without mocks - SYNC call
+    dataset = process_raw_images_upload(...)  # ← SYNC call, no await
     assert dataset is not None
 
 @pytest.mark.parametrize('lat,lon', TEST_POINTS_WITH_DATA)

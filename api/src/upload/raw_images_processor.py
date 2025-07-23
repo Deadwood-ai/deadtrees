@@ -16,7 +16,7 @@ logger = UnifiedLogger(__name__)
 logger.add_supabase_handler(SupabaseHandler())
 
 
-async def process_raw_images_upload(
+def process_raw_images_upload(
 	user_id: str,
 	file_path: Path,
 	file_name: str,

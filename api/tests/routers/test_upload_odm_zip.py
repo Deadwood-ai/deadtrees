@@ -51,8 +51,7 @@ def temp_test_zip(test_zip_file):
 # ============================================================================
 
 
-@pytest.mark.asyncio
-async def test_process_raw_images_upload_creates_dataset(temp_test_zip, test_user, auth_token):
+def test_process_raw_images_upload_creates_dataset(temp_test_zip, test_user, auth_token):
 	"""Test that ZIP upload creates v2_datasets entry correctly"""
 	# Test data
 	user_id = test_user
@@ -62,7 +61,7 @@ async def test_process_raw_images_upload_creates_dataset(temp_test_zip, test_use
 	authors = ['Test Author 1', 'Test Author 2']
 
 	# Process the upload
-	dataset = await process_raw_images_upload(
+	dataset = process_raw_images_upload(
 		user_id=user_id,
 		file_path=temp_test_zip,
 		file_name=file_name,
@@ -96,11 +95,10 @@ async def test_process_raw_images_upload_creates_dataset(temp_test_zip, test_use
 		assert db_dataset.data[0]['user_id'] == user_id
 
 
-@pytest.mark.asyncio
-async def test_process_raw_images_upload_creates_raw_images_entry(temp_test_zip, test_user, auth_token):
+def test_process_raw_images_upload_creates_raw_images_entry(temp_test_zip, test_user, auth_token):
 	"""Test that ZIP upload creates v2_raw_images entry correctly"""
 	# Process the upload
-	dataset = await process_raw_images_upload(
+	dataset = process_raw_images_upload(
 		user_id=test_user,
 		file_path=temp_test_zip,
 		file_name='test_minimal_3_images.zip',
@@ -123,11 +121,10 @@ async def test_process_raw_images_upload_creates_raw_images_entry(temp_test_zip,
 		assert raw_images_data['version'] == 1
 
 
-@pytest.mark.asyncio
-async def test_exif_extraction_populates_acquisition_date(temp_test_zip, test_user, auth_token):
+def test_exif_extraction_populates_acquisition_date(temp_test_zip, test_user, auth_token):
 	"""Test that EXIF extraction populates acquisition date correctly"""
 	# Process upload without providing acquisition date - test real EXIF extraction
-	dataset = await process_raw_images_upload(
+	dataset = process_raw_images_upload(
 		user_id=test_user,
 		file_path=temp_test_zip,
 		file_name='test_minimal_3_images.zip',
@@ -145,11 +142,10 @@ async def test_exif_extraction_populates_acquisition_date(temp_test_zip, test_us
 	# Test succeeds if processing completes (EXIF extraction may or may not find dates in test images)
 
 
-@pytest.mark.asyncio
-async def test_rtk_detection_identifies_rtk_files(temp_test_zip, test_user, auth_token):
+def test_rtk_detection_identifies_rtk_files(temp_test_zip, test_user, auth_token):
 	"""Test that RTK detection identifies RTK files and metadata"""
 	# Process the upload - test real RTK detection
-	dataset = await process_raw_images_upload(
+	dataset = process_raw_images_upload(
 		user_id=test_user,
 		file_path=temp_test_zip,
 		file_name='test_minimal_3_images.zip',
@@ -174,11 +170,10 @@ async def test_rtk_detection_identifies_rtk_files(temp_test_zip, test_user, auth
 		assert 'rtk_file_count' in raw_images_data
 
 
-@pytest.mark.asyncio
-async def test_images_transferred_to_storage_path(temp_test_zip, test_user, auth_token):
+def test_images_transferred_to_storage_path(temp_test_zip, test_user, auth_token):
 	"""Test that images are transferred to storage server at correct path"""
 	# Process the upload using real storage settings
-	dataset = await process_raw_images_upload(
+	dataset = process_raw_images_upload(
 		user_id=test_user,
 		file_path=temp_test_zip,
 		file_name='test_minimal_3_images.zip',
