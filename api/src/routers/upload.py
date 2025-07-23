@@ -28,7 +28,7 @@ logger.add_supabase_handler(SupabaseHandler())
 
 
 @router.post('/datasets/chunk')
-async def upload_geotiff_chunk(
+async def upload_chunk(
 	file: UploadFile,
 	chunk_index: Annotated[int, Form()],
 	chunks_total: Annotated[int, Form()],
@@ -48,7 +48,7 @@ async def upload_geotiff_chunk(
 	citation_doi: Annotated[Optional[str], Form()] = None,
 	upload_type: Annotated[Optional[UploadType], Form()] = None,
 ):
-	"""Handle chunked upload of a GeoTIFF file with incremental hash computation"""
+	"""Handle chunked upload of files (GeoTIFF or ZIP) with auto-detection and simplified processing"""
 	user = verify_token(token)
 	if not user:
 		logger.error('Invalid token provided for upload', LogContext(category=LogCategory.AUTH, token=token))
@@ -65,7 +65,7 @@ async def upload_geotiff_chunk(
 	chunk_index = int(chunk_index)
 	chunks_total = int(chunks_total)
 
-	upload_file_name = f'{upload_id}.tif.tmp'
+	upload_file_name = f'{upload_id}.tmp'
 	upload_target_path = settings.archive_path / upload_file_name
 
 	# Log chunk upload start

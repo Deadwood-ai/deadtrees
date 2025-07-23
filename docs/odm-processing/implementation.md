@@ -41,6 +41,7 @@ This document outlines the step-by-step implementation plan for integrating Open
 - Logging Pattern: Use `logger.method('message', LogContext(category=LogCategory.CATEGORY))` syntax - LogContext is a class requiring instantiation, not an enum with attributes like .PROCESSING
 - Test Data Size: Use smaller test files for faster execution - `test_no_rtk_3_images.zip` (25MB) vs `test_minimal_3_images.zip` (1.3GB) reduces test time from 2+ minutes to ~40 seconds
 - Obsolete Test Cleanup: When implementing new simplified interfaces, remove old tests that use deprecated function signatures to avoid confusion and false failures
+- Function Naming: When expanding functions to handle multiple types, rename from specific names (e.g., `upload_geotiff_chunk`) to generic names (e.g., `upload_chunk`) to reflect broader functionality
 
 ---
 
