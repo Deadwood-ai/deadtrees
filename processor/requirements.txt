@@ -11,6 +11,7 @@ fire
 pillow
 paramiko
 requests
+docker>=6.1.0
 torch
 torchvision
 tqdm

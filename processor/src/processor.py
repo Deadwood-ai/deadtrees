@@ -3,6 +3,7 @@ import shutil
 from threading import Timer
 from pathlib import Path
 from processor.src.process_geotiff import process_geotiff
+from processor.src.process_odm import process_odm
 from shared.models import QueueTask, StatusEnum, Dataset, TaskTypeEnum
 from shared.settings import settings
 from shared.db import use_client, login, verify_token
@@ -133,7 +134,30 @@ def process_task(task: QueueTask, token: str):
 		shutil.rmtree(settings.processing_path, ignore_errors=True)
 
 	try:
-		# Process convert_geotiff first if it's in the list
+		# Process ODM first if it's in the list (generates orthomosaic for ZIP uploads)
+		if TaskTypeEnum.odm_processing in task.task_types:
+			try:
+				logger.info(
+					'Starting ODM processing',
+					LogContext(
+						category=LogCategory.PROCESSING, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+					),
+				)
+				process_odm(task, settings.processing_path)
+			except Exception as e:
+				logger.error(
+					f'ODM processing failed: {str(e)}',
+					LogContext(
+						category=LogCategory.PROCESSING,
+						dataset_id=task.dataset_id,
+						user_id=task.user_id,
+						token=token,
+						extra={'error': str(e)},
+					),
+				)
+				raise ProcessingError(str(e), task_type='odm_processing', task_id=task.id, dataset_id=task.dataset_id)
+
+		# Process convert_geotiff if it's in the list (handles ortho creation for both upload types)
 		if TaskTypeEnum.geotiff in task.task_types:
 			try:
 				logger.info(
