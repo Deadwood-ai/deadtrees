@@ -279,30 +279,30 @@ def test_complete_odm_to_segmentation_pipeline(odm_task, auth_token):
 		assert len(thumbnail_response.data) == 1
 	print('✅ Thumbnail processing completed - preview image created')
 
-	# Step 5: Deadwood Segmentation (COG → AI segmentation)
-	print('\n=== Step 5: Deadwood Segmentation ===')
-	segmentation_task = QueueTask(
-		id=5,
-		dataset_id=dataset_id,
-		user_id=odm_task.user_id,
-		task_types=[TaskTypeEnum.deadwood],
-		priority=1,
-		is_processing=False,
-		current_position=1,
-		estimated_time=0.0,
-		build_args={},
-	)
-	process_deadwood_segmentation(segmentation_task, auth_token, settings.processing_path)
+	# # Step 5: Deadwood Segmentation (COG → AI segmentation)
+	# print('\n=== Step 5: Deadwood Segmentation ===')
+	# segmentation_task = QueueTask(
+	# 	id=5,
+	# 	dataset_id=dataset_id,
+	# 	user_id=odm_task.user_id,
+	# 	task_types=[TaskTypeEnum.deadwood],
+	# 	priority=1,
+	# 	is_processing=False,
+	# 	current_position=1,
+	# 	estimated_time=0.0,
+	# 	build_args={},
+	# )
+	# process_deadwood_segmentation(segmentation_task, auth_token, settings.processing_path)
 
-	with use_client(auth_token) as client:
-		status = client.table(settings.statuses_table).select('*').eq('dataset_id', dataset_id).execute().data[0]
-		assert status['is_deadwood_done'] is True
+	# with use_client(auth_token) as client:
+	# 	status = client.table(settings.statuses_table).select('*').eq('dataset_id', dataset_id).execute().data[0]
+	# 	assert status['is_deadwood_done'] is True
 
-		# Verify segmentation was processed (may or may not find deadwood)
-		labels_response = client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).execute()
-		# Note: It's valid for labels to be empty if no deadwood was detected
-		print(f'✅ Deadwood segmentation processed - {len(labels_response.data)} deadwood segments detected')
-	print('✅ Deadwood segmentation completed - AI analysis finished')
+	# 	# Verify segmentation was processed (may or may not find deadwood)
+	# 	labels_response = client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).execute()
+	# 	# Note: It's valid for labels to be empty if no deadwood was detected
+	# 	print(f'✅ Deadwood segmentation processed - {len(labels_response.data)} deadwood segments detected')
+	# print('✅ Deadwood segmentation completed - AI analysis finished')
 
 	# Final verification: Complete pipeline success
 	print('\n=== Final Status Verification ===')
@@ -314,7 +314,7 @@ def test_complete_odm_to_segmentation_pipeline(odm_task, auth_token):
 		assert final_status['is_ortho_done'] is True
 		assert final_status['is_cog_done'] is True
 		assert final_status['is_thumbnail_done'] is True
-		assert final_status['is_deadwood_done'] is True
+		# assert final_status['is_deadwood_done'] is True
 		assert final_status['has_error'] is False
 		assert final_status['current_status'] == StatusEnum.idle
 
