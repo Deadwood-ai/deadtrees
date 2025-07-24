@@ -139,16 +139,14 @@ def process_task(task: QueueTask, token: str):
 			try:
 				logger.info(
 					'Starting ODM processing',
-					LogContext(
-						category=LogCategory.PROCESSING, dataset_id=task.dataset_id, user_id=task.user_id, token=token
-					),
+					LogContext(category=LogCategory.ODM, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 				)
 				process_odm(task, settings.processing_path)
 			except Exception as e:
 				logger.error(
 					f'ODM processing failed: {str(e)}',
 					LogContext(
-						category=LogCategory.PROCESSING,
+						category=LogCategory.ODM,
 						dataset_id=task.dataset_id,
 						user_id=task.user_id,
 						token=token,

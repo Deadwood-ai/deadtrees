@@ -38,7 +38,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 
 	logger.info(
 		f'Starting ODM processing for dataset {dataset_id}',
-		LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 	)
 
 	try:
@@ -49,7 +49,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 
 		logger.info(
 			f'Pulling ZIP file from storage: {remote_zip_path}',
-			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
 		pull_file_from_storage_server(
@@ -62,7 +62,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 
 		logger.info(
 			f'Extracting ZIP file to: {extraction_dir}',
-			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
 		with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
@@ -71,7 +71,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 		# Step 2.5: Extract EXIF metadata from images and update database
 		logger.info(
 			f'Extracting EXIF metadata from drone images',
-			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
 		exif_metadata = _extract_exif_from_images(extraction_dir, token, dataset_id)
@@ -90,7 +90,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 
 		logger.info(
 			f'Starting ODM processing with Docker container',
-			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
 		_run_odm_container(images_dir=extraction_dir, output_dir=odm_host_temp_dir, token=token, dataset_id=dataset_id)
@@ -106,7 +106,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 
 		logger.info(
 			f'Pushing generated orthomosaic to storage: {remote_ortho_path}',
-			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
 		push_file_to_storage_server(
@@ -121,7 +121,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 
 		logger.info(
 			f'ODM processing completed successfully for dataset {dataset_id}',
-			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
 		# Step 6: Cleanup temporary ODM directory
@@ -131,13 +131,13 @@ def process_odm(task: QueueTask, temp_dir: Path):
 			shutil.rmtree(odm_host_temp_dir)
 			logger.info(
 				f'Cleaned up temporary ODM directory: {odm_host_temp_dir}',
-				LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 
 	except Exception as e:
 		logger.error(
 			f'ODM processing failed for dataset {dataset_id}: {str(e)}',
-			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
 		# Cleanup temporary ODM directory even on failure
@@ -147,7 +147,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 			shutil.rmtree(odm_host_temp_dir)
 			logger.info(
 				f'Cleaned up temporary ODM directory after failure: {odm_host_temp_dir}',
-				LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 
 		raise
@@ -175,13 +175,13 @@ def _extract_exif_from_images(extraction_dir: Path, token: str, dataset_id: int)
 	if not image_files:
 		logger.warning(
 			f'No image files found in extraction directory: {extraction_dir}',
-			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 		return {}
 
 	logger.info(
 		f'Found {len(image_files)} image files, extracting EXIF from first valid image',
-		LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 	)
 
 	# Sample first 3 images to find representative EXIF data
@@ -191,19 +191,19 @@ def _extract_exif_from_images(extraction_dir: Path, token: str, dataset_id: int)
 			if exif_data:
 				logger.info(
 					f'Successfully extracted EXIF metadata from {image_file.name} with {len(exif_data)} fields',
-					LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 				)
 				return exif_data
 		except Exception as e:
 			logger.warning(
 				f'Failed to extract EXIF from {image_file.name}: {str(e)}',
-				LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 			continue
 
 	logger.warning(
 		f'No valid EXIF data found in any of the sampled image files',
-		LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 	)
 	return {}
 
@@ -228,12 +228,12 @@ def _update_camera_metadata(dataset_id: int, exif_metadata: dict, token: str):
 		if response.data:
 			logger.info(
 				f'Successfully updated camera_metadata for dataset {dataset_id} with {len(exif_metadata)} EXIF fields',
-				LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 		else:
 			logger.error(
 				f'Failed to update camera_metadata for dataset {dataset_id} - no raw_images entry found',
-				LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 
 
@@ -269,7 +269,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		else:
 			logger.warning(
 				f'Skipping potentially corrupt image {image_file.name} (size: {image_file.stat().st_size} bytes)',
-				LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 
 	for image_file in valid_image_files:
@@ -277,7 +277,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 
 	logger.info(
 		f'Copied {len(valid_image_files)} valid images to ODM project structure (filtered out {len(image_files) - len(valid_image_files)} potentially corrupt images)',
-		LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 	)
 
 	# Improved ODM Docker configuration optimized for small datasets
@@ -302,24 +302,24 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 
 	logger.info(
 		f'Starting ODM processing with command: {" ".join(odm_command)}',
-		LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 	)
 
 	try:
 		# Run ODM container using Docker Python API with detailed logging
 		logger.info(
 			f'Creating ODM container with volumes: {str(output_dir)}:/odm_data',
-			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
 		# Debug: Check what we're mounting
 		logger.info(
 			f'Host directory structure: {output_dir} -> {list(output_dir.iterdir()) if output_dir.exists() else "does not exist"}',
-			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 		logger.info(
 			f'Project directory: {project_dir} -> {list(project_dir.iterdir()) if project_dir.exists() else "does not exist"}',
-			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
 		# Convert container path to host path for Docker-in-Docker
@@ -341,7 +341,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 
 		logger.info(
 			f'Mounting host path {host_path} as /odm_data in ODM container (container path: {container_path})',
-			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
 		# Mount the parent directory so ODM can find the project directory
@@ -359,7 +359,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		# Debug: Check what ODM sees in the container (simplified - no decode issues)
 		logger.info(
 			'ODM container started, processing images...',
-			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
 		# Wait for completion and get logs
@@ -375,7 +375,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		if exit_status == 0:
 			logger.info(
 				'ODM processing completed successfully',
-				LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 
 			# Log output for debugging
@@ -384,19 +384,19 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 				stdout_tail = stdout_logs[-1000:] if len(stdout_logs) > 1000 else stdout_logs
 				logger.info(
 					f'ODM stdout (tail): {stdout_tail}',
-					LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 				)
 		else:
 			# ODM failed - log detailed error information
 			logger.error(
 				f'ODM container failed with exit code {exit_status}',
-				LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 
 			if stderr_logs:
 				logger.error(
 					f'ODM stderr: {stderr_logs}',
-					LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 				)
 
 			if stdout_logs:
@@ -404,7 +404,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 				stdout_tail = stdout_logs[-2000:] if len(stdout_logs) > 2000 else stdout_logs
 				logger.error(
 					f'ODM stdout (tail): {stdout_tail}',
-					LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 				)
 
 			# Check if images directory exists and has content for debugging
@@ -412,12 +412,12 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 				image_files = list(images_dir.glob('*.jpg')) + list(images_dir.glob('*.JPG'))
 				logger.error(
 					f'Images directory contains {len(image_files)} image files: {[f.name for f in image_files[:5]]}',
-					LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 				)
 			else:
 				logger.error(
 					f'Images directory {images_dir} does not exist!',
-					LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 				)
 
 			raise Exception(
@@ -426,7 +426,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 	except Exception as e:
 		logger.error(
 			f'Failed to run ODM container: {str(e)}',
-			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 		raise
 
