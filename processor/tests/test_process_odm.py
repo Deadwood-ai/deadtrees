@@ -58,18 +58,18 @@ def odm_test_dataset(auth_token, test_zip_file, test_processor_user):
 			remote_zip_path = f'{settings.raw_images_path}/{zip_filename}'
 			push_file_to_storage_server(str(test_zip_file), remote_zip_path, auth_token, dataset_id)
 
-			# Create raw_images entry with smaller dataset info
+			# Create raw_images entry matching new upload flow (minimal info, updated during ODM processing)
 			raw_images_data = {
 				'dataset_id': dataset_id,
 				'version': 1,
-				'raw_image_count': 3,  # Small dataset with 3 images
-				'raw_image_size_mb': int(test_zip_file.stat().st_size / 1024 / 1024),  # MB
+				'raw_image_count': 0,  # Placeholder - will be updated during ODM processing
+				'raw_image_size_mb': int(test_zip_file.stat().st_size / 1024 / 1024),  # ZIP file size as placeholder
 				'raw_images_path': remote_zip_path,
-				'camera_metadata': {},
-				'has_rtk_data': False,  # No RTK dataset
-				'rtk_precision_cm': None,
-				'rtk_quality_indicator': None,
-				'rtk_file_count': 0,
+				'camera_metadata': {},  # Will be populated during ODM processing
+				'has_rtk_data': False,  # Will be updated during ODM processing
+				'rtk_precision_cm': None,  # Will be updated during ODM processing
+				'rtk_quality_indicator': None,  # Will be updated during ODM processing
+				'rtk_file_count': 0,  # Will be updated during ODM processing
 			}
 			client.table(settings.raw_images_table).insert(raw_images_data).execute()
 
@@ -144,6 +144,8 @@ def test_odm_container_execution_with_real_images(odm_task, auth_token):
 		assert raw_images_response.data, f'Raw images entry not found for dataset {odm_task.dataset_id}'
 
 		raw_images_entry = raw_images_response.data[0]
+
+		# Verify EXIF metadata extraction
 		camera_metadata = raw_images_entry['camera_metadata']
 		assert camera_metadata is not None, 'camera_metadata should not be None after ODM processing'
 		assert isinstance(camera_metadata, dict), 'camera_metadata should be a dictionary'
@@ -164,6 +166,23 @@ def test_odm_container_execution_with_real_images(odm_task, auth_token):
 		assert fields_found >= 2, (
 			f'Should have EXIF fields from at least 2 categories, found {fields_found} categories with fields'
 		)
+
+		# Verify RTK metadata detection and database updates during ODM processing
+		raw_image_count = raw_images_entry['raw_image_count']
+		raw_image_size_mb = raw_images_entry['raw_image_size_mb']
+		has_rtk_data = raw_images_entry['has_rtk_data']
+		rtk_file_count = raw_images_entry['rtk_file_count']
+
+		# These values should be updated from defaults during ODM processing
+		assert raw_image_count > 0, 'raw_image_count should be updated from 0 during ODM processing'
+		assert raw_image_size_mb > 0, 'raw_image_size_mb should be calculated during ODM processing'
+		assert isinstance(has_rtk_data, bool), 'has_rtk_data should be boolean'
+		assert isinstance(rtk_file_count, int), 'rtk_file_count should be integer'
+
+		# For this test dataset (test_no_rtk_3_images.zip), we expect no RTK data
+		assert has_rtk_data is False, 'test_no_rtk_3_images.zip should have no RTK data'
+		assert rtk_file_count == 0, 'test_no_rtk_3_images.zip should have no RTK files'
+		assert raw_image_count == 3, 'test_no_rtk_3_images.zip should have exactly 3 images'
 
 
 def test_odm_orthomosaic_generation_and_storage(odm_task, auth_token):

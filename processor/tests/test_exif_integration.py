@@ -60,18 +60,18 @@ def integration_dataset(auth_token, integration_test_zip, test_processor_user):
 			dataset_response = client.table(settings.datasets_table).insert(dataset_data).execute()
 			dataset_id = dataset_response.data[0]['id']
 
-		# Create raw_images entry (simulating ZIP upload processing)
+		# Create raw_images entry (simulating new simplified ZIP upload processing)
 		raw_images_data = {
 			'dataset_id': dataset_id,
 			'version': 1,
-			'raw_image_count': 3,  # Small dataset with 3 images
-			'raw_image_size_mb': int(integration_test_zip.stat().st_size / 1024 / 1024),  # MB
+			'raw_image_count': 0,  # Placeholder - will be updated during ODM processing
+			'raw_image_size_mb': int(integration_test_zip.stat().st_size / 1024 / 1024),  # ZIP file size as placeholder
 			'raw_images_path': f'{settings.raw_images_path}/{dataset_id}.zip',  # Direct path like working tests
 			'camera_metadata': {},  # Will be populated by ODM processing
-			'has_rtk_data': False,
-			'rtk_precision_cm': None,
-			'rtk_quality_indicator': None,
-			'rtk_file_count': 0,
+			'has_rtk_data': False,  # Will be updated during ODM processing
+			'rtk_precision_cm': None,  # Will be updated during ODM processing
+			'rtk_quality_indicator': None,  # Will be updated during ODM processing
+			'rtk_file_count': 0,  # Will be updated during ODM processing
 		}
 		client.table(settings.raw_images_table).insert(raw_images_data).execute()
 

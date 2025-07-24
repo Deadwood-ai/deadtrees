@@ -129,7 +129,7 @@ def test_geotiff_upload_creates_dataset_no_ortho(test_file, auth_token, test_use
 
 
 def test_zip_upload_creates_dataset_and_raw_images(temp_test_zip, auth_token, test_user):
-	"""Test ZIP upload creates dataset and raw_images entry only"""
+	"""Test ZIP upload creates dataset and raw_images entry only (no extraction during upload)"""
 	# Setup
 	file_size = temp_test_zip.stat().st_size
 	chunks_total = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
@@ -182,16 +182,19 @@ def test_zip_upload_creates_dataset_and_raw_images(temp_test_zip, auth_token, te
 				assert dataset['authors'] == ['Test Author']
 				assert dataset['user_id'] == test_user
 
-				# Verify files extracted to correct location
+				# Verify ZIP file stored at expected location (no extraction during upload)
+				zip_filename = f'{dataset_id}.zip'
+				zip_path = settings.raw_images_path / zip_filename
+				assert zip_path.exists(), f'ZIP file should be stored at {zip_path}'
+				assert zip_path.is_file(), 'Stored file should be a ZIP file, not a directory'
+
+				# Verify NO extraction directory exists during upload phase
 				extraction_dir = settings.raw_images_path / str(dataset_id)
-				assert extraction_dir.exists()
-				assert extraction_dir.is_dir()
+				assert not extraction_dir.exists(), (
+					'Files should NOT be extracted during upload (deferred to ODM processing)'
+				)
 
-				# Verify extracted files exist
-				extracted_files = list(extraction_dir.rglob('*'))
-				assert len(extracted_files) > 0, 'ZIP should have been extracted'
-
-				# Verify raw_images database entry created
+				# Verify raw_images database entry created with minimal info
 				with use_client(auth_token) as supabase_client:
 					raw_images_response = (
 						supabase_client.table(settings.raw_images_table)
@@ -202,11 +205,15 @@ def test_zip_upload_creates_dataset_and_raw_images(temp_test_zip, auth_token, te
 					assert len(raw_images_response.data) == 1
 					raw_images = raw_images_response.data[0]
 					assert raw_images['dataset_id'] == dataset_id
-					assert raw_images['raw_images_path'] == str(extraction_dir)
-					assert raw_images['raw_image_count'] > 0
-					assert raw_images['raw_image_size_mb'] > 0
-					assert 'has_rtk_data' in raw_images
-					assert 'rtk_file_count' in raw_images
+					assert raw_images['raw_images_path'] == str(zip_path)  # Points to ZIP file, not directory
+					assert raw_images['raw_image_count'] == 0  # Placeholder - will be updated during ODM processing
+					assert raw_images['raw_image_size_mb'] > 0  # ZIP file size as placeholder
+
+					# RTK fields should be defaults (will be updated during ODM processing)
+					assert raw_images['has_rtk_data'] is False  # Default value
+					assert raw_images['rtk_file_count'] == 0  # Default value
+					assert raw_images['rtk_precision_cm'] is None  # Default value
+					assert raw_images['rtk_quality_indicator'] is None  # Default value
 
 				# **KEY TEST**: Verify NO ortho entry created during upload
 				with use_client(auth_token) as supabase_client:
@@ -215,10 +222,7 @@ def test_zip_upload_creates_dataset_and_raw_images(temp_test_zip, auth_token, te
 					)
 					assert len(ortho_response.data) == 0, 'Ortho entry should NOT be created during ZIP upload'
 
-				# Note: temp_test_zip is cleaned up by the test fixture, not by the upload process
-				# The actual upload file (assembled from chunks) is cleaned up by the processor
-
-				# Verify status indicates upload done only
+				# Verify status indicates upload done only (processing deferred)
 				with use_client(auth_token) as supabase_client:
 					status_response = (
 						supabase_client.table(settings.statuses_table)
