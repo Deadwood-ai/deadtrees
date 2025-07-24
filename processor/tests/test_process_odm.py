@@ -8,7 +8,6 @@ from processor.src.process_odm import process_odm
 from processor.src.process_geotiff import process_geotiff
 from processor.src.process_cog import process_cog
 from processor.src.process_thumbnail import process_thumbnail
-from processor.src.process_deadwood_segmentation import process_deadwood_segmentation
 from processor.src.utils.ssh import push_file_to_storage_server, check_file_exists_on_storage
 
 
@@ -137,6 +136,35 @@ def test_odm_container_execution_with_real_images(odm_task, auth_token):
 	ortho_exists = check_file_exists_on_storage(remote_ortho_path, auth_token)
 	assert ortho_exists, f'Generated orthomosaic not found at {remote_ortho_path}'
 
+	# Verify EXIF metadata was extracted and stored in camera_metadata
+	with use_client(auth_token) as client:
+		raw_images_response = (
+			client.table(settings.raw_images_table).select('*').eq('dataset_id', odm_task.dataset_id).execute()
+		)
+		assert raw_images_response.data, f'Raw images entry not found for dataset {odm_task.dataset_id}'
+
+		raw_images_entry = raw_images_response.data[0]
+		camera_metadata = raw_images_entry['camera_metadata']
+		assert camera_metadata is not None, 'camera_metadata should not be None after ODM processing'
+		assert isinstance(camera_metadata, dict), 'camera_metadata should be a dictionary'
+		assert len(camera_metadata) > 0, 'camera_metadata should contain EXIF fields from drone images'
+
+		# Verify typical drone EXIF fields are present (flexible check for any manufacturer)
+		expected_field_categories = [
+			['Make', 'Model', 'Software'],  # Camera info
+			['ISOSpeedRatings', 'FNumber', 'FocalLength', 'ExposureTime'],  # Image settings
+			['DateTime', 'DateTimeOriginal', 'DateTimeDigitized'],  # Acquisition details
+		]
+
+		fields_found = 0
+		for category in expected_field_categories:
+			if any(field in camera_metadata for field in category):
+				fields_found += 1
+
+		assert fields_found >= 2, (
+			f'Should have EXIF fields from at least 2 categories, found {fields_found} categories with fields'
+		)
+
 
 def test_odm_orthomosaic_generation_and_storage(odm_task, auth_token):
 	"""Test that ODM generates orthomosaic and moves it to correct archive location"""
@@ -189,6 +217,22 @@ def test_odm_real_data_end_to_end_processing(odm_task, auth_token):
 	remote_ortho_path = f'{settings.archive_path}/{odm_task.dataset_id}_ortho.tif'
 	ortho_exists = check_file_exists_on_storage(remote_ortho_path, auth_token)
 	assert ortho_exists, f'Generated orthomosaic not found at {remote_ortho_path}'
+
+	# Verify comprehensive EXIF metadata was extracted during ODM processing
+	with use_client(auth_token) as client:
+		raw_images_response = (
+			client.table(settings.raw_images_table).select('*').eq('dataset_id', odm_task.dataset_id).execute()
+		)
+		assert raw_images_response.data, f'Raw images entry not found for dataset {odm_task.dataset_id}'
+
+		raw_images_entry = raw_images_response.data[0]
+		camera_metadata = raw_images_entry['camera_metadata']
+		assert camera_metadata is not None, 'EXIF metadata should be extracted during ODM processing'
+		assert isinstance(camera_metadata, dict), 'camera_metadata should be a dictionary'
+		assert len(camera_metadata) > 0, 'Should contain comprehensive EXIF data from drone images'
+
+		# Verify database state includes comprehensive EXIF data (flexible for any manufacturer)
+		print(f'✅ EXIF extraction verified - {len(camera_metadata)} metadata fields extracted from drone images')
 
 
 @pytest.mark.slow

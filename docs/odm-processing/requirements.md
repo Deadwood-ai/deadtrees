@@ -148,16 +148,27 @@ ALTER TABLE "public"."v2_statuses" ADD COLUMN "is_odm_done" boolean NOT NULL DEF
 - System shall defer all technical analysis (hash calculation, cog_info, bbox extraction) to processing phase
 
 ### **FR-ODM-002: Enhanced EXIF Data Management**
-- System shall extract basic acquisition date in frontend during upload for immediate UX
-- System shall store comprehensive EXIF data in v2_raw_images.camera_metadata during upload processing
-- System shall handle missing or corrupted EXIF data gracefully without blocking upload
-- System shall perform detailed technical analysis only during processing phase
+- System shall extract basic acquisition date in frontend during upload for immediate UX (optional - manual entry supported)
+- System shall extract comprehensive EXIF data during ODM processing phase from extracted drone images
+- System shall store extensive EXIF metadata in v2_raw_images.camera_metadata jsonb field for flexible querying
+- System shall handle missing or corrupted EXIF data gracefully without blocking processing
+- System shall sample multiple images to find representative EXIF data when individual images lack metadata
 
 ### **FR-ODM-002A: RTK Data Detection and Storage**
 - System shall automatically detect RTK positioning files in ZIP uploads (.RTK, .MRK, .RTL, .RTB, .RPOS, .RTS, .IMU)
 - System shall parse RTK timestamp files (.MRK) to extract precision indicators during upload
 - System shall store RTK metadata in v2_raw_images table (has_rtk_data, rtk_precision_cm, rtk_quality_indicator)
 - System shall store RTK files alongside images in raw_images directory for processing access
+
+### **FR-ODM-002B: Comprehensive EXIF Metadata Extraction**
+- System shall extract comprehensive EXIF metadata during ODM processing after ZIP extraction
+- System shall capture camera specifications (make, model, software version, serial number)
+- System shall extract image technical settings (ISO, aperture, shutter speed, focal length, white balance)
+- System shall record acquisition metadata (datetime, GPS coordinates, altitude, orientation)
+- System shall store image properties (dimensions, color space, compression, bit depth)
+- System shall store all EXIF data in v2_raw_images.camera_metadata as structured jsonb for efficient querying
+- System shall sample first 3 valid images to find representative EXIF data when individual images vary
+- System shall continue processing successfully even when EXIF data is missing or corrupted
 
 ### **FR-ODM-003: ODM Container Integration with Ortho Creation** 
 - System shall execute OpenDroneMap via GPU-accelerated Docker container using Docker-in-Docker

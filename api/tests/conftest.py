@@ -6,11 +6,7 @@ from shared.settings import settings
 from supabase import create_client
 from shared.models import DatasetAccessEnum, LicenseEnum, PlatformEnum
 
-from shared.testing.fixtures import (
-	test_file,
-	cleanup_database,
-	data_directory,
-)
+from shared.testing.fixtures import test_file, cleanup_database, data_directory, test_processor_user
 
 
 @pytest.fixture(scope='session')

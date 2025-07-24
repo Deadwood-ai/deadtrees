@@ -10,7 +10,9 @@ from shared.logger import logger
 from shared.settings import settings
 from shared.status import update_status
 from shared.logging import LogContext, LogCategory
+from shared.db import use_client
 from processor.src.utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
+from shared.exif_utils import extract_comprehensive_exif
 
 
 def process_odm(task: QueueTask, temp_dir: Path):
@@ -20,6 +22,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 	Steps:
 	1. Pull original ZIP file from storage via SSH
 	2. Extract ZIP file locally
+	2.5. Extract EXIF metadata from images and update database
 	3. Execute ODM Docker container with GPU acceleration
 	4. Move generated orthomosaic to archive/{dataset_id}_ortho.tif
 	5. Update status is_odm_done=True
@@ -64,6 +67,16 @@ def process_odm(task: QueueTask, temp_dir: Path):
 
 		with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
 			zip_ref.extractall(extraction_dir)
+
+		# Step 2.5: Extract EXIF metadata from images and update database
+		logger.info(
+			f'Extracting EXIF metadata from drone images',
+			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+		)
+
+		exif_metadata = _extract_exif_from_images(extraction_dir, token, dataset_id)
+		if exif_metadata:
+			_update_camera_metadata(dataset_id, exif_metadata, token)
 
 		# Step 3: Execute ODM Docker container
 		# For Docker-in-Docker, we need a path that's accessible from the host
@@ -138,6 +151,90 @@ def process_odm(task: QueueTask, temp_dir: Path):
 			)
 
 		raise
+
+
+def _extract_exif_from_images(extraction_dir: Path, token: str, dataset_id: int) -> dict:
+	"""
+	Extract EXIF metadata from the first valid image file with EXIF data.
+
+	Args:
+		extraction_dir: Directory containing extracted images
+		token: Authentication token for logging
+		dataset_id: Dataset ID for logging
+
+	Returns:
+		Dictionary containing comprehensive EXIF metadata, or empty dict if none found
+	"""
+	# Find image files in extraction directory
+	image_extensions = ['.jpg', '.jpeg', '.tif', '.tiff', '.JPG', '.JPEG', '.TIF', '.TIFF']
+	image_files = []
+
+	for ext in image_extensions:
+		image_files.extend(extraction_dir.glob(f'*{ext}'))
+
+	if not image_files:
+		logger.warning(
+			f'No image files found in extraction directory: {extraction_dir}',
+			LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+		)
+		return {}
+
+	logger.info(
+		f'Found {len(image_files)} image files, extracting EXIF from first valid image',
+		LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+	)
+
+	# Sample first 3 images to find representative EXIF data
+	for image_file in image_files[:3]:
+		try:
+			exif_data = extract_comprehensive_exif(image_file)
+			if exif_data:
+				logger.info(
+					f'Successfully extracted EXIF metadata from {image_file.name} with {len(exif_data)} fields',
+					LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+				)
+				return exif_data
+		except Exception as e:
+			logger.warning(
+				f'Failed to extract EXIF from {image_file.name}: {str(e)}',
+				LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+			)
+			continue
+
+	logger.warning(
+		f'No valid EXIF data found in any of the sampled image files',
+		LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+	)
+	return {}
+
+
+def _update_camera_metadata(dataset_id: int, exif_metadata: dict, token: str):
+	"""
+	Update the camera_metadata field in v2_raw_images table with EXIF data.
+
+	Args:
+		dataset_id: Dataset ID to update
+		exif_metadata: Dictionary containing EXIF metadata
+		token: Authentication token for database access
+	"""
+	with use_client(token) as client:
+		response = (
+			client.table(settings.raw_images_table)
+			.update({'camera_metadata': exif_metadata})
+			.eq('dataset_id', dataset_id)
+			.execute()
+		)
+
+		if response.data:
+			logger.info(
+				f'Successfully updated camera_metadata for dataset {dataset_id} with {len(exif_metadata)} EXIF fields',
+				LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+			)
+		else:
+			logger.error(
+				f'Failed to update camera_metadata for dataset {dataset_id} - no raw_images entry found',
+				LogContext(category=LogCategory.PROCESS, token=token, dataset_id=dataset_id),
+			)
 
 
 def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_id: int):

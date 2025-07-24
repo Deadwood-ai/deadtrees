@@ -35,13 +35,13 @@ Both paths converge at geotiff processing where ortho entries are created
 Clean separation following existing v2_* table architecture:
 
 ```sql
--- New table for raw drone image metadata
+-- New table for raw drone image metadata with comprehensive EXIF storage
 CREATE TABLE "public"."v2_raw_images" (
     "dataset_id" bigint NOT NULL REFERENCES "public"."v2_datasets"(id) ON DELETE CASCADE,
     "raw_image_count" integer NOT NULL,
     "raw_image_size_mb" integer NOT NULL, 
     "raw_images_path" text NOT NULL, -- Contains both images and RTK files
-    "camera_metadata" jsonb,
+    "camera_metadata" jsonb, -- Comprehensive EXIF metadata in structured format
     "has_rtk_data" boolean NOT NULL DEFAULT false,
     "rtk_precision_cm" numeric(4,2),
     "rtk_quality_indicator" integer,
@@ -53,6 +53,29 @@ CREATE TABLE "public"."v2_raw_images" (
 -- Indexes and constraints following v2_* patterns
 CREATE UNIQUE INDEX v2_raw_images_pkey ON public.v2_raw_images USING btree (dataset_id);
 ALTER TABLE "public"."v2_raw_images" ADD CONSTRAINT "v2_raw_images_pkey" PRIMARY KEY using index "v2_raw_images_pkey";
+
+-- GIN index for efficient JSONB querying of camera metadata
+CREATE INDEX v2_raw_images_camera_metadata_gin_idx ON public.v2_raw_images USING gin (camera_metadata);
+
+-- Example camera_metadata structure (populated during ODM processing):
+-- {
+--   "Make": "DJI",
+--   "Model": "FC6310",
+--   "Software": "v01.00.0300",
+--   "DateTime": "2024:01:15 14:30:45",
+--   "DateTimeOriginal": "2024:01:15 14:30:45",
+--   "ExifImageWidth": 5472,
+--   "ExifImageHeight": 3648,
+--   "ISO": 100,
+--   "FNumber": 2.8,
+--   "ExposureTime": "1/1000",
+--   "FocalLength": 8.8,
+--   "WhiteBalance": "Auto",
+--   "ColorSpace": "sRGB",
+--   "GPSLatitude": 48.1234,
+--   "GPSLongitude": 11.5678,
+--   "GPSAltitude": 120.5
+-- }
 ```
 
 ### **Status System Integration - Following Existing Patterns**
@@ -180,30 +203,61 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
     update_status(token, task.dataset_id, is_ortho_done=True)
 ```
 
-#### **Simplified ODM Processing**
+#### **Enhanced ODM Processing with EXIF Extraction**
 ```python
 # processor/src/process_odm.py
 def process_odm(task: QueueTask, temp_dir: Path):
-    """Generate ODM orthomosaic and move to standard location"""
+    """Generate ODM orthomosaic with comprehensive EXIF metadata extraction"""
     
     # 1. Pull raw images from storage
     raw_images_dir = temp_dir / f"raw_images_{task.dataset_id}"
     pull_raw_images_from_storage(task.dataset_id, raw_images_dir)
     
-    # 2. Execute ODM container
-    odm_output_dir = temp_dir / f"odm_{task.dataset_id}"
-    execute_odm_container(raw_images_dir, odm_output_dir, task.dataset_id)
+    # 2. Extract ZIP file locally for processing
+    extraction_dir = temp_dir / f'raw_images_{task.dataset_id}'
+    extract_zip_locally(task.dataset_id, extraction_dir)
     
-    # 3. Move generated orthomosaic to standard archive location
+    # 2.5. Extract comprehensive EXIF metadata - NEW STEP
+    extract_and_store_exif_metadata(extraction_dir, task.dataset_id, token)
+    
+    # 3. Execute ODM container
+    odm_output_dir = temp_dir / f"odm_{task.dataset_id}"
+    execute_odm_container(extraction_dir, odm_output_dir, task.dataset_id)
+    
+    # 4. Move generated orthomosaic to standard archive location
     odm_ortho = odm_output_dir / task.dataset_id / "odm_orthophoto" / "odm_orthophoto.tif"
     final_ortho = settings.archive_path / f"{task.dataset_id}_ortho.tif"
     
     shutil.move(str(odm_ortho), str(final_ortho))
     
-    # 4. Update status only - NO ortho entry creation (geotiff processor will handle)
+    # 5. Update status only - NO ortho entry creation (geotiff processor will handle)
     update_status(token, task.dataset_id, is_odm_done=True)
     
     # NOTE: geotiff processing task will find the file and create ortho entry
+
+def extract_and_store_exif_metadata(extraction_dir: Path, dataset_id: int, token: str):
+    """Extract comprehensive EXIF metadata and store in v2_raw_images.camera_metadata"""
+    from api.src.upload.exif_utils import extract_comprehensive_exif
+    
+    # Find image files
+    image_files = list(extraction_dir.glob('*.jpg')) + list(extraction_dir.glob('*.JPG'))
+    image_files += list(extraction_dir.glob('*.jpeg')) + list(extraction_dir.glob('*.JPEG'))
+    
+    # Sample first 3 images to find representative EXIF data
+    camera_metadata = {}
+    for image_file in image_files[:3]:
+        exif_data = extract_comprehensive_exif(image_file)
+        if exif_data:
+            camera_metadata = exif_data
+            break
+    
+    # Update v2_raw_images with comprehensive EXIF metadata
+    if camera_metadata:
+        with use_client(token) as client:
+            client.table(settings.raw_images_table)\
+                  .update({'camera_metadata': camera_metadata})\
+                  .eq('dataset_id', dataset_id)\
+                  .execute()
 ```
 
 ### **3. Upload Processing Functions - Simplified Architecture**

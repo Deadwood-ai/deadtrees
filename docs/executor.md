@@ -61,7 +61,12 @@ Before starting any implementation:
 
 **NEVER run pytest directly - always use `deadtrees dev test` commands:**
 
+
+
 ```bash
+
+# first activate the python env
+source venv/bin/activate
 # API tests
 deadtrees dev test api api/tests/specific_test.py
 deadtrees dev test api shared/tests/test_odm_models.py
