@@ -2,6 +2,7 @@ import os
 import zipfile
 import shutil
 import docker
+import docker.types
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -28,9 +29,12 @@ def process_odm(task: QueueTask, temp_dir: Path):
 	3. Extract ZIP file locally
 	4. Detect RTK files and update database with metadata
 	5. Extract EXIF metadata from images and update database
-	6. Execute ODM Docker container with GPU acceleration
+	6. Execute ODM Docker container using --fast-orthophoto
 	7. Move generated orthomosaic to archive/{dataset_id}_ortho.tif
 	8. Update status is_odm_done=True
+
+	Uses simplified ODM configuration with only --fast-orthophoto flag for
+	fast processing with better quality orthomosaics.
 
 	Args:
 		task: QueueTask with dataset_id and user information
@@ -471,21 +475,9 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 	)
 
-	# Improved ODM Docker configuration optimized for small datasets
+	# Simplified ODM configuration using only fast-orthophoto
 	odm_command = [
 		'--fast-orthophoto',  # Fast processing mode
-		'--orthophoto-resolution',
-		'10',  # 10cm/pixel resolution (faster for small datasets)
-		'--feature-quality',
-		'low',  # Low quality features (more robust for small datasets)
-		'--matcher-neighbors',
-		'4',  # Use fewer neighbors for small datasets
-		'--min-num-features',
-		'4000',  # Lower minimum features for small datasets
-		'--ignore-gsd',  # Ignore Ground Sample Distance warnings
-		'--skip-3dmodel',  # Skip 3D model generation (we only need orthophoto)
-		'--force-gps',  # Force GPS usage even with few images
-		'--use-hybrid-bundle-adjustment',  # Better for small datasets
 		'--project-path',
 		'/odm_data',
 		project_name,  # This is the PROJECTDIR argument
