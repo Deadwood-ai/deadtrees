@@ -360,12 +360,15 @@ def _extract_exif_from_images(extraction_dir: Path, token: str, dataset_id: int)
 	Returns:
 		Dictionary containing comprehensive EXIF metadata, or empty dict if none found
 	"""
-	# Find image files in extraction directory
+	# Find image files in extraction directory (search recursively)
 	image_extensions = ['.jpg', '.jpeg', '.tif', '.tiff', '.JPG', '.JPEG', '.TIF', '.TIFF']
 	image_files = []
 
 	for ext in image_extensions:
-		image_files.extend(extraction_dir.glob(f'*{ext}'))
+		found_files = list(extraction_dir.rglob(f'*{ext}'))
+		# Filter out files in __MACOSX directories
+		filtered_files = [f for f in found_files if '__MACOSX' not in str(f)]
+		image_files.extend(filtered_files)
 
 	if not image_files:
 		logger.warning(
@@ -453,22 +456,68 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 	project_dir.mkdir(exist_ok=True)
 	project_images_dir.mkdir(exist_ok=True)
 
-	# Copy images to the expected ODM project structure
-	image_files = list(images_dir.glob('*.jpg')) + list(images_dir.glob('*.JPG'))
+	# Copy all relevant files to the expected ODM project structure
+	# ODM expects images in the 'images' subdirectory, but can also use RTK/GPS files
 
-	# Filter out obviously corrupt images by size (very small files are likely corrupt)
+	# Find all files recursively, excluding __MACOSX directories
+	all_files = []
+	for file_path in images_dir.rglob('*'):
+		if file_path.is_file() and '__MACOSX' not in str(file_path):
+			all_files.append(file_path)
+
+	# Separate files by type
+	image_files = []
+	rtk_files = []
+	other_files = []
+
+	# Common image extensions (be inclusive, let ODM validate)
+	image_extensions = {'.jpg', '.jpeg', '.png', '.tif', '.tiff', '.dng', '.raw', '.bmp', '.webp'}
+
+	for file_path in all_files:
+		ext = file_path.suffix.lower()
+		if ext in image_extensions:
+			image_files.append(file_path)
+		elif ext.upper() in RTK_EXTENSIONS:
+			rtk_files.append(file_path)
+		else:
+			other_files.append(file_path)
+
+	logger.info(
+		f'Found {len(image_files)} image files, {len(rtk_files)} RTK files, {len(other_files)} other files in {images_dir}',
+		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+	)
+
+	if len(image_files) == 0:
+		# Log directory structure for debugging
+		logger.error(
+			f'No image files found. Directory contains: {[f.name for f in all_files[:20]]}{"..." if len(all_files) > 20 else ""}',
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+		)
+		raise Exception(f'No supported images found in {images_dir}')
+
+	# Filter out obviously corrupt images by size (but be less restrictive - 100KB minimum)
 	valid_image_files = []
 	for image_file in image_files:
-		if image_file.stat().st_size > 1024 * 1024:  # At least 1MB
+		file_size = image_file.stat().st_size
+		if file_size > 100 * 1024:  # At least 100KB (less restrictive than 1MB)
 			valid_image_files.append(image_file)
 		else:
 			logger.warning(
-				f'Skipping potentially corrupt image {image_file.name} (size: {image_file.stat().st_size} bytes)',
+				f'Skipping potentially corrupt image {image_file.name} (size: {file_size} bytes)',
 				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 
+	# Copy valid images to the images directory
 	for image_file in valid_image_files:
 		shutil.copy2(image_file, project_images_dir)
+
+	# Copy RTK files to the project root (ODM expects them at project level)
+	for rtk_file in rtk_files:
+		shutil.copy2(rtk_file, project_dir)
+		logger.info(
+			f'Copied RTK file: {rtk_file.name}',
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+		)
 
 	logger.info(
 		f'Copied {len(valid_image_files)} valid images to ODM project structure (filtered out {len(image_files) - len(valid_image_files)} potentially corrupt images)',
@@ -529,83 +578,100 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 
 		# Mount the parent directory so ODM can find the project directory
 		# Use host path since /data is mounted from host to processor container
-		container = client.containers.create(
-			image='opendronemap/odm',
-			command=odm_command,
-			volumes={host_path: {'bind': '/odm_data', 'mode': 'rw'}},
-			auto_remove=False,  # Keep container for debugging
-		)
+		container = None
+		container_created = False
 
-		# Start the container
-		container.start()
+		try:
+			container = client.containers.create(
+				image='opendronemap/odm',
+				command=odm_command,
+				volumes={host_path: {'bind': '/odm_data', 'mode': 'rw'}},
+				auto_remove=False,  # We'll manage removal manually to ensure cleanup
+			)
+			container_created = True
 
-		# Debug: Check what ODM sees in the container (simplified - no decode issues)
-		logger.info(
-			'ODM container started, processing images...',
-			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
-		)
+			# Start the container
+			container.start()
 
-		# Wait for completion and get logs
-		exit_status = container.wait()['StatusCode']
-
-		# Get both stdout and stderr logs
-		stdout_logs = container.logs(stdout=True, stderr=False).decode('utf-8', errors='ignore')
-		stderr_logs = container.logs(stdout=False, stderr=True).decode('utf-8', errors='ignore')
-
-		# Remove the container now that we have the logs
-		container.remove()
-
-		if exit_status == 0:
+			# Debug: Check what ODM sees in the container (simplified - no decode issues)
 			logger.info(
-				'ODM processing completed successfully',
+				'ODM container started, processing images...',
 				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 
-			# Log output for debugging
-			if stdout_logs:
-				# Log last 1000 chars to avoid huge logs but still show completion status
-				stdout_tail = stdout_logs[-1000:] if len(stdout_logs) > 1000 else stdout_logs
+			# Wait for completion and get logs
+			exit_status = container.wait()['StatusCode']
+
+			# Get both stdout and stderr logs
+			stdout_logs = container.logs(stdout=True, stderr=False).decode('utf-8', errors='ignore')
+			stderr_logs = container.logs(stdout=False, stderr=True).decode('utf-8', errors='ignore')
+
+			if exit_status == 0:
 				logger.info(
-					f'ODM stdout (tail): {stdout_tail}',
-					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
-				)
-		else:
-			# ODM failed - log detailed error information
-			logger.error(
-				f'ODM container failed with exit code {exit_status}',
-				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
-			)
-
-			if stderr_logs:
-				logger.error(
-					f'ODM stderr: {stderr_logs}',
+					'ODM processing completed successfully',
 					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 				)
 
-			if stdout_logs:
-				# Log the last part of stdout which often contains error info
-				stdout_tail = stdout_logs[-2000:] if len(stdout_logs) > 2000 else stdout_logs
-				logger.error(
-					f'ODM stdout (tail): {stdout_tail}',
-					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
-				)
-
-			# Check if images directory exists and has content for debugging
-			if images_dir.exists():
-				image_files = list(images_dir.glob('*.jpg')) + list(images_dir.glob('*.JPG'))
-				logger.error(
-					f'Images directory contains {len(image_files)} image files: {[f.name for f in image_files[:5]]}',
-					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
-				)
+				# Log output for debugging
+				if stdout_logs:
+					# Log last 1000 chars to avoid huge logs but still show completion status
+					stdout_tail = stdout_logs[-1000:] if len(stdout_logs) > 1000 else stdout_logs
+					logger.info(
+						f'ODM stdout (tail): {stdout_tail}',
+						LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+					)
 			else:
+				# ODM failed - log detailed error information
 				logger.error(
-					f'Images directory {images_dir} does not exist!',
+					f'ODM container failed with exit code {exit_status}',
 					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 				)
 
-			raise Exception(
-				f'ODM processing failed with exit code {exit_status}. stdout: {stdout_logs[-500:] if stdout_logs else "No stdout"}. stderr: {stderr_logs[-500:] if stderr_logs else "No stderr"}'
-			)
+				if stderr_logs:
+					logger.error(
+						f'ODM stderr: {stderr_logs}',
+						LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+					)
+
+				if stdout_logs:
+					# Log the last part of stdout which often contains error info
+					stdout_tail = stdout_logs[-2000:] if len(stdout_logs) > 2000 else stdout_logs
+					logger.error(
+						f'ODM stdout (tail): {stdout_tail}',
+						LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+					)
+
+				# Check if images directory exists and has content for debugging
+				if images_dir.exists():
+					image_files = list(images_dir.glob('*.jpg')) + list(images_dir.glob('*.JPG'))
+					logger.error(
+						f'Images directory contains {len(image_files)} image files: {[f.name for f in image_files[:5]]}',
+						LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+					)
+				else:
+					logger.error(
+						f'Images directory {images_dir} does not exist!',
+						LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+					)
+
+				raise Exception(
+					f'ODM processing failed with exit code {exit_status}. stdout: {stdout_logs[-500:] if stdout_logs else "No stdout"}. stderr: {stderr_logs[-500:] if stderr_logs else "No stderr"}'
+				)
+		finally:
+			# Always remove the container, even if an exception occurred
+			if container_created and container:
+				try:
+					container.remove()
+					logger.info(
+						'ODM container removed successfully',
+						LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+					)
+				except Exception as cleanup_error:
+					logger.error(
+						f'Failed to remove ODM container: {str(cleanup_error)}',
+						LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+					)
+
 	except Exception as e:
 		logger.error(
 			f'Failed to run ODM container: {str(e)}',

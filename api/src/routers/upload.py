@@ -66,7 +66,11 @@ async def upload_chunk(
 	chunks_total = int(chunks_total)
 
 	upload_file_name = f'{upload_id}.tmp'
-	upload_target_path = settings.archive_path / upload_file_name
+	# Write raw images directly to raw_images path, GeoTIFF to archive path
+	if upload_type == UploadType.RAW_IMAGES_ZIP:
+		upload_target_path = settings.raw_images_path / upload_file_name
+	else:
+		upload_target_path = settings.archive_path / upload_file_name
 
 	# Log chunk upload start
 	logger.info(
@@ -140,8 +144,8 @@ async def upload_chunk(
 			elif upload_type == UploadType.RAW_IMAGES_ZIP:
 				# Call simplified ZIP processing
 				dataset = await process_raw_images_upload(dataset, upload_target_path, token)
-				file_name = file.filename
-				target_path = settings.raw_images_path / str(dataset.id)
+				file_name = f'{dataset.id}.zip'  # Actual ZIP filename
+				target_path = settings.raw_images_path / file_name  # Actual file location, not directory
 
 			# Note: Status update is now handled within processing functions
 			# No additional status update needed here
