@@ -37,6 +37,8 @@ services:
       - SSH_PRIVATE_KEY_PASSPHRASE=
       - ENV=development
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
+      # Fast ODM processing for tests (50cm/pixel vs 1cm/pixel production)
+      - ODM_ORTHOPHOTO_RESOLUTION=50.0
       # NVIDIA GPU configuration
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all

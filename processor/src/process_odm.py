@@ -521,13 +521,17 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		project_name = f'dataset_{dataset_id}'
 		odm_command = [
 			'--fast-orthophoto',  # Fast processing mode
+			'--orthophoto-resolution',
+			str(
+				settings.ODM_ORTHOPHOTO_RESOLUTION
+			),  # Configurable resolution in cm/pixel (1 = 1cm/pixel, 50 = 50cm/pixel)
 			'--project-path',
 			'/odm_data',
 			project_name,  # This is the PROJECTDIR argument
 		]
 
 		logger.info(
-			f'Starting ODM processing with command: {" ".join(odm_command)}',
+			f'Starting ODM processing with command: {" ".join(odm_command)} (Resolution: {settings.ODM_ORTHOPHOTO_RESOLUTION}cm/pixel)',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
