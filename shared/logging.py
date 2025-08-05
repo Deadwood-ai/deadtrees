@@ -23,6 +23,7 @@ class LogCategory(Enum):
 	COG = 'cog'  # COG generation
 	THUMBNAIL = 'thumb'  # Thumbnail creation
 	DEADWOOD = 'deadwood'  # Deadwood segmentation
+	TREECOVER = 'treecover'  # Tree cover segmentation
 	FOREST = 'forest'  # Forest cover analysis
 	METADATA = 'metadata'  # Metadata processing
 
