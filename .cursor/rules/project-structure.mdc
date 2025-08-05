@@ -1,0 +1,265 @@
+---
+alwaysApply: true
+---
+# Project Structure & Organization
+
+## 📋 **WHEN TO USE THIS RULE**
+**Agent should request this rule when:**
+- Creating new modules, utilities, or services
+- Deciding where to place functions or classes
+- Organizing tests or implementing new features
+- Refactoring existing code for better structure
+
+## 🏗️ **MODULE ORGANIZATION PRINCIPLES**
+
+### **Separation of Concerns**
+```python
+# ✅ GOOD: Each module has a single responsibility
+api/src/utils/file_utils.py    # File type detection, validation
+api/src/utils/exif_utils.py    # EXIF extraction logic  
+api/src/utils/rtk_utils.py     # RTK file processing
+api/src/upload/upload.py       # Dataset creation only
+api/src/routers/upload.py      # HTTP endpoint logic only
+
+# ❌ BAD: Mixed responsibilities
+api/src/upload/upload.py       # Dataset creation + file detection + EXIF + RTK
+```
+
+### **Import Hierarchy**
+```python
+# ✅ GOOD: Clear dependency flow
+routers/ → utils/     # Routers use utilities
+routers/ → upload/    # Routers use business logic  
+upload/  → utils/     # Business logic uses utilities
+
+# ❌ BAD: Circular dependencies
+utils/ → routers/     # Utils should not depend on routers
+upload/ → routers/    # Business logic should not depend on HTTP layer
+```
+
+### **Reusability Guidelines**
+```python
+# ✅ Place in utils/ if:
+- Function is stateless
+- Used by multiple modules  
+- General-purpose utility
+- No domain-specific business logic
+
+# ✅ Place in service modules if:
+- Contains business logic
+- Manages state or resources
+- Domain-specific operations
+- Database interactions
+
+# ✅ Place in routers/ if:
+- HTTP-specific logic
+- Request/response handling
+- Authentication/authorization
+- API endpoint definitions
+```
+
+## 🧪 **TEST ORGANIZATION PATTERNS**
+
+### **Co-located Testing (Preferred)**
+```
+shared/
+├── models.py
+└── tests/
+    ├── test_models.py          # Tests shared/models.py
+    └── test_odm_models.py      # Tests ODM-specific models
+
+api/
+├── src/
+│   ├── utils/file_utils.py
+│   ├── upload/upload.py  
+│   └── routers/upload.py
+└── tests/
+    ├── utils/
+    │   └── test_file_utils.py  # Tests api/src/utils/file_utils.py
+    ├── upload/
+    │   └── test_upload.py      # Tests api/src/upload/upload.py
+    └── routers/
+        └── test_upload.py      # Tests api/src/routers/upload.py
+```
+
+### **Test Categories**
+```python
+# Unit tests: Test individual functions/classes
+api/tests/utils/test_file_utils.py
+processor/tests/test_process_odm.py
+
+# Integration tests: Test module interactions  
+api/tests/test_upload_integration.py
+processor/tests/test_odm_pipeline.py
+
+# End-to-end tests: Test complete workflows
+integration/tests/test_complete_workflow.py
+```
+
+### **Test Naming Conventions**
+```python
+# ✅ GOOD: Clear, descriptive names
+test_detect_upload_type_with_geotiff_file()
+test_detect_upload_type_with_zip_file()
+test_detect_upload_type_raises_error_for_unsupported_type()
+
+# ❌ BAD: Vague or unclear names  
+test_upload_type()
+test_detection()
+test_error()
+```
+
+## 📁 **RECOMMENDED FILE STRUCTURE**
+
+### **API Service Structure**
+```
+api/
+├── src/
+│   ├── utils/                 # 🔧 Reusable utilities
+│   │   ├── file_utils.py      # File type detection, validation
+│   │   ├── exif_utils.py      # EXIF data extraction
+│   │   ├── rtk_utils.py       # RTK file processing
+│   │   └── validation.py      # Common validation functions
+│   ├── upload/                # 📤 Upload business logic
+│   │   ├── upload.py          # Dataset creation
+│   │   └── raw_images_processor.py  # ZIP processing logic
+│   ├── routers/               # 🌐 HTTP endpoints
+│   │   ├── upload.py          # Upload endpoints
+│   │   ├── datasets.py        # Dataset management
+│   │   └── processing.py      # Processing control
+│   └── services/              # 🏢 Domain services (if needed)
+└── tests/                     # 🧪 Mirror src/ structure
+    ├── utils/
+    ├── upload/
+    └── routers/
+```
+
+### **Processor Service Structure**  
+```
+processor/
+├── src/
+│   ├── utils/                 # 🔧 Processing utilities
+│   │   ├── docker_utils.py    # Docker container management
+│   │   ├── file_transfer.py   # SSH/file operations
+│   │   └── path_utils.py      # Path management
+│   ├── processors/            # ⚙️ Individual processors
+│   │   ├── process_odm.py     # ODM processing
+│   │   ├── process_cog.py     # COG generation
+│   │   └── process_metadata.py # Metadata extraction
+│   └── processor.py           # 🎯 Main orchestrator
+└── tests/                     # 🧪 Mirror src/ structure
+    ├── utils/
+    └── processors/
+```
+
+## 🎯 **NAMING CONVENTIONS**
+
+### **Module Names**
+```python
+# ✅ GOOD: Clear, descriptive module names
+file_utils.py       # File-related utilities
+exif_utils.py       # EXIF extraction utilities  
+rtk_utils.py        # RTK processing utilities
+raw_images_processor.py  # Raw images processing
+
+# ❌ BAD: Vague or generic names
+utils.py           # Too generic
+helper.py          # Too vague
+common.py          # Unclear purpose
+```
+
+### **Function Names** 
+```python
+# ✅ GOOD: Verb-noun pattern, clear intent
+detect_upload_type()
+extract_exif_data()
+process_raw_images_upload()
+validate_zip_structure()
+
+# ❌ BAD: Unclear or overly generic
+get_type()
+do_upload()
+handle_file()
+process()
+```
+
+### **Class Names**
+```python
+# ✅ GOOD: Noun phrases, clear purpose
+class UploadType(Enum):
+class ProcessingRequest(BaseModel):
+class ODMProcessor:
+
+# ❌ BAD: Vague or abbreviated
+class Type:
+class Request:
+class Processor:
+```
+
+## 🚨 **ANTI-PATTERNS TO AVOID**
+
+### **❌ God Modules**
+```python
+# BAD: One module doing everything
+upload.py  # 2000+ lines handling upload, processing, validation, etc.
+
+# GOOD: Split by responsibility  
+upload/upload.py         # Dataset creation (200 lines)
+utils/file_utils.py      # File utilities (100 lines)
+utils/exif_utils.py      # EXIF extraction (150 lines)
+```
+
+### **❌ Circular Dependencies**
+```python
+# BAD: Modules depending on each other
+upload.py → router.py → upload.py
+
+# GOOD: Unidirectional dependency flow
+router.py → upload.py → utils.py
+```
+
+### **❌ Deep Import Paths**
+```python
+# BAD: Too many nested levels
+from api.src.upload.processors.image.exif.extraction import extract_exif
+
+# GOOD: Flatter structure with clear modules
+from api.src.utils.exif_utils import extract_exif
+```
+
+### **❌ Generic Naming**
+```python
+# BAD: Generic, unclear names
+utils.py, helper.py, common.py, manager.py
+
+# GOOD: Specific, descriptive names  
+file_utils.py, exif_utils.py, rtk_utils.py, odm_processor.py
+```
+
+## 📚 **BEST PRACTICES SUMMARY**
+
+### **Code Organization**
+1. **One responsibility per module** - clear, focused purpose
+2. **Co-locate related functionality** - keep related code together
+3. **Minimize dependencies** - reduce coupling between modules
+4. **Use descriptive names** - make intent clear from naming
+5. **Follow import hierarchy** - utils ← business logic ← routers
+
+### **Test Organization**  
+1. **Mirror source structure** - tests in same relative locations
+2. **Test one thing per test** - focused, specific test cases
+3. **Use descriptive test names** - make test purpose clear
+4. **Group related tests** - use test classes for organization
+5. **Real data over mocking** - use actual data when possible
+
+### **File Structure**
+1. **Flatten when possible** - avoid deep nesting
+2. **Group by feature** - related functionality together
+3. **Separate concerns** - utils/business logic/HTTP layers
+4. **Consistent naming** - follow established patterns
+5. **Document structure** - README files for complex modules
+
+---
+
+**Remember**: Good structure makes code easier to understand, test, and maintain. When in doubt, prefer clarity and simplicity over clever organization.
+description:

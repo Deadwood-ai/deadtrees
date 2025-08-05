@@ -25,6 +25,7 @@ _tables = {
 	'forest_cover_geometries': 'v2_forest_cover_geometries',
 	'label_objects': 'v1_label_objects',
 	'logs': 'v2_logs',
+	'raw_images': 'v2_raw_images',
 	'statuses': 'v2_statuses',
 	'queue': 'v2_queue',
 	'queue_positions': 'v2_queue_positions',
@@ -76,6 +77,7 @@ class Settings(BaseSettings):
 	TRASH_DIR: str = 'trash'
 	DOWNLOADS_DIR: str = 'downloads'
 	PROCESSING_DIR: str = 'processing_dir'
+	RAW_IMAGES_DIR: str = 'raw_images'
 
 	# Temporary processing directory
 	# tmp_processing_path: str = str(Path(tempfile.mkdtemp(prefix='processing')))
@@ -180,6 +182,14 @@ class Settings(BaseSettings):
 		return path
 
 	@property
+	def raw_images_path(self) -> Path:
+		path = self.base_path / self.RAW_IMAGES_DIR
+		if not path.exists():
+			path.mkdir(parents=True, exist_ok=True)
+
+		return path
+
+	@property
 	def _tables(self) -> dict:
 		return _tables
 
@@ -238,6 +248,10 @@ class Settings(BaseSettings):
 	@property
 	def queue_position_table(self) -> str:
 		return self._tables['queue_positions']
+
+	@property
+	def raw_images_table(self) -> str:
+		return self._tables['raw_images']
 
 	@property
 	def statuses_table(self) -> str:

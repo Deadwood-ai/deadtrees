@@ -23,25 +23,42 @@ def convert_task(test_dataset_for_processing, test_processor_user):
 
 
 def test_process_geotiff_success(convert_task, auth_token):
-	"""Test successful GeoTIFF conversion and info creation"""
+	"""Test successful GeoTIFF conversion with fresh metadata calculation and both database entries creation"""
 	process_geotiff(convert_task, settings.processing_path)
 
-	# Verify GeoTIFF info was created
 	with use_client(auth_token) as client:
-		response = (
+		# Verify original ortho entry exists with fresh metadata (always recalculated)
+		ortho_response = (
+			client.table(settings.orthos_table).select('*').eq('dataset_id', convert_task.dataset_id).execute()
+		)
+		assert len(ortho_response.data) == 1
+		ortho_data = ortho_response.data[0]
+
+		# Verify essential original ortho fields with fresh metadata
+		assert ortho_data['dataset_id'] == convert_task.dataset_id
+		assert ortho_data['ortho_file_name'].endswith('ortho.tif')
+		assert ortho_data['version'] == 1
+		# sha256 and ortho_info should always be freshly calculated
+		assert ortho_data['sha256'] is not None
+		assert ortho_data['ortho_info'] is not None
+		assert ortho_data['bbox'] is not None
+
+		# Verify processed GeoTIFF info was created (existing functionality)
+		processed_response = (
 			client.table(settings.orthos_processed_table)
 			.select('*')
 			.eq('dataset_id', convert_task.dataset_id)
 			.execute()
 		)
-		assert len(response.data) == 1
-		data = response.data[0]
+		assert len(processed_response.data) == 1
+		processed_data = processed_response.data[0]
 
-		# Verify essential GeoTIFF info fields
-		assert data['dataset_id'] == convert_task.dataset_id
-		assert data['ortho_file_name'].endswith('ortho.tif')
-		assert data['ortho_processing_runtime'] > 0
-		assert data['ortho_info']['Compression'] == 'DEFLATE'
+		# Verify essential processed GeoTIFF info fields
+		assert processed_data['dataset_id'] == convert_task.dataset_id
+		assert processed_data['ortho_file_name'].endswith('ortho.tif')
+		assert processed_data['ortho_processing_runtime'] > 0
+		assert processed_data['ortho_info']['Compression'] == 'DEFLATE'
 
-		# Clean up by removing the test entry
+		# Clean up by removing both test entries
 		client.table(settings.orthos_processed_table).delete().eq('dataset_id', convert_task.dataset_id).execute()
+		client.table(settings.orthos_table).delete().eq('dataset_id', convert_task.dataset_id).execute()

@@ -112,13 +112,15 @@ def test_file():
 	return file_path
 
 
-@test_environment_only
+# @test_environment_only
 @pytest.fixture(scope='session', autouse=True)
 def cleanup_database(auth_token):
 	"""Clean up database tables after all tests"""
 	yield
 
-	with use_client(auth_token) as client:
+	processor_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD, use_cached_session=False)
+
+	with use_client(processor_token) as client:
 		# With CASCADE delete, we only need to clean the parent table
 		client.table(settings.datasets_table).delete().neq('id', 0).execute()
 		client.table(settings.logs_table).delete().neq('id', 1).execute()
@@ -140,15 +142,32 @@ def data_directory():
 	label_objects_dir = data_dir / settings.LABEL_OBJECTS_DIR
 	trash_dir = data_dir / settings.TRASH_DIR
 	downloads_dir = data_dir / settings.DOWNLOADS_DIR
+	raw_images_dir = data_dir / settings.RAW_IMAGES_DIR
 
 	# Create all directories
-	for directory in [archive_dir, cogs_dir, thumbnails_dir, label_objects_dir, trash_dir, downloads_dir]:
+	for directory in [
+		archive_dir,
+		cogs_dir,
+		thumbnails_dir,
+		label_objects_dir,
+		trash_dir,
+		downloads_dir,
+		raw_images_dir,
+	]:
 		directory.mkdir(parents=True, exist_ok=True)
 
 	yield data_dir
 
 	# Cleanup after all tests
-	for directory in [archive_dir, cogs_dir, thumbnails_dir, label_objects_dir, trash_dir, downloads_dir]:
+	for directory in [
+		archive_dir,
+		cogs_dir,
+		thumbnails_dir,
+		label_objects_dir,
+		trash_dir,
+		downloads_dir,
+		raw_images_dir,
+	]:
 		if directory.exists():
 			shutil.rmtree(directory)
 			directory.mkdir(parents=True, exist_ok=True)

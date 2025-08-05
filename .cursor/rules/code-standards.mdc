@@ -21,6 +21,90 @@ alwaysApply: false
 - **Async-First**: Use async/await for I/O operations, sync for CPU-bound
 - **Real Data Testing**: Use real datasets and fixtures, avoid mocking where possible
 
+## 🚨 **FUNCTIONAL PROGRAMMING REQUIREMENTS**
+
+### **✅ Use Functions for Business Logic**
+```python
+# GOOD: Processing functions (follow existing codebase patterns)
+def process_metadata(task: QueueTask, temp_dir: Path) -> None:
+    """Process and store metadata for a dataset"""
+    # Processing logic here
+    pass
+
+def standardise_geotiff(input_path: str, output_path: str, token: str = None) -> bool:
+    """Standardise a GeoTIFF file"""
+    # Standardization logic
+    return True
+
+def extract_exif_data(image_path: Path) -> Dict[str, Any]:
+    """Extract EXIF metadata from image"""
+    return exif_dict
+
+# GOOD: Utility functions for geospatial operations
+def get_biome_data(bbox_centroid: tuple) -> tuple:
+    """Get biome data for coordinates"""
+    return biome_name, biome_id
+
+def calculate_cog(input_path: str, output_path: str) -> CogInfo:
+    """Calculate Cloud Optimized GeoTIFF"""
+    # COG processing logic
+    return cog_info
+```
+
+### **❌ Avoid Classes for Business Logic**
+```python
+# BAD: Don't create classes for processing logic
+class MetadataProcessor:  # ❌ Avoid this pattern
+    def __init__(self, task: QueueTask, temp_dir: Path):
+        self.task = task
+        self.temp_dir = temp_dir
+    
+    def process(self):
+        pass
+
+class GeotiffStandardizer:  # ❌ Avoid this pattern
+    def standardize(self, input_path: str, output_path: str):
+        pass
+
+class BiomeExtractor:  # ❌ Avoid this pattern  
+    def extract(self, coordinates: tuple):
+        pass
+```
+
+### **✅ When Classes ARE Appropriate**
+```python
+# GOOD: Data models (Pydantic models for validation)
+class Dataset(BaseModel):
+    id: Optional[int] = None
+    user_id: str
+    file_name: str
+    authors: List[str]
+    
+class ProcessingRequest(BaseModel):
+    dataset_id: int
+    task_types: List[TaskTypeEnum]
+    priority: int = Field(ge=1, le=5)
+
+# GOOD: Enums for constants
+class TaskTypeEnum(Enum):
+    cog = 'cog'
+    thumbnail = 'thumbnail'
+    metadata = 'metadata'
+    odm_processing = 'odm_processing'
+
+# GOOD: Exception classes (when needed for error hierarchy)
+class ProcessingError(Exception):
+    def __init__(self, message: str, task_type: str, **kwargs):
+        self.task_type = task_type
+        super().__init__(f'{task_type} processing failed: {message}')
+
+# GOOD: Settings/Configuration classes
+class Settings(BaseSettings):
+    supabase_url: str
+    processing_timeout: int = 3600
+    max_concurrent_tasks: int = 2
+```
+
 ## 📝 **PYTHON STANDARDS**
 
 ### Code Style
@@ -411,6 +495,64 @@ def process_geospatial_data(
     pass
 ```
 
+## ⚠️ **ANTI-PATTERNS TO AVOID**
+
+### ❌ Don't Use Classes for Processing Logic
+```python
+# BAD: Classes for stateless operations
+class DataProcessor:
+    def process_dataset(self, dataset_id: int):
+        pass
+
+class ImageStandardizer:
+    def standardize(self, input_path: str, output_path: str):
+        pass
+
+# GOOD: Use functions instead
+def process_dataset(dataset_id: int) -> ProcessingResult:
+    """Process dataset and return results"""
+    pass
+
+def standardize_image(input_path: str, output_path: str) -> bool:
+    """Standardize image file and return success status"""
+    pass
+```
+
+### ❌ Don't Create Complex Class Hierarchies  
+```python
+# BAD: Unnecessary inheritance for simple operations
+class BaseProcessor:
+    def validate_input(self):
+        pass
+
+class GeotiffProcessor(BaseProcessor):
+    def process(self):
+        pass
+
+class CogProcessor(BaseProcessor):
+    def process(self):
+        pass
+
+# GOOD: Simple functions with shared utilities
+def validate_geotiff_input(file_path: str) -> bool:
+    """Validate GeoTIFF input file"""
+    pass
+
+def process_geotiff(input_path: str, output_path: str) -> bool:
+    """Process GeoTIFF file"""
+    if not validate_geotiff_input(input_path):
+        return False
+    # processing logic
+    return True
+
+def process_cog(input_path: str, output_path: str) -> CogInfo:
+    """Process Cloud Optimized GeoTIFF"""
+    if not validate_geotiff_input(input_path):
+        raise ValueError("Invalid input file")
+    # COG processing logic
+    return cog_info
+```
+
 ## 🎯 **BEST PRACTICES SUMMARY**
 
 ### Code Quality
@@ -419,6 +561,8 @@ def process_geospatial_data(
 3. **Use Pydantic models** for data validation and configuration
 4. **Follow PEP 8** with project-specific formatting rules
 5. **Write descriptive docstrings** with examples and error documentation
+6. **PREFER functions over classes** for business logic and processing
+7. **Use classes only for data models, enums, exceptions, and configuration**
 
 ### Geospatial & Scientific Data
 1. **Use real data testing** instead of mocking for geospatial functions

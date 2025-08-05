@@ -8,9 +8,10 @@ prometheus-client
 rasterio==1.4.2
 rio-cogeo
 fire
-pillow
+pillow>=10.0.0
 paramiko
 requests
+docker>=6.1.0
 torch
 torchvision
 tqdm

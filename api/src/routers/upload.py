@@ -4,17 +4,17 @@ import time
 import aiofiles
 from fastapi import UploadFile, Depends, HTTPException, Form, APIRouter
 from fastapi.security import OAuth2PasswordBearer
-from rio_cogeo.cogeo import cog_info
 
 from shared.models import StatusEnum, LicenseEnum, PlatformEnum, DatasetAccessEnum
 from shared.db import verify_token
 from shared.settings import settings
 from shared.status import update_status
-from shared.hash import get_file_identifier
-from shared.ortho import upsert_ortho_entry
 from shared.logging import LogCategory, LogContext, UnifiedLogger, SupabaseHandler
 
 from ..upload.upload import create_dataset_entry
+from ..upload.geotiff_processor import process_geotiff_upload
+from ..upload.raw_images_processor import process_raw_images_upload
+from ..utils.file_utils import UploadType, detect_upload_type
 
 
 router = APIRouter()
@@ -28,7 +28,7 @@ logger.add_supabase_handler(SupabaseHandler())
 
 
 @router.post('/datasets/chunk')
-async def upload_geotiff_chunk(
+async def upload_chunk(
 	file: UploadFile,
 	chunk_index: Annotated[int, Form()],
 	chunks_total: Annotated[int, Form()],
@@ -46,21 +46,31 @@ async def upload_geotiff_chunk(
 	additional_information: Annotated[Optional[str], Form()] = None,
 	data_access: Annotated[DatasetAccessEnum, Form()] = DatasetAccessEnum.public,
 	citation_doi: Annotated[Optional[str], Form()] = None,
+	upload_type: Annotated[Optional[UploadType], Form()] = None,
 ):
-	"""Handle chunked upload of a GeoTIFF file with incremental hash computation"""
+	"""Handle chunked upload of files (GeoTIFF or ZIP) with auto-detection and simplified processing"""
 	user = verify_token(token)
 	if not user:
 		logger.error('Invalid token provided for upload', LogContext(category=LogCategory.AUTH, token=token))
 		raise HTTPException(status_code=401, detail='Invalid token')
 
+	# Auto-detect upload type if not provided (backward compatibility)
+	if upload_type is None:
+		upload_type = detect_upload_type(file.filename)
+
+	# Continue with upload processing for both types
 	# Start upload timer
 	t1 = time.time()
 
 	chunk_index = int(chunk_index)
 	chunks_total = int(chunks_total)
 
-	upload_file_name = f'{upload_id}.tif.tmp'
-	upload_target_path = settings.archive_path / upload_file_name
+	upload_file_name = f'{upload_id}.tmp'
+	# Write raw images directly to raw_images path, GeoTIFF to archive path
+	if upload_type == UploadType.RAW_IMAGES_ZIP:
+		upload_target_path = settings.raw_images_path / upload_file_name
+	else:
+		upload_target_path = settings.archive_path / upload_file_name
 
 	# Log chunk upload start
 	logger.info(
@@ -125,44 +135,27 @@ async def upload_geotiff_chunk(
 				token=token,
 			)
 
-			# Rename file with dataset ID
-			file_name = f'{dataset.id}_ortho.tif'
-			target_path = settings.archive_path / file_name
-			upload_target_path.rename(target_path)
+			# Route to simplified processing based on upload type
+			if upload_type == UploadType.GEOTIFF:
+				# Call simplified GeoTIFF processing
+				dataset = await process_geotiff_upload(dataset, upload_target_path, token)
+				file_name = f'{dataset.id}_ortho.tif'
+				target_path = settings.archive_path / file_name
+			elif upload_type == UploadType.RAW_IMAGES_ZIP:
+				# Call simplified ZIP processing
+				dataset = await process_raw_images_upload(dataset, upload_target_path, token)
+				file_name = f'{dataset.id}.zip'  # Actual ZIP filename
+				target_path = settings.raw_images_path / file_name  # Actual file location, not directory
 
-			# Create ortho entry
-			sha256 = get_file_identifier(target_path)
-			ortho_info = cog_info(target_path)
+			# Note: Status update is now handled within processing functions
+			# No additional status update needed here
 
-			logger.info(
-				f'Creating ortho entry for dataset {dataset.id}',
-				LogContext(
-					category=LogCategory.UPLOAD,
-					user_id=user.id,
-					dataset_id=dataset.id,
-					token=token,
-					extra={'file_name': file_name},
-				),
-			)
-
-			upsert_ortho_entry(
-				dataset_id=dataset.id,
-				file_path=target_path,
-				ortho_upload_runtime=upload_runtime,
-				ortho_info=ortho_info,
-				version=1,
-				sha256=sha256,
-				token=token,
-			)
-
-			# Update status to indicate upload completion
-			update_status(
-				token=token,
-				dataset_id=dataset.id,
-				current_status=StatusEnum.idle,
-				is_upload_done=True,
-				has_error=False,
-			)
+			# Calculate appropriate size based on upload type
+			if upload_type == UploadType.GEOTIFF:
+				file_size = target_path.stat().st_size
+			else:  # RAW_IMAGES_ZIP
+				# Calculate total size of extracted directory contents
+				file_size = sum(f.stat().st_size for f in target_path.rglob('*') if f.is_file())
 
 			logger.info(
 				f'Upload completed successfully for dataset {dataset.id}',
@@ -172,7 +165,7 @@ async def upload_geotiff_chunk(
 					dataset_id=dataset.id,
 					token=token,
 					extra={
-						'file_size': target_path.stat().st_size,
+						'file_size': file_size,
 						'upload_time': upload_runtime,
 						'file_name': file_name,
 					},

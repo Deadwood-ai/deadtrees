@@ -36,6 +36,7 @@ class StatusEnum(str, Enum):
 	ortho_processing = 'ortho_processing'
 	cog_processing = 'cog_processing'
 	metadata_processing = 'metadata_processing'
+	odm_processing = 'odm_processing'
 	thumbnail_processing = 'thumbnail_processing'
 	deadwood_segmentation = 'deadwood_segmentation'
 	forest_cover_segmentation = 'forest_cover_segmentation'
@@ -73,6 +74,7 @@ class TaskTypeEnum(str, Enum):
 	deadwood = 'deadwood'  # Run deadwood segmentation
 	geotiff = 'geotiff'  # Convert to geotiff
 	metadata = 'metadata'  # Extract metadata
+	odm_processing = 'odm_processing'  # ODM raw image processing
 
 
 class TaskPayload(BaseModel):
@@ -111,6 +113,7 @@ class Status(BaseModel):
 	is_deadwood_done: bool = False
 	is_forest_cover_done: bool = False
 	is_metadata_done: bool = False
+	is_odm_done: bool = False
 	is_audited: bool = False
 	has_error: bool = False
 	error_message: Optional[str] = None
@@ -180,6 +183,64 @@ class Dataset(PartialModelMixin, BaseModel):
 		if v is not None and (v < 1 or v > 31):
 			raise ValueError('Day must be between 1 and 31')
 		return v
+
+
+class RawImages(BaseModel):
+	"""
+	Raw drone images metadata and RTK data information.
+
+	This model stores metadata about uploaded raw drone image collections,
+	including comprehensive camera EXIF metadata extracted from the images.
+	"""
+
+	id: Optional[int] = None
+	dataset_id: int
+	raw_image_count: int
+	raw_image_size_mb: int
+	raw_images_path: str  # Contains both images and RTK files
+	camera_metadata: Optional[Dict[str, Any]] = None
+	"""
+	Flexible EXIF metadata extracted from drone images stored as JSONB.
+	
+	Structure varies by camera manufacturer but typically includes:
+	
+	**Camera Information:**
+	- Make, Model, Software, Serial numbers
+	- Examples: DJI: "Make": "DJI", "Model": "L2"
+	          Canon: "Make": "Canon", "Model": "EOS R5"
+	          
+	**Image Settings:**
+	- ISO, aperture, shutter speed, focal length
+	- Examples: "ISOSpeedRatings": 100, "FNumber": 2.8, "FocalLength": 12.29
+	
+	**Acquisition Details:**
+	- Timestamps, GPS coordinates, altitude
+	- Examples: "DateTime": "2025:04:03 12:53:33"
+	          "GPSLatitude": [lat, lat_ref], "GPSLongitude": [lon, lon_ref]
+	
+	**Technical Specifications:**
+	- Image dimensions, color space, compression
+	- Examples: "ExifImageWidth": 5280, "ExifImageHeight": 3956
+	
+	**Note:** Field names and structures vary significantly between manufacturers.
+	This flexible approach accommodates DJI, Canon, Nikon, Sony, Phantom, 
+	and other drone/camera systems without imposing rigid schema constraints.
+	
+	The extraction process automatically handles manufacturer differences,
+	sanitizes problematic characters, and filters out non-serializable data.
+	"""
+	has_rtk_data: bool = False
+	rtk_precision_cm: Optional[float] = None
+	rtk_quality_indicator: Optional[int] = None
+	rtk_file_count: int = 0
+	version: int = 1
+	created_at: Optional[datetime] = None
+
+	@field_serializer('created_at', mode='plain')
+	def datetime_to_isoformat(field: datetime | None) -> str | None:
+		if field is None:
+			return None
+		return field.isoformat()
 
 
 class Cog(BaseModel):

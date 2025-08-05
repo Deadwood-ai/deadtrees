@@ -19,6 +19,7 @@ class LogCategory(Enum):
 	# Processing Pipeline
 	PROCESS = 'process'  # Processing operations
 	ORTHO = 'ortho'  # Orthophoto processing
+	ODM = 'odm'  # ODM raw image processing
 	COG = 'cog'  # COG generation
 	THUMBNAIL = 'thumb'  # Thumbnail creation
 	DEADWOOD = 'deadwood'  # Deadwood segmentation

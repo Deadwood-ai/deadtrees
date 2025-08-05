@@ -102,7 +102,7 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 		shutil.rmtree(settings.processing_path)
 
 
-@test_environment_only
+# @test_environment_only
 @pytest.fixture(autouse=True)
 def cleanup_storage():
 	"""Clean up storage before and after each test"""
@@ -114,6 +114,7 @@ def cleanup_storage():
 		f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.COG_DIR}',
 		f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.THUMBNAIL_DIR}',
 		f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.TRASH_DIR}',
+		f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.RAW_IMAGES_DIR}',
 	]
 
 	# Clean before test
@@ -137,7 +138,7 @@ def cleanup_storage():
 		shutil.rmtree(settings.processing_path, ignore_errors=True)
 
 
-@test_environment_only
+# @test_environment_only
 @pytest.fixture(scope='session', autouse=True)
 def handle_logging_cleanup():
 	"""Ensure logging handlers are properly cleaned up after all tests."""

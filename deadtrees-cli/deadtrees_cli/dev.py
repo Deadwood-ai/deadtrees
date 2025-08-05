@@ -1,7 +1,15 @@
 import subprocess
 import os
+import signal
+import shutil
+from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
+
+from supabase import create_client
+from shared.settings import settings
+from shared.db import login, use_client
+from shared.testing.safety import ensure_test_environment
 
 
 class DevCommands:
@@ -64,6 +72,87 @@ class DevCommands:
 						services_to_rebuild.append(service)
 
 		return services_to_rebuild
+
+	def _setup_test_users(self):
+		"""Create test users for development environment if they don't exist"""
+		ensure_test_environment()
+
+		print('Setting up test users...')
+		supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+
+		users_to_create = [
+			{'email': settings.TEST_USER_EMAIL, 'password': settings.TEST_USER_PASSWORD, 'name': 'Test User'},
+			{'email': settings.TEST_USER_EMAIL2, 'password': settings.TEST_USER_PASSWORD2, 'name': 'Test User 2'},
+			{'email': settings.PROCESSOR_USERNAME, 'password': settings.PROCESSOR_PASSWORD, 'name': 'Processor User'},
+		]
+
+		for user_info in users_to_create:
+			try:
+				# Try to sign up the user
+				response = supabase.auth.sign_up({'email': user_info['email'], 'password': user_info['password']})
+				if response.user:
+					print(f'✓ Created user: {user_info["email"]}')
+				else:
+					print(f'? User creation unclear: {user_info["email"]}')
+			except Exception as e:
+				# If user already exists, try to sign in to verify
+				try:
+					response = supabase.auth.sign_in_with_password(
+						{'email': user_info['email'], 'password': user_info['password']}
+					)
+					if response.user:
+						print(f'✓ User already exists: {user_info["email"]}')
+					else:
+						print(f'⚠ Could not verify user: {user_info["email"]}')
+				except Exception as sign_in_error:
+					print(f'⚠ User setup issue for {user_info["email"]}: {str(sign_in_error)}')
+
+	def _cleanup_development_environment(self):
+		"""Clean up database and directories like test fixtures do"""
+		ensure_test_environment()
+
+		print('Cleaning up development environment...')
+
+		try:
+			# Get processor token for cleanup operations (like test fixtures)
+			processor_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD, use_cached_session=False)
+
+			# Clean database (following cleanup_database fixture pattern)
+			print('Cleaning database tables...')
+			with use_client(processor_token) as client:
+				# Delete datasets (cascades to related tables)
+				client.table(settings.datasets_table).delete().neq('id', 0).execute()
+				# Clean logs except first entry
+				client.table(settings.logs_table).delete().neq('id', 1).execute()
+
+			# Clean directory structure (following data_directory fixture pattern)
+			print('Cleaning directories...')
+			data_dir = Path(settings.BASE_DIR)
+			directories_to_clean = [
+				data_dir / settings.ARCHIVE_DIR,
+				data_dir / settings.COG_DIR,
+				data_dir / settings.THUMBNAIL_DIR,
+				data_dir / settings.LABEL_OBJECTS_DIR,
+				data_dir / settings.TRASH_DIR,
+				data_dir / settings.DOWNLOADS_DIR,
+				data_dir / settings.RAW_IMAGES_DIR,
+				data_dir / settings.PROCESSING_DIR,
+			]
+
+			for directory in directories_to_clean:
+				if directory.exists():
+					try:
+						shutil.rmtree(directory)
+						# Recreate empty directory
+						directory.mkdir(parents=True, exist_ok=True)
+						print(f'✓ Cleaned: {directory}')
+					except Exception as e:
+						print(f'⚠ Could not clean {directory}: {str(e)}')
+
+			print('✓ Development environment cleanup completed')
+
+		except Exception as e:
+			print(f'⚠ Cleanup error: {str(e)}')
 
 	def start(self, force_rebuild: bool = False):
 		"""Start the test environment and rebuild containers if needed"""
@@ -163,27 +252,71 @@ class DevCommands:
 
 	def run_dev(self):
 		"""Start complete test environment with continuous processor queue checking"""
-		# Build and start all services
-		self._run_command(['docker', 'compose', '-f', self.test_compose_file, 'up', '-d', '--build'])
 
-		# Start the processor in continuous mode
-		self._run_command(
-			[
-				'docker',
-				'compose',
-				'-f',
-				self.test_compose_file,
-				'exec',
-				'processor-test',
-				'python',
-				# '-m',
-				# 'debugpy',
-				# '--listen',
-				# '0.0.0.0:5678',
-				'-m',
-				'processor.src.continuous_processor',
-			]
-		)
+		# Signal handler for graceful cleanup
+		def signal_handler(sig, frame):
+			print('\n🛑 Received interrupt signal. Cleaning up...')
+			self._cleanup_development_environment()
+			print('👋 Goodbye!')
+			exit(0)
+
+		# Register signal handlers
+		signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
+		signal.signal(signal.SIGTERM, signal_handler)  # Termination
+
+		try:
+			# Setup test users first
+			self._setup_test_users()
+
+			# Build and start all services
+			print('Starting development environment...')
+			self._run_command(['docker', 'compose', '-f', self.test_compose_file, 'up', '-d', '--build'])
+
+			print('🚀 Development environment started!')
+			print('📧 Available test users:')
+			print(f'   • Test User: {settings.TEST_USER_EMAIL} / {settings.TEST_USER_PASSWORD}')
+			print(f'   • Test User 2: {settings.TEST_USER_EMAIL2} / {settings.TEST_USER_PASSWORD2}')
+			print(f'   • Processor: {settings.PROCESSOR_USERNAME} / {settings.PROCESSOR_PASSWORD}')
+			print('')
+			print('🔄 Starting continuous processor... (Press Ctrl+C to stop and cleanup)')
+
+			# Start the processor in continuous mode
+			self._run_command(
+				[
+					'docker',
+					'compose',
+					'-f',
+					self.test_compose_file,
+					'exec',
+					'processor-test',
+					'python',
+					# '-m',
+					# 'debugpy',
+					# '--listen',
+					# '0.0.0.0:5678',
+					'-m',
+					'processor.src.continuous_processor',
+				]
+			)
+
+		except KeyboardInterrupt:
+			print('\n🛑 Keyboard interrupt received. Cleaning up...')
+			self._cleanup_development_environment()
+			print('👋 Goodbye!')
+		except Exception as e:
+			print(f'\n❌ Error in run_dev: {str(e)}')
+			print('🧹 Running cleanup before exit...')
+			self._cleanup_development_environment()
+			raise
+		finally:
+			# Always run cleanup when exiting
+			print('\n🧹 Final cleanup...')
+			self._cleanup_development_environment()
+
+	def cleanup(self):
+		"""Manually clean up the development environment (database and directories)"""
+		print('🧹 Manual cleanup requested...')
+		self._cleanup_development_environment()
 
 	def debug_data(self, test_path: Optional[str] = None, port: int = 5680):
 		"""

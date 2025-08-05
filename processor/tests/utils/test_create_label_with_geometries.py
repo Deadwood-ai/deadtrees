@@ -67,8 +67,7 @@ def test_dataset_with_label(auth_token, data_directory, test_file, test_processo
 				archive_path.unlink()
 
 
-@pytest.mark.asyncio
-async def test_create_label_with_chunked_geometries(
+def test_create_label_with_chunked_geometries(
 	test_dataset_with_label, test_geometries, test_processor_user, auth_token
 ):
 	"""Test creating a label with geometries that exceed chunk size"""
@@ -120,8 +119,7 @@ async def test_create_label_with_chunked_geometries(
 		# assert combined_geom == test_geometries
 
 
-@pytest.mark.asyncio
-async def test_create_label_with_real_geometries(test_dataset_with_label, test_processor_user, auth_token):
+def test_create_label_with_real_geometries(test_dataset_with_label, test_processor_user, auth_token):
 	"""Test creating a label with geometries from a real GeoPackage file"""
 	# Load geometries from test GeoPackage
 	test_file = Path(__file__).parent.parent.parent.parent / 'assets' / 'test_data' / 'yanspain_crop_124_polygons.gpkg'

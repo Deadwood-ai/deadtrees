@@ -19,6 +19,8 @@ services:
       # Mount your Ed25519 key directly
       - ~/.ssh/processing-to-storage:/tmp/ssh-keys/processing-to-storage:ro
       - ~/.ssh/processing-to-storage.pub:/tmp/ssh-keys/processing-to-storage.pub:ro
+      # Docker socket for ODM container execution
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - PYTHONPATH=/app
       - PYTEST_ADDOPTS=--color=yes
@@ -35,6 +37,10 @@ services:
       - SSH_PRIVATE_KEY_PASSPHRASE=
       - ENV=development
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
+
+      # NVIDIA GPU configuration
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     # command: python -m debugpy --listen 0.0.0.0:5678 -c "print('Call the Processor Debugger individually.')"
