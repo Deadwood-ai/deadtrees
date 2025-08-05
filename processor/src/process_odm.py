@@ -398,7 +398,7 @@ def _extract_exif_from_images(extraction_dir: Path, token: str, dataset_id: int)
 			continue
 
 	logger.warning(
-		f'No valid EXIF data found in any of the sampled image files',
+		'No valid EXIF data found in any of the sampled image files',
 		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 	)
 	return {}
@@ -517,21 +517,40 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		# Copy files to shared volume using the current approach
 		copy_files_to_shared_volume(images_dir, valid_image_files, rtk_files, volume_name, dataset_id, token)
 
-		# Simplified ODM configuration using only fast-orthophoto
+		# Environment-aware ODM configuration
 		project_name = f'dataset_{dataset_id}'
-		odm_command = [
-			'--fast-orthophoto',  # Fast processing mode
-			'--orthophoto-resolution',
-			str(
-				settings.ODM_ORTHOPHOTO_RESOLUTION
-			),  # Configurable resolution in cm/pixel (1 = 1cm/pixel, 50 = 50cm/pixel)
-			'--project-path',
-			'/odm_data',
-			project_name,  # This is the PROJECTDIR argument
-		]
+		odm_command = ['--fast-orthophoto']  # Always use fast processing
 
+		# Set resolution based on environment
+		if settings.DEV_MODE:
+			# Development/Test: Fast processing with lower resolution
+			resolution = '50.0'  # 50cm/pixel for fast testing
+			odm_command.extend(
+				[
+					'--skip-3dmodel',  # Skip 3D model generation (faster for 2D outputs)
+					'--max-concurrency',
+					'2',  # Limit parallel processes for testing
+				]
+			)
+		else:
+			# Production: High quality processing
+			resolution = '1.0'  # 1cm/pixel for production quality
+
+		# Add common parameters
+		odm_command.extend(
+			[
+				'--orthophoto-resolution',
+				resolution,  # Environment-specific resolution (1cm production, 50cm test)
+				'--project-path',
+				'/odm_data',
+				project_name,  # This is the PROJECTDIR argument
+			]
+		)
+
+		# Log with environment-specific details
+		env_mode = 'Speed optimized' if settings.DEV_MODE else 'Production quality'
 		logger.info(
-			f'Starting ODM processing with command: {" ".join(odm_command)} (Resolution: {settings.ODM_ORTHOPHOTO_RESOLUTION}cm/pixel)',
+			f'Starting ODM processing with command: {" ".join(odm_command)} (Resolution: {resolution}cm/pixel, {env_mode})',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 

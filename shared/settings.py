@@ -107,9 +107,6 @@ class Settings(BaseSettings):
 	SSH_PRIVATE_KEY_PATH: str = '/app/ssh_key'
 	SSH_PRIVATE_KEY_PASSPHRASE: str = ''
 
-	# ODM processing settings
-	ODM_ORTHOPHOTO_RESOLUTION: float = 1.0  # cm per pixel (1.0 = 1cm/pixel high quality, 20 = 20cm/pixel fast)
-
 	# monitoring
 	LOGFIRE_TOKEN: str = None
 	LOGFIRE_PYDANTIC_PLUGIN_RECORD: str = 'all'
