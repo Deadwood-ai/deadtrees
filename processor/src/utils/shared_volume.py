@@ -1,0 +1,196 @@
+"""
+Shared volume utilities for Docker container file sharing.
+
+This module provides functions for copying files to and from Docker named volumes
+using temporary Alpine containers. This approach eliminates host path dependencies
+and works identically in test and production environments.
+"""
+
+import docker
+import tarfile
+import io
+from pathlib import Path
+from shared.logger import logger
+from shared.logging import LogContext, LogCategory
+
+
+def copy_files_to_shared_volume(
+	images_dir: Path, valid_image_files: list, rtk_files: list, volume_name: str, dataset_id: int, token: str
+):
+	"""
+	Copy input files to the shared volume using Docker API and temporary container.
+	This creates the ODM project structure that ODM expects without requiring bind mounts.
+
+	Args:
+		images_dir: Directory containing the source files (unused in new implementation)
+		valid_image_files: List of validated image files to copy
+		rtk_files: List of RTK files to copy
+		volume_name: Name of the Docker volume to copy files to
+		dataset_id: Dataset ID for logging and project naming
+		token: Authentication token for logging
+	"""
+	client = docker.from_env()
+	project_name = f'dataset_{dataset_id}'
+
+	logger.info(
+		f'Copying {len(valid_image_files)} images and {len(rtk_files)} RTK files to shared volume using Docker API',
+		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+	)
+
+	# Create temporary container with named volume mounted
+	temp_container = None
+	try:
+		temp_container = client.containers.create(
+			image='alpine',
+			volumes={volume_name: {'bind': '/odm_shared', 'mode': 'rw'}},
+			command=['sleep', '60'],  # Keep alive for file operations
+			user='root',
+		)
+		temp_container.start()
+
+		logger.info(
+			f'Created temporary container {temp_container.short_id} for file transfer',
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+		)
+
+		# Create ODM project structure
+		exec_result = temp_container.exec_run(f'mkdir -p /odm_shared/{project_name}/images')
+		if exec_result.exit_code != 0:
+			raise Exception(f'Failed to create directory structure: {exec_result.output.decode()}')
+
+		# Helper function to copy a single file using Docker API
+		def copy_file_to_container(file_path: Path, container_dest_path: str):
+			"""Copy a file to container using put_archive API"""
+			with open(file_path, 'rb') as f:
+				file_data = f.read()
+
+			# Create tar archive in memory
+			tar_buffer = io.BytesIO()
+			with tarfile.open(mode='w', fileobj=tar_buffer) as tar:
+				tarinfo = tarfile.TarInfo(name=file_path.name)
+				tarinfo.size = len(file_data)
+				tar.addfile(tarinfo, io.BytesIO(file_data))
+
+			tar_buffer.seek(0)
+			temp_container.put_archive(container_dest_path, tar_buffer.getvalue())
+
+		# Copy image files to images directory
+		for img_file in valid_image_files:
+			copy_file_to_container(img_file, f'/odm_shared/{project_name}/images/')
+			logger.debug(
+				f'Copied image file: {img_file.name}',
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+			)
+
+		# Copy RTK files to project root
+		for rtk_file in rtk_files:
+			copy_file_to_container(rtk_file, f'/odm_shared/{project_name}/')
+			logger.debug(
+				f'Copied RTK file: {rtk_file.name}',
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+			)
+
+		logger.info(
+			f'Successfully copied files to shared volume {volume_name}',
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+		)
+
+	except Exception as e:
+		logger.error(
+			f'Failed to copy files to shared volume: {str(e)}',
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+		)
+		raise
+	finally:
+		if temp_container:
+			try:
+				temp_container.remove(force=True)
+				logger.debug(
+					f'Cleaned up temporary container {temp_container.short_id}',
+					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+				)
+			except Exception as cleanup_error:
+				logger.warning(
+					f'Failed to cleanup temporary container: {cleanup_error}',
+					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+				)
+
+
+def copy_results_from_shared_volume(volume_name: str, output_dir: Path, project_name: str, dataset_id: int, token: str):
+	"""
+	Copy ODM results from the shared volume to the output directory using Docker API.
+
+	Args:
+		volume_name: Name of the Docker volume to copy results from
+		output_dir: Local directory to copy results to
+		project_name: ODM project name (usually dataset_{dataset_id})
+		dataset_id: Dataset ID for logging
+		token: Authentication token for logging
+	"""
+	client = docker.from_env()
+
+	logger.info(
+		f'Copying ODM results from shared volume {volume_name} to {output_dir} using Docker API',
+		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+	)
+
+	# Ensure output directory exists
+	output_dir.mkdir(parents=True, exist_ok=True)
+
+	# Create temporary container with shared volume mounted
+	temp_container = None
+	try:
+		temp_container = client.containers.create(
+			image='alpine',
+			volumes={volume_name: {'bind': '/odm_shared', 'mode': 'ro'}},
+			command=['sleep', '60'],  # Keep alive for file operations
+			user='root',
+		)
+		temp_container.start()
+
+		logger.info(
+			f'Created temporary container {temp_container.short_id} for result extraction',
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+		)
+
+		# Check if project directory exists in volume
+		exec_result = temp_container.exec_run(f'test -d /odm_shared/{project_name}')
+		if exec_result.exit_code != 0:
+			raise Exception(f'Project directory /odm_shared/{project_name} not found in volume')
+
+		logger.info(
+			f'Project directory exists in volume, copying files',
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+		)
+
+		# Get tar archive of entire project directory from container
+		archive_stream, _ = temp_container.get_archive(f'/odm_shared/{project_name}')
+
+		# Extract archive to output directory
+		with tarfile.open(mode='r|', fileobj=io.BytesIO(b''.join(archive_stream))) as tar:
+			tar.extractall(output_dir)
+
+		logger.info(
+			'Successfully copied ODM results from shared volume',
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+		)
+
+	except Exception as e:
+		logger.error(
+			f'Failed to copy results from shared volume: {str(e)}',
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+		)
+		raise
+	finally:
+		if temp_container:
+			try:
+				temp_container.remove(force=True)
+				logger.debug(
+					f'Cleaned up temporary extraction container {temp_container.short_id}',
+					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+				)
+			except Exception as cleanup_error:
+				logger.warning(
+					f'Failed to cleanup temporary extraction container: {cleanup_error}',
+					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+				)

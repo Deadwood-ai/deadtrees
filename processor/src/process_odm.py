@@ -1,10 +1,7 @@
-import os
 import zipfile
-import shutil
 import docker
-import docker.types
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 
 from shared.models import QueueTask
 from shared.logger import logger
@@ -13,6 +10,7 @@ from shared.status import update_status
 from shared.logging import LogContext, LogCategory
 from shared.db import use_client
 from processor.src.utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
+from processor.src.utils.shared_volume import copy_files_to_shared_volume, copy_results_from_shared_volume
 from shared.exif_utils import extract_comprehensive_exif
 
 # RTK file extensions as specified in requirements
@@ -437,27 +435,22 @@ def _update_camera_metadata(dataset_id: int, exif_metadata: dict, token: str):
 
 def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_id: int):
 	"""
-	Execute ODM Docker container using Docker Python API with correct command structure.
+	Execute ODM Docker container using shared named volumes for file sharing.
+	This approach eliminates host path complexity and works identically in test and production.
 
 	Args:
 	    images_dir: Directory containing extracted drone images
-	    output_dir: Directory for ODM output (this will contain the project directory)
+	    output_dir: Directory for ODM output results
 	    token: Authentication token for logging
 	    dataset_id: Dataset ID for logging
 	"""
 	client = docker.from_env()
+	volume_name = f'odm_processing_{dataset_id}'
 
-	# Create project directory structure that ODM expects
-	project_name = f'dataset_{dataset_id}'
-	project_dir = output_dir / project_name
-	project_images_dir = project_dir / 'images'
-
-	# Create the project directory structure
-	project_dir.mkdir(exist_ok=True)
-	project_images_dir.mkdir(exist_ok=True)
-
-	# Copy all relevant files to the expected ODM project structure
-	# ODM expects images in the 'images' subdirectory, but can also use RTK/GPS files
+	logger.info(
+		f'Starting ODM processing with shared volume approach for dataset {dataset_id}',
+		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+	)
 
 	# Find all files recursively, excluding __MACOSX directories
 	all_files = []
@@ -507,85 +500,52 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 
-	# Copy valid images to the images directory
-	for image_file in valid_image_files:
-		shutil.copy2(image_file, project_images_dir)
-
-	# Copy RTK files to the project root (ODM expects them at project level)
-	for rtk_file in rtk_files:
-		shutil.copy2(rtk_file, project_dir)
-		logger.info(
-			f'Copied RTK file: {rtk_file.name}',
-			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
-		)
-
 	logger.info(
-		f'Copied {len(valid_image_files)} valid images to ODM project structure (filtered out {len(image_files) - len(valid_image_files)} potentially corrupt images)',
-		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
-	)
-
-	# Simplified ODM configuration using only fast-orthophoto
-	odm_command = [
-		'--fast-orthophoto',  # Fast processing mode
-		'--project-path',
-		'/odm_data',
-		project_name,  # This is the PROJECTDIR argument
-	]
-
-	logger.info(
-		f'Starting ODM processing with command: {" ".join(odm_command)}',
+		f'Preparing to copy {len(valid_image_files)} valid images to shared volume (filtered out {len(image_files) - len(valid_image_files)} potentially corrupt images)',
 		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 	)
 
 	try:
-		# Run ODM container using Docker Python API with detailed logging
+		# Create shared volume for this processing session
+		volume = client.volumes.create(name=volume_name)
+
 		logger.info(
-			f'Creating ODM container with volumes: {str(output_dir)}:/odm_data',
+			f'Created shared volume {volume_name} for ODM processing',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
-		# Debug: Check what we're mounting
-		logger.info(
-			f'Host directory structure: {output_dir} -> {list(output_dir.iterdir()) if output_dir.exists() else "does not exist"}',
-			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
-		)
-		logger.info(
-			f'Project directory: {project_dir} -> {list(project_dir.iterdir()) if project_dir.exists() else "does not exist"}',
-			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
-		)
+		# Copy files to shared volume using the current approach
+		copy_files_to_shared_volume(images_dir, valid_image_files, rtk_files, volume_name, dataset_id, token)
 
-		# Convert container path to host path for Docker-in-Docker
-		container_path = str(output_dir)
-		if container_path.startswith('/app/processor/'):
-			# In test environment: /app/processor is mounted from host ./processor
-			# The docker-compose is run from the project root, so we need that path
-			# For now, use a known project structure since we're in development
-			relative_path = container_path.replace('/app/processor/', 'processor/')
-			# In test environment, assume project root is /home/jj1049/dev/deadtrees
-			# This could be made configurable via environment variable later
-			host_path = f'/home/jj1049/dev/deadtrees/{relative_path}'
-		elif container_path.startswith('/data/'):
-			# In production: /data is mounted from host
-			host_path = container_path
-		else:
-			# Fallback to container path
-			host_path = container_path
+		# Simplified ODM configuration using only fast-orthophoto
+		project_name = f'dataset_{dataset_id}'
+		odm_command = [
+			'--fast-orthophoto',  # Fast processing mode
+			'--project-path',
+			'/odm_data',
+			project_name,  # This is the PROJECTDIR argument
+		]
 
 		logger.info(
-			f'Mounting host path {host_path} as /odm_data in ODM container (container path: {container_path})',
+			f'Starting ODM processing with command: {" ".join(odm_command)}',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
-		# Mount the parent directory so ODM can find the project directory
-		# Use host path since /data is mounted from host to processor container
+		# Create ODM container with shared volume (environment-agnostic approach)
 		container = None
 		container_created = False
 
 		try:
+			logger.info(
+				f'Creating ODM container with shared volume {volume_name}',
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+			)
+
 			container = client.containers.create(
 				image='opendronemap/odm',
 				command=odm_command,
-				volumes={host_path: {'bind': '/odm_data', 'mode': 'rw'}},
+				volumes={volume_name: {'bind': '/odm_data', 'mode': 'rw'}},
+				# user='1000:1000',  # Removed - running as root for simplicity
 				auto_remove=False,  # We'll manage removal manually to ensure cleanup
 			)
 			container_created = True
@@ -593,7 +553,6 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			# Start the container
 			container.start()
 
-			# Debug: Check what ODM sees in the container (simplified - no decode issues)
 			logger.info(
 				'ODM container started, processing images...',
 				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
@@ -620,6 +579,9 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 						f'ODM stdout (tail): {stdout_tail}',
 						LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 					)
+
+				# Copy results from shared volume to output directory
+				copy_results_from_shared_volume(volume_name, output_dir, project_name, dataset_id, token)
 			else:
 				# ODM failed - log detailed error information
 				logger.error(
@@ -678,6 +640,19 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 		raise
+	finally:
+		# Always clean up the shared volume
+		try:
+			volume.remove()
+			logger.info(
+				f'Shared volume {volume_name} removed successfully',
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+			)
+		except Exception as volume_cleanup_error:
+			logger.error(
+				f'Failed to remove shared volume {volume_name}: {str(volume_cleanup_error)}',
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+			)
 
 
 def _find_orthomosaic(output_dir: Path, project_name: str) -> Optional[Path]:
@@ -693,19 +668,42 @@ def _find_orthomosaic(output_dir: Path, project_name: str) -> Optional[Path]:
 	"""
 	# ODM outputs orthomosaic in PROJECT/odm_orthophoto/odm_orthophoto.tif
 	project_dir = output_dir / project_name
+
+	# Debug: Log what's actually in the output directory
+	logger.info(f'Looking for orthomosaic in: {project_dir}')
+	if project_dir.exists():
+		all_files = list(project_dir.rglob('*'))
+		logger.info(f'Files in project directory: {[str(f.relative_to(project_dir)) for f in all_files[:20]]}')
+
+		# Look specifically in odm_orthophoto directory
+		orthophoto_dir = project_dir / 'odm_orthophoto'
+		if orthophoto_dir.exists():
+			orthophoto_files = list(orthophoto_dir.iterdir())
+			logger.info(f'Files in odm_orthophoto directory: {[f.name for f in orthophoto_files]}')
+		else:
+			logger.warning(f'odm_orthophoto directory does not exist in {project_dir}')
+	else:
+		logger.error(f'Project directory does not exist: {project_dir}')
+		return None
+
 	orthophoto_patterns = [
 		project_dir / 'odm_orthophoto' / 'odm_orthophoto.tif',
+		project_dir / 'odm_orthophoto' / 'odm_orthophoto.original.tif',  # ODM often generates .original.tif
 		project_dir / 'odm_orthophoto' / 'odm_orthophoto.png',
 		# Fallback: look for any .tif file in project directory
 	]
 
 	for pattern in orthophoto_patterns:
+		logger.debug(f'Checking pattern: {pattern}')
 		if pattern.exists():
+			logger.info(f'Found orthomosaic at: {pattern}')
 			return pattern
 
 	# Fallback: search for any .tif files in the project directory
 	for tif_file in project_dir.rglob('*.tif'):
 		if 'orthophoto' in tif_file.name.lower():
+			logger.info(f'Found orthomosaic via fallback search: {tif_file}')
 			return tif_file
 
+	logger.error(f'No orthomosaic found in {project_dir}')
 	return None

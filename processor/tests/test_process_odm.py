@@ -14,11 +14,11 @@ from processor.src.utils.ssh import push_file_to_storage_server, check_file_exis
 @pytest.fixture
 def test_zip_file():
 	"""Get path to test ZIP file for ODM processing"""
-	# Use smaller, higher-quality dataset for more reliable testing
+	# Use minimal ODM-compatible dataset (5 images + RTK) for reliable testing
 	possible_paths = [
-		Path(settings.base_path) / 'assets' / 'test_data' / 'raw_drone_images' / 'test_no_rtk_3_images.zip',
-		Path('/app/assets/test_data/raw_drone_images/test_no_rtk_3_images.zip'),
-		Path('./assets/test_data/raw_drone_images/test_no_rtk_3_images.zip'),
+		Path(settings.base_path) / 'assets' / 'test_data' / 'raw_drone_images' / 'test_minimal_5_images.zip',
+		Path('/app/assets/test_data/raw_drone_images/test_minimal_5_images.zip'),
+		Path('./assets/test_data/raw_drone_images/test_minimal_5_images.zip'),
 	]
 
 	for zip_path in possible_paths:
@@ -40,7 +40,7 @@ def odm_test_dataset(auth_token, test_zip_file, test_processor_user):
 		# Create test dataset in database (ZIP upload)
 		with use_client(auth_token) as client:
 			dataset_data = {
-				'file_name': 'test_no_rtk_3_images.zip',
+				'file_name': 'test_minimal_5_images.zip',
 				'license': 'CC BY',
 				'platform': 'drone',
 				'authors': ['Test Author'],
@@ -179,10 +179,10 @@ def test_odm_container_execution_with_real_images(odm_task, auth_token):
 		assert isinstance(has_rtk_data, bool), 'has_rtk_data should be boolean'
 		assert isinstance(rtk_file_count, int), 'rtk_file_count should be integer'
 
-		# For this test dataset (test_no_rtk_3_images.zip), we expect no RTK data
-		assert has_rtk_data is False, 'test_no_rtk_3_images.zip should have no RTK data'
-		assert rtk_file_count == 0, 'test_no_rtk_3_images.zip should have no RTK files'
-		assert raw_image_count == 3, 'test_no_rtk_3_images.zip should have exactly 3 images'
+		# For this test dataset (test_minimal_5_images.zip), we expect RTK data and 5 images
+		assert has_rtk_data is True, 'test_minimal_5_images.zip should have RTK data'
+		assert rtk_file_count > 0, 'test_minimal_5_images.zip should have RTK files'
+		assert raw_image_count == 5, 'test_minimal_5_images.zip should have exactly 5 images'
 
 
 def test_odm_orthomosaic_generation_and_storage(odm_task, auth_token):

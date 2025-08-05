@@ -23,9 +23,9 @@ from processor.src.utils.ssh import check_file_exists_on_storage
 def integration_test_zip():
 	"""Get path to test ZIP file for integration testing"""
 	possible_paths = [
-		Path(settings.base_path) / 'assets' / 'test_data' / 'raw_drone_images' / 'test_no_rtk_3_images.zip',
-		Path('/app/assets/test_data/raw_drone_images/test_no_rtk_3_images.zip'),
-		Path('./assets/test_data/raw_drone_images/test_no_rtk_3_images.zip'),
+		Path(settings.base_path) / 'assets' / 'test_data' / 'raw_drone_images' / 'test_minimal_5_images.zip',
+		Path('/app/assets/test_data/raw_drone_images/test_minimal_5_images.zip'),
+		Path('./assets/test_data/raw_drone_images/test_minimal_5_images.zip'),
 	]
 
 	for zip_path in possible_paths:
@@ -46,7 +46,7 @@ def integration_dataset(auth_token, integration_test_zip, test_processor_user):
 		# Create test dataset in database (ZIP upload simulation)
 		with use_client(auth_token) as client:
 			dataset_data = {
-				'file_name': 'test_no_rtk_3_images.zip',
+				'file_name': 'test_minimal_5_images.zip',
 				'license': 'CC BY',
 				'platform': 'drone',
 				'authors': ['Integration Test Author'],
