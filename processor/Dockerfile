@@ -37,6 +37,9 @@ RUN pip3 install --no-cache-dir -r /app/processor/requirements.txt
 COPY ./processor /app/processor
 COPY ./shared /app/shared
 
+# Copy pytest configuration for custom marks
+COPY pytest.ini /app/pytest.ini
+
 # Copy entrypoint script and make it executable
 COPY processor/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
