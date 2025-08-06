@@ -37,8 +37,8 @@ RUN chmod 755 /home/deadtrees
 USER deadtrees
 WORKDIR /home/deadtrees
 
-# Copy the TCD source code
-COPY --chown=deadtrees:deadtrees tcd_repo/ ./tcd/
+# Clone the TCD repository (as deadtrees user)
+RUN git clone https://github.com/Restor-Foundation/tcd.git ./tcd
 
 WORKDIR /home/deadtrees/tcd
 ENV PATH=/home/deadtrees/.local/bin:$PATH
