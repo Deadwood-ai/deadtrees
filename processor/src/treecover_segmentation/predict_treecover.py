@@ -23,6 +23,7 @@ TCD_MODEL = 'restor/tcd-segformer-mit-b5'
 TCD_TARGET_RESOLUTION = 0.1  # 10cm resolution
 TCD_TARGET_CRS = 'EPSG:3395'  # Mercator projection for processing
 TCD_OUTPUT_CRS = 'EPSG:4326'  # WGS84 for database storage
+TCD_CONTAINER_IMAGE = 'deadtrees-tcd:latest'  # Our local TCD container
 
 
 def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
@@ -98,8 +99,10 @@ def _copy_ortho_to_tcd_volume(ortho_path: str, volume_name: str, dataset_id: int
 		)
 		temp_container.start()
 
-		# Create TCD directory structure
-		exec_result = temp_container.exec_run(f'mkdir -p /tcd_data/{project_name}/input')
+		# Create TCD directory structure (running as root for simplicity like ODM)
+		exec_result = temp_container.exec_run(
+			f'mkdir -p /tcd_data/{project_name}/input /tcd_data/{project_name}/output'
+		)
 		if exec_result.exit_code != 0:
 			raise Exception(f'Failed to create TCD directory structure: {exec_result.output.decode()}')
 
@@ -164,21 +167,23 @@ def _run_tcd_container(volume_name: str, dataset_id: int, token: str) -> str:
 	)
 
 	try:
-		                        # Pull TCD container image
-        logger.info(
-            'Using locally built TCD container image',
-            LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
-        )
+		# Pull TCD container image
+		logger.info(
+			'Pulling TCD container image if not available',
+			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+		)
+		# Use local container - no need to pull
+		# client.images.pull('ghcr.io/restor-foundation/tcd:main')
 
-        # Create and run TCD container
-        container = client.containers.run(
-            image='deadtrees/tcd-processor:latest',
-            command=['tcd-predict', 'semantic', input_path, output_path, f'--model={TCD_MODEL}'],
-            volumes={volume_name: {'bind': '/tcd_data', 'mode': 'rw'}},
-            remove=True,  # Auto-remove container when done
-            detach=False,  # Wait for completion
-            user='root',
-        )
+		# Create and run TCD container
+		container = client.containers.run(
+			image=TCD_CONTAINER_IMAGE,
+			command=['tcd-predict', 'semantic', input_path, output_path, f'--model={TCD_MODEL}'],
+			volumes={volume_name: {'bind': '/tcd_data', 'mode': 'rw'}},
+			remove=True,  # Auto-remove container when done
+			detach=False,  # Wait for completion
+			user='root',  # Run as root for simplicity like ODM
+		)
 
 		logger.info(
 			f'TCD container execution completed successfully',
@@ -231,17 +236,53 @@ def _copy_tcd_results_from_volume(volume_name: str, local_output_dir: Path, data
 		)
 		temp_container.start()
 
-		# Check if confidence map exists in volume
-		exec_result = temp_container.exec_run(f'test -f /tcd_data/{project_name}/output/confidence_map.tif')
-		if exec_result.exit_code != 0:
-			raise Exception(f'Confidence map not found in TCD output: /tcd_data/{project_name}/output/')
+		# List all files in the output directory to see what TCD actually generates
+		exec_result = temp_container.exec_run(f'ls -la /tcd_data/{project_name}/output/')
+		logger.info(
+			f'TCD output directory contents: {exec_result.output.decode()}',
+			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+		)
 
-		# Get confidence map file from container
-		archive_stream, _ = temp_container.get_archive(f'/tcd_data/{project_name}/output/confidence_map.tif')
+		# Look for any segmentation output files (TCD generates multiple tile files)
+		# Use shell command to handle pipes correctly in Alpine container
+		exec_result = temp_container.exec_run(
+			['sh', '-c', f'ls /tcd_data/{project_name}/output/ | grep segmentation.tif | head -1']
+		)
+		logger.info(
+			f'Segmentation file search result: "{exec_result.output.decode()}" (exit_code: {exec_result.exit_code})',
+			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+		)
 
-		# Extract confidence map to local directory
+		if exec_result.exit_code != 0 or not exec_result.output.decode().strip():
+			# Fallback: try to get any .tif file using shell
+			exec_result = temp_container.exec_run(['sh', '-c', f'ls /tcd_data/{project_name}/output/*.tif | head -1'])
+			if exec_result.exit_code != 0 or not exec_result.output.decode().strip():
+				raise Exception(f'No segmentation files found in TCD output: /tcd_data/{project_name}/output/')
+
+		# Get the first segmentation file found (need to construct full path)
+		filename = exec_result.output.decode().strip()
+		if filename.startswith('/'):
+			# Already has full path
+			first_segmentation_file = filename
+		else:
+			# Need to construct full path
+			first_segmentation_file = f'/tcd_data/{project_name}/output/{filename}'
+		logger.info(
+			f'Using segmentation file: {first_segmentation_file}',
+			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+		)
+
+		# Get segmentation file from container
+		archive_stream, _ = temp_container.get_archive(first_segmentation_file)
+
+		# Extract segmentation file to local directory and rename to confidence_map.tif for compatibility
 		with tarfile.open(mode='r|', fileobj=io.BytesIO(b''.join(archive_stream))) as tar:
 			tar.extractall(local_output_dir)
+
+		# Rename the extracted file to confidence_map.tif for API compatibility
+		extracted_files = list(local_output_dir.glob('*segmentation.tif'))
+		if extracted_files:
+			extracted_files[0].rename(confidence_map_path)
 
 		logger.info(
 			f'Successfully copied confidence map to {confidence_map_path}',
@@ -431,7 +472,7 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 				'threshold': TCD_THRESHOLD,
 				'resolution_m': TCD_TARGET_RESOLUTION,
 				'processing_crs': TCD_TARGET_CRS,
-				'container_version': 'ghcr.io/restor-foundation/tcd:main',
+				'container_version': TCD_CONTAINER_IMAGE,
 			},
 		)
 
