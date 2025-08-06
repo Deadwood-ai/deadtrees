@@ -3,6 +3,7 @@ services:
     build:
       context: .
       dockerfile: processor/Dockerfile
+      # Only include essential files for build (excludes assets via .dockerignore)
     # healthcheck:
     #   test: curl --fail http://127.0.0.1:5678/ || exit 1
     #   interval: 15s

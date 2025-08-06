@@ -11,6 +11,7 @@ from shared.logger import logger
 from .process_thumbnail import process_thumbnail
 from .process_cog import process_cog
 from .process_deadwood_segmentation import process_deadwood_segmentation
+from .process_treecover_segmentation import process_treecover_segmentation
 from .process_metadata import process_metadata
 from .exceptions import ProcessorError, AuthenticationError, DatasetError, ProcessingError, StorageError
 from shared.logging import LogContext, LogCategory, UnifiedLogger, SupabaseHandler
@@ -250,6 +251,27 @@ def process_task(task: QueueTask, token: str):
 				)
 				raise ProcessingError(
 					str(e), task_type='deadwood_segmentation', task_id=task.id, dataset_id=task.dataset_id
+				)
+
+		# Process treecover_segmentation if requested (runs after deadwood)
+		if TaskTypeEnum.treecover in task.task_types:
+			try:
+				logger.info(
+					'processing tree cover segmentation',
+					LogContext(
+						category=LogCategory.TREECOVER, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+					),
+				)
+				process_treecover_segmentation(task, token, settings.processing_path)
+			except Exception as e:
+				logger.error(
+					f'Tree cover segmentation failed: {str(e)}',
+					LogContext(
+						category=LogCategory.TREECOVER, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+					),
+				)
+				raise ProcessingError(
+					str(e), task_type='treecover_segmentation', task_id=task.id, dataset_id=task.dataset_id
 				)
 
 		# Only delete task if all processing completed successfully

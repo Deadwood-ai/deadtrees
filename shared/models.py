@@ -72,6 +72,7 @@ class TaskTypeEnum(str, Enum):
 	cog = 'cog'  # Generate cloud optimized geotiff
 	thumbnail = 'thumbnail'  # Generate thumbnail image
 	deadwood = 'deadwood'  # Run deadwood segmentation
+	treecover = 'treecover'  # Run tree cover segmentation
 	geotiff = 'geotiff'  # Convert to geotiff
 	metadata = 'metadata'  # Extract metadata
 	odm_processing = 'odm_processing'  # ODM raw image processing

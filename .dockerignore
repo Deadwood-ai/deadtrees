@@ -1,0 +1,44 @@
+# Exclude large asset directories from Docker build context
+assets/test_data/
+assets/models/
+assets/gadm/
+assets/pheno/
+assets/biom/
+
+# Exclude development files
+.git/
+.gitignore
+venv/
+.env*
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Exclude documentation
+README.md
+*.md
+docs/
+
+# Exclude IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Exclude temporary files
+tmp/
+temp/
+.DS_Store
+Thumbs.db
+
+# Exclude test outputs
+tcd_test_output/
+*.log
+
+# Keep only what we actually need for the container build:
+# - processor/
+# - shared/
+# - api/ (for api-test container)
+# - nginx/ (for nginx container)
