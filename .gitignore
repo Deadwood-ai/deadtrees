@@ -5,6 +5,8 @@ processor/src/deadwood_segmentation/models/*
 
 /scratchpad/*
 
+scripts/geonadir/*
+
 #logs for scripts
 scripts/logs/*
 scripts/area_m2_update.sh
