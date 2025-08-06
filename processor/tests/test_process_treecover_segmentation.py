@@ -166,7 +166,7 @@ def test_treecover_preprocessing_workflow():
 	# Create a minimal test GeoTIFF
 	with tempfile.NamedTemporaryFile(suffix='.tif', delete=False) as temp_input:
 		# Create a simple test raster in WGS84
-		width, height = 100, 100
+		width, height = 50, 50  # Smaller size to avoid disk space issues
 		data = np.random.randint(0, 255, (3, height, width), dtype=np.uint8)
 
 		transform = rasterio.transform.from_bounds(-1, -1, 1, 1, width, height)
@@ -204,21 +204,22 @@ def test_tcd_container_availability():
 
 	try:
 		client = docker.from_env()
-		# Try to pull the TCD container
-		image = client.images.pull('ghcr.io/restor-foundation/tcd:main')
+		# Check if our local TCD container image exists
+		image = client.images.get('deadtrees-tcd:latest')
 		assert image is not None
 
 		# Test that we can create a container (but don't run it)
 		container = client.containers.create(
-			image='ghcr.io/restor-foundation/tcd:main',
+			image='deadtrees-tcd:latest',
 			command=['--help'],  # Just test help command
-			remove=True,
 		)
 		assert container is not None
 
 		# Clean up the test container
 		container.remove()
 
+	except docker.errors.ImageNotFound:
+		pytest.skip('Local TCD container deadtrees-tcd:latest not found - run docker build first')
 	except Exception as e:
 		pytest.skip(f'Docker or TCD container not available: {str(e)}')
 
@@ -228,9 +229,9 @@ def test_confidence_map_thresholding():
 	from processor.src.treecover_segmentation.predict_treecover import TCD_THRESHOLD
 	import numpy as np
 
-	# Create test confidence map with values around threshold (keeping within uint8 range 0-255)
+	# Create test confidence map with values around threshold
 	confidence_map = np.array(
-		[[100, 150, 200, 250], [50, 199, 201, 255], [0, 180, 220, 230], [75, 195, 205, 240]], dtype=np.uint8
+		[[100, 150, 200, 250], [50, 199, 201, 255], [0, 180, 220, 255], [75, 195, 205, 255]], dtype=np.uint8
 	)
 
 	# Apply thresholding (same logic as in predict_treecover)
