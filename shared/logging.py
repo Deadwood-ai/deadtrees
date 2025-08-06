@@ -117,14 +117,37 @@ class UnifiedLogger(logging.Logger):
 		# Add small delay before any logging to ensure DB operations complete
 		self.log(level, msg, *args, **kwargs)
 
-	def info(self, msg: str, context: Optional[LogContext] = None, *args: Any, **kwargs: Any) -> None:
+	def info(self, msg: str, *args: Any, context: Optional[LogContext] = None, **kwargs: Any) -> None:
+		# Handle both standard logging: info(msg, arg1, arg2) and custom: info(msg, context=LogContext)
+		if context is None and args and len(args) > 0 and isinstance(args[0], LogContext):
+			# Called as info(msg, LogContext_instance, ...)
+			context = args[0]
+			args = args[1:]
 		self._log_with_context(logging.INFO, msg, context, *args, **kwargs)
 
-	def error(self, msg: str, context: Optional[LogContext] = None, *args: Any, **kwargs: Any) -> None:
+	def error(self, msg: str, *args: Any, context: Optional[LogContext] = None, **kwargs: Any) -> None:
+		# Handle both standard logging: error(msg, arg1, arg2) and custom: error(msg, context=LogContext)
+		if context is None and args and len(args) > 0 and isinstance(args[0], LogContext):
+			# Called as error(msg, LogContext_instance, ...)
+			context = args[0]
+			args = args[1:]
 		self._log_with_context(logging.ERROR, msg, context, *args, **kwargs)
 
-	def warning(self, msg: str, context: Optional[LogContext] = None, *args: Any, **kwargs: Any) -> None:
+	def warning(self, msg: str, *args: Any, context: Optional[LogContext] = None, **kwargs: Any) -> None:
+		# Handle both standard logging: warning(msg, arg1, arg2) and custom: warning(msg, context=LogContext)
+		if context is None and args and len(args) > 0 and isinstance(args[0], LogContext):
+			# Called as warning(msg, LogContext_instance, ...)
+			context = args[0]
+			args = args[1:]
 		self._log_with_context(logging.WARNING, msg, context, *args, **kwargs)
+
+	def debug(self, msg: str, *args: Any, context: Optional[LogContext] = None, **kwargs: Any) -> None:
+		# Handle both standard logging: debug(msg, arg1, arg2) and custom: debug(msg, context=LogContext)
+		if context is None and args and len(args) > 0 and isinstance(args[0], LogContext):
+			# Called as debug(msg, LogContext_instance, ...)
+			context = args[0]
+			args = args[1:]
+		self._log_with_context(logging.DEBUG, msg, context, *args, **kwargs)
 
 	def add_supabase_handler(self, handler: SupabaseHandler) -> None:
 		self.addHandler(handler)
