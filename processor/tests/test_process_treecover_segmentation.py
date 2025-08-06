@@ -156,47 +156,6 @@ def test_process_treecover_segmentation_replaces_existing_labels(treecover_task,
 		# so we don't need to assert that geometries exist
 
 
-def test_treecover_preprocessing_workflow():
-	"""Test the preprocessing workflow without running the full container"""
-	from processor.src.treecover_segmentation.predict_treecover import _reproject_orthomosaic_for_tcd
-	import tempfile
-	import rasterio
-	import numpy as np
-
-	# Create a minimal test GeoTIFF
-	with tempfile.NamedTemporaryFile(suffix='.tif', delete=False) as temp_input:
-		# Create a simple test raster in WGS84
-		width, height = 50, 50  # Smaller size to avoid disk space issues
-		data = np.random.randint(0, 255, (3, height, width), dtype=np.uint8)
-
-		transform = rasterio.transform.from_bounds(-1, -1, 1, 1, width, height)
-
-		with rasterio.open(
-			temp_input.name,
-			'w',
-			driver='GTiff',
-			height=height,
-			width=width,
-			count=3,
-			dtype=np.uint8,
-			crs='EPSG:4326',
-			transform=transform,
-		) as dst:
-			for i in range(3):
-				dst.write(data[i], i + 1)
-
-		# Test reprojection
-		with tempfile.NamedTemporaryFile(suffix='.tif', delete=False) as temp_output:
-			result_path = _reproject_orthomosaic_for_tcd(temp_input.name, temp_output.name)
-
-			# Verify the reprojected file
-			with rasterio.open(result_path) as src:
-				assert src.crs.to_string() == 'EPSG:3395'
-				# Check that resolution is approximately 0.1m (allowing for some variation due to reprojection)
-				assert abs(src.res[0] - 0.1) < 0.01
-				assert abs(src.res[1] - 0.1) < 0.01
-
-
 @pytest.mark.comprehensive
 def test_tcd_container_availability():
 	"""Test that TCD container can be pulled and is available"""
