@@ -1,39 +1,59 @@
-# Use the same base image as the original TCD Dockerfile
 FROM pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
-
-# Set non-interactive frontend for package installations
-ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Europe/Zurich
 
-# Update package lists and install essential dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    build-essential \
-    ca-certificates \
-    git \
+# set bash as current shell
+RUN chsh -s /bin/bash
+SHELL ["/bin/bash", "-c"]
+
+# Apt update and clean
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y \
     wget \
     bzip2 \
+    build-essential \
+    ca-certificates \
     libglib2.0-0 \
     libxext6 \
     libsm6 \
-    libxrender1 && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    libxrender1 \
+    git \
+    mercurial \
+    subversion \
+    gdal-bin \
+    libgdal-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create a non-root user for better security
-RUN useradd -m -s /bin/bash appuser
-USER appuser
-WORKDIR /home/appuser
+# Set environment variables for GDAL
+ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
+ENV C_INCLUDE_PATH=/usr/include/gdal
 
-# Clone the TCD repository
-RUN git clone https://github.com/Restor-Foundation/tcd.git tcd_repo
+# Setup deadtrees user (instead of restor)
+RUN groupadd -r deadtrees && useradd -r -g deadtrees deadtrees
+RUN mkdir /home/deadtrees
+RUN chown -R deadtrees:deadtrees /home/deadtrees
+RUN chmod 755 /home/deadtrees
 
-# Install Python dependencies from the repository
-WORKDIR /home/appuser/tcd_repo
-RUN pip install --no-cache-dir -r requirements.txt
+USER deadtrees
+WORKDIR /home/deadtrees
 
-# Install the TCD package itself in editable mode
-RUN pip install --no-cache-dir -e .
+# Copy the TCD source code
+COPY --chown=deadtrees:deadtrees tcd_repo/ ./tcd/
 
-# Set the entrypoint to the TCD prediction script
-ENTRYPOINT ["tcd-predict"]
+WORKDIR /home/deadtrees/tcd
+ENV PATH=/home/deadtrees/.local/bin:$PATH
+
+# Switch to root to install packages system-wide (for root access like ODM)
+USER root
+RUN python -m pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir -e .
+
+# Create the entrypoint script
+COPY --chown=deadtrees:deadtrees entrypoint.sh /home/deadtrees/entrypoint.sh
+RUN chmod +x /home/deadtrees/entrypoint.sh
+
+USER deadtrees
+WORKDIR /home/deadtrees
+
+ENTRYPOINT ["/home/deadtrees/entrypoint.sh"]
+CMD ["--help"]
