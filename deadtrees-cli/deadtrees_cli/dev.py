@@ -250,7 +250,7 @@ class DevCommands:
 		print(f'Running tests for {service}...')
 		self._run_command(cmd)
 
-	def run_dev(self):
+	def run_dev(self, force_rebuild: bool = False):
 		"""Start complete test environment with continuous processor queue checking"""
 
 		# Signal handler for graceful cleanup
@@ -268,9 +268,22 @@ class DevCommands:
 			# Setup test users first
 			self._setup_test_users()
 
-			# Build and start all services
+			# Build and start all services using smart rebuild detection
 			print('Starting development environment...')
-			self._run_command(['docker', 'compose', '-f', self.test_compose_file, 'up', '-d', '--build'])
+			if force_rebuild:
+				services_to_rebuild = ['--build']
+				print('Force rebuild requested - rebuilding all services')
+			else:
+				services_to_rebuild = self._check_rebuild_needed()
+				if services_to_rebuild:
+					print(f'Rebuilding services: {", ".join(services_to_rebuild)}')
+					services_to_rebuild = ['--build'] + services_to_rebuild
+				else:
+					print('No rebuilds needed - using existing containers')
+					services_to_rebuild = []
+
+			cmd = ['docker', 'compose', '-f', self.test_compose_file, 'up', '-d'] + services_to_rebuild
+			self._run_command(cmd)
 
 			print('🚀 Development environment started!')
 			print('📧 Available test users:')
