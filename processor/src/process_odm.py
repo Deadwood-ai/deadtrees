@@ -519,7 +519,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 
 		# Environment-aware ODM configuration
 		project_name = f'dataset_{dataset_id}'
-		odm_command = ['--fast-orthophoto']  # Always use fast processing
+		odm_command = []  # Always use fast processing
 
 		# Set resolution based on environment
 		if settings.DEV_MODE:
@@ -530,6 +530,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 					'--skip-3dmodel',  # Skip 3D model generation (faster for 2D outputs)
 					'--max-concurrency',
 					'2',  # Limit parallel processes for testing
+					'--fast-orthophoto',
 				]
 			)
 		else:
