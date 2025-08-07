@@ -89,17 +89,44 @@ case "$1" in
         # Run TCD prediction with semantic model directly
         exec python predict.py semantic "$INPUT_PATH" "$OUTPUT_PATH"
         ;;
+    "pipeline")
+        # Handle the pipeline approach - use TCD Pipeline class directly
+        # Expected format: pipeline input_tif output_confidence_map
+        if [ $# -lt 3 ]; then
+            echo "Usage: pipeline <input_tif> <output_confidence_map>"
+            exit 1
+        fi
+        
+        INPUT_TIF="$2"
+        OUTPUT_CONFIDENCE_MAP="$3"
+        
+        echo "Running TCD Pipeline prediction..."
+        echo "Input: $INPUT_TIF"
+        echo "Output: $OUTPUT_CONFIDENCE_MAP"
+        
+        # Copy the predict_pipeline.py script to the container working directory
+        # Note: This script should be mounted into the container
+        if [ ! -f "/tcd_data/predict_pipeline.py" ]; then
+            echo "Error: predict_pipeline.py not found in /tcd_data/"
+            exit 1
+        fi
+        
+        # Run the pipeline prediction script
+        exec python /tcd_data/predict_pipeline.py "$INPUT_TIF" "$OUTPUT_CONFIDENCE_MAP"
+        ;;
     "--help"|"help")
         echo "DeadTrees TCD Container"
         echo ""
         echo "Usage:"
         echo "  tcd-predict <model> <input> <output> [options]  - Run TCD prediction"
         echo "  semantic <input> <output> [--model=model]       - Run semantic segmentation"
+        echo "  pipeline <input> <output>                       - Run TCD Pipeline (single confidence map)"
         echo "  --help                                           - Show this help"
         echo ""
         echo "Examples:"
         echo "  semantic /input/ortho.tif /output --model=restor/tcd-segformer-mit-b5"
         echo "  tcd-predict semantic /input/ortho.tif /output"
+        echo "  pipeline /input/ortho.tif /output/confidence_map.tif"
         ;;
     *)
         # If no recognized command, try to run it directly as a TCD command

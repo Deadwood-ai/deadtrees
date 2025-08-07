@@ -1,8 +1,8 @@
 import tempfile
 import os
 import uuid
+import json
 from pathlib import Path
-from typing import Optional
 import numpy as np
 import rasterio
 import rasterio.warp
@@ -14,24 +14,35 @@ from shared.logger import logger
 from shared.models import LabelPayloadData, LabelSourceEnum, LabelTypeEnum, LabelDataEnum
 from shared.labels import create_label_with_geometries, delete_model_prediction_labels
 from shared.logging import LogContext, LogCategory
-from ..deadwood_segmentation.deadtreesmodels.common.common import mask_to_polygons, reproject_polygons
+from ..deadwood_segmentation.deadtreesmodels.common.common import (
+	mask_to_polygons,
+	reproject_polygons,
+	filter_polygons_by_area,
+	image_reprojector,
+)
 from ..exceptions import ProcessingError
 
-# TCD configuration (from original implementation)
-TCD_THRESHOLD = 200
+# Load configuration
+CONFIG_PATH = str(Path(__file__).parent / 'treecover_inference_config.json')
+with open(CONFIG_PATH, 'r') as f:
+	config = json.load(f)
+
+# TCD configuration
+TCD_THRESHOLD = config['tree_cover_threshold']
 TCD_MODEL = 'restor/tcd-segformer-mit-b5'
-TCD_TARGET_RESOLUTION = 0.1  # 10cm resolution
+TCD_TARGET_RESOLUTION = config['tree_cover_inference_resolution']  # 10cm resolution
 TCD_TARGET_CRS = 'EPSG:3395'  # Mercator projection for processing
 TCD_OUTPUT_CRS = 'EPSG:4326'  # WGS84 for database storage
 TCD_CONTAINER_IMAGE = 'deadtrees-tcd:latest'  # Our local TCD container
+MINIMUM_POLYGON_AREA = config['minimum_polygon_area']
 
 
 def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 	"""
-	Reproject orthomosaic to EPSG:3395 with 10cm resolution for TCD container processing.
+	Reproject orthomosaic using image_reprojector approach for consistency with deadwood processing.
 
-	This replaces the original convert_to_projected() function with rasterio.warp.reproject()
-	to maintain the exact same output format without TCD Python dependencies.
+	This uses the existing image_reprojector function to determine the correct parameters,
+	then performs the actual reprojection using rasterio.warp.reproject for compatibility.
 
 	Args:
 	    input_tif (str): Path to input orthomosaic
@@ -40,15 +51,32 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 	Returns:
 	    str: Path to reprojected file
 	"""
-	with rasterio.open(input_tif) as src:
-		# Calculate transform for target CRS and resolution
-		transform, width, height = rasterio.warp.calculate_default_transform(
-			src.crs, TCD_TARGET_CRS, src.width, src.height, *src.bounds, resolution=TCD_TARGET_RESOLUTION
-		)
+	# Use image_reprojector to get VRT parameters (transform, size, etc.)
+	vrt_src = image_reprojector(input_tif, min_res=TCD_TARGET_RESOLUTION)
 
-		# Create output profile
+	# Get the target parameters from the VRT
+	target_transform = vrt_src.transform
+	target_width = vrt_src.width
+	target_height = vrt_src.height
+	target_crs = vrt_src.crs
+	target_nodata = vrt_src.nodata
+
+	# Close VRT to free resources
+	vrt_src.close()
+
+	# Now perform the actual reprojection using rasterio.warp.reproject
+	with rasterio.open(input_tif) as src:
+		# Create output profile based on source but with target parameters
 		profile = src.profile.copy()
-		profile.update({'crs': TCD_TARGET_CRS, 'transform': transform, 'width': width, 'height': height})
+		profile.update(
+			{
+				'crs': target_crs,
+				'transform': target_transform,
+				'width': target_width,
+				'height': target_height,
+				'nodata': target_nodata,
+			}
+		)
 
 		# Reproject the image
 		with rasterio.open(output_path, 'w', **profile) as dst:
@@ -58,17 +86,17 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 					destination=rasterio.band(dst, i),
 					src_transform=src.transform,
 					src_crs=src.crs,
-					dst_transform=transform,
-					dst_crs=TCD_TARGET_CRS,
+					dst_transform=target_transform,
+					dst_crs=target_crs,
 					resampling=rasterio.warp.Resampling.bilinear,
 				)
 
 	return output_path
 
 
-def _copy_ortho_to_tcd_volume(ortho_path: str, volume_name: str, dataset_id: int, token: str) -> str:
+def _copy_files_to_tcd_volume(ortho_path: str, volume_name: str, dataset_id: int, token: str) -> tuple[str, str]:
 	"""
-	Copy reprojected orthomosaic to TCD shared volume.
+	Copy reprojected orthomosaic and pipeline script to TCD shared volume.
 
 	Args:
 	    ortho_path (str): Path to reprojected orthomosaic file
@@ -77,14 +105,15 @@ def _copy_ortho_to_tcd_volume(ortho_path: str, volume_name: str, dataset_id: int
 	    token (str): Authentication token for logging
 
 	Returns:
-	    str: Container path to the copied orthomosaic
+	    tuple[str, str]: Container paths to (orthomosaic, confidence_map_output)
 	"""
 	client = docker.from_env()
 	project_name = f'dataset_{dataset_id}'
 	container_ortho_path = f'/tcd_data/{project_name}/input/orthomosaic_reprojected.tif'
+	container_confidence_path = f'/tcd_data/{project_name}/output/confidence_map.tif'
 
 	logger.info(
-		f'Copying reprojected orthomosaic to TCD shared volume',
+		'Copying files to TCD shared volume',
 		LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 	)
 
@@ -99,37 +128,58 @@ def _copy_ortho_to_tcd_volume(ortho_path: str, volume_name: str, dataset_id: int
 		)
 		temp_container.start()
 
-		# Create TCD directory structure (running as root for simplicity like ODM)
+		# Create TCD directory structure
 		exec_result = temp_container.exec_run(
 			f'mkdir -p /tcd_data/{project_name}/input /tcd_data/{project_name}/output'
 		)
 		if exec_result.exit_code != 0:
 			raise Exception(f'Failed to create TCD directory structure: {exec_result.output.decode()}')
 
-		# Copy orthomosaic file using put_archive API
+		# Copy orthomosaic file
 		with open(ortho_path, 'rb') as f:
-			file_data = f.read()
+			ortho_data = f.read()
 
-		# Create tar archive in memory
+		# Copy pipeline script
+		pipeline_script_path = Path(__file__).parent / 'predict_pipeline.py'
+		with open(pipeline_script_path, 'rb') as f:
+			script_data = f.read()
+
+		# Create tar archive with both files
 		tar_buffer = io.BytesIO()
 		with tarfile.open(mode='w', fileobj=tar_buffer) as tar:
-			tarinfo = tarfile.TarInfo(name='orthomosaic_reprojected.tif')
-			tarinfo.size = len(file_data)
-			tar.addfile(tarinfo, io.BytesIO(file_data))
+			# Add orthomosaic
+			ortho_info = tarfile.TarInfo(name='orthomosaic_reprojected.tif')
+			ortho_info.size = len(ortho_data)
+			tar.addfile(ortho_info, io.BytesIO(ortho_data))
+
+			# Add pipeline script
+			script_info = tarfile.TarInfo(name='predict_pipeline.py')
+			script_info.size = len(script_data)
+			tar.addfile(script_info, io.BytesIO(script_data))
 
 		tar_buffer.seek(0)
 		temp_container.put_archive(f'/tcd_data/{project_name}/input/', tar_buffer.getvalue())
 
+		# Copy script to root of volume for entrypoint access
+		script_tar_buffer = io.BytesIO()
+		with tarfile.open(mode='w', fileobj=script_tar_buffer) as tar:
+			script_info = tarfile.TarInfo(name='predict_pipeline.py')
+			script_info.size = len(script_data)
+			tar.addfile(script_info, io.BytesIO(script_data))
+
+		script_tar_buffer.seek(0)
+		temp_container.put_archive('/tcd_data/', script_tar_buffer.getvalue())
+
 		logger.info(
-			f'Successfully copied orthomosaic to TCD volume at {container_ortho_path}',
+			'Successfully copied files to TCD volume',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 
-		return container_ortho_path
+		return container_ortho_path, container_confidence_path
 
 	except Exception as e:
 		logger.error(
-			f'Failed to copy orthomosaic to TCD volume: {str(e)}',
+			f'Failed to copy files to TCD volume: {str(e)}',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 		raise
@@ -144,9 +194,9 @@ def _copy_ortho_to_tcd_volume(ortho_path: str, volume_name: str, dataset_id: int
 				)
 
 
-def _run_tcd_container(volume_name: str, dataset_id: int, token: str) -> str:
+def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -> str:
 	"""
-	Execute TCD container for semantic segmentation via shared volumes.
+	Execute TCD container using Pipeline class via Python script for complete confidence map output.
 
 	Args:
 	    volume_name (str): Docker volume name
@@ -154,31 +204,25 @@ def _run_tcd_container(volume_name: str, dataset_id: int, token: str) -> str:
 	    token (str): Authentication token for logging
 
 	Returns:
-	    str: Container path to output directory
+	    str: Container path to confidence map output file
 	"""
 	client = docker.from_env()
 	project_name = f'dataset_{dataset_id}'
 	input_path = f'/tcd_data/{project_name}/input/orthomosaic_reprojected.tif'
-	output_path = f'/tcd_data/{project_name}/output'
+	output_path = f'/tcd_data/{project_name}/output/confidence_map.tif'
 
 	logger.info(
-		f'Starting TCD container execution for dataset {dataset_id}',
+		f'Starting TCD Pipeline container execution for dataset {dataset_id}',
 		LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 	)
 
 	try:
-		# Pull TCD container image
-		logger.info(
-			'Pulling TCD container image if not available',
-			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
-		)
-		# Use local container - no need to pull
-		# client.images.pull('ghcr.io/restor-foundation/tcd:main')
-
-		# Create and run TCD container
-		container = client.containers.run(
+		# Create and run TCD container with direct Python script execution
+		# Override entrypoint to bypass the predict.py routing and run our script directly
+		container_output = client.containers.run(
 			image=TCD_CONTAINER_IMAGE,
-			command=['tcd-predict', 'semantic', input_path, output_path, f'--model={TCD_MODEL}'],
+			command=['python', '/tcd_data/predict_pipeline.py', input_path, output_path],
+			entrypoint='',  # Override the container's entrypoint to run our command directly
 			volumes={volume_name: {'bind': '/tcd_data', 'mode': 'rw'}},
 			remove=True,  # Auto-remove container when done
 			detach=False,  # Wait for completion
@@ -186,23 +230,30 @@ def _run_tcd_container(volume_name: str, dataset_id: int, token: str) -> str:
 		)
 
 		logger.info(
-			f'TCD container execution completed successfully',
+			'TCD Pipeline container execution completed successfully',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
+
+		# Log container output for debugging
+		if container_output:
+			logger.info(
+				f'TCD Pipeline output: {container_output.decode("utf-8").strip()}',
+				LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+			)
 
 		return output_path
 
 	except Exception as e:
 		logger.error(
-			f'TCD container execution failed: {str(e)}',
+			f'TCD Pipeline container execution failed: {str(e)}',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 		raise
 
 
-def _copy_tcd_results_from_volume(volume_name: str, local_output_dir: Path, dataset_id: int, token: str) -> str:
+def _copy_confidence_map_from_volume(volume_name: str, local_output_dir: Path, dataset_id: int, token: str) -> str:
 	"""
-	Copy TCD confidence map from shared volume to local directory.
+	Copy TCD Pipeline confidence map from shared volume to local directory.
 
 	Args:
 	    volume_name (str): Docker volume name
@@ -216,9 +267,10 @@ def _copy_tcd_results_from_volume(volume_name: str, local_output_dir: Path, data
 	client = docker.from_env()
 	project_name = f'dataset_{dataset_id}'
 	confidence_map_path = local_output_dir / 'confidence_map.tif'
+	container_confidence_path = f'/tcd_data/{project_name}/output/confidence_map.tif'
 
 	logger.info(
-		f'Copying TCD results from shared volume to {local_output_dir}',
+		f'Copying TCD Pipeline confidence map from shared volume to {local_output_dir}',
 		LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 	)
 
@@ -236,53 +288,29 @@ def _copy_tcd_results_from_volume(volume_name: str, local_output_dir: Path, data
 		)
 		temp_container.start()
 
-		# List all files in the output directory to see what TCD actually generates
+		# List all files in the output directory for debugging
 		exec_result = temp_container.exec_run(f'ls -la /tcd_data/{project_name}/output/')
 		logger.info(
 			f'TCD output directory contents: {exec_result.output.decode()}',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 
-		# Look for any segmentation output files (TCD generates multiple tile files)
-		# Use shell command to handle pipes correctly in Alpine container
-		exec_result = temp_container.exec_run(
-			['sh', '-c', f'ls /tcd_data/{project_name}/output/ | grep segmentation.tif | head -1']
-		)
+		# Check if confidence_map.tif exists
+		exec_result = temp_container.exec_run(f'test -f {container_confidence_path}')
+		if exec_result.exit_code != 0:
+			raise Exception(f'Confidence map not found at: {container_confidence_path}')
+
 		logger.info(
-			f'Segmentation file search result: "{exec_result.output.decode()}" (exit_code: {exec_result.exit_code})',
+			f'Found confidence map at: {container_confidence_path}',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 
-		if exec_result.exit_code != 0 or not exec_result.output.decode().strip():
-			# Fallback: try to get any .tif file using shell
-			exec_result = temp_container.exec_run(['sh', '-c', f'ls /tcd_data/{project_name}/output/*.tif | head -1'])
-			if exec_result.exit_code != 0 or not exec_result.output.decode().strip():
-				raise Exception(f'No segmentation files found in TCD output: /tcd_data/{project_name}/output/')
+		# Get confidence map file from container
+		archive_stream, _ = temp_container.get_archive(container_confidence_path)
 
-		# Get the first segmentation file found (need to construct full path)
-		filename = exec_result.output.decode().strip()
-		if filename.startswith('/'):
-			# Already has full path
-			first_segmentation_file = filename
-		else:
-			# Need to construct full path
-			first_segmentation_file = f'/tcd_data/{project_name}/output/{filename}'
-		logger.info(
-			f'Using segmentation file: {first_segmentation_file}',
-			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
-		)
-
-		# Get segmentation file from container
-		archive_stream, _ = temp_container.get_archive(first_segmentation_file)
-
-		# Extract segmentation file to local directory and rename to confidence_map.tif for compatibility
+		# Extract confidence map to local directory
 		with tarfile.open(mode='r|', fileobj=io.BytesIO(b''.join(archive_stream))) as tar:
 			tar.extractall(local_output_dir)
-
-		# Rename the extracted file to confidence_map.tif for API compatibility
-		extracted_files = list(local_output_dir.glob('*segmentation.tif'))
-		if extracted_files:
-			extracted_files[0].rename(confidence_map_path)
 
 		logger.info(
 			f'Successfully copied confidence map to {confidence_map_path}',
@@ -293,7 +321,7 @@ def _copy_tcd_results_from_volume(volume_name: str, local_output_dir: Path, data
 
 	except Exception as e:
 		logger.error(
-			f'Failed to copy TCD results from volume: {str(e)}',
+			f'Failed to copy confidence map from volume: {str(e)}',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 		raise
@@ -351,12 +379,12 @@ def _cleanup_tcd_volume(volume_name: str, dataset_id: int, token: str):
 
 def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str):
 	"""
-	Hybrid tree cover prediction using TCD container + original processing logic.
+	Tree cover prediction using TCD Pipeline class in container for complete confidence map.
 
-	This function implements the hybrid approach:
-	1. Preprocess: Reproject orthomosaic to EPSG:3395, 10cm resolution (rasterio)
-	2. Container: Execute TCD container via shared volumes
-	3. Postprocess: Load confidence map, threshold, convert to polygons (original logic)
+	This function implements the Pipeline-based approach:
+	1. Preprocess: Reproject orthomosaic using image_reprojector approach
+	2. Container: Execute TCD Pipeline class to generate single complete confidence map
+	3. Postprocess: Load confidence map, apply nodata mask, threshold, filter polygons
 	4. Storage: Save to v2_forest_cover_geometries via labels system
 
 	Args:
@@ -392,20 +420,22 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 
-		# Copy reprojected orthomosaic to shared volume
-		container_ortho_path = _copy_ortho_to_tcd_volume(str(reprojected_path), volume_name, dataset_id, token)
+		# Copy reprojected orthomosaic and pipeline script to shared volume
+		container_ortho_path, container_confidence_path = _copy_files_to_tcd_volume(
+			str(reprojected_path), volume_name, dataset_id, token
+		)
 
-		# Step 3: Container Execution - Run TCD container for semantic segmentation
+		# Step 3: Container Execution - Run TCD Pipeline container for complete confidence map
 		logger.info(
-			'Running TCD container for semantic segmentation',
+			'Running TCD Pipeline container for complete confidence map generation',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 
-		container_output_path = _run_tcd_container(volume_name, dataset_id, token)
+		_run_tcd_pipeline_container(volume_name, dataset_id, token)
 
 		# Step 4: Result Extraction - Copy confidence map from volume
 		tcd_output_dir = temp_dir_path / 'tcd_output'
-		confidence_map_path = _copy_tcd_results_from_volume(volume_name, tcd_output_dir, dataset_id, token)
+		confidence_map_path = _copy_confidence_map_from_volume(volume_name, tcd_output_dir, dataset_id, token)
 
 		# Step 5: Postprocessing - Load confidence map and apply original thresholding logic
 		logger.info(
@@ -417,6 +447,33 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 
 		# Apply original thresholding logic: (confidence_map > 200).astype(np.uint8)
 		outimage = (confidence_map > TCD_THRESHOLD).astype(np.uint8)
+
+		# Step 5.1: Apply nodata mask processing (critical for avoiding tile artifacts)
+		logger.info(
+			'Applying nodata mask processing to filter invalid areas',
+			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+		)
+
+		# Open reprojected dataset to get nodata mask
+		with rasterio.open(confidence_map_path) as confidence_src:
+			# Get the dataset mask from confidence map
+			nodata_mask = confidence_src.dataset_mask()
+
+			# Only apply masking if the mask is standard (contains only 0 and 255)
+			unique_mask_values = np.unique(nodata_mask)
+			if len(unique_mask_values) <= 2 and (0 in unique_mask_values or 255 in unique_mask_values):
+				# Standard mask with 0 and 255 values - apply it
+				outimage = outimage * (nodata_mask / 255).astype(np.uint8)
+				logger.info(
+					f'Applied standard nodata mask with values: {unique_mask_values}',
+					LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+				)
+			else:
+				# Non-standard mask with values all over the place - skip masking
+				logger.warning(
+					f'Non-standard mask detected with values: {unique_mask_values} - skipping masking operation to avoid artifacts',
+					LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+				)
 
 		# Step 6: Polygon Conversion - Use existing mask_to_polygons utility
 		logger.info(
@@ -435,13 +492,32 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 			)
 			return
 
-		# Step 7: Coordinate Reprojection - Reproject from EPSG:3395 back to WGS84
+		# Step 6.1: Polygon Area Filtering - Remove small noise polygons
 		logger.info(
-			f'Reprojecting {len(polygons)} polygons from {TCD_TARGET_CRS} to {TCD_OUTPUT_CRS}',
+			f'Filtering {len(polygons)} polygons by minimum area of {MINIMUM_POLYGON_AREA}m²',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 
-		polygons = reproject_polygons(polygons, TCD_TARGET_CRS, TCD_OUTPUT_CRS)
+		polygons = filter_polygons_by_area(polygons, MINIMUM_POLYGON_AREA)
+
+		if not any(polygons):
+			logger.warning(
+				'No tree cover polygons detected after area filtering',
+				LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+			)
+			return
+
+		# Step 7: Coordinate Reprojection - Reproject from projected CRS back to WGS84
+		logger.info(
+			f'Reprojecting {len(polygons)} filtered polygons to {TCD_OUTPUT_CRS}',
+			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+		)
+
+		# Get the CRS from the reprojected dataset for accurate reprojection
+		with rasterio.open(str(reprojected_path)) as dataset:
+			source_crs = dataset.crs
+
+		polygons = reproject_polygons(polygons, source_crs, TCD_OUTPUT_CRS)
 
 		# Step 8: Database Storage - Convert to GeoJSON and save via labels system
 		logger.info(
