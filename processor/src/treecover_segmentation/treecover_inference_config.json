@@ -1,0 +1,6 @@
+{
+    "config_name": "treecover_default_08_Jan_2025",
+    "tree_cover_threshold": 200,
+    "tree_cover_inference_resolution": 0.1,
+    "minimum_polygon_area": 0.1
+}
