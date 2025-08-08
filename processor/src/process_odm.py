@@ -536,6 +536,16 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		else:
 			# Production: High quality processing
 			resolution = '1.0'  # 1cm/pixel for production quality
+			odm_command.extend(
+				[
+					'--fast-orthophoto',
+					'true',
+					'--feature-quality',
+					'ultra',
+					'--matcher-neighbors',
+					'12',
+				]
+			)
 
 		# Add common parameters
 		odm_command.extend(
