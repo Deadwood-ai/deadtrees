@@ -227,6 +227,13 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 			remove=True,  # Auto-remove container when done
 			detach=False,  # Wait for completion
 			user='root',  # Run as root for simplicity like ODM
+			# Enable GPU access for the TCD container
+			device_requests=[docker.types.DeviceRequest(count=-1, capabilities=[['gpu']])],
+			runtime='nvidia',
+			environment={
+				'NVIDIA_VISIBLE_DEVICES': 'all',
+				'NVIDIA_DRIVER_CAPABILITIES': 'all',
+			},
 		)
 
 		logger.info(
