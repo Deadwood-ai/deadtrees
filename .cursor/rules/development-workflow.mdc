@@ -3,522 +3,111 @@ alwaysApply: true
 ---
 # Development Workflow & Testing
 
-## 📋 **WHEN TO USE THIS RULE**
-**Agent should request this rule when:**
-- Setting up or managing development environment
+## WHEN TO USE
+- Setting up or managing the development environment
 - Running tests or debugging test failures
 - Working with CLI commands or container orchestration
-- Troubleshooting development environment issues
-- Implementing real data testing patterns
+- Troubleshooting development environment or data assets
 
-## 🎯 **CORE PRINCIPLES**
-**ALWAYS use `deadtrees` CLI commands. NEVER run pytest directly - always use `deadtrees dev test` commands.**
-**Use real data and fixtures instead of mocking for geospatial and utility functions.**
-**PREFER FUNCTIONAL PROGRAMMING over classes throughout the codebase.**
+## CORE PRINCIPLES
+- CLI-first: always use `deadtrees` CLI for dev and tests; avoid calling pytest directly
+- Real-data-first: prefer real datasets and fixtures over mocks for geospatial/util functions
+- Functional programming: prefer functions over classes for business logic
+- Sync tests only: test functions must be synchronous
+- Containers as source of truth: run services inside Docker Compose
+- Ask-first: if something is unclear, ask clarifying questions
 
-## 🚨 **FUNCTIONAL PROGRAMMING REQUIREMENTS**
-
-### **🔄 SYNC TESTS ONLY (Critical)**
-**ALL tests must be synchronous (sync) functions - NO async/await in tests:**
-- ✅ `def test_function():` - Always use sync test functions
-- ❌ `async def test_function():` - Never use async test functions  
-- ❌ `@pytest.mark.asyncio` - Never use async test markers
-- ❌ `await` - Never use await in test functions
-
-**Why sync tests:**
-- **Reliable cleanup**: Sync fixtures have predictable lifecycle
-- **No event loop issues**: Eliminates timing problems
-- **Simpler debugging**: Straightforward execution flow
-- **FastAPI compatibility**: TestClient handles async endpoints with sync tests
-
-### **❌ NEVER Use Test Classes**
-```python
-# BAD: Test classes are not allowed
-class TestUploadFunctionality:
-    def test_upload_zip_processing(self):
-        pass
-    
-    def test_upload_geotiff_processing(self):
-        pass
-
-# GOOD: Use functions instead
-def test_upload_zip_processing():
-    """Test ZIP upload processing functionality"""
-    pass
-
-def test_upload_geotiff_processing():
-    """Test GeoTIFF upload processing functionality"""
-    pass
-```
-
-### **✅ Functional Test Structure (Required Pattern)**
-```python
-# Always use function-based tests with descriptive names - ALL SYNC (no async/await)
-def test_process_raw_images_upload_creates_dataset(temp_test_zip, test_user, auth_token):
-    """Test that ZIP upload creates v2_datasets entry correctly"""
-    dataset = process_raw_images_upload(  # ← SYNC call, no await
-        user_id=test_user,
-        file_path=temp_test_zip,
-        file_name='test_minimal_3_images.zip',
-        license=LicenseEnum.cc_by,
-        platform=PlatformEnum.drone,
-        authors=['Test Author'],
-        token=auth_token,
-    )
-    
-    assert dataset is not None
-    assert isinstance(dataset, Dataset)
-
-def test_exif_extraction_populates_acquisition_date(temp_test_zip, test_user, auth_token):
-    """Test that EXIF extraction works with real data"""
-    # Test real functionality without mocks - SYNC call
-    dataset = process_raw_images_upload(...)  # ← SYNC call, no await
-    assert dataset is not None
-
-@pytest.mark.parametrize('lat,lon', TEST_POINTS_WITH_DATA)
-def test_phenology_with_real_coordinates(lat, lon):
-    """Test phenology function with real geographic coordinates"""
-    result = get_phenology_curve(lat, lon)
-    if result is not None:
-        assert len(result) == 365
-        assert all(0 <= val <= 255 for val in result)
-```
-
-### **✅ Business Logic: Functions Over Classes**
-```python
-# GOOD: Processing functions (existing codebase pattern)
-def process_metadata(task: QueueTask, temp_dir: Path):
-    """Process and store metadata for a dataset"""
-    # Processing logic here
-    pass
-
-def process_cog(task: QueueTask, temp_dir: Path):
-    """Process COG generation for a dataset"""
-    # COG processing logic
-    pass
-
-def standardise_geotiff(input_path: str, output_path: str, token: str = None) -> bool:
-    """Standardise a GeoTIFF file"""
-    # Standardization logic
-    return True
-
-# GOOD: Utility functions
-def get_biome_data(bbox_centroid) -> tuple:
-    """Get biome data for coordinates"""
-    return biome_name, biome_id
-
-def extract_comprehensive_exif(image_path: Path) -> Dict[str, Any]:
-    """Extract EXIF metadata from image"""
-    return exif_dict
-
-# BAD: Don't create classes for business logic
-class MetadataProcessor:  # ❌ Avoid this pattern
-    def process(self, task):
-        pass
-
-class BiomeExtractor:  # ❌ Avoid this pattern  
-    def extract(self, coordinates):
-        pass
-```
-
-### **✅ When Classes ARE Appropriate**
-```python
-# GOOD: Data models (Pydantic models)
-class Dataset(BaseModel):
-    id: Optional[int] = None
-    user_id: str
-    file_name: str
-    # ... other fields
-
-class RawImages(BaseModel):
-    id: Optional[int] = None
-    dataset_id: int
-    # ... other fields
-
-# GOOD: Enums
-class TaskTypeEnum(Enum):
-    cog = 'cog'
-    thumbnail = 'thumbnail'
-    odm_processing = 'odm_processing'
-
-# GOOD: Exception classes (when needed)
-class ProcessingError(Exception):
-    def __init__(self, message: str, task_type: str, **kwargs):
-        self.task_type = task_type
-        super().__init__(f'{task_type} processing failed: {message}')
-```
-
-## ⚡ **ESSENTIAL COMMANDS**
-
-### Environment Management
+## QUICK START
 ```bash
-deadtrees dev start                    # Start development environment
-deadtrees dev stop                     # Stop all containers
-deadtrees dev start --force-rebuild   # Force rebuild containers (after dependency changes)
-```
+# 1) Activate venv (local tools) — if needed
+source venv/bin/activate
 
-### Testing
-```bash
-deadtrees dev test api                 # Run API tests
-deadtrees dev test processor           # Run processor tests
-deadtrees dev test processor --test-path=processor/tests/utils/test_phenology.py  # Specific test file
-deadtrees dev debug api               # Debug with breakpoints
-deadtrees dev debug api --test-path=specific_test.py  # Debug specific test
-```
+# 2) Download assets and create symlinks
+make download-assets
+make symlinks
 
-### Environment Setup
-```bash
-supabase db reset                      # Reset database (always run before tests)
-make download-assets                   # Download test data and geospatial assets
-make symlinks                          # Create legacy symlinks
-```
-
-## 🐳 **CONTAINER SERVICES**
-```yaml
-# docker-compose.test.yaml services
-api-test:         # Port 8017, Debug 5679
-processor-test:   # Debug 5678, GPU support  
-nginx:           # Port 8080, SSH 2222
-```
-
-**Debug Ports:**
-- API: 5679
-- Processor: 5678  
-- CLI: 5680
-
-## 🧪 **TESTING PATTERNS**
-
-### Test Execution
-```bash
-# Default (excludes slow tests)
-deadtrees dev test api
-
-# Include comprehensive tests
-deadtrees dev test api --include-comprehensive
-
-# Specific test categories
-pytest -m comprehensive
-pytest -m "slow and comprehensive"
-```
-
-### Real Data Testing (Preferred Pattern)
-```python
-# Use real geographic coordinates and datasets
-TEST_POINTS_WITH_DATA = [
-    # Black Forest, Germany (temperate forest)
-    (48.0, 8.0),
-    # Eastern Canada (temperate forest)  
-    (45.0, -75.0),
-    # Northern Michigan, USA (temperate forest)
-    (45.8, -84.5),
-    # Central Europe (temperate)
-    (50.0, 10.0),
-]
-
-# Test points where no data should exist (ocean locations)
-TEST_POINTS_NO_DATA = [
-    # Atlantic Ocean
-    (30.0, -30.0),
-    # Pacific Ocean  
-    (0.0, -150.0),
-    # Southern Ocean
-    (-30.0, 150.0),
-]
-
-@pytest.mark.parametrize('lat,lon', TEST_POINTS_WITH_DATA)
-def test_utility_function_with_data(lat, lon):
-    """Test utility function for locations with expected data."""
-    result = get_data_for_location(lat, lon)
-    
-    if result is not None:  # Some locations might not have data
-        assert isinstance(result, list)
-        assert len(result) == EXPECTED_LENGTH
-        assert all(isinstance(val, int) for val in result)
-        assert all(0 <= val <= MAX_VALUE for val in result)
-        # Should have some variation (not all same values)
-        assert len(set(result)) > 1
-
-@pytest.mark.parametrize('lat,lon', TEST_POINTS_NO_DATA)
-def test_utility_function_no_data(lat, lon):
-    """Test utility function for ocean locations (should return None)."""
-    result = get_data_for_location(lat, lon)
-    # Ocean locations should return None (no data)
-    assert result is None
-```
-
-### Functional Test Structure (Required)
-```python
-@pytest.fixture
-def sample_dataset():
-    return Dataset(id=1, name="test_dataset")
-
-@pytest.fixture
-def metadata_task(test_dataset_for_processing, test_processor_user):
-    """Create a metadata task for testing"""
-    return QueueTask(
-        id=1,
-        dataset_id=test_dataset_for_processing,
-        user_id=test_processor_user,
-        task_types=[TaskTypeEnum.metadata],
-        priority=1,
-        is_processing=False,
-        current_position=0,
-    )
-
-@pytest.mark.slow
-def test_comprehensive_processing():
-    """Marked as slow for optional execution"""
-    pass
-
-@pytest.mark.comprehensive  
-def test_full_pipeline():
-    """Comprehensive end-to-end test"""
-    pass
-```
-
-### Integration Testing Pattern
-```python
-def test_metadata_processing_integration(metadata_task, auth_token):
-    """Test that new metadata is properly integrated."""
-    # Process metadata
-    process_metadata(metadata_task, settings.processing_path)
-    
-    # Verify metadata was saved
-    with use_client(auth_token) as client:
-        response = client.table(settings.metadata_table).select('*').eq('dataset_id', metadata_task.dataset_id).execute()
-        
-    assert response.data
-    metadata = response.data[0]['metadata']
-    
-    # Check if new metadata was included (conditional - depends on data availability)
-    if MetadataType.NEW_TYPE in metadata:
-        new_metadata = metadata[MetadataType.NEW_TYPE]
-        assert 'data_field' in new_metadata
-        assert len(new_metadata['data_field']) == EXPECTED_LENGTH
-        assert new_metadata['source'] == 'Expected Source'
-        assert new_metadata['version'] == '1.0'
-```
-
-### Authentication Testing
-```python
-def test_regular_user_operations():
-    """Test with standard authenticated user"""
-    user_token = login(TEST_USER_EMAIL, TEST_USER_PASSWORD)
-    # Test with auth.uid() pattern
-    
-def test_processor_user_operations():
-    """Test with processor user (email-based auth)"""
-    processor_token = login(PROCESSOR_USERNAME, PROCESSOR_PASSWORD)
-    # Test with auth.jwt() email pattern
-```
-
-## 🚨 **COMMON TEST FAILURES**
-
-### Database Trigger Issues
-```python
-# Issue: auth.uid() returns NULL for processor user
-# Solution: Check trigger handles dual authentication
-
-def test_processor_trigger_handling():
-    processor_token = login(PROCESSOR_USERNAME, PROCESSOR_PASSWORD)
-    result = update_dataset_with_token(processor_token, dataset_id, changes)
-    
-    # Should not be empty - indicates trigger fired correctly
-    history = get_edit_history(dataset_id) 
-    assert len(history) > 0, "Processor user should trigger audit logging"
-```
-
-### Missing Dependencies After Rebuild
-```bash
-# If new dependencies added to requirements.txt
-deadtrees dev start --force-rebuild  # Force rebuild to install new packages
-
-# Check if scientific computing packages installed
-docker-compose -f docker-compose.test.yaml exec processor-test python -c "import xarray, zarr, numpy; print('Dependencies OK')"
-```
-
-### Path Resolution Issues
-```python
-# Always use settings.base_path for asset paths
-DATASET_PATH = settings.base_path / "assets" / "data" / "dataset.zarr"
-
-# Not: hardcoded paths like Path("/app/assets/...")
-```
-
-### Container State Issues
-```bash
-# Reset test environment
-deadtrees dev stop
+# 3) Start dev environment (test stack)
 deadtrees dev start
 
-# Check logs
-docker-compose -f docker-compose.test.yaml logs api-test
-docker-compose -f docker-compose.test.yaml logs processor-test
-```
-
-## 🔧 **DEBUGGING WORKFLOWS**
-
-### Failed Tests
-```bash
-# Get detailed output
-deadtrees dev test api 2>&1 | tee test_output.log
-
-# Debug specific test
-deadtrees dev debug api --test-path=path/to/failing_test.py
-
-# Connect to container
-docker-compose -f docker-compose.test.yaml exec api-test bash
-```
-
-### Database State Debugging
-```python
-def debug_database_state():
-    """Helper for debugging database issues during tests"""
-    datasets = client.table('v2_datasets').select('*').execute()
-    statuses = client.table('v2_statuses').select('*').execute()
-    
-    print(f"Datasets: {len(datasets.data)}")
-    print(f"Statuses: {len(statuses.data)}")
-    
-    # Check for errors
-    errors = client.table('v2_statuses').select('*').eq('has_error', True).execute()
-    if errors.data:
-        print(f"Datasets with errors: {[d['dataset_id'] for d in errors.data]}")
-```
-
-### Real Data Validation
-```python
-def test_real_data_accessibility():
-    """Verify real datasets are accessible for testing"""
-    dataset_path = settings.base_path / "assets" / "data" / "dataset.zarr"
-    assert dataset_path.exists(), f"Test dataset not found at {dataset_path}"
-    
-    # Test data access
-    import xarray as xr
-    ds = xr.open_zarr(dataset_path)
-    assert 'data_variable' in ds.variables, "Expected data variable not found"
-```
-
-## 📁 **TEST DATA MANAGEMENT**
-```
-assets/
-├── test_data/debugging/testcases/
-│   ├── small/          # Small test files for comprehensive testing
-│   └── original/       # Original large test files
-├── pheno/              # Phenology datasets
-│   └── modispheno_aggregated_normalized.zarr/
-├── gadm/               # GADM administrative boundaries
-└── biom/               # Biome classification data
-```
-
-### Asset Commands
-```bash
-make download-assets    # Download required assets (GADM, biome, phenology data)
-make symlinks          # Create legacy compatibility links  
-make clean             # Clean downloaded assets
-```
-
-### Asset Verification
-```bash
-# Verify assets are downloaded correctly
-ls -la assets/pheno/modispheno_aggregated_normalized.zarr/
-ls -la assets/gadm/gadm_410.gpkg
-ls -la assets/biom/terres_ecosystems.gpkg
-```
-
-## ⚠️ **ANTI-PATTERNS TO AVOID**
-
-### ❌ Don't Use Test Classes
-```python
-# BAD: Test classes (never use these)
-class TestZipUploadProcessing:
-    def test_zip_upload_creates_dataset(self):
-        pass
-    
-    def test_zip_upload_creates_raw_images_entry(self):
-        pass
-
-# GOOD: Use functions instead
-def test_zip_upload_creates_dataset():
-    """Test ZIP upload creates v2_datasets entry correctly"""
-    pass
-
-def test_zip_upload_creates_raw_images_entry():
-    """Test ZIP upload creates v2_raw_images entry correctly"""
-    pass
-```
-
-### ❌ Don't Create Classes for Business Logic
-```python
-# BAD: Classes for processing logic
-class MetadataProcessor:
-    def __init__(self, task, temp_dir):
-        self.task = task
-        self.temp_dir = temp_dir
-    
-    def process(self):
-        # processing logic
-        pass
-
-# GOOD: Use functions instead
-def process_metadata(task: QueueTask, temp_dir: Path):
-    """Process and store metadata for a dataset"""
-    # processing logic
-    pass
-```
-
-### ❌ Don't Mock Geospatial Functions
-```python
-# BAD: Mocking geospatial data access
-@patch('processor.src.utils.phenology.xr.open_zarr')
-def test_phenology_with_mock(mock_open_zarr):
-    mock_ds = MagicMock()
-    mock_ds.sel.return_value.data.values = [1, 2, 3]
-    # This doesn't test real coordinate transformation or data access
-```
-
-### ✅ Do Use Real Data Testing
-```python
-# GOOD: Testing with real coordinates and datasets
-def test_phenology_with_real_data():
-    """Test phenology retrieval for Black Forest coordinates"""
-    lat, lon = 48.0, 8.0  # Real coordinates
-    result = get_phenology_curve(lat, lon)
-    
-    if result is not None:
-        assert len(result) == 365
-        assert all(0 <= val <= 255 for val in result)
-```
-
-### ❌ Don't Use Hardcoded Paths
-```python
-# BAD: Hardcoded paths
-DATASET_PATH = Path("/app/assets/pheno/modispheno_aggregated_normalized.zarr")
-
-# GOOD: Use settings
-DATASET_PATH = settings.base_path / "assets" / "pheno" / "modispheno_aggregated_normalized.zarr"
-```
-
-### ❌ Don't Run pytest Directly
-```bash
-# BAD: Direct pytest
-pytest processor/tests/
-
-# GOOD: Use CLI
+# 4) Run tests (CLI-only)
+deadtrees dev test api
 deadtrees dev test processor
+
+# 5) Debug a specific test file
+deadtrees dev debug api --test-path=api/tests/routers/test_download.py
+# or
+deadtrees dev debug processor --test-path=processor/tests/test_process_cog.py
+
+# 6) Run continuous processor (dev loop)
+deadtrees dev run-dev
 ```
 
-## 🎯 **BEST PRACTICES**
-1. **Always reset database** before running tests (`supabase db reset`)
-2. **Use CLI commands** for all development tasks
-3. **Test both authentication patterns** (regular user + processor)
-4. **Mark slow tests** with `@pytest.mark.slow`
-5. **Clean up test data** after test runs
-6. **Use real data testing** for geospatial and utility functions
-7. **Force rebuild** after adding new dependencies
-8. **Use parametrized tests** with real coordinates
-9. **Test graceful degradation** for optional data sources
-10. **Verify asset availability** before running tests that depend on external datasets
-11. **NEVER use test classes** - always use functions
-12. **PREFER functions over classes** throughout the codebase
-13. **Use classes only for data models, enums, and exceptions**
+## CONTAINER SERVICES (test stack)
+- api-test: HTTP 8017, debug 5679
+- processor-test: debug 5678 (GPU)
+- nginx: HTTP 8080, SSH 2222 (test reverse proxy)
+- CLI debugging (local): default 5680
+
+## PORTS & ENDPOINTS
+- Nginx test endpoints:
+  - `http://localhost:8080/api/v1/` (FastAPI docs at `/docs`)
+  - `http://localhost:8080/cogs/v1/`
+  - `http://localhost:8080/thumbnails/v1/`
+  - `http://localhost:8080/downloads/v1/`
+- API test service: 8017 (internal health checks)
+- Supabase (local): typically `http://host.docker.internal:54321` for API/pooler, studio commonly on 54323 (verify current local setup)
+
+## TESTING PATTERNS
+- Sync-only tests: `def test_*():` (no `async def`, no `@pytest.mark.asyncio`)
+- Prefer function-based tests. Note: legacy class-based tests exist; avoid adding new ones
+- Use real coordinates and assets for geospatial utilities
+- Mark slow suites: `@pytest.mark.slow`, `--include-comprehensive` optional flag
+
+## ESSENTIAL COMMANDS
+```bash
+# Environment management
+deadtrees dev start                    # Start test stack
+deadtrees dev stop                     # Stop test stack
+deadtrees dev start --force-rebuild    # Force rebuild containers
+
+# Testing (CLI-only)
+deadtrees dev test api
+deadtrees dev test processor
+
+deadtrees dev debug api --test-path=api/tests/routers/test_download.py
+deadtrees dev debug processor --test-path=processor/tests/test_process_cog.py
+
+# Dev loop (sets up test users; runs processor continuously)
+deadtrees dev run-dev
+
+# Database reset (local)
+supabase db reset
+
+# Assets
+make download-assets
+make symlinks
+```
+
+## DATA & ASSETS
+- Use `make download-assets` to fetch test GeoTIFFs, models, and GADM
+- Key assets (default paths; see settings):
+  - GADM: `assets/gadm/gadm_410.gpkg`
+  - Phenology Zarr: `assets/pheno/modispheno_aggregated_normalized.zarr/`
+  - Biome: `assets/biom/terres_ecosystems.gpkg`
+  - Segmentation model: `assets/models/segformer_b5_full_epoch_100.safetensors`
+
+## TROUBLESHOOTING
+- Missing dependencies after rebuild → `deadtrees dev start --force-rebuild`
+- Paths wrong in tests → use `shared.settings.settings.base_path` and derived paths
+- GPU/unavailable → ensure NVIDIA runtime and device mounts in compose; check driver versions
+- DB issues (prod) → use MCP tools; for local use `supabase db reset`
+
+## ANTI-PATTERNS
+- Do not run `pytest` directly in containers; use CLI wrappers
+- Do not introduce async tests
+- Avoid class-based tests; prefer functions (existing classes are legacy)
+- Do not hardcode absolute file paths; derive from `shared.settings.settings`
+
+## NOTES
+- If any step or assumption is unclear, ask questions before proceeding
+- Never commit on behalf of the user; request approval for git operations

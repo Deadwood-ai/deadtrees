@@ -113,25 +113,7 @@ services:
       - ./nginx/test-conf:/etc/nginx/conf.d/:ro
 
 
-  tests:
-    build:
-      context: .
-      dockerfile: end2end_tests/Dockerfile
-    links:
-      - nginx
-      - api-test
-    depends_on:
-      nginx:
-        condition: service_healthy
-    environment:
-      COG_URL: http://nginx:80/cogs/v1
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
-    volumes:
-      - ./assets:/app/assets/:ro
-      - ./end2end_tests:/app/tests # dev only, no rebuild needed
-    # command: pytest -s test_performance.py
-    # command: tail -f /dev/null # Keeps container running indefinitely
+  
 
 networks:
   default:

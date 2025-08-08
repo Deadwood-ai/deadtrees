@@ -9,7 +9,7 @@ services:
       # - 2222:22  # Expose SSH port
     volumes:
       - /data:/data
-      - ./assets/gdam/gdam_410.gpkg:/gadm_data/gadm_410.gpkg
+      - ./assets/gadm/gadm_410.gpkg:/gadm_data/gadm_410.gpkg
       - ~/.ssh/authorized_keys:/home/dendro/.ssh/authorized_keys:ro
     
     healthcheck:

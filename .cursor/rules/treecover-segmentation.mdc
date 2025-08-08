@@ -1,0 +1,30 @@
+# Treecover Segmentation
+
+## WHEN TO USE
+- Working with `processor/src/treecover_segmentation/predict_treecover.py`
+- Running segmentation inference or pipelines
+
+## Key Files
+- `processor/src/treecover_segmentation/predict_treecover.py`
+- `processor/src/treecover_segmentation/predict_pipeline.py`
+- Config: `processor/src/treecover_segmentation/treecover_inference_config.json`
+- Models: `assets/models/segformer_b5_full_epoch_100.safetensors`
+
+## Requirements
+- GPU required; assume CUDA-capable environment
+- Ensure model files are present (`make download-assets`)
+
+## Patterns
+- Use functions (no classes) for pipeline steps
+- Read/write via `settings`-derived paths
+- Keep memory usage bounded (tile-wise inference if needed)
+
+## Failure Modes
+- Missing model/checkpoint → verify assets path
+- CRS/transform mismatches → ensure GeoTIFF standardized (`standardise_geotiff.py`)
+- CUDA OOM → reduce tile size/batch size
+
+## Debugging
+- Run processor tests targeting treecover modules
+- Log intermediate shapes and CRS when investigating errors
+- If behavior is unclear, ask for expected output contract

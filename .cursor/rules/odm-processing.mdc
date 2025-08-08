@@ -1,0 +1,31 @@
+# ODM Processing
+
+## WHEN TO USE
+- Implementing or troubleshooting ODM-related functionality
+- Running or inspecting `processor/src/process_odm.py`
+
+## Requirements
+- CPU-only (GPU not used for ODM with current Docker approach)
+- Docker socket mounted into processor container (`/var/run/docker.sock`)
+- Sufficient CPU/RAM reservations in compose (see `docker-compose.processor.yaml`)
+
+## Key Files
+- `processor/src/process_odm.py`
+- `docker-compose.processor.yaml` (mounts, env, network_mode host)
+
+## Inputs & Outputs
+- Inputs: dataset ID, source imagery in `/data` structure
+- Outputs: generated orthos/COGs/assets according to `shared.settings`
+- Use `settings.processing_path` for temp work; persist to `settings.cog_path`, thumbnails, etc.
+
+## Common Issues
+- Permissions on Docker socket (inside container)
+- GPU availability and driver compatibility
+- Path resolution: always use `settings.*_path` helpers
+
+## Debugging
+- Use `deadtrees dev debug processor --test-path=processor/tests/test_process_odm.py`
+- Check logs via `shared.logger` and processor container output
+
+## Notes
+- Ask for missing context (e.g., dataset structure) instead of assuming
