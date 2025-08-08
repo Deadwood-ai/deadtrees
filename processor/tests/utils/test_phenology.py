@@ -107,24 +107,23 @@ def test_process_metadata_with_phenology(metadata_task, auth_token):
 	assert phenology['version'] == '1.0'
 
 
-class TestPhenologyMetadata:
-	"""Test PhenologyMetadata model validation"""
+def test_create_metadata_valid():
+	"""Test creating metadata with valid curve"""
+	curve = list(range(366))
+	metadata = PhenologyMetadata(phenology_curve=curve)
 
-	def test_create_metadata_valid(self):
-		"""Test creating metadata with valid curve"""
-		curve = list(range(366))  # Simple curve with 366 values
-		metadata = PhenologyMetadata(phenology_curve=curve)
+	assert metadata.phenology_curve == curve
+	assert metadata.source == 'MODIS Phenology'
+	assert metadata.version == '1.0'
 
-		assert metadata.phenology_curve == curve
-		assert metadata.source == 'MODIS Phenology'
-		assert metadata.version == '1.0'
 
-	def test_create_metadata_invalid_length(self):
-		"""Test creating metadata with invalid curve length"""
-		with pytest.raises(ValueError, match='must have exactly 366 values'):
-			PhenologyMetadata(phenology_curve=[1, 2, 3])
+def test_create_metadata_invalid_length():
+	"""Test creating metadata with invalid curve length"""
+	with pytest.raises(ValueError, match='must have exactly 366 values'):
+		PhenologyMetadata(phenology_curve=[1, 2, 3])
 
-	def test_create_metadata_empty_curve(self):
-		"""Test creating metadata with empty curve"""
-		with pytest.raises(ValueError, match='must have exactly 366 values'):
-			PhenologyMetadata(phenology_curve=[])
+
+def test_create_metadata_empty_curve():
+	"""Test creating metadata with empty curve"""
+	with pytest.raises(ValueError, match='must have exactly 366 values'):
+		PhenologyMetadata(phenology_curve=[])
