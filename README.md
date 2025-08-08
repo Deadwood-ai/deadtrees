@@ -42,7 +42,7 @@ LOGFIRE_TOKEN=your_logfire_token
 make
 ```
 
-### Use the CLI tool to manage the development environment:
+### Use the CLI tool to manage the development environment (CLI-first):
 
 ```bash
 # Start the development environment
@@ -57,20 +57,20 @@ deadtrees dev start --force-rebuild
 deadtrees dev run-dev
 
 # Run API tests
-deadtrees dev test api api/tests/routers/test_download.py
+deadtrees dev test api
 
 # Debug API tests
-deadtrees dev debug api api/tests/routers/test_download.py
+deadtrees dev debug api --test-path=api/tests/routers/test_download.py
 
 # Run processor tests
-deadtrees dev test processor processor/tests/test_processor.py
+deadtrees dev test processor
 
 # Debug processor tests
-deadtrees dev debug processor processor/tests/test_processor.py
+deadtrees dev debug processor --test-path=processor/tests/test_processor.py
 
 ```
 
-### Accessing services
+### Accessing services (Test Stack)
 
 the nginx acts as a reverse proxy for the API and processor services.
 
@@ -93,24 +93,15 @@ http://localhost:8080/api/v1/datasets/chunk
 http://localhost:8080/api/v1/download/docs
 http://localhost:8080/api/v1/download/datasets/1/dataset.zip
 
-# supabase studio
-http://127.0.0.1:54323
-
-# supabase API
-http://127.0.0.1:54323/api/v1/
+# Supabase
+# Pooler/API: http://host.docker.internal:54321
+# Studio: http://127.0.0.1:54323
 
 ```
 
-### Run the application with Docker Compose:
+### Notes on Tests
 
-```bash
-# Build and run all tests
-docker compose -f docker-compose.test.yaml up --build
-
-# Run specific test suites
-docker compose -f docker-compose.test.yaml run processor-test pytest processor/tests/
-docker compose -f docker-compose.test.yaml run api-test pytest api/tests/
-```
+- Prefer the `deadtrees` CLI for running tests and debugging. Avoid calling `pytest` directly in containers.
 
 ### Local supabase setup and development
 
