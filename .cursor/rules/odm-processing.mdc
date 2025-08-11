@@ -27,8 +27,30 @@ alwaysApply: false
 - Path resolution: always use `settings.*_path` helpers
 
 ## Debugging
-- Use `deadtrees dev debug processor --test-path=processor/tests/test_process_odm.py`
-- Check logs via `shared.logger` and processor container output
+- Use `deadtrees dev test processor --test-path=processor/tests/test_process_odm.py` for regular runs.
+- Use `deadtrees dev debug processor --test-path=processor/tests/test_process_odm.py` only when you need breakpoints (port 5678 must be free).
+- Check logs via `shared.logger` and processor container output.
+- Reproduce failures with real datasets by staging ZIPs locally and pointing tests to them:
+
+  1) Create a debug folder and copy the raw ZIP from storage:
+     - `mkdir -p assets/test_data/debugging/<dataset_id>`
+     - `scp -i ~/.ssh/processing-to-storage dendro@data2.deadtrees.earth:/data/raw_images/<dataset_id>.zip assets/test_data/debugging/<dataset_id>/`
+
+  2) Optionally copy the current ortho for inspection:
+     - `scp -i ~/.ssh/processing-to-storage dendro@data2.deadtrees.earth:/data/archive/<dataset_id>_ortho.tif assets/test_data/debugging/<dataset_id>/`
+
+  3) Run the existing ODM test against the debug ZIP. The fixture resolves ZIPs in this order:
+     - `DEBUG_ODM_ZIP` env var (absolute path to a local ZIP)
+     - Any ZIP under `assets/test_data/debugging/`
+     - Default minimal 5-image dataset
+
+     Examples:
+     - Auto-pick from debugging folder:
+       `deadtrees dev test processor --test-path=processor/tests/test_process_odm.py::test_complete_odm_processing_with_real_images`
+     - Target a specific ZIP explicitly:
+       `DEBUG_ODM_ZIP=$(pwd)/assets/test_data/debugging/5386/5386.zip deadtrees dev test processor --test-path=processor/tests/test_process_odm.py::test_complete_odm_processing_with_real_images`
+
+  4) Behavior: with debug ZIPs the test asserts a proper error is recorded in `v2_statuses`; with the default test ZIP it expects full success and metadata updates.
 
 ## Notes
 - Ask for missing context (e.g., dataset structure) instead of assuming# ODM Processing
