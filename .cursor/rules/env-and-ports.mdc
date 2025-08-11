@@ -1,4 +1,50 @@
+---
+alwaysApply: true
+---
+
 # Environment & Ports Reference
+
+## WHEN TO USE
+- Need to know which ports/services are used
+- Configure local vs production environments
+
+## Services (Test Stack)
+- api-test: HTTP 8017 (Uvicorn), debug 5679
+- processor-test: debug 5678 (GPU-enabled)
+- nginx (test proxy): 8080 HTTP, 2222 SSH
+
+## URLs (Test Stack via nginx)
+- API root: `http://localhost:8080/api/v1/` (docs at `/docs`)
+- COGs: `http://localhost:8080/cogs/v1/`
+- Thumbnails: `http://localhost:8080/thumbnails/v1/`
+- Downloads: `http://localhost:8080/downloads/v1/`
+
+## Supabase (Local Typical)
+- Pooler/API: `http://host.docker.internal:54321`
+- Studio: `http://127.0.0.1:54323`
+- Note: Verify your local Supabase configuration; env overrides may apply
+
+## Production (Processor Deploy)
+- Processor network mode: host
+- NVIDIA runtime required; devices mounted in compose
+
+## Environment Variables (Selected)
+- `SUPABASE_URL`, `SUPABASE_KEY` (required)
+- `BASE_DIR` (default inside containers: `/data` or `/app` depending on service)
+- `ENV` (`development` by default locally)
+- `LOGFIRE_TOKEN` (optional)
+- Processor SSH & storage:
+  - `STORAGE_SERVER_IP`, `STORAGE_SERVER_USERNAME`, `STORAGE_SERVER_DATA_PATH`
+  - `SSH_PRIVATE_KEY_PATH`, `SSH_PRIVATE_KEY_PASSPHRASE`
+
+## Uvicorn Config (Shared Defaults)
+- Host: `0.0.0.0` in containers, `127.0.0.1` for local dev
+- Port: 8017 in test stack; 40831 in API deploy compose
+- Root path: `/api/v1`
+
+## Notes
+- Prefer using `deadtrees` CLI for starting/stopping the test stack
+- If any mapping is unclear, ask; do not assume ports# Environment & Ports Reference
 
 ## WHEN TO USE
 - Need to know which ports/services are used

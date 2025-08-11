@@ -1,4 +1,22 @@
+---
+alwaysApply: true
+---
+
 # Rules Index
+
+Available workspace rules under `.cursor/rules/`:
+
+- `development-workflow.mdc`: CLI-first dev/test workflow, ports, troubleshooting
+- `code-map.mdc`: High-level map of modules and key files
+- `env-and-ports.mdc`: Services, ports, environment variables
+- `assets-and-paths.mdc`: Asset locations, settings-derived paths
+- `odm-processing.mdc`: Requirements and patterns for ODM
+- `treecover-segmentation.mdc`: Using and debugging treecover segmentation
+- `upload-and-chunking.mdc`: Dataset creation and chunk upload flow
+- `collaboration.mdc`: Session preferences and guardrails
+- `testing-policy.mdc`: Sync tests, no new class-based tests, CLI usage
+
+If something is missing or unclear, ask clarifying questions before proceeding.# Rules Index
 
 Available workspace rules under `.cursor/rules/`:
 
