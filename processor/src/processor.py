@@ -337,7 +337,7 @@ def background_process():
 				# Task has error or isn't ready, remove it from queue_position to get next task
 				# but keep it in the main queue table
 				with use_client(token) as client:
-					client.table(settings.queue_position_table).delete().eq('id', task.id).execute()
+					client.table(settings.queue_table).delete().eq('id', task.id).execute()
 				logger.info(
 					f'Skipping task {task.id} due to dataset status, moving to next task',
 					LogContext(
