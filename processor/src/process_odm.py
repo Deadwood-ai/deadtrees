@@ -27,12 +27,12 @@ def process_odm(task: QueueTask, temp_dir: Path):
 	3. Extract ZIP file locally
 	4. Detect RTK files and update database with metadata
 	5. Extract EXIF metadata from images and update database
-	6. Execute ODM Docker container using --fast-orthophoto
+	6. Execute ODM Docker container using --fast-orthophoto and --crop 0.1
 	7. Move generated orthomosaic to archive/{dataset_id}_ortho.tif
 	8. Update status is_odm_done=True
 
-	Uses simplified ODM configuration with only --fast-orthophoto flag for
-	fast processing with better quality orthomosaics.
+	Uses simplified ODM configuration with --fast-orthophoto and --crop 0.1 for
+	fast processing with better quality orthomosaics and cleaner boundaries.
 
 	Args:
 		task: QueueTask with dataset_id and user information
@@ -532,10 +532,12 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			resolution = '50.0'  # 50cm/pixel for fast testing
 			odm_command.extend(
 				[
+					'--fast-orthophoto',
 					'--skip-3dmodel',  # Skip 3D model generation (faster for 2D outputs)
 					'--max-concurrency',
 					'2',  # Limit parallel processes for testing
-					'--fast-orthophoto',
+					'--crop',
+					'0.1',  # Crop with 0.1m buffer for cleaner boundaries
 				]
 			)
 		else:
@@ -548,6 +550,8 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 					'ultra',
 					'--matcher-neighbors',
 					'12',
+					'--crop',
+					'0.1',  # Crop with 0.1m buffer for cleaner boundaries
 				]
 			)
 
