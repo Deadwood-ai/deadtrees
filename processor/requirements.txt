@@ -4,6 +4,7 @@ pydantic_partial
 python-dotenv
 python-multipart
 supabase
+gotrue
 prometheus-client
 rasterio==1.4.2
 rio-cogeo

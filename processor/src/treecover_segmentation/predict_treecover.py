@@ -39,10 +39,10 @@ MINIMUM_POLYGON_AREA = config['minimum_polygon_area']
 
 def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 	"""
-	Reproject orthomosaic using image_reprojector approach for consistency with deadwood processing.
+	Reproject orthomosaic to EPSG:3395 (World Mercator) for TCD processing.
 
-	This uses the existing image_reprojector function to determine the correct parameters,
-	then performs the actual reprojection using rasterio.warp.reproject for compatibility.
+	This function properly reprojects to EPSG:3395 coordinate system as required by TCD,
+	instead of using UTM coordinates which caused incomplete image coverage.
 
 	Args:
 	    input_tif (str): Path to input orthomosaic
@@ -51,34 +51,30 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 	Returns:
 	    str: Path to reprojected file
 	"""
-	# Use image_reprojector to get VRT parameters (transform, size, etc.)
-	vrt_src = image_reprojector(input_tif, min_res=TCD_TARGET_RESOLUTION)
-
-	# Get the target parameters from the VRT
-	target_transform = vrt_src.transform
-	target_width = vrt_src.width
-	target_height = vrt_src.height
-	target_crs = vrt_src.crs
-	target_nodata = vrt_src.nodata
-
-	# Close VRT to free resources
-	vrt_src.close()
-
-	# Now perform the actual reprojection using rasterio.warp.reproject
 	with rasterio.open(input_tif) as src:
-		# Create output profile based on source but with target parameters
+		# Calculate transform for EPSG:3395 (World Mercator) directly
+		target_transform, target_width, target_height = rasterio.warp.calculate_default_transform(
+			src.crs,
+			TCD_TARGET_CRS,  # 'EPSG:3395'
+			src.width,
+			src.height,
+			*src.bounds,
+			resolution=TCD_TARGET_RESOLUTION,  # 0.1m
+		)
+
+		# Create output profile based on source but with EPSG:3395 parameters
 		profile = src.profile.copy()
 		profile.update(
 			{
-				'crs': target_crs,
+				'crs': TCD_TARGET_CRS,  # EPSG:3395, not UTM
 				'transform': target_transform,
 				'width': target_width,
 				'height': target_height,
-				'nodata': target_nodata,
+				'nodata': 0,  # Standard nodata value
 			}
 		)
 
-		# Reproject the image
+		# Reproject the image to EPSG:3395
 		with rasterio.open(output_path, 'w', **profile) as dst:
 			for i in range(1, src.count + 1):
 				rasterio.warp.reproject(
@@ -87,7 +83,7 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 					src_transform=src.transform,
 					src_crs=src.crs,
 					dst_transform=target_transform,
-					dst_crs=target_crs,
+					dst_crs=TCD_TARGET_CRS,  # EPSG:3395
 					resampling=rasterio.warp.Resampling.bilinear,
 				)
 
