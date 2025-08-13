@@ -57,58 +57,29 @@ def auth_token(test_processor_user):
 @pytest.fixture
 def test_file():
 	"""Fixture to provide test GeoTIFF file path"""
-	file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data.tif'
-	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'float-ortho-poland.tif'
-	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'fva_offset_bug.tif'
+	import os
+
+	# Check for environment variable to override test file
+	env_test_file = os.getenv('TEST_FILE_PATH')
+	if env_test_file:
+		file_path = Path(env_test_file)
+		if file_path.is_absolute():
+			# Use absolute path as-is
+			pass
+		else:
+			# Treat as relative to project root
+			file_path = Path(__file__).parent.parent.parent / env_test_file
+	else:
+		# Default test file
+		file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data.tif'
+
+	# Alternative files for manual testing (uncomment as needed):
+	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'debugging' / '5392' / 'ortho_5392.tif'
 	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data-small.tif'
-	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'corrupted-crs-small.tif'
-	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'utm.tif'  # huge file
-	# file_path = (
-	# 	Path(__file__).parent.parent.parent
-	# 	/ 'assets'
-	# 	/ 'test_data'
-	# 	/ 'debugging'
-	# 	/ 'ortho_3824_geonadir_location_problem.tif'
-	# )
-	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'debugging' / 'fva_no_segmentation.tif'
-	# file_path = (
-	# 	Path(__file__).parent.parent.parent
-	# 	/ 'assets'
-	# 	/ 'test_data'
-	# 	/ 'debugging'
-	# 	/ 'Beutelsdorf_20160926_reordered-upload-error.tif'
-	# )
-	# file_path = (
-	# 	Path(__file__).parent.parent.parent
-	# 	/ 'assets'
-	# 	/ 'test_data'
-	# 	/ 'debugging'
-	# 	/ '20220517_SASMDD0012_p1_ortho_01_cog.tif'
-	# )
-	# file_path = (
-	# 	Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'debugging' / 'ortho_3114_segmentation_error.tif'
-	# )
-	# file_path = (
-	# 	Path(__file__).parent.parent.parent
-	# 	/ 'assets'
-	# 	/ 'test_data'
-	# 	/ 'debugging'
-	# 	/ 'testcases'
-	# 	/ 'small'
-	# 	/ 'small_3904_ortho.tif'
-	# )
-	# file_path = (
-	# 	Path(__file__).parent.parent.parent
-	# 	/ 'assets'
-	# 	/ 'test_data'
-	# 	/ 'debugging'
-	# 	/ 'testcases'
-	# 	/ 'original'
-	# 	/ '3904_ortho.tif'
-	# )
+	# file_path = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'debugging' / 'ortho_3114_segmentation_error.tif'
 
 	if not file_path.exists():
-		pytest.skip('Test file not found')
+		pytest.skip(f'Test file not found: {file_path}')
 	return file_path
 
 
