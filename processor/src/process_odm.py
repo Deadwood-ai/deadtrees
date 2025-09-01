@@ -530,30 +530,11 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		if settings.DEV_MODE:
 			# Development/Test: Fast processing with lower resolution
 			resolution = '50.0'  # 50cm/pixel for fast testing
-			odm_command.extend(
-				[
-					'--fast-orthophoto',
-					'--skip-3dmodel',  # Skip 3D model generation (faster for 2D outputs)
-					'--max-concurrency',
-					'2',  # Limit parallel processes for testing
-					'--crop',
-					'0.1',  # Crop with 0.1m buffer for cleaner boundaries
-				]
-			)
+			odm_command.extend(['--fast-orthophoto', '--skip-3dmodel'])
 		else:
 			# Production: High quality processing
 			resolution = '1.0'  # 1cm/pixel for production quality
-			odm_command.extend(
-				[
-					'--fast-orthophoto',
-					'--feature-quality',
-					'ultra',
-					'--matcher-neighbors',
-					'12',
-					'--crop',
-					'0.1',  # Crop with 0.1m buffer for cleaner boundaries
-				]
-			)
+			odm_command.extend(['--fast-orthophoto', '--feature-quality', 'ultra', '--matcher-neighbors', '12'])
 
 		# Add common parameters
 		odm_command.extend(
