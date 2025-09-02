@@ -9,6 +9,7 @@ and works identically in test and production environments.
 import docker
 import tarfile
 import io
+import time
 from pathlib import Path
 from shared.logger import logger
 from shared.logging import LogContext, LogCategory
@@ -45,6 +46,12 @@ def copy_files_to_shared_volume(
 			volumes={volume_name: {'bind': '/odm_shared', 'mode': 'rw'}},
 			command=['sleep', '60'],  # Keep alive for file operations
 			user='root',
+			labels={
+				'dt': 'odm',
+				'dt_role': 'temp_transfer',
+				'dt_dataset_id': str(dataset_id),
+				'dt_volume': volume_name,
+			},
 		)
 		temp_container.start()
 
@@ -145,6 +152,12 @@ def copy_results_from_shared_volume(volume_name: str, output_dir: Path, project_
 			volumes={volume_name: {'bind': '/odm_shared', 'mode': 'ro'}},
 			command=['sleep', '60'],  # Keep alive for file operations
 			user='root',
+			labels={
+				'dt': 'odm',
+				'dt_role': 'temp_extract',
+				'dt_dataset_id': str(dataset_id),
+				'dt_volume': volume_name,
+			},
 		)
 		temp_container.start()
 
@@ -194,3 +207,66 @@ def copy_results_from_shared_volume(volume_name: str, output_dir: Path, project_
 					f'Failed to cleanup temporary extraction container: {cleanup_error}',
 					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 				)
+
+
+def _containers_referencing_volume(client: docker.DockerClient, volume_name: str):
+	"""Return a list of containers (running/created/exited) that reference a given volume."""
+	try:
+		return client.containers.list(all=True, filters={'volume': volume_name})
+	except Exception:
+		return []
+
+
+def cleanup_volume_and_references(volume_name: str, token: str, dataset_id: int, attempts: int = 3, delay_seconds: float = 2.0):
+	"""
+	Ensure a named Docker volume is cleaned up by:
+	1) Removing any containers that reference it
+	2) Removing the volume with retry/backoff
+	"""
+	client = docker.from_env()
+
+	# Remove referencing containers first
+	containers = _containers_referencing_volume(client, volume_name)
+	for c in containers:
+		try:
+			try:
+				c.reload()
+				if getattr(c, 'status', '') == 'running':
+					c.stop(timeout=10)
+			except Exception:
+				pass
+			c.remove(force=True)
+			logger.debug(
+				f'Removed container {getattr(c, 'short_id', '?')} referencing volume {volume_name}',
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+			)
+		except Exception as e:
+			logger.warning(
+				f'Failed removing container {getattr(c, 'short_id', '?')} for volume {volume_name}: {e}',
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+			)
+
+	# Try to remove the volume with retries
+	for attempt in range(1, attempts + 1):
+		try:
+			vol = client.volumes.get(volume_name)
+			vol.remove()
+			logger.info(
+				f'Shared volume {volume_name} removed successfully',
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+			)
+			return
+		except Exception as e:
+			if attempt >= attempts:
+				logger.error(
+					f'Failed to remove shared volume {volume_name} after {attempts} attempts: {e}',
+					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+				)
+				break
+			# Re-enumerate references and backoff
+			for c in _containers_referencing_volume(client, volume_name):
+				try:
+					c.remove(force=True)
+				except Exception:
+					pass
+			time.sleep(delay_seconds)

@@ -10,7 +10,7 @@ from shared.status import update_status
 from shared.logging import LogContext, LogCategory
 from shared.db import use_client
 from processor.src.utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
-from processor.src.utils.shared_volume import copy_files_to_shared_volume, copy_results_from_shared_volume
+from processor.src.utils.shared_volume import copy_files_to_shared_volume, copy_results_from_shared_volume, cleanup_volume_and_references
 from shared.exif_utils import extract_comprehensive_exif
 
 # RTK file extensions as specified in requirements
@@ -570,6 +570,12 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 				volumes={volume_name: {'bind': '/odm_data', 'mode': 'rw'}},
 				# user='1000:1000',  # Removed - running as root for simplicity
 				auto_remove=False,  # We'll manage removal manually to ensure cleanup
+				labels={
+					'dt': 'odm',
+					'dt_role': 'odm_container',
+					'dt_dataset_id': str(dataset_id),
+					'dt_volume': volume_name,
+				},
 			)
 			container_created = True
 
@@ -669,16 +675,12 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			pass
 		raise
 	finally:
-		# Always clean up the shared volume
+		# Always clean up the shared volume (remove referencing containers first)
 		try:
-			volume.remove()
-			logger.info(
-				f'Shared volume {volume_name} removed successfully',
-				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
-			)
+			cleanup_volume_and_references(volume_name, token, dataset_id)
 		except Exception as volume_cleanup_error:
 			logger.error(
-				f'Failed to remove shared volume {volume_name}: {str(volume_cleanup_error)}',
+				f'Failed to fully cleanup shared volume {volume_name}: {str(volume_cleanup_error)}',
 				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 
