@@ -1,6 +1,5 @@
 ---
-description: Dataset investigation and MCP database debugging workflows
-globs: 
+description: - Investigating failed or problematic datasets (like dataset 3904) - Debugging data processing pipeline issues - Using MCP tools to examine production database - Analyzing dataset status, errors, or processing failures
 alwaysApply: false
 ---
 # Data Debugging & Dataset Investigation
@@ -68,7 +67,7 @@ LEFT JOIN v2_deadwood_geometries dg ON l.id = dg.label_id
 WHERE l.dataset_id = ? GROUP BY l.id;
 ```
 
-## 📝 **5-STEP INVESTIGATION WORKFLOW**
+## 📝 **6-STEP INVESTIGATION WORKFLOW**
 
 ### 1. Dataset Overview
 ```sql
@@ -97,7 +96,44 @@ FROM v2_logs WHERE dataset_id = ? AND level = 'ERROR'
 ORDER BY created_at DESC LIMIT 10;
 ```
 
-### 5. System Health
+### 5. Server Resource Checks (Host)
+```sql
+-- Derive processing time window from logs (e.g., ODM)
+WITH w AS (
+  SELECT date_trunc('minute', MIN(created_at)) AS t_start,
+         date_trunc('minute', MAX(created_at)) AS t_end
+  FROM v2_logs
+  WHERE dataset_id = ? AND category = 'odm'
+)
+SELECT * FROM w;
+```
+
+```bash
+# On Ubuntu hosts with sysstat enabled (replace DD with day-of-month, times from query)
+# CPU
+LC_ALL=C sar -u -f /var/log/sysstat/saDD -s HH:MM:SS -e HH:MM:SS
+
+# Memory and swap
+LC_ALL=C sar -r -f /var/log/sysstat/saDD -s HH:MM:SS -e HH:MM:SS
+LC_ALL=C sar -S -f /var/log/sysstat/saDD -s HH:MM:SS -e HH:MM:SS
+
+# Load averages / run queue
+LC_ALL=C sar -q -f /var/log/sysstat/saDD -s HH:MM:SS -e HH:MM:SS
+
+# Kernel OOM / kill events in window
+journalctl -k --since 'YYYY-MM-DD HH:MM:SS' --until 'YYYY-MM-DD HH:MM:SS' | egrep -i 'oom|killed process|out of memory'
+
+# (Optional) Docker daemon events in window
+docker events --since 'YYYY-MM-DDTHH:MM:SS' --until 'YYYY-MM-DDTHH:MM:SS'
+```
+
+Interpretation checklist:
+- CPU: sustained >85% busy or high iowait (>5%) may indicate contention/IO bottlenecks.
+- RAM: %memused >90% or rising swap >10% suggests memory pressure; check journalctl for OOM.
+- Load: compare load vs CPU cores; load >> cores with low CPU% may be IO-bound.
+- If host looks healthy, prefer data/content or container-level root causes.
+
+### 6. System Health
 ```bash
 # Use MCP tool
 mcp_deadtrees-prod_analyze_db_health: health_type="all"
@@ -131,3 +167,28 @@ SELECT
 FROM v2_statuses s JOIN v2_datasets d ON s.dataset_id = d.id
 WHERE d.created_at > NOW() - INTERVAL '24 hours';
 ``` 
+
+## 🧠 Improvements & Additional Data to Capture
+
+- Persist host metrics snapshots per dataset/time window in DB (new table proposal, e.g., `v2_host_metrics`):
+  - dataset_id, t_start, t_end, avg_cpu_user, avg_cpu_system, avg_cpu_iowait, avg_mem_used_pct,
+    avg_swap_used_mb, avg_load1, avg_load5, avg_load15
+- Capture container-level stats and exit reasons:
+  - docker exit code, last N lines of stdout/stderr, container OOM (from cgroup/journal), image tag
+- Log processing parameters for reproducibility:
+  - ODM command/flags (resolution, feature quality, neighbors), environment (DEV/PROD)
+- Enrich raw data inventory:
+  - image_count (done), total_size_bytes (done), per-extension counts, size histogram, skipped/corrupt files list
+- EXIF summary:
+  - first/last `DateTimeOriginal`, camera `Make/Model`, focal length range, GPS availability ratio
+- Stage timing breakdown:
+  - extract zip, RTK detection, EXIF extraction, ODM stages (opensfm, mve/meshing, orthophoto), COG, thumbnail
+- Storage/IO telemetry:
+  - SSH/S3 transfer durations, retries, bandwidth; disk free space checks before processing
+- Error taxonomy & remediation hints:
+  - classify frequent failures (CRS missing, corrupt TIFF, projection mismatch, insufficient overlap) and suggest fixes
+
+Operational tips to speed triage:
+- Always derive the exact processing window from `v2_logs` and correlate with sysstat/journalctl.
+- Keep small helper scripts to map dataset timestamp → `saDD` file and run `sar` commands automatically.
+- Consider writing a CLI helper that outputs a compact resource summary next to DB log excerpts for any dataset.
