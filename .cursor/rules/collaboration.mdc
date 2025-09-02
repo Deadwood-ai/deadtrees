@@ -1,4 +1,28 @@
+---
+alwaysApply: true
+---
+
 # Collaboration & Session Preferences
+
+## WHEN TO USE
+- Guidance for agent behavior to align with maintainer preferences
+
+## Principles
+- Ask questions when anything is unclear; avoid assumptions
+- Do not commit or push code without explicit approval
+- Prefer absolute paths in tool calls
+- Cite code using file paths and line ranges when referencing existing code
+- Use `deadtrees` CLI for dev/test tasks
+- Prefer functions over classes; async for I/O in API; sync tests
+
+## Communication Style
+- Be concise and skimmable
+- Highlight critical info with bold text in responses
+- Use code fences only for relevant snippets, not entire messages
+
+## Safety
+- Never embed secrets in code or logs
+- Verify destructive actions (DB resets, deletions) explicitly# Collaboration & Session Preferences
 
 ## WHEN TO USE
 - Guidance for agent behavior to align with maintainer preferences

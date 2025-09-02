@@ -1,4 +1,39 @@
+---
+description: - Implementing or debugging dataset upload flows and metadata population
+alwaysApply: false
+---
 # Upload & Chunking
+
+## WHEN TO USE
+- Implementing or debugging dataset upload flows and metadata population
+
+## API Endpoints
+- Root: `/api/v1/`
+- Upload chunks: `/api/v1/datasets/chunk`
+
+## Key Files
+- Router: `api/src/routers/upload.py`
+- Business logic: `api/src/upload/upload.py` (e.g., `create_dataset_entry`)
+- Raw images: `api/src/upload/raw_images_processor.py`
+- GeoTIFF: `api/src/upload/geotiff_processor.py`
+
+## Dataset Creation
+- Use Pydantic models from `shared.models`
+- Insert via Supabase client in `shared.db.use_client`
+- Example: `create_dataset_entry(...)` constructs and inserts `Dataset`
+
+## Geo Bounds & CRS
+- Use `rasterio` with `Env(GTIFF_SRS_SOURCE='EPSG')`
+- Transform bounds to EPSG:4326 via `rasterio.warp.transform_bounds`
+- Log and handle missing CRS gracefully
+
+## Best Practices
+- RORO (receive object, return object) for functions
+- Early validation and structured error responses (HTTP 4xx/5xx with details)
+- No hardcoded paths; rely on `settings`
+
+## Troubleshooting
+- If chunk assembly or hashing unclear, document current behavior and ask for missing pieces before changing# Upload & Chunking
 
 ## WHEN TO USE
 - Implementing or debugging dataset upload flows and metadata population
