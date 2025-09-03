@@ -10,7 +10,11 @@ from shared.status import update_status
 from shared.logging import LogContext, LogCategory
 from shared.db import use_client
 from processor.src.utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
-from processor.src.utils.shared_volume import copy_files_to_shared_volume, copy_results_from_shared_volume, cleanup_volume_and_references
+from processor.src.utils.shared_volume import (
+	copy_files_to_shared_volume,
+	copy_results_from_shared_volume,
+	cleanup_volume_and_references,
+)
 from shared.exif_utils import extract_comprehensive_exif
 
 # RTK file extensions as specified in requirements
@@ -479,6 +483,25 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			rtk_files.append(file_path)
 		else:
 			other_files.append(file_path)
+
+	# Filter out multispectral images (e.g., DJI M3M files like *_MS_*.TIF)
+	# We prefer RGB imagery (e.g., *_D.JPG) for our default ODM run.
+	ms_excluded = []
+	filtered_image_files = []
+	for img in image_files:
+		name_upper = img.name.upper()
+		if '_MS_' in name_upper:
+			ms_excluded.append(img)
+		else:
+			filtered_image_files.append(img)
+
+	if ms_excluded:
+		logger.info(
+			f'Filtered out {len(ms_excluded)} multispectral images (keeping {len(filtered_image_files)} RGB candidates)',
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+		)
+		# Replace the image list with the filtered RGB-only set
+		image_files = filtered_image_files
 
 	logger.info(
 		f'Found {len(image_files)} image files, {len(rtk_files)} RTK files, {len(other_files)} other files in {images_dir}',
