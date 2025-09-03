@@ -1,9 +1,3 @@
-# Exclude large asset directories from Docker build context
-assets/test_data/
-assets/models/
-assets/gadm/
-assets/pheno/
-assets/biom/
 
 # Exclude development files
 .git/
@@ -42,3 +36,7 @@ tcd_test_output/
 # - shared/
 # - api/ (for api-test container)
 # - nginx/ (for nginx container)
+
+data/
+assets/
+scratchpad/
