@@ -552,8 +552,8 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		# Set resolution based on environment
 		if settings.DEV_MODE:
 			# Development/Test: Fast processing with lower resolution
-			resolution = '50.0'  # 50cm/pixel for fast testing
-			odm_command.extend(['--fast-orthophoto', '--skip-3dmodel'])
+			resolution = '1.0'  # 50cm/pixel for fast testing
+			odm_command.extend(['--fast-orthophoto', '--feature-quality', 'ultra', '--matcher-neighbors', '12'])
 		else:
 			# Production: High quality processing
 			resolution = '1.0'  # 1cm/pixel for production quality
