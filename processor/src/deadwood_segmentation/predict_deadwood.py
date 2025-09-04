@@ -1,11 +1,13 @@
 from pathlib import Path
 from shared.logger import logger
+from shared.logging import LogContext, LogCategory
+from shared.settings import settings
+from shared.db import login
 from shared.models import LabelPayloadData, LabelSourceEnum, LabelTypeEnum, LabelDataEnum
 from shared.labels import create_label_with_geometries, delete_model_prediction_labels
 from .deadtreesmodels.deadwood import DeadwoodInference
 from ..exceptions import ProcessingError
 import rasterio
-import asyncio
 from .deadtreesmodels.common.common import reproject_polygons
 
 # Get base project directory (where assets folder is located)
@@ -19,16 +21,28 @@ MODEL_PATH = str(ASSETS_DIR / 'models' / 'segformer_b5_full_epoch_100.safetensor
 def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str):
 	try:
 		# First, check and delete any existing model prediction labels for deadwood
-		logger.info(f'Checking for existing deadwood prediction labels for dataset {dataset_id}')
+		logger.info(
+			f'Checking for existing deadwood prediction labels for dataset {dataset_id}',
+			LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
 
-		logger.info('Initializing deadwood inference model')
+		logger.info(
+			'Initializing deadwood inference model',
+			LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
 		deadwood_model = DeadwoodInference(config_path=CONFIG_PATH, model_path=MODEL_PATH)
 
-		logger.info('Running deadwood inference')
+		logger.info(
+			'Running deadwood inference',
+			LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
 		polygons = deadwood_model.inference_deadwood(str(file_path))
 
 		if not any(polygons):
-			logger.warning('No deadwood polygons detected')
+			logger.warning(
+				'No deadwood polygons detected',
+				LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
+			)
 			return
 
 		with rasterio.open(str(file_path)) as src:
@@ -57,6 +71,8 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 		)
 
 		# Delete existing deadwood prediction labels
+		# Refresh token before DB ops to avoid expiry after long inference
+		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 		deleted_count = delete_model_prediction_labels(
 			dataset_id=dataset_id, label_data=LabelDataEnum.deadwood, token=token
 		)
@@ -64,10 +80,19 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 			logger.info(f'Deleted {deleted_count} existing deadwood prediction labels')
 
 		# Create label with geometries
-		logger.info('Creating label with geometries')
+		logger.info(
+			'Creating label with geometries',
+			LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
 		label = create_label_with_geometries(payload, user_id, token)
-		logger.info(f'Created label {label.id} with geometries')
+		logger.info(
+			f'Created label {label.id} with geometries',
+			LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
 
 	except Exception as e:
-		logger.error(f'Error in predict_deadwood: {str(e)}')
+		logger.error(
+			f'Error in predict_deadwood: {str(e)}',
+			LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
 		raise ProcessingError(str(e), task_type='deadwood_segmentation', dataset_id=dataset_id)

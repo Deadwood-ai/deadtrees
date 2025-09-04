@@ -1,19 +1,16 @@
-import atexit
 import shutil
-from threading import Timer
 from pathlib import Path
 from processor.src.process_geotiff import process_geotiff
 from processor.src.process_odm import process_odm
-from shared.models import QueueTask, StatusEnum, Dataset, TaskTypeEnum
+from shared.models import QueueTask, TaskTypeEnum
 from shared.settings import settings
 from shared.db import use_client, login, verify_token
-from shared.logger import logger
 from .process_thumbnail import process_thumbnail
 from .process_cog import process_cog
 from .process_deadwood_segmentation import process_deadwood_segmentation
 from .process_treecover_segmentation import process_treecover_segmentation
 from .process_metadata import process_metadata
-from .exceptions import ProcessorError, AuthenticationError, DatasetError, ProcessingError, StorageError
+from .exceptions import AuthenticationError, ProcessingError
 from shared.logging import LogContext, LogCategory, UnifiedLogger, SupabaseHandler
 
 # Initialize logger with proper cleanup
@@ -347,7 +344,7 @@ def background_process():
 				continue
 	else:
 		# inform no spot available
-		logger.debug('No spot available for new task.', LogContext(category=LogCategory.DEBUG, token=token))
+		logger.debug('No spot available for new task.', LogContext(category=LogCategory.PROCESS, token=token))
 		return
 
 

@@ -1,5 +1,5 @@
 from typing import Optional
-from .models import Status, StatusEnum
+from .models import StatusEnum
 from .db import use_client
 from .settings import settings
 from .logger import logger
@@ -82,6 +82,6 @@ def update_status(
 
 	except Exception as e:
 		logger.error(
-			f'Error updating status: {e}', LogContext(category=LogCategory.ERROR, dataset_id=dataset_id, token=token)
+			f'Error updating status: {e}', LogContext(category=LogCategory.STATUS, dataset_id=dataset_id, token=token)
 		)
 		raise

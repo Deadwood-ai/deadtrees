@@ -16,7 +16,7 @@ def upload_to_supabase(dataset_id, label, aoi, label_type, label_source, label_q
 		raise AuthenticationError('Invalid token')
 
 	try:
-		with use_client(token) as client:
+		with use_client(token):
 			headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
 			data = {
 				'dataset_id': dataset_id,
@@ -32,6 +32,6 @@ def upload_to_supabase(dataset_id, label, aoi, label_type, label_source, label_q
 	except Exception as e:
 		logger.error(
 			f'Error uploading prediction: {e}',
-			LogContext(category=LogCategory.ERROR, dataset_id=dataset_id, user_id=user.id, token=token),
+			LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user.id, token=token),
 		)
 		return None

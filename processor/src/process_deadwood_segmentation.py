@@ -116,5 +116,7 @@ def process_deadwood_segmentation(task: QueueTask, token: str, temp_dir: Path):
 				extra={'error': str(e)},
 			),
 		)
+		# Re-login to avoid using an expired token during error handling
+		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 		update_status(token, dataset_id=ortho.dataset_id, has_error=True, error_message=str(e))
 		raise ProcessingError(str(e), task_type='deadwood_segmentation', task_id=task.id, dataset_id=ortho.dataset_id)

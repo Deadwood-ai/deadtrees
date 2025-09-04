@@ -1,8 +1,6 @@
 import logging
-import time
 from typing import Any, Dict, Optional
 from enum import Enum
-import logfire
 from shared.settings import settings
 from shared.__version__ import __version__
 from shared.db import use_client
@@ -77,7 +75,7 @@ class SupabaseHandler(logging.Handler):
 			}
 
 			# Insert into v2_logs table
-			with self.use_client(getattr(record, 'token', None)) as client:
+			with self.use_client(token) as client:
 				client.table(settings.logs_table).insert(log_entry).execute()
 
 		except Exception as e:
