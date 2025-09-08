@@ -76,8 +76,8 @@ def comprehensive_test_dataset(auth_token, small_test_file, test_processor_user)
 			dataset_id = response.data[0]['id']
 			ortho_file_name = f'{dataset_id}_ortho.tif'
 
-			ortho_path = Path(settings.BASE_DIR) / settings.ARCHIVE_DIR / ortho_file_name
-			push_file_to_storage_server(str(small_test_file), str(ortho_path), auth_token, dataset_id)
+			ortho_path = f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.ARCHIVE_DIR}/{ortho_file_name}'
+			push_file_to_storage_server(str(small_test_file), ortho_path, auth_token, dataset_id)
 
 			# Add ortho entry
 			ortho_data = {
@@ -198,8 +198,8 @@ def create_test_dataset(auth_token, test_file, test_processor_user):
 		dataset_id = response.data[0]['id']
 		ortho_file_name = f'{dataset_id}_ortho.tif'
 
-		ortho_path = Path(settings.BASE_DIR) / settings.ARCHIVE_DIR / ortho_file_name
-		push_file_to_storage_server(str(test_file), str(ortho_path), auth_token, dataset_id)
+		ortho_path = f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.ARCHIVE_DIR}/{ortho_file_name}'
+		push_file_to_storage_server(str(test_file), ortho_path, auth_token, dataset_id)
 
 		# Add ortho entry
 		ortho_data = {
