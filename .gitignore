@@ -11,6 +11,7 @@ scripts/geonadir/*
 scripts/logs/*
 scripts/area_m2_update.sh
 scripts/helpers/get_file_from_remote.md
+scripts/helpers/rerun_process.md
 
 processor/tests/test_data/*
 .vscode/*
