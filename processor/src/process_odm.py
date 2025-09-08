@@ -134,8 +134,8 @@ def process_odm(task: QueueTask, temp_dir: Path):
 		if not orthomosaic_path:
 			raise Exception('ODM did not generate an orthomosaic')
 
-		# Push orthomosaic to storage server at standard location
-		remote_ortho_path = f'{settings.archive_path}/{dataset_id}_ortho.tif'
+		# Push orthomosaic to storage server at standard location (remote path)
+		remote_ortho_path = f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.ARCHIVE_DIR}/{dataset_id}_ortho.tif'
 
 		logger.info(
 			f'Pushing generated orthomosaic to storage: {remote_ortho_path}',
