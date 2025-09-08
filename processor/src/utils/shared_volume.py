@@ -217,7 +217,9 @@ def _containers_referencing_volume(client: docker.DockerClient, volume_name: str
 		return []
 
 
-def cleanup_volume_and_references(volume_name: str, token: str, dataset_id: int, attempts: int = 3, delay_seconds: float = 2.0):
+def cleanup_volume_and_references(
+	volume_name: str, token: str, dataset_id: int, attempts: int = 3, delay_seconds: float = 2.0
+):
 	"""
 	Ensure a named Docker volume is cleaned up by:
 	1) Removing any containers that reference it
@@ -237,12 +239,12 @@ def cleanup_volume_and_references(volume_name: str, token: str, dataset_id: int,
 				pass
 			c.remove(force=True)
 			logger.debug(
-				f'Removed container {getattr(c, 'short_id', '?')} referencing volume {volume_name}',
+				f'Removed container {getattr(c, "short_id", "?")} referencing volume {volume_name}',
 				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 		except Exception as e:
 			logger.warning(
-				f'Failed removing container {getattr(c, 'short_id', '?')} for volume {volume_name}: {e}',
+				f'Failed removing container {getattr(c, "short_id", "?")} for volume {volume_name}: {e}',
 				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 

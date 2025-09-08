@@ -11,6 +11,7 @@ import tarfile
 import io
 
 from shared.logger import logger
+from shared.settings import settings
 from shared.models import LabelPayloadData, LabelSourceEnum, LabelTypeEnum, LabelDataEnum
 from shared.labels import create_label_with_geometries, delete_model_prediction_labels
 from shared.logging import LogContext, LogCategory
@@ -18,7 +19,9 @@ from ..deadwood_segmentation.deadtreesmodels.common.common import (
 	mask_to_polygons,
 	reproject_polygons,
 	filter_polygons_by_area,
+	get_utm_string_from_latlon,
 )
+from processor.src.utils.shared_volume import cleanup_volume_and_references
 from ..exceptions import ProcessingError
 
 # Load configuration
@@ -29,70 +32,13 @@ with open(CONFIG_PATH, 'r') as f:
 # TCD configuration
 TCD_THRESHOLD = config['tree_cover_threshold']
 TCD_MODEL = 'restor/tcd-segformer-mit-b5'
-TCD_TARGET_RESOLUTION = config['tree_cover_inference_resolution']  # 10cm resolution
-TCD_TARGET_CRS = 'EPSG:3395'  # Mercator projection for processing
+TCD_TARGET_RESOLUTION = config['tree_cover_inference_resolution']  # nominal resolution guideline
 TCD_OUTPUT_CRS = 'EPSG:4326'  # WGS84 for database storage
-TCD_CONTAINER_IMAGE = 'deadtrees-tcd:latest'  # Our local TCD container
+TCD_CONTAINER_IMAGE = settings.TCD_CONTAINER_IMAGE  # Our local TCD container
 MINIMUM_POLYGON_AREA = config['minimum_polygon_area']
 
 
-def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
-	"""
-	Reproject orthomosaic to EPSG:3395 (World Mercator) for TCD processing.
-
-	This function properly reprojects to EPSG:3395 coordinate system as required by TCD,
-	instead of using UTM coordinates which caused incomplete image coverage.
-
-	Args:
-	    input_tif (str): Path to input orthomosaic
-	    output_path (str): Path for reprojected output file
-
-	Returns:
-	    str: Path to reprojected file
-	"""
-	with rasterio.open(input_tif) as src:
-		# Determine source ground sample distance (GSD) and avoid upsampling
-		src_xres, src_yres = src.res
-		src_gsd = max(abs(src_xres), abs(src_yres))
-		# Use the coarser of source GSD and target (0.1 m) to prevent upsampling
-		effective_resolution = max(TCD_TARGET_RESOLUTION, src_gsd)
-
-		# Calculate transform for EPSG:3395 (World Mercator) using effective resolution
-		target_transform, target_width, target_height = rasterio.warp.calculate_default_transform(
-			src.crs,
-			TCD_TARGET_CRS,  # 'EPSG:3395'
-			src.width,
-			src.height,
-			*src.bounds,
-			resolution=effective_resolution,
-		)
-
-		# Create output profile based on source but with EPSG:3395 parameters
-		profile = src.profile.copy()
-		profile.update(
-			{
-				'crs': TCD_TARGET_CRS,  # EPSG:3395, not UTM
-				'transform': target_transform,
-				'width': target_width,
-				'height': target_height,
-				'nodata': 0,  # Standard nodata value
-			}
-		)
-
-		# Reproject the image to EPSG:3395
-		with rasterio.open(output_path, 'w', **profile) as dst:
-			for i in range(1, src.count + 1):
-				rasterio.warp.reproject(
-					source=rasterio.band(src, i),
-					destination=rasterio.band(dst, i),
-					src_transform=src.transform,
-					src_crs=src.crs,
-					dst_transform=target_transform,
-					dst_crs=TCD_TARGET_CRS,  # EPSG:3395
-					resampling=rasterio.warp.Resampling.bilinear,
-				)
-
-	return output_path
+## Note: Pre-inference reprojection is not required by TCD and has been removed.
 
 
 def _copy_files_to_tcd_volume(ortho_path: str, volume_name: str, dataset_id: int, token: str) -> tuple[str, str]:
@@ -110,7 +56,7 @@ def _copy_files_to_tcd_volume(ortho_path: str, volume_name: str, dataset_id: int
 	"""
 	client = docker.from_env()
 	project_name = f'dataset_{dataset_id}'
-	container_ortho_path = f'/tcd_data/{project_name}/input/orthomosaic_reprojected.tif'
+	container_ortho_path = f'/tcd_data/{project_name}/input/orthomosaic.tif'
 	container_confidence_path = f'/tcd_data/{project_name}/output/confidence_map.tif'
 
 	logger.info(
@@ -136,9 +82,8 @@ def _copy_files_to_tcd_volume(ortho_path: str, volume_name: str, dataset_id: int
 		if exec_result.exit_code != 0:
 			raise Exception(f'Failed to create TCD directory structure: {exec_result.output.decode()}')
 
-		# Copy orthomosaic file
-		with open(ortho_path, 'rb') as f:
-			ortho_data = f.read()
+		# Copy orthomosaic file (stream to avoid loading entire file in memory)
+		ortho_file = Path(ortho_path)
 
 		# Copy pipeline script
 		pipeline_script_path = Path(__file__).parent / 'predict_pipeline.py'
@@ -148,10 +93,11 @@ def _copy_files_to_tcd_volume(ortho_path: str, volume_name: str, dataset_id: int
 		# Create tar archive with both files
 		tar_buffer = io.BytesIO()
 		with tarfile.open(mode='w', fileobj=tar_buffer) as tar:
-			# Add orthomosaic
-			ortho_info = tarfile.TarInfo(name='orthomosaic_reprojected.tif')
-			ortho_info.size = len(ortho_data)
-			tar.addfile(ortho_info, io.BytesIO(ortho_data))
+			# Add orthomosaic (streamed)
+			ortho_info = tarfile.TarInfo(name='orthomosaic.tif')
+			ortho_info.size = ortho_file.stat().st_size
+			with open(ortho_file, 'rb') as of:
+				tar.addfile(ortho_info, of)
 
 			# Add pipeline script
 			script_info = tarfile.TarInfo(name='predict_pipeline.py')
@@ -209,7 +155,7 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 	"""
 	client = docker.from_env()
 	project_name = f'dataset_{dataset_id}'
-	input_path = f'/tcd_data/{project_name}/input/orthomosaic_reprojected.tif'
+	input_path = f'/tcd_data/{project_name}/input/orthomosaic.tif'
 	output_path = f'/tcd_data/{project_name}/output/confidence_map.tif'
 
 	logger.info(
@@ -218,24 +164,32 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 	)
 
 	try:
-		# Create and run TCD container with direct Python script execution
-		# Override entrypoint to bypass the predict.py routing and run our script directly
-		container_output = client.containers.run(
-			image=TCD_CONTAINER_IMAGE,
-			command=['python', '/tcd_data/predict_pipeline.py', input_path, output_path],
-			entrypoint='',  # Override the container's entrypoint to run our command directly
-			volumes={volume_name: {'bind': '/tcd_data', 'mode': 'rw'}},
-			remove=True,  # Auto-remove container when done
-			detach=False,  # Wait for completion
-			user='root',  # Run as root for simplicity like ODM
-			# Enable GPU access for the TCD container
-			device_requests=[docker.types.DeviceRequest(count=-1, capabilities=[['gpu']])],
-			runtime='nvidia',
-			environment={
-				'NVIDIA_VISIBLE_DEVICES': 'all',
-				'NVIDIA_DRIVER_CAPABILITIES': 'all',
-			},
-		)
+		# Preflight: ensure image exists
+		try:
+			client.images.get(TCD_CONTAINER_IMAGE)
+		except Exception as e:
+			raise Exception(f'TCD container image {TCD_CONTAINER_IMAGE} not found. Build or pull it. Error: {e}')
+
+		def _run(device_requests=None):
+			return client.containers.run(
+				image=TCD_CONTAINER_IMAGE,
+				command=['python', '/tcd_data/predict_pipeline.py', input_path, output_path],
+				entrypoint='',
+				volumes={volume_name: {'bind': '/tcd_data', 'mode': 'rw'}},
+				remove=True,
+				detach=False,
+				user='root',
+				device_requests=device_requests,
+			)
+
+		try:
+			container_output = _run(device_requests=[docker.types.DeviceRequest(count=-1, capabilities=[['gpu']])])
+		except Exception as gpu_err:
+			logger.warning(
+				f'GPU execution failed for TCD container, retrying on CPU: {gpu_err}',
+				LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+			)
+			container_output = _run(device_requests=None)
 
 		logger.info(
 			'TCD Pipeline container execution completed successfully',
@@ -409,14 +363,8 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 		temp_dir = tempfile.mkdtemp(prefix=f'treecover_{dataset_id}_')
 		temp_dir_path = Path(temp_dir)
 
-		# Step 1: Preprocess - Reproject orthomosaic using rasterio (replaces convert_to_projected)
-		logger.info(
-			f'Reprojecting orthomosaic to {TCD_TARGET_CRS} at {TCD_TARGET_RESOLUTION}m resolution',
-			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
-		)
-
-		reprojected_path = temp_dir_path / 'orthomosaic_reprojected.tif'
-		_reproject_orthomosaic_for_tcd(str(file_path), str(reprojected_path))
+		# Step 1: Preprocess - no reprojection required; use standardized orthomosaic as-is
+		reprojected_path = file_path
 
 		# Step 2: Container Setup - Create shared volume and copy reprojected ortho
 		volume_name = f'tcd_volume_{dataset_id}_{uuid.uuid4().hex[:8]}'
@@ -428,7 +376,7 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 
-		# Copy reprojected orthomosaic and pipeline script to shared volume
+		# Copy orthomosaic and pipeline script to shared volume
 		container_ortho_path, container_confidence_path = _copy_files_to_tcd_volume(
 			str(reprojected_path), volume_name, dataset_id, token
 		)
@@ -489,8 +437,8 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 
-		# Open the reprojected dataset to get the transform for mask_to_polygons
-		with rasterio.open(str(reprojected_path)) as dataset:
+		# Use the confidence map dataset to get the transform for mask_to_polygons
+		with rasterio.open(str(confidence_map_path)) as dataset:
 			polygons = mask_to_polygons(outimage, dataset)
 
 		if not any(polygons):
@@ -500,14 +448,36 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 			)
 			return
 
-		# Step 6.1: Polygon Area Filtering - Remove small noise polygons
+		# Choose metric CRS for area filtering, then reproject to WGS84
+		logger.info(
+			'Preparing polygons for area filtering and reprojection',
+			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+		)
+
+		with rasterio.open(str(confidence_map_path)) as dataset:
+			source_crs = dataset.crs
+			bounds = dataset.bounds
+			center_x = (bounds.left + bounds.right) / 2.0
+			center_y = (bounds.bottom + bounds.top) / 2.0
+
+		# Select area CRS
+		area_crs = None
+		try:
+			if source_crs and not source_crs.is_geographic:
+				area_crs = source_crs.to_string()
+			else:
+				area_crs = get_utm_string_from_latlon(center_y, center_x)
+		except Exception:
+			area_crs = source_crs.to_string() if source_crs else 'EPSG:3857'
+
+		if area_crs and source_crs and area_crs != source_crs.to_string():
+			polygons = reproject_polygons(polygons, source_crs, area_crs)
+
 		logger.info(
 			f'Filtering {len(polygons)} polygons by minimum area of {MINIMUM_POLYGON_AREA}m²',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
-
 		polygons = filter_polygons_by_area(polygons, MINIMUM_POLYGON_AREA)
-
 		if not any(polygons):
 			logger.warning(
 				'No tree cover polygons detected after area filtering',
@@ -515,17 +485,11 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 			)
 			return
 
-		# Step 7: Coordinate Reprojection - Reproject from projected CRS back to WGS84
-		logger.info(
-			f'Reprojecting {len(polygons)} filtered polygons to {TCD_OUTPUT_CRS}',
-			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
-		)
-
-		# Get the CRS from the reprojected dataset for accurate reprojection
-		with rasterio.open(str(reprojected_path)) as dataset:
-			source_crs = dataset.crs
-
-		polygons = reproject_polygons(polygons, source_crs, TCD_OUTPUT_CRS)
+		# Reproject to WGS84 for storage
+		if area_crs:
+			polygons = reproject_polygons(polygons, area_crs, TCD_OUTPUT_CRS)
+		else:
+			polygons = reproject_polygons(polygons, source_crs, TCD_OUTPUT_CRS)
 
 		# Step 8: Database Storage - Convert to GeoJSON and save via labels system
 		logger.info(
@@ -544,8 +508,8 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 		}
 
 		# Create label payload
-		# Derive actual output resolution from the reprojected dataset to record in properties
-		with rasterio.open(str(reprojected_path)) as dataset:
+		# Derive actual output resolution from the confidence map dataset to record in properties
+		with rasterio.open(str(confidence_map_path)) as dataset:
 			out_xres, out_yres = dataset.res
 			actual_resolution_m = float(max(abs(out_xres), abs(out_yres)))
 
@@ -560,7 +524,7 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 				'model': TCD_MODEL,
 				'threshold': TCD_THRESHOLD,
 				'resolution_m': actual_resolution_m,
-				'processing_crs': TCD_TARGET_CRS,
+				'processing_crs': source_crs.to_string() if source_crs else None,
 				'container_version': TCD_CONTAINER_IMAGE,
 			},
 		)
@@ -598,7 +562,10 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 	finally:
 		# Clean up resources
 		if volume_name:
-			_cleanup_tcd_volume(volume_name, dataset_id, token)
+			try:
+				cleanup_volume_and_references(volume_name, token, dataset_id)
+			except Exception:
+				_cleanup_tcd_volume(volume_name, dataset_id, token)
 
 		if temp_dir and os.path.exists(temp_dir):
 			import shutil

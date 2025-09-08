@@ -73,27 +73,29 @@ def predict_with_pipeline(input_tif: str, output_confidence_map: str, threshold:
 		print(f'Saving confidence map to: {output_confidence_map}')
 
 		with rasterio.open(input_tif) as src:
-			# Create output profile based on input
+			# Create output profile based on input; clean incompatible keys
 			profile = src.profile.copy()
-			profile.update(
-				{
-					'dtype': confidence_map.dtype,
-					'count': 1,
-					'compress': 'lzw',  # Add compression
-					'nodata': None,  # Clear any nodata value for confidence map
-					'photometric': None,  # Clear any incompatible photometric settings
-					'jpeg_quality': None,  # Clear JPEG-specific settings
-				}
-			)
+			profile.update({'dtype': confidence_map.dtype, 'count': 1, 'compress': 'lzw'})
+			# Ensure a concrete nodata value for mask-aware IO (uint8 -> 0)
+			profile['nodata'] = 0
+			# Remove keys that can conflict for single-band confidence maps
+			for k in ('photometric', 'jpeg_quality'):
+				if k in profile:
+					profile.pop(k)
 
 			# Update dimensions if they differ
 			if confidence_map.shape != (src.height, src.width):
 				profile.update({'height': confidence_map.shape[0], 'width': confidence_map.shape[1]})
 				print(f'Updated profile dimensions to match confidence map: {confidence_map.shape}')
 
-			# Write confidence map
+			# Write confidence map and propagate mask from input
 			with rasterio.open(output_confidence_map, 'w', **profile) as dst:
 				dst.write(confidence_map, 1)
+				try:
+					mask = src.dataset_mask()
+					dst.write_mask(mask)
+				except Exception as e:
+					print(f'Warning: failed to write dataset mask: {e}')
 
 		print(f'Successfully saved confidence map with shape {confidence_map.shape}')
 		return True

@@ -1,8 +1,6 @@
-from typing import Optional
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 from pathlib import Path
-import tempfile
 import os
 
 # load an .env file if it exists
@@ -41,6 +39,9 @@ class Settings(BaseSettings):
 	# Environment indicator
 	ENV: str = ENV
 	DEV_MODE: bool = IS_DEVELOPMENT
+
+	# Containers
+	TCD_CONTAINER_IMAGE: str = 'deadtrees-tcd:latest'
 
 	# Base paths and directories
 	BASE_DIR: str = str(BASE)
