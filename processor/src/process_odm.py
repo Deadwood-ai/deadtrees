@@ -9,7 +9,11 @@ from shared.settings import settings
 from shared.status import update_status
 from shared.logging import LogContext, LogCategory
 from shared.db import use_client
-from processor.src.utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
+from processor.src.utils.ssh import (
+	pull_file_from_storage_server,
+	push_file_to_storage_server,
+	check_file_exists_on_storage,
+)
 from processor.src.utils.shared_volume import (
 	copy_files_to_shared_volume,
 	copy_results_from_shared_volume,
@@ -130,7 +134,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 
 		# Step 7: Move generated orthomosaic to standard location
 		project_name = f'dataset_{dataset_id}'
-		orthomosaic_path = _find_orthomosaic(odm_host_temp_dir, project_name)
+		orthomosaic_path = _find_orthomosaic(odm_host_temp_dir, project_name, token, dataset_id)
 		if not orthomosaic_path:
 			raise Exception('ODM did not generate an orthomosaic')
 
@@ -148,6 +152,19 @@ def process_odm(task: QueueTask, temp_dir: Path):
 			token=token,
 			dataset_id=dataset_id,
 		)
+
+		# Verify orthomosaic exists on storage after push
+		if check_file_exists_on_storage(remote_ortho_path, token):
+			logger.info(
+				f'Verified orthomosaic on storage: {remote_ortho_path}',
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+			)
+		else:
+			logger.error(
+				f'Orthomosaic missing on storage after push: {remote_ortho_path}',
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+			)
+			raise Exception('Orthomosaic verification failed after push to storage')
 
 		# Step 8: Update status
 		update_status(dataset_id=dataset_id, is_odm_done=True, token=token)
@@ -698,7 +715,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			)
 
 
-def _find_orthomosaic(output_dir: Path, project_name: str) -> Optional[Path]:
+def _find_orthomosaic(output_dir: Path, project_name: str, token: str, dataset_id: int) -> Optional[Path]:
 	"""
 	Find the generated orthomosaic file in ODM output directory.
 
@@ -713,20 +730,35 @@ def _find_orthomosaic(output_dir: Path, project_name: str) -> Optional[Path]:
 	project_dir = output_dir / project_name
 
 	# Debug: Log what's actually in the output directory
-	logger.info(f'Looking for orthomosaic in: {project_dir}')
+	logger.info(
+		f'Looking for orthomosaic in: {project_dir}',
+		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+	)
 	if project_dir.exists():
 		all_files = list(project_dir.rglob('*'))
-		logger.info(f'Files in project directory: {[str(f.relative_to(project_dir)) for f in all_files[:20]]}')
+		logger.info(
+			f'Files in project directory: {[str(f.relative_to(project_dir)) for f in all_files[:20]]}',
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+		)
 
 		# Look specifically in odm_orthophoto directory
 		orthophoto_dir = project_dir / 'odm_orthophoto'
 		if orthophoto_dir.exists():
 			orthophoto_files = list(orthophoto_dir.iterdir())
-			logger.info(f'Files in odm_orthophoto directory: {[f.name for f in orthophoto_files]}')
+			logger.info(
+				f'Files in odm_orthophoto directory: {[f.name for f in orthophoto_files]}',
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+			)
 		else:
-			logger.warning(f'odm_orthophoto directory does not exist in {project_dir}')
+			logger.warning(
+				f'odm_orthophoto directory does not exist in {project_dir}',
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+			)
 	else:
-		logger.error(f'Project directory does not exist: {project_dir}')
+		logger.error(
+			f'Project directory does not exist: {project_dir}',
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+		)
 		return None
 
 	orthophoto_patterns = [
@@ -737,16 +769,27 @@ def _find_orthomosaic(output_dir: Path, project_name: str) -> Optional[Path]:
 	]
 
 	for pattern in orthophoto_patterns:
-		logger.debug(f'Checking pattern: {pattern}')
+		logger.debug(
+			f'Checking pattern: {pattern}', LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id)
+		)
 		if pattern.exists():
-			logger.info(f'Found orthomosaic at: {pattern}')
+			logger.info(
+				f'Found orthomosaic at: {pattern}',
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+			)
 			return pattern
 
 	# Fallback: search for any .tif files in the project directory
 	for tif_file in project_dir.rglob('*.tif'):
 		if 'orthophoto' in tif_file.name.lower():
-			logger.info(f'Found orthomosaic via fallback search: {tif_file}')
+			logger.info(
+				f'Found orthomosaic via fallback search: {tif_file}',
+				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+			)
 			return tif_file
 
-	logger.error(f'No orthomosaic found in {project_dir}')
+	logger.error(
+		f'No orthomosaic found in {project_dir}',
+		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+	)
 	return None
