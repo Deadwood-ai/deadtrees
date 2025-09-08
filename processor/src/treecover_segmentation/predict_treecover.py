@@ -68,7 +68,7 @@ def _copy_files_to_tcd_volume(ortho_path: str, volume_name: str, dataset_id: int
 	# Create temporary container with named volume mounted
 	temp_container = None
 	try:
-		container_name = f'dt-tcd-transfer-d{dataset_id}-{int(time.time())}'
+		container_name = f'dt-tcd-transfer-d{dataset_id}-{int(time.time())}-{uuid.uuid4().hex[:6]}'
 		temp_container = client.containers.create(
 			image='alpine',
 			volumes={volume_name: {'bind': '/tcd_data', 'mode': 'rw'}},
@@ -195,7 +195,7 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 					'dt_dataset_id': str(dataset_id),
 					'dt_volume': volume_name,
 				},
-				name=f'dt-tcd-pipeline-d{dataset_id}-{int(time.time())}',
+				name=f'dt-tcd-pipeline-d{dataset_id}-{int(time.time())}-{uuid.uuid4().hex[:6]}',
 				device_requests=device_requests,
 			)
 
@@ -259,7 +259,7 @@ def _copy_confidence_map_from_volume(volume_name: str, local_output_dir: Path, d
 	# Create temporary container with shared volume mounted
 	temp_container = None
 	try:
-		container_name = f'dt-tcd-extract-d{dataset_id}-{int(time.time())}'
+		container_name = f'dt-tcd-extract-d{dataset_id}-{int(time.time())}-{uuid.uuid4().hex[:6]}'
 		temp_container = client.containers.create(
 			image='alpine',
 			volumes={volume_name: {'bind': '/tcd_data', 'mode': 'ro'}},
