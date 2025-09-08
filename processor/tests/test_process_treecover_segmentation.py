@@ -164,12 +164,12 @@ def test_tcd_container_availability():
 	try:
 		client = docker.from_env()
 		# Check if our local TCD container image exists
-		image = client.images.get('deadtrees-tcd:latest')
+		image = client.images.get(settings.TCD_CONTAINER_IMAGE)
 		assert image is not None
 
 		# Test that we can create a container (but don't run it)
 		container = client.containers.create(
-			image='deadtrees-tcd:latest',
+			image=settings.TCD_CONTAINER_IMAGE,
 			command=['--help'],  # Just test help command
 		)
 		assert container is not None
@@ -178,7 +178,7 @@ def test_tcd_container_availability():
 		container.remove()
 
 	except docker.errors.ImageNotFound:
-		pytest.skip('Local TCD container deadtrees-tcd:latest not found - run docker build first')
+		pytest.skip(f'Local TCD container {settings.TCD_CONTAINER_IMAGE} not found - run docker build first')
 	except Exception as e:
 		pytest.skip(f'Docker or TCD container not available: {str(e)}')
 
