@@ -46,6 +46,7 @@ def copy_files_to_shared_volume(
 			volumes={volume_name: {'bind': '/odm_shared', 'mode': 'rw'}},
 			command=['sleep', '60'],  # Keep alive for file operations
 			user='root',
+			auto_remove=True,
 			labels={
 				'dt': 'odm',
 				'dt_role': 'temp_transfer',
@@ -152,6 +153,7 @@ def copy_results_from_shared_volume(volume_name: str, output_dir: Path, project_
 			volumes={volume_name: {'bind': '/odm_shared', 'mode': 'ro'}},
 			command=['sleep', '60'],  # Keep alive for file operations
 			user='root',
+			auto_remove=True,
 			labels={
 				'dt': 'odm',
 				'dt_role': 'temp_extract',
@@ -218,7 +220,7 @@ def _containers_referencing_volume(client: docker.DockerClient, volume_name: str
 
 
 def cleanup_volume_and_references(
-	volume_name: str, token: str, dataset_id: int, attempts: int = 3, delay_seconds: float = 2.0
+	volume_name: str, token: str, dataset_id: int, attempts: int = 8, delay_seconds: float = 2.0
 ):
 	"""
 	Ensure a named Docker volume is cleaned up by:

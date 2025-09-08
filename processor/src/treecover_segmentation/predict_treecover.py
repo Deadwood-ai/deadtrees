@@ -72,6 +72,7 @@ def _copy_files_to_tcd_volume(ortho_path: str, volume_name: str, dataset_id: int
 			volumes={volume_name: {'bind': '/tcd_data', 'mode': 'rw'}},
 			command=['sleep', '60'],  # Keep alive for file operations
 			user='root',
+			auto_remove=True,
 		)
 		temp_container.start()
 
@@ -247,6 +248,7 @@ def _copy_confidence_map_from_volume(volume_name: str, local_output_dir: Path, d
 			volumes={volume_name: {'bind': '/tcd_data', 'mode': 'ro'}},
 			command=['sleep', '60'],  # Keep alive for file operations
 			user='root',
+			auto_remove=True,
 		)
 		temp_container.start()
 

@@ -94,7 +94,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 
 		# Step 4: Detect RTK files and update database with comprehensive metadata
 		logger.info(
-			f'Analyzing extracted files for RTK data and image content',
+			'Analyzing extracted files for RTK data and image content',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
@@ -103,7 +103,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 
 		# Step 5: Extract EXIF metadata from images and update database
 		logger.info(
-			f'Extracting EXIF metadata from drone images',
+			'Extracting EXIF metadata from drone images',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
@@ -122,7 +122,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 		regular_temp_dir.mkdir(exist_ok=True)
 
 		logger.info(
-			f'Starting ODM processing with Docker container',
+			'Starting ODM processing with Docker container',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
@@ -535,7 +535,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 
 	try:
 		# Create shared volume for this processing session
-		volume = client.volumes.create(name=volume_name)
+		client.volumes.create(name=volume_name)
 
 		logger.info(
 			f'Created shared volume {volume_name} for ODM processing',
@@ -552,7 +552,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		# Set resolution based on environment
 		if settings.DEV_MODE:
 			# Development/Test: Fast processing with lower resolution
-			resolution = '1.0'  # 50cm/pixel for fast testing
+			resolution = '50.0'  # 50cm/pixel for fast testing
 			odm_command.extend(['--fast-orthophoto', '--feature-quality', 'ultra', '--matcher-neighbors', '12'])
 		else:
 			# Production: High quality processing
@@ -578,8 +578,6 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		)
 
 		# Create ODM container with shared volume (environment-agnostic approach)
-		container = None
-		container_created = False
 
 		try:
 			logger.info(
@@ -587,35 +585,38 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 
-			container = client.containers.create(
-				image='opendronemap/odm',
-				command=odm_command,
-				volumes={volume_name: {'bind': '/odm_data', 'mode': 'rw'}},
-				# user='1000:1000',  # Removed - running as root for simplicity
-				auto_remove=False,  # We'll manage removal manually to ensure cleanup
-				labels={
-					'dt': 'odm',
-					'dt_role': 'odm_container',
-					'dt_dataset_id': str(dataset_id),
-					'dt_volume': volume_name,
-				},
-			)
-			container_created = True
-
-			# Start the container
-			container.start()
-
+			# Run in foreground with automatic removal on exit; capture combined output
 			logger.info(
 				'ODM container started, processing images...',
 				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
-
-			# Wait for completion and get logs
-			exit_status = container.wait()['StatusCode']
-
-			# Get both stdout and stderr logs
-			stdout_logs = container.logs(stdout=True, stderr=False).decode('utf-8', errors='ignore')
-			stderr_logs = container.logs(stdout=False, stderr=True).decode('utf-8', errors='ignore')
+			stdout_logs = ''
+			stderr_logs = ''
+			exit_status = 0
+			try:
+				output = client.containers.run(
+					image='opendronemap/odm',
+					command=odm_command,
+					volumes={volume_name: {'bind': '/odm_data', 'mode': 'rw'}},
+					remove=True,
+					detach=False,
+					labels={
+						'dt': 'odm',
+						'dt_role': 'odm_container',
+						'dt_dataset_id': str(dataset_id),
+						'dt_volume': volume_name,
+					},
+				)
+				stdout_logs = (
+					output.decode('utf-8', errors='ignore') if isinstance(output, (bytes, bytearray)) else str(output)
+				)
+			except docker.errors.ContainerError as ce:
+				exit_status = getattr(ce, 'exit_status', 1)
+				# ce.stderr may contain error output; container may already be removed
+				try:
+					stderr_logs = ce.stderr.decode('utf-8', errors='ignore') if getattr(ce, 'stderr', None) else ''
+				except Exception:
+					stderr_logs = ''
 
 			if exit_status == 0:
 				logger.info(
@@ -672,19 +673,8 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 					f'ODM processing failed with exit code {exit_status}. stdout: {stdout_logs[-500:] if stdout_logs else "No stdout"}. stderr: {stderr_logs[-500:] if stderr_logs else "No stderr"}'
 				)
 		finally:
-			# Always remove the container, even if an exception occurred
-			if container_created and container:
-				try:
-					container.remove()
-					logger.info(
-						'ODM container removed successfully',
-						LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
-					)
-				except Exception as cleanup_error:
-					logger.error(
-						f'Failed to remove ODM container: {str(cleanup_error)}',
-						LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
-					)
+			# No manual removal needed when remove=True
+			...
 
 	except Exception as e:
 		logger.error(
