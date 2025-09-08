@@ -2,6 +2,7 @@ import tempfile
 import os
 import uuid
 import json
+import time
 from pathlib import Path
 import numpy as np
 import rasterio
@@ -67,12 +68,20 @@ def _copy_files_to_tcd_volume(ortho_path: str, volume_name: str, dataset_id: int
 	# Create temporary container with named volume mounted
 	temp_container = None
 	try:
+		container_name = f'dt-tcd-transfer-d{dataset_id}-{int(time.time())}'
 		temp_container = client.containers.create(
 			image='alpine',
 			volumes={volume_name: {'bind': '/tcd_data', 'mode': 'rw'}},
-			command=['sleep', '60'],  # Keep alive for file operations
+			command=['tail', '-f', '/dev/null'],  # Keep alive for file operations (no timeout)
+			name=container_name,
 			user='root',
 			auto_remove=True,
+			labels={
+				'dt': 'tcd',
+				'dt_role': 'temp_transfer',
+				'dt_dataset_id': str(dataset_id),
+				'dt_volume': volume_name,
+			},
 		)
 		temp_container.start()
 
@@ -180,6 +189,13 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 				remove=True,
 				detach=False,
 				user='root',
+				labels={
+					'dt': 'tcd',
+					'dt_role': 'tcd_pipeline',
+					'dt_dataset_id': str(dataset_id),
+					'dt_volume': volume_name,
+				},
+				name=f'dt-tcd-pipeline-d{dataset_id}-{int(time.time())}',
 				device_requests=device_requests,
 			)
 
@@ -243,12 +259,20 @@ def _copy_confidence_map_from_volume(volume_name: str, local_output_dir: Path, d
 	# Create temporary container with shared volume mounted
 	temp_container = None
 	try:
+		container_name = f'dt-tcd-extract-d{dataset_id}-{int(time.time())}'
 		temp_container = client.containers.create(
 			image='alpine',
 			volumes={volume_name: {'bind': '/tcd_data', 'mode': 'ro'}},
-			command=['sleep', '60'],  # Keep alive for file operations
+			command=['tail', '-f', '/dev/null'],  # Keep alive for file operations (no timeout)
+			name=container_name,
 			user='root',
 			auto_remove=True,
+			labels={
+				'dt': 'tcd',
+				'dt_role': 'temp_extract',
+				'dt_dataset_id': str(dataset_id),
+				'dt_volume': volume_name,
+			},
 		)
 		temp_container.start()
 

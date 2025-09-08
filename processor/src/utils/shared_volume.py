@@ -41,10 +41,12 @@ def copy_files_to_shared_volume(
 	# Create temporary container with named volume mounted
 	temp_container = None
 	try:
+		container_name = f'dt-odm-transfer-d{dataset_id}-{int(time.time())}'
 		temp_container = client.containers.create(
 			image='alpine',
 			volumes={volume_name: {'bind': '/odm_shared', 'mode': 'rw'}},
-			command=['sleep', '60'],  # Keep alive for file operations
+			command=['tail', '-f', '/dev/null'],  # Keep alive for file operations (no timeout)
+			name=container_name,
 			user='root',
 			auto_remove=True,
 			labels={
@@ -148,10 +150,12 @@ def copy_results_from_shared_volume(volume_name: str, output_dir: Path, project_
 	# Create temporary container with shared volume mounted
 	temp_container = None
 	try:
+		container_name = f'dt-odm-extract-d{dataset_id}-{int(time.time())}'
 		temp_container = client.containers.create(
 			image='alpine',
 			volumes={volume_name: {'bind': '/odm_shared', 'mode': 'ro'}},
-			command=['sleep', '60'],  # Keep alive for file operations
+			command=['tail', '-f', '/dev/null'],  # Keep alive for file operations (no timeout)
+			name=container_name,
 			user='root',
 			auto_remove=True,
 			labels={
@@ -174,7 +178,7 @@ def copy_results_from_shared_volume(volume_name: str, output_dir: Path, project_
 			raise Exception(f'Project directory /odm_shared/{project_name} not found in volume')
 
 		logger.info(
-			f'Project directory exists in volume, copying files',
+			'Project directory exists in volume, copying files',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
