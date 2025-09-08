@@ -130,16 +130,14 @@ def test_complete_odm_to_thumbnail_pipeline(pipeline_odm_task, auth_token):
 	dataset_id = pipeline_odm_task.dataset_id
 
 	# Step 1: ODM Processing (Raw images → Orthomosaic)
-	print('\n=== Step 1: ODM Processing ===')
 	process_odm(pipeline_odm_task, Path(settings.processing_path))
 
 	with use_client(auth_token) as client:
 		status = client.table(settings.statuses_table).select('*').eq('dataset_id', dataset_id).execute().data[0]
 		assert status['is_odm_done'] is True
-	print('✅ ODM processing completed - orthomosaic generated')
 
 	# Step 2: GeoTIFF Processing (Orthomosaic → Standardized + Ortho entry)
-	print('\n=== Step 2: GeoTIFF Processing ===')
+
 	geotiff_task = QueueTask(
 		id=2,
 		dataset_id=dataset_id,
@@ -160,10 +158,8 @@ def test_complete_odm_to_thumbnail_pipeline(pipeline_odm_task, auth_token):
 		# Verify ortho entry was created
 		ortho_response = client.table(settings.orthos_table).select('*').eq('dataset_id', dataset_id).execute()
 		assert len(ortho_response.data) == 1
-	print('✅ GeoTIFF processing completed - ortho entry created')
 
 	# Step 3: COG Processing (Standardized → Cloud Optimized GeoTIFF)
-	print('\n=== Step 3: COG Processing ===')
 	cog_task = QueueTask(
 		id=3,
 		dataset_id=dataset_id,
@@ -184,10 +180,9 @@ def test_complete_odm_to_thumbnail_pipeline(pipeline_odm_task, auth_token):
 		# Verify COG entry was created
 		cog_response = client.table(settings.cogs_table).select('*').eq('dataset_id', dataset_id).execute()
 		assert len(cog_response.data) == 1
-	print('✅ COG processing completed - cloud optimized GeoTIFF created')
 
 	# Step 4: Thumbnail Processing (COG → Thumbnail image)
-	print('\n=== Step 4: Thumbnail Processing ===')
+
 	thumbnail_task = QueueTask(
 		id=4,
 		dataset_id=dataset_id,
@@ -208,10 +203,8 @@ def test_complete_odm_to_thumbnail_pipeline(pipeline_odm_task, auth_token):
 		# Verify thumbnail entry was created
 		thumbnail_response = client.table(settings.thumbnails_table).select('*').eq('dataset_id', dataset_id).execute()
 		assert len(thumbnail_response.data) == 1
-	print('✅ Thumbnail processing completed - preview image created')
 
 	# Final verification: Complete pipeline success
-	print('\n=== Final Status Verification ===')
 	with use_client(auth_token) as client:
 		final_status = client.table(settings.statuses_table).select('*').eq('dataset_id', dataset_id).execute().data[0]
 
@@ -222,6 +215,3 @@ def test_complete_odm_to_thumbnail_pipeline(pipeline_odm_task, auth_token):
 		assert final_status['is_thumbnail_done'] is True
 		assert final_status['has_error'] is False
 		assert final_status['current_status'] == StatusEnum.idle
-
-	print('🎉 COMPLETE PIPELINE SUCCESS: ODM → GeoTIFF → COG → Thumbnail')
-	print('✅ Raw drone images successfully processed through processing pipeline!')
