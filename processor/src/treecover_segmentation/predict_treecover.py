@@ -18,7 +18,6 @@ from ..deadwood_segmentation.deadtreesmodels.common.common import (
 	mask_to_polygons,
 	reproject_polygons,
 	filter_polygons_by_area,
-	image_reprojector,
 )
 from ..exceptions import ProcessingError
 
@@ -52,14 +51,20 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 	    str: Path to reprojected file
 	"""
 	with rasterio.open(input_tif) as src:
-		# Calculate transform for EPSG:3395 (World Mercator) directly
+		# Determine source ground sample distance (GSD) and avoid upsampling
+		src_xres, src_yres = src.res
+		src_gsd = max(abs(src_xres), abs(src_yres))
+		# Use the coarser of source GSD and target (0.1 m) to prevent upsampling
+		effective_resolution = max(TCD_TARGET_RESOLUTION, src_gsd)
+
+		# Calculate transform for EPSG:3395 (World Mercator) using effective resolution
 		target_transform, target_width, target_height = rasterio.warp.calculate_default_transform(
 			src.crs,
 			TCD_TARGET_CRS,  # 'EPSG:3395'
 			src.width,
 			src.height,
 			*src.bounds,
-			resolution=TCD_TARGET_RESOLUTION,  # 0.1m
+			resolution=effective_resolution,
 		)
 
 		# Create output profile based on source but with EPSG:3395 parameters
@@ -539,6 +544,11 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 		}
 
 		# Create label payload
+		# Derive actual output resolution from the reprojected dataset to record in properties
+		with rasterio.open(str(reprojected_path)) as dataset:
+			out_xres, out_yres = dataset.res
+			actual_resolution_m = float(max(abs(out_xres), abs(out_yres)))
+
 		payload = LabelPayloadData(
 			dataset_id=dataset_id,
 			label_source=LabelSourceEnum.model_prediction,
@@ -549,7 +559,7 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 			properties={
 				'model': TCD_MODEL,
 				'threshold': TCD_THRESHOLD,
-				'resolution_m': TCD_TARGET_RESOLUTION,
+				'resolution_m': actual_resolution_m,
 				'processing_crs': TCD_TARGET_CRS,
 				'container_version': TCD_CONTAINER_IMAGE,
 			},
