@@ -6,6 +6,7 @@ pydantic_partial
 python-dotenv
 python-multipart
 supabase
+gotrue
 rasterio==1.4.2
 rio-cogeo
 fire
