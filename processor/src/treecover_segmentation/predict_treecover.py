@@ -34,12 +34,61 @@ with open(CONFIG_PATH, 'r') as f:
 TCD_THRESHOLD = config['tree_cover_threshold']
 TCD_MODEL = 'restor/tcd-segformer-mit-b5'
 TCD_TARGET_RESOLUTION = config['tree_cover_inference_resolution']  # nominal resolution guideline
+TCD_TARGET_CRS = 'EPSG:3395'  # World Mercator for TCD processing
 TCD_OUTPUT_CRS = 'EPSG:4326'  # WGS84 for database storage
 TCD_CONTAINER_IMAGE = settings.TCD_CONTAINER_IMAGE  # Our local TCD container
 MINIMUM_POLYGON_AREA = config['minimum_polygon_area']
 
 
-## Note: Pre-inference reprojection is not required by TCD and has been removed.
+## Note: Reprojection for TCD: use World Mercator (EPSG:3395) to ensure full coverage
+
+
+def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
+	"""
+	Reproject orthomosaic to EPSG:3395 (World Mercator) for TCD processing.
+
+	Args:
+		input_tif (str): Path to input orthomosaic
+		output_path (str): Path where the reprojected orthomosaic will be written
+
+	Returns:
+		str: Path to reprojected file
+	"""
+	with rasterio.open(input_tif) as src:
+		# Calculate transform and dimensions for target CRS at desired resolution
+		target_transform, target_width, target_height = rasterio.warp.calculate_default_transform(
+			src.crs,
+			TCD_TARGET_CRS,
+			src.width,
+			src.height,
+			*src.bounds,
+			resolution=TCD_TARGET_RESOLUTION,
+		)
+
+		profile = src.profile.copy()
+		profile.update(
+			{
+				'crs': TCD_TARGET_CRS,
+				'transform': target_transform,
+				'width': target_width,
+				'height': target_height,
+				'nodata': 0,
+			}
+		)
+
+		with rasterio.open(output_path, 'w', **profile) as dst:
+			for i in range(1, src.count + 1):
+				rasterio.warp.reproject(
+					source=rasterio.band(src, i),
+					destination=rasterio.band(dst, i),
+					src_transform=src.transform,
+					src_crs=src.crs,
+					dst_transform=target_transform,
+					dst_crs=TCD_TARGET_CRS,
+					resampling=rasterio.warp.Resampling.bilinear,
+				)
+
+	return output_path
 
 
 def _copy_files_to_tcd_volume(ortho_path: str, volume_name: str, dataset_id: int, token: str) -> tuple[str, str]:
@@ -189,6 +238,11 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 				remove=True,
 				detach=False,
 				user='root',
+				runtime='nvidia',
+				environment={
+					'NVIDIA_VISIBLE_DEVICES': 'all',
+					'NVIDIA_DRIVER_CAPABILITIES': 'all',
+				},
 				labels={
 					'dt': 'tcd',
 					'dt_role': 'tcd_pipeline',
@@ -389,8 +443,9 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 		temp_dir = tempfile.mkdtemp(prefix=f'treecover_{dataset_id}_')
 		temp_dir_path = Path(temp_dir)
 
-		# Step 1: Preprocess - no reprojection required; use standardized orthomosaic as-is
-		reprojected_path = file_path
+		# Step 1: Preprocess - reproject orthomosaic to EPSG:3395 for TCD
+		reprojected_temp_path = temp_dir_path / 'reprojected_orthomosaic.tif'
+		reprojected_path = Path(_reproject_orthomosaic_for_tcd(str(file_path), str(reprojected_temp_path)))
 
 		# Step 2: Container Setup - Create shared volume and copy reprojected ortho
 		volume_name = f'tcd_volume_{dataset_id}_{uuid.uuid4().hex[:8]}'

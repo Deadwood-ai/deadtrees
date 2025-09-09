@@ -10,9 +10,11 @@ import sys
 import os
 import numpy as np
 import rasterio
+import rasterio.warp
 
 try:
 	from tcd_pipeline.pipeline import Pipeline
+	from tcd_pipeline.util import convert_to_projected
 except ImportError as e:
 	print(f'Error importing TCD pipeline: {e}', file=sys.stderr)
 	sys.exit(1)
@@ -37,13 +39,47 @@ def predict_with_pipeline(input_tif: str, output_confidence_map: str, threshold:
 		print(f'Starting TCD Pipeline prediction for: {input_tif}')
 		print(f'Output confidence map will be saved to: {output_confidence_map}')
 
+		# Determine effective input: reproject to metric CRS and only resample when source GSD < 0.1 m
+		TCD_MIN_RES_M = 0.1
+		effective_input = input_tif
+		reprojected_input = None
+		try:
+			with rasterio.open(input_tif) as src:
+				if src.crs is not None:
+					# Estimate source resolution in meters by projecting bounds to EPSG:3395
+					default_transform, _, _ = rasterio.warp.calculate_default_transform(
+						src.crs, 'EPSG:3395', src.width, src.height, *src.bounds
+					)
+					orig_res_m = abs(default_transform.a)
+					print(f'Estimated source resolution (m): {orig_res_m:.6f}')
+					should_resample = orig_res_m < TCD_MIN_RES_M
+					target_gsd = TCD_MIN_RES_M if should_resample else orig_res_m
+					base_dir = os.path.dirname(input_tif)
+					base_name, _ = os.path.splitext(os.path.basename(input_tif))
+					reprojected_input = os.path.join(base_dir, f'{base_name}_reprojected.tif')
+					print(
+						f'Reprojecting to metric CRS (EPSG:3395); resample={should_resample} target_gsd_m={target_gsd}'
+					)
+					convert_to_projected(
+						input_tif,
+						reprojected_input,
+						resample=should_resample,
+						target_gsd_m=float(target_gsd),
+						dst_crs='EPSG:3395',
+					)
+					effective_input = reprojected_input
+				else:
+					print('Warning: input has no CRS; proceeding without reprojection')
+		except Exception as reproj_err:
+			print(f'Warning: reprojection step failed: {reproj_err}; using original input')
+
 		# Initialize the TCD pipeline with the segformer model
 		print('Initializing TCD Pipeline...')
 		pipeline = Pipeline(model_or_config='restor/tcd-segformer-mit-b5')
 
 		# Run prediction - this handles all tiling internally
-		print('Running TCD prediction...')
-		result = pipeline.predict(input_tif)
+		print(f'Running TCD prediction on: {effective_input}')
+		result = pipeline.predict(effective_input)
 
 		# Get confidence map from result
 		print(f'Extracting confidence map... (type: {type(result.confidence_map)})')
@@ -72,7 +108,7 @@ def predict_with_pipeline(input_tif: str, output_confidence_map: str, threshold:
 		# Save confidence map as GeoTIFF with same spatial reference as input
 		print(f'Saving confidence map to: {output_confidence_map}')
 
-		with rasterio.open(input_tif) as src:
+		with rasterio.open(effective_input) as src:
 			# Create output profile based on input; clean incompatible keys
 			profile = src.profile.copy()
 			profile.update({'dtype': confidence_map.dtype, 'count': 1, 'compress': 'lzw'})
