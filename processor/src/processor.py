@@ -328,20 +328,31 @@ def background_process():
 						category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
 					),
 				)
-				process_task(task, token=token)
+				# Mark task as processing to avoid duplicate picks while running
+				with use_client(token) as client:
+					client.table(settings.queue_table).update({'is_processing': True}).eq('id', task.id).execute()
+
+				try:
+					process_task(task, token=token)
+				finally:
+					# If the task still exists (was not deleted by process_task), reset is_processing to False
+					with use_client(token) as client:
+						result = client.table(settings.queue_table).select('id').eq('id', task.id).execute()
+					if result.data:
+						with use_client(token) as client:
+							client.table(settings.queue_table).update({'is_processing': False}).eq(
+								'id', task.id
+							).execute()
 				break
 			else:
-				# Task has error or isn't ready, remove it from queue_position to get next task
-				# but keep it in the main queue table
-				with use_client(token) as client:
-					client.table(settings.queue_table).delete().eq('id', task.id).execute()
+				# Task has error or isn't ready; skip it for now and exit loop to try again later
 				logger.info(
-					f'Skipping task {task.id} due to dataset status, moving to next task',
+					f'Skipping task {task.id} due to dataset status; will retry later',
 					LogContext(
 						category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
 					),
 				)
-				continue
+				break
 	else:
 		# inform no spot available
 		logger.debug('No spot available for new task.', LogContext(category=LogCategory.PROCESS, token=token))
