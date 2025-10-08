@@ -300,7 +300,11 @@ def background_process():
 	token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 	user = verify_token(token)
 	if not user:
-		raise Exception(status_code=401, detail='Invalid token')
+		# Token verification failed, try fresh login without cache
+		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD, use_cached_session=False)
+		user = verify_token(token)
+		if not user:
+			raise Exception(status_code=401, detail='Invalid token after fresh login')
 
 	# get the number of currently running tasks
 	num_of_running = current_running_tasks(token)

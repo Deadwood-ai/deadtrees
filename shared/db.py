@@ -74,14 +74,19 @@ def verify_token(jwt: str) -> Union[Literal[False], User]:
 	Returns:
 	    Union[Literal[False], User]: Returns true if user session is active, false if not
 	"""
-	# make the authentication
-	with use_client(jwt) as client:
-		response = client.auth.get_user(jwt)
+	global cached_session
 
-	# check the token
+	# make the authentication
 	try:
+		with use_client(jwt) as client:
+			response = client.auth.get_user(jwt)
 		return response.user
-	except Exception:
+	except Exception as e:
+		# If verification fails and we have a cached session, clear it
+		# This handles the case where the session was invalidated server-side
+		if cached_session and 'Session from session_id claim in JWT does not exist' in str(e):
+			print('cached session invalidated server-side, clearing cache')
+			cached_session = None
 		return False
 
 
