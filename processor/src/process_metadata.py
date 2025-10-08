@@ -117,6 +117,9 @@ def process_metadata(task: QueueTask, temp_dir: Path):
 			version=1,
 			processing_runtime=runtime,
 		)
+
+		# Refresh token before database operations
+		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 		update_status(token, task.dataset_id, current_status=StatusEnum.idle, is_metadata_done=True)
 		# Save to database, excluding created_at to use DB default
 		logger.info(
@@ -159,6 +162,3 @@ def process_metadata(task: QueueTask, temp_dir: Path):
 		)
 		update_status(token, task.dataset_id, has_error=True, error_message=str(e))
 		raise ProcessingError(str(e), task_type='metadata', task_id=task.id, dataset_id=task.dataset_id)
-
-	# Update final status
-	update_status(token, task.dataset_id, current_status=StatusEnum.idle, is_metadata_done=True)

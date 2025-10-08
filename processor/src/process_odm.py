@@ -167,6 +167,8 @@ def process_odm(task: QueueTask, temp_dir: Path):
 			raise Exception('Orthomosaic verification failed after push to storage')
 
 		# Step 8: Update status
+		# Re-login to ensure we have a fresh token (ODM processing may take >1hr for large datasets)
+		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 		update_status(dataset_id=dataset_id, is_odm_done=True, token=token)
 
 		logger.info(
