@@ -115,7 +115,14 @@ def test_priority_queue_order(test_dataset, auth_token):
 	# Check queue positions
 	with use_client(auth_token) as clientNew:
 		# Order by priority DESC to match the database view's ordering
-		response = clientNew.table(settings.queue_position_table).select('*').order('priority', desc=True).execute()
+		# Filter by dataset_id to avoid interference from other tests
+		response = (
+			clientNew.table(settings.queue_position_table)
+			.select('*')
+			.eq('dataset_id', test_dataset)
+			.order('priority', desc=True)
+			.execute()
+		)
 		tasks = response.data
 
 		# Verify order matches priority DESC ordering from the view
