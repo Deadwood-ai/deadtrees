@@ -351,11 +351,22 @@ def _copy_confidence_map_from_volume(volume_name: str, local_output_dir: Path, d
 		archive_stream, _ = temp_container.get_archive(container_confidence_path)
 
 		# Extract confidence map to local directory
-		with tarfile.open(mode='r|', fileobj=io.BytesIO(b''.join(archive_stream))) as tar:
-			tar.extractall(local_output_dir)
+		# FIXED: Stream directly without loading entire archive into memory
+		# This prevents memory exhaustion on large confidence maps
+		start_time = time.time()
+		file_count = 0
+		total_bytes = 0
 
+		with tarfile.open(mode='r|*', fileobj=archive_stream) as tar:
+			for member in tar:
+				tar.extract(member, local_output_dir)
+				file_count += 1
+				total_bytes += member.size
+
+		# Log extraction stats
+		elapsed = time.time() - start_time
 		logger.info(
-			f'Successfully copied confidence map to {confidence_map_path}',
+			f'Successfully copied confidence map to {confidence_map_path}: {file_count} files, {total_bytes / 1024 / 1024:.1f} MB in {elapsed:.1f}s',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 

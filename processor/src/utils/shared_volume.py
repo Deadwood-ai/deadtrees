@@ -186,11 +186,32 @@ def copy_results_from_shared_volume(volume_name: str, output_dir: Path, project_
 		archive_stream, _ = temp_container.get_archive(f'/odm_shared/{project_name}')
 
 		# Extract archive to output directory
-		with tarfile.open(mode='r|', fileobj=io.BytesIO(b''.join(archive_stream))) as tar:
-			tar.extractall(output_dir)
+		# FIXED: Stream directly without loading entire archive into memory
+		# This prevents memory exhaustion on large datasets (40GB+)
+		start_time = time.time()
+		file_count = 0
+		total_bytes = 0
 
+		with tarfile.open(mode='r|*', fileobj=archive_stream) as tar:
+			for member in tar:
+				tar.extract(member, output_dir)
+				file_count += 1
+				total_bytes += member.size
+
+				# Log progress every 100 files to track extraction
+				if file_count % 100 == 0:
+					elapsed = time.time() - start_time
+					rate_mb_s = (total_bytes / 1024 / 1024) / elapsed if elapsed > 0 else 0
+					logger.info(
+						f'Extraction progress: {file_count} files, {total_bytes / 1024 / 1024:.1f} MB, {rate_mb_s:.1f} MB/s',
+						LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+					)
+
+		# Log final extraction stats
+		total_time = time.time() - start_time
+		avg_rate = (total_bytes / 1024 / 1024) / total_time if total_time > 0 else 0
 		logger.info(
-			'Successfully copied ODM results from shared volume',
+			f'Successfully copied ODM results from shared volume: {file_count} files, {total_bytes / 1024 / 1024:.1f} MB in {total_time:.1f}s ({avg_rate:.1f} MB/s)',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
