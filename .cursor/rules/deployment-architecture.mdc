@@ -1,0 +1,296 @@
+---
+alwaysApply: true
+---
+
+# Deployment Architecture & Machine Separation
+
+## WHEN TO USE
+- Understanding how services are deployed
+- Debugging container data transfer issues
+- Working with ODM or treecover processing
+- Troubleshooting permission issues with volumes
+- Understanding why named volumes are used
+
+## CRITICAL ARCHITECTURAL CONTEXT
+
+### Production: 2 SEPARATE Physical Machines
+
+**Machine A: API Server**
+```
+Location: Separate physical server
+Runs: docker-compose.api.yaml
+Services:
+  - NGINX (reverse proxy, file serving)
+  - FastAPI API service
+  - Local /data/ directory for file storage
+Purpose: User-facing API, file uploads/downloads
+```
+
+**Machine B: Processor Server**
+```
+Location: Separate physical server (current working machine)
+Runs: docker-compose.processor.yaml
+Services:
+  - Processor orchestrator
+  - Spawns ODM containers
+  - Spawns TCD (treecover) containers
+  - NO shared /data/ with Machine A
+Purpose: Heavy processing (ODM, segmentation)
+Data Transfer: SSH pull/push to Machine A
+```
+
+### Test Environment: 1 Machine (Simulates Separation)
+
+**Machine: Development Workstation**
+```
+Location: Local machine
+Runs: docker-compose.test.yaml
+Services:
+  - API + NGINX (has ./data:/data mount)
+  - Processor (NO ./data mount - intentional!)
+  - Processor uses SSH to API container
+Purpose: Test the same separation as production
+```
+
+**Why Processor Has NO /data Mount in Test:**
+- Simulates production where processor and API are on different machines
+- Forces processor to use SSH pull/push (same as prod)
+- Catches bugs that would only appear in production
+
+---
+
+## DATA FLOW PATTERNS
+
+### Standard Processing Flow
+```
+1. User uploads → API → Storage (Machine A /data/)
+2. Queue entry created in Supabase
+3. Processor (Machine B) polls queue
+4. Processor SSH pulls file from Machine A
+5. Processor creates named Docker volume
+6. Processor copies data to volume
+7. Processing container (ODM/TCD) mounts volume
+8. Processing container writes results to volume
+9. Processor extracts results from volume
+10. Processor SSH pushes results to Machine A
+11. Processor updates database
+```
+
+### Why Named Volumes (Not Bind Mounts)
+
+**Original Problem (That Led to Named Volumes):**
+- Initially: Everything in one container (simple!)
+- Then: Needed multiple independent containers (ODM, TCD, etc.)
+- Tried: Bind mounts between containers
+- Hit: Permission issues (UID mismatches, read/write conflicts)
+- Solution: Named Docker volumes with extraction containers
+
+**Named Volumes Benefits:**
+- ✅ No shared filesystem needed between machines
+- ✅ Works identically in test and prod
+- ✅ Simulates machine separation correctly
+- ✅ Each container pulls its own data (SSH)
+- ✅ Avoids permission issues from bind mounts
+- ✅ Container UIDs don't conflict
+
+**Why NOT Bind Mounts:**
+- ❌ Would break separation simulation in test
+- ❌ Permission problems (ODM runs as UID 999, processor as different UID)
+- ❌ Doesn't match production (no shared filesystem)
+- ❌ Files written by one container unreadable by another
+
+---
+
+## CONTAINER DATA TRANSFER PATTERN
+
+### ODM Processing (process_odm.py)
+```python
+# 1. Create named volume
+volume_name = f'odm_processing_{dataset_id}'
+client.volumes.create(name=volume_name)
+
+# 2. Copy input files to volume via temp container
+copy_files_to_shared_volume(images, volume_name)
+
+# 3. Run ODM with volume mounted
+client.containers.run(
+    image='opendronemap/odm',
+    volumes={volume_name: {'bind': '/odm_data', 'mode': 'rw'}},
+    remove=True,
+    detach=False,
+)
+
+# 4. Extract results from volume via temp container
+copy_results_from_shared_volume(volume_name, output_dir)
+
+# 5. Cleanup volume
+cleanup_volume_and_references(volume_name)
+```
+
+### Treecover Processing (predict_treecover.py)
+```python
+# Same pattern as ODM
+volume_name = f'tcd_volume_{dataset_id}'
+client.volumes.create(name=volume_name)
+_copy_files_to_tcd_volume(ortho_path, volume_name)
+_run_tcd_pipeline_container(volume_name)
+_copy_confidence_map_from_volume(volume_name, output_dir)
+_cleanup_tcd_volume(volume_name)
+```
+
+---
+
+## KNOWN ISSUES & FIXES
+
+### Issue: Tar Extraction Memory Exhaustion (CRITICAL)
+**Location:** `processor/src/utils/shared_volume.py:189`
+```python
+# BROKEN - loads entire 40GB archive into RAM!
+with tarfile.open(mode='r|', fileobj=io.BytesIO(b''.join(archive_stream))) as tar:
+    tar.extractall(output_dir)
+```
+
+**Fix:** Stream tar directly without loading
+```python
+# FIXED - streams without RAM loading
+with tarfile.open(mode='r|*', fileobj=archive_stream) as tar:
+    for member in tar:
+        tar.extract(member, output_dir)
+```
+
+**Same Bug Exists In:**
+- `processor/src/treecover_segmentation/predict_treecover.py:354`
+
+---
+
+## DOCKER COMPOSE CONFIGURATIONS
+
+### Production API (docker-compose.api.yaml)
+```yaml
+services:
+  api:
+    volumes:
+      - /data:/data  # Local file storage
+  
+  nginx:
+    volumes:
+      - /data:/data:ro  # Serves files from /data
+```
+
+### Production Processor (docker-compose.processor.yaml)
+```yaml
+services:
+  processor:
+    volumes:
+      - ./processor:/app/processor
+      - ./shared:/app/shared
+      - ./assets:/app/assets
+      - /var/run/docker.sock:/var/run/docker.sock  # Spawn containers
+      # NO /data mount - pulls via SSH!
+    environment:
+      - STORAGE_SERVER_IP=<api-machine-ip>
+      - SSH_PRIVATE_KEY_PATH=/tmp/ssh-keys/processing-to-storage
+```
+
+### Test Environment (docker-compose.test.yaml)
+```yaml
+services:
+  processor-test:
+    volumes:
+      - ./processor:/app/processor
+      - ./shared:/app/shared
+      - ./assets:/app/assets
+      - /var/run/docker.sock:/var/run/docker.sock
+      # NO /data mount - simulates prod separation!
+  
+  api-test:
+    volumes:
+      - ./data:/data:rw  # Only API has /data
+  
+  nginx:
+    volumes:
+      - ./data:/data/:rw  # NGINX serves from /data
+```
+
+---
+
+## TROUBLESHOOTING
+
+### "Permission denied" on files in /data
+- Expected! Processor shouldn't access /data directly
+- Use SSH pull/push instead
+- Check `processor/src/utils/ssh.py`
+
+### "Volume in use" when cleaning up
+- Named volumes referenced by zombie extract containers
+- Run startup cleanup routine
+- Check for containers with label: `dt_role=temp_extract`
+
+### "Can't access files from ODM container"
+- Don't use bind mounts - use named volumes
+- Extraction container pattern is correct architecture
+- Issue is likely tar streaming bug, not permissions
+
+### Test environment SSH not working
+- Verify nginx container has SSH server running
+- Check port 2222 exposed
+- Verify SSH keys mounted: `~/.ssh/processing-to-storage`
+
+---
+
+## KEY FILES FOR DATA TRANSFER
+
+**SSH Operations:**
+- `processor/src/utils/ssh.py` - pull_file_from_storage_server, push_file_to_storage_server
+
+**Volume Operations:**
+- `processor/src/utils/shared_volume.py` - copy_files_to_shared_volume, copy_results_from_shared_volume
+
+**ODM Processing:**
+- `processor/src/process_odm.py` - Uses named volumes + SSH
+
+**Treecover Processing:**
+- `processor/src/process_treecover_segmentation.py` - Entry point
+- `processor/src/treecover_segmentation/predict_treecover.py` - Uses named volumes + SSH
+
+---
+
+## ANTI-PATTERNS TO AVOID
+
+❌ **Don't bind mount /data in processor**
+- Breaks production model
+- Creates permission issues
+- Defeats separation simulation
+
+❌ **Don't try to share filesystems between API and Processor**
+- They're on different machines in prod
+- Test should simulate this
+
+❌ **Don't load tar archives into memory**
+- Stream directly from Docker API
+- See tar streaming fix above
+
+❌ **Don't skip SSH in test environment**
+- Must match production data flow
+- Tests should catch SSH issues
+
+---
+
+## QUESTIONS TO ASK
+
+When debugging data transfer issues:
+1. Is this in test or production?
+2. Are we trying to share /data between API and processor? (Don't!)
+3. Are we using named volumes or bind mounts? (Use named volumes)
+4. Is tar extraction hanging? (Likely memory issue)
+5. Are there zombie extract containers? (Run cleanup)
+
+---
+
+## REFERENCES
+
+- Analysis document: `ANALYSIS_ODM_EXTRACTION_FAILURE.md`
+- Architecture document: `ARCHITECTURE_ANALYSIS_CONTAINER_DATA_TRANSFER.md`
+- Settings: `shared/settings.py` (STORAGE_SERVER_* vars)
+- SSH utils: `processor/src/utils/ssh.py`
+- Volume utils: `processor/src/utils/shared_volume.py`

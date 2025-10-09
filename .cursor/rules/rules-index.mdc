@@ -9,25 +9,30 @@ Available workspace rules under `.cursor/rules/`:
 - `development-workflow.mdc`: CLI-first dev/test workflow, ports, troubleshooting
 - `code-map.mdc`: High-level map of modules and key files
 - `env-and-ports.mdc`: Services, ports, environment variables
+- `deployment-architecture.mdc`: **CRITICAL** - Production architecture, machine separation, named volumes
 - `assets-and-paths.mdc`: Asset locations, settings-derived paths
-- `odm-processing.mdc`: Requirements and patterns for ODM
+- `odm-processing.mdc`: Requirements, patterns, tar streaming bug for ODM
 - `treecover-segmentation.mdc`: Using and debugging treecover segmentation
 - `upload-and-chunking.mdc`: Dataset creation and chunk upload flow
 - `collaboration.mdc`: Session preferences and guardrails
 - `testing-policy.mdc`: Sync tests, no new class-based tests, CLI usage
+- `project-structure.mdc`: Module organization and file placement
+- `code-standards.mdc`: Programming standards and patterns
+- `data-debugging.mdc`: Dataset investigation and debugging
+- `database-mcp.mdc`: Database operations and MCP tools
+- `github.mdc`: GitHub CLI and workflows
 
-If something is missing or unclear, ask clarifying questions before proceeding.# Rules Index
+## Critical Rules for New Agents
 
-Available workspace rules under `.cursor/rules/`:
+**Must read first:**
+1. `deployment-architecture.mdc` - Understanding production vs test, machine separation
+2. `code-map.mdc` - Where functionality lives
+3. `development-workflow.mdc` - How to run tests and debug
 
-- `development-workflow.mdc`: CLI-first dev/test workflow, ports, troubleshooting
-- `code-map.mdc`: High-level map of modules and key files
-- `env-and-ports.mdc`: Services, ports, environment variables
-- `assets-and-paths.mdc`: Asset locations, settings-derived paths
-- `odm-processing.mdc`: Requirements and patterns for ODM
-- `treecover-segmentation.mdc`: Using and debugging treecover segmentation
-- `upload-and-chunking.mdc`: Dataset creation and chunk upload flow
-- `collaboration.mdc`: Session preferences and guardrails
-- `testing-policy.mdc`: Sync tests, no new class-based tests, CLI usage
+**For specific tasks:**
+- Working with ODM → `odm-processing.mdc`
+- Working with treecover → `treecover-segmentation.mdc`
+- Data transfer issues → `deployment-architecture.mdc`
+- Testing → `testing-policy.mdc` + `development-workflow.mdc`
 
 If something is missing or unclear, ask clarifying questions before proceeding.
