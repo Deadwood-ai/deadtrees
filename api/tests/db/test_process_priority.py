@@ -97,41 +97,65 @@ def test_process_invalid_priority(test_dataset, auth_token):
 	assert response.status_code == 422  # Validation error
 
 
-def test_priority_queue_order(test_dataset, auth_token):
+def test_priority_queue_order(auth_token, test_user):
 	"""Test that tasks are ordered correctly by priority"""
-	# Create three tasks with different priorities
+	# Create three datasets with different priorities
+	# Note: Each dataset can only have one queue entry, so we need 3 separate datasets
 	priorities = [2, 5, 1]  # Default, Highest, Lowest
 	task_ids = []
+	dataset_ids = []
 
-	for priority in priorities:
-		response = client.put(
-			f'/datasets/{test_dataset}/process',
-			headers={'Authorization': f'Bearer {auth_token}'},
-			json={'task_types': ['metadata'], 'priority': priority},
-		)
-		assert response.status_code == 200
-		task_ids.append(response.json()['id'])
+	try:
+		# Create 3 test datasets
+		with use_client(auth_token) as supabaseClient:
+			for i, priority in enumerate(priorities):
+				# Create test dataset
+				dataset_data = {
+					'user_id': test_user,
+					'license': LicenseEnum.cc_by.value,
+					'platform': PlatformEnum.drone.value,
+					'data_access': DatasetAccessEnum.public.value,
+					'authors': ['test_author'],
+					'file_name': f'test_priority_db_{i}.zip',  # Required field
+				}
+				dataset_response = supabaseClient.table(settings.datasets_table).insert(dataset_data).execute()
+				dataset_id = dataset_response.data[0]['id']
+				dataset_ids.append(dataset_id)
 
-	# Check queue positions
-	with use_client(auth_token) as clientNew:
-		# Order by priority DESC to match the database view's ordering
-		# Filter by dataset_id to avoid interference from other tests
-		response = (
-			clientNew.table(settings.queue_position_table)
-			.select('*')
-			.eq('dataset_id', test_dataset)
-			.order('priority', desc=True)
-			.execute()
-		)
-		tasks = response.data
+				# Create status entry
+				status_data = {'dataset_id': dataset_id}
+				supabaseClient.table(settings.statuses_table).insert(status_data).execute()
 
-		# Verify order matches priority DESC ordering from the view
-		assert len(tasks) == 3
-		assert tasks[0]['priority'] == 5  # Highest priority (5) comes first
-		assert tasks[1]['priority'] == 2  # Default priority (2) in middle
-		assert tasks[2]['priority'] == 1  # Lowest priority (1) comes last
+				# Create queue task with specific priority
+				response = client.put(
+					f'/datasets/{dataset_id}/process',
+					headers={'Authorization': f'Bearer {auth_token}'},
+					json={'task_types': ['metadata'], 'priority': priority},
+				)
+				assert response.status_code == 200
+				task_ids.append(response.json()['id'])
 
-	# Cleanup
-	with use_client(auth_token) as supabaseClient:
-		for task_id in task_ids:
-			supabaseClient.table(settings.queue_table).delete().eq('id', task_id).execute()
+		# Check queue positions across all datasets
+		with use_client(auth_token) as clientNew:
+			# Order by priority DESC to match the database view's ordering
+			# Filter by our test dataset IDs
+			response = (
+				clientNew.table(settings.queue_position_table)
+				.select('*')
+				.in_('dataset_id', dataset_ids)
+				.order('priority', desc=True)
+				.execute()
+			)
+			tasks = response.data
+
+			# Verify order matches priority DESC ordering from the view
+			assert len(tasks) == 3
+			assert tasks[0]['priority'] == 5  # Highest priority (5) comes first
+			assert tasks[1]['priority'] == 2  # Default priority (2) in middle
+			assert tasks[2]['priority'] == 1  # Lowest priority (1) comes last
+
+	finally:
+		# Cleanup datasets (cascade deletes queue items and status entries)
+		with use_client(auth_token) as supabaseClient:
+			for dataset_id in dataset_ids:
+				supabaseClient.table(settings.datasets_table).delete().eq('id', dataset_id).execute()

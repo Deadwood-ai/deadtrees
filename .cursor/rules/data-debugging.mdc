@@ -1,5 +1,5 @@
 ---
-description: - Investigating failed or problematic datasets (like dataset 3904) - Debugging data processing pipeline issues - Using MCP tools to examine production database - Analyzing dataset status, errors, or processing failures
+description: - Investigating failed or problematic datasets (like dataset 3904) - Debugging data processing pipeline issues - Using MCP tools to examine production database - Analyzing dataset status, errors, or processing failures - Rerunning datasets after fixing issues
 alwaysApply: false
 ---
 # Data Debugging & Dataset Investigation
@@ -10,6 +10,7 @@ alwaysApply: false
 - Debugging data processing pipeline issues
 - Using MCP tools to examine production database
 - Analyzing dataset status, errors, or processing failures
+- Rerunning datasets after identifying and fixing root causes
 
 ## 🎯 **CORE PRINCIPLE**
 **ALWAYS use MCP tools for production database investigation. NEVER use deadtrees CLI for database connections.**
@@ -149,6 +150,89 @@ WHERE dataset_id = ? AND current_status != 'idle';
 -- Remove from processing queue
 DELETE FROM v2_queue WHERE dataset_id = ?;
 ```
+
+## 🔄 **RERUNNING DATASETS AFTER DEBUGGING**
+
+### Preferred Method: Use API Endpoint (No Manual DB Edits)
+
+After identifying and fixing the root cause of a dataset failure, use the API to rerun processing:
+
+```bash
+# Rerun a dataset through the API
+curl -X PUT "http://localhost:8080/api/v1/datasets/{dataset_id}/process" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task_types": ["odm", "cog", "thumbnail", "metadata"],
+    "priority": 1
+  }'
+```
+
+**The endpoint automatically:**
+- Checks if dataset is actively being processed (returns 409 Conflict if yes)
+- Removes any old/stuck queue entries for the dataset
+- Adds fresh queue entry with specified tasks and priority
+- Returns queue position and estimated time
+
+**Task Types Available:**
+- `odm` - OpenDroneMap processing (raw images → ortho)
+- `cog` - Cloud Optimized GeoTIFF generation
+- `thumbnail` - Thumbnail generation
+- `metadata` - Extract metadata (admin levels, biome, phenology)
+- `geotiff` - Process uploaded GeoTIFF
+- `deadwood` - Deadwood segmentation
+- `treecover` - Tree cover segmentation
+
+**Common Rerun Scenarios:**
+
+```bash
+# Full rerun (everything)
+task_types: ["odm", "cog", "thumbnail", "metadata", "deadwood", "treecover"]
+
+# Rerun from ODM (uploaded raw images failed)
+task_types: ["odm", "cog", "thumbnail", "metadata"]
+
+# Rerun post-processing only (ODM succeeded, but COG/thumbnail failed)
+task_types: ["cog", "thumbnail", "metadata"]
+
+# Rerun segmentation only
+task_types: ["deadwood", "treecover"]
+
+# High priority rerun (test dataset)
+priority: 1  # 1=highest, 5=lowest
+```
+
+**Response Scenarios:**
+
+Success (200 OK):
+```json
+{
+  "id": 123,
+  "dataset_id": 6140,
+  "current_position": 1,
+  "estimated_time": 3600.0,
+  "task_types": ["odm", "cog", "thumbnail"],
+  "priority": 1
+}
+```
+
+Active Processing (409 Conflict):
+```json
+{
+  "detail": "Dataset 6140 is currently being processed. Please stop the active processing container first, then retry."
+}
+```
+
+**If You Get 409 Conflict:**
+1. Identify the running container/process for that dataset
+2. Stop the container manually: `docker stop <container_id>`
+3. Retry the API call
+
+**Notes:**
+- The API endpoint handles queue cleanup automatically
+- No need to manually delete from `v2_queue` table
+- Processor's startup cleanup will handle Docker volumes/containers
+- Always prefer API over manual DB manipulation
 
 ## 📊 **MONITORING QUERIES**
 ```sql

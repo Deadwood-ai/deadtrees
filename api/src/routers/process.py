@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Body
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, Field, validator
 
-from shared.db import verify_token, use_client
+from shared.db import verify_token, use_client, login
 from shared.settings import settings
 from shared.models import TaskPayload, QueueTask, TaskTypeEnum
 from shared.logging import LogContext, LogCategory, UnifiedLogger, SupabaseHandler
@@ -77,6 +77,54 @@ def create_processing_task(
 			),
 		)
 		raise HTTPException(status_code=400, detail=f'Invalid task type: {str(e)}')
+
+	# Check if dataset is currently being processed and clean up old queue items
+	try:
+		with use_client(token) as client:
+			# Check for active processing
+			active_tasks = (
+				client.table(settings.queue_table)
+				.select('*')
+				.eq('dataset_id', dataset_id)
+				.eq('is_processing', True)
+				.execute()
+			)
+
+			if active_tasks.data:
+				logger.warning(
+					f'Dataset {dataset_id} is currently being processed',
+					LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token),
+				)
+				raise HTTPException(
+					status_code=409,
+					detail=f'Dataset {dataset_id} is currently being processed. Please stop the active processing container first, then retry.',
+				)
+
+		# Check for existing queue items and delete them (users can delete their own items)
+		existing_tasks = client.table(settings.queue_table).select('id').eq('dataset_id', dataset_id).execute()
+
+		if existing_tasks.data:
+			# Delete all existing queue items for this dataset (clean slate for rerun)
+			client.table(settings.queue_table).delete().eq('dataset_id', dataset_id).execute()
+			logger.info(
+				f'Removed {len(existing_tasks.data)} existing queue items for dataset {dataset_id}',
+				LogContext(
+					category=LogCategory.ADD_PROCESS,
+					user_id=user.id,
+					dataset_id=dataset_id,
+					token=token,
+					extra={'removed_count': len(existing_tasks.data)},
+				),
+			)
+
+	except HTTPException:
+		raise
+	except Exception as e:
+		msg = f'Error checking queue status for dataset {dataset_id}: {str(e)}'
+		logger.error(
+			msg, LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token)
+		)
+		raise HTTPException(status_code=500, detail=msg)
 
 	# Load the dataset info
 	try:
