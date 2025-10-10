@@ -37,6 +37,36 @@ TCD_TARGET_RESOLUTION = config['tree_cover_inference_resolution']  # nominal res
 TCD_TARGET_CRS = 'EPSG:3395'  # World Mercator for TCD processing
 TCD_OUTPUT_CRS = 'EPSG:4326'  # WGS84 for database storage
 TCD_CONTAINER_IMAGE = settings.TCD_CONTAINER_IMAGE  # Our local TCD container
+
+
+class _GeneratorStream(io.RawIOBase):
+	"""
+	Wraps a generator to provide a file-like interface for tarfile.
+
+	Docker's get_archive() returns a generator, but tarfile.open() expects
+	a file-like object with a .read() method. This wrapper bridges that gap
+	by implementing the io.RawIOBase interface and streaming chunks from
+	the generator without loading the entire archive into memory.
+	"""
+
+	def __init__(self, generator):
+		self.generator = generator
+		self.leftover = b''
+
+	def readable(self):
+		return True
+
+	def readinto(self, b):
+		try:
+			length = len(b)
+			chunk = self.leftover or next(self.generator)
+			output, self.leftover = chunk[:length], chunk[length:]
+			b[: len(output)] = output
+			return len(output)
+		except StopIteration:
+			return 0  # Indicate EOF
+
+
 MINIMUM_POLYGON_AREA = config['minimum_polygon_area']
 
 
@@ -351,13 +381,15 @@ def _copy_confidence_map_from_volume(volume_name: str, local_output_dir: Path, d
 		archive_stream, _ = temp_container.get_archive(container_confidence_path)
 
 		# Extract confidence map to local directory
-		# FIXED: Stream directly without loading entire archive into memory
-		# This prevents memory exhaustion on large confidence maps
+		# FIXED: Wrap generator in file-like object for tarfile streaming
+		# Docker's get_archive() returns a generator, but tarfile expects a file-like object
+		# This prevents memory exhaustion on large confidence maps while properly handling the generator
 		start_time = time.time()
 		file_count = 0
 		total_bytes = 0
 
-		with tarfile.open(mode='r|*', fileobj=archive_stream) as tar:
+		wrapped_stream = io.BufferedReader(_GeneratorStream(archive_stream))
+		with tarfile.open(mode='r|*', fileobj=wrapped_stream) as tar:
 			for member in tar:
 				tar.extract(member, local_output_dir)
 				file_count += 1

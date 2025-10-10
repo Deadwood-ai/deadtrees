@@ -15,6 +15,34 @@ from shared.logger import logger
 from shared.logging import LogContext, LogCategory
 
 
+class _GeneratorStream(io.RawIOBase):
+	"""
+	Wraps a generator to provide a file-like interface for tarfile.
+
+	Docker's get_archive() returns a generator, but tarfile.open() expects
+	a file-like object with a .read() method. This wrapper bridges that gap
+	by implementing the io.RawIOBase interface and streaming chunks from
+	the generator without loading the entire archive into memory.
+	"""
+
+	def __init__(self, generator):
+		self.generator = generator
+		self.leftover = b''
+
+	def readable(self):
+		return True
+
+	def readinto(self, b):
+		try:
+			length = len(b)
+			chunk = self.leftover or next(self.generator)
+			output, self.leftover = chunk[:length], chunk[length:]
+			b[: len(output)] = output
+			return len(output)
+		except StopIteration:
+			return 0  # Indicate EOF
+
+
 def copy_files_to_shared_volume(
 	images_dir: Path, valid_image_files: list, rtk_files: list, volume_name: str, dataset_id: int, token: str
 ):
@@ -186,13 +214,15 @@ def copy_results_from_shared_volume(volume_name: str, output_dir: Path, project_
 		archive_stream, _ = temp_container.get_archive(f'/odm_shared/{project_name}')
 
 		# Extract archive to output directory
-		# FIXED: Stream directly without loading entire archive into memory
-		# This prevents memory exhaustion on large datasets (40GB+)
+		# FIXED: Wrap generator in file-like object for tarfile streaming
+		# Docker's get_archive() returns a generator, but tarfile expects a file-like object
+		# This prevents memory exhaustion on large datasets (40GB+) while properly handling the generator
 		start_time = time.time()
 		file_count = 0
 		total_bytes = 0
 
-		with tarfile.open(mode='r|*', fileobj=archive_stream) as tar:
+		wrapped_stream = io.BufferedReader(_GeneratorStream(archive_stream))
+		with tarfile.open(mode='r|*', fileobj=wrapped_stream) as tar:
 			for member in tar:
 				tar.extract(member, output_dir)
 				file_count += 1
