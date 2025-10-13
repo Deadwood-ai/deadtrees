@@ -154,7 +154,7 @@ def _copy_files_to_tcd_volume(ortho_path: str, volume_name: str, dataset_id: int
 			command=['tail', '-f', '/dev/null'],  # Keep alive for file operations (no timeout)
 			name=container_name,
 			user='root',
-			auto_remove=True,
+			auto_remove=False,
 			labels={
 				'dt': 'tcd',
 				'dt_role': 'temp_transfer',
