@@ -76,6 +76,7 @@ MINIMUM_POLYGON_AREA = config['minimum_polygon_area']
 def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 	"""
 	Reproject orthomosaic to EPSG:3395 (World Mercator) for TCD processing.
+	Uses memory-efficient windowed reprojection with tiling to handle large orthomosaics.
 
 	Args:
 		input_tif (str): Path to input orthomosaic
@@ -95,6 +96,7 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 			resolution=TCD_TARGET_RESOLUTION,
 		)
 
+		# Use tiled COG profile for memory-efficient streaming
 		profile = src.profile.copy()
 		profile.update(
 			{
@@ -103,9 +105,17 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 				'width': target_width,
 				'height': target_height,
 				'nodata': 0,
+				'tiled': True,
+				'blockxsize': 512,
+				'blockysize': 512,
+				'compress': 'deflate',
+				'predictor': 2,
+				'interleave': 'pixel',
 			}
 		)
 
+		# Reproject using GDAL's windowed writing for memory efficiency
+		# This processes the image in chunks rather than loading everything at once
 		with rasterio.open(output_path, 'w', **profile) as dst:
 			for i in range(1, src.count + 1):
 				rasterio.warp.reproject(
@@ -116,6 +126,8 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 					dst_transform=target_transform,
 					dst_crs=TCD_TARGET_CRS,
 					resampling=rasterio.warp.Resampling.bilinear,
+					num_threads=4,
+					warp_mem_limit=256,  # Limit memory per warp operation (MB)
 				)
 
 	return output_path
@@ -488,6 +500,10 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 
 		# Step 1: Preprocess - reproject orthomosaic to EPSG:3395 for TCD
 		reprojected_temp_path = temp_dir_path / 'reprojected_orthomosaic.tif'
+		logger.info(
+			f'Reprojecting orthomosaic to EPSG:3395 for TCD: {file_path} -> {reprojected_temp_path}',
+			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+		)
 		reprojected_path = Path(_reproject_orthomosaic_for_tcd(str(file_path), str(reprojected_temp_path)))
 
 		# Step 2: Container Setup - Create shared volume and copy reprojected ortho
