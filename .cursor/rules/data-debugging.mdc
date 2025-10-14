@@ -15,6 +15,25 @@ alwaysApply: false
 ## 🎯 **CORE PRINCIPLE**
 **ALWAYS use MCP tools for production database investigation. NEVER use deadtrees CLI for database connections.**
 
+## 🔄 **PROCESSING ORDER** (see `processor-pipeline.mdc` for full details)
+
+Tasks execute in this **strict order**:
+
+1. **ODM** (if raw drone images) → Generates ortho from raw images
+2. **GeoTIFF Standardization** → Standardizes/tiles ortho (**stays LOCAL in processor**, not pushed back)
+3. **Metadata** → GADM, biome, phenology extraction
+4. **COG** → Cloud-optimized GeoTIFF generation
+5. **Thumbnail** → Preview image generation
+6. **Deadwood** → Deadwood segmentation
+7. **Tree Cover** → Forest cover segmentation
+
+**CRITICAL: Standardized File Flow**
+- Original ortho: `/data/archive/XXXX_ortho.tif` (preserved, may be untiled)
+- Standardized ortho: Processor temp dir ONLY (tiled, not pushed back to storage)
+- All downstream tasks use the **local standardized file** (COG, thumbnail, segmentation)
+- Metadata stored in `v2_orthos_processed` table
+- This is why `process_geotiff.py` line 195 is commented out (intentional!)
+
 ## ⚡ **QUICK START: Essential Investigation Query**
 ```sql
 -- Run this FIRST for any dataset issue
