@@ -1,18 +1,32 @@
 #!/usr/bin/env python3
 """
-Export ML training tiles as 1024x1024 PNG images with JSON metadata.
+Export reference patches as 1024x1024 GeoTIFF images in Web Mercator projection (EPSG:3857).
 
 This script:
-1. Queries the database for tiles with status='good'
+1. Queries the database for patches with status='good'
 2. Downloads COGs via nginx
-3. Crops and resamples to exact tile boundaries (1024x1024 pixels)
-4. Validates effective GSD matches target GSD
-5. Exports PNG + JSON sidecar files
+3. Validates patches are square and geodesically correct
+4. Crops and resamples to exact patch boundaries (1024x1024 pixels)
+5. Exports GeoTIFF (RGB ortho + binary masks) + JSON sidecar files in EPSG:3857
+
+IMPORTANT: Why Web Mercator Instead of UTM?
+- Patches are created with latitude-based geodesic correction
+- Web Mercator bboxes are intentionally LARGER at higher latitudes (e.g., 289m at 45°)
+- This ensures CORRECT ground resolution (0.05m, 0.10m, or 0.20m) regardless of latitude
+- Exporting in Web Mercator avoids projection transformation artifacts
+- Result: Perfectly square patches with correct ground pixel spacing
+- For ML training, the CRS doesn't matter - only pixel spacing consistency matters
+
+Benefits vs UTM Export:
+✅ No projection transformation = no X/Y asymmetry artifacts
+✅ Perfectly square patches (no 1-3% rectangular distortion)
+✅ Faster export (no coordinate transformation)
+✅ Same ground resolution accuracy
 
 Usage:
 	python scripts/export_ml_tiles.py --output-dir ml_ready_tiles
-	python scripts/export_ml_tiles.py --output-dir /path/to/export --dataset-id 426
-	python scripts/export_ml_tiles.py --output-dir ml_ready_tiles --resolution 5
+	python scripts/export_ml_tiles.py --output-dir /path/to/export --dataset-id 946
+	python scripts/export_ml_tiles.py --output-dir ml_ready_tiles --resolution 10
 """
 
 import argparse
@@ -30,10 +44,8 @@ from rasterio.enums import Resampling
 from rasterio.windows import from_bounds
 from rasterio.features import rasterize
 from rasterio.transform import from_bounds as transform_from_bounds
-from PIL import Image
 from tqdm import tqdm
 from shapely.geometry import shape, box
-from shapely import wkb
 from shapely.ops import transform
 from pyproj import Transformer
 
@@ -46,6 +58,29 @@ from shared.settings import settings
 # Default credentials (can be overridden via CLI or env vars)
 DEFAULT_EMAIL = 'processor@deadtrees.earth'
 DEFAULT_PASSWORD = 'processor'
+
+
+def calculate_utm_zone(lon: float, lat: float) -> str:
+	"""Calculate UTM zone EPSG code from WGS84 coordinates.
+
+	Args:
+		lon: Longitude in WGS84
+		lat: Latitude in WGS84
+
+	Returns:
+		str: EPSG code (e.g., 'EPSG:32632' for UTM zone 32N)
+	"""
+	# Calculate UTM zone number (1-60)
+	zone_number = int((lon + 180) / 6) + 1
+
+	# Determine hemisphere (North or South)
+	# North: EPSG:326xx, South: EPSG:327xx
+	if lat >= 0:
+		epsg_code = f'EPSG:326{zone_number:02d}'
+	else:
+		epsg_code = f'EPSG:327{zone_number:02d}'
+
+	return epsg_code
 
 
 def get_nginx_cog_url(cog_path: str, base_url: str = 'http://localhost:8080/cogs/v1') -> str:
@@ -106,136 +141,234 @@ def validate_tile_bounds(tile_bbox: tuple, cog_bounds: tuple, dataset_id: int, t
 	return True
 
 
-def export_tile_png(
+def export_patch_geotiff(
 	token: str,
 	cog_path_local: Path,
-	tile: dict,
+	patch: dict,
 	output_dir: Path,
 	target_gsd_m: float,
 	cog_info: dict,
 	aoi_geometry: Optional[dict],
-	label_ids: dict,
 ) -> Optional[Path]:
-	"""Export a single tile as 1024x1024 PNG with JSON metadata and prediction masks.
+	"""Export a single patch as 1024x1024 GeoTIFF in UTM projection with JSON metadata and prediction masks.
 
 	Args:
 		token: Authentication token
 		cog_path_local: Path to local COG file
-		tile: Tile record from database
-		output_dir: Output directory for PNG files
+		patch: Patch record from database (from reference_patches table)
+		output_dir: Output directory for GeoTIFF files
 		target_gsd_m: Target ground sample distance in meters
 		cog_info: COG info from database
 		aoi_geometry: AOI GeoJSON geometry
-		label_ids: Dictionary with 'deadwood' and 'forest_cover' label IDs
 
 	Returns:
-		Path to exported PNG file, or None if export failed
+		Path to exported GeoTIFF file, or None if export failed
 	"""
-	dataset_id = tile['dataset_id']
-	tile_index = tile['tile_index']
-	resolution_cm = tile['resolution_cm']
+	dataset_id = patch['dataset_id']
+	patch_index = patch['patch_index']
+	patch_id = patch['id']
+	resolution_cm = patch['resolution_cm']
 
-	# Extract bounding box
-	minx = tile['bbox_minx']
-	miny = tile['bbox_miny']
-	maxx = tile['bbox_maxx']
-	maxy = tile['bbox_maxy']
+	# Extract bounding box in EPSG:3857
+	minx_3857 = patch['bbox_minx']
+	miny_3857 = patch['bbox_miny']
+	maxx_3857 = patch['bbox_maxx']
+	maxy_3857 = patch['bbox_maxy']
 
-	# Calculate effective GSD from bbox
-	bbox_width_m = maxx - minx
-	bbox_height_m = maxy - miny
-	eff_gsd_x = bbox_width_m / 1024.0
-	eff_gsd_y = bbox_height_m / 1024.0
-
-	# Validate GSD matches target (within 1mm tolerance)
-	if abs(eff_gsd_x - target_gsd_m) > 0.001 or abs(eff_gsd_y - target_gsd_m) > 0.001:
-		print(f'❌ Tile {tile_index}: GSD mismatch! Expected {target_gsd_m}m, got {eff_gsd_x:.6f}m x {eff_gsd_y:.6f}m')
-		return None
-
-	# Validate tile is within COG bounds
+	# Validate patch is within COG bounds
 	cog_bbox = cog_info['GEO']['BoundingBox']
 	cog_bounds = (cog_bbox[0], cog_bbox[1], cog_bbox[2], cog_bbox[3])  # left, bottom, right, top
 
-	if not validate_tile_bounds((minx, miny, maxx, maxy), cog_bounds, dataset_id, tile_index):
+	if not validate_tile_bounds((minx_3857, miny_3857, maxx_3857, maxy_3857), cog_bounds, dataset_id, patch_index):
+		return None
+
+	# Calculate patch center in WGS84 (for metadata only)
+	center_x_3857 = (minx_3857 + maxx_3857) / 2.0
+	center_y_3857 = (miny_3857 + maxy_3857) / 2.0
+	transformer_to_wgs84 = Transformer.from_crs('EPSG:3857', 'EPSG:4326', always_xy=True)
+	center_lon, center_lat = transformer_to_wgs84.transform(center_x_3857, center_y_3857)
+
+	# Calculate Web Mercator dimensions (no projection transformation = no artifacts!)
+	bbox_width_3857 = maxx_3857 - minx_3857
+	bbox_height_3857 = maxy_3857 - miny_3857
+
+	# Validate patch is roughly square (within 0.5% - should be perfect since no transformation)
+	size_difference_percent = abs(bbox_width_3857 - bbox_height_3857) / max(bbox_width_3857, bbox_height_3857)
+	if size_difference_percent > 0.005:  # 0.5% tolerance
+		print(f'❌ Patch {patch_index}: Not square! {bbox_width_3857:.2f}m × {bbox_height_3857:.2f}m')
+		print(f'   Difference: {size_difference_percent * 100:.2f}% (expected: perfectly square)')
+		return None
+
+	# Calculate expected Web Mercator size based on latitude and resolution
+	# This validates the geodesic correction was applied correctly
+	import math
+
+	scale_factor = 1.0 / math.cos(math.radians(center_lat))
+	expected_size_3857 = target_gsd_m * 1024.0 * scale_factor
+
+	# Validate actual size matches expected (within 1% tolerance)
+	avg_size_3857 = (bbox_width_3857 + bbox_height_3857) / 2.0
+	size_error_percent = abs(avg_size_3857 - expected_size_3857) / expected_size_3857
+
+	if size_error_percent > 0.01:  # 1% tolerance
+		print(f'❌ Patch {patch_index}: Size mismatch! Expected {expected_size_3857:.2f}m, got {avg_size_3857:.2f}m')
+		print(f'   Error: {size_error_percent * 100:.1f}% (at latitude {center_lat:.4f}°)')
+		print(f'   Scale factor: {scale_factor:.4f}')
 		return None
 
 	try:
 		with rasterio.open(cog_path_local) as src:
-			# Create window from bounds
+			# Create window from bounds in EPSG:3857
 			# Note: from_bounds expects (left, bottom, right, top) but in image coordinates
 			# In EPSG:3857, Y increases northward, so maxy is top, miny is bottom
-			window = from_bounds(minx, miny, maxx, maxy, src.transform)
+			window = from_bounds(minx_3857, miny_3857, maxx_3857, maxy_3857, src.transform)
 
 			# Read RGB bands with resampling to exact 1024x1024
 			data = src.read(indexes=[1, 2, 3], window=window, out_shape=(3, 1024, 1024), resampling=Resampling.bilinear)
 
 			# Check data shape
 			if data.shape != (3, 1024, 1024):
-				print(f'❌ Tile {tile_index}: Invalid data shape {data.shape}, expected (3, 1024, 1024)')
+				print(f'❌ Patch {patch_index}: Invalid data shape {data.shape}, expected (3, 1024, 1024)')
 				return None
 
-			# Convert to HWC format for PIL
-			img_data = np.moveaxis(data, 0, -1)
-
-			# Create AOI mask
-			bbox_tuple = (minx, miny, maxx, maxy)
-			aoi_mask = create_aoi_mask(aoi_geometry, bbox_tuple)
+			# Create AOI mask (in EPSG:3857 coordinates)
+			bbox_tuple_3857 = (minx_3857, miny_3857, maxx_3857, maxy_3857)
+			aoi_mask = create_aoi_mask(aoi_geometry, bbox_tuple_3857)
 
 			# Apply AOI mask to RGB image (set to black outside AOI)
 			aoi_mask_3d = np.expand_dims(aoi_mask, axis=2)
-			img_data_masked = img_data * aoi_mask_3d
+			aoi_mask_broadcast = np.broadcast_to(aoi_mask_3d, (1024, 1024, 3))
+			img_data_masked = np.moveaxis(data, 0, -1) * aoi_mask_broadcast
 
-			# Fetch and rasterize deadwood predictions
+			# Move back to CHW format for rasterio
+			rgb_data = np.moveaxis(img_data_masked, -1, 0).astype(np.uint8)
+
+			# Fetch and rasterize deadwood reference geometries
 			deadwood_mask = None
-			if 'deadwood' in label_ids:
-				deadwood_geoms = fetch_prediction_geometries(
-					token, label_ids['deadwood'], 'v2_deadwood_geometries', bbox_tuple
-				)
-				deadwood_mask = rasterize_geometries(deadwood_geoms, bbox_tuple)
-				# Apply AOI mask to deadwood predictions
-				deadwood_mask = deadwood_mask * aoi_mask
+			deadwood_geoms = fetch_patch_geometries(
+				token, patch_id, 'reference_patch_deadwood_geometries', bbox_tuple_3857
+			)
+			if deadwood_geoms:
+				deadwood_mask = rasterize_geometries(deadwood_geoms, bbox_tuple_3857)
+				# Apply AOI mask and convert to binary 0/1 (not 0/255)
+				deadwood_mask = ((deadwood_mask > 0) * aoi_mask).astype(np.uint8)
 
-			# Fetch and rasterize forest cover predictions
+			# Fetch and rasterize forest cover reference geometries
 			forestcover_mask = None
-			if 'forest_cover' in label_ids:
-				forestcover_geoms = fetch_prediction_geometries(
-					token, label_ids['forest_cover'], 'v2_forest_cover_geometries', bbox_tuple
-				)
-				forestcover_mask = rasterize_geometries(forestcover_geoms, bbox_tuple)
-				# Apply AOI mask to forest cover predictions
-				forestcover_mask = forestcover_mask * aoi_mask
+			forestcover_geoms = fetch_patch_geometries(
+				token, patch_id, 'reference_patch_forest_cover_geometries', bbox_tuple_3857
+			)
+			if forestcover_geoms:
+				forestcover_mask = rasterize_geometries(forestcover_geoms, bbox_tuple_3857)
+				# Apply AOI mask and convert to binary 0/1 (not 0/255)
+				forestcover_mask = ((forestcover_mask > 0) * aoi_mask).astype(np.uint8)
 
 			# Create output filenames
-			filename_base = f'{dataset_id}_{tile_index}_{resolution_cm}cm'
-			png_path = output_dir / f'{filename_base}.png'
+			filename_base = f'{dataset_id}_{patch_index}_{resolution_cm}cm'
+			geotiff_path = output_dir / f'{filename_base}.tif'
 			json_path = output_dir / f'{filename_base}.json'
-			deadwood_path = output_dir / f'{filename_base}_deadwood.png'
-			forestcover_path = output_dir / f'{filename_base}_forestcover.png'
+			deadwood_path = output_dir / f'{filename_base}_deadwood.tif'
+			forestcover_path = output_dir / f'{filename_base}_forestcover.tif'
 
-			# Save RGB PNG (cropped by AOI)
-			img = Image.fromarray(img_data_masked.astype(np.uint8))
-			img.save(png_path, 'PNG')
+			# Create Web Mercator transform for the patch
+			wm_transform = transform_from_bounds(minx_3857, miny_3857, maxx_3857, maxy_3857, 1024, 1024)
+
+			# Save RGB GeoTIFF in Web Mercator projection (EPSG:3857)
+			with rasterio.open(
+				geotiff_path,
+				'w',
+				driver='GTiff',
+				height=1024,
+				width=1024,
+				count=3,
+				dtype=np.uint8,
+				crs='EPSG:3857',
+				transform=wm_transform,
+				compress='DEFLATE',
+				tiled=True,
+				blockxsize=256,
+				blockysize=256,
+			) as dst:
+				dst.write(rgb_data)
 
 			# Save deadwood mask if available
 			has_deadwood = False
 			if deadwood_mask is not None:
-				Image.fromarray(deadwood_mask).save(deadwood_path, 'PNG')
+				with rasterio.open(
+					deadwood_path,
+					'w',
+					driver='GTiff',
+					height=1024,
+					width=1024,
+					count=1,
+					dtype=np.uint8,
+					crs='EPSG:3857',
+					transform=wm_transform,
+					compress='DEFLATE',
+					tiled=True,
+					blockxsize=256,
+					blockysize=256,
+				) as dst:
+					dst.write(deadwood_mask, 1)
 				has_deadwood = True
 
 			# Save forest cover mask if available
 			has_forestcover = False
 			if forestcover_mask is not None:
-				Image.fromarray(forestcover_mask).save(forestcover_path, 'PNG')
+				with rasterio.open(
+					forestcover_path,
+					'w',
+					driver='GTiff',
+					height=1024,
+					width=1024,
+					count=1,
+					dtype=np.uint8,
+					crs='EPSG:3857',
+					transform=wm_transform,
+					compress='DEFLATE',
+					tiled=True,
+					blockxsize=256,
+					blockysize=256,
+				) as dst:
+					dst.write(forestcover_mask, 1)
 				has_forestcover = True
+
+			# Calculate Web Mercator pixel spacing
+			wm_pixel_spacing_x = bbox_width_3857 / 1024.0
+			wm_pixel_spacing_y = bbox_height_3857 / 1024.0
 
 			# Create metadata JSON
 			metadata = {
 				'dataset_id': dataset_id,
-				'tile_id': tile['id'],
-				'tile_index': tile_index,
+				'patch_id': patch_id,
+				'patch_index': patch_index,
 				'resolution_cm': resolution_cm,
-				'bbox_epsg3857': {'minx': minx, 'miny': miny, 'maxx': maxx, 'maxy': maxy},
-				'effective_gsd_m': {'x': eff_gsd_x, 'y': eff_gsd_y},
+				'crs': 'EPSG:3857',
+				'bbox_epsg3857': {
+					'minx': minx_3857,
+					'miny': miny_3857,
+					'maxx': maxx_3857,
+					'maxy': maxy_3857,
+					'width_m': bbox_width_3857,
+					'height_m': bbox_height_3857,
+				},
+				'center_wgs84': {
+					'lon': center_lon,
+					'lat': center_lat,
+				},
+				'geodesic_correction': {
+					'scale_factor': scale_factor,
+					'latitude': center_lat,
+					'note': 'Web Mercator bbox is larger at high latitudes to ensure correct ground resolution',
+				},
+				'pixel_spacing': {
+					'web_mercator_m': {
+						'x': wm_pixel_spacing_x,
+						'y': wm_pixel_spacing_y,
+					},
+					'ground_resolution_m': target_gsd_m,
+					'note': 'Ground resolution is correct due to geodesic correction. Web Mercator pixel spacing varies by latitude.',
+				},
 				'target_gsd_m': target_gsd_m,
 				'image_size_px': {'width': 1024, 'height': 1024},
 				'source_cog_resolution_m_px': cog_info['GEO']['Resolution'][0],
@@ -243,24 +376,24 @@ def export_tile_png(
 				'has_forestcover_mask': has_forestcover,
 				'aoi_cropped': aoi_geometry is not None,
 				'coverage_stats': {
-					'aoi_coverage_percent': tile.get('aoi_coverage_percent'),
-					'deadwood_prediction_coverage_percent': tile.get('deadwood_prediction_coverage_percent'),
-					'forest_cover_prediction_coverage_percent': tile.get('forest_cover_prediction_coverage_percent'),
+					'aoi_coverage_percent': patch.get('aoi_coverage_percent'),
+					'deadwood_prediction_coverage_percent': patch.get('deadwood_prediction_coverage_percent'),
+					'forest_cover_prediction_coverage_percent': patch.get('forest_cover_prediction_coverage_percent'),
 				},
-				'created_at': tile['created_at']
-				if isinstance(tile['created_at'], str)
-				else tile['created_at'].isoformat(),
-				'user_id': str(tile['user_id']),
+				'created_at': patch['created_at']
+				if isinstance(patch['created_at'], str)
+				else patch['created_at'].isoformat(),
+				'user_id': str(patch['user_id']),
 			}
 
 			# Save JSON
 			with open(json_path, 'w') as f:
 				json.dump(metadata, f, indent=2)
 
-			return png_path
+			return geotiff_path
 
 	except Exception as e:
-		print(f'❌ Error exporting tile {tile_index}: {e}')
+		print(f'❌ Error exporting patch {patch_index}: {e}')
 		return None
 
 
@@ -286,55 +419,24 @@ def fetch_aoi_geometry(token: str, dataset_id: int) -> Optional[dict]:
 		return None
 
 
-def fetch_label_ids(token: str, dataset_id: int) -> dict:
-	"""Fetch label IDs for model predictions (deadwood and forest cover).
+def fetch_patch_geometries(token: str, patch_id: int, table_name: str, bbox: tuple) -> list:
+	"""Fetch reference geometries for a patch that intersect with patch bounds.
 
 	Args:
 		token: Authentication token
-		dataset_id: Dataset ID
+		patch_id: Patch ID from reference_patches table
+		table_name: 'reference_patch_deadwood_geometries' or 'reference_patch_forest_cover_geometries'
+		bbox: Patch bounding box (minx, miny, maxx, maxy) in EPSG:3857
 
 	Returns:
-		Dictionary with 'deadwood' and 'forest_cover' label IDs
-	"""
-	try:
-		with use_client(token) as client:
-			response = (
-				client.from_('v2_labels')
-				.select('id, label_data')
-				.eq('dataset_id', dataset_id)
-				.eq('label_source', 'model_prediction')
-				.execute()
-			)
-
-			labels = {}
-			if response.data:
-				for label in response.data:
-					labels[label['label_data']] = label['id']
-
-			return labels
-	except Exception as e:
-		print(f'❌ Error fetching label IDs: {e}')
-		return {}
-
-
-def fetch_prediction_geometries(token: str, label_id: int, table_name: str, bbox: tuple) -> list:
-	"""Fetch prediction geometries that intersect with tile bounds.
-
-	Args:
-		token: Authentication token
-		label_id: Label ID
-		table_name: 'v2_deadwood_geometries' or 'v2_forest_cover_geometries'
-		bbox: Tile bounding box (minx, miny, maxx, maxy) in EPSG:3857
-
-	Returns:
-		List of WKB geometries
+		List of shapely geometries in EPSG:3857
 	"""
 	try:
 		minx, miny, maxx, maxy = bbox
 
-		# Fetch all geometries for this label
+		# Fetch all geometries for this patch
 		with use_client(token) as client:
-			response = client.from_(table_name).select('geometry').eq('label_id', label_id).execute()
+			response = client.from_(table_name).select('geometry').eq('patch_id', patch_id).execute()
 
 			if not response.data:
 				return []
@@ -357,7 +459,8 @@ def fetch_prediction_geometries(token: str, label_id: int, table_name: str, bbox
 					# Check if it intersects with tile
 					if geom_3857.intersects(tile_box):
 						geometries.append(geom_3857)
-				except Exception as e:
+				except Exception:
+					# Skip invalid geometries silently
 					continue
 
 			return geometries
@@ -446,8 +549,8 @@ def create_aoi_mask(aoi_geojson: dict, bbox: tuple, width: int = 1024, height: i
 		return np.ones((height, width), dtype=np.uint8)
 
 
-def fetch_good_tiles(token: str, dataset_id: Optional[int] = None, resolution_cm: Optional[int] = None) -> list[dict]:
-	"""Fetch all tiles with status='good' from database.
+def fetch_good_patches(token: str, dataset_id: Optional[int] = None, resolution_cm: Optional[int] = None) -> list[dict]:
+	"""Fetch all patches with status='good' from database.
 
 	Args:
 		token: Authentication token
@@ -455,11 +558,11 @@ def fetch_good_tiles(token: str, dataset_id: Optional[int] = None, resolution_cm
 		resolution_cm: Optional resolution filter (5, 10, or 20)
 
 	Returns:
-		List of tile records
+		List of patch records from reference_patches table
 	"""
 	try:
 		with use_client(token) as client:
-			query = client.from_('ml_training_tiles').select('*').eq('status', 'good')
+			query = client.from_('reference_patches').select('*').eq('status', 'good')
 
 			if dataset_id:
 				query = query.eq('dataset_id', dataset_id)
@@ -467,11 +570,11 @@ def fetch_good_tiles(token: str, dataset_id: Optional[int] = None, resolution_cm
 			if resolution_cm:
 				query = query.eq('resolution_cm', resolution_cm)
 
-			response = query.order('dataset_id').order('resolution_cm').order('tile_index').execute()
+			response = query.order('dataset_id').order('resolution_cm').order('patch_index').execute()
 
 			return response.data if response.data else []
 	except Exception as e:
-		print(f'❌ Error fetching tiles: {e}')
+		print(f'❌ Error fetching patches: {e}')
 		return []
 
 
@@ -499,11 +602,11 @@ def fetch_cog_info(token: str, dataset_id: int) -> Optional[dict]:
 
 def main():
 	parser = argparse.ArgumentParser(
-		description='Export ML training tiles as 1024x1024 PNG images',
+		description='Export reference patches as 1024x1024 GeoTIFF images in Web Mercator projection (EPSG:3857)',
 		formatter_class=argparse.RawDescriptionHelpFormatter,
 		epilog="""
 Examples:
-  # Export all good tiles (uses default credentials)
+  # Export all good patches (uses default credentials)
   python scripts/export_ml_tiles.py --output-dir ml_ready_tiles
   
   # Export with custom credentials via CLI
@@ -514,17 +617,27 @@ Examples:
   export DEADTREES_PASSWORD=mypassword
   python scripts/export_ml_tiles.py --output-dir ml_ready_tiles
   
-  # Export only dataset 426
-  python scripts/export_ml_tiles.py --output-dir ml_ready_tiles --dataset-id 426
+  # Export only dataset 946
+  python scripts/export_ml_tiles.py --output-dir ml_ready_tiles --dataset-id 946
   
-  # Export only 5cm resolution tiles
-  python scripts/export_ml_tiles.py --output-dir ml_ready_tiles --resolution 5
+  # Export only 10cm resolution patches
+  python scripts/export_ml_tiles.py --output-dir ml_ready_tiles --resolution 10
   
   # Custom nginx endpoint
   python scripts/export_ml_tiles.py --output-dir ml_ready_tiles --nginx-url http://production:8080/cogs/v1
   
   # Dry run to preview what would be exported
   python scripts/export_ml_tiles.py --output-dir ml_ready_tiles --dry-run
+
+Output Files:
+  For each patch, the script generates:
+  - {dataset_id}_{patch_index}_{resolution}cm.tif - RGB ortho in EPSG:3857 (Web Mercator)
+  - {dataset_id}_{patch_index}_{resolution}cm_deadwood.tif - Binary deadwood mask (0/1)
+  - {dataset_id}_{patch_index}_{resolution}cm_forestcover.tif - Binary forest cover mask (0/1)
+  - {dataset_id}_{patch_index}_{resolution}cm.json - Metadata with geodesic correction info
+
+Note: All GeoTIFFs are exported in EPSG:3857 (Web Mercator) with geodesic correction
+      applied. This ensures correct ground resolution and perfectly square patches.
 
 Authentication Priority:
   1. CLI arguments (--user, --password)
@@ -537,11 +650,11 @@ Authentication Priority:
 		'--output-dir',
 		type=str,
 		default='ml_ready_tiles',
-		help='Output directory for exported tiles (default: ml_ready_tiles)',
+		help='Output directory for exported patches (default: ml_ready_tiles)',
 	)
-	parser.add_argument('--dataset-id', type=int, help='Export tiles only for this dataset ID')
+	parser.add_argument('--dataset-id', type=int, help='Export patches only for this dataset ID')
 	parser.add_argument(
-		'--resolution', type=int, choices=[5, 10, 20], help='Export tiles only for this resolution (5, 10, or 20 cm)'
+		'--resolution', type=int, choices=[5, 10, 20], help='Export patches only for this resolution (5, 10, or 20 cm)'
 	)
 	parser.add_argument(
 		'--nginx-url',
@@ -583,21 +696,21 @@ Authentication Priority:
 		output_dir.mkdir(parents=True, exist_ok=True)
 		print(f'📁 Output directory: {output_dir.absolute()}\n')
 
-	# Fetch tiles
-	print('🔍 Fetching tiles from database...')
-	tiles = fetch_good_tiles(token, dataset_id=args.dataset_id, resolution_cm=args.resolution)
+	# Fetch patches
+	print('🔍 Fetching patches from database...')
+	patches = fetch_good_patches(token, dataset_id=args.dataset_id, resolution_cm=args.resolution)
 
-	if not tiles:
-		print('❌ No good tiles found matching criteria')
+	if not patches:
+		print('❌ No good patches found matching criteria')
 		return 1
 
-	print(f'✓ Found {len(tiles)} good tiles to export\n')
+	print(f'✓ Found {len(patches)} good patches to export\n')
 
-	# Group tiles by dataset and resolution for summary
+	# Group patches by dataset and resolution for summary
 	by_dataset = {}
-	for tile in tiles:
-		dataset_id = tile['dataset_id']
-		resolution = tile['resolution_cm']
+	for patch in patches:
+		dataset_id = patch['dataset_id']
+		resolution = patch['resolution_cm']
 
 		if dataset_id not in by_dataset:
 			by_dataset[dataset_id] = {}
@@ -616,20 +729,19 @@ Authentication Priority:
 		print('🔍 Dry run - no files will be exported')
 		return 0
 
-	# Export tiles
-	print('🚀 Exporting tiles...')
+	# Export patches
+	print('🚀 Exporting patches...')
 
-	# Track COGs, AOI, and labels we've already fetched per dataset
+	# Track COGs and AOI we've already fetched per dataset
 	cog_cache: dict[int, tuple[Path, dict]] = {}
 	aoi_cache: dict[int, Optional[dict]] = {}
-	label_cache: dict[int, dict] = {}
 
 	success_count = 0
 	failed_count = 0
 
-	for tile in tqdm(tiles, desc='Exporting tiles'):
-		dataset_id = tile['dataset_id']
-		resolution_cm = tile['resolution_cm']
+	for patch in tqdm(patches, desc='Exporting patches'):
+		dataset_id = patch['dataset_id']
+		resolution_cm = patch['resolution_cm']
 
 		# GSD mapping
 		gsd_map = {20: 0.20, 10: 0.10, 5: 0.05}
@@ -657,16 +769,11 @@ Authentication Priority:
 		if dataset_id not in aoi_cache:
 			aoi_cache[dataset_id] = fetch_aoi_geometry(token, dataset_id)
 
-		# Get label IDs (fetch from DB if not cached)
-		if dataset_id not in label_cache:
-			label_cache[dataset_id] = fetch_label_ids(token, dataset_id)
-
 		cog_path_local, cog_info = cog_cache[dataset_id]
 		aoi_geometry = aoi_cache[dataset_id]
-		label_ids = label_cache[dataset_id]
 
-		# Export tile with masks
-		result = export_tile_png(token, cog_path_local, tile, output_dir, target_gsd, cog_info, aoi_geometry, label_ids)
+		# Export patch with masks as GeoTIFF
+		result = export_patch_geotiff(token, cog_path_local, patch, output_dir, target_gsd, cog_info, aoi_geometry)
 
 		if result:
 			success_count += 1
@@ -679,10 +786,10 @@ Authentication Priority:
 			cog_path_local.unlink()
 
 	# Print summary
-	print(f'\n✅ Export complete!')
-	print(f'   Successfully exported: {success_count} tiles')
+	print('\n✅ Export complete!')
+	print(f'   Successfully exported: {success_count} patches')
 	if failed_count > 0:
-		print(f'   Failed: {failed_count} tiles')
+		print(f'   Failed: {failed_count} patches')
 	print(f'   Output directory: {output_dir.absolute()}')
 
 	return 0 if failed_count == 0 else 1
