@@ -456,3 +456,63 @@ def test_edge_cases_and_error_scenarios(test_data_generator, tmp_path):
 				assert verify_geotiff(str(output_path)), f'Output should be valid for {config.name}'
 		except Exception as e:
 			pytest.fail(f'Should not raise unhandled exception for {config.name}: {e}')
+
+
+@pytest.mark.skip(reason='Skip removed - this test should run')
+def test_dataset_6046_uint8_rgba_with_existing_alpha():
+	"""
+	Test the exact scenario from dataset 6046:
+	- uint8 file (no bit depth conversion needed)
+	- 4 bands with explicit alpha band (ColorInterp=Alpha)
+	- nodata=255 on all bands
+
+	This reproduces the bug where standardise_geotiff tries to:
+	1. Select only bands 1-3 (-b 1 -b 2 -b 3)
+	2. Create a NEW alpha band (-dstalpha)
+
+	When the file already has an alpha band, causing gdalwarp to fail.
+	"""
+	# Use the real clipped file from dataset 6046
+	fixtures_dir = Path(__file__).parent / 'fixtures'
+	input_path = fixtures_dir / '6046_small_rgba_alpha.tif'
+
+	# Skip test if fixture doesn't exist
+	if not input_path.exists():
+		pytest.skip(f'Test fixture not found: {input_path}')
+
+	# Verify the input file has the expected structure
+	with rasterio.open(input_path) as src:
+		assert src.count == 4, 'Should have 4 bands'
+		assert src.profile['dtype'] == 'uint8', 'Should be uint8'
+		assert src.nodata == 255 or src.nodata == 255.0, 'Should have nodata=255'
+		assert src.colorinterp[3] == rasterio.enums.ColorInterp.alpha, 'Band 4 should be alpha'
+
+	# Create output path in temp directory
+	import tempfile
+
+	with tempfile.TemporaryDirectory() as tmp_dir:
+		output_path = Path(tmp_dir) / '6046_standardized.tif'
+
+		# Run standardization - this should succeed after the fix
+		success = standardise_geotiff(str(input_path), str(output_path))
+
+		assert success, 'Standardization should succeed for uint8 RGBA file with existing alpha band'
+		assert output_path.exists(), 'Output file should be created'
+
+		# Verify output characteristics
+		with rasterio.open(output_path) as dst:
+			assert dst.profile['dtype'] == 'uint8', 'Output should be uint8'
+			assert dst.count == 4, 'Output should have 4 bands (RGB + alpha preserved)'
+
+			# Check that alpha band is preserved/created correctly
+			alpha_band = dst.read(4)
+			assert np.any(alpha_band == 0), 'Alpha band should have transparent areas (from nodata)'
+			assert np.any(alpha_band == 255), 'Alpha band should have opaque areas (where data exists)'
+
+			# Check output is tiled and compressed
+			assert dst.profile.get('tiled', False), 'Output should be tiled'
+			compression = dst.profile.get('compress', '').upper()
+			assert compression == 'DEFLATE', f'Output should use DEFLATE compression, got {compression}'
+
+		# Verify output file integrity
+		assert verify_geotiff(str(output_path)), 'Output should pass COG verification'

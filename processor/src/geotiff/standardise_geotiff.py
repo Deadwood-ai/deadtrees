@@ -1,5 +1,6 @@
 from datetime import datetime
 import subprocess
+import shutil
 from pathlib import Path
 from shared.utils import get_transformed_bounds
 from rio_cogeo.cogeo import cog_info
@@ -10,7 +11,75 @@ from shared.logger import logger
 from shared.models import Ortho
 from shared.logging import LogContext, LogCategory
 import rasterio
+import rasterio.enums
 import numpy as np
+
+
+def _check_if_already_standardized(
+	input_path: str, token: str = None, dataset_id: int = None, user_id: str = None
+) -> dict:
+	"""
+	Check if the input file already meets standardization requirements.
+
+	Returns dict with:
+	- is_standardized: bool - True if file meets all requirements
+	- has_alpha: bool - True if file has an alpha band
+	- is_lossy: bool - True if file uses lossy compression (WEBP, JPEG, etc.)
+	- compression: str - Original compression type
+	- details: dict - Details about the file properties
+	"""
+	# Lossy compression formats that should be preserved
+	LOSSY_COMPRESSIONS = {'WEBP', 'JPEG', 'JPEG2000', 'JPEGXL'}
+
+	try:
+		with rasterio.open(input_path) as src:
+			is_uint8 = src.profile['dtype'] == 'uint8'
+			is_tiled = src.profile.get('tiled', False)
+			compression = src.profile.get('compress', '').upper()
+			has_compression = compression != ''
+			num_bands = src.count
+
+			# Detect lossy compression
+			is_lossy = compression in LOSSY_COMPRESSIONS
+
+			# Check if band 4 is an alpha channel
+			has_alpha = False
+			if num_bands == 4:
+				try:
+					has_alpha = src.colorinterp[3] == rasterio.enums.ColorInterp.alpha
+				except (IndexError, AttributeError):
+					has_alpha = False
+
+			# File is standardized if it's uint8, tiled, and compressed
+			is_standardized = is_uint8 and is_tiled and has_compression
+
+			details = {
+				'dtype': src.profile['dtype'],
+				'tiled': is_tiled,
+				'compression': compression,
+				'num_bands': num_bands,
+				'has_alpha': has_alpha,
+				'is_lossy': is_lossy,
+			}
+
+			logger.info(
+				f'File check - standardized: {is_standardized}, details: {details}',
+				LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+			)
+
+			return {
+				'is_standardized': is_standardized,
+				'has_alpha': has_alpha,
+				'is_lossy': is_lossy,
+				'compression': compression,
+				'details': details,
+			}
+	except Exception as e:
+		logger.warning(
+			f'Error checking if file is standardized: {e}',
+			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
+		return {'is_standardized': False, 'has_alpha': False, 'is_lossy': False, 'compression': '', 'details': {}}
 
 
 def find_nodata_value(src, num_bands):
@@ -95,9 +164,11 @@ def standardise_geotiff(
 ) -> bool:
 	"""
 	Standardise a GeoTIFF by:
-	1. Converting to 8-bit with auto-scaling if needed
-	2. Creating a true alpha channel using internal TIFF masks
-	3. Handling nodata values with transparency
+	1. Checking if already standardized (uint8, tiled, compressed) - if yes, just copy
+	2. Converting to 8-bit with auto-scaling if needed
+	3. Creating a true alpha channel using internal TIFF masks
+	4. Handling nodata values with transparency
+	5. Properly preserving existing alpha bands without conflicting instructions
 
 	Args:
 		input_path (str): Path to input GeoTIFF file
@@ -110,25 +181,68 @@ def standardise_geotiff(
 		bool: True if successful, False otherwise
 	"""
 	try:
+		# Step 0: Check if file is already standardized
+		check_result = _check_if_already_standardized(input_path, token, dataset_id, user_id)
+
+		if check_result['is_standardized']:
+			logger.info(
+				'File already meets standardization requirements, copying instead of reprocessing',
+				LogContext(
+					category=LogCategory.ORTHO,
+					dataset_id=dataset_id,
+					user_id=user_id,
+					token=token,
+					extra={'details': check_result['details']},
+				),
+			)
+			# Just copy the file to preserve original compression
+			shutil.copy2(input_path, output_path)
+			return verify_geotiff(output_path, token, dataset_id, user_id)
+
+		logger.info(
+			'File needs standardization processing',
+			LogContext(
+				category=LogCategory.ORTHO,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'details': check_result['details']},
+			),
+		)
+
 		# Step 1: Validate and extract source image properties
 		src_properties = _get_source_properties(input_path, token, dataset_id, user_id)
 		if not src_properties:
 			return False
 
+		# Add has_alpha and compression info to properties for later use
+		src_properties['has_alpha'] = check_result['has_alpha']
+		src_properties['is_lossy'] = check_result['is_lossy']
+		src_properties['compression'] = check_result['compression']
+
 		# Step 2: Handle bit depth conversion if needed (now returns nodata value)
 		processed_input, final_nodata_value = _handle_bit_depth_conversion(
-			input_path, output_path, src_properties['dtype'], token, dataset_id, user_id
+			input_path,
+			output_path,
+			src_properties['dtype'],
+			src_properties['has_alpha'],
+			src_properties['compression'],
+			token,
+			dataset_id,
+			user_id,
 		)
 		if not processed_input:
 			return False
 
-		# Step 3: Apply final transformations with gdalwarp (pass the actual nodata value)
+		# Step 3: Apply final transformations with gdalwarp (pass the actual nodata value AND alpha info AND compression)
 		success = _apply_final_transformations(
 			processed_input,
 			output_path,
 			src_properties['nodata'],
 			final_nodata_value,  # Pass the actual nodata value from intermediate file
 			src_properties['num_bands'],
+			src_properties['has_alpha'],  # Pass alpha band info to avoid conflicts
+			src_properties['compression'],  # Pass original compression to preserve lossy formats
 			token,
 			dataset_id,
 			user_id,
@@ -196,20 +310,50 @@ def _get_source_properties(input_path: str, token: str, dataset_id: int = None, 
 
 
 def _handle_bit_depth_conversion(
-	input_path: str, output_path: str, src_dtype: str, token: str, dataset_id: int = None, user_id: str = None
+	input_path: str,
+	output_path: str,
+	src_dtype: str,
+	has_alpha: bool,
+	compression: str,
+	token: str,
+	dataset_id: int = None,
+	user_id: str = None,
 ) -> tuple:
-	"""Convert non-uint8 images to 8-bit using gdal_translate with proper nodata handling."""
-	if src_dtype == 'uint8':
-		# For uint8 files, we still need to detect and return the nodata value
-		with rasterio.open(input_path) as src:
-			detected_nodata = find_nodata_value(src, src.count)
-			explicit_nodata = src.nodata
+	"""
+	Convert non-uint8 images to 8-bit using gdal_translate with proper nodata handling.
 
-			# Return the original nodata value for transparency handling
-			final_nodata = explicit_nodata if explicit_nodata is not None else detected_nodata
-			return input_path, final_nodata
+	Args:
+		has_alpha: If True, file already has alpha band so nodata detection is skipped
+		compression: Original compression type to preserve (especially for lossy formats like WEBP, JPEG)
+	"""
+	if src_dtype == 'uint8':
+		# For uint8 files, check if we need nodata detection
+		if has_alpha:
+			# File has alpha band - no need to detect nodata (alpha handles transparency)
+			logger.info(
+				'File has alpha band, skipping nodata detection (alpha handles transparency)',
+				LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+			)
+			return input_path, None
+		else:
+			# No alpha band - detect nodata for creating alpha from it
+			with rasterio.open(input_path) as src:
+				detected_nodata = find_nodata_value(src, src.count)
+				explicit_nodata = src.nodata
+
+				# Return the original nodata value for transparency handling
+				final_nodata = explicit_nodata if explicit_nodata is not None else detected_nodata
+				return input_path, final_nodata
 
 	temp_output = f'{output_path}.temp.tif'
+
+	# Determine compression to use - preserve original if specified
+	compress_arg = compression if compression else 'DEFLATE'
+
+	logger.info(
+		f'Converting {src_dtype} to uint8 with {compress_arg} compression',
+		LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+	)
 
 	# Get nodata information and calculate proper scaling
 	with rasterio.open(input_path) as src:
@@ -335,6 +479,13 @@ def _handle_bit_depth_conversion(
 
 	# Add EXPLICIT scaling
 	translate_cmd.extend(['-scale', str(data_min), str(data_max), '0', '255'])
+
+	# Add compression - preserve original compression format if specified
+	translate_cmd.extend(['-co', f'COMPRESS={compress_arg}'])
+	if compress_arg == 'DEFLATE':
+		translate_cmd.extend(['-co', 'PREDICTOR=2'])  # Only for DEFLATE
+	translate_cmd.extend(['-co', 'TILED=YES'])  # Ensure tiled output
+
 	translate_cmd.extend([input_path, temp_output])
 
 	try:
@@ -375,11 +526,36 @@ def _apply_final_transformations(
 	original_nodata: float,
 	final_nodata_value: int,  # The actual nodata value in the intermediate file
 	num_bands: int,
+	has_alpha: bool,  # Whether the input already has an alpha band
+	compression: str,  # Original compression to preserve
 	token: str,
 	dataset_id: int = None,
 	user_id: str = None,
 ) -> bool:
-	"""Apply final transformations using gdalwarp."""
+	"""
+	Apply final transformations using gdalwarp.
+
+	Properly handles existing alpha bands to avoid conflicting instructions:
+	- If file has alpha band: Preserve all 4 bands, don't add -dstalpha
+	- If file has no alpha: Extract RGB and create alpha from nodata
+	- Preserves original compression format (especially important for lossy formats like WEBP, JPEG)
+
+	JPEG YCbCr Special Handling:
+	- JPEG with YCbCr photometric is incompatible with alpha band operations
+	- When alpha band creation is needed, converts to DEFLATE RGB instead
+	"""
+	# Determine compression to use - preserve original if specified
+	# CRITICAL: JPEG YCbCr is incompatible with alpha band modifications
+	# If we need to create alpha from nodata, use DEFLATE instead
+	if compression == 'JPEG' and final_nodata_value is not None and not has_alpha:
+		logger.info(
+			'Converting JPEG compression to DEFLATE for alpha band creation (JPEG YCbCr incompatible with warp)',
+			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
+		compress_arg = 'DEFLATE'
+	else:
+		compress_arg = compression if compression else 'DEFLATE'
+
 	cmd = [
 		'gdalwarp',
 		'-of',
@@ -387,35 +563,61 @@ def _apply_final_transformations(
 		'-co',
 		'TILED=YES',
 		'-co',
-		'COMPRESS=DEFLATE',
-		'-co',
-		'PREDICTOR=2',
-		'-co',
-		'BIGTIFF=YES',
-		'--config',
-		'GDAL_TIFF_INTERNAL_MASK',
-		'YES',
-		'--config',
-		'GDAL_NUM_THREADS',
-		'ALL_CPUS',
+		f'COMPRESS={compress_arg}',
 	]
 
-	# Use the actual nodata value from the intermediate file
-	if final_nodata_value is not None:
-		logger.info(
-			f'Creating alpha channel for transparency (using actual nodata: {final_nodata_value})',
-			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
-		)
-		cmd.extend(['-srcnodata', str(final_nodata_value), '-dstalpha'])
-	else:
-		logger.info(
-			'No nodata handling needed',
-			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
-		)
+	# Add PREDICTOR only for DEFLATE compression
+	if compress_arg == 'DEFLATE':
+		cmd.extend(['-co', 'PREDICTOR=2'])
 
-	# Handle band selection for RGB
-	if num_bands > 3:
-		cmd.extend(['-b', '1', '-b', '2', '-b', '3'])
+	cmd.extend(
+		[
+			'-co',
+			'BIGTIFF=YES',
+			'--config',
+			'GDAL_TIFF_INTERNAL_MASK',
+			'YES',
+			'--config',
+			'GDAL_NUM_THREADS',
+			'ALL_CPUS',
+		]
+	)
+
+	logger.info(
+		f'Applying final transformations with {compress_arg} compression',
+		LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+	)
+
+	# CRITICAL FIX: Properly handle existing alpha bands
+	if has_alpha:
+		# File already has alpha band - preserve all 4 bands without conflicts
+		logger.info(
+			f'Input has existing alpha band, preserving all {num_bands} bands without modification',
+			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
+		# Don't add -b flags (use all bands)
+		# Don't add -dstalpha (already has alpha)
+	else:
+		# File doesn't have alpha band - create from nodata
+		if final_nodata_value is not None:
+			logger.info(
+				f'Creating alpha channel for transparency (using nodata: {final_nodata_value})',
+				LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+			)
+			cmd.extend(['-srcnodata', str(final_nodata_value), '-dstalpha'])
+		else:
+			logger.info(
+				'No nodata handling needed',
+				LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+			)
+
+		# Handle band selection for RGB (only if no alpha)
+		if num_bands > 3:
+			logger.info(
+				f'Selecting first 3 bands from {num_bands} total bands',
+				LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+			)
+			cmd.extend(['-b', '1', '-b', '2', '-b', '3'])
 
 	cmd.extend([input_path, output_path])
 
@@ -427,7 +629,7 @@ def _apply_final_transformations(
 				dataset_id=dataset_id,
 				user_id=user_id,
 				token=token,
-				extra={'command': ' '.join(cmd)},
+				extra={'command': ' '.join(cmd), 'has_alpha': has_alpha, 'num_bands': num_bands},
 			),
 		)
 		result = subprocess.run(cmd, check=True, capture_output=True, text=True)
@@ -438,6 +640,7 @@ def _apply_final_transformations(
 
 		return verify_geotiff(output_path, token, dataset_id, user_id)
 	except subprocess.CalledProcessError as e:
+		stderr_output = e.stderr if e.stderr else 'No stderr captured'
 		logger.error(
 			f'Error in final transformation: {e}',
 			LogContext(
@@ -445,7 +648,13 @@ def _apply_final_transformations(
 				dataset_id=dataset_id,
 				user_id=user_id,
 				token=token,
-				extra={'error': str(e), 'stderr': e.stderr},
+				extra={
+					'error': str(e),
+					'exit_code': e.returncode,
+					'stderr': stderr_output,
+					'stdout': e.stdout if e.stdout else 'No stdout',
+					'command': ' '.join(cmd),
+				},
 			),
 		)
 		return False

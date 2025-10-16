@@ -111,6 +111,7 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 				'compress': 'deflate',
 				'predictor': 2,
 				'interleave': 'pixel',
+				'photometric': 'rgb',  # Force RGB to avoid JPEG YCbCr conflicts with DEFLATE
 			}
 		)
 
