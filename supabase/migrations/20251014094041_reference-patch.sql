@@ -72,6 +72,10 @@ drop view if exists "public"."dev_full_dataset_view";
 
 drop view if exists "public"."v1_full_dataset_view";
 
+drop view if exists "public"."v2_full_dataset_view_public";
+
+drop view if exists "public"."v2_full_dataset_view";
+
 alter table "public"."ml_training_tiles" drop constraint "ml_training_tiles_pkey";
 
 drop index if exists "public"."idx_ml_tiles_dataset";
@@ -645,6 +649,208 @@ create or replace view "public"."v1_full_dataset_view" as  WITH ds AS (
    FROM ((ds
      LEFT JOIN v1_metadata m ON ((m.dataset_id = ds.id)))
      LEFT JOIN extra ON ((extra.dataset_id = ds.id)));
+
+
+create or replace view "public"."v2_full_dataset_view" as  WITH ds AS (
+         SELECT v2_datasets.id,
+            v2_datasets.user_id,
+            v2_datasets.created_at,
+            v2_datasets.file_name,
+            v2_datasets.license,
+            v2_datasets.platform,
+            v2_datasets.project_id,
+            v2_datasets.authors,
+            v2_datasets.aquisition_year,
+            v2_datasets.aquisition_month,
+            v2_datasets.aquisition_day,
+            v2_datasets.additional_information,
+            v2_datasets.data_access,
+            v2_datasets.citation_doi
+           FROM v2_datasets
+          WHERE ((v2_datasets.data_access <> 'private'::access) OR (auth.uid() = v2_datasets.user_id) OR can_view_all_private_data())
+        ), ortho AS (
+         SELECT v2_orthos.dataset_id,
+            v2_orthos.ortho_file_name,
+            v2_orthos.ortho_file_size,
+            v2_orthos.bbox,
+            v2_orthos.sha256,
+            v2_orthos.ortho_upload_runtime
+           FROM v2_orthos
+        ), status AS (
+         SELECT v2_statuses.dataset_id,
+            v2_statuses.current_status,
+            v2_statuses.is_upload_done,
+            v2_statuses.is_ortho_done,
+            v2_statuses.is_cog_done,
+            v2_statuses.is_thumbnail_done,
+            v2_statuses.is_deadwood_done,
+            v2_statuses.is_forest_cover_done,
+            v2_statuses.is_metadata_done,
+            v2_statuses.is_odm_done,
+            v2_statuses.is_audited,
+            v2_statuses.has_error,
+            v2_statuses.error_message,
+            v2_statuses.has_ml_tiles,
+            v2_statuses.ml_tiles_completed_at
+           FROM v2_statuses
+        ), extra AS (
+         SELECT ds_1.id AS dataset_id,
+            cog.cog_file_name,
+            cog.cog_path,
+            cog.cog_file_size,
+            thumb.thumbnail_file_name,
+            thumb.thumbnail_path,
+            (meta.metadata ->> 'gadm'::text) AS admin_metadata,
+            (meta.metadata ->> 'biome'::text) AS biome_metadata
+           FROM (((v2_datasets ds_1
+             LEFT JOIN v2_cogs cog ON ((cog.dataset_id = ds_1.id)))
+             LEFT JOIN v2_thumbnails thumb ON ((thumb.dataset_id = ds_1.id)))
+             LEFT JOIN v2_metadata meta ON ((meta.dataset_id = ds_1.id)))
+          WHERE ((ds_1.data_access <> 'private'::access) OR (auth.uid() = ds_1.user_id) OR can_view_all_private_data())
+        ), label_info AS (
+         SELECT dataset.id AS dataset_id,
+            (EXISTS ( SELECT 1
+                   FROM v2_labels
+                  WHERE ((v2_labels.dataset_id = dataset.id) AND (v2_labels.label_source = 'visual_interpretation'::"LabelSource") AND (v2_labels.label_data = 'deadwood'::"LabelData")))) AS has_labels,
+            (EXISTS ( SELECT 1
+                   FROM v2_labels
+                  WHERE ((v2_labels.dataset_id = dataset.id) AND (v2_labels.label_source = 'model_prediction'::"LabelSource") AND (v2_labels.label_data = 'deadwood'::"LabelData")))) AS has_deadwood_prediction
+           FROM v2_datasets dataset
+          WHERE ((dataset.data_access <> 'private'::access) OR (auth.uid() = dataset.user_id) OR can_view_all_private_data())
+        ), freidata_doi AS (
+         SELECT jt.dataset_id,
+            dp.doi AS freidata_doi
+           FROM (jt_data_publication_datasets jt
+             JOIN data_publication dp ON ((dp.id = jt.publication_id)))
+          WHERE (dp.doi IS NOT NULL)
+        )
+ SELECT ds.id,
+    ds.user_id,
+    ds.created_at,
+    ds.file_name,
+    ds.license,
+    ds.platform,
+    ds.project_id,
+    ds.authors,
+    ds.aquisition_year,
+    ds.aquisition_month,
+    ds.aquisition_day,
+    ds.additional_information,
+    ds.data_access,
+    ds.citation_doi,
+    ortho.ortho_file_name,
+    ortho.ortho_file_size,
+    ortho.bbox,
+    ortho.sha256,
+    status.current_status,
+    status.is_upload_done,
+    status.is_ortho_done,
+    status.is_cog_done,
+    status.is_thumbnail_done,
+    status.is_deadwood_done,
+    status.is_forest_cover_done,
+    status.is_metadata_done,
+    status.is_odm_done,
+    status.is_audited,
+    status.has_error,
+    status.error_message,
+    extra.cog_file_name,
+    extra.cog_path,
+    extra.cog_file_size,
+    extra.thumbnail_file_name,
+    extra.thumbnail_path,
+    ((extra.admin_metadata)::jsonb ->> 'admin_level_1'::text) AS admin_level_1,
+    ((extra.admin_metadata)::jsonb ->> 'admin_level_2'::text) AS admin_level_2,
+    ((extra.admin_metadata)::jsonb ->> 'admin_level_3'::text) AS admin_level_3,
+    ((extra.biome_metadata)::jsonb ->> 'biome_name'::text) AS biome_name,
+    label_info.has_labels,
+    label_info.has_deadwood_prediction,
+    freidata_doi.freidata_doi,
+    status.has_ml_tiles,
+    status.ml_tiles_completed_at
+   FROM (((((ds
+     LEFT JOIN ortho ON ((ortho.dataset_id = ds.id)))
+     LEFT JOIN status ON ((status.dataset_id = ds.id)))
+     LEFT JOIN extra ON ((extra.dataset_id = ds.id)))
+     LEFT JOIN label_info ON ((label_info.dataset_id = ds.id)))
+     LEFT JOIN freidata_doi ON ((freidata_doi.dataset_id = ds.id)));
+
+
+create or replace view "public"."v2_full_dataset_view_public" as  SELECT base.id,
+    base.user_id,
+    base.created_at,
+    base.file_name,
+    base.license,
+    base.platform,
+    base.project_id,
+    base.authors,
+    base.aquisition_year,
+    base.aquisition_month,
+    base.aquisition_day,
+    base.additional_information,
+    base.data_access,
+    base.citation_doi,
+    base.ortho_file_name,
+    base.ortho_file_size,
+    base.bbox,
+    base.sha256,
+    base.current_status,
+    base.is_upload_done,
+    base.is_ortho_done,
+    base.is_cog_done,
+    base.is_thumbnail_done,
+    base.is_deadwood_done,
+    base.is_forest_cover_done,
+    base.is_metadata_done,
+    base.is_odm_done,
+    base.is_audited,
+    base.has_error,
+    base.error_message,
+    base.cog_file_name,
+    base.cog_path,
+    base.cog_file_size,
+    base.thumbnail_file_name,
+    base.thumbnail_path,
+    base.admin_level_1,
+    base.admin_level_2,
+    base.admin_level_3,
+    base.biome_name,
+    base.has_labels,
+    base.has_deadwood_prediction,
+    base.freidata_doi,
+    base.has_ml_tiles,
+    base.ml_tiles_completed_at,
+    audit_data.final_assessment,
+    audit_data.deadwood_quality,
+    audit_data.forest_cover_quality,
+    audit_data.has_major_issue,
+    audit_data.audit_date,
+    audit_data.audited_by,
+    audit_data.audited_by_email,
+        CASE
+            WHEN (audit_data.deadwood_quality = 'bad'::prediction_quality) THEN false
+            WHEN (audit_data.deadwood_quality = ANY (ARRAY['great'::prediction_quality, 'sentinel_ok'::prediction_quality])) THEN true
+            WHEN ((audit_data.deadwood_quality IS NULL) AND (base.is_audited = true)) THEN false
+            ELSE true
+        END AS show_deadwood_predictions,
+        CASE
+            WHEN (audit_data.forest_cover_quality = 'bad'::prediction_quality) THEN false
+            WHEN (audit_data.forest_cover_quality = ANY (ARRAY['great'::prediction_quality, 'sentinel_ok'::prediction_quality])) THEN true
+            WHEN ((audit_data.forest_cover_quality IS NULL) AND (base.is_audited = true)) THEN false
+            ELSE true
+        END AS show_forest_cover_predictions
+   FROM (v2_full_dataset_view base
+     LEFT JOIN ( SELECT da.dataset_id,
+            da.final_assessment,
+            da.deadwood_quality,
+            da.forest_cover_quality,
+            da.has_major_issue,
+            da.audit_date,
+            da.audited_by,
+            au.email AS audited_by_email
+           FROM (dataset_audit da
+             LEFT JOIN auth.users au ON ((da.audited_by = au.id)))) audit_data ON ((audit_data.dataset_id = base.id)))
+  WHERE ((audit_data.final_assessment IS NULL) OR (audit_data.final_assessment <> 'exclude_completely'::text));
 
 
 grant delete on table "public"."reference_patch_deadwood_geometries" to "anon";
