@@ -252,6 +252,16 @@ file_utils.py, exif_utils.py, rtk_utils.py, odm_processor.py
 4. **Group related tests** - use test classes for organization
 5. **Real data over mocking** - use actual data when possible
 
+### **Test Fixtures Location** ⚠️
+- **NEVER** place test fixtures in `assets/test_data/` or `test_data/`
+- **ALWAYS** place test fixtures in `{service}/tests/fixtures/`
+- Examples:
+  - ✅ `processor/tests/fixtures/sample_geotiff.tif`
+  - ✅ `api/tests/fixtures/sample_upload.zip`
+  - ❌ `assets/test_data/sample_geotiff.tif`
+  - ❌ `test_data/debugging/sample.tif`
+- Rationale: Keep test data co-located with tests, mounted in test containers
+
 ### **File Structure**
 1. **Flatten when possible** - avoid deep nesting
 2. **Group by feature** - related functionality together
