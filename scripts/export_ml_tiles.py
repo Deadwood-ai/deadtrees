@@ -1,26 +1,25 @@
 #!/usr/bin/env python3
 """
-Export reference patches as 1024x1024 GeoTIFF images in Web Mercator projection (EPSG:3857).
+Export reference patches as 1024x1024 GeoTIFF images in UTM projection.
 
 This script:
 1. Queries the database for patches with status='good'
 2. Downloads COGs via nginx
-3. Validates patches are square and geodesically correct
+3. Validates patches are square with correct dimensions
 4. Crops and resamples to exact patch boundaries (1024x1024 pixels)
-5. Exports GeoTIFF (RGB ortho + binary masks) + JSON sidecar files in EPSG:3857
+5. Exports GeoTIFF (RGB ortho + binary masks) + JSON sidecar files in UTM projection
 
-IMPORTANT: Why Web Mercator Instead of UTM?
-- Patches are created with latitude-based geodesic correction
-- Web Mercator bboxes are intentionally LARGER at higher latitudes (e.g., 289m at 45°)
-- This ensures CORRECT ground resolution (0.05m, 0.10m, or 0.20m) regardless of latitude
-- Exporting in Web Mercator avoids projection transformation artifacts
-- Result: Perfectly square patches with correct ground pixel spacing
-- For ML training, the CRS doesn't matter - only pixel spacing consistency matters
+IMPORTANT: UTM Storage
+- Patches are stored in UTM coordinates (not Web Mercator)
+- Each patch has an associated epsg_code field (e.g., 32632 for UTM Zone 32N)
+- UTM provides true ground measurements in meters with no distortion
+- A 204.8m × 204.8m patch is exactly that size on the ground
+- No geodesic correction needed
 
-Benefits vs UTM Export:
-✅ No projection transformation = no X/Y asymmetry artifacts
-✅ Perfectly square patches (no 1-3% rectangular distortion)
-✅ Faster export (no coordinate transformation)
+Benefits of UTM Export:
+✅ No distortion - true ground measurements
+✅ Perfectly square patches (exact dimensions)
+✅ Consistent dimensions regardless of latitude
 ✅ Same ground resolution accuracy
 
 Usage:
@@ -44,6 +43,7 @@ from rasterio.enums import Resampling
 from rasterio.windows import from_bounds
 from rasterio.features import rasterize
 from rasterio.transform import from_bounds as transform_from_bounds
+from rasterio.vrt import WarpedVRT
 from tqdm import tqdm
 from shapely.geometry import shape, box
 from shapely.ops import transform
@@ -58,29 +58,6 @@ from shared.settings import settings
 # Default credentials (can be overridden via CLI or env vars)
 DEFAULT_EMAIL = 'processor@deadtrees.earth'
 DEFAULT_PASSWORD = 'processor'
-
-
-def calculate_utm_zone(lon: float, lat: float) -> str:
-	"""Calculate UTM zone EPSG code from WGS84 coordinates.
-
-	Args:
-		lon: Longitude in WGS84
-		lat: Latitude in WGS84
-
-	Returns:
-		str: EPSG code (e.g., 'EPSG:32632' for UTM zone 32N)
-	"""
-	# Calculate UTM zone number (1-60)
-	zone_number = int((lon + 180) / 6) + 1
-
-	# Determine hemisphere (North or South)
-	# North: EPSG:326xx, South: EPSG:327xx
-	if lat >= 0:
-		epsg_code = f'EPSG:326{zone_number:02d}'
-	else:
-		epsg_code = f'EPSG:327{zone_number:02d}'
-
-	return epsg_code
 
 
 def get_nginx_cog_url(cog_path: str, base_url: str = 'http://localhost:8080/cogs/v1') -> str:
@@ -168,229 +145,251 @@ def export_patch_geotiff(
 	patch_index = patch['patch_index']
 	patch_id = patch['id']
 	resolution_cm = patch['resolution_cm']
+	epsg_code = patch['epsg_code']
+	utm_zone = patch.get('utm_zone')
 
-	# Extract bounding box in EPSG:3857
-	minx_3857 = patch['bbox_minx']
-	miny_3857 = patch['bbox_miny']
-	maxx_3857 = patch['bbox_maxx']
-	maxy_3857 = patch['bbox_maxy']
-
-	# Validate patch is within COG bounds
-	cog_bbox = cog_info['GEO']['BoundingBox']
-	cog_bounds = (cog_bbox[0], cog_bbox[1], cog_bbox[2], cog_bbox[3])  # left, bottom, right, top
-
-	if not validate_tile_bounds((minx_3857, miny_3857, maxx_3857, maxy_3857), cog_bounds, dataset_id, patch_index):
+	# Validate EPSG code exists
+	if not epsg_code:
+		print(f'❌ Patch {patch_index}: Missing epsg_code field')
 		return None
+
+	# Extract bounding box in UTM coordinates
+	minx_utm = patch['bbox_minx']
+	miny_utm = patch['bbox_miny']
+	maxx_utm = patch['bbox_maxx']
+	maxy_utm = patch['bbox_maxy']
+
+	# Note: We'll validate bounds after opening the COG with WarpedVRT in UTM projection
+	# This way we can compare UTM coordinates directly
 
 	# Calculate patch center in WGS84 (for metadata only)
-	center_x_3857 = (minx_3857 + maxx_3857) / 2.0
-	center_y_3857 = (miny_3857 + maxy_3857) / 2.0
-	transformer_to_wgs84 = Transformer.from_crs('EPSG:3857', 'EPSG:4326', always_xy=True)
-	center_lon, center_lat = transformer_to_wgs84.transform(center_x_3857, center_y_3857)
+	center_x_utm = (minx_utm + maxx_utm) / 2.0
+	center_y_utm = (miny_utm + maxy_utm) / 2.0
+	transformer_to_wgs84 = Transformer.from_crs(f'EPSG:{epsg_code}', 'EPSG:4326', always_xy=True)
+	center_lon, center_lat = transformer_to_wgs84.transform(center_x_utm, center_y_utm)
 
-	# Calculate Web Mercator dimensions (no projection transformation = no artifacts!)
-	bbox_width_3857 = maxx_3857 - minx_3857
-	bbox_height_3857 = maxy_3857 - miny_3857
+	# Calculate UTM dimensions (should be exact!)
+	bbox_width_utm = maxx_utm - minx_utm
+	bbox_height_utm = maxy_utm - miny_utm
 
-	# Validate patch is roughly square (within 0.5% - should be perfect since no transformation)
-	size_difference_percent = abs(bbox_width_3857 - bbox_height_3857) / max(bbox_width_3857, bbox_height_3857)
-	if size_difference_percent > 0.005:  # 0.5% tolerance
-		print(f'❌ Patch {patch_index}: Not square! {bbox_width_3857:.2f}m × {bbox_height_3857:.2f}m')
-		print(f'   Difference: {size_difference_percent * 100:.2f}% (expected: perfectly square)')
+	# Validate patch is square (should be perfect in UTM)
+	size_difference = abs(bbox_width_utm - bbox_height_utm)
+	if size_difference > 0.1:  # Allow 10cm tolerance
+		print(f'❌ Patch {patch_index}: Not square! {bbox_width_utm:.2f}m × {bbox_height_utm:.2f}m')
+		print(f'   Difference: {size_difference:.2f}m (expected: perfectly square)')
 		return None
 
-	# Calculate expected Web Mercator size based on latitude and resolution
-	# This validates the geodesic correction was applied correctly
-	import math
+	# Validate expected size (204.8m for 20cm, 102.4m for 10cm, 51.2m for 5cm)
+	expected_size = target_gsd_m * 1024.0
+	avg_size = (bbox_width_utm + bbox_height_utm) / 2.0
+	size_error = abs(avg_size - expected_size)
 
-	scale_factor = 1.0 / math.cos(math.radians(center_lat))
-	expected_size_3857 = target_gsd_m * 1024.0 * scale_factor
-
-	# Validate actual size matches expected (within 1% tolerance)
-	avg_size_3857 = (bbox_width_3857 + bbox_height_3857) / 2.0
-	size_error_percent = abs(avg_size_3857 - expected_size_3857) / expected_size_3857
-
-	if size_error_percent > 0.01:  # 1% tolerance
-		print(f'❌ Patch {patch_index}: Size mismatch! Expected {expected_size_3857:.2f}m, got {avg_size_3857:.2f}m')
-		print(f'   Error: {size_error_percent * 100:.1f}% (at latitude {center_lat:.4f}°)')
-		print(f'   Scale factor: {scale_factor:.4f}')
+	if size_error > 1.0:  # Allow 1m tolerance
+		print(f'❌ Patch {patch_index}: Size mismatch! Expected {expected_size:.2f}m, got {avg_size:.2f}m')
+		print(f'   Error: {size_error:.2f}m')
 		return None
 
 	try:
 		with rasterio.open(cog_path_local) as src:
-			# Create window from bounds in EPSG:3857
-			# Note: from_bounds expects (left, bottom, right, top) but in image coordinates
-			# In EPSG:3857, Y increases northward, so maxy is top, miny is bottom
-			window = from_bounds(minx_3857, miny_3857, maxx_3857, maxy_3857, src.transform)
+			# Wrap COG in a WarpedVRT to reproject it to UTM on-the-fly
+			# This avoids coordinate transformation artifacts and ensures perfect alignment
+			with WarpedVRT(
+				src,
+				crs=f'EPSG:{epsg_code}',  # Target UTM projection
+				resampling=Resampling.bilinear,
+			) as vrt:
+				# Now we can read directly using UTM coordinates!
+				# The VRT handles the reprojection transparently
 
-			# Read RGB bands with resampling to exact 1024x1024
-			data = src.read(indexes=[1, 2, 3], window=window, out_shape=(3, 1024, 1024), resampling=Resampling.bilinear)
+				# Validate patch is within VRT bounds (now in UTM)
+				vrt_bounds = vrt.bounds  # left, bottom, right, top in UTM
+				if not validate_tile_bounds(
+					(minx_utm, miny_utm, maxx_utm, maxy_utm), vrt_bounds, dataset_id, patch_index
+				):
+					return None
 
-			# Check data shape
-			if data.shape != (3, 1024, 1024):
-				print(f'❌ Patch {patch_index}: Invalid data shape {data.shape}, expected (3, 1024, 1024)')
-				return None
+				# Create window from UTM bounds
+				window = from_bounds(minx_utm, miny_utm, maxx_utm, maxy_utm, vrt.transform)
 
-			# Create AOI mask (in EPSG:3857 coordinates)
-			bbox_tuple_3857 = (minx_3857, miny_3857, maxx_3857, maxy_3857)
-			aoi_mask = create_aoi_mask(aoi_geometry, bbox_tuple_3857)
+				# Read RGB bands with resampling to exact 1024x1024
+				data = vrt.read(
+					indexes=[1, 2, 3], window=window, out_shape=(3, 1024, 1024), resampling=Resampling.bilinear
+				)
 
-			# Apply AOI mask to RGB image (set to black outside AOI)
-			aoi_mask_3d = np.expand_dims(aoi_mask, axis=2)
-			aoi_mask_broadcast = np.broadcast_to(aoi_mask_3d, (1024, 1024, 3))
-			img_data_masked = np.moveaxis(data, 0, -1) * aoi_mask_broadcast
+		# Check data shape
+		if data.shape != (3, 1024, 1024):
+			print(f'❌ Patch {patch_index}: Invalid data shape {data.shape}, expected (3, 1024, 1024)')
+			return None
 
-			# Move back to CHW format for rasterio
-			rgb_data = np.moveaxis(img_data_masked, -1, 0).astype(np.uint8)
+		# Create AOI mask (in UTM coordinates)
+		bbox_tuple_utm = (minx_utm, miny_utm, maxx_utm, maxy_utm)
+		aoi_mask = create_aoi_mask(aoi_geometry, bbox_tuple_utm, epsg_code)
 
-			# Fetch and rasterize deadwood reference geometries
-			deadwood_mask = None
-			deadwood_geoms = fetch_patch_geometries(
-				token, patch_id, 'reference_patch_deadwood_geometries', bbox_tuple_3857
+		# Apply AOI mask to RGB image (set to black outside AOI)
+		aoi_mask_3d = np.expand_dims(aoi_mask, axis=2)
+		aoi_mask_broadcast = np.broadcast_to(aoi_mask_3d, (1024, 1024, 3))
+		img_data_masked = np.moveaxis(data, 0, -1) * aoi_mask_broadcast
+
+		# Move back to CHW format for rasterio
+		rgb_data = np.moveaxis(img_data_masked, -1, 0).astype(np.uint8)
+
+		# Fetch and rasterize deadwood reference geometries
+		# For child patches without their own labels, inherit from parent hierarchy
+		deadwood_mask = None
+		deadwood_label_id = patch.get('reference_deadwood_label_id')
+		forestcover_label_id = patch.get('reference_forest_cover_label_id')
+
+		# If this patch doesn't have label IDs, recursively search parent hierarchy
+		if (not deadwood_label_id or not forestcover_label_id) and patch.get('parent_tile_id'):
+			parent_labels = fetch_parent_label_ids(token, patch['parent_tile_id'])
+			if not deadwood_label_id:
+				deadwood_label_id = parent_labels['deadwood']
+			if not forestcover_label_id:
+				forestcover_label_id = parent_labels['forestcover']
+
+		# Fetch and rasterize deadwood geometries
+		if deadwood_label_id:
+			deadwood_geoms = fetch_geometries_by_label(
+				token, deadwood_label_id, 'reference_patch_deadwood_geometries', bbox_tuple_utm, epsg_code
 			)
 			if deadwood_geoms:
-				deadwood_mask = rasterize_geometries(deadwood_geoms, bbox_tuple_3857)
+				deadwood_mask = rasterize_geometries(deadwood_geoms, bbox_tuple_utm)
 				# Apply AOI mask and convert to binary 0/1 (not 0/255)
 				deadwood_mask = ((deadwood_mask > 0) * aoi_mask).astype(np.uint8)
 
-			# Fetch and rasterize forest cover reference geometries
-			forestcover_mask = None
-			forestcover_geoms = fetch_patch_geometries(
-				token, patch_id, 'reference_patch_forest_cover_geometries', bbox_tuple_3857
+		# Fetch and rasterize forest cover geometries
+		forestcover_mask = None
+		if forestcover_label_id:
+			forestcover_geoms = fetch_geometries_by_label(
+				token, forestcover_label_id, 'reference_patch_forest_cover_geometries', bbox_tuple_utm, epsg_code
 			)
 			if forestcover_geoms:
-				forestcover_mask = rasterize_geometries(forestcover_geoms, bbox_tuple_3857)
+				forestcover_mask = rasterize_geometries(forestcover_geoms, bbox_tuple_utm)
 				# Apply AOI mask and convert to binary 0/1 (not 0/255)
 				forestcover_mask = ((forestcover_mask > 0) * aoi_mask).astype(np.uint8)
 
-			# Create output filenames
-			filename_base = f'{dataset_id}_{patch_index}_{resolution_cm}cm'
-			geotiff_path = output_dir / f'{filename_base}.tif'
-			json_path = output_dir / f'{filename_base}.json'
-			deadwood_path = output_dir / f'{filename_base}_deadwood.tif'
-			forestcover_path = output_dir / f'{filename_base}_forestcover.tif'
+		# Create output filenames
+		filename_base = f'{dataset_id}_{patch_index}_{resolution_cm}cm'
+		geotiff_path = output_dir / f'{filename_base}.tif'
+		json_path = output_dir / f'{filename_base}.json'
+		deadwood_path = output_dir / f'{filename_base}_deadwood.tif'
+		forestcover_path = output_dir / f'{filename_base}_forestcover.tif'
 
-			# Create Web Mercator transform for the patch
-			wm_transform = transform_from_bounds(minx_3857, miny_3857, maxx_3857, maxy_3857, 1024, 1024)
+		# Create UTM transform for the patch
+		utm_transform = transform_from_bounds(minx_utm, miny_utm, maxx_utm, maxy_utm, 1024, 1024)
 
-			# Save RGB GeoTIFF in Web Mercator projection (EPSG:3857)
+		# Save RGB GeoTIFF in UTM projection
+		with rasterio.open(
+			geotiff_path,
+			'w',
+			driver='GTiff',
+			height=1024,
+			width=1024,
+			count=3,
+			dtype=np.uint8,
+			crs=f'EPSG:{epsg_code}',
+			transform=utm_transform,
+			compress='DEFLATE',
+			tiled=True,
+			blockxsize=256,
+			blockysize=256,
+		) as dst:
+			dst.write(rgb_data)
+
+		# Save deadwood mask if available
+		has_deadwood = False
+		if deadwood_mask is not None:
 			with rasterio.open(
-				geotiff_path,
+				deadwood_path,
 				'w',
 				driver='GTiff',
 				height=1024,
 				width=1024,
-				count=3,
+				count=1,
 				dtype=np.uint8,
-				crs='EPSG:3857',
-				transform=wm_transform,
+				crs=f'EPSG:{epsg_code}',
+				transform=utm_transform,
 				compress='DEFLATE',
 				tiled=True,
 				blockxsize=256,
 				blockysize=256,
 			) as dst:
-				dst.write(rgb_data)
+				dst.write(deadwood_mask, 1)
+			has_deadwood = True
 
-			# Save deadwood mask if available
-			has_deadwood = False
-			if deadwood_mask is not None:
-				with rasterio.open(
-					deadwood_path,
-					'w',
-					driver='GTiff',
-					height=1024,
-					width=1024,
-					count=1,
-					dtype=np.uint8,
-					crs='EPSG:3857',
-					transform=wm_transform,
-					compress='DEFLATE',
-					tiled=True,
-					blockxsize=256,
-					blockysize=256,
-				) as dst:
-					dst.write(deadwood_mask, 1)
-				has_deadwood = True
+		# Save forest cover mask if available
+		has_forestcover = False
+		if forestcover_mask is not None:
+			with rasterio.open(
+				forestcover_path,
+				'w',
+				driver='GTiff',
+				height=1024,
+				width=1024,
+				count=1,
+				dtype=np.uint8,
+				crs=f'EPSG:{epsg_code}',
+				transform=utm_transform,
+				compress='DEFLATE',
+				tiled=True,
+				blockxsize=256,
+				blockysize=256,
+			) as dst:
+				dst.write(forestcover_mask, 1)
+			has_forestcover = True
 
-			# Save forest cover mask if available
-			has_forestcover = False
-			if forestcover_mask is not None:
-				with rasterio.open(
-					forestcover_path,
-					'w',
-					driver='GTiff',
-					height=1024,
-					width=1024,
-					count=1,
-					dtype=np.uint8,
-					crs='EPSG:3857',
-					transform=wm_transform,
-					compress='DEFLATE',
-					tiled=True,
-					blockxsize=256,
-					blockysize=256,
-				) as dst:
-					dst.write(forestcover_mask, 1)
-				has_forestcover = True
+		# Calculate UTM pixel spacing
+		utm_pixel_spacing_x = bbox_width_utm / 1024.0
+		utm_pixel_spacing_y = bbox_height_utm / 1024.0
 
-			# Calculate Web Mercator pixel spacing
-			wm_pixel_spacing_x = bbox_width_3857 / 1024.0
-			wm_pixel_spacing_y = bbox_height_3857 / 1024.0
+		# Create metadata JSON
+		metadata = {
+			'dataset_id': dataset_id,
+			'patch_id': patch_id,
+			'patch_index': patch_index,
+			'resolution_cm': resolution_cm,
+			'crs': f'EPSG:{epsg_code}',
+			'utm_zone': utm_zone,
+			'epsg_code': epsg_code,
+			'bbox_utm': {
+				'minx': minx_utm,
+				'miny': miny_utm,
+				'maxx': maxx_utm,
+				'maxy': maxy_utm,
+				'width_m': bbox_width_utm,
+				'height_m': bbox_height_utm,
+			},
+			'center_wgs84': {
+				'lon': center_lon,
+				'lat': center_lat,
+			},
+			'pixel_spacing_m': {
+				'x': utm_pixel_spacing_x,
+				'y': utm_pixel_spacing_y,
+				'ground_resolution_m': target_gsd_m,
+			},
+			'target_gsd_m': target_gsd_m,
+			'image_size_px': {'width': 1024, 'height': 1024},
+			'source_cog_resolution_m_px': cog_info['GEO']['Resolution'][0],
+			'has_deadwood_mask': has_deadwood,
+			'has_forestcover_mask': has_forestcover,
+			'aoi_cropped': aoi_geometry is not None,
+			'coverage_stats': {
+				'aoi_coverage_percent': patch.get('aoi_coverage_percent'),
+				'deadwood_prediction_coverage_percent': patch.get('deadwood_prediction_coverage_percent'),
+				'forest_cover_prediction_coverage_percent': patch.get('forest_cover_prediction_coverage_percent'),
+			},
+			'created_at': patch['created_at']
+			if isinstance(patch['created_at'], str)
+			else patch['created_at'].isoformat(),
+			'user_id': str(patch['user_id']),
+		}
 
-			# Create metadata JSON
-			metadata = {
-				'dataset_id': dataset_id,
-				'patch_id': patch_id,
-				'patch_index': patch_index,
-				'resolution_cm': resolution_cm,
-				'crs': 'EPSG:3857',
-				'bbox_epsg3857': {
-					'minx': minx_3857,
-					'miny': miny_3857,
-					'maxx': maxx_3857,
-					'maxy': maxy_3857,
-					'width_m': bbox_width_3857,
-					'height_m': bbox_height_3857,
-				},
-				'center_wgs84': {
-					'lon': center_lon,
-					'lat': center_lat,
-				},
-				'geodesic_correction': {
-					'scale_factor': scale_factor,
-					'latitude': center_lat,
-					'note': 'Web Mercator bbox is larger at high latitudes to ensure correct ground resolution',
-				},
-				'pixel_spacing': {
-					'web_mercator_m': {
-						'x': wm_pixel_spacing_x,
-						'y': wm_pixel_spacing_y,
-					},
-					'ground_resolution_m': target_gsd_m,
-					'note': 'Ground resolution is correct due to geodesic correction. Web Mercator pixel spacing varies by latitude.',
-				},
-				'target_gsd_m': target_gsd_m,
-				'image_size_px': {'width': 1024, 'height': 1024},
-				'source_cog_resolution_m_px': cog_info['GEO']['Resolution'][0],
-				'has_deadwood_mask': has_deadwood,
-				'has_forestcover_mask': has_forestcover,
-				'aoi_cropped': aoi_geometry is not None,
-				'coverage_stats': {
-					'aoi_coverage_percent': patch.get('aoi_coverage_percent'),
-					'deadwood_prediction_coverage_percent': patch.get('deadwood_prediction_coverage_percent'),
-					'forest_cover_prediction_coverage_percent': patch.get('forest_cover_prediction_coverage_percent'),
-				},
-				'created_at': patch['created_at']
-				if isinstance(patch['created_at'], str)
-				else patch['created_at'].isoformat(),
-				'user_id': str(patch['user_id']),
-			}
+		# Save JSON
+		with open(json_path, 'w') as f:
+			json.dump(metadata, f, indent=2)
 
-			# Save JSON
-			with open(json_path, 'w') as f:
-				json.dump(metadata, f, indent=2)
-
-			return geotiff_path
+		return geotiff_path
 
 	except Exception as e:
 		print(f'❌ Error exporting patch {patch_index}: {e}')
@@ -419,17 +418,132 @@ def fetch_aoi_geometry(token: str, dataset_id: int) -> Optional[dict]:
 		return None
 
 
-def fetch_patch_geometries(token: str, patch_id: int, table_name: str, bbox: tuple) -> list:
+def fetch_parent_label_ids(token: str, parent_tile_id: int) -> dict:
+	"""Recursively fetch label IDs from parent hierarchy.
+
+	For child patches, traverse up the parent tree until we find
+	a patch with label_ids set. This handles multi-level hierarchies
+	like 5cm → 10cm → 20cm where only the 20cm has labels.
+
+	Args:
+		token: Authentication token
+		parent_tile_id: Parent tile ID to start searching from
+
+	Returns:
+		Dict with 'deadwood' and 'forestcover' label IDs (can be None)
+	"""
+	label_ids = {'deadwood': None, 'forestcover': None}
+
+	try:
+		current_id = parent_tile_id
+		max_depth = 5  # Prevent infinite loops
+		depth = 0
+
+		while current_id and depth < max_depth:
+			with use_client(token) as client:
+				response = (
+					client.from_('reference_patches')
+					.select('id, parent_tile_id, reference_deadwood_label_id, reference_forest_cover_label_id')
+					.eq('id', current_id)
+					.single()
+					.execute()
+				)
+
+				if not response.data:
+					break
+
+				patch = response.data
+
+				# If we found label IDs, use them
+				if patch.get('reference_deadwood_label_id'):
+					label_ids['deadwood'] = patch['reference_deadwood_label_id']
+				if patch.get('reference_forest_cover_label_id'):
+					label_ids['forestcover'] = patch['reference_forest_cover_label_id']
+
+				# If we found both labels or there's no parent, stop
+				if (label_ids['deadwood'] and label_ids['forestcover']) or not patch.get('parent_tile_id'):
+					break
+
+				# Move up to parent
+				current_id = patch.get('parent_tile_id')
+				depth += 1
+
+		return label_ids
+
+	except Exception as e:
+		print(f'⚠️  Error fetching parent label IDs: {e}')
+		return label_ids
+
+
+def fetch_geometries_by_label(token: str, label_id: int, table_name: str, bbox: tuple, epsg_code: int) -> list:
+	"""Fetch reference geometries for a label that intersect with bbox.
+
+	Args:
+		token: Authentication token
+		label_id: Label ID to fetch geometries for
+		table_name: 'reference_patch_deadwood_geometries' or 'reference_patch_forest_cover_geometries'
+		bbox: Bounding box (minx, miny, maxx, maxy) in UTM coordinates
+		epsg_code: UTM EPSG code (e.g., 32632)
+
+	Returns:
+		List of shapely geometries in UTM projection
+	"""
+	try:
+		minx, miny, maxx, maxy = bbox
+
+		# Fetch all geometries for this label
+		with use_client(token) as client:
+			response = client.from_(table_name).select('geometry').eq('label_id', label_id).execute()
+
+			if not response.data:
+				return []
+
+			# Create transformer for EPSG:4326 -> UTM
+			transformer = Transformer.from_crs('EPSG:4326', f'EPSG:{epsg_code}', always_xy=True)
+
+			# Convert to shapely geometries, reproject, and filter by bbox
+			tile_box = box(minx, miny, maxx, maxy)
+			geometries = []
+
+			for row in response.data:
+				try:
+					# Load geometry from GeoJSON (in EPSG:4326)
+					geom_4326 = shape(row['geometry'])
+
+					# Reproject to UTM
+					geom_utm = transform(transformer.transform, geom_4326)
+
+					# Check if it intersects with bbox
+					if geom_utm.intersects(tile_box):
+						geometries.append(geom_utm)
+				except Exception:
+					# Skip invalid geometries silently
+					continue
+
+			return geometries
+
+	except Exception as e:
+		print(f'❌ Error fetching geometries by label: {e}')
+		import traceback
+
+		traceback.print_exc()
+		return []
+
+
+def fetch_patch_geometries(token: str, patch_id: int, table_name: str, bbox: tuple, epsg_code: int) -> list:
 	"""Fetch reference geometries for a patch that intersect with patch bounds.
+
+	DEPRECATED: Use fetch_geometries_by_label instead for better performance.
 
 	Args:
 		token: Authentication token
 		patch_id: Patch ID from reference_patches table
 		table_name: 'reference_patch_deadwood_geometries' or 'reference_patch_forest_cover_geometries'
-		bbox: Patch bounding box (minx, miny, maxx, maxy) in EPSG:3857
+		bbox: Patch bounding box (minx, miny, maxx, maxy) in UTM coordinates
+		epsg_code: UTM EPSG code (e.g., 32632)
 
 	Returns:
-		List of shapely geometries in EPSG:3857
+		List of shapely geometries in UTM projection
 	"""
 	try:
 		minx, miny, maxx, maxy = bbox
@@ -441,8 +555,8 @@ def fetch_patch_geometries(token: str, patch_id: int, table_name: str, bbox: tup
 			if not response.data:
 				return []
 
-			# Create transformer for EPSG:4326 -> EPSG:3857
-			transformer = Transformer.from_crs('EPSG:4326', 'EPSG:3857', always_xy=True)
+			# Create transformer for EPSG:4326 -> UTM
+			transformer = Transformer.from_crs('EPSG:4326', f'EPSG:{epsg_code}', always_xy=True)
 
 			# Convert WKB to shapely geometries, reproject, and filter by bbox
 			tile_box = box(minx, miny, maxx, maxy)
@@ -453,12 +567,12 @@ def fetch_patch_geometries(token: str, patch_id: int, table_name: str, bbox: tup
 					# Load geometry from GeoJSON (in EPSG:4326)
 					geom_4326 = shape(row['geometry'])
 
-					# Reproject to EPSG:3857
-					geom_3857 = transform(transformer.transform, geom_4326)
+					# Reproject to UTM
+					geom_utm = transform(transformer.transform, geom_4326)
 
 					# Check if it intersects with tile
-					if geom_3857.intersects(tile_box):
-						geometries.append(geom_3857)
+					if geom_utm.intersects(tile_box):
+						geometries.append(geom_utm)
 				except Exception:
 					# Skip invalid geometries silently
 					continue
@@ -504,12 +618,15 @@ def rasterize_geometries(geometries: list, bbox: tuple, width: int = 1024, heigh
 	return mask
 
 
-def create_aoi_mask(aoi_geojson: dict, bbox: tuple, width: int = 1024, height: int = 1024) -> np.ndarray:
+def create_aoi_mask(
+	aoi_geojson: dict, bbox: tuple, epsg_code: int, width: int = 1024, height: int = 1024
+) -> np.ndarray:
 	"""Create binary mask from AOI geometry.
 
 	Args:
 		aoi_geojson: AOI GeoJSON geometry (in EPSG:4326/WGS84)
-		bbox: Tile bounding box (minx, miny, maxx, maxy) in EPSG:3857
+		bbox: Tile bounding box (minx, miny, maxx, maxy) in UTM coordinates
+		epsg_code: UTM EPSG code (e.g., 32632)
 		width: Output width in pixels
 		height: Output height in pixels
 
@@ -523,16 +640,16 @@ def create_aoi_mask(aoi_geojson: dict, bbox: tuple, width: int = 1024, height: i
 		# Parse AOI geometry (in EPSG:4326)
 		aoi_shape = shape(aoi_geojson)
 
-		# Reproject AOI from EPSG:4326 (WGS84) to EPSG:3857 (Web Mercator)
-		transformer = Transformer.from_crs('EPSG:4326', 'EPSG:3857', always_xy=True)
-		aoi_shape_3857 = transform(transformer.transform, aoi_shape)
+		# Reproject AOI from EPSG:4326 (WGS84) to UTM
+		transformer = Transformer.from_crs('EPSG:4326', f'EPSG:{epsg_code}', always_xy=True)
+		aoi_shape_utm = transform(transformer.transform, aoi_shape)
 
 		minx, miny, maxx, maxy = bbox
 		raster_transform = transform_from_bounds(minx, miny, maxx, maxy, width, height)
 
 		# Rasterize AOI with value 1 for inside
 		aoi_mask = rasterize(
-			[(aoi_shape_3857, 1)],
+			[(aoi_shape_utm, 1)],
 			out_shape=(height, width),
 			transform=raster_transform,
 			fill=0,
@@ -631,13 +748,13 @@ Examples:
 
 Output Files:
   For each patch, the script generates:
-  - {dataset_id}_{patch_index}_{resolution}cm.tif - RGB ortho in EPSG:3857 (Web Mercator)
+  - {dataset_id}_{patch_index}_{resolution}cm.tif - RGB ortho in UTM projection
   - {dataset_id}_{patch_index}_{resolution}cm_deadwood.tif - Binary deadwood mask (0/1)
   - {dataset_id}_{patch_index}_{resolution}cm_forestcover.tif - Binary forest cover mask (0/1)
-  - {dataset_id}_{patch_index}_{resolution}cm.json - Metadata with geodesic correction info
+  - {dataset_id}_{patch_index}_{resolution}cm.json - Metadata with UTM zone and EPSG code
 
-Note: All GeoTIFFs are exported in EPSG:3857 (Web Mercator) with geodesic correction
-      applied. This ensures correct ground resolution and perfectly square patches.
+Note: All GeoTIFFs are exported in UTM projection (EPSG code stored in database).
+      This ensures correct ground resolution and perfectly square patches with no distortion.
 
 Authentication Priority:
   1. CLI arguments (--user, --password)
