@@ -253,14 +253,21 @@ file_utils.py, exif_utils.py, rtk_utils.py, odm_processor.py
 5. **Real data over mocking** - use actual data when possible
 
 ### **Test Fixtures Location** ⚠️
-- **NEVER** place test fixtures in `assets/test_data/` or `test_data/`
-- **ALWAYS** place test fixtures in `{service}/tests/fixtures/`
+- **ALWAYS** place test fixtures in `assets/test_data/`
+- Test fixtures are organized in subdirectories:
+  - `assets/test_data/` - Standard test files (test-data.tif, test-data-small.tif, etc.)
+  - `assets/test_data/debugging/` - Debugging test cases and specific dataset reproductions
+  - `assets/test_data/raw_drone_images/` - ODM test ZIP files
 - Examples:
-  - ✅ `processor/tests/fixtures/sample_geotiff.tif`
-  - ✅ `api/tests/fixtures/sample_upload.zip`
-  - ❌ `assets/test_data/sample_geotiff.tif`
-  - ❌ `test_data/debugging/sample.tif`
-- Rationale: Keep test data co-located with tests, mounted in test containers
+  - ✅ `assets/test_data/test-data.tif` (standard test GeoTIFF)
+  - ✅ `assets/test_data/debugging/5392/ortho_5392.tif` (specific dataset debugging)
+  - ✅ `assets/test_data/raw_drone_images/test_minimal_5_images.zip` (ODM test data)
+- Access pattern in tests:
+  ```python
+  test_data_dir = Path(__file__).parent.parent.parent / 'assets' / 'test_data'
+  input_path = test_data_dir / 'test-data.tif'
+  ```
+- Rationale: Centralized test data location, shared across all services, mounted in test containers via compose
 
 ### **File Structure**
 1. **Flatten when possible** - avoid deep nesting

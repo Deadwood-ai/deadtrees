@@ -473,8 +473,8 @@ def test_dataset_6046_uint8_rgba_with_existing_alpha():
 	When the file already has an alpha band, causing gdalwarp to fail.
 	"""
 	# Use the real clipped file from dataset 6046
-	fixtures_dir = Path(__file__).parent / 'fixtures'
-	input_path = fixtures_dir / '6046_small_rgba_alpha.tif'
+	test_data_dir = Path(__file__).parent.parent.parent / 'assets' / 'test_data'
+	input_path = test_data_dir / '6046_small_rgba_alpha.tif'
 
 	# Skip test if fixture doesn't exist
 	if not input_path.exists():
