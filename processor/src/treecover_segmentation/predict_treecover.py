@@ -16,6 +16,7 @@ from shared.settings import settings
 from shared.models import LabelPayloadData, LabelSourceEnum, LabelTypeEnum, LabelDataEnum
 from shared.labels import create_label_with_geometries, delete_model_prediction_labels
 from shared.logging import LogContext, LogCategory
+from shared.db import login, verify_token
 from ..deadwood_segmentation.deadtreesmodels.common.common import (
 	mask_to_polygons,
 	reproject_polygons,
@@ -23,7 +24,7 @@ from ..deadwood_segmentation.deadtreesmodels.common.common import (
 	get_utm_string_from_latlon,
 )
 from processor.src.utils.shared_volume import cleanup_volume_and_references
-from ..exceptions import ProcessingError
+from ..exceptions import ProcessingError, AuthenticationError
 
 # Load configuration
 CONFIG_PATH = str(Path(__file__).parent / 'treecover_inference_config.json')
@@ -112,6 +113,7 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 				'predictor': 2,
 				'interleave': 'pixel',
 				'photometric': 'rgb',  # Force RGB to avoid JPEG YCbCr conflicts with DEFLATE
+				'BIGTIFF': 'YES',  # Support files > 4GB
 			}
 		)
 
@@ -669,6 +671,16 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 				'container_version': TCD_CONTAINER_IMAGE,
 			},
 		)
+
+		# Refresh token before database operations to avoid expiry after long inference
+		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
+		user = verify_token(token)
+		if not user:
+			logger.error(
+				'Token refresh failed during treecover database operations',
+				LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+			)
+			raise AuthenticationError('Token refresh failed', token=token, dataset_id=dataset_id)
 
 		# Delete existing tree cover prediction labels
 		deleted_count = delete_model_prediction_labels(
