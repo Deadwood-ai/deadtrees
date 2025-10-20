@@ -25,3 +25,4 @@ fastapi[testclient]
 logfire[fastapi,system-metrics]
 pyarrow
 fiona
+pillow
