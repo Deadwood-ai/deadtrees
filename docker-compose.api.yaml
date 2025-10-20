@@ -31,6 +31,11 @@ services:
       UVICORN_PORT: 40831
       UVICORN_HOST: 0.0.0.0
       LOGFIRE_TOKEN: ${LOGFIRE_TOKEN}
+      # Reference export configuration
+      REFERENCE_EXPORT_UUID: ${REFERENCE_EXPORT_UUID}
+      NGINX_COG_URL: ${NGINX_COG_URL}
+      DEADTREES_USER: ${DEADTREES_USER}
+      DEADTREES_PASSWORD: ${DEADTREES_PASSWORD}
 
     # command: python run.py server --reload=False
 
