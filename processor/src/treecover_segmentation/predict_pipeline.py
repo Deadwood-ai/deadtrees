@@ -10,8 +10,6 @@ import sys
 import os
 import numpy as np
 import rasterio
-import rasterio.warp
-from rasterio.warp import reproject, Resampling
 
 try:
 	from tcd_pipeline.pipeline import Pipeline
@@ -22,13 +20,14 @@ except ImportError as e:
 
 def predict_with_pipeline(input_tif: str, output_confidence_map: str, threshold: int = 200):
 	"""
-	Run tree cover detection using TCD Pipeline and save confidence map.
+	Run tree cover detection using TCD Pipeline.
 
-	This replicates the original inference_forestcover() function but saves
-	the confidence map as a GeoTIFF for further processing.
+	TCD handles CRS and resolution internally. The confidence map will inherit
+	the CRS/transform from TCD's output, which predict_treecover.py will then
+	convert to EPSG:4326 for database storage.
 
 	Args:
-	    input_tif (str): Path to input reprojected GeoTIFF
+	    input_tif (str): Path to input GeoTIFF
 	    output_confidence_map (str): Path to save confidence map GeoTIFF
 	    threshold (int): Confidence threshold (default: 200)
 
@@ -39,94 +38,20 @@ def predict_with_pipeline(input_tif: str, output_confidence_map: str, threshold:
 		print(f'Starting TCD Pipeline prediction for: {input_tif}')
 		print(f'Output confidence map will be saved to: {output_confidence_map}')
 
-		# Determine effective input: reproject to metric CRS using memory-efficient chunked processing
-		# This approach uses rasterio's windowed reprojection with tiling
-		# Fixes "Chunk and warp failed" errors on large (gigapixel+) orthomosaics
-		TCD_MIN_RES_M = 0.1
-		effective_input = input_tif
-		try:
-			with rasterio.open(input_tif) as src:
-				if src.crs is not None:
-					# Estimate source resolution in meters by projecting bounds to EPSG:3395
-					default_transform, width, height = rasterio.warp.calculate_default_transform(
-						src.crs, 'EPSG:3395', src.width, src.height, *src.bounds
-					)
-					orig_res_m = abs(default_transform.a)
-					print(f'Estimated source resolution (m): {orig_res_m:.6f}')
+		# Log input properties for debugging
+		with rasterio.open(input_tif) as src:
+			print(f'Input CRS: {src.crs}')
+			print(f'Input dimensions: {src.width}x{src.height}')
+			print(f'Input transform: {src.transform}')
+			print(f'Input resolution: {src.res}')
 
-					# Determine if resampling is needed
-					should_resample = orig_res_m < TCD_MIN_RES_M
-					target_gsd = TCD_MIN_RES_M if should_resample else orig_res_m
-
-					# Recalculate transform with target resolution if resampling
-					if should_resample:
-						print(f'Resampling to minimum resolution: {TCD_MIN_RES_M}m')
-						default_transform, width, height = rasterio.warp.calculate_default_transform(
-							src.crs, 'EPSG:3395', src.width, src.height, *src.bounds, resolution=target_gsd
-						)
-
-					print(f'Creating memory-efficient reprojection to EPSG:3395 (target resolution: {target_gsd}m)')
-					print(f'Target dimensions: {width}x{height} pixels')
-
-					# Save reprojected file using tiled COG format for memory efficiency
-					# This uses GDAL's internal tiling/chunking to avoid the "Chunk and warp failed" error
-					base_dir = os.path.dirname(input_tif)
-					base_name, _ = os.path.splitext(os.path.basename(input_tif))
-					reprojected_path = os.path.join(base_dir, f'{base_name}_reprojected.tif')
-
-					# Use COG profile with tiling for efficient streaming
-					profile = {
-						'driver': 'GTiff',
-						'dtype': 'uint8',
-						'width': width,
-						'height': height,
-						'count': src.count,
-						'crs': 'EPSG:3395',
-						'transform': default_transform,
-						'nodata': 0,
-						'tiled': True,
-						'blockxsize': 512,
-						'blockysize': 512,
-						'compress': 'deflate',
-						'predictor': 2,
-						'interleave': 'pixel',
-					}
-
-					# Reproject using GDAL's windowed writing for memory efficiency
-					# This processes the image in chunks rather than loading everything at once
-					print('Reprojecting in memory-efficient chunks...')
-
-					with rasterio.open(reprojected_path, 'w', **profile) as dst:
-						for band_idx in range(1, src.count + 1):
-							reproject(
-								source=rasterio.band(src, band_idx),
-								destination=rasterio.band(dst, band_idx),
-								src_transform=src.transform,
-								src_crs=src.crs,
-								dst_transform=default_transform,
-								dst_crs='EPSG:3395',
-								resampling=Resampling.bilinear,
-								num_threads=4,
-								warp_mem_limit=256,  # Limit memory per warp operation
-							)
-
-					print(f'Reprojected file created successfully: {reprojected_path}')
-					effective_input = reprojected_path
-				else:
-					print('Warning: input has no CRS; proceeding without reprojection')
-		except Exception as reproj_err:
-			print(f'Warning: Reprojection failed: {reproj_err}; using original input')
-			import traceback
-
-			traceback.print_exc()
-
-		# Initialize the TCD pipeline with the segformer model
-		print('Initializing TCD Pipeline...')
+		# Initialize TCD Pipeline - handles preprocessing internally
+		print('Initializing TCD Pipeline with restor/tcd-segformer-mit-b5...')
 		pipeline = Pipeline(model_or_config='restor/tcd-segformer-mit-b5')
 
-		# Run prediction - this handles all tiling internally
-		print(f'Running TCD prediction on: {effective_input}')
-		result = pipeline.predict(effective_input)
+		# Run prediction - TCD handles tiling, resolution optimization, etc.
+		print('Running TCD prediction (TCD handles CRS/tiling internally)...')
+		result = pipeline.predict(input_tif)
 
 		# Get confidence map from result
 		print(f'Extracting confidence map... (type: {type(result.confidence_map)})')
@@ -155,23 +80,25 @@ def predict_with_pipeline(input_tif: str, output_confidence_map: str, threshold:
 		# Save confidence map as GeoTIFF with same spatial reference as input
 		print(f'Saving confidence map to: {output_confidence_map}')
 
-		with rasterio.open(effective_input) as src:
-			# Create output profile based on input; clean incompatible keys
+		with rasterio.open(input_tif) as src:
+			# Use input's profile (CRS, transform preserved from TCD)
 			profile = src.profile.copy()
 			profile.update({'dtype': confidence_map.dtype, 'count': 1, 'compress': 'lzw'})
-			# Ensure a concrete nodata value for mask-aware IO (uint8 -> 0)
 			profile['nodata'] = 0
-			# Remove keys that can conflict for single-band confidence maps
+
+			# Remove incompatible keys
 			for k in ('photometric', 'jpeg_quality'):
 				if k in profile:
 					profile.pop(k)
 
-			# Update dimensions if they differ
+			# Update dimensions if TCD changed them
 			if confidence_map.shape != (src.height, src.width):
 				profile.update({'height': confidence_map.shape[0], 'width': confidence_map.shape[1]})
-				print(f'Updated profile dimensions to match confidence map: {confidence_map.shape}')
+				print(
+					f'TCD changed dimensions: {src.width}x{src.height} → {confidence_map.shape[1]}x{confidence_map.shape[0]}'
+				)
 
-			# Write confidence map and propagate mask from input
+			# Write confidence map with mask
 			with rasterio.open(output_confidence_map, 'w', **profile) as dst:
 				dst.write(confidence_map, 1)
 				try:
@@ -181,6 +108,7 @@ def predict_with_pipeline(input_tif: str, output_confidence_map: str, threshold:
 					print(f'Warning: failed to write dataset mask: {e}')
 
 		print(f'Successfully saved confidence map with shape {confidence_map.shape}')
+		print('Confidence map will be processed by host for database storage')
 		return True
 
 	except Exception as e:

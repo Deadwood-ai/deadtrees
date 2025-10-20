@@ -482,14 +482,14 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 	Tree cover prediction using TCD Pipeline class in container for complete confidence map.
 
 	This function implements the Pipeline-based approach:
-	1. Preprocess: Reproject orthomosaic using image_reprojector approach
-	2. Container: Execute TCD Pipeline class to generate single complete confidence map
+	1. Preprocess: Reproject orthomosaic to EPSG:3395 (TCD requires metric CRS, not degrees)
+	2. Container: Execute TCD Pipeline class (no additional reprojection in container)
 	3. Postprocess: Load confidence map, apply nodata mask, threshold, filter polygons
-	4. Storage: Save to v2_forest_cover_geometries via labels system
+	4. Storage: Convert to EPSG:4326 and save to v2_forest_cover_geometries via labels system
 
 	Args:
 	    dataset_id (int): Dataset ID
-	    file_path (Path): Path to orthomosaic file
+	    file_path (Path): Path to original orthomosaic file
 	    user_id (str): User ID for label creation
 	    token (str): Authentication token
 	"""
@@ -502,6 +502,7 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 		temp_dir_path = Path(temp_dir)
 
 		# Step 1: Preprocess - reproject orthomosaic to EPSG:3395 for TCD
+		# This is necessary because TCD expects metric CRS, not geographic (degrees)
 		reprojected_temp_path = temp_dir_path / 'reprojected_orthomosaic.tif'
 		logger.info(
 			f'Reprojecting orthomosaic to EPSG:3395 for TCD: {file_path} -> {reprojected_temp_path}',
@@ -519,7 +520,7 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 
-		# Copy orthomosaic and pipeline script to shared volume
+		# Copy reprojected orthomosaic and pipeline script to shared volume
 		container_ortho_path, container_confidence_path = _copy_files_to_tcd_volume(
 			str(reprojected_path), volume_name, dataset_id, token
 		)
@@ -553,7 +554,7 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 
-		# Open reprojected dataset to get nodata mask
+		# Open confidence map to get nodata mask
 		with rasterio.open(confidence_map_path) as confidence_src:
 			# Get the dataset mask from confidence map
 			nodata_mask = confidence_src.dataset_mask()
@@ -634,7 +635,7 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 		else:
 			polygons = reproject_polygons(polygons, source_crs, TCD_OUTPUT_CRS)
 
-		# Step 8: Database Storage - Convert to GeoJSON and save via labels system
+		# Step 7: Database Storage - Convert to GeoJSON and save via labels system
 		logger.info(
 			'Converting polygons to GeoJSON format for database storage',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
