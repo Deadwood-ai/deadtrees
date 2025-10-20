@@ -92,7 +92,7 @@ def cleanup_database(auth_token):
 	processor_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD, use_cached_session=False)
 
 	with use_client(processor_token) as client:
-		# With CASCADE delete, we only need to clean the parent table
+		# With CASCADE delete, cleaning parent tables automatically cleans child tables
 		client.table(settings.datasets_table).delete().neq('id', 0).execute()
 		client.table(settings.logs_table).delete().neq('id', 1).execute()
 
