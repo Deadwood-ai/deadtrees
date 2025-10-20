@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="${PROJECT_ROOT}/.env.export"
 VENV_PATH="${PROJECT_ROOT}/venv"
-EXPORT_SCRIPT="${PROJECT_ROOT}/scripts/export_reference_patches.py"
+EXPORT_SCRIPT="${PROJECT_ROOT}/api/src/export/export_reference_patches.py"
 
 # Colors for output
 RED='\033[0;31m'

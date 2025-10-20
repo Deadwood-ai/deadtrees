@@ -36,7 +36,7 @@ log "Starting reference patches export (container: $CONTAINER_NAME)..."
 # Run export script inside container
 # Environment variables are loaded from container's environment
 docker compose -f "$COMPOSE_FILE" exec -T "$CONTAINER_NAME" \
-    python /app/scripts/export_reference_patches.py
+    python /app/api/src/export/export_reference_patches.py
 
 EXIT_CODE=$?
 
