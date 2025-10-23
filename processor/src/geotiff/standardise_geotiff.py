@@ -362,7 +362,7 @@ def _handle_bit_depth_conversion(
 
 		# Calculate scaling parameters by reading from center of image
 		logger.info(
-			'Calculating scaling parameters from center region',
+			'Calculating per-band scaling parameters from center region',
 			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
 		)
 
@@ -375,42 +375,51 @@ def _handle_bit_depth_conversion(
 		sample_window = rasterio.windows.Window(center_x, center_y, center_width, center_height)
 		sample_data = src.read(window=sample_window)
 
-		# Remove NaN values and any detected nodata for proper min/max calculation
-		valid_mask = ~np.isnan(sample_data)
+		# Calculate min/max per band for multispectral imagery
+		num_bands = src.count
+		band_ranges = []
 
-		# Exclude explicit nodata values from scaling calculation
-		if explicit_nodata is not None and not np.isnan(explicit_nodata):
-			valid_mask = valid_mask & (sample_data != explicit_nodata)
+		for band_idx in range(num_bands):
+			band_data = sample_data[band_idx]
 
-		# Exclude detected nodata values (if numeric)
-		if detected_nodata is not None and detected_nodata != 'nan':
-			try:
-				detected_numeric = float(detected_nodata)
-				valid_mask = valid_mask & (sample_data != detected_numeric)
-			except (ValueError, TypeError):
-				pass  # detected_nodata is not numeric
+			# Remove NaN values and any detected nodata for proper min/max calculation
+			valid_mask = ~np.isnan(band_data)
 
-		valid_data = sample_data[valid_mask]
+			# Exclude explicit nodata values from scaling calculation
+			if explicit_nodata is not None and not np.isnan(explicit_nodata):
+				valid_mask = valid_mask & (band_data != explicit_nodata)
 
-		if len(valid_data) > 0:
-			data_min = float(np.min(valid_data))
-			data_max = float(np.max(valid_data))
+			# Exclude detected nodata values (if numeric)
+			if detected_nodata is not None and detected_nodata != 'nan':
+				try:
+					detected_numeric = float(detected_nodata)
+					valid_mask = valid_mask & (band_data != detected_numeric)
+				except (ValueError, TypeError):
+					pass  # detected_nodata is not numeric
+
+			valid_band_data = band_data[valid_mask]
+
+			if len(valid_band_data) > 0:
+				band_min = float(np.min(valid_band_data))
+				band_max = float(np.max(valid_band_data))
+			else:
+				# Fallback if no valid data found for this band
+				band_min, band_max = 0.0, 255.0
+				logger.warning(
+					f'No valid data found for band {band_idx + 1}, using default range',
+					LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+				)
+
+			band_ranges.append((band_min, band_max))
 			logger.info(
-				f'Calculated data range (excluding nodata): {data_min:.3f} - {data_max:.3f}',
+				f'Band {band_idx + 1} range: {band_min:.3f} - {band_max:.3f}',
 				LogContext(
 					category=LogCategory.ORTHO,
 					dataset_id=dataset_id,
 					user_id=user_id,
 					token=token,
-					extra={'data_min': data_min, 'data_max': data_max},
+					extra={'band': band_idx + 1, 'band_min': band_min, 'band_max': band_max},
 				),
-			)
-		else:
-			# Fallback if no valid data found
-			data_min, data_max = 0.0, 255.0
-			logger.warning(
-				'No valid data found for scaling, using default range',
-				LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
 			)
 
 		# Log nodata detection results
@@ -477,8 +486,10 @@ def _handle_bit_depth_conversion(
 			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
 		)
 
-	# Add EXPLICIT scaling
-	translate_cmd.extend(['-scale', str(data_min), str(data_max), '0', '255'])
+	# Add per-band scaling for multispectral imagery
+	# GDAL supports -scale_X for band-specific scaling
+	for band_idx, (band_min, band_max) in enumerate(band_ranges, start=1):
+		translate_cmd.extend([f'-scale_{band_idx}', str(band_min), str(band_max), '0', '255'])
 
 	# Add compression - preserve original compression format if specified
 	translate_cmd.extend(['-co', f'COMPRESS={compress_arg}'])
@@ -490,13 +501,17 @@ def _handle_bit_depth_conversion(
 
 	try:
 		logger.info(
-			'Running gdal_translate preserving original nodata: ' + ' '.join(translate_cmd),
+			'Running gdal_translate with per-band scaling: ' + ' '.join(translate_cmd),
 			LogContext(
 				category=LogCategory.ORTHO,
 				dataset_id=dataset_id,
 				user_id=user_id,
 				token=token,
-				extra={'command': ' '.join(translate_cmd), 'final_nodata': final_nodata_value},
+				extra={
+					'command': ' '.join(translate_cmd),
+					'final_nodata': final_nodata_value,
+					'num_bands': len(band_ranges),
+				},
 			),
 		)
 		result = subprocess.run(translate_cmd, check=True, capture_output=True, text=True)
