@@ -585,7 +585,7 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 		with rasterio.open(str(confidence_map_path)) as dataset:
 			polygons = mask_to_polygons(outimage, dataset)
 
-		if not any(polygons):
+		if len(polygons) == 0:
 			logger.warning(
 				'No tree cover polygons detected',
 				LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
@@ -622,7 +622,7 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 		polygons = filter_polygons_by_area(polygons, MINIMUM_POLYGON_AREA)
-		if not any(polygons):
+		if len(polygons) == 0:
 			logger.warning(
 				'No tree cover polygons detected after area filtering',
 				LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
@@ -634,6 +634,24 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 			polygons = reproject_polygons(polygons, area_crs, TCD_OUTPUT_CRS)
 		else:
 			polygons = reproject_polygons(polygons, source_crs, TCD_OUTPUT_CRS)
+
+		# Step 6.5: Validate and fix geometries before saving (CRITICAL for frontend performance)
+		logger.info(
+			'Validating and fixing geometries before database storage',
+			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+		)
+		from processor.src.utils.geometry_validation import validate_and_fix_polygons
+
+		polygons, validation_stats = validate_and_fix_polygons(
+			polygons, min_area=0.0, dataset_id=dataset_id, label_type='treecover'
+		)
+
+		if len(polygons) == 0:
+			logger.warning(
+				'No valid tree cover polygons after geometry validation',
+				LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+			)
+			return
 
 		# Step 7: Database Storage - Convert to GeoJSON and save via labels system
 		logger.info(

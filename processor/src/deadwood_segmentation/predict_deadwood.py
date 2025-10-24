@@ -38,7 +38,7 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 		)
 		polygons = deadwood_model.inference_deadwood(str(file_path))
 
-		if not any(polygons):
+		if len(polygons) == 0:
 			logger.warning(
 				'No deadwood polygons detected',
 				LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
@@ -49,6 +49,24 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 			src_crs = src.crs
 		# Reproject polygons to WGS 84
 		polygons = reproject_polygons(polygons, src_crs, 'EPSG:4326')
+
+		# Validate and fix geometries before saving (CRITICAL for frontend performance)
+		logger.info(
+			'Validating and fixing geometries before database storage',
+			LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
+		from processor.src.utils.geometry_validation import validate_and_fix_polygons
+
+		polygons, validation_stats = validate_and_fix_polygons(
+			polygons, min_area=0.0, dataset_id=dataset_id, label_type='deadwood'
+		)
+
+		if len(polygons) == 0:
+			logger.warning(
+				'No valid deadwood polygons after geometry validation',
+				LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
+			)
+			return
 
 		# Convert polygons to GeoJSON MultiPolygon format with holes
 		deadwood_geojson = {
