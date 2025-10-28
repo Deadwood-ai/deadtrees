@@ -466,20 +466,41 @@ def test_download_labels_with_aoi(auth_token, test_dataset_with_label):
 	"""Test downloading consolidated labels and AOI as single GeoPackage"""
 	dataset_id = test_dataset_with_label
 
+	# Make initial request to start the labels geopackage creation
 	response = client.get(
 		f'/api/v1/download/datasets/{dataset_id}/labels.gpkg',
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 
-	# Check response
+	# Check response format
 	assert response.status_code == 200
-	assert response.headers['content-type'] == 'application/geopackage+sqlite3'
-	assert response.headers['content-disposition'] == f'attachment; filename="dataset_{dataset_id}_labels.gpkg"'
+	data = response.json()
+	assert 'status' in data
+	assert data['job_id'] == f'labels_{dataset_id}'
 
-	# Save and verify contents
+	# Wait for processing to complete
+	max_attempts = 10
+	for _ in range(max_attempts):
+		status_response = client.get(
+			f'/api/v1/download/datasets/{dataset_id}/labels/status',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		assert status_response.status_code == 200
+		status_data = status_response.json()
+		if status_data['status'] == 'completed':
+			break
+		time.sleep(1)
+	else:
+		pytest.fail('Labels GeoPackage processing did not complete within expected time')
+
+	# Get the labels file directly from downloads directory
+	labels_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}_labels.gpkg'
+	assert labels_file.exists()
+
+	# Verify contents
 	with tempfile.TemporaryDirectory() as tmpdir:
 		gpkg_path = Path(tmpdir) / f'dataset_{dataset_id}_labels.gpkg'
-		gpkg_path.write_bytes(response.content)
+		shutil.copy2(labels_file, gpkg_path)
 
 		# Get all layers in the consolidated geopackage
 		layers = fiona.listlayers(gpkg_path)
@@ -511,20 +532,41 @@ def test_download_labels_without_aoi(auth_token, test_dataset_with_label_no_aoi)
 	"""Test downloading consolidated labels without AOI as single GeoPackage"""
 	dataset_id = test_dataset_with_label_no_aoi
 
+	# Make initial request to start the labels geopackage creation
 	response = client.get(
 		f'/api/v1/download/datasets/{dataset_id}/labels.gpkg',
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 
-	# Check response
+	# Check response format
 	assert response.status_code == 200
-	assert response.headers['content-type'] == 'application/geopackage+sqlite3'
-	assert response.headers['content-disposition'] == f'attachment; filename="dataset_{dataset_id}_labels.gpkg"'
+	data = response.json()
+	assert 'status' in data
+	assert data['job_id'] == f'labels_{dataset_id}'
 
-	# Save response content to temporary file and verify
+	# Wait for processing to complete
+	max_attempts = 10
+	for _ in range(max_attempts):
+		status_response = client.get(
+			f'/api/v1/download/datasets/{dataset_id}/labels/status',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		assert status_response.status_code == 200
+		status_data = status_response.json()
+		if status_data['status'] == 'completed':
+			break
+		time.sleep(1)
+	else:
+		pytest.fail('Labels GeoPackage processing did not complete within expected time')
+
+	# Get the labels file directly from downloads directory
+	labels_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}_labels.gpkg'
+	assert labels_file.exists()
+
+	# Verify contents
 	with tempfile.TemporaryDirectory() as tmpdir:
 		gpkg_path = Path(tmpdir) / f'dataset_{dataset_id}_labels.gpkg'
-		gpkg_path.write_bytes(response.content)
+		shutil.copy2(labels_file, gpkg_path)
 
 		# List all available layers in the consolidated GeoPackage
 		available_layers = fiona.listlayers(gpkg_path)
@@ -610,21 +652,41 @@ def test_download_consolidated_labels_multiple_types(auth_token, test_dataset_fo
 	forest_cover_model_label = create_label_with_geometries(forest_cover_model_payload, test_user, auth_token)
 	deadwood_fixed_label = create_label_with_geometries(deadwood_fixed_payload, test_user, auth_token)
 
-	# Download consolidated labels
+	# Make initial request to start the labels geopackage creation
 	response = client.get(
 		f'/api/v1/download/datasets/{dataset_id}/labels.gpkg',
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 
-	# Check response
+	# Check response format
 	assert response.status_code == 200
-	assert response.headers['content-type'] == 'application/geopackage+sqlite3'
-	assert response.headers['content-disposition'] == f'attachment; filename="dataset_{dataset_id}_labels.gpkg"'
+	data = response.json()
+	assert 'status' in data
+	assert data['job_id'] == f'labels_{dataset_id}'
 
-	# Save and verify contents
+	# Wait for processing to complete
+	max_attempts = 10
+	for _ in range(max_attempts):
+		status_response = client.get(
+			f'/api/v1/download/datasets/{dataset_id}/labels/status',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		assert status_response.status_code == 200
+		status_data = status_response.json()
+		if status_data['status'] == 'completed':
+			break
+		time.sleep(1)
+	else:
+		pytest.fail('Labels GeoPackage processing did not complete within expected time')
+
+	# Get the labels file directly from downloads directory
+	labels_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}_labels.gpkg'
+	assert labels_file.exists()
+
+	# Verify contents
 	with tempfile.TemporaryDirectory() as tmpdir:
 		gpkg_path = Path(tmpdir) / f'dataset_{dataset_id}_labels.gpkg'
-		gpkg_path.write_bytes(response.content)
+		shutil.copy2(labels_file, gpkg_path)
 
 		# Get all layers in the consolidated geopackage
 		layers = fiona.listlayers(gpkg_path)
@@ -666,13 +728,38 @@ def test_download_consolidated_labels_multiple_types(auth_token, test_dataset_fo
 
 def test_download_labels_not_found(auth_token, test_dataset_for_download):
 	"""Test attempting to download labels for a dataset that has none"""
+	# Make initial request - should start background job
 	response = client.get(
 		f'/api/v1/download/datasets/{test_dataset_for_download}/labels.gpkg',
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 
-	assert response.status_code == 404
-	assert 'No labels found for dataset' in response.json()['detail']
+	# Should return processing status initially
+	assert response.status_code == 200
+	data = response.json()
+	assert data['status'] == 'processing'
+
+	# Wait and check status - background job should fail and not create file
+	max_attempts = 10
+	for _ in range(max_attempts):
+		status_response = client.get(
+			f'/api/v1/download/datasets/{test_dataset_for_download}/labels/status',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		assert status_response.status_code == 200
+		status_data = status_response.json()
+
+		# File should never be created, so status stays "processing"
+		if status_data['status'] == 'processing':
+			time.sleep(1)
+			continue
+		else:
+			# If it somehow completed, fail the test
+			pytest.fail(f'Expected file not to be created, but got status: {status_data["status"]}')
+
+	# After waiting, file should still not exist
+	labels_file = settings.downloads_path / str(test_dataset_for_download) / f'{test_dataset_for_download}_labels.gpkg'
+	assert not labels_file.exists(), 'Labels file should not exist for dataset with no labels'
 
 
 def test_download_dataset_async(auth_token, test_dataset_for_download):

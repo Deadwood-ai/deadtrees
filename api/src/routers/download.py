@@ -219,6 +219,37 @@ async def create_dataset_bundle_background(dataset_id: str, dataset: Dataset, or
 			download_file.unlink()
 
 
+async def create_labels_geopackage_background(dataset_id: str):
+	"""Background task to create labels geopackage"""
+	download_dir = settings.downloads_path / dataset_id
+	labels_file = download_dir / f'{dataset_id}_labels.gpkg'
+
+	try:
+		logger.info(f'Starting labels GeoPackage creation for dataset {dataset_id}')
+
+		# Create consolidated geopackage in temp directory
+		temp_gpkg = create_consolidated_geopackage(int(dataset_id))
+
+		# Move to downloads directory
+		shutil.move(str(temp_gpkg), str(labels_file))
+
+		# Clean up temp directory
+		shutil.rmtree(temp_gpkg.parent)
+
+		logger.info(f'Labels GeoPackage completed for dataset {dataset_id}')
+
+	except ValueError as e:
+		logger.error(f'No labels found for dataset {dataset_id}: {str(e)}')
+		# Remove failed file if it exists
+		if labels_file.exists():
+			labels_file.unlink()
+	except Exception as e:
+		logger.error(f'Error in background labels GeoPackage creation: {str(e)}', extra={'dataset_id': dataset_id})
+		# Remove failed file if it exists
+		if labels_file.exists():
+			labels_file.unlink()
+
+
 # @download_app.get('/datasets/{dataset_id}/ortho.tif')
 # async def download_geotiff(dataset_id: str):
 # 	"""
@@ -266,24 +297,75 @@ async def create_dataset_bundle_background(dataset_id: str, dataset: Dataset, or
 # 		return FileResponse(target.name, media_type='text/csv', filename='metadata.csv')
 
 
-@download_app.get('/datasets/{dataset_id}/labels.gpkg')
+@download_app.get('/datasets/{dataset_id}/labels.gpkg', response_model=DownloadStatus)
 async def get_labels(dataset_id: str, background_tasks: BackgroundTasks):
 	"""
-	Download consolidated labels and AOI data as single GeoPackage
+	Prepare labels GeoPackage in the background and return job status
 	"""
 	# Check dataset exists and is public
 	dataset, ortho = await get_public_dataset(dataset_id)
 
-	# Create consolidated geopackage (no user_token needed for public datasets)
-	try:
-		gpkg_file = create_consolidated_geopackage(int(dataset_id))
-	except ValueError as e:
-		raise HTTPException(status_code=404, detail=str(e))
+	# Build the file paths
+	download_dir = settings.downloads_path / dataset_id
+	labels_file = download_dir / f'{dataset_id}_labels.gpkg'
 
-	# Setup cleanup for temporary file
-	background_tasks.add_task(lambda: shutil.rmtree(gpkg_file.parent))
+	# Check if file already exists
+	if labels_file.exists():
+		# File already exists, return completed status
+		return DownloadStatus(
+			status=DownloadStatusEnum.COMPLETED,
+			job_id=f'labels_{dataset_id}',
+			message='Labels GeoPackage is ready for download',
+			download_path=f'/downloads/v1/{dataset_id}/{dataset_id}_labels.gpkg',
+		)
 
-	# Return single geopackage file
-	return FileResponse(
-		str(gpkg_file), media_type='application/geopackage+sqlite3', filename=f'dataset_{dataset_id}_labels.gpkg'
+	# Create download directory if it doesn't exist
+	download_dir.mkdir(parents=True, exist_ok=True)
+
+	# Start background task to create the geopackage
+	background_tasks.add_task(create_labels_geopackage_background, dataset_id=dataset_id)
+
+	# Return processing status response
+	return DownloadStatus(
+		status=DownloadStatusEnum.PROCESSING,
+		job_id=f'labels_{dataset_id}',
+		message='Labels GeoPackage is being prepared',
 	)
+
+
+@download_app.get('/datasets/{dataset_id}/labels/status', response_model=DownloadStatus)
+async def check_labels_status(dataset_id: str):
+	"""Check the status of a labels GeoPackage job"""
+	download_dir = settings.downloads_path / dataset_id
+	labels_file = download_dir / f'{dataset_id}_labels.gpkg'
+
+	# Check dataset exists and is public
+	dataset, ortho = await get_public_dataset(dataset_id)
+
+	if labels_file.exists():
+		return DownloadStatus(
+			status=DownloadStatusEnum.COMPLETED,
+			job_id=f'labels_{dataset_id}',
+			message='Labels GeoPackage is ready for download',
+			download_path=f'/downloads/v1/{dataset_id}/{dataset_id}_labels.gpkg',
+		)
+	else:
+		return DownloadStatus(
+			status=DownloadStatusEnum.PROCESSING,
+			job_id=f'labels_{dataset_id}',
+			message='Labels GeoPackage is being prepared',
+		)
+
+
+@download_app.get('/datasets/{dataset_id}/labels/download', response_class=RedirectResponse)
+async def download_labels_file(dataset_id: str):
+	"""Redirect to the actual labels download file once it's ready"""
+	# Check dataset exists and is public
+	dataset, ortho = await get_public_dataset(dataset_id)
+
+	labels_file = settings.downloads_path / dataset_id / f'{dataset_id}_labels.gpkg'
+
+	if not labels_file.exists():
+		raise HTTPException(status_code=404, detail=f'Labels file for dataset <ID={dataset_id}> not found')
+
+	return RedirectResponse(url=f'/downloads/v1/{dataset_id}/{dataset_id}_labels.gpkg', status_code=303)
