@@ -199,13 +199,14 @@ async def download_dataset_file(dataset_id: str):
 	return RedirectResponse(url=f'/downloads/v1/{dataset_id}/{dataset_id}.zip', status_code=303)
 
 
-async def create_dataset_bundle_background(dataset_id: str, dataset: Dataset, ortho: dict):
+def create_dataset_bundle_background(dataset_id: str, dataset: Dataset, ortho: dict):
 	"""Background task to create dataset bundle"""
+	download_dir = settings.downloads_path / dataset_id
+	download_file = download_dir / f'{dataset_id}.zip'
+
 	try:
 		# Build the file paths
 		archive_file_name = (settings.archive_path / ortho['ortho_file_name']).resolve()
-		download_dir = settings.downloads_path / dataset_id
-		download_file = download_dir / f'{dataset_id}.zip'
 
 		# Bundle dataset directly to downloads directory - no need to pass label anymore
 		bundle_dataset(str(download_file), archive_file_name, dataset=dataset)
@@ -219,7 +220,7 @@ async def create_dataset_bundle_background(dataset_id: str, dataset: Dataset, or
 			download_file.unlink()
 
 
-async def create_labels_geopackage_background(dataset_id: str):
+def create_labels_geopackage_background(dataset_id: str):
 	"""Background task to create labels geopackage"""
 	download_dir = settings.downloads_path / dataset_id
 	labels_file = download_dir / f'{dataset_id}_labels.gpkg'
@@ -302,35 +303,39 @@ async def get_labels(dataset_id: str, background_tasks: BackgroundTasks):
 	"""
 	Prepare labels GeoPackage in the background and return job status
 	"""
-	# Check dataset exists and is public
-	dataset, ortho = await get_public_dataset(dataset_id)
+	try:
+		# Check dataset exists and is public
+		dataset, ortho = await get_public_dataset(dataset_id)
 
-	# Build the file paths
-	download_dir = settings.downloads_path / dataset_id
-	labels_file = download_dir / f'{dataset_id}_labels.gpkg'
+		# Build the file paths
+		download_dir = settings.downloads_path / dataset_id
+		labels_file = download_dir / f'{dataset_id}_labels.gpkg'
 
-	# Check if file already exists
-	if labels_file.exists():
-		# File already exists, return completed status
+		# Check if file already exists
+		if labels_file.exists():
+			# File already exists, return completed status
+			return DownloadStatus(
+				status=DownloadStatusEnum.COMPLETED,
+				job_id=f'labels_{dataset_id}',
+				message='Labels GeoPackage is ready for download',
+				download_path=f'/downloads/v1/{dataset_id}/{dataset_id}_labels.gpkg',
+			)
+
+		# Create download directory if it doesn't exist
+		download_dir.mkdir(parents=True, exist_ok=True)
+
+		# Start background task to create the geopackage
+		background_tasks.add_task(create_labels_geopackage_background, dataset_id=dataset_id)
+
+		# Return processing status response
 		return DownloadStatus(
-			status=DownloadStatusEnum.COMPLETED,
+			status=DownloadStatusEnum.PROCESSING,
 			job_id=f'labels_{dataset_id}',
-			message='Labels GeoPackage is ready for download',
-			download_path=f'/downloads/v1/{dataset_id}/{dataset_id}_labels.gpkg',
+			message='Labels GeoPackage is being prepared',
 		)
-
-	# Create download directory if it doesn't exist
-	download_dir.mkdir(parents=True, exist_ok=True)
-
-	# Start background task to create the geopackage
-	background_tasks.add_task(create_labels_geopackage_background, dataset_id=dataset_id)
-
-	# Return processing status response
-	return DownloadStatus(
-		status=DownloadStatusEnum.PROCESSING,
-		job_id=f'labels_{dataset_id}',
-		message='Labels GeoPackage is being prepared',
-	)
+	except Exception as e:
+		logger.error(f'Error initiating labels download for dataset {dataset_id}: {str(e)}')
+		raise HTTPException(status_code=500, detail=f'Error initiating labels download: {str(e)}')
 
 
 @download_app.get('/datasets/{dataset_id}/labels/status', response_model=DownloadStatus)
