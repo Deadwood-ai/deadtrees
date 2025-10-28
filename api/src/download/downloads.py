@@ -31,7 +31,7 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 
 		# Get geometries for this label using pagination to handle large datasets
 		all_geometries = []
-		batch_size = 800  # Conservative batch size to avoid memory issues with large geometries
+		batch_size = 5000  # Optimized batch size: ~7MB per batch for typical geometries (~1.4KB each)
 		offset = 0
 
 		while True:
@@ -56,7 +56,7 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 			offset += batch_size
 
 			# Log progress for large datasets
-			if len(all_geometries) % 5000 == 0:
+			if len(all_geometries) % 10000 == 0:
 				logger.info(f'Fetched {len(all_geometries)} geometries for label {label.id}')
 
 		if not all_geometries:
