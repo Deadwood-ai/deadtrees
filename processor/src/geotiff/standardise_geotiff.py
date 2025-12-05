@@ -10,6 +10,7 @@ from shared.hash import get_file_identifier
 from shared.logger import logger
 from shared.models import Ortho
 from shared.logging import LogContext, LogCategory
+from processor.src.exceptions import ConversionError
 import rasterio
 import rasterio.enums
 import numpy as np
@@ -211,9 +212,8 @@ def standardise_geotiff(
 		)
 
 		# Step 1: Validate and extract source image properties
+		# _get_source_properties now raises ConversionError on failure
 		src_properties = _get_source_properties(input_path, token, dataset_id, user_id)
-		if not src_properties:
-			return False
 
 		# Add has_alpha and compression info to properties for later use
 		src_properties['has_alpha'] = check_result['has_alpha']
@@ -254,14 +254,31 @@ def standardise_geotiff(
 
 		return success
 
+	except ConversionError:
+		raise  # Re-raise ConversionError with specific reason
+	except MemoryError as e:
+		error_msg = f'Out of memory processing file. File may be too large ({e})'
+		logger.error(
+			error_msg,
+			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
+		raise ConversionError('Standardization failed', error_msg, dataset_id=dataset_id)
 	except Exception as e:
+		error_msg = str(e)
+		# Check for common memory-related errors
+		if 'Unable to allocate' in error_msg or 'MemoryError' in error_msg:
+			error_msg = f'Out of memory: {error_msg}'
 		logger.error(
 			f'Unexpected error in standardise_geotiff: {e}',
 			LogContext(
-				category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token, extra={'error': str(e)}
+				category=LogCategory.ORTHO,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'error': error_msg},
 			),
 		)
-		return False
+		raise ConversionError('Standardization failed', error_msg, dataset_id=dataset_id)
 
 
 def _get_source_properties(input_path: str, token: str, dataset_id: int = None, user_id: str = None) -> dict:
@@ -276,11 +293,29 @@ def _get_source_properties(input_path: str, token: str, dataset_id: int = None, 
 			}
 
 			if not properties['crs']:
+				# Check if file has transform info but no CRS
+				has_transform = src.transform and src.transform != rasterio.transform.Affine.identity()
+				origin = [src.transform.c, src.transform.f] if src.transform else [0, 0]
+
+				if has_transform and (origin[0] != 0 or origin[1] != 0):
+					# File has coordinates but no CRS definition
+					error_msg = (
+						f'File has coordinates (origin: {origin[0]:.1f}, {origin[1]:.1f}) but no CRS definition. '
+						'The projection system is unknown. Please re-export with embedded CRS or provide a .prj file.'
+					)
+				else:
+					# File has no georeferencing at all
+					error_msg = (
+						'File has no coordinate reference system (CRS) or georeferencing. '
+						'This appears to be a plain image, not a georeferenced orthomosaic. '
+						'Please upload a GeoTIFF with embedded CRS or include a world file (.tfw).'
+					)
+
 				logger.warning(
-					'No CRS found in source file',
+					error_msg,
 					LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
 				)
-				return None
+				raise ConversionError('Standardization failed', error_msg, dataset_id=dataset_id)
 
 			logger.info(
 				f'Source properties - dtype: {properties["dtype"]}, bands: {properties["num_bands"]}, '
@@ -299,6 +334,8 @@ def _get_source_properties(input_path: str, token: str, dataset_id: int = None, 
 			)
 			return properties
 
+	except ConversionError:
+		raise  # Re-raise ConversionError without wrapping
 	except Exception as e:
 		logger.error(
 			f'Error reading source properties: {e}',
@@ -306,7 +343,7 @@ def _get_source_properties(input_path: str, token: str, dataset_id: int = None, 
 				category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token, extra={'error': str(e)}
 			),
 		)
-		return None
+		raise ConversionError('Standardization failed', f'Error reading file: {str(e)}', dataset_id=dataset_id)
 
 
 def _handle_bit_depth_conversion(

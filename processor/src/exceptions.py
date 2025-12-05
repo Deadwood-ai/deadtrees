@@ -38,3 +38,11 @@ class StorageError(ProcessorError):
 		self.operation = operation
 		self.file_path = file_path
 		super().__init__(f'Storage {operation} failed for {file_path}: {message}', **kwargs)
+
+
+class ConversionError(ProcessorError):
+	"""Raised when GeoTIFF conversion/standardization fails with a specific reason"""
+
+	def __init__(self, message: str, reason: str, **kwargs):
+		self.reason = reason
+		super().__init__(f'{message}: {reason}', **kwargs)

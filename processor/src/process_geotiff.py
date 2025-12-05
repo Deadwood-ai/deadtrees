@@ -8,7 +8,7 @@ from shared.models import StatusEnum, Ortho, QueueTask
 from shared.logger import logger
 from shared.ortho import upsert_processed_ortho_entry, upsert_ortho_entry
 from .utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
-from .exceptions import AuthenticationError, DatasetError, ProcessingError
+from .exceptions import AuthenticationError, DatasetError, ProcessingError, ConversionError
 from .geotiff.standardise_geotiff import standardise_geotiff, verify_geotiff
 from rio_cogeo.cogeo import cog_info
 from shared.hash import get_file_identifier
@@ -169,10 +169,15 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 			LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
 		)
 
-		if not standardise_geotiff(str(path_original), str(path_converted), token, task.dataset_id):
-			raise ProcessingError(
-				'Conversion failed', task_type='convert', task_id=task.id, dataset_id=ortho.dataset_id
-			)
+		try:
+			success = standardise_geotiff(str(path_original), str(path_converted), token, task.dataset_id)
+			if not success:
+				raise ProcessingError(
+					'Conversion failed', task_type='convert', task_id=task.id, dataset_id=ortho.dataset_id
+				)
+		except ConversionError as e:
+			# Re-raise with the specific reason from ConversionError
+			raise ProcessingError(e.reason, task_type='convert', task_id=task.id, dataset_id=ortho.dataset_id)
 
 		# Verify converted file
 		logger.info(
