@@ -66,7 +66,7 @@ def get_next_task(token: str) -> QueueTask:
 	return QueueTask(**response.data[0])
 
 
-def is_dataset_uploaded_or_processed(task: QueueTask, token: str) -> bool:
+def is_dataset_uploaded_or_processed(task: QueueTask, token: str) -> tuple:
 	"""Check if a dataset is ready for processing by verifying its upload status and error status.
 
 	Args:
@@ -74,7 +74,9 @@ def is_dataset_uploaded_or_processed(task: QueueTask, token: str) -> bool:
 	    token (str): Authentication token
 
 	Returns:
-	    bool: True if dataset is uploaded and ready for processing (no errors)
+	    tuple: (is_ready: bool, has_error: bool)
+	        - is_ready: True if dataset is uploaded and ready for processing
+	        - has_error: True if dataset has errors (should be removed from queue)
 	"""
 	with use_client(token) as client:
 		response = (
@@ -88,22 +90,22 @@ def is_dataset_uploaded_or_processed(task: QueueTask, token: str) -> bool:
 			logger.warning(
 				f'No status found for dataset {task.dataset_id}', extra={'token': token, 'dataset_id': task.dataset_id}
 			)
-			return False
+			return False, False
 
 		is_uploaded = response.data[0]['is_upload_done']
 		has_error = response.data[0].get('has_error', False)  # Default to False if field doesn't exist
 
 		if has_error:
 			logger.warning(
-				f'Dataset {task.dataset_id} has errors, skipping processing',
+				f'Dataset {task.dataset_id} has errors, will remove from queue',
 				extra={'token': token, 'dataset_id': task.dataset_id},
 			)
-			return False
+			return False, True
 
 		msg = f'dataset upload status: {is_uploaded}'
 		logger.info(msg, extra={'token': token})
 
-		return is_uploaded
+		return is_uploaded, False
 
 
 def process_task(task: QueueTask, token: str):
@@ -281,6 +283,20 @@ def process_task(task: QueueTask, token: str):
 			f'Processing failed: {str(e)}',
 			LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 		)
+		# Delete task from queue on failure - error is already recorded in status table
+		try:
+			delete_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
+			with use_client(delete_token) as client:
+				client.table(settings.queue_table).delete().eq('id', task.id).execute()
+			logger.info(
+				f'Removed failed task {task.id} from queue',
+				LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+			)
+		except Exception as delete_error:
+			logger.error(
+				f'Failed to remove task {task.id} from queue: {delete_error}',
+				LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+			)
 		raise  # Re-raise the exception to ensure the error is properly handled
 
 	finally:
@@ -323,7 +339,21 @@ def background_process():
 			if task is None:
 				break
 
-			is_ready = is_dataset_uploaded_or_processed(task, token)
+			is_ready, has_error = is_dataset_uploaded_or_processed(task, token)
+
+			if has_error:
+				# Dataset has errors - remove task from queue (error already recorded in status table)
+				logger.info(
+					f'Removing errored task {task.id} for dataset {task.dataset_id} from queue',
+					LogContext(
+						category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+					),
+				)
+				with use_client(token) as client:
+					client.table(settings.queue_table).delete().eq('id', task.id).execute()
+				# Continue to check next task in queue
+				continue
+
 			if is_ready:
 				# Found a valid task, process it
 				logger.info(
@@ -349,9 +379,9 @@ def background_process():
 							).execute()
 				break
 			else:
-				# Task has error or isn't ready; skip it for now and exit loop to try again later
+				# Task isn't ready yet (not uploaded) - skip and try again later
 				logger.info(
-					f'Skipping task {task.id} due to dataset status; will retry later',
+					f'Skipping task {task.id} - dataset not uploaded yet; will retry later',
 					LogContext(
 						category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
 					),

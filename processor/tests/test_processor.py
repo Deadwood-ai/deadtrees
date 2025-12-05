@@ -267,8 +267,12 @@ def processor_task_with_missing_file(test_processor_user, auth_token):
 					client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 
 
-def test_failed_process_keeps_task_in_queue(processor_task_with_missing_file, auth_token):
-	"""Test that failed processing keeps task in queue and updates status appropriately"""
+def test_failed_process_removes_task_from_queue(processor_task_with_missing_file, auth_token):
+	"""Test that failed processing removes task from queue but records error in status.
+
+	This prevents endless retry loops - the error is recorded in v2_statuses
+	so users can see what failed, but the task doesn't block the queue.
+	"""
 	# First verify task exists before processing
 	with use_client(auth_token) as client:
 		initial_task = (
@@ -280,30 +284,25 @@ def test_failed_process_keeps_task_in_queue(processor_task_with_missing_file, au
 		# Run the background process - this should raise a ProcessingError
 		background_process()
 	except Exception:
-		# We expect an error, but the task should still be in queue
+		# We expect an error
 		pass
 
 	# Verify task state after failed processing
 	with use_client(auth_token) as client:
-		# Check queue still contains the task
+		# Task should be REMOVED from queue (prevents endless retry loop)
 		queue_response = (
 			client.table(settings.queue_table).select('*').eq('id', processor_task_with_missing_file).execute()
 		)
-		assert len(queue_response.data) == 1
-		task = queue_response.data[0]
-
-		# Verify task is marked as not processing
-		assert task['is_processing'] is False
+		assert len(queue_response.data) == 0, 'Failed task should be removed from queue'
 
 		# Check status was updated to reflect error
 		status_response = client.table(settings.statuses_table).select('*').eq('dataset_id', dataset_id).execute()
 		assert len(status_response.data) == 1
 		status = status_response.data[0]
 
-		# Verify error status
-		# assert status['has_error'] is True # i will improve this later and adding better error handling
-		assert status['error_message'] is not None
-		assert status['current_status'] == StatusEnum.idle
+		# Verify error is recorded in status table
+		assert status['has_error'] is True, 'Status should have has_error=True'
+		assert status['error_message'] is not None, 'Error message should be recorded'
 
 
 def test_processor_respects_priority(test_dataset_for_processing, test_processor_user, auth_token):
