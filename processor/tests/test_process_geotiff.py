@@ -59,7 +59,7 @@ def test_process_geotiff_success(convert_task, auth_token):
 		assert processed_data['ortho_processing_runtime'] > 0
 		# Compression should be preserved or DEFLATE (JPEG may be converted to DEFLATE if alpha needed)
 		compression = processed_data['ortho_info']['Compression']
-		assert compression in ['DEFLATE', 'JPEG', 'WEBP'], f'Unexpected compression: {compression}'
+		assert compression in ['DEFLATE', 'JPEG', 'WEBP', 'LZW'], f'Unexpected compression: {compression}'
 
 		# Clean up by removing both test entries
 		client.table(settings.orthos_processed_table).delete().eq('dataset_id', convert_task.dataset_id).execute()

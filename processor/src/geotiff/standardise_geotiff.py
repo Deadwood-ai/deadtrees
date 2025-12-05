@@ -375,11 +375,12 @@ def _handle_bit_depth_conversion(
 		sample_window = rasterio.windows.Window(center_x, center_y, center_width, center_height)
 		sample_data = src.read(window=sample_window)
 
-		# Calculate min/max per band for multispectral imagery
+		# Calculate min/max per band for RGB only (first 3 bands)
 		num_bands = src.count
+		bands_to_analyze = min(num_bands, 3)  # Only analyze RGB bands
 		band_ranges = []
 
-		for band_idx in range(num_bands):
+		for band_idx in range(bands_to_analyze):
 			band_data = sample_data[band_idx]
 
 			# Remove NaN values and any detected nodata for proper min/max calculation
@@ -435,7 +436,20 @@ def _handle_bit_depth_conversion(
 		)
 
 	# Build translate command - PRESERVE original nodata values
+	# Only process RGB bands (1-3) - extra bands (multispectral, undefined) are not needed
+	# and can cause issues (e.g., constant-value bands cause GDAL scaling divide-by-zero)
+	bands_to_process = min(num_bands, 3)  # Only RGB bands
+	if num_bands > 3:
+		logger.info(
+			f'File has {num_bands} bands, will only process first 3 (RGB) for standardization',
+			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
+
 	translate_cmd = ['gdal_translate', '-ot', 'Byte']
+
+	# Select only RGB bands if file has more than 3
+	if num_bands > 3:
+		translate_cmd.extend(['-b', '1', '-b', '2', '-b', '3'])
 
 	# Determine what nodata value to preserve in the output
 	final_nodata_value = None
@@ -486,10 +500,19 @@ def _handle_bit_depth_conversion(
 			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
 		)
 
-	# Add per-band scaling for multispectral imagery
+	# Add per-band scaling for RGB bands only
 	# GDAL supports -scale_X for band-specific scaling
-	for band_idx, (band_min, band_max) in enumerate(band_ranges, start=1):
-		translate_cmd.extend([f'-scale_{band_idx}', str(band_min), str(band_max), '0', '255'])
+	for band_idx, (band_min, band_max) in enumerate(band_ranges[:bands_to_process], start=1):
+		# Handle edge case where band has constant value (min == max)
+		if band_min == band_max:
+			logger.warning(
+				f'Band {band_idx} has constant value ({band_min}), using fallback scaling',
+				LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+			)
+			# Use full range scaling as fallback
+			translate_cmd.extend([f'-scale_{band_idx}', '0', '65535', '0', '255'])
+		else:
+			translate_cmd.extend([f'-scale_{band_idx}', str(band_min), str(band_max), '0', '255'])
 
 	# Add compression - preserve original compression format if specified
 	translate_cmd.extend(['-co', f'COMPRESS={compress_arg}'])
