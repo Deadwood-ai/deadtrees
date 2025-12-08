@@ -1,14 +1,34 @@
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple, Literal, Union, Annotated
 from enum import Enum
 from datetime import datetime
 
-from pydantic import BaseModel, field_serializer, field_validator, model_validator
-from pydantic_geojson import MultiPolygonModel, PolygonModel
+from pydantic import BaseModel, field_serializer, field_validator, model_validator, Field
 from pydantic_partial import PartialModelMixin
 from pydantic_settings import BaseSettings
 from rasterio.coords import BoundingBox
 
 from .settings import settings
+
+
+# Custom 2D-only GeoJSON models (replacing pydantic_geojson which adds alt=None)
+# This prevents float(None) errors when converting to shapely geometries
+
+Coordinate2D = Tuple[
+	Annotated[Union[float, int], Field(ge=-180, le=180)],  # lon
+	Annotated[Union[float, int], Field(ge=-90, le=90)],    # lat
+]
+
+
+class PolygonModel(BaseModel):
+	"""2D-only Polygon GeoJSON model."""
+	type: Literal["Polygon"] = "Polygon"
+	coordinates: List[List[Coordinate2D]]
+
+
+class MultiPolygonModel(BaseModel):
+	"""2D-only MultiPolygon GeoJSON model."""
+	type: Literal["MultiPolygon"] = "MultiPolygon"
+	coordinates: List[List[List[Coordinate2D]]]
 
 
 class LabelDataEnum(str, Enum):
