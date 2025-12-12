@@ -22,7 +22,6 @@ from ..deadwood_segmentation.deadtreesmodels.common.common import (
 	reproject_polygons,
 	filter_polygons_by_area,
 	get_utm_string_from_latlon,
-	image_reprojector,
 )
 from processor.src.utils.shared_volume import cleanup_volume_and_references
 from ..exceptions import ProcessingError, AuthenticationError
@@ -35,7 +34,8 @@ with open(CONFIG_PATH, 'r') as f:
 # TCD configuration
 TCD_THRESHOLD = config['tree_cover_threshold']
 TCD_MODEL = 'restor/tcd-segformer-mit-b5'
-TCD_TARGET_RESOLUTION = config['tree_cover_inference_resolution']  # nominal resolution guideline
+TCD_TARGET_RESOLUTION = config['tree_cover_inference_resolution']  # 10cm resolution (forced for all inputs)
+TCD_TARGET_CRS = 'EPSG:3395'  # World Mercator - what the TCD model was trained on
 TCD_OUTPUT_CRS = 'EPSG:4326'  # WGS84 for database storage
 TCD_CONTAINER_IMAGE = settings.TCD_CONTAINER_IMAGE  # Our local TCD container
 
@@ -73,10 +73,11 @@ MINIMUM_POLYGON_AREA = config['minimum_polygon_area']
 
 def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 	"""
-	Reproject orthomosaic using image_reprojector approach for consistency with deadwood processing.
+	Reproject orthomosaic to EPSG:3395 (World Mercator) with forced 10cm resolution for TCD.
 
-	This uses the existing image_reprojector function to determine the correct parameters,
-	then performs the actual reprojection using rasterio.warp.reproject for compatibility.
+	The TCD model was trained on EPSG:3395 at 10cm resolution. This function ensures
+	all inputs are standardized to match the training conditions, regardless of the
+	original CRS or resolution of the input orthomosaic.
 
 	Args:
 		input_tif (str): Path to input orthomosaic
@@ -85,34 +86,30 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 	Returns:
 		str: Path to reprojected file
 	"""
-	# Use image_reprojector to get VRT parameters (transform, size, etc.)
-	vrt_src = image_reprojector(input_tif, min_res=TCD_TARGET_RESOLUTION)
-
-	# Get the target parameters from the VRT
-	target_transform = vrt_src.transform
-	target_width = vrt_src.width
-	target_height = vrt_src.height
-	target_crs = vrt_src.crs
-	target_nodata = vrt_src.nodata
-
-	# Close VRT to free resources
-	vrt_src.close()
-
-	# Now perform the actual reprojection using rasterio.warp.reproject
 	with rasterio.open(input_tif) as src:
-		# Create output profile based on source but with target parameters
+		# Calculate transform for EPSG:3395 at forced 10cm resolution
+		target_transform, target_width, target_height = rasterio.warp.calculate_default_transform(
+			src.crs,
+			TCD_TARGET_CRS,
+			src.width,
+			src.height,
+			*src.bounds,
+			resolution=TCD_TARGET_RESOLUTION,  # Force 10cm regardless of input resolution
+		)
+
+		# Create output profile
 		profile = src.profile.copy()
 		profile.update(
 			{
-				'crs': target_crs,
+				'crs': TCD_TARGET_CRS,
 				'transform': target_transform,
 				'width': target_width,
 				'height': target_height,
-				'nodata': target_nodata,
+				'nodata': 0,
 			}
 		)
 
-		# Reproject the image
+		# Reproject the image to EPSG:3395
 		with rasterio.open(output_path, 'w', **profile) as dst:
 			for i in range(1, src.count + 1):
 				rasterio.warp.reproject(
@@ -121,7 +118,7 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 					src_transform=src.transform,
 					src_crs=src.crs,
 					dst_transform=target_transform,
-					dst_crs=target_crs,
+					dst_crs=TCD_TARGET_CRS,
 					resampling=rasterio.warp.Resampling.bilinear,
 				)
 
