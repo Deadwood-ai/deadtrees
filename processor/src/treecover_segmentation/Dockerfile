@@ -38,7 +38,7 @@ USER deadtrees
 WORKDIR /home/deadtrees
 
 # Clone the TCD repository (as deadtrees user)
-RUN git clone https://github.com/Restor-Foundation/tcd.git ./tcd
+RUN git clone https://github.com/cmosig/tcd.git ./tcd
 
 WORKDIR /home/deadtrees/tcd
 ENV PATH=/home/deadtrees/.local/bin:$PATH

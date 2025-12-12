@@ -22,6 +22,7 @@ from ..deadwood_segmentation.deadtreesmodels.common.common import (
 	reproject_polygons,
 	filter_polygons_by_area,
 	get_utm_string_from_latlon,
+	image_reprojector,
 )
 from processor.src.utils.shared_volume import cleanup_volume_and_references
 from ..exceptions import ProcessingError, AuthenticationError
@@ -35,7 +36,6 @@ with open(CONFIG_PATH, 'r') as f:
 TCD_THRESHOLD = config['tree_cover_threshold']
 TCD_MODEL = 'restor/tcd-segformer-mit-b5'
 TCD_TARGET_RESOLUTION = config['tree_cover_inference_resolution']  # nominal resolution guideline
-TCD_TARGET_CRS = 'EPSG:3395'  # World Mercator for TCD processing
 TCD_OUTPUT_CRS = 'EPSG:4326'  # WGS84 for database storage
 TCD_CONTAINER_IMAGE = settings.TCD_CONTAINER_IMAGE  # Our local TCD container
 
@@ -71,54 +71,48 @@ class _GeneratorStream(io.RawIOBase):
 MINIMUM_POLYGON_AREA = config['minimum_polygon_area']
 
 
-## Note: Reprojection for TCD: use World Mercator (EPSG:3395) to ensure full coverage
-
-
 def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 	"""
-	Reproject orthomosaic to EPSG:3395 (World Mercator) for TCD processing.
-	Uses memory-efficient windowed reprojection with tiling to handle large orthomosaics.
+	Reproject orthomosaic using image_reprojector approach for consistency with deadwood processing.
+
+	This uses the existing image_reprojector function to determine the correct parameters,
+	then performs the actual reprojection using rasterio.warp.reproject for compatibility.
 
 	Args:
 		input_tif (str): Path to input orthomosaic
-		output_path (str): Path where the reprojected orthomosaic will be written
+		output_path (str): Path for reprojected output file
 
 	Returns:
 		str: Path to reprojected file
 	"""
-	with rasterio.open(input_tif) as src:
-		# Calculate transform and dimensions for target CRS at desired resolution
-		target_transform, target_width, target_height = rasterio.warp.calculate_default_transform(
-			src.crs,
-			TCD_TARGET_CRS,
-			src.width,
-			src.height,
-			*src.bounds,
-			resolution=TCD_TARGET_RESOLUTION,
-		)
+	# Use image_reprojector to get VRT parameters (transform, size, etc.)
+	vrt_src = image_reprojector(input_tif, min_res=TCD_TARGET_RESOLUTION)
 
-		# Use tiled COG profile for memory-efficient streaming
+	# Get the target parameters from the VRT
+	target_transform = vrt_src.transform
+	target_width = vrt_src.width
+	target_height = vrt_src.height
+	target_crs = vrt_src.crs
+	target_nodata = vrt_src.nodata
+
+	# Close VRT to free resources
+	vrt_src.close()
+
+	# Now perform the actual reprojection using rasterio.warp.reproject
+	with rasterio.open(input_tif) as src:
+		# Create output profile based on source but with target parameters
 		profile = src.profile.copy()
 		profile.update(
 			{
-				'crs': TCD_TARGET_CRS,
+				'crs': target_crs,
 				'transform': target_transform,
 				'width': target_width,
 				'height': target_height,
-				'nodata': 0,
-				'tiled': True,
-				'blockxsize': 512,
-				'blockysize': 512,
-				'compress': 'deflate',
-				'predictor': 2,
-				'interleave': 'pixel',
-				'photometric': 'rgb',  # Force RGB to avoid JPEG YCbCr conflicts with DEFLATE
-				'BIGTIFF': 'YES',  # Support files > 4GB
+				'nodata': target_nodata,
 			}
 		)
 
-		# Reproject using GDAL's windowed writing for memory efficiency
-		# This processes the image in chunks rather than loading everything at once
+		# Reproject the image
 		with rasterio.open(output_path, 'w', **profile) as dst:
 			for i in range(1, src.count + 1):
 				rasterio.warp.reproject(
@@ -127,10 +121,8 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 					src_transform=src.transform,
 					src_crs=src.crs,
 					dst_transform=target_transform,
-					dst_crs=TCD_TARGET_CRS,
+					dst_crs=target_crs,
 					resampling=rasterio.warp.Resampling.bilinear,
-					num_threads=4,
-					warp_mem_limit=256,  # Limit memory per warp operation (MB)
 				)
 
 	return output_path
