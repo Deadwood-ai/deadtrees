@@ -18,18 +18,20 @@ except ImportError as e:
 	sys.exit(1)
 
 
-def predict_with_pipeline(input_tif: str, output_confidence_map: str, threshold: int = 200):
+def predict_with_pipeline(input_tif: str, output_confidence_map: str):
 	"""
 	Run tree cover detection using TCD Pipeline.
 
-	TCD handles CRS and resolution internally. The confidence map will inherit
-	the CRS/transform from TCD's output, which predict_treecover.py will then
-	convert to EPSG:4326 for database storage.
+	The input GeoTIFF should already be reprojected to EPSG:3395 at 10cm resolution
+	by predict_treecover.py before being passed to this script. TCD handles tiling
+	and inference internally, but expects metric CRS input.
+
+	The confidence map (0-255 values) is saved as a GeoTIFF. Thresholding and
+	polygon extraction are performed by the host (predict_treecover.py).
 
 	Args:
-	    input_tif (str): Path to input GeoTIFF
+	    input_tif (str): Path to input GeoTIFF (already reprojected to EPSG:3395)
 	    output_confidence_map (str): Path to save confidence map GeoTIFF
-	    threshold (int): Confidence threshold (default: 200)
 
 	Returns:
 	    bool: True if successful, False otherwise
@@ -49,8 +51,8 @@ def predict_with_pipeline(input_tif: str, output_confidence_map: str, threshold:
 		print('Initializing TCD Pipeline with restor/tcd-segformer-mit-b5...')
 		pipeline = Pipeline(model_or_config='restor/tcd-segformer-mit-b5')
 
-		# Run prediction - TCD handles tiling, resolution optimization, etc.
-		print('Running TCD prediction (TCD handles CRS/tiling internally)...')
+		# Run prediction - TCD handles tiling and GSD resampling internally
+		print('Running TCD prediction...')
 		result = pipeline.predict(input_tif)
 
 		# Get confidence map from result
@@ -81,7 +83,7 @@ def predict_with_pipeline(input_tif: str, output_confidence_map: str, threshold:
 		print(f'Saving confidence map to: {output_confidence_map}')
 
 		with rasterio.open(input_tif) as src:
-			# Use input's profile (CRS, transform preserved from TCD)
+			# Use input's profile (already EPSG:3395 from reprojection)
 			profile = src.profile.copy()
 			profile.update({'dtype': confidence_map.dtype, 'count': 1, 'compress': 'lzw'})
 			profile['nodata'] = 0
@@ -98,14 +100,18 @@ def predict_with_pipeline(input_tif: str, output_confidence_map: str, threshold:
 					f'TCD changed dimensions: {src.width}x{src.height} → {confidence_map.shape[1]}x{confidence_map.shape[0]}'
 				)
 
-			# Write confidence map with mask
+			# Write confidence map
 			with rasterio.open(output_confidence_map, 'w', **profile) as dst:
 				dst.write(confidence_map, 1)
-				try:
-					mask = src.dataset_mask()
-					dst.write_mask(mask)
-				except Exception as e:
-					print(f'Warning: failed to write dataset mask: {e}')
+				# Only copy mask if dimensions match (TCD may have resampled)
+				if confidence_map.shape == (src.height, src.width):
+					try:
+						mask = src.dataset_mask()
+						dst.write_mask(mask)
+					except Exception as e:
+						print(f'Warning: failed to write dataset mask: {e}')
+				else:
+					print('Skipping mask copy: dimensions changed due to GSD resampling')
 
 		print(f'Successfully saved confidence map with shape {confidence_map.shape}')
 		print('Confidence map will be processed by host for database storage')
