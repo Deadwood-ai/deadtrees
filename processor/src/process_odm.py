@@ -8,7 +8,7 @@ from shared.logger import logger
 from shared.settings import settings
 from shared.status import update_status
 from shared.logging import LogContext, LogCategory
-from shared.db import use_client
+from shared.db import use_client, login
 from processor.src.utils.ssh import (
 	pull_file_from_storage_server,
 	push_file_to_storage_server,
@@ -651,6 +651,13 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 						f'ODM stdout (tail): {stdout_tail}',
 						LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 					)
+
+				# Refresh token before extraction - ODM containers can run for hours and token may have expired
+				token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
+				logger.info(
+					'Token refreshed before result extraction',
+					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+				)
 
 				# Copy results from shared volume to output directory
 				copy_results_from_shared_volume(volume_name, output_dir, project_name, dataset_id, token)

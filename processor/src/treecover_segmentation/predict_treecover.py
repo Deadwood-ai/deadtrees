@@ -522,6 +522,13 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 
 		_run_tcd_pipeline_container(volume_name, dataset_id, token)
 
+		# Refresh token before extraction - TCD containers can run for hours and token may have expired
+		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
+		logger.info(
+			'Token refreshed before result extraction',
+			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+		)
+
 		# Step 4: Result Extraction - Copy confidence map from volume
 		tcd_output_dir = temp_dir_path / 'tcd_output'
 		confidence_map_path = _copy_confidence_map_from_volume(volume_name, tcd_output_dir, dataset_id, token)
