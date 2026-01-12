@@ -36,6 +36,14 @@ def test_process_thumbnail_success(thumbnail_task, auth_token):
 		thumbnail_data = response.data[0]
 		assert thumbnail_data['dataset_id'] == thumbnail_task.dataset_id
 
+		# Verify thumbnail_path contains UUID prefix (security feature)
+		thumbnail_path = thumbnail_data['thumbnail_path']
+		assert '/' in thumbnail_path, 'thumbnail_path should contain UUID prefix with slash'
+		uuid_part, filename_part = thumbnail_path.rsplit('/', 1)
+		assert len(uuid_part) == 36, f'UUID should be 36 characters, got {len(uuid_part)}'
+		assert '-' in uuid_part, 'UUID should contain dashes'
+		assert filename_part == thumbnail_data['thumbnail_file_name'], 'Filename part should match thumbnail_file_name'
+
 		# Verify thumbnail file exists on storage server
 		storage_server_path = f'{settings.STORAGE_SERVER_DATA_PATH}/thumbnails/{thumbnail_data["thumbnail_path"]}'
 		assert check_file_exists_on_storage(storage_server_path, auth_token), (

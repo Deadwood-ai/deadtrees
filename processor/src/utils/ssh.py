@@ -94,6 +94,23 @@ def push_file_to_storage_server(local_file_path: str, remote_file_path: str, tok
 			temp_remote_path = f'{remote_file_path}.tmp'
 
 			try:
+				# Create parent directory if it doesn't exist (needed for UUID-prefixed paths)
+				remote_dir = str(Path(remote_file_path).parent)
+				try:
+					sftp.stat(remote_dir)
+				except IOError:
+					# Directory doesn't exist, create it
+					logger.info(
+						'Creating remote directory',
+						LogContext(
+							category=LogCategory.SSH,
+							token=token,
+							dataset_id=dataset_id,
+							extra={'remote_dir': remote_dir},
+						),
+					)
+					sftp.mkdir(remote_dir)
+
 				# Check if file exists on remote host
 				try:
 					sftp.stat(remote_file_path)

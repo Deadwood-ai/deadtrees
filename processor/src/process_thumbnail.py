@@ -1,5 +1,6 @@
 from pathlib import Path
 import time
+import uuid
 
 from shared.db import use_client, login, verify_token
 from shared.settings import settings
@@ -62,6 +63,9 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 		storage_server_file_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{ortho.ortho_file_name}'
 		pull_file_from_storage_server(storage_server_file_path, str(input_path), token, task.dataset_id)
 
+		# Generate UUID for secure path (makes URL iteration impossible)
+		secure_token = str(uuid.uuid4())
+
 		# Generate thumbnail
 		t1 = time.time()
 		logger.info(
@@ -81,17 +85,17 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 			),
 		)
 
-		# Push thumbnail to storage
-		storage_server_thumbnail_path = f'{settings.STORAGE_SERVER_DATA_PATH}/thumbnails/{thumbnail_file_name}'
+		# Push thumbnail to UUID-prefixed path
+		storage_server_thumbnail_path = f'{settings.STORAGE_SERVER_DATA_PATH}/thumbnails/{secure_token}/{thumbnail_file_name}'
 		push_file_to_storage_server(str(output_path), storage_server_thumbnail_path, token, task.dataset_id)
 		t2 = time.time()
 
-		# Prepare metadata
+		# Prepare metadata (thumbnail_path includes UUID prefix for security)
 		meta = dict(
 			dataset_id=ortho.dataset_id,
 			thumbnail_file_size=max(1, int((output_path.stat().st_size))),
 			thumbnail_file_name=thumbnail_file_name,
-			thumbnail_path=thumbnail_file_name,
+			thumbnail_path=f'{secure_token}/{thumbnail_file_name}',  # UUID-prefixed path for security
 			version=1,
 			thumbnail_processing_runtime=t2 - t1,
 		)

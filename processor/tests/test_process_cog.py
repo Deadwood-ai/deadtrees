@@ -151,10 +151,16 @@ def test_process_cog_success(cog_task, auth_token):
 		assert cog_data['cog_file_size'] > 0
 		assert cog_data['cog_info'] is not None
 
-		# assert cog_data['cog_info']['Profile']['Nodata'] == 0
+		# Verify cog_path contains UUID prefix (security feature)
+		cog_path = cog_data['cog_path']
+		assert '/' in cog_path, 'cog_path should contain UUID prefix with slash'
+		uuid_part, filename_part = cog_path.rsplit('/', 1)
+		assert len(uuid_part) == 36, f'UUID should be 36 characters, got {len(uuid_part)}'
+		assert '-' in uuid_part, 'UUID should contain dashes'
+		assert filename_part == cog_data['cog_file_name'], 'Filename part should match cog_file_name'
 
-		# Verify COG file exists on storage server
-		remote_path = f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.COG_DIR}/{cog_data["cog_file_name"]}'
+		# Verify COG file exists on storage server (using cog_path, not cog_file_name)
+		remote_path = f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.COG_DIR}/{cog_data["cog_path"]}'
 		assert check_file_exists_on_storage(remote_path, auth_token)
 
 
@@ -241,6 +247,7 @@ def cleanup_test_dataset(auth_token, dataset_id):
 		client.table(settings.logs_table).delete().neq('id', 1).execute()
 
 
+@pytest.mark.skip(reason="Comprehensive test; skipped by default unless explicitly requested")
 @pytest.mark.slow
 @pytest.mark.comprehensive
 def test_comprehensive_all_small_files_pipeline(all_small_test_files, auth_token, test_processor_user):

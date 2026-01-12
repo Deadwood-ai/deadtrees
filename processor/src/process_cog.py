@@ -1,5 +1,6 @@
 from pathlib import Path
 import time
+import uuid
 
 from shared.db import use_client, login, verify_token
 from shared.settings import settings
@@ -42,6 +43,9 @@ def process_cog(task: QueueTask, temp_dir: Path):
 		file_name = f'{ortho.dataset_id}_cog.tif'
 		output_path = Path(temp_dir) / file_name
 
+		# Generate UUID for secure path (makes URL iteration impossible)
+		secure_token = str(uuid.uuid4())
+
 		# Generate COG
 		t1 = time.time()
 		info = calculate_cog(
@@ -51,17 +55,17 @@ def process_cog(task: QueueTask, temp_dir: Path):
 		)
 		logger.info(f'COG created for dataset {ortho.dataset_id}: {info}', extra={'token': token})
 
-		# Push generated COG
-		storage_server_cog_path = f'{settings.STORAGE_SERVER_DATA_PATH}/cogs/{file_name}'
+		# Push generated COG to UUID-prefixed path
+		storage_server_cog_path = f'{settings.STORAGE_SERVER_DATA_PATH}/cogs/{secure_token}/{file_name}'
 		push_file_to_storage_server(str(output_path), storage_server_cog_path, token, task.dataset_id)
 		t2 = time.time()
 
-		# Prepare metadata
+		# Prepare metadata (cog_path includes UUID prefix for security)
 		meta = dict(
 			dataset_id=ortho.dataset_id,
 			cog_file_size=max(1, int((output_path.stat().st_size / 1024 / 1024))),  # in MB
 			cog_file_name=file_name,
-			cog_path=file_name,
+			cog_path=f'{secure_token}/{file_name}',  # UUID-prefixed path for security
 			version=1,
 			cog_info=info.model_dump(),
 			cog_processing_runtime=t2 - t1,
