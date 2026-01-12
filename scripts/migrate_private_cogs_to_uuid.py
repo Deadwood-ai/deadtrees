@@ -156,10 +156,23 @@ def update_database(token: str, dataset_id: int, new_cog_path: str, new_thumbnai
 
 
 def main():
-	parser = argparse.ArgumentParser(description='Migrate private COGs/thumbnails to UUID-prefixed paths')
-	parser.add_argument('--dry-run', action='store_true', help='Show what would be done without making changes')
-	parser.add_argument('--dataset-id', type=int, help='Migrate only a specific dataset')
-	args = parser.parse_args()
+	## ========================================================================
+	## DEBUG MODE - Set these values for testing, then use argparse for prod
+	## ========================================================================
+	DEBUG_MODE = True  # Set to False to use command line args
+
+	if DEBUG_MODE:
+		# Hardcoded debug values
+		dry_run = True  # Set to False to actually execute
+		dataset_id = 3587  # Set to None to process all, or specific ID to test
+	else:
+		parser = argparse.ArgumentParser(description='Migrate private COGs/thumbnails to UUID-prefixed paths')
+		parser.add_argument('--dry-run', action='store_true', help='Show what would be done without making changes')
+		parser.add_argument('--dataset-id', type=int, help='Migrate only a specific dataset')
+		args = parser.parse_args()
+		dry_run = args.dry_run
+		dataset_id = args.dataset_id
+	## ========================================================================
 
 	# Login
 	logger.info('Logging in as processor...')
@@ -167,7 +180,7 @@ def main():
 
 	# Get datasets needing migration
 	logger.info('Fetching private datasets needing migration...')
-	datasets = get_private_datasets_needing_migration(token, args.dataset_id)
+	datasets = get_private_datasets_needing_migration(token, dataset_id)
 	logger.info(f'Found {len(datasets)} datasets to migrate')
 
 	if not datasets:
