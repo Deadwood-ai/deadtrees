@@ -86,9 +86,14 @@ def get_private_datasets_needing_migration(token: str, dataset_id: int | None = 
 
 def get_ssh_connection() -> paramiko.SSHClient:
 	"""Create SSH connection to storage server."""
+	import os
 	ssh = paramiko.SSHClient()
 	ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-	pkey = paramiko.Ed25519Key.from_private_key_file(settings.SSH_PRIVATE_KEY_PATH)
+
+	# Expand ~ in path and load key with passphrase if set
+	key_path = os.path.expanduser(settings.SSH_PRIVATE_KEY_PATH)
+	passphrase = getattr(settings, 'SSH_PRIVATE_KEY_PASSPHRASE', None)
+	pkey = paramiko.Ed25519Key.from_private_key_file(key_path, password=passphrase)
 
 	ssh.connect(
 		hostname=settings.STORAGE_SERVER_IP,
@@ -163,8 +168,8 @@ def main():
 
 	if DEBUG_MODE:
 		# Hardcoded debug values
-		dry_run = True  # Set to False to actually execute
-		dataset_id = 3587  # Set to None to process all, or specific ID to test
+		dry_run = False  # Set to False to actually execute
+		dataset_id = None  # Process ALL private datasets needing migration
 	else:
 		parser = argparse.ArgumentParser(description='Migrate private COGs/thumbnails to UUID-prefixed paths')
 		parser.add_argument('--dry-run', action='store_true', help='Show what would be done without making changes')
