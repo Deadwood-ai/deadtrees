@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Migration script: Move private COGs/thumbnails to UUID-prefixed paths.
+Migration script: Move ALL COGs/thumbnails to UUID-prefixed paths.
 
-This script migrates existing private datasets to use UUID-prefixed paths,
-making their URLs unguessable and securing them against iteration attacks.
+This script migrates all existing datasets (public and private) to use 
+UUID-prefixed paths for consistent URL structure across the platform.
 
 Usage:
     # Dry run (no changes made)
@@ -30,6 +30,7 @@ Prerequisites:
 import argparse
 import uuid
 import sys
+import logging
 from pathlib import Path
 
 import paramiko
@@ -40,20 +41,23 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from shared.db import login, use_client
 from shared.settings import settings
-from shared.logger import logger
+
+# Setup standard Python logging
+logging.basicConfig(
+	level=logging.INFO,
+	format='%(asctime)s [%(levelname)s] %(message)s',
+	datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 
-
-
-
-
-
-def get_private_datasets_needing_migration(token: str, dataset_id: int | None = None) -> list[dict]:
-	"""Get all private datasets that need migration (no UUID in path)."""
+def get_datasets_needing_migration(token: str, dataset_id: int | None = None) -> list[dict]:
+	"""Get all datasets that need migration (no UUID in path)."""
 	with use_client(token) as client:
 		query = client.table('v2_datasets').select(
 			'id, data_access, v2_cogs(cog_path, cog_file_name), v2_thumbnails(thumbnail_path, thumbnail_file_name)'
-		).eq('data_access', 'private')
+		)
+		# No filter on data_access - migrate ALL datasets (public and private)
 
 		if dataset_id:
 			query = query.eq('id', dataset_id)
@@ -184,18 +188,13 @@ def main():
 	token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 
 	# Get datasets needing migration
-	logger.info('Fetching private datasets needing migration...')
-	datasets = get_private_datasets_needing_migration(token, dataset_id)
+	logger.info('Fetching ALL datasets needing migration (public + private)...')
+	datasets = get_datasets_needing_migration(token, dataset_id)
 	logger.info(f'Found {len(datasets)} datasets to migrate')
 
 	if not datasets:
 		logger.info('No datasets need migration.')
 		return
-
-	# Connect to storage server
-	logger.info(f'Connecting to storage server {settings.STORAGE_SERVER_IP}...')
-	ssh = get_ssh_connection()
-	sftp = ssh.open_sftp()
 
 	cog_base = f'{settings.STORAGE_SERVER_DATA_PATH}/cogs'
 	thumbnail_base = f'{settings.STORAGE_SERVER_DATA_PATH}/thumbnails'
@@ -205,44 +204,68 @@ def main():
 	failed = 0
 	skipped = 0
 
-	try:
-		for i, dataset in enumerate(datasets, 1):
-			dataset_id = dataset['dataset_id']
-			logger.info(f'[{i}/{len(datasets)}] Processing dataset {dataset_id}...')
+	# Process in batches to avoid token/connection timeouts
+	BATCH_SIZE = 100
+	total_batches = (len(datasets) + BATCH_SIZE - 1) // BATCH_SIZE
 
-			# Generate UUID for this dataset
-			secure_token = str(uuid.uuid4())
+	for batch_num in range(total_batches):
+		batch_start = batch_num * BATCH_SIZE
+		batch_end = min(batch_start + BATCH_SIZE, len(datasets))
+		batch = datasets[batch_start:batch_end]
 
-			# Build new paths
-			new_cog_path = f'{secure_token}/{dataset["cog_file_name"]}'
-			new_thumbnail_path = None
-			if dataset['thumbnail_path'] and dataset['thumbnail_file_name']:
-				new_thumbnail_path = f'{secure_token}/{dataset["thumbnail_file_name"]}'
+		logger.info(f'\n{"="*50}')
+		logger.info(f'BATCH {batch_num + 1}/{total_batches} (datasets {batch_start + 1}-{batch_end} of {len(datasets)})')
+		logger.info(f'{"="*50}')
 
-			# Migrate COG
-			cog_ok = migrate_file(sftp, cog_base, dataset['cog_path'], new_cog_path, dry_run)
+		# Re-login for fresh token each batch
+		logger.info('Refreshing database token...')
+		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 
-			# Migrate thumbnail (if exists)
-			if dataset['thumbnail_path']:
-				migrate_file(sftp, thumbnail_base, dataset['thumbnail_path'], new_thumbnail_path, dry_run)
+		# Fresh SSH connection for each batch
+		logger.info(f'Connecting to storage server {settings.STORAGE_SERVER_IP}...')
+		ssh = get_ssh_connection()
+		sftp = ssh.open_sftp()
 
-			if not cog_ok:
-				skipped += 1
-				continue
+		try:
+			for i, dataset in enumerate(batch, batch_start + 1):
+				dataset_id = dataset['dataset_id']
+				logger.info(f'[{i}/{len(datasets)}] Processing dataset {dataset_id}...')
 
-			# Update database (skip in dry run)
-			if dry_run:
-				logger.info(f'[DRY RUN] Would update DB: cog_path={new_cog_path}, thumbnail_path={new_thumbnail_path}')
-				success += 1
-			else:
-				if update_database(token, dataset_id, new_cog_path, new_thumbnail_path):
+				# Generate UUID for this dataset
+				secure_token = str(uuid.uuid4())
+
+				# Build new paths
+				new_cog_path = f'{secure_token}/{dataset["cog_file_name"]}'
+				new_thumbnail_path = None
+				if dataset['thumbnail_path'] and dataset['thumbnail_file_name']:
+					new_thumbnail_path = f'{secure_token}/{dataset["thumbnail_file_name"]}'
+
+				# Migrate COG
+				cog_ok = migrate_file(sftp, cog_base, dataset['cog_path'], new_cog_path, dry_run)
+
+				# Migrate thumbnail (if exists)
+				if dataset['thumbnail_path']:
+					migrate_file(sftp, thumbnail_base, dataset['thumbnail_path'], new_thumbnail_path, dry_run)
+
+				if not cog_ok:
+					skipped += 1
+					continue
+
+				# Update database (skip in dry run)
+				if dry_run:
+					logger.info(f'[DRY RUN] Would update DB: cog_path={new_cog_path}, thumbnail_path={new_thumbnail_path}')
 					success += 1
 				else:
-					failed += 1
+					if update_database(token, dataset_id, new_cog_path, new_thumbnail_path):
+						success += 1
+					else:
+						failed += 1
 
-	finally:
-		sftp.close()
-		ssh.close()
+		finally:
+			sftp.close()
+			ssh.close()
+
+		logger.info(f'Batch {batch_num + 1} complete. Progress: {success} success, {failed} failed, {skipped} skipped')
 
 	# Summary
 	print('\n' + '=' * 50)
