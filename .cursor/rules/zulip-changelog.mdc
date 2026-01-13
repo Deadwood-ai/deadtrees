@@ -1,0 +1,53 @@
+---
+description: Using Zulip MCP
+alwaysApply: false
+---
+# Zulip Changelog & Status Updates
+
+## WHEN TO USE
+- Posting application updates, bug fixes, or feature announcements
+- Communicating deployment status to the team
+
+## Workflow
+
+1. **Draft first**: Create a markdown file in `scratchpad/` for user review
+   - Example: `scratchpad/changelog_<feature_name>.md`
+   - Wait for user approval/edits before posting
+
+2. **Post to Zulip**: Use the correct channel and topic
+   - Channel: `project_deadtree.earth`
+   - Topic: `Application Updates (changelog)`
+
+3. **Cleanup**: Delete the scratchpad file after posting
+
+## Message Format
+
+```markdown
+## Status Update (YYYY-MM-DD)
+
+### [Fixed/Added/Changed]: Brief description
+
+Context about the issue or feature.
+
+**What was [fixed/added/changed]:**
+- Change 1
+- Change 2
+
+**Impact:** Description of how this affects users or the system.
+
+linked issue: <linear-issue-url>
+```
+
+## Example Tool Call
+
+```
+mcp_zulip_zulip_post_message:
+  channel_name: project_deadtree.earth
+  topic: Application Updates (changelog)
+  content: <formatted message>
+```
+
+## Notes
+- Always include the Linear issue link if one exists
+- Keep messages concise but informative
+- Use markdown formatting for readability
