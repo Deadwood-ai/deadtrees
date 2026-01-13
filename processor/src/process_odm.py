@@ -583,6 +583,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			[
 				'--orthophoto-resolution',
 				resolution,  # Environment-specific resolution (1cm production, 50cm test)
+				'--skip-report',  # Skip PDF report generation (can hang on WeasyPrint font issues)
 				'--project-path',
 				'/odm_data',
 				project_name,  # This is the PROJECTDIR argument
