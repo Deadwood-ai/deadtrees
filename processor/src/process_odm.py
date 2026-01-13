@@ -617,6 +617,12 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 					image='opendronemap/odm',
 					command=odm_command,
 					volumes={volume_name: {'bind': '/odm_data', 'mode': 'rw'}},
+					environment={
+						# Limit GDAL cache to prevent OOM during orthophoto generation
+						# Without this, GDAL auto-calculates based on system RAM (e.g., 58GB on 125GB machine)
+						# which combined with ODM's memory usage can cause OOM kills
+						'GDAL_CACHEMAX': '16384',  # 16GB max cache
+					},
 					remove=True,
 					detach=False,
 					labels={
