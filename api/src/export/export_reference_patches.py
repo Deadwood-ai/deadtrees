@@ -9,7 +9,7 @@ Output structure: /data/reference_export/{uuid}/{dataset_id}/{geotiff,png,metada
 Accessible via: /reference/{uuid}/{dataset_id}/...
 
 Features:
-- Incremental exports (checks file existence)
+- Incremental exports (timestamp-based change detection)
 - Automatic cleanup of removed datasets
 - UUID-based access control
 
@@ -34,6 +34,7 @@ Usage:
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 import os
@@ -271,24 +272,37 @@ def fetch_geometries_by_label(token: str, label_id: int, table_name: str, bbox: 
 		return []
 
 
-def patch_files_exist(output_dir: Path, filename_base: str, has_ref: bool) -> bool:
-	"""Check if all required files for a patch already exist.
+def patch_needs_export(output_dir: Path, filename_base: str, patch_updated_at: datetime, has_ref: bool) -> bool:
+	"""Check if patch needs to be exported based on timestamps.
 
 	Args:
 		output_dir: Base output directory for the dataset
 		filename_base: Base filename (e.g., "420_0_0_5cm")
+		patch_updated_at: When the patch was last updated in the database
 		has_ref: Whether reference masks should exist
 
 	Returns:
-		True if all required files exist, False otherwise
+		True if patch should be exported (files missing or outdated), False otherwise
 	"""
-	# Check RGB files (always required)
-	geotiff_path = output_dir / 'geotiff' / f'{filename_base}.tif'
-	png_path = output_dir / 'png' / f'{filename_base}.png'
 	json_path = output_dir / 'metadata' / f'{filename_base}.json'
 
-	if not (geotiff_path.exists() and png_path.exists() and json_path.exists()):
-		return False
+	# If metadata file doesn't exist, needs export
+	if not json_path.exists():
+		return True
+
+	# Compare file modification time with patch updated_at
+	file_mtime = datetime.fromtimestamp(json_path.stat().st_mtime, tz=timezone.utc)
+
+	# If patch was updated after file was written, needs re-export
+	if patch_updated_at > file_mtime:
+		return True
+
+	# Check other required files exist
+	geotiff_path = output_dir / 'geotiff' / f'{filename_base}.tif'
+	png_path = output_dir / 'png' / f'{filename_base}.png'
+
+	if not (geotiff_path.exists() and png_path.exists()):
+		return True
 
 	# Check reference masks if they should exist
 	if has_ref:
@@ -299,9 +313,9 @@ def patch_files_exist(output_dir: Path, filename_base: str, has_ref: bool) -> bo
 			output_dir / 'png' / f'{filename_base}_forestcover_ref.png',
 		]
 		if not all(f.exists() for f in ref_files):
-			return False
+			return True
 
-	return True
+	return False
 
 
 def cleanup_removed_datasets(output_base_dir: Path, reference_dataset_ids: list[int]):
@@ -767,8 +781,13 @@ def main():
 			or patch.get('parent_forestcover_label_id')
 		)
 
-		# Check if files already exist (incremental export)
-		if not args.force and patch_files_exist(dataset_output_dir, filename_base, has_ref):
+		# Parse updated_at timestamp for change detection
+		patch_updated_at = patch['updated_at']
+		if isinstance(patch_updated_at, str):
+			patch_updated_at = datetime.fromisoformat(patch_updated_at.replace('Z', '+00:00'))
+
+		# Check if patch needs export (files missing or outdated)
+		if not args.force and not patch_needs_export(dataset_output_dir, filename_base, patch_updated_at, has_ref):
 			skipped_count += 1
 			continue
 
