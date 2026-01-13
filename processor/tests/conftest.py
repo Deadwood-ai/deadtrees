@@ -123,7 +123,7 @@ def cleanup_storage():
 		try:
 			cleanup_storage_server_directory(path, token)
 		except Exception as e:
-			print(f'Pre-test cleanup warning: {str(e)}', extra={'token': token})
+			print(f'Pre-test cleanup warning: {str(e)}')
 
 	yield
 
@@ -132,7 +132,7 @@ def cleanup_storage():
 		try:
 			cleanup_storage_server_directory(path, token)
 		except Exception as e:
-			print(f'Post-test cleanup warning: {str(e)}', extra={'token': token})
+			print(f'Post-test cleanup warning: {str(e)}')
 
 	# Clean local processing directory
 	if Path(settings.processing_path).exists():
