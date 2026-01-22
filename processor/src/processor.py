@@ -11,6 +11,7 @@ from .process_deadwood_segmentation import process_deadwood_segmentation
 from .process_treecover_segmentation import process_treecover_segmentation
 from .process_metadata import process_metadata
 from .exceptions import AuthenticationError, ProcessingError
+from .utils.linear_issues import create_processing_failure_issue
 from shared.logging import LogContext, LogCategory, UnifiedLogger, SupabaseHandler
 
 # Initialize logger with proper cleanup
@@ -283,6 +284,20 @@ def process_task(task: QueueTask, token: str):
 			f'Processing failed: {str(e)}',
 			LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 		)
+
+		# Create Linear issue for processing failure
+		try:
+			stage = e.task_type if isinstance(e, ProcessingError) else 'processing'
+			create_processing_failure_issue(
+				token=token,
+				dataset_id=task.dataset_id,
+				stage=stage,
+				error_message=str(e),
+			)
+		except Exception as linear_error:
+			# Never let Linear issue creation block processing
+			logger.warning(f'Failed to create Linear issue: {linear_error}')
+
 		# Delete task from queue on failure - error is already recorded in status table
 		try:
 			delete_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)

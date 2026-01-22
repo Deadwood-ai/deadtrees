@@ -41,6 +41,11 @@ services:
       SSH_PRIVATE_KEY_PATH: /root/.ssh/processing-to-storage
       DEV_MODE: "false"
       LOGFIRE_TOKEN: ${LOGFIRE_TOKEN}
+      # Service role key for accessing auth.users (user email lookup)
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      # Linear integration for processing failure notifications
+      LINEAR_ENABLED: ${LINEAR_ENABLED:-false}
+      LINEAR_API_KEY: ${LINEAR_API_KEY:-}
       # SSH_KEY_PATH: /root/.ssh/processing-to-storage
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: all

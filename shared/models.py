@@ -97,6 +97,28 @@ class TaskTypeEnum(str, Enum):
 	metadata = 'metadata'  # Extract metadata
 	odm_processing = 'odm_processing'  # ODM raw image processing
 
+	@property
+	def display_name(self) -> str:
+		"""Human-readable display name for the task type."""
+		display_names = {
+			'cog': 'COG',
+			'thumbnail': 'Thumbnail',
+			'deadwood': 'Deadwood',
+			'treecover': 'Tree Cover',
+			'geotiff': 'GeoTIFF',
+			'metadata': 'Metadata',
+			'odm_processing': 'ODM',
+		}
+		return display_names.get(self.value, self.value)
+
+	@classmethod
+	def from_string(cls, value: str) -> 'TaskTypeEnum | None':
+		"""Get TaskTypeEnum from string value, returns None if not found."""
+		try:
+			return cls(value)
+		except ValueError:
+			return None
+
 
 class TaskPayload(BaseModel):
 	id: Optional[int] = None

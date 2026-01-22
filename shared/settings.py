@@ -86,6 +86,7 @@ class Settings(BaseSettings):
 	# supabase settings for supabase authentication
 	SUPABASE_URL: str
 	SUPABASE_KEY: str
+	SUPABASE_SERVICE_ROLE_KEY: str = ''  # Optional: for accessing auth.users table
 
 	# some basic settings for the UVICORN server
 	UVICORN_HOST: str = '127.0.0.1' if DEV_MODE else '0.0.0.0'
@@ -111,6 +112,11 @@ class Settings(BaseSettings):
 	# monitoring
 	LOGFIRE_TOKEN: str = None
 	LOGFIRE_PYDANTIC_PLUGIN_RECORD: str = 'all'
+
+	# Linear integration for processing failure notifications
+	LINEAR_ENABLED: bool = False
+	LINEAR_API_KEY: str = ''
+	LINEAR_TEAM_ID: str = 'ba4011bf-0b5c-4631-9f88-1034ab4ef541'  # deadtrees team
 
 	# Test settings
 	TEST_USER_EMAIL: str = 'test@example.com'
