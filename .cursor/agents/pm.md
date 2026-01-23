@@ -75,6 +75,7 @@ list_issues: team=deadtrees, updatedAt=-P3D
 ## Linear Organization Rules
 
 **Status workflow (only use these):**
+- **Triage** → New issues, awaiting review, **unassigned**
 - **Backlog** → Evaluated, not urgent, **unassigned**
 - **Todo** → Active work queue, **only items being worked on now**, must be assigned
 - **In Progress** → Currently working
@@ -83,11 +84,11 @@ list_issues: team=deadtrees, updatedAt=-P3D
 - **Canceled** → Won't do
 - **Duplicate** → Duplicate of another issue
 
-**Do NOT use:** Triage, Pinned, Next, or other custom statuses.
+**Do NOT use:** Pinned, Next, or other custom statuses.
 
 **Key rules:**
-1. Only assign issues in **Todo** or later — Backlog items stay unassigned
-2. New issues go to **Backlog** (not Triage)
+1. Only assign issues in **Todo** or later — Backlog/Triage items stay unassigned
+2. New issues go to **Triage** (for review before moving to Backlog or Todo)
 3. No duplicates — search before creating, link related issues, mark as Duplicate if found
 4. Proper scoping — one session of work, not too broad or too specific
 5. Use **Projects** for time-bound groups of issues (epics/milestones)

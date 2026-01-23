@@ -80,7 +80,7 @@ FROM v2_logs WHERE dataset_id = <dataset_id>;
 **⚠️ IMPORTANT: File Size Units**
 - `ortho_file_size` and `cog_file_size` are stored in **MB** (not bytes, despite field name)
 - Example: `ortho_file_size: 7366` = 7,366 MB ≈ 7.2 GB
-- To verify actual file size on disk: SSH to storage server and use `ls -lh`
+- To verify actual file size on disk: use `/home/jj1049/mount_storage_server/` (local mount of storage server)
 
 **2.1 Raw Images Metadata** (if ODM pipeline or ZIP upload)
 ```sql
@@ -107,7 +107,7 @@ SELECT ortho_file_size as size_mb,
 FROM v2_orthos WHERE dataset_id = <dataset_id>;
 ```
 → **Check:** CRS validity, bbox validity, COG errors, tiling status (important for large images!)
-→ **NOTE:** `ortho_file_size` is in **MB**. E.g., 7366 = 7.2 GB. Verify actual size: `ls -lh /data/archive/6166_ortho.tif`
+→ **NOTE:** `ortho_file_size` is in **MB**. E.g., 7366 = 7.2 GB. Verify actual size: `ls -lh /home/jj1049/mount_storage_server/archive/<dataset_id>_ortho.tif`
 
 **2.3 Orthos Processed** (standardized GeoTIFF metadata - LOCAL file only)
 ```sql
@@ -125,7 +125,7 @@ SELECT dataset_id, cog_file_name, cog_file_size, cog_info,
 FROM v2_cogs WHERE dataset_id = <dataset_id>;
 ```
 → **Check:** COG created, file size > 0, processing time, tiling/compression info (cog_info contains tiling details)
-→ **NOTE:** `cog_file_size` is in **MB**. E.g., 1108 = 1.1 GB. Verify actual size: `ls -lh /data/cogs/6166_cog.tif`
+→ **NOTE:** `cog_file_size` is in **MB**. E.g., 1108 = 1.1 GB. Verify actual size: `ls -lh /home/jj1049/mount_storage_server/cogs/<dataset_id>_cog.tif`
 
 **2.5 Thumbnail**
 ```sql
@@ -217,6 +217,26 @@ FROM v2_queue WHERE dataset_id = <dataset_id>;
 ---
 
 ### 💻 PHASE 4: LOCAL SYSTEM INVESTIGATION
+
+**⚠️ IMPORTANT: Storage Server Files Available Locally**
+The production storage server is mounted at `/home/jj1049/mount_storage_server`. Use this to explore actual uploaded files without SSH:
+```bash
+# Archive files (original uploads)
+ls -lh /home/jj1049/mount_storage_server/archive/<dataset_id>_ortho.tif
+
+# COGs
+ls -lh /home/jj1049/mount_storage_server/cogs/<dataset_id>_cog.tif
+
+# Thumbnails
+ls -lh /home/jj1049/mount_storage_server/thumbnails/<dataset_id>_thumbnail.png
+
+# Raw images (for ZIP/ODM uploads)
+ls -lh /home/jj1049/mount_storage_server/raw_drone_images/<dataset_id>/
+
+# Verify file integrity
+gdalinfo /home/jj1049/mount_storage_server/archive/<dataset_id>_ortho.tif | head -30
+```
+This mount corresponds to `/data/` on the storage server.
 
 **4.1 Docker Containers** (Local)
 ```bash
