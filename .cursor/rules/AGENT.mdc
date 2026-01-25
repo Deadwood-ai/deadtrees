@@ -1,0 +1,90 @@
+---
+description: Core project rules - security, architecture, and essential gotchas
+alwaysApply: true
+---
+# DeadTrees Agent Rules
+
+## Security Constraints (NEVER Violate)
+
+- **NEVER SSH to remote machines without explicit user consent** - Always ask first
+- **NEVER commit or push without user approval** - Always ask before git operations
+- **NEVER bypass MCP for database access** - Use `user-deadtrees-prod` or `user-deadtrees-local`
+
+---
+
+## Architecture (Critical Knowledge)
+
+### Production: Two Separate Physical Machines
+
+| Machine | Services | Has /data? |
+|---------|----------|------------|
+| **API Server** | NGINX, FastAPI, file storage | YES |
+| **Processor Server** | Processor, ODM containers, TCD containers | NO |
+
+**Key insight:** No shared filesystem. Data transfer via SSH pull/push.
+
+### Test Environment
+- Processor container has **NO /data mount** (simulates production separation)
+- Uses SSH to nginx container (port 2222)
+
+### Why Named Volumes
+- No shared filesystem between machines
+- Avoids permission issues (ODM UID 999 ≠ processor UID)
+
+### Critical: Standardized File Flow
+- Original ortho: `/data/archive/XXXX_ortho.tif` (preserved, may be untiled)
+- Standardized ortho: **LOCAL in processor only** (tiled, NOT pushed back to storage)
+- `ssh.py` skip-if-exists reuses local tiled file for all downstream tasks
+- This prevents "Chunk and warp failed" errors in treecover
+
+---
+
+## Known Bugs & Gotchas
+
+### Active Bug: Tar Streaming Memory Exhaustion
+- **Location:** `processor/src/utils/shared_volume.py:189`, `predict_treecover.py:354`
+- **Problem:** `io.BytesIO(b''.join(archive_stream))` loads entire archive into RAM
+- **Fix:** Stream directly: `tarfile.open(mode='r|*', fileobj=archive_stream)`
+
+### Data Gotchas
+
+| Issue | Reality |
+|-------|---------|
+| File sizes in DB | **MB not bytes** (7366 = 7.2 GB) |
+| Phenology path | Has `_filled` suffix: `modispheno_aggregated_normalized_filled.zarr` |
+| User privileges table | `privileged_users` not `v2_users` |
+| Legacy tables | `v1_label_objects` dropped, `v2_queue_positions` doesn't exist |
+
+---
+
+## Conventions (Non-Standard)
+
+### Python
+- **Tabs, not spaces**
+- Prefer functions over classes for business logic
+
+### Testing
+- **Sync tests only** - no `async def`, no `@pytest.mark.asyncio`
+- Use `deadtrees` CLI, never `pytest` directly in containers
+- Use real data and fixtures, avoid mocking
+
+### CLI
+```bash
+deadtrees dev start/stop        # Manage test stack
+deadtrees dev test api/processor
+deadtrees dev debug api --test-path=...
+```
+
+---
+
+## External Services
+
+| Server | Purpose |
+|--------|---------|
+| `user-deadtrees-prod` | Production database (read-only) |
+| `user-deadtrees-local` | Local database |
+| `user-Linear` | Issue tracking |
+| `user-zulip` | Team communication |
+
+**GitHub:** `Deadwood-ai/deadtrees`
+**Zulip:** `project_deadtree.earth` channel

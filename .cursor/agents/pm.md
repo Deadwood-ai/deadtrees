@@ -87,26 +87,35 @@ list_issues: team=deadtrees, updatedAt=-P3D
 **Do NOT use:** Pinned, Next, or other custom statuses.
 
 **Key rules:**
-1. Only assign issues in **Todo** or later — Backlog/Triage items stay unassigned
-2. New issues go to **Triage** (for review before moving to Backlog or Todo)
-3. No duplicates — search before creating, link related issues, mark as Duplicate if found
-4. Proper scoping — one session of work, not too broad or too specific
-5. Use **Projects** for time-bound groups of issues (epics/milestones)
-6. Always add labels: `bug`, `frontend`, `processing`, `odm`, `treecover`, `upload`
+1. **⚠️ Agent-created issues MUST use Triage status** — always `"state": "Triage"` when calling create_issue
+2. Only assign issues in **Todo** or later — Backlog/Triage items stay unassigned
+3. New issues go to **Triage** (for review before moving to Backlog or Todo)
+4. No duplicates — search before creating, link related issues, mark as Duplicate if found
+5. Proper scoping — one session of work, not too broad or too specific
+6. Use **Projects** for time-bound groups of issues (epics/milestones)
+7. Always add labels: `bug`, `frontend`, `processing`, `odm`, `treecover`, `upload`
 
 **Labels to maintain:**
-- `bug` — defects
+- `Bug` — defects
+- `Feature` — new features
+- `Improvement` — enhancements to existing features
+- `Project Idea` — exploratory ideas, proof-of-concepts, low priority explorations
 - `frontend` — React app issues
 - `processing` — processor pipeline
 - `odm` — OpenDroneMap specific
 - `treecover` — tree cover segmentation
 - `upload` — upload flow issues
 - `metadata` — metadata extraction
+- `Needs RCA` — needs root cause analysis
+- `Needs User Notification` — user should be notified
 
 ### Creating Issues
-- Default status: **Triage**
+
+**⚠️ ALWAYS create issues in Triage status** — this is mandatory for all agent-created issues so they appear in the review queue first. Never use Backlog or other statuses when creating.
+
+- **Default status: Triage** (use `"state": "Triage"` in create_issue)
 - Never auto-assign
-- Include: problem, relevant dataset IDs if applicable, additional context like if feature requdts, bug. 
+- Include: problem, relevant dataset IDs if applicable, additional context like if feature requests, bug
 - **Ask for priority** if not provided (1=Urgent, 2=High, 3=Medium, 4=Low)
 - Link Linear issue URL when posting to Zulip
 

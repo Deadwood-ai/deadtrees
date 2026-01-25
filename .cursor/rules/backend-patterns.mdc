@@ -1,0 +1,91 @@
+---
+description: Python backend conventions - project-specific patterns
+alwaysApply: true
+---
+# Backend Patterns
+
+## Critical Conventions
+
+### Functions Over Classes (Required)
+```python
+# ✅ GOOD: Processing functions
+def process_metadata(task: QueueTask, temp_dir: Path) -> None:
+	pass
+
+# ❌ BAD: Don't create classes for stateless operations
+class MetadataProcessor:
+	def __init__(self, task: QueueTask):
+		self.task = task
+```
+
+**Classes ARE appropriate for:** Pydantic models, Enums, Exceptions, Settings
+
+### Sync Tests Only
+```python
+# ✅ GOOD: Sync test function
+def test_process_dataset(dataset_fixture):
+	result = process_dataset(dataset_fixture.id)
+	assert result.success
+
+# ❌ BAD: Async test (NOT supported)
+async def test_async_operation():
+	pass
+```
+
+### Real Data Testing (Preferred)
+Use real geographic coordinates and fixtures, not mocks:
+```python
+TEST_POINTS = [
+	(48.0, 8.0, "Black Forest, Germany"),
+	(45.0, -75.0, "Eastern Canada"),
+]
+
+@pytest.mark.parametrize('lat,lon,location', TEST_POINTS)
+def test_data_retrieval(lat, lon, location):
+	result = get_data_for_location(lat, lon)
+	assert result is not None
+```
+
+---
+
+## Logging (Project-Specific)
+
+```python
+from shared.logging import UnifiedLogger, LogContext, LogCategory
+
+logger = UnifiedLogger()
+
+def process_dataset(dataset_id: int, user_id: str):
+	context = LogContext(
+		category=LogCategory.PROCESS,
+		dataset_id=dataset_id,
+		user_id=user_id
+	)
+	logger.info("Processing started", context=context)
+```
+
+---
+
+## Metadata Extension Pattern
+
+When adding new metadata types:
+
+```python
+# 1. Add to MetadataType enum
+class MetadataType(str, Enum):
+	GADM = 'gadm'
+	BIOME = 'biome'
+	PHENOLOGY = 'phenology'  # New type
+
+# 2. Create metadata model
+class PhenologyMetadata(BaseModel):
+	data_field: List[int]
+	source: str = 'MODIS'
+
+# 3. Create utility function in processor/src/utils/
+def get_phenology_metadata(lat: float, lon: float) -> Optional[PhenologyMetadata]:
+	data = get_data_for_location(lat, lon)
+	return PhenologyMetadata(data_field=data) if data else None
+
+# 4. Integrate into process_metadata.py
+```

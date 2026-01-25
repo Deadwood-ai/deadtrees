@@ -1,44 +1,40 @@
 ---
 alwaysApply: true
 ---
-
 # Rules Index
 
-Available workspace rules under `.cursor/rules/`:
+## Core Rules (Always Applied)
 
-- `processor-pipeline.mdc`: **CRITICAL** - Always applied - Processor order of operations, file flow, standardization logic
-- `security-constraints.mdc`: **CRITICAL** - Never SSH without consent, MCP-only database access
-- `deployment-architecture.mdc`: **CRITICAL** - Production architecture, machine separation, named volumes
-- `development-workflow.mdc`: CLI-first dev/test workflow, ports, troubleshooting
-- `code-map.mdc`: High-level map of modules and key files
-- `env-and-ports.mdc`: Services, ports, environment variables
-- `assets-and-paths.mdc`: Asset locations, settings-derived paths
-- `odm-processing.mdc`: Requirements, patterns, tar streaming bug for ODM
-- `treecover-segmentation.mdc`: Using and debugging treecover segmentation
-- `upload-and-chunking.mdc`: Dataset creation and chunk upload flow
-- `collaboration.mdc`: Session preferences and guardrails
-- `testing-policy.mdc`: Sync tests, no new class-based tests, CLI usage
-- `project-structure.mdc`: Module organization and file placement
-- `code-standards.mdc`: Programming standards and patterns
-- `data-debugging.mdc`: Dataset investigation and debugging
-- `database-mcp.mdc`: Database operations and MCP tools
-- `github.mdc`: GitHub CLI and workflows
+| File | Purpose |
+|------|---------|
+| `AGENT.mdc` | **START HERE** - Security constraints, architecture, gotchas |
+| `backend-patterns.mdc` | Python conventions, testing patterns |
+| `processing-patterns.mdc` | Pipeline flow, ODM, treecover debugging |
+| `database-patterns.mdc` | MCP queries, dual auth, migrations |
 
-## Critical Rules for New Agents
+## Reference (Always Applied)
 
-**Must read first:**
-1. `processor-pipeline.mdc` - **CRITICAL** - Processing order, file flow, why standardized file isn't pushed back
-2. `security-constraints.mdc` - **NEVER SSH without consent, ALWAYS use MCP for database**
-3. `deployment-architecture.mdc` - Understanding production vs test, machine separation
-4. `code-map.mdc` - Where functionality lives
-5. `development-workflow.mdc` - How to run tests and debug
+| File | Purpose |
+|------|---------|
+| `code-map.mdc` | Quick map of modules and key files |
+| `project-structure.mdc` | Module organization, file placement |
+| `development-workflow.mdc` | CLI commands, ports, troubleshooting |
 
-**For specific tasks:**
-- Understanding processor flow → `processor-pipeline.mdc` (always applied)
-- Working with ODM → `odm-processing.mdc`
-- Working with treecover → `treecover-segmentation.mdc`
-- Data transfer issues → `deployment-architecture.mdc`
-- Testing → `testing-policy.mdc` + `development-workflow.mdc`
-- Debugging datasets → `data-debugging.mdc` + `debug-dataset.md` command
+## Skills (Agent Requestable)
 
-If something is missing or unclear, ask clarifying questions before proceeding.
+| File | When to Use |
+|------|-------------|
+| `data-debugging.mdc` | Investigating failed datasets |
+| `github.mdc` | GitHub CLI, issues, PRs |
+| `linear.mdc` | Linear issue management, status workflow |
+| `upload-and-chunking.mdc` | Upload flows, metadata |
+| `zulip-changelog.mdc` | Posting to Zulip |
+
+## Quick Start for New Agents
+
+1. Read `AGENT.mdc` first - covers security rules you must never violate
+2. Check `code-map.mdc` to find where functionality lives
+3. For processing issues, see `processing-patterns.mdc`
+4. For database queries, see `database-patterns.mdc`
+
+If something is unclear, ask clarifying questions before proceeding.
