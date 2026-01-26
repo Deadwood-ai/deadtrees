@@ -30,6 +30,7 @@ alwaysApply: true
 | `upload-and-chunking.mdc` | Upload flows, metadata |
 | `zulip-changelog.mdc` | Posting to Zulip |
 
+
 ## Quick Start for New Agents
 
 1. Read `AGENT.mdc` first - covers security rules you must never violate

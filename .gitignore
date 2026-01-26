@@ -8,6 +8,9 @@ ml_ready_tiles/*
 
 /scratchpad/*
 
+# Operational docs (contains infrastructure details, credentials references)
+docs/ops/*
+
 scripts/geonadir/*
 
 #logs for scripts
