@@ -118,6 +118,18 @@ class Settings(BaseSettings):
 	LINEAR_API_KEY: str = ''
 	LINEAR_TEAM_ID: str = 'ba4011bf-0b5c-4631-9f88-1034ab4ef541'  # deadtrees team
 
+	# PostHog integration for website analytics
+	POSTHOG_API_KEY: str = ''
+	POSTHOG_PROJECT_ID: str = ''
+	POSTHOG_HOST: str = 'https://eu.posthog.com'  # EU instance
+
+	# Zulip integration for notifications
+	ZULIP_EMAIL: str = ''
+	ZULIP_API_KEY: str = ''
+	ZULIP_SITE: str = ''  # e.g., https://chat.deadtrees.earth
+	ZULIP_STREAM: str = 'project_deadtree.earth'
+	ZULIP_TOPIC: str = 'Daily Summary'
+
 	# Test settings
 	TEST_USER_EMAIL: str = 'test@example.com'
 	TEST_USER_PASSWORD: str = 'test123456'
