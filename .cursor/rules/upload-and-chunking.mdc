@@ -1,5 +1,5 @@
 ---
-description: - Implementing or debugging dataset upload flows and metadata population
+description: Implementing or debugging dataset upload flows and metadata population
 alwaysApply: false
 ---
 # Upload & Chunking
