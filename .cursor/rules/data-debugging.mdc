@@ -1,5 +1,5 @@
 ---
-description: - Investigating failed or problematic datasets (like dataset 3904) - Debugging data processing pipeline issues - Using MCP tools to examine production database - Analyzing dataset status, errors, or processing failures - Rerunning datasets after fixing issues
+description: Investigating failed or problematic datasets (like dataset 3904) - Debugging data processing pipeline issues - Using MCP tools to examine production database - Analyzing dataset status, errors, or processing failures - Rerunning datasets after fixing issues
 alwaysApply: false
 ---
 # Data Debugging & Dataset Investigation

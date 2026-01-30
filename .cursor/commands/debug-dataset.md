@@ -5,7 +5,7 @@
 ## 🚨 CRITICAL RULES
 - **READ-ONLY ANALYSIS** - Never modify database, files, or configurations during investigation
 - **MCP ONLY** - All database queries use MCP tools (never direct DB connection)
-- **ASK BEFORE SSH** - Get explicit permission before SSH to remote machines
+- **NEVER USE SSH** 
 - **Output inline** - Present findings in chat (no file writing)
 
 ## 🔄 **Processing Order of Operations**
@@ -219,7 +219,7 @@ FROM v2_queue WHERE dataset_id = <dataset_id>;
 ### 💻 PHASE 4: LOCAL SYSTEM INVESTIGATION
 
 **⚠️ IMPORTANT: Storage Server Files Available Locally**
-The production storage server is mounted at `/home/jj1049/mount_storage_server`. Use this to explore actual uploaded files without SSH:
+The production storage server is mounted at `/home/jj1049/mount_storage_server`. Use this to explore actual uploaded files:
 ```bash
 # Archive files (original uploads)
 ls -lh /home/jj1049/mount_storage_server/archive/<dataset_id>_ortho.tif
@@ -365,12 +365,9 @@ grep -n "def test_" processor/tests/test_process_<stage>.py
 
 ### ✅ IMMEDIATE NEXT STEPS (DO NOT EXECUTE - SUGGEST ONLY)
 
-**Option 1: Rerun via API** (Recommended)
-```bash
-curl -X PUT "http://localhost:8080/api/v1/datasets/<dataset_id>/process" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"task_types": ["<stage>"], "priority": 1}'
-```
+**Update DB to rerun dataset**
+- give the sql to update v2_status and v2_queue table in db to add the dataset to the processing queue again. 
+- provide the sql to the users to do this, dont run yourselve.
 
 **Option 2: Manual Investigation**
 1. Check file exists on storage: `<command>`

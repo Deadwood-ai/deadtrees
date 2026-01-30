@@ -1,0 +1,108 @@
+---
+description: Database patterns - MCP queries, dual auth, migrations
+alwaysApply: true
+---
+# Database Patterns
+
+## MCP Database Access
+
+```python
+# Query via CallMcpTool
+{
+	"server": "user-deadtrees-prod",  # or user-deadtrees-local
+	"toolName": "execute_sql",
+	"arguments": {"sql": "SELECT * FROM v2_datasets WHERE id = 6166"}
+}
+```
+
+Available tools: `execute_sql`, `list_schemas`, `list_objects`, `get_object_details`, `explain_query`, `analyze_db_health`
+
+---
+
+## Common Investigation Queries
+
+```sql
+-- Dataset overview
+SELECT d.id, d.file_name, s.current_status, s.has_error, s.error_message,
+	s.is_ortho_done, s.is_cog_done, s.is_deadwood_done
+FROM v2_datasets d 
+JOIN v2_statuses s ON d.id = s.dataset_id 
+WHERE d.id = ?;
+
+-- File size (REMEMBER: stored in MB, not bytes!)
+SELECT dataset_id, ortho_file_size as size_mb,
+	ortho_info->'Profile'->>'Tiled' as is_tiled
+FROM v2_orthos WHERE dataset_id = ?;
+
+-- Stuck processing (> 1 hour)
+SELECT d.id, s.current_status,
+	EXTRACT(EPOCH FROM (NOW() - s.updated_at))/3600 as hours_stuck
+FROM v2_datasets d JOIN v2_statuses s ON d.id = s.dataset_id 
+WHERE s.current_status != 'idle' AND s.updated_at < NOW() - INTERVAL '1 hour';
+
+-- Processing logs
+SELECT level, message, created_at FROM v2_logs 
+WHERE dataset_id = ? AND level = 'ERROR' ORDER BY created_at DESC LIMIT 10;
+```
+
+---
+
+## Dual Authentication Pattern
+
+Database functions must handle both regular users and processor:
+
+```sql
+IF (auth.jwt() ->> 'email'::text) = 'processor@deadtrees.earth'::text THEN
+	SELECT id INTO current_user_id FROM auth.users WHERE email = 'processor@deadtrees.earth';
+ELSE
+	current_user_id := auth.uid();
+END IF;
+```
+
+**RLS Policy Pattern:**
+```sql
+using (
+	((auth.jwt() ->> 'email'::text) = 'processor@deadtrees.earth'::text) 
+	OR (auth.uid() = user_id)
+)
+```
+
+---
+
+## Migration Gotchas
+
+**Port 5432 vs 6543:**
+- Migrations: Use direct port **5432**
+- Application: Use pooler port **6543**
+
+**View Dependencies:**
+```sql
+-- Must drop views BEFORE altering columns they reference
+DROP VIEW IF EXISTS "public"."dependent_view";
+ALTER TABLE "public"."table" ALTER COLUMN "col" TYPE new_type;
+CREATE OR REPLACE VIEW "public"."dependent_view" AS SELECT ...;
+```
+
+---
+
+## Safe Update Patterns
+
+```sql
+-- ALWAYS test in transaction first
+BEGIN;
+UPDATE v2_statuses SET is_forest_cover_done = true WHERE dataset_id IN (...);
+SELECT COUNT(*) as affected FROM v2_statuses WHERE ...;
+ROLLBACK;  -- or COMMIT when ready
+```
+
+---
+
+## Rerunning Datasets
+
+```bash
+curl -X PUT "http://localhost:8080/api/v1/datasets/{id}/process" \
+	-H "Authorization: Bearer TOKEN" \
+	-d '{"task_types": ["cog", "thumbnail", "metadata"], "priority": 1}'
+```
+
+Task types: `odm`, `geotiff`, `cog`, `thumbnail`, `metadata`, `deadwood`, `treecover`

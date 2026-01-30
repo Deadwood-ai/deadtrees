@@ -1,0 +1,91 @@
+---
+description: Linear issue management - status workflow, labels, creating issues
+---
+# Linear Rules
+
+MCP Server: `user-Linear`
+
+## Status Workflow (Only Use These)
+
+| Status | Description | Assigned? |
+|--------|-------------|-----------|
+| **Triage** | New, awaiting review | ❌ Unassigned |
+| **Backlog** | Evaluated, not urgent | ❌ Unassigned |
+| **Todo** | Active work queue | ✅ Must be assigned |
+| **In Progress** | Currently working | ✅ Assigned |
+| **In Review** | Awaiting feedback | ✅ Assigned |
+| **Done** | Completed | - |
+| **Canceled** | Won't do | - |
+| **Duplicate** | Duplicate of another | - |
+
+**Do NOT use:** Pinned, Next, or custom statuses.
+
+---
+
+## Creating Issues
+
+**⚠️ Agent-created issues MUST use Triage status:**
+```python
+{
+	"server": "user-Linear",
+	"toolName": "create_issue",
+	"arguments": {
+		"title": "Issue title",
+		"description": "Problem description with dataset IDs if applicable",
+		"teamId": "deadtrees",
+		"state": "Triage",  # ALWAYS Triage for agent-created
+		"labels": ["Bug"],  # Add appropriate labels
+		"priority": 3       # Ask user if not specified
+	}
+}
+```
+
+**Rules:**
+1. Always search before creating (no duplicates)
+2. Never auto-assign - Triage/Backlog stay unassigned
+3. Include: problem, dataset IDs, context
+4. Ask for priority if not provided (1=Urgent, 2=High, 3=Medium, 4=Low)
+5. Link Linear URL when posting to Zulip
+
+---
+
+## Labels
+
+| Label | Use For |
+|-------|---------|
+| `Bug` | Defects |
+| `Feature` | New features |
+| `Improvement` | Enhancements |
+| `Project Idea` | Exploratory, low priority |
+| `frontend` | React app |
+| `processing` | Processor pipeline |
+| `odm` | OpenDroneMap |
+| `treecover` | Tree cover segmentation |
+| `upload` | Upload flow |
+| `Needs RCA` | Needs root cause analysis |
+| `Needs User Notification` | User should be notified |
+
+---
+
+## Common Queries
+
+```python
+# Recent issues
+{"server": "user-Linear", "toolName": "list_issues", 
+ "arguments": {"team": "deadtrees", "limit": 20, "orderBy": "updatedAt"}}
+
+# Triage queue
+{"server": "user-Linear", "toolName": "list_issues",
+ "arguments": {"team": "deadtrees", "state": "Triage"}}
+
+# Get issue details
+{"server": "user-Linear", "toolName": "get_issue",
+ "arguments": {"issueId": "DT-123"}}
+```
+
+---
+
+## Teams
+
+- `deadtrees` - Main project (DT-XXX issues)
+- `3Dtrees` - 3D trees project (3DT-XXX issues) - ignore unless asked

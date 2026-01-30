@@ -1,0 +1,127 @@
+---
+description: Processing pipeline patterns - ODM, treecover, debugging
+alwaysApply: true
+---
+# Processing Pipeline Patterns
+
+## Pipeline Order
+```
+Upload → ODM (if raw images) → GeoTIFF Standardization → Metadata → 
+COG → Thumbnail → Deadwood Segmentation → Treecover Segmentation
+```
+
+---
+
+## Named Volume Pattern (Critical)
+
+Both ODM and Treecover use named Docker volumes for container data transfer:
+
+```python
+# 1. Create named volume
+volume_name = f'odm_processing_{dataset_id}'
+client.volumes.create(name=volume_name)
+
+# 2. Copy files via temp container
+copy_files_to_shared_volume(images, volume_name)
+
+# 3. Run processing container
+client.containers.run(
+	image='opendronemap/odm',
+	volumes={volume_name: {'bind': '/odm_data', 'mode': 'rw'}},
+)
+
+# 4. Extract results, cleanup
+```
+
+**Why named volumes?**
+- Production: API and Processor on different machines (no shared filesystem)
+- Avoids permission issues (different container UIDs)
+- Each container pulls data via SSH, processes, pushes results
+
+---
+
+## ODM Processing
+
+**Requirements:** Docker socket, CPU-only (GPU not used), 32-64GB memory for large datasets
+
+**Debugging ODM:**
+```bash
+# Stage ZIP locally
+mkdir -p assets/test_data/debugging/<id>
+scp -i ~/.ssh/processing-to-storage dendro@data2.deadtrees.earth:/data/raw_images/<id>.zip \
+	assets/test_data/debugging/<id>/
+
+# Run test
+DEBUG_ODM_ZIP=$(pwd)/assets/test_data/debugging/<id>/<id>.zip \
+	deadtrees dev test processor --test-path=processor/tests/test_process_odm.py
+```
+
+**Common Issues:**
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Extraction hangs | Tar loads into RAM | Stream directly (see AGENT.md tar bug) |
+| Container stuck | Zombie containers | Run startup cleanup |
+
+---
+
+## Treecover Segmentation
+
+**Requirements:**
+- **GPU required** (CUDA)
+- Model: `assets/models/segformer_b5_full_epoch_100.safetensors`
+- Docker socket
+
+**Failure Modes:**
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| "Chunk and warp failed" | Untiled ortho | Ensure `standardise_geotiff()` ran first |
+| CUDA OOM | Tile too large | Reduce batch size |
+| Missing model | Assets not downloaded | `make download-assets` |
+
+---
+
+## GeoTIFF Standardization (Critical Behavior)
+
+```python
+# Standardized file created LOCAL only - NOT pushed back
+standardised_path = processing_dir / f"{dataset_id}_ortho.tif"
+standardise_geotiff(input_path, str(standardised_path), token)
+
+# ssh.py skip-if-exists:
+def pull_file_from_storage_server(remote_path, local_path, ...):
+	if os.path.exists(local_path):
+		return  # Skip SSH - reuse local tiled file
+```
+
+**Why not push back?**
+1. Downstream tasks (COG, thumbnail, segmentation) run in same pipeline
+2. SSH skip-if-exists reuses local tiled file
+3. Original preserved in `/data/archive/` for reproducibility
+
+---
+
+## Metadata Sources
+
+| Type | Path |
+|------|------|
+| GADM | `/app/assets/gadm/gadm_410.gpkg` |
+| Biome | `/app/assets/biom/terres_ecosystems.gpkg` |
+| Phenology | `/app/assets/pheno/modispheno_aggregated_normalized_filled.zarr` |
+
+---
+
+## Troubleshooting Checklist
+
+1. **Which stage failed?** Check `v2_statuses` and `v2_logs`
+2. **File exists?** Is ortho in `/data/archive/`?
+3. **Tiling?** Untiled files cause "Chunk and warp failed"
+4. **Container issues?** Zombie containers? Orphan volumes?
+
+**Emergency Reset:**
+```sql
+UPDATE v2_statuses 
+SET current_status = 'idle', has_error = false 
+WHERE dataset_id = ? AND current_status != 'idle';
+
+DELETE FROM v2_queue WHERE dataset_id = ?;
+```
