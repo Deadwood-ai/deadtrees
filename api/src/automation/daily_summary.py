@@ -113,12 +113,12 @@ def get_lookback_period() -> tuple[datetime, datetime, str]:
 	now = datetime.now()
 	
 	if now.weekday() == 0:  # Monday
-		# Look back to Friday 8:00 AM
+		# Look back to Friday 8:00 AM (covers weekend)
 		days_back = 3
-		period_label = "since Friday"
+		period_label = "over the weekend"
 	else:
 		days_back = 1
-		period_label = "last 24h"
+		period_label = "yesterday"
 	
 	period_start = now - timedelta(days=days_back)
 	period_end = now
@@ -457,13 +457,14 @@ def format_country_list(countries: dict) -> str:
 
 def format_message(metrics: SummaryMetrics) -> str:
 	"""Format the summary message for Zulip"""
-	date_str = metrics.period_end.strftime("%a, %b %d, %Y")
+	# Use period_start date to show what day is being summarized
+	summary_date = metrics.period_start.strftime("%a, %b %d")
 	
 	# Build message sections
 	sections = []
 	
-	# Header
-	sections.append(f"## 🌲 deadtrees.earth Daily Summary ({date_str})")
+	# Header - clarify this is a summary OF the previous period
+	sections.append(f"## 🌲 deadtrees.earth Summary for {summary_date}")
 	sections.append("")
 	
 	# Website Activity
