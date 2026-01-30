@@ -18,10 +18,19 @@ alwaysApply: true
 
 | Machine | Services | Has /data? |
 |---------|----------|------------|
-| **API Server** | NGINX, FastAPI, file storage | YES |
+| **API Server** | NGINX (host), FastAPI (Docker), file storage | YES |
 | **Processor Server** | Processor, ODM containers, TCD containers | NO |
 
 **Key insight:** No shared filesystem. Data transfer via SSH pull/push.
+
+### API Server Deployment (data.deadtrees.earth)
+
+- **API:** Runs in Docker via `docker compose -f docker-compose.api.yaml up -d api`
+- **nginx:** Runs on HOST (systemd), NOT Docker - config at `nginx/conf/storage-server.conf`
+- **Auto-deploy:** `auto_deploy_api.sh` (local only) pulls and redeploys API on new commits
+- **Port conflict:** NEVER run `docker compose -f docker-compose.api.yaml up -d` without specifying `api` - Docker nginx will conflict with host nginx on port 80
+
+See `docs/ops/api-server-deployment.md` for full details.
 
 ### Test Environment
 - Processor container has **NO /data mount** (simulates production separation)

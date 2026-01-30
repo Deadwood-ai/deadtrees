@@ -204,3 +204,7 @@ data/*
 # deployment ignores
 certbot/conf
 certbot/www
+docker-compose.yaml
+nginx/conf/
+auto_deploy_api.sh
+auto-deploy.log
