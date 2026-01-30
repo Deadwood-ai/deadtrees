@@ -89,9 +89,20 @@ services:
       - PYTEST_ADDOPTS=--color=yes
       - SUPABASE_URL=http://host.docker.internal:54321
       - SUPABASE_KEY=${SUPABASE_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
       - BASE_DIR=/data
       - ENV=development
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
+      # Daily summary: PostHog integration
+      - POSTHOG_API_KEY=${POSTHOG_API_KEY:-}
+      - POSTHOG_PROJECT_ID=${POSTHOG_PROJECT_ID:-}
+      - POSTHOG_HOST=${POSTHOG_HOST:-https://eu.posthog.com}
+      # Daily summary: Zulip integration
+      - ZULIP_EMAIL=${ZULIP_EMAIL:-}
+      - ZULIP_API_KEY=${ZULIP_API_KEY:-}
+      - ZULIP_SITE=${ZULIP_SITE:-}
+      - ZULIP_STREAM=${ZULIP_STREAM:-project_deadtree.earth}
+      - ZULIP_TOPIC=${ZULIP_TOPIC:-Daily Summary}
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     # command: python -m debugpy --listen 0.0.0.0:5679 run.py server --reload=True

@@ -36,6 +36,18 @@ services:
       NGINX_COG_URL: ${NGINX_COG_URL}
       DEADTREES_USER: ${DEADTREES_USER}
       DEADTREES_PASSWORD: ${DEADTREES_PASSWORD}
+      # Service role key for accessing auth.users (user email lookup)
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      # Daily summary: PostHog integration
+      POSTHOG_API_KEY: ${POSTHOG_API_KEY:-}
+      POSTHOG_PROJECT_ID: ${POSTHOG_PROJECT_ID:-}
+      POSTHOG_HOST: ${POSTHOG_HOST:-https://eu.posthog.com}
+      # Daily summary: Zulip integration
+      ZULIP_EMAIL: ${ZULIP_EMAIL:-}
+      ZULIP_API_KEY: ${ZULIP_API_KEY:-}
+      ZULIP_SITE: ${ZULIP_SITE:-}
+      ZULIP_STREAM: ${ZULIP_STREAM:-project_deadtree.earth}
+      ZULIP_TOPIC: ${ZULIP_TOPIC:-Daily Summary}
 
     # command: python run.py server --reload=False
 
