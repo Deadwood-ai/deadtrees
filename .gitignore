@@ -207,4 +207,5 @@ certbot/www
 docker-compose.yaml
 nginx/conf/
 auto_deploy_api.sh
+auto_deploy_processor.sh
 auto-deploy.log
