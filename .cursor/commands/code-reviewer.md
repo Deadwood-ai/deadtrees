@@ -60,6 +60,7 @@ Apply the conventions you looked up. Check for:
 - readability
 - code smells and anti pattern
 - doublicated code and logic
+- check for lots of data aggregation and merging in hooks which soulhd acutally be impelemnted in the db as views or tables. 
 ---
 
 **Project-specific (from rules):**
