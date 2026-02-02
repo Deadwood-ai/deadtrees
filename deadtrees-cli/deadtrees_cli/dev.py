@@ -10,6 +10,13 @@ from supabase import create_client
 from shared.settings import settings
 from shared.db import login, use_client
 from shared.testing.safety import ensure_test_environment
+from shared.models import (
+	TaskTypeEnum,
+	StatusEnum,
+	DatasetAccessEnum,
+	LicenseEnum,
+	PlatformEnum,
+)
 
 
 class DevCommands:
@@ -107,6 +114,215 @@ class DevCommands:
 				except Exception as sign_in_error:
 					print(f'⚠ User setup issue for {user_info["email"]}: {str(sign_in_error)}')
 
+	def _resolve_processor_user_id(self):
+		"""Get processor user ID for local dev"""
+		supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+		try:
+			response = supabase.auth.sign_in_with_password(
+				{'email': settings.PROCESSOR_USERNAME, 'password': settings.PROCESSOR_PASSWORD}
+			)
+			if response.user:
+				return response.user.id
+		except Exception:
+			try:
+				response = supabase.auth.sign_up(
+					{'email': settings.PROCESSOR_USERNAME, 'password': settings.PROCESSOR_PASSWORD}
+				)
+				if response.user:
+					return response.user.id
+			except Exception as e:
+				print(f'⚠ Could not resolve processor user: {str(e)}')
+		return None
+
+	def _normalize_task_types(self, task_types: Optional[List[str] | str]) -> List[TaskTypeEnum]:
+		"""Normalize task types into ordered TaskTypeEnum list"""
+		if task_types is None:
+			return []
+		if isinstance(task_types, str):
+			raw = [t.strip().lower() for t in task_types.split(',') if t.strip()]
+		else:
+			raw = [str(t).strip().lower() for t in task_types if str(t).strip()]
+
+		alias_map = {
+			'forest_cover': 'treecover',
+			'forestcover': 'treecover',
+			'geo': 'geotiff',
+			'ortho': 'geotiff',
+			'odm': 'odm_processing',
+		}
+
+		mapped: List[TaskTypeEnum] = []
+		for value in raw:
+			value = alias_map.get(value, value)
+			task = TaskTypeEnum.from_string(value)
+			if task is None:
+				raise ValueError(f'Unknown task type: {value}')
+			mapped.append(task)
+
+		# Deduplicate while preserving order
+		seen = set()
+		unique = []
+		for task in mapped:
+			if task.value not in seen:
+				unique.append(task)
+				seen.add(task.value)
+
+		order = [
+			TaskTypeEnum.odm_processing,
+			TaskTypeEnum.geotiff,
+			TaskTypeEnum.metadata,
+			TaskTypeEnum.cog,
+			TaskTypeEnum.thumbnail,
+			TaskTypeEnum.deadwood,
+			TaskTypeEnum.treecover,
+		]
+		ordered = [task for task in order if task in unique]
+		return ordered
+
+	def rerun_processes(
+		self,
+		dataset_id: int,
+		source_path: str,
+		task_types: str = 'geotiff,cog,thumbnail,deadwood,treecover,metadata',
+		include_geotiff: bool = True,
+		run_processor: bool = True,
+		priority: int = 1,
+	):
+		"""
+		Prepare a local dataset and rerun specific processing steps.
+
+		Args:
+		    dataset_id: Dataset ID to use in local DB
+		    source_path: Path to source ortho file (copied to ./data/archive)
+		    task_types: Comma-separated list of tasks
+		    include_geotiff: Automatically include geotiff if needed
+		    run_processor: Execute processor once in docker after enqueue
+		    priority: Queue priority (1=high)
+		"""
+		ensure_test_environment()
+
+		if not source_path:
+			raise ValueError('source_path is required')
+
+		task_list = self._normalize_task_types(task_types)
+		if not task_list:
+			raise ValueError('No valid task types provided')
+
+		needs_geotiff = any(
+			task in task_list
+			for task in [TaskTypeEnum.metadata, TaskTypeEnum.cog, TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood, TaskTypeEnum.treecover]
+		)
+		if include_geotiff and needs_geotiff and TaskTypeEnum.geotiff not in task_list:
+			task_list.insert(0, TaskTypeEnum.geotiff)
+
+		data_root = Path(settings.BASE_DIR) / 'data'
+		archive_dir = data_root / settings.ARCHIVE_DIR
+		archive_dir.mkdir(parents=True, exist_ok=True)
+
+		source = Path(source_path).expanduser().resolve()
+		if not source.exists():
+			raise FileNotFoundError(f'Source file not found: {source}')
+
+		ortho_name = f'{dataset_id}_ortho.tif'
+		dest = archive_dir / ortho_name
+		if source != dest:
+			shutil.copy2(source, dest)
+			print(f'✓ Copied ortho to {dest}')
+
+		processor_user_id = self._resolve_processor_user_id()
+		if not processor_user_id:
+			raise RuntimeError('Could not resolve processor user ID')
+
+		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD, use_cached_session=False)
+		file_size_mb = max(1, int(dest.stat().st_size / 1024 / 1024))
+
+		with use_client(token) as client:
+			existing = client.table(settings.datasets_table).select('id,user_id').eq('id', dataset_id).execute()
+			if existing.data:
+				user_id = existing.data[0]['user_id']
+				print(f'✓ Dataset {dataset_id} already exists')
+			else:
+				user_id = processor_user_id
+				dataset_data = {
+					'id': dataset_id,
+					'file_name': source.name,
+					'license': LicenseEnum.cc_by.value,
+					'platform': PlatformEnum.drone.value,
+					'authors': ['Debug'],
+					'user_id': user_id,
+					'data_access': DatasetAccessEnum.public.value,
+					'aquisition_year': None,
+					'aquisition_month': None,
+					'aquisition_day': None,
+				}
+				client.table(settings.datasets_table).insert(dataset_data).execute()
+				print(f'✓ Created dataset {dataset_id}')
+
+			status_data = {
+				'dataset_id': dataset_id,
+				'current_status': StatusEnum.idle.value,
+				'is_upload_done': True,
+				'is_odm_done': False,
+				'is_ortho_done': False,
+				'is_cog_done': False,
+				'is_thumbnail_done': False,
+				'is_deadwood_done': False,
+				'is_forest_cover_done': False,
+				'is_metadata_done': False,
+				'has_error': False,
+				'error_message': None,
+			}
+			status_existing = (
+				client.table(settings.statuses_table).select('dataset_id').eq('dataset_id', dataset_id).execute()
+			)
+			if status_existing.data:
+				client.table(settings.statuses_table).update(status_data).eq('dataset_id', dataset_id).execute()
+			else:
+				client.table(settings.statuses_table).insert(status_data).execute()
+
+			ortho_data = {
+				'dataset_id': dataset_id,
+				'ortho_file_name': ortho_name,
+				'version': 1,
+				'ortho_file_size': file_size_mb,
+				'bbox': None,
+				'ortho_upload_runtime': None,
+				'ortho_info': None,
+			}
+			ortho_existing = (
+				client.table(settings.orthos_table).select('dataset_id').eq('dataset_id', dataset_id).execute()
+			)
+			if ortho_existing.data:
+				client.table(settings.orthos_table).update(ortho_data).eq('dataset_id', dataset_id).execute()
+			else:
+				client.table(settings.orthos_table).insert(ortho_data).execute()
+
+			client.table(settings.queue_table).delete().eq('dataset_id', dataset_id).execute()
+			queue_data = {
+				'dataset_id': dataset_id,
+				'user_id': user_id,
+				'task_types': [task.value for task in task_list],
+				'is_processing': False,
+				'priority': priority,
+			}
+			client.table(settings.queue_table).insert(queue_data).execute()
+			print(f'✓ Enqueued tasks: {[task.value for task in task_list]}')
+
+		if run_processor:
+			print('▶ Running processor once in docker...')
+			self._run_command(
+				[
+					'docker',
+					'compose',
+					'-f',
+					self.test_compose_file,
+					'exec',
+					'processor-test',
+					'python',
+					'-m',
+					'processor.src.processor',
+				]
+			)
 	def _cleanup_development_environment(self):
 		"""Clean up database and directories like test fixtures do"""
 		ensure_test_environment()
