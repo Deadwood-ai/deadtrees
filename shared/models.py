@@ -199,6 +199,7 @@ class Dataset(PartialModelMixin, BaseModel):
 	additional_information: Optional[str] = None
 	data_access: DatasetAccessEnum = DatasetAccessEnum.public
 	citation_doi: Optional[str] = None
+	archived: bool = False
 
 	@field_serializer('created_at', mode='plain')
 	def datetime_to_isoformat(field: datetime | None) -> str | None:

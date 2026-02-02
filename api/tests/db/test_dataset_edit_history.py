@@ -363,7 +363,7 @@ def test_dataset_update_null_values(auth_token, test_user, test_dataset_for_edit
 			assert entry['new_value'] is None  # New values are null
 
 
-def test_dataset_update_with_processor_user(test_dataset_for_editing):
+def test_dataset_update_with_processor_user(auth_token, test_dataset_for_editing):
 	"""Test that processor user can update datasets"""
 	processor_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD, use_cached_session=False)
 
@@ -377,7 +377,9 @@ def test_dataset_update_with_processor_user(test_dataset_for_editing):
 		assert response.data is not None
 		assert response.data[0]['authors'] == ['Processor Updated Author']
 
-		# Verify edit history was created (processor user should be recorded)
+	# Verify edit history was created using the dataset owner's token
+	# (processor can update but RLS on edit_history requires privileged access to read others' history)
+	with use_client(auth_token) as client:
 		history_response = (
 			client.table('v2_dataset_edit_history').select('*').eq('dataset_id', test_dataset_for_editing).execute()
 		)
