@@ -48,6 +48,10 @@ services:
       ZULIP_SITE: ${ZULIP_SITE:-}
       ZULIP_STREAM: ${ZULIP_STREAM:-project_deadtree.earth}
       ZULIP_TOPIC: ${ZULIP_TOPIC:-Daily Summary}
+      # Daily summary: Linear integration
+      LINEAR_ENABLED: ${LINEAR_ENABLED:-true}
+      LINEAR_API_KEY: ${LINEAR_API_KEY:-}
+      LINEAR_TEAM_ID: ${LINEAR_TEAM_ID:-ba4011bf-0b5c-4631-9f88-1034ab4ef541}
 
     # command: python run.py server --reload=False
 

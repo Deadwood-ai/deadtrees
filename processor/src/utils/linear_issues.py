@@ -158,8 +158,8 @@ def check_existing_issue(dataset_id: int) -> bool:
 		return False
 
 	query = '''
-	query SearchIssues($query: String!) {
-		issueSearch(query: $query, first: 1) {
+	query SearchIssues($term: String!) {
+		searchIssues(term: $term, first: 1) {
 			nodes {
 				id
 				identifier
@@ -167,6 +167,8 @@ def check_existing_issue(dataset_id: int) -> bool:
 		}
 	}
 	'''
+
+	query_text = f'Dataset ID: {dataset_id}'
 
 	try:
 		response = requests.post(
@@ -177,14 +179,14 @@ def check_existing_issue(dataset_id: int) -> bool:
 			},
 			json={
 				'query': query,
-				'variables': {'query': f'[Processing Failure] Dataset ID: {dataset_id}'},
+				'variables': {'term': query_text},
 			},
 			timeout=10,
 		)
 
 		if response.status_code == 200:
 			data = response.json()
-			nodes = data.get('data', {}).get('issueSearch', {}).get('nodes', [])
+			nodes = data.get('data', {}).get('searchIssues', {}).get('nodes', [])
 			if nodes:
 				logger.info(f'Found existing Linear issue for dataset {dataset_id}: {nodes[0].get("identifier")}')
 				return True

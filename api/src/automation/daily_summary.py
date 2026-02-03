@@ -308,8 +308,8 @@ def fetch_linear_issue(dataset_id: int) -> Optional[dict]:
 		return None
 
 	query = '''
-	query IssueSearch($query: String!) {
-		issueSearch(query: $query, first: 1) {
+	query SearchIssues($term: String!) {
+		searchIssues(term: $term, first: 1) {
 			nodes {
 				identifier
 				url
@@ -317,6 +317,8 @@ def fetch_linear_issue(dataset_id: int) -> Optional[dict]:
 		}
 	}
 	'''
+
+	query_text = f'Dataset ID: {dataset_id}'
 
 	try:
 		with httpx.Client(timeout=10) as client:
@@ -328,13 +330,13 @@ def fetch_linear_issue(dataset_id: int) -> Optional[dict]:
 				},
 				json={
 					'query': query,
-					'variables': {'query': f'[Processing Failure] Dataset ID: {dataset_id}'},
+					'variables': {'term': query_text},
 				},
 			)
 
 			if response.status_code == 200:
 				data = response.json()
-				nodes = data.get('data', {}).get('issueSearch', {}).get('nodes', [])
+				nodes = data.get('data', {}).get('searchIssues', {}).get('nodes', [])
 				if nodes:
 					issue = nodes[0]
 					return {
