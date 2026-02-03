@@ -41,6 +41,54 @@ Tasks execute in this **strict order** (see `@processor-pipeline.mdc` for detail
 
 ## Investigation Protocol (Execute in Order)
 
+### 📋 PHASE 0: CHECK EXISTING LINEAR ISSUES (MCP - Linear)
+**0.1 Check for Dataset-Specific Issue** (Linear MCP)
+```python
+# Use Linear MCP tool to search for existing issues
+# Search query format matches linear_issues.py: "[Processing Failure] Dataset ID: {dataset_id}"
+{
+    "server": "user-Linear",
+    "toolName": "list_issues",
+    "arguments": {
+        "query": f"[Processing Failure] Dataset ID: {dataset_id}",
+        "limit": 5
+    }
+}
+```
+→ **Identify:** Existing issue for this dataset, status, priority, related issues
+
+**0.2 Check for Similar Issues** (Linear MCP)
+After getting error message from Phase 1.1, search for similar errors:
+```python
+# Search by error message keywords or stage name
+{
+    "server": "user-Linear",
+    "toolName": "list_issues",
+    "arguments": {
+        "query": "<error_keyword> OR <stage_name>",
+        "limit": 10
+    }
+}
+```
+→ **Identify:** Related issues, known patterns, existing solutions
+
+**0.3 Review Related Issues** (Linear MCP)
+If similar issues found, get details:
+```python
+{
+    "server": "user-Linear",
+    "toolName": "get_issue",
+    "arguments": {
+        "id": "<issue_identifier>"  # e.g., "DT-236"
+    }
+}
+```
+→ **Identify:** Root cause analysis, solutions, workarounds from similar cases
+
+**Note:** Linear issues are created automatically by `processor/src/utils/linear_issues.py` when processing fails. Check these first to avoid duplicate investigation work.
+
+---
+
 ### 🔍 PHASE 1: CRITICAL STATUS (MCP - Required)
 **1.1 Dataset Status & Error** (MCP)
 ```sql
@@ -316,6 +364,8 @@ grep -n "def test_" processor/tests/test_process_<stage>.py
 
 ## 🔍 Root Cause Analysis: Dataset `<dataset_id>`
 
+**Related Linear Issues:** `<list_issue_identifiers>` (if found in Phase 0)
+
 ### ✅ FACTS (Confirmed Evidence)
 **Dataset Overview:**
 - ID: `<id>`, File: `<filename>`, User: `<email>` (<total_datasets> datasets, <error_count> errors)
@@ -408,6 +458,7 @@ grep -n "def test_" processor/tests/test_process_<stage>.py
 ### 📋 EXECUTION CHECKLIST
 
 **Completed:**
+- [x] Linear issue check (dataset-specific and similar issues)
 - [x] MCP database queries (no direct DB access)
 - [x] Local system investigation
 - [x] Code analysis and dependency tracing
