@@ -8,7 +8,7 @@ Examples:
 
 ---
 
-## Phase 1: Context Gathering
+## Phase 1: Explore (Context + Questions)
 
 ### 1.1 Detect Input Type
 - If input matches `DT-\d+` → Fetch from Linear MCP
@@ -50,11 +50,15 @@ list-errors: status=active, dateFrom=-P7D
 ```
 Check for related errors or user behavior patterns.
 
----
+### 1.6 Explore Summary & Options
+At the end of the explore phase:
+- Summarize the key context gathered
+- Present 2-4 viable implementation options
+- For each option, include: short description, pros/cons, risks, and testability
+- Keep options distinct to enable divergence before convergence
 
-## Phase 2: Clarifying Questions
-
-After gathering context, ask clarifying questions using this format:
+### 1.7 Clarifying Questions
+Ask all clarifying questions in the explore phase using this format:
 
 ```
 ## Clarifying Questions
@@ -79,9 +83,19 @@ Continue asking until all ambiguity is resolved.
 
 ---
 
-## Phase 3: Create Plan
+## Phase 2: Converge (Select Approach)
 
-When context is complete, create plan file:
+Use the explore summary and answers to:
+- Select a single approach
+- Explain why it was chosen
+- Note any tradeoffs being accepted
+
+---
+
+## Phase 3: Create Plan (Sized + Verifiable)
+
+When context is complete, create plan file.
+Size the work: if the scope is large or risky, split into smaller, focused plans.
 
 **Location:** `scratchpad/plans/<issue_id>-<slug>.md`
 - Example: `scratchpad/plans/DT-184-auto-issue-creation.md`
@@ -109,6 +123,11 @@ When context is complete, create plan file:
 - [ ] <Criterion 2>
 - [ ] <Criterion 3>
 
+## Verification
+- <Primary automated verification (unit/integration test)>
+- <If browser-only: minimal manual steps + console checks + test accounts>
+- <Verification must be the final implementation step>
+
 ## Key Files
 - `path/to/file1.py` — <what to change>
 - `path/to/file2.py` — <what to change>
@@ -134,10 +153,12 @@ After creating the plan:
 
 1. **MCP only** for database and Linear queries
 2. **Read before writing** — understand existing patterns first
-3. **Minimal plans** — goal, tasks, acceptance criteria only
+3. **Minimal plans** — goal, tasks, acceptance criteria, verification only
 4. **No overengineering** — use existing codebase patterns
 5. **Ask questions** — use numbered options for clarity
-6. **Wait for approval** — don't start implementation without user OK
+6. **Size the work** — split into smaller plans if too big
+7. **Verification last** — prefer automated tests; browser only if needed
+8. **Wait for approval** — don't start implementation without user OK
 
 ## Reference Rules
 - `.cursor/rules/code-map.mdc` — where functionality lives
