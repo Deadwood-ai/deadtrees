@@ -14,6 +14,7 @@ Usage:
 import httpx
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
+from typing import Optional
 from supabase import create_client, Client
 
 from shared.settings import settings
@@ -74,6 +75,8 @@ COUNTRY_FLAGS = {
 	"Taiwan": "🇹🇼",
 }
 
+LINEAR_API_URL = 'https://api.linear.app/graphql'
+
 
 @dataclass
 class SummaryMetrics:
@@ -95,12 +98,11 @@ class SummaryMetrics:
 	upload_countries: dict = field(default_factory=dict)
 	uploaders: list = field(default_factory=list)
 	
-	# Failures (7 days for context)
-	recent_failures: list = field(default_factory=list)
+	# Failures in period
+	failures: list = field(default_factory=list)
 	
-	# Data quality
+	# Audit
 	audits_completed: int = 0
-	reference_patches_created: int = 0
 	top_auditors: list = field(default_factory=list)
 
 
@@ -300,15 +302,61 @@ def fetch_upload_details(client: Client, period_start: datetime) -> tuple[dict, 
 	return countries, list(uploaders)
 
 
-def fetch_recent_failures(client: Client) -> list:
-	"""Fetch recent failures (7 days) for context"""
-	seven_days_ago = (datetime.now() - timedelta(days=7)).isoformat()
+def fetch_linear_issue(dataset_id: int) -> Optional[dict]:
+	"""Fetch Linear issue info for a dataset failure."""
+	if not settings.LINEAR_ENABLED or not settings.LINEAR_API_KEY:
+		return None
+
+	query = '''
+	query IssueSearch($query: String!) {
+		issueSearch(query: $query, first: 1) {
+			nodes {
+				identifier
+				url
+			}
+		}
+	}
+	'''
+
+	try:
+		with httpx.Client(timeout=10) as client:
+			response = client.post(
+				LINEAR_API_URL,
+				headers={
+					'Authorization': settings.LINEAR_API_KEY,
+					'Content-Type': 'application/json',
+				},
+				json={
+					'query': query,
+					'variables': {'query': f'[Processing Failure] Dataset ID: {dataset_id}'},
+				},
+			)
+
+			if response.status_code == 200:
+				data = response.json()
+				nodes = data.get('data', {}).get('issueSearch', {}).get('nodes', [])
+				if nodes:
+					issue = nodes[0]
+					return {
+						'identifier': issue.get('identifier'),
+						'url': issue.get('url'),
+					}
+	except Exception as e:
+		print(f"Warning: Failed to fetch Linear issue for dataset {dataset_id}: {e}")
+
+	return None
+
+
+def fetch_failures(client: Client, period_start: datetime, period_end: datetime) -> list:
+	"""Fetch failures within the summary period."""
+	period_start_str = period_start.isoformat()
+	period_end_str = period_end.isoformat()
 	failures = []
 	
 	# Get datasets with errors
 	response = client.table(settings.datasets_table).select(
-		'id, file_name, v2_statuses(error_message, has_error)'
-	).gte('created_at', seven_days_ago).execute()
+		'id, file_name, v2_statuses(error_message, has_error, updated_at)'
+	).gte('v2_statuses.updated_at', period_start_str).lte('v2_statuses.updated_at', period_end_str).execute()
 	
 	if response.data:
 		for row in response.data:
@@ -326,11 +374,17 @@ def fetch_recent_failures(client: Client) -> list:
 				error_msg = status.get("error_message", "Unknown error")
 				if error_msg:
 					error_msg = error_msg[:100]  # Truncate
-				failures.append({
+				failure = {
 					"id": row.get("id"),
 					"file_name": row.get("file_name"),
 					"error_message": error_msg
-				})
+				}
+				
+				linear_issue = fetch_linear_issue(failure["id"])
+				if linear_issue:
+					failure["linear_issue"] = linear_issue
+				
+				failures.append(failure)
 	
 	return failures[:5]  # Limit to 5
 
@@ -377,17 +431,6 @@ def fetch_audit_metrics(client: Client, period_start: datetime) -> tuple[int, li
 	return audit_count, top_auditors
 
 
-def fetch_reference_patches(client: Client, period_start: datetime) -> int:
-	"""Fetch count of reference patches created"""
-	period_str = period_start.isoformat()
-	
-	response = client.table('reference_patches').select(
-		'id', count='exact'
-	).gte('created_at', period_str).execute()
-	
-	return response.count if response.count else 0
-
-
 def gather_metrics() -> SummaryMetrics:
 	"""Gather all metrics for the summary"""
 	period_start, period_end, period_label = get_lookback_period()
@@ -421,17 +464,13 @@ def gather_metrics() -> SummaryMetrics:
 		metrics.upload_countries, metrics.uploaders = fetch_upload_details(client, period_start)
 		print(f"  Countries: {metrics.upload_countries}")
 		
-		# Recent failures
-		metrics.recent_failures = fetch_recent_failures(client)
-		print(f"  Recent failures: {len(metrics.recent_failures)}")
+		# Failures in period
+		metrics.failures = fetch_failures(client, period_start, period_end)
+		print(f"  Failures in period: {len(metrics.failures)}")
 		
 		# Audit metrics
 		metrics.audits_completed, metrics.top_auditors = fetch_audit_metrics(client, period_start)
 		print(f"  Audits: {metrics.audits_completed} completed")
-		
-		# Reference patches
-		metrics.reference_patches_created = fetch_reference_patches(client, period_start)
-		print(f"  Reference patches: {metrics.reference_patches_created}")
 		
 	except Exception as e:
 		print(f"Warning: Failed to fetch database metrics: {e}")
@@ -455,6 +494,13 @@ def format_country_list(countries: dict) -> str:
 	return ", ".join(items)
 
 
+def format_auditor_list(auditors: list) -> str:
+	"""Format auditors with counts for a compact shoutout."""
+	if not auditors:
+		return "None"
+	return ", ".join(f"{auditor['email']} ({auditor['count']})" for auditor in auditors)
+
+
 def format_message(metrics: SummaryMetrics) -> str:
 	"""Format the summary message for Zulip"""
 	# Use period_start date to show what day is being summarized
@@ -464,19 +510,19 @@ def format_message(metrics: SummaryMetrics) -> str:
 	sections = []
 	
 	# Header - clarify this is a summary OF the previous period
-	sections.append(f"## 🌲 deadtrees.earth Summary for {summary_date}")
+	sections.append(f"### 🌲 DeadTrees - {summary_date} - {metrics.period_label}")
 	sections.append("")
 	
 	# Website Activity
-	sections.append("### 📊 Website Activity")
+	sections.append("#### 📊 Website")
 	if metrics.unique_visitors > 0 or metrics.page_views > 0:
-		sections.append(f"- **Visitors**: {metrics.unique_visitors} unique | {metrics.page_views} page views")
+		sections.append(f"- **Visitors**: {metrics.unique_visitors} | {metrics.page_views} page views")
 	else:
 		sections.append("- *PostHog not configured or no data*")
 	sections.append("")
 	
 	# Uploads
-	sections.append(f"### 📤 Uploads ({metrics.period_label})")
+	sections.append("#### 📤 Uploads")
 	sections.append(f"- **New datasets**: {metrics.total_uploads}")
 	
 	if metrics.total_uploads > 0:
@@ -501,28 +547,26 @@ def format_message(metrics: SummaryMetrics) -> str:
 	sections.append("")
 	
 	# Failures (if any)
-	if metrics.recent_failures:
-		sections.append("### ⚠️ Failures (last 7 days)")
-		for failure in metrics.recent_failures:
+	if metrics.failures:
+		sections.append("#### ⚠️ Failures")
+		for failure in metrics.failures:
 			error_short = (failure["error_message"] or "Unknown").split("\n")[0][:60]
-			sections.append(f"- Dataset {failure['id']} ({failure['file_name']}) - {error_short}")
+			issue = failure.get("linear_issue")
+			if issue and issue.get("url") and issue.get("identifier"):
+				issue_link = f"[{issue['identifier']}]({issue['url']})"
+				sections.append(
+					f"- Dataset {failure['id']} ({failure['file_name']}) - {issue_link} - {error_short}"
+				)
+			else:
+				sections.append(f"- Dataset {failure['id']} ({failure['file_name']}) - {error_short}")
 		sections.append("")
 	
-	# Data Quality
-	sections.append(f"### ✅ Data Quality ({metrics.period_label})")
+	# Audit
+	sections.append("#### ✅ Audit")
 	sections.append(f"- **Audits completed**: {metrics.audits_completed}")
-	sections.append(f"- **Reference patches created**: {metrics.reference_patches_created}")
-	sections.append("")
-	
-	# Auditor Shoutout
 	if metrics.top_auditors and metrics.audits_completed > 0:
-		sections.append("### 🙏 Auditor Shoutout")
-		sections.append("Thank you to our data quality heroes:")
-		medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
-		for i, auditor in enumerate(metrics.top_auditors[:5]):
-			medal = medals[i] if i < len(medals) else "•"
-			sections.append(f"- {medal} {auditor['email']} ({auditor['count']} audits)")
-		sections.append("")
+		sections.append(f"- **Auditor shoutout**: {format_auditor_list(metrics.top_auditors)}")
+	sections.append("")
 	
 	# Footer
 	sections.append("---")
