@@ -567,7 +567,9 @@ def format_message(metrics: SummaryMetrics) -> str:
 	sections.append("#### ✅ Audit")
 	sections.append(f"- **Audits completed**: {metrics.audits_completed}")
 	if metrics.top_auditors and metrics.audits_completed > 0:
-		sections.append(f"- **Auditor shoutout**: {format_auditor_list(metrics.top_auditors)}")
+		sections.append(
+			f"- **🎉 Auditor shoutout**: 🙌 {format_auditor_list(metrics.top_auditors)}"
+		)
 	sections.append("")
 	
 	# Footer
