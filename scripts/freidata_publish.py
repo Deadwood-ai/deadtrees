@@ -2,14 +2,23 @@
 # -*- coding: utf-8 -*-
 
 """
-Deprecated wrapper. Use freidata/cli.py instead.
-CLI remains:
-  python scripts/freidata_publish.py <folder_with_zips> <publication_id>
+Wrapper for freidata publication CLI.
+
+Usage:
+  python scripts/freidata_publish.py <publication_id> [--folder <path>]
+
+If --folder is not provided, a temp folder is auto-created.
+With AUTO_DOWNLOAD=1 (default), datasets are automatically bundled from /data/archive.
 """
 
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+
+repo_root = Path(__file__).resolve().parents[1]
+if str(repo_root) not in sys.path:
+	sys.path.insert(0, str(repo_root))
 
 from freidata.cli import main
 

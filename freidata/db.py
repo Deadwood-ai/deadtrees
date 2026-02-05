@@ -10,7 +10,9 @@ from .config import Config
 
 def get_supabase_client(cfg: Config) -> Client:
 	if not cfg.supabase_url or not cfg.supabase_key:
-		raise RuntimeError("SUPABASE_URL / SUPABASE_SERVICE_KEY fehlt. Bitte ENV setzen.")
+		raise RuntimeError(
+			"SUPABASE_URL / SUPABASE_SERVICE_KEY (oder SUPABASE_SERVICE_ROLE_KEY) fehlt. Bitte ENV setzen."
+		)
 	options = ClientOptions(auto_refresh_token=False)
 	return create_client(cfg.supabase_url, cfg.supabase_key, options=options)
 

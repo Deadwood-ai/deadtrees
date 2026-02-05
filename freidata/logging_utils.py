@@ -32,5 +32,11 @@ def setup_logging(folder: Path, cfg: Config) -> IO[str]:
 	sys.stdout = Tee(stdout, log_file)
 	sys.stderr = Tee(stderr, log_file)
 	print(f"[LOG] Writing to {log_path}")
-	atexit.register(log_file.close)
+
+	def _cleanup() -> None:
+		sys.stdout = stdout
+		sys.stderr = stderr
+		log_file.close()
+
+	atexit.register(_cleanup)
 	return log_file

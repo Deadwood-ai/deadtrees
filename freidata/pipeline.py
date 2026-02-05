@@ -15,6 +15,7 @@ from .db import (
 	fetch_publication_row,
 	update_publication_row,
 )
+from .download import download_publication_datasets
 from .invenio_client import InvenioClient
 from .state import load_state, save_state
 from .zip_utils import clean_zip, list_zip_files, validate_zips_against_db
@@ -89,6 +90,16 @@ def stop_if(cfg: Config, label: str) -> None:
 		sys.exit(0)
 
 
+def is_review_already_open_error(err: Exception) -> bool:
+	msg = str(err).lower()
+	return (
+		"open review cannot be deleted" in msg
+		or "already under review" in msg
+		or "review already exists" in msg
+		or "already submitted" in msg
+	)
+
+
 def run_publication(cfg: Config, db: Client, folder: Path, publication_id: int) -> None:
 	pub_row = fetch_publication_row(db, publication_id)
 	if pub_row.get("doi"):
@@ -97,17 +108,24 @@ def run_publication(cfg: Config, db: Client, folder: Path, publication_id: int) 
 
 	update_publication_row(db, publication_id, {"status": "uploading"})
 
-	print("[1/6] Fetch publication info from DB...")
+	print("[1/7] Fetch publication info from DB...")
 	pub = fetch_publication_full_info(db, publication_id)
 	print(f"publication_id={pub.get('publication_id')}  title={pub.get('title')!r}")
 	stop_if(cfg, "db")
 
-	print("[2/6] Build InvenioRDM record payload...")
+	print("[2/7] Build InvenioRDM record payload...")
 	record_payload = build_record_payload(pub)
 	print(json.dumps(record_payload, indent=2, ensure_ascii=False))
 	stop_if(cfg, "metadata")
 
-	print("[3/6] Check ZIPs in folder...")
+	if cfg.auto_download:
+		print("[3/7] Download datasets via API...")
+		download_publication_datasets(cfg, db, folder, publication_id)
+		stop_if(cfg, "download")
+	else:
+		print("[3/7] AUTO_DOWNLOAD=0 (skipping download, using existing ZIPs)")
+
+	print("[4/7] Check ZIPs in folder...")
 	zip_paths = list_zip_files(folder)
 	for z in zip_paths:
 		print(f" - {z.name}")
@@ -115,7 +133,7 @@ def run_publication(cfg: Config, db: Client, folder: Path, publication_id: int) 
 
 	upload_paths = zip_paths
 	if cfg.clean_zips:
-		print("[4/6] Cleaning ZIPs...")
+		print("[5/7] Cleaning ZIPs...")
 		cleaned_dir = folder / "cleaned"
 		cleaned_dir.mkdir(exist_ok=True)
 		new_paths: List[Path] = []
@@ -128,7 +146,7 @@ def run_publication(cfg: Config, db: Client, folder: Path, publication_id: int) 
 			new_paths.append(out_zip)
 		upload_paths = new_paths
 	else:
-		print("[4/6] CLEAN_ZIPS=0 (skip cleaning).")
+		print("[5/7] CLEAN_ZIPS=0 (skip cleaning).")
 
 	stop_if(cfg, "zips")
 
@@ -149,10 +167,10 @@ def run_publication(cfg: Config, db: Client, folder: Path, publication_id: int) 
 		save_state(folder, state)
 
 	if record_id:
-		print(f"[5/6] Reuse existing draft record_id={record_id}")
+		print(f"[6/7] Reuse existing draft record_id={record_id}")
 		draft = client.get_draft(record_id)
 	else:
-		print("[5/6] Create draft on FreiData...")
+		print("[6/7] Create draft on FreiData...")
 		draft = client.create_draft(record_payload)
 		record_id = draft["id"]
 		state["record_id"] = record_id
@@ -181,7 +199,7 @@ def run_publication(cfg: Config, db: Client, folder: Path, publication_id: int) 
 
 	stop_if(cfg, "draft")
 
-	print("[6/6] Upload ZIP files sequentially...")
+	print("[7/7] Upload ZIP files sequentially...")
 	keys = [p.name for p in upload_paths]
 
 	files_info = client.list_draft_files(record_id)
@@ -232,16 +250,34 @@ def run_publication(cfg: Config, db: Client, folder: Path, publication_id: int) 
 		if not community_id:
 			raise RuntimeError("Community hit ohne id (unerwartet).")
 
+		review_already_open = False
 		print(f"Set community review to community_id={community_id} ...")
-		r = client.set_community_review(record_id, community_id)
-		state["community_review"] = r
-		save_state(folder, state)
-
-		if cfg.submit_community_review:
-			print("Submit community review request ...")
-			r2 = client.submit_review(record_id)
-			state["community_review_submitted"] = r2
+		try:
+			r = client.set_community_review(record_id, community_id)
+			state["community_review"] = r
 			save_state(folder, state)
+		except Exception as e:
+			if is_review_already_open_error(e):
+				print("[INFO] Review already open; skipping review setup.")
+				review_already_open = True
+			else:
+				raise
+
+		if cfg.submit_community_review and not review_already_open:
+			print("Submit community review request ...")
+			try:
+				r2 = client.submit_review(record_id)
+				state["community_review_submitted"] = r2
+				save_state(folder, state)
+				update_publication_row(db, publication_id, {"status": "in_review"})
+			except Exception as e:
+				if is_review_already_open_error(e):
+					print("[INFO] Review already submitted; skipping submit.")
+					review_already_open = True
+				else:
+					raise
+
+		if review_already_open:
 			update_publication_row(db, publication_id, {"status": "in_review"})
 
 	publish_allowed = cfg.publish

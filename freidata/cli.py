@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import tempfile
 from pathlib import Path
 import sys
 
@@ -11,16 +12,31 @@ from .pipeline import run_publication_safe
 
 
 def main() -> None:
-	parser = argparse.ArgumentParser()
-	parser.add_argument("folder", type=str)
-	parser.add_argument("publication_id", type=int)
+	parser = argparse.ArgumentParser(
+		description="Publish datasets to FreiData (InvenioRDM)"
+	)
+	parser.add_argument(
+		"publication_id",
+		type=int,
+		help="Publication ID from data_publication table"
+	)
+	parser.add_argument(
+		"--folder",
+		type=str,
+		default=None,
+		help="Working folder for ZIPs (auto-created if not provided)"
+	)
 	args = parser.parse_args()
 
-	folder = Path(args.folder).expanduser().resolve()
 	publication_id = int(args.publication_id)
 
-	if not folder.exists() or not folder.is_dir():
-		raise RuntimeError(f"Ordner existiert nicht: {folder}")
+	# Auto-create folder if not provided
+	if args.folder:
+		folder = Path(args.folder).expanduser().resolve()
+		folder.mkdir(parents=True, exist_ok=True)
+	else:
+		folder = Path(tempfile.mkdtemp(prefix=f"freidata_{publication_id}_"))
+		print(f"[INFO] Using temp folder: {folder}")
 
 	cfg = load_config()
 	setup_logging(folder, cfg)
