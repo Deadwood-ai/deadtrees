@@ -1,9 +1,10 @@
 import zipfile
 import io
 import json
+import hashlib
 import tempfile
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple, Set
 
 import geopandas as gpd
 import yaml
@@ -16,8 +17,280 @@ from shared.models import Label, Dataset, LicenseEnum, Ortho, LabelDataEnum, Lab
 
 TEMPLATE_PATH = Path(__file__).parent / 'templates'
 
+# Base URL for deadtrees dataset links
+DEADTREES_BASE_URL = 'https://deadtrees.earth/datasets'
+
 # Create a proper logger
 logger = UnifiedLogger(__name__)
+
+
+# =============================================================================
+# Multi-Dataset Bundle Helpers
+# =============================================================================
+
+
+def get_unique_archive_name(base_name: str, used_names: Set[str]) -> str:
+	"""
+	Return a unique filename, adding _2, _3, etc. suffix if collision exists.
+	
+	Args:
+		base_name: The desired filename (e.g., "flight_data.tif")
+		used_names: Set of already-used names in the archive
+		
+	Returns:
+		Unique filename (original if no collision, or with suffix)
+	"""
+	if base_name not in used_names:
+		return base_name
+	
+	# Split into stem and suffix
+	path = Path(base_name)
+	stem = path.stem
+	suffix = path.suffix
+	
+	# Find next available number
+	counter = 2
+	while True:
+		candidate = f"{stem}_{counter}{suffix}"
+		if candidate not in used_names:
+			return candidate
+		counter += 1
+
+
+def get_ortho_base_filename(dataset: Dataset, use_original: bool = True) -> str:
+	"""
+	Get the base filename for an ortho file.
+	
+	Args:
+		dataset: The dataset object
+		use_original: If True, use original filename; if False, use ID-based name
+		
+	Returns:
+		Base filename with .tif extension
+	"""
+	if not use_original:
+		return f"ortho_{dataset.id}.tif"
+	
+	if dataset.file_name:
+		# Get stem (handles both .tif and .zip files from ODM)
+		stem = Path(dataset.file_name).stem.strip()
+		if stem:
+			return f"{stem}.tif"
+	
+	# Fallback to ID-based name
+	return f"ortho_{dataset.id}.tif"
+
+
+def build_dataset_metadata_row(
+	dataset: Dataset,
+	ortho: Dict,
+	metadata: Optional[Dict],
+) -> Dict:
+	"""
+	Build a single row of metadata for one dataset in a multi-dataset bundle.
+	
+	Args:
+		dataset: The Dataset object
+		ortho: The ortho record from v2_orthos
+		metadata: The metadata record from v2_metadata (optional)
+		
+	Returns:
+		Dict with all metadata fields for this dataset
+	"""
+	# Extract admin levels from metadata
+	admin_levels = {}
+	if metadata and 'metadata' in metadata:
+		gadm = metadata['metadata'].get('gadm', {})
+		admin_levels = {
+			'admin_level_0': gadm.get('admin_level_1'),  # Country (GADM naming is off-by-one)
+			'admin_level_1': gadm.get('admin_level_1'),
+			'admin_level_2': gadm.get('admin_level_2'),
+			'admin_level_3': gadm.get('admin_level_3'),
+		}
+	
+	# Extract centroid from ortho bbox
+	centroid_lat = None
+	centroid_lon = None
+	if ortho and ortho.get('bbox'):
+		bbox_str = ortho['bbox']
+		# Parse BOX(left bottom, right top) format
+		if bbox_str and bbox_str.startswith('BOX('):
+			try:
+				coords = bbox_str.replace('BOX(', '').replace(')', '')
+				ll, ur = coords.split(',')
+				left, bottom = map(float, ll.strip().split(' '))
+				right, top = map(float, ur.strip().split(' '))
+				centroid_lon = (left + right) / 2
+				centroid_lat = (bottom + top) / 2
+			except (ValueError, IndexError):
+				pass
+	
+	# Extract GSD from ortho_info if available
+	gsd_cm = None
+	if ortho and ortho.get('ortho_info'):
+		ortho_info = ortho['ortho_info']
+		if isinstance(ortho_info, dict):
+			# GSD might be in different places depending on processing
+			gsd_cm = ortho_info.get('gsd_cm') or ortho_info.get('gsd')
+	
+	# Format capture date
+	capture_date = None
+	if dataset.aquisition_year:
+		parts = [str(dataset.aquisition_year)]
+		if dataset.aquisition_month:
+			parts.append(f"{dataset.aquisition_month:02d}")
+			if dataset.aquisition_day:
+				parts.append(f"{dataset.aquisition_day:02d}")
+		capture_date = '-'.join(parts)
+	
+	return {
+		'deadtrees_id': dataset.id,
+		'deadtrees_url': f"{DEADTREES_BASE_URL}/{dataset.id}",
+		'file_name': dataset.file_name,
+		'capture_date': capture_date,
+		'gsd_cm': gsd_cm,
+		'sensor_platform': dataset.platform.value if dataset.platform else None,
+		'license': dataset.license.value if dataset.license else None,
+		'authors': ', '.join(dataset.authors) if dataset.authors else None,
+		'admin_level_0': admin_levels.get('admin_level_0'),
+		'admin_level_1': admin_levels.get('admin_level_1'),
+		'admin_level_2': admin_levels.get('admin_level_2'),
+		'admin_level_3': admin_levels.get('admin_level_3'),
+		'centroid_lat': centroid_lat,
+		'centroid_lon': centroid_lon,
+		'additional_information': dataset.additional_information,
+	}
+
+
+def generate_bundle_job_id(dataset_ids: List[int], include_labels: bool, include_parquet: bool) -> str:
+	"""
+	Generate a deterministic job ID for a multi-dataset bundle.
+	
+	Args:
+		dataset_ids: List of dataset IDs to bundle
+		include_labels: Whether labels are included
+		include_parquet: Whether parquet is included
+		
+	Returns:
+		A short hash string suitable for use as job_id and filename
+	"""
+	# Sort IDs for deterministic hash
+	sorted_ids = sorted(dataset_ids)
+	key = f"{sorted_ids}-{include_labels}-{include_parquet}"
+	return hashlib.sha256(key.encode()).hexdigest()[:12]
+
+
+def bundle_multi_dataset(
+	target_path: str,
+	datasets_info: List[Tuple[Dataset, Dict, Optional[Dict], str]],
+	include_labels: bool = False,
+	include_parquet: bool = False,
+	use_original_filename: bool = True,
+) -> str:
+	"""
+	Bundle multiple datasets into a single ZIP archive.
+	
+	Args:
+		target_path: Path to write the ZIP file
+		datasets_info: List of tuples (dataset, ortho_dict, metadata_dict, archive_file_path)
+		include_labels: Whether to include label GeoPackages
+		include_parquet: Whether to include METADATA.parquet
+		use_original_filename: If True, use original filenames for orthos; if False, use ortho_{id}.tif
+		
+	Returns:
+		Path to the created ZIP file
+	"""
+	if not datasets_info:
+		raise ValueError("No datasets provided for bundling")
+	
+	# Track used filenames to handle collisions
+	used_names: Set[str] = set()
+	
+	# Build metadata rows for all datasets
+	metadata_rows = []
+	ortho_entries = []  # (archive_name, file_path)
+	
+	for dataset, ortho, metadata, archive_file_path in datasets_info:
+		# Get base filename and resolve collisions
+		base_name = get_ortho_base_filename(dataset, use_original_filename)
+		unique_name = get_unique_archive_name(base_name, used_names)
+		used_names.add(unique_name)
+		
+		ortho_entries.append((unique_name, archive_file_path))
+		
+		# Build metadata row
+		row = build_dataset_metadata_row(dataset, ortho, metadata)
+		row['bundle_filename'] = unique_name  # Track which file in bundle
+		metadata_rows.append(row)
+	
+	# Get first dataset for license/citation (assume same license for all)
+	first_dataset = datasets_info[0][0]
+	
+	# Create the ZIP archive
+	with zipfile.ZipFile(target_path, 'w', zipfile.ZIP_STORED) as archive:
+		# Add all ortho files
+		for archive_name, file_path in ortho_entries:
+			if Path(file_path).exists():
+				archive.write(file_path, arcname=archive_name)
+				logger.info(f"Added {archive_name} to multi-dataset bundle")
+			else:
+				logger.warning(f"Ortho file not found: {file_path}")
+		
+		# Create consolidated metadata DataFrame
+		df = pd.DataFrame(metadata_rows)
+		
+		# Write METADATA.csv
+		with tempfile.NamedTemporaryFile(suffix='.csv', delete=False) as csv_file:
+			df.to_csv(csv_file.name, index=False)
+			archive.write(csv_file.name, arcname='METADATA.csv')
+			Path(csv_file.name).unlink()
+		
+		# Write METADATA.parquet if requested
+		if include_parquet:
+			with tempfile.NamedTemporaryFile(suffix='.parquet', delete=False) as parquet_file:
+				df.to_parquet(parquet_file.name, index=False)
+				archive.write(parquet_file.name, arcname='METADATA.parquet')
+				Path(parquet_file.name).unlink()
+		
+		# Add license file
+		license_content = create_license_file(first_dataset.license)
+		archive.writestr('LICENSE.txt', license_content)
+		
+		# Add citation file
+		citation_buffer = io.StringIO()
+		create_citation_file(first_dataset, citation_buffer)
+		archive.writestr('CITATION.cff', citation_buffer.getvalue())
+		
+		# Add labels if requested
+		if include_labels:
+			with tempfile.TemporaryDirectory() as temp_dir:
+				for dataset, ortho, metadata, archive_file_path in datasets_info:
+					# Get all labels for this dataset
+					labels = get_all_dataset_labels(dataset.id)
+					
+					if not labels:
+						continue
+					
+					# Process each type of label
+					for label_type in set(label.label_data for label in labels):
+						# Create temporary file for this label type
+						label_file = Path(temp_dir) / f'{label_type.value}_{dataset.id}.gpkg'
+						
+						# Filter labels of this type
+						type_labels = [label for label in labels if label.label_data == label_type]
+						
+						# Process each label into the GeoPackage
+						for label in type_labels:
+							label_to_geopackage(str(label_file), label)
+						
+						# Add to archive with ID-based name (always use ID for labels)
+						archive_name = f'labels_{label_type.value}_{dataset.id}.gpkg'
+						if label_file.exists():
+							archive.write(label_file, arcname=archive_name)
+							logger.info(f"Added {archive_name} to multi-dataset bundle")
+	
+	logger.info(f"Created multi-dataset bundle with {len(datasets_info)} datasets at {target_path}")
+	return target_path
 
 
 def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
@@ -283,14 +556,37 @@ def create_license_file(license_enum: LicenseEnum) -> str:
 		return f.read()
 
 
+def bundle_variant_suffix(include_labels: bool, include_parquet: bool) -> str:
+	parts = []
+	if not include_labels:
+		parts.append('nolabels')
+	if not include_parquet:
+		parts.append('noparquet')
+	return '_'.join(parts)
+
+
+def get_bundle_filename(dataset_id: int, include_labels: bool, include_parquet: bool) -> str:
+	suffix = bundle_variant_suffix(include_labels, include_parquet)
+	if not suffix:
+		return f'{dataset_id}.zip'
+	return f'{dataset_id}_{suffix}.zip'
+
+
 def bundle_dataset(
 	target_path: str,
 	archive_file_path: str,
 	dataset: Dataset,
+	include_parquet: bool = True,
+	include_labels: bool = True,
+	use_original_filename: bool = False,
 ):
 	"""Bundle dataset files into a ZIP archive including all labels"""
 	# Generate formatted filename base
 	base_filename = f'ortho_{dataset.id}'
+	if use_original_filename and dataset.file_name:
+		stem = Path(dataset.file_name).stem.strip()
+		if stem:
+			base_filename = stem
 
 	# Create the ZIP archive
 	with zipfile.ZipFile(target_path, 'w', zipfile.ZIP_STORED) as archive:
@@ -301,15 +597,14 @@ def bundle_dataset(
 		df = pd.DataFrame([dataset.model_dump(exclude={'id', 'created_at'})])
 
 		# Create temporary files for metadata formats
-		with (
-			tempfile.NamedTemporaryFile(suffix='.csv') as csv_file,
-			tempfile.NamedTemporaryFile(suffix='.parquet') as parquet_file,
-		):
+		with tempfile.NamedTemporaryFile(suffix='.csv') as csv_file:
 			df.to_csv(csv_file.name, index=False)
-			df.to_parquet(parquet_file.name, index=False)
-
 			archive.write(csv_file.name, arcname='METADATA.csv')
-			archive.write(parquet_file.name, arcname='METADATA.parquet')
+
+		if include_parquet:
+			with tempfile.NamedTemporaryFile(suffix='.parquet') as parquet_file:
+				df.to_parquet(parquet_file.name, index=False)
+				archive.write(parquet_file.name, arcname='METADATA.parquet')
 
 		# Add license file
 		license_content = create_license_file(dataset.license)
@@ -320,30 +615,31 @@ def bundle_dataset(
 		create_citation_file(dataset, citation_buffer)
 		archive.writestr('CITATION.cff', citation_buffer.getvalue())
 
-		# Get and add all labels
-		with tempfile.TemporaryDirectory() as temp_dir:
-			# Get all labels for this dataset
-			labels = get_all_dataset_labels(dataset.id)
+		if include_labels:
+			# Get and add all labels
+			with tempfile.TemporaryDirectory() as temp_dir:
+				# Get all labels for this dataset
+				labels = get_all_dataset_labels(dataset.id)
 
-			if labels:
-				# Process each type of label
-				for label_type in set(label.label_data for label in labels):
-					# Create temporary file for this label type
-					label_file = Path(temp_dir) / f'{label_type.value}_{dataset.id}.gpkg'
+				if labels:
+					# Process each type of label
+					for label_type in set(label.label_data for label in labels):
+						# Create temporary file for this label type
+						label_file = Path(temp_dir) / f'{label_type.value}_{dataset.id}.gpkg'
 
-					# Filter labels of this type
-					type_labels = [label for label in labels if label.label_data == label_type]
+						# Filter labels of this type
+						type_labels = [label for label in labels if label.label_data == label_type]
 
-					# Process each label into the GeoPackage
-					for label in type_labels:
-						label_to_geopackage(str(label_file), label)
+						# Process each label into the GeoPackage
+						for label in type_labels:
+							label_to_geopackage(str(label_file), label)
 
-					# Add to archive with appropriate name
-					archive_name = f'labels_{label_type.value}_{dataset.id}.gpkg'
-					archive.write(label_file, arcname=archive_name)
+						# Add to archive with appropriate name
+						archive_name = f'labels_{label_type.value}_{dataset.id}.gpkg'
+						archive.write(label_file, arcname=archive_name)
 
-					# Use logger without context if needed
-					logger.info(f'Added {label_type.value} labels to bundle for dataset {dataset.id}')
+						# Use logger without context if needed
+						logger.info(f'Added {label_type.value} labels to bundle for dataset {dataset.id}')
 
 	return target_path
 

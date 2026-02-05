@@ -9,6 +9,7 @@ import geopandas as gpd
 import pyogrio
 import time
 import fiona
+import pandas as pd
 from shared.db import use_client
 from shared.settings import settings
 from fastapi.testclient import TestClient
@@ -22,8 +23,15 @@ from shared.models import (
 	LabelSourceEnum,
 	LabelTypeEnum,
 	LabelDataEnum,
+	Dataset,
 )
 from api.src.download.cleanup import cleanup_downloads_directory
+from api.src.download.downloads import (
+	get_unique_archive_name,
+	get_ortho_base_filename,
+	build_dataset_metadata_row,
+	generate_bundle_job_id,
+)
 from shared.labels import create_label_with_geometries
 from shared.testing.fixtures import login
 import json
@@ -1626,3 +1634,473 @@ def test_download_large_dataset_with_pagination(auth_token, test_dataset_with_la
 
 				# This should be a large number if our complex geometry fixture worked
 				assert len(gdf) > 0
+
+
+# =============================================================================
+# Multi-Dataset Bundle Tests
+# =============================================================================
+
+
+class TestMultiBundleHelpers:
+	"""Unit tests for multi-dataset bundle helper functions"""
+
+	def test_get_unique_archive_name_no_collision(self):
+		"""Test that original name is preserved when no collision"""
+		used_names = set()
+		result = get_unique_archive_name('test.tif', used_names)
+		assert result == 'test.tif'
+
+	def test_get_unique_archive_name_with_collision(self):
+		"""Test that suffix is added on collision"""
+		used_names = {'test.tif'}
+		result = get_unique_archive_name('test.tif', used_names)
+		assert result == 'test_2.tif'
+
+	def test_get_unique_archive_name_multiple_collisions(self):
+		"""Test incremental suffixes for multiple collisions"""
+		used_names = {'test.tif', 'test_2.tif', 'test_3.tif'}
+		result = get_unique_archive_name('test.tif', used_names)
+		assert result == 'test_4.tif'
+
+	def test_get_ortho_base_filename_with_original(self):
+		"""Test filename extraction with original name enabled"""
+		dataset = Dataset(
+			id=123,
+			user_id='test-user',
+			file_name='SE_Rumperöd_20230614.zip',
+			license=LicenseEnum.cc_by,
+			platform=PlatformEnum.drone,
+			authors=['Test'],
+		)
+		result = get_ortho_base_filename(dataset, use_original=True)
+		assert result == 'SE_Rumperöd_20230614.tif'
+
+	def test_get_ortho_base_filename_without_original(self):
+		"""Test ID-based filename when original disabled"""
+		dataset = Dataset(
+			id=123,
+			user_id='test-user',
+			file_name='SE_Rumperöd_20230614.zip',
+			license=LicenseEnum.cc_by,
+			platform=PlatformEnum.drone,
+			authors=['Test'],
+		)
+		result = get_ortho_base_filename(dataset, use_original=False)
+		assert result == 'ortho_123.tif'
+
+	def test_get_ortho_base_filename_tif_extension(self):
+		"""Test that .tif files keep their name"""
+		dataset = Dataset(
+			id=456,
+			user_id='test-user',
+			file_name='my_ortho.tif',
+			license=LicenseEnum.cc_by,
+			platform=PlatformEnum.drone,
+			authors=['Test'],
+		)
+		result = get_ortho_base_filename(dataset, use_original=True)
+		assert result == 'my_ortho.tif'
+
+	def test_build_dataset_metadata_row_basic(self):
+		"""Test metadata row creation with basic data"""
+		dataset = Dataset(
+			id=123,
+			user_id='test-user',
+			file_name='test.tif',
+			license=LicenseEnum.cc_by,
+			platform=PlatformEnum.drone,
+			authors=['Author A', 'Author B'],
+			aquisition_year=2024,
+			aquisition_month=6,
+			aquisition_day=15,
+			additional_information='Test info',
+		)
+		ortho = {
+			'bbox': 'BOX(8.0 48.0, 9.0 49.0)',
+			'ortho_info': {'gsd_cm': 5.0},
+		}
+		metadata = {
+			'metadata': {
+				'gadm': {
+					'admin_level_1': 'Germany',
+					'admin_level_2': 'Baden-Württemberg',
+					'admin_level_3': 'Freiburg',
+				}
+			}
+		}
+
+		result = build_dataset_metadata_row(dataset, ortho, metadata)
+
+		assert result['deadtrees_id'] == 123
+		assert result['deadtrees_url'] == 'https://deadtrees.earth/datasets/123'
+		assert result['capture_date'] == '2024-06-15'
+		assert result['gsd_cm'] == 5.0
+		assert result['sensor_platform'] == 'drone'
+		assert result['authors'] == 'Author A, Author B'
+		assert result['admin_level_1'] == 'Germany'
+		assert result['admin_level_2'] == 'Baden-Württemberg'
+		assert result['admin_level_3'] == 'Freiburg'
+		assert result['centroid_lat'] == 48.5
+		assert result['centroid_lon'] == 8.5
+		assert result['additional_information'] == 'Test info'
+
+	def test_generate_bundle_job_id_deterministic(self):
+		"""Test that job ID is deterministic for same inputs"""
+		id1 = generate_bundle_job_id([1, 2, 3], True, True)
+		id2 = generate_bundle_job_id([3, 1, 2], True, True)  # Different order
+		assert id1 == id2  # Should be same (sorted)
+
+	def test_generate_bundle_job_id_different_params(self):
+		"""Test that different params produce different job IDs"""
+		id1 = generate_bundle_job_id([1, 2, 3], True, True)
+		id2 = generate_bundle_job_id([1, 2, 3], False, True)
+		assert id1 != id2
+
+
+@pytest.fixture(scope='function')
+def multi_test_datasets(auth_token, data_directory, test_file, test_user):
+	"""Create multiple test datasets for multi-bundle testing"""
+	created_datasets = []
+
+	try:
+		with use_client(auth_token) as supabase_client:
+			for i in range(3):
+				# Copy test file to archive directory with unique name
+				file_name = f'test-multi-{i}.tif'
+				archive_path = data_directory / settings.archive_path / file_name
+				shutil.copy2(test_file, archive_path)
+
+				# Create test dataset
+				dataset_data = {
+					'file_name': file_name,
+					'user_id': test_user,
+					'license': LicenseEnum.cc_by.value,
+					'platform': PlatformEnum.drone.value,
+					'authors': [f'Author {i}'],
+					'aquisition_year': 2024,
+					'aquisition_month': i + 1,
+					'aquisition_day': 15,
+					'data_access': DatasetAccessEnum.public.value,
+					'additional_information': f'Test dataset {i}',
+				}
+				response = supabase_client.table(settings.datasets_table).insert(dataset_data).execute()
+				dataset_id = response.data[0]['id']
+				created_datasets.append(dataset_id)
+
+				# Create ortho entry
+				ortho_data = {
+					'dataset_id': dataset_id,
+					'ortho_file_name': file_name,
+					'version': 1,
+					'ortho_file_size': max(1, int((archive_path.stat().st_size / 1024 / 1024))),
+					'ortho_upload_runtime': 0.1,
+					'bbox': 'BOX(8.0 48.0, 9.0 49.0)',
+				}
+				supabase_client.table(settings.orthos_table).insert(ortho_data).execute()
+
+				# Create status entry
+				status_data = {
+					'dataset_id': dataset_id,
+					'current_status': StatusEnum.idle.value,
+					'is_upload_done': True,
+					'is_ortho_done': True,
+				}
+				supabase_client.table(settings.statuses_table).insert(status_data).execute()
+
+				# Create metadata entry with admin levels
+				metadata_data = {
+					'dataset_id': dataset_id,
+					'version': 1,
+					'metadata': {
+						'gadm': {
+							'admin_level_1': 'Germany',
+							'admin_level_2': 'Baden-Württemberg',
+							'admin_level_3': f'District_{i}',
+						}
+					},
+				}
+				supabase_client.table(settings.metadata_table).insert(metadata_data).execute()
+
+		yield created_datasets
+
+	finally:
+		# Cleanup
+		with use_client(auth_token) as supabase_client:
+			for dataset_id in created_datasets:
+				supabase_client.table(settings.metadata_table).delete().eq('dataset_id', dataset_id).execute()
+				supabase_client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
+				supabase_client.table(settings.orthos_table).delete().eq('dataset_id', dataset_id).execute()
+				supabase_client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
+
+			# Cleanup archive files
+			for i in range(3):
+				file_name = f'test-multi-{i}.tif'
+				archive_path = data_directory / settings.archive_path / file_name
+				if archive_path.exists():
+					archive_path.unlink()
+
+		# Cleanup bundle files
+		bundles_dir = settings.downloads_path / 'bundles'
+		if bundles_dir.exists():
+			shutil.rmtree(bundles_dir)
+
+
+def test_multi_bundle_single_dataset(auth_token, multi_test_datasets):
+	"""Test multi-bundle endpoint with a single dataset"""
+	dataset_id = multi_test_datasets[0]
+
+	# Make request to bundle endpoint
+	response = client.get(
+		f'/api/v1/download/bundle.zip?dataset_ids={dataset_id}',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 200
+	data = response.json()
+	assert 'status' in data
+	assert 'job_id' in data
+
+	# Wait for processing
+	job_id = data['job_id']
+	max_attempts = 10
+	for _ in range(max_attempts):
+		status_response = client.get(
+			f'/api/v1/download/bundle/status?job_id={job_id}',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		assert status_response.status_code == 200
+		status_data = status_response.json()
+
+		if status_data['status'] == 'completed':
+			break
+		time.sleep(1)
+	else:
+		pytest.fail('Bundle processing did not complete in time')
+
+	# Verify download path
+	assert 'download_path' in status_data
+	assert f'/downloads/v1/bundles/{job_id}.zip' in status_data['download_path']
+
+	# Verify file exists
+	bundle_file = settings.downloads_path / 'bundles' / f'{job_id}.zip'
+	assert bundle_file.exists()
+
+	# Verify contents
+	with zipfile.ZipFile(bundle_file) as zf:
+		files = zf.namelist()
+		assert 'METADATA.csv' in files
+		assert 'LICENSE.txt' in files
+		assert 'CITATION.cff' in files
+		assert any(f.endswith('.tif') for f in files)
+
+
+def test_multi_bundle_multiple_datasets(auth_token, multi_test_datasets):
+	"""Test multi-bundle endpoint with multiple datasets"""
+	dataset_ids = ','.join(str(d) for d in multi_test_datasets)
+
+	# Make request to bundle endpoint
+	response = client.get(
+		f'/api/v1/download/bundle.zip?dataset_ids={dataset_ids}',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 200
+	data = response.json()
+	job_id = data['job_id']
+
+	# Wait for processing
+	max_attempts = 15
+	for _ in range(max_attempts):
+		status_response = client.get(
+			f'/api/v1/download/bundle/status?job_id={job_id}',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		status_data = status_response.json()
+
+		if status_data['status'] == 'completed':
+			break
+		time.sleep(1)
+	else:
+		pytest.fail('Bundle processing did not complete in time')
+
+	# Verify file exists
+	bundle_file = settings.downloads_path / 'bundles' / f'{job_id}.zip'
+	assert bundle_file.exists()
+
+	# Verify contents
+	with zipfile.ZipFile(bundle_file) as zf:
+		files = zf.namelist()
+
+		# Should have 3 ortho files
+		tif_files = [f for f in files if f.endswith('.tif')]
+		assert len(tif_files) == 3
+
+		# Check metadata CSV has all datasets
+		assert 'METADATA.csv' in files
+		with tempfile.TemporaryDirectory() as tmpdir:
+			zf.extract('METADATA.csv', tmpdir)
+			df = pd.read_csv(Path(tmpdir) / 'METADATA.csv')
+			assert len(df) == 3
+			assert 'deadtrees_id' in df.columns
+			assert 'deadtrees_url' in df.columns
+			assert 'admin_level_1' in df.columns
+
+
+def test_multi_bundle_with_original_filename(auth_token, multi_test_datasets):
+	"""Test that use_original_filename works correctly"""
+	dataset_ids = ','.join(str(d) for d in multi_test_datasets)
+
+	# Request with original filenames
+	response = client.get(
+		f'/api/v1/download/bundle.zip?dataset_ids={dataset_ids}&use_original_filename=true',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 200
+	job_id = response.json()['job_id']
+
+	# Wait for completion
+	max_attempts = 15
+	for _ in range(max_attempts):
+		status_response = client.get(
+			f'/api/v1/download/bundle/status?job_id={job_id}',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		if status_response.json()['status'] == 'completed':
+			break
+		time.sleep(1)
+
+	# Verify files use original names (test-multi-0.tif, etc.)
+	bundle_file = settings.downloads_path / 'bundles' / f'{job_id}.zip'
+	with zipfile.ZipFile(bundle_file) as zf:
+		files = zf.namelist()
+		tif_files = [f for f in files if f.endswith('.tif')]
+		# Should use original filenames (stems from test-multi-{i}.tif)
+		assert any('test-multi' in f for f in tif_files)
+
+
+def test_multi_bundle_without_original_filename(auth_token, multi_test_datasets):
+	"""Test that ID-based filenames work correctly"""
+	dataset_ids = ','.join(str(d) for d in multi_test_datasets)
+
+	# Request with ID-based filenames
+	response = client.get(
+		f'/api/v1/download/bundle.zip?dataset_ids={dataset_ids}&use_original_filename=false',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 200
+	job_id = response.json()['job_id']
+
+	# Wait for completion
+	max_attempts = 15
+	for _ in range(max_attempts):
+		status_response = client.get(
+			f'/api/v1/download/bundle/status?job_id={job_id}',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		if status_response.json()['status'] == 'completed':
+			break
+		time.sleep(1)
+
+	# Verify files use ID-based names (ortho_{id}.tif)
+	bundle_file = settings.downloads_path / 'bundles' / f'{job_id}.zip'
+	with zipfile.ZipFile(bundle_file) as zf:
+		files = zf.namelist()
+		tif_files = [f for f in files if f.endswith('.tif')]
+		# Should use ID-based filenames
+		assert all('ortho_' in f for f in tif_files)
+
+
+def test_multi_bundle_caching(auth_token, multi_test_datasets):
+	"""Test that repeated requests return cached bundle"""
+	dataset_ids = ','.join(str(d) for d in multi_test_datasets)
+
+	# First request
+	response1 = client.get(
+		f'/api/v1/download/bundle.zip?dataset_ids={dataset_ids}',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	job_id1 = response1.json()['job_id']
+
+	# Wait for completion
+	max_attempts = 15
+	for _ in range(max_attempts):
+		status_response = client.get(
+			f'/api/v1/download/bundle/status?job_id={job_id1}',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		if status_response.json()['status'] == 'completed':
+			break
+		time.sleep(1)
+
+	# Second request (should return immediately as completed)
+	response2 = client.get(
+		f'/api/v1/download/bundle.zip?dataset_ids={dataset_ids}',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	job_id2 = response2.json()['job_id']
+	status2 = response2.json()['status']
+
+	# Same job ID and already completed
+	assert job_id1 == job_id2
+	assert status2 == 'completed'
+
+
+def test_multi_bundle_invalid_dataset_id(auth_token):
+	"""Test error handling for invalid dataset ID"""
+	response = client.get(
+		'/api/v1/download/bundle.zip?dataset_ids=99999999',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	assert response.status_code == 404
+
+
+def test_multi_bundle_invalid_format(auth_token):
+	"""Test error handling for invalid dataset_ids format"""
+	response = client.get(
+		'/api/v1/download/bundle.zip?dataset_ids=abc,def',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	assert response.status_code == 400
+
+
+def test_multi_bundle_empty_ids(auth_token):
+	"""Test error handling for empty dataset_ids"""
+	response = client.get(
+		'/api/v1/download/bundle.zip?dataset_ids=',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	assert response.status_code == 400
+
+
+def test_multi_bundle_download_redirect(auth_token, multi_test_datasets):
+	"""Test the download redirect endpoint"""
+	dataset_ids = ','.join(str(d) for d in multi_test_datasets[:1])
+
+	# Create bundle
+	response = client.get(
+		f'/api/v1/download/bundle.zip?dataset_ids={dataset_ids}',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	job_id = response.json()['job_id']
+
+	# Wait for completion
+	max_attempts = 10
+	for _ in range(max_attempts):
+		status_response = client.get(
+			f'/api/v1/download/bundle/status?job_id={job_id}',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		if status_response.json()['status'] == 'completed':
+			break
+		time.sleep(1)
+
+	# Test download redirect
+	download_response = client.get(
+		f'/api/v1/download/bundle/download?job_id={job_id}',
+		headers={'Authorization': f'Bearer {auth_token}'},
+		follow_redirects=False,
+	)
+	assert download_response.status_code == 303
+	assert f'/downloads/v1/bundles/{job_id}.zip' in download_response.headers['location']
