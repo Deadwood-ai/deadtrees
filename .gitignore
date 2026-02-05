@@ -8,6 +8,7 @@ ml_ready_tiles/*
 
 /scratchpad/*
 docs/projects/*
+freidata/freidata.env
 
 # Operational docs (contains infrastructure details, credentials references)
 docs/ops/*
