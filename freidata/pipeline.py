@@ -206,6 +206,15 @@ def run_publication(cfg: Config, db: Client, folder: Path, publication_id: int) 
 	entries = files_info.get("entries") or []
 	existing = {e.get("key"): e for e in entries if isinstance(e, dict) and e.get("key")}
 
+	# Remove stale files from prior runs (different keys than current upload)
+	stale_keys = [k for k in existing if k not in keys]
+	if stale_keys:
+		print(f"Removing {len(stale_keys)} stale file(s) from draft...")
+		for k in stale_keys:
+			print(f"  [DELETE] {k}")
+			client.delete_draft_file(record_id, k)
+			existing.pop(k, None)
+
 	if cfg.overwrite_files:
 		for k in list(existing.keys()):
 			if k in keys:
