@@ -5,10 +5,12 @@
 Wrapper for freidata publication CLI.
 
 Usage:
-  python scripts/freidata_publish.py <publication_id> [--folder <path>]
+  python scripts/freidata_publish.py publish <publication_id> [--folder <path>]
+  python scripts/freidata_publish.py cron
+  python scripts/freidata_publish.py sync
 
 If --folder is not provided, a temp folder is auto-created.
-With AUTO_DOWNLOAD=1 (default), datasets are automatically bundled from /data/archive.
+With AUTO_DOWNLOAD=1 (default), datasets are automatically bundled from the API.
 """
 
 from __future__ import annotations

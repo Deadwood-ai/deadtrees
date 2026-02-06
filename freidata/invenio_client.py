@@ -78,12 +78,17 @@ class InvenioClient:
 		return self.require_ok(r, "init_files")
 
 	def upload_file_content(self, record_id: str, key: str, filepath) -> Dict[str, Any]:
+		import os
+		file_size = os.path.getsize(filepath)
 		with open(filepath, "rb") as f:
 			r = self.request(
 				"PUT",
 				f"/api/records/{record_id}/draft/files/{key}/content",
 				data=f,
-				headers={"Content-Type": "application/octet-stream"},
+				headers={
+					"Content-Type": "application/octet-stream",
+					"Content-Length": str(file_size),
+				},
 				timeout=(60, self.upload_timeout),
 			)
 		return self.require_ok(r, f"upload_content:{key}")
@@ -91,6 +96,25 @@ class InvenioClient:
 	def commit_file(self, record_id: str, key: str) -> Dict[str, Any]:
 		r = self.request("POST", f"/api/records/{record_id}/draft/files/{key}/commit")
 		return self.require_ok(r, f"commit_file:{key}")
+
+	def get_file_entry(self, record_id: str, key: str) -> Dict[str, Any]:
+		key_q = quote(key, safe="")
+		r = self.request("GET", f"/api/records/{record_id}/draft/files/{key_q}")
+		return self.require_ok(r, f"get_file_entry:{key}")
+
+	def get_published_record(self, record_id: str) -> Dict[str, Any] | None:
+		"""Fetch a published record. Returns None if not yet published (404)."""
+		r = self.request("GET", f"/api/records/{record_id}")
+		if r.status_code == 404:
+			return None
+		return self.require_ok(r, "get_published_record")
+
+	def get_review(self, record_id: str) -> Dict[str, Any] | None:
+		"""Fetch the review request for a draft. Returns None if no review exists (404)."""
+		r = self.request("GET", f"/api/records/{record_id}/draft/review")
+		if r.status_code == 404:
+			return None
+		return self.require_ok(r, "get_review")
 
 	def publish(self, record_id: str) -> Dict[str, Any]:
 		r = self.request("POST", f"/api/records/{record_id}/draft/actions/publish")

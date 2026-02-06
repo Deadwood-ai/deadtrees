@@ -6,7 +6,9 @@ This module uses the existing download endpoints to build canonical ZIP files
 """
 from __future__ import annotations
 
+import re
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
@@ -19,6 +21,45 @@ from .db import fetch_publication_full_info
 
 
 _cached_api_token: Optional[str] = None
+
+
+def slugify_title(title: str, max_length: int = 60) -> str:
+	"""
+	Convert a publication title to a filesystem-safe slug.
+
+	Examples:
+		"Östra Göinge, Sweden by X - part of deadtrees.earth"
+		-> "ostra-goinge-sweden"
+	"""
+	# Remove the " - part of deadtrees.earth" suffix and "by Author" parts
+	cleaned = re.sub(r'\s*-\s*part of deadtrees\.earth\s*$', '', title, flags=re.IGNORECASE)
+	cleaned = re.sub(r'\s+by\s+.*$', '', cleaned, flags=re.IGNORECASE)
+
+	# Transliterate unicode to ASCII (ö -> o, é -> e, etc.)
+	nfkd = unicodedata.normalize("NFKD", cleaned)
+	ascii_text = nfkd.encode("ascii", "ignore").decode("ascii")
+
+	# Lowercase, replace non-alphanumeric with hyphens
+	slug = re.sub(r'[^a-z0-9]+', '-', ascii_text.lower()).strip('-')
+
+	# Collapse multiple hyphens
+	slug = re.sub(r'-{2,}', '-', slug)
+
+	# Truncate to max_length at a word boundary
+	if len(slug) > max_length:
+		slug = slug[:max_length].rsplit('-', 1)[0]
+
+	return slug or "bundle"
+
+
+def make_bundle_filename(title: str, publication_id: int) -> str:
+	"""
+	Create a human-readable ZIP filename for a publication bundle.
+
+	Example: "ostra-goinge-sweden_pub36.zip"
+	"""
+	slug = slugify_title(title)
+	return f"{slug}_pub{publication_id}.zip"
 
 
 def get_publication_dataset_ids(db: Client, publication_id: int) -> List[int]:
@@ -173,6 +214,7 @@ def download_dataset_zip(
     dataset_ids: List[int],
     output_folder: Path,
     publication_id: int,
+    publication_title: str = "",
 ) -> Path:
     output_zip: Optional[Path] = None
     print(f"  Requesting bundle for dataset_ids={dataset_ids}...")
@@ -193,7 +235,13 @@ def download_dataset_zip(
         raise RuntimeError("No download_path returned for bundle request.")
 
     download_url = build_download_url(cfg.download_api_base_url, download_path)
-    download_name = Path(urlparse(download_path).path).name or f"bundle_{publication_id}.zip"
+
+    # Use a meaningful filename instead of the job ID hash
+    if publication_title:
+        download_name = make_bundle_filename(publication_title, publication_id)
+    else:
+        download_name = Path(urlparse(download_path).path).name or f"bundle_{publication_id}.zip"
+
     output_zip = output_folder / download_name
 
     if output_zip.exists() and output_zip.stat().st_size > 0:
@@ -220,9 +268,20 @@ def download_dataset_zip(
 def download_publication_datasets(cfg: Config, db: Client, output_folder: Path, publication_id: int) -> List[Path]:
     print(f"[DOWNLOAD] Fetching datasets for publication {publication_id}...")
 
-    dataset_ids = get_publication_dataset_ids(db, publication_id)
+    pub = fetch_publication_full_info(db, publication_id)
+    datasets = pub.get("datasets") or []
+    dataset_ids: List[int] = []
+    for d in datasets:
+        if isinstance(d, dict) and "dataset_id" in d:
+            try:
+                dataset_ids.append(int(d["dataset_id"]))
+            except Exception:
+                continue
+
     if not dataset_ids:
         raise RuntimeError(f"No datasets found for publication {publication_id}")
+
+    publication_title = pub.get("title") or ""
 
     print(f"[DOWNLOAD] Found {len(dataset_ids)} dataset(s)")
     output_folder.mkdir(parents=True, exist_ok=True)
@@ -235,6 +294,7 @@ def download_publication_datasets(cfg: Config, db: Client, output_folder: Path, 
             dataset_ids=dataset_ids,
             output_folder=output_folder,
             publication_id=publication_id,
+            publication_title=publication_title,
         )
         created_zips.append(zip_path)
 

@@ -233,19 +233,47 @@ def run_publication(cfg: Config, db: Client, folder: Path, publication_id: int) 
 	entries = files_info.get("entries") or []
 	existing = {e.get("key"): e for e in entries if isinstance(e, dict) and e.get("key")}
 
+	max_upload_attempts = 3
 	for p in upload_paths:
 		key = p.name
+		local_size = p.stat().st_size
 		entry = existing.get(key)
 		status = (entry or {}).get("status")
 
 		if (not cfg.overwrite_files) and status == "completed":
-			print(f"[SKIP] {key} already completed in draft.")
-			continue
+			# Verify the existing file has the correct size
+			remote_size = (entry or {}).get("size")
+			if remote_size is not None and remote_size != local_size:
+				print(f"[SIZE MISMATCH] {key}: remote={remote_size}, local={local_size}. Re-uploading...")
+				client.delete_draft_file(record_id, key)
+				client.init_files(record_id, [key])
+			else:
+				print(f"[SKIP] {key} already completed in draft ({local_size} bytes).")
+				continue
 
-		print(f"Upload {key} ({p.stat().st_size} bytes)... (current status={status})")
-		client.upload_file_content(record_id, key, p)
-		client.commit_file(record_id, key)
-		print(f"Committed {key}")
+		for attempt in range(1, max_upload_attempts + 1):
+			print(f"Upload {key} ({local_size:,} bytes)... attempt {attempt}/{max_upload_attempts}")
+			client.upload_file_content(record_id, key, p)
+			client.commit_file(record_id, key)
+
+			# Verify committed file size matches local
+			file_entry = client.get_file_entry(record_id, key)
+			remote_size = file_entry.get("size")
+			if remote_size is not None and remote_size != local_size:
+				print(f"[WARN] Size mismatch after commit: remote={remote_size:,}, local={local_size:,}")
+				if attempt < max_upload_attempts:
+					print(f"  Deleting and retrying...")
+					client.delete_draft_file(record_id, key)
+					client.init_files(record_id, [key])
+					continue
+				else:
+					raise RuntimeError(
+						f"Upload failed after {max_upload_attempts} attempts: "
+						f"{key} size mismatch (remote={remote_size:,}, local={local_size:,})"
+					)
+			else:
+				print(f"Committed {key} (verified: {remote_size:,} bytes)")
+				break
 
 	stop_if(cfg, "upload")
 
