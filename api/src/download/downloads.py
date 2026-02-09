@@ -313,6 +313,7 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 				client.table(geom_table)
 				.select('*')
 				.eq('label_id', label.id)
+				.eq('is_deleted', False)
 				.range(offset, offset + batch_size - 1)
 				.execute()
 			)

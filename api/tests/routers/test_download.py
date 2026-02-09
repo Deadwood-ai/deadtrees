@@ -31,6 +31,7 @@ from api.src.download.downloads import (
 	get_ortho_base_filename,
 	build_dataset_metadata_row,
 	generate_bundle_job_id,
+	create_consolidated_geopackage,
 )
 from shared.labels import create_label_with_geometries
 from shared.testing.fixtures import login
@@ -591,6 +592,82 @@ def test_download_labels_without_aoi(auth_token, test_dataset_with_label_no_aoi)
 
 		# Verify no AOI layer exists (since this dataset has no AOI)
 		assert 'aoi' not in available_layers
+
+
+def test_labels_geopackage_excludes_soft_deleted_geometries(auth_token, test_dataset_for_download, test_user):
+	"""Ensure soft-deleted geometries are excluded from label downloads"""
+	dataset_id = test_dataset_for_download
+
+	# Create a label with two polygons
+	geometry = {
+		'type': 'MultiPolygon',
+		'coordinates': [
+			[
+				[
+					[0.0, 0.0],
+					[1.0, 0.0],
+					[1.0, 1.0],
+					[0.0, 1.0],
+					[0.0, 0.0],
+				]
+			],
+			[
+				[
+					[2.0, 2.0],
+					[3.0, 2.0],
+					[3.0, 3.0],
+					[2.0, 3.0],
+					[2.0, 2.0],
+				]
+			],
+		],
+	}
+
+	payload = LabelPayloadData(
+		dataset_id=dataset_id,
+		label_source=LabelSourceEnum.visual_interpretation,
+		label_type=LabelTypeEnum.segmentation,
+		label_data=LabelDataEnum.deadwood,
+		label_quality=1,
+		geometry=geometry,
+		properties={'source': 'test_data'},
+	)
+
+	label = create_label_with_geometries(payload, test_user, auth_token)
+
+	gpkg_path = None
+	try:
+		with use_client(auth_token) as client:
+			geom_response = (
+				client.table(settings.deadwood_geometries_table)
+				.select('id')
+				.eq('label_id', label.id)
+				.execute()
+			)
+			geom_ids = [row['id'] for row in geom_response.data]
+			assert len(geom_ids) == 2
+
+			# Soft delete one geometry
+			client.table(settings.deadwood_geometries_table).update({'is_deleted': True}).eq('id', geom_ids[0]).execute()
+
+		# Create consolidated GeoPackage and verify only one feature is included
+		gpkg_path = create_consolidated_geopackage(dataset_id)
+		deadwood_layer = f'deadwood_{LabelSourceEnum.visual_interpretation.value}'
+		assert deadwood_layer in fiona.listlayers(gpkg_path)
+
+		gdf_labels = gpd.read_file(gpkg_path, layer=deadwood_layer)
+		assert len(gdf_labels) == 1
+	finally:
+		# Cleanup label and geometries
+		with use_client(auth_token) as client:
+			client.table(settings.deadwood_geometries_table).delete().eq('label_id', label.id).execute()
+			client.table(settings.labels_table).delete().eq('id', label.id).execute()
+
+		# Cleanup geopackage temp dir
+		if gpkg_path:
+			gpkg_dir = Path(gpkg_path).parent
+			if gpkg_dir.exists():
+				shutil.rmtree(gpkg_dir)
 
 
 def test_download_consolidated_labels_multiple_types(auth_token, test_dataset_for_download, test_user):
