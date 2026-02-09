@@ -17,6 +17,7 @@ from .db import (
 )
 from .download import download_publication_datasets
 from .invenio_client import InvenioClient
+from .notify import notify_error, notify_submitted_for_review
 from .state import load_state, save_state
 from .zip_utils import clean_zip, list_zip_files, validate_zips_against_db
 
@@ -317,6 +318,19 @@ def run_publication(cfg: Config, db: Client, folder: Path, publication_id: int) 
 		if review_already_open:
 			update_publication_row(db, publication_id, {"status": "in_review"})
 
+		# --- Zulip notification: submitted for review ---
+		datasets = pub.get("datasets") or []
+		dataset_count = len(datasets) if isinstance(datasets, list) else 0
+		zip_names = [p.name for p in upload_paths]
+		notify_submitted_for_review(
+			cfg,
+			pub_id=publication_id,
+			title=(pub.get("title") or "").strip(),
+			record_id=record_id,
+			dataset_count=dataset_count,
+			zip_names=zip_names,
+		)
+
 	publish_allowed = cfg.publish
 	if cfg.create_community_review and cfg.submit_community_review and cfg.publish:
 		print("[WARN] Review submitted -> skipping publish (publish after accept).")
@@ -341,9 +355,26 @@ def run_publication(cfg: Config, db: Client, folder: Path, publication_id: int) 
 def run_publication_safe(cfg: Config, db: Client, folder: Path, publication_id: int) -> None:
 	try:
 		run_publication(cfg, db, folder, publication_id)
-	except Exception:
+	except Exception as exc:
 		try:
 			update_publication_row(db, publication_id, {"status": "error"})
 		except Exception:
 			pass
+
+		# --- Zulip notification: pipeline error ---
+		try:
+			pub_row = fetch_publication_row(db, publication_id)
+			title = (pub_row.get("title") or f"Publication #{publication_id}")
+			record_id = pub_row.get("freidata_record_id")
+		except Exception:
+			title = f"Publication #{publication_id}"
+			record_id = None
+
+		notify_error(
+			cfg,
+			pub_id=publication_id,
+			title=title,
+			error_message=str(exc),
+			record_id=record_id,
+		)
 		raise
