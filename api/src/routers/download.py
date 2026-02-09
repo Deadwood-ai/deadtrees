@@ -235,17 +235,23 @@ def create_dataset_bundle_background(
 	include_parquet: bool = True,
 	use_original_filename: bool = False,
 ):
-	"""Background task to create dataset bundle"""
+	"""Background task to create dataset bundle.
+
+	Writes to a .part temp file first, then atomically renames to the final
+	path.  This prevents the status-polling endpoint from seeing a partially
+	written file and reporting "completed" too early (race condition).
+	"""
 	download_dir = settings.downloads_path / dataset_id
 	download_file = download_dir / get_bundle_filename(int(dataset_id), include_labels, include_parquet)
+	temp_file = download_file.with_suffix('.zip.part')
 
 	try:
 		# Build the file paths
 		archive_file_name = (settings.archive_path / ortho['ortho_file_name']).resolve()
 
-		# Bundle dataset directly to downloads directory - no need to pass label anymore
+		# Write to temp file first
 		bundle_dataset(
-			str(download_file),
+			str(temp_file),
 			archive_file_name,
 			dataset=dataset,
 			include_parquet=include_parquet,
@@ -253,13 +259,17 @@ def create_dataset_bundle_background(
 			use_original_filename=use_original_filename,
 		)
 
+		# Atomic rename – status check only sees .zip when fully written
+		temp_file.rename(download_file)
+
 		logger.info(f'Dataset bundle completed for dataset {dataset_id}')
 
 	except Exception as e:
 		logger.error(f'Error in background dataset bundling: {str(e)}', extra={'dataset_id': dataset_id})
-		# Remove failed file if it exists
-		if download_file.exists():
-			download_file.unlink()
+		# Remove failed files if they exist
+		for f in (temp_file, download_file):
+			if f.exists():
+				f.unlink()
 
 
 def create_labels_geopackage_background(dataset_id: str):
@@ -474,25 +484,37 @@ def create_multi_bundle_background(
 	include_parquet: bool = False,
 	use_original_filename: bool = True,
 ):
-	"""Background task to create multi-dataset bundle"""
+	"""Background task to create multi-dataset bundle.
+
+	Writes to a .part temp file first, then atomically renames to the final
+	path.  This prevents the status-polling endpoint from seeing a partially
+	written file and reporting "completed" too early (race condition).
+	"""
 	download_dir = settings.downloads_path / 'bundles'
 	download_file = download_dir / f'{job_id}.zip'
+	temp_file = download_dir / f'{job_id}.zip.part'
 	
 	try:
+		# Write to temp file first
 		bundle_multi_dataset(
-			str(download_file),
+			str(temp_file),
 			datasets_info,
 			include_labels=include_labels,
 			include_parquet=include_parquet,
 			use_original_filename=use_original_filename,
 		)
+
+		# Atomic rename – status check only sees .zip when fully written
+		temp_file.rename(download_file)
+
 		logger.info(f'Multi-dataset bundle completed: {job_id}')
 		
 	except Exception as e:
 		logger.error(f'Error in background multi-dataset bundling: {str(e)}', extra={'job_id': job_id})
-		# Remove failed file if it exists
-		if download_file.exists():
-			download_file.unlink()
+		# Remove failed files if they exist
+		for f in (temp_file, download_file):
+			if f.exists():
+				f.unlink()
 
 
 @download_app.get('/bundle.zip', response_model=DownloadStatus)
