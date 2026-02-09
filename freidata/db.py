@@ -59,7 +59,7 @@ def fetch_publication_full_info(client: Client, publication_id: int) -> Dict[str
 def fetch_publication_row(client: Client, publication_id: int) -> Dict[str, Any]:
 	resp = (
 		client.table("data_publication")
-		.select("id, doi, freidata_record_id, status, notified_at")
+		.select("id, title, doi, freidata_record_id, status, notified_at")
 		.eq("id", publication_id)
 		.limit(1)
 		.execute()
