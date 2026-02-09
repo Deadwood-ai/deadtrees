@@ -44,7 +44,7 @@ def cmd_sync(args: argparse.Namespace) -> None:
 	setup_logging(log_folder, cfg)
 	db = get_supabase_client(cfg)
 	client = InvenioClient(cfg.freidata_base_url, cfg.freidata_token, upload_timeout=cfg.upload_timeout)
-	sync_all(client, db)
+	sync_all(client, db, cfg=cfg)
 
 
 def main() -> None:

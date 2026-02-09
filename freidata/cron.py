@@ -85,7 +85,7 @@ def run_cron() -> None:
 	# --- Phase 2: Sync in_review publications ---
 	print()
 	client = InvenioClient(cfg.freidata_base_url, cfg.freidata_token, upload_timeout=cfg.upload_timeout)
-	sync_all(client, db)
+	sync_all(client, db, cfg=cfg)
 
 	print(f"\n[cron] Done.\n")
 
