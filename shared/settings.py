@@ -130,6 +130,16 @@ class Settings(BaseSettings):
 	ZULIP_STREAM: str = 'project_deadtree.earth'
 	ZULIP_TOPIC: str = 'Daily Summary'
 
+	# Brevo (transactional email notifications)
+	BREVO_API_KEY: str = ''
+	NOTIFICATION_SENDER_EMAIL: str = 'notifications@deadtrees.earth'
+	NOTIFICATION_SENDER_NAME: str = 'DeadTrees'
+
+	# Mailpit (local test email server) - used when ENV=development
+	MAILPIT_SMTP_HOST: str = 'localhost'
+	MAILPIT_SMTP_PORT: int = 54325
+	MAILPIT_API_URL: str = 'http://localhost:54324'
+
 	# Test settings
 	TEST_USER_EMAIL: str = 'test@example.com'
 	TEST_USER_PASSWORD: str = 'test123456'
