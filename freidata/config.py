@@ -26,6 +26,13 @@ class Config:
 	supabase_url: str
 	supabase_key: str
 
+	# Zulip notifications
+	zulip_email: str
+	zulip_api_key: str
+	zulip_site: str
+	zulip_stream: str
+	zulip_topic: str
+
 	# Logging
 	log_file: Optional[str]
 
@@ -65,6 +72,11 @@ def load_config() -> Config:
 	return Config(
 		freidata_base_url=base_url,
 		freidata_token=token,
+		zulip_email=os.getenv("ZULIP_EMAIL", "").strip(),
+		zulip_api_key=os.getenv("ZULIP_API_KEY", "").strip(),
+		zulip_site=os.getenv("ZULIP_SITE", "").strip(),
+		zulip_stream=os.getenv("ZULIP_STREAM", "project_deadtree.earth"),
+		zulip_topic=os.getenv("ZULIP_TOPIC", "New Data Publications"),
 		stop_after=os.getenv("STOP_AFTER"),
 		clean_zips=env_bool("CLEAN_ZIPS", False),
 		clean_inplace=env_bool("CLEAN_INPLACE", False),
