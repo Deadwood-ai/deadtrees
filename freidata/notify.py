@@ -72,6 +72,11 @@ def _freidata_draft_url(base_url: str, record_id: str) -> str:
 	return f"{base_url}/uploads/{record_id}"
 
 
+def _freidata_request_url(base_url: str, request_id: str) -> str:
+	"""Build the review-request URL for a FreiData community submission."""
+	return f"{base_url}/me/requests/{request_id}"
+
+
 # ---------------------------------------------------------------------------
 # Message formatters
 # ---------------------------------------------------------------------------
@@ -87,9 +92,15 @@ def notify_submitted_for_review(
 	record_id: str,
 	dataset_count: int,
 	zip_names: list[str] | None = None,
+	request_id: Optional[str] = None,
 ) -> bool:
 	"""Notify that a publication was uploaded and submitted for community review."""
-	url = _freidata_draft_url(cfg.freidata_base_url, record_id)
+	if request_id:
+		url = _freidata_request_url(cfg.freidata_base_url, request_id)
+		link_label = "Review request"
+	else:
+		url = _freidata_draft_url(cfg.freidata_base_url, record_id)
+		link_label = "FreiData draft"
 	lines = [
 		f"### Submitted for Review",
 		"",
@@ -98,7 +109,7 @@ def notify_submitted_for_review(
 		f"| Detail | Value |",
 		f"|--------|-------|",
 		f"| Datasets | {dataset_count} |",
-		f"| FreiData draft | [View on FreiData]({url}) |",
+		f"| {link_label} | [View on FreiData]({url}) |",
 	]
 	if zip_names:
 		files_str = ", ".join(f"`{z}`" for z in zip_names[:5])

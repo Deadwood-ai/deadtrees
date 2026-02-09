@@ -319,6 +319,14 @@ def run_publication(cfg: Config, db: Client, folder: Path, publication_id: int) 
 			update_publication_row(db, publication_id, {"status": "in_review"})
 
 		# --- Zulip notification: submitted for review ---
+		# Extract review request ID from saved state (set_community_review or submit_review response)
+		review_request_id = None
+		for state_key in ("community_review_submitted", "community_review"):
+			resp = state.get(state_key)
+			if isinstance(resp, dict) and resp.get("id"):
+				review_request_id = resp["id"]
+				break
+
 		datasets = pub.get("datasets") or []
 		dataset_count = len(datasets) if isinstance(datasets, list) else 0
 		zip_names = [p.name for p in upload_paths]
@@ -329,6 +337,7 @@ def run_publication(cfg: Config, db: Client, folder: Path, publication_id: int) 
 			record_id=record_id,
 			dataset_count=dataset_count,
 			zip_names=zip_names,
+			request_id=review_request_id,
 		)
 
 	publish_allowed = cfg.publish
