@@ -13,14 +13,22 @@ Use this workflow to safely create and validate database migrations in DeadTrees
 
 - Never connect to the database directly with Python; use MCP tools.
 - Use local DB MCP (`user-deadtrees-local`) for schema changes and validation.
+- Before any change, verify local and production DB are in sync using MCP-only checks.
 - Keep test scope fast first: run only relevant, quick tests before broader checks.
 - Ask before committing; do not commit automatically.
+- Never push/apply migrations to production from the agent; production migration application is manual by the user.
 
 ## Required Workflow
 
 Follow these steps in order.
 
-### 1) Make local dev DB changes via MCP
+### 1) Verify local and production are in sync (MCP-only)
+
+- Compare local and production schemas via MCP (`user-deadtrees-local` and `user-deadtrees-prod`) before making changes.
+- Validate critical objects involved in the migration (tables, views, functions, policies, indexes, triggers).
+- If drift is found, stop and report it before proceeding.
+
+### 2) Make local dev DB changes via MCP
 
 - Apply schema/function/policy changes using MCP SQL execution against local DB.
 - Prefer safe SQL patterns:
@@ -28,7 +36,7 @@ Follow these steps in order.
 	- Validate affected objects immediately after each change.
 - If view dependencies exist, handle drop/alter/recreate order explicitly.
 
-### 2) Validate with fast tests and MCP checks
+### 3) Validate with fast tests and MCP checks
 
 - Run relevant fast tests only (smallest affected scope first).
 - Follow project testing rules:
@@ -39,12 +47,12 @@ Follow these steps in order.
 	- Run validation queries that prove expected behavior.
 	- Confirm no unintended side effects in related tables/views/functions.
 
-### 3) Fix breakages if found
+### 4) Fix breakages if found
 
 - If tests or MCP validation fail, fix code/SQL and re-run step 2.
 - Continue until fast tests pass and MCP validation confirms expected behavior.
 
-### 4) Export migration
+### 5) Export migration
 
 Run:
 
@@ -55,16 +63,17 @@ PGSSLMODE=disable supabase db diff -f name-of-migration-file
 - Use a descriptive migration file name.
 - Ensure generated migration reflects only intended schema changes.
 
-### 5) Review migration file
+### 6) Review migration file
 
 - Verify SQL ordering and dependency safety.
 - Confirm idempotence expectations and rollback safety where applicable.
 - Ensure no accidental changes are included.
 
-### 6) Ask to commit
+### 7) Ask to commit
 
 - Summarize what changed, what was tested, and MCP validation results.
 - Ask user for approval before `git add`/`git commit`.
+- Explicitly remind: do not apply/push migration to production; user applies it manually.
 
 ## Fast-Path Test Selection Guidance
 
