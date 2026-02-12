@@ -32,6 +32,7 @@ GeoLabel is implemented as a public correction workflow integrated into deadtree
 - Delete incorrect polygons
 
 ![Screencast: Adding a missing polygon in the GeoLabel editing workflow](assets/deadtrees-editing-feature-add-missing-polygon-short-lots-zoom.gif)
+
 *Figure: Adding a missing deadwood polygon using the GeoLabel correction workflow.*
 
 The correction workflow is designed around two complementary roles:
