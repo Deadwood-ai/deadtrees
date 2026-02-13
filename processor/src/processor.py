@@ -2,9 +2,10 @@ import shutil
 from pathlib import Path
 from processor.src.process_geotiff import process_geotiff
 from processor.src.process_odm import process_odm
-from shared.models import QueueTask, TaskTypeEnum
+from shared.models import QueueTask, TaskTypeEnum, StatusEnum
 from shared.settings import settings
 from shared.db import use_client, login, verify_token
+from shared.status import update_status
 from .process_thumbnail import process_thumbnail
 from .process_cog import process_cog
 from .process_deadwood_segmentation import process_deadwood_segmentation
@@ -19,36 +20,53 @@ logger = UnifiedLogger(__name__)
 logger.add_supabase_handler(SupabaseHandler())
 
 
-def current_running_tasks(token: str) -> int:
-	"""Get the number of currently actively processing tasks from supabase.
+# Maps each task type to its corresponding is_*_done flag and human-readable stage name.
+# Used by crash detection to determine exactly which stage a previous run crashed during.
+PIPELINE_STAGE_MAP = [
+	(TaskTypeEnum.odm_processing, 'is_odm_done', 'odm_processing'),
+	(TaskTypeEnum.geotiff, 'is_ortho_done', 'ortho_processing'),
+	(TaskTypeEnum.metadata, 'is_metadata_done', 'metadata_processing'),
+	(TaskTypeEnum.cog, 'is_cog_done', 'cog_processing'),
+	(TaskTypeEnum.thumbnail, 'is_thumbnail_done', 'thumbnail_processing'),
+	(TaskTypeEnum.deadwood, 'is_deadwood_done', 'deadwood_segmentation'),
+	(TaskTypeEnum.treecover, 'is_forest_cover_done', 'forest_cover_segmentation'),
+]
+
+
+def detect_crashed_stage(status_data: dict, task_types: list) -> str:
+	"""Determine which pipeline stage a previous crash occurred during.
+
+	Walks the pipeline in order and returns the first stage that was requested
+	but not yet marked as done in v2_statuses.
 
 	Args:
-	    token (str): Client access token for supabase
+		status_data: Row from v2_statuses table
+		task_types: List of TaskTypeEnum values from the queue task
 
 	Returns:
-	    int: number of currently active tasks
+		str: Human-readable stage name where the crash occurred
 	"""
-	with use_client(token) as client:
-		response = client.table(settings.queue_table).select('id').eq('is_processing', True).execute()
-		num_of_tasks = len(response.data)
+	for task_type, done_flag, stage_name in PIPELINE_STAGE_MAP:
+		if task_type in task_types and not status_data.get(done_flag, False):
+			return stage_name
+	return 'unknown'
 
-	return num_of_tasks
 
-
-def queue_length(token: str) -> int:
-	"""Get the number of tasks in the queue from supabase.
+def get_completed_stages(status_data: dict) -> list[str]:
+	"""Get list of pipeline stages that completed successfully before the crash.
 
 	Args:
-	    token (str): Client access token for supabase
+		status_data: Row from v2_statuses table
 
 	Returns:
-	    int: number of all tasks in the queue
+		list[str]: Human-readable names of completed stages
 	"""
-	with use_client(token) as client:
-		response = client.table(settings.queue_position_table).select('id').execute()
-		num_of_tasks = len(response.data)
+	completed = []
+	for _, done_flag, stage_name in PIPELINE_STAGE_MAP:
+		if status_data.get(done_flag, False):
+			completed.append(stage_name)
+	return completed
 
-	return num_of_tasks
 
 
 def get_next_task(token: str) -> QueueTask:
@@ -322,10 +340,19 @@ def process_task(task: QueueTask, token: str):
 
 def background_process():
 	"""
-	This process checks if there is anything to do in the queue.
-	If so, it checks the currently running tasks against the maximum allowed tasks.
-	If another task can be started, it will do so. It will skip tasks with errors
-	and try the next one.
+	Cron-triggered processor: pick the next task from the queue and process it.
+
+	On each run this function:
+	1. Logs in as the processor service account.
+	2. Loops through the queue, clearing any crashed tasks it finds:
+	   - A "crash" is detected when current_status != 'idle' for a queued task,
+	     meaning a previous container run died (OOM, kill) mid-processing.
+	   - Crashed tasks are marked as errored, a Linear issue is created, and
+	     the task is removed from the queue.
+	3. Once a healthy, ready task is found, processes it and exits.
+
+	docker compose up guarantees only one processor container runs at a time,
+	so no is_processing flag or concurrency guard is needed.
 	"""
 	# use the processor to log in
 	token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
@@ -337,75 +364,90 @@ def background_process():
 		if not user:
 			raise Exception(status_code=401, detail='Invalid token after fresh login')
 
-	# get the number of currently running tasks
-	num_of_running = current_running_tasks(token)
-	queued_tasks = queue_length(token)
+	while True:
+		task = get_next_task(token)
+		if task is None:
+			print('No tasks in the queue.')
+			return
 
-	# is there is nothing in the queue, just stop the process and log
-	if queued_tasks == 0:
-		print('No tasks in the queue.')
-		return
+		is_ready, has_error = is_dataset_uploaded_or_processed(task, token)
 
-	# check if we can start another task
-	if num_of_running < settings.CONCURRENT_TASKS:
-		# Keep trying tasks until we find one that's ready or run out of tasks
-		while True:
-			task = get_next_task(token)
-			if task is None:
-				break
+		if has_error:
+			# Dataset already has errors - remove task from queue
+			logger.info(
+				f'Removing errored task {task.id} for dataset {task.dataset_id} from queue',
+				LogContext(
+					category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+				),
+			)
+			with use_client(token) as client:
+				client.table(settings.queue_table).delete().eq('id', task.id).execute()
+			continue
 
-			is_ready, has_error = is_dataset_uploaded_or_processed(task, token)
+		if not is_ready:
+			# Not uploaded yet - skip, try again next cron run
+			logger.info(
+				f'Skipping task {task.id} - dataset not uploaded yet; will retry later',
+				LogContext(
+					category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+				),
+			)
+			return
 
-			if has_error:
-				# Dataset has errors - remove task from queue (error already recorded in status table)
-				logger.info(
-					f'Removing errored task {task.id} for dataset {task.dataset_id} from queue',
+		# CRASH DETECTION: check if a previous run crashed mid-processing
+		with use_client(token) as client:
+			status_resp = client.table(settings.statuses_table) \
+				.select('*').eq('dataset_id', task.dataset_id).execute()
+
+		if status_resp.data:
+			status = status_resp.data[0]
+			if status['current_status'] != 'idle':
+				# Previous crash detected - current_status is still set to a processing stage
+				crashed_stage = detect_crashed_stage(status, task.task_types)
+				completed = get_completed_stages(status)
+				error_msg = f'Processing container crashed during {crashed_stage}. Completed: {completed}'
+
+				logger.warning(
+					f'Crash detected for dataset {task.dataset_id}: {error_msg}',
 					LogContext(
 						category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
 					),
 				)
+
+				# Mark as errored and reset to idle so it can be re-queued later
+				update_status(
+					token,
+					dataset_id=task.dataset_id,
+					current_status=StatusEnum.idle,
+					has_error=True,
+					error_message=error_msg,
+				)
+
+				# Create Linear issue for visibility
+				try:
+					create_processing_failure_issue(
+						token=token,
+						dataset_id=task.dataset_id,
+						stage=crashed_stage,
+						error_message=error_msg,
+					)
+				except Exception as linear_error:
+					logger.warning(f'Failed to create Linear issue for crash: {linear_error}')
+
+				# Remove from queue
 				with use_client(token) as client:
 					client.table(settings.queue_table).delete().eq('id', task.id).execute()
-				# Continue to check next task in queue
-				continue
+				continue  # check next task in queue
 
-			if is_ready:
-				# Found a valid task, process it
-				logger.info(
-					f'Start a new background process for queued task: {task}.',
-					LogContext(
-						category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
-					),
-				)
-				# Mark task as processing to avoid duplicate picks while running
-				with use_client(token) as client:
-					client.table(settings.queue_table).update({'is_processing': True}).eq('id', task.id).execute()
-
-				try:
-					process_task(task, token=token)
-				finally:
-					# If the task still exists (was not deleted by process_task), reset is_processing to False
-					with use_client(token) as client:
-						result = client.table(settings.queue_table).select('id').eq('id', task.id).execute()
-					if result.data:
-						with use_client(token) as client:
-							client.table(settings.queue_table).update({'is_processing': False}).eq(
-								'id', task.id
-							).execute()
-				break
-			else:
-				# Task isn't ready yet (not uploaded) - skip and try again later
-				logger.info(
-					f'Skipping task {task.id} - dataset not uploaded yet; will retry later',
-					LogContext(
-						category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
-					),
-				)
-				break
-	else:
-		# inform no spot available
-		logger.debug('No spot available for new task.', LogContext(category=LogCategory.PROCESS, token=token))
-		return
+		# Normal processing - found a healthy, ready task
+		logger.info(
+			f'Start processing queued task: {task}.',
+			LogContext(
+				category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+			),
+		)
+		process_task(task, token=token)
+		break  # processed one task, exit for cron
 
 
 if __name__ == '__main__':

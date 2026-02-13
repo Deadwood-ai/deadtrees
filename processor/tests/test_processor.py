@@ -4,7 +4,10 @@ from pathlib import Path
 from shared.db import use_client
 from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask, StatusEnum
-from processor.src.processor import background_process, process_task, get_next_task
+from processor.src.processor import (
+	background_process, process_task, get_next_task,
+	detect_crashed_stage, get_completed_stages, PIPELINE_STAGE_MAP,
+)
 
 
 @pytest.fixture
@@ -19,7 +22,6 @@ def processor_task(test_dataset_for_processing, test_processor_user, auth_token)
 				'user_id': test_processor_user,
 				'task_types': [TaskTypeEnum.metadata],
 				'priority': 1,
-				'is_processing': False,
 			}
 			response = client.table(settings.queue_table).insert(task_data).execute()
 			task_id = response.data[0]['id']
@@ -67,31 +69,6 @@ def test_background_process_no_tasks():
 	assert background_process() is None
 
 
-def test_background_process_max_concurrent(processor_task, auth_token):
-	"""Test background process respects max concurrent tasks limit"""
-	# Set a task as currently processing
-	with use_client(auth_token) as client:
-		client.table(settings.queue_table).update({'is_processing': True}).eq('id', processor_task).execute()
-
-	# Set CONCURRENT_TASKS to 1 temporarily
-	original_limit = settings.CONCURRENT_TASKS
-	settings.CONCURRENT_TASKS = 1
-
-	try:
-		# Run background process
-		background_process()
-
-		# Verify no new tasks were started
-		with use_client(auth_token) as client:
-			response = client.table(settings.queue_table).select('*').execute()
-			processing_tasks = [task for task in response.data if task['is_processing']]
-			assert len(processing_tasks) == 1
-
-	finally:
-		# Restore original concurrent tasks limit
-		settings.CONCURRENT_TASKS = original_limit
-
-
 @pytest.fixture
 def sequential_task(test_dataset_for_processing, test_processor_user):
 	"""Create a test task for sequential processing"""
@@ -107,7 +84,7 @@ def sequential_task(test_dataset_for_processing, test_processor_user):
 			TaskTypeEnum.deadwood,
 		],
 		priority=1,
-		is_processing=False,
+		is_processing=False,  # Column still exists in DB but is inert
 		current_position=1,
 		estimated_time=0.0,
 	)
@@ -243,7 +220,6 @@ def processor_task_with_missing_file(test_processor_user, auth_token):
 				'user_id': test_processor_user,
 				'task_types': [TaskTypeEnum.metadata],
 				'priority': 1,
-				'is_processing': False,
 			}
 			response = client.table(settings.queue_table).insert(task_data).execute()
 			task_id = response.data[0]['id']
@@ -317,7 +293,6 @@ def test_processor_respects_priority(test_dataset_for_processing, test_processor
 				'user_id': test_processor_user,
 				'task_types': [TaskTypeEnum.metadata],
 				'priority': 2,  # Lower priority
-				'is_processing': False,
 			}
 			response = client.table(settings.queue_table).insert(task1_data).execute()
 			task_ids.append(response.data[0]['id'])
@@ -328,7 +303,6 @@ def test_processor_respects_priority(test_dataset_for_processing, test_processor
 				'user_id': test_processor_user,
 				'task_types': [TaskTypeEnum.metadata],
 				'priority': 5,  # Higher priority (changed from 1)
-				'is_processing': False,
 			}
 			response = client.table(settings.queue_table).insert(task2_data).execute()
 			task_ids.append(response.data[0]['id'])
@@ -345,3 +319,173 @@ def test_processor_respects_priority(test_dataset_for_processing, test_processor
 		with use_client(auth_token) as client:
 			for task_id in task_ids:
 				client.table(settings.queue_table).delete().eq('id', task_id).execute()
+
+
+# --- Crash detection unit tests ---
+
+def test_detect_crashed_stage_finds_first_incomplete():
+	"""Test that detect_crashed_stage returns the first incomplete stage in the pipeline."""
+	status_data = {
+		'is_odm_done': True,
+		'is_ortho_done': True,
+		'is_metadata_done': True,
+		'is_cog_done': False,
+		'is_thumbnail_done': False,
+		'is_deadwood_done': False,
+		'is_forest_cover_done': False,
+	}
+	task_types = [
+		TaskTypeEnum.geotiff, TaskTypeEnum.metadata, TaskTypeEnum.cog,
+		TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood, TaskTypeEnum.treecover,
+	]
+	assert detect_crashed_stage(status_data, task_types) == 'cog_processing'
+
+
+def test_detect_crashed_stage_only_checks_requested_types():
+	"""Test that detect_crashed_stage only considers task types that were actually requested."""
+	status_data = {
+		'is_ortho_done': True,
+		'is_metadata_done': True,
+		'is_cog_done': True,
+		'is_thumbnail_done': True,
+		'is_deadwood_done': False,  # Not done, but not requested
+		'is_forest_cover_done': False,
+	}
+	# Only requesting up to thumbnail -- deadwood/treecover not in the list
+	task_types = [TaskTypeEnum.geotiff, TaskTypeEnum.metadata, TaskTypeEnum.cog, TaskTypeEnum.thumbnail]
+	assert detect_crashed_stage(status_data, task_types) == 'unknown'
+
+
+def test_detect_crashed_stage_deadwood():
+	"""Test crash detection specifically for deadwood segmentation crash."""
+	status_data = {
+		'is_ortho_done': True,
+		'is_metadata_done': True,
+		'is_cog_done': True,
+		'is_thumbnail_done': True,
+		'is_deadwood_done': False,  # Crashed here
+		'is_forest_cover_done': False,
+		'current_status': 'deadwood_segmentation',
+	}
+	task_types = [
+		TaskTypeEnum.geotiff, TaskTypeEnum.metadata, TaskTypeEnum.cog,
+		TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood, TaskTypeEnum.treecover,
+	]
+	assert detect_crashed_stage(status_data, task_types) == 'deadwood_segmentation'
+
+
+def test_get_completed_stages():
+	"""Test that get_completed_stages returns all completed stages."""
+	status_data = {
+		'is_odm_done': False,
+		'is_ortho_done': True,
+		'is_metadata_done': True,
+		'is_cog_done': True,
+		'is_thumbnail_done': True,
+		'is_deadwood_done': False,
+		'is_forest_cover_done': False,
+	}
+	completed = get_completed_stages(status_data)
+	assert 'ortho_processing' in completed
+	assert 'metadata_processing' in completed
+	assert 'cog_processing' in completed
+	assert 'thumbnail_processing' in completed
+	assert 'deadwood_segmentation' not in completed
+	assert 'forest_cover_segmentation' not in completed
+
+
+def test_get_completed_stages_none_completed():
+	"""Test get_completed_stages when nothing has completed."""
+	status_data = {}
+	completed = get_completed_stages(status_data)
+	assert completed == []
+
+
+@pytest.fixture
+def crashed_dataset_task(test_processor_user, auth_token):
+	"""Create a task that simulates a previous crash (current_status stuck, some stages done)."""
+	task_id = None
+	dataset_id = None
+	try:
+		with use_client(auth_token) as client:
+			# Create dataset
+			dataset_data = {
+				'file_name': 'crash_test_file.tif',
+				'user_id': test_processor_user,
+				'license': 'CC BY',
+				'platform': 'drone',
+				'authors': ['Test Author'],
+				'data_access': 'public',
+				'aquisition_year': 2024,
+				'aquisition_month': 1,
+				'aquisition_day': 1,
+			}
+			dataset_response = client.table(settings.datasets_table).insert(dataset_data).execute()
+			dataset_id = dataset_response.data[0]['id']
+
+			# Create status entry that simulates a crash during deadwood segmentation
+			status_data = {
+				'dataset_id': dataset_id,
+				'is_upload_done': True,
+				'current_status': 'deadwood_segmentation',  # Stuck in non-idle state
+				'is_ortho_done': True,
+				'is_metadata_done': True,
+				'is_cog_done': True,
+				'is_thumbnail_done': True,
+				'is_deadwood_done': False,  # Crashed before completing
+				'is_forest_cover_done': False,
+				'has_error': False,
+			}
+			client.table(settings.statuses_table).insert(status_data).execute()
+
+			# Create queue task
+			task_data = {
+				'dataset_id': dataset_id,
+				'user_id': test_processor_user,
+				'task_types': [
+					TaskTypeEnum.geotiff, TaskTypeEnum.metadata, TaskTypeEnum.cog,
+					TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood, TaskTypeEnum.treecover,
+				],
+				'priority': 1,
+			}
+			response = client.table(settings.queue_table).insert(task_data).execute()
+			task_id = response.data[0]['id']
+
+			yield {'task_id': task_id, 'dataset_id': dataset_id}
+
+	finally:
+		if auth_token:
+			with use_client(auth_token) as client:
+				if task_id:
+					client.table(settings.queue_table).delete().eq('id', task_id).execute()
+				if dataset_id:
+					client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
+					client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
+
+
+def test_background_process_detects_crashed_dataset(crashed_dataset_task, auth_token):
+	"""Test that background_process detects a crashed dataset, marks it as errored,
+	and removes it from the queue."""
+	dataset_id = crashed_dataset_task['dataset_id']
+
+	# Run the background process -- should detect the crash and clear it
+	background_process()
+
+	with use_client(auth_token) as client:
+		# Task should be removed from queue
+		queue_response = (
+			client.table(settings.queue_table).select('*')
+			.eq('id', crashed_dataset_task['task_id']).execute()
+		)
+		assert len(queue_response.data) == 0, 'Crashed task should be removed from queue'
+
+		# Status should be marked as errored with current_status back to idle
+		status_response = (
+			client.table(settings.statuses_table).select('*')
+			.eq('dataset_id', dataset_id).execute()
+		)
+		assert len(status_response.data) == 1
+		status = status_response.data[0]
+		assert status['has_error'] is True, 'Status should have has_error=True'
+		assert status['current_status'] == 'idle', 'Status should be reset to idle'
+		assert 'deadwood_segmentation' in status['error_message'], 'Error should mention crashed stage'

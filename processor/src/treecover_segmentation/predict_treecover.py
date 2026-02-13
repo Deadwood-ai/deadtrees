@@ -8,6 +8,7 @@ import numpy as np
 import rasterio
 import rasterio.warp
 import docker
+import requests
 import tarfile
 import io
 
@@ -256,6 +257,8 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 		LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 	)
 
+	TCD_TIMEOUT_SECONDS = 14400  # 4 hours
+
 	try:
 		# Preflight: ensure image exists
 		try:
@@ -269,8 +272,8 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 				command=['python', '/tcd_data/predict_pipeline.py', input_path, output_path],
 				entrypoint='',
 				volumes={volume_name: {'bind': '/tcd_data', 'mode': 'rw'}},
-				remove=True,
-				detach=False,
+				remove=False,
+				detach=True,
 				user='root',
 				runtime='nvidia',
 				environment={
@@ -287,14 +290,39 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 				device_requests=device_requests,
 			)
 
+		def _run_and_wait(device_requests=None):
+			"""Run container in detached mode with a timeout, then collect output."""
+			container = _run(device_requests=device_requests)
+			try:
+				result = container.wait(timeout=TCD_TIMEOUT_SECONDS)
+				container_output = container.logs()
+				if result['StatusCode'] != 0:
+					logs = container.logs(tail=100).decode('utf-8', errors='replace')
+					raise Exception(f'TCD exited with code {result["StatusCode"]}: {logs}')
+				return container_output
+			except requests.exceptions.ReadTimeout:
+				logger.error(
+					f'TCD container timed out after {TCD_TIMEOUT_SECONDS}s for dataset {dataset_id}',
+					LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+				)
+				container.kill()
+				raise Exception(f'TCD container timed out after {TCD_TIMEOUT_SECONDS // 3600} hours')
+			finally:
+				try:
+					container.remove(force=True)
+				except Exception:
+					pass
+
 		try:
-			container_output = _run(device_requests=[docker.types.DeviceRequest(count=-1, capabilities=[['gpu']])])
+			container_output = _run_and_wait(
+				device_requests=[docker.types.DeviceRequest(count=-1, capabilities=[['gpu']])]
+			)
 		except Exception as gpu_err:
 			logger.warning(
 				f'GPU execution failed for TCD container, retrying on CPU: {gpu_err}',
 				LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 			)
-			container_output = _run(device_requests=None)
+			container_output = _run_and_wait(device_requests=None)
 
 		logger.info(
 			'TCD Pipeline container execution completed successfully',
