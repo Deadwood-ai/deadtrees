@@ -438,8 +438,11 @@ def _handle_bit_depth_conversion(
 			valid_band_data = band_data[valid_mask]
 
 			if len(valid_band_data) > 0:
-				band_min = float(np.min(valid_band_data))
-				band_max = float(np.max(valid_band_data))
+				# Use percentile-based scaling to avoid outlier-skewed contrast stretch.
+				# Raw min/max causes most pixel data to be compressed into a tiny dark range
+				# when a few extreme outlier pixels define the scaling bounds (e.g., WorldView uint16).
+				band_min = float(np.percentile(valid_band_data, 2))
+				band_max = float(np.percentile(valid_band_data, 98))
 			else:
 				# Fallback if no valid data found for this band
 				band_min, band_max = 0.0, 255.0
