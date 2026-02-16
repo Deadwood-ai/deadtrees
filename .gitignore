@@ -5,7 +5,7 @@ processor/src/deadwood_segmentation/models/*
 ml_ready_tiles/*
 /reports/*
 /tmp/*
-
+/docs/projects/paper
 /scratchpad/*
 # docs/projects/*
 freidata/freidata.env
