@@ -5,7 +5,7 @@ from shared import monitoring
 import logging
 
 from shared.__version__ import __version__
-from .routers import process, upload, info, auth, labels, download
+from .routers import process, upload, info, auth, labels, download, dte_stats
 
 app = FastAPI(
 	title='Deadwood-AI API',
@@ -54,6 +54,9 @@ app.include_router(process.router)
 # add thumbnail route to the app
 # app.include_router(thumbnail.router)
 
+
+# add the DTE stats route (public, no auth)
+app.include_router(dte_stats.router)
 
 # add the download routes to the app
 # app.include_router(download.download_app)

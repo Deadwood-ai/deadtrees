@@ -26,3 +26,5 @@ logfire[fastapi,system-metrics]
 pyarrow
 fiona
 pillow
+pyproj
+shapely

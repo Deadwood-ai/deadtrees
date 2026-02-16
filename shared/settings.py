@@ -70,6 +70,9 @@ class Settings(BaseSettings):
 
 	PHENOLOGY_DATA_PATH: str = str(Path('/app/assets/pheno/modispheno_aggregated_normalized_filled.zarr'))
 
+	# DTE maps (deadwood/forest cover COGs)
+	DTE_MAPS_PATH: str = '/data/assets/dte_maps'
+
 	# directly specify the locations for several files
 	ARCHIVE_DIR: str = 'archive'
 	COG_DIR: str = 'cogs'
@@ -217,6 +220,10 @@ class Settings(BaseSettings):
 			path.mkdir(parents=True, exist_ok=True)
 
 		return path
+
+	@property
+	def dte_maps_path(self) -> Path:
+		return Path(self.DTE_MAPS_PATH)
 
 	@property
 	def _tables(self) -> dict:
