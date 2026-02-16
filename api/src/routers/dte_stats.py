@@ -5,6 +5,7 @@ Provides time-series statistics (forest cover, deadwood) aggregated within
 a user-drawn polygon. Reads data directly from COG files on the local filesystem.
 """
 
+import math
 import re
 import logging
 from pathlib import Path
@@ -30,10 +31,12 @@ router = APIRouter(prefix="/dte-stats", tags=["dte-stats"])
 # Max polygon area in km²
 MAX_AREA_KM2 = 1000.0
 
-# Pixel resolution (~19.1m in EPSG:3857, from actual COG metadata)
-PIXEL_SIZE_M = 19.109257
-PIXEL_AREA_M2 = PIXEL_SIZE_M * PIXEL_SIZE_M  # ~365.16 m²
-PIXEL_AREA_HA = PIXEL_AREA_M2 / 10_000  # ~0.03652 ha
+# Pixel resolution in EPSG:3857 Mercator units (from actual COG metadata).
+# IMPORTANT: This is NOT real ground distance. In Web Mercator, distances are
+# inflated by 1/cos(lat), so areas are inflated by 1/cos²(lat).
+# Use compute_pixel_area_ha() to get the real ground-level pixel area.
+PIXEL_SIZE_MERCATOR = 19.109257
+PIXEL_AREA_MERCATOR_M2 = PIXEL_SIZE_MERCATOR * PIXEL_SIZE_MERCATOR  # ~365.16 m² (in projection units)
 
 # COG filename pattern
 COG_PATTERN = re.compile(
@@ -86,6 +89,19 @@ class PolygonStatsResponse(BaseModel):
 
 # --- Utility functions ---
 
+def compute_pixel_area_ha(centroid_lat_deg: float) -> float:
+	"""
+	Compute the real ground-level area of a single pixel in hectares,
+	corrected for Web Mercator projection distortion at the given latitude.
+
+	In EPSG:3857, a "meter" at latitude phi corresponds to cos(phi) real meters
+	on the ground. So pixel area in real m² = mercator_area * cos²(lat).
+	"""
+	cos_lat = math.cos(math.radians(centroid_lat_deg))
+	real_area_m2 = PIXEL_AREA_MERCATOR_M2 * cos_lat * cos_lat
+	return real_area_m2 / 10_000
+
+
 def compute_geodesic_area_km2(geojson_polygon: dict) -> float:
 	"""Compute geodesic area of a GeoJSON polygon (EPSG:4326) in km²."""
 	geod = Geod(ellps="WGS84")
@@ -119,6 +135,7 @@ def discover_available_cogs(maps_dir: Path) -> dict[str, dict[int, Path]]:
 def compute_stats_for_cog(
 	cog_path: Path,
 	polygon_3857: dict,
+	pixel_area_ha: float,
 ) -> tuple[float, int, float]:
 	"""
 	Compute statistics for a single COG file within a polygon.
@@ -126,6 +143,7 @@ def compute_stats_for_cog(
 	Args:
 		cog_path: Path to the COG file
 		polygon_3857: GeoJSON polygon in EPSG:3857
+		pixel_area_ha: Real ground-level pixel area in hectares (latitude-corrected)
 
 	Returns:
 		(mean_pct, pixel_count, weighted_area_ha)
@@ -156,8 +174,8 @@ def compute_stats_for_cog(
 		# Mean percentage (0-100)
 		mean_pct = float(np.mean(fractional) * 100)
 
-		# Weighted area: sum of fractional values × pixel area
-		weighted_area_ha = float(np.sum(fractional) * PIXEL_AREA_HA)
+		# Weighted area: sum of fractional values × latitude-corrected pixel area
+		weighted_area_ha = float(np.sum(fractional) * pixel_area_ha)
 
 		return mean_pct, valid_count, weighted_area_ha
 
@@ -246,6 +264,15 @@ def get_polygon_stats(request: PolygonStatsRequest):
 			detail=f"No DTE map COGs found in {maps_dir}"
 		)
 
+	# Compute latitude-corrected pixel area from polygon centroid
+	poly_geom_4326 = shape(polygon)
+	centroid = poly_geom_4326.centroid
+	pixel_area_ha = compute_pixel_area_ha(centroid.y)
+	logger.info(
+		f"Polygon centroid: lat={centroid.y:.4f}, lon={centroid.x:.4f} — "
+		f"pixel area: {pixel_area_ha:.6f} ha (cos²-corrected from {PIXEL_AREA_MERCATOR_M2/10000:.6f} ha Mercator)"
+	)
+
 	# Transform polygon to EPSG:3857 for raster operations
 	polygon_3857 = transform_polygon_4326_to_3857(polygon)
 
@@ -268,7 +295,7 @@ def get_polygon_stats(request: PolygonStatsRequest):
 					cb = src.bounds
 					logger.info(f"COG deadwood {year} bounds: left={cb.left:.1f}, bottom={cb.bottom:.1f}, right={cb.right:.1f}, top={cb.top:.1f}")
 				mean_pct, count, area_ha = compute_stats_for_cog(
-					cog_path, polygon_3857
+					cog_path, polygon_3857, pixel_area_ha
 				)
 				year_stats.deadwood_mean_pct = round(mean_pct, 2)
 				year_stats.deadwood_pixel_count = count
@@ -285,7 +312,7 @@ def get_polygon_stats(request: PolygonStatsRequest):
 					cb = src.bounds
 					logger.info(f"COG forest {year} bounds: left={cb.left:.1f}, bottom={cb.bottom:.1f}, right={cb.right:.1f}, top={cb.top:.1f}")
 				mean_pct, count, area_ha = compute_stats_for_cog(
-					cog_path, polygon_3857
+					cog_path, polygon_3857, pixel_area_ha
 				)
 				year_stats.forest_mean_pct = round(mean_pct, 2)
 				year_stats.forest_pixel_count = count

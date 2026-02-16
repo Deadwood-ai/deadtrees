@@ -178,6 +178,52 @@ def test_no_cog_data(empty_cog_dir):
 	assert "No DTE map COGs found" in response.json()["detail"]
 
 
+def test_mercator_area_correction(synthetic_cog_dir):
+	"""
+	Verify that the area calculation applies the cos²(lat) Mercator correction.
+
+	At lat ~51.785° (Harz test polygon centroid), cos²(lat) ≈ 0.387,
+	so the corrected pixel area should be ~38.7% of the raw Mercator pixel area.
+	"""
+	import math
+	from api.src.routers.dte_stats import compute_pixel_area_ha, PIXEL_AREA_MERCATOR_M2
+
+	centroid_lat = 51.785  # approximate centroid of TEST_POLYGON_WGS84
+	corrected_ha = compute_pixel_area_ha(centroid_lat)
+	mercator_ha = PIXEL_AREA_MERCATOR_M2 / 10_000
+
+	# The corrected area must be significantly smaller than the Mercator area
+	assert corrected_ha < mercator_ha * 0.5, (
+		f"Corrected area {corrected_ha:.6f} ha should be < 50% of "
+		f"Mercator area {mercator_ha:.6f} ha at lat {centroid_lat}°"
+	)
+
+	# Check against known cos² value
+	expected_ratio = math.cos(math.radians(centroid_lat)) ** 2
+	actual_ratio = corrected_ha / mercator_ha
+	assert abs(actual_ratio - expected_ratio) < 0.001, (
+		f"Ratio {actual_ratio:.4f} should match cos²({centroid_lat}°) = {expected_ratio:.4f}"
+	)
+
+	# Verify the endpoint returns area values using the corrected pixel area
+	response = client.post(
+		"/dte-stats/polygon",
+		json={"polygon": TEST_POLYGON_WGS84},
+	)
+	assert response.status_code == 200
+	data = response.json()
+
+	# With corrected area, forest/deadwood area should be reasonable
+	# (not inflated by ~2.5x as with uncorrected Mercator)
+	for stat in data["stats"]:
+		if stat["forest_area_ha"] is not None and stat["forest_pixel_count"]:
+			max_possible_ha = stat["forest_pixel_count"] * corrected_ha
+			assert stat["forest_area_ha"] <= max_possible_ha + 0.01, (
+				f"Forest area {stat['forest_area_ha']} ha exceeds max possible "
+				f"{max_possible_ha:.4f} ha ({stat['forest_pixel_count']} pixels × {corrected_ha:.6f} ha)"
+			)
+
+
 def test_polygon_stats_with_real_data():
 	"""
 	Integration test using real COG clips already on disk.
