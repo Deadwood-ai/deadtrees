@@ -1,8 +1,11 @@
 """
 DTE Maps Statistics Endpoint
 
-Provides time-series statistics (forest cover, deadwood) aggregated within
-a user-drawn polygon. Reads data directly from COG files on the local filesystem.
+Provides time-series statistics (tree cover, standing deadwood) aggregated within
+a user-drawn polygon. Uses threshold-based pixel counting: a pixel counts as
+"affected" if its cover value exceeds a threshold (default 20%).
+
+Reads data directly from COG files on the local filesystem.
 """
 
 import math
@@ -38,6 +41,10 @@ MAX_AREA_KM2 = 1000.0
 PIXEL_SIZE_MERCATOR = 19.109257
 PIXEL_AREA_MERCATOR_M2 = PIXEL_SIZE_MERCATOR * PIXEL_SIZE_MERCATOR  # ~365.16 m² (in projection units)
 
+# Cover threshold: pixels with fractional cover above this are counted as "affected".
+# 20% = 0.20 (i.e. pixel value > 51 on a 0-255 scale)
+COVER_THRESHOLD = 0.20
+
 # COG filename pattern
 COG_PATTERN = re.compile(
 	r"run_v1004_v1000_crop_half_fold_None_checkpoint_199_(deadwood|forest)_(\d{4})\.cog\.tif"
@@ -63,12 +70,10 @@ class PolygonStatsRequest(BaseModel):
 class YearStats(BaseModel):
 	"""Statistics for a single year."""
 	year: int
-	deadwood_mean_pct: Optional[float] = Field(None, description="Mean deadwood fractional cover (%)")
-	deadwood_pixel_count: Optional[int] = Field(None, description="Number of valid deadwood pixels")
-	deadwood_area_ha: Optional[float] = Field(None, description="Deadwood-weighted area in hectares")
-	forest_mean_pct: Optional[float] = Field(None, description="Mean forest fractional cover (%)")
-	forest_pixel_count: Optional[int] = Field(None, description="Number of valid forest pixels")
-	forest_area_ha: Optional[float] = Field(None, description="Forest-weighted area in hectares")
+	deadwood_pixel_count: Optional[int] = Field(None, description="Pixels with mortality cover > threshold")
+	deadwood_area_ha: Optional[float] = Field(None, description="Area affected by standing deadwood (ha)")
+	tree_cover_pixel_count: Optional[int] = Field(None, description="Pixels with tree cover > threshold")
+	tree_cover_area_ha: Optional[float] = Field(None, description="Tree-covered area (ha)")
 
 
 class CoverageBounds(BaseModel):
@@ -82,6 +87,7 @@ class CoverageBounds(BaseModel):
 class PolygonStatsResponse(BaseModel):
 	"""Response with time-series statistics."""
 	polygon_area_km2: float = Field(..., description="Geodesic area of the polygon in km²")
+	cover_threshold_pct: float = Field(..., description="Cover threshold used (e.g. 20 means >20%)")
 	available_years: list[int] = Field(..., description="Years with data")
 	stats: list[YearStats] = Field(..., description="Per-year statistics")
 	coverage_bounds: Optional[CoverageBounds] = Field(None, description="Geographic bounds of available data")
@@ -136,20 +142,25 @@ def compute_stats_for_cog(
 	cog_path: Path,
 	polygon_3857: dict,
 	pixel_area_ha: float,
-) -> tuple[float, int, float]:
+	threshold: float = COVER_THRESHOLD,
+) -> tuple[int, float]:
 	"""
-	Compute statistics for a single COG file within a polygon.
+	Count pixels exceeding a cover threshold within a polygon.
+
+	A pixel is counted as "affected" if its fractional cover (0-255 scaled
+	to 0.0-1.0) exceeds the threshold. The area is simply
+	count(affected_pixels) * pixel_area_ha.
 
 	Args:
 		cog_path: Path to the COG file
 		polygon_3857: GeoJSON polygon in EPSG:3857
 		pixel_area_ha: Real ground-level pixel area in hectares (latitude-corrected)
+		threshold: Fractional cover threshold (0.0-1.0), default 0.20
 
 	Returns:
-		(mean_pct, pixel_count, weighted_area_ha)
+		(affected_pixel_count, affected_area_ha)
 	"""
 	with rasterio.open(str(cog_path)) as src:
-		# Mask the raster with the polygon
 		out_image, out_transform = rasterio_mask(
 			src,
 			[polygon_3857],
@@ -158,26 +169,19 @@ def compute_stats_for_cog(
 			filled=True,
 		)
 
-		# Get the first band
 		band = out_image[0].astype(np.float64)
 
-		# Valid pixels (nodata=0, so values > 0 are valid)
-		valid_mask = band > 0
-		valid_count = int(np.sum(valid_mask))
+		# Normalize 0-255 to 0-1 fractional cover, excluding nodata (0)
+		fractional = band / 255.0
 
-		if valid_count == 0:
-			return 0.0, 0, 0.0
+		# Count pixels exceeding the threshold (nodata pixels have value 0,
+		# which is below any positive threshold, so they are excluded)
+		affected_mask = fractional > threshold
+		affected_count = int(np.sum(affected_mask))
 
-		# Normalize 0-255 to 0-1 fractional cover
-		fractional = band[valid_mask] / 255.0
+		affected_area_ha = affected_count * pixel_area_ha
 
-		# Mean percentage (0-100)
-		mean_pct = float(np.mean(fractional) * 100)
-
-		# Weighted area: sum of fractional values × latitude-corrected pixel area
-		weighted_area_ha = float(np.sum(fractional) * pixel_area_ha)
-
-		return mean_pct, valid_count, weighted_area_ha
+		return affected_count, affected_area_ha
 
 
 def transform_polygon_4326_to_3857(geojson_polygon: dict) -> dict:
@@ -283,48 +287,48 @@ def get_polygon_stats(request: PolygonStatsRequest):
 
 	# Compute stats for each year
 	stats: list[YearStats] = []
+	threshold_pct = COVER_THRESHOLD * 100
 
 	for year in all_years:
 		year_stats = YearStats(year=year)
 
-		# Deadwood
+		# Deadwood (standing deadwood / mortality)
 		if year in cog_map["deadwood"]:
 			try:
 				cog_path = cog_map["deadwood"][year]
 				with rasterio.open(str(cog_path)) as src:
 					cb = src.bounds
 					logger.info(f"COG deadwood {year} bounds: left={cb.left:.1f}, bottom={cb.bottom:.1f}, right={cb.right:.1f}, top={cb.top:.1f}")
-				mean_pct, count, area_ha = compute_stats_for_cog(
+				count, area_ha = compute_stats_for_cog(
 					cog_path, polygon_3857, pixel_area_ha
 				)
-				year_stats.deadwood_mean_pct = round(mean_pct, 2)
 				year_stats.deadwood_pixel_count = count
 				year_stats.deadwood_area_ha = round(area_ha, 4)
-				logger.info(f"Deadwood {year}: mean={mean_pct:.2f}%, count={count}, area={area_ha:.4f}ha")
+				logger.info(f"Deadwood {year}: pixels>{threshold_pct:.0f}%={count}, area={area_ha:.4f}ha")
 			except Exception as e:
 				logger.error(f"Error computing deadwood stats for {year}: {e}", exc_info=True)
 
-		# Forest
+		# Tree cover
 		if year in cog_map["forest"]:
 			try:
 				cog_path = cog_map["forest"][year]
 				with rasterio.open(str(cog_path)) as src:
 					cb = src.bounds
-					logger.info(f"COG forest {year} bounds: left={cb.left:.1f}, bottom={cb.bottom:.1f}, right={cb.right:.1f}, top={cb.top:.1f}")
-				mean_pct, count, area_ha = compute_stats_for_cog(
+					logger.info(f"COG tree_cover {year} bounds: left={cb.left:.1f}, bottom={cb.bottom:.1f}, right={cb.right:.1f}, top={cb.top:.1f}")
+				count, area_ha = compute_stats_for_cog(
 					cog_path, polygon_3857, pixel_area_ha
 				)
-				year_stats.forest_mean_pct = round(mean_pct, 2)
-				year_stats.forest_pixel_count = count
-				year_stats.forest_area_ha = round(area_ha, 4)
-				logger.info(f"Forest {year}: mean={mean_pct:.2f}%, count={count}, area={area_ha:.4f}ha")
+				year_stats.tree_cover_pixel_count = count
+				year_stats.tree_cover_area_ha = round(area_ha, 4)
+				logger.info(f"Tree cover {year}: pixels>{threshold_pct:.0f}%={count}, area={area_ha:.4f}ha")
 			except Exception as e:
-				logger.error(f"Error computing forest stats for {year}: {e}", exc_info=True)
+				logger.error(f"Error computing tree cover stats for {year}: {e}", exc_info=True)
 
 		stats.append(year_stats)
 
 	return PolygonStatsResponse(
 		polygon_area_km2=round(area_km2, 4),
+		cover_threshold_pct=threshold_pct,
 		available_years=all_years,
 		stats=stats,
 	)

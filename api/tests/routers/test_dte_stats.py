@@ -104,7 +104,7 @@ def empty_cog_dir():
 # ===================================================================
 
 def test_polygon_stats_with_synthetic_data(synthetic_cog_dir):
-	"""Test the endpoint with synthetic COG data."""
+	"""Test the endpoint with synthetic COG data (threshold-based counting)."""
 	response = client.post(
 		"/dte-stats/polygon",
 		json={"polygon": TEST_POLYGON_WGS84},
@@ -115,24 +115,24 @@ def test_polygon_stats_with_synthetic_data(synthetic_cog_dir):
 
 	# Structure
 	assert "polygon_area_km2" in data
+	assert "cover_threshold_pct" in data
 	assert "available_years" in data
 	assert "stats" in data
 	assert data["polygon_area_km2"] > 0
 	assert data["polygon_area_km2"] < MAX_AREA_KM2
+	assert data["cover_threshold_pct"] == 20.0
 	assert len(data["available_years"]) == 3
 	assert data["available_years"] == [2020, 2022, 2025]
 
-	# Per-year stats
+	# Per-year stats (threshold-based: pixel counts and area)
 	for stat in data["stats"]:
 		assert "year" in stat
-		assert stat["deadwood_mean_pct"] is not None
-		assert stat["forest_mean_pct"] is not None
-		assert stat["deadwood_mean_pct"] >= 0
-		assert stat["forest_mean_pct"] >= 0
-		assert stat["deadwood_pixel_count"] > 0
-		assert stat["forest_pixel_count"] > 0
+		assert stat["deadwood_pixel_count"] is not None
+		assert stat["tree_cover_pixel_count"] is not None
+		assert stat["deadwood_pixel_count"] >= 0
+		assert stat["tree_cover_pixel_count"] >= 0
 		assert stat["deadwood_area_ha"] >= 0
-		assert stat["forest_area_ha"] >= 0
+		assert stat["tree_cover_area_ha"] >= 0
 
 
 def test_polygon_too_large():
@@ -213,14 +213,14 @@ def test_mercator_area_correction(synthetic_cog_dir):
 	assert response.status_code == 200
 	data = response.json()
 
-	# With corrected area, forest/deadwood area should be reasonable
-	# (not inflated by ~2.5x as with uncorrected Mercator)
+	# With threshold counting, area = pixel_count * corrected_ha
+	# So area must be exactly pixel_count * corrected_ha (within rounding)
 	for stat in data["stats"]:
-		if stat["forest_area_ha"] is not None and stat["forest_pixel_count"]:
-			max_possible_ha = stat["forest_pixel_count"] * corrected_ha
-			assert stat["forest_area_ha"] <= max_possible_ha + 0.01, (
-				f"Forest area {stat['forest_area_ha']} ha exceeds max possible "
-				f"{max_possible_ha:.4f} ha ({stat['forest_pixel_count']} pixels × {corrected_ha:.6f} ha)"
+		if stat["tree_cover_area_ha"] is not None and stat["tree_cover_pixel_count"]:
+			expected_ha = stat["tree_cover_pixel_count"] * corrected_ha
+			assert abs(stat["tree_cover_area_ha"] - expected_ha) < 0.01, (
+				f"Tree cover area {stat['tree_cover_area_ha']} ha should equal "
+				f"{expected_ha:.4f} ha ({stat['tree_cover_pixel_count']} pixels × {corrected_ha:.6f} ha)"
 			)
 
 
@@ -245,7 +245,7 @@ def test_polygon_stats_with_real_data():
 	assert data["polygon_area_km2"] > 0
 
 	for stat in data["stats"]:
-		if stat["forest_mean_pct"] is not None:
-			assert 0 <= stat["forest_mean_pct"] <= 100
-		if stat["deadwood_mean_pct"] is not None:
-			assert 0 <= stat["deadwood_mean_pct"] <= 100
+		if stat["tree_cover_area_ha"] is not None:
+			assert stat["tree_cover_area_ha"] >= 0
+		if stat["deadwood_area_ha"] is not None:
+			assert stat["deadwood_area_ha"] >= 0
