@@ -283,6 +283,9 @@ def bundle_multi_dataset(
 						for label in type_labels:
 							label_to_geopackage(str(label_file), label)
 						
+						# Add unified AOI layer to the GeoPackage
+						export_dataset_aois(dataset.id, str(label_file))
+						
 						# Add to archive with ID-based name (always use ID for labels)
 						archive_name = f'labels_{label_type.value}_{dataset.id}.gpkg'
 						if label_file.exists():
@@ -634,6 +637,9 @@ def bundle_dataset(
 						# Process each label into the GeoPackage
 						for label in type_labels:
 							label_to_geopackage(str(label_file), label)
+
+						# Add unified AOI layer to the GeoPackage
+						export_dataset_aois(dataset.id, str(label_file))
 
 						# Add to archive with appropriate name
 						archive_name = f'labels_{label_type.value}_{dataset.id}.gpkg'
