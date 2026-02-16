@@ -107,6 +107,7 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 				'width': target_width,
 				'height': target_height,
 				'nodata': 0,
+				'BIGTIFF': 'YES',
 			}
 		)
 
