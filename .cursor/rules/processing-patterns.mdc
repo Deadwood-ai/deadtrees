@@ -75,6 +75,7 @@ DEBUG_ODM_ZIP=$(pwd)/assets/test_data/debugging/<id>/<id>.zip \
 | Issue | Cause | Solution |
 |-------|-------|----------|
 | "Chunk and warp failed" | Untiled ortho | Ensure `standardise_geotiff()` ran first |
+| "Maximum TIFF file size exceeded" | Reprojected file > 4GB | Fixed: `BIGTIFF=YES` in `_reproject_orthomosaic_for_tcd` profile |
 | CUDA OOM | Tile too large | Reduce batch size |
 | Missing model | Assets not downloaded | `make download-assets` |
 
@@ -97,6 +98,20 @@ def pull_file_from_storage_server(remote_path, local_path, ...):
 1. Downstream tasks (COG, thumbnail, segmentation) run in same pipeline
 2. SSH skip-if-exists reuses local tiled file
 3. Original preserved in `/data/archive/` for reproducibility
+
+**CRITICAL: Re-queuing individual tasks**
+The standardized file is ephemeral — it only exists in `processing_dir` during a pipeline run. When re-queuing any downstream task individually (e.g., just treecover, just COG), you **MUST always include `geotiff`** (standardization) as well, otherwise the task will run against the raw unstandardized file from `/data/archive/` and fail or produce wrong results.
+
+```python
+# ❌ WRONG: re-queue treecover alone — will use raw uint16 file
+task_types = ['treecover']
+
+# ✅ CORRECT: always include geotiff so standardization runs first
+task_types = ['geotiff', 'treecover']
+
+# ✅ CORRECT: any subset of downstream tasks must include geotiff
+task_types = ['geotiff', 'cog', 'thumbnail']
+```
 
 ---
 
