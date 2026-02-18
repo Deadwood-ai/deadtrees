@@ -303,22 +303,29 @@ def fetch_upload_details(client: Client, period_start: datetime) -> tuple[dict, 
 
 
 def fetch_linear_issue(dataset_id: int) -> Optional[dict]:
-	"""Fetch Linear issue info for a dataset failure."""
+	"""Fetch Linear issue info for a dataset failure.
+	
+	Validates that the returned issue actually references the dataset ID
+	in its title or description to avoid fuzzy search false positives.
+	"""
 	if not settings.LINEAR_ENABLED or not settings.LINEAR_API_KEY:
 		return None
 
 	query = '''
 	query SearchIssues($term: String!) {
-		searchIssues(term: $term, first: 1) {
+		searchIssues(term: $term, first: 5) {
 			nodes {
 				identifier
 				url
+				title
+				description
 			}
 		}
 	}
 	'''
 
 	query_text = f'Dataset ID: {dataset_id}'
+	dataset_id_str = str(dataset_id)
 
 	try:
 		with httpx.Client(timeout=10) as client:
@@ -337,12 +344,15 @@ def fetch_linear_issue(dataset_id: int) -> Optional[dict]:
 			if response.status_code == 200:
 				data = response.json()
 				nodes = data.get('data', {}).get('searchIssues', {}).get('nodes', [])
-				if nodes:
-					issue = nodes[0]
-					return {
-						'identifier': issue.get('identifier'),
-						'url': issue.get('url'),
-					}
+				for issue in nodes:
+					title = issue.get('title', '') or ''
+					description = issue.get('description', '') or ''
+					searchable = f"{title} {description}"
+					if dataset_id_str in searchable:
+						return {
+							'identifier': issue.get('identifier'),
+							'url': issue.get('url'),
+						}
 	except Exception as e:
 		print(f"Warning: Failed to fetch Linear issue for dataset {dataset_id}: {e}")
 
