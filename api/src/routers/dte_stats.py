@@ -70,10 +70,16 @@ class PolygonStatsRequest(BaseModel):
 class YearStats(BaseModel):
 	"""Statistics for a single year."""
 	year: int
+	# Threshold-based (binary): pixel count and area where cover > threshold
 	deadwood_pixel_count: Optional[int] = Field(None, description="Pixels with mortality cover > threshold")
 	deadwood_area_ha: Optional[float] = Field(None, description="Area affected by standing deadwood (ha)")
 	tree_cover_pixel_count: Optional[int] = Field(None, description="Pixels with tree cover > threshold")
 	tree_cover_area_ha: Optional[float] = Field(None, description="Tree-covered area (ha)")
+	# Continuous (fractional): weighted sum and mean of fractional cover
+	deadwood_continuous_area_ha: Optional[float] = Field(None, description="Deadwood fractional cover weighted area (ha)")
+	deadwood_mean_pct: Optional[float] = Field(None, description="Mean deadwood fractional cover (%)")
+	tree_cover_continuous_area_ha: Optional[float] = Field(None, description="Tree cover fractional cover weighted area (ha)")
+	tree_cover_mean_pct: Optional[float] = Field(None, description="Mean tree fractional cover (%)")
 
 
 class CoverageBounds(BaseModel):
@@ -138,18 +144,37 @@ def discover_available_cogs(maps_dir: Path) -> dict[str, dict[int, Path]]:
 	return result
 
 
+class CogStats:
+	"""Results from a single COG raster analysis."""
+	__slots__ = (
+		"threshold_count", "threshold_area_ha",
+		"continuous_area_ha", "mean_pct", "valid_count",
+	)
+
+	def __init__(
+		self,
+		threshold_count: int,
+		threshold_area_ha: float,
+		continuous_area_ha: float,
+		mean_pct: float,
+		valid_count: int,
+	):
+		self.threshold_count = threshold_count
+		self.threshold_area_ha = threshold_area_ha
+		self.continuous_area_ha = continuous_area_ha
+		self.mean_pct = mean_pct
+		self.valid_count = valid_count
+
+
 def compute_stats_for_cog(
 	cog_path: Path,
 	polygon_3857: dict,
 	pixel_area_ha: float,
 	threshold: float = COVER_THRESHOLD,
-) -> tuple[int, float]:
+) -> CogStats:
 	"""
-	Count pixels exceeding a cover threshold within a polygon.
-
-	A pixel is counted as "affected" if its fractional cover (0-255 scaled
-	to 0.0-1.0) exceeds the threshold. The area is simply
-	count(affected_pixels) * pixel_area_ha.
+	Compute both threshold-based and continuous statistics for a single COG
+	within a polygon, in a single raster pass.
 
 	Args:
 		cog_path: Path to the COG file
@@ -158,7 +183,7 @@ def compute_stats_for_cog(
 		threshold: Fractional cover threshold (0.0-1.0), default 0.20
 
 	Returns:
-		(affected_pixel_count, affected_area_ha)
+		CogStats with threshold and continuous results
 	"""
 	with rasterio.open(str(cog_path)) as src:
 		out_image, out_transform = rasterio_mask(
@@ -170,18 +195,32 @@ def compute_stats_for_cog(
 		)
 
 		band = out_image[0].astype(np.float64)
-
-		# Normalize 0-255 to 0-1 fractional cover, excluding nodata (0)
 		fractional = band / 255.0
 
-		# Count pixels exceeding the threshold (nodata pixels have value 0,
-		# which is below any positive threshold, so they are excluded)
-		affected_mask = fractional > threshold
-		affected_count = int(np.sum(affected_mask))
+		# Valid pixels: value > 0 (nodata pixels are 0)
+		valid_mask = fractional > 0
+		valid_count = int(np.sum(valid_mask))
 
-		affected_area_ha = affected_count * pixel_area_ha
+		if valid_count == 0:
+			return CogStats(0, 0.0, 0.0, 0.0, 0)
 
-		return affected_count, affected_area_ha
+		valid_values = fractional[valid_mask]
+
+		# Threshold-based: count pixels exceeding the threshold
+		affected_count = int(np.sum(valid_values > threshold))
+		threshold_area_ha = affected_count * pixel_area_ha
+
+		# Continuous: weighted sum and mean of fractional cover
+		continuous_area_ha = float(np.sum(valid_values) * pixel_area_ha)
+		mean_pct = float(np.mean(valid_values) * 100)
+
+		return CogStats(
+			threshold_count=affected_count,
+			threshold_area_ha=threshold_area_ha,
+			continuous_area_ha=continuous_area_ha,
+			mean_pct=mean_pct,
+			valid_count=valid_count,
+		)
 
 
 def transform_polygon_4326_to_3857(geojson_polygon: dict) -> dict:
@@ -296,15 +335,15 @@ def get_polygon_stats(request: PolygonStatsRequest):
 		if year in cog_map["deadwood"]:
 			try:
 				cog_path = cog_map["deadwood"][year]
-				with rasterio.open(str(cog_path)) as src:
-					cb = src.bounds
-					logger.info(f"COG deadwood {year} bounds: left={cb.left:.1f}, bottom={cb.bottom:.1f}, right={cb.right:.1f}, top={cb.top:.1f}")
-				count, area_ha = compute_stats_for_cog(
-					cog_path, polygon_3857, pixel_area_ha
+				s = compute_stats_for_cog(cog_path, polygon_3857, pixel_area_ha)
+				year_stats.deadwood_pixel_count = s.threshold_count
+				year_stats.deadwood_area_ha = round(s.threshold_area_ha, 4)
+				year_stats.deadwood_continuous_area_ha = round(s.continuous_area_ha, 4)
+				year_stats.deadwood_mean_pct = round(s.mean_pct, 2)
+				logger.info(
+					f"Deadwood {year}: threshold={s.threshold_count}px/{s.threshold_area_ha:.4f}ha, "
+					f"continuous={s.continuous_area_ha:.4f}ha, mean={s.mean_pct:.2f}%"
 				)
-				year_stats.deadwood_pixel_count = count
-				year_stats.deadwood_area_ha = round(area_ha, 4)
-				logger.info(f"Deadwood {year}: pixels>{threshold_pct:.0f}%={count}, area={area_ha:.4f}ha")
 			except Exception as e:
 				logger.error(f"Error computing deadwood stats for {year}: {e}", exc_info=True)
 
@@ -312,15 +351,15 @@ def get_polygon_stats(request: PolygonStatsRequest):
 		if year in cog_map["forest"]:
 			try:
 				cog_path = cog_map["forest"][year]
-				with rasterio.open(str(cog_path)) as src:
-					cb = src.bounds
-					logger.info(f"COG tree_cover {year} bounds: left={cb.left:.1f}, bottom={cb.bottom:.1f}, right={cb.right:.1f}, top={cb.top:.1f}")
-				count, area_ha = compute_stats_for_cog(
-					cog_path, polygon_3857, pixel_area_ha
+				s = compute_stats_for_cog(cog_path, polygon_3857, pixel_area_ha)
+				year_stats.tree_cover_pixel_count = s.threshold_count
+				year_stats.tree_cover_area_ha = round(s.threshold_area_ha, 4)
+				year_stats.tree_cover_continuous_area_ha = round(s.continuous_area_ha, 4)
+				year_stats.tree_cover_mean_pct = round(s.mean_pct, 2)
+				logger.info(
+					f"Tree cover {year}: threshold={s.threshold_count}px/{s.threshold_area_ha:.4f}ha, "
+					f"continuous={s.continuous_area_ha:.4f}ha, mean={s.mean_pct:.2f}%"
 				)
-				year_stats.tree_cover_pixel_count = count
-				year_stats.tree_cover_area_ha = round(area_ha, 4)
-				logger.info(f"Tree cover {year}: pixels>{threshold_pct:.0f}%={count}, area={area_ha:.4f}ha")
 			except Exception as e:
 				logger.error(f"Error computing tree cover stats for {year}: {e}", exc_info=True)
 

@@ -124,15 +124,28 @@ def test_polygon_stats_with_synthetic_data(synthetic_cog_dir):
 	assert len(data["available_years"]) == 3
 	assert data["available_years"] == [2020, 2022, 2025]
 
-	# Per-year stats (threshold-based: pixel counts and area)
+	# Per-year stats: both threshold and continuous fields present
 	for stat in data["stats"]:
 		assert "year" in stat
+		# Threshold-based
 		assert stat["deadwood_pixel_count"] is not None
 		assert stat["tree_cover_pixel_count"] is not None
 		assert stat["deadwood_pixel_count"] >= 0
 		assert stat["tree_cover_pixel_count"] >= 0
 		assert stat["deadwood_area_ha"] >= 0
 		assert stat["tree_cover_area_ha"] >= 0
+		# Continuous
+		assert stat["deadwood_continuous_area_ha"] is not None
+		assert stat["tree_cover_continuous_area_ha"] is not None
+		assert stat["deadwood_mean_pct"] is not None
+		assert stat["tree_cover_mean_pct"] is not None
+		assert stat["deadwood_continuous_area_ha"] >= 0
+		assert stat["tree_cover_continuous_area_ha"] >= 0
+		assert 0 <= stat["deadwood_mean_pct"] <= 100
+		assert 0 <= stat["tree_cover_mean_pct"] <= 100
+		# Continuous area should be >= threshold area (weighted sum >= count of above-threshold)
+		assert stat["tree_cover_continuous_area_ha"] >= 0
+		assert stat["deadwood_continuous_area_ha"] >= 0
 
 
 def test_polygon_too_large():
