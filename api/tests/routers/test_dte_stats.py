@@ -115,12 +115,14 @@ def test_polygon_stats_with_synthetic_data(synthetic_cog_dir):
 
 	# Structure
 	assert "polygon_area_km2" in data
-	assert "cover_threshold_pct" in data
+	assert "tree_cover_threshold_pct" in data
+	assert "deadwood_threshold_pct" in data
 	assert "available_years" in data
 	assert "stats" in data
 	assert data["polygon_area_km2"] > 0
 	assert data["polygon_area_km2"] < MAX_AREA_KM2
-	assert data["cover_threshold_pct"] == 20.0
+	assert data["tree_cover_threshold_pct"] == 10.0
+	assert data["deadwood_threshold_pct"] == 50.0
 	assert len(data["available_years"]) == 3
 	assert data["available_years"] == [2020, 2022, 2025]
 

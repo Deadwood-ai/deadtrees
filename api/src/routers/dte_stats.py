@@ -2,8 +2,7 @@
 DTE Maps Statistics Endpoint
 
 Provides time-series statistics (tree cover, standing deadwood) aggregated within
-a user-drawn polygon. Uses threshold-based pixel counting: a pixel counts as
-"affected" if its cover value exceeds a threshold (default 20%).
+a user-drawn polygon. Uses per-type thresholds: tree cover >10%, deadwood >50%.
 
 Reads data directly from COG files on the local filesystem.
 """
@@ -41,9 +40,10 @@ MAX_AREA_KM2 = 1000.0
 PIXEL_SIZE_MERCATOR = 19.109257
 PIXEL_AREA_MERCATOR_M2 = PIXEL_SIZE_MERCATOR * PIXEL_SIZE_MERCATOR  # ~365.16 m² (in projection units)
 
-# Cover threshold: pixels with fractional cover above this are counted as "affected".
-# 20% = 0.20 (i.e. pixel value > 51 on a 0-255 scale)
-COVER_THRESHOLD = 0.20
+# Per-type cover thresholds: a pixel is counted as "affected" if its
+# fractional cover exceeds this value.
+TREE_COVER_THRESHOLD = 0.10  # 10% — captures sparse forests and open canopy
+DEADWOOD_THRESHOLD = 0.50    # 50% — high confidence for standing deadwood
 
 # COG filename pattern
 COG_PATTERN = re.compile(
@@ -93,7 +93,8 @@ class CoverageBounds(BaseModel):
 class PolygonStatsResponse(BaseModel):
 	"""Response with time-series statistics."""
 	polygon_area_km2: float = Field(..., description="Geodesic area of the polygon in km²")
-	cover_threshold_pct: float = Field(..., description="Cover threshold used (e.g. 20 means >20%)")
+	tree_cover_threshold_pct: float = Field(..., description="Tree cover threshold (e.g. 10 means >10%)")
+	deadwood_threshold_pct: float = Field(..., description="Deadwood threshold (e.g. 50 means >50%)")
 	available_years: list[int] = Field(..., description="Years with data")
 	stats: list[YearStats] = Field(..., description="Per-year statistics")
 	coverage_bounds: Optional[CoverageBounds] = Field(None, description="Geographic bounds of available data")
@@ -170,7 +171,7 @@ def compute_stats_for_cog(
 	cog_path: Path,
 	polygon_3857: dict,
 	pixel_area_ha: float,
-	threshold: float = COVER_THRESHOLD,
+	threshold: float = 0.10,
 ) -> CogStats:
 	"""
 	Compute both threshold-based and continuous statistics for a single COG
@@ -326,16 +327,15 @@ def get_polygon_stats(request: PolygonStatsRequest):
 
 	# Compute stats for each year
 	stats: list[YearStats] = []
-	threshold_pct = COVER_THRESHOLD * 100
 
 	for year in all_years:
 		year_stats = YearStats(year=year)
 
-		# Deadwood (standing deadwood / mortality)
+		# Deadwood (standing deadwood / mortality) — threshold 50%
 		if year in cog_map["deadwood"]:
 			try:
 				cog_path = cog_map["deadwood"][year]
-				s = compute_stats_for_cog(cog_path, polygon_3857, pixel_area_ha)
+				s = compute_stats_for_cog(cog_path, polygon_3857, pixel_area_ha, threshold=DEADWOOD_THRESHOLD)
 				year_stats.deadwood_pixel_count = s.threshold_count
 				year_stats.deadwood_area_ha = round(s.threshold_area_ha, 4)
 				year_stats.deadwood_continuous_area_ha = round(s.continuous_area_ha, 4)
@@ -347,11 +347,11 @@ def get_polygon_stats(request: PolygonStatsRequest):
 			except Exception as e:
 				logger.error(f"Error computing deadwood stats for {year}: {e}", exc_info=True)
 
-		# Tree cover
+		# Tree cover — threshold 10%
 		if year in cog_map["forest"]:
 			try:
 				cog_path = cog_map["forest"][year]
-				s = compute_stats_for_cog(cog_path, polygon_3857, pixel_area_ha)
+				s = compute_stats_for_cog(cog_path, polygon_3857, pixel_area_ha, threshold=TREE_COVER_THRESHOLD)
 				year_stats.tree_cover_pixel_count = s.threshold_count
 				year_stats.tree_cover_area_ha = round(s.threshold_area_ha, 4)
 				year_stats.tree_cover_continuous_area_ha = round(s.continuous_area_ha, 4)
@@ -367,7 +367,8 @@ def get_polygon_stats(request: PolygonStatsRequest):
 
 	return PolygonStatsResponse(
 		polygon_area_km2=round(area_km2, 4),
-		cover_threshold_pct=threshold_pct,
+		tree_cover_threshold_pct=TREE_COVER_THRESHOLD * 100,
+		deadwood_threshold_pct=DEADWOOD_THRESHOLD * 100,
 		available_years=all_years,
 		stats=stats,
 	)
