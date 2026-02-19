@@ -251,6 +251,7 @@ def fetch_upload_details(client: Client, period_start: datetime) -> tuple[dict, 
 	"""Fetch country breakdown and uploader emails"""
 	countries = {}
 	uploaders = set()
+	unknown_country_count = 0
 	period_str = period_start.isoformat()
 	
 	# Get datasets with metadata (for country)
@@ -277,14 +278,18 @@ def fetch_upload_details(client: Client, period_start: datetime) -> tuple[dict, 
 			else:
 				metadata_row = None
 			
+			country = None
 			if metadata_row:
 				metadata = metadata_row.get("metadata", {})
 				if isinstance(metadata, dict):
 					gadm = metadata.get("gadm", {})
 					if isinstance(gadm, dict):
 						country = gadm.get("admin_level_1")
-						if country:
-							countries[country] = countries.get(country, 0) + 1
+			
+			if country:
+				countries[country] = countries.get(country, 0) + 1
+			else:
+				unknown_country_count += 1
 	
 	# Fetch user emails using service role (auth.users access)
 	if user_ids:
@@ -299,14 +304,18 @@ def fetch_upload_details(client: Client, period_start: datetime) -> tuple[dict, 
 			except Exception as e:
 				print(f"Warning: Could not fetch user {user_id}: {e}")
 	
+	if unknown_country_count > 0:
+		countries["Unknown"] = unknown_country_count
+	
 	return countries, list(uploaders)
 
 
-def fetch_linear_issue(dataset_id: int) -> Optional[dict]:
+def fetch_linear_issue(dataset_id: int, period_start: datetime, period_end: datetime) -> Optional[dict]:
 	"""Fetch Linear issue info for a dataset failure.
 	
 	Validates that the returned issue actually references the dataset ID
 	in its title or description to avoid fuzzy search false positives.
+	Only links issues updated in the current summary period.
 	"""
 	if not settings.LINEAR_ENABLED or not settings.LINEAR_API_KEY:
 		return None
@@ -319,6 +328,7 @@ def fetch_linear_issue(dataset_id: int) -> Optional[dict]:
 				url
 				title
 				description
+				updatedAt
 			}
 		}
 	}
@@ -348,7 +358,10 @@ def fetch_linear_issue(dataset_id: int) -> Optional[dict]:
 					title = issue.get('title', '') or ''
 					description = issue.get('description', '') or ''
 					searchable = f"{title} {description}"
-					if dataset_id_str in searchable:
+					updated_at = issue.get('updatedAt', '') or ''
+					updated_date = updated_at[:10] if len(updated_at) >= 10 else ''
+					is_in_period = period_start.date().isoformat() <= updated_date <= period_end.date().isoformat()
+					if dataset_id_str in searchable and is_in_period:
 						return {
 							'identifier': issue.get('identifier'),
 							'url': issue.get('url'),
@@ -360,15 +373,18 @@ def fetch_linear_issue(dataset_id: int) -> Optional[dict]:
 
 
 def fetch_failures(client: Client, period_start: datetime, period_end: datetime) -> list:
-	"""Fetch failures within the summary period."""
+	"""Fetch failures for uploads created within the summary period.
+	
+	This keeps the failures section aligned with Upload status counts.
+	"""
 	period_start_str = period_start.isoformat()
 	period_end_str = period_end.isoformat()
 	failures = []
 	
-	# Get datasets with errors
+	# Get datasets created in period and inspect their error state
 	response = client.table(settings.datasets_table).select(
-		'id, file_name, v2_statuses(error_message, has_error, updated_at)'
-	).gte('v2_statuses.updated_at', period_start_str).lte('v2_statuses.updated_at', period_end_str).execute()
+		'id, file_name, created_at, v2_statuses(error_message, has_error)'
+	).gte('created_at', period_start_str).lte('created_at', period_end_str).execute()
 	
 	if response.data:
 		for row in response.data:
@@ -392,13 +408,13 @@ def fetch_failures(client: Client, period_start: datetime, period_end: datetime)
 					"error_message": error_msg
 				}
 				
-				linear_issue = fetch_linear_issue(failure["id"])
+				linear_issue = fetch_linear_issue(failure["id"], period_start, period_end)
 				if linear_issue:
 					failure["linear_issue"] = linear_issue
 				
 				failures.append(failure)
 	
-	return failures[:5]  # Limit to 5
+	return failures[:5]  # Keep concise in Zulip; message shows if truncated
 
 
 def fetch_audit_metrics(client: Client, period_start: datetime) -> tuple[int, list]:
@@ -561,6 +577,10 @@ def format_message(metrics: SummaryMetrics) -> str:
 	# Failures (if any)
 	if metrics.failures:
 		sections.append("#### ⚠️ Failures")
+		if metrics.failed_uploads > len(metrics.failures):
+			sections.append(
+				f"- *Showing {len(metrics.failures)} of {metrics.failed_uploads} failed uploads*"
+			)
 		for failure in metrics.failures:
 			error_short = (failure["error_message"] or "Unknown").split("\n")[0][:60]
 			issue = failure.get("linear_issue")
