@@ -20,6 +20,21 @@ logger = UnifiedLogger(__name__)
 logger.add_supabase_handler(SupabaseHandler())
 
 
+_TASK_TYPE_STATUS_FLAGS = {
+	TaskTypeEnum.odm_processing: 'is_odm_done',
+	TaskTypeEnum.geotiff: 'is_ortho_done',
+	TaskTypeEnum.metadata: 'is_metadata_done',
+	TaskTypeEnum.cog: 'is_cog_done',
+	TaskTypeEnum.thumbnail: 'is_thumbnail_done',
+	TaskTypeEnum.deadwood: 'is_deadwood_done',
+	TaskTypeEnum.treecover: 'is_forest_cover_done',
+}
+
+
+def _task_type_to_status_flag(task_type: TaskTypeEnum) -> str | None:
+	return _TASK_TYPE_STATUS_FLAGS.get(task_type)
+
+
 class ProcessRequest(BaseModel):
 	task_types: List[str]
 	priority: Optional[int] = Field(default=2, ge=1, le=5, description='Task priority (1=highest, 5=lowest)')
@@ -81,8 +96,6 @@ def create_processing_task(
 	# Check if dataset is currently being processed and clean up old queue items
 	try:
 		with use_client(token) as client:
-			# Check for active processing via current_status in statuses table
-			# Allow requeue if has_error=true (previous failure, user wants to retry)
 			status_check = (
 				client.table(settings.statuses_table)
 				.select('current_status, has_error')
@@ -100,6 +113,22 @@ def create_processing_task(
 					raise HTTPException(
 						status_code=409,
 						detail=f'Dataset {dataset_id} is currently being processed. Please wait for processing to complete, then retry.',
+					)
+
+				if s.get('has_error', False):
+					reset_fields = {
+						'has_error': False,
+						'error_message': None,
+						'current_status': 'idle',
+					}
+					for task_type in validated_task_types:
+						flag = _task_type_to_status_flag(task_type)
+						if flag:
+							reset_fields[flag] = False
+					client.table(settings.statuses_table).update(reset_fields).eq('dataset_id', dataset_id).execute()
+					logger.info(
+						f'Cleared error state for dataset {dataset_id} (requeue)',
+						LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token),
 					)
 
 		# Check for existing queue items and delete them (users can delete their own items)

@@ -172,86 +172,92 @@ DELETE FROM v2_queue WHERE dataset_id = ?;
 
 ## 🔄 **RERUNNING DATASETS AFTER DEBUGGING**
 
-### Preferred Method: Use API Endpoint (No Manual DB Edits)
+### Preferred Method: SQL via Supabase Studio (Two Steps)
 
-After identifying and fixing the root cause of a dataset failure, use the API to rerun processing:
+The API endpoint (`PUT /datasets/{id}/process`) only adds a queue entry — it does **NOT** clear `has_error` on `v2_statuses`. The processor checks `has_error` and **drops tasks for errored datasets**. Therefore, always use this two-step SQL approach:
 
-```bash
-# Rerun a dataset through the API
-curl -X PUT "http://localhost:8080/api/v1/datasets/{dataset_id}/process" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "task_types": ["odm", "cog", "thumbnail", "metadata"],
-    "priority": 1
-  }'
+**Step 1 — Clear error state:**
+```sql
+UPDATE v2_statuses 
+SET has_error = false, 
+    error_message = null, 
+    current_status = 'idle',
+    is_odm_done = false        -- reset the failed stage flag(s)
+WHERE dataset_id = <DATASET_ID>;
 ```
 
-**The endpoint automatically:**
-- Checks if dataset is actively being processed (returns 409 Conflict if yes)
-- Removes any old/stuck queue entries for the dataset
-- Adds fresh queue entry with specified tasks and priority
-- Returns queue position and estimated time
+Adjust which `is_*_done` flags to reset based on which stages need rerunning:
+- `is_odm_done = false` — ODM failed
+- `is_ortho_done = false` — GeoTIFF standardization failed
+- `is_cog_done = false` — COG generation failed
+- `is_deadwood_done = false` — Deadwood segmentation failed
+- `is_forest_cover_done = false` — Treecover segmentation failed
 
-**Task Types Available:**
-- `odm` - OpenDroneMap processing (raw images → ortho)
-- `cog` - Cloud Optimized GeoTIFF generation
-- `thumbnail` - Thumbnail generation
-- `metadata` - Extract metadata (admin levels, biome, phenology)
-- `geotiff` - Process uploaded GeoTIFF
-- `deadwood` - Deadwood segmentation
-- `treecover` - Tree cover segmentation
+**Step 2 — Clean up stale queue entries and insert new one:**
+```sql
+DELETE FROM v2_queue WHERE dataset_id = <DATASET_ID>;
+
+INSERT INTO v2_queue (dataset_id, user_id, priority, task_types)
+SELECT 
+    <DATASET_ID>,
+    d.user_id,
+    1,  -- priority: 1=highest, 5=lowest
+    ARRAY['odm_processing','geotiff','cog','thumbnail','metadata','deadwood','treecover']
+FROM v2_datasets d
+WHERE d.id = <DATASET_ID>;
+```
+
+The `user_id` is pulled automatically from `v2_datasets`.
+
+**Task type enum values** (must use these exact strings in the array):
+- `odm_processing` — OpenDroneMap (raw images → ortho)
+- `geotiff` — GeoTIFF standardization
+- `cog` — Cloud Optimized GeoTIFF
+- `thumbnail` — Thumbnail generation
+- `metadata` — Extract metadata (GADM, biome, phenology)
+- `deadwood` — Deadwood segmentation
+- `treecover` — Tree cover segmentation
 
 **Common Rerun Scenarios:**
 
+```sql
+-- Full rerun from ODM (raw image dataset)
+ARRAY['odm_processing','geotiff','cog','thumbnail','metadata','deadwood','treecover']
+
+-- Rerun post-ODM only (ODM succeeded, downstream failed)
+-- CRITICAL: always include geotiff — standardized file is ephemeral
+ARRAY['geotiff','cog','thumbnail','metadata','deadwood','treecover']
+
+-- Rerun segmentation only (COG/thumbnail OK)
+ARRAY['geotiff','deadwood','treecover']
+
+-- Rerun just COG + thumbnail
+ARRAY['geotiff','cog','thumbnail']
+```
+
+⚠️ **CRITICAL: Always include `geotiff`** when rerunning any downstream task. The standardized ortho only exists during a pipeline run — it is NOT stored permanently. Without `geotiff`, downstream tasks run against the raw unstandardized file and fail or produce wrong results.
+
+### Alternative: API Endpoint
+
+The `PUT /api/v1/datasets/{id}/process` endpoint automatically clears `has_error` and resets the relevant `is_*_done` flags when re-queuing a failed dataset. Use it when you have API access:
+
 ```bash
-# Full rerun (everything)
-task_types: ["odm", "cog", "thumbnail", "metadata", "deadwood", "treecover"]
+# Authenticate against production Supabase
+cd /home/jj1049/prod/deadtrees && source .env
+TOKEN=$(curl -s -X POST "${SUPABASE_URL}/auth/v1/token?grant_type=password" \
+  -H "apikey: ${SUPABASE_KEY}" \
+  -H "Content-Type: application/json" \
+  -d "{\"email\": \"processor@deadtrees.earth\", \"password\": \"${PROCESSOR_PASSWORD}\"}" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 
-# Rerun from ODM (uploaded raw images failed)
-task_types: ["odm", "cog", "thumbnail", "metadata"]
-
-# Rerun post-processing only (ODM succeeded, but COG/thumbnail failed)
-task_types: ["cog", "thumbnail", "metadata"]
-
-# Rerun segmentation only
-task_types: ["deadwood", "treecover"]
-
-# High priority rerun (test dataset)
-priority: 1  # 1=highest, 5=lowest
+# Re-queue dataset
+curl -X PUT "https://data2.deadtrees.earth/api/v1/datasets/<DATASET_ID>/process" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"task_types": ["odm_processing","geotiff","cog","thumbnail","metadata","deadwood","treecover"], "priority": 1}'
 ```
 
-**Response Scenarios:**
-
-Success (200 OK):
-```json
-{
-  "id": 123,
-  "dataset_id": 6140,
-  "current_position": 1,
-  "estimated_time": 3600.0,
-  "task_types": ["odm", "cog", "thumbnail"],
-  "priority": 1
-}
-```
-
-Active Processing (409 Conflict):
-```json
-{
-  "detail": "Dataset 6140 is currently being processed. Please stop the active processing container first, then retry."
-}
-```
-
-**If You Get 409 Conflict:**
-1. Identify the running container/process for that dataset
-2. Stop the container manually: `docker stop <container_id>`
-3. Retry the API call
-
-**Notes:**
-- The API endpoint handles queue cleanup automatically
-- No need to manually delete from `v2_queue` table
-- Processor's startup cleanup will handle Docker volumes/containers
-- Always prefer API over manual DB manipulation
+The SQL approach above is the fallback when you don't have API access or need finer control over which flags to reset.
 
 ## 📊 **MONITORING QUERIES**
 ```sql
