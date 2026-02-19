@@ -576,7 +576,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		else:
 			# Production: High quality processing
 			resolution = '1.0'  # 1cm/pixel for production quality
-			odm_command.extend(['--fast-orthophoto', '--feature-quality', 'ultra', '--matcher-neighbors', '12'])
+			odm_command.extend(['--fast-orthophoto', '--feature-quality', 'high', '--matcher-neighbors', '12'])
 
 		# Add common parameters
 		odm_command.extend(
@@ -703,7 +703,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 					)
 
 				raise Exception(
-					f'ODM processing failed with exit code {exit_status}. stdout: {stdout_logs[-500:] if stdout_logs else "No stdout"}. stderr: {stderr_logs[-500:] if stderr_logs else "No stderr"}'
+					f'ODM processing failed with exit code {exit_status}. stdout: {stdout_logs[-2000:] if stdout_logs else "No stdout"}. stderr: {stderr_logs[-5000:] if stderr_logs else "No stderr"}'
 				)
 		finally:
 			# No manual removal needed when remove=True
