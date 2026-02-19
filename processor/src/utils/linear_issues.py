@@ -5,6 +5,7 @@ Creates issues in Linear when dataset processing fails, with full context
 including dataset info, error message, user email, and recent logs.
 """
 
+import re
 import requests
 from typing import Optional
 from supabase import create_client
@@ -159,16 +160,19 @@ def check_existing_issue(dataset_id: int) -> bool:
 
 	query = '''
 	query SearchIssues($term: String!) {
-		searchIssues(term: $term, first: 1) {
+		searchIssues(term: $term, first: 25) {
 			nodes {
 				id
 				identifier
+				title
+				description
 			}
 		}
 	}
 	'''
 
 	query_text = f'Dataset ID: {dataset_id}'
+	exact_dataset_id_pattern = re.compile(rf'Dataset ID:\s*{dataset_id}\b')
 
 	try:
 		response = requests.post(
@@ -187,9 +191,13 @@ def check_existing_issue(dataset_id: int) -> bool:
 		if response.status_code == 200:
 			data = response.json()
 			nodes = data.get('data', {}).get('searchIssues', {}).get('nodes', [])
-			if nodes:
-				logger.info(f'Found existing Linear issue for dataset {dataset_id}: {nodes[0].get("identifier")}')
-				return True
+			for issue in nodes:
+				title = issue.get('title') or ''
+				description = issue.get('description') or ''
+				search_text = f'{title}\n{description}'
+				if exact_dataset_id_pattern.search(search_text):
+					logger.info(f'Found existing Linear issue for dataset {dataset_id}: {issue.get("identifier")}')
+					return True
 
 		return False
 	except Exception as e:
