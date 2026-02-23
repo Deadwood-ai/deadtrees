@@ -1,19 +1,10 @@
 #!/bin/bash
 
-# Generate SSH key pair if it doesn't exist
-if [ ! -f /root/.ssh/id_rsa ]; then
-    ssh-keygen -t rsa -b 4096 -f /root/.ssh/id_rsa -N ""
-    cp /root/.ssh/id_rsa.pub /root/.ssh/authorized_keys
-    chmod 600 /root/.ssh/id_rsa
-    chmod 644 /root/.ssh/id_rsa.pub /root/.ssh/authorized_keys
-    echo "Generated new SSH keys"
-else
-    echo "Using existing SSH keys"
+# This container is an SSH *server* endpoint for storage access.
+# It should not generate client keys (and cannot, because /root/.ssh is mounted read-only).
+if [ ! -f /root/.ssh/authorized_keys ]; then
+	echo "Warning: /root/.ssh/authorized_keys not found; SSH public key auth may fail."
 fi
-
-# Print the public key for reference
-echo "SSH public key for authentication:"
-cat /root/.ssh/id_rsa.pub
 
 # Start SSH service
 service ssh start

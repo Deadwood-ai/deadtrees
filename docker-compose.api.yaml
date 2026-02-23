@@ -55,45 +55,6 @@ services:
 
     # command: python run.py server --reload=False
 
-  nginx:
-    build:
-      context: ./nginx/api-conf
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    ports:
-      - 80:80
-      - 443:443
-      - 2222:22  # Expose SSH port (optional)
-
-    links:
-      - api
-    depends_on:
-      api:
-        condition: service_healthy
-    healthcheck:
-      test: ['CMD', 'service', 'nginx', 'status']
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 1m30s
-      start_interval: 1s
-
-    volumes:
-      - ./nginx/api-conf:/etc/nginx/conf.d/:ro
-      - /data:/data/:rw
-      - ./nginx/logs:/var/log/nginx
-      - ./certbot/www:/var/www/certbot:ro
-      - ./certbot/conf:/etc/nginx/ssl/:ro
-      - ~/.ssh:/root/.ssh:ro  # Mount the host's SSH directory
-  
-  certbot:
-    image: certbot/certbot:latest
-    volumes:
-      - ./certbot/www/:/var/www/certbot/:rw
-      - ./certbot/conf/:/etc/letsencrypt:rw
-    depends_on:
-      - nginx
-
-# volumes:
-  # nginx_ssh:  # Define the volume for SSH keys
-        
+  # NOTE:
+  # NGINX runs on the host (systemd) on the production storage server.
+  # This compose file only manages the API container to avoid port conflicts on 80/443.
