@@ -575,8 +575,10 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			odm_command.extend(['--fast-orthophoto'])
 		else:
 			# Production: High quality processing
+			# --max-concurrency 2: limits parallel threads to ~2x image_MP GB peak RAM
+			# (default 4 causes OOM on large datasets: 655 images × 12MP × 4 threads ≈ 120GB+)
 			resolution = '1.0'  # 1cm/pixel for production quality
-			odm_command.extend(['--fast-orthophoto', '--feature-quality', 'high', '--matcher-neighbors', '12'])
+			odm_command.extend(['--fast-orthophoto', '--feature-quality', 'high', '--matcher-neighbors', '12', '--max-concurrency', '2'])
 
 		# Add common parameters
 		odm_command.extend(
