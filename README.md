@@ -1,7 +1,7 @@
 # GeoLabel: Community Label Correction System for Geospatial ML
 Teja Kattenborn<sup>1</sup>, Janusch Vajna-Jehle<sup>1</sup>, Clemens Mosig<sup>2</sup>
 
-1 Chair of Sensor-based Geoinformatics (GeoSense), University of Freiburg, Germany
+1 Chair of Sensor-based Geoinformatics (GeoSense,  [geosense.uni-freiburg.de]([https://deadtrees.earth/](https://geosense.uni-freiburg.de/en))), University of Freiburg, Germany
 2 Institute for Earth System Science and Remote Sensing, Leipzig University, Germany
 
 Date of submission: TBD
@@ -11,7 +11,7 @@ Date of submission: TBD
 | Project duration | 01-2025 to 12-2025 |
 | Contributors | Teja Kattenborn (Conceptualization; Project Administration; Supervision; Writing - Review & Editing), Janusch Vajna-Jehle (Software; Writing - Original Draft), Clemens Mosig (Conceptualization; Writing - Review & Editing) |
 | DOI | To be reserved on Zenodo |
-| Corresponding author | TBD |
+| Corresponding author | Janusch Vajna-Jehle |
 
 This work has been funded by the German Research Foundation via NFDI4Earth (DFG project no. 460036893, https://www.nfdi4earth.de/).
 
