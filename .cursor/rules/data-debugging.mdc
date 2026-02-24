@@ -243,18 +243,14 @@ The `PUT /api/v1/datasets/{id}/process` endpoint automatically clears `has_error
 
 ```bash
 # Authenticate against production Supabase
-cd /home/jj1049/prod/deadtrees && source .env
-TOKEN=$(curl -s -X POST "${SUPABASE_URL}/auth/v1/token?grant_type=password" \
-  -H "apikey: ${SUPABASE_KEY}" \
-  -H "Content-Type: application/json" \
-  -d "{\"email\": \"processor@deadtrees.earth\", \"password\": \"${PROCESSOR_PASSWORD}\"}" \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+cd /home/jj1049/prod/deadtrees
 
-# Re-queue dataset
-curl -X PUT "https://data2.deadtrees.earth/api/v1/datasets/<DATASET_ID>/process" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"task_types": ["odm_processing","geotiff","cog","thumbnail","metadata","deadwood","treecover"], "priority": 1}'
+# NOTE: Avoid `source .env` on prod — it can be non-shell-safe.
+# Use the helper script that parses only the needed keys and performs auth + requeue:
+python3 scripts/requeue_datasets_via_api.py \
+  --dataset-ids <DATASET_ID> \
+  --priority 1 \
+  --task-types odm_processing,geotiff,cog,thumbnail,metadata,deadwood,treecover
 ```
 
 The SQL approach above is the fallback when you don't have API access or need finer control over which flags to reset.

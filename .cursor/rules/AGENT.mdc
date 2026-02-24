@@ -64,6 +64,13 @@ See `docs/ops/api-server-deployment.md` for full details.
 | User privileges table | `privileged_users` not `v2_users` |
 | Legacy tables | `v1_label_objects` dropped, `v2_queue_positions` doesn't exist |
 
+### Operational: Re-queuing Failed Datasets (Prod)
+- **Prod DB writes:** `user-deadtrees-prod` MCP is read-only. Use the API endpoint (preferred) or Supabase Studio for manual SQL.
+- **API re-queue:** `PUT https://data2.deadtrees.earth/api/v1/datasets/<ID>/process` with a processor Bearer token.
+- **OOM/exit 137:** These are the best candidates to rerun after ODM memory/concurrency fixes (search `v2_statuses.error_message` / `v2_logs.message` for `exit code 137`).
+- **Critical:** when re-running any downstream stage, always include `geotiff` (standardized ortho is ephemeral).
+- Full workflow + snippets live in `.cursor/rules/data-debugging.mdc` (search: “Alternative: API Endpoint”).
+
 ---
 
 ## Conventions (Non-Standard)
