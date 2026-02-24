@@ -1,9 +1,20 @@
 services:
+  mailpit:
+    image: axllent/mailpit:latest
+    # SMTP: 1025, HTTP API/UI: 8025
+    # Tests use the service name (`mailpit`) from inside containers.
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
   processor-test:
     build:
       context: .
       dockerfile: processor/Dockerfile
       # Only include essential files for build (excludes assets via .dockerignore)
+    env_file:
+      # Load local Supabase keys from repo .env, avoiding accidental shell overrides.
+      - ./.env
     # healthcheck:
     #   test: curl --fail http://127.0.0.1:5678/ || exit 1
     #   interval: 15s
@@ -17,6 +28,7 @@ services:
       - ./processor:/app/processor
       - ./shared:/app/shared
       - ./assets:/app/assets
+      - ./pytest.ini:/app/pytest.ini:ro
       # Mount your Ed25519 key directly
       - ~/.ssh/processing-to-storage:/tmp/ssh-keys/processing-to-storage:ro
       - ~/.ssh/processing-to-storage.pub:/tmp/ssh-keys/processing-to-storage.pub:ro
@@ -30,19 +42,11 @@ services:
       - STORAGE_SERVER_DATA_PATH=/data
       - PROCESSOR_USERNAME=processor@deadtrees.earth
       - SUPABASE_URL=http://host.docker.internal:54321
-      - SUPABASE_KEY=${SUPABASE_KEY}
       - BASE_DIR=/data
-      - PROCESSOR_PASSWORD=${PROCESSOR_PASSWORD}
       # Update the path to use your Ed25519 key
       - SSH_PRIVATE_KEY_PATH=/root/.ssh/processing-to-storage
       - SSH_PRIVATE_KEY_PASSPHRASE=
       - ENV=development
-      - LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
-      # Service role key for accessing auth.users (user email lookup)
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
-      # Linear integration for processing failure notifications
-      - LINEAR_ENABLED=${LINEAR_ENABLED:-false}
-      - LINEAR_API_KEY=${LINEAR_API_KEY:-}
 
       # NVIDIA GPU configuration
       - NVIDIA_VISIBLE_DEVICES=all
@@ -67,6 +71,9 @@ services:
     build:
       context: .
       dockerfile: api/Dockerfile
+    env_file:
+      # Load local Supabase keys from repo .env, avoiding accidental shell overrides.
+      - ./.env
     healthcheck:
       test: curl --fail http://127.0.0.1:8017/ || exit 1
       interval: 30s
@@ -82,27 +89,19 @@ services:
       - ./api:/app/api # dev only, no rebuild needed
       - ./shared:/app/shared # dev only, no rebuild needed
       - ./assets:/app/assets
+      - ./pytest.ini:/app/pytest.ini:ro
     environment:
       - PYTHONPATH=/app
       - UVICORN_HOST=0.0.0.0
       - UVICORN_PORT=8017
       - PYTEST_ADDOPTS=--color=yes
       - SUPABASE_URL=http://host.docker.internal:54321
-      - SUPABASE_KEY=${SUPABASE_KEY}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
       - BASE_DIR=/data
       - ENV=development
-      - LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
-      # Daily summary: PostHog integration
-      - POSTHOG_API_KEY=${POSTHOG_API_KEY:-}
-      - POSTHOG_PROJECT_ID=${POSTHOG_PROJECT_ID:-}
-      - POSTHOG_HOST=${POSTHOG_HOST:-https://eu.posthog.com}
-      # Daily summary: Zulip integration
-      - ZULIP_EMAIL=${ZULIP_EMAIL:-}
-      - ZULIP_API_KEY=${ZULIP_API_KEY:-}
-      - ZULIP_SITE=${ZULIP_SITE:-}
-      - ZULIP_STREAM=${ZULIP_STREAM:-project_deadtree.earth}
-      - ZULIP_TOPIC=${ZULIP_TOPIC:-Daily Summary}
+      # Mailpit for api/tests/test_notifications.py
+      - MAILPIT_SMTP_HOST=mailpit
+      - MAILPIT_SMTP_PORT=1025
+      - MAILPIT_API_URL=http://mailpit:8025
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     # command: python -m debugpy --listen 0.0.0.0:5679 run.py server --reload=True
