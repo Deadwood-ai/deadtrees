@@ -46,63 +46,114 @@ The pilot demonstrates this workflow in a real-world Earth observation context u
 ## II. Results
 
 ### a) Implemented solution
-GeoLabel is implemented as a public correction workflow integrated into [deadtrees.earth](https://deadtrees.earth/). Users review model predictions on high-resolution orthomosaics and propose edits directly on the map. The system supports three edit operations:
+GeoLabel is implemented as a public correction workflow integrated into [deadtrees.earth](https://deadtrees.earth/). Users review model predictions on high-resolution orthomosaics and propose edits directly on the map. The correction workflow is designed around two complementary roles: contributors propose edits through an interactive browser-based editor, while auditors review pending changes, approve or revert them, and maintain a clear audit trail.
 
-- Add missing polygons
-- Modify existing polygons
-- Delete incorrect polygons
+<figure>
+<img src="assets/ui-screenshot.jpg" alt="GeoLabel editing interface on deadtrees.earth" width="100%"/>
+<figcaption><em>The GeoLabel editing interface on deadtrees.earth, showing the polygon editor with available tools, keyboard shortcuts, and an active correction on a high-resolution orthomosaic.</em></figcaption>
+</figure>
+
+#### Editing tools
+
+The editor provides a comprehensive set of polygon editing tools for correcting model predictions. All edits are stored as corrections linked to the original predictions, preserving the source data while tracking every change with full audit metadata.
 
 <table>
 <tr>
-<td width="50%">
-<img src="assets/deadtrees-editing-feature-add-missing-polygon-short-lots-zoom.gif" alt="Adding a missing polygon" width="100%"/>
-<br/><em>Adding a missing deadwood polygon.</em>
+<td width="25%">
+<video src="assets/adding-free-hand.mp4" autoplay loop muted playsinline width="100%"></video>
+<br/><em>Freehand polygon drawing.</em>
 </td>
-<td width="50%">
-<img src="assets/deadtrees-editing-feature-deletion.gif" alt="Deleting an incorrect polygon" width="100%"/>
+<td width="25%">
+<video src="assets/adding-click.mp4" autoplay loop muted playsinline width="100%"></video>
+<br/><em>Click-based polygon drawing.</em>
+</td>
+<td width="25%">
+<video src="assets/adding-ai.mp4" autoplay loop muted playsinline width="100%"></video>
+<br/><em>AI-assisted boundary suggestion.</em>
+</td>
+<td width="25%">
+<video src="assets/deletion.mp4" autoplay loop muted playsinline width="100%"></video>
 <br/><em>Deleting an incorrect polygon.</em>
+</td>
+</tr>
+<tr>
+<td width="25%">
+<video src="assets/cutting.mp4" autoplay loop muted playsinline width="100%"></video>
+<br/><em>Cutting a hole in a polygon.</em>
+</td>
+<td width="25%">
+<video src="assets/merging.mp4" autoplay loop muted playsinline width="100%"></video>
+<br/><em>Merging two polygons.</em>
+</td>
+<td width="25%">
+<video src="assets/clipping.mp4" autoplay loop muted playsinline width="100%"></video>
+<br/><em>Clipping two polygons.</em>
+</td>
+<td width="25%">
+<video src="assets/undo.mp4" autoplay loop muted playsinline width="100%"></video>
+<br/><em>Undoing an action.</em>
 </td>
 </tr>
 </table>
 
-The correction workflow is designed around two complementary roles:
+Keyboard shortcuts support fast, friction-free editing:
 
-- Contributors can propose edits through an interactive editor that supports direct polygon editing and optional AI-assisted boundary suggestions.
-- Auditors can review pending edits, approve or revert changes, and maintain a clear audit trail.
+| Key | Action | Key | Action |
+|-----|--------|-----|--------|
+| A | Draw mode | S | Toggle AI assist |
+| D | Delete selection | Ctrl/Cmd+Z | Undo |
+| G | Merge polygons | Ctrl/Cmd+S | Save |
+| X | Clip polygons | Esc | Cancel editing |
+| C | Cut hole | | |
 
-Key technical elements include:
+#### Architecture
 
-- Database-generated vector tiles using PostGIS MVT functions for fast rendering of large geospatial datasets.
-- A correction table that records all edits, with audit metadata and history.
-- Optimistic locking and conflict detection to prevent concurrent editing issues.
-- An audit workflow that allows reviewers to approve or revert edits before they are applied.
+The system architecture combines database-native vector tile generation with a structured correction workflow, enabling fast rendering of large prediction layers and safe collaborative editing.
 
-This combination provides both scalability (fast visualization of large data) and data integrity (auditability of community edits). The system ensures that edits are visible and reviewable without immediately altering the underlying data, allowing the community to contribute while preserving scientific quality.
+```mermaid
+flowchart TD
+    subgraph A["① Visualize"]
+        direction LR
+        A1["Ortho imagery<br/>(COG tiles)"]
+        A2["Prediction geometries<br/>(PostGIS vector tiles)"]
+        A3["Interactive map"]
+        A1 --> A3
+        A2 --> A3
+    end
 
-Additional implementation highlights:
+    subgraph B["② Edit"]
+        direction LR
+        B1["Polygon editor<br/>draw · delete · cut<br/>merge · clip · undo"]
+        B2["AI-assisted segmentation<br/>(SegmentAnything)"]
+        B1 <--> B2
+    end
 
-- Multi-layer support: corrections can be applied to both deadwood and forest cover prediction layers.
-- Correction styling: pending and approved edits are visually distinguished to communicate review status.
-- Fast refresh after edits: vector tile sources are invalidated and reloaded to avoid stale visuals.
+    subgraph C["③ Store"]
+        C1["Corrections saved to dedicated table<br/>linked to original predictions · status: pending"]
+    end
 
-Editing capabilities were a core focus of the pilot. The editor provides a fast, low-friction entry into editing mode and offers the following tools:
+    subgraph D["④ Review"]
+        direction LR
+        D1["Auditor reviews<br/>pending corrections"]
+        D2["✓ Approve<br/>correction permanent"]
+        D3["✗ Revert<br/>original restored"]
+        D1 --> D2
+        D1 --> D3
+    end
 
-- Polygon drawing with freehand placement to add missing objects.
-- AI-assisted segmentation (currently SegmentAnything) to propose boundaries from user input (rectangles).
-- Cut, merge, and clip operations to refine polygon topology.
-- Delete and undo actions to correct mistakes quickly.
+    A3 --> B1
+    B1 -->|save| C1
+    C1 --> D1
+    D2 & D3 -.->|tiles updated| A2
+```
 
-Keyboard-first interaction is supported to reduce friction during detailed edits. For this, a series of keyboard shortcuts was implemented:
+Key architectural decisions:
 
-- A: draw mode
-- D: delete selection
-- G: merge (two polygons)
-- X: clip (two polygons)
-- C: cut hole (single polygon)
-- S: toggle AI assist
-- Ctrl/Cmd+Z: undo
-- Ctrl/Cmd+S: save
-- Esc: cancel editing
+- **Database-native vector tiles**: Prediction geometries are rendered as vector tiles generated directly in PostGIS using `ST_AsMVT`, avoiding the need for a separate tile server. Tiles include correction status metadata, enabling visual distinction between pending and approved edits.
+- **Correction-based editing**: Edits are stored in a dedicated correction table rather than modifying predictions directly. Original geometries are soft-deleted (flagged, not removed), making every change fully reversible.
+- **Audit workflow**: Corrections start with `pending` status. Auditors can approve (making changes permanent) or revert (restoring original geometries and removing additions). The full edit history, including contributor, timestamp, and session, is preserved.
+- **AI-assisted segmentation**: Users can optionally activate SegmentAnything to propose polygon boundaries. The ortho raster is cropped client-side, sent to an external SAM API, and returned polygons are added to the editor as regular edits.
+- **Multi-layer support**: The same correction workflow applies to both deadwood and forest cover prediction layers, with layer-specific vector tile endpoints and shared correction infrastructure.
 
 ### b) Data and software availability
 - Platform: https://deadtrees.earth
@@ -147,9 +198,9 @@ The GeoLabel team has been highly active in presenting and discussing the pilot 
 
 Community uptake indicators (last 12 months):
 
-- 5,919 datasets submitted
-- 158 unique submitters
-- 16,709 unique users (based on distinct pageview users)
+- 7,472 datasets submitted
+- 166 unique submitters
+- 18,155 unique users (based on distinct pageview users)
 
 Outreach and visibility include:
 
@@ -181,7 +232,7 @@ GeoLabel establishes a robust public correction workflow, but there is still sub
 - Möhring, J., Kattenborn, T., Mahecha, M. D., Cheng, Y., Beloiu Schwenke, M., Cloutier, M., Denter, M., Frey, J., Gassilloud, M., Göritz, A., Hempel, J., Horion, S., Jucker, T., Junttila, S., Khatri-Chhetri, P., Korznikov, K., Kruse, S., Laliberté, E., Maroschek, M., Neumeier, P., Pérez-Priego, O., Potts, A., Schiefer, F., Seidl, R., Vajna-Jehle, J., Zielewska-Büttner, K., & Mosig, C. (2025). Global, multi-scale standing deadwood segmentation in centimeter-scale aerial images. ISPRS Open Journal of Photogrammetry and Remote Sensing. https://doi.org/10.1016/j.ophoto.2025.100104
 
 ## Figures and screenshots
-Figure placeholders to be added in the final version:
-- Figure 1: Correction workflow overview (user edit -> audit -> approval)
-- Figure 2: Example correction before/after
-- Figure 3: System architecture (frontend, database, PostGIS tile generation)
+Figures, screencasts, and diagrams are embedded inline throughout Section II.a:
+- UI overview screenshot of the GeoLabel editing interface
+- Screencasts of all editing tools: freehand drawing, click-based drawing, AI-assisted segmentation, deletion, cutting, merging, clipping, and undo
+- System architecture diagram (Mermaid) showing the data flow from visualization through editing, storage, and audit review

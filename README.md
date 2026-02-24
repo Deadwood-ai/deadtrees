@@ -1,268 +1,238 @@
-# Deadwood API
+# GeoLabel: Community Label Correction System for Geospatial ML
+Teja Kattenborn<sup>1</sup>, Janusch Vajna-Jehle<sup>1</sup>, Clemens Mosig<sup>2</sup>
 
-Main FastAPI application for the deadwood backend. This repository contains both the API and processor components for processing geospatial data and performing deadwood segmentation.
+1 Chair of Sensor-based Geoinformatics (GeoSense), University of Freiburg, Germany
+2 Institute for Earth System Science and Remote Sensing, Leipzig University, Germany
 
-## Prerequisites
+Date of submission: TBD
 
-- Docker and Docker Compose
-- NVIDIA GPU with CUDA support (for deadwood segmentation)
+| Pilot title | GeoLabel: Community Label Correction System |
+| :---- | :---- |
+| Project duration | 01-2025 to 12-2025 |
+| Contributors | Teja Kattenborn (Conceptualization; Project Administration; Supervision; Writing - Review & Editing), Janusch Vajna-Jehle (Software; Writing - Original Draft), Clemens Mosig (Conceptualization; Writing - Review & Editing) |
+| DOI | To be reserved on Zenodo |
+| Corresponding author | TBD |
 
----
+This work has been funded by the German Research Foundation via NFDI4Earth (DFG project no. 460036893, https://www.nfdi4earth.de/).
 
-## Setup
-### Clone the repository with submodules:
+## Abstract
 
-```bash
-# Clone the repository
-git clone https://github.com/deadtrees/deadwood-api.git
-cd deadwood-api
+High-quality geospatial labels are a central prerequisite for training and validating machine learning models in Earth System Science. However, current labeling workflows face critical bottlenecks: limited support for large geospatial datasets, insufficient integration of geospatial context, lack of scalable web-based collaboration, and missing audit mechanisms for quality control. Existing tools are often not designed for georeferenced data, do not scale to large prediction layers, and provide limited support for distributed community contributions or AI-assisted editing.
+GeoLabel addresses these challenges through the development of a scalable, browser-based, and community-driven correction and labeling system for geospatial machine learning outputs. The system enables users to directly review and edit model predictions in a web-based GIS environment, combining interactive polygon editing with optional AI-assisted boundary suggestions. A structured audit workflow ensures that community contributions remain transparent, reversible, and scientifically reliable.
+The tool architecture integrates database-native vector tile generation, role-based editing and review workflows, and conflict-aware data handling to enable fast rendering and safe collaborative editing of large datasets. By combining high-performance geospatial visualization with AI-assisted labeling and built-in auditability, GeoLabel provides an operational solution to one of the major bottlenecks in geospatial ML: scalable, high-quality, and community-based label refinement.
+The developed tools are showcased on the [deadtrees.earth](https://deadtrees.earth/) platform using high-resolution orthoimages as a real-world application case. In this context, GeoLabel enables the correction and refinement of model predictions for deadwood detection and forest cover mapping. This deployment demonstrates how large-scale orthomosaic-based segmentation outputs can be collaboratively reviewed and improved in a fully web-based environment, providing a transferable template for similar Earth observation workflows across domains.
 
-# Initialize and update submodules
-git submodule update --init --recursive
+## I. Introduction
 
+Machine learning (ML) methods have become a cornerstone of Earth System Science (ESS), enabling large-scale mapping, monitoring, and modeling of complex environmental processes from remote sensing data. Applications range from vegetation structure and species mapping to disturbance detection, land cover classification, and ecosystem monitoring across spatial scales. However, the performance, transferability, and interpretability of these models critically depend on the availability of high-quality, geospatially explicit labels.
+
+Despite rapid advances in model architectures and computational infrastructure, the generation and curation of reliable training and validation data remain major bottlenecks. In many ESS domains, labels are sparse, inconsistently formatted, spatially biased, or not preserved with sufficient metadata. Moreover, labeling workflows are often fragmented across tools that were not designed for large, georeferenced datasets. Conventional annotation software typically operates on small, non-geocoded image subsets, limiting spatial context, reducing interoperability, and complicating downstream reuse. As a result, researchers frequently resort to ad hoc workflows that combine GIS software, local scripts, and manual data handling—processes that are time-consuming, difficult to reproduce, and hard to scale.
+
+Several core challenges can be identified:
+* **Scalability**: Large orthomosaics, satellite time series, and dense prediction layers exceed the capacity of many conventional labeling tools. Efficient visualization and editing of millions of geometries require database-native and tile-based solutions.
+* **Geospatial context**: Labels must remain spatially explicit, interoperable, and compatible with standard geospatial formats to enable reuse across tasks and resolutions. Currently, most labelled dataset are created on tiles with fixed size (e.g. 512x512 pixels) without geocoordinates, making reuse with different settings not possibl.
+* **Collaboration**: Distributed community contributions are increasingly important, yet most tools lack robust role management, conflict handling, and web-based accessibility.
+* **Auditability and quality control**: Open contribution models require structured review, versioning, and revert mechanisms to ensure scientific reliability.
+* **AI-assisted workflows**: While automated segmentation models exist, few systems tightly integrate AI-assisted boundary refinement into interactive, browser-based editing environments. AI-assisted labelling could overcome labelling effort considerably.
+
+GeoLabel addresses these bottlenecks by developing a scalable, web-based, and community-driven correction and labeling system for geospatial ML outputs. Rather than treating labeling as an isolated preprocessing step, GeoLabel integrates prediction review, correction, and audit mechanisms directly into a browser-accessible GIS workflow. The system is designed to handle large prediction layers derived from high-resolution Earth observation data, while preserving full geospatial context and metadata.
+
+Technically, GeoLabel combines efficient brower-based visualization with role-based editing and review workflows. Corrections are stored separately from the original predictions, enabling reversible edits, structured approval processes, and full audit trails. AI-assisted segmentation can be optionally activated to support boundary delineation, improving efficiency without sacrificing transparency.
+
+The pilot demonstrates this workflow in a real-world Earth observation context using high-resolution orthoimages, where deadwood and forest cover predictions are collaboratively reviewed and refined in high resolution drone imagery. By embedding correction tools directly within an operational platform, GeoLabel moves beyond conceptual tool design and provides a functional example of scalable, community-based geospatial label refinement.
+
+
+
+## II. Results
+
+### a) Implemented solution
+GeoLabel is implemented as a public correction workflow integrated into [deadtrees.earth](https://deadtrees.earth/). Users review model predictions on high-resolution orthomosaics and propose edits directly on the map. The correction workflow is designed around two complementary roles: contributors propose edits through an interactive browser-based editor, while auditors review pending changes, approve or revert them, and maintain a clear audit trail.
+
+<figure>
+<img src="docs/projects/geolabel/assets/ui-screenshot.jpg" alt="GeoLabel editing interface on deadtrees.earth" width="100%"/>
+<figcaption><em>The GeoLabel editing interface on deadtrees.earth, showing the polygon editor with available tools, keyboard shortcuts, and an active correction on a high-resolution orthomosaic.</em></figcaption>
+</figure>
+
+#### Editing tools
+
+The editor provides a comprehensive set of polygon editing tools for correcting model predictions. All edits are stored as corrections linked to the original predictions, preserving the source data while tracking every change with full audit metadata.
+
+<table>
+<tr>
+<td width="25%">
+<video src="docs/projects/geolabel/assets/adding-free-hand.mp4" autoplay loop muted playsinline width="100%"></video>
+<br/><em>Freehand polygon drawing.</em>
+</td>
+<td width="25%">
+<video src="docs/projects/geolabel/assets/adding-click.mp4" autoplay loop muted playsinline width="100%"></video>
+<br/><em>Click-based polygon drawing.</em>
+</td>
+<td width="25%">
+<video src="docs/projects/geolabel/assets/adding-ai.mp4" autoplay loop muted playsinline width="100%"></video>
+<br/><em>AI-assisted boundary suggestion.</em>
+</td>
+<td width="25%">
+<video src="docs/projects/geolabel/assets/deletion.mp4" autoplay loop muted playsinline width="100%"></video>
+<br/><em>Deleting an incorrect polygon.</em>
+</td>
+</tr>
+<tr>
+<td width="25%">
+<video src="docs/projects/geolabel/assets/cutting.mp4" autoplay loop muted playsinline width="100%"></video>
+<br/><em>Cutting a hole in a polygon.</em>
+</td>
+<td width="25%">
+<video src="docs/projects/geolabel/assets/merging.mp4" autoplay loop muted playsinline width="100%"></video>
+<br/><em>Merging two polygons.</em>
+</td>
+<td width="25%">
+<video src="docs/projects/geolabel/assets/clipping.mp4" autoplay loop muted playsinline width="100%"></video>
+<br/><em>Clipping two polygons.</em>
+</td>
+<td width="25%">
+<video src="docs/projects/geolabel/assets/undo.mp4" autoplay loop muted playsinline width="100%"></video>
+<br/><em>Undoing an action.</em>
+</td>
+</tr>
+</table>
+
+Keyboard shortcuts support fast, friction-free editing:
+
+| Key | Action | Key | Action |
+|-----|--------|-----|--------|
+| A | Draw mode | S | Toggle AI assist |
+| D | Delete selection | Ctrl/Cmd+Z | Undo |
+| G | Merge polygons | Ctrl/Cmd+S | Save |
+| X | Clip polygons | Esc | Cancel editing |
+| C | Cut hole | | |
+
+#### Architecture
+
+The system architecture combines database-native vector tile generation with a structured correction workflow, enabling fast rendering of large prediction layers and safe collaborative editing.
+
+```mermaid
+flowchart TD
+    subgraph A["① Visualize"]
+        direction LR
+        A1["Ortho imagery<br/>(COG tiles)"]
+        A2["Prediction geometries<br/>(PostGIS vector tiles)"]
+        A3["Interactive map"]
+        A1 --> A3
+        A2 --> A3
+    end
+
+    subgraph B["② Edit"]
+        direction LR
+        B1["Polygon editor<br/>draw · delete · cut<br/>merge · clip · undo"]
+        B2["AI-assisted segmentation<br/>(SegmentAnything)"]
+        B1 <--> B2
+    end
+
+    subgraph C["③ Store"]
+        C1["Corrections saved to dedicated table<br/>linked to original predictions · status: pending"]
+    end
+
+    subgraph D["④ Review"]
+        direction LR
+        D1["Auditor reviews<br/>pending corrections"]
+        D2["✓ Approve<br/>correction permanent"]
+        D3["✗ Revert<br/>original restored"]
+        D1 --> D2
+        D1 --> D3
+    end
+
+    A3 --> B1
+    B1 -->|save| C1
+    C1 --> D1
+    D2 & D3 -.->|tiles updated| A2
 ```
 
-### Create a .env file with required environment variables:
+Key architectural decisions:
 
-```
-SUPABASE_URL=your_supabase_url
-SUPABASE_KEY=your_supabase_key
-PROCESSOR_PASSWORD=your_processor_password
-STORAGE_SERVER_USERNAME=your_username
-SSH_PRIVATE_KEY_PATH=/path/to/your/ssh/key
-STORAGE_SERVER_DATA_PATH=/apps/storage-server/production
-DEV_MODE=true
-LOGFIRE_TOKEN=your_logfire_token
-```
+- **Database-native vector tiles**: Prediction geometries are rendered as vector tiles generated directly in PostGIS using `ST_AsMVT`, avoiding the need for a separate tile server. Tiles include correction status metadata, enabling visual distinction between pending and approved edits.
+- **Correction-based editing**: Edits are stored in a dedicated correction table rather than modifying predictions directly. Original geometries are soft-deleted (flagged, not removed), making every change fully reversible.
+- **Audit workflow**: Corrections start with `pending` status. Auditors can approve (making changes permanent) or revert (restoring original geometries and removing additions). The full edit history, including contributor, timestamp, and session, is preserved.
+- **AI-assisted segmentation**: Users can optionally activate SegmentAnything to propose polygon boundaries. The ortho raster is cropped client-side, sent to an external SAM API, and returned polygons are added to the editor as regular edits.
+- **Multi-layer support**: The same correction workflow applies to both deadwood and forest cover prediction layers, with layer-specific vector tile endpoints and shared correction infrastructure.
 
-### Download required assets:
+### b) Data and software availability
+- Platform: https://deadtrees.earth
+- Backend repository (public, GPL-3.0): https://github.com/Deadwood-ai/deadtrees
+- Frontend repository: https://github.com/Deadwood-ai/deadtrees-frontend-react (planned for public release)
+- Pilot documentation: `docs/projects/geolabel/`
 
-```bash
-# Create assets directory and download test data, models, and GADM data
-make
-```
+The platform provides open access to datasets, prediction layers, and the GeoLabel correction workflows. Documentation includes user guidance, technical overviews, and detailed descriptions of the correction workflow.
 
-### Use the CLI tool to manage the development environment (CLI-first):
+Core data and software assets include:
 
-```bash
-# Start the development environment
-deadtrees dev start
-# Stop the development environment
-deadtrees dev stop
+- PostGIS-backed vector tile generation for large-scale prediction layers.
+- Correction history stored in a dedicated table with review metadata and session tracking.
+- Supabase RPC functions that expose database logic as API endpoints for save, approve, and revert operations.
 
-# Rebuild the development environment
-deadtrees dev start --force-rebuild
+### c) Innovation and FAIRness
+The key innovation is a community-first, audit-ready correction system applied directly to model outputs, rather than isolated labeling tasks. This approach supports:
 
-# Run development environment with continuous processor queue checking
-deadtrees dev run-dev
+- Findability and accessibility: open access to datasets and corrections via a public platform.
+- Interoperability: PostGIS-based geospatial standards and APIs; use of common geospatial data formats for labelled data (geopackage and GeoTIFF format).
+- Reusability: corrections are tracked, reviewed, and preserved with history, supporting downstream model training and validation.
 
-# Run API tests
-deadtrees dev test api
+GeoLabel also demonstrates a scalable approach to collaborative labeling that can be adapted to other domains in Earth System Science. Its modular architecture allows the integration of different data types, prediction layers, and labeling tasks without fundamental changes to the core system. By combining database-native geospatial processing, browser-based editing, and structured audit workflows, the approach can be transferred to applications such as land cover mapping, habitat delineation, cryosphere monitoring, or coastal change detection. This flexibility makes GeoLabel not only a domain-specific solution, but a generalizable framework for community-driven, AI-assisted geospatial data curation
 
-# Debug API tests
-deadtrees dev debug api --test-path=api/tests/routers/test_download.py
+## III. Challenges and gaps
+The main technical challenge was balancing high-performance visualization with direct, editable data access. Several iterations were required:
 
-# Run processor tests
-deadtrees dev test processor
+1) Copy-based editing (used in the reference data editor). This approach is reliable but slow for large datasets and leads to heavy data duplication.
+2) Database-native vector tiles and edit workflows. The final solution generates vector tiles directly in the database and exposes PostGIS functions as API endpoints. This allows fast rendering and direct editing without full dataset copies.
 
-# Debug processor tests
-deadtrees dev debug processor --test-path=processor/tests/test_processor.py
+Additional challenges included:
 
-```
+- Designing a robust audit workflow for community contributions.
+- Ensuring edits remain reversible and auditable to preserve data quality.
+- Optimizing caching and tile refresh to avoid stale visuals after edits.
 
-### Accessing services (Test Stack)
+The final system resolves these issues by combining PostGIS MVT generation with Supabase RPC functions for save/approve/revert workflows and a review queue for auditors.
 
-the nginx acts as a reverse proxy for the API and processor services.
+## IV. Relevance for the community and NFDI4Earth
 
-```bash
-# nginx
-http://localhost:8080/cogs/v1/
-http://localhost:8080/thumbnails/v1/
-http://localhost:8080/downloads/v1/
+The GeoLabel team has been highly active in presenting and discussing the pilot at international conferences, workshops, and community meetings, with a strong focus on research data management (RDM), FAIR principles, and scalable geospatial infrastructures. The underlying concepts, system architecture, and demonstrator use case were continuously communicated to both the Earth System Science and NFDI communities, fostering dialogue on collaborative labeling and AI-ready data workflows. In addition, the conceptual and methodological foundations and application context have been formalized in peer-reviewed publications, strengthening the scientific visibility and long-term impact of the initiative.
 
-# API Endpoints
-http://localhost:8080/api/v1/
+Community uptake indicators (last 12 months):
 
-# API docs
-http://localhost:8080/api/v1/docs
+- 7,472 datasets submitted
+- 166 unique submitters
+- 18,155 unique users (based on distinct pageview users)
 
-# Upload Chunks
-http://localhost:8080/api/v1/datasets/chunk
+Outreach and visibility include:
 
-# Download Endpoint
-http://localhost:8080/api/v1/download/docs
-http://localhost:8080/api/v1/download/datasets/1/dataset.zip
+- Joint NFDI4Earth & NFDI4Biodiversity Plenary 2025 (Bremen) on the GeoLabel pilot
+- SmartForest 2025: deadtrees.earth: Crowd-Sourced Imagery and AI for Global Insights into Tree Mortality Dynamics
+- Dreilaendertagung 2025: From Local Drones to Global Insights: AI-Driven Tree Mortality Mapping with Remote Sensing
+- EGU 2025 & EGU 2026 talks on the deadtrees.earth platform and related RDM activities
+- Living Planet Symposium 2025 and BioSpace 2025 presentations
+- International Tree Mortality Network seminar (2024)
 
-# Supabase
-# Pooler/API: http://host.docker.internal:54321
-# Studio: http://127.0.0.1:54323
+Publications:
+- Mosig, C., Vajna-Jehle, J., Mahecha, M. D., Cheng, Y., Hartmann, H., Montero, D., Junttila, S., Horion, S., Schwenke, M. B., ... & Kattenborn, T. (2026). *deadtrees.earth – An open-access and interactive database for centimeter-scale aerial imagery to uncover global tree mortality dynamics*. Remote Sensing of Environment, 332, 115027. https://doi.org/10.1016/j.rse.2025.115027
+- Möhring, J., Kattenborn, T., Mahecha, M. D., Cheng, Y., Beloiu Schwenke, M., Cloutier, M., Denter, M., Frey, J., Gassilloud, M., Göritz, A., Hempel, J., Horion, S., Jucker, T., Junttila, S., Khatri-Chhetri, P., Korznikov, K., Kruse, S., Laliberté, E., Maroschek, M., Neumeier, P., Pérez-Priego, O., Potts, A., Schiefer, F., Seidl, R., Vajna-Jehle, J., Zielewska-Büttner, K., & Mosig, C. (2025). Global, multi-scale standing deadwood segmentation in centimeter-scale aerial images. ISPRS Open Journal of Photogrammetry and Remote Sensing. https://doi.org/10.1016/j.ophoto.2025.100104
 
-```
+These activities demonstrate active engagement with the Earth System Science community and provide multiple entry points for collaboration and adoption.
 
-### Notes on Tests
+## V. Future directions
+GeoLabel establishes a robust public correction workflow, but there is still substantial opportunity for growth. The pilot shows that community labeling at scale is feasible when performance, auditability, and usability are addressed together. The next steps focus on strengthening adoption, expanding feature coverage, and ensuring long-term sustainability:
 
-- Prefer the `deadtrees` CLI for running tests and debugging. Avoid calling `pytest` directly in containers.
+- Expand correction workflows to additional label types and domains.
+- Improve analytical tooling around correction impact and reviewer throughput.
+- Provide enriched dataset metadata and tighter linkage to publications.
+- Support broader integration into external workflows and third-party systems.
+- Continue outreach to grow the contributor base and diversify geographic coverage.
+- Integrate crowd-sourced labels into active supervised AI training workflows.
 
-### Local supabase setup and development
+## Publications and related outputs (selected)
+- Mosig, C., Vajna-Jehle, J., Mahecha, M. D., Cheng, Y., Hartmann, H., Montero, D., Junttila, S., Horion, S., Schwenke, M. B., ... & Kattenborn, T. (2026). *deadtrees.earth – An open-access and interactive database for centimeter-scale aerial imagery to uncover global tree mortality dynamics*. Remote Sensing of Environment, 332, 115027. https://doi.org/10.1016/j.rse.2025.115027
+- Möhring, J., Kattenborn, T., Mahecha, M. D., Cheng, Y., Beloiu Schwenke, M., Cloutier, M., Denter, M., Frey, J., Gassilloud, M., Göritz, A., Hempel, J., Horion, S., Jucker, T., Junttila, S., Khatri-Chhetri, P., Korznikov, K., Kruse, S., Laliberté, E., Maroschek, M., Neumeier, P., Pérez-Priego, O., Potts, A., Schiefer, F., Seidl, R., Vajna-Jehle, J., Zielewska-Büttner, K., & Mosig, C. (2025). Global, multi-scale standing deadwood segmentation in centimeter-scale aerial images. ISPRS Open Journal of Photogrammetry and Remote Sensing. https://doi.org/10.1016/j.ophoto.2025.100104
 
-```bash
-## install supabase cli
-brew install supabase
-
-# Start Supabase
-supabase login
-
-# Initialize project
-supabase init
-
-# Link to project
-supabase link --project-ref <project-ref>
-
-# Start Supabase
-supabase start
-
-# Create initial migration file
-# supabase db diff --use-migra initial_schema -f initial_schema --linked
-supabase db pull
-
-# Apply the migration
-supabase migration up
-
-# to reset the database
-supabase db reset
-
-# set new env varialbes based on the output of supabase start
-SUPABASE_URL=your_supabase_url
-SUPABASE_KEY=your_supabase_key
-
-```
-
-## Project structure
-
-```bash
-/assets      - Downloaded data and models
-  /gadm        - GADM geographic data
-  /models      - ML models for deadwood segmentation
-/test_data   - Test GeoTIFF files
-
-/api         - FastAPI application
-  /src       - Source code
-  /tests     - API tests
-
-/processor   - Data processing service
-  /src       - Source code
-  /tests     - Processor tests
-
-/shared      - Shared code between API and processor
-```
-
-
-## API - Deployment
-
-### Additional requirements
-
-So far I found the following packages missing on the Hetzner ubuntu image:
-
-```bash
-apt install -y make unzip 
-```
-
-### Setup user
-
-create a user for everyone to log in (using root)
-
-```bash
-useradd dendro
-usermod -aG docker dendro
-```
-
-### Init git and download repo
-
-Next upload SSH keys for developers to `home/dendro/.ssh/authorized_keys`
-**Add Env variables to the key, to set the git user for each developer**
-
-```
-command="export $GIT_AUTHOR_NAME='yourname' && export $GIT_AUTHOR_EMAIL='your-email';exec $SHELL -l" key
-```
-
-Next change the `/home/dendro/.bashrc` to configure git, add to the end:
-
-```
-if  [[ -n "$GIT_AUTHOR_NAME" && -n "$GIT_AUTHOR_EMAIL" ]]; then
-        git config --global user.name "$GIT_AUTHOR_NAME"
-        git config --global user.email "$GIT_AUTHOR_EMAIL"
-fi
-```
-
-Now, you can download the repo, including the private repo.
-
-```bash
-# Clone the repository
-git clone git@github.com:deadtrees/deadwood-api.git
-cd deadwood-api
-
-# Initialize and update submodules
-git submodule update --init --recursive
-```
-
-### Create a .env file with required environment variables:
-
-On the Storage server, only the necessary env is set
-```
-SUPABASE_URL=your_supabase_url
-SUPABASE_KEY=your_supabase_key
-LOGFIRE_TOKEN=your_logfire_token
-```
-
-### Download required assets:
-
-```bash
-# Create assets directory and download test data, models, and GADM data
-make
-```
-
-### Build the repo
-
-Optionally, you can alias the call of the correct docker compose file. Add to `.bashrc`
-
-```
-alias serv='docker compose -f docker-compose.api.yaml'
-```
-
-### Certificate issueing & renewal
-
-The certbot service can be used to issue a certificate. For that, the ACME challange 
-has to be served by a temporary nginx:
-
-```nginx
-server {
-    listen 80;
-    listen [::]:80;
-    server_name default_server;
-    server_tokens off;
-
-    # add ACME challange for certbot
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-    }
-}
-```
-
-Then run the certbot service with all the mounts as configured in the `docker-compose.api.yaml`:
-
-```bash
-serv certbot certonly
-```
-
-Once successfull, you can start a cronjob to renew the certificate:
-
-```bash
-crontab -e
-```
-
-And add the following cronjob to run every Sunday night at 1:30. Currently we are not notified if this
-fails and thus needs to be monitored for now:
-
-```
-30 1  * * 0 docker compose -f /apps/deadtrees/docker-compose.api.yaml run --rm certbot renew
-```
+## Figures and screenshots
+Figures, screencasts, and diagrams are embedded inline throughout Section II.a:
+- UI overview screenshot of the GeoLabel editing interface
+- Screencasts of all editing tools: freehand drawing, click-based drawing, AI-assisted segmentation, deletion, cutting, merging, clipping, and undo
+- System architecture diagram (Mermaid) showing the data flow from visualization through editing, storage, and audit review
