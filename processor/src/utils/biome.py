@@ -52,7 +52,11 @@ def get_biome_data(point: Tuple[float, float]) -> Tuple[Optional[str], Optional[
 					row = intersecting.iloc[0]
 				else:
 					# Multiple intersections, find the closest one
-					distances = intersecting.geometry.distance(point_geom)
+					# Calculate distances in meters to avoid GeoPandas "geographic CRS" warning.
+					crs = intersecting.crs or 'EPSG:4326'
+					intersecting_m = intersecting.to_crs(epsg=3857)
+					point_m = gpd.GeoSeries([point_geom], crs=crs).to_crs(epsg=3857).iloc[0]
+					distances = intersecting_m.geometry.distance(point_m)
 					row = intersecting.iloc[distances.argmin()]
 				
 				biome_id = int(row['BIOME'])

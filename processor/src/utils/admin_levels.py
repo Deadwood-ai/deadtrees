@@ -49,8 +49,12 @@ def get_admin_tags(point: Tuple[float, float]) -> List[Optional[str]]:
 			if mask.any():
 				# Get all intersecting polygons
 				intersecting = gdf[mask]
-				# Calculate distances to the point
-				distances = intersecting.geometry.distance(point_geom)
+				# Calculate distances in meters to avoid GeoPandas "geographic CRS" warning.
+				# (GADM data is typically EPSG:4326; distances in degrees are meaningless.)
+				crs = intersecting.crs or 'EPSG:4326'
+				intersecting_m = intersecting.to_crs(epsg=3857)
+				point_m = gpd.GeoSeries([point_geom], crs=crs).to_crs(epsg=3857).iloc[0]
+				distances = intersecting_m.geometry.distance(point_m)
 				# Get the row with minimum distance
 				row = intersecting.iloc[distances.argmin()]
 				return [row['NAME_0'], row['NAME_2'], row['NAME_4']]
