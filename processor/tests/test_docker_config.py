@@ -11,6 +11,8 @@ from docker.errors import DockerException, ImageNotFound, APIError
 import subprocess
 import os
 
+pytestmark = pytest.mark.slow
+
 
 def test_docker_socket_accessible():
 	"""Test that Docker socket is accessible from processor container."""

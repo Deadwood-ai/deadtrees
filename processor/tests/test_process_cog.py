@@ -9,6 +9,8 @@ from processor.src.process_geotiff import process_geotiff
 from processor.src.processor import process_task
 from processor.src.utils.ssh import check_file_exists_on_storage
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def cog_task(test_dataset_for_processing, test_processor_user):

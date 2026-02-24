@@ -5,6 +5,8 @@ from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask, MetadataType
 from processor.src.process_metadata import process_metadata
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def metadata_task(test_dataset_for_processing, test_processor_user):

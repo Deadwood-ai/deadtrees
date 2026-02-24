@@ -39,7 +39,7 @@ def cleanup_labels(auth_token, deadwood_task):
 		client.table(settings.labels_table).delete().eq('dataset_id', deadwood_task.dataset_id).execute()
 
 
-# @pytest.mark.skip(reason="Long running process - skip by default")
+@pytest.mark.comprehensive
 def test_process_deadwood_segmentation_success(deadwood_task, auth_token):
 	"""Test successful deadwood segmentation processing with actual model"""
 	process_deadwood_segmentation(deadwood_task, auth_token, settings.processing_path)
@@ -71,6 +71,7 @@ def test_process_deadwood_segmentation_success(deadwood_task, auth_token):
 		assert 'coordinates' in first_geom['geometry']
 
 
+@pytest.mark.comprehensive
 def test_process_deadwood_segmentation_replaces_existing_labels(deadwood_task, auth_token):
 	"""Test that running deadwood segmentation replaces existing model prediction labels"""
 	from shared.models import LabelPayloadData, LabelSourceEnum, LabelTypeEnum, LabelDataEnum

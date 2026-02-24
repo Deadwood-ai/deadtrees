@@ -58,6 +58,9 @@ class TestDatasetConfig:
 	large_image: bool = False  # NEW: Create large image like your real data
 	nodata_value: Optional[Union[float, int]] = None  # NEW: Custom nodata value
 
+	# This is a helper config object, not a pytest test class.
+	__test__ = False
+
 
 class GeoTIFFTestDataGenerator:
 	"""Generate synthetic GeoTIFF files for testing standardization functions"""

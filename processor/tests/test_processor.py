@@ -69,6 +69,24 @@ def test_background_process_no_tasks():
 	assert background_process() is None
 
 
+def test_pipeline_stage_map_is_stable_and_ordered():
+	"""
+	Locks down the pipeline stage ordering used for crash detection and reporting.
+	If this changes, it should be intentional (and reviewed), because it affects
+	how we attribute failures to stages.
+	"""
+	expected = [
+		(TaskTypeEnum.odm_processing, 'is_odm_done', 'odm_processing'),
+		(TaskTypeEnum.geotiff, 'is_ortho_done', 'ortho_processing'),
+		(TaskTypeEnum.metadata, 'is_metadata_done', 'metadata_processing'),
+		(TaskTypeEnum.cog, 'is_cog_done', 'cog_processing'),
+		(TaskTypeEnum.thumbnail, 'is_thumbnail_done', 'thumbnail_processing'),
+		(TaskTypeEnum.deadwood, 'is_deadwood_done', 'deadwood_segmentation'),
+		(TaskTypeEnum.treecover, 'is_forest_cover_done', 'forest_cover_segmentation'),
+	]
+	assert PIPELINE_STAGE_MAP == expected
+
+
 @pytest.fixture
 def sequential_task(test_dataset_for_processing, test_processor_user):
 	"""Create a test task for sequential processing"""
@@ -81,7 +99,6 @@ def sequential_task(test_dataset_for_processing, test_processor_user):
 			TaskTypeEnum.cog,
 			TaskTypeEnum.thumbnail,
 			TaskTypeEnum.metadata,
-			TaskTypeEnum.deadwood,
 		],
 		priority=1,
 		is_processing=False,  # Column still exists in DB but is inert
@@ -90,6 +107,7 @@ def sequential_task(test_dataset_for_processing, test_processor_user):
 	)
 
 
+@pytest.mark.integration
 def test_sequential_processing(sequential_task, auth_token):
 	"""Test running all processing steps sequentially"""
 	# Process all tasks
@@ -132,12 +150,6 @@ def test_sequential_processing(sequential_task, auth_token):
 		assert 'gadm' in metadata_response.data[0]['metadata']
 		assert 'biome' in metadata_response.data[0]['metadata']
 
-		# Check deadwood processing
-		deadwood_response = (
-			client.table(settings.labels_table).select('*').eq('dataset_id', sequential_task.dataset_id).execute()
-		)
-		assert len(deadwood_response.data) == 1
-
 		# Verify final status
 		status_response = (
 			client.table(settings.statuses_table).select('*').eq('dataset_id', sequential_task.dataset_id).execute()
@@ -150,38 +162,10 @@ def test_sequential_processing(sequential_task, auth_token):
 		assert status['is_thumbnail_done'] is True
 		assert status['is_metadata_done'] is True
 		assert not status['has_error']
-		assert status['is_deadwood_done'] is True
 
 		# Verify task was removed from queue
 		queue_response = client.table(settings.queue_table).select('*').eq('id', sequential_task.id).execute()
 		assert len(queue_response.data) == 0
-
-
-@pytest.fixture(autouse=True)
-def cleanup_storage():
-	"""Clean up storage before and after each test"""
-	# Setup
-	storage_path = Path('/data/archive')
-	processing_path = Path('/data/processing_dir')
-
-	def clean_directory(path: Path):
-		if path.exists():
-			for file in path.glob('*'):
-				try:
-					if file.is_file():
-						file.unlink()
-				except Exception:
-					pass
-
-	# Clean before test
-	clean_directory(storage_path)
-	clean_directory(processing_path)
-
-	yield
-
-	# Clean after test
-	clean_directory(storage_path)
-	clean_directory(processing_path)
 
 
 @pytest.fixture
@@ -243,6 +227,7 @@ def processor_task_with_missing_file(test_processor_user, auth_token):
 					client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 
 
+@pytest.mark.integration
 def test_failed_process_removes_task_from_queue(processor_task_with_missing_file, auth_token):
 	"""Test that failed processing removes task from queue but records error in status.
 

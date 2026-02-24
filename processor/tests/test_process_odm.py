@@ -3,17 +3,121 @@ Consolidated ODM processing tests covering complete functionality.
 
 Tests ODM container execution, EXIF extraction, RTK detection, and orthomosaic generation
 in a single comprehensive test suite, eliminating redundancy across multiple test files.
+
+Fast unit tests (no Docker/SSH) cover analysis and EXIF extraction logic.
+The slow integration test (marked @pytest.mark.slow) runs the full ODM pipeline.
 """
 
 import os
+import zipfile
+import tempfile
 import pytest
 from pathlib import Path
 
 from shared.db import use_client
 from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask, StatusEnum
-from processor.src.process_odm import process_odm
+from processor.src.process_odm import process_odm, _analyze_extracted_files, _extract_exif_from_images
 from processor.src.utils.ssh import push_file_to_storage_server, check_file_exists_on_storage
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _extract_zip_to_tempdir(zip_path: Path) -> tempfile.TemporaryDirectory:
+	"""Extract a ZIP to a fresh temp directory, return the TemporaryDirectory object."""
+	tmp = tempfile.TemporaryDirectory()
+	with zipfile.ZipFile(zip_path, 'r') as zf:
+		zf.extractall(tmp.name)
+	return tmp
+
+
+def _find_test_zip(filename: str) -> Path | None:
+	"""Find a test ZIP by checking known asset locations (base_path varies in containers)."""
+	candidates = [
+		Path(settings.base_path) / 'assets' / 'test_data' / 'raw_drone_images' / filename,
+		Path('/app/assets/test_data/raw_drone_images') / filename,
+		Path('./assets/test_data/raw_drone_images') / filename,
+	]
+	for p in candidates:
+		if p.exists():
+			return p
+	return None
+
+
+def _rtk_zip_path() -> Path | None:
+	return _find_test_zip('test_minimal_5_images.zip')
+
+
+def _no_rtk_zip_path() -> Path | None:
+	return _find_test_zip('test_no_rtk_3_images.zip')
+
+
+# ---------------------------------------------------------------------------
+# Fast unit tests — no Docker, no SSH, no DB (run in default suite)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_analyze_extracted_files_detects_rtk_and_images():
+	"""RTK files and 5 JPG images are correctly detected after local extraction."""
+	zip_path = _rtk_zip_path()
+	if zip_path is None:
+		pytest.skip('test_minimal_5_images.zip not found; run make download-assets')
+
+	with _extract_zip_to_tempdir(zip_path) as tmpdir:
+		rtk_metadata, image_count, total_size_bytes = _analyze_extracted_files(
+			Path(tmpdir), token='test', dataset_id=0
+		)
+
+	assert image_count == 5
+	assert total_size_bytes > 0
+	assert rtk_metadata['has_rtk_data'] is True
+	assert rtk_metadata['rtk_file_count'] > 0
+	assert len(rtk_metadata['detected_extensions']) > 0
+
+
+@pytest.mark.unit
+def test_analyze_extracted_files_no_rtk():
+	"""A ZIP without RTK files reports has_rtk_data=False and correct image count."""
+	zip_path = _no_rtk_zip_path()
+	if zip_path is None:
+		pytest.skip('test_no_rtk_3_images.zip not found; run make download-assets')
+
+	with _extract_zip_to_tempdir(zip_path) as tmpdir:
+		rtk_metadata, image_count, total_size_bytes = _analyze_extracted_files(
+			Path(tmpdir), token='test', dataset_id=0
+		)
+
+	assert image_count >= 1
+	assert total_size_bytes > 0
+	assert rtk_metadata['has_rtk_data'] is False
+	assert rtk_metadata['rtk_file_count'] == 0
+
+
+@pytest.mark.unit
+def test_extract_exif_from_real_drone_images():
+	"""EXIF extraction returns camera make/model and GPS fields from real DJI images."""
+	zip_path = _rtk_zip_path()
+	if zip_path is None:
+		pytest.skip('test_minimal_5_images.zip not found; run make download-assets')
+
+	with _extract_zip_to_tempdir(zip_path) as tmpdir:
+		exif_data = _extract_exif_from_images(Path(tmpdir), token='test', dataset_id=0)
+
+	assert isinstance(exif_data, dict) and len(exif_data) > 0
+
+	camera_fields = {'Make', 'Model', 'Software'}
+	timing_fields = {'DateTime', 'DateTimeOriginal', 'DateTimeDigitized'}
+	exposure_fields = {'ISOSpeedRatings', 'FNumber', 'FocalLength', 'ExposureTime'}
+
+	categories_found = sum([
+		bool(camera_fields & exif_data.keys()),
+		bool(timing_fields & exif_data.keys()),
+		bool(exposure_fields & exif_data.keys()),
+	])
+	assert categories_found >= 2, f'Expected ≥2 EXIF categories, got {categories_found}. Keys: {list(exif_data.keys())[:10]}'
 
 
 @pytest.fixture

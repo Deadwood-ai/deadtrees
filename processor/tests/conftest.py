@@ -11,7 +11,6 @@ from shared.models import StatusEnum, Ortho
 from processor.src.utils.ssh import push_file_to_storage_server, cleanup_storage_server_directory
 from shared.testing.fixtures import (
 	auth_token,
-	test_file,
 	test_processor_user,
 	cleanup_database,
 	data_directory,
@@ -26,6 +25,30 @@ def ensure_gadm_data():
 	if not gadm_path.exists():
 		pytest.skip(f'GADM data not found at {gadm_path}. Run `make download-assets` to download required data files.')
 	return gadm_path
+
+
+@pytest.fixture
+def test_file():
+	"""
+	Processor tests don't need the 52MB GeoTIFF by default.
+	Use the smaller fixture to speed up GeoTIFF/COG/thumbnail stages significantly.
+	"""
+	# Allow overrides for local debugging / repro.
+	import os
+
+	env_test_file = os.getenv('TEST_FILE_PATH')
+	if env_test_file:
+		p = Path(env_test_file)
+		if not p.is_absolute():
+			p = Path(__file__).parent.parent.parent / env_test_file
+		if not p.exists():
+			pytest.skip(f'Test file not found: {p}')
+		return p
+
+	p = Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data-small.tif'
+	if not p.exists():
+		pytest.skip(f'Test file not found: {p}')
+	return p
 
 
 @pytest.fixture(scope='function')
@@ -105,8 +128,17 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 
 # @test_environment_only
 @pytest.fixture(autouse=True)
-def cleanup_storage():
+def cleanup_storage(request, auth_token):
 	"""Clean up storage before and after each test"""
+	# Most unit tests don't touch SSH storage paths; skipping this saves a lot of time.
+	if (
+		request.node.get_closest_marker('integration') is None
+		and request.node.get_closest_marker('slow') is None
+		and request.node.get_closest_marker('comprehensive') is None
+	):
+		yield
+		return
+
 	token = auth_token
 
 	# Paths to clean

@@ -7,6 +7,8 @@ from shared.models import TaskTypeEnum, QueueTask
 from processor.src.process_thumbnail import process_thumbnail
 from processor.src.utils.ssh import check_file_exists_on_storage
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def thumbnail_task(test_dataset_for_processing, test_processor_user):
