@@ -114,6 +114,25 @@ The system architecture combines database-native vector tile generation with a s
 
 *GeoLabel correction workflow architecture (visualize → edit → store → review) with correction status feeding back into database-native vector tiles.*
 
+##### Correction lifecycle (conceptual)
+
+The correction lifecycle is designed to make community contributions auditable and reversible. Contributors submit corrections in `pending` status; auditors then approve or revert them as part of a structured review process.
+
+![GeoLabel correction lifecycle: pending → approve / revert](assets/geolabel-correction-lifecycle.png)
+
+*Conceptual correction lifecycle: corrections are stored with review status and applied in a reversible manner (e.g., inserts and soft-deletes), enabling safe community editing with formal review.*
+
+##### Audit and approval workflow
+
+Auditors review pending corrections in an audit UI and can approve or revert changes to preserve data quality.
+
+<figure>
+<p align="center">
+<img src="assets/approve.gif" alt="Approving pending corrections in the audit UI" width="85%"/>
+</p>
+<figcaption><em>Screencast: approving pending corrections as part of the audit workflow.</em></figcaption>
+</figure>
+
 Key architectural decisions:
 
 - **Database-native vector tiles**: Prediction geometries are rendered as vector tiles generated directly in PostGIS using `ST_AsMVT`, avoiding the need for a separate tile server. Tiles include correction status metadata, enabling visual distinction between pending and approved edits.
@@ -201,5 +220,7 @@ GeoLabel establishes a robust public correction workflow, but there is still sub
 ## Figures and screenshots
 Figures, screencasts, and diagrams are embedded inline throughout Section II.a:
 - UI overview screenshot of the GeoLabel editing interface
-- Screencasts of all editing tools: freehand drawing, click-based drawing, AI-assisted segmentation, deletion, cutting, merging, clipping, and undo
-- System architecture diagram (Mermaid) showing the data flow from visualization through editing, storage, and audit review
+- Screencasts of editing tools: freehand drawing, click-based drawing, AI-assisted segmentation, deletion, cutting, merging, clipping, and undo
+- Screencast: approving pending corrections in the audit UI
+- System architecture diagram (D2) showing the high-level workflow (visualize → edit → store → review)
+- Correction lifecycle diagram (D2) showing pending → approve / revert and reversible application of edits

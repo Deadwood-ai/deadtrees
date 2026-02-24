@@ -1,0 +1,98 @@
+direction: right
+
+classes: {
+  node: {
+    style: {
+      fill: "#2c2c30"
+      stroke: "#404046"
+      font-color: "#d8d8dc"
+      border-radius: 6
+      font-size: 18
+      stroke-width: 1
+    }
+  }
+  hub: {
+    style: {
+      fill: "#3c3c42"
+      stroke: "#505058"
+      font-color: "#f0f0f2"
+      border-radius: 8
+      font-size: 18
+      stroke-width: 1
+    }
+  }
+  store: {
+    shape: cylinder
+    style: {
+      fill: "#2c2c30"
+      stroke: "#404046"
+      font-color: "#d8d8dc"
+      border-radius: 8
+      font-size: 18
+      stroke-width: 1
+    }
+  }
+}
+
+contrib: {
+  label: "Contributor"
+  class: hub
+
+  edit: "Edit session\nAdd · Delete · Modify" { class: node }
+  submit: "Submit corrections\n(status: pending)" { class: node }
+
+  edit -> submit: "save" {
+    style.stroke: "#505058"
+    style.font-color: "#b8b8be"
+  }
+}
+
+db: {
+  label: "Database"
+  class: hub
+
+  corr: "Geometry corrections\noperation + metadata\nreview_status: pending" { class: store }
+  effect: "Effect on predictions\n(kept reversible)\n\nAdd: insert new geometry\nDelete: soft-delete geometry\nModify: replace geometry" { class: node }
+
+  corr -> effect: "apply on save" {
+    style.stroke: "#505058"
+    style.font-color: "#b8b8be"
+  }
+}
+
+audit: {
+  label: "Auditor"
+  class: hub
+
+  review: "Review queue\npending corrections" { class: node }
+  approve: "Approve\nreview_status: approved" { class: node }
+  revert: "Revert\nreview_status: rejected" { class: node }
+
+  review -> approve: "approve" {
+    style.stroke: "#505058"
+    style.font-color: "#b8b8be"
+  }
+  review -> revert: "revert" {
+    style.stroke: "#505058"
+    style.font-color: "#b8b8be"
+  }
+}
+
+contrib.submit -> db.corr: "create correction record" {
+  style.stroke: "#505058"
+  style.font-color: "#b8b8be"
+}
+db.corr -> audit.review: {
+  style.stroke: "#505058"
+  style.font-color: "#b8b8be"
+}
+
+audit.approve -> db.corr: "mark approved" {
+  style.stroke: "#505058"
+  style.font-color: "#b8b8be"
+}
+audit.revert -> db.corr: "mark rejected\nand restore original" {
+  style.stroke: "#505058"
+  style.font-color: "#b8b8be"
+  style.stroke-dash: 4
+}
