@@ -925,15 +925,35 @@ def test_download_dataset_already_exists(auth_token, test_dataset_for_download):
 	)
 
 	# Wait until processing completes
-	max_attempts = 5
+	# This endpoint is rate-limited (one request at a time per IP). In the test
+	# suite we can briefly hit 429s while the initial request is still finalizing
+	# its background task work. Treat those as "still processing" and keep polling.
+	max_attempts = 20
+	last_body = None
 	for _ in range(max_attempts):
 		status_response = client.get(
 			f'/api/v1/download/datasets/{test_dataset_for_download}/status',
 			headers={'Authorization': f'Bearer {auth_token}'},
 		)
-		if status_response.json()['status'] == 'completed':
+		if status_response.status_code != 200:
+			last_body = status_response.text
+			time.sleep(0.25)
+			continue
+
+		try:
+			status_json = status_response.json()
+		except Exception:
+			last_body = status_response.text
+			time.sleep(0.25)
+			continue
+
+		last_body = status_json
+		if isinstance(status_json, dict) and status_json.get('status') == 'completed':
 			break
-		time.sleep(1)
+
+		time.sleep(0.25)
+	else:
+		pytest.fail(f'Dataset processing did not complete within expected time. Last status: {last_body}')
 
 	# Now request the download again
 	second_response = client.get(
