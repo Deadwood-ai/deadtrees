@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timezone
 from shared.logger import logger
 from shared.logging import LogContext, LogCategory
+from processor.src.utils.debug_artifacts import retention_ttl_hours
 
 
 def cleanup_orphaned_resources(token: str):
@@ -28,8 +29,52 @@ def cleanup_orphaned_resources(token: str):
 		token: Authentication token for database operations
 	"""
 	client = docker.from_env()
+	ttl_hours = retention_ttl_hours()
 
 	logger.info('=== STARTUP CLEANUP ===', LogContext(category=LogCategory.PROCESS, token=token))
+
+	# 0. Clean up retained artifacts past TTL (containers/volumes kept for debugging)
+	try:
+		retained = client.containers.list(all=True, filters={'label': 'dt_keep=true'})
+		if retained:
+			logger.info(
+				f'Found {len(retained)} retained containers (dt_keep=true), TTL={ttl_hours}h',
+				LogContext(category=LogCategory.PROCESS, token=token),
+			)
+
+		removed_retained = 0
+		for container in retained:
+			try:
+				created_timestamp = container.attrs.get('Created') if hasattr(container, 'attrs') else None
+				if not created_timestamp:
+					container.reload()
+					created_timestamp = container.attrs.get('Created')
+				created_time = datetime.fromisoformat(created_timestamp.replace('Z', '+00:00'))
+				age_hours = (datetime.now(timezone.utc) - created_time).total_seconds() / 3600
+
+				if age_hours > ttl_hours:
+					logger.warning(
+						f'Removing retained container past TTL: {container.name} (age: {age_hours:.1f}h)',
+						LogContext(category=LogCategory.PROCESS, token=token),
+					)
+					container.remove(force=True)
+					removed_retained += 1
+			except Exception as e:
+				logger.warning(
+					f'Failed to evaluate/remove retained container {getattr(container, "name", "?")}: {e}',
+					LogContext(category=LogCategory.PROCESS, token=token),
+				)
+
+		if removed_retained > 0:
+			logger.info(
+				f'Removed {removed_retained} retained containers past TTL',
+				LogContext(category=LogCategory.PROCESS, token=token),
+			)
+	except Exception as e:
+		logger.warning(
+			f'Failed retained container cleanup: {e}',
+			LogContext(category=LogCategory.PROCESS, token=token),
+		)
 
 	# 1. Find and kill zombie extract containers
 	try:
@@ -66,31 +111,77 @@ def cleanup_orphaned_resources(token: str):
 	except Exception as e:
 		logger.error(f'Failed to cleanup zombie containers: {e}', LogContext(category=LogCategory.PROCESS, token=token))
 
+	# 1b. Clean up exited stage containers leaked by crashes (ODM/TCD)
+	# Note: ODM is run with remove=False for better failure forensics. If the processor
+	# crashes mid-flight, exited containers can be left behind.
+	try:
+		roles = ('odm_container', 'tcd_pipeline')
+		removed_stage = 0
+		for role in roles:
+			containers = client.containers.list(all=True, filters={'label': f'dt_role={role}'})
+			for c in containers:
+				try:
+					c.reload()
+					status = getattr(c, 'status', '') or ''
+					if status == 'running':
+						continue
+
+					created_timestamp = c.attrs.get('Created', '')
+					if not created_timestamp:
+						continue
+
+					created_time = datetime.fromisoformat(created_timestamp.replace('Z', '+00:00'))
+					age_hours = (datetime.now(timezone.utc) - created_time).total_seconds() / 3600
+					if age_hours > ttl_hours:
+						logger.warning(
+							f'Removing leaked stage container: {c.name} (role={role}, age: {age_hours:.1f}h, status={status})',
+							LogContext(category=LogCategory.PROCESS, token=token),
+						)
+						c.remove(force=True)
+						removed_stage += 1
+				except Exception:
+					pass
+
+		if removed_stage > 0:
+			logger.info(
+				f'Removed {removed_stage} leaked stage containers (older than {ttl_hours}h)',
+				LogContext(category=LogCategory.PROCESS, token=token),
+			)
+	except Exception as e:
+		logger.warning(
+			f'Failed leaked stage container cleanup: {e}',
+			LogContext(category=LogCategory.PROCESS, token=token),
+		)
+
 	# 2. Clean up orphaned volumes (optional - only if not referenced)
 	try:
-		volumes = client.volumes.list(filters={'name': 'odm_processing_'})
 		orphaned_volumes = []
+		for prefix in ('odm_processing_', 'tcd_volume_'):
+			volumes = client.volumes.list(filters={'name': prefix})
+			for volume in volumes:
+				try:
+					# Check if volume is referenced by any container
+					containers = client.containers.list(all=True, filters={'volume': volume.name})
+					if containers:
+						continue
 
-		for volume in volumes:
-			try:
-				# Check if volume is referenced by any container
-				containers = client.containers.list(all=True, filters={'volume': volume.name})
-				if not containers:
-					# Check volume age
 					volume.reload()
 					created_at = volume.attrs.get('CreatedAt', '')
-					if created_at:
-						created_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-						age_hours = (datetime.now(timezone.utc) - created_time).total_seconds() / 3600
+					if not created_at:
+						continue
 
-						if age_hours > 24:  # Only remove volumes older than 24 hours
-							orphaned_volumes.append((volume, age_hours))
-			except Exception:
-				pass  # Skip volumes we can't inspect
+					created_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+					age_hours = (datetime.now(timezone.utc) - created_time).total_seconds() / 3600
+
+					# Remove volumes older than TTL; these are usually leaked from crashes.
+					if age_hours > ttl_hours:
+						orphaned_volumes.append((volume, age_hours))
+				except Exception:
+					pass  # Skip volumes we can't inspect
 
 		if orphaned_volumes:
 			logger.info(
-				f'Found {len(orphaned_volumes)} orphaned volumes (>24h old)',
+				f'Found {len(orphaned_volumes)} orphaned volumes (>{ttl_hours}h old)',
 				LogContext(category=LogCategory.PROCESS, token=token),
 			)
 

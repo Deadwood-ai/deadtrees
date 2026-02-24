@@ -1,5 +1,6 @@
 import zipfile
 import docker
+import time
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -18,6 +19,12 @@ from processor.src.utils.shared_volume import (
 	copy_files_to_shared_volume,
 	copy_results_from_shared_volume,
 	cleanup_volume_and_references,
+)
+from processor.src.utils.debug_artifacts import (
+	retain_failed_artifacts_enabled_for_dataset,
+	dt_resource_labels,
+	build_container_forensics,
+	write_debug_bundle,
 )
 from shared.exif_utils import extract_comprehensive_exif
 
@@ -197,15 +204,21 @@ def process_odm(task: QueueTask, temp_dir: Path):
 		except Exception:
 			pass
 
-		# Cleanup temporary ODM directory even on failure
+		# Cleanup temporary ODM directory on failure unless retention is enabled for this dataset.
 		if 'odm_host_temp_dir' in locals() and odm_host_temp_dir.exists():
-			import shutil
+			if retain_failed_artifacts_enabled_for_dataset(dataset_id):
+				logger.warning(
+					f'Retaining temporary ODM directory after failure (DT_RETAIN_FAILED_ARTIFACTS enabled): {odm_host_temp_dir}',
+					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+				)
+			else:
+				import shutil
 
-			shutil.rmtree(odm_host_temp_dir)
-			logger.info(
-				f'Cleaned up temporary ODM directory after failure: {odm_host_temp_dir}',
-				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
-			)
+				shutil.rmtree(odm_host_temp_dir)
+				logger.info(
+					f'Cleaned up temporary ODM directory after failure: {odm_host_temp_dir}',
+					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+				)
 
 		raise
 
@@ -467,13 +480,17 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 	This approach eliminates host path complexity and works identically in test and production.
 
 	Args:
-	    images_dir: Directory containing extracted drone images
-	    output_dir: Directory for ODM output results
-	    token: Authentication token for logging
-	    dataset_id: Dataset ID for logging
+		images_dir: Directory containing extracted drone images
+		output_dir: Directory for ODM output results
+		token: Authentication token for logging
+		dataset_id: Dataset ID for logging
 	"""
 	client = docker.from_env()
 	volume_name = f'odm_processing_{dataset_id}'
+	retain_on_failure = retain_failed_artifacts_enabled_for_dataset(dataset_id)
+	resource_labels = dt_resource_labels(dataset_id=dataset_id, stage='odm', keep_eligible=retain_on_failure)
+	odm_success = False
+	odm_container = None
 
 	logger.info(
 		f'Starting ODM processing with shared volume approach for dataset {dataset_id}',
@@ -554,7 +571,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 
 	try:
 		# Create shared volume for this processing session
-		client.volumes.create(name=volume_name)
+		client.volumes.create(name=volume_name, labels=resource_labels)
 
 		logger.info(
 			f'Created shared volume {volume_name} for ODM processing',
@@ -607,46 +624,60 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 
-			# Run in foreground with automatic removal on exit; capture combined output
+			# Run detached (remove=False) so we can inspect and persist forensics on failure.
 			logger.info(
 				'ODM container started, processing images...',
 				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 			stdout_logs = ''
-			stderr_logs = ''
-			exit_status = 0
+			exit_status = 1
 			try:
-				output = client.containers.run(
+				odm_container = client.containers.run(
 					image='opendronemap/odm',
 					command=odm_command,
 					volumes={volume_name: {'bind': '/odm_data', 'mode': 'rw'}},
 					environment={
-						# Limit GDAL cache to prevent OOM during orthophoto generation
-						# Without this, GDAL auto-calculates based on system RAM (e.g., 58GB on 125GB machine)
-						# which combined with ODM's memory usage can cause OOM kills
-						'GDAL_CACHEMAX': '16384',  # 16GB max cache
+						'GDAL_CACHEMAX': '16384',
 					},
-					remove=True,
-					detach=False,
+					remove=False,
+					detach=True,
+					name=f'dt-odm-pipeline-d{dataset_id}-{int(time.time())}',
 					labels={
-						'dt': 'odm',
+						**resource_labels,
 						'dt_role': 'odm_container',
-						'dt_dataset_id': str(dataset_id),
 						'dt_volume': volume_name,
 					},
 				)
+
+				result = odm_container.wait()
+				exit_status = result.get('StatusCode', 1) if isinstance(result, dict) else 1
+
+				log_bytes = odm_container.logs()
 				stdout_logs = (
-					output.decode('utf-8', errors='ignore') if isinstance(output, (bytes, bytearray)) else str(output)
+					log_bytes.decode('utf-8', errors='ignore')
+					if isinstance(log_bytes, (bytes, bytearray))
+					else str(log_bytes)
 				)
-			except docker.errors.ContainerError as ce:
-				exit_status = getattr(ce, 'exit_status', 1)
-				# ce.stderr may contain error output; container may already be removed
-				try:
-					stderr_logs = ce.stderr.decode('utf-8', errors='ignore') if getattr(ce, 'stderr', None) else ''
-				except Exception:
-					stderr_logs = ''
+			except Exception as e:
+				logger.error(
+					f'ODM container execution failed unexpectedly: {e}',
+					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+				)
+
+				# Best-effort log capture if container exists.
+				if odm_container is not None:
+					try:
+						log_bytes = odm_container.logs()
+						stdout_logs = (
+							log_bytes.decode('utf-8', errors='ignore')
+							if isinstance(log_bytes, (bytes, bytearray))
+							else str(log_bytes)
+						)
+					except Exception:
+						pass
 
 			if exit_status == 0:
+				odm_success = True
 				logger.info(
 					'ODM processing completed successfully',
 					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
@@ -677,12 +708,6 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 				)
 
-				if stderr_logs:
-					logger.error(
-						f'ODM stderr: {stderr_logs}',
-						LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
-					)
-
 				if stdout_logs:
 					# Log the last part of stdout which often contains error info
 					stdout_tail = stdout_logs[-2000:] if len(stdout_logs) > 2000 else stdout_logs
@@ -690,6 +715,28 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 						f'ODM stdout (tail): {stdout_tail}',
 						LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 					)
+
+				# Persist forensics so we can debug even if the processor crashes later.
+				if odm_container is not None:
+					forensics = build_container_forensics(
+						odm_container,
+						dataset_id=dataset_id,
+						stage='odm',
+						command=odm_command,
+						volume_name=volume_name,
+					)
+					write_debug_bundle(forensics=forensics, token=token, dataset_id=dataset_id, stage='odm')
+
+					if retain_on_failure:
+						logger.warning(
+							f'Retaining failed ODM container/volume for debugging: container={getattr(odm_container, "name", None)} volume={volume_name}',
+							LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+						)
+					else:
+						try:
+							odm_container.remove(force=True)
+						except Exception:
+							pass
 
 				# Check if images directory exists and has content for debugging
 				if images_dir.exists():
@@ -705,11 +752,15 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 					)
 
 				raise Exception(
-					f'ODM processing failed with exit code {exit_status}. stdout: {stdout_logs[-2000:] if stdout_logs else "No stdout"}. stderr: {stderr_logs[-5000:] if stderr_logs else "No stderr"}'
+					f'ODM processing failed with exit code {exit_status}. stdout: {stdout_logs[-2000:] if stdout_logs else "No stdout"}'
 				)
 		finally:
-			# No manual removal needed when remove=True
-			...
+			# Always remove successful container to avoid leaks (failure retention is optional).
+			if odm_container is not None and (odm_success or not retain_on_failure):
+				try:
+					odm_container.remove(force=True)
+				except Exception:
+					pass
 
 	except Exception as e:
 		logger.error(
@@ -723,12 +774,18 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			pass
 		raise
 	finally:
-		# Always clean up the shared volume (remove referencing containers first)
-		try:
-			cleanup_volume_and_references(volume_name, token, dataset_id)
-		except Exception as volume_cleanup_error:
-			logger.error(
-				f'Failed to fully cleanup shared volume {volume_name}: {str(volume_cleanup_error)}',
+		# Clean up shared volume unless we intentionally retained failed artifacts.
+		if odm_success or not retain_on_failure:
+			try:
+				cleanup_volume_and_references(volume_name, token, dataset_id)
+			except Exception as volume_cleanup_error:
+				logger.error(
+					f'Failed to fully cleanup shared volume {volume_name}: {str(volume_cleanup_error)}',
+					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+				)
+		else:
+			logger.warning(
+				f'Retaining shared volume {volume_name} after ODM failure (DT_RETAIN_FAILED_ARTIFACTS enabled)',
 				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 			)
 
@@ -738,11 +795,11 @@ def _find_orthomosaic(output_dir: Path, project_name: str, token: str, dataset_i
 	Find the generated orthomosaic file in ODM output directory.
 
 	Args:
-	    output_dir: ODM output directory containing project directory
-	    project_name: Name of the ODM project directory
+		output_dir: ODM output directory containing project directory
+		project_name: Name of the ODM project directory
 
 	Returns:
-	    Path to orthomosaic file or None if not found
+		Path to orthomosaic file or None if not found
 	"""
 	# ODM outputs orthomosaic in PROJECT/odm_orthophoto/odm_orthophoto.tif
 	project_dir = output_dir / project_name

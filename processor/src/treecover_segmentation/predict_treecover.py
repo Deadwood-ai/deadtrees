@@ -25,6 +25,12 @@ from ..deadwood_segmentation.deadtreesmodels.common.common import (
 	get_utm_string_from_latlon,
 )
 from processor.src.utils.shared_volume import cleanup_volume_and_references
+from processor.src.utils.debug_artifacts import (
+	retain_failed_artifacts_enabled_for_dataset,
+	dt_resource_labels,
+	build_container_forensics,
+	write_debug_bundle,
+)
 from ..exceptions import ProcessingError, AuthenticationError
 
 # Load configuration
@@ -132,13 +138,13 @@ def _copy_files_to_tcd_volume(ortho_path: str, volume_name: str, dataset_id: int
 	Copy reprojected orthomosaic and pipeline script to TCD shared volume.
 
 	Args:
-	    ortho_path (str): Path to reprojected orthomosaic file
-	    volume_name (str): Docker volume name
-	    dataset_id (int): Dataset ID for directory structure
-	    token (str): Authentication token for logging
+		ortho_path (str): Path to reprojected orthomosaic file
+		volume_name (str): Docker volume name
+		dataset_id (int): Dataset ID for directory structure
+		token (str): Authentication token for logging
 
 	Returns:
-	    tuple[str, str]: Container paths to (orthomosaic, confidence_map_output)
+		tuple[str, str]: Container paths to (orthomosaic, confidence_map_output)
 	"""
 	client = docker.from_env()
 	project_name = f'dataset_{dataset_id}'
@@ -241,17 +247,19 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 	Execute TCD container using Pipeline class via Python script for complete confidence map output.
 
 	Args:
-	    volume_name (str): Docker volume name
-	    dataset_id (int): Dataset ID
-	    token (str): Authentication token for logging
+		volume_name (str): Docker volume name
+		dataset_id (int): Dataset ID
+		token (str): Authentication token for logging
 
 	Returns:
-	    str: Container path to confidence map output file
+		str: Container path to confidence map output file
 	"""
 	client = docker.from_env()
 	project_name = f'dataset_{dataset_id}'
 	input_path = f'/tcd_data/{project_name}/input/orthomosaic.tif'
 	output_path = f'/tcd_data/{project_name}/output/confidence_map.tif'
+	retain_on_failure = retain_failed_artifacts_enabled_for_dataset(dataset_id)
+	resource_labels = dt_resource_labels(dataset_id=dataset_id, stage='tcd', keep_eligible=retain_on_failure)
 
 	logger.info(
 		f'Starting TCD Pipeline container execution for dataset {dataset_id}',
@@ -282,9 +290,8 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 					'NVIDIA_DRIVER_CAPABILITIES': 'all',
 				},
 				labels={
-					'dt': 'tcd',
+					**resource_labels,
 					'dt_role': 'tcd_pipeline',
-					'dt_dataset_id': str(dataset_id),
 					'dt_volume': volume_name,
 				},
 				name=f'dt-tcd-pipeline-d{dataset_id}-{int(time.time())}-{uuid.uuid4().hex[:6]}',
@@ -294,25 +301,60 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 		def _run_and_wait(device_requests=None):
 			"""Run container in detached mode with a timeout, then collect output."""
 			container = _run(device_requests=device_requests)
+			success = False
 			try:
 				result = container.wait(timeout=TCD_TIMEOUT_SECONDS)
 				container_output = container.logs()
 				if result['StatusCode'] != 0:
-					logs = container.logs(tail=100).decode('utf-8', errors='replace')
+					logs = container.logs(tail=200).decode('utf-8', errors='replace')
+
+					# Persist debug bundle before cleanup so failures remain debuggable.
+					forensics = build_container_forensics(
+						container,
+						dataset_id=dataset_id,
+						stage='treecover',
+						command=['python', '/tcd_data/predict_pipeline.py', input_path, output_path],
+						volume_name=volume_name,
+					)
+					write_debug_bundle(forensics=forensics, token=token, dataset_id=dataset_id, stage='treecover')
+
 					raise Exception(f'TCD exited with code {result["StatusCode"]}: {logs}')
+				success = True
 				return container_output
 			except requests.exceptions.ReadTimeout:
 				logger.error(
 					f'TCD container timed out after {TCD_TIMEOUT_SECONDS}s for dataset {dataset_id}',
 					LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 				)
-				container.kill()
-				raise Exception(f'TCD container timed out after {TCD_TIMEOUT_SECONDS // 3600} hours')
-			finally:
 				try:
-					container.remove(force=True)
+					container.kill()
 				except Exception:
 					pass
+
+				try:
+					forensics = build_container_forensics(
+						container,
+						dataset_id=dataset_id,
+						stage='treecover',
+						command=['python', '/tcd_data/predict_pipeline.py', input_path, output_path],
+						volume_name=volume_name,
+					)
+					write_debug_bundle(forensics=forensics, token=token, dataset_id=dataset_id, stage='treecover')
+				except Exception:
+					pass
+
+				raise Exception(f'TCD container timed out after {TCD_TIMEOUT_SECONDS // 3600} hours')
+			finally:
+				if success or not retain_on_failure:
+					try:
+						container.remove(force=True)
+					except Exception:
+						pass
+				else:
+					logger.warning(
+						f'Retaining failed TCD container for debugging (DT_RETAIN_FAILED_ARTIFACTS enabled): {getattr(container, "name", None)}',
+						LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+					)
 
 		try:
 			container_output = _run_and_wait(
@@ -352,13 +394,13 @@ def _copy_confidence_map_from_volume(volume_name: str, local_output_dir: Path, d
 	Copy TCD Pipeline confidence map from shared volume to local directory.
 
 	Args:
-	    volume_name (str): Docker volume name
-	    local_output_dir (Path): Local directory to copy results to
-	    dataset_id (int): Dataset ID
-	    token (str): Authentication token for logging
+		volume_name (str): Docker volume name
+		local_output_dir (Path): Local directory to copy results to
+		dataset_id (int): Dataset ID
+		token (str): Authentication token for logging
 
 	Returns:
-	    str: Path to extracted confidence_map.tif file
+		str: Path to extracted confidence_map.tif file
 	"""
 	client = docker.from_env()
 	project_name = f'dataset_{dataset_id}'
@@ -424,7 +466,9 @@ def _copy_confidence_map_from_volume(volume_name: str, local_output_dir: Path, d
 		wrapped_stream = io.BufferedReader(_GeneratorStream(archive_stream))
 		with tarfile.open(mode='r|*', fileobj=wrapped_stream) as tar:
 			for member in tar:
-				tar.extract(member, local_output_dir)
+				# Explicit filter avoids upcoming Python 3.14 default-behavior warnings and
+				# protects against path traversal / unsafe metadata.
+				tar.extract(member, local_output_dir, filter='data')
 				file_count += 1
 				total_bytes += member.size
 
@@ -462,10 +506,10 @@ def _load_confidence_map_from_container_output(confidence_map_path: str) -> np.n
 	a simple file-based approach since we know the container outputs a GeoTIFF.
 
 	Args:
-	    confidence_map_path (str): Path to confidence_map.tif from TCD container
+		confidence_map_path (str): Path to confidence_map.tif from TCD container
 
 	Returns:
-	    np.ndarray: Confidence map as numpy array
+		np.ndarray: Confidence map as numpy array
 	"""
 	with rasterio.open(confidence_map_path) as src:
 		return src.read(1)  # Read first band as numpy array
@@ -476,9 +520,9 @@ def _cleanup_tcd_volume(volume_name: str, dataset_id: int, token: str):
 	Clean up TCD shared volume after processing.
 
 	Args:
-	    volume_name (str): Docker volume name to remove
-	    dataset_id (int): Dataset ID for logging
-	    token (str): Authentication token for logging
+		volume_name (str): Docker volume name to remove
+		dataset_id (int): Dataset ID for logging
+		token (str): Authentication token for logging
 	"""
 	client = docker.from_env()
 
@@ -506,13 +550,16 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 	4. Storage: Convert to EPSG:4326 and save to v2_forest_cover_geometries via labels system
 
 	Args:
-	    dataset_id (int): Dataset ID
-	    file_path (Path): Path to original orthomosaic file
-	    user_id (str): User ID for label creation
-	    token (str): Authentication token
+		dataset_id (int): Dataset ID
+		file_path (Path): Path to original orthomosaic file
+		user_id (str): User ID for label creation
+		token (str): Authentication token
 	"""
 	volume_name = None
 	temp_dir = None
+	had_error = False
+	retain_on_failure = retain_failed_artifacts_enabled_for_dataset(dataset_id)
+	resource_labels = dt_resource_labels(dataset_id=dataset_id, stage='tcd', keep_eligible=retain_on_failure)
 
 	try:
 		# Create temporary directory for processing
@@ -531,7 +578,7 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 		# Step 2: Container Setup - Create shared volume and copy reprojected ortho
 		volume_name = f'tcd_volume_{dataset_id}_{uuid.uuid4().hex[:8]}'
 		client = docker.from_env()
-		client.volumes.create(name=volume_name)
+		client.volumes.create(name=volume_name, labels=resource_labels)
 
 		logger.info(
 			f'Created TCD shared volume {volume_name}',
@@ -750,25 +797,54 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 		)
 
 	except Exception as e:
+		had_error = True
 		logger.error(
 			f'Error in predict_treecover: {str(e)}',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
+		# Best-effort: persist a minimal debug bundle even if failure isn't a clean container exit.
+		try:
+			write_debug_bundle(
+				forensics={
+					'dataset_id': dataset_id,
+					'stage': 'treecover',
+					'error': str(e),
+					'volume_name': volume_name,
+					'temp_dir': temp_dir,
+				},
+				token=token,
+				dataset_id=dataset_id,
+				stage='treecover',
+			)
+		except Exception:
+			pass
 		raise ProcessingError(str(e), task_type='treecover_segmentation', dataset_id=dataset_id)
 
 	finally:
 		# Clean up resources
 		if volume_name:
-			try:
-				cleanup_volume_and_references(volume_name, token, dataset_id)
-			except Exception:
-				_cleanup_tcd_volume(volume_name, dataset_id, token)
+			if had_error and retain_on_failure:
+				logger.warning(
+					f'Retaining failed TCD volume for debugging (DT_RETAIN_FAILED_ARTIFACTS enabled): {volume_name}',
+					LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+				)
+			else:
+				try:
+					cleanup_volume_and_references(volume_name, token, dataset_id)
+				except Exception:
+					_cleanup_tcd_volume(volume_name, dataset_id, token)
 
 		if temp_dir and os.path.exists(temp_dir):
 			import shutil
 
-			shutil.rmtree(temp_dir, ignore_errors=True)
-			logger.info(
-				f'Cleaned up temporary directory {temp_dir}',
-				LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
-			)
+			if had_error and retain_on_failure:
+				logger.warning(
+					f'Retaining treecover temp directory for debugging (DT_RETAIN_FAILED_ARTIFACTS enabled): {temp_dir}',
+					LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+				)
+			else:
+				shutil.rmtree(temp_dir, ignore_errors=True)
+				logger.info(
+					f'Cleaned up temporary directory {temp_dir}',
+					LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+				)

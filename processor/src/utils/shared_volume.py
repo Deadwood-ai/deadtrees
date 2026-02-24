@@ -224,7 +224,9 @@ def copy_results_from_shared_volume(volume_name: str, output_dir: Path, project_
 		wrapped_stream = io.BufferedReader(_GeneratorStream(archive_stream))
 		with tarfile.open(mode='r|*', fileobj=wrapped_stream) as tar:
 			for member in tar:
-				tar.extract(member, output_dir)
+				# Explicit filter avoids upcoming Python 3.14 default-behavior warnings and
+				# protects against path traversal / unsafe metadata.
+				tar.extract(member, output_dir, filter='data')
 				file_count += 1
 				total_bytes += member.size
 
