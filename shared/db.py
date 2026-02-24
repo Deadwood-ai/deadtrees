@@ -1,4 +1,4 @@
-from typing import Union, Literal, Optional, Generator
+from typing import Union, Literal, Optional, Generator, Any
 from contextlib import contextmanager
 import time
 import logging
@@ -6,7 +6,6 @@ import logging
 from pydantic import BaseModel
 from shared.models import StatusEnum
 from supabase import create_client, ClientOptions, Client
-from gotrue import User
 from shared.settings import settings
 
 # Create logger instance at module level
@@ -65,14 +64,14 @@ def login(user: str, password: str, use_cached_session: bool = True) -> str:
 		raise Exception(f'Login failed: {str(e)}')
 
 
-def verify_token(jwt: str) -> Union[Literal[False], User]:
+def verify_token(jwt: str) -> Union[Literal[False], Any]:
 	"""Verifies a user jwt token string against the active supabase sessions
 
 	Args:
 	    jwt (str): A jwt token string
 
 	Returns:
-	    Union[Literal[False], User]: Returns true if user session is active, false if not
+	    Union[Literal[False], Any]: Returns true if user session is active, false if not
 	"""
 	global cached_session
 
