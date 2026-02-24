@@ -1,7 +1,7 @@
 from typing import Optional, Annotated, List
 from fastapi import APIRouter, Depends, HTTPException, Body
 from fastapi.security import OAuth2PasswordBearer
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 
 from shared.db import verify_token, use_client, login
 from shared.settings import settings
@@ -38,12 +38,6 @@ def _task_type_to_status_flag(task_type: TaskTypeEnum) -> str | None:
 class ProcessRequest(BaseModel):
 	task_types: List[str]
 	priority: Optional[int] = Field(default=2, ge=1, le=5, description='Task priority (1=highest, 5=lowest)')
-
-	@validator('priority')
-	def validate_priority(cls, v):
-		if v < 1 or v > 5:
-			raise ValueError('Priority must be between 1 (highest) and 5 (lowest)')
-		return v
 
 
 @router.put('/datasets/{dataset_id}/process')
@@ -96,6 +90,24 @@ def create_processing_task(
 	# Check if dataset is currently being processed and clean up old queue items
 	try:
 		with use_client(token) as client:
+			# If the processor already picked up a task, block reruns.
+			# This is more robust than relying solely on v2_statuses.current_status, which may lag.
+			active_queue = (
+				client.table(settings.queue_table)
+				.select('id')
+				.eq('dataset_id', dataset_id)
+				.eq('is_processing', True)
+				.execute()
+			)
+			if active_queue.data:
+				raise HTTPException(
+					status_code=409,
+					detail=(
+						f'Dataset {dataset_id} is currently being processed. '
+						'Please stop the active processing container (or wait for completion), then retry.'
+					),
+				)
+
 			status_check = (
 				client.table(settings.statuses_table)
 				.select('current_status, has_error')
@@ -131,22 +143,22 @@ def create_processing_task(
 						LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token),
 					)
 
-		# Check for existing queue items and delete them (users can delete their own items)
-		existing_tasks = client.table(settings.queue_table).select('id').eq('dataset_id', dataset_id).execute()
+			# Check for existing queue items and delete them (users can delete their own items)
+			existing_tasks = client.table(settings.queue_table).select('id').eq('dataset_id', dataset_id).execute()
 
-		if existing_tasks.data:
-			# Delete all existing queue items for this dataset (clean slate for rerun)
-			client.table(settings.queue_table).delete().eq('dataset_id', dataset_id).execute()
-			logger.info(
-				f'Removed {len(existing_tasks.data)} existing queue items for dataset {dataset_id}',
-				LogContext(
-					category=LogCategory.ADD_PROCESS,
-					user_id=user.id,
-					dataset_id=dataset_id,
-					token=token,
-					extra={'removed_count': len(existing_tasks.data)},
-				),
-			)
+			if existing_tasks.data:
+				# Delete all existing queue items for this dataset (clean slate for rerun)
+				client.table(settings.queue_table).delete().eq('dataset_id', dataset_id).execute()
+				logger.info(
+					f'Removed {len(existing_tasks.data)} existing queue items for dataset {dataset_id}',
+					LogContext(
+						category=LogCategory.ADD_PROCESS,
+						user_id=user.id,
+						dataset_id=dataset_id,
+						token=token,
+						extra={'removed_count': len(existing_tasks.data)},
+					),
+				)
 
 	except HTTPException:
 		raise
