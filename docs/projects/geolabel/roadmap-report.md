@@ -110,42 +110,9 @@ Keyboard shortcuts support fast, friction-free editing:
 
 The system architecture combines database-native vector tile generation with a structured correction workflow, enabling fast rendering of large prediction layers and safe collaborative editing.
 
-```mermaid
-flowchart TD
-    subgraph A["① Visualize"]
-        direction LR
-        A1["Ortho imagery<br/>(COG tiles)"]
-        A2["Prediction geometries<br/>(PostGIS vector tiles)"]
-        A3["Interactive map"]
-        A1 --> A3
-        A2 --> A3
-    end
+![GeoLabel architecture: visualize, edit, store, review workflow](assets/geolabel-architecture.png)
 
-    subgraph B["② Edit"]
-        direction LR
-        B1["Polygon editor<br/>draw · delete · cut<br/>merge · clip · undo"]
-        B2["AI-assisted segmentation<br/>(SegmentAnything)"]
-        B1 <--> B2
-    end
-
-    subgraph C["③ Store"]
-        C1["Corrections saved to dedicated table<br/>linked to original predictions · status: pending"]
-    end
-
-    subgraph D["④ Review"]
-        direction LR
-        D1["Auditor reviews<br/>pending corrections"]
-        D2["✓ Approve<br/>correction permanent"]
-        D3["✗ Revert<br/>original restored"]
-        D1 --> D2
-        D1 --> D3
-    end
-
-    A3 --> B1
-    B1 -->|save| C1
-    C1 --> D1
-    D2 & D3 -.->|tiles updated| A2
-```
+*GeoLabel correction workflow architecture (visualize → edit → store → review) with correction status feeding back into database-native vector tiles.*
 
 Key architectural decisions:
 
