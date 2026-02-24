@@ -40,6 +40,41 @@ import json
 client = TestClient(app)
 
 
+def _wait_for_download_completed(dataset_id: int, auth_token: str, *, max_attempts: int = 40, sleep_s: float = 0.25):
+	"""
+	Poll the download status endpoint until it reports completed.
+
+	The download service enforces a per-IP rate limit and runs background tasks; in the test
+	suite we can briefly see non-200 or non-JSON responses. Treat those as transient and
+	keep polling so background jobs don't outlive the test and delete their own inputs.
+	"""
+	last_body = None
+	for _ in range(max_attempts):
+		status_response = client.get(
+			f'/api/v1/download/datasets/{dataset_id}/status',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		if status_response.status_code != 200:
+			last_body = status_response.text
+			time.sleep(sleep_s)
+			continue
+
+		try:
+			status_json = status_response.json()
+		except Exception:
+			last_body = status_response.text
+			time.sleep(sleep_s)
+			continue
+
+		last_body = status_json
+		if isinstance(status_json, dict) and status_json.get('status') == 'completed':
+			return status_json
+
+		time.sleep(sleep_s)
+
+	pytest.fail(f'Dataset processing did not complete within expected time. Last status: {last_body}')
+
+
 @pytest.fixture(scope='function')
 def test_dataset_for_download(auth_token, data_directory, test_file, test_user):
 	"""Create a temporary test dataset for download testing"""
@@ -111,25 +146,8 @@ def test_download_dataset(auth_token, test_dataset_for_download):
 	assert 'job_id' in data
 	assert data['job_id'] == str(test_dataset_for_download)
 
-	# Wait a bit for processing to complete
-	max_attempts = 5
-	for _ in range(max_attempts):
-		# Check status
-		status_response = client.get(
-			f'/api/v1/download/datasets/{test_dataset_for_download}/status',
-			headers={'Authorization': f'Bearer {auth_token}'},
-		)
-		assert status_response.status_code == 200
-		status_data = status_response.json()
-
-		if status_data['status'] == 'completed':
-			download_path = status_data['download_path']
-			break
-
-		# Wait before checking again
-		time.sleep(1)
-	else:
-		pytest.fail('Dataset processing did not complete within expected time')
+	status_data = _wait_for_download_completed(test_dataset_for_download, auth_token)
+	download_path = status_data['download_path']
 
 	# Test the download redirect endpoint
 	download_response = client.get(
@@ -166,16 +184,7 @@ def test_download_cleanup(auth_token, test_dataset_for_download):
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 
-	# Wait for processing to complete
-	max_attempts = 5
-	for _ in range(max_attempts):
-		status_response = client.get(
-			f'/api/v1/download/datasets/{test_dataset_for_download}/status',
-			headers={'Authorization': f'Bearer {auth_token}'},
-		)
-		if status_response.json()['status'] == 'completed':
-			break
-		time.sleep(1)
+	_wait_for_download_completed(test_dataset_for_download, auth_token)
 
 	download_file = settings.downloads_path / str(test_dataset_for_download) / f'{test_dataset_for_download}.zip'
 	assert download_file.exists()
@@ -1031,16 +1040,7 @@ def test_download_dataset_with_multiple_labels(auth_token, test_dataset_for_down
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 
-	# Wait for processing to complete
-	max_attempts = 5
-	for _ in range(max_attempts):
-		status_response = client.get(
-			f'/api/v1/download/datasets/{dataset_id}/status',
-			headers={'Authorization': f'Bearer {auth_token}'},
-		)
-		if status_response.json()['status'] == 'completed':
-			break
-		time.sleep(1)
+	_wait_for_download_completed(dataset_id, auth_token)
 
 	# Get the download
 	download_response = client.get(
