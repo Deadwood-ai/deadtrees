@@ -60,37 +60,37 @@ The editor provides a comprehensive set of polygon editing tools for correcting 
 <table>
 <tr>
 <td width="25%">
-<video src="docs/projects/geolabel/assets/adding-free-hand.mp4" autoplay loop muted playsinline width="100%"></video>
+<video src="docs/projects/geolabel/assets/adding-free-hand.mp4" controls loop muted playsinline width="100%"></video>
 <br/><em>Freehand polygon drawing.</em>
 </td>
 <td width="25%">
-<video src="docs/projects/geolabel/assets/adding-click.mp4" autoplay loop muted playsinline width="100%"></video>
+<video src="docs/projects/geolabel/assets/adding-click.mp4" controls loop muted playsinline width="100%"></video>
 <br/><em>Click-based polygon drawing.</em>
 </td>
 <td width="25%">
-<video src="docs/projects/geolabel/assets/adding-ai.mp4" autoplay loop muted playsinline width="100%"></video>
+<video src="docs/projects/geolabel/assets/adding-ai.mp4" controls loop muted playsinline width="100%"></video>
 <br/><em>AI-assisted boundary suggestion.</em>
 </td>
 <td width="25%">
-<video src="docs/projects/geolabel/assets/deletion.mp4" autoplay loop muted playsinline width="100%"></video>
+<video src="docs/projects/geolabel/assets/deletion.mp4" controls loop muted playsinline width="100%"></video>
 <br/><em>Deleting an incorrect polygon.</em>
 </td>
 </tr>
 <tr>
 <td width="25%">
-<video src="docs/projects/geolabel/assets/cutting.mp4" autoplay loop muted playsinline width="100%"></video>
+<video src="docs/projects/geolabel/assets/cutting.mp4" controls loop muted playsinline width="100%"></video>
 <br/><em>Cutting a hole in a polygon.</em>
 </td>
 <td width="25%">
-<video src="docs/projects/geolabel/assets/merging.mp4" autoplay loop muted playsinline width="100%"></video>
+<video src="docs/projects/geolabel/assets/merging.mp4" controls loop muted playsinline width="100%"></video>
 <br/><em>Merging two polygons.</em>
 </td>
 <td width="25%">
-<video src="docs/projects/geolabel/assets/clipping.mp4" autoplay loop muted playsinline width="100%"></video>
+<video src="docs/projects/geolabel/assets/clipping.mp4" controls loop muted playsinline width="100%"></video>
 <br/><em>Clipping two polygons.</em>
 </td>
 <td width="25%">
-<video src="docs/projects/geolabel/assets/undo.mp4" autoplay loop muted playsinline width="100%"></video>
+<video src="docs/projects/geolabel/assets/undo.mp4" controls loop muted playsinline width="100%"></video>
 <br/><em>Undoing an action.</em>
 </td>
 </tr>
