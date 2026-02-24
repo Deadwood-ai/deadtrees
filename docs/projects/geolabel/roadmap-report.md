@@ -61,37 +61,37 @@ The editor provides a comprehensive set of polygon editing tools for correcting 
 <tr>
 <td width="25%">
 <img src="assets/adding-free-hand.gif" alt="Freehand polygon drawing" width="100%"/>
-<br/><em>Freehand polygon drawing.</em>
+<br/><em>Freehand draw.</em>
 </td>
 <td width="25%">
 <img src="assets/adding-click.gif" alt="Click-based polygon drawing" width="100%"/>
-<br/><em>Click-based polygon drawing.</em>
+<br/><em>Click draw.</em>
 </td>
 <td width="25%">
 <img src="assets/adding-ai.gif" alt="AI-assisted boundary suggestion" width="100%"/>
-<br/><em>AI-assisted boundary suggestion.</em>
+<br/><em>AI boundary assist.</em>
 </td>
 <td width="25%">
 <img src="assets/deletion.gif" alt="Deleting an incorrect polygon" width="100%"/>
-<br/><em>Deleting an incorrect polygon.</em>
+<br/><em>Delete polygon.</em>
 </td>
 </tr>
 <tr>
 <td width="25%">
 <img src="assets/cutting.gif" alt="Cutting a hole in a polygon" width="100%"/>
-<br/><em>Cutting a hole in a polygon.</em>
+<br/><em>Cut hole.</em>
 </td>
 <td width="25%">
 <img src="assets/merging.gif" alt="Merging two polygons" width="100%"/>
-<br/><em>Merging two polygons.</em>
+<br/><em>Merge polygons.</em>
 </td>
 <td width="25%">
 <img src="assets/clipping.gif" alt="Clipping two polygons" width="100%"/>
-<br/><em>Clipping two polygons.</em>
+<br/><em>Clip polygons.</em>
 </td>
 <td width="25%">
 <img src="assets/undo.gif" alt="Undoing an action" width="100%"/>
-<br/><em>Undoing an action.</em>
+<br/><em>Undo action.</em>
 </td>
 </tr>
 </table>
