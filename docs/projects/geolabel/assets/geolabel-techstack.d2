@@ -1,0 +1,98 @@
+direction: down
+
+classes: {
+  ui: {
+    style: {
+      fill: "#0f172a"
+      stroke: "#f59e0b"
+      font-color: "#fef3c7"
+      border-radius: 12
+      font-size: 22
+      stroke-width: 2
+      shadow: true
+    }
+  }
+  tiles: {
+    style: {
+      fill: "#0f172a"
+      stroke: "#38bdf8"
+      font-color: "#e0f2fe"
+      border-radius: 12
+      font-size: 22
+      stroke-width: 2
+      shadow: true
+    }
+  }
+  api: {
+    style: {
+      fill: "#0f172a"
+      stroke: "#a78bfa"
+      font-color: "#ede9fe"
+      border-radius: 12
+      font-size: 22
+      stroke-width: 2
+      shadow: true
+    }
+  }
+  db: {
+    style: {
+      fill: "#0f172a"
+      stroke: "#22c55e"
+      font-color: "#dcfce7"
+      border-radius: 12
+      font-size: 22
+      stroke-width: 2
+      shadow: true
+    }
+  }
+  label: {
+    style: {
+      fill: "transparent"
+      stroke: "transparent"
+      font-color: "#94a3b8"
+      font-size: 18
+      bold: false
+    }
+  }
+}
+
+browser: "Map UI\nReact + OpenLayers" { class: ui }
+
+tiles: {
+  label: "Tile Services"
+  class: tiles
+
+  cog: "Raster  ·  COG tiles\nnginx" { class: tiles }
+  mvt: "Vector  ·  PostGIS MVT\npredictions + correction status" { class: tiles }
+}
+
+api: "API  ·  FastAPI\nsave_correction  ·  approve  ·  revert" { class: api }
+
+database: {
+  label: "PostgreSQL / PostGIS"
+  class: db
+
+  preds: "Prediction geometries\ndeadwood  ·  forest cover" { class: db }
+  corr: "Correction table\nstatus: pending → approved / reverted" { class: db }
+}
+
+browser -> tiles: "fetch tiles" {
+  style.stroke: "#f59e0b"
+  style.font-color: "#f59e0b"
+  style.stroke-width: 2
+}
+browser -> api: "save / approve / revert" {
+  style.stroke: "#a78bfa"
+  style.font-color: "#a78bfa"
+  style.stroke-width: 2
+}
+api -> database: "read / write" {
+  style.stroke: "#a78bfa"
+  style.font-color: "#a78bfa"
+  style.stroke-width: 2
+}
+tiles -> database: "live query" {
+  style.stroke: "#38bdf8"
+  style.font-color: "#38bdf8"
+  style.stroke-width: 2
+}
