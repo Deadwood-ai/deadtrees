@@ -106,19 +106,11 @@ Keyboard shortcuts support fast, friction-free editing:
 | X | Clip polygons | Esc | Cancel editing |
 | C | Cut hole | | |
 
-#### Architecture
-
-The system architecture combines database-native vector tile generation with a structured correction workflow, enabling fast rendering of large prediction layers and safe collaborative editing.
-
-![GeoLabel architecture: visualize, edit, store, review workflow](docs/projects/geolabel/assets/geolabel-architecture.png)
-
-*GeoLabel correction workflow architecture (visualize → edit → store → review) with correction status feeding back into database-native vector tiles.*
-
 ##### Correction lifecycle (conceptual)
 
 The correction lifecycle is designed to make community contributions auditable and reversible. Contributors submit corrections in `pending` status; auditors then approve or revert them as part of a structured review process.
 
-![GeoLabel correction lifecycle: pending → approve / revert](docs/projects/geolabel/assets/geolabel-correction-lifecycle-presentation.png)
+![GeoLabel correction lifecycle: pending → approve / revert](docs/projects/geolabel/assets/geolabel-architecture-horizontal.png)
 
 *Conceptual correction lifecycle: corrections are stored with review status and applied in a reversible manner (e.g., inserts and soft-deletes), enabling safe community editing with formal review.*
 
@@ -131,6 +123,14 @@ Auditors review pending corrections in an audit UI and can approve or revert cha
 </p>
 
 *Screencast: approving pending corrections as part of the audit workflow.*
+
+#### Architecture
+
+The system architecture combines database-native vector tile generation with a structured correction workflow, enabling fast rendering of large prediction layers and safe collaborative editing.
+
+![GeoLabel architecture: visualize, edit, store, review workflow](docs/projects/geolabel/assets/geolabel-techstack.png)
+
+*GeoLabel correction workflow architecture (visualize → edit → store → review) with correction status feeding back into database-native vector tiles.*
 
 Key architectural decisions:
 
