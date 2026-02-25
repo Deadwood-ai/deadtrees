@@ -8,7 +8,7 @@ The platform is designed for scalability and reproducibility, supporting communi
 
 ## System Architecture
 
-![DeadTrees System Architecture](docs/projects/paper/diagrams/deadtrees-dataflow-d2.svg)
+![DeadTrees System Architecture](docs/assets/geolabel-techstack.png)
 
 *Figure 1: System architecture of the DeadTrees platform. GeoTIFF orthomosaics and raw drone images are uploaded, standardized, and processed through four parallel stages: COG generation, metadata enrichment (GADM, biome, phenology), and deep learning segmentation for deadwood (SegFormer-B5) and tree cover (TCD SegFormer-MIT-B5). Teal nodes indicate the ML models; edge labels show output types (files, records, labels). Raw drone images are optionally pre-processed through OpenDroneMap before entering the pipeline. Results are persisted to file storage (COG files) and PostgreSQL (metadata and segmentation labels), and delivered through a web application.*
 
