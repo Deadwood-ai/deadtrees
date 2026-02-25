@@ -1,34 +1,12 @@
 direction: down
 
 classes: {
-  contributor: {
+  step: {
     style: {
-      fill: "#92400e"
-      stroke: "#f59e0b"
-      font-color: "#fef3c7"
-      border-radius: 12
-      font-size: 24
-      stroke-width: 2
-      shadow: true
-    }
-  }
-  pending: {
-    style: {
-      fill: "#0c4a6e"
-      stroke: "#38bdf8"
-      font-color: "#e0f2fe"
-      border-radius: 12
-      font-size: 24
-      stroke-width: 2
-      shadow: true
-    }
-  }
-  auditor: {
-    style: {
-      fill: "#1e1b4b"
-      stroke: "#818cf8"
-      font-color: "#e0e7ff"
-      border-radius: 12
+      fill: "#1e293b"
+      stroke: "#475569"
+      font-color: "#f1f5f9"
+      border-radius: 10
       font-size: 24
       stroke-width: 2
       shadow: true
@@ -37,9 +15,9 @@ classes: {
   decision: {
     shape: diamond
     style: {
-      fill: "#1e1b4b"
-      stroke: "#818cf8"
-      font-color: "#e0e7ff"
+      fill: "#1e293b"
+      stroke: "#64748b"
+      font-color: "#f1f5f9"
       font-size: 22
       stroke-width: 2
       shadow: true
@@ -48,9 +26,9 @@ classes: {
   approved: {
     style: {
       fill: "#052e16"
-      stroke: "#34d399"
-      font-color: "#d1fae5"
-      border-radius: 12
+      stroke: "#22c55e"
+      font-color: "#dcfce7"
+      border-radius: 10
       font-size: 24
       stroke-width: 2
       shadow: true
@@ -58,10 +36,10 @@ classes: {
   }
   reverted: {
     style: {
-      fill: "#450a0a"
-      stroke: "#f87171"
+      fill: "#1c0a09"
+      stroke: "#ef4444"
       font-color: "#fee2e2"
-      border-radius: 12
+      border-radius: 10
       font-size: 24
       stroke-width: 2
       shadow: true
@@ -69,46 +47,46 @@ classes: {
   }
 }
 
-edit: "Contributor edits prediction\nadd · delete · modify" {
-  class: contributor
+edit: "Contributor edits prediction\nadd  ·  delete  ·  modify" {
+  class: step
 }
 
-pending: "Correction saved\nstatus: pending\naudit trail preserved" {
-  class: pending
+pending: "Correction saved\nstatus: pending  ·  audit trail preserved" {
+  class: step
 }
 
-review: "Auditor reviews\npending corrections" {
-  class: auditor
+review: "Auditor reviews pending corrections" {
+  class: step
 }
 
 decision: "Approve?" {
   class: decision
 }
 
-approved: "Approved ✓\nchange permanent\nmap tiles updated" {
+approved: "Approved ✓\nchange is permanent  ·  map tiles updated" {
   class: approved
 }
 
-reverted: "Reverted ✗\noriginal restored\ncorrection rejected" {
+reverted: "Reverted ✗\noriginal geometry restored" {
   class: reverted
 }
 
 edit -> pending: "save" {
-  style.stroke: "#f59e0b"
-  style.font-color: "#f59e0b"
+  style.stroke: "#64748b"
+  style.font-color: "#94a3b8"
 }
 pending -> review: "queue" {
-  style.stroke: "#38bdf8"
-  style.font-color: "#38bdf8"
+  style.stroke: "#64748b"
+  style.font-color: "#94a3b8"
 }
 review -> decision: {
-  style.stroke: "#818cf8"
+  style.stroke: "#64748b"
 }
 decision -> approved: "yes" {
-  style.stroke: "#34d399"
-  style.font-color: "#34d399"
+  style.stroke: "#22c55e"
+  style.font-color: "#22c55e"
 }
 decision -> reverted: "no" {
-  style.stroke: "#f87171"
-  style.font-color: "#f87171"
+  style.stroke: "#ef4444"
+  style.font-color: "#ef4444"
 }
