@@ -1,0 +1,86 @@
+direction: right
+
+classes: {
+  visualize: {
+    style: {
+      fill: "#0f172a"
+      stroke: "#f59e0b"
+      font-color: "#fef3c7"
+      border-radius: 14
+      font-size: 26
+      stroke-width: 2
+      shadow: true
+    }
+  }
+  edit: {
+    style: {
+      fill: "#0f172a"
+      stroke: "#38bdf8"
+      font-color: "#e0f2fe"
+      border-radius: 14
+      font-size: 26
+      stroke-width: 2
+      shadow: true
+    }
+  }
+  store: {
+    style: {
+      fill: "#0f172a"
+      stroke: "#a78bfa"
+      font-color: "#ede9fe"
+      border-radius: 14
+      font-size: 26
+      stroke-width: 2
+      shadow: true
+    }
+  }
+  review: {
+    style: {
+      fill: "#052e16"
+      stroke: "#22c55e"
+      font-color: "#dcfce7"
+      border-radius: 14
+      font-size: 26
+      stroke-width: 2
+      shadow: true
+    }
+  }
+}
+
+visualize: "① Visualize\n\nOrtho imagery (COG tiles)\nPrediction polygons\nMap UI — React + OpenLayers" {
+  class: visualize
+}
+
+edit: "② Edit\n\nDraw · Delete · Cut\nMerge · Clip · Undo\nAI assist (SegmentAnything)" {
+  class: edit
+}
+
+store: "③ Store\n\nCorrection geometry saved\nStatus: pending\nFull audit trail preserved" {
+  class: store
+}
+
+review: "④ Review\n\nAuditor sees pending corrections\nApprove → tiles updated\nRevert → original restored" {
+  class: review
+}
+
+visualize -> edit: "contributor\nstarts editing" {
+  style.stroke: "#f59e0b"
+  style.font-color: "#f59e0b"
+  style.stroke-width: 2
+}
+edit -> store: "save" {
+  style.stroke: "#38bdf8"
+  style.font-color: "#38bdf8"
+  style.stroke-width: 2
+}
+store -> review: "pending\ncorrection" {
+  style.stroke: "#a78bfa"
+  style.font-color: "#a78bfa"
+  style.stroke-width: 2
+}
+review -> visualize: "tiles refreshed" {
+  style.stroke: "#22c55e"
+  style.stroke-dash: 5
+  style.font-color: "#22c55e"
+  style.stroke-width: 2
+}
