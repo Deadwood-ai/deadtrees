@@ -49,7 +49,7 @@ The pilot demonstrates this workflow in a real-world Earth observation context u
 GeoLabel is implemented as a public correction workflow integrated into [deadtrees.earth](https://deadtrees.earth/). Users review model predictions on high-resolution orthomosaics and propose edits directly on the map. The correction workflow is designed around two complementary roles: contributors propose edits through an interactive browser-based editor, while auditors review pending changes, approve or revert them, and maintain a clear audit trail.
 
 <figure>
-<img src="assets/ui-screenshot.jpg" alt="GeoLabel editing interface on deadtrees.earth" width="100%"/>
+<img src="../../assets/ui-screenshot.jpg" alt="GeoLabel editing interface on deadtrees.earth" width="100%"/>
 <figcaption><em>The GeoLabel editing interface on deadtrees.earth, showing the polygon editor with available tools, keyboard shortcuts, and an active correction on a high-resolution orthomosaic.</em></figcaption>
 </figure>
 
@@ -60,37 +60,37 @@ The editor provides a comprehensive set of polygon editing tools for correcting 
 <table>
 <tr>
 <td width="25%">
-<img src="assets/adding-free-hand.gif" alt="Freehand polygon drawing" width="100%"/>
+<img src="../../assets/adding-free-hand.gif" alt="Freehand polygon drawing" width="100%"/>
 <br/><em>Freehand draw.</em>
 </td>
 <td width="25%">
-<img src="assets/adding-click.gif" alt="Click-based polygon drawing" width="100%"/>
+<img src="../../assets/adding-click.gif" alt="Click-based polygon drawing" width="100%"/>
 <br/><em>Click draw.</em>
 </td>
 <td width="25%">
-<img src="assets/adding-ai.gif" alt="AI-assisted boundary suggestion" width="100%"/>
+<img src="../../assets/adding-ai.gif" alt="AI-assisted boundary suggestion" width="100%"/>
 <br/><em>AI boundary assist.</em>
 </td>
 <td width="25%">
-<img src="assets/deletion.gif" alt="Deleting an incorrect polygon" width="100%"/>
+<img src="../../assets/deletion.gif" alt="Deleting an incorrect polygon" width="100%"/>
 <br/><em>Delete polygon.</em>
 </td>
 </tr>
 <tr>
 <td width="25%">
-<img src="assets/cutting.gif" alt="Cutting a hole in a polygon" width="100%"/>
+<img src="../../assets/cutting.gif" alt="Cutting a hole in a polygon" width="100%"/>
 <br/><em>Cut hole.</em>
 </td>
 <td width="25%">
-<img src="assets/merging.gif" alt="Merging two polygons" width="100%"/>
+<img src="../../assets/merging.gif" alt="Merging two polygons" width="100%"/>
 <br/><em>Merge polygons.</em>
 </td>
 <td width="25%">
-<img src="assets/clipping.gif" alt="Clipping two polygons" width="100%"/>
+<img src="../../assets/clipping.gif" alt="Clipping two polygons" width="100%"/>
 <br/><em>Clip polygons.</em>
 </td>
 <td width="25%">
-<img src="assets/undo.gif" alt="Undoing an action" width="100%"/>
+<img src="../../assets/undo.gif" alt="Undoing an action" width="100%"/>
 <br/><em>Undo action.</em>
 </td>
 </tr>
@@ -110,7 +110,7 @@ Keyboard shortcuts support fast, friction-free editing:
 
 The correction lifecycle is designed to make community contributions auditable and reversible. Contributors submit corrections in `pending` status; auditors then approve or revert them as part of a structured review process.
 
-![GeoLabel correction lifecycle: pending → approve / revert](assets/geolabel-architecture-horizontal.png)
+![GeoLabel correction lifecycle: pending → approve / revert](../../assets/geolabel-architecture-horizontal.png)
 
 *Conceptual correction lifecycle: corrections are stored with review status and applied in a reversible manner (e.g., inserts and soft-deletes), enabling safe community editing with formal review.*
 
@@ -120,7 +120,7 @@ Auditors review pending corrections in an audit UI and can approve or revert cha
 
 <figure>
 <p align="center">
-<img src="assets/approve.gif" alt="Approving pending corrections in the audit UI" width="85%"/>
+<img src="../../assets/approve.gif" alt="Approving pending corrections in the audit UI" width="85%"/>
 </p>
 <figcaption><em>Screencast: approving pending corrections as part of the audit workflow.</em></figcaption>
 </figure>
@@ -129,7 +129,7 @@ Auditors review pending corrections in an audit UI and can approve or revert cha
 
 The system architecture combines database-native vector tile generation with a structured correction workflow, enabling fast rendering of large prediction layers and safe collaborative editing.
 
-![GeoLabel architecture: visualize, edit, store, review workflow](assets/geolabel-techstack.png)
+![GeoLabel architecture: visualize, edit, store, review workflow](../../assets/geolabel-techstack.png)
 
 *GeoLabel correction workflow architecture (visualize → edit → store → review) with correction status feeding back into database-native vector tiles.*
 
@@ -143,8 +143,8 @@ Key architectural decisions:
 
 ### b) Data and software availability
 - Platform: https://deadtrees.earth
-- Backend repository (public, GPL-3.0): https://github.com/Deadwood-ai/deadtrees
-- Frontend repository: https://github.com/Deadwood-ai/deadtrees-frontend-react (planned for public release)
+- Backend repository (public, MIT): https://github.com/Deadwood-ai/deadtrees-backend
+- Frontend repository: https://github.com/Deadwood-ai/deadtrees-frontend
 - Pilot documentation: `docs/projects/geolabel/`
 
 The platform provides open access to datasets, prediction layers, and the GeoLabel correction workflows. Documentation includes user guidance, technical overviews, and detailed descriptions of the correction workflow.

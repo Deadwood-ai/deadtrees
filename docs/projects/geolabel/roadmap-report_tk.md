@@ -59,11 +59,11 @@ GeoLabel is implemented as a public correction workflow integrated into [deadtre
 <table>
 <tr>
 <td width="50%">
-<img src="assets/deadtrees-editing-feature-add-missing-polygon-short-lots-zoom.gif" alt="Adding a missing polygon" width="100%"/>
+<img src="../../assets/deadtrees-editing-feature-add-missing-polygon-short-lots-zoom.gif" alt="Adding a missing polygon" width="100%"/>
 <br/><em>Adding a missing deadwood polygon.</em>
 </td>
 <td width="50%">
-<img src="assets/deadtrees-editing-feature-deletion.gif" alt="Deleting an incorrect polygon" width="100%"/>
+<img src="../../assets/deadtrees-editing-feature-deletion.gif" alt="Deleting an incorrect polygon" width="100%"/>
 <br/><em>Deleting an incorrect polygon.</em>
 </td>
 </tr>
@@ -111,8 +111,8 @@ Keyboard-first interaction is supported to reduce friction during detailed edits
 
 ### b) Data and software availability
 - Platform: https://deadtrees.earth
-- Backend repository (public, GPL-3.0): https://github.com/Deadwood-ai/deadtrees
-- Frontend repository: https://github.com/Deadwood-ai/deadtrees-frontend-react (planned for public release)
+- Backend repository (public, MIT): https://github.com/Deadwood-ai/deadtrees-backend
+- Frontend repository: https://github.com/Deadwood-ai/deadtrees-frontend
 - Pilot documentation: `docs/projects/geolabel/`
 
 The platform provides open access to datasets, prediction layers, and the GeoLabel correction workflows. Documentation includes user guidance, technical overviews, and detailed descriptions of the correction workflow.
@@ -134,8 +134,8 @@ GeoLabel also demonstrates a scalable approach to collaborative labeling that ca
 
 ### b) Data and software availability
 - Platform: https://deadtrees.earth
-- Backend repository (public, GPL-3.0): https://github.com/Deadwood-ai/deadtrees
-- Frontend repository: https://github.com/Deadwood-ai/deadtrees-frontend-react (planned for public release)
+- Backend repository (public, MIT): https://github.com/Deadwood-ai/deadtrees-backend
+- Frontend repository: https://github.com/Deadwood-ai/deadtrees-frontend
 - Pilot documentation: `docs/projects/geolabel/`
 
 The platform provides open access to datasets, prediction layers, and correction workflows. Documentation includes user guidance, technical overviews, and detailed descriptions of the correction workflow.
