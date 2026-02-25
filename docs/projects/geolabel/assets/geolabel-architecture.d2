@@ -1,102 +1,86 @@
-direction: right
+direction: down
 
 classes: {
-  node: {
+  visualize: {
     style: {
-      fill: "#2c2c30"
-      stroke: "#404046"
-      font-color: "#d8d8dc"
-      border-radius: 6
-      font-size: 18
-      stroke-width: 1
+      fill: "#0f172a"
+      stroke: "#f59e0b"
+      font-color: "#fef3c7"
+      border-radius: 14
+      font-size: 26
+      stroke-width: 2
+      shadow: true
     }
   }
-  hub: {
+  edit: {
     style: {
-      fill: "#3c3c42"
-      stroke: "#505058"
-      font-color: "#f0f0f2"
-      border-radius: 8
-      font-size: 18
-      stroke-width: 1
+      fill: "#0f172a"
+      stroke: "#38bdf8"
+      font-color: "#e0f2fe"
+      border-radius: 14
+      font-size: 26
+      stroke-width: 2
+      shadow: true
     }
   }
   store: {
-    shape: cylinder
     style: {
-      fill: "#2c2c30"
-      stroke: "#404046"
-      font-color: "#d8d8dc"
-      border-radius: 8
-      font-size: 18
-      stroke-width: 1
+      fill: "#0f172a"
+      stroke: "#a78bfa"
+      font-color: "#ede9fe"
+      border-radius: 14
+      font-size: 26
+      stroke-width: 2
+      shadow: true
     }
   }
-  ml: {
+  review: {
     style: {
-      fill: "#1c1c20"
-      stroke: "#404046"
-      font-color: "#d8d8dc"
-      border-radius: 6
-      font-size: 18
-      stroke-width: 1
+      fill: "#052e16"
+      stroke: "#22c55e"
+      font-color: "#dcfce7"
+      border-radius: 14
+      font-size: 26
+      stroke-width: 2
+      shadow: true
     }
   }
 }
 
-visualize: {
-  label: "① Visualize"
-  class: hub
-
-  ortho: "Ortho imagery\nCOG tiles (nginx)" { class: node }
-  tiles: "Prediction + correction status\nPostGIS vector tiles (MVT)" { class: node }
-  map: "Map UI\nReact + OpenLayers" { class: node }
-
+visualize: "① Visualize\n\nOrtho imagery (COG tiles)\nPrediction polygons\nMap UI — React + OpenLayers" {
+  class: visualize
 }
 
-edit: {
-  label: "② Edit"
-  class: hub
-
-  editor: "Polygon editor\nDraw · Delete · Cut\nMerge · Clip · Undo" { class: node }
-  ai: "AI assist\nSegmentAnything (optional)" { class: ml }
-
+edit: "② Edit\n\nDraw · Delete · Cut\nMerge · Clip · Undo\nAI assist (SegmentAnything)" {
+  class: edit
 }
 
-store: {
-  label: "③ Store"
-  class: hub
-
-  rpc: "RPC\nsave_prediction_corrections" { class: node }
-  preds: "Prediction geometries\n(deadwood / forest cover)" { class: store }
-  corr: "Geometry corrections\nstatus: pending → approve/revert" { class: store }
-
+store: "③ Store\n\nCorrection geometry saved\nStatus: pending\nFull audit trail preserved" {
+  class: store
 }
 
-review: {
-  label: "④ Review"
-  class: hub
-
-  auditor: "Auditor queue\n(pending corrections)" { class: node }
-  approve: "RPC\napprove_correction" { class: node }
-  revert: "RPC\nrevert_correction" { class: node }
-
+review: "④ Review\n\nAuditor sees pending corrections\nApprove → tiles updated\nRevert → original restored" {
+  class: review
 }
 
-visualize -> edit: "edit" {
-  style.stroke: "#505058"
-  style.font-color: "#b8b8be"
+visualize -> edit: "contributor\nstarts editing" {
+  style.stroke: "#f59e0b"
+  style.font-color: "#f59e0b"
+  style.stroke-width: 2
 }
 edit -> store: "save" {
-  style.stroke: "#505058"
-  style.font-color: "#b8b8be"
+  style.stroke: "#38bdf8"
+  style.font-color: "#38bdf8"
+  style.stroke-width: 2
 }
-store -> review: "pending" {
-  style.stroke: "#505058"
-  style.font-color: "#b8b8be"
+store -> review: "pending\ncorrection" {
+  style.stroke: "#a78bfa"
+  style.font-color: "#a78bfa"
+  style.stroke-width: 2
 }
-review -> visualize: "approve / revert\nrefresh tiles" {
-  style.stroke: "#505058"
-  style.stroke-dash: 4
-  style.font-color: "#b8b8be"
+review -> visualize: "tiles refreshed" {
+  style.stroke: "#22c55e"
+  style.stroke-dash: 5
+  style.font-color: "#22c55e"
+  style.stroke-width: 2
 }
