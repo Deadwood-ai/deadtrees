@@ -118,7 +118,7 @@ The system architecture combines database-native vector tile generation with a s
 
 The correction lifecycle is designed to make community contributions auditable and reversible. Contributors submit corrections in `pending` status; auditors then approve or revert them as part of a structured review process.
 
-![GeoLabel correction lifecycle: pending → approve / revert](docs/projects/geolabel/assets/geolabel-correction-lifecycle.png)
+![GeoLabel correction lifecycle: pending → approve / revert](docs/projects/geolabel/assets/geolabel-correction-lifecycle-presentation.png)
 
 *Conceptual correction lifecycle: corrections are stored with review status and applied in a reversible manner (e.g., inserts and soft-deletes), enabling safe community editing with formal review.*
 
