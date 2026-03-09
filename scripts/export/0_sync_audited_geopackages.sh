@@ -169,12 +169,8 @@ while IFS=',' read -r dataset_id dataset_name; do
         "$DB_CONN" 2>/dev/null
 
     # Extract deadwood layer from canonical candidate view.
-    # Sentinel-upscaling logic is applied here in the export:
-    # - audited no_issues datasets
-    # - deadwood/forest quality both not bad
-    # - model_prediction + active labels
-    # - if pending model edits exist: use original prediction geometry
-    # - otherwise: use active non-deleted geometry
+    # Polygon-selection logic is already resolved in the view.
+    # Export script only applies use-case level dataset audit filters.
     ogr2ogr -f "GPKG" \
         -update \
         -nln "deadwood_auto_cover" \
@@ -194,18 +190,11 @@ while IFS=',' read -r dataset_id dataset_name; do
                 AND layer_type = 'deadwood'
                 AND final_assessment = 'no_issues'
                 AND deadwood_quality != 'bad'
-                AND forest_cover_quality != 'bad'
-                AND label_source = 'model_prediction'
-                AND is_active = true
-                AND (
-                  (has_pending_model_edits = true AND is_original_prediction_geometry = true)
-                  OR
-                  (has_pending_model_edits = false AND is_deleted = false)
-                )" \
+                AND forest_cover_quality != 'bad'" \
         "$output_file" \
         "$DB_CONN" 2>/dev/null
 
-    # Extract forest cover layer from canonical candidate view with same logic.
+    # Extract forest cover layer from canonical candidate view with same approach.
     ogr2ogr -f "GPKG" \
         -update \
         -nln "forest_auto_cover" \
@@ -225,14 +214,7 @@ while IFS=',' read -r dataset_id dataset_name; do
                 AND layer_type = 'forest_cover'
                 AND final_assessment = 'no_issues'
                 AND deadwood_quality != 'bad'
-                AND forest_cover_quality != 'bad'
-                AND label_source = 'model_prediction'
-                AND is_active = true
-                AND (
-                  (has_pending_model_edits = true AND is_original_prediction_geometry = true)
-                  OR
-                  (has_pending_model_edits = false AND is_deleted = false)
-                )" \
+                AND forest_cover_quality != 'bad'" \
         "$output_file" \
         "$DB_CONN" 2>/dev/null
 
