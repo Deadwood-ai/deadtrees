@@ -197,6 +197,66 @@ def test_download_cleanup(auth_token, test_dataset_for_download):
 	assert not download_file.parent.exists()
 
 
+def test_download_daily_limit_applies_to_dataset_bundle(auth_token, test_dataset_for_download, test_user, monkeypatch):
+	"""Dataset bundle endpoint should enforce per-user daily limit."""
+	from api.src.routers import download as download_router
+
+	monkeypatch.setattr(download_router, 'DOWNLOAD_REQUESTS_PER_DAY', 2)
+
+	with use_client(auth_token) as db_client:
+		# Seed two prior counted requests for this user in the rolling daily window.
+		for i in range(2):
+			db_client.table(settings.logs_table).insert(
+				{
+					'name': 'test.download',
+					'level': 'INFO',
+					'message': f'seed {i}',
+					'origin': 'test_download.py',
+					'user_id': test_user,
+					'category': 'download',
+					'extra': {'event': 'allowed', 'count_towards_limit': True, 'endpoint': 'seed'},
+				}
+			).execute()
+
+	response = client.get(
+		f'/api/v1/download/datasets/{test_dataset_for_download}/dataset.zip',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 429
+	assert 'Daily download limit exceeded' in response.json()['detail']
+
+
+def test_download_daily_limit_does_not_apply_to_status(auth_token, test_dataset_for_download, test_user, monkeypatch):
+	"""Status endpoint should require auth but not count against / be blocked by daily limit."""
+	from api.src.routers import download as download_router
+
+	monkeypatch.setattr(download_router, 'DOWNLOAD_REQUESTS_PER_DAY', 2)
+
+	with use_client(auth_token) as db_client:
+		# Seed above-threshold counted requests for this user.
+		for i in range(3):
+			db_client.table(settings.logs_table).insert(
+				{
+					'name': 'test.download',
+					'level': 'INFO',
+					'message': f'seed-status {i}',
+					'origin': 'test_download.py',
+					'user_id': test_user,
+					'category': 'download',
+					'extra': {'event': 'allowed', 'count_towards_limit': True, 'endpoint': 'seed'},
+				}
+			).execute()
+
+	response = client.get(
+		f'/api/v1/download/datasets/{test_dataset_for_download}/status',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 200
+	assert response.json()['status'] in ('processing', 'completed')
+
+
 @pytest.fixture(scope='function')
 def test_dataset_with_label(auth_token, test_dataset_for_download, test_user):
 	"""Create a test dataset with label from real GeoPackage data"""

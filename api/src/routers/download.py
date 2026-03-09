@@ -1,5 +1,5 @@
 import asyncio
-from typing import Callable, Optional, List
+from typing import Callable, Optional, List, Annotated
 from enum import Enum, auto
 import tempfile
 from pathlib import Path
@@ -7,11 +7,13 @@ import time
 import shutil
 import zipfile
 import io
+from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response, Query
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response, Query, Depends
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 import pandas as pd
 
@@ -28,11 +30,13 @@ from api.src.download.downloads import (
 	create_consolidated_geopackage,
 	generate_bundle_job_id,
 )
-from shared.db import use_client
-from shared.logger import logger
+from shared.db import use_client, verify_token
+from shared.logging import UnifiedLogger, SupabaseHandler, LogCategory, LogContext
 
 # first approach to implement a rate limit
 CONNECTED_IPS = {}
+DOWNLOAD_REQUESTS_PER_DAY = 100
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token')
 
 # create the router for download
 download_app = FastAPI(
@@ -40,6 +44,8 @@ download_app = FastAPI(
 	description='This is the Deadwood-AI Download API. It is used to download single files and full Datasets. This is part of the Deadwood API.',
 	version=__version__,
 )
+logger = UnifiedLogger(__name__)
+logger.add_supabase_handler(SupabaseHandler())
 
 # add cors
 download_app.add_middleware(
@@ -47,7 +53,7 @@ download_app.add_middleware(
 	allow_origins=['*'],
 	allow_credentials=False,
 	allow_methods=['OPTIONS', 'GET'],
-	allow_headers=['Content-Type', 'Accept', 'Accept-Encoding'],
+	allow_headers=['Content-Type', 'Accept', 'Accept-Encoding', 'Authorization'],
 )
 
 
@@ -128,6 +134,72 @@ async def get_public_dataset(dataset_id: str) -> tuple[Dataset, dict]:
 		return dataset, ortho
 
 
+def validate_user_and_limit(
+	token: str,
+	endpoint: str,
+	dataset_id: Optional[int] = None,
+	job_id: Optional[str] = None,
+	count_towards_limit: bool = True,
+):
+	"""Validate auth token and enforce per-user daily download request limits."""
+	user = verify_token(token)
+	if not user:
+		raise HTTPException(status_code=401, detail='Invalid token')
+
+	requests_last_day = 0
+	if count_towards_limit:
+		window_start = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+		with use_client(token) as client:
+			usage_response = (
+				client.table(settings.logs_table)
+				.select('id', count='exact')
+				.eq('user_id', user.id)
+				.eq('category', LogCategory.DOWNLOAD.value)
+				.contains('extra', {'count_towards_limit': True, 'event': 'allowed'})
+				.gte('created_at', window_start)
+				.execute()
+			)
+			requests_last_day = usage_response.count or 0
+
+		if requests_last_day >= DOWNLOAD_REQUESTS_PER_DAY:
+			logger.warning(
+				f'Download rate limit exceeded for user {user.id}',
+				context=LogContext(
+					category=LogCategory.DOWNLOAD,
+					user_id=user.id,
+					dataset_id=dataset_id,
+					token=token,
+					extra={
+						'event': 'blocked',
+						'endpoint': endpoint,
+						'job_id': job_id,
+						'requests_last_day': requests_last_day,
+						'limit_per_day': DOWNLOAD_REQUESTS_PER_DAY,
+						'count_towards_limit': True,
+					},
+				),
+			)
+			raise HTTPException(status_code=429, detail='Daily download limit exceeded (100/day). Please try again tomorrow.')
+
+	logger.info(
+		'Download endpoint access granted',
+		context=LogContext(
+			category=LogCategory.DOWNLOAD,
+			user_id=user.id,
+			dataset_id=dataset_id,
+			token=token,
+			extra={
+				'event': 'allowed',
+				'endpoint': endpoint,
+				'job_id': job_id,
+				'count_towards_limit': count_towards_limit,
+			},
+		),
+	)
+
+	return user
+
+
 # Updated download route with background processing
 @download_app.get('/datasets/{dataset_id}/dataset.zip', response_model=DownloadStatus)
 async def download_dataset(
@@ -136,10 +208,17 @@ async def download_dataset(
 	include_labels: bool = Query(True),
 	include_parquet: bool = Query(True),
 	use_original_filename: bool = Query(False),
+	token: Annotated[str, Depends(oauth2_scheme)] = '',
 ):
 	"""
 	Prepare dataset bundle in the background and return job status
 	"""
+	validate_user_and_limit(
+		token=token,
+		endpoint='datasets/{dataset_id}/dataset.zip',
+		dataset_id=int(dataset_id),
+	)
+
 	# Check dataset exists and is public
 	dataset, ortho = await get_public_dataset(dataset_id)
 
@@ -188,8 +267,16 @@ async def check_download_status(
 	dataset_id: str,
 	include_labels: bool = Query(True),
 	include_parquet: bool = Query(True),
+	token: Annotated[str, Depends(oauth2_scheme)] = '',
 ):
 	"""Check the status of a dataset bundle job"""
+	validate_user_and_limit(
+		token=token,
+		endpoint='datasets/{dataset_id}/status',
+		dataset_id=int(dataset_id),
+		count_towards_limit=False,
+	)
+
 	download_dir = settings.downloads_path / dataset_id
 	download_file = download_dir / get_bundle_filename(int(dataset_id), include_labels, include_parquet)
 
@@ -214,8 +301,15 @@ async def download_dataset_file(
 	dataset_id: str,
 	include_labels: bool = Query(True),
 	include_parquet: bool = Query(True),
+	token: Annotated[str, Depends(oauth2_scheme)] = '',
 ):
 	"""Redirect to the actual download file once it's ready"""
+	validate_user_and_limit(
+		token=token,
+		endpoint='datasets/{dataset_id}/download',
+		dataset_id=int(dataset_id),
+	)
+
 	# Check dataset exists and is public
 	dataset, ortho = await get_public_dataset(dataset_id)
 
@@ -351,11 +445,20 @@ def create_labels_geopackage_background(dataset_id: str):
 
 
 @download_app.get('/datasets/{dataset_id}/labels.gpkg', response_model=DownloadStatus)
-async def get_labels(dataset_id: str, background_tasks: BackgroundTasks):
+async def get_labels(
+	dataset_id: str,
+	background_tasks: BackgroundTasks,
+	token: Annotated[str, Depends(oauth2_scheme)] = '',
+):
 	"""
 	Prepare labels GeoPackage in the background and return job status
 	"""
 	try:
+		validate_user_and_limit(
+			token=token,
+			endpoint='datasets/{dataset_id}/labels.gpkg',
+			dataset_id=int(dataset_id),
+		)
 		# Check dataset exists and is public
 		dataset, ortho = await get_public_dataset(dataset_id)
 
@@ -391,8 +494,18 @@ async def get_labels(dataset_id: str, background_tasks: BackgroundTasks):
 
 
 @download_app.get('/datasets/{dataset_id}/labels/status', response_model=DownloadStatus)
-async def check_labels_status(dataset_id: str):
+async def check_labels_status(
+	dataset_id: str,
+	token: Annotated[str, Depends(oauth2_scheme)] = '',
+):
 	"""Check the status of a labels GeoPackage job"""
+	validate_user_and_limit(
+		token=token,
+		endpoint='datasets/{dataset_id}/labels/status',
+		dataset_id=int(dataset_id),
+		count_towards_limit=False,
+	)
+
 	download_dir = settings.downloads_path / dataset_id
 	labels_file = download_dir / f'{dataset_id}_labels.gpkg'
 
@@ -415,8 +528,17 @@ async def check_labels_status(dataset_id: str):
 
 
 @download_app.get('/datasets/{dataset_id}/labels/download', response_class=RedirectResponse)
-async def download_labels_file(dataset_id: str):
+async def download_labels_file(
+	dataset_id: str,
+	token: Annotated[str, Depends(oauth2_scheme)] = '',
+):
 	"""Redirect to the actual labels download file once it's ready"""
+	validate_user_and_limit(
+		token=token,
+		endpoint='datasets/{dataset_id}/labels/download',
+		dataset_id=int(dataset_id),
+	)
+
 	# Check dataset exists and is public
 	dataset, ortho = await get_public_dataset(dataset_id)
 
@@ -524,6 +646,7 @@ async def prepare_multi_bundle(
 	include_labels: bool = Query(False, description="Include label GeoPackages"),
 	include_parquet: bool = Query(False, description="Include METADATA.parquet"),
 	use_original_filename: bool = Query(True, description="Use original filenames for orthos"),
+	token: Annotated[str, Depends(oauth2_scheme)] = '',
 ):
 	"""
 	Prepare a multi-dataset bundle in the background and return job status.
@@ -550,6 +673,11 @@ async def prepare_multi_bundle(
 	
 	# Generate job ID
 	job_id = generate_bundle_job_id(id_list, include_labels, include_parquet)
+	validate_user_and_limit(
+		token=token,
+		endpoint='bundle.zip',
+		job_id=job_id,
+	)
 	
 	# Check if bundle already exists
 	download_dir = settings.downloads_path / 'bundles'
@@ -593,8 +721,16 @@ async def prepare_multi_bundle(
 @download_app.get('/bundle/status', response_model=DownloadStatus)
 async def check_bundle_status(
 	job_id: str = Query(..., description="The job ID returned from /bundle.zip"),
+	token: Annotated[str, Depends(oauth2_scheme)] = '',
 ):
 	"""Check the status of a multi-dataset bundle job"""
+	validate_user_and_limit(
+		token=token,
+		endpoint='bundle/status',
+		job_id=job_id,
+		count_towards_limit=False,
+	)
+
 	download_file = settings.downloads_path / 'bundles' / f'{job_id}.zip'
 	
 	if download_file.exists() and download_file.stat().st_size > 0:
@@ -615,8 +751,15 @@ async def check_bundle_status(
 @download_app.get('/bundle/download', response_class=RedirectResponse)
 async def download_bundle_file(
 	job_id: str = Query(..., description="The job ID returned from /bundle.zip"),
+	token: Annotated[str, Depends(oauth2_scheme)] = '',
 ):
 	"""Redirect to the actual bundle download file once it's ready"""
+	validate_user_and_limit(
+		token=token,
+		endpoint='bundle/download',
+		job_id=job_id,
+	)
+
 	download_file = settings.downloads_path / 'bundles' / f'{job_id}.zip'
 	
 	if not download_file.exists() or download_file.stat().st_size == 0:

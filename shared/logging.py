@@ -9,6 +9,7 @@ from shared.db import use_client
 class LogCategory(Enum):
 	# API Operations
 	UPLOAD = 'upload'  # File upload operations
+	DOWNLOAD = 'download'  # Download API operations
 	DATASET = 'dataset'  # Dataset management
 	LABEL = 'label'  # Label operations
 	AUTH = 'auth'  # Authentication events

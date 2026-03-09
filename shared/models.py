@@ -73,6 +73,7 @@ class LabelSourceEnum(str, Enum):
 	visual_interpretation = 'visual_interpretation'
 	model_prediction = 'model_prediction'
 	fixed_model_prediction = 'fixed_model_prediction'
+	reference_patch = 'reference_patch'
 
 
 class LabelTypeEnum(str, Enum):
