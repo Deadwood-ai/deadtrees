@@ -1,6 +1,8 @@
 -- Drop redundant label_data column from canonical export view.
 -- layer_type already encodes deadwood vs forest_cover for downstream use.
 
+drop view if exists "public"."v_export_polygon_candidates";
+
 create or replace view "public"."v_export_polygon_candidates" as
 with dataset_mode as (
 	select
