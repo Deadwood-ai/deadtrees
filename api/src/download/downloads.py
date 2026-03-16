@@ -1,6 +1,5 @@
 import zipfile
 import io
-import json
 import hashlib
 import tempfile
 from pathlib import Path
@@ -10,7 +9,7 @@ import geopandas as gpd
 import yaml
 import pandas as pd
 
-from shared.logging import UnifiedLogger, LogCategory, LogContext
+from shared.logging import UnifiedLogger
 from shared.settings import settings
 from shared.db import use_client
 from shared.models import Label, Dataset, LicenseEnum, Ortho, LabelDataEnum, LabelSourceEnum
@@ -305,66 +304,6 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 		else:
 			geom_table = settings.forest_cover_geometries_table
 
-		# Get geometries for this label using pagination to handle large datasets
-		all_geometries = []
-		batch_size = 5000  # Optimized batch size: ~7MB per batch for typical geometries (~1.4KB each)
-		offset = 0
-
-		while True:
-			# Fetch geometries in batches
-			geom_response = (
-				client.table(geom_table)
-				.select('*')
-				.eq('label_id', label.id)
-				# Treat NULL as "not deleted" (some tables default to NULL instead of false).
-				.neq('is_deleted', True)
-				.range(offset, offset + batch_size - 1)
-				.execute()
-			)
-
-			if not geom_response.data:
-				break
-
-			all_geometries.extend(geom_response.data)
-
-			# If we got fewer than batch_size results, we've reached the end
-			if len(geom_response.data) < batch_size:
-				break
-
-			offset += batch_size
-
-			# Log progress for large datasets
-			if len(all_geometries) % 10000 == 0:
-				logger.info(f'Fetched {len(all_geometries)} geometries for label {label.id}')
-
-		if not all_geometries:
-			raise ValueError(f'No geometries found for label {label.id}')
-
-		logger.info(f'Successfully fetched {len(all_geometries)} geometries for label {label.id}')
-
-		# Create features from geometries
-		features = []
-		for geom in all_geometries:
-			# Get properties with a default empty dict and filter out None values
-			geom_properties = geom.get('properties', {}) or {}
-			features.append(
-				{
-					'type': 'Feature',
-					'geometry': geom['geometry'],
-					'properties': {
-						'source': label.label_source,
-						'type': label.label_type,
-						'quality': label.label_quality,
-						'label_id': label.id,
-						**geom_properties,
-					},
-				}
-			)
-
-		# Create GeoDataFrame
-		label_gdf = gpd.GeoDataFrame.from_features(features)
-		label_gdf.set_crs('EPSG:4326', inplace=True)
-
 		# Check if file already exists to determine if we need to append
 		path = Path(label_file)
 		file_exists = path.exists()
@@ -384,17 +323,77 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 				# File might exist but not be a valid GeoPackage yet
 				pass
 
-		# If layer exists, read existing data and append the new data
-		if layer_name in existing_layers:
-			# Read existing layer
-			existing_gdf = gpd.read_file(label_file, layer=layer_name)
-			# Append new data
-			combined_gdf = pd.concat([existing_gdf, label_gdf], ignore_index=True)
-			# Write back combined data, overwriting the layer
-			combined_gdf.to_file(label_file, driver='GPKG', layer=layer_name)
-		else:
-			# Write to a new layer
-			label_gdf.to_file(label_file, driver='GPKG', layer=layer_name)
+		layer_exists = layer_name in existing_layers
+		total_geometries = 0
+		batch_size = 5000  # Balanced DB round-trips and memory pressure
+		offset = 0
+
+		while True:
+			# Fetch geometries in batches and stream-write each chunk to disk
+			geom_response = (
+				client.table(geom_table)
+				.select('*')
+				.eq('label_id', label.id)
+				# Treat NULL as "not deleted" (some tables default to NULL instead of false).
+				.neq('is_deleted', True)
+				.range(offset, offset + batch_size - 1)
+				.execute()
+			)
+
+			if not geom_response.data:
+				break
+
+			total_geometries += len(geom_response.data)
+
+			# Build only this batch's features to keep memory bounded
+			features = []
+			for geom in geom_response.data:
+				geom_properties = geom.get('properties', {}) or {}
+				features.append(
+					{
+						'type': 'Feature',
+						'geometry': geom['geometry'],
+						'properties': {
+							'source': label.label_source,
+							'type': label.label_type,
+							'quality': label.label_quality,
+							'label_id': label.id,
+							**geom_properties,
+						},
+					}
+				)
+
+			label_gdf = gpd.GeoDataFrame.from_features(features)
+			label_gdf.set_crs('EPSG:4326', inplace=True)
+
+			if layer_exists:
+				try:
+					# Fast path: append batch to existing layer without re-reading old rows
+					label_gdf.to_file(label_file, driver='GPKG', layer=layer_name, mode='a')
+				except Exception as append_error:
+					# Fallback for environments where append mode is unsupported
+					logger.warning(
+						f'Append mode failed for layer {layer_name}, falling back to read+concat: {append_error}'
+					)
+					existing_gdf = gpd.read_file(label_file, layer=layer_name)
+					combined_gdf = pd.concat([existing_gdf, label_gdf], ignore_index=True)
+					combined_gdf.to_file(label_file, driver='GPKG', layer=layer_name)
+			else:
+				label_gdf.to_file(label_file, driver='GPKG', layer=layer_name)
+				layer_exists = True
+
+			if total_geometries % 10000 == 0:
+				logger.info(f'Fetched and wrote {total_geometries} geometries for label {label.id}')
+
+			if len(geom_response.data) < batch_size:
+				break
+
+			offset += batch_size
+
+		if total_geometries == 0:
+			raise ValueError(f'No geometries found for label {label.id}')
+
+		logger.info(f'Successfully fetched and wrote {total_geometries} geometries for label {label.id}')
 
 		# Get AOI data only if aoi_id exists
 		if label.aoi_id is not None:
@@ -709,18 +708,6 @@ def export_dataset_aois(dataset_id: int, gpkg_file: str):
 		# Create GeoDataFrame from AOI data
 		aoi_gdf = gpd.GeoDataFrame.from_features(features)
 		aoi_gdf.set_crs('EPSG:4326', inplace=True)
-
-		# Check if file already exists to determine existing layers
-		path = Path(gpkg_file)
-		existing_layers = []
-		if path.exists():
-			try:
-				import fiona
-
-				existing_layers = fiona.listlayers(gpkg_file)
-			except Exception:
-				# File might exist but not be a valid GeoPackage yet
-				pass
 
 		# Write to 'aoi' layer in geopackage
 		aoi_gdf.to_file(gpkg_file, driver='GPKG', layer='aoi')
