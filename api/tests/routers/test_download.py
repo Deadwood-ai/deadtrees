@@ -131,6 +131,205 @@ def test_dataset_for_download(auth_token, data_directory, test_file, test_user):
 				archive_path.unlink()
 
 
+@pytest.fixture(scope='function')
+def private_test_dataset_for_download(auth_token, data_directory, test_file, test_user):
+	"""Create a private test dataset for access-control download testing."""
+	with use_client(auth_token) as client:
+		file_name = 'test-private-download.tif'
+		archive_path = data_directory / settings.archive_path / file_name
+		shutil.copy2(test_file, archive_path)
+
+		dataset_data = {
+			'file_name': file_name,
+			'user_id': test_user,
+			'license': LicenseEnum.cc_by.value,
+			'platform': PlatformEnum.drone.value,
+			'authors': ['Test Author'],
+			'aquisition_year': 2024,
+			'aquisition_month': 1,
+			'aquisition_day': 1,
+			'data_access': DatasetAccessEnum.private.value,
+			'additional_information': 'Private dataset for download access testing',
+		}
+		response = client.table(settings.datasets_table).insert(dataset_data).execute()
+		dataset_id = response.data[0]['id']
+
+		ortho_data = {
+			'dataset_id': dataset_id,
+			'ortho_file_name': file_name,
+			'version': 1,
+			'ortho_file_size': max(1, int((archive_path.stat().st_size / 1024 / 1024))),
+			'ortho_upload_runtime': 0.1,
+		}
+		client.table(settings.orthos_table).insert(ortho_data).execute()
+
+		status_data = {
+			'dataset_id': dataset_id,
+			'current_status': StatusEnum.idle.value,
+			'is_upload_done': True,
+			'is_ortho_done': True,
+		}
+		client.table(settings.statuses_table).insert(status_data).execute()
+
+		try:
+			yield dataset_id
+		finally:
+			client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
+			client.table(settings.orthos_table).delete().eq('dataset_id', dataset_id).execute()
+			client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
+			if archive_path.exists():
+				archive_path.unlink()
+
+
+@pytest.fixture(scope='function')
+def viewonly_test_dataset_for_download(auth_token, data_directory, test_file, test_user):
+	"""Create a view-only test dataset for download policy testing."""
+	with use_client(auth_token) as client:
+		file_name = 'test-viewonly-download.tif'
+		archive_path = data_directory / settings.archive_path / file_name
+		shutil.copy2(test_file, archive_path)
+
+		dataset_data = {
+			'file_name': file_name,
+			'user_id': test_user,
+			'license': LicenseEnum.cc_by.value,
+			'platform': PlatformEnum.drone.value,
+			'authors': ['Test Author'],
+			'aquisition_year': 2024,
+			'aquisition_month': 1,
+			'aquisition_day': 1,
+			'data_access': DatasetAccessEnum.viewonly.value,
+			'additional_information': 'View-only dataset for download policy testing',
+		}
+		response = client.table(settings.datasets_table).insert(dataset_data).execute()
+		dataset_id = response.data[0]['id']
+
+		ortho_data = {
+			'dataset_id': dataset_id,
+			'ortho_file_name': file_name,
+			'version': 1,
+			'ortho_file_size': max(1, int((archive_path.stat().st_size / 1024 / 1024))),
+			'ortho_upload_runtime': 0.1,
+		}
+		client.table(settings.orthos_table).insert(ortho_data).execute()
+
+		status_data = {
+			'dataset_id': dataset_id,
+			'current_status': StatusEnum.idle.value,
+			'is_upload_done': True,
+			'is_ortho_done': True,
+		}
+		client.table(settings.statuses_table).insert(status_data).execute()
+
+		try:
+			yield dataset_id
+		finally:
+			client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
+			client.table(settings.orthos_table).delete().eq('dataset_id', dataset_id).execute()
+			client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
+			if archive_path.exists():
+				archive_path.unlink()
+
+
+def test_download_status_invalid_dataset_id_returns_400(auth_token):
+	"""Status endpoint should return a clean 400 for invalid dataset IDs."""
+	response = client.get(
+		'/api/v1/download/datasets/undefined/status',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 400
+	assert 'Invalid dataset ID' in response.json()['detail']
+
+
+def test_download_dataset_blocks_viewonly_full_download(auth_token, viewonly_test_dataset_for_download):
+	"""View-only datasets should block full orthophoto bundle download."""
+	response = client.get(
+		f'/api/v1/download/datasets/{viewonly_test_dataset_for_download}/dataset.zip',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 403
+	assert 'view-only' in response.json()['detail']
+
+
+def test_download_labels_allows_viewonly_dataset(auth_token, test_dataset_with_label):
+	"""View-only datasets should still allow labels/predictions download flow."""
+	dataset_id = test_dataset_with_label
+	with use_client(auth_token) as db_client:
+		db_client.table(settings.datasets_table).update(
+			{'data_access': DatasetAccessEnum.viewonly.value}
+		).eq('id', dataset_id).execute()
+
+	response = client.get(
+		f'/api/v1/download/datasets/{dataset_id}/labels.gpkg',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 200
+	assert response.json()['status'] in ('processing', 'completed')
+
+
+def test_private_dataset_owner_can_download(auth_token, private_test_dataset_for_download):
+	"""Owner of a private dataset should be able to download it."""
+	response = client.get(
+		f'/api/v1/download/datasets/{private_test_dataset_for_download}/dataset.zip',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 200
+	assert response.json()['status'] in ('processing', 'completed')
+
+
+def test_private_dataset_non_privileged_user_cannot_download(private_test_dataset_for_download):
+	"""Non-owner without private-view privilege should not access private downloads."""
+	user2_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+	response = client.get(
+		f'/api/v1/download/datasets/{private_test_dataset_for_download}/dataset.zip',
+		headers={'Authorization': f'Bearer {user2_token}'},
+	)
+
+	assert response.status_code == 404
+
+
+def test_private_dataset_privileged_user_can_download(private_test_dataset_for_download, test_user2):
+	"""Users with can_view_all_private should be able to download private datasets."""
+	user2_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+	processor_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD, use_cached_session=False)
+
+	with use_client(processor_token) as processor_client:
+		existing = processor_client.table('privileged_users').select('*').eq('user_id', test_user2).execute().data
+		processor_client.table('privileged_users').delete().eq('user_id', test_user2).execute()
+		processor_client.table('privileged_users').insert(
+			{
+				'user_id': test_user2,
+				'can_upload_private': False,
+				'can_view_all_private': True,
+				'can_audit': False,
+			}
+		).execute()
+
+	try:
+		response = client.get(
+			f'/api/v1/download/datasets/{private_test_dataset_for_download}/dataset.zip',
+			headers={'Authorization': f'Bearer {user2_token}'},
+		)
+		assert response.status_code == 200
+		assert response.json()['status'] in ('processing', 'completed')
+	finally:
+		with use_client(processor_token) as processor_client:
+			processor_client.table('privileged_users').delete().eq('user_id', test_user2).execute()
+			for row in existing:
+				processor_client.table('privileged_users').insert(
+					{
+						'user_id': row['user_id'],
+						'can_upload_private': row['can_upload_private'],
+						'can_view_all_private': row['can_view_all_private'],
+						'can_audit': row['can_audit'],
+					}
+				).execute()
+
+
 def test_download_dataset(auth_token, test_dataset_for_download):
 	"""Test downloading a complete dataset ZIP bundle (now using the async approach)"""
 	# Make initial request to start the download
@@ -2253,6 +2452,26 @@ def test_multi_bundle_caching(auth_token, multi_test_datasets):
 	# Same job ID and already completed
 	assert job_id1 == job_id2
 	assert status2 == 'completed'
+
+
+def test_multi_bundle_blocks_viewonly_dataset(auth_token, multi_test_datasets):
+	"""Bundles should be blocked when any selected dataset is view-only."""
+	viewonly_dataset_id = multi_test_datasets[0]
+	dataset_ids = ','.join(str(d) for d in multi_test_datasets)
+
+	with use_client(auth_token) as db_client:
+		db_client.table(settings.datasets_table).update(
+			{'data_access': DatasetAccessEnum.viewonly.value}
+		).eq('id', viewonly_dataset_id).execute()
+
+	response = client.get(
+		f'/api/v1/download/bundle.zip?dataset_ids={dataset_ids}',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 403
+	assert 'view-only datasets' in response.json()['detail']
+	assert str(viewonly_dataset_id) in response.json()['detail']
 
 
 def test_multi_bundle_invalid_dataset_id(auth_token):

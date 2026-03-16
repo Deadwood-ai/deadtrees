@@ -112,25 +112,45 @@ class DownloadStatus(BaseModel):
 	download_path: str = ''
 
 
-async def get_public_dataset(dataset_id: str) -> tuple[Dataset, dict]:
-	"""Get dataset and ortho data, but only if it's publicly accessible"""
-	with use_client() as client:
-		# Get dataset
-		dataset_response = client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute()
+def parse_dataset_id(dataset_id: str) -> int:
+	"""Parse dataset IDs from route params and return a clean 400 on invalid values."""
+	try:
+		return int(dataset_id)
+	except (TypeError, ValueError):
+		raise HTTPException(status_code=400, detail=f'Invalid dataset ID: {dataset_id}')
 
+
+def enforce_dataset_download_access(
+	dataset: Dataset,
+	allow_viewonly_full_download: bool,
+):
+	"""Enforce dataset-level access policy for download endpoints."""
+	if not allow_viewonly_full_download and dataset.data_access.value == 'viewonly':
+		raise HTTPException(
+			status_code=403,
+			detail='This dataset is view-only. Please download predictions (GPKG) instead.',
+		)
+
+
+async def get_accessible_dataset(
+	dataset_id: int,
+	token: str,
+	allow_viewonly_full_download: bool = True,
+) -> tuple[Dataset, dict]:
+	"""Get dataset and ortho data if the requesting user is allowed to access it."""
+	with use_client(token) as client:
+		dataset_response = client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute()
 		if not dataset_response.data:
 			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
 
 		dataset = Dataset(**dataset_response.data[0])
+		enforce_dataset_download_access(
+			dataset=dataset,
+			allow_viewonly_full_download=allow_viewonly_full_download,
+		)
 
-		# Only allow access to public datasets
-		if dataset.data_access.value == 'private':
-			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
-
-		# Get ortho data
 		ortho_response = client.table(settings.orthos_table).select('*').eq('dataset_id', dataset_id).execute()
 		ortho = ortho_response.data[0] if ortho_response.data else None
-
 		return dataset, ortho
 
 
@@ -213,21 +233,27 @@ async def download_dataset(
 	"""
 	Prepare dataset bundle in the background and return job status
 	"""
+	dataset_id_int = parse_dataset_id(dataset_id)
 	validate_user_and_limit(
 		token=token,
 		endpoint='datasets/{dataset_id}/dataset.zip',
-		dataset_id=int(dataset_id),
+		dataset_id=dataset_id_int,
 	)
+	dataset_id = str(dataset_id_int)
 
-	# Check dataset exists and is public
-	dataset, ortho = await get_public_dataset(dataset_id)
+	# Check dataset exists and access policy allows full download
+	dataset, ortho = await get_accessible_dataset(
+		dataset_id=dataset_id_int,
+		token=token,
+		allow_viewonly_full_download=False,
+	)
 
 	if not ortho:
 		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no ortho file.')
 
 	# Build the file paths
 	download_dir = settings.downloads_path / dataset_id
-	download_file = download_dir / get_bundle_filename(int(dataset_id), include_labels, include_parquet)
+	download_file = download_dir / get_bundle_filename(dataset_id_int, include_labels, include_parquet)
 
 	# Check if file already exists
 	if download_file.exists():
@@ -270,18 +296,24 @@ async def check_download_status(
 	token: Annotated[str, Depends(oauth2_scheme)] = '',
 ):
 	"""Check the status of a dataset bundle job"""
+	dataset_id_int = parse_dataset_id(dataset_id)
 	validate_user_and_limit(
 		token=token,
 		endpoint='datasets/{dataset_id}/status',
-		dataset_id=int(dataset_id),
+		dataset_id=dataset_id_int,
 		count_towards_limit=False,
 	)
+	dataset_id = str(dataset_id_int)
 
 	download_dir = settings.downloads_path / dataset_id
-	download_file = download_dir / get_bundle_filename(int(dataset_id), include_labels, include_parquet)
+	download_file = download_dir / get_bundle_filename(dataset_id_int, include_labels, include_parquet)
 
-	# Check dataset exists and is public
-	dataset, ortho = await get_public_dataset(dataset_id)
+	# Check dataset exists and access policy allows full download
+	dataset, ortho = await get_accessible_dataset(
+		dataset_id=dataset_id_int,
+		token=token,
+		allow_viewonly_full_download=False,
+	)
 
 	if download_file.exists() and download_file.stat().st_size > 0:
 		return DownloadStatus(
@@ -304,16 +336,22 @@ async def download_dataset_file(
 	token: Annotated[str, Depends(oauth2_scheme)] = '',
 ):
 	"""Redirect to the actual download file once it's ready"""
+	dataset_id_int = parse_dataset_id(dataset_id)
 	validate_user_and_limit(
 		token=token,
 		endpoint='datasets/{dataset_id}/download',
-		dataset_id=int(dataset_id),
+		dataset_id=dataset_id_int,
+	)
+	dataset_id = str(dataset_id_int)
+
+	# Check dataset exists and access policy allows full download
+	dataset, ortho = await get_accessible_dataset(
+		dataset_id=dataset_id_int,
+		token=token,
+		allow_viewonly_full_download=False,
 	)
 
-	# Check dataset exists and is public
-	dataset, ortho = await get_public_dataset(dataset_id)
-
-	download_file = settings.downloads_path / dataset_id / get_bundle_filename(int(dataset_id), include_labels, include_parquet)
+	download_file = settings.downloads_path / dataset_id / get_bundle_filename(dataset_id_int, include_labels, include_parquet)
 
 	if not download_file.exists() or download_file.stat().st_size == 0:
 		raise HTTPException(status_code=404, detail=f'Download file for dataset <ID={dataset_id}> not found')
@@ -470,14 +508,21 @@ async def get_labels(
 	"""
 	Prepare labels GeoPackage in the background and return job status
 	"""
+	dataset_id_int = parse_dataset_id(dataset_id)
+	validate_user_and_limit(
+		token=token,
+		endpoint='datasets/{dataset_id}/labels.gpkg',
+		dataset_id=dataset_id_int,
+	)
+	dataset_id = str(dataset_id_int)
+
 	try:
-		validate_user_and_limit(
+		# Check dataset exists and access policy allows labels download
+		dataset, ortho = await get_accessible_dataset(
+			dataset_id=dataset_id_int,
 			token=token,
-			endpoint='datasets/{dataset_id}/labels.gpkg',
-			dataset_id=int(dataset_id),
+			allow_viewonly_full_download=True,
 		)
-		# Check dataset exists and is public
-		dataset, ortho = await get_public_dataset(dataset_id)
 
 		# Build the file paths
 		download_dir = settings.downloads_path / dataset_id
@@ -513,6 +558,8 @@ async def get_labels(
 			job_id=f'labels_{dataset_id}',
 			message='Labels GeoPackage is being prepared',
 		)
+	except HTTPException:
+		raise
 	except Exception as e:
 		logger.error(f'Error initiating labels download for dataset {dataset_id}: {str(e)}')
 		raise HTTPException(status_code=500, detail=f'Error initiating labels download: {str(e)}')
@@ -524,19 +571,25 @@ async def check_labels_status(
 	token: Annotated[str, Depends(oauth2_scheme)] = '',
 ):
 	"""Check the status of a labels GeoPackage job"""
+	dataset_id_int = parse_dataset_id(dataset_id)
 	validate_user_and_limit(
 		token=token,
 		endpoint='datasets/{dataset_id}/labels/status',
-		dataset_id=int(dataset_id),
+		dataset_id=dataset_id_int,
 		count_towards_limit=False,
 	)
+	dataset_id = str(dataset_id_int)
 
 	download_dir = settings.downloads_path / dataset_id
 	labels_file = download_dir / f'{dataset_id}_labels.gpkg'
 	error_file = download_dir / f'{dataset_id}_labels.gpkg.error'
 
-	# Check dataset exists and is public
-	dataset, ortho = await get_public_dataset(dataset_id)
+	# Check dataset exists and access policy allows labels download
+	dataset, ortho = await get_accessible_dataset(
+		dataset_id=dataset_id_int,
+		token=token,
+		allow_viewonly_full_download=True,
+	)
 
 	if error_file.exists():
 		error_message = error_file.read_text(encoding='utf-8').strip()
@@ -567,14 +620,20 @@ async def download_labels_file(
 	token: Annotated[str, Depends(oauth2_scheme)] = '',
 ):
 	"""Redirect to the actual labels download file once it's ready"""
+	dataset_id_int = parse_dataset_id(dataset_id)
 	validate_user_and_limit(
 		token=token,
 		endpoint='datasets/{dataset_id}/labels/download',
-		dataset_id=int(dataset_id),
+		dataset_id=dataset_id_int,
 	)
+	dataset_id = str(dataset_id_int)
 
-	# Check dataset exists and is public
-	dataset, ortho = await get_public_dataset(dataset_id)
+	# Check dataset exists and access policy allows labels download
+	dataset, ortho = await get_accessible_dataset(
+		dataset_id=dataset_id_int,
+		token=token,
+		allow_viewonly_full_download=True,
+	)
 
 	labels_file = settings.downloads_path / dataset_id / f'{dataset_id}_labels.gpkg'
 	error_file = settings.downloads_path / dataset_id / f'{dataset_id}_labels.gpkg.error'
@@ -594,17 +653,21 @@ async def download_labels_file(
 # =============================================================================
 
 
-async def get_datasets_for_bundle(dataset_ids: List[int]) -> List[tuple]:
+async def get_datasets_for_bundle(
+	dataset_ids: List[int],
+	token: str,
+) -> List[tuple]:
 	"""
 	Fetch dataset, ortho, and metadata for multiple datasets.
-	Only returns public datasets.
+	Enforces private/view-only download policy for the requesting user.
 	
 	Returns:
 		List of tuples: (dataset, ortho_dict, metadata_dict, archive_file_path)
 	"""
 	results = []
+	viewonly_dataset_ids: List[int] = []
 	
-	with use_client() as client:
+	with use_client(token) as client:
 		for dataset_id in dataset_ids:
 			# Get dataset
 			dataset_response = client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute()
@@ -613,10 +676,10 @@ async def get_datasets_for_bundle(dataset_ids: List[int]) -> List[tuple]:
 				raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
 			
 			dataset = Dataset(**dataset_response.data[0])
-			
-			# Only allow access to public datasets
-			if dataset.data_access.value == 'private':
-				raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
+
+			if dataset.data_access.value == 'viewonly':
+				viewonly_dataset_ids.append(dataset_id)
+				continue
 			
 			# Get ortho data
 			ortho_response = client.table(settings.orthos_table).select('*').eq('dataset_id', dataset_id).execute()
@@ -634,7 +697,14 @@ async def get_datasets_for_bundle(dataset_ids: List[int]) -> List[tuple]:
 			archive_file_path = str((settings.archive_path / ortho['ortho_file_name']).resolve())
 			
 			results.append((dataset, ortho, metadata, archive_file_path))
-	
+
+	if viewonly_dataset_ids:
+		blocked_ids = ', '.join(str(x) for x in sorted(viewonly_dataset_ids))
+		raise HTTPException(
+			status_code=403,
+			detail=f'Bundle contains view-only datasets that cannot include orthophoto downloads: [{blocked_ids}]',
+		)
+
 	return results
 
 
@@ -737,8 +807,11 @@ async def prepare_multi_bundle(
 	if download_file.exists():
 		download_file.unlink()
 	
-	# Fetch all datasets (validates they exist and are public)
-	datasets_info = await get_datasets_for_bundle(id_list)
+	# Fetch all datasets and enforce access policy for bundle creation
+	datasets_info = await get_datasets_for_bundle(
+		dataset_ids=id_list,
+		token=token,
+	)
 	
 	# Start background task
 	background_tasks.add_task(
