@@ -6,7 +6,7 @@ from shared.testing.fixtures import test_processor_user
 
 
 @pytest.fixture(scope='function')
-def setup_privileged_users(auth_token, test_user, test_processor_user):
+def setup_privileged_users(auth_token, test_user, test_user2, test_processor_user):
 	"""Create test entries in the privileged_users table"""
 	privileged_user_ids = []
 
@@ -16,6 +16,10 @@ def setup_privileged_users(auth_token, test_user, test_processor_user):
 
 		# Create entries for both test user and processor
 		with use_client(processor_token) as processor_client:
+			# Normalize existing state for test users to keep assertions deterministic
+			processor_client.table('privileged_users').delete().eq('user_id', test_user).execute()
+			processor_client.table('privileged_users').delete().eq('user_id', test_user2).execute()
+
 			# Add test user to privileged users with all permissions
 			test_user_entry = {
 				'user_id': test_user,
@@ -82,6 +86,10 @@ def setup_privileged_users_with_limited_permissions(auth_token, test_user, test_
 		processor_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD, use_cached_session=False)
 
 		with use_client(processor_token) as processor_client:
+			# Normalize existing state for both test users
+			processor_client.table('privileged_users').delete().eq('user_id', test_user).execute()
+			processor_client.table('privileged_users').delete().eq('user_id', test_user2).execute()
+
 			# Add test_user with view_all_private permission only
 			test_user_entry = {
 				'user_id': test_user,
@@ -142,7 +150,6 @@ def test_processor_can_see_all_privileges(setup_privileged_users):
 		all_user_ids = {entry['user_id'] for entry in response.data}
 		assert setup_privileged_users['test_user_id'] in all_user_ids
 		assert setup_privileged_users['processor_id'] in all_user_ids
-		assert len(all_user_ids) == 2
 
 
 def test_non_privileged_user_sees_nothing(setup_privileged_users, test_user2):

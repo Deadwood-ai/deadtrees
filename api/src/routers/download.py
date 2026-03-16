@@ -370,15 +370,28 @@ def create_labels_geopackage_background(dataset_id: str):
 	"""Background task to create labels geopackage"""
 	download_dir = settings.downloads_path / dataset_id
 	labels_file = download_dir / f'{dataset_id}_labels.gpkg'
+	temp_file = download_dir / f'{dataset_id}_labels.gpkg.part'
+	error_file = download_dir / f'{dataset_id}_labels.gpkg.error'
 
 	try:
 		logger.info(f'Starting labels GeoPackage creation for dataset {dataset_id}')
+		download_dir.mkdir(parents=True, exist_ok=True)
+
+		# Clear stale state from prior attempts
+		if temp_file.exists():
+			temp_file.unlink()
+		if error_file.exists():
+			error_file.unlink()
 
 		# Create consolidated geopackage in temp directory
 		temp_gpkg = create_consolidated_geopackage(int(dataset_id))
 
-		# Move to downloads directory
-		shutil.move(str(temp_gpkg), str(labels_file))
+		# Copy to a temp file inside the target directory, then atomically rename.
+		# This avoids exposing a partially written file in /downloads/v1.
+		shutil.copyfile(str(temp_gpkg), str(temp_file))
+		if temp_file.stat().st_size == 0:
+			raise ValueError(f'Generated GeoPackage is empty for dataset {dataset_id}')
+		temp_file.replace(labels_file)
 
 		# Clean up temp directory
 		shutil.rmtree(temp_gpkg.parent)
@@ -387,14 +400,18 @@ def create_labels_geopackage_background(dataset_id: str):
 
 	except ValueError as e:
 		logger.error(f'No labels found for dataset {dataset_id}: {str(e)}')
-		# Remove failed file if it exists
-		if labels_file.exists():
-			labels_file.unlink()
+		# Remove failed files and persist error reason for status endpoint
+		for f in (temp_file, labels_file):
+			if f.exists():
+				f.unlink()
+		error_file.write_text(str(e), encoding='utf-8')
 	except Exception as e:
 		logger.error(f'Error in background labels GeoPackage creation: {str(e)}', extra={'dataset_id': dataset_id})
-		# Remove failed file if it exists
-		if labels_file.exists():
-			labels_file.unlink()
+		# Remove failed files if they exist and persist the error reason for status endpoint
+		for f in (temp_file, labels_file):
+			if f.exists():
+				f.unlink()
+		error_file.write_text(str(e), encoding='utf-8')
 
 
 # @download_app.get('/datasets/{dataset_id}/ortho.tif')
@@ -465,16 +482,24 @@ async def get_labels(
 		# Build the file paths
 		download_dir = settings.downloads_path / dataset_id
 		labels_file = download_dir / f'{dataset_id}_labels.gpkg'
+		error_file = download_dir / f'{dataset_id}_labels.gpkg.error'
 
 		# Check if file already exists
 		if labels_file.exists():
-			# File already exists, return completed status
-			return DownloadStatus(
-				status=DownloadStatusEnum.COMPLETED,
-				job_id=f'labels_{dataset_id}',
-				message='Labels GeoPackage is ready for download',
-				download_path=f'/downloads/v1/{dataset_id}/{dataset_id}_labels.gpkg',
-			)
+			if labels_file.stat().st_size == 0:
+				labels_file.unlink()
+			else:
+				# File already exists, return completed status
+				return DownloadStatus(
+					status=DownloadStatusEnum.COMPLETED,
+					job_id=f'labels_{dataset_id}',
+					message='Labels GeoPackage is ready for download',
+					download_path=f'/downloads/v1/{dataset_id}/{dataset_id}_labels.gpkg',
+				)
+
+		# Clear stale error marker from prior failed attempt
+		if error_file.exists():
+			error_file.unlink()
 
 		# Create download directory if it doesn't exist
 		download_dir.mkdir(parents=True, exist_ok=True)
@@ -508,11 +533,20 @@ async def check_labels_status(
 
 	download_dir = settings.downloads_path / dataset_id
 	labels_file = download_dir / f'{dataset_id}_labels.gpkg'
+	error_file = download_dir / f'{dataset_id}_labels.gpkg.error'
 
 	# Check dataset exists and is public
 	dataset, ortho = await get_public_dataset(dataset_id)
 
-	if labels_file.exists():
+	if error_file.exists():
+		error_message = error_file.read_text(encoding='utf-8').strip()
+		return DownloadStatus(
+			status=DownloadStatusEnum.FAILED,
+			job_id=f'labels_{dataset_id}',
+			message=error_message or 'Labels GeoPackage generation failed',
+		)
+
+	if labels_file.exists() and labels_file.stat().st_size > 0:
 		return DownloadStatus(
 			status=DownloadStatusEnum.COMPLETED,
 			job_id=f'labels_{dataset_id}',
@@ -543,8 +577,13 @@ async def download_labels_file(
 	dataset, ortho = await get_public_dataset(dataset_id)
 
 	labels_file = settings.downloads_path / dataset_id / f'{dataset_id}_labels.gpkg'
+	error_file = settings.downloads_path / dataset_id / f'{dataset_id}_labels.gpkg.error'
 
-	if not labels_file.exists():
+	if error_file.exists():
+		error_message = error_file.read_text(encoding='utf-8').strip()
+		raise HTTPException(status_code=500, detail=error_message or 'Labels GeoPackage generation failed')
+
+	if not labels_file.exists() or labels_file.stat().st_size == 0:
 		raise HTTPException(status_code=404, detail=f'Labels file for dataset <ID={dataset_id}> not found')
 
 	return RedirectResponse(url=f'/downloads/v1/{dataset_id}/{dataset_id}_labels.gpkg', status_code=303)

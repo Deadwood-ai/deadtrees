@@ -893,7 +893,7 @@ def test_download_labels_not_found(auth_token, test_dataset_for_download):
 	data = response.json()
 	assert data['status'] == 'processing'
 
-	# Wait and check status - background job should fail and not create file
+	# Wait and check status - background job should fail
 	max_attempts = 10
 	for _ in range(max_attempts):
 		status_response = client.get(
@@ -903,17 +903,68 @@ def test_download_labels_not_found(auth_token, test_dataset_for_download):
 		assert status_response.status_code == 200
 		status_data = status_response.json()
 
-		# File should never be created, so status stays "processing"
+		if status_data['status'] == 'failed':
+			assert 'No labels found' in status_data['message']
+			break
+
 		if status_data['status'] == 'processing':
 			time.sleep(1)
 			continue
-		else:
-			# If it somehow completed, fail the test
-			pytest.fail(f'Expected file not to be created, but got status: {status_data["status"]}')
+		pytest.fail(f'Unexpected status for labels job: {status_data["status"]}')
+
+	else:
+		pytest.fail('Labels GeoPackage processing did not fail within expected time')
 
 	# After waiting, file should still not exist
 	labels_file = settings.downloads_path / str(test_dataset_for_download) / f'{test_dataset_for_download}_labels.gpkg'
 	assert not labels_file.exists(), 'Labels file should not exist for dataset with no labels'
+
+
+def test_check_labels_status_returns_failed_when_error_marker_exists(auth_token, test_dataset_for_download):
+	"""Status endpoint should return failed when error marker file exists"""
+	download_dir = settings.downloads_path / str(test_dataset_for_download)
+	error_file = download_dir / f'{test_dataset_for_download}_labels.gpkg.error'
+	download_dir.mkdir(parents=True, exist_ok=True)
+	error_file.write_text('synthetic labels generation error', encoding='utf-8')
+
+	try:
+		response = client.get(
+			f'/api/v1/download/datasets/{test_dataset_for_download}/labels/status',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+
+		assert response.status_code == 200
+		data = response.json()
+		assert data['status'] == 'failed'
+		assert 'synthetic labels generation error' in data['message']
+	finally:
+		if error_file.exists():
+			error_file.unlink()
+		if download_dir.exists() and not any(download_dir.iterdir()):
+			download_dir.rmdir()
+
+
+def test_download_labels_file_returns_500_when_error_marker_exists(auth_token, test_dataset_for_download):
+	"""Download endpoint should return 500 when label generation failed"""
+	download_dir = settings.downloads_path / str(test_dataset_for_download)
+	error_file = download_dir / f'{test_dataset_for_download}_labels.gpkg.error'
+	download_dir.mkdir(parents=True, exist_ok=True)
+	error_file.write_text('synthetic labels generation error', encoding='utf-8')
+
+	try:
+		response = client.get(
+			f'/api/v1/download/datasets/{test_dataset_for_download}/labels/download',
+			headers={'Authorization': f'Bearer {auth_token}'},
+			follow_redirects=False,
+		)
+
+		assert response.status_code == 500
+		assert 'synthetic labels generation error' in response.json()['detail']
+	finally:
+		if error_file.exists():
+			error_file.unlink()
+		if download_dir.exists() and not any(download_dir.iterdir()):
+			download_dir.rmdir()
 
 
 def test_download_dataset_async(auth_token, test_dataset_for_download):
