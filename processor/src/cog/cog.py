@@ -5,6 +5,107 @@ from shared.logger import logger
 from rio_cogeo.cogeo import cog_info, cog_validate
 # from rio_cogeo.profiles import cog_profiles
 
+def _build_cog_translate_command(
+	tiff_file_path: str,
+	cog_target_path: str,
+	num_bands: int,
+	force_epsg_3857: bool = False,
+):
+	"""Build gdal_translate command with a safe strategy per band-count."""
+	if num_bands < 1:
+		raise ValueError(f'Invalid band count: {num_bands}')
+
+	compress = 'JPEG'
+	overview_compress = 'JPEG'
+	add_alpha = False
+	band_indexes = None
+
+	if num_bands == 1:
+		# Grayscale input. Keep JPEG but pin explicit band.
+		band_indexes = [1]
+	elif num_bands == 2:
+		# JPEG does not consistently handle 2-band rasters.
+		# Use lossless DEFLATE and preserve both bands.
+		compress = 'DEFLATE'
+		overview_compress = 'DEFLATE'
+		band_indexes = [1, 2]
+	elif num_bands == 3:
+		# Existing behavior for RGB data.
+		add_alpha = True
+	else:
+		# Avoid the RGBA+JPEG+ALPHA path which failed in production.
+		# We keep RGB output by selecting the first 3 bands.
+		band_indexes = [1, 2, 3]
+
+	cmd_translate = ['gdal_translate', tiff_file_path]
+
+	if band_indexes:
+		for band_index in band_indexes:
+			cmd_translate.extend(['-b', str(band_index)])
+
+	cmd_translate.extend(
+		[
+			cog_target_path,
+			'-co',
+			'BIGTIFF=YES',
+			'-ot',
+			'Byte',
+			'-of',
+			'COG',
+			'-co',
+			f'COMPRESS={compress}',
+			'-co',
+			'QUALITY=95',
+			'-co',
+			f'OVERVIEW_COMPRESS={overview_compress}',
+			'-co',
+			'OVERVIEW_QUALITY=95',
+			'-co',
+			'TILING_SCHEME=GoogleMapsCompatible',
+			'--config',
+			'GDAL_TIFF_INTERNAL_MASK',
+			'TRUE',
+			'--config',
+			'GDAL_NUM_THREADS',
+			'ALL_CPUS',
+			'--config',
+			'GDAL_CACHEMAX',
+			'32768',
+			'--config',
+			'GDAL_GTIFF_SRS_SOURCE',
+			'EPSG',
+		]
+	)
+
+	if add_alpha:
+		cmd_translate.extend(['-co', 'ALPHA=YES'])
+
+	if force_epsg_3857:
+		cmd_translate.extend(['-a_srs', 'EPSG:3857'])
+
+	return cmd_translate
+
+
+def _run_gdal_translate(command: list[str], token: str | None = None, attempt: str = 'primary'):
+	"""Run gdal_translate and log full stdout/stderr on success/failure."""
+	try:
+		result = subprocess.run(command, check=True, capture_output=True, text=True)
+		if result.stdout:
+			logger.info(f'gdal_translate stdout ({attempt}):\n{result.stdout}', extra={'token': token})
+		if result.stderr:
+			logger.info(f'gdal_translate stderr ({attempt}):\n{result.stderr}', extra={'token': token})
+	except subprocess.CalledProcessError as e:
+		logger.error(
+			(
+				f'gdal_translate failed ({attempt}) exit_code={e.returncode}\n'
+				f'command: {" ".join(command)}\n'
+				f'stdout:\n{e.stdout or ""}\n'
+				f'stderr:\n{e.stderr or ""}'
+			),
+			extra={'token': token},
+		)
+		raise
+
 
 # def calculate_cog(
 # 	tiff_file_path: str,
@@ -60,78 +161,31 @@ def calculate_cog(
 	with rasterio.open(tiff_file_path) as src:
 		num_bands = src.count
 
-	# Build base gdal command
-	cmd_translate = [
-		'gdal_translate',
-		tiff_file_path,
-		cog_target_path,
-		'-co',
-		'BIGTIFF=YES',
-		'-ot',
-		'Byte',
-		'-of',
-		'COG',
-		'-co',
-		'COMPRESS=JPEG',
-		'-co',
-		'QUALITY=95',
-		'-co',
-		'OVERVIEW_COMPRESS=JPEG',
-		'-co',
-		'OVERVIEW_QUALITY=95',
-		'-co',
-		'TILING_SCHEME=GoogleMapsCompatible',
-		'--config',
-		'GDAL_TIFF_INTERNAL_MASK',
-		'TRUE',
-		'--config',
-		'GDAL_NUM_THREADS',
-		'ALL_CPUS',
-		'--config',
-		'GDAL_CACHEMAX',
-		'32768',
-		'--config',
-		'GDAL_GTIFF_SRS_SOURCE',
-		'EPSG',
-		# '-a_nodata',
-		# '0',  # Set nodata value to 0 instead of 255
-	]
-
-	# Handle band selection based on number of bands
-	if num_bands == 3:
-		pass
-		# Standard RGB image - add alpha channel
-		cmd_translate.extend(['-co', 'ALPHA=YES'])
-	elif num_bands == 4:
-		# RGBA image - keep all bands
-		band_args = []
-		for i in range(1, 5):
-			band_args.extend(['-b', str(i)])
-		cmd_translate[2:2] = band_args
-		cmd_translate.extend(['-co', 'ALPHA=YES'])
-	else:
-		# Multi-band image - select first three bands and add alpha
-		band_args = []
-		for i in range(1, 4):
-			band_args.extend(['-b', str(i)])
-		cmd_translate[2:2] = band_args
-		cmd_translate.extend(['-co', 'ALPHA=YES'])
+	cmd_translate = _build_cog_translate_command(
+		tiff_file_path=tiff_file_path,
+		cog_target_path=cog_target_path,
+		num_bands=num_bands,
+	)
 
 	# Try to process with original CRS first
 	try:
-		logger.info('Running COG processing with original CRS', extra={'token': token})
-		result = subprocess.run(cmd_translate, check=True, capture_output=True, text=True)
-		logger.info(f'gdal_translate output:\n{result.stdout}', extra={'token': token})
-	except subprocess.CalledProcessError as e:
-		logger.error(f'Error gdal_translate: {e}', extra={'token': token})
-		logger.info('Retrying with EPSG:3857', extra={'token': token})
+		logger.info(
+			f'Running COG processing with original CRS (bands={num_bands})',
+			extra={'token': token},
+		)
+		_run_gdal_translate(cmd_translate, token=token, attempt='original-crs')
+	except subprocess.CalledProcessError:
+		logger.info('Retrying COG processing with EPSG:3857', extra={'token': token})
 		try:
-			# Add explicit CRS setting
-			cmd_translate.extend(['-a_srs', 'EPSG:3857'])
-			result = subprocess.run(cmd_translate, check=True, capture_output=True, text=True)
-			logger.info(f'gdal_translate output (with EPSG:3857):\n{result.stdout}', extra={'token': token})
+			cmd_translate_epsg = _build_cog_translate_command(
+				tiff_file_path=tiff_file_path,
+				cog_target_path=cog_target_path,
+				num_bands=num_bands,
+				force_epsg_3857=True,
+			)
+			_run_gdal_translate(cmd_translate_epsg, token=token, attempt='epsg-3857-retry')
 		except subprocess.CalledProcessError as e:
-			logger.error(f'Error running gdal_translate with EPSG:3857: {e}', extra={'token': token})
+			logger.error(f'Error running gdal_translate with EPSG:3857 retry: {e}', extra={'token': token})
 			raise  # Re-raise the exception to stop execution if both attempts fail
 
 	return cog_info(cog_target_path)
