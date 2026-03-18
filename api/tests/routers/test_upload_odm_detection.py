@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from api.src.server import app
 from api.src.utils.file_utils import detect_upload_type, UploadType
 from shared.models import LicenseEnum, PlatformEnum, DatasetAccessEnum
+from shared.zip_utils import UnsupportedZipCompressionError
 
 client = TestClient(app)
 
@@ -172,3 +173,31 @@ def test_chunk_endpoint_without_auth():
 	response = client.post('/datasets/chunk', files=files, data=form_data)
 
 	assert response.status_code == 401
+
+
+def test_chunk_endpoint_rejects_unsupported_zip_compression(auth_token, monkeypatch):
+	"""Final ZIP chunk should return 400 when compression is unsupported."""
+
+	def _raise_unsupported(_path):
+		raise UnsupportedZipCompressionError(unsupported_methods={9: 3}, allowed_methods={0, 8})
+
+	monkeypatch.setattr('api.src.routers.upload.ensure_supported_zip_compression', _raise_unsupported)
+
+	form_data = {
+		'chunk_index': '0',
+		'chunks_total': '1',
+		'upload_id': 'test-upload-id-unsupported-compression',
+		'license': LicenseEnum.cc_by.value,
+		'platform': PlatformEnum.drone.value,
+		'authors': ['Test Author'],
+		'data_access': DatasetAccessEnum.public.value,
+		'upload_type': UploadType.RAW_IMAGES_ZIP.value,
+	}
+
+	files = {'file': ('unsupported.zip', b'fake-zip-data', 'application/zip')}
+	response = client.post(
+		'/datasets/chunk', files=files, data=form_data, headers={'Authorization': f'Bearer {auth_token}'}
+	)
+
+	assert response.status_code == 400
+	assert 'Unsupported ZIP compression method(s)' in response.json()['detail']

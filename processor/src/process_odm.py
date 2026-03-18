@@ -10,6 +10,11 @@ from shared.settings import settings
 from shared.status import update_status
 from shared.logging import LogContext, LogCategory
 from shared.db import use_client, login
+from shared.zip_utils import (
+	ensure_supported_zip_compression,
+	UnsupportedZipCompressionError,
+	InvalidZipArchiveError,
+)
 from processor.src.utils.ssh import (
 	pull_file_from_storage_server,
 	push_file_to_storage_server,
@@ -99,6 +104,13 @@ def process_odm(task: QueueTask, temp_dir: Path):
 			f'Extracting ZIP file to: {extraction_dir}',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
+
+		try:
+			ensure_supported_zip_compression(local_zip_path)
+		except UnsupportedZipCompressionError as e:
+			raise Exception(f'Unsupported ZIP compression for dataset {dataset_id}: {str(e)}') from e
+		except InvalidZipArchiveError as e:
+			raise Exception(f'Invalid ZIP archive for dataset {dataset_id}: {str(e)}') from e
 
 		with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
 			zip_ref.extractall(extraction_dir)

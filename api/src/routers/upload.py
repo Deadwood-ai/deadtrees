@@ -10,6 +10,11 @@ from shared.db import verify_token
 from shared.settings import settings
 from shared.status import update_status
 from shared.logging import LogCategory, LogContext, UnifiedLogger, SupabaseHandler
+from shared.zip_utils import (
+	ensure_supported_zip_compression,
+	UnsupportedZipCompressionError,
+	InvalidZipArchiveError,
+)
 
 from ..upload.upload import create_dataset_entry
 from ..upload.geotiff_processor import process_geotiff_upload
@@ -108,6 +113,17 @@ async def upload_chunk(
 			t2 = time.time()
 			upload_runtime = t2 - t1
 
+			# Validate ZIP compression methods before creating dataset entries.
+			if upload_type == UploadType.RAW_IMAGES_ZIP:
+				try:
+					ensure_supported_zip_compression(upload_target_path)
+				except UnsupportedZipCompressionError as e:
+					upload_target_path.unlink(missing_ok=True)
+					raise HTTPException(status_code=400, detail=str(e))
+				except InvalidZipArchiveError as e:
+					upload_target_path.unlink(missing_ok=True)
+					raise HTTPException(status_code=400, detail=str(e))
+
 			logger.info(
 				f'Creating dataset entry for {file.filename}',
 				LogContext(
@@ -174,6 +190,28 @@ async def upload_chunk(
 
 			return dataset
 
+		except (UnsupportedZipCompressionError, InvalidZipArchiveError) as e:
+			logger.warning(
+				f'ZIP validation failed: {str(e)}',
+				LogContext(
+					category=LogCategory.UPLOAD,
+					user_id=user.id,
+					dataset_id=dataset.id if 'dataset' in locals() else None,
+					token=token,
+					extra={'upload_id': upload_id, 'file_name': file.filename},
+				),
+			)
+			if 'dataset' in locals():
+				update_status(
+					token=token,
+					dataset_id=dataset.id,
+					current_status=StatusEnum.uploading,
+					has_error=True,
+					error_message=str(e),
+				)
+			raise HTTPException(status_code=400, detail=str(e))
+		except HTTPException:
+			raise
 		except Exception as e:
 			logger.error(
 				f'Error processing final chunk: {str(e)}',

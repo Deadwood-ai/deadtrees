@@ -6,6 +6,7 @@ from shared.status import update_status
 from shared.models import StatusEnum
 from shared.settings import settings
 from shared.db import use_client
+from shared.zip_utils import ensure_supported_zip_compression
 
 
 async def process_raw_images_upload(dataset: Dataset, upload_target_path: Path, token: str) -> Dataset:
@@ -23,6 +24,10 @@ async def process_raw_images_upload(dataset: Dataset, upload_target_path: Path, 
 		This function only handles ZIP file storage. All extraction, RTK detection, and
 		technical analysis is deferred to the ODM processing task.
 	"""
+	# Defensive validation in case this function is called outside the
+	# normal upload endpoint flow.
+	ensure_supported_zip_compression(upload_target_path)
+
 	# Move ZIP file to expected location for ODM processor
 	zip_filename = f'{dataset.id}.zip'
 	final_zip_path = settings.raw_images_path / zip_filename
