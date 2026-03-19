@@ -788,11 +788,62 @@ def main():
 		print('✓ No new patches to export')
 		return 0
 
-	print(f'✓ Found {len(patches)} validated patches in database\n')
-
-	# Group patches by dataset and resolution for summary
-	by_dataset = {}
+	# Pre-filter patches that actually need export. This keeps no-change cron runs
+	# compact and avoids printing the full dataset breakdown every time.
+	export_candidates = []
+	skipped_count = 0
 	for patch in patches:
+		dataset_id = patch['dataset_id']
+		resolution_cm = patch['resolution_cm']
+		patch_index = patch['patch_index']
+
+		dataset_output_dir = output_base_dir / str(dataset_id)
+		tile_id = patch_index.split('_')[-2:] if '_' in patch_index else [patch_index]
+		tile_id = '_'.join(tile_id) if len(tile_id) > 1 else tile_id[0]
+		filename_base = f'{dataset_id}_{tile_id}_{resolution_cm}cm'
+
+		has_deadwood_ref = bool(
+			patch.get('effective_deadwood_label_id')
+			or patch.get('reference_deadwood_label_id')
+			or patch.get('parent_deadwood_label_id')
+		)
+		has_forestcover_ref = bool(
+			patch.get('effective_forestcover_label_id')
+			or patch.get('reference_forest_cover_label_id')
+			or patch.get('parent_forestcover_label_id')
+		)
+
+		patch_updated_at = parse_optional_datetime(patch.get('updated_at'))
+		if patch_updated_at is None:
+			patch_updated_at = datetime.fromtimestamp(0, tz=timezone.utc)
+		effective_reference_updated_at = parse_optional_datetime(patch.get('effective_reference_updated_at'))
+
+		if not args.force and not patch_needs_export(
+			dataset_output_dir,
+			filename_base,
+			patch_updated_at,
+			has_deadwood_ref,
+			has_forestcover_ref,
+			effective_reference_updated_at=effective_reference_updated_at,
+		):
+			skipped_count += 1
+			continue
+
+		export_candidates.append(patch)
+
+	if not export_candidates:
+		print('✅ No patch changes detected; export skipped.')
+		print('   Newly exported: 0 patches')
+		print(f'   Skipped (already exist): {skipped_count} patches')
+		return 0
+
+	print(f'✓ Found {len(patches)} validated patches in database')
+	print(f'   Need export: {len(export_candidates)} patches')
+	print(f'   Already up-to-date: {skipped_count} patches\n')
+
+	# Group only export candidates by dataset/resolution for readable change summary.
+	by_dataset = {}
+	for patch in export_candidates:
 		dataset_id = patch['dataset_id']
 		resolution = patch['resolution_cm']
 
@@ -802,7 +853,7 @@ def main():
 			by_dataset[dataset_id][resolution] = 0
 		by_dataset[dataset_id][resolution] += 1
 
-	print('📊 Patches by dataset:')
+	print('📊 Patches to export by dataset:')
 	for dataset_id in sorted(by_dataset.keys()):
 		resolutions = by_dataset[dataset_id]
 		res_str = ', '.join([f'{count}x{res}cm' for res, count in sorted(resolutions.items())])
@@ -818,9 +869,7 @@ def main():
 
 	success_count = 0
 	failed_count = 0
-	skipped_count = 0
-
-	for patch in tqdm(patches, desc='Exporting patches'):
+	for patch in tqdm(export_candidates, desc='Exporting patches'):
 		dataset_id = patch['dataset_id']
 		resolution_cm = patch['resolution_cm']
 		patch_index = patch['patch_index']
@@ -836,37 +885,6 @@ def main():
 		tile_id = patch_index.split('_')[-2:] if '_' in patch_index else [patch_index]
 		tile_id = '_'.join(tile_id) if len(tile_id) > 1 else tile_id[0]
 		filename_base = f'{dataset_id}_{tile_id}_{resolution_cm}cm'
-
-		# Check if patch has deadwood / forestcover labels (including inherited labels).
-		has_deadwood_ref = bool(
-			patch.get('effective_deadwood_label_id')
-			or patch.get('reference_deadwood_label_id')
-			or patch.get('parent_deadwood_label_id')
-		)
-		has_forestcover_ref = bool(
-			patch.get('effective_forestcover_label_id')
-			or patch.get('reference_forest_cover_label_id')
-			or patch.get('parent_forestcover_label_id')
-		)
-
-		# Parse timestamps for change detection.
-		patch_updated_at = parse_optional_datetime(patch.get('updated_at'))
-		if patch_updated_at is None:
-			patch_updated_at = datetime.fromtimestamp(0, tz=timezone.utc)
-
-		effective_reference_updated_at = parse_optional_datetime(patch.get('effective_reference_updated_at'))
-
-		# Check if patch needs export (files missing or outdated)
-		if not args.force and not patch_needs_export(
-			dataset_output_dir,
-			filename_base,
-			patch_updated_at,
-			has_deadwood_ref,
-			has_forestcover_ref,
-			effective_reference_updated_at=effective_reference_updated_at,
-		):
-			skipped_count += 1
-			continue
 
 		# Get COG URL (fetch from DB if not cached)
 		if dataset_id not in cog_cache:
