@@ -314,7 +314,8 @@ def patch_needs_export(
 	output_dir: Path,
 	filename_base: str,
 	patch_updated_at: datetime,
-	has_ref: bool,
+	has_deadwood_ref: bool,
+	has_forestcover_ref: bool,
 	effective_reference_updated_at: Optional[datetime] = None,
 ) -> bool:
 	"""Check if patch needs to be exported based on timestamps.
@@ -325,7 +326,8 @@ def patch_needs_export(
 		patch_updated_at: When the patch was last updated in the database
 		effective_reference_updated_at: Latest ancestor label update time that can
 			change this patch's exported masks
-		has_ref: Whether reference masks should exist
+		has_deadwood_ref: Whether deadwood reference masks should exist
+		has_forestcover_ref: Whether forest cover reference masks should exist
 
 	Returns:
 		True if patch should be exported (files missing or outdated), False otherwise
@@ -353,15 +355,22 @@ def patch_needs_export(
 	if not (geotiff_path.exists() and png_path.exists()):
 		return True
 
-	# Check reference masks if they should exist
-	if has_ref:
-		ref_files = [
+	# Check reference masks only for label types that actually exist.
+	# Some validated patches legitimately have only one label type.
+	if has_deadwood_ref:
+		deadwood_ref_files = [
 			output_dir / 'geotiff' / f'{filename_base}_deadwood_ref.tif',
-			output_dir / 'geotiff' / f'{filename_base}_forestcover_ref.tif',
 			output_dir / 'png' / f'{filename_base}_deadwood_ref.png',
+		]
+		if not all(f.exists() for f in deadwood_ref_files):
+			return True
+
+	if has_forestcover_ref:
+		forestcover_ref_files = [
+			output_dir / 'geotiff' / f'{filename_base}_forestcover_ref.tif',
 			output_dir / 'png' / f'{filename_base}_forestcover_ref.png',
 		]
-		if not all(f.exists() for f in ref_files):
+		if not all(f.exists() for f in forestcover_ref_files):
 			return True
 
 	return False
@@ -828,10 +837,14 @@ def main():
 		tile_id = '_'.join(tile_id) if len(tile_id) > 1 else tile_id[0]
 		filename_base = f'{dataset_id}_{tile_id}_{resolution_cm}cm'
 
-		# Check if patch has reference labels (including parent labels for 5cm/10cm patches)
-		has_ref = (
-			patch.get('reference_deadwood_label_id')
+		# Check if patch has deadwood / forestcover labels (including inherited labels).
+		has_deadwood_ref = bool(
+			patch.get('effective_deadwood_label_id')
+			or patch.get('reference_deadwood_label_id')
 			or patch.get('parent_deadwood_label_id')
+		)
+		has_forestcover_ref = bool(
+			patch.get('effective_forestcover_label_id')
 			or patch.get('reference_forest_cover_label_id')
 			or patch.get('parent_forestcover_label_id')
 		)
@@ -848,7 +861,8 @@ def main():
 			dataset_output_dir,
 			filename_base,
 			patch_updated_at,
-			has_ref,
+			has_deadwood_ref,
+			has_forestcover_ref,
 			effective_reference_updated_at=effective_reference_updated_at,
 		):
 			skipped_count += 1
