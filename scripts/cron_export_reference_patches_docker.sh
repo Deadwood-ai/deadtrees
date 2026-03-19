@@ -6,19 +6,21 @@
 # All dependencies are already installed in the container.
 #
 # Cron setup (run every minute on HOST):
-# * * * * * /path/to/scripts/cron_export_reference_patches_docker.sh >> /data/logs/reference_export.log 2>&1
+# * * * * * /path/to/scripts/cron_export_reference_patches_docker.sh
 
 set -euo pipefail
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-LOG_DIR="/data/logs"
+LOG_DIR="${LOG_DIR:-/data/logs}"
+LOG_FILE="${LOG_FILE:-$LOG_DIR/reference_export.log}"
 CONTAINER_NAME="api"  # Change to your API container name
 COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.api.yaml"
 
 # Ensure log directory exists
 mkdir -p "$LOG_DIR"
+exec >>"$LOG_FILE" 2>&1
 
 # Log with timestamp
 log() {

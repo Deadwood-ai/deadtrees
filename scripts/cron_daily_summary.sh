@@ -7,19 +7,21 @@
 #
 # Cron setup (run at 8:00 AM CET on weekdays on HOST):
 # For CET (UTC+1 in winter, UTC+2 in summer), use 7:00 UTC in winter:
-# 0 7 * * 1-5 /path/to/scripts/cron_daily_summary.sh >> /data/logs/daily_summary.log 2>&1
+# 0 7 * * 1-5 /path/to/scripts/cron_daily_summary.sh
 
 set -euo pipefail
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-LOG_DIR="/data/logs"
+LOG_DIR="${LOG_DIR:-/data/logs}"
+LOG_FILE="${LOG_FILE:-$LOG_DIR/daily_summary.log}"
 CONTAINER_NAME="api"  # API container name
 COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.api.yaml"
 
 # Ensure log directory exists
 mkdir -p "$LOG_DIR"
+exec >>"$LOG_FILE" 2>&1
 
 # Log with timestamp
 log() {

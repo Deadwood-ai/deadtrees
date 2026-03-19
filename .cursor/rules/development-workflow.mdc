@@ -102,6 +102,15 @@ make symlinks
 - GPU/unavailable → ensure NVIDIA runtime and device mounts in compose; check driver versions
 - DB issues (prod) → use MCP tools; for local use `supabase db reset`
 
+## PRODUCTION LOG ACCESS (STORAGE SERVER)
+- Prefer `/data/logs` for cron and operational logs so they are visible via mounted storage paths during debugging
+- Reference export cron wrapper writes to `/data/logs/reference_export.log`
+- Daily summary cron wrapper writes to `/data/logs/daily_summary.log`
+- FreiData cron wrapper writes to `/data/logs/freidata_cron.log` and defaults FreiData publish logs to `/data/logs/freidata_publish.log`
+- API container stdout/stderr can be incrementally captured to `/data/logs/api_container.log` via `scripts/cron_capture_api_container_logs.sh`
+- Keep a small capture runner log at `/data/logs/api_container_capture.log` and state file at `/data/logs/.api_container_logs_since`
+- Use `flock` in cron entries for long-running jobs to prevent overlap and duplicate log noise
+
 ## ANTI-PATTERNS
 - Do not run `pytest` directly in containers; use CLI wrappers
 - Do not introduce async tests
