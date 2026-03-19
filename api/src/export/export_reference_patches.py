@@ -69,6 +69,25 @@ def get_nginx_cog_url(cog_path: str, base_url: str = 'http://localhost:8080/cogs
 	return f'{base_url}/{cog_path}'
 
 
+def parse_optional_datetime(value) -> Optional[datetime]:
+	"""Parse string/datetime values to timezone-aware datetime."""
+	if value is None:
+		return None
+
+	if isinstance(value, datetime):
+		if value.tzinfo is None:
+			return value.replace(tzinfo=timezone.utc)
+		return value
+
+	if isinstance(value, str):
+		try:
+			return datetime.fromisoformat(value.replace('Z', '+00:00'))
+		except ValueError:
+			return None
+
+	return None
+
+
 def fetch_reference_datasets(token: str) -> list[int]:
 	"""Fetch all dataset IDs from reference_datasets table."""
 	try:
@@ -92,7 +111,8 @@ def fetch_validated_patches(
 	By default, fetches patches where BOTH deadwood_validated AND forest_cover_validated are true.
 	Use flags to filter for specific validation types.
 
-	For 5cm/10cm patches without their own reference labels, adds parent 20cm patch's label IDs.
+	For child patches without direct labels, resolves effective labels by traversing
+	the full parent chain (5cm -> 10cm -> 20cm).
 	"""
 	try:
 		with use_client(token) as client:
@@ -125,55 +145,73 @@ def fetch_validated_patches(
 			response = query.order('dataset_id').order('resolution_cm').order('patch_index').execute()
 			patches = response.data if response.data else []
 
-			# For 5cm/10cm patches without their own labels, look up parent 20cm patch labels
-			# Group by dataset to minimize queries
-			patches_needing_parent = []
+			if not patches:
+				return []
+
+			# Build per-dataset parent maps so each validated patch can resolve effective
+			# label IDs through the full ancestor chain.
+			dataset_ids = sorted(set(p['dataset_id'] for p in patches))
+			dataset_patch_maps: dict[int, dict[int, dict]] = {}
+			for ds_id in dataset_ids:
+				all_patches_response = (
+					client.from_('reference_patches')
+					.select('id, parent_tile_id, reference_deadwood_label_id, reference_forest_cover_label_id, updated_at')
+					.eq('dataset_id', ds_id)
+					.execute()
+				)
+				all_patches = all_patches_response.data if all_patches_response.data else []
+				dataset_patch_maps[ds_id] = {row['id']: row for row in all_patches}
+
 			for patch in patches:
-				if patch['resolution_cm'] in [5, 10]:
-					if not patch.get('reference_deadwood_label_id') and not patch.get(
-						'reference_forest_cover_label_id'
-					):
-						patches_needing_parent.append(patch)
+				dataset_patch_map = dataset_patch_maps.get(patch['dataset_id'], {})
+				patch_updated_at = parse_optional_datetime(patch.get('updated_at'))
 
-			if patches_needing_parent:
-				# Group by dataset_id to fetch parent patches efficiently
-				dataset_ids = list(set(p['dataset_id'] for p in patches_needing_parent))
-				parent_label_cache = {}
+				effective_deadwood_label_id = patch.get('reference_deadwood_label_id')
+				effective_forest_label_id = patch.get('reference_forest_cover_label_id')
+				effective_deadwood_updated_at = patch_updated_at if effective_deadwood_label_id else None
+				effective_forest_updated_at = patch_updated_at if effective_forest_label_id else None
 
-				for ds_id in dataset_ids:
-					# Fetch 20cm patch for this dataset
-					parent_response = (
-						client.from_('reference_patches')
-						.select('patch_index, reference_deadwood_label_id, reference_forest_cover_label_id')
-						.eq('dataset_id', ds_id)
-						.eq('resolution_cm', 20)
-						.execute()
-					)
+				parent_id = patch.get('parent_tile_id')
+				visited_patch_ids = {patch.get('id')}
 
-					if parent_response.data:
-						for parent in parent_response.data:
-							parent_patch_index = parent['patch_index']
-							parent_label_cache[f'{ds_id}_{parent_patch_index}'] = {
-								'deadwood': parent.get('reference_deadwood_label_id'),
-								'forestcover': parent.get('reference_forest_cover_label_id'),
-							}
+				while parent_id and (not effective_deadwood_label_id or not effective_forest_label_id):
+					if parent_id in visited_patch_ids:
+						# Guard against unexpected parent cycles.
+						break
+					visited_patch_ids.add(parent_id)
 
-				# Add parent label IDs to child patches
-				for patch in patches:
-					if patch['resolution_cm'] in [5, 10]:
-						if not patch.get('reference_deadwood_label_id') and not patch.get(
-							'reference_forest_cover_label_id'
-						):
-							# Extract parent patch index from child (e.g., "20_1760952965035_0_1" -> "20_1760952965035")
-							patch_index_parts = patch['patch_index'].split('_')
-							if len(patch_index_parts) >= 2:
-								parent_patch_index = '_'.join(patch_index_parts[:2])
-								cache_key = f'{patch["dataset_id"]}_{parent_patch_index}'
+					parent_patch = dataset_patch_map.get(parent_id)
+					if not parent_patch:
+						break
 
-								if cache_key in parent_label_cache:
-									parent_labels = parent_label_cache[cache_key]
-									patch['parent_deadwood_label_id'] = parent_labels['deadwood']
-									patch['parent_forestcover_label_id'] = parent_labels['forestcover']
+					parent_updated_at = parse_optional_datetime(parent_patch.get('updated_at'))
+					if not effective_deadwood_label_id and parent_patch.get('reference_deadwood_label_id'):
+						effective_deadwood_label_id = parent_patch.get('reference_deadwood_label_id')
+						effective_deadwood_updated_at = parent_updated_at
+
+					if not effective_forest_label_id and parent_patch.get('reference_forest_cover_label_id'):
+						effective_forest_label_id = parent_patch.get('reference_forest_cover_label_id')
+						effective_forest_updated_at = parent_updated_at
+
+					parent_id = parent_patch.get('parent_tile_id')
+
+				# Keep legacy keys for downstream logic compatibility.
+				if not patch.get('reference_deadwood_label_id') and effective_deadwood_label_id:
+					patch['parent_deadwood_label_id'] = effective_deadwood_label_id
+				if not patch.get('reference_forest_cover_label_id') and effective_forest_label_id:
+					patch['parent_forestcover_label_id'] = effective_forest_label_id
+
+				# Add explicit effective labels and a combined source-update timestamp.
+				patch['effective_deadwood_label_id'] = effective_deadwood_label_id
+				patch['effective_forestcover_label_id'] = effective_forest_label_id
+
+				effective_update_candidates = [
+					c
+					for c in [patch_updated_at, effective_deadwood_updated_at, effective_forest_updated_at]
+					if c is not None
+				]
+				if effective_update_candidates:
+					patch['effective_reference_updated_at'] = max(effective_update_candidates)
 
 			return patches
 	except Exception as e:
@@ -272,13 +310,21 @@ def fetch_geometries_by_label(token: str, label_id: int, table_name: str, bbox: 
 		return []
 
 
-def patch_needs_export(output_dir: Path, filename_base: str, patch_updated_at: datetime, has_ref: bool) -> bool:
+def patch_needs_export(
+	output_dir: Path,
+	filename_base: str,
+	patch_updated_at: datetime,
+	has_ref: bool,
+	effective_reference_updated_at: Optional[datetime] = None,
+) -> bool:
 	"""Check if patch needs to be exported based on timestamps.
 
 	Args:
 		output_dir: Base output directory for the dataset
 		filename_base: Base filename (e.g., "420_0_0_5cm")
 		patch_updated_at: When the patch was last updated in the database
+		effective_reference_updated_at: Latest ancestor label update time that can
+			change this patch's exported masks
 		has_ref: Whether reference masks should exist
 
 	Returns:
@@ -292,9 +338,12 @@ def patch_needs_export(output_dir: Path, filename_base: str, patch_updated_at: d
 
 	# Compare file modification time with patch updated_at
 	file_mtime = datetime.fromtimestamp(json_path.stat().st_mtime, tz=timezone.utc)
+	latest_update = patch_updated_at
+	if effective_reference_updated_at and effective_reference_updated_at > latest_update:
+		latest_update = effective_reference_updated_at
 
 	# If patch was updated after file was written, needs re-export
-	if patch_updated_at > file_mtime:
+	if latest_update > file_mtime:
 		return True
 
 	# Check other required files exist
@@ -464,7 +513,11 @@ def export_patch(
 		# Always create masks - empty mask (all zeros) if no geometries found
 		deadwood_ref_mask = None
 		has_deadwood_ref_label = False
-		deadwood_ref_label_id = patch.get('reference_deadwood_label_id') or patch.get('parent_deadwood_label_id')
+		deadwood_ref_label_id = (
+			patch.get('effective_deadwood_label_id')
+			or patch.get('reference_deadwood_label_id')
+			or patch.get('parent_deadwood_label_id')
+		)
 		if deadwood_ref_label_id:
 			has_deadwood_ref_label = True
 			deadwood_ref_geoms = fetch_geometries_by_label(
@@ -477,8 +530,10 @@ def export_patch(
 
 		forestcover_ref_mask = None
 		has_forestcover_ref_label = False
-		forestcover_ref_label_id = patch.get('reference_forest_cover_label_id') or patch.get(
-			'parent_forestcover_label_id'
+		forestcover_ref_label_id = (
+			patch.get('effective_forestcover_label_id')
+			or patch.get('reference_forest_cover_label_id')
+			or patch.get('parent_forestcover_label_id')
 		)
 		if forestcover_ref_label_id:
 			has_forestcover_ref_label = True
@@ -781,13 +836,21 @@ def main():
 			or patch.get('parent_forestcover_label_id')
 		)
 
-		# Parse updated_at timestamp for change detection
-		patch_updated_at = patch['updated_at']
-		if isinstance(patch_updated_at, str):
-			patch_updated_at = datetime.fromisoformat(patch_updated_at.replace('Z', '+00:00'))
+		# Parse timestamps for change detection.
+		patch_updated_at = parse_optional_datetime(patch.get('updated_at'))
+		if patch_updated_at is None:
+			patch_updated_at = datetime.fromtimestamp(0, tz=timezone.utc)
+
+		effective_reference_updated_at = parse_optional_datetime(patch.get('effective_reference_updated_at'))
 
 		# Check if patch needs export (files missing or outdated)
-		if not args.force and not patch_needs_export(dataset_output_dir, filename_base, patch_updated_at, has_ref):
+		if not args.force and not patch_needs_export(
+			dataset_output_dir,
+			filename_base,
+			patch_updated_at,
+			has_ref,
+			effective_reference_updated_at=effective_reference_updated_at,
+		):
 			skipped_count += 1
 			continue
 
