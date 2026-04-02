@@ -7,9 +7,11 @@ from shared.settings import settings
 from shared.models import StatusEnum, QueueTask, Cog, Ortho
 from shared.logger import logger
 from .cog.cog import calculate_cog
-from .utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
+from .utils.ssh import push_file_to_storage_server
+from .utils.local_ortho import ensure_local_ortho
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
 from shared.status import update_status
+from shared.logging import LogContext, LogCategory
 
 
 def process_cog(task: QueueTask, temp_dir: Path):
@@ -34,10 +36,20 @@ def process_cog(task: QueueTask, temp_dir: Path):
 	try:
 		# Setup paths
 		input_path = Path(temp_dir) / ortho.ortho_file_name
-		storage_server_file_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{ortho.ortho_file_name}'
 
-		# Pull source file
-		pull_file_from_storage_server(storage_server_file_path, str(input_path), token, task.dataset_id)
+		# Prefer the standardized local ortho from the current pipeline run.
+		ensure_local_ortho(
+			local_path=input_path,
+			ortho_file_name=ortho.ortho_file_name,
+			token=token,
+			dataset_id=task.dataset_id,
+			log_context=LogContext(
+				category=LogCategory.COG,
+				dataset_id=task.dataset_id,
+				user_id=user.id,
+				token=token,
+			),
+		)
 
 		# Get options and setup output paths
 		file_name = f'{ortho.dataset_id}_cog.tif'

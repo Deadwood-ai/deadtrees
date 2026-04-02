@@ -8,6 +8,12 @@ from processor.src.process_deadwood_segmentation import process_deadwood_segment
 
 
 @pytest.fixture
+def test_file():
+	"""Deadwood integration tests need the full positive fixture, not the tiny default."""
+	return Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data.tif'
+
+
+@pytest.fixture
 def deadwood_task(test_dataset_for_processing, test_processor_user):
 	"""Create a test task specifically for deadwood segmentation processing"""
 	return QueueTask(

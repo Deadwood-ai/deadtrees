@@ -111,6 +111,8 @@ class Settings(BaseSettings):
 	PROCESSOR_PASSWORD: str = 'processor'
 	SSH_PRIVATE_KEY_PATH: str = '/app/ssh_key'
 	SSH_PRIVATE_KEY_PASSPHRASE: str = ''
+	ODM_SKY_REMOVAL: bool = False
+	ODM_BG_REMOVAL: bool = False
 
 	# monitoring
 	LOGFIRE_TOKEN: str = None

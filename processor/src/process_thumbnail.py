@@ -7,8 +7,9 @@ from shared.settings import settings
 from shared.models import StatusEnum, Ortho, QueueTask, Thumbnail
 from shared.logger import logger
 from .thumbnail.thumbnail import calculate_thumbnail
-from .utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
-from .exceptions import AuthenticationError, DatasetError, ProcessingError, StorageError
+from .utils.ssh import push_file_to_storage_server
+from .utils.local_ortho import ensure_local_ortho
+from .exceptions import AuthenticationError, DatasetError, ProcessingError
 from shared.status import update_status
 from shared.logging import LogContext, LogCategory
 
@@ -59,9 +60,20 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 			),
 		)
 
-		# get the remote file path and pull file
-		storage_server_file_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{ortho.ortho_file_name}'
-		pull_file_from_storage_server(storage_server_file_path, str(input_path), token, task.dataset_id)
+		# Prefer the standardized local ortho from the current pipeline run.
+		ensure_local_ortho(
+			local_path=input_path,
+			ortho_file_name=ortho.ortho_file_name,
+			token=token,
+			dataset_id=task.dataset_id,
+			log_context=LogContext(
+				category=LogCategory.THUMBNAIL,
+				dataset_id=task.dataset_id,
+				user_id=user.id,
+				token=token,
+				extra={'input': str(input_path)},
+			),
+		)
 
 		# Generate UUID for secure path (makes URL iteration impossible)
 		secure_token = str(uuid.uuid4())

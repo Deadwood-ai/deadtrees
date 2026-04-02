@@ -47,12 +47,12 @@ def process_odm(task: QueueTask, temp_dir: Path):
 	3. Extract ZIP file locally
 	4. Detect RTK files and update database with metadata
 	5. Extract EXIF metadata from images and update database
-	6. Execute ODM Docker container using --fast-orthophoto and --crop 0.1
+	6. Execute ODM Docker container using fast orthophoto settings
 	7. Move generated orthomosaic to archive/{dataset_id}_ortho.tif
 	8. Update status is_odm_done=True
 
-	Uses simplified ODM configuration with --fast-orthophoto and --crop 0.1 for
-	fast processing with better quality orthomosaics and cleaner boundaries.
+	Uses an environment-specific ODM configuration optimized for our current
+	production memory limits and development speed.
 
 	Args:
 		task: QueueTask with dataset_id and user information
@@ -608,6 +608,12 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			# (default 4 causes OOM on large datasets: 655 images × 12MP × 4 threads ≈ 120GB+)
 			resolution = '1.0'  # 1cm/pixel for production quality
 			odm_command.extend(['--fast-orthophoto', '--feature-quality', 'high', '--matcher-neighbors', '12', '--max-concurrency', '2'])
+
+		# Optional experimental masking flags for sky-heavy or background-heavy datasets.
+		if settings.ODM_SKY_REMOVAL:
+			odm_command.append('--sky-removal')
+		if settings.ODM_BG_REMOVAL:
+			odm_command.append('--bg-removal')
 
 		# Add common parameters
 		odm_command.extend(

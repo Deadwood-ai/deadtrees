@@ -9,6 +9,7 @@ alwaysApply: true
 - **NEVER SSH to remote machines without explicit user consent** - Always ask first
 - **NEVER commit or push without user approval** - Always ask before git operations
 - **NEVER bypass MCP for database access** - Use `user-deadtrees-prod` or `user-deadtrees-local`
+- **NEVER modify `/home/jj1049/prod/deadtrees` directly** - Production changes must only arrive via the sync/deploy path from `main`; do all code work in `/home/jj1049/dev/deadtrees`
 
 ---
 

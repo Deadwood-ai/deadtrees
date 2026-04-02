@@ -7,7 +7,7 @@ from shared.logger import logger
 from shared.status import update_status
 from shared.logging import LogContext, LogCategory
 
-from .utils.ssh import pull_file_from_storage_server
+from .utils.local_ortho import ensure_local_ortho
 from .deadwood_segmentation.predict_deadwood import predict_deadwood
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
 
@@ -53,20 +53,30 @@ def process_deadwood_segmentation(task: QueueTask, token: str, temp_dir: Path):
 
 	# get local file path
 	file_path = Path(temp_dir) / ortho.ortho_file_name
-	# get the remote file path
-	storage_server_file_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{ortho.ortho_file_name}'
 
 	logger.info(
-		'Pulling file from storage server',
+		'Resolving ortho source for deadwood segmentation',
 		LogContext(
 			category=LogCategory.DEADWOOD,
 			dataset_id=task.dataset_id,
 			user_id=user.id,
 			token=token,
-			extra={'file_path': str(file_path), 'storage_path': storage_server_file_path},
+			extra={'file_path': str(file_path)},
 		),
 	)
-	pull_file_from_storage_server(storage_server_file_path, str(file_path), token, ortho.dataset_id)
+	ensure_local_ortho(
+		local_path=file_path,
+		ortho_file_name=ortho.ortho_file_name,
+		token=token,
+		dataset_id=ortho.dataset_id,
+		log_context=LogContext(
+			category=LogCategory.DEADWOOD,
+			dataset_id=task.dataset_id,
+			user_id=user.id,
+			token=token,
+			extra={'file_path': str(file_path)},
+		),
+	)
 
 	try:
 		logger.info(

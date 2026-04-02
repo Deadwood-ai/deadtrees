@@ -1,9 +1,16 @@
 import pytest
+from pathlib import Path
 
 from shared.db import use_client
 from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask, LabelDataEnum, LabelSourceEnum, LabelTypeEnum
 from processor.src.process_treecover_segmentation import process_treecover_segmentation
+
+
+@pytest.fixture
+def test_file():
+	"""Tree cover integration tests need the full orthomosaic fixture for realistic TCD input."""
+	return Path(__file__).parent.parent.parent / 'assets' / 'test_data' / 'test-data.tif'
 
 
 @pytest.fixture
