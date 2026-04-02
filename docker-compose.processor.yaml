@@ -40,6 +40,7 @@ services:
       SSH_PRIVATE_KEY_PASSPHRASE: ${SSH_PRIVATE_KEY_PASSPHRASE}
       SSH_PRIVATE_KEY_PATH: /root/.ssh/processing-to-storage
       DEV_MODE: "false"
+      ODM_SKY_REMOVAL: "true"
       LOGFIRE_TOKEN: ${LOGFIRE_TOKEN}
       # Service role key for accessing auth.users (user email lookup)
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
@@ -57,4 +58,3 @@ services:
       - /dev/nvidia-modeset:/dev/nvidia-modeset
       - /dev/nvidia-uvm:/dev/nvidia-uvm
       - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
-
