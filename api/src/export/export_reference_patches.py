@@ -108,7 +108,7 @@ def fetch_validated_patches(
 ) -> list[dict]:
 	"""Fetch validated patches from reference_patches table.
 
-	By default, fetches patches where BOTH deadwood_validated AND forest_cover_validated are true.
+	By default, fetches patches where EITHER deadwood_validated OR forest_cover_validated is true.
 	Use flags to filter for specific validation types.
 
 	For child patches without direct labels, resolves effective labels by traversing
@@ -138,12 +138,15 @@ def fetch_validated_patches(
 				query = query.eq('deadwood_validated', True)
 			elif forest_cover_only:
 				query = query.eq('forest_cover_validated', True)
-			else:
-				# Default: Both validated
-				query = query.eq('deadwood_validated', True).eq('forest_cover_validated', True)
 
 			response = query.order('dataset_id').order('resolution_cm').order('patch_index').execute()
 			patches = response.data if response.data else []
+			if not deadwood_only and not forest_cover_only:
+				patches = [
+					p
+					for p in patches
+					if bool(p.get('deadwood_validated')) or bool(p.get('forest_cover_validated'))
+				]
 
 			if not patches:
 				return []
