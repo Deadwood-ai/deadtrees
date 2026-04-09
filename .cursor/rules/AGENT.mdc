@@ -72,6 +72,13 @@ See `docs/ops/api-server-deployment.md` for full details.
 - **Critical:** when re-running any downstream stage, always include `geotiff` (standardized ortho is ephemeral).
 - Full workflow + snippets live in `.cursor/rules/data-debugging.mdc` (search: “Alternative: API Endpoint”).
 
+### Operational: Processor Liveness on Prod
+- `auto_deploy_processor.sh` is a deploy hook, not a watchdog. If local `HEAD` already matches `origin/main`, it exits after logging `No changes` and does **not** restart a stopped processor.
+- `docker-compose.processor.yaml` currently has no `restart:` policy for the `processor` service, so container liveness is not self-healing yet.
+- The prod cron line below is currently required to keep the processor running after stops/exits:
+  - `* * * * * cd /home/jj1049/prod/deadtrees && docker compose -f docker-compose.processor.yaml up`
+- Do **not** remove that cron entry unless it is replaced by an equivalent watchdog or a proper Docker restart policy and verified on prod.
+
 ---
 
 ## Conventions (Non-Standard)
