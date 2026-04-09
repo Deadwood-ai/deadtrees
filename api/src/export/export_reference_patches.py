@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Optional
 import os
 
+import geopandas as gpd
 import numpy as np
 import rasterio
 from rasterio.enums import Resampling
@@ -47,7 +48,7 @@ from rasterio.features import rasterize
 from rasterio.transform import from_bounds as transform_from_bounds
 from rasterio.vrt import WarpedVRT
 from tqdm import tqdm
-from shapely.geometry import shape, box
+from shapely.geometry import MultiPolygon, shape, box
 from shapely.ops import transform as shapely_transform
 from pyproj import Transformer
 from PIL import Image
@@ -313,6 +314,267 @@ def fetch_geometries_by_label(token: str, label_id: int, table_name: str, bbox: 
 		return []
 
 
+def fetch_vector_features_by_label(token: str, patch_id: int, label_id: Optional[int], table_name: str) -> list[dict]:
+	"""Fetch stored reference geometries for a root patch as EPSG:4326 GeoJSON features."""
+	if label_id is None:
+		return []
+
+	try:
+		with use_client(token) as client:
+			response = (
+				client.from_(table_name)
+				.select('geometry, area_m2, properties')
+				.eq('patch_id', patch_id)
+				.eq('label_id', label_id)
+				.execute()
+			)
+			return response.data if response.data else []
+	except Exception as e:
+		print(f'❌ Error fetching vector features for patch {patch_id}: {e}')
+		return []
+
+
+def build_filename_base(patch: dict) -> str:
+	"""Build the common filename base used by raster and vector exports."""
+	dataset_id = patch['dataset_id']
+	resolution_cm = patch['resolution_cm']
+	patch_index = patch['patch_index']
+
+	tile_id = patch_index.split('_')[-2:] if '_' in patch_index else [patch_index]
+	tile_id = '_'.join(tile_id) if len(tile_id) > 1 else tile_id[0]
+	return f'{dataset_id}_{tile_id}_{resolution_cm}cm'
+
+
+def patch_has_deadwood_reference(patch: dict) -> bool:
+	"""Return whether this patch has a deadwood reference label in its effective chain."""
+	return bool(
+		patch.get('effective_deadwood_label_id')
+		or patch.get('reference_deadwood_label_id')
+		or patch.get('parent_deadwood_label_id')
+	)
+
+
+def patch_has_forestcover_reference(patch: dict) -> bool:
+	"""Return whether this patch has a forest cover reference label in its effective chain."""
+	return bool(
+		patch.get('effective_forestcover_label_id')
+		or patch.get('reference_forest_cover_label_id')
+		or patch.get('parent_forestcover_label_id')
+	)
+
+
+def is_vector_export_eligible_patch(patch: dict) -> bool:
+	"""Return whether a patch should produce a vector export."""
+	return (
+		patch.get('resolution_cm') == 20
+		and patch.get('parent_tile_id') is None
+		and (bool(patch.get('deadwood_validated')) or bool(patch.get('forest_cover_validated')))
+	)
+
+
+def get_vector_export_candidates(patches: list[dict], resolution_cm: Optional[int] = None) -> list[dict]:
+	"""Return root/base patches that should be considered for GeoPackage export."""
+	if resolution_cm in (5, 10):
+		return []
+	return [patch for patch in patches if is_vector_export_eligible_patch(patch)]
+
+
+def vector_export_needs_export(output_dir: Path, filename_base: str, patch_updated_at: datetime) -> bool:
+	"""Check if a root patch vector export needs refresh."""
+	gpkg_path = output_dir / 'gpkg' / f'{filename_base}.gpkg'
+	metadata_path = output_dir / 'metadata' / f'{filename_base}_vector.json'
+
+	if not gpkg_path.exists() or not metadata_path.exists():
+		return True
+
+	file_mtime = datetime.fromtimestamp(metadata_path.stat().st_mtime, tz=timezone.utc)
+	return patch_updated_at > file_mtime
+
+
+def normalize_polygon_geometry(geometry: dict) -> MultiPolygon:
+	"""Normalize polygonal GeoJSON to MultiPolygon for stable GeoPackage schemas."""
+	geom = shape(geometry)
+	if geom.geom_type == 'Polygon':
+		return MultiPolygon([geom])
+	if geom.geom_type == 'MultiPolygon':
+		return geom
+	raise ValueError(f'Expected polygonal geometry, got {geom.geom_type}')
+
+
+def build_base_patch_geodataframe(patch: dict) -> gpd.GeoDataFrame:
+	"""Build the base_patch GeoDataFrame for a root patch boundary."""
+	rows = [
+		{
+			'dataset_id': patch['dataset_id'],
+			'patch_id': patch['id'],
+			'patch_index': patch['patch_index'],
+			'resolution_cm': patch['resolution_cm'],
+			'layer_name': 'base_patch',
+			'geometry': normalize_polygon_geometry(patch['geometry']),
+		}
+	]
+	return gpd.GeoDataFrame(rows, geometry='geometry', crs='EPSG:4326')
+
+
+def build_vector_layer_geodataframe(
+	patch: dict,
+	layer_name: str,
+	label_id: Optional[int],
+	rows: list[dict],
+) -> gpd.GeoDataFrame:
+	"""Build a GeoDataFrame for a validated reference layer."""
+	features = []
+	for row in rows:
+		try:
+			features.append(
+				{
+					'dataset_id': patch['dataset_id'],
+					'patch_id': patch['id'],
+					'patch_index': patch['patch_index'],
+					'resolution_cm': patch['resolution_cm'],
+					'label_id': label_id,
+					'layer_name': layer_name,
+					'validated': 1,
+					'area_m2': row.get('area_m2'),
+					'properties_json': json.dumps(row.get('properties') or {}, sort_keys=True),
+					'geometry': normalize_polygon_geometry(row['geometry']),
+				}
+			)
+		except Exception:
+			continue
+
+	if not features:
+		return gpd.GeoDataFrame(
+			columns=[
+				'dataset_id',
+				'patch_id',
+				'patch_index',
+				'resolution_cm',
+				'label_id',
+				'layer_name',
+				'validated',
+				'area_m2',
+				'properties_json',
+				'geometry',
+			],
+			geometry='geometry',
+			crs='EPSG:4326',
+		)
+
+	return gpd.GeoDataFrame(features, geometry='geometry', crs='EPSG:4326')
+
+
+def write_geopackage_layer(gpkg_path: Path, layer_name: str, gdf: gpd.GeoDataFrame, schema: Optional[dict] = None):
+	"""Write a new GeoPackage layer, including empty layers with explicit schema."""
+	kwargs = {'driver': 'GPKG', 'layer': layer_name, 'engine': 'fiona'}
+	if schema is not None:
+		kwargs['schema'] = schema
+	gdf.to_file(gpkg_path, **kwargs)
+
+
+def export_vector_geopackage(token: str, patch: dict, output_dir: Path) -> Optional[Path]:
+	"""Export a root/base patch as a GeoPackage in EPSG:4326."""
+	filename_base = build_filename_base(patch)
+	gpkg_dir = output_dir / 'gpkg'
+	gpkg_dir.mkdir(parents=True, exist_ok=True)
+	metadata_dir = output_dir / 'metadata'
+	metadata_dir.mkdir(parents=True, exist_ok=True)
+
+	gpkg_path = gpkg_dir / f'{filename_base}.gpkg'
+	temp_gpkg_path = gpkg_dir / f'{filename_base}.tmp.gpkg'
+	metadata_path = metadata_dir / f'{filename_base}_vector.json'
+
+	if temp_gpkg_path.exists():
+		temp_gpkg_path.unlink()
+
+	label_layer_schema = {
+		'geometry': 'MultiPolygon',
+		'properties': {
+			'dataset_id': 'int',
+			'patch_id': 'int',
+			'patch_index': 'str',
+			'resolution_cm': 'int',
+			'label_id': 'int',
+			'layer_name': 'str',
+			'validated': 'int',
+			'area_m2': 'float',
+			'properties_json': 'str',
+		},
+	}
+	base_patch_schema = {
+		'geometry': 'MultiPolygon',
+		'properties': {
+			'dataset_id': 'int',
+			'patch_id': 'int',
+			'patch_index': 'str',
+			'resolution_cm': 'int',
+			'layer_name': 'str',
+		},
+	}
+
+	try:
+		write_geopackage_layer(temp_gpkg_path, 'base_patch', build_base_patch_geodataframe(patch), schema=base_patch_schema)
+
+		layer_counts = {'base_patch': 1, 'deadwood': 0, 'forest_cover': 0}
+		exported_layers = {'deadwood': False, 'forest_cover': False}
+
+		if bool(patch.get('deadwood_validated')):
+			deadwood_label_id = patch.get('reference_deadwood_label_id')
+			deadwood_rows = fetch_vector_features_by_label(
+				token,
+				patch['id'],
+				deadwood_label_id,
+				'reference_patch_deadwood_geometries',
+			)
+			deadwood_gdf = build_vector_layer_geodataframe(patch, 'deadwood', deadwood_label_id, deadwood_rows)
+			write_geopackage_layer(temp_gpkg_path, 'deadwood', deadwood_gdf, schema=label_layer_schema)
+			layer_counts['deadwood'] = len(deadwood_gdf.index)
+			exported_layers['deadwood'] = True
+
+		if bool(patch.get('forest_cover_validated')):
+			forest_label_id = patch.get('reference_forest_cover_label_id')
+			forest_rows = fetch_vector_features_by_label(
+				token,
+				patch['id'],
+				forest_label_id,
+				'reference_patch_forest_cover_geometries',
+			)
+			forest_gdf = build_vector_layer_geodataframe(patch, 'forest_cover', forest_label_id, forest_rows)
+			write_geopackage_layer(temp_gpkg_path, 'forest_cover', forest_gdf, schema=label_layer_schema)
+			layer_counts['forest_cover'] = len(forest_gdf.index)
+			exported_layers['forest_cover'] = True
+
+		if gpkg_path.exists():
+			gpkg_path.unlink()
+		temp_gpkg_path.replace(gpkg_path)
+
+		metadata = {
+			'dataset_id': patch['dataset_id'],
+			'patch_id': patch['id'],
+			'patch_index': patch['patch_index'],
+			'resolution_cm': patch['resolution_cm'],
+			'crs': 'EPSG:4326',
+			'layers': exported_layers,
+			'validation': {
+				'deadwood_validated': bool(patch.get('deadwood_validated')),
+				'forest_cover_validated': bool(patch.get('forest_cover_validated')),
+			},
+			'feature_counts': layer_counts,
+		}
+		with open(metadata_path, 'w') as f:
+			json.dump(metadata, f, indent=2)
+
+		return gpkg_path
+	except Exception as e:
+		print(f"❌ Error exporting vector GeoPackage for patch {patch['patch_index']}: {e}")
+		import traceback
+
+		traceback.print_exc()
+		if temp_gpkg_path.exists():
+			temp_gpkg_path.unlink()
+		return None
+
+
 def patch_needs_export(
 	output_dir: Path,
 	filename_base: str,
@@ -560,11 +822,7 @@ def export_patch(
 		# Note: We only export reference (human-validated) masks, not ML predictions
 
 		# Create output filenames with simplified naming
-		# Extract grid coordinates from patch_index if available (e.g., "20_1760951000108_0_0" -> "0_0")
-		# Otherwise use the full patch_index
-		tile_id = patch_index.split('_')[-2:] if '_' in patch_index else [patch_index]
-		tile_id = '_'.join(tile_id) if len(tile_id) > 1 else tile_id[0]
-		filename_base = f'{dataset_id}_{tile_id}_{resolution_cm}cm'
+		filename_base = build_filename_base(patch)
 
 		# Export GeoTIFF
 		if export_geotiff:
@@ -793,28 +1051,19 @@ def main():
 
 	# Pre-filter patches that actually need export. This keeps no-change cron runs
 	# compact and avoids printing the full dataset breakdown every time.
-	export_candidates = []
-	skipped_count = 0
+	raster_export_candidates = []
+	raster_skipped_count = 0
+	vector_candidates = get_vector_export_candidates(patches, resolution_cm=args.resolution)
+	vector_export_candidates = []
+	vector_skipped_count = 0
+
 	for patch in patches:
 		dataset_id = patch['dataset_id']
-		resolution_cm = patch['resolution_cm']
-		patch_index = patch['patch_index']
-
 		dataset_output_dir = output_base_dir / str(dataset_id)
-		tile_id = patch_index.split('_')[-2:] if '_' in patch_index else [patch_index]
-		tile_id = '_'.join(tile_id) if len(tile_id) > 1 else tile_id[0]
-		filename_base = f'{dataset_id}_{tile_id}_{resolution_cm}cm'
+		filename_base = build_filename_base(patch)
 
-		has_deadwood_ref = bool(
-			patch.get('effective_deadwood_label_id')
-			or patch.get('reference_deadwood_label_id')
-			or patch.get('parent_deadwood_label_id')
-		)
-		has_forestcover_ref = bool(
-			patch.get('effective_forestcover_label_id')
-			or patch.get('reference_forest_cover_label_id')
-			or patch.get('parent_forestcover_label_id')
-		)
+		has_deadwood_ref = patch_has_deadwood_reference(patch)
+		has_forestcover_ref = patch_has_forestcover_reference(patch)
 
 		patch_updated_at = parse_optional_datetime(patch.get('updated_at'))
 		if patch_updated_at is None:
@@ -829,24 +1078,39 @@ def main():
 			has_forestcover_ref,
 			effective_reference_updated_at=effective_reference_updated_at,
 		):
-			skipped_count += 1
-			continue
+			raster_skipped_count += 1
+		else:
+			raster_export_candidates.append(patch)
 
-		export_candidates.append(patch)
+	for patch in vector_candidates:
+		dataset_output_dir = output_base_dir / str(patch['dataset_id'])
+		filename_base = build_filename_base(patch)
+		patch_updated_at = parse_optional_datetime(patch.get('updated_at'))
+		if patch_updated_at is None:
+			patch_updated_at = datetime.fromtimestamp(0, tz=timezone.utc)
 
-	if not export_candidates:
+		if not args.force and not vector_export_needs_export(dataset_output_dir, filename_base, patch_updated_at):
+			vector_skipped_count += 1
+		else:
+			vector_export_candidates.append(patch)
+
+	if not raster_export_candidates and not vector_export_candidates:
 		print('✅ No patch changes detected; export skipped.')
-		print('   Newly exported: 0 patches')
-		print(f'   Skipped (already exist): {skipped_count} patches')
+		print('   Newly exported (raster): 0 patches')
+		print(f'   Skipped raster (already exist): {raster_skipped_count} patches')
+		print('   Newly exported (vector): 0 geopackages')
+		print(f'   Skipped vector (already exist): {vector_skipped_count} geopackages')
 		return 0
 
 	print(f'✓ Found {len(patches)} validated patches in database')
-	print(f'   Need export: {len(export_candidates)} patches')
-	print(f'   Already up-to-date: {skipped_count} patches\n')
+	print(f'   Need raster export: {len(raster_export_candidates)} patches')
+	print(f'   Raster already up-to-date: {raster_skipped_count} patches')
+	print(f'   Need vector export: {len(vector_export_candidates)} geopackages')
+	print(f'   Vector already up-to-date: {vector_skipped_count} geopackages\n')
 
 	# Group only export candidates by dataset/resolution for readable change summary.
 	by_dataset = {}
-	for patch in export_candidates:
+	for patch in raster_export_candidates:
 		dataset_id = patch['dataset_id']
 		resolution = patch['resolution_cm']
 
@@ -861,6 +1125,14 @@ def main():
 		resolutions = by_dataset[dataset_id]
 		res_str = ', '.join([f'{count}x{res}cm' for res, count in sorted(resolutions.items())])
 		print(f'  Dataset {dataset_id}: {res_str}')
+	if vector_export_candidates:
+		vector_by_dataset = {}
+		for patch in vector_export_candidates:
+			vector_by_dataset.setdefault(patch['dataset_id'], 0)
+			vector_by_dataset[patch['dataset_id']] += 1
+		print('📦 Root patch GeoPackages to export:')
+		for dataset_id in sorted(vector_by_dataset.keys()):
+			print(f"  Dataset {dataset_id}: {vector_by_dataset[dataset_id]}x gpkg")
 	print()
 
 	# Export patches
@@ -872,10 +1144,9 @@ def main():
 
 	success_count = 0
 	failed_count = 0
-	for patch in tqdm(export_candidates, desc='Exporting patches'):
+	for patch in tqdm(raster_export_candidates, desc='Exporting raster patches'):
 		dataset_id = patch['dataset_id']
 		resolution_cm = patch['resolution_cm']
-		patch_index = patch['patch_index']
 
 		# GSD mapping
 		gsd_map = {20: 0.20, 10: 0.10, 5: 0.05}
@@ -883,11 +1154,6 @@ def main():
 
 		# Dataset-specific output directory structure
 		dataset_output_dir = output_base_dir / str(dataset_id)
-
-		# Generate filename for existence check
-		tile_id = patch_index.split('_')[-2:] if '_' in patch_index else [patch_index]
-		tile_id = '_'.join(tile_id) if len(tile_id) > 1 else tile_id[0]
-		filename_base = f'{dataset_id}_{tile_id}_{resolution_cm}cm'
 
 		# Get COG URL (fetch from DB if not cached)
 		if dataset_id not in cog_cache:
@@ -926,18 +1192,33 @@ def main():
 		else:
 			failed_count += 1
 
+	vector_success_count = 0
+	vector_failed_count = 0
+	for patch in tqdm(vector_export_candidates, desc='Exporting vector GeoPackages'):
+		dataset_output_dir = output_base_dir / str(patch['dataset_id'])
+		result = export_vector_geopackage(token, patch, dataset_output_dir)
+		if result:
+			vector_success_count += 1
+		else:
+			vector_failed_count += 1
+
 	# Print summary
 	print('\n✅ Export complete!')
-	print(f'   Newly exported: {success_count} patches')
-	print(f'   Skipped (already exist): {skipped_count} patches')
+	print(f'   Newly exported raster: {success_count} patches')
+	print(f'   Skipped raster (already exist): {raster_skipped_count} patches')
 	if failed_count > 0:
-		print(f'   Failed: {failed_count} patches')
+		print(f'   Failed raster: {failed_count} patches')
+	print(f'   Newly exported vector: {vector_success_count} geopackages')
+	print(f'   Skipped vector (already exist): {vector_skipped_count} geopackages')
+	if vector_failed_count > 0:
+		print(f'   Failed vector: {vector_failed_count} geopackages')
 	print('\n📁 Output structure:')
 	print(f'   {output_base_dir.absolute()}/<dataset_id>/geotiff/')
 	print(f'   {output_base_dir.absolute()}/<dataset_id>/png/')
+	print(f'   {output_base_dir.absolute()}/<dataset_id>/gpkg/')
 	print(f'   {output_base_dir.absolute()}/<dataset_id>/metadata/')
 
-	return 0 if failed_count == 0 else 1
+	return 0 if failed_count == 0 and vector_failed_count == 0 else 1
 
 
 if __name__ == '__main__':
