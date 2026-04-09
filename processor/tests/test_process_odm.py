@@ -17,7 +17,12 @@ from pathlib import Path
 from shared.db import use_client
 from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask, StatusEnum
-from processor.src.process_odm import process_odm, _analyze_extracted_files, _extract_exif_from_images
+from processor.src.process_odm import (
+	process_odm,
+	_analyze_extracted_files,
+	_extract_exif_from_images,
+	_build_odm_command,
+)
 from processor.src.utils.ssh import push_file_to_storage_server, check_file_exists_on_storage
 
 
@@ -118,6 +123,35 @@ def test_extract_exif_from_real_drone_images():
 		bool(exposure_fields & exif_data.keys()),
 	])
 	assert categories_found >= 2, f'Expected ≥2 EXIF categories, got {categories_found}. Keys: {list(exif_data.keys())[:10]}'
+
+
+@pytest.mark.unit
+def test_build_odm_command_enables_auto_boundary(monkeypatch):
+	"""Production ODM commands should include auto-boundary when enabled."""
+	monkeypatch.setattr(settings, 'DEV_MODE', False)
+	monkeypatch.setattr(settings, 'ODM_AUTO_BOUNDARY', True)
+	monkeypatch.setattr(settings, 'ODM_SKY_REMOVAL', False)
+	monkeypatch.setattr(settings, 'ODM_BG_REMOVAL', False)
+
+	command, resolution, env_mode = _build_odm_command()
+
+	assert '--auto-boundary' in command
+	assert '--max-concurrency' in command
+	assert resolution == '1.0'
+	assert env_mode == 'Production quality'
+
+
+@pytest.mark.unit
+def test_build_odm_command_skips_auto_boundary_when_disabled(monkeypatch):
+	"""Auto-boundary should remain opt-in via configuration."""
+	monkeypatch.setattr(settings, 'DEV_MODE', False)
+	monkeypatch.setattr(settings, 'ODM_AUTO_BOUNDARY', False)
+	monkeypatch.setattr(settings, 'ODM_SKY_REMOVAL', False)
+	monkeypatch.setattr(settings, 'ODM_BG_REMOVAL', False)
+
+	command, _, _ = _build_odm_command()
+
+	assert '--auto-boundary' not in command
 
 
 @pytest.fixture

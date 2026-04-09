@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from shared.models import QueueTask
+from shared.models import QueueTask, StatusEnum
 from shared.logger import logger
 from shared.settings import settings
 from shared.status import update_status
@@ -37,6 +37,32 @@ from shared.exif_utils import extract_comprehensive_exif
 RTK_EXTENSIONS = {'.RTK', '.MRK', '.RTL', '.RTB', '.RPOS', '.RTS', '.IMU'}
 
 
+def _build_odm_command() -> tuple[list[str], str, str]:
+	"""Build the ODM CLI command for the current environment."""
+	odm_command: list[str] = []
+
+	if settings.DEV_MODE:
+		resolution = '50.0'  # 50cm/pixel for fast testing
+		odm_command.extend(['--fast-orthophoto'])
+	else:
+		# --max-concurrency 2: limits parallel threads to ~2x image_MP GB peak RAM
+		# (default 4 causes OOM on large datasets: 655 images × 12MP × 4 threads ≈ 120GB+)
+		resolution = '1.0'  # 1cm/pixel for production quality
+		odm_command.extend(
+			['--fast-orthophoto', '--feature-quality', 'high', '--matcher-neighbors', '12', '--max-concurrency', '2']
+		)
+
+	if settings.ODM_AUTO_BOUNDARY:
+		odm_command.append('--auto-boundary')
+	if settings.ODM_SKY_REMOVAL:
+		odm_command.append('--sky-removal')
+	if settings.ODM_BG_REMOVAL:
+		odm_command.append('--bg-removal')
+
+	env_mode = 'Speed optimized' if settings.DEV_MODE else 'Production quality'
+	return odm_command, resolution, env_mode
+
+
 def process_odm(task: QueueTask, temp_dir: Path):
 	"""
 	Process ODM (OpenDroneMap) task for raw drone images.
@@ -62,6 +88,8 @@ def process_odm(task: QueueTask, temp_dir: Path):
 
 	dataset_id = task.dataset_id
 	token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
+
+	update_status(token=token, dataset_id=dataset_id, current_status=StatusEnum.odm_processing)
 
 	logger.info(
 		f'Starting ODM processing for dataset {dataset_id}',
@@ -188,7 +216,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 		# Step 8: Update status
 		# Re-login to ensure we have a fresh token (ODM processing may take >1hr for large datasets)
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-		update_status(dataset_id=dataset_id, is_odm_done=True, token=token)
+		update_status(dataset_id=dataset_id, is_odm_done=True, current_status=StatusEnum.idle, token=token)
 
 		logger.info(
 			f'ODM processing completed successfully for dataset {dataset_id}',
@@ -206,13 +234,20 @@ def process_odm(task: QueueTask, temp_dir: Path):
 			)
 
 	except Exception as e:
+		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 		logger.error(
 			f'ODM processing failed for dataset {dataset_id}: {str(e)}',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 		# Ensure status reflects the error so the queue can skip this dataset until manual intervention
 		try:
-			update_status(token=token, dataset_id=dataset_id, has_error=True, error_message=str(e))
+			update_status(
+				token=token,
+				dataset_id=dataset_id,
+				current_status=StatusEnum.idle,
+				has_error=True,
+				error_message=str(e),
+			)
 		except Exception:
 			pass
 
@@ -595,25 +630,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 
 		# Environment-aware ODM configuration
 		project_name = f'dataset_{dataset_id}'
-		odm_command = []  # Always use fast processing
-
-		# Set resolution based on environment
-		if settings.DEV_MODE:
-			# Development/Test: Fast processing with lower resolution
-			resolution = '50.0'  # 50cm/pixel for fast testing
-			odm_command.extend(['--fast-orthophoto'])
-		else:
-			# Production: High quality processing
-			# --max-concurrency 2: limits parallel threads to ~2x image_MP GB peak RAM
-			# (default 4 causes OOM on large datasets: 655 images × 12MP × 4 threads ≈ 120GB+)
-			resolution = '1.0'  # 1cm/pixel for production quality
-			odm_command.extend(['--fast-orthophoto', '--feature-quality', 'high', '--matcher-neighbors', '12', '--max-concurrency', '2'])
-
-		# Optional experimental masking flags for sky-heavy or background-heavy datasets.
-		if settings.ODM_SKY_REMOVAL:
-			odm_command.append('--sky-removal')
-		if settings.ODM_BG_REMOVAL:
-			odm_command.append('--bg-removal')
+		odm_command, resolution, env_mode = _build_odm_command()
 
 		# Add common parameters
 		odm_command.extend(
@@ -627,8 +644,6 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			]
 		)
 
-		# Log with environment-specific details
-		env_mode = 'Speed optimized' if settings.DEV_MODE else 'Production quality'
 		logger.info(
 			f'Starting ODM processing with command: {" ".join(odm_command)} (Resolution: {resolution}cm/pixel, {env_mode})',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
