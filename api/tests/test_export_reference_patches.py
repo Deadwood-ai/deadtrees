@@ -1,4 +1,9 @@
+import json
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+
+import fiona
+import geopandas as gpd
 
 from api.src.export import export_reference_patches as export_module
 
@@ -70,6 +75,7 @@ def make_patch(
 	reference_deadwood_label_id=None,
 	reference_forest_cover_label_id=None,
 	updated_at='2026-04-07T13:57:22+00:00',
+	geometry=None,
 ):
 	return {
 		'id': patch_id,
@@ -82,6 +88,11 @@ def make_patch(
 		'reference_deadwood_label_id': reference_deadwood_label_id,
 		'reference_forest_cover_label_id': reference_forest_cover_label_id,
 		'updated_at': updated_at,
+		'geometry': geometry
+		or {
+			'type': 'Polygon',
+			'coordinates': [[[7.0, 47.0], [7.1, 47.0], [7.1, 47.1], [7.0, 47.1], [7.0, 47.0]]],
+		},
 	}
 
 
@@ -152,3 +163,229 @@ def test_fetch_validated_patches_resolves_effective_labels_for_single_validation
 
 	assert child_patch['effective_deadwood_label_id'] == 9001
 	assert child_patch['effective_forestcover_label_id'] == 9102
+
+
+def test_get_vector_export_candidates_only_includes_root_20cm_patches():
+	patches = [
+		make_patch(1, '20_root_valid', resolution_cm=20, deadwood_validated=True),
+		make_patch(2, '20_child_valid', resolution_cm=20, parent_tile_id=1, deadwood_validated=True),
+		make_patch(3, '10_child_valid', resolution_cm=10, parent_tile_id=1, forest_cover_validated=True),
+		make_patch(4, '20_root_unvalidated', resolution_cm=20, deadwood_validated=False, forest_cover_validated=False),
+	]
+
+	candidates = export_module.get_vector_export_candidates(patches)
+
+	assert [patch['id'] for patch in candidates] == [1]
+
+
+def test_get_vector_export_candidates_skips_when_resolution_filter_is_not_20():
+	patches = [make_patch(1, '20_root_valid', resolution_cm=20, deadwood_validated=True)]
+
+	assert export_module.get_vector_export_candidates(patches, resolution_cm=5) == []
+	assert export_module.get_vector_export_candidates(patches, resolution_cm=10) == []
+
+
+def test_vector_export_needs_export_checks_gpkg_and_metadata(tmp_path):
+	output_dir = tmp_path / '10'
+	(output_dir / 'gpkg').mkdir(parents=True)
+	(output_dir / 'metadata').mkdir(parents=True)
+
+	filename_base = '10_0_0_20cm'
+	patch_updated_at = datetime(2026, 4, 9, 12, 0, tzinfo=timezone.utc)
+
+	assert export_module.vector_export_needs_export(output_dir, filename_base, patch_updated_at) is True
+
+	gpkg_path = output_dir / 'gpkg' / f'{filename_base}.gpkg'
+	metadata_path = output_dir / 'metadata' / f'{filename_base}_vector.json'
+	gpkg_path.write_text('gpkg')
+	metadata_path.write_text('{}')
+
+	old_mtime = (patch_updated_at - timedelta(hours=1)).timestamp()
+	metadata_path.touch()
+	gpkg_path.touch()
+	import os
+
+	os.utime(metadata_path, (old_mtime, old_mtime))
+	assert export_module.vector_export_needs_export(output_dir, filename_base, patch_updated_at) is True
+
+	new_mtime = (patch_updated_at + timedelta(hours=1)).timestamp()
+	os.utime(metadata_path, (new_mtime, new_mtime))
+	assert export_module.vector_export_needs_export(output_dir, filename_base, patch_updated_at) is False
+
+
+def test_fetch_latest_reference_geometry_created_at_uses_latest_geometry_table_timestamp(monkeypatch):
+	tables = {
+		'reference_patch_deadwood_geometries': [
+			{'patch_id': 1, 'created_at': '2026-04-09T10:00:00+00:00'},
+			{'patch_id': 1, 'created_at': '2026-04-09T11:00:00+00:00'},
+		],
+		'reference_patch_forest_cover_geometries': [
+			{'patch_id': 1, 'created_at': '2026-04-09T12:00:00+00:00'},
+			{'patch_id': 2, 'created_at': '2026-04-09T13:00:00+00:00'},
+		],
+	}
+	install_fake_db(monkeypatch, tables)
+
+	latest_created_at = export_module.fetch_latest_reference_geometry_created_at('token', 1)
+
+	assert latest_created_at == datetime(2026, 4, 9, 12, 0, tzinfo=timezone.utc)
+
+
+def test_export_vector_geopackage_writes_validated_layers_only(monkeypatch, tmp_path):
+	patch = make_patch(
+		1,
+		'20_1760951000108',
+		deadwood_validated=True,
+		forest_cover_validated=False,
+		reference_deadwood_label_id=9001,
+		reference_forest_cover_label_id=9002,
+	)
+	tables = {
+		'reference_patch_deadwood_geometries': [
+			{
+				'patch_id': 1,
+				'label_id': 9001,
+				'geometry': {
+					'type': 'Polygon',
+					'coordinates': [[[7.01, 47.01], [7.02, 47.01], [7.02, 47.02], [7.01, 47.02], [7.01, 47.01]]],
+				},
+				'area_m2': 12.5,
+				'properties': {'source': 'test'},
+			}
+		],
+		'reference_patch_forest_cover_geometries': [
+			{
+				'patch_id': 1,
+				'label_id': 9002,
+				'geometry': {
+					'type': 'Polygon',
+					'coordinates': [[[7.03, 47.03], [7.04, 47.03], [7.04, 47.04], [7.03, 47.04], [7.03, 47.03]]],
+				},
+				'area_m2': 8.0,
+				'properties': {'source': 'test'},
+			}
+		],
+	}
+	install_fake_db(monkeypatch, tables)
+
+	gpkg_path = export_module.export_vector_geopackage('token', patch, tmp_path / '10')
+
+	assert gpkg_path is not None
+	assert gpkg_path.exists()
+
+	layers = fiona.listlayers(gpkg_path)
+	assert layers == ['base_patch', 'deadwood']
+
+	base_patch_gdf = gpd.read_file(gpkg_path, layer='base_patch')
+	deadwood_gdf = gpd.read_file(gpkg_path, layer='deadwood')
+
+	assert len(base_patch_gdf) == 1
+	assert len(deadwood_gdf) == 1
+	assert deadwood_gdf.iloc[0]['label_id'] == 9001
+	assert deadwood_gdf.iloc[0]['layer_name'] == 'deadwood'
+	assert json.loads(deadwood_gdf.iloc[0]['properties_json']) == {'source': 'test'}
+
+	filename_base = export_module.build_filename_base(patch)
+	metadata_path = tmp_path / '10' / 'metadata' / f'{filename_base}_vector.json'
+	metadata = json.loads(metadata_path.read_text())
+	assert metadata['layers'] == {'deadwood': True, 'forest_cover': False}
+	assert metadata['feature_counts']['deadwood'] == 1
+	assert metadata['feature_counts']['forest_cover'] == 0
+
+
+def test_export_vector_geopackage_writes_both_layers_when_both_validated(monkeypatch, tmp_path):
+	patch = make_patch(
+		1,
+		'20_1760951000108',
+		deadwood_validated=True,
+		forest_cover_validated=True,
+		reference_deadwood_label_id=9001,
+		reference_forest_cover_label_id=9002,
+	)
+	tables = {
+		'reference_patch_deadwood_geometries': [
+			{
+				'patch_id': 1,
+				'label_id': 9001,
+				'geometry': {
+					'type': 'Polygon',
+					'coordinates': [[[7.01, 47.01], [7.02, 47.01], [7.02, 47.02], [7.01, 47.02], [7.01, 47.01]]],
+				},
+				'area_m2': 12.5,
+				'properties': {},
+			}
+		],
+		'reference_patch_forest_cover_geometries': [
+			{
+				'patch_id': 1,
+				'label_id': 9002,
+				'geometry': {
+					'type': 'Polygon',
+					'coordinates': [[[7.03, 47.03], [7.04, 47.03], [7.04, 47.04], [7.03, 47.04], [7.03, 47.03]]],
+				},
+				'area_m2': 8.0,
+				'properties': {},
+			}
+		],
+	}
+	install_fake_db(monkeypatch, tables)
+
+	gpkg_path = export_module.export_vector_geopackage('token', patch, tmp_path / '10')
+
+	assert gpkg_path is not None
+	assert fiona.listlayers(gpkg_path) == ['base_patch', 'deadwood', 'forest_cover']
+
+
+def test_export_vector_geopackage_creates_empty_validated_layer(monkeypatch, tmp_path):
+	patch = make_patch(
+		1,
+		'20_1760951000108',
+		deadwood_validated=False,
+		forest_cover_validated=True,
+		reference_forest_cover_label_id=9002,
+	)
+	tables = {
+		'reference_patch_deadwood_geometries': [],
+		'reference_patch_forest_cover_geometries': [],
+	}
+	install_fake_db(monkeypatch, tables)
+
+	gpkg_path = export_module.export_vector_geopackage('token', patch, tmp_path / '10')
+
+	assert gpkg_path is not None
+	assert fiona.listlayers(gpkg_path) == ['base_patch', 'forest_cover']
+
+	forest_cover_gdf = gpd.read_file(gpkg_path, layer='forest_cover')
+	assert len(forest_cover_gdf) == 0
+
+
+def test_export_vector_geopackage_fails_on_invalid_validated_geometry(monkeypatch, tmp_path):
+	patch = make_patch(
+		1,
+		'20_1760951000108',
+		deadwood_validated=True,
+		forest_cover_validated=False,
+		reference_deadwood_label_id=9001,
+	)
+	tables = {
+		'reference_patch_deadwood_geometries': [
+			{
+				'patch_id': 1,
+				'label_id': 9001,
+				'geometry': {
+					'type': 'Point',
+					'coordinates': [7.01, 47.01],
+				},
+				'area_m2': 12.5,
+				'properties': {'source': 'test'},
+			}
+		],
+		'reference_patch_forest_cover_geometries': [],
+	}
+	install_fake_db(monkeypatch, tables)
+
+	gpkg_path = export_module.export_vector_geopackage('token', patch, tmp_path / '10')
+	filename_base = export_module.build_filename_base(patch)
+
+	assert gpkg_path is None
+	assert not (tmp_path / '10' / 'gpkg' / f'{filename_base}.gpkg').exists()
