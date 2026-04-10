@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from shared.db import use_client, login, verify_token
+from shared.db import use_client, login, login_verified
 from shared.settings import settings
 from shared.models import StatusEnum, Ortho, QueueTask
 from shared.logger import logger
@@ -17,9 +17,7 @@ def process_deadwood_segmentation(task: QueueTask, token: str, temp_dir: Path):
 	import torch
 
 	# login with the processor
-	token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-
-	user = verify_token(token)
+	token, user = login_verified(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 	if not user:
 		logger.error(
 			'Invalid processor token',

@@ -1,7 +1,7 @@
 from pathlib import Path
 import time
 
-from shared.db import use_client, login, verify_token
+from shared.db import use_client, login_verified
 from shared.status import update_status
 from shared.settings import settings
 from shared.models import StatusEnum, Ortho, QueueTask
@@ -16,8 +16,7 @@ from shared.logging import LogContext, LogCategory
 
 
 def process_geotiff(task: QueueTask, temp_dir: Path):
-	token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-	user = verify_token(token)
+	token, user = login_verified(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 	if not user:
 		raise AuthenticationError('Invalid processor token', token=token, task_id=task.id)
 

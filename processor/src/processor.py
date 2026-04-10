@@ -4,7 +4,7 @@ from processor.src.process_geotiff import process_geotiff
 from processor.src.process_odm import process_odm
 from shared.models import QueueTask, TaskTypeEnum, StatusEnum
 from shared.settings import settings
-from shared.db import use_client, login, verify_token
+from shared.db import use_client, login, login_verified, verify_token
 from shared.status import update_status
 from .process_thumbnail import process_thumbnail
 from .process_cog import process_cog
@@ -355,14 +355,9 @@ def background_process():
 	so no is_processing flag or concurrency guard is needed.
 	"""
 	# use the processor to log in
-	token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-	user = verify_token(token)
+	token, user = login_verified(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 	if not user:
-		# Token verification failed, try fresh login without cache
-		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD, use_cached_session=False)
-		user = verify_token(token)
-		if not user:
-			raise Exception(status_code=401, detail='Invalid token after fresh login')
+		raise Exception(status_code=401, detail='Invalid token after fresh login')
 
 	while True:
 		task = get_next_task(token)
