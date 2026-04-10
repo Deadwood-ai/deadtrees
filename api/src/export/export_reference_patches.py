@@ -379,7 +379,25 @@ def get_vector_export_candidates(patches: list[dict], resolution_cm: Optional[in
 	return [patch for patch in patches if is_vector_export_eligible_patch(patch)]
 
 
-def vector_export_needs_export(output_dir: Path, filename_base: str, patch_updated_at: datetime) -> bool:
+def fetch_latest_reference_geometry_created_at(token: str, patch_id: int) -> Optional[datetime]:
+	"""Return the latest geometry creation timestamp for a reference patch."""
+	latest_created_at = None
+
+	try:
+		with use_client(token) as client:
+			for table_name in ('reference_patch_deadwood_geometries', 'reference_patch_forest_cover_geometries'):
+				response = client.from_(table_name).select('created_at').eq('patch_id', patch_id).execute()
+				for row in response.data or []:
+					created_at = parse_optional_datetime(row.get('created_at'))
+					if created_at and (latest_created_at is None or created_at > latest_created_at):
+						latest_created_at = created_at
+	except Exception as e:
+		print(f'⚠️  Error fetching latest geometry timestamp for patch {patch_id}: {e}')
+
+	return latest_created_at
+
+
+def vector_export_needs_export(output_dir: Path, filename_base: str, latest_source_updated_at: datetime) -> bool:
 	"""Check if a root patch vector export needs refresh."""
 	gpkg_path = output_dir / 'gpkg' / f'{filename_base}.gpkg'
 	metadata_path = output_dir / 'metadata' / f'{filename_base}_vector.json'
@@ -388,7 +406,7 @@ def vector_export_needs_export(output_dir: Path, filename_base: str, patch_updat
 		return True
 
 	file_mtime = datetime.fromtimestamp(metadata_path.stat().st_mtime, tz=timezone.utc)
-	return patch_updated_at > file_mtime
+	return latest_source_updated_at > file_mtime
 
 
 def normalize_polygon_geometry(geometry: dict) -> MultiPolygon:
@@ -424,24 +442,35 @@ def build_vector_layer_geodataframe(
 ) -> gpd.GeoDataFrame:
 	"""Build a GeoDataFrame for a validated reference layer."""
 	features = []
-	for row in rows:
+	for index, row in enumerate(rows, start=1):
 		try:
-			features.append(
-				{
-					'dataset_id': patch['dataset_id'],
-					'patch_id': patch['id'],
-					'patch_index': patch['patch_index'],
-					'resolution_cm': patch['resolution_cm'],
-					'label_id': label_id,
-					'layer_name': layer_name,
-					'validated': 1,
-					'area_m2': row.get('area_m2'),
-					'properties_json': json.dumps(row.get('properties') or {}, sort_keys=True),
-					'geometry': normalize_polygon_geometry(row['geometry']),
-				}
-			)
-		except Exception:
-			continue
+			properties_json = json.dumps(row.get('properties') or {}, sort_keys=True)
+		except TypeError as exc:
+			raise ValueError(
+				f'Failed to serialize properties for {layer_name} feature {index} on patch {patch["patch_index"]}'
+			) from exc
+
+		try:
+			geometry = normalize_polygon_geometry(row['geometry'])
+		except (KeyError, TypeError, ValueError) as exc:
+			raise ValueError(
+				f'Invalid geometry for {layer_name} feature {index} on patch {patch["patch_index"]}'
+			) from exc
+
+		features.append(
+			{
+				'dataset_id': patch['dataset_id'],
+				'patch_id': patch['id'],
+				'patch_index': patch['patch_index'],
+				'resolution_cm': patch['resolution_cm'],
+				'label_id': label_id,
+				'layer_name': layer_name,
+				'validated': 1,
+				'area_m2': row.get('area_m2'),
+				'properties_json': properties_json,
+				'geometry': geometry,
+			}
+		)
 
 	if not features:
 		return gpd.GeoDataFrame(
@@ -544,8 +573,6 @@ def export_vector_geopackage(token: str, patch: dict, output_dir: Path) -> Optio
 			layer_counts['forest_cover'] = len(forest_gdf.index)
 			exported_layers['forest_cover'] = True
 
-		if gpkg_path.exists():
-			gpkg_path.unlink()
 		temp_gpkg_path.replace(gpkg_path)
 
 		metadata = {
@@ -1088,8 +1115,16 @@ def main():
 		patch_updated_at = parse_optional_datetime(patch.get('updated_at'))
 		if patch_updated_at is None:
 			patch_updated_at = datetime.fromtimestamp(0, tz=timezone.utc)
+		geometry_created_at = fetch_latest_reference_geometry_created_at(token, patch['id'])
+		latest_vector_source_updated_at = patch_updated_at
+		if geometry_created_at and geometry_created_at > latest_vector_source_updated_at:
+			latest_vector_source_updated_at = geometry_created_at
 
-		if not args.force and not vector_export_needs_export(dataset_output_dir, filename_base, patch_updated_at):
+		if not args.force and not vector_export_needs_export(
+			dataset_output_dir,
+			filename_base,
+			latest_vector_source_updated_at,
+		):
 			vector_skipped_count += 1
 		else:
 			vector_export_candidates.append(patch)

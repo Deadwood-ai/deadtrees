@@ -213,6 +213,24 @@ def test_vector_export_needs_export_checks_gpkg_and_metadata(tmp_path):
 	assert export_module.vector_export_needs_export(output_dir, filename_base, patch_updated_at) is False
 
 
+def test_fetch_latest_reference_geometry_created_at_uses_latest_geometry_table_timestamp(monkeypatch):
+	tables = {
+		'reference_patch_deadwood_geometries': [
+			{'patch_id': 1, 'created_at': '2026-04-09T10:00:00+00:00'},
+			{'patch_id': 1, 'created_at': '2026-04-09T11:00:00+00:00'},
+		],
+		'reference_patch_forest_cover_geometries': [
+			{'patch_id': 1, 'created_at': '2026-04-09T12:00:00+00:00'},
+			{'patch_id': 2, 'created_at': '2026-04-09T13:00:00+00:00'},
+		],
+	}
+	install_fake_db(monkeypatch, tables)
+
+	latest_created_at = export_module.fetch_latest_reference_geometry_created_at('token', 1)
+
+	assert latest_created_at == datetime(2026, 4, 9, 12, 0, tzinfo=timezone.utc)
+
+
 def test_export_vector_geopackage_writes_validated_layers_only(monkeypatch, tmp_path):
 	patch = make_patch(
 		1,
@@ -339,3 +357,35 @@ def test_export_vector_geopackage_creates_empty_validated_layer(monkeypatch, tmp
 
 	forest_cover_gdf = gpd.read_file(gpkg_path, layer='forest_cover')
 	assert len(forest_cover_gdf) == 0
+
+
+def test_export_vector_geopackage_fails_on_invalid_validated_geometry(monkeypatch, tmp_path):
+	patch = make_patch(
+		1,
+		'20_1760951000108',
+		deadwood_validated=True,
+		forest_cover_validated=False,
+		reference_deadwood_label_id=9001,
+	)
+	tables = {
+		'reference_patch_deadwood_geometries': [
+			{
+				'patch_id': 1,
+				'label_id': 9001,
+				'geometry': {
+					'type': 'Point',
+					'coordinates': [7.01, 47.01],
+				},
+				'area_m2': 12.5,
+				'properties': {'source': 'test'},
+			}
+		],
+		'reference_patch_forest_cover_geometries': [],
+	}
+	install_fake_db(monkeypatch, tables)
+
+	gpkg_path = export_module.export_vector_geopackage('token', patch, tmp_path / '10')
+	filename_base = export_module.build_filename_base(patch)
+
+	assert gpkg_path is None
+	assert not (tmp_path / '10' / 'gpkg' / f'{filename_base}.gpkg').exists()
