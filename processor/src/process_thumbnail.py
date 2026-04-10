@@ -2,7 +2,7 @@ from pathlib import Path
 import time
 import uuid
 
-from shared.db import use_client, login, verify_token
+from shared.db import use_client, login, login_verified
 from shared.settings import settings
 from shared.models import StatusEnum, Ortho, QueueTask, Thumbnail
 from shared.logger import logger
@@ -16,9 +16,7 @@ from shared.logging import LogContext, LogCategory
 
 def process_thumbnail(task: QueueTask, temp_dir: Path):
 	# login with the processor
-	token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-
-	user = verify_token(token)
+	token, user = login_verified(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 	if not user:
 		logger.error(
 			'Invalid processor token',
@@ -130,8 +128,7 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 	# Save thumbnail metadata to database
 	try:
 		# Refresh token before database operation
-		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-		user = verify_token(token)
+		token, user = login_verified(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 		if not user:
 			logger.error(
 				'Token refresh failed',

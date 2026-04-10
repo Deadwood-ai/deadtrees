@@ -2,7 +2,7 @@ from pathlib import Path
 import time
 from typing import Dict, Any
 
-from shared.db import use_client, login, verify_token
+from shared.db import use_client, login, login_verified
 from shared.status import update_status
 from shared.settings import settings
 from shared.models import (
@@ -25,9 +25,7 @@ from .utils.phenology import get_phenology_metadata
 
 def process_metadata(task: QueueTask, temp_dir: Path):
 	"""Process and store metadata for a dataset"""
-	token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-
-	user = verify_token(token)
+	token, user = login_verified(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 	if not user:
 		logger.error(
 			'Invalid processor token',

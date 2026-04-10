@@ -64,6 +64,21 @@ def login(user: str, password: str, use_cached_session: bool = True) -> str:
 		raise Exception(f'Login failed: {str(e)}')
 
 
+def login_verified(user: str, password: str) -> tuple[str, Union[Literal[False], Any]]:
+	"""
+	Log in and verify the resulting token, retrying once without using the cached
+	session if the first token is stale or invalid.
+	"""
+	token = login(user, password)
+	user_obj = verify_token(token)
+	if user_obj:
+		return token, user_obj
+
+	token = login(user, password, use_cached_session=False)
+	user_obj = verify_token(token)
+	return token, user_obj
+
+
 def verify_token(jwt: str) -> Union[Literal[False], Any]:
 	"""Verifies a user jwt token string against the active supabase sessions
 
