@@ -606,6 +606,52 @@ def test_download_dataset_with_labels(auth_token, test_dataset_with_label):
 			assert gdf_aoi.iloc[0]['notes'] == 'Test AOI from real data'
 
 
+def test_download_dataset_ignores_reference_patch_labels_without_dataset_geometries(
+	auth_token, test_dataset_with_label, test_user
+):
+	"""Dataset ZIP export should skip reference-patch labels instead of failing the bundle."""
+	dataset_id = test_dataset_with_label
+	inserted_label_id = None
+
+	with use_client(auth_token) as db_client:
+		response = (
+			db_client.table(settings.labels_table)
+			.insert(
+				{
+					'dataset_id': dataset_id,
+					'user_id': test_user,
+					'aoi_id': None,
+					'label_source': LabelSourceEnum.reference_patch.value,
+					'label_type': LabelTypeEnum.semantic_segmentation.value,
+					'label_data': LabelDataEnum.deadwood.value,
+					'label_quality': 1,
+				}
+			)
+			.execute()
+		)
+		inserted_label_id = response.data[0]['id']
+
+	try:
+		response = client.get(
+			f'/api/v1/download/datasets/{dataset_id}/dataset.zip',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		assert response.status_code == 200
+
+		_wait_for_download_completed(dataset_id, auth_token)
+
+		download_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}.zip'
+		assert download_file.exists()
+
+		with zipfile.ZipFile(download_file) as zf:
+			files = zf.namelist()
+			assert any(f.startswith('labels_') and f.endswith('.gpkg') for f in files)
+	finally:
+		if inserted_label_id is not None:
+			with use_client(auth_token) as db_client:
+				db_client.table(settings.labels_table).delete().eq('id', inserted_label_id).execute()
+
+
 @pytest.fixture(scope='function')
 def test_dataset_with_label_no_aoi(auth_token, test_dataset_for_download, test_user):
 	"""Create a test dataset with label but without AOI"""
