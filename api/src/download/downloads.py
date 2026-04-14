@@ -24,6 +24,12 @@ DEADTREES_BASE_URL = 'https://deadtrees.earth/datasets'
 logger = UnifiedLogger(__name__)
 
 
+EXPORTABLE_LABEL_SOURCES = {
+	LabelSourceEnum.model_prediction,
+	LabelSourceEnum.visual_interpretation,
+}
+
+
 # =============================================================================
 # Multi-Dataset Bundle Helpers
 # =============================================================================
@@ -299,8 +305,8 @@ def bundle_multi_dataset(
 		if include_labels:
 			with tempfile.TemporaryDirectory() as temp_dir:
 				for dataset, ortho, metadata, archive_file_path in datasets_info:
-					# Get all labels for this dataset
-					labels = get_all_dataset_labels(dataset.id)
+					# Get only dataset-level labels that this export path can serialize.
+					labels = get_exportable_dataset_labels(dataset.id)
 					
 					if not labels:
 						continue
@@ -499,9 +505,25 @@ def get_all_dataset_labels(dataset_id: int) -> List[Label]:
 		return [Label(**label_data) for label_data in all_labels]
 
 
+def filter_exportable_dataset_labels(labels: List[Label]) -> List[Label]:
+	"""Keep only dataset-level label sources supported by download bundles."""
+	filtered_labels = [label for label in labels if label.label_source in EXPORTABLE_LABEL_SOURCES]
+
+	skipped_count = len(labels) - len(filtered_labels)
+	if skipped_count:
+		logger.info(f'Skipping {skipped_count} non-exportable labels during bundle generation')
+
+	return filtered_labels
+
+
+def get_exportable_dataset_labels(dataset_id: int) -> List[Label]:
+	"""Fetch labels for a dataset and drop unsupported sources like reference patches."""
+	return filter_exportable_dataset_labels(get_all_dataset_labels(dataset_id))
+
+
 def create_labels_geopackages(dataset_id: int) -> Dict[str, Path]:
 	"""Create GeoPackage files for all labels of a dataset, grouped by label type"""
-	labels = get_all_dataset_labels(dataset_id)
+	labels = get_exportable_dataset_labels(dataset_id)
 	if not labels:
 		return {}
 
@@ -659,8 +681,8 @@ def bundle_dataset(
 		if include_labels:
 			# Get and add all labels
 			with tempfile.TemporaryDirectory() as temp_dir:
-				# Get all labels for this dataset
-				labels = get_all_dataset_labels(dataset.id)
+				# Get only dataset-level labels that this export path can serialize.
+				labels = get_exportable_dataset_labels(dataset.id)
 
 				if labels:
 					# Process each type of label
@@ -769,9 +791,7 @@ def create_consolidated_geopackage(dataset_id: int) -> Path:
 	if not all_labels:
 		raise ValueError(f'No labels found for dataset {dataset_id}')
 
-	# Filter labels to only include model_prediction and visual_interpretation sources
-	target_sources = [LabelSourceEnum.model_prediction, LabelSourceEnum.visual_interpretation]
-	filtered_labels = [label for label in all_labels if label.label_source in target_sources]
+	filtered_labels = filter_exportable_dataset_labels(all_labels)
 
 	if not filtered_labels:
 		raise ValueError(
