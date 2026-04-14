@@ -1,0 +1,38 @@
+name: Supabase Migrate On Merge
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "supabase/**"
+      - ".github/workflows/supabase-migrate-on-merge.yml"
+
+concurrency:
+  group: supabase-prod-migrate
+  cancel-in-progress: false
+
+jobs:
+  supabase-migrate:
+    name: supabase-migrate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      PGSSLMODE: disable
+      SUPABASE_DB_URL_PROD: ${{ secrets.SUPABASE_DB_URL_PROD }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.40.7
+
+      - name: Show Supabase CLI version
+        run: supabase --version
+
+      - name: Apply production migrations
+        run: supabase migration up --db-url "$SUPABASE_DB_URL_PROD"
