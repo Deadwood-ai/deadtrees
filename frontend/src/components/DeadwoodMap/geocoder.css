@@ -1,0 +1,26 @@
+.geoapify-close-button {
+  color: gainsboro;
+}
+.geoapify-close-button:hover {
+  color: white;
+}
+
+.location-controls .geoapify-autocomplete-input,
+.location-controls .geoapify-autocomplete-input::placeholder,
+.location-controls input[type="text"] {
+  font-size: 13px;
+}
+
+@media (max-width: 767px) {
+  .location-controls .geoapify-autocomplete-input,
+  .location-controls .geoapify-autocomplete-input::placeholder,
+  .location-controls input[type="text"] {
+    font-size: 16px;
+  }
+}
+
+.location-controls .geoapify-autocomplete-input,
+.location-controls input[type="text"] {
+  min-height: 40px;
+  border-radius: 10px;
+}

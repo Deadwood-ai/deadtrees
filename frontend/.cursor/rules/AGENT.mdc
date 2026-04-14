@@ -1,0 +1,161 @@
+---
+description: Frontend rules - React, TypeScript, OpenLayers critical patterns
+alwaysApply: true
+---
+# DeadTrees Frontend Rules
+
+## Shared Context
+
+See `deadtrees/.cursor/rules/AGENT.mdc` for:
+- Security constraints (MCP database access, no commits without approval)
+- Architecture (API/Processor separation)
+
+Key for frontend:
+- User privileges: `privileged_users` table (not `v2_users`)
+- Database: use `user-deadtrees-prod` MCP
+
+---
+
+## TypeScript Conventions
+
+```typescript
+// Prefix domain interfaces with 'I'
+interface IDataset { /* ... */ }
+
+// Component props - suffix with 'Props'
+interface DataTableProps { /* ... */ }
+
+// Use string enums
+export enum IDataAccess {
+	OPEN = "open",
+	RESTRICTED = "restricted",
+}
+```
+
+---
+
+## React Patterns
+
+### Component Size Limit
+**Keep under 200 lines.** Extract to: hooks, subcomponents, render functions, config files.
+
+### State Management
+```typescript
+// Local state (UI only)
+const [isModalOpen, setModalOpen] = useState(false);
+
+// Server state (React Query) - ALWAYS for Supabase
+const { data, isLoading } = useDatasets();
+
+// Global state (Context) - MINIMIZE (auth, map viewport, theme only)
+```
+
+### Query Key Convention
+```typescript
+["datasets"]                    // All
+["datasets", id]                // Single
+["datasets", id, "labels"]      // Nested
+```
+
+---
+
+## Logging
+Use `console.debug()` instead of `console.log()` — debug logs don't clutter production if not removed. 
+
+## OpenLayers Mapping (CRITICAL)
+
+### NEVER Store Map in State
+```typescript
+// ✅ Correct - use ref
+const mapRef = useRef<Map | null>(null);
+
+// ❌ Wrong - causes infinite re-renders
+const [map, setMap] = useState<Map | null>(null);
+```
+
+### Always Cleanup
+```typescript
+useEffect(() => {
+	const map = new Map({ target: mapRef.current /* ... */ });
+
+	return () => {
+		map.getLayers().forEach((layer) => {
+			const source = layer.getSource();
+			if (source && "dispose" in source) {
+				(source as any).dispose();
+			}
+		});
+		map.setTarget(undefined);
+	};
+}, []);
+```
+
+### Coordinate Transforms
+```typescript
+import { fromLonLat, toLonLat } from "ol/proj";
+const mapCoords = fromLonLat([lon, lat], "EPSG:3857");  // WGS84 → Web Mercator
+```
+
+### WebGL for COG
+```typescript
+import WebGLTileLayer from "ol/layer/WebGLTile";
+import GeoTIFF from "ol/source/GeoTIFF";
+
+const rasterLayer = new WebGLTileLayer({
+	source: new GeoTIFF({
+		sources: [{ url: cogUrl }],
+		transition: 0,
+	}),
+});
+```
+
+---
+
+## File Upload
+
+- Chunk size: **50MB**
+- Token refresh before each chunk for long uploads
+- Use AbortController for cancellation
+
+---
+
+## Real-time Subscriptions
+
+```typescript
+useEffect(() => {
+	const channel = supabase
+		.channel("dataset_changes")
+		.on("postgres_changes", {
+			event: "UPDATE",
+			schema: "public",
+			table: "v2_statuses",
+		}, async (payload) => {
+			// Validate ownership before invalidating
+			const { data } = await supabase
+				.from("v2_datasets")
+				.select("user_id")
+				.eq("id", payload.new.dataset_id)
+				.single();
+
+			if (data?.user_id !== userId) return;
+			queryClient.invalidateQueries(["userDatasets", userId]);
+		})
+		.subscribe();
+
+	return () => supabase.removeChannel(channel);
+}, [userId]);
+```
+
+---
+
+## Reference Components
+
+| Pattern | Location |
+|---------|----------|
+| Table with filters | `src/components/DataTable.tsx` |
+| File upload | `src/components/Upload/UploadModal.tsx` |
+| Basic map | `src/components/DatasetMap/DatasetMap.tsx` |
+| WebGL/COG map | `src/components/DatasetDetailsMap/` |
+| Drawing/editing | `src/components/DatasetAudit/` |
+| Auth hook | `src/hooks/useAuthProvider.tsx` |
+| User privileges | `src/hooks/useUserPrivileges.ts` |
