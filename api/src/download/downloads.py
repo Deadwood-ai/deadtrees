@@ -2,6 +2,7 @@ import zipfile
 import io
 import hashlib
 import tempfile
+import json
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Set
 
@@ -96,16 +97,19 @@ def build_dataset_metadata_row(
 	Returns:
 		Dict with all metadata fields for this dataset
 	"""
-	# Extract admin levels from metadata
-	admin_levels = {}
-	if metadata and 'metadata' in metadata:
-		gadm = metadata['metadata'].get('gadm', {})
-		admin_levels = {
-			'admin_level_0': gadm.get('admin_level_1'),  # Country (GADM naming is off-by-one)
-			'admin_level_1': gadm.get('admin_level_1'),
-			'admin_level_2': gadm.get('admin_level_2'),
-			'admin_level_3': gadm.get('admin_level_3'),
-		}
+	# Extract structured metadata fields for download bundles.
+	metadata_blob = metadata.get('metadata') if isinstance(metadata, dict) else None
+	metadata_blob = metadata_blob if isinstance(metadata_blob, dict) else {}
+	gadm = metadata_blob.get('gadm') if isinstance(metadata_blob.get('gadm'), dict) else {}
+	biome = metadata_blob.get('biome') if isinstance(metadata_blob.get('biome'), dict) else {}
+	phenology = metadata_blob.get('phenology') if isinstance(metadata_blob.get('phenology'), dict) else {}
+
+	admin_levels = {
+		'admin_level_0': gadm.get('admin_level_1'),  # Country (GADM naming is off-by-one)
+		'admin_level_1': gadm.get('admin_level_2'),
+		'admin_level_2': gadm.get('admin_level_3'),
+		'admin_level_3': gadm.get('admin_level_4'),
+	}
 	
 	# Extract centroid from ortho bbox
 	centroid_lat = None
@@ -155,10 +159,41 @@ def build_dataset_metadata_row(
 		'admin_level_1': admin_levels.get('admin_level_1'),
 		'admin_level_2': admin_levels.get('admin_level_2'),
 		'admin_level_3': admin_levels.get('admin_level_3'),
+		'gadm_source': gadm.get('source'),
+		'gadm_version': gadm.get('version'),
+		'biome_id': biome.get('biome_id'),
+		'biome_name': biome.get('biome_name'),
+		'biome_source': biome.get('source'),
+		'biome_version': biome.get('version'),
+		'phenology_source': phenology.get('source'),
+		'phenology_version': phenology.get('version'),
+		'has_phenology_curve': isinstance(phenology.get('phenology_curve'), list)
+		and len(phenology['phenology_curve']) > 0,
+		'metadata_version': metadata.get('version') if isinstance(metadata, dict) else None,
+		'metadata_created_at': metadata.get('created_at') if isinstance(metadata, dict) else None,
 		'centroid_lat': centroid_lat,
 		'centroid_lon': centroid_lon,
 		'additional_information': dataset.additional_information,
 	}
+
+
+def build_single_dataset_metadata_row(
+	dataset: Dataset,
+	ortho: Optional[Dict],
+	metadata: Optional[Dict],
+) -> Dict:
+	"""Build the METADATA row for a single-dataset ZIP bundle."""
+	row = dataset.model_dump(exclude={'created_at'})
+	row.update(build_dataset_metadata_row(dataset, ortho or {}, metadata))
+
+	# Keep the raw metadata blob accessible without forcing callers to query the DB separately.
+	metadata_blob = metadata.get('metadata') if isinstance(metadata, dict) else None
+	if metadata_blob is not None:
+		row['metadata_json'] = json.dumps(metadata_blob, sort_keys=True)
+	else:
+		row['metadata_json'] = None
+
+	return row
 
 
 def generate_bundle_job_id(dataset_ids: List[int], include_labels: bool, include_parquet: bool) -> str:
@@ -580,6 +615,8 @@ def bundle_dataset(
 	target_path: str,
 	archive_file_path: str,
 	dataset: Dataset,
+	ortho: Optional[Dict] = None,
+	metadata: Optional[Dict] = None,
 	include_parquet: bool = True,
 	include_labels: bool = True,
 	use_original_filename: bool = False,
@@ -597,8 +634,8 @@ def bundle_dataset(
 		# Add the ortho file
 		archive.write(archive_file_path, arcname=f'{base_filename}.tif')
 
-		# Convert dataset to DataFrame for metadata
-		df = pd.DataFrame([dataset.model_dump(exclude={'id', 'created_at'})])
+		# Include both dataset columns and extracted v2_metadata fields in the bundle metadata.
+		df = pd.DataFrame([build_single_dataset_metadata_row(dataset, ortho, metadata)])
 
 		# Create temporary files for metadata formats
 		with tempfile.NamedTemporaryFile(suffix='.csv') as csv_file:

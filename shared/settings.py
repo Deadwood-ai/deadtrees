@@ -45,11 +45,11 @@ class Settings(BaseSettings):
 
 	# Base paths and directories
 	BASE_DIR: str = str(BASE)
-	# Default GADM path in assets, can be overridden by env var
-	GADM_DATA_PATH: str = str(Path('/app/assets/gadm/gadm_410.gpkg'))
+	# Default to repo-local assets in dev/test; container deployments can still override via env.
+	GADM_DATA_PATH: str = str(ASSETS_DIR / 'gadm' / 'gadm_410.gpkg')
 	CONCURRENT_TASKS: int = 2
 
-	BIOME_DATA_PATH: str = str(Path('/app/assets/biom/terres_ecosystems.gpkg'))
+	BIOME_DATA_PATH: str = str(ASSETS_DIR / 'biom' / 'terres_ecosystems.gpkg')
 
 	BIOME_DICT: dict[int, str] = {
 		1: 'Tropical and Subtropical Moist Broadleaf Forests',
@@ -68,7 +68,7 @@ class Settings(BaseSettings):
 		14: 'Mangroves',
 	}
 
-	PHENOLOGY_DATA_PATH: str = str(Path('/app/assets/pheno/modispheno_aggregated_normalized_filled.zarr'))
+	PHENOLOGY_DATA_PATH: str = str(ASSETS_DIR / 'pheno' / 'modispheno_aggregated_normalized_filled.zarr')
 
 	# DTE maps (deadwood/forest cover COGs)
 	DTE_MAPS_PATH: str = '/data/assets/dte_maps'

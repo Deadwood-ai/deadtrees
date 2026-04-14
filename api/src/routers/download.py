@@ -248,12 +248,17 @@ async def download_dataset(
 		allow_viewonly_full_download=False,
 	)
 
+	with use_client(token) as client:
+		metadata_response = client.table(settings.metadata_table).select('*').eq('dataset_id', dataset_id_int).execute()
+	metadata = metadata_response.data[0] if metadata_response.data else None
+
 	if not ortho:
 		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no ortho file.')
 
 	# Build the file paths
 	download_dir = settings.downloads_path / dataset_id
 	download_file = download_dir / get_bundle_filename(dataset_id_int, include_labels, include_parquet)
+	error_file = download_file.with_suffix(f'{download_file.suffix}.error')
 
 	# Check if file already exists
 	if download_file.exists():
@@ -271,12 +276,17 @@ async def download_dataset(
 	# Create download directory if it doesn't exist
 	download_dir.mkdir(parents=True, exist_ok=True)
 
+	# Clear stale failure marker from prior failed attempt
+	if error_file.exists():
+		error_file.unlink()
+
 	# Start background task to create the archive
 	background_tasks.add_task(
 		create_dataset_bundle_background,
 		dataset_id=dataset_id,
 		dataset=dataset,
 		ortho=ortho,
+		metadata=metadata,
 		include_labels=include_labels,
 		include_parquet=include_parquet,
 		use_original_filename=use_original_filename,
@@ -307,6 +317,7 @@ async def check_download_status(
 
 	download_dir = settings.downloads_path / dataset_id
 	download_file = download_dir / get_bundle_filename(dataset_id_int, include_labels, include_parquet)
+	error_file = download_file.with_suffix(f'{download_file.suffix}.error')
 
 	# Check dataset exists and access policy allows full download
 	dataset, ortho = await get_accessible_dataset(
@@ -315,7 +326,14 @@ async def check_download_status(
 		allow_viewonly_full_download=False,
 	)
 
-	if download_file.exists() and download_file.stat().st_size > 0:
+	if error_file.exists():
+		error_message = error_file.read_text(encoding='utf-8').strip()
+		return DownloadStatus(
+			status=DownloadStatusEnum.FAILED,
+			job_id=dataset_id,
+			message=error_message or 'Dataset bundle generation failed',
+		)
+	elif download_file.exists() and download_file.stat().st_size > 0:
 		return DownloadStatus(
 			status=DownloadStatusEnum.COMPLETED,
 			job_id=dataset_id,
@@ -352,6 +370,11 @@ async def download_dataset_file(
 	)
 
 	download_file = settings.downloads_path / dataset_id / get_bundle_filename(dataset_id_int, include_labels, include_parquet)
+	error_file = download_file.with_suffix(f'{download_file.suffix}.error')
+
+	if error_file.exists():
+		error_message = error_file.read_text(encoding='utf-8').strip()
+		raise HTTPException(status_code=500, detail=error_message or 'Dataset bundle generation failed')
 
 	if not download_file.exists() or download_file.stat().st_size == 0:
 		raise HTTPException(status_code=404, detail=f'Download file for dataset <ID={dataset_id}> not found')
@@ -363,6 +386,7 @@ def create_dataset_bundle_background(
 	dataset_id: str,
 	dataset: Dataset,
 	ortho: dict,
+	metadata: Optional[dict] = None,
 	include_labels: bool = True,
 	include_parquet: bool = True,
 	use_original_filename: bool = False,
@@ -376,16 +400,24 @@ def create_dataset_bundle_background(
 	download_dir = settings.downloads_path / dataset_id
 	download_file = download_dir / get_bundle_filename(int(dataset_id), include_labels, include_parquet)
 	temp_file = download_file.with_suffix('.zip.part')
+	error_file = download_file.with_suffix(f'{download_file.suffix}.error')
 
 	try:
 		# Build the file paths
 		archive_file_name = (settings.archive_path / ortho['ortho_file_name']).resolve()
+
+		# Clear stale state from prior attempts
+		for f in (temp_file, error_file):
+			if f.exists():
+				f.unlink()
 
 		# Write to temp file first
 		bundle_dataset(
 			str(temp_file),
 			archive_file_name,
 			dataset=dataset,
+			ortho=ortho,
+			metadata=metadata,
 			include_parquet=include_parquet,
 			include_labels=include_labels,
 			use_original_filename=use_original_filename,
@@ -402,6 +434,7 @@ def create_dataset_bundle_background(
 		for f in (temp_file, download_file):
 			if f.exists():
 				f.unlink()
+		error_file.write_text(str(e) or 'Dataset bundle generation failed', encoding='utf-8')
 
 
 def create_labels_geopackage_background(dataset_id: str):
