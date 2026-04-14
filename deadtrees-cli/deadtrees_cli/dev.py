@@ -1,7 +1,9 @@
+import json
 import subprocess
 import os
 import signal
 import shutil
+import time
 from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
@@ -25,6 +27,22 @@ class DevCommands:
 	def __init__(self):
 		self.test_compose_file = 'docker-compose.test.yaml'
 
+	def _compose_cmd(self, *args: str) -> List[str]:
+		"""Build a docker compose command for the test environment."""
+		return ['docker', 'compose', '-f', self.test_compose_file, *args]
+
+	def _compose_lifecycle_cmd(
+		self, action: str, *, flags: Optional[List[str]] = None, services: Optional[List[str]] = None
+	) -> List[str]:
+		"""Build compose up/down commands with consistent lifecycle flags."""
+		cmd = self._compose_cmd(action)
+		if flags:
+			cmd.extend(flags)
+		cmd.append('--remove-orphans')
+		if services:
+			cmd.extend(services)
+		return cmd
+
 	def _run_command(self, command: List[str], check: bool = True) -> subprocess.CompletedProcess:
 		"""Run a shell command and handle errors"""
 		try:
@@ -34,56 +52,96 @@ class DevCommands:
 			print(f'Error: {str(e)}')
 			raise
 
-	def _is_service_running(self, service: str) -> bool:
-		"""Check whether a compose service is currently running."""
+	def _get_compose_services(self) -> List[str]:
+		"""Get the list of services defined in the test compose file."""
 		result = subprocess.run(
-			['docker', 'compose', '-f', self.test_compose_file, 'ps', '--status', 'running', '--services'],
+			self._compose_cmd('config', '--services'),
+			capture_output=True,
+			text=True,
+			check=True,
+		)
+		return [service for service in result.stdout.strip().split('\n') if service]
+
+	def _get_service_statuses(self) -> dict[str, dict]:
+		"""Return compose service status records keyed by service name."""
+		result = subprocess.run(
+			self._compose_cmd('ps', '--format', 'json'),
 			capture_output=True,
 			text=True,
 			check=False,
 		)
 		if result.returncode != 0:
-			return False
+			return {}
 
-		running_services = {line.strip() for line in result.stdout.splitlines() if line.strip()}
-		return service in running_services
+		statuses = {}
+		for line in result.stdout.splitlines():
+			line = line.strip()
+			if not line:
+				continue
+			record = json.loads(line)
+			statuses[record['Service']] = record
+		return statuses
+
+	def _is_service_running(self, service: str) -> bool:
+		"""Check whether a compose service is currently running."""
+		record = self._get_service_statuses().get(service)
+		return bool(record and record.get('State') == 'running')
+
+	def _wait_for_services_ready(self, services: List[str], timeout_seconds: int = 90):
+		"""Wait until all requested services are running and healthy when health checks exist."""
+		deadline = time.monotonic() + timeout_seconds
+		pending: List[str] = []
+
+		while time.monotonic() < deadline:
+			statuses = self._get_service_statuses()
+			pending = []
+
+			for service in services:
+				record = statuses.get(service)
+				if not record:
+					pending.append(f'{service} (missing)')
+					continue
+
+				if record.get('State') != 'running':
+					pending.append(f'{service} ({record.get("State", "unknown")})')
+					continue
+
+				health = record.get('Health')
+				if health and health != 'healthy':
+					pending.append(f'{service} ({health})')
+
+			if not pending:
+				return
+
+			time.sleep(1)
+
+		raise RuntimeError(f'Timed out waiting for test services to become ready: {", ".join(pending)}')
 
 	def _ensure_test_service_running(self, service: str):
 		"""Start the test stack if the requested service is not already running."""
-		if self._is_service_running(service):
-			return
+		if not self._is_service_running(service):
+			print(f'Service "{service}" is not running. Starting test environment...')
+			try:
+				self.start()
+			except subprocess.CalledProcessError:
+				# Compose can report a startup conflict while still leaving the requested
+				# service running. Re-check before surfacing the failure.
+				if not self._is_service_running(service):
+					raise
+				print(f'Service "{service}" is now running despite compose startup warnings. Continuing...')
 
-		print(f'Service "{service}" is not running. Starting test environment...')
-		try:
-			self.start()
-		except subprocess.CalledProcessError:
-			# Compose can report a startup conflict while still leaving the requested
-			# service running. Re-check before surfacing the failure.
-			if not self._is_service_running(service):
-				raise
-			print(f'Service "{service}" is now running despite compose startup warnings. Continuing...')
+		self._wait_for_services_ready(self._get_compose_services())
 
 	def _check_rebuild_needed(self) -> List[str]:
 		"""Check which services need rebuilding by comparing image and dockerfile timestamps"""
 		services_to_rebuild = []
 
 		# Get list of all services
-		result = subprocess.run(
-			['docker', 'compose', '-f', self.test_compose_file, 'config', '--services'],
-			capture_output=True,
-			text=True,
-			check=True,
-		)
-		services = result.stdout.strip().split('\n')
+		services = self._get_compose_services()
 
 		for service in services:
 			# Check if image exists
-			result = subprocess.run(
-				['docker', 'compose', '-f', self.test_compose_file, 'images', '-q', service],
-				capture_output=True,
-				text=True,
-				check=False,
-			)
+			result = subprocess.run(self._compose_cmd('images', '-q', service), capture_output=True, text=True, check=False)
 
 			if not result.stdout.strip():
 				services_to_rebuild.append(service)
@@ -402,15 +460,15 @@ class DevCommands:
 	def start(self, force_rebuild: bool = False):
 		"""Start the test environment and rebuild containers if needed"""
 		if force_rebuild:
-			services_to_rebuild = ['--build']
+			self._run_command(self._compose_lifecycle_cmd('up', flags=['-d', '--build']))
+			return
 		else:
 			services_to_rebuild = self._check_rebuild_needed()
 			if services_to_rebuild:
 				print(f'Rebuilding services: {", ".join(services_to_rebuild)}')
-				services_to_rebuild = ['--build'] + services_to_rebuild
+				self._run_command(self._compose_cmd('build', *services_to_rebuild))
 
-		cmd = ['docker', 'compose', '-f', self.test_compose_file, 'up', '-d', '--remove-orphans'] + services_to_rebuild
-		self._run_command(cmd)
+		self._run_command(self._compose_lifecycle_cmd('up', flags=['-d']))
 
 	def up(self, force_rebuild: bool = False):
 		"""Alias for start() to match the documented CLI examples."""
@@ -418,7 +476,7 @@ class DevCommands:
 
 	def stop(self):
 		"""Stop the test environment"""
-		self._run_command(['docker', 'compose', '-f', self.test_compose_file, 'down', '--remove-orphans'])
+		self._run_command(self._compose_lifecycle_cmd('down'))
 
 	def down(self):
 		"""Alias for stop() to match the documented CLI examples."""
@@ -528,19 +586,16 @@ class DevCommands:
 			# Build and start all services using smart rebuild detection
 			print('Starting development environment...')
 			if force_rebuild:
-				services_to_rebuild = ['--build']
 				print('Force rebuild requested - rebuilding all services')
+				self._run_command(self._compose_lifecycle_cmd('up', flags=['-d', '--build']))
 			else:
 				services_to_rebuild = self._check_rebuild_needed()
 				if services_to_rebuild:
 					print(f'Rebuilding services: {", ".join(services_to_rebuild)}')
-					services_to_rebuild = ['--build'] + services_to_rebuild
+					self._run_command(self._compose_cmd('build', *services_to_rebuild))
 				else:
 					print('No rebuilds needed - using existing containers')
-					services_to_rebuild = []
-
-			cmd = ['docker', 'compose', '-f', self.test_compose_file, 'up', '-d'] + services_to_rebuild
-			self._run_command(cmd)
+				self._run_command(self._compose_lifecycle_cmd('up', flags=['-d']))
 
 			print('🚀 Development environment started!')
 			print('📧 Available test users:')

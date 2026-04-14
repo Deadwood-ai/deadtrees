@@ -106,9 +106,9 @@ def build_dataset_metadata_row(
 
 	admin_levels = {
 		'admin_level_0': gadm.get('admin_level_1'),  # Country (GADM naming is off-by-one)
-		'admin_level_1': gadm.get('admin_level_1'),
-		'admin_level_2': gadm.get('admin_level_2'),
-		'admin_level_3': gadm.get('admin_level_3'),
+		'admin_level_1': gadm.get('admin_level_2'),
+		'admin_level_2': gadm.get('admin_level_3'),
+		'admin_level_3': gadm.get('admin_level_4'),
 	}
 	
 	# Extract centroid from ortho bbox

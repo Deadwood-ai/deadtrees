@@ -1281,9 +1281,9 @@ def test_single_dataset_bundle_metadata_includes_v2_metadata(auth_token, test_da
 			zf.extract('METADATA.csv', tmpdir)
 			df = pd.read_csv(Path(tmpdir) / 'METADATA.csv')
 			assert len(df) == 1
-			assert df.loc[0, 'admin_level_1'] == 'Germany'
-			assert df.loc[0, 'admin_level_2'] == 'Baden-Wuerttemberg'
-			assert df.loc[0, 'admin_level_3'] == 'Freiburg'
+			assert df.loc[0, 'admin_level_0'] == 'Germany'
+			assert df.loc[0, 'admin_level_1'] == 'Baden-Wuerttemberg'
+			assert df.loc[0, 'admin_level_2'] == 'Freiburg'
 			assert df.loc[0, 'biome_name'] == 'Temperate Broadleaf and Mixed Forests'
 			assert bool(df.loc[0, 'has_phenology_curve']) is True
 			assert '"gadm"' in df.loc[0, 'metadata_json']
@@ -2239,9 +2239,9 @@ class TestMultiBundleHelpers:
 		assert result['gsd_cm'] == 5.0
 		assert result['sensor_platform'] == 'drone'
 		assert result['authors'] == 'Author A, Author B'
-		assert result['admin_level_1'] == 'Germany'
-		assert result['admin_level_2'] == 'Baden-Württemberg'
-		assert result['admin_level_3'] == 'Freiburg'
+		assert result['admin_level_0'] == 'Germany'
+		assert result['admin_level_1'] == 'Baden-Württemberg'
+		assert result['admin_level_2'] == 'Freiburg'
 		assert result['centroid_lat'] == 48.5
 		assert result['centroid_lon'] == 8.5
 		assert result['additional_information'] == 'Test info'

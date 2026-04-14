@@ -1,5 +1,6 @@
 import pytest
 from datetime import datetime
+from unittest.mock import ANY
 
 from shared.db import use_client
 from shared.settings import settings
@@ -86,8 +87,14 @@ def metadata_task(metadata_dataset_for_processing, test_processor_user):
 
 @pytest.fixture
 def suppress_status_updates(monkeypatch):
-	"""Keep metadata test focused on metadata extraction, not status/RLS behavior."""
-	monkeypatch.setattr(process_metadata_module, 'update_status', lambda *args, **kwargs: None)
+	"""Record status updates without exercising the DB/RLS path."""
+	calls = []
+
+	def record_update_status(*args, **kwargs):
+		calls.append({'args': args, 'kwargs': kwargs})
+
+	monkeypatch.setattr(process_metadata_module, 'update_status', record_update_status)
+	return calls
 
 
 def test_process_metadata_success(metadata_task, auth_token, suppress_status_updates):
@@ -137,5 +144,13 @@ def test_process_metadata_success(metadata_task, auth_token, suppress_status_upd
 		assert 'version' in metadata
 		assert metadata['processing_runtime'] > 0
 
-		# Clean up
-		client.table(settings.metadata_table).delete().eq('dataset_id', metadata_task.dataset_id).execute()
+	assert suppress_status_updates == [
+		{
+			'args': (ANY, metadata_task.dataset_id),
+			'kwargs': {'current_status': StatusEnum.metadata_processing},
+		},
+		{
+			'args': (ANY, metadata_task.dataset_id),
+			'kwargs': {'current_status': StatusEnum.idle, 'is_metadata_done': True},
+		},
+	]
