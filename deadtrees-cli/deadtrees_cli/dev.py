@@ -34,6 +34,35 @@ class DevCommands:
 			print(f'Error: {str(e)}')
 			raise
 
+	def _is_service_running(self, service: str) -> bool:
+		"""Check whether a compose service is currently running."""
+		result = subprocess.run(
+			['docker', 'compose', '-f', self.test_compose_file, 'ps', '--status', 'running', '--services'],
+			capture_output=True,
+			text=True,
+			check=False,
+		)
+		if result.returncode != 0:
+			return False
+
+		running_services = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+		return service in running_services
+
+	def _ensure_test_service_running(self, service: str):
+		"""Start the test stack if the requested service is not already running."""
+		if self._is_service_running(service):
+			return
+
+		print(f'Service "{service}" is not running. Starting test environment...')
+		try:
+			self.start()
+		except subprocess.CalledProcessError:
+			# Compose can report a startup conflict while still leaving the requested
+			# service running. Re-check before surfacing the failure.
+			if not self._is_service_running(service):
+				raise
+			print(f'Service "{service}" is now running despite compose startup warnings. Continuing...')
+
 	def _check_rebuild_needed(self) -> List[str]:
 		"""Check which services need rebuilding by comparing image and dockerfile timestamps"""
 		services_to_rebuild = []
@@ -380,12 +409,20 @@ class DevCommands:
 				print(f'Rebuilding services: {", ".join(services_to_rebuild)}')
 				services_to_rebuild = ['--build'] + services_to_rebuild
 
-		cmd = ['docker', 'compose', '-f', self.test_compose_file, 'up', '-d'] + services_to_rebuild
+		cmd = ['docker', 'compose', '-f', self.test_compose_file, 'up', '-d', '--remove-orphans'] + services_to_rebuild
 		self._run_command(cmd)
+
+	def up(self, force_rebuild: bool = False):
+		"""Alias for start() to match the documented CLI examples."""
+		self.start(force_rebuild=force_rebuild)
 
 	def stop(self):
 		"""Stop the test environment"""
-		self._run_command(['docker', 'compose', '-f', self.test_compose_file, 'down'])
+		self._run_command(['docker', 'compose', '-f', self.test_compose_file, 'down', '--remove-orphans'])
+
+	def down(self):
+		"""Alias for stop() to match the documented CLI examples."""
+		self.stop()
 
 	def debug(self, service: str = 'api', test_path: Optional[str] = None, port: Optional[int] = None):
 		"""
@@ -405,6 +442,8 @@ class DevCommands:
 			service = 'processor-test'
 		else:
 			raise ValueError(f'Invalid service: {service}')
+
+		self._ensure_test_service_running(service)
 
 		# Build the pytest command with test_path at the end
 		cmd = [
@@ -432,7 +471,7 @@ class DevCommands:
 		print('Waiting for debugger to attach...')
 		self._run_command(cmd)
 
-	def test(self, service: str = 'api-test', test_path: Optional[str] = None):
+	def test(self, service: str = 'api', test_path: Optional[str] = None):
 		"""
 		Run tests without debugging
 
@@ -446,6 +485,8 @@ class DevCommands:
 			service = 'processor-test'
 		else:
 			raise ValueError(f'Invalid service: {service}')
+
+		self._ensure_test_service_running(service)
 
 		cmd = [
 			'docker',

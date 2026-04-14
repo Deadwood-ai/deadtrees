@@ -1,19 +1,79 @@
 import pytest
+from datetime import datetime
 
 from shared.db import use_client
 from shared.settings import settings
-from shared.models import TaskTypeEnum, QueueTask, MetadataType
-from processor.src.process_metadata import process_metadata
-
-pytestmark = pytest.mark.integration
+from shared.models import TaskTypeEnum, QueueTask, MetadataType, StatusEnum, Ortho
+import processor.src.process_metadata as process_metadata_module
 
 
 @pytest.fixture
-def metadata_task(test_dataset_for_processing, test_processor_user):
+def metadata_dataset_for_processing(auth_token, test_processor_user):
+	"""Create only the DB rows metadata processing needs.
+
+	Unlike GeoTIFF/COG/thumbnail stages, metadata processing uses the ortho bbox
+	from the database and never pulls the raster from SSH storage.
+	"""
+	dataset_id = None
+	try:
+		with use_client(auth_token) as client:
+			dataset_data = {
+				'file_name': 'test-process.tif',
+				'license': 'CC BY',
+				'platform': 'drone',
+				'authors': ['Test Author'],
+				'user_id': test_processor_user,
+				'data_access': 'public',
+				'aquisition_year': 2024,
+				'aquisition_month': 1,
+				'aquisition_day': 1,
+			}
+			response = client.table(settings.datasets_table).insert(dataset_data).execute()
+			dataset_id = response.data[0]['id']
+
+			ortho = Ortho(
+				dataset_id=dataset_id,
+				ortho_file_name=f'{dataset_id}_ortho.tif',
+				version=1,
+				ortho_file_size=1,
+				bbox='BOX(13.4050 52.5200,13.4150 52.5300)',
+				ortho_upload_runtime=0.1,
+				ortho_info={'Driver': 'GTiff', 'Size': [1024, 1024]},
+				created_at=datetime.now(),
+			)
+			client.table(settings.orthos_table).insert(ortho.model_dump()).execute()
+
+			status_data = {
+				'dataset_id': dataset_id,
+				'current_status': StatusEnum.idle,
+				'is_upload_done': True,
+				'is_ortho_done': True,
+				'is_cog_done': False,
+				'is_thumbnail_done': False,
+				'is_deadwood_done': False,
+				'is_forest_cover_done': False,
+				'is_metadata_done': False,
+				'is_audited': False,
+				'has_error': False,
+			}
+			client.table(settings.statuses_table).insert(status_data).execute()
+
+		yield dataset_id
+	finally:
+		if dataset_id is not None:
+			with use_client(auth_token) as client:
+				client.table(settings.metadata_table).delete().eq('dataset_id', dataset_id).execute()
+				client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
+				client.table(settings.orthos_table).delete().eq('dataset_id', dataset_id).execute()
+				client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
+
+
+@pytest.fixture
+def metadata_task(metadata_dataset_for_processing, test_processor_user):
 	"""Create a test task for metadata processing"""
 	return QueueTask(
 		id=1,
-		dataset_id=test_dataset_for_processing,
+		dataset_id=metadata_dataset_for_processing,
 		user_id=test_processor_user,
 		task_types=[TaskTypeEnum.metadata],
 		priority=1,
@@ -24,9 +84,15 @@ def metadata_task(test_dataset_for_processing, test_processor_user):
 	)
 
 
-def test_process_metadata_success(metadata_task, auth_token):
+@pytest.fixture
+def suppress_status_updates(monkeypatch):
+	"""Keep metadata test focused on metadata extraction, not status/RLS behavior."""
+	monkeypatch.setattr(process_metadata_module, 'update_status', lambda *args, **kwargs: None)
+
+
+def test_process_metadata_success(metadata_task, auth_token, suppress_status_updates):
 	"""Test successful metadata processing"""
-	process_metadata(metadata_task, settings.processing_path)
+	process_metadata_module.process_metadata(metadata_task, settings.processing_path)
 
 	with use_client(auth_token) as client:
 		response = (

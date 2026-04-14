@@ -1235,6 +1235,101 @@ def test_download_dataset_async(auth_token, test_dataset_for_download):
 		assert 'LICENSE.txt' in files
 
 
+def test_single_dataset_bundle_metadata_includes_v2_metadata(auth_token, test_dataset_for_download):
+	"""Single-dataset bundles should include extracted v2_metadata fields in METADATA.csv."""
+	metadata_data = {
+		'dataset_id': test_dataset_for_download,
+		'version': 1,
+		'metadata': {
+			'gadm': {
+				'source': 'GADM',
+				'version': '4.1.0',
+				'admin_level_1': 'Germany',
+				'admin_level_2': 'Baden-Wuerttemberg',
+				'admin_level_3': 'Freiburg',
+			},
+			'biome': {
+				'source': 'WWF',
+				'version': '2.0',
+				'biome_id': 4,
+				'biome_name': 'Temperate Broadleaf and Mixed Forests',
+			},
+			'phenology': {
+				'source': 'MODIS',
+				'version': '1.0',
+				'phenology_curve': [0, 1, 2],
+			},
+		},
+	}
+
+	with use_client(auth_token) as db_client:
+		db_client.table(settings.metadata_table).insert(metadata_data).execute()
+
+	try:
+		response = client.get(
+			f'/api/v1/download/datasets/{test_dataset_for_download}/dataset.zip',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		assert response.status_code == 200
+
+		_wait_for_download_completed(test_dataset_for_download, auth_token)
+
+		download_file = settings.downloads_path / str(test_dataset_for_download) / f'{test_dataset_for_download}.zip'
+		assert download_file.exists()
+
+		with zipfile.ZipFile(download_file) as zf, tempfile.TemporaryDirectory() as tmpdir:
+			zf.extract('METADATA.csv', tmpdir)
+			df = pd.read_csv(Path(tmpdir) / 'METADATA.csv')
+			assert len(df) == 1
+			assert df.loc[0, 'admin_level_1'] == 'Germany'
+			assert df.loc[0, 'admin_level_2'] == 'Baden-Wuerttemberg'
+			assert df.loc[0, 'admin_level_3'] == 'Freiburg'
+			assert df.loc[0, 'biome_name'] == 'Temperate Broadleaf and Mixed Forests'
+			assert bool(df.loc[0, 'has_phenology_curve']) is True
+			assert '"gadm"' in df.loc[0, 'metadata_json']
+	finally:
+		with use_client(auth_token) as db_client:
+			db_client.table(settings.metadata_table).delete().eq('dataset_id', test_dataset_for_download).execute()
+
+
+def test_single_dataset_bundle_status_reports_failed_when_generation_errors(
+	auth_token, test_dataset_for_download, data_directory
+):
+	"""Single-dataset status endpoint should surface bundle failures instead of polling forever."""
+	archive_path = data_directory / settings.archive_path / 'test-download.tif'
+	if archive_path.exists():
+		archive_path.unlink()
+
+	response = client.get(
+		f'/api/v1/download/datasets/{test_dataset_for_download}/dataset.zip',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	assert response.status_code == 200
+
+	last_status = None
+	for _ in range(20):
+		status_response = client.get(
+			f'/api/v1/download/datasets/{test_dataset_for_download}/status',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		assert status_response.status_code == 200
+		last_status = status_response.json()
+		if last_status['status'] == 'failed':
+			break
+		time.sleep(0.1)
+	else:
+		pytest.fail(f'Expected failed status, got: {last_status}')
+
+	assert 'No such file or directory' in last_status['message']
+
+	download_response = client.get(
+		f'/api/v1/download/datasets/{test_dataset_for_download}/download',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	assert download_response.status_code == 500
+	assert 'No such file or directory' in download_response.json()['detail']
+
+
 def test_download_dataset_already_exists(auth_token, test_dataset_for_download):
 	"""Test requesting a download when the file already exists"""
 	# First ensure the download exists
