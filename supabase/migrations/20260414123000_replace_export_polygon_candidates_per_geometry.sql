@@ -7,7 +7,6 @@ with correction_flags as (
 	select
 		c.layer_type,
 		c.geometry_id,
-		c.original_geometry_id,
 		bool_or(c.operation = 'add' and c.review_status = 'approved') as has_approved_add,
 		bool_or(c.operation = 'modify' and c.review_status = 'approved') as has_approved_modify,
 		bool_or(c.operation = 'delete' and c.review_status = 'approved') as has_approved_delete,
@@ -17,17 +16,19 @@ with correction_flags as (
 	from public.v2_geometry_corrections c
 	group by
 		c.layer_type,
-		c.geometry_id,
-		c.original_geometry_id
+		c.geometry_id
 ),
 approved_replacements as (
 	select
-		layer_type,
-		original_geometry_id as geometry_id,
-		bool_or(has_approved_modify) as replaced_by_approved_modify
-	from correction_flags
-	where original_geometry_id is not null
-	group by layer_type, original_geometry_id
+		c.layer_type,
+		c.original_geometry_id as geometry_id,
+		true as replaced_by_approved_modify
+	from public.v2_geometry_corrections c
+	where
+		c.operation = 'modify'
+		and c.review_status = 'approved'
+		and c.original_geometry_id is not null
+	group by c.layer_type, c.original_geometry_id
 ),
 deadwood as (
 	select
