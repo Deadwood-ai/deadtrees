@@ -15,6 +15,27 @@ alwaysApply: true
 
 ## Architecture (Critical Knowledge)
 
+### Repository: Monorepo
+
+- **Primary repository:** `Deadwood-ai/deadtrees`
+- **Frontend app:** `frontend/`
+- **Backend API:** `api/`
+- **Processor:** `processor/`
+- **Database migrations:** `supabase/`
+
+### Deployment Flow
+
+- **Frontend:** preview deploy on PR, live deploy on merge to `main` via GitHub Actions/Firebase
+- **API:** storage server pulls `main` and rebuilds `api`
+- **Processor:** processor server pulls `main` and rebuilds `processor`
+- **Database:** `supabase migration up --db-url ...` runs on merge to `main` when `supabase/**` changes
+
+### Delivery Policy
+
+- Expected workflow is: local development and testing → PR checks/reviews → merge to `main` → automatic deploy
+- Do not add PR-time workflows that mutate production services or the production database
+- Production changes should land through the existing merge-to-main deploy path unless the user explicitly asks for a manual production intervention
+
 ### Production: Two Separate Physical Machines
 
 | Machine | Services | Has /data? |

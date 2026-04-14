@@ -16,6 +16,7 @@ alwaysApply: true
 - Sync tests only: test functions must be synchronous
 - Containers as source of truth: run services inside Docker Compose
 - Ask-first: if something is unclear, ask clarifying questions
+- Monorepo-aware: backend, frontend, and Supabase changes now live in the same repo but deploy through different paths
 
 ## QUICK START
 ```bash
@@ -47,6 +48,14 @@ deadtrees dev run-dev
 - processor-test: debug 5678 (GPU)
 - nginx: HTTP 8080, SSH 2222 (test reverse proxy)
 - CLI debugging (local): default 5680
+
+## MONOREPO DELIVERY FLOW
+- Frontend code lives in `frontend/`
+- Frontend preview deploy runs on PRs that touch `frontend/**`
+- Frontend live deploy runs on merge to `main`
+- API and processor production deploys are server-side pull/rebuild flows triggered by new commits on `main`
+- Supabase production migrations run on merge to `main` only when `supabase/**` changes
+- Expected workflow is local development/testing first, then PR review, then merge-driven deployment
 
 ## PORTS & ENDPOINTS
 - Nginx test endpoints:
@@ -116,6 +125,7 @@ make symlinks
 - Do not introduce async tests
 - Avoid class-based tests; prefer functions (existing classes are legacy)
 - Do not hardcode absolute file paths; derive from `shared.settings.settings`
+- Do not add PR-time database workflows that apply migrations to production; production DB mutation belongs only to the merge-to-main deploy path
 
 ## NOTES
 - If any step or assumption is unclear, ask questions before proceeding
