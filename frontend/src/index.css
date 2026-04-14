@@ -1,0 +1,225 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Theme variables are injected at runtime from src/theme/palette.ts */
+
+/* Shared OpenLayers controls for public maps */
+.dt-map-attribution-control {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  right: auto;
+  max-width: min(320px, calc(100% - 24px));
+  background-color: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 14px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+  padding: 4px 8px;
+  font-size: 11px;
+  z-index: 40;
+}
+
+.dt-map-attribution-control.ol-collapsed {
+  width: auto;
+  max-width: none;
+  padding: 2px;
+}
+
+.dt-map-attribution-control.ol-collapsed ul {
+  display: none;
+}
+
+.dt-map-attribution-control:not(.ol-collapsed) ul {
+  display: inline;
+}
+
+.dt-map-zoom-control {
+  top: auto !important;
+  bottom: 12px !important;
+  right: 16px !important;
+  left: auto !important;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  z-index: 40;
+}
+
+.dt-map-zoom-control button {
+  width: 36px;
+  height: 36px;
+  margin: 0 !important;
+  border: 1px solid rgba(148, 163, 184, 0.28) !important;
+  border-radius: 12px !important;
+  background: rgba(255, 255, 255, 0.94) !important;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+  color: var(--dt-text-primary) !important;
+  font-size: 20px !important;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.dt-map-zoom-control button:hover,
+.dt-map-attribution-control button:hover {
+  background: rgba(255, 255, 255, 1) !important;
+}
+
+.dt-map-attribution-control button {
+  background-color: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--dt-text-primary);
+  min-width: 32px;
+  min-height: 32px;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+}
+
+.dt-map-attribution-control ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dt-map-attribution-control li {
+  display: inline;
+  margin: 0 4px;
+}
+
+@media (max-width: 767px) {
+  .dt-map-zoom-control {
+    display: none !important;
+  }
+
+  .dt-map-attribution-control {
+    display: none !important;
+  }
+}
+
+.logo-scroll {
+  overflow: hidden;
+  width: 100%;
+  position: relative;
+}
+
+.logo-container {
+  display: flex;
+  animation: scroll 30s linear infinite;
+  width: fit-content;
+}
+
+.logo-item {
+  flex: 0 0 auto;
+  width: 200px;
+  margin: 0 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@keyframes scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+/* Optional: Pause on hover */
+.logo-container:hover {
+  animation-play-state: paused;
+}
+
+/* Improve checkbox visibility across the app (especially on white cards/modals). */
+.ant-checkbox .ant-checkbox-inner {
+  border-color: #6b7280;
+  border-width: 1.5px;
+  background-color: #ffffff;
+}
+
+.ant-checkbox-wrapper:hover .ant-checkbox-inner,
+.ant-checkbox:hover .ant-checkbox-inner {
+  border-color: #1b5e35;
+}
+
+.ant-checkbox-checked .ant-checkbox-inner {
+  border-color: #1b5e35;
+  background-color: #1b5e35;
+}
+
+.ant-checkbox-input:focus-visible + .ant-checkbox-inner {
+  outline: 2px solid rgba(27, 94, 53, 0.28);
+  outline-offset: 2px;
+}
+
+.ant-checkbox-disabled .ant-checkbox-inner {
+  border-color: #94a3b8 !important;
+}
+
+@media (max-width: 767px) {
+  .map-controls-mobile-drawer .ant-drawer-content-wrapper {
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    top: auto !important;
+    width: auto !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: 100dvh !important;
+    box-sizing: border-box;
+    overflow-x: clip !important;
+  }
+
+  .map-controls-mobile-drawer .ant-drawer-content {
+    width: 100%;
+    max-height: 100dvh;
+    box-sizing: border-box;
+    overflow-x: clip !important;
+  }
+
+  .map-controls-mobile-drawer .ant-drawer-body {
+    height: auto;
+    max-height: calc(100dvh - 56px);
+    box-sizing: border-box;
+    overflow-x: clip !important;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .map-controls-mobile-drawer .ant-drawer-body::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+
+  .map-control-panel--drawer .ant-divider {
+    margin-top: 10px;
+    margin-bottom: 10px;
+  }
+
+  .map-control-panel--drawer .ant-checkbox-wrapper + .ant-checkbox-wrapper {
+    margin-top: 6px;
+  }
+
+  .map-control-panel--drawer .ant-slider {
+    margin-top: 6px;
+    margin-bottom: 6px;
+  }
+
+  .ant-input,
+  .ant-input-affix-wrapper,
+  .ant-input-affix-wrapper input,
+  .ant-input-textarea textarea,
+  textarea.ant-input {
+    font-size: 16px !important;
+  }
+}

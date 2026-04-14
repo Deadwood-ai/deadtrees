@@ -143,8 +143,8 @@ Key architectural decisions:
 
 ### b) Data and software availability
 - Platform: https://deadtrees.earth
-- Backend repository (public, MIT): https://github.com/Deadwood-ai/deadtrees-backend
-- Frontend repository: https://github.com/Deadwood-ai/deadtrees-frontend
+- Monorepo repository (public, MIT): https://github.com/Deadwood-ai/deadtrees
+- Frontend application path: `frontend/`
 - Pilot documentation: `docs/projects/geolabel/`
 
 The platform provides open access to datasets, prediction layers, and the GeoLabel correction workflows. Documentation includes user guidance, technical overviews, and detailed descriptions of the correction workflow.

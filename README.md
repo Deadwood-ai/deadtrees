@@ -66,6 +66,17 @@ The frontend is a React-based single-page application using OpenLayers for inter
 - Dataset upload with progress tracking and real-time status updates
 - Quality audit workflow for expert review of model predictions
 
+The frontend source is maintained in this monorepo under `frontend/`.
+
+## Repository Layout
+
+- `api/` — FastAPI backend
+- `processor/` — processing pipeline and GPU jobs
+- `shared/` — shared Python modules
+- `supabase/` — schema and migration history
+- `frontend/` — React + TypeScript web application
+- `deadtrees-cli/` — local development CLI
+
 ## Data Model
 
 Each dataset record tracks:

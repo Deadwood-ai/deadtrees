@@ -1,0 +1,2 @@
+export const standingDeadwoodLayerExplanation =
+  "The standing deadwood layer corresponds to woody material (twigs, branches, or stems) in the upper canopy layer that has died off but has largely retained its original structure. Partial dieback points to past stressors, but the rest of the tree can still be alive. Deciduous trees in leaf-off season may be marked as dead; see the phenology indicator. Defoliators or other stressors can cause temporary leaf-loss without subsequent tree death, and trees can regain leaves later on.";

@@ -17,8 +17,8 @@ GeoLabel is a browser-based correction workflow on [deadtrees.earth](https://dea
 
 ## Data and software availability
 - Platform: https://deadtrees.earth
-- Backend repository (MIT): https://github.com/Deadwood-ai/deadtrees-backend
-- Frontend repository: https://github.com/Deadwood-ai/deadtrees-frontend
+- Monorepo repository (MIT): https://github.com/Deadwood-ai/deadtrees
+- Frontend application path: `frontend/`
 - Roadmap PDF (NFDI template): `docs/projects/geolabel/roadmap-report-nfdi.pdf`
 - Roadmap markdown source: `docs/projects/geolabel/roadmap-report-pdf.md`
 
