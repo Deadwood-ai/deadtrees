@@ -91,11 +91,12 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 		# Delete existing deadwood prediction labels
 		# Refresh token before DB ops to avoid expiry after long inference
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-		deleted_count = delete_model_prediction_labels(
-			dataset_id=dataset_id, label_data=LabelDataEnum.deadwood, token=token
-		)
+		deleted_count = delete_model_prediction_labels(dataset_id=dataset_id, label_data=LabelDataEnum.deadwood, token=token)
 		if deleted_count > 0:
-			logger.info(f'Deleted {deleted_count} existing deadwood prediction labels')
+			logger.info(
+				f'Deleted {deleted_count} existing deadwood prediction labels',
+				LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
+			)
 
 		# Create label with geometries
 		logger.info(

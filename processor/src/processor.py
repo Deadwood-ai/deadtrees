@@ -33,6 +33,16 @@ PIPELINE_STAGE_MAP = [
 ]
 
 
+def refresh_processor_token(task: QueueTask, fallback_token: str | None = None) -> str:
+	"""Best-effort token refresh for stage-boundary logging and updates."""
+	try:
+		return login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
+	except Exception:
+		if fallback_token is not None:
+			return fallback_token
+		raise AuthenticationError('Invalid processor token', token=fallback_token, task_id=task.id)
+
+
 def detect_crashed_stage(status_data: dict, task_types: list) -> str:
 	"""Determine which pipeline stage a previous crash occurred during.
 
@@ -156,19 +166,21 @@ def process_task(task: QueueTask, token: str):
 		# Process ODM first if it's in the list (generates orthomosaic for ZIP uploads)
 		if TaskTypeEnum.odm_processing in task.task_types:
 			try:
+				token = refresh_processor_token(task, token)
 				logger.info(
 					'Starting ODM processing',
 					LogContext(category=LogCategory.ODM, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 				)
 				process_odm(task, settings.processing_path)
 			except Exception as e:
+				error_token = refresh_processor_token(task, token)
 				logger.error(
 					f'ODM processing failed: {str(e)}',
 					LogContext(
 						category=LogCategory.ODM,
 						dataset_id=task.dataset_id,
 						user_id=task.user_id,
-						token=token,
+						token=error_token,
 						extra={'error': str(e)},
 					),
 				)
@@ -177,6 +189,7 @@ def process_task(task: QueueTask, token: str):
 		# Process convert_geotiff if it's in the list (handles ortho creation for both upload types)
 		if TaskTypeEnum.geotiff in task.task_types:
 			try:
+				token = refresh_processor_token(task, token)
 				logger.info(
 					'Starting GeoTIFF conversion',
 					LogContext(
@@ -185,13 +198,14 @@ def process_task(task: QueueTask, token: str):
 				)
 				process_geotiff(task, settings.processing_path)
 			except Exception as e:
+				error_token = refresh_processor_token(task, token)
 				logger.error(
 					f'GeoTIFF conversion failed: {str(e)}',
 					LogContext(
 						category=LogCategory.ORTHO,
 						dataset_id=task.dataset_id,
 						user_id=task.user_id,
-						token=token,
+						token=error_token,
 						extra={'error': str(e)},
 					),
 				)
@@ -200,6 +214,7 @@ def process_task(task: QueueTask, token: str):
 		# Process metadata if requested
 		if TaskTypeEnum.metadata in task.task_types:
 			try:
+				token = refresh_processor_token(task, token)
 				logger.info(
 					'processing metadata',
 					LogContext(
@@ -208,10 +223,11 @@ def process_task(task: QueueTask, token: str):
 				)
 				process_metadata(task, settings.processing_path)
 			except Exception as e:
+				error_token = refresh_processor_token(task, token)
 				logger.error(
 					f'Metadata processing failed: {str(e)}',
 					LogContext(
-						category=LogCategory.METADATA, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+						category=LogCategory.METADATA, dataset_id=task.dataset_id, user_id=task.user_id, token=error_token
 					),
 				)
 				raise ProcessingError(str(e), task_type='metadata', task_id=task.id, dataset_id=task.dataset_id)
@@ -219,21 +235,26 @@ def process_task(task: QueueTask, token: str):
 		# Process cog if requested
 		if TaskTypeEnum.cog in task.task_types:
 			try:
+				token = refresh_processor_token(task, token)
 				logger.info(
 					f'processing cog to {settings.processing_path}',
 					LogContext(category=LogCategory.COG, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 				)
 				process_cog(task, settings.processing_path)
 			except Exception as e:
+				error_token = refresh_processor_token(task, token)
 				logger.error(
 					f'COG processing failed: {str(e)}',
-					LogContext(category=LogCategory.COG, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+					LogContext(
+						category=LogCategory.COG, dataset_id=task.dataset_id, user_id=task.user_id, token=error_token
+					),
 				)
 				raise ProcessingError(str(e), task_type='cog', task_id=task.id, dataset_id=task.dataset_id)
 
 		# Process thumbnail if requested
 		if TaskTypeEnum.thumbnail in task.task_types:
 			try:
+				token = refresh_processor_token(task, token)
 				logger.info(
 					f'processing thumbnail to {settings.processing_path}',
 					LogContext(
@@ -242,10 +263,14 @@ def process_task(task: QueueTask, token: str):
 				)
 				process_thumbnail(task, settings.processing_path)
 			except Exception as e:
+				error_token = refresh_processor_token(task, token)
 				logger.error(
 					f'Thumbnail processing failed: {str(e)}',
 					LogContext(
-						category=LogCategory.THUMBNAIL, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+						category=LogCategory.THUMBNAIL,
+						dataset_id=task.dataset_id,
+						user_id=task.user_id,
+						token=error_token,
 					),
 				)
 				raise ProcessingError(str(e), task_type='thumbnail', task_id=task.id, dataset_id=task.dataset_id)
@@ -253,6 +278,7 @@ def process_task(task: QueueTask, token: str):
 		# Process deadwood_segmentation if requested
 		if TaskTypeEnum.deadwood in task.task_types:
 			try:
+				token = refresh_processor_token(task, token)
 				logger.info(
 					'processing deadwood segmentation',
 					LogContext(
@@ -261,10 +287,14 @@ def process_task(task: QueueTask, token: str):
 				)
 				process_deadwood_segmentation(task, token, settings.processing_path)
 			except Exception as e:
+				error_token = refresh_processor_token(task, token)
 				logger.error(
 					f'Deadwood segmentation failed: {str(e)}',
 					LogContext(
-						category=LogCategory.DEADWOOD, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+						category=LogCategory.DEADWOOD,
+						dataset_id=task.dataset_id,
+						user_id=task.user_id,
+						token=error_token,
 					),
 				)
 				raise ProcessingError(
@@ -274,6 +304,7 @@ def process_task(task: QueueTask, token: str):
 		# Process treecover_segmentation if requested (runs after deadwood)
 		if TaskTypeEnum.treecover in task.task_types:
 			try:
+				token = refresh_processor_token(task, token)
 				logger.info(
 					'processing tree cover segmentation',
 					LogContext(
@@ -282,10 +313,14 @@ def process_task(task: QueueTask, token: str):
 				)
 				process_treecover_segmentation(task, token, settings.processing_path)
 			except Exception as e:
+				error_token = refresh_processor_token(task, token)
 				logger.error(
 					f'Tree cover segmentation failed: {str(e)}',
 					LogContext(
-						category=LogCategory.TREECOVER, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+						category=LogCategory.TREECOVER,
+						dataset_id=task.dataset_id,
+						user_id=task.user_id,
+						token=error_token,
 					),
 				)
 				raise ProcessingError(

@@ -4,9 +4,17 @@ import numpy as np
 from PIL import Image
 
 from shared.logger import logger
+from shared.logging import LogContext, LogCategory
 
 
-def calculate_thumbnail(tiff_file_path: str, thumbnail_file_path: str, size=(256, 256)):
+def calculate_thumbnail(
+	tiff_file_path: str,
+	thumbnail_file_path: str,
+	size=(256, 256),
+	token: str = None,
+	dataset_id: int = None,
+	user_id: str = None,
+):
 	"""
 	Creates a thumbnail from a GeoTIFF file using rasterio.
 
@@ -18,7 +26,10 @@ def calculate_thumbnail(tiff_file_path: str, thumbnail_file_path: str, size=(256
 	Returns:
 	    None
 	"""
-	logger.info(f'Starting thumbnail calculation with paths - input: {tiff_file_path}, output: {thumbnail_file_path}')
+	logger.info(
+		f'Starting thumbnail calculation with paths - input: {tiff_file_path}, output: {thumbnail_file_path}',
+		LogContext(category=LogCategory.THUMBNAIL, dataset_id=dataset_id, user_id=user_id, token=token),
+	)
 
 	try:
 		with rasterio.open(tiff_file_path) as src:
@@ -61,13 +72,25 @@ def calculate_thumbnail(tiff_file_path: str, thumbnail_file_path: str, size=(256
 			thumb.paste(img, offset)
 
 			# Save the thumbnail
-			logger.info(f'Saving thumbnail to: {thumbnail_file_path}')
+			logger.info(
+				f'Saving thumbnail to: {thumbnail_file_path}',
+				LogContext(category=LogCategory.THUMBNAIL, dataset_id=dataset_id, user_id=user_id, token=token),
+			)
 			thumb.save(thumbnail_file_path, 'JPEG', quality=85)
-			logger.info(f'Thumbnail saved successfully to: {thumbnail_file_path}')
+			logger.info(
+				f'Thumbnail saved successfully to: {thumbnail_file_path}',
+				LogContext(category=LogCategory.THUMBNAIL, dataset_id=dataset_id, user_id=user_id, token=token),
+			)
 
 	except Exception as e:
 		logger.error(
 			f'Error creating thumbnail: {str(e)}',
-			extra={'tiff_file': tiff_file_path, 'thumbnail_file': thumbnail_file_path},
+			LogContext(
+				category=LogCategory.THUMBNAIL,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'tiff_file': tiff_file_path, 'thumbnail_file': thumbnail_file_path},
+			),
 		)
 		raise

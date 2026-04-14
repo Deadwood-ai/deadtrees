@@ -1,6 +1,7 @@
 import pytest
 from pathlib import Path
 
+import processor.src.processor as processor_module
 from shared.db import use_client
 from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask, StatusEnum
@@ -67,6 +68,65 @@ def test_background_process_no_tasks():
 	# Verify it completes without error
 	# (The function should return None when no tasks are found)
 	assert background_process() is None
+
+
+def test_process_task_success_path_with_refresh(monkeypatch):
+	"""Successful stage execution should not fall into an error path."""
+
+	task = QueueTask(
+		id=123,
+		dataset_id=456,
+		user_id='test-user',
+		task_types=[TaskTypeEnum.metadata],
+		priority=1,
+		is_processing=False,
+		current_position=1,
+		estimated_time=0.0,
+	)
+	stage_calls = []
+	deleted_task_ids = []
+
+	class _DeleteQuery:
+		def eq(self, field, value):
+			assert field == 'id'
+			deleted_task_ids.append(value)
+			return self
+
+		def execute(self):
+			return None
+
+	class _TableQuery:
+		def delete(self):
+			return _DeleteQuery()
+
+	class _FakeClient:
+		def table(self, name):
+			assert name == settings.queue_table
+			return _TableQuery()
+
+		def __enter__(self):
+			return self
+
+		def __exit__(self, exc_type, exc, tb):
+			return False
+
+	monkeypatch.setattr(processor_module, 'verify_token', lambda token: {'id': 'processor-user'})
+	monkeypatch.setattr(processor_module, 'refresh_processor_token', lambda task, token=None: 'refreshed-token')
+	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'final-token')
+	monkeypatch.setattr(processor_module, 'use_client', lambda token: _FakeClient())
+	monkeypatch.setattr(processor_module.logger, 'info', lambda *args, **kwargs: None)
+	monkeypatch.setattr(processor_module.logger, 'error', lambda *args, **kwargs: None)
+	monkeypatch.setattr(processor_module.logger, 'warning', lambda *args, **kwargs: None)
+	monkeypatch.setattr(
+		processor_module,
+		'process_metadata',
+		lambda current_task, processing_path: stage_calls.append((current_task.id, str(processing_path))),
+	)
+
+	process_task(task, 'initial-token')
+
+	assert stage_calls == [(task.id, str(settings.processing_path))]
+	assert deleted_task_ids == [task.id]
 
 
 def test_pipeline_stage_map_is_stable_and_ordered():

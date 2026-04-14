@@ -4,6 +4,7 @@ import geopandas as gpd
 from shapely.geometry import Point
 from shared.logger import logger
 from shared.settings import settings
+from shared.logging import LogContext, LogCategory
 
 # Define the path to the biome database
 BIOME_PATH = Path(settings.BIOME_DATA_PATH)
@@ -20,7 +21,9 @@ def get_biome_path():
 	return BIOME_PATH
 
 
-def get_biome_data(point: Tuple[float, float]) -> Tuple[Optional[str], Optional[int]]:
+def get_biome_data(
+	point: Tuple[float, float], token: str = None, dataset_id: int = None, user_id: str = None
+) -> Tuple[Optional[str], Optional[int]]:
 	"""
 	Returns biome name and ID for a given point.
 
@@ -67,5 +70,14 @@ def get_biome_data(point: Tuple[float, float]) -> Tuple[Optional[str], Optional[
 		return None, None
 
 	except Exception as e:
-		logger.error(f'Error getting biome data: {str(e)}')
+		logger.error(
+			f'Error getting biome data: {str(e)}',
+			LogContext(
+				category=LogCategory.METADATA,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'error': str(e)},
+			),
+		)
 		return None, None

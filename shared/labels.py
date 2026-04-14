@@ -16,6 +16,7 @@ from shared.models import (
 from shared.db import use_client
 from shared.settings import settings
 from shared.logger import logger
+from shared.logging import LogContext, LogCategory
 
 MAX_CHUNK_SIZE = 1024 * 1024 * 5  # 5MB per chunk
 
@@ -214,7 +215,10 @@ def delete_model_prediction_labels(dataset_id: int, label_data: LabelDataEnum, t
 			# Delete the labels themselves
 			client.table(settings.labels_table).delete().in_('id', label_ids).execute()
 
-			logger.info(f'Deleted {deleted_count} existing model prediction labels for dataset {dataset_id}')
+			logger.info(
+				f'Deleted {deleted_count} existing model prediction labels for dataset {dataset_id}',
+				LogContext(category=LogCategory.LABEL, dataset_id=dataset_id, token=token),
+			)
 			return deleted_count
 
 		except Exception as e:
