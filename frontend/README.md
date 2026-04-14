@@ -2,10 +2,10 @@
 
 React + TypeScript frontend for `deadtrees.earth` and GeoLabel workflows (map visualization, correction editing, and audit UI).
 
-## Repositories
+## Repository
 
-- Frontend: https://github.com/Deadwood-ai/deadtrees-frontend
-- Backend: https://github.com/Deadwood-ai/deadtrees-backend
+- Monorepo: https://github.com/Deadwood-ai/deadtrees
+- Frontend app path: `frontend/`
 - Upload service: https://github.com/Deadwood-ai/deadtrees-upload
 - Live platform: https://deadtrees.earth
 
@@ -18,12 +18,12 @@ The frontend provides:
 - auditor review queue with approve/revert workflow
 
 <p align="center">
-<img src="https://github.com/Deadwood-ai/deadtrees-backend/blob/main/docs/assets/ui-screenshot.jpg?raw=1" alt="GeoLabel UI overview" width="100%"/>
+<img src="https://github.com/Deadwood-ai/deadtrees/blob/main/docs/assets/ui-screenshot.jpg?raw=1" alt="GeoLabel UI overview" width="100%"/>
 </p>
 
 <p align="center">
-<img src="https://github.com/Deadwood-ai/deadtrees-backend/blob/main/docs/assets/adding-ai.gif?raw=1" alt="AI-assisted editing" width="48%"/>
-<img src="https://github.com/Deadwood-ai/deadtrees-backend/blob/main/docs/assets/approve.gif?raw=1" alt="Audit approval workflow" width="48%"/>
+<img src="https://github.com/Deadwood-ai/deadtrees/blob/main/docs/assets/adding-ai.gif?raw=1" alt="AI-assisted editing" width="48%"/>
+<img src="https://github.com/Deadwood-ai/deadtrees/blob/main/docs/assets/approve.gif?raw=1" alt="Audit approval workflow" width="48%"/>
 </p>
 
 ## Tech Stack
@@ -44,6 +44,7 @@ The frontend provides:
 ### Install and Run
 
 ```bash
+cd frontend
 npm install
 npm run dev
 ```
@@ -53,6 +54,7 @@ By default, Vite serves at `http://localhost:5173`.
 ### Build and Lint
 
 ```bash
+cd frontend
 npm run lint
 npm run build
 npm run preview
@@ -63,8 +65,8 @@ npm run preview
 The frontend can deploy automatically to Firebase Hosting from GitHub Actions whenever `main` changes.
 
 Workflow files:
-- `.github/workflows/firebase-hosting-merge.yml`
-- `.github/workflows/firebase-hosting-pull-request.yml`
+- `.github/workflows/frontend-hosting-merge.yml`
+- `.github/workflows/frontend-hosting-pull-request.yml`
 
 These workflows intentionally let Firebase's framework-aware Hosting deploy perform the Vite build. That matches local `firebase deploy --only hosting` behavior and avoids blocking deploys on the repo's current standalone TypeScript check failures from `tsc && vite build`.
 
@@ -86,7 +88,7 @@ The quickest way to provision the Firebase deploy credential is to run:
 firebase init hosting:github
 ```
 
-Firebase's official Hosting docs say this command creates the deploy service account, stores its JSON key as a GitHub secret, and writes the workflow files for you. In this repo it created the secret `FIREBASE_SERVICE_ACCOUNT_DEADWOOD_D4A4B` and the two Firebase Hosting workflow files above.
+Firebase's official Hosting docs say this command creates the deploy service account, stores its JSON key as a GitHub secret, and writes the workflow files for you. In this monorepo the Hosting workflow should deploy with `frontend/` as its entry point.
 
 ## Environment Variables
 
@@ -114,8 +116,8 @@ VITE_SUPABASE_SENTINEL_PROCESSING_ANON_KEY=...
 
 ## Related Documentation
 
-- Full GeoLabel pilot roadmap: https://github.com/Deadwood-ai/deadtrees-backend/blob/main/docs/projects/geolabel/roadmap-report.md
-- Backend architecture and processing docs: https://github.com/Deadwood-ai/deadtrees-backend
+- Full GeoLabel pilot roadmap: https://github.com/Deadwood-ai/deadtrees/blob/main/docs/projects/geolabel/roadmap-report.md
+- Backend architecture and processing docs: https://github.com/Deadwood-ai/deadtrees
 
 ## License
 
