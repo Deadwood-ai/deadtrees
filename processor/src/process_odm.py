@@ -177,7 +177,12 @@ def process_odm(task: QueueTask, temp_dir: Path):
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
-		_run_odm_container(images_dir=extraction_dir, output_dir=odm_host_temp_dir, token=token, dataset_id=dataset_id)
+		token = _run_odm_container(
+			images_dir=extraction_dir,
+			output_dir=odm_host_temp_dir,
+			token=token,
+			dataset_id=dataset_id,
+		)
 
 		# Step 7: Move generated orthomosaic to standard location
 		project_name = f'dataset_{dataset_id}'
@@ -521,7 +526,7 @@ def _update_camera_metadata(dataset_id: int, exif_metadata: dict, token: str):
 			)
 
 
-def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_id: int):
+def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_id: int) -> str:
 	"""
 	Execute ODM Docker container using shared named volumes for file sharing.
 	This approach eliminates host path complexity and works identically in test and production.
@@ -734,6 +739,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 
 				# Copy results from shared volume to output directory
 				copy_results_from_shared_volume(volume_name, output_dir, project_name, dataset_id, token)
+				return token
 			else:
 				# ODM failed - log detailed error information
 				logger.error(

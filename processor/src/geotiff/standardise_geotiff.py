@@ -83,7 +83,7 @@ def _check_if_already_standardized(
 		return {'is_standardized': False, 'has_alpha': False, 'is_lossy': False, 'compression': '', 'details': {}}
 
 
-def find_nodata_value(src, num_bands):
+def find_nodata_value(src, num_bands, token: str = None, dataset_id: int = None, user_id: str = None):
 	"""Helper function to determine current nodata value from the source image"""
 	try:
 		# First check if nodata is explicitly set
@@ -92,7 +92,13 @@ def find_nodata_value(src, num_bands):
 				# This is our main problem case - NaN nodata
 				logger.info(
 					'Detected NaN nodata in source file',
-					LogContext(category=LogCategory.ORTHO, extra={'nodata_type': 'nan'}),
+					LogContext(
+						category=LogCategory.ORTHO,
+						dataset_id=dataset_id,
+						user_id=user_id,
+						token=token,
+						extra={'nodata_type': 'nan'},
+					),
 				)
 				return 'nan'  # Return string to distinguish from numeric values
 			else:
@@ -110,7 +116,14 @@ def find_nodata_value(src, num_bands):
 					return 0
 			except Exception as e:
 				logger.warning(
-					f'Error reading alpha band: {e}', LogContext(category=LogCategory.ORTHO, extra={'error': str(e)})
+					f'Error reading alpha band: {e}',
+					LogContext(
+						category=LogCategory.ORTHO,
+						dataset_id=dataset_id,
+						user_id=user_id,
+						token=token,
+						extra={'error': str(e)},
+					),
 				)
 
 		# Sample edges to detect nodata, being careful with NaN values
@@ -130,7 +143,13 @@ def find_nodata_value(src, num_bands):
 			if nan_percentage > 0.5:  # If more than 50% of edges are NaN
 				logger.info(
 					f'High NaN percentage in edges: {nan_percentage * 100:.1f}%',
-					LogContext(category=LogCategory.ORTHO, extra={'nan_percentage': nan_percentage}),
+					LogContext(
+						category=LogCategory.ORTHO,
+						dataset_id=dataset_id,
+						user_id=user_id,
+						token=token,
+						extra={'nan_percentage': nan_percentage},
+					),
 				)
 				return 'nan'
 
@@ -148,14 +167,28 @@ def find_nodata_value(src, num_bands):
 
 		except Exception as e:
 			logger.warning(
-				f'Error reading image edges: {e}', LogContext(category=LogCategory.ORTHO, extra={'error': str(e)})
+				f'Error reading image edges: {e}',
+				LogContext(
+					category=LogCategory.ORTHO,
+					dataset_id=dataset_id,
+					user_id=user_id,
+					token=token,
+					extra={'error': str(e)},
+				),
 			)
 
 		return None
 
 	except Exception as e:
 		logger.error(
-			f'Error in find_nodata_value: {e}', LogContext(category=LogCategory.ORTHO, extra={'error': str(e)})
+			f'Error in find_nodata_value: {e}',
+			LogContext(
+				category=LogCategory.ORTHO,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'error': str(e)},
+			),
 		)
 		return None
 
@@ -289,7 +322,7 @@ def _get_source_properties(input_path: str, token: str, dataset_id: int = None, 
 				'dtype': src.profile['dtype'],
 				'num_bands': src.count,
 				'crs': src.crs,
-				'nodata': find_nodata_value(src, src.count),
+				'nodata': find_nodata_value(src, src.count, token=token, dataset_id=dataset_id, user_id=user_id),
 			}
 
 			if not properties['crs']:
@@ -375,7 +408,13 @@ def _handle_bit_depth_conversion(
 		else:
 			# No alpha band - detect nodata for creating alpha from it
 			with rasterio.open(input_path) as src:
-				detected_nodata = find_nodata_value(src, src.count)
+				detected_nodata = find_nodata_value(
+					src,
+					src.count,
+					token=token,
+					dataset_id=dataset_id,
+					user_id=user_id,
+				)
 				explicit_nodata = src.nodata
 
 				# Return the original nodata value for transparency handling
@@ -394,7 +433,7 @@ def _handle_bit_depth_conversion(
 
 	# Get nodata information and calculate proper scaling
 	with rasterio.open(input_path) as src:
-		detected_nodata = find_nodata_value(src, src.count)
+		detected_nodata = find_nodata_value(src, src.count, token=token, dataset_id=dataset_id, user_id=user_id)
 		explicit_nodata = src.nodata
 
 		# Calculate scaling parameters by reading from center of image

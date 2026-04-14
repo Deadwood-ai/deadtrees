@@ -6,6 +6,7 @@ from rasterio import crs, warp
 from shared.logger import logger
 from shared.models import PhenologyMetadata
 from shared.settings import settings
+from shared.logging import LogContext, LogCategory
 
 # Dataset path
 
@@ -33,7 +34,9 @@ def get_phenology_path() -> Path:
 	return Path(settings.PHENOLOGY_DATA_PATH)
 
 
-def get_phenology_curve(lat: float, lon: float) -> Optional[List[int]]:
+def get_phenology_curve(
+	lat: float, lon: float, token: str = None, dataset_id: int = None, user_id: str = None
+) -> Optional[List[int]]:
 	"""
 	Get the phenology curve for a given latitude and longitude.
 
@@ -59,24 +62,41 @@ def get_phenology_curve(lat: float, lon: float) -> Optional[List[int]]:
 		is_nan = ds_nearest.nan_mask.values[0][0]
 
 		if is_nan:
-			logger.debug(f'No phenology data available for coordinates ({lat}, {lon})')
+			logger.debug(
+				f'No phenology data available for coordinates ({lat}, {lon})',
+				LogContext(category=LogCategory.METADATA, dataset_id=dataset_id, user_id=user_id, token=token),
+			)
 			return None
 
 		# Convert to list of integers
 		phenology_curve = pheno.astype(int).tolist()
 
 		if len(phenology_curve) != 366:
-			logger.warning(f'Unexpected phenology curve length: {len(phenology_curve)}')
+			logger.warning(
+				f'Unexpected phenology curve length: {len(phenology_curve)}',
+				LogContext(category=LogCategory.METADATA, dataset_id=dataset_id, user_id=user_id, token=token),
+			)
 			return None
 
 		return phenology_curve
 
 	except Exception as e:
-		logger.error(f'Error getting phenology data for ({lat}, {lon}): {str(e)}')
+		logger.error(
+			f'Error getting phenology data for ({lat}, {lon}): {str(e)}',
+			LogContext(
+				category=LogCategory.METADATA,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'error': str(e)},
+			),
+		)
 		return None
 
 
-def get_phenology_metadata(lat: float, lon: float) -> Optional[PhenologyMetadata]:
+def get_phenology_metadata(
+	lat: float, lon: float, token: str = None, dataset_id: int = None, user_id: str = None
+) -> Optional[PhenologyMetadata]:
 	"""
 	Get phenology metadata for a location.
 
@@ -89,7 +109,7 @@ def get_phenology_metadata(lat: float, lon: float) -> Optional[PhenologyMetadata
 	"""
 	try:
 		# Get phenology curve
-		curve = get_phenology_curve(lat, lon)
+		curve = get_phenology_curve(lat, lon, token=token, dataset_id=dataset_id, user_id=user_id)
 		if curve is None:
 			return None
 
@@ -97,5 +117,14 @@ def get_phenology_metadata(lat: float, lon: float) -> Optional[PhenologyMetadata
 		return PhenologyMetadata(phenology_curve=curve)
 
 	except Exception as e:
-		logger.error(f'Error creating phenology metadata: {str(e)}')
+		logger.error(
+			f'Error creating phenology metadata: {str(e)}',
+			LogContext(
+				category=LogCategory.METADATA,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'error': str(e)},
+			),
+		)
 		return None

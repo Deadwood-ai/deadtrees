@@ -71,14 +71,24 @@ def process_metadata(task: QueueTask, temp_dir: Path):
 			),
 		)
 
-		admin_levels = get_admin_tags(bbox_centroid)
+		admin_levels = get_admin_tags(
+			bbox_centroid,
+			token=token,
+			dataset_id=task.dataset_id,
+			user_id=task.user_id,
+		)
 
 		admin_metadata = AdminBoundariesMetadata(
 			admin_level_1=admin_levels[0], admin_level_2=admin_levels[1], admin_level_3=admin_levels[2]
 		)
 
 		# Get biome data
-		biome_name, biome_id = get_biome_data(bbox_centroid)
+		biome_name, biome_id = get_biome_data(
+			bbox_centroid,
+			token=token,
+			dataset_id=task.dataset_id,
+			user_id=task.user_id,
+		)
 		biome_metadata = BiomeMetadata(biome_name=biome_name, biome_id=biome_id)
 
 		# Get phenology data
@@ -96,6 +106,9 @@ def process_metadata(task: QueueTask, temp_dir: Path):
 		phenology_metadata = get_phenology_metadata(
 			lat=bbox_centroid[1],  # latitude
 			lon=bbox_centroid[0],  # longitude
+			token=token,
+			dataset_id=task.dataset_id,
+			user_id=task.user_id,
 		)
 
 		# Create metadata entry with GADM, biome, and phenology data

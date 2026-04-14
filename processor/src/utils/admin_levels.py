@@ -6,6 +6,7 @@ from shared.logger import logger
 from shared.db import use_client
 from shared.settings import settings
 from shared.models import Dataset
+from shared.logging import LogContext, LogCategory
 
 # Define the path to the GADM database
 GADM_PATH = Path(settings.GADM_DATA_PATH)
@@ -21,7 +22,9 @@ def get_gadm_path():
 	return GADM_PATH
 
 
-def get_admin_tags(point: Tuple[float, float]) -> List[Optional[str]]:
+def get_admin_tags(
+	point: Tuple[float, float], token: str = None, dataset_id: int = None, user_id: str = None
+) -> List[Optional[str]]:
 	"""
 	Returns administrative names for levels 0 (country), 1 (state/province),
 	and 2 (municipality/district).
@@ -62,7 +65,16 @@ def get_admin_tags(point: Tuple[float, float]) -> List[Optional[str]]:
 		return [None, None, None]
 
 	except Exception as e:
-		logger.error(f'Error getting GADM admin tags: {str(e)}')
+		logger.error(
+			f'Error getting GADM admin tags: {str(e)}',
+			LogContext(
+				category=LogCategory.METADATA,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'error': str(e)},
+			),
+		)
 		return [None, None, None]
 
 
@@ -84,7 +96,7 @@ def update_metadata_admin_level(dataset_id: int, token: str):
 			data = Dataset(**response.data[0])
 
 		# Get admin tags using GADM data
-		admin_levels = get_admin_tags(data.centroid)
+		admin_levels = get_admin_tags(data.centroid, token=token, dataset_id=dataset_id)
 		metadata_update = {
 			'admin_level_1': admin_levels[0],  # country
 			'admin_level_2': admin_levels[1],  # state/province

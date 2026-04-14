@@ -82,7 +82,13 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 			'Starting thumbnail generation',
 			LogContext(category=LogCategory.THUMBNAIL, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 		)
-		calculate_thumbnail(str(input_path), str(output_path))
+		calculate_thumbnail(
+			str(input_path),
+			str(output_path),
+			token=token,
+			dataset_id=task.dataset_id,
+			user_id=task.user_id,
+		)
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 		logger.info(
 			'Thumbnail generated successfully',
