@@ -134,6 +134,16 @@ api/
     └── routers/
 ```
 
+### **Frontend Structure**
+```
+frontend/
+├── src/                     # React application source
+├── public/                  # Static assets
+├── docs/                    # Frontend-specific plans/changelogs
+├── test/                    # Frontend fixtures/tests
+└── firebase.json            # Firebase Hosting config
+```
+
 ### **Processor Service Structure**  
 ```
 processor/
@@ -150,6 +160,18 @@ processor/
 └── tests/                     # 🧪 Mirror src/ structure
     ├── utils/
     └── processors/
+```
+
+### **Repository Top Level**
+```
+.
+├── api/                     # FastAPI backend service
+├── processor/               # Processing pipeline
+├── shared/                  # Shared utilities and models
+├── supabase/                # Database migrations and Supabase config
+├── frontend/                # React frontend application
+├── deadtrees-cli/           # CLI and dev tooling
+└── .cursor/rules/           # Agent guidance
 ```
 
 ## 🎯 **NAMING CONVENTIONS**
