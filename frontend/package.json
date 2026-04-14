@@ -30,7 +30,7 @@
     "geotiff-geokeys-to-proj4": "^2024.4.13",
     "kompas": "^1.0.0",
     "localforage": "^1.10.0",
-    "lodash": "^4.17.21",
+    "lodash": "^4.18.1",
     "match-sorter": "^6.3.4",
     "ol": "^10.4.0",
     "ol-mapbox-style": "^13.4.0",
