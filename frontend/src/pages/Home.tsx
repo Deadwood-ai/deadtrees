@@ -7,6 +7,7 @@ import PlatformFeatures from "../components/Home/PlatformFeatures";
 import GetInContact from "../components/Home/GetInContact";
 
 import { useData } from "../hooks/useDataProvider";
+import { useAnalytics } from "../hooks/useAnalytics";
 
 const FAQ_ITEM_STYLE = {
 	border: "1px solid #e2e8f0",
@@ -20,6 +21,7 @@ const FAQ_ITEM_STYLE = {
 
 const FAQ = () => {
   const { authors } = useData();
+  const { track } = useAnalytics("faq");
   const contributorNames = useMemo(
     () => (authors || []).map((author) => author.label).sort((a, b) => a.localeCompare(b)),
     [authors],
@@ -175,6 +177,12 @@ const FAQ = () => {
           style={{ backgroundColor: "transparent" }}
           className="w-full"
           items={FAQItems}
+          onChange={(activeKeys) => {
+            const openedKey = Array.isArray(activeKeys) ? activeKeys.at(-1) : activeKeys;
+            if (typeof openedKey === "string") {
+              track("faq_opened", { faq_item_key: openedKey });
+            }
+          }}
         />
       </div>
     </section>

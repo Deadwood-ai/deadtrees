@@ -7,6 +7,7 @@ import { useAuth } from "../../hooks/useAuthProvider";
 import { useData } from "../../hooks/useDataProvider";
 import { useDesktopOnlyFeature } from "../../hooks/useDesktopOnlyFeature";
 import { isDatasetViewable } from "../../utils/datasetVisibility";
+import { useAnalytics } from "../../hooks/useAnalytics";
 import LogoBannerBand from "./LogoBanner";
 
 const logos = [
@@ -89,6 +90,7 @@ const Hero = () => {
 	const { user } = useAuth();
 	const { data, authors } = useData();
 	const { isMobile, runDesktopOnlyAction } = useDesktopOnlyFeature();
+	const { track } = useAnalytics("home");
 
 	const stats = useMemo(() => {
 		if (!data) return null;
@@ -102,6 +104,11 @@ const Hero = () => {
 	}, [data, authors]);
 
 	const handleContribute = useCallback(() => {
+		track("landing_cta_clicked", {
+			cta_name: "hero_contribute_drone_data",
+			action_target: user ? "/profile" : "/sign-in",
+			...(isMobile ? { blocked_reason: "mobile" } : {}),
+		});
 		runDesktopOnlyAction("upload", () => {
 			if (user) {
 				navigate("/profile");
@@ -109,15 +116,23 @@ const Hero = () => {
 				navigate("/sign-in");
 			}
 		});
-	}, [navigate, runDesktopOnlyAction, user]);
+	}, [isMobile, navigate, runDesktopOnlyAction, track, user]);
 
 	const handleExploreMap = useCallback(() => {
+		track("landing_cta_clicked", {
+			cta_name: "hero_explore_map",
+			action_target: "/deadtrees",
+		});
 		navigate("/deadtrees");
-	}, [navigate]);
+	}, [navigate, track]);
 
 	const handleExploreDatasets = useCallback(() => {
+		track("landing_cta_clicked", {
+			cta_name: "hero_explore_datasets",
+			action_target: "/dataset",
+		});
 		navigate("/dataset");
-	}, [navigate]);
+	}, [navigate, track]);
 
 	return (
 		<section className="relative flex w-full flex-col overflow-hidden min-h-screen pt-24 md:pt-28">

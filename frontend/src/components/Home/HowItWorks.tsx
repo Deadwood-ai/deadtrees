@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "antd";
 import { CloudUploadOutlined, GlobalOutlined, DatabaseOutlined } from "@ant-design/icons";
 import { useDesktopOnlyFeature } from "../../hooks/useDesktopOnlyFeature";
+import { useAnalytics } from "../../hooks/useAnalytics";
 import DataGallery from "./DataGallery";
 
 const UPLOAD_VIDEO_URL = "https://data2.deadtrees.earth/assets/v1/videos/upload.mp4";
@@ -45,7 +46,8 @@ const DeferredMiniSatelliteMap = () => {
 
 const HowItWorks = () => {
   const navigate = useNavigate();
-  const { runDesktopOnlyAction } = useDesktopOnlyFeature();
+  const { isMobile, runDesktopOnlyAction } = useDesktopOnlyFeature();
+  const { track } = useAnalytics("home");
 
   return (
     <section className="w-full bg-[#F8FAF9] border-t border-slate-200/50 py-24 md:py-32">
@@ -80,7 +82,14 @@ const HowItWorks = () => {
               size="large"
               icon={<CloudUploadOutlined />}
               className="min-h-11 px-6"
-              onClick={() => runDesktopOnlyAction("upload", () => navigate("/profile"))}
+              onClick={() => {
+                track("landing_cta_clicked", {
+                  cta_name: "pipeline_upload_via_profile",
+                  action_target: "/profile",
+                  ...(isMobile ? { blocked_reason: "mobile" } : {}),
+                });
+                runDesktopOnlyAction("upload", () => navigate("/profile"));
+              }}
             >
                 Upload via Profile
             </Button>
@@ -118,7 +127,17 @@ const HowItWorks = () => {
           </div>
           <div className="flex justify-center">
             <Link to="/dataset">
-              <Button size="large" icon={<DatabaseOutlined />} className="min-h-11 px-6">
+              <Button
+                size="large"
+                icon={<DatabaseOutlined />}
+                className="min-h-11 px-6"
+                onClick={() =>
+                  track("landing_cta_clicked", {
+                    cta_name: "pipeline_browse_dataset_archive",
+                    action_target: "/dataset",
+                  })
+                }
+              >
                 Browse Dataset Archive
               </Button>
             </Link>
@@ -143,7 +162,18 @@ const HowItWorks = () => {
               The high-resolution ground truth trains our satellite models to generate large-scale spatiotemporal maps of forest mortality at the European scale. We provide embedded visualization and download of these extensive tree mortality products.
             </p>
             <Link to="/deadtrees">
-              <Button type="primary" size="large" icon={<GlobalOutlined />} className="min-h-11 px-6">
+              <Button
+                type="primary"
+                size="large"
+                icon={<GlobalOutlined />}
+                className="min-h-11 px-6"
+                onClick={() =>
+                  track("landing_cta_clicked", {
+                    cta_name: "pipeline_explore_satellite_maps",
+                    action_target: "/deadtrees",
+                  })
+                }
+              >
                 Explore Satellite Maps
               </Button>
             </Link>

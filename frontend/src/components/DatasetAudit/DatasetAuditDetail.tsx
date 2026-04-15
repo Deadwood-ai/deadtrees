@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { Form, message, Button, Drawer } from "antd";
 import { IDataset } from "../../types/dataset";
 import { DatasetDetailsMapProvider } from "../../hooks/useDatasetDetailsMapProvider";
@@ -27,6 +27,7 @@ import AuditMapWithControls, { AuditMapWithControlsHandle } from "./AuditMapWith
 import { MAP_AUDIT_SIDEBAR_WIDTH_CLASS, MAP_FLOATING_TOP_CLASS } from "../../theme/mapLayout";
 import { resolveDownloadUrl } from "../../utils/downloadUrl";
 import { useIsMobile } from "../../hooks/useIsMobile";
+import { useAnalytics } from "../../hooks/useAnalytics";
 
 interface DatasetAuditDetailProps {
 	dataset: IDataset;
@@ -51,6 +52,7 @@ interface DownloadApiResponse {
 export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps) {
 	const { session } = useAuth();
 	const isMobile = useIsMobile();
+	const { track } = useAnalytics("audit");
 	// Map ref for map controls (zoom, flash, refresh)
 	const mapRef = useRef<AuditMapWithControlsHandle>(null);
 
@@ -145,6 +147,10 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 
 		const downloadStarted = startDownload(`${ds.id}-ortho`);
 		if (!downloadStarted) return;
+		track("dataset_download_started", {
+			dataset_id: ds.id,
+			download_type: "orthophoto",
+		});
 
 		const baseUrl = `${Settings.API_URL}/download/datasets/${ds.id}/dataset.zip`;
 
@@ -203,11 +209,20 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 								}
 
 								downloadMsg();
+								track("dataset_download_completed", {
+									dataset_id: ds.id,
+									download_type: "orthophoto",
+								});
 								window.location.href = downloadUrl;
 								message.success("Download started!");
 								finishDownload();
 							} else if (statusData.status === "failed") {
 								downloadMsg();
+								track("dataset_download_failed", {
+									dataset_id: ds.id,
+									download_type: "orthophoto",
+									failure_reason: statusData.message || "preparation_failed",
+								});
 								message.error(`Download failed: ${statusData.message || "Unknown error"}`);
 								finishDownload();
 							} else {
@@ -216,6 +231,11 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 						})
 						.catch(() => {
 							downloadMsg();
+							track("dataset_download_failed", {
+								dataset_id: ds.id,
+								download_type: "orthophoto",
+								failure_reason: "status_check_failed",
+							});
 							message.error("Failed to check download status");
 							finishDownload();
 						});
@@ -225,10 +245,22 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 			})
 			.catch((error: Error) => {
 				downloadMsg();
+				track("dataset_download_failed", {
+					dataset_id: ds.id,
+					download_type: "orthophoto",
+					failure_reason: error?.message || "start_failed",
+				});
 				message.error(error?.message || "Failed to initiate download");
 				finishDownload();
 			});
 	};
+
+	useEffect(() => {
+		track("correction_review_started", {
+			dataset_id: dataset.id,
+			review_scope: "dataset",
+		});
+	}, [dataset.id, track]);
 
 	// Show loading state
 	if (isLoading) {

@@ -21,6 +21,7 @@ import { useDatasetFlags, useUpdateFlagStatus } from "../../hooks/useDatasetFlag
 import { usePhenologyData } from "../../hooks/usePhenologyData";
 import { useSeasonPrompt } from "../../hooks/useSeasonPrompt";
 import { supabase } from "../../hooks/useSupabase";
+import { trackAppEvent } from "../../utils/analytics";
 import { AOIToolbarState } from "../DatasetDetailsMap/DatasetDetailsMap";
 
 export interface UseAuditDetailStateProps {
@@ -281,6 +282,10 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 
 			const isCompletion = !auditData;
 			await saveAudit(auditPayload);
+			trackAppEvent("audit_completed", {
+				dataset_id: dataset.id,
+				final_assessment: values.final_assessment || "unknown",
+			});
 			if (!isCompletion) {
 				message.success("Audit data updated successfully");
 			}

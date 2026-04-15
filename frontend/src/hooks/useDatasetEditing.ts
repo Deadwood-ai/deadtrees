@@ -18,6 +18,7 @@ import {
   type LayerType,
 } from "./useSaveCorrections";
 import { useDatasetLabelTypes } from "./useDatasetLabelTypes";
+import { trackAppEvent } from "../utils/analytics";
 
 interface UseDatasetEditingOptions {
   datasetId: number | undefined;
@@ -124,6 +125,12 @@ export function useDatasetEditing({ datasetId, user }: UseDatasetEditingOptions)
       }
       setEditingLayerType(layerType);
       setIsEditing(true);
+      if (datasetId) {
+        trackAppEvent("edit_started", {
+          dataset_id: datasetId,
+          layer_type: layerType,
+        });
+      }
       editor.startEditing();
       const overlaySource = editor.getOverlayLayer()?.getSource();
       emitDebugEvent("start-editing:after-editor-start", {
@@ -134,18 +141,24 @@ export function useDatasetEditing({ datasetId, user }: UseDatasetEditingOptions)
         overlayFeatureCount: overlaySource?.getFeatures()?.length ?? null,
       });
     },
-    [user, navigate, editor, emitDebugEvent, hasDeadwood, hasForestCover]
+    [datasetId, user, navigate, editor, emitDebugEvent, hasDeadwood, hasForestCover]
   );
 
   // Cancel editing
   const handleCancelEditing = useCallback(() => {
+    if (datasetId && editingLayerType) {
+      trackAppEvent("edit_cancelled", {
+        dataset_id: datasetId,
+        layer_type: editingLayerType,
+      });
+    }
     editor.stopEditing();
     editor.getOverlayLayer()?.getSource()?.clear();
     setIsEditing(false);
     setEditingLayerType(null);
     setInitialFeatures([]);
     message.info("Editing cancelled");
-  }, [editor]);
+  }, [datasetId, editingLayerType, editor]);
 
   // Save edits
   const handleSaveEdits = useCallback(async () => {
@@ -198,6 +211,10 @@ export function useDatasetEditing({ datasetId, user }: UseDatasetEditingOptions)
       }
 
       message.success("Corrections saved successfully!");
+      trackAppEvent("edit_saved", {
+        dataset_id: datasetId,
+        layer_type: editingLayerType,
+      });
       editor.stopEditing();
       editor.getOverlayLayer()?.getSource()?.clear();
       setIsEditing(false);
@@ -217,7 +234,7 @@ export function useDatasetEditing({ datasetId, user }: UseDatasetEditingOptions)
     } finally {
       setIsSaving(false);
     }
-  }, [predictionLabel?.id, editingLayerType, user?.id, datasetId, editor, initialFeatures, geoJson, saveCorrections]);
+  }, [predictionLabel?.id, editingLayerType, user?.id, datasetId, editor, initialFeatures, geoJson, saveCorrections, emitDebugEvent]);
 
   // Load geometries into editor when editing starts
   useEffect(() => {

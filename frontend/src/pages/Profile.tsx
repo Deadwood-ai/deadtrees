@@ -12,6 +12,7 @@ import PublicationModal from "../components/PublicationModal";
 import PublicationsTable from "../components/PublicationsTable";
 import { useIsMobile } from "../hooks/useIsMobile";
 import DesktopOnlyFeatureNotice from "../components/DesktopOnlyFeatureNotice";
+import { useAnalytics } from "../hooks/useAnalytics";
 
 interface ProfileAvatarProps {
   email: string;
@@ -53,6 +54,7 @@ export default function ProfilePage() {
   const { session, user } = useAuth();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const { track } = useAnalytics("profile");
 
   // const { data: userData } = useUserDatasets();
   const { data: myFlags = [] } = useMyFlags();
@@ -73,6 +75,9 @@ export default function ProfilePage() {
   };
 
   const showPublicationModal = () => {
+    track("publish_started", {
+      dataset_count: selectedDatasets.length,
+    });
     setIsPublicationModalVisible(true);
   };
 

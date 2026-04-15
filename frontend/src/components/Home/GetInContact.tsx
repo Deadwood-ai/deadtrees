@@ -6,6 +6,7 @@ import { useDesktopOnlyFeature } from "../../hooks/useDesktopOnlyFeature";
 import { usePresentations } from "../../hooks/usePresentations";
 import { supabase } from "../../hooks/useSupabase";
 import { Settings } from "../../config";
+import { useAnalytics } from "../../hooks/useAnalytics";
 
 interface Contribution {
 	title: string;
@@ -100,13 +101,15 @@ const UpcomingConferences = () => {
 
 const GetInContact = () => {
 	const navigate = useNavigate();
-	const { runDesktopOnlyAction } = useDesktopOnlyFeature();
+	const { isMobile, runDesktopOnlyAction } = useDesktopOnlyFeature();
 	const [email, setEmail] = useState<string>("");
 	const [isSubmitting, setIsSubmitting] = useState(false);
+	const { track } = useAnalytics("newsletter");
 
 	const addSubscriber = useCallback(async () => {
 		const emailCheck = /\S+@\S+\.\S+/;
 		if (!emailCheck.test(email)) {
+			track("newsletter_signup_submitted", { status: "invalid_email" });
 			notification.error({
 				message: "Invalid email",
 				description: "Please enter a valid email address.",
@@ -124,12 +127,14 @@ const GetInContact = () => {
 
 		if (insertError) {
 			if (insertError.code === "23505") {
+				track("newsletter_signup_submitted", { status: "duplicate" });
 				notification.info({
 					message: "Already subscribed",
 					description: "This email is already subscribed to our newsletter.",
 					placement: "topRight",
 				});
 			} else {
+				track("newsletter_signup_submitted", { status: "error" });
 				notification.error({
 					message: "Error",
 					description: "An error occurred while adding the subscriber.",
@@ -138,6 +143,7 @@ const GetInContact = () => {
 				console.error("Error adding subscriber:", insertError);
 			}
 		} else {
+			track("newsletter_signup_submitted", { status: "success" });
 			notification.success({
 				message: "Thank you!",
 				description: "Thank you for subscribing! You will receive updates on new features and developments.",
@@ -146,7 +152,7 @@ const GetInContact = () => {
 			setEmail("");
 		}
 		setIsSubmitting(false);
-	}, [email]);
+	}, [email, track]);
 
 	return (
 		<section className="w-full bg-[#F8FAF9] border-y border-slate-200/50 py-24 md:py-32">
@@ -174,12 +180,25 @@ const GetInContact = () => {
 								<Button
 									type="primary"
 									size="large"
-									onClick={() => runDesktopOnlyAction("upload", () => navigate("/profile"))}
+									onClick={() => {
+										track("landing_cta_clicked", {
+											cta_name: "community_start_contributing",
+											action_target: "/profile",
+											...(isMobile ? { blocked_reason: "mobile" } : {}),
+										});
+										runDesktopOnlyAction("upload", () => navigate("/profile"));
+									}}
 									className="min-h-11 px-6"
 								>
 								Start contributing
 							</Button>
 							<Button
+								onClick={() =>
+									track("landing_cta_clicked", {
+										cta_name: "community_get_in_touch",
+										action_target: "mailto:info@deadtrees.earth",
+									})
+								}
 								size="large"
 								href="mailto:info@deadtrees.earth?subject=deadtrees.earth collaboration"
 								className="min-h-11 px-6"

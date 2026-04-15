@@ -34,6 +34,7 @@ interface DatasetDetailsMapProps {
   onMapReady?: (map: OLMap) => void;
   onOrthoLayerReady?: (layer: TileLayerWebGL) => void;
   onVectorLayersReady?: (deadwood: VectorTileLayer | null, forestCover: VectorTileLayer | null) => void;
+  onFirstMapInteraction?: () => void;
   hideDeadwoodLayer?: boolean;
   hideForestCoverLayer?: boolean;
   hideDroneImagery?: boolean;
@@ -73,6 +74,7 @@ const DatasetDetailsMapInner = forwardRef<DatasetDetailsMapHandle, DatasetDetail
   onMapReady,
   onOrthoLayerReady,
   onVectorLayersReady,
+  onFirstMapInteraction,
   hideDeadwoodLayer = false,
   hideForestCoverLayer = false,
   hideDroneImagery = false,
@@ -152,6 +154,7 @@ const DatasetDetailsMapInner = forwardRef<DatasetDetailsMapHandle, DatasetDetail
         onMapReady={onMapReady}
         onOrthoLayerReady={onOrthoLayerReady}
         onVectorLayersReady={onVectorLayersReady}
+        onFirstMapInteraction={onFirstMapInteraction}
         showDeadwood={effectiveDeadwoodVisible}
         showForestCover={effectiveForestCoverVisible}
         showDroneImagery={effectiveDroneImageryVisible}

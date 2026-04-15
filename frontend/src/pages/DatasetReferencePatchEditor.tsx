@@ -13,6 +13,7 @@ import {
   useReopenPatchGeneration,
 } from "../hooks/useReferencePatches";
 import { useAuth } from "../hooks/useAuthProvider";
+import { useAnalytics } from "../hooks/useAnalytics";
 import ReferencePatchEditorView from "../components/ReferencePatches/ReferencePatchEditorView";
 import { palette } from "../theme/palette";
 import { MAP_FLOATING_TOP_CLASS } from "../theme/mapLayout";
@@ -21,6 +22,7 @@ export default function DatasetReferencePatchEditor() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { track } = useAnalytics("editor");
   const datasetId = id ? parseInt(id, 10) : undefined;
   const { data: dataset } = useDatasetById(datasetId);
 
@@ -33,6 +35,13 @@ export default function DatasetReferencePatchEditor() {
   const { mutateAsync: reopenPatchGeneration } = useReopenPatchGeneration();
 
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  useEffect(() => {
+    if (!datasetId) return;
+    track("reference_patch_editor_opened", {
+      dataset_id: datasetId,
+    });
+  }, [datasetId, track]);
 
   // Count 20cm base patches
   const basePatchesCount = useMemo(() => allPatches.filter((p) => p.resolution_cm === 20).length, [allPatches]);

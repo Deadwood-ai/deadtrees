@@ -23,6 +23,7 @@ import { useDatasetFilter } from "../hooks/useDatasetFilterProvider";
 import { isDatasetViewable } from "../utils/datasetVisibility";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useDesktopOnlyFeature } from "../hooks/useDesktopOnlyFeature";
+import { useAnalytics } from "../hooks/useAnalytics";
 
 type FilterTag = "platform" | "license" | "authors_image" | "admin_level_1" | "admin_level_3" | "biome";
 
@@ -60,6 +61,7 @@ export default function Dataset() {
   const colorMode: DatasetMapColorMode = "timeline";
   const isMobile = useIsMobile();
   const { runDesktopOnlyAction } = useDesktopOnlyFeature();
+  const { track } = useAnalytics("dataset_archive");
   // Incremented on explicit filter actions to trigger map zoom
   const [filterZoomTrigger, setFilterZoomTrigger] = useState(0);
 
@@ -71,6 +73,17 @@ export default function Dataset() {
 
     return () => clearTimeout(timer);
   }, [searchInput]);
+
+  useEffect(() => {
+    track("dataset_archive_viewed", {});
+  }, [track]);
+
+  useEffect(() => {
+    if (!searchValue.trim()) return;
+    track("dataset_search_used", {
+      search_length: searchValue.trim().length,
+    });
+  }, [searchValue, track]);
 
   const handleSearch = (value: string) => {
     setSearchInput(value);
@@ -84,6 +97,10 @@ export default function Dataset() {
     setFilter(filterValue);
     setFilterTag(filterType);
     setFilterZoomTrigger((n) => n + 1);
+    track("dataset_filter_applied", {
+      filter_type: filterType,
+      filter_value: filterValue,
+    });
   };
 
   const handleFilterButtonClick = () => {
@@ -93,6 +110,14 @@ export default function Dataset() {
   const handleApplyFilters = (newFilters: AdvancedFilters) => {
     setAdvancedFilters(newFilters);
     setFilterZoomTrigger((n) => n + 1);
+    const appliedFilters = Object.entries(newFilters).filter(([, value]) => {
+      if (Array.isArray(value)) return value.length > 0;
+      return value !== null && value !== undefined && value !== "";
+    });
+    track("dataset_filter_applied", {
+      filter_type: appliedFilters.map(([key]) => key).join(",") || "advanced",
+      filter_value: String(appliedFilters.length),
+    });
   };
 
   const processedData = useMemo(() => {
@@ -325,6 +350,11 @@ export default function Dataset() {
             setVisibleFeatures={setVisibleFeatures}
             filterZoomTrigger={filterZoomTrigger}
             colorMode={colorMode}
+            onMapInteracted={() =>
+              track("dataset_map_interacted", {
+                interaction_type: "move",
+              })
+            }
           />
         )}
       </div>
