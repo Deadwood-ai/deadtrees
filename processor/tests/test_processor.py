@@ -7,7 +7,7 @@ from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask, StatusEnum
 from processor.src.processor import (
 	background_process, process_task, get_next_task,
-	detect_crashed_stage, get_completed_stages, PIPELINE_STAGE_MAP,
+	detect_crashed_stage, get_completed_stages, are_requested_stages_complete, PIPELINE_STAGE_MAP,
 )
 
 
@@ -464,6 +464,17 @@ def test_get_completed_stages_none_completed():
 	assert completed == []
 
 
+def test_are_requested_stages_complete_only_returns_true_when_all_requested_flags_are_done():
+	status_data = {
+		'is_ortho_done': True,
+		'is_metadata_done': True,
+		'is_cog_done': False,
+	}
+	assert are_requested_stages_complete(status_data, [TaskTypeEnum.geotiff, TaskTypeEnum.metadata]) is True
+	assert are_requested_stages_complete(status_data, [TaskTypeEnum.geotiff, TaskTypeEnum.cog]) is False
+	assert are_requested_stages_complete(status_data, []) is False
+
+
 @pytest.fixture
 def crashed_dataset_task(test_processor_user, auth_token):
 	"""Create a task that simulates a previous crash (current_status stuck, some stages done)."""
@@ -630,3 +641,84 @@ def test_background_process_detects_stale_active_task_without_stage_update(
 		assert status['has_error'] is True, 'Status should have has_error=True'
 		assert status['current_status'] == 'idle', 'Status should remain/reset to idle'
 		assert 'before the first stage status update' in status['error_message']
+
+
+@pytest.fixture
+def stale_completed_active_task(test_processor_user, auth_token):
+	"""Create a completed task that still has a stale active queue row."""
+	task_id = None
+	dataset_id = None
+	try:
+		with use_client(auth_token) as client:
+			dataset_data = {
+				'file_name': 'completed_stale_active_test.tif',
+				'user_id': test_processor_user,
+				'license': 'CC BY',
+				'platform': 'drone',
+				'authors': ['Test Author'],
+				'data_access': 'public',
+				'aquisition_year': 2024,
+				'aquisition_month': 1,
+				'aquisition_day': 1,
+			}
+			dataset_response = client.table(settings.datasets_table).insert(dataset_data).execute()
+			dataset_id = dataset_response.data[0]['id']
+
+			status_data = {
+				'dataset_id': dataset_id,
+				'is_upload_done': True,
+				'current_status': 'idle',
+				'is_metadata_done': True,
+				'has_error': False,
+			}
+			client.table(settings.statuses_table).insert(status_data).execute()
+
+			task_data = {
+				'dataset_id': dataset_id,
+				'user_id': test_processor_user,
+				'task_types': [TaskTypeEnum.metadata],
+				'priority': 1,
+				'is_processing': True,
+			}
+			response = client.table(settings.queue_table).insert(task_data).execute()
+			task_id = response.data[0]['id']
+
+			yield {'task_id': task_id, 'dataset_id': dataset_id}
+
+	finally:
+		if auth_token:
+			with use_client(auth_token) as client:
+				if task_id:
+					client.table(settings.queue_table).delete().eq('id', task_id).execute()
+				if dataset_id:
+					client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
+					client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
+
+
+def test_background_process_removes_stale_completed_active_task_without_marking_error(
+	stale_completed_active_task, auth_token, monkeypatch
+):
+	"""Completed tasks should not be reclassified as crashes during stale queue recovery."""
+	issue_calls = []
+	monkeypatch.setattr(processor_module, 'create_processing_failure_issue', lambda **kwargs: issue_calls.append(kwargs))
+
+	dataset_id = stale_completed_active_task['dataset_id']
+
+	background_process()
+
+	with use_client(auth_token) as client:
+		queue_response = (
+			client.table(settings.queue_table).select('*')
+			.eq('id', stale_completed_active_task['task_id']).execute()
+		)
+		assert len(queue_response.data) == 0, 'Completed stale task should be removed from queue'
+
+		status_response = (
+			client.table(settings.statuses_table).select('*')
+			.eq('dataset_id', dataset_id).execute()
+		)
+		assert len(status_response.data) == 1
+		status = status_response.data[0]
+		assert status['has_error'] is False, 'Completed stale task should not be marked as errored'
+		assert status['current_status'] == 'idle', 'Completed status should remain idle'
+		assert issue_calls == [], 'Completed stale tasks should not create failure issues'

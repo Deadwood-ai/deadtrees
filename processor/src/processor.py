@@ -78,6 +78,12 @@ def get_completed_stages(status_data: dict) -> list[str]:
 	return completed
 
 
+def are_requested_stages_complete(status_data: dict, task_types: list) -> bool:
+	"""Return True when all requested pipeline stages are already marked complete."""
+	requested = [done_flag for task_type, done_flag, _ in PIPELINE_STAGE_MAP if task_type in task_types]
+	return bool(requested) and all(status_data.get(done_flag, False) for done_flag in requested)
+
+
 
 def get_next_task(token: str) -> QueueTask:
 	"""Get the next task (QueueTask class) in the queue from supabase.
@@ -451,12 +457,29 @@ def background_process():
 				status_resp = client.table(settings.statuses_table) \
 					.select('*').eq('dataset_id', active_task.dataset_id).execute()
 
+			should_mark_error = True
 			if status_resp.data:
 				status = status_resp.data[0]
-				if status['current_status'] != 'idle':
+				completed = get_completed_stages(status)
+				if are_requested_stages_complete(status, active_task.task_types):
+					logger.info(
+						f'Removing stale completed queue task {active_task.id} for dataset {active_task.dataset_id}',
+						LogContext(
+							category=LogCategory.PROCESS,
+							dataset_id=active_task.dataset_id,
+							user_id=active_task.user_id,
+							token=token,
+						),
+					)
+					should_mark_error = False
+					crashed_stage = 'completed'
+					error_msg = ''
+				elif status['current_status'] != 'idle':
 					crashed_stage = detect_crashed_stage(status, active_task.task_types)
-					completed = get_completed_stages(status)
 					error_msg = f'Processing container crashed during {crashed_stage}. Completed: {completed}'
+				elif completed:
+					crashed_stage = detect_crashed_stage(status, active_task.task_types)
+					error_msg = f'Processing container crashed after completing {completed} and before starting {crashed_stage}.'
 				else:
 					crashed_stage = 'startup'
 					error_msg = 'Processing container crashed before the first stage status update.'
@@ -464,23 +487,24 @@ def background_process():
 				crashed_stage = 'unknown'
 				error_msg = 'Processing container crashed and no status row was available for recovery.'
 
-			update_status(
-				token,
-				dataset_id=active_task.dataset_id,
-				current_status=StatusEnum.idle,
-				has_error=True,
-				error_message=error_msg,
-			)
-
-			try:
-				create_processing_failure_issue(
-					token=token,
+			if should_mark_error:
+				update_status(
+					token,
 					dataset_id=active_task.dataset_id,
-					stage=crashed_stage,
+					current_status=StatusEnum.idle,
+					has_error=True,
 					error_message=error_msg,
 				)
-			except Exception as linear_error:
-				logger.warning(f'Failed to create Linear issue for stale active task: {linear_error}')
+
+				try:
+					create_processing_failure_issue(
+						token=token,
+						dataset_id=active_task.dataset_id,
+						stage=crashed_stage,
+						error_message=error_msg,
+					)
+				except Exception as linear_error:
+					logger.warning(f'Failed to create Linear issue for stale active task: {linear_error}')
 
 			with use_client(token) as client:
 				client.table(settings.queue_table).delete().eq('id', active_task.id).execute()
