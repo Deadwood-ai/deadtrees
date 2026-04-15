@@ -32,7 +32,6 @@ STORAGE_SERVER_USERNAME=your_username
 SSH_PRIVATE_KEY_PATH=/path/to/your/ssh/key
 STORAGE_SERVER_DATA_PATH=/apps/storage-server/production
 DEV_MODE=true
-LOGFIRE_TOKEN=your_logfire_token
 ```
 
 ### Download required assets:
@@ -211,7 +210,6 @@ On the Storage server, only the necessary env is set
 ```
 SUPABASE_URL=your_supabase_url
 SUPABASE_KEY=your_supabase_key
-LOGFIRE_TOKEN=your_logfire_token
 ```
 
 ### Download required assets:
