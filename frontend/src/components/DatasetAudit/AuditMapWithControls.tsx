@@ -18,6 +18,7 @@ import { useAuth } from "../../hooks/useAuthProvider";
 import { useDatasetEditing } from "../../hooks/useDatasetEditing";
 import { mapColors } from "../../theme/mapColors";
 import { MAP_FLOATING_TOP_CLASS } from "../../theme/mapLayout";
+import { trackAppEvent } from "../../utils/analytics";
 
 interface AuditMapWithControlsProps {
 	dataset: IDataset;
@@ -109,10 +110,14 @@ const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWith
 		}), []);
 
 		// Handlers for correction review
-		const handleApproveCorrection = async (correctionId: number, _geometryId: number) => {
+		const handleApproveCorrection = async (correctionId: number, geometryId: number) => {
 			try {
+				void geometryId;
 				const result = await approveCorrection(correctionId);
 				if (result) {
+					trackAppEvent("correction_approved", {
+						dataset_id: dataset.id,
+					});
 					message.success("Correction approved");
 					queryClient.invalidateQueries({ queryKey: ["pendingCorrections"] });
 					queryClient.invalidateQueries({ queryKey: ["correctionStats", dataset?.id] });
@@ -128,10 +133,14 @@ const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWith
 			}
 		};
 
-		const handleRevertCorrection = async (correctionId: number, _geometryId: number) => {
+		const handleRevertCorrection = async (correctionId: number, geometryId: number) => {
 			try {
+				void geometryId;
 				const result = await revertCorrection(correctionId);
 				if (result) {
+					trackAppEvent("correction_reverted", {
+						dataset_id: dataset.id,
+					});
 					message.success("Correction reverted");
 					queryClient.invalidateQueries({ queryKey: ["pendingCorrections"] });
 					queryClient.invalidateQueries({ queryKey: ["correctionStats", dataset?.id] });

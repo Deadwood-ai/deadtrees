@@ -2,11 +2,20 @@ import { SignUp as SignUpAuthUI } from "@supabase/auth-ui-react";
 import { ThemeSupa } from "@supabase/auth-ui-shared";
 import { supabase } from "../../hooks/useSupabase";
 import { Link, useSearchParams } from "react-router-dom";
+import { useEffect } from "react";
 import { palette } from "../../theme/palette";
+import { useAnalytics } from "../../hooks/useAnalytics";
 
 const SignUp = () => {
   const [searchParams] = useSearchParams();
   const returnTo = searchParams.get("returnTo") || "/profile";
+  const { track } = useAnalytics("auth");
+
+  useEffect(() => {
+    track("sign_up_started", {
+      auth_path: window.location.pathname + window.location.search,
+    });
+  }, [track]);
 
   return (
     <div className="m-auto flex h-full max-w-7xl items-center justify-center">

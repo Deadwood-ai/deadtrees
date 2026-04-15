@@ -3,6 +3,7 @@ import { Modal, Form, Input, Button, Typography, Table, Spin, message, Tag, Row,
 import { PlusOutlined, DeleteOutlined, SearchOutlined, ClockCircleOutlined } from "@ant-design/icons";
 import { supabase } from "../hooks/useSupabase";
 import { useAuth } from "../hooks/useAuthProvider";
+import { useAnalytics } from "../hooks/useAnalytics";
 import { processOrcidInput } from "../utils/orcidUtils";
 import { palette } from "../theme/palette";
 
@@ -41,6 +42,7 @@ const PublicationModal: React.FC<PublicationModalProps> = ({ visible, onCancel, 
   const [authors, setAuthors] = useState<Author[]>([]);
   const [orcidLoading, setOrcidLoading] = useState(false);
   const [currentOrcid, setCurrentOrcid] = useState("");
+  const { track } = useAnalytics("profile");
 
   // Generate title based on datasets
   useEffect(() => {
@@ -251,6 +253,10 @@ const PublicationModal: React.FC<PublicationModalProps> = ({ visible, onCancel, 
   };
 
   const handleSubmit = async () => {
+    track("publish_submitted", {
+      dataset_count: datasets.length,
+      publish_target: "freidata",
+    });
     try {
       const values = await form.validateFields();
 
@@ -328,6 +334,10 @@ const PublicationModal: React.FC<PublicationModalProps> = ({ visible, onCancel, 
       }
 
       message.success("Publication submitted successfully");
+      track("publish_completed", {
+        dataset_count: datasets.length,
+        publish_target: "freidata",
+      });
 
       // Call the onSuccess callback if provided
       if (onSuccess) {
@@ -337,6 +347,11 @@ const PublicationModal: React.FC<PublicationModalProps> = ({ visible, onCancel, 
       }
     } catch (error) {
       console.error("Error submitting publication:", error);
+      track("publish_failed", {
+        dataset_count: datasets.length,
+        publish_target: "freidata",
+        failure_reason: error instanceof Error ? error.message : "submit_failed",
+      });
       message.error("Failed to submit publication");
     } finally {
       setLoading(false);

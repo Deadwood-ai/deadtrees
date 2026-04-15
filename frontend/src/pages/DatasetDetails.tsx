@@ -15,6 +15,7 @@ import { useCreateFlag } from "../hooks/useDatasetFlags";
 import { useDatasetEditing } from "../hooks/useDatasetEditing";
 import { useCanAudit } from "../hooks/useUserPrivileges";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { useAnalytics } from "../hooks/useAnalytics";
 
 import DatasetLayerControlPanel from "../components/DatasetDetailsMap/DatasetLayerControlPanel";
 import EditingSidebar from "../components/DatasetDetailsMap/EditingSidebar";
@@ -32,6 +33,7 @@ export default function DatasetDetails() {
   const hasValidDatasetId = typeof datasetId === "number" && Number.isFinite(datasetId);
   const { user } = useAuth();
   const { canAudit } = useCanAudit();
+  const { track } = useAnalytics("dataset_detail");
   const { data: dataset, isLoading: isDatasetLoading } = usePublicDatasetById(hasValidDatasetId ? datasetId : undefined);
   const {
     setViewport,
@@ -100,10 +102,19 @@ export default function DatasetDetails() {
     async (values: { is_ortho_mosaic_issue: boolean; is_prediction_issue: boolean; description: string }) => {
       if (!dataset) return;
       await createFlag({ dataset_id: dataset.id, ...values });
+      track("flag_submitted", {
+        dataset_id: dataset.id,
+        flag_type:
+          values.is_ortho_mosaic_issue && values.is_prediction_issue
+            ? "mixed"
+            : values.is_ortho_mosaic_issue
+              ? "orthomosaic"
+              : "prediction",
+      });
       message.success("Issue reported successfully");
       setReportModalOpen(false);
     },
-    [dataset, createFlag]
+    [dataset, createFlag, track]
   );
 
   useEffect(() => {
@@ -111,6 +122,21 @@ export default function DatasetDetails() {
       setLabelsOnly(true);
     }
   }, [dataset?.data_access, labelsOnly, setLabelsOnly]);
+
+  useEffect(() => {
+    if (!dataset) return;
+    track("dataset_opened", { dataset_id: dataset.id });
+    if (dataset.is_deadwood_done || dataset.is_forest_cover_done) {
+      track("processing_result_viewed", {
+        dataset_id: dataset.id,
+        processing_type: dataset.is_deadwood_done && dataset.is_forest_cover_done
+          ? "deadwood_and_forest_cover"
+          : dataset.is_deadwood_done
+            ? "deadwood"
+            : "forest_cover",
+      });
+    }
+  }, [dataset, track]);
 
   // Loading state
   if (!hasValidDatasetId || isDatasetLoading) {
@@ -308,6 +334,12 @@ export default function DatasetDetails() {
             data={dataset}
             onMapReady={editing.handleMapReady}
             onOrthoLayerReady={editing.handleOrthoLayerReady}
+            onFirstMapInteraction={() =>
+              track("dataset_map_interacted", {
+                dataset_id: dataset.id,
+                interaction_type: "move",
+              })
+            }
             hideDeadwoodLayer={isEditing}
             hideForestCoverLayer={isEditing}
             refreshKey={refreshKey}

@@ -28,6 +28,8 @@ export interface UseMapCoreOptions {
 	onMapReady?: (map: Map) => void;
 	/** Callback when ortho layer is ready */
 	onOrthoLayerReady?: (layer: TileLayerWebGL) => void;
+	/** Callback for the first meaningful interaction after initial map positioning */
+	onFirstInteraction?: () => void;
 	/** Minimum zoom level */
 	minZoom?: number;
 	/** Maximum zoom level */
@@ -85,6 +87,7 @@ export function useMapCore({
 	onViewportChange,
 	onMapReady,
 	onOrthoLayerReady,
+	onFirstInteraction,
 	minZoom = 2,
 	maxZoom = 23,
 	isReady = true,
@@ -99,12 +102,16 @@ export function useMapCore({
 	const onViewportChangeRef = useRef(onViewportChange);
 	const onMapReadyRef = useRef(onMapReady);
 	const onOrthoLayerReadyRef = useRef(onOrthoLayerReady);
+	const onFirstInteractionRef = useRef(onFirstInteraction);
+	const hasSeenInitialMoveEndRef = useRef(false);
+	const hasTrackedInteractionRef = useRef(false);
 	
 	// Keep refs up to date
 	useEffect(() => {
 		onViewportChangeRef.current = onViewportChange;
 		onMapReadyRef.current = onMapReady;
 		onOrthoLayerReadyRef.current = onOrthoLayerReady;
+		onFirstInteractionRef.current = onFirstInteraction;
 	});
 
 	// Layer management
@@ -199,6 +206,14 @@ export function useMapCore({
 					zoom: view.getZoom() || 2,
 					extent: view.calculateExtent(newMap.getSize() || [0, 0]) as number[],
 				});
+				if (!hasSeenInitialMoveEndRef.current) {
+					hasSeenInitialMoveEndRef.current = true;
+					return;
+				}
+				if (!hasTrackedInteractionRef.current) {
+					hasTrackedInteractionRef.current = true;
+					onFirstInteractionRef.current?.();
+				}
 			});
 
 			// Fit to extent if no saved viewport
@@ -222,8 +237,8 @@ export function useMapCore({
 						const disposableLayer = layer as DisposableLayer;
 						const source = disposableLayer.getSource?.();
 						if (source) {
-							if ("clear" in source) source.clear();
-							if ("dispose" in source) source.dispose();
+							if ("clear" in source && typeof source.clear === "function") source.clear();
+							if ("dispose" in source && typeof source.dispose === "function") source.dispose();
 						}
 						disposableLayer.dispose?.();
 					});
@@ -232,6 +247,8 @@ export function useMapCore({
 				mapRef.current.dispose();
 				mapRef.current = null;
 				orthoLayerRef.current = null;
+				hasSeenInitialMoveEndRef.current = false;
+				hasTrackedInteractionRef.current = false;
 				setIsMapReady(false);
 				setExtent(null);
 			}

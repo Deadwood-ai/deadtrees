@@ -8,6 +8,7 @@ import { resolveDownloadUrl } from "../../utils/downloadUrl";
 import { useEffect } from "react";
 import DesktopOnlyFeatureNotice from "../DesktopOnlyFeatureNotice";
 import { useDesktopOnlyFeature } from "../../hooks/useDesktopOnlyFeature";
+import { useAnalytics } from "../../hooks/useAnalytics";
 
 interface DownloadSectionProps {
   dataset: IDataset;
@@ -40,6 +41,7 @@ export default function DownloadSection({
 }: DownloadSectionProps) {
   const { session } = useAuth();
   const { isMobile } = useDesktopOnlyFeature();
+  const { track } = useAnalytics("dataset_detail");
   const isViewOnlyDataset = dataset.data_access === "viewonly";
 
   useEffect(() => {
@@ -107,6 +109,12 @@ export default function DownloadSection({
     const downloadStarted = startDownload(dataset.id.toString());
     if (!downloadStarted) return;
 
+    const downloadType = labelsOnly || isViewOnlyDataset ? "labels" : "dataset";
+    track("dataset_download_started", {
+      dataset_id: dataset.id,
+      download_type: downloadType,
+    });
+
     const baseUrl = labelsOnly
       ? `${Settings.API_URL}/download/datasets/${dataset.id}/labels.gpkg`
       : `${Settings.API_URL}/download/datasets/${dataset.id}/dataset.zip`;
@@ -146,6 +154,10 @@ export default function DownloadSection({
 
                 downloadMsg();
                 finishDownload();
+                track("dataset_download_completed", {
+                  dataset_id: dataset.id,
+                  download_type: downloadType,
+                });
                 window.location.href = downloadUrl;
                 message.success({
                   content: `${labelsOnly ? "Predictions" : "Dataset"} download started!`,
@@ -154,6 +166,11 @@ export default function DownloadSection({
               } else if (statusData.status === "failed") {
                 downloadMsg();
                 finishDownload();
+                track("dataset_download_failed", {
+                  dataset_id: dataset.id,
+                  download_type: downloadType,
+                  failure_reason: statusData.message || "preparation_failed",
+                });
                 message.error({
                   content: statusData.message || "Download preparation failed. Please try again.",
                   duration: 5,
@@ -165,6 +182,11 @@ export default function DownloadSection({
             .catch((error) => {
               downloadMsg();
               finishDownload();
+              track("dataset_download_failed", {
+                dataset_id: dataset.id,
+                download_type: downloadType,
+                failure_reason: error.message,
+              });
               message.error({ content: `Error checking download status: ${error.message}`, duration: 5 });
             });
         };
@@ -174,6 +196,11 @@ export default function DownloadSection({
       .catch((error) => {
         downloadMsg();
         finishDownload();
+        track("dataset_download_failed", {
+          dataset_id: dataset.id,
+          download_type: downloadType,
+          failure_reason: error.message,
+        });
         message.error({ content: `Error initiating download: ${error.message}`, duration: 5 });
       });
   };

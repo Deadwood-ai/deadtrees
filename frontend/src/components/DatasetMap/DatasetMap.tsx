@@ -216,6 +216,7 @@ const DatasetMapOL = ({
   setVisibleFeatures,
   filterZoomTrigger = 0,
   colorMode = "quality",
+  onMapInteracted,
 }: {
   data: IDataset[];
   hoveredItem: number | null;
@@ -223,6 +224,7 @@ const DatasetMapOL = ({
   setVisibleFeatures: (ids: string[]) => void;
   filterZoomTrigger?: number;
   colorMode?: DatasetMapColorMode;
+  onMapInteracted?: () => void;
 }) => {
   const navigate = useNavigate();
   const mapRef = useRef<MapRef | null>(null);
@@ -238,6 +240,8 @@ const DatasetMapOL = ({
   const setVisibleFeaturesRef = useRef(setVisibleFeatures);
   const setNavigationSourceRef = useRef(setNavigationSource);
   const navigateRef = useRef(navigate);
+  const hasSeenInitialMoveEndRef = useRef(false);
+  const hasTrackedInteractionRef = useRef(false);
 
   useEffect(() => {
     setHoveredItemRef.current = setHoveredItem;
@@ -327,6 +331,14 @@ const DatasetMapOL = ({
             };
             setDatasetViewport(newViewport);
             updateVisibleFeatures();
+            if (!hasSeenInitialMoveEndRef.current) {
+              hasSeenInitialMoveEndRef.current = true;
+              return;
+            }
+            if (!hasTrackedInteractionRef.current) {
+              hasTrackedInteractionRef.current = true;
+              onMapInteracted?.();
+            }
           };
           map.on("moveend", moveEndListener);
 

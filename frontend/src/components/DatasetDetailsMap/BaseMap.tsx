@@ -22,6 +22,7 @@ interface BaseMapProps {
 	onMapReady?: (map: import("ol").Map) => void;
 	onOrthoLayerReady?: (layer: import("ol/layer/WebGLTile.js").default) => void;
 	onVectorLayersReady?: (deadwood: VectorTileLayer | null, forestCover: VectorTileLayer | null) => void;
+	onFirstMapInteraction?: () => void;
 
 	// Layer visibility
 	showDeadwood?: boolean;
@@ -59,6 +60,7 @@ export default function BaseMap({
 	onMapReady,
 	onOrthoLayerReady,
 	onVectorLayersReady,
+	onFirstMapInteraction,
 	showDeadwood = true,
 	showForestCover = true,
 	showDroneImagery = true,
@@ -109,6 +111,7 @@ export default function BaseMap({
 			onMapReady?.(map);
 		},
 		onOrthoLayerReady,
+		onFirstInteraction: onFirstMapInteraction,
 		isReady: !isLoadingLabels && !isAOILoading && !!data?.file_name,
 		disableRotation: isMobile,
 	});

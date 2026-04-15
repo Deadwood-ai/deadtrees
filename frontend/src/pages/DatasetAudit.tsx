@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import type { Dayjs } from "dayjs";
 import {
 	Table,
 	Button,
@@ -43,6 +44,7 @@ import { getBiomeEmoji, getBiomeTagColor, truncateBiomeLabel } from "../utils/bi
 import { useDatasetLogs, useProcessingOverview, ProcessingOverviewRow, ProcessingStatus } from "../hooks/useProcessingOverview";
 import { getAcquisitionPeriod } from "../utils/phenologyUtils";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { useAnalytics } from "../hooks/useAnalytics";
 
 const { Title, Text } = Typography;
 
@@ -53,6 +55,7 @@ type AuditTab = "pending" | "completed" | "reference" | "edits-flags" | "process
 type CompletedStatusFilter = "all" | "ready" | "fixable" | "excluded" | "needs-review" | "reviewed";
 
 type ProcessingStateFilterKey = "ortho" | "cog" | "thumbnail" | "deadwood" | "forestCover" | "metadata";
+type AcquisitionMonthRange = [Dayjs | null, Dayjs | null] | null;
 
 const PROCESSING_STATE_OPTIONS: Array<{ label: string; value: ProcessingStateFilterKey }> = [
 	{ label: "Ortho", value: "ortho" },
@@ -210,6 +213,7 @@ function DatasetAuditInner() {
 	const navigate = useNavigate();
 	const [searchParams, setSearchParams] = useSearchParams();
 	const { setFilteredDatasetIds } = useAuditNavigation();
+	const { track } = useAnalytics("audit");
 
 	// ALL HOOKS MUST BE CALLED FIRST
 	const { user } = useAuth();
@@ -239,7 +243,7 @@ function DatasetAuditInner() {
 	const [activeTab, setActiveTab] = useState<AuditTab>(initialTab);
 	const [statusFilter, setStatusFilter] = useState<CompletedStatusFilter>(initialStatus);
 	const [idFilter, setIdFilter] = useState<string>(searchParams.get("id") || "");
-	const [acquisitionMonthRange, setAcquisitionMonthRange] = useState<unknown>(null);
+	const [acquisitionMonthRange, setAcquisitionMonthRange] = useState<AcquisitionMonthRange>(null);
 	const [biomeFilter, setBiomeFilter] = useState<string>(initialBiome);
 	const [countryFilter, setCountryFilter] = useState<string>(initialCountry);
 	const [auditorFilter, setAuditorFilter] = useState<string>(initialAuditor);
@@ -423,8 +427,8 @@ function DatasetAuditInner() {
 			}
 		}
 
-		const acquisitionStart = (acquisitionMonthRange as any)?.[0] ?? null;
-		const acquisitionEnd = (acquisitionMonthRange as any)?.[1] ?? null;
+		const acquisitionStart = acquisitionMonthRange?.[0] ?? null;
+		const acquisitionEnd = acquisitionMonthRange?.[1] ?? null;
 		const acquisitionStartIndex =
 			acquisitionStart && typeof acquisitionStart.year === "function" && typeof acquisitionStart.month === "function"
 				? acquisitionStart.year() * 12 + acquisitionStart.month()
@@ -601,19 +605,6 @@ function DatasetAuditInner() {
 		}
 	}, [user, isAuthLoading, isAuditPrivilegeLoading, canAudit, navigate]);
 
-	// Loading state
-	if (isAuthLoading || isAuditPrivilegeLoading) {
-		return <div className="p-6">Loading...</div>;
-	}
-
-	// Detail view
-	if (id) {
-		const dataset = datasets?.find((d) => d.id.toString() === id);
-		if (isDatasetLoading) return <div>Loading dataset...</div>;
-		if (!dataset) return <div>Dataset not found</div>;
-		return <DatasetAuditDetail dataset={dataset} />;
-	}
-
 	const handleStartAudit = async (datasetId: number) => {
 		try {
 			const { data, error } = await supabase
@@ -633,12 +624,34 @@ function DatasetAuditInner() {
 				return;
 			}
 
+			track("audit_started", { dataset_id: datasetId });
 			navigate(`/dataset-audit/${datasetId}`);
 		} catch (error) {
 			console.error("Error checking audit status:", error);
+			track("audit_started", { dataset_id: datasetId });
 			navigate(`/dataset-audit/${datasetId}`);
 		}
 	};
+
+	useEffect(() => {
+		track("audit_queue_viewed", { audit_tab: activeTab });
+		if (activeTab === "edits-flags") {
+			track("correction_review_started", { review_scope: "queue" });
+		}
+	}, [activeTab, track]);
+
+	// Loading state
+	if (isAuthLoading || isAuditPrivilegeLoading) {
+		return <div className="p-6">Loading...</div>;
+	}
+
+	// Detail view
+	if (id) {
+		const dataset = datasets?.find((d) => d.id.toString() === id);
+		if (isDatasetLoading) return <div>Loading dataset...</div>;
+		if (!dataset) return <div>Dataset not found</div>;
+		return <DatasetAuditDetail dataset={dataset} />;
+	}
 
 	const processingColumns: ColumnsType<ProcessingOverviewRow> = [
 		{
@@ -1104,7 +1117,7 @@ function DatasetAuditInner() {
 
 	const hasActiveFilters =
 		idFilter ||
-		Boolean((acquisitionMonthRange as any)?.[0] || (acquisitionMonthRange as any)?.[1]) ||
+		Boolean(acquisitionMonthRange?.[0] || acquisitionMonthRange?.[1]) ||
 		biomeFilter ||
 		countryFilter ||
 		auditorFilter ||
@@ -1490,8 +1503,8 @@ function DatasetAuditInner() {
 												</Text>
 												<DatePicker.RangePicker
 													picker="month"
-													value={acquisitionMonthRange as any}
-													onChange={(value) => setAcquisitionMonthRange(value as any)}
+													value={acquisitionMonthRange}
+													onChange={(value) => setAcquisitionMonthRange(value)}
 													allowClear
 													placeholder={["From", "To"]}
 													style={{ width: isMobile ? "100%" : 200 }}

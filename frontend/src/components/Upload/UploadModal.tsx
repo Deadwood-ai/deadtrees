@@ -38,6 +38,7 @@ import { isTokenExpiringSoon } from "../../utils/isTokenExpiringSoon";
 import { supabase } from "../../hooks/useSupabase";
 import { RcFile } from "antd/es/upload";
 import type { Dayjs } from "dayjs";
+import { useAnalytics } from "../../hooks/useAnalytics";
 // New interfaces
 interface IFormValues {
   license: ILicense;
@@ -60,6 +61,20 @@ interface UploadModalProps {
 // Add these types near the top of the file
 interface UploadResponse {
   id: string;
+}
+
+interface UploadMetadata {
+  license: string;
+  platform: string;
+  authors: string[];
+  upload_type: string;
+  project_id?: string;
+  aquisition_year?: number;
+  aquisition_month?: number;
+  aquisition_day?: number;
+  additional_information?: string;
+  data_access?: string;
+  citation_doi?: string;
 }
 
 function createLabelObjectFormData(
@@ -114,6 +129,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
   } = useUploadNotification(uploadKey, fileName);
 
   const [uploadValidationError, setUploadValidationError] = useState<string | null>(null);
+  const { track } = useAnalytics("profile");
 
   const { canUpload: canUploadPrivate } = useCanUploadPrivate();
 
@@ -138,7 +154,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
     }
   };
 
-  const uploadOrthophoto = async (file: RcFile, metadata: Record<string, unknown>): Promise<UploadResponse> => {
+  const uploadOrthophoto = async (file: RcFile, metadata: UploadMetadata): Promise<UploadResponse> => {
     return new Promise((resolve, reject) => {
       // Create a new AbortController for this upload
       abortControllerRef.current = new AbortController();
@@ -197,6 +213,11 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
 
       // Detect file type and validate file size
       const uploadType = detectUploadType(uploadFile.name);
+      const hasLabelsFile = labelsFileList.length > 0;
+      track("upload_started", {
+        upload_type: uploadType,
+        has_labels_file: hasLabelsFile,
+      });
       validateFileSize(uploadFile.originFileObj, uploadType);
       if (uploadType === UploadType.GEOTIFF) {
         await validateGeoTiffAiEligibility(uploadFile.originFileObj);
@@ -204,14 +225,14 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
 
       // console.log("values.author", values.author);
       // Create metadata object
-      const metadata = {
+      const metadata: UploadMetadata = {
         license: values.license,
-        platform: values.platform,
+        platform: String(values.platform),
         authors: values.author,
         upload_type: uploadType,
         project_id: undefined,
         aquisition_year: values.aquisition_date?.year(),
-        aquisition_month: values.aquisition_date?.month() + 1,
+        aquisition_month: values.aquisition_date ? values.aquisition_date.month() + 1 : undefined,
         aquisition_day: values.aquisition_date?.date(),
         additional_information: values.additional_information,
         data_access: values.is_private ? "private" : "public",
@@ -230,7 +251,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
 
       // Upload labels if present
       if (labelsFileList.length > 0) {
-        const labelFile = labelsFileList[0].originFileObj;
+          const labelFile = labelsFileList[0]?.originFileObj;
         if (labelFile) {
           const labelFormData = createLabelObjectFormData(
             uploadResponse.id.toString(),
@@ -249,6 +270,11 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
           : ["cog", "thumbnail", "metadata", "geotiff", "deadwood", "treecover"]; // GeoTIFF workflow (no ODM needed)
 
       await processDataset(Number(uploadResponse.id), validAccessToken, processingSteps);
+      track("upload_completed", {
+        dataset_id: Number(uploadResponse.id),
+        upload_type: uploadType,
+        has_labels_file: hasLabelsFile,
+      });
 
       showSuccessNotification();
     } catch (error) {
@@ -257,6 +283,11 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
         // console.log("Upload was cancelled by the user");
       } else {
         console.error("Upload error:", error);
+        track("upload_failed", {
+          upload_type:
+            fileList[0]?.name ? detectUploadType(fileList[0].name) : undefined,
+          failure_reason: error instanceof Error ? error.message : "unknown_error",
+        });
         showErrorNotification();
       }
     } finally {
