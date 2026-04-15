@@ -22,8 +22,9 @@ def cleanup_orphaned_resources(token: str):
 	1. Removes old extract containers (Alpine containers stuck with tail -f)
 	2. Removes orphaned Docker volumes (optional)
 
-	Note: Stuck queue items (previously is_processing=True) are now handled by
-	crash detection in background_process() which checks current_status in v2_statuses.
+	Note: Stuck queue items are handled by crash detection in background_process(),
+	which checks current_status in v2_statuses. The queue's is_processing flag is
+	kept only for live bookkeeping and operational visibility.
 
 	Args:
 		token: Authentication token for database operations

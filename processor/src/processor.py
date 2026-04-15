@@ -78,6 +78,12 @@ def get_completed_stages(status_data: dict) -> list[str]:
 	return completed
 
 
+def are_requested_stages_complete(status_data: dict, task_types: list) -> bool:
+	"""Return True when all requested pipeline stages are already marked complete."""
+	requested = [done_flag for task_type, done_flag, _ in PIPELINE_STAGE_MAP if task_type in task_types]
+	return bool(requested) and all(status_data.get(done_flag, False) for done_flag in requested)
+
+
 
 def get_next_task(token: str) -> QueueTask:
 	"""Get the next task (QueueTask class) in the queue from supabase.
@@ -93,6 +99,38 @@ def get_next_task(token: str) -> QueueTask:
 	if not response.data or len(response.data) == 0:
 		return None
 	return QueueTask(**response.data[0])
+
+
+def get_active_task(token: str) -> QueueTask | None:
+	"""Get a task still marked as actively processing in the raw queue table.
+
+	Active tasks are excluded from `v2_queue_positions`, so crash recovery must
+	inspect `v2_queue` directly before looking for waiting work.
+	"""
+	with use_client(token) as client:
+		response = (
+			client.table(settings.queue_table)
+			.select('id,dataset_id,user_id,priority,is_processing,task_types')
+			.eq('is_processing', True)
+			.order('priority', desc=True)
+			.order('created_at')
+			.limit(1)
+			.execute()
+		)
+	if not response.data or len(response.data) == 0:
+		return None
+
+	task_data = response.data[0]
+	return QueueTask(
+		id=task_data['id'],
+		dataset_id=task_data['dataset_id'],
+		user_id=task_data['user_id'],
+		priority=task_data['priority'],
+		is_processing=task_data['is_processing'],
+		current_position=-1,
+		estimated_time=None,
+		task_types=task_data['task_types'],
+	)
 
 
 def is_dataset_uploaded_or_processed(task: QueueTask, token: str) -> tuple:
@@ -158,6 +196,13 @@ def process_task(task: QueueTask, token: str):
 			extra={'task_types': [t.value for t in task.task_types]},
 		),
 	)
+
+	# Keep queue bookkeeping aligned with the live worker state.
+	# `v2_statuses.current_status` remains the crash/source-of-truth signal,
+	# but `v2_queue.is_processing` is still consumed by ops snapshots and queue views.
+	with use_client(token) as client:
+		client.table(settings.queue_table).update({'is_processing': True}).eq('id', task.id).execute()
+
 	# remove processing path if it exists
 	if Path(settings.processing_path).exists():
 		shutil.rmtree(settings.processing_path, ignore_errors=True)
@@ -379,15 +424,16 @@ def background_process():
 
 	On each run this function:
 	1. Logs in as the processor service account.
-	2. Loops through the queue, clearing any crashed tasks it finds:
+	2. Clears any stale `is_processing=true` queue rows left behind by crashes.
+	3. Loops through the waiting queue, clearing any crashed tasks it finds:
 	   - A "crash" is detected when current_status != 'idle' for a queued task,
 	     meaning a previous container run died (OOM, kill) mid-processing.
 	   - Crashed tasks are marked as errored, a Linear issue is created, and
 	     the task is removed from the queue.
-	3. Once a healthy, ready task is found, processes it and exits.
+	4. Once a healthy, ready task is found, processes it and exits.
 
 	docker compose up guarantees only one processor container runs at a time,
-	so no is_processing flag or concurrency guard is needed.
+	so `is_processing` is bookkeeping only, not the concurrency guard.
 	"""
 	# use the processor to log in
 	token, user = login_verified(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
@@ -395,6 +441,75 @@ def background_process():
 		raise Exception(status_code=401, detail='Invalid token after fresh login')
 
 	while True:
+		active_task = get_active_task(token)
+		if active_task is not None:
+			logger.warning(
+				f'Found stale active queue task {active_task.id} for dataset {active_task.dataset_id}; recovering it before new work',
+				LogContext(
+					category=LogCategory.PROCESS,
+					dataset_id=active_task.dataset_id,
+					user_id=active_task.user_id,
+					token=token,
+				),
+			)
+
+			with use_client(token) as client:
+				status_resp = client.table(settings.statuses_table) \
+					.select('*').eq('dataset_id', active_task.dataset_id).execute()
+
+			should_mark_error = True
+			if status_resp.data:
+				status = status_resp.data[0]
+				completed = get_completed_stages(status)
+				if are_requested_stages_complete(status, active_task.task_types):
+					logger.info(
+						f'Removing stale completed queue task {active_task.id} for dataset {active_task.dataset_id}',
+						LogContext(
+							category=LogCategory.PROCESS,
+							dataset_id=active_task.dataset_id,
+							user_id=active_task.user_id,
+							token=token,
+						),
+					)
+					should_mark_error = False
+					crashed_stage = 'completed'
+					error_msg = ''
+				elif status['current_status'] != 'idle':
+					crashed_stage = detect_crashed_stage(status, active_task.task_types)
+					error_msg = f'Processing container crashed during {crashed_stage}. Completed: {completed}'
+				elif completed:
+					crashed_stage = detect_crashed_stage(status, active_task.task_types)
+					error_msg = f'Processing container crashed after completing {completed} and before starting {crashed_stage}.'
+				else:
+					crashed_stage = 'startup'
+					error_msg = 'Processing container crashed before the first stage status update.'
+			else:
+				crashed_stage = 'unknown'
+				error_msg = 'Processing container crashed and no status row was available for recovery.'
+
+			if should_mark_error:
+				update_status(
+					token,
+					dataset_id=active_task.dataset_id,
+					current_status=StatusEnum.idle,
+					has_error=True,
+					error_message=error_msg,
+				)
+
+				try:
+					create_processing_failure_issue(
+						token=token,
+						dataset_id=active_task.dataset_id,
+						stage=crashed_stage,
+						error_message=error_msg,
+					)
+				except Exception as linear_error:
+					logger.warning(f'Failed to create Linear issue for stale active task: {linear_error}')
+
+			with use_client(token) as client:
+				client.table(settings.queue_table).delete().eq('id', active_task.id).execute()
+			continue
+
 		task = get_next_task(token)
 		if task is None:
 			print('No tasks in the queue.')
