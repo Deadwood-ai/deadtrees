@@ -340,9 +340,9 @@ export const initializePostHog = (consent: string | null = null): void => {
     });
   }
 
-  if (consent === "accepted" && !posthog.has_opted_in_capturing) {
+  if (consent === "accepted" && !posthog.has_opted_in_capturing()) {
     posthog.opt_in_capturing();
-  } else if (consent === "rejected" && !posthog.has_opted_out_capturing) {
+  } else if (consent === "rejected" && !posthog.has_opted_out_capturing()) {
     posthog.opt_out_capturing();
   }
 };
