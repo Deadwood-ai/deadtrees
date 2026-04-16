@@ -89,6 +89,7 @@ class Settings(BaseSettings):
 	# supabase settings for supabase authentication
 	SUPABASE_URL: str
 	SUPABASE_KEY: str
+	SUPABASE_ANON_KEY: str = ''
 	SUPABASE_SERVICE_ROLE_KEY: str = ''  # Optional: for accessing auth.users table
 
 	# some basic settings for the UVICORN server
@@ -114,10 +115,6 @@ class Settings(BaseSettings):
 	ODM_AUTO_BOUNDARY: bool = False
 	ODM_SKY_REMOVAL: bool = False
 	ODM_BG_REMOVAL: bool = False
-
-	# monitoring
-	LOGFIRE_TOKEN: str = None
-	LOGFIRE_PYDANTIC_PLUGIN_RECORD: str = 'all'
 
 	# Linear integration for processing failure notifications
 	LINEAR_ENABLED: bool = False

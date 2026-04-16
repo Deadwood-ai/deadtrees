@@ -132,6 +132,27 @@ def use_client(access_token: Optional[str] = None) -> Generator[Client, None, No
 		pass
 
 
+@contextmanager
+def use_anon_client(access_token: Optional[str] = None) -> Generator[Client, None, None]:
+	"""Creates a Supabase client that behaves like an anonymous/public caller."""
+	if not settings.SUPABASE_ANON_KEY:
+		raise ValueError('SUPABASE_ANON_KEY is required for anonymous/public client access')
+
+	client = create_client(
+		settings.SUPABASE_URL,
+		settings.SUPABASE_ANON_KEY,
+		options=ClientOptions(auto_refresh_token=False),
+	)
+
+	try:
+		if access_token is not None:
+			client.postgrest.auth(token=access_token)
+
+		yield client
+	finally:
+		pass
+
+
 class SupabaseReader(BaseModel):
 	Model: type[BaseModel]
 	table: str

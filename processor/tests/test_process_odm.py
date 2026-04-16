@@ -190,7 +190,7 @@ def test_zip_file():
 
 	pytest.skip(
 		'No ODM test ZIP found. Set DEBUG_ODM_ZIP or place a ZIP under assets/test_data/debugging/, '
-		'or run `./scripts/create_odm_test_data.sh`.'
+		'or run `make download-assets`.'
 	)
 
 

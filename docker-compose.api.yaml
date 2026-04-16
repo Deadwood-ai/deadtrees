@@ -30,7 +30,6 @@ services:
       UVICORN_ROOT_PATH: /api/v1
       UVICORN_PORT: 40831
       UVICORN_HOST: 0.0.0.0
-      LOGFIRE_TOKEN: ${LOGFIRE_TOKEN}
       # Reference export configuration
       REFERENCE_EXPORT_UUID: ${REFERENCE_EXPORT_UUID}
       NGINX_COG_URL: ${NGINX_COG_URL}

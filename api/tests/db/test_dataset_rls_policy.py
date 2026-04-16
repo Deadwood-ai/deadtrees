@@ -1,5 +1,5 @@
 import pytest
-from shared.db import use_client, login
+from shared.db import use_anon_client, use_client, login
 from shared.settings import settings
 from shared.models import DatasetAccessEnum, LicenseEnum, PlatformEnum
 from shared.testing.fixtures import test_processor_user
@@ -148,7 +148,7 @@ def test_rls_policy_for_private_datasets(datasets_with_mixed_access, auth_token,
 		assert len(response.data) == 1
 
 	# Public/anonymous access - create a client without authentication
-	with use_client() as public_client:
+	with use_anon_client() as public_client:
 		# Public can see public dataset
 		response = (
 			public_client.table(settings.datasets_table)
@@ -215,7 +215,7 @@ def test_rls_policy_for_view_with_private_datasets(datasets_with_mixed_access, a
 		assert len(response.data) == 1
 
 	# Public/anonymous access - create a client without authentication
-	with use_client() as public_client:
+	with use_anon_client() as public_client:
 		# Public can see public dataset through the view
 		response = (
 			public_client.from_('v2_full_dataset_view')

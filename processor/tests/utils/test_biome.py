@@ -1,6 +1,8 @@
 import pytest
 from processor.src.utils.biome import get_biome_data
 
+pytestmark = pytest.mark.usefixtures('ensure_biome_data')
+
 # Test data points (real coordinates with known biomes)
 TEST_POINTS = [
 	# Amazon rainforest

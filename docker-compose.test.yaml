@@ -29,9 +29,9 @@ services:
       - ./shared:/app/shared
       - ./assets:/app/assets
       - ./pytest.ini:/app/pytest.ini:ro
-      # Mount your Ed25519 key directly
-      - ~/.ssh/processing-to-storage:/tmp/ssh-keys/processing-to-storage:ro
-      - ~/.ssh/processing-to-storage.pub:/tmp/ssh-keys/processing-to-storage.pub:ro
+      # Mount a dedicated local test keypair so processor integration tests can SSH into nginx.
+      - ${LOCAL_TEST_SSH_PRIVATE_KEY_PATH:-./.local/ssh/processing-to-storage}:/tmp/ssh-keys/processing-to-storage:ro
+      - ${LOCAL_TEST_SSH_PUBLIC_KEY_PATH:-./.local/ssh/processing-to-storage.pub}:/tmp/ssh-keys/processing-to-storage.pub:ro
       # Docker socket for ODM container execution
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
@@ -42,9 +42,10 @@ services:
       - STORAGE_SERVER_DATA_PATH=/data
       - PROCESSOR_USERNAME=processor@deadtrees.earth
       - SUPABASE_URL=http://host.docker.internal:54321
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0}
       - BASE_DIR=/data
-      # Update the path to use your Ed25519 key
-      - SSH_PRIVATE_KEY_PATH=/root/.ssh/processing-to-storage
+      # Match the mounted SSH key location inside the test container.
+      - SSH_PRIVATE_KEY_PATH=/tmp/ssh-keys/processing-to-storage
       - SSH_PRIVATE_KEY_PASSPHRASE=
       - ENV=development
 
@@ -58,15 +59,9 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '12'
-          memory: '64G'
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    runtime: nvidia
-
+          # Keep the placeholder processor service lightweight on local dev machines.
+          cpus: '2'
+          memory: '8G'
   api-test:
     build:
       context: .
@@ -96,6 +91,7 @@ services:
       - UVICORN_PORT=8017
       - PYTEST_ADDOPTS=--color=yes
       - SUPABASE_URL=http://host.docker.internal:54321
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0}
       - BASE_DIR=/data
       - ENV=development
       # Mailpit for api/tests/test_notifications.py
@@ -122,9 +118,8 @@ services:
       - 2222:22
     volumes:
       - ./data:/data/:rw
-      # Mount your Ed25519 public key for authorized_keys
-      # - ~/.ssh/processing-to-storage.pub:/root/.ssh/authorized_keys:ro
-      - ~/.ssh/processing-to-storage.pub:/tmp/ssh-keys/processing-to-storage.pub:ro
+      # Mount the matching public key so nginx can authorize processor-test SSH access.
+      - ${LOCAL_TEST_SSH_PUBLIC_KEY_PATH:-./.local/ssh/processing-to-storage.pub}:/tmp/ssh-keys/processing-to-storage.pub:ro
       - ./nginx/test-conf:/etc/nginx/conf.d/:ro
 
 

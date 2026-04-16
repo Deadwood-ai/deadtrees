@@ -157,6 +157,8 @@ celerybeat.pid
 # Environments
 .env
 .env.export
+.playwright-cli/
+.local/ssh/
 .venv
 env/
 venv/

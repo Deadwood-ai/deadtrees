@@ -1,7 +1,6 @@
 from fastapi import FastAPI, Response
 from starlette.middleware.cors import CORSMiddleware
 
-from shared import monitoring
 import logging
 
 from shared.__version__ import __version__
@@ -14,7 +13,6 @@ app = FastAPI(
 	root_path='/api/v1',
 )
 
-# monitoring.logfire.instrument_fastapi(app)
 # logging.basicConfig(level=logging.INFO)
 
 # Comprehensive CORS configuration

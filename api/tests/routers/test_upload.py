@@ -34,7 +34,7 @@ TEST_ZIP_FILE = TEST_DATA_DIR / 'test_no_rtk_3_images.zip'  # Much smaller file 
 def temp_test_zip():
 	"""Create a temporary copy of test ZIP file for manipulation"""
 	if not TEST_ZIP_FILE.exists():
-		pytest.skip(f'Test data file not found: {TEST_ZIP_FILE}. Run ./scripts/create_odm_test_data.sh')
+		pytest.skip(f'Test data file not found: {TEST_ZIP_FILE}. Run `make download-assets`.')
 
 	with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as tmp:
 		shutil.copy2(TEST_ZIP_FILE, tmp.name)

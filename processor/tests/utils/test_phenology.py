@@ -2,6 +2,8 @@ import pytest
 from processor.src.utils.phenology import get_phenology_curve, get_phenology_metadata
 from shared.models import PhenologyMetadata
 
+pytestmark = pytest.mark.usefixtures('ensure_phenology_data')
+
 # Test data points (real coordinates where phenology data should exist)
 TEST_POINTS_WITH_DATA = [
 	# Black Forest, Germany (temperate forest)

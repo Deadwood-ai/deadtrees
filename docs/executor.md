@@ -45,16 +45,20 @@ Before starting any implementation:
 
 1. **Environment Preparation:**
    ```bash
+   git submodule update --init --recursive    # REQUIRED on fresh clones
    source venv/bin/activate               # REQUIRED: Activate virtual environment first
+   cp .env.example .env                   # If .env does not exist yet
+   cp frontend/.env.local.example frontend/.env.local  # If frontend env is missing
+   supabase start                         # Start local Supabase first
+   make download-assets                   # Download required local fixtures and assets
+   make setup-local-test-ssh              # Required before processor integration tests
+   make download-processor-assets         # Biome/phenology/scaling fixtures for processor tests
    deadtrees dev start                    # Start development environment
-   supabase db reset                      # Reset database (required before tests)
-   make download-assets                   # Download test data if needed
    ```
 
-2. **Test Data Setup (Task 0.1 requirement):**
+2. **Optional extended ODM fixture setup:**
    ```bash
-   ./scripts/create_odm_test_data.sh      # Create ODM test ZIP files
-   ls -la assets/test_data/raw_drone_images/test_*.zip  # Verify creation
+   ./scripts/create_odm_test_data.sh      # Only needed for larger ODM fixture sets
    ```
 
 #### **Testing Commands (Use EXCLUSIVELY)**
@@ -126,7 +130,8 @@ deadtrees dev start --force-rebuild
 
 #### **Test Data Requirements**
 
-- **Use real data:** Tests use actual drone images from `test_minimal_3_images.zip`, `test_small_10_images.zip`
+- **Use real data:** Tests use actual local fixtures from `make download-assets`
+- **Processor support data:** Run `make download-processor-assets` for biome, phenology, and the WorldView scaling fixture
 - **No mocking:** Geospatial and utility functions tested with real coordinates and datasets
 - **Test fixtures:** Follow existing patterns from `shared/testing/fixtures.py`
 - **Cleanup:** Tests must clean up after themselves (database cascade deletes)
@@ -134,4 +139,3 @@ deadtrees dev start --force-rebuild
 ---
 
 ### Deadtrees Rules
-

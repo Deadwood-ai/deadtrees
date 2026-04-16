@@ -22,7 +22,6 @@ setup(
 		'rasterio>=1.4.2',
 		'pydantic-geojson==0.2.0',
 		'supabase>=1.0.3',
-		'logfire>=0.8.0',
 		'pydantic-partial>=0.3.1',
 		'pydantic-settings>=2.0.0',
 		'fiona>=1.9.0',

@@ -1,141 +1,209 @@
-# Deadwood API
+# Local Development Setup
 
-Main FastAPI application for the deadwood backend. This repository contains both the API and processor components for processing geospatial data and performing deadwood segmentation.
+This repository contains the API, processor, shared Python code, frontend, Supabase migrations, and the `deadtrees` development CLI.
 
 ## Prerequisites
 
-- Docker and Docker Compose
-- NVIDIA GPU with CUDA support (for deadwood segmentation)
+- Docker Desktop or Docker Engine with `docker compose`
+- Python 3.12+
+- Node.js 20+ and `npm`
+- Supabase CLI
+- `make`, `curl`, and `unzip`
 
----
+## First-Time Bootstrap
 
-## Setup
-### Clone the repository with submodules:
+These are the steps that currently produce a working local setup from a fresh clone.
+
+### 1. Clone with submodules
 
 ```bash
-# Clone the repository
-git clone https://github.com/deadtrees/deadwood-api.git
-cd deadwood-api
-
-# Initialize and update submodules
+git clone https://github.com/Deadwood-ai/deadtrees.git
+cd deadtrees
 git submodule update --init --recursive
-
 ```
 
-### Create a .env file with required environment variables:
+The `processor/src/deadwood_segmentation/deadtreesmodels` submodule is required. If it is missing, processor images will not build.
 
-```
-SUPABASE_URL=your_supabase_url
-SUPABASE_KEY=your_supabase_key
-PROCESSOR_PASSWORD=your_processor_password
-STORAGE_SERVER_USERNAME=your_username
-SSH_PRIVATE_KEY_PATH=/path/to/your/ssh/key
-STORAGE_SERVER_DATA_PATH=/apps/storage-server/production
-DEV_MODE=true
-LOGFIRE_TOKEN=your_logfire_token
-```
-
-### Download required assets:
+### 2. Create the Python environment and install the CLI
 
 ```bash
-# Create assets directory and download test data, models, and GADM data
-make
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -e ./deadtrees-cli[test]
 ```
 
-### Use the CLI tool to manage the development environment (CLI-first):
+This installs the `deadtrees` command used for local stack management and test execution.
+
+### 3. Install frontend dependencies
 
 ```bash
-# Start the development environment
+npm --prefix frontend ci
+```
+
+### 4. Create local env files from the checked-in examples
+
+```bash
+cp .env.example .env
+cp frontend/.env.local.example frontend/.env.local
+```
+
+The example values are set up for local Supabase CLI defaults and the local Docker test stack.
+
+### 5. Start local Supabase
+
+```bash
+supabase start
+```
+
+Useful local endpoints after `supabase start`:
+
+- API gateway: `http://127.0.0.1:54321`
+- Postgres: `postgresql://postgres:postgres@127.0.0.1:54322/postgres`
+- Studio: `http://127.0.0.1:54323`
+- Mailpit: `http://127.0.0.1:54324`
+
+If you need a clean local database:
+
+```bash
+supabase db reset
+```
+
+### 6. Download required local assets and test fixtures
+
+```bash
+make download-assets
+```
+
+This now downloads the fixtures required for the local API test suite:
+
+- `assets/test_data/test-data.tif`
+- `assets/test_data/test-data-small.tif`
+- `assets/test_data/yanspain_crop_124_polygons.gpkg`
+- `assets/test_data/raw_drone_images/test_no_rtk_3_images.zip`
+- `assets/test_data/raw_drone_images/test_minimal_5_images.zip`
+- `data/assets/dte_maps/*.tif` test clips
+- model and GADM assets
+
+For the extra processor-only support data, run:
+
+```bash
+make download-processor-assets
+```
+
+This downloads:
+
+- `assets/biom/terres_ecosystems.gpkg`
+- `assets/pheno/modispheno_aggregated_normalized_filled.zarr`
+- `assets/test_data/worldview_uint16_crop.tif`
+
+### 7. Start the local development stack
+
+```bash
 deadtrees dev start
-# Stop the development environment
-deadtrees dev stop
+```
 
-# Rebuild the development environment
+This builds and starts the local test/dev services, including:
+
+- `api-test`
+- `processor-test`
+- `nginx`
+- `mailpit`
+
+To rebuild from scratch:
+
+```bash
 deadtrees dev start --force-rebuild
+```
 
-# Run development environment with continuous processor queue checking
-deadtrees dev run-dev
+To stop the stack:
 
-# Run API tests
+```bash
+deadtrees dev stop
+```
+
+### 8. Start the frontend
+
+```bash
+npm --prefix frontend run dev
+```
+
+## What Should Work After Bootstrap
+
+### Local services
+
+- Frontend: `http://127.0.0.1:5173`
+- API via nginx: `http://127.0.0.1:8080/api/v1/`
+- API docs: `http://127.0.0.1:8080/api/v1/docs`
+- Downloads docs: `http://127.0.0.1:8080/api/v1/download/docs`
+- COGs: `http://127.0.0.1:8080/cogs/v1/`
+- Thumbnails: `http://127.0.0.1:8080/thumbnails/v1/`
+- Supabase Studio: `http://127.0.0.1:54323`
+
+### Tests
+
+Prefer the `deadtrees` CLI for tests and debugging.
+
+```bash
+source venv/bin/activate
+
+# Full API suite
 deadtrees dev test api
 
-# Debug API tests
-deadtrees dev debug api --test-path=api/tests/routers/test_download.py
+# Single API file
+deadtrees dev test api api/tests/routers/test_download.py
 
-# Run processor tests
+# Processor suite
 deadtrees dev test processor
 
-# Debug processor tests
+# First-time processor test bootstrap on a new machine
+make setup-local-test-ssh
+make download-processor-assets
+deadtrees dev test processor
+
+# Frontend tests
+npm --prefix frontend test
+```
+
+Current known-good local result:
+
+- `deadtrees dev test api` passes end-to-end after the bootstrap steps above
+- `npm --prefix frontend test` passes
+- `deadtrees dev test processor` passes after `make setup-local-test-ssh` and `make download-processor-assets`
+- the remaining processor skips are the intentionally skipped comprehensive GeoTIFF standardization tests
+
+### Debugging tests
+
+```bash
+deadtrees dev debug api --test-path=api/tests/routers/test_download.py
 deadtrees dev debug processor --test-path=processor/tests/test_processor.py
-
 ```
 
-### Accessing services (Test Stack)
+## Optional: Extra ODM Test Data
 
-the nginx acts as a reverse proxy for the API and processor services.
+For the basic local API suite, `make download-assets` is enough.
+
+If you want the larger locally generated ODM ZIP fixtures as well:
 
 ```bash
-# nginx
-http://localhost:8080/cogs/v1/
-http://localhost:8080/thumbnails/v1/
-http://localhost:8080/downloads/v1/
-
-# API Endpoints
-http://localhost:8080/api/v1/
-
-# API docs
-http://localhost:8080/api/v1/docs
-
-# Upload Chunks
-http://localhost:8080/api/v1/datasets/chunk
-
-# Download Endpoint
-http://localhost:8080/api/v1/download/docs
-http://localhost:8080/api/v1/download/datasets/1/dataset.zip
-
-# Supabase
-# Pooler/API: http://host.docker.internal:54321
-# Studio: http://127.0.0.1:54323
-
+./scripts/create_odm_test_data.sh
 ```
 
-### Notes on Tests
+This is optional and mostly useful for extra processor/ODM experiments.
 
-- Prefer the `deadtrees` CLI for running tests and debugging. Avoid calling `pytest` directly in containers.
+## Processor test prerequisites
 
-### Local supabase setup and development
+The processor integration suite uses SSH against the local `nginx` test container to mimic the storage server.
+Generate the local test-only keypair once before running processor tests:
 
 ```bash
-## install supabase cli
-brew install supabase
-
-# Start Supabase
-supabase login
-
-# Initialize project
-supabase init
-
-# Link to project
-supabase link --project-ref <project-ref>
-
-# Start Supabase
-supabase start
-
-# Create initial migration file
-# supabase db diff --use-migra initial_schema -f initial_schema --linked
-supabase db pull
-
-# Apply the migration
-supabase migration up
-
-# to reset the database
-supabase db reset
-
-# set new env varialbes based on the output of supabase start
-SUPABASE_URL=your_supabase_url
-SUPABASE_KEY=your_supabase_key
-
+make setup-local-test-ssh
+make download-processor-assets
 ```
+
+This writes an ignored keypair to `.local/ssh/processing-to-storage` and `.local/ssh/processing-to-storage.pub`.
+If you prefer a different key location, set absolute paths in `LOCAL_TEST_SSH_PRIVATE_KEY_PATH` and
+`LOCAL_TEST_SSH_PUBLIC_KEY_PATH` before running `docker compose -f docker-compose.test.yaml ...`.
 
 ## Project structure
 
@@ -211,7 +279,6 @@ On the Storage server, only the necessary env is set
 ```
 SUPABASE_URL=your_supabase_url
 SUPABASE_KEY=your_supabase_key
-LOGFIRE_TOKEN=your_logfire_token
 ```
 
 ### Download required assets:
