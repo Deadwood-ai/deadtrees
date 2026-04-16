@@ -242,12 +242,12 @@ def test_mercator_area_correction(synthetic_cog_dir):
 def test_polygon_stats_with_real_data():
 	"""
 	Integration test using real COG clips already on disk.
-	Run `python scripts/download_dte_test_clips.py` first to populate the data.
+	Run `make download-assets` first to populate the data.
 	Skipped if clips are not present.
 	"""
 	maps_dir = settings.dte_maps_path
 	if not maps_dir.exists() or not any(maps_dir.glob("*.tif")):
-		pytest.skip("No real COG test data — run: python scripts/download_dte_test_clips.py")
+		pytest.skip("No real COG test data — run: make download-assets")
 
 	response = client.post(
 		"/dte-stats/polygon",

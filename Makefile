@@ -12,6 +12,7 @@ TEST_DATA_URL := $(TEST_DATA_BASE_URL)/test-data.tif
 TEST_DATA_SMALL_URL := $(TEST_DATA_BASE_URL)/test-data-small.tif
 TEST_DATA_REAL_LABELS_URL := $(TEST_DATA_BASE_URL)/yanspain_crop_124_polygons.gpkg
 TEST_RAW_DRONE_ZIP_URL := $(TEST_DATA_BASE_URL)/raw_drone_images/test_no_rtk_3_images.zip
+TEST_ODM_MINIMAL_ZIP_URL := $(TEST_DATA_BASE_URL)/raw_drone_images/test_minimal_5_images.zip
 MODEL_URL := https://ijuphmnaebfdzsfrnsrn.supabase.co/storage/v1/object/public/assets//segformer_b5_full_epoch_100.safetensors
 GADM_URL := https://geodata.ucdavis.edu/gadm/gadm4.1/gadm_410-gpkg.zip
 
@@ -20,6 +21,7 @@ TEST_DATA := $(TEST_DATA_DIR)/test-data.tif
 TEST_DATA_SMALL := $(TEST_DATA_DIR)/test-data-small.tif
 TEST_DATA_REAL_LABELS := $(TEST_DATA_DIR)/yanspain_crop_124_polygons.gpkg
 TEST_RAW_DRONE_ZIP := $(TEST_RAW_DRONE_IMAGES_DIR)/test_no_rtk_3_images.zip
+TEST_ODM_MINIMAL_ZIP := $(TEST_RAW_DRONE_IMAGES_DIR)/test_minimal_5_images.zip
 MODEL := $(MODELS_DIR)/segformer_b5_full_epoch_100.safetensors
 GADM := $(GADM_DIR)/gadm_410.gpkg
 GADM_ZIP := $(GADM_DIR)/gadm_410-gpkg.zip
@@ -54,9 +56,9 @@ create-dirs:
 	@mkdir -p data/label_objects
 	@mkdir -p data/trash
 
-download-assets: create-dirs $(TEST_DATA) $(TEST_DATA_SMALL) $(MODEL) $(GADM) $(TEST_DATA_REAL_LABELS) $(TEST_RAW_DRONE_ZIP) $(DTE_TEST_FILES)
+download-assets: create-dirs $(TEST_DATA) $(TEST_DATA_SMALL) $(MODEL) $(GADM) $(TEST_DATA_REAL_LABELS) $(TEST_RAW_DRONE_ZIP) $(TEST_ODM_MINIMAL_ZIP) $(DTE_TEST_FILES)
 
-$(TEST_DATA) $(TEST_DATA_SMALL) $(TEST_DATA_REAL_LABELS) $(TEST_RAW_DRONE_ZIP) $(MODEL) $(GADM_ZIP) $(DTE_TEST_FILES): | setup-dirs
+$(TEST_DATA) $(TEST_DATA_SMALL) $(TEST_DATA_REAL_LABELS) $(TEST_RAW_DRONE_ZIP) $(TEST_ODM_MINIMAL_ZIP) $(MODEL) $(GADM_ZIP) $(DTE_TEST_FILES): | setup-dirs
 
 $(TEST_DATA):
 	@echo "Downloading test data..."
@@ -77,6 +79,10 @@ $(TEST_DATA_REAL_LABELS):
 $(TEST_RAW_DRONE_ZIP):
 	@echo "Downloading upload ZIP test data..."
 	curl -L -o $@ "$(TEST_RAW_DRONE_ZIP_URL)"
+
+$(TEST_ODM_MINIMAL_ZIP):
+	@echo "Downloading minimal ODM ZIP test data..."
+	curl -L -o $@ "$(TEST_ODM_MINIMAL_ZIP_URL)"
 
 $(DTE_TEST_DIR)/%.tif:
 	@echo "Downloading DTE test clip $(@F)..."
