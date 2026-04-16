@@ -2,7 +2,12 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { Session, User } from "@supabase/supabase-js";
 
 import { identifyUser, trackAuthCompletion } from "../utils/analytics";
-import { getAuthErrorText, hasWellFormedJwt, isInvalidSessionError } from "../utils/authSession";
+import {
+  classifySessionValidationResult,
+  getAuthErrorText,
+  hasWellFormedJwt,
+  isInvalidSessionError,
+} from "../utils/authSession";
 
 import { clearLocalSupabaseSession, clearSupabaseAuthStorage, supabase } from "./useSupabase";
 
@@ -172,7 +177,8 @@ const AuthProvider = ({ children }: AuthProviderProps) => {
       }
 
       if (validationResult === authValidationTimeout) {
-        throw new Error("Auth session validation timed out.");
+        const outcome = classifySessionValidationResult({ timedOut: true });
+        throw new Error(outcome.reason);
       }
 
       const {
@@ -180,17 +186,17 @@ const AuthProvider = ({ children }: AuthProviderProps) => {
         error,
       } = validationResult;
 
-      if (error) {
-        if (isInvalidSessionError(error)) {
-          recoverInvalidSession(error, requestId);
-          return { status: "invalid" } satisfies SessionValidationResult;
-        }
+      const outcome = classifySessionValidationResult({
+        error,
+        user: validatedUser,
+      });
 
-        throw error;
+      if (outcome.status === "transient_failure") {
+        throw new Error(outcome.reason);
       }
 
-      if (!validatedUser) {
-        recoverInvalidSession(new Error("Supabase returned no authenticated user for the restored session."), requestId);
+      if (outcome.status === "invalid_session") {
+        recoverInvalidSession(error ?? new Error(outcome.reason), requestId);
         return { status: "invalid" } satisfies SessionValidationResult;
       }
 

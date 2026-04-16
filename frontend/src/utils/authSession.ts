@@ -8,6 +8,19 @@ type ErrorLike = {
   status?: number;
 };
 
+export type SessionValidationOutcome =
+  | {
+      status: "valid";
+    }
+  | {
+      status: "invalid_session";
+      reason: string;
+    }
+  | {
+      status: "transient_failure";
+      reason: string;
+    };
+
 const INVALID_SESSION_MARKERS = [
   "invalidjwttoken",
   "invalid jwt",
@@ -77,4 +90,44 @@ export function isInvalidSessionError(error: unknown): boolean {
   }
 
   return INVALID_SESSION_MARKERS.some((marker) => normalizedText.includes(marker));
+}
+
+export function classifySessionValidationResult({
+  error,
+  timedOut = false,
+  user,
+}: {
+  error?: unknown;
+  timedOut?: boolean;
+  user?: unknown;
+}): SessionValidationOutcome {
+  if (timedOut) {
+    return {
+      status: "transient_failure",
+      reason: "Auth session validation timed out.",
+    };
+  }
+
+  if (error) {
+    return isInvalidSessionError(error)
+      ? {
+          status: "invalid_session",
+          reason: getAuthErrorText(error) || "Invalid auth session.",
+        }
+      : {
+          status: "transient_failure",
+          reason: getAuthErrorText(error) || "Auth session validation failed.",
+        };
+  }
+
+  if (!user) {
+    return {
+      status: "invalid_session",
+      reason: "Supabase returned no authenticated user for the restored session.",
+    };
+  }
+
+  return {
+    status: "valid",
+  };
 }
