@@ -7,6 +7,8 @@ from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask, MetadataType, StatusEnum, Ortho
 import processor.src.process_metadata as process_metadata_module
 
+pytestmark = pytest.mark.usefixtures('ensure_metadata_support_data')
+
 
 @pytest.fixture
 def metadata_dataset_for_processing(auth_token, test_processor_user):

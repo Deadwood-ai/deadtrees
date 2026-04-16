@@ -26,7 +26,11 @@ WORLDVIEW_FIXTURE = TEST_DATA_DIR / 'worldview_uint16_crop.tif'
 @pytest.fixture
 def worldview_input():
 	"""Path to the WorldView uint16 test fixture."""
-	assert WORLDVIEW_FIXTURE.exists(), f'Test fixture not found: {WORLDVIEW_FIXTURE}'
+	if not WORLDVIEW_FIXTURE.exists():
+		pytest.skip(
+			f'WorldView scaling fixture not found at {WORLDVIEW_FIXTURE}. '
+			'Add the local WorldView test raster before running scaling regression tests.'
+		)
 	return str(WORLDVIEW_FIXTURE)
 
 

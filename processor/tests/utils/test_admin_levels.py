@@ -4,6 +4,8 @@ from shared.settings import settings
 from shared.db import use_client
 import shutil
 
+pytestmark = pytest.mark.usefixtures('ensure_gadm_data')
+
 
 # Test data points (real coordinates that exist in GADM data)
 TEST_POINTS = [

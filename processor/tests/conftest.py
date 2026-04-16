@@ -27,6 +27,40 @@ def ensure_gadm_data():
 	return gadm_path
 
 
+@pytest.fixture(scope='session')
+def ensure_biome_data():
+	"""Ensure biome support data is available for metadata tests."""
+	biome_path = Path(settings.BIOME_DATA_PATH)
+	if not biome_path.exists():
+		pytest.skip(
+			f'Biome data not found at {biome_path}. '
+			'Add the local biome dataset before running processor metadata tests.'
+		)
+	return biome_path
+
+
+@pytest.fixture(scope='session')
+def ensure_phenology_data():
+	"""Ensure phenology support data is available for metadata tests."""
+	phenology_path = Path(settings.PHENOLOGY_DATA_PATH)
+	if not phenology_path.exists():
+		pytest.skip(
+			f'Phenology data not found at {phenology_path}. '
+			'Add the local phenology dataset before running processor metadata tests.'
+		)
+	return phenology_path
+
+
+@pytest.fixture(scope='session')
+def ensure_metadata_support_data(ensure_gadm_data, ensure_biome_data, ensure_phenology_data):
+	"""Ensure all metadata enrichment datasets are available for integration tests."""
+	return {
+		'gadm': ensure_gadm_data,
+		'biome': ensure_biome_data,
+		'phenology': ensure_phenology_data,
+	}
+
+
 @pytest.fixture
 def test_file():
 	"""

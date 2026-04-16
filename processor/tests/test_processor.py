@@ -186,6 +186,7 @@ def sequential_task(test_dataset_for_processing, test_processor_user):
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures('ensure_metadata_support_data')
 def test_sequential_processing(sequential_task, auth_token):
 	"""Test running all processing steps sequentially"""
 	# Process all tasks
