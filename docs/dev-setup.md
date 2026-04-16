@@ -85,6 +85,18 @@ This now downloads the fixtures required for the local API test suite:
 - `data/assets/dte_maps/*.tif` test clips
 - model and GADM assets
 
+For the extra processor-only support data, run:
+
+```bash
+make download-processor-assets
+```
+
+This downloads:
+
+- `assets/biom/terres_ecosystems.gpkg`
+- `assets/pheno/modispheno_aggregated_normalized_filled.zarr`
+- `assets/test_data/worldview_uint16_crop.tif`
+
 ### 7. Start the local development stack
 
 ```bash
@@ -180,6 +192,7 @@ Generate the local test-only keypair once before running processor tests:
 
 ```bash
 make setup-local-test-ssh
+make download-processor-assets
 ```
 
 This writes an ignored keypair to `.local/ssh/processing-to-storage` and `.local/ssh/processing-to-storage.pub`.
