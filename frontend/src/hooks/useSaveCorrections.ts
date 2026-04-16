@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "./useSupabase";
+import { clearLocalSupabaseSession, supabase } from "./useSupabase";
 import { useAuth } from "./useAuthProvider";
+import { isInvalidSessionError } from "../utils/authSession";
 import { isTokenExpiringSoon } from "../utils/isTokenExpiringSoon";
 import type Feature from "ol/Feature";
 import type { Geometry } from "ol/geom";
@@ -213,6 +214,9 @@ export function useSaveCorrections() {
       if (isTokenExpiringSoon(session)) {
         const { error: refreshError } = await supabase.auth.refreshSession();
         if (refreshError) {
+          if (isInvalidSessionError(refreshError)) {
+            await clearLocalSupabaseSession();
+          }
           throw new Error("Session expired. Please sign in again.");
         }
       }

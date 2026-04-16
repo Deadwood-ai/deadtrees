@@ -1,6 +1,7 @@
 import axios from "axios";
 import { Settings } from "../config";
-import { supabase } from "../hooks/useSupabase";
+import { clearLocalSupabaseSession, supabase } from "../hooks/useSupabase";
+import { isInvalidSessionError } from "../utils/authSession";
 import { isTokenExpiringSoon } from "../utils/isTokenExpiringSoon";
 
 interface UploadOptions {
@@ -73,6 +74,11 @@ async function uploadChunks(file: File, totalChunks: number, uploadStartTime: nu
     if (isTokenExpiringSoon(currentSession)) {
       const { data, error } = await supabase.auth.refreshSession();
       if (error) {
+        if (isInvalidSessionError(error)) {
+          await clearLocalSupabaseSession();
+          throw new Error("Session expired. Please sign in again.");
+        }
+
         console.error("Error refreshing token:", error);
         throw error;
       }
