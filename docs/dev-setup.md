@@ -173,6 +173,19 @@ If you want the larger locally generated ODM ZIP fixtures as well:
 
 This is optional and mostly useful for extra processor/ODM experiments.
 
+## Processor test prerequisites
+
+The processor integration suite uses SSH against the local `nginx` test container to mimic the storage server.
+Generate the local test-only keypair once before running processor tests:
+
+```bash
+make setup-local-test-ssh
+```
+
+This writes an ignored keypair to `.local/ssh/processing-to-storage` and `.local/ssh/processing-to-storage.pub`.
+If you prefer a different key location, set absolute paths in `LOCAL_TEST_SSH_PRIVATE_KEY_PATH` and
+`LOCAL_TEST_SSH_PUBLIC_KEY_PATH` before running `docker compose -f docker-compose.test.yaml ...`.
+
 ## Project structure
 
 ```bash

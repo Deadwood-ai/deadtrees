@@ -5,6 +5,9 @@ TEST_RAW_DRONE_IMAGES_DIR := $(TEST_DATA_DIR)/raw_drone_images
 DTE_TEST_DIR := data/assets/dte_maps
 MODELS_DIR := $(ASSETS_DIR)/models
 GADM_DIR := $(ASSETS_DIR)/gadm
+LOCAL_TEST_SSH_DIR := .local/ssh
+LOCAL_TEST_SSH_KEY := $(LOCAL_TEST_SSH_DIR)/processing-to-storage
+LOCAL_TEST_SSH_PUB_KEY := $(LOCAL_TEST_SSH_KEY).pub
 
 # URLs for assets
 TEST_DATA_BASE_URL := https://data2.deadtrees.earth/assets/v1/test_data
@@ -34,7 +37,7 @@ DTE_TEST_FILENAMES := \
 	run_v1004_v1000_crop_half_fold_None_checkpoint_199_forest_2025.cog.tif
 DTE_TEST_FILES := $(addprefix $(DTE_TEST_DIR)/,$(DTE_TEST_FILENAMES))
 
-.PHONY: all clean setup-dirs create-dirs symlinks
+.PHONY: all clean setup-dirs create-dirs symlinks setup-local-test-ssh
 
 all: setup-dirs download-assets
 
@@ -57,6 +60,17 @@ create-dirs:
 	@mkdir -p data/trash
 
 download-assets: create-dirs $(TEST_DATA) $(TEST_DATA_SMALL) $(MODEL) $(GADM) $(TEST_DATA_REAL_LABELS) $(TEST_RAW_DRONE_ZIP) $(TEST_ODM_MINIMAL_ZIP) $(DTE_TEST_FILES)
+
+setup-local-test-ssh:
+	@mkdir -p $(LOCAL_TEST_SSH_DIR)
+	@if [ ! -f $(LOCAL_TEST_SSH_KEY) ] || [ ! -f $(LOCAL_TEST_SSH_PUB_KEY) ]; then \
+		echo "Generating local processor test SSH key..."; \
+		ssh-keygen -t ed25519 -N "" -C "deadtrees-local-test" -f $(LOCAL_TEST_SSH_KEY) >/dev/null; \
+	else \
+		echo "Local processor test SSH key already exists at $(LOCAL_TEST_SSH_KEY)"; \
+	fi
+	@chmod 600 $(LOCAL_TEST_SSH_KEY)
+	@chmod 644 $(LOCAL_TEST_SSH_PUB_KEY)
 
 $(TEST_DATA) $(TEST_DATA_SMALL) $(TEST_DATA_REAL_LABELS) $(TEST_RAW_DRONE_ZIP) $(TEST_ODM_MINIMAL_ZIP) $(MODEL) $(GADM_ZIP) $(DTE_TEST_FILES): | setup-dirs
 
