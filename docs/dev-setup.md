@@ -156,6 +156,11 @@ deadtrees dev test api api/tests/routers/test_download.py
 # Processor suite
 deadtrees dev test processor
 
+# First-time processor test bootstrap on a new machine
+make setup-local-test-ssh
+make download-processor-assets
+deadtrees dev test processor
+
 # Frontend tests
 npm --prefix frontend test
 ```
@@ -164,7 +169,8 @@ Current known-good local result:
 
 - `deadtrees dev test api` passes end-to-end after the bootstrap steps above
 - `npm --prefix frontend test` passes
-- `deadtrees dev test processor` still needs additional processor-side follow-up and should not be treated as the first bootstrap smoke test yet
+- `deadtrees dev test processor` passes after `make setup-local-test-ssh` and `make download-processor-assets`
+- the remaining processor skips are the intentionally skipped comprehensive GeoTIFF standardization tests
 
 ### Debugging tests
 

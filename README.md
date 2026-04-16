@@ -100,6 +100,14 @@ After that:
 - API: `http://127.0.0.1:8080/api/v1/`
 - full API suite: `deadtrees dev test api`
 
+If you also want the processor test path on a new machine:
+
+```bash
+make setup-local-test-ssh
+make download-processor-assets
+deadtrees dev test processor
+```
+
 ## Repository Layout
 
 - `api/` — FastAPI backend

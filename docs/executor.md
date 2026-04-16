@@ -51,6 +51,8 @@ Before starting any implementation:
    cp frontend/.env.local.example frontend/.env.local  # If frontend env is missing
    supabase start                         # Start local Supabase first
    make download-assets                   # Download required local fixtures and assets
+   make setup-local-test-ssh              # Required before processor integration tests
+   make download-processor-assets         # Biome/phenology/scaling fixtures for processor tests
    deadtrees dev start                    # Start development environment
    ```
 
@@ -129,6 +131,7 @@ deadtrees dev start --force-rebuild
 #### **Test Data Requirements**
 
 - **Use real data:** Tests use actual local fixtures from `make download-assets`
+- **Processor support data:** Run `make download-processor-assets` for biome, phenology, and the WorldView scaling fixture
 - **No mocking:** Geospatial and utility functions tested with real coordinates and datasets
 - **Test fixtures:** Follow existing patterns from `shared/testing/fixtures.py`
 - **Cleanup:** Tests must clean up after themselves (database cascade deletes)
