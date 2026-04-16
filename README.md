@@ -68,6 +68,38 @@ The frontend is a React-based single-page application using OpenLayers for inter
 
 The frontend source is maintained in this monorepo under `frontend/`.
 
+## Quick Start
+
+For the current first-time local setup that has been verified to work, use [docs/dev-setup.md](docs/dev-setup.md).
+
+Shortest path:
+
+```bash
+git clone https://github.com/Deadwood-ai/deadtrees.git
+cd deadtrees
+git submodule update --init --recursive
+
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -e ./deadtrees-cli[test]
+
+npm --prefix frontend ci
+cp .env.example .env
+cp frontend/.env.local.example frontend/.env.local
+
+supabase start
+make download-assets
+deadtrees dev start
+npm --prefix frontend run dev
+```
+
+After that:
+
+- frontend: `http://127.0.0.1:5173`
+- API: `http://127.0.0.1:8080/api/v1/`
+- full API suite: `deadtrees dev test api`
+
 ## Repository Layout
 
 - `api/` — FastAPI backend
