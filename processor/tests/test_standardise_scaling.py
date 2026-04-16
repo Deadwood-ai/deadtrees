@@ -29,7 +29,7 @@ def worldview_input():
 	if not WORLDVIEW_FIXTURE.exists():
 		pytest.skip(
 			f'WorldView scaling fixture not found at {WORLDVIEW_FIXTURE}. '
-			'Add the local WorldView test raster before running scaling regression tests.'
+			'Run `make download-processor-assets` before running scaling regression tests.'
 		)
 	return str(WORLDVIEW_FIXTURE)
 

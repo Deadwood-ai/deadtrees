@@ -34,7 +34,7 @@ def ensure_biome_data():
 	if not biome_path.exists():
 		pytest.skip(
 			f'Biome data not found at {biome_path}. '
-			'Add the local biome dataset before running processor metadata tests.'
+			'Run `make download-processor-assets` before running processor metadata tests.'
 		)
 	return biome_path
 
@@ -46,7 +46,7 @@ def ensure_phenology_data():
 	if not phenology_path.exists():
 		pytest.skip(
 			f'Phenology data not found at {phenology_path}. '
-			'Add the local phenology dataset before running processor metadata tests.'
+			'Run `make download-processor-assets` before running processor metadata tests.'
 		)
 	return phenology_path
 
