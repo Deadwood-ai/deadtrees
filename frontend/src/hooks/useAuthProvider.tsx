@@ -29,6 +29,15 @@ type AuthState = {
   user: User | null;
 };
 
+type SessionValidationResult =
+  | {
+      status: "valid";
+      user: User;
+    }
+  | {
+      status: "invalid";
+    };
+
 const anonymousState: AuthState = {
   recoveryReason: null,
   status: "anonymous",
@@ -110,6 +119,23 @@ const AuthProvider = ({ children }: AuthProviderProps) => {
     [getIsCoreTeam],
   );
 
+  const trackAuthCompletionForUser = useCallback(
+    async (user: User, currentPath: string, requestId: number) => {
+      const isCoreTeam = await getIsCoreTeam(user.id);
+
+      if (authRequestRef.current !== requestId) {
+        return;
+      }
+
+      if (currentPath.startsWith("/sign-up")) {
+        trackAuthCompletion("sign_up_completed", { authPath: currentPath, isCoreTeam });
+      } else if (currentPath.startsWith("/sign-in") || currentPath.startsWith("/reset-password")) {
+        trackAuthCompletion("sign_in_completed", { authPath: currentPath, isCoreTeam });
+      }
+    },
+    [getIsCoreTeam],
+  );
+
   const recoverInvalidSession = useCallback(
     (error: unknown, requestId?: number) => {
       if (requestId !== undefined && authRequestRef.current !== requestId) {
@@ -130,7 +156,7 @@ const AuthProvider = ({ children }: AuthProviderProps) => {
     async (nextSession: Session, requestId: number) => {
       if (!hasWellFormedJwt(nextSession.access_token)) {
         recoverInvalidSession(new Error("Stored access token is malformed."), requestId);
-        return null;
+        return { status: "invalid" } satisfies SessionValidationResult;
       }
 
       const authValidationTimeout = Symbol("authValidationTimeout");
@@ -146,8 +172,7 @@ const AuthProvider = ({ children }: AuthProviderProps) => {
       }
 
       if (validationResult === authValidationTimeout) {
-        recoverInvalidSession(new Error("Auth session validation timed out."), requestId);
-        return null;
+        throw new Error("Auth session validation timed out.");
       }
 
       const {
@@ -158,7 +183,7 @@ const AuthProvider = ({ children }: AuthProviderProps) => {
       if (error) {
         if (isInvalidSessionError(error)) {
           recoverInvalidSession(error, requestId);
-          return null;
+          return { status: "invalid" } satisfies SessionValidationResult;
         }
 
         throw error;
@@ -166,15 +191,31 @@ const AuthProvider = ({ children }: AuthProviderProps) => {
 
       if (!validatedUser) {
         recoverInvalidSession(new Error("Supabase returned no authenticated user for the restored session."), requestId);
-        return null;
+        return { status: "invalid" } satisfies SessionValidationResult;
       }
 
       applyAuthenticatedState(nextSession, validatedUser);
       void enrichUserAnalytics(validatedUser, requestId);
 
-      return validatedUser;
+      return {
+        status: "valid",
+        user: validatedUser,
+      } satisfies SessionValidationResult;
     },
     [applyAuthenticatedState, enrichUserAnalytics, recoverInvalidSession],
+  );
+
+  const recoverTransientValidationFailure = useCallback(
+    (nextSession: Session, error: unknown, requestId: number) => {
+      if (authRequestRef.current !== requestId) {
+        return;
+      }
+
+      console.warn("Auth session validation failed temporarily; keeping current session.", getAuthErrorText(error));
+      applyAuthenticatedState(nextSession, nextSession.user);
+      void enrichUserAnalytics(nextSession.user, requestId);
+    },
+    [applyAuthenticatedState, enrichUserAnalytics],
   );
 
   const restoreSession = useCallback(
@@ -187,23 +228,26 @@ const AuthProvider = ({ children }: AuthProviderProps) => {
         setAuthState(checkingState);
       }
 
-      const validatedUser = await validateSession(nextSession, requestId);
-      if (!validatedUser) {
+      let validationResult: SessionValidationResult;
+      try {
+        validationResult = await validateSession(nextSession, requestId);
+      } catch (error) {
+        recoverTransientValidationFailure(nextSession, error, requestId);
+        return null;
+      }
+
+      if (validationResult.status !== "valid") {
         return null;
       }
 
       if (event === "SIGNED_IN") {
         const currentPath = window.location.pathname;
-        if (currentPath.startsWith("/sign-up")) {
-          trackAuthCompletion("sign_up_completed", { authPath: currentPath, isCoreTeam: false });
-        } else if (currentPath.startsWith("/sign-in") || currentPath.startsWith("/reset-password")) {
-          trackAuthCompletion("sign_in_completed", { authPath: currentPath, isCoreTeam: false });
-        }
+        void trackAuthCompletionForUser(validationResult.user, currentPath, requestId);
       }
 
-      return validatedUser;
+      return validationResult.user;
     },
-    [validateSession],
+    [recoverTransientValidationFailure, trackAuthCompletionForUser, validateSession],
   );
 
   const signOut = useCallback(async () => {
@@ -270,7 +314,11 @@ const AuthProvider = ({ children }: AuthProviderProps) => {
           return;
         }
 
-        await validateSession(restoredSession, requestId);
+        try {
+          await validateSession(restoredSession, requestId);
+        } catch (validationError) {
+          recoverTransientValidationFailure(restoredSession, validationError, requestId);
+        }
       } catch (error) {
         console.error("Failed to restore Supabase auth session", error);
         if (authRequestRef.current === requestId) {
@@ -285,7 +333,7 @@ const AuthProvider = ({ children }: AuthProviderProps) => {
       isMounted = false;
       listener.subscription.unsubscribe();
     };
-  }, [applyAnonymousState, recoverInvalidSession, restoreSession, validateSession]);
+  }, [applyAnonymousState, recoverInvalidSession, recoverTransientValidationFailure, restoreSession, validateSession]);
 
   const value = {
     loading: authState.status === "checking",
