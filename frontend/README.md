@@ -70,6 +70,10 @@ Workflow files:
 
 These workflows intentionally let Firebase's framework-aware Hosting deploy perform the Vite build. That matches local `firebase deploy --only hosting` behavior and avoids blocking deploys on the repo's current standalone TypeScript check failures from `tsc && vite build`.
 
+Deployment cache policy:
+- HTML / SPA entry responses should revalidate on each request (`Cache-Control: no-cache`) so browsers do not hold on to an old app shell after a deploy.
+- Fingerprinted build assets under `/assets/**` should stay long-lived and immutable (`public, max-age=31536000, immutable`) because their filenames change on every content update.
+
 Required GitHub repository secrets:
 - `FIREBASE_SERVICE_ACCOUNT_DEADWOOD_D4A4B`
 - `VITE_SUPABASE_URL`
