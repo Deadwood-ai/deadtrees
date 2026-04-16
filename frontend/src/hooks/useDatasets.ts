@@ -11,6 +11,8 @@ interface DatasetQueryOptions {
 
 // Base datasets hook - includes ALL datasets (for admin/audit use)
 export function useDatasets(options: DatasetQueryOptions = {}) {
+  const { status } = useAuth();
+
   return useQuery({
     queryKey: ["datasets"],
     queryFn: async () => {
@@ -18,7 +20,7 @@ export function useDatasets(options: DatasetQueryOptions = {}) {
       if (error) throw error;
       return data;
     },
-    enabled: options.enabled ?? true,
+    enabled: (options.enabled ?? true) && status !== "checking",
     staleTime: 5 * 60 * 1000, // 5 minutes - data is fresh for 5 minutes
     gcTime: 10 * 60 * 1000, // 10 minutes - keep in cache for 10 minutes
   });
@@ -26,6 +28,8 @@ export function useDatasets(options: DatasetQueryOptions = {}) {
 
 // Public datasets hook - excludes datasets marked as "exclude_completely"
 export function usePublicDatasets(options: DatasetQueryOptions = {}) {
+  const { status } = useAuth();
+
   return useQuery({
     queryKey: ["public-datasets"],
     queryFn: async () => {
@@ -33,7 +37,7 @@ export function usePublicDatasets(options: DatasetQueryOptions = {}) {
       if (error) throw error;
       return data;
     },
-    enabled: options.enabled ?? true,
+    enabled: (options.enabled ?? true) && status !== "checking",
     staleTime: 5 * 60 * 1000, // 5 minutes - data is fresh for 5 minutes
     gcTime: 10 * 60 * 1000, // 10 minutes - keep in cache for 10 minutes
   });
@@ -41,9 +45,11 @@ export function usePublicDatasets(options: DatasetQueryOptions = {}) {
 
 // Public single dataset hook - optimized for dataset details page
 export function usePublicDatasetById(datasetId: number | undefined) {
+  const { status } = useAuth();
+
 	return useQuery({
 		queryKey: ["public-dataset-by-id", datasetId],
-		enabled: !!datasetId,
+		enabled: !!datasetId && status !== "checking",
 		queryFn: async () => {
 			if (!datasetId) return null;
 			const { data, error } = await supabase
@@ -61,9 +67,11 @@ export function usePublicDatasetById(datasetId: number | undefined) {
 
 // Fetch a single dataset by id; minimal fields are enough for Tiles page
 export function useDatasetById(datasetId: number | undefined) {
+  const { status } = useAuth();
+
   return useQuery({
     queryKey: ["dataset-by-id", datasetId],
-    enabled: !!datasetId,
+    enabled: !!datasetId && status !== "checking",
     queryFn: async () => {
       if (!datasetId) return null;
       const { data, error } = await supabase.from(Settings.DATA_TABLE_FULL).select("*").eq("id", datasetId).single();
@@ -75,7 +83,7 @@ export function useDatasetById(datasetId: number | undefined) {
 
 // User-specific datasets - uses public view to exclude excluded and archived datasets
 export function useUserDatasets(options: DatasetQueryOptions = {}) {
-  const { session } = useAuth();
+  const { session, status } = useAuth();
 
   return useQuery({
     queryKey: ["userDatasets", session?.user?.id],
@@ -88,7 +96,7 @@ export function useUserDatasets(options: DatasetQueryOptions = {}) {
       if (error) throw error;
       return data;
     },
-    enabled: (options.enabled ?? true) && !!session?.user?.id,
+    enabled: (options.enabled ?? true) && status === "authenticated" && !!session?.user?.id,
     staleTime: 5 * 60 * 1000, // 5 minutes - data is fresh for 5 minutes
     gcTime: 10 * 60 * 1000, // 10 minutes - keep in cache for 10 minutes
   });

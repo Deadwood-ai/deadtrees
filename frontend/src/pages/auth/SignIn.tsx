@@ -1,27 +1,27 @@
+import { Alert } from "antd";
 import { SignIn as SignInAuthUI } from "@supabase/auth-ui-react";
 import { ThemeSupa } from "@supabase/auth-ui-shared";
+import { Link, useSearchParams } from "react-router-dom";
 import { supabase } from "../../hooks/useSupabase";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { useEffect } from "react";
-import { useAuth } from "../../hooks/useAuthProvider";
 import { palette } from "../../theme/palette";
 
 const SignIn = () => {
-  const { session } = useAuth();
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const returnTo = searchParams.get("returnTo") || "/profile";
-
-  useEffect(() => {
-    if (session) {
-      navigate(returnTo);
-    }
-  }, [session, navigate, returnTo]);
+  const sessionExpired = searchParams.get("reason") === "session_expired";
 
   return (
     <div className="m-auto flex h-full  max-w-7xl items-center justify-center">
       <div className="w-96 rounded-md p-8">
         <h1 className="mb-8 text-3xl font-semibold text-gray-600">Sign In</h1>
+        {sessionExpired ? (
+          <Alert
+            type="warning"
+            showIcon
+            className="mb-4"
+            message="Your session expired. Please sign in again."
+          />
+        ) : null}
         <SignInAuthUI
           supabaseClient={supabase}
           providers={[]}

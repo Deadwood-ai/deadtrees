@@ -51,6 +51,18 @@ npm run dev
 
 By default, Vite serves at `http://localhost:5173`.
 
+Preferred profile-based commands:
+
+```bash
+cd frontend
+npm run dev:local
+npm run dev:prod
+```
+
+- `npm run dev:local` loads `frontend/.env.dev.local` and is meant for local backend / local Supabase development.
+- `npm run dev:prod` loads `frontend/.env.prod.local` and is meant for testing the local frontend against the live production services.
+- Both files are local-only and ignored by git because they end in `.local`.
+
 ### Build and Lint
 
 ```bash
@@ -96,10 +108,34 @@ Firebase's official Hosting docs say this command creates the deploy service acc
 
 ## Environment Variables
 
-Create a `.env.local` file (or equivalent environment setup) and provide the values your deployment mode needs:
+For ad hoc development you can still use a single `.env.local`, but the recommended setup is to keep two local-only profiles:
+
+```bash
+frontend/.env.dev.local
+frontend/.env.prod.local
+```
+
+Suggested contents:
+
+`frontend/.env.dev.local`
 
 ```bash
 VITE_MODE=development
+VITE_SUPABASE_URL=http://127.0.0.1:54321
+VITE_SUPABASE_ANON_KEY=...
+
+# optional integrations
+VITE_SAM_API_URL=...
+VITE_POSTHOG_PROJECT_KEY=...
+VITE_GEOPIFY_KEY=...
+VITE_SUPABASE_SENTINEL_PROCESSING_URL=...
+VITE_SUPABASE_SENTINEL_PROCESSING_ANON_KEY=...
+```
+
+`frontend/.env.prod.local`
+
+```bash
+VITE_MODE=production
 VITE_SUPABASE_URL=...
 VITE_SUPABASE_ANON_KEY=...
 
@@ -110,6 +146,12 @@ VITE_GEOPIFY_KEY=...
 VITE_SUPABASE_SENTINEL_PROCESSING_URL=...
 VITE_SUPABASE_SENTINEL_PROCESSING_ANON_KEY=...
 ```
+
+Notes:
+
+- `VITE_MODE=development` makes `src/config.ts` use the local development URLs.
+- `VITE_MODE=production` makes `src/config.ts` use the explicit `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` values from the env file.
+- If you already have an older `frontend/.env.local`, split it into the two profile files above and prefer the `dev:local` / `dev:prod` scripts.
 
 ## Important Feature Areas
 

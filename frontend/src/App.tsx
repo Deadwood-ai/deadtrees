@@ -24,6 +24,7 @@ import ResetPassword from "./pages/auth/ResetPassword";
 import About from "./pages/About";
 import Impressum from "./pages/Impressum";
 import Footer from "./components/Footer";
+import { PublicOnly, RequireAuth } from "./components/AuthGate";
 import Datenschutzerklaerung from "./pages/Datenschutzerklaerung";
 import TermsOfService from "./pages/TermsOfService";
 import { antdTheme } from "./theme/antdTheme";
@@ -94,7 +95,14 @@ function AppWithTracking() {
     <Routes>
       <Route path="/" element={<LayoutWrapper />}>
         <Route path="/" element={<HomePage />} />
-        <Route path="profile" element={<ProfilePage />} />
+        <Route
+          path="profile"
+          element={(
+            <RequireAuth>
+              <ProfilePage />
+            </RequireAuth>
+          )}
+        />
         <Route path="dataset" element={<Dataset />} />
         <Route path="dataset/:id" element={<DatasetDetails />} />
         <Route path="dataset-audit" element={<DatasetAudit />} />
@@ -111,8 +119,22 @@ function AppWithTracking() {
         <Route path="impressum" element={<Impressum />} />
         <Route path="datenschutzerklaerung" element={<Datenschutzerklaerung />} />
         <Route path="terms-of-service" element={<TermsOfService />} />
-        <Route path="sign-up" element={<SignUp />} />
-        <Route path="sign-in" element={<SignIn />} />
+        <Route
+          path="sign-up"
+          element={(
+            <PublicOnly>
+              <SignUp />
+            </PublicOnly>
+          )}
+        />
+        <Route
+          path="sign-in"
+          element={(
+            <PublicOnly>
+              <SignIn />
+            </PublicOnly>
+          )}
+        />
         <Route path="forgot-password" element={<Forgotpassword />} />
         <Route path="reset-password" element={<ResetPassword />} />
       </Route>

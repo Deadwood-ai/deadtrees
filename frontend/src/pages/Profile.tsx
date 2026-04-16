@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Avatar, Badge, Button, Segmented, Typography, Table, Tag, Tooltip } from "antd";
 import { useAuth } from "../hooks/useAuthProvider";
 import DataTable from "../components/DataTable";
@@ -63,12 +63,6 @@ export default function ProfilePage() {
   const [selectedDatasets, setSelectedDatasets] = useState<DatasetType[]>([]);
   const [isPublicationModalVisible, setIsPublicationModalVisible] = useState(false);
   const [resetSelectionFlag, setResetSelectionFlag] = useState(false);
-
-  useEffect(() => {
-    if (!session) {
-      navigate("/sign-in");
-    }
-  }, [session, navigate]);
 
   const handleSelectedRowsChange = (rows: DatasetType[]) => {
     setSelectedDatasets(rows);

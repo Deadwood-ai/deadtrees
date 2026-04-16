@@ -33,9 +33,10 @@ import {
   validateGeoTiffAiEligibility,
   validateZipCompressionMethods,
 } from "../../utils/fileValidation";
+import { isInvalidSessionError } from "../../utils/authSession";
 
 import { isTokenExpiringSoon } from "../../utils/isTokenExpiringSoon";
-import { supabase } from "../../hooks/useSupabase";
+import { clearLocalSupabaseSession, supabase } from "../../hooks/useSupabase";
 import { RcFile } from "antd/es/upload";
 import type { Dayjs } from "dayjs";
 import { useAnalytics } from "../../hooks/useAnalytics";
@@ -182,7 +183,14 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
   const getValidAccessToken = async (): Promise<string> => {
     if (isTokenExpiringSoon(session)) {
       const { data, error } = await supabase.auth.refreshSession();
-      if (error) throw error;
+      if (error) {
+        if (isInvalidSessionError(error)) {
+          await clearLocalSupabaseSession();
+          throw new Error("Session expired. Please sign in again.");
+        }
+
+        throw error;
+      }
       return data.session!.access_token;
     }
     return session!.access_token;
