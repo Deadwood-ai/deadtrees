@@ -670,6 +670,16 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			stdout_logs = ''
 			exit_status = 1
 			try:
+				# Hard cap ODM container RAM via cgroups so a runaway ODM stage
+				# (texrecon / gdal ortho writeout) cannot exhaust host memory and
+				# take the processor container down with it as OOM collateral.
+				# Host has ~125 GB; processor is capped at 96 GB; leaving ODM
+				# uncapped was causing global OOM events that killed the
+				# processor mid-pipeline (see DT-263 / forensics for 8469, 8473,
+				# 8503). 100 GB is generous for ODM while guaranteeing the
+				# processor can always keep running. oom_score_adj biases the
+				# kernel OOM killer toward the ODM container if memory pressure
+				# still occurs, protecting the processor from collateral kills.
 				odm_container = client.containers.run(
 					image='opendronemap/odm',
 					command=odm_command,
@@ -677,6 +687,9 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 					environment={
 						'GDAL_CACHEMAX': '16384',
 					},
+					mem_limit='100g',
+					memswap_limit='100g',
+					oom_score_adj=500,
 					remove=False,
 					detach=True,
 					name=f'dt-odm-pipeline-d{dataset_id}-{int(time.time())}',

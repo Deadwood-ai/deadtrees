@@ -7,6 +7,12 @@ services:
     network_mode: host
     # command: python -m debugpy --listen 0.0.0.0:5678 --wait-for-client -m processor.src.processor
     command: python -m processor.src.processor
+    # Self-heal if the processor container crashes (e.g. OOM collateral kill
+    # during a heavy ODM / treecover stage). Clean exits (exit 0 after finishing
+    # a task) are not restarted, so the existing cron-based polling model is
+    # preserved. Cap retries so a persistently broken container does not
+    # thrash forever.
+    restart: on-failure:5
     deploy:
       resources:
         limits:
