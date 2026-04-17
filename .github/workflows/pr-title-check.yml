@@ -1,0 +1,41 @@
+name: Validate Pull Request Title
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  validate-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Conventional PR title
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = context.payload.pull_request.title;
+            const pattern = /^(feat|fix|docs|chore|refactor|perf|test|build|ci|revert)(\([^)]+\))?(!)?: .+/;
+
+            if (pattern.test(title)) {
+              core.info(`PR title is valid: ${title}`);
+              return;
+            }
+
+            core.setFailed(
+              [
+                "Pull request titles must use Conventional Commit style.",
+                "",
+                "Expected format:",
+                "  type(scope): short summary",
+                "",
+                "Allowed types:",
+                "  feat, fix, docs, chore, refactor, perf, test, build, ci, revert",
+                "",
+                "Examples:",
+                "  feat(frontend): add dataset upload confirmations",
+                "  fix(api): avoid duplicate export jobs",
+                "  ci(release): automate CalVer releases on main",
+              ].join("\n")
+            );
