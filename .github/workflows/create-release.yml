@@ -38,8 +38,10 @@ jobs:
       - name: Compute next release tag
         id: version
         shell: bash
+        env:
+          RELEASE_DATE_INPUT: ${{ inputs.release_date }}
         run: |
-          release_date="${{ inputs.release_date }}"
+          release_date="${RELEASE_DATE_INPUT}"
           if [ -z "$release_date" ]; then
             release_date="$(date -u +%Y.%m.%d)"
           fi
@@ -70,6 +72,7 @@ jobs:
             echo "previous_tag=$previous_tag"
             echo "next_tag=$next_tag"
             echo "release_date=$release_date"
+            echo "target_commitish=$(git rev-parse HEAD)"
             echo "commit_sha=$(git rev-parse --short=12 HEAD)"
           } >> "$GITHUB_OUTPUT"
 
@@ -109,7 +112,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           NEXT_TAG: ${{ steps.version.outputs.next_tag }}
-          TARGET_COMMITISH: ${{ inputs.target_commitish || github.sha }}
+          TARGET_COMMITISH: ${{ steps.version.outputs.target_commitish }}
         with:
           script: |
             const response = await github.rest.repos.createRelease({
