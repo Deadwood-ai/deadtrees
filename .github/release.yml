@@ -1,0 +1,42 @@
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+  categories:
+    - title: Breaking Changes
+      labels:
+        - breaking-change
+    - title: Frontend
+      labels:
+        - frontend
+    - title: API
+      labels:
+        - api
+    - title: Database
+      labels:
+        - database
+        - db
+        - supabase
+    - title: Processing
+      labels:
+        - processor
+        - processing
+        - pipeline
+        - odm
+        - segmentation
+    - title: CI/CD
+      labels:
+        - ci
+        - cd
+        - github-actions
+        - release
+    - title: Docs
+      labels:
+        - docs
+    - title: Maintenance
+      labels:
+        - dependencies
+        - chore
+    - title: Other Changes
+      labels:
+        - "*"
