@@ -205,6 +205,21 @@ This writes an ignored keypair to `.local/ssh/processing-to-storage` and `.local
 If you prefer a different key location, set absolute paths in `LOCAL_TEST_SSH_PRIVATE_KEY_PATH` and
 `LOCAL_TEST_SSH_PUBLIC_KEY_PATH` before running `docker compose -f docker-compose.test.yaml ...`.
 
+## Codex app worktrees
+
+If you use the Codex desktop app, configure a project Local Environment so new
+Dead Trees worktrees bootstrap themselves automatically.
+
+- Setup script: `bash scripts/setup-worktree.sh`
+- Suggested actions:
+  - `source venv/bin/activate && deadtrees dev test api`
+  - `source venv/bin/activate && deadtrees dev test processor`
+  - `npm --prefix frontend test`
+
+The setup script auto-detects the primary checkout from `git worktree list`,
+so a Codex-created worktree will reuse the main checkout for shared `assets`,
+`data`, and `.local/ssh` without hardcoding a machine-specific path.
+
 ## Project structure
 
 ```bash

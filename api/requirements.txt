@@ -27,3 +27,4 @@ fiona
 pillow
 pyproj
 shapely
+pyogrio

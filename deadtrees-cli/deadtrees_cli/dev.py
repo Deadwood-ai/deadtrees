@@ -20,12 +20,29 @@ from shared.models import (
 	PlatformEnum,
 )
 
+DEFAULT_COMPOSE_PROJECT_NAME = 'deadtrees-test'
+SERVICE_DEPENDENCIES = {
+	'api-test': ['api-test', 'nginx', 'mailpit'],
+	'processor-test': ['processor-test', 'nginx'],
+}
+SERVICE_BUILD_FILES = {
+	'api-test': ['api/Dockerfile', 'api/requirements.txt'],
+	'processor-test': [
+		'processor/Dockerfile',
+		'processor/requirements.txt',
+		'processor/src/deadwood_segmentation/deadtreesmodels/requirements.txt',
+	],
+	'nginx': ['nginx/test-conf/Dockerfile', 'nginx/test-conf/storage-server.conf', 'nginx/test-conf/entrypoint.sh'],
+}
+
 
 class DevCommands:
 	"""Development environment management commands"""
 
 	def __init__(self):
 		self.test_compose_file = 'docker-compose.test.yaml'
+		self.compose_env = os.environ.copy()
+		self.compose_env.setdefault('COMPOSE_PROJECT_NAME', DEFAULT_COMPOSE_PROJECT_NAME)
 
 	def _compose_cmd(self, *args: str) -> List[str]:
 		"""Build a docker compose command for the test environment."""
@@ -46,7 +63,7 @@ class DevCommands:
 	def _run_command(self, command: List[str], check: bool = True) -> subprocess.CompletedProcess:
 		"""Run a shell command and handle errors"""
 		try:
-			return subprocess.run(command, check=check)
+			return subprocess.run(command, check=check, env=self.compose_env)
 		except subprocess.CalledProcessError as e:
 			print(f'Error executing command: {" ".join(command)}')
 			print(f'Error: {str(e)}')
@@ -59,6 +76,7 @@ class DevCommands:
 			capture_output=True,
 			text=True,
 			check=True,
+			env=self.compose_env,
 		)
 		return [service for service in result.stdout.strip().split('\n') if service]
 
@@ -69,6 +87,7 @@ class DevCommands:
 			capture_output=True,
 			text=True,
 			check=False,
+			env=self.compose_env,
 		)
 		if result.returncode != 0:
 			return {}
@@ -86,6 +105,10 @@ class DevCommands:
 		"""Check whether a compose service is currently running."""
 		record = self._get_service_statuses().get(service)
 		return bool(record and record.get('State') == 'running')
+
+	def _services_for_target(self, service: str) -> List[str]:
+		"""Return the compose services required for a given test target."""
+		return SERVICE_DEPENDENCIES.get(service, [service])
 
 	def _wait_for_services_ready(self, services: List[str], timeout_seconds: int = 90):
 		"""Wait until all requested services are running and healthy when health checks exist."""
@@ -118,52 +141,62 @@ class DevCommands:
 		raise RuntimeError(f'Timed out waiting for test services to become ready: {", ".join(pending)}')
 
 	def _ensure_test_service_running(self, service: str):
-		"""Start the test stack if the requested service is not already running."""
-		if not self._is_service_running(service):
-			print(f'Service "{service}" is not running. Starting test environment...')
+		"""Start only the services needed for the requested test target."""
+		required_services = self._services_for_target(service)
+		missing_services = [required for required in required_services if not self._is_service_running(required)]
+		if missing_services:
+			print(f'Services not running for "{service}": {", ".join(missing_services)}. Starting shared test services...')
 			try:
-				self.start()
+				self.start(services=required_services)
 			except subprocess.CalledProcessError:
 				# Compose can report a startup conflict while still leaving the requested
 				# service running. Re-check before surfacing the failure.
-				if not self._is_service_running(service):
+				still_missing = [required for required in required_services if not self._is_service_running(required)]
+				if still_missing:
 					raise
-				print(f'Service "{service}" is now running despite compose startup warnings. Continuing...')
+				print(f'Shared test services for "{service}" are now running despite compose startup warnings. Continuing...')
 
-		self._wait_for_services_ready(self._get_compose_services())
+		self._wait_for_services_ready(required_services)
 
-	def _check_rebuild_needed(self) -> List[str]:
+	def _check_rebuild_needed(self, services: Optional[List[str]] = None) -> List[str]:
 		"""Check which services need rebuilding by comparing image and dockerfile timestamps"""
 		services_to_rebuild = []
 
-		# Get list of all services
-		services = self._get_compose_services()
+		service_names = services or self._get_compose_services()
 
-		for service in services:
+		for service in service_names:
+			build_files = [Path(path) for path in SERVICE_BUILD_FILES.get(service, [f'{service}/Dockerfile'])]
+			existing_build_files = [path for path in build_files if path.exists()]
+			if not existing_build_files:
+				continue
+
 			# Check if image exists
-			result = subprocess.run(self._compose_cmd('images', '-q', service), capture_output=True, text=True, check=False)
+			result = subprocess.run(
+				self._compose_cmd('images', '-q', service),
+				capture_output=True,
+				text=True,
+				check=False,
+				env=self.compose_env,
+			)
 
 			if not result.stdout.strip():
 				services_to_rebuild.append(service)
 				continue
 
-			# Get Dockerfile timestamp if it exists
-			dockerfile_path = f'./{service}/Dockerfile'
-			if os.path.exists(dockerfile_path):
-				dockerfile_mtime = os.path.getmtime(dockerfile_path)
+			image_id = result.stdout.strip().splitlines()[-1]
+			image_created = subprocess.run(
+				['docker', 'image', 'inspect', '-f', '{{.Created}}', image_id],
+				capture_output=True,
+				text=True,
+				check=False,
+			)
+			if image_created.returncode != 0:
+				services_to_rebuild.append(service)
+				continue
 
-				# Get image creation timestamp
-				result = subprocess.run(
-					['docker', 'inspect', '-f', '{{.Created}}', f'deadwood_network-{service}'],
-					capture_output=True,
-					text=True,
-					check=False,
-				)
-
-				if result.returncode == 0:
-					image_timestamp = datetime.fromisoformat(result.stdout.strip().replace('Z', '+00:00'))
-					if dockerfile_mtime > image_timestamp.timestamp():
-						services_to_rebuild.append(service)
+			image_timestamp = datetime.fromisoformat(image_created.stdout.strip().replace('Z', '+00:00')).timestamp()
+			if any(path.stat().st_mtime > image_timestamp for path in existing_build_files):
+				services_to_rebuild.append(service)
 
 		return services_to_rebuild
 
@@ -457,18 +490,19 @@ class DevCommands:
 		except Exception as e:
 			print(f'⚠ Cleanup error: {str(e)}')
 
-	def start(self, force_rebuild: bool = False):
-		"""Start the test environment and rebuild containers if needed"""
+	def start(self, force_rebuild: bool = False, services: Optional[List[str]] = None):
+		"""Start the shared test environment, optionally scoped to a subset of services."""
+		selected_services = services or self._get_compose_services()
 		if force_rebuild:
-			self._run_command(self._compose_lifecycle_cmd('up', flags=['-d', '--build']))
+			self._run_command(self._compose_lifecycle_cmd('up', flags=['-d', '--build'], services=selected_services))
 			return
 		else:
-			services_to_rebuild = self._check_rebuild_needed()
+			services_to_rebuild = self._check_rebuild_needed(selected_services)
 			if services_to_rebuild:
 				print(f'Rebuilding services: {", ".join(services_to_rebuild)}')
 				self._run_command(self._compose_cmd('build', *services_to_rebuild))
 
-		self._run_command(self._compose_lifecycle_cmd('up', flags=['-d']))
+		self._run_command(self._compose_lifecycle_cmd('up', flags=['-d'], services=selected_services))
 
 	def up(self, force_rebuild: bool = False):
 		"""Alias for start() to match the documented CLI examples."""
