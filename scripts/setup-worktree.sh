@@ -210,8 +210,14 @@ ensure_assets_and_keys() {
 
 require_command git
 require_command python3
-require_command npm
-require_command make
+
+if [[ "$INSTALL_FRONTEND" == true ]]; then
+  require_command npm
+fi
+
+if [[ "$ENSURE_ASSETS" == true ]]; then
+  require_command make
+fi
 
 if [[ -z "$SHARED_ROOT" ]]; then
   SHARED_ROOT="$(detect_default_shared_root)"

@@ -141,20 +141,23 @@ class DevCommands:
 		raise RuntimeError(f'Timed out waiting for test services to become ready: {", ".join(pending)}')
 
 	def _ensure_test_service_running(self, service: str):
-		"""Start only the services needed for the requested test target."""
+		"""Refresh only the services needed for the requested test target."""
 		required_services = self._services_for_target(service)
 		missing_services = [required for required in required_services if not self._is_service_running(required)]
 		if missing_services:
 			print(f'Services not running for "{service}": {", ".join(missing_services)}. Starting shared test services...')
-			try:
-				self.start(services=required_services)
-			except subprocess.CalledProcessError:
-				# Compose can report a startup conflict while still leaving the requested
-				# service running. Re-check before surfacing the failure.
-				still_missing = [required for required in required_services if not self._is_service_running(required)]
-				if still_missing:
-					raise
-				print(f'Shared test services for "{service}" are now running despite compose startup warnings. Continuing...')
+		else:
+			print(f'Refreshing shared test services for "{service}" so this worktree owns the active bind mounts...')
+
+		try:
+			self.start(services=required_services)
+		except subprocess.CalledProcessError:
+			# Compose can report a startup conflict while still leaving the requested
+			# services running. Re-check before surfacing the failure.
+			still_missing = [required for required in required_services if not self._is_service_running(required)]
+			if still_missing:
+				raise
+			print(f'Shared test services for "{service}" are now running despite compose startup warnings. Continuing...')
 
 		self._wait_for_services_ready(required_services)
 

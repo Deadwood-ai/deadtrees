@@ -21,7 +21,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 # already provided by the distro geospatial stack to avoid slow source builds.
 COPY api/requirements.txt .
 RUN pip install --upgrade pip && \
-    grep -Ev '^(rasterio==.*|geopandas|fiona|pyproj|shapely)$' requirements.txt > docker-requirements.txt && \
+    grep -Ev '^(rasterio|geopandas|fiona|pyproj|shapely)(==.*)?$' requirements.txt > docker-requirements.txt && \
     pip install -r docker-requirements.txt && \
     rm docker-requirements.txt && \
     rm requirements.txt
