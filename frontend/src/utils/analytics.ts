@@ -2,6 +2,7 @@ import { User } from "@supabase/supabase-js";
 import posthog from "posthog-js";
 
 const POSTHOG_PROJECT_KEY = import.meta.env.VITE_POSTHOG_PROJECT_KEY as string | undefined;
+let initializedPostHogMode: "limited" | "accepted" | null = null;
 
 export const COOKIE_CONSENT_VERSION = "1.1";
 export const COOKIE_CONSENT_KEY = "cookieConsent";
@@ -314,13 +315,6 @@ export const saveConsent = (consent: "accepted" | "rejected"): void => {
 export const initializePostHog = (consent: string | null = null): void => {
   if (!isPostHogAvailable() || !POSTHOG_PROJECT_KEY) return;
 
-  if (
-    (consent === "accepted" && posthog.has_opted_in_capturing()) ||
-    (consent === "rejected" && posthog.has_opted_out_capturing())
-  ) {
-    return;
-  }
-
   if (consent === null) {
     const storage = getStorage();
     consent = storage?.getItem(COOKIE_CONSENT_KEY) ?? null;
@@ -330,14 +324,20 @@ export const initializePostHog = (consent: string | null = null): void => {
     }
   }
 
-  if (!posthog.has_opted_in_capturing() && !posthog.has_opted_out_capturing()) {
+  const mode = consent === "accepted" ? "accepted" : "limited";
+
+  // Persisted opt-in/out flags survive reloads, so they are not a safe proxy for whether
+  // the current page has actually initialized PostHog after a deploy. We also need to
+  // reconfigure PostHog when consent changes from limited mode to full cookie-backed mode.
+  if (initializedPostHogMode !== mode) {
     posthog.init(POSTHOG_PROJECT_KEY, {
       api_host: "https://eu.i.posthog.com",
-      persistence: consent === "accepted" ? "cookie" : "memory",
-      autocapture: consent === "accepted",
+      persistence: mode === "accepted" ? "cookie" : "memory",
+      autocapture: mode === "accepted",
       capture_pageview: true,
-      capture_pageleave: consent === "accepted",
+      capture_pageleave: mode === "accepted",
     });
+    initializedPostHogMode = mode;
   }
 
   if (consent === "accepted" && !posthog.has_opted_in_capturing()) {
