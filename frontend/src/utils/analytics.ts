@@ -2,6 +2,7 @@ import { User } from "@supabase/supabase-js";
 import posthog from "posthog-js";
 
 const POSTHOG_PROJECT_KEY = import.meta.env.VITE_POSTHOG_PROJECT_KEY as string | undefined;
+let hasInitializedPostHog = false;
 let initializedPostHogMode: "limited" | "accepted" | null = null;
 
 export const COOKIE_CONSENT_VERSION = "1.1";
@@ -325,18 +326,24 @@ export const initializePostHog = (consent: string | null = null): void => {
   }
 
   const mode = consent === "accepted" ? "accepted" : "limited";
+  const posthogConfig = {
+    api_host: "https://eu.i.posthog.com",
+    persistence: mode === "accepted" ? "cookie" : "memory",
+    autocapture: mode === "accepted",
+    capture_pageview: true,
+    capture_pageleave: mode === "accepted",
+  } as const;
 
   // Persisted opt-in/out flags survive reloads, so they are not a safe proxy for whether
-  // the current page has actually initialized PostHog after a deploy. We also need to
-  // reconfigure PostHog when consent changes from limited mode to full cookie-backed mode.
-  if (initializedPostHogMode !== mode) {
-    posthog.init(POSTHOG_PROJECT_KEY, {
-      api_host: "https://eu.i.posthog.com",
-      persistence: mode === "accepted" ? "cookie" : "memory",
-      autocapture: mode === "accepted",
-      capture_pageview: true,
-      capture_pageleave: mode === "accepted",
-    });
+  // the current page has actually initialized PostHog after a deploy. We initialize the
+  // SDK once per page load, then use set_config for consent upgrades because posthog.init()
+  // becomes a no-op after the first successful initialization.
+  if (!hasInitializedPostHog) {
+    posthog.init(POSTHOG_PROJECT_KEY, posthogConfig);
+    hasInitializedPostHog = true;
+    initializedPostHogMode = mode;
+  } else if (initializedPostHogMode !== mode) {
+    posthog.set_config(posthogConfig);
     initializedPostHogMode = mode;
   }
 
@@ -344,6 +351,8 @@ export const initializePostHog = (consent: string | null = null): void => {
     posthog.opt_in_capturing();
   } else if (consent === "rejected" && !posthog.has_opted_out_capturing()) {
     posthog.opt_out_capturing();
+  } else if (consent !== "accepted" && (posthog.has_opted_in_capturing() || posthog.has_opted_out_capturing())) {
+    posthog.clear_opt_in_out_capturing();
   }
 };
 
