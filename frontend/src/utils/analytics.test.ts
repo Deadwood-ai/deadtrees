@@ -1,10 +1,61 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  createAnalyticsPayload,
-  deriveUserSegment,
-  sanitizeEventProperties,
-} from "./analytics";
+const posthogMock = vi.hoisted(() => ({
+  init: vi.fn(),
+  capture: vi.fn(),
+  identify: vi.fn(),
+  opt_in_capturing: vi.fn(),
+  opt_out_capturing: vi.fn(),
+  has_opted_in_capturing: vi.fn(() => false),
+  has_opted_out_capturing: vi.fn(() => false),
+}));
+
+vi.mock("posthog-js", () => ({
+  default: posthogMock,
+}));
+
+let createAnalyticsPayload: typeof import("./analytics").createAnalyticsPayload;
+let deriveUserSegment: typeof import("./analytics").deriveUserSegment;
+let initializePostHog: typeof import("./analytics").initializePostHog;
+let sanitizeEventProperties: typeof import("./analytics").sanitizeEventProperties;
+
+beforeEach(async () => {
+  vi.resetModules();
+  vi.stubEnv("VITE_POSTHOG_PROJECT_KEY", "ph_test_key");
+  const storage = (() => {
+    const values = new Map<string, string>();
+    return {
+      clear: () => values.clear(),
+      getItem: (key: string) => values.get(key) ?? null,
+      removeItem: (key: string) => values.delete(key),
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+  })();
+  vi.stubGlobal("localStorage", storage);
+  vi.stubGlobal("window", {
+    location: {
+      href: "https://deadtrees.earth/",
+      origin: "https://deadtrees.earth",
+      pathname: "/",
+      search: "",
+    },
+    localStorage: storage,
+  });
+  storage.clear();
+  Object.values(posthogMock).forEach((value) => {
+    if ("mockReset" in value) {
+      value.mockReset();
+    }
+  });
+  posthogMock.has_opted_in_capturing.mockReturnValue(false);
+  posthogMock.has_opted_out_capturing.mockReturnValue(false);
+
+  const analytics = await import("./analytics");
+  createAnalyticsPayload = analytics.createAnalyticsPayload;
+  deriveUserSegment = analytics.deriveUserSegment;
+  initializePostHog = analytics.initializePostHog;
+  sanitizeEventProperties = analytics.sanitizeEventProperties;
+});
 
 describe("deriveUserSegment", () => {
   it("classifies anonymous users as visitors", () => {
@@ -97,5 +148,58 @@ describe("createAnalyticsPayload", () => {
     expect(payload.source_surface).toBe("profile");
     expect(payload.is_logged_in).toBe(true);
     expect(payload.user_segment).toBe("contributor");
+  });
+});
+
+describe("initializePostHog", () => {
+  it("initializes PostHog even when an old opt-in cookie exists", () => {
+    localStorage.setItem("cookieConsent", "accepted");
+    localStorage.setItem("cookieConsentVersion", "1.0");
+    posthogMock.has_opted_in_capturing.mockReturnValue(true);
+
+    initializePostHog();
+
+    expect(posthogMock.init).toHaveBeenCalledWith(
+      "ph_test_key",
+      expect.objectContaining({
+        persistence: "memory",
+        autocapture: false,
+        capture_pageview: true,
+      }),
+    );
+  });
+
+  it("initializes PostHog only once per page load", () => {
+    initializePostHog("accepted");
+    initializePostHog("accepted");
+
+    expect(posthogMock.init).toHaveBeenCalledTimes(1);
+  });
+
+  it("reinitializes PostHog when consent changes from limited to accepted", () => {
+    initializePostHog("pending");
+    initializePostHog("accepted");
+
+    expect(posthogMock.init).toHaveBeenCalledTimes(2);
+    expect(posthogMock.init).toHaveBeenNthCalledWith(
+      1,
+      "ph_test_key",
+      expect.objectContaining({
+        persistence: "memory",
+        autocapture: false,
+        capture_pageview: true,
+        capture_pageleave: false,
+      }),
+    );
+    expect(posthogMock.init).toHaveBeenNthCalledWith(
+      2,
+      "ph_test_key",
+      expect.objectContaining({
+        persistence: "cookie",
+        autocapture: true,
+        capture_pageview: true,
+        capture_pageleave: true,
+      }),
+    );
   });
 });
