@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const posthogMock = vi.hoisted(() => ({
   init: vi.fn(),
+  set_config: vi.fn(),
   capture: vi.fn(),
   identify: vi.fn(),
   opt_in_capturing: vi.fn(),
   opt_out_capturing: vi.fn(),
+  clear_opt_in_out_capturing: vi.fn(),
   has_opted_in_capturing: vi.fn(() => false),
   has_opted_out_capturing: vi.fn(() => false),
 }));
@@ -167,6 +169,7 @@ describe("initializePostHog", () => {
         capture_pageview: true,
       }),
     );
+    expect(posthogMock.clear_opt_in_out_capturing).toHaveBeenCalledTimes(1);
   });
 
   it("initializes PostHog only once per page load", () => {
@@ -174,13 +177,14 @@ describe("initializePostHog", () => {
     initializePostHog("accepted");
 
     expect(posthogMock.init).toHaveBeenCalledTimes(1);
+    expect(posthogMock.set_config).not.toHaveBeenCalled();
   });
 
-  it("reinitializes PostHog when consent changes from limited to accepted", () => {
+  it("updates PostHog config when consent changes from limited to accepted", () => {
     initializePostHog("pending");
     initializePostHog("accepted");
 
-    expect(posthogMock.init).toHaveBeenCalledTimes(2);
+    expect(posthogMock.init).toHaveBeenCalledTimes(1);
     expect(posthogMock.init).toHaveBeenNthCalledWith(
       1,
       "ph_test_key",
@@ -191,9 +195,8 @@ describe("initializePostHog", () => {
         capture_pageleave: false,
       }),
     );
-    expect(posthogMock.init).toHaveBeenNthCalledWith(
-      2,
-      "ph_test_key",
+    expect(posthogMock.set_config).toHaveBeenCalledTimes(1);
+    expect(posthogMock.set_config).toHaveBeenCalledWith(
       expect.objectContaining({
         persistence: "cookie",
         autocapture: true,
@@ -201,5 +204,14 @@ describe("initializePostHog", () => {
         capture_pageleave: true,
       }),
     );
+    expect(posthogMock.opt_in_capturing).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears stale opt status while consent is pending", () => {
+    posthogMock.has_opted_out_capturing.mockReturnValue(true);
+
+    initializePostHog("pending");
+
+    expect(posthogMock.clear_opt_in_out_capturing).toHaveBeenCalledTimes(1);
   });
 });
