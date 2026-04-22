@@ -95,6 +95,7 @@ class SummaryMetrics:
 	successful_uploads: int = 0
 	failed_uploads: int = 0
 	processing_uploads: int = 0
+	processed_datasets: int = 0
 	upload_countries: dict = field(default_factory=dict)
 	uploaders: list = field(default_factory=list)
 	
@@ -210,14 +211,14 @@ def fetch_posthog_metrics(period_start: datetime, period_end: datetime) -> tuple
 
 def fetch_upload_metrics(client: Client, period_start: datetime) -> dict:
 	"""Fetch upload statistics from database"""
-	stats = {"total": 0, "successful": 0, "failed": 0, "processing": 0}
+	stats = {"total": 0, "successful": 0, "failed": 0, "processing": 0, "processed": 0}
 	
 	# Get datasets created after period_start with their status
 	# Using PostgREST embedding to join v2_datasets with v2_statuses
 	period_str = period_start.isoformat()
 	
 	response = client.table(settings.datasets_table).select(
-		'id, v2_statuses(has_error, current_status)'
+		'id, v2_statuses(has_error, current_status, is_deadwood_done, is_forest_cover_done, is_odm_done)'
 	).gte('created_at', period_str).execute()
 	
 	if response.data:
@@ -236,6 +237,10 @@ def fetch_upload_metrics(client: Client, period_start: datetime) -> dict:
 			if status:
 				has_error = status.get("has_error", False)
 				current_status = status.get("current_status", "idle")
+				is_processed = any(
+					status.get(flag, False)
+					for flag in ("is_deadwood_done", "is_forest_cover_done", "is_odm_done")
+				)
 				
 				if has_error:
 					stats["failed"] += 1
@@ -243,6 +248,9 @@ def fetch_upload_metrics(client: Client, period_start: datetime) -> dict:
 					stats["successful"] += 1
 				else:
 					stats["processing"] += 1
+
+				if not has_error and is_processed:
+					stats["processed"] += 1
 	
 	return stats
 
@@ -486,6 +494,7 @@ def gather_metrics() -> SummaryMetrics:
 		metrics.successful_uploads = upload_stats["successful"]
 		metrics.failed_uploads = upload_stats["failed"]
 		metrics.processing_uploads = upload_stats["processing"]
+		metrics.processed_datasets = upload_stats["processed"]
 		print(f"  Uploads: {metrics.total_uploads} total ({metrics.successful_uploads} ok, {metrics.failed_uploads} failed)")
 		
 		# Upload details
@@ -564,6 +573,9 @@ def format_message(metrics: SummaryMetrics) -> str:
 		
 		if status_parts:
 			sections.append(f"- **Status**: {' | '.join(status_parts)}")
+
+		if metrics.processed_datasets > 0:
+			sections.append(f"- **Datasets processed**: {metrics.processed_datasets}")
 		
 		if metrics.uploaders:
 			sections.append(f"- **Contributors**: {', '.join(metrics.uploaders)}")
