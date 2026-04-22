@@ -48,6 +48,14 @@ class DevCommands:
 		"""Build a docker compose command for the test environment."""
 		return ['docker', 'compose', '-f', self.test_compose_file, *args]
 
+	def _normalize_services(self, services: Optional[List[str] | str]) -> Optional[List[str]]:
+		"""Allow Fire callers to pass either a list or a comma-separated string."""
+		if services is None:
+			return None
+		if isinstance(services, str):
+			return [service.strip() for service in services.split(',') if service.strip()]
+		return services
+
 	def _compose_lifecycle_cmd(
 		self, action: str, *, flags: Optional[List[str]] = None, services: Optional[List[str]] = None
 	) -> List[str]:
@@ -165,7 +173,7 @@ class DevCommands:
 		"""Check which services need rebuilding by comparing image and dockerfile timestamps"""
 		services_to_rebuild = []
 
-		service_names = services or self._get_compose_services()
+		service_names = self._normalize_services(services) or self._get_compose_services()
 
 		for service in service_names:
 			build_files = [Path(path) for path in SERVICE_BUILD_FILES.get(service, [f'{service}/Dockerfile'])]
@@ -495,7 +503,7 @@ class DevCommands:
 
 	def start(self, force_rebuild: bool = False, services: Optional[List[str]] = None):
 		"""Start the shared test environment, optionally scoped to a subset of services."""
-		selected_services = services or self._get_compose_services()
+		selected_services = self._normalize_services(services) or self._get_compose_services()
 		if force_rebuild:
 			self._run_command(self._compose_lifecycle_cmd('up', flags=['-d', '--build'], services=selected_services))
 			return
