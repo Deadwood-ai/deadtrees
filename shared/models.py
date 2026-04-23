@@ -490,6 +490,16 @@ class Label(BaseModel):
 		return v
 
 
+class ModelPreference(BaseModel):
+	"""Stores the preferred model_config per label_data type (v2_model_preferences table)."""
+
+	id: Optional[int] = None
+	label_data: LabelDataEnum
+	model_config: Dict[str, Any]
+	created_at: Optional[datetime] = None
+	updated_at: Optional[datetime] = None
+
+
 class DeadwoodGeometry(BaseModel):
 	"""Label geometry model for v2_deadwood_geometries table"""
 

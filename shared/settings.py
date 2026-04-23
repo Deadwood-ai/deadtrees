@@ -27,6 +27,7 @@ _tables = {
 	'statuses': 'v2_statuses',
 	'queue': 'v2_queue',
 	'queue_positions': 'v2_queue_positions',
+	'model_preferences': 'v2_model_preferences',
 }
 
 
@@ -292,6 +293,10 @@ class Settings(BaseSettings):
 	@property
 	def statuses_table(self) -> str:
 		return self._tables['statuses']
+
+	@property
+	def model_preferences_table(self) -> str:
+		return self._tables['model_preferences']
 
 
 settings = Settings()

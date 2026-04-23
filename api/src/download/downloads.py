@@ -14,6 +14,7 @@ from shared.logging import UnifiedLogger
 from shared.settings import settings
 from shared.db import use_client
 from shared.models import Label, Dataset, LicenseEnum, Ortho, LabelDataEnum, LabelSourceEnum
+from shared.labels import get_model_preferences
 
 TEMPLATE_PATH = Path(__file__).parent / 'templates'
 
@@ -505,20 +506,34 @@ def get_all_dataset_labels(dataset_id: int) -> List[Label]:
 		return [Label(**label_data) for label_data in all_labels]
 
 
-def filter_exportable_dataset_labels(labels: List[Label]) -> List[Label]:
-	"""Keep only dataset-level label sources supported by download bundles."""
-	filtered_labels = [label for label in labels if label.label_source in EXPORTABLE_LABEL_SOURCES]
+def filter_exportable_dataset_labels(
+	labels: List[Label], preferences: Dict[LabelDataEnum, Dict]
+) -> List[Label]:
+	"""Keep only exportable label sources, and for model predictions only the preferred model version."""
+	result = []
+	for label in labels:
+		if label.label_source not in EXPORTABLE_LABEL_SOURCES:
+			continue
+		if label.label_source == LabelSourceEnum.model_prediction:
+			preferred = preferences.get(label.label_data)
+			if preferred is None:
+				# No preference configured — skip model predictions for this layer type
+				continue
+			if label.model_metadata != preferred:
+				continue
+		result.append(label)
 
-	skipped_count = len(labels) - len(filtered_labels)
+	skipped_count = len(labels) - len(result)
 	if skipped_count:
 		logger.info(f'Skipping {skipped_count} non-exportable labels during bundle generation')
 
-	return filtered_labels
+	return result
 
 
 def get_exportable_dataset_labels(dataset_id: int) -> List[Label]:
-	"""Fetch labels for a dataset and drop unsupported sources like reference patches."""
-	return filter_exportable_dataset_labels(get_all_dataset_labels(dataset_id))
+	"""Fetch labels for a dataset and drop unsupported sources and non-preferred model versions."""
+	preferences = get_model_preferences()
+	return filter_exportable_dataset_labels(get_all_dataset_labels(dataset_id), preferences)
 
 
 def create_labels_geopackages(dataset_id: int) -> Dict[str, Path]:
@@ -791,7 +806,8 @@ def create_consolidated_geopackage(dataset_id: int) -> Path:
 	if not all_labels:
 		raise ValueError(f'No labels found for dataset {dataset_id}')
 
-	filtered_labels = filter_exportable_dataset_labels(all_labels)
+	preferences = get_model_preferences()
+	filtered_labels = filter_exportable_dataset_labels(all_labels, preferences)
 
 	if not filtered_labels:
 		raise ValueError(

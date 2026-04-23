@@ -7,6 +7,7 @@ from shapely import wkb
 from shared.models import (
 	LabelPayloadData,
 	Label,
+	ModelPreference,
 	AOI,
 	DeadwoodGeometry,
 	ForestCoverGeometry,
@@ -233,3 +234,15 @@ def delete_model_prediction_labels(
 				f'Error deleting model prediction labels: {str(e)}', extra={'token': token, 'dataset_id': dataset_id}
 			)
 			raise Exception(f'Error deleting model prediction labels: {str(e)}')
+
+
+def get_model_preferences(token: Optional[str] = None) -> Dict[LabelDataEnum, Dict[str, Any]]:
+	"""Return the preferred model_config per label_data type from v2_model_preferences.
+
+	Returns a dict mapping LabelDataEnum -> model_config dict.
+	Label data types with no preference row are absent from the result.
+	"""
+	with use_client(token) as client:
+		response = client.table(settings.model_preferences_table).select('label_data,model_config').execute()
+
+	return {LabelDataEnum(row['label_data']): row['model_config'] for row in response.data}
