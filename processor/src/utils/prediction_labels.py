@@ -6,7 +6,14 @@ from shared.models import LabelDataEnum, LabelPayloadData, LabelSourceEnum, Labe
 from shared.settings import settings
 
 
-def replace_model_prediction_label(dataset_id: int, user_id: str, label_data: LabelDataEnum, geometry: dict, token: str):
+def replace_model_prediction_label(
+	dataset_id: int,
+	user_id: str,
+	label_data: LabelDataEnum,
+	geometry: dict,
+	token: str,
+	model_config: dict | None = None,
+):
 	"""Replace the existing model-prediction label for a dataset and label type."""
 	token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 
@@ -23,6 +30,7 @@ def replace_model_prediction_label(dataset_id: int, user_id: str, label_data: La
 		label_type=LabelTypeEnum.semantic_segmentation,
 		label_data=label_data,
 		label_quality=3,
+		model_metadata=model_config,
 		geometry=geometry,
 	)
 	return create_label_with_geometries(payload, user_id, token)

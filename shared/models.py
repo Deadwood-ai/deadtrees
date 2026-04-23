@@ -422,7 +422,7 @@ class LabelPayloadData(PartialModelMixin, BaseModel):
 	label_type: LabelTypeEnum
 	label_data: LabelDataEnum
 	label_quality: Optional[int] = None
-	# model_config: Optional[Dict[str, Any]] = None
+	model_metadata: Optional[Dict[str, Any]] = Field(default=None, serialization_alias='model_config')
 
 	# Label geometry
 	geometry: MultiPolygonModel
@@ -479,7 +479,7 @@ class Label(BaseModel):
 	label_type: LabelTypeEnum
 	label_data: LabelDataEnum
 	label_quality: Optional[int] = None
-	# model_config: Optional[Dict[str, Any]] = None
+	model_metadata: Optional[Dict[str, Any]] = Field(default=None, serialization_alias='model_config')
 	created_at: Optional[datetime] = None
 	updated_at: Optional[datetime] = None
 

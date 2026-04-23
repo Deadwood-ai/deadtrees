@@ -13,6 +13,8 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 ASSETS_DIR = PROJECT_ROOT / 'assets'
 
 MODEL_PATH = str(ASSETS_DIR / 'models' / 'segformer_b5_full_epoch_100.safetensors')
+MODULE_NAME = 'deadwood_segmentation_v1_moehring'
+CHECKPOINT_NAME = Path(MODEL_PATH).name
 
 
 def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str):
@@ -77,6 +79,10 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 			label_data=LabelDataEnum.deadwood,
 			geometry=deadwood_geojson,
 			token=token,
+			model_config={
+				'module': MODULE_NAME,
+				'checkpoint_name': CHECKPOINT_NAME,
+			},
 		)
 		logger.info(
 			f'Created label {label.id} with geometries',

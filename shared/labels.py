@@ -73,6 +73,7 @@ def create_label_with_geometries(payload: LabelPayloadData, user_id: str, token:
 		label_type=payload.label_type,
 		label_data=payload.label_data,
 		label_quality=payload.label_quality,
+		model_metadata=payload.model_metadata,
 	)
 
 	# Start transaction for label and geometries
@@ -81,7 +82,7 @@ def create_label_with_geometries(payload: LabelPayloadData, user_id: str, token:
 			# Insert label
 			response = (
 				client.table(settings.labels_table)
-				.insert(label.model_dump(exclude={'id', 'created_at', 'updated_at'}))
+				.insert(label.model_dump(by_alias=True, exclude={'id', 'created_at', 'updated_at'}))
 				.execute()
 			)
 			label_id = response.data[0]['id']
