@@ -156,6 +156,7 @@ const DatasetLayerControlPanel = ({
                 value={selectedForestLabelId ?? forestVariants[0]?.id}
                 onChange={onForestVariantChange}
                 className="w-full text-xs"
+                popupMatchSelectWidth={false}
                 options={forestVariants.map((l) => ({
                   value: l.id,
                   label: l.model_config?.module ?? `Label #${l.id}`,
@@ -190,6 +191,7 @@ const DatasetLayerControlPanel = ({
                 value={selectedDeadwoodLabelId ?? deadwoodVariants[0]?.id}
                 onChange={onDeadwoodVariantChange}
                 className="w-full text-xs"
+                popupMatchSelectWidth={false}
                 options={deadwoodVariants.map((l) => ({
                   value: l.id,
                   label: l.model_config?.module ?? `Label #${l.id}`,
