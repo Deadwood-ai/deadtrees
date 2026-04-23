@@ -168,9 +168,11 @@ class CombinedInference:
         except Exception:
             pass
 
-        # Extract binary masks per class
+        # Extract binary masks per class.
+        # Deadwood is a subset of tree cover, so merge deadwood pixels into the
+        # treecover mask before polygonization.
         deadwood_mask = (class_map == CLASS_DEADWOOD).astype(np.uint8)
-        treecover_mask = (class_map == CLASS_TREECOVER).astype(np.uint8)
+        treecover_mask = ((class_map == CLASS_TREECOVER) | (class_map == CLASS_DEADWOOD)).astype(np.uint8)
 
         src_crs = vrt_src.crs
         vrt_src.close()
