@@ -755,7 +755,7 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 			label_type=LabelTypeEnum.semantic_segmentation,
 			label_data=LabelDataEnum.forest_cover,
 			label_quality=3,
-			model_config={
+			model_metadata={
 				'module': MODULE_NAME,
 				'checkpoint_name': CHECKPOINT_NAME,
 			},
