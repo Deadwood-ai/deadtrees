@@ -10,6 +10,7 @@ from .process_thumbnail import process_thumbnail
 from .process_cog import process_cog
 from .process_deadwood_segmentation import process_deadwood_segmentation
 from .process_treecover_segmentation import process_treecover_segmentation
+from .process_deadwood_treecover_combined_v2 import process_deadwood_treecover_combined_v2
 from .process_metadata import process_metadata
 from .exceptions import AuthenticationError, ProcessingError
 from .utils.linear_issues import create_processing_failure_issue
@@ -30,6 +31,7 @@ PIPELINE_STAGE_MAP = [
 	(TaskTypeEnum.thumbnail, 'is_thumbnail_done', 'thumbnail_processing'),
 	(TaskTypeEnum.deadwood_v1, 'is_deadwood_done', 'deadwood_segmentation'),
 	(TaskTypeEnum.treecover_v1, 'is_forest_cover_done', 'forest_cover_segmentation'),
+	(TaskTypeEnum.deadwood_treecover_combined_v2, 'is_deadwood_done', 'deadwood_treecover_combined_segmentation'),
 ]
 
 
@@ -370,6 +372,35 @@ def process_task(task: QueueTask, token: str):
 				)
 				raise ProcessingError(
 					str(e), task_type='treecover_segmentation', task_id=task.id, dataset_id=task.dataset_id
+				)
+
+		# Process combined deadwood+treecover segmentation if requested
+		if TaskTypeEnum.deadwood_treecover_combined_v2 in task.task_types:
+			try:
+				token = refresh_processor_token(task, token)
+				logger.info(
+					'processing combined deadwood+treecover segmentation',
+					LogContext(
+						category=LogCategory.DEADWOOD, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+					),
+				)
+				process_deadwood_treecover_combined_v2(task, token, settings.processing_path)
+			except Exception as e:
+				error_token = refresh_processor_token(task, token)
+				logger.error(
+					f'Combined segmentation failed: {str(e)}',
+					LogContext(
+						category=LogCategory.DEADWOOD,
+						dataset_id=task.dataset_id,
+						user_id=task.user_id,
+						token=error_token,
+					),
+				)
+				raise ProcessingError(
+					str(e),
+					task_type='deadwood_treecover_combined_segmentation',
+					task_id=task.id,
+					dataset_id=task.dataset_id,
 				)
 
 		# Only delete task if all processing completed successfully

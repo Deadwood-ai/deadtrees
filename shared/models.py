@@ -94,6 +94,7 @@ class TaskTypeEnum(str, Enum):
 	thumbnail = 'thumbnail'  # Generate thumbnail image
 	deadwood_v1 = 'deadwood_v1'  # Run deadwood segmentation
 	treecover_v1 = 'treecover_v1'  # Run tree cover segmentation
+	deadwood_treecover_combined_v2 = 'deadwood_treecover_combined_v2'  # Run combined deadwood+treecover segmentation
 	geotiff = 'geotiff'  # Convert to geotiff
 	metadata = 'metadata'  # Extract metadata
 	odm_processing = 'odm_processing'  # ODM raw image processing
@@ -106,6 +107,7 @@ class TaskTypeEnum(str, Enum):
 			'thumbnail': 'Thumbnail',
 			'deadwood_v1': 'Deadwood',
 			'treecover_v1': 'Tree Cover',
+			'deadwood_treecover_combined_v2': 'Deadwood+Treecover (v2)',
 			'geotiff': 'GeoTIFF',
 			'metadata': 'Metadata',
 			'odm_processing': 'ODM',
