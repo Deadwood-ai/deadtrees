@@ -366,8 +366,8 @@ export default function DatasetDetails() {
             onEditForestCover={() => editing.handleStartEditing("forest_cover")}
             isLoggedIn={!!user}
             allowBadQualityLayers={canAudit}
-            deadwoodLabelIdOverride={canAudit ? selectedDeadwoodLabelId : undefined}
-            forestCoverLabelIdOverride={canAudit ? selectedForestLabelId : undefined}
+            deadwoodLabelIdOverride={canAudit && selectedDeadwoodLabelId !== null ? selectedDeadwoodLabelId : undefined}
+            forestCoverLabelIdOverride={canAudit && selectedForestLabelId !== null ? selectedForestLabelId : undefined}
           />
         </Suspense>
       </div>
