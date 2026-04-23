@@ -168,13 +168,16 @@ def upload_geometry_chunk(
 		raise Exception(f'Error uploading geometry chunk: {str(e)}')
 
 
-def delete_model_prediction_labels(dataset_id: int, label_data: LabelDataEnum, token: str) -> int:
-	"""Deletes all model prediction labels for a dataset with the specified label data type.
+def delete_model_prediction_labels(
+	dataset_id: int, label_data: LabelDataEnum, token: str, model_config: Optional[Dict[str, Any]] = None
+) -> int:
+	"""Deletes model prediction labels for a dataset with the specified label data type.
 
 	Args:
 		dataset_id: The ID of the dataset to delete labels for
 		label_data: The label data type (e.g., deadwood, forest_cover)
 		token: Authentication token
+		model_config: If provided, only delete labels whose model_metadata matches all keys/values
 
 	Returns:
 		int: Number of labels deleted
@@ -184,14 +187,17 @@ def delete_model_prediction_labels(dataset_id: int, label_data: LabelDataEnum, t
 	with use_client(token) as client:
 		try:
 			# First, get all model prediction labels for this dataset with the specified label data type
-			response = (
+			query = (
 				client.table(settings.labels_table)
 				.select('id')
 				.eq('dataset_id', dataset_id)
 				.eq('label_source', LabelSourceEnum.model_prediction.value)
 				.eq('label_data', label_data.value)
-				.execute()
 			)
+			if model_config:
+				for key, value in model_config.items():
+					query = query.eq(f'model_config->>{key}', value)
+			response = query.execute()
 
 			if not response.data:
 				# No existing labels found

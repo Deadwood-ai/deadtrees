@@ -17,7 +17,9 @@ def replace_model_prediction_label(
 	"""Replace the existing model-prediction label for a dataset and label type."""
 	token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 
-	deleted_count = delete_model_prediction_labels(dataset_id=dataset_id, label_data=label_data, token=token)
+	deleted_count = delete_model_prediction_labels(
+		dataset_id=dataset_id, label_data=label_data, token=token, model_config=model_config
+	)
 	if deleted_count > 0:
 		logger.info(
 			f'Deleted {deleted_count} existing prediction labels',
