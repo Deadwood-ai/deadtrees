@@ -28,8 +28,8 @@ PIPELINE_STAGE_MAP = [
 	(TaskTypeEnum.metadata, 'is_metadata_done', 'metadata_processing'),
 	(TaskTypeEnum.cog, 'is_cog_done', 'cog_processing'),
 	(TaskTypeEnum.thumbnail, 'is_thumbnail_done', 'thumbnail_processing'),
-	(TaskTypeEnum.deadwood, 'is_deadwood_done', 'deadwood_segmentation'),
-	(TaskTypeEnum.treecover, 'is_forest_cover_done', 'forest_cover_segmentation'),
+	(TaskTypeEnum.deadwood_v1, 'is_deadwood_done', 'deadwood_segmentation'),
+	(TaskTypeEnum.treecover_v1, 'is_forest_cover_done', 'forest_cover_segmentation'),
 ]
 
 
@@ -321,7 +321,7 @@ def process_task(task: QueueTask, token: str):
 				raise ProcessingError(str(e), task_type='thumbnail', task_id=task.id, dataset_id=task.dataset_id)
 
 		# Process deadwood_segmentation if requested
-		if TaskTypeEnum.deadwood in task.task_types:
+		if TaskTypeEnum.deadwood_v1 in task.task_types:
 			try:
 				token = refresh_processor_token(task, token)
 				logger.info(
@@ -347,7 +347,7 @@ def process_task(task: QueueTask, token: str):
 				)
 
 		# Process treecover_segmentation if requested (runs after deadwood)
-		if TaskTypeEnum.treecover in task.task_types:
+		if TaskTypeEnum.treecover_v1 in task.task_types:
 			try:
 				token = refresh_processor_token(task, token)
 				logger.info(

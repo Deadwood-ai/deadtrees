@@ -26,8 +26,8 @@ _TASK_TYPE_STATUS_FLAGS = {
 	TaskTypeEnum.metadata: 'is_metadata_done',
 	TaskTypeEnum.cog: 'is_cog_done',
 	TaskTypeEnum.thumbnail: 'is_thumbnail_done',
-	TaskTypeEnum.deadwood: 'is_deadwood_done',
-	TaskTypeEnum.treecover: 'is_forest_cover_done',
+	TaskTypeEnum.deadwood_v1: 'is_deadwood_done',
+	TaskTypeEnum.treecover_v1: 'is_forest_cover_done',
 }
 
 

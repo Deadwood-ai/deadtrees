@@ -92,8 +92,8 @@ class PredictionQualityEnum(str, Enum):
 class TaskTypeEnum(str, Enum):
 	cog = 'cog'  # Generate cloud optimized geotiff
 	thumbnail = 'thumbnail'  # Generate thumbnail image
-	deadwood = 'deadwood'  # Run deadwood segmentation
-	treecover = 'treecover'  # Run tree cover segmentation
+	deadwood_v1 = 'deadwood_v1'  # Run deadwood segmentation
+	treecover_v1 = 'treecover_v1'  # Run tree cover segmentation
 	geotiff = 'geotiff'  # Convert to geotiff
 	metadata = 'metadata'  # Extract metadata
 	odm_processing = 'odm_processing'  # ODM raw image processing
@@ -104,8 +104,8 @@ class TaskTypeEnum(str, Enum):
 		display_names = {
 			'cog': 'COG',
 			'thumbnail': 'Thumbnail',
-			'deadwood': 'Deadwood',
-			'treecover': 'Tree Cover',
+			'deadwood_v1': 'Deadwood',
+			'treecover_v1': 'Tree Cover',
 			'geotiff': 'GeoTIFF',
 			'metadata': 'Metadata',
 			'odm_processing': 'ODM',

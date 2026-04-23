@@ -274,8 +274,8 @@ class DevCommands:
 			raw = [str(t).strip().lower() for t in task_types if str(t).strip()]
 
 		alias_map = {
-			'forest_cover': 'treecover',
-			'forestcover': 'treecover',
+			'forest_cover': 'treecover_v1',
+			'forestcover': 'treecover_v1',
 			'geo': 'geotiff',
 			'ortho': 'geotiff',
 			'odm': 'odm_processing',
@@ -303,8 +303,8 @@ class DevCommands:
 			TaskTypeEnum.metadata,
 			TaskTypeEnum.cog,
 			TaskTypeEnum.thumbnail,
-			TaskTypeEnum.deadwood,
-			TaskTypeEnum.treecover,
+			TaskTypeEnum.deadwood_v1,
+			TaskTypeEnum.treecover_v1,
 		]
 		ordered = [task for task in order if task in unique]
 		return ordered
@@ -313,7 +313,7 @@ class DevCommands:
 		self,
 		dataset_id: int,
 		source_path: str,
-		task_types: str = 'geotiff,cog,thumbnail,deadwood,treecover,metadata',
+		task_types: str = 'geotiff,cog,thumbnail,deadwood_v1,treecover_v1,metadata',
 		include_geotiff: bool = True,
 		run_processor: bool = True,
 		priority: int = 1,
@@ -340,7 +340,7 @@ class DevCommands:
 
 		needs_geotiff = any(
 			task in task_list
-			for task in [TaskTypeEnum.metadata, TaskTypeEnum.cog, TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood, TaskTypeEnum.treecover]
+			for task in [TaskTypeEnum.metadata, TaskTypeEnum.cog, TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood_v1, TaskTypeEnum.treecover_v1]
 		)
 		if include_geotiff and needs_geotiff and TaskTypeEnum.geotiff not in task_list:
 			task_list.insert(0, TaskTypeEnum.geotiff)

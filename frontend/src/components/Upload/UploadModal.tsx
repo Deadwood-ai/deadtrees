@@ -274,8 +274,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
       // Process dataset with appropriate steps based on upload type
       const processingSteps =
         uploadType === UploadType.RAW_IMAGES_ZIP
-          ? ["odm_processing", "cog", "thumbnail", "metadata", "geotiff", "deadwood", "treecover"] // Raw images workflow includes ODM
-          : ["cog", "thumbnail", "metadata", "geotiff", "deadwood", "treecover"]; // GeoTIFF workflow (no ODM needed)
+          ? ["odm_processing", "cog", "thumbnail", "metadata", "geotiff", "deadwood_v1", "treecover_v1"] // Raw images workflow includes ODM
+          : ["cog", "thumbnail", "metadata", "geotiff", "deadwood_v1", "treecover_v1"]; // GeoTIFF workflow (no ODM needed)
 
       await processDataset(Number(uploadResponse.id), validAccessToken, processingSteps);
       track("upload_completed", {

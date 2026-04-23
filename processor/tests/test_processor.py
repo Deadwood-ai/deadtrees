@@ -159,8 +159,8 @@ def test_pipeline_stage_map_is_stable_and_ordered():
 		(TaskTypeEnum.metadata, 'is_metadata_done', 'metadata_processing'),
 		(TaskTypeEnum.cog, 'is_cog_done', 'cog_processing'),
 		(TaskTypeEnum.thumbnail, 'is_thumbnail_done', 'thumbnail_processing'),
-		(TaskTypeEnum.deadwood, 'is_deadwood_done', 'deadwood_segmentation'),
-		(TaskTypeEnum.treecover, 'is_forest_cover_done', 'forest_cover_segmentation'),
+		(TaskTypeEnum.deadwood_v1, 'is_deadwood_done', 'deadwood_segmentation'),
+		(TaskTypeEnum.treecover_v1, 'is_forest_cover_done', 'forest_cover_segmentation'),
 	]
 	assert PIPELINE_STAGE_MAP == expected
 
@@ -400,7 +400,7 @@ def test_detect_crashed_stage_finds_first_incomplete():
 	}
 	task_types = [
 		TaskTypeEnum.geotiff, TaskTypeEnum.metadata, TaskTypeEnum.cog,
-		TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood, TaskTypeEnum.treecover,
+		TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood_v1, TaskTypeEnum.treecover_v1,
 	]
 	assert detect_crashed_stage(status_data, task_types) == 'cog_processing'
 
@@ -433,7 +433,7 @@ def test_detect_crashed_stage_deadwood():
 	}
 	task_types = [
 		TaskTypeEnum.geotiff, TaskTypeEnum.metadata, TaskTypeEnum.cog,
-		TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood, TaskTypeEnum.treecover,
+		TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood_v1, TaskTypeEnum.treecover_v1,
 	]
 	assert detect_crashed_stage(status_data, task_types) == 'deadwood_segmentation'
 
@@ -519,7 +519,7 @@ def crashed_dataset_task(test_processor_user, auth_token):
 				'user_id': test_processor_user,
 				'task_types': [
 					TaskTypeEnum.geotiff, TaskTypeEnum.metadata, TaskTypeEnum.cog,
-					TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood, TaskTypeEnum.treecover,
+					TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood_v1, TaskTypeEnum.treecover_v1,
 				],
 				'priority': 1,
 				'is_processing': True,

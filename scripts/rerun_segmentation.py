@@ -90,7 +90,7 @@ def rerun_segmentation(dataset_ids: list, skip_processed: bool = True, priority:
 			# Start the deadwood segmentation task
 			result = row_data_commands.process(
 				dataset_id=dataset_id,
-				task_types=[TaskTypeEnum.geotiff.value, TaskTypeEnum.deadwood.value],
+				task_types=[TaskTypeEnum.geotiff.value, TaskTypeEnum.deadwood_v1.value],
 				priority=priority,
 			)
 
