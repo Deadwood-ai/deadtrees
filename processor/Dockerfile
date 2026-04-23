@@ -23,15 +23,10 @@ ENV CPLUS_INCLUDE_PATH=/usr/include/gdal \
 
 # Set up the application maintaining local structure
 WORKDIR /app
-RUN mkdir -p /app/processor/src/deadwood_segmentation/deadtreesmodels/data
 RUN mkdir -p /data
 
 # PyTorch 2.4 adds Python 3.12 support for torch.compile while still offering CUDA 12.1 wheels.
 RUN pip3 install --no-cache-dir torch==2.4.1 torchvision==0.19.1
-
-# Copy deadtreesmodels requirements and install
-COPY processor/src/deadwood_segmentation/deadtreesmodels/requirements.txt /app/processor/src/deadwood_segmentation/deadtreesmodels/requirements.txt
-RUN pip3 install --no-cache-dir -r /app/processor/src/deadwood_segmentation/deadtreesmodels/requirements.txt
 
 # Copy and install main requirements
 COPY processor/requirements.txt /app/processor/requirements.txt

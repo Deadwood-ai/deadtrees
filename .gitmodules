@@ -1,3 +1,0 @@
-[submodule "processor/src/deadwood_segmentation/deadtreesmodels"]
-	path = processor/src/deadwood_segmentation/deadtreesmodels
-	url = https://github.com/cmosig/deadtreesmodels.git

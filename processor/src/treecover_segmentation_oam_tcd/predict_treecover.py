@@ -18,7 +18,7 @@ from shared.models import LabelPayloadData, LabelSourceEnum, LabelTypeEnum, Labe
 from shared.labels import create_label_with_geometries, delete_model_prediction_labels
 from shared.logging import LogContext, LogCategory
 from shared.db import login, verify_token
-from ..deadwood_segmentation.deadtreesmodels.common.common import (
+from ..utils.segmentation import (
 	mask_to_polygons,
 	reproject_polygons,
 	filter_polygons_by_area,

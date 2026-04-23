@@ -192,7 +192,7 @@ def test_tcd_container_availability():
 
 def test_confidence_map_thresholding():
 	"""Test the confidence map thresholding logic"""
-	from processor.src.treecover_segmentation.predict_treecover import TCD_THRESHOLD
+	from processor.src.treecover_segmentation_oam_tcd.predict_treecover import TCD_THRESHOLD
 	import numpy as np
 
 	# Create test confidence map with values around threshold

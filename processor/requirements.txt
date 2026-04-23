@@ -19,6 +19,7 @@ utm
 scikit-learn
 matplotlib
 safetensors
+segmentation_models_pytorch
 opencv-python
 pytest
 pytest-cov

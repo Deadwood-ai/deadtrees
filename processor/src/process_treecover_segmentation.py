@@ -8,7 +8,7 @@ from shared.status import update_status
 from shared.logging import LogContext, LogCategory
 
 from .utils.local_ortho import ensure_local_ortho
-from .treecover_segmentation.predict_treecover import predict_treecover
+from .treecover_segmentation_oam_tcd.predict_treecover import predict_treecover
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
 
 

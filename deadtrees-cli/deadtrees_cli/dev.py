@@ -30,7 +30,6 @@ SERVICE_BUILD_FILES = {
 	'processor-test': [
 		'processor/Dockerfile',
 		'processor/requirements.txt',
-		'processor/src/deadwood_segmentation/deadtreesmodels/requirements.txt',
 	],
 	'nginx': ['nginx/test-conf/Dockerfile', 'nginx/test-conf/storage-server.conf', 'nginx/test-conf/entrypoint.sh'],
 }

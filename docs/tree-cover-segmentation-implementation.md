@@ -65,7 +65,7 @@ ODM → GeoTIFF → COG → Thumbnail → Metadata → Deadwood → TreeCover
 - [x] 3.5 Replace `tcd_pipeline.pipeline.Pipeline` calls with container execution
 
 ### Phase 4: Result Processing with Original Logic
-- [x] 4.1 Create `processor/src/treecover_segmentation/predict_treecover.py` for result parsing
+- [x] 4.1 Create `processor/src/treecover_segmentation_oam_tcd/predict_treecover.py` for result parsing
 - [x] 4.2 Preserve original confidence map handling (simplified for container output)
 - [x] 4.3 Implement original thresholding logic: `(confidence_map > 200).astype(np.uint8)`
 - [x] 4.4 Use existing `mask_to_polygons()` utility from common module
@@ -253,7 +253,7 @@ The tree cover segmentation feature is now fully functional and ready for produc
 - `shared/logging.py` - Added `LogCategory.TREECOVER`
 - `processor/src/processor.py` - Added treecover processing integration
 - `processor/src/process_treecover_segmentation.py` - Main processing entry point
-- `processor/src/treecover_segmentation/predict_treecover.py` - Hybrid processing implementation
+- `processor/src/treecover_segmentation_oam_tcd/predict_treecover.py` - Hybrid processing implementation
 - `processor/tests/test_process_treecover_segmentation.py` - Comprehensive test suite
 
 ### Usage:
