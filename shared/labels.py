@@ -245,4 +245,4 @@ def get_model_preferences(token: Optional[str] = None) -> Dict[LabelDataEnum, Di
 	with use_client(token) as client:
 		response = client.table(settings.model_preferences_table).select('label_data,model_config').execute()
 
-	return {LabelDataEnum(row['label_data']): row['model_config'] for row in response.data}
+	return {LabelDataEnum(row['label_data']): row['model_config'] for row in (response.data or [])}

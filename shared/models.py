@@ -495,9 +495,11 @@ class ModelPreference(BaseModel):
 
 	id: Optional[int] = None
 	label_data: LabelDataEnum
-	model_config: Dict[str, Any]
+	preferred_model_config: Dict[str, Any] = Field(alias='model_config')
 	created_at: Optional[datetime] = None
 	updated_at: Optional[datetime] = None
+
+	model_config = {'populate_by_name': True}
 
 
 class DeadwoodGeometry(BaseModel):
