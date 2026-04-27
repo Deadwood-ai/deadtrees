@@ -2,7 +2,19 @@ import pytest
 from datetime import datetime
 from typing import Dict, Any
 
-from shared.models import RawImages, TaskTypeEnum, StatusEnum, Status
+from shared.models import (
+	COMBINED_MODEL_CONFIG,
+	DEFAULT_MODEL_PREFERENCES,
+	Label,
+	LabelDataEnum,
+	LabelPayloadData,
+	LabelSourceEnum,
+	LabelTypeEnum,
+	RawImages,
+	TaskTypeEnum,
+	StatusEnum,
+	Status,
+)
 
 
 # ============================================================================
@@ -18,9 +30,64 @@ def test_odm_processing_in_enum():
 
 def test_all_expected_task_types_present():
 	"""Test that all expected task types are present"""
-	expected_values = {'cog', 'thumbnail', 'deadwood', 'geotiff', 'metadata', 'odm_processing'}
+	expected_values = {
+		'cog',
+		'thumbnail',
+		'deadwood_v1',
+		'treecover_v1',
+		'deadwood_treecover_combined_v2',
+		'geotiff',
+		'metadata',
+		'odm_processing',
+	}
 	actual_values = {task.value for task in TaskTypeEnum}
 	assert expected_values.issubset(actual_values)
+
+
+def test_legacy_task_type_aliases_normalize_to_v1_tasks():
+	assert TaskTypeEnum('deadwood') == TaskTypeEnum.deadwood_v1
+	assert TaskTypeEnum('treecover') == TaskTypeEnum.treecover_v1
+	assert TaskTypeEnum.from_string('deadwood') == TaskTypeEnum.deadwood_v1
+	assert TaskTypeEnum.from_string('treecover') == TaskTypeEnum.treecover_v1
+
+
+def test_label_model_config_input_alias_deserializes_to_model_metadata():
+	model_config = {'module': 'deadwood_treecover_combined_v2', 'checkpoint_name': 'test.safetensors'}
+	label = Label(
+		id=1,
+		dataset_id=2,
+		user_id='user-id',
+		label_source=LabelSourceEnum.model_prediction,
+		label_type=LabelTypeEnum.segmentation,
+		label_data=LabelDataEnum.deadwood,
+		model_config=model_config,
+	)
+
+	assert label.model_metadata == model_config
+	assert label.model_dump(by_alias=True)['model_config'] == model_config
+
+
+def test_label_payload_model_config_input_alias_deserializes_to_model_metadata():
+	model_config = {'module': 'deadwood_treecover_combined_v2', 'checkpoint_name': 'test.safetensors'}
+	payload = LabelPayloadData(
+		dataset_id=2,
+		label_source=LabelSourceEnum.model_prediction,
+		label_type=LabelTypeEnum.segmentation,
+		label_data=LabelDataEnum.deadwood,
+		model_config=model_config,
+		geometry={
+			'type': 'MultiPolygon',
+			'coordinates': [[[[0, 0], [0, 1], [1, 1], [0, 0]]]],
+		},
+	)
+
+	assert payload.model_metadata == model_config
+	assert payload.model_dump(by_alias=True)['model_config'] == model_config
+
+
+def test_default_model_preferences_use_combined_model_for_both_label_types():
+	assert DEFAULT_MODEL_PREFERENCES[LabelDataEnum.deadwood] == COMBINED_MODEL_CONFIG
+	assert DEFAULT_MODEL_PREFERENCES[LabelDataEnum.forest_cover] == COMBINED_MODEL_CONFIG
 
 
 # ============================================================================

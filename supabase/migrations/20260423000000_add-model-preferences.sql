@@ -8,6 +8,20 @@ create table v2_model_preferences (
 
 create index on v2_model_preferences using gin(model_config);
 
+insert into v2_model_preferences (label_data, model_config)
+values
+  (
+    'deadwood',
+    '{"module":"deadwood_treecover_combined_v2","checkpoint_name":"mitb3_seed200_ckpt_epoch_6_best_macro_f1.safetensors"}'::jsonb
+  ),
+  (
+    'forest_cover',
+    '{"module":"deadwood_treecover_combined_v2","checkpoint_name":"mitb3_seed200_ckpt_epoch_6_best_macro_f1.safetensors"}'::jsonb
+  )
+on conflict (label_data) do update
+set model_config = excluded.model_config,
+    updated_at = now();
+
 -- Only admins/service role can modify preferences; authenticated users can read.
 alter table v2_model_preferences enable row level security;
 

@@ -2,7 +2,7 @@ from typing import Optional, List, Dict, Any, Tuple, Literal, Union, Annotated
 from enum import Enum
 from datetime import datetime
 
-from pydantic import BaseModel, field_serializer, field_validator, model_validator, Field
+from pydantic import AliasChoices, BaseModel, field_serializer, field_validator, model_validator, Field
 from pydantic_partial import PartialModelMixin
 from pydantic_settings import BaseSettings
 from rasterio.coords import BoundingBox
@@ -34,6 +34,20 @@ class MultiPolygonModel(BaseModel):
 class LabelDataEnum(str, Enum):
 	deadwood = 'deadwood'
 	forest_cover = 'forest_cover'
+
+
+COMBINED_MODEL_MODULE = 'deadwood_treecover_combined_v2'
+COMBINED_MODEL_CHECKPOINT_NAME = 'mitb3_seed200_ckpt_epoch_6_best_macro_f1.safetensors'
+COMBINED_MODEL_CONFIG = {
+	'module': COMBINED_MODEL_MODULE,
+	'checkpoint_name': COMBINED_MODEL_CHECKPOINT_NAME,
+}
+
+
+DEFAULT_MODEL_PREFERENCES = {
+	LabelDataEnum.deadwood: dict(COMBINED_MODEL_CONFIG),
+	LabelDataEnum.forest_cover: dict(COMBINED_MODEL_CONFIG),
+}
 
 
 class PlatformEnum(str, Enum):
@@ -99,6 +113,16 @@ class TaskTypeEnum(str, Enum):
 	metadata = 'metadata'  # Extract metadata
 	odm_processing = 'odm_processing'  # ODM raw image processing
 
+	@classmethod
+	def _missing_(cls, value):
+		legacy_aliases = {
+			'deadwood': cls.deadwood_v1,
+			'treecover': cls.treecover_v1,
+		}
+		if isinstance(value, str):
+			return legacy_aliases.get(value)
+		return None
+
 	@property
 	def display_name(self) -> str:
 		"""Human-readable display name for the task type."""
@@ -116,7 +140,7 @@ class TaskTypeEnum(str, Enum):
 
 	@classmethod
 	def from_string(cls, value: str) -> 'TaskTypeEnum | None':
-		"""Get TaskTypeEnum from string value, returns None if not found."""
+		"""Get TaskTypeEnum from string value, including legacy aliases, returns None if not found."""
 		try:
 			return cls(value)
 		except ValueError:
@@ -424,7 +448,11 @@ class LabelPayloadData(PartialModelMixin, BaseModel):
 	label_type: LabelTypeEnum
 	label_data: LabelDataEnum
 	label_quality: Optional[int] = None
-	model_metadata: Optional[Dict[str, Any]] = Field(default=None, serialization_alias='model_config')
+	model_metadata: Optional[Dict[str, Any]] = Field(
+		default=None,
+		validation_alias=AliasChoices('model_config', 'model_metadata'),
+		serialization_alias='model_config',
+	)
 
 	# Label geometry
 	geometry: MultiPolygonModel
@@ -481,7 +509,11 @@ class Label(BaseModel):
 	label_type: LabelTypeEnum
 	label_data: LabelDataEnum
 	label_quality: Optional[int] = None
-	model_metadata: Optional[Dict[str, Any]] = Field(default=None, serialization_alias='model_config')
+	model_metadata: Optional[Dict[str, Any]] = Field(
+		default=None,
+		validation_alias=AliasChoices('model_config', 'model_metadata'),
+		serialization_alias='model_config',
+	)
 	created_at: Optional[datetime] = None
 	updated_at: Optional[datetime] = None
 
