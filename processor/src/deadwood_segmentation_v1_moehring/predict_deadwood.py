@@ -2,6 +2,7 @@ from pathlib import Path
 from shared.logger import logger
 from shared.logging import LogContext, LogCategory
 from shared.models import LabelDataEnum
+from shared.labels import delete_model_prediction_labels
 from .inference import DeadwoodInference
 from ..exceptions import ProcessingError
 import rasterio
@@ -15,6 +16,10 @@ ASSETS_DIR = PROJECT_ROOT / 'assets'
 MODEL_PATH = str(ASSETS_DIR / 'models' / 'segformer_b5_full_epoch_100.safetensors')
 MODULE_NAME = 'deadwood_segmentation_v1_moehring'
 CHECKPOINT_NAME = Path(MODEL_PATH).name
+MODEL_CONFIG = {
+	'module': MODULE_NAME,
+	'checkpoint_name': CHECKPOINT_NAME,
+}
 
 
 def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str):
@@ -42,6 +47,12 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 				'No deadwood polygons detected',
 				LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
 			)
+			delete_model_prediction_labels(
+				dataset_id=dataset_id,
+				label_data=LabelDataEnum.deadwood,
+				token=token,
+				model_config=MODEL_CONFIG,
+			)
 			return
 
 		with rasterio.open(str(file_path)) as src:
@@ -65,6 +76,12 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 				'No valid deadwood polygons after geometry validation',
 				LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
 			)
+			delete_model_prediction_labels(
+				dataset_id=dataset_id,
+				label_data=LabelDataEnum.deadwood,
+				token=token,
+				model_config=MODEL_CONFIG,
+			)
 			return
 
 		deadwood_geojson = polygons_to_multipolygon_geojson(polygons)
@@ -79,10 +96,7 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 			label_data=LabelDataEnum.deadwood,
 			geometry=deadwood_geojson,
 			token=token,
-			model_config={
-				'module': MODULE_NAME,
-				'checkpoint_name': CHECKPOINT_NAME,
-			},
+			model_config=MODEL_CONFIG,
 		)
 		logger.info(
 			f'Created label {label.id} with geometries',

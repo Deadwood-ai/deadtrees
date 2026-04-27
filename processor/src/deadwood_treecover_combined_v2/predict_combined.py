@@ -4,7 +4,8 @@ import rasterio
 
 from shared.logger import logger
 from shared.logging import LogContext, LogCategory
-from shared.models import LabelDataEnum
+from shared.models import COMBINED_MODEL_CHECKPOINT_NAME, COMBINED_MODEL_CONFIG, COMBINED_MODEL_MODULE, LabelDataEnum
+from shared.labels import delete_model_prediction_labels
 
 from ..exceptions import ProcessingError
 from ..utils.prediction_labels import replace_model_prediction_label
@@ -15,8 +16,8 @@ from .inference import CombinedInference
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 ASSETS_DIR = PROJECT_ROOT / 'assets'
 
-MODEL_PATH = str(ASSETS_DIR / 'models' / 'mitb3_seed200_ckpt_epoch_6_best_macro_f1.safetensors')
-MODULE_NAME = 'deadwood_treecover_combined_v2'
+MODEL_PATH = str(ASSETS_DIR / 'models' / COMBINED_MODEL_CHECKPOINT_NAME)
+MODULE_NAME = COMBINED_MODEL_MODULE
 CHECKPOINT_NAME = Path(MODEL_PATH).name
 
 
@@ -36,7 +37,7 @@ def predict_combined(dataset_id: int, file_path: Path, user_id: str, token: str)
         with rasterio.open(str(file_path)) as src:
             src_crs = src.crs
 
-        model_config = {'module': MODULE_NAME, 'checkpoint_name': CHECKPOINT_NAME}
+        model_config = dict(COMBINED_MODEL_CONFIG)
 
         _save_label(
             polygons=deadwood_polygons,
@@ -73,6 +74,12 @@ def _save_label(polygons, label_data, src_crs, dataset_id, user_id, token, model
 
     if len(polygons) == 0:
         logger.warning(f'No {label_type} polygons detected', log_ctx)
+        delete_model_prediction_labels(
+            dataset_id=dataset_id,
+            label_data=label_data,
+            token=token,
+            model_config=model_config,
+        )
         return
 
     polygons = reproject_polygons(polygons, src_crs, 'EPSG:4326')
@@ -80,6 +87,12 @@ def _save_label(polygons, label_data, src_crs, dataset_id, user_id, token, model
 
     if len(polygons) == 0:
         logger.warning(f'No valid {label_type} polygons after geometry validation', log_ctx)
+        delete_model_prediction_labels(
+            dataset_id=dataset_id,
+            label_data=label_data,
+            token=token,
+            model_config=model_config,
+        )
         return
 
     geojson = polygons_to_multipolygon_geojson(polygons)

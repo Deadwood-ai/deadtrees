@@ -179,7 +179,8 @@ def delete_model_prediction_labels(
 		dataset_id: The ID of the dataset to delete labels for
 		label_data: The label data type (e.g., deadwood, forest_cover)
 		token: Authentication token
-		model_config: If provided, only delete labels whose model_metadata matches all keys/values
+		model_config: If provided, delete labels whose model_metadata matches all keys/values.
+			Legacy labels with no model_config are also deleted so reruns replace pre-versioned predictions.
 
 	Returns:
 		int: Number of labels deleted
@@ -189,24 +190,31 @@ def delete_model_prediction_labels(
 	with use_client(token) as client:
 		try:
 			# First, get all model prediction labels for this dataset with the specified label data type
-			query = (
+			response = (
 				client.table(settings.labels_table)
-				.select('id')
+				.select('id,model_config')
 				.eq('dataset_id', dataset_id)
 				.eq('label_source', LabelSourceEnum.model_prediction.value)
 				.eq('label_data', label_data.value)
+				.execute()
 			)
-			if model_config:
-				for key, value in model_config.items():
-					query = query.eq(f'model_config->>{key}', value)
-			response = query.execute()
 
-			if not response.data:
+			if model_config:
+				labels_to_delete = [
+					label
+					for label in response.data
+					if label.get('model_config') is None
+					or all(label.get('model_config', {}).get(key) == value for key, value in model_config.items())
+				]
+			else:
+				labels_to_delete = response.data
+
+			if not labels_to_delete:
 				# No existing labels found
 				return 0
 
 			# Get label IDs to delete
-			label_ids = [label['id'] for label in response.data]
+			label_ids = [label['id'] for label in labels_to_delete]
 			deleted_count = len(label_ids)
 
 			# Determine geometry table based on label_data
