@@ -9,11 +9,72 @@ monorepo without changing the existing continuous deployment model.
 - production database migrations apply from `main`
 - GitHub Releases are created automatically on pushes to `main`
 - the API Docker image is built and pushed as part of the release workflow
+- the production processor server has a host-local cron auto-deploy script that
+  pulls `main` into `/home/jj1049/prod/deadtrees` and rebuilds the processor
+  service
 - release tags and notes document what reached `main`; they are not a separate
   approval gate
 
 This repository is an application monorepo, not a published package monorepo.
 Treat the repo-wide Git tag as the source of truth for releases.
+
+## Production Deployment Automation
+
+Production deployment is split across GitHub Actions and host-local automation.
+Future agents should verify both surfaces before judging rollout risk.
+
+GitHub Actions on pushes to `main`:
+
+- `.github/workflows/frontend-hosting-merge.yml` deploys the frontend to the
+  Firebase live channel when `frontend/**` changes.
+- `.github/workflows/supabase-migrate-on-merge.yml` runs
+  `supabase migration up --db-url "$SUPABASE_DB_URL_PROD"` when `supabase/**`
+  changes.
+- `.github/workflows/create-release.yml` creates the CalVer GitHub Release and
+  builds/pushes the API image to `ghcr.io/deadwood-ai/deadwood-api`.
+
+Processing server automation is not represented as a GitHub workflow. It is a
+host-local cron setup on `processing-server`:
+
+```cron
+* * * * * cd /home/jj1049/prod/deadtrees && docker compose -f docker-compose.processor.yaml up
+* * * * * /home/jj1049/prod/deadtrees/auto_deploy_processor.sh
+```
+
+`/home/jj1049/prod/deadtrees/auto_deploy_processor.sh`:
+
+- operates on `/home/jj1049/prod/deadtrees`
+- fetches `origin/main`
+- compares local `HEAD` with `origin/main`
+- runs `git pull origin main` when a new commit is available
+- runs `docker compose -f docker-compose.processor.yaml build processor`
+- writes status to `/home/jj1049/prod/deadtrees/auto-deploy.log`
+
+`docker-compose.processor.yaml` builds the processor locally on the processing
+server and bind-mounts `./processor`, `./shared`, `./assets`, `/data`, and the
+Docker socket. It uses the NVIDIA runtime and does not consume the API image
+published by the release workflow.
+
+Useful verification commands:
+
+```bash
+ssh processing-server 'crontab -l | grep -E "auto_deploy_processor|docker compose -f docker-compose.processor"'
+ssh processing-server 'cd /home/jj1049/prod/deadtrees && git log -1 --oneline --decorate'
+ssh processing-server 'cd /home/jj1049/prod/deadtrees && tail -80 auto-deploy.log'
+ssh processing-server 'docker ps --format "{{.Names}}\t{{.Status}}\t{{.Image}}" | grep deadtrees-processor'
+```
+
+For changes that touch `supabase/**`, `api/**`, `processor/**`, or shared task
+models, verify after merge that:
+
+- the Supabase migration workflow completed successfully
+- the processing server auto-deploy log shows the target commit deployed
+- the running `deadtrees-processor` container was rebuilt/restarted from that
+  commit
+
+If `/home/jj1049/prod/deadtrees` is dirty or `git pull` conflicts, the cron
+auto-deploy may fail even though GitHub Actions succeeded. Check
+`auto-deploy.log` before assuming production is on the merged commit.
 
 ## Source Of Truth
 
