@@ -31,8 +31,16 @@ PIPELINE_STAGE_MAP = [
 	(TaskTypeEnum.thumbnail, 'is_thumbnail_done', 'thumbnail_processing'),
 	(TaskTypeEnum.deadwood_v1, 'is_deadwood_done', 'deadwood_segmentation'),
 	(TaskTypeEnum.treecover_v1, 'is_forest_cover_done', 'forest_cover_segmentation'),
-	(TaskTypeEnum.deadwood_treecover_combined_v2, 'is_deadwood_done', 'deadwood_treecover_combined_segmentation'),
+	(
+		TaskTypeEnum.deadwood_treecover_combined_v2,
+		('is_deadwood_done', 'is_forest_cover_done'),
+		'deadwood_treecover_combined_segmentation',
+	),
 ]
+
+
+def _stage_done_flags(done_flags: str | tuple[str, ...]) -> tuple[str, ...]:
+	return (done_flags,) if isinstance(done_flags, str) else done_flags
 
 
 def refresh_processor_token(task: QueueTask, fallback_token: str | None = None) -> str:
@@ -58,8 +66,8 @@ def detect_crashed_stage(status_data: dict, task_types: list) -> str:
 	Returns:
 		str: Human-readable stage name where the crash occurred
 	"""
-	for task_type, done_flag, stage_name in PIPELINE_STAGE_MAP:
-		if task_type in task_types and not status_data.get(done_flag, False):
+	for task_type, done_flags, stage_name in PIPELINE_STAGE_MAP:
+		if task_type in task_types and not all(status_data.get(flag, False) for flag in _stage_done_flags(done_flags)):
 			return stage_name
 	return 'unknown'
 
@@ -74,15 +82,20 @@ def get_completed_stages(status_data: dict) -> list[str]:
 		list[str]: Human-readable names of completed stages
 	"""
 	completed = []
-	for _, done_flag, stage_name in PIPELINE_STAGE_MAP:
-		if status_data.get(done_flag, False):
+	for _, done_flags, stage_name in PIPELINE_STAGE_MAP:
+		if all(status_data.get(flag, False) for flag in _stage_done_flags(done_flags)):
 			completed.append(stage_name)
 	return completed
 
 
 def are_requested_stages_complete(status_data: dict, task_types: list) -> bool:
 	"""Return True when all requested pipeline stages are already marked complete."""
-	requested = [done_flag for task_type, done_flag, _ in PIPELINE_STAGE_MAP if task_type in task_types]
+	requested = [
+		flag
+		for task_type, done_flags, _ in PIPELINE_STAGE_MAP
+		if task_type in task_types
+		for flag in _stage_done_flags(done_flags)
+	]
 	return bool(requested) and all(status_data.get(done_flag, False) for done_flag in requested)
 
 
