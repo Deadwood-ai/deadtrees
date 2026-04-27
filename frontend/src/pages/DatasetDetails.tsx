@@ -70,9 +70,14 @@ export default function DatasetDetails() {
 
   // Data hooks
   const { data: overlappingDatasets, isLoading: isLoadingOverlapping } = useOverlappingDatasets(dataset?.id);
-  const { data: labelsData } = useDatasetLabels({
+  const { data: preferredDeadwoodLabel } = useDatasetLabels({
     datasetId: dataset?.id || 0,
     labelData: ILabelData.DEADWOOD,
+    enabled: !!dataset?.id,
+  });
+  const { data: preferredForestLabel } = useDatasetLabels({
+    datasetId: dataset?.id || 0,
+    labelData: ILabelData.FOREST_COVER,
     enabled: !!dataset?.id,
   });
   const { data: phenologyData, isLoading: isPhenologyLoading } = usePhenologyData(dataset?.id);
@@ -82,6 +87,8 @@ export default function DatasetDetails() {
   const { data: forestVariants } = useModelVariantLabels(dataset?.id, ILabelData.FOREST_COVER, canAudit && !!dataset?.id);
   const [selectedDeadwoodLabelId, setSelectedDeadwoodLabelId] = useState<number | null>(null);
   const [selectedForestLabelId, setSelectedForestLabelId] = useState<number | null>(null);
+  const effectiveSelectedDeadwoodLabelId = selectedDeadwoodLabelId ?? preferredDeadwoodLabel?.id ?? null;
+  const effectiveSelectedForestLabelId = selectedForestLabelId ?? preferredForestLabel?.id ?? null;
   const auditInfo = dataset
     ? {
       final_assessment: dataset.final_assessment,
@@ -129,6 +136,11 @@ export default function DatasetDetails() {
       setLabelsOnly(true);
     }
   }, [dataset?.data_access, labelsOnly, setLabelsOnly]);
+
+  useEffect(() => {
+    setSelectedDeadwoodLabelId(null);
+    setSelectedForestLabelId(null);
+  }, [dataset?.id]);
 
   useEffect(() => {
     if (!dataset) return;
@@ -195,7 +207,7 @@ export default function DatasetDetails() {
         dataset={dataset}
         labelsOnly={labelsOnly}
         setLabelsOnly={setLabelsOnly}
-        hasLabels={!!labelsData}
+        hasLabels={!!preferredDeadwoodLabel || !!preferredForestLabel}
         isDownloading={isDownloading}
         currentDownloadId={currentDownloadId}
         startDownload={startDownload}
@@ -299,9 +311,9 @@ export default function DatasetDetails() {
               canAudit={canAudit}
               deadwoodVariants={deadwoodVariants ?? []}
               forestVariants={forestVariants ?? []}
-              selectedDeadwoodLabelId={selectedDeadwoodLabelId}
+              selectedDeadwoodLabelId={effectiveSelectedDeadwoodLabelId}
               onDeadwoodVariantChange={setSelectedDeadwoodLabelId}
-              selectedForestLabelId={selectedForestLabelId}
+              selectedForestLabelId={effectiveSelectedForestLabelId}
               onForestVariantChange={setSelectedForestLabelId}
               opacity={layerControl.layerOpacity}
               setOpacity={setLayerOpacity}
@@ -415,9 +427,9 @@ export default function DatasetDetails() {
             canAudit={canAudit}
             deadwoodVariants={deadwoodVariants ?? []}
             forestVariants={forestVariants ?? []}
-            selectedDeadwoodLabelId={selectedDeadwoodLabelId}
+            selectedDeadwoodLabelId={effectiveSelectedDeadwoodLabelId}
             onDeadwoodVariantChange={setSelectedDeadwoodLabelId}
-            selectedForestLabelId={selectedForestLabelId}
+            selectedForestLabelId={effectiveSelectedForestLabelId}
             onForestVariantChange={setSelectedForestLabelId}
             opacity={layerControl.layerOpacity}
             setOpacity={setLayerOpacity}
