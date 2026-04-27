@@ -18,7 +18,7 @@ from shared.models import LabelPayloadData, LabelSourceEnum, LabelTypeEnum, Labe
 from shared.labels import create_label_with_geometries, delete_model_prediction_labels
 from shared.logging import LogContext, LogCategory
 from shared.db import login, verify_token
-from ..deadwood_segmentation.deadtreesmodels.common.common import (
+from ..utils.segmentation import (
 	mask_to_polygons,
 	reproject_polygons,
 	filter_polygons_by_area,
@@ -45,6 +45,8 @@ TCD_TARGET_RESOLUTION = config['tree_cover_inference_resolution']  # 10cm resolu
 TCD_TARGET_CRS = 'EPSG:3395'  # World Mercator - what the TCD model was trained on
 TCD_OUTPUT_CRS = 'EPSG:4326'  # WGS84 for database storage
 TCD_CONTAINER_IMAGE = settings.TCD_CONTAINER_IMAGE  # Our local TCD container
+MODULE_NAME = 'treecover_segmentation_oam_tcd'
+CHECKPOINT_NAME = TCD_MODEL
 
 
 class _GeneratorStream(io.RawIOBase):
@@ -753,6 +755,10 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 			label_type=LabelTypeEnum.semantic_segmentation,
 			label_data=LabelDataEnum.forest_cover,
 			label_quality=3,
+			model_metadata={
+				'module': MODULE_NAME,
+				'checkpoint_name': CHECKPOINT_NAME,
+			},
 			geometry=treecover_geojson,
 			properties={
 				'model': TCD_MODEL,

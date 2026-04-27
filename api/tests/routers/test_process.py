@@ -108,6 +108,24 @@ def test_create_processing_task_empty_types(test_dataset, auth_token):
 	assert response.status_code == 400
 
 
+def test_create_processing_task_accepts_legacy_task_type_aliases(test_dataset, auth_token):
+	"""Legacy task names should continue to enqueue their v1 task equivalents."""
+	response = client.put(
+		f'/datasets/{test_dataset}/process',
+		json={'task_types': ['deadwood', 'treecover']},
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 200
+	data = response.json()
+	assert 'deadwood_v1' in data['task_types']
+	assert 'treecover_v1' in data['task_types']
+
+	with use_client(auth_token) as supabaseClient:
+		response = supabaseClient.table(settings.queue_table).select('*').eq('dataset_id', test_dataset).execute()
+		assert response.data[0]['task_types'] == ['deadwood_v1', 'treecover_v1']
+
+
 # Priority tests added from test_process_priority.py
 def test_process_default_priority(test_dataset, auth_token):
 	"""Test that process request uses default priority (2) when none specified"""
@@ -323,6 +341,36 @@ def test_rerun_succeeds_after_failed_processing(test_dataset, auth_token):
 		assert 'metadata' in response.data[0]['task_types']
 		assert response.data[0]['priority'] == 1
 		assert response.data[0]['is_processing'] is False
+
+
+def test_rerun_combined_task_resets_both_prediction_flags(test_dataset, auth_token):
+	"""Rerunning the combined model after an error must reset both labels it produces."""
+	with use_client(auth_token) as supabaseClient:
+		supabaseClient.table(settings.statuses_table).update(
+			{
+				'has_error': True,
+				'error_message': 'Simulated combined processing failure',
+				'current_status': StatusEnum.idle,
+				'is_deadwood_done': True,
+				'is_forest_cover_done': True,
+			}
+		).eq('dataset_id', test_dataset).execute()
+
+	response = client.put(
+		f'/datasets/{test_dataset}/process',
+		json={'task_types': ['deadwood_treecover_combined_v2']},
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 200
+
+	with use_client(auth_token) as supabaseClient:
+		response = supabaseClient.table(settings.statuses_table).select('*').eq('dataset_id', test_dataset).execute()
+		status = response.data[0]
+		assert status['has_error'] is False
+		assert status['error_message'] is None
+		assert status['is_deadwood_done'] is False
+		assert status['is_forest_cover_done'] is False
 
 
 def test_rerun_multiple_old_queue_items(test_dataset, auth_token, test_user):

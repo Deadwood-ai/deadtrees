@@ -49,6 +49,9 @@ interface BaseMapProps {
 	skipInteractions?: boolean;
 	// Allow rendering predictions even when audited as poor
 	allowBadQualityLayers?: boolean;
+	// Override which label ID to display (for auditor model variant switching)
+	deadwoodLabelIdOverride?: number | null;
+	forestCoverLabelIdOverride?: number | null;
 }
 
 /**
@@ -76,6 +79,8 @@ export default function BaseMap({
 	onRevertCorrection,
 	skipInteractions = false,
 	allowBadQualityLayers = false,
+	deadwoodLabelIdOverride,
+	forestCoverLabelIdOverride,
 }: BaseMapProps) {
 	// Refs
 	const mapContainerRef = useRef<HTMLDivElement | null>(null);
@@ -139,8 +144,8 @@ export default function BaseMap({
 		setLayerOpacity,
 	} = useVectorLayers({
 		map: mapRef.current,
-		deadwoodLabelId: deadwood.data?.id,
-		forestCoverLabelId: forestCover.data?.id,
+		deadwoodLabelId: deadwoodLabelIdOverride !== undefined ? deadwoodLabelIdOverride : deadwood.data?.id,
+		forestCoverLabelId: forestCoverLabelIdOverride !== undefined ? forestCoverLabelIdOverride : forestCover.data?.id,
 		isForestCoverDone: data?.is_forest_cover_done,
 		showCorrectionStyling: true,
 		getDeadwoodVisible,

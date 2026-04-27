@@ -21,18 +21,19 @@ logger.add_supabase_handler(SupabaseHandler())
 
 
 _TASK_TYPE_STATUS_FLAGS = {
-	TaskTypeEnum.odm_processing: 'is_odm_done',
-	TaskTypeEnum.geotiff: 'is_ortho_done',
-	TaskTypeEnum.metadata: 'is_metadata_done',
-	TaskTypeEnum.cog: 'is_cog_done',
-	TaskTypeEnum.thumbnail: 'is_thumbnail_done',
-	TaskTypeEnum.deadwood: 'is_deadwood_done',
-	TaskTypeEnum.treecover: 'is_forest_cover_done',
+	TaskTypeEnum.odm_processing: ('is_odm_done',),
+	TaskTypeEnum.geotiff: ('is_ortho_done',),
+	TaskTypeEnum.metadata: ('is_metadata_done',),
+	TaskTypeEnum.cog: ('is_cog_done',),
+	TaskTypeEnum.thumbnail: ('is_thumbnail_done',),
+	TaskTypeEnum.deadwood_v1: ('is_deadwood_done',),
+	TaskTypeEnum.treecover_v1: ('is_forest_cover_done',),
+	TaskTypeEnum.deadwood_treecover_combined_v2: ('is_deadwood_done', 'is_forest_cover_done'),
 }
 
 
-def _task_type_to_status_flag(task_type: TaskTypeEnum) -> str | None:
-	return _TASK_TYPE_STATUS_FLAGS.get(task_type)
+def _task_type_to_status_flags(task_type: TaskTypeEnum) -> tuple[str, ...]:
+	return _TASK_TYPE_STATUS_FLAGS.get(task_type, ())
 
 
 class ProcessRequest(BaseModel):
@@ -134,8 +135,7 @@ def create_processing_task(
 						'current_status': 'idle',
 					}
 					for task_type in validated_task_types:
-						flag = _task_type_to_status_flag(task_type)
-						if flag:
+						for flag in _task_type_to_status_flags(task_type):
 							reset_fields[flag] = False
 					client.table(settings.statuses_table).update(reset_fields).eq('dataset_id', dataset_id).execute()
 					logger.info(

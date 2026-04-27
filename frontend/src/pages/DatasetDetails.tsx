@@ -5,6 +5,7 @@ import { useState, useCallback, Suspense, lazy, useEffect } from "react";
 
 import { usePublicDatasetById } from "../hooks/useDatasets";
 import { useDatasetLabels } from "../hooks/useDatasetLabels";
+import { useModelVariantLabels } from "../hooks/useModelVariantLabels";
 import { ILabelData } from "../types/labels";
 import { useDownload } from "../hooks/useDownloadProvider";
 import { useOverlappingDatasets } from "../hooks/useOverlappingDatasets";
@@ -69,12 +70,25 @@ export default function DatasetDetails() {
 
   // Data hooks
   const { data: overlappingDatasets, isLoading: isLoadingOverlapping } = useOverlappingDatasets(dataset?.id);
-  const { data: labelsData } = useDatasetLabels({
+  const { data: preferredDeadwoodLabel } = useDatasetLabels({
     datasetId: dataset?.id || 0,
     labelData: ILabelData.DEADWOOD,
     enabled: !!dataset?.id,
   });
+  const { data: preferredForestLabel } = useDatasetLabels({
+    datasetId: dataset?.id || 0,
+    labelData: ILabelData.FOREST_COVER,
+    enabled: !!dataset?.id,
+  });
   const { data: phenologyData, isLoading: isPhenologyLoading } = usePhenologyData(dataset?.id);
+
+  // Auditor model variant selection (session-only, no DB writes)
+  const { data: deadwoodVariants } = useModelVariantLabels(dataset?.id, ILabelData.DEADWOOD, canAudit && !!dataset?.id);
+  const { data: forestVariants } = useModelVariantLabels(dataset?.id, ILabelData.FOREST_COVER, canAudit && !!dataset?.id);
+  const [selectedDeadwoodLabelId, setSelectedDeadwoodLabelId] = useState<number | null>(null);
+  const [selectedForestLabelId, setSelectedForestLabelId] = useState<number | null>(null);
+  const effectiveSelectedDeadwoodLabelId = selectedDeadwoodLabelId ?? preferredDeadwoodLabel?.id ?? null;
+  const effectiveSelectedForestLabelId = selectedForestLabelId ?? preferredForestLabel?.id ?? null;
   const auditInfo = dataset
     ? {
       final_assessment: dataset.final_assessment,
@@ -122,6 +136,11 @@ export default function DatasetDetails() {
       setLabelsOnly(true);
     }
   }, [dataset?.data_access, labelsOnly, setLabelsOnly]);
+
+  useEffect(() => {
+    setSelectedDeadwoodLabelId(null);
+    setSelectedForestLabelId(null);
+  }, [dataset?.id]);
 
   useEffect(() => {
     if (!dataset) return;
@@ -188,7 +207,7 @@ export default function DatasetDetails() {
         dataset={dataset}
         labelsOnly={labelsOnly}
         setLabelsOnly={setLabelsOnly}
-        hasLabels={!!labelsData}
+        hasLabels={!!preferredDeadwoodLabel || !!preferredForestLabel}
         isDownloading={isDownloading}
         currentDownloadId={currentDownloadId}
         startDownload={startDownload}
@@ -289,6 +308,13 @@ export default function DatasetDetails() {
               forestCoverQuality={auditInfo?.forest_cover_quality as "great" | "sentinel_ok" | "bad" | undefined}
               deadwoodQuality={auditInfo?.deadwood_quality as "great" | "sentinel_ok" | "bad" | undefined}
               canBypassQualityRestriction={canAudit}
+              canAudit={canAudit}
+              deadwoodVariants={deadwoodVariants ?? []}
+              forestVariants={forestVariants ?? []}
+              selectedDeadwoodLabelId={effectiveSelectedDeadwoodLabelId}
+              onDeadwoodVariantChange={setSelectedDeadwoodLabelId}
+              selectedForestLabelId={effectiveSelectedForestLabelId}
+              onForestVariantChange={setSelectedForestLabelId}
               opacity={layerControl.layerOpacity}
               setOpacity={setLayerOpacity}
               onReportClick={() => setReportModalOpen(true)}
@@ -352,6 +378,8 @@ export default function DatasetDetails() {
             onEditForestCover={() => editing.handleStartEditing("forest_cover")}
             isLoggedIn={!!user}
             allowBadQualityLayers={canAudit}
+            deadwoodLabelIdOverride={canAudit && selectedDeadwoodLabelId !== null ? selectedDeadwoodLabelId : undefined}
+            forestCoverLabelIdOverride={canAudit && selectedForestLabelId !== null ? selectedForestLabelId : undefined}
           />
         </Suspense>
       </div>
@@ -396,6 +424,13 @@ export default function DatasetDetails() {
             forestCoverQuality={auditInfo?.forest_cover_quality as "great" | "sentinel_ok" | "bad" | undefined}
             deadwoodQuality={auditInfo?.deadwood_quality as "great" | "sentinel_ok" | "bad" | undefined}
             canBypassQualityRestriction={canAudit}
+            canAudit={canAudit}
+            deadwoodVariants={deadwoodVariants ?? []}
+            forestVariants={forestVariants ?? []}
+            selectedDeadwoodLabelId={effectiveSelectedDeadwoodLabelId}
+            onDeadwoodVariantChange={setSelectedDeadwoodLabelId}
+            selectedForestLabelId={effectiveSelectedForestLabelId}
+            onForestVariantChange={setSelectedForestLabelId}
             opacity={layerControl.layerOpacity}
             setOpacity={setLayerOpacity}
             onReportClick={() => setReportModalOpen(true)}

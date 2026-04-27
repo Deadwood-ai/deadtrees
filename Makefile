@@ -21,6 +21,7 @@ TEST_RAW_DRONE_ZIP_URL := $(TEST_DATA_BASE_URL)/raw_drone_images/test_no_rtk_3_i
 TEST_ODM_MINIMAL_ZIP_URL := $(TEST_DATA_BASE_URL)/raw_drone_images/test_minimal_5_images.zip
 WORLDVIEW_FIXTURE_URL := $(TEST_DATA_BASE_URL)/worldview_uint16_crop.tif
 MODEL_URL := $(ASSETS_BASE_URL)/models/segformer_b5_full_epoch_100.safetensors
+COMBINED_MODEL_URL := $(ASSETS_BASE_URL)/models/mitb3_seed200_ckpt_epoch_6_best_macro_f1.safetensors
 GADM_URL := $(ASSETS_BASE_URL)/gadm/gadm_410.gpkg
 BIOME_URL := $(ASSETS_BASE_URL)/biom/terres_ecosystems.gpkg
 PHENOLOGY_ARCHIVE_URL := $(ASSETS_BASE_URL)/pheno/modispheno_aggregated_normalized_filled.zarr.tar.gz
@@ -33,6 +34,7 @@ TEST_RAW_DRONE_ZIP := $(TEST_RAW_DRONE_IMAGES_DIR)/test_no_rtk_3_images.zip
 TEST_ODM_MINIMAL_ZIP := $(TEST_RAW_DRONE_IMAGES_DIR)/test_minimal_5_images.zip
 WORLDVIEW_FIXTURE := $(TEST_DATA_DIR)/worldview_uint16_crop.tif
 MODEL := $(MODELS_DIR)/segformer_b5_full_epoch_100.safetensors
+COMBINED_MODEL := $(MODELS_DIR)/mitb3_seed200_ckpt_epoch_6_best_macro_f1.safetensors
 GADM := $(GADM_DIR)/gadm_410.gpkg
 BIOME := $(BIOME_DIR)/terres_ecosystems.gpkg
 PHENOLOGY_DATA := $(PHENO_DIR)/modispheno_aggregated_normalized_filled.zarr
@@ -46,7 +48,7 @@ DTE_TEST_FILENAMES := \
 	run_v1004_v1000_crop_half_fold_None_checkpoint_199_forest_2025.cog.tif
 DTE_TEST_FILES := $(addprefix $(DTE_TEST_DIR)/,$(DTE_TEST_FILENAMES))
 
-.PHONY: all clean setup-dirs create-dirs symlinks setup-local-test-ssh download-processor-assets
+.PHONY: all clean setup-dirs create-dirs symlinks setup-local-test-ssh download-processor-assets download-combined-model
 
 all: setup-dirs download-assets
 
@@ -70,8 +72,9 @@ create-dirs:
 	@mkdir -p data/label_objects
 	@mkdir -p data/trash
 
-download-assets: create-dirs $(TEST_DATA) $(TEST_DATA_SMALL) $(MODEL) $(GADM) $(TEST_DATA_REAL_LABELS) $(TEST_RAW_DRONE_ZIP) $(TEST_ODM_MINIMAL_ZIP) $(DTE_TEST_FILES)
+download-assets: create-dirs $(TEST_DATA) $(TEST_DATA_SMALL) $(MODEL) $(COMBINED_MODEL) $(GADM) $(TEST_DATA_REAL_LABELS) $(TEST_RAW_DRONE_ZIP) $(TEST_ODM_MINIMAL_ZIP) $(DTE_TEST_FILES)
 download-processor-assets: create-dirs $(BIOME) $(PHENOLOGY_DATA) $(WORLDVIEW_FIXTURE)
+download-combined-model: $(COMBINED_MODEL)
 
 setup-local-test-ssh:
 	@mkdir -p $(LOCAL_TEST_SSH_DIR)
@@ -84,7 +87,7 @@ setup-local-test-ssh:
 	@chmod 600 $(LOCAL_TEST_SSH_KEY)
 	@chmod 644 $(LOCAL_TEST_SSH_PUB_KEY)
 
-$(TEST_DATA) $(TEST_DATA_SMALL) $(TEST_DATA_REAL_LABELS) $(TEST_RAW_DRONE_ZIP) $(TEST_ODM_MINIMAL_ZIP) $(WORLDVIEW_FIXTURE) $(MODEL) $(GADM) $(BIOME) $(PHENOLOGY_ARCHIVE) $(DTE_TEST_FILES): | setup-dirs
+$(TEST_DATA) $(TEST_DATA_SMALL) $(TEST_DATA_REAL_LABELS) $(TEST_RAW_DRONE_ZIP) $(TEST_ODM_MINIMAL_ZIP) $(WORLDVIEW_FIXTURE) $(MODEL) $(COMBINED_MODEL) $(GADM) $(BIOME) $(PHENOLOGY_ARCHIVE) $(DTE_TEST_FILES): | setup-dirs
 
 $(TEST_DATA):
 	@echo "Downloading test data..."
@@ -97,6 +100,10 @@ $(TEST_DATA_SMALL):
 $(MODEL):
 	@echo "Downloading model..."
 	curl -L -o $@ "$(MODEL_URL)"
+
+$(COMBINED_MODEL):
+	@echo "Downloading combined deadwood/treecover model..."
+	curl -L -o $@ "$(COMBINED_MODEL_URL)"
 
 $(TEST_DATA_REAL_LABELS):
 	@echo "Downloading real labels..."

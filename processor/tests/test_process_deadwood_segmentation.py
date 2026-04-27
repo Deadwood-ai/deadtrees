@@ -20,7 +20,7 @@ def deadwood_task(test_dataset_for_processing, test_processor_user):
 		id=1,
 		dataset_id=test_dataset_for_processing,
 		user_id=test_processor_user,
-		task_types=[TaskTypeEnum.deadwood],
+		task_types=[TaskTypeEnum.deadwood_v1],
 		priority=1,
 		is_processing=False,
 		current_position=1,

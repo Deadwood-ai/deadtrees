@@ -7,11 +7,13 @@ from shapely import wkb
 from shared.models import (
 	LabelPayloadData,
 	Label,
+	ModelPreference,
 	AOI,
 	DeadwoodGeometry,
 	ForestCoverGeometry,
 	LabelDataEnum,
 	LabelSourceEnum,
+	DEFAULT_MODEL_PREFERENCES,
 )
 from shared.db import use_client
 from shared.settings import settings
@@ -73,6 +75,7 @@ def create_label_with_geometries(payload: LabelPayloadData, user_id: str, token:
 		label_type=payload.label_type,
 		label_data=payload.label_data,
 		label_quality=payload.label_quality,
+		model_metadata=payload.model_metadata,
 	)
 
 	# Start transaction for label and geometries
@@ -81,7 +84,7 @@ def create_label_with_geometries(payload: LabelPayloadData, user_id: str, token:
 			# Insert label
 			response = (
 				client.table(settings.labels_table)
-				.insert(label.model_dump(exclude={'id', 'created_at', 'updated_at'}))
+				.insert(label.model_dump(by_alias=True, exclude={'id', 'created_at', 'updated_at'}))
 				.execute()
 			)
 			label_id = response.data[0]['id']
@@ -167,13 +170,17 @@ def upload_geometry_chunk(
 		raise Exception(f'Error uploading geometry chunk: {str(e)}')
 
 
-def delete_model_prediction_labels(dataset_id: int, label_data: LabelDataEnum, token: str) -> int:
-	"""Deletes all model prediction labels for a dataset with the specified label data type.
+def delete_model_prediction_labels(
+	dataset_id: int, label_data: LabelDataEnum, token: str, model_config: Optional[Dict[str, Any]] = None
+) -> int:
+	"""Deletes model prediction labels for a dataset with the specified label data type.
 
 	Args:
 		dataset_id: The ID of the dataset to delete labels for
 		label_data: The label data type (e.g., deadwood, forest_cover)
 		token: Authentication token
+		model_config: If provided, delete labels whose model_metadata matches all keys/values.
+			Legacy labels with no model_config are also deleted so reruns replace pre-versioned predictions.
 
 	Returns:
 		int: Number of labels deleted
@@ -185,19 +192,29 @@ def delete_model_prediction_labels(dataset_id: int, label_data: LabelDataEnum, t
 			# First, get all model prediction labels for this dataset with the specified label data type
 			response = (
 				client.table(settings.labels_table)
-				.select('id')
+				.select('id,model_config')
 				.eq('dataset_id', dataset_id)
 				.eq('label_source', LabelSourceEnum.model_prediction.value)
 				.eq('label_data', label_data.value)
 				.execute()
 			)
 
-			if not response.data:
+			if model_config:
+				labels_to_delete = [
+					label
+					for label in response.data
+					if label.get('model_config') is None
+					or all(label.get('model_config', {}).get(key) == value for key, value in model_config.items())
+				]
+			else:
+				labels_to_delete = response.data
+
+			if not labels_to_delete:
 				# No existing labels found
 				return 0
 
 			# Get label IDs to delete
-			label_ids = [label['id'] for label in response.data]
+			label_ids = [label['id'] for label in labels_to_delete]
 			deleted_count = len(label_ids)
 
 			# Determine geometry table based on label_data
@@ -226,3 +243,17 @@ def delete_model_prediction_labels(dataset_id: int, label_data: LabelDataEnum, t
 				f'Error deleting model prediction labels: {str(e)}', extra={'token': token, 'dataset_id': dataset_id}
 			)
 			raise Exception(f'Error deleting model prediction labels: {str(e)}')
+
+
+def get_model_preferences(token: Optional[str] = None) -> Dict[LabelDataEnum, Dict[str, Any]]:
+	"""Return the preferred model_config per label_data type from v2_model_preferences.
+
+	Returns a dict mapping LabelDataEnum -> model_config dict.
+	Label data types with no preference row use the combined model defaults.
+	"""
+	with use_client(token) as client:
+		response = client.table(settings.model_preferences_table).select('label_data,model_config').execute()
+
+	preferences = {label_data: dict(config) for label_data, config in DEFAULT_MODEL_PREFERENCES.items()}
+	preferences.update({LabelDataEnum(row['label_data']): row['model_config'] for row in (response.data or [])})
+	return preferences

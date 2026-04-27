@@ -159,8 +159,13 @@ def test_pipeline_stage_map_is_stable_and_ordered():
 		(TaskTypeEnum.metadata, 'is_metadata_done', 'metadata_processing'),
 		(TaskTypeEnum.cog, 'is_cog_done', 'cog_processing'),
 		(TaskTypeEnum.thumbnail, 'is_thumbnail_done', 'thumbnail_processing'),
-		(TaskTypeEnum.deadwood, 'is_deadwood_done', 'deadwood_segmentation'),
-		(TaskTypeEnum.treecover, 'is_forest_cover_done', 'forest_cover_segmentation'),
+		(TaskTypeEnum.deadwood_v1, 'is_deadwood_done', 'deadwood_segmentation'),
+		(TaskTypeEnum.treecover_v1, 'is_forest_cover_done', 'forest_cover_segmentation'),
+		(
+			TaskTypeEnum.deadwood_treecover_combined_v2,
+			('is_deadwood_done', 'is_forest_cover_done'),
+			'deadwood_treecover_combined_segmentation',
+		),
 	]
 	assert PIPELINE_STAGE_MAP == expected
 
@@ -400,7 +405,7 @@ def test_detect_crashed_stage_finds_first_incomplete():
 	}
 	task_types = [
 		TaskTypeEnum.geotiff, TaskTypeEnum.metadata, TaskTypeEnum.cog,
-		TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood, TaskTypeEnum.treecover,
+		TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood_v1, TaskTypeEnum.treecover_v1,
 	]
 	assert detect_crashed_stage(status_data, task_types) == 'cog_processing'
 
@@ -433,7 +438,7 @@ def test_detect_crashed_stage_deadwood():
 	}
 	task_types = [
 		TaskTypeEnum.geotiff, TaskTypeEnum.metadata, TaskTypeEnum.cog,
-		TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood, TaskTypeEnum.treecover,
+		TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood_v1, TaskTypeEnum.treecover_v1,
 	]
 	assert detect_crashed_stage(status_data, task_types) == 'deadwood_segmentation'
 
@@ -474,6 +479,24 @@ def test_are_requested_stages_complete_only_returns_true_when_all_requested_flag
 	assert are_requested_stages_complete(status_data, [TaskTypeEnum.geotiff, TaskTypeEnum.metadata]) is True
 	assert are_requested_stages_complete(status_data, [TaskTypeEnum.geotiff, TaskTypeEnum.cog]) is False
 	assert are_requested_stages_complete(status_data, []) is False
+
+
+def test_combined_stage_requires_both_deadwood_and_forest_cover_flags():
+	status_data = {
+		'is_deadwood_done': True,
+		'is_forest_cover_done': False,
+	}
+
+	assert (
+		detect_crashed_stage(status_data, [TaskTypeEnum.deadwood_treecover_combined_v2])
+		== 'deadwood_treecover_combined_segmentation'
+	)
+	assert are_requested_stages_complete(status_data, [TaskTypeEnum.deadwood_treecover_combined_v2]) is False
+
+	status_data['is_forest_cover_done'] = True
+	assert detect_crashed_stage(status_data, [TaskTypeEnum.deadwood_treecover_combined_v2]) == 'unknown'
+	assert are_requested_stages_complete(status_data, [TaskTypeEnum.deadwood_treecover_combined_v2]) is True
+	assert 'deadwood_treecover_combined_segmentation' in get_completed_stages(status_data)
 
 
 @pytest.fixture
@@ -519,7 +542,7 @@ def crashed_dataset_task(test_processor_user, auth_token):
 				'user_id': test_processor_user,
 				'task_types': [
 					TaskTypeEnum.geotiff, TaskTypeEnum.metadata, TaskTypeEnum.cog,
-					TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood, TaskTypeEnum.treecover,
+					TaskTypeEnum.thumbnail, TaskTypeEnum.deadwood_v1, TaskTypeEnum.treecover_v1,
 				],
 				'priority': 1,
 				'is_processing': True,

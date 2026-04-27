@@ -1,21 +1,25 @@
 from pathlib import Path
 from shared.logger import logger
 from shared.logging import LogContext, LogCategory
-from shared.settings import settings
-from shared.db import login
-from shared.models import LabelPayloadData, LabelSourceEnum, LabelTypeEnum, LabelDataEnum
-from shared.labels import create_label_with_geometries, delete_model_prediction_labels
-from .deadtreesmodels.deadwood import DeadwoodInference
+from shared.models import LabelDataEnum
+from shared.labels import delete_model_prediction_labels
+from .inference import DeadwoodInference
 from ..exceptions import ProcessingError
 import rasterio
-from .deadtreesmodels.common.common import reproject_polygons
+from ..utils.prediction_labels import replace_model_prediction_label
+from ..utils.segmentation import polygons_to_multipolygon_geojson, reproject_polygons
 
 # Get base project directory (where assets folder is located)
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 ASSETS_DIR = PROJECT_ROOT / 'assets'
 
-CONFIG_PATH = str(Path(__file__).parent / 'deadtreesmodels/deadwood_inference_config.json')
 MODEL_PATH = str(ASSETS_DIR / 'models' / 'segformer_b5_full_epoch_100.safetensors')
+MODULE_NAME = 'deadwood_segmentation_v1_moehring'
+CHECKPOINT_NAME = Path(MODEL_PATH).name
+MODEL_CONFIG = {
+	'module': MODULE_NAME,
+	'checkpoint_name': CHECKPOINT_NAME,
+}
 
 
 def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str):
@@ -30,7 +34,7 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 			'Initializing deadwood inference model',
 			LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
 		)
-		deadwood_model = DeadwoodInference(config_path=CONFIG_PATH, model_path=MODEL_PATH)
+		deadwood_model = DeadwoodInference(model_path=MODEL_PATH)
 
 		logger.info(
 			'Running deadwood inference',
@@ -42,6 +46,12 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 			logger.warning(
 				'No deadwood polygons detected',
 				LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
+			)
+			delete_model_prediction_labels(
+				dataset_id=dataset_id,
+				label_data=LabelDataEnum.deadwood,
+				token=token,
+				model_config=MODEL_CONFIG,
 			)
 			return
 
@@ -66,44 +76,28 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 				'No valid deadwood polygons after geometry validation',
 				LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
 			)
+			delete_model_prediction_labels(
+				dataset_id=dataset_id,
+				label_data=LabelDataEnum.deadwood,
+				token=token,
+				model_config=MODEL_CONFIG,
+			)
 			return
 
-		# Convert polygons to GeoJSON MultiPolygon format with holes
-		deadwood_geojson = {
-			'type': 'MultiPolygon',
-			'coordinates': [
-				[[[float(x), float(y)] for x, y in poly.exterior.coords]]
-				+ [[[float(x), float(y)] for x, y in interior.coords] for interior in poly.interiors]
-				for poly in polygons
-			],
-		}
+		deadwood_geojson = polygons_to_multipolygon_geojson(polygons)
 
-		# Create label payload
-		payload = LabelPayloadData(
-			dataset_id=dataset_id,
-			label_source=LabelSourceEnum.model_prediction,
-			label_type=LabelTypeEnum.semantic_segmentation,
-			label_data=LabelDataEnum.deadwood,
-			label_quality=3,
-			geometry=deadwood_geojson,
-		)
-
-		# Delete existing deadwood prediction labels
-		# Refresh token before DB ops to avoid expiry after long inference
-		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-		deleted_count = delete_model_prediction_labels(dataset_id=dataset_id, label_data=LabelDataEnum.deadwood, token=token)
-		if deleted_count > 0:
-			logger.info(
-				f'Deleted {deleted_count} existing deadwood prediction labels',
-				LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
-			)
-
-		# Create label with geometries
 		logger.info(
 			'Creating label with geometries',
 			LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
 		)
-		label = create_label_with_geometries(payload, user_id, token)
+		label = replace_model_prediction_label(
+			dataset_id=dataset_id,
+			user_id=user_id,
+			label_data=LabelDataEnum.deadwood,
+			geometry=deadwood_geojson,
+			token=token,
+			model_config=MODEL_CONFIG,
+		)
 		logger.info(
 			f'Created label {label.id} with geometries',
 			LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),

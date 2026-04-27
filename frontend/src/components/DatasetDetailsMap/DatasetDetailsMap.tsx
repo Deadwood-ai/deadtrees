@@ -62,6 +62,9 @@ interface DatasetDetailsMapProps {
   onApproveCorrection?: (correctionId: number, geometryId: number) => void;
   onRevertCorrection?: (correctionId: number, geometryId: number) => void;
   allowBadQualityLayers?: boolean;
+  // Override which label ID to display (for auditor model variant switching)
+  deadwoodLabelIdOverride?: number | null;
+  forestCoverLabelIdOverride?: number | null;
 }
 
 /**
@@ -94,6 +97,8 @@ const DatasetDetailsMapInner = forwardRef<DatasetDetailsMapHandle, DatasetDetail
   onApproveCorrection,
   onRevertCorrection,
   allowBadQualityLayers = false,
+  deadwoodLabelIdOverride,
+  forestCoverLabelIdOverride,
     },
     ref
   ) => {
@@ -169,6 +174,8 @@ const DatasetDetailsMapInner = forwardRef<DatasetDetailsMapHandle, DatasetDetail
         onApproveCorrection={handleApproveCorrection}
         onRevertCorrection={handleRevertCorrection}
         allowBadQualityLayers={allowBadQualityLayers}
+        deadwoodLabelIdOverride={deadwoodLabelIdOverride}
+        forestCoverLabelIdOverride={forestCoverLabelIdOverride}
       />
     );
   }

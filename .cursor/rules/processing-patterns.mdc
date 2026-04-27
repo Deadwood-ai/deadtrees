@@ -104,10 +104,10 @@ The standardized file is ephemeral — it only exists in `processing_dir` during
 
 ```python
 # ❌ WRONG: re-queue treecover alone — will use raw uint16 file
-task_types = ['treecover']
+task_types = ['treecover_v1']
 
 # ✅ CORRECT: always include geotiff so standardization runs first
-task_types = ['geotiff', 'treecover']
+task_types = ['geotiff', 'treecover_v1']
 
 # ✅ CORRECT: any subset of downstream tasks must include geotiff
 task_types = ['geotiff', 'cog', 'thumbnail']

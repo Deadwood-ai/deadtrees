@@ -165,7 +165,7 @@ def main():
 				try:
 					process_result = file_data_commands.process(
 						dataset_id=new_dataset_id,
-						task_types=['geotiff', 'metadata', 'cog', 'thumbnail', 'deadwood'],
+						task_types=['geotiff', 'metadata', 'cog', 'thumbnail', 'deadwood_v1'],
 						priority=3,
 					)
 					print(f'Started processing tasks for dataset {new_dataset_id}')

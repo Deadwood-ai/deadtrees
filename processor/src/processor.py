@@ -10,6 +10,7 @@ from .process_thumbnail import process_thumbnail
 from .process_cog import process_cog
 from .process_deadwood_segmentation import process_deadwood_segmentation
 from .process_treecover_segmentation import process_treecover_segmentation
+from .process_deadwood_treecover_combined_v2 import process_deadwood_treecover_combined_v2
 from .process_metadata import process_metadata
 from .exceptions import AuthenticationError, ProcessingError
 from .utils.linear_issues import create_processing_failure_issue
@@ -28,9 +29,18 @@ PIPELINE_STAGE_MAP = [
 	(TaskTypeEnum.metadata, 'is_metadata_done', 'metadata_processing'),
 	(TaskTypeEnum.cog, 'is_cog_done', 'cog_processing'),
 	(TaskTypeEnum.thumbnail, 'is_thumbnail_done', 'thumbnail_processing'),
-	(TaskTypeEnum.deadwood, 'is_deadwood_done', 'deadwood_segmentation'),
-	(TaskTypeEnum.treecover, 'is_forest_cover_done', 'forest_cover_segmentation'),
+	(TaskTypeEnum.deadwood_v1, 'is_deadwood_done', 'deadwood_segmentation'),
+	(TaskTypeEnum.treecover_v1, 'is_forest_cover_done', 'forest_cover_segmentation'),
+	(
+		TaskTypeEnum.deadwood_treecover_combined_v2,
+		('is_deadwood_done', 'is_forest_cover_done'),
+		'deadwood_treecover_combined_segmentation',
+	),
 ]
+
+
+def _stage_done_flags(done_flags: str | tuple[str, ...]) -> tuple[str, ...]:
+	return (done_flags,) if isinstance(done_flags, str) else done_flags
 
 
 def refresh_processor_token(task: QueueTask, fallback_token: str | None = None) -> str:
@@ -56,8 +66,8 @@ def detect_crashed_stage(status_data: dict, task_types: list) -> str:
 	Returns:
 		str: Human-readable stage name where the crash occurred
 	"""
-	for task_type, done_flag, stage_name in PIPELINE_STAGE_MAP:
-		if task_type in task_types and not status_data.get(done_flag, False):
+	for task_type, done_flags, stage_name in PIPELINE_STAGE_MAP:
+		if task_type in task_types and not all(status_data.get(flag, False) for flag in _stage_done_flags(done_flags)):
 			return stage_name
 	return 'unknown'
 
@@ -72,15 +82,20 @@ def get_completed_stages(status_data: dict) -> list[str]:
 		list[str]: Human-readable names of completed stages
 	"""
 	completed = []
-	for _, done_flag, stage_name in PIPELINE_STAGE_MAP:
-		if status_data.get(done_flag, False):
+	for _, done_flags, stage_name in PIPELINE_STAGE_MAP:
+		if all(status_data.get(flag, False) for flag in _stage_done_flags(done_flags)):
 			completed.append(stage_name)
 	return completed
 
 
 def are_requested_stages_complete(status_data: dict, task_types: list) -> bool:
 	"""Return True when all requested pipeline stages are already marked complete."""
-	requested = [done_flag for task_type, done_flag, _ in PIPELINE_STAGE_MAP if task_type in task_types]
+	requested = [
+		flag
+		for task_type, done_flags, _ in PIPELINE_STAGE_MAP
+		if task_type in task_types
+		for flag in _stage_done_flags(done_flags)
+	]
 	return bool(requested) and all(status_data.get(done_flag, False) for done_flag in requested)
 
 
@@ -321,7 +336,7 @@ def process_task(task: QueueTask, token: str):
 				raise ProcessingError(str(e), task_type='thumbnail', task_id=task.id, dataset_id=task.dataset_id)
 
 		# Process deadwood_segmentation if requested
-		if TaskTypeEnum.deadwood in task.task_types:
+		if TaskTypeEnum.deadwood_v1 in task.task_types:
 			try:
 				token = refresh_processor_token(task, token)
 				logger.info(
@@ -347,7 +362,7 @@ def process_task(task: QueueTask, token: str):
 				)
 
 		# Process treecover_segmentation if requested (runs after deadwood)
-		if TaskTypeEnum.treecover in task.task_types:
+		if TaskTypeEnum.treecover_v1 in task.task_types:
 			try:
 				token = refresh_processor_token(task, token)
 				logger.info(
@@ -370,6 +385,35 @@ def process_task(task: QueueTask, token: str):
 				)
 				raise ProcessingError(
 					str(e), task_type='treecover_segmentation', task_id=task.id, dataset_id=task.dataset_id
+				)
+
+		# Process combined deadwood+treecover segmentation if requested
+		if TaskTypeEnum.deadwood_treecover_combined_v2 in task.task_types:
+			try:
+				token = refresh_processor_token(task, token)
+				logger.info(
+					'processing combined deadwood+treecover segmentation',
+					LogContext(
+						category=LogCategory.DEADWOOD, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+					),
+				)
+				process_deadwood_treecover_combined_v2(task, token, settings.processing_path)
+			except Exception as e:
+				error_token = refresh_processor_token(task, token)
+				logger.error(
+					f'Combined segmentation failed: {str(e)}',
+					LogContext(
+						category=LogCategory.DEADWOOD,
+						dataset_id=task.dataset_id,
+						user_id=task.user_id,
+						token=error_token,
+					),
+				)
+				raise ProcessingError(
+					str(e),
+					task_type='deadwood_treecover_combined_segmentation',
+					task_id=task.id,
+					dataset_id=task.dataset_id,
 				)
 
 		# Only delete task if all processing completed successfully

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Segmented, Slider, Checkbox, Button, Divider, Tooltip } from "antd";
+import { Segmented, Slider, Checkbox, Button, Divider, Tooltip, Select } from "antd";
 import {
   FlagOutlined,
   EditOutlined,
@@ -10,6 +10,7 @@ import {
 } from "@ant-design/icons";
 import { mapColors } from "../../theme/mapColors";
 import { standingDeadwoodLayerExplanation } from "../../utils/standingDeadwoodInfo";
+import { ILabel } from "../../types/labels";
 
 type QualityRating = "great" | "sentinel_ok" | "bad" | null | undefined;
 
@@ -34,6 +35,14 @@ interface DatasetLayerControlPanelProps {
   forestCoverQuality?: QualityRating;
   deadwoodQuality?: QualityRating;
   canBypassQualityRestriction?: boolean;
+  // Model variant selection (auditors only)
+  canAudit?: boolean;
+  deadwoodVariants?: ILabel[];
+  forestVariants?: ILabel[];
+  selectedDeadwoodLabelId?: number | null;
+  onDeadwoodVariantChange?: (id: number) => void;
+  selectedForestLabelId?: number | null;
+  onForestVariantChange?: (id: number) => void;
   // Opacity (controls forest cover + deadwood layers)
   opacity: number;
   setOpacity: (value: number) => void;
@@ -87,6 +96,13 @@ const DatasetLayerControlPanel = ({
   forestCoverQuality,
   deadwoodQuality,
   canBypassQualityRestriction = false,
+  canAudit = false,
+  deadwoodVariants,
+  forestVariants,
+  selectedDeadwoodLabelId,
+  onDeadwoodVariantChange,
+  selectedForestLabelId,
+  onForestVariantChange,
   opacity,
   setOpacity,
   onReportClick,
@@ -120,38 +136,68 @@ const DatasetLayerControlPanel = ({
       <div className="mb-2 text-xs font-medium text-gray-500">Data Layers</div>
       <div className="flex flex-col gap-1">
         {hasForestCover && (
-          <div className="flex items-center justify-between">
-            <Checkbox
-              checked={showForestCover}
-              onChange={(e) => setShowForestCover(e.target.checked)}
-              disabled={forestCoverQuality === "bad" && !canBypassQualityRestriction}
-            >
-              <span className={`flex items-center gap-2 ${forestCoverQuality === "bad" && !canBypassQualityRestriction ? "opacity-50" : ""}`}>
-                <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: mapColors.forest.fill }} />
-                <span className="text-xs text-gray-600">Forest Cover</span>
-              </span>
-            </Checkbox>
-            <QualityIcon quality={forestCoverQuality} />
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <Checkbox
+                checked={showForestCover}
+                onChange={(e) => setShowForestCover(e.target.checked)}
+                disabled={forestCoverQuality === "bad" && !canBypassQualityRestriction}
+              >
+                <span className={`flex items-center gap-2 ${forestCoverQuality === "bad" && !canBypassQualityRestriction ? "opacity-50" : ""}`}>
+                  <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: mapColors.forest.fill }} />
+                  <span className="text-xs text-gray-600">Forest Cover</span>
+                </span>
+              </Checkbox>
+              <QualityIcon quality={forestCoverQuality} />
+            </div>
+            {canAudit && forestVariants && forestVariants.length >= 1 && (
+              <Select
+                size="small"
+                value={selectedForestLabelId ?? forestVariants[0]?.id}
+                onChange={onForestVariantChange}
+                className="w-full text-xs"
+                popupMatchSelectWidth={false}
+                options={forestVariants.map((l) => ({
+                  value: l.id,
+                  label: l.model_config?.module ?? `Label #${l.id}`,
+                }))}
+              />
+            )}
           </div>
         )}
         {hasDeadwood && (
-          <div className="flex items-center justify-between">
-            <Checkbox
-              checked={showDeadwood}
-              onChange={(e) => setShowDeadwood(e.target.checked)}
-              disabled={deadwoodQuality === "bad" && !canBypassQualityRestriction}
-            >
-              <span className={`flex items-center gap-2 ${deadwoodQuality === "bad" && !canBypassQualityRestriction ? "opacity-50" : ""}`}>
-                <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: mapColors.deadwood.fill }} />
-                <span className="text-xs text-gray-600">Standing Deadwood</span>
-              </span>
-            </Checkbox>
-            <div className="flex items-center gap-1">
-              <Tooltip title={<div className="max-w-xs text-xs leading-relaxed">{standingDeadwoodLayerExplanation}</div>} placement="left">
-                <InfoCircleOutlined className="cursor-help text-xs text-gray-400 hover:text-gray-600" />
-              </Tooltip>
-              <QualityIcon quality={deadwoodQuality} />
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <Checkbox
+                checked={showDeadwood}
+                onChange={(e) => setShowDeadwood(e.target.checked)}
+                disabled={deadwoodQuality === "bad" && !canBypassQualityRestriction}
+              >
+                <span className={`flex items-center gap-2 ${deadwoodQuality === "bad" && !canBypassQualityRestriction ? "opacity-50" : ""}`}>
+                  <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: mapColors.deadwood.fill }} />
+                  <span className="text-xs text-gray-600">Standing Deadwood</span>
+                </span>
+              </Checkbox>
+              <div className="flex items-center gap-1">
+                <Tooltip title={<div className="max-w-xs text-xs leading-relaxed">{standingDeadwoodLayerExplanation}</div>} placement="left">
+                  <InfoCircleOutlined className="cursor-help text-xs text-gray-400 hover:text-gray-600" />
+                </Tooltip>
+                <QualityIcon quality={deadwoodQuality} />
+              </div>
             </div>
+            {canAudit && deadwoodVariants && deadwoodVariants.length >= 1 && (
+              <Select
+                size="small"
+                value={selectedDeadwoodLabelId ?? deadwoodVariants[0]?.id}
+                onChange={onDeadwoodVariantChange}
+                className="w-full text-xs"
+                popupMatchSelectWidth={false}
+                options={deadwoodVariants.map((l) => ({
+                  value: l.id,
+                  label: l.model_config?.module ?? `Label #${l.id}`,
+                }))}
+              />
+            )}
           </div>
         )}
         <Checkbox

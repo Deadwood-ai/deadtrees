@@ -12,6 +12,8 @@ services:
       context: .
       dockerfile: processor/Dockerfile
       # Only include essential files for build (excludes assets via .dockerignore)
+    gpus: all
+    runtime: nvidia
     env_file:
       # Load local Supabase keys from repo .env, avoiding accidental shell overrides.
       - ./.env

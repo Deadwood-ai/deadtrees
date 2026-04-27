@@ -8,7 +8,7 @@ from shared.status import update_status
 from shared.logging import LogContext, LogCategory
 
 from .utils.local_ortho import ensure_local_ortho
-from .deadwood_segmentation.predict_deadwood import predict_deadwood
+from .deadwood_segmentation_v1_moehring.predict_deadwood import predict_deadwood
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
 
 

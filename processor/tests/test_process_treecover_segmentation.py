@@ -20,7 +20,7 @@ def treecover_task(test_dataset_for_processing, test_processor_user):
 		id=1,
 		dataset_id=test_dataset_for_processing,
 		user_id=test_processor_user,
-		task_types=[TaskTypeEnum.treecover],
+		task_types=[TaskTypeEnum.treecover_v1],
 		priority=1,
 		is_processing=False,
 		current_position=1,
@@ -192,7 +192,7 @@ def test_tcd_container_availability():
 
 def test_confidence_map_thresholding():
 	"""Test the confidence map thresholding logic"""
-	from processor.src.treecover_segmentation.predict_treecover import TCD_THRESHOLD
+	from processor.src.treecover_segmentation_oam_tcd.predict_treecover import TCD_THRESHOLD
 	import numpy as np
 
 	# Create test confidence map with values around threshold
@@ -219,7 +219,7 @@ def test_pipeline_integration_deadwood_then_treecover(test_dataset_for_processin
 		id=1,
 		dataset_id=test_dataset_for_processing,
 		user_id=test_processor_user,
-		task_types=[TaskTypeEnum.deadwood],
+		task_types=[TaskTypeEnum.deadwood_v1],
 		priority=1,
 		is_processing=False,
 		current_position=1,
@@ -230,7 +230,7 @@ def test_pipeline_integration_deadwood_then_treecover(test_dataset_for_processin
 		id=2,
 		dataset_id=test_dataset_for_processing,
 		user_id=test_processor_user,
-		task_types=[TaskTypeEnum.treecover],
+		task_types=[TaskTypeEnum.treecover_v1],
 		priority=1,
 		is_processing=False,
 		current_position=2,

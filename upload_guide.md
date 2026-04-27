@@ -149,7 +149,7 @@ def main():
                 # Start processing
                 data_commands.process(
                     dataset_id=dataset_id,
-                    task_types=['geotiff', 'metadata', 'cog', 'thumbnail', 'deadwood', 'treecover'],
+                    task_types=['geotiff', 'metadata', 'cog', 'thumbnail', 'deadwood_v1', 'treecover_v1'],
                     priority=2
                 )
                 

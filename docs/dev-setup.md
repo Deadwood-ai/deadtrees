@@ -22,8 +22,6 @@ cd deadtrees
 git submodule update --init --recursive
 ```
 
-The `processor/src/deadwood_segmentation/deadtreesmodels` submodule is required. If it is missing, processor images will not build.
-
 ### 2. Create the Python environment and install the CLI
 
 ```bash

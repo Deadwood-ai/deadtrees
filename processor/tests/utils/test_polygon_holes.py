@@ -1,7 +1,7 @@
 import pytest
 from shapely.geometry import Polygon
 import json
-from processor.src.deadwood_segmentation.deadtreesmodels.common.common import reproject_polygons
+from processor.src.utils.segmentation import reproject_polygons
 
 
 def test_polygon_with_holes_conversion():
