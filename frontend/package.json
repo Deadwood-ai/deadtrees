@@ -22,7 +22,7 @@
     "@geoapify/react-geocoder-autocomplete": "^2.0.1",
     "@supabase/auth-ui-react": "^0.4.7",
     "@supabase/auth-ui-shared": "^0.1.8",
-    "@supabase/supabase-js": "^2.48.1",
+    "@supabase/supabase-js": "^2.105.0",
     "@tanstack/react-query": "^5.66.0",
     "@turf/turf": "^7.2.0",
     "antd": "^5.24.0",
