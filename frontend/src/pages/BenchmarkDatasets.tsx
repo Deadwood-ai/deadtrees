@@ -3,76 +3,25 @@ import { Button, Tag } from "antd";
 import { useNavigate } from "react-router-dom";
 
 import {
-  getReferencePatchImages,
-  referenceDatasetCollections,
-  type ReferenceDatasetCollection,
-  type ReferenceDatasetSite,
-} from "../data/referenceDatasets";
-import { GroundTruthMask } from "../components/ReferenceDatasets/GroundTruthMask";
-
-const FEATURED_PREVIEW_SITE_IDS = [375, 435, 1396, 4087, 5584, 6445];
-
-type PreviewMode = "rgb" | "mask";
-
-const PREVIEW_MODES: PreviewMode[] = ["rgb", "mask", "rgb", "mask", "rgb", "mask"];
-
-const pickPreviewSites = (
-  sites: ReferenceDatasetSite[],
-  preferredIds: number[],
-  count: number,
-): ReferenceDatasetSite[] => {
-  const byId = new Map(sites.map((site) => [site.id, site]));
-  const preferred = preferredIds
-    .map((id) => byId.get(id))
-    .filter((site): site is ReferenceDatasetSite => Boolean(site));
-  if (preferred.length >= count) return preferred.slice(0, count);
-  const rest = sites.filter((site) => !preferredIds.includes(site.id));
-  return [...preferred, ...rest].slice(0, count);
-};
+  benchmarkDatasetCollections,
+  getBenchmarkDatasetStats,
+  type BenchmarkDatasetCollection,
+} from "../data/benchmarkDatasets";
+import { DatasetPreviewStrip } from "../components/BenchmarkDatasets/DatasetPreviewStrip";
 
 function FeaturedCollectionCard({
   collection,
   onOpen,
 }: {
-  collection: ReferenceDatasetCollection;
+  collection: BenchmarkDatasetCollection;
   onOpen: () => void;
 }) {
-  const previewSites = pickPreviewSites(
-    collection.sites,
-    FEATURED_PREVIEW_SITE_IDS,
-    6,
-  );
   const isAvailable = collection.status === "available";
+  const stats = getBenchmarkDatasetStats(collection);
 
   return (
     <article className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md">
-      <div className="grid grid-cols-3 gap-px bg-gray-200 sm:grid-cols-6">
-        {previewSites.map((site, index) => {
-          const previewPatch = getReferencePatchImages(site, 20, 0);
-          const mode = PREVIEW_MODES[index % PREVIEW_MODES.length];
-          if (mode === "mask") {
-            return (
-              <GroundTruthMask
-                key={site.id}
-                forestCoverSrc={previewPatch.treeCoverMask}
-                deadwoodSrc={previewPatch.mortalityMask}
-                alt={`Reference mask from site ${site.id}`}
-                size={256}
-              />
-            );
-          }
-          return (
-            <div key={site.id} className="aspect-square bg-gray-100">
-              <img
-                src={previewPatch.rgb}
-                alt={`Benchmark patch from site ${site.id}`}
-                loading="lazy"
-                className="h-full w-full object-cover"
-              />
-            </div>
-          );
-        })}
-      </div>
+      <DatasetPreviewStrip sites={collection.sites} />
 
       <div className="grid gap-8 p-6 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] md:p-10">
         <div>
@@ -81,7 +30,6 @@ function FeaturedCollectionCard({
               {isAvailable ? "Available" : "Coming soon"}
             </Tag>
             <Tag className="m-0">{collection.shortName}</Tag>
-            {isAvailable && <Tag className="m-0">Static v1</Tag>}
           </div>
 
           <h2 className="m-0 mt-5 text-3xl font-semibold leading-tight text-gray-950 md:text-4xl">
@@ -106,7 +54,7 @@ function FeaturedCollectionCard({
         </div>
 
         <div className="grid grid-cols-2 gap-3 self-start sm:grid-cols-2">
-          {collection.stats.map((stat) => (
+          {stats.map((stat) => (
             <div
               key={stat.label}
               className="rounded-lg border border-gray-100 bg-gray-50 p-4"
@@ -125,23 +73,23 @@ function FeaturedCollectionCard({
   );
 }
 
-export default function ReferenceDatasets() {
+export default function BenchmarkDatasets() {
   const navigate = useNavigate();
-  const featured = referenceDatasetCollections;
+  const featured = benchmarkDatasetCollections;
 
   return (
     <main className="min-h-screen bg-[#f8faf9] pt-24 md:pt-32">
       <section className="border-b border-gray-200/80 bg-white">
         <div className="mx-auto max-w-4xl px-4 py-16 text-center md:px-8 md:py-24">
           <p className="m-0 text-sm font-semibold uppercase tracking-wider text-[#1B5E35] md:text-base">
-            Reference datasets
+            Benchmark datasets
           </p>
           <h1 className="m-0 mt-3 text-4xl font-semibold leading-[1.1] text-gray-950 md:text-5xl">
             Curated benchmark datasets from deadtrees.earth
           </h1>
           <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-gray-600">
-            Stable dataset releases with gallery views, benchmark splits, reference masks,
-            metadata, and citation material for scientific reuse.
+            Stable dataset releases with gallery views, benchmark splits,
+            ground-truth masks, and metadata for scientific reuse.
           </p>
         </div>
       </section>
@@ -152,9 +100,7 @@ export default function ReferenceDatasets() {
             <FeaturedCollectionCard
               key={collection.slug}
               collection={collection}
-              onOpen={() =>
-                navigate(`/reference-datasets/${collection.slug}`)
-              }
+              onOpen={() => navigate(`/benchmark-datasets/${collection.slug}`)}
             />
           ))}
         </div>
@@ -164,14 +110,14 @@ export default function ReferenceDatasets() {
             More coming
           </span>
           <h3 className="m-0 mt-4 text-lg font-semibold text-gray-900 md:text-xl">
-            Additional reference releases are in preparation
+            Additional benchmark releases are in preparation
           </h3>
           <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-gray-600">
             New benchmark collections — including satellite-derived products and
             extended aerial sites — will appear here as they are finalised. If
             you have a dataset to contribute,{" "}
             <a
-              href="mailto:info@deadtrees.earth?subject=Reference dataset contribution"
+              href="mailto:info@deadtrees.earth?subject=Benchmark dataset contribution"
               className="font-semibold text-[#1B5E35] underline"
             >
               get in touch

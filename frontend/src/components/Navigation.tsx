@@ -23,8 +23,8 @@ const defaultNavigation = [
     label: "Drone Archive",
   },
   {
-    key: "/reference-datasets",
-    label: "Reference Data",
+    key: "/benchmark-datasets",
+    label: "Benchmark Data",
   },
   {
     key: "/about",
@@ -140,7 +140,8 @@ export default function Navigation() {
             WebkitBackdropFilter: "blur(12px)",
             borderRadius: "1rem",
             border: "1px solid rgba(229, 231, 235, 0.8)",
-            boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)",
+            boxShadow:
+              "0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)",
             padding: "0 24px",
             height: "64px",
             lineHeight: "64px",
@@ -220,7 +221,9 @@ export default function Navigation() {
         open={mobileMenuOpen}
         width="82vw"
         onClose={() => setMobileMenuOpen(false)}
-        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
+        styles={{
+          body: { padding: 0, display: "flex", flexDirection: "column" },
+        }}
       >
         <div className="flex-1 overflow-y-auto py-2">
           <ConfigProvider
@@ -239,7 +242,10 @@ export default function Navigation() {
               selectedKeys={[currentPath === "/" ? "/home" : currentPath]}
               items={navigation}
               onClick={handleMenuClick}
-              style={{ borderInlineEnd: "none", backgroundColor: "transparent" }}
+              style={{
+                borderInlineEnd: "none",
+                backgroundColor: "transparent",
+              }}
             />
           </ConfigProvider>
         </div>

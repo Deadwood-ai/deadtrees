@@ -70,7 +70,8 @@ export const composeMaskDataUrl = ({
     maskCanvas.width = size;
     maskCanvas.height = size;
     const maskCtx = maskCanvas.getContext("2d", { willReadFrequently: true });
-    if (!maskCtx) throw new Error("Could not create source mask canvas context");
+    if (!maskCtx)
+      throw new Error("Could not create source mask canvas context");
 
     maskCtx.drawImage(forestImage, 0, 0, size, size);
     const forestData = maskCtx.getImageData(0, 0, size, size).data;

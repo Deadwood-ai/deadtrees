@@ -1,6 +1,6 @@
-export type ReferencePatchResolution = 5 | 10 | 20;
+export type BenchmarkPatchResolution = 5 | 10 | 20;
 
-export interface ReferenceDatasetSite {
+export interface BenchmarkDatasetSite {
   id: number;
   fileName: string;
   biome: string;
@@ -15,7 +15,7 @@ export interface ReferenceDatasetSite {
   patchCount: number;
 }
 
-export interface ReferenceDatasetAdminInfo {
+export interface BenchmarkDatasetAdminInfo {
   id: number | string;
   admin_level_1: string | null;
   admin_level_2: string | null;
@@ -27,8 +27,8 @@ export interface ReferenceDatasetAdminInfo {
   authors: string[] | null;
 }
 
-export interface ReferencePatchImageSet {
-  resolutionCm: ReferencePatchResolution;
+export interface BenchmarkPatchImageSet {
+  resolutionCm: BenchmarkPatchResolution;
   patchIndex: number;
   label: string;
   rgb: string;
@@ -36,24 +36,48 @@ export interface ReferencePatchImageSet {
   mortalityMask: string;
 }
 
-export interface ReferenceDatasetCollection {
+export interface BenchmarkDatasetCollection {
   slug: string;
   name: string;
   shortName: string;
   title: string;
   status: "available" | "coming-soon";
   summary: string;
-  stats: Array<{ label: string; value: string }>;
+  metrics: {
+    benchmarkSites: number;
+    benchmarkPatches: number;
+    patchSizePx: number;
+    resolutionsCm: BenchmarkPatchResolution[];
+  };
   links: {
     dataset: string;
   };
-  sites: ReferenceDatasetSite[];
+  sites: BenchmarkDatasetSite[];
 }
 
-export const REFERENCE_EXPORT_BASE_URL =
+export interface BenchmarkDatasetStat {
+  label: string;
+  value: string;
+}
+
+export const BENCHMARK_EXPORT_BASE_URL =
   "https://data2.deadtrees.earth/reference/69e57f93-d003-4b64-9108-fe3dfa654918";
 
-export const dteAerialReferenceDatasetAdminInfoById: Record<number, ReferenceDatasetAdminInfo> = {
+export const getCoarseBiomeGroup = (biome: string) => {
+  const normalized = biome.toLowerCase();
+  if (normalized.includes("tropical")) return "(Sub)tropical";
+  if (normalized.includes("mediterranean")) return "Drylands";
+  if (normalized.includes("boreal") || normalized.includes("montane")) {
+    return "Boreal and montane";
+  }
+  if (normalized.includes("temperate")) return "Temperate";
+  return biome;
+};
+
+export const dteAerialBenchmarkDatasetAdminInfoById: Record<
+  number,
+  BenchmarkDatasetAdminInfo
+> = {
   375: {
     id: 375,
     admin_level_1: "Spain",
@@ -85,7 +109,11 @@ export const dteAerialReferenceDatasetAdminInfoById: Record<number, ReferenceDat
     aquisition_month: 11,
     aquisition_day: 26,
     platform: "drone",
-    authors: ["Helene C. Muller-Landau", "Vicente Garcia Vasquez", "Melvin Milton Hernandez"],
+    authors: [
+      "Helene C. Muller-Landau",
+      "Vicente Garcia Vasquez",
+      "Melvin Milton Hernandez",
+    ],
   },
   868: {
     id: 868,
@@ -283,7 +311,9 @@ export const dteAerialReferenceDatasetAdminInfoById: Record<number, ReferenceDat
     aquisition_month: 5,
     aquisition_day: 12,
     platform: "drone",
-    authors: ["UC Natural Reserve System and Becca Fenwick, Justin Cummings, Jacob Flannagan, Clancy McConnell, Sean Hogan"],
+    authors: [
+      "UC Natural Reserve System and Becca Fenwick, Justin Cummings, Jacob Flannagan, Clancy McConnell, Sean Hogan",
+    ],
   },
   5783: {
     id: 5783,
@@ -294,7 +324,9 @@ export const dteAerialReferenceDatasetAdminInfoById: Record<number, ReferenceDat
     aquisition_month: 8,
     aquisition_day: 17,
     platform: "drone",
-    authors: ["UC Natural Reserve System and Becca Fenwick, Justin Cummings, Jacob Flannagan, Clancy McConnell, Sean Hogan"],
+    authors: [
+      "UC Natural Reserve System and Becca Fenwick, Justin Cummings, Jacob Flannagan, Clancy McConnell, Sean Hogan",
+    ],
   },
   5786: {
     id: 5786,
@@ -305,7 +337,9 @@ export const dteAerialReferenceDatasetAdminInfoById: Record<number, ReferenceDat
     aquisition_month: 8,
     aquisition_day: 17,
     platform: "drone",
-    authors: ["UC Natural Reserve System and Becca Fenwick, Justin Cummings, Jacob Flannagan, Clancy McConnell, Sean Hogan"],
+    authors: [
+      "UC Natural Reserve System and Becca Fenwick, Justin Cummings, Jacob Flannagan, Clancy McConnell, Sean Hogan",
+    ],
   },
   5931: {
     id: 5931,
@@ -331,9 +365,9 @@ export const dteAerialReferenceDatasetAdminInfoById: Record<number, ReferenceDat
   },
 };
 
-const makeReferencePatchBase = (
-  dataset: ReferenceDatasetSite,
-  resolutionCm: ReferencePatchResolution,
+const makeBenchmarkPatchBase = (
+  dataset: BenchmarkDatasetSite,
+  resolutionCm: BenchmarkPatchResolution,
   patchIndex = 0,
 ) => {
   if (resolutionCm === 20) {
@@ -349,13 +383,13 @@ const makeReferencePatchBase = (
   return `${dataset.id}_${row}_${column}_5cm`;
 };
 
-export const getReferencePatchImages = (
-  dataset: ReferenceDatasetSite,
-  resolutionCm: ReferencePatchResolution,
+export const getBenchmarkPatchImages = (
+  dataset: BenchmarkDatasetSite,
+  resolutionCm: BenchmarkPatchResolution,
   patchIndex = 0,
-): ReferencePatchImageSet => {
-  const base = makeReferencePatchBase(dataset, resolutionCm, patchIndex);
-  const folder = `${REFERENCE_EXPORT_BASE_URL}/${dataset.id}/png`;
+): BenchmarkPatchImageSet => {
+  const base = makeBenchmarkPatchBase(dataset, resolutionCm, patchIndex);
+  const folder = `${BENCHMARK_EXPORT_BASE_URL}/${dataset.id}/png`;
 
   return {
     resolutionCm,
@@ -367,35 +401,58 @@ export const getReferencePatchImages = (
   };
 };
 
-export const getReferencePatchGridImages = (
-  dataset: ReferenceDatasetSite,
-  resolutionCm: ReferencePatchResolution,
-): ReferencePatchImageSet[] => {
-  const patchCountByResolution: Record<ReferencePatchResolution, number> = {
+export const getBenchmarkPatchGridImages = (
+  dataset: BenchmarkDatasetSite,
+  resolutionCm: BenchmarkPatchResolution,
+): BenchmarkPatchImageSet[] => {
+  const patchCountByResolution: Record<BenchmarkPatchResolution, number> = {
     20: 1,
     10: 4,
     5: 16,
   };
 
-  return Array.from({ length: patchCountByResolution[resolutionCm] }, (_, index) =>
-    getReferencePatchImages(dataset, resolutionCm, index),
+  return Array.from(
+    { length: patchCountByResolution[resolutionCm] },
+    (_, index) => getBenchmarkPatchImages(dataset, resolutionCm, index),
   );
 };
 
-export const dteAerialReferenceDataset: ReferenceDatasetCollection = {
+export const getBenchmarkDatasetStats = (
+  collection: BenchmarkDatasetCollection,
+): BenchmarkDatasetStat[] => [
+  {
+    label: "Benchmark sites",
+    value: collection.metrics.benchmarkSites.toString(),
+  },
+  {
+    label: "Benchmark patches",
+    value: collection.metrics.benchmarkPatches.toString(),
+  },
+  {
+    label: "Patch size",
+    value: `${collection.metrics.patchSizePx} px`,
+  },
+  {
+    label: "Resolutions",
+    value: `${collection.metrics.resolutionsCm.join(", ")} cm`,
+  },
+];
+
+export const dteAerialBenchmarkDataset: BenchmarkDatasetCollection = {
   slug: "dte-aerial-bench",
   name: "DTE-aerial-bench",
   shortName: "DTE-aerial-bench",
-  title: "DTE-aerial-bench: A Multi-Resolution Aerial Image Benchmark for Tree Cover and Mortality Detection",
+  title:
+    "DTE-aerial-bench: A multi-resolution manually labelled aerial benchmark for tree cover and mortality segmentation",
   status: "available",
   summary:
-    "A curated aerial benchmark for tree cover and mortality detection, built from high-resolution drone and aircraft orthophotos with expert reference masks.",
-  stats: [
-    { label: "Golden test sites", value: "25" },
-    { label: "Benchmark patches", value: "525" },
-    { label: "Patch size", value: "1024 px" },
-    { label: "Resolutions", value: "5, 10, 20 cm" },
-  ],
+    "A curated aerial benchmark for tree cover and mortality segmentation, built from high-resolution drone and aircraft orthophotos with expert ground-truth masks.",
+  metrics: {
+    benchmarkSites: 25,
+    benchmarkPatches: 525,
+    patchSizePx: 1024,
+    resolutionsCm: [5, 10, 20],
+  },
   links: {
     dataset: "#dataset-download-placeholder",
   },
@@ -512,7 +569,8 @@ export const dteAerialReferenceDataset: ReferenceDatasetCollection = {
     },
     {
       id: 3834,
-      fileName: "2013_08_27_Tanjung Survey 110m horizontal 150m vert_RGB_orthomosaic.tif",
+      fileName:
+        "2013_08_27_Tanjung Survey 110m horizontal 150m vert_RGB_orthomosaic.tif",
       biome: "Tropical and Subtropical Moist Broadleaf Forests",
       license: "CC BY",
       citationUrl: null,
@@ -678,4 +736,4 @@ export const dteAerialReferenceDataset: ReferenceDatasetCollection = {
   ],
 };
 
-export const referenceDatasetCollections = [dteAerialReferenceDataset];
+export const benchmarkDatasetCollections = [dteAerialBenchmarkDataset];
