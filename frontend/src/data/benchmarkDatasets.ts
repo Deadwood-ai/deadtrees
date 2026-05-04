@@ -443,7 +443,7 @@ export const dteAerialBenchmarkDataset: BenchmarkDatasetCollection = {
   name: "DTE-aerial-bench",
   shortName: "DTE-aerial-bench",
   title:
-    "DTE-aerial-bench: A Multi-Resolution Manually Labelled Aerial Benchmark for Tree Cover and Mortality Segmentation",
+    "DTE-aerial-bench: A multi-resolution manually labelled aerial benchmark for tree cover and mortality segmentation",
   status: "available",
   summary:
     "A curated aerial benchmark for tree cover and mortality segmentation, built from high-resolution drone and aircraft orthophotos with expert ground-truth masks.",
