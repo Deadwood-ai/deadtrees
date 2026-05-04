@@ -1,4 +1,4 @@
-import { Outlet, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { ConfigProvider, Layout } from "antd";
 import { useEffect } from "react";
 import { trackPageView, initializePostHog } from "./utils/analytics";
@@ -17,6 +17,8 @@ import DatasetReferencePatchEditor from "./pages/DatasetReferencePatchEditor";
 import DatasetLabelEditor from "./pages/DatasetLabelEditor";
 import DatasetCorrections from "./pages/DatasetCorrections";
 import Deadtrees from "./pages/Deadtrees";
+import ReferenceDatasets from "./pages/ReferenceDatasets";
+import DteAerialReferenceDataset from "./pages/DteAerialReferenceDataset";
 import SignUp from "./pages/auth/SignUp";
 import SignIn from "./pages/auth/SignIn";
 import Forgotpassword from "./pages/auth/ForgotPassword";
@@ -120,6 +122,15 @@ function AppWithTracking() {
           element={<DatasetCorrections />}
         />
         <Route path="deadtrees" element={<Deadtrees />} />
+        <Route path="reference-datasets" element={<ReferenceDatasets />} />
+        <Route
+          path="reference-datasets/dte-aerial"
+          element={<DteAerialReferenceDataset />}
+        />
+        <Route
+          path="DTE-aerial"
+          element={<Navigate to="/reference-datasets/dte-aerial" replace />}
+        />
         <Route path="about" element={<About />} />
         <Route path="impressum" element={<Impressum />} />
         <Route
