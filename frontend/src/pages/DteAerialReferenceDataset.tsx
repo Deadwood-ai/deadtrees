@@ -525,7 +525,7 @@ function DatasetAdminCell({
         />
         <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/55 via-black/20 to-transparent" />
         <div className="absolute left-2 top-2 rounded-md bg-white/95 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-gray-900 shadow-sm">
-          #{site.id}
+          {site.id}
         </div>
         <div className="absolute bottom-2 left-2 right-2">
           <span className="inline-flex max-w-full items-center rounded-md bg-white/95 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#1B5E35] shadow-sm">
