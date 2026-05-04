@@ -377,7 +377,7 @@ function PatchModalViewer({
         <div className="-mt-1 pr-8">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-lg font-bold tabular-nums text-gray-950">
-              #{site.id}
+              {site.id}
             </span>
             <span className="text-gray-300" aria-hidden>
               ·
@@ -474,7 +474,7 @@ function PatchModalViewer({
             icon={<SelectOutlined />}
             className="px-0 font-semibold text-[#1B5E35]"
           >
-            Open dataset #{site.id}
+            Open dataset {site.id}
           </Button>
         </div>
       </div>
@@ -606,7 +606,7 @@ function DatasetAdminCell({
             href={`/dataset/${site.id}`}
             icon={<SelectOutlined />}
           >
-            Explore #{site.id}
+            Open {site.id}
           </Button>
         </div>
       </div>
