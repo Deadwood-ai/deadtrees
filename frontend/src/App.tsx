@@ -124,12 +124,20 @@ function AppWithTracking() {
         <Route path="deadtrees" element={<Deadtrees />} />
         <Route path="reference-datasets" element={<ReferenceDatasets />} />
         <Route
-          path="reference-datasets/dte-aerial"
+          path="reference-datasets/dte-aerial-bench"
           element={<DteAerialReferenceDataset />}
         />
         <Route
+          path="reference-datasets/dte-aerial"
+          element={<Navigate to="/reference-datasets/dte-aerial-bench" replace />}
+        />
+        <Route
           path="DTE-aerial"
-          element={<Navigate to="/reference-datasets/dte-aerial" replace />}
+          element={<Navigate to="/reference-datasets/dte-aerial-bench" replace />}
+        />
+        <Route
+          path="DTE-aerial-bench"
+          element={<Navigate to="/reference-datasets/dte-aerial-bench" replace />}
         />
         <Route path="about" element={<About />} />
         <Route path="impressum" element={<Impressum />} />

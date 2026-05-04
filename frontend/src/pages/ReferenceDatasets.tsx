@@ -100,7 +100,7 @@ function FeaturedCollectionCard({
               className="min-h-11"
               disabled={!isAvailable}
             >
-              Open DTE-aerial
+              Open DTE-aerial-bench
             </Button>
           </div>
         </div>

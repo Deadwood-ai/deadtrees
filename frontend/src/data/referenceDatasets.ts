@@ -383,10 +383,10 @@ export const getReferencePatchGridImages = (
 };
 
 export const dteAerialReferenceDataset: ReferenceDatasetCollection = {
-  slug: "dte-aerial",
-  name: "deadtrees.earth-aerial",
-  shortName: "DTE-aerial",
-  title: "deadtrees.earth-aerial: A Multi-Resolution Aerial Image Dataset for Tree Cover and Mortality Detection",
+  slug: "dte-aerial-bench",
+  name: "DTE-aerial-bench",
+  shortName: "DTE-aerial-bench",
+  title: "DTE-aerial-bench: A Multi-Resolution Aerial Image Benchmark for Tree Cover and Mortality Detection",
   status: "available",
   summary:
     "A curated aerial benchmark for tree cover and mortality detection, built from high-resolution drone and aircraft orthophotos with expert reference masks.",

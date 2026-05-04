@@ -73,7 +73,7 @@ const ReferenceDatasetsSection = () => {
 							`/reference-datasets/${dteAerialReferenceDataset.slug}`,
 						)}
 						className="group block overflow-hidden rounded-2xl shadow-xl ring-1 ring-black/5 transition-all hover:shadow-2xl"
-						aria-label="Open the deadtrees.earth-aerial reference gallery"
+						aria-label="Open the DTE-aerial-bench reference gallery"
 					>
 						<div className="grid grid-cols-3 gap-px bg-gray-200 sm:grid-cols-6">
 							{previewSites.map((site, index) => {
@@ -149,12 +149,12 @@ const ReferenceDatasetsSection = () => {
 							<Link
 								to={`/reference-datasets/${dteAerialReferenceDataset.slug}`}
 								onClick={trackCta(
-									"home_open_dte_aerial_gallery",
+									"home_open_dte_aerial_bench_gallery",
 									`/reference-datasets/${dteAerialReferenceDataset.slug}`,
 								)}
 								className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#1B5E35] hover:underline"
 							>
-								Open DTE-aerial gallery
+								Open DTE-aerial-bench gallery
 								<ArrowRightOutlined />
 							</Link>
 						</div>

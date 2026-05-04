@@ -62,13 +62,16 @@ const sortOptions: Array<{ label: string; value: SortKey }> = [
   { label: "North to south", value: "north-south" },
 ];
 
-const getShortBiome = (biome: string) =>
-  biome
-    .replace("Tropical and Subtropical", "Tropical")
-    .replace("Mediterranean Forests, Woodlands, and Scrub", "Mediterranean")
-    .replace("Temperate Broadleaf and Mixed Forests", "Temperate broadleaf")
-    .replace("Temperate Coniferous Forests", "Temperate conifer")
-    .replace("Boreal Forests/Taiga", "Boreal");
+const getCoarseBiomeGroup = (biome: string) => {
+  const normalized = biome.toLowerCase();
+  if (normalized.includes("tropical")) return "(Sub)tropical";
+  if (normalized.includes("mediterranean")) return "Drylands";
+  if (normalized.includes("boreal") || normalized.includes("montane")) {
+    return "Boreal and montane";
+  }
+  if (normalized.includes("temperate")) return "Temperate";
+  return biome;
+};
 
 const makeThumbnailUrl = (site: ReferenceDatasetSite) =>
   `https://data2.deadtrees.earth/thumbnails/v1/${site.thumbnailPath}`;
@@ -142,7 +145,11 @@ const sortSites = (sites: ReferenceDatasetSite[], sortKey: SortKey) => {
   const sorted = [...sites];
 
   if (sortKey === "biome") {
-    return sorted.sort((a, b) => a.biome.localeCompare(b.biome) || a.id - b.id);
+    return sorted.sort(
+      (a, b) =>
+        getCoarseBiomeGroup(a.biome).localeCompare(getCoarseBiomeGroup(b.biome)) ||
+        a.id - b.id,
+    );
   }
 
   if (sortKey === "west-east") {
@@ -185,7 +192,7 @@ function WorldSiteMap({ sites }: { sites: ReferenceDatasetSite[] }) {
         const feature = new Feature({
           geometry: new Point(fromLonLat([site.center.lon, site.center.lat])),
           datasetId: site.id,
-          biome: getShortBiome(site.biome),
+          biome: getCoarseBiomeGroup(site.biome),
         });
         feature.setStyle(defaultMarkerStyle);
         return feature;
@@ -353,12 +360,12 @@ function PatchModalViewer({
 
   const { site, patch } = selection;
   const location = formatDatasetLocationLabels(adminInfo, false);
-  const shortBiome = getShortBiome(site.biome);
+  const coarseBiome = getCoarseBiomeGroup(site.biome);
   const capturedDate = formatAcquisitionDate(adminInfo, false);
   const subtitleParts = [
     location.primary !== "Location unavailable" ? location.primary : null,
     location.secondary,
-    shortBiome,
+    coarseBiome,
     capturedDate !== "Unknown" ? capturedDate : null,
   ].filter(Boolean) as string[];
 
@@ -508,7 +515,7 @@ function DatasetAdminCell({
   const location = formatDatasetLocationLabels(adminInfo, isAdminInfoLoading);
   const capturedDate = formatAcquisitionDate(adminInfo, isAdminInfoLoading);
   const platform = formatPlatform(adminInfo?.platform, isAdminInfoLoading);
-  const shortBiome = getShortBiome(site.biome);
+  const coarseBiome = getCoarseBiomeGroup(site.biome);
   const authors = (adminInfo?.authors ?? []).filter((author): author is string =>
     Boolean(author && author.trim().length > 0),
   );
@@ -529,7 +536,7 @@ function DatasetAdminCell({
         </div>
         <div className="absolute bottom-2 left-2 right-2">
           <span className="inline-flex max-w-full items-center rounded-md bg-white/95 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#1B5E35] shadow-sm">
-            <span className="truncate">{shortBiome}</span>
+            <span className="truncate">{coarseBiome}</span>
           </span>
         </div>
       </div>
@@ -758,7 +765,8 @@ export default function DteAerialReferenceDataset() {
   const biomeCounts = useMemo(() => {
     const counts = new Map<string, number>();
     collection.sites.forEach((site) => {
-      counts.set(getShortBiome(site.biome), (counts.get(getShortBiome(site.biome)) ?? 0) + 1);
+      const biomeGroup = getCoarseBiomeGroup(site.biome);
+      counts.set(biomeGroup, (counts.get(biomeGroup) ?? 0) + 1);
     });
     return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
   }, [collection.sites]);
@@ -830,7 +838,7 @@ export default function DteAerialReferenceDataset() {
           <div className="rounded-lg border border-gray-200 bg-white p-5">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
               <GlobalOutlined />
-              Biome coverage
+              Coarse biome coverage
             </div>
             <div className="mt-4 space-y-2.5">
               {biomeCounts.map(([biome, count]) => (
