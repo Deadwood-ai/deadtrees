@@ -1,9 +1,7 @@
 import {
-  BookOutlined,
   CalendarOutlined,
   DatabaseOutlined,
   DownloadOutlined,
-  FileTextOutlined,
   GlobalOutlined,
   LeftOutlined,
   RightOutlined,
@@ -802,25 +800,6 @@ export default function DteAerialReferenceDataset() {
               >
                 Download dataset
               </Button>
-              <Button
-                size="large"
-                icon={<BookOutlined />}
-                href={collection.links.citation}
-                className="min-h-11"
-              >
-                Citation
-              </Button>
-              <Button
-                size="large"
-                icon={<FileTextOutlined />}
-                href={collection.links.croissant}
-                className="min-h-11"
-              >
-                Croissant metadata
-              </Button>
-              <span className="inline-flex items-center rounded-full bg-[#E8F3EB] px-3 py-1 text-xs font-bold uppercase tracking-wide text-[#1B5E35]">
-                Coming soon
-              </span>
             </div>
           </div>
 
@@ -958,59 +937,30 @@ export default function DteAerialReferenceDataset() {
         </div>
       </section>
 
-      <section className="border-t border-gray-200 bg-white">
+      <section
+        id="dataset-download-placeholder"
+        className="border-t border-gray-200 bg-white"
+      >
         <div className="mx-auto max-w-7xl px-4 py-16 md:px-8 md:py-20">
-          <div className="mb-8 max-w-3xl">
+          <div className="max-w-3xl">
             <p className="m-0 text-sm font-semibold uppercase tracking-wider text-[#1B5E35]">
               Release artifacts
             </p>
             <h2 className="m-0 mt-3 text-3xl font-semibold leading-tight text-gray-950 md:text-4xl">
-              What you'll be able to download
+              Dataset package
             </h2>
             <p className="mt-3 text-base leading-7 text-gray-600">
-              The gallery above is the live preview of the dataset. The official release will bundle the patches with metadata, citation, and machine-readable schemas.
+              The gallery above is the live preview of the dataset. The final release link will point to the dataset package once the Hugging Face upload is available.
             </p>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-3">
-            {[
-              {
-                icon: <DatabaseOutlined className="text-xl text-[#1B5E35]" />,
-                title: "Dataset package",
-                description:
-                  "RGB patches and reference masks at 5, 10, and 20 cm, packaged for Hugging Face and FreiData.",
-              },
-              {
-                icon: <BookOutlined className="text-xl text-[#1B5E35]" />,
-                title: "Citation",
-                description:
-                  "Paper citation, DOI, BibTeX entry, and per-site attribution following CC BY.",
-              },
-              {
-                icon: <FileTextOutlined className="text-xl text-[#1B5E35]" />,
-                title: "Croissant metadata",
-                description:
-                  "Machine-readable schema describing splits, fields, and responsible AI considerations.",
-              },
-            ].map((card) => (
-              <div
-                key={card.title}
-                className="flex flex-col rounded-2xl border border-gray-200 bg-white p-6 transition-shadow hover:shadow-sm"
-              >
-                <div className="flex items-center justify-between">
-                  {card.icon}
-                  <span className="inline-flex items-center rounded-full bg-[#E8F3EB] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#1B5E35]">
-                    Coming soon
-                  </span>
-                </div>
-                <h3 className="m-0 mt-4 text-lg font-semibold text-gray-950">
-                  {card.title}
-                </h3>
-                <p className="mt-2 text-sm leading-6 text-gray-600">
-                  {card.description}
-                </p>
-              </div>
-            ))}
+            <Button
+              type="primary"
+              size="large"
+              icon={<DatabaseOutlined />}
+              href={collection.links.dataset}
+              className="mt-6 min-h-11"
+            >
+              Download dataset
+            </Button>
           </div>
         </div>
       </section>

@@ -46,8 +46,6 @@ export interface ReferenceDatasetCollection {
   stats: Array<{ label: string; value: string }>;
   links: {
     dataset: string;
-    citation: string;
-    croissant: string;
   };
   sites: ReferenceDatasetSite[];
 }
@@ -400,8 +398,6 @@ export const dteAerialReferenceDataset: ReferenceDatasetCollection = {
   ],
   links: {
     dataset: "#dataset-download-placeholder",
-    citation: "#citation-placeholder",
-    croissant: "#croissant-placeholder",
   },
   sites: [
     {
