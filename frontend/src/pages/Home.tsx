@@ -3,6 +3,7 @@ import { Collapse } from "antd";
 
 import Hero from "../components/Home/Hero";
 import HowItWorks from "../components/Home/HowItWorks";
+import ReferenceDatasetsSection from "../components/Home/ReferenceDatasets";
 import PlatformFeatures from "../components/Home/PlatformFeatures";
 import GetInContact from "../components/Home/GetInContact";
 
@@ -194,6 +195,7 @@ export default function HomePage() {
     <div className="w-full bg-white">
       <Hero />
       <HowItWorks />
+      <ReferenceDatasetsSection />
       <PlatformFeatures />
       <GetInContact />
       <FAQ />
