@@ -17,8 +17,8 @@ import DatasetReferencePatchEditor from "./pages/DatasetReferencePatchEditor";
 import DatasetLabelEditor from "./pages/DatasetLabelEditor";
 import DatasetCorrections from "./pages/DatasetCorrections";
 import Deadtrees from "./pages/Deadtrees";
-import ReferenceDatasets from "./pages/ReferenceDatasets";
-import DteAerialReferenceDataset from "./pages/DteAerialReferenceDataset";
+import BenchmarkDatasets from "./pages/BenchmarkDatasets";
+import DteAerialBenchmarkDataset from "./pages/DteAerialBenchmarkDataset";
 import SignUp from "./pages/auth/SignUp";
 import SignIn from "./pages/auth/SignIn";
 import Forgotpassword from "./pages/auth/ForgotPassword";
@@ -78,6 +78,23 @@ function LayoutWrapper() {
   );
 }
 
+function RouteScrollRestoration() {
+  const { pathname, hash } = useLocation();
+
+  useEffect(() => {
+    if (hash) {
+      requestAnimationFrame(() => {
+        document.getElementById(hash.slice(1))?.scrollIntoView();
+      });
+      return;
+    }
+
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [pathname, hash]);
+
+  return null;
+}
+
 // Create a separate component for tracking that uses hooks
 function AppWithTracking() {
   const location = useLocation();
@@ -93,79 +110,107 @@ function AppWithTracking() {
   }, [location]);
 
   return (
-    <Routes>
-      <Route path="/" element={<LayoutWrapper />}>
-        <Route path="/" element={<HomePage />} />
-        <Route
-          path="profile"
-          element={
-            <RequireAuth>
-              <ProfilePage />
-            </RequireAuth>
-          }
-        />
-        <Route path="dataset" element={<Dataset />} />
-        <Route path="dataset/:id" element={<DatasetDetails />} />
-        <Route path="dataset-audit" element={<DatasetAudit />} />
-        <Route path="dataset-audit/:id" element={<DatasetAudit />} />
-        {/* New route for Reference Patch Editor */}
-        <Route
-          path="dataset-audit/:id/reference-patches"
-          element={<DatasetReferencePatchEditor />}
-        />
-        {/* Old route kept for backward compatibility */}
-        <Route path="dataset-audit/:id/ml-tiles" element={<DatasetMLTiles />} />
-        <Route path="dataset-label/:id" element={<DatasetLabelEditor />} />
-        {/* Public labelling / corrections editor */}
-        <Route
-          path="dataset-corrections/:id"
-          element={<DatasetCorrections />}
-        />
-        <Route path="deadtrees" element={<Deadtrees />} />
-        <Route path="reference-datasets" element={<ReferenceDatasets />} />
-        <Route
-          path="reference-datasets/dte-aerial-bench"
-          element={<DteAerialReferenceDataset />}
-        />
-        <Route
-          path="reference-datasets/dte-aerial"
-          element={<Navigate to="/reference-datasets/dte-aerial-bench" replace />}
-        />
-        <Route
-          path="DTE-aerial"
-          element={<Navigate to="/reference-datasets/dte-aerial-bench" replace />}
-        />
-        <Route
-          path="DTE-aerial-bench"
-          element={<Navigate to="/reference-datasets/dte-aerial-bench" replace />}
-        />
-        <Route path="about" element={<About />} />
-        <Route path="impressum" element={<Impressum />} />
-        <Route
-          path="datenschutzerklaerung"
-          element={<Datenschutzerklaerung />}
-        />
-        <Route path="terms-of-service" element={<TermsOfService />} />
-        <Route
-          path="sign-up"
-          element={
-            <PublicOnly>
-              <SignUp />
-            </PublicOnly>
-          }
-        />
-        <Route
-          path="sign-in"
-          element={
-            <PublicOnly>
-              <SignIn />
-            </PublicOnly>
-          }
-        />
-        <Route path="forgot-password" element={<Forgotpassword />} />
-        <Route path="reset-password" element={<ResetPassword />} />
-      </Route>
-    </Routes>
+    <>
+      <RouteScrollRestoration />
+      <Routes>
+        <Route path="/" element={<LayoutWrapper />}>
+          <Route path="/" element={<HomePage />} />
+          <Route
+            path="profile"
+            element={
+              <RequireAuth>
+                <ProfilePage />
+              </RequireAuth>
+            }
+          />
+          <Route path="dataset" element={<Dataset />} />
+          <Route path="dataset/:id" element={<DatasetDetails />} />
+          <Route path="dataset-audit" element={<DatasetAudit />} />
+          <Route path="dataset-audit/:id" element={<DatasetAudit />} />
+          {/* New route for Reference Patch Editor */}
+          <Route
+            path="dataset-audit/:id/reference-patches"
+            element={<DatasetReferencePatchEditor />}
+          />
+          {/* Old route kept for backward compatibility */}
+          <Route
+            path="dataset-audit/:id/ml-tiles"
+            element={<DatasetMLTiles />}
+          />
+          <Route path="dataset-label/:id" element={<DatasetLabelEditor />} />
+          {/* Public labelling / corrections editor */}
+          <Route
+            path="dataset-corrections/:id"
+            element={<DatasetCorrections />}
+          />
+          <Route path="deadtrees" element={<Deadtrees />} />
+          <Route path="benchmark-datasets" element={<BenchmarkDatasets />} />
+          <Route
+            path="benchmark-datasets/dte-aerial-bench"
+            element={<DteAerialBenchmarkDataset />}
+          />
+          <Route
+            path="benchmark-datasets/dte-aerial"
+            element={
+              <Navigate to="/benchmark-datasets/dte-aerial-bench" replace />
+            }
+          />
+          <Route
+            path="reference-datasets"
+            element={<Navigate to="/benchmark-datasets" replace />}
+          />
+          <Route
+            path="reference-datasets/dte-aerial-bench"
+            element={
+              <Navigate to="/benchmark-datasets/dte-aerial-bench" replace />
+            }
+          />
+          <Route
+            path="reference-datasets/dte-aerial"
+            element={
+              <Navigate to="/benchmark-datasets/dte-aerial-bench" replace />
+            }
+          />
+          <Route
+            path="DTE-aerial"
+            element={
+              <Navigate to="/benchmark-datasets/dte-aerial-bench" replace />
+            }
+          />
+          <Route
+            path="DTE-aerial-bench"
+            element={
+              <Navigate to="/benchmark-datasets/dte-aerial-bench" replace />
+            }
+          />
+          <Route path="about" element={<About />} />
+          <Route path="impressum" element={<Impressum />} />
+          <Route
+            path="datenschutzerklaerung"
+            element={<Datenschutzerklaerung />}
+          />
+          <Route path="terms-of-service" element={<TermsOfService />} />
+          <Route
+            path="sign-up"
+            element={
+              <PublicOnly>
+                <SignUp />
+              </PublicOnly>
+            }
+          />
+          <Route
+            path="sign-in"
+            element={
+              <PublicOnly>
+                <SignIn />
+              </PublicOnly>
+            }
+          />
+          <Route path="forgot-password" element={<Forgotpassword />} />
+          <Route path="reset-password" element={<ResetPassword />} />
+        </Route>
+      </Routes>
+    </>
   );
 }
 

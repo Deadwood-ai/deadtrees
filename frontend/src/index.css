@@ -139,36 +139,36 @@
   animation-play-state: paused;
 }
 
-/* Reference dataset gallery: force scrollbars to be always visible so the
+/* Benchmark dataset gallery: force scrollbars to be always visible so the
  * 2-axis scroll (datasets vertically, patches horizontally) is discoverable
  * even on macOS where overlay scrollbars hide by default. */
-.reference-gallery-scroll {
+.benchmark-gallery-scroll {
   scrollbar-gutter: stable;
   scrollbar-color: rgba(27, 94, 53, 0.45) rgba(207, 216, 210, 0.6);
   scrollbar-width: thin;
 }
 
-.reference-gallery-scroll::-webkit-scrollbar {
+.benchmark-gallery-scroll::-webkit-scrollbar {
   width: 12px;
   height: 12px;
   background-color: rgba(207, 216, 210, 0.6);
 }
 
-.reference-gallery-scroll::-webkit-scrollbar-track {
+.benchmark-gallery-scroll::-webkit-scrollbar-track {
   background-color: rgba(207, 216, 210, 0.6);
 }
 
-.reference-gallery-scroll::-webkit-scrollbar-thumb {
+.benchmark-gallery-scroll::-webkit-scrollbar-thumb {
   background-color: rgba(27, 94, 53, 0.45);
   border: 2px solid rgba(207, 216, 210, 0.6);
   border-radius: 999px;
 }
 
-.reference-gallery-scroll::-webkit-scrollbar-thumb:hover {
+.benchmark-gallery-scroll::-webkit-scrollbar-thumb:hover {
   background-color: rgba(27, 94, 53, 0.7);
 }
 
-.reference-gallery-scroll::-webkit-scrollbar-corner {
+.benchmark-gallery-scroll::-webkit-scrollbar-corner {
   background-color: rgba(207, 216, 210, 0.6);
 }
 

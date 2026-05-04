@@ -9,6 +9,7 @@ ml_ready_tiles/*
 /reports/*
 /tmp/*
 /docs/projects/paper
+/docs/papers/
 /scratchpad/*
 # docs/projects/*
 freidata/freidata.env
