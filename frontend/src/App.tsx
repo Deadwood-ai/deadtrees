@@ -1,4 +1,4 @@
-import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
+import { Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { ConfigProvider, Layout } from "antd";
 import { useEffect } from "react";
 import { trackPageView, initializePostHog } from "./utils/analytics";
@@ -95,12 +95,6 @@ function RouteScrollRestoration() {
   return null;
 }
 
-function LegacyRedirect({ to }: { to: string }) {
-  const { search, hash } = useLocation();
-
-  return <Navigate to={`${to}${search}${hash}`} replace />;
-}
-
 // Create a separate component for tracking that uses hooks
 function AppWithTracking() {
   const location = useLocation();
@@ -154,38 +148,6 @@ function AppWithTracking() {
           <Route
             path="benchmark-datasets/dte-aerial-bench"
             element={<DteAerialBenchmarkDataset />}
-          />
-          <Route
-            path="benchmark-datasets/dte-aerial"
-            element={<LegacyRedirect to="/benchmark-datasets/dte-aerial-bench" />}
-          />
-          <Route
-            path="reference-datasets"
-            element={<LegacyRedirect to="/benchmark-datasets" />}
-          />
-          <Route
-            path="reference-datasets/dte-aerial-bench"
-            element={
-              <LegacyRedirect to="/benchmark-datasets/dte-aerial-bench" />
-            }
-          />
-          <Route
-            path="reference-datasets/dte-aerial"
-            element={
-              <LegacyRedirect to="/benchmark-datasets/dte-aerial-bench" />
-            }
-          />
-          <Route
-            path="DTE-aerial"
-            element={
-              <LegacyRedirect to="/benchmark-datasets/dte-aerial-bench" />
-            }
-          />
-          <Route
-            path="DTE-aerial-bench"
-            element={
-              <LegacyRedirect to="/benchmark-datasets/dte-aerial-bench" />
-            }
           />
           <Route path="about" element={<About />} />
           <Route path="impressum" element={<Impressum />} />
