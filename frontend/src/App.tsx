@@ -95,6 +95,12 @@ function RouteScrollRestoration() {
   return null;
 }
 
+function LegacyRedirect({ to }: { to: string }) {
+  const { search, hash } = useLocation();
+
+  return <Navigate to={`${to}${search}${hash}`} replace />;
+}
+
 // Create a separate component for tracking that uses hooks
 function AppWithTracking() {
   const location = useLocation();
@@ -151,36 +157,34 @@ function AppWithTracking() {
           />
           <Route
             path="benchmark-datasets/dte-aerial"
-            element={
-              <Navigate to="/benchmark-datasets/dte-aerial-bench" replace />
-            }
+            element={<LegacyRedirect to="/benchmark-datasets/dte-aerial-bench" />}
           />
           <Route
             path="reference-datasets"
-            element={<Navigate to="/benchmark-datasets" replace />}
+            element={<LegacyRedirect to="/benchmark-datasets" />}
           />
           <Route
             path="reference-datasets/dte-aerial-bench"
             element={
-              <Navigate to="/benchmark-datasets/dte-aerial-bench" replace />
+              <LegacyRedirect to="/benchmark-datasets/dte-aerial-bench" />
             }
           />
           <Route
             path="reference-datasets/dte-aerial"
             element={
-              <Navigate to="/benchmark-datasets/dte-aerial-bench" replace />
+              <LegacyRedirect to="/benchmark-datasets/dte-aerial-bench" />
             }
           />
           <Route
             path="DTE-aerial"
             element={
-              <Navigate to="/benchmark-datasets/dte-aerial-bench" replace />
+              <LegacyRedirect to="/benchmark-datasets/dte-aerial-bench" />
             }
           />
           <Route
             path="DTE-aerial-bench"
             element={
-              <Navigate to="/benchmark-datasets/dte-aerial-bench" replace />
+              <LegacyRedirect to="/benchmark-datasets/dte-aerial-bench" />
             }
           />
           <Route path="about" element={<About />} />
