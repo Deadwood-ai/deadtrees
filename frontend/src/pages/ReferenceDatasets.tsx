@@ -1,4 +1,4 @@
-import { ArrowRightOutlined, DatabaseOutlined } from "@ant-design/icons";
+import { DatabaseOutlined } from "@ant-design/icons";
 import { Button, Tag } from "antd";
 import { useNavigate } from "react-router-dom";
 
@@ -100,17 +100,7 @@ function FeaturedCollectionCard({
               className="min-h-11"
               disabled={!isAvailable}
             >
-              Open gallery
-            </Button>
-            <Button
-              type="link"
-              size="large"
-              icon={<ArrowRightOutlined />}
-              onClick={onOpen}
-              className="px-0 font-semibold text-[#1B5E35]"
-              disabled={!isAvailable}
-            >
-              See all {collection.sites.length} sites
+              Open DTE-aerial
             </Button>
           </div>
         </div>
