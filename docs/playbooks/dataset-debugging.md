@@ -74,28 +74,22 @@ Remember: ortho file size values are MB, not bytes.
 
 ## Reference Export Checks
 
-For user reports about reference/training tile counts, stale public reference
-downloads, or files under `/reference/{uuid}/{dataset_id}/...`, compare the
-database patch set with the public export artifacts before changing data.
-
-Count current validated patches in production:
+For reference/training tile count reports under
+`/reference/{uuid}/{dataset_id}/...`, compare current DB patches with public
+export artifacts before changing data:
 
 ```sql
 select
 	resolution_cm,
 	count(*) as total,
 	count(*) filter (where parent_tile_id is null) as roots,
-	count(*) filter (where parent_tile_id is not null) as children,
-	count(*) filter (where deadwood_validated is true) as deadwood_validated,
-	count(*) filter (where forest_cover_validated is true) as forest_cover_validated,
 	max(updated_at) as max_updated_at
 from reference_patches
 where dataset_id = :dataset_id
+  and (deadwood_validated is true or forest_cover_validated is true)
 group by resolution_cm
 order by resolution_cm desc;
 ```
-
-Then compare against the public export directory listing:
 
 ```bash
 curl -fsSL "https://data2.deadtrees.earth/reference/${REFERENCE_EXPORT_UUID}/${DATASET_ID}/metadata/" \
@@ -103,11 +97,9 @@ curl -fsSL "https://data2.deadtrees.earth/reference/${REFERENCE_EXPORT_UUID}/${D
   | sort
 ```
 
-If the database count is correct but public files are higher, suspect stale
-export artifacts rather than duplicate database rows. The reference exporter is
-responsible for deleting generated patch files that no longer correspond to
-current `reference_patches` rows; do not manually delete production files unless
-the user explicitly approves that intervention.
+If DB counts are correct but public files are higher, suspect stale generated
+export artifacts. Do not manually delete production files without explicit user
+approval.
 
 ## Queue
 
