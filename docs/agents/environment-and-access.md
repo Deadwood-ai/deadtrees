@@ -1,0 +1,115 @@
+# Environment And Access Model
+
+This file defines where agent-facing rules, app env, local access notes, and
+credentials belong. It intentionally contains no real secrets.
+
+## File Classes
+
+| Class | Examples | Tracked? | May contain real secrets? |
+| --- | --- | --- | --- |
+| Agent rules | `AGENTS.md`, `frontend/AGENTS.md`, `docs/agents/*.md` | yes | no |
+| Safe playbooks | `docs/playbooks/*.md` | yes | no |
+| Local ops notes | `docs/ops/*`, `.codex/local-access.md` | no | yes |
+| Codex MCP config | `.codex/config.toml` | no | yes |
+| Backend/runtime env | `.env` | no | yes |
+| Backend/runtime example | `.env.example` | yes | no |
+| Frontend local profiles | `frontend/.env.dev.local`, `frontend/.env.prod.local` | no | public client keys only |
+| Frontend example | `frontend/.env.local.example` | yes | no |
+| Local keys/assets | `.local/`, `assets/`, `data/` | no | yes or large data |
+
+## Root `.env`
+
+Use root `.env` for application/runtime variables loaded by Docker Compose,
+`python-dotenv`, and `shared.settings`.
+
+Expected app/runtime keys include:
+
+- `ENV`
+- `DEV_MODE`
+- `COMPOSE_PROJECT_NAME`
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `PROCESSOR_PASSWORD`
+- `STORAGE_SERVER_USERNAME`
+- `STORAGE_SERVER_DATA_PATH`
+- `SSH_PRIVATE_KEY_PASSPHRASE`
+- `DEADTREES_USER`
+- `DEADTREES_PASSWORD`
+- `REFERENCE_EXPORT_UUID`
+- `NGINX_COG_URL`
+- `LOGFIRE_TOKEN`
+- `POSTHOG_API_KEY`
+- `POSTHOG_PROJECT_ID`
+- `POSTHOG_HOST`
+- `ZULIP_EMAIL`
+- `ZULIP_API_KEY`
+- `ZULIP_SITE`
+- `ZULIP_STREAM`
+- `ZULIP_TOPIC`
+- `LINEAR_ENABLED`
+- `LINEAR_API_KEY`
+- `LINEAR_TEAM_ID`
+- `FREIDATA_TOKEN`
+- `BREVO_API_KEY`
+
+Do not add VPN passwords, manual SSH passwords, personal tokens, or explanatory
+access notes to root `.env`. Put those in local-only access notes or the user
+machine's secure credential store.
+
+## Frontend Env
+
+Vite exposes `VITE_*` values to browser code. Only browser-safe public client
+configuration belongs in `frontend/.env*`.
+
+Use:
+
+- `frontend/.env.dev.local` for local Supabase/API development
+- `frontend/.env.prod.local` for a local frontend pointed at production services
+- `frontend/.env.local.example` as the tracked key schema
+
+Never put service-role keys, SSH credentials, VPN credentials, MCP bearer tokens,
+or private API keys in frontend env files.
+
+## Codex Local Files
+
+`.codex/config.toml` is for repo-local MCP/server configuration and may contain
+database URLs or bearer tokens. It is ignored and should remain local.
+
+`.codex/local-access.md` is for Codex-specific access notes that future local
+Codex sessions can read. It may contain credentials, so it must stay ignored.
+
+When inspecting either file, report only the presence, purpose, and line numbers
+of risks. Do not print credential values.
+
+## Human Access Notes
+
+`docs/ops/*` is local-only operational documentation. It can contain machine
+names, private access workflows, passwords, or links to restricted docs.
+
+Safe tracked docs may point to `docs/ops/*`, but must not copy credentials out of
+that directory.
+
+## Worktrees
+
+`scripts/setup-worktree.sh` copies ignored local files from the primary checkout
+when available:
+
+- `.codex/config.toml`
+- `.codex/local-access.md`
+- `.codex/environments`
+- `docs/ops`
+- frontend env profiles
+
+This keeps new Codex worktrees usable without committing secrets. If a copied
+local file is stale, update the primary checkout's local-only file rather than
+adding secrets to tracked docs.
+
+## Secret Hygiene
+
+- Redact command output that includes `password`, `token`, `secret`, `key`,
+  `Authorization`, or database URLs.
+- Avoid broad `codex mcp list` or config dumps unless output is capped and redacted.
+- Rotate credentials if they were printed into an agent session, shared log, PR,
+  or tracked file.

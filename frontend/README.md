@@ -46,12 +46,12 @@ The frontend provides:
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev:local
 ```
 
 By default, Vite serves at `http://localhost:5173`.
 
-Preferred profile-based commands:
+Profile-based commands:
 
 ```bash
 cd frontend

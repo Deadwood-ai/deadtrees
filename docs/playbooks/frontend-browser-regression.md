@@ -65,7 +65,9 @@ Use Browser Use with the Codex in-app browser, not an external browser, unless t
    - PostHog or analytics initialization errors
 5. Keep the session logged in only as long as needed. Sign out or close the tab when finished if the browser session will be reused.
 
-Use the dedicated live test account from the repo-local agent instructions for normal auth checks. If those credentials are not available in the session, ask the user for a test account. Do not use a personal account unless the user explicitly asks for it.
+Use the dedicated live test account from local-only access notes if available. If
+those credentials are not available in the session, ask the user for a test
+account. Do not use a personal account unless the user explicitly asks for it.
 
 ## Core Smoke Flow
 

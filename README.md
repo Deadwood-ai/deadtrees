@@ -88,12 +88,12 @@ pip install -e ./deadtrees-cli[test]
 
 npm --prefix frontend ci
 cp .env.example .env
-cp frontend/.env.local.example frontend/.env.local
+cp frontend/.env.local.example frontend/.env.dev.local
 
 supabase start
 make download-assets
 deadtrees dev start
-npm --prefix frontend run dev
+npm --prefix frontend run dev:local
 ```
 
 After that:
@@ -101,6 +101,7 @@ After that:
 - frontend: `http://127.0.0.1:5173`
 - API: `http://127.0.0.1:8080/api/v1/`
 - full API suite: `deadtrees dev test api`
+- agent rules: `AGENTS.md` and `docs/agents/README.md`
 
 If you also want the processor test path on a new machine:
 

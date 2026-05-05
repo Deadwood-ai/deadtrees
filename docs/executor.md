@@ -48,7 +48,7 @@ Before starting any implementation:
    git submodule update --init --recursive    # REQUIRED on fresh clones
    source venv/bin/activate               # REQUIRED: Activate virtual environment first
    cp .env.example .env                   # If .env does not exist yet
-   cp frontend/.env.local.example frontend/.env.local  # If frontend env is missing
+   cp frontend/.env.local.example frontend/.env.dev.local  # If frontend env is missing
    supabase start                         # Start local Supabase first
    make download-assets                   # Download required local fixtures and assets
    make setup-local-test-ssh              # Required before processor integration tests

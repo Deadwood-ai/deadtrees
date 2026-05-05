@@ -14,8 +14,8 @@ Quick guide for researchers to upload drone orthophoto data to the DeadTrees pla
 ### 1. Install CLI Package
 
 ```bash
-git clone https://github.com/deadtrees/deadwood-api.git
-cd deadwood-api/deadtrees-cli
+git clone https://github.com/Deadwood-ai/deadtrees.git
+cd deadtrees/deadtrees-cli
 pip install -e .
 ```
 

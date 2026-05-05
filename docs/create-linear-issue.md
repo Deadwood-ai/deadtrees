@@ -1,6 +1,6 @@
 # Linear Issue Template
 
-Use this template when creating new issues in Linear for the 3D Trees project.
+Use this template when creating new issues in Linear for the DeadTrees project.
 
 ## Issue Title
 
@@ -83,11 +83,11 @@ Use this template when creating new issues in Linear for the 3D Trees project.
 
 Before creating issues, gather necessary context:
 
-- **Database Schema:** Use `mcp_3dtrees-dev_list_schemas()` and `mcp_3dtrees-dev_get_object_details()` for table structures
-- **Key Tables:** `datasets`, `las_metadata`, `dataset_processing_status`, `dataset_history`, `datacite`
-- **Codebase:** Use `codebase_search()` to understand current implementation patterns
-- **Upload Flow:** Check `src/components/dataset-upload-modal.tsx`, `src/services/upload-service.ts`
-- **Database Operations:** Review `src/services/database-service.ts` for existing patterns
+- **Database Schema:** Use the configured Supabase/Postgres MCP or local Supabase CLI to inspect tables.
+- **Key Tables:** `v2_datasets`, `v2_statuses`, `v2_queue`, `v2_logs`, `v2_labels`, `v2_orthos`
+- **Codebase:** Use `rg` and existing module patterns before proposing work.
+- **Upload Flow:** Check `frontend/src/components/Upload/`, `api/src/routers/upload.py`, and `api/src/upload/`.
+- **Database Operations:** Review `shared/db.py`, `shared/models.py`, and existing migrations.
 
 ### MCP Issue Management Workflow
 
@@ -95,14 +95,13 @@ Before creating a new issue, always check for existing similar issues:
 
 1. **Search for existing issues:**
 
-   ```
-   mcp_linear_list_issues({"query": "relevant keywords", "projectId": "project-id"})
-   ```
+   Search Linear for relevant keywords in the DeadTrees workspace/project.
 
 2. **If similar issue exists:**
    - Update the existing issue instead of creating a duplicate
-   - Use `mcp_linear_update_issue()` to add new requirements or details
-   - **Status Management:** Move to "Todo" or "Backlog" (never leave in "Triage")
+   - Update the existing Linear issue with new requirements or details
+   - **Status Management:** Keep new or updated agent-discovered issues in `Triage`
+     unless the user explicitly asks to move them.
 
 3. **Project Assignment:**
    - Always assign issues to the appropriate project
@@ -110,9 +109,10 @@ Before creating a new issue, always check for existing similar issues:
    - If unclear which project, ask the user explicitly
 
 4. **Status Guidelines:**
-   - **New issues:** Start in "Todo" for immediate work or "Backlog" for future planning
-   - **Updated issues:** Move from "Triage" to "Todo" or "Backlog"
-   - **Avoid "Triage"** - only use temporarily during issue creation/review
+   - **New agent-created issues:** Start in `Triage` for human review.
+   - **Updated issues:** Do not move status unless the user explicitly asks or the
+     current task is specifically Linear triage.
+   - **Assignment:** Leave `Triage` and `Backlog` items unassigned unless the user says otherwise.
 
 5. **Label Assignment:**
    - **Always assign appropriate labels** when creating issues
@@ -137,7 +137,7 @@ Before creating a new issue, always check for existing similar issues:
 
 ### User Types
 
-Common user types for 3D Trees:
+Common user types for DeadTrees:
 
 - Data manager
 - Forest researcher

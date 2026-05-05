@@ -169,7 +169,7 @@ ensure_frontend_env_profiles() {
     ensure_file_from_example "$REPO_ROOT/frontend/.env.dev.local" "$REPO_ROOT/frontend/.env.local.example"
   fi
 
-  ensure_file_from_example "$REPO_ROOT/frontend/.env.local" "$REPO_ROOT/frontend/.env.local.example"
+  log "Using profile-based frontend env files; not creating frontend/.env.local"
 }
 
 ensure_codex_local_config() {
