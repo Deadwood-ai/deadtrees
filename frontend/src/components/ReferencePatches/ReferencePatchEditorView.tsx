@@ -8,6 +8,7 @@ import {
   useUpdatePatchStatus,
   useUpdatePatchLayerValidation,
   useDeleteReferencePatch,
+  useUpdatePatchGeometry,
 } from "../../hooks/useReferencePatches";
 import { useSaveReferenceGeometries } from "../../hooks/useReferenceGeometries";
 import { clipGeometriesInBatches } from "../../hooks/useReferenceGeometriesBatch";
@@ -70,6 +71,7 @@ export default function ReferencePatchEditorView({
   const { mutateAsync: updateStatus } = useUpdatePatchStatus();
   const { mutateAsync: updateLayerValidation } = useUpdatePatchLayerValidation();
   const { mutateAsync: deletePatch } = useDeleteReferencePatch();
+  const { mutateAsync: updatePatchGeometry } = useUpdatePatchGeometry();
   const { mutateAsync: saveGeometries } = useSaveReferenceGeometries();
 
   // Initialize editor hooks (only when map is ready)
@@ -157,10 +159,7 @@ export default function ReferencePatchEditorView({
     async (parentPatch: IReferencePatch) => {
       const { createUtmSquare, getTargetGroundSize } = await import("../../utils/utm");
 
-      const parentGeom = parentPatch.geometry;
-      const parentCoords = parentGeom.coordinates[0];
-      const [minx, miny] = parentCoords[0];
-      const [maxx, maxy] = parentCoords[2];
+      const { bbox_minx: minx, bbox_miny: miny, bbox_maxx: maxx, bbox_maxy: maxy } = parentPatch;
       const centerX = (minx + maxx) / 2;
       const centerY = (miny + maxy) / 2;
       const halfWidth = (maxx - minx) / 2;
@@ -641,8 +640,31 @@ export default function ReferencePatchEditorView({
           }
         }
 
-        const patchToGenerate =
-          geometryToUse !== basePatch.geometry ? { ...basePatch, geometry: geometryToUse } : basePatch;
+        const { polygonToBBox } = await import("../../utils/utm");
+        const bboxToUse = polygonToBBox(geometryToUse);
+        const bboxChanged =
+          Math.abs(bboxToUse.minx - basePatch.bbox_minx) > 0.001 ||
+          Math.abs(bboxToUse.miny - basePatch.bbox_miny) > 0.001 ||
+          Math.abs(bboxToUse.maxx - basePatch.bbox_maxx) > 0.001 ||
+          Math.abs(bboxToUse.maxy - basePatch.bbox_maxy) > 0.001;
+
+        const patchWithCurrentGeometry: IReferencePatch = {
+          ...basePatch,
+          geometry: geometryToUse,
+          bbox_minx: bboxToUse.minx,
+          bbox_miny: bboxToUse.miny,
+          bbox_maxx: bboxToUse.maxx,
+          bbox_maxy: bboxToUse.maxy,
+        };
+
+        const patchToGenerate = bboxChanged
+          ? await updatePatchGeometry({
+              patchId: basePatch.id,
+              geometry: geometryToUse,
+              bbox: bboxToUse,
+              aoiCoveragePercent: basePatch.aoi_coverage_percent,
+            })
+          : patchWithCurrentGeometry;
 
         // Step 1: Auto-copy model predictions as v1 reference data
         await autoCopyPredictionsAsReference(patchToGenerate);
@@ -688,6 +710,7 @@ export default function ReferencePatchEditorView({
       allPatches,
       getPatchGeometryFromMap,
       autoCopyPredictionsAsReference,
+      updatePatchGeometry,
       refetchPatches,
     ],
   );

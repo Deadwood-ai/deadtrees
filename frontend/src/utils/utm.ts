@@ -154,6 +154,23 @@ export function createUtmSquare(centerX: number, centerY: number, sizeMeters: nu
   };
 }
 
+export function polygonToBBox(geometry: GeoJSON.Polygon): { minx: number; miny: number; maxx: number; maxy: number } {
+  const coords = geometry.coordinates[0] ?? [];
+  if (coords.length === 0) {
+    throw new Error("Cannot calculate bbox for polygon without coordinates");
+  }
+
+  const xs = coords.map(([x]) => x);
+  const ys = coords.map(([, y]) => y);
+
+  return {
+    minx: Math.min(...xs),
+    miny: Math.min(...ys),
+    maxx: Math.max(...xs),
+    maxy: Math.max(...ys),
+  };
+}
+
 /**
  * Transform a GeoJSON Polygon from UTM to Web Mercator
  * @param polygon GeoJSON Polygon in UTM coordinates
