@@ -246,7 +246,7 @@ function PatchModalViewer({
       footer={null}
       title={null}
       onCancel={onClose}
-      destroyOnHidden
+      destroyOnClose
       aria-label={`Dataset ${site.id} ${patch.label} at ${patch.resolutionCm} cm`}
     >
       <div className="space-y-5">

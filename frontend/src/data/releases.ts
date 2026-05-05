@@ -8,6 +8,7 @@ export interface DteAerialSite {
   citationUrl: string | null;
   thumbnailPath: string;
   exportSeed: string;
+  assetVersion?: string;
   center: {
     lon: number;
     lat: number;
@@ -410,6 +411,9 @@ const makeDteAerialPatchBase = (
   return `${dataset.id}_${row}_${column}_5cm`;
 };
 
+const withDteAerialAssetVersion = (url: string, dataset: DteAerialSite) =>
+  `${url}?v=${encodeURIComponent(dataset.assetVersion ?? dataset.exportSeed)}`;
+
 export const getDteAerialPatchImages = (
   dataset: DteAerialSite,
   resolutionCm: DteAerialPatchResolution,
@@ -422,9 +426,15 @@ export const getDteAerialPatchImages = (
     resolutionCm,
     patchIndex,
     label: `Patch ${patchIndex + 1}`,
-    rgb: `${folder}/${base}.png`,
-    treeCoverMask: `${folder}/${base}_forestcover_ref.png`,
-    mortalityMask: `${folder}/${base}_deadwood_ref.png`,
+    rgb: withDteAerialAssetVersion(`${folder}/${base}.png`, dataset),
+    treeCoverMask: withDteAerialAssetVersion(
+      `${folder}/${base}_forestcover_ref.png`,
+      dataset,
+    ),
+    mortalityMask: withDteAerialAssetVersion(
+      `${folder}/${base}_deadwood_ref.png`,
+      dataset,
+    ),
   };
 };
 
@@ -732,6 +742,7 @@ export const dteAerialRelease: DteAerialRelease = {
       citationUrl: "https://data.geonadir.com/image-collection-details/3066",
       thumbnailPath: "1b0d5cff-a5fa-4a97-9af0-e6baeddd4b99/4471_thumbnail.jpg",
       exportSeed: "1768211503784",
+      assetVersion: "2026-05-05T11-48-31Z",
       center: { lon: 173.66067, lat: -41.57676 },
       patchCount: 21,
     },
