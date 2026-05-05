@@ -9,15 +9,16 @@ import { Button, Modal, Segmented, Select, Tag, Tooltip } from "antd";
 import { useCallback, useMemo, useRef, useState, useTransition } from "react";
 
 import {
-  getBenchmarkPatchGridImages,
+  getDteAerialPatchGridImages,
   getCoarseBiomeGroup,
-  type BenchmarkDatasetAdminInfo,
-  type BenchmarkDatasetCollection,
-  type BenchmarkDatasetSite,
-  type BenchmarkPatchImageSet,
-  type BenchmarkPatchResolution,
-} from "../../data/benchmarkDatasets";
-import { GROUND_TRUTH_COLORS, GroundTruthMask } from "./GroundTruthMask";
+  type DteAerialDatasetAdminInfo,
+  type DteAerialRelease,
+  type DteAerialSite,
+  type DteAerialPatchImageSet,
+  type DteAerialPatchResolution,
+} from "../../data/releases";
+import { SegmentationMaskPreview } from "./SegmentationMaskPreview";
+import { MASK_COLORS } from "./maskRendering";
 
 type SortKey = "dataset" | "biome" | "west-east" | "north-south";
 type GalleryResolutionFilter = "all" | "20" | "10" | "5";
@@ -26,9 +27,9 @@ type PatchViewerMode = "rgb" | "overlay" | "mask";
 // One PatchCard width (190px) plus flex gap (12px).
 const GALLERY_PATCH_STEP_PX = 202;
 
-interface SelectedBenchmarkPatch {
-  site: BenchmarkDatasetSite;
-  patch: BenchmarkPatchImageSet;
+interface SelectedDteAerialPatch {
+  site: DteAerialSite;
+  patch: DteAerialPatchImageSet;
 }
 
 const sortOptions: Array<{ label: string; value: SortKey }> = [
@@ -48,7 +49,7 @@ const galleryResolutionOptions: Array<{
   { label: "20", value: "20" },
 ];
 
-const makeThumbnailUrl = (site: BenchmarkDatasetSite) =>
+const makeThumbnailUrl = (site: DteAerialSite) =>
   `https://data2.deadtrees.earth/thumbnails/v1/${site.thumbnailPath}`;
 
 const normalizeMetadataValue = (value?: string | null) => {
@@ -62,7 +63,7 @@ interface DatasetLocationLabels {
 }
 
 const formatDatasetLocationLabels = (
-  adminInfo: BenchmarkDatasetAdminInfo | undefined,
+  adminInfo: DteAerialDatasetAdminInfo | undefined,
   isLoading: boolean,
 ): DatasetLocationLabels => {
   if (!adminInfo) {
@@ -93,7 +94,7 @@ const formatDatasetLocationLabels = (
 };
 
 const formatAcquisitionDate = (
-  adminInfo: BenchmarkDatasetAdminInfo | undefined,
+  adminInfo: DteAerialDatasetAdminInfo | undefined,
   isLoading: boolean,
 ) => {
   if (!adminInfo) return isLoading ? "Loading" : "Unknown";
@@ -126,7 +127,7 @@ const formatPlatform = (
   return normalized.slice(0, 1).toUpperCase() + normalized.slice(1);
 };
 
-const sortSites = (sites: BenchmarkDatasetSite[], sortKey: SortKey) => {
+const sortSites = (sites: DteAerialSite[], sortKey: SortKey) => {
   const sorted = [...sites];
 
   if (sortKey === "biome") {
@@ -167,9 +168,9 @@ function PatchCard({
   patch,
   onSelect,
 }: {
-  site: BenchmarkDatasetSite;
-  patch: BenchmarkPatchImageSet;
-  onSelect: (selection: SelectedBenchmarkPatch) => void;
+  site: DteAerialSite;
+  patch: DteAerialPatchImageSet;
+  onSelect: (selection: SelectedDteAerialPatch) => void;
 }) {
   return (
     <button
@@ -197,12 +198,12 @@ function PatchCard({
       </div>
       <div className="mt-3">
         <div className="mb-1 text-[11px] font-semibold uppercase text-gray-500">
-          Ground truth
+          Mask
         </div>
-        <GroundTruthMask
+        <SegmentationMaskPreview
           forestCoverSrc={patch.treeCoverMask}
           deadwoodSrc={patch.mortalityMask}
-          alt={`Dataset ${site.id} ${patch.label} combined tree cover and mortality ground truth mask at ${patch.resolutionCm} cm`}
+          alt={`Dataset ${site.id} ${patch.label} combined tree cover and mortality mask at ${patch.resolutionCm} cm`}
           size={160}
           className="rounded-md"
         />
@@ -218,8 +219,8 @@ function PatchModalViewer({
   onModeChange,
   onClose,
 }: {
-  selection: SelectedBenchmarkPatch | null;
-  adminInfo: BenchmarkDatasetAdminInfo | undefined;
+  selection: SelectedDteAerialPatch | null;
+  adminInfo: DteAerialDatasetAdminInfo | undefined;
   mode: PatchViewerMode;
   onModeChange: (mode: PatchViewerMode) => void;
   onClose: () => void;
@@ -245,7 +246,7 @@ function PatchModalViewer({
       footer={null}
       title={null}
       onCancel={onClose}
-      destroyOnClose
+      destroyOnHidden
       aria-label={`Dataset ${site.id} ${patch.label} at ${patch.resolutionCm} cm`}
     >
       <div className="space-y-5">
@@ -291,7 +292,7 @@ function PatchModalViewer({
             alt={`Dataset ${site.id} ${patch.label} RGB patch at ${patch.resolutionCm} cm`}
             className="h-full w-full object-cover"
           />
-          <GroundTruthMask
+          <SegmentationMaskPreview
             forestCoverSrc={patch.treeCoverMask}
             deadwoodSrc={patch.mortalityMask}
             alt={`Dataset ${site.id} ${patch.label} tree cover and mortality overlay at ${patch.resolutionCm} cm`}
@@ -307,10 +308,10 @@ function PatchModalViewer({
               mode === "mask" ? "opacity-100" : "opacity-0"
             }`}
           >
-            <GroundTruthMask
+            <SegmentationMaskPreview
               forestCoverSrc={patch.treeCoverMask}
               deadwoodSrc={patch.mortalityMask}
-              alt={`Dataset ${site.id} ${patch.label} ground truth mask at ${patch.resolutionCm} cm`}
+              alt={`Dataset ${site.id} ${patch.label} mask at ${patch.resolutionCm} cm`}
               size={512}
               className="h-full w-full border-0"
             />
@@ -318,7 +319,7 @@ function PatchModalViewer({
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <GroundTruthLegend />
+          <MaskLegend />
           <Button
             type="link"
             size="small"
@@ -334,27 +335,27 @@ function PatchModalViewer({
   );
 }
 
-function GroundTruthLegend() {
+function MaskLegend() {
   return (
     <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-wide">
       <span className="text-gray-500">Legend</span>
       <span className="inline-flex items-center gap-1.5 rounded-md bg-[#BDBDBD]/25 px-2 py-1 text-gray-700">
         <span
           className="h-2.5 w-2.5 rounded-sm"
-          style={{ backgroundColor: GROUND_TRUTH_COLORS.background }}
+          style={{ backgroundColor: MASK_COLORS.background }}
         />
         Background
       </span>
       <span
         className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-white"
-        style={{ backgroundColor: GROUND_TRUTH_COLORS.forestCover }}
+        style={{ backgroundColor: MASK_COLORS.forestCover }}
       >
         <span className="h-2.5 w-2.5 rounded-sm bg-white/90" />
         Tree cover
       </span>
       <span
         className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-white"
-        style={{ backgroundColor: GROUND_TRUTH_COLORS.deadwood }}
+        style={{ backgroundColor: MASK_COLORS.deadwood }}
       >
         <span className="h-2.5 w-2.5 rounded-sm bg-white/90" />
         Mortality
@@ -370,8 +371,8 @@ function DatasetAdminCell({
   resolutionFilter,
   onResolutionChange,
 }: {
-  site: BenchmarkDatasetSite;
-  adminInfo: BenchmarkDatasetAdminInfo | undefined;
+  site: DteAerialSite;
+  adminInfo: DteAerialDatasetAdminInfo | undefined;
   isAdminInfoLoading: boolean;
   resolutionFilter: GalleryResolutionFilter;
   onResolutionChange: (value: GalleryResolutionFilter) => void;
@@ -493,11 +494,11 @@ function DatasetPatchRow({
   onScrollGallery,
   onResolutionChange,
 }: {
-  site: BenchmarkDatasetSite;
+  site: DteAerialSite;
   resolutionFilter: GalleryResolutionFilter;
-  adminInfo: BenchmarkDatasetAdminInfo | undefined;
+  adminInfo: DteAerialDatasetAdminInfo | undefined;
   isAdminInfoLoading: boolean;
-  onSelectPatch: (selection: SelectedBenchmarkPatch) => void;
+  onSelectPatch: (selection: SelectedDteAerialPatch) => void;
   onScrollGallery: (direction: -1 | 1) => void;
   onResolutionChange: (value: GalleryResolutionFilter) => void;
 }) {
@@ -505,13 +506,13 @@ function DatasetPatchRow({
     () =>
       resolutionFilter === "all"
         ? [
-            ...getBenchmarkPatchGridImages(site, 20),
-            ...getBenchmarkPatchGridImages(site, 10),
-            ...getBenchmarkPatchGridImages(site, 5),
+            ...getDteAerialPatchGridImages(site, 20),
+            ...getDteAerialPatchGridImages(site, 10),
+            ...getDteAerialPatchGridImages(site, 5),
           ]
-        : getBenchmarkPatchGridImages(
+        : getDteAerialPatchGridImages(
             site,
-            Number(resolutionFilter) as BenchmarkPatchResolution,
+            Number(resolutionFilter) as DteAerialPatchResolution,
           ),
     [resolutionFilter, site],
   );
@@ -563,22 +564,23 @@ function DatasetPatchRow({
   );
 }
 
-interface DteAerialBenchmarkGalleryProps {
-  collection: BenchmarkDatasetCollection;
-  adminInfoByDatasetId: Map<number, BenchmarkDatasetAdminInfo>;
+interface DteAerialReleaseGalleryProps {
+  release: DteAerialRelease;
+  adminInfoByDatasetId: Map<number, DteAerialDatasetAdminInfo>;
   isAdminInfoLoading: boolean;
 }
 
-export function DteAerialBenchmarkGallery({
-  collection,
+export function DteAerialReleaseGallery({
+  release,
   adminInfoByDatasetId,
   isAdminInfoLoading,
-}: DteAerialBenchmarkGalleryProps) {
+}: DteAerialReleaseGalleryProps) {
+  const benchmark = release.dteAerial;
   const [resolutionFilter, setResolutionFilter] =
     useState<GalleryResolutionFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("dataset");
   const [selectedPatch, setSelectedPatch] =
-    useState<SelectedBenchmarkPatch | null>(null);
+    useState<SelectedDteAerialPatch | null>(null);
   const [patchViewerMode, setPatchViewerMode] =
     useState<PatchViewerMode>("overlay");
   const [, startResolutionTransition] = useTransition();
@@ -602,14 +604,14 @@ export function DteAerialBenchmarkGallery({
     });
   }, []);
 
-  const handleSelectPatch = useCallback((selection: SelectedBenchmarkPatch) => {
+  const handleSelectPatch = useCallback((selection: SelectedDteAerialPatch) => {
     setSelectedPatch(selection);
     setPatchViewerMode("overlay");
   }, []);
 
   const sortedSites = useMemo(
-    () => sortSites(collection.sites, sortKey),
-    [collection.sites, sortKey],
+    () => sortSites(benchmark.sites, sortKey),
+    [benchmark.sites, sortKey],
   );
 
   return (
@@ -634,9 +636,8 @@ export function DteAerialBenchmarkGallery({
           Browse every benchmark patch
         </h2>
         <p className="mt-3 max-w-3xl text-base leading-7 text-gray-600">
-          {collection.metrics.benchmarkSites} sites ·{" "}
-          {collection.metrics.benchmarkPatches} patches across{" "}
-          {collection.metrics.resolutionsCm.join(", ")} cm resolutions. Use the
+          {benchmark.benchmarkSites} sites · {benchmark.benchmarkPatches}{" "}
+          patches across {benchmark.resolutionsCm.join(", ")} cm resolutions. Use the
           controls in each dataset row to switch resolution, or change the
           dataset order below.
         </p>
@@ -654,13 +655,13 @@ export function DteAerialBenchmarkGallery({
               onChange={setSortKey}
             />
           </div>
-          <GroundTruthLegend />
+          <MaskLegend />
         </div>
       </div>
 
       <div
         ref={galleryScrollRef}
-        className="benchmark-gallery-scroll overflow-x-auto border-y border-[#b9c4be] bg-[#dfe8e2]"
+        className="release-gallery-scroll overflow-x-auto border-y border-[#b9c4be] bg-[#dfe8e2]"
       >
         <div className="min-w-max space-y-5 py-5">
           {sortedSites.map((site) => (

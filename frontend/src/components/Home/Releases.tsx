@@ -2,11 +2,15 @@ import { Button, Tag } from "antd";
 import { DatabaseOutlined, ArrowRightOutlined } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 
-import { dteAerialBenchmarkDataset } from "../../data/benchmarkDatasets";
-import { DatasetPreviewStrip } from "../BenchmarkDatasets/DatasetPreviewStrip";
+import {
+  dteAerialRelease,
+  getReleasePreviewTiles,
+  getReleaseTeaserMeta,
+} from "../../data/releases";
+import { ReleasePreviewStrip } from "../Releases/ReleasePreviewStrip";
 import { useAnalytics } from "../../hooks/useAnalytics";
 
-const BenchmarkDatasetsSection = () => {
+const ReleasesSection = () => {
   const { track } = useAnalytics("home");
 
   const trackCta = (cta: string, target: string) => () =>
@@ -20,14 +24,13 @@ const BenchmarkDatasetsSection = () => {
       <div className="m-auto max-w-6xl px-4 md:px-8">
         <div className="mb-12 text-center md:mb-16">
           <p className="mb-2 text-lg font-semibold uppercase tracking-wider text-[#1B5E35]">
-            Benchmark Data
+            Releases
           </p>
           <h2 className="m-0 text-4xl font-semibold text-gray-800 md:text-5xl">
-            Curated benchmarks for forest AI
+            Published resources for forest AI
           </h2>
           <p className="mx-auto mt-6 max-w-3xl text-lg text-gray-600">
-            Stable, citable releases with expert ground-truth masks,
-            multi-resolution patches, and benchmark splits - built for
+            Stable, citable datasets, models, and benchmarks built for
             reproducible machine learning research on tree cover and standing
             deadwood.
           </p>
@@ -35,16 +38,16 @@ const BenchmarkDatasetsSection = () => {
 
         <div className="mx-auto max-w-5xl">
           <Link
-            to={`/benchmark-datasets/${dteAerialBenchmarkDataset.slug}`}
+            to={`/releases/${dteAerialRelease.slug}`}
             onClick={trackCta(
-              "home_benchmark_preview_strip",
-              `/benchmark-datasets/${dteAerialBenchmarkDataset.slug}`,
+              "home_release_preview_strip",
+              `/releases/${dteAerialRelease.slug}`,
             )}
             className="group block overflow-hidden rounded-2xl shadow-xl ring-1 ring-black/5 transition-all hover:shadow-2xl"
-            aria-label="Open the DTE-aerial-bench benchmark gallery"
+            aria-label="Open the DTE-aerial-bench release"
           >
-            <DatasetPreviewStrip
-              sites={dteAerialBenchmarkDataset.sites}
+            <ReleasePreviewStrip
+              tiles={getReleasePreviewTiles(dteAerialRelease)}
               tileClassName="transition-transform duration-300 group-hover:scale-[1.02]"
             />
           </Link>
@@ -55,47 +58,47 @@ const BenchmarkDatasetsSection = () => {
                 <Tag color="green" className="m-0">
                   Available
                 </Tag>
+                <Tag className="m-0">{dteAerialRelease.typeLabel}</Tag>
                 <span className="text-sm font-semibold text-gray-700">
-                  {dteAerialBenchmarkDataset.shortName}
+                  {dteAerialRelease.shortName}
                 </span>
                 <span aria-hidden className="text-gray-300">
                   -
                 </span>
                 <span className="text-sm text-gray-500">
-                  25 sites - 525 patches - 5, 10, 20 cm resolutions
+                  {getReleaseTeaserMeta(dteAerialRelease)}
                 </span>
               </div>
               <p className="mt-2 text-base text-gray-600">
                 A multi-resolution aerial benchmark for tree cover and mortality
-                segmentation - alternating RGB patches with paired ground-truth
-                masks.
+                segmentation with alternating RGB patches and paired masks.
               </p>
             </div>
 
             <div className="flex flex-shrink-0 flex-wrap items-center gap-3">
-              <Link to="/benchmark-datasets">
+              <Link to="/releases">
                 <Button
                   type="primary"
                   size="large"
                   icon={<DatabaseOutlined />}
                   className="min-h-11 px-6"
                   onClick={trackCta(
-                    "home_browse_benchmark_data",
-                    "/benchmark-datasets",
+                    "home_browse_releases",
+                    "/releases",
                   )}
                 >
-                  Browse Benchmark Data
+                  Browse Releases
                 </Button>
               </Link>
               <Link
-                to={`/benchmark-datasets/${dteAerialBenchmarkDataset.slug}`}
+                to={`/releases/${dteAerialRelease.slug}`}
                 onClick={trackCta(
-                  "home_open_dte_aerial_bench_gallery",
-                  `/benchmark-datasets/${dteAerialBenchmarkDataset.slug}`,
+                  "home_open_dte_aerial_bench_release",
+                  `/releases/${dteAerialRelease.slug}`,
                 )}
                 className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#1B5E35] hover:underline"
               >
-                Open DTE-aerial-bench gallery
+                Open DTE-aerial-bench
                 <ArrowRightOutlined />
               </Link>
             </div>
@@ -106,4 +109,4 @@ const BenchmarkDatasetsSection = () => {
   );
 };
 
-export default BenchmarkDatasetsSection;
+export default ReleasesSection;

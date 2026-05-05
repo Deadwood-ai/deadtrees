@@ -4,23 +4,22 @@ import { useQuery } from "@tanstack/react-query";
 import { Settings } from "../config";
 import { supabase } from "./useSupabase";
 import {
-  dteAerialBenchmarkDatasetAdminInfoById,
-  type BenchmarkDatasetAdminInfo,
-  type BenchmarkDatasetCollection,
-} from "../data/benchmarkDatasets";
+  dteAerialDatasetAdminInfoById,
+  type DteAerialDatasetAdminInfo,
+  type DteAerialRelease,
+} from "../data/releases";
 
-export function useBenchmarkDatasetAdminInfo(
-  collection: BenchmarkDatasetCollection,
-) {
+export function useDteAerialDatasetAdminInfo(release: DteAerialRelease) {
+  const sites = release.dteAerial.sites;
   const datasetIds = useMemo(
-    () => collection.sites.map((site) => site.id),
-    [collection.sites],
+    () => sites.map((site) => site.id),
+    [sites],
   );
 
   const { data: adminInfoRows, isLoading } = useQuery({
     queryKey: [
-      "benchmark-dataset-admin-info",
-      collection.slug,
+      "dte-aerial-release-dataset-admin-info",
+      release.slug,
       datasetIds.join(","),
     ],
     queryFn: async () => {
@@ -32,14 +31,14 @@ export function useBenchmarkDatasetAdminInfo(
         .in("id", datasetIds);
 
       if (error) throw error;
-      return (data ?? []) as BenchmarkDatasetAdminInfo[];
+      return (data ?? []) as DteAerialDatasetAdminInfo[];
     },
     staleTime: 5 * 60 * 1000,
   });
 
   const adminInfoByDatasetId = useMemo(() => {
-    const rowsById = new Map<number, BenchmarkDatasetAdminInfo>(
-      Object.entries(dteAerialBenchmarkDatasetAdminInfoById).map(
+    const rowsById = new Map<number, DteAerialDatasetAdminInfo>(
+      Object.entries(dteAerialDatasetAdminInfoById).map(
         ([id, adminInfo]) => [Number(id), adminInfo],
       ),
     );

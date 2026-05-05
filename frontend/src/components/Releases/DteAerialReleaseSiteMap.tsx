@@ -12,18 +12,18 @@ import "ol/ol.css";
 
 import {
   getCoarseBiomeGroup,
-  type BenchmarkDatasetSite,
-} from "../../data/benchmarkDatasets";
+  type DteAerialSite,
+} from "../../data/releases";
 import {
   createOpenFreeMapLibertyLayerGroup,
   createStandardMapControls,
 } from "../../utils/basemaps";
-import { GROUND_TRUTH_COLORS } from "./GroundTruthMask";
+import { MASK_COLORS } from "./maskRendering";
 
-export function DteAerialWorldSiteMap({
+export function DteAerialReleaseSiteMap({
   sites,
 }: {
-  sites: BenchmarkDatasetSite[];
+  sites: DteAerialSite[];
 }) {
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const tooltipElementRef = useRef<HTMLDivElement | null>(null);
@@ -35,7 +35,7 @@ export function DteAerialWorldSiteMap({
     const defaultMarkerStyle = new Style({
       image: new CircleStyle({
         radius: 7,
-        fill: new Fill({ color: GROUND_TRUTH_COLORS.forestCover }),
+        fill: new Fill({ color: MASK_COLORS.forestCover }),
         stroke: new Stroke({ color: "#ffffff", width: 2.5 }),
       }),
     });
@@ -43,7 +43,7 @@ export function DteAerialWorldSiteMap({
     const hoverMarkerStyle = new Style({
       image: new CircleStyle({
         radius: 11,
-        fill: new Fill({ color: GROUND_TRUTH_COLORS.deadwood }),
+        fill: new Fill({ color: MASK_COLORS.deadwood }),
         stroke: new Stroke({ color: "#ffffff", width: 3 }),
       }),
     });
@@ -89,7 +89,7 @@ export function DteAerialWorldSiteMap({
     });
 
     const extent = markerSource.getExtent();
-    if (extent.every(Number.isFinite)) {
+    if (extent && extent.every(Number.isFinite)) {
       map.getView().fit(extent, {
         padding: [28, 28, 28, 28],
         maxZoom: 3.2,
@@ -98,7 +98,9 @@ export function DteAerialWorldSiteMap({
 
     let hoveredFeature: Feature | null = null;
 
-    const handlePointerMove = (event: MapBrowserEvent<PointerEvent>) => {
+    const handlePointerMove = (
+      event: MapBrowserEvent<PointerEvent | KeyboardEvent | WheelEvent>,
+    ) => {
       const featureAtPixel = map.forEachFeatureAtPixel(
         event.pixel,
         (feature) => feature,

@@ -1,6 +1,6 @@
-export type BenchmarkPatchResolution = 5 | 10 | 20;
+export type DteAerialPatchResolution = 5 | 10 | 20;
 
-export interface BenchmarkDatasetSite {
+export interface DteAerialSite {
   id: number;
   fileName: string;
   biome: string;
@@ -15,7 +15,7 @@ export interface BenchmarkDatasetSite {
   patchCount: number;
 }
 
-export interface BenchmarkDatasetAdminInfo {
+export interface DteAerialDatasetAdminInfo {
   id: number | string;
   admin_level_1: string | null;
   admin_level_2: string | null;
@@ -27,8 +27,8 @@ export interface BenchmarkDatasetAdminInfo {
   authors: string[] | null;
 }
 
-export interface BenchmarkPatchImageSet {
-  resolutionCm: BenchmarkPatchResolution;
+export interface DteAerialPatchImageSet {
+  resolutionCm: DteAerialPatchResolution;
   patchIndex: number;
   label: string;
   rgb: string;
@@ -36,31 +36,58 @@ export interface BenchmarkPatchImageSet {
   mortalityMask: string;
 }
 
-export interface BenchmarkDatasetCollection {
-  slug: string;
-  name: string;
-  shortName: string;
-  title: string;
-  status: "available" | "coming-soon";
-  summary: string;
-  metrics: {
-    benchmarkSites: number;
-    benchmarkPatches: number;
-    patchSizePx: number;
-    resolutionsCm: BenchmarkPatchResolution[];
-  };
-  links: {
-    dataset: string;
-  };
-  sites: BenchmarkDatasetSite[];
-}
+export type PublicReleaseType = "benchmark-dataset" | "dataset" | "model";
 
-export interface BenchmarkDatasetStat {
+export interface ReleaseStat {
   label: string;
   value: string;
 }
 
-export const BENCHMARK_EXPORT_BASE_URL =
+export type ReleasePreviewTile =
+  | {
+      kind: "image";
+      key: string;
+      src: string;
+      alt: string;
+    }
+  | {
+      kind: "mask";
+      key: string;
+      forestCoverSrc: string;
+      deadwoodSrc: string;
+      alt: string;
+    };
+
+export interface PublicReleaseBase {
+  slug: string;
+  name: string;
+  shortName: string;
+  title: string;
+  type: PublicReleaseType;
+  typeLabel: string;
+  status: "available" | "coming-soon";
+  summary: string;
+  links: {
+    artifact: string;
+  };
+}
+
+export interface DteAerialRelease extends PublicReleaseBase {
+  type: "benchmark-dataset";
+  dteAerial: {
+    benchmarkSites: number;
+    benchmarkPatches: number;
+    patchSizePx: number;
+    resolutionsCm: DteAerialPatchResolution[];
+    sites: DteAerialSite[];
+  };
+}
+
+export type PublicRelease = DteAerialRelease;
+
+const DEFAULT_DTE_AERIAL_PREVIEW_SITE_IDS = [375, 1396, 5584];
+
+export const DTE_AERIAL_EXPORT_BASE_URL =
   "https://data2.deadtrees.earth/reference/69e57f93-d003-4b64-9108-fe3dfa654918";
 
 export const getCoarseBiomeGroup = (biome: string) => {
@@ -74,9 +101,9 @@ export const getCoarseBiomeGroup = (biome: string) => {
   return biome;
 };
 
-export const dteAerialBenchmarkDatasetAdminInfoById: Record<
+export const dteAerialDatasetAdminInfoById: Record<
   number,
-  BenchmarkDatasetAdminInfo
+  DteAerialDatasetAdminInfo
 > = {
   375: {
     id: 375,
@@ -365,9 +392,9 @@ export const dteAerialBenchmarkDatasetAdminInfoById: Record<
   },
 };
 
-const makeBenchmarkPatchBase = (
-  dataset: BenchmarkDatasetSite,
-  resolutionCm: BenchmarkPatchResolution,
+const makeDteAerialPatchBase = (
+  dataset: DteAerialSite,
+  resolutionCm: DteAerialPatchResolution,
   patchIndex = 0,
 ) => {
   if (resolutionCm === 20) {
@@ -383,13 +410,13 @@ const makeBenchmarkPatchBase = (
   return `${dataset.id}_${row}_${column}_5cm`;
 };
 
-export const getBenchmarkPatchImages = (
-  dataset: BenchmarkDatasetSite,
-  resolutionCm: BenchmarkPatchResolution,
+export const getDteAerialPatchImages = (
+  dataset: DteAerialSite,
+  resolutionCm: DteAerialPatchResolution,
   patchIndex = 0,
-): BenchmarkPatchImageSet => {
-  const base = makeBenchmarkPatchBase(dataset, resolutionCm, patchIndex);
-  const folder = `${BENCHMARK_EXPORT_BASE_URL}/${dataset.id}/png`;
+): DteAerialPatchImageSet => {
+  const base = makeDteAerialPatchBase(dataset, resolutionCm, patchIndex);
+  const folder = `${DTE_AERIAL_EXPORT_BASE_URL}/${dataset.id}/png`;
 
   return {
     resolutionCm,
@@ -401,11 +428,11 @@ export const getBenchmarkPatchImages = (
   };
 };
 
-export const getBenchmarkPatchGridImages = (
-  dataset: BenchmarkDatasetSite,
-  resolutionCm: BenchmarkPatchResolution,
-): BenchmarkPatchImageSet[] => {
-  const patchCountByResolution: Record<BenchmarkPatchResolution, number> = {
+export const getDteAerialPatchGridImages = (
+  dataset: DteAerialSite,
+  resolutionCm: DteAerialPatchResolution,
+): DteAerialPatchImageSet[] => {
+  const patchCountByResolution: Record<DteAerialPatchResolution, number> = {
     20: 1,
     10: 4,
     5: 16,
@@ -413,50 +440,113 @@ export const getBenchmarkPatchGridImages = (
 
   return Array.from(
     { length: patchCountByResolution[resolutionCm] },
-    (_, index) => getBenchmarkPatchImages(dataset, resolutionCm, index),
+    (_, index) => getDteAerialPatchImages(dataset, resolutionCm, index),
   );
 };
 
-export const getBenchmarkDatasetStats = (
-  collection: BenchmarkDatasetCollection,
-): BenchmarkDatasetStat[] => [
-  {
-    label: "Benchmark sites",
-    value: collection.metrics.benchmarkSites.toString(),
-  },
-  {
-    label: "Benchmark patches",
-    value: collection.metrics.benchmarkPatches.toString(),
-  },
-  {
-    label: "Patch size",
-    value: `${collection.metrics.patchSizePx} px`,
-  },
-  {
-    label: "Resolutions",
-    value: `${collection.metrics.resolutionsCm.join(", ")} cm`,
-  },
-];
+const pickDteAerialPreviewSites = (
+  sites: DteAerialSite[],
+  preferredIds = DEFAULT_DTE_AERIAL_PREVIEW_SITE_IDS,
+  count = 3,
+) => {
+  const byId = new Map(sites.map((site) => [site.id, site]));
+  const preferred = preferredIds
+    .map((id) => byId.get(id))
+    .filter((site): site is DteAerialSite => Boolean(site));
+  if (preferred.length >= count) return preferred.slice(0, count);
+  const rest = sites.filter((site) => !preferredIds.includes(site.id));
+  return [...preferred, ...rest].slice(0, count);
+};
 
-export const dteAerialBenchmarkDataset: BenchmarkDatasetCollection = {
+export const getReleasePreviewTiles = (
+  release: PublicRelease,
+): ReleasePreviewTile[] => {
+  if (release.type === "benchmark-dataset") {
+    return pickDteAerialPreviewSites(release.dteAerial.sites).flatMap(
+      (site) => {
+        const previewPatch = getDteAerialPatchImages(site, 20, 0);
+        return [
+          {
+            kind: "image" as const,
+            key: `${site.id}-rgb`,
+            src: previewPatch.rgb,
+            alt: `RGB preview from ${release.name} site ${site.id}`,
+          },
+          {
+            kind: "mask" as const,
+            key: `${site.id}-mask`,
+            forestCoverSrc: previewPatch.treeCoverMask,
+            deadwoodSrc: previewPatch.mortalityMask,
+            alt: `Mask preview from ${release.name} site ${site.id}`,
+          },
+        ];
+      },
+    );
+  }
+
+  return [];
+};
+
+export const getReleaseStats = (release: PublicRelease): ReleaseStat[] => {
+  if (release.type === "benchmark-dataset") {
+    const { benchmarkSites, benchmarkPatches, patchSizePx, resolutionsCm } =
+      release.dteAerial;
+    return [
+      {
+        label: "Benchmark sites",
+        value: benchmarkSites.toString(),
+      },
+      {
+        label: "Benchmark patches",
+        value: benchmarkPatches.toString(),
+      },
+      {
+        label: "Patch size",
+        value: `${patchSizePx} px`,
+      },
+      {
+        label: "Resolutions",
+        value: `${resolutionsCm.join(", ")} cm`,
+      },
+    ];
+  }
+
+  return [];
+};
+
+export const getPublicReleaseBySlug = (slug: string) =>
+  publicReleases.find((release) => release.slug === slug);
+
+export const getReleaseTeaserMeta = (release: PublicRelease) => {
+  if (release.type === "benchmark-dataset") {
+    const { benchmarkSites, benchmarkPatches, resolutionsCm } =
+      release.dteAerial;
+    return `${benchmarkSites} sites - ${benchmarkPatches} patches - ${resolutionsCm.join(", ")} cm resolutions`;
+  }
+
+  return release.shortName;
+};
+
+export const dteAerialRelease: DteAerialRelease = {
   slug: "dte-aerial-bench",
   name: "DTE-aerial-bench",
   shortName: "DTE-aerial-bench",
   title:
     "DTE-aerial-bench: A multi-resolution manually labelled aerial benchmark for tree cover and mortality segmentation",
+  type: "benchmark-dataset",
+  typeLabel: "Benchmark dataset",
   status: "available",
   summary:
-    "A curated aerial benchmark for tree cover and mortality segmentation, built from high-resolution drone and aircraft orthophotos with expert ground-truth masks.",
-  metrics: {
+    "A curated aerial benchmark for tree cover and mortality segmentation, built from high-resolution drone and aircraft orthophotos with expert masks.",
+  links: {
+    artifact: "#dataset-download-placeholder",
+  },
+  dteAerial: {
     benchmarkSites: 25,
     benchmarkPatches: 525,
     patchSizePx: 1024,
     resolutionsCm: [5, 10, 20],
-  },
-  links: {
-    dataset: "#dataset-download-placeholder",
-  },
-  sites: [
+    sites: [
     {
       id: 375,
       fileName: "spain_16_09_2023_andy_8_ortho.tif",
@@ -733,7 +823,8 @@ export const dteAerialBenchmarkDataset: BenchmarkDatasetCollection = {
       center: { lon: 128.56302, lat: 36.476 },
       patchCount: 21,
     },
-  ],
+    ],
+  },
 };
 
-export const benchmarkDatasetCollections = [dteAerialBenchmarkDataset];
+export const publicReleases: PublicRelease[] = [dteAerialRelease];

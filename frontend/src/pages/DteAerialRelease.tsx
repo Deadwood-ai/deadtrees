@@ -6,36 +6,37 @@ import {
 import { Button, Tag } from "antd";
 import { useMemo } from "react";
 
-import { DteAerialBenchmarkGallery } from "../components/BenchmarkDatasets/DteAerialBenchmarkGallery";
-import { DteAerialWorldSiteMap } from "../components/BenchmarkDatasets/DteAerialWorldSiteMap";
+import { DteAerialReleaseGallery } from "../components/Releases/DteAerialReleaseGallery";
+import { DteAerialReleaseSiteMap } from "../components/Releases/DteAerialReleaseSiteMap";
 import {
-  dteAerialBenchmarkDataset,
-  getBenchmarkDatasetStats,
+  getReleaseStats,
   getCoarseBiomeGroup,
-} from "../data/benchmarkDatasets";
-import { useBenchmarkDatasetAdminInfo } from "../hooks/useBenchmarkDatasetAdminInfo";
+  type DteAerialRelease as DteAerialReleaseData,
+} from "../data/releases";
+import { useDteAerialDatasetAdminInfo } from "../hooks/useDteAerialDatasetAdminInfo";
 
-export default function DteAerialBenchmarkDataset() {
-  const collection = dteAerialBenchmarkDataset;
+interface DteAerialReleaseProps {
+  release: DteAerialReleaseData;
+}
+
+export default function DteAerialRelease({ release }: DteAerialReleaseProps) {
+  const benchmark = release.dteAerial;
   const { adminInfoByDatasetId, isAdminInfoLoading } =
-    useBenchmarkDatasetAdminInfo(collection);
-  const heroTagline = collection.title.startsWith(`${collection.name}: `)
-    ? collection.title.slice(collection.name.length + 2)
-    : collection.title;
+    useDteAerialDatasetAdminInfo(release);
+  const heroTagline = release.title.startsWith(`${release.name}: `)
+    ? release.title.slice(release.name.length + 2)
+    : release.title;
 
-  const datasetStats = useMemo(
-    () => getBenchmarkDatasetStats(collection),
-    [collection],
-  );
+  const releaseStats = useMemo(() => getReleaseStats(release), [release]);
 
   const biomeCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    collection.sites.forEach((site) => {
+    benchmark.sites.forEach((site) => {
       const biomeGroup = getCoarseBiomeGroup(site.biome);
       counts.set(biomeGroup, (counts.get(biomeGroup) ?? 0) + 1);
     });
     return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
-  }, [collection.sites]);
+  }, [benchmark.sites]);
 
   return (
     <main className="min-h-screen bg-[#f8faf9] pt-24 md:pt-32">
@@ -43,10 +44,10 @@ export default function DteAerialBenchmarkDataset() {
         <div className="mx-auto grid max-w-7xl gap-10 px-4 py-16 md:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)] md:gap-12 md:px-8 md:py-24">
           <div>
             <p className="m-0 text-sm font-semibold uppercase tracking-wider text-[#1B5E35] md:text-base">
-              Benchmark dataset · {collection.shortName}
+              {release.typeLabel} · {release.shortName}
             </p>
             <h1 className="m-0 mt-3 text-4xl font-semibold leading-[1.1] text-gray-950 md:text-5xl">
-              {collection.name}
+              {release.name}
             </h1>
             <p className="mt-5 max-w-3xl text-lg leading-8 text-gray-600">
               {heroTagline}
@@ -67,14 +68,14 @@ export default function DteAerialBenchmarkDataset() {
             </div>
           </div>
 
-          <DteAerialWorldSiteMap sites={collection.sites} />
+          <DteAerialReleaseSiteMap sites={benchmark.sites} />
         </div>
       </section>
 
       <section className="mx-auto max-w-7xl px-4 py-10 md:px-8 md:py-12">
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-2">
-            {datasetStats.map((stat) => (
+            {releaseStats.map((stat) => (
               <div
                 key={stat.label}
                 className="rounded-lg border border-gray-200 bg-white p-5"
@@ -92,7 +93,7 @@ export default function DteAerialBenchmarkDataset() {
           <div className="rounded-lg border border-gray-200 bg-white p-5">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
               <GlobalOutlined />
-              Coarse biome coverage
+              Coverage across biome groups
             </div>
             <div className="mt-4 space-y-2.5">
               {biomeCounts.map(([biome, count]) => (
@@ -110,7 +111,7 @@ export default function DteAerialBenchmarkDataset() {
                     <span
                       className="block h-full rounded-full bg-[#1B5E35]"
                       style={{
-                        width: `${(count / collection.sites.length) * 100}%`,
+                        width: `${(count / benchmark.sites.length) * 100}%`,
                       }}
                     />
                   </span>
@@ -124,8 +125,8 @@ export default function DteAerialBenchmarkDataset() {
         </div>
       </section>
 
-      <DteAerialBenchmarkGallery
-        collection={collection}
+      <DteAerialReleaseGallery
+        release={release}
         adminInfoByDatasetId={adminInfoByDatasetId}
         isAdminInfoLoading={isAdminInfoLoading}
       />

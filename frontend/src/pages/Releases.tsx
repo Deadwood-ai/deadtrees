@@ -3,25 +3,26 @@ import { Button, Tag } from "antd";
 import { useNavigate } from "react-router-dom";
 
 import {
-  benchmarkDatasetCollections,
-  getBenchmarkDatasetStats,
-  type BenchmarkDatasetCollection,
-} from "../data/benchmarkDatasets";
-import { DatasetPreviewStrip } from "../components/BenchmarkDatasets/DatasetPreviewStrip";
+  publicReleases,
+  getReleasePreviewTiles,
+  getReleaseStats,
+  type PublicRelease,
+} from "../data/releases";
+import { ReleasePreviewStrip } from "../components/Releases/ReleasePreviewStrip";
 
-function FeaturedCollectionCard({
-  collection,
+function FeaturedReleaseCard({
+  release,
   onOpen,
 }: {
-  collection: BenchmarkDatasetCollection;
+  release: PublicRelease;
   onOpen: () => void;
 }) {
-  const isAvailable = collection.status === "available";
-  const stats = getBenchmarkDatasetStats(collection);
+  const isAvailable = release.status === "available";
+  const stats = getReleaseStats(release);
 
   return (
     <article className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md">
-      <DatasetPreviewStrip sites={collection.sites} />
+      <ReleasePreviewStrip tiles={getReleasePreviewTiles(release)} />
 
       <div className="grid gap-8 p-6 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] md:p-10">
         <div>
@@ -29,14 +30,15 @@ function FeaturedCollectionCard({
             <Tag color={isAvailable ? "green" : "default"} className="m-0">
               {isAvailable ? "Available" : "Coming soon"}
             </Tag>
-            <Tag className="m-0">{collection.shortName}</Tag>
+            <Tag className="m-0">{release.typeLabel}</Tag>
+            <Tag className="m-0">{release.shortName}</Tag>
           </div>
 
           <h2 className="m-0 mt-5 text-3xl font-semibold leading-tight text-gray-950 md:text-4xl">
-            {collection.name}
+            {release.name}
           </h2>
           <p className="mt-4 text-base leading-7 text-gray-600">
-            {collection.summary}
+            {release.summary}
           </p>
 
           <div className="mt-7 flex flex-wrap items-center gap-3">
@@ -48,7 +50,7 @@ function FeaturedCollectionCard({
               className="min-h-11"
               disabled={!isAvailable}
             >
-              Open DTE-aerial-bench
+              Open release
             </Button>
           </div>
         </div>
@@ -73,34 +75,33 @@ function FeaturedCollectionCard({
   );
 }
 
-export default function BenchmarkDatasets() {
+export default function Releases() {
   const navigate = useNavigate();
-  const featured = benchmarkDatasetCollections;
 
   return (
     <main className="min-h-screen bg-[#f8faf9] pt-24 md:pt-32">
       <section className="border-b border-gray-200/80 bg-white">
         <div className="mx-auto max-w-4xl px-4 py-16 text-center md:px-8 md:py-24">
           <p className="m-0 text-sm font-semibold uppercase tracking-wider text-[#1B5E35] md:text-base">
-            Benchmark datasets
+            Releases
           </p>
           <h1 className="m-0 mt-3 text-4xl font-semibold leading-[1.1] text-gray-950 md:text-5xl">
-            Curated benchmark datasets from deadtrees.earth
+            Published resources from deadtrees.earth
           </h1>
           <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-gray-600">
-            Stable dataset releases with gallery views, benchmark splits,
-            ground-truth masks, and metadata for scientific reuse.
+            Stable data, model, and benchmark releases with metadata and
+            previews for scientific reuse.
           </p>
         </div>
       </section>
 
       <section className="mx-auto max-w-7xl px-4 py-12 md:px-8 md:py-16">
         <div className="grid gap-6">
-          {featured.map((collection) => (
-            <FeaturedCollectionCard
-              key={collection.slug}
-              collection={collection}
-              onOpen={() => navigate(`/benchmark-datasets/${collection.slug}`)}
+          {publicReleases.map((release) => (
+            <FeaturedReleaseCard
+              key={release.slug}
+              release={release}
+              onOpen={() => navigate(`/releases/${release.slug}`)}
             />
           ))}
         </div>
@@ -110,14 +111,14 @@ export default function BenchmarkDatasets() {
             More coming
           </span>
           <h3 className="m-0 mt-4 text-lg font-semibold text-gray-900 md:text-xl">
-            Additional benchmark releases are in preparation
+            Additional releases are in preparation
           </h3>
           <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-gray-600">
-            New benchmark collections — including satellite-derived products and
-            extended aerial sites — will appear here as they are finalised. If
-            you have a dataset to contribute,{" "}
+            New resources, including datasets, models, and benchmark
+            collections, will appear here as they are finalised. If you have a
+            release to contribute,{" "}
             <a
-              href="mailto:info@deadtrees.earth?subject=Benchmark dataset contribution"
+              href="mailto:info@deadtrees.earth?subject=Release contribution"
               className="font-semibold text-[#1B5E35] underline"
             >
               get in touch
