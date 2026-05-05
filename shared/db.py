@@ -133,6 +133,24 @@ def use_client(access_token: Optional[str] = None) -> Generator[Client, None, No
 
 
 @contextmanager
+def use_service_client() -> Generator[Client, None, None]:
+	"""Creates a Supabase service-role client for server-side privileged writes."""
+	if not settings.SUPABASE_SERVICE_ROLE_KEY:
+		raise ValueError('SUPABASE_SERVICE_ROLE_KEY is required for service-role database access')
+
+	client = create_client(
+		settings.SUPABASE_URL,
+		settings.SUPABASE_SERVICE_ROLE_KEY,
+		options=ClientOptions(auto_refresh_token=False),
+	)
+
+	try:
+		yield client
+	finally:
+		pass
+
+
+@contextmanager
 def use_anon_client(access_token: Optional[str] = None) -> Generator[Client, None, None]:
 	"""Creates a Supabase client that behaves like an anonymous/public caller."""
 	if not settings.SUPABASE_ANON_KEY:

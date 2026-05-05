@@ -1,3 +1,5 @@
+import pytest
+
 import shared.db as db
 
 
@@ -41,3 +43,11 @@ def test_login_verified_returns_first_valid_token(monkeypatch):
 	assert attempts == [True]
 	assert token == 'cached-token'
 	assert user == {'id': 'processor-user'}
+
+
+def test_use_service_client_requires_service_role_key(monkeypatch):
+	monkeypatch.setattr(db.settings, 'SUPABASE_SERVICE_ROLE_KEY', '')
+
+	with pytest.raises(ValueError, match='SUPABASE_SERVICE_ROLE_KEY is required'):
+		with db.use_service_client():
+			pass
