@@ -31,6 +31,14 @@ frontend work.
   cross-cutting state.
 - Prefer `console.debug()` over `console.log()`.
 
+## Review guidelines
+
+- Apply the root review guidelines, especially for correctness, security, maintainability, and testability risks in changed frontend code.
+- Flag frontend changes that expose service-role keys, MCP tokens, SSH/VPN credentials, private API keys, or production-only values to browser code or tracked `frontend/.env*` files.
+- Flag auth, Supabase, React Query, upload, map, or COG-rendering changes that make permissions, cache invalidation, cancellation, cleanup, or error states hard to reason about or hard to test.
+- Treat large React components, duplicated data-fetching logic, unstable query keys, missing cleanup of OpenLayers resources, and hidden side effects as review issues when they create concrete regression risk.
+- Do not flag subjective UI style preferences unless they affect accessibility, data integrity, security, testability, or a documented product requirement.
+
 ## Query Keys
 
 Use stable tuple keys:
