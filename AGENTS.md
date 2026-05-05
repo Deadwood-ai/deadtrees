@@ -24,6 +24,17 @@ the linked docs that match the task.
   path. Treat production database writes as off-limits unless the user explicitly authorizes
   a specific write.
 
+## Review guidelines
+
+- Prioritize concrete P0/P1 risks: correctness bugs, security regressions, data loss, broken authorization, production deployment hazards, and missing validation for high-risk changes.
+- Treat readability, maintainability, and testability as review concerns when they create concrete future risk: duplicated workflow logic, unclear ownership, hidden side effects, brittle coupling, hard-to-test flows, oversized unstructured functions, or confusing domain names.
+- For architecture-sensitive changes, check whether the PR spreads behavior across callers, weakens locality, or introduces shallow pass-through modules that make future changes harder to verify.
+- For changed interfaces, check that callers do not need to know hidden ordering, config, error modes, permission rules, storage details, or deployment assumptions that should stay behind one module interface.
+- For database, storage, deployment, or production-connected changes, require evidence of repo-approved validation and flag unsafe production assumptions.
+- For security, flag changes that weaken auth, authorization, RLS/policies, tenancy isolation, signed URL handling, upload validation, secret handling, logging of sensitive data, CORS/cookie/session controls, or privilege boundaries.
+- Treat credentials, bearer tokens, database URLs, private keys, raw production access notes, and PII in tracked files or logs as P1.
+- Do not flag subjective style preferences, formatting, or broad cleanup ideas unless they affect correctness, security, maintainability, or testability in the changed code.
+
 ## Git And PRs
 
 - Do not create draft PRs for this workspace. Open normal PRs when asked.
