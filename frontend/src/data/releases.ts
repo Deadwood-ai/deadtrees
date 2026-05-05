@@ -67,7 +67,6 @@ export interface PublicReleaseBase {
   typeLabel: string;
   status: "available" | "coming-soon";
   summary: string;
-  stats: ReleaseStat[];
   links: {
     artifact: string;
   };
@@ -488,8 +487,32 @@ export const getReleasePreviewTiles = (
   return [];
 };
 
-export const getReleaseStats = (release: PublicRelease): ReleaseStat[] =>
-  release.stats;
+export const getReleaseStats = (release: PublicRelease): ReleaseStat[] => {
+  if (release.type === "benchmark-dataset") {
+    const { benchmarkSites, benchmarkPatches, patchSizePx, resolutionsCm } =
+      release.dteAerial;
+    return [
+      {
+        label: "Benchmark sites",
+        value: benchmarkSites.toString(),
+      },
+      {
+        label: "Benchmark patches",
+        value: benchmarkPatches.toString(),
+      },
+      {
+        label: "Patch size",
+        value: `${patchSizePx} px`,
+      },
+      {
+        label: "Resolutions",
+        value: `${resolutionsCm.join(", ")} cm`,
+      },
+    ];
+  }
+
+  return [];
+};
 
 export const getPublicReleaseBySlug = (slug: string) =>
   publicReleases.find((release) => release.slug === slug);
@@ -515,24 +538,6 @@ export const dteAerialRelease: DteAerialRelease = {
   status: "available",
   summary:
     "A curated aerial benchmark for tree cover and mortality segmentation, built from high-resolution drone and aircraft orthophotos with expert masks.",
-  stats: [
-    {
-      label: "Benchmark sites",
-      value: "25",
-    },
-    {
-      label: "Benchmark patches",
-      value: "525",
-    },
-    {
-      label: "Patch size",
-      value: "1024 px",
-    },
-    {
-      label: "Resolutions",
-      value: "5, 10, 20 cm",
-    },
-  ],
   links: {
     artifact: "#dataset-download-placeholder",
   },
