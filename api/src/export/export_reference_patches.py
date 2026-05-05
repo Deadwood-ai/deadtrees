@@ -38,6 +38,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 import os
+import re
 
 import geopandas as gpd
 import numpy as np
@@ -343,6 +344,111 @@ def build_filename_base(patch: dict) -> str:
 	tile_id = patch_index.split('_')[-2:] if '_' in patch_index else [patch_index]
 	tile_id = '_'.join(tile_id) if len(tile_id) > 1 else tile_id[0]
 	return f'{dataset_id}_{tile_id}_{resolution_cm}cm'
+
+
+def get_export_base_resolution(filename_base: str) -> Optional[int]:
+	"""Extract the patch resolution from a generated export filename base."""
+	match = re.search(r'_(5|10|20)cm$', filename_base)
+	return int(match.group(1)) if match else None
+
+
+def get_raster_filename_base(path: Path) -> str:
+	"""Return the patch filename base for raster image/mask files."""
+	base = path.stem
+	for suffix in ('_deadwood_ref', '_forestcover_ref'):
+		if base.endswith(suffix):
+			return base[: -len(suffix)]
+	return base
+
+
+def get_metadata_filename_base(path: Path) -> tuple[str, bool]:
+	"""Return the patch filename base and whether this is vector metadata."""
+	base = path.stem
+	if base.endswith('_vector'):
+		return base[: -len('_vector')], True
+	return base, False
+
+
+def should_cleanup_export_base(filename_base: str, expected_bases: set[str], resolution_cm: Optional[int]) -> bool:
+	"""Return whether a generated patch export is outside the current DB patch set."""
+	if resolution_cm is not None and get_export_base_resolution(filename_base) != resolution_cm:
+		return False
+	return filename_base not in expected_bases
+
+
+def cleanup_removed_patch_exports(
+	output_base_dir: Path,
+	patches: list[dict],
+	reference_dataset_ids: list[int],
+	dataset_id: Optional[int] = None,
+	resolution_cm: Optional[int] = None,
+) -> int:
+	"""Remove export artifacts for patches that no longer exist in reference_patches.
+
+	This complements cleanup_removed_datasets: if a reference patch is replaced, the
+	dataset stays active, but old PNG/GeoTIFF/metadata/GeoPackage files must not
+	remain visible in the public export directory.
+	"""
+	if not output_base_dir.exists():
+		return 0
+
+	expected_raster_bases: dict[int, set[str]] = {}
+	for patch in patches:
+		expected_raster_bases.setdefault(patch['dataset_id'], set()).add(build_filename_base(patch))
+
+	vector_candidates = get_vector_export_candidates(patches, resolution_cm=resolution_cm)
+	expected_vector_bases: dict[int, set[str]] = {}
+	for patch in vector_candidates:
+		expected_vector_bases.setdefault(patch['dataset_id'], set()).add(build_filename_base(patch))
+
+	target_dataset_ids = [dataset_id] if dataset_id is not None else reference_dataset_ids
+	removed_count = 0
+
+	for target_dataset_id in target_dataset_ids:
+		dataset_output_dir = output_base_dir / str(target_dataset_id)
+		if not dataset_output_dir.exists():
+			continue
+
+		dataset_raster_bases = expected_raster_bases.get(target_dataset_id, set())
+		dataset_vector_bases = expected_vector_bases.get(target_dataset_id, set())
+
+		for subdir_name in ('geotiff', 'png'):
+			subdir = dataset_output_dir / subdir_name
+			if not subdir.exists():
+				continue
+			for path in subdir.iterdir():
+				if not path.is_file() or path.suffix.lower() not in {'.tif', '.png'}:
+					continue
+				filename_base = get_raster_filename_base(path)
+				if should_cleanup_export_base(filename_base, dataset_raster_bases, resolution_cm):
+					path.unlink()
+					removed_count += 1
+
+		metadata_dir = dataset_output_dir / 'metadata'
+		if metadata_dir.exists():
+			for path in metadata_dir.iterdir():
+				if not path.is_file() or path.suffix.lower() != '.json':
+					continue
+				filename_base, is_vector_metadata = get_metadata_filename_base(path)
+				expected_bases = dataset_vector_bases if is_vector_metadata else dataset_raster_bases
+				if should_cleanup_export_base(filename_base, expected_bases, resolution_cm):
+					path.unlink()
+					removed_count += 1
+
+		gpkg_dir = dataset_output_dir / 'gpkg'
+		if gpkg_dir.exists():
+			for path in gpkg_dir.iterdir():
+				if not path.is_file() or path.suffix.lower() != '.gpkg':
+					continue
+				filename_base = path.stem
+				if should_cleanup_export_base(filename_base, dataset_vector_bases, resolution_cm):
+					path.unlink()
+					removed_count += 1
+
+	if removed_count > 0:
+		print(f'✓ Cleaned up {removed_count} stale patch export file(s)\n')
+
+	return removed_count
 
 
 def patch_has_deadwood_reference(patch: dict) -> bool:
@@ -1075,6 +1181,15 @@ def main():
 	if not patches:
 		print('✓ No new patches to export')
 		return 0
+
+	print('🗑️  Checking for removed patch exports...')
+	cleanup_removed_patch_exports(
+		output_base_dir,
+		patches,
+		reference_dataset_ids,
+		dataset_id=args.dataset_id,
+		resolution_cm=args.resolution,
+	)
 
 	# Pre-filter patches that actually need export. This keeps no-change cron runs
 	# compact and avoids printing the full dataset breakdown every time.

@@ -213,6 +213,114 @@ def test_vector_export_needs_export_checks_gpkg_and_metadata(tmp_path):
 	assert export_module.vector_export_needs_export(output_dir, filename_base, patch_updated_at) is False
 
 
+def test_cleanup_removed_patch_exports_removes_stale_replaced_patch_files(tmp_path):
+	dataset_dir = tmp_path / '3251'
+	for subdir in ('geotiff', 'png', 'metadata', 'gpkg'):
+		(dataset_dir / subdir).mkdir(parents=True)
+
+	current_root = make_patch(
+		1,
+		'20_1776848107785',
+		dataset_id=3251,
+		deadwood_validated=True,
+		forest_cover_validated=True,
+	)
+	current_child = make_patch(
+		2,
+		'1776848107785_0',
+		dataset_id=3251,
+		resolution_cm=10,
+		parent_tile_id=1,
+		deadwood_validated=True,
+		forest_cover_validated=True,
+	)
+	current_leaf = make_patch(
+		3,
+		'0_0',
+		dataset_id=3251,
+		resolution_cm=5,
+		parent_tile_id=2,
+		deadwood_validated=True,
+		forest_cover_validated=True,
+	)
+	patches = [current_root, current_child, current_leaf]
+
+	current_bases = [export_module.build_filename_base(patch) for patch in patches]
+	stale_bases = [
+		'3251_20_1761645491783_20cm',
+		'3251_1761645491783_0_10cm',
+	]
+
+	for filename_base in current_bases + stale_bases:
+		(dataset_dir / 'geotiff' / f'{filename_base}.tif').write_text('rgb')
+		(dataset_dir / 'geotiff' / f'{filename_base}_deadwood_ref.tif').write_text('deadwood')
+		(dataset_dir / 'geotiff' / f'{filename_base}_forestcover_ref.tif').write_text('forest')
+		(dataset_dir / 'png' / f'{filename_base}.png').write_text('rgb')
+		(dataset_dir / 'png' / f'{filename_base}_deadwood_ref.png').write_text('deadwood')
+		(dataset_dir / 'png' / f'{filename_base}_forestcover_ref.png').write_text('forest')
+		(dataset_dir / 'metadata' / f'{filename_base}.json').write_text('{}')
+
+	for filename_base in [current_bases[0], stale_bases[0]]:
+		(dataset_dir / 'gpkg' / f'{filename_base}.gpkg').write_text('gpkg')
+		(dataset_dir / 'metadata' / f'{filename_base}_vector.json').write_text('{}')
+
+	(dataset_dir / 'metadata' / 'README.txt').write_text('leave me alone')
+
+	removed_count = export_module.cleanup_removed_patch_exports(
+		tmp_path,
+		patches,
+		reference_dataset_ids=[3251],
+	)
+
+	assert removed_count == 16
+	for filename_base in current_bases:
+		assert (dataset_dir / 'geotiff' / f'{filename_base}.tif').exists()
+		assert (dataset_dir / 'png' / f'{filename_base}.png').exists()
+		assert (dataset_dir / 'metadata' / f'{filename_base}.json').exists()
+	assert (dataset_dir / 'gpkg' / f'{current_bases[0]}.gpkg').exists()
+	assert (dataset_dir / 'metadata' / f'{current_bases[0]}_vector.json').exists()
+	assert (dataset_dir / 'metadata' / 'README.txt').exists()
+
+	for filename_base in stale_bases:
+		assert not (dataset_dir / 'geotiff' / f'{filename_base}.tif').exists()
+		assert not (dataset_dir / 'png' / f'{filename_base}.png').exists()
+		assert not (dataset_dir / 'metadata' / f'{filename_base}.json').exists()
+	assert not (dataset_dir / 'gpkg' / f'{stale_bases[0]}.gpkg').exists()
+	assert not (dataset_dir / 'metadata' / f'{stale_bases[0]}_vector.json').exists()
+
+
+def test_cleanup_removed_patch_exports_respects_resolution_filter(tmp_path):
+	dataset_dir = tmp_path / '3251'
+	for subdir in ('geotiff', 'png', 'metadata'):
+		(dataset_dir / subdir).mkdir(parents=True)
+
+	current_5cm = make_patch(
+		1,
+		'0_0',
+		dataset_id=3251,
+		resolution_cm=5,
+		deadwood_validated=True,
+	)
+	stale_5cm_base = '3251_0_1_5cm'
+	stale_10cm_base = '3251_1761645491783_0_10cm'
+
+	for filename_base in [export_module.build_filename_base(current_5cm), stale_5cm_base, stale_10cm_base]:
+		(dataset_dir / 'geotiff' / f'{filename_base}.tif').write_text('rgb')
+		(dataset_dir / 'png' / f'{filename_base}.png').write_text('rgb')
+		(dataset_dir / 'metadata' / f'{filename_base}.json').write_text('{}')
+
+	removed_count = export_module.cleanup_removed_patch_exports(
+		tmp_path,
+		[current_5cm],
+		reference_dataset_ids=[3251],
+		resolution_cm=5,
+	)
+
+	assert removed_count == 3
+	assert not (dataset_dir / 'geotiff' / f'{stale_5cm_base}.tif').exists()
+	assert (dataset_dir / 'geotiff' / f'{stale_10cm_base}.tif').exists()
+
+
 def test_fetch_latest_reference_geometry_created_at_uses_latest_geometry_table_timestamp(monkeypatch):
 	tables = {
 		'reference_patch_deadwood_geometries': [
