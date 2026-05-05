@@ -15,10 +15,12 @@ use these files directly; editor-specific rule folders are intentionally retired
 7. For dataset failures, stuck processing, or upload-triggered failures, use
    `docs/playbooks/dataset-debugging.md`.
 8. For diagrams, use `docs/playbooks/technical-diagrams.md`.
-9. For `/reflect-and-learn` or end-of-session retrospectives, use
+9. For local pre-PR code quality reviews, use
+   `docs/agents/local-review-instructions.md`.
+10. For `/reflect-and-learn` or end-of-session retrospectives, use
    `docs/playbooks/reflect-and-learn.md`. Use `docs/playbooks/reflect-context.md`
    when the focus is only rules/docs context cleanup.
-10. For release or deploy questions, use `docs/playbooks/create-release.md`,
+11. For release or deploy questions, use `docs/playbooks/create-release.md`,
    `docs/playbooks/processor-deploy.md`, and local-only `docs/ops/*` files when present.
 
 ## Tracked Versus Local
