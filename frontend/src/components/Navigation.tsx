@@ -23,8 +23,8 @@ const defaultNavigation = [
     label: "Drone Archive",
   },
   {
-    key: "/benchmark-datasets",
-    label: "Benchmark Data",
+    key: "/releases",
+    label: "Releases",
   },
   {
     key: "/about",

@@ -1,6 +1,4 @@
-import { useEffect, useRef, useState } from "react";
-
-export const GROUND_TRUTH_COLORS = {
+export const MASK_COLORS = {
   background: "#BDBDBD",
   forestCover: "#087C69",
   deadwood: "#FF9800",
@@ -62,16 +60,17 @@ export const composeMaskDataUrl = ({
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) throw new Error("Could not create mask canvas context");
 
-    const background = parseHexColor(GROUND_TRUTH_COLORS.background);
-    const forestCover = parseHexColor(GROUND_TRUTH_COLORS.forestCover);
-    const deadwood = parseHexColor(GROUND_TRUTH_COLORS.deadwood);
+    const background = parseHexColor(MASK_COLORS.background);
+    const forestCover = parseHexColor(MASK_COLORS.forestCover);
+    const deadwood = parseHexColor(MASK_COLORS.deadwood);
 
     const maskCanvas = document.createElement("canvas");
     maskCanvas.width = size;
     maskCanvas.height = size;
     const maskCtx = maskCanvas.getContext("2d", { willReadFrequently: true });
-    if (!maskCtx)
+    if (!maskCtx) {
       throw new Error("Could not create source mask canvas context");
+    }
 
     maskCtx.drawImage(forestImage, 0, 0, size, size);
     const forestData = maskCtx.getImageData(0, 0, size, size).data;
@@ -115,88 +114,3 @@ export const composeMaskDataUrl = ({
   composedMaskCache.set(cacheKey, cachedPromise);
   return cachedPromise;
 };
-
-interface GroundTruthMaskProps {
-  forestCoverSrc: string;
-  deadwoodSrc: string;
-  alt: string;
-  mode?: "opaque" | "transparent";
-  opacity?: number;
-  size?: number;
-  className?: string;
-}
-
-export function GroundTruthMask({
-  forestCoverSrc,
-  deadwoodSrc,
-  alt,
-  mode = "opaque",
-  opacity = 1,
-  size = 256,
-  className = "",
-}: GroundTruthMaskProps) {
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const [shouldRender, setShouldRender] = useState(false);
-  const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
-
-    if (!("IntersectionObserver" in window)) {
-      setShouldRender(true);
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setShouldRender(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "180px" },
-    );
-
-    observer.observe(wrapper);
-
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (!shouldRender) return;
-
-    let cancelled = false;
-    setMaskDataUrl(null);
-
-    composeMaskDataUrl({ forestCoverSrc, deadwoodSrc, mode, opacity, size })
-      .then((dataUrl) => {
-        if (!cancelled) setMaskDataUrl(dataUrl);
-      })
-      .catch(() => {
-        if (!cancelled) setMaskDataUrl(null);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [deadwoodSrc, forestCoverSrc, mode, opacity, shouldRender, size]);
-
-  return (
-    <div
-      ref={wrapperRef}
-      className={`aspect-square overflow-hidden ${
-        mode === "opaque" ? "bg-[#BDBDBD]" : "bg-transparent"
-      } ${className}`}
-    >
-      {maskDataUrl && (
-        <img
-          src={maskDataUrl}
-          alt={alt}
-          loading="lazy"
-          className="h-full w-full object-cover"
-        />
-      )}
-    </div>
-  );
-}

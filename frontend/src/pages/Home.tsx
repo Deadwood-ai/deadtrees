@@ -3,7 +3,7 @@ import { Collapse } from "antd";
 
 import Hero from "../components/Home/Hero";
 import HowItWorks from "../components/Home/HowItWorks";
-import BenchmarkDatasetsSection from "../components/Home/BenchmarkDatasets";
+import ReleasesSection from "../components/Home/Releases";
 import PlatformFeatures from "../components/Home/PlatformFeatures";
 import GetInContact from "../components/Home/GetInContact";
 
@@ -260,7 +260,7 @@ export default function HomePage() {
     <div className="w-full bg-white">
       <Hero />
       <HowItWorks />
-      <BenchmarkDatasetsSection />
+      <ReleasesSection />
       <PlatformFeatures />
       <GetInContact />
       <FAQ />

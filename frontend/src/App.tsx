@@ -17,8 +17,8 @@ import DatasetReferencePatchEditor from "./pages/DatasetReferencePatchEditor";
 import DatasetLabelEditor from "./pages/DatasetLabelEditor";
 import DatasetCorrections from "./pages/DatasetCorrections";
 import Deadtrees from "./pages/Deadtrees";
-import BenchmarkDatasets from "./pages/BenchmarkDatasets";
-import DteAerialBenchmarkDataset from "./pages/DteAerialBenchmarkDataset";
+import Releases from "./pages/Releases";
+import ReleaseDetail from "./pages/ReleaseDetail";
 import SignUp from "./pages/auth/SignUp";
 import SignIn from "./pages/auth/SignIn";
 import Forgotpassword from "./pages/auth/ForgotPassword";
@@ -144,11 +144,8 @@ function AppWithTracking() {
             element={<DatasetCorrections />}
           />
           <Route path="deadtrees" element={<Deadtrees />} />
-          <Route path="benchmark-datasets" element={<BenchmarkDatasets />} />
-          <Route
-            path="benchmark-datasets/dte-aerial-bench"
-            element={<DteAerialBenchmarkDataset />}
-          />
+          <Route path="releases" element={<Releases />} />
+          <Route path="releases/:slug" element={<ReleaseDetail />} />
           <Route path="about" element={<About />} />
           <Route path="impressum" element={<Impressum />} />
           <Route
