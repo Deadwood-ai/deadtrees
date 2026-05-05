@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Body
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, Field
 
-from shared.db import verify_token, use_client, login
+from shared.db import verify_token, use_client, use_service_client, login
 from shared.settings import settings
 from shared.models import TaskPayload, QueueTask, TaskTypeEnum
 from shared.logging import LogContext, LogCategory, UnifiedLogger, SupabaseHandler
@@ -34,6 +34,37 @@ _TASK_TYPE_STATUS_FLAGS = {
 
 def _task_type_to_status_flags(task_type: TaskTypeEnum) -> tuple[str, ...]:
 	return _TASK_TYPE_STATUS_FLAGS.get(task_type, ())
+
+
+def _failed_requeue_reset_fields(task_types: list[TaskTypeEnum]) -> dict:
+	reset_fields = {
+		'has_error': False,
+		'error_message': None,
+		'current_status': 'idle',
+	}
+	for task_type in task_types:
+		for flag in _task_type_to_status_flags(task_type):
+			reset_fields[flag] = False
+	return reset_fields
+
+
+def _reset_failed_status_for_requeue(service_client, dataset_id: int, task_types: list[TaskTypeEnum]) -> None:
+	reset_fields = _failed_requeue_reset_fields(task_types)
+	response = (
+		service_client.table(settings.statuses_table)
+		.update(reset_fields)
+		.eq('dataset_id', dataset_id)
+		.execute()
+	)
+	updated_rows = getattr(response, 'data', None) or []
+	if len(updated_rows) != 1:
+		raise HTTPException(
+			status_code=500,
+			detail=(
+				f'Failed to clear error state for dataset {dataset_id}: '
+				f'expected exactly one status row update, got {len(updated_rows)}.'
+			),
+		)
 
 
 class ProcessRequest(BaseModel):
@@ -94,7 +125,26 @@ def create_processing_task(
 		)
 		raise HTTPException(status_code=400, detail=f'Invalid task type: {str(e)}')
 
-	# Check if dataset is currently being processed and clean up old queue items
+	# Load the dataset info with the caller's token before any privileged write.
+	try:
+		with use_client(token) as client:
+			response = client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute()
+			if not response.data:
+				logger.warning(
+					f'Dataset not found: {dataset_id}',
+					LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token),
+				)
+				raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
+	except HTTPException:
+		raise
+	except Exception as e:
+		msg = f'Error loading dataset {dataset_id}: {str(e)}'
+		logger.error(
+			msg, LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token)
+		)
+		raise HTTPException(status_code=500, detail=msg)
+
+	# Check if dataset is currently being processed and clean up old queue items.
 	try:
 		with use_client(token) as client:
 			# If the processor already picked up a task, block reruns.
@@ -135,16 +185,8 @@ def create_processing_task(
 					)
 
 				if s.get('has_error', False):
-					reset_fields = {
-						'has_error': False,
-						'error_message': None,
-						'current_status': 'idle',
-					}
-					for task_type in validated_task_types:
-						for flag in _task_type_to_status_flags(task_type):
-							reset_fields[flag] = False
-					with use_client() as service_client:
-						service_client.table(settings.statuses_table).update(reset_fields).eq('dataset_id', dataset_id).execute()
+					with use_service_client() as service_client:
+						_reset_failed_status_for_requeue(service_client, dataset_id, validated_task_types)
 					logger.info(
 						f'Cleared error state for dataset {dataset_id} (requeue)',
 						LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token),
@@ -171,25 +213,6 @@ def create_processing_task(
 		raise
 	except Exception as e:
 		msg = f'Error checking queue status for dataset {dataset_id}: {str(e)}'
-		logger.error(
-			msg, LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token)
-		)
-		raise HTTPException(status_code=500, detail=msg)
-
-	# Load the dataset info
-	try:
-		with use_client(token) as client:
-			response = client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute()
-			if not response.data:
-				logger.warning(
-					f'Dataset not found: {dataset_id}',
-					LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token),
-				)
-				raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
-	except HTTPException:
-		raise
-	except Exception as e:
-		msg = f'Error loading dataset {dataset_id}: {str(e)}'
 		logger.error(
 			msg, LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token)
 		)

@@ -1,9 +1,12 @@
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 
+import api.src.routers.process as process_router
 from api.src.server import app
 from api.src.routers.process import _task_type_to_status_flags
-from shared.db import use_client, login
+from shared.db import use_client, use_service_client, login
 from shared.settings import settings
 from shared.models import TaskTypeEnum, LicenseEnum, PlatformEnum, DatasetAccessEnum, StatusEnum
 
@@ -324,13 +327,16 @@ def test_rerun_succeeds_after_failed_processing(test_dataset, auth_token):
 	first_task_id = response.json()['id']
 
 	# Simulate failed processing: task exists but is_processing=False (simulating completion/failure)
-	with use_client(auth_token) as supabaseClient:
+	with use_service_client() as supabaseClient:
 		# Update status to indicate error
 		supabaseClient.table(settings.statuses_table).update(
 			{
 				'has_error': True,
 				'error_message': 'Simulated processing failure',
 				'current_status': StatusEnum.idle,
+				'is_cog_done': True,
+				'is_thumbnail_done': True,
+				'is_metadata_done': True,
 			}
 		).eq('dataset_id', test_dataset).execute()
 
@@ -355,10 +361,77 @@ def test_rerun_succeeds_after_failed_processing(test_dataset, auth_token):
 		assert response.data[0]['priority'] == 1
 		assert response.data[0]['is_processing'] is False
 
+		status_response = supabaseClient.table(settings.statuses_table).select('*').eq('dataset_id', test_dataset).execute()
+		status = status_response.data[0]
+		assert status['has_error'] is False
+		assert status['error_message'] is None
+		assert status['current_status'] == StatusEnum.idle
+		assert status['is_cog_done'] is False
+		assert status['is_thumbnail_done'] is False
+		assert status['is_metadata_done'] is False
+
+
+class _ZeroRowStatusUpdateClient:
+	def table(self, table_name):
+		self.table_name = table_name
+		return self
+
+	def update(self, fields):
+		self.fields = fields
+		return self
+
+	def eq(self, column, value):
+		self.column = column
+		self.value = value
+		return self
+
+	def execute(self):
+		return SimpleNamespace(data=[])
+
+
+class _FakeServiceClientContext:
+	def __enter__(self):
+		return _ZeroRowStatusUpdateClient()
+
+	def __exit__(self, exc_type, exc, traceback):
+		return False
+
+
+def test_failed_status_reset_zero_rows_does_not_enqueue(test_dataset, auth_token, monkeypatch):
+	"""If the error reset does not update one status row, the API must not enqueue."""
+	with use_service_client() as supabaseClient:
+		supabaseClient.table(settings.statuses_table).update(
+			{
+				'has_error': True,
+				'error_message': 'Simulated stale error',
+				'current_status': StatusEnum.idle,
+			}
+		).eq('dataset_id', test_dataset).execute()
+
+	monkeypatch.setattr(process_router, 'use_service_client', lambda: _FakeServiceClientContext())
+
+	response = client.put(
+		f'/datasets/{test_dataset}/process',
+		json={'task_types': ['cog']},
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 500
+	assert 'expected exactly one status row update, got 0' in response.json()['detail']
+
+	with use_client(auth_token) as supabaseClient:
+		queue_response = supabaseClient.table(settings.queue_table).select('*').eq('dataset_id', test_dataset).execute()
+		assert queue_response.data == []
+
+		status_response = supabaseClient.table(settings.statuses_table).select('*').eq('dataset_id', test_dataset).execute()
+		status = status_response.data[0]
+		assert status['has_error'] is True
+		assert status['error_message'] == 'Simulated stale error'
+
 
 def test_rerun_combined_task_resets_only_combined_prediction_flag(test_dataset, auth_token):
 	"""Rerunning the combined model should not reset legacy model completion flags."""
-	with use_client() as supabaseClient:
+	with use_service_client() as supabaseClient:
 		supabaseClient.table(settings.statuses_table).update(
 			{
 				'has_error': True,
