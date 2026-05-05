@@ -72,6 +72,43 @@ where dataset_id = :dataset_id;
 
 Remember: ortho file size values are MB, not bytes.
 
+## Reference Export Checks
+
+For user reports about reference/training tile counts, stale public reference
+downloads, or files under `/reference/{uuid}/{dataset_id}/...`, compare the
+database patch set with the public export artifacts before changing data.
+
+Count current validated patches in production:
+
+```sql
+select
+	resolution_cm,
+	count(*) as total,
+	count(*) filter (where parent_tile_id is null) as roots,
+	count(*) filter (where parent_tile_id is not null) as children,
+	count(*) filter (where deadwood_validated is true) as deadwood_validated,
+	count(*) filter (where forest_cover_validated is true) as forest_cover_validated,
+	max(updated_at) as max_updated_at
+from reference_patches
+where dataset_id = :dataset_id
+group by resolution_cm
+order by resolution_cm desc;
+```
+
+Then compare against the public export directory listing:
+
+```bash
+curl -fsSL "https://data2.deadtrees.earth/reference/${REFERENCE_EXPORT_UUID}/${DATASET_ID}/metadata/" \
+  | sed -n 's/.*href="\([^"]*_[0-9][0-9]*cm\.json\)".*/\1/p' \
+  | sort
+```
+
+If the database count is correct but public files are higher, suspect stale
+export artifacts rather than duplicate database rows. The reference exporter is
+responsible for deleting generated patch files that no longer correspond to
+current `reference_patches` rows; do not manually delete production files unless
+the user explicitly approves that intervention.
+
 ## Queue
 
 ```sql
