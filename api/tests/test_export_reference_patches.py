@@ -1,4 +1,5 @@
 import json
+import sys
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -319,6 +320,44 @@ def test_cleanup_removed_patch_exports_respects_resolution_filter(tmp_path):
 	assert removed_count == 3
 	assert not (dataset_dir / 'geotiff' / f'{stale_5cm_base}.tif').exists()
 	assert (dataset_dir / 'geotiff' / f'{stale_10cm_base}.tif').exists()
+
+
+def test_main_runs_scoped_stale_cleanup_when_no_validated_patches(monkeypatch, tmp_path):
+	cleanup_calls = []
+
+	monkeypatch.setattr(sys, 'argv', ['export_reference_patches.py', '--output-dir', str(tmp_path), '--dataset-id', '3251'])
+	monkeypatch.setattr(export_module, 'login', lambda _user, _password: 'token')
+	monkeypatch.setattr(export_module, 'fetch_reference_datasets', lambda _token: [3251])
+	monkeypatch.setattr(export_module, 'fetch_validated_patches', lambda *_args, **_kwargs: [])
+	monkeypatch.setattr(export_module, 'cleanup_removed_datasets', lambda *_args, **_kwargs: None)
+	monkeypatch.setattr(
+		export_module,
+		'cleanup_removed_patch_exports',
+		lambda *args, **kwargs: cleanup_calls.append((args, kwargs)) or 0,
+	)
+
+	assert export_module.main() == 0
+	assert len(cleanup_calls) == 1
+	assert cleanup_calls[0][0][1] == []
+	assert cleanup_calls[0][1] == {'dataset_id': 3251, 'resolution_cm': None}
+
+
+def test_main_skips_stale_cleanup_when_patch_fetch_fails(monkeypatch, tmp_path):
+	cleanup_calls = []
+
+	monkeypatch.setattr(sys, 'argv', ['export_reference_patches.py', '--output-dir', str(tmp_path), '--dataset-id', '3251'])
+	monkeypatch.setattr(export_module, 'login', lambda _user, _password: 'token')
+	monkeypatch.setattr(export_module, 'fetch_reference_datasets', lambda _token: [3251])
+	monkeypatch.setattr(export_module, 'fetch_validated_patches', lambda *_args, **_kwargs: None)
+	monkeypatch.setattr(export_module, 'cleanup_removed_datasets', lambda *_args, **_kwargs: None)
+	monkeypatch.setattr(
+		export_module,
+		'cleanup_removed_patch_exports',
+		lambda *args, **kwargs: cleanup_calls.append((args, kwargs)) or 0,
+	)
+
+	assert export_module.main() == 1
+	assert cleanup_calls == []
 
 
 def test_fetch_latest_reference_geometry_created_at_uses_latest_geometry_table_timestamp(monkeypatch):

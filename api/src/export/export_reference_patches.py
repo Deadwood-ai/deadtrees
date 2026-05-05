@@ -107,7 +107,7 @@ def fetch_validated_patches(
 	resolution_cm: Optional[int] = None,
 	deadwood_only: bool = False,
 	forest_cover_only: bool = False,
-) -> list[dict]:
+) -> Optional[list[dict]]:
 	"""Fetch validated patches from reference_patches table.
 
 	By default, fetches patches where EITHER deadwood_validated OR forest_cover_validated is true.
@@ -221,7 +221,7 @@ def fetch_validated_patches(
 			return patches
 	except Exception as e:
 		print(f'❌ Error fetching patches: {e}')
-		return []
+		return None
 
 
 def fetch_cog_info(token: str, dataset_id: int) -> Optional[dict]:
@@ -1178,7 +1178,20 @@ def main():
 		forest_cover_only=False,
 	)
 
+	if patches is None:
+		print('❌ Could not fetch validated patches; skipping stale export cleanup')
+		return 1
+
 	if not patches:
+		if args.dataset_id is not None or args.resolution is not None:
+			print('🗑️  Checking for removed patch exports...')
+			cleanup_removed_patch_exports(
+				output_base_dir,
+				patches,
+				reference_dataset_ids,
+				dataset_id=args.dataset_id,
+				resolution_cm=args.resolution,
+			)
 		print('✓ No new patches to export')
 		return 0
 
