@@ -37,6 +37,7 @@ import {
   webMercatorToUtm,
   createUtmSquare,
   getTargetGroundSize,
+  polygonToBBox,
 } from "../../utils/utm";
 import { createOpenFreeMapLibertyLayerGroup } from "../../utils/basemaps";
 import { palette } from "../../theme/palette";
@@ -337,7 +338,7 @@ export default function ReferencePatchMap({
       updatePatchGeometry({
         patchId,
         geometry: gjCorrectedUtm,
-        bbox: polygonToBBoxShort(gjCorrectedUtm),
+        bbox: polygonToBBox(gjCorrectedUtm),
         aoiCoveragePercent: placementValidation.overlapPercent ? Math.round(placementValidation.overlapPercent) : null,
       });
       // Use patchesRef.current to access the latest patches array
@@ -1037,11 +1038,4 @@ function enforcePatchDimensions(geometry: Polygon, resolution: PatchResolution, 
   // Convert to OpenLayers Polygon
   const coords = webMercatorGeoJsonGeom.coordinates[0];
   return new Polygon([coords]);
-}
-
-function polygonToBBoxShort(geometry: GeoJSON.Polygon): { minx: number; miny: number; maxx: number; maxy: number } {
-  const coords = geometry.coordinates[0];
-  const [minx, miny] = coords[0];
-  const [maxx, maxy] = coords[2];
-  return { minx, miny, maxx, maxy };
 }

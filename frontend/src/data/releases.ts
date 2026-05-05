@@ -652,9 +652,9 @@ export const dteAerialRelease: DteAerialRelease = {
       license: "CC BY",
       citationUrl: null,
       thumbnailPath: "9be88d59-2140-4e7a-aae5-45aa01ef40d7/3251_thumbnail.jpg",
-      exportSeed: "1761645491783",
+      exportSeed: "1776848107785",
       center: { lon: 98.08785, lat: 3.96959 },
-      patchCount: 26,
+      patchCount: 21,
     },
     {
       id: 3341,
