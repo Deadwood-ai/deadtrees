@@ -41,17 +41,19 @@ processor or storage code.
 
 ## Testing
 
-Use the project CLI instead of direct container pytest:
+Use the project CLI for normal validation; reserve `deadtrees dev debug ...` for
+sessions where a debugger client will attach.
 
 ```bash
 source venv/bin/activate
 deadtrees dev test api
 deadtrees dev test processor
-deadtrees dev debug api --test-path=api/tests/routers/test_download.py
-deadtrees dev debug processor --test-path=processor/tests/test_process_cog.py
 ```
 
 Local work is good for API, shared-model, frontend, docs, and non-GPU checks.
+For targeted follow-up after the test stack is already running, direct
+container pytest is acceptable, for example
+`docker compose -f docker-compose.test.yaml exec api-test python -m pytest -v api/tests/routers/test_process.py`.
 Run large processor/model validations on the processing-server dev checkout only
 when explicitly needed and approved.
 
@@ -129,6 +131,8 @@ Known production gotchas:
 
 - PR titles must be Conventional Commit style and pass the title check.
 - Do not prefix PR titles with agent markers such as `[codex]`.
+- If a GitHub publishing skill suggests draft PRs or `[codex]` title prefixes,
+  follow these repo rules instead: open normal PRs and use Conventional Commit titles.
 - Use area labels such as `frontend`, `api`, `database`, `processing`, `ci`, or
   `docs` where available for release-note grouping.
 
