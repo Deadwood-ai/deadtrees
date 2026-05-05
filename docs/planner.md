@@ -4,12 +4,12 @@
 
 When planning begins with a Linear issue ID:
 
-1. **Fetch the Linear issue** using `mcp_linear_get_issue()` with the provided issue ID
+1. **Fetch the Linear issue** with the configured Linear connector/tooling using the provided issue ID
 2. **Read the issue thoroughly** - understand the user story, acceptance criteria, scope, dependencies, and any context provided in the Context Gathering section
 
 3. **Gather additional context as needed:**
-   - Use `codebase_search()` to understand current implementation patterns
-   - Use Postgres MCP tools (`mcp_3dtrees-dev_*`) to inspect database schema and tables
+   - Use `rg` and current code paths to understand implementation patterns
+   - Use the configured Supabase/Postgres MCP or local Supabase CLI to inspect database schema and tables
    - Review related files and components mentioned in the issue
 4. **Only after gathering context** - if there are still unclear parts, begin the questioning process
 
@@ -32,7 +32,7 @@ Your job is ONLY to develop a thorough, step-by-step technical specification and
 If you violate these rules and propose or describe code, you are breaking the planning protocol.
 
 **TESTING PHILOSOPHY:**
-When planning involves testing, always specify real-world testing without mocks. Use actual Supabase database, real API endpoints, and genuine browser interactions. Limit to maximum 4 tests total, focusing only on core functionalities. This ensures tests reflect true system behavior for the 3D Trees data platform while maintaining development focus.
+When planning involves testing, specify real-world testing without mocks where practical. Use the actual local Supabase database, real API endpoints, and genuine browser interactions for core workflows. Keep the test list focused so the plan stays executable.
 
 ---
 

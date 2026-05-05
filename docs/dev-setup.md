@@ -43,10 +43,12 @@ npm --prefix frontend ci
 
 ```bash
 cp .env.example .env
-cp frontend/.env.local.example frontend/.env.local
+cp frontend/.env.local.example frontend/.env.dev.local
 ```
 
 The example values are set up for local Supabase CLI defaults and the local Docker test stack.
+Keep manual SSH/VPN credentials, MCP bearer tokens, and other agent access notes
+out of `.env` and frontend env files. See `docs/agents/environment-and-access.md`.
 
 ### 5. Start local Supabase
 
@@ -123,7 +125,7 @@ deadtrees dev stop
 ### 8. Start the frontend
 
 ```bash
-npm --prefix frontend run dev
+npm --prefix frontend run dev:local
 ```
 
 ## What Should Work After Bootstrap
@@ -254,6 +256,10 @@ so a Codex-created worktree will reuse the main checkout for shared `assets`,
 `data`, `.local/ssh`, local `.codex` project config, and ignored local
 `docs/ops` playbooks without hardcoding a machine-specific path.
 
+Tracked Codex instructions live in root `AGENTS.md`, `frontend/AGENTS.md`, and
+`docs/agents/`. Local-only access details stay in `.codex/*`, `docs/ops/*`, and
+ignored env files.
+
 ## Project structure
 
 ```bash
@@ -315,8 +321,8 @@ Now, you can download the repo, including the private repo.
 
 ```bash
 # Clone the repository
-git clone git@github.com:deadtrees/deadwood-api.git
-cd deadwood-api
+git clone git@github.com:Deadwood-ai/deadtrees.git
+cd deadtrees
 
 # Initialize and update submodules
 git submodule update --init --recursive
