@@ -29,6 +29,7 @@ import {
 import { Settings } from "../../config";
 import { createOpenFreeMapLibertyLayerGroup } from "../../utils/basemaps";
 import { palette } from "../../theme/palette";
+import { polygonToBBox } from "../../utils/utm";
 
 interface Props {
   datasetId: number;
@@ -310,7 +311,7 @@ export default function MLTileMap({
       updateTileGeometry({
         tileId,
         geometry: gjCorrected,
-        bbox: polygonToBBoxShort(gjCorrected),
+        bbox: polygonToBBox(gjCorrected),
         aoiCoveragePercent: placementValidation.overlapPercent ? Math.round(placementValidation.overlapPercent) : null,
       });
       // Use tilesRef.current to access the latest tiles array
@@ -667,11 +668,4 @@ function enforceTileDimensions(geometry: Polygon, resolution: TileResolution): P
       [cx - half, cy - half],
     ],
   ]);
-}
-
-function polygonToBBoxShort(geometry: GeoJSON.Polygon): { minx: number; miny: number; maxx: number; maxy: number } {
-  const coords = geometry.coordinates[0];
-  const [minx, miny] = coords[0];
-  const [maxx, maxy] = coords[2];
-  return { minx, miny, maxx, maxy };
 }
