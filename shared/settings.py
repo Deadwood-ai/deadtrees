@@ -107,6 +107,12 @@ class Settings(BaseSettings):
 	# api endpoint
 	API_ENDPOINT: str = 'http://localhost:8080/api/v1/' if DEV_MODE else 'https://data2.deadtrees.earth/api/v1/'
 	API_ENTPOINT_DATASETS: str = API_ENDPOINT + 'datasets/chunk'
+	PREPACKAGED_DOWNLOAD_BASE_URL: str = (
+		'http://localhost:8080/prepackaged/v1' if DEV_MODE else 'https://data2.deadtrees.earth/prepackaged/v1'
+	)
+	PREPACKAGED_GRANTS_PER_USER_PER_DAY: int = 2
+	PREPACKAGED_GRANTS_GLOBAL_PER_DAY: int = 6
+	PREPACKAGED_GRANT_TTL_HOURS: int = 24
 
 	# processor settings
 	PROCESSOR_USERNAME: str = 'processor@deadtrees.earth'
