@@ -110,8 +110,8 @@ class Settings(BaseSettings):
 	PREPACKAGED_DOWNLOAD_BASE_URL: str = (
 		'http://localhost:8080/prepackaged/v1' if DEV_MODE else 'https://data2.deadtrees.earth/prepackaged/v1'
 	)
-	PREPACKAGED_GRANTS_PER_USER_PER_DAY: int = 2
-	PREPACKAGED_GRANTS_GLOBAL_PER_DAY: int = 6
+	PREPACKAGED_GRANTS_PER_USER_PER_DAY: int = 5
+	PREPACKAGED_GRANTS_GLOBAL_PER_DAY: int = 30
 	PREPACKAGED_GRANT_TTL_HOURS: int = 24
 
 	# processor settings
@@ -155,6 +155,18 @@ class Settings(BaseSettings):
 	TEST_USER_PASSWORD: str = 'test123456'
 	TEST_USER_EMAIL2: str = 'test2@example.com'
 	TEST_USER_PASSWORD2: str = 'test2123456'
+
+	def model_post_init(self, __context):
+		if 'API_ENDPOINT' not in self.model_fields_set:
+			self.API_ENDPOINT = 'http://localhost:8080/api/v1/' if self.DEV_MODE else 'https://data2.deadtrees.earth/api/v1/'
+		if 'API_ENTPOINT_DATASETS' not in self.model_fields_set:
+			self.API_ENTPOINT_DATASETS = self.API_ENDPOINT + 'datasets/chunk'
+		if 'PREPACKAGED_DOWNLOAD_BASE_URL' not in self.model_fields_set:
+			self.PREPACKAGED_DOWNLOAD_BASE_URL = (
+				'http://localhost:8080/prepackaged/v1'
+				if self.DEV_MODE
+				else 'https://data2.deadtrees.earth/prepackaged/v1'
+			)
 
 	@property
 	def base_path(self) -> Path:

@@ -62,8 +62,8 @@ location /prepackaged/v1/ {
     limit_conn prepackaged_per_ip 1;
     limit_conn prepackaged_global 3;
     limit_req zone=prepackaged_start_rate burst=3 nodelay;
-    limit_rate_after 256m;
-    limit_rate 20m;
+    limit_rate_after 512m;
+    limit_rate 40m;
 
     sendfile on;
     tcp_nopush on;
