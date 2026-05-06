@@ -33,6 +33,14 @@ GitHub Actions on pushes to `main`:
 - `.github/workflows/create-release.yml` creates the CalVer GitHub Release and
   builds/pushes the API image to `ghcr.io/deadwood-ai/deadwood-api`.
 
+Do not use local/manual SQL as the normal production migration path. If the
+Supabase workflow fails, diagnose the workflow failure before proceeding with
+dependent host or API changes. For out-of-order migration errors, where a PR
+adds a migration timestamped earlier than the latest migration already recorded
+in production, prefer a reviewed follow-up migration with a newer timestamp or
+an explicit workflow fix. Manual migration repair or direct production SQL
+execution should be an explicitly approved emergency action only.
+
 Processing server automation is not represented as a GitHub workflow. It is a
 host-local cron setup on `processing-server`:
 
