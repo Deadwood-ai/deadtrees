@@ -18,6 +18,7 @@ from processor.src.utils.segmentation import (
     mask_to_polygons,
     reproject_polygons,
 )
+from processor.src.utils.geometry_validation import count_polygon_points, simplify_polygons_preserving_topology
 
 CHECKPOINT_NAME = 'mitb3_seed200_ckpt_epoch_6_best_macro_f1.safetensors'
 
@@ -27,6 +28,9 @@ CLASS_TREECOVER = 1
 CLASS_DEADWOOD = 2
 
 MINIMUM_INFERENCE_RESOLUTION = 0.05  # metres — match deadwood_v1
+# Keep simplification below one 5 cm inference pixel so boundaries are reduced
+# without allowing a whole-pixel displacement.
+FOREST_COVER_SIMPLIFICATION_TOLERANCE_M = 0.04
 BATCH_SIZE = 2
 NUM_DATALOADER_WORKERS = 0
 MINIMUM_POLYGON_AREA = 0.1  # m²
@@ -78,6 +82,7 @@ class CombinedInference:
         torch.set_float32_matmul_precision('high')
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model = self._load_model(model_path)
+        self.simplification_stats = {}
 
     def _load_model(self, model_path: str) -> SegformerForSemanticSegmentation:
         # Checkpoint was saved from a wrapper class (self.model = ...), so all
@@ -97,6 +102,7 @@ class CombinedInference:
     def inference(self, input_tif: str) -> tuple[list, list]:
         """Run inference on a GeoTIFF and return (deadwood_polygons, treecover_polygons)
         in the CRS of the input file."""
+        self.simplification_stats = {}
         vrt_src = image_reprojector(input_tif, min_res=MINIMUM_INFERENCE_RESOLUTION)
         dataset = InferenceDataset(
             image_src=vrt_src,
@@ -184,13 +190,45 @@ class CombinedInference:
             deadwood_mask, dataset.image_src, src_crs, orig_crs
         )
         treecover_polygons = self._mask_to_filtered_polygons(
-            treecover_mask, dataset.image_src, src_crs, orig_crs
+            treecover_mask,
+            dataset.image_src,
+            src_crs,
+            orig_crs,
+            simplification_tolerance=FOREST_COVER_SIMPLIFICATION_TOLERANCE_M,
+            stats_key='forest_cover',
         )
 
         return deadwood_polygons, treecover_polygons
 
-    def _mask_to_filtered_polygons(self, mask, image_src, inference_crs, orig_crs):
+    def _mask_to_filtered_polygons(
+        self,
+        mask,
+        image_src,
+        inference_crs,
+        orig_crs,
+        simplification_tolerance: float | None = None,
+        stats_key: str | None = None,
+    ):
         polygons = mask_to_polygons(mask, image_src)
+        if simplification_tolerance is not None:
+            points_before = count_polygon_points(polygons)
+            polygons = simplify_polygons_preserving_topology(polygons, simplification_tolerance)
+            points_after = count_polygon_points(polygons)
+
+            if stats_key:
+                self.simplification_stats[stats_key] = {
+                    'tolerance_m': simplification_tolerance,
+                    'simplification_crs': inference_crs.to_string()
+                    if hasattr(inference_crs, 'to_string')
+                    else str(inference_crs),
+                    'polygons': len(polygons),
+                    'points_before': points_before,
+                    'points_after': points_after,
+                }
+
+            if len(polygons) == 0:
+                return []
+
         polygons = filter_polygons_by_area(polygons, MINIMUM_POLYGON_AREA)
         polygons = reproject_polygons(polygons, inference_crs, orig_crs)
         return polygons
