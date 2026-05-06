@@ -1,21 +1,30 @@
 import { ILabel, ILabelData, ILabelSource } from "../types/labels";
 
 export type ModelConfig = Record<string, unknown>;
-export type ModelPreferenceConfig = ModelConfig | null;
+export type ModelPreferenceConfig = ModelConfig;
+
+export const DEADWOOD_V1_MODEL_CONFIG: ModelConfig = {
+  module: "deadwood_segmentation_v1_moehring",
+  checkpoint_name: "segformer_b5_full_epoch_100.safetensors",
+};
+
+export const TREECOVER_V1_MODEL_CONFIG: ModelConfig = {
+  module: "treecover_segmentation_oam_tcd",
+  checkpoint_name: "restor/tcd-segformer-mit-b5",
+};
 
 export const DEFAULT_MODEL_PREFERENCES: Record<
   ILabelData,
   ModelPreferenceConfig
 > = {
-  [ILabelData.DEADWOOD]: null,
-  [ILabelData.FOREST_COVER]: null,
+  [ILabelData.DEADWOOD]: DEADWOOD_V1_MODEL_CONFIG,
+  [ILabelData.FOREST_COVER]: TREECOVER_V1_MODEL_CONFIG,
 };
 
 function configMatches(
   labelConfig: ModelConfig | null | undefined,
   preferredConfig: ModelPreferenceConfig,
 ): boolean {
-  if (preferredConfig === null) return labelConfig == null;
   if (!labelConfig) return false;
   return Object.entries(preferredConfig).every(
     ([key, value]) => labelConfig[key] === value,

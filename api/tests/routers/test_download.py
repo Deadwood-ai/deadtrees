@@ -26,6 +26,8 @@ from shared.models import (
 	Dataset,
 	Label,
 	COMBINED_MODEL_CONFIG,
+	DEADWOOD_V1_MODEL_CONFIG,
+	TREECOVER_V1_MODEL_CONFIG,
 )
 from api.src.download.cleanup import cleanup_downloads_directory
 from api.src.download.downloads import (
@@ -60,20 +62,20 @@ def _download_test_label(
 	)
 
 
-def test_filter_exportable_dataset_labels_keeps_legacy_model_prediction_for_null_preference():
-	legacy_label = _download_test_label(1, LabelDataEnum.forest_cover, model_metadata=None)
+def test_filter_exportable_dataset_labels_keeps_legacy_model_prediction_for_legacy_preference():
+	legacy_label = _download_test_label(1, LabelDataEnum.forest_cover, model_metadata=TREECOVER_V1_MODEL_CONFIG)
 	combined_label = _download_test_label(2, LabelDataEnum.forest_cover, model_metadata=COMBINED_MODEL_CONFIG)
 
 	result = filter_exportable_dataset_labels(
 		[legacy_label, combined_label],
-		{LabelDataEnum.forest_cover: None},
+		{LabelDataEnum.forest_cover: TREECOVER_V1_MODEL_CONFIG},
 	)
 
 	assert [label.id for label in result] == [legacy_label.id]
 
 
 def test_filter_exportable_dataset_labels_skips_model_prediction_without_configured_preference():
-	model_label = _download_test_label(1, LabelDataEnum.forest_cover, model_metadata=None)
+	model_label = _download_test_label(1, LabelDataEnum.forest_cover, model_metadata=TREECOVER_V1_MODEL_CONFIG)
 	visual_label = _download_test_label(
 		2,
 		LabelDataEnum.forest_cover,
@@ -1067,6 +1069,7 @@ def test_download_consolidated_labels_multiple_types(auth_token, test_dataset_fo
 		label_type=LabelTypeEnum.segmentation,
 		label_data=LabelDataEnum.deadwood,
 		label_quality=2,
+		model_metadata=DEADWOOD_V1_MODEL_CONFIG,
 		geometry=deadwood_geojson,
 	)
 
@@ -1077,6 +1080,7 @@ def test_download_consolidated_labels_multiple_types(auth_token, test_dataset_fo
 		label_type=LabelTypeEnum.segmentation,
 		label_data=LabelDataEnum.forest_cover,
 		label_quality=2,
+		model_metadata=TREECOVER_V1_MODEL_CONFIG,
 		geometry=deadwood_geojson,
 	)
 
@@ -1512,6 +1516,7 @@ def test_download_dataset_with_multiple_labels(auth_token, test_dataset_for_down
 		label_type=LabelTypeEnum.segmentation,
 		label_data=LabelDataEnum.deadwood,
 		label_quality=2,
+		model_metadata=DEADWOOD_V1_MODEL_CONFIG,
 		geometry=deadwood_geojson,
 	)
 
@@ -1522,6 +1527,7 @@ def test_download_dataset_with_multiple_labels(auth_token, test_dataset_for_down
 		label_type=LabelTypeEnum.segmentation,
 		label_data=LabelDataEnum.forest_cover,
 		label_quality=2,
+		model_metadata=TREECOVER_V1_MODEL_CONFIG,
 		geometry=deadwood_geojson,
 	)
 

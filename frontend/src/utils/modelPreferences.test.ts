@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { ILabel, ILabelData, ILabelSource, ILabelType } from "../types/labels";
-import { selectPreferredModelLabel } from "./modelPreferences";
+import {
+  selectPreferredModelLabel,
+  TREECOVER_V1_MODEL_CONFIG,
+} from "./modelPreferences";
 
 function modelLabel(id: number, module: string | null): ILabel {
   return {
@@ -16,7 +19,7 @@ function modelLabel(id: number, module: string | null): ILabel {
           checkpoint_name:
             module === "deadwood_treecover_combined_v2"
               ? "mitb3_seed200_ckpt_epoch_6_best_macro_f1.safetensors"
-              : "legacy.safetensors",
+              : "restor/tcd-segformer-mit-b5",
         }
       : undefined,
     created_at: "2026-04-29T09:51:38.523681+00:00",
@@ -27,7 +30,7 @@ function modelLabel(id: number, module: string | null): ILabel {
 describe("model preference label selection", () => {
   it("defaults to legacy model labels when preferences are unavailable", () => {
     const labels = [
-      modelLabel(20762, null),
+      modelLabel(20762, "treecover_segmentation_oam_tcd"),
       modelLabel(20764, "deadwood_treecover_combined_v2"),
     ];
 
@@ -41,7 +44,7 @@ describe("model preference label selection", () => {
 
   it("uses configured model preferences when they are available", () => {
     const labels = [
-      modelLabel(20762, null),
+      modelLabel(20762, "treecover_segmentation_oam_tcd"),
       modelLabel(20764, "deadwood_treecover_combined_v2"),
     ];
 
@@ -62,13 +65,15 @@ describe("model preference label selection", () => {
     ).toBe(20764);
   });
 
-  it("uses null preferences to select legacy model labels", () => {
+  it("uses configured legacy preferences to select legacy model labels", () => {
     const labels = [
-      modelLabel(20762, null),
+      modelLabel(20762, "treecover_segmentation_oam_tcd"),
       modelLabel(20764, "deadwood_treecover_combined_v2"),
     ];
 
-    const preferences = new Map([[ILabelData.FOREST_COVER, null]]);
+    const preferences = new Map([
+      [ILabelData.FOREST_COVER, TREECOVER_V1_MODEL_CONFIG],
+    ]);
 
     expect(
       selectPreferredModelLabel(labels, ILabelData.FOREST_COVER, preferences)

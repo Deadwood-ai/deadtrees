@@ -245,18 +245,15 @@ def delete_model_prediction_labels(
 			raise Exception(f'Error deleting model prediction labels: {str(e)}')
 
 
-def get_model_preferences(token: Optional[str] = None) -> Dict[LabelDataEnum, Optional[Dict[str, Any]]]:
+def get_model_preferences(token: Optional[str] = None) -> Dict[LabelDataEnum, Dict[str, Any]]:
 	"""Return the preferred model_config per label_data type from v2_model_preferences.
 
-	Returns a dict mapping LabelDataEnum -> model_config dict, or None for legacy labels.
+	Returns a dict mapping LabelDataEnum -> model_config dict.
 	Label data types with no preference row use the legacy model defaults.
 	"""
 	with use_client(token) as client:
 		response = client.table(settings.model_preferences_table).select('label_data,model_config').execute()
 
-	preferences = {
-		label_data: dict(config) if config is not None else None
-		for label_data, config in DEFAULT_MODEL_PREFERENCES.items()
-	}
+	preferences = {label_data: dict(config) for label_data, config in DEFAULT_MODEL_PREFERENCES.items()}
 	preferences.update({LabelDataEnum(row['label_data']): row['model_config'] for row in (response.data or [])})
 	return preferences

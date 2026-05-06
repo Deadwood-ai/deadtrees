@@ -507,7 +507,7 @@ def get_all_dataset_labels(dataset_id: int) -> List[Label]:
 
 
 def filter_exportable_dataset_labels(
-	labels: List[Label], preferences: Dict[LabelDataEnum, Optional[Dict]]
+	labels: List[Label], preferences: Dict[LabelDataEnum, Dict]
 ) -> List[Label]:
 	"""Keep only exportable label sources, and for model predictions only the preferred model version."""
 	result = []

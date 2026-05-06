@@ -1,15 +1,37 @@
 -- Restore public defaults to legacy model predictions while the combined model
--- remains available as an auditor-selectable variant. Legacy labels are encoded
--- by a NULL model_config, so preferences and export matching must be null-safe.
+-- remains available as an auditor-selectable variant. Older legacy labels were
+-- written before model_config existed, so backfill those rows to the explicit
+-- legacy model configs used by the current legacy processors.
 
-alter table public.v2_model_preferences
-	alter column model_config drop not null;
+update public.v2_labels
+set
+	model_config = '{"module":"deadwood_segmentation_v1_moehring","checkpoint_name":"segformer_b5_full_epoch_100.safetensors"}'::jsonb,
+	updated_at = now()
+where
+	label_source = 'model_prediction'::"LabelSource"
+	and label_data = 'deadwood'
+	and model_config is null;
+
+update public.v2_labels
+set
+	model_config = '{"module":"treecover_segmentation_oam_tcd","checkpoint_name":"restor/tcd-segformer-mit-b5"}'::jsonb,
+	updated_at = now()
+where
+	label_source = 'model_prediction'::"LabelSource"
+	and label_data = 'forest_cover'
+	and model_config is null;
 
 update public.v2_model_preferences
 set
-	model_config = null,
+	model_config = case label_data
+		when 'deadwood' then '{"module":"deadwood_segmentation_v1_moehring","checkpoint_name":"segformer_b5_full_epoch_100.safetensors"}'::jsonb
+		when 'forest_cover' then '{"module":"treecover_segmentation_oam_tcd","checkpoint_name":"restor/tcd-segformer-mit-b5"}'::jsonb
+	end,
 	updated_at = now()
 where label_data in ('deadwood', 'forest_cover');
+
+alter table public.v2_model_preferences
+	alter column model_config set not null;
 
 create or replace view "public"."v_export_polygon_candidates" as
 with correction_flags as (
@@ -64,7 +86,7 @@ deadwood as (
 	join public.v2_labels l on l.id = dg.label_id
 	join public.v2_model_preferences mp
 		on mp.label_data = 'deadwood'
-		and l.model_config is not distinct from mp.model_config
+		and l.model_config = mp.model_config
 	left join correction_flags cf
 		on cf.layer_type = 'deadwood'
 		and cf.geometry_id = dg.id
@@ -98,7 +120,7 @@ forest_cover as (
 	join public.v2_labels l on l.id = fg.label_id
 	join public.v2_model_preferences mp
 		on mp.label_data = 'forest_cover'
-		and l.model_config is not distinct from mp.model_config
+		and l.model_config = mp.model_config
 	left join correction_flags cf
 		on cf.layer_type = 'forest_cover'
 		and cf.geometry_id = fg.id

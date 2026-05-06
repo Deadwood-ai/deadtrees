@@ -4,12 +4,14 @@ from typing import Dict, Any
 
 from shared.models import (
 	DEFAULT_MODEL_PREFERENCES,
+	DEADWOOD_V1_MODEL_CONFIG,
 	Label,
 	LabelDataEnum,
 	LabelPayloadData,
 	LabelSourceEnum,
 	LabelTypeEnum,
 	RawImages,
+	TREECOVER_V1_MODEL_CONFIG,
 	TaskTypeEnum,
 	StatusEnum,
 	Status,
@@ -85,8 +87,8 @@ def test_label_payload_model_config_input_alias_deserializes_to_model_metadata()
 
 
 def test_default_model_preferences_use_legacy_model_for_both_label_types():
-	assert DEFAULT_MODEL_PREFERENCES[LabelDataEnum.deadwood] is None
-	assert DEFAULT_MODEL_PREFERENCES[LabelDataEnum.forest_cover] is None
+	assert DEFAULT_MODEL_PREFERENCES[LabelDataEnum.deadwood] == DEADWOOD_V1_MODEL_CONFIG
+	assert DEFAULT_MODEL_PREFERENCES[LabelDataEnum.forest_cover] == TREECOVER_V1_MODEL_CONFIG
 
 
 # ============================================================================
