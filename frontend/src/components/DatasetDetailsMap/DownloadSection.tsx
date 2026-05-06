@@ -227,7 +227,7 @@ export default function DownloadSection({
   }
 
   return (
-    <div className="shrink-0">
+    <div className="shrink-0" data-testid="dataset-download-section">
       <div className="rounded-2xl border border-slate-300/80 bg-white/98 p-4 shadow-md">
         <Space direction="vertical" className="w-full">
           {isDownloading && currentDownloadId !== dataset.id.toString() && (

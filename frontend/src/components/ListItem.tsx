@@ -166,6 +166,9 @@ const ListItem = ({
 
           <Tooltip title={biomeName || "Unknown biome"}>
             <Tag
+              data-testid={
+                biomeName ? "dataset-biome-filter" : "dataset-biome-label"
+              }
               color={biomeColor}
               className="m-0 inline-flex w-fit shrink-0 cursor-pointer select-none"
               onClick={(e) => {
