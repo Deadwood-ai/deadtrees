@@ -1,6 +1,19 @@
 # Deadtrees AARRR Analytics
 
-This document is the source-of-truth for the current Deadtrees analytics v1 migration.
+This document tracks the current DeadTrees analytics v1 event map and PostHog
+dashboard setup. The strategic product model for future analytics and
+regression-test coverage lives in
+[`docs/analytics/customer-factory-product-map.md`](customer-factory-product-map.md).
+
+Use the customer factory map as the source of truth for product definitions:
+
+- Priority customer: data contributors.
+- North star: weekly trusted forest-data outcomes, reported as a composite
+  scorecard.
+- Contributor activation: processing completed and the contributor views the
+  processed segmentation result for the first time.
+- Healthy processing lead time: one hour target, two hours upper bound.
+- Value capture: impact, not revenue.
 
 ## Current Production Status
 
@@ -9,7 +22,7 @@ This document is the source-of-truth for the current Deadtrees analytics v1 migr
 - The existing AARRR overview dashboard already exists in PostHog, but named product events are effectively absent in production history until the initialization fix is deployed.
 - The companion dashboards for contribution funnels, retention, and friction were created as shells but were not populated with insights.
 
-## AARRR Event Map
+## Current Event Map
 
 ### Acquisition
 
@@ -24,6 +37,10 @@ This document is the source-of-truth for the current Deadtrees analytics v1 migr
 
 ### Activation
 
+Contributor activation is not just upload completion. The target activation
+moment is: processing completed, then the contributor opens the processed
+segmentation result for the first time.
+
 - `sign_up_started`
 - `sign_up_completed`
 - `sign_in_completed`
@@ -31,7 +48,12 @@ This document is the source-of-truth for the current Deadtrees analytics v1 migr
 - `upload_completed`
 - `processing_result_viewed`
 
-### Retention / Value
+Missing next events:
+
+- `processing_completed`
+- `owner_processing_result_viewed`
+
+### Retention / Value Creation
 
 - `dataset_download_started`
 - `dataset_download_completed`
@@ -40,6 +62,33 @@ This document is the source-of-truth for the current Deadtrees analytics v1 migr
 - `publish_started`
 - `publish_submitted`
 - `publish_completed`
+
+### Impact / Value Capture
+
+DeadTrees is impact-driven, so this replaces revenue as the meaningful value
+capture stage. Track outcomes that prove the platform creates reusable data,
+trusted reference assets, publications, releases, and satellite-upscaling value.
+
+Current events:
+
+- `dataset_download_completed`
+- `publish_completed`
+- `audit_completed`
+- `correction_approved`
+- `reference_patch_editor_opened`
+
+Missing next events:
+
+- `processing_completed`
+- `processing_failed`
+- `processing_failure_notified`
+- `processing_failure_resolved`
+- `reference_patch_validated`
+- `release_opened`
+- `release_artifact_clicked`
+- `satellite_map_opened`
+- `satellite_layer_toggled`
+- `satellite_dataset_downloaded`
 
 ### Referral / Community
 
@@ -80,4 +129,5 @@ This document is the source-of-truth for the current Deadtrees analytics v1 migr
 - Deploy the frontend analytics initialization fix.
 - Verify that named events begin appearing in production again.
 - Keep the AARRR dashboards attached to the current event names instead of creating a second competing taxonomy.
-- Treat `Referral` as a light-weight stage for now; Deadtrees does not yet have a deeper invite or share loop instrumented.
+- Align future analytics work with the customer factory map: composite weekly outcome metrics, contributor activation after processing, one-hour processing target, and impact/value capture instead of revenue.
+- Treat `Referral` as a light-weight stage for now; DeadTrees does not yet have a deeper invite or share loop instrumented.
