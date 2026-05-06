@@ -45,8 +45,8 @@ COMBINED_MODEL_CONFIG = {
 
 
 DEFAULT_MODEL_PREFERENCES = {
-	LabelDataEnum.deadwood: dict(COMBINED_MODEL_CONFIG),
-	LabelDataEnum.forest_cover: dict(COMBINED_MODEL_CONFIG),
+	LabelDataEnum.deadwood: None,
+	LabelDataEnum.forest_cover: None,
 }
 
 

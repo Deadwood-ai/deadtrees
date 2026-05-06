@@ -3,11 +3,6 @@ import { ILabel, ILabelData, ILabelSource } from "../types/labels";
 export type ModelConfig = Record<string, unknown>;
 export type ModelPreferenceConfig = ModelConfig | null;
 
-export const COMBINED_MODEL_CONFIG: ModelConfig = {
-  module: "deadwood_treecover_combined_v2",
-  checkpoint_name: "mitb3_seed200_ckpt_epoch_6_best_macro_f1.safetensors",
-};
-
 export const DEFAULT_MODEL_PREFERENCES: Record<
   ILabelData,
   ModelPreferenceConfig
@@ -38,8 +33,13 @@ export function selectPreferredModelLabel<
   if (activeLabels.length === 0) return null;
   if (activeLabels.length === 1) return activeLabels[0];
 
-  const preferredConfig =
-    preferences?.get(labelType) ?? DEFAULT_MODEL_PREFERENCES[labelType];
+  let preferredConfig = DEFAULT_MODEL_PREFERENCES[labelType];
+  if (preferences?.has(labelType)) {
+    const configuredPreference = preferences.get(labelType);
+    preferredConfig =
+      configuredPreference === undefined ? preferredConfig : configuredPreference;
+  }
+
   const preferred = activeLabels.find(
     (label) =>
       label.label_source === ILabelSource.MODEL_PREDICTION &&

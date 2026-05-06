@@ -24,6 +24,7 @@ from shared.models import (
 	LabelTypeEnum,
 	LabelDataEnum,
 	Dataset,
+	Label,
 	COMBINED_MODEL_CONFIG,
 )
 from api.src.download.cleanup import cleanup_downloads_directory
@@ -33,12 +34,55 @@ from api.src.download.downloads import (
 	build_dataset_metadata_row,
 	generate_bundle_job_id,
 	create_consolidated_geopackage,
+	filter_exportable_dataset_labels,
 )
 from shared.labels import create_label_with_geometries
 from shared.testing.fixtures import login
 import json
 
 client = TestClient(app)
+
+
+def _download_test_label(
+	label_id: int,
+	label_data: LabelDataEnum,
+	label_source: LabelSourceEnum = LabelSourceEnum.model_prediction,
+	model_metadata: dict | None = None,
+) -> Label:
+	return Label(
+		id=label_id,
+		dataset_id=1,
+		user_id='test-user',
+		label_source=label_source,
+		label_type=LabelTypeEnum.segmentation,
+		label_data=label_data,
+		model_metadata=model_metadata,
+	)
+
+
+def test_filter_exportable_dataset_labels_keeps_legacy_model_prediction_for_null_preference():
+	legacy_label = _download_test_label(1, LabelDataEnum.forest_cover, model_metadata=None)
+	combined_label = _download_test_label(2, LabelDataEnum.forest_cover, model_metadata=COMBINED_MODEL_CONFIG)
+
+	result = filter_exportable_dataset_labels(
+		[legacy_label, combined_label],
+		{LabelDataEnum.forest_cover: None},
+	)
+
+	assert [label.id for label in result] == [legacy_label.id]
+
+
+def test_filter_exportable_dataset_labels_skips_model_prediction_without_configured_preference():
+	model_label = _download_test_label(1, LabelDataEnum.forest_cover, model_metadata=None)
+	visual_label = _download_test_label(
+		2,
+		LabelDataEnum.forest_cover,
+		label_source=LabelSourceEnum.visual_interpretation,
+	)
+
+	result = filter_exportable_dataset_labels([model_label, visual_label], {})
+
+	assert [label.id for label in result] == [visual_label.id]
 
 
 def _wait_for_download_completed(dataset_id: int, auth_token: str, *, max_attempts: int = 40, sleep_s: float = 0.25):
