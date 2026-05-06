@@ -42,7 +42,21 @@ test.describe("customer factory public smoke", () => {
     await expect(page.getByTestId("releases-page")).toBeVisible();
     await expect(page.getByTestId("release-card").first()).toBeVisible();
 
-    await page.getByRole("button", { name: "Open release" }).first().click();
+    const releaseActions = page.getByRole("button", { name: "Open release" });
+    const releaseActionCount = await releaseActions.count();
+    let openedAvailableRelease = false;
+
+    for (let index = 0; index < releaseActionCount; index += 1) {
+      const releaseAction = releaseActions.nth(index);
+
+      if (await releaseAction.isEnabled()) {
+        await releaseAction.click();
+        openedAvailableRelease = true;
+        break;
+      }
+    }
+
+    expect(openedAvailableRelease).toBe(true);
     await expect(page).toHaveURL(/\/releases\/[^/]+$/);
     await expect(page.getByTestId("release-detail-page")).toBeVisible({
       timeout: 30_000,
