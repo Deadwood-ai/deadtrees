@@ -6,19 +6,11 @@ import numpy as np
 import rasterio
 import rasterio.warp
 import shapely
-import utm
 from rasterio.vrt import WarpedVRT
 from shapely.affinity import affine_transform
 from shapely.geometry import Polygon
 
-
-def get_utm_string_from_latlon(lat, lon):
-	zone = utm.from_latlon(lat, lon)
-	utm_code = 32600 + zone[2]
-	if lat < 0:
-		utm_code -= 100
-
-	return f'EPSG:{utm_code}'
+from .crs import get_utm_string_from_latlon
 
 
 def merge_polygons(contours, hierarchy):
