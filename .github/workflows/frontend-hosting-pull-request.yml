@@ -16,6 +16,7 @@ jobs:
   frontend-ci:
     name: frontend-ci
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
@@ -25,9 +26,11 @@ jobs:
       - run: npm test
       - name: Install Playwright Chromium
         if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository }}
+        timeout-minutes: 8
         run: npx playwright install --with-deps chromium
       - name: Run customer factory smoke
         if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository }}
+        timeout-minutes: 8
         env:
           VITE_MODE: production
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}

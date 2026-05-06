@@ -42,7 +42,10 @@ export default function DataList({
       {!visibleData ? (
         <div>Loading...</div>
       ) : visibleData.length === 0 ? (
-        <div className="flex h-full flex-col items-center justify-center">
+        <div
+          className="flex h-full flex-col items-center justify-center"
+          data-testid="dataset-empty-results"
+        >
           <div className="text-lg font-medium text-gray-500">No results found</div>
           <div className="text-sm text-gray-400">Try adjusting your filters or search criteria</div>
         </div>

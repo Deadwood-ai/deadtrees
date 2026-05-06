@@ -1368,6 +1368,7 @@ const DeadtreesMap = () => {
           height: "100%",
         }}
         ref={mapContainer}
+        data-testid="deadtrees-map"
       >
         {/* Top Left - Location Controls (desktop) */}
         <div className="absolute left-4 top-24 z-50 hidden md:block">

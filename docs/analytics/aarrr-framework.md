@@ -3,11 +3,11 @@
 This document tracks the current DeadTrees analytics v1 event map and PostHog
 dashboard setup. The strategic product model for future analytics and
 regression-test coverage lives in
-[`docs/analytics/customer-factory-product-map.md`](customer-factory-product-map.md).
+[`docs/analytics/deadtrees-data-factory.md`](deadtrees-data-factory.md).
 
-Use the customer factory map as the source of truth for product definitions:
+Use the DeadTrees Data Factory as the source of truth for product definitions:
 
-- Priority customer: data contributors.
+- Priority role: data contributors.
 - North star: weekly trusted forest-data outcomes, reported as a composite
   scorecard.
 - Contributor activation: processing completed and the contributor views the
@@ -129,5 +129,5 @@ Missing next events:
 - Deploy the frontend analytics initialization fix.
 - Verify that named events begin appearing in production again.
 - Keep the AARRR dashboards attached to the current event names instead of creating a second competing taxonomy.
-- Align future analytics work with the customer factory map: composite weekly outcome metrics, contributor activation after processing, one-hour processing target, and impact/value capture instead of revenue.
+- Align future analytics work with the DeadTrees Data Factory: composite weekly outcome metrics, contributor activation after processing, one-hour processing target, and impact/value capture instead of revenue.
 - Treat `Referral` as a light-weight stage for now; DeadTrees does not yet have a deeper invite or share loop instrumented.

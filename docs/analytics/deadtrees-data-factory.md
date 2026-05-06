@@ -1,4 +1,4 @@
-# DeadTrees Customer Factory Product Map
+# DeadTrees Data Factory
 
 This document defines the user-facing product model for DeadTrees. It should be
 the shared basis for product decisions, analytics, and regression tests.
@@ -8,14 +8,16 @@ deadwood and forest-cover segmentation, turn the best outputs into trusted
 reference/benchmark data, and use that data for satellite-scale forest mortality
 products.
 
-![DeadTrees customer factory](deadtrees-customer-factory.png)
+![DeadTrees Data Factory](deadtrees-data-factory.png)
 
 ## Framework
 
-Use Ash Maurya's Customer Factory as the operating model:
+Use the DeadTrees Data Factory as the operating model:
 
-- **Input**: potential contributors, data users, reviewers, and partners.
-- **Output**: people who achieve a concrete outcome through DeadTrees.
+- **Input**: potential contributors, data users, reviewers, partners, and raw
+  forest data.
+- **Output**: processed, trusted, reusable forest data products and the people
+  who can act on them.
 - **Throughput**: the weekly rate at which these outcomes happen.
 - **Constraint**: the weakest step in the system right now.
 
@@ -24,9 +26,8 @@ The useful question is not "which features exist?" but:
 > Where does the DeadTrees factory currently lose valuable data, trust, reuse,
 > or contributor momentum?
 
-Sources:
+Background sources:
 
-- [The Customer Factory](https://www.leanfoundry.com/articles/customer-factory)
 - [How to Systematically Prioritize and Tackle the Riskiest Assumptions in Your Business Model](https://www.leanfoundry.com/articles/how-to-systematically-prioritize-and-tackle-the-riskiest-assumptions-in-your-business-model)
 - [Traction is the Goal. Everything Else is Distraction.](https://www.leanfoundry.com/articles/traction-is-the-goal-everything-else-is-distraction)
 - [What's Your Company's Bottleneck?](https://www.lean.org/the-lean-post/articles/whats-your-companys-bottleneck/)
@@ -35,9 +36,9 @@ Sources:
 
 ### Priority Role: Data Contributor
 
-The priority customer for the current phase is the data contributor: someone
-with access to forests who can upload raw drone imagery or pre-processed
-GeoTIFF orthophotos.
+The priority role for the current phase is the data contributor: someone with
+access to forests who can upload raw drone imagery or pre-processed GeoTIFF
+orthophotos.
 
 Their expected value:
 
@@ -133,7 +134,7 @@ hour, with two hours as the upper bound for a healthy experience.
 
 ## Dataset Factory
 
-The user factory depends on dataset throughput:
+The data factory depends on dataset throughput:
 
 ![DeadTrees dataset factory](deadtrees-dataset-factory.png)
 

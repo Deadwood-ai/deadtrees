@@ -223,6 +223,7 @@ export default function Dataset() {
                     (filterDisplay.length > 15 ? "..." : "")}
                 </span>
                 <Button
+                  data-testid="dataset-active-filter-clear"
                   className="border-none bg-transparent h-auto p-0 ml-1 flex items-center justify-center text-blue-500 hover:text-blue-700"
                   size="small"
                   onClick={() => {
@@ -253,6 +254,7 @@ export default function Dataset() {
         <div className="flex flex-col gap-2 sm:flex-row">
           <Input
             placeholder="Search by Authors or Location (Region, Province, City)"
+            data-testid="dataset-search-input"
             onChange={(e) => handleSearch(e.target.value)}
             className="flex-1"
             allowClear
