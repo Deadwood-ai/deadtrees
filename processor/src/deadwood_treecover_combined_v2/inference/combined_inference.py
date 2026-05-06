@@ -28,9 +28,9 @@ CLASS_TREECOVER = 1
 CLASS_DEADWOOD = 2
 
 MINIMUM_INFERENCE_RESOLUTION = 0.05  # metres — match deadwood_v1
-# Keep simplification below one 5 cm inference pixel so boundaries are reduced
-# without allowing a whole-pixel displacement.
-FOREST_COVER_SIMPLIFICATION_TOLERANCE_M = 0.04
+# Match the 5 cm combined-model inference grid when simplifying forest cover
+# polygons for storage.
+FOREST_COVER_SIMPLIFICATION_TOLERANCE_M = 0.05
 BATCH_SIZE = 2
 NUM_DATALOADER_WORKERS = 0
 MINIMUM_POLYGON_AREA = 0.1  # m²

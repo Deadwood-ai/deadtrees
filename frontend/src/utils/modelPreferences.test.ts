@@ -25,23 +25,23 @@ function modelLabel(id: number, module: string | null): ILabel {
 }
 
 describe("model preference label selection", () => {
-  it("defaults to the combined model when preferences are unavailable", () => {
+  it("defaults to legacy model labels when preferences are unavailable", () => {
     const labels = [
-      modelLabel(20762, "treecover_segmentation_oam_tcd"),
+      modelLabel(20762, null),
       modelLabel(20764, "deadwood_treecover_combined_v2"),
     ];
 
     expect(
       selectPreferredModelLabel(labels, ILabelData.FOREST_COVER, new Map())?.id,
-    ).toBe(20764);
+    ).toBe(20762);
     expect(
       selectPreferredModelLabel(labels, ILabelData.FOREST_COVER, undefined)?.id,
-    ).toBe(20764);
+    ).toBe(20762);
   });
 
   it("uses configured model preferences when they are available", () => {
     const labels = [
-      modelLabel(20762, "treecover_segmentation_oam_tcd"),
+      modelLabel(20762, null),
       modelLabel(20764, "deadwood_treecover_combined_v2"),
     ];
 
@@ -49,11 +49,26 @@ describe("model preference label selection", () => {
       [
         ILabelData.FOREST_COVER,
         {
-          module: "treecover_segmentation_oam_tcd",
-          checkpoint_name: "legacy.safetensors",
+          module: "deadwood_treecover_combined_v2",
+          checkpoint_name:
+            "mitb3_seed200_ckpt_epoch_6_best_macro_f1.safetensors",
         },
       ],
     ]);
+
+    expect(
+      selectPreferredModelLabel(labels, ILabelData.FOREST_COVER, preferences)
+        ?.id,
+    ).toBe(20764);
+  });
+
+  it("uses null preferences to select legacy model labels", () => {
+    const labels = [
+      modelLabel(20762, null),
+      modelLabel(20764, "deadwood_treecover_combined_v2"),
+    ];
+
+    const preferences = new Map([[ILabelData.FOREST_COVER, null]]);
 
     expect(
       selectPreferredModelLabel(labels, ILabelData.FOREST_COVER, preferences)

@@ -1,21 +1,26 @@
 import { ILabel, ILabelData, ILabelSource } from "../types/labels";
 
 export type ModelConfig = Record<string, unknown>;
+export type ModelPreferenceConfig = ModelConfig | null;
 
 export const COMBINED_MODEL_CONFIG: ModelConfig = {
   module: "deadwood_treecover_combined_v2",
   checkpoint_name: "mitb3_seed200_ckpt_epoch_6_best_macro_f1.safetensors",
 };
 
-export const DEFAULT_MODEL_PREFERENCES: Record<ILabelData, ModelConfig> = {
-  [ILabelData.DEADWOOD]: COMBINED_MODEL_CONFIG,
-  [ILabelData.FOREST_COVER]: COMBINED_MODEL_CONFIG,
+export const DEFAULT_MODEL_PREFERENCES: Record<
+  ILabelData,
+  ModelPreferenceConfig
+> = {
+  [ILabelData.DEADWOOD]: null,
+  [ILabelData.FOREST_COVER]: null,
 };
 
 function configMatches(
-  labelConfig: ModelConfig | undefined,
-  preferredConfig: ModelConfig,
+  labelConfig: ModelConfig | null | undefined,
+  preferredConfig: ModelPreferenceConfig,
 ): boolean {
+  if (preferredConfig === null) return labelConfig == null;
   if (!labelConfig) return false;
   return Object.entries(preferredConfig).every(
     ([key, value]) => labelConfig[key] === value,
@@ -27,7 +32,7 @@ export function selectPreferredModelLabel<
 >(
   labels: T[],
   labelType: ILabelData,
-  preferences?: ReadonlyMap<string, ModelConfig>,
+  preferences?: ReadonlyMap<string, ModelPreferenceConfig>,
 ): T | null {
   const activeLabels = labels.filter((label) => label.is_active !== false);
   if (activeLabels.length === 0) return null;
