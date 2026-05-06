@@ -1,10 +1,12 @@
 import {
+  ArrowLeftOutlined,
   DatabaseOutlined,
   DownloadOutlined,
   GlobalOutlined,
 } from "@ant-design/icons";
 import { Button, Tag } from "antd";
 import { useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { DteAerialReleaseGallery } from "../components/Releases/DteAerialReleaseGallery";
 import { DteAerialReleaseSiteMap } from "../components/Releases/DteAerialReleaseSiteMap";
@@ -20,6 +22,7 @@ interface DteAerialReleaseProps {
 }
 
 export default function DteAerialRelease({ release }: DteAerialReleaseProps) {
+  const navigate = useNavigate();
   const benchmark = release.dteAerial;
   const { adminInfoByDatasetId, isAdminInfoLoading } =
     useDteAerialDatasetAdminInfo(release);
@@ -41,7 +44,18 @@ export default function DteAerialRelease({ release }: DteAerialReleaseProps) {
   return (
     <main className="min-h-screen bg-[#f8faf9] pt-24 md:pt-32">
       <section className="border-b border-gray-200/80 bg-white">
-        <div className="mx-auto grid max-w-7xl gap-10 px-4 py-16 md:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)] md:gap-12 md:px-8 md:py-24">
+        <div className="mx-auto max-w-7xl px-4 pt-8 md:px-8">
+          <Button
+            icon={<ArrowLeftOutlined />}
+            onClick={() => navigate("/releases")}
+            type="text"
+            className="px-0"
+          >
+            Back to releases
+          </Button>
+        </div>
+
+        <div className="mx-auto grid max-w-7xl gap-10 px-4 pb-16 pt-8 md:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)] md:gap-12 md:px-8 md:pb-24">
           <div>
             <p className="m-0 text-sm font-semibold uppercase tracking-wider text-[#1B5E35] md:text-base">
               {release.typeLabel} · {release.shortName}

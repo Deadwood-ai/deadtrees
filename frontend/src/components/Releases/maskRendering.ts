@@ -15,6 +15,7 @@ const parseHexColor = (hex: string): [number, number, number] => {
 
 const imageLoadCache = new Map<string, Promise<HTMLImageElement>>();
 const composedMaskCache = new Map<string, Promise<string>>();
+const singleMaskCache = new Map<string, Promise<string>>();
 
 const loadImage = (src: string) => {
   const cached = imageLoadCache.get(src);
@@ -112,5 +113,77 @@ export const composeMaskDataUrl = ({
   });
 
   composedMaskCache.set(cacheKey, cachedPromise);
+  return cachedPromise;
+};
+
+export const composeSingleMaskDataUrl = ({
+  src,
+  layer,
+  mode,
+  opacity,
+  size,
+}: {
+  src: string;
+  layer: "tree-cover" | "deadwood";
+  mode: "opaque" | "transparent";
+  opacity: number;
+  size: number;
+}) => {
+  const cacheKey = `${src}|${layer}|${mode}|${opacity}|${size}`;
+  const cached = singleMaskCache.get(cacheKey);
+  if (cached) return cached;
+
+  const promise = loadImage(src).then((maskImage) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) throw new Error("Could not create mask canvas context");
+
+    const sourceCanvas = document.createElement("canvas");
+    sourceCanvas.width = size;
+    sourceCanvas.height = size;
+    const sourceCtx = sourceCanvas.getContext("2d", {
+      willReadFrequently: true,
+    });
+    if (!sourceCtx) {
+      throw new Error("Could not create source mask canvas context");
+    }
+
+    sourceCtx.drawImage(maskImage, 0, 0, size, size);
+    const sourceData = sourceCtx.getImageData(0, 0, size, size).data;
+    const output = ctx.createImageData(size, size);
+    const background = parseHexColor(MASK_COLORS.background);
+    const positive = parseHexColor(
+      layer === "tree-cover" ? MASK_COLORS.forestCover : MASK_COLORS.deadwood,
+    );
+
+    for (let i = 0; i < output.data.length; i += 4) {
+      const isPositive = sourceData[i] > 127;
+      const color = isPositive ? positive : background;
+      const alpha =
+        mode === "transparent"
+          ? isPositive
+            ? Math.round(opacity * 255)
+            : 0
+          : 255;
+
+      output.data[i] = color[0];
+      output.data[i + 1] = color[1];
+      output.data[i + 2] = color[2];
+      output.data[i + 3] = alpha;
+    }
+
+    ctx.putImageData(output, 0, 0);
+    return canvas.toDataURL("image/png");
+  });
+
+  const cachedPromise = promise.catch((error) => {
+    singleMaskCache.delete(cacheKey);
+    throw error;
+  });
+
+  singleMaskCache.set(cacheKey, cachedPromise);
   return cachedPromise;
 };

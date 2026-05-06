@@ -1,10 +1,8 @@
-from fastapi import FastAPI, Response
+from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
-import logging
-
 from shared.__version__ import __version__
-from .routers import process, upload, info, auth, labels, download, dte_stats
+from .routers import process, upload, info, auth, download, dte_stats, prepackaged
 
 app = FastAPI(
 	title='Deadwood-AI API',
@@ -55,6 +53,9 @@ app.include_router(process.router)
 
 # add the DTE stats route (public, no auth)
 app.include_router(dte_stats.router)
+
+# add authenticated prepackaged dataset catalog and grant routes
+app.include_router(prepackaged.router)
 
 # add the download routes to the app
 # app.include_router(download.download_app)
