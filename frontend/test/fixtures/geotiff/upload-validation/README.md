@@ -1,4 +1,4 @@
-These fixtures are tiny crops derived from real archive files so upload validation can be tested against the same TIFF structures we see in production, without checking large customer files into the repo.
+These fixtures are tiny crops derived from real archive files so upload validation can be tested against the same TIFF structures we see in production, without checking large contributor files into the repo.
 
 Source datasets:
 - `rgb-real-crop.tif`: cropped from `/home/jj1049/mount_storage_server/archive/1000_ortho.tif`

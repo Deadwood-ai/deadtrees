@@ -75,6 +75,7 @@ const LayerControlPanel = ({
   return (
     <div
       className={`map-control-panel box-border min-w-0 pointer-events-auto flex flex-col overflow-x-hidden p-3 ${isDrawerSheet ? "map-control-panel--drawer w-full" : "w-60 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-gray-200/60 bg-white/95 shadow-xl backdrop-blur-sm"}`}
+      data-testid="deadtrees-layer-controls"
     >
       {/* Basemap Selection */}
       <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">Basemap</div>

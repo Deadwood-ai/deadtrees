@@ -293,6 +293,7 @@ export default function DatasetDetails() {
         <div className="pointer-events-auto">
           {!isEditing && (
             <Button
+              data-testid="dataset-detail-back-mobile"
               shape="circle"
               onClick={handleBackClick}
               icon={<ArrowLeftOutlined />}
@@ -332,6 +333,7 @@ export default function DatasetDetails() {
           }}
         >
           <Button
+            data-testid="dataset-detail-back-desktop"
             size="large"
             shape="circle"
             onClick={handleBackClick}

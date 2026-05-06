@@ -74,9 +74,9 @@ Do not use currently red global checks as blocking evidence unless the task is
 to fix that baseline. As of this strategy, frontend Vitest is the green fast
 gate, while frontend build/lint still have unrelated baseline debt.
 
-## Customer Factory Coverage
+## Data Factory Coverage
 
-Each base product action from `docs/analytics/customer-factory-product-map.md`
+Each base product action from `docs/analytics/deadtrees-data-factory.md`
 should have at least one durable test or smoke check:
 
 - discovery: home, archive, search/filter/map, releases
