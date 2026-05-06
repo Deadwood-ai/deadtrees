@@ -150,6 +150,7 @@ export default function DteAerialRelease({ release }: DteAerialReleaseProps) {
 
       <section
         id="dataset-download-placeholder"
+        data-testid="release-artifacts"
         className="border-t border-gray-200 bg-white"
       >
         <div className="mx-auto max-w-7xl px-4 py-16 md:px-8 md:py-20">

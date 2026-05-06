@@ -266,6 +266,7 @@ export default function BaseMap({
 			<div
 				ref={mapContainerRef}
 				style={{ width: "100%", height: "100%", position: "relative" }}
+				data-testid="dataset-detail-map"
 				data-rr-ignore
 			>
 				{/* Tooltip overlay */}

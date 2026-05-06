@@ -241,7 +241,10 @@ export default function PrepackagedDatasetRelease() {
             </div>
           </section>
 
-          <section className="border-t border-gray-200 bg-white">
+          <section
+            className="border-t border-gray-200 bg-white"
+            data-testid="release-artifacts"
+          >
             <div className="mx-auto max-w-7xl px-4 py-12 md:px-8 md:py-14">
               <div className="flex max-w-4xl flex-col gap-6 md:flex-row md:items-center md:justify-between">
                 <div>
