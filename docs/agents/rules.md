@@ -41,6 +41,10 @@ processor or storage code.
 
 ## Testing
 
+Use `docs/agents/testing-strategy.md` before choosing test scope, mocks, TDD
+style, CI gates, or browser validation. DeadTrees is test-plan-first: decide the
+behavior and the cheapest proving surface before changing code.
+
 Use the project CLI for normal validation; reserve `deadtrees dev debug ...` for
 sessions where a debugger client will attach.
 
@@ -48,6 +52,8 @@ sessions where a debugger client will attach.
 source venv/bin/activate
 deadtrees dev test api
 deadtrees dev test processor
+npm --prefix frontend test
+npm --prefix frontend run test:e2e
 ```
 
 Local work is good for API, shared-model, frontend, docs, and non-GPU checks.

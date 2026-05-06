@@ -101,7 +101,10 @@ export default function PrepackagedDatasetRelease() {
   };
 
   return (
-    <main className="min-h-screen bg-[#f8faf9] pt-20 md:pt-24">
+    <main
+      className="min-h-screen bg-[#f8faf9] pt-20 md:pt-24"
+      data-testid="release-detail-page"
+    >
       {contextHolder}
 
       <section className="border-b border-gray-200/80 bg-white">

@@ -40,7 +40,10 @@ function ReleaseCard({
   onOpen: () => void;
 }) {
   return (
-    <article className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md">
+    <article
+      className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md"
+      data-testid="release-card"
+    >
       <ReleasePreviewStrip tiles={previewTiles} />
 
       <div className="grid gap-8 p-6 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] md:p-10">
@@ -124,7 +127,10 @@ export default function Releases() {
       .sort((a, b) => a.sort_order - b.sort_order) ?? [];
 
   return (
-    <main className="min-h-screen bg-[#f8faf9] pt-24 md:pt-32">
+    <main
+      className="min-h-screen bg-[#f8faf9] pt-24 md:pt-32"
+      data-testid="releases-page"
+    >
       <section className="border-b border-gray-200/80 bg-white">
         <div className="mx-auto max-w-4xl px-4 py-16 text-center md:px-8 md:py-24">
           <p className="m-0 text-sm font-semibold uppercase tracking-wider text-[#1B5E35] md:text-base">
