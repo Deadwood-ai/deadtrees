@@ -9,11 +9,30 @@ The production storage server uses host Nginx managed by systemd. It does not
 serve public traffic through the tracked Docker Nginx config.
 
 - API code deploys automatically from `main` through `/apps/deadtrees/auto_deploy_api.sh`.
+- Production Supabase migrations should be applied by the GitHub
+  `Supabase Migrate On Merge` workflow, not by local/manual SQL.
 - Host Nginx config is local-only at `/apps/deadtrees/nginx/conf/storage-server.conf`.
 - `/etc/nginx/sites-enabled/storage-server.conf` points to that local-only file.
 - The tracked `nginx/api-conf/storage-server.conf` is a reference for Docker-style
   Nginx and local review; production needs the same relevant blocks applied
   manually to the host Nginx file.
+
+## Production Migration Policy
+
+Avoid manual production Supabase migrations. They should happen through the
+merge-to-main workflow so schema history, reviewed SQL, and deployment state
+stay aligned.
+
+If the GitHub migration workflow fails, stop before changing host Nginx and
+diagnose the workflow failure first. For out-of-order migration errors such as
+"local migration files to be inserted before the last migration on remote
+database", prefer a reviewed follow-up migration with a newer timestamp or an
+explicit workflow fix. Do not apply local SQL to production as a normal
+workaround.
+
+The direct Postgres port is the right target for migration tooling if the
+workflow itself needs debugging. Application traffic and MCP checks may use the
+pooler, but migration runners should avoid the transaction pooler.
 
 ## Before Updating Host Nginx
 
@@ -24,6 +43,31 @@ curl -fsS https://data2.deadtrees.earth/api/v1/prepackaged/packages
 ```
 
 The response should be a JSON list of package definitions and versions.
+
+Confirm that the API container is running the expected production settings:
+
+```bash
+ssh storage-server 'docker exec deadtrees-api-1 python -c "
+from shared.settings import settings
+print(settings.DEV_MODE)
+print(settings.PREPACKAGED_DOWNLOAD_BASE_URL)
+print(settings.PREPACKAGED_GRANTS_PER_USER_PER_DAY)
+print(settings.PREPACKAGED_GRANTS_GLOBAL_PER_DAY)
+"'
+```
+
+Expected:
+
+```text
+False
+https://data2.deadtrees.earth/prepackaged/v1
+5
+30
+```
+
+If `PREPACKAGED_DOWNLOAD_BASE_URL` points to `localhost`, the API has not
+deployed the production URL fix or the settings defaults are being evaluated
+before environment parsing.
 
 ## Host Nginx Update
 
@@ -110,7 +154,8 @@ curl -sk -o /dev/null -w "%{http_code}\n" \
 Expected: `404`.
 
 After a signed-in frontend download attempt, confirm the dedicated prepackaged
-access log does not contain query-string tokens:
+access log does not contain query-string tokens and the grant URL uses the
+production storage host:
 
 ```bash
 sudo tail -20 /var/log/nginx/prepackaged_access.log
@@ -118,4 +163,30 @@ sudo grep -R "token=" /var/log/nginx/prepackaged_access.log
 ```
 
 Expected: the `tail` output logs `/prepackaged/v1/<file>.zip` without query
-arguments, and the `grep` command returns no matches.
+arguments, and the `grep` command returns no matches. In the browser, newly
+minted download URLs should start with
+`https://data2.deadtrees.earth/prepackaged/v1/`, never `http://localhost:8080/`.
+
+## Bandwidth Context
+
+On the current storage server, the public route uses `enp41s0`, which reports a
+1 Gbit/s link:
+
+```bash
+ip route get 1.1.1.1
+sudo ethtool enp41s0 | grep -E "Speed|Duplex|Link detected"
+```
+
+Nginx `limit_rate` uses bytes per second, not bits per second. The current
+prepackaged package cap is:
+
+```nginx
+limit_conn prepackaged_global 3;
+limit_rate_after 512m;
+limit_rate 20m;
+```
+
+This allows roughly 20 MB/s per download after the first 512 MB, or about
+60 MB/s across the three global concurrent package downloads. That leaves
+headroom on the 1 Gbit/s public interface for COG, API, and normal website
+traffic.
