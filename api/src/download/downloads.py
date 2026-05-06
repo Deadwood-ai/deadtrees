@@ -517,10 +517,10 @@ def filter_exportable_dataset_labels(
 		if label.label_source not in EXPORTABLE_LABEL_SOURCES:
 			continue
 		if label.label_source == LabelSourceEnum.model_prediction:
-			preferred = preferences.get(label.label_data)
-			if preferred is None:
-				# No preference configured — skip model predictions for this layer type
+			if label.label_data not in preferences:
+				# No preference configured - skip model predictions for this layer type.
 				continue
+			preferred = preferences[label.label_data]
 			if label.model_metadata != preferred:
 				continue
 		result.append(label)

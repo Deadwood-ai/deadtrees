@@ -249,7 +249,7 @@ def get_model_preferences(token: Optional[str] = None) -> Dict[LabelDataEnum, Di
 	"""Return the preferred model_config per label_data type from v2_model_preferences.
 
 	Returns a dict mapping LabelDataEnum -> model_config dict.
-	Label data types with no preference row use the combined model defaults.
+	Label data types with no preference row use the legacy model defaults.
 	"""
 	with use_client(token) as client:
 		response = client.table(settings.model_preferences_table).select('label_data,model_config').execute()

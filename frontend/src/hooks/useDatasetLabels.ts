@@ -3,7 +3,7 @@ import { supabase } from "../hooks/useSupabase";
 import { ILabel, ILabelData } from "../types/labels";
 import { Settings } from "../config";
 import {
-  ModelConfig,
+  ModelPreferenceConfig,
   selectPreferredModelLabel,
 } from "../utils/modelPreferences";
 
@@ -15,13 +15,13 @@ interface UseDatasetLabelsProps {
 
 interface ModelPreference {
   label_data: string;
-  model_config: ModelConfig;
+  model_config: ModelPreferenceConfig;
 }
 
 function useModelPreferences() {
   return useQuery({
     queryKey: ["model-preferences"],
-    queryFn: async (): Promise<Map<string, Record<string, unknown>>> => {
+    queryFn: async (): Promise<Map<string, ModelPreferenceConfig>> => {
       const { data, error } = await supabase
         .from("v2_model_preferences")
         .select("label_data,model_config");

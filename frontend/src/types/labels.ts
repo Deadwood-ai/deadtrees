@@ -43,7 +43,7 @@ export interface ILabel {
   label_type: ILabelType;
   label_data: ILabelData;
   label_quality?: number;
-  model_config?: Record<string, any>;
+  model_config?: Record<string, any> | null;
   created_at: string;
   updated_at: string;
 

@@ -49,7 +49,7 @@ def test_forest_cover_simplification_runs_before_reproject(monkeypatch):
 		image_src=object(),
 		inference_crs=inference_crs,
 		orig_crs=orig_crs,
-		simplification_tolerance=0.04,
+		simplification_tolerance=0.05,
 		stats_key='forest_cover',
 	)
 
@@ -59,7 +59,7 @@ def test_forest_cover_simplification_runs_before_reproject(monkeypatch):
 	assert reproject_call['dst_crs'] == orig_crs
 	assert reproject_call['points'] < count_polygon_points([polygon])
 	assert inference.simplification_stats['forest_cover'] == {
-		'tolerance_m': 0.04,
+		'tolerance_m': 0.05,
 		'simplification_crs': 'EPSG:32634',
 		'polygons': 1,
 		'points_before': count_polygon_points([polygon]),

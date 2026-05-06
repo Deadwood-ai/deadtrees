@@ -43,10 +43,20 @@ COMBINED_MODEL_CONFIG = {
 	'checkpoint_name': COMBINED_MODEL_CHECKPOINT_NAME,
 }
 
+DEADWOOD_V1_MODEL_CONFIG = {
+	'module': 'deadwood_segmentation_v1_moehring',
+	'checkpoint_name': 'segformer_b5_full_epoch_100.safetensors',
+}
+
+TREECOVER_V1_MODEL_CONFIG = {
+	'module': 'treecover_segmentation_oam_tcd',
+	'checkpoint_name': 'restor/tcd-segformer-mit-b5',
+}
+
 
 DEFAULT_MODEL_PREFERENCES = {
-	LabelDataEnum.deadwood: dict(COMBINED_MODEL_CONFIG),
-	LabelDataEnum.forest_cover: dict(COMBINED_MODEL_CONFIG),
+	LabelDataEnum.deadwood: dict(DEADWOOD_V1_MODEL_CONFIG),
+	LabelDataEnum.forest_cover: dict(TREECOVER_V1_MODEL_CONFIG),
 }
 
 

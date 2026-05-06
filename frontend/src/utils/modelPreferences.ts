@@ -1,20 +1,29 @@
 import { ILabel, ILabelData, ILabelSource } from "../types/labels";
 
 export type ModelConfig = Record<string, unknown>;
+export type ModelPreferenceConfig = ModelConfig;
 
-export const COMBINED_MODEL_CONFIG: ModelConfig = {
-  module: "deadwood_treecover_combined_v2",
-  checkpoint_name: "mitb3_seed200_ckpt_epoch_6_best_macro_f1.safetensors",
+export const DEADWOOD_V1_MODEL_CONFIG: ModelConfig = {
+  module: "deadwood_segmentation_v1_moehring",
+  checkpoint_name: "segformer_b5_full_epoch_100.safetensors",
 };
 
-export const DEFAULT_MODEL_PREFERENCES: Record<ILabelData, ModelConfig> = {
-  [ILabelData.DEADWOOD]: COMBINED_MODEL_CONFIG,
-  [ILabelData.FOREST_COVER]: COMBINED_MODEL_CONFIG,
+export const TREECOVER_V1_MODEL_CONFIG: ModelConfig = {
+  module: "treecover_segmentation_oam_tcd",
+  checkpoint_name: "restor/tcd-segformer-mit-b5",
+};
+
+export const DEFAULT_MODEL_PREFERENCES: Record<
+  ILabelData,
+  ModelPreferenceConfig
+> = {
+  [ILabelData.DEADWOOD]: DEADWOOD_V1_MODEL_CONFIG,
+  [ILabelData.FOREST_COVER]: TREECOVER_V1_MODEL_CONFIG,
 };
 
 function configMatches(
-  labelConfig: ModelConfig | undefined,
-  preferredConfig: ModelConfig,
+  labelConfig: ModelConfig | null | undefined,
+  preferredConfig: ModelPreferenceConfig,
 ): boolean {
   if (!labelConfig) return false;
   return Object.entries(preferredConfig).every(
@@ -27,14 +36,19 @@ export function selectPreferredModelLabel<
 >(
   labels: T[],
   labelType: ILabelData,
-  preferences?: ReadonlyMap<string, ModelConfig>,
+  preferences?: ReadonlyMap<string, ModelPreferenceConfig>,
 ): T | null {
   const activeLabels = labels.filter((label) => label.is_active !== false);
   if (activeLabels.length === 0) return null;
   if (activeLabels.length === 1) return activeLabels[0];
 
-  const preferredConfig =
-    preferences?.get(labelType) ?? DEFAULT_MODEL_PREFERENCES[labelType];
+  let preferredConfig = DEFAULT_MODEL_PREFERENCES[labelType];
+  if (preferences?.has(labelType)) {
+    const configuredPreference = preferences.get(labelType);
+    preferredConfig =
+      configuredPreference === undefined ? preferredConfig : configuredPreference;
+  }
+
   const preferred = activeLabels.find(
     (label) =>
       label.label_source === ILabelSource.MODEL_PREDICTION &&
