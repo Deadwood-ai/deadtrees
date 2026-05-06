@@ -44,9 +44,7 @@ frontend work.
 Use stable tuple keys:
 
 ```ts
-["datasets"]
-["datasets", id]
-["datasets", id, "labels"]
+["datasets"][("datasets", id)][("datasets", id, "labels")];
 ```
 
 ## OpenLayers
@@ -64,14 +62,23 @@ Use stable tuple keys:
 
 ## Validation
 
+Use `docs/agents/testing-strategy.md` first to choose the right test surface and
+mocking level. For frontend work, test-plan-first does not always mean strict
+red-green TDD: prototype visual/map interactions when needed, then add or run a
+durable regression check before merge.
+
 Run targeted checks first:
 
 ```bash
 npm --prefix frontend test
-npm --prefix frontend run build
-npm --prefix frontend run lint
+npm --prefix frontend run test:e2e
 ```
 
 For user-facing UI changes, start the relevant Vite profile and validate with the
 Codex in-app browser or Playwright. Use `docs/playbooks/frontend-browser-regression.md`
 for production-connected smoke checks.
+
+`npm --prefix frontend run build` and `npm --prefix frontend run lint` are useful
+checks, but they currently have unrelated baseline debt. Do not treat them as
+blocking for focused frontend changes unless the task includes fixing that
+baseline.

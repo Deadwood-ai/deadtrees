@@ -4,7 +4,11 @@ import { IDataset } from "../types/dataset";
 import { Settings } from "../config";
 import countryList from "../utils/countryList";
 import { useDatasetDetailsMap } from "../hooks/useDatasetDetailsMapProvider";
-import { getBiomeEmoji, getBiomeTagColor, truncateBiomeLabel } from "../utils/biomeDisplay";
+import {
+  getBiomeEmoji,
+  getBiomeTagColor,
+  truncateBiomeLabel,
+} from "../utils/biomeDisplay";
 
 interface ListItemProps {
   item: IDataset;
@@ -13,11 +17,23 @@ interface ListItemProps {
   hoveredItem: number | null;
   onFilterClick: (
     filterValue: string,
-    filterType: "platform" | "license" | "authors_image" | "admin_level_1" | "admin_level_3" | "biome",
+    filterType:
+      | "platform"
+      | "license"
+      | "authors_image"
+      | "admin_level_1"
+      | "admin_level_3"
+      | "biome",
   ) => void;
 }
 
-const ListItem = ({ item, index, setHoveredItem, hoveredItem, onFilterClick }: ListItemProps) => {
+const ListItem = ({
+  item,
+  index,
+  setHoveredItem,
+  hoveredItem,
+  onFilterClick,
+}: ListItemProps) => {
   const navigate = useNavigate();
   const { setNavigationSource } = useDatasetDetailsMap();
 
@@ -41,7 +57,13 @@ const ListItem = ({ item, index, setHoveredItem, hoveredItem, onFilterClick }: L
   const onClickFilterHandler = (
     e: React.MouseEvent,
     filter: string,
-    filterType: "platform" | "license" | "authors_image" | "admin_level_1" | "admin_level_3" | "biome",
+    filterType:
+      | "platform"
+      | "license"
+      | "authors_image"
+      | "admin_level_1"
+      | "admin_level_3"
+      | "biome",
   ) => {
     onFilterClick(filter, filterType);
     e.stopPropagation();
@@ -61,6 +83,7 @@ const ListItem = ({ item, index, setHoveredItem, hoveredItem, onFilterClick }: L
   return (
     <div
       key={index}
+      data-testid="dataset-list-item"
       className={`flex rounded-md p-2 transition duration-150 ease-in-out ${
         hoveredItem === item.id ? "bg-gray-200" : "bg-white hover:bg-gray-100"
       }`}
@@ -70,7 +93,11 @@ const ListItem = ({ item, index, setHoveredItem, hoveredItem, onFilterClick }: L
     >
       <div className="relative h-16 w-16 min-h-16 min-w-16 shrink-0 overflow-hidden rounded-lg">
         <img
-          src={item.thumbnail_path ? Settings.THUMBNAIL_URL + item.thumbnail_path : "/assets/tree-icon.png"}
+          src={
+            item.thumbnail_path
+              ? Settings.THUMBNAIL_URL + item.thumbnail_path
+              : "/assets/tree-icon.png"
+          }
           className="m-0 h-full w-full scale-150 object-cover transition-transform hover:z-10"
           loading="lazy"
         />
@@ -83,9 +110,12 @@ const ListItem = ({ item, index, setHoveredItem, hoveredItem, onFilterClick }: L
                 type="text"
                 size="small"
                 className="max-content m-0 p-0 font-semibold truncate"
-                onClick={(e) => onClickFilterHandler(e, adminLevel3, "admin_level_3")}
+                onClick={(e) =>
+                  onClickFilterHandler(e, adminLevel3, "admin_level_3")
+                }
               >
-                {adminLevel3.slice(0, 16) + (adminLevel3.length > 16 ? "..." : "")}
+                {adminLevel3.slice(0, 16) +
+                  (adminLevel3.length > 16 ? "..." : "")}
               </Button>
             </Tooltip>
             {adminLevel3 && <span className="mr-1">,</span>}
@@ -94,7 +124,9 @@ const ListItem = ({ item, index, setHoveredItem, hoveredItem, onFilterClick }: L
                 type="text"
                 size="small"
                 className="max-content m-0 p-0 font-semibold shrink-0"
-                onClick={(e) => onClickFilterHandler(e, adminLevel1, "admin_level_1")}
+                onClick={(e) =>
+                  onClickFilterHandler(e, adminLevel1, "admin_level_1")
+                }
               >
                 {countryList[adminLevel1 as keyof typeof countryList]}
               </Button>
@@ -120,10 +152,14 @@ const ListItem = ({ item, index, setHoveredItem, hoveredItem, onFilterClick }: L
               <Button
                 size="small"
                 className="inline-block max-w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-left font-medium"
-                onClick={(e) => onClickFilterHandler(e, firstAuthor, "authors_image")}
+                onClick={(e) =>
+                  onClickFilterHandler(e, firstAuthor, "authors_image")
+                }
               >
                 {truncatedFirstAuthor}
-                {item.authors && item.authors.length > 1 ? ` +${item.authors.length - 1}` : ""}
+                {item.authors && item.authors.length > 1
+                  ? ` +${item.authors.length - 1}`
+                  : ""}
               </Button>
             </Tooltip>
           </div>

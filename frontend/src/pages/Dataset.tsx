@@ -12,7 +12,9 @@ import {
 } from "@ant-design/icons";
 
 import DataList from "../components/DataList";
-import DatasetMapOL, { type DatasetMapColorMode } from "../components/DatasetMap/DatasetMap";
+import DatasetMapOL, {
+  type DatasetMapColorMode,
+} from "../components/DatasetMap/DatasetMap";
 import DatasetTimelineControl from "../components/DatasetMap/DatasetTimelineControl";
 import { useNavigate } from "react-router-dom";
 import { useFilteredDatasets } from "../hooks/useFilteredDatasets";
@@ -25,7 +27,13 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { useDesktopOnlyFeature } from "../hooks/useDesktopOnlyFeature";
 import { useAnalytics } from "../hooks/useAnalytics";
 
-type FilterTag = "platform" | "license" | "authors_image" | "admin_level_1" | "admin_level_3" | "biome";
+type FilterTag =
+  | "platform"
+  | "license"
+  | "authors_image"
+  | "admin_level_1"
+  | "admin_level_3"
+  | "biome";
 
 const SIDEBAR_LEFT_PX = 16;
 const SIDEBAR_WIDTH_PX = 360;
@@ -130,19 +138,27 @@ export default function Dataset() {
       // If no search value, return true for the base condition
       if (!searchValue.trim()) return true;
 
-      const searchTerms = searchValue.toLowerCase().split(/\s+/).filter(Boolean);
+      const searchTerms = searchValue
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean);
 
       // Search in authors
       const authorMatch =
-        d.authors?.some((author) => searchTerms.every((term) => author.toLowerCase().includes(term))) || false;
+        d.authors?.some((author) =>
+          searchTerms.every((term) => author.toLowerCase().includes(term)),
+        ) || false;
 
       // Search in location - now including admin_level_2
-      const locationWords = `${d.admin_level_3 || ""}, ${d.admin_level_2 || ""}, ${d.admin_level_1 || ""}`
-        .toLowerCase()
-        .split(/[\s,]+/)
-        .filter(Boolean);
+      const locationWords =
+        `${d.admin_level_3 || ""}, ${d.admin_level_2 || ""}, ${d.admin_level_1 || ""}`
+          .toLowerCase()
+          .split(/[\s,]+/)
+          .filter(Boolean);
 
-      const locationMatch = searchTerms.every((term) => locationWords.some((word) => word.includes(term)));
+      const locationMatch = searchTerms.every((term) =>
+        locationWords.some((word) => word.includes(term)),
+      );
 
       return authorMatch || locationMatch;
     });
@@ -153,8 +169,14 @@ export default function Dataset() {
     });
   }, [filteredData, searchValue, sortDirection]);
 
-  const { periods, selectedPeriod, setSelectedPeriod, displayData, cumulativeCount, addedInQuarter } =
-    useUploadTimeline(processedData);
+  const {
+    periods,
+    selectedPeriod,
+    setSelectedPeriod,
+    displayData,
+    cumulativeCount,
+    addedInQuarter,
+  } = useUploadTimeline(processedData);
 
   // Reset visibleFeatures when data changes
   useEffect(() => {
@@ -167,21 +189,23 @@ export default function Dataset() {
   const filterDisplay = typeof filter === "string" ? filter : String(filter);
   const desktopTimelineStyle = isMobile
     ? {
-      left: "50%",
-      transform: "translateX(-50%)",
-      maxWidth: "92vw",
-    }
+        left: "50%",
+        transform: "translateX(-50%)",
+        maxWidth: "92vw",
+      }
     : {
-      left: sidebarCollapsed
-        ? "50%"
-        : `calc(50% + ${(SIDEBAR_LEFT_PX + SIDEBAR_WIDTH_PX) / 2}px)`,
-      transform: "translateX(-50%)",
-      maxWidth: sidebarCollapsed
-        ? "min(92vw, 720px)"
-        : `min(92vw, calc(100vw - ${SIDEBAR_WIDTH_PX + SIDEBAR_LEFT_PX * 2 + 24}px))`,
-    };
+        left: sidebarCollapsed
+          ? "50%"
+          : `calc(50% + ${(SIDEBAR_LEFT_PX + SIDEBAR_WIDTH_PX) / 2}px)`,
+        transform: "translateX(-50%)",
+        maxWidth: sidebarCollapsed
+          ? "min(92vw, 720px)"
+          : `min(92vw, calc(100vw - ${SIDEBAR_WIDTH_PX + SIDEBAR_LEFT_PX * 2 + 24}px))`,
+      };
   const sidebarContent = (
-    <div className={`flex h-full flex-col pointer-events-auto ${!isMobile ? "rounded-2xl border border-gray-200/60 bg-white/95 px-4 pb-4 pt-4 shadow-xl backdrop-blur-sm" : "px-4 pt-4 pb-16"}`}>
+    <div
+      className={`flex h-full flex-col pointer-events-auto ${!isMobile ? "rounded-2xl border border-gray-200/60 bg-white/95 px-4 pb-4 pt-4 shadow-xl backdrop-blur-sm" : "px-4 pt-4 pb-16"}`}
+    >
       <div className="pb-3">
         <div className="flex flex-col">
           <div className="flex items-center">
@@ -195,7 +219,8 @@ export default function Dataset() {
               <span className="text-xs text-gray-500 mr-2">Filtered by:</span>
               <Tag className="m-0 flex items-center gap-1" color="blue">
                 <span className="text-xs font-medium">
-                  {filterDisplay.slice(0, 15) + (filterDisplay.length > 15 ? "..." : "")}
+                  {filterDisplay.slice(0, 15) +
+                    (filterDisplay.length > 15 ? "..." : "")}
                 </span>
                 <Button
                   className="border-none bg-transparent h-auto p-0 ml-1 flex items-center justify-center text-blue-500 hover:text-blue-700"
@@ -214,7 +239,9 @@ export default function Dataset() {
           <Button
             type="primary"
             icon={<UploadOutlined />}
-            onClick={() => runDesktopOnlyAction("upload", () => navigate("/profile"))}
+            onClick={() =>
+              runDesktopOnlyAction("upload", () => navigate("/profile"))
+            }
             className="mt-4 w-full shadow-sm font-medium"
           >
             Upload Data
@@ -233,15 +260,32 @@ export default function Dataset() {
           />
           <div className="flex items-center gap-2 sm:pl-2">
             <Tooltip title="Open advanced filtering options">
-              <Button icon={<FilterOutlined />} onClick={handleFilterButtonClick} />
+              <Button
+                icon={<FilterOutlined />}
+                onClick={handleFilterButtonClick}
+              />
             </Tooltip>
-            <Tooltip title={`Sort by addition order ${sortDirection === "asc" ? "oldest first" : "newest first"}`}>
-              <Button icon={sortDirection === "asc" ? <ArrowDownOutlined /> : <ArrowUpOutlined />} onClick={toggleSort} />
+            <Tooltip
+              title={`Sort by addition order ${sortDirection === "asc" ? "oldest first" : "newest first"}`}
+            >
+              <Button
+                icon={
+                  sortDirection === "asc" ? (
+                    <ArrowDownOutlined />
+                  ) : (
+                    <ArrowUpOutlined />
+                  )
+                }
+                onClick={toggleSort}
+              />
             </Tooltip>
           </div>
         </div>
         <div className="ml-1 mt-0">
-          <Checkbox checked={filterByViewport} onChange={(e) => setFilterByViewport(e.target.checked)}>
+          <Checkbox
+            checked={filterByViewport}
+            onChange={(e) => setFilterByViewport(e.target.checked)}
+          >
             Filter list by map view
           </Checkbox>
         </div>
@@ -267,13 +311,17 @@ export default function Dataset() {
   );
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-slate-50">
+    <div
+      className="relative h-full w-full overflow-hidden bg-slate-50"
+      data-testid="dataset-archive-page"
+    >
       {/* Floating Sidebar */}
       <div
-        className={`absolute left-4 top-24 bottom-6 z-10 hidden md:flex transition-all duration-300 ${sidebarCollapsed
-          ? "w-0 -translate-x-full overflow-hidden opacity-0 pointer-events-none"
-          : "w-[360px] translate-x-0 opacity-100"
-          }`}
+        className={`absolute left-4 top-24 bottom-6 z-10 hidden md:flex transition-all duration-300 ${
+          sidebarCollapsed
+            ? "w-0 -translate-x-full overflow-hidden opacity-0 pointer-events-none"
+            : "w-[360px] translate-x-0 opacity-100"
+        }`}
       >
         {sidebarContent}
       </div>
@@ -292,9 +340,15 @@ export default function Dataset() {
             size="large"
             shape="circle"
             onClick={() => setSidebarCollapsed((prev) => !prev)}
-            icon={sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            icon={
+              sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />
+            }
             className="bg-white shadow-md border-gray-200 text-gray-700 hover:text-gray-900"
-            style={{ width: FLOAT_BUTTON_SIZE_PX, minWidth: FLOAT_BUTTON_SIZE_PX, height: FLOAT_BUTTON_SIZE_PX }}
+            style={{
+              width: FLOAT_BUTTON_SIZE_PX,
+              minWidth: FLOAT_BUTTON_SIZE_PX,
+              height: FLOAT_BUTTON_SIZE_PX,
+            }}
           />
         </div>
       )}
@@ -316,14 +370,17 @@ export default function Dataset() {
         open={isMobileListOpen}
         onClose={() => setIsMobileListOpen(false)}
         className="md:hidden"
-        styles={{ body: { padding: '0', overflowY: 'hidden' } }}
+        styles={{ body: { padding: "0", overflowY: "hidden" } }}
       >
         <div className="h-full bg-slate-50">{sidebarContent}</div>
       </Drawer>
 
       {/* Full Map */}
       <div className="absolute inset-0 z-0">
-        <div className="absolute bottom-2 z-10 transition-all duration-300" style={desktopTimelineStyle}>
+        <div
+          className="absolute bottom-2 z-10 transition-all duration-300"
+          style={desktopTimelineStyle}
+        >
           {periods.length > 0 && selectedPeriod && (
             <DatasetTimelineControl
               periods={periods}
@@ -341,8 +398,12 @@ export default function Dataset() {
           </div>
         ) : displayData.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center rounded-lg bg-white">
-            <div className="text-lg font-medium text-gray-500">No results found</div>
-            <div className="text-sm text-gray-400">Try adjusting your filters or search criteria</div>
+            <div className="text-lg font-medium text-gray-500">
+              No results found
+            </div>
+            <div className="text-sm text-gray-400">
+              Try adjusting your filters or search criteria
+            </div>
           </div>
         ) : (
           <DatasetMapOL

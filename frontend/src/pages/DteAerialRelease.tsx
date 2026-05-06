@@ -42,7 +42,10 @@ export default function DteAerialRelease({ release }: DteAerialReleaseProps) {
   }, [benchmark.sites]);
 
   return (
-    <main className="min-h-screen bg-[#f8faf9] pt-24 md:pt-32">
+    <main
+      className="min-h-screen bg-[#f8faf9] pt-24 md:pt-32"
+      data-testid="release-detail-page"
+    >
       <section className="border-b border-gray-200/80 bg-white">
         <div className="mx-auto max-w-7xl px-4 pt-8 md:px-8">
           <Button
