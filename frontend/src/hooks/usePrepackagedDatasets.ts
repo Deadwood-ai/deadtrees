@@ -5,10 +5,10 @@ import {
   fetchPrepackagedPackages,
 } from "../api/prepackaged";
 
-export function usePrepackagedDatasets(token?: string) {
+export function usePrepackagedDatasets() {
   return useQuery({
     queryKey: ["prepackaged-datasets"],
-    queryFn: () => fetchPrepackagedPackages(token),
+    queryFn: () => fetchPrepackagedPackages(),
   });
 }
 

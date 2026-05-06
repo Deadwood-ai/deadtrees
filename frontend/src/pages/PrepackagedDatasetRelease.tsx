@@ -29,7 +29,7 @@ export default function PrepackagedDatasetRelease() {
   const [messageApi, contextHolder] = message.useMessage();
   const { session } = useAuth();
   const token = session?.access_token;
-  const { data, isLoading, error } = usePrepackagedDatasets(token);
+  const { data, isLoading, error } = usePrepackagedDatasets();
   const grantMutation = useCreatePrepackagedDownloadGrant(token);
   const returnTo = `/releases/${slug ?? ""}`;
   const handleSignIn = () =>

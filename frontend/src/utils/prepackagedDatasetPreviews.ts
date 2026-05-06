@@ -84,30 +84,3 @@ export function getPrepackagedDatasetPreviewTiles(
     };
   });
 }
-
-export function getPrepackagedDatasetVisualSummary(
-  datasetPackage: IPrepackagedDatasetPackage,
-) {
-  switch (datasetPackage.slug) {
-    case "tree-cover-aerial-global":
-      return {
-        eyebrow: "Audited tree-cover geometry",
-        note: "Previewing only the tree-cover class layer represented in this vector package.",
-      };
-    case "standing-deadwood-aerial-global-conservative":
-      return {
-        eyebrow: "Conservative standing-deadwood geometry",
-        note: "Previewing only the standing-deadwood class layer represented in this vector package.",
-      };
-    case "image-tiles-1024-global-aerial-sampled-20-random":
-      return {
-        eyebrow: "Sampled source-resolution imagery",
-        note: "Previewing only representative aerial image tiles from the imagery package.",
-      };
-    default:
-      return {
-        eyebrow: "Versioned data package",
-        note: "Previewing representative source datasets from the release.",
-      };
-  }
-}

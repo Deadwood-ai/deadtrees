@@ -11,7 +11,6 @@ import {
   type ReleasePreviewTile,
 } from "../data/releases";
 import { ReleasePreviewStrip } from "../components/Releases/ReleasePreviewStrip";
-import { useAuth } from "../hooks/useAuthProvider";
 import { usePrepackagedDatasets } from "../hooks/usePrepackagedDatasets";
 import { getPrepackagedDatasetPreviewTiles } from "../utils/prepackagedDatasetPreviews";
 import {
@@ -118,13 +117,7 @@ function buildPrepackagedStats(pkg: IPrepackagedDatasetPackage): ReleaseStat[] {
 
 export default function Releases() {
   const navigate = useNavigate();
-  const { session } = useAuth();
-  const token = session?.access_token;
-  const {
-    data: dataPackages,
-    isLoading,
-    error,
-  } = usePrepackagedDatasets(token);
+  const { data: dataPackages, isLoading, error } = usePrepackagedDatasets();
   const availableDataPackages =
     dataPackages
       ?.filter((pkg) => pkg.versions.length > 0)

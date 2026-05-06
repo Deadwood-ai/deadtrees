@@ -37,12 +37,10 @@ export interface IPrepackagedDownloadGrant {
 const buildAuthHeaders = (token?: string) =>
   token ? { Authorization: `Bearer ${token}` } : undefined;
 
-export async function fetchPrepackagedPackages(
-  token?: string,
-): Promise<IPrepackagedDatasetPackage[]> {
-  const response = await fetch(`${Settings.API_URL}/prepackaged/packages`, {
-    headers: buildAuthHeaders(token),
-  });
+export async function fetchPrepackagedPackages(): Promise<
+  IPrepackagedDatasetPackage[]
+> {
+  const response = await fetch(`${Settings.API_URL}/prepackaged/packages`);
 
   if (!response.ok) {
     throw new Error(`Failed to load prepackaged datasets (${response.status})`);
