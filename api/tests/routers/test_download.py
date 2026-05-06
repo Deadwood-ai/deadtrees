@@ -1067,7 +1067,6 @@ def test_download_consolidated_labels_multiple_types(auth_token, test_dataset_fo
 		label_type=LabelTypeEnum.segmentation,
 		label_data=LabelDataEnum.deadwood,
 		label_quality=2,
-		model_metadata=COMBINED_MODEL_CONFIG,
 		geometry=deadwood_geojson,
 	)
 
@@ -1078,7 +1077,6 @@ def test_download_consolidated_labels_multiple_types(auth_token, test_dataset_fo
 		label_type=LabelTypeEnum.segmentation,
 		label_data=LabelDataEnum.forest_cover,
 		label_quality=2,
-		model_metadata=COMBINED_MODEL_CONFIG,
 		geometry=deadwood_geojson,
 	)
 
@@ -1514,7 +1512,6 @@ def test_download_dataset_with_multiple_labels(auth_token, test_dataset_for_down
 		label_type=LabelTypeEnum.segmentation,
 		label_data=LabelDataEnum.deadwood,
 		label_quality=2,
-		model_metadata=COMBINED_MODEL_CONFIG,
 		geometry=deadwood_geojson,
 	)
 
@@ -1525,7 +1522,6 @@ def test_download_dataset_with_multiple_labels(auth_token, test_dataset_for_down
 		label_type=LabelTypeEnum.segmentation,
 		label_data=LabelDataEnum.forest_cover,
 		label_quality=2,
-		model_metadata=COMBINED_MODEL_CONFIG,
 		geometry=deadwood_geojson,
 	)
 

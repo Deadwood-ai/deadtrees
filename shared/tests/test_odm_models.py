@@ -3,7 +3,6 @@ from datetime import datetime
 from typing import Dict, Any
 
 from shared.models import (
-	COMBINED_MODEL_CONFIG,
 	DEFAULT_MODEL_PREFERENCES,
 	Label,
 	LabelDataEnum,
@@ -85,9 +84,9 @@ def test_label_payload_model_config_input_alias_deserializes_to_model_metadata()
 	assert payload.model_dump(by_alias=True)['model_config'] == model_config
 
 
-def test_default_model_preferences_use_combined_model_for_both_label_types():
-	assert DEFAULT_MODEL_PREFERENCES[LabelDataEnum.deadwood] == COMBINED_MODEL_CONFIG
-	assert DEFAULT_MODEL_PREFERENCES[LabelDataEnum.forest_cover] == COMBINED_MODEL_CONFIG
+def test_default_model_preferences_use_legacy_model_for_both_label_types():
+	assert DEFAULT_MODEL_PREFERENCES[LabelDataEnum.deadwood] is None
+	assert DEFAULT_MODEL_PREFERENCES[LabelDataEnum.forest_cover] is None
 
 
 # ============================================================================
