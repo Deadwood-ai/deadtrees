@@ -110,8 +110,8 @@ class Settings(BaseSettings):
 	PREPACKAGED_DOWNLOAD_BASE_URL: str = (
 		'http://localhost:8080/prepackaged/v1' if DEV_MODE else 'https://data2.deadtrees.earth/prepackaged/v1'
 	)
-	PREPACKAGED_GRANTS_PER_USER_PER_DAY: int = 2
-	PREPACKAGED_GRANTS_GLOBAL_PER_DAY: int = 6
+	PREPACKAGED_GRANTS_PER_USER_PER_DAY: int = 5
+	PREPACKAGED_GRANTS_GLOBAL_PER_DAY: int = 30
 	PREPACKAGED_GRANT_TTL_HOURS: int = 24
 
 	# processor settings
