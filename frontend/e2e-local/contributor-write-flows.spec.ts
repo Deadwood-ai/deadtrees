@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,7 +36,7 @@ type LocalSession = {
   };
 };
 
-const uniqueRunId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const uniqueRunId = `${Date.now()}-${randomUUID()}`;
 const contributorEmail = `local-write-${uniqueRunId}@example.com`;
 const initialPassword = `Initial-${uniqueRunId}!`;
 const resetPassword = `Reset-${uniqueRunId}!`;
