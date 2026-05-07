@@ -74,6 +74,10 @@ npm --prefix frontend test
 npm --prefix frontend run test:e2e
 ```
 
+Use `npm --prefix frontend run test:e2e:local` for authenticated contributor
+upload-shell changes. It is intentionally separate from the production-read
+smoke suite.
+
 For user-facing UI changes, start the relevant Vite profile and validate with the
 Codex in-app browser or Playwright. Use `docs/playbooks/frontend-browser-regression.md`
 for production-connected smoke checks.

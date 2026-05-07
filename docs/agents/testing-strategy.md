@@ -55,6 +55,7 @@ rename while behavior is unchanged, the test is probably too coupled.
 | ---------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | Frontend utility       | `npm --prefix frontend test`                                            | pure data, validation, analytics, routing helpers                                   |
 | Frontend browser       | `npm --prefix frontend run test:e2e` or the browser regression playbook | user-facing routes, maps, auth shell, archive/detail/release flows                  |
+| Contributor local E2E  | `npm --prefix frontend run test:e2e:local`                              | authenticated upload shell, metadata submission contract, process request contract  |
 | API/router             | `deadtrees dev test api <path>`                                         | FastAPI routes, upload/download/process/auth behavior                               |
 | Database/RLS/migration | focused API DB tests plus migration review/reset where practical        | schema, policies, RPCs, views, generated contracts                                  |
 | Processor CPU          | `deadtrees dev test processor <path>`                                   | queue orchestration, GeoTIFF/COG/metadata, non-GPU utilities                        |
@@ -87,3 +88,20 @@ should have at least one durable test or smoke check:
 - improvement: issue reporting, correction save, approval/revert
 - trust: audit filters, locks, saves, reference patch readiness
 - publication: selection, author/ORCID validation, submission state
+
+## Local Contributor Smoke
+
+Keep authenticated contributor journeys out of the production-read Playwright
+suite. Use the local contributor smoke when a frontend change touches upload,
+auth restoration, upload metadata, or process enqueue behavior:
+
+```bash
+npm --prefix frontend run test:e2e:local
+deadtrees dev test api api/tests/routers/test_contributor_contract_smoke.py
+```
+
+The browser smoke uses local/development frontend settings and mocked local
+service responses to prove the UI contract without mutating production. The API
+contract smoke runs against the repo test stack and proves the same upload and
+processing payloads are accepted by FastAPI and persisted to the expected local
+test tables/storage paths.

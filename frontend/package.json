@@ -13,6 +13,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:readonly": "playwright test",
+    "test:e2e:local": "playwright test --config playwright.local.config.ts",
     "test:watch": "vitest"
   },
   "dependencies": {

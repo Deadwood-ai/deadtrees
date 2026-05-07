@@ -28,7 +28,7 @@ jobs:
         if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository }}
         timeout-minutes: 8
         run: npx playwright install --with-deps chromium
-      - name: Run customer factory smoke
+      - name: Run data factory smoke
         if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository }}
         timeout-minutes: 8
         env:

@@ -7,6 +7,8 @@ interface PickerWithTypeProps {
   pickerTypeOptions: string[];
   pickerType: string;
   setPickerType: (type: string) => void;
+  datePickerTestId?: string;
+  pickerTypeTestId?: string;
 }
 
 const pickerTypeToAntdPicker: Record<string, "date" | "month" | "year"> = {
@@ -15,7 +17,15 @@ const pickerTypeToAntdPicker: Record<string, "date" | "month" | "year"> = {
   Year: "year",
 } as const;
 
-const PickerWithType = ({ value, onChange, pickerTypeOptions, pickerType, setPickerType }: PickerWithTypeProps) => {
+const PickerWithType = ({
+  value,
+  onChange,
+  pickerTypeOptions,
+  pickerType,
+  setPickerType,
+  datePickerTestId,
+  pickerTypeTestId,
+}: PickerWithTypeProps) => {
   const handleDateChange = (date: Dayjs | null) => {
     if (date) {
       // Normalize the date based on picker type
@@ -44,6 +54,7 @@ const PickerWithType = ({ value, onChange, pickerTypeOptions, pickerType, setPic
   return (
     <div className="flex w-full space-x-4">
       <Select
+        data-testid={pickerTypeTestId}
         style={{ width: "100%" }}
         value={pickerType}
         onChange={(newType) => {
@@ -59,6 +70,7 @@ const PickerWithType = ({ value, onChange, pickerTypeOptions, pickerType, setPic
         ))}
       </Select>
       <DatePicker
+        data-testid={datePickerTestId}
         className="w-full"
         picker={pickerTypeToAntdPicker[pickerType]}
         onChange={handleDateChange}

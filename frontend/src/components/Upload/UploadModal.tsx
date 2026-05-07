@@ -345,7 +345,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
       maskClosable={false}
       width={720}
     >
-      <div className="m-0 px-4 py-0">
+      <div className="m-0 px-4 py-0" data-testid="contributor-upload-modal">
         <Typography.Title style={{ margin: 0, paddingBottom: 16 }} level={4}>
           Orthophoto Upload
         </Typography.Title>
@@ -359,6 +359,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
           <div className="flex flex-col w-full gap-1">
             <Form.Item label="Orthophoto" rules={[{ required: true, message: "Please upload a GeoTIFF file" }]}>
               <Upload.Dragger
+                data-testid="contributor-upload-dropzone"
                 fileList={fileList}
                 onChange={onFileChange}
                 beforeUpload={handleBeforeUpload}
@@ -420,13 +421,19 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
             >
               {authors?.at(0)?.label ? (
                 <Select
+                  data-testid="contributor-upload-author-select"
                   mode="tags"
                   style={{ width: "100%" }}
                   options={authors}
                   placeholder="Enter author names separately (e.g. 'John Smith')"
                 />
               ) : (
-                <Select mode="tags" style={{ width: "100%" }} placeholder="Enter authors (one author per entry)" />
+                <Select
+                  data-testid="contributor-upload-author-select"
+                  mode="tags"
+                  style={{ width: "100%" }}
+                  placeholder="Enter authors (one author per entry)"
+                />
               )}
             </Form.Item>
 
@@ -449,6 +456,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
                 pickerType={pickerType}
                 setPickerType={setPickerType}
                 onChange={(date) => form.setFieldsValue({ aquisition_date: date })}
+                datePickerTestId="contributor-upload-acquisition-date"
+                pickerTypeTestId="contributor-upload-acquisition-date-type"
               />
             </Form.Item>
 
@@ -592,7 +601,12 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
                   </Checkbox>
                 </Form.Item>
                 <Space className="pt-2">
-                  <Button type="primary" htmlType="submit" disabled={fileList.length === 0 || !agreementAccepted}>
+                  <Button
+                    data-testid="contributor-upload-submit"
+                    type="primary"
+                    htmlType="submit"
+                    disabled={fileList.length === 0 || !agreementAccepted}
+                  >
                     Upload
                   </Button>
                   <Button type="default" onClick={onClose}>
