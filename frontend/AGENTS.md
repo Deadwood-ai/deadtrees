@@ -83,6 +83,10 @@ Supabase/API/Mailpit stack is running and the change needs real local
 signup/password-reset/upload/download side-effect coverage. This suite mutates
 local auth, database, mail, and storage state and cleans up after itself.
 
+Use `npm --prefix frontend run test:e2e:local:audit` for auditor-only queue,
+audit-tab, processing-log, and audit access guard changes. It uses mocked local
+Supabase responses and must stay production-write safe.
+
 For user-facing UI changes, start the relevant Vite profile and validate with the
 Codex in-app browser or Playwright. Use `docs/playbooks/frontend-browser-regression.md`
 for production-connected smoke checks.

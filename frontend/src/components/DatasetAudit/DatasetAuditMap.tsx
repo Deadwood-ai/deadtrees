@@ -82,7 +82,6 @@ const DatasetAuditMap = forwardRef<DatasetAuditMapHandle, DatasetAuditMapProps>(
 	onMapReady,
 	onOrthoLayerReady,
 	isEditing = false,
-	editingLayerType: _editingLayerType = null,
 	enableAOIEditing = false,
 	onAOIChange,
 	onToolbarStateChange,
@@ -109,7 +108,7 @@ const DatasetAuditMap = forwardRef<DatasetAuditMapHandle, DatasetAuditMapProps>(
 
 	// Fetch AOI data
 	const { data: aoiData, isLoading: isAOILoading } = useDatasetAOI(data?.id);
-	const aoiGeometry = useMemo(() => aoiData?.geometry, [aoiData?.id]);
+	const aoiGeometry = aoiData?.geometry;
 
 	// Compute effective visibility - HIDE MVT LAYERS WHEN EDITING
 	const effectiveDeadwoodVisible = useMemo(() => {
@@ -302,6 +301,7 @@ const DatasetAuditMap = forwardRef<DatasetAuditMapHandle, DatasetAuditMapProps>(
 				ref={mapContainerRef}
 				style={{ width: "100%", height: "100%", position: "relative" }}
 				data-rr-ignore
+				data-testid="dataset-audit-map"
 			>
 				{/* Tooltip overlay */}
 				<FeatureTooltip
