@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 const PORT = Number(process.env.PLAYWRIGHT_PORT || 5173);
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || `http://127.0.0.1:${PORT}`;
+const SLOW_MO = Number(process.env.PLAYWRIGHT_SLOW_MO || 0);
 
 export default defineConfig({
   testDir: "./e2e-local",
@@ -14,6 +15,9 @@ export default defineConfig({
   use: {
     baseURL: BASE_URL,
     browserName: "chromium",
+    launchOptions: {
+      slowMo: SLOW_MO,
+    },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "off",

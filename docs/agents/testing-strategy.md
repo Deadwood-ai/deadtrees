@@ -57,6 +57,7 @@ rename while behavior is unchanged, the test is probably too coupled.
 | Frontend browser       | `npm --prefix frontend run test:e2e` or the browser regression playbook | user-facing routes, maps, auth shell, archive/detail/release flows                  |
 | Contributor local E2E  | `npm --prefix frontend run test:e2e:local`                              | authenticated upload shell, metadata submission contract, process request contract  |
 | Contributor write E2E  | `npm --prefix frontend run test:e2e:local:write`                        | local-only signup, password reset, upload start, download request side effects      |
+| Auditor local E2E      | `npm --prefix frontend run test:e2e:local:audit`                        | auditor-only queue triage, audit tabs, processing logs, and audit access guards     |
 | API/router             | `deadtrees dev test api <path>`                                         | FastAPI routes, upload/download/process/auth behavior                               |
 | Database/RLS/migration | focused API DB tests plus migration review/reset where practical        | schema, policies, RPCs, views, generated contracts                                  |
 | Processor CPU          | `deadtrees dev test processor <path>`                                   | queue orchestration, GeoTIFF/COG/metadata, non-GPU utilities                        |
@@ -121,3 +122,22 @@ contributor, requests a password reset through local Supabase Auth, verifies the
 reset email through Supabase Mailpit, uploads a small GeoTIFF through the real
 local API, asserts dataset/status/ortho/queue rows and archive storage, starts a
 download request, and asserts the local download bundle plus download audit log.
+
+## Local Auditor Smoke
+
+Use the local auditor smoke when a frontend change touches audit access,
+auditor-only queue triage, completed/reference/edit-review tabs, or processing
+visibility:
+
+```bash
+npm --prefix frontend run test:e2e:local:audit
+deadtrees dev test api api/tests/db/test_auditor_flag_review_contract.py
+```
+
+The browser smoke runs against local/development frontend settings and mocked
+local Supabase responses. It verifies the auditor access guard, the dashboard's
+main queue tabs, processing-log inspection, and the audit-lock navigation
+contract without writing to production. The DB contract smoke covers the real
+`update_flag_status` RPC with local Supabase side effects: non-auditors are
+rejected, auditors can acknowledge and resolve a flag, and status history is
+recorded with the acting auditor.
