@@ -56,6 +56,7 @@ rename while behavior is unchanged, the test is probably too coupled.
 | Frontend utility       | `npm --prefix frontend test`                                            | pure data, validation, analytics, routing helpers                                   |
 | Frontend browser       | `npm --prefix frontend run test:e2e` or the browser regression playbook | user-facing routes, maps, auth shell, archive/detail/release flows                  |
 | Contributor local E2E  | `npm --prefix frontend run test:e2e:local`                              | authenticated upload shell, metadata submission contract, process request contract  |
+| Contributor write E2E  | `npm --prefix frontend run test:e2e:local:write`                        | local-only signup, password reset, upload start, download request side effects      |
 | API/router             | `deadtrees dev test api <path>`                                         | FastAPI routes, upload/download/process/auth behavior                               |
 | Database/RLS/migration | focused API DB tests plus migration review/reset where practical        | schema, policies, RPCs, views, generated contracts                                  |
 | Processor CPU          | `deadtrees dev test processor <path>`                                   | queue orchestration, GeoTIFF/COG/metadata, non-GPU utilities                        |
@@ -105,3 +106,18 @@ service responses to prove the UI contract without mutating production. The API
 contract smoke runs against the repo test stack and proves the same upload and
 processing payloads are accepted by FastAPI and persisted to the expected local
 test tables/storage paths.
+
+Use the local write-flow suite when auth, upload start, download start, or
+local storage side effects are part of the risk:
+
+```bash
+supabase start
+deadtrees dev start
+npm --prefix frontend run test:e2e:local:write
+```
+
+This suite is intentionally opt-in and local-only. It signs up a unique local
+contributor, requests a password reset through local Supabase Auth, verifies the
+reset email through Supabase Mailpit, uploads a small GeoTIFF through the real
+local API, asserts dataset/status/ortho/queue rows and archive storage, starts a
+download request, and asserts the local download bundle plus download audit log.

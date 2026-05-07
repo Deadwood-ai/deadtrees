@@ -62,7 +62,10 @@ const installAuthenticatedContributor = async (page: Page) => {
   const session = createLocalSession();
 
   await page.addInitScript((localSession) => {
-    window.localStorage.setItem("sb-127-auth-token", JSON.stringify(localSession));
+    window.localStorage.setItem(
+      "sb-127-auth-token",
+      JSON.stringify(localSession),
+    );
   }, session);
 
   await page.route(`${localSupabaseUrl}/auth/v1/user`, async (route) => {
@@ -110,7 +113,9 @@ test.describe("contributor local e2e", () => {
 
     await page.goto("/profile");
 
-    await expect(page.getByRole("heading", { name: "My Account" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "My Account" }),
+    ).toBeVisible();
     await expect(page.getByText(contributor.email)).toBeVisible();
 
     await page.getByRole("button", { name: "Upload Data" }).click();
@@ -118,9 +123,15 @@ test.describe("contributor local e2e", () => {
     const modal = page.getByTestId("contributor-upload-modal");
     await expect(modal).toBeVisible();
     await expect(modal.getByText("Orthophoto Upload")).toBeVisible();
-    await expect(page.getByTestId("contributor-upload-dropzone")).toBeAttached();
-    await expect(page.getByText("Click or drag file to this area")).toBeVisible();
-    await expect(page.getByTestId("contributor-upload-author-select")).toBeVisible();
+    await expect(
+      page.getByTestId("contributor-upload-dropzone"),
+    ).toBeAttached();
+    await expect(
+      page.getByText("Click or drag file to this area"),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("contributor-upload-author-select"),
+    ).toBeVisible();
     await expect(page.getByTestId("contributor-upload-submit")).toBeDisabled();
   });
 
@@ -165,18 +176,19 @@ test.describe("contributor local e2e", () => {
     await page.goto("/profile");
     await page.getByRole("button", { name: "Upload Data" }).click();
 
-    await page.getByTestId("contributor-upload-dropzone").setInputFiles(rgbGeoTiffFixture);
+    await page
+      .getByTestId("contributor-upload-dropzone")
+      .setInputFiles(rgbGeoTiffFixture);
 
-    await page.getByTestId("contributor-upload-author-select").click();
-    await page.keyboard.type("Local E2E Contributor");
-    await page.keyboard.press("Enter");
-    await page.keyboard.press("Escape");
+    await addUploadAuthor(page, "Local E2E Contributor");
 
     const dateInput = page.getByPlaceholder("Select date");
     await dateInput.fill("2024-05-06");
     await dateInput.press("Enter");
 
-    await page.getByLabel("DOI").fill("https://doi.org/10.1234/deadtrees.local-e2e");
+    await page
+      .getByLabel("DOI")
+      .fill("https://doi.org/10.1234/deadtrees.local-e2e");
     await page
       .getByLabel("Additional Information")
       .fill("Local contributor smoke metadata");
@@ -185,7 +197,9 @@ test.describe("contributor local e2e", () => {
     await expect(page.getByTestId("contributor-upload-submit")).toBeEnabled();
     await page.getByTestId("contributor-upload-submit").click();
 
-    await expect.poll(() => uploadMultipartBody).toContain('name="upload_type"');
+    await expect
+      .poll(() => uploadMultipartBody)
+      .toContain('name="upload_type"');
     expect(uploadMultipartBody).toContain("\r\n\r\ngeotiff\r\n");
     expect(uploadMultipartBody).toContain('name="platform"');
     expect(uploadMultipartBody).toContain("\r\n\r\ndrone\r\n");
@@ -200,19 +214,30 @@ test.describe("contributor local e2e", () => {
     expect(uploadMultipartBody).toContain('name="data_access"');
     expect(uploadMultipartBody).toContain("\r\n\r\npublic\r\n");
     expect(uploadMultipartBody).toContain('name="citation_doi"');
-    expect(uploadMultipartBody).toContain("https://doi.org/10.1234/deadtrees.local-e2e");
+    expect(uploadMultipartBody).toContain(
+      "https://doi.org/10.1234/deadtrees.local-e2e",
+    );
 
-    await expect.poll(() => processRequestBody).toEqual({
-      task_types: [
-        "geotiff",
-        "cog",
-        "thumbnail",
-        "metadata",
-        "deadwood_v1",
-        "treecover_v1",
-        "deadwood_treecover_combined_v2",
-      ],
-      priority: 4,
-    });
+    await expect
+      .poll(() => processRequestBody)
+      .toEqual({
+        task_types: [
+          "geotiff",
+          "cog",
+          "thumbnail",
+          "metadata",
+          "deadwood_v1",
+          "treecover_v1",
+          "deadwood_treecover_combined_v2",
+        ],
+        priority: 4,
+      });
   });
 });
+
+async function addUploadAuthor(page: Page, author: string) {
+  const authorSelect = page.getByTestId("contributor-upload-author-select");
+  await authorSelect.locator("input").fill(author);
+  await authorSelect.locator("input").press("Enter");
+  await expect(authorSelect).toContainText(author);
+}
