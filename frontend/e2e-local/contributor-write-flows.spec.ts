@@ -286,7 +286,15 @@ async function addUploadAuthor(page: Page, author: string) {
 }
 
 async function purgeMailpit() {
-  await fetch(`${localMailpitUrl}/api/v1/messages`, { method: "DELETE" });
+  const response = await fetch(`${localMailpitUrl}/api/v1/messages`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to purge Mailpit: ${response.status} ${await response.text()}`,
+    );
+  }
 }
 
 async function waitForAuthUser(email: string) {
