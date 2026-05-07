@@ -1,0 +1,243 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { expect, test, type Page, type Route } from "@playwright/test";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const rgbGeoTiffFixture = path.resolve(
+  __dirname,
+  "../test/fixtures/geotiff/upload-validation/rgb-real-crop.tif",
+);
+
+const localSupabaseUrl = "http://127.0.0.1:54321";
+const localApiUrl = "http://localhost:8080/api/v1";
+const contributor = {
+  id: "00000000-0000-4000-8000-000000000001",
+  email: "contributor-local-e2e@example.com",
+};
+
+const createUnsignedJwt = (payload: Record<string, unknown>) => {
+  const encode = (value: Record<string, unknown>) =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
+
+  return [
+    encode({ alg: "none", typ: "JWT" }),
+    encode({
+      aud: "authenticated",
+      role: "authenticated",
+      sub: contributor.id,
+      email: contributor.email,
+      exp: Math.floor(Date.now() / 1000) + 60 * 60,
+      ...payload,
+    }),
+    "local-e2e",
+  ].join(".");
+};
+
+const createLocalSession = () => {
+  const accessToken = createUnsignedJwt({});
+  const now = new Date().toISOString();
+
+  return {
+    access_token: accessToken,
+    token_type: "bearer",
+    expires_in: 3600,
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+    refresh_token: "local-e2e-refresh-token",
+    user: {
+      id: contributor.id,
+      aud: "authenticated",
+      role: "authenticated",
+      email: contributor.email,
+      email_confirmed_at: now,
+      app_metadata: { provider: "email", providers: ["email"] },
+      user_metadata: {},
+      created_at: now,
+      updated_at: now,
+    },
+  };
+};
+
+const installAuthenticatedContributor = async (page: Page) => {
+  const session = createLocalSession();
+
+  await page.addInitScript((localSession) => {
+    window.localStorage.setItem(
+      "sb-127-auth-token",
+      JSON.stringify(localSession),
+    );
+  }, session);
+
+  await page.route(`${localSupabaseUrl}/auth/v1/user`, async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: session.user,
+    });
+  });
+
+  await page.route(`${localSupabaseUrl}/rest/v1/**`, async (route) => {
+    const url = new URL(route.request().url());
+    const table = url.pathname.split("/").pop();
+
+    if (table === "privileged_users") {
+      await route.fulfill({
+        contentType: "application/json",
+        json: {
+          id: 1,
+          user_id: contributor.id,
+          can_upload_private: false,
+          can_audit: false,
+          can_view_all_private: false,
+          created_at: new Date().toISOString(),
+        },
+      });
+      return;
+    }
+
+    await route.fulfill({
+      contentType: "application/json",
+      headers: { "content-range": "0-0/0" },
+      json: [],
+    });
+  });
+};
+
+const extractMultipartText = (route: Route) =>
+  route.request().postDataBuffer()?.toString("latin1") ?? "";
+
+test.describe("contributor local e2e", () => {
+  test("authenticated contributor can open the upload workflow", async ({
+    page,
+  }) => {
+    await installAuthenticatedContributor(page);
+
+    await page.goto("/profile");
+
+    await expect(
+      page.getByRole("heading", { name: "My Account" }),
+    ).toBeVisible();
+    await expect(page.getByText(contributor.email)).toBeVisible();
+
+    await page.getByRole("button", { name: "Upload Data" }).click();
+
+    const modal = page.getByTestId("contributor-upload-modal");
+    await expect(modal).toBeVisible();
+    await expect(modal.getByText("Orthophoto Upload")).toBeVisible();
+    await expect(
+      page.getByTestId("contributor-upload-dropzone"),
+    ).toBeAttached();
+    await expect(
+      page.getByText("Click or drag file to this area"),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("contributor-upload-author-select"),
+    ).toBeVisible();
+    await expect(page.getByTestId("contributor-upload-submit")).toBeDisabled();
+  });
+
+  test("GeoTIFF contribution sends upload and processing contracts", async ({
+    page,
+  }) => {
+    await installAuthenticatedContributor(page);
+
+    let uploadMultipartBody = "";
+    let processRequestBody: Record<string, unknown> | undefined;
+
+    await page.route(`${localApiUrl}/datasets/chunk`, async (route) => {
+      uploadMultipartBody = extractMultipartText(route);
+      await route.fulfill({
+        contentType: "application/json",
+        json: {
+          id: 4242,
+          file_name: "rgb-real-crop.tif",
+          user_id: contributor.id,
+          license: "CC BY",
+          platform: "drone",
+          authors: ["Local E2E Contributor"],
+          data_access: "public",
+        },
+      });
+    });
+
+    await page.route(`${localApiUrl}/datasets/4242/process`, async (route) => {
+      processRequestBody = route.request().postDataJSON();
+      await route.fulfill({
+        contentType: "application/json",
+        json: {
+          id: 99,
+          dataset_id: 4242,
+          task_types: processRequestBody?.task_types,
+          priority: processRequestBody?.priority,
+          is_processing: false,
+        },
+      });
+    });
+
+    await page.goto("/profile");
+    await page.getByRole("button", { name: "Upload Data" }).click();
+
+    await page
+      .getByTestId("contributor-upload-dropzone")
+      .setInputFiles(rgbGeoTiffFixture);
+
+    await addUploadAuthor(page, "Local E2E Contributor");
+
+    const dateInput = page.getByPlaceholder("Select date");
+    await dateInput.fill("2024-05-06");
+    await dateInput.press("Enter");
+
+    await page
+      .getByLabel("DOI")
+      .fill("https://doi.org/10.1234/deadtrees.local-e2e");
+    await page
+      .getByLabel("Additional Information")
+      .fill("Local contributor smoke metadata");
+    await page.getByRole("checkbox", { name: /I agree to the/i }).check();
+
+    await expect(page.getByTestId("contributor-upload-submit")).toBeEnabled();
+    await page.getByTestId("contributor-upload-submit").click();
+
+    await expect
+      .poll(() => uploadMultipartBody)
+      .toContain('name="upload_type"');
+    expect(uploadMultipartBody).toContain("\r\n\r\ngeotiff\r\n");
+    expect(uploadMultipartBody).toContain('name="platform"');
+    expect(uploadMultipartBody).toContain("\r\n\r\ndrone\r\n");
+    expect(uploadMultipartBody).toContain('name="authors"');
+    expect(uploadMultipartBody).toContain("\r\n\r\nLocal E2E Contributor\r\n");
+    expect(uploadMultipartBody).toContain('name="aquisition_year"');
+    expect(uploadMultipartBody).toContain("\r\n\r\n2024\r\n");
+    expect(uploadMultipartBody).toContain('name="aquisition_month"');
+    expect(uploadMultipartBody).toContain("\r\n\r\n5\r\n");
+    expect(uploadMultipartBody).toContain('name="aquisition_day"');
+    expect(uploadMultipartBody).toContain("\r\n\r\n6\r\n");
+    expect(uploadMultipartBody).toContain('name="data_access"');
+    expect(uploadMultipartBody).toContain("\r\n\r\npublic\r\n");
+    expect(uploadMultipartBody).toContain('name="citation_doi"');
+    expect(uploadMultipartBody).toContain(
+      "https://doi.org/10.1234/deadtrees.local-e2e",
+    );
+
+    await expect
+      .poll(() => processRequestBody)
+      .toEqual({
+        task_types: [
+          "geotiff",
+          "cog",
+          "thumbnail",
+          "metadata",
+          "deadwood_v1",
+          "treecover_v1",
+          "deadwood_treecover_combined_v2",
+        ],
+        priority: 4,
+      });
+  });
+});
+
+async function addUploadAuthor(page: Page, author: string) {
+  const authorSelect = page.getByTestId("contributor-upload-author-select");
+  await authorSelect.locator("input").fill(author);
+  await authorSelect.locator("input").press("Enter");
+  await expect(authorSelect).toContainText(author);
+}
