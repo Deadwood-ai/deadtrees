@@ -67,8 +67,10 @@ test.describe("auditor local write flows", () => {
   test.afterAll(async () => {
     await cleanupDataset();
     await cleanupAuditPrivilege();
-    await deleteAuthUsersByEmail(adminClient, auditorEmail);
-    await deleteAuthUsersByEmail(adminClient, reporterEmail);
+    if (adminClient) {
+      await deleteAuthUsersByEmail(adminClient, auditorEmail);
+      await deleteAuthUsersByEmail(adminClient, reporterEmail);
+    }
     fs.rmSync(path.join(repoRoot, "data", "cogs", cogPath), { force: true });
   });
 
@@ -465,26 +467,38 @@ async function expectAuditSideEffects() {
 
 async function cleanupAuditPrivilege() {
   if (!privilegedUserId) return;
-  await adminClient.from("privileged_users").delete().eq("id", privilegedUserId);
+  await deleteRows("privileged_users", "id", privilegedUserId);
   privilegedUserId = 0;
 }
 
 async function cleanupDataset() {
   if (!datasetId) return;
 
-  await adminClient
-    .from("dataset_flag_status_history")
-    .delete()
-    .eq("flag_id", flagId);
-  await adminClient.from("dataset_flags").delete().eq("dataset_id", datasetId);
-  await adminClient.from("dataset_audit").delete().eq("dataset_id", datasetId);
-  await adminClient.from("v2_aois").delete().eq("dataset_id", datasetId);
-  await adminClient.from("v2_cogs").delete().eq("dataset_id", datasetId);
-  await adminClient.from("v2_thumbnails").delete().eq("dataset_id", datasetId);
-  await adminClient.from("v2_orthos").delete().eq("dataset_id", datasetId);
-  await adminClient.from("v2_statuses").delete().eq("dataset_id", datasetId);
-  await adminClient.from("v2_datasets").delete().eq("id", datasetId);
+  if (flagId) {
+    await deleteRows("dataset_flag_status_history", "flag_id", flagId);
+  }
+  await deleteRows("dataset_flags", "dataset_id", datasetId);
+  await deleteRows("dataset_audit", "dataset_id", datasetId);
+  await deleteRows("v2_aois", "dataset_id", datasetId);
+  await deleteRows("v2_cogs", "dataset_id", datasetId);
+  await deleteRows("v2_thumbnails", "dataset_id", datasetId);
+  await deleteRows("v2_orthos", "dataset_id", datasetId);
+  await deleteRows("v2_statuses", "dataset_id", datasetId);
+  await deleteRows("v2_datasets", "id", datasetId);
 
   datasetId = 0;
   flagId = 0;
+}
+
+async function deleteRows(
+  table: string,
+  column: string,
+  value: number | string,
+) {
+  const { error } = await adminClient.from(table).delete().eq(column, value);
+  if (error) {
+    throw new Error(
+      `Failed to clean ${table}.${column}=${String(value)}: ${error.message}`,
+    );
+  }
 }
