@@ -87,6 +87,11 @@ Use `npm --prefix frontend run test:e2e:local:audit` for auditor-only queue,
 audit-tab, processing-log, and audit access guard changes. It uses mocked local
 Supabase responses and must stay production-write safe.
 
+Use `npm --prefix frontend run test:e2e:local:audit:write` only when the local
+Supabase/API/nginx stack is running and the change needs real auditor write
+side-effect coverage for flag acknowledgement, AOI save, audit lock release, or
+`dataset_audit` persistence.
+
 For user-facing UI changes, start the relevant Vite profile and validate with the
 Codex in-app browser or Playwright. Use `docs/playbooks/frontend-browser-regression.md`
 for production-connected smoke checks.

@@ -58,6 +58,7 @@ rename while behavior is unchanged, the test is probably too coupled.
 | Contributor local E2E  | `npm --prefix frontend run test:e2e:local`                              | authenticated upload shell, metadata submission contract, process request contract  |
 | Contributor write E2E  | `npm --prefix frontend run test:e2e:local:write`                        | local-only signup, password reset, upload start, download request side effects      |
 | Auditor local E2E      | `npm --prefix frontend run test:e2e:local:audit`                        | auditor-only queue triage, audit tabs, processing logs, and audit access guards     |
+| Auditor write E2E      | `npm --prefix frontend run test:e2e:local:audit:write`                  | local-only auditor flag, AOI, audit-lock, and audit-save side effects               |
 | API/router             | `deadtrees dev test api <path>`                                         | FastAPI routes, upload/download/process/auth behavior                               |
 | Database/RLS/migration | focused API DB tests plus migration review/reset where practical        | schema, policies, RPCs, views, generated contracts                                  |
 | Processor CPU          | `deadtrees dev test processor <path>`                                   | queue orchestration, GeoTIFF/COG/metadata, non-GPU utilities                        |
@@ -141,3 +142,19 @@ contract without writing to production. The DB contract smoke covers the real
 `update_flag_status` RPC with local Supabase side effects: non-auditors are
 rejected, auditors can acknowledge and resolve a flag, and status history is
 recorded with the acting auditor.
+
+Use the local auditor write-flow suite when the frontend change touches real
+auditor write behavior:
+
+```bash
+supabase start
+deadtrees dev start --services api-test,nginx
+npm --prefix frontend run test:e2e:local:audit:write
+```
+
+This suite is intentionally opt-in and local-only. It creates unique local
+auditor and reporter Auth users, grants the auditor `can_audit`, seeds an
+auditable dataset with a local COG, opens the real audit page, acknowledges a
+user-reported flag through the `update_flag_status` RPC, draws an AOI, saves the
+audit, and asserts real local side effects in `dataset_audit`, `v2_aois`,
+`v2_statuses`, `dataset_flags`, and `dataset_flag_status_history`.
