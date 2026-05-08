@@ -323,10 +323,7 @@ async function installAuditorSession(page: Page) {
   expect(login.data.session).toBeTruthy();
 
   await page.addInitScript((session) => {
-    const storageKey = "sb-127-auth-token";
-    const { user, ...sessionWithoutUser } = session;
-    window.localStorage.setItem(storageKey, JSON.stringify(sessionWithoutUser));
-    window.localStorage.setItem(`${storageKey}-user`, JSON.stringify({ user }));
+    window.localStorage.setItem("sb-127-auth-token", JSON.stringify(session));
   }, login.data.session);
 }
 
