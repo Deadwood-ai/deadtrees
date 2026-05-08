@@ -15,6 +15,7 @@
     "test:e2e": "playwright test",
     "test:e2e:readonly": "playwright test",
     "test:e2e:local:audit": "playwright test --config playwright.local.config.ts auditor-local.spec.ts",
+    "test:e2e:local:audit:write": "bash ./scripts/run-local-auditor-write-e2e.sh",
     "test:e2e:local": "playwright test --config playwright.local.config.ts",
     "test:e2e:local:write": "bash ./scripts/run-local-write-e2e.sh",
     "test:watch": "vitest"
