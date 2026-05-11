@@ -10,6 +10,17 @@ if [[ ! -f .env ]]; then
 	cp .env.example .env
 fi
 
+if [[ -z "${COMPOSE_PROJECT_NAME:-}" ]]; then
+	compose_project_name="$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' .env | tail -n 1)"
+	compose_project_name="${compose_project_name%\"}"
+	compose_project_name="${compose_project_name#\"}"
+	compose_project_name="${compose_project_name%\'}"
+	compose_project_name="${compose_project_name#\'}"
+	export COMPOSE_PROJECT_NAME="${compose_project_name:-deadtrees-test}"
+else
+	export COMPOSE_PROJECT_NAME
+fi
+
 mkdir -p \
 	data/archive \
 	data/cogs \
