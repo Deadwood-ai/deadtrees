@@ -59,7 +59,7 @@ rename while behavior is unchanged, the test is probably too coupled.
 | Contributor write E2E  | `npm --prefix frontend run test:e2e:local:write`                        | local-only signup, password reset, upload start, download request side effects      |
 | Auditor local E2E      | `npm --prefix frontend run test:e2e:local:audit`                        | auditor-only queue triage, audit tabs, processing logs, and audit access guards     |
 | Auditor write E2E      | `npm --prefix frontend run test:e2e:local:audit:write`                  | local-only auditor flag, AOI, audit-lock, and audit-save side effects               |
-| API/router             | `deadtrees dev test api <path>`                                         | FastAPI routes, upload/download/process/auth behavior                               |
+| API/router             | `scripts/test-api-smoke.sh` or `deadtrees dev test api <path>`          | FastAPI routes, upload/download/process/auth behavior                               |
 | Database/RLS/migration | focused API DB tests plus migration review/reset where practical        | schema, policies, RPCs, views, generated contracts                                  |
 | Processor CPU          | `deadtrees dev test processor <path>`                                   | queue orchestration, GeoTIFF/COG/metadata, non-GPU utilities                        |
 | Processor GPU/model    | processing-server dev checkout                                          | model loading, CUDA/NVIDIA runtime, full combined-model execution, ODM-heavy checks |
@@ -93,6 +93,42 @@ should have at least one durable test or smoke check:
 - publication: selection, author/ORCID validation, submission state
 
 ## Local Contributor Smoke
+
+## API Smoke
+
+Use the API smoke suite when a change touches FastAPI routes, shared database
+models/helpers, Supabase migrations, RLS policies, RPC contracts, or local
+storage/download behavior:
+
+```bash
+supabase start
+scripts/test-api-smoke.sh
+```
+
+The same command is used by the path-filtered `api-smoke` GitHub Actions
+workflow. It starts only the backend-lite test surface: local Supabase, the API
+test container, nginx storage, and Mailpit. It intentionally excludes the
+processor, GPU/model inference, ODM, and full pipeline validation.
+
+The suite covers:
+
+- API settings/import sanity
+- contributor upload and process request contracts
+- upload type detection and unsupported ZIP compression rejection
+- processing task validation, priority, queue ordering, and rerun behavior
+- prepackaged download grant contracts
+- DTE stats route validation with synthetic fixtures
+- focused download route contracts and bundle helper behavior
+- auditor flag review RPC authorization and status history
+- private dataset RLS through tables and dataset views
+- privileged user visibility and privilege functions
+- dataset audit persistence and constraints
+- dataset edit history triggers and authorization
+- data publication tables and basic publication operations
+- notification email rendering and Mailpit delivery
+
+Keep this suite backend-lite. Add processor/GPU/ODM checks to the processing
+server validation lane instead of expanding API smoke into full-system testing.
 
 Keep authenticated contributor journeys out of the production-read Playwright
 suite. Use the local contributor smoke when a frontend change touches upload,

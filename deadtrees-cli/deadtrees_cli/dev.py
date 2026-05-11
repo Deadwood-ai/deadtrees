@@ -3,6 +3,7 @@ import subprocess
 import os
 import signal
 import shutil
+import sys
 import time
 from pathlib import Path
 from typing import Optional, List
@@ -46,6 +47,14 @@ class DevCommands:
 	def _compose_cmd(self, *args: str) -> List[str]:
 		"""Build a docker compose command for the test environment."""
 		return ['docker', 'compose', '-f', self.test_compose_file, *args]
+
+	def _compose_exec_args(self, service: str) -> List[str]:
+		"""Build docker compose exec args that work both locally and in CI."""
+		args = ['exec']
+		if os.environ.get('CI') or not sys.stdin.isatty():
+			args.append('-T')
+		args.append(service)
+		return args
 
 	def _normalize_services(self, services: Optional[List[str] | str]) -> Optional[List[str]]:
 		"""Allow Fire callers to pass either a list or a comma-separated string."""
@@ -595,8 +604,7 @@ class DevCommands:
 			'compose',
 			'-f',
 			self.test_compose_file,
-			'exec',
-			service,
+			*self._compose_exec_args(service),
 			'python',
 			'-m',
 			'pytest',
