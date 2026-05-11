@@ -34,6 +34,8 @@ class PrepackagedDatasetVersion(BaseModel):
 	artifact_count: Optional[int] = None
 	built_at: Optional[datetime] = None
 	published_at: Optional[datetime] = None
+	source_commit: Optional[str] = None
+	source_package_version: Optional[str] = None
 	manifest: dict[str, Any] = Field(default_factory=dict)
 	known_issues: Optional[str] = None
 
@@ -46,6 +48,9 @@ class PrepackagedDatasetPackage(BaseModel):
 	title: str
 	summary: str
 	description: Optional[str] = None
+	technical_description: Optional[str] = None
+	source_repository_url: Optional[str] = None
+	source_file_path: Optional[str] = None
 	kind: str
 	sort_order: int
 	versions: list[PrepackagedDatasetVersion]
@@ -192,7 +197,10 @@ def list_prepackaged_packages():
 	with use_service_client() as db_client:
 		definition_response = (
 			db_client.table(DEFINITIONS_TABLE)
-			.select('id,slug,title,summary,description,kind,sort_order')
+			.select(
+				'id,slug,title,summary,description,technical_description,'
+				'source_repository_url,source_file_path,kind,sort_order'
+			)
 			.eq('is_active', True)
 			.order('sort_order')
 			.execute()
@@ -201,7 +209,8 @@ def list_prepackaged_packages():
 			db_client.table(VERSIONS_TABLE)
 			.select(
 				'id,definition_id,version,status,file_name,public_download_path,size_bytes,checksum_sha256,'
-				'dataset_count,artifact_count,built_at,published_at,manifest,known_issues'
+				'dataset_count,artifact_count,built_at,published_at,source_commit,source_package_version,'
+				'manifest,known_issues'
 			)
 			.eq('status', 'available')
 			.order('published_at', desc=True)
