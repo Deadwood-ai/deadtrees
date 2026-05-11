@@ -1,0 +1,67 @@
+name: API Smoke
+
+on:
+  pull_request:
+    paths:
+      - "api/**"
+      - "shared/**"
+      - "supabase/**"
+      - "deadtrees-cli/**"
+      - "docker-compose.test.yaml"
+      - "nginx/test-conf/**"
+      - "scripts/test-api-smoke.sh"
+      - ".github/workflows/api-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  api-smoke:
+    name: api-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      COMPOSE_PROJECT_NAME: deadtrees-api-smoke
+      DOCKER_BUILDKIT: "1"
+      COMPOSE_DOCKER_CLI_BUILD: "1"
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: |
+            deadtrees-cli/setup.py
+            api/requirements.txt
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+
+      - name: Prepare local env
+        run: |
+          cp .env.example .env
+          mkdir -p data/archive data/cogs data/thumbnails data/label_objects data/downloads data/raw_images data/trash
+
+      - name: Install DeadTrees CLI
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e deadtrees-cli
+
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Run API smoke suite
+        run: scripts/test-api-smoke.sh
+
+      - name: Stop API test stack
+        if: always()
+        run: docker compose -f docker-compose.test.yaml down --remove-orphans
+
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop --no-backup
