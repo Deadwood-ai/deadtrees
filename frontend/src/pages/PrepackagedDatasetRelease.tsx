@@ -1,7 +1,10 @@
 import {
   ArrowLeftOutlined,
+  CodeOutlined,
   DatabaseOutlined,
+  ExportOutlined,
   FileOutlined,
+  LinkOutlined,
   LoginOutlined,
 } from "@ant-design/icons";
 import { Alert, Button, Empty, Skeleton, message } from "antd";
@@ -22,6 +25,36 @@ import {
   prepackagedKindLabel,
   prepackagedNumberFormatter,
 } from "../utils/prepackagedDatasets";
+
+function getSafeHttpUrl(url: string | null) {
+  if (!url) return null;
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return null;
+  }
+}
+
+function buildSourceCodeUrl(
+  repositoryUrl: string | null,
+  sourceFilePath: string | null,
+  sourceCommit: string | null,
+) {
+  const safeRepositoryUrl = getSafeHttpUrl(repositoryUrl);
+  if (!safeRepositoryUrl || !sourceFilePath || !sourceCommit) return null;
+
+  const encodedPath = sourceFilePath.split("/").map(encodeURIComponent).join("/");
+  return `${safeRepositoryUrl}/blob/${encodeURIComponent(sourceCommit)}/${encodedPath}`;
+}
+
+function getShortCommit(sourceCommit: string | null) {
+  return sourceCommit ? sourceCommit.slice(0, 7) : null;
+}
 
 export default function PrepackagedDatasetRelease() {
   const { slug } = useParams();
@@ -81,6 +114,27 @@ export default function PrepackagedDatasetRelease() {
     typeof manifest.license_filter === "string"
       ? manifest.license_filter
       : null;
+  const safeRepositoryUrl = datasetPackage
+    ? getSafeHttpUrl(datasetPackage.source_repository_url)
+    : null;
+  const sourceCodeUrl =
+    datasetPackage && latestVersion
+      ? buildSourceCodeUrl(
+          datasetPackage.source_repository_url,
+          datasetPackage.source_file_path,
+          latestVersion.source_commit,
+        )
+      : null;
+  const shortSourceCommit = latestVersion
+    ? getShortCommit(latestVersion.source_commit)
+    : null;
+  const hasReproducibilityMetadata = Boolean(
+    datasetPackage?.technical_description ||
+      sourceCodeUrl ||
+      safeRepositoryUrl ||
+      latestVersion?.source_package_version ||
+      shortSourceCommit,
+  );
 
   const handleDownload = async (versionId: number) => {
     if (!token) {
@@ -240,6 +294,94 @@ export default function PrepackagedDatasetRelease() {
               </div>
             </div>
           </section>
+
+          {hasReproducibilityMetadata && (
+            <section className="border-t border-gray-200 bg-[#f8faf9]">
+              <div className="mx-auto grid max-w-7xl gap-8 px-4 py-10 md:px-8 md:py-12 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+                <div>
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[#1B5E35]">
+                    <CodeOutlined />
+                    Reproducibility
+                  </div>
+                  <h2 className="m-0 mt-3 text-3xl font-semibold leading-tight text-gray-950 md:text-4xl">
+                    Technical definition
+                  </h2>
+                  {datasetPackage.technical_description && (
+                    <p className="mt-4 max-w-4xl text-base leading-8 text-gray-600">
+                      {datasetPackage.technical_description}
+                    </p>
+                  )}
+                </div>
+
+                <div className="self-start rounded-lg border border-gray-200 bg-white p-5 md:p-6">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    <LinkOutlined />
+                    Generator code
+                  </div>
+                  <dl className="mt-5 grid gap-4 text-sm text-gray-600">
+                    {safeRepositoryUrl && (
+                      <div>
+                        <dt className="font-semibold text-gray-800">
+                          Repository
+                        </dt>
+                        <dd className="m-0 mt-2">
+                          <a
+                            href={safeRepositoryUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex max-w-full items-center gap-2 rounded-md border border-[#1B5E35]/20 bg-[#f8faf9] px-3 py-2 font-semibold text-[#1B5E35] transition hover:border-[#1B5E35]/40 hover:bg-[#eef6f0]"
+                          >
+                            <span className="truncate">
+                              Open repository
+                            </span>
+                            <ExportOutlined className="shrink-0 text-xs" />
+                          </a>
+                        </dd>
+                      </div>
+                    )}
+                    {sourceCodeUrl && (
+                      <div>
+                        <dt className="font-semibold text-gray-800">
+                          Source file
+                        </dt>
+                        <dd className="m-0 mt-2">
+                          <a
+                            href={sourceCodeUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex max-w-full items-center gap-2 rounded-md border border-[#1B5E35]/20 bg-[#f8faf9] px-3 py-2 font-semibold text-[#1B5E35] transition hover:border-[#1B5E35]/40 hover:bg-[#eef6f0]"
+                          >
+                            <span className="truncate">
+                              Open source file
+                            </span>
+                            <ExportOutlined className="shrink-0 text-xs" />
+                          </a>
+                        </dd>
+                      </div>
+                    )}
+                    {shortSourceCommit && (
+                      <div>
+                        <dt className="font-semibold text-gray-800">Commit</dt>
+                        <dd className="m-0 mt-1 font-mono text-gray-700">
+                          {shortSourceCommit}
+                        </dd>
+                      </div>
+                    )}
+                    {latestVersion.source_package_version && (
+                      <div>
+                        <dt className="font-semibold text-gray-800">
+                          Package version
+                        </dt>
+                        <dd className="m-0 mt-1">
+                          v{latestVersion.source_package_version}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                </div>
+              </div>
+            </section>
+          )}
 
           <section
             className="border-t border-gray-200 bg-white"

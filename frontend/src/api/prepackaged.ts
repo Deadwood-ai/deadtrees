@@ -12,6 +12,8 @@ export interface IPrepackagedDatasetVersion {
   artifact_count: number | null;
   built_at: string | null;
   published_at: string | null;
+  source_commit: string | null;
+  source_package_version: string | null;
   manifest: Record<string, unknown>;
   known_issues: string | null;
 }
@@ -22,6 +24,9 @@ export interface IPrepackagedDatasetPackage {
   title: string;
   summary: string;
   description: string | null;
+  technical_description: string | null;
+  source_repository_url: string | null;
+  source_file_path: string | null;
   kind: "vector" | "tiles" | "labels" | "satellite";
   sort_order: number;
   versions: IPrepackagedDatasetVersion[];

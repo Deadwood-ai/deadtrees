@@ -124,6 +124,9 @@ class FakeCatalogClient:
 					'title': 'Tree cover aerial global',
 					'summary': 'Tree cover summary',
 					'description': None,
+					'technical_description': 'Exact package definition',
+					'source_repository_url': 'https://github.com/Deadwood-ai/prepackaged_datasets_dte',
+					'source_file_path': 'deadtrees_prepackaged/datasets/tree_cover_aerial_global.py',
 					'kind': 'vector',
 					'sort_order': 10,
 				}
@@ -142,6 +145,8 @@ class FakeCatalogClient:
 					'artifact_count': 1,
 					'built_at': None,
 					'published_at': None,
+					'source_commit': 'feffe7b73d2ec3159260a6d3fddf7e5ac9ae855a',
+					'source_package_version': '0.1.0',
 					'manifest': {},
 					'known_issues': None,
 				}
@@ -186,7 +191,12 @@ def test_list_prepackaged_packages_is_public_service_read(monkeypatch):
 
 	assert len(packages) == 1
 	assert packages[0].slug == 'tree-cover-aerial-global'
+	assert packages[0].technical_description == 'Exact package definition'
+	assert packages[0].source_repository_url == 'https://github.com/Deadwood-ai/prepackaged_datasets_dte'
+	assert packages[0].source_file_path == 'deadtrees_prepackaged/datasets/tree_cover_aerial_global.py'
 	assert packages[0].versions[0].file_name == 'tree-cover.zip'
+	assert packages[0].versions[0].source_commit == 'feffe7b73d2ec3159260a6d3fddf7e5ac9ae855a'
+	assert packages[0].versions[0].source_package_version == '0.1.0'
 	assert ('is_active', True) in client.queries[DEFINITIONS_TABLE].filters
 	assert ('status', 'available') in client.queries[VERSIONS_TABLE].filters
 
