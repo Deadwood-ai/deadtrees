@@ -55,6 +55,8 @@ deadtrees dev test processor
 scripts/lint-python.sh
 scripts/test-api-smoke.sh
 npm --prefix frontend test
+npm --prefix frontend run lint
+npm --prefix frontend run build
 npm --prefix frontend run test:e2e
 ```
 

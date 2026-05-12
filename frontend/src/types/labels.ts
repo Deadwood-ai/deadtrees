@@ -43,7 +43,7 @@ export interface ILabel {
   label_type: ILabelType;
   label_data: ILabelData;
   label_quality?: number;
-  model_config?: Record<string, any> | null;
+  model_config?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 
@@ -58,7 +58,7 @@ export interface IDeadwoodGeometry {
   id: number;
   label_id: number;
   geometry: GeoJSON.Geometry;
-  properties?: Record<string, any>;
+  properties?: Record<string, unknown>;
   created_at: string;
 }
 
@@ -66,7 +66,7 @@ export interface IForestCoverGeometry {
   id: number;
   label_id: number;
   geometry: GeoJSON.Geometry;
-  properties?: Record<string, any>;
+  properties?: Record<string, unknown>;
   created_at: string;
 }
 
@@ -77,7 +77,7 @@ export interface IReferencePatchDeadwoodGeometry {
   patch_id: number;
   geometry: GeoJSON.Geometry; // Stored as JSONB in DB
   area_m2?: number | null;
-  properties?: Record<string, any>;
+  properties?: Record<string, unknown>;
   created_at: string;
 }
 
@@ -87,6 +87,6 @@ export interface IReferencePatchForestCoverGeometry {
   patch_id: number;
   geometry: GeoJSON.Geometry; // Stored as JSONB in DB
   area_m2?: number | null;
-  properties?: Record<string, any>;
+  properties?: Record<string, unknown>;
   created_at: string;
 }

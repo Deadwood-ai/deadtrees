@@ -64,7 +64,7 @@ export function useMapInteractions({
 	const handlersAttachedRef = useRef(false);
 
 	// Hover handler
-	const handlePointerMove = useCallback((event: MapBrowserEvent<PointerEvent>) => {
+	const handlePointerMove = useCallback((event: MapBrowserEvent) => {
 		if (!enabled || !map) {
 			// Reset cursor when disabled
 			const targetElement = map?.getTargetElement();
@@ -120,7 +120,7 @@ export function useMapInteractions({
 	}, [enabled, map, deadwoodLayer, forestCoverLayer, minZoom, onHover]);
 
 	// Click handler
-	const handleClick = useCallback((event: MapBrowserEvent<PointerEvent>) => {
+	const handleClick = useCallback((event: MapBrowserEvent) => {
 		if (!enabled || !map) {
 			onClick?.(null);
 			return;
@@ -174,13 +174,13 @@ export function useMapInteractions({
 		if (!map || handlersAttachedRef.current) return;
 		if (!deadwoodLayer && !forestCoverLayer) return;
 
-		map.on("pointermove", handlePointerMove as any);
-		map.on("click", handleClick as any);
+		map.on("pointermove", handlePointerMove);
+		map.on("click", handleClick);
 		handlersAttachedRef.current = true;
 
 		return () => {
-			map.un("pointermove", handlePointerMove as any);
-			map.un("click", handleClick as any);
+			map.un("pointermove", handlePointerMove);
+			map.un("click", handleClick);
 			handlersAttachedRef.current = false;
 		};
 	}, [map, deadwoodLayer, forestCoverLayer, handlePointerMove, handleClick]);

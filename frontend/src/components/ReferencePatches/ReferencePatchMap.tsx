@@ -638,8 +638,10 @@ export default function ReferencePatchMap({
     // Only auto-fit on first load if patches exist and we haven't done initial fit yet
     if (patches && patches.length > 0 && !hasInitialFitRef.current) {
       const extent = src.getExtent();
-      map.getView().fit(extent, { padding: [50, 50, 50, 50], maxZoom: 18, duration: 500 });
-      hasInitialFitRef.current = true;
+      if (extent) {
+        map.getView().fit(extent, { padding: [50, 50, 50, 50], maxZoom: 18, duration: 500 });
+        hasInitialFitRef.current = true;
+      }
     }
   }, [patches, geoJsonFormatter]);
 

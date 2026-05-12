@@ -125,7 +125,7 @@ const createVectorLayer = (config: VectorLayerConfig) => {
     }
 
     // Default style values - keep original fill, only change border for corrections
-    let fillColor = config.style.fillColor;
+    const fillColor = config.style.fillColor;
     let strokeColor = config.style.strokeColor;
     let strokeWidth = config.style.strokeWidth;
 

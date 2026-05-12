@@ -1,4 +1,6 @@
-export const isTokenExpiringSoon = (session: any, thresholdMinutes: number = 40) => {
+import type { Session } from "@supabase/supabase-js";
+
+export const isTokenExpiringSoon = (session: Pick<Session, "expires_at"> | null | undefined, thresholdMinutes = 40) => {
   if (!session || !session.expires_at) {
     return true; // If we don't have a session or expiration time, assume it's expiring soon
   }

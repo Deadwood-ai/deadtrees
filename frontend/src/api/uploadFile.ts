@@ -1,7 +1,12 @@
+import type { UploadFile } from "antd";
 import { Settings } from "../config";
 
-const uploadFile = async (file: any, token: string) => {
+const uploadFile = async (file: UploadFile, token: string) => {
   // console.log("file in uploadFile", file);
+  if (!file.originFileObj) {
+    throw new Error("Missing original upload file");
+  }
+
   const formData = new FormData();
   formData.append("file", file.originFileObj);
 

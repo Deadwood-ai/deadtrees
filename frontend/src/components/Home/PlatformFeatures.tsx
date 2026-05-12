@@ -29,7 +29,8 @@ const PlatformFeatures = () => {
             </div>
             <h3 className="mb-3 text-2xl font-bold tracking-tight text-gray-900 md:text-3xl">Community labeling</h3>
             <p className="text-base leading-relaxed text-gray-600">
-	              Review predictions, add missing polygons, and correct deadwood cover labels directly in the browser to improve training data quality.
+              Review predictions, add missing polygons, and correct deadwood cover labels directly in the browser to
+              improve training data quality.
             </p>
           </div>
           <div className="relative w-full px-8 pb-8 md:w-1/2 md:p-10 md:pl-0">

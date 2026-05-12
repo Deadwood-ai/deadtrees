@@ -424,8 +424,10 @@ export default function MLTileMap({
     // Only auto-fit on first load if tiles exist and we haven't done initial fit yet
     if (tiles && tiles.length > 0 && !hasInitialFitRef.current) {
       const extent = src.getExtent();
-      map.getView().fit(extent, { padding: [50, 50, 50, 50], maxZoom: 18, duration: 500 });
-      hasInitialFitRef.current = true;
+      if (extent) {
+        map.getView().fit(extent, { padding: [50, 50, 50, 50], maxZoom: 18, duration: 500 });
+        hasInitialFitRef.current = true;
+      }
     }
   }, [tiles, geoJsonFormatter]);
 

@@ -33,7 +33,8 @@ class FileReaderPolyfill {
 
 const loadFixture = async (name: string): Promise<Blob> => {
   const buffer = await readFile(path.join(fixturesDir, name));
-  return new Blob([buffer], { type: "image/tiff" });
+  const bytes = Uint8Array.from(buffer);
+  return new Blob([bytes.buffer], { type: "image/tiff" });
 };
 
 beforeAll(() => {

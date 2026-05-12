@@ -203,7 +203,7 @@ const buildTooltipTitle = (dataset: IDataset): string => {
 
 interface MapRef extends Map {
   moveEndListener?: () => void;
-  pointerMoveListener?: (evt: MapBrowserEvent<UIEvent>) => void;
+  pointerMoveListener?: (evt: MapBrowserEvent) => void;
   selectOnClick?: Select;
   selectListener?: (e: SelectEvent) => void;
   tooltip?: Overlay;
@@ -345,7 +345,7 @@ const DatasetMapOL = ({
           mapRef.current!.moveEndListener = moveEndListener;
           mapRef.current!.tooltip = tooltip;
 
-          const pointerMoveListener = (evt: MapBrowserEvent<UIEvent>) => {
+          const pointerMoveListener = (evt: MapBrowserEvent) => {
             if (evt.dragging) return;
             const pixel = map.getEventPixel(evt.originalEvent);
 
@@ -490,6 +490,8 @@ const DatasetMapOL = ({
         }
       };
     }
+    // OpenLayers map initialization is mounted once; mutable refs keep viewport and callbacks current.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -547,10 +549,12 @@ const DatasetMapOL = ({
           const source = vectorLayerExtendRef.current.getSource();
           if (source && source.getFeatures().length > 0) {
             const extent = source.getExtent();
-            mapRef.current.getView().fit(extent, {
-              padding: [50, 50, 50, 50],
-              maxZoom: 18,
-            });
+            if (extent) {
+              mapRef.current.getView().fit(extent, {
+                padding: [50, 50, 50, 50],
+                maxZoom: 18,
+              });
+            }
           }
         }
       }

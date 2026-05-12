@@ -101,7 +101,7 @@ export default function BaseMap({
 
 	// Fetch AOI data
 	const { data: aoiData, isLoading: isAOILoading } = useDatasetAOI(data?.id);
-	const aoiGeometry = useMemo(() => aoiData?.geometry, [aoiData?.id]);
+	const aoiGeometry = useMemo(() => aoiData?.geometry, [aoiData?.geometry]);
 
 	// Core map initialization
 	const {
