@@ -46,7 +46,7 @@ const Stat = ({ title, value, unit }: { title: string; value: string; unit: stri
 };
 
 const getDatasetLocationLabel = (item: IDataset): string => {
-  const place = item.admin_level_3 ?? item.admin_level_2;
+  const place = item.admin_level_3 || item.admin_level_2;
 
   if (place) {
     const country = item.admin_level_1 ? `, ${countryList[item.admin_level_1 as keyof typeof countryList]}` : "";
