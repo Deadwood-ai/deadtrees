@@ -1,0 +1,8 @@
+id: no-browser-dump-in-tests
+valid:
+  - 'await expect(page.getByTestId("dataset-archive-page")).toBeVisible()'
+  - 'await page.getByRole("button", { name: "Explore Map" }).click()'
+invalid:
+  - 'await page.locator("body").innerText()'
+  - 'await page.content()'
+  - 'await page.locator(".items").allTextContents()'

@@ -53,6 +53,7 @@ source venv/bin/activate
 deadtrees dev test api
 deadtrees dev test processor
 scripts/lint-python.sh
+scripts/lint-ast-grep.sh
 scripts/test-api-smoke.sh
 npm --prefix frontend test
 npm --prefix frontend run lint
@@ -65,6 +66,11 @@ Use `scripts/lint-python.sh` for the fast Python critical-runtime lint gate; it
 is deliberately narrower than full Ruff cleanup and currently checks syntax,
 invalid control flow, and undefined names across API, shared, processor, CLI,
 and Python scripts.
+Use `scripts/lint-ast-grep.sh` after general code changes that touch frontend,
+Python, scripts, or tests. It enforces DeadTrees-specific guardrails that generic
+linters do not know: read-only E2E tests stay read-only, frontend code does not
+reach for privileged service-role env values, environment values are not logged,
+and browser checks avoid broad DOM/text dumps.
 Use `scripts/test-api-smoke.sh` for API, shared, Supabase migration, RLS/RPC, or
 backend storage/download changes that need the same backend-lite coverage as CI.
 For targeted follow-up after the test stack is already running, direct

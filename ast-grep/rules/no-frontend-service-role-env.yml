@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: no-frontend-service-role-env
+message: Do not reference privileged service-role or private env values from frontend code.
+severity: error
+language: TypeScript
+files:
+  - "frontend/**/*.ts"
+  - "frontend/**/*.tsx"
+rule:
+  any:
+    - pattern: import.meta.env.$KEY
+    - pattern: process.env.$KEY
+constraints:
+  KEY:
+    regex: "(SERVICE_ROLE|SERVICE_KEY|PRIVATE_KEY|DATABASE_URL|JWT_SECRET|SUPABASE_SERVICE_ROLE_KEY)"
+note: Browser code may use public VITE_* anon keys only; service-role and private credentials belong behind API/server boundaries.
+

@@ -1,0 +1,8 @@
+id: no-env-value-logging-ts
+valid:
+  - console.log("startup complete")
+  - const apiUrl = import.meta.env.VITE_SAM_API_URL
+invalid:
+  - console.log(process.env.SUPABASE_SERVICE_ROLE_KEY)
+  - logger.warn(import.meta.env.VITE_SUPABASE_ANON_KEY)
+

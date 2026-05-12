@@ -1,0 +1,8 @@
+id: no-env-value-logging-python
+valid:
+  - settings_value = os.environ.get('GDAL_DISABLE_READDIR_ON_OPEN')
+  - logger.info('processor started')
+invalid:
+  - print(os.environ['SUPABASE_SERVICE_ROLE_KEY'])
+  - logger.error(os.getenv('DATABASE_URL'))
+

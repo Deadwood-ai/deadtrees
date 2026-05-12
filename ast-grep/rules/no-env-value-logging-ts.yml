@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: no-env-value-logging-ts
+message: Do not log environment values or frontend runtime env values.
+severity: error
+language: TypeScript
+rule:
+  any:
+    - pattern: console.$METHOD(process.env.$KEY)
+    - pattern: console.$METHOD(import.meta.env.$KEY)
+    - pattern: logger.$METHOD(process.env.$KEY)
+    - pattern: logger.$METHOD(import.meta.env.$KEY)
+note: Secrets and runtime configuration must not be printed into browser, CI, or server logs.
+

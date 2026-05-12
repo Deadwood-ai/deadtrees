@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: no-env-value-logging-python
+message: Do not log environment values.
+severity: error
+language: Python
+rule:
+  any:
+    - pattern: print(os.environ)
+    - pattern: print(os.environ[$KEY])
+    - pattern: print(os.getenv($KEY))
+    - pattern: $LOGGER.$METHOD(os.environ)
+    - pattern: $LOGGER.$METHOD(os.environ[$KEY])
+    - pattern: $LOGGER.$METHOD(os.getenv($KEY))
+note: Secrets and local access settings must not be printed into CI, runtime, or support logs.
+
