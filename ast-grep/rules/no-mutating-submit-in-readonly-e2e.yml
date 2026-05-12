@@ -12,6 +12,5 @@ rule:
     - pattern: 'await $PAGE.getByText($NAME).click($$$ARGS)'
 constraints:
   NAME:
-    regex: "(Sign Up|Reset Password|Upload|Submit|Save|Request download|Request access|Start processing)"
+    regex: "(?i)(Sign Up|Reset Password|Upload|Submit|Save|Request download|Request access|Start processing)"
 note: It is fine for read-only tests to inspect forms or verify signed-out redirects; actual write submissions belong in local/controlled E2E.
-

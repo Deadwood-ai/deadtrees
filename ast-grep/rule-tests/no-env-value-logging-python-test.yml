@@ -4,5 +4,6 @@ valid:
   - logger.info('processor started')
 invalid:
   - print(os.environ['SUPABASE_SERVICE_ROLE_KEY'])
+  - print(os.environ.get('DATABASE_URL'))
   - logger.error(os.getenv('DATABASE_URL'))
-
+  - logger.info('db url', os.environ.get('DATABASE_URL'))

@@ -10,5 +10,12 @@ rule:
     - pattern: console.$METHOD(import.meta.env.$KEY)
     - pattern: logger.$METHOD(process.env.$KEY)
     - pattern: logger.$METHOD(import.meta.env.$KEY)
+    - pattern: console.$METHOD($A, process.env.$KEY)
+    - pattern: console.$METHOD($A, import.meta.env.$KEY)
+    - pattern: logger.$METHOD($A, process.env.$KEY)
+    - pattern: logger.$METHOD($A, import.meta.env.$KEY)
+    - pattern: console.$METHOD($A, $B, process.env.$KEY)
+    - pattern: console.$METHOD($A, $B, import.meta.env.$KEY)
+    - pattern: logger.$METHOD($A, $B, process.env.$KEY)
+    - pattern: logger.$METHOD($A, $B, import.meta.env.$KEY)
 note: Secrets and runtime configuration must not be printed into browser, CI, or server logs.
-

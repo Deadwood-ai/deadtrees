@@ -5,4 +5,5 @@ valid:
 invalid:
   - console.log(process.env.SUPABASE_SERVICE_ROLE_KEY)
   - logger.warn(import.meta.env.VITE_SUPABASE_ANON_KEY)
-
+  - console.error("db", process.env.DATABASE_URL)
+  - logger.warn("cfg", import.meta.env.VITE_SUPABASE_ANON_KEY)

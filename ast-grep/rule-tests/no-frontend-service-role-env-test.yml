@@ -5,4 +5,7 @@ valid:
 invalid:
   - const serviceRole = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY
   - const databaseUrl = process.env.DATABASE_URL
-
+  - const serviceRole = import.meta.env["VITE_SUPABASE_SERVICE_ROLE_KEY"]
+  - const databaseUrl = process.env["DATABASE_URL"]
+  - const { VITE_SUPABASE_SERVICE_ROLE_KEY } = import.meta.env
+  - const { DATABASE_URL, OTHER } = process.env

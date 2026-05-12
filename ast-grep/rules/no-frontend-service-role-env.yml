@@ -11,8 +11,13 @@ rule:
   any:
     - pattern: import.meta.env.$KEY
     - pattern: process.env.$KEY
+    - pattern: import.meta.env[$KEY]
+    - pattern: process.env[$KEY]
+    - pattern: const { $KEY } = import.meta.env
+    - pattern: const { $KEY } = process.env
+    - pattern: const { $$$, $KEY, $$$ } = import.meta.env
+    - pattern: const { $$$, $KEY, $$$ } = process.env
 constraints:
   KEY:
-    regex: "(SERVICE_ROLE|SERVICE_KEY|PRIVATE_KEY|DATABASE_URL|JWT_SECRET|SUPABASE_SERVICE_ROLE_KEY)"
+    regex: "(?i)(SERVICE_ROLE|SERVICE_KEY|PRIVATE_KEY|DATABASE_URL|JWT_SECRET|SUPABASE_SERVICE_ROLE_KEY)"
 note: Browser code may use public VITE_* anon keys only; service-role and private credentials belong behind API/server boundaries.
-

@@ -12,6 +12,7 @@ on:
       - "scripts/**/*.py"
       - "scripts/**/*.ts"
       - "scripts/lint-ast-grep.sh"
+      - "scripts/test-ast-grep-rules.sh"
       - "ast-grep/**"
       - "sgconfig.yml"
       - ".github/workflows/ast-grep.yml"
