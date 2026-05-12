@@ -1,5 +1,6 @@
 import pytest
 from processor.src.utils.biome import get_biome_data
+from shared.models import QueueTask, TaskTypeEnum
 
 pytestmark = pytest.mark.usefixtures('ensure_biome_data')
 

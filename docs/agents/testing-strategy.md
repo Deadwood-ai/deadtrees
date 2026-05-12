@@ -59,6 +59,7 @@ rename while behavior is unchanged, the test is probably too coupled.
 | Contributor write E2E  | `npm --prefix frontend run test:e2e:local:write`                        | local-only signup, password reset, upload start, download request side effects      |
 | Auditor local E2E      | `npm --prefix frontend run test:e2e:local:audit`                        | auditor-only queue triage, audit tabs, processing logs, and audit access guards     |
 | Auditor write E2E      | `npm --prefix frontend run test:e2e:local:audit:write`                  | local-only auditor flag, AOI, audit-lock, and audit-save side effects               |
+| Python critical lint   | `scripts/lint-python.sh`                                                | syntax/runtime-name safety for API, shared models, processor, CLI, and scripts      |
 | API/router             | `scripts/test-api-smoke.sh` or `deadtrees dev test api <path>`          | FastAPI routes, upload/download/process/auth behavior                               |
 | Database/RLS/migration | focused API DB tests plus migration review/reset where practical        | schema, policies, RPCs, views, generated contracts                                  |
 | Processor CPU          | `deadtrees dev test processor <path>`                                   | queue orchestration, GeoTIFF/COG/metadata, non-GPU utilities                        |
@@ -77,6 +78,11 @@ rename while behavior is unchanged, the test is probably too coupled.
 Do not use currently red global checks as blocking evidence unless the task is
 to fix that baseline. As of this strategy, frontend Vitest is the green fast
 gate, while frontend build/lint still have unrelated baseline debt.
+
+`scripts/lint-python.sh` is intentionally a critical-runtime Ruff gate, not a
+full style gate. It checks `E9,F63,F7,F82` across Python surfaces so CI catches
+syntax errors, invalid control-flow patterns, and undefined names without first
+requiring cleanup of the wider existing Ruff debt.
 
 ## Data Factory Coverage
 

@@ -1,0 +1,36 @@
+name: Python Lint
+
+on:
+  pull_request:
+    paths:
+      - "api/**"
+      - "shared/**"
+      - "processor/**"
+      - "deadtrees-cli/**"
+      - "scripts/*.py"
+      - "scripts/**/*.py"
+      - "scripts/lint-python.sh"
+      - "pyproject.toml"
+      - ".github/workflows/python-lint.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  python-lint:
+    name: python-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Ruff
+        run: python -m pip install ruff==0.15.12
+
+      - name: Run critical Python lint
+        run: scripts/lint-python.sh --output-format=github

@@ -52,12 +52,17 @@ sessions where a debugger client will attach.
 source venv/bin/activate
 deadtrees dev test api
 deadtrees dev test processor
+scripts/lint-python.sh
 scripts/test-api-smoke.sh
 npm --prefix frontend test
 npm --prefix frontend run test:e2e
 ```
 
 Local work is good for API, shared-model, frontend, docs, and non-GPU checks.
+Use `scripts/lint-python.sh` for the fast Python critical-runtime lint gate; it
+is deliberately narrower than full Ruff cleanup and currently checks syntax,
+invalid control flow, and undefined names across API, shared, processor, CLI,
+and Python scripts.
 Use `scripts/test-api-smoke.sh` for API, shared, Supabase migration, RLS/RPC, or
 backend storage/download changes that need the same backend-lite coverage as CI.
 For targeted follow-up after the test stack is already running, direct
