@@ -90,7 +90,7 @@ function buildTooltip(audit: DatasetAuditUserInfo) {
   );
 }
 
-const AuditBadge: React.FC<Props> = ({ datasetId: _datasetId, audit: auditProp }) => {
+const AuditBadge: React.FC<Props> = ({ audit: auditProp }) => {
   const audit = (auditProp ?? null) as DatasetAuditUserInfo | null;
   const show = Boolean(audit && audit.final_assessment);
 

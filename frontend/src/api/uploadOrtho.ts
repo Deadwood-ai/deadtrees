@@ -1,4 +1,5 @@
-import axios from "axios";
+import axios, { type AxiosProgressEvent, type AxiosResponse } from "axios";
+import type { Session } from "@supabase/supabase-js";
 import { Settings } from "../config";
 import { clearLocalSupabaseSession, supabase } from "../hooks/useSupabase";
 import { isInvalidSessionError } from "../utils/authSession";
@@ -20,12 +21,16 @@ interface UploadOptions {
     citation_doi?: string;
   };
   onProgress: (progress: { percent: number }) => void;
-  onSuccess: (response: any) => void;
+  onSuccess: (response: UploadOrthoResponse) => void;
   onError: (error: Error) => void;
   uploadId: string;
-  session: any;
+  session: Session | null;
   signal?: AbortSignal;
 }
+
+type UploadOrthoResponse = {
+  id: string;
+} & Record<string, unknown>;
 
 interface ChunkInfo {
   index: number;
@@ -66,7 +71,7 @@ const uploadOrtho = async (options: UploadOptions) => {
 };
 
 async function uploadChunks(file: File, totalChunks: number, uploadStartTime: number, options: UploadOptions) {
-  let resUpload;
+  let resUpload: AxiosResponse<UploadOrthoResponse> | undefined;
   let currentSession = options.session;
 
   for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
@@ -103,7 +108,11 @@ async function uploadChunks(file: File, totalChunks: number, uploadStartTime: nu
     });
   }
 
-  return resUpload?.data;
+  if (!resUpload) {
+    throw new Error("Upload did not return a dataset response");
+  }
+
+  return resUpload.data;
 }
 
 function getChunkInfo(file: File, chunkIndex: number): ChunkInfo {
@@ -185,7 +194,7 @@ async function uploadSingleChunk(formData: FormData, chunkInfo: ChunkInfo, fileS
 
   for (let attempt = 1; attempt <= MAX_CHUNK_UPLOAD_ATTEMPTS; attempt++) {
     try {
-      const resUpload = await axios.post(`${Settings.API_URL_UPLOAD_ENDPOINT}`, formData, {
+      const resUpload = await axios.post<UploadOrthoResponse>(`${Settings.API_URL_UPLOAD_ENDPOINT}`, formData, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
@@ -216,8 +225,13 @@ async function uploadSingleChunk(formData: FormData, chunkInfo: ChunkInfo, fileS
   throw new Error(`Failed to upload chunk ${chunkInfo.index}: exhausted retry attempts`);
 }
 
-function calculateProgress(chunkInfo: ChunkInfo, progressEvent: any, fileSize: number): number {
-  const chunkProgress = progressEvent.loaded / progressEvent.total;
+function calculateProgress(chunkInfo: ChunkInfo, progressEvent: AxiosProgressEvent, fileSize: number): number {
+  const total = progressEvent.total;
+  if (!total) {
+    return Math.round((chunkInfo.index * CHUNK_SIZE / fileSize) * 100);
+  }
+
+  const chunkProgress = progressEvent.loaded / total;
   const overallProgress = (chunkInfo.index * CHUNK_SIZE + chunkProgress * (chunkInfo.end - chunkInfo.start)) / fileSize;
   return Math.round(overallProgress * 100);
 }

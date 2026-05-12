@@ -11,8 +11,12 @@ interface Props {
   onUnsavedChanges: (hasChanges: boolean) => void;
 }
 
+type MLTilePhase = "placement" | "qa" | "validation";
+
+const isMLTilePhase = (key: string): key is MLTilePhase => ["placement", "qa", "validation"].includes(key);
+
 export default function MLTilePhaseManager({ dataset, onUnsavedChanges }: Props) {
-  const [activePhase, setActivePhase] = useState<"placement" | "qa" | "validation">("placement");
+  const [activePhase, setActivePhase] = useState<MLTilePhase>("placement");
   const { data: tiles20cm } = useMLTiles(dataset.id, 20);
   const { data: progress } = useTileProgress(dataset.id);
   const { mutateAsync: completeGeneration, isPending: isCompleting } = useCompleteTileGeneration();
@@ -63,7 +67,9 @@ export default function MLTilePhaseManager({ dataset, onUnsavedChanges }: Props)
 
       <Tabs
         activeKey={activePhase}
-        onChange={(key) => setActivePhase(key as any)}
+        onChange={(key) => {
+          if (isMLTilePhase(key)) setActivePhase(key);
+        }}
         className="flex-1"
         items={[
           {

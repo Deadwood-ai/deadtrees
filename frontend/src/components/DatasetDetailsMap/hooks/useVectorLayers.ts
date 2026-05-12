@@ -1,11 +1,15 @@
 import { useEffect, useRef, useCallback } from "react";
 import type { Map as OLMap } from "ol";
-import type VectorTileLayer from "ol/layer/VectorTile";
+import VectorTileLayer from "ol/layer/VectorTile";
 import { Style, Stroke } from "ol/style";
 import type { FeatureLike } from "ol/Feature";
 import { palette } from "../../../theme/palette";
 
 import { createDeadwoodVectorLayer, createForestCoverVectorLayer } from "../createVectorLayer";
+
+type DisposableSource = {
+	dispose: () => void;
+};
 
 export interface UseVectorLayersOptions {
 	/** Map instance */
@@ -124,7 +128,7 @@ export function useVectorLayers({
 			deadwoodLayerRef.current = deadwoodLayer;
 
 			// Create selection layer for hover (shares source with deadwood)
-			const selectionLayer = new (deadwoodLayer.constructor as any)({
+			const selectionLayer = new VectorTileLayer({
 				source: deadwoodLayer.getSource()!,
 				style: (feature: FeatureLike) => {
 					if (hoveredLabelIdRef.current !== null && feature.get("id") === hoveredLabelIdRef.current) {
@@ -169,13 +173,13 @@ export function useVectorLayers({
 				if (deadwoodLayerRef.current) {
 					map.removeLayer(deadwoodLayerRef.current);
 					const source = deadwoodLayerRef.current.getSource();
-					if (source && "dispose" in source) (source as any).dispose();
+					if (source && "dispose" in source) (source as DisposableSource).dispose();
 					deadwoodLayerRef.current = null;
 				}
 				if (forestCoverLayerRef.current) {
 					map.removeLayer(forestCoverLayerRef.current);
 					const source = forestCoverLayerRef.current.getSource();
-					if (source && "dispose" in source) (source as any).dispose();
+					if (source && "dispose" in source) (source as DisposableSource).dispose();
 					forestCoverLayerRef.current = null;
 				}
 				if (selectionLayerRef.current) {

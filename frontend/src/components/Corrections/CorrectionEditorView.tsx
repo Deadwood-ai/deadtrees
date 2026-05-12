@@ -189,6 +189,8 @@ export default function CorrectionEditorView({ dataset, initialLayerType, onClos
       deadwoodLayerRef.current = null;
       forestCoverLayerRef.current = null;
     };
+    // OpenLayers map setup is intentionally owned by dataset/layer identity; viewport changes are persisted by the map.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataset.cog_path, hasDisplayableForestCover, deadwood.data?.id, forestCover.data?.id]);
 
   // Start editing

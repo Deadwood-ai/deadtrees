@@ -84,13 +84,13 @@ export const sanitizeText = (text: string | null | undefined): string => {
  * @param textFields - Array of field names to clean
  * @returns Object with cleaned text fields
  */
-export const fixObjectTextEncoding = <T extends Record<string, any>>(obj: T, textFields: (keyof T)[]): T => {
+export const fixObjectTextEncoding = <T extends Record<string, unknown>>(obj: T, textFields: (keyof T)[]): T => {
   const cleaned = { ...obj };
 
   textFields.forEach((field) => {
     if (typeof cleaned[field] === "string") {
       cleaned[field] = fixTextEncoding(cleaned[field] as string) as T[keyof T];
-    } else if (Array.isArray(cleaned[field]) && cleaned[field].every((item: any) => typeof item === "string")) {
+    } else if (Array.isArray(cleaned[field]) && cleaned[field].every((item: unknown) => typeof item === "string")) {
       cleaned[field] = fixAuthorNamesEncoding(cleaned[field] as string[]) as T[keyof T];
     }
   });

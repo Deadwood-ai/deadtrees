@@ -201,7 +201,7 @@ export default function DatasetLabelEditor() {
     if (!mapRef.current || !serverLayerRef.current) return;
     const map = mapRef.current;
 
-    const handleClick = (evt: MapBrowserEvent<UIEvent>) => {
+    const handleClick = (evt: MapBrowserEvent) => {
       if (!editor.isEditing) return;
       let picked: Feature<Geometry> | null = null;
       map.forEachFeatureAtPixel(
@@ -275,7 +275,7 @@ export default function DatasetLabelEditor() {
     if (!mapRef.current || !serverLayerRef.current) return;
     const map = mapRef.current;
     let raf = 0;
-    const onMove = (evt: MapBrowserEvent<UIEvent>) => {
+    const onMove = (evt: MapBrowserEvent) => {
       if (ai.isProcessing || ai.isActive) return;
       if (raf) return;
       raf = requestAnimationFrame(() => {

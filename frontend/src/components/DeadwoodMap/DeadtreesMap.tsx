@@ -421,104 +421,107 @@ const DeadtreesMap = () => {
   }, []);
 
   // handler functions
-  const handleClick = async (
-    event: { coordinate: number[] },
-    year: string,
-    skipIfDrawing: boolean,
-  ) => {
-    // Skip click handling when drawing flag bbox
-    if (skipIfDrawing) return;
-    if (mapRef.current) {
-      // Fetch both deadwood and forest values (forest also gives us the cell bounds)
-      const [deadwoodResult, forestResult] = await Promise.all([
-        getPixelValueOfCoordinate({
-          coordinates: event.coordinate,
-          cogUrl: getDeadwoodCOGUrl(year),
-        }),
-        getPixelValueOfCoordinate({
-          coordinates: event.coordinate,
-          cogUrl: getForestCOGUrl(year),
-        }),
-      ]);
+  const handleClick = useCallback(
+    async (
+      event: { coordinate: number[] },
+      year: string,
+      skipIfDrawing: boolean,
+    ) => {
+      // Skip click handling when drawing flag bbox
+      if (skipIfDrawing) return;
+      if (mapRef.current) {
+        // Fetch both deadwood and forest values (forest also gives us the cell bounds)
+        const [deadwoodResult, forestResult] = await Promise.all([
+          getPixelValueOfCoordinate({
+            coordinates: event.coordinate,
+            cogUrl: getDeadwoodCOGUrl(year),
+          }),
+          getPixelValueOfCoordinate({
+            coordinates: event.coordinate,
+            cogUrl: getForestCOGUrl(year),
+          }),
+        ]);
 
-      // Use cell bounds from forest raster to create the polygon
-      const [minX, minY, maxX, maxY] = forestResult.cellBounds;
-      const cellPolygon = new Polygon([
-        [
-          [minX, minY],
-          [maxX, minY],
-          [maxX, maxY],
-          [minX, maxY],
-          [minX, minY],
-        ],
-      ]);
+        // Use cell bounds from forest raster to create the polygon
+        const [minX, minY, maxX, maxY] = forestResult.cellBounds;
+        const cellPolygon = new Polygon([
+          [
+            [minX, minY],
+            [maxX, minY],
+            [maxX, maxY],
+            [minX, maxY],
+            [minX, minY],
+          ],
+        ]);
 
-      // Update clicked cell layer
-      if (clickedCellLayerRef.current) {
-        const source = clickedCellLayerRef.current.getSource();
-        if (source) {
-          source.clear();
-          const feature = new Feature({ geometry: cellPolygon });
-          source.addFeature(feature);
+        // Update clicked cell layer
+        if (clickedCellLayerRef.current) {
+          const source = clickedCellLayerRef.current.getSource();
+          if (source) {
+            source.clear();
+            const feature = new Feature({ geometry: cellPolygon });
+            source.addFeature(feature);
+          }
         }
-      }
 
-      const dwVal = Number(deadwoodResult.value) || 0;
-      const fVal = Number(forestResult.value) || 0;
-      // Normalize from 0-255 to 0-100%
-      const deadwoodPct = dwVal > 0 ? Math.round((dwVal / 255) * 100) : 0;
-      const forestPct = fVal > 0 ? Math.round((fVal / 255) * 100) : 0;
+        const dwVal = Number(deadwoodResult.value) || 0;
+        const fVal = Number(forestResult.value) || 0;
+        // Normalize from 0-255 to 0-100%
+        const deadwoodPct = dwVal > 0 ? Math.round((dwVal / 255) * 100) : 0;
+        const forestPct = fVal > 0 ? Math.round((fVal / 255) * 100) : 0;
 
-      // Update tooltip over the clicked cell - show active layers
-      if (clickedCellTooltipRef.current) {
-        const tooltipElement = clickedCellTooltipRef.current.getElement();
-        if (tooltipElement) {
-          // Build tooltip content based on which layers are active
-          const layerParts: string[] = [];
-          if (showForest) {
-            layerParts.push(`<span style="display: flex; align-items: center; gap: 4px;">
+        // Update tooltip over the clicked cell - show active layers
+        if (clickedCellTooltipRef.current) {
+          const tooltipElement = clickedCellTooltipRef.current.getElement();
+          if (tooltipElement) {
+            // Build tooltip content based on which layers are active
+            const layerParts: string[] = [];
+            if (showForest) {
+              layerParts.push(`<span style="display: flex; align-items: center; gap: 4px;">
                 <span style="width: 8px; height: 8px; border-radius: 2px; background: ${mapColors.forest.fill};"></span>
                 <span style="color: ${palette.neutral[700]};">Tree cover [%]</span>
                 <span style="font-weight: 600;">${forestPct}%</span>
               </span>`);
-          }
-          if (showDeadwood) {
-            layerParts.push(`<span style="display: flex; align-items: center; gap: 4px;">
+            }
+            if (showDeadwood) {
+              layerParts.push(`<span style="display: flex; align-items: center; gap: 4px;">
                 <span style="width: 8px; height: 8px; border-radius: 2px; background: ${mapColors.deadwood.fill};"></span>
                 <span style="color: ${palette.neutral[700]};">Deadwood cover [%]</span>
                 <span style="font-weight: 600;">${deadwoodPct}%</span>
               </span>`);
-          }
+            }
 
-          tooltipElement.innerHTML = `
+            tooltipElement.innerHTML = `
             <div style="display: flex; align-items: center; gap: 12px; color: ${palette.neutral[800]};">
               ${layerParts.join("")}
               <button id="close-cell-tooltip" style="background: none; border: none; cursor: pointer; color: ${palette.neutral[500]}; font-size: 16px; line-height: 1; padding: 0 0 0 4px;">&times;</button>
             </div>
           `;
-          // Add close button handler
-          const closeBtn = tooltipElement.querySelector("#close-cell-tooltip");
-          if (closeBtn) {
-            closeBtn.addEventListener("click", () => {
-              clickedCellTooltipRef.current?.setPosition(undefined);
-              // Also clear the clicked cell layer
-              if (clickedCellLayerRef.current) {
-                const source = clickedCellLayerRef.current.getSource();
-                if (source) source.clear();
-              }
-              setClickedValues(null);
-            });
+            // Add close button handler
+            const closeBtn = tooltipElement.querySelector("#close-cell-tooltip");
+            if (closeBtn) {
+              closeBtn.addEventListener("click", () => {
+                clickedCellTooltipRef.current?.setPosition(undefined);
+                // Also clear the clicked cell layer
+                if (clickedCellLayerRef.current) {
+                  const source = clickedCellLayerRef.current.getSource();
+                  if (source) source.clear();
+                }
+                setClickedValues(null);
+              });
+            }
           }
+          // Position tooltip at top center of the cell
+          const centerX = (minX + maxX) / 2;
+          clickedCellTooltipRef.current.setPosition([centerX, maxY]);
         }
-        // Position tooltip at top center of the cell
-        const centerX = (minX + maxX) / 2;
-        clickedCellTooltipRef.current.setPosition([centerX, maxY]);
-      }
 
-      // Update state to display in legend panel
-      setClickedValues({ forestPct, deadwoodPct });
-    }
-  };
+        // Update state to display in legend panel
+        setClickedValues({ forestPct, deadwoodPct });
+      }
+    },
+    [showDeadwood, showForest],
+  );
 
   useEffect(() => {
     // console.log(DeadwoodMapViewport);
@@ -713,6 +716,8 @@ const DeadtreesMap = () => {
         map.setTarget(undefined);
       }
     };
+    // OpenLayers map initialization is mounted once; map state changes are applied by focused effects below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopOrientationTracking, stopUserLocationTracking]);
 
   // effects -----------------------------------------------------------
@@ -771,7 +776,7 @@ const DeadtreesMap = () => {
         }
       };
     }
-  }, [selectedYear, isDrawingFlag, polygonAnalysis.isDrawing]);
+  }, [selectedYear, isDrawingFlag, polygonAnalysis.isDrawing, handleClick]);
 
   // Update sources when year changes (use cached sources for instant switching)
   useEffect(() => {

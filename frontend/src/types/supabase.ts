@@ -1,4 +1,4 @@
-interface Dataset {
+export interface Dataset {
   aquisition_date: string;
   bbox: unknown | null;
   compress_time: number | null;

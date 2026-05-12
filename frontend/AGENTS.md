@@ -96,7 +96,6 @@ For user-facing UI changes, start the relevant Vite profile and validate with th
 Codex in-app browser or Playwright. Use `docs/playbooks/frontend-browser-regression.md`
 for production-connected smoke checks.
 
-`npm --prefix frontend run build` and `npm --prefix frontend run lint` are useful
-checks, but they currently have unrelated baseline debt. Do not treat them as
-blocking for focused frontend changes unless the task includes fixing that
-baseline.
+`npm --prefix frontend run build` and `npm --prefix frontend run lint` are
+required frontend checks. Treat failures as blocking for frontend changes unless
+the failure is clearly unrelated and documented.

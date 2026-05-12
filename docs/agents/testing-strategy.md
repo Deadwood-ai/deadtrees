@@ -54,6 +54,7 @@ rename while behavior is unchanged, the test is probably too coupled.
 | Surface                | Default check                                                           | Use when                                                                            |
 | ---------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | Frontend utility       | `npm --prefix frontend test`                                            | pure data, validation, analytics, routing helpers                                   |
+| Frontend static        | `npm --prefix frontend run lint` and `npm --prefix frontend run build`  | TypeScript, lint, React hook, import, and production-build correctness              |
 | Frontend browser       | `npm --prefix frontend run test:e2e` or the browser regression playbook | user-facing routes, maps, auth shell, archive/detail/release flows                  |
 | Contributor local E2E  | `npm --prefix frontend run test:e2e:local`                              | authenticated upload shell, metadata submission contract, process request contract  |
 | Contributor write E2E  | `npm --prefix frontend run test:e2e:local:write`                        | local-only signup, password reset, upload start, download request side effects      |
@@ -74,9 +75,10 @@ rename while behavior is unchanged, the test is probably too coupled.
 4. Escalate to processing-server validation only for GPU/model/ODM behavior or
    when local non-GPU checks cannot prove the risk.
 
-Do not use currently red global checks as blocking evidence unless the task is
-to fix that baseline. As of this strategy, frontend Vitest is the green fast
-gate, while frontend build/lint still have unrelated baseline debt.
+Frontend build and lint are required frontend gates. Treat failures in
+`npm --prefix frontend run lint` or `npm --prefix frontend run build` as
+blocking for frontend changes unless the failure is clearly unrelated and
+documented.
 
 ## Data Factory Coverage
 

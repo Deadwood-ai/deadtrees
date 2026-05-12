@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Modal, Form, Checkbox, Select, Radio, Slider, Button, Divider } from "antd";
 import { IBiome } from "../types/dataset";
 import { useData } from "../hooks/useDataProvider";
@@ -26,7 +26,7 @@ const FilterModal: React.FC<FilterModalProps> = ({ isVisible, onClose, onApplyFi
 
   // Determine date range boundaries
   const currentYear = new Date().getFullYear();
-  const defaultDateRange: [number, number] = [2010, currentYear];
+  const defaultDateRange: [number, number] = useMemo(() => [2010, currentYear], [currentYear]);
 
   // Reset form when modal is opened
   useEffect(() => {

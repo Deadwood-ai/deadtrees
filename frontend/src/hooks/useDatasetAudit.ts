@@ -49,7 +49,7 @@ export interface AOIData {
 // New interface for ortho metadata
 export interface OrthoMetadata {
   dataset_id: number;
-  ortho_info: Record<string, any>;
+  ortho_info: Record<string, unknown>;
   created_at?: string;
   updated_at?: string;
 }

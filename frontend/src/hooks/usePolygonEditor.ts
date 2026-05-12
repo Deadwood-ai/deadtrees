@@ -54,8 +54,8 @@ export default function usePolygonEditor({ mapRef }: UsePolygonEditorParams): Us
   const modifyRef = useRef<Modify | null>(null);
   const drawRef = useRef<Draw | null>(null);
   const hoveredFeatureRef = useRef<Feature<Geometry> | null>(null);
-  const pointerMoveListenerRef = useRef<((evt: MapBrowserEvent<UIEvent>) => void) | null>(null);
-  const clickListenerRef = useRef<((evt: MapBrowserEvent<UIEvent>) => void) | null>(null);
+  const pointerMoveListenerRef = useRef<((evt: MapBrowserEvent) => void) | null>(null);
+  const clickListenerRef = useRef<((evt: MapBrowserEvent) => void) | null>(null);
 
   const ensureOverlay = useCallback(() => {
     if (!mapRef.current) return;
@@ -360,7 +360,7 @@ export default function usePolygonEditor({ mapRef }: UsePolygonEditorParams): Us
     });
 
     // Hover highlight handler - use feature properties instead of setStyle
-    const handlePointerMove = (evt: MapBrowserEvent<UIEvent>) => {
+    const handlePointerMove = (evt: MapBrowserEvent) => {
       if (!mapRef.current || !overlayLayerRef.current) return;
       let hitFeature: Feature<Geometry> | null = null;
       mapRef.current.forEachFeatureAtPixel(
@@ -403,7 +403,7 @@ export default function usePolygonEditor({ mapRef }: UsePolygonEditorParams): Us
     pointerMoveListenerRef.current = handlePointerMove;
 
     // Click outside to clear selection (keeps toolbar in sync)
-    const handleMapClick = (evt: MapBrowserEvent<UIEvent>) => {
+    const handleMapClick = (evt: MapBrowserEvent) => {
       if (!mapRef.current || !overlayLayerRef.current || !selectRef.current) return;
       // If drawing, ignore (draw handles clicks)
       if (drawRef.current) return;

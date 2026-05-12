@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Table, Tag, Typography, Button, Tooltip, Spin, Empty } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { supabase } from "../hooks/useSupabase";
@@ -21,7 +21,7 @@ const PublicationsTable: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [publications, setPublications] = useState<Publication[]>([]);
 
-  const fetchPublications = async () => {
+  const fetchPublications = useCallback(async () => {
     if (!user) return;
 
     try {
@@ -59,11 +59,11 @@ const PublicationsTable: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     fetchPublications();
-  }, [user]);
+  }, [fetchPublications]);
 
   const columns: ColumnsType<Publication> = [
     {

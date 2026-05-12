@@ -1,6 +1,6 @@
 import { Settings } from "../config";
 
-const addMetadata = async (dataset_id: number, metadata: any, token: string) => {
+const addMetadata = async (dataset_id: number, metadata: Record<string, unknown>, token: string) => {
   try {
     const res = await fetch(
       `${Settings.API_URL}/datasets/${dataset_id}/metadata`,

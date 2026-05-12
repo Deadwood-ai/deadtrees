@@ -2,12 +2,14 @@ import { Button, Carousel, Tooltip, Tag } from "antd";
 import { useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { LeftOutlined, RightOutlined } from "@ant-design/icons";
+import type { CarouselRef } from "antd/es/carousel";
 import { useData } from "../../hooks/useDataProvider";
 import { Settings } from "../../config";
 import countryList from "../../utils/countryList";
 import { useDatasetDetailsMap } from "../../hooks/useDatasetDetailsMapProvider";
 import parseBBox from "../../utils/parseBBox";
 import { isDatasetViewable } from "../../utils/datasetVisibility";
+import type { IDataset } from "../../types/dataset";
 
 // Convert a geographic bounding box to area in hectares
 const calculateAreaFromBBox = (bboxArray: number[]): number => {
@@ -43,7 +45,18 @@ const Stat = ({ title, value, unit }: { title: string; value: string; unit: stri
   );
 };
 
-const Stats = ({ datasets }: { datasets: any[] }) => {
+const getDatasetLocationLabel = (item: IDataset): string => {
+  const place = item.admin_level_3 ?? item.admin_level_2;
+
+  if (place) {
+    const country = item.admin_level_1 ? `, ${countryList[item.admin_level_1 as keyof typeof countryList]}` : "";
+    return `${place.slice(0, 10)}${place.length > 15 ? "..." : ""}${country}`;
+  }
+
+  return item.admin_level_1 ? countryList[item.admin_level_1 as keyof typeof countryList] : "";
+};
+
+const Stats = ({ datasets }: { datasets: IDataset[] }) => {
   const stats = useMemo(() => {
     if (!datasets.length) return { orthophotos: 0, area: 0, countries: 0, fileSize: 0 };
 
@@ -100,7 +113,7 @@ const Stats = ({ datasets }: { datasets: any[] }) => {
 
 const DataGallery = ({ hideHeader = false }: { hideHeader?: boolean }) => {
   const { data } = useData();
-  const carouselRef = useRef<any>(null);
+  const carouselRef = useRef<CarouselRef | null>(null);
   const navigate = useNavigate();
   const { setNavigationSource } = useDatasetDetailsMap();
 
@@ -134,7 +147,7 @@ const DataGallery = ({ hideHeader = false }: { hideHeader?: boolean }) => {
     // );
 
     // Create a map to store one entry per author
-    const authorMap = new Map();
+    const authorMap = new Map<string, IDataset>();
 
     // Take only the first entry for each author in the authors array
     filtered.forEach((item) => {
@@ -147,7 +160,7 @@ const DataGallery = ({ hideHeader = false }: { hideHeader?: boolean }) => {
     });
 
     // Convert map values back to array and remove duplicates
-    const oneImagePerAuthor = Array.from(new Set(authorMap.values()));
+    const oneImagePerAuthor = Array.from(new Set<IDataset>(authorMap.values()));
 
     // Debug: Final result
     // console.log("Final unique entries:", oneImagePerAuthor.length);
@@ -248,13 +261,7 @@ const DataGallery = ({ hideHeader = false }: { hideHeader?: boolean }) => {
                           }
                         >
                           <span className="max-w-[70%] truncate font-semibold">
-                            {item.admin_level_3 || item.admin_level_2
-                              ? // If we have level 2 or 3, show it with country
-                              `${(item.admin_level_3 || item.admin_level_2).slice(0, 10)}${(item.admin_level_3 || item.admin_level_2).length > 15 ? "..." : ""}${item.admin_level_1 ? `, ${countryList[item.admin_level_1 as keyof typeof countryList]}` : ""}`
-                              : // If we only have level 1, just show the country
-                              item.admin_level_1
-                                ? countryList[item.admin_level_1 as keyof typeof countryList]
-                                : ""}
+                            {getDatasetLocationLabel(item)}
                           </span>
                         </Tooltip>
                         <span className="text-xs text-gray-500">
