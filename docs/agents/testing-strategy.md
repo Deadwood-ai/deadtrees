@@ -55,6 +55,7 @@ rename while behavior is unchanged, the test is probably too coupled.
 | ---------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | Frontend utility       | `npm --prefix frontend test`                                            | pure data, validation, analytics, routing helpers                                   |
 | Frontend static        | `npm --prefix frontend run lint` and `npm --prefix frontend run build`  | TypeScript, lint, React hook, import, and production-build correctness              |
+| Repo guardrails        | `scripts/lint-ast-grep.sh`                                             | DeadTrees-specific AST rules for read-only CI safety, secret logging, and browser-test hygiene |
 | Frontend browser       | `npm --prefix frontend run test:e2e` or the browser regression playbook | user-facing routes, maps, auth shell, archive/detail/release flows                  |
 | Contributor local E2E  | `npm --prefix frontend run test:e2e:local`                              | authenticated upload shell, metadata submission contract, process request contract  |
 | Contributor write E2E  | `npm --prefix frontend run test:e2e:local:write`                        | local-only signup, password reset, upload start, download request side effects      |
@@ -80,6 +81,10 @@ Frontend build and lint are required frontend gates. Treat failures in
 `npm --prefix frontend run lint` or `npm --prefix frontend run build` as
 blocking for frontend changes unless the failure is clearly unrelated and
 documented.
+Run `scripts/lint-ast-grep.sh` after broad implementation changes and before PRs
+that touch frontend, Python, scripts, or tests. Add new ast-grep rules only for
+repo-specific mistakes that are cheap to detect and expensive to review manually;
+do not use ast-grep for subjective style preferences.
 
 `scripts/lint-python.sh` is intentionally a critical-runtime Ruff gate, not a
 full style gate. It checks `E9,F63,F7,F82` across Python surfaces so CI catches

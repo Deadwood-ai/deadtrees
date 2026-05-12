@@ -32,6 +32,9 @@ Prioritize:
 - Frontend UX regressions that affect real workflows, including broken responsive
   layouts, inaccessible controls, confusing states, missing loading/error states,
   or text/layout overlap.
+- Repo-specific guardrail violations caught by `scripts/lint-ast-grep.sh`,
+  especially read-only CI tests that start write flows, secret/env logging, or
+  broad browser dumps that make automated reviews noisy.
 
 Avoid:
 
@@ -84,6 +87,8 @@ When the user asks Codex to run the local review and improve the worktree:
 3. Fix only high-signal findings that are in scope for the branch.
 4. Preserve user changes and avoid unrelated refactors.
 5. Run the smallest relevant validation set.
+   Include `scripts/lint-ast-grep.sh` when the branch touches frontend, Python,
+   scripts, E2E tests, environment handling, or browser automation.
 6. Summarize what changed, what was validated, and what remains deferred.
 
 Do not commit, push, open a PR, mutate production, or perform production database

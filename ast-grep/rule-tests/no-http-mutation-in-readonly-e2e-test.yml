@@ -1,0 +1,7 @@
+id: no-http-mutation-in-readonly-e2e
+valid:
+  - 'await request.get("/api/v1/openapi.json")'
+  - 'await page.goto("/dataset")'
+invalid:
+  - 'await request.post("/api/v1/datasets")'
+  - 'await api.patch("/api/v1/datasets/1")'

@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: no-http-mutation-in-readonly-e2e
+message: Read-only E2E tests must not perform direct mutating HTTP requests.
+severity: error
+language: TypeScript
+files:
+  - "frontend/e2e/*readonly*.spec.ts"
+rule:
+  any:
+    - pattern: await $REQUEST.post($$$ARGS)
+    - pattern: await $REQUEST.put($$$ARGS)
+    - pattern: await $REQUEST.patch($$$ARGS)
+    - pattern: await $REQUEST.delete($$$ARGS)
+note: Production-read CI must stay read-only. Move signup, password reset, uploads, downloads, and API mutations to local/controlled suites.
+

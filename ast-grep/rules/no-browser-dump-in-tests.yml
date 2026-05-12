@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: no-browser-dump-in-tests
+message: Use scoped locators/assertions instead of broad browser text or DOM dumps.
+severity: error
+language: TypeScript
+files:
+  - "frontend/e2e/**/*.ts"
+  - "frontend/scripts/**/*.ts"
+rule:
+  any:
+    - pattern: $PAGE.locator("body").innerText()
+    - pattern: $PAGE.locator('body').innerText()
+    - pattern: $LOCATOR.allTextContents()
+    - pattern: $PAGE.content()
+note: Browser checks should stay output-light and focused on URLs, locator state, console errors, and small artifacts.
+

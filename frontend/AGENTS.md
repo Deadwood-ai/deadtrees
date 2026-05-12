@@ -99,3 +99,6 @@ for production-connected smoke checks.
 `npm --prefix frontend run build` and `npm --prefix frontend run lint` are
 required frontend checks. Treat failures as blocking for frontend changes unless
 the failure is clearly unrelated and documented.
+Run `scripts/lint-ast-grep.sh` from the repo root after frontend changes that
+touch E2E tests, environment usage, browser-debug code, or production-connected
+flows. The ast-grep rules are repo-specific guardrails, not formatting rules.

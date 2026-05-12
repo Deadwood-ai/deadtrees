@@ -1,0 +1,9 @@
+id: no-mutating-submit-in-readonly-e2e
+valid:
+  - 'await page.getByRole("button", { name: "Explore Map" }).click()'
+  - 'await page.getByRole("menuitem", { name: "Drone Archive" }).click()'
+invalid:
+  - 'await page.getByRole("button", { name: "Upload Data" }).click()'
+  - 'await page.getByRole("button", { name: "upload data" }).click()'
+  - 'await page.getByRole("button", { name: /Reset Password/i }).click()'
+  - 'await page.getByText("Save").click()'

@@ -1,0 +1,11 @@
+id: no-frontend-service-role-env
+valid:
+  - const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+  - const mode = import.meta.env.VITE_MODE
+invalid:
+  - const serviceRole = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY
+  - const databaseUrl = process.env.DATABASE_URL
+  - const serviceRole = import.meta.env["VITE_SUPABASE_SERVICE_ROLE_KEY"]
+  - const databaseUrl = process.env["DATABASE_URL"]
+  - const { VITE_SUPABASE_SERVICE_ROLE_KEY } = import.meta.env
+  - const { DATABASE_URL, OTHER } = process.env

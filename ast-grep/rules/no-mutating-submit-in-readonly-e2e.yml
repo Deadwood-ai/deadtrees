@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: no-mutating-submit-in-readonly-e2e
+message: Read-only E2E tests must not click controls that submit or start write flows.
+severity: error
+language: TypeScript
+files:
+  - "frontend/e2e/*readonly*.spec.ts"
+rule:
+  any:
+    - pattern: 'await $PAGE.getByRole($ROLE, { name: $NAME }).click($$$ARGS)'
+    - pattern: 'await $PAGE.getByText($NAME).click($$$ARGS)'
+constraints:
+  NAME:
+    regex: "(?i)(Sign Up|Reset Password|Upload|Submit|Save|Request download|Request access|Start processing)"
+note: It is fine for read-only tests to inspect forms or verify signed-out redirects; actual write submissions belong in local/controlled E2E.
