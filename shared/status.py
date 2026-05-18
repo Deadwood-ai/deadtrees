@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Optional
 from .models import StatusEnum
 from .db import use_client
@@ -73,6 +74,7 @@ def update_status(
 			update_data['error_message'] = error_message
 
 		if update_data:
+			update_data['updated_at'] = datetime.now(timezone.utc).isoformat()
 			with use_client(token) as client:
 				# First check if status exists
 				result = client.table(settings.statuses_table).select('id').eq('dataset_id', dataset_id).execute()
