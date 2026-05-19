@@ -288,22 +288,13 @@ export default function PriwaFieldMap({
       : userLocation.isLocating
         ? "Standort wird gesucht"
         : "Aktuelle Position";
-  const pointCountLabel = isLoadingPoints
-    ? "Lade Punkte"
-    : `${points.length} ${points.length === 1 ? "Punkt" : "Punkte"}`;
-  const locationStatusLabel = userLocation.locationError
+  const locationHintLabel = userLocation.locationError
     ? userLocation.locationError
-    : userLocation.isLocating
-      ? "Standort wird angefragt"
-      : userLocation.hasFix
-        ? userLocation.needsOrientationPermission
-          ? "Standort aktiv · Richtung antippen"
-          : userLocation.isHeadingActive
-            ? "Standort aktiv · Richtung"
-            : "Standort aktiv"
-        : userLocation.isTracking
-          ? "Standort wird gesucht"
-          : "Standort nicht aktiv";
+    : userLocation.needsOrientationPermission
+      ? "Richtung: Standort-Button antippen"
+      : userLocation.isLocating
+        ? "Standort wird angefragt"
+        : null;
   const pointListToggleLabel = isPointListOpen
     ? "Punktliste schließen"
     : "Punktliste öffnen";
@@ -470,11 +461,11 @@ export default function PriwaFieldMap({
 
       {!isPlacingPoint && (
         <div className="pointer-events-none absolute right-4 top-20 z-10 flex max-w-[calc(100%-5.75rem)] flex-col items-end gap-1.5 md:top-24">
-          <div className="rounded-md bg-white/90 px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm backdrop-blur">
-            {userLocation.locationError
-              ? locationStatusLabel
-              : `${projectName} · ${pointCountLabel} · ${locationStatusLabel}`}
-          </div>
+          {locationHintLabel && (
+            <div className="rounded-md bg-white/90 px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm backdrop-blur">
+              {locationHintLabel}
+            </div>
+          )}
           <PriwaOfflineStatus />
         </div>
       )}
