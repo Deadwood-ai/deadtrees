@@ -147,7 +147,6 @@ export default function PriwaFieldMap({
     });
 
     mapRef.current = map;
-    locateUser(false);
 
     const clickKey = map.on("singleclick", (event) => {
       if (isPlacingPointRef.current) return;
@@ -177,7 +176,7 @@ export default function PriwaFieldMap({
       previewLayerRef.current = null;
       cogLayerRef.current = null;
     };
-  }, [locateUser, openPointForEditing, stopUserLocation, userLocationLayer]);
+  }, [openPointForEditing, stopUserLocation, userLocationLayer]);
 
   useEffect(() => {
     const source = pointLayerRef.current?.getSource();
@@ -294,7 +293,9 @@ export default function PriwaFieldMap({
       ? "Richtung: Standort-Button antippen"
       : userLocation.isLocating
         ? "Standort wird angefragt"
-        : null;
+        : locationButtonActive
+          ? null
+          : "Standort-Button antippen";
   const pointListToggleLabel = isPointListOpen
     ? "Punktliste schließen"
     : "Punktliste öffnen";
