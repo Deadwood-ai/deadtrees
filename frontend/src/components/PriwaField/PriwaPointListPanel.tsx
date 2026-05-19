@@ -44,6 +44,12 @@ export default function PriwaPointListPanel({
     (point) => point.coordinateSource === "qr",
   ).length;
   const visiblePoints = filter === "qa" ? qaPoints : points;
+  const emptyDescription =
+    isLoading
+      ? "Lade Punkte..."
+      : filter === "qa" && points.length > 0
+        ? "Keine QA-Punkte"
+        : "Keine Punkte";
 
   return (
     <section className="pointer-events-auto absolute inset-x-2 bottom-2 z-[58] flex max-h-[50dvh] flex-col overflow-hidden rounded-md bg-white shadow-xl ring-1 ring-slate-900/10 md:bottom-5 md:left-4 md:right-auto md:top-24 md:w-[390px] md:max-h-[calc(100dvh-8rem)]">
@@ -90,7 +96,7 @@ export default function PriwaPointListPanel({
           <div className="px-3 py-8">
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={isLoading ? "Lade Punkte..." : "Keine Punkte"}
+              description={emptyDescription}
             />
           </div>
         ) : (
