@@ -101,6 +101,8 @@ export const useUserLocationLayer = (mapRef: MutableRefObject<Map | null>) => {
   const [hasFix, setHasFix] = useState(false);
   const [hasZoomedToUser, setHasZoomedToUser] = useState(false);
   const [isHeadingActive, setIsHeadingActive] = useState(false);
+  const [needsOrientationPermission, setNeedsOrientationPermission] =
+    useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [currentCoordinate, setCurrentCoordinate] = useState<{
     lat: number;
@@ -226,14 +228,19 @@ export const useUserLocationLayer = (mapRef: MutableRefObject<Map | null>) => {
         try {
           const permission =
             await OrientationEventWithPermission.requestPermission();
-          if (permission !== "granted") return;
+          if (permission !== "granted") {
+            setNeedsOrientationPermission(true);
+            return;
+          }
         } catch {
+          setNeedsOrientationPermission(true);
           return;
         }
       } else if (
         !requestPermission &&
         typeof OrientationEventWithPermission.requestPermission === "function"
       ) {
+        setNeedsOrientationPermission(true);
         return;
       }
 
@@ -241,7 +248,7 @@ export const useUserLocationLayer = (mapRef: MutableRefObject<Map | null>) => {
 
       const tracker = createKompas().on("heading", updateUserHeading).watch();
       compassTrackerRef.current = tracker;
-      setIsHeadingActive(true);
+      setNeedsOrientationPermission(false);
     },
     [updateUserHeading],
   );
@@ -258,6 +265,7 @@ export const useUserLocationLayer = (mapRef: MutableRefObject<Map | null>) => {
     setIsTracking(false);
     setIsLocating(false);
     setIsHeadingActive(false);
+    setNeedsOrientationPermission(false);
   }, []);
 
   const locateUser = useCallback(
@@ -362,6 +370,7 @@ export const useUserLocationLayer = (mapRef: MutableRefObject<Map | null>) => {
     hasFix,
     hasZoomedToUser,
     isHeadingActive,
+    needsOrientationPermission,
     locationError,
     currentCoordinate,
   };

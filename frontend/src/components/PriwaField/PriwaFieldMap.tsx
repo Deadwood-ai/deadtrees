@@ -23,6 +23,7 @@ import { unByKey } from "ol/Observable";
 import { fromLonLat, toLonLat } from "ol/proj";
 import View from "ol/View";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { PointerEvent } from "react";
 
 import { createStandardMapControls } from "../../utils/basemaps";
 import { useUserLocationLayer } from "../../hooks/useUserLocationLayer";
@@ -73,6 +74,7 @@ export default function PriwaFieldMap({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
   const isPlacingPointRef = useRef(false);
+  const hasRequestedOrientationFromInteractionRef = useRef(false);
   const pointLayerRef = useRef<ReturnType<typeof createPriwaPointLayer> | null>(
     null,
   );
@@ -255,10 +257,49 @@ export default function PriwaFieldMap({
     setDrawerOpen(true);
   }, []);
 
+  const requestDeferredOrientationPermission = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      if (!userLocation.needsOrientationPermission) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest("button,[role='button']")
+      )
+        return;
+      if (hasRequestedOrientationFromInteractionRef.current) return;
+
+      hasRequestedOrientationFromInteractionRef.current = true;
+      void locateUser(true);
+    },
+    [locateUser, userLocation.needsOrientationPermission],
+  );
+
   const locationButtonActive =
     userLocation.isTracking &&
     userLocation.hasFix &&
     userLocation.hasZoomedToUser;
+  const locationButtonTitle = userLocation.locationError
+    ? "Standort erneut anfragen"
+    : userLocation.needsOrientationPermission
+      ? "Richtung aktivieren"
+      : userLocation.isLocating
+        ? "Standort wird gesucht"
+        : "Aktuelle Position";
+  const pointCountLabel = isLoadingPoints
+    ? "Lade Punkte"
+    : `${points.length} ${points.length === 1 ? "Punkt" : "Punkte"}`;
+  const locationStatusLabel = userLocation.locationError
+    ? userLocation.locationError
+    : userLocation.isLocating
+      ? "Standort wird angefragt"
+      : userLocation.hasFix
+        ? userLocation.needsOrientationPermission
+          ? "Standort aktiv · Richtung antippen"
+          : userLocation.isHeadingActive
+            ? "Standort aktiv · Richtung"
+            : "Standort aktiv"
+        : userLocation.isTracking
+          ? "Standort wird gesucht"
+          : "Standort nicht aktiv";
   const pointListToggleLabel = isPointListOpen
     ? "Punktliste schließen"
     : "Punktliste öffnen";
@@ -320,16 +361,23 @@ export default function PriwaFieldMap({
   );
 
   return (
-    <div className="relative h-full min-h-[100dvh] w-full overflow-hidden bg-neutral-950">
+    <div
+      className="relative h-full min-h-[100dvh] w-full overflow-hidden bg-neutral-950"
+      onPointerDownCapture={requestDeferredOrientationPermission}
+    >
       <div ref={containerRef} className="absolute inset-0" />
 
       {!isPlacingPoint && (
         <>
           <div className="pointer-events-none absolute left-4 top-20 z-10 flex flex-col gap-2 md:top-24">
-            <Tooltip title="Aktuelle Position">
+            <Tooltip title={locationButtonTitle}>
               <Button
                 className="pointer-events-auto shadow-md"
-                type={locationButtonActive ? "primary" : "default"}
+                type={
+                  locationButtonActive || userLocation.hasFix
+                    ? "primary"
+                    : "default"
+                }
                 shape="circle"
                 size="large"
                 icon={
@@ -419,13 +467,9 @@ export default function PriwaFieldMap({
       {!isPlacingPoint && (
         <div className="pointer-events-none absolute right-4 top-20 z-10 flex max-w-[calc(100%-5.75rem)] flex-col items-end gap-1.5 md:top-24">
           <div className="rounded-md bg-white/90 px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm backdrop-blur">
-            {userLocation.locationError ??
-              `${projectName} · ${
-                isLoadingPoints
-                  ? "Lade Punkte"
-                  : `${points.length} ${points.length === 1 ? "Punkt" : "Punkte"}`
-              }`}
-            {userLocation.isHeadingActive ? " · Richtung" : ""}
+            {userLocation.locationError
+              ? locationStatusLabel
+              : `${projectName} · ${pointCountLabel} · ${locationStatusLabel}`}
           </div>
           <PriwaOfflineStatus />
         </div>
