@@ -8,10 +8,12 @@ from shared.settings import settings
 
 
 def priwa_point(lon=8.2044, lat=48.4064):
+	"""Return a GeoJSON point near the PRIWA Renchtal field area."""
 	return {'type': 'Point', 'coordinates': [lon, lat]}
 
 
 def kaeferbaum_payload(project_id, **overrides):
+	"""Build a valid default Käferbaum payload with optional field overrides."""
 	payload = {
 		'project_id': project_id,
 		'geom': priwa_point(),
@@ -36,6 +38,7 @@ def kaeferbaum_payload(project_id, **overrides):
 
 @pytest.fixture(scope='function')
 def priwa_project(test_user, test_user2):
+	"""Create an isolated PRIWA project with one member and one non-member."""
 	project_id = str(uuid.uuid4())
 	slug = f'test-priwa-{project_id}'
 
@@ -65,6 +68,7 @@ def priwa_project(test_user, test_user2):
 
 
 def test_priwa_membership_gates_projects_and_kaeferbaeume(priwa_project, test_user):
+	"""Members can read project records while non-members see no PRIWA data."""
 	member_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
 	non_member_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
 	kaeferbaum_id = str(uuid.uuid4())
@@ -104,6 +108,7 @@ def test_priwa_membership_gates_projects_and_kaeferbaeume(priwa_project, test_us
 
 
 def test_priwa_member_can_create_update_and_soft_delete_kaeferbaum(priwa_project):
+	"""Members can write current-state records and soft-delete them only by update."""
 	member_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
 
 	with use_client(member_token) as client:
@@ -139,6 +144,7 @@ def test_priwa_member_can_create_update_and_soft_delete_kaeferbaum(priwa_project
 
 
 def test_priwa_kaeferbaum_requires_baumnr_for_estimated_locations(priwa_project):
+	"""Estimated GPS or map locations require a tree number for later matching."""
 	member_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
 
 	with use_client(member_token) as client:
@@ -166,6 +172,7 @@ def test_priwa_kaeferbaum_requires_baumnr_for_estimated_locations(priwa_project)
 
 
 def test_priwa_non_member_cannot_write_kaeferbaum(priwa_project):
+	"""Non-members cannot create Käferbaum records in a PRIWA project."""
 	non_member_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
 
 	with use_client(non_member_token) as client:
