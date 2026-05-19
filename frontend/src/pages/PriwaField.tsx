@@ -1,9 +1,11 @@
 import PriwaFieldMap from "../components/PriwaField/PriwaFieldMap";
+import { usePriwaOfflineStatus } from "../components/PriwaField/usePriwaOfflineStatus";
 import { usePriwaKaeferbaeume } from "../components/PriwaField/usePriwaKaeferbaeume";
 import { usePriwaProjectMemberships } from "../hooks/usePriwaProjectMemberships";
-import { Alert, Result, Spin } from "antd";
+import { Alert, Button, Result, Spin } from "antd";
 
 export default function PriwaField() {
+  const { isOnline, serviceWorker } = usePriwaOfflineStatus();
   const {
     data: memberships = [],
     error: membershipError,
@@ -20,6 +22,27 @@ export default function PriwaField() {
     deletePoint,
     isSaving,
   } = usePriwaKaeferbaeume(activeMembership?.projectId);
+
+  if (!isOnline && isLoadingMemberships) {
+    return (
+      <div className="flex min-h-[100dvh] items-center justify-center bg-slate-50 p-6">
+        <Result
+          status="warning"
+          title="PRIWA Felddaten offline noch nicht verfügbar"
+          subTitle={
+            serviceWorker.status === "ready"
+              ? "Die App ist installiert und offline startbar. Projektmitgliedschaft, Punkte und Synchronisation werden aber erst im nächsten Offline-Daten-Schritt lokal gespeichert."
+              : "Die App ist offline, bevor die Offline-Hülle vollständig vorbereitet wurde. Bitte öffne PRIWA Field einmal mit Internetverbindung."
+          }
+          extra={
+            <Button type="primary" onClick={() => window.location.reload()}>
+              Erneut versuchen
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
 
   if (isLoadingMemberships) {
     return (
