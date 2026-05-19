@@ -10,7 +10,7 @@
   "theme_color": "#1b5e35",
   "icons": [
     {
-      "src": "/assets/tree-icon.png",
+      "src": "/assets/app-icon.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
@@ -30,7 +30,7 @@
       "url": "/priwa-field",
       "icons": [
         {
-          "src": "/assets/tree-icon.png",
+          "src": "/assets/app-icon.png",
           "sizes": "512x512",
           "type": "image/png"
         }
