@@ -457,6 +457,7 @@ export default function PriwaPointDrawer({
         <Form
           layout="vertical"
           form={form}
+          size="large"
           className="[&_.ant-form-item]:mb-2.5 [&_.ant-form-item-label]:pb-0.5 [&_.ant-form-item-label>label]:text-xs [&_.ant-form-item-label>label]:font-medium"
         >
           <Collapse

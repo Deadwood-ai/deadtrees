@@ -12,9 +12,11 @@ import { CookieBanner } from "./components/cookieBanner/CookieBanner";
 import { applyCanvasOptimization } from "./utils/canvasOptimization";
 import { applyThemeCssVariables } from "./theme/cssVariables";
 import { BrowserRouter } from "react-router-dom";
+import { registerPriwaServiceWorker } from "./pwa/priwaServiceWorker";
 
 applyThemeCssVariables();
 applyCanvasOptimization();
+registerPriwaServiceWorker();
 
 const queryClient = new QueryClient();
 

@@ -1,4 +1,13 @@
-import { Alert, Button, Popover, Switch, Tooltip, Typography, message } from "antd";
+import {
+  Alert,
+  Button,
+  FloatButton,
+  Popover,
+  Switch,
+  Tooltip,
+  Typography,
+  message,
+} from "antd";
 import {
   AimOutlined,
   EnvironmentOutlined,
@@ -27,6 +36,7 @@ import {
 } from "./createPriwaPointLayer";
 import PriwaPointDrawer from "./PriwaPointDrawer";
 import PriwaPointListPanel from "./PriwaPointListPanel";
+import PriwaOfflineStatus from "./PriwaOfflineStatus";
 import type {
   IPriwaCoordinate,
   IPriwaPoint,
@@ -358,20 +368,21 @@ export default function PriwaFieldMap({
             </Tooltip>
           </div>
 
-          {!isPointListOpen && (
-            <div className="pointer-events-none absolute bottom-5 right-5 z-[60]">
-              <Tooltip title="Punkt aufnehmen" placement="left">
-                <Button
-                  className="pointer-events-auto shadow-lg"
-                  type="primary"
-                  shape="circle"
-                  size="large"
-                  icon={<PlusOutlined />}
-                  onClick={openNewPointDrawer}
-                  aria-label="Punkt aufnehmen"
-                />
-              </Tooltip>
-            </div>
+          {!isPointListOpen && !isDrawerOpen && (
+            <FloatButton
+              className="priwa-add-point-fab"
+              type="primary"
+              shape="circle"
+              icon={<PlusOutlined />}
+              tooltip={{ title: "Punkt aufnehmen", placement: "left" }}
+              onClick={openNewPointDrawer}
+              aria-label="Punkt aufnehmen"
+              style={{
+                right: "max(20px, calc(env(safe-area-inset-right, 0px) + 20px))",
+                bottom:
+                  "max(20px, calc(env(safe-area-inset-bottom, 0px) + 20px))",
+              }}
+            />
           )}
         </>
       )}
@@ -406,14 +417,17 @@ export default function PriwaFieldMap({
       )}
 
       {!isPlacingPoint && (
-        <div className="pointer-events-none absolute right-4 top-20 z-10 rounded-md bg-white/90 px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm backdrop-blur md:top-24">
-          {userLocation.locationError ??
-            `${projectName} · ${
-              isLoadingPoints
-                ? "Lade Punkte"
-                : `${points.length} ${points.length === 1 ? "Punkt" : "Punkte"}`
-            }`}
-          {userLocation.isHeadingActive ? " · Richtung" : ""}
+        <div className="pointer-events-none absolute right-4 top-20 z-10 flex max-w-[calc(100%-5.75rem)] flex-col items-end gap-1.5 md:top-24">
+          <div className="rounded-md bg-white/90 px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm backdrop-blur">
+            {userLocation.locationError ??
+              `${projectName} · ${
+                isLoadingPoints
+                  ? "Lade Punkte"
+                  : `${points.length} ${points.length === 1 ? "Punkt" : "Punkte"}`
+              }`}
+            {userLocation.isHeadingActive ? " · Richtung" : ""}
+          </div>
+          <PriwaOfflineStatus />
         </div>
       )}
 
