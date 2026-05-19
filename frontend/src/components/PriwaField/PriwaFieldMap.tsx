@@ -273,10 +273,14 @@ export default function PriwaFieldMap({
     [locateUser, userLocation.needsOrientationPermission],
   );
 
-  const locationButtonActive =
+  const hasCenteredUserLocation =
     userLocation.isTracking &&
     userLocation.hasFix &&
     userLocation.hasZoomedToUser;
+  const locationButtonActive =
+    hasCenteredUserLocation &&
+    !userLocation.needsOrientationPermission &&
+    userLocation.isHeadingActive;
   const locationButtonTitle = userLocation.locationError
     ? "Standort erneut anfragen"
     : userLocation.needsOrientationPermission
@@ -372,12 +376,12 @@ export default function PriwaFieldMap({
           <div className="pointer-events-none absolute left-4 top-20 z-10 flex flex-col gap-2 md:top-24">
             <Tooltip title={locationButtonTitle}>
               <Button
-                className="pointer-events-auto shadow-md"
-                type={
-                  locationButtonActive || userLocation.hasFix
-                    ? "primary"
-                    : "default"
+                className={
+                  userLocation.needsOrientationPermission
+                    ? "pointer-events-auto border-amber-500 text-amber-700 shadow-md"
+                    : "pointer-events-auto shadow-md"
                 }
+                type={locationButtonActive ? "primary" : "default"}
                 shape="circle"
                 size="large"
                 icon={
