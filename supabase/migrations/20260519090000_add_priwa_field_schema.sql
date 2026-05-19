@@ -126,11 +126,13 @@ begin
             end if;
         end if;
 
-        NEW.created_at = coalesce(NEW.created_at, now());
-        NEW.updated_at = coalesce(NEW.updated_at, NEW.created_at, now());
+        NEW.created_at = now();
+        NEW.updated_at = NEW.created_at;
         return NEW;
     end if;
 
+    NEW.id = OLD.id;
+    NEW.project_id = OLD.project_id;
     NEW.created_at = OLD.created_at;
     NEW.created_by = OLD.created_by;
     NEW.updated_at = now();
@@ -203,7 +205,10 @@ on "public"."priwa_kaeferbaeume"
 as permissive
 for update
 to authenticated
-using (public.priwa_is_project_member(project_id))
+using (
+    deleted_at is null
+    and public.priwa_is_project_member(project_id)
+)
 with check (
     public.priwa_is_project_member(project_id)
     and updated_by = (select auth.uid())

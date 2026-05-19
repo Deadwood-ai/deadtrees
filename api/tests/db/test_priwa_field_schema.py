@@ -139,8 +139,73 @@ def test_priwa_member_can_create_update_and_soft_delete_kaeferbaum(priwa_project
 			{'deleted_at': datetime.now(timezone.utc).isoformat()}
 		).eq('id', created['id']).execute()
 		active_records = client.table('priwa_kaeferbaeume').select('*').eq('id', created['id']).execute()
+		blocked_update = (
+			client.table('priwa_kaeferbaeume')
+			.update({'fund': 'should-not-change'})
+			.eq('id', created['id'])
+			.execute()
+		)
 
 	assert active_records.data == []
+	assert blocked_update.data == []
+
+	with use_service_client() as client:
+		soft_deleted = (
+			client.table('priwa_kaeferbaeume')
+			.select('deleted_at,deleted_by,fund')
+			.eq('id', created['id'])
+			.single()
+			.execute()
+		)
+
+	assert soft_deleted.data['deleted_at'] is not None
+	assert soft_deleted.data['deleted_by'] == priwa_project['member_id']
+	assert soft_deleted.data['fund'] == 'kontrolliert'
+
+
+def test_priwa_kaeferbaum_identity_project_and_server_timestamps_are_locked(priwa_project):
+	"""Client writes cannot move a record, replace its id, or forge server timestamps."""
+	member_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
+	client_timestamp = '2000-01-01T00:00:00+00:00'
+
+	with use_client(member_token) as client:
+		inserted = client.table('priwa_kaeferbaeume').insert(
+			kaeferbaum_payload(
+				priwa_project['id'],
+				created_at=client_timestamp,
+				updated_at=client_timestamp,
+			)
+		).execute()
+
+	created = inserted.data[0]
+	replacement_id = str(uuid.uuid4())
+	replacement_project_id = str(uuid.uuid4())
+
+	assert not created['created_at'].startswith('2000-01-01')
+	assert not created['updated_at'].startswith('2000-01-01')
+
+	with use_client(member_token) as client:
+		updated = (
+			client.table('priwa_kaeferbaeume')
+			.update(
+				{
+					'id': replacement_id,
+					'project_id': replacement_project_id,
+					'fund': 'kontrolliert',
+				}
+			)
+			.eq('id', created['id'])
+			.execute()
+		)
+
+	assert updated.data[0]['id'] == created['id']
+	assert updated.data[0]['project_id'] == priwa_project['id']
+	assert updated.data[0]['fund'] == 'kontrolliert'
+
+	with use_service_client() as client:
+		replacement_records = client.table('priwa_kaeferbaeume').select('id').eq('id', replacement_id).execute()
+
+	assert replacement_records.data == []
 
 
 def test_priwa_kaeferbaum_requires_baumnr_for_estimated_locations(priwa_project):
