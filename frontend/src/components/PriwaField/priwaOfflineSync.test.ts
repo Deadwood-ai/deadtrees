@@ -86,6 +86,25 @@ describe("PRIWA offline sync helpers", () => {
     ]);
   });
 
+  it("keeps failed deletes visible for retry and recovery", () => {
+    const queue = [
+      {
+        ...mutation("delete", undefined),
+        status: "failed" as const,
+        lastError: "Network error",
+      },
+    ];
+
+    expect(mergePriwaOfflinePoints([basePoint], queue)).toEqual([
+      expect.objectContaining({
+        id: "point-1",
+        syncStatus: "failed",
+        syncOperation: "delete",
+        syncError: "Network error",
+      }),
+    ]);
+  });
+
   it("summarizes queue state for the field status badge", () => {
     expect(
       getPriwaSyncSummary([

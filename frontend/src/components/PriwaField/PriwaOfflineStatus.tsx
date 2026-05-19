@@ -35,7 +35,7 @@ export default function PriwaOfflineStatus({
   const tooltipTitle =
     serviceWorker.errorMessage ??
     (syncSummary && syncSummary.total > 0
-      ? `${syncSummary.pending} pending, ${syncSummary.syncing} syncing, ${syncSummary.failed} failed`
+      ? `${syncSummary.pending} ausstehend, ${syncSummary.syncing} wird synchronisiert, ${syncSummary.failed} fehlgeschlagen`
       : statusView.label);
 
   return (

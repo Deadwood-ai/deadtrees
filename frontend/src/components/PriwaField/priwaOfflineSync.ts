@@ -88,6 +88,18 @@ export const mergePriwaOfflinePoints = (
 
   queue.forEach((mutation) => {
     if (mutation.type === "delete") {
+      if (mutation.status === "failed") {
+        const point = merged.get(mutation.pointId);
+        if (point) {
+          merged.set(mutation.pointId, {
+            ...point,
+            syncStatus: "failed",
+            syncOperation: "delete",
+            syncError: mutation.lastError,
+          });
+        }
+        return;
+      }
       merged.delete(mutation.pointId);
       return;
     }

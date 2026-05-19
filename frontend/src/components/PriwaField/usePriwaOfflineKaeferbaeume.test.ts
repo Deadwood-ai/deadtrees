@@ -169,4 +169,21 @@ describe("usePriwaOfflineKaeferbaeume", () => {
       ],
     );
   });
+
+  it("uses the local cache ahead of stale query data when both exist", async () => {
+    queryData = [{ ...basePoint, baumnr: "server-stale" }];
+    stateValues = [[{ ...basePoint, baumnr: "cache-fresh" }], [], false, false];
+    const { usePriwaOfflineKaeferbaeume } = await import(
+      "./usePriwaOfflineKaeferbaeume"
+    );
+
+    const result = usePriwaOfflineKaeferbaeume("project-1");
+
+    expect(result.points).toEqual([
+      expect.objectContaining({
+        id: "point-1",
+        baumnr: "cache-fresh",
+      }),
+    ]);
+  });
 });
