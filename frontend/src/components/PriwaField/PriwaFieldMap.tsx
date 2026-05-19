@@ -4,6 +4,7 @@ import {
   EnvironmentOutlined,
   PlusOutlined,
   SlidersOutlined,
+  UnorderedListOutlined,
 } from "@ant-design/icons";
 import "ol/ol.css";
 import { Map } from "ol";
@@ -25,6 +26,7 @@ import {
   createPriwaPreviewLayer,
 } from "./createPriwaPointLayer";
 import PriwaPointDrawer from "./PriwaPointDrawer";
+import PriwaPointListPanel from "./PriwaPointListPanel";
 import type {
   IPriwaCoordinate,
   IPriwaPoint,
@@ -77,12 +79,22 @@ export default function PriwaFieldMap({
     useState<PriwaCoordinateSource>("qr");
   const [editingPoint, setEditingPoint] = useState<IPriwaPoint | null>(null);
   const [formSessionId, setFormSessionId] = useState(0);
+  const [isPointListOpen, setPointListOpen] = useState(false);
   const userLocation = useUserLocationLayer(mapRef);
   const {
     layer: userLocationLayer,
     locateUser,
     stop: stopUserLocation,
   } = userLocation;
+
+  const openPointForEditing = useCallback((point: IPriwaPoint) => {
+    setPointListOpen(false);
+    setFormSessionId((currentSessionId) => currentSessionId + 1);
+    setEditingPoint(point);
+    setSelectedCoordinate({ lat: point.lat, lon: point.lon });
+    setSelectedCoordinateSource(point.coordinateSource);
+    setDrawerOpen(true);
+  }, []);
 
   useEffect(() => {
     isPlacingPointRef.current = isPlacingPoint;
@@ -140,11 +152,7 @@ export default function PriwaFieldMap({
       );
 
       if (pointFeature) {
-        setFormSessionId((currentSessionId) => currentSessionId + 1);
-        setEditingPoint(pointFeature);
-        setSelectedCoordinate({ lat: pointFeature.lat, lon: pointFeature.lon });
-        setSelectedCoordinateSource(pointFeature.coordinateSource);
-        setDrawerOpen(true);
+        openPointForEditing(pointFeature);
       }
     });
 
@@ -157,7 +165,7 @@ export default function PriwaFieldMap({
       previewLayerRef.current = null;
       cogLayerRef.current = null;
     };
-  }, [locateUser, stopUserLocation, userLocationLayer]);
+  }, [locateUser, openPointForEditing, stopUserLocation, userLocationLayer]);
 
   useEffect(() => {
     const source = pointLayerRef.current?.getSource();
@@ -207,6 +215,7 @@ export default function PriwaFieldMap({
   }, []);
 
   const openNewPointDrawer = useCallback(() => {
+    setPointListOpen(false);
     setFormSessionId((currentSessionId) => currentSessionId + 1);
     setEditingPoint(null);
     setSelectedCoordinate(null);
@@ -215,6 +224,7 @@ export default function PriwaFieldMap({
   }, []);
 
   const requestMapPlacement = useCallback(() => {
+    setPointListOpen(false);
     setDrawerOpen(false);
     setPlacingPoint(true);
   }, []);
@@ -239,6 +249,9 @@ export default function PriwaFieldMap({
     userLocation.isTracking &&
     userLocation.hasFix &&
     userLocation.hasZoomedToUser;
+  const pointListToggleLabel = isPointListOpen
+    ? "Punktliste schließen"
+    : "Punktliste öffnen";
 
   const handleAddPoint = useCallback(
     async (point: IPriwaPoint) => {
@@ -329,22 +342,49 @@ export default function PriwaFieldMap({
                 aria-label="Layer auswählen"
               />
             </Popover>
-          </div>
-
-          <div className="pointer-events-none absolute bottom-5 right-5 z-[60]">
-            <Tooltip title="Punkt aufnehmen" placement="left">
+            <Tooltip title={pointListToggleLabel}>
               <Button
-                className="pointer-events-auto shadow-lg"
-                type="primary"
+                className="pointer-events-auto shadow-md"
+                type={isPointListOpen ? "primary" : "default"}
                 shape="circle"
                 size="large"
-                icon={<PlusOutlined />}
-                onClick={openNewPointDrawer}
-                aria-label="Punkt aufnehmen"
+                icon={<UnorderedListOutlined />}
+                aria-pressed={isPointListOpen}
+                onClick={() =>
+                  setPointListOpen((currentIsOpen) => !currentIsOpen)
+                }
+                aria-label={pointListToggleLabel}
               />
             </Tooltip>
           </div>
+
+          {!isPointListOpen && (
+            <div className="pointer-events-none absolute bottom-5 right-5 z-[60]">
+              <Tooltip title="Punkt aufnehmen" placement="left">
+                <Button
+                  className="pointer-events-auto shadow-lg"
+                  type="primary"
+                  shape="circle"
+                  size="large"
+                  icon={<PlusOutlined />}
+                  onClick={openNewPointDrawer}
+                  aria-label="Punkt aufnehmen"
+                />
+              </Tooltip>
+            </div>
+          )}
         </>
+      )}
+
+      {isPointListOpen && !isPlacingPoint && (
+        <PriwaPointListPanel
+          points={points}
+          projectName={projectName}
+          isLoading={isLoadingPoints}
+          onClose={() => setPointListOpen(false)}
+          onEditPoint={openPointForEditing}
+          onZoomToPoint={zoomToCoordinate}
+        />
       )}
 
       {isPlacingPoint && (

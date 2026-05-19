@@ -255,4 +255,16 @@
   textarea.ant-input {
     font-size: 16px !important;
   }
+
+  .priwa-point-drawer-root .ant-input,
+  .priwa-point-drawer-root .ant-input-affix-wrapper,
+  .priwa-point-drawer-root .ant-input-affix-wrapper input,
+  .priwa-point-drawer-root .ant-input-textarea textarea,
+  .priwa-point-drawer-root textarea.ant-input,
+  .priwa-point-drawer-root .ant-select-selector,
+  .priwa-point-drawer-root .ant-select-selection-item,
+  .priwa-point-drawer-root .ant-select-selection-placeholder,
+  .priwa-point-drawer-root .ant-select-selection-search-input {
+    font-size: 16px !important;
+  }
 }
