@@ -17,6 +17,7 @@ import DatasetReferencePatchEditor from "./pages/DatasetReferencePatchEditor";
 import DatasetLabelEditor from "./pages/DatasetLabelEditor";
 import DatasetCorrections from "./pages/DatasetCorrections";
 import Deadtrees from "./pages/Deadtrees";
+import PriwaField from "./pages/PriwaField";
 import Releases from "./pages/Releases";
 import ReleaseDetail from "./pages/ReleaseDetail";
 import SignUp from "./pages/auth/SignUp";
@@ -41,6 +42,7 @@ function LayoutWrapper() {
   const fullHeightPaths = [
     "/dataset",
     "/deadtrees",
+    "/priwa-field",
     "/dataset-audit",
     "/dataset-label",
     "/dataset-corrections",
@@ -144,6 +146,14 @@ function AppWithTracking() {
             element={<DatasetCorrections />}
           />
           <Route path="deadtrees" element={<Deadtrees />} />
+          <Route
+            path="priwa-field"
+            element={
+              <RequireAuth>
+                <PriwaField />
+              </RequireAuth>
+            }
+          />
           <Route path="releases" element={<Releases />} />
           <Route path="releases/:slug" element={<ReleaseDetail />} />
           <Route path="about" element={<About />} />
