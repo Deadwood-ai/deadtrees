@@ -282,6 +282,9 @@ export const useUserLocationLayer = (mapRef: MutableRefObject<Map | null>) => {
         return;
       }
 
+      setLocationError(null);
+      void startOrientationTracking(requestOrientationPermission);
+
       try {
         const permissionStatus = await navigator.permissions?.query({
           name: "geolocation" as PermissionName,
@@ -296,8 +299,6 @@ export const useUserLocationLayer = (mapRef: MutableRefObject<Map | null>) => {
         // Safari may not expose a useful Permissions API state for geolocation.
       }
 
-      setLocationError(null);
-      void startOrientationTracking(requestOrientationPermission);
       shouldAnimateToUserRef.current = true;
       setIsTracking(true);
       setIsLocating(true);
