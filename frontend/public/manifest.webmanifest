@@ -1,0 +1,40 @@
+{
+  "name": "PRIWA Field - deadtrees.earth",
+  "short_name": "PRIWA Field",
+  "description": "PRIWA field capture app for Kaeferbaum records.",
+  "start_url": "/priwa-field",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#1b5e35",
+  "icons": [
+    {
+      "src": "/assets/tree-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/favicon.png",
+      "sizes": "356x430",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["productivity", "utilities"],
+  "shortcuts": [
+    {
+      "name": "PRIWA Field",
+      "short_name": "Field",
+      "url": "/priwa-field",
+      "icons": [
+        {
+          "src": "/assets/tree-icon.png",
+          "sizes": "512x512",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}

@@ -27,6 +27,7 @@ import {
 } from "./createPriwaPointLayer";
 import PriwaPointDrawer from "./PriwaPointDrawer";
 import PriwaPointListPanel from "./PriwaPointListPanel";
+import PriwaOfflineStatus from "./PriwaOfflineStatus";
 import type {
   IPriwaCoordinate,
   IPriwaPoint,
@@ -406,14 +407,17 @@ export default function PriwaFieldMap({
       )}
 
       {!isPlacingPoint && (
-        <div className="pointer-events-none absolute right-4 top-20 z-10 rounded-md bg-white/90 px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm backdrop-blur md:top-24">
-          {userLocation.locationError ??
-            `${projectName} · ${
-              isLoadingPoints
-                ? "Lade Punkte"
-                : `${points.length} ${points.length === 1 ? "Punkt" : "Punkte"}`
-            }`}
-          {userLocation.isHeadingActive ? " · Richtung" : ""}
+        <div className="pointer-events-none absolute right-4 top-20 z-10 flex max-w-[calc(100%-5.75rem)] flex-col items-end gap-1.5 md:top-24">
+          <div className="rounded-md bg-white/90 px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm backdrop-blur">
+            {userLocation.locationError ??
+              `${projectName} · ${
+                isLoadingPoints
+                  ? "Lade Punkte"
+                  : `${points.length} ${points.length === 1 ? "Punkt" : "Punkte"}`
+              }`}
+            {userLocation.isHeadingActive ? " · Richtung" : ""}
+          </div>
+          <PriwaOfflineStatus />
         </div>
       )}
 
