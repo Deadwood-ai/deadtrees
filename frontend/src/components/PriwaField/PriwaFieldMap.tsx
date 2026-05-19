@@ -249,6 +249,9 @@ export default function PriwaFieldMap({
     userLocation.isTracking &&
     userLocation.hasFix &&
     userLocation.hasZoomedToUser;
+  const pointListToggleLabel = isPointListOpen
+    ? "Punktliste schließen"
+    : "Punktliste öffnen";
 
   const handleAddPoint = useCallback(
     async (point: IPriwaPoint) => {
@@ -339,17 +342,18 @@ export default function PriwaFieldMap({
                 aria-label="Layer auswählen"
               />
             </Popover>
-            <Tooltip title="Punktliste">
+            <Tooltip title={pointListToggleLabel}>
               <Button
                 className="pointer-events-auto shadow-md"
                 type={isPointListOpen ? "primary" : "default"}
                 shape="circle"
                 size="large"
                 icon={<UnorderedListOutlined />}
+                aria-pressed={isPointListOpen}
                 onClick={() =>
                   setPointListOpen((currentIsOpen) => !currentIsOpen)
                 }
-                aria-label="Punktliste öffnen"
+                aria-label={pointListToggleLabel}
               />
             </Tooltip>
           </div>
