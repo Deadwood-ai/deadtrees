@@ -53,8 +53,6 @@ export interface IPriwaPoint extends IPriwaCoordinate {
   gps: PriwaGpsQuality;
   isEstimatedLocation?: boolean;
   bhd?: number | null;
-  grueneNadeln?: PriwaYesNo | null;
-  andererSchaden?: boolean;
   fotoQrName?: string;
   rawQrValue?: string;
 }

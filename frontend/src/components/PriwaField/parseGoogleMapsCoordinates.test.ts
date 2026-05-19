@@ -113,4 +113,10 @@ describe("parseGoogleMapsCoordinates", () => {
       ),
     ).toBeNull();
   });
+
+  it("rejects malformed percent escapes without throwing", () => {
+    expect(
+      parseGoogleMapsCoordinates("https://maps.example/?q=48.45%foo,8.18"),
+    ).toBeNull();
+  });
 });

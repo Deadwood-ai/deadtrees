@@ -112,8 +112,6 @@ interface IPriwaPointFormValues {
   name: PriwaObserverName;
   datum: string;
   kom: string;
-  grueneNadeln?: PriwaYesNo | null;
-  andererSchaden?: boolean;
 }
 
 const createDefaultFormValues = (): IPriwaPointFormValues => ({
@@ -129,8 +127,6 @@ const createDefaultFormValues = (): IPriwaPointFormValues => ({
   name: "andere",
   datum: today(),
   kom: "",
-  grueneNadeln: null,
-  andererSchaden: false,
 });
 
 const createFormValuesFromPoint = (
@@ -148,8 +144,6 @@ const createFormValuesFromPoint = (
   name: point.name,
   datum: point.datum,
   kom: point.kom,
-  grueneNadeln: point.grueneNadeln ?? null,
-  andererSchaden: point.andererSchaden ?? false,
 });
 
 interface PriwaPointDrawerProps {
@@ -271,6 +265,9 @@ export default function PriwaPointDrawer({
 
     try {
       const values = await form.validateFields();
+      const savedCoordinateSource = willUseEstimatedGps
+        ? "gps"
+        : coordinateSource;
       const savedPoint: IPriwaPoint = {
         id: editingPoint?.id ?? crypto.randomUUID(),
         lat: effectiveCoordinate.lat,
@@ -288,12 +285,11 @@ export default function PriwaPointDrawer({
         datum: values.datum,
         kom: values.kom?.trim() ?? "",
         capturedAt: editingPoint?.capturedAt ?? new Date().toISOString(),
-        coordinateSource: willUseEstimatedGps ? "gps" : coordinateSource,
+        coordinateSource: savedCoordinateSource,
         gps: willUseEstimatedGps ? "nein" : "ja",
         isEstimatedLocation: willUseEstimatedGps,
-        grueneNadeln: values.grueneNadeln ?? null,
-        andererSchaden: values.andererSchaden ?? false,
-        rawQrValue: rawQrValue.trim() || editingPoint?.rawQrValue,
+        rawQrValue:
+          savedCoordinateSource === "qr" ? rawQrValue.trim() || undefined : undefined,
       };
 
       if (editingPoint) {
@@ -535,23 +531,6 @@ export default function PriwaPointDrawer({
 
           <section className="mt-3 space-y-2 border-t border-gray-200 pt-3">
             <Typography.Text strong>Optional</Typography.Text>
-            <div className="grid grid-cols-1 gap-x-2 sm:grid-cols-2">
-              <Form.Item label="Grüne Nadeln" name="grueneNadeln">
-                <Select
-                  allowClear
-                  placeholder="optional"
-                  options={yesNoOptions}
-                />
-              </Form.Item>
-              <Form.Item label="Anderer Schaden" name="andererSchaden">
-                <Select
-                  options={[
-                    { label: "Nein", value: false },
-                    { label: "Ja", value: true },
-                  ]}
-                />
-              </Form.Item>
-            </div>
             <Form.Item
               label="Kommentar"
               name="kom"

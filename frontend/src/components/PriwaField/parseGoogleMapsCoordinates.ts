@@ -33,13 +33,21 @@ const coordinateFromMatch = (
 const parseCoordinatePair = (value: string): IPriwaCoordinate | null =>
   coordinateFromMatch(value.match(COORDINATE_PAIR_PATTERN));
 
+const safelyDecodeUriComponent = (value: string) => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
 export const parseGoogleMapsCoordinates = (
   rawValue: string,
 ): IPriwaCoordinate | null => {
   const trimmedValue = rawValue.trim();
   if (!trimmedValue) return null;
 
-  const decodedValue = decodeURIComponent(trimmedValue);
+  const decodedValue = safelyDecodeUriComponent(trimmedValue);
 
   const dataCoordinate = coordinateFromMatch(
     decodedValue.match(GOOGLE_MAPS_DATA_PATTERN),

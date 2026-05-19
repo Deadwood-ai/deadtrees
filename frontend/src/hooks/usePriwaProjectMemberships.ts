@@ -31,11 +31,11 @@ const firstProject = (project: IPriwaMembershipRow["priwa_projects"]) =>
   Array.isArray(project) ? (project[0] ?? null) : project;
 
 export function usePriwaProjectMemberships() {
-  const { status } = useAuth();
+  const { status, user } = useAuth();
 
   return useQuery({
-    queryKey: ["priwa-project-memberships"],
-    enabled: status === "authenticated",
+    queryKey: ["priwa-project-memberships", user?.id],
+    enabled: status === "authenticated" && !!user?.id,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("priwa_project_memberships")
