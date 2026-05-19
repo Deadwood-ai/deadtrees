@@ -12,7 +12,11 @@ import { Circle as CircleStyle, Fill, Icon, Stroke, Style } from "ol/style";
 import type { Map } from "ol";
 import createKompas from "kompas";
 
+import { shouldUseGpsHeading, smoothHeading } from "./headingStabilizer";
+
 const LOCATION_HEADING_ICON_SRC = "/assets/location-heading.svg";
+const COMPASS_HEADING_SMOOTHING_FACTOR = 0.2;
+const GPS_HEADING_SMOOTHING_FACTOR = 0.35;
 
 type DeviceOrientationWithPermission = typeof DeviceOrientationEvent & {
   requestPermission?: () => Promise<"granted" | "denied">;
@@ -90,6 +94,7 @@ export const useUserLocationLayer = (mapRef: MutableRefObject<Map | null>) => {
   const userAccuracyFeatureRef = useRef<Feature<Geometry> | null>(null);
   const shouldAnimateToUserRef = useRef(false);
   const compassTrackerRef = useRef<KompasTracker | null>(null);
+  const smoothedHeadingRef = useRef<number | null>(null);
 
   const [isTracking, setIsTracking] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
@@ -127,25 +132,35 @@ export const useUserLocationLayer = (mapRef: MutableRefObject<Map | null>) => {
     [mapRef],
   );
 
-  const updateUserHeading = useCallback((heading: number | null) => {
-    const userFeature = userLocationFeatureRef.current;
-    if (
-      !userFeature ||
-      typeof heading !== "number" ||
-      !Number.isFinite(heading)
-    )
-      return;
+  const updateUserHeading = useCallback(
+    (heading: number | null, smoothingFactor = COMPASS_HEADING_SMOOTHING_FACTOR) => {
+      const userFeature = userLocationFeatureRef.current;
+      if (
+        !userFeature ||
+        typeof heading !== "number" ||
+        !Number.isFinite(heading)
+      )
+        return;
 
-    userFeature.set("heading", heading);
-    userFeature.changed();
-    setIsHeadingActive(true);
-  }, []);
+      const nextSmoothedHeading = smoothHeading(
+        smoothedHeadingRef.current,
+        heading,
+        smoothingFactor,
+      );
+      if (nextSmoothedHeading === null) return;
+
+      smoothedHeadingRef.current = nextSmoothedHeading;
+      userFeature.set("heading", nextSmoothedHeading);
+      userFeature.changed();
+      setIsHeadingActive(true);
+    },
+    [],
+  );
 
   const updateUserLocationFeature = useCallback(
     (
       coordinates: number[],
       accuracyInMeters?: number | null,
-      heading?: number | null,
     ) => {
       const userLocationSource = layer.getSource();
       if (!userLocationSource) return;
@@ -186,11 +201,6 @@ export const useUserLocationLayer = (mapRef: MutableRefObject<Map | null>) => {
       } else if (accuracyFeature) {
         userLocationSource.removeFeature(accuracyFeature);
         userAccuracyFeatureRef.current = null;
-      }
-
-      if (typeof heading === "number" && Number.isFinite(heading)) {
-        userFeature.set("heading", heading);
-        setIsHeadingActive(true);
       }
 
       userFeature.changed();
@@ -244,6 +254,7 @@ export const useUserLocationLayer = (mapRef: MutableRefObject<Map | null>) => {
 
     compassTrackerRef.current?.clear();
     compassTrackerRef.current = null;
+    smoothedHeadingRef.current = null;
     setIsTracking(false);
     setIsLocating(false);
     setIsHeadingActive(false);
@@ -298,14 +309,22 @@ export const useUserLocationLayer = (mapRef: MutableRefObject<Map | null>) => {
         (position) => {
           const { latitude, longitude } = position.coords;
           const center = fromLonLat([longitude, latitude]);
-          const heading =
+          const gpsHeading =
             typeof position.coords.heading === "number" &&
             Number.isFinite(position.coords.heading)
               ? position.coords.heading
               : null;
+          const speedMetersPerSecond =
+            typeof position.coords.speed === "number" &&
+            Number.isFinite(position.coords.speed)
+              ? position.coords.speed
+              : null;
 
           setCurrentCoordinate({ lat: latitude, lon: longitude });
-          updateUserLocationFeature(center, position.coords.accuracy, heading);
+          updateUserLocationFeature(center, position.coords.accuracy);
+          if (shouldUseGpsHeading(gpsHeading, speedMetersPerSecond)) {
+            updateUserHeading(gpsHeading, GPS_HEADING_SMOOTHING_FACTOR);
+          }
           if (shouldAnimateToUserRef.current) {
             animateToUserLocation(center);
             shouldAnimateToUserRef.current = false;
@@ -330,6 +349,7 @@ export const useUserLocationLayer = (mapRef: MutableRefObject<Map | null>) => {
       startOrientationTracking,
       stop,
       updateUserLocationFeature,
+      updateUserHeading,
     ],
   );
 
