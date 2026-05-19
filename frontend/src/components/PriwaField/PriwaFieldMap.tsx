@@ -23,6 +23,7 @@ import { unByKey } from "ol/Observable";
 import { fromLonLat, toLonLat } from "ol/proj";
 import View from "ol/View";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { PointerEvent } from "react";
 
 import { createStandardMapControls } from "../../utils/basemaps";
 import { useUserLocationLayer } from "../../hooks/useUserLocationLayer";
@@ -73,6 +74,7 @@ export default function PriwaFieldMap({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
   const isPlacingPointRef = useRef(false);
+  const hasRequestedOrientationFromInteractionRef = useRef(false);
   const pointLayerRef = useRef<ReturnType<typeof createPriwaPointLayer> | null>(
     null,
   );
@@ -145,7 +147,6 @@ export default function PriwaFieldMap({
     });
 
     mapRef.current = map;
-    locateUser(false);
 
     const clickKey = map.on("singleclick", (event) => {
       if (isPlacingPointRef.current) return;
@@ -175,7 +176,7 @@ export default function PriwaFieldMap({
       previewLayerRef.current = null;
       cogLayerRef.current = null;
     };
-  }, [locateUser, openPointForEditing, stopUserLocation, userLocationLayer]);
+  }, [openPointForEditing, stopUserLocation, userLocationLayer]);
 
   useEffect(() => {
     const source = pointLayerRef.current?.getSource();
@@ -255,10 +256,46 @@ export default function PriwaFieldMap({
     setDrawerOpen(true);
   }, []);
 
-  const locationButtonActive =
+  const requestDeferredOrientationPermission = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      if (!userLocation.needsOrientationPermission) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest("button,[role='button']")
+      )
+        return;
+      if (hasRequestedOrientationFromInteractionRef.current) return;
+
+      hasRequestedOrientationFromInteractionRef.current = true;
+      void locateUser(true);
+    },
+    [locateUser, userLocation.needsOrientationPermission],
+  );
+
+  const hasCenteredUserLocation =
     userLocation.isTracking &&
     userLocation.hasFix &&
     userLocation.hasZoomedToUser;
+  const locationButtonActive =
+    hasCenteredUserLocation &&
+    !userLocation.needsOrientationPermission &&
+    userLocation.isHeadingActive;
+  const locationButtonTitle = userLocation.locationError
+    ? "Standort erneut anfragen"
+    : userLocation.needsOrientationPermission
+      ? "Richtung aktivieren"
+      : userLocation.isLocating
+        ? "Standort wird gesucht"
+        : "Aktuelle Position";
+  const locationHintLabel = userLocation.locationError
+    ? userLocation.locationError
+    : userLocation.needsOrientationPermission
+      ? "Richtung: Standort-Button antippen"
+      : userLocation.isLocating
+        ? "Standort wird angefragt"
+        : locationButtonActive
+          ? null
+          : "Standort-Button antippen";
   const pointListToggleLabel = isPointListOpen
     ? "Punktliste schließen"
     : "Punktliste öffnen";
@@ -320,15 +357,22 @@ export default function PriwaFieldMap({
   );
 
   return (
-    <div className="relative h-full min-h-[100dvh] w-full overflow-hidden bg-neutral-950">
+    <div
+      className="relative h-full min-h-[100dvh] w-full overflow-hidden bg-neutral-950"
+      onPointerDownCapture={requestDeferredOrientationPermission}
+    >
       <div ref={containerRef} className="absolute inset-0" />
 
       {!isPlacingPoint && (
         <>
           <div className="pointer-events-none absolute left-4 top-20 z-10 flex flex-col gap-2 md:top-24">
-            <Tooltip title="Aktuelle Position">
+            <Tooltip title={locationButtonTitle}>
               <Button
-                className="pointer-events-auto shadow-md"
+                className={
+                  userLocation.needsOrientationPermission
+                    ? "pointer-events-auto border-amber-500 text-amber-700 shadow-md"
+                    : "pointer-events-auto shadow-md"
+                }
                 type={locationButtonActive ? "primary" : "default"}
                 shape="circle"
                 size="large"
@@ -418,15 +462,11 @@ export default function PriwaFieldMap({
 
       {!isPlacingPoint && (
         <div className="pointer-events-none absolute right-4 top-20 z-10 flex max-w-[calc(100%-5.75rem)] flex-col items-end gap-1.5 md:top-24">
-          <div className="rounded-md bg-white/90 px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm backdrop-blur">
-            {userLocation.locationError ??
-              `${projectName} · ${
-                isLoadingPoints
-                  ? "Lade Punkte"
-                  : `${points.length} ${points.length === 1 ? "Punkt" : "Punkte"}`
-              }`}
-            {userLocation.isHeadingActive ? " · Richtung" : ""}
-          </div>
+          {locationHintLabel && (
+            <div className="rounded-md bg-white/90 px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm backdrop-blur">
+              {locationHintLabel}
+            </div>
+          )}
           <PriwaOfflineStatus />
         </div>
       )}
