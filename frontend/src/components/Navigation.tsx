@@ -5,6 +5,7 @@ import { useLocation } from "react-router-dom";
 const { Header } = Layout;
 
 import { useAuth } from "../hooks/useAuthProvider";
+import { usePriwaProjectMemberships } from "../hooks/usePriwaProjectMemberships";
 import { useCanAudit } from "../hooks/useUserPrivileges";
 import { useNavigate } from "react-router-dom";
 import { palette } from "../theme/palette";
@@ -46,6 +47,7 @@ export default function Navigation() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { session, signOut } = useAuth();
   const { canAudit } = useCanAudit();
+  const { data: priwaMemberships = [] } = usePriwaProjectMemberships();
   const nav = useNavigate();
   const location = useLocation();
 
@@ -57,6 +59,12 @@ export default function Navigation() {
 
   // Add audit navigation if user has audit privileges
   const navigation = [...defaultNavigation];
+  if (priwaMemberships.length > 0) {
+    navigation.splice(2, 0, {
+      key: "/priwa-field",
+      label: "PRIWA",
+    });
+  }
   if (canAudit) {
     // Insert the audit link before the Account link
     navigation.splice(navigation.length - 1, 0, auditNavigation);
