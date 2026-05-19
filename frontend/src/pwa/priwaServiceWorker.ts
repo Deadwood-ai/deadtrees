@@ -6,23 +6,23 @@ export type PriwaServiceWorkerStatus =
   | "error";
 
 export interface IPriwaServiceWorkerSnapshot {
-  status: PriwaServiceWorkerStatus;
-  errorMessage: string | null;
+  readonly status: PriwaServiceWorkerStatus;
+  readonly errorMessage: string | null;
 }
 
 const listeners = new Set<() => void>();
 
-let snapshot: IPriwaServiceWorkerSnapshot = {
+let snapshot: IPriwaServiceWorkerSnapshot = Object.freeze({
   status: import.meta.env.PROD ? "registering" : "disabled",
   errorMessage: null,
-};
+});
 
 const notify = () => {
   listeners.forEach((listener) => listener());
 };
 
 const setSnapshot = (nextSnapshot: IPriwaServiceWorkerSnapshot) => {
-  snapshot = nextSnapshot;
+  snapshot = Object.freeze(nextSnapshot);
   notify();
 };
 

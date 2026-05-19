@@ -33,5 +33,9 @@ export const getPriwaOfflineStatusView = (
     return { label: "Offline nicht unterstützt", color: "warning" };
   }
 
+  if (serviceWorkerStatus === "disabled") {
+    return { label: "Offline nur im Build", color: "default" };
+  }
+
   return { label: "Offline nur im Build", color: "default" };
 };

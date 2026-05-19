@@ -55,7 +55,12 @@ const handleNavigation = async (request) => {
     return (
       (await caches.match(request)) ||
       (await caches.match("/priwa-field")) ||
-      (await caches.match("/"))
+      (await caches.match("/")) ||
+      new Response("PRIWA Field is offline and the app shell is unavailable.", {
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+        status: 503,
+        statusText: "Offline",
+      })
     );
   }
 };
@@ -64,7 +69,14 @@ const handleSameOriginAsset = async (request) => {
   const cachedResponse = await caches.match(request);
   const networkResponsePromise = fetch(request)
     .then((response) => cacheSuccessfulResponse(request, response))
-    .catch(() => cachedResponse);
+    .catch(
+      () =>
+        cachedResponse ||
+        new Response("", {
+          status: 503,
+          statusText: "Offline",
+        }),
+    );
 
   return cachedResponse || networkResponsePromise;
 };

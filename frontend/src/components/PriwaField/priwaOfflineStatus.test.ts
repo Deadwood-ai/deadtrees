@@ -8,6 +8,10 @@ describe("PRIWA offline status labels", () => {
       label: "Offline bereit",
       color: "success",
     });
+    expect(getPriwaOfflineStatusView("ready", false)).toEqual({
+      label: "Offline bereit",
+      color: "success",
+    });
   });
 
   it("shows limited offline state when the browser is offline before readiness", () => {
@@ -25,6 +29,28 @@ describe("PRIWA offline status labels", () => {
     expect(getPriwaOfflineStatusView("unsupported", true)).toEqual({
       label: "Offline nicht unterstützt",
       color: "warning",
+    });
+  });
+
+  it("distinguishes failed registration from offline precedence", () => {
+    expect(getPriwaOfflineStatusView("error", true)).toEqual({
+      label: "Offline nicht bereit",
+      color: "error",
+    });
+    expect(getPriwaOfflineStatusView("error", false)).toEqual({
+      label: "Offline eingeschränkt",
+      color: "warning",
+    });
+  });
+
+  it("handles disabled and unexpected states with the build-only fallback", () => {
+    expect(getPriwaOfflineStatusView("disabled", true)).toEqual({
+      label: "Offline nur im Build",
+      color: "default",
+    });
+    expect(getPriwaOfflineStatusView("unknown" as never, true)).toEqual({
+      label: "Offline nur im Build",
+      color: "default",
     });
   });
 });
