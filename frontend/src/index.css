@@ -5,6 +5,11 @@
 /* Theme variables are injected at runtime from src/theme/palette.ts */
 
 /* Shared OpenLayers controls for public maps */
+.priwa-placement-mode .dt-app-navigation,
+.priwa-placement-mode .dt-map-attribution-control {
+  display: none !important;
+}
+
 .dt-map-attribution-control {
   position: absolute;
   bottom: 12px;
@@ -252,7 +257,42 @@
   .ant-input-affix-wrapper,
   .ant-input-affix-wrapper input,
   .ant-input-textarea textarea,
+  .ant-select-selector,
+  .ant-select-selection-item,
+  .ant-select-selection-placeholder,
+  .ant-select-selection-search-input,
   textarea.ant-input {
     font-size: 16px !important;
+  }
+
+  .priwa-point-drawer-root .ant-drawer-content-wrapper {
+    width: min(430px, 100vw) !important;
+    max-width: 100vw !important;
+    overflow-x: clip !important;
+  }
+
+  .priwa-point-drawer,
+  .priwa-point-drawer .ant-drawer-content,
+  .priwa-point-drawer .ant-drawer-body {
+    max-width: 100vw !important;
+    box-sizing: border-box;
+    overflow-x: clip !important;
+  }
+
+  .priwa-point-drawer .ant-input,
+  .priwa-point-drawer .ant-input-affix-wrapper,
+  .priwa-point-drawer .ant-input-affix-wrapper input,
+  .priwa-point-drawer .ant-input-textarea textarea,
+  .priwa-point-drawer .ant-select-selector,
+  .priwa-point-drawer .ant-select-selection-item,
+  .priwa-point-drawer .ant-select-selection-placeholder,
+  .priwa-point-drawer .ant-select-selection-search-input,
+  .priwa-point-drawer textarea.ant-input {
+    font-size: 16px !important;
+  }
+
+  .priwa-point-drawer .ant-input,
+  .priwa-point-drawer .ant-select-selector {
+    min-height: 40px;
   }
 }

@@ -19,6 +19,10 @@ const defaultNavigation = [
     label: "Satellite Map",
   },
   {
+    key: "/priwa-field",
+    label: "PRIWA",
+  },
+  {
     key: "/dataset",
     label: "Drone Archive",
   },
@@ -129,7 +133,7 @@ export default function Navigation() {
 
   return (
     <>
-      <div className="hidden md:flex justify-center w-full fixed top-0 z-50 pt-4 px-4 pb-2 pointer-events-none">
+      <div className="dt-app-navigation hidden md:flex justify-center w-full fixed top-0 z-50 pt-4 px-4 pb-2 pointer-events-none">
         <Header
           className="w-full pointer-events-auto"
           style={{
@@ -180,7 +184,7 @@ export default function Navigation() {
         </Header>
       </div>
 
-      <div className="md:hidden fixed top-0 z-50 w-full px-2 pt-2 pointer-events-none">
+      <div className="dt-app-navigation md:hidden fixed top-0 z-50 w-full px-2 pt-2 pointer-events-none">
         <Header
           className="pointer-events-auto"
           style={{
