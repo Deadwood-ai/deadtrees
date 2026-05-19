@@ -268,3 +268,12 @@
     font-size: 16px !important;
   }
 }
+
+.priwa-add-point-fab {
+  width: 64px !important;
+  height: 64px !important;
+}
+
+.priwa-add-point-fab .anticon {
+  font-size: 24px;
+}

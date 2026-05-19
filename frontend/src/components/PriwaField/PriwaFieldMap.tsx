@@ -1,4 +1,13 @@
-import { Alert, Button, Popover, Switch, Tooltip, Typography, message } from "antd";
+import {
+  Alert,
+  Button,
+  FloatButton,
+  Popover,
+  Switch,
+  Tooltip,
+  Typography,
+  message,
+} from "antd";
 import {
   AimOutlined,
   EnvironmentOutlined,
@@ -359,20 +368,21 @@ export default function PriwaFieldMap({
             </Tooltip>
           </div>
 
-          {!isPointListOpen && (
-            <div className="pointer-events-none absolute bottom-5 right-5 z-[60]">
-              <Tooltip title="Punkt aufnehmen" placement="left">
-                <Button
-                  className="pointer-events-auto shadow-lg"
-                  type="primary"
-                  shape="circle"
-                  size="large"
-                  icon={<PlusOutlined />}
-                  onClick={openNewPointDrawer}
-                  aria-label="Punkt aufnehmen"
-                />
-              </Tooltip>
-            </div>
+          {!isPointListOpen && !isDrawerOpen && (
+            <FloatButton
+              className="priwa-add-point-fab"
+              type="primary"
+              shape="circle"
+              icon={<PlusOutlined />}
+              tooltip={{ title: "Punkt aufnehmen", placement: "left" }}
+              onClick={openNewPointDrawer}
+              aria-label="Punkt aufnehmen"
+              style={{
+                right: "max(20px, calc(env(safe-area-inset-right, 0px) + 20px))",
+                bottom:
+                  "max(20px, calc(env(safe-area-inset-bottom, 0px) + 20px))",
+              }}
+            />
           )}
         </>
       )}
