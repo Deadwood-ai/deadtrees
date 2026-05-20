@@ -122,10 +122,49 @@ const pointToRow = (projectId: string, point: IPriwaPoint) => ({
   client_updated_at: new Date().toISOString(),
 });
 
-const priwaPointsQueryKey = (projectId: string | null | undefined) => [
+export const priwaPointsQueryKey = (projectId: string | null | undefined) => [
   "priwa-kaeferbaeume",
   projectId,
 ];
+
+export const fetchPriwaKaeferbaeume = async (projectId: string) => {
+  const { data, error } = await supabase
+    .from("priwa_kaeferbaeume")
+    .select(
+      "id, project_id, geom, location_source, is_exact_location, baumnr, fund, baumart, bm, bohrloch, harz, nadel, rinde, kv, name, datum, kom, raw_qr_value, created_at, updated_at, client_updated_at",
+    )
+    .eq("project_id", projectId)
+    .order("updated_at", { ascending: false });
+
+  if (error) throw error;
+
+  return ((data ?? []) as IPriwaKaeferbaumRow[])
+    .map(rowToPoint)
+    .filter((point): point is IPriwaPoint => point !== null);
+};
+
+export const upsertPriwaKaeferbaum = async (
+  projectId: string,
+  point: IPriwaPoint,
+) => {
+  const { error } = await supabase
+    .from("priwa_kaeferbaeume")
+    .upsert(pointToRow(projectId, point), { onConflict: "id" });
+
+  if (error) throw error;
+};
+
+export const softDeletePriwaKaeferbaum = async (
+  pointId: string,
+  deletedAt = new Date().toISOString(),
+) => {
+  const { error } = await supabase
+    .from("priwa_kaeferbaeume")
+    .update({ deleted_at: deletedAt })
+    .eq("id", pointId);
+
+  if (error) throw error;
+};
 
 export function usePriwaKaeferbaeume(projectId: string | null | undefined) {
   const queryClient = useQueryClient();
@@ -135,20 +174,7 @@ export function usePriwaKaeferbaeume(projectId: string | null | undefined) {
     enabled: !!projectId,
     queryFn: async () => {
       if (!projectId) return [];
-
-      const { data, error } = await supabase
-        .from("priwa_kaeferbaeume")
-        .select(
-          "id, project_id, geom, location_source, is_exact_location, baumnr, fund, baumart, bm, bohrloch, harz, nadel, rinde, kv, name, datum, kom, raw_qr_value, created_at, updated_at, client_updated_at",
-        )
-        .eq("project_id", projectId)
-        .order("updated_at", { ascending: false });
-
-      if (error) throw error;
-
-      return ((data ?? []) as IPriwaKaeferbaumRow[])
-        .map(rowToPoint)
-        .filter((point): point is IPriwaPoint => point !== null);
+      return fetchPriwaKaeferbaeume(projectId);
     },
     staleTime: 30 * 1000,
   });
@@ -162,12 +188,7 @@ export function usePriwaKaeferbaeume(projectId: string | null | undefined) {
   const createPoint = useMutation({
     mutationFn: async (point: IPriwaPoint) => {
       if (!projectId) throw new Error("PRIWA project membership is required.");
-
-      const { error } = await supabase
-        .from("priwa_kaeferbaeume")
-        .insert(pointToRow(projectId, point));
-
-      if (error) throw error;
+      await upsertPriwaKaeferbaum(projectId, point);
     },
     onSuccess: invalidatePoints,
   });
@@ -175,25 +196,14 @@ export function usePriwaKaeferbaeume(projectId: string | null | undefined) {
   const updatePoint = useMutation({
     mutationFn: async (point: IPriwaPoint) => {
       if (!projectId) throw new Error("PRIWA project membership is required.");
-
-      const { error } = await supabase
-        .from("priwa_kaeferbaeume")
-        .update(pointToRow(projectId, point))
-        .eq("id", point.id);
-
-      if (error) throw error;
+      await upsertPriwaKaeferbaum(projectId, point);
     },
     onSuccess: invalidatePoints,
   });
 
   const deletePoint = useMutation({
     mutationFn: async (pointId: string) => {
-      const { error } = await supabase
-        .from("priwa_kaeferbaeume")
-        .update({ deleted_at: new Date().toISOString() })
-        .eq("id", pointId);
-
-      if (error) throw error;
+      await softDeletePriwaKaeferbaum(pointId);
     },
     onSuccess: invalidatePoints,
   });

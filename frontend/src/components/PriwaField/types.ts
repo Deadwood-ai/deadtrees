@@ -5,6 +5,8 @@ export interface IPriwaCoordinate {
 
 export type PriwaCoordinateSource = "qr" | "gps" | "map";
 export type PriwaGpsQuality = "ja" | "nein";
+export type PriwaPointSyncOperation = "create" | "update" | "delete";
+export type PriwaPointSyncStatus = "synced" | "pending" | "syncing" | "failed";
 export type PriwaObserverName =
   | "Sigi Huber"
   | "Martin Schade"
@@ -55,4 +57,7 @@ export interface IPriwaPoint extends IPriwaCoordinate {
   bhd?: number | null;
   fotoQrName?: string;
   rawQrValue?: string;
+  syncStatus?: PriwaPointSyncStatus;
+  syncOperation?: PriwaPointSyncOperation;
+  syncError?: string;
 }

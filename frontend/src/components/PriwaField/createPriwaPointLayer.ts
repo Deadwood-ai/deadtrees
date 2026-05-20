@@ -37,9 +37,30 @@ const pointStyle = (point: IPriwaPoint) => {
       : undefined,
   });
 
-  if (!point.isEstimatedLocation) return coreStyle;
+  const syncStyle =
+    point.syncStatus && point.syncStatus !== "synced"
+      ? new Style({
+          image: new CircleStyle({
+            radius: point.syncStatus === "failed" ? 17 : 16,
+            fill: new Fill({ color: "rgba(255,255,255,0.01)" }),
+            stroke: new Stroke({
+              color:
+                point.syncStatus === "failed"
+                  ? "rgba(220, 38, 38, 0.95)"
+                  : "rgba(37, 99, 235, 0.95)",
+              width: 3,
+              lineDash: [3, 4],
+            }),
+          }),
+        })
+      : null;
+
+  if (!point.isEstimatedLocation) {
+    return syncStyle ? [syncStyle, coreStyle] : coreStyle;
+  }
 
   return [
+    ...(syncStyle ? [syncStyle] : []),
     new Style({
       image: new CircleStyle({
         radius: 13,

@@ -2,6 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 
 import { useAuth } from "./useAuthProvider";
 import { supabase } from "./useSupabase";
+import {
+  loadCachedPriwaMemberships,
+  saveCachedPriwaMemberships,
+} from "../components/PriwaField/priwaOfflineStore";
 
 export interface IPriwaProjectMembership {
   projectId: string;
@@ -30,6 +34,9 @@ interface IPriwaMembershipRow {
 const firstProject = (project: IPriwaMembershipRow["priwa_projects"]) =>
   Array.isArray(project) ? (project[0] ?? null) : project;
 
+const isBrowserOffline = () =>
+  typeof navigator !== "undefined" && !navigator.onLine;
+
 export function usePriwaProjectMemberships() {
   const { status, user } = useAuth();
 
@@ -37,26 +44,42 @@ export function usePriwaProjectMemberships() {
     queryKey: ["priwa-project-memberships", user?.id],
     enabled: status === "authenticated" && !!user?.id,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("priwa_project_memberships")
-        .select("project_id, role, priwa_projects(id, slug, name)")
-        .order("created_at", { ascending: true });
+      if (!user?.id) return [];
 
-      if (error) throw error;
+      if (isBrowserOffline()) {
+        const cachedMemberships = await loadCachedPriwaMemberships(user.id);
+        if (cachedMemberships.length > 0) return cachedMemberships;
+      }
 
-      return ((data ?? []) as IPriwaMembershipRow[])
-        .map((membership) => {
-          const project = firstProject(membership.priwa_projects);
-          if (!project) return null;
+      try {
+        const { data, error } = await supabase
+          .from("priwa_project_memberships")
+          .select("project_id, role, priwa_projects(id, slug, name)")
+          .order("created_at", { ascending: true });
 
-          return {
-            projectId: membership.project_id,
-            projectName: project.name,
-            projectSlug: project.slug,
-            role: membership.role,
-          } satisfies IPriwaProjectMembership;
-        })
-        .filter((membership): membership is IPriwaProjectMembership => membership !== null);
+        if (error) throw error;
+
+        const memberships = ((data ?? []) as IPriwaMembershipRow[])
+          .map((membership) => {
+            const project = firstProject(membership.priwa_projects);
+            if (!project) return null;
+
+            return {
+              projectId: membership.project_id,
+              projectName: project.name,
+              projectSlug: project.slug,
+              role: membership.role,
+            } satisfies IPriwaProjectMembership;
+          })
+          .filter((membership): membership is IPriwaProjectMembership => membership !== null);
+
+        await saveCachedPriwaMemberships(user.id, memberships);
+        return memberships;
+      } catch (error) {
+        const cachedMemberships = await loadCachedPriwaMemberships(user.id);
+        if (cachedMemberships.length > 0) return cachedMemberships;
+        throw error;
+      }
     },
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,

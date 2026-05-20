@@ -44,6 +44,9 @@ export default function PriwaPointListPanel({
     (point) => point.coordinateSource === "qr",
   ).length;
   const visiblePoints = filter === "qa" ? qaPoints : points;
+  const pendingSyncCount = points.filter(
+    (point) => point.syncStatus && point.syncStatus !== "synced",
+  ).length;
   const emptyDescription =
     isLoading
       ? "Lade Punkte..."
@@ -56,7 +59,10 @@ export default function PriwaPointListPanel({
       <header className="flex items-start justify-between gap-3 border-b border-slate-200 px-3 py-2.5">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-slate-950">Käferbaum QA</div>
-          <div className="truncate text-xs text-slate-500">{projectName}</div>
+          <div className="truncate text-xs text-slate-500">
+            {projectName}
+            {pendingSyncCount > 0 ? ` · ${pendingSyncCount} lokal` : ""}
+          </div>
         </div>
         <Button size="small" onClick={onClose}>
           Schließen
@@ -131,6 +137,14 @@ export default function PriwaPointListPanel({
                         {getPriwaPointSourceLabel(point)}
                       </Tag>
                       <Tag className="m-0">{getPriwaFundLabel(point)}</Tag>
+                      {point.syncStatus && point.syncStatus !== "synced" && (
+                        <Tag
+                          className="m-0"
+                          color={point.syncStatus === "failed" ? "red" : "blue"}
+                        >
+                          {point.syncStatus === "failed" ? "Fehler" : "Lokal"}
+                        </Tag>
+                      )}
                       <span className="text-xs text-slate-500">{point.baumart}</span>
                       <span className="text-xs text-slate-400">·</span>
                       <span className="text-xs text-slate-500">{point.name}</span>

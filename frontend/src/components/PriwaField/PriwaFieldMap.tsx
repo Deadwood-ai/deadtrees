@@ -13,6 +13,7 @@ import {
   EnvironmentOutlined,
   PlusOutlined,
   SlidersOutlined,
+  SyncOutlined,
   UnorderedListOutlined,
 } from "@ant-design/icons";
 import "ol/ol.css";
@@ -38,6 +39,7 @@ import {
 import PriwaPointDrawer from "./PriwaPointDrawer";
 import PriwaPointListPanel from "./PriwaPointListPanel";
 import PriwaOfflineStatus from "./PriwaOfflineStatus";
+import type { IPriwaSyncSummary } from "./priwaOfflineSync";
 import type {
   IPriwaCoordinate,
   IPriwaPoint,
@@ -54,9 +56,11 @@ interface PriwaFieldMapProps {
   cogPath?: string | null;
   isCogLoading?: boolean;
   errorMessage?: string | null;
+  syncSummary?: IPriwaSyncSummary;
   onAddPoint: (point: IPriwaPoint) => Promise<void>;
   onUpdatePoint: (point: IPriwaPoint) => Promise<void>;
   onDeletePoint: (pointId: string) => Promise<void>;
+  onSyncNow?: () => Promise<void>;
 }
 
 export default function PriwaFieldMap({
@@ -67,9 +71,11 @@ export default function PriwaFieldMap({
   cogPath,
   isCogLoading = false,
   errorMessage = null,
+  syncSummary,
   onAddPoint,
   onUpdatePoint,
   onDeletePoint,
+  onSyncNow,
 }: PriwaFieldMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
@@ -325,6 +331,7 @@ export default function PriwaFieldMap({
     },
     [onDeletePoint],
   );
+  const hasPendingSync = (syncSummary?.total ?? 0) > 0;
 
   const layerPanel = (
     <div className="w-64 space-y-3">
@@ -352,6 +359,17 @@ export default function PriwaFieldMap({
           disabled={!cogPath}
           onChange={setCogVisible}
         />
+      </div>
+      <div className="border-t border-slate-200 pt-3">
+        <Button
+          block
+          size="small"
+          icon={<SyncOutlined spin={!!syncSummary?.syncing} />}
+          disabled={!hasPendingSync || !onSyncNow}
+          onClick={() => void onSyncNow?.()}
+        >
+          Jetzt synchronisieren
+        </Button>
       </div>
     </div>
   );
@@ -467,7 +485,7 @@ export default function PriwaFieldMap({
               {locationHintLabel}
             </div>
           )}
-          <PriwaOfflineStatus />
+          <PriwaOfflineStatus syncSummary={syncSummary} />
         </div>
       )}
 

@@ -35,7 +35,7 @@ jobs:
         timeout-minutes: 8
         env:
           VITE_MODE: production
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_SAM_API_URL: ${{ secrets.VITE_SAM_API_URL }}
           VITE_POSTHOG_PROJECT_KEY: ${{ secrets.VITE_POSTHOG_PROJECT_KEY }}
@@ -55,7 +55,7 @@ jobs:
         working-directory: frontend
     env:
       VITE_MODE: production
-      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
       VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       VITE_SAM_API_URL: ${{ secrets.VITE_SAM_API_URL }}
       VITE_POSTHOG_PROJECT_KEY: ${{ secrets.VITE_POSTHOG_PROJECT_KEY }}
