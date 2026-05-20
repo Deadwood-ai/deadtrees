@@ -185,6 +185,7 @@ export default function PriwaPointDrawer({
   const [coordinateSource, setCoordinateSource] =
     useState<PriwaCoordinateSource>("qr");
   const [isQrScannerOpen, setQrScannerOpen] = useState(false);
+  const [activeCollapseKeys, setActiveCollapseKeys] = useState<string[]>([]);
 
   const qrCoordinate = useMemo(
     () => parseGoogleMapsCoordinates(rawQrValue),
@@ -197,11 +198,13 @@ export default function PriwaPointDrawer({
     if (editingPoint) {
       form.setFieldsValue(createFormValuesFromPoint(editingPoint));
       setRawQrValue(editingPoint.rawQrValue ?? "");
+      setActiveCollapseKeys(["baum"]);
       return;
     }
 
     form.setFieldsValue(createDefaultFormValues());
     setRawQrValue("");
+    setActiveCollapseKeys([]);
   }, [editingPoint, form, formSessionId]);
 
   useEffect(() => {
@@ -264,7 +267,16 @@ export default function PriwaPointDrawer({
     if (!effectiveCoordinate) return;
 
     try {
-      const values = await form.validateFields();
+      if (requiresBaumnr) {
+        setActiveCollapseKeys((keys) =>
+          keys.includes("baum") ? keys : [...keys, "baum"],
+        );
+      }
+
+      const values = {
+        ...createDefaultFormValues(),
+        ...(await form.validateFields()),
+      };
       const savedCoordinateSource = willUseEstimatedGps
         ? "gps"
         : coordinateSource;
@@ -287,7 +299,7 @@ export default function PriwaPointDrawer({
         capturedAt: editingPoint?.capturedAt ?? new Date().toISOString(),
         coordinateSource: savedCoordinateSource,
         gps: willUseEstimatedGps ? "nein" : "ja",
-        isEstimatedLocation: willUseEstimatedGps,
+        isEstimatedLocation: savedCoordinateSource !== "qr",
         rawQrValue:
           savedCoordinateSource === "qr" ? rawQrValue.trim() || undefined : undefined,
       };
@@ -463,7 +475,10 @@ export default function PriwaPointDrawer({
           <Collapse
             ghost
             size="small"
-            defaultActiveKey={editingPoint ? ["baum"] : []}
+            activeKey={activeCollapseKeys}
+            onChange={(keys) =>
+              setActiveCollapseKeys(Array.isArray(keys) ? keys : [keys])
+            }
             expandIcon={({ isActive }) => (
               <DownOutlined rotate={isActive ? 180 : 0} />
             )}
@@ -471,6 +486,7 @@ export default function PriwaPointDrawer({
               {
                 key: "baum",
                 label: <Typography.Text strong>Baum</Typography.Text>,
+                forceRender: true,
                 children: (
                   <div className="grid grid-cols-1 gap-x-2 sm:grid-cols-2">
                     <Form.Item
