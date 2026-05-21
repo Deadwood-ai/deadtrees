@@ -151,9 +151,47 @@ const cacheViewedBasemapResponse = async (request, response) => {
   return response;
 };
 
+const createOfflineTileResponse = () =>
+  new Response("", {
+    status: 503,
+    statusText: "Offline",
+  });
+
+const isExplicitBasemapCacheName = (cacheName) =>
+  cacheName.startsWith(BASEMAP_CACHE_PREFIX) &&
+  cacheName !== VIEWED_BASEMAP_CACHE;
+
+const matchExplicitBasemapPackage = async (requests) => {
+  const cacheNames = await caches.keys();
+
+  for (const cacheName of cacheNames) {
+    if (!isExplicitBasemapCacheName(cacheName)) {
+      continue;
+    }
+
+    const cache = await caches.open(cacheName);
+    for (const request of requests) {
+      const response = await cache.match(request, { ignoreVary: true });
+      if (response) {
+        return response;
+      }
+    }
+  }
+
+  return null;
+};
+
 const handleBasemapTile = async (event) => {
   const { request } = event;
   const canonicalRequest = canonicalizeLglBasemapRequest(request);
+
+  if (self.navigator && self.navigator.onLine === false) {
+    return (
+      (await matchExplicitBasemapPackage([canonicalRequest, request])) ||
+      createOfflineTileResponse()
+    );
+  }
+
   const cachedResponse =
     (await caches.match(canonicalRequest, { ignoreVary: true })) ||
     (await caches.match(request, { ignoreVary: true }));
@@ -161,12 +199,9 @@ const handleBasemapTile = async (event) => {
   const networkResponsePromise = fetch(request)
     .then((response) => cacheViewedBasemapResponse(canonicalRequest, response))
     .catch(
-      () =>
-        cachedResponse ||
-        new Response("", {
-          status: 503,
-          statusText: "Offline",
-        }),
+      async () =>
+        (await matchExplicitBasemapPackage([canonicalRequest, request])) ||
+        createOfflineTileResponse(),
     );
 
   if (cachedResponse) {
