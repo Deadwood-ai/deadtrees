@@ -1,6 +1,5 @@
 import json
 
-import cv2
 import geopandas as gpd
 import numpy as np
 import rasterio
@@ -38,8 +37,27 @@ def merge_polygons(contours, hierarchy):
 	return polygons
 
 
+def mask_to_polygons_scanline(dataset, class_value):
+	"""Polygonize pixels matching class_value without loading the full raster.
+
+	Uses rasterio.features.shapes with a Band reference so GDAL reads
+	scanline-by-scanline rather than materialising the full array.
+	Returns polygons in the dataset CRS.
+	"""
+	from rasterio.features import shapes
+	from shapely.geometry import shape as shapely_shape
+
+	band = rasterio.Band(dataset, 1, dataset.dtypes[0], dataset.shape)
+	return [
+		shapely_shape(geom)
+		for geom, val in shapes(band, transform=dataset.transform)
+		if int(val) == class_value
+	]
+
+
 def mask_to_polygons(mask, dataset_reader):
 	"""Convert a binary mask into polygons in the dataset CRS."""
+	import cv2
 	contours, hierarchy = cv2.findContours(
 		mask.astype(np.uint8).copy(),
 		mode=cv2.RETR_CCOMP,
