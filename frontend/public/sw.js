@@ -1,5 +1,9 @@
 const CACHE_VERSION = "priwa-app-shell-v1";
 const APP_SHELL_CACHE = `deadtrees-${CACHE_VERSION}`;
+const BASEMAP_CACHE = "deadtrees-priwa-basemap-v1";
+const LGL_BASEMAP_URL_PREFIX =
+  "https://owsproxy.lgl-bw.de/owsproxy/ows/WMTS_LGL-BW_ATKIS_DOP_20_C";
+const PRESERVED_CACHES = new Set([APP_SHELL_CACHE, BASEMAP_CACHE]);
 const APP_SHELL_URLS = [
   "/",
   "/priwa-field",
@@ -14,9 +18,7 @@ self.addEventListener("install", (event) => {
       .open(APP_SHELL_CACHE)
       .then((cache) =>
         cache.addAll(
-          APP_SHELL_URLS.map(
-            (url) => new Request(url, { cache: "reload" }),
-          ),
+          APP_SHELL_URLS.map((url) => new Request(url, { cache: "reload" })),
         ),
       )
       .then(() => self.skipWaiting()),
@@ -31,7 +33,7 @@ self.addEventListener("activate", (event) => {
         Promise.all(
           cacheNames
             .filter((cacheName) => cacheName.startsWith("deadtrees-priwa-"))
-            .filter((cacheName) => cacheName !== APP_SHELL_CACHE)
+            .filter((cacheName) => !PRESERVED_CACHES.has(cacheName))
             .map((cacheName) => caches.delete(cacheName)),
         ),
       )
@@ -81,11 +83,52 @@ const handleSameOriginAsset = async (request) => {
   return cachedResponse || networkResponsePromise;
 };
 
+const isLglBasemapTileRequest = (requestUrl) =>
+  requestUrl.href.startsWith(LGL_BASEMAP_URL_PREFIX);
+
+const cacheBasemapResponse = async (request, response) => {
+  if (!response || (!response.ok && response.type !== "opaque")) {
+    return response;
+  }
+
+  const cache = await caches.open(BASEMAP_CACHE);
+  await cache.put(request, response.clone());
+  return response;
+};
+
+const handleBasemapTile = async (request) => {
+  const cachedResponse = await caches.match(request, {
+    ignoreVary: true,
+  });
+
+  try {
+    const response = await fetch(request);
+    return cacheBasemapResponse(request, response);
+  } catch {
+    return (
+      cachedResponse ||
+      new Response("", {
+        status: 503,
+        statusText: "Offline",
+      })
+    );
+  }
+};
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   const requestUrl = new URL(request.url);
 
-  if (request.method !== "GET" || requestUrl.origin !== self.location.origin) {
+  if (request.method !== "GET") {
+    return;
+  }
+
+  if (isLglBasemapTileRequest(requestUrl)) {
+    event.respondWith(handleBasemapTile(request));
+    return;
+  }
+
+  if (requestUrl.origin !== self.location.origin) {
     return;
   }
 

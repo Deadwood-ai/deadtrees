@@ -86,13 +86,12 @@ export default function PriwaField() {
   return (
     <PriwaFieldMap
       points={points}
+      projectId={activeMembership.projectId}
       projectName={activeMembership.projectName}
       isLoadingPoints={isLoadingPoints || isRefetching}
       isSavingPoint={isSaving}
       cogPath={null}
-      errorMessage={
-        pointsError instanceof Error ? pointsError.message : null
-      }
+      errorMessage={pointsError instanceof Error ? pointsError.message : null}
       onAddPoint={createPoint}
       onUpdatePoint={updatePoint}
       onDeletePoint={deletePoint}

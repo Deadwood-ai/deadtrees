@@ -63,6 +63,7 @@ test.describe("PRIWA local field write flows", () => {
   }) => {
     await signInFieldUser(page);
     await expect(page.getByTestId("priwa-field-map")).toBeVisible();
+    await expectOfflineBasemapControl(page);
 
     await context.setOffline(true);
     await waitForBrowserOnlineState(page, false);
@@ -107,6 +108,15 @@ async function createMapEstimatedPoint(page: Page, pointBaumnr: string) {
   await page.getByLabel("Baumnr").fill(pointBaumnr);
   await page.getByRole("button", { name: "Schnellspeichern" }).click();
   await expect(page.getByText("Käferbaum gespeichert")).toBeVisible();
+}
+
+async function expectOfflineBasemapControl(page: Page) {
+  await page.getByRole("button", { name: "Layer auswählen" }).click();
+  await expect(page.getByText("Basiskarte offline")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Kartenausschnitt speichern" }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
 }
 
 async function editFirstPointBaumnr(page: Page, pointBaumnr: string) {
