@@ -82,12 +82,16 @@ describe("PRIWA offline basemap helpers", () => {
   it("caches successful tiles and reports per-tile failures", async () => {
     const put = vi.fn();
     const open = vi.fn().mockResolvedValue({ put });
+    const opaqueResponse = new Response(null);
+    Object.defineProperty(opaqueResponse, "ok", { value: false });
+    Object.defineProperty(opaqueResponse, "status", { value: 0 });
+    Object.defineProperty(opaqueResponse, "type", { value: "opaque" });
     vi.stubGlobal("caches", { open });
     vi.stubGlobal(
       "fetch",
       vi
         .fn()
-        .mockResolvedValueOnce(new Response("tile", { status: 200 }))
+        .mockResolvedValueOnce(opaqueResponse)
         .mockRejectedValueOnce(new Error("offline")),
     );
     const progress = vi.fn();
