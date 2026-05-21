@@ -1,9 +1,12 @@
+import os
+import tempfile
 from pathlib import Path
 
 import numpy as np
 import rasterio
 import torch
 import torch.nn.functional as F
+from rasterio.windows import Window as RioWindow
 from safetensors import safe_open
 from torch.utils.data import DataLoader
 from torchvision.transforms import transforms
@@ -15,7 +18,7 @@ from processor.src.utils.inference_dataset import InferenceDataset
 from processor.src.utils.segmentation import (
     filter_polygons_by_area,
     image_reprojector,
-    mask_to_polygons,
+    mask_to_polygons_scanline,
     reproject_polygons,
 )
 from processor.src.utils.geometry_validation import count_polygon_points, simplify_polygons_preserving_topology
@@ -120,99 +123,124 @@ class CombinedInference:
             shuffle=False,
         )
 
-        # Integer class map assembled from tiles
-        class_map = np.zeros((dataset.height, dataset.width), dtype=np.int8)
-
-        for images, cropped_windows in tqdm(loader, desc='combined inference'):
-            images = images.to(self.device)
-
-            with torch.no_grad():
-                if images.shape[0] < BATCH_SIZE:
-                    pad = torch.zeros((BATCH_SIZE, 3, TILE_SIZE, TILE_SIZE), dtype=torch.float32)
-                    pad[: images.shape[0]] = images
-                    pad = pad.to(self.device)
-                    logits = self.model(pixel_values=pad).logits[: images.shape[0]]
-                else:
-                    logits = self.model(pixel_values=images).logits
-
-                # Resize logits to tile size then argmax
-                logits = F.interpolate(logits, size=(TILE_SIZE, TILE_SIZE), mode='bilinear', align_corners=False)
-                preds = logits.argmax(dim=1, keepdim=True).float()  # (B, 1, H, W)
-
-            for i in range(preds.shape[0]):
-                pred_tile = crop(
-                    preds[i].cpu(),
-                    top=PADDING,
-                    left=PADDING,
-                    height=TILE_SIZE - (2 * PADDING),
-                    width=TILE_SIZE - (2 * PADDING),
-                )
-
-                minx = int(cropped_windows['col_off'][i])
-                maxx = minx + int(cropped_windows['width'][i])
-                miny = int(cropped_windows['row_off'][i])
-                maxy = miny + int(cropped_windows['width'][i])
-
-                diff_minx = max(0, -minx); minx = max(0, minx)
-                diff_miny = max(0, -miny); miny = max(0, miny)
-                diff_maxx = max(0, maxx - class_map.shape[1]); maxx = min(maxx, class_map.shape[1])
-                diff_maxy = max(0, maxy - class_map.shape[0]); maxy = min(maxy, class_map.shape[0])
-
-                pred_tile = pred_tile[
-                    :,
-                    diff_miny: pred_tile.shape[1] - diff_maxy if diff_maxy else pred_tile.shape[1],
-                    diff_minx: pred_tile.shape[2] - diff_maxx if diff_maxx else pred_tile.shape[2],
-                ]
-                class_map[miny:maxy, minx:maxx] = pred_tile[0].numpy().astype(np.int8)
-
-        # Apply nodata mask in-place to avoid a full-res copy.
+        tmp_class_path = None
+        tmp_treecover_path = None
         try:
-            nodata_mask = vrt_src.dataset_mask()
-            if set(np.unique(nodata_mask)).issubset({0, 255}):
-                class_map[nodata_mask == 0] = 0
-            del nodata_mask
-        except Exception:
-            pass
+            # Two temp GeoTIFFs written tile-by-tile during inference so the full
+            # class map never lives in RAM. Nodata is applied per tile from the
+            # VRT mask band, avoiding a full-res dataset_mask() load entirely.
+            with tempfile.NamedTemporaryFile(suffix='_class.tif', delete=False) as f:
+                tmp_class_path = f.name
+            with tempfile.NamedTemporaryFile(suffix='_treecover.tif', delete=False) as f:
+                tmp_treecover_path = f.name
 
-        src_crs = vrt_src.crs
-        vrt_src.close()
+            tif_kwargs = dict(
+                driver='GTiff',
+                height=dataset.height,
+                width=dataset.width,
+                count=1,
+                dtype=np.uint8,
+                crs=vrt_src.crs,
+                transform=vrt_src.transform,
+            )
+            with (
+                rasterio.open(tmp_class_path, 'w', **tif_kwargs) as dst_class,
+                rasterio.open(tmp_treecover_path, 'w', **tif_kwargs) as dst_treecover,
+            ):
+                for images, cropped_windows in tqdm(loader, desc='combined inference'):
+                    images = images.to(self.device)
 
-        with rasterio.open(input_tif) as src:
-            orig_crs = src.crs
+                    with torch.no_grad():
+                        if images.shape[0] < BATCH_SIZE:
+                            pad = torch.zeros((BATCH_SIZE, 3, TILE_SIZE, TILE_SIZE), dtype=torch.float32)
+                            pad[: images.shape[0]] = images
+                            pad = pad.to(self.device)
+                            logits = self.model(pixel_values=pad).logits[: images.shape[0]]
+                        else:
+                            logits = self.model(pixel_values=images).logits
 
-        # Extract and process each mask sequentially so only one full-res uint8
-        # copy lives in memory at a time alongside class_map.
-        # Deadwood is a subset of tree cover, so merge deadwood pixels into the
-        # treecover mask before polygonization.
-        deadwood_mask = (class_map == CLASS_DEADWOOD).astype(np.uint8)
-        deadwood_polygons = self._mask_to_filtered_polygons(
-            deadwood_mask, dataset.image_src, src_crs, orig_crs
-        )
-        del deadwood_mask
+                        # Resize logits to tile size then argmax
+                        logits = F.interpolate(logits, size=(TILE_SIZE, TILE_SIZE), mode='bilinear', align_corners=False)
+                        preds = logits.argmax(dim=1, keepdim=True).float()  # (B, 1, H, W)
 
-        treecover_mask = ((class_map == CLASS_TREECOVER) | (class_map == CLASS_DEADWOOD)).astype(np.uint8)
-        treecover_polygons = self._mask_to_filtered_polygons(
-            treecover_mask,
-            dataset.image_src,
-            src_crs,
-            orig_crs,
-            simplification_tolerance=FOREST_COVER_SIMPLIFICATION_TOLERANCE_M,
-            stats_key='forest_cover',
-        )
-        del treecover_mask
+                    for i in range(preds.shape[0]):
+                        pred_tile = crop(
+                            preds[i].cpu(),
+                            top=PADDING,
+                            left=PADDING,
+                            height=TILE_SIZE - (2 * PADDING),
+                            width=TILE_SIZE - (2 * PADDING),
+                        )
 
-        return deadwood_polygons, treecover_polygons
+                        minx = int(cropped_windows['col_off'][i])
+                        maxx = minx + int(cropped_windows['width'][i])
+                        miny = int(cropped_windows['row_off'][i])
+                        maxy = miny + int(cropped_windows['width'][i])
 
-    def _mask_to_filtered_polygons(
+                        diff_minx = max(0, -minx); minx = max(0, minx)
+                        diff_miny = max(0, -miny); miny = max(0, miny)
+                        diff_maxx = max(0, maxx - dataset.width); maxx = min(maxx, dataset.width)
+                        diff_maxy = max(0, maxy - dataset.height); maxy = min(maxy, dataset.height)
+
+                        if maxx <= minx or maxy <= miny:
+                            continue
+
+                        pred_tile = pred_tile[
+                            :,
+                            diff_miny: pred_tile.shape[1] - diff_maxy if diff_maxy else pred_tile.shape[1],
+                            diff_minx: pred_tile.shape[2] - diff_maxx if diff_maxx else pred_tile.shape[2],
+                        ]
+
+                        out_window = RioWindow(col_off=minx, row_off=miny, width=maxx - minx, height=maxy - miny)
+                        class_arr = pred_tile[0].numpy().astype(np.uint8)
+
+                        nodata_tile = vrt_src.read_masks(1, window=out_window)
+                        class_arr[nodata_tile == 0] = CLASS_BACKGROUND
+
+                        dst_class.write(class_arr, 1, window=out_window)
+                        dst_treecover.write((class_arr > 0).astype(np.uint8), 1, window=out_window)
+
+            src_crs = vrt_src.crs
+            vrt_src.close()
+
+            with rasterio.open(input_tif) as src:
+                orig_crs = src.crs
+
+            # Polygonize directly from the temp files — GDAL reads scanline-by-scanline
+            # so no full-res array is materialised. Deadwood is a subset of treecover;
+            # the treecover file stores 1 wherever class != background so they merge
+            # naturally without a union step.
+            with rasterio.open(tmp_class_path) as ds:
+                deadwood_polys = mask_to_polygons_scanline(ds, CLASS_DEADWOOD)
+
+            deadwood_polygons = self._filter_polygons(deadwood_polys, src_crs, orig_crs)
+
+            with rasterio.open(tmp_treecover_path) as ds:
+                treecover_polys = mask_to_polygons_scanline(ds, 1)
+
+            treecover_polygons = self._filter_polygons(
+                treecover_polys,
+                src_crs,
+                orig_crs,
+                simplification_tolerance=FOREST_COVER_SIMPLIFICATION_TOLERANCE_M,
+                stats_key='forest_cover',
+            )
+
+            return deadwood_polygons, treecover_polygons
+
+        finally:
+            for p in (tmp_class_path, tmp_treecover_path):
+                if p and os.path.exists(p):
+                    os.unlink(p)
+
+    def _filter_polygons(
         self,
-        mask,
-        image_src,
+        polygons,
         inference_crs,
         orig_crs,
         simplification_tolerance: float | None = None,
         stats_key: str | None = None,
     ):
-        polygons = mask_to_polygons(mask, image_src)
         if simplification_tolerance is not None:
             points_before = count_polygon_points(polygons)
             polygons = simplify_polygons_preserving_topology(polygons, simplification_tolerance)

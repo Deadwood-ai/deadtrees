@@ -1,4 +1,6 @@
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -6,6 +8,7 @@ import rasterio
 import safetensors.torch
 import segmentation_models_pytorch as smp
 import torch
+from rasterio.windows import Window as RioWindow
 from torch.utils.data import DataLoader
 from torchvision.transforms import transforms
 from torchvision.transforms.functional import crop
@@ -15,7 +18,7 @@ from processor.src.utils.inference_dataset import InferenceDataset
 from processor.src.utils.segmentation import (
 	filter_polygons_by_area,
 	image_reprojector,
-	mask_to_polygons,
+	mask_to_polygons_scanline,
 	reproject_polygons,
 )
 
@@ -101,85 +104,103 @@ class DeadwoodInference:
 			shuffle=False,
 		)
 
-		outimage = np.zeros((dataset.height, dataset.width), dtype=np.float32)
-		for images, cropped_windows in tqdm(inference_loader, desc='inference'):
-			images = images.to(device=self.device, memory_format=torch.channels_last)
-
-			with torch.no_grad():
-				if images.shape[0] < DEADWOOD_BATCH_SIZE:
-					pad = torch.zeros((DEADWOOD_BATCH_SIZE, 3, 1024, 1024), dtype=torch.float32)
-					pad[: images.shape[0]] = images
-					pad = pad.to(device=self.device, memory_format=torch.channels_last)
-					output = self.model(pad)[: images.shape[0]]
-				else:
-					output = self.model(images)
-				output = torch.sigmoid(output)
-
-			for i in range(output.shape[0]):
-				output_tile = crop(
-					output[i].cpu(),
-					top=dataset.padding,
-					left=dataset.padding,
-					height=dataset.tile_size - (2 * dataset.padding),
-					width=dataset.tile_size - (2 * dataset.padding),
-				)
-
-				minx = cropped_windows['col_off'][i]
-				maxx = minx + cropped_windows['width'][i]
-				miny = cropped_windows['row_off'][i]
-				maxy = miny + cropped_windows['width'][i]
-
-				diff_minx = 0
-				if minx < 0:
-					diff_minx = abs(minx)
-					minx = 0
-
-				diff_miny = 0
-				if miny < 0:
-					diff_miny = abs(miny)
-					miny = 0
-
-				diff_maxx = 0
-				if maxx > outimage.shape[1]:
-					diff_maxx = maxx - outimage.shape[1]
-					maxx = outimage.shape[1]
-
-				diff_maxy = 0
-				if maxy > outimage.shape[0]:
-					diff_maxy = maxy - outimage.shape[0]
-					maxy = outimage.shape[0]
-
-				output_tile = output_tile[
-					:,
-					diff_miny : output_tile.shape[1] - diff_maxy,
-					diff_minx : output_tile.shape[2] - diff_maxx,
-				]
-				outimage[miny:maxy, minx:maxx] = output_tile[0].numpy()
-
-		print('Postprocessing mask into polygons and filtering....')
-		# Threshold in-place: reuse the array as uint8 to avoid keeping the
-		# float32 accumulator alive alongside the thresholded copy.
-		outimage = (outimage > DEADWOOD_PROBABILITY_THRESHOLD).astype(np.uint8)
-
+		tmp_path = None
 		try:
-			nodata_mask = vrt_src.dataset_mask()
-		except Exception as e:
-			raise RuntimeError(f'Failed to read dataset mask from VRT: {e}') from e
+			with tempfile.NamedTemporaryFile(suffix='_deadwood.tif', delete=False) as f:
+				tmp_path = f.name
 
-		unique_mask_values = np.unique(nodata_mask)
-		if len(unique_mask_values) <= 2 and (0 in unique_mask_values or 255 in unique_mask_values):
-			# Apply nodata mask in-place to avoid a full-res copy.
-			outimage[nodata_mask == 0] = 0
-		else:
-			print('Non-standard mask detected with values:', unique_mask_values)
-			print('Skipping masking operation to avoid artifacts')
-		del nodata_mask
+			# Write thresholded uint8 predictions tile-by-tile so the float32
+			# probability map and the full binary mask never exist as full-res
+			# arrays in RAM simultaneously.
+			with rasterio.open(
+				tmp_path, 'w',
+				driver='GTiff',
+				height=dataset.height,
+				width=dataset.width,
+				count=1,
+				dtype=np.uint8,
+				crs=vrt_src.crs,
+				transform=vrt_src.transform,
+			) as dst:
+				for images, cropped_windows in tqdm(inference_loader, desc='inference'):
+					images = images.to(device=self.device, memory_format=torch.channels_last)
 
-		polygons = mask_to_polygons(outimage, dataset.image_src)
-		vrt_src.close()
+					with torch.no_grad():
+						if images.shape[0] < DEADWOOD_BATCH_SIZE:
+							pad = torch.zeros((DEADWOOD_BATCH_SIZE, 3, 1024, 1024), dtype=torch.float32)
+							pad[: images.shape[0]] = images
+							pad = pad.to(device=self.device, memory_format=torch.channels_last)
+							output = self.model(pad)[: images.shape[0]]
+						else:
+							output = self.model(images)
+						output = torch.sigmoid(output)
 
-		polygons = filter_polygons_by_area(polygons, DEADWOOD_MINIMUM_POLYGON_AREA)
-		polygons = reproject_polygons(polygons, dataset.image_src.crs, rasterio.open(input_tif).crs)
+					for i in range(output.shape[0]):
+						output_tile = crop(
+							output[i].cpu(),
+							top=dataset.padding,
+							left=dataset.padding,
+							height=dataset.tile_size - (2 * dataset.padding),
+							width=dataset.tile_size - (2 * dataset.padding),
+						)
 
-		print('done')
-		return polygons
+						minx = cropped_windows['col_off'][i]
+						maxx = minx + cropped_windows['width'][i]
+						miny = cropped_windows['row_off'][i]
+						maxy = miny + cropped_windows['width'][i]
+
+						diff_minx = 0
+						if minx < 0:
+							diff_minx = abs(minx)
+							minx = 0
+
+						diff_miny = 0
+						if miny < 0:
+							diff_miny = abs(miny)
+							miny = 0
+
+						diff_maxx = 0
+						if maxx > dataset.width:
+							diff_maxx = maxx - dataset.width
+							maxx = dataset.width
+
+						diff_maxy = 0
+						if maxy > dataset.height:
+							diff_maxy = maxy - dataset.height
+							maxy = dataset.height
+
+						if maxx <= minx or maxy <= miny:
+							continue
+
+						output_tile = output_tile[
+							:,
+							diff_miny : output_tile.shape[1] - diff_maxy if diff_maxy else output_tile.shape[1],
+							diff_minx : output_tile.shape[2] - diff_maxx if diff_maxx else output_tile.shape[2],
+						]
+
+						out_window = RioWindow(col_off=minx, row_off=miny, width=maxx - minx, height=maxy - miny)
+
+						# Threshold per-tile so no float32 accumulator is kept in RAM.
+						binary_tile = (output_tile[0].numpy() > DEADWOOD_PROBABILITY_THRESHOLD).astype(np.uint8)
+
+						nodata_tile = vrt_src.read_masks(1, window=out_window)
+						binary_tile[nodata_tile == 0] = 0
+
+						dst.write(binary_tile, 1, window=out_window)
+
+			print('Postprocessing mask into polygons and filtering....')
+			src_crs = vrt_src.crs
+			vrt_src.close()
+
+			with rasterio.open(tmp_path) as ds:
+				polygons = mask_to_polygons_scanline(ds, 1)
+
+			polygons = filter_polygons_by_area(polygons, DEADWOOD_MINIMUM_POLYGON_AREA)
+			polygons = reproject_polygons(polygons, src_crs, rasterio.open(input_tif).crs)
+
+			print('done')
+			return polygons
+
+		finally:
+			if tmp_path and os.path.exists(tmp_path):
+				os.unlink(tmp_path)
