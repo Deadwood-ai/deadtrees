@@ -54,7 +54,9 @@ describe("PRIWA offline basemap helpers", () => {
     expect(plan.tileCount).toBeGreaterThan(0);
     expect(plan.tileCount).toBe(plan.urls.length);
     expect(
-      plan.urls.some((url) => url.includes("tile.openstreetmap.org")),
+      plan.urls.some(
+        (url) => new URL(url).hostname === "tile.openstreetmap.org",
+      ),
     ).toBe(true);
     expect(plan.extent3857).toEqual([909_750, 6_179_750, 910_750, 6_180_750]);
     expect(plan.areaKm2).toBeGreaterThan(0.4);
