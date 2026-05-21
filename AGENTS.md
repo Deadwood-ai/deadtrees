@@ -44,6 +44,8 @@ the linked docs that match the task.
 - Good example: `fix(frontend): align tree and deadwood cover labels`.
 - PR bodies should be concise and changelog-friendly: what changed, why, who it helps,
   validation done, and any user-visible risk.
+- When referring to a pull request in chat, reviews, status updates, or handoff notes,
+  include the clickable GitHub URL instead of only writing the PR number.
 
 ## Local-Only Access
 
