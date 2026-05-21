@@ -20,8 +20,6 @@ def test_forest_cover_simplification_runs_before_reproject(monkeypatch):
 	events = []
 	original_simplify = combined_inference.simplify_polygons_preserving_topology
 
-	monkeypatch.setattr(combined_inference, 'mask_to_polygons', lambda mask, image_src: [polygon])
-
 	def fake_simplify(polygons, tolerance):
 		events.append('simplify')
 		return original_simplify(polygons, tolerance)
@@ -44,9 +42,8 @@ def test_forest_cover_simplification_runs_before_reproject(monkeypatch):
 	inference = CombinedInference.__new__(CombinedInference)
 	inference.simplification_stats = {}
 
-	result = inference._mask_to_filtered_polygons(
-		mask=None,
-		image_src=object(),
+	result = inference._filter_polygons(
+		polygons=[polygon],
 		inference_crs=inference_crs,
 		orig_crs=orig_crs,
 		simplification_tolerance=0.05,
