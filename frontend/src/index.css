@@ -288,6 +288,10 @@
   justify-content: center;
 }
 
+.priwa-comment-form-item.ant-form-item {
+  margin-bottom: 30px !important;
+}
+
 .priwa-add-point-fab .anticon {
   font-size: 20px;
 }

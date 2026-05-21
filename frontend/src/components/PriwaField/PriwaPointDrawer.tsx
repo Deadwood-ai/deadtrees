@@ -549,6 +549,7 @@ export default function PriwaPointDrawer({
           <section className="mt-3 space-y-2 border-t border-gray-200 pt-3">
             <Typography.Text strong>Optional</Typography.Text>
             <Form.Item
+              className="priwa-comment-form-item"
               label="Kommentar"
               name="kom"
               rules={[{ max: 200, message: "Maximal 200 Zeichen" }]}
