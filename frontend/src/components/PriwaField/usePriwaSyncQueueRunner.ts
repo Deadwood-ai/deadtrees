@@ -98,6 +98,7 @@ export function usePriwaSyncQueueRunner({
           if (syncingMutation.type === "delete") {
             await softDeletePriwaKaeferbaum(
               syncingMutation.pointId,
+              userId,
               syncingMutation.updatedAt,
             );
             onPointDeleted(syncingMutation.pointId);
