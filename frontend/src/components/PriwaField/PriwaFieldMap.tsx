@@ -433,7 +433,7 @@ export default function PriwaFieldMap({
             Basiskarte offline
           </div>
           <div className="text-xs text-gray-500">
-            Speichert den aktuellen Kartenausschnitt für die Offline-Nutzung.
+            Speichert den aktuellen Ausschnitt plus Umgebung.
           </div>
         </div>
         {offlineBasemapArea && (
@@ -452,7 +452,7 @@ export default function PriwaFieldMap({
           disabled={!isOfflineBasemapSupported}
           onClick={() => void handleCacheBasemapArea()}
         >
-          Kartenausschnitt speichern
+          Ausschnitt + Umgebung speichern
         </Button>
         {basemapCacheState.isCaching && (
           <Progress
@@ -473,6 +473,7 @@ export default function PriwaFieldMap({
             className="mt-2"
             size="small"
             icon={<DeleteOutlined />}
+            disabled={basemapCacheState.isCaching}
             onClick={() => void handleClearBasemapArea()}
           >
             Bereich entfernen

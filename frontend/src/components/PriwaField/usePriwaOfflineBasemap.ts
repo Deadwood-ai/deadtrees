@@ -106,20 +106,24 @@ export function usePriwaOfflineBasemap(projectId: string | null | undefined) {
       });
 
       try {
-        const result = await cachePriwaBasemapTiles(plan.urls, (progress) => {
-          setCacheState({
-            isCaching: true,
-            cached: progress.cached,
-            failed: progress.failed,
-            total: progress.total,
-            errorMessage: null,
-          });
-        });
+        const result = await cachePriwaBasemapTiles(
+          projectId,
+          plan.urls,
+          (progress) => {
+            setCacheState({
+              isCaching: true,
+              cached: progress.cached,
+              failed: progress.failed,
+              total: progress.total,
+              errorMessage: null,
+            });
+          },
+        );
 
         const nextArea: IPriwaOfflineBasemapArea = {
           id: `${projectId}:${now}`,
           projectId,
-          name: "Kartenausschnitt",
+          name: "Ausschnitt + Umgebung",
           extent3857,
           centerLonLat: center,
           zoom,
@@ -165,7 +169,7 @@ export function usePriwaOfflineBasemap(projectId: string | null | undefined) {
     if (!projectId) return;
 
     await clearPriwaOfflineBasemapArea(projectId);
-    await clearPriwaBasemapTileCache();
+    await clearPriwaBasemapTileCache(projectId);
     setArea(null);
     setCacheState(initialCacheState);
   }, [projectId]);

@@ -1,15 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  PRIWA_BASEMAP_CACHE,
   buildPriwaBasemapTilePlan,
   cachePriwaBasemapTiles,
   clearPriwaBasemapTileCache,
   createPriwaBasemapTileUrl,
+  getPriwaBasemapCacheName,
   validatePriwaBasemapTilePlan,
 } from "./priwaOfflineBasemap";
 
 describe("PRIWA offline basemap helpers", () => {
+  const projectId = "project-1";
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -20,15 +22,21 @@ describe("PRIWA offline basemap helpers", () => {
       createPriwaBasemapTileUrl({ zoom: 18, row: 90225, col: 137017 }),
     );
 
-    expect(url.searchParams.get("SERVICE")).toBe("WMTS");
-    expect(url.searchParams.get("REQUEST")).toBe("GetTile");
-    expect(url.searchParams.get("LAYER")).toBe("DOP_20_C");
-    expect(url.searchParams.get("TILEMATRIX")).toBe("GoogleMapsCompatible:18");
-    expect(url.searchParams.get("TILEROW")).toBe("90225");
-    expect(url.searchParams.get("TILECOL")).toBe("137017");
+    expect(url.searchParams.get("Service")).toBe("WMTS");
+    expect(url.searchParams.get("Request")).toBe("GetTile");
+    expect(url.searchParams.get("layer")).toBe("DOP_20_C");
+    expect(url.searchParams.get("TileMatrix")).toBe("GoogleMapsCompatible:18");
+    expect(url.searchParams.get("TileRow")).toBe("90225");
+    expect(url.searchParams.get("TileCol")).toBe("137017");
+    expect(url.toString()).toContain(
+      "layer=DOP_20_C&style=default&tilematrixset=GoogleMapsCompatible",
+    );
+    expect(url.toString()).toContain(
+      "TileMatrix=GoogleMapsCompatible%3A18&TileCol=137017&TileRow=90225",
+    );
   });
 
-  it("plans a bounded current-map cache across a small zoom band", () => {
+  it("plans a buffered current-map cache across a small zoom band", () => {
     const plan = buildPriwaBasemapTilePlan(
       [910_000, 6_180_000, 910_500, 6_180_500],
       18,
@@ -38,16 +46,34 @@ describe("PRIWA offline basemap helpers", () => {
     expect(plan.maxZoom).toBe(19);
     expect(plan.tileCount).toBeGreaterThan(0);
     expect(plan.tileCount).toBe(plan.urls.length);
-    expect(plan.areaKm2).toBeCloseTo(0.25);
+    expect(plan.extent3857).toEqual([909_750, 6_179_750, 910_750, 6_180_750]);
+    expect(plan.areaKm2).toBeGreaterThan(0.4);
+    expect(plan.areaKm2).toBeLessThan(0.5);
     expect(() => validatePriwaBasemapTilePlan(plan)).not.toThrow();
   });
 
-  it("rejects oversized basemap packages before fetching tiles", () => {
+  it("counts exact tile-boundary extents without an extra max tile", () => {
+    const halfWorld = 20037508.342789244;
+    const tileSpan = (halfWorld * 2) / 2 ** 18;
+    const minX = -halfWorld + 137_000 * tileSpan;
+    const maxY = halfWorld - 90_000 * tileSpan;
+    const plan = buildPriwaBasemapTilePlan(
+      [minX, maxY - tileSpan, minX + tileSpan, maxY],
+      18,
+      { bufferRatio: 0 },
+    );
+
+    expect(plan.tileCount).toBe(6);
+  });
+
+  it("rejects oversized basemap packages before building tile URLs", () => {
     const plan = buildPriwaBasemapTilePlan(
       [900_000, 6_170_000, 905_000, 6_175_000],
       18,
     );
 
+    expect(plan.tileCount).toBeGreaterThan(0);
+    expect(plan.urls).toEqual([]);
     expect(() => validatePriwaBasemapTilePlan(plan)).toThrow(
       /Ausschnitt ist zu groß|zu viele Basiskarten-Kacheln/,
     );
@@ -70,11 +96,13 @@ describe("PRIWA offline basemap helpers", () => {
       createPriwaBasemapTileUrl({ zoom: 18, row: 1, col: 2 }),
     ];
 
-    await expect(cachePriwaBasemapTiles(urls, progress)).resolves.toEqual({
+    await expect(
+      cachePriwaBasemapTiles(projectId, urls, progress),
+    ).resolves.toEqual({
       cached: 1,
       failed: 1,
     });
-    expect(open).toHaveBeenCalledWith(PRIWA_BASEMAP_CACHE);
+    expect(open).toHaveBeenCalledWith(getPriwaBasemapCacheName(projectId));
     expect(put).toHaveBeenCalledTimes(1);
     expect(progress).toHaveBeenLastCalledWith({
       cached: 1,
@@ -87,8 +115,10 @@ describe("PRIWA offline basemap helpers", () => {
     const cacheDelete = vi.fn().mockResolvedValue(true);
     vi.stubGlobal("caches", { delete: cacheDelete });
 
-    await clearPriwaBasemapTileCache();
+    await clearPriwaBasemapTileCache(projectId);
 
-    expect(cacheDelete).toHaveBeenCalledWith(PRIWA_BASEMAP_CACHE);
+    expect(cacheDelete).toHaveBeenCalledWith(
+      getPriwaBasemapCacheName(projectId),
+    );
   });
 });

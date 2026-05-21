@@ -1,3 +1,6 @@
+import { fromExtent } from "ol/geom/Polygon";
+import { getArea as getGeodesicArea } from "ol/sphere";
+
 import {
   LGL_DOP20_FORMAT,
   LGL_DOP20_LAYER,
@@ -6,11 +9,12 @@ import {
   LGL_DOP20_WMTS_URL,
 } from "./createLglDop20Layer";
 
-export const PRIWA_BASEMAP_CACHE = "deadtrees-priwa-basemap-v1";
+export const PRIWA_BASEMAP_CACHE_PREFIX = "deadtrees-priwa-basemap-v1";
 export const PRIWA_BASEMAP_MIN_ZOOM = 16;
 export const PRIWA_BASEMAP_MAX_ZOOM = 20;
 export const PRIWA_BASEMAP_MAX_TILES = 600;
 export const PRIWA_BASEMAP_MAX_AREA_KM2 = 2;
+export const PRIWA_BASEMAP_EXTENT_BUFFER_RATIO = 0.5;
 
 const WEB_MERCATOR_HALF_WORLD = 20037508.342789244;
 
@@ -38,16 +42,57 @@ export type PriwaBasemapProgressHandler = (
   progress: IPriwaBasemapCacheProgress,
 ) => void;
 
+interface IPriwaBasemapTileRange {
+  minCol: number;
+  maxCol: number;
+  minRow: number;
+  maxRow: number;
+}
+
+interface IPriwaBasemapTilePlanOptions {
+  bufferRatio?: number;
+}
+
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 
 const tileSpanForZoom = (zoom: number) =>
   (WEB_MERCATOR_HALF_WORLD * 2) / 2 ** zoom;
 
+const appendWmtsParams = (url: string, params: Record<string, string>) => {
+  const queryString = Object.entries(params)
+    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+    .join("&");
+
+  return `${url.replace(/[?&]$/, "")}${url.includes("?") ? "&" : "?"}${queryString}`;
+};
+
+const expandExtent = (
+  extent3857: [number, number, number, number],
+  bufferRatio: number,
+): [number, number, number, number] => {
+  const [minX, minY, maxX, maxY] = extent3857;
+  const bufferX = Math.abs(maxX - minX) * bufferRatio;
+  const bufferY = Math.abs(maxY - minY) * bufferRatio;
+
+  return [
+    clamp(minX - bufferX, -WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD),
+    clamp(minY - bufferY, -WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD),
+    clamp(maxX + bufferX, -WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD),
+    clamp(maxY + bufferY, -WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD),
+  ];
+};
+
+const calculateGeodesicAreaKm2 = (
+  extent3857: [number, number, number, number],
+) =>
+  getGeodesicArea(fromExtent(extent3857), { projection: "EPSG:3857" }) /
+  1_000_000;
+
 const tileRangeForExtent = (
   extent3857: [number, number, number, number],
   zoom: number,
-) => {
+): IPriwaBasemapTileRange => {
   const tileSpan = tileSpanForZoom(zoom);
   const [minX, minY, maxX, maxY] = extent3857;
   const maxTile = 2 ** zoom - 1;
@@ -59,7 +104,7 @@ const tileRangeForExtent = (
       maxTile,
     ),
     maxCol: clamp(
-      Math.floor((maxX + WEB_MERCATOR_HALF_WORLD) / tileSpan),
+      Math.ceil((maxX + WEB_MERCATOR_HALF_WORLD) / tileSpan) - 1,
       0,
       maxTile,
     ),
@@ -69,12 +114,18 @@ const tileRangeForExtent = (
       maxTile,
     ),
     maxRow: clamp(
-      Math.floor((WEB_MERCATOR_HALF_WORLD - minY) / tileSpan),
+      Math.ceil((WEB_MERCATOR_HALF_WORLD - minY) / tileSpan) - 1,
       0,
       maxTile,
     ),
   };
 };
+
+const countTilesInRange = (range: IPriwaBasemapTileRange) =>
+  (range.maxCol - range.minCol + 1) * (range.maxRow - range.minRow + 1);
+
+export const getPriwaBasemapCacheName = (projectId: string) =>
+  `${PRIWA_BASEMAP_CACHE_PREFIX}-${encodeURIComponent(projectId)}`;
 
 export const createPriwaBasemapTileUrl = ({
   zoom,
@@ -85,26 +136,32 @@ export const createPriwaBasemapTileUrl = ({
   row: number;
   col: number;
 }) => {
-  const params = new URLSearchParams({
-    SERVICE: "WMTS",
-    REQUEST: "GetTile",
-    VERSION: "1.0.0",
-    LAYER: LGL_DOP20_LAYER,
-    STYLE: LGL_DOP20_STYLE,
-    TILEMATRIXSET: LGL_DOP20_MATRIX_SET,
-    TILEMATRIX: `${LGL_DOP20_MATRIX_SET}:${zoom}`,
-    TILEROW: String(row),
-    TILECOL: String(col),
-    FORMAT: LGL_DOP20_FORMAT,
+  const baseUrl = appendWmtsParams(LGL_DOP20_WMTS_URL, {
+    layer: LGL_DOP20_LAYER,
+    style: LGL_DOP20_STYLE,
+    tilematrixset: LGL_DOP20_MATRIX_SET,
+    Service: "WMTS",
+    Request: "GetTile",
+    Version: "1.0.0",
+    Format: LGL_DOP20_FORMAT,
   });
 
-  return `${LGL_DOP20_WMTS_URL}?${params.toString()}`;
+  return appendWmtsParams(baseUrl, {
+    TileMatrix: `${LGL_DOP20_MATRIX_SET}:${zoom}`,
+    TileCol: String(col),
+    TileRow: String(row),
+  });
 };
 
 export const buildPriwaBasemapTilePlan = (
-  extent3857: [number, number, number, number],
+  viewportExtent3857: [number, number, number, number],
   zoom: number,
+  options: IPriwaBasemapTilePlanOptions = {},
 ): IPriwaBasemapTilePlan => {
+  const extent3857 = expandExtent(
+    viewportExtent3857,
+    options.bufferRatio ?? PRIWA_BASEMAP_EXTENT_BUFFER_RATIO,
+  );
   const roundedZoom = clamp(
     Math.round(zoom),
     PRIWA_BASEMAP_MIN_ZOOM,
@@ -120,26 +177,38 @@ export const buildPriwaBasemapTilePlan = (
     PRIWA_BASEMAP_MIN_ZOOM,
     PRIWA_BASEMAP_MAX_ZOOM,
   );
-  const urls: string[] = [];
+  const ranges: Array<{ zoom: number; range: IPriwaBasemapTileRange }> = [];
+  let tileCount = 0;
 
   for (let tileZoom = minZoom; tileZoom <= maxZoom; tileZoom += 1) {
     const range = tileRangeForExtent(extent3857, tileZoom);
-    for (let row = range.minRow; row <= range.maxRow; row += 1) {
-      for (let col = range.minCol; col <= range.maxCol; col += 1) {
-        urls.push(createPriwaBasemapTileUrl({ zoom: tileZoom, row, col }));
+    ranges.push({ zoom: tileZoom, range });
+    tileCount += countTilesInRange(range);
+  }
+
+  const areaKm2 = calculateGeodesicAreaKm2(extent3857);
+  const urls: string[] = [];
+
+  if (
+    areaKm2 <= PRIWA_BASEMAP_MAX_AREA_KM2 &&
+    tileCount <= PRIWA_BASEMAP_MAX_TILES &&
+    tileCount > 0
+  ) {
+    for (const { zoom: tileZoom, range } of ranges) {
+      for (let row = range.minRow; row <= range.maxRow; row += 1) {
+        for (let col = range.minCol; col <= range.maxCol; col += 1) {
+          urls.push(createPriwaBasemapTileUrl({ zoom: tileZoom, row, col }));
+        }
       }
     }
   }
-
-  const [minX, minY, maxX, maxY] = extent3857;
-  const areaKm2 = Math.abs((maxX - minX) * (maxY - minY)) / 1_000_000;
 
   return {
     extent3857,
     areaKm2,
     minZoom,
     maxZoom,
-    tileCount: urls.length,
+    tileCount,
     urls,
   };
 };
@@ -165,6 +234,7 @@ export const validatePriwaBasemapTilePlan = (plan: IPriwaBasemapTilePlan) => {
 };
 
 export const cachePriwaBasemapTiles = async (
+  projectId: string,
   urls: string[],
   onProgress?: PriwaBasemapProgressHandler,
 ): Promise<IPriwaBasemapCacheResult> => {
@@ -174,7 +244,9 @@ export const cachePriwaBasemapTiles = async (
     );
   }
 
-  const cache = await globalThis.caches.open(PRIWA_BASEMAP_CACHE);
+  const cache = await globalThis.caches.open(
+    getPriwaBasemapCacheName(projectId),
+  );
   let cached = 0;
   let failed = 0;
 
@@ -209,7 +281,7 @@ export const cachePriwaBasemapTiles = async (
   return { cached, failed };
 };
 
-export const clearPriwaBasemapTileCache = async () => {
+export const clearPriwaBasemapTileCache = async (projectId: string) => {
   if (!("caches" in globalThis)) return;
-  await globalThis.caches.delete(PRIWA_BASEMAP_CACHE);
+  await globalThis.caches.delete(getPriwaBasemapCacheName(projectId));
 };

@@ -134,7 +134,7 @@ async function expectOfflineBasemapControl(page: Page) {
   await page.getByRole("button", { name: "Layer auswählen" }).click();
   await expect(page.getByText("Basiskarte offline")).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Kartenausschnitt speichern" }),
+    page.getByRole("button", { name: "Ausschnitt + Umgebung speichern" }),
   ).toBeVisible();
   await page.keyboard.press("Escape");
 }
