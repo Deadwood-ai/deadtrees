@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { supabase } from "../../hooks/useSupabase";
+import { useAuth } from "../../hooks/useAuthProvider";
 import type { IPriwaPoint, PriwaCoordinateSource } from "./types";
 
 type PriwaDbLocationSource = "qr_exact" | "gps_estimated" | "map_estimated";
@@ -156,11 +157,17 @@ export const upsertPriwaKaeferbaum = async (
 
 export const softDeletePriwaKaeferbaum = async (
   pointId: string,
+  userId: string,
   deletedAt = new Date().toISOString(),
 ) => {
   const { error } = await supabase
     .from("priwa_kaeferbaeume")
-    .update({ deleted_at: deletedAt })
+    .update({
+      deleted_at: deletedAt,
+      deleted_by: userId,
+      updated_by: userId,
+      client_updated_at: deletedAt,
+    })
     .eq("id", pointId);
 
   if (error) throw error;
@@ -168,6 +175,8 @@ export const softDeletePriwaKaeferbaum = async (
 
 export function usePriwaKaeferbaeume(projectId: string | null | undefined) {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
 
   const pointsQuery = useQuery({
     queryKey: priwaPointsQueryKey(projectId),
@@ -203,7 +212,8 @@ export function usePriwaKaeferbaeume(projectId: string | null | undefined) {
 
   const deletePoint = useMutation({
     mutationFn: async (pointId: string) => {
-      await softDeletePriwaKaeferbaum(pointId);
+      if (!userId) throw new Error("PRIWA user session is required.");
+      await softDeletePriwaKaeferbaum(pointId, userId);
     },
     onSuccess: invalidatePoints,
   });
