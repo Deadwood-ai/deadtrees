@@ -157,8 +157,6 @@ Known production gotchas:
   follow these repo rules instead: open normal PRs and use Conventional Commit titles.
 - Use area labels such as `frontend`, `api`, `database`, `processing`, `ci`, or
   `docs` where available for release-note grouping.
-- When referencing a pull request in chat, reviews, status updates, or handoff
-  notes, include the clickable GitHub URL rather than only the PR number.
 
 ## Communication
 
