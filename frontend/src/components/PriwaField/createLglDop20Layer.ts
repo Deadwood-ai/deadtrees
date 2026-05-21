@@ -4,9 +4,13 @@ import WMTS from "ol/source/WMTS";
 import WMTSTileGrid from "ol/tilegrid/WMTS";
 import { getTopLeft, getWidth } from "ol/extent";
 
-const LGL_DOP20_WMTS_URL =
+export const LGL_DOP20_WMTS_URL =
   "https://owsproxy.lgl-bw.de/owsproxy/ows/WMTS_LGL-BW_ATKIS_DOP_20_C";
-const LGL_DOP20_ATTRIBUTION = "Datengrundlage: LGL, www.lgl-bw.de";
+export const LGL_DOP20_LAYER = "DOP_20_C";
+export const LGL_DOP20_MATRIX_SET = "GoogleMapsCompatible";
+export const LGL_DOP20_FORMAT = "image/jpeg";
+export const LGL_DOP20_STYLE = "default";
+export const LGL_DOP20_ATTRIBUTION = "Datengrundlage: LGL, www.lgl-bw.de";
 
 export const createLglDop20Layer = () => {
   const projection = getProjection("EPSG:3857");
@@ -28,10 +32,10 @@ export const createLglDop20Layer = () => {
     preload: 1,
     source: new WMTS({
       url: LGL_DOP20_WMTS_URL,
-      layer: "DOP_20_C",
-      matrixSet: "GoogleMapsCompatible",
-      format: "image/jpeg",
-      style: "default",
+      layer: LGL_DOP20_LAYER,
+      matrixSet: LGL_DOP20_MATRIX_SET,
+      format: LGL_DOP20_FORMAT,
+      style: LGL_DOP20_STYLE,
       projection,
       tileGrid: new WMTSTileGrid({
         origin: getTopLeft(projectionExtent),

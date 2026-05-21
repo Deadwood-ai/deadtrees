@@ -63,6 +63,7 @@ test.describe("PRIWA local field write flows", () => {
   }) => {
     await signInFieldUser(page);
     await expect(page.getByTestId("priwa-field-map")).toBeVisible();
+    await expectOfflineBasemapControl(page);
 
     await context.setOffline(true);
     await waitForBrowserOnlineState(page, false);
@@ -102,11 +103,40 @@ async function createMapEstimatedPoint(page: Page, pointBaumnr: string) {
   await page.getByRole("button", { name: "Auf Karte setzen" }).click();
   await page.getByRole("button", { name: "Punkt übernehmen" }).click();
   await expect(page.getByText("Position gesetzt")).toBeVisible();
+  await expectCommentCounterClearOfSaveButton(page);
 
   await page.getByText("Baum", { exact: true }).click();
   await page.getByLabel("Baumnr").fill(pointBaumnr);
   await page.getByRole("button", { name: "Schnellspeichern" }).click();
   await expect(page.getByText("Käferbaum gespeichert")).toBeVisible();
+}
+
+async function expectCommentCounterClearOfSaveButton(page: Page) {
+  await page.getByLabel("Kommentar").scrollIntoViewIfNeeded();
+
+  const counter = page.locator(
+    ".priwa-comment-form-item .ant-input-data-count",
+  );
+  const saveButton = page.getByRole("button", { name: "Schnellspeichern" });
+
+  await expect(counter).toBeVisible();
+  await expect(saveButton).toBeVisible();
+
+  const counterBox = await counter.boundingBox();
+  const saveButtonBox = await saveButton.boundingBox();
+
+  expect(counterBox).not.toBeNull();
+  expect(saveButtonBox).not.toBeNull();
+  expect(counterBox!.y + counterBox!.height).toBeLessThan(saveButtonBox!.y);
+}
+
+async function expectOfflineBasemapControl(page: Page) {
+  await page.getByRole("button", { name: "Layer auswählen" }).click();
+  await expect(page.getByText("Basiskarte offline")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Ausschnitt + Umgebung speichern" }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
 }
 
 async function editFirstPointBaumnr(page: Page, pointBaumnr: string) {

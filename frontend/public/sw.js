@@ -1,5 +1,9 @@
 const CACHE_VERSION = "priwa-app-shell-v1";
 const APP_SHELL_CACHE = `deadtrees-${CACHE_VERSION}`;
+const BASEMAP_CACHE_PREFIX = "deadtrees-priwa-basemap-v1";
+const VIEWED_BASEMAP_CACHE = `${BASEMAP_CACHE_PREFIX}-viewed`;
+const LGL_BASEMAP_URL_PREFIX =
+  "https://owsproxy.lgl-bw.de/owsproxy/ows/WMTS_LGL-BW_ATKIS_DOP_20_C";
 const APP_SHELL_URLS = [
   "/",
   "/priwa-field",
@@ -14,9 +18,7 @@ self.addEventListener("install", (event) => {
       .open(APP_SHELL_CACHE)
       .then((cache) =>
         cache.addAll(
-          APP_SHELL_URLS.map(
-            (url) => new Request(url, { cache: "reload" }),
-          ),
+          APP_SHELL_URLS.map((url) => new Request(url, { cache: "reload" })),
         ),
       )
       .then(() => self.skipWaiting()),
@@ -31,7 +33,11 @@ self.addEventListener("activate", (event) => {
         Promise.all(
           cacheNames
             .filter((cacheName) => cacheName.startsWith("deadtrees-priwa-"))
-            .filter((cacheName) => cacheName !== APP_SHELL_CACHE)
+            .filter(
+              (cacheName) =>
+                cacheName !== APP_SHELL_CACHE &&
+                !cacheName.startsWith(BASEMAP_CACHE_PREFIX),
+            )
             .map((cacheName) => caches.delete(cacheName)),
         ),
       )
@@ -81,11 +87,145 @@ const handleSameOriginAsset = async (request) => {
   return cachedResponse || networkResponsePromise;
 };
 
+const isLglBasemapTileRequest = (requestUrl) =>
+  requestUrl.href.startsWith(LGL_BASEMAP_URL_PREFIX);
+
+const getSearchParamCaseInsensitive = (searchParams, key) => {
+  const targetKey = key.toLowerCase();
+  for (const [candidateKey, value] of searchParams.entries()) {
+    if (candidateKey.toLowerCase() === targetKey) {
+      return value;
+    }
+  }
+
+  return null;
+};
+
+const appendWmtsParams = (url, params) => {
+  const queryString = Object.entries(params)
+    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+    .join("&");
+
+  return `${url.replace(/[?&]$/, "")}${url.includes("?") ? "&" : "?"}${queryString}`;
+};
+
+const canonicalizeLglBasemapRequest = (request) => {
+  const url = new URL(request.url);
+  const tileMatrix = getSearchParamCaseInsensitive(
+    url.searchParams,
+    "TileMatrix",
+  );
+  const tileCol = getSearchParamCaseInsensitive(url.searchParams, "TileCol");
+  const tileRow = getSearchParamCaseInsensitive(url.searchParams, "TileRow");
+
+  if (!tileMatrix || !tileCol || !tileRow) {
+    return request;
+  }
+
+  const baseUrl = appendWmtsParams(LGL_BASEMAP_URL_PREFIX, {
+    layer: "DOP_20_C",
+    style: "default",
+    tilematrixset: "GoogleMapsCompatible",
+    Service: "WMTS",
+    Request: "GetTile",
+    Version: "1.0.0",
+    Format: "image/jpeg",
+  });
+
+  return new Request(
+    appendWmtsParams(baseUrl, {
+      TileMatrix: tileMatrix,
+      TileCol: tileCol,
+      TileRow: tileRow,
+    }),
+  );
+};
+
+const cacheViewedBasemapResponse = async (request, response) => {
+  if (!response || (!response.ok && response.type !== "opaque")) {
+    return response;
+  }
+
+  const cache = await caches.open(VIEWED_BASEMAP_CACHE);
+  await cache.put(request, response.clone()).catch(() => undefined);
+  return response;
+};
+
+const createOfflineTileResponse = () =>
+  new Response("", {
+    status: 503,
+    statusText: "Offline",
+  });
+
+const isExplicitBasemapCacheName = (cacheName) =>
+  cacheName.startsWith(BASEMAP_CACHE_PREFIX) &&
+  cacheName !== VIEWED_BASEMAP_CACHE;
+
+const matchExplicitBasemapPackage = async (requests) => {
+  const cacheNames = await caches.keys();
+
+  for (const cacheName of cacheNames) {
+    if (!isExplicitBasemapCacheName(cacheName)) {
+      continue;
+    }
+
+    const cache = await caches.open(cacheName);
+    for (const request of requests) {
+      const response = await cache.match(request, { ignoreVary: true });
+      if (response) {
+        return response;
+      }
+    }
+  }
+
+  return null;
+};
+
+const handleBasemapTile = async (event) => {
+  const { request } = event;
+  const canonicalRequest = canonicalizeLglBasemapRequest(request);
+
+  if (self.navigator && self.navigator.onLine === false) {
+    return (
+      (await matchExplicitBasemapPackage([canonicalRequest, request])) ||
+      createOfflineTileResponse()
+    );
+  }
+
+  const cachedResponse =
+    (await caches.match(canonicalRequest, { ignoreVary: true })) ||
+    (await caches.match(request, { ignoreVary: true }));
+
+  const networkResponsePromise = fetch(request)
+    .then((response) => cacheViewedBasemapResponse(canonicalRequest, response))
+    .catch(
+      async () =>
+        (await matchExplicitBasemapPackage([canonicalRequest, request])) ||
+        createOfflineTileResponse(),
+    );
+
+  if (cachedResponse) {
+    event.waitUntil(networkResponsePromise);
+    return cachedResponse;
+  }
+
+  return networkResponsePromise;
+};
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   const requestUrl = new URL(request.url);
 
-  if (request.method !== "GET" || requestUrl.origin !== self.location.origin) {
+  if (request.method !== "GET") {
+    return;
+  }
+
+  if (isLglBasemapTileRequest(requestUrl)) {
+    event.respondWith(handleBasemapTile(event));
+    return;
+  }
+
+  if (requestUrl.origin !== self.location.origin) {
     return;
   }
 

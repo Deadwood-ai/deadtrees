@@ -1,6 +1,7 @@
 import {
   Alert,
   Button,
+  Progress,
   FloatButton,
   Popover,
   Switch,
@@ -10,6 +11,8 @@ import {
 } from "antd";
 import {
   AimOutlined,
+  DeleteOutlined,
+  DownloadOutlined,
   EnvironmentOutlined,
   PlusOutlined,
   SlidersOutlined,
@@ -29,6 +32,10 @@ import type { PointerEvent } from "react";
 import { createStandardMapControls } from "../../utils/basemaps";
 import { useUserLocationLayer } from "../../hooks/useUserLocationLayer";
 import { createLglDop20Layer } from "./createLglDop20Layer";
+import {
+  createPriwaOfflineAreaFeature,
+  createPriwaOfflineAreaLayer,
+} from "./createPriwaOfflineAreaLayer";
 import { createPriwaCogLayer } from "./createPriwaCogLayer";
 import {
   createPriwaPointFeature,
@@ -39,6 +46,7 @@ import {
 import PriwaPointDrawer from "./PriwaPointDrawer";
 import PriwaPointListPanel from "./PriwaPointListPanel";
 import PriwaOfflineStatus from "./PriwaOfflineStatus";
+import { usePriwaOfflineBasemap } from "./usePriwaOfflineBasemap";
 import type { IPriwaSyncSummary } from "./priwaOfflineSync";
 import type {
   IPriwaCoordinate,
@@ -50,6 +58,7 @@ const FIELD_CENTER: [number, number] = [8.18013, 48.45596];
 
 interface PriwaFieldMapProps {
   points: IPriwaPoint[];
+  projectId: string;
   isLoadingPoints?: boolean;
   isSavingPoint?: boolean;
   projectName: string;
@@ -65,6 +74,7 @@ interface PriwaFieldMapProps {
 
 export default function PriwaFieldMap({
   points,
+  projectId,
   isLoadingPoints = false,
   isSavingPoint = false,
   projectName,
@@ -87,6 +97,9 @@ export default function PriwaFieldMap({
   const previewLayerRef = useRef<ReturnType<
     typeof createPriwaPreviewLayer
   > | null>(null);
+  const offlineAreaLayerRef = useRef<ReturnType<
+    typeof createPriwaOfflineAreaLayer
+  > | null>(null);
   const cogLayerRef = useRef<TileLayerWebGL | null>(null);
   const [isDrawerOpen, setDrawerOpen] = useState(false);
   const [isCogVisible, setCogVisible] = useState(true);
@@ -104,6 +117,13 @@ export default function PriwaFieldMap({
     locateUser,
     stop: stopUserLocation,
   } = userLocation;
+  const {
+    area: offlineBasemapArea,
+    cacheState: basemapCacheState,
+    cacheCurrentMapArea,
+    clearArea: clearOfflineBasemapArea,
+    isSupported: isOfflineBasemapSupported,
+  } = usePriwaOfflineBasemap(projectId);
 
   const openPointForEditing = useCallback((point: IPriwaPoint) => {
     setPointListOpen(false);
@@ -127,14 +147,22 @@ export default function PriwaFieldMap({
     if (!containerRef.current || mapRef.current) return;
 
     const dopLayer = createLglDop20Layer();
+    const offlineAreaLayer = createPriwaOfflineAreaLayer();
     const pointLayer = createPriwaPointLayer([]);
     const previewLayer = createPriwaPreviewLayer();
+    offlineAreaLayerRef.current = offlineAreaLayer;
     pointLayerRef.current = pointLayer;
     previewLayerRef.current = previewLayer;
 
     const map = new Map({
       target: containerRef.current,
-      layers: [dopLayer, pointLayer, previewLayer, userLocationLayer],
+      layers: [
+        dopLayer,
+        offlineAreaLayer,
+        pointLayer,
+        previewLayer,
+        userLocationLayer,
+      ],
       view: new View({
         center: fromLonLat(FIELD_CENTER),
         zoom: 19,
@@ -178,6 +206,7 @@ export default function PriwaFieldMap({
       unByKey(clickKey);
       map.setTarget(undefined);
       mapRef.current = null;
+      offlineAreaLayerRef.current = null;
       pointLayerRef.current = null;
       previewLayerRef.current = null;
       cogLayerRef.current = null;
@@ -193,6 +222,18 @@ export default function PriwaFieldMap({
       source.addFeature(createPriwaPointFeature(point)),
     );
   }, [points]);
+
+  useEffect(() => {
+    const source = offlineAreaLayerRef.current?.getSource();
+    if (!source) return;
+
+    source.clear();
+    if (offlineBasemapArea) {
+      source.addFeature(
+        createPriwaOfflineAreaFeature(offlineBasemapArea.extent3857),
+      );
+    }
+  }, [offlineBasemapArea]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -332,6 +373,34 @@ export default function PriwaFieldMap({
     [onDeletePoint],
   );
   const hasPendingSync = (syncSummary?.total ?? 0) > 0;
+  const basemapCachePercent =
+    basemapCacheState.total > 0
+      ? Math.round(
+          ((basemapCacheState.cached + basemapCacheState.failed) /
+            basemapCacheState.total) *
+            100,
+        )
+      : 0;
+
+  const handleCacheBasemapArea = useCallback(async () => {
+    try {
+      const area = await cacheCurrentMapArea(mapRef.current);
+      message.success(
+        `Basiskarte offline gespeichert (${area.cachedTileCount}/${area.tileCount} Kacheln)`,
+      );
+    } catch (error) {
+      message.error(
+        error instanceof Error
+          ? error.message
+          : "Basiskarte konnte nicht offline gespeichert werden.",
+      );
+    }
+  }, [cacheCurrentMapArea]);
+
+  const handleClearBasemapArea = useCallback(async () => {
+    await clearOfflineBasemapArea();
+    message.success("Offline-Basiskartenbereich entfernt");
+  }, [clearOfflineBasemapArea]);
 
   const layerPanel = (
     <div className="w-64 space-y-3">
@@ -357,6 +426,65 @@ export default function PriwaFieldMap({
           disabled={!cogPath}
           onChange={setCogVisible}
         />
+      </div>
+      <div className="border-t border-slate-200 pt-3">
+        <div className="mb-2">
+          <div className="text-sm font-medium text-gray-900">
+            Basiskarte offline
+          </div>
+          <div className="text-xs text-gray-500">
+            Speichert den aktuellen Ausschnitt plus Umgebung. Online geladene
+            Basiskarten-Kacheln bleiben zusätzlich offline verfügbar.
+          </div>
+        </div>
+        {offlineBasemapArea && (
+          <div className="mb-2 rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-xs text-emerald-900">
+            {offlineBasemapArea.cachedTileCount} Kacheln · Zoom{" "}
+            {offlineBasemapArea.minZoom}-{offlineBasemapArea.maxZoom} ·{" "}
+            {offlineBasemapArea.areaKm2.toFixed(2)} km²
+          </div>
+        )}
+        <Button
+          block
+          size="small"
+          type={offlineBasemapArea ? "default" : "primary"}
+          icon={<DownloadOutlined />}
+          loading={basemapCacheState.isCaching}
+          disabled={!isOfflineBasemapSupported}
+          onClick={() => void handleCacheBasemapArea()}
+        >
+          Ausschnitt + Umgebung speichern
+        </Button>
+        {basemapCacheState.isCaching && (
+          <Progress
+            className="mt-2"
+            percent={basemapCachePercent}
+            size="small"
+            status={basemapCacheState.failed > 0 ? "exception" : "active"}
+          />
+        )}
+        {basemapCacheState.errorMessage && (
+          <div className="mt-1 text-xs text-red-600">
+            {basemapCacheState.errorMessage}
+          </div>
+        )}
+        {offlineBasemapArea && (
+          <Button
+            block
+            className="mt-2"
+            size="small"
+            icon={<DeleteOutlined />}
+            disabled={basemapCacheState.isCaching}
+            onClick={() => void handleClearBasemapArea()}
+          >
+            Bereich entfernen
+          </Button>
+        )}
+        {!isOfflineBasemapSupported && (
+          <div className="mt-1 text-xs text-amber-700">
+            Dieser Browser unterstützt den Offline-Kartenspeicher nicht.
+          </div>
+        )}
       </div>
       <div className="border-t border-slate-200 pt-3">
         <Button
