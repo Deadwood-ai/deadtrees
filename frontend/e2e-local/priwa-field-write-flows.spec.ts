@@ -132,6 +132,10 @@ async function expectCommentCounterClearOfSaveButton(page: Page) {
 
 async function expectOfflineBasemapControl(page: Page) {
   await page.getByRole("button", { name: "Layer auswählen" }).click();
+  await expect(page.getByText("Kartenbasis")).toBeVisible();
+  await expect(page.getByText("Luftbild", { exact: true })).toBeVisible();
+  await page.getByText("OSM", { exact: true }).click();
+  await expect(page.locator(".ol-layer").first()).toBeVisible();
   await expect(page.getByText("Basiskarte offline")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Ausschnitt + Umgebung speichern" }),

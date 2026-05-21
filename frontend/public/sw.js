@@ -4,6 +4,7 @@ const BASEMAP_CACHE_PREFIX = "deadtrees-priwa-basemap-v1";
 const VIEWED_BASEMAP_CACHE = `${BASEMAP_CACHE_PREFIX}-viewed`;
 const LGL_BASEMAP_URL_PREFIX =
   "https://owsproxy.lgl-bw.de/owsproxy/ows/WMTS_LGL-BW_ATKIS_DOP_20_C";
+const OSM_TILE_URL_PREFIX = "https://tile.openstreetmap.org";
 const APP_SHELL_URLS = [
   "/",
   "/priwa-field",
@@ -90,6 +91,12 @@ const handleSameOriginAsset = async (request) => {
 const isLglBasemapTileRequest = (requestUrl) =>
   requestUrl.href.startsWith(LGL_BASEMAP_URL_PREFIX);
 
+const isOsmTileRequest = (requestUrl) =>
+  requestUrl.href.startsWith(`${OSM_TILE_URL_PREFIX}/`);
+
+const isBasemapTileRequest = (requestUrl) =>
+  isLglBasemapTileRequest(requestUrl) || isOsmTileRequest(requestUrl);
+
 const getSearchParamCaseInsensitive = (searchParams, key) => {
   const targetKey = key.toLowerCase();
   for (const [candidateKey, value] of searchParams.entries()) {
@@ -141,6 +148,31 @@ const canonicalizeLglBasemapRequest = (request) => {
   );
 };
 
+const canonicalizeOsmTileRequest = (request) => {
+  const url = new URL(request.url);
+  if (!isOsmTileRequest(url)) {
+    return request;
+  }
+
+  return new Request(
+    `${OSM_TILE_URL_PREFIX}${url.pathname.replace(/\/+/g, "/")}`,
+  );
+};
+
+const canonicalizeBasemapRequest = (request) => {
+  const url = new URL(request.url);
+
+  if (isLglBasemapTileRequest(url)) {
+    return canonicalizeLglBasemapRequest(request);
+  }
+
+  if (isOsmTileRequest(url)) {
+    return canonicalizeOsmTileRequest(request);
+  }
+
+  return request;
+};
+
 const cacheViewedBasemapResponse = async (request, response) => {
   if (!response || (!response.ok && response.type !== "opaque")) {
     return response;
@@ -183,7 +215,7 @@ const matchExplicitBasemapPackage = async (requests) => {
 
 const handleBasemapTile = async (event) => {
   const { request } = event;
-  const canonicalRequest = canonicalizeLglBasemapRequest(request);
+  const canonicalRequest = canonicalizeBasemapRequest(request);
 
   if (self.navigator && self.navigator.onLine === false) {
     return (
@@ -220,7 +252,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (isLglBasemapTileRequest(requestUrl)) {
+  if (isBasemapTileRequest(requestUrl)) {
     event.respondWith(handleBasemapTile(event));
     return;
   }
