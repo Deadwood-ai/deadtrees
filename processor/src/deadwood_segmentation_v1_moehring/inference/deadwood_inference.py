@@ -157,6 +157,8 @@ class DeadwoodInference:
 				outimage[miny:maxy, minx:maxx] = output_tile[0].numpy()
 
 		print('Postprocessing mask into polygons and filtering....')
+		# Threshold in-place: reuse the array as uint8 to avoid keeping the
+		# float32 accumulator alive alongside the thresholded copy.
 		outimage = (outimage > DEADWOOD_PROBABILITY_THRESHOLD).astype(np.uint8)
 
 		try:
@@ -166,10 +168,12 @@ class DeadwoodInference:
 
 		unique_mask_values = np.unique(nodata_mask)
 		if len(unique_mask_values) <= 2 and (0 in unique_mask_values or 255 in unique_mask_values):
-			outimage = outimage * (nodata_mask / 255).astype(np.uint8)
+			# Apply nodata mask in-place to avoid a full-res copy.
+			outimage[nodata_mask == 0] = 0
 		else:
 			print('Non-standard mask detected with values:', unique_mask_values)
 			print('Skipping masking operation to avoid artifacts')
+		del nodata_mask
 
 		polygons = mask_to_polygons(outimage, dataset.image_src)
 		vrt_src.close()

@@ -165,20 +165,14 @@ class CombinedInference:
                 ]
                 class_map[miny:maxy, minx:maxx] = pred_tile[0].numpy().astype(np.int8)
 
-        # Apply nodata mask
+        # Apply nodata mask in-place to avoid a full-res copy.
         try:
             nodata_mask = vrt_src.dataset_mask()
             if set(np.unique(nodata_mask)).issubset({0, 255}):
-                valid = (nodata_mask / 255).astype(np.uint8)
-                class_map = (class_map * valid).astype(np.int8)
+                class_map[nodata_mask == 0] = 0
+            del nodata_mask
         except Exception:
             pass
-
-        # Extract binary masks per class.
-        # Deadwood is a subset of tree cover, so merge deadwood pixels into the
-        # treecover mask before polygonization.
-        deadwood_mask = (class_map == CLASS_DEADWOOD).astype(np.uint8)
-        treecover_mask = ((class_map == CLASS_TREECOVER) | (class_map == CLASS_DEADWOOD)).astype(np.uint8)
 
         src_crs = vrt_src.crs
         vrt_src.close()
@@ -186,9 +180,17 @@ class CombinedInference:
         with rasterio.open(input_tif) as src:
             orig_crs = src.crs
 
+        # Extract and process each mask sequentially so only one full-res uint8
+        # copy lives in memory at a time alongside class_map.
+        # Deadwood is a subset of tree cover, so merge deadwood pixels into the
+        # treecover mask before polygonization.
+        deadwood_mask = (class_map == CLASS_DEADWOOD).astype(np.uint8)
         deadwood_polygons = self._mask_to_filtered_polygons(
             deadwood_mask, dataset.image_src, src_crs, orig_crs
         )
+        del deadwood_mask
+
+        treecover_mask = ((class_map == CLASS_TREECOVER) | (class_map == CLASS_DEADWOOD)).astype(np.uint8)
         treecover_polygons = self._mask_to_filtered_polygons(
             treecover_mask,
             dataset.image_src,
@@ -197,6 +199,7 @@ class CombinedInference:
             simplification_tolerance=FOREST_COVER_SIMPLIFICATION_TOLERANCE_M,
             stats_key='forest_cover',
         )
+        del treecover_mask
 
         return deadwood_polygons, treecover_polygons
 
