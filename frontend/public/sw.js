@@ -1,6 +1,7 @@
 const CACHE_VERSION = "priwa-app-shell-v1";
 const APP_SHELL_CACHE = `deadtrees-${CACHE_VERSION}`;
 const BASEMAP_CACHE_PREFIX = "deadtrees-priwa-basemap-v1";
+const VIEWED_BASEMAP_CACHE = `${BASEMAP_CACHE_PREFIX}-viewed`;
 const LGL_BASEMAP_URL_PREFIX =
   "https://owsproxy.lgl-bw.de/owsproxy/ows/WMTS_LGL-BW_ATKIS_DOP_20_C";
 const APP_SHELL_URLS = [
@@ -140,23 +141,40 @@ const canonicalizeLglBasemapRequest = (request) => {
   );
 };
 
-const handleBasemapTile = async (request) => {
-  try {
-    return await fetch(request);
-  } catch {
-    const canonicalRequest = canonicalizeLglBasemapRequest(request);
-    const cachedResponse =
-      (await caches.match(canonicalRequest, { ignoreVary: true })) ||
-      (await caches.match(request, { ignoreVary: true }));
-
-    return (
-      cachedResponse ||
-      new Response("", {
-        status: 503,
-        statusText: "Offline",
-      })
-    );
+const cacheViewedBasemapResponse = async (request, response) => {
+  if (!response || (!response.ok && response.type !== "opaque")) {
+    return response;
   }
+
+  const cache = await caches.open(VIEWED_BASEMAP_CACHE);
+  await cache.put(request, response.clone()).catch(() => undefined);
+  return response;
+};
+
+const handleBasemapTile = async (event) => {
+  const { request } = event;
+  const canonicalRequest = canonicalizeLglBasemapRequest(request);
+  const cachedResponse =
+    (await caches.match(canonicalRequest, { ignoreVary: true })) ||
+    (await caches.match(request, { ignoreVary: true }));
+
+  const networkResponsePromise = fetch(request)
+    .then((response) => cacheViewedBasemapResponse(canonicalRequest, response))
+    .catch(
+      () =>
+        cachedResponse ||
+        new Response("", {
+          status: 503,
+          statusText: "Offline",
+        }),
+    );
+
+  if (cachedResponse) {
+    event.waitUntil(networkResponsePromise);
+    return cachedResponse;
+  }
+
+  return networkResponsePromise;
 };
 
 self.addEventListener("fetch", (event) => {
@@ -168,7 +186,7 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (isLglBasemapTileRequest(requestUrl)) {
-    event.respondWith(handleBasemapTile(request));
+    event.respondWith(handleBasemapTile(event));
     return;
   }
 

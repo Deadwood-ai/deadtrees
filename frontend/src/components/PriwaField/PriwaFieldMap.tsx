@@ -433,7 +433,8 @@ export default function PriwaFieldMap({
             Basiskarte offline
           </div>
           <div className="text-xs text-gray-500">
-            Speichert den aktuellen Ausschnitt plus Umgebung.
+            Speichert den aktuellen Ausschnitt plus Umgebung. Online geladene
+            Basiskarten-Kacheln bleiben zusätzlich offline verfügbar.
           </div>
         </div>
         {offlineBasemapArea && (
