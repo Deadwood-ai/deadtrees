@@ -18,6 +18,7 @@
     "test:e2e:local:audit:write": "bash ./scripts/run-local-auditor-write-e2e.sh",
     "test:e2e:local": "playwright test --config playwright.local.config.ts",
     "test:e2e:local:write": "bash ./scripts/run-local-write-e2e.sh",
+    "test:e2e:local:priwa:write": "bash ./scripts/run-local-priwa-write-e2e.sh",
     "test:watch": "vitest"
   },
   "dependencies": {
