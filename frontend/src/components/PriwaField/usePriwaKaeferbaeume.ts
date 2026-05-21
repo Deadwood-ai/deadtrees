@@ -135,6 +135,7 @@ export const fetchPriwaKaeferbaeume = async (projectId: string) => {
       "id, project_id, geom, location_source, is_exact_location, baumnr, fund, baumart, bm, bohrloch, harz, nadel, rinde, kv, name, datum, kom, raw_qr_value, created_at, updated_at, client_updated_at",
     )
     .eq("project_id", projectId)
+    .is("deleted_at", null)
     .order("updated_at", { ascending: false });
 
   if (error) throw error;

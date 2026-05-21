@@ -343,9 +343,7 @@ export default function PriwaFieldMap({
       </div>
       <div className="flex items-center justify-between gap-4">
         <div>
-          <div className="text-sm font-medium text-gray-900">
-            Drohnenlayer
-          </div>
+          <div className="text-sm font-medium text-gray-900">Drohnenlayer</div>
           <div className="text-xs text-gray-500">
             {isCogLoading
               ? "Lade Drohnenlayer..."
@@ -376,6 +374,7 @@ export default function PriwaFieldMap({
 
   return (
     <div
+      data-testid="priwa-field-map"
       className="relative h-full min-h-[100dvh] w-full overflow-hidden bg-neutral-950"
       onPointerDownCapture={requestDeferredOrientationPermission}
     >
@@ -440,7 +439,8 @@ export default function PriwaFieldMap({
               onClick={openNewPointDrawer}
               aria-label="Punkt aufnehmen"
               style={{
-                right: "max(20px, calc(env(safe-area-inset-right, 0px) + 20px))",
+                right:
+                  "max(20px, calc(env(safe-area-inset-right, 0px) + 20px))",
                 bottom:
                   "max(20px, calc(env(safe-area-inset-bottom, 0px) + 20px))",
               }}
