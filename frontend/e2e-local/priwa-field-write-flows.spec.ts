@@ -146,7 +146,11 @@ async function expectOfflineBasemapControl(page: Page) {
   await expect(page.getByText("Luftbild", { exact: true })).toBeVisible();
   await page.getByText("Karte", { exact: true }).click();
   await expect(page.locator(".ol-layer").first()).toBeVisible();
-  await expect(page.getByText("Basiskarte offline")).toBeVisible();
+  await expect(page.getByText("Offline-Karten")).toBeHidden();
+  await page.keyboard.press("Escape");
+
+  await page.getByRole("button", { name: "Offline-Karten speichern" }).click();
+  await expect(page.getByText("Offline-Karten")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Ausschnitt + Umgebung speichern" }),
   ).toBeVisible();

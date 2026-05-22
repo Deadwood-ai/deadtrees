@@ -16,8 +16,6 @@ import {
   DownloadOutlined,
   EnvironmentOutlined,
   PlusOutlined,
-  SlidersOutlined,
-  SyncOutlined,
   UnorderedListOutlined,
 } from "@ant-design/icons";
 import "ol/ol.css";
@@ -58,6 +56,28 @@ import type {
 
 const FIELD_CENTER: [number, number] = [8.18013, 48.45596];
 type PriwaBaseLayer = "aerial" | "topographic";
+
+function MapLayersIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      focusable="false"
+      viewBox="0 0 24 24"
+      width="1em"
+      height="1em"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.8}
+    >
+      <path d="M9 18.5 3.5 16V5.5L9 8v10.5Z" />
+      <path d="m9 8 6-2.5 5.5 2.5v10.5L15 16l-6 2.5" />
+      <path d="M15 5.5V16" />
+      <path d="M6.2 10.2 9 11.5l3-1.25 3 1.25 2.8-1.2" opacity={0.55} />
+    </svg>
+  );
+}
 
 interface PriwaFieldMapProps {
   points: IPriwaPoint[];
@@ -393,7 +413,6 @@ export default function PriwaFieldMap({
     },
     [onDeletePoint],
   );
-  const hasPendingSync = (syncSummary?.total ?? 0) > 0;
   const basemapCachePercent =
     basemapCacheState.total > 0
       ? Math.round(
@@ -424,7 +443,7 @@ export default function PriwaFieldMap({
   }, [clearOfflineBasemapArea]);
 
   const layerPanel = (
-    <div className="w-64 space-y-3">
+    <div className="w-56 space-y-3">
       <div>
         <Typography.Text strong>Layer</Typography.Text>
         <div className="text-xs text-gray-500">
@@ -458,83 +477,91 @@ export default function PriwaFieldMap({
           </div>
         </div>
         <Switch
-          checked={isCogVisible}
+          checked={!!cogPath && isCogVisible}
           disabled={!cogPath}
           onChange={setCogVisible}
         />
       </div>
-      <div className="border-t border-slate-200 pt-3">
-        <div className="mb-2">
-          <div className="text-sm font-medium text-gray-900">
-            Basiskarte offline
-          </div>
-          <div className="text-xs text-gray-500">
-            Speichert den aktuellen Ausschnitt plus Umgebung. Online geladene
-            Luftbild- und Kartenkacheln bleiben zusätzlich offline verfügbar.
-          </div>
-        </div>
-        {offlineBasemapArea && (
-          <div className="mb-2 rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-xs text-emerald-900">
-            {offlineBasemapArea.cachedTileCount} Kacheln · Zoom{" "}
-            {offlineBasemapArea.minZoom}-{offlineBasemapArea.maxZoom} ·{" "}
-            {offlineBasemapArea.areaKm2.toFixed(2)} km²
-          </div>
-        )}
-        <Button
-          block
-          size="small"
-          type={offlineBasemapArea ? "default" : "primary"}
-          icon={<DownloadOutlined />}
-          loading={basemapCacheState.isCaching}
-          disabled={!isOfflineBasemapSupported}
-          onClick={() => void handleCacheBasemapArea()}
-        >
-          Ausschnitt + Umgebung speichern
-        </Button>
-        {basemapCacheState.isCaching && (
-          <Progress
-            className="mt-2"
-            percent={basemapCachePercent}
-            size="small"
-            status={basemapCacheState.failed > 0 ? "exception" : "active"}
-          />
-        )}
-        {basemapCacheState.errorMessage && (
-          <div className="mt-1 text-xs text-red-600">
-            {basemapCacheState.errorMessage}
-          </div>
-        )}
-        {offlineBasemapArea && (
-          <Button
-            block
-            className="mt-2"
-            size="small"
-            icon={<DeleteOutlined />}
-            disabled={basemapCacheState.isCaching}
-            onClick={() => void handleClearBasemapArea()}
-          >
-            Bereich entfernen
-          </Button>
-        )}
-        {!isOfflineBasemapSupported && (
-          <div className="mt-1 text-xs text-amber-700">
-            Dieser Browser unterstützt den Offline-Kartenspeicher nicht.
-          </div>
-        )}
-      </div>
-      <div className="border-t border-slate-200 pt-3">
-        <Button
-          block
-          size="small"
-          icon={<SyncOutlined spin={!!syncSummary?.syncing} />}
-          disabled={!hasPendingSync || !onSyncNow}
-          onClick={() => void onSyncNow?.()}
-        >
-          Jetzt synchronisieren
-        </Button>
-      </div>
     </div>
   );
+
+  const offlineMapPanel = (
+    <div className="w-64 space-y-3">
+      <div>
+        <Typography.Text strong>Offline-Karten</Typography.Text>
+        <div className="mt-1 text-xs text-gray-500">
+          Speichert den aktuellen Ausschnitt plus Umgebung für Luftbild und
+          Karte.
+        </div>
+      </div>
+      {offlineBasemapArea && (
+        <div className="rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-xs text-emerald-900">
+          {offlineBasemapArea.cachedTileCount} Kacheln · Zoom{" "}
+          {offlineBasemapArea.minZoom}-{offlineBasemapArea.maxZoom} ·{" "}
+          {offlineBasemapArea.areaKm2.toFixed(2)} km²
+        </div>
+      )}
+      <Button
+        block
+        size="small"
+        type={offlineBasemapArea ? "default" : "primary"}
+        icon={<DownloadOutlined />}
+        loading={basemapCacheState.isCaching}
+        disabled={!isOfflineBasemapSupported}
+        onClick={() => void handleCacheBasemapArea()}
+      >
+        Ausschnitt + Umgebung speichern
+      </Button>
+      {basemapCacheState.isCaching && (
+        <Progress
+          percent={basemapCachePercent}
+          size="small"
+          status={basemapCacheState.failed > 0 ? "exception" : "active"}
+        />
+      )}
+      {basemapCacheState.errorMessage && (
+        <div className="text-xs text-red-600">
+          {basemapCacheState.errorMessage}
+        </div>
+      )}
+      {offlineBasemapArea && (
+        <Button
+          block
+          danger
+          size="small"
+          icon={<DeleteOutlined />}
+          disabled={basemapCacheState.isCaching}
+          onClick={() => void handleClearBasemapArea()}
+        >
+          Bereich entfernen
+        </Button>
+      )}
+      {!isOfflineBasemapSupported && (
+        <div className="text-xs text-amber-700">
+          Dieser Browser unterstützt den Offline-Kartenspeicher nicht.
+        </div>
+      )}
+      {offlineBasemapArea && (
+        <div className="text-xs text-gray-500">
+          Die Umrisslinie auf der Karte zeigt den gespeicherten Bereich.
+        </div>
+      )}
+    </div>
+  );
+
+  const offlineMapButtonTitle = offlineBasemapArea
+    ? "Offline-Karten verwalten"
+    : "Offline-Karten speichern";
+
+  const offlineMapButtonIcon = basemapCacheState.isCaching ? (
+    <DownloadOutlined spin />
+  ) : (
+    <DownloadOutlined />
+  );
+
+  const offlineMapButtonClassName = offlineBasemapArea
+    ? "pointer-events-auto border-emerald-600 text-emerald-700 shadow-md"
+    : "pointer-events-auto shadow-md";
 
   return (
     <div
@@ -573,8 +600,22 @@ export default function PriwaFieldMap({
                 className="pointer-events-auto shadow-md"
                 shape="circle"
                 size="large"
-                icon={<SlidersOutlined />}
+                icon={<MapLayersIcon />}
                 aria-label="Layer auswählen"
+              />
+            </Popover>
+            <Popover
+              trigger="click"
+              placement="rightTop"
+              content={offlineMapPanel}
+            >
+              <Button
+                className={offlineMapButtonClassName}
+                type={offlineBasemapArea ? "primary" : "default"}
+                shape="circle"
+                size="large"
+                icon={offlineMapButtonIcon}
+                aria-label={offlineMapButtonTitle}
               />
             </Popover>
             <Tooltip title={pointListToggleLabel}>
@@ -596,7 +637,6 @@ export default function PriwaFieldMap({
           {!isPointListOpen && !isDrawerOpen && (
             <FloatButton
               className="priwa-add-point-fab"
-              type="primary"
               shape="circle"
               icon={<PlusOutlined />}
               tooltip={{ title: "Punkt aufnehmen", placement: "left" }}
@@ -649,7 +689,10 @@ export default function PriwaFieldMap({
               {locationHintLabel}
             </div>
           )}
-          <PriwaOfflineStatus syncSummary={syncSummary} />
+          <PriwaOfflineStatus
+            syncSummary={syncSummary}
+            onSyncNow={onSyncNow}
+          />
         </div>
       )}
 
