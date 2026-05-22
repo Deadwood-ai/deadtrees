@@ -536,6 +536,10 @@ export default function PriwaPointDrawer({
             }
           }}
         >
+          <Form.Item label="Name" name="name">
+            <Select options={observerOptions} />
+          </Form.Item>
+
           <Collapse
             ghost
             size="small"
@@ -553,9 +557,6 @@ export default function PriwaPointDrawer({
                 forceRender: true,
                 children: (
                   <div className="grid grid-cols-1 gap-x-2 sm:grid-cols-2">
-                    <Form.Item label="Name" name="name">
-                      <Select options={observerOptions} />
-                    </Form.Item>
                     <Form.Item
                       label="Baumnr"
                       name="baumnr"

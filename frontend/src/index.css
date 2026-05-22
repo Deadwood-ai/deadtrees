@@ -284,6 +284,21 @@
 .priwa-add-point-fab {
   width: 52px !important;
   height: 52px !important;
+  color: #2d6b3f !important;
+  box-shadow:
+    0 8px 24px rgb(15 23 42 / 18%),
+    0 2px 6px rgb(15 23 42 / 14%) !important;
+}
+
+.priwa-add-point-fab .ant-float-btn-body {
+  background: #ffffff !important;
+  border: 1px solid rgb(226 232 240) !important;
+}
+
+.priwa-add-point-fab:hover .ant-float-btn-body,
+.priwa-add-point-fab:focus-visible .ant-float-btn-body {
+  background: #f8fafc !important;
+  border-color: #2d6b3f !important;
 }
 
 .priwa-add-point-fab .ant-float-btn-body,
@@ -306,4 +321,5 @@
 
 .priwa-add-point-fab .anticon {
   font-size: 20px;
+  color: #2d6b3f !important;
 }
