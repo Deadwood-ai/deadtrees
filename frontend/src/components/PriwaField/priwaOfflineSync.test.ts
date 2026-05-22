@@ -18,6 +18,7 @@ const basePoint: IPriwaPoint = {
   bm: "ja",
   bohrloch: "ja",
   harz: "nein",
+  grueneNadelnAmBoden: "nein",
   nadel: "grün",
   rinde: "0%",
   kv: "0%",

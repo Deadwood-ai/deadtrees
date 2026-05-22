@@ -33,7 +33,7 @@ import type { PointerEvent } from "react";
 import { createStandardMapControls } from "../../utils/basemaps";
 import { useUserLocationLayer } from "../../hooks/useUserLocationLayer";
 import { createLglDop20Layer } from "./createLglDop20Layer";
-import { createPriwaOsmLayer } from "./createPriwaOsmLayer";
+import { createPriwaTopographicLayer } from "./createPriwaTopographicLayer";
 import {
   createPriwaOfflineAreaFeature,
   createPriwaOfflineAreaLayer,
@@ -57,7 +57,7 @@ import type {
 } from "./types";
 
 const FIELD_CENTER: [number, number] = [8.18013, 48.45596];
-type PriwaBaseLayer = "aerial" | "osm";
+type PriwaBaseLayer = "aerial" | "topographic";
 
 interface PriwaFieldMapProps {
   points: IPriwaPoint[];
@@ -106,9 +106,9 @@ export default function PriwaFieldMap({
   const aerialLayerRef = useRef<ReturnType<typeof createLglDop20Layer> | null>(
     null,
   );
-  const osmLayerRef = useRef<ReturnType<typeof createPriwaOsmLayer> | null>(
-    null,
-  );
+  const topographicLayerRef = useRef<ReturnType<
+    typeof createPriwaTopographicLayer
+  > | null>(null);
   const cogLayerRef = useRef<TileLayerWebGL | null>(null);
   const [isDrawerOpen, setDrawerOpen] = useState(false);
   const [isCogVisible, setCogVisible] = useState(true);
@@ -156,13 +156,13 @@ export default function PriwaFieldMap({
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
-    const osmLayer = createPriwaOsmLayer();
+    const topographicLayer = createPriwaTopographicLayer();
     const dopLayer = createLglDop20Layer();
     const offlineAreaLayer = createPriwaOfflineAreaLayer();
     const pointLayer = createPriwaPointLayer([]);
     const previewLayer = createPriwaPreviewLayer();
     aerialLayerRef.current = dopLayer;
-    osmLayerRef.current = osmLayer;
+    topographicLayerRef.current = topographicLayer;
     offlineAreaLayerRef.current = offlineAreaLayer;
     pointLayerRef.current = pointLayer;
     previewLayerRef.current = previewLayer;
@@ -170,7 +170,7 @@ export default function PriwaFieldMap({
     const map = new Map({
       target: containerRef.current,
       layers: [
-        osmLayer,
+        topographicLayer,
         dopLayer,
         offlineAreaLayer,
         pointLayer,
@@ -222,7 +222,7 @@ export default function PriwaFieldMap({
       mapRef.current = null;
       offlineAreaLayerRef.current = null;
       aerialLayerRef.current = null;
-      osmLayerRef.current = null;
+      topographicLayerRef.current = null;
       pointLayerRef.current = null;
       previewLayerRef.current = null;
       cogLayerRef.current = null;
@@ -231,7 +231,7 @@ export default function PriwaFieldMap({
 
   useEffect(() => {
     aerialLayerRef.current?.setVisible(baseLayer === "aerial");
-    osmLayerRef.current?.setVisible(baseLayer === "osm");
+    topographicLayerRef.current?.setVisible(baseLayer === "topographic");
   }, [baseLayer]);
 
   useEffect(() => {
@@ -441,7 +441,7 @@ export default function PriwaFieldMap({
           value={baseLayer}
           options={[
             { label: "Luftbild", value: "aerial" },
-            { label: "OSM", value: "osm" },
+            { label: "Karte", value: "topographic" },
           ]}
           onChange={setBaseLayer}
         />
@@ -470,7 +470,7 @@ export default function PriwaFieldMap({
           </div>
           <div className="text-xs text-gray-500">
             Speichert den aktuellen Ausschnitt plus Umgebung. Online geladene
-            Luftbild- und OSM-Kacheln bleiben zusätzlich offline verfügbar.
+            Luftbild- und Kartenkacheln bleiben zusätzlich offline verfügbar.
           </div>
         </div>
         {offlineBasemapArea && (

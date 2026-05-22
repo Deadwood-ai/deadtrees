@@ -45,6 +45,7 @@ const observerOptions: Array<{ label: string; value: PriwaObserverName }> = [
   { label: "Maurice Mayer", value: "Maurice Mayer" },
   { label: "Lukas Ruf", value: "Lukas Ruf" },
   { label: "Markus Mayer", value: "Markus Mayer" },
+  { label: "Stefan Treyer", value: "Stefan Treyer" },
   { label: "Andere", value: "andere" },
 ];
 
@@ -106,6 +107,7 @@ interface IPriwaPointFormValues {
   bm: PriwaYesNo;
   bohrloch: PriwaBohrloch;
   harz: PriwaHarz;
+  grueneNadelnAmBoden: PriwaYesNo;
   nadel: PriwaNadel;
   rinde: PriwaPercentClass;
   kv: PriwaPercentClass;
@@ -114,17 +116,53 @@ interface IPriwaPointFormValues {
   kom: string;
 }
 
-const createDefaultFormValues = (): IPriwaPointFormValues => ({
+const PRIWA_OBSERVER_NAME_STORAGE_KEY = "deadtrees-priwa-field:observer-name";
+const DEFAULT_OBSERVER_NAME: PriwaObserverName = "andere";
+
+const isPriwaObserverName = (value: unknown): value is PriwaObserverName =>
+  observerOptions.some((option) => option.value === value);
+
+const loadStoredObserverName = (): PriwaObserverName => {
+  if (typeof globalThis.localStorage === "undefined") {
+    return DEFAULT_OBSERVER_NAME;
+  }
+
+  try {
+    const storedName = globalThis.localStorage.getItem(
+      PRIWA_OBSERVER_NAME_STORAGE_KEY,
+    );
+    return isPriwaObserverName(storedName) ? storedName : DEFAULT_OBSERVER_NAME;
+  } catch {
+    return DEFAULT_OBSERVER_NAME;
+  }
+};
+
+const saveStoredObserverName = (name: PriwaObserverName) => {
+  if (typeof globalThis.localStorage === "undefined") {
+    return;
+  }
+
+  try {
+    globalThis.localStorage.setItem(PRIWA_OBSERVER_NAME_STORAGE_KEY, name);
+  } catch {
+    // Best-effort preference only; point capture must keep working.
+  }
+};
+
+const createDefaultFormValues = (
+  observerName: PriwaObserverName = DEFAULT_OBSERVER_NAME,
+): IPriwaPointFormValues => ({
   baumnr: "",
   fund: "ja",
   baumart: "Fichte",
   bm: "nein",
   bohrloch: "nein",
   harz: "nein",
+  grueneNadelnAmBoden: "nein",
   nadel: "grün",
   rinde: "0%",
   kv: "0%",
-  name: "andere",
+  name: observerName,
   datum: today(),
   kom: "",
 });
@@ -138,6 +176,7 @@ const createFormValuesFromPoint = (
   bm: point.bm,
   bohrloch: point.bohrloch,
   harz: point.harz,
+  grueneNadelnAmBoden: point.grueneNadelnAmBoden ?? "nein",
   nadel: point.nadel,
   rinde: point.rinde,
   kv: point.kv,
@@ -186,6 +225,8 @@ export default function PriwaPointDrawer({
     useState<PriwaCoordinateSource>("qr");
   const [isQrScannerOpen, setQrScannerOpen] = useState(false);
   const [activeCollapseKeys, setActiveCollapseKeys] = useState<string[]>([]);
+  const [defaultObserverName, setDefaultObserverName] =
+    useState<PriwaObserverName>(() => loadStoredObserverName());
 
   const qrCoordinate = useMemo(
     () => parseGoogleMapsCoordinates(rawQrValue),
@@ -202,9 +243,9 @@ export default function PriwaPointDrawer({
       return;
     }
 
-    form.setFieldsValue(createDefaultFormValues());
+    form.setFieldsValue(createDefaultFormValues(loadStoredObserverName()));
     setRawQrValue("");
-    setActiveCollapseKeys([]);
+    setActiveCollapseKeys(["baum"]);
   }, [editingPoint, form, formSessionId]);
 
   useEffect(() => {
@@ -274,9 +315,11 @@ export default function PriwaPointDrawer({
       }
 
       const values = {
-        ...createDefaultFormValues(),
+        ...createDefaultFormValues(defaultObserverName),
         ...(await form.validateFields()),
       };
+      saveStoredObserverName(values.name);
+      setDefaultObserverName(values.name);
       const savedCoordinateSource = willUseEstimatedGps
         ? "gps"
         : coordinateSource;
@@ -290,6 +333,7 @@ export default function PriwaPointDrawer({
         bm: values.bm,
         bohrloch: values.bohrloch,
         harz: values.harz,
+        grueneNadelnAmBoden: values.grueneNadelnAmBoden,
         nadel: values.nadel,
         rinde: values.rinde,
         kv: values.kv,
@@ -311,7 +355,7 @@ export default function PriwaPointDrawer({
       }
 
       onZoomToPoint(effectiveCoordinate);
-      form.setFieldsValue(createDefaultFormValues());
+      form.setFieldsValue(createDefaultFormValues(values.name));
       setRawQrValue("");
       setCoordinate(null);
       setCoordinateSource("qr");
@@ -362,8 +406,19 @@ export default function PriwaPointDrawer({
       className="priwa-point-drawer"
       destroyOnClose={false}
       styles={{
-        body: { overflowX: "hidden", padding: "14px 18px 18px" },
-        content: { maxWidth: "100vw", overflowX: "hidden" },
+        body: {
+          overflowX: "hidden",
+          overflowY: "auto",
+          overscrollBehavior: "contain",
+          padding: "14px 18px 18px",
+          touchAction: "pan-y",
+          WebkitOverflowScrolling: "touch",
+        },
+        content: {
+          maxHeight: "100dvh",
+          maxWidth: "100vw",
+          overflowX: "hidden",
+        },
       }}
     >
       <div className="space-y-3">
@@ -471,6 +526,15 @@ export default function PriwaPointDrawer({
           form={form}
           size="large"
           className="[&_.ant-form-item]:mb-2.5 [&_.ant-form-item-label]:pb-0.5 [&_.ant-form-item-label>label]:text-xs [&_.ant-form-item-label>label]:font-medium"
+          onValuesChange={(changedValues: Partial<IPriwaPointFormValues>) => {
+            if (
+              isPriwaObserverName(changedValues.name) &&
+              changedValues.name !== defaultObserverName
+            ) {
+              saveStoredObserverName(changedValues.name);
+              setDefaultObserverName(changedValues.name);
+            }
+          }}
         >
           <Collapse
             ghost
@@ -506,6 +570,9 @@ export default function PriwaPointDrawer({
                     <Form.Item label="Fund" name="fund">
                       <Select options={fundOptions} />
                     </Form.Item>
+                    <Form.Item label="Baumart" name="baumart">
+                      <Select options={baumartOptions} />
+                    </Form.Item>
                     <Form.Item label="Name" name="name">
                       <Select options={observerOptions} />
                     </Form.Item>
@@ -520,28 +587,31 @@ export default function PriwaPointDrawer({
           />
 
           <section className="mt-3 space-y-2 border-t border-gray-200 pt-3">
-            <Typography.Text strong>Befallssymptome</Typography.Text>
+            <Typography.Text strong>Befall</Typography.Text>
             <div className="grid grid-cols-1 gap-x-2 sm:grid-cols-2">
-              <Form.Item label="Baumart" name="baumart">
-                <Select options={baumartOptions} />
-              </Form.Item>
               <Form.Item label="Bohrmehl" name="bm">
                 <Select options={yesNoOptions} />
               </Form.Item>
-              <Form.Item label="Bohrloch" name="bohrloch">
-                <Select options={bohrlochOptions} />
-              </Form.Item>
-              <Form.Item label="Harzfluss" name="harz">
+              <Form.Item label="Harz" name="harz">
                 <Select options={harzOptions} />
               </Form.Item>
-              <Form.Item label="Nadelfarbe" name="nadel">
+              <Form.Item
+                label="Grüne Nadeln am Boden"
+                name="grueneNadelnAmBoden"
+              >
+                <Select options={yesNoOptions} />
+              </Form.Item>
+              <Form.Item label="Nadelverlust" name="kv">
+                <Select options={percentOptions} />
+              </Form.Item>
+              <Form.Item label="Nadelverfärbung" name="nadel">
                 <Select options={nadelOptions} />
               </Form.Item>
-              <Form.Item label="Rindenverluste" name="rinde">
+              <Form.Item label="Rindenverlust" name="rinde">
                 <Select options={percentOptions} />
               </Form.Item>
-              <Form.Item label="Kronenverluste" name="kv">
-                <Select options={percentOptions} />
+              <Form.Item label="Bohrloch" name="bohrloch">
+                <Select options={bohrlochOptions} />
               </Form.Item>
             </div>
           </section>

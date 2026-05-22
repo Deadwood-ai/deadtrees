@@ -5,7 +5,7 @@ import {
   cachePriwaBasemapTiles,
   clearPriwaBasemapTileCache,
   createPriwaBasemapTileUrl,
-  createPriwaOsmTileUrl,
+  createPriwaTopographicTileUrl,
   getPriwaBasemapCacheName,
   validatePriwaBasemapTilePlan,
 } from "./priwaOfflineBasemap";
@@ -37,9 +37,11 @@ describe("PRIWA offline basemap helpers", () => {
     );
   });
 
-  it("builds OpenStreetMap XYZ tile URLs", () => {
-    expect(createPriwaOsmTileUrl({ zoom: 18, row: 90225, col: 137017 })).toBe(
-      "https://tile.openstreetmap.org/18/137017/90225.png",
+  it("builds topographic XYZ tile URLs", () => {
+    expect(
+      createPriwaTopographicTileUrl({ zoom: 18, row: 90225, col: 137017 }),
+    ).toBe(
+      "https://sgx.geodatenzentrum.de/wmts_basemapde/tile/1.0.0/de_basemapde_web_raster_farbe/default/GLOBAL_WEBMERCATOR/18/90225/137017.png",
     );
   });
 
@@ -55,7 +57,7 @@ describe("PRIWA offline basemap helpers", () => {
     expect(plan.tileCount).toBe(plan.urls.length);
     expect(
       plan.urls.some(
-        (url) => new URL(url).hostname === "tile.openstreetmap.org",
+        (url) => new URL(url).hostname === "sgx.geodatenzentrum.de",
       ),
     ).toBe(true);
     expect(plan.extent3857).toEqual([909_750, 6_179_750, 910_750, 6_180_750]);

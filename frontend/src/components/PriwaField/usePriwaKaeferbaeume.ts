@@ -23,6 +23,7 @@ interface IPriwaKaeferbaumRow {
   bm: IPriwaPoint["bm"];
   bohrloch: IPriwaPoint["bohrloch"];
   harz: IPriwaPoint["harz"];
+  gruene_nadeln_am_boden: IPriwaPoint["grueneNadelnAmBoden"] | null;
   nadel: IPriwaPoint["nadel"];
   rinde: IPriwaPoint["rinde"] | null;
   kv: IPriwaPoint["kv"] | null;
@@ -85,6 +86,7 @@ const rowToPoint = (row: IPriwaKaeferbaumRow): IPriwaPoint | null => {
     bm: row.bm,
     bohrloch: row.bohrloch,
     harz: row.harz,
+    grueneNadelnAmBoden: row.gruene_nadeln_am_boden ?? "nein",
     nadel: row.nadel,
     rinde: row.rinde ?? "0%",
     kv: row.kv ?? "0%",
@@ -113,6 +115,7 @@ const pointToRow = (projectId: string, point: IPriwaPoint) => ({
   bm: point.bm,
   bohrloch: point.bohrloch,
   harz: point.harz,
+  gruene_nadeln_am_boden: point.grueneNadelnAmBoden ?? "nein",
   nadel: point.nadel,
   rinde: point.rinde || null,
   kv: point.kv || null,
@@ -132,7 +135,7 @@ export const fetchPriwaKaeferbaeume = async (projectId: string) => {
   const { data, error } = await supabase
     .from("priwa_kaeferbaeume")
     .select(
-      "id, project_id, geom, location_source, is_exact_location, baumnr, fund, baumart, bm, bohrloch, harz, nadel, rinde, kv, name, datum, kom, raw_qr_value, created_at, updated_at, client_updated_at",
+      "id, project_id, geom, location_source, is_exact_location, baumnr, fund, baumart, bm, bohrloch, harz, gruene_nadeln_am_boden, nadel, rinde, kv, name, datum, kom, raw_qr_value, created_at, updated_at, client_updated_at",
     )
     .eq("project_id", projectId)
     .is("deleted_at", null)

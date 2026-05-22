@@ -104,6 +104,18 @@
   }
 }
 
+.priwa-point-drawer-root .ant-drawer-body {
+  min-height: 0;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+.priwa-point-drawer-root .ant-drawer-content,
+.priwa-point-drawer-root .ant-drawer-content-wrapper {
+  max-height: 100dvh;
+}
+
 .logo-scroll {
   overflow: hidden;
   width: 100%;

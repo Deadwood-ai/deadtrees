@@ -4,7 +4,8 @@ const BASEMAP_CACHE_PREFIX = "deadtrees-priwa-basemap-v1";
 const VIEWED_BASEMAP_CACHE = `${BASEMAP_CACHE_PREFIX}-viewed`;
 const LGL_BASEMAP_URL_PREFIX =
   "https://owsproxy.lgl-bw.de/owsproxy/ows/WMTS_LGL-BW_ATKIS_DOP_20_C";
-const OSM_TILE_URL_PREFIX = "https://tile.openstreetmap.org";
+const TOPOGRAPHIC_TILE_URL_PREFIX =
+  "https://sgx.geodatenzentrum.de/wmts_basemapde/tile/1.0.0/de_basemapde_web_raster_farbe/default/GLOBAL_WEBMERCATOR";
 const APP_SHELL_URLS = [
   "/",
   "/priwa-field",
@@ -91,11 +92,11 @@ const handleSameOriginAsset = async (request) => {
 const isLglBasemapTileRequest = (requestUrl) =>
   requestUrl.href.startsWith(LGL_BASEMAP_URL_PREFIX);
 
-const isOsmTileRequest = (requestUrl) =>
-  requestUrl.href.startsWith(`${OSM_TILE_URL_PREFIX}/`);
+const isTopographicTileRequest = (requestUrl) =>
+  requestUrl.href.startsWith(`${TOPOGRAPHIC_TILE_URL_PREFIX}/`);
 
 const isBasemapTileRequest = (requestUrl) =>
-  isLglBasemapTileRequest(requestUrl) || isOsmTileRequest(requestUrl);
+  isLglBasemapTileRequest(requestUrl) || isTopographicTileRequest(requestUrl);
 
 const getSearchParamCaseInsensitive = (searchParams, key) => {
   const targetKey = key.toLowerCase();
@@ -145,17 +146,19 @@ const canonicalizeLglBasemapRequest = (request) => {
       TileCol: tileCol,
       TileRow: tileRow,
     }),
+    request,
   );
 };
 
-const canonicalizeOsmTileRequest = (request) => {
+const canonicalizeTopographicTileRequest = (request) => {
   const url = new URL(request.url);
-  if (!isOsmTileRequest(url)) {
+  if (!isTopographicTileRequest(url)) {
     return request;
   }
 
   return new Request(
-    `${OSM_TILE_URL_PREFIX}${url.pathname.replace(/\/+/g, "/")}`,
+    `${url.origin}${url.pathname.replace(/\/+/g, "/")}`,
+    request,
   );
 };
 
@@ -166,8 +169,8 @@ const canonicalizeBasemapRequest = (request) => {
     return canonicalizeLglBasemapRequest(request);
   }
 
-  if (isOsmTileRequest(url)) {
-    return canonicalizeOsmTileRequest(request);
+  if (isTopographicTileRequest(url)) {
+    return canonicalizeTopographicTileRequest(request);
   }
 
   return request;
