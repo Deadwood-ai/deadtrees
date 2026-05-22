@@ -4,6 +4,8 @@ const BASEMAP_CACHE_PREFIX = "deadtrees-priwa-basemap-v1";
 const VIEWED_BASEMAP_CACHE = `${BASEMAP_CACHE_PREFIX}-viewed`;
 const LGL_BASEMAP_URL_PREFIX =
   "https://owsproxy.lgl-bw.de/owsproxy/ows/WMTS_LGL-BW_ATKIS_DOP_20_C";
+const TOPOGRAPHIC_TILE_URL_PREFIX =
+  "https://sgx.geodatenzentrum.de/wmts_basemapde/tile/1.0.0/de_basemapde_web_raster_farbe/default/GLOBAL_WEBMERCATOR";
 const APP_SHELL_URLS = [
   "/",
   "/priwa-field",
@@ -90,6 +92,12 @@ const handleSameOriginAsset = async (request) => {
 const isLglBasemapTileRequest = (requestUrl) =>
   requestUrl.href.startsWith(LGL_BASEMAP_URL_PREFIX);
 
+const isTopographicTileRequest = (requestUrl) =>
+  requestUrl.href.startsWith(`${TOPOGRAPHIC_TILE_URL_PREFIX}/`);
+
+const isBasemapTileRequest = (requestUrl) =>
+  isLglBasemapTileRequest(requestUrl) || isTopographicTileRequest(requestUrl);
+
 const getSearchParamCaseInsensitive = (searchParams, key) => {
   const targetKey = key.toLowerCase();
   for (const [candidateKey, value] of searchParams.entries()) {
@@ -138,7 +146,34 @@ const canonicalizeLglBasemapRequest = (request) => {
       TileCol: tileCol,
       TileRow: tileRow,
     }),
+    request,
   );
+};
+
+const canonicalizeTopographicTileRequest = (request) => {
+  const url = new URL(request.url);
+  if (!isTopographicTileRequest(url)) {
+    return request;
+  }
+
+  return new Request(
+    `${url.origin}${url.pathname.replace(/\/+/g, "/")}`,
+    request,
+  );
+};
+
+const canonicalizeBasemapRequest = (request) => {
+  const url = new URL(request.url);
+
+  if (isLglBasemapTileRequest(url)) {
+    return canonicalizeLglBasemapRequest(request);
+  }
+
+  if (isTopographicTileRequest(url)) {
+    return canonicalizeTopographicTileRequest(request);
+  }
+
+  return request;
 };
 
 const cacheViewedBasemapResponse = async (request, response) => {
@@ -183,7 +218,7 @@ const matchExplicitBasemapPackage = async (requests) => {
 
 const handleBasemapTile = async (event) => {
   const { request } = event;
-  const canonicalRequest = canonicalizeLglBasemapRequest(request);
+  const canonicalRequest = canonicalizeBasemapRequest(request);
 
   if (self.navigator && self.navigator.onLine === false) {
     return (
@@ -220,7 +255,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (isLglBasemapTileRequest(requestUrl)) {
+  if (isBasemapTileRequest(requestUrl)) {
     event.respondWith(handleBasemapTile(event));
     return;
   }

@@ -13,6 +13,7 @@ export type PriwaObserverName =
   | "Maurice Mayer"
   | "Lukas Ruf"
   | "Markus Mayer"
+  | "Stefan Treyer"
   | "andere";
 export type PriwaFund = "ja" | "ja_kein_buchdrucker" | "nein" | "unsicher";
 export type PriwaBaumart =
@@ -44,6 +45,7 @@ export interface IPriwaPoint extends IPriwaCoordinate {
   bm: PriwaYesNo;
   bohrloch: PriwaBohrloch;
   harz: PriwaHarz;
+  grueneNadelnAmBoden: PriwaYesNo;
   nadel: PriwaNadel;
   rinde: PriwaPercentClass;
   kv: PriwaPercentClass;

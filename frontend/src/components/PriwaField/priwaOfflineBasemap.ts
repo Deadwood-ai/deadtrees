@@ -8,11 +8,15 @@ import {
   LGL_DOP20_STYLE,
   LGL_DOP20_WMTS_URL,
 } from "./createLglDop20Layer";
+import {
+  PRIWA_TOPOGRAPHIC_MAX_ZOOM,
+  PRIWA_TOPOGRAPHIC_TILE_URL_PREFIX,
+} from "./createPriwaTopographicLayer";
 
 export const PRIWA_BASEMAP_CACHE_PREFIX = "deadtrees-priwa-basemap-v1";
 export const PRIWA_BASEMAP_MIN_ZOOM = 16;
 export const PRIWA_BASEMAP_MAX_ZOOM = 20;
-export const PRIWA_BASEMAP_MAX_TILES = 600;
+export const PRIWA_BASEMAP_MAX_TILES = 1_200;
 export const PRIWA_BASEMAP_MAX_AREA_KM2 = 2;
 export const PRIWA_BASEMAP_EXTENT_BUFFER_RATIO = 0.5;
 
@@ -153,6 +157,16 @@ export const createPriwaBasemapTileUrl = ({
   });
 };
 
+export const createPriwaTopographicTileUrl = ({
+  zoom,
+  row,
+  col,
+}: {
+  zoom: number;
+  row: number;
+  col: number;
+}) => `${PRIWA_TOPOGRAPHIC_TILE_URL_PREFIX}/${zoom}/${row}/${col}.png`;
+
 export const buildPriwaBasemapTilePlan = (
   viewportExtent3857: [number, number, number, number],
   zoom: number,
@@ -183,7 +197,11 @@ export const buildPriwaBasemapTilePlan = (
   for (let tileZoom = minZoom; tileZoom <= maxZoom; tileZoom += 1) {
     const range = tileRangeForExtent(extent3857, tileZoom);
     ranges.push({ zoom: tileZoom, range });
-    tileCount += countTilesInRange(range);
+    const tileCountForZoom = countTilesInRange(range);
+    tileCount += tileCountForZoom;
+    if (tileZoom <= PRIWA_TOPOGRAPHIC_MAX_ZOOM) {
+      tileCount += tileCountForZoom;
+    }
   }
 
   const areaKm2 = calculateGeodesicAreaKm2(extent3857);
@@ -198,6 +216,11 @@ export const buildPriwaBasemapTilePlan = (
       for (let row = range.minRow; row <= range.maxRow; row += 1) {
         for (let col = range.minCol; col <= range.maxCol; col += 1) {
           urls.push(createPriwaBasemapTileUrl({ zoom: tileZoom, row, col }));
+          if (tileZoom <= PRIWA_TOPOGRAPHIC_MAX_ZOOM) {
+            urls.push(
+              createPriwaTopographicTileUrl({ zoom: tileZoom, row, col }),
+            );
+          }
         }
       }
     }

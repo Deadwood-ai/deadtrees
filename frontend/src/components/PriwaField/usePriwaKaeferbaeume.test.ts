@@ -31,6 +31,9 @@ describe("softDeletePriwaKaeferbaum", () => {
     await fetchPriwaKaeferbaeume("project-1");
 
     expect(supabaseMock.from).toHaveBeenCalledWith("priwa_kaeferbaeume");
+    expect(supabaseMock.select).toHaveBeenCalledWith(
+      expect.stringContaining("gruene_nadeln_am_boden"),
+    );
     expect(supabaseMock.selectEq).toHaveBeenCalledWith(
       "project_id",
       "project-1",

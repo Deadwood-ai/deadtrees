@@ -5,6 +5,7 @@ import {
   cachePriwaBasemapTiles,
   clearPriwaBasemapTileCache,
   createPriwaBasemapTileUrl,
+  createPriwaTopographicTileUrl,
   getPriwaBasemapCacheName,
   validatePriwaBasemapTilePlan,
 } from "./priwaOfflineBasemap";
@@ -36,6 +37,14 @@ describe("PRIWA offline basemap helpers", () => {
     );
   });
 
+  it("builds topographic XYZ tile URLs", () => {
+    expect(
+      createPriwaTopographicTileUrl({ zoom: 18, row: 90225, col: 137017 }),
+    ).toBe(
+      "https://sgx.geodatenzentrum.de/wmts_basemapde/tile/1.0.0/de_basemapde_web_raster_farbe/default/GLOBAL_WEBMERCATOR/18/90225/137017.png",
+    );
+  });
+
   it("plans a buffered current-map cache across a small zoom band", () => {
     const plan = buildPriwaBasemapTilePlan(
       [910_000, 6_180_000, 910_500, 6_180_500],
@@ -46,6 +55,11 @@ describe("PRIWA offline basemap helpers", () => {
     expect(plan.maxZoom).toBe(19);
     expect(plan.tileCount).toBeGreaterThan(0);
     expect(plan.tileCount).toBe(plan.urls.length);
+    expect(
+      plan.urls.some(
+        (url) => new URL(url).hostname === "sgx.geodatenzentrum.de",
+      ),
+    ).toBe(true);
     expect(plan.extent3857).toEqual([909_750, 6_179_750, 910_750, 6_180_750]);
     expect(plan.areaKm2).toBeGreaterThan(0.4);
     expect(plan.areaKm2).toBeLessThan(0.5);
@@ -63,7 +77,7 @@ describe("PRIWA offline basemap helpers", () => {
       { bufferRatio: 0 },
     );
 
-    expect(plan.tileCount).toBe(6);
+    expect(plan.tileCount).toBe(12);
   });
 
   it("rejects oversized basemap packages before building tile URLs", () => {

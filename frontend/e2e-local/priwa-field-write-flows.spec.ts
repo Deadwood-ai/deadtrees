@@ -64,6 +64,12 @@ test.describe("PRIWA local field write flows", () => {
     await signInFieldUser(page);
     await expect(page.getByTestId("priwa-field-map")).toBeVisible();
     await expectOfflineBasemapControl(page);
+    await page.evaluate(() => {
+      window.localStorage.setItem(
+        "deadtrees-priwa-field:observer-name",
+        "Stefan Treyer",
+      );
+    });
 
     await context.setOffline(true);
     await waitForBrowserOnlineState(page, false);
@@ -73,7 +79,12 @@ test.describe("PRIWA local field write flows", () => {
 
     await context.setOffline(false);
     await waitForBrowserOnlineState(page, true);
-    await waitForPointRow(baumnr, (row) => row.deleted_at === null);
+    const createdRow = await waitForPointRow(
+      baumnr,
+      (row) => row.deleted_at === null,
+    );
+    expect(createdRow.name).toBe("Stefan Treyer");
+    expect(createdRow.gruene_nadeln_am_boden).toBe("nein");
 
     await context.setOffline(true);
     await editFirstPointBaumnr(page, updatedBaumnr);
@@ -105,7 +116,6 @@ async function createMapEstimatedPoint(page: Page, pointBaumnr: string) {
   await expect(page.getByText("Position gesetzt")).toBeVisible();
   await expectCommentCounterClearOfSaveButton(page);
 
-  await page.getByText("Baum", { exact: true }).click();
   await page.getByLabel("Baumnr").fill(pointBaumnr);
   await page.getByRole("button", { name: "Schnellspeichern" }).click();
   await expect(page.getByText("Käferbaum gespeichert")).toBeVisible();
@@ -132,6 +142,10 @@ async function expectCommentCounterClearOfSaveButton(page: Page) {
 
 async function expectOfflineBasemapControl(page: Page) {
   await page.getByRole("button", { name: "Layer auswählen" }).click();
+  await expect(page.getByText("Kartenbasis")).toBeVisible();
+  await expect(page.getByText("Luftbild", { exact: true })).toBeVisible();
+  await page.getByText("Karte", { exact: true }).click();
+  await expect(page.locator(".ol-layer").first()).toBeVisible();
   await expect(page.getByText("Basiskarte offline")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Ausschnitt + Umgebung speichern" }),
@@ -216,7 +230,9 @@ async function waitForPointRow(
   while (Date.now() < deadline) {
     const { data, error } = await adminClient
       .from("priwa_kaeferbaeume")
-      .select("id, baumnr, deleted_at, deleted_by, updated_by")
+      .select(
+        "id, baumnr, name, gruene_nadeln_am_boden, deleted_at, deleted_by, updated_by",
+      )
       .eq("project_id", projectId)
       .eq("baumnr", expectedBaumnr)
       .order("updated_at", { ascending: false });
@@ -322,6 +338,8 @@ function delay(ms: number) {
 type IPriwaPointRow = {
   id: string;
   baumnr: string;
+  name: string;
+  gruene_nadeln_am_boden: string;
   deleted_at: string | null;
   deleted_by: string | null;
   updated_by: string | null;
