@@ -1,6 +1,7 @@
 import { Typography, Tooltip, Tag } from "antd";
-import { EnvironmentOutlined, CheckCircleOutlined, ExclamationCircleOutlined, WarningOutlined, ClockCircleOutlined } from "@ant-design/icons";
+import { EnvironmentOutlined, CheckCircleOutlined, ExclamationCircleOutlined, WarningOutlined, ClockCircleOutlined, LockOutlined, GlobalOutlined, EyeOutlined } from "@ant-design/icons";
 import type { IDataset } from "../../types/dataset";
+import { IDataAccess } from "../../types/dataset";
 import type { PhenologyMetadata } from "../../types/phenology";
 import countryList from "../../utils/countryList";
 import { isGeonadirDataset, getTruncatedAuthorDisplay } from "../../utils/datasetUtils";
@@ -10,6 +11,7 @@ import PhenologyBar from "../PhenologyBar/PhenologyBar";
 import DatasetNavigation from "./DatasetNavigation";
 import { palette } from "../../theme/palette";
 import { getBiomeEmoji, getBiomeTagColor, truncateBiomeLabel } from "../../utils/biomeDisplay";
+import { useCanUploadPrivate, useCanViewAllPrivate } from "../../hooks/useUserPrivileges";
 
 interface DatasetInfoSidebarProps {
   dataset: IDataset;
@@ -180,6 +182,9 @@ export default function DatasetInfoSidebar({
   isLoadingOverlapping,
 }: DatasetInfoSidebarProps) {
   const isFromGeonadir = isGeonadirDataset(dataset);
+  const { canUpload } = useCanUploadPrivate();
+  const { canView } = useCanViewAllPrivate();
+  const showPrivacyIndicator = canUpload || canView;
 
   return (
     <div className="flex flex-col gap-4 pb-4">
@@ -301,6 +306,17 @@ export default function DatasetInfoSidebar({
               : `${dataset.ortho_file_size.toFixed(0)} MB`}
           </Typography.Text>
         </InfoRow>
+        {showPrivacyIndicator && (
+          <InfoRow label="Visibility" tooltip="Whether this dataset is publicly visible or restricted.">
+            {dataset.data_access === IDataAccess.private ? (
+              <Tag icon={<LockOutlined />} color="red" style={{ margin: 0 }}>Private</Tag>
+            ) : dataset.data_access === IDataAccess.viewonly ? (
+              <Tag icon={<EyeOutlined />} color="orange" style={{ margin: 0 }}>View only</Tag>
+            ) : (
+              <Tag icon={<GlobalOutlined />} color="green" style={{ margin: 0 }}>Public</Tag>
+            )}
+          </InfoRow>
+        )}
       </Section>
 
       {/* Additional Information */}
