@@ -71,7 +71,8 @@ class DevCommands:
 		cmd = self._compose_cmd(action)
 		if flags:
 			cmd.extend(flags)
-		cmd.append('--remove-orphans')
+		if not services:
+			cmd.append('--remove-orphans')
 		if services:
 			cmd.extend(services)
 		return cmd
