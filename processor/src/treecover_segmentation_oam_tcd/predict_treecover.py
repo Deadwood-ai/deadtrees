@@ -289,7 +289,7 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 				runtime='nvidia',
 				environment={
 					'NVIDIA_VISIBLE_DEVICES': 'all',
-					'NVIDIA_DRIVER_CAPABILITIES': 'all',
+					'NVIDIA_DRIVER_CAPABILITIES': 'compute,utility',
 				},
 				labels={
 					**resource_labels,
