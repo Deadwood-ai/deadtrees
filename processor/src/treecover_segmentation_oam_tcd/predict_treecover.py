@@ -278,6 +278,7 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 			raise Exception(f'TCD container image {TCD_CONTAINER_IMAGE} not found. Build or pull it. Error: {e}')
 
 		def _run(device_requests=None):
+			use_gpu = device_requests is not None
 			return client.containers.run(
 				image=TCD_CONTAINER_IMAGE,
 				command=['python', '/tcd_data/predict_pipeline.py', input_path, output_path],
@@ -286,11 +287,11 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 				remove=False,
 				detach=True,
 				user='root',
-				runtime='nvidia',
+				runtime='nvidia' if use_gpu else None,
 				environment={
 					'NVIDIA_VISIBLE_DEVICES': 'all',
 					'NVIDIA_DRIVER_CAPABILITIES': 'compute,utility',
-				},
+				} if use_gpu else {},
 				labels={
 					**resource_labels,
 					'dt_role': 'tcd_pipeline',
@@ -359,9 +360,7 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 					)
 
 		try:
-			container_output = _run_and_wait(
-				device_requests=[docker.types.DeviceRequest(count=-1, capabilities=[['gpu']])]
-			)
+			container_output = _run_and_wait(device_requests=None)
 		except Exception as gpu_err:
 			logger.warning(
 				f'GPU execution failed for TCD container, retrying on CPU: {gpu_err}',
