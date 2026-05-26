@@ -602,32 +602,32 @@ def crashed_dataset_task(test_processor_user, auth_token):
 					client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 
 
-def test_background_process_detects_crashed_dataset(crashed_dataset_task, auth_token):
-	"""Test that background_process detects a crashed dataset, marks it as errored,
-	and removes it from the queue."""
+def test_background_process_requeues_interrupted_dataset(crashed_dataset_task, auth_token, monkeypatch):
+	"""Interrupted tasks (processor restarted mid-job) are re-queued rather than
+	marked as errors, so deployments don't require manual re-queuing."""
+	monkeypatch.setattr(processor_module, '_kill_dangling_dataset_resources', lambda dataset_id: None)
+
 	dataset_id = crashed_dataset_task['dataset_id']
 
-	# Run the background process -- should detect the crash and clear it
 	background_process()
 
 	with use_client(auth_token) as client:
-		# Task should be removed from queue
 		queue_response = (
 			client.table(settings.queue_table).select('*')
 			.eq('id', crashed_dataset_task['task_id']).execute()
 		)
-		assert len(queue_response.data) == 0, 'Crashed task should be removed from queue'
+		assert len(queue_response.data) == 1, 'Interrupted task should remain in queue for retry'
+		assert queue_response.data[0]['is_processing'] is False, 'Task should be reset to is_processing=False'
 
-		# Status should be marked as errored with current_status back to idle
 		status_response = (
 			client.table(settings.statuses_table).select('*')
 			.eq('dataset_id', dataset_id).execute()
 		)
 		assert len(status_response.data) == 1
 		status = status_response.data[0]
-		assert status['has_error'] is True, 'Status should have has_error=True'
+		assert status['has_error'] is False, 'Interrupted task should not be marked as error'
 		assert status['current_status'] == 'idle', 'Status should be reset to idle'
-		assert 'deadwood_segmentation' in status['error_message'], 'Error should mention crashed stage'
+		assert status['error_message'] is None, 'Error message should be cleared'
 
 
 @pytest.fixture
@@ -681,10 +681,13 @@ def stale_active_task_without_stage_update(test_processor_user, auth_token):
 					client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 
 
-def test_background_process_detects_stale_active_task_without_stage_update(
-	stale_active_task_without_stage_update, auth_token
+def test_background_process_requeues_stale_task_without_stage_update(
+	stale_active_task_without_stage_update, auth_token, monkeypatch
 ):
-	"""Test that background_process clears a stale active queue row even if status stayed idle."""
+	"""A stale task that never wrote a stage update (processor killed at startup) is
+	re-queued rather than marked as error."""
+	monkeypatch.setattr(processor_module, '_kill_dangling_dataset_resources', lambda dataset_id: None)
+
 	dataset_id = stale_active_task_without_stage_update['dataset_id']
 
 	background_process()
@@ -694,7 +697,8 @@ def test_background_process_detects_stale_active_task_without_stage_update(
 			client.table(settings.queue_table).select('*')
 			.eq('id', stale_active_task_without_stage_update['task_id']).execute()
 		)
-		assert len(queue_response.data) == 0, 'Stale active task should be removed from queue'
+		assert len(queue_response.data) == 1, 'Task should remain in queue for retry'
+		assert queue_response.data[0]['is_processing'] is False, 'Task should be reset to is_processing=False'
 
 		status_response = (
 			client.table(settings.statuses_table).select('*')
@@ -702,9 +706,9 @@ def test_background_process_detects_stale_active_task_without_stage_update(
 		)
 		assert len(status_response.data) == 1
 		status = status_response.data[0]
-		assert status['has_error'] is True, 'Status should have has_error=True'
-		assert status['current_status'] == 'idle', 'Status should remain/reset to idle'
-		assert 'before the first stage status update' in status['error_message']
+		assert status['has_error'] is False, 'Task should not be marked as error'
+		assert status['current_status'] == 'idle'
+		assert status['error_message'] is None
 
 
 @pytest.fixture
@@ -763,8 +767,7 @@ def test_background_process_removes_stale_completed_active_task_without_marking_
 	stale_completed_active_task, auth_token, monkeypatch
 ):
 	"""Completed tasks should not be reclassified as crashes during stale queue recovery."""
-	issue_calls = []
-	monkeypatch.setattr(processor_module, 'create_processing_failure_issue', lambda **kwargs: issue_calls.append(kwargs))
+	monkeypatch.setattr(processor_module, '_kill_dangling_dataset_resources', lambda dataset_id: None)
 
 	dataset_id = stale_completed_active_task['dataset_id']
 
@@ -785,4 +788,16 @@ def test_background_process_removes_stale_completed_active_task_without_marking_
 		status = status_response.data[0]
 		assert status['has_error'] is False, 'Completed stale task should not be marked as errored'
 		assert status['current_status'] == 'idle', 'Completed status should remain idle'
-		assert issue_calls == [], 'Completed stale tasks should not create failure issues'
+
+
+def test_kill_dangling_resources_called_on_stale_task_recovery(crashed_dataset_task, monkeypatch):
+	"""_kill_dangling_dataset_resources is called with the correct dataset_id when
+	a stale active task is found, so orphaned containers and volumes are cleaned up."""
+	killed_ids = []
+	monkeypatch.setattr(processor_module, '_kill_dangling_dataset_resources', lambda dataset_id: killed_ids.append(dataset_id))
+
+	background_process()
+
+	assert crashed_dataset_task['dataset_id'] in killed_ids, (
+		'_kill_dangling_dataset_resources should be called with the stale task dataset_id'
+	)

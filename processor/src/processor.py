@@ -1,4 +1,5 @@
 import shutil
+import docker
 from pathlib import Path
 from processor.src.process_geotiff import process_geotiff
 from processor.src.process_odm import process_odm
@@ -18,6 +19,33 @@ from shared.logging import LogContext, LogCategory, UnifiedLogger, SupabaseHandl
 
 # Initialize logger with proper cleanup
 logger = UnifiedLogger(__name__)
+
+
+def _kill_dangling_dataset_resources(dataset_id: int):
+	"""Kill any running containers and remove volumes left over from an interrupted job."""
+	try:
+		client = docker.from_env()
+		label_filter = f'dt_dataset_id={dataset_id}'
+
+		containers = client.containers.list(all=True, filters={'label': label_filter})
+		for c in containers:
+			try:
+				if c.status == 'running':
+					c.stop(timeout=10)
+				c.remove(force=True)
+				logger.info(f'Removed dangling container {c.short_id} for dataset {dataset_id}')
+			except Exception as e:
+				logger.warning(f'Failed to remove dangling container {c.short_id} for dataset {dataset_id}: {e}')
+
+		volumes = client.volumes.list(filters={'label': label_filter})
+		for v in volumes:
+			try:
+				v.remove()
+				logger.info(f'Removed dangling volume {v.name} for dataset {dataset_id}')
+			except Exception as e:
+				logger.warning(f'Failed to remove dangling volume {v.name} for dataset {dataset_id}: {e}')
+	except Exception as e:
+		logger.warning(f'Error during dangling resource cleanup for dataset {dataset_id}: {e}')
 logger.add_supabase_handler(SupabaseHandler())
 
 # Maps each task type to its corresponding is_*_done flag and human-readable stage name.
@@ -499,11 +527,12 @@ def background_process():
 				status_resp = client.table(settings.statuses_table) \
 					.select('*').eq('dataset_id', active_task.dataset_id).execute()
 
-			should_mark_error = True
+			_kill_dangling_dataset_resources(active_task.dataset_id)
+
 			if status_resp.data:
 				status = status_resp.data[0]
-				completed = get_completed_stages(status)
 				if are_requested_stages_complete(status, active_task.task_types):
+					# All stages finished — just remove the stale queue row.
 					logger.info(
 						f'Removing stale completed queue task {active_task.id} for dataset {active_task.dataset_id}',
 						LogContext(
@@ -513,44 +542,32 @@ def background_process():
 							token=token,
 						),
 					)
-					should_mark_error = False
-					crashed_stage = 'completed'
-					error_msg = ''
-				elif status['current_status'] != 'idle':
-					crashed_stage = detect_crashed_stage(status, active_task.task_types)
-					error_msg = f'Processing container crashed during {crashed_stage}. Completed: {completed}'
-				elif completed:
-					crashed_stage = detect_crashed_stage(status, active_task.task_types)
-					error_msg = f'Processing container crashed after completing {completed} and before starting {crashed_stage}.'
-				else:
-					crashed_stage = 'startup'
-					error_msg = 'Processing container crashed before the first stage status update.'
-			else:
-				crashed_stage = 'unknown'
-				error_msg = 'Processing container crashed and no status row was available for recovery.'
+					with use_client(token) as client:
+						client.table(settings.queue_table).delete().eq('id', active_task.id).execute()
+					continue
 
-			if should_mark_error:
-				update_status(
-					token,
+			# Incomplete job — reset for retry rather than marking as error.
+			# Deployments and clean restarts interrupt jobs without any fault in the
+			# data or code; treating them as errors creates noise and requires manual
+			# re-queuing. The task is left in the queue with is_processing=False so
+			# it will be picked up again on the next processor run.
+			logger.info(
+				f'Re-queuing interrupted task {active_task.id} for dataset {active_task.dataset_id}',
+				LogContext(
+					category=LogCategory.PROCESS,
 					dataset_id=active_task.dataset_id,
-					current_status=StatusEnum.idle,
-					has_error=True,
-					error_message=error_msg,
-				)
-
-				try:
-					create_processing_failure_issue(
-						token=token,
-						dataset_id=active_task.dataset_id,
-						stage=crashed_stage,
-						error_message=error_msg,
-					)
-				except Exception as linear_error:
-					logger.warning(f'Failed to create Linear issue for stale active task: {linear_error}')
-
+					user_id=active_task.user_id,
+					token=token,
+				),
+			)
 			with use_client(token) as client:
-				client.table(settings.queue_table).delete().eq('id', active_task.id).execute()
-			continue
+				client.table(settings.statuses_table).update({
+					'current_status': StatusEnum.idle.value,
+					'has_error': False,
+					'error_message': None,
+				}).eq('dataset_id', active_task.dataset_id).execute()
+				client.table(settings.queue_table).update({'is_processing': False}).eq('id', active_task.id).execute()
+			return  # defer processing of re-queued task to the next cron run
 
 		task = get_next_task(token)
 		if task is None:

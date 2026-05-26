@@ -38,6 +38,7 @@ COPY ./shared /app/shared
 
 # Copy pytest configuration for custom marks
 COPY pytest.ini /app/pytest.ini
+COPY .dockerignore /app/.dockerignore
 
 # Copy entrypoint script and make it executable
 COPY processor/entrypoint.sh /entrypoint.sh
