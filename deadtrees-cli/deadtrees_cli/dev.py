@@ -509,6 +509,9 @@ class DevCommands:
 		except Exception as e:
 			print(f'⚠ Cleanup error: {str(e)}')
 
+		print('Stopping Docker compose stack...')
+		self._run_command(self._compose_lifecycle_cmd('down'), check=False)
+
 	def start(self, force_rebuild: bool = False, services: Optional[List[str]] = None):
 		"""Start the shared test environment, optionally scoped to a subset of services."""
 		selected_services = self._normalize_services(services) or self._get_compose_services()
@@ -665,6 +668,7 @@ class DevCommands:
 					'-f',
 					self.test_compose_file,
 					'exec',
+					'-T',
 					'processor-test',
 					'python',
 					# '-m',
