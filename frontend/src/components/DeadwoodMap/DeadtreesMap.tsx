@@ -801,22 +801,21 @@ const DeadtreesMap = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localWaybackItems.length]); // Only depend on length to run once when data loads
 
-  // Zoom threshold for switching between point and bbox display
-  const ZOOM_THRESHOLD = 1;
+  // Switch from point marker to bbox polygon once the bbox is at least this many pixels wide
+  const MIN_BBOX_PIXELS = 20;
 
-  // Style function for flags - shows point at low zoom, bbox at high zoom
+  // Style function for flags - shows point marker when bbox is too small to see, bbox otherwise
   const getFlagStyle = useCallback(
-    (feature: FeatureLike) => {
-      const showAsPoint = currentZoom < ZOOM_THRESHOLD;
+    (feature: FeatureLike, resolution: number) => {
+      const geometry = feature.getGeometry();
+      const extent = geometry?.getExtent();
+      const centerPoint = extent ? new Point(getCenter(extent)) : undefined;
+      const bboxWidthPx = extent ? (extent[2] - extent[0]) / resolution : 0;
+      const showAsPoint = bboxWidthPx < MIN_BBOX_PIXELS;
 
       if (showAsPoint) {
-        // Point style - need to return center point of the polygon geometry
-        const geometry = feature.getGeometry();
-        const extent = geometry?.getExtent();
-        const centerPoint = extent ? new Point(getCenter(extent)) : undefined;
-
         return new Style({
-          geometry: centerPoint, // Render at center point instead of polygon
+          geometry: centerPoint,
           image: new CircleStyle({
             radius: 8,
             fill: new Fill({ color: mapColors.flag.fill }),
@@ -824,14 +823,13 @@ const DeadtreesMap = () => {
           }),
         });
       } else {
-        // Bbox style
         return new Style({
           fill: new Fill({ color: "rgba(22, 119, 255, 0.15)" }),
           stroke: new Stroke({ color: mapColors.flag.stroke, width: 2 }),
         });
       }
     },
-    [currentZoom],
+    [],
   );
 
   // Create and update flags layer
@@ -883,7 +881,6 @@ const DeadtreesMap = () => {
         },
       );
     } else {
-      // Update style when zoom changes
       flagsLayerRef.current.setStyle(getFlagStyle);
     }
 
