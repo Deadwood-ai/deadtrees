@@ -414,6 +414,7 @@ export default function DatasetDetails() {
                 editing.handleStartEditing("forest_cover")
               }
               onEditDeadwood={() => editing.handleStartEditing("deadwood")}
+              onAuditClick={dataset ? () => navigate(`/dataset-audit/${dataset.id}`) : undefined}
               isLoggedIn={!!user}
             />
           </div>
@@ -552,6 +553,7 @@ export default function DatasetDetails() {
             onReportClick={() => setReportModalOpen(true)}
             onEditForestCover={() => editing.handleStartEditing("forest_cover")}
             onEditDeadwood={() => editing.handleStartEditing("deadwood")}
+            onAuditClick={dataset ? () => navigate(`/dataset-audit/${dataset.id}`) : undefined}
             isLoggedIn={!!user}
           />
         </div>
