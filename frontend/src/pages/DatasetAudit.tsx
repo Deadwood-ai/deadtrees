@@ -359,7 +359,7 @@ function DatasetAuditInner() {
 	const filteredDatasets = useMemo(() => {
 		if (!datasets) return [];
 
-		let filtered = datasets;
+		let filtered = datasets.filter((d) => !d.archived);
 
 		// Tab-based filtering
 		if (activeTab === "pending") {
