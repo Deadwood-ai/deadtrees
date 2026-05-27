@@ -268,12 +268,6 @@ function DatasetAuditInner() {
 		setSearchParams(params, { replace: true });
 	}, [activeTab, statusFilter, biomeFilter, countryFilter, auditorFilter, contributorFilter, hasFlagsFilter, idFilter, setSearchParams]);
 
-	// Minimum dataset ID for auditing
-	const MIN_AUDIT_DATASET_ID = 2559;
-	const hasAboveMinId = useMemo(() => {
-		return (datasets || []).some((d) => d.id > MIN_AUDIT_DATASET_ID);
-	}, [datasets]);
-
 	// Create maps for quick lookup
 	const auditMap = useMemo(() => {
 		if (!audits) return new Map<number, DatasetAuditUserInfo>();
@@ -366,12 +360,6 @@ function DatasetAuditInner() {
 		if (!datasets) return [];
 
 		let filtered = datasets;
-
-		// Apply minimum ID filter only for core audit workflow tabs.
-		// Edits & Flags and Reference should include legacy dataset IDs.
-		if ((activeTab === "pending" || activeTab === "completed") && hasAboveMinId) {
-			filtered = filtered.filter((dataset) => dataset.id > MIN_AUDIT_DATASET_ID);
-		}
 
 		// Tab-based filtering
 		if (activeTab === "pending") {
@@ -498,7 +486,6 @@ function DatasetAuditInner() {
 		correctionsMap,
 		contributorMap,
 		flaggedAgg,
-		hasAboveMinId,
 		referenceDatasetIds,
 	]);
 
@@ -571,15 +558,13 @@ function DatasetAuditInner() {
 	// Compute counts for tabs
 	const pendingCount = useMemo(() => {
 		if (!datasets) return 0;
-		const base = hasAboveMinId ? datasets.filter((d) => d.id > MIN_AUDIT_DATASET_ID) : datasets;
-		return base.filter((d) => !d.is_audited && isProcessingComplete(d)).length;
-	}, [datasets, hasAboveMinId]);
+		return datasets.filter((d) => !d.is_audited && isProcessingComplete(d)).length;
+	}, [datasets]);
 
 	const completedCount = useMemo(() => {
 		if (!datasets) return 0;
-		const base = hasAboveMinId ? datasets.filter((d) => d.id > MIN_AUDIT_DATASET_ID) : datasets;
-		return base.filter((d) => d.is_audited).length;
-	}, [datasets, hasAboveMinId]);
+		return datasets.filter((d) => d.is_audited).length;
+	}, [datasets]);
 
 	const referenceCount = useMemo(() => {
 		if (!datasets) return 0;
