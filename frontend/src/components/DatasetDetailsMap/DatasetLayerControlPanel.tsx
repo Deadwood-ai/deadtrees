@@ -3,6 +3,7 @@ import { Segmented, Slider, Checkbox, Button, Divider, Tooltip, Select } from "a
 import {
   FlagOutlined,
   EditOutlined,
+  AuditOutlined,
   WarningOutlined,
   CheckCircleOutlined,
   ExclamationCircleOutlined,
@@ -50,6 +51,7 @@ interface DatasetLayerControlPanelProps {
   onReportClick: () => void;
   onEditForestCover?: () => void;
   onEditDeadwood?: () => void;
+  onAuditClick?: () => void;
   isLoggedIn: boolean;
 }
 
@@ -108,6 +110,7 @@ const DatasetLayerControlPanel = ({
   onReportClick,
   onEditForestCover,
   onEditDeadwood,
+  onAuditClick,
   isLoggedIn,
 }: DatasetLayerControlPanelProps) => {
   const [showAttributions, setShowAttributions] = useState(false);
@@ -334,6 +337,17 @@ const DatasetLayerControlPanel = ({
               block
             >
               Edit deadwood cover
+            </Button>
+          )}
+
+          {canAudit && onAuditClick && (
+            <Button
+              size="small"
+              icon={<AuditOutlined />}
+              onClick={onAuditClick}
+              block
+            >
+              Audit dataset
             </Button>
           )}
 
