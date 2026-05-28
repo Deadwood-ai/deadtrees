@@ -52,6 +52,7 @@ import YearImagerySelector from "./YearImagerySelector";
 import PolygonStatsModal from "./PolygonStatsModal";
 import { useDatasetMap } from "../../hooks/useDatasetMapProvider";
 import { useAuth } from "../../hooks/useAuthProvider";
+import { useCanAudit } from "../../hooks/useUserPrivileges";
 import { useMapFlags, useCreateMapFlag } from "../../hooks/useMapFlags";
 import { useWaybackItemsDebounced } from "../../hooks/useWaybackItems";
 import { usePolygonAnalysis } from "../../hooks/usePolygonAnalysis";
@@ -227,8 +228,13 @@ const DeadtreesMap = () => {
   const [deadwoodWarningModalOpen, setDeadwoodWarningModalOpen] =
     useState(false);
 
+  // Auth privilege — needed before polygonAnalysis so effectiveModelVersion is available
+  const { canAudit } = useCanAudit();
+  // Non-auditors are locked to v1; auditors can freely switch
+  const effectiveModelVersion: MapModelVersion = canAudit ? modelVersion : "v1";
+
   // Polygon analysis (drawing + stats)
-  const polygonAnalysis = usePolygonAnalysis(mapRef, modelVersion);
+  const polygonAnalysis = usePolygonAnalysis(mapRef, effectiveModelVersion);
 
   // Wayback imagery state - using debounced location-based query
   // Default to a recent Wayback release (31144 = 2024) for immediate satellite display
@@ -438,11 +444,11 @@ const DeadtreesMap = () => {
         const [deadwoodResult, forestResult] = await Promise.all([
           getPixelValueOfCoordinate({
             coordinates: event.coordinate,
-            cogUrl: getDeadwoodCOGUrl(year, modelVersion),
+            cogUrl: getDeadwoodCOGUrl(year, effectiveModelVersion),
           }),
           getPixelValueOfCoordinate({
             coordinates: event.coordinate,
-            cogUrl: getForestCOGUrl(year, modelVersion),
+            cogUrl: getForestCOGUrl(year, effectiveModelVersion),
           }),
         ]);
 
@@ -524,7 +530,7 @@ const DeadtreesMap = () => {
         setClickedValues({ forestPct, deadwoodPct });
       }
     },
-    [showDeadwood, showForest, modelVersion],
+    [showDeadwood, showForest, effectiveModelVersion],
   );
 
   useEffect(() => {
@@ -548,7 +554,7 @@ const DeadtreesMap = () => {
       // Create only 2 layers - one for forest, one for deadwood (for current year)
       // Forest layer: Light green → Dark green gradient based on cover intensity
       const forestLayer = new TileLayerWebGL({
-        source: getCachedForestSource(selectedYear, modelVersion),
+        source: getCachedForestSource(selectedYear, effectiveModelVersion),
         className: "forest-layer",
         style: {
           color: [
@@ -578,7 +584,7 @@ const DeadtreesMap = () => {
       // Deadwood layer: selective yellow spectrum with enhanced visibility for high values
       // Low values are more transparent, high values are more visible
       const deadwoodLayer = new TileLayerWebGL({
-        source: getCachedDeadwoodSource(selectedYear, modelVersion),
+        source: getCachedDeadwoodSource(selectedYear, effectiveModelVersion),
         className: "deadwood-layer",
         visible: true, // Both layers visible by default
         style: {
@@ -780,19 +786,19 @@ const DeadtreesMap = () => {
         }
       };
     }
-  }, [selectedYear, modelVersion, isDrawingFlag, polygonAnalysis.isDrawing, handleClick]);
+  }, [selectedYear, effectiveModelVersion, isDrawingFlag, polygonAnalysis.isDrawing, handleClick]);
 
   // Update sources when year or model version changes (use cached sources for instant switching)
   useEffect(() => {
     if (forestLayerRef.current && deadwoodLayerRef.current) {
       // Use cached sources - instant if already loaded
-      forestLayerRef.current.setSource(getCachedForestSource(selectedYear, modelVersion));
-      deadwoodLayerRef.current.setSource(getCachedDeadwoodSource(selectedYear, modelVersion));
+      forestLayerRef.current.setSource(getCachedForestSource(selectedYear, effectiveModelVersion));
+      deadwoodLayerRef.current.setSource(getCachedDeadwoodSource(selectedYear, effectiveModelVersion));
       // Maintain visibility state after source update
       forestLayerRef.current.setVisible(showForest);
       deadwoodLayerRef.current.setVisible(showDeadwood);
     }
-  }, [selectedYear, modelVersion, showForest, showDeadwood]);
+  }, [selectedYear, effectiveModelVersion, showForest, showDeadwood]);
 
   // Initialize Wayback style and auto-select best imagery when items first load
   useEffect(() => {
@@ -1410,7 +1416,7 @@ const DeadtreesMap = () => {
             clickedValues={clickedValues}
             variant="floating-card"
             modelVersion={modelVersion}
-            onModelVersionChange={setModelVersion}
+            onModelVersionChange={canAudit ? setModelVersion : undefined}
           />
         </div>
 
@@ -1581,7 +1587,7 @@ const DeadtreesMap = () => {
               clickedValues={clickedValues}
               variant="drawer-sheet"
               modelVersion={modelVersion}
-              onModelVersionChange={setModelVersion}
+              onModelVersionChange={canAudit ? setModelVersion : undefined}
             />
           </div>
         </Drawer>
