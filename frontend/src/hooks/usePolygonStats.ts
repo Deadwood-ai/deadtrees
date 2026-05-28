@@ -29,7 +29,7 @@ export function usePolygonStats() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchStats = async (polygon: GeoJSON.Polygon) => {
+  const fetchStats = async (polygon: GeoJSON.Polygon, modelVersion?: string) => {
     setLoading(true);
     setError(null);
     setData(null);
@@ -39,7 +39,7 @@ export function usePolygonStats() {
       console.debug("[PolygonStats] Polygon:", JSON.stringify(polygon));
       const response = await axios.post<PolygonStatsResponse>(
         `${Settings.API_URL}/dte-stats/polygon`,
-        { polygon },
+        { polygon, model_version: modelVersion ?? "v1" },
       );
       console.debug("[PolygonStats] Response:", JSON.stringify(response.data));
       setData(response.data);

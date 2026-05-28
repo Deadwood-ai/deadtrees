@@ -5,6 +5,7 @@ import { mapColors } from "../../theme/mapColors";
 import { palette } from "../../theme/palette";
 import MapLegend from "./MapLegend";
 import { standingDeadwoodLayerExplanation } from "../../utils/standingDeadwoodInfo";
+import type { MapModelVersion } from "../../utils/getDeadwoodCOGUrl";
 
 interface LayerControlPanelProps {
   // Basemap
@@ -35,6 +36,9 @@ interface LayerControlPanelProps {
     deadwoodPct: number;
   } | null;
   variant?: "floating-card" | "drawer-sheet";
+  // Model version
+  modelVersion?: MapModelVersion;
+  onModelVersionChange?: (version: MapModelVersion) => void;
 }
 
 // Basemap options: Streets and Satellite
@@ -64,6 +68,8 @@ const LayerControlPanel = ({
   flagsCount,
   clickedValues = null,
   variant = "floating-card",
+  modelVersion = "v2",
+  onModelVersionChange,
 }: LayerControlPanelProps) => {
   const [showAttributions, setShowAttributions] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
@@ -110,6 +116,23 @@ const LayerControlPanel = ({
           </Tooltip>
         </div>
       </div>
+
+      {onModelVersionChange && (
+        <>
+          <Divider className="my-2.5" />
+          <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">Dataset Version</div>
+          <Segmented
+            size="small"
+            block
+            value={modelVersion}
+            onChange={(value) => onModelVersionChange(value as MapModelVersion)}
+            options={[
+              { value: "v1", label: "v1" },
+              { value: "v2", label: "v2" },
+            ]}
+          />
+        </>
+      )}
 
       <Divider className="my-2.5" />
 
