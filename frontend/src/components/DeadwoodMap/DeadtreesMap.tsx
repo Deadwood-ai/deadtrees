@@ -875,11 +875,12 @@ const DeadtreesMap = () => {
           if (feature) {
             const flagId = feature.get("flagId");
             const description = feature.get("description");
+            const year = feature.get("year");
             const popupElement = flagHoverOverlayRef.current.getElement();
             if (popupElement) {
               popupElement.innerHTML = `
               <div style="font-family: system-ui, sans-serif;">
-                <div style="font-weight: 600; color: ${mapColors.flag.stroke}; margin-bottom: 4px;">Flag #${flagId}</div>
+                <div style="font-weight: 600; color: ${mapColors.flag.stroke}; margin-bottom: 4px;">Flag #${flagId}${year ? ` · ${year}` : ""}</div>
                 <div style="color: ${palette.neutral[800]}; line-height: 1.4;">${description}</div>
               </div>
             `;
@@ -921,6 +922,7 @@ const DeadtreesMap = () => {
         const feature = new Feature({ geometry: polygon });
         feature.set("flagId", flag.id);
         feature.set("description", flag.description);
+        feature.set("year", flag.year ?? null);
         // Store center for point rendering
         const centerX = (extent[0] + extent[2]) / 2;
         const centerY = (extent[1] + extent[3]) / 2;
