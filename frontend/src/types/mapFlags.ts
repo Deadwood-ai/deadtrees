@@ -7,6 +7,7 @@ export interface IMapFlag {
   description: string;
   category: MapFlagCategory;
   year?: string | null;
+  model_version?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -16,5 +17,6 @@ export interface CreateMapFlagInput {
   description: string;
   category?: MapFlagCategory;
   year?: string;
+  model_version?: string;
 }
 

@@ -46,6 +46,7 @@ export function useCreateMapFlag() {
           description: input.description,
           category: input.category ?? "other",
           year: input.year ?? null,
+          model_version: input.model_version ?? null,
         })
         .select("*")
         .single();

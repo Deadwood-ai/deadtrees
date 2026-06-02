@@ -898,7 +898,10 @@ const DeadtreesMap = () => {
     const source = flagsLayerRef.current.getSource();
     if (source) {
       source.clear();
-      mapFlags.forEach((flag: IMapFlag) => {
+      const visibleFlags = mapFlags.filter(
+        (f) => !f.model_version || f.model_version === effectiveModelVersion,
+      );
+      visibleFlags.forEach((flag: IMapFlag) => {
         const [minLon, minLat, maxLon, maxLat] = flag.bbox;
         // Create polygon from bbox in EPSG:3857
         const extent = transformExtent(
@@ -925,7 +928,7 @@ const DeadtreesMap = () => {
         source.addFeature(feature);
       });
     }
-  }, [mapFlags, user, getFlagStyle]);
+  }, [mapFlags, user, getFlagStyle, effectiveModelVersion]);
 
   // Toggle flags layer visibility
   useEffect(() => {
@@ -1157,6 +1160,7 @@ const DeadtreesMap = () => {
         bbox: pendingFlagBbox,
         description: flagDescription.trim(),
         year: selectedYear,
+        model_version: effectiveModelVersion,
       });
       message.success("Flag added successfully");
       setFlagModalOpen(false);
@@ -1166,7 +1170,7 @@ const DeadtreesMap = () => {
       message.error("Failed to add flag");
       console.error(error);
     }
-  }, [pendingFlagBbox, flagDescription, selectedYear, createFlagMutation]);
+  }, [pendingFlagBbox, flagDescription, selectedYear, effectiveModelVersion, createFlagMutation]);
 
   // Cancel flag modal
   const handleFlagCancel = useCallback(() => {
