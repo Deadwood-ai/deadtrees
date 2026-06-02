@@ -11,7 +11,7 @@ import math
 import re
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import numpy as np
 import rasterio
@@ -68,7 +68,7 @@ class PolygonStatsRequest(BaseModel):
 			}
 		}
 	)
-	model_version: str = Field(
+	model_version: Literal["v1", "v2"] = Field(
 		default="v1",
 		description="Model version to use for statistics ('v1' or 'v2')",
 	)
