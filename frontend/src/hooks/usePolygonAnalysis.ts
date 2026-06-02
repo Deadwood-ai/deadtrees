@@ -313,6 +313,7 @@ export function usePolygonAnalysis(mapRef: React.MutableRefObject<Map | null>, m
     stats,
     resetDrawingState,
     removeDrawInteraction,
+    modelVersion,
   ]);
 
   const cancelDrawing = useCallback(() => {

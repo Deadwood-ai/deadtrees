@@ -9,6 +9,7 @@ const V2_DEADWOOD_PREFIX = "run_v2004_seasonal_filter_fold_None_epoch_3_deadwood
 const V2_FOREST_PREFIX = "run_v2004_seasonal_filter_fold_None_epoch_3_forest_";
 
 export const getDeadwoodCOGUrl = (year: string | null, version: MapModelVersion = "v1") => {
+  if (!year || year.trim() === "") throw new Error("Invalid year for Deadwood COG URL");
   if (version === "v2") {
     return `${V2_BASE_URL}${V2_DEADWOOD_PREFIX}${year}.cog.tif`;
   }
@@ -16,6 +17,7 @@ export const getDeadwoodCOGUrl = (year: string | null, version: MapModelVersion 
 };
 
 export const getForestCOGUrl = (year: string | null, version: MapModelVersion = "v1") => {
+  if (!year || year.trim() === "") throw new Error("Invalid year for Forest COG URL");
   if (version === "v2") {
     return `${V2_BASE_URL}${V2_FOREST_PREFIX}${year}.cog.tif`;
   }
