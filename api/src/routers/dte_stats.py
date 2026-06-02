@@ -11,7 +11,7 @@ import math
 import re
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import numpy as np
 import rasterio
@@ -45,9 +45,12 @@ PIXEL_AREA_MERCATOR_M2 = PIXEL_SIZE_MERCATOR * PIXEL_SIZE_MERCATOR  # ~365.16 m�
 TREE_COVER_THRESHOLD = 0.10  # 10% — captures sparse forests and open canopy
 DEADWOOD_THRESHOLD = 0.50    # 50% — high confidence for standing deadwood
 
-# COG filename pattern
+# COG filename patterns per model version
 COG_PATTERN = re.compile(
 	r"run_v1004_v1000_crop_half_fold_None_checkpoint_199_(deadwood|forest)_(\d{4})\.cog\.tif"
+)
+COG_PATTERN_V2 = re.compile(
+	r"run_v2004_seasonal_filter_fold_None_epoch_3_(deadwood|forest)_(\d{4})\.cog\.tif"
 )
 
 
@@ -64,6 +67,10 @@ class PolygonStatsRequest(BaseModel):
 				"coordinates": [[[10.64, 51.77], [10.70, 51.77], [10.70, 51.80], [10.64, 51.80], [10.64, 51.77]]]
 			}
 		}
+	)
+	model_version: Literal["v1", "v2"] = Field(
+		default="v1",
+		description="Model version to use for statistics ('v1' or 'v2')",
 	)
 
 
@@ -124,9 +131,9 @@ def compute_geodesic_area_km2(geojson_polygon: dict) -> float:
 	return abs(area_m2) / 1_000_000
 
 
-def discover_available_cogs(maps_dir: Path) -> dict[str, dict[int, Path]]:
+def discover_available_cogs(maps_dir: Path, pattern: re.Pattern = COG_PATTERN) -> dict[str, dict[int, Path]]:
 	"""
-	Scan the dte_maps directory and return available COGs grouped by type and year.
+	Scan a dte_maps directory and return available COGs grouped by type and year.
 	Returns: {"deadwood": {2020: Path(...), ...}, "forest": {2020: Path(...), ...}}
 	"""
 	result: dict[str, dict[int, Path]] = {"deadwood": {}, "forest": {}}
@@ -136,7 +143,7 @@ def discover_available_cogs(maps_dir: Path) -> dict[str, dict[int, Path]]:
 		return result
 
 	for f in maps_dir.iterdir():
-		m = COG_PATTERN.match(f.name)
+		m = pattern.match(f.name)
 		if m:
 			cog_type = m.group(1)
 			year = int(m.group(2))
@@ -296,9 +303,13 @@ def get_polygon_stats(request: PolygonStatsRequest):
 	if area_km2 < 0.0001:
 		raise HTTPException(status_code=400, detail="Polygon is too small")
 
-	# Discover available COGs
-	maps_dir = settings.dte_maps_path
-	cog_map = discover_available_cogs(maps_dir)
+	# Discover available COGs for the requested model version
+	if request.model_version == "v2":
+		maps_dir = settings.dte_maps_v2_path
+		cog_map = discover_available_cogs(maps_dir, COG_PATTERN_V2)
+	else:
+		maps_dir = settings.dte_maps_path
+		cog_map = discover_available_cogs(maps_dir, COG_PATTERN)
 
 	all_years = sorted(set(list(cog_map["deadwood"].keys()) + list(cog_map["forest"].keys())))
 

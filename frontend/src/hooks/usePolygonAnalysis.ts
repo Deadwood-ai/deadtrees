@@ -68,7 +68,7 @@ function getAreaColor(areaKm2: number): {
 // Hook
 // ---------------------------------------------------------------------------
 
-export function usePolygonAnalysis(mapRef: React.MutableRefObject<Map | null>) {
+export function usePolygonAnalysis(mapRef: React.MutableRefObject<Map | null>, modelVersion?: string) {
   // ---- state ----
   const [isDrawing, setIsDrawing] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -291,7 +291,7 @@ export function usePolygonAnalysis(mapRef: React.MutableRefObject<Map | null>) {
           coordinates: [coords4326],
         };
         setModalOpen(true);
-        stats.fetchStats(geoJsonPolygon);
+        stats.fetchStats(geoJsonPolygon, modelVersion);
       }
 
       resetDrawingState();
@@ -313,6 +313,7 @@ export function usePolygonAnalysis(mapRef: React.MutableRefObject<Map | null>) {
     stats,
     resetDrawingState,
     removeDrawInteraction,
+    modelVersion,
   ]);
 
   const cancelDrawing = useCallback(() => {

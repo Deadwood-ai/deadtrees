@@ -73,6 +73,7 @@ class Settings(BaseSettings):
 
 	# DTE maps (deadwood/forest cover COGs)
 	DTE_MAPS_PATH: str = '/data/assets/dte_maps'
+	DTE_MAPS_V2_PATH: str = '/data/assets/dte_maps_v2'
 
 	# directly specify the locations for several files
 	ARCHIVE_DIR: str = 'archive'
@@ -243,6 +244,10 @@ class Settings(BaseSettings):
 	@property
 	def dte_maps_path(self) -> Path:
 		return Path(self.DTE_MAPS_PATH)
+
+	@property
+	def dte_maps_v2_path(self) -> Path:
+		return Path(self.DTE_MAPS_V2_PATH)
 
 	@property
 	def _tables(self) -> dict:
