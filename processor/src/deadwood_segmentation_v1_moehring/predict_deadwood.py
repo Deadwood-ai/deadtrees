@@ -3,6 +3,8 @@ from shared.logger import logger
 from shared.logging import LogContext, LogCategory
 from shared.models import LabelDataEnum
 from shared.labels import delete_model_prediction_labels
+from shared.db import login
+from shared.settings import settings
 from .inference import DeadwoodInference
 from ..exceptions import ProcessingError
 import rasterio
@@ -41,6 +43,11 @@ def predict_deadwood(dataset_id: int, file_path: Path, user_id: str, token: str)
 			LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
 		)
 		polygons = deadwood_model.inference_deadwood(str(file_path))
+
+		# Inference can run longer than the JWT lifetime (~1h), which would make the
+		# subsequent label delete/write fail with PGRST303 'JWT expired'. Refresh the
+		# token now that the long-running work is done and DB writes are imminent.
+		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 
 		if len(polygons) == 0:
 			logger.warning(
