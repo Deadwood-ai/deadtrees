@@ -5,6 +5,8 @@ import rasterio
 from shared.logger import logger
 from shared.logging import LogContext, LogCategory
 from shared.models import COMBINED_MODEL_CHECKPOINT_NAME, COMBINED_MODEL_CONFIG, COMBINED_MODEL_MODULE, LabelDataEnum
+from shared.db import login
+from shared.settings import settings
 
 from ..exceptions import ProcessingError
 from ..utils.prediction_labels import create_versioned_model_prediction_label
@@ -34,6 +36,11 @@ def predict_combined(dataset_id: int, file_path: Path, user_id: str, token: str)
         deadwood_polygons, treecover_polygons = model.inference(str(file_path))
         if forest_cover_stats := model.simplification_stats.get('forest_cover'):
             log('Applied topology-preserving forest cover simplification during inference', **forest_cover_stats)
+
+        # Inference can run longer than the JWT lifetime (~1h), which would make the
+        # subsequent label delete/write fail with PGRST303 'JWT expired'. Refresh the
+        # token now that the long-running work is done and DB writes are imminent.
+        token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 
         with rasterio.open(str(file_path)) as src:
             src_crs = src.crs
