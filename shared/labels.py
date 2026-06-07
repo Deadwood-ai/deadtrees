@@ -19,6 +19,7 @@ from shared.db import use_client
 from shared.settings import settings
 from shared.logger import logger
 from shared.logging import LogContext, LogCategory
+from shared.retry import retry_on_transient_error
 
 MAX_CHUNK_SIZE = 1024 * 1024 * 5  # 5MB per chunk
 
@@ -163,8 +164,31 @@ def upload_geometry_chunk(
 		geometry = GeometryModel(label_id=label_id, geometry=geom.__geo_interface__, properties=properties)
 		geometry_records.append(geometry.model_dump(exclude={'id', 'created_at'}))
 
+	def _count_existing() -> int:
+		response = client.table(table).select('id', count='exact').eq('label_id', label_id).execute()
+		return response.count or 0
+
+	# Baseline row count so that, if a transient failure drops the connection
+	# *after* the insert committed, the retry can detect the rows already landed
+	# and skip re-inserting (a PostgREST batch insert is atomic, so the count is
+	# either the baseline or baseline + len(records)). If we can't read a
+	# baseline, fall back to plain retry.
 	try:
+		count_before = _count_existing()
+	except Exception:
+		count_before = None
+
+	def _already_committed() -> bool:
+		if count_before is None:
+			return False
+		return _count_existing() >= count_before + len(geometry_records)
+
+	@retry_on_transient_error(verify_succeeded=_already_committed)
+	def _insert() -> None:
 		client.table(table).insert(geometry_records).execute()
+
+	try:
+		_insert()
 	except Exception as e:
 		logger.error(f'Error uploading geometry chunk: {str(e)}', extra={'token': token})
 		raise Exception(f'Error uploading geometry chunk: {str(e)}')
