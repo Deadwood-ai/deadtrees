@@ -36,8 +36,9 @@ DEFAULT_TASK_TYPES = [
 	"cog",
 	"thumbnail",
 	"metadata",
-	"deadwood",
-	"treecover",
+	"deadwood_v1",
+	"treecover_v1",
+	"deadwood_treecover_combined_v2",
 ]
 
 
