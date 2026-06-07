@@ -4,6 +4,7 @@ from .models import StatusEnum
 from .db import use_client
 from .settings import settings
 from .logger import logger
+from .retry import retry_on_transient_error
 from shared.logging import LogContext, LogCategory
 
 
@@ -75,16 +76,21 @@ def update_status(
 
 		if update_data:
 			update_data['updated_at'] = datetime.now(timezone.utc).isoformat()
-			with use_client(token) as client:
-				# First check if status exists
-				result = client.table(settings.statuses_table).select('id').eq('dataset_id', dataset_id).execute()
 
-				if not result.data:
-					# Create new status row if it doesn't exist
-					client.table(settings.statuses_table).insert({'dataset_id': dataset_id, **update_data}).execute()
-				else:
-					# Update existing status
-					client.table(settings.statuses_table).update(update_data).eq('dataset_id', dataset_id).execute()
+			@retry_on_transient_error
+			def _write_status() -> None:
+				with use_client(token) as client:
+					# First check if status exists
+					result = client.table(settings.statuses_table).select('id').eq('dataset_id', dataset_id).execute()
+
+					if not result.data:
+						# Create new status row if it doesn't exist
+						client.table(settings.statuses_table).insert({'dataset_id': dataset_id, **update_data}).execute()
+					else:
+						# Update existing status
+						client.table(settings.statuses_table).update(update_data).eq('dataset_id', dataset_id).execute()
+
+			_write_status()
 
 	except Exception as e:
 		logger.error(

@@ -5,8 +5,21 @@ from datetime import datetime
 from shared.logger import logger
 from shared.settings import settings
 from shared.testing.safety import test_environment_only
+from shared.retry import retry_on_transient_error
 
 from shared.logging import LogContext, LogCategory
+
+
+@retry_on_transient_error
+def _connect_with_retry(ssh: paramiko.SSHClient, **connect_kwargs) -> None:
+	"""Open the SSH connection, retrying transient failures.
+
+	Connection establishment is where the storage-server flakiness shows up
+	("Error reading SSH protocol banner") when the server is briefly overloaded.
+	Retrying only the connect (not the subsequent transfer) keeps this safe:
+	there are no partial-file side effects to undo before reconnecting.
+	"""
+	ssh.connect(**connect_kwargs)
 
 
 def pull_file_from_storage_server(remote_file_path: str, local_file_path: str, token: str, dataset_id: int):
@@ -27,7 +40,8 @@ def pull_file_from_storage_server(remote_file_path: str, local_file_path: str, t
 		)
 		port = 2222 if settings.DEV_MODE else 22
 
-		ssh.connect(
+		_connect_with_retry(
+			ssh,
 			hostname=settings.STORAGE_SERVER_IP,
 			username=settings.STORAGE_SERVER_USERNAME,
 			pkey=pkey,
@@ -83,7 +97,8 @@ def push_file_to_storage_server(local_file_path: str, remote_file_path: str, tok
 		)
 		port = 2222 if settings.DEV_MODE else 22
 
-		ssh.connect(
+		_connect_with_retry(
+			ssh,
 			hostname=settings.STORAGE_SERVER_IP,
 			username=settings.STORAGE_SERVER_USERNAME,
 			pkey=pkey,
@@ -268,7 +283,8 @@ def check_file_exists_on_storage(remote_file_path: str, token: str) -> bool:
 
 		port = 2222 if settings.DEV_MODE else 22
 
-		ssh.connect(
+		_connect_with_retry(
+			ssh,
 			hostname=settings.STORAGE_SERVER_IP,
 			username=settings.STORAGE_SERVER_USERNAME,
 			pkey=pkey,

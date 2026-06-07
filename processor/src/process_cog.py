@@ -11,6 +11,7 @@ from .utils.ssh import push_file_to_storage_server
 from .utils.local_ortho import ensure_local_ortho
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
 from shared.status import update_status
+from shared.retry import retry_on_transient_error
 from shared.logging import LogContext, LogCategory
 
 
@@ -94,9 +95,16 @@ def process_cog(task: QueueTask, temp_dir: Path):
 		if not user:
 			raise AuthenticationError('Token refresh failed', token=token, task_id=task.id)
 
-		with use_client(token) as client:
-			send_data = {k: v for k, v in cog.model_dump().items() if v is not None}
-			client.table(settings.cogs_table).upsert(send_data, on_conflict='dataset_id').execute()
+		send_data = {k: v for k, v in cog.model_dump().items() if v is not None}
+
+		# upsert is idempotent (on_conflict='dataset_id'), so retrying a transient
+		# disconnect/SSL-handshake timeout cannot create duplicate rows.
+		@retry_on_transient_error
+		def _save_cog_metadata() -> None:
+			with use_client(token) as client:
+				client.table(settings.cogs_table).upsert(send_data, on_conflict='dataset_id').execute()
+
+		_save_cog_metadata()
 
 		# Update final status
 		update_status(token, dataset_id=ortho.dataset_id, current_status=StatusEnum.idle, is_cog_done=True)

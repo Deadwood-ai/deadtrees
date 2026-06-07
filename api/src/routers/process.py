@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from shared.db import verify_token, use_client, use_service_client, login
 from shared.settings import settings
 from shared.models import TaskPayload, QueueTask, TaskTypeEnum
+from shared.retry import retry_on_transient_error
 from shared.logging import LogContext, LogCategory, UnifiedLogger, SupabaseHandler
 
 # create the router for the processing
@@ -145,7 +146,11 @@ def create_processing_task(
 		raise HTTPException(status_code=500, detail=msg)
 
 	# Check if dataset is currently being processed and clean up old queue items.
-	try:
+	# The reads are idempotent and the reset/delete are safe to repeat, so the
+	# whole block is retried on a transient DB blip. The internal 409s are not
+	# transient, so they propagate immediately instead of being retried.
+	@retry_on_transient_error
+	def _check_and_clean_queue() -> None:
 		with use_client(token) as client:
 			# If the processor already picked up a task, block reruns.
 			# This is more robust than relying solely on v2_statuses.current_status, which may lag.
@@ -209,6 +214,8 @@ def create_processing_task(
 					),
 				)
 
+	try:
+		_check_and_clean_queue()
 	except HTTPException:
 		raise
 	except Exception as e:
@@ -227,12 +234,30 @@ def create_processing_task(
 		is_processing=False,
 	)
 
-	# Add the task to the queue
-	try:
+	# Add the task to the queue. The cleanup above removed any existing rows for
+	# this dataset, so if a transient failure drops the connection after the
+	# insert committed, we can detect the row already exists and re-read it
+	# instead of inserting a duplicate task.
+	def _task_already_inserted() -> bool:
+		with use_client(token) as client:
+			existing = client.table(settings.queue_table).select('id').eq('dataset_id', dataset_id).execute()
+			return bool(existing.data)
+
+	@retry_on_transient_error(verify_succeeded=_task_already_inserted)
+	def _insert_task() -> Optional[dict]:
 		with use_client(token) as client:
 			send_data = {k: v for k, v in payload.model_dump().items() if v is not None and k != 'id'}
 			response = client.table(settings.queue_table).insert(send_data).execute()
-			task = TaskPayload(**response.data[0])
+			return response.data[0]
+
+	try:
+		inserted = _insert_task()
+		if inserted is None:
+			# Insert committed but the response was lost; re-read the queued row.
+			with use_client(token) as client:
+				existing = client.table(settings.queue_table).select('*').eq('dataset_id', dataset_id).execute()
+				inserted = existing.data[0]
+		task = TaskPayload(**inserted)
 
 		logger.info(
 			f'Added task to queue for dataset {dataset_id}',
