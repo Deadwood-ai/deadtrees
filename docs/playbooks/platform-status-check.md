@@ -26,6 +26,14 @@ Check the surfaces relevant to the question:
 - Zulip reports and automation summaries when relevant
 - reference exports and backups for data freshness incidents
 
+## Operator Chat Integration
+
+This playbook covers platform health only: database, API, storage, processing,
+PostHog, Zulip, exports, and backups. The broader Operator Chat workflow in
+[`operator-chat.md`](operator-chat.md) wraps this with product-health,
+project-management, Gmail, and handoff checks. Use this playbook as the daily
+full platform check inside that broader operator cadence.
+
 ## Fast Preflight
 
 1. Confirm local access files exist if host or MCP access is needed:
