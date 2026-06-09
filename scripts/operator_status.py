@@ -79,13 +79,26 @@ def git_status() -> dict[str, Any]:
 		divergence['behind'] = int(branch_line.split('behind ', 1)[1].split(']', 1)[0].split(',', 1)[0])
 
 	head = run_command(['git', 'rev-parse', '--short', 'HEAD'], timeout=5)
+	upstream = run_command(['git', 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], timeout=5)
+	ahead_commits: list[str] = []
+	behind_commits: list[str] = []
+	if upstream['ok']:
+		if divergence['ahead']:
+			ahead = run_command(['git', 'log', '--oneline', '--max-count=3', f'{upstream["stdout"]}..HEAD'], timeout=5)
+			ahead_commits = ahead['stdout'].splitlines() if ahead['ok'] else []
+		if divergence['behind']:
+			behind = run_command(['git', 'log', '--oneline', '--max-count=3', f'HEAD..{upstream["stdout"]}'], timeout=5)
+			behind_commits = behind['stdout'].splitlines() if behind['ok'] else []
 	return {
 		'ok': True,
 		'branch': branch_line.removeprefix('## '),
 		'head': head['stdout'] if head['ok'] else None,
+		'upstream': upstream['stdout'] if upstream['ok'] else None,
 		'dirty_count': len(dirty_files),
 		'dirty_files': dirty_files[:8],
 		'divergence': divergence,
+		'ahead_commits': ahead_commits,
+		'behind_commits': behind_commits,
 	}
 
 
@@ -184,7 +197,26 @@ def ssh_probe(env_name: str, command: str, timeout: int) -> dict[str, Any]:
 		return {'ok': False, 'host_env': env_name, 'error': compact_error(result)}
 
 	lines = [line.strip() for line in result['stdout'].splitlines() if line.strip()]
-	return {'ok': True, 'host_env': env_name, 'lines': lines[:12], 'duration_ms': result['duration_ms']}
+	return {
+		'ok': True,
+		'host_env': env_name,
+		'lines': lines[:12],
+		'disks': parse_disk_lines(lines),
+		'duration_ms': result['duration_ms'],
+	}
+
+
+def parse_disk_lines(lines: list[str]) -> dict[str, int]:
+	disks: dict[str, int] = {}
+	for line in lines:
+		if not line.startswith('disk=') or ':' not in line:
+			continue
+		path, percent = line.removeprefix('disk=').rsplit(':', 1)
+		try:
+			disks[path] = int(percent.rstrip('%'))
+		except ValueError:
+			continue
+	return disks
 
 
 def host_summaries(timeout: int) -> dict[str, Any]:
@@ -256,6 +288,9 @@ def classify(snapshot: dict[str, Any]) -> tuple[str, list[str], list[str]]:
 			risks.append(f"{key} host probe failed")
 		elif value.get('ok') is None:
 			skipped.append(key)
+		for path, percent in value.get('disks', {}).items():
+			if percent >= 80:
+				risks.append(f'{key} disk {path} is {percent}% full')
 
 	for key, value in snapshot['connectors'].items():
 		if value.get('ok') is None:
@@ -314,7 +349,21 @@ def build_snapshot(args: argparse.Namespace) -> dict[str, Any]:
 	snapshot['top_risks'] = risks
 	snapshot['skipped_surfaces'] = skipped
 	snapshot['changed_since_last'] = changed_since_last(previous, snapshot)
+	snapshot['next_checks'] = next_checks(snapshot)
 	return snapshot
+
+
+def next_checks(snapshot: dict[str, Any]) -> list[str]:
+	checks: list[str] = []
+	repo = snapshot['repo']
+	if repo.get('divergence', {}).get('behind'):
+		checks.append('inspect upstream commits, then pull only if the tree is clean')
+	if snapshot['platform']['database'].get('ok') is None:
+		checks.append('run DB aggregate via connector or set DEADTREES_OPERATOR_DATABASE_URL')
+	if snapshot['platform']['hosts']['backups'].get('ok') is None:
+		checks.append('configure backup host/path or command for freshness probe')
+	checks.append('run PostHog/Linear/Gmail/Zulip connector deltas')
+	return checks[:4]
 
 
 def render_markdown(snapshot: dict[str, Any]) -> str:
@@ -326,19 +375,32 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
 		f"- verdict: `{snapshot['verdict']}`",
 		f"- window: `{snapshot['window_hours']}h`",
 		f"- repo: `{snapshot['repo'].get('branch')}` head `{snapshot['repo'].get('head')}` dirty `{snapshot['repo'].get('dirty_count')}`",
-		f"- API: `{status_word(api)}` version `{api.get('version')}`",
-		f"- DB: `{status_word(db)}` errors `{db.get('statuses_error_window')}` non-idle `{db.get('non_idle_now')}` active-queue `{db.get('queue_active')}`",
-		'',
-		'## Changed Since Last',
-		*bullet_lines(snapshot['changed_since_last']),
-		'',
-		'## Top Risks',
-		*bullet_lines(snapshot['top_risks'] or ['none']),
-		'',
-		'## Host And Backup Probes',
-	]
+			f"- API: `{status_word(api)}` version `{api.get('version')}`",
+			f"- DB: `{status_word(db)}` errors `{db.get('statuses_error_window')}` non-idle `{db.get('non_idle_now')}` active-queue `{db.get('queue_active')}`",
+		]
+	if snapshot['repo'].get('behind_commits'):
+		lines.extend(['', '## Upstream Commits', *bullet_lines(snapshot['repo']['behind_commits'])])
+	if snapshot['repo'].get('ahead_commits'):
+		lines.extend(['', '## Local Commits', *bullet_lines(snapshot['repo']['ahead_commits'])])
+	if snapshot['repo'].get('dirty_files'):
+		lines.extend(['', '## Dirty Files', *bullet_lines(snapshot['repo']['dirty_files'])])
+	lines.extend(
+		[
+			'',
+			'## Changed Since Last',
+			*bullet_lines(snapshot['changed_since_last']),
+			'',
+			'## Top Risks',
+			*bullet_lines(snapshot['top_risks'] or ['none']),
+			'',
+			'## Host And Backup Probes',
+		]
+	)
 	for key, value in snapshot['platform']['hosts'].items():
-		summary = '; '.join(value.get('lines', [])[:4]) if value.get('lines') else value.get('skipped') or value.get('error')
+		if value.get('disks'):
+			summary = 'disks ' + ', '.join(f'{path}={percent}%' for path, percent in value['disks'].items())
+		else:
+			summary = '; '.join(value.get('lines', [])[:4]) if value.get('lines') else value.get('skipped') or value.get('error')
 		lines.append(f"- {key}: `{status_word(value)}` {summary or ''}")
 	lines.extend(
 		[
@@ -350,11 +412,14 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
 		lines.append(f"- {key}: `{status_word(value)}` {value.get('manual_connector_check')}")
 	lines.extend(
 		[
-			'',
-			'## Skipped Or Manual',
-			*bullet_lines(snapshot['skipped_surfaces'] or ['none']),
-		]
-	)
+				'',
+				'## Skipped Or Manual',
+				*bullet_lines(snapshot['skipped_surfaces'] or ['none']),
+				'',
+				'## Next Checks',
+				*bullet_lines(snapshot['next_checks']),
+			]
+		)
 	if snapshot.get('state_write_error'):
 		lines.extend(
 			[
