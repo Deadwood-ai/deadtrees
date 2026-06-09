@@ -162,6 +162,7 @@ celerybeat.pid
 .playwright-cli/
 /.local
 .local/ssh/
+.codex/private/
 .venv
 env/
 venv/

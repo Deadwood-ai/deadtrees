@@ -36,6 +36,15 @@ full platform check inside that broader operator cadence.
 
 ## Fast Preflight
 
+0. Generate the compact operator snapshot when running from the repo:
+
+   ```bash
+   python3 scripts/operator_status.py --write-state --format markdown
+   ```
+
+   Use this as the first-pass summary, then drill down only into warnings,
+   failures, skipped surfaces, or user-visible symptoms.
+
 1. Confirm local access files exist if host or MCP access is needed:
 
    ```bash
@@ -76,10 +85,10 @@ from v2_statuses;
 ```
 
 ```sql
-select processing_status, count(*)
+select is_processing, priority, count(*), min(created_at) as oldest, max(created_at) as newest
 from v2_queue
-group by processing_status
-order by count(*) desc;
+group by is_processing, priority
+order by is_processing desc, priority desc;
 ```
 
 ```sql

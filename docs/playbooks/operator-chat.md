@@ -41,6 +41,35 @@ this repo at the time this playbook was added:
 
 ## Cadence
 
+### Manual Status Refresh
+
+Start a manual operator refresh with the repo-local compact status script:
+
+```bash
+python3 scripts/operator_status.py --write-state --format markdown
+```
+
+The script is the cheap infrastructure spine for the operator chat. It checks
+repo state, API health, optional database aggregates, optional host/storage
+probes, optional backup freshness, and writes ignored compact state to:
+
+- `.local/operator/operator-state.json`
+- `.local/operator/operator-latest.md`
+
+Production-only checks are opt-in through local environment variables so the
+tracked script contains no credentials:
+
+- `DEADTREES_OPERATOR_DATABASE_URL` for a read-only `psql` summary.
+- `DEADTREES_OPERATOR_PROCESSING_HOST` for processing host disk/heartbeat probes.
+- `DEADTREES_OPERATOR_STORAGE_HOST` for storage host disk probes.
+- `DEADTREES_OPERATOR_BACKUP_HOST` plus either `DEADTREES_OPERATOR_BACKUP_PATH`
+  or `DEADTREES_OPERATOR_BACKUP_COMMAND` for backup freshness.
+
+After reading the script output, use connector checks for the surfaces that
+cannot be reliably accessed by repo-local tooling: PostHog, Linear, Gmail, and
+Zulip. Keep those checks delta-first and inspect detail only after a concrete
+signal appears.
+
 ### Hourly Micro-Check
 
 Use this for cheap, token-efficient monitoring. Report only deltas and
@@ -48,14 +77,22 @@ exceptions unless the user asks for detail.
 
 1. Repo state: branch, dirty files, local/remote divergence.
 2. API health: public OpenAPI route or health endpoint.
-3. Deployed version: deployed SHA or container image tag when cheaply available.
-4. Database anomaly summary: aggregate dataset/status/queue/log counts.
-5. Worker heartbeat: latest processing activity, queue age, stuck non-idle work.
-6. PostHog: exact counts for verified events in the check window.
+3. Database anomaly summary: aggregate dataset/status/queue/log counts.
+4. Worker/server heartbeat: latest processing activity, queue age, disk pressure,
+   and stuck non-idle work.
+5. Storage and backup freshness when local host probes are configured.
+6. PostHog: exact counts for verified events in the check window, plus cheap
+   frustration indicators such as exceptions, rage clicks, dead clicks, and
+   route-level drop-off deltas.
 7. Linear: recent platform issues, stale urgent triage, repeated anomaly
    fingerprints, and active blockers.
 8. Gmail/Zulip: urgent delta only, using bounded search or monitored unread
    checks.
+
+Do not inspect PostHog recordings in the operator chat by default. The operator
+chat should identify candidate recording IDs or frustration clusters. Start a
+worker thread for recording review only when a concrete frontend pain signal is
+visible.
 
 ### Daily Full Check
 
@@ -78,8 +115,8 @@ Produce a broader operating review:
 
 Use local ignored state for cursors and compact summaries. Recommended paths:
 
-- `.codex/private/operator-chat-state.json`
-- `.codex/private/operator-latest.md`
+- `.local/operator/operator-state.json`
+- `.local/operator/operator-latest.md`
 
 Store only:
 
@@ -87,6 +124,7 @@ Store only:
 - last seen Gmail and Zulip IDs/cursors
 - relevant Linear issue IDs
 - PostHog event-count baselines
+- compact infrastructure snapshot from `scripts/operator_status.py`
 - last verdict and top risks
 
 Do not store secrets, raw logs, bearer tokens, database URLs, complete email
