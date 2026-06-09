@@ -66,7 +66,7 @@ def test_create_processing_task(test_dataset, auth_token):
 	"""Test creating a new processing task for a dataset"""
 	response = client.put(
 		f'/datasets/{test_dataset}/process',
-		json={'task_types': ['cog', 'thumbnail']},
+		json={'task_types': ['geotiff', 'cog', 'thumbnail']},
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 
@@ -74,6 +74,7 @@ def test_create_processing_task(test_dataset, auth_token):
 	data = response.json()
 
 	assert data['dataset_id'] == test_dataset
+	assert 'geotiff' in data['task_types']
 	assert 'cog' in data['task_types']
 	assert 'thumbnail' in data['task_types']
 	assert not data['is_processing']
@@ -82,8 +83,24 @@ def test_create_processing_task(test_dataset, auth_token):
 		response = supabaseClient.table(settings.queue_table).select('*').eq('dataset_id', test_dataset).execute()
 		assert len(response.data) == 1
 		assert response.data[0]['dataset_id'] == test_dataset
+		assert 'geotiff' in response.data[0]['task_types']
 		assert 'cog' in response.data[0]['task_types']
 		assert 'thumbnail' in response.data[0]['task_types']
+
+
+def test_create_processing_task_rejects_downstream_without_geotiff(test_dataset, auth_token):
+	"""Downstream raster/model stages require geotiff in the same transient processing job."""
+	response = client.put(
+		f'/datasets/{test_dataset}/process',
+		json={'task_types': ['thumbnail', 'deadwood_treecover_combined_v2']},
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 400
+	detail = response.json()['detail']
+	assert 'require geotiff in the same processing request' in detail
+	assert 'thumbnail' in detail
+	assert 'deadwood_treecover_combined_v2' in detail
 
 
 def test_create_processing_task_unauthorized(test_dataset):
@@ -100,7 +117,7 @@ def test_create_processing_task_invalid_dataset(auth_token):
 	"""Test process creation for non-existent dataset"""
 	response = client.put(
 		'/datasets/99999/process',
-		json={'task_types': ['cog', 'thumbnail']},
+		json={'task_types': ['geotiff', 'cog', 'thumbnail']},
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 	assert response.status_code == 404
@@ -120,18 +137,19 @@ def test_create_processing_task_accepts_legacy_task_type_aliases(test_dataset, a
 	"""Legacy task names should continue to enqueue their v1 task equivalents."""
 	response = client.put(
 		f'/datasets/{test_dataset}/process',
-		json={'task_types': ['deadwood', 'treecover']},
+		json={'task_types': ['geotiff', 'deadwood', 'treecover']},
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 
 	assert response.status_code == 200
 	data = response.json()
+	assert 'geotiff' in data['task_types']
 	assert 'deadwood_v1' in data['task_types']
 	assert 'treecover_v1' in data['task_types']
 
 	with use_client(auth_token) as supabaseClient:
 		response = supabaseClient.table(settings.queue_table).select('*').eq('dataset_id', test_dataset).execute()
-		assert response.data[0]['task_types'] == ['deadwood_v1', 'treecover_v1']
+		assert response.data[0]['task_types'] == ['geotiff', 'deadwood_v1', 'treecover_v1']
 
 
 # Priority tests added from test_process_priority.py
@@ -249,7 +267,7 @@ def test_rerun_removes_old_queue_items(test_dataset, auth_token):
 	# Create initial task
 	response = client.put(
 		f'/datasets/{test_dataset}/process',
-		json={'task_types': ['cog', 'thumbnail'], 'priority': 2},
+		json={'task_types': ['geotiff', 'cog', 'thumbnail'], 'priority': 2},
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 	assert response.status_code == 200
@@ -290,7 +308,7 @@ def test_rerun_blocks_active_processing(test_dataset, auth_token, test_user):
 		task_data = {
 			'dataset_id': test_dataset,
 			'user_id': test_user,
-			'task_types': ['cog', 'thumbnail'],
+			'task_types': ['geotiff', 'cog', 'thumbnail'],
 			'priority': 2,
 			'is_processing': True,  # Already being processed
 		}
@@ -320,7 +338,7 @@ def test_rerun_succeeds_after_failed_processing(test_dataset, auth_token):
 	# Create initial task
 	response = client.put(
 		f'/datasets/{test_dataset}/process',
-		json={'task_types': ['cog']},
+		json={'task_types': ['geotiff', 'cog']},
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 	assert response.status_code == 200
@@ -334,6 +352,7 @@ def test_rerun_succeeds_after_failed_processing(test_dataset, auth_token):
 				'has_error': True,
 				'error_message': 'Simulated processing failure',
 				'current_status': StatusEnum.idle,
+				'is_ortho_done': True,
 				'is_cog_done': True,
 				'is_thumbnail_done': True,
 				'is_metadata_done': True,
@@ -343,7 +362,7 @@ def test_rerun_succeeds_after_failed_processing(test_dataset, auth_token):
 	# Rerun should succeed (removes old task, adds new one)
 	response = client.put(
 		f'/datasets/{test_dataset}/process',
-		json={'task_types': ['cog', 'thumbnail', 'metadata'], 'priority': 1},
+		json={'task_types': ['geotiff', 'cog', 'thumbnail', 'metadata'], 'priority': 1},
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 	assert response.status_code == 200
@@ -355,6 +374,7 @@ def test_rerun_succeeds_after_failed_processing(test_dataset, auth_token):
 		response = supabaseClient.table(settings.queue_table).select('*').eq('dataset_id', test_dataset).execute()
 		assert len(response.data) == 1
 		assert response.data[0]['id'] == second_task_id
+		assert 'geotiff' in response.data[0]['task_types']
 		assert 'cog' in response.data[0]['task_types']
 		assert 'thumbnail' in response.data[0]['task_types']
 		assert 'metadata' in response.data[0]['task_types']
@@ -366,6 +386,7 @@ def test_rerun_succeeds_after_failed_processing(test_dataset, auth_token):
 		assert status['has_error'] is False
 		assert status['error_message'] is None
 		assert status['current_status'] == StatusEnum.idle
+		assert status['is_ortho_done'] is False
 		assert status['is_cog_done'] is False
 		assert status['is_thumbnail_done'] is False
 		assert status['is_metadata_done'] is False
@@ -412,7 +433,7 @@ def test_failed_status_reset_zero_rows_does_not_enqueue(test_dataset, auth_token
 
 	response = client.put(
 		f'/datasets/{test_dataset}/process',
-		json={'task_types': ['cog']},
+		json={'task_types': ['geotiff', 'cog']},
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 
@@ -437,6 +458,7 @@ def test_rerun_combined_task_resets_only_combined_prediction_flag(test_dataset, 
 				'has_error': True,
 				'error_message': 'Simulated combined processing failure',
 				'current_status': StatusEnum.idle,
+				'is_ortho_done': True,
 				'is_deadwood_done': True,
 				'is_forest_cover_done': True,
 				'is_combined_model_done': True,
@@ -445,7 +467,7 @@ def test_rerun_combined_task_resets_only_combined_prediction_flag(test_dataset, 
 
 	response = client.put(
 		f'/datasets/{test_dataset}/process',
-		json={'task_types': ['deadwood_treecover_combined_v2']},
+		json={'task_types': ['geotiff', 'deadwood_treecover_combined_v2']},
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 
@@ -456,6 +478,7 @@ def test_rerun_combined_task_resets_only_combined_prediction_flag(test_dataset, 
 		status = response.data[0]
 		assert status['has_error'] is False
 		assert status['error_message'] is None
+		assert status['is_ortho_done'] is False
 		assert status['is_deadwood_done'] is True
 		assert status['is_forest_cover_done'] is True
 		assert status['is_combined_model_done'] is False
@@ -471,7 +494,7 @@ def test_rerun_multiple_old_queue_items(test_dataset, auth_token, test_user):
 			task_data = {
 				'dataset_id': test_dataset,
 				'user_id': test_user,  # Use test_user fixture instead of auth call
-				'task_types': ['cog'],
+				'task_types': ['geotiff', 'cog'],
 				'priority': 2,
 				'is_processing': False,
 			}
