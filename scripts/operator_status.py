@@ -202,6 +202,7 @@ def ssh_probe(env_name: str, command: str, timeout: int) -> dict[str, Any]:
 		'host_env': env_name,
 		'lines': lines[:12],
 		'disks': parse_disk_lines(lines),
+		'archives': parse_archive_lines(lines),
 		'duration_ms': result['duration_ms'],
 	}
 
@@ -217,6 +218,17 @@ def parse_disk_lines(lines: list[str]) -> dict[str, int]:
 		except ValueError:
 			continue
 	return disks
+
+
+def parse_archive_lines(lines: list[str]) -> dict[str, str]:
+	archives: dict[str, str] = {}
+	for line in lines:
+		if not line.startswith('archive=') or ':' not in line:
+			continue
+		name, archive = line.removeprefix('archive=').split(':', 1)
+		if name and archive:
+			archives[name] = archive
+	return archives
 
 
 def host_summaries(timeout: int) -> dict[str, Any]:
@@ -397,9 +409,13 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
 		]
 	)
 	for key, value in snapshot['platform']['hosts'].items():
+		parts: list[str] = []
 		if value.get('disks'):
-			summary = 'disks ' + ', '.join(f'{path}={percent}%' for path, percent in value['disks'].items())
-		else:
+			parts.append('disks ' + ', '.join(f'{path}={percent}%' for path, percent in value['disks'].items()))
+		if value.get('archives'):
+			parts.append('archives ' + ', '.join(f'{name}={archive}' for name, archive in value['archives'].items()))
+		summary = '; '.join(parts)
+		if not summary:
 			summary = '; '.join(value.get('lines', [])[:4]) if value.get('lines') else value.get('skipped') or value.get('error')
 		lines.append(f"- {key}: `{status_word(value)}` {summary or ''}")
 	lines.extend(
