@@ -7,6 +7,7 @@ from shared.models import QueueTask, TaskTypeEnum, StatusEnum
 from shared.settings import settings
 from shared.db import use_client, login, login_verified, verify_token
 from shared.status import update_status
+from shared.processing_tasks import downstream_tasks_missing_geotiff, format_missing_geotiff_error
 from .process_thumbnail import process_thumbnail
 from .process_cog import process_cog
 from .process_deadwood_segmentation import process_deadwood_segmentation
@@ -249,6 +250,23 @@ def process_task(task: QueueTask, token: str):
 		shutil.rmtree(settings.processing_path, ignore_errors=True)
 
 	try:
+		downstream_without_geotiff = downstream_tasks_missing_geotiff(task.task_types)
+		if downstream_without_geotiff:
+			error_message = format_missing_geotiff_error(downstream_without_geotiff)
+			update_status(
+				token,
+				dataset_id=task.dataset_id,
+				current_status=StatusEnum.idle,
+				has_error=True,
+				error_message=error_message,
+			)
+			raise ProcessingError(
+				error_message,
+				task_type='geotiff_dependency',
+				task_id=task.id,
+				dataset_id=task.dataset_id,
+			)
+
 		# Process ODM first if it's in the list (generates orthomosaic for ZIP uploads)
 		if TaskTypeEnum.odm_processing in task.task_types:
 			try:

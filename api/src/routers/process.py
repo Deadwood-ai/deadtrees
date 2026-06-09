@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from shared.db import verify_token, use_client, use_service_client, login
 from shared.settings import settings
 from shared.models import TaskPayload, QueueTask, TaskTypeEnum
+from shared.processing_tasks import downstream_tasks_missing_geotiff, format_missing_geotiff_error
 from shared.retry import retry_on_transient_error
 from shared.logging import LogContext, LogCategory, UnifiedLogger, SupabaseHandler
 
@@ -125,6 +126,24 @@ def create_processing_task(
 			),
 		)
 		raise HTTPException(status_code=400, detail=f'Invalid task type: {str(e)}')
+
+	downstream_without_geotiff = downstream_tasks_missing_geotiff(validated_task_types)
+	if downstream_without_geotiff:
+		detail = format_missing_geotiff_error(downstream_without_geotiff)
+		logger.warning(
+			'Rejected processing request missing geotiff dependency',
+			LogContext(
+				category=LogCategory.ADD_PROCESS,
+				user_id=user.id,
+				dataset_id=dataset_id,
+				token=token,
+				extra={
+					'task_types': request.task_types,
+					'missing_geotiff_for': [task_type.value for task_type in downstream_without_geotiff],
+				},
+			),
+		)
+		raise HTTPException(status_code=400, detail=detail)
 
 	# Load the dataset info with the caller's token before any privileged write.
 	try:
