@@ -36,7 +36,7 @@ jobs:
             deadtrees-cli/setup.py
             api/requirements.txt
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - uses: supabase/setup-cli@v2
         with:
