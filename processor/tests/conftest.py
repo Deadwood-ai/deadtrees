@@ -162,7 +162,7 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 
 # @test_environment_only
 @pytest.fixture(autouse=True)
-def cleanup_storage(request, auth_token):
+def cleanup_storage(request):
 	"""Clean up storage before and after each test"""
 	# Most unit tests don't touch SSH storage paths; skipping this saves a lot of time.
 	if (
@@ -173,7 +173,7 @@ def cleanup_storage(request, auth_token):
 		yield
 		return
 
-	token = auth_token
+	token = request.getfixturevalue('auth_token')
 
 	# Paths to clean
 	paths = [

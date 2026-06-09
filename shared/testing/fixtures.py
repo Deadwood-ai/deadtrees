@@ -7,9 +7,37 @@ import shutil
 from .safety import test_environment_only
 
 
+# These fixtures force DB setup even if a test is marked unit. Unmarked tests
+# keep the historical default and get DB setup; only pure unit-test sessions skip
+# Supabase setup.
+DATABASE_FIXTURES = frozenset(
+	{
+		'auth_token',
+		'test_user',
+		'test_user2',
+		'datasets_with_mixed_access',
+	}
+)
+
+
+def _session_needs_database(request) -> bool:
+	return any(
+		item.get_closest_marker('integration') is not None
+		or item.get_closest_marker('slow') is not None
+		or item.get_closest_marker('comprehensive') is not None
+		or DATABASE_FIXTURES.intersection(item.fixturenames)
+		or item.get_closest_marker('unit') is None
+		for item in request.session.items
+	)
+
+
 @pytest.fixture(scope='session', autouse=True)
-def test_processor_user():
+def test_processor_user(request):
 	"""Create the processor user in the database if it doesn't exist and clean up after tests"""
+	if not _session_needs_database(request):
+		yield None
+		return
+
 	supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
 	user_id = None
 
@@ -85,8 +113,12 @@ def test_file():
 
 # @test_environment_only
 @pytest.fixture(scope='session', autouse=True)
-def cleanup_database(auth_token):
+def cleanup_database(request):
 	"""Clean up database tables after all tests"""
+	if not _session_needs_database(request):
+		yield
+		return
+
 	yield
 
 	processor_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD, use_cached_session=False)
