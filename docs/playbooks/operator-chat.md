@@ -70,6 +70,28 @@ cannot be reliably accessed by repo-local tooling: PostHog, Linear, Gmail, and
 Zulip. Keep those checks delta-first and inspect detail only after a concrete
 signal appears.
 
+For product/factory status, run the data-factory scorecard after the platform
+snapshot:
+
+```bash
+python3 scripts/data_factory_scorecard.py --write-state --format markdown
+```
+
+This script reports backend truth for input, processing, queue, trust, and
+impact when `DEADTREES_OPERATOR_DATABASE_URL` is available. Without a local DB
+URL, print the exact SQL for the Postgres MCP with:
+
+```bash
+python3 scripts/data_factory_scorecard.py --print-sql
+```
+
+PostHog remains a connector-side add-on for frontend pain and funnel signals.
+Print the compact PostHog SQL templates with:
+
+```bash
+python3 scripts/data_factory_scorecard.py --posthog-sql
+```
+
 ### Hourly Micro-Check
 
 Use this for cheap, token-efficient monitoring. Report only deltas and
