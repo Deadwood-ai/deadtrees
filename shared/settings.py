@@ -43,6 +43,7 @@ class Settings(BaseSettings):
 
 	# Containers
 	TCD_CONTAINER_IMAGE: str = 'deadtrees-tcd:latest'
+	TCD_CONTAINER_TIMEOUT_SECONDS: int = 14400
 
 	# Base paths and directories
 	BASE_DIR: str = str(BASE)
