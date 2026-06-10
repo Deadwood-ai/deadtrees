@@ -337,7 +337,36 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 			container = _run(device_requests=device_requests)
 			success = False
 			try:
-				result = container.wait(timeout=tcd_timeout_seconds)
+				try:
+					result = container.wait(timeout=tcd_timeout_seconds)
+				except requests.exceptions.RequestException as e:
+					if not _is_docker_wait_timeout(e):
+						raise
+
+					logger.error(
+						f'TCD container timed out after {tcd_timeout_seconds}s for dataset {dataset_id}',
+						LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+					)
+					try:
+						container.kill()
+					except Exception:
+						pass
+
+					try:
+						forensics = build_container_forensics(
+							container,
+							dataset_id=dataset_id,
+							stage='treecover',
+							command=['python', '/tcd_data/predict_pipeline.py', input_path, output_path],
+							volume_name=volume_name,
+						)
+						write_debug_bundle(forensics=forensics, token=token, dataset_id=dataset_id, stage='treecover')
+					except Exception:
+						pass
+
+					timeout_hours = max(1, round(tcd_timeout_seconds / 3600))
+					raise _TCDContainerTimeout(f'TCD container timed out after {timeout_hours} hours') from e
+
 				container_output = container.logs()
 				if result['StatusCode'] != 0:
 					logs = container.logs(tail=200).decode('utf-8', errors='replace')
@@ -355,33 +384,6 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 					raise Exception(f'TCD exited with code {result["StatusCode"]}: {logs}')
 				success = True
 				return container_output
-			except requests.exceptions.RequestException as e:
-				if not _is_docker_wait_timeout(e):
-					raise
-
-				logger.error(
-					f'TCD container timed out after {tcd_timeout_seconds}s for dataset {dataset_id}',
-					LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
-				)
-				try:
-					container.kill()
-				except Exception:
-					pass
-
-				try:
-					forensics = build_container_forensics(
-						container,
-						dataset_id=dataset_id,
-						stage='treecover',
-						command=['python', '/tcd_data/predict_pipeline.py', input_path, output_path],
-						volume_name=volume_name,
-					)
-					write_debug_bundle(forensics=forensics, token=token, dataset_id=dataset_id, stage='treecover')
-				except Exception:
-					pass
-
-				timeout_hours = max(1, round(tcd_timeout_seconds / 3600))
-				raise _TCDContainerTimeout(f'TCD container timed out after {timeout_hours} hours') from e
 			finally:
 				if success or not retain_on_failure:
 					try:

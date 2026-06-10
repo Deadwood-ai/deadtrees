@@ -1,4 +1,5 @@
 import requests
+import pytest
 from urllib3.exceptions import ReadTimeoutError
 
 from processor.src.treecover_segmentation_oam_tcd import predict_treecover
@@ -58,13 +59,13 @@ def test_tcd_wait_connection_timeout_is_controlled_and_not_retried(monkeypatch):
 		'write_debug_bundle',
 		lambda **kwargs: bundles.append(kwargs),
 	)
+	monkeypatch.setattr(predict_treecover.settings, 'TCD_CONTAINER_TIMEOUT_SECONDS', 14400)
 
-	try:
+	with pytest.raises(
+		predict_treecover._TCDContainerTimeout,
+		match='TCD container timed out after 4 hours',
+	):
 		predict_treecover._run_tcd_pipeline_container('tcd_volume_10179_test', 10179, 'token')
-	except Exception as exc:
-		assert 'TCD container timed out after 4 hours' in str(exc)
-	else:
-		raise AssertionError('expected controlled TCD timeout')
 
 	assert len(client.containers.runs) == 1
 	assert client.containers.runs[0].killed is True
