@@ -49,6 +49,37 @@ MODULE_NAME = 'treecover_segmentation_oam_tcd'
 CHECKPOINT_NAME = TCD_MODEL
 
 
+class _TCDContainerTimeout(Exception):
+	"""Raised when the TCD Docker wait call reaches its allowed wall time."""
+
+
+def _is_docker_wait_timeout(exc: BaseException) -> bool:
+	"""Return true for Docker SDK wait timeouts, including urllib3-wrapped forms."""
+	if isinstance(exc, requests.exceptions.ReadTimeout):
+		return True
+
+	seen: set[int] = set()
+	stack: list[BaseException | object] = [exc]
+	while stack:
+		current = stack.pop()
+		if id(current) in seen:
+			continue
+		seen.add(id(current))
+
+		class_name = current.__class__.__name__
+		if class_name == 'ReadTimeoutError':
+			return True
+
+		if isinstance(current, BaseException):
+			if current.__cause__ is not None:
+				stack.append(current.__cause__)
+			if current.__context__ is not None:
+				stack.append(current.__context__)
+			stack.extend(arg for arg in current.args if isinstance(arg, BaseException))
+
+	return isinstance(exc, requests.exceptions.ConnectionError) and 'Read timed out' in str(exc)
+
+
 class _GeneratorStream(io.RawIOBase):
 	"""
 	Wraps a generator to provide a file-like interface for tarfile.
@@ -268,7 +299,7 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 		LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 	)
 
-	TCD_TIMEOUT_SECONDS = 14400  # 4 hours
+	tcd_timeout_seconds = max(1, settings.TCD_CONTAINER_TIMEOUT_SECONDS)
 
 	try:
 		# Preflight: ensure image exists
@@ -306,7 +337,7 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 			container = _run(device_requests=device_requests)
 			success = False
 			try:
-				result = container.wait(timeout=TCD_TIMEOUT_SECONDS)
+				result = container.wait(timeout=tcd_timeout_seconds)
 				container_output = container.logs()
 				if result['StatusCode'] != 0:
 					logs = container.logs(tail=200).decode('utf-8', errors='replace')
@@ -324,9 +355,12 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 					raise Exception(f'TCD exited with code {result["StatusCode"]}: {logs}')
 				success = True
 				return container_output
-			except requests.exceptions.ReadTimeout:
+			except requests.exceptions.RequestException as e:
+				if not _is_docker_wait_timeout(e):
+					raise
+
 				logger.error(
-					f'TCD container timed out after {TCD_TIMEOUT_SECONDS}s for dataset {dataset_id}',
+					f'TCD container timed out after {tcd_timeout_seconds}s for dataset {dataset_id}',
 					LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 				)
 				try:
@@ -346,7 +380,8 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 				except Exception:
 					pass
 
-				raise Exception(f'TCD container timed out after {TCD_TIMEOUT_SECONDS // 3600} hours')
+				timeout_hours = max(1, round(tcd_timeout_seconds / 3600))
+				raise _TCDContainerTimeout(f'TCD container timed out after {timeout_hours} hours') from e
 			finally:
 				if success or not retain_on_failure:
 					try:
@@ -361,9 +396,11 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 
 		try:
 			container_output = _run_and_wait(device_requests=None)
+		except _TCDContainerTimeout:
+			raise
 		except Exception as gpu_err:
 			logger.warning(
-				f'GPU execution failed for TCD container, retrying on CPU: {gpu_err}',
+				f'TCD container execution failed, retrying once: {gpu_err}',
 				LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 			)
 			container_output = _run_and_wait(device_requests=None)
