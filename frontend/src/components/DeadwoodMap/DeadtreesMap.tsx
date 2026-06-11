@@ -686,15 +686,12 @@ const DeadtreesMap = () => {
     }
   }, [selectedYear, effectiveModelVersion, showForest, showDeadwood]);
 
-  // Initialize Wayback style and auto-select best imagery when items first load
+  // Mark the first local imagery result as handled. The selected release is
+  // initialized above; do not force the basemap back on if the user toggled it off.
   useEffect(() => {
     if (localWaybackItems.length > 0 && !hasAutoSelectedImageryRef.current) {
       hasAutoSelectedImageryRef.current = true;
-      // Set to Wayback as default style (already default, but ensure it's set)
-      setDeadwoodMapStyle("wayback");
-      // Select best version for current year (handled by YearImagerySelector)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localWaybackItems.length]); // Only depend on length to run once when data loads
 
   // Switch from point marker to bbox polygon once the bbox is at least this many pixels wide
@@ -1082,9 +1079,11 @@ const DeadtreesMap = () => {
   // Handle map style change
   const handleMapStyleChange = useCallback(
     (style: string) => {
-      setDeadwoodMapStyle(DeadwoodMapStyle === style ? "none" : style);
+      setDeadwoodMapStyle((currentStyle) =>
+        currentStyle === style ? "none" : style,
+      );
     },
-    [DeadwoodMapStyle, setDeadwoodMapStyle],
+    [setDeadwoodMapStyle],
   );
 
   const handleAnalysisClick = useCallback(() => {

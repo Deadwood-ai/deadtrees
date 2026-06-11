@@ -6,7 +6,7 @@ interface MapViewportContextType {
   DeadwoodMapViewport: { center: number[]; zoom: number };
   setDeadwoodMapViewport: (view: { center: number[]; zoom: number }) => void;
   DeadwoodMapStyle: string;
-  setDeadwoodMapStyle: (style: string) => void;
+  setDeadwoodMapStyle: React.Dispatch<React.SetStateAction<string>>;
 }
 
 const MapViewportContext = createContext<MapViewportContextType>({
