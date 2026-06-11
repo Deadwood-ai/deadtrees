@@ -114,7 +114,7 @@ const MobileBottomSheet = ({
         dragStartRef.current = null;
         dragCleanupRef.current?.();
 
-        if (lastHeight <= compactHeight - CLOSE_THRESHOLD_PX) {
+        if (lastHeight <= closeHeight) {
           setDragHeight(lastHeight);
           setIsClosing(true);
           closeTimerRef.current = window.setTimeout(() => {

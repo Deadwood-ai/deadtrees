@@ -61,6 +61,12 @@ export const useMobileImageryAutoSelect = ({
     if (closest && closest.releaseNum !== selectedReleaseNum) {
       onImageryChange(closest.releaseNum);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, predictionYear, autoMatchImagery]);
+  }, [
+    enabled,
+    waybackItems,
+    selectedReleaseNum,
+    onImageryChange,
+    predictionYear,
+    autoMatchImagery,
+  ]);
 };

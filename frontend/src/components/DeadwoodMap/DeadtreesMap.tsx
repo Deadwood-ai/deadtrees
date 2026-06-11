@@ -594,6 +594,22 @@ const DeadtreesMap = () => {
 
     return () => {
       userLocation.stop();
+      const currentMap = mapRef.current;
+
+      if (publicTreeObservationLayerRef.current) {
+        currentMap?.removeLayer(publicTreeObservationLayerRef.current);
+        publicTreeObservationLayerRef.current.getSource()?.clear();
+        publicTreeObservationLayerRef.current.setSource(null);
+        publicTreeObservationLayerRef.current = null;
+      }
+
+      if (clickedCellLayerRef.current) {
+        currentMap?.removeLayer(clickedCellLayerRef.current);
+        clickedCellLayerRef.current.getSource()?.clear();
+        clickedCellLayerRef.current.setSource(null);
+        clickedCellLayerRef.current = null;
+      }
+
       mapRef.current?.setTarget(undefined);
       mapRef.current = null;
     };
