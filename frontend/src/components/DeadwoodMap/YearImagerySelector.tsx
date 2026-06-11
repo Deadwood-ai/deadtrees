@@ -14,7 +14,17 @@ import type { WaybackItemWithMetadata } from "../../hooks/useWaybackItems";
 
 const { Text } = Typography;
 
-const PREDICTION_YEARS = ["2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025"];
+export const PREDICTION_YEARS = [
+  "2017",
+  "2018",
+  "2019",
+  "2020",
+  "2021",
+  "2022",
+  "2023",
+  "2024",
+  "2025",
+];
 
 /**
  * Format date for display (e.g., "Jun 15, 2022")
@@ -42,7 +52,10 @@ const formatResolution = (resolution: number | undefined): string => {
 /**
  * Find the closest imagery to a target year, preferring older over newer
  */
-const findClosestImagery = (items: WaybackItemWithMetadata[], targetYear: number): WaybackItemWithMetadata | null => {
+export const findClosestImagery = (
+  items: WaybackItemWithMetadata[],
+  targetYear: number,
+): WaybackItemWithMetadata | null => {
   if (items.length === 0) return null;
 
   return items.reduce((closest, item) => {
@@ -146,7 +159,10 @@ const YearImagerySelector = ({
           <span className="inline-flex items-center">
             {y}
             {yearsWithImagery.has(y) && (
-              <span className="ml-0.5 text-green-500" style={{ fontSize: "18px", lineHeight: 0 }}>
+              <span
+                className="ml-0.5 text-green-500"
+                style={{ fontSize: "18px", lineHeight: 0 }}
+              >
                 •
               </span>
             )}
@@ -158,7 +174,8 @@ const YearImagerySelector = ({
 
   // Check if current selection is valid (exists in current waybackItems)
   const isSelectionValid =
-    selectedReleaseNum !== null && waybackItems.some((item) => item.releaseNum === selectedReleaseNum);
+    selectedReleaseNum !== null &&
+    waybackItems.some((item) => item.releaseNum === selectedReleaseNum);
 
   // Auto-select imagery when items load or when current selection becomes invalid
   useEffect(() => {
@@ -174,11 +191,19 @@ const YearImagerySelector = ({
         onImageryChange(waybackItems[waybackItems.length - 1].releaseNum);
       }
     }
-  }, [waybackItems, selectedReleaseNum, isSelectionValid, onImageryChange, autoMatchImagery, predictionYear]);
+  }, [
+    waybackItems,
+    selectedReleaseNum,
+    isSelectionValid,
+    onImageryChange,
+    autoMatchImagery,
+    predictionYear,
+  ]);
 
   // Auto-match imagery when prediction year changes (if enabled)
   useEffect(() => {
-    if (!autoMatchImagery || waybackItems.length === 0 || !selectedReleaseNum) return;
+    if (!autoMatchImagery || waybackItems.length === 0 || !selectedReleaseNum)
+      return;
 
     const targetYear = parseInt(predictionYear);
     const closestItem = findClosestImagery(waybackItems, targetYear);
@@ -206,8 +231,11 @@ const YearImagerySelector = ({
   };
 
   // Find currently selected item
-  const currentImageryIndex = waybackItems.findIndex((item) => item.releaseNum === selectedReleaseNum);
-  const selectedItem = currentImageryIndex >= 0 ? waybackItems[currentImageryIndex] : null;
+  const currentImageryIndex = waybackItems.findIndex(
+    (item) => item.releaseNum === selectedReleaseNum,
+  );
+  const selectedItem =
+    currentImageryIndex >= 0 ? waybackItems[currentImageryIndex] : null;
   const hasMultipleImages = waybackItems.length > 1;
   const isImageryFirst = currentImageryIndex <= 0;
   const isImageryLast = currentImageryIndex >= waybackItems.length - 1;
@@ -252,7 +280,10 @@ const YearImagerySelector = ({
               size="small"
               value={predictionYear}
               onChange={(value) => onPredictionYearChange(value)}
-              options={PREDICTION_YEARS.map((year) => ({ value: year, label: year }))}
+              options={PREDICTION_YEARS.map((year) => ({
+                value: year,
+                label: year,
+              }))}
               className="min-w-24"
             />
           ) : (
@@ -273,7 +304,13 @@ const YearImagerySelector = ({
 
           {/* Auto-match toggle */}
           {isWaybackActive && (
-            <Tooltip title={autoMatchImagery ? "Auto-matching imagery to year" : "Manual imagery selection"}>
+            <Tooltip
+              title={
+                autoMatchImagery
+                  ? "Auto-matching imagery to year"
+                  : "Manual imagery selection"
+              }
+            >
               <Button
                 size="small"
                 type={autoMatchImagery ? "primary" : "default"}
@@ -290,38 +327,54 @@ const YearImagerySelector = ({
       {isWaybackActive && (
         <div className="flex w-full flex-col items-center gap-1 border-t border-gray-100 pt-2">
           {/* Informative message - always visible when imagery is loaded */}
-          {!isLoading && waybackItems.length > 0 && selectedItem && !compactMode && (
-            <div className="flex items-center gap-1.5 text-xs">
-              {yearsMatch ? (
-                <CheckCircleOutlined className="text-green-500" style={{ fontSize: "12px" }} />
-              ) : (
-                <WarningOutlined className="text-amber-500" style={{ fontSize: "12px" }} />
-              )}
-              <Text type="secondary">
+          {!isLoading &&
+            waybackItems.length > 0 &&
+            selectedItem &&
+            !compactMode && (
+              <div className="flex items-center gap-1.5 text-xs">
                 {yearsMatch ? (
-                  <>
-                    {predictionYear} {activeProductName} with matching{" "}
-                    <span className="text-green-500" style={{ fontSize: "14px", lineHeight: 0 }}>
-                      •
-                    </span>{" "}
-                    base map
-                  </>
+                  <CheckCircleOutlined
+                    className="text-green-500"
+                    style={{ fontSize: "12px" }}
+                  />
                 ) : (
-                  <>
-                    {compactMode
-                      ? `${predictionYear} vs ${baseMapYear || "unknown"} base map`
-                      : `${predictionYear} ${activeProductName} against ${baseMapYear || "unknown"} base map`}
-                  </>
+                  <WarningOutlined
+                    className="text-amber-500"
+                    style={{ fontSize: "12px" }}
+                  />
                 )}
-              </Text>
-            </div>
-          )}
+                <Text type="secondary">
+                  {yearsMatch ? (
+                    <>
+                      {predictionYear} {activeProductName} with matching{" "}
+                      <span
+                        className="text-green-500"
+                        style={{ fontSize: "14px", lineHeight: 0 }}
+                      >
+                        •
+                      </span>{" "}
+                      base map
+                    </>
+                  ) : (
+                    <>
+                      {compactMode
+                        ? `${predictionYear} vs ${baseMapYear || "unknown"} base map`
+                        : `${predictionYear} ${activeProductName} against ${baseMapYear || "unknown"} base map`}
+                    </>
+                  )}
+                </Text>
+              </div>
+            )}
 
           <div className="flex w-full items-center justify-center gap-2 overflow-x-auto">
             {isLoading ? (
               <div className="flex items-center gap-2 text-gray-400">
-                <Spin indicator={<LoadingOutlined style={{ fontSize: 14 }} spin />} />
-                <span className="text-xs">Finding basemap imagery for this area ...</span>
+                <Spin
+                  indicator={<LoadingOutlined style={{ fontSize: 14 }} spin />}
+                />
+                <span className="text-xs">
+                  Finding basemap imagery for this area ...
+                </span>
               </div>
             ) : hasNoImagery ? (
               <Text type="secondary" className="text-xs text-gray-400">
@@ -343,22 +396,35 @@ const YearImagerySelector = ({
 
                 {/* Imagery info from item metadata */}
                 <div className="flex items-center gap-2">
-                  <CameraOutlined className="text-gray-400" style={{ fontSize: "12px" }} />
+                  <CameraOutlined
+                    className="text-gray-400"
+                    style={{ fontSize: "12px" }}
+                  />
 
                   {selectedItem ? (
                     <Tooltip
                       title={
                         <div className="text-center">
                           <div className="font-medium">Satellite Imagery</div>
-                          <div className="mt-1">Captured: {formatDate(selectedItem.acquisitionDate)}</div>
-                          {selectedItem.provider && <div>Provider: {selectedItem.provider}</div>}
-                          {selectedItem.source && <div>Satellite: {selectedItem.source}</div>}
+                          <div className="mt-1">
+                            Captured: {formatDate(selectedItem.acquisitionDate)}
+                          </div>
+                          {selectedItem.provider && (
+                            <div>Provider: {selectedItem.provider}</div>
+                          )}
+                          {selectedItem.source && (
+                            <div>Satellite: {selectedItem.source}</div>
+                          )}
                           {selectedItem.resolution && (
-                            <div>Resolution: {formatResolution(selectedItem.resolution)}</div>
+                            <div>
+                              Resolution:{" "}
+                              {formatResolution(selectedItem.resolution)}
+                            </div>
                           )}
                           {hasMultipleImages && (
                             <div className="mt-1 text-gray-300">
-                              Image {currentImageryIndex + 1} of {waybackItems.length}
+                              Image {currentImageryIndex + 1} of{" "}
+                              {waybackItems.length}
                             </div>
                           )}
                         </div>
@@ -366,20 +432,36 @@ const YearImagerySelector = ({
                       placement="top"
                     >
                       <div className="flex cursor-help items-center gap-1.5 text-xs">
-                        <span className="font-medium text-gray-700">{formatDate(selectedItem.acquisitionDate)}</span>
-                        {!compactMode && selectedItem.provider && <span className="text-gray-400">·</span>}
-                        {!compactMode && selectedItem.provider && <span className="text-gray-500">{selectedItem.provider}</span>}
-                        {!compactMode && selectedItem.source && <span className="text-gray-400">{selectedItem.source}</span>}
+                        <span className="font-medium text-gray-700">
+                          {formatDate(selectedItem.acquisitionDate)}
+                        </span>
+                        {!compactMode && selectedItem.provider && (
+                          <span className="text-gray-400">·</span>
+                        )}
+                        {!compactMode && selectedItem.provider && (
+                          <span className="text-gray-500">
+                            {selectedItem.provider}
+                          </span>
+                        )}
+                        {!compactMode && selectedItem.source && (
+                          <span className="text-gray-400">
+                            {selectedItem.source}
+                          </span>
+                        )}
                         {!compactMode && selectedItem.resolution && (
                           <>
                             <span className="text-gray-400">·</span>
-                            <span className="text-gray-500">{formatResolution(selectedItem.resolution)}</span>
+                            <span className="text-gray-500">
+                              {formatResolution(selectedItem.resolution)}
+                            </span>
                           </>
                         )}
                       </div>
                     </Tooltip>
                   ) : (
-                    <span className="text-xs text-gray-400">No imagery selected</span>
+                    <span className="text-xs text-gray-400">
+                      No imagery selected
+                    </span>
                   )}
                 </div>
 
@@ -400,17 +482,24 @@ const YearImagerySelector = ({
                   title={
                     <div className="text-center">
                       <div className="font-medium">About this view</div>
-                      <div className="mt-1">Predictions are available for all years (2017-2025).</div>
                       <div className="mt-1">
-                        <span className="text-green-400">•</span> indicates base map imagery is available for that year.
+                        Predictions are available for all years (2017-2025).
+                      </div>
+                      <div className="mt-1">
+                        <span className="text-green-400">•</span> indicates base
+                        map imagery is available for that year.
                       </div>
                       <div className="mt-1 text-gray-300">
-                        The base map shows satellite imagery for visual context only.
+                        The base map shows satellite imagery for visual context
+                        only.
                       </div>
                     </div>
                   }
                 >
-                  <InfoCircleOutlined className="ml-1 cursor-help text-gray-400" style={{ fontSize: "12px" }} />
+                  <InfoCircleOutlined
+                    className="ml-1 cursor-help text-gray-400"
+                    style={{ fontSize: "12px" }}
+                  />
                 </Tooltip>
               </>
             )}
