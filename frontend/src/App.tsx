@@ -61,14 +61,16 @@ function LayoutWrapper() {
       <Layout
         style={{
           margin: "0 auto",
-          height: shouldUseFullHeight ? "100vh" : "auto",
+          height: shouldUseFullHeight ? "100dvh" : "auto",
+          minHeight: shouldUseFullHeight ? "100vh" : undefined,
           backgroundColor: "var(--dt-surface-base)",
         }}
       >
         <Navigation />
         <Content
           style={{
-            height: shouldUseFullHeight ? "100vh" : "auto",
+            height: shouldUseFullHeight ? "100dvh" : "auto",
+            minHeight: shouldUseFullHeight ? "100vh" : undefined,
             backgroundColor: "var(--dt-surface-base)",
           }}
         >

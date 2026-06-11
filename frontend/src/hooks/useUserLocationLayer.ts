@@ -124,6 +124,7 @@ export const useUserLocationLayer = (mapRef: MutableRefObject<Map | null>) => {
       const view = mapRef.current?.getView();
       if (!view) return;
 
+      view.cancelAnimations();
       view.animate({
         center: coordinates,
         zoom: Math.max(view.getZoom() || 0, 18),

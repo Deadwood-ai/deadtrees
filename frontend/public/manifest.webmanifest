@@ -1,8 +1,8 @@
 {
-  "name": "PRIWA Field - deadtrees.earth",
-  "short_name": "PRIWA Field",
-  "description": "PRIWA field capture app for Kaeferbaum records.",
-  "start_url": "/priwa-field",
+  "name": "deadtrees.earth",
+  "short_name": "deadtrees",
+  "description": "Mobile map for exploring and contributing dead-tree observations.",
+  "start_url": "/deadtrees",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
@@ -25,8 +25,20 @@
   "categories": ["productivity", "utilities"],
   "shortcuts": [
     {
+      "name": "DeadTrees map",
+      "short_name": "Map",
+      "url": "/deadtrees",
+      "icons": [
+        {
+          "src": "/assets/app-icon.png",
+          "sizes": "512x512",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
       "name": "PRIWA Field",
-      "short_name": "Field",
+      "short_name": "PRIWA",
       "url": "/priwa-field",
       "icons": [
         {

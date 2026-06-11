@@ -1,4 +1,4 @@
-const CACHE_VERSION = "priwa-app-shell-v1";
+const CACHE_VERSION = "deadtrees-app-shell-v2";
 const APP_SHELL_CACHE = `deadtrees-${CACHE_VERSION}`;
 const BASEMAP_CACHE_PREFIX = "deadtrees-priwa-basemap-v1";
 const VIEWED_BASEMAP_CACHE = `${BASEMAP_CACHE_PREFIX}-viewed`;
@@ -8,6 +8,7 @@ const TOPOGRAPHIC_TILE_URL_PREFIX =
   "https://sgx.geodatenzentrum.de/wmts_basemapde/tile/1.0.0/de_basemapde_web_raster_farbe/default/GLOBAL_WEBMERCATOR";
 const APP_SHELL_URLS = [
   "/",
+  "/deadtrees",
   "/priwa-field",
   "/manifest.webmanifest",
   "/assets/favicon.png",
@@ -64,7 +65,7 @@ const handleNavigation = async (request) => {
       (await caches.match(request)) ||
       (await caches.match("/priwa-field")) ||
       (await caches.match("/")) ||
-      new Response("PRIWA Field is offline and the app shell is unavailable.", {
+      new Response("deadtrees.earth is offline and the app shell is unavailable.", {
         headers: { "Content-Type": "text/plain; charset=utf-8" },
         status: 503,
         statusText: "Offline",
