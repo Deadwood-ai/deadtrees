@@ -1,6 +1,7 @@
 from pathlib import Path
 import subprocess
 import rasterio
+import rasterio.enums
 from shared.logger import logger
 from rio_cogeo.cogeo import cog_info, cog_validate
 # from rio_cogeo.profiles import cog_profiles
@@ -9,6 +10,7 @@ def _build_cog_translate_command(
 	tiff_file_path: str,
 	cog_target_path: str,
 	num_bands: int,
+	alpha_band_index: int | None = None,
 	force_epsg_3857: bool = False,
 ):
 	"""Build gdal_translate command with a safe strategy per band-count."""
@@ -19,8 +21,18 @@ def _build_cog_translate_command(
 	overview_compress = 'JPEG'
 	add_alpha = False
 	band_indexes = None
+	mask_band_index = None
 
-	if num_bands == 1:
+	if alpha_band_index is not None:
+		data_band_count = alpha_band_index - 1
+		if data_band_count == 1:
+			band_indexes = [1, 1, 1]
+		elif data_band_count == 2:
+			band_indexes = [1, 2, 1]
+		else:
+			band_indexes = [1, 2, 3]
+		mask_band_index = alpha_band_index
+	elif num_bands == 1:
 		# Grayscale input. Keep JPEG but pin explicit band.
 		band_indexes = [1]
 	elif num_bands == 2:
@@ -42,6 +54,11 @@ def _build_cog_translate_command(
 	if band_indexes:
 		for band_index in band_indexes:
 			cmd_translate.extend(['-b', str(band_index)])
+
+	if mask_band_index is not None:
+		# Public COGs use internal binary masks; graded alpha is intentionally
+		# collapsed here to prioritize reliable browser transparency.
+		cmd_translate.extend(['-mask', str(mask_band_index)])
 
 	cmd_translate.extend(
 		[
@@ -160,11 +177,15 @@ def calculate_cog(
 	# Get number of bands from input file
 	with rasterio.open(tiff_file_path) as src:
 		num_bands = src.count
+		alpha_band_index = None
+		if src.count >= 2 and src.colorinterp[src.count - 1] == rasterio.enums.ColorInterp.alpha:
+			alpha_band_index = src.count
 
 	cmd_translate = _build_cog_translate_command(
 		tiff_file_path=tiff_file_path,
 		cog_target_path=cog_target_path,
 		num_bands=num_bands,
+		alpha_band_index=alpha_band_index,
 	)
 
 	# Try to process with original CRS first
@@ -181,6 +202,7 @@ def calculate_cog(
 				tiff_file_path=tiff_file_path,
 				cog_target_path=cog_target_path,
 				num_bands=num_bands,
+				alpha_band_index=alpha_band_index,
 				force_epsg_3857=True,
 			)
 			_run_gdal_translate(cmd_translate_epsg, token=token, attempt='epsg-3857-retry')

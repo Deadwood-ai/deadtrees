@@ -16,6 +16,19 @@ import rasterio.enums
 import numpy as np
 
 
+def _as_python_scalar(value):
+	if isinstance(value, np.generic):
+		return value.item()
+	return value
+
+
+def _has_alpha_band(src) -> bool:
+	try:
+		return src.count >= 2 and src.colorinterp[src.count - 1] == rasterio.enums.ColorInterp.alpha
+	except (IndexError, AttributeError):
+		return False
+
+
 def _check_if_already_standardized(
 	input_path: str, token: str = None, dataset_id: int = None, user_id: str = None
 ) -> dict:
@@ -45,11 +58,7 @@ def _check_if_already_standardized(
 
 			# Check if band 4 is an alpha channel
 			has_alpha = False
-			if num_bands == 4:
-				try:
-					has_alpha = src.colorinterp[3] == rasterio.enums.ColorInterp.alpha
-				except (IndexError, AttributeError):
-					has_alpha = False
+			has_alpha = _has_alpha_band(src)
 
 			# File is standardized if it's uint8, tiled, and compressed
 			is_standardized = is_uint8 and is_tiled and has_compression
@@ -163,7 +172,7 @@ def find_nodata_value(src, num_bands, token: str = None, dataset_id: int = None,
 			most_common_value = values[np.argmax(counts)]
 
 			if np.max(counts) > len(edges_clean) * 0.3:
-				return most_common_value
+				return _as_python_scalar(most_common_value)
 
 		except Exception as e:
 			logger.warning(
@@ -191,6 +200,116 @@ def find_nodata_value(src, num_bands, token: str = None, dataset_id: int = None,
 			),
 		)
 		return None
+
+
+def _source_nodata_mask(source_data: np.ndarray, nodata_value) -> np.ndarray:
+	"""Return pixels where all selected source bands are nodata."""
+	if nodata_value is None:
+		return np.zeros(source_data.shape[1:], dtype=bool)
+	if nodata_value == 'nan':
+		if not np.issubdtype(source_data.dtype, np.floating):
+			return np.zeros(source_data.shape[1:], dtype=bool)
+		return np.all(np.isnan(source_data), axis=0)
+	try:
+		numeric_nodata = float(nodata_value)
+	except (TypeError, ValueError):
+		return np.zeros(source_data.shape[1:], dtype=bool)
+	return np.all(source_data == numeric_nodata, axis=0)
+
+
+def _is_extreme_value_for_dtype(value: float, dtype: str) -> bool:
+	try:
+		np_dtype = np.dtype(dtype)
+	except TypeError:
+		return False
+	if np.issubdtype(np_dtype, np.integer):
+		info = np.iinfo(np_dtype)
+		return value in {float(info.min), float(info.max)}
+	return False
+
+
+def _is_plausible_detected_nodata(value: float, dtype: str) -> bool:
+	try:
+		np_dtype = np.dtype(dtype)
+	except TypeError:
+		return False
+	if np.issubdtype(np_dtype, np.floating):
+		return np.isfinite(value)
+	if not np.issubdtype(np_dtype, np.integer):
+		return False
+
+	info = np.iinfo(np_dtype)
+	integer_value = int(value)
+	if value != float(integer_value):
+		return False
+	if integer_value == 0:
+		return True
+	if abs(integer_value - int(info.min)) <= 1 or abs(integer_value - int(info.max)) <= 1:
+		return True
+	return integer_value < 0 and abs(integer_value) in {999, 9999, 32767, 32768}
+
+
+def _add_alpha_from_source_nodata(
+	input_path: str,
+	byte_output_path: str,
+	source_nodata_value,
+	bands_to_process: int,
+	source_alpha_band_index: int | None = None,
+	token: str = None,
+	dataset_id: int = None,
+	user_id: str = None,
+) -> str:
+	"""Create an RGBA byte file whose alpha is derived from source nodata.
+
+	Nodata values such as 65535 cannot be represented after `-ot Byte`.
+	GDAL scaling clips them to 255 unless transparency is derived from the
+	original source values before the final warp step.
+	"""
+	if source_nodata_value is None and source_alpha_band_index is None:
+		return byte_output_path
+
+	indexes = list(range(1, bands_to_process + 1))
+	alpha_output_path = f'{byte_output_path}.alpha.tif'
+	with rasterio.open(input_path) as src, rasterio.open(byte_output_path) as byte_src:
+		profile = byte_src.profile.copy()
+		profile.pop('photometric', None)
+		profile.update(count=4, dtype='uint8', nodata=None, compress='DEFLATE', predictor=2)
+
+		with rasterio.open(alpha_output_path, 'w', **profile) as dst:
+			dst.colorinterp = (
+				rasterio.enums.ColorInterp.red,
+				rasterio.enums.ColorInterp.green,
+				rasterio.enums.ColorInterp.blue,
+				rasterio.enums.ColorInterp.alpha,
+			)
+			for _, window in byte_src.block_windows(1):
+				byte_data = byte_src.read(indexes=indexes, window=window, masked=False)
+				source_data = src.read(indexes=indexes, window=window, masked=False)
+				nodata_mask = _source_nodata_mask(source_data, source_nodata_value)
+				if source_alpha_band_index is not None:
+					source_alpha = src.read(source_alpha_band_index, window=window, masked=False)
+					# The public COG path uses binary masks, so preserve fully transparent
+					# source pixels while treating any nonzero alpha as valid data.
+					nodata_mask |= source_alpha == 0
+				alpha = np.full(nodata_mask.shape, 255, dtype=np.uint8)
+				if np.any(nodata_mask):
+					byte_data[:, nodata_mask] = 0
+					alpha[nodata_mask] = 0
+				if bands_to_process == 1:
+					rgb_data = np.repeat(byte_data[:1], 3, axis=0)
+				elif bands_to_process == 2:
+					rgb_data = np.concatenate([byte_data[:2], byte_data[:1]], axis=0)
+				else:
+					rgb_data = byte_data[:3]
+				dst.write(rgb_data, indexes=[1, 2, 3], window=window)
+				dst.write(alpha, indexes=4, window=window)
+
+	logger.info(
+		f'Added alpha band from source nodata value: {source_nodata_value}',
+		LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+	)
+	Path(byte_output_path).unlink()
+	return alpha_output_path
 
 
 def standardise_geotiff(
@@ -267,14 +386,18 @@ def standardise_geotiff(
 		if not processed_input:
 			return False
 
+		with rasterio.open(processed_input) as processed_src:
+			processed_num_bands = processed_src.count
+			processed_has_alpha = _has_alpha_band(processed_src)
+
 		# Step 3: Apply final transformations with gdalwarp (pass the actual nodata value AND alpha info AND compression)
 		success = _apply_final_transformations(
 			processed_input,
 			output_path,
 			src_properties['nodata'],
 			final_nodata_value,  # Pass the actual nodata value from intermediate file
-			src_properties['num_bands'],
-			src_properties['has_alpha'],  # Pass alpha band info to avoid conflicts
+			processed_num_bands,
+			processed_has_alpha,  # Pass alpha band info to avoid conflicts
 			src_properties['compression'],  # Pass original compression to preserve lossy formats
 			token,
 			dataset_id,
@@ -435,6 +558,10 @@ def _handle_bit_depth_conversion(
 	with rasterio.open(input_path) as src:
 		detected_nodata = find_nodata_value(src, src.count, token=token, dataset_id=dataset_id, user_id=user_id)
 		explicit_nodata = src.nodata
+		source_has_alpha = _has_alpha_band(src)
+		source_alpha_band_index = src.count if source_has_alpha else None
+		if source_has_alpha and explicit_nodata is None:
+			detected_nodata = None
 
 		# Calculate scaling parameters by reading from center of image
 		logger.info(
@@ -450,10 +577,13 @@ def _handle_bit_depth_conversion(
 
 		sample_window = rasterio.windows.Window(center_x, center_y, center_width, center_height)
 		sample_data = src.read(window=sample_window)
+		sample_alpha_mask = None
+		if source_has_alpha:
+			sample_alpha_mask = sample_data[source_alpha_band_index - 1] > 0
 
 		# Calculate min/max per band for RGB only (first 3 bands)
-		num_bands = src.count
-		bands_to_analyze = min(num_bands, 3)  # Only analyze RGB bands
+		data_band_count = src.count - 1 if source_has_alpha else src.count
+		bands_to_analyze = min(data_band_count, 3)  # Only analyze RGB/display bands
 		band_ranges = []
 
 		for band_idx in range(bands_to_analyze):
@@ -461,6 +591,8 @@ def _handle_bit_depth_conversion(
 
 			# Remove NaN values and any detected nodata for proper min/max calculation
 			valid_mask = ~np.isnan(band_data)
+			if sample_alpha_mask is not None:
+				valid_mask = valid_mask & sample_alpha_mask
 
 			# Exclude explicit nodata values from scaling calculation
 			if explicit_nodata is not None and not np.isnan(explicit_nodata):
@@ -517,21 +649,29 @@ def _handle_bit_depth_conversion(
 	# Build translate command - PRESERVE original nodata values
 	# Only process RGB bands (1-3) - extra bands (multispectral, undefined) are not needed
 	# and can cause issues (e.g., constant-value bands cause GDAL scaling divide-by-zero)
-	bands_to_process = min(num_bands, 3)  # Only RGB bands
-	if num_bands > 3:
+	bands_to_process = min(data_band_count, 3)  # Only RGB/display bands
+	if compress_arg == 'JPEG' and bands_to_process < 3:
 		logger.info(
-			f'File has {num_bands} bands, will only process first 3 (RGB) for standardization',
+			'Converting JPEG compression to DEFLATE for low-band byte conversion',
+			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
+		compress_arg = 'DEFLATE'
+	if data_band_count > 3:
+		logger.info(
+			f'File has {data_band_count} data bands, will only process first 3 for standardization',
 			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
 		)
 
 	translate_cmd = ['gdal_translate', '-ot', 'Byte']
 
-	# Select only RGB bands if file has more than 3
-	if num_bands > 3:
-		translate_cmd.extend(['-b', '1', '-b', '2', '-b', '3'])
+	# Select only data/display bands when the source has extra or alpha bands.
+	if source_has_alpha or data_band_count > 3:
+		for band_index in range(1, bands_to_process + 1):
+			translate_cmd.extend(['-b', str(band_index)])
 
 	# Determine what nodata value to preserve in the output
 	final_nodata_value = None
+	source_nodata_value = None
 
 	if explicit_nodata is not None and np.isnan(explicit_nodata):
 		# NaN nodata - convert to 0 (since Byte format can't store NaN)
@@ -541,6 +681,7 @@ def _handle_bit_depth_conversion(
 		)
 		translate_cmd.extend(['-a_nodata', '0'])
 		final_nodata_value = 0
+		source_nodata_value = 'nan'
 	elif detected_nodata == 'nan':
 		# Detected NaN nodata - convert to 0
 		logger.info(
@@ -549,25 +690,34 @@ def _handle_bit_depth_conversion(
 		)
 		translate_cmd.extend(['-a_nodata', '0'])
 		final_nodata_value = 0
+		source_nodata_value = 'nan'
 	elif explicit_nodata is not None:
-		# Preserve explicit numeric nodata value
-		nodata_int = int(explicit_nodata)
+		# Convert numeric source nodata to byte-safe nodata.
+		nodata_float = float(explicit_nodata)
 		logger.info(
-			f'Preserving explicit nodata value: {nodata_int}',
+			f'Converting explicit nodata value {nodata_float:g} to byte nodata value 0',
 			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
 		)
-		translate_cmd.extend(['-a_nodata', str(nodata_int)])
-		final_nodata_value = nodata_int
+		translate_cmd.extend(['-a_nodata', '0'])
+		final_nodata_value = 0
+		source_nodata_value = nodata_float
 	elif detected_nodata is not None and detected_nodata != 'nan':
-		# Preserve detected numeric nodata value
+		# Convert detected numeric source nodata to byte-safe nodata.
 		try:
-			nodata_int = int(float(detected_nodata))
-			logger.info(
-				f'Preserving detected nodata value: {nodata_int}',
-				LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
-			)
-			translate_cmd.extend(['-a_nodata', str(nodata_int)])
-			final_nodata_value = nodata_int
+			nodata_float = float(detected_nodata)
+			if not _is_plausible_detected_nodata(nodata_float, src_dtype):
+				logger.warning(
+					f'Ignoring implausible detected nodata value: {nodata_float:g}',
+					LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+				)
+			else:
+				logger.info(
+					f'Converting detected nodata value {nodata_float:g} to byte nodata value 0',
+					LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+				)
+				translate_cmd.extend(['-a_nodata', '0'])
+				final_nodata_value = 0
+				source_nodata_value = nodata_float
 		except (ValueError, TypeError):
 			logger.warning(
 				f'Could not convert detected nodata to integer: {detected_nodata}',
@@ -621,6 +771,35 @@ def _handle_bit_depth_conversion(
 			f'gdal_translate output:\n{result.stdout}',
 			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
 		)
+		try:
+			processed_output = _add_alpha_from_source_nodata(
+				input_path,
+				temp_output,
+				source_nodata_value,
+				bands_to_process,
+				source_alpha_band_index=source_alpha_band_index,
+				token=token,
+				dataset_id=dataset_id,
+				user_id=user_id,
+			)
+		except Exception as e:
+			for partial_path in [temp_output, f'{temp_output}.alpha.tif']:
+				partial = Path(partial_path)
+				if partial.exists():
+					partial.unlink()
+			logger.error(
+				f'Error creating alpha band from source nodata: {e}',
+				LogContext(
+					category=LogCategory.ORTHO,
+					dataset_id=dataset_id,
+					user_id=user_id,
+					token=token,
+					extra={'error': str(e)},
+				),
+			)
+			return None, None
+		if processed_output != temp_output:
+			return processed_output, None
 		return temp_output, final_nodata_value
 
 	except subprocess.CalledProcessError as e:
@@ -664,11 +843,13 @@ def _apply_final_transformations(
 	# Determine compression to use - preserve original if specified
 	# CRITICAL: JPEG YCbCr is incompatible with alpha band modifications
 	# If we need to create alpha from nodata, use DEFLATE instead
-	if compression == 'JPEG' and final_nodata_value is not None and not has_alpha:
+	if compression == 'JPEG' and (has_alpha or final_nodata_value is not None or num_bands < 3):
 		logger.info(
-			'Converting JPEG compression to DEFLATE for alpha band creation (JPEG YCbCr incompatible with warp)',
+			'Converting JPEG compression to DEFLATE for final warp (JPEG YCbCr incompatible with alpha/low-band output)',
 			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
 		)
+		# JPEG-in-GTiff is unsafe for alpha and low-band outputs; accept larger
+		# standardized files here to keep browser masks and grayscale data valid.
 		compress_arg = 'DEFLATE'
 	else:
 		compress_arg = compression if compression else 'DEFLATE'
