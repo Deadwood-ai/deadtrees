@@ -573,7 +573,7 @@ export default function PriwaFieldMap({
 
       {!isPlacingPoint && (
         <>
-          <div className="pointer-events-none absolute left-4 top-20 z-10 flex flex-col gap-2 md:top-24">
+          <div className="priwa-map-control-stack pointer-events-none absolute left-4 z-10 flex flex-col gap-2">
             <Tooltip title={locationButtonTitle}>
               <Button
                 className={
@@ -683,7 +683,7 @@ export default function PriwaFieldMap({
       )}
 
       {!isPlacingPoint && (
-        <div className="pointer-events-none absolute right-4 top-20 z-10 flex max-w-[calc(100%-5.75rem)] flex-col items-end gap-1.5 md:top-24">
+        <div className="priwa-map-status-stack pointer-events-none absolute right-4 z-10 flex max-w-[calc(100%-5.75rem)] flex-col items-end gap-1.5">
           {locationHintLabel && (
             <div className="rounded-md bg-white/90 px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm backdrop-blur">
               {locationHintLabel}
