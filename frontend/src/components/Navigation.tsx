@@ -188,7 +188,7 @@ export default function Navigation() {
         </Header>
       </div>
 
-      <div className="md:hidden fixed top-0 z-50 w-full px-2 pt-2 pointer-events-none">
+      <div className="dt-mobile-nav-shell md:hidden fixed top-0 z-50 w-full px-2 pointer-events-none">
         <Header
           className="pointer-events-auto"
           style={{

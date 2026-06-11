@@ -323,3 +323,19 @@
   font-size: 20px;
   color: #2d6b3f !important;
 }
+
+.dt-mobile-nav-shell {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 0.5rem);
+}
+
+.priwa-map-control-stack,
+.priwa-map-status-stack {
+  top: calc(env(safe-area-inset-top, 0px) + 5.75rem);
+}
+
+@media (min-width: 768px) {
+  .priwa-map-control-stack,
+  .priwa-map-status-stack {
+    top: 6rem;
+  }
+}

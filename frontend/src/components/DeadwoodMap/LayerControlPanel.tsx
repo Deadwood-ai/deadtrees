@@ -1,6 +1,20 @@
 import { useState } from "react";
-import { Segmented, Slider, Switch, Button, Divider, Checkbox, Tooltip } from "antd";
-import { AreaChartOutlined, FlagOutlined, LoginOutlined, InfoCircleOutlined } from "@ant-design/icons";
+import {
+  Segmented,
+  Slider,
+  Switch,
+  Button,
+  Divider,
+  Checkbox,
+  Tooltip,
+} from "antd";
+import {
+  AreaChartOutlined,
+  DownloadOutlined,
+  FlagOutlined,
+  LoginOutlined,
+  InfoCircleOutlined,
+} from "@ant-design/icons";
 import { mapColors } from "../../theme/mapColors";
 import { palette } from "../../theme/palette";
 import MapLegend from "./MapLegend";
@@ -16,6 +30,10 @@ interface LayerControlPanelProps {
   setShowForest: (show: boolean) => void;
   showDeadwood: boolean;
   setShowDeadwood: (show: boolean) => void;
+  showPublicContributions?: boolean;
+  setShowPublicContributions?: (show: boolean) => void;
+  publicContributionsCount?: number;
+  onDownloadPublicTreeObservations?: () => void;
   // Opacity
   opacity: number;
   setOpacity: (value: number) => void;
@@ -54,6 +72,10 @@ const LayerControlPanel = ({
   setShowForest,
   showDeadwood,
   setShowDeadwood,
+  showPublicContributions,
+  setShowPublicContributions,
+  publicContributionsCount,
+  onDownloadPublicTreeObservations,
   opacity,
   setOpacity,
   isDrawingPolygon,
@@ -84,34 +106,62 @@ const LayerControlPanel = ({
       data-testid="deadtrees-layer-controls"
     >
       {/* Basemap Selection */}
-      <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">Basemap</div>
-      <Segmented
-        size="small"
-        block
-        value={mapStyle}
-        onChange={(value) => onMapStyleChange(value as string)}
-        options={basemapOptions}
-      />
+      <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">
+        Basemap
+      </div>
+      <div className="grid grid-cols-2 gap-1">
+        {basemapOptions.map((option) => (
+          <Button
+            key={option.value}
+            size="small"
+            type={mapStyle === option.value ? "primary" : "default"}
+            onClick={() => onMapStyleChange(option.value)}
+          >
+            {option.label}
+          </Button>
+        ))}
+      </div>
 
       <Divider className="my-2.5" />
 
-      {/* Data Layers - independent toggles, 0/1/2 layers can be active */}
-      <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">Data Layers</div>
+      {/* Data Layers - independent toggles, any combination can be active */}
+      <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">
+        Data Layers
+      </div>
       <div className="flex flex-col gap-1">
-        <Checkbox checked={showForest} onChange={(e) => setShowForest(e.target.checked)}>
+        <Checkbox
+          checked={showForest}
+          onChange={(e) => setShowForest(e.target.checked)}
+        >
           <span className="flex items-center gap-2">
-            <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: mapColors.forest.fill }} />
+            <span
+              className="h-3 w-3 rounded-sm"
+              style={{ backgroundColor: mapColors.forest.fill }}
+            />
             <span className="text-xs text-gray-600">Tree cover [%]</span>
           </span>
         </Checkbox>
         <div className="flex items-center justify-between">
-          <Checkbox checked={showDeadwood} onChange={(e) => setShowDeadwood(e.target.checked)}>
+          <Checkbox
+            checked={showDeadwood}
+            onChange={(e) => setShowDeadwood(e.target.checked)}
+          >
             <span className="flex items-center gap-2">
-              <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: mapColors.deadwood.fill }} />
+              <span
+                className="h-3 w-3 rounded-sm"
+                style={{ backgroundColor: mapColors.deadwood.fill }}
+              />
               <span className="text-xs text-gray-600">Deadwood cover [%]</span>
             </span>
           </Checkbox>
-          <Tooltip title={<div className="max-w-xs text-xs leading-relaxed">{standingDeadwoodLayerExplanation}</div>} placement="left">
+          <Tooltip
+            title={
+              <div className="max-w-xs text-xs leading-relaxed">
+                {standingDeadwoodLayerExplanation}
+              </div>
+            }
+            placement="left"
+          >
             <InfoCircleOutlined className="cursor-help text-xs text-gray-400 hover:text-gray-600" />
           </Tooltip>
         </div>
@@ -120,7 +170,9 @@ const LayerControlPanel = ({
       {onModelVersionChange && (
         <>
           <Divider className="my-2.5" />
-          <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">Dataset Version</div>
+          <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">
+            Dataset Version
+          </div>
           <Segmented
             size="small"
             block
@@ -137,18 +189,25 @@ const LayerControlPanel = ({
       <Divider className="my-2.5" />
 
       {/* Opacity */}
-      <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">Layer Opacity</div>
+      <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">
+        Layer Opacity
+      </div>
       <Slider
         min={0}
         max={1}
         step={0.01}
         value={opacity}
         onChange={setOpacity}
-        tooltip={{ formatter: (v) => `${Math.round((v || 0) * 100)}%`, placement: "left" }}
+        tooltip={{
+          formatter: (v) => `${Math.round((v || 0) * 100)}%`,
+          placement: "left",
+        }}
       />
 
       <Divider className="my-2.5" />
-      <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">Model Info</div>
+      <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">
+        Model Info
+      </div>
       <Tooltip title="View model attributions and papers">
         <Button
           type="link"
@@ -163,7 +222,9 @@ const LayerControlPanel = ({
       {showAttributions && (
         <div className="mt-2 space-y-2 rounded bg-gray-50 p-2 text-xs">
           <div>
-            <div className="font-semibold text-gray-800">Satellite products (Sentinel maps):</div>
+            <div className="font-semibold text-gray-800">
+              Satellite products (Sentinel maps):
+            </div>
             <a
               href="https://eartharxiv.org/repository/view/11912/"
               className="text-blue-600 underline"
@@ -180,7 +241,9 @@ const LayerControlPanel = ({
       {onPolygonStatsClick && (
         <>
           <Divider className="my-2.5" />
-          <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">Analytics</div>
+          <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">
+            Analytics
+          </div>
           <Button
             size={actionButtonSize}
             type={isDrawingPolygon ? "primary" : "default"}
@@ -191,7 +254,10 @@ const LayerControlPanel = ({
             className={controlButtonClass}
             style={
               !isDrawingPolygon
-                ? { borderColor: palette.primary[500], color: palette.primary[500] }
+                ? {
+                    borderColor: palette.primary[500],
+                    color: palette.primary[500],
+                  }
                 : undefined
             }
           >
@@ -206,8 +272,49 @@ const LayerControlPanel = ({
       {/* Flags Section - shown to all users */}
       {showFlagsControls && (
         <>
-          <div className={`${isDrawerSheet ? "mt-2.5 -mx-3 border-t border-gray-100 bg-[#F8FAF9] px-3 pb-3 pt-2.5" : "-mx-3 -mb-3 mt-2.5 border-t border-gray-100 bg-[#F8FAF9] px-3 pb-3 pt-2.5"}`}>
-            <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">Feedback</div>
+          <div
+            className={`${isDrawerSheet ? "mt-2.5 -mx-3 border-t border-gray-100 bg-[#F8FAF9] px-3 pb-3 pt-2.5" : "-mx-3 -mb-3 mt-2.5 border-t border-gray-100 bg-[#F8FAF9] px-3 pb-3 pt-2.5"}`}
+          >
+            <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">
+              Feedback
+            </div>
+            {setShowPublicContributions && (
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <Checkbox
+                  checked={showPublicContributions}
+                  onChange={(e) =>
+                    setShowPublicContributions(e.target.checked)
+                  }
+                >
+                  <span className="flex items-center gap-2">
+                    <span
+                      className="h-3 w-3 rounded-full border-2 border-white shadow-sm"
+                      style={{ backgroundColor: "rgba(22, 163, 74, 0.96)" }}
+                    />
+                    <span className="text-xs text-gray-600">
+                      Point observations
+                      {publicContributionsCount !== undefined &&
+                        publicContributionsCount > 0 &&
+                        ` (${publicContributionsCount})`}
+                    </span>
+                  </span>
+                </Checkbox>
+                {onDownloadPublicTreeObservations && (
+                  <Tooltip title="Download point observations as CSV">
+                    <Button
+                      size="small"
+                      icon={<DownloadOutlined />}
+                      disabled={(publicContributionsCount ?? 0) === 0}
+                      aria-label="Download point observations as CSV"
+                      onClick={onDownloadPublicTreeObservations}
+                    />
+                  </Tooltip>
+                )}
+              </div>
+            )}
+            <p className="mb-2 text-xs leading-4 text-gray-500">
+              Add point observations from the mobile map.
+            </p>
             <p className="mb-2 text-xs leading-4 text-gray-500">
               Help improve our AI by flagging incorrect predictions
             </p>
@@ -227,9 +334,16 @@ const LayerControlPanel = ({
                 {setShowFlagsLayer && (
                   <div className="mt-2 flex items-center justify-between">
                     <span className="text-xs text-blue-600">
-                      Show Flags {flagsCount !== undefined && flagsCount > 0 && `(${flagsCount})`}
+                      Show Flags{" "}
+                      {flagsCount !== undefined &&
+                        flagsCount > 0 &&
+                        `(${flagsCount})`}
                     </span>
-                    <Switch size="small" checked={showFlagsLayer} onChange={setShowFlagsLayer} />
+                    <Switch
+                      size="small"
+                      checked={showFlagsLayer}
+                      onChange={setShowFlagsLayer}
+                    />
                   </div>
                 )}
               </>
