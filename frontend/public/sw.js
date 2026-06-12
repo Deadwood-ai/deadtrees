@@ -1,5 +1,5 @@
 const CACHE_VERSION = "deadtrees-app-shell-v2";
-const APP_SHELL_CACHE = `deadtrees-${CACHE_VERSION}`;
+const APP_SHELL_CACHE = CACHE_VERSION;
 const BASEMAP_CACHE_PREFIX = "deadtrees-priwa-basemap-v1";
 const VIEWED_BASEMAP_CACHE = `${BASEMAP_CACHE_PREFIX}-viewed`;
 const LGL_BASEMAP_URL_PREFIX =
