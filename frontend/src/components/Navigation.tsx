@@ -229,6 +229,7 @@ export default function Navigation() {
         open={mobileMenuOpen}
         width="82vw"
         onClose={() => setMobileMenuOpen(false)}
+        rootClassName="dt-mobile-navigation-drawer-root"
         styles={{
           body: { padding: 0, display: "flex", flexDirection: "column" },
         }}
@@ -257,7 +258,7 @@ export default function Navigation() {
             />
           </ConfigProvider>
         </div>
-        <div className="p-4 border-t border-gray-100">
+        <div className="dt-mobile-navigation-drawer-footer p-4 border-t border-gray-100">
           <Button
             className="w-full font-medium"
             type={session ? "default" : "primary"}

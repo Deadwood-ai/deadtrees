@@ -13,7 +13,10 @@ const MobileAddTreeButton = ({
   if (hidden) return null;
 
   return (
-    <div className="pointer-events-none absolute bottom-[calc(1rem+env(safe-area-inset-bottom))] right-3 z-[54] md:hidden">
+    <div
+      className="pointer-events-none absolute right-3 z-[54] md:hidden"
+      style={{ bottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
+    >
       <Button
         type="primary"
         shape="round"

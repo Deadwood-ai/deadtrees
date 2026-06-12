@@ -102,6 +102,26 @@
   .dt-map-attribution-control {
     display: none !important;
   }
+
+  .dt-mobile-navigation-drawer-root .ant-drawer-content,
+  .dt-mobile-navigation-drawer-root .ant-drawer-content-wrapper,
+  .priwa-point-drawer-root .ant-drawer-content,
+  .priwa-point-drawer-root .ant-drawer-content-wrapper {
+    max-height: 100dvh;
+  }
+
+  .dt-mobile-navigation-drawer-root .ant-drawer-header,
+  .priwa-point-drawer-root .ant-drawer-header {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 16px);
+  }
+
+  .dt-mobile-navigation-drawer-root .ant-drawer-body {
+    padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+  }
+
+  .dt-mobile-navigation-drawer-footer {
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 16px) !important;
+  }
 }
 
 .priwa-point-drawer-root .ant-drawer-body {

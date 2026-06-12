@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Button,
@@ -1148,22 +1147,6 @@ const DeadtreesMap = () => {
     }
   }, [userLocation.locationError]);
 
-  const maybeStartMobileOrientationTracking = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (!isMobile || !userLocation.needsOrientationPermission) return;
-      const target = event.target as HTMLElement | null;
-      if (
-        target?.closest(
-          "button, input, textarea, select, .ant-drawer, .deadtrees-mobile-control-panel",
-        )
-      ) {
-        return;
-      }
-      locateUser(true);
-    },
-    [isMobile, locateUser, userLocation.needsOrientationPermission],
-  );
-
   const requestPublicObservationPlacement = useCallback(() => {
     if (!mapRef.current || !isMobile) return;
 
@@ -1283,10 +1266,7 @@ const DeadtreesMap = () => {
     isDrawingFlag || polygonAnalysis.isDrawing || isPlacingPublicObservation;
 
   return (
-    <div
-      className="h-full w-full"
-      onPointerDownCapture={maybeStartMobileOrientationTracking}
-    >
+    <div className="h-full w-full">
       <div
         style={{
           width: "100%",
@@ -1443,7 +1423,10 @@ const DeadtreesMap = () => {
         />
 
         {activeMobileDrawMode && (
-          <div className="pointer-events-none absolute bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-1/2 z-[60] w-fit max-w-[calc(100vw-1.5rem)] -translate-x-1/2 md:hidden">
+          <div
+            className="pointer-events-none absolute left-1/2 z-[60] w-fit max-w-[calc(100vw-1.5rem)] -translate-x-1/2 md:hidden"
+            style={{ bottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
+          >
             <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-gray-200/80 bg-white/95 p-2 shadow-xl backdrop-blur-sm">
               <div className="hidden min-w-0 flex-1 px-1 sm:block">
                 <div className="text-xs font-semibold text-gray-700">

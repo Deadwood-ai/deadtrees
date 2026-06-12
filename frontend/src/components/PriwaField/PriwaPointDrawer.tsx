@@ -410,7 +410,7 @@ export default function PriwaPointDrawer({
           overflowX: "hidden",
           overflowY: "auto",
           overscrollBehavior: "contain",
-          padding: "14px 18px 18px",
+          padding: "14px 18px calc(env(safe-area-inset-bottom, 0px) + 18px)",
           touchAction: "pan-y",
           WebkitOverflowScrolling: "touch",
         },
