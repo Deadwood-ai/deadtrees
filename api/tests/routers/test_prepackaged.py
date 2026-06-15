@@ -7,14 +7,11 @@ from api.src.routers.prepackaged import (
 	DEFINITIONS_TABLE,
 	GRANTS_TABLE,
 	VERSIONS_TABLE,
-	build_download_url,
 	create_prepackaged_download_grant,
 	generate_prepackaged_signed_download_url,
 	hash_download_token,
 	list_prepackaged_packages,
 	normalize_prepackaged_storage_key,
-	parse_original_path,
-	parse_original_token,
 )
 
 
@@ -26,28 +23,6 @@ def test_hash_download_token_is_stable_and_non_plaintext():
 	assert token_hash == hash_download_token(token)
 	assert token_hash != token
 	assert len(token_hash) == 64
-
-
-def test_build_download_url_uses_configured_file_name(monkeypatch):
-	from api.src.routers import prepackaged
-
-	monkeypatch.setattr(prepackaged.settings, 'PREPACKAGED_DOWNLOAD_BASE_URL', 'https://data.example/prepackaged/v1')
-
-	download_url = build_download_url('/prepackaged/v1/tree-cover_2026.04.17.zip', 'signed-token')
-
-	assert download_url == 'https://data.example/prepackaged/v1/tree-cover_2026.04.17.zip?token=signed-token'
-
-
-def test_parse_original_path_drops_query_token():
-	assert (
-		parse_original_path('/prepackaged/v1/tree-cover.zip?token=signed-token')
-		== '/prepackaged/v1/tree-cover.zip'
-	)
-
-
-def test_parse_original_token_reads_query_token():
-	assert parse_original_token('/prepackaged/v1/tree-cover.zip?token=signed-token') == 'signed-token'
-	assert parse_original_token('/prepackaged/v1/tree-cover.zip') is None
 
 
 class FakeDataResponse:

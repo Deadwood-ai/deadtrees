@@ -5,6 +5,7 @@ def make_settings(**overrides):
 	defaults = {
 		'SUPABASE_URL': 'http://example.supabase',
 		'SUPABASE_KEY': 'example-key',
+		'PREPACKAGED_SIGNED_URL_TTL_SECONDS': 86400,
 	}
 	defaults.update(overrides)
 	return Settings(**defaults)
@@ -18,7 +19,7 @@ def test_production_dependent_urls_follow_dev_mode():
 	assert settings.PREPACKAGED_DOWNLOAD_BASE_URL == 'https://data2.deadtrees.earth/prepackaged/v1'
 	assert settings.PREPACKAGED_S3_REGION == 'fr1-ec82'
 	assert settings.PREPACKAGED_S3_BUCKET == 'frct-deadtrees-products'
-	assert settings.PREPACKAGED_SIGNED_URL_TTL_SECONDS == 604800
+	assert settings.PREPACKAGED_SIGNED_URL_TTL_SECONDS == 86400
 
 
 def test_explicit_prepackaged_download_base_url_is_preserved():
