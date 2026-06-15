@@ -16,8 +16,8 @@ export const mapColors = {
     fill: hexToRgba(palette.secondary[500], 0.2),
   },
   flag: {
-    stroke: palette.primary[500],
-    fill: palette.primary[500],
+    stroke: palette.secondary[500],
+    fill: palette.secondary[500],
+    areaFill: hexToRgba(palette.secondary[500], 0.15),
   },
 } as const;
-

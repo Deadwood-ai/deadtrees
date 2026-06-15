@@ -333,7 +333,10 @@ const LayerControlPanel = ({
                 </Button>
                 {setShowFlagsLayer && (
                   <div className="mt-2 flex items-center justify-between">
-                    <span className="text-xs text-blue-600">
+                    <span
+                      className="text-xs"
+                      style={{ color: mapColors.flag.stroke }}
+                    >
                       Show Flags{" "}
                       {flagsCount !== undefined &&
                         flagsCount > 0 &&
