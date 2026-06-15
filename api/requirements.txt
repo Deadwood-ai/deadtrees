@@ -15,6 +15,7 @@ geopandas
 paramiko
 requests
 aiofiles
+boto3
 httpx
 tqdm
 pytest
