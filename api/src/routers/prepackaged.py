@@ -2,9 +2,9 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import secrets
 from typing import Any, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from shared.db import use_client, use_service_client, verify_token
@@ -67,11 +67,6 @@ class PrepackagedDownloadGrantResponse(BaseModel):
 
 def hash_download_token(token: str) -> str:
 	return hashlib.sha256(token.encode('utf-8')).hexdigest()
-
-
-def build_download_url(public_download_path: str, token: str) -> str:
-	file_name = public_download_path.rstrip('/').split('/')[-1]
-	return f'{settings.PREPACKAGED_DOWNLOAD_BASE_URL.rstrip("/")}/{file_name}?token={token}'
 
 
 def normalize_prepackaged_storage_key(storage_path: Optional[str]) -> str:
@@ -171,24 +166,6 @@ def get_request_ip(request: Request) -> Optional[str]:
 	return None
 
 
-def parse_original_path(original_uri: Optional[str]) -> Optional[str]:
-	if not original_uri:
-		return None
-
-	return urlparse(original_uri).path
-
-
-def parse_original_token(original_uri: Optional[str]) -> Optional[str]:
-	if not original_uri:
-		return None
-
-	token_values = parse_qs(urlparse(original_uri).query).get('token')
-	if not token_values:
-		return None
-
-	return token_values[0]
-
-
 def require_user(token: str):
 	user = verify_token(token)
 	if not user:
@@ -271,7 +248,9 @@ def create_prepackaged_download_grant(
 ):
 	token = authorization.replace('Bearer ', '')
 	user = require_user(token)
-	audit_token = secrets.token_urlsafe(32)
+	# The table still has a unique, non-null token_hash from the old Nginx-token flow.
+	# S3 signed downloads do not expose this nonce; grant id plus extra JSON are the audit record.
+	audit_nonce = secrets.token_urlsafe(32)
 	expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.PREPACKAGED_SIGNED_URL_TTL_SECONDS)
 
 	with use_client(token) as db_client:
@@ -289,7 +268,7 @@ def create_prepackaged_download_grant(
 				{
 					'version_id': version_id,
 					'user_id': user.id,
-					'token_hash': hash_download_token(audit_token),
+					'token_hash': hash_download_token(audit_nonce),
 					'expires_at': expires_at.isoformat(),
 					'requested_ip': get_request_ip(request),
 					'requested_user_agent': request.headers.get('user-agent'),
@@ -333,50 +312,3 @@ def create_prepackaged_download_grant(
 		expires_at=expires_at,
 		download_url=download_url,
 	)
-
-
-@router.get('/grants/validate')
-def validate_prepackaged_download_grant(
-	token: Optional[str] = Query(default=None),
-	x_download_token: Optional[str] = Header(default=None, alias='X-Download-Token'),
-	x_original_uri: Optional[str] = Header(default=None, alias='X-Original-URI'),
-):
-	raw_download_token = token or x_download_token or parse_original_token(x_original_uri)
-	if not raw_download_token:
-		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Missing download token')
-
-	requested_path = parse_original_path(x_original_uri)
-	now = datetime.now(timezone.utc)
-
-	with use_service_client() as db_client:
-		grant_response = (
-			db_client.table(GRANTS_TABLE)
-			.select(
-				'id,expires_at,revoked_at,validation_count,'
-				'version:prepackaged_dataset_versions(id,status,public_download_path,file_name)'
-			)
-			.eq('token_hash', hash_download_token(raw_download_token))
-			.execute()
-		)
-
-		if not grant_response.data:
-			raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid download token')
-
-		grant = grant_response.data[0]
-		version = grant.get('version') or {}
-		expires_at = datetime.fromisoformat(grant['expires_at'].replace('Z', '+00:00'))
-
-		if grant.get('revoked_at') is not None or expires_at <= now or version.get('status') != 'available':
-			raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Download grant is not active')
-
-		if requested_path and requested_path != version.get('public_download_path'):
-			raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Download grant does not match file')
-
-		db_client.table(GRANTS_TABLE).update(
-			{
-				'last_validated_at': now.isoformat(),
-				'validation_count': (grant.get('validation_count') or 0) + 1,
-			}
-		).eq('id', grant['id']).execute()
-
-	return {'ok': True}

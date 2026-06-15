@@ -121,7 +121,7 @@ class Settings(BaseSettings):
 	PREPACKAGED_S3_BUCKET: str = 'frct-deadtrees-products'
 	PREPACKAGED_API_READ_S3_ACCESS_KEY: str = ''
 	PREPACKAGED_API_READ_S3_SECRET_KEY: str = ''
-	PREPACKAGED_SIGNED_URL_TTL_SECONDS: int = 604800
+	PREPACKAGED_SIGNED_URL_TTL_SECONDS: int = 86400
 
 	# processor settings
 	PROCESSOR_USERNAME: str = 'processor@deadtrees.earth'

@@ -30,7 +30,7 @@ PREPACKAGED_S3_REGION=fr1-ec82
 PREPACKAGED_S3_BUCKET=frct-deadtrees-products
 PREPACKAGED_API_READ_S3_ACCESS_KEY=<read-user-access-key>
 PREPACKAGED_API_READ_S3_SECRET_KEY=<read-user-secret-key>
-PREPACKAGED_SIGNED_URL_TTL_SECONDS=604800
+PREPACKAGED_SIGNED_URL_TTL_SECONDS=86400
 ```
 
 The API read user only needs `s3:GetObject` on
@@ -96,7 +96,7 @@ False
 https://s3.bwsfs.uni-freiburg.de
 fr1-ec82
 frct-deadtrees-products
-604800
+86400
 True
 True
 ```
@@ -119,8 +119,14 @@ Confirm the API recorded the request in
 ```
 
 The old Nginx-backed `/prepackaged/v1/` route and
-`/_prepackaged_download_auth` validation endpoint can remain temporarily for
-rollback, but they are not the primary download path after this release.
+`/_prepackaged_download_auth` validation endpoint are no longer part of the
+tracked deployment config. If rollback to host-served ZIPs is required, restore
+that route together with the matching API validation endpoint in the same
+reviewed rollback change.
+
+Signed URLs are direct object-storage URLs. Revoking an app-side grant prevents
+new links, but an already issued URL remains usable until its one-day expiry
+unless the object, credentials, or bucket policy are changed.
 
 The old public asset path must stay blocked:
 
