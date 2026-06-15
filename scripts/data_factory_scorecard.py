@@ -127,15 +127,18 @@ with input as (
       from prepackaged_dataset_versions
       where created_at >= now() - interval '30 days'
     ),
-    'download_grants_7d', (
+    'prepackaged_signed_downloads_7d', (
       select count(*)
       from prepackaged_dataset_download_grants
       where created_at >= now() - interval '7 days'
+        and extra->>'event' = 'prepackaged_signed_download_created'
     ),
-    'download_grants_validated_7d', (
-      select count(*)
+    'prepackaged_signed_download_bytes_7d', (
+      select coalesce(sum((extra->>'size_bytes')::bigint), 0)
       from prepackaged_dataset_download_grants
-      where last_validated_at >= now() - interval '7 days'
+      where created_at >= now() - interval '7 days'
+        and extra->>'event' = 'prepackaged_signed_download_created'
+        and extra->>'size_bytes' ~ '^[0-9]+$'
     ),
     'datasets_with_freidata_doi', (
       select count(*)
@@ -264,7 +267,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
 			'## Impact',
 			f"- published release versions: `{impact['published_release_versions']}`",
 			f"- release versions created 30d: `{impact['release_versions_created_30d']}`",
-			f"- prepackaged download grants 7d: `{impact['download_grants_7d']}`; validated `{impact['download_grants_validated_7d']}`",
+			f"- prepackaged signed downloads 7d: `{impact['prepackaged_signed_downloads_7d']}`; bytes `{impact['prepackaged_signed_download_bytes_7d']}`",
 			f"- datasets with FreiDATA DOI: `{impact['datasets_with_freidata_doi']}`",
 			'',
 			'## Risks',
@@ -293,15 +296,15 @@ def classify(scorecard: dict[str, Any]) -> tuple[str, str, list[str]]:
 		risks.append(f"{processing['has_error_now']} datasets currently have errors")
 	if int(trust['open_flags']) > 0:
 		risks.append(f"{trust['open_flags']} open dataset flags")
-	if int(impact['download_grants_7d']) == 0:
-		risks.append('no prepackaged download grants in 7d')
+	if int(impact['prepackaged_signed_downloads_7d']) == 0:
+		risks.append('no prepackaged signed downloads in 7d')
 
 	constraint = 'processing reliability'
 	if int(processing['statuses_error_24h']) == 0 and int(queue['active']) <= 1:
 		constraint = 'trust/reference throughput'
 	if int(trust['audits_reviewed_7d']) > 0 and int(trust['reference_patches_created_7d']) == 0:
 		constraint = 'reference-patch creation'
-	if int(impact['download_grants_7d']) == 0:
+	if int(impact['prepackaged_signed_downloads_7d']) == 0:
 		constraint = 'reuse/impact capture'
 
 	verdict = 'green'

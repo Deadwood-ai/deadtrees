@@ -112,9 +112,16 @@ class Settings(BaseSettings):
 	PREPACKAGED_DOWNLOAD_BASE_URL: str = (
 		'http://localhost:8080/prepackaged/v1' if DEV_MODE else 'https://data2.deadtrees.earth/prepackaged/v1'
 	)
+	# Legacy Nginx-token download settings retained so existing .env files keep loading.
 	PREPACKAGED_GRANTS_PER_USER_PER_DAY: int = 5
 	PREPACKAGED_GRANTS_GLOBAL_PER_DAY: int = 30
 	PREPACKAGED_GRANT_TTL_HOURS: int = 24
+	PREPACKAGED_S3_ENDPOINT_URL: str = ''
+	PREPACKAGED_S3_REGION: str = 'fr1-ec82'
+	PREPACKAGED_S3_BUCKET: str = 'frct-deadtrees-products'
+	PREPACKAGED_API_READ_S3_ACCESS_KEY: str = ''
+	PREPACKAGED_API_READ_S3_SECRET_KEY: str = ''
+	PREPACKAGED_SIGNED_URL_TTL_SECONDS: int = 604800
 
 	# processor settings
 	PROCESSOR_USERNAME: str = 'processor@deadtrees.earth'
