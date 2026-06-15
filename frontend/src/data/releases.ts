@@ -75,6 +75,7 @@ export interface PublicReleaseBase {
   typeLabel: string;
   status: "available" | "coming-soon";
   summary: string;
+  prepackagedPackageSlugs?: string[];
   links: {
     artifact: string;
   };
@@ -555,6 +556,11 @@ export const dteAerialRelease: DteAerialRelease = {
   status: "available",
   summary:
     "A curated aerial benchmark for tree cover and mortality segmentation, built from high-resolution drone and aircraft orthophotos with expert masks.",
+  prepackagedPackageSlugs: [
+    "tree-cover-aerial-global",
+    "standing-deadwood-aerial-global-conservative",
+    "image-tiles-1024-global-aerial-sampled-20-random",
+  ],
   links: {
     artifact: "#dataset-download-placeholder",
   },

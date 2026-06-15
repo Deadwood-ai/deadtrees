@@ -12,9 +12,14 @@ export function usePrepackagedDatasets() {
   });
 }
 
-export function useCreatePrepackagedDownloadGrant(token?: string) {
+interface CreatePrepackagedDownloadGrantVariables {
+  versionId: number;
+  token: string;
+}
+
+export function useCreatePrepackagedDownloadGrant() {
   return useMutation({
-    mutationFn: (versionId: number) =>
-      createPrepackagedDownloadGrant(versionId, token as string),
+    mutationFn: ({ versionId, token }: CreatePrepackagedDownloadGrantVariables) =>
+      createPrepackagedDownloadGrant(versionId, token),
   });
 }

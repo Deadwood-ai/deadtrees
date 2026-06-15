@@ -213,7 +213,9 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
     await expect(
       page
         .getByTestId("release-artifacts")
-        .getByRole("button", { name: /Download dataset|Download ZIP/ })
+        .getByRole("button", {
+          name: /Download dataset|Download ZIP|Sign in to download/,
+        })
         .first(),
     ).toBeVisible();
   });

@@ -5,18 +5,14 @@ import {
   ExportOutlined,
   FileOutlined,
   LinkOutlined,
-  LoginOutlined,
 } from "@ant-design/icons";
-import { Alert, Button, Empty, Skeleton, message } from "antd";
+import { Alert, Button, Empty, Skeleton } from "antd";
 import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
+import { PrepackagedDownloadButton } from "../components/Releases/PrepackagedDownloadButton";
 import { ReleasePreviewStrip } from "../components/Releases/ReleasePreviewStrip";
-import {
-  useCreatePrepackagedDownloadGrant,
-  usePrepackagedDatasets,
-} from "../hooks/usePrepackagedDatasets";
-import { useAuth } from "../hooks/useAuthProvider";
+import { usePrepackagedDatasets } from "../hooks/usePrepackagedDatasets";
 import { getPrepackagedDatasetPreviewTiles } from "../utils/prepackagedDatasetPreviews";
 import {
   formatPrepackagedBytes,
@@ -48,7 +44,10 @@ function buildSourceCodeUrl(
   const safeRepositoryUrl = getSafeHttpUrl(repositoryUrl);
   if (!safeRepositoryUrl || !sourceFilePath || !sourceCommit) return null;
 
-  const encodedPath = sourceFilePath.split("/").map(encodeURIComponent).join("/");
+  const encodedPath = sourceFilePath
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/");
   return `${safeRepositoryUrl}/blob/${encodeURIComponent(sourceCommit)}/${encodedPath}`;
 }
 
@@ -59,14 +58,8 @@ function getShortCommit(sourceCommit: string | null) {
 export default function PrepackagedDatasetRelease() {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const [messageApi, contextHolder] = message.useMessage();
-  const { session } = useAuth();
-  const token = session?.access_token;
   const { data, isLoading, error } = usePrepackagedDatasets();
-  const grantMutation = useCreatePrepackagedDownloadGrant(token);
   const returnTo = `/releases/${slug ?? ""}`;
-  const handleSignIn = () =>
-    navigate(`/sign-in?returnTo=${encodeURIComponent(returnTo)}`);
 
   const datasetPackage = useMemo(
     () => data?.find((candidate) => candidate.slug === slug),
@@ -130,37 +123,17 @@ export default function PrepackagedDatasetRelease() {
     : null;
   const hasReproducibilityMetadata = Boolean(
     datasetPackage?.technical_description ||
-      sourceCodeUrl ||
-      safeRepositoryUrl ||
-      latestVersion?.source_package_version ||
-      shortSourceCommit,
+    sourceCodeUrl ||
+    safeRepositoryUrl ||
+    latestVersion?.source_package_version ||
+    shortSourceCommit,
   );
-
-  const handleDownload = async (versionId: number) => {
-    if (!token) {
-      handleSignIn();
-      return;
-    }
-
-    try {
-      const grant = await grantMutation.mutateAsync(versionId);
-      window.location.assign(grant.download_url);
-    } catch (downloadError) {
-      const errorMessage =
-        downloadError instanceof Error
-          ? downloadError.message
-          : "Could not start the package download.";
-      void messageApi.error(errorMessage);
-    }
-  };
 
   return (
     <main
       className="min-h-screen bg-[#f8faf9] pt-20 md:pt-24"
       data-testid="release-detail-page"
     >
-      {contextHolder}
-
       <section className="border-b border-gray-200/80 bg-white">
         <div className="mx-auto max-w-7xl px-4 pt-8 md:px-8">
           <Button
@@ -331,9 +304,7 @@ export default function PrepackagedDatasetRelease() {
                             rel="noreferrer"
                             className="inline-flex max-w-full items-center gap-2 rounded-md border border-[#1B5E35]/20 bg-[#f8faf9] px-3 py-2 font-semibold text-[#1B5E35] transition hover:border-[#1B5E35]/40 hover:bg-[#eef6f0]"
                           >
-                            <span className="truncate">
-                              Open repository
-                            </span>
+                            <span className="truncate">Open repository</span>
                             <ExportOutlined className="shrink-0 text-xs" />
                           </a>
                         </dd>
@@ -351,9 +322,7 @@ export default function PrepackagedDatasetRelease() {
                             rel="noreferrer"
                             className="inline-flex max-w-full items-center gap-2 rounded-md border border-[#1B5E35]/20 bg-[#f8faf9] px-3 py-2 font-semibold text-[#1B5E35] transition hover:border-[#1B5E35]/40 hover:bg-[#eef6f0]"
                           >
-                            <span className="truncate">
-                              Open source file
-                            </span>
+                            <span className="truncate">Open source file</span>
                             <ExportOutlined className="shrink-0 text-xs" />
                           </a>
                         </dd>
@@ -402,30 +371,14 @@ export default function PrepackagedDatasetRelease() {
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-3">
-                  <Button
-                    type="primary"
-                    size="large"
+                  <PrepackagedDownloadButton
+                    versionId={latestVersion.id}
+                    returnTo={returnTo}
                     icon={<DatabaseOutlined />}
-                    loading={
-                      grantMutation.isPending &&
-                      grantMutation.variables === latestVersion.id
-                    }
-                    onClick={() => handleDownload(latestVersion.id)}
-                    disabled={!token}
                     className="min-h-11"
                   >
                     Download ZIP
-                  </Button>
-                  {!token && (
-                    <Button
-                      size="large"
-                      icon={<LoginOutlined />}
-                      onClick={handleSignIn}
-                      className="min-h-11"
-                    >
-                      Sign in
-                    </Button>
-                  )}
+                  </PrepackagedDownloadButton>
                 </div>
               </div>
             </div>
