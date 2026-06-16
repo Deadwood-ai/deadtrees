@@ -50,6 +50,11 @@ PADDING = 256
 BATCH_SIZE = 2
 NUM_DATALOADER_WORKERS = 0
 
+# The model expects a fixed 10 cm ground sampling distance, so every ortho is
+# resampled to exactly this resolution (both finer and coarser inputs) when
+# reprojected to its metric UTM CRS.
+INFERENCE_RESOLUTION_M = 0.10
+
 # Polygon cleanup, in metres (we run inference in a metric UTM CRS). These
 # mirror config/evaluation/full_ortho_b1_50epoch_production.yml so the AOI shape
 # matches the validated production output.
@@ -246,10 +251,15 @@ class AOIInference:
 	def inference(self, input_tif: str) -> list[Polygon]:
 		"""Run inference on a GeoTIFF and return the cleaned AOI polygon(s) in the
 		CRS of the input file."""
-		# Reproject to a metric (UTM) CRS at native resolution. This keeps the
-		# production tiling scale while guaranteeing the polygon cleanup buffers
-		# are expressed in metres.
-		vrt_src = image_reprojector(input_tif)
+		# Reproject to a metric (UTM) CRS and resample to the model's fixed 10 cm
+		# grid. Passing the same value as min and max resolution forces exactly
+		# INFERENCE_RESOLUTION_M whether the input is finer or coarser, and the
+		# metric CRS keeps the polygon cleanup buffers expressed in metres.
+		vrt_src = image_reprojector(
+			input_tif,
+			min_res=INFERENCE_RESOLUTION_M,
+			max_res=INFERENCE_RESOLUTION_M,
+		)
 		dataset = InferenceDataset(
 			image_src=vrt_src,
 			tile_size=TILE_SIZE,
