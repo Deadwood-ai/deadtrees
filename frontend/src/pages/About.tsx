@@ -97,17 +97,6 @@ export default function About() {
     },
   ];
 
-  const fundingLogos = [
-    {
-      path: "assets/logos/MLR.png",
-      alt: "Ministry of Food, Rural Affairs and Consumer Protection Baden-Württemberg",
-    },
-    {
-      path: "assets/logos/UM.png",
-      alt: "Ministry of the Environment, Climate Protection and the Energy Sector Baden-Württemberg",
-    },
-  ];
-
   const navigate = useNavigate();
   const { data: publications, isLoading: isLoadingPublications } =
     usePublications();
@@ -398,75 +387,6 @@ abstract = {Excessive tree mortality is a global concern and remains poorly unde
           </div>
         </div>
 
-        {/* Project origins and funding */}
-        <section
-          className="mx-auto mb-24 max-w-6xl"
-          aria-labelledby="project-origins-heading"
-        >
-          <div className="grid gap-10 border-y border-emerald-900/10 py-12 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
-            <div>
-              <p className="mb-3 text-sm font-bold uppercase tracking-widest text-[#1B5E35]">
-                Project origins
-              </p>
-              <h2
-                id="project-origins-heading"
-                className="mb-5 text-3xl font-bold tracking-tight text-gray-900"
-              >
-                Developed with PRIMA-Wald and PRIWA
-              </h2>
-              <div className="space-y-4 text-lg leading-relaxed text-gray-600">
-                <p>
-                  deadtrees.earth was substantially developed and expanded
-                  through the PRIMA-Wald and PRIWA projects. PRIMA-Wald provided
-                  the starting point for turning the platform into a practical
-                  tool for forest monitoring, including PRIWA Field workflows
-                  and regional bark beetle monitoring applications.
-                </p>
-                <p>
-                  PRIMA-Wald was carried out under the Waldstrategie
-                  Baden-Württemberg and funded by the Ministry of Food, Rural
-                  Affairs and Consumer Protection Baden-Württemberg (MLR),
-                  co-financed by the Ministry of the Environment, Climate
-                  Protection and the Energy Sector Baden-Württemberg (UM).
-                </p>
-              </div>
-              <a
-                href="https://prima-wald.de/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-[#1B5E35] hover:text-emerald-800 hover:underline"
-              >
-                Visit the PRIMA-Wald & PRIWA project website <ExportOutlined />
-              </a>
-            </div>
-
-            <div className="rounded-2xl border border-emerald-100 bg-white p-6 shadow-sm">
-              <p className="mb-5 text-sm font-bold uppercase tracking-widest text-gray-400">
-                Funding acknowledgement
-              </p>
-              <div className="grid gap-5 sm:grid-cols-2">
-                {fundingLogos.map((logo) => (
-                  <div
-                    key={logo.path}
-                    className="flex min-h-32 items-center justify-center rounded-xl bg-white p-5 ring-1 ring-gray-100"
-                  >
-                    <img
-                      src={logo.path}
-                      alt={logo.alt}
-                      className="max-h-24 w-full object-contain"
-                    />
-                  </div>
-                ))}
-              </div>
-              <p className="mt-6 text-sm leading-relaxed text-gray-600">
-                Funding is provided from state funds approved by the State
-                Parliament of Baden-Württemberg. Funding administration is
-                handled by the MLR.
-              </p>
-            </div>
-          </div>
-        </section>
-
         {/* Partners Banner */}
         <div className="mx-auto mb-24 max-w-6xl">
           <div className="mb-6 text-center">
@@ -477,6 +397,21 @@ abstract = {Excessive tree mortality is a global concern and remains poorly unde
           <div className="overflow-hidden rounded-3xl bg-white py-6 shadow-sm ring-1 ring-black/5">
             <LogoBannerBand logos={logos} title="" compact />
           </div>
+          <p className="mx-auto mt-6 max-w-4xl text-center text-sm leading-relaxed text-gray-600">
+            The launch of deadtrees.earth was made possible in large part by
+            funding from the State of Baden-Württemberg through the{" "}
+            <a
+              href="https://prima-wald.de/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-[#1B5E35] hover:text-emerald-800 hover:underline"
+            >
+              PRIMA-Wald and PRIWA projects
+            </a>
+            . Substantial platform extensions were, and continue to be,
+            supported by NFDI4Earth. Satellite-based upscaling has been
+            supported in particular by the European Space Agency.
+          </p>
         </div>
 
         {/* How to cite */}
