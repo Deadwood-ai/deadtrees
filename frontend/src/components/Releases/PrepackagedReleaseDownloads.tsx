@@ -123,6 +123,7 @@ export function PrepackagedReleaseDownloads({
 
               <PrepackagedDownloadButton
                 versionId={latestVersion?.id}
+                fileName={latestVersion?.file_name}
                 returnTo={returnTo}
                 icon={<DatabaseOutlined />}
                 className="min-h-11 shrink-0"

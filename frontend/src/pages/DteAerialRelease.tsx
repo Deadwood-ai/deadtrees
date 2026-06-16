@@ -175,7 +175,10 @@ export default function DteAerialRelease({ release }: DteAerialReleaseProps) {
             <p className="mt-3 text-base leading-7 text-gray-600">
               The gallery above is the live preview of the dataset. ZIP
               artifacts are issued as short-lived signed links after sign-in so
-              downloads can be audited.
+              downloads can be audited. Use the main button for a browser
+              download, or open the menu next to it to copy wget/curl commands
+              for server-side downloads. Copied commands include expiring signed
+              links; regenerate a command if one has expired.
             </p>
             <div className="mt-6">
               <PrepackagedReleaseDownloads

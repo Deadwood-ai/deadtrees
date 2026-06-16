@@ -367,12 +367,17 @@ export default function PrepackagedDatasetRelease() {
                   </h2>
                   <p className="mt-3 max-w-2xl text-base leading-7 text-gray-600">
                     Downloads use short-lived links so access can be limited and
-                    audited without exposing the storage server directly.
+                    audited without exposing the storage server directly. Use
+                    the main button for a browser download, or open the menu
+                    next to it to copy wget/curl commands for server-side
+                    downloads. Copied commands include expiring signed links;
+                    regenerate a command if one has expired.
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-3">
                   <PrepackagedDownloadButton
                     versionId={latestVersion.id}
+                    fileName={latestVersion.file_name}
                     returnTo={returnTo}
                     icon={<DatabaseOutlined />}
                     className="min-h-11"
