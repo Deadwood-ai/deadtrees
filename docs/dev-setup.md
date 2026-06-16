@@ -69,6 +69,39 @@ If you need a clean local database:
 supabase db reset
 ```
 
+#### Optional: isolated Supabase per worktree
+
+For parallel local worktrees, generate a separate Supabase workdir, project id,
+and port band without changing the tracked `supabase/config.toml`:
+
+```bash
+scripts/dev/isolated-supabase.sh start
+```
+
+This writes ignored runtime state under `.local/supabase/<worktree-slug>/` and
+prints the generated API and Postgres URLs. To point shell commands, Docker
+Compose, Vite, and Playwright local E2E tests at that isolated stack:
+
+```bash
+set -a
+source "$(scripts/dev/isolated-supabase.sh env)"
+set +a
+```
+
+Then start the app services as usual. `docker-compose.test.yaml`,
+`npm --prefix frontend run dev:local`, and
+`npm --prefix frontend run test:e2e:local` will use the generated ports when
+these variables are present. The default isolated Supabase profile excludes
+Studio, Realtime, Storage, Mailpit, Edge Runtime, analytics/logging, and PgMeta;
+it keeps Postgres, Kong, PostgREST, and Auth for normal local app flows.
+
+Useful commands:
+
+```bash
+scripts/dev/isolated-supabase.sh status
+scripts/dev/isolated-supabase.sh stop
+```
+
 ### 6. Download required local assets and test fixtures
 
 ```bash

@@ -18,9 +18,12 @@ const rgbGeoTiffFixture = path.resolve(
   "../test/fixtures/geotiff/upload-validation/rgb-real-crop.tif",
 );
 
-const localSupabaseUrl = "http://127.0.0.1:54321";
-const localApiUrl = "http://localhost:8080/api/v1";
-const localMailpitUrl = "http://127.0.0.1:54324";
+const localSupabaseUrl =
+  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "http://127.0.0.1:54321";
+const localApiUrl = process.env.VITE_LOCAL_API_URL || "http://localhost:8080/api/v1";
+const localMailpitUrl = process.env.LOCAL_MAILPIT_HTTP_PORT
+  ? `http://127.0.0.1:${process.env.LOCAL_MAILPIT_HTTP_PORT}`
+  : "http://127.0.0.1:54324";
 
 type MailpitMessageSummary = {
   ID: string;

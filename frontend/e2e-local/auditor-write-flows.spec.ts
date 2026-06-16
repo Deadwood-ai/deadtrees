@@ -13,8 +13,9 @@ const rgbGeoTiffFixture = path.resolve(
   "../test/fixtures/geotiff/upload-validation/rgb-real-crop.tif",
 );
 
-const localSupabaseUrl = "http://127.0.0.1:54321";
-const localApiUrl = "http://localhost:8080/api/v1";
+const localSupabaseUrl =
+  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "http://127.0.0.1:54321";
+const localApiUrl = process.env.VITE_LOCAL_API_URL || "http://localhost:8080/api/v1";
 
 const uniqueRunId = randomUUID().replaceAll("-", "").slice(0, 12);
 const auditorEmail = `auditor-write-${uniqueRunId}@example.com`;

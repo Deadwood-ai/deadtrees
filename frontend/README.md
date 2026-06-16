@@ -151,6 +151,7 @@ Notes:
 
 - `VITE_MODE=development` makes `src/config.ts` use the local development URLs.
 - `VITE_MODE=production` makes `src/config.ts` use the explicit `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` values from the env file.
+- For an isolated worktree stack, source the env file from `scripts/dev/isolated-supabase.sh env`; `dev:local` and local Playwright E2E will use those generated local URLs.
 - If you already have an older `frontend/.env.local`, split it into the two profile files above and prefer the `dev:local` / `dev:prod` scripts.
 
 ## Important Feature Areas

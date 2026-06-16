@@ -4,8 +4,8 @@ services:
     # SMTP: 1025, HTTP API/UI: 8025
     # Tests use the service name (`mailpit`) from inside containers.
     ports:
-      - "8025:8025"
-      - "1025:1025"
+      - "${LOCAL_MAILPIT_HTTP_PORT:-8025}:8025"
+      - "${LOCAL_MAILPIT_SMTP_PORT:-1025}:1025"
 
   processor-test:
     build:
@@ -24,7 +24,7 @@ services:
     #   retries: 5
     #   start_period: 2s
     ports:
-      - '5678:5678'
+      - '${LOCAL_PROCESSOR_DEBUG_PORT:-5678}:5678'
     volumes:
       # - ./data:/data # need it for testing (pulling and pushing files to storage server)
       - ./processor:/app/processor
@@ -43,8 +43,9 @@ services:
       - STORAGE_SERVER_USERNAME=root
       - STORAGE_SERVER_DATA_PATH=/data
       - PROCESSOR_USERNAME=processor@deadtrees.earth
-      - SUPABASE_URL=http://host.docker.internal:54321
+      - SUPABASE_URL=${SUPABASE_URL_DOCKER:-http://host.docker.internal:54321}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0}
+      - NGINX_COG_URL=${NGINX_COG_URL:-http://localhost:8080/cogs/v1}
       - BASE_DIR=/data
       # Match the mounted SSH key location inside the test container.
       - SSH_PRIVATE_KEY_PATH=/tmp/ssh-keys/processing-to-storage
@@ -79,8 +80,8 @@ services:
       start_period: 1m30s
       start_interval: 1s
     ports:
-      - '8017:8017'
-      - '5679:5679'
+      - '${LOCAL_API_HOST_PORT:-8017}:8017'
+      - '${LOCAL_API_DEBUG_PORT:-5679}:5679'
     volumes:
       - ./data:/data:rw
       - ./api:/app/api # dev only, no rebuild needed
@@ -92,8 +93,9 @@ services:
       - UVICORN_HOST=0.0.0.0
       - UVICORN_PORT=8017
       - PYTEST_ADDOPTS=--color=yes
-      - SUPABASE_URL=http://host.docker.internal:54321
+      - SUPABASE_URL=${SUPABASE_URL_DOCKER:-http://host.docker.internal:54321}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0}
+      - NGINX_COG_URL=${NGINX_COG_URL:-http://localhost:8080/cogs/v1}
       - BASE_DIR=/data
       - ENV=development
       # Mailpit for api/tests/test_notifications.py
@@ -116,8 +118,8 @@ services:
       retries: 5
       start_period: 2s
     ports:
-      - 8080:80
-      - 2222:22
+      - "${LOCAL_NGINX_HTTP_PORT:-8080}:80"
+      - "${LOCAL_NGINX_SSH_PORT:-2222}:22"
     volumes:
       - ./data:/data/:rw
       # Mount the matching public key so nginx can authorize processor-test SSH access.
@@ -129,7 +131,7 @@ services:
 
 networks:
   default:
-    name: deadwood_network
+    name: ${COMPOSE_NETWORK_NAME:-deadwood_network}
 
 # volumes:
   # nginx_ssh:  # This can be removed if not used by other services
