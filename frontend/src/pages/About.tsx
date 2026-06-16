@@ -409,8 +409,25 @@ abstract = {Excessive tree mortality is a global concern and remains poorly unde
               PRIMA-Wald and PRIWA projects
             </a>
             . Substantial platform extensions were, and continue to be,
-            supported by NFDI4Earth. Satellite-based upscaling has been
-            supported in particular by the European Space Agency.
+            supported by{" "}
+            <a
+              href="https://nfdi4earth.de/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-[#1B5E35] hover:text-emerald-800 hover:underline"
+            >
+              NFDI4Earth
+            </a>
+            . Satellite-based upscaling has been supported in particular by the{" "}
+            <a
+              href="https://www.esa.int/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-[#1B5E35] hover:text-emerald-800 hover:underline"
+            >
+              European Space Agency
+            </a>
+            .
           </p>
         </div>
 
