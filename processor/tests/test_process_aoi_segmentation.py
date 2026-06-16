@@ -97,9 +97,9 @@ def test_process_aoi_segmentation_success(aoi_task, auth_token):
 
 
 @pytest.mark.comprehensive
-def test_process_aoi_idempotent_and_preserves_user_aoi(aoi_task, auth_token, test_processor_user):
-	"""Re-running replaces the auto AOI and never deletes auditor-drawn AOIs."""
-	# An auditor-drawn AOI (different notes) must survive reruns.
+def test_process_aoi_skips_when_human_aoi_exists(aoi_task, auth_token, test_processor_user):
+	"""If an auditor-drawn AOI exists, the task is a no-op and never adds an auto
+	AOI (a newer auto row would shadow the human AOI in the recency-based UI)."""
 	user_aoi = AOI(
 		dataset_id=aoi_task.dataset_id,
 		user_id=test_processor_user,
@@ -115,14 +115,13 @@ def test_process_aoi_idempotent_and_preserves_user_aoi(aoi_task, auth_token, tes
 			user_aoi.model_dump(exclude={'id', 'created_at', 'updated_at'})
 		).execute()
 
+	# Runs the full stage, but predict_aoi returns early before any inference.
 	process_aoi_segmentation(aoi_task, auth_token, settings.processing_path)
 	process_aoi_segmentation(aoi_task, auth_token, settings.processing_path)
 
 	with use_client(auth_token) as client:
 		aoi_response = client.table(settings.aois_table).select('*').eq('dataset_id', aoi_task.dataset_id).execute()
 
-	# Auditor AOI preserved.
+	# Auditor AOI preserved and no auto AOI was created.
 	assert any(aoi['notes'] == 'auditor drawn' for aoi in aoi_response.data)
-	# At most one auto-generated AOI remains after two runs.
-	auto_aois = [aoi for aoi in aoi_response.data if aoi['notes'] == AUTO_AOI_NOTES]
-	assert len(auto_aois) <= 1
+	assert not any(aoi['notes'] == AUTO_AOI_NOTES for aoi in aoi_response.data)
