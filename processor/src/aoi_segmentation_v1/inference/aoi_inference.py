@@ -249,8 +249,8 @@ class AOIInference:
 		return model
 
 	def inference(self, input_tif: str) -> list[Polygon]:
-		"""Run inference on a GeoTIFF and return the cleaned AOI polygon(s) in the
-		CRS of the input file."""
+		"""Run inference on a GeoTIFF and return the cleaned AOI polygon(s) in
+		WGS84 (EPSG:4326) lon/lat, ready to store in v2_aois."""
 		# Reproject to a metric (UTM) CRS and resample to the model's fixed 10 cm
 		# grid. Passing the same value as min and max resolution forces exactly
 		# INFERENCE_RESOLUTION_M whether the input is finer or coarser, and the
@@ -354,9 +354,6 @@ class AOIInference:
 			src_crs = vrt_src.crs
 			vrt_src.close()
 
-			with rasterio.open(input_tif) as src:
-				orig_crs = src.crs
-
 			# Polygonize the inside-AOI class scanline-by-scanline (no full-res
 			# array), then run the production polygon cleanup in the metric CRS.
 			with rasterio.open(tmp_mask_path) as ds:
@@ -367,7 +364,9 @@ class AOIInference:
 			if not cleaned:
 				return []
 
-			return reproject_polygons(cleaned, src_crs, orig_crs)
+			# Store AOIs in WGS84 lon/lat — that is what v2_aois holds and what the
+			# frontend map renders. The cleanup ran in the metric inference CRS.
+			return reproject_polygons(cleaned, src_crs, 'EPSG:4326')
 
 		finally:
 			if tmp_mask_path and os.path.exists(tmp_mask_path):
