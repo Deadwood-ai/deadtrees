@@ -17,6 +17,10 @@ def test_combined_task_maps_to_dedicated_status_flag():
 	assert _task_type_to_status_flags(TaskTypeEnum.deadwood_treecover_combined_v2) == ('is_combined_model_done',)
 
 
+def test_aoi_task_maps_to_dedicated_status_flag():
+	assert _task_type_to_status_flags(TaskTypeEnum.aoi_v1) == ('is_aoi_done',)
+
+
 @pytest.fixture(scope='function')
 def test_dataset(auth_token, test_user):
 	"""Create a temporary test dataset for process testing"""

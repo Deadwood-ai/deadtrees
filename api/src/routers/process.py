@@ -31,6 +31,7 @@ _TASK_TYPE_STATUS_FLAGS = {
 	TaskTypeEnum.deadwood_v1: ('is_deadwood_done',),
 	TaskTypeEnum.treecover_v1: ('is_forest_cover_done',),
 	TaskTypeEnum.deadwood_treecover_combined_v2: ('is_combined_model_done',),
+	TaskTypeEnum.aoi_v1: ('is_aoi_done',),
 }
 
 

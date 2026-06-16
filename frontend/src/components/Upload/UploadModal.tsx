@@ -117,6 +117,7 @@ const GEOTIFF_PROCESSING_STEPS = [
   "cog",
   "thumbnail",
   "metadata",
+  "aoi_v1",
   ...PREDICTION_PROCESSING_STEPS,
 ];
 
