@@ -63,6 +63,11 @@ POLYGON_OPENING_RADIUS_M = 5.0
 NEGATIVE_BUFFER_M = -1.5
 SIMPLIFY_TOLERANCE_M = 5.0
 CHAIKIN_ITERATIONS = 1
+# Final vertex-thinning pass. The non-expansive clip below re-introduces
+# near-pixel-density vertices along the boundary; a small simplification keeps
+# the shape within 20 cm while cutting the vertex count by ~1-2 orders of
+# magnitude (lighter storage and map rendering).
+FINAL_SIMPLIFY_TOLERANCE_M = 0.20
 
 
 def _build_transform():
@@ -215,6 +220,13 @@ def cleanup_aoi_polygon(polygons: list[Polygon]) -> list[Polygon]:
 
 	geometry = _keep_largest_polygon(geometry)
 	geometry = _remove_polygon_holes(geometry)
+
+	# Thin the dense vertices the clip re-introduced (kept last so it never
+	# expands the AOI beyond the non-expansive reference by more than tolerance).
+	if FINAL_SIMPLIFY_TOLERANCE_M > 0 and geometry is not None and not geometry.is_empty:
+		simplified = geometry.simplify(FINAL_SIMPLIFY_TOLERANCE_M, preserve_topology=True)
+		if not simplified.is_empty:
+			geometry = simplified if simplified.is_valid else simplified.buffer(0)
 
 	if geometry is None or geometry.is_empty:
 		return []
