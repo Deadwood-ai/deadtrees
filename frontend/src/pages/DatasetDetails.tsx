@@ -20,6 +20,7 @@ import { usePhenologyData } from "../hooks/usePhenologyData";
 import { useAuth } from "../hooks/useAuthProvider";
 import { useCreateFlag } from "../hooks/useDatasetFlags";
 import { useDatasetEditing } from "../hooks/useDatasetEditing";
+import { useDatasetAOI } from "../hooks/useDatasetAudit";
 import { useCanAudit } from "../hooks/useUserPrivileges";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAnalytics } from "../hooks/useAnalytics";
@@ -82,6 +83,9 @@ export default function DatasetDetails() {
 
   // Editing hook
   const editing = useDatasetEditing({ datasetId: dataset?.id, user });
+
+  // AOI presence drives whether the Area of Interest layer toggle is shown
+  const { data: aoiData } = useDatasetAOI(dataset?.id);
 
   // Data hooks
   const { data: overlappingDatasets, isLoading: isLoadingOverlapping } =
@@ -233,6 +237,7 @@ export default function DatasetDetails() {
       label?.label_source === ILabelSource.MODEL_PREDICTION ||
       label?.label_source === ILabelSource.VISUAL_INTERPRETATION,
   );
+  const hasAOI = !!aoiData?.geometry;
   const SIDEBAR_LEFT_PX = 16;
   const SIDEBAR_WIDTH_PX = 384;
   const SIDEBAR_BUTTON_TOP_PX = 112;
@@ -387,7 +392,7 @@ export default function DatasetDetails() {
               setShowAOI={setShowAOI}
               hasForestCover={hasDisplayableForestCover}
               hasDeadwood={hasDeadwood}
-              hasAOI={true}
+              hasAOI={hasAOI}
               forestCoverQuality={
                 auditInfo?.forest_cover_quality as
                   | "great"
@@ -528,7 +533,7 @@ export default function DatasetDetails() {
             setShowAOI={setShowAOI}
             hasForestCover={hasDisplayableForestCover}
             hasDeadwood={hasDeadwood}
-            hasAOI={true}
+            hasAOI={hasAOI}
             forestCoverQuality={
               auditInfo?.forest_cover_quality as
                 | "great"
