@@ -4,15 +4,19 @@ Date: 2026-06-16
 
 ## Decision
 
-Use the built-in Browser as the default execution surface for local DeadTrees
-agent QA.
+Use the built-in Browser as the default execution surface for ordinary local
+DeadTrees agent QA.
 
 Fallbacks:
 
+- Use Browser Use CLI for playbooks that need per-worker browser/session
+  isolation or file upload.
 - Use Chrome only when a journey explicitly needs the user's real Chrome
   profile, cookies, extensions, or logged-in browser state.
 - Use Computer Use only when DOM/browser automation cannot operate a required
   local UI interaction and a screen-level fallback is acceptable.
+- Use Playwright-backed helper scripts for deterministic fallback checks when
+  Browser Use CLI or Browser cannot operate a control reliably.
 
 ## Why Browser Is The Default
 
@@ -93,6 +97,29 @@ Use it only for cases such as:
 - a visual-only issue where a screenshot and coordinates are the relevant
   evidence.
 
+## Browser Use CLI Probe
+
+Hardening evidence:
+
+```text
+docs/qa/browser-use-cli-evidence.md
+```
+
+Result:
+
+- Browser Use CLI is available via `uvx --from browser-use`.
+- It supports named sessions.
+- It supports indexed file upload.
+- A local upload probe successfully attached
+  `frontend/test/fixtures/geotiff/upload-validation/rgb-real-crop.tif`.
+
+Decision:
+
+- Use Browser Use CLI for isolated worker sessions and upload-specific
+  playbooks when available.
+- Keep built-in Browser as the default for simple route/locator/console checks.
+- Keep Playwright helpers as the deterministic fallback.
+
 ## Follow-Up Comparison Still Recommended
 
 For a fuller comparison, repeat the following playbooks when Chrome is exposed
@@ -109,4 +136,3 @@ Capture:
 - evidence quality,
 - tab/session cleanup behavior,
 - whether multiple workers can run without state collision.
-

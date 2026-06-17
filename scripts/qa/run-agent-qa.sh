@@ -231,6 +231,24 @@ for path in sorted(playbook_dir.glob("*.md")):
         }
     )
 
+def resource_locks_for(playbook: dict[str, object]) -> list[str]:
+    if playbook["mutation_level"] == "read-only":
+        return []
+
+    locks: set[str] = set()
+    for route in playbook["routes"]:
+        for dataset_id in re.findall(r"\b(9[1-9][0-9]{3})\b", str(route)):
+            locks.add(f"dataset:{dataset_id}")
+
+    if not locks and playbook["id"] == "auth-shell":
+        locks.add("auth:mailpit")
+    if not locks and playbook["mutation_level"] != "read-only":
+        locks.add(f"playbook:{playbook['id']}")
+    return sorted(locks)
+
+for playbook in all_playbooks:
+    playbook["resource_locks"] = resource_locks_for(playbook)
+
 selected_ids = [item for item in selected_csv.split(",") if item] if selected_csv else []
 if selected_ids:
     by_id = {item["id"]: item for item in all_playbooks}
@@ -267,9 +285,30 @@ if not playbooks:
     raise SystemExit("No playbooks matched the requested filters.")
 
 worker_count = min(parallel, len(playbooks)) if playbooks else 1
-workers = [{"id": f"worker-{idx:02d}", "playbooks": []} for idx in range(1, worker_count + 1)]
+workers = [
+    {"id": f"worker-{idx:02d}", "playbooks": [], "resource_locks": []}
+    for idx in range(1, worker_count + 1)
+]
+lock_owners: dict[str, dict[str, object]] = {}
+
 for idx, playbook in enumerate(playbooks):
-    workers[idx % worker_count]["playbooks"].append(playbook)
+    locks = set(playbook["resource_locks"])
+    overlapping_workers = [
+        lock_owners[lock]
+        for lock in locks
+        if lock in lock_owners
+    ]
+    if overlapping_workers:
+        worker = overlapping_workers[0]
+    else:
+        worker = min(workers, key=lambda item: len(item["playbooks"]))
+
+    worker["playbooks"].append(playbook)
+    worker_locks = set(worker["resource_locks"])
+    worker_locks.update(locks)
+    worker["resource_locks"] = sorted(worker_locks)
+    for lock in locks:
+        lock_owners[lock] = worker
 
 generated_at = datetime.now(timezone.utc).isoformat()
 frontend_url = os.environ.get("PLAYWRIGHT_BASE_URL") or f"http://127.0.0.1:{os.environ.get('PLAYWRIGHT_PORT', '5173')}"
@@ -290,6 +329,7 @@ env_summary = {
     "api_url": api_url,
     "supabase_url": supabase_url,
     "mailpit_url": mailpit_url,
+    "local_data_root": os.environ.get("LOCAL_DATA_ROOT"),
     "compose_project_name": os.environ.get("COMPOSE_PROJECT_NAME"),
     "compose_network_name": os.environ.get("COMPOSE_NETWORK_NAME"),
 }
@@ -318,9 +358,10 @@ for worker in workers:
     (worker_dir / "screenshots").mkdir(parents=True, exist_ok=True)
     prompt_path = run_dir / f"{worker['id']}.prompt.md"
     playbook_lines = "\n".join(
-        f"- `{item['id']}`: `{item['path']}` ({item['persona']}, {item['mutation_level']})"
+        f"- `{item['id']}`: `{item['path']}` ({item['persona']}, {item['mutation_level']}; locks: {', '.join(item['resource_locks']) or 'none'})"
         for item in worker["playbooks"]
     )
+    worker_lock_lines = "\n".join(f"- `{lock}`" for lock in worker["resource_locks"]) or "- none"
     prompt = f"""# {worker['id']} DeadTrees Local QA Prompt
 
 You are a QA subagent executing DeadTrees local agent QA playbooks.
@@ -331,6 +372,7 @@ You are a QA subagent executing DeadTrees local agent QA playbooks.
 - API: {api_url}
 - Supabase: {supabase_url}
 - Mailpit: {mailpit_url}
+- Local data root: {os.environ.get("LOCAL_DATA_ROOT") or "not configured"}
 - Fixture profile: {profile}
 - Artifact directory: `{worker_dir.relative_to(repo_root)}`
 
@@ -338,14 +380,22 @@ You are a QA subagent executing DeadTrees local agent QA playbooks.
 
 {playbook_lines}
 
+## Worker Data Locks
+
+{worker_lock_lines}
+
 ## Rules
 
-- Use the built-in Browser unless a playbook explicitly says otherwise.
+- Use the built-in Browser for ordinary route/locator checks unless a playbook explicitly says otherwise.
+- Use Browser Use CLI for per-worker session isolation or file-upload flows when available.
+- Use `scripts/qa/playwright-upload-probe.sh` as the deterministic upload fallback.
+- Keep browser/auth state isolated from other workers when the selected tool supports it.
 - Keep output compact and evidence-based.
 - Do not use production URLs, production credentials, or production data.
 - Store screenshots and raw artifacts under your artifact directory.
 - Capture only focused evidence: current URL, relevant locator state, console errors, network/API status, and one screenshot when visual evidence is needed.
 - For each playbook, report `pass`, `fail`, `blocked`, or `needs-human-review`.
+- For each non-pass finding, include one category: `qa-platform-gap`, `fixture-gap`, `product-bug`, `tooling-limitation`, or `needs-design-decision`.
 
 ## Result Contract
 
@@ -353,6 +403,7 @@ Write your result summary to `{worker['id']}.result.md` with:
 
 - playbook id
 - status
+- category, or `none` for pass
 - evidence paths
 - concise findings
 - follow-up issue suggestions

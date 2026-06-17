@@ -9,6 +9,14 @@ delete from public.dataset_flag_status_history where flag_id in (
 );
 delete from public.dataset_flags where dataset_id between 91001 and 91099;
 delete from public.dataset_audit where dataset_id between 91001 and 91099;
+delete from public.v2_geometry_corrections where dataset_id between 91001 and 91099;
+delete from public.v2_deadwood_geometries where label_id in (
+	select id from public.v2_labels where dataset_id between 91001 and 91099
+);
+delete from public.v2_forest_cover_geometries where label_id in (
+	select id from public.v2_labels where dataset_id between 91001 and 91099
+);
+delete from public.v2_labels where dataset_id between 91001 and 91099;
 delete from public.v2_logs where dataset_id between 91001 and 91099;
 delete from public.v2_queue where dataset_id between 91001 and 91099;
 delete from public.v2_metadata where dataset_id between 91001 and 91099;
@@ -16,7 +24,15 @@ delete from public.v2_thumbnails where dataset_id between 91001 and 91099;
 delete from public.v2_cogs where dataset_id between 91001 and 91099;
 delete from public.v2_orthos where dataset_id between 91001 and 91099;
 delete from public.v2_statuses where dataset_id between 91001 and 91099;
+delete from public.jt_data_publication_datasets where dataset_id between 91001 and 91099;
+delete from public.jt_data_publication_user_info where publication_id between 91001 and 91099;
+delete from public.data_publication where id between 91001 and 91099;
+delete from public.user_info where id between 91001 and 91099;
 delete from public.v2_datasets where id between 91001 and 91099;
+
+delete from public.priwa_kaeferbaeume where project_id = '00000000-0000-4000-8000-00000000b001';
+delete from public.priwa_project_memberships where project_id = '00000000-0000-4000-8000-00000000b001';
+delete from public.priwa_projects where id = '00000000-0000-4000-8000-00000000b001';
 
 delete from public.privileged_users where user_id in (
 	'00000000-0000-4000-8000-00000000a001',
@@ -351,6 +367,218 @@ values (
 	false,
 	'QA flag: visible ortho seam in the north-east corner.',
 	'open'
+);
+
+insert into public.v2_labels (
+	id,
+	dataset_id,
+	user_id,
+	label_source,
+	label_type,
+	label_data,
+	label_quality,
+	model_config,
+	is_active,
+	version
+)
+values
+	(
+		9100101,
+		91001,
+		'00000000-0000-4000-8000-00000000a001',
+		'model_prediction',
+		'semantic_segmentation',
+		'deadwood',
+		2,
+		'{"qa": true, "model": "qa-seed"}'::jsonb,
+		true,
+		1
+	),
+	(
+		9100102,
+		91001,
+		'00000000-0000-4000-8000-00000000a001',
+		'model_prediction',
+		'semantic_segmentation',
+		'forest_cover',
+		2,
+		'{"qa": true, "model": "qa-seed"}'::jsonb,
+		true,
+		1
+	);
+
+insert into public.v2_deadwood_geometries (
+	id,
+	label_id,
+	geometry,
+	properties,
+	is_deleted
+)
+values (
+	9100101,
+	9100101,
+	st_geomfromtext('POLYGON((7.9000 47.9900, 7.9003 47.9900, 7.9003 47.9903, 7.9000 47.9903, 7.9000 47.9900))', 4326),
+	'{"qa": true, "source": "qa-labels"}'::jsonb,
+	false
+);
+
+insert into public.v2_forest_cover_geometries (
+	id,
+	label_id,
+	geometry,
+	properties,
+	is_deleted
+)
+values (
+	9100102,
+	9100102,
+	st_geomfromtext('POLYGON((7.8995 47.9895, 7.9008 47.9895, 7.9008 47.9908, 7.8995 47.9908, 7.8995 47.9895))', 4326),
+	'{"qa": true, "source": "qa-labels"}'::jsonb,
+	false
+);
+
+insert into public.v2_geometry_corrections (
+	id,
+	geometry_id,
+	layer_type,
+	label_id,
+	dataset_id,
+	operation,
+	original_geometry_id,
+	user_id,
+	session_id,
+	review_status
+)
+values (
+	9100101,
+	9100101,
+	'deadwood',
+	9100101,
+	91001,
+	'modify',
+	9100101,
+	'00000000-0000-4000-8000-00000000a001',
+	'00000000-0000-4000-8000-00000000c001',
+	'pending'
+);
+
+insert into public.priwa_projects (
+	id,
+	slug,
+	name
+)
+values (
+	'00000000-0000-4000-8000-00000000b001',
+	'qa-priwa-project',
+	'QA PRIWA Project'
+);
+
+insert into public.priwa_project_memberships (
+	project_id,
+	user_id,
+	role
+)
+values (
+	'00000000-0000-4000-8000-00000000b001',
+	'00000000-0000-4000-8000-00000000a001',
+	'field_user'
+);
+
+insert into public.priwa_kaeferbaeume (
+	id,
+	project_id,
+	geom,
+	location_source,
+	baumnr,
+	fund,
+	baumart,
+	bm,
+	bohrloch,
+	harz,
+	gruene_nadeln_am_boden,
+	nadel,
+	rinde,
+	kv,
+	name,
+	datum,
+	kom,
+	raw_qr_value,
+	created_by,
+	updated_by
+)
+values (
+	'00000000-0000-4000-8000-00000000b101',
+	'00000000-0000-4000-8000-00000000b001',
+	st_setsrid(st_makepoint(7.9001, 47.9901), 4326),
+	'map_estimated',
+	'QA-001',
+	'stehend',
+	'Fichte',
+	'ja',
+	'nein',
+	'nein',
+	'nein',
+	'rot',
+	'0%',
+	'0%',
+	'QA Field User',
+	'2026-06-16',
+	'QA seeded PRIWA point.',
+	'QA-PRIWA-001',
+	'00000000-0000-4000-8000-00000000a001',
+	'00000000-0000-4000-8000-00000000a001'
+);
+
+insert into public.user_info (
+	id,
+	"user",
+	organisation,
+	orcid,
+	first_name,
+	last_name,
+	title
+)
+values (
+	91001,
+	'00000000-0000-4000-8000-00000000a001',
+	'DeadTrees QA',
+	'0000-0000-0000-0000',
+	'QA',
+	'Contributor',
+	'Dr.'
+);
+
+insert into public.data_publication (
+	id,
+	doi,
+	title,
+	description,
+	user_id
+)
+values (
+	91001,
+	'10.9999/deadtrees.qa-publication',
+	'QA Local Publication',
+	'Local-only publication fixture for agent QA.',
+	'00000000-0000-4000-8000-00000000a001'
+);
+
+insert into public.jt_data_publication_datasets (
+	publication_id,
+	dataset_id
+)
+values (
+	91001,
+	91001
+);
+
+insert into public.jt_data_publication_user_info (
+	publication_id,
+	user_info_id
+)
+values (
+	91001,
+	91001
 );
 
 commit;

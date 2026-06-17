@@ -78,3 +78,84 @@ pending=0
 5. Re-run only the failed, blocked, and review playbooks.
 6. Convert confirmed product behavior issues into normal implementation
    tickets or PR work.
+
+## Hardening Update
+
+Date: 2026-06-17
+
+The recommended next slice has been implemented as a local QA hardening pass.
+
+Delivered:
+
+- `scripts/qa/env.sh` now provides a single lifecycle entry point for
+  rendering, starting, checking, resetting, and stopping the isolated QA stack.
+- App containers now use an ignored per-worktree data root via
+  `LOCAL_DATA_ROOT=.local/qa-data`, avoiding writes through the shared `data`
+  symlink.
+- `scripts/qa/prepare-fixtures.sh` creates deterministic local fixture files
+  for archive, COG, and thumbnail paths used by seeded QA datasets.
+- `qa-full` seed data now includes PRIWA rows, label/correction rows, and a
+  publication fixture, with `scripts/qa/check-fixtures.sql` covering the new
+  domain rows.
+- `scripts/qa/run-agent-qa.sh` now assigns resource locks to mutating playbooks
+  so playbooks touching the same dataset are co-located on one worker.
+- Worker prompts now document Browser Use CLI for isolated sessions/upload
+  flows and Playwright as the deterministic upload fallback.
+- `scripts/qa/report.sh` now aggregates finding categories.
+- Browser Use CLI was tested through `uvx --from browser-use` and passed a
+  local named-session plus file-upload probe.
+
+Validation completed:
+
+```bash
+bash -n scripts/dev/isolated-supabase.sh scripts/qa/*.sh frontend/scripts/run-vite-profile.sh
+scripts/qa/lint-playbooks.sh
+scripts/qa/env.sh render
+scripts/qa/prepare-fixtures.sh qa-full
+scripts/qa/run-agent-qa.sh --profile qa-full --parallel 4 --dry-run --run-dir .local/qa-runs/hardening-dry-run
+scripts/qa/report.sh .local/qa-runs/hardening-dry-run
+scripts/qa/browser-use-cli-probe.sh .local/qa-runs/browser-use-cli-probe --exercise-upload
+npm --prefix frontend run lint
+scripts/lint-ast-grep.sh
+git diff --check
+```
+
+Live validation completed after Docker was restarted:
+
+```bash
+scripts/qa/env.sh up
+scripts/qa/env.sh reset
+scripts/qa/check-auth-mailpit.sh
+scripts/qa/playwright-upload-probe.sh .local/qa-runs/playwright-upload-probe
+scripts/qa/run-agent-qa.sh --profile qa-full --parallel 3 \
+  --playbook auth-shell \
+  --playbook contributor-upload-process \
+  --playbook public-archive-detail-download \
+  --playbook priwa-field-workflow \
+  --playbook labels-corrections-map \
+  --playbook negative-empty-error-states \
+  --run-dir .local/qa-runs/hardening-focused-pilot
+scripts/qa/report.sh .local/qa-runs/hardening-focused-pilot
+```
+
+Focused pilot result:
+
+```text
+.local/qa-runs/hardening-focused-pilot/report.md
+pass=4
+fail=2
+blocked=0
+needs-human-review=0
+pending=0
+```
+
+Remaining findings are product bugs, not QA platform blockers:
+
+- `public-archive-detail-download`: seeded dataset `91001` did not appear in
+  the public archive list; direct detail route worked, but anonymous download
+  was disabled and the seeded COG produced `Invalid byte order value`.
+- `labels-corrections-map`: contributor correction route did not mount a usable
+  map/editor and the fixed header intercepted `Start Editing Deadwood cover`;
+  auditor label route rendered but still hit the seeded COG byte-order error.
+
+Detailed hardening notes are in `docs/qa/local-agent-qa-hardening-brief.md`.

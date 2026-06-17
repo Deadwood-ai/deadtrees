@@ -49,11 +49,21 @@ manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
 env_summary = json.loads((run_dir / "env-summary.json").read_text(encoding="utf-8"))
 
 allowed_statuses = {"pass", "fail", "blocked", "needs-human-review", "pending"}
+allowed_categories = {
+    "qa-platform-gap",
+    "fixture-gap",
+    "product-bug",
+    "tooling-limitation",
+    "needs-design-decision",
+    "none",
+    "uncategorized",
+}
 playbook_status: dict[str, str] = {
     item["id"]: "pending"
     for worker in manifest["workers"]
     for item in worker["playbooks"]
 }
+playbook_category: dict[str, str] = {playbook_id: "uncategorized" for playbook_id in playbook_status}
 
 worker_summaries = []
 for result_path in sorted(run_dir.glob("worker-*.result.md")):
@@ -65,15 +75,36 @@ for result_path in sorted(run_dir.glob("worker-*.result.md")):
 
     worker_playbook_statuses = []
     for playbook_id in playbook_status:
+        heading = re.search(
+            rf"(?ims)^##+\s*`?{re.escape(playbook_id)}`?.*?(?=^##+\s|\Z)",
+            text,
+        )
         patterns = [
             rf"(?im)^[-*]\s*`?{re.escape(playbook_id)}`?\s*[:\-]\s*(pass|fail|blocked|needs-human-review|pending)\b",
             rf"(?im)^##+\s*`?{re.escape(playbook_id)}`?\s*(?:[:\-]|[ ]+)\s*(pass|fail|blocked|needs-human-review|pending)\b",
         ]
         match = next((found for pattern in patterns if (found := re.search(pattern, text))), None)
-        if match:
-            status = match.group(1).lower()
+        heading_status_match = (
+            re.search(r"(?im)^status:\s*`?(pass|fail|blocked|needs-human-review|pending)`?\s*$", heading.group(0))
+            if heading
+            else None
+        )
+        if match or heading_status_match:
+            status = (match or heading_status_match).group(1).lower()
             playbook_status[playbook_id] = status
             worker_playbook_statuses.append(status)
+
+            if heading:
+                category_match = re.search(
+                    r"(?im)^category:\s*`?([a-z-]+|none)`?\s*$",
+                    heading.group(0),
+                )
+                if category_match:
+                    category = category_match.group(1).lower()
+                    if category in allowed_categories:
+                        playbook_category[playbook_id] = category
+            if playbook_status[playbook_id] == "pass" and playbook_category[playbook_id] == "uncategorized":
+                playbook_category[playbook_id] = "none"
 
     if worker_playbook_statuses:
         if any(status == "fail" for status in worker_playbook_statuses):
@@ -96,6 +127,7 @@ for result_path in sorted(run_dir.glob("worker-*.result.md")):
     )
 
 counts = Counter(playbook_status.values())
+category_counts = Counter(playbook_category.values())
 generated_at = datetime.now(timezone.utc).isoformat()
 
 lines = [
@@ -110,6 +142,7 @@ lines = [
     f"- Frontend: `{env_summary.get('frontend_url')}`",
     f"- API: `{env_summary.get('api_url')}`",
     f"- Supabase: `{env_summary.get('supabase_url')}`",
+    f"- Local data root: `{env_summary.get('local_data_root')}`",
     "",
     "## Status Summary",
     "",
@@ -117,13 +150,30 @@ lines = [
 for status in ["pass", "fail", "blocked", "needs-human-review", "pending"]:
     lines.append(f"- `{status}`: {counts.get(status, 0)}")
 
+lines.extend(["", "## Category Summary", ""])
+for category in [
+    "qa-platform-gap",
+    "fixture-gap",
+    "product-bug",
+    "tooling-limitation",
+    "needs-design-decision",
+    "uncategorized",
+    "none",
+]:
+    count = category_counts.get(category, 0)
+    if count:
+        lines.append(f"- `{category}`: {count}")
+
 lines.extend(["", "## Worker Results", ""])
 for worker in worker_summaries:
     lines.append(f"- `{worker['file']}`: {worker['status']}")
 
 lines.extend(["", "## Playbook Status", ""])
 for playbook_id in sorted(playbook_status):
-    lines.append(f"- `{playbook_id}`: {playbook_status[playbook_id]}")
+    lines.append(
+        f"- `{playbook_id}`: {playbook_status[playbook_id]} "
+        f"(category: {playbook_category[playbook_id]})"
+    )
 
 lines.extend(
     [

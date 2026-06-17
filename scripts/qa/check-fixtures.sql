@@ -21,7 +21,13 @@ begin
 		'thumbnails', (select count(*) from public.v2_thumbnails t where t.dataset_id in (91001, 91002)),
 		'audits', (select count(*) from public.dataset_audit a where a.dataset_id = 91002),
 		'flags', (select count(*) from public.dataset_flags f where f.dataset_id = 91001),
-		'auditors', (select count(*) from public.privileged_users p where p.user_id = '00000000-0000-4000-8000-00000000a002')
+		'auditors', (select count(*) from public.privileged_users p where p.user_id = '00000000-0000-4000-8000-00000000a002'),
+		'priwa_memberships', (select count(*) from public.priwa_project_memberships p where p.user_id = '00000000-0000-4000-8000-00000000a001'),
+		'priwa_points', (select count(*) from public.priwa_kaeferbaeume k where k.project_id = '00000000-0000-4000-8000-00000000b001'),
+		'labels', (select count(*) from public.v2_labels l where l.dataset_id = 91001),
+		'deadwood_geometries', (select count(*) from public.v2_deadwood_geometries dg join public.v2_labels l on l.id = dg.label_id where l.dataset_id = 91001),
+		'forest_cover_geometries', (select count(*) from public.v2_forest_cover_geometries fg join public.v2_labels l on l.id = fg.label_id where l.dataset_id = 91001),
+		'publications', (select count(*) from public.data_publication p where p.user_id = '00000000-0000-4000-8000-00000000a001')
 	)
 	into counts;
 
@@ -33,7 +39,13 @@ begin
 		'thumbnails', 2,
 		'audits', 1,
 		'flags', 1,
-		'auditors', 1
+		'auditors', 1,
+		'priwa_memberships', 1,
+		'priwa_points', 1,
+		'labels', 2,
+		'deadwood_geometries', 1,
+		'forest_cover_geometries', 1,
+		'publications', 1
 	) then
 		raise exception 'fixture check failed: %', counts;
 	end if;

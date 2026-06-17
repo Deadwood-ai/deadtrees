@@ -57,4 +57,5 @@ esac
 require_local_database_url
 
 psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "$SEED_FILE"
+"$REPO_ROOT/scripts/qa/prepare-fixtures.sh" "$PROFILE"
 psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "$REPO_ROOT/scripts/qa/check-fixtures.sql"
