@@ -32,6 +32,76 @@ const expectReleasesReady = async (page: Page) => {
 };
 
 test.describe("DeadTrees Data Factory read-only smoke", () => {
+  test("homepage uses lightweight read models for stats and deferred teasers", async ({
+    page,
+  }) => {
+    const restRequests: string[] = [];
+
+    page.on("request", (request) => {
+      const url = request.url();
+      if (url.includes("/rest/v1/")) {
+        restRequests.push(decodeURIComponent(url));
+      }
+    });
+
+    const statsResponsePromise = page
+      .waitForResponse((response) =>
+        response.url().includes("/rest/v1/public_home_stats"),
+      )
+      .catch(() => null);
+
+    await page.goto("/");
+
+    const statsResponse = await statsResponsePromise;
+    test.skip(
+      statsResponse?.status() === 404,
+      "homepage read-model migration has not been deployed to this backend yet",
+    );
+
+    expect(statsResponse, "home stats read-model request was not issued").not.toBeNull();
+    expect(statsResponse?.ok(), "home stats read-model request failed").toBe(true);
+
+    await expect(page.getByTestId("home-page")).toBeVisible();
+    await expect(page.getByTestId("home-stat-datasets-value")).not.toHaveText(
+      "...",
+      { timeout: 20_000 },
+    );
+    await expect(page.getByTestId("home-stat-countries-value")).not.toHaveText(
+      "...",
+      { timeout: 20_000 },
+    );
+    await expect(
+      page.getByTestId("home-stat-contributors-value"),
+    ).not.toHaveText("...", { timeout: 20_000 });
+
+    expect(
+      restRequests.some((url) => url.includes("/rest/v1/public_home_stats")),
+    ).toBe(true);
+    expect(
+      restRequests.some(
+        (url) =>
+          url.includes("/rest/v1/v2_full_dataset_view_public") &&
+          url.includes("select=*"),
+      ),
+    ).toBe(false);
+    expect(
+      restRequests.some((url) =>
+        url.includes("/rest/v1/public_home_dataset_teasers"),
+      ),
+    ).toBe(false);
+
+    await page.getByTestId("home-data-gallery-anchor").scrollIntoViewIfNeeded();
+    await expect
+      .poll(
+        () =>
+          restRequests.some((url) =>
+            url.includes("/rest/v1/public_home_dataset_teasers"),
+          ),
+        { timeout: 20_000 },
+      )
+      .toBe(true);
+  });
+
   test("public info and auth routes render their base read-only states", async ({
     page,
   }) => {

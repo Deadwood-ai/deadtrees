@@ -38,9 +38,10 @@ const DataProvider = ({ children }: DataProviderProps) => {
   const location = useLocation();
   const shouldFetchDataContext = useMemo(() => {
     const pathname = location.pathname;
-    // Home/About and data-management pages rely on this context.
+    // About and data-management pages rely on this broad context.
+    // Home uses dedicated lightweight read models.
     // Skip broad prefetch for heavy detail/map routes like /dataset/:id.
-    if (pathname === "/" || pathname === "/about") return true;
+    if (pathname === "/about") return true;
     if (pathname.startsWith("/profile")) return true;
     if (pathname === "/dataset") return true;
     return false;

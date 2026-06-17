@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "antd";
 import {
   DatabaseOutlined,
@@ -8,9 +8,8 @@ import {
 import ReactPlayer from "react-player";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuthProvider";
-import { useData } from "../../hooks/useDataProvider";
+import { useHomeStats } from "../../hooks/useHomeReadModels";
 import { useDesktopOnlyFeature } from "../../hooks/useDesktopOnlyFeature";
-import { isDatasetViewable } from "../../utils/datasetVisibility";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import LogoBannerBand from "./LogoBanner";
 
@@ -89,8 +88,14 @@ const AnimatedStat = ({
   }, [value]);
 
   return (
-    <div className="flex items-baseline gap-1.5">
-      <span className="min-w-[3ch] text-xl font-bold tabular-nums text-[#FFB31C]">
+    <div
+      className="flex items-baseline gap-1.5"
+      data-testid={`home-stat-${label.toLowerCase()}`}
+    >
+      <span
+        className="min-w-[3ch] text-xl font-bold tabular-nums text-[#FFB31C]"
+        data-testid={`home-stat-${label.toLowerCase()}-value`}
+      >
         {displayValue === null ? "..." : displayValue.toLocaleString()}
       </span>
       <span className="text-sm font-medium text-gray-500">{label}</span>
@@ -101,22 +106,9 @@ const AnimatedStat = ({
 const Hero = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { data, authors } = useData();
+  const { data: stats } = useHomeStats();
   const { isMobile, runDesktopOnlyAction } = useDesktopOnlyFeature();
   const { track } = useAnalytics("home");
-
-  const stats = useMemo(() => {
-    if (!data) return null;
-    const valid = data.filter((item) => isDatasetViewable(item));
-    const countries = new Set(
-      valid.map((d) => d.admin_level_1).filter(Boolean),
-    );
-    return {
-      datasets: valid.length,
-      countries: countries.size,
-      contributors: authors?.length ?? 0,
-    };
-  }, [data, authors]);
 
   const handleContribute = useCallback(() => {
     track("landing_cta_clicked", {
@@ -226,13 +218,16 @@ const Hero = () => {
             )}
 
             <div className="mt-8 flex flex-wrap items-center justify-center gap-6 md:justify-start">
-              <AnimatedStat value={stats?.datasets ?? null} label="Datasets" />
               <AnimatedStat
-                value={stats?.countries ?? null}
+                value={stats?.dataset_count ?? null}
+                label="Datasets"
+              />
+              <AnimatedStat
+                value={stats?.country_count ?? null}
                 label="Countries"
               />
               <AnimatedStat
-                value={stats?.contributors ?? null}
+                value={stats?.contributor_count ?? null}
                 label="Contributors"
               />
             </div>

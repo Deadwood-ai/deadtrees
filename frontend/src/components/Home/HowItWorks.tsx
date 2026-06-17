@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "antd";
 import { CloudUploadOutlined, GlobalOutlined, DatabaseOutlined } from "@ant-design/icons";
@@ -10,7 +10,19 @@ const UPLOAD_VIDEO_URL = "https://data2.deadtrees.earth/assets/v1/videos/upload.
 
 const MiniSatelliteMap = lazy(() => import("./MiniSatelliteMap"));
 
-const DeferredMiniSatelliteMap = () => {
+const DeferredUntilVisible = ({
+  children,
+  className,
+  placeholder,
+  rootMargin,
+  testId,
+}: {
+  children: ReactNode;
+  className?: string;
+  placeholder: ReactNode;
+  rootMargin: string;
+  testId?: string;
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
 
@@ -24,25 +36,46 @@ const DeferredMiniSatelliteMap = () => {
           observer.disconnect();
         }
       },
-      { rootMargin: "250px 0px" },
+      { rootMargin },
     );
 
     observer.observe(containerRef.current);
     return () => observer.disconnect();
-  }, [isVisible]);
+  }, [isVisible, rootMargin]);
 
   return (
-    <div ref={containerRef} className="h-full w-full">
-      {isVisible ? (
-        <Suspense fallback={<div className="h-full w-full animate-pulse bg-gray-100" />}>
-          <MiniSatelliteMap />
-        </Suspense>
-      ) : (
-        <div className="h-full w-full animate-pulse bg-gray-100" />
-      )}
+    <div ref={containerRef} className={className} data-testid={testId}>
+      {isVisible ? children : placeholder}
     </div>
   );
 };
+
+const DeferredMiniSatelliteMap = () => (
+  <DeferredUntilVisible
+    className="h-full w-full"
+    placeholder={<div className="h-full w-full animate-pulse bg-gray-100" />}
+    rootMargin="250px 0px"
+  >
+    <Suspense fallback={<div className="h-full w-full animate-pulse bg-gray-100" />}>
+      <MiniSatelliteMap />
+    </Suspense>
+  </DeferredUntilVisible>
+);
+
+const DeferredDataGallery = () => (
+  <DeferredUntilVisible
+    placeholder={
+      <div
+        className="h-80 w-full animate-pulse rounded-lg bg-white/70"
+        data-testid="home-data-gallery-placeholder"
+      />
+    }
+    rootMargin="300px 0px"
+    testId="home-data-gallery-anchor"
+  >
+    <DataGallery hideHeader={true} />
+  </DeferredUntilVisible>
+);
 
 const HowItWorks = () => {
   const navigate = useNavigate();
@@ -123,7 +156,7 @@ const HowItWorks = () => {
             </p>
           </div>
           <div className="-mx-4 md:mx-0 relative z-10">
-             <DataGallery hideHeader={true} />
+             <DeferredDataGallery />
           </div>
           <div className="flex justify-center">
             <Link to="/dataset">
