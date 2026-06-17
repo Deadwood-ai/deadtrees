@@ -28,13 +28,22 @@ sanitize_slug() {
 }
 
 default_slug() {
+	local repo
 	local parent
+	repo="$(basename "$REPO_ROOT")"
 	parent="$(basename "$(dirname "$REPO_ROOT")")"
-	if [[ "$parent" =~ ^[[:alnum:]_-]+$ && "$parent" != "." ]]; then
-		sanitize_slug "$parent"
-	else
-		sanitize_slug "$(basename "$REPO_ROOT")"
-	fi
+	case "$parent" in
+		.|projects|project|src|source|code|repo|repos|repository|repositories|workspace|workspaces)
+			sanitize_slug "$repo"
+			;;
+		*)
+			if [[ "$parent" =~ ^[[:alnum:]_-]+$ ]]; then
+				sanitize_slug "$parent"
+			else
+				sanitize_slug "$repo"
+			fi
+			;;
+	esac
 }
 
 default_port_base() {

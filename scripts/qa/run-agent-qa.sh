@@ -297,13 +297,30 @@ lock_owners: dict[str, dict[str, object]] = {}
 
 for idx, playbook in enumerate(playbooks):
     locks = set(playbook["resource_locks"])
-    overlapping_workers = [
-        lock_owners[lock]
-        for lock in locks
-        if lock in lock_owners
-    ]
+    overlapping_workers = []
+    seen_worker_ids = set()
+    for lock in locks:
+        if lock not in lock_owners:
+            continue
+        owner = lock_owners[lock]
+        owner_id = id(owner)
+        if owner_id in seen_worker_ids:
+            continue
+        seen_worker_ids.add(owner_id)
+        overlapping_workers.append(owner)
     if overlapping_workers:
         worker = overlapping_workers[0]
+        for other in overlapping_workers[1:]:
+            if other is worker:
+                continue
+            worker["playbooks"].extend(other["playbooks"])
+            merged_locks = set(worker["resource_locks"])
+            merged_locks.update(other["resource_locks"])
+            worker["resource_locks"] = sorted(merged_locks)
+            other["playbooks"] = []
+            other["resource_locks"] = []
+            for lock in merged_locks:
+                lock_owners[lock] = worker
     else:
         worker = min(workers, key=lambda item: len(item["playbooks"]))
 
@@ -364,6 +381,7 @@ manifest = {
 
 for worker in workers:
     worker_dir = run_dir / worker["id"]
+    result_path = run_dir / f"{worker['id']}.result.md"
     (worker_dir / "screenshots").mkdir(parents=True, exist_ok=True)
     prompt_path = run_dir / f"{worker['id']}.prompt.md"
     playbook_lines = "\n".join(
@@ -412,7 +430,7 @@ You are a QA subagent executing DeadTrees local agent QA playbooks.
 
 ## Result Contract
 
-Write your result summary to `{worker['id']}.result.md` with:
+Write your result summary to `{result_path.relative_to(repo_root)}` with:
 
 - playbook id
 - status
@@ -422,7 +440,7 @@ Write your result summary to `{worker['id']}.result.md` with:
 - follow-up issue suggestions
 """
     prompt_path.write_text(prompt, encoding="utf-8")
-    (run_dir / f"{worker['id']}.result.md").write_text(
+    result_path.write_text(
         f"# {worker['id']} Result\n\nStatus: pending\n\n", encoding="utf-8"
     )
 
