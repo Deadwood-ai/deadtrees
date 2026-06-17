@@ -8,6 +8,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../..");
+const localDataRoot = process.env.LOCAL_DATA_ROOT || path.join(repoRoot, "data");
 const rgbGeoTiffFixture = path.resolve(
   __dirname,
   "../test/fixtures/geotiff/upload-validation/rgb-real-crop.tif",
@@ -72,7 +73,7 @@ test.describe("auditor local write flows", () => {
       await deleteAuthUsersByEmail(adminClient, auditorEmail);
       await deleteAuthUsersByEmail(adminClient, reporterEmail);
     }
-    fs.rmSync(path.join(repoRoot, "data", "cogs", cogPath), { force: true });
+    fs.rmSync(path.join(localDataRoot, "cogs", cogPath), { force: true });
   });
 
   test("auditor acknowledges a user flag, draws AOI, and persists audit side effects", async ({
@@ -278,7 +279,7 @@ async function createAuditableDataset() {
   });
   expect(statusError).toBeNull();
 
-  const localCogFile = path.join(repoRoot, "data", "cogs", cogPath);
+  const localCogFile = path.join(localDataRoot, "cogs", cogPath);
   fs.mkdirSync(path.dirname(localCogFile), { recursive: true });
   fs.copyFileSync(rgbGeoTiffFixture, localCogFile);
 
