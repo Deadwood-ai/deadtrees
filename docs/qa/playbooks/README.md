@@ -22,6 +22,8 @@ dataset IDs.
 ## Execution Rules
 
 - Default to the built-in Browser for local app checks.
+- Treat Browser Use CLI as conditional: require current probe evidence that the
+  selected backend renders the real app before using it for QA conclusions.
 - Keep evidence under `.local/qa-runs/<timestamp>/<playbook-id>/`.
 - Capture focused evidence: URL, locator state, console errors, and a single
   screenshot only when visual evidence is needed.

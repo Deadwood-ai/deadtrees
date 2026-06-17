@@ -9,8 +9,9 @@ DeadTrees agent QA.
 
 Fallbacks:
 
-- Use Browser Use CLI for playbooks that need per-worker browser/session
-  isolation or file upload.
+- Use Browser Use CLI only for playbooks that need per-worker browser/session
+  isolation or file upload, and require probe evidence that the selected Browser
+  Use backend renders the real app.
 - Use Chrome only when a journey explicitly needs the user's real Chrome
   profile, cookies, extensions, or logged-in browser state.
 - Use Computer Use only when DOM/browser automation cannot operate a required
@@ -115,8 +116,13 @@ Result:
 
 Decision:
 
+- Do not use Browser Use default Chromium as the primary real-app QA renderer
+  unless `scripts/qa/browser-use-real-app-probe.sh` classifies it as `pass` for
+  the target route. It has previously rendered `/dataset` as a blank page while
+  Playwright and Browser Use with a real Chrome profile rendered the app.
 - Use Browser Use CLI for isolated worker sessions and upload-specific
-  playbooks when available.
+  playbooks only after a current probe produces usable DOM and screenshot
+  evidence.
 - Keep built-in Browser as the default for simple route/locator/console checks.
 - Keep Playwright helpers as the deterministic fallback.
 

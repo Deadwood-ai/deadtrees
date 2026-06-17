@@ -392,7 +392,8 @@ You are a QA subagent executing DeadTrees local agent QA playbooks.
 ## Rules
 
 - Use the built-in Browser for ordinary route/locator checks unless a playbook explicitly says otherwise.
-- Use Browser Use CLI for per-worker session isolation or file-upload flows when available.
+- Do not use Browser Use default Chromium as primary evidence for real-app rendering unless `scripts/qa/browser-use-real-app-probe.sh` classifies it as `pass` for this route.
+- Use Browser Use CLI for per-worker session isolation or file-upload flows only when the selected backend has current DOM and screenshot evidence.
 - To make Browser Use visible for a human observer, run it in headed mode with either `--headed` or `BROWSER_USE_HEADED=1`.
 - Example headed Browser Use probe: `scripts/qa/browser-use-cli-probe.sh {worker_dir.relative_to(repo_root)}/browser-use-probe --exercise-upload --headed`.
 - Example headed worker session: `uvx --from browser-use browser-use --headed --session {worker['id']} open {frontend_url}`.

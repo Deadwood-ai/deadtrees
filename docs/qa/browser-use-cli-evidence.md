@@ -114,18 +114,21 @@ document.title = deadtrees.earth
 
 ## Decision
 
-Browser Use CLI is suitable for a targeted local QA role:
+Browser Use CLI is suitable for a targeted local QA role only after a current
+rendering probe passes for the selected backend:
 
 - per-worker browser sessions,
 - file-upload playbooks,
 - browser state isolation probes.
 
-It should not replace the built-in Browser for all playbooks yet because:
+It should not replace the built-in Browser for all playbooks because:
 
 - it requires `uvx` and repo-local cache/tool setup unless preinstalled,
 - element interaction depends on Browser Use's indexed accessibility state,
+- default Browser Use Chromium has previously produced a blank real-app render
+  on `/dataset`,
 - for complex product flows, Playwright remains the deterministic fallback when
   a stable selector contract already exists.
 
-Use it as the preferred fallback for file upload and session-isolated workers.
+Use it as a conditional fallback for file upload and session-isolated workers.
 Keep Playwright as the deterministic fallback for CI-like probes.

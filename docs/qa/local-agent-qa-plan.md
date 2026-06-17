@@ -187,8 +187,8 @@ parallel_safe: true
 mutation_level: read-only
 routes:
   - /
-  - /archive
-  - /datasets/:id
+  - /dataset
+  - /dataset/:id
 
 ## Purpose
 
