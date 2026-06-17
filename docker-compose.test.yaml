@@ -45,6 +45,8 @@ services:
       - PROCESSOR_USERNAME=processor@deadtrees.earth
       - SUPABASE_URL=${SUPABASE_URL_DOCKER:-http://host.docker.internal:54321}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0}
+      - SUPABASE_KEY=${SUPABASE_KEY:-${SUPABASE_SERVICE_ROLE_KEY}}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-${SUPABASE_KEY}}
       - NGINX_COG_URL=${NGINX_COG_URL:-http://localhost:8080/cogs/v1}
       - BASE_DIR=/data
       # Match the mounted SSH key location inside the test container.
@@ -95,6 +97,8 @@ services:
       - PYTEST_ADDOPTS=--color=yes
       - SUPABASE_URL=${SUPABASE_URL_DOCKER:-http://host.docker.internal:54321}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0}
+      - SUPABASE_KEY=${SUPABASE_KEY:-${SUPABASE_SERVICE_ROLE_KEY}}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-${SUPABASE_KEY}}
       - NGINX_COG_URL=${NGINX_COG_URL:-http://localhost:8080/cogs/v1}
       - BASE_DIR=/data
       - ENV=development
