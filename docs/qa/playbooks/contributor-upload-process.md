@@ -57,4 +57,3 @@ small GeoTIFF to the isolated local API.
 - Upload request URL/status and created dataset ID.
 - Local DB assertion for created dataset and queue row.
 - One screenshot only for UI validation/layout failure.
-

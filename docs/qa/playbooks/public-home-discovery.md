@@ -58,4 +58,3 @@ the isolated local app stack.
 - Visibility state for the expected `data-testid`.
 - Console errors filtered to `error` level.
 - One screenshot only if layout is visibly broken.
-

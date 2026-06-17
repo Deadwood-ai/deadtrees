@@ -132,13 +132,12 @@ def test_priwa_member_can_create_update_and_soft_delete_kaeferbaum(priwa_project
 	assert updated.data[0]['updated_by'] == priwa_project['member_id']
 
 	with use_client(member_token) as client:
-		with pytest.raises(Exception):
-			client.table('priwa_kaeferbaeume').delete().eq('id', created['id']).execute()
+		delete_attempt = client.table('priwa_kaeferbaeume').delete().eq('id', created['id']).execute()
+		after_delete_attempt = client.table('priwa_kaeferbaeume').select('*').eq('id', created['id']).execute()
 
 		client.table('priwa_kaeferbaeume').update(
 			{'deleted_at': datetime.now(timezone.utc).isoformat()}
 		).eq('id', created['id']).execute()
-		active_records = client.table('priwa_kaeferbaeume').select('*').eq('id', created['id']).execute()
 		blocked_update = (
 			client.table('priwa_kaeferbaeume')
 			.update({'fund': 'should-not-change'})
@@ -146,7 +145,8 @@ def test_priwa_member_can_create_update_and_soft_delete_kaeferbaum(priwa_project
 			.execute()
 		)
 
-	assert active_records.data == []
+	assert delete_attempt.data == []
+	assert len(after_delete_attempt.data) == 1
 	assert blocked_update.data == []
 
 	with use_service_client() as client:

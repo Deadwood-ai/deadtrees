@@ -57,4 +57,3 @@ auditor personas.
 - Current URL and guard state for each persona.
 - `privileged_users` query status if visible in network summary.
 - One screenshot only if protected content leaks.
-

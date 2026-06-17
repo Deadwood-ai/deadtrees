@@ -60,4 +60,3 @@ Mailpit, including seeded login and password-reset shell behavior.
 - Profile route URL and visible contributor email state.
 - Mailpit message count and subject for reset check.
 - Console errors only.
-

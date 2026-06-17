@@ -59,4 +59,3 @@ Supabase.
 - Pending/synced text state.
 - DB assertion for created, updated, and soft-deleted row.
 - Console errors related to service worker/offline store only.
-

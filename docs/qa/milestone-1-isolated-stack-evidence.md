@@ -110,4 +110,3 @@ stacks to run on generated ports.
 - Optionally prove two independent worktrees concurrently; current evidence
   proves this worktree can run on generated ports and avoids the default shared
   port band.
-

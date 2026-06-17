@@ -57,4 +57,3 @@ or confirm AOI state where required, and persist final assessment locally.
 - Audit save response status.
 - Focused DB assertion for dataset `91001`.
 - One screenshot only if map/form layout prevents completion.
-

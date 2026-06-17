@@ -55,4 +55,3 @@ environment and handles the currently seeded release catalog state.
 - URL and state of the first opened detail page.
 - Console errors filtered to release/publication calls.
 - Note whether missing `qa-publication` fixture coverage blocked deeper checks.
-

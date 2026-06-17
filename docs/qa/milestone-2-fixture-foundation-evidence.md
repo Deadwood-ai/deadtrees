@@ -85,4 +85,3 @@ Supabase Auth generated columns differ from ordinary application tables:
 - Auth token fields such as `confirmation_token` should be empty strings rather
   than null for this local GoTrue version.
 - `auth.users.phone` should remain null unless a unique phone value is needed.
-

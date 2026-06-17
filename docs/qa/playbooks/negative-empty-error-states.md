@@ -59,4 +59,3 @@ states.
 - Guard redirect or denial state.
 - Console errors filtered to route/data-loading failures.
 - One screenshot only when the visual state is ambiguous.
-

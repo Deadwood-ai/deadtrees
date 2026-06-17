@@ -44,4 +44,3 @@ State the product behavior this journey proves.
 - Console errors only.
 - One screenshot only when visual evidence is needed.
 - API or DB assertion for mutating journeys.
-

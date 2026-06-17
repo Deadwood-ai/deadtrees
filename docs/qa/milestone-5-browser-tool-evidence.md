@@ -68,4 +68,3 @@ Fallback order:
 
 1. Chrome, only for real Chrome profile/session/extension state.
 2. Computer Use, only for interactions that cannot be driven through Browser.
-

@@ -58,4 +58,3 @@ and exercise the local download surface without touching production.
 - Current detail URL.
 - Download request URL/status.
 - One screenshot of the download section only if the UI is visually broken.
-

@@ -46,4 +46,3 @@ dataset IDs.
 | `labels-corrections-map` | contributor/auditor | local-write | `qa-labels` | `/dataset-label/91001`, `/dataset-corrections/91001` |
 | `priwa-field-workflow` | authenticated field user | local-write | `qa-priwa` | `/priwa-field` |
 | `negative-empty-error-states` | mixed | read-only | `qa-negative`, `qa-base` | `/dataset/999999`, `/dataset/91004`, `/dataset-audit` |
-

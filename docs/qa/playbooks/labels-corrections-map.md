@@ -58,4 +58,3 @@ map, layer controls, geometry creation/editing, and approval/revert paths.
 - DB assertion for correction row if mutation occurs.
 - Permission result for contributor versus auditor.
 - One clipped screenshot of the map tool area only if visual layout blocks use.
-
