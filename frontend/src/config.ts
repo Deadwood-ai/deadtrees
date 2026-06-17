@@ -49,6 +49,8 @@ export const Settings = {
 
   DATA_TABLE_FULL: "v2_full_dataset_view", // For admin/audit use (includes excluded datasets)
   DATA_TABLE_PUBLIC: "v2_full_dataset_view_public", // For public use (excludes excluded datasets)
+  HOME_STATS_VIEW: "public_home_stats",
+  HOME_DATASET_TEASERS_VIEW: "public_home_dataset_teasers",
   THUMBNAILS_TABLE: "v2_thumbnails",
   COLLABORATORS_TABLE: "collaborators",
   LABELS_TABLE: "v2_labels",

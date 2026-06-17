@@ -3,35 +3,15 @@ import { useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import type { CarouselRef } from "antd/es/carousel";
-import { useData } from "../../hooks/useDataProvider";
 import { Settings } from "../../config";
 import countryList from "../../utils/countryList";
 import { useDatasetDetailsMap } from "../../hooks/useDatasetDetailsMapProvider";
-import parseBBox from "../../utils/parseBBox";
-import { isDatasetViewable } from "../../utils/datasetVisibility";
-import type { IDataset } from "../../types/dataset";
-
-// Convert a geographic bounding box to area in hectares
-const calculateAreaFromBBox = (bboxArray: number[]): number => {
-  if (!bboxArray || bboxArray.length !== 4) return 0;
-
-  const [minLon, minLat, maxLon, maxLat] = bboxArray;
-
-  // Approximate conversion (this is a simplification that works reasonably well for small areas)
-  // 1 degree of latitude is approximately 111.32 km
-  // 1 degree of longitude varies with latitude: 111.32 * cos(latitude in radians)
-  const latDistance = (maxLat - minLat) * 111.32; // in km
-
-  // Average latitude for longitude calculation
-  const avgLat = (minLat + maxLat) / 2;
-  const lonDistance = (maxLon - minLon) * 111.32 * Math.cos(avgLat * (Math.PI / 180)); // in km
-
-  // Area in square kilometers
-  const areaKm2 = latDistance * lonDistance;
-
-  // Convert to hectares (1 km² = 100 hectares)
-  return areaKm2 * 100;
-};
+import {
+  useHomeDatasetTeasers,
+  useHomeStats,
+  type IHomeDatasetTeaser,
+  type IHomeStats,
+} from "../../hooks/useHomeReadModels";
 
 const Stat = ({ title, value, unit }: { title: string; value: string; unit: string }) => {
   return (
@@ -45,132 +25,69 @@ const Stat = ({ title, value, unit }: { title: string; value: string; unit: stri
   );
 };
 
-const getDatasetLocationLabel = (item: IDataset): string => {
+const getDatasetLocationLabel = (item: IHomeDatasetTeaser): string => {
   const place = item.admin_level_3 || item.admin_level_2;
 
   if (place) {
-    const country = item.admin_level_1 ? `, ${countryList[item.admin_level_1 as keyof typeof countryList]}` : "";
-    return `${place.slice(0, 10)}${place.length > 15 ? "..." : ""}${country}`;
+    const countryName = item.admin_level_1
+      ? countryList[item.admin_level_1 as keyof typeof countryList] ?? item.admin_level_1
+      : "";
+    const country = countryName ? `, ${countryName}` : "";
+    const truncatedPlace = place.length > 10 ? `${place.slice(0, 10)}...` : place;
+    return `${truncatedPlace}${country}`;
   }
 
-  return item.admin_level_1 ? countryList[item.admin_level_1 as keyof typeof countryList] : "";
+  return item.admin_level_1
+    ? countryList[item.admin_level_1 as keyof typeof countryList] ?? item.admin_level_1
+    : "";
 };
 
-const Stats = ({ datasets }: { datasets: IDataset[] }) => {
-  const stats = useMemo(() => {
-    if (!datasets.length) return { orthophotos: 0, area: 0, countries: 0, fileSize: 0 };
+const getDatasetDateLabel = (item: IHomeDatasetTeaser): string => {
+  if (!item.aquisition_year) return "Unknown date";
 
-    // Calculate orthophoto count
-    const orthophotos = datasets.length;
+  return new Date(
+    item.aquisition_year,
+    item.aquisition_month ? item.aquisition_month - 1 : 0,
+    item.aquisition_day ? item.aquisition_day : 1,
+  ).toLocaleDateString("en-GB", {
+    year: "numeric",
+    ...(item.aquisition_month && { month: "numeric" }),
+    ...(item.aquisition_day && { day: "numeric" }),
+  });
+};
 
-    // Calculate total area from bounding boxes
-    let totalArea = 0;
-    datasets.forEach((item) => {
-      if (item.bbox) {
-        const parsedBBox = parseBBox(item.bbox);
-        if (parsedBBox) {
-          totalArea += calculateAreaFromBBox(parsedBBox);
-        }
-      }
-    });
+type StatsProps = { stats: IHomeStats | null | undefined };
 
-    // Unique countries
-    const countries = new Set<string>();
-    datasets.forEach((item) => {
-      if (item.admin_level_1) {
-        countries.add(item.admin_level_1);
-      }
-    });
-
-    // Total file size in TB
-    const totalFileSizeBytes = datasets.reduce((sum, item) => {
-      // Convert from MB to TB (1 TB = 1,048,576 MB)
-      return sum + (item.ortho_file_size || 0);
-    }, 0);
-
-    // Convert MB to TB
-    const totalFileSizeTB = totalFileSizeBytes / 1_048_576;
-
-    return {
-      orthophotos,
-      area: totalArea,
-      countries: countries.size,
-      fileSize: totalFileSizeTB,
-    };
-  }, [datasets]);
-
+const Stats = ({ stats }: StatsProps) => {
   return (
     <div className="mt-4 flex flex-col justify-center rounded-2xl bg-white/50 py-6 md:mt-8">
       <div className="grid grid-cols-2 gap-y-8 md:flex md:justify-around md:gap-y-0">
-        <Stat title="Orthophotos" value={stats.orthophotos.toLocaleString()} unit="" />
-        <Stat title="Area Covered" value={Math.round(stats.area).toLocaleString()} unit="ha" />
-        <Stat title="Countries" value={stats.countries.toString()} unit="" />
-        <Stat title="Data Size" value={stats.fileSize.toFixed(2)} unit="TB" />
+        <Stat title="Orthophotos" value={(stats?.dataset_count ?? 0).toLocaleString()} unit="" />
+        <Stat title="Area Covered" value={Math.round(stats?.area_covered_ha ?? 0).toLocaleString()} unit="ha" />
+        <Stat title="Countries" value={(stats?.country_count ?? 0).toString()} unit="" />
+        <Stat title="Data Size" value={(stats?.data_size_tb ?? 0).toFixed(2)} unit="TB" />
       </div>
     </div>
   );
 };
 
 const DataGallery = ({ hideHeader = false }: { hideHeader?: boolean }) => {
-  const { data } = useData();
+  const { data: galleryData = [], isLoading } = useHomeDatasetTeasers();
+  const { data: stats } = useHomeStats();
   const carouselRef = useRef<CarouselRef | null>(null);
   const navigate = useNavigate();
   const { setNavigationSource } = useDatasetDetailsMap();
 
-  const viewableData = useMemo(() => {
-    if (!data) return [];
-    return data.filter((item) => isDatasetViewable(item));
-  }, [data]);
+  const visibleGalleryData = useMemo(() => {
+    if (!galleryData.length) return [];
 
-  const sortedUniqueData = useMemo(() => {
-    if (!viewableData.length) return [];
-
-    const sorted = [...viewableData].sort((a, b) => b.id - a.id);
-
-    // Debug: Check initial data
-    // console.log("Initial data count:", sorted.length);
-
-    // First filter for required fields using centralized visibility check
-    const filtered = sorted.filter((item) => {
-      // Carousel-specific requirements (authors and thumbnail for display)
+    return galleryData.filter((item) => {
       if (!item.authors || !Array.isArray(item.authors) || !item.thumbnail_path) {
         return false;
       }
       return true;
     });
-
-    // Debug: Check after required fields filter
-    // console.log("After required fields filter:", filtered.length);
-    // console.log(
-    //   "Sample authors:",
-    //   filtered.slice(0, 5).map((item) => item.authors),
-    // );
-
-    // Create a map to store one entry per author
-    const authorMap = new Map<string, IDataset>();
-
-    // Take only the first entry for each author in the authors array
-    filtered.forEach((item) => {
-      item.authors?.forEach((author: string) => {
-        const authorKey = author.trim().toLowerCase();
-        if (!authorMap.has(authorKey)) {
-          authorMap.set(authorKey, item);
-        }
-      });
-    });
-
-    // Convert map values back to array and remove duplicates
-    const oneImagePerAuthor = Array.from(new Set<IDataset>(authorMap.values()));
-
-    // Debug: Final result
-    // console.log("Final unique entries:", oneImagePerAuthor.length);
-    // console.log(
-    //   "Final unique authors:",
-    //   oneImagePerAuthor.map((item) => item.authors),
-    // );
-
-    return oneImagePerAuthor;
-  }, [viewableData]);
+  }, [galleryData]);
 
   const onClickHandler = useCallback((id: number) => {
     setNavigationSource("dataset");
@@ -234,63 +151,63 @@ const DataGallery = ({ hideHeader = false }: { hideHeader?: boolean }) => {
               shape="circle"
             />
 
-            <Carousel ref={carouselRef} {...settings}>
-              {sortedUniqueData.map((item) => (
-                <div key={item.id} className="px-2 py-4">
-                  <div
-                    className="cursor-pointer rounded-lg bg-white shadow-md transition-shadow duration-200 hover:shadow-lg"
-                    onClick={() => onClickHandler(item.id)}
-                  >
-                    <div className="relative m-2 mt-2 overflow-hidden rounded-lg">
-                      <img
-                        src={
-                          item.thumbnail_path ? Settings.THUMBNAIL_URL + item.thumbnail_path : "/assets/tree-icon.png"
-                        }
-                        className="h-36 w-48 scale-150 rounded-t-lg object-cover"
-                        loading="lazy"
-                        alt={`Dataset ${item.id}`}
-                      />
-                    </div>
-                    <div className="p-4">
-                      <div className="mb-2 flex items-baseline justify-between">
-                        <Tooltip
-                          title={
-                            item.admin_level_1
-                              ? `${item.admin_level_3 || item.admin_level_2 || ""}${item.admin_level_1 ? `, ${item.admin_level_1}` : ""}`
-                              : ""
+            {isLoading ? (
+              <div
+                className="h-64 animate-pulse rounded-lg bg-white/70"
+                data-testid="home-data-gallery-loading"
+              />
+            ) : (
+              <Carousel ref={carouselRef} {...settings} data-testid="home-data-gallery">
+                {visibleGalleryData.map((item) => (
+                  <div key={item.id} className="px-2 py-4">
+                    <button
+                      className="block w-full cursor-pointer rounded-lg border-0 bg-white p-0 text-left shadow-md transition-shadow duration-200 hover:shadow-lg"
+                      onClick={() => onClickHandler(item.id)}
+                      type="button"
+                    >
+                      <div className="relative m-2 mt-2 overflow-hidden rounded-lg">
+                        <img
+                          src={
+                            item.thumbnail_path ? Settings.THUMBNAIL_URL + item.thumbnail_path : "/assets/tree-icon.png"
                           }
-                        >
-                          <span className="max-w-[70%] truncate font-semibold">
-                            {getDatasetLocationLabel(item)}
-                          </span>
-                        </Tooltip>
-                        <span className="text-xs text-gray-500">
-                          {new Date(
-                            parseInt(item.aquisition_year),
-                            item.aquisition_month ? parseInt(item.aquisition_month) - 1 : 0,
-                            item.aquisition_day ? parseInt(item.aquisition_day) : 1,
-                          ).toLocaleDateString("en-GB", {
-                            year: "numeric",
-                            ...(item.aquisition_month && { month: "numeric" }),
-                            ...(item.aquisition_day && { day: "numeric" }),
-                          })}
-                        </span>
+                          className="h-36 w-48 scale-150 rounded-t-lg object-cover"
+                          loading="lazy"
+                          alt={`Dataset ${item.id}`}
+                        />
                       </div>
-                      <div className="flex items-center justify-between">
-                        <Tooltip title={item.authors}>
-                          <span className="max-w-[70%] truncate text-sm text-gray-600">
-                            {item.authors && item.authors.slice(0, 18) + (item.authors.length > 18 ? "..." : "")}
+                      <div className="p-4">
+                        <div className="mb-2 flex items-baseline justify-between">
+                          <Tooltip
+                            title={
+                              item.admin_level_1
+                                ? `${item.admin_level_3 || item.admin_level_2 || ""}${item.admin_level_1 ? `, ${item.admin_level_1}` : ""}`
+                                : ""
+                            }
+                          >
+                            <span className="max-w-[70%] truncate font-semibold">
+                              {getDatasetLocationLabel(item)}
+                            </span>
+                          </Tooltip>
+                          <span className="text-xs text-gray-500">
+                            {getDatasetDateLabel(item)}
                           </span>
-                        </Tooltip>
-                        <Tag>{item.platform}</Tag>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <Tooltip title={item.authors?.join(", ")}>
+                            <span className="max-w-[70%] truncate text-sm text-gray-600">
+                              {item.authors?.join(", ")}
+                            </span>
+                          </Tooltip>
+                          <Tag>{item.platform}</Tag>
+                        </div>
                       </div>
-                    </div>
+                    </button>
                   </div>
-                </div>
-              ))}
-            </Carousel>
+                ))}
+              </Carousel>
+            )}
           </div>
-          <Stats datasets={viewableData} />
+          <Stats stats={stats} />
         </div>
         {!hideHeader && (
           <div className="flex justify-center pt-8">
