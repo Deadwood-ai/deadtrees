@@ -104,8 +104,12 @@ vite_is_running() {
 start_vite() {
 	mkdir -p "$STATE_DIR"
 	if vite_is_running; then
-		echo "Vite already running with PID $(cat "$VITE_PID_FILE")"
-		return
+		if check_url "Frontend" "${PLAYWRIGHT_BASE_URL}/" >/dev/null 2>&1; then
+			echo "Vite already running with PID $(cat "$VITE_PID_FILE")"
+			return
+		fi
+		echo "Recorded Vite process is not serving ${PLAYWRIGHT_BASE_URL}; restarting Vite"
+		stop_vite
 	fi
 
 	if command -v tmux >/dev/null 2>&1; then
@@ -113,7 +117,7 @@ start_vite() {
 		session="$(vite_session_name)"
 		: >"$VITE_LOG_FILE"
 		tmux new-session -d -s "$session" -c "$REPO_ROOT" \
-			"bash frontend/scripts/run-vite-profile.sh local --host 127.0.0.1 >> '$VITE_LOG_FILE' 2>&1"
+			"set -a; source '$DEADTREES_ISOLATED_ENV_FILE'; set +a; bash frontend/scripts/run-vite-profile.sh local --host 127.0.0.1 >> '$VITE_LOG_FILE' 2>&1"
 		tmux display-message -p -t "$session" '#{pane_pid}' >"$VITE_PID_FILE"
 		echo "Started Vite in tmux session $session with pane PID $(cat "$VITE_PID_FILE"); log: $VITE_LOG_FILE"
 		return
@@ -205,6 +209,10 @@ render() {
 up() {
 	source_isolated_env
 	write_summary
+	if [[ ! -x "$REPO_ROOT/venv/bin/deadtrees" ]]; then
+		echo "Missing $REPO_ROOT/venv/bin/deadtrees. Run: bash scripts/setup-worktree.sh --skip-assets" >&2
+		return 1
+	fi
 	"$REPO_ROOT/scripts/dev/isolated-supabase.sh" start
 	"$REPO_ROOT/scripts/qa/prepare-fixtures.sh" qa-full
 	"$REPO_ROOT/venv/bin/deadtrees" dev start --services=api-test,nginx,mailpit

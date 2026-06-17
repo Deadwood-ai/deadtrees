@@ -68,7 +68,7 @@ playbook_category: dict[str, str] = {playbook_id: "uncategorized" for playbook_i
 worker_summaries = []
 for result_path in sorted(run_dir.glob("worker-*.result.md")):
     text = result_path.read_text(encoding="utf-8")
-    status_match = re.search(r"^Status:\s*([A-Za-z-]+)", text, re.MULTILINE)
+    status_match = re.search(r"^(?:[-*]\s*)?Status:\s*([A-Za-z-]+)", text, re.MULTILINE | re.IGNORECASE)
     worker_status = status_match.group(1).lower() if status_match else "pending"
     if worker_status not in allowed_statuses:
         worker_status = "pending"
@@ -85,7 +85,7 @@ for result_path in sorted(run_dir.glob("worker-*.result.md")):
         ]
         match = next((found for pattern in patterns if (found := re.search(pattern, text))), None)
         heading_status_match = (
-            re.search(r"(?im)^status:\s*`?(pass|fail|blocked|needs-human-review|pending)`?\s*$", heading.group(0))
+            re.search(r"(?im)^(?:[-*]\s*)?status:\s*`?(pass|fail|blocked|needs-human-review|pending)`?\s*$", heading.group(0))
             if heading
             else None
         )
@@ -96,7 +96,7 @@ for result_path in sorted(run_dir.glob("worker-*.result.md")):
 
             if heading:
                 category_match = re.search(
-                    r"(?im)^category:\s*`?([a-z-]+|none)`?\s*$",
+                    r"(?im)^(?:[-*]\s*)?category:\s*`?([a-z-]+|none)`?\s*$",
                     heading.group(0),
                 )
                 if category_match:

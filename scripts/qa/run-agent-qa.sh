@@ -310,6 +310,11 @@ for idx, playbook in enumerate(playbooks):
     for lock in locks:
         lock_owners[lock] = worker
 
+workers = [worker for worker in workers if worker["playbooks"]]
+for idx, worker in enumerate(workers, start=1):
+    worker["id"] = f"worker-{idx:02d}"
+worker_count = len(workers)
+
 generated_at = datetime.now(timezone.utc).isoformat()
 frontend_url = os.environ.get("PLAYWRIGHT_BASE_URL") or f"http://127.0.0.1:{os.environ.get('PLAYWRIGHT_PORT', '5173')}"
 api_url = os.environ.get("VITE_LOCAL_API_URL", "http://localhost:8080/api/v1")
@@ -388,6 +393,9 @@ You are a QA subagent executing DeadTrees local agent QA playbooks.
 
 - Use the built-in Browser for ordinary route/locator checks unless a playbook explicitly says otherwise.
 - Use Browser Use CLI for per-worker session isolation or file-upload flows when available.
+- To make Browser Use visible for a human observer, run it in headed mode with either `--headed` or `BROWSER_USE_HEADED=1`.
+- Example headed Browser Use probe: `scripts/qa/browser-use-cli-probe.sh {worker_dir.relative_to(repo_root)}/browser-use-probe --exercise-upload --headed`.
+- Example headed worker session: `uvx --from browser-use browser-use --headed --session {worker['id']} open {frontend_url}`.
 - Use `scripts/qa/playwright-upload-probe.sh` as the deterministic upload fallback.
 - Keep browser/auth state isolated from other workers when the selected tool supports it.
 - Keep output compact and evidence-based.
