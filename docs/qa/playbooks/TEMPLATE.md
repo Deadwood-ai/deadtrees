@@ -8,6 +8,7 @@ fixture_packs:
 browser: browser
 parallel_safe: true
 mutation_level: read-only
+resource_locks: []
 routes:
   - /
 ```

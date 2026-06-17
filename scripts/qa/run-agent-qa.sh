@@ -226,16 +226,20 @@ for path in sorted(playbook_dir.glob("*.md")):
             "browser": metadata["browser"],
             "parallel_safe": metadata["parallel_safe"],
             "mutation_level": metadata["mutation_level"],
+            "resource_locks": metadata.get("resource_locks", []),
             "routes": metadata["routes"],
             "path": str(path.relative_to(repo_root)),
         }
     )
 
 def resource_locks_for(playbook: dict[str, object]) -> list[str]:
-    if playbook["mutation_level"] == "read-only":
-        return []
+    locks: set[str] = set(str(lock) for lock in playbook.get("resource_locks", []))
+    if not playbook["parallel_safe"]:
+        locks.add("serial:non-parallel")
 
-    locks: set[str] = set()
+    if playbook["mutation_level"] == "read-only":
+        return sorted(locks)
+
     for route in playbook["routes"]:
         for dataset_id in re.findall(r"\b(9[1-9][0-9]{3})\b", str(route)):
             locks.add(f"dataset:{dataset_id}")

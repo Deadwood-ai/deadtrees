@@ -138,6 +138,12 @@ def test_priwa_member_can_create_update_and_soft_delete_kaeferbaum(priwa_project
 		client.table('priwa_kaeferbaeume').update(
 			{'deleted_at': datetime.now(timezone.utc).isoformat()}
 		).eq('id', created['id']).execute()
+		member_records_after_soft_delete = (
+			client.table('priwa_kaeferbaeume')
+			.select('deleted_at,deleted_by,fund')
+			.eq('id', created['id'])
+			.execute()
+		)
 		blocked_update = (
 			client.table('priwa_kaeferbaeume')
 			.update({'fund': 'should-not-change'})
@@ -147,6 +153,8 @@ def test_priwa_member_can_create_update_and_soft_delete_kaeferbaum(priwa_project
 
 	assert delete_attempt.data == []
 	assert len(after_delete_attempt.data) == 1
+	assert len(member_records_after_soft_delete.data) == 1
+	assert member_records_after_soft_delete.data[0]['deleted_at'] is not None
 	assert blocked_update.data == []
 
 	with use_service_client() as client:

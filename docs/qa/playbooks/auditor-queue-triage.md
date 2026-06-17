@@ -8,6 +8,9 @@ fixture_packs:
 browser: browser
 parallel_safe: false
 mutation_level: local-write
+resource_locks:
+  - dataset:91001
+  - flag:91001
 routes:
   - /dataset-audit
 ```

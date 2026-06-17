@@ -57,11 +57,11 @@ write_cog_fixture() {
 	local source="$1"
 	local target="$2"
 	require_source_file "$source"
-	if command -v gdal_translate >/dev/null 2>&1; then
-		gdal_translate -q -of COG "$source" "$target"
-	else
-		cp "$source" "$target"
+	if ! command -v gdal_translate >/dev/null 2>&1; then
+		echo "gdal_translate is required to generate QA COG fixtures." >&2
+		exit 1
 	fi
+	gdal_translate -q -of COG "$source" "$target"
 }
 
 copy_fixture_file "$SOURCE_GEOTIFF" "$DATA_ROOT/archive/qa-public-complete.tif"
