@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 ALLOW_FAIL=0
 if [[ "${1:-}" == "--allow-fail" ]]; then
 	ALLOW_FAIL=1
+fi
+
+ENV_FILE="${DEADTREES_ISOLATED_ENV_FILE:-$REPO_ROOT/.local/supabase/current.env}"
+if [[ -f "$ENV_FILE" ]]; then
+	set -a
+	# shellcheck disable=SC1090
+	source "$ENV_FILE"
+	set +a
 fi
 
 SUPABASE_URL="${SUPABASE_URL:-http://127.0.0.1:54321}"
