@@ -14,6 +14,9 @@ PERSONA_FILTER=""
 BROWSER_FILTER=""
 MUTATION_LEVEL_FILTER=""
 FIXTURE_PACKS=()
+AGENT_BROWSER_SURFACE="browser"
+AGENT_MODEL="gpt-5.5 low"
+FOCUS=""
 
 usage() {
 	cat >&2 <<'USAGE'
@@ -27,6 +30,10 @@ Options:
   --browser <name>       Restrict to playbooks with browser, chrome, or computer-use
   --mutation-level <lvl> Restrict to read-only or local-write
   --fixture-pack <name>  Restrict to playbooks requiring a fixture pack; may repeat
+  --agent-browser-surface <browser|chrome>
+                         Browser automation surface for generated worker prompts
+  --agent-model <text>   Agent/model hint to include in worker prompts, default gpt-5.5 low
+  --focus <text>         Additional feature-specific QA focus for workers
   --dry-run              Generate manifest/prompts without readiness or seed
   --no-seed              Skip fixture seeding for non-dry runs
   --run-dir <path>       Override output directory
@@ -64,6 +71,18 @@ while [[ $# -gt 0 ]]; do
 			FIXTURE_PACKS+=("${2:-}")
 			shift 2
 			;;
+		--agent-browser-surface)
+			AGENT_BROWSER_SURFACE="${2:-}"
+			shift 2
+			;;
+		--agent-model)
+			AGENT_MODEL="${2:-}"
+			shift 2
+			;;
+		--focus)
+			FOCUS="${2:-}"
+			shift 2
+			;;
 		--dry-run)
 			DRY_RUN=1
 			shift
@@ -96,6 +115,14 @@ if ! [[ "$PARALLEL" =~ ^[1-9][0-9]*$ ]]; then
 	echo "--parallel must be a positive integer." >&2
 	exit 1
 fi
+case "$AGENT_BROWSER_SURFACE" in
+	browser|chrome)
+		;;
+	*)
+		echo "--agent-browser-surface must be one of: browser, chrome" >&2
+		exit 1
+		;;
+esac
 
 ENV_FILE="${DEADTREES_ISOLATED_ENV_FILE:-$REPO_ROOT/.local/supabase/current.env}"
 if [[ -f "$ENV_FILE" ]]; then
@@ -158,7 +185,7 @@ if [[ "${#FIXTURE_PACKS[@]}" -gt 0 ]]; then
 	FIXTURE_PACK_CSV="$(IFS=,; echo "${FIXTURE_PACKS[*]}")"
 fi
 
-python3 - "$REPO_ROOT" "$RUN_DIR" "$PROFILE" "$PARALLEL" "$DRY_RUN" "$PLAYBOOK_CSV" "$ENV_FILE" "$PERSONA_FILTER" "$BROWSER_FILTER" "$MUTATION_LEVEL_FILTER" "$FIXTURE_PACK_CSV" <<'PY'
+python3 - "$REPO_ROOT" "$RUN_DIR" "$PROFILE" "$PARALLEL" "$DRY_RUN" "$PLAYBOOK_CSV" "$ENV_FILE" "$PERSONA_FILTER" "$BROWSER_FILTER" "$MUTATION_LEVEL_FILTER" "$FIXTURE_PACK_CSV" "$AGENT_BROWSER_SURFACE" "$AGENT_MODEL" "$FOCUS" <<'PY'
 import json
 import os
 import re
@@ -177,7 +204,37 @@ persona_filter = sys.argv[8].strip().lower()
 browser_filter = sys.argv[9].strip()
 mutation_level_filter = sys.argv[10].strip()
 fixture_pack_filters = [item for item in sys.argv[11].split(",") if item]
+agent_browser_surface = sys.argv[12].strip()
+agent_model = sys.argv[13].strip() or "gpt-5.5 low"
+focus = sys.argv[14].strip()
 playbook_dir = repo_root / "docs" / "qa" / "playbooks"
+
+
+def resolve_chrome_client_path() -> str:
+    configured = os.environ.get("CODEX_CHROME_CLIENT_PATH")
+    if configured:
+        path = Path(configured).expanduser()
+        if path.exists():
+            return str(path)
+        raise RuntimeError(f"CODEX_CHROME_CLIENT_PATH does not exist: {path}")
+
+    def version_key(path: Path) -> tuple[int, tuple[int, ...], str]:
+        name = path.parent.parent.name
+        if re.fullmatch(r"\d+(?:\.\d+)*", name):
+            return (1, tuple(int(part) for part in name.split(".")), name)
+        return (0, (), name)
+
+    codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
+    candidates = sorted(
+        codex_home.glob("plugins/cache/openai-bundled/chrome/*/scripts/browser-client.mjs"),
+        key=version_key,
+    )
+    for path in reversed(candidates):
+        if path.exists():
+            return str(path)
+    raise RuntimeError(
+        "Chrome client script not found. Install/enable the Chrome plugin or set CODEX_CHROME_CLIENT_PATH."
+    )
 
 
 def parse_metadata(path: Path) -> dict[str, object]:
@@ -288,6 +345,8 @@ if fixture_pack_filters:
 if not playbooks:
     raise SystemExit("No playbooks matched the requested filters.")
 
+chrome_client_path = resolve_chrome_client_path() if agent_browser_surface == "chrome" else ""
+
 worker_count = min(parallel, len(playbooks)) if playbooks else 1
 workers = [
     {"id": f"worker-{idx:02d}", "playbooks": [], "resource_locks": []}
@@ -373,6 +432,9 @@ manifest = {
         "mutation_level": mutation_level_filter or None,
         "fixture_packs": fixture_pack_filters,
     },
+    "agent_browser_surface": agent_browser_surface,
+    "agent_model": agent_model,
+    "focus": focus or None,
     "worker_count": worker_count,
     "playbook_count": len(playbooks),
     "workers": workers,
@@ -389,7 +451,139 @@ for worker in workers:
         for item in worker["playbooks"]
     )
     worker_lock_lines = "\n".join(f"- `{lock}`" for lock in worker["resource_locks"]) or "- none"
-    prompt = f"""# {worker['id']} DeadTrees Local QA Prompt
+    focus_block = (
+        f"""
+## Feature-Specific Focus
+
+In addition to the standard assigned playbooks, explicitly test this current
+feature/change when it is visible in the app:
+
+{focus}
+
+If the focus is too vague to verify directly, record `needs-human-review` with
+the missing signal instead of inventing extra checks.
+"""
+        if focus
+        else ""
+    )
+    common_result_contract = f"""## Result Contract
+
+Write your result summary to `{result_path.relative_to(repo_root)}` with:
+
+- `Status: pass|fail|blocked|needs-human-review`
+- one section per playbook using heading `## <playbook-id>`
+- `Status: ...`
+- `Category: none|qa-platform-gap|fixture-gap|product-bug|tooling-limitation|needs-design-decision`
+- exact evidence: URL, locator/test-id state, auth identity, console errors summary, and artifact paths
+- concise findings
+- follow-up issue suggestions
+"""
+
+    if agent_browser_surface == "chrome":
+        prompt = f"""# {worker['id']} DeadTrees Chrome QA Prompt
+
+You are a QA subagent executing DeadTrees local agent QA playbooks.
+
+Recommended agent: {agent_model}. Follow the script mechanically. Do not
+improvise browser tooling.
+
+## Environment
+
+- Frontend: {frontend_url}
+- API: {api_url}
+- Supabase: {supabase_url}
+- Mailpit: {mailpit_url}
+- Local data root: {os.environ.get("LOCAL_DATA_ROOT") or "not configured"}
+- Fixture profile: {profile}
+- Artifact directory: `{worker_dir.relative_to(repo_root)}`
+
+## Assigned Playbooks
+
+{playbook_lines}
+
+## Worker Data Locks
+
+{worker_lock_lines}
+{focus_block}
+## Chrome-Only Browser Rules
+
+- Use the Chrome plugin / `chrome:control-chrome` surface only.
+- Do not use terminal Playwright, standalone Chromium, the in-app Browser, or web search.
+- Do not use Computer Use unless Chrome attach reports Chrome is unavailable; if used, use it only to foreground/open Chrome, then retry Chrome plugin and report it.
+- If Chrome plugin attachment cannot be proven, mark the worker `blocked`.
+- Do not run setup, restart services, reseed, or mutate production.
+- Do not submit upload forms unless the assigned playbook explicitly requires a local write and the step is part of the current approved QA run.
+- Treat any production API/Supabase/storage request as a failure signal. Public static/media URLs to `data2.deadtrees.earth` should be reported explicitly.
+
+## Required Chrome Bootstrap
+
+Run this through the Node REPL `js` tool. If a `const` name is already declared,
+use `var` or fresh names rather than resetting blindly.
+
+```js
+const {{ setupBrowserRuntime }} = await import("{chrome_client_path}");
+await setupBrowserRuntime({{ globals: globalThis }});
+globalThis.browser = await agent.browsers.get("extension");
+```
+
+Prove Chrome attachment before QA:
+
+- `browser.user.openTabs()` returns a count, or
+- `browser.tabs.new()` creates a tab and `tab.url()` after navigation is the expected local URL.
+
+## Login And Identity Rules
+
+- Contributor: `qa-contributor-local@example.com` / `DeadTreesQA-Local-1!`
+- Auditor: `qa-auditor-local@example.com` / `DeadTreesQA-Local-1!`
+- PRIWA field user: use the contributor account; it has the seeded
+  `qa-priwa-project` membership.
+- After every login or account switch, verify the visible account identity before checking role-specific pages.
+- Use scoped submit selectors, for example `form button[type="submit"]`, when sign-in buttons are ambiguous.
+- If identity cannot be proven, mark the affected playbook `blocked`.
+
+## Upload Mechanism
+
+For Chrome upload checks, use the file chooser path. Do not use
+`locator.setInputFiles` and do not click the hidden file input directly.
+The generic browser API reference may only list `waitForEvent("download")`,
+but the Chrome file-management documentation supports the `filechooser` event;
+do not classify upload as unsupported solely from the generic API reference.
+
+```js
+const chooserPromise = tab.playwright.waitForEvent("filechooser");
+await tab.playwright.locator(".ant-upload.ant-upload-btn").click();
+const chooser = await chooserPromise;
+await chooser.setFiles([
+  "{repo_root}/frontend/test/fixtures/geotiff/upload-validation/rgb-real-crop.tif",
+]);
+```
+
+Required upload evidence:
+
+- `filechooser opened=true`
+- `setFiles=ok`
+- `rgb-real-crop.tif visible=true`
+- `form submitted=false` unless explicitly approved for the playbook
+
+## Multi-Tab Rule
+
+Chrome same-profile multi-tab checks are allowed for read-only checks. Keep
+local-write playbooks serial unless their resource locks are disjoint and the
+playbook explicitly allows it.
+
+## Evidence Discipline
+
+- Keep output compact and evidence-based.
+- Do not paste full DOM snapshots, full body text, large logs, or screenshots.
+- Store screenshots and raw artifacts under your artifact directory only when needed.
+- Capture focused evidence: current URL, relevant locator state, auth identity, console errors only, network target summary, and one screenshot only for visual failure.
+- For each playbook, report `pass`, `fail`, `blocked`, or `needs-human-review`.
+- For each non-pass finding, include one category: `qa-platform-gap`, `fixture-gap`, `product-bug`, `tooling-limitation`, or `needs-design-decision`.
+
+{common_result_contract}
+"""
+    else:
+        prompt = f"""# {worker['id']} DeadTrees Local QA Prompt
 
 You are a QA subagent executing DeadTrees local agent QA playbooks.
 
@@ -410,6 +604,7 @@ You are a QA subagent executing DeadTrees local agent QA playbooks.
 ## Worker Data Locks
 
 {worker_lock_lines}
+{focus_block}
 
 ## Rules
 
@@ -428,16 +623,7 @@ You are a QA subagent executing DeadTrees local agent QA playbooks.
 - For each playbook, report `pass`, `fail`, `blocked`, or `needs-human-review`.
 - For each non-pass finding, include one category: `qa-platform-gap`, `fixture-gap`, `product-bug`, `tooling-limitation`, or `needs-design-decision`.
 
-## Result Contract
-
-Write your result summary to `{result_path.relative_to(repo_root)}` with:
-
-- playbook id
-- status
-- category, or `none` for pass
-- evidence paths
-- concise findings
-- follow-up issue suggestions
+{common_result_contract}
 """
     prompt_path.write_text(prompt, encoding="utf-8")
     result_path.write_text(
