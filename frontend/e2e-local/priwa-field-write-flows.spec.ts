@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { expect, test, type Page } from "@playwright/test";
 
-const localSupabaseUrl = "http://127.0.0.1:54321";
+const localSupabaseUrl =
+  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "http://127.0.0.1:54321";
 
 const uniqueRunId = `${Date.now()}-${randomUUID()}`;
 const fieldUserEmail = `priwa-write-${uniqueRunId}@example.com`;

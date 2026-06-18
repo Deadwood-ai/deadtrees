@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 from supabase import create_client
 from shared.settings import settings
-from shared.db import login, use_client
+from shared.db import login, use_client, use_service_client
 import shutil
 from .safety import test_environment_only
 
@@ -121,10 +121,11 @@ def cleanup_database(request):
 
 	yield
 
-	processor_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD, use_cached_session=False)
-
-	with use_client(processor_token) as client:
-		# With CASCADE delete, cleaning parent tables automatically cleans child tables
+	with use_service_client() as client:
+		client.table('jt_data_publication_datasets').delete().neq('dataset_id', 0).execute()
+		client.table('jt_data_publication_user_info').delete().neq('publication_id', 0).execute()
+		client.table('data_publication').delete().neq('id', 0).execute()
+		client.table('user_info').delete().neq('id', 0).execute()
 		client.table(settings.datasets_table).delete().neq('id', 0).execute()
 		client.table(settings.logs_table).delete().neq('id', 1).execute()
 

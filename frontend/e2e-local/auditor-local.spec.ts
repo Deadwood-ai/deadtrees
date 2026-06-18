@@ -10,7 +10,8 @@ const rgbGeoTiffFixture = path.resolve(
   "../test/fixtures/geotiff/upload-validation/rgb-real-crop.tif",
 );
 
-const localSupabaseUrl = "http://127.0.0.1:54321";
+const localSupabaseUrl =
+  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "http://127.0.0.1:54321";
 const auditor = {
   id: "00000000-0000-4000-8000-0000000000a1",
   email: "auditor-local-e2e@example.com",

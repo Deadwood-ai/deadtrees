@@ -13,14 +13,18 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../..");
+const localDataRoot = process.env.LOCAL_DATA_ROOT || path.join(repoRoot, "data");
 const rgbGeoTiffFixture = path.resolve(
   __dirname,
   "../test/fixtures/geotiff/upload-validation/rgb-real-crop.tif",
 );
 
-const localSupabaseUrl = "http://127.0.0.1:54321";
-const localApiUrl = "http://localhost:8080/api/v1";
-const localMailpitUrl = "http://127.0.0.1:54324";
+const localSupabaseUrl =
+  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "http://127.0.0.1:54321";
+const localApiUrl = process.env.VITE_LOCAL_API_URL || "http://localhost:8080/api/v1";
+const localMailpitUrl = process.env.LOCAL_MAILPIT_HTTP_PORT
+  ? `http://127.0.0.1:${process.env.LOCAL_MAILPIT_HTTP_PORT}`
+  : "http://127.0.0.1:54324";
 
 type MailpitMessageSummary = {
   ID: string;
@@ -216,8 +220,7 @@ test.describe("contributor local write flows", () => {
     );
 
     const downloadFile = path.join(
-      repoRoot,
-      "data",
+      localDataRoot,
       "downloads",
       String(datasetId),
       `${datasetId}.zip`,
@@ -414,8 +417,7 @@ async function expectDatasetSideEffects(datasetId: number) {
   expect(orthoRows).toEqual([]);
 
   const archiveFile = path.join(
-    repoRoot,
-    "data",
+    localDataRoot,
     "archive",
     `${datasetId}_ortho.tif`,
   );
@@ -463,8 +465,7 @@ async function expectDatasetSideEffects(datasetId: number) {
 
 async function markUploadedDatasetDownloadable(datasetId: number) {
   const archiveFile = path.join(
-    repoRoot,
-    "data",
+    localDataRoot,
     "archive",
     `${datasetId}_ortho.tif`,
   );
@@ -561,12 +562,12 @@ async function cleanupDatasets(client: SupabaseClient, datasetIds: number[]) {
     await client.from("v2_datasets").delete().eq("id", datasetId);
 
     fs.rmSync(
-      path.join(repoRoot, "data", "archive", `${datasetId}_ortho.tif`),
+      path.join(localDataRoot, "archive", `${datasetId}_ortho.tif`),
       {
         force: true,
       },
     );
-    fs.rmSync(path.join(repoRoot, "data", "downloads", String(datasetId)), {
+    fs.rmSync(path.join(localDataRoot, "downloads", String(datasetId)), {
       force: true,
       recursive: true,
     });

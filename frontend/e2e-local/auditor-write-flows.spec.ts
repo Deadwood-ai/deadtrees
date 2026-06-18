@@ -8,13 +8,15 @@ import { expect, test, type Page } from "@playwright/test";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../..");
+const localDataRoot = process.env.LOCAL_DATA_ROOT || path.join(repoRoot, "data");
 const rgbGeoTiffFixture = path.resolve(
   __dirname,
   "../test/fixtures/geotiff/upload-validation/rgb-real-crop.tif",
 );
 
-const localSupabaseUrl = "http://127.0.0.1:54321";
-const localApiUrl = "http://localhost:8080/api/v1";
+const localSupabaseUrl =
+  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "http://127.0.0.1:54321";
+const localApiUrl = process.env.VITE_LOCAL_API_URL || "http://localhost:8080/api/v1";
 
 const uniqueRunId = randomUUID().replaceAll("-", "").slice(0, 12);
 const auditorEmail = `auditor-write-${uniqueRunId}@example.com`;
@@ -71,7 +73,7 @@ test.describe("auditor local write flows", () => {
       await deleteAuthUsersByEmail(adminClient, auditorEmail);
       await deleteAuthUsersByEmail(adminClient, reporterEmail);
     }
-    fs.rmSync(path.join(repoRoot, "data", "cogs", cogPath), { force: true });
+    fs.rmSync(path.join(localDataRoot, "cogs", cogPath), { force: true });
   });
 
   test("auditor acknowledges a user flag, draws AOI, and persists audit side effects", async ({
@@ -277,7 +279,7 @@ async function createAuditableDataset() {
   });
   expect(statusError).toBeNull();
 
-  const localCogFile = path.join(repoRoot, "data", "cogs", cogPath);
+  const localCogFile = path.join(localDataRoot, "cogs", cogPath);
   fs.mkdirSync(path.dirname(localCogFile), { recursive: true });
   fs.copyFileSync(rgbGeoTiffFixture, localCogFile);
 
