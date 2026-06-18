@@ -196,7 +196,6 @@ class Status(BaseModel):
 	is_combined_model_done: bool = False
 	is_metadata_done: bool = False
 	is_odm_done: bool = False
-	is_audited: bool = False
 	has_error: bool = False
 	error_message: Optional[str] = None
 	created_at: Optional[datetime] = None
