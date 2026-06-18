@@ -12,7 +12,7 @@ import { useState, useCallback, Suspense, lazy, useEffect } from "react";
 import { usePublicDatasetById } from "../hooks/useDatasets";
 import { useDatasetLabels } from "../hooks/useDatasetLabels";
 import { useModelVariantLabels } from "../hooks/useModelVariantLabels";
-import { ILabelData } from "../types/labels";
+import { ILabelData, ILabelSource } from "../types/labels";
 import { useDownload } from "../hooks/useDownloadProvider";
 import { useOverlappingDatasets } from "../hooks/useOverlappingDatasets";
 import { useDatasetDetailsMap } from "../hooks/useDatasetDetailsMapProvider";
@@ -167,10 +167,8 @@ export default function DatasetDetails() {
   );
 
   useEffect(() => {
-    if (dataset?.data_access === "viewonly" && !labelsOnly) {
-      setLabelsOnly(true);
-    }
-  }, [dataset?.data_access, labelsOnly, setLabelsOnly]);
+    setLabelsOnly(false);
+  }, [dataset?.id]);
 
   useEffect(() => {
     setSelectedDeadwoodLabelId(null);
@@ -230,6 +228,11 @@ export default function DatasetDetails() {
   } = editing;
   const hasDisplayableForestCover =
     hasForestCover && hasForestCoverPredictionOutput(dataset);
+  const hasExportableLabels = [preferredDeadwoodLabel, preferredForestLabel].some(
+    (label) =>
+      label?.label_source === ILabelSource.MODEL_PREDICTION ||
+      label?.label_source === ILabelSource.VISUAL_INTERPRETATION,
+  );
   const SIDEBAR_LEFT_PX = 16;
   const SIDEBAR_WIDTH_PX = 384;
   const SIDEBAR_BUTTON_TOP_PX = 112;
@@ -261,7 +264,7 @@ export default function DatasetDetails() {
         dataset={dataset}
         labelsOnly={labelsOnly}
         setLabelsOnly={setLabelsOnly}
-        hasLabels={!!preferredDeadwoodLabel || !!preferredForestLabel}
+        hasExportableLabels={hasExportableLabels}
         isDownloading={isDownloading}
         currentDownloadId={currentDownloadId}
         startDownload={startDownload}
