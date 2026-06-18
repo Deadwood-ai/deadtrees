@@ -9,7 +9,7 @@ SOURCE_THUMBNAIL="$REPO_ROOT/frontend/public/assets/custom_marker.png"
 
 usage() {
 	cat >&2 <<'USAGE'
-Usage: scripts/qa/prepare-fixtures.sh [qa-base|qa-full]
+Usage: scripts/qa/prepare-fixtures.sh [qa-base|qa-full|qa-realistic]
 
 Creates deterministic local-only QA files under ignored data/ directories.
 USAGE
@@ -17,7 +17,7 @@ USAGE
 
 PROFILE="${1:-qa-full}"
 case "$PROFILE" in
-	qa-base|qa-full)
+	qa-base|qa-full|qa-realistic)
 		;;
 	-h|--help)
 		usage
@@ -72,5 +72,24 @@ write_cog_fixture "$SOURCE_GEOTIFF" "$DATA_ROOT/cogs/qa/cogs/qa-public-complete-
 write_cog_fixture "$SOURCE_GEOTIFF" "$DATA_ROOT/cogs/qa/cogs/qa-public-audited-cog.tif"
 copy_fixture_file "$SOURCE_THUMBNAIL" "$DATA_ROOT/thumbnails/qa/thumbnails/qa-public-complete.png"
 copy_fixture_file "$SOURCE_THUMBNAIL" "$DATA_ROOT/thumbnails/qa/thumbnails/qa-public-audited.png"
+
+require_matching_file() {
+	local directory="$1"
+	local pattern="$2"
+	local description="$3"
+	local minimum_count="$4"
+	local match_count
+	match_count="$(find "$directory" -type f -name "$pattern" -size +0c 2>/dev/null | wc -l | tr -d '[:space:]')"
+	if (( match_count < minimum_count )); then
+		echo "Missing realistic QA $description under $directory; found $match_count, expected at least $minimum_count" >&2
+		echo "Run: scripts/qa/pull-realistic-fixtures.py" >&2
+		exit 1
+	fi
+}
+
+if [[ "$PROFILE" == "qa-realistic" ]]; then
+	require_matching_file "$DATA_ROOT/cogs/realistic/cogs" 'qa-realistic-*-cog.tif' "COG assets" 4
+	require_matching_file "$DATA_ROOT/thumbnails/realistic/thumbnails" 'qa-realistic-*-thumbnail.jpg' "thumbnails" 4
+fi
 
 echo "Prepared local QA fixture files under $DATA_ROOT"

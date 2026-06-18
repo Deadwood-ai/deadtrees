@@ -11,6 +11,19 @@ scripts/qa/seed.sh qa-full
 
 The seed runner refuses non-local `SUPABASE_DB_URL` values.
 
+For a production-derived local pack with real public COGs, thumbnails,
+geometries, corrections, flags, and one error-state dataset, first generate the
+ignored pack files:
+
+```bash
+scripts/qa/pull-realistic-fixtures.py
+scripts/qa/seed.sh qa-realistic
+```
+
+`qa-realistic` applies `qa-base` first, then overlays sanitized rows in the
+920xx range. Production access is read-only. Generated SQL, manifest, COGs,
+thumbnails, and archive copies stay under `.local/`.
+
 ## Personas
 
 All seeded users use the local-only password:
@@ -24,6 +37,9 @@ DeadTreesQA-Local-1!
 | contributor | `qa-contributor-local@example.com` | `00000000-0000-4000-8000-00000000a001` | Owns seeded datasets and can upload private data |
 | auditor | `qa-auditor-local@example.com` | `00000000-0000-4000-8000-00000000a002` | Can audit and view private data |
 | viewer | `qa-viewer-local@example.com` | `00000000-0000-4000-8000-00000000a003` | Normal authenticated user without privileges |
+
+The contributor also has the seeded `qa-priwa-project` membership and is the
+default PRIWA field user for local QA playbooks.
 
 ## Dataset IDs
 
@@ -50,3 +66,12 @@ DeadTreesQA-Local-1!
 
 Future fixture packs should add narrower data for labels/corrections, PRIWA,
 publications, downloads, and negative/empty states.
+
+`qa-realistic` adds sanitized production-derived rows in the 920xx range:
+
+| Local ID | Source | Purpose |
+| --- | --- | --- |
+| `92001`+ | Public production samples | Real COG/thumbnail rendering, dense map layers, corrections, audit rows, flags, and processing-error coverage |
+
+The exact source mapping is written to `.local/qa-packs/realistic/manifest.json`
+when the pack is generated.
