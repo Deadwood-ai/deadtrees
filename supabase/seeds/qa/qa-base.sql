@@ -250,16 +250,15 @@ insert into public.v2_statuses (
 	is_forest_cover_done,
 	is_metadata_done,
 	is_combined_model_done,
-	is_audited,
 	has_error,
 	error_message,
 	is_in_audit
 )
 values
-	(91001, 'idle', true, true, true, true, true, true, true, true, false, false, null, false),
-	(91002, 'idle', true, true, true, true, true, true, true, true, true, false, null, false),
-	(91003, 'idle', true, true, true, true, false, false, true, false, false, false, null, false),
-	(91004, 'cog_processing', true, true, false, false, false, false, true, false, false, true, 'QA fixture processing error', false);
+	(91001, 'idle', true, true, true, true, true, true, true, true, false, null, false),
+	(91002, 'idle', true, true, true, true, true, true, true, true, false, null, false),
+	(91003, 'idle', true, true, true, true, false, false, true, false, false, null, false),
+	(91004, 'cog_processing', true, true, false, false, false, false, true, false, true, 'QA fixture processing error', false);
 
 insert into public.v2_orthos (
 	dataset_id,

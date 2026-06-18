@@ -106,7 +106,6 @@ def comprehensive_test_dataset(auth_token, small_test_file, test_processor_user)
 				'is_deadwood_done': False,
 				'is_forest_cover_done': False,
 				'is_metadata_done': False,
-				'is_audited': False,
 				'has_error': False,
 			}
 			client.table(settings.statuses_table).insert(status_data).execute()
@@ -234,7 +233,6 @@ def create_test_dataset(auth_token, test_file, test_processor_user):
 			'is_deadwood_done': False,
 			'is_forest_cover_done': False,
 			'is_metadata_done': False,
-			'is_audited': False,
 			'has_error': False,
 		}
 		client.table(settings.statuses_table).insert(status_data).execute()

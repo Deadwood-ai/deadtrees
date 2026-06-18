@@ -1,5 +1,5 @@
 import pytest
-from shared.db import use_client
+from shared.db import use_client, use_service_client
 from shared.settings import settings
 from shared.models import LicenseEnum, PlatformEnum, DatasetAccessEnum
 
@@ -9,6 +9,7 @@ def test_datasets_for_publication(auth_token, test_user):
 	"""Create multiple test datasets for publication testing"""
 	dataset_ids = []
 	publication_ids = []
+	audit_rows = []
 
 	try:
 		with use_client(auth_token) as client:
@@ -68,7 +69,6 @@ def test_datasets_for_publication(auth_token, test_user):
 						'is_deadwood_done': True,
 						'is_forest_cover_done': True,
 						'is_metadata_done': True,
-						'is_audited': True,
 						'has_error': False,
 						'error_message': None,
 					}
@@ -86,7 +86,6 @@ def test_datasets_for_publication(auth_token, test_user):
 							'is_deadwood_done': False,
 							'is_forest_cover_done': False,
 							'is_metadata_done': True,
-							'is_audited': False,
 							'has_error': True,
 							'error_message': 'Error during COG processing',
 						}
@@ -102,12 +101,31 @@ def test_datasets_for_publication(auth_token, test_user):
 							'is_deadwood_done': False,
 							'is_forest_cover_done': False,
 							'is_metadata_done': True,
-							'is_audited': False,
 							'has_error': False,
 							'error_message': None,
 						}
 
 				client.table(settings.statuses_table).insert(status_data).execute()
+				if i % 2 == 0:
+					audit_rows.append(
+						{
+							'dataset_id': dataset_id,
+							'is_georeferenced': True,
+							'has_valid_acquisition_date': True,
+							'has_valid_phenology': True,
+							'deadwood_quality': 'sentinel_ok',
+							'forest_cover_quality': 'great',
+							'aoi_done': True,
+							'has_cog_issue': False,
+							'has_thumbnail_issue': False,
+							'audited_by': test_user,
+							'has_major_issue': False,
+							'final_assessment': 'ready',
+						}
+					)
+
+			with use_service_client() as service_client:
+				service_client.table('dataset_audit').insert(audit_rows).execute()
 
 			yield dataset_ids
 
@@ -134,11 +152,13 @@ def test_datasets_for_publication(auth_token, test_user):
 					client.table('data_publication').delete().eq('id', pub_id).execute()
 
 				# 3. Delete datasets
-				for dataset_id in dataset_ids:
-					# Delete all related tables explicitly in proper order
-					client.table(settings.metadata_table).delete().eq('dataset_id', dataset_id).execute()
-					client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
-					client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
+				with use_service_client() as service_client:
+					for dataset_id in dataset_ids:
+						# Delete all related tables explicitly in proper order
+						service_client.table('dataset_audit').delete().eq('dataset_id', dataset_id).execute()
+						client.table(settings.metadata_table).delete().eq('dataset_id', dataset_id).execute()
+						client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
+						client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 
 				# 4. Clean up logs
 				client.table(settings.logs_table).delete().neq('id', 1).execute()

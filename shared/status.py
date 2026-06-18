@@ -21,7 +21,6 @@ def update_status(
 	is_combined_model_done: Optional[bool] = None,
 	is_metadata_done: Optional[bool] = None,
 	is_odm_done: Optional[bool] = None,
-	is_audited: Optional[bool] = None,
 	has_error: Optional[bool] = None,
 	error_message: Optional[str] = None,
 ) -> None:
@@ -41,7 +40,6 @@ def update_status(
 	    is_combined_model_done (bool, optional): Combined model completion status
 	    is_metadata_done (bool, optional): Metadata processing completion status
 	    is_odm_done (bool, optional): ODM processing completion status
-	    is_audited (bool, optional): Audit completion status
 	    has_error (bool, optional): Error status flag
 	    error_message (str, optional): Error message if any
 	"""
@@ -67,8 +65,6 @@ def update_status(
 			update_data['is_metadata_done'] = is_metadata_done
 		if is_odm_done is not None:
 			update_data['is_odm_done'] = is_odm_done
-		if is_audited is not None:
-			update_data['is_audited'] = is_audited
 		if has_error is not None:
 			update_data['has_error'] = has_error
 		if error_message is not None:
