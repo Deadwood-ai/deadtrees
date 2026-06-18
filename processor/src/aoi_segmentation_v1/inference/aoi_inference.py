@@ -335,9 +335,10 @@ class AOIInference:
 
 					with torch.no_grad():
 						if images.shape[0] < BATCH_SIZE:
-							pad = torch.zeros((BATCH_SIZE, 3, TILE_SIZE, TILE_SIZE), dtype=torch.float32)
+							pad = torch.zeros(
+								(BATCH_SIZE, 3, TILE_SIZE, TILE_SIZE), dtype=images.dtype, device=images.device
+							)
 							pad[: images.shape[0]] = images
-							pad = pad.to(self.device)
 							logits = self.model(pixel_values=pad).logits[: images.shape[0]]
 						else:
 							logits = self.model(pixel_values=images).logits

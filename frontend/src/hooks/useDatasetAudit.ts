@@ -198,8 +198,12 @@ export function useSaveDatasetAOI() {
 
   return useMutation({
     mutationFn: async (aoiData: AOIData) => {
+      const aoiValues = { ...aoiData };
+      delete aoiValues.id;
+      delete aoiValues.created_at;
+      delete aoiValues.updated_at;
       const dataToSave = {
-        ...aoiData,
+        ...aoiValues,
         user_id: user?.id,
         updated_at: new Date().toISOString(),
       };
@@ -207,25 +211,32 @@ export function useSaveDatasetAOI() {
       // Check if AOI already exists for this dataset
       const { data: existingAOI } = await supabase
         .from("v2_aois")
-        .select("id")
+        .select("id,user_id")
         .eq("dataset_id", aoiData.dataset_id)
+        .order("created_at", { ascending: false })
         .limit(1);
 
       let result;
-      if (existingAOI && existingAOI.length > 0) {
-        // Update existing AOI
+      const latestAOI = existingAOI?.[0];
+      if (latestAOI && latestAOI.user_id === user?.id) {
+        // Update the same AOI row the map displayed when the current user owns it.
         const { data, error } = await supabase
           .from("v2_aois")
           .update(dataToSave)
-          .eq("dataset_id", aoiData.dataset_id)
+          .eq("id", latestAOI.id)
           .select()
           .single();
 
         if (error) throw error;
         result = data;
       } else {
-        // Insert new AOI record
-        const { data, error } = await supabase.from("v2_aois").insert(dataToSave).select().single();
+        // Auto-generated AOIs are processor-owned. Auditors claim edits by
+        // inserting a fresh row, which makes reruns treat the edit as human work.
+        const { data, error } = await supabase
+          .from("v2_aois")
+          .insert({ ...dataToSave, notes: null })
+          .select()
+          .single();
 
         if (error) throw error;
         result = data;
