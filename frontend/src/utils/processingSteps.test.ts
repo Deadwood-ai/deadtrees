@@ -66,6 +66,24 @@ describe("processing step completion", () => {
     });
   });
 
+  it("keeps the AOI step visible while it is actively running after predictions", () => {
+    const dataset: DatasetProgress = {
+      ...completeCore,
+      current_status: "aoi_segmentation",
+      is_deadwood_done: false,
+      is_forest_cover_done: false,
+      is_combined_model_done: true,
+      is_aoi_done: false,
+    };
+
+    const progress = calculateProcessingProgress(dataset);
+
+    expect(isDatasetProcessingComplete(dataset)).toBe(false);
+    expect(progress.isComplete).toBe(false);
+    expect(progress.currentStepInfo.key).toBe("aoi");
+    expect(progress.totalSteps).toBe(6);
+  });
+
   it("does not complete predictions without a legacy or combined prediction signal", () => {
     const dataset: DatasetProgress = {
       ...completeCore,
