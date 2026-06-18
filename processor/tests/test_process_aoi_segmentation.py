@@ -10,7 +10,7 @@ from shared.models import TaskTypeEnum, QueueTask, AOI
 
 from processor.src.process_aoi_segmentation import process_aoi_segmentation
 from processor.src.aoi_segmentation_v1.predict_aoi import AUTO_AOI_NOTES
-from processor.src.aoi_segmentation_v1.inference.aoi_inference import cleanup_aoi_polygon
+from processor.src.aoi_segmentation_v1.inference.aoi_inference import cleanup_aoi_polygon, _clip_prediction_tile
 
 MODEL_PATH = str(Path(__file__).parent.parent.parent / 'assets' / 'models' / 'b1_50epoch_best_macro_f1.safetensors')
 
@@ -30,7 +30,13 @@ def aoi_task(test_dataset_for_processing, test_processor_user):
 
 
 @pytest.fixture(autouse=True)
-def cleanup_aois(auth_token, aoi_task):
+def cleanup_aois(request):
+	if request.node.get_closest_marker('unit') is not None:
+		yield
+		return
+
+	auth_token = request.getfixturevalue('auth_token')
+	aoi_task = request.getfixturevalue('aoi_task')
 	yield
 	with use_client(auth_token) as client:
 		client.table(settings.aois_table).delete().eq('dataset_id', aoi_task.dataset_id).execute()
@@ -52,6 +58,7 @@ def test_aoi_model_loads():
 	assert logits.shape[1] == 2  # binary: outside_aoi, inside_aoi
 
 
+@pytest.mark.unit
 def test_cleanup_aoi_polygon_returns_single_solid_polygon():
 	"""Cleanup merges parts, keeps the largest, and removes holes (metric CRS)."""
 	# Large square (100 m) with an interior hole.
@@ -72,8 +79,45 @@ def test_cleanup_aoi_polygon_returns_single_solid_polygon():
 	assert 6000 < result.area < 10000
 
 
+@pytest.mark.unit
 def test_cleanup_aoi_polygon_empty():
 	assert cleanup_aoi_polygon([]) == []
+
+
+@pytest.mark.unit
+def test_clip_prediction_tile_preserves_non_square_window_height():
+	out_window, row_slice, col_slice = _clip_prediction_tile(
+		{'col_off': 10, 'row_off': 20, 'width': 100, 'height': 40},
+		dataset_width=200,
+		dataset_height=200,
+		tile_height=512,
+		tile_width=512,
+	)
+
+	assert out_window.col_off == 10
+	assert out_window.row_off == 20
+	assert out_window.width == 100
+	assert out_window.height == 40
+	assert row_slice == slice(0, 512)
+	assert col_slice == slice(0, 512)
+
+
+@pytest.mark.unit
+def test_clip_prediction_tile_trims_dataset_edges_independently():
+	out_window, row_slice, col_slice = _clip_prediction_tile(
+		{'col_off': -5, 'row_off': 170, 'width': 100, 'height': 40},
+		dataset_width=80,
+		dataset_height=200,
+		tile_height=40,
+		tile_width=100,
+	)
+
+	assert out_window.col_off == 0
+	assert out_window.row_off == 170
+	assert out_window.width == 80
+	assert out_window.height == 30
+	assert row_slice == slice(0, 30)
+	assert col_slice == slice(5, 85)
 
 
 @pytest.mark.comprehensive

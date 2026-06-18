@@ -235,6 +235,30 @@ def cleanup_aoi_polygon(polygons: list[Polygon]) -> list[Polygon]:
 	return [geometry]
 
 
+def _clip_prediction_tile(cropped_window, dataset_width: int, dataset_height: int, tile_height: int, tile_width: int):
+	minx = int(cropped_window['col_off'])
+	maxx = minx + int(cropped_window['width'])
+	miny = int(cropped_window['row_off'])
+	maxy = miny + int(cropped_window['height'])
+
+	diff_minx = max(0, -minx)
+	minx = max(0, minx)
+	diff_miny = max(0, -miny)
+	miny = max(0, miny)
+	diff_maxx = max(0, maxx - dataset_width)
+	maxx = min(maxx, dataset_width)
+	diff_maxy = max(0, maxy - dataset_height)
+	maxy = min(maxy, dataset_height)
+
+	if maxx <= minx or maxy <= miny:
+		return None
+
+	row_stop = tile_height - diff_maxy if diff_maxy else tile_height
+	col_stop = tile_width - diff_maxx if diff_maxx else tile_width
+	out_window = RioWindow(col_off=minx, row_off=miny, width=maxx - minx, height=maxy - miny)
+	return out_window, slice(diff_miny, row_stop), slice(diff_minx, col_stop)
+
+
 class AOIInference:
 	"""Runs the SegFormer-B1 AOI model and returns the cleaned AOI polygon(s)
 	in the CRS of the input orthomosaic."""
@@ -332,30 +356,18 @@ class AOIInference:
 							width=TILE_SIZE - (2 * PADDING),
 						)
 
-						minx = int(cropped_windows['col_off'][i])
-						maxx = minx + int(cropped_windows['width'][i])
-						miny = int(cropped_windows['row_off'][i])
-						maxy = miny + int(cropped_windows['width'][i])
-
-						diff_minx = max(0, -minx)
-						minx = max(0, minx)
-						diff_miny = max(0, -miny)
-						miny = max(0, miny)
-						diff_maxx = max(0, maxx - dataset.width)
-						maxx = min(maxx, dataset.width)
-						diff_maxy = max(0, maxy - dataset.height)
-						maxy = min(maxy, dataset.height)
-
-						if maxx <= minx or maxy <= miny:
+						clipped = _clip_prediction_tile(
+							{key: cropped_windows[key][i] for key in ('col_off', 'row_off', 'width', 'height')},
+							dataset_width=dataset.width,
+							dataset_height=dataset.height,
+							tile_height=pred_tile.shape[1],
+							tile_width=pred_tile.shape[2],
+						)
+						if clipped is None:
 							continue
 
-						pred_tile = pred_tile[
-							:,
-							diff_miny : pred_tile.shape[1] - diff_maxy if diff_maxy else pred_tile.shape[1],
-							diff_minx : pred_tile.shape[2] - diff_maxx if diff_maxx else pred_tile.shape[2],
-						]
-
-						out_window = RioWindow(col_off=minx, row_off=miny, width=maxx - minx, height=maxy - miny)
+						out_window, row_slice, col_slice = clipped
+						pred_tile = pred_tile[:, row_slice, col_slice]
 						mask_arr = (pred_tile[0].numpy() == CLASS_INSIDE_AOI).astype(np.uint8)
 
 						nodata_tile = vrt_src.read_masks(1, window=out_window)

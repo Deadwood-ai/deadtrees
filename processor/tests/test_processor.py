@@ -146,6 +146,7 @@ def test_process_task_success_path_with_refresh(monkeypatch):
 	assert processing_updates == [task.id]
 	assert deleted_task_ids == [task.id]
 
+@pytest.mark.unit
 def test_pipeline_stage_map_is_stable_and_ordered():
 	"""
 	Locks down the pipeline stage ordering used for crash detection and reporting.
