@@ -12,6 +12,7 @@
 grant select on table public.v2_aois to anon, authenticated;
 grant insert, update, delete on table public.v2_aois to authenticated;
 grant all on table public.v2_aois to service_role;
+grant usage, select on sequence public.v2_aois_id_seq to authenticated, service_role;
 
 drop policy if exists "Allow public read access to AOIs" on public.v2_aois;
 create policy "Allow public read access to AOIs"
@@ -27,10 +28,17 @@ create policy "Allow public read access to AOIs"
           d.data_access <> 'private'::access
           or auth.uid() = d.user_id
           or can_view_all_private_data()
+          or ((auth.jwt() ->> 'email'::text) = 'processor@deadtrees.earth'::text)
         )
         and (
           d.archived = false
           or auth.uid() = d.user_id
+        )
+        and (
+          auth.uid() = d.user_id
+          or can_view_all_private_data()
+          or ((auth.jwt() ->> 'email'::text) = 'processor@deadtrees.earth'::text)
+          or not internal.is_dataset_excluded_from_public_surface(d.id)
         )
     )
   );

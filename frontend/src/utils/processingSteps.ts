@@ -55,6 +55,7 @@ export interface DatasetProgress {
   is_forest_cover_done?: boolean;
   is_combined_model_done?: boolean;
   is_aoi_done?: boolean;
+  is_aoi_required?: boolean;
   has_error?: boolean;
   current_status?: string;
   final_assessment?: "ready" | "fixable_issues" | "no_issues" | "exclude_completely" | null;
@@ -104,7 +105,8 @@ export function isDatasetProcessingComplete(dataset: DatasetProgress): boolean {
     dataset.is_ortho_done &&
     dataset.is_metadata_done &&
     dataset.is_cog_done &&
-    isPredictionProcessingComplete(dataset)
+    isPredictionProcessingComplete(dataset) &&
+    (!dataset.is_aoi_required || dataset.is_aoi_done)
   );
 }
 
@@ -123,6 +125,7 @@ export function calculateProcessingProgress(dataset: DatasetProgress): {
     dataset.is_combined_model_done ||
     dataset.current_status === COMBINED_MODEL_STATUS;
   const includeAoiStep =
+    dataset.is_aoi_required ||
     dataset.is_aoi_done ||
     dataset.current_status === AOI_STATUS;
   const useCombinedModelOnly =

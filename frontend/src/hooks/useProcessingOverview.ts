@@ -27,6 +27,7 @@ export interface ProcessingOverviewRow {
 	is_forest_cover_done: boolean | null;
 	is_combined_model_done: boolean | null;
 	is_aoi_done: boolean | null;
+	is_aoi_required: boolean | null;
 	last_20_logs: string | null;
 }
 

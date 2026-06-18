@@ -20,6 +20,7 @@ def update_status(
 	is_forest_cover_done: Optional[bool] = None,
 	is_combined_model_done: Optional[bool] = None,
 	is_aoi_done: Optional[bool] = None,
+	is_aoi_required: Optional[bool] = None,
 	is_metadata_done: Optional[bool] = None,
 	is_odm_done: Optional[bool] = None,
 	has_error: Optional[bool] = None,
@@ -40,6 +41,7 @@ def update_status(
 	    is_forest_cover_done (bool, optional): Forest cover completion status
 	    is_combined_model_done (bool, optional): Combined model completion status
 	    is_aoi_done (bool, optional): Automatic AOI segmentation completion status
+	    is_aoi_required (bool, optional): Whether automatic AOI completion is required for this dataset
 	    is_metadata_done (bool, optional): Metadata processing completion status
 	    is_odm_done (bool, optional): ODM processing completion status
 	    has_error (bool, optional): Error status flag
@@ -65,6 +67,8 @@ def update_status(
 			update_data['is_combined_model_done'] = is_combined_model_done
 		if is_aoi_done is not None:
 			update_data['is_aoi_done'] = is_aoi_done
+		if is_aoi_required is not None:
+			update_data['is_aoi_required'] = is_aoi_required
 		if is_metadata_done is not None:
 			update_data['is_metadata_done'] = is_metadata_done
 		if is_odm_done is not None:

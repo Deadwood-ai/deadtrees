@@ -60,7 +60,8 @@ with ds as (
         v2_statuses.has_ml_tiles,
         v2_statuses.ml_tiles_completed_at,
         v2_statuses.is_combined_model_done,
-        v2_statuses.is_aoi_done
+        v2_statuses.is_aoi_done,
+        v2_statuses.is_aoi_required
     from v2_statuses
 ), extra as (
     select
@@ -184,7 +185,8 @@ select
     coalesce(correction_stats.rejected_corrections_count, 0::bigint) as rejected_corrections_count,
     coalesce(correction_stats.total_corrections_count, 0::bigint) as total_corrections_count,
     status.is_combined_model_done,
-    status.is_aoi_done
+    status.is_aoi_done,
+    status.is_aoi_required
 from ds
 left join ortho on ortho.dataset_id = ds.id
 left join status on status.dataset_id = ds.id
@@ -262,7 +264,8 @@ select
     else false
   end as show_forest_cover_predictions,
   base.is_combined_model_done,
-  base.is_aoi_done
+  base.is_aoi_done,
+  base.is_aoi_required
 from v2_full_dataset_view base
 left join (
   select
@@ -362,7 +365,8 @@ select distinct on (d.id)
         ) recent_logs
     ) as last_20_logs,
     s.is_combined_model_done,
-    s.is_aoi_done
+    s.is_aoi_done,
+    s.is_aoi_required
 from v2_datasets d
 left join v2_statuses s on s.dataset_id = d.id
 left join auth.users au on au.id = d.user_id

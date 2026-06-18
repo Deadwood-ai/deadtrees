@@ -17,6 +17,8 @@ interface StatusPayloadData {
   is_deadwood_done: boolean;
   is_forest_cover_done: boolean;
   is_combined_model_done: boolean;
+  is_aoi_done: boolean;
+  is_aoi_required: boolean;
   has_error: boolean;
   error_message?: string;
 }

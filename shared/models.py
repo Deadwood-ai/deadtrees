@@ -208,6 +208,7 @@ class Status(BaseModel):
 	is_forest_cover_done: bool = False
 	is_combined_model_done: bool = False
 	is_aoi_done: bool = False
+	is_aoi_required: bool = False
 	is_metadata_done: bool = False
 	is_odm_done: bool = False
 	has_error: bool = False

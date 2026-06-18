@@ -91,6 +91,96 @@ def test_create_processing_task(test_dataset, auth_token):
 		assert 'cog' in response.data[0]['task_types']
 		assert 'thumbnail' in response.data[0]['task_types']
 
+		status_response = (
+			supabaseClient.table(settings.statuses_table)
+			.select('is_aoi_required')
+			.eq('dataset_id', test_dataset)
+			.execute()
+		)
+		assert status_response.data[0]['is_aoi_required'] is False
+
+
+def test_create_processing_task_marks_aoi_required(test_dataset, auth_token):
+	"""AOI applicability is persisted so completion logic only waits for AOI when requested."""
+	response = client.put(
+		f'/datasets/{test_dataset}/process',
+		json={'task_types': ['geotiff', 'cog', 'thumbnail', 'aoi_v1']},
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 200
+
+	with use_client(auth_token) as supabaseClient:
+		status_response = (
+			supabaseClient.table(settings.statuses_table)
+			.select('is_aoi_required')
+			.eq('dataset_id', test_dataset)
+			.execute()
+		)
+		assert status_response.data[0]['is_aoi_required'] is True
+
+
+def test_create_processing_task_preserves_existing_aoi_requirement(test_dataset, auth_token):
+	"""Partial reruns should not silently drop an outstanding AOI requirement."""
+	with use_service_client() as service_client:
+		service_client.table(settings.statuses_table).update({'is_aoi_required': True}).eq('dataset_id', test_dataset).execute()
+
+	response = client.put(
+		f'/datasets/{test_dataset}/process',
+		json={'task_types': ['metadata']},
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 200
+
+	with use_client(auth_token) as supabaseClient:
+		status_response = (
+			supabaseClient.table(settings.statuses_table)
+			.select('is_aoi_required')
+			.eq('dataset_id', test_dataset)
+			.execute()
+		)
+		assert status_response.data[0]['is_aoi_required'] is True
+
+
+def test_create_processing_task_tolerates_missing_status_row(auth_token, test_user):
+	"""Datasets without a status row should continue to enqueue non-AOI tasks."""
+	dataset_id = None
+	try:
+		with use_client(auth_token) as supabaseClient:
+			response = supabaseClient.table(settings.datasets_table).insert({
+				'file_name': 'missing-status-process.tif',
+				'user_id': test_user,
+				'license': LicenseEnum.cc_by,
+				'platform': PlatformEnum.drone,
+				'authors': ['Test Author'],
+				'data_access': DatasetAccessEnum.public,
+				'aquisition_year': 2024,
+			}).execute()
+			dataset_id = response.data[0]['id']
+
+		response = client.put(
+			f'/datasets/{dataset_id}/process',
+			json={'task_types': ['metadata']},
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+
+		assert response.status_code == 200
+
+		with use_client(auth_token) as supabaseClient:
+			status_response = (
+				supabaseClient.table(settings.statuses_table)
+				.select('id')
+				.eq('dataset_id', dataset_id)
+				.execute()
+			)
+			assert status_response.data == []
+	finally:
+		if dataset_id:
+			with use_client(auth_token) as supabaseClient:
+				supabaseClient.table(settings.queue_table).delete().eq('dataset_id', dataset_id).execute()
+				supabaseClient.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
+
 
 def test_create_processing_task_rejects_downstream_without_geotiff(test_dataset, auth_token):
 	"""Downstream raster/model stages require geotiff in the same transient processing job."""

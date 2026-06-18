@@ -51,6 +51,7 @@ def process_aoi_segmentation(task: QueueTask, token: str, temp_dir: Path):
 		dataset_id=ortho.dataset_id,
 		current_status=StatusEnum.aoi_segmentation,
 		is_aoi_done=False,
+		is_aoi_required=True,
 	)
 	logger.info(
 		'Starting AOI segmentation',
