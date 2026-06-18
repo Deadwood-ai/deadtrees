@@ -59,6 +59,8 @@ scripts/qa/validate-isolated-env.sh
 
 ## Git And PRs
 
+- Before creating a worktree/branch for implementation, QA, or broad tests,
+  fetch `origin` and base it on current `origin/main` unless told otherwise.
 - Do not create draft PRs for this workspace. Open normal PRs when asked.
 - PR titles must pass `.github/workflows/pr-title-check.yml`.
 - Use Conventional Commit format: `type(scope): short summary`.

@@ -106,6 +106,14 @@ This keeps new Codex worktrees usable without committing secrets. If a copied
 local file is stale, update the primary checkout's local-only file rather than
 adding secrets to tracked docs.
 
+Start implementation, QA, and broad test work from current `origin/main` unless
+the user names another base:
+
+```bash
+git fetch origin main --prune
+git worktree add <path> -b <branch-name> origin/main
+```
+
 ### Isolated Dev/Test Stack
 
 Use the lightweight setup only when the task does not need a running app stack.
