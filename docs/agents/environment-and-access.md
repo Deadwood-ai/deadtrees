@@ -106,6 +106,56 @@ This keeps new Codex worktrees usable without committing secrets. If a copied
 local file is stale, update the primary checkout's local-only file rather than
 adding secrets to tracked docs.
 
+### Isolated Dev/Test Stack
+
+Use the lightweight setup only when the task does not need a running app stack.
+Exploration, code reading, docs edits, static analysis, narrow unit tests, lint,
+and review-only work usually do not need Docker, Supabase, API, Mailpit, or Vite.
+
+Use the isolated per-worktree stack before any work that needs a realistic local
+application environment:
+
+- full API or broad test-suite work,
+- local E2E tests,
+- browser validation,
+- QA-agent playbooks,
+- Supabase/Auth/Mailpit flows,
+- upload, download, storage, or fixture-backed API flows,
+- debugging behavior that depends on frontend/API/Supabase integration.
+
+Bootstrap and validate the stack in this order:
+
+```bash
+bash scripts/setup-worktree.sh --skip-assets
+scripts/qa/env.sh up
+scripts/qa/env.sh reset
+scripts/qa/validate-isolated-env.sh
+```
+
+When running commands manually against the isolated stack, source the generated
+env last so shell commands, Docker Compose, Vite, Playwright, and test helpers
+use the worktree-specific ports and data root:
+
+```bash
+set -a
+source .local/supabase/current.env
+set +a
+```
+
+Useful follow-up commands:
+
+```bash
+scripts/qa/env.sh status
+scripts/qa/run-agent-qa.sh --dry-run --parallel 4
+scripts/qa/env.sh down
+```
+
+`scripts/qa/env.sh up` starts Docker containers and Vite, so do not run it as a
+default step for every exploratory thread. Run it when the user asks for a full
+test suite, local QA, browser/app verification, or a fix that should be tested
+against the integrated local environment. After finishing, stop the stack with
+`scripts/qa/env.sh down` unless the user wants to keep it running.
+
 ## Secret Hygiene
 
 - Redact command output that includes `password`, `token`, `secret`, `key`,
