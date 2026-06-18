@@ -13,22 +13,102 @@ grant select on table public.v2_aois to anon, authenticated;
 grant insert, update, delete on table public.v2_aois to authenticated;
 grant all on table public.v2_aois to service_role;
 
+drop policy if exists "Allow public read access to AOIs" on public.v2_aois;
+create policy "Allow public read access to AOIs"
+  on public.v2_aois
+  for select
+  to public
+  using (
+    exists (
+      select 1
+      from public.v2_datasets d
+      where d.id = dataset_id
+        and (
+          d.data_access <> 'private'::access
+          or auth.uid() = d.user_id
+          or can_view_all_private_data()
+        )
+        and (
+          d.archived = false
+          or auth.uid() = d.user_id
+        )
+    )
+  );
+
+-- Tighten the original owner-only AOI write policies so authenticated users can
+-- only write AOIs for datasets they own, datasets they may audit, or processor
+-- automation. Without the dataset authorization check, any logged-in user could
+-- insert a newer AOI row for any public dataset and shadow the displayed AOI.
+drop policy if exists "Allow authenticated users to create AOIs" on public.v2_aois;
+create policy "Allow authenticated users to create AOIs"
+  on public.v2_aois
+  for insert
+  to authenticated
+  with check (
+    auth.uid() = user_id
+    and (
+      exists (
+        select 1
+        from public.v2_datasets d
+        where d.id = dataset_id
+          and d.user_id = auth.uid()
+      )
+      or can_audit()
+      or ((auth.jwt() ->> 'email'::text) = 'processor@deadtrees.earth'::text)
+    )
+  );
+
+drop policy if exists "Allow users to update their own AOIs" on public.v2_aois;
+create policy "Allow users to update their own AOIs"
+  on public.v2_aois
+  for update
+  to authenticated
+  using (
+    auth.uid() = user_id
+    and (
+      exists (
+        select 1
+        from public.v2_datasets d
+        where d.id = dataset_id
+          and d.user_id = auth.uid()
+      )
+      or can_audit()
+      or ((auth.jwt() ->> 'email'::text) = 'processor@deadtrees.earth'::text)
+    )
+  )
+  with check (
+    auth.uid() = user_id
+    and (
+      exists (
+        select 1
+        from public.v2_datasets d
+        where d.id = dataset_id
+          and d.user_id = auth.uid()
+      )
+      or can_audit()
+      or ((auth.jwt() ->> 'email'::text) = 'processor@deadtrees.earth'::text)
+    )
+  );
+
 -- The automatic AOI task (aoi_segmentation_v1) replaces its own previously
 -- generated AOI on rerun. Without a DELETE policy, RLS silently drops the
 -- delete (0 rows) and reruns would accumulate duplicate auto AOIs. Allow users
 -- to delete their own AOIs (the processor owns the rows it writes).
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'v2_aois'
-      and policyname = 'Allow users to delete their own AOIs'
-  ) then
-    create policy "Allow users to delete their own AOIs"
-      on public.v2_aois
-      for delete
-      to authenticated
-      using (auth.uid() = user_id);
-  end if;
-end $$;
+drop policy if exists "Allow users to delete their own AOIs" on public.v2_aois;
+create policy "Allow users to delete their own AOIs"
+  on public.v2_aois
+  for delete
+  to authenticated
+  using (
+    auth.uid() = user_id
+    and (
+      exists (
+        select 1
+        from public.v2_datasets d
+        where d.id = dataset_id
+          and d.user_id = auth.uid()
+      )
+      or can_audit()
+      or ((auth.jwt() ->> 'email'::text) = 'processor@deadtrees.earth'::text)
+    )
+  );

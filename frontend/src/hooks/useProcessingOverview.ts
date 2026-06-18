@@ -26,6 +26,7 @@ export interface ProcessingOverviewRow {
 	is_deadwood_done: boolean | null;
 	is_forest_cover_done: boolean | null;
 	is_combined_model_done: boolean | null;
+	is_aoi_done: boolean | null;
 	last_20_logs: string | null;
 }
 
