@@ -5,16 +5,16 @@ import type { IDataset } from "../../types/dataset";
 import { supabase } from "../../hooks/useSupabase";
 import { useAuth } from "../../hooks/useAuthProvider";
 import { resolveDownloadUrl } from "../../utils/downloadUrl";
-import { useEffect } from "react";
 import DesktopOnlyFeatureNotice from "../DesktopOnlyFeatureNotice";
 import { useDesktopOnlyFeature } from "../../hooks/useDesktopOnlyFeature";
 import { useAnalytics } from "../../hooks/useAnalytics";
+import { canDownloadCompleteDataset } from "../../utils/datasetDownloads";
 
 interface DownloadSectionProps {
   dataset: IDataset;
   labelsOnly: boolean;
   setLabelsOnly: (value: boolean) => void;
-  hasLabels: boolean;
+  hasExportableLabels: boolean;
   isDownloading: boolean;
   currentDownloadId: string | null;
   startDownload: (id: string) => boolean;
@@ -33,7 +33,7 @@ export default function DownloadSection({
   dataset,
   labelsOnly,
   setLabelsOnly,
-  hasLabels,
+  hasExportableLabels,
   isDownloading,
   currentDownloadId,
   startDownload,
@@ -43,12 +43,13 @@ export default function DownloadSection({
   const { isMobile } = useDesktopOnlyFeature();
   const { track } = useAnalytics("dataset_detail");
   const isViewOnlyDataset = dataset.data_access === "viewonly";
-
-  useEffect(() => {
-    if (isViewOnlyDataset && !labelsOnly) {
-      setLabelsOnly(true);
-    }
-  }, [isViewOnlyDataset, labelsOnly, setLabelsOnly]);
+  const completeDatasetAvailable = canDownloadCompleteDataset(dataset);
+  const forcedLabelsOnly =
+    hasExportableLabels && (isViewOnlyDataset || !completeDatasetAvailable);
+  const effectiveLabelsOnly = labelsOnly || forcedLabelsOnly;
+  const shouldUseLabelsDownload =
+    hasExportableLabels && effectiveLabelsOnly;
+  const hasAvailableDownload = completeDatasetAvailable || shouldUseLabelsDownload;
 
   const getAuthHeaders = async (): Promise<Record<string, string>> => {
     const accessToken = session?.access_token;
@@ -93,9 +94,8 @@ export default function DownloadSection({
       return;
     }
 
-    if (isViewOnlyDataset && !labelsOnly) {
-      setLabelsOnly(true);
-      message.warning("This is a view-only dataset. You can only download predictions.");
+    if (!hasAvailableDownload) {
+      message.info("This dataset is not ready for download yet.");
       return;
     }
 
@@ -109,18 +109,18 @@ export default function DownloadSection({
     const downloadStarted = startDownload(dataset.id.toString());
     if (!downloadStarted) return;
 
-    const downloadType = labelsOnly || isViewOnlyDataset ? "labels" : "dataset";
+    const downloadType = shouldUseLabelsDownload ? "labels" : "dataset";
     track("dataset_download_started", {
       dataset_id: dataset.id,
       download_type: downloadType,
     });
 
-    const baseUrl = labelsOnly
+    const baseUrl = shouldUseLabelsDownload
       ? `${Settings.API_URL}/download/datasets/${dataset.id}/labels.gpkg`
       : `${Settings.API_URL}/download/datasets/${dataset.id}/dataset.zip`;
 
     const downloadMsg = message.loading({
-      content: `Preparing ${labelsOnly ? "predictions" : "complete dataset"} for download...`,
+      content: `Preparing ${shouldUseLabelsDownload ? "predictions" : "complete dataset"} for download...`,
       duration: 0,
     });
 
@@ -135,10 +135,10 @@ export default function DownloadSection({
         if (!jobId) {
           throw new Error("Missing job ID in download response");
         }
-        const statusEndpoint = labelsOnly
+        const statusEndpoint = shouldUseLabelsDownload
           ? `${Settings.API_URL}/download/datasets/${dataset.id}/labels/status`
           : `${Settings.API_URL}/download/datasets/${jobId}/status`;
-        const downloadEndpoint = labelsOnly
+        const downloadEndpoint = shouldUseLabelsDownload
           ? `${Settings.API_URL}/download/datasets/${dataset.id}/labels/download`
           : `${Settings.API_URL}/download/datasets/${jobId}/download`;
 
@@ -160,7 +160,7 @@ export default function DownloadSection({
                 });
                 window.location.href = downloadUrl;
                 message.success({
-                  content: `${labelsOnly ? "Predictions" : "Dataset"} download started!`,
+                  content: `${shouldUseLabelsDownload ? "Predictions" : "Dataset"} download started!`,
                   duration: 5,
                 });
               } else if (statusData.status === "failed") {
@@ -211,9 +211,11 @@ export default function DownloadSection({
       : "Another download is in progress. Only one download can be active at a time."
     : !session
       ? "Please log in to download datasets."
-    : isViewOnlyDataset && !labelsOnly
-      ? "This dataset is view-only. Labels/predictions are available."
-      : labelsOnly
+    : !hasAvailableDownload
+      ? "Downloads are available after dataset processing finishes."
+    : forcedLabelsOnly && !labelsOnly
+      ? "Only labels/predictions are available for this dataset."
+      : shouldUseLabelsDownload
         ? "Download vector data of tree mortality predictions (GPKG format)"
         : "Download both orthophoto and tree mortality predictions";
 
@@ -244,18 +246,22 @@ export default function DownloadSection({
               size="large"
               icon={<DownloadOutlined />}
               className="w-full shadow-sm"
-              disabled={!session || isDownloading}
+              disabled={!session || isDownloading || !hasAvailableDownload}
               loading={isDownloading && currentDownloadId === dataset.id.toString()}
               onClick={handleDownload}
             >
-              {labelsOnly || isViewOnlyDataset ? "Download Predictions (GPKG)" : "Download Complete Dataset"}
+              {!hasAvailableDownload
+                ? "Download unavailable"
+                : shouldUseLabelsDownload
+                  ? "Download Predictions (GPKG)"
+                  : "Download Complete Dataset"}
             </Button>
           </Tooltip>
-          {hasLabels && (
+          {hasExportableLabels && (
             <Tooltip title="Only download the vector data containing tree mortality predictions, without the orthophoto">
               <Checkbox
-                checked={labelsOnly || isViewOnlyDataset}
-                disabled={isViewOnlyDataset}
+                checked={effectiveLabelsOnly}
+                disabled={isViewOnlyDataset || !completeDatasetAvailable}
                 onChange={(e) => setLabelsOnly(e.target.checked)}
                 className="mt-2 flex justify-center text-gray-600"
               >
