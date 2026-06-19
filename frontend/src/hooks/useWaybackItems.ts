@@ -93,7 +93,7 @@ export const useWaybackItemsDebounced = (
       // Step 2: Fetch metadata for ALL items in parallel
       const metadataPromises = items.map(async (item): Promise<WaybackItemWithMetadata> => {
         try {
-          const metadata = await getMetadata(point, zoomLevel, item.releaseNum);
+          const metadata = (await getMetadata(point, zoomLevel, item.releaseNum)) ?? undefined;
           return {
             ...item,
             metadata,
