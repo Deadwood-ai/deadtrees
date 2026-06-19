@@ -5,13 +5,13 @@ import {
   SearchOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
-import ReactPlayer from "react-player";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuthProvider";
 import { useHomeStats } from "../../hooks/useHomeReadModels";
 import { useDesktopOnlyFeature } from "../../hooks/useDesktopOnlyFeature";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import LogoBannerBand from "./LogoBanner";
+import ReactPlayer from "../ReactPlayerCompat";
 
 const logos = [
   { path: "assets/logos/esa.jpg" },
