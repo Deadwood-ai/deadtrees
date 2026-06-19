@@ -24,6 +24,7 @@ import type { StyleFunction as OLStyleFunction } from "ol/style/Style";
 import type { IDataset } from "../types/dataset";
 import type MapBrowserEvent from "ol/MapBrowserEvent";
 import { createOpenFreeMapLibertyLayerGroup } from "../utils/basemaps";
+import { COG_SOURCE_OPTIONS } from "../utils/cogSourceOptions";
 import { palette } from "../theme/palette";
 
 type StyleFn = (f: Feature<Geometry>) => Style | null | undefined;
@@ -84,6 +85,7 @@ export default function DatasetLabelEditor() {
             },
           ],
           convertToRGB: true,
+          sourceOptions: COG_SOURCE_OPTIONS,
         }),
         maxZoom: 23,
         cacheSize: 4096,

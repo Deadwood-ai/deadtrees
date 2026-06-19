@@ -44,6 +44,7 @@ import {
   getForestCOGUrl,
   type MapModelVersion,
 } from "../../utils/getDeadwoodCOGUrl";
+import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import {
   createOpenFreeMapLibertyLayerGroup,
   createStandardMapControls,
@@ -116,6 +117,7 @@ const createDeadwoodSource = (year: string, version: MapModelVersion) => {
     ],
     normalize: true,
     interpolate: false,
+    sourceOptions: COG_SOURCE_OPTIONS,
   });
 };
 
@@ -127,6 +129,7 @@ const createForestSource = (year: string, version: MapModelVersion) => {
     ],
     normalize: true,
     interpolate: false,
+    sourceOptions: COG_SOURCE_OPTIONS,
   });
 };
 
@@ -732,7 +735,7 @@ const DeadtreesMap = () => {
         });
       } else {
         return new Style({
-          fill: new Fill({ color: "rgba(22, 119, 255, 0.15)" }),
+          fill: new Fill({ color: mapColors.flag.areaFill }),
           stroke: new Stroke({ color: mapColors.flag.stroke, width: 2 }),
         });
       }
@@ -1649,7 +1652,12 @@ const DeadtreesMap = () => {
               <p className="mb-1 font-medium text-blue-700">Share feedback</p>
               <p className="text-sm leading-6">
                 After signing in, use{" "}
-                <span className="font-semibold text-blue-600">Flag Area</span>{" "}
+                <span
+                  className="font-semibold"
+                  style={{ color: mapColors.flag.stroke }}
+                >
+                  Flag Area
+                </span>{" "}
                 to report issues in your forest or study area.
               </p>
             </div>

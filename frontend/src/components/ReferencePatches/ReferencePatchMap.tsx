@@ -31,6 +31,7 @@ import {
   createAOIMaskLayer,
 } from "../DatasetDetailsMap/createVectorLayer";
 import { Settings } from "../../config";
+import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import {
   transformPolygonUtmToWebMercator,
   transformPolygonWebMercatorToUtm,
@@ -225,6 +226,7 @@ export default function ReferencePatchMap({
             },
           ],
           convertToRGB: true,
+          sourceOptions: COG_SOURCE_OPTIONS,
         }),
         maxZoom: 25, // Allow very high zoom for detailed ortho imagery
         cacheSize: 1024,

@@ -70,6 +70,8 @@ export interface IDataset {
   is_deadwood_done: boolean;
   is_forest_cover_done: boolean;
   is_combined_model_done: boolean;
+  is_aoi_done: boolean;
+  is_aoi_required: boolean;
   is_metadata_done: boolean;
   is_audited: boolean;
   has_error: boolean;

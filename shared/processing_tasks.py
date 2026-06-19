@@ -8,6 +8,7 @@ TASKS_REQUIRING_STANDARDIZED_ORTHO = frozenset(
 		TaskTypeEnum.deadwood_v1,
 		TaskTypeEnum.treecover_v1,
 		TaskTypeEnum.deadwood_treecover_combined_v2,
+		TaskTypeEnum.aoi_v1,
 	}
 )
 

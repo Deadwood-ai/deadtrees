@@ -69,6 +69,55 @@ If you need a clean local database:
 supabase db reset
 ```
 
+#### Optional: isolated Supabase per worktree
+
+For parallel local worktrees, generate a separate Supabase workdir, project id,
+and port band without changing the tracked `supabase/config.toml`:
+
+```bash
+bash scripts/setup-worktree.sh --skip-assets
+scripts/qa/env.sh up
+scripts/qa/env.sh reset
+scripts/qa/validate-isolated-env.sh
+```
+
+This writes ignored runtime state under `.local/supabase/<worktree-slug>/`,
+starts the light Supabase profile, app API/nginx/Mailpit services, Vite, and
+seeds deterministic QA data. The validation command checks that the generated
+URLs are local-only, the services are reachable, QA fixtures are present, and
+Auth recovery mail reaches the worktree's Mailpit instance.
+
+To point shell commands, Docker Compose, Vite, and Playwright local E2E tests at
+that isolated stack:
+
+```bash
+set -a
+source "$(scripts/dev/isolated-supabase.sh env)"
+set +a
+```
+
+`docker-compose.test.yaml`, `npm --prefix frontend run dev:local`, and
+`npm --prefix frontend run test:e2e:local` use the generated ports when these
+variables are present. The default isolated Supabase profile excludes Studio,
+Realtime, Storage, Mailpit, Edge Runtime, analytics/logging, and PgMeta; it
+keeps Postgres, Kong, PostgREST, and Auth for normal local app flows.
+
+Useful commands:
+
+```bash
+scripts/qa/env.sh status
+scripts/qa/validate-isolated-env.sh
+scripts/qa/env.sh down
+
+# Lower-level Supabase-only controls:
+scripts/dev/isolated-supabase.sh status
+scripts/dev/isolated-supabase.sh stop
+```
+
+This layer only proves isolated dev instances. Browser Use, built-in Browser,
+and multi-agent QA orchestration are a separate layer on top of the running
+isolated frontend/API/Supabase stack.
+
 ### 6. Download required local assets and test fixtures
 
 ```bash

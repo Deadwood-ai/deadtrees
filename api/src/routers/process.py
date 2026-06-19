@@ -31,6 +31,7 @@ _TASK_TYPE_STATUS_FLAGS = {
 	TaskTypeEnum.deadwood_v1: ('is_deadwood_done',),
 	TaskTypeEnum.treecover_v1: ('is_forest_cover_done',),
 	TaskTypeEnum.deadwood_treecover_combined_v2: ('is_combined_model_done',),
+	TaskTypeEnum.aoi_v1: ('is_aoi_done',),
 }
 
 
@@ -252,6 +253,60 @@ def create_processing_task(
 		priority=request.priority,
 		is_processing=False,
 	)
+
+	def _sync_aoi_requirement() -> None:
+		with use_service_client() as service_client:
+			current_status_response = (
+				service_client.table(settings.statuses_table)
+				.select('is_aoi_required')
+				.eq('dataset_id', dataset_id)
+				.execute()
+			)
+			current_status_rows = getattr(current_status_response, 'data', None) or []
+			if len(current_status_rows) > 1:
+				raise HTTPException(
+					status_code=500,
+					detail=(
+						f'Failed to load AOI requirement for dataset {dataset_id}: '
+						f'expected at most one status row, got {len(current_status_rows)}.'
+					),
+				)
+
+			is_aoi_required = (
+				TaskTypeEnum.aoi_v1 in validated_task_types
+				or bool(current_status_rows and current_status_rows[0].get('is_aoi_required'))
+			)
+			if current_status_rows:
+				status_response = (
+					service_client.table(settings.statuses_table)
+					.update({'is_aoi_required': is_aoi_required})
+					.eq('dataset_id', dataset_id)
+					.execute()
+				)
+				updated_rows = getattr(status_response, 'data', None) or []
+				if len(updated_rows) != 1:
+					raise HTTPException(
+						status_code=500,
+						detail=(
+							f'Failed to update AOI requirement for dataset {dataset_id}: '
+							f'expected exactly one status row update, got {len(updated_rows)}.'
+						),
+					)
+			elif is_aoi_required:
+				service_client.table(settings.statuses_table).insert(
+					{'dataset_id': dataset_id, 'is_aoi_required': True}
+				).execute()
+
+	try:
+		_sync_aoi_requirement()
+	except HTTPException:
+		raise
+	except Exception as e:
+		msg = f'Error updating AOI requirement for dataset {dataset_id}: {str(e)}'
+		logger.error(
+			msg, LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token)
+		)
+		raise HTTPException(status_code=500, detail=msg)
 
 	# Add the task to the queue. The cleanup above removed any existing rows for
 	# this dataset, so if a transient failure drops the connection after the

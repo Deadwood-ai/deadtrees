@@ -1,7 +1,7 @@
 import pytest
-from shared.db import use_anon_client, use_client, login
+from shared.db import use_anon_client, use_client, use_service_client, login
 from shared.settings import settings
-from shared.models import DatasetAccessEnum, LicenseEnum, PlatformEnum
+from shared.models import DatasetAccessEnum, LabelDataEnum, LabelSourceEnum, LabelTypeEnum, LicenseEnum, PlatformEnum
 from shared.testing.fixtures import test_processor_user
 
 
@@ -233,3 +233,195 @@ def test_rls_policy_for_view_with_private_datasets(datasets_with_mixed_access, a
 			.execute()
 		)
 		assert len(response.data) == 0
+
+
+def test_label_rls_policy_follows_dataset_visibility(
+	datasets_with_mixed_access, auth_token, test_user, test_processor_user
+):
+	"""Raw label reads should not reveal labels for private datasets to anonymous clients."""
+	with use_service_client() as owner_client:
+		public_label = {
+			'dataset_id': datasets_with_mixed_access['public_id'],
+			'user_id': test_user,
+			'label_source': LabelSourceEnum.visual_interpretation,
+			'label_type': LabelTypeEnum.semantic_segmentation,
+			'label_data': LabelDataEnum.deadwood,
+			'label_quality': 1,
+		}
+		private_label = {
+			**public_label,
+			'dataset_id': datasets_with_mixed_access['private_id'],
+		}
+		public_forest_cover_label = {
+			**public_label,
+			'label_data': LabelDataEnum.forest_cover,
+		}
+		private_forest_cover_label = {
+			**private_label,
+			'label_data': LabelDataEnum.forest_cover,
+		}
+		response = (
+			owner_client.table(settings.labels_table)
+			.insert([public_label, private_label, public_forest_cover_label, private_forest_cover_label])
+			.execute()
+		)
+		label_ids_by_dataset_and_data = {
+			(row['dataset_id'], row['label_data']): row['id'] for row in response.data
+		}
+		inserted_label_ids = set(label_ids_by_dataset_and_data.values())
+		public_deadwood_label_id = label_ids_by_dataset_and_data[
+			(datasets_with_mixed_access['public_id'], LabelDataEnum.deadwood)
+		]
+		private_deadwood_label_id = label_ids_by_dataset_and_data[
+			(datasets_with_mixed_access['private_id'], LabelDataEnum.deadwood)
+		]
+		public_forest_cover_label_id = label_ids_by_dataset_and_data[
+			(datasets_with_mixed_access['public_id'], LabelDataEnum.forest_cover)
+		]
+		private_forest_cover_label_id = label_ids_by_dataset_and_data[
+			(datasets_with_mixed_access['private_id'], LabelDataEnum.forest_cover)
+		]
+		geometry = {
+			'type': 'Polygon',
+			'coordinates': [
+				[
+					[7.0, 47.0],
+					[7.0, 47.1],
+					[7.1, 47.1],
+					[7.1, 47.0],
+					[7.0, 47.0],
+				]
+			],
+		}
+		geometry_response = (
+			owner_client.table(settings.deadwood_geometries_table)
+			.insert(
+				[
+					{
+						'label_id': public_deadwood_label_id,
+						'geometry': geometry,
+						'properties': {'fixture': 'public'},
+					},
+					{
+						'label_id': private_deadwood_label_id,
+						'geometry': geometry,
+						'properties': {'fixture': 'private'},
+					},
+				]
+			)
+			.execute()
+		)
+		inserted_deadwood_geometry_ids = {row['id'] for row in geometry_response.data}
+		geometry_response = (
+			owner_client.table(settings.forest_cover_geometries_table)
+			.insert(
+				[
+					{
+						'label_id': public_forest_cover_label_id,
+						'geometry': geometry,
+						'properties': {'fixture': 'public'},
+					},
+					{
+						'label_id': private_forest_cover_label_id,
+						'geometry': geometry,
+						'properties': {'fixture': 'private'},
+					},
+				]
+			)
+			.execute()
+		)
+		inserted_forest_cover_geometry_ids = {row['id'] for row in geometry_response.data}
+
+	with use_anon_client() as public_client:
+		response = (
+			public_client.table(settings.labels_table)
+			.select('id,dataset_id')
+			.in_('id', list(inserted_label_ids))
+			.execute()
+		)
+		visible_dataset_ids = {row['dataset_id'] for row in response.data}
+		assert visible_dataset_ids == {datasets_with_mixed_access['public_id']}
+
+		response = (
+			public_client.table(settings.deadwood_geometries_table)
+			.select('id,label_id')
+			.in_('id', list(inserted_deadwood_geometry_ids))
+			.execute()
+		)
+		visible_label_ids = {row['label_id'] for row in response.data}
+		assert visible_label_ids == {public_deadwood_label_id}
+
+		response = (
+			public_client.table(settings.forest_cover_geometries_table)
+			.select('id,label_id')
+			.in_('id', list(inserted_forest_cover_geometry_ids))
+			.execute()
+		)
+		visible_label_ids = {row['label_id'] for row in response.data}
+		assert visible_label_ids == {public_forest_cover_label_id}
+
+	processor_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD, use_cached_session=False)
+	with use_client(processor_token) as processor_client:
+		processor_client.table('dataset_audit').insert(
+			{
+				'dataset_id': datasets_with_mixed_access['public_id'],
+				'audited_by': test_processor_user,
+				'final_assessment': 'exclude_completely',
+			}
+		).execute()
+
+	with use_anon_client() as public_client:
+		response = (
+			public_client.table(settings.labels_table)
+			.select('id,dataset_id')
+			.in_('id', list(inserted_label_ids))
+			.execute()
+		)
+		assert response.data == []
+
+		response = (
+			public_client.table(settings.deadwood_geometries_table)
+			.select('id,label_id')
+			.in_('id', list(inserted_deadwood_geometry_ids))
+			.execute()
+		)
+		assert response.data == []
+
+		response = (
+			public_client.table(settings.forest_cover_geometries_table)
+			.select('id,label_id')
+			.in_('id', list(inserted_forest_cover_geometry_ids))
+			.execute()
+		)
+		assert response.data == []
+
+	with use_client(auth_token) as owner_client:
+		response = (
+			owner_client.table(settings.labels_table)
+			.select('id,dataset_id')
+			.in_('id', list(inserted_label_ids))
+			.execute()
+		)
+		visible_dataset_ids = {row['dataset_id'] for row in response.data}
+		assert visible_dataset_ids == {
+			datasets_with_mixed_access['public_id'],
+			datasets_with_mixed_access['private_id'],
+		}
+
+		response = (
+			owner_client.table(settings.deadwood_geometries_table)
+			.select('id,label_id')
+			.in_('id', list(inserted_deadwood_geometry_ids))
+			.execute()
+		)
+		visible_label_ids = {row['label_id'] for row in response.data}
+		assert visible_label_ids == {public_deadwood_label_id, private_deadwood_label_id}
+
+		response = (
+			owner_client.table(settings.forest_cover_geometries_table)
+			.select('id,label_id')
+			.in_('id', list(inserted_forest_cover_geometry_ids))
+			.execute()
+		)
+		visible_label_ids = {row['label_id'] for row in response.data}
+		assert visible_label_ids == {public_forest_cover_label_id, private_forest_cover_label_id}

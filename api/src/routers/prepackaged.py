@@ -2,9 +2,9 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import secrets
 from typing import Any, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from shared.db import use_client, use_service_client, verify_token
@@ -19,6 +19,8 @@ logger.add_supabase_handler(SupabaseHandler())
 DEFINITIONS_TABLE = 'prepackaged_dataset_definitions'
 VERSIONS_TABLE = 'prepackaged_dataset_versions'
 GRANTS_TABLE = 'prepackaged_dataset_download_grants'
+S3_SIGNING_ERROR = 'Prepackaged dataset download signing is not configured'
+
 
 class PrepackagedDatasetVersion(BaseModel):
 	model_config = ConfigDict(extra='ignore')
@@ -67,9 +69,90 @@ def hash_download_token(token: str) -> str:
 	return hashlib.sha256(token.encode('utf-8')).hexdigest()
 
 
-def build_download_url(public_download_path: str, token: str) -> str:
-	file_name = public_download_path.rstrip('/').split('/')[-1]
-	return f'{settings.PREPACKAGED_DOWNLOAD_BASE_URL.rstrip("/")}/{file_name}?token={token}'
+def normalize_prepackaged_storage_key(storage_path: Optional[str]) -> str:
+	storage_key = (storage_path or '').strip()
+	if not storage_key:
+		raise HTTPException(status_code=500, detail='Prepackaged dataset version is missing a storage path')
+
+	if storage_key.startswith('s3://'):
+		parsed = urlparse(storage_key)
+		if parsed.netloc and parsed.netloc != settings.PREPACKAGED_S3_BUCKET:
+			raise HTTPException(status_code=500, detail='Prepackaged dataset version points at an unexpected S3 bucket')
+		storage_key = parsed.path.lstrip('/')
+
+	if storage_key.startswith('/'):
+		raise HTTPException(status_code=500, detail='Prepackaged dataset version does not use an S3 object key')
+
+	return storage_key.lstrip('/')
+
+
+def build_content_disposition(file_name: str) -> str:
+	safe_file_name = file_name.replace('"', '')
+	return f'attachment; filename="{safe_file_name}"'
+
+
+def create_prepackaged_s3_client():
+	missing_settings = [
+		name
+		for name in (
+			'PREPACKAGED_S3_ENDPOINT_URL',
+			'PREPACKAGED_S3_REGION',
+			'PREPACKAGED_S3_BUCKET',
+			'PREPACKAGED_API_READ_S3_ACCESS_KEY',
+			'PREPACKAGED_API_READ_S3_SECRET_KEY',
+		)
+		if not getattr(settings, name)
+	]
+	if missing_settings:
+		logger.error(
+			'Prepackaged S3 signing settings are missing',
+			context=LogContext(
+				category=LogCategory.DOWNLOAD,
+				extra={'event': 'prepackaged_s3_signing_misconfigured', 'missing_settings': missing_settings},
+			),
+		)
+		raise HTTPException(status_code=500, detail=S3_SIGNING_ERROR)
+
+	try:
+		import boto3
+		from botocore.config import Config
+	except ImportError as error:
+		logger.error(
+			'Prepackaged S3 signing dependency is missing',
+			context=LogContext(
+				category=LogCategory.DOWNLOAD,
+				extra={'event': 'prepackaged_s3_signing_dependency_missing'},
+			),
+		)
+		raise HTTPException(status_code=500, detail=S3_SIGNING_ERROR) from error
+
+	return boto3.client(
+		's3',
+		endpoint_url=settings.PREPACKAGED_S3_ENDPOINT_URL,
+		aws_access_key_id=settings.PREPACKAGED_API_READ_S3_ACCESS_KEY,
+		aws_secret_access_key=settings.PREPACKAGED_API_READ_S3_SECRET_KEY,
+		region_name=settings.PREPACKAGED_S3_REGION,
+		config=Config(signature_version='s3v4', s3={'addressing_style': 'path'}),
+	)
+
+
+def generate_prepackaged_signed_download_url(
+	storage_path: str,
+	file_name: str,
+	s3_client=None,
+) -> tuple[str, str]:
+	storage_key = normalize_prepackaged_storage_key(storage_path)
+	client = s3_client or create_prepackaged_s3_client()
+	download_url = client.generate_presigned_url(
+		'get_object',
+		Params={
+			'Bucket': settings.PREPACKAGED_S3_BUCKET,
+			'Key': storage_key,
+			'ResponseContentDisposition': build_content_disposition(file_name),
+		},
+		ExpiresIn=settings.PREPACKAGED_SIGNED_URL_TTL_SECONDS,
+	)
+	return download_url, storage_key
 
 
 def get_request_ip(request: Request) -> Optional[str]:
@@ -81,24 +164,6 @@ def get_request_ip(request: Request) -> Optional[str]:
 		return request.client.host
 
 	return None
-
-
-def parse_original_path(original_uri: Optional[str]) -> Optional[str]:
-	if not original_uri:
-		return None
-
-	return urlparse(original_uri).path
-
-
-def parse_original_token(original_uri: Optional[str]) -> Optional[str]:
-	if not original_uri:
-		return None
-
-	token_values = parse_qs(urlparse(original_uri).query).get('token')
-	if not token_values:
-		return None
-
-	return token_values[0]
 
 
 def require_user(token: str):
@@ -113,7 +178,7 @@ def fetch_available_version(db_client, version_id: int) -> dict[str, Any]:
 	response = (
 		db_client.table(VERSIONS_TABLE)
 		.select(
-			'id,version,status,file_name,public_download_path,size_bytes,checksum_sha256,'
+			'id,version,status,file_name,storage_path,public_download_path,size_bytes,checksum_sha256,'
 			'dataset_count,artifact_count,built_at,published_at,manifest,known_issues,'
 			'definition:prepackaged_dataset_definitions(id,slug,title,summary,kind,is_active)'
 		)
@@ -131,65 +196,6 @@ def fetch_available_version(db_client, version_id: int) -> dict[str, Any]:
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Prepackaged dataset version not found')
 
 	return version
-
-
-def enforce_user_prepackaged_grant_limit(db_client, user_id: str, token: str):
-	window_start = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-
-	user_usage = (
-		db_client.table(GRANTS_TABLE)
-		.select('id', count='exact')
-		.eq('user_id', user_id)
-		.gte('created_at', window_start)
-		.execute()
-	)
-	if (user_usage.count or 0) >= settings.PREPACKAGED_GRANTS_PER_USER_PER_DAY:
-		logger.warning(
-			f'Prepackaged download grant limit exceeded for user {user_id}',
-			context=LogContext(
-				category=LogCategory.DOWNLOAD,
-				user_id=user_id,
-				token=token,
-				extra={
-					'event': 'prepackaged_grant_blocked',
-					'requests_last_day': user_usage.count or 0,
-					'limit_per_day': settings.PREPACKAGED_GRANTS_PER_USER_PER_DAY,
-				},
-			),
-		)
-		raise HTTPException(
-			status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-			detail='Daily prepackaged dataset download limit exceeded. Please try again tomorrow.',
-		)
-
-
-def enforce_global_prepackaged_grant_limit(db_client, user_id: str, token: str):
-	window_start = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-
-	global_usage = (
-		db_client.table(GRANTS_TABLE)
-		.select('id', count='exact')
-		.gte('created_at', window_start)
-		.execute()
-	)
-	if (global_usage.count or 0) >= settings.PREPACKAGED_GRANTS_GLOBAL_PER_DAY:
-		logger.warning(
-			'Global prepackaged download grant limit exceeded',
-			context=LogContext(
-				category=LogCategory.DOWNLOAD,
-				user_id=user_id,
-				token=token,
-				extra={
-					'event': 'prepackaged_global_grant_blocked',
-					'requests_last_day': global_usage.count or 0,
-					'limit_per_day': settings.PREPACKAGED_GRANTS_GLOBAL_PER_DAY,
-				},
-			),
-		)
-		raise HTTPException(
-			status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-			detail='Daily prepackaged dataset download capacity is currently full. Please try again later.',
-		)
 
 
 @router.get('/packages', response_model=list[PrepackagedDatasetPackage])
@@ -242,30 +248,38 @@ def create_prepackaged_download_grant(
 ):
 	token = authorization.replace('Bearer ', '')
 	user = require_user(token)
-	raw_download_token = secrets.token_urlsafe(32)
-	expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.PREPACKAGED_GRANT_TTL_HOURS)
+	# The table still has a unique, non-null token_hash from the old Nginx-token flow.
+	# S3 signed downloads do not expose this nonce; grant id plus extra JSON are the audit record.
+	audit_nonce = secrets.token_urlsafe(32)
+	expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.PREPACKAGED_SIGNED_URL_TTL_SECONDS)
 
 	with use_client(token) as db_client:
 		version = fetch_available_version(db_client, version_id)
-		enforce_user_prepackaged_grant_limit(db_client, user.id, token)
+
+	download_url, storage_key = generate_prepackaged_signed_download_url(
+		version['storage_path'],
+		version['file_name'],
+	)
 
 	with use_service_client() as service_client:
-		enforce_global_prepackaged_grant_limit(service_client, user.id, token)
 		grant_response = (
 			service_client.table(GRANTS_TABLE)
 			.insert(
 				{
 					'version_id': version_id,
 					'user_id': user.id,
-					'token_hash': hash_download_token(raw_download_token),
+					'token_hash': hash_download_token(audit_nonce),
 					'expires_at': expires_at.isoformat(),
 					'requested_ip': get_request_ip(request),
 					'requested_user_agent': request.headers.get('user-agent'),
 					'extra': {
-						'event': 'prepackaged_grant_created',
+						'event': 'prepackaged_signed_download_created',
 						'package_slug': (version.get('definition') or {}).get('slug'),
 						'version': version.get('version'),
 						'file_name': version.get('file_name'),
+						'size_bytes': version.get('size_bytes'),
+						'storage_bucket': settings.PREPACKAGED_S3_BUCKET,
+						'storage_key': storage_key,
 					},
 				}
 			)
@@ -277,16 +291,17 @@ def create_prepackaged_download_grant(
 
 	grant = grant_response.data[0]
 	logger.info(
-		'Prepackaged download grant created',
+		'Prepackaged signed download created',
 		context=LogContext(
 			category=LogCategory.DOWNLOAD,
 			user_id=user.id,
 			token=token,
 			extra={
-				'event': 'prepackaged_grant_created',
+				'event': 'prepackaged_signed_download_created',
 				'grant_id': grant['id'],
 				'version_id': version_id,
 				'file_name': version['file_name'],
+				'storage_key': storage_key,
 			},
 		),
 	)
@@ -295,52 +310,5 @@ def create_prepackaged_download_grant(
 		grant_id=grant['id'],
 		version_id=version_id,
 		expires_at=expires_at,
-		download_url=build_download_url(version['public_download_path'], raw_download_token),
+		download_url=download_url,
 	)
-
-
-@router.get('/grants/validate')
-def validate_prepackaged_download_grant(
-	token: Optional[str] = Query(default=None),
-	x_download_token: Optional[str] = Header(default=None, alias='X-Download-Token'),
-	x_original_uri: Optional[str] = Header(default=None, alias='X-Original-URI'),
-):
-	raw_download_token = token or x_download_token or parse_original_token(x_original_uri)
-	if not raw_download_token:
-		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Missing download token')
-
-	requested_path = parse_original_path(x_original_uri)
-	now = datetime.now(timezone.utc)
-
-	with use_service_client() as db_client:
-		grant_response = (
-			db_client.table(GRANTS_TABLE)
-			.select(
-				'id,expires_at,revoked_at,validation_count,'
-				'version:prepackaged_dataset_versions(id,status,public_download_path,file_name)'
-			)
-			.eq('token_hash', hash_download_token(raw_download_token))
-			.execute()
-		)
-
-		if not grant_response.data:
-			raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid download token')
-
-		grant = grant_response.data[0]
-		version = grant.get('version') or {}
-		expires_at = datetime.fromisoformat(grant['expires_at'].replace('Z', '+00:00'))
-
-		if grant.get('revoked_at') is not None or expires_at <= now or version.get('status') != 'available':
-			raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Download grant is not active')
-
-		if requested_path and requested_path != version.get('public_download_path'):
-			raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Download grant does not match file')
-
-		db_client.table(GRANTS_TABLE).update(
-			{
-				'last_validated_at': now.isoformat(),
-				'validation_count': (grant.get('validation_count') or 0) + 1,
-			}
-		).eq('id', grant['id']).execute()
-
-	return {'ok': True}

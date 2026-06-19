@@ -335,13 +335,18 @@ What this prepared:
   - frontend local/prod env profiles where available
   - local Codex config where available (.codex)
   - local ops docs where available (docs/ops)
-  - stable Docker compose project name (${DEFAULT_COMPOSE_PROJECT_NAME})
+  - repo-local Python and frontend dependencies
   - git submodules
   - per-worktree Python CLI environment
   - per-worktree frontend dependencies
   - shared heavy paths where available (assets, data, .local/ssh)
 
-Typical next steps:
+Typical isolated QA next steps:
+  scripts/qa/env.sh up
+  scripts/qa/env.sh reset
+  scripts/qa/validate-isolated-env.sh
+
+Generic local dev/test entrypoints:
   source "$REPO_ROOT/venv/bin/activate"
   deadtrees dev start
   deadtrees dev test api
@@ -349,7 +354,8 @@ Typical next steps:
   npm --prefix frontend test
 
 Notes:
-  - The local Supabase stack still needs to be running separately on port 54321.
-  - deadtrees dev start/test will reuse the single Docker compose project name above,
-    so one worktree can take over the shared test containers without duplicating them.
+  - scripts/qa/env.sh renders a per-worktree Supabase project id, port band,
+    Docker compose project, fixture data root, and Vite port.
+  - deadtrees dev start/test without the isolated env still uses the generic
+    local-dev defaults.
 EOF

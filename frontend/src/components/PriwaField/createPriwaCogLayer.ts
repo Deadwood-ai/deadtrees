@@ -2,6 +2,7 @@ import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { GeoTIFF } from "ol/source";
 
 import { Settings } from "../../config";
+import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 
 export const createPriwaCogLayer = (cogPath: string) =>
   new TileLayerWebGL({
@@ -14,6 +15,7 @@ export const createPriwaCogLayer = (cogPath: string) =>
         },
       ],
       convertToRGB: true,
+      sourceOptions: COG_SOURCE_OPTIONS,
     }),
     opacity: 0.82,
     maxZoom: 23,

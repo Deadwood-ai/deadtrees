@@ -24,6 +24,28 @@ the linked docs that match the task.
   path. Treat production database writes as off-limits unless the user explicitly authorizes
   a specific write.
 
+## Local Test Environment
+
+- For exploration, code reading, docs edits, static analysis, and narrow unit or
+  lint checks, do not start the full local dev stack unless the task needs it.
+- For full test-suite work, API tests against Supabase, local E2E, browser
+  validation, QA-agent runs, Auth/Mailpit flows, upload/download flows, or any
+  work that needs the app running, first bootstrap and validate the isolated
+  per-worktree environment:
+
+```bash
+bash scripts/setup-worktree.sh --skip-assets
+scripts/qa/env.sh up
+scripts/qa/env.sh reset
+scripts/qa/validate-isolated-env.sh
+```
+
+- Use the generated `.local/supabase/current.env` endpoints for frontend, API,
+  Supabase, Mailpit, Docker Compose, Playwright, and QA agents. Do not use the
+  default shared Supabase ports for full QA/test work.
+- See `docs/agents/environment-and-access.md` for the routing table, manual
+  `source` command, and teardown guidance.
+
 ## Review guidelines
 
 - Prioritize concrete P0/P1 risks: correctness bugs, security regressions, data loss, broken authorization, production deployment hazards, and missing validation for high-risk changes.
@@ -37,6 +59,8 @@ the linked docs that match the task.
 
 ## Git And PRs
 
+- Before creating a worktree/branch for implementation, QA, or broad tests,
+  fetch `origin` and base it on current `origin/main` unless told otherwise.
 - Do not create draft PRs for this workspace. Open normal PRs when asked.
 - PR titles must pass `.github/workflows/pr-title-check.yml`.
 - Use Conventional Commit format: `type(scope): short summary`.

@@ -6,10 +6,10 @@ const DEV = (import.meta.env.VITE_MODE as string | undefined)
   : import.meta.env.DEV;
 //console.log("DEV", DEV);
 
-const STORAGE_SERVER_DEV = "http://localhost:8080";
+const STORAGE_SERVER_DEV = (import.meta.env.VITE_LOCAL_STORAGE_SERVER_URL as string | undefined) || "http://localhost:8080";
 const STORAGE_SERVER_URL = "https://data2.deadtrees.earth";
 
-const API_URL_DEV = STORAGE_SERVER_DEV + "/api/v1";
+const API_URL_DEV = (import.meta.env.VITE_LOCAL_API_URL as string | undefined) || STORAGE_SERVER_DEV + "/api/v1";
 const API_URL_PROD = STORAGE_SERVER_URL + "/api/v1";
 
 const API_URL_UPLOAD_ENDPOINT_DEV = API_URL_DEV + "/datasets/chunk";
@@ -21,7 +21,7 @@ const COG_BASE_URL_PROD = STORAGE_SERVER_URL + "/cogs/v1/";
 const THUMBNAIL_URL_DEV = STORAGE_SERVER_DEV + "/thumbnails/v1/";
 const THUMBNAIL_URL_PROD = STORAGE_SERVER_URL + "/thumbnails/v1/";
 
-const SUPABASE_URL_DEV = "http://127.0.0.1:54321";
+const SUPABASE_URL_DEV = (import.meta.env.VITE_SUPABASE_URL as string | undefined) || "http://127.0.0.1:54321";
 const SUPABASE_URL_PROD = import.meta.env.VITE_SUPABASE_URL;
 
 const SUPABASE_ANON_KEY_DEV = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -49,6 +49,8 @@ export const Settings = {
 
   DATA_TABLE_FULL: "v2_full_dataset_view", // For admin/audit use (includes excluded datasets)
   DATA_TABLE_PUBLIC: "v2_full_dataset_view_public", // For public use (excludes excluded datasets)
+  HOME_STATS_VIEW: "public_home_stats",
+  HOME_DATASET_TEASERS_VIEW: "public_home_dataset_teasers",
   THUMBNAILS_TABLE: "v2_thumbnails",
   COLLABORATORS_TABLE: "collaborators",
   LABELS_TABLE: "v2_labels",

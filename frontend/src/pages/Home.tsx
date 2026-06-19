@@ -7,8 +7,8 @@ import ReleasesSection from "../components/Home/Releases";
 import PlatformFeatures from "../components/Home/PlatformFeatures";
 import GetInContact from "../components/Home/GetInContact";
 
-import { useData } from "../hooks/useDataProvider";
 import { useAnalytics } from "../hooks/useAnalytics";
+import { useHomeStats } from "../hooks/useHomeReadModels";
 
 const FAQ_ITEM_STYLE = {
   border: "1px solid #e2e8f0",
@@ -20,14 +20,11 @@ const FAQ_ITEM_STYLE = {
 };
 
 const FAQ = () => {
-  const { authors } = useData();
+  const { data: stats } = useHomeStats();
   const { track } = useAnalytics("faq");
   const contributorNames = useMemo(
-    () =>
-      (authors || [])
-        .map((author) => author.label)
-        .sort((a, b) => a.localeCompare(b)),
-    [authors],
+    () => stats?.contributor_names || [],
+    [stats?.contributor_names],
   );
 
   const FAQItems = useMemo(

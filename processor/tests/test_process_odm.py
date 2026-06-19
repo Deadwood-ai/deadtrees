@@ -257,7 +257,6 @@ def odm_test_dataset(auth_token, test_zip_file, test_processor_user):
 				'is_deadwood_done': False,
 				'is_forest_cover_done': False,
 				'is_metadata_done': False,
-				'is_audited': False,
 				'has_error': False,
 			}
 			client.table(settings.statuses_table).insert(status_data).execute()

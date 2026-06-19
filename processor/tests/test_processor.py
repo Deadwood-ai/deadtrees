@@ -146,6 +146,7 @@ def test_process_task_success_path_with_refresh(monkeypatch):
 	assert processing_updates == [task.id]
 	assert deleted_task_ids == [task.id]
 
+@pytest.mark.unit
 def test_pipeline_stage_map_is_stable_and_ordered():
 	"""
 	Locks down the pipeline stage ordering used for crash detection and reporting.
@@ -165,6 +166,7 @@ def test_pipeline_stage_map_is_stable_and_ordered():
 			'is_combined_model_done',
 			'deadwood_treecover_combined_segmentation',
 		),
+		(TaskTypeEnum.aoi_v1, 'is_aoi_done', 'aoi_segmentation'),
 	]
 	assert PIPELINE_STAGE_MAP == expected
 

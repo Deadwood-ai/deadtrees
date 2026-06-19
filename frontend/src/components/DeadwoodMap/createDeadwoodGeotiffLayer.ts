@@ -1,5 +1,6 @@
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { GeoTIFF } from "ol/source";
+import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import getDeadwoodCOGUrl from "../../utils/getDeadwoodCOGUrl";
 
 const createDeadwoodGeotiffLayer = (year: string) => {
@@ -14,6 +15,7 @@ const createDeadwoodGeotiffLayer = (year: string) => {
     ],
     normalize: true,
     interpolate: false, // Show actual pixel grid
+    sourceOptions: COG_SOURCE_OPTIONS,
   });
 
   // Single-band COG: values 0-255 (normalized to 0-1)

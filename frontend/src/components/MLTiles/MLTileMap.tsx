@@ -28,6 +28,7 @@ import {
 } from "../DatasetDetailsMap/createVectorLayer";
 import { Settings } from "../../config";
 import { createOpenFreeMapLibertyLayerGroup } from "../../utils/basemaps";
+import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import { palette } from "../../theme/palette";
 import { polygonToBBox } from "../../utils/utm";
 
@@ -205,6 +206,7 @@ export default function MLTileMap({
             },
           ],
           convertToRGB: true,
+          sourceOptions: COG_SOURCE_OPTIONS,
         }),
         maxZoom: 23,
         cacheSize: 1024,
