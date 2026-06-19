@@ -7,6 +7,7 @@ import type { Layer } from "ol/layer";
 
 import { Settings } from "../../../config";
 import { createStandardMapControls } from "../../../utils/basemaps";
+import { COG_SOURCE_OPTIONS } from "../../../utils/cogSourceOptions";
 import { createMapInteractions } from "../../../utils/mapInteractions";
 
 export interface Viewport {
@@ -155,6 +156,7 @@ export function useMapCore({
 					bands: [1, 2, 3],
 				}],
 				convertToRGB: true,
+				sourceOptions: COG_SOURCE_OPTIONS,
 			}),
 			maxZoom: 23,
 			cacheSize: 4096,
