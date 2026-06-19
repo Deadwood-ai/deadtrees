@@ -13,6 +13,7 @@ from .process_cog import process_cog
 from .process_deadwood_segmentation import process_deadwood_segmentation
 from .process_treecover_segmentation import process_treecover_segmentation
 from .process_deadwood_treecover_combined_v2 import process_deadwood_treecover_combined_v2
+from .process_aoi_segmentation import process_aoi_segmentation
 from .process_metadata import process_metadata
 from .exceptions import AuthenticationError, ProcessingError
 from .utils.linear_issues import create_processing_failure_issue
@@ -64,6 +65,7 @@ PIPELINE_STAGE_MAP = [
 		'is_combined_model_done',
 		'deadwood_treecover_combined_segmentation',
 	),
+	(TaskTypeEnum.aoi_v1, 'is_aoi_done', 'aoi_segmentation'),
 ]
 
 
@@ -459,6 +461,28 @@ def process_task(task: QueueTask, token: str):
 					task_id=task.id,
 					dataset_id=task.dataset_id,
 				)
+
+		# Generate the automatic AOI polygon if requested (runs before audit)
+		if TaskTypeEnum.aoi_v1 in task.task_types:
+			try:
+				token = refresh_processor_token(task, token)
+				logger.info(
+					'processing AOI segmentation',
+					LogContext(category=LogCategory.AOI, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+				)
+				process_aoi_segmentation(task, token, settings.processing_path)
+			except Exception as e:
+				error_token = refresh_processor_token(task, token)
+				logger.error(
+					f'AOI segmentation failed: {str(e)}',
+					LogContext(
+						category=LogCategory.AOI,
+						dataset_id=task.dataset_id,
+						user_id=task.user_id,
+						token=error_token,
+					),
+				)
+				raise ProcessingError(str(e), task_type='aoi_segmentation', task_id=task.id, dataset_id=task.dataset_id)
 
 		# Only delete task if all processing completed successfully
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)

@@ -31,7 +31,14 @@ const COMBINED_MODEL_STEP: ProcessingStep = {
   description: "Running combined deadwood cover and tree cover model",
 };
 
+const AOI_STEP: ProcessingStep = {
+  key: "aoi",
+  label: "Area selection",
+  description: "Generating an initial area of interest for audit",
+};
+
 const COMBINED_MODEL_STATUS = "deadwood_treecover_combined_segmentation";
+const AOI_STATUS = "aoi_segmentation";
 
 function isOdmWorkflow(dataset: DatasetProgress): boolean {
   return dataset.file_name?.toLowerCase().endsWith(".zip") || false;
@@ -47,6 +54,8 @@ export interface DatasetProgress {
   is_deadwood_done?: boolean;
   is_forest_cover_done?: boolean;
   is_combined_model_done?: boolean;
+  is_aoi_done?: boolean;
+  is_aoi_required?: boolean;
   has_error?: boolean;
   current_status?: string;
   final_assessment?: "ready" | "fixable_issues" | "no_issues" | "exclude_completely" | null;
@@ -96,7 +105,8 @@ export function isDatasetProcessingComplete(dataset: DatasetProgress): boolean {
     dataset.is_ortho_done &&
     dataset.is_metadata_done &&
     dataset.is_cog_done &&
-    isPredictionProcessingComplete(dataset)
+    isPredictionProcessingComplete(dataset) &&
+    (!dataset.is_aoi_required || dataset.is_aoi_done)
   );
 }
 
@@ -114,9 +124,13 @@ export function calculateProcessingProgress(dataset: DatasetProgress): {
   const includeCombinedModelStep =
     dataset.is_combined_model_done ||
     dataset.current_status === COMBINED_MODEL_STATUS;
+  const includeAoiStep =
+    dataset.is_aoi_required ||
+    dataset.is_aoi_done ||
+    dataset.current_status === AOI_STATUS;
   const useCombinedModelOnly =
     includeCombinedModelStep && !hasExplicitLegacyPredictionOutput;
-  const steps = useCombinedModelOnly
+  let steps = useCombinedModelOnly
     ? [
         ...(isOdmDataset
           ? RAW_IMAGES_PROCESSING_STEPS
@@ -134,6 +148,9 @@ export function calculateProcessingProgress(dataset: DatasetProgress): {
       : isOdmDataset
         ? RAW_IMAGES_PROCESSING_STEPS
         : GEOTIFF_PROCESSING_STEPS;
+  if (includeAoiStep) {
+    steps = [...steps, AOI_STEP];
+  }
   const totalSteps = steps.length;
 
   // If there's an error, return error state
@@ -156,7 +173,7 @@ export function calculateProcessingProgress(dataset: DatasetProgress): {
   ];
 
   // Check completion status for each step.
-  const stepCompletions = useCombinedModelOnly
+  let stepCompletions = useCombinedModelOnly
     ? [...baseStepCompletions, dataset.is_combined_model_done || false]
     : includeCombinedModelStep
       ? [
@@ -170,6 +187,9 @@ export function calculateProcessingProgress(dataset: DatasetProgress): {
           isDeadwoodProcessingComplete(dataset),
           isTreecoverProcessingComplete(dataset),
         ];
+  if (includeAoiStep) {
+    stepCompletions = [...stepCompletions, dataset.is_aoi_done || false];
+  }
 
   // Find the current step (first incomplete step)
   const currentStep = stepCompletions.findIndex((completed) => !completed);

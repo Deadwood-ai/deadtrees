@@ -53,6 +53,16 @@ TREECOVER_V1_MODEL_CONFIG = {
 	'checkpoint_name': 'restor/tcd-segformer-mit-b5',
 }
 
+# Automatic Area-of-Interest (AOI) segmentation model. Produces one coarse AOI
+# polygon per orthomosaic that an auditor reviews/edits before the dataset is
+# audited. SegFormer-B1, binary inside/outside-AOI classification.
+AOI_V1_MODEL_MODULE = 'aoi_segmentation_v1'
+AOI_V1_MODEL_CHECKPOINT_NAME = 'b1_50epoch_best_macro_f1.safetensors'
+AOI_V1_MODEL_CONFIG = {
+	'module': AOI_V1_MODEL_MODULE,
+	'checkpoint_name': AOI_V1_MODEL_CHECKPOINT_NAME,
+}
+
 
 DEFAULT_MODEL_PREFERENCES = {
 	LabelDataEnum.deadwood: dict(DEADWOOD_V1_MODEL_CONFIG),
@@ -85,6 +95,7 @@ class StatusEnum(str, Enum):
 	deadwood_segmentation = 'deadwood_segmentation'
 	forest_cover_segmentation = 'forest_cover_segmentation'
 	deadwood_treecover_combined_segmentation = 'deadwood_treecover_combined_segmentation'
+	aoi_segmentation = 'aoi_segmentation'
 	audit_in_progress = 'audit_in_progress'
 
 
@@ -120,6 +131,7 @@ class TaskTypeEnum(str, Enum):
 	deadwood_v1 = 'deadwood_v1'  # Run deadwood segmentation
 	treecover_v1 = 'treecover_v1'  # Run tree cover segmentation
 	deadwood_treecover_combined_v2 = 'deadwood_treecover_combined_v2'  # Run combined deadwood+treecover segmentation
+	aoi_v1 = 'aoi_v1'  # Auto-generate the dataset area of interest (AOI) polygon
 	geotiff = 'geotiff'  # Convert to geotiff
 	metadata = 'metadata'  # Extract metadata
 	odm_processing = 'odm_processing'  # ODM raw image processing
@@ -143,6 +155,7 @@ class TaskTypeEnum(str, Enum):
 			'deadwood_v1': 'Deadwood',
 			'treecover_v1': 'Tree Cover',
 			'deadwood_treecover_combined_v2': 'Deadwood+Treecover (v2)',
+			'aoi_v1': 'AOI',
 			'geotiff': 'GeoTIFF',
 			'metadata': 'Metadata',
 			'odm_processing': 'ODM',
@@ -194,6 +207,8 @@ class Status(BaseModel):
 	is_deadwood_done: bool = False
 	is_forest_cover_done: bool = False
 	is_combined_model_done: bool = False
+	is_aoi_done: bool = False
+	is_aoi_required: bool = False
 	is_metadata_done: bool = False
 	is_odm_done: bool = False
 	has_error: bool = False

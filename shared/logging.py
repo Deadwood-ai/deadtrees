@@ -23,6 +23,7 @@ class LogCategory(Enum):
 	THUMBNAIL = 'thumb'  # Thumbnail creation
 	DEADWOOD = 'deadwood'  # Deadwood segmentation
 	TREECOVER = 'treecover'  # Tree cover segmentation
+	AOI = 'aoi'  # Automatic area-of-interest segmentation
 	FOREST = 'forest'  # Forest cover analysis
 	METADATA = 'metadata'  # Metadata processing
 
