@@ -8,6 +8,7 @@ import { GeoTIFF } from "ol/source";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { fromLonLat } from "ol/proj";
 
+import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import { getDeadwoodCOGUrl, getForestCOGUrl } from "../../utils/getDeadwoodCOGUrl";
 import { getWaybackTileUrl } from "../../utils/waybackVersions";
 
@@ -26,6 +27,7 @@ const createRasterSource = (url: string) =>
     sources: [{ url, bands: [1], min: 0, max: 255 }],
     normalize: true,
     interpolate: false,
+    sourceOptions: COG_SOURCE_OPTIONS,
   });
 
 const MiniSatelliteMap = () => {

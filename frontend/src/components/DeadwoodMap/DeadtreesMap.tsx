@@ -44,6 +44,7 @@ import {
   getForestCOGUrl,
   type MapModelVersion,
 } from "../../utils/getDeadwoodCOGUrl";
+import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import {
   createOpenFreeMapLibertyLayerGroup,
   createStandardMapControls,
@@ -116,6 +117,7 @@ const createDeadwoodSource = (year: string, version: MapModelVersion) => {
     ],
     normalize: true,
     interpolate: false,
+    sourceOptions: COG_SOURCE_OPTIONS,
   });
 };
 
@@ -127,6 +129,7 @@ const createForestSource = (year: string, version: MapModelVersion) => {
     ],
     normalize: true,
     interpolate: false,
+    sourceOptions: COG_SOURCE_OPTIONS,
   });
 };
 

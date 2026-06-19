@@ -27,6 +27,7 @@ import { createDeadwoodVectorLayer, createForestCoverVectorLayer } from "../Data
 import { useDatasetLabelTypes } from "../../hooks/useDatasetLabelTypes";
 import { useDatasetDetailsMap } from "../../hooks/useDatasetDetailsMapProvider";
 import { createOpenFreeMapLibertyLayerGroup, createStandardMapControls } from "../../utils/basemaps";
+import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import { hasForestCoverPredictionOutput } from "../../utils/predictionAvailability";
 
 interface Props {
@@ -101,6 +102,7 @@ export default function CorrectionEditorView({ dataset, initialLayerType, onClos
           },
         ],
         convertToRGB: true,
+        sourceOptions: COG_SOURCE_OPTIONS,
       }),
       maxZoom: 23,
       cacheSize: 4096,
