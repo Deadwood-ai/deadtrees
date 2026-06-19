@@ -14,7 +14,7 @@ import { usePublications } from "../hooks/usePublications";
 import { ReactNode, useMemo } from "react";
 import LogoBannerBand from "../components/Home/LogoBanner";
 import { useData } from "../hooks/useDataProvider";
-import ReactPlayer from "react-player";
+import ReactPlayer from "../components/ReactPlayerCompat";
 
 export default function About() {
   const coreTeam = [
