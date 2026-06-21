@@ -21,13 +21,24 @@ interface OrthoTileSearchProps {
 // Draw highlight tiles above all other layers.
 const HIGHLIGHT_Z_INDEX = 9999;
 
-/** Purple highlight whose opacity scales with relative relevance. */
-function styleForSimilarity(similarity: number, maxSimilarity: number): Style {
-  const norm = maxSimilarity > 0 ? similarity / maxSimilarity : similarity;
-  const alpha = 0.12 + 0.5 * Math.max(0, Math.min(1, norm));
+// Warm "heat" highlight that reads well over green/brown aerial imagery.
+const FILL_RGB = "249, 115, 22"; // orange-500
+const STROKE_RGB = "194, 65, 12"; // orange-700
+
+// Only highlight tiles that are reasonably confident relative to the best match
+// (and above a small absolute floor), so a search highlights a handful of tiles
+// rather than the whole orthophoto.
+const RELATIVE_FLOOR = 0.5;
+const ABSOLUTE_FLOOR = 0.12;
+
+/** Heat highlight whose fill AND border opacity scale with normalized relevance. */
+function styleForNorm(norm: number): Style {
+  const n = Math.max(0, Math.min(1, norm));
+  const fillAlpha = 0.06 + 0.34 * n;
+  const strokeAlpha = 0.25 + 0.65 * n;
   return new Style({
-    stroke: new Stroke({ color: "rgba(124, 58, 237, 0.95)", width: 2 }),
-    fill: new Fill({ color: `rgba(168, 85, 247, ${alpha.toFixed(2)})` }),
+    stroke: new Stroke({ color: `rgba(${STROKE_RGB}, ${strokeAlpha.toFixed(2)})`, width: 1.5 }),
+    fill: new Fill({ color: `rgba(${FILL_RGB}, ${fillAlpha.toFixed(2)})` }),
   });
 }
 
@@ -58,41 +69,37 @@ export default function OrthoTileSearch({ map, datasetId, initialQuery }: OrthoT
   }, [map]);
 
   const renderTiles = useCallback(
-    (tiles: TileSearchResult[]) => {
+    (tiles: TileSearchResult[]): number => {
       const layer = layerRef.current;
-      if (!layer || !map) return;
+      if (!layer || !map) return 0;
       const source = layer.getSource();
-      if (!source) return;
+      if (!source) return 0;
       source.clear();
-      if (!tiles.length) return;
+      if (!tiles.length) return 0;
+
+      // Drop low-confidence tiles: keep those at least RELATIVE_FLOOR of the best
+      // match and above the absolute floor.
+      const maxSimilarity = Math.max(...tiles.map((t) => t.similarity));
+      const floor = Math.max(ABSOLUTE_FLOOR, RELATIVE_FLOOR * maxSimilarity);
+      const kept = tiles.filter((t) => t.similarity >= floor);
+      if (!kept.length) return 0;
 
       const projection = map.getView().getProjection();
       const format = new GeoJSON();
-      const maxSimilarity = Math.max(...tiles.map((t) => t.similarity));
+      const span = Math.max(1e-6, maxSimilarity - floor);
 
-      const features = tiles.map((tile) => {
+      const features = kept.map((tile) => {
         const feature = format.readFeature(
           { type: "Feature", geometry: tile.geometry, properties: {} },
           { dataProjection: "EPSG:4326", featureProjection: projection },
         ) as Feature;
-        feature.setStyle(styleForSimilarity(tile.similarity, maxSimilarity));
+        // Normalize opacity across the kept range so the best match is fully
+        // saturated and the weakest kept tile is still faintly visible.
+        feature.setStyle(styleForNorm((tile.similarity - floor) / span));
         return feature;
       });
       source.addFeatures(features);
-
-      // Zoom to the single best-matching tile.
-      const bestIndex = tiles.reduce(
-        (best, tile, idx) => (tile.similarity > tiles[best].similarity ? idx : best),
-        0,
-      );
-      const bestGeometry = features[bestIndex]?.getGeometry();
-      if (bestGeometry) {
-        map.getView().fit(bestGeometry.getExtent(), {
-          padding: [80, 80, 80, 80],
-          maxZoom: 18,
-          duration: 500,
-        });
-      }
+      return kept.length;
     },
     [map],
   );
@@ -115,8 +122,7 @@ export default function OrthoTileSearch({ map, datasetId, initialQuery }: OrthoT
       setError(null);
       try {
         const tiles = await searchTiles(trimmed, datasetId);
-        renderTiles(tiles);
-        setMatchCount(tiles.length);
+        setMatchCount(renderTiles(tiles));
       } catch (e) {
         setError(e instanceof Error ? e.message : "Search failed");
       } finally {
@@ -152,10 +158,14 @@ export default function OrthoTileSearch({ map, datasetId, initialQuery }: OrthoT
       />
       {matchCount !== null && (
         <div className="mt-1 flex items-center justify-between rounded bg-white/90 px-2 py-0.5 text-xs text-gray-600 shadow">
-          <span>{matchCount} matching tiles highlighted</span>
+          <span>
+            {matchCount > 0
+              ? `${matchCount} matching ${matchCount === 1 ? "tile" : "tiles"} highlighted`
+              : "No strong matches in this orthophoto"}
+          </span>
           <button
             type="button"
-            className="font-medium text-purple-600 hover:text-purple-800"
+            className="font-medium text-orange-600 hover:text-orange-800"
             onClick={clearHighlights}
           >
             Clear
