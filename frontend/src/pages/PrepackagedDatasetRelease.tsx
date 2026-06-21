@@ -36,21 +36,6 @@ function getSafeHttpUrl(url: string | null) {
   }
 }
 
-function buildSourceCodeUrl(
-  repositoryUrl: string | null,
-  sourceFilePath: string | null,
-  sourceCommit: string | null,
-) {
-  const safeRepositoryUrl = getSafeHttpUrl(repositoryUrl);
-  if (!safeRepositoryUrl || !sourceFilePath || !sourceCommit) return null;
-
-  const encodedPath = sourceFilePath
-    .split("/")
-    .map(encodeURIComponent)
-    .join("/");
-  return `${safeRepositoryUrl}/blob/${encodeURIComponent(sourceCommit)}/${encodedPath}`;
-}
-
 function getShortCommit(sourceCommit: string | null) {
   return sourceCommit ? sourceCommit.slice(0, 7) : null;
 }
@@ -86,13 +71,6 @@ export default function PrepackagedDatasetRelease() {
               : prepackagedNumberFormatter.format(latestVersion.dataset_count),
         },
         {
-          label: "Artifacts",
-          value:
-            latestVersion.artifact_count === null
-              ? "Unknown"
-              : prepackagedNumberFormatter.format(latestVersion.artifact_count),
-        },
-        {
           label: "Built",
           value: formatPrepackagedDate(latestVersion.built_at),
         },
@@ -110,20 +88,11 @@ export default function PrepackagedDatasetRelease() {
   const safeRepositoryUrl = datasetPackage
     ? getSafeHttpUrl(datasetPackage.source_repository_url)
     : null;
-  const sourceCodeUrl =
-    datasetPackage && latestVersion
-      ? buildSourceCodeUrl(
-          datasetPackage.source_repository_url,
-          datasetPackage.source_file_path,
-          latestVersion.source_commit,
-        )
-      : null;
   const shortSourceCommit = latestVersion
     ? getShortCommit(latestVersion.source_commit)
     : null;
   const hasReproducibilityMetadata = Boolean(
     datasetPackage?.technical_description ||
-    sourceCodeUrl ||
     safeRepositoryUrl ||
     latestVersion?.source_package_version ||
     shortSourceCommit,
@@ -231,12 +200,6 @@ export default function PrepackagedDatasetRelease() {
                   </div>
                   <dl className="mt-4 grid gap-3 text-sm text-gray-600 sm:grid-cols-2">
                     <div>
-                      <dt className="font-semibold text-gray-800">Published</dt>
-                      <dd className="m-0 mt-0.5">
-                        {formatPrepackagedDate(latestVersion.published_at)}
-                      </dd>
-                    </div>
-                    <div>
                       <dt className="font-semibold text-gray-800">Version</dt>
                       <dd className="m-0 mt-0.5">v{latestVersion.version}</dd>
                     </div>
@@ -255,14 +218,6 @@ export default function PrepackagedDatasetRelease() {
                       </div>
                     )}
                   </dl>
-                  {latestVersion.known_issues && (
-                    <Alert
-                      className="mt-4"
-                      type="warning"
-                      showIcon
-                      message={latestVersion.known_issues}
-                    />
-                  )}
                 </div>
               </div>
             </div>
@@ -305,24 +260,6 @@ export default function PrepackagedDatasetRelease() {
                             className="inline-flex max-w-full items-center gap-2 rounded-md border border-[#1B5E35]/20 bg-[#f8faf9] px-3 py-2 font-semibold text-[#1B5E35] transition hover:border-[#1B5E35]/40 hover:bg-[#eef6f0]"
                           >
                             <span className="truncate">Open repository</span>
-                            <ExportOutlined className="shrink-0 text-xs" />
-                          </a>
-                        </dd>
-                      </div>
-                    )}
-                    {sourceCodeUrl && (
-                      <div>
-                        <dt className="font-semibold text-gray-800">
-                          Source file
-                        </dt>
-                        <dd className="m-0 mt-2">
-                          <a
-                            href={sourceCodeUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex max-w-full items-center gap-2 rounded-md border border-[#1B5E35]/20 bg-[#f8faf9] px-3 py-2 font-semibold text-[#1B5E35] transition hover:border-[#1B5E35]/40 hover:bg-[#eef6f0]"
-                          >
-                            <span className="truncate">Open source file</span>
                             <ExportOutlined className="shrink-0 text-xs" />
                           </a>
                         </dd>
