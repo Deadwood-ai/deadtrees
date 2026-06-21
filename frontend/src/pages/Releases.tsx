@@ -68,7 +68,6 @@ function ReleaseCard({
               icon={<DatabaseOutlined />}
               onClick={onOpen}
               className="min-h-11"
-              disabled={!isAvailable}
             >
               Open release
             </Button>
