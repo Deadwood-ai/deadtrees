@@ -553,7 +553,7 @@ export const dteAerialRelease: DteAerialRelease = {
     "DTE-aerial-bench: A multi-resolution manually labelled aerial benchmark for tree cover and mortality segmentation",
   type: "benchmark-dataset",
   typeLabel: "Benchmark dataset",
-  status: "coming-soon",
+  status: "available",
   summary:
     "A curated aerial benchmark for tree cover and mortality segmentation, built from high-resolution drone and aircraft orthophotos with expert masks.",
   prepackagedPackageSlugs: [

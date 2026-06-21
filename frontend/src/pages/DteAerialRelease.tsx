@@ -9,7 +9,6 @@ import { useNavigate } from "react-router-dom";
 
 import { DteAerialReleaseGallery } from "../components/Releases/DteAerialReleaseGallery";
 import { DteAerialReleaseSiteMap } from "../components/Releases/DteAerialReleaseSiteMap";
-import { PrepackagedReleaseDownloads } from "../components/Releases/PrepackagedReleaseDownloads";
 import {
   getReleaseStats,
   getCoarseBiomeGroup,
@@ -24,8 +23,6 @@ interface DteAerialReleaseProps {
 export default function DteAerialRelease({ release }: DteAerialReleaseProps) {
   const navigate = useNavigate();
   const benchmark = release.dteAerial;
-  const prepackagedPackageSlugs = release.prepackagedPackageSlugs ?? [];
-  const hasPrepackagedDownloads = prepackagedPackageSlugs.length > 0;
   const { adminInfoByDatasetId, isAdminInfoLoading } =
     useDteAerialDatasetAdminInfo(release);
   const heroTagline = release.title.startsWith(`${release.name}: `)
@@ -33,11 +30,6 @@ export default function DteAerialRelease({ release }: DteAerialReleaseProps) {
     : release.title;
 
   const releaseStats = useMemo(() => getReleaseStats(release), [release]);
-  const scrollToDownloads = () => {
-    document
-      .getElementById("dataset-download-placeholder")
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
 
   const biomeCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -81,17 +73,13 @@ export default function DteAerialRelease({ release }: DteAerialReleaseProps) {
                 type="primary"
                 size="large"
                 icon={<DownloadOutlined />}
-                disabled={!hasPrepackagedDownloads}
-                onClick={scrollToDownloads}
+                disabled
                 className="min-h-11"
               >
                 View downloads
               </Button>
-              <Tag
-                className="m-0"
-                color={hasPrepackagedDownloads ? "green" : "warning"}
-              >
-                {hasPrepackagedDownloads ? "Available" : "Coming soon"}
+              <Tag className="m-0" color="warning">
+                Coming soon
               </Tag>
             </div>
           </div>
@@ -158,37 +146,6 @@ export default function DteAerialRelease({ release }: DteAerialReleaseProps) {
         adminInfoByDatasetId={adminInfoByDatasetId}
         isAdminInfoLoading={isAdminInfoLoading}
       />
-
-      <section
-        id="dataset-download-placeholder"
-        data-testid="release-artifacts"
-        className="border-t border-gray-200 bg-white"
-      >
-        <div className="mx-auto max-w-7xl px-4 py-16 md:px-8 md:py-20">
-          <div className="max-w-3xl">
-            <p className="m-0 text-sm font-semibold uppercase tracking-wider text-[#1B5E35]">
-              Release artifacts
-            </p>
-            <h2 className="m-0 mt-3 text-3xl font-semibold leading-tight text-gray-950 md:text-4xl">
-              Dataset package
-            </h2>
-            <p className="mt-3 text-base leading-7 text-gray-600">
-              The gallery above is the live preview of the dataset. ZIP
-              artifacts are issued as short-lived signed links after sign-in so
-              downloads can be audited. Use the main button for a browser
-              download, or open the menu next to it to copy wget/curl commands
-              for server-side downloads. Copied commands include expiring signed
-              links; regenerate a command if one has expired.
-            </p>
-            <div className="mt-6">
-              <PrepackagedReleaseDownloads
-                packageSlugs={prepackagedPackageSlugs}
-                returnTo={`/releases/${release.slug}`}
-              />
-            </div>
-          </div>
-        </div>
-      </section>
     </main>
   );
 }
