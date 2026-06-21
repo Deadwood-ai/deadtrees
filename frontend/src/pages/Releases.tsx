@@ -49,7 +49,7 @@ function ReleaseCard({
       <div className="grid gap-8 p-6 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] md:p-10">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <Tag color={isAvailable ? "green" : "default"} className="m-0">
+            <Tag color={isAvailable ? "green" : "warning"} className="m-0">
               {isAvailable ? "Available" : "Coming soon"}
             </Tag>
             <Tag className="m-0">{typeLabel}</Tag>
@@ -68,7 +68,6 @@ function ReleaseCard({
               icon={<DatabaseOutlined />}
               onClick={onOpen}
               className="min-h-11"
-              disabled={!isAvailable}
             >
               Open release
             </Button>
@@ -106,13 +105,6 @@ function buildPrepackagedStats(pkg: IPrepackagedDatasetPackage): ReleaseStat[] {
         v.dataset_count === null
           ? "Unknown"
           : prepackagedNumberFormatter.format(v.dataset_count),
-    },
-    {
-      label: "Artifacts",
-      value:
-        v.artifact_count === null
-          ? "Unknown"
-          : prepackagedNumberFormatter.format(v.artifact_count),
     },
     { label: "Built", value: formatPrepackagedDate(v.built_at) },
   ];
