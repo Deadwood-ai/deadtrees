@@ -14,7 +14,7 @@ export default function Footer({ className = "" }: FooterProps) {
           {/* Left side - Copyright */}
           <div className="mb-4 md:mb-0">
             {/* <img src="/assets/logo.png" alt="deadtrees.earth" className="h-8" /> */}
-            <span className="font-inter text-sm text-gray-600">© 2025 deadtrees.earth</span>
+            <span className="font-inter text-sm text-gray-600">© 2026 deadtrees.earth</span>
           </div>
 
           {/* Center - Links */}
