@@ -195,27 +195,6 @@ export default function Releases() {
             );
           })}
         </div>
-
-        <div className="mt-10 rounded-2xl border border-dashed border-gray-300 bg-white/60 px-6 py-8 text-center md:px-10">
-          <span className="inline-flex items-center rounded-full bg-[#E8F3EB] px-3 py-1 text-xs font-bold uppercase tracking-wide text-[#1B5E35]">
-            More coming
-          </span>
-          <h3 className="m-0 mt-4 text-lg font-semibold text-gray-900 md:text-xl">
-            Additional releases are in preparation
-          </h3>
-          <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-gray-600">
-            New resources, including datasets, models, and benchmark
-            collections, will appear here as they are finalised. If you have a
-            release to contribute,{" "}
-            <a
-              href="mailto:info@deadtrees.earth?subject=Release contribution"
-              className="font-semibold text-[#1B5E35] underline"
-            >
-              get in touch
-            </a>
-            .
-          </p>
-        </div>
       </section>
     </main>
   );
