@@ -135,7 +135,8 @@ export default function Releases() {
           <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-gray-600">
             Stable datasets and benchmarks with metadata and previews for
             scientific reuse—including versioned ZIP packages sourced from
-            public CC BY data.
+            public CC BY data (downloads require sign-in and use short-lived
+            links).
           </p>
         </div>
       </section>
