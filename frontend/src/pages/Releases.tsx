@@ -107,13 +107,6 @@ function buildPrepackagedStats(pkg: IPrepackagedDatasetPackage): ReleaseStat[] {
           ? "Unknown"
           : prepackagedNumberFormatter.format(v.dataset_count),
     },
-    {
-      label: "Artifacts",
-      value:
-        v.artifact_count === null
-          ? "Unknown"
-          : prepackagedNumberFormatter.format(v.artifact_count),
-    },
     { label: "Built", value: formatPrepackagedDate(v.built_at) },
   ];
 }
