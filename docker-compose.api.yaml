@@ -23,6 +23,9 @@ services:
     environment:
       BASE_DIR: /data
       PYTHONPATH: /app
+      # Persist the OpenCLIP text-encoder weights on the /data mount so the
+      # ~3.9GB download happens once and survives container restarts.
+      OPENCLIP_CACHE_DIR: /data/assets/openclip_cache
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_KEY: ${SUPABASE_KEY}
       DEV_MODE: false

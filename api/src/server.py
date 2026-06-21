@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from shared.__version__ import __version__
-from .routers import process, upload, info, auth, download, dte_stats, prepackaged
+from .routers import process, upload, info, auth, download, dte_stats, prepackaged, search
 
 app = FastAPI(
 	title='Deadwood-AI API',
@@ -53,6 +53,9 @@ app.include_router(process.router)
 
 # add the DTE stats route (public, no auth)
 app.include_router(dte_stats.router)
+
+# add the open-vocabulary search query-embedding route (public, no auth)
+app.include_router(search.router)
 
 # add authenticated prepackaged dataset catalog and grant routes
 app.include_router(prepackaged.router)

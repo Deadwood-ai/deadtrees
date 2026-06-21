@@ -106,19 +106,24 @@ const PrivacyLink = () => (
   </Typography.Link>
 );
 
-const PREDICTION_PROCESSING_STEPS = [
-  "deadwood_v1",
-  "treecover_v1",
-  "deadwood_treecover_combined_v2",
-];
+// TEMP (local testing): segmentation prediction models, currently disabled below.
+// const PREDICTION_PROCESSING_STEPS = [
+//   "deadwood_v1",
+//   "treecover_v1",
+//   "deadwood_treecover_combined_v2",
+// ];
 
 const GEOTIFF_PROCESSING_STEPS = [
   "geotiff",
   "cog",
   "thumbnail",
   "metadata",
-  "aoi_v1",
-  ...PREDICTION_PROCESSING_STEPS,
+  // TEMP (local testing): segmentation models disabled to speed up uploads while
+  // testing COG + open-vocab search. Re-enable by un-commenting the two lines below.
+  // "aoi_v1",
+  // ...PREDICTION_PROCESSING_STEPS,
+  // Open-vocabulary tile embeddings run last (needs the standardized ortho).
+  "embeddings_v1",
 ];
 
 const RAW_IMAGES_PROCESSING_STEPS = [

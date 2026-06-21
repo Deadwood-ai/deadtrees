@@ -14,6 +14,8 @@ interface DataListProps {
   ) => void;
   searchValue: string;
   filterByViewport: boolean;
+  scores?: Map<number, number> | null;
+  semanticQuery?: string | null;
 }
 
 export default function DataList({
@@ -24,14 +26,18 @@ export default function DataList({
   onFilterClick,
   searchValue,
   filterByViewport,
+  scores,
+  semanticQuery,
 }: DataListProps) {
   const [nItems, setNItems] = useState(50);
 
   // Filter data by visible features in the map viewport only when:
-  // 1. Not searching
+  // 1. Not searching (text or semantic)
   // 2. Viewport filtering is enabled
   const visibleData =
-    !searchValue && filterByViewport ? data.filter((item) => visibleFeatures.includes(item.id.toString())) : data;
+    !searchValue && !scores && filterByViewport
+      ? data.filter((item) => visibleFeatures.includes(item.id.toString()))
+      : data;
 
   const handleMoreItems = () => {
     setNItems(nItems + 50);
@@ -63,6 +69,8 @@ export default function DataList({
                     hoveredItem={hoveredItem}
                     setHoveredItem={setHoveredItem}
                     onFilterClick={onFilterClick}
+                    score={scores?.get(item.id) ?? null}
+                    semanticQuery={semanticQuery ?? null}
                   />
                 ),
             )}

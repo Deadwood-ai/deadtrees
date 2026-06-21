@@ -25,6 +25,10 @@ interface ListItemProps {
       | "admin_level_3"
       | "biome",
   ) => void;
+  // Open-vocabulary search relevance (0..1) when a semantic query is active.
+  score?: number | null;
+  // Active semantic query, forwarded to the details page to highlight tiles.
+  semanticQuery?: string | null;
 }
 
 const ListItem = ({
@@ -33,9 +37,16 @@ const ListItem = ({
   setHoveredItem,
   hoveredItem,
   onFilterClick,
+  score,
+  semanticQuery,
 }: ListItemProps) => {
   const navigate = useNavigate();
   const { setNavigationSource } = useDatasetDetailsMap();
+
+  // Forward the active query so the details page can highlight matching tiles.
+  const datasetUrl = semanticQuery
+    ? `/dataset/${item.id}?q=${encodeURIComponent(semanticQuery)}`
+    : `/dataset/${item.id}`;
 
   const handleMouseEnter = () => {
     if (setHoveredItem) {
@@ -49,9 +60,26 @@ const ListItem = ({
     }
   };
 
-  const onClickHandler = (item: IDataset) => {
+  const openInNewTab = () => {
+    window.open(datasetUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const onClickHandler = (e: React.MouseEvent) => {
+    // Ctrl/Cmd-click opens in a new tab, like a normal link.
+    if (e.ctrlKey || e.metaKey) {
+      openInNewTab();
+      return;
+    }
     setNavigationSource("dataset");
-    navigate(`/dataset/${item.id}`);
+    navigate(datasetUrl);
+  };
+
+  // Middle-click (or any auxiliary button) opens the dataset in a new tab.
+  const onAuxClickHandler = (e: React.MouseEvent) => {
+    if (e.button === 1) {
+      e.preventDefault();
+      openInNewTab();
+    }
   };
 
   const onClickFilterHandler = (
@@ -89,7 +117,8 @@ const ListItem = ({
       }`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      onClick={() => onClickHandler(item)}
+      onClick={onClickHandler}
+      onAuxClick={onAuxClickHandler}
     >
       <div className="relative h-16 w-16 min-h-16 min-w-16 shrink-0 overflow-hidden rounded-lg">
         <img
@@ -133,6 +162,15 @@ const ListItem = ({
             </Tooltip>
           </div>
           <div className="flex flex-col items-end shrink-0 pl-1">
+            {typeof score === "number" && (
+              <Tag
+                color="purple"
+                className="m-0 mb-0.5 px-1 py-0 text-[10px] leading-4"
+                data-testid="dataset-semantic-score"
+              >
+                {Math.round(score * 100)}% match
+              </Tag>
+            )}
             <div className="pt-0.5 text-xs whitespace-nowrap">
               {new Date(
                 parseInt(item.aquisition_year),

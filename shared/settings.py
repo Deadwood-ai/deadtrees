@@ -28,6 +28,7 @@ _tables = {
 	'queue': 'v2_queue',
 	'queue_positions': 'v2_queue_positions',
 	'model_preferences': 'v2_model_preferences',
+	'tile_embeddings': 'v2_tile_embeddings',
 }
 
 
@@ -328,6 +329,10 @@ class Settings(BaseSettings):
 	@property
 	def model_preferences_table(self) -> str:
 		return self._tables['model_preferences']
+
+	@property
+	def tile_embeddings_table(self) -> str:
+		return self._tables['tile_embeddings']
 
 
 settings = Settings()

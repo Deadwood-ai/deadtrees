@@ -52,6 +52,9 @@ export interface AnalyticsEventPropertiesMap {
   dataset_search_used: AnalyticsBaseProperties & {
     search_length: number;
   };
+  dataset_semantic_search_used: AnalyticsBaseProperties & {
+    search_length: number;
+  };
   dataset_filter_applied: AnalyticsBaseProperties & {
     filter_type: string;
     filter_value?: string;
