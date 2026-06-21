@@ -36,10 +36,6 @@ function getSafeHttpUrl(url: string | null) {
   }
 }
 
-function getShortCommit(sourceCommit: string | null) {
-  return sourceCommit ? sourceCommit.slice(0, 7) : null;
-}
-
 export default function PrepackagedDatasetRelease() {
   const { slug } = useParams();
   const navigate = useNavigate();
@@ -88,14 +84,10 @@ export default function PrepackagedDatasetRelease() {
   const safeRepositoryUrl = datasetPackage
     ? getSafeHttpUrl(datasetPackage.source_repository_url)
     : null;
-  const shortSourceCommit = latestVersion
-    ? getShortCommit(latestVersion.source_commit)
-    : null;
   const hasReproducibilityMetadata = Boolean(
     datasetPackage?.technical_description ||
     safeRepositoryUrl ||
-    latestVersion?.source_package_version ||
-    shortSourceCommit,
+    latestVersion?.source_package_version,
   );
 
   return (
@@ -262,14 +254,6 @@ export default function PrepackagedDatasetRelease() {
                             <span className="truncate">Open repository</span>
                             <ExportOutlined className="shrink-0 text-xs" />
                           </a>
-                        </dd>
-                      </div>
-                    )}
-                    {shortSourceCommit && (
-                      <div>
-                        <dt className="font-semibold text-gray-800">Commit</dt>
-                        <dd className="m-0 mt-1 font-mono text-gray-700">
-                          {shortSourceCommit}
                         </dd>
                       </div>
                     )}
