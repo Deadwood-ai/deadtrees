@@ -144,8 +144,7 @@ export default function PrepackagedDatasetRelease() {
                 {datasetPackage.description || datasetPackage.summary}
               </p>
               <p className="mt-6 max-w-2xl text-sm leading-6 text-gray-500">
-                Metadata is public. ZIP downloads require sign-in and use
-                short-lived links.
+                Metadata is public.
               </p>
             </div>
 
