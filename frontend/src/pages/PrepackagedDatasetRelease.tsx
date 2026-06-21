@@ -143,9 +143,6 @@ export default function PrepackagedDatasetRelease() {
               <p className="mt-5 max-w-3xl text-lg leading-8 text-gray-600">
                 {datasetPackage.description || datasetPackage.summary}
               </p>
-              <p className="mt-6 max-w-2xl text-sm leading-6 text-gray-500">
-                Metadata is public.
-              </p>
             </div>
 
             <div className="self-start overflow-hidden rounded-lg border border-gray-200 bg-white">
