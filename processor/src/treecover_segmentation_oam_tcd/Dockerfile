@@ -45,8 +45,20 @@ ENV PATH=/home/deadtrees/.local/bin:$PATH
 
 # Switch to root to install packages system-wide (for root access like ODM)
 USER root
-RUN python -m pip install --no-cache-dir -r requirements.txt
-RUN python -m pip install --no-cache-dir -e .
+
+# Pin torch/torchvision to a CUDA 12.1 build. tcd's requirements only ask for
+# `torch>=2` with unpinned torchvision, so an unconstrained install pulls the
+# latest cu130 wheel — too new for CUDA 12.x host drivers, which makes torch
+# silently disable CUDA and run inference on CPU. A cu121 build is portable
+# across the GPU fleet (any driver supporting CUDA >= 12.1 runs it).
+RUN python -m pip install --no-cache-dir \
+    torch==2.3.0+cu121 torchvision==0.18.0+cu121 \
+    --index-url https://download.pytorch.org/whl/cu121
+
+# Constrain the rest of the install so the unpinned deps can't upgrade torch.
+RUN printf 'torch==2.3.0\ntorchvision==0.18.0\n' > /tmp/torch-constraints.txt
+RUN PIP_CONSTRAINT=/tmp/torch-constraints.txt python -m pip install --no-cache-dir -r requirements.txt
+RUN PIP_CONSTRAINT=/tmp/torch-constraints.txt python -m pip install --no-cache-dir -e .
 
 # Create the entrypoint script
 COPY --chown=deadtrees:deadtrees entrypoint.sh /home/deadtrees/entrypoint.sh
