@@ -25,11 +25,15 @@ const HIGHLIGHT_Z_INDEX = 9999;
 const FILL_RGB = "249, 115, 22"; // orange-500
 const STROKE_RGB = "194, 65, 12"; // orange-700
 
-// Only highlight tiles that are reasonably confident relative to the best match
-// (and above a small absolute floor), so a search highlights a handful of tiles
-// rather than the whole orthophoto.
-const RELATIVE_FLOOR = 0.5;
-const ABSOLUTE_FLOOR = 0.12;
+// Backend similarity is a calibrated match probability (softmax of the query vs
+// a bank of background prompts), so it's comparable across queries and has a
+// meaningful noise floor: "nothing here" queries top out around ~0.05-0.09,
+// while genuine matches form a cluster above ~0.10. ABSOLUTE_FLOOR is therefore
+// a principled minimum confidence (keeps no-match searches empty), and
+// RELATIVE_FLOOR keeps broad queries focused on their strongest regions without
+// dropping graded matches. Weak kept tiles fade out via the opacity ramp below.
+const RELATIVE_FLOOR = 0.35;
+const ABSOLUTE_FLOOR = 0.1;
 
 /** Heat highlight whose fill AND border opacity scale with normalized relevance. */
 function styleForNorm(norm: number): Style {
