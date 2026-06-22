@@ -9,6 +9,27 @@ const expectArchiveReady = async (page: Page) => {
   return firstDataset;
 };
 
+const waitForArchiveReadModelResponse = async (page: Page) =>
+  page
+    .waitForResponse(
+      (response) =>
+        response.url().includes("/rest/v1/public_dataset_archive_items"),
+      { timeout: 20_000 },
+    )
+    .catch(() => null);
+
+const skipIfArchiveReadModelMissing = (
+  archiveResponse: Awaited<ReturnType<typeof waitForArchiveReadModelResponse>>,
+) => {
+  test.skip(
+    archiveResponse?.status() === 404,
+    "archive read-model migration has not been deployed to this backend yet",
+  );
+
+  expect(archiveResponse, "archive read-model request was not issued").not.toBeNull();
+  expect(archiveResponse?.ok(), "archive read-model request failed").toBe(true);
+};
+
 const openArchiveFromHome = async (page: Page) => {
   await page.goto("/");
 
@@ -17,8 +38,10 @@ const openArchiveFromHome = async (page: Page) => {
     page.getByRole("img", { name: "deadtrees.earth" }).first(),
   ).toBeVisible();
 
+  const archiveResponsePromise = waitForArchiveReadModelResponse(page);
   await page.getByRole("menuitem", { name: "Drone Archive" }).click();
   await expect(page).toHaveURL(/\/dataset$/);
+  skipIfArchiveReadModelMissing(await archiveResponsePromise);
 
   return expectArchiveReady(page);
 };
@@ -166,7 +189,29 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
   test("archive journey searches public data and applies a biome filter", async ({
     page,
   }) => {
+    const restRequests: string[] = [];
+
+    page.on("request", (request) => {
+      const url = request.url();
+      if (url.includes("/rest/v1/")) {
+        restRequests.push(decodeURIComponent(url));
+      }
+    });
+
     await openArchiveFromHome(page);
+
+    expect(
+      restRequests.some((url) =>
+        url.includes("/rest/v1/public_dataset_archive_items"),
+      ),
+    ).toBe(true);
+    expect(
+      restRequests.some(
+        (url) =>
+          url.includes("/rest/v1/v2_full_dataset_view_public") &&
+          url.includes("select=*"),
+      ),
+    ).toBe(false);
 
     const searchInput = page.getByTestId("dataset-search-input");
     await searchInput.fill("no-matching-public-dataset-smoke-query");
@@ -293,6 +338,18 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
   test("satellite map journey loads public layers and read-only controls", async ({
     page,
   }) => {
+    const earlyWaybackMetadataRequests: string[] = [];
+
+    page.on("request", (request) => {
+      const url = request.url();
+      if (
+        url.toLowerCase().includes("wayback") &&
+        url.toLowerCase().includes("metadata")
+      ) {
+        earlyWaybackMetadataRequests.push(url);
+      }
+    });
+
     await page.goto("/");
 
     await page.getByRole("button", { name: "Explore Map" }).click();
@@ -309,6 +366,7 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
 
     const controls = page.getByTestId("deadtrees-layer-controls");
     await expect(controls).toBeVisible();
+    expect(earlyWaybackMetadataRequests).toHaveLength(0);
     await expect(
       controls.getByRole("checkbox", { name: "Tree cover [%]" }),
     ).toBeChecked();

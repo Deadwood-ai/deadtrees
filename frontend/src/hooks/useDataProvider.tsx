@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, useState } from "react";
-import { usePublicDatasets, useUserDatasets, useAuthors } from "./useDatasets";
-import { IDataset, IThumbnail } from "../types/dataset";
+import { usePublicDatasetArchiveItems, usePublicDatasets, useUserDatasets, useAuthors } from "./useDatasets";
+import { IDataset, IDatasetArchiveItem, IThumbnail } from "../types/dataset";
 import { useLocation } from "react-router-dom";
 
 interface DataProviderProps {
@@ -13,7 +13,7 @@ interface AuthorOption {
 }
 
 type DataContextType = {
-  data: IDataset[] | undefined;
+  data: Array<IDataset | IDatasetArchiveItem> | undefined;
   filter: string;
   setFilter: (filter: string) => void;
   setFilterTag: (filterTag: string) => void;
@@ -47,9 +47,19 @@ const DataProvider = ({ children }: DataProviderProps) => {
     return false;
   }, [location.pathname]);
 
-  const { data: rawData, isLoading: isLoadingRawData } = usePublicDatasets({ enabled: shouldFetchDataContext });
+  const shouldFetchArchiveContext = location.pathname === "/dataset";
+  const shouldFetchFullPublicContext = shouldFetchDataContext && !shouldFetchArchiveContext;
+  const shouldFetchUserDatasets = location.pathname.startsWith("/profile");
+  const { data: publicData, isLoading: isLoadingPublicData } = usePublicDatasets({
+    enabled: shouldFetchFullPublicContext,
+  });
+  const { data: archiveData, isLoading: isLoadingArchiveData } = usePublicDatasetArchiveItems({
+    enabled: shouldFetchArchiveContext,
+  });
+  const rawData = shouldFetchArchiveContext ? archiveData : publicData;
+  const isLoadingRawData = shouldFetchArchiveContext ? isLoadingArchiveData : isLoadingPublicData;
   const { data: authors } = useAuthors({ enabled: shouldFetchDataContext });
-  const { data: userData } = useUserDatasets({ enabled: shouldFetchDataContext });
+  const { data: userData } = useUserDatasets({ enabled: shouldFetchUserDatasets });
 
   const [filter, setFilter] = useState<string>("");
   const [filterTag, setFilterTag] = useState<string>("");
