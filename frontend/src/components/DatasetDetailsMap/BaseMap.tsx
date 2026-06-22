@@ -110,7 +110,13 @@ export default function BaseMap({
 	} = useMapCore({
 		containerRef: mapContainerRef,
 		cogPath: data?.cog_path,
-		initialViewport: viewport,
+		// When arriving from the dataset list, ignore the persisted viewport and let
+		// the map fit the new orthophoto's extent. useMapCore reads initialViewport
+		// once at init, so the previous (stale) viewport would otherwise leave the
+		// imagery — and any tile-search highlights — centered on the old location
+		// until a full reload. (Resetting the stored viewport via an effect raced
+		// the init and didn't take.)
+		initialViewport: navigatedFrom === "dataset" ? { center: [0, 0], zoom: 2 } : viewport,
 		onViewportChange: setViewport,
 		onMapReady: (map) => {
 			setMap(map);
@@ -241,13 +247,6 @@ export default function BaseMap({
 			refreshVectors();
 		}
 	}, [refreshKey, refreshVectors]);
-
-	// Reset viewport when navigated from dataset
-	useEffect(() => {
-		if (navigatedFrom === "dataset") {
-			setViewport({ center: [0, 0], zoom: 2 });
-		}
-	}, [navigatedFrom, setViewport]);
 
 	// Edit handler
 	const handleEdit = useCallback(() => {

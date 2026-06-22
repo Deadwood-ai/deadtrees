@@ -52,63 +52,63 @@ export default function OrthoTileSearch({ map, datasetId, initialQuery }: OrthoT
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [matchCount, setMatchCount] = useState<number | null>(null);
-  const layerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  // Fetched results are kept in state (not drawn imperatively) so they can be
+  // re-rendered whenever the highlight layer is (re)created — e.g. React
+  // StrictMode's dev double-mount, or the map finishing init after a client-side
+  // navigation. Drawing only on fetch lost the highlights in those cases.
+  const [tiles, setTiles] = useState<TileSearchResult[]>([]);
+  const [layer, setLayer] = useState<VectorLayer<VectorSource> | null>(null);
   const autoRan = useRef(false);
 
   // Create a dedicated highlight layer once the map is available.
   useEffect(() => {
     if (!map) return;
-    const source = new VectorSource();
-    const layer = new VectorLayer({ source, zIndex: HIGHLIGHT_Z_INDEX });
-    layerRef.current = layer;
-    map.addLayer(layer);
+    const lyr = new VectorLayer({ source: new VectorSource(), zIndex: HIGHLIGHT_Z_INDEX });
+    map.addLayer(lyr);
+    setLayer(lyr);
     return () => {
-      map.removeLayer(layer);
-      layerRef.current = null;
+      map.removeLayer(lyr);
+      setLayer((prev) => (prev === lyr ? null : prev));
     };
   }, [map]);
 
-  const renderTiles = useCallback(
-    (tiles: TileSearchResult[]): number => {
-      const layer = layerRef.current;
-      if (!layer || !map) return 0;
-      const source = layer.getSource();
-      if (!source) return 0;
-      source.clear();
-      if (!tiles.length) return 0;
+  // Render the current results whenever they change OR the layer is recreated.
+  useEffect(() => {
+    if (!layer || !map) return;
+    const source = layer.getSource();
+    if (!source) return;
+    source.clear();
+    if (!tiles.length) {
+      setMatchCount(null);
+      return;
+    }
 
-      // Drop low-confidence tiles: keep those at least RELATIVE_FLOOR of the best
-      // match and above the absolute floor.
-      const maxSimilarity = Math.max(...tiles.map((t) => t.similarity));
-      const floor = Math.max(ABSOLUTE_FLOOR, RELATIVE_FLOOR * maxSimilarity);
-      const kept = tiles.filter((t) => t.similarity >= floor);
-      if (!kept.length) return 0;
+    // Drop low-confidence tiles: keep those at least RELATIVE_FLOOR of the best
+    // match and above the absolute floor.
+    const maxSimilarity = Math.max(...tiles.map((t) => t.similarity));
+    const floor = Math.max(ABSOLUTE_FLOOR, RELATIVE_FLOOR * maxSimilarity);
+    const kept = tiles.filter((t) => t.similarity >= floor);
+    const projection = map.getView().getProjection();
+    const format = new GeoJSON();
+    const span = Math.max(1e-6, maxSimilarity - floor);
 
-      const projection = map.getView().getProjection();
-      const format = new GeoJSON();
-      const span = Math.max(1e-6, maxSimilarity - floor);
-
-      const features = kept.map((tile) => {
-        const feature = format.readFeature(
-          { type: "Feature", geometry: tile.geometry, properties: {} },
-          { dataProjection: "EPSG:4326", featureProjection: projection },
-        ) as Feature;
-        // Normalize opacity across the kept range so the best match is fully
-        // saturated and the weakest kept tile is still faintly visible.
-        feature.setStyle(styleForNorm((tile.similarity - floor) / span));
-        return feature;
-      });
-      source.addFeatures(features);
-      return kept.length;
-    },
-    [map],
-  );
+    for (const tile of kept) {
+      const feature = format.readFeature(
+        { type: "Feature", geometry: tile.geometry, properties: {} },
+        { dataProjection: "EPSG:4326", featureProjection: projection },
+      ) as Feature;
+      // Normalize opacity across the kept range so the best match is fully
+      // saturated and the weakest kept tile is still faintly visible.
+      feature.setStyle(styleForNorm((tile.similarity - floor) / span));
+      source.addFeature(feature);
+    }
+    setMatchCount(kept.length);
+  }, [layer, tiles, map]);
 
   const clearHighlights = useCallback(() => {
     setQuery("");
-    setMatchCount(null);
     setError(null);
-    layerRef.current?.getSource()?.clear();
+    setTiles([]); // the render effect clears the layer + resets the count
   }, []);
 
   const run = useCallback(
@@ -121,15 +121,14 @@ export default function OrthoTileSearch({ map, datasetId, initialQuery }: OrthoT
       setLoading(true);
       setError(null);
       try {
-        const tiles = await searchTiles(trimmed, datasetId);
-        setMatchCount(renderTiles(tiles));
+        setTiles(await searchTiles(trimmed, datasetId)); // render happens in the effect
       } catch (e) {
         setError(e instanceof Error ? e.message : "Search failed");
       } finally {
         setLoading(false);
       }
     },
-    [datasetId, renderTiles, clearHighlights],
+    [datasetId, clearHighlights],
   );
 
   // Auto-run a query forwarded from the dataset list, once the map is ready.
