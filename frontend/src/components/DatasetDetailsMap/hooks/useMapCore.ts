@@ -106,6 +106,11 @@ export function useMapCore({
 	const onFirstInteractionRef = useRef(onFirstInteraction);
 	const hasSeenInitialMoveEndRef = useRef(false);
 	const hasTrackedInteractionRef = useRef(false);
+	// Auto-framing across container resizes (see ResizeObserver below).
+	const autoFitExtentRef = useRef(false);
+	const cogExtentRef = useRef<number[] | null>(null);
+	const programmaticFitsRef = useRef(0);
+	const resizeObserverRef = useRef<ResizeObserver | null>(null);
 	
 	// Keep refs up to date
 	useEffect(() => {
@@ -208,6 +213,12 @@ export function useMapCore({
 					zoom: view.getZoom() || 2,
 					extent: view.calculateExtent(newMap.getSize() || [0, 0]) as number[],
 				});
+				// Ignore moveends caused by our own programmatic (re-)fits so a
+				// resize-driven re-frame isn't mistaken for a user interaction.
+				if (programmaticFitsRef.current > 0) {
+					programmaticFitsRef.current--;
+					return;
+				}
 				if (!hasSeenInitialMoveEndRef.current) {
 					hasSeenInitialMoveEndRef.current = true;
 					return;
@@ -219,12 +230,35 @@ export function useMapCore({
 			});
 
 			// Fit to extent if no saved viewport
+			cogExtentRef.current = cogExtent;
+			autoFitExtentRef.current = !hasValidViewport;
 			if (!hasValidViewport) {
+				programmaticFitsRef.current++;
 				mapView.fit(cogExtent);
 			}
 
 			mapRef.current = newMap;
 			setIsMapReady(true);
+
+			// The orthophoto map is often built while the container is still
+			// settling after a client-side navigation (collapsed/short height).
+			// view.fit() then frames the imagery for the wrong size, leaving it —
+			// and tile-search highlights — partly off-screen until a full reload.
+			// Re-measure and (until the user takes control) re-fit on every resize.
+			if (containerRef.current && typeof ResizeObserver !== "undefined") {
+				const ro = new ResizeObserver(() => {
+					const m = mapRef.current;
+					if (!m) return;
+					m.updateSize();
+					if (autoFitExtentRef.current && !hasTrackedInteractionRef.current && cogExtentRef.current) {
+						programmaticFitsRef.current++;
+						m.getView().fit(cogExtentRef.current as [number, number, number, number]);
+					}
+				});
+				ro.observe(containerRef.current);
+				resizeObserverRef.current = ro;
+			}
+
 			onMapReadyRef.current?.(newMap);
 			onOrthoLayerReadyRef.current?.(orthoCogLayer);
 		}).catch((err) => {
@@ -233,6 +267,11 @@ export function useMapCore({
 
 		// Cleanup
 		return () => {
+			resizeObserverRef.current?.disconnect();
+			resizeObserverRef.current = null;
+			programmaticFitsRef.current = 0;
+			autoFitExtentRef.current = false;
+			cogExtentRef.current = null;
 			if (mapRef.current) {
 				// Remove all layers
 					mapRef.current.getLayers().forEach((layer) => {
