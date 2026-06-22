@@ -18,11 +18,10 @@ import DatasetMapOL, {
 import DatasetTimelineControl from "../components/DatasetMap/DatasetTimelineControl";
 import { useNavigate } from "react-router-dom";
 import { useFilteredDatasets } from "../hooks/useFilteredDatasets";
-import { usePublicDatasets } from "../hooks/useDatasets";
+import { usePublicDatasetArchiveItems } from "../hooks/useDatasets";
 import { useUploadTimeline } from "../hooks/useUploadTimeline";
 import FilterModal, { AdvancedFilters } from "../components/FilterModal";
 import { useDatasetFilter } from "../hooks/useDatasetFilterProvider";
-import { isDatasetViewable } from "../utils/datasetVisibility";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useDesktopOnlyFeature } from "../hooks/useDesktopOnlyFeature";
 import { useAnalytics } from "../hooks/useAnalytics";
@@ -42,7 +41,7 @@ const FLOAT_BUTTON_SIZE_PX = 36;
 
 export default function Dataset() {
   const navigate = useNavigate();
-  const { data: allData } = usePublicDatasets();
+  const { data: allData } = usePublicDatasetArchiveItems();
   const { filteredData } = useFilteredDatasets(allData);
 
   // Get filter state from context
@@ -132,9 +131,6 @@ export default function Dataset() {
     if (!filteredData) return null;
 
     const filtered = filteredData.filter((d) => {
-      // Use centralized visibility check
-      if (!isDatasetViewable(d)) return false;
-
       // If no search value, return true for the base condition
       if (!searchValue.trim()) return true;
 

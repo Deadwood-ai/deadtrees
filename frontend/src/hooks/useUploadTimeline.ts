@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { IDataset } from "../types/dataset";
+import { IDataset, IDatasetArchiveItem } from "../types/dataset";
+
+type TimelineDataset = IDataset | IDatasetArchiveItem;
 
 type ParsedDataset = {
-  dataset: IDataset;
+  dataset: TimelineDataset;
   createdAtMs: number;
   year: number;
   quarter: number;
@@ -37,12 +39,12 @@ interface UploadTimelineResult {
   periods: string[];
   selectedPeriod: string;
   setSelectedPeriod: (period: string) => void;
-  displayData: IDataset[] | null;
+  displayData: TimelineDataset[] | null;
   cumulativeCount: number;
   addedInQuarter: number;
 }
 
-export function useUploadTimeline(processedData: IDataset[] | null): UploadTimelineResult {
+export function useUploadTimeline(processedData: TimelineDataset[] | null): UploadTimelineResult {
   const [selectedPeriod, setSelectedPeriod] = useState<string>("");
 
   const parsedDatasets = useMemo<ParsedDataset[] | null>(() => {
@@ -134,7 +136,7 @@ export function useUploadTimeline(processedData: IDataset[] | null): UploadTimel
 
   const selectedMeta = selectedPeriod ? periodByKey[selectedPeriod] : undefined;
 
-  const displayData = useMemo<IDataset[] | null>(() => {
+  const displayData = useMemo<TimelineDataset[] | null>(() => {
     if (!processedData) return null;
     if (!parsedDatasets || !selectedMeta) return processedData;
 

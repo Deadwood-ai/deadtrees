@@ -1,6 +1,6 @@
 import { Button, Tag, Tooltip } from "antd";
 import { useNavigate } from "react-router-dom";
-import { IDataset } from "../types/dataset";
+import { IDataset, IDatasetArchiveItem } from "../types/dataset";
 import { Settings } from "../config";
 import countryList from "../utils/countryList";
 import { useDatasetDetailsMap } from "../hooks/useDatasetDetailsMapProvider";
@@ -11,7 +11,7 @@ import {
 } from "../utils/biomeDisplay";
 
 interface ListItemProps {
-  item: IDataset;
+  item: IDataset | IDatasetArchiveItem;
   index: number;
   setHoveredItem: ((id: number | null) => void) | undefined;
   hoveredItem: number | null;
@@ -49,7 +49,7 @@ const ListItem = ({
     }
   };
 
-  const onClickHandler = (item: IDataset) => {
+  const onClickHandler = (item: IDataset | IDatasetArchiveItem) => {
     setNavigationSource("dataset");
     navigate(`/dataset/${item.id}`);
   };

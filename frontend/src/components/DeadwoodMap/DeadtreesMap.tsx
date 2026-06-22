@@ -258,6 +258,8 @@ const DeadtreesMap = () => {
     DEFAULT_WAYBACK_RELEASE,
   );
   const [autoMatchImagery, setAutoMatchImagery] = useState(true); // Auto-match imagery to prediction year
+  const [shouldLoadLocalWaybackItems, setShouldLoadLocalWaybackItems] =
+    useState(false);
 
   // Track map center in lon/lat for location-specific wayback queries
   const [mapCenterLonLat, setMapCenterLonLat] = useState<{
@@ -279,7 +281,7 @@ const DeadtreesMap = () => {
       mapCenterLonLat?.lon,
       mapCenterLonLat?.lat,
       currentZoom,
-      DeadwoodMapStyle === "wayback", // Only fetch when wayback basemap is active
+      DeadwoodMapStyle === "wayback" && shouldLoadLocalWaybackItems,
     );
 
   useMobileImageryAutoSelect({
@@ -620,6 +622,21 @@ const DeadtreesMap = () => {
   }, []);
 
   // effects -----------------------------------------------------------
+
+  useEffect(() => {
+    if (DeadwoodMapStyle !== "wayback" || shouldLoadLocalWaybackItems) return;
+
+    const loadLocalImagery = () => setShouldLoadLocalWaybackItems(true);
+    if (typeof window.requestIdleCallback === "function") {
+      const idleHandle = window.requestIdleCallback(loadLocalImagery, {
+        timeout: 3000,
+      });
+      return () => window.cancelIdleCallback(idleHandle);
+    }
+
+    const timeoutHandle = window.setTimeout(loadLocalImagery, 1500);
+    return () => window.clearTimeout(timeoutHandle);
+  }, [DeadwoodMapStyle, shouldLoadLocalWaybackItems]);
 
   // update on bounds change after geocoder search
   useEffect(() => {
@@ -1100,6 +1117,9 @@ const DeadtreesMap = () => {
       setDeadwoodMapStyle((currentStyle) =>
         currentStyle === style ? "none" : style,
       );
+      if (style === "wayback") {
+        setShouldLoadLocalWaybackItems(true);
+      }
     },
     [setDeadwoodMapStyle],
   );
@@ -1331,22 +1351,26 @@ const DeadtreesMap = () => {
           isTracking={userLocation.isTracking}
           hasLocationFix={userLocation.hasFix}
           onLocate={() => locateUser(true)}
-          onOpenPanel={(panel) =>
+          onOpenPanel={(panel) => {
+            if (panel === "time") {
+              setShouldLoadLocalWaybackItems(true);
+            }
             setMobileMapPanel((currentPanel) =>
               currentPanel === panel ? null : panel,
-            )
-          }
+            );
+          }}
         />
 
         <MobileTimePill
           year={selectedYear}
           active={mobileMapPanel === "time"}
           hidden={hideMobileFloatingControls}
-          onClick={() =>
+          onClick={() => {
+            setShouldLoadLocalWaybackItems(true);
             setMobileMapPanel((currentPanel) =>
               currentPanel === "time" ? null : "time",
-            )
-          }
+            );
+          }}
         />
 
         <MobileAddTreeButton

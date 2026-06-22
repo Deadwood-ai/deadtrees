@@ -1,8 +1,10 @@
 import { useMemo } from "react";
-import { IDataset } from "../types/dataset";
+import { IDataset, IDatasetArchiveItem } from "../types/dataset";
 import { useDatasetFilter } from "./useDatasetFilterProvider";
 
-export function useFilteredDatasets(datasets: IDataset[] | undefined) {
+type FilterableDataset = IDataset | IDatasetArchiveItem;
+
+export function useFilteredDatasets<TDataset extends FilterableDataset>(datasets: TDataset[] | undefined) {
   const { filter, filterTag, advancedFilters } = useDatasetFilter();
 
   const filteredData = useMemo(() => {
