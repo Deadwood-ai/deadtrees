@@ -9,6 +9,27 @@ const expectArchiveReady = async (page: Page) => {
   return firstDataset;
 };
 
+const waitForArchiveReadModelResponse = async (page: Page) =>
+  page
+    .waitForResponse(
+      (response) =>
+        response.url().includes("/rest/v1/public_dataset_archive_items"),
+      { timeout: 20_000 },
+    )
+    .catch(() => null);
+
+const skipIfArchiveReadModelMissing = (
+  archiveResponse: Awaited<ReturnType<typeof waitForArchiveReadModelResponse>>,
+) => {
+  test.skip(
+    archiveResponse?.status() === 404,
+    "archive read-model migration has not been deployed to this backend yet",
+  );
+
+  expect(archiveResponse, "archive read-model request was not issued").not.toBeNull();
+  expect(archiveResponse?.ok(), "archive read-model request failed").toBe(true);
+};
+
 const openArchiveFromHome = async (page: Page) => {
   await page.goto("/");
 
@@ -17,8 +38,10 @@ const openArchiveFromHome = async (page: Page) => {
     page.getByRole("img", { name: "deadtrees.earth" }).first(),
   ).toBeVisible();
 
+  const archiveResponsePromise = waitForArchiveReadModelResponse(page);
   await page.getByRole("menuitem", { name: "Drone Archive" }).click();
   await expect(page).toHaveURL(/\/dataset$/);
+  skipIfArchiveReadModelMissing(await archiveResponsePromise);
 
   return expectArchiveReady(page);
 };
@@ -175,19 +198,7 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
       }
     });
 
-    const archiveResponsePromise = page
-      .waitForResponse((response) =>
-        response.url().includes("/rest/v1/public_dataset_archive_items"),
-      )
-      .catch(() => null);
-
     await openArchiveFromHome(page);
-
-    const archiveResponse = await archiveResponsePromise;
-    test.skip(
-      archiveResponse?.status() === 404,
-      "archive read-model migration has not been deployed to this backend yet",
-    );
 
     expect(
       restRequests.some((url) =>
