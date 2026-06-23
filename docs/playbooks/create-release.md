@@ -55,13 +55,23 @@ host-local cron setup on `processing-server`:
 - fetches `origin/main`
 - compares local `HEAD` with `origin/main`
 - runs `git pull origin main` when a new commit is available
-- runs `docker compose -f docker-compose.processor.yaml build processor`
+- runs `docker compose -f docker-compose.processor.yaml build processor tcd`
 - writes status to `/home/jj1049/prod/deadtrees/auto-deploy.log`
 
 `docker-compose.processor.yaml` builds the processor locally on the processing
 server and bind-mounts `./processor`, `./shared`, `./assets`, `/data`, and the
 Docker socket. It uses the NVIDIA runtime and does not consume the API image
 published by the release workflow.
+
+The `tcd` service is a build-only service (gated behind the `build` profile, so
+`docker compose up` never starts it). It exists solely so the deploy rebuilds the
+`deadtrees-tcd:latest` tree-cover inference image — which the processor launches
+ad-hoc through the Docker socket — from version control. Without `tcd` in the
+build command, a Dockerfile change under
+`processor/src/treecover_segmentation_oam_tcd/` (e.g. the torch CUDA build) never
+reaches production and the processor keeps launching a stale image. The TCD image
+build is heavy but layer-cached, so it only does real work when that Dockerfile or
+its base image changes.
 
 Useful verification commands:
 

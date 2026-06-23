@@ -59,3 +59,16 @@ services:
       - /dev/nvidia-modeset:/dev/nvidia-modeset
       - /dev/nvidia-uvm:/dev/nvidia-uvm
       - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
+
+  # Build-only service for the TCD tree-cover inference image. The processor
+  # never runs this via compose — it launches `deadtrees-tcd:latest` ad-hoc
+  # through the mounted Docker socket. Declaring it here makes the image part of
+  # the standard deploy build (`docker compose build processor tcd`) so it is
+  # rebuilt from version control and can't drift onto a stale (e.g. wrong-CUDA,
+  # CPU-only) image. The `build` profile keeps it out of `docker compose up`.
+  tcd:
+    image: deadtrees-tcd:latest
+    profiles: ["build"]
+    build:
+      context: ./processor/src/treecover_segmentation_oam_tcd
+      dockerfile: Dockerfile
