@@ -7,7 +7,8 @@ import GeoJSON from "ol/format/GeoJSON";
 import Style from "ol/style/Style";
 import Stroke from "ol/style/Stroke";
 import Fill from "ol/style/Fill";
-import { Input } from "antd";
+import { Input, Tooltip } from "antd";
+import { InfoCircleOutlined } from "@ant-design/icons";
 
 import { searchTiles, TileSearchResult } from "../../api/searchEmbeddings";
 
@@ -21,9 +22,11 @@ interface OrthoTileSearchProps {
 // Draw highlight tiles above all other layers.
 const HIGHLIGHT_Z_INDEX = 9999;
 
-// Warm "heat" highlight that reads well over green/brown aerial imagery.
-const FILL_RGB = "249, 115, 22"; // orange-500
-const STROKE_RGB = "194, 65, 12"; // orange-700
+// Magenta highlight: an unnatural color that almost never occurs in forests or
+// other terrestrial surfaces (green/brown/tan), so matches pop against the
+// imagery instead of blending into autumn foliage, bare soil or dry vegetation.
+const FILL_RGB = "217, 70, 239"; // fuchsia-500
+const STROKE_RGB = "162, 28, 175"; // fuchsia-700
 
 // Backend similarity is a calibrated match probability (softmax of the query vs
 // a bank of background prompts), so it's comparable across queries and has a
@@ -158,6 +161,31 @@ export default function OrthoTileSearch({ map, datasetId, initialQuery }: OrthoT
         }}
         onSearch={(value) => run(value)}
         data-testid="ortho-tile-search-input"
+        suffix={
+          <Tooltip
+            placement="bottomRight"
+            styles={{ root: { maxWidth: 280 } }}
+            title={
+              <div className="text-xs">
+                <p className="mb-1">
+                  Describe what you're looking for in plain language and the
+                  best-matching areas of this orthophoto are highlighted in
+                  magenta.
+                </p>
+                <p className="mb-0.5 font-medium">Try, for example:</p>
+                <p className="mb-0">
+                  fire · fallen trees · road · water · clearing · bare soil ·
+                  buildings
+                </p>
+              </div>
+            }
+          >
+            <InfoCircleOutlined
+              className="text-gray-400 hover:text-gray-600"
+              data-testid="ortho-tile-search-help"
+            />
+          </Tooltip>
+        }
       />
       {matchCount !== null && (
         <div className="mt-1 flex items-center justify-between rounded bg-white/90 px-2 py-0.5 text-xs text-gray-600 shadow">
@@ -168,7 +196,7 @@ export default function OrthoTileSearch({ map, datasetId, initialQuery }: OrthoT
           </span>
           <button
             type="button"
-            className="font-medium text-orange-600 hover:text-orange-800"
+            className="font-medium text-fuchsia-600 hover:text-fuchsia-800"
             onClick={clearHighlights}
           >
             Clear
