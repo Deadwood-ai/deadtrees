@@ -10,7 +10,7 @@ import type { SelectEvent } from "ol/interaction/Select";
 import "ol/ol.css";
 import { fromExtent } from "ol/geom/Polygon.js";
 import { useNavigate } from "react-router-dom";
-import { IDataset } from "../../types/dataset";
+import { IDataset, IDatasetArchiveItem } from "../../types/dataset";
 import parseBBox from "../../utils/parseBBox";
 import {
   applyOpenFreeMapLibertyStyle,
@@ -72,12 +72,14 @@ const createHoverExtentStyle = (spec: DatasetVisualSpec): Style =>
     stroke: new Stroke({ color: "#ffffff", width: 2.5 }),
   });
 
-const parseYear = (dataset: IDataset): number | null => {
+type DatasetMapItem = IDataset | IDatasetArchiveItem;
+
+const parseYear = (dataset: DatasetMapItem): number | null => {
   const year = Number.parseInt(dataset.aquisition_year, 10);
   return Number.isNaN(year) ? null : year;
 };
 
-const getDatasetVisualSpec = (dataset: IDataset, mode: DatasetMapColorMode): DatasetVisualSpec => {
+const getDatasetVisualSpec = (dataset: DatasetMapItem, mode: DatasetMapColorMode): DatasetVisualSpec => {
   if (mode === "labels") {
     if (dataset.has_labels) {
       return {
@@ -177,7 +179,7 @@ const getDatasetVisualSpec = (dataset: IDataset, mode: DatasetMapColorMode): Dat
   };
 };
 
-const formatAcquisitionDate = (dataset: IDataset): string => {
+const formatAcquisitionDate = (dataset: DatasetMapItem): string => {
   const year = Number.parseInt(dataset.aquisition_year, 10);
   if (Number.isNaN(year)) return "Unknown date";
 
@@ -191,7 +193,7 @@ const formatAcquisitionDate = (dataset: IDataset): string => {
   });
 };
 
-const buildTooltipTitle = (dataset: IDataset): string => {
+const buildTooltipTitle = (dataset: DatasetMapItem): string => {
   const place = dataset.admin_level_3 || dataset.admin_level_2 || "";
   const country = dataset.admin_level_1 || "";
 
@@ -218,7 +220,7 @@ const DatasetMapOL = ({
   colorMode = "quality",
   onMapInteracted,
 }: {
-  data: IDataset[];
+  data: DatasetMapItem[];
   hoveredItem: number | null;
   setHoveredItem: (id: number | null) => void;
   setVisibleFeatures: (ids: string[]) => void;

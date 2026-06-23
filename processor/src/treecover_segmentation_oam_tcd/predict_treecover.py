@@ -308,8 +308,14 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 		except Exception as e:
 			raise Exception(f'TCD container image {TCD_CONTAINER_IMAGE} not found. Build or pull it. Error: {e}')
 
-		def _run(device_requests=None):
-			use_gpu = device_requests is not None
+		def _run(use_gpu=False):
+			# Expose the GPU the same way the processor container itself does
+			# (docker-compose.processor.yaml): the legacy nvidia runtime +
+			# NVIDIA_VISIBLE_DEVICES, which makes the nvidia runtime inject the GPU
+			# device nodes. We deliberately do NOT use device_requests / `--gpus`,
+			# because that CDI path is broken on the production host (`failed to
+			# fulfil mount request: open /usr/bin/nvidia-cuda-mps-control`). The
+			# legacy runtime+env path is the one proven to work on prod for Deadwood.
 			return client.containers.run(
 				image=TCD_CONTAINER_IMAGE,
 				command=['python', '/tcd_data/predict_pipeline.py', input_path, output_path],
@@ -329,12 +335,11 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 					'dt_volume': volume_name,
 				},
 				name=f'dt-tcd-pipeline-d{dataset_id}-{int(time.time())}-{uuid.uuid4().hex[:6]}',
-				device_requests=device_requests,
 			)
 
-		def _run_and_wait(device_requests=None):
+		def _run_and_wait(use_gpu=False):
 			"""Run container in detached mode with a timeout, then collect output."""
-			container = _run(device_requests=device_requests)
+			container = _run(use_gpu=use_gpu)
 			success = False
 			try:
 				try:
@@ -397,15 +402,15 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 					)
 
 		try:
-			container_output = _run_and_wait(device_requests=None)
+			container_output = _run_and_wait(use_gpu=True)
 		except _TCDContainerTimeout:
 			raise
 		except Exception as gpu_err:
 			logger.warning(
-				f'TCD container execution failed, retrying once: {gpu_err}',
+				f'TCD container GPU execution failed, retrying once on CPU: {gpu_err}',
 				LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 			)
-			container_output = _run_and_wait(device_requests=None)
+			container_output = _run_and_wait(use_gpu=False)
 
 		logger.info(
 			'TCD Pipeline container execution completed successfully',

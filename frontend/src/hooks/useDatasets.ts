@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "./useAuthProvider";
 import { supabase } from "./useSupabase";
 import { Settings } from "../config";
-import { IDataset } from "../types/dataset";
+import { IDataset, IDatasetArchiveItem } from "../types/dataset";
 import { fixTextEncoding } from "../utils/textUtils";
 
 interface DatasetQueryOptions {
@@ -40,6 +40,26 @@ export function usePublicDatasets(options: DatasetQueryOptions = {}) {
     enabled: (options.enabled ?? true) && status !== "checking",
     staleTime: 5 * 60 * 1000, // 5 minutes - data is fresh for 5 minutes
     gcTime: 10 * 60 * 1000, // 10 minutes - keep in cache for 10 minutes
+  });
+}
+
+// Public archive hook - narrow rows for the /dataset archive list, timeline, filters, and map
+export function usePublicDatasetArchiveItems(options: DatasetQueryOptions = {}) {
+  const { status } = useAuth();
+
+  return useQuery({
+    queryKey: ["public-dataset-archive-items"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from(Settings.DATASET_ARCHIVE_ITEMS_VIEW)
+        .select("*")
+        .order("id", { ascending: false });
+      if (error) throw error;
+      return data as IDatasetArchiveItem[];
+    },
+    enabled: (options.enabled ?? true) && status !== "checking",
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 }
 
@@ -104,7 +124,7 @@ export function useUserDatasets(options: DatasetQueryOptions = {}) {
 
 // Authors list - based on public datasets only
 export function useAuthors(options: DatasetQueryOptions = {}) {
-  const { data: datasets } = usePublicDatasets({ enabled: options.enabled });
+  const { data: datasets } = usePublicDatasetArchiveItems({ enabled: options.enabled });
 
   return useQuery({
     queryKey: ["authors"],

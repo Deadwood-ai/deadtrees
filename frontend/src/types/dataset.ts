@@ -108,6 +108,42 @@ export interface IDataset {
   show_forest_cover_predictions: boolean;
 }
 
+export type IDatasetArchiveItem = Pick<
+  IDataset,
+  | "id"
+  | "created_at"
+  | "license"
+  | "platform"
+  | "authors"
+  | "aquisition_year"
+  | "aquisition_month"
+  | "aquisition_day"
+  | "bbox"
+  | "thumbnail_path"
+  | "admin_level_1"
+  | "admin_level_2"
+  | "admin_level_3"
+  | "biome_name"
+  | "has_labels"
+  | "has_deadwood_prediction"
+> &
+  Partial<
+    Pick<
+      IDataset,
+      | "is_cog_done"
+      | "is_thumbnail_done"
+      | "is_metadata_done"
+      | "has_error"
+      | "is_deadwood_done"
+      | "is_forest_cover_done"
+      | "is_audited"
+      | "final_assessment"
+      | "deadwood_quality"
+      | "forest_cover_quality"
+      | "has_major_issue"
+    >
+  >;
+
 export interface ILabels {
   id: number;
   dataset_id: number;

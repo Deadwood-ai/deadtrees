@@ -1,10 +1,12 @@
 import { useState } from "react";
 import ListItem from "./ListItem";
 import { Button } from "antd";
-import { IDataset } from "../types/dataset";
+import { IDataset, IDatasetArchiveItem } from "../types/dataset";
+
+type ListDataset = IDataset | IDatasetArchiveItem;
 
 interface DataListProps {
-  data: IDataset[];
+  data: ListDataset[];
   hoveredItem: number | null;
   setHoveredItem: (id: number | null) => void;
   visibleFeatures: string[];

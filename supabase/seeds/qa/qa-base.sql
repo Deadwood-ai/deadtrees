@@ -265,15 +265,16 @@ insert into public.v2_orthos (
 	ortho_file_name,
 	version,
 	sha256,
+	bbox,
 	ortho_upload_runtime,
 	ortho_file_size,
 	ortho_info
 )
 values
-	(91001, 'qa-public-complete.tif', 1, 'qa-public-complete-sha256', 0.1, 123456, '{}'::jsonb),
-	(91002, 'qa-public-audited.tif', 1, 'qa-public-audited-sha256', 0.1, 123456, '{}'::jsonb),
-	(91003, 'qa-private-contributor.tif', 1, 'qa-private-contributor-sha256', 0.1, 123456, '{}'::jsonb),
-	(91004, 'qa-processing-error.tif', 1, 'qa-processing-error-sha256', 0.1, 123456, '{}'::jsonb);
+	(91001, 'qa-public-complete.tif', 1, 'qa-public-complete-sha256', 'BOX(7.80 47.95,7.88 48.02)'::box2d, 0.1, 123456, '{}'::jsonb),
+	(91002, 'qa-public-audited.tif', 1, 'qa-public-audited-sha256', 'BOX(8.60 50.08,8.72 50.18)'::box2d, 0.1, 123456, '{}'::jsonb),
+	(91003, 'qa-private-contributor.tif', 1, 'qa-private-contributor-sha256', 'BOX(7.70 47.90,7.76 47.96)'::box2d, 0.1, 123456, '{}'::jsonb),
+	(91004, 'qa-processing-error.tif', 1, 'qa-processing-error-sha256', 'BOX(9.00 48.70,9.05 48.75)'::box2d, 0.1, 123456, '{}'::jsonb);
 
 insert into public.v2_cogs (
 	dataset_id,
@@ -307,10 +308,10 @@ insert into public.v2_metadata (
 	processing_runtime
 )
 values
-	(91001, '{"qa": true, "admin_level_1": "Germany", "admin_level_2": "Bavaria", "admin_level_3": "QA Forest"}'::jsonb, 1, 0.1),
-	(91002, '{"qa": true, "admin_level_1": "Germany", "admin_level_2": "Hesse", "admin_level_3": "QA Audited Forest"}'::jsonb, 1, 0.1),
-	(91003, '{"qa": true, "admin_level_1": "Germany", "admin_level_2": "Private QA", "admin_level_3": "QA Contributor Forest"}'::jsonb, 1, 0.1),
-	(91004, '{"qa": true, "admin_level_1": "Germany", "admin_level_2": "Error QA", "admin_level_3": "QA Processing Forest"}'::jsonb, 1, 0.1);
+	(91001, '{"qa": true, "gadm": {"admin_level_1": "Germany", "admin_level_2": "Bavaria", "admin_level_3": "QA Forest"}, "biome": {"biome_name": "Temperate Broadleaf and Mixed Forests"}}'::jsonb, 1, 0.1),
+	(91002, '{"qa": true, "gadm": {"admin_level_1": "Germany", "admin_level_2": "Hesse", "admin_level_3": "QA Audited Forest"}, "biome": {"biome_name": "Temperate Broadleaf and Mixed Forests"}}'::jsonb, 1, 0.1),
+	(91003, '{"qa": true, "gadm": {"admin_level_1": "Germany", "admin_level_2": "Private QA", "admin_level_3": "QA Contributor Forest"}, "biome": {"biome_name": "Temperate Broadleaf and Mixed Forests"}}'::jsonb, 1, 0.1),
+	(91004, '{"qa": true, "gadm": {"admin_level_1": "Germany", "admin_level_2": "Error QA", "admin_level_3": "QA Processing Forest"}, "biome": {"biome_name": "Temperate Broadleaf and Mixed Forests"}}'::jsonb, 1, 0.1);
 
 insert into public.dataset_audit (
 	dataset_id,
