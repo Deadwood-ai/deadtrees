@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+FROM pytorch/pytorch:2.7.1-cuda11.8-cudnn9-runtime
 ENV TZ=Europe/Zurich
 
 # set bash as current shell
@@ -46,17 +46,14 @@ ENV PATH=/home/deadtrees/.local/bin:$PATH
 # Switch to root to install packages system-wide (for root access like ODM)
 USER root
 
-# Pin torch/torchvision to a CUDA 12.1 build. tcd's requirements only ask for
-# `torch>=2` with unpinned torchvision, so an unconstrained install pulls the
-# latest cu130 wheel — too new for CUDA 12.x host drivers, which makes torch
-# silently disable CUDA and run inference on CPU. A cu121 build is portable
-# across the GPU fleet (any driver supporting CUDA >= 12.1 runs it).
-RUN python -m pip install --no-cache-dir \
-    torch==2.3.0+cu121 torchvision==0.18.0+cu121 \
-    --index-url https://download.pytorch.org/whl/cu121
-
-# Constrain the rest of the install so the unpinned deps can't upgrade torch.
-RUN printf 'torch==2.3.0\ntorchvision==0.18.0\n' > /tmp/torch-constraints.txt
+# The base image ships torch 2.7.1 built for CUDA 11.8 (cu118). tcd requires
+# torch>=2.7.0, so the base already satisfies it and pip won't upgrade torch —
+# avoiding the latest cu130 wheel, which is too new for the GPU host drivers
+# (prod CUDA 12.2, dev 12.8) and would make torch silently fall back to CPU. cu118
+# runs on any driver >= 11.8, covering the whole GPU fleet. The constraint locks
+# torch's CUDA build so an unpinned transitive dep (e.g. torchvision) can't quietly
+# pull a cu126/cu128/cu130 wheel the prod driver can't run.
+RUN printf 'torch==2.7.1\n' > /tmp/torch-constraints.txt
 RUN PIP_CONSTRAINT=/tmp/torch-constraints.txt python -m pip install --no-cache-dir -r requirements.txt
 RUN PIP_CONSTRAINT=/tmp/torch-constraints.txt python -m pip install --no-cache-dir -e .
 
