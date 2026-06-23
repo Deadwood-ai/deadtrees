@@ -167,6 +167,7 @@ def test_pipeline_stage_map_is_stable_and_ordered():
 			'deadwood_treecover_combined_segmentation',
 		),
 		(TaskTypeEnum.aoi_v1, 'is_aoi_done', 'aoi_segmentation'),
+		(TaskTypeEnum.embeddings_v1, 'is_embeddings_done', 'embedding_processing'),
 	]
 	assert PIPELINE_STAGE_MAP == expected
 

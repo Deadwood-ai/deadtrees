@@ -127,17 +127,36 @@ def process_embeddings(task: QueueTask, token: str, temp_dir: Path):
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 
 		# Replace any previous embeddings for this dataset (idempotent reruns).
-		# The delete goes through the table (RLS allows the processor); inserts go
-		# through the RPC so vector/geometry casting happens server-side.
+		# Insert the new rows FIRST, then delete the old ones, so the search RPCs —
+		# which read this table live — never observe a partial or empty set: if a
+		# chunk insert fails mid-way we abort with the previous complete set still
+		# intact. The only transient state is old+new rows coexisting, which is
+		# harmless for ranking (max over a dataset's tiles). Rows use a monotonic
+		# identity id, so every freshly inserted row sorts strictly after the
+		# captured old_max_id, letting one delete remove exactly the old set.
+		# Inserts go through the RPC so vector/geometry casting happens server-side.
 		rows = _rows_from_embeddings(embeddings, bg_sims)
 		with use_client(token) as client:
-			client.table(settings.tile_embeddings_table).delete().eq('dataset_id', ortho.dataset_id).execute()
+			existing = (
+				client.table(settings.tile_embeddings_table)
+				.select('id')
+				.eq('dataset_id', ortho.dataset_id)
+				.order('id', desc=True)
+				.limit(1)
+				.execute()
+			)
+			old_max_id = existing.data[0]['id'] if existing.data else None
 
 			for start in range(0, len(rows), _INSERT_CHUNK_SIZE):
 				client.rpc(
 					'insert_tile_embeddings',
 					{'p_dataset_id': ortho.dataset_id, 'p_rows': rows[start : start + _INSERT_CHUNK_SIZE]},
 				).execute()
+
+			if old_max_id is not None:
+				client.table(settings.tile_embeddings_table).delete().eq(
+					'dataset_id', ortho.dataset_id
+				).lte('id', old_max_id).execute()
 
 		logger.info(
 			f'Stored {len(embeddings)} tile embeddings',

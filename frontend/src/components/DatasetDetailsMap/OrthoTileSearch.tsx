@@ -75,6 +75,13 @@ export default function OrthoTileSearch({ map, datasetId, initialQuery }: OrthoT
     setLayer(lyr);
     return () => {
       map.removeLayer(lyr);
+      // Dispose the layer and its source so OpenLayers tears down the event
+      // listeners they hold; otherwise repeated mount/unmount (navigating
+      // between datasets) leaks sources that can never be GC'd.
+      const source = lyr.getSource();
+      source?.clear();
+      source?.dispose();
+      lyr.dispose();
       setLayer((prev) => (prev === lyr ? null : prev));
     };
   }, [map]);
