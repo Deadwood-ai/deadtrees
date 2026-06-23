@@ -8,13 +8,13 @@ import { supabase } from "../hooks/useSupabase";
 // through supabase-js means row-level security enforces per-user dataset
 // visibility automatically.
 
-export interface DatasetSearchResult {
+export interface IDatasetSearchResult {
   dataset_id: number;
   similarity: number;
   tile_count: number;
 }
 
-export interface TileSearchResult {
+export interface ITileSearchResult {
   id: number;
   similarity: number;
   nodata_fraction: number;
@@ -41,7 +41,7 @@ export async function searchDatasets(
   query: string,
   matchCount = 100,
   minSimilarity = 0,
-): Promise<DatasetSearchResult[]> {
+): Promise<IDatasetSearchResult[]> {
   const embedding = await embedQuery(query);
   const { data, error } = await supabase.rpc("search_datasets_by_embedding", {
     query_embedding: embedding,
@@ -49,7 +49,7 @@ export async function searchDatasets(
     min_similarity: minSimilarity,
   });
   if (error) throw error;
-  return (data ?? []) as DatasetSearchResult[];
+  return (data ?? []) as IDatasetSearchResult[];
 }
 
 /** Rank the tiles of a single dataset against the query (for highlighting). */
@@ -57,7 +57,7 @@ export async function searchTiles(
   query: string,
   datasetId: number,
   matchCount = 300,
-): Promise<TileSearchResult[]> {
+): Promise<ITileSearchResult[]> {
   const embedding = await embedQuery(query);
   const { data, error } = await supabase.rpc("search_tiles_by_embedding", {
     query_embedding: embedding,
@@ -65,5 +65,5 @@ export async function searchTiles(
     match_count: matchCount,
   });
   if (error) throw error;
-  return (data ?? []) as TileSearchResult[];
+  return (data ?? []) as ITileSearchResult[];
 }

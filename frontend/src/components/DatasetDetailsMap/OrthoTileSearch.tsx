@@ -10,7 +10,7 @@ import Fill from "ol/style/Fill";
 import { Input, Tooltip } from "antd";
 import { InfoCircleOutlined } from "@ant-design/icons";
 
-import { searchTiles, TileSearchResult } from "../../api/searchEmbeddings";
+import { searchTiles, ITileSearchResult } from "../../api/searchEmbeddings";
 
 interface OrthoTileSearchProps {
   map: OLMap | null;
@@ -63,7 +63,7 @@ export default function OrthoTileSearch({ map, datasetId, initialQuery }: OrthoT
   // re-rendered whenever the highlight layer is (re)created — e.g. React
   // StrictMode's dev double-mount, or the map finishing init after a client-side
   // navigation. Drawing only on fetch lost the highlights in those cases.
-  const [tiles, setTiles] = useState<TileSearchResult[]>([]);
+  const [tiles, setTiles] = useState<ITileSearchResult[]>([]);
   const [layer, setLayer] = useState<VectorLayer<VectorSource> | null>(null);
   const autoRan = useRef(false);
 

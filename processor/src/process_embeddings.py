@@ -87,22 +87,24 @@ def process_embeddings(task: QueueTask, token: str, temp_dir: Path):
 		LogContext(category=LogCategory.EMBEDDINGS, dataset_id=task.dataset_id, user_id=user.id, token=token),
 	)
 
-	file_path = Path(temp_dir) / ortho.ortho_file_name
-	ensure_local_ortho(
-		local_path=file_path,
-		ortho_file_name=ortho.ortho_file_name,
-		token=token,
-		dataset_id=ortho.dataset_id,
-		log_context=LogContext(
-			category=LogCategory.EMBEDDINGS,
-			dataset_id=task.dataset_id,
-			user_id=user.id,
-			token=token,
-			extra={'file_path': str(file_path)},
-		),
-	)
-
 	try:
+		# Inside the try so a storage/download failure goes through the same
+		# has_error + ProcessingError path as the rest of the embedding stage.
+		file_path = Path(temp_dir) / ortho.ortho_file_name
+		ensure_local_ortho(
+			local_path=file_path,
+			ortho_file_name=ortho.ortho_file_name,
+			token=token,
+			dataset_id=ortho.dataset_id,
+			log_context=LogContext(
+				category=LogCategory.EMBEDDINGS,
+				dataset_id=task.dataset_id,
+				user_id=user.id,
+				token=token,
+				extra={'file_path': str(file_path)},
+			),
+		)
+
 		device = 'cuda' if torch.cuda.is_available() else 'cpu'
 		logger.info(
 			f'Loading OpenCLIP model on {device}',

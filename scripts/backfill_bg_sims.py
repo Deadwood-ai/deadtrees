@@ -35,8 +35,15 @@ def main():
 	conn.autocommit = False
 	cur = conn.cursor()
 
-	where = "" if args.all else "where array_length(bg_sims, 1) is null"
-	cur.execute(f"select id, embedding::real[] from public.v2_tile_embeddings {where}")
+	# Two literal queries instead of interpolating a WHERE clause, so static
+	# analysis can see no string is ever built into the SQL.
+	if args.all:
+		cur.execute("select id, embedding::real[] from public.v2_tile_embeddings")
+	else:
+		cur.execute(
+			"select id, embedding::real[] from public.v2_tile_embeddings "
+			"where array_length(bg_sims, 1) is null"
+		)
 	rows = cur.fetchall()
 	print(f"rows to backfill: {len(rows)}")
 	if not rows:
