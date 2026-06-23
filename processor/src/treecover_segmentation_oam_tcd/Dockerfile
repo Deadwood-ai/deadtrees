@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+FROM pytorch/pytorch:2.7.1-cuda11.8-cudnn9-runtime
 ENV TZ=Europe/Zurich
 
 # set bash as current shell
@@ -45,8 +45,17 @@ ENV PATH=/home/deadtrees/.local/bin:$PATH
 
 # Switch to root to install packages system-wide (for root access like ODM)
 USER root
-RUN python -m pip install --no-cache-dir -r requirements.txt
-RUN python -m pip install --no-cache-dir -e .
+
+# The base image ships torch 2.7.1 built for CUDA 11.8 (cu118). tcd requires
+# torch>=2.7.0, so the base already satisfies it and pip won't upgrade torch —
+# avoiding the latest cu130 wheel, which is too new for the GPU host drivers
+# (prod CUDA 12.2, dev 12.8) and would make torch silently fall back to CPU. cu118
+# runs on any driver >= 11.8, covering the whole GPU fleet. The constraint locks
+# torch's CUDA build so an unpinned transitive dep (e.g. torchvision) can't quietly
+# pull a cu126/cu128/cu130 wheel the prod driver can't run.
+RUN printf 'torch==2.7.1\n' > /tmp/torch-constraints.txt
+RUN PIP_CONSTRAINT=/tmp/torch-constraints.txt python -m pip install --no-cache-dir -r requirements.txt
+RUN PIP_CONSTRAINT=/tmp/torch-constraints.txt python -m pip install --no-cache-dir -e .
 
 # Create the entrypoint script
 COPY --chown=deadtrees:deadtrees entrypoint.sh /home/deadtrees/entrypoint.sh

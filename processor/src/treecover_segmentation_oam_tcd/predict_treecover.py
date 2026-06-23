@@ -397,12 +397,14 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 					)
 
 		try:
-			container_output = _run_and_wait(device_requests=None)
+			container_output = _run_and_wait(
+				device_requests=[docker.types.DeviceRequest(count=-1, capabilities=[['gpu']])]
+			)
 		except _TCDContainerTimeout:
 			raise
 		except Exception as gpu_err:
 			logger.warning(
-				f'TCD container execution failed, retrying once: {gpu_err}',
+				f'TCD container GPU execution failed, retrying once on CPU: {gpu_err}',
 				LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 			)
 			container_output = _run_and_wait(device_requests=None)
