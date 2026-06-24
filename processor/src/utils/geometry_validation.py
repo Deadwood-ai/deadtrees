@@ -10,55 +10,10 @@ Geometries can become invalid due to:
 These utilities should be called AFTER all reprojections but BEFORE saving to database.
 """
 
-try:
-	from shapely import get_num_coordinates
-except ImportError:  # pragma: no cover - Shapely < 2 fallback
-	get_num_coordinates = None
 from shapely.geometry import Polygon, MultiPolygon
 from shapely.validation import explain_validity
 from shared.logger import logger
 from shared.logging import LogContext, LogCategory
-
-
-def _as_polygons(geometry: Polygon | MultiPolygon) -> list[Polygon]:
-	if isinstance(geometry, Polygon):
-		return [geometry]
-	if isinstance(geometry, MultiPolygon):
-		return list(geometry.geoms)
-	return []
-
-
-def count_polygon_points(polygons: list[Polygon | MultiPolygon]) -> int:
-	"""Count exterior and interior ring vertices across polygons."""
-	total = 0
-	for geometry in polygons:
-		if geometry is None or geometry.is_empty:
-			continue
-		if get_num_coordinates is not None:
-			total += get_num_coordinates(geometry)
-			continue
-		for polygon in _as_polygons(geometry):
-			total += len(polygon.exterior.coords) + sum(len(ring.coords) for ring in polygon.interiors)
-	return total
-
-
-def simplify_polygons_preserving_topology(polygons: list[Polygon | MultiPolygon], tolerance: float) -> list[Polygon]:
-	"""Simplify polygons with topology preservation and discard empty results."""
-	if tolerance <= 0:
-		return [polygon for geometry in polygons for polygon in _as_polygons(geometry)]
-
-	simplified = []
-	for geometry in polygons:
-		if geometry is None or geometry.is_empty:
-			continue
-
-		simplified_geometry = geometry.simplify(tolerance, preserve_topology=True)
-		if simplified_geometry.is_empty:
-			continue
-
-		simplified.extend(_as_polygons(simplified_geometry))
-
-	return simplified
 
 
 def validate_and_fix_polygon(polygon: Polygon, min_area: float = 0.0) -> Polygon | None:

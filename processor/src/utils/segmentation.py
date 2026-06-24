@@ -140,7 +140,7 @@ def filter_polygons_by_area(polygons, min_area):
 		filtered_holes = [hole for hole in polygon.interiors if Polygon(hole).area >= min_area]
 		filtered_polygon = Polygon(exterior, filtered_holes)
 		if filtered_polygon.area >= min_area:
-			filtered.append(polygon)
+			filtered.append(filtered_polygon)
 
 	print(f'Filtered {len(polygons) - len(filtered)} polygons by minimum area of {min_area}m2.')
 	return filtered
