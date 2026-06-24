@@ -13,6 +13,11 @@ services:
     # preserved. Cap retries so a persistently broken container does not
     # thrash forever.
     restart: on-failure:5
+    # Give the graceful-shutdown handler time to re-queue the in-flight task on a
+    # deploy/restart (SIGTERM) before Docker escalates to SIGKILL. Without this,
+    # the default 10s can expire mid-stage and a healthy job gets misclassified as
+    # a crash. See _handle_graceful_shutdown in processor/src/processor.py.
+    stop_grace_period: 30s
     deploy:
       resources:
         limits:

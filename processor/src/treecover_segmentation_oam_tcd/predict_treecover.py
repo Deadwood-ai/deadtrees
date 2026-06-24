@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import rasterio
 import rasterio.warp
+from rasterio.windows import Window
 import docker
 import requests
 import tarfile
@@ -543,23 +544,6 @@ def _copy_confidence_map_from_volume(volume_name: str, local_output_dir: Path, d
 				)
 
 
-def _load_confidence_map_from_container_output(confidence_map_path: str) -> np.ndarray:
-	"""
-	Load confidence map from TCD container output file.
-
-	This replaces the original confidence map type detection logic with
-	a simple file-based approach since we know the container outputs a GeoTIFF.
-
-	Args:
-		confidence_map_path (str): Path to confidence_map.tif from TCD container
-
-	Returns:
-		np.ndarray: Confidence map as numpy array
-	"""
-	with rasterio.open(confidence_map_path) as src:
-		return src.read(1)  # Read first band as numpy array
-
-
 def _cleanup_tcd_volume(volume_name: str, dataset_id: int, token: str):
 	"""
 	Clean up TCD shared volume after processing.
@@ -654,33 +638,64 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 		tcd_output_dir = temp_dir_path / 'tcd_output'
 		confidence_map_path = _copy_confidence_map_from_volume(volume_name, tcd_output_dir, dataset_id, token)
 
-		# Step 5: Postprocessing - Load confidence map and apply original thresholding logic
+		# Step 5: Postprocessing - threshold the confidence map and apply the nodata
+		# mask in windowed blocks.
+		#
+		# The TCD confidence map is gigapixel-scale (e.g. ~40000x22000 px for a
+		# typical drone ortho). Loading the whole confidence array, the full
+		# thresholded array AND the full dataset mask at once — plus the float64
+		# temporary that ``mask / 255`` used to create — peaked at many GB and got
+		# the worker OOM-killed mid-step (the process was SIGKILLed, so no error was
+		# ever logged). Reading block-by-block keeps peak memory proportional to a
+		# single window; the only full-resolution array kept is ``outimage``, which
+		# ``mask_to_polygons`` needs anyway.
 		logger.info(
 			'Loading confidence map and applying thresholding',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
-
-		confidence_map = _load_confidence_map_from_container_output(confidence_map_path)
-
-		# Apply original thresholding logic: (confidence_map > 200).astype(np.uint8)
-		outimage = (confidence_map > TCD_THRESHOLD).astype(np.uint8)
-
-		# Step 5.1: Apply nodata mask processing (critical for avoiding tile artifacts)
 		logger.info(
 			'Applying nodata mask processing to filter invalid areas',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 
-		# Open confidence map to get nodata mask
 		with rasterio.open(confidence_map_path) as confidence_src:
-			# Get the dataset mask from confidence map
-			nodata_mask = confidence_src.dataset_mask()
+			height = confidence_src.height
+			width = confidence_src.width
 
-			# Only apply masking if the mask is standard (contains only 0 and 255)
-			unique_mask_values = np.unique(nodata_mask)
-			if len(unique_mask_values) <= 2 and (0 in unique_mask_values or 255 in unique_mask_values):
-				# Standard mask with 0 and 255 values - apply it
-				outimage = outimage * (nodata_mask / 255).astype(np.uint8)
+			# Iterate over the file's internal tiling; fall back to row strips when
+			# the GeoTIFF is not internally tiled (TCD output is often striped).
+			windows = [window for _, window in confidence_src.block_windows(1)]
+			if not windows:
+				strip_height = 2048
+				windows = [
+					Window(0, row, width, min(strip_height, height - row))
+					for row in range(0, height, strip_height)
+				]
+
+			# Pass 1: threshold each confidence block into the output array and
+			# record which nodata mask values appear, without materialising any
+			# full-resolution temporary.
+			outimage = np.zeros((height, width), dtype=np.uint8)
+			mask_values_seen: set[int] = set()
+			for window in windows:
+				rows = slice(int(window.row_off), int(window.row_off + window.height))
+				cols = slice(int(window.col_off), int(window.col_off + window.width))
+				confidence_block = confidence_src.read(1, window=window)
+				outimage[rows, cols] = (confidence_block > TCD_THRESHOLD).astype(np.uint8)
+				mask_values_seen.update(np.unique(confidence_src.dataset_mask(window=window)).tolist())
+
+			# Only apply masking if the mask is standard (contains only 0 and 255).
+			# A non-standard mask (partial-alpha values all over the place) is left
+			# untouched to avoid masking artifacts, matching the original behaviour.
+			unique_mask_values = sorted(mask_values_seen)
+			if len(unique_mask_values) <= 2 and (0 in mask_values_seen or 255 in mask_values_seen):
+				# Pass 2: zero out fully-transparent (mask == 0) pixels block-by-block.
+				for window in windows:
+					rows = slice(int(window.row_off), int(window.row_off + window.height))
+					cols = slice(int(window.col_off), int(window.col_off + window.width))
+					mask_block = confidence_src.dataset_mask(window=window)
+					out_block = outimage[rows, cols]
+					out_block[mask_block == 0] = 0
 				logger.info(
 					f'Applied standard nodata mask with values: {unique_mask_values}',
 					LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),

@@ -603,10 +603,17 @@ def crashed_dataset_task(test_processor_user, auth_token):
 					client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 
 
-def test_background_process_requeues_interrupted_dataset(crashed_dataset_task, auth_token, monkeypatch):
-	"""Interrupted tasks (processor restarted mid-job) are re-queued rather than
-	marked as errors, so deployments don't require manual re-queuing."""
+def test_background_process_fails_crashed_dataset(crashed_dataset_task, auth_token, monkeypatch):
+	"""A stale active task left mid-stage means the previous run was hard-killed
+	(SIGKILL/OOM) without a graceful shutdown. Such crashes are deterministic, so
+	the task is marked errored and removed from the queue rather than retried."""
 	monkeypatch.setattr(processor_module, '_kill_dangling_dataset_resources', lambda dataset_id: None)
+
+	linear_calls = []
+	monkeypatch.setattr(
+		processor_module, 'create_processing_failure_issue',
+		lambda **kwargs: linear_calls.append(kwargs),
+	)
 
 	dataset_id = crashed_dataset_task['dataset_id']
 
@@ -617,8 +624,7 @@ def test_background_process_requeues_interrupted_dataset(crashed_dataset_task, a
 			client.table(settings.queue_table).select('*')
 			.eq('id', crashed_dataset_task['task_id']).execute()
 		)
-		assert len(queue_response.data) == 1, 'Interrupted task should remain in queue for retry'
-		assert queue_response.data[0]['is_processing'] is False, 'Task should be reset to is_processing=False'
+		assert len(queue_response.data) == 0, 'Crashed task should be removed from queue (no retry)'
 
 		status_response = (
 			client.table(settings.statuses_table).select('*')
@@ -626,9 +632,12 @@ def test_background_process_requeues_interrupted_dataset(crashed_dataset_task, a
 		)
 		assert len(status_response.data) == 1
 		status = status_response.data[0]
-		assert status['has_error'] is False, 'Interrupted task should not be marked as error'
+		assert status['has_error'] is True, 'Crashed task should be marked as error'
 		assert status['current_status'] == 'idle', 'Status should be reset to idle'
-		assert status['error_message'] is None, 'Error message should be cleared'
+		assert status['error_message'] is not None, 'Error message should describe the crash'
+
+	assert len(linear_calls) == 1, 'A Linear issue should be filed for the crash'
+	assert linear_calls[0]['dataset_id'] == dataset_id
 
 
 @pytest.fixture
@@ -682,12 +691,13 @@ def stale_active_task_without_stage_update(test_processor_user, auth_token):
 					client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 
 
-def test_background_process_requeues_stale_task_without_stage_update(
+def test_background_process_fails_stale_task_without_stage_update(
 	stale_active_task_without_stage_update, auth_token, monkeypatch
 ):
-	"""A stale task that never wrote a stage update (processor killed at startup) is
-	re-queued rather than marked as error."""
+	"""A stale active task whose requested stages are not complete is a hard-kill
+	crash (no graceful shutdown cleaned it up), so it is failed and dequeued."""
 	monkeypatch.setattr(processor_module, '_kill_dangling_dataset_resources', lambda dataset_id: None)
+	monkeypatch.setattr(processor_module, 'create_processing_failure_issue', lambda **kwargs: None)
 
 	dataset_id = stale_active_task_without_stage_update['dataset_id']
 
@@ -698,8 +708,7 @@ def test_background_process_requeues_stale_task_without_stage_update(
 			client.table(settings.queue_table).select('*')
 			.eq('id', stale_active_task_without_stage_update['task_id']).execute()
 		)
-		assert len(queue_response.data) == 1, 'Task should remain in queue for retry'
-		assert queue_response.data[0]['is_processing'] is False, 'Task should be reset to is_processing=False'
+		assert len(queue_response.data) == 0, 'Crashed task should be removed from queue (no retry)'
 
 		status_response = (
 			client.table(settings.statuses_table).select('*')
@@ -707,9 +716,9 @@ def test_background_process_requeues_stale_task_without_stage_update(
 		)
 		assert len(status_response.data) == 1
 		status = status_response.data[0]
-		assert status['has_error'] is False, 'Task should not be marked as error'
+		assert status['has_error'] is True, 'Crashed task should be marked as error'
 		assert status['current_status'] == 'idle'
-		assert status['error_message'] is None
+		assert status['error_message'] is not None
 
 
 @pytest.fixture
@@ -796,9 +805,52 @@ def test_kill_dangling_resources_called_on_stale_task_recovery(crashed_dataset_t
 	a stale active task is found, so orphaned containers and volumes are cleaned up."""
 	killed_ids = []
 	monkeypatch.setattr(processor_module, '_kill_dangling_dataset_resources', lambda dataset_id: killed_ids.append(dataset_id))
+	monkeypatch.setattr(processor_module, 'create_processing_failure_issue', lambda **kwargs: None)
 
 	background_process()
 
 	assert crashed_dataset_task['dataset_id'] in killed_ids, (
 		'_kill_dangling_dataset_resources should be called with the stale task dataset_id'
 	)
+
+
+def test_graceful_shutdown_requeues_inflight_task(crashed_dataset_task, auth_token):
+	"""On an orderly shutdown (SIGTERM/SIGINT) the in-flight task is cleanly
+	re-queued for retry — left in the queue, is_processing reset, status idle and
+	no error — so deploys/restarts never lose or wrongly fail a healthy job."""
+	import signal
+
+	dataset_id = crashed_dataset_task['dataset_id']
+	task_id = crashed_dataset_task['task_id']
+
+	with use_client(auth_token) as client:
+		row = client.table(settings.queue_table).select('*').eq('id', task_id).execute().data[0]
+
+	task = QueueTask(
+		id=row['id'],
+		dataset_id=row['dataset_id'],
+		user_id=row['user_id'],
+		priority=row['priority'],
+		is_processing=row['is_processing'],
+		current_position=-1,
+		estimated_time=None,
+		task_types=row['task_types'],
+	)
+
+	processor_module._set_inflight_task(task)
+	try:
+		with pytest.raises(SystemExit) as exc_info:
+			processor_module._handle_graceful_shutdown(signal.SIGTERM, None)
+		assert exc_info.value.code == 0
+	finally:
+		processor_module._set_inflight_task(None)
+
+	with use_client(auth_token) as client:
+		queue_response = client.table(settings.queue_table).select('*').eq('id', task_id).execute()
+		assert len(queue_response.data) == 1, 'Gracefully interrupted task should stay in queue for retry'
+		assert queue_response.data[0]['is_processing'] is False, 'is_processing should be reset for re-pickup'
+
+		status = client.table(settings.statuses_table).select('*').eq('dataset_id', dataset_id).execute().data[0]
+		assert status['has_error'] is False, 'Graceful interruption is not an error'
+		assert status['current_status'] == 'idle', 'Status should be reset to idle'
+		assert status['error_message'] is None

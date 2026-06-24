@@ -1,4 +1,6 @@
 import shutil
+import signal
+import sys
 import docker
 from pathlib import Path
 from processor.src.process_geotiff import process_geotiff
@@ -49,6 +51,58 @@ def _kill_dangling_dataset_resources(dataset_id: int):
 	except Exception as e:
 		logger.warning(f'Error during dangling resource cleanup for dataset {dataset_id}: {e}')
 logger.add_supabase_handler(SupabaseHandler())
+
+# Tracks the task currently being processed so the graceful-shutdown handler can
+# cleanly return it to the queue when the container is asked to stop (deploy /
+# restart). Holds the QueueTask while a stage is running; None when idle.
+_inflight_task: QueueTask | None = None
+
+
+def _set_inflight_task(task: QueueTask | None) -> None:
+	global _inflight_task
+	_inflight_task = task
+
+
+def _handle_graceful_shutdown(signum, frame):
+	"""Cleanly re-queue the in-flight task on an orderly shutdown (SIGTERM/SIGINT).
+
+	This is what distinguishes a *transient* interruption from a *fault*. A deploy
+	or manual restart sends SIGTERM, so this handler runs and returns the in-flight
+	task to the waiting queue (is_processing=False, status idle) — it is retried
+	transparently and leaves no stale active row behind. An OOM kill or hard crash
+	delivers SIGKILL (or kills the process outright), so this handler never runs;
+	the task is left as a stale is_processing=True row, which the crash-recovery
+	path then treats as a genuine, non-retryable failure. Retrying OOM/bug crashes
+	just loops and burns hours of compute, so we deliberately do not.
+	"""
+	task = _inflight_task
+	if task is not None:
+		try:
+			# The token captured at task start may have expired during a long
+			# stage; log in fresh for the bookkeeping writes.
+			token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
+			logger.warning(
+				f'Received signal {signum}; gracefully re-queuing in-flight task {task.id} '
+				f'for dataset {task.dataset_id} for retry',
+				LogContext(
+					category=LogCategory.PROCESS,
+					dataset_id=task.dataset_id,
+					user_id=task.user_id,
+					token=token,
+				),
+			)
+			with use_client(token) as client:
+				client.table(settings.statuses_table).update({
+					'current_status': StatusEnum.idle.value,
+					'has_error': False,
+					'error_message': None,
+				}).eq('dataset_id', task.dataset_id).execute()
+				client.table(settings.queue_table).update({'is_processing': False}).eq('id', task.id).execute()
+		except Exception as e:
+			# Best-effort: if we cannot clean up, fall through and exit anyway. The
+			# task is then left as a stale active row and treated as a crash next run.
+			logger.error(f'Failed to gracefully re-queue task {task.id} during shutdown: {e}')
+	sys.exit(0)
 
 # Maps each task type to its corresponding is_*_done flag and human-readable stage name.
 # Used by crash detection to determine exactly which stage a previous run crashed during.
@@ -219,6 +273,52 @@ def is_dataset_uploaded_or_processed(task: QueueTask, token: str) -> tuple:
 		return is_uploaded, False
 
 
+def _fail_crashed_task(token: str, task: QueueTask, status: dict | None) -> None:
+	"""Mark a crashed task's dataset as errored, file a Linear issue, and dequeue it.
+
+	Used when a previous run died mid-stage without a graceful shutdown (SIGKILL /
+	OOM / hard crash). These failures are deterministic — retrying just loops and
+	wastes hours of compute — so the task is failed for human attention rather than
+	re-queued. Shared by both crash-recovery paths so they stay consistent.
+	"""
+	if status is not None:
+		crashed_stage = detect_crashed_stage(status, task.task_types)
+		completed = get_completed_stages(status)
+		error_msg = f'Processing container crashed during {crashed_stage}. Completed: {completed}'
+	else:
+		crashed_stage = 'unknown'
+		error_msg = 'Processing container crashed before a status row was written'
+
+	logger.warning(
+		f'Crash detected for dataset {task.dataset_id}: {error_msg}',
+		LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+	)
+
+	# Mark as errored and reset to idle so it is no longer seen as in-progress.
+	update_status(
+		token,
+		dataset_id=task.dataset_id,
+		current_status=StatusEnum.idle,
+		has_error=True,
+		error_message=error_msg,
+	)
+
+	# Create Linear issue for visibility
+	try:
+		create_processing_failure_issue(
+			token=token,
+			dataset_id=task.dataset_id,
+			stage=crashed_stage,
+			error_message=error_msg,
+		)
+	except Exception as linear_error:
+		logger.warning(f'Failed to create Linear issue for crash: {linear_error}')
+
+	# Remove from queue — the dataset must be explicitly re-triggered once fixed.
+	with use_client(token) as client:
+		client.table(settings.queue_table).delete().eq('id', task.id).execute()
+
+
 def process_task(task: QueueTask, token: str):
 	# Verify token
 	user = verify_token(token)
@@ -246,6 +346,9 @@ def process_task(task: QueueTask, token: str):
 	# but `v2_queue.is_processing` is still consumed by ops snapshots and queue views.
 	with use_client(token) as client:
 		client.table(settings.queue_table).update({'is_processing': True}).eq('id', task.id).execute()
+
+	# Register as in-flight so a graceful shutdown (SIGTERM) re-queues it for retry.
+	_set_inflight_task(task)
 
 	# remove processing path if it exists
 	if Path(settings.processing_path).exists():
@@ -525,6 +628,11 @@ def process_task(task: QueueTask, token: str):
 		raise  # Re-raise the exception to ensure the error is properly handled
 
 	finally:
+		# No longer in-flight: the task has either completed, been failed and
+		# dequeued, or is about to re-raise. A shutdown from here on must not
+		# re-queue it.
+		_set_inflight_task(None)
+
 		# Clean up processing path regardless of success/failure
 		if not settings.DEV_MODE:
 			shutil.rmtree(settings.processing_path, ignore_errors=True)
@@ -536,17 +644,26 @@ def background_process():
 
 	On each run this function:
 	1. Logs in as the processor service account.
-	2. Clears any stale `is_processing=true` queue rows left behind by crashes.
-	3. Loops through the waiting queue, clearing any crashed tasks it finds:
-	   - A "crash" is detected when current_status != 'idle' for a queued task,
-	     meaning a previous container run died (OOM, kill) mid-processing.
-	   - Crashed tasks are marked as errored, a Linear issue is created, and
-	     the task is removed from the queue.
-	4. Once a healthy, ready task is found, processes it and exits.
+	2. Installs a graceful-shutdown handler so a deploy/restart (SIGTERM) cleanly
+	   re-queues the in-flight task for retry instead of leaving it stranded.
+	3. Handles any stale `is_processing=true` queue row left behind by a previous
+	   run. Because graceful stops self-clean via the shutdown handler, a leftover
+	   active row can only mean a hard kill (SIGKILL/OOM) or hard crash:
+	   - If all requested stages are already done, the row is just removed.
+	   - Otherwise it is a genuine, non-retryable crash: the dataset is marked
+	     errored, a Linear issue is filed, and the task is removed from the queue.
+	     OOM/bug crashes are deterministic, so retrying only loops and wastes
+	     compute — we deliberately do not retry them.
+	4. Detects crashes the same way for the next waiting task, then processes the
+	   first healthy, ready task and exits.
 
 	docker compose up guarantees only one processor container runs at a time,
 	so `is_processing` is bookkeeping only, not the concurrency guard.
 	"""
+	# Install graceful-shutdown handlers so deploys/restarts re-queue cleanly.
+	signal.signal(signal.SIGTERM, _handle_graceful_shutdown)
+	signal.signal(signal.SIGINT, _handle_graceful_shutdown)
+
 	# use the processor to log in
 	token, user = login_verified(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 	if not user:
@@ -555,8 +672,13 @@ def background_process():
 	while True:
 		active_task = get_active_task(token)
 		if active_task is not None:
+			# A graceful stop (deploy/restart) re-queues its in-flight task via
+			# _handle_graceful_shutdown and leaves no active row. So a leftover
+			# is_processing=True row here means the previous run was hard-killed
+			# (SIGKILL/OOM) or crashed without cleanup — a genuine fault.
 			logger.warning(
-				f'Found stale active queue task {active_task.id} for dataset {active_task.dataset_id}; recovering it before new work',
+				f'Found stale active queue task {active_task.id} for dataset {active_task.dataset_id}; '
+				'previous run died without graceful shutdown',
 				LogContext(
 					category=LogCategory.PROCESS,
 					dataset_id=active_task.dataset_id,
@@ -571,45 +693,27 @@ def background_process():
 
 			_kill_dangling_dataset_resources(active_task.dataset_id)
 
-			if status_resp.data:
-				status = status_resp.data[0]
-				if are_requested_stages_complete(status, active_task.task_types):
-					# All stages finished — just remove the stale queue row.
-					logger.info(
-						f'Removing stale completed queue task {active_task.id} for dataset {active_task.dataset_id}',
-						LogContext(
-							category=LogCategory.PROCESS,
-							dataset_id=active_task.dataset_id,
-							user_id=active_task.user_id,
-							token=token,
-						),
-					)
-					with use_client(token) as client:
-						client.table(settings.queue_table).delete().eq('id', active_task.id).execute()
-					continue
+			status = status_resp.data[0] if status_resp.data else None
 
-			# Incomplete job — reset for retry rather than marking as error.
-			# Deployments and clean restarts interrupt jobs without any fault in the
-			# data or code; treating them as errors creates noise and requires manual
-			# re-queuing. The task is left in the queue with is_processing=False so
-			# it will be picked up again on the next processor run.
-			logger.info(
-				f'Re-queuing interrupted task {active_task.id} for dataset {active_task.dataset_id}',
-				LogContext(
-					category=LogCategory.PROCESS,
-					dataset_id=active_task.dataset_id,
-					user_id=active_task.user_id,
-					token=token,
-				),
-			)
-			with use_client(token) as client:
-				client.table(settings.statuses_table).update({
-					'current_status': StatusEnum.idle.value,
-					'has_error': False,
-					'error_message': None,
-				}).eq('dataset_id', active_task.dataset_id).execute()
-				client.table(settings.queue_table).update({'is_processing': False}).eq('id', active_task.id).execute()
-			return  # defer processing of re-queued task to the next cron run
+			if status is not None and are_requested_stages_complete(status, active_task.task_types):
+				# Crashed only after finishing all requested stages — no fault to
+				# report, just remove the stale queue row.
+				logger.info(
+					f'Removing stale completed queue task {active_task.id} for dataset {active_task.dataset_id}',
+					LogContext(
+						category=LogCategory.PROCESS,
+						dataset_id=active_task.dataset_id,
+						user_id=active_task.user_id,
+						token=token,
+					),
+				)
+				with use_client(token) as client:
+					client.table(settings.queue_table).delete().eq('id', active_task.id).execute()
+				continue
+
+			# Genuine mid-stage crash — fail it instead of retrying.
+			_fail_crashed_task(token, active_task, status)
+			continue
 
 		task = get_next_task(token)
 		if task is None:
@@ -648,41 +752,10 @@ def background_process():
 		if status_resp.data:
 			status = status_resp.data[0]
 			if status['current_status'] != 'idle':
-				# Previous crash detected - current_status is still set to a processing stage
-				crashed_stage = detect_crashed_stage(status, task.task_types)
-				completed = get_completed_stages(status)
-				error_msg = f'Processing container crashed during {crashed_stage}. Completed: {completed}'
-
-				logger.warning(
-					f'Crash detected for dataset {task.dataset_id}: {error_msg}',
-					LogContext(
-						category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
-					),
-				)
-
-				# Mark as errored and reset to idle so it can be re-queued later
-				update_status(
-					token,
-					dataset_id=task.dataset_id,
-					current_status=StatusEnum.idle,
-					has_error=True,
-					error_message=error_msg,
-				)
-
-				# Create Linear issue for visibility
-				try:
-					create_processing_failure_issue(
-						token=token,
-						dataset_id=task.dataset_id,
-						stage=crashed_stage,
-						error_message=error_msg,
-					)
-				except Exception as linear_error:
-					logger.warning(f'Failed to create Linear issue for crash: {linear_error}')
-
-				# Remove from queue
-				with use_client(token) as client:
-					client.table(settings.queue_table).delete().eq('id', task.id).execute()
+				# Previous crash detected - current_status is still set to a
+				# processing stage. Fail it (no retry) for the same reason as the
+				# stale-active-task path above.
+				_fail_crashed_task(token, task, status)
 				continue  # check next task in queue
 
 		# Normal processing - found a healthy, ready task
