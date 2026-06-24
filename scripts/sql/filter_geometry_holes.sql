@@ -98,14 +98,27 @@ repaired AS (
     SELECT
         id,
         old_geometry,
-        raw_geometry,
         CASE
             WHEN ST_IsValid(raw_geometry) THEN raw_geometry
             ELSE ST_Buffer(raw_geometry, 0)
         END AS new_geometry
     FROM rebuilt
 )
-SELECT * FROM repaired;
+SELECT
+    id,
+    old_geometry,
+    new_geometry,
+    -- A row is only safe to write back if hole removal yielded a valid, non-empty
+    -- single POLYGON with fewer vertices. Pre-existing invalid geometries (e.g.
+    -- self-intersecting rings) can repair into a MULTIPOLYGON or empty geometry,
+    -- which cannot go into a geometry(Polygon,4326) column; those are left as-is.
+    (
+        ST_IsValid(new_geometry)
+        AND NOT ST_IsEmpty(new_geometry)
+        AND GeometryType(new_geometry) = 'POLYGON'
+        AND ST_NPoints(new_geometry) < ST_NPoints(old_geometry)
+    ) AS applicable
+FROM repaired;
 
 DO $$
 BEGIN
@@ -146,51 +159,43 @@ FROM (
     SELECT
         'after' AS variant,
         count(*) AS rows,
-        sum(ST_NPoints(new_geometry)) AS points,
-        sum(ST_NumInteriorRings(new_geometry)) AS holes,
-        sum(pg_column_size(new_geometry)) AS geom_bytes,
-        sum(ST_Area(new_geometry::geography)) AS area_m2
+        sum(ST_NPoints(CASE WHEN applicable THEN new_geometry ELSE old_geometry END)) AS points,
+        sum(ST_NumInteriorRings(CASE WHEN applicable THEN new_geometry ELSE old_geometry END)) AS holes,
+        sum(pg_column_size(CASE WHEN applicable THEN new_geometry ELSE old_geometry END)) AS geom_bytes,
+        sum(ST_Area((CASE WHEN applicable THEN new_geometry ELSE old_geometry END)::geography)) AS area_m2
     FROM _hole_filter_candidate
 ) metrics
 ORDER BY (variant = 'after');
 
--- Safety gate: nothing other than valid, non-empty POLYGONs may be written back.
+-- Report rows that had holes but could NOT be safely rebuilt into a single valid
+-- POLYGON (almost always pre-existing invalid input geometry). These are left
+-- untouched by the UPDATE below rather than aborting the whole label.
 SELECT
     id,
-    GeometryType(new_geometry) AS geom_type,
+    GeometryType(new_geometry) AS rebuilt_type,
     ST_IsValid(new_geometry) AS is_valid,
-    ST_IsEmpty(new_geometry) AS is_empty
+    ST_IsEmpty(new_geometry) AS is_empty,
+    ST_IsValidReason(old_geometry) AS old_geometry_reason
 FROM _hole_filter_candidate
-WHERE
-    ST_IsEmpty(new_geometry)
-    OR NOT ST_IsValid(new_geometry)
-    OR GeometryType(new_geometry) <> 'POLYGON'
+WHERE NOT applicable
+  AND ST_NumInteriorRings(old_geometry) > 0
 LIMIT 20;
 
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1
-        FROM _hole_filter_candidate
-        WHERE
-            ST_IsEmpty(new_geometry)
-            OR NOT ST_IsValid(new_geometry)
-            OR GeometryType(new_geometry) <> 'POLYGON'
-    ) THEN
-        RAISE EXCEPTION 'Hole filtering produced rows that cannot be safely stored as geometry(Polygon,4326). See blocked row sample above.';
-    END IF;
-END $$;
+SELECT
+    count(*) FILTER (WHERE applicable) AS rows_to_update,
+    count(*) FILTER (WHERE NOT applicable AND ST_NumInteriorRings(old_geometry) > 0) AS rows_skipped_with_holes
+FROM _hole_filter_candidate;
 
 \if :apply
-    -- Only rewrite rows that actually lost holes (fewer vertices), to avoid
-    -- churning unchanged geometries and their area_m2.
+    -- Only rewrite rows flagged applicable: a valid, non-empty single POLYGON with
+    -- fewer vertices than before. Unchanged and unstorable rows are left as-is.
     UPDATE :target_table g
     SET
         geometry = c.new_geometry::geometry(Polygon, 4326),
         area_m2 = ST_Area(c.new_geometry::geography)
     FROM _hole_filter_candidate c
     WHERE g.id = c.id
-      AND ST_NPoints(c.new_geometry) < ST_NPoints(c.old_geometry);
+      AND c.applicable;
 
     COMMIT;
     \echo 'Committed hole filtering.'
