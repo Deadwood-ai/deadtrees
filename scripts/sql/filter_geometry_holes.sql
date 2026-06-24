@@ -1,22 +1,31 @@
--- Remove sub-threshold interior rings (holes) from one forest-cover label in-place.
+-- Remove sub-threshold interior rings (holes) from one label's polygons in-place.
 --
--- Background: forest-cover polygons stored in v2_forest_cover_geometries can carry
--- huge numbers of tiny interior rings (often degenerate triangles). These were
--- meant to be dropped at ingestion by filter_polygons_by_area, but a bug appended
--- the unfiltered polygon, so the holes were persisted. This backfill rebuilds each
--- polygon keeping only interior rings whose geodesic area is >= the threshold.
+-- Works on either v2_forest_cover_geometries or v2_deadwood_geometries (pass the
+-- table via -v target_table=...). Both store geometry(Polygon,4326) with an
+-- area_m2 column.
+--
+-- Background: model-prediction polygons could carry large numbers of tiny interior
+-- rings (often degenerate triangles). These were meant to be dropped at ingestion
+-- by filter_polygons_by_area, but a bug appended the unfiltered polygon, so the
+-- holes were persisted. This backfill rebuilds each polygon keeping only interior
+-- rings whose geodesic area is >= the threshold.
 --
 -- Exterior rings are always kept; whole rows are never deleted (only holes change).
 --
--- Usage:
---   scripts/filter_forest_cover_holes.sh 10494
---   scripts/filter_forest_cover_holes.sh 10494 --min-area-m2 0.1 --apply
+-- Usage (via scripts/filter_geometry_holes.sh):
+--   -v label_id=32269 -v target_table=public.v2_forest_cover_geometries
+--   -v label_id=32268 -v target_table=public.v2_deadwood_geometries -v apply=1
 --
 -- Set apply=1 only after reviewing the printed before/after metrics.
 
 \if :{?label_id}
 \else
   \quit 'Missing required psql variable: label_id'
+\endif
+
+\if :{?target_table}
+\else
+  \set target_table public.v2_forest_cover_geometries
 \endif
 
 \if :{?min_area_m2}
@@ -29,7 +38,8 @@
   \set apply 0
 \endif
 
-\echo 'Forest-cover hole filter backfill'
+\echo 'Geometry hole filter backfill'
+\echo '  target_table: ' :target_table
 \echo '  label_id: ' :label_id
 \echo '  min_area_m2: ' :min_area_m2
 \echo '  apply: ' :apply
@@ -37,7 +47,7 @@
 BEGIN;
 SET LOCAL statement_timeout = '10min';
 
-CREATE TEMP TABLE _forest_cover_hole_candidate ON COMMIT DROP AS
+CREATE TEMP TABLE _hole_filter_candidate ON COMMIT DROP AS
 WITH params AS (
     SELECT
         :label_id::bigint AS label_id,
@@ -45,7 +55,7 @@ WITH params AS (
 ),
 src AS (
     SELECT g.id, g.geometry AS old_geometry, p.min_area_m2
-    FROM public.v2_forest_cover_geometries g
+    FROM :target_table g
     CROSS JOIN params p
     WHERE g.label_id = p.label_id
 ),
@@ -99,8 +109,8 @@ SELECT * FROM repaired;
 
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM _forest_cover_hole_candidate) THEN
-        RAISE EXCEPTION 'No v2_forest_cover_geometries rows found for the requested label_id. Nothing to do.';
+    IF NOT EXISTS (SELECT 1 FROM _hole_filter_candidate) THEN
+        RAISE EXCEPTION 'No rows found for the requested label_id in the target table. Nothing to do.';
     END IF;
 END $$;
 
@@ -109,10 +119,10 @@ END $$;
 DO $$
 BEGIN
     IF EXISTS (
-        SELECT 1 FROM _forest_cover_hole_candidate
+        SELECT 1 FROM _hole_filter_candidate
         WHERE GeometryType(old_geometry) <> 'POLYGON'
     ) THEN
-        RAISE EXCEPTION 'Found non-POLYGON forest-cover rows; this backfill only supports POLYGON geometries.';
+        RAISE EXCEPTION 'Found non-POLYGON rows; this backfill only supports POLYGON geometries.';
     END IF;
 END $$;
 
@@ -131,7 +141,7 @@ FROM (
         sum(ST_NumInteriorRings(old_geometry)) AS holes,
         sum(pg_column_size(old_geometry)) AS geom_bytes,
         sum(ST_Area(old_geometry::geography)) AS area_m2
-    FROM _forest_cover_hole_candidate
+    FROM _hole_filter_candidate
     UNION ALL
     SELECT
         'after' AS variant,
@@ -140,7 +150,7 @@ FROM (
         sum(ST_NumInteriorRings(new_geometry)) AS holes,
         sum(pg_column_size(new_geometry)) AS geom_bytes,
         sum(ST_Area(new_geometry::geography)) AS area_m2
-    FROM _forest_cover_hole_candidate
+    FROM _hole_filter_candidate
 ) metrics
 ORDER BY (variant = 'after');
 
@@ -150,7 +160,7 @@ SELECT
     GeometryType(new_geometry) AS geom_type,
     ST_IsValid(new_geometry) AS is_valid,
     ST_IsEmpty(new_geometry) AS is_empty
-FROM _forest_cover_hole_candidate
+FROM _hole_filter_candidate
 WHERE
     ST_IsEmpty(new_geometry)
     OR NOT ST_IsValid(new_geometry)
@@ -161,7 +171,7 @@ DO $$
 BEGIN
     IF EXISTS (
         SELECT 1
-        FROM _forest_cover_hole_candidate
+        FROM _hole_filter_candidate
         WHERE
             ST_IsEmpty(new_geometry)
             OR NOT ST_IsValid(new_geometry)
@@ -174,16 +184,16 @@ END $$;
 \if :apply
     -- Only rewrite rows that actually lost holes (fewer vertices), to avoid
     -- churning unchanged geometries and their area_m2.
-    UPDATE public.v2_forest_cover_geometries g
+    UPDATE :target_table g
     SET
         geometry = c.new_geometry::geometry(Polygon, 4326),
         area_m2 = ST_Area(c.new_geometry::geography)
-    FROM _forest_cover_hole_candidate c
+    FROM _hole_filter_candidate c
     WHERE g.id = c.id
       AND ST_NPoints(c.new_geometry) < ST_NPoints(c.old_geometry);
 
     COMMIT;
-    \echo 'Committed forest-cover hole filtering.'
+    \echo 'Committed hole filtering.'
 \else
     ROLLBACK;
     \echo 'Dry run only. Re-run with --apply to commit.'
