@@ -11,7 +11,7 @@ interface ProcessingProgressProps {
   queueInfo?: QueueInfo;
 }
 
-const ProcessingProgress: React.FC<ProcessingProgressProps> = ({ dataset, showDetails = true, queueInfo }) => {
+const ProcessingProgress: React.FC<ProcessingProgressProps> = ({ dataset, queueInfo }) => {
   const progress = calculateProcessingProgress(dataset);
   const normalizedAssessment = dataset.final_assessment === "ready" ? "no_issues" : dataset.final_assessment;
   const audit = normalizedAssessment
@@ -85,38 +85,14 @@ const ProcessingProgress: React.FC<ProcessingProgressProps> = ({ dataset, showDe
     );
   }
 
-  // Handle processing state - compact single row version
-  const progressElement = (
-    <div className="flex items-center gap-2">
-      <span className="whitespace-nowrap text-sm font-medium">
-        Step {progress.currentStep} of {progress.totalSteps}
-      </span>
-      <div className="h-1 w-16 overflow-hidden rounded-full bg-gray-200">
-        <div
-          className="h-full rounded-full bg-blue-500 transition-all duration-300"
-          style={{ width: `${progress.percentage}%` }}
-        />
-      </div>
-      <SyncOutlined spin />
-    </div>
+  // Handle processing state - simple status indicator
+  return (
+    <Tooltip title="Your data is being processed">
+      <Tag icon={<SyncOutlined spin />} color="processing">
+        Processing
+      </Tag>
+    </Tooltip>
   );
-
-  if (showDetails) {
-    return (
-      <Tooltip
-        title={
-          <div>
-            <div className="font-medium">{progress.currentStepInfo.label}</div>
-            <div className="text-xs opacity-90">{progress.currentStepInfo.description}</div>
-          </div>
-        }
-      >
-        {progressElement}
-      </Tooltip>
-    );
-  }
-
-  return progressElement;
 };
 
 export default ProcessingProgress;
