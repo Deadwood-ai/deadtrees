@@ -51,6 +51,7 @@ export interface DatasetProgress {
   is_ortho_done?: boolean;
   is_metadata_done?: boolean;
   is_cog_done?: boolean;
+  is_thumbnail_done?: boolean;
   is_deadwood_done?: boolean;
   is_forest_cover_done?: boolean;
   is_combined_model_done?: boolean;
@@ -107,6 +108,30 @@ export function isDatasetProcessingComplete(dataset: DatasetProgress): boolean {
     dataset.is_cog_done &&
     isPredictionProcessingComplete(dataset) &&
     (!dataset.is_aoi_required || dataset.is_aoi_done)
+  );
+}
+
+/**
+ * Whether a dataset is ready to be audited.
+ *
+ * Auditing only concerns the legacy processing pipeline (ortho, metadata, COG,
+ * thumbnail, and the legacy deadwood + tree cover predictions). It is intentionally
+ * independent of the v2 combined segmentation model, AOI generation, and whatever
+ * processing status the dataset currently has: a dataset must be auditable as soon
+ * as its legacy outputs exist, regardless of whether/where v2 segmentation is in
+ * its pipeline (running, queued, errored, or done).
+ */
+export function isDatasetReadyForAudit(dataset: DatasetProgress): boolean {
+  const odmComplete = !isOdmWorkflow(dataset) || dataset.is_odm_done;
+
+  return !!(
+    dataset.is_upload_done &&
+    odmComplete &&
+    dataset.is_ortho_done &&
+    dataset.is_metadata_done &&
+    dataset.is_cog_done &&
+    dataset.is_thumbnail_done &&
+    isLegacyPredictionProcessingComplete(dataset)
   );
 }
 
