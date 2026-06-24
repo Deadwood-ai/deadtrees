@@ -91,6 +91,11 @@ def _handle_graceful_shutdown(signum, frame):
 					token=token,
 				),
 			)
+			# ODM/TCD stages run as detached containers via the host Docker socket
+			# and outlive this process. Kill them before making the task retryable,
+			# otherwise the next run starts a duplicate while the old one keeps
+			# consuming GPU/CPU.
+			_kill_dangling_dataset_resources(task.dataset_id)
 			with use_client(token) as client:
 				client.table(settings.statuses_table).update({
 					'current_status': StatusEnum.idle.value,
@@ -344,11 +349,12 @@ def process_task(task: QueueTask, token: str):
 	# Keep queue bookkeeping aligned with the live worker state.
 	# `v2_statuses.current_status` remains the crash/source-of-truth signal,
 	# but `v2_queue.is_processing` is still consumed by ops snapshots and queue views.
+	# Register as in-flight before marking the row active so a SIGTERM in this gap
+	# cannot leave a stale is_processing=True row that looks like a hard crash.
+	_set_inflight_task(task)
+
 	with use_client(token) as client:
 		client.table(settings.queue_table).update({'is_processing': True}).eq('id', task.id).execute()
-
-	# Register as in-flight so a graceful shutdown (SIGTERM) re-queues it for retry.
-	_set_inflight_task(task)
 
 	# remove processing path if it exists
 	if Path(settings.processing_path).exists():
@@ -593,6 +599,10 @@ def process_task(task: QueueTask, token: str):
 			client.table(settings.queue_table).delete().eq('id', task.id).execute()
 
 	except Exception as e:
+		# This path owns the failure bookkeeping; clear the in-flight marker now so a
+		# SIGTERM mid-handling cannot re-queue the failed task or clear its error.
+		_set_inflight_task(None)
+
 		logger.error(
 			f'Processing failed: {str(e)}',
 			LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
@@ -706,6 +716,15 @@ def background_process():
 						user_id=active_task.user_id,
 						token=token,
 					),
+				)
+				# Reset to idle too: if the crash happened after finishing all stages
+				# but before status was set back to idle, leaving it non-idle would
+				# make a later queued task for this dataset hit the crash path.
+				update_status(
+					token,
+					dataset_id=active_task.dataset_id,
+					current_status=StatusEnum.idle,
+					has_error=False,
 				)
 				with use_client(token) as client:
 					client.table(settings.queue_table).delete().eq('id', active_task.id).execute()
