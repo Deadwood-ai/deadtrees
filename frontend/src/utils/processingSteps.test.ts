@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   calculateProcessingProgress,
   isDatasetProcessingComplete,
+  isDatasetReadyForAudit,
   type DatasetProgress,
 } from "./processingSteps";
 
@@ -131,5 +132,66 @@ describe("processing step completion", () => {
 
     expect(isDatasetProcessingComplete(dataset)).toBe(false);
     expect(isDatasetProcessingComplete({ ...dataset, is_odm_done: true })).toBe(true);
+  });
+});
+
+const auditReadyCore: DatasetProgress = {
+  ...completeCore,
+  is_thumbnail_done: true,
+  is_deadwood_done: true,
+  is_forest_cover_done: true,
+};
+
+describe("audit readiness", () => {
+  it("is ready once the legacy pipeline (incl. thumbnail + legacy predictions) is done", () => {
+    expect(isDatasetReadyForAudit(auditReadyCore)).toBe(true);
+  });
+
+  it("is not gated on the v2 segmentation pipeline", () => {
+    // Ready regardless of where v2 segmentation is: running, queued/required, errored, or done.
+    expect(
+      isDatasetReadyForAudit({
+        ...auditReadyCore,
+        current_status: "deadwood_treecover_combined_segmentation",
+        is_combined_model_done: false,
+      }),
+    ).toBe(true);
+
+    expect(
+      isDatasetReadyForAudit({
+        ...auditReadyCore,
+        current_status: "aoi_segmentation",
+        is_aoi_required: true,
+        is_aoi_done: false,
+      }),
+    ).toBe(true);
+
+    expect(isDatasetReadyForAudit({ ...auditReadyCore, has_error: true })).toBe(true);
+  });
+
+  it("requires the thumbnail", () => {
+    expect(isDatasetReadyForAudit({ ...auditReadyCore, is_thumbnail_done: false })).toBe(false);
+  });
+
+  it("requires legacy predictions and ignores combined-model-only output", () => {
+    expect(
+      isDatasetReadyForAudit({
+        ...auditReadyCore,
+        is_deadwood_done: false,
+        is_forest_cover_done: false,
+        is_combined_model_done: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("requires ODM completion only for raw image ZIP workflows", () => {
+    const dataset: DatasetProgress = {
+      ...auditReadyCore,
+      file_name: "raw-images.zip",
+      is_odm_done: false,
+    };
+
+    expect(isDatasetReadyForAudit(dataset)).toBe(false);
+    expect(isDatasetReadyForAudit({ ...dataset, is_odm_done: true })).toBe(true);
   });
 });

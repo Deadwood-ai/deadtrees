@@ -45,7 +45,7 @@ import { useDatasetLogs, useProcessingOverview, ProcessingOverviewRow, Processin
 import { getAcquisitionPeriod } from "../utils/phenologyUtils";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAnalytics } from "../hooks/useAnalytics";
-import { isDatasetProcessingComplete } from "../utils/processingSteps";
+import { isDatasetReadyForAudit } from "../utils/processingSteps";
 
 const { Title, Text } = Typography;
 
@@ -85,9 +85,11 @@ const formatHours = (value: number | null | undefined): string => {
 	return `${value.toFixed(1)}h`;
 };
 
-// Helper function to check if dataset processing is complete
+// Helper function to check if a dataset is ready to be audited.
+// Auditing only depends on the legacy pipeline; it must not be gated on the v2
+// combined segmentation model, AOI generation, or the current processing status.
 const isProcessingComplete = (dataset: IDataset) => {
-	return dataset.is_thumbnail_done && isDatasetProcessingComplete(dataset);
+	return isDatasetReadyForAudit(dataset);
 };
 
 // Helper to format location
