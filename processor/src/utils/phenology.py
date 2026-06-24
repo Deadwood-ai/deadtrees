@@ -34,6 +34,47 @@ def get_phenology_path() -> Path:
 	return Path(settings.PHENOLOGY_DATA_PATH)
 
 
+def _find_nearest_valid_index(ds: xr.Dataset, x: float, y: float) -> Optional[Tuple[int, int]]:
+	"""
+	Find the (y, x) integer index of the nearest non-masked phenology pixel.
+
+	The phenology grid is gap-filled in time (each valid pixel has a full curve) but not in
+	space: ~87% of pixels are masked (ocean, projection corners, and land pixels where MODIS
+	derived no cycle). A dataset centroid near a coast/island can land on a masked pixel even
+	though valid phenology exists nearby. To guarantee every dataset gets a curve, when the
+	nearest pixel is masked we fall back to the globally nearest valid pixel, regardless of how
+	far away it is.
+
+	Args:
+	    ds: Open phenology dataset (dims y, x, day) with a boolean ``nan_mask`` (True = no data).
+	    x: Target x coordinate in MODIS sinusoidal meters.
+	    y: Target y coordinate in MODIS sinusoidal meters.
+
+	Returns:
+	    (yi, xi) of the nearest valid pixel, or None only if the grid has no valid pixels at all.
+	"""
+	xs = ds.x.values
+	ys = ds.y.values
+
+	xi = int(np.abs(xs - x).argmin())
+	yi = int(np.abs(ys - y).argmin())
+
+	# Fast path: nearest pixel already has data (true for ~94% of datasets).
+	if not bool(ds.nan_mask.isel(y=yi, x=xi).values):
+		return yi, xi
+
+	# Fallback: load the small (~7 MB) nan_mask and pick the globally nearest valid pixel.
+	mask = ds.nan_mask.values
+	valid_rows, valid_cols = np.where(~mask)
+	if valid_rows.size == 0:
+		return None
+
+	dy = valid_rows - yi
+	dx = valid_cols - xi
+	nearest = int(np.argmin(dy * dy + dx * dx))
+	return int(valid_rows[nearest]), int(valid_cols[nearest])
+
+
 def get_phenology_curve(
 	lat: float, lon: float, token: str = None, dataset_id: int = None, user_id: str = None
 ) -> Optional[List[int]]:
@@ -54,19 +95,19 @@ def get_phenology_curve(
 		# Open the dataset
 		ds = xr.open_zarr(get_phenology_path())
 
-		# Get the nearest pixel
-		ds_nearest = ds.sel(x=x, y=y, method='nearest')
+		# Get the nearest valid pixel, falling back to the globally nearest valid pixel when the
+		# nearest pixel is masked (e.g. coastal/island centroids). Only None if the grid is empty.
+		index = _find_nearest_valid_index(ds, x[0], y[0])
 
-		# Extract phenology data
-		pheno = ds_nearest.phenology.values[0][0]
-		is_nan = ds_nearest.nan_mask.values[0][0]
-
-		if is_nan:
+		if index is None:
 			logger.debug(
 				f'No phenology data available for coordinates ({lat}, {lon})',
 				LogContext(category=LogCategory.METADATA, dataset_id=dataset_id, user_id=user_id, token=token),
 			)
 			return None
+
+		yi, xi = index
+		pheno = ds.phenology.isel(y=yi, x=xi).values
 
 		# Convert to list of integers
 		phenology_curve = pheno.astype(int).tolist()
