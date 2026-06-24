@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import rasterio
 import rasterio.warp
+from rasterio.windows import Window
 import docker
 import requests
 import tarfile
@@ -19,7 +20,7 @@ from shared.labels import create_label_with_geometries, delete_model_prediction_
 from shared.logging import LogContext, LogCategory
 from shared.db import login, verify_token
 from ..utils.segmentation import (
-	mask_to_polygons,
+	mask_to_polygons_scanline,
 	reproject_polygons,
 	filter_polygons_by_area,
 	get_utm_string_from_latlon,
@@ -543,23 +544,6 @@ def _copy_confidence_map_from_volume(volume_name: str, local_output_dir: Path, d
 				)
 
 
-def _load_confidence_map_from_container_output(confidence_map_path: str) -> np.ndarray:
-	"""
-	Load confidence map from TCD container output file.
-
-	This replaces the original confidence map type detection logic with
-	a simple file-based approach since we know the container outputs a GeoTIFF.
-
-	Args:
-		confidence_map_path (str): Path to confidence_map.tif from TCD container
-
-	Returns:
-		np.ndarray: Confidence map as numpy array
-	"""
-	with rasterio.open(confidence_map_path) as src:
-		return src.read(1)  # Read first band as numpy array
-
-
 def _cleanup_tcd_volume(volume_name: str, dataset_id: int, token: str):
 	"""
 	Clean up TCD shared volume after processing.
@@ -654,33 +638,76 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 		tcd_output_dir = temp_dir_path / 'tcd_output'
 		confidence_map_path = _copy_confidence_map_from_volume(volume_name, tcd_output_dir, dataset_id, token)
 
-		# Step 5: Postprocessing - Load confidence map and apply original thresholding logic
+		# Step 5: Postprocessing - threshold the confidence map and apply the nodata
+		# mask, writing the binary result to a temporary GeoTIFF block-by-block.
+		#
+		# The TCD confidence map is gigapixel-scale (e.g. ~40000x22000 px for a
+		# typical drone ortho). The previous approach loaded the whole confidence
+		# array, the full thresholded array AND the full dataset mask at once — plus
+		# the float64 temporary that ``mask / 255`` created — peaking at many GB and
+		# OOM-killing the worker mid-step (SIGKILLed, so nothing was ever logged).
+		# We now stream block-by-block to a binary mask GeoTIFF and polygonize it
+		# with ``mask_to_polygons_scanline`` (the same memory-safe path the deadwood,
+		# combined and AOI models already use), so no full-resolution array is ever
+		# held in memory — peak usage stays proportional to a single window.
 		logger.info(
 			'Loading confidence map and applying thresholding',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
-
-		confidence_map = _load_confidence_map_from_container_output(confidence_map_path)
-
-		# Apply original thresholding logic: (confidence_map > 200).astype(np.uint8)
-		outimage = (confidence_map > TCD_THRESHOLD).astype(np.uint8)
-
-		# Step 5.1: Apply nodata mask processing (critical for avoiding tile artifacts)
 		logger.info(
 			'Applying nodata mask processing to filter invalid areas',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 
-		# Open confidence map to get nodata mask
+		treecover_mask_path = temp_dir_path / 'treecover_mask.tif'
 		with rasterio.open(confidence_map_path) as confidence_src:
-			# Get the dataset mask from confidence map
-			nodata_mask = confidence_src.dataset_mask()
+			height = confidence_src.height
+			width = confidence_src.width
 
-			# Only apply masking if the mask is standard (contains only 0 and 255)
-			unique_mask_values = np.unique(nodata_mask)
-			if len(unique_mask_values) <= 2 and (0 in unique_mask_values or 255 in unique_mask_values):
-				# Standard mask with 0 and 255 values - apply it
-				outimage = outimage * (nodata_mask / 255).astype(np.uint8)
+			# For internally tiled GeoTIFFs, iterate the native tiles. For non-tiled
+			# (striped) files block_windows yields one window per strip — often a
+			# single row — which is correct but means tens of thousands of tiny
+			# reads on a gigapixel raster; coalesce those into 2048-row strips
+			# instead. Either way peak memory stays proportional to one window.
+			if confidence_src.is_tiled:
+				windows = [window for _, window in confidence_src.block_windows(1)]
+			else:
+				strip_height = 2048
+				windows = [
+					Window(0, row, width, min(strip_height, height - row))
+					for row in range(0, height, strip_height)
+				]
+
+			mask_profile = confidence_src.profile.copy()
+			mask_profile.update(
+				count=1, dtype='uint8', nodata=None,
+				compress='LZW', tiled=True, blockxsize=512, blockysize=512,
+			)
+
+			# Pass 1: threshold each confidence block straight into the output
+			# GeoTIFF and record which nodata mask values appear, without ever
+			# materialising a full-resolution array.
+			mask_values_seen: set[int] = set()
+			with rasterio.open(treecover_mask_path, 'w', **mask_profile) as mask_dst:
+				for window in windows:
+					confidence_block = confidence_src.read(1, window=window)
+					mask_dst.write((confidence_block > TCD_THRESHOLD).astype(np.uint8), 1, window=window)
+					mask_values_seen.update(np.unique(confidence_src.dataset_mask(window=window)).tolist())
+
+			# Only apply masking if the mask is strictly binary (values ⊆ {0, 255}).
+			# The block-wise pass zeros pixels where mask == 0, which is only correct
+			# for a true binary nodata mask; partial-alpha masks (e.g. {0, 128}) are
+			# left untouched to avoid masking artifacts.
+			unique_mask_values = sorted(mask_values_seen)
+			if mask_values_seen and mask_values_seen.issubset({0, 255}):
+				# Pass 2: zero out fully-transparent (mask == 0) pixels block-by-block,
+				# reading and writing the output GeoTIFF in place.
+				with rasterio.open(treecover_mask_path, 'r+') as mask_dst:
+					for window in windows:
+						mask_block = confidence_src.dataset_mask(window=window)
+						out_block = mask_dst.read(1, window=window)
+						out_block[mask_block == 0] = 0
+						mask_dst.write(out_block, 1, window=window)
 				logger.info(
 					f'Applied standard nodata mask with values: {unique_mask_values}',
 					LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
@@ -692,15 +719,15 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 					LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 				)
 
-		# Step 6: Polygon Conversion - Use existing mask_to_polygons utility
+		# Step 6: Polygon Conversion - polygonize the binary mask GeoTIFF scanline by
+		# scanline so the full raster is never loaded into memory.
 		logger.info(
 			'Converting binary mask to polygons',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
 
-		# Use the confidence map dataset to get the transform for mask_to_polygons
-		with rasterio.open(str(confidence_map_path)) as dataset:
-			polygons = mask_to_polygons(outimage, dataset)
+		with rasterio.open(str(treecover_mask_path)) as dataset:
+			polygons = mask_to_polygons_scanline(dataset, 1)
 
 		if len(polygons) == 0:
 			logger.warning(
