@@ -60,12 +60,8 @@ const ProcessingProgress: React.FC<ProcessingProgressProps> = ({ dataset, queueI
         ? `In queue: #${queueInfo.current_position}`
         : "Pending in queue";
 
-    const tooltipText = queueInfo?.estimated_time
-      ? `Estimated start in ~${Math.round(queueInfo.estimated_time)} min`
-      : "Waiting for processing to start";
-
     return (
-      <Tooltip title={tooltipText}>
+      <Tooltip title="Waiting for processing to start">
         <Tag color="blue">{positionText}</Tag>
       </Tooltip>
     );
