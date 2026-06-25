@@ -110,6 +110,7 @@ export default function BaseMap({
 	} = useMapCore({
 		containerRef: mapContainerRef,
 		cogPath: data?.cog_path,
+		thumbnailPath: data?.thumbnail_path,
 		// When arriving from the dataset list, ignore the persisted viewport and let
 		// the map fit the new orthophoto's extent. useMapCore reads initialViewport
 		// once at init, so the previous (stale) viewport would otherwise leave the

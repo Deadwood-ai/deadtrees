@@ -101,6 +101,7 @@ class Settings(BaseSettings):
 	UVICORN_PORT: int = 8017 if DEV_MODE else 8000
 	UVICORN_ROOT_PATH: str = '/api/v1'
 	UVICORN_PROXY_HEADERS: bool = True
+	SEARCH_RATE_LIMIT_TRUSTED_PROXIES: str = '127.0.0.1,::1,172.16.0.0/12'
 
 	# storage server settings
 	STORAGE_SERVER_IP: str = ''

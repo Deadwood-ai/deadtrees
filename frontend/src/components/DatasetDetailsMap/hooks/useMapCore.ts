@@ -1,8 +1,10 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { Map, View, Overlay } from "ol";
 import type BaseLayer from "ol/layer/Base";
+import ImageLayer from "ol/layer/Image";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { GeoTIFF } from "ol/source";
+import StaticImageSource from "ol/source/ImageStatic";
 import type { Layer } from "ol/layer";
 
 import { Settings } from "../../../config";
@@ -21,6 +23,8 @@ export interface UseMapCoreOptions {
 	containerRef: React.RefObject<HTMLDivElement | null>;
 	/** COG path (relative to base URL) */
 	cogPath: string | null | undefined;
+	/** Thumbnail path used as a static no-WebGL fallback */
+	thumbnailPath?: string | null;
 	/** Initial viewport state */
 	initialViewport?: Viewport;
 	/** Callback when viewport changes */
@@ -47,7 +51,7 @@ export interface UseMapCoreReturn {
 	/** Whether map is initialized */
 	isMapReady: boolean;
 	/** Ortho COG layer */
-	orthoLayer: TileLayerWebGL | null;
+	orthoLayer: BaseLayer | null;
 	/** GeoTIFF extent (for fit view) */
 	extent: number[] | null;
 	/** Add a layer to the map */
@@ -72,6 +76,32 @@ type DisposableLayer = BaseLayer & {
 	dispose?: () => void;
 };
 
+const disposeLayerWithSource = (layer: DisposableLayer) => {
+	const source = layer.getSource?.();
+	if (source) {
+		if ("clear" in source && typeof source.clear === "function") source.clear();
+		if ("dispose" in source && typeof source.dispose === "function") source.dispose();
+	}
+	layer.dispose?.();
+};
+
+const browserSupportsWebGL = () => {
+	if (typeof document === "undefined") return false;
+
+	const canvas = document.createElement("canvas");
+	try {
+		const context = (
+			canvas.getContext("webgl2") ||
+				canvas.getContext("webgl") ||
+				canvas.getContext("experimental-webgl")
+		) as WebGLRenderingContext | WebGL2RenderingContext | null;
+		context?.getExtension("WEBGL_lose_context")?.loseContext();
+		return Boolean(context);
+	} catch {
+		return false;
+	}
+};
+
 /**
  * Core map initialization hook
  * 
@@ -84,6 +114,7 @@ type DisposableLayer = BaseLayer & {
 export function useMapCore({
 	containerRef,
 	cogPath,
+	thumbnailPath,
 	initialViewport,
 	onViewportChange,
 	onMapReady,
@@ -95,7 +126,7 @@ export function useMapCore({
 	disableRotation = false,
 }: UseMapCoreOptions): UseMapCoreReturn {
 	const mapRef = useRef<Map | null>(null);
-	const orthoLayerRef = useRef<TileLayerWebGL | null>(null);
+	const orthoLayerRef = useRef<BaseLayer | null>(null);
 	const [isMapReady, setIsMapReady] = useState(false);
 	const [extent, setExtent] = useState<number[] | null>(null);
 
@@ -104,6 +135,7 @@ export function useMapCore({
 	const onMapReadyRef = useRef(onMapReady);
 	const onOrthoLayerReadyRef = useRef(onOrthoLayerReady);
 	const onFirstInteractionRef = useRef(onFirstInteraction);
+	const thumbnailPathRef = useRef(thumbnailPath);
 	// Read via ref so a post-init change (isMobile flips false on first render)
 	// configures interactions without rebuilding the whole map.
 	const disableRotationRef = useRef(disableRotation);
@@ -116,6 +148,7 @@ export function useMapCore({
 		onMapReadyRef.current = onMapReady;
 		onOrthoLayerReadyRef.current = onOrthoLayerReady;
 		onFirstInteractionRef.current = onFirstInteraction;
+		thumbnailPathRef.current = thumbnailPath;
 		disableRotationRef.current = disableRotation;
 	});
 
@@ -161,30 +194,35 @@ export function useMapCore({
 			return;
 		}
 
-		// Create ortho COG layer
-		const orthoCogLayer = new TileLayerWebGL({
-			source: new GeoTIFF({
-				sources: [{
-					url: Settings.COG_BASE_URL + cogPath,
-					nodata: 0,
-					bands: [1, 2, 3],
-				}],
-				convertToRGB: true,
-				sourceOptions: COG_SOURCE_OPTIONS,
-			}),
-			maxZoom: 23,
-			cacheSize: 4096,
-			preload: 0,
+		let isDisposed = false;
+		const orthoCogSource = new GeoTIFF({
+			sources: [{
+				url: Settings.COG_BASE_URL + cogPath,
+				nodata: 0,
+				bands: [1, 2, 3],
+			}],
+			convertToRGB: true,
+			sourceOptions: COG_SOURCE_OPTIONS,
 		});
+
+		// The orthophoto COG uses OpenLayers' WebGL tile renderer. Some embedded
+		// browsers disable WebGL; in that case keep the map usable with a static
+		// thumbnail fallback, vector layers, AOI, and tile-search overlays.
+		const supportsWebGL = browserSupportsWebGL();
+		const orthoCogLayer = supportsWebGL
+			? new TileLayerWebGL({
+					source: orthoCogSource,
+					maxZoom: 23,
+					cacheSize: 4096,
+					preload: 0,
+				})
+			: null;
 
 		orthoLayerRef.current = orthoCogLayer;
 
 		// Get view from GeoTIFF extent
-		const orthoCogSource = orthoCogLayer.getSource();
-		if (!orthoCogSource) return;
-
 		orthoCogSource.getView().then((viewOptions) => {
-			if (!viewOptions?.extent || !containerRef.current) return;
+			if (isDisposed || !viewOptions?.extent || !containerRef.current) return;
 
 			const cogExtent = viewOptions.extent as number[];
 			setExtent(cogExtent);
@@ -201,10 +239,26 @@ export function useMapCore({
 				constrainOnlyCenter: true,
 			});
 
-			// Create map with only the ortho layer (others added by consuming code)
+			const fallbackThumbnailPath = thumbnailPathRef.current;
+			const fallbackOrthoLayer =
+				!supportsWebGL && fallbackThumbnailPath
+					? new ImageLayer({
+							source: new StaticImageSource({
+								url: Settings.THUMBNAIL_URL + fallbackThumbnailPath,
+								imageExtent: cogExtent as [number, number, number, number],
+								projection: "EPSG:3857",
+								crossOrigin: "anonymous",
+							}),
+						})
+					: null;
+			const displayOrthoLayer = orthoCogLayer ?? fallbackOrthoLayer;
+			orthoLayerRef.current = displayOrthoLayer;
+
+			// Create map with the COG layer when WebGL is available; otherwise the
+			// georeferenced thumbnail fallback occupies the same display layer slot.
 				const newMap = new Map({
 					target: containerRef.current,
-					layers: [orthoCogLayer],
+					layers: displayOrthoLayer ? [displayOrthoLayer] : [],
 					view: mapView,
 					controls: createStandardMapControls(),
 					interactions: createMapInteractions({
@@ -240,35 +294,40 @@ export function useMapCore({
 			mapRef.current = newMap;
 			setIsMapReady(true);
 			onMapReadyRef.current?.(newMap);
-			onOrthoLayerReadyRef.current?.(orthoCogLayer);
+			if (orthoCogLayer) {
+				onOrthoLayerReadyRef.current?.(orthoCogLayer);
+			}
 		}).catch((err) => {
 			console.error("Failed to get GeoTIFF view:", err);
 		});
 
-		// Cleanup
-		return () => {
-			if (mapRef.current) {
-				// Remove all layers
+			// Cleanup
+			return () => {
+				isDisposed = true;
+				if (mapRef.current) {
+					// Remove all layers
 					mapRef.current.getLayers().forEach((layer) => {
-						const disposableLayer = layer as DisposableLayer;
-						const source = disposableLayer.getSource?.();
-						if (source) {
-							if ("clear" in source && typeof source.clear === "function") source.clear();
-							if ("dispose" in source && typeof source.dispose === "function") source.dispose();
-						}
-						disposableLayer.dispose?.();
+						disposeLayerWithSource(layer as DisposableLayer);
 					});
 
-				mapRef.current.setTarget(undefined);
+					mapRef.current.setTarget(undefined);
 				mapRef.current.dispose();
 				mapRef.current = null;
 				orthoLayerRef.current = null;
 				hasSeenInitialMoveEndRef.current = false;
 				hasTrackedInteractionRef.current = false;
-				setIsMapReady(false);
-				setExtent(null);
-			}
-		};
+					setIsMapReady(false);
+					setExtent(null);
+				}
+				if (!mapRef.current && orthoLayerRef.current) {
+					disposeLayerWithSource(orthoLayerRef.current as DisposableLayer);
+					orthoLayerRef.current = null;
+				}
+				if (!orthoCogLayer) {
+					orthoCogSource.clear();
+					orthoCogSource.dispose();
+				}
+			};
 	// Note: callbacks/disableRotation are accessed via refs to avoid triggering
 	// re-runs. mapEnabled is latched (only ever false->true). The map therefore
 	// rebuilds only when the dataset (cogPath) or container changes — not on the

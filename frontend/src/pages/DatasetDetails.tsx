@@ -504,9 +504,9 @@ export default function DatasetDetails() {
           />
         </Suspense>
 
-        {/* Open-vocabulary search scoped to this orthophoto (highlights tiles).
-            Gated to the core team (can_audit) for now while it's being refined. */}
-        {!isEditing && dataset && canAudit && (
+        {/* Open-vocabulary search scoped to this orthophoto is public; backend
+            rate limiting protects embedding generation from automated abuse. */}
+        {!isEditing && dataset && (
           <div className="pointer-events-none absolute left-1/2 top-24 z-30 -translate-x-1/2">
             <div className="pointer-events-auto">
               <OrthoTileSearch
