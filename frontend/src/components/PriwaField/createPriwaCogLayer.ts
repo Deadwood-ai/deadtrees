@@ -16,14 +16,16 @@ export const resolvePriwaCogUrl = (cogUrl: string) => {
   }
 };
 
-export const createPriwaCogLayer = (cogs: IPriwaCogLayerSource[]) =>
+export const createPriwaCogLayer = (cog: IPriwaCogLayerSource) =>
   new TileLayerWebGL({
     source: new GeoTIFF({
-      sources: cogs.map((cog) => ({
-        url: resolvePriwaCogUrl(cog.cogUrl),
-        nodata: 0,
-        bands: [1, 2, 3],
-      })),
+      sources: [
+        {
+          url: resolvePriwaCogUrl(cog.cogUrl),
+          nodata: 0,
+          bands: [1, 2, 3],
+        },
+      ],
       convertToRGB: true,
       sourceOptions: COG_SOURCE_OPTIONS,
     }),
@@ -33,3 +35,6 @@ export const createPriwaCogLayer = (cogs: IPriwaCogLayerSource[]) =>
     cacheSize: 4096,
     preload: 0,
   });
+
+export const createPriwaCogLayers = (cogs: IPriwaCogLayerSource[]) =>
+  cogs.map((cog) => createPriwaCogLayer(cog));

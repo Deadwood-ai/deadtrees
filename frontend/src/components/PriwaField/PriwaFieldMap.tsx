@@ -36,7 +36,7 @@ import {
   createPriwaOfflineAreaFeature,
   createPriwaOfflineAreaLayer,
 } from "./createPriwaOfflineAreaLayer";
-import { createPriwaCogLayer } from "./createPriwaCogLayer";
+import { createPriwaCogLayers } from "./createPriwaCogLayer";
 import {
   createPriwaPointFeature,
   createPriwaPointLayer,
@@ -132,7 +132,7 @@ export default function PriwaFieldMap({
   const topographicLayerRef = useRef<ReturnType<
     typeof createPriwaTopographicLayer
   > | null>(null);
-  const cogLayerRef = useRef<TileLayerWebGL | null>(null);
+  const cogLayersRef = useRef<TileLayerWebGL[]>([]);
   const [isDrawerOpen, setDrawerOpen] = useState(false);
   const [isCogVisible, setCogVisible] = useState(true);
   const [isPlacingPoint, setPlacingPoint] = useState(false);
@@ -252,7 +252,7 @@ export default function PriwaFieldMap({
       topographicLayerRef.current = null;
       pointLayerRef.current = null;
       previewLayerRef.current = null;
-      cogLayerRef.current = null;
+      cogLayersRef.current = [];
     };
   }, [openPointForEditing, stopUserLocation, userLocationLayer]);
 
@@ -287,16 +287,20 @@ export default function PriwaFieldMap({
     const map = mapRef.current;
     if (!map) return;
 
-    if (cogLayerRef.current) {
-      map.removeLayer(cogLayerRef.current);
-      cogLayerRef.current = null;
+    if (cogLayersRef.current.length > 0) {
+      cogLayersRef.current.forEach((layer) => {
+        map.removeLayer(layer);
+      });
+      cogLayersRef.current = [];
     }
 
     if (visibleMosaics.length === 0 || !isCogVisible) return;
 
-    const cogLayer = createPriwaCogLayer(visibleMosaics);
-    cogLayerRef.current = cogLayer;
-    map.getLayers().insertAt(2, cogLayer);
+    const cogLayers = createPriwaCogLayers(visibleMosaics);
+    cogLayersRef.current = cogLayers;
+    cogLayers.forEach((layer, index) => {
+      map.getLayers().insertAt(2 + index, layer);
+    });
   }, [visibleMosaics, isCogVisible]);
 
   const handlePreviewCoordinate = useCallback(
