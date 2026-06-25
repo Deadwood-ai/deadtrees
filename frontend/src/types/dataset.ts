@@ -118,6 +118,7 @@ export type IDatasetArchiveItem = Pick<
   | "aquisition_year"
   | "aquisition_month"
   | "aquisition_day"
+  | "data_access"
   | "bbox"
   | "thumbnail_path"
   | "admin_level_1"

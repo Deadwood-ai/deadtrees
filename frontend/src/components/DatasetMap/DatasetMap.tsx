@@ -10,7 +10,7 @@ import type { SelectEvent } from "ol/interaction/Select";
 import "ol/ol.css";
 import { fromExtent } from "ol/geom/Polygon.js";
 import { useNavigate } from "react-router-dom";
-import { IDataset, IDatasetArchiveItem } from "../../types/dataset";
+import { IDataAccess, IDataset, IDatasetArchiveItem } from "../../types/dataset";
 import parseBBox from "../../utils/parseBBox";
 import {
   applyOpenFreeMapLibertyStyle,
@@ -196,11 +196,12 @@ const formatAcquisitionDate = (dataset: DatasetMapItem): string => {
 const buildTooltipTitle = (dataset: DatasetMapItem): string => {
   const place = dataset.admin_level_3 || dataset.admin_level_2 || "";
   const country = dataset.admin_level_1 || "";
+  const suffix = dataset.data_access === IDataAccess.private ? " [Private]" : "";
 
-  if (place && country) return `${place}, ${country}`;
-  if (place) return place;
-  if (country) return country;
-  return `Dataset #${dataset.id}`;
+  if (place && country) return `${place}, ${country}${suffix}`;
+  if (place) return `${place}${suffix}`;
+  if (country) return `${country}${suffix}`;
+  return `Dataset #${dataset.id}${suffix}`;
 };
 
 interface MapRef extends Map {
