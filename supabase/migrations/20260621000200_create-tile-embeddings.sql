@@ -21,11 +21,18 @@ create table if not exists public.v2_tile_embeddings (
   pixel_x1 integer not null,
   pixel_y1 integer not null,
   nodata_fraction real not null default 0,
+  -- Rows are inserted inactive and atomically activated after the full dataset
+  -- batch is present, so failed first runs never become searchable.
+  is_active boolean not null default false,
   created_at timestamptz not null default now()
 );
 
 create index if not exists v2_tile_embeddings_dataset_id_idx
   on public.v2_tile_embeddings (dataset_id);
+
+create index if not exists v2_tile_embeddings_active_dataset_id_idx
+  on public.v2_tile_embeddings (dataset_id)
+  where is_active;
 
 create index if not exists v2_tile_embeddings_geometry_idx
   on public.v2_tile_embeddings using gist (geometry);
@@ -49,10 +56,18 @@ create policy "Allow public read access to tile embeddings"
   for select
   to public
   using (
+    is_active
+    and exists (
+      select 1
+      from public.v2_statuses s
+      where s.dataset_id = v2_tile_embeddings.dataset_id
+        and s.is_embeddings_done = true
+    )
+    and
     exists (
       select 1
       from public.v2_datasets d
-      where d.id = dataset_id
+      where d.id = v2_tile_embeddings.dataset_id
         and (
           d.data_access <> 'private'::access
           or auth.uid() = d.user_id
@@ -124,6 +139,24 @@ as $$
   );
 $$;
 
+-- Search should only publish datasets whose embedding generation has completed.
+-- Combined with per-row is_active, this prevents failed first runs and partially
+-- inserted reruns from leaking into search results.
+create or replace function public.is_dataset_search_ready(p_dataset_id bigint)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.v2_statuses s
+    where s.dataset_id = p_dataset_id
+      and s.is_embeddings_done = true
+  );
+$$;
+
 -- Rank datasets by their single best-matching tile against a query embedding.
 -- query_embedding is passed as a pgvector text literal ('[v1,v2,...]') so the
 -- API can send it through PostgREST without vector-typed RPC params.
@@ -149,7 +182,9 @@ as $$
     count(*)::bigint as tile_count
   from public.v2_tile_embeddings e
   cross join q
-  where public.is_dataset_search_visible(e.dataset_id)
+  where e.is_active
+    and public.is_dataset_search_ready(e.dataset_id)
+    and public.is_dataset_search_visible(e.dataset_id)
   group by e.dataset_id
   having max(1 - (e.embedding <=> q.v)) >= min_similarity
   order by similarity desc
@@ -183,6 +218,8 @@ as $$
   from public.v2_tile_embeddings e
   cross join q
   where e.dataset_id = p_dataset_id
+    and e.is_active
+    and public.is_dataset_search_ready(e.dataset_id)
     and public.is_dataset_search_visible(e.dataset_id)
   order by similarity desc
   limit greatest(match_count, 1);
@@ -233,7 +270,51 @@ begin
 end;
 $$;
 
+-- Publish the newly inserted inactive rows for a dataset in one database
+-- transaction, then remove the previous active generation. Until this RPC
+-- commits, readers continue seeing the old complete generation (if any).
+create or replace function public.activate_tile_embeddings(
+  p_dataset_id bigint,
+  p_old_max_id bigint default null,
+  p_expected_count integer default null
+)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  activated integer;
+begin
+  if (auth.jwt() ->> 'email'::text) is distinct from 'processor@deadtrees.earth'::text then
+    raise exception 'not authorized to activate tile embeddings';
+  end if;
+
+  update public.v2_tile_embeddings
+  set is_active = true
+  where dataset_id = p_dataset_id
+    and is_active = false
+    and (p_old_max_id is null or id > p_old_max_id);
+
+  get diagnostics activated = row_count;
+
+  if p_expected_count is not null and activated <> p_expected_count then
+    raise exception 'activated % tile embeddings, expected %', activated, p_expected_count;
+  end if;
+
+  if p_old_max_id is not null then
+    delete from public.v2_tile_embeddings
+    where dataset_id = p_dataset_id
+      and id <= p_old_max_id;
+  end if;
+
+  return activated;
+end;
+$$;
+
 grant execute on function public.is_dataset_search_visible(bigint) to anon, authenticated, service_role;
+grant execute on function public.is_dataset_search_ready(bigint) to anon, authenticated, service_role;
 grant execute on function public.insert_tile_embeddings(bigint, jsonb) to authenticated, service_role;
+grant execute on function public.activate_tile_embeddings(bigint, bigint, integer) to authenticated, service_role;
 grant execute on function public.search_datasets_by_embedding(text, integer, double precision) to anon, authenticated, service_role;
 grant execute on function public.search_tiles_by_embedding(text, bigint, integer) to anon, authenticated, service_role;

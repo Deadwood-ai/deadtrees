@@ -14,9 +14,9 @@ orthophoto. Branch: `feat/open-vocab-tile-search`.
 2. **Query (API `POST /search/embed`).** The text query is encoded with the same
    model into a 1024-d vector (a pgvector literal).
 3. **Dataset ranking (`search_datasets_by_embedding`).** Each dataset is scored
-   by its **single best-matching tile** — `max(1 − cosine_distance)` over that
-   dataset's tiles — and datasets are returned ordered by that score. So a
-   dataset ranks high if *any one tile* strongly matches the query.
+   by its **single best-matching tile** after calibration against the stored
+   background-prompt similarities (`bg_sims`). So a dataset ranks high if *any
+   one tile* strongly matches the query relative to generic background prompts.
 4. **Tile ranking / highlight (`search_tiles_by_embedding`).** For one dataset,
    tiles are returned ordered by similarity with their GeoJSON footprints; the
    frontend draws them as highlight rectangles (opacity ∝ relevance) and zooms to
@@ -37,10 +37,10 @@ into the persistent `OPENCLIP_CACHE_DIR` (`/data/assets/openclip_cache`).
 ## Quick test WITHOUT a database (ranking only)
 
 ```bash
-# 1. Precompute tile embeddings for some orthos -> NDJSON (uses the local model)
+# 1. Precompute tile embeddings + bg_sims for some orthos -> NDJSON (uses the local model)
 python scripts/dump_embeddings.py 204:/path/204_postfire.tif 211:/path/211_auwald.tif
 
-# 2. Rank datasets/tiles for queries (mirrors the SQL RPCs exactly)
+# 2. Rank datasets/tiles for queries with the same calibrated probability as SQL
 python scripts/search_demo.py "fire" "river" "railway tracks"
 ```
 

@@ -47,6 +47,13 @@ def _rows_from_embeddings(embeddings: List[PatchEmbedding], bg_sims) -> List[dic
 	return rows
 
 
+def _rpc_scalar_count(data, function_name: str) -> int:
+	"""Normalize Supabase scalar RPC return shapes across client versions."""
+	if isinstance(data, list) and data:
+		data = data[0].get(function_name, 0)
+	return int(data or 0)
+
+
 def process_embeddings(task: QueueTask, token: str, temp_dir: Path):
 	"""Compute per-tile CLIP embeddings for a dataset and store them for search.
 
@@ -155,10 +162,18 @@ def process_embeddings(task: QueueTask, token: str, temp_dir: Path):
 					{'p_dataset_id': ortho.dataset_id, 'p_rows': rows[start : start + _INSERT_CHUNK_SIZE]},
 				).execute()
 
-			if old_max_id is not None:
-				client.table(settings.tile_embeddings_table).delete().eq(
-					'dataset_id', ortho.dataset_id
-				).lte('id', old_max_id).execute()
+			activated = client.rpc(
+				'activate_tile_embeddings',
+				{'p_dataset_id': ortho.dataset_id, 'p_old_max_id': old_max_id, 'p_expected_count': len(rows)},
+			).execute()
+			activated_count = _rpc_scalar_count(activated.data, 'activate_tile_embeddings')
+			if activated_count != len(rows):
+				raise ProcessingError(
+					f'Activated {activated_count} of {len(rows)} tile embedding rows',
+					task_type='embedding_processing',
+					task_id=task.id,
+					dataset_id=ortho.dataset_id,
+				)
 
 		logger.info(
 			f'Stored {len(embeddings)} tile embeddings',

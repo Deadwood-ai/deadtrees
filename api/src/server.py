@@ -54,7 +54,7 @@ app.include_router(process.router)
 # add the DTE stats route (public, no auth)
 app.include_router(dte_stats.router)
 
-# add the open-vocabulary search query-embedding route (public, no auth)
+# add the public open-vocabulary search query-embedding route
 app.include_router(search.router)
 
 # add authenticated prepackaged dataset catalog and grant routes

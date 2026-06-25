@@ -31,7 +31,7 @@ from rasterio.warp import calculate_default_transform, transform_bounds
 from rasterio.windows import Window
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from shared.embedding_model import load_openclip, encode_images  # noqa: E402
+from shared.embedding_model import load_openclip, encode_images, tile_background_sims  # noqa: E402
 
 PATCH = 512
 GSD_M = 0.10
@@ -90,9 +90,11 @@ def main():
 				if not imgs:
 					return
 				feats = encode_images(bundle, imgs).detach().cpu().float().numpy()
-				for emb, m in zip(feats, metas):
+				bg_sims = tile_background_sims(feats, bundle=bundle)
+				for emb, bg, m in zip(feats, bg_sims, metas):
 					rec = dict(m)
 					rec["embedding"] = [round(float(v), 6) for v in emb]
+					rec["bg_sims"] = [round(float(v), 6) for v in bg]
 					out_f.write(json.dumps(rec) + "\n")
 					kept += 1
 				imgs.clear()

@@ -58,6 +58,19 @@ def test_rows_from_embeddings_are_index_aligned():
 	assert rows[1]['embedding'] == '[2.000000]'
 
 
+@pytest.mark.parametrize(
+	'data, expected',
+	[
+		(3, 3),
+		(None, 0),
+		([{'activate_tile_embeddings': 4}], 4),
+		([], 0),
+	],
+)
+def test_rpc_scalar_count_normalizes_supabase_shapes(data, expected):
+	assert pe._rpc_scalar_count(data, 'activate_tile_embeddings') == expected
+
+
 def test_tile_background_sims_equals_cosine_for_normalized(monkeypatch):
 	# Stub the (normally model-derived) background bank: 2 prompts in 3-D.
 	monkeypatch.setattr(em, '_BG_EMB', np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32))

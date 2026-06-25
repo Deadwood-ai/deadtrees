@@ -11,6 +11,9 @@
 alter table public.v2_tile_embeddings
   add column if not exists bg_sims real[] not null default '{}';
 
+alter table public.v2_tile_embeddings
+  add column if not exists is_active boolean not null default false;
+
 -- Numerically-stable softmax of the query vs the stored background sims.
 create or replace function public.tile_match_probability(
   sim_q double precision,
@@ -50,13 +53,13 @@ drop function if exists public.insert_tile_embeddings(bigint, jsonb);
 -- Rank datasets by their best-matching tile's calibrated probability.
 --
 -- Two-stage so the HNSW vector index does the heavy lifting:
---   1. Pull the globally nearest tiles straight from the index by ordering on the
---      raw distance operator (e.embedding <=> q). Ordering on the *calibrated*
---      probability instead — a computed expression — would force a full table
---      scan of every tile (≈15µs/row: at a few million tiles that is tens of
---      seconds per search).
---   2. Calibrate those candidates into probabilities, enforce per-user dataset
---      visibility, and rank datasets by their single best candidate tile.
+--   1. Pull the nearest active, completed, caller-visible tiles straight from
+--      the index by ordering on the raw distance operator (e.embedding <=> q).
+--      Ordering on the *calibrated* probability instead — a computed expression
+--      — would force a full table scan of every tile (≈15µs/row: at a few
+--      million tiles that is tens of seconds per search).
+--   2. Calibrate those candidates into probabilities and rank datasets by their
+--      single best candidate tile.
 -- The calibration is monotonic in the query similarity per tile (only bg_sims
 -- differ between a dataset's tiles), so the globally strongest calibrated matches
 -- are reliably inside the raw-distance candidate pool. The pool is oversampled
@@ -95,17 +98,20 @@ begin
   with candidates as (
     select e.dataset_id, e.embedding, e.bg_sims
     from public.v2_tile_embeddings e
+    where e.is_active
+      and public.is_dataset_search_ready(e.dataset_id)
+      and public.is_dataset_search_visible(e.dataset_id)
     order by e.embedding <=> query_embedding::vector(1024)
     limit pool
   )
-  -- tile_count here is the dataset's tile count *within the candidate pool* (the
-  -- RPC never needed the dataset's full tile total, and the frontend ignores it).
+  -- tile_count here is the dataset's tile count *within the visible candidate
+  -- pool* (the RPC never needed the dataset's full tile total, and the frontend
+  -- ignores it).
   select
     c.dataset_id,
     max(public.tile_match_probability(1 - (c.embedding <=> query_embedding::vector(1024)), c.bg_sims, temperature))::double precision as similarity,
     count(*)::bigint as tile_count
   from candidates c
-  where public.is_dataset_search_visible(c.dataset_id)
   group by c.dataset_id
   having max(public.tile_match_probability(1 - (c.embedding <=> query_embedding::vector(1024)), c.bg_sims, temperature)) >= min_similarity
   order by similarity desc
@@ -146,6 +152,8 @@ as $$
   from public.v2_tile_embeddings e
   cross join q
   where e.dataset_id = p_dataset_id
+    and e.is_active
+    and public.is_dataset_search_ready(e.dataset_id)
     and public.is_dataset_search_visible(e.dataset_id)
   order by similarity desc
   limit greatest(match_count, 1);
@@ -195,7 +203,50 @@ begin
 end;
 $$;
 
+-- Publish the newly inserted inactive rows for a dataset in one database
+-- transaction, then remove the previous active generation. Until this RPC
+-- commits, readers continue seeing the old complete generation (if any).
+create or replace function public.activate_tile_embeddings(
+  p_dataset_id bigint,
+  p_old_max_id bigint default null,
+  p_expected_count integer default null
+)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  activated integer;
+begin
+  if (auth.jwt() ->> 'email'::text) is distinct from 'processor@deadtrees.earth'::text then
+    raise exception 'not authorized to activate tile embeddings';
+  end if;
+
+  update public.v2_tile_embeddings
+  set is_active = true
+  where dataset_id = p_dataset_id
+    and is_active = false
+    and (p_old_max_id is null or id > p_old_max_id);
+
+  get diagnostics activated = row_count;
+
+  if p_expected_count is not null and activated <> p_expected_count then
+    raise exception 'activated % tile embeddings, expected %', activated, p_expected_count;
+  end if;
+
+  if p_old_max_id is not null then
+    delete from public.v2_tile_embeddings
+    where dataset_id = p_dataset_id
+      and id <= p_old_max_id;
+  end if;
+
+  return activated;
+end;
+$$;
+
 grant execute on function public.tile_match_probability(double precision, real[], double precision) to anon, authenticated, service_role;
 grant execute on function public.search_datasets_by_embedding(text, integer, double precision, double precision, integer) to anon, authenticated, service_role;
 grant execute on function public.search_tiles_by_embedding(text, bigint, integer, double precision) to anon, authenticated, service_role;
 grant execute on function public.insert_tile_embeddings(bigint, jsonb) to authenticated, service_role;
+grant execute on function public.activate_tile_embeddings(bigint, bigint, integer) to authenticated, service_role;
