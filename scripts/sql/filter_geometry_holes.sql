@@ -46,6 +46,11 @@
 
 BEGIN;
 SET LOCAL statement_timeout = '10min';
+-- Pre-existing invalid geometries (self-intersecting rings) make PostGIS emit a
+-- flood of "Self-intersection" NOTICEs from ST_IsValid/ST_Buffer/ST_MakePolygon.
+-- They are expected and handled (such rows are skipped), so quiet them; the
+-- skipped-rows report below still surfaces the affected ids and reasons.
+SET LOCAL client_min_messages = warning;
 
 CREATE TEMP TABLE _hole_filter_candidate ON COMMIT DROP AS
 WITH params AS (
