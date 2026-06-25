@@ -13,12 +13,15 @@ lifetime (see ``shared.embedding_model.get_text_bundle``).
 
 import logging
 from collections import defaultdict, deque
+from functools import lru_cache
+from ipaddress import ip_address, ip_network
 from threading import Lock
 from time import monotonic
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from shared.settings import settings
 from shared.embedding_model import EMBEDDING_DIM, embed_text
 
 logger = logging.getLogger(__name__)
@@ -43,18 +46,53 @@ class EmbedResponse(BaseModel):
 	dim: int = Field(..., description='Embedding dimensionality')
 
 
+@lru_cache(maxsize=16)
+def _trusted_proxy_networks(config: str) -> tuple:
+	networks = []
+	for raw_entry in config.split(','):
+		entry = raw_entry.strip()
+		if not entry:
+			continue
+		try:
+			networks.append(ip_network(entry, strict=False))
+		except ValueError:
+			logger.warning('Ignoring invalid trusted proxy entry for search rate limit')
+	return tuple(networks)
+
+
+def _is_trusted_proxy(host: str | None) -> bool:
+	if not host:
+		return False
+	try:
+		address = ip_address(host)
+	except ValueError:
+		return False
+	return any(address in network for network in _trusted_proxy_networks(settings.SEARCH_RATE_LIMIT_TRUSTED_PROXIES))
+
+
+def _parse_ip(host: str) -> bool:
+	try:
+		ip_address(host)
+	except ValueError:
+		return False
+	return True
+
+
 def _search_client_key(request: Request) -> str:
-	"""Best-effort client key for the public embedding rate limit."""
-	real_ip = request.headers.get('x-real-ip', '').strip()
-	if real_ip:
-		return real_ip
+	"""Client key for the public embedding rate limit.
 
-	forwarded_for = request.headers.get('x-forwarded-for', '').strip()
-	if forwarded_for:
-		return forwarded_for.split(',')[0].strip()
+	Only trust ``X-Real-IP`` from configured proxy peers. Host nginx overwrites
+	that header with ``$remote_addr``; ``X-Forwarded-For`` is appendable and can
+	preserve client-supplied spoofed hops, so it is not used for limiter keys.
+	"""
+	client_host = request.client.host if request.client else None
+	if _is_trusted_proxy(client_host):
+		real_ip = request.headers.get('x-real-ip', '').strip()
+		if real_ip and _parse_ip(real_ip):
+			return real_ip
 
-	if request.client:
-		return request.client.host
+	if client_host:
+		return client_host
 
 	return 'unknown'
 

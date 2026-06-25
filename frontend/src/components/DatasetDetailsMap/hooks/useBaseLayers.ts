@@ -4,7 +4,6 @@ import LayerGroup from "ol/layer/Group";
 import TileLayer from "ol/layer/Tile";
 import { XYZ } from "ol/source";
 import type { Map as OLMap } from "ol";
-import type TileLayerWebGL from "ol/layer/WebGLTile.js";
 
 import {
 	createOpenFreeMapLibertyLayerGroup,
@@ -25,7 +24,7 @@ export interface UseBaseLayersOptions {
 	/** Whether drone imagery (ortho) is visible */
 	showDroneImagery?: boolean;
 	/** Ortho layer ref (from useMapCore) */
-	orthoLayer?: TileLayerWebGL | null;
+	orthoLayer?: BaseLayer | null;
 }
 
 export interface UseBaseLayersReturn {

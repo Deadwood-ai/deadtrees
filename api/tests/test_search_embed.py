@@ -16,6 +16,7 @@ from api.src.routers.search import (
 	EmbedRequest,
 	MAX_QUERY_LENGTH,
 	_check_search_embed_rate_limit,
+	_trusted_proxy_networks,
 	_search_client_key,
 	embed_query,
 )
@@ -37,9 +38,13 @@ def _guard_model(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _reset_rate_limit():
+	trusted_proxies = search_module.settings.SEARCH_RATE_LIMIT_TRUSTED_PROXIES
 	search_module._search_embed_requests.clear()
+	_trusted_proxy_networks.cache_clear()
 	yield
+	search_module.settings.SEARCH_RATE_LIMIT_TRUSTED_PROXIES = trusted_proxies
 	search_module._search_embed_requests.clear()
+	_trusted_proxy_networks.cache_clear()
 
 
 def _request(host='127.0.0.1', headers=None):
@@ -117,16 +122,42 @@ def test_model_failure_returns_503(monkeypatch):
 	assert exc.value.status_code == 503
 
 
-def test_client_key_prefers_nginx_real_ip_header():
+def test_client_key_ignores_spoofable_forwarded_headers():
 	request = _request(host='10.0.0.2', headers={'x-real-ip': '198.51.100.10'})
+	search_module.settings.SEARCH_RATE_LIMIT_TRUSTED_PROXIES = '127.0.0.1,::1'
 
-	assert _search_client_key(request) == '198.51.100.10'
+	assert _search_client_key(request) == '10.0.0.2'
 
 
-def test_client_key_uses_first_forwarded_for_when_real_ip_missing():
+def test_client_key_ignores_spoofable_x_forwarded_for_header():
 	request = _request(host='10.0.0.2', headers={'x-forwarded-for': '198.51.100.10, 10.0.0.2'})
+	search_module.settings.SEARCH_RATE_LIMIT_TRUSTED_PROXIES = '127.0.0.1,::1'
+
+	assert _search_client_key(request) == '10.0.0.2'
+
+
+def test_client_key_trusts_real_ip_from_configured_proxy():
+	request = _request(host='172.18.0.1', headers={'x-real-ip': '198.51.100.10'})
+	search_module.settings.SEARCH_RATE_LIMIT_TRUSTED_PROXIES = '172.16.0.0/12'
+	_trusted_proxy_networks.cache_clear()
 
 	assert _search_client_key(request) == '198.51.100.10'
+
+
+def test_client_key_ignores_forwarded_for_even_from_configured_proxy():
+	request = _request(host='172.18.0.1', headers={'x-forwarded-for': '198.51.100.10, 172.18.0.1'})
+	search_module.settings.SEARCH_RATE_LIMIT_TRUSTED_PROXIES = '172.16.0.0/12'
+	_trusted_proxy_networks.cache_clear()
+
+	assert _search_client_key(request) == '172.18.0.1'
+
+
+def test_client_key_ignores_invalid_real_ip_from_configured_proxy():
+	request = _request(host='172.18.0.1', headers={'x-real-ip': 'not an ip'})
+	search_module.settings.SEARCH_RATE_LIMIT_TRUSTED_PROXIES = '172.16.0.0/12'
+	_trusted_proxy_networks.cache_clear()
+
+	assert _search_client_key(request) == '172.18.0.1'
 
 
 def test_search_rate_limit_blocks_same_client_before_model(monkeypatch):
