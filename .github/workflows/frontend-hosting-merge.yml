@@ -28,7 +28,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: npm ci
-      - uses: FirebaseExtended/action-hosting-deploy@v0
+      - id: firebase-live-deploy
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        continue-on-error: true
         env:
           FIREBASE_CLI_EXPERIMENTS: webframeworks
         with:
@@ -37,3 +39,16 @@ jobs:
           projectId: deadwood-d4a4b
           channelId: live
           entryPoint: frontend
+          firebaseToolsVersion: 15.22.2
+      - name: Retry Firebase live deploy
+        if: ${{ steps.firebase-live-deploy.outcome == 'failure' }}
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        env:
+          FIREBASE_CLI_EXPERIMENTS: webframeworks
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DEADWOOD_D4A4B }}
+          projectId: deadwood-d4a4b
+          channelId: live
+          entryPoint: frontend
+          firebaseToolsVersion: 15.22.2
