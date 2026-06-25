@@ -15,7 +15,7 @@ from shared.logger import logger
 BASE_PATH = Path('/Users/januschvajna-jehle/projects/deadwood-upload-labels/data')
 CSV_PATH = BASE_PATH / 'rerun_segmentation/rerun_deadwood_segmentation.csv'
 FORCE_REPROCESS = False  # Set to True to reprocess already processed datasets
-PRIORITY = 2  # Processing priority (1-5, where 1 is highest)
+PRIORITY = 2  # Processing priority (1-5, where 5 is highest)
 
 # File to track processed datasets
 PROCESSED_FILE = BASE_PATH / 'rerun_segmentation/rerun_segmentation_processed.txt'
