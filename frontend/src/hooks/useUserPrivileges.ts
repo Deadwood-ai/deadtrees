@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "./useSupabase";
 import { useAuth } from "./useAuthProvider";
+import { canUseAiSearch } from "../utils/aiSearchAccess";
 
 export interface UserPrivileges {
   id: number;
@@ -32,6 +33,14 @@ export function useCanAudit() {
   const { data: privileges, isLoading } = useUserPrivileges();
   return {
     canAudit: privileges?.can_audit || false,
+    isLoading,
+  };
+}
+
+export function useCanUseAiSearch() {
+  const { data: privileges, isLoading } = useUserPrivileges();
+  return {
+    canUseAiSearch: canUseAiSearch(privileges),
     isLoading,
   };
 }
