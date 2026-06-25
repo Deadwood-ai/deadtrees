@@ -44,7 +44,21 @@ const FLOAT_BUTTON_SIZE_PX = 36;
 export default function Dataset() {
   const navigate = useNavigate();
   const { data: allData } = usePublicDatasetArchiveItems();
-  const { filteredData } = useFilteredDatasets(allData);
+
+  // The "DB as of" timeline axis is derived from the full, unfiltered dataset so
+  // that no filter (tag, advanced, or text search) ever changes the available
+  // periods. The timeline is applied first; all filters apply on top of the
+  // time-limited slice below.
+  const {
+    periods,
+    selectedPeriod,
+    setSelectedPeriod,
+    displayData: timeFilteredData,
+    cumulativeCount,
+    addedInQuarter,
+  } = useUploadTimeline(allData ?? null);
+
+  const { filteredData } = useFilteredDatasets(timeFilteredData ?? undefined);
 
   // Get filter state from context
   const {
@@ -136,7 +150,10 @@ export default function Dataset() {
     });
   };
 
-  const processedData = useMemo(() => {
+  // Text/semantic search and sorting are applied on top of the already
+  // filtered data, so they affect only which datasets are shown — never the
+  // timeline.
+  const displayData = useMemo(() => {
     if (!filteredData) return null;
 
     const filtered = filteredData.filter((d) => {
@@ -182,15 +199,6 @@ export default function Dataset() {
       return sortDirection === "asc" ? a.id - b.id : b.id - a.id;
     });
   }, [filteredData, searchValue, sortDirection, semantic.scores]);
-
-  const {
-    periods,
-    selectedPeriod,
-    setSelectedPeriod,
-    displayData,
-    cumulativeCount,
-    addedInQuarter,
-  } = useUploadTimeline(processedData);
 
   // Reset visibleFeatures when data changes
   useEffect(() => {
@@ -292,7 +300,7 @@ export default function Dataset() {
           {semantic.query && (
             <div className="flex items-center justify-between px-1 text-xs text-gray-500">
               <span>
-                Ranked by “{semantic.query}” · {processedData?.length ?? 0} matches
+                Ranked by “{semantic.query}” · {displayData?.length ?? 0} matches
               </span>
               <Button
                 type="link"
