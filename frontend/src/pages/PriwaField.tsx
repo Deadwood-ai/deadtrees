@@ -1,6 +1,7 @@
 import PriwaFieldMap from "../components/PriwaField/PriwaFieldMap";
 import { usePriwaOfflineStatus } from "../components/PriwaField/usePriwaOfflineStatus";
 import { usePriwaOfflineKaeferbaeume } from "../components/PriwaField/usePriwaOfflineKaeferbaeume";
+import { usePriwaMosaics } from "../components/PriwaField/usePriwaMosaics";
 import { usePriwaProjectMemberships } from "../hooks/usePriwaProjectMemberships";
 import { Alert, Button, Result, Spin } from "antd";
 
@@ -24,6 +25,12 @@ export default function PriwaField() {
     syncSummary,
     syncNow,
   } = usePriwaOfflineKaeferbaeume(activeMembership?.projectId);
+  const {
+    data: mosaics = [],
+    error: mosaicsError,
+    isLoading: isLoadingMosaics,
+    isRefetching: isRefetchingMosaics,
+  } = usePriwaMosaics(activeMembership?.projectId);
 
   if (!isOnline && isLoadingMemberships) {
     return (
@@ -90,7 +97,11 @@ export default function PriwaField() {
       projectName={activeMembership.projectName}
       isLoadingPoints={isLoadingPoints || isRefetching}
       isSavingPoint={isSaving}
-      cogPath={null}
+      mosaics={mosaics}
+      isCogLoading={isLoadingMosaics || isRefetchingMosaics}
+      cogErrorMessage={
+        mosaicsError instanceof Error ? mosaicsError.message : null
+      }
       errorMessage={pointsError instanceof Error ? pointsError.message : null}
       onAddPoint={createPoint}
       onUpdatePoint={updatePoint}

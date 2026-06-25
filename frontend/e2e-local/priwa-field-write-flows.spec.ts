@@ -13,6 +13,7 @@ const projectSlug = `priwa-e2e-${uniqueRunId}`;
 const projectName = "PRIWA Local E2E";
 const baumnr = `E2E-${uniqueRunId.slice(-12)}`;
 const updatedBaumnr = `${baumnr}-U`;
+const mosaicLabel = "E2E Testbefliegung";
 
 let adminClient: SupabaseClient;
 let fieldUserId = "";
@@ -40,12 +41,17 @@ test.describe("PRIWA local field write flows", () => {
     const user = await createConfirmedUser(fieldUserEmail, fieldUserPassword);
     fieldUserId = user.id;
     projectId = await createPriwaProjectWithMembership(fieldUserId);
+    await createPriwaProjectMosaic(projectId);
   });
 
   test.afterAll(async () => {
     if (projectId) {
       await adminClient
         .from("priwa_kaeferbaeume")
+        .delete()
+        .eq("project_id", projectId);
+      await adminClient
+        .from("priwa_project_mosaics")
         .delete()
         .eq("project_id", projectId);
       await adminClient
@@ -145,6 +151,7 @@ async function expectOfflineBasemapControl(page: Page) {
   await page.getByRole("button", { name: "Layer auswählen" }).click();
   await expect(page.getByText("Kartenbasis")).toBeVisible();
   await expect(page.getByText("Luftbild", { exact: true })).toBeVisible();
+  await expect(page.getByText("1 Befliegung")).toBeVisible();
   await page.getByText("Karte", { exact: true }).click();
   await expect(page.locator(".ol-layer").first()).toBeVisible();
   await expect(page.getByText("Offline-Karten")).toBeHidden();
@@ -223,6 +230,17 @@ async function createPriwaProjectWithMembership(userId: string) {
   }
 
   return project.id as string;
+}
+
+async function createPriwaProjectMosaic(targetProjectId: string) {
+  const { error } = await adminClient.from("priwa_project_mosaics").insert({
+    project_id: targetProjectId,
+    label: mosaicLabel,
+    cog_url: "priwa/e2e/test-flight.tif",
+    capture_date: "2026-06-24",
+  });
+
+  if (error) throw error;
 }
 
 async function waitForPointRow(
