@@ -1,0 +1,126 @@
+name: Supabase Migration Guard
+
+on:
+  pull_request:
+    paths:
+      - "supabase/migrations/**"
+      - "scripts/check_supabase_migration_versions.py"
+      - ".github/workflows/supabase-migration-guard.yml"
+  pull_request_target:
+    paths:
+      - "supabase/migrations/**"
+      - "scripts/check_supabase_migration_versions.py"
+      - ".github/workflows/supabase-migration-guard.yml"
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  migration-filename-check:
+    name: migration-filename-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Test migration guard helper
+        run: python -m unittest scripts.tests.test_check_supabase_migration_versions
+
+      - name: Check migration filenames
+        run: |
+          python scripts/check_supabase_migration_versions.py \
+            --base-ref "${{ github.event.pull_request.base.sha }}" \
+            --head-ref "${{ github.event.pull_request.head.sha }}"
+
+  production-version-check:
+    name: production-version-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: ${{ github.event_name == 'pull_request_target' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+
+      - name: Check trusted helper availability
+        id: trusted-helper
+        run: |
+          if [[ -f scripts/check_supabase_migration_versions.py ]]; then
+            echo "available=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::notice::Trusted migration guard helper is not on the base branch yet; skipping production-version-check for this bootstrap PR."
+            echo "available=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - uses: actions/setup-python@v6
+        if: ${{ steps.trusted-helper.outputs.available == 'true' }}
+        with:
+          python-version: "3.11"
+
+      - name: Install psql
+        if: ${{ steps.trusted-helper.outputs.available == 'true' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Read changed PR files
+        if: ${{ steps.trusted-helper.outputs.available == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api \
+            --paginate \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files?per_page=100" \
+            --jq '.[]' \
+            | jq -s '.' \
+            > "${RUNNER_TEMP}/pr-files.json"
+
+          file_count="$(jq 'length' "${RUNNER_TEMP}/pr-files.json")"
+          if [[ "${file_count}" -ge 3000 ]]; then
+            echo "::error::GitHub's pull request files API returned ${file_count} files, so the migration guard cannot prove the changed-file list is complete."
+            exit 1
+          fi
+
+      - name: Read latest production migration version
+        if: ${{ steps.trusted-helper.outputs.available == 'true' }}
+        id: production-migrations
+        shell: bash
+        env:
+          SUPABASE_DB_URL_PROD: ${{ secrets.SUPABASE_DB_URL_PROD }}
+        run: |
+          if [[ -z "${SUPABASE_DB_URL_PROD}" ]]; then
+            echo "::error::SUPABASE_DB_URL_PROD secret is required for production migration checks."
+            exit 1
+          fi
+
+          latest_version="$(
+            psql "${SUPABASE_DB_URL_PROD}" \
+              -X \
+              -v ON_ERROR_STOP=1 \
+              -Atc "select coalesce(max(version::text), '') from supabase_migrations.schema_migrations;"
+          )"
+
+          if [[ -z "${latest_version}" ]]; then
+            echo "::error::Could not read any applied production migration versions."
+            exit 1
+          fi
+
+          echo "latest_version=${latest_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check PR migrations against production
+        if: ${{ steps.trusted-helper.outputs.available == 'true' }}
+        env:
+          LATEST_APPLIED_VERSION: ${{ steps.production-migrations.outputs.latest_version }}
+        run: |
+          python scripts/check_supabase_migration_versions.py \
+            --changed-files-json "${RUNNER_TEMP}/pr-files.json" \
+            --latest-applied-version "${LATEST_APPLIED_VERSION}"
