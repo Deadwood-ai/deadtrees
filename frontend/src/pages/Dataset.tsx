@@ -300,7 +300,7 @@ export default function Dataset() {
           {semantic.query && (
             <div className="flex items-center justify-between px-1 text-xs text-gray-500">
               <span>
-                Ranked by “{semantic.query}” · {displayData?.length ?? 0} matches
+                Ranked by “{semantic.query}” · {semantic.scores?.size ?? 0} matches
               </span>
               <Button
                 type="link"
