@@ -25,6 +25,7 @@ class LogCategory(Enum):
 	TREECOVER = 'treecover'  # Tree cover segmentation
 	AOI = 'aoi'  # Automatic area-of-interest segmentation
 	FOREST = 'forest'  # Forest cover analysis
+	EMBEDDINGS = 'embeddings'  # Open-vocabulary tile embeddings
 	METADATA = 'metadata'  # Metadata processing
 
 	# System Operations

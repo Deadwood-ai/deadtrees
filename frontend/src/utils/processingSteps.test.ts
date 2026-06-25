@@ -121,6 +121,56 @@ describe("processing step completion", () => {
     expect(progress.currentStepInfo.key).toBe("deadwood");
   });
 
+  it("keeps an existing dataset complete without the embeddings stage", () => {
+    // Datasets uploaded before the embeddings_v1 stage never run it and default
+    // is_embeddings_done=false; they must still read as complete.
+    const dataset: DatasetProgress = {
+      ...completeCore,
+      is_deadwood_done: true,
+      is_forest_cover_done: true,
+      is_embeddings_done: false,
+    };
+
+    expect(isDatasetProcessingComplete(dataset)).toBe(true);
+    expect(calculateProcessingProgress(dataset)).toMatchObject({
+      isComplete: true,
+      totalSteps: 6,
+    });
+  });
+
+  it("does not complete while the embeddings stage is actively running", () => {
+    const dataset: DatasetProgress = {
+      ...completeCore,
+      current_status: "embedding_processing",
+      is_deadwood_done: true,
+      is_forest_cover_done: true,
+      is_embeddings_done: false,
+    };
+
+    const progress = calculateProcessingProgress(dataset);
+
+    expect(isDatasetProcessingComplete(dataset)).toBe(false);
+    expect(progress.isComplete).toBe(false);
+    expect(progress.currentStepInfo.key).toBe("embeddings");
+    expect(progress.totalSteps).toBe(7);
+  });
+
+  it("completes once the embeddings stage is done", () => {
+    const dataset: DatasetProgress = {
+      ...completeCore,
+      is_deadwood_done: true,
+      is_forest_cover_done: true,
+      is_embeddings_done: true,
+    };
+
+    expect(isDatasetProcessingComplete(dataset)).toBe(true);
+    expect(calculateProcessingProgress(dataset)).toMatchObject({
+      isComplete: true,
+      percentage: 100,
+      totalSteps: 7,
+    });
+  });
+
   it("requires ODM completion only for raw image ZIP workflows", () => {
     const dataset: DatasetProgress = {
       ...completeCore,

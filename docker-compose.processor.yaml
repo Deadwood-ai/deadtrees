@@ -36,6 +36,9 @@ services:
       - /data:/data
     environment:
       BASE_DIR: /data
+      # Persist the OpenCLIP weights on the /data mount (shared with the API) so
+      # the ~3.9GB download happens once, not on every cron-recreated container.
+      OPENCLIP_CACHE_DIR: /data/assets/openclip_cache
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_KEY: ${SUPABASE_KEY}
       STORAGE_SERVER_IP: data2.deadtrees.earth

@@ -16,6 +16,7 @@ from .process_deadwood_segmentation import process_deadwood_segmentation
 from .process_treecover_segmentation import process_treecover_segmentation
 from .process_deadwood_treecover_combined_v2 import process_deadwood_treecover_combined_v2
 from .process_aoi_segmentation import process_aoi_segmentation
+from .process_embeddings import process_embeddings
 from .process_metadata import process_metadata
 from .exceptions import AuthenticationError, ProcessingError
 from .utils.linear_issues import create_processing_failure_issue
@@ -125,6 +126,7 @@ PIPELINE_STAGE_MAP = [
 		'deadwood_treecover_combined_segmentation',
 	),
 	(TaskTypeEnum.aoi_v1, 'is_aoi_done', 'aoi_segmentation'),
+	(TaskTypeEnum.embeddings_v1, 'is_embeddings_done', 'embedding_processing'),
 ]
 
 
@@ -592,6 +594,31 @@ def process_task(task: QueueTask, token: str):
 					),
 				)
 				raise ProcessingError(str(e), task_type='aoi_segmentation', task_id=task.id, dataset_id=task.dataset_id)
+
+		# Compute per-tile CLIP embeddings for open-vocabulary search.
+		# Runs last so the standardized ortho and all prior stages are already done.
+		if TaskTypeEnum.embeddings_v1 in task.task_types:
+			try:
+				token = refresh_processor_token(task, token)
+				logger.info(
+					'processing tile embeddings',
+					LogContext(
+						category=LogCategory.EMBEDDINGS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+					),
+				)
+				process_embeddings(task, token, settings.processing_path)
+			except Exception as e:
+				error_token = refresh_processor_token(task, token)
+				logger.error(
+					f'Tile embedding failed: {str(e)}',
+					LogContext(
+						category=LogCategory.EMBEDDINGS,
+						dataset_id=task.dataset_id,
+						user_id=task.user_id,
+						token=error_token,
+					),
+				)
+				raise ProcessingError(str(e), task_type='embedding_processing', task_id=task.id, dataset_id=task.dataset_id)
 
 		# Only delete task if all processing completed successfully
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)

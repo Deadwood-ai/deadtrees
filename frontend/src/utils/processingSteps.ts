@@ -37,8 +37,15 @@ const AOI_STEP: ProcessingStep = {
   description: "Generating an initial area of interest for audit",
 };
 
+const EMBEDDINGS_STEP: ProcessingStep = {
+  key: "embeddings",
+  label: "Search indexing",
+  description: "Computing open-vocabulary embeddings for tile search",
+};
+
 const COMBINED_MODEL_STATUS = "deadwood_treecover_combined_segmentation";
 const AOI_STATUS = "aoi_segmentation";
+const EMBEDDING_STATUS = "embedding_processing";
 
 function isOdmWorkflow(dataset: DatasetProgress): boolean {
   return dataset.file_name?.toLowerCase().endsWith(".zip") || false;
@@ -57,6 +64,9 @@ export interface DatasetProgress {
   is_combined_model_done?: boolean;
   is_aoi_done?: boolean;
   is_aoi_required?: boolean;
+  // Open-vocabulary tile embeddings run as the final stage for every new upload.
+  // current_status may now be "embedding_processing" while this stage runs.
+  is_embeddings_done?: boolean;
   has_error?: boolean;
   current_status?: string;
   final_assessment?: "ready" | "fixable_issues" | "no_issues" | "exclude_completely" | null;
@@ -95,6 +105,10 @@ export function isPredictionProcessingComplete(
 
 export function isDatasetProcessingComplete(dataset: DatasetProgress): boolean {
   const odmComplete = !isOdmWorkflow(dataset) || dataset.is_odm_done;
+  // Any non-idle status blocks completion, which now also covers the final
+  // "embedding_processing" stage. We intentionally do NOT require
+  // is_embeddings_done while idle: existing datasets predate the embeddings
+  // stage and would otherwise never read as complete.
   const hasActiveProcessingStatus =
     !!dataset.current_status && dataset.current_status !== "idle";
 
@@ -153,6 +167,12 @@ export function calculateProcessingProgress(dataset: DatasetProgress): {
     dataset.is_aoi_required ||
     dataset.is_aoi_done ||
     dataset.current_status === AOI_STATUS;
+  // Only surface the embeddings step once the dataset is on the new pipeline
+  // (actively embedding or already done), so existing datasets that predate the
+  // stage keep their previous step count and complete state.
+  const includeEmbeddingsStep =
+    dataset.is_embeddings_done ||
+    dataset.current_status === EMBEDDING_STATUS;
   const useCombinedModelOnly =
     includeCombinedModelStep && !hasExplicitLegacyPredictionOutput;
   let steps = useCombinedModelOnly
@@ -175,6 +195,9 @@ export function calculateProcessingProgress(dataset: DatasetProgress): {
         : GEOTIFF_PROCESSING_STEPS;
   if (includeAoiStep) {
     steps = [...steps, AOI_STEP];
+  }
+  if (includeEmbeddingsStep) {
+    steps = [...steps, EMBEDDINGS_STEP];
   }
   const totalSteps = steps.length;
 
@@ -214,6 +237,9 @@ export function calculateProcessingProgress(dataset: DatasetProgress): {
         ];
   if (includeAoiStep) {
     stepCompletions = [...stepCompletions, dataset.is_aoi_done || false];
+  }
+  if (includeEmbeddingsStep) {
+    stepCompletions = [...stepCompletions, dataset.is_embeddings_done || false];
   }
 
   // Find the current step (first incomplete step)

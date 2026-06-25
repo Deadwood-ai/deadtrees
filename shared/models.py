@@ -96,6 +96,7 @@ class StatusEnum(str, Enum):
 	forest_cover_segmentation = 'forest_cover_segmentation'
 	deadwood_treecover_combined_segmentation = 'deadwood_treecover_combined_segmentation'
 	aoi_segmentation = 'aoi_segmentation'
+	embedding_processing = 'embedding_processing'
 	audit_in_progress = 'audit_in_progress'
 
 
@@ -132,6 +133,7 @@ class TaskTypeEnum(str, Enum):
 	treecover_v1 = 'treecover_v1'  # Run tree cover segmentation
 	deadwood_treecover_combined_v2 = 'deadwood_treecover_combined_v2'  # Run combined deadwood+treecover segmentation
 	aoi_v1 = 'aoi_v1'  # Auto-generate the dataset area of interest (AOI) polygon
+	embeddings_v1 = 'embeddings_v1'  # Compute per-tile CLIP embeddings for open-vocab search
 	geotiff = 'geotiff'  # Convert to geotiff
 	metadata = 'metadata'  # Extract metadata
 	odm_processing = 'odm_processing'  # ODM raw image processing
@@ -156,6 +158,7 @@ class TaskTypeEnum(str, Enum):
 			'treecover_v1': 'Tree Cover',
 			'deadwood_treecover_combined_v2': 'Deadwood+Treecover (v2)',
 			'aoi_v1': 'AOI',
+			'embeddings_v1': 'Embeddings',
 			'geotiff': 'GeoTIFF',
 			'metadata': 'Metadata',
 			'odm_processing': 'ODM',
@@ -209,6 +212,7 @@ class Status(BaseModel):
 	is_combined_model_done: bool = False
 	is_aoi_done: bool = False
 	is_aoi_required: bool = False
+	is_embeddings_done: bool = False
 	is_metadata_done: bool = False
 	is_odm_done: bool = False
 	has_error: bool = False

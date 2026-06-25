@@ -29,3 +29,5 @@ pillow
 pyproj
 shapely
 pyogrio
+# Open-vocabulary tile search: CPU text-query encoder (pulls torch).
+open-clip-torch>=2.24.0

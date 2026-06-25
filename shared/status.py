@@ -21,6 +21,7 @@ def update_status(
 	is_combined_model_done: Optional[bool] = None,
 	is_aoi_done: Optional[bool] = None,
 	is_aoi_required: Optional[bool] = None,
+	is_embeddings_done: Optional[bool] = None,
 	is_metadata_done: Optional[bool] = None,
 	is_odm_done: Optional[bool] = None,
 	has_error: Optional[bool] = None,
@@ -69,6 +70,8 @@ def update_status(
 			update_data['is_aoi_done'] = is_aoi_done
 		if is_aoi_required is not None:
 			update_data['is_aoi_required'] = is_aoi_required
+		if is_embeddings_done is not None:
+			update_data['is_embeddings_done'] = is_embeddings_done
 		if is_metadata_done is not None:
 			update_data['is_metadata_done'] = is_metadata_done
 		if is_odm_done is not None:

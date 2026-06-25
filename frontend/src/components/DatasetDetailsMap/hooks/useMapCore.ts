@@ -104,15 +104,19 @@ export function useMapCore({
 	const onMapReadyRef = useRef(onMapReady);
 	const onOrthoLayerReadyRef = useRef(onOrthoLayerReady);
 	const onFirstInteractionRef = useRef(onFirstInteraction);
+	// Read via ref so a post-init change (isMobile flips false on first render)
+	// configures interactions without rebuilding the whole map.
+	const disableRotationRef = useRef(disableRotation);
 	const hasSeenInitialMoveEndRef = useRef(false);
 	const hasTrackedInteractionRef = useRef(false);
-	
+
 	// Keep refs up to date
 	useEffect(() => {
 		onViewportChangeRef.current = onViewportChange;
 		onMapReadyRef.current = onMapReady;
 		onOrthoLayerReadyRef.current = onOrthoLayerReady;
 		onFirstInteractionRef.current = onFirstInteraction;
+		disableRotationRef.current = disableRotation;
 	});
 
 	// Layer management
@@ -140,10 +144,20 @@ export function useMapCore({
 		mapRef.current.getView().fit(targetExtent as [number, number, number, number]);
 	}, [extent]);
 
+	// Latch readiness: once the map is allowed to build, keep it allowed. isReady
+	// is derived from react-query loading flags; if one of those flips back to
+	// loading after the map exists (e.g. a label/AOI refetch), having isReady in
+	// the init effect's deps would run its cleanup — disposing and rebuilding the
+	// whole map, and leaking the ortho's WebGL context each time until the context
+	// is lost and rendering (including tile-search highlights) silently dies.
+	const readyLatchRef = useRef(false);
+	if (isReady) readyLatchRef.current = true;
+	const mapEnabled = readyLatchRef.current;
+
 	// Main map initialization
 	useEffect(() => {
 		// Skip if already initialized, not ready, or missing required data
-		if (mapRef.current || !isReady || !cogPath || !containerRef.current) {
+		if (mapRef.current || !mapEnabled || !cogPath || !containerRef.current) {
 			return;
 		}
 
@@ -195,7 +209,7 @@ export function useMapCore({
 					controls: createStandardMapControls(),
 					interactions: createMapInteractions({
 						doubleClickZoom: false,
-						disableRotation,
+						disableRotation: disableRotationRef.current,
 					}),
 				});
 
@@ -255,9 +269,12 @@ export function useMapCore({
 				setExtent(null);
 			}
 		};
-	// Note: callbacks are accessed via refs to avoid triggering re-runs
+	// Note: callbacks/disableRotation are accessed via refs to avoid triggering
+	// re-runs. mapEnabled is latched (only ever false->true). The map therefore
+	// rebuilds only when the dataset (cogPath) or container changes — not on the
+	// transient isReady / isMobile flips that previously leaked WebGL contexts.
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [isReady, cogPath, containerRef, disableRotation]);
+	}, [mapEnabled, cogPath, containerRef]);
 
 	return {
 		mapRef,

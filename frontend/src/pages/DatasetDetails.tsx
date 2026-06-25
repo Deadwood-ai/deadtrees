@@ -1,5 +1,6 @@
 import { Button, Spin, message, Drawer } from "antd";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import type { Map as OLMap } from "ol";
 import {
   ArrowLeftOutlined,
   MenuFoldOutlined,
@@ -31,6 +32,7 @@ import EditingSidebar from "../components/DatasetDetailsMap/EditingSidebar";
 import DatasetInfoSidebar from "../components/DatasetDetailsMap/DatasetInfoSidebar";
 import DownloadSection from "../components/DatasetDetailsMap/DownloadSection";
 import ReportIssueModal from "../components/DatasetDetailsMap/ReportIssueModal";
+import OrthoTileSearch from "../components/DatasetDetailsMap/OrthoTileSearch";
 import { EditorToolbar } from "../components/PolygonEditor";
 
 const DatasetDetailsMap = lazy(
@@ -40,6 +42,11 @@ const DatasetDetailsMap = lazy(
 export default function DatasetDetails() {
   const navigate = useNavigate();
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
+  // Open-vocabulary query forwarded from the dataset list (highlights tiles).
+  const initialTileQuery = searchParams.get("q");
+  // OL map instance, captured so the tile-search overlay can draw highlights.
+  const [mapInstance, setMapInstance] = useState<OLMap | null>(null);
   const datasetId = id ? Number(id) : undefined;
   const hasValidDatasetId =
     typeof datasetId === "number" && Number.isFinite(datasetId);
@@ -461,7 +468,10 @@ export default function DatasetDetails() {
         >
           <DatasetDetailsMap
             data={dataset}
-            onMapReady={editing.handleMapReady}
+            onMapReady={(map) => {
+              editing.handleMapReady(map);
+              setMapInstance(map);
+            }}
             onOrthoLayerReady={editing.handleOrthoLayerReady}
             onFirstMapInteraction={() =>
               track("dataset_map_interacted", {
@@ -493,6 +503,20 @@ export default function DatasetDetails() {
             }
           />
         </Suspense>
+
+        {/* Open-vocabulary search scoped to this orthophoto (highlights tiles).
+            Gated to the core team (can_audit) for now while it's being refined. */}
+        {!isEditing && dataset && canAudit && (
+          <div className="pointer-events-none absolute left-1/2 top-24 z-30 -translate-x-1/2">
+            <div className="pointer-events-auto">
+              <OrthoTileSearch
+                map={mapInstance}
+                datasetId={dataset.id}
+                initialQuery={initialTileQuery}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       <Drawer

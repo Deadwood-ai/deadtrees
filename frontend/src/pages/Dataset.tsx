@@ -25,6 +25,8 @@ import { useDatasetFilter } from "../hooks/useDatasetFilterProvider";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useDesktopOnlyFeature } from "../hooks/useDesktopOnlyFeature";
 import { useAnalytics } from "../hooks/useAnalytics";
+import { useSemanticSearch } from "../hooks/useSemanticSearch";
+import { useCanAudit } from "../hooks/useUserPrivileges";
 
 type FilterTag =
   | "platform"
@@ -71,6 +73,13 @@ export default function Dataset() {
   const { track } = useAnalytics("dataset_archive");
   // Incremented on explicit filter actions to trigger map zoom
   const [filterZoomTrigger, setFilterZoomTrigger] = useState(0);
+
+  // Open-vocabulary (CLIP) search. Coexists with the text filter above: when a
+  // semantic query is active the list is restricted to and ranked by matches.
+  // Gated to the core team (can_audit) for now while it's being refined.
+  const { canAudit } = useCanAudit();
+  const semantic = useSemanticSearch();
+  const [semanticInput, setSemanticInput] = useState("");
 
   // Debounced search handler
   useEffect(() => {
@@ -159,11 +168,20 @@ export default function Dataset() {
       return authorMatch || locationMatch;
     });
 
+    // When a semantic query is active, restrict to matched datasets and order
+    // by relevance score (most relevant first), overriding the id/date sort.
+    if (semantic.scores) {
+      const scores = semantic.scores;
+      return filtered
+        .filter((d) => scores.has(d.id))
+        .sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0));
+    }
+
     // Sort by ID instead of date (ID represents order of addition to database)
     return filtered.sort((a, b) => {
       return sortDirection === "asc" ? a.id - b.id : b.id - a.id;
     });
-  }, [filteredData, searchValue, sortDirection]);
+  }, [filteredData, searchValue, sortDirection, semantic.scores]);
 
   const {
     periods,
@@ -247,6 +265,53 @@ export default function Dataset() {
       </div>
 
       <div className="flex flex-col gap-2 pb-4">
+        {canAudit && (
+        <div className="flex flex-col gap-1">
+          <Input.Search
+            placeholder="AI search, e.g. 'standing dead trees', 'clearcut'"
+            data-testid="dataset-semantic-search-input"
+            enterButton
+            allowClear
+            loading={semantic.loading}
+            value={semanticInput}
+            onChange={(e) => {
+              setSemanticInput(e.target.value);
+              if (!e.target.value && semantic.query) semantic.clear();
+            }}
+            onSearch={(value) => {
+              if (value.trim()) {
+                semantic.run(value);
+                track("dataset_semantic_search_used", {
+                  search_length: value.trim().length,
+                });
+              } else {
+                semantic.clear();
+              }
+            }}
+          />
+          {semantic.query && (
+            <div className="flex items-center justify-between px-1 text-xs text-gray-500">
+              <span>
+                Ranked by “{semantic.query}” · {processedData?.length ?? 0} matches
+              </span>
+              <Button
+                type="link"
+                size="small"
+                className="h-auto p-0 text-xs"
+                onClick={() => {
+                  setSemanticInput("");
+                  semantic.clear();
+                }}
+              >
+                Clear
+              </Button>
+            </div>
+          )}
+          {semantic.error && (
+            <div className="px-1 text-xs text-red-500">{semantic.error}</div>
+          )}
+        </div>
+        )}
         <div className="flex flex-col gap-2 sm:flex-row">
           <Input
             placeholder="Search by Authors or Location (Region, Province, City)"
@@ -298,6 +363,8 @@ export default function Dataset() {
           onFilterClick={handleFilterClick}
           searchValue={searchValue}
           filterByViewport={filterByViewport}
+          scores={semantic.scores}
+          semanticQuery={semantic.query}
         />
       ) : (
         <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500">

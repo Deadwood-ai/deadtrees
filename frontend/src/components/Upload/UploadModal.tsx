@@ -119,6 +119,8 @@ const GEOTIFF_PROCESSING_STEPS = [
   "metadata",
   "aoi_v1",
   ...PREDICTION_PROCESSING_STEPS,
+  // Open-vocabulary tile embeddings run last (needs the standardized ortho).
+  "embeddings_v1",
 ];
 
 const RAW_IMAGES_PROCESSING_STEPS = [
