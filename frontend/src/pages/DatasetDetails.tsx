@@ -22,7 +22,7 @@ import { useAuth } from "../hooks/useAuthProvider";
 import { useCreateFlag } from "../hooks/useDatasetFlags";
 import { useDatasetEditing } from "../hooks/useDatasetEditing";
 import { useDatasetAOI } from "../hooks/useDatasetAudit";
-import { useCanAudit } from "../hooks/useUserPrivileges";
+import { useCanAudit, useCanUseAiSearch } from "../hooks/useUserPrivileges";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAnalytics } from "../hooks/useAnalytics";
 import { hasForestCoverPredictionOutput } from "../utils/predictionAvailability";
@@ -52,6 +52,7 @@ export default function DatasetDetails() {
     typeof datasetId === "number" && Number.isFinite(datasetId);
   const { user } = useAuth();
   const { canAudit } = useCanAudit();
+  const { canUseAiSearch } = useCanUseAiSearch();
   const { track } = useAnalytics("dataset_detail");
   const { data: dataset, isLoading: isDatasetLoading } = usePublicDatasetById(
     hasValidDatasetId ? datasetId : undefined,
@@ -504,9 +505,11 @@ export default function DatasetDetails() {
           />
         </Suspense>
 
-        {/* Open-vocabulary search scoped to this orthophoto is public; backend
-            rate limiting protects embedding generation from automated abuse. */}
-        {!isEditing && dataset && (
+        {/* Open-vocabulary tile search is a core-team-only feature, gated to the
+            same auditors who get the AI search on the dataset archive. The
+            /search/embed endpoint stays public + rate-limited; this only hides
+            the UI from regular visitors. */}
+        {canUseAiSearch && !isEditing && dataset && (
           <div className="pointer-events-none absolute left-1/2 top-24 z-30 -translate-x-1/2">
             <div className="pointer-events-auto">
               <OrthoTileSearch
