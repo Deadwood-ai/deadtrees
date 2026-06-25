@@ -107,7 +107,7 @@ def main() -> int:
 		required=True,
 		help="Comma-separated dataset ids, e.g. 8046,8037,6479,6073",
 	)
-	parser.add_argument("--priority", type=int, default=5, help="1=highest, 5=lowest (default: 5)")
+	parser.add_argument("--priority", type=int, default=5, help="5=highest, 1=lowest (default: 5)")
 	parser.add_argument(
 		"--task-types",
 		default=",".join(DEFAULT_TASK_TYPES),
@@ -174,4 +174,3 @@ def main() -> int:
 
 if __name__ == "__main__":
 	raise SystemExit(main())
-
