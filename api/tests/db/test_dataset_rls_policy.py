@@ -1,7 +1,15 @@
 import pytest
 from shared.db import use_anon_client, use_client, use_service_client, login
 from shared.settings import settings
-from shared.models import DatasetAccessEnum, LabelDataEnum, LabelSourceEnum, LabelTypeEnum, LicenseEnum, PlatformEnum
+from shared.models import (
+	DatasetAccessEnum,
+	LabelDataEnum,
+	LabelSourceEnum,
+	LabelTypeEnum,
+	LicenseEnum,
+	PlatformEnum,
+	StatusEnum,
+)
 from shared.testing.fixtures import test_processor_user
 
 
@@ -99,6 +107,91 @@ def datasets_with_mixed_access(auth_token, test_user, test_processor_user):
 		with use_client(auth_token) as supabase_client:
 			for dataset_id in datasets:
 				supabase_client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
+
+
+@pytest.fixture(scope='function')
+def archive_ready_private_dataset(test_user):
+	"""Create a private dataset that satisfies public_dataset_archive_items predicates."""
+	dataset_id = None
+
+	try:
+		with use_service_client() as client:
+			dataset = {
+				'file_name': 'test-private-archive-visible.tif',
+				'user_id': test_user,
+				'license': LicenseEnum.cc_by.value,
+				'platform': PlatformEnum.drone.value,
+				'authors': ['Private Archive Test Author'],
+				'data_access': DatasetAccessEnum.private.value,
+				'aquisition_year': 2024,
+				'aquisition_month': 1,
+				'aquisition_day': 1,
+			}
+			response = client.table(settings.datasets_table).insert(dataset).execute()
+			dataset_id = response.data[0]['id']
+
+			client.table(settings.orthos_table).insert(
+				{
+					'dataset_id': dataset_id,
+					'ortho_file_name': 'test-private-archive-visible.tif',
+					'version': 1,
+					'ortho_file_size': 1,
+					'bbox': 'BOX(13.4050 52.5200,13.4150 52.5300)',
+					'sha256': 'test-private-archive-visible',
+					'ortho_upload_runtime': 0.1,
+				}
+			).execute()
+			client.table(settings.thumbnails_table).insert(
+				{
+					'dataset_id': dataset_id,
+					'thumbnail_file_name': 'test-private-archive-visible.jpg',
+					'thumbnail_path': 'test-private-archive-visible.jpg',
+					'thumbnail_file_size': 1,
+					'version': 1,
+				}
+			).execute()
+			client.table(settings.metadata_table).insert(
+				{
+					'dataset_id': dataset_id,
+					'metadata': {
+						'gadm': {
+							'admin_level_1': 'DEU',
+							'admin_level_2': 'Berlin',
+							'admin_level_3': 'Berlin',
+						},
+						'biome': {
+							'biome_name': 'Temperate Broadleaf and Mixed Forests',
+						},
+					},
+					'version': 1,
+					'processing_runtime': 0.1,
+				}
+			).execute()
+			client.table(settings.statuses_table).insert(
+				{
+					'dataset_id': dataset_id,
+					'current_status': StatusEnum.idle.value,
+					'is_upload_done': True,
+					'is_ortho_done': True,
+					'is_cog_done': True,
+					'is_thumbnail_done': True,
+					'is_deadwood_done': True,
+					'is_forest_cover_done': True,
+					'is_metadata_done': True,
+					'has_error': False,
+				}
+			).execute()
+
+		yield dataset_id
+
+	finally:
+		if dataset_id:
+			with use_service_client() as client:
+				client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
+				client.table(settings.metadata_table).delete().eq('dataset_id', dataset_id).execute()
+				client.table(settings.thumbnails_table).delete().eq('dataset_id', dataset_id).execute()
+				client.table(settings.orthos_table).delete().eq('dataset_id', dataset_id).execute()
+				client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 
 
 def test_rls_policy_for_private_datasets(datasets_with_mixed_access, auth_token, setup_processor_privileges):
@@ -230,6 +323,83 @@ def test_rls_policy_for_view_with_private_datasets(datasets_with_mixed_access, a
 			public_client.from_('v2_full_dataset_view')
 			.select('*')
 			.eq('id', datasets_with_mixed_access['private_id'])
+			.execute()
+		)
+		assert len(response.data) == 0
+
+
+def test_archive_items_include_private_datasets_for_authorized_users(
+	archive_ready_private_dataset,
+	setup_processor_privileges,
+	test_processor_user,
+	test_user2,
+):
+	"""The archive map/list feed should include private rows only for authorized users."""
+	user_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
+	processor_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD, use_cached_session=False)
+	other_user_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+
+	with use_anon_client() as client:
+		response = (
+			client.from_('public_dataset_archive_items')
+			.select('id,data_access')
+			.eq('id', archive_ready_private_dataset)
+			.execute()
+		)
+		assert len(response.data) == 0
+
+	with use_client(other_user_token) as client:
+		response = (
+			client.from_('public_dataset_archive_items')
+			.select('id,data_access')
+			.eq('id', archive_ready_private_dataset)
+			.execute()
+		)
+		assert len(response.data) == 0
+
+	with use_client(user_token) as client:
+		response = (
+			client.from_('public_dataset_archive_items')
+			.select('id,data_access')
+			.eq('id', archive_ready_private_dataset)
+			.execute()
+		)
+		assert len(response.data) == 1
+		assert response.data[0]['data_access'] == DatasetAccessEnum.private.value
+
+	with use_client(processor_token) as client:
+		response = (
+			client.from_('public_dataset_archive_items')
+			.select('id,data_access')
+			.eq('id', archive_ready_private_dataset)
+			.execute()
+		)
+		assert len(response.data) == 1
+		assert response.data[0]['data_access'] == DatasetAccessEnum.private.value
+
+	with use_client(processor_token) as client:
+		client.table('dataset_audit').insert(
+			{
+				'dataset_id': archive_ready_private_dataset,
+				'audited_by': test_processor_user,
+				'final_assessment': 'exclude_completely',
+			}
+		).execute()
+
+	with use_client(user_token) as client:
+		response = (
+			client.from_('public_dataset_archive_items')
+			.select('id,data_access')
+			.eq('id', archive_ready_private_dataset)
+			.execute()
+		)
+		assert len(response.data) == 0
+
+	with use_client(processor_token) as client:
+		response = (
+			client.from_('public_dataset_archive_items')
+			.select('id,data_access')
+			.eq('id', archive_ready_private_dataset)
 			.execute()
 		)
 		assert len(response.data) == 0

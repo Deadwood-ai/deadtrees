@@ -11,10 +11,10 @@ interface DatasetQueryOptions {
 
 // Base datasets hook - includes ALL datasets (for admin/audit use)
 export function useDatasets(options: DatasetQueryOptions = {}) {
-  const { status } = useAuth();
+  const { status, user } = useAuth();
 
   return useQuery({
-    queryKey: ["datasets"],
+    queryKey: ["datasets", status, user?.id ?? "anonymous"],
     queryFn: async () => {
       const { data, error } = await supabase.from(Settings.DATA_TABLE_FULL).select("*");
       if (error) throw error;
@@ -28,10 +28,10 @@ export function useDatasets(options: DatasetQueryOptions = {}) {
 
 // Public datasets hook - excludes datasets marked as "exclude_completely"
 export function usePublicDatasets(options: DatasetQueryOptions = {}) {
-  const { status } = useAuth();
+  const { status, user } = useAuth();
 
   return useQuery({
-    queryKey: ["public-datasets"],
+    queryKey: ["public-datasets", status, user?.id ?? "anonymous"],
     queryFn: async () => {
       const { data, error } = await supabase.from(Settings.DATA_TABLE_PUBLIC).select("*");
       if (error) throw error;
@@ -45,10 +45,10 @@ export function usePublicDatasets(options: DatasetQueryOptions = {}) {
 
 // Public archive hook - narrow rows for the /dataset archive list, timeline, filters, and map
 export function usePublicDatasetArchiveItems(options: DatasetQueryOptions = {}) {
-  const { status } = useAuth();
+  const { status, user } = useAuth();
 
   return useQuery({
-    queryKey: ["public-dataset-archive-items"],
+    queryKey: ["public-dataset-archive-items", status, user?.id ?? "anonymous"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from(Settings.DATASET_ARCHIVE_ITEMS_VIEW)
@@ -65,10 +65,10 @@ export function usePublicDatasetArchiveItems(options: DatasetQueryOptions = {}) 
 
 // Public single dataset hook - optimized for dataset details page
 export function usePublicDatasetById(datasetId: number | undefined) {
-  const { status } = useAuth();
+  const { status, user } = useAuth();
 
 	return useQuery({
-		queryKey: ["public-dataset-by-id", datasetId],
+		queryKey: ["public-dataset-by-id", datasetId, status, user?.id ?? "anonymous"],
 		enabled: !!datasetId && status !== "checking",
 		queryFn: async () => {
 			if (!datasetId) return null;
@@ -87,10 +87,10 @@ export function usePublicDatasetById(datasetId: number | undefined) {
 
 // Fetch a single dataset by id; minimal fields are enough for Tiles page
 export function useDatasetById(datasetId: number | undefined) {
-  const { status } = useAuth();
+  const { status, user } = useAuth();
 
   return useQuery({
-    queryKey: ["dataset-by-id", datasetId],
+    queryKey: ["dataset-by-id", datasetId, status, user?.id ?? "anonymous"],
     enabled: !!datasetId && status !== "checking",
     queryFn: async () => {
       if (!datasetId) return null;
@@ -124,10 +124,11 @@ export function useUserDatasets(options: DatasetQueryOptions = {}) {
 
 // Authors list - based on public datasets only
 export function useAuthors(options: DatasetQueryOptions = {}) {
+  const { status, user } = useAuth();
   const { data: datasets } = usePublicDatasetArchiveItems({ enabled: options.enabled });
 
   return useQuery({
-    queryKey: ["authors"],
+    queryKey: ["authors", status, user?.id ?? "anonymous"],
     enabled: (options.enabled ?? true) && !!datasets,
     queryFn: () => {
       // Flatten all authors arrays and remove duplicates

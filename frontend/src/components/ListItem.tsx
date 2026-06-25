@@ -1,6 +1,6 @@
 import { Button, Tag, Tooltip } from "antd";
 import { useNavigate } from "react-router-dom";
-import { IDataset, IDatasetArchiveItem } from "../types/dataset";
+import { IDataAccess, IDataset, IDatasetArchiveItem } from "../types/dataset";
 import { Settings } from "../config";
 import countryList from "../utils/countryList";
 import { useDatasetDetailsMap } from "../hooks/useDatasetDetailsMapProvider";
@@ -107,6 +107,7 @@ const ListItem = ({
   const biomeLabel = biomeName || "Unknown";
   const biomeColor = getBiomeTagColor(biomeName);
   const biomeIcon = getBiomeEmoji(biomeName);
+  const isPrivate = item.data_access === IDataAccess.private;
 
   return (
     <div
@@ -169,6 +170,11 @@ const ListItem = ({
                 data-testid="dataset-semantic-score"
               >
                 {Math.round(score * 100)}% match
+              </Tag>
+            )}
+            {isPrivate && (
+              <Tag color="gold" className="mb-1 mr-0">
+                Private
               </Tag>
             )}
             <div className="pt-0.5 text-xs whitespace-nowrap">
