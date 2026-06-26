@@ -1,62 +1,76 @@
-create table "public"."priwa_project_mosaics" (
-    "id" uuid not null default gen_random_uuid(),
-    "project_id" uuid not null,
-    "label" text not null,
-    "cog_url" text not null,
-    "capture_date" date,
-    "sort_order" integer not null default 0,
-    "is_active" boolean not null default true,
-    "created_at" timestamp with time zone not null default now(),
-    "updated_at" timestamp with time zone not null default now(),
-    constraint "priwa_project_mosaics_label_not_blank" check (btrim(label) <> ''),
-    constraint "priwa_project_mosaics_cog_url_not_blank" check (btrim(cog_url) <> '')
-);
-
-alter table "public"."priwa_project_mosaics" enable row level security;
-
-create unique index priwa_project_mosaics_pkey
-on public.priwa_project_mosaics using btree (id);
-
-create index priwa_project_mosaics_active_project_idx
-on public.priwa_project_mosaics using btree (project_id, sort_order, capture_date desc, created_at desc)
-where is_active = true;
-
-alter table "public"."priwa_project_mosaics"
-add constraint "priwa_project_mosaics_pkey" primary key using index "priwa_project_mosaics_pkey";
-
-alter table "public"."priwa_project_mosaics"
-add constraint "priwa_project_mosaics_project_id_fkey"
-foreign key (project_id) references public.priwa_projects(id) on update cascade on delete cascade not valid;
-
-alter table "public"."priwa_project_mosaics"
-validate constraint "priwa_project_mosaics_project_id_fkey";
-
-create or replace function public.priwa_set_project_mosaic_updated_at()
-returns trigger
-language plpgsql
+create or replace function public.priwa_project_latest_flight_mosaics(
+    p_project_id uuid,
+    p_limit integer default 50
+)
+returns table (
+    id text,
+    project_id uuid,
+    label text,
+    cog_url text,
+    capture_date date,
+    created_at timestamp with time zone
+)
+language sql
+stable
+security definer
 set search_path = public
 as $$
-begin
-    NEW.updated_at = now();
-    return NEW;
-end;
+    select
+        dataset.id::text as id,
+        p_project_id as project_id,
+        coalesce(nullif(dataset.file_name, ''), 'Dataset ' || dataset.id::text) as label,
+        dataset.cog_path as cog_url,
+        case
+            when dataset.aquisition_year between 1981 and 2098
+                and dataset.aquisition_month between 1 and 12
+                and dataset.aquisition_day between 1 and 31
+                and dataset.aquisition_day <= extract(
+                    day from (
+                        date_trunc(
+                            'month',
+                            make_date(
+                                dataset.aquisition_year::integer,
+                                dataset.aquisition_month::integer,
+                                1
+                            )
+                        ) + interval '1 month - 1 day'
+                    )
+                )
+            then make_date(
+                dataset.aquisition_year::integer,
+                dataset.aquisition_month::integer,
+                dataset.aquisition_day::integer
+            )
+            else null
+        end as capture_date,
+        dataset.created_at
+    from public.v2_full_dataset_view_public dataset
+    where exists (
+            select 1
+            from public.priwa_project_memberships requester_membership
+            where requester_membership.project_id = p_project_id
+              and requester_membership.user_id = (select auth.uid())
+        )
+      and exists (
+            select 1
+            from public.priwa_project_memberships uploader_membership
+            where uploader_membership.project_id = p_project_id
+              and uploader_membership.user_id = dataset.user_id
+        )
+      and dataset.platform::text = 'drone'
+      and dataset.is_cog_done is true
+      and dataset.cog_path is not null
+    order by
+        capture_date desc nulls last,
+        dataset.created_at desc,
+        dataset.id desc
+    limit least(greatest(coalesce(p_limit, 50), 1), 100);
 $$;
 
-create trigger priwa_project_mosaics_set_updated_at
-before update on public.priwa_project_mosaics
-for each row execute function public.priwa_set_project_mosaic_updated_at();
+comment on function public.priwa_project_latest_flight_mosaics(uuid, integer)
+is 'Returns latest public COG drone datasets uploaded by members of a PRIWA project for authenticated members of that same project.';
 
-grant select on table "public"."priwa_project_mosaics" to "authenticated";
-grant all on table "public"."priwa_project_mosaics" to "service_role";
-revoke all on function public.priwa_set_project_mosaic_updated_at() from public;
-grant execute on function public.priwa_set_project_mosaic_updated_at() to "service_role";
-
-create policy "PRIWA members can read active project mosaics"
-on "public"."priwa_project_mosaics"
-as permissive
-for select
-to authenticated
-using (
-    is_active
-    and public.priwa_is_project_member(project_id)
-);
+revoke all on function public.priwa_project_latest_flight_mosaics(uuid, integer) from public;
+revoke all on function public.priwa_project_latest_flight_mosaics(uuid, integer) from anon;
+grant execute on function public.priwa_project_latest_flight_mosaics(uuid, integer) to authenticated;
+grant execute on function public.priwa_project_latest_flight_mosaics(uuid, integer) to service_role;

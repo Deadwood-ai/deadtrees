@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
+import { Settings } from "../../config";
 import { supabase } from "../../hooks/useSupabase";
 
 export interface IPriwaMosaic {
@@ -18,6 +19,86 @@ interface IPriwaMosaicRow {
   capture_date: string | null;
 }
 
+interface IPriwaDatasetMosaicRow {
+  id: number;
+  file_name: string | null;
+  cog_path: string | null;
+  aquisition_year: number | null;
+  aquisition_month: number | null;
+  aquisition_day: number | null;
+  created_at: string;
+  authors: string[] | null;
+}
+
+const PRIWA_MOSAIC_LIMIT = 50;
+const PRIWA_PREVIEW_AUTHOR_MARKERS = new Set([
+  "prima",
+  "prima-wald",
+  "priwa",
+  "unique land use",
+  "unique land use gmbh",
+]);
+
+const isMissingPriwaMosaicRpc = (error: unknown) => {
+  const candidate = error as { code?: string; message?: string } | null;
+  return (
+    candidate?.code === "PGRST202" ||
+    candidate?.message?.includes("priwa_project_latest_flight_mosaics") === true
+  );
+};
+
+const hasPriwaPreviewAuthor = (authors: string[] | null) =>
+  (authors ?? []).some((author) =>
+    PRIWA_PREVIEW_AUTHOR_MARKERS.has(author.trim().toLowerCase()),
+  );
+
+const dateFromAcquisitionParts = (row: IPriwaDatasetMosaicRow) => {
+  if (!row.aquisition_year || !row.aquisition_month || !row.aquisition_day) {
+    return null;
+  }
+
+  const date = new Date(
+    Date.UTC(row.aquisition_year, row.aquisition_month - 1, row.aquisition_day),
+  );
+  if (
+    date.getUTCFullYear() !== row.aquisition_year ||
+    date.getUTCMonth() !== row.aquisition_month - 1 ||
+    date.getUTCDate() !== row.aquisition_day
+  ) {
+    return null;
+  }
+
+  return date.toISOString().slice(0, 10);
+};
+
+const fetchPreviewFallbackMosaics = async (
+  projectId: string,
+): Promise<IPriwaMosaic[]> => {
+  const { data, error } = await supabase
+    .from(Settings.DATA_TABLE_PUBLIC)
+    .select(
+      "id, file_name, cog_path, aquisition_year, aquisition_month, aquisition_day, created_at, authors",
+    )
+    .eq("platform", "drone")
+    .eq("is_cog_done", true)
+    .not("cog_path", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(300);
+
+  if (error) throw error;
+
+  return ((data ?? []) as IPriwaDatasetMosaicRow[])
+    .filter((row) => row.cog_path && hasPriwaPreviewAuthor(row.authors))
+    .slice(0, PRIWA_MOSAIC_LIMIT)
+    .map((row) => ({
+      id: String(row.id),
+      projectId,
+      label: row.file_name || `Dataset ${row.id}`,
+      cogUrl: row.cog_path as string,
+      captureDate: dateFromAcquisitionParts(row),
+    }));
+};
+
 export const priwaMosaicsQueryKey = (
   projectId: string | null | undefined,
 ) => ["priwa-project-mosaics", projectId];
@@ -26,15 +107,18 @@ export const fetchPriwaMosaics = async (
   projectId: string,
 ): Promise<IPriwaMosaic[]> => {
   const { data, error } = await supabase
-    .from("priwa_project_mosaics")
-    .select("id, project_id, label, cog_url, capture_date")
-    .eq("project_id", projectId)
-    .eq("is_active", true)
-    .order("sort_order", { ascending: true })
-    .order("capture_date", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false });
+    .rpc("priwa_project_latest_flight_mosaics", {
+      p_project_id: projectId,
+      p_limit: PRIWA_MOSAIC_LIMIT,
+    });
 
-  if (error) throw error;
+  if (error) {
+    if (isMissingPriwaMosaicRpc(error)) {
+      return fetchPreviewFallbackMosaics(projectId);
+    }
+
+    throw error;
+  }
 
   return ((data ?? []) as IPriwaMosaicRow[]).map((row) => ({
     id: row.id,
