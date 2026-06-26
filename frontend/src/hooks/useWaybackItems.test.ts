@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { WaybackItem, WaybackMetadata } from "@esri/wayback-core";
-import { loadWaybackItemsWithMetadata } from "./useWaybackItems";
+import type { WaybackItem } from "@esri/wayback-core";
+import { loadGlobalWaybackItems, loadLocalWaybackItems } from "./useWaybackItems";
 
 const point = { longitude: 10.451526, latitude: 51.165691 };
 
@@ -19,25 +19,35 @@ const waybackItem = (
   releaseDatetime: new Date(releaseDateLabel).getTime(),
 });
 
-const metadata = (date: string): WaybackMetadata => ({
-  date: new Date(date).getTime(),
-  provider: "Vantor",
-  source: "WV02",
-  resolution: 0.3,
-  accuracy: 5,
-});
-
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("loadWaybackItemsWithMetadata", () => {
+describe("loadGlobalWaybackItems", () => {
+  it("loads release-list candidates without local tile probing", async () => {
+    const getItems = vi
+      .fn()
+      .mockResolvedValue([
+        waybackItem(100, "2020-01-01"),
+        waybackItem(300, "2022-01-01"),
+        waybackItem(200, "2021-01-01"),
+      ]);
+
+    const result = await loadGlobalWaybackItems({ getItems });
+
+    expect(getItems).toHaveBeenCalledTimes(1);
+    expect(result.map((item) => item.releaseNum)).toEqual([100, 200, 300]);
+    expect(result.every((item) => item.metadata === undefined)).toBe(true);
+  });
+});
+
+describe("loadLocalWaybackItems", () => {
   it("keeps discovery timeouts retryable instead of caching empty imagery", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     const startedAt = Date.now();
     await expect(
-      loadWaybackItemsWithMetadata(point, 12, {
+      loadLocalWaybackItems(point, 12, {
         itemsTimeoutMs: 10,
         getItemsWithLocalChanges: () =>
           new Promise<WaybackItem[]>(() => undefined),
@@ -47,35 +57,36 @@ describe("loadWaybackItemsWithMetadata", () => {
     expect(Date.now() - startedAt).toBeLessThan(250);
   });
 
-  it("keeps imagery usable when metadata exceeds the timeout", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const item = waybackItem(31144);
+  it("returns local candidates without eager metadata fetching", async () => {
+    const getItemsWithLocalChanges = vi
+      .fn()
+      .mockResolvedValue([waybackItem(31144)]);
 
-    const startedAt = Date.now();
-    const result = await loadWaybackItemsWithMetadata(point, 12, {
-      metadataTimeoutMs: 10,
-      getItemsWithLocalChanges: async () => [item],
-      getItemMetadata: () =>
-        new Promise<WaybackMetadata | null>(() => undefined),
+    const result = await loadLocalWaybackItems(point, 12, {
+      getItemsWithLocalChanges,
     });
 
-    expect(Date.now() - startedAt).toBeLessThan(250);
     expect(result).toHaveLength(1);
     expect(result[0].releaseNum).toBe(31144);
     expect(result[0].metadata).toBeUndefined();
     expect(result[0].provider).toBeUndefined();
   });
 
-  it("uses accurate local Wayback duplicate detection", async () => {
+  it("uses size-only local Wayback duplicate detection", async () => {
     const getItemsWithLocalChanges = vi
       .fn()
       .mockResolvedValue([waybackItem(31144)]);
 
-    await loadWaybackItemsWithMetadata(point, 12, {
+    await loadLocalWaybackItems(point, 12, {
       getItemsWithLocalChanges,
-      getItemMetadata: async () => metadata("2022-10-04"),
     });
 
-    expect(getItemsWithLocalChanges).toHaveBeenCalledWith(point, 12);
+    expect(getItemsWithLocalChanges).toHaveBeenCalledWith(
+      point,
+      12,
+      expect.objectContaining({
+        onlyUseSizeToFilterDuplicates: true,
+      }),
+    );
   });
 });

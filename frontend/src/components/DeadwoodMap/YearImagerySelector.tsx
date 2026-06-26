@@ -110,6 +110,8 @@ interface YearImagerySelectorProps {
   autoMatchImagery?: boolean;
   /** Callback when auto-match setting changes */
   onAutoMatchChange?: (enabled: boolean) => void;
+  /** Callback when the user asks for local imagery candidates */
+  onRequestLocalImagery?: () => void;
   /** Whether tree cover layer is shown */
   showForest?: boolean;
   /** Whether standing deadwood layer is shown */
@@ -137,6 +139,7 @@ const YearImagerySelector = ({
   isWaybackActive = true,
   autoMatchImagery = false,
   onAutoMatchChange,
+  onRequestLocalImagery,
   showForest = false,
   showDeadwood = false,
   compactMode = false,
@@ -251,6 +254,8 @@ const YearImagerySelector = ({
 
   // Navigation: ← goes to older (lower index), → goes to newer (higher index)
   const handleImageryPrev = () => {
+    onRequestLocalImagery?.();
+
     if (isSelectionOutsideCandidates && waybackItems.length > 0) {
       if (autoMatchImagery) onAutoMatchChange?.(false);
       onImageryChange(waybackItems[waybackItems.length - 1].releaseNum);
@@ -264,6 +269,8 @@ const YearImagerySelector = ({
   };
 
   const handleImageryNext = () => {
+    onRequestLocalImagery?.();
+
     if (isSelectionOutsideCandidates && waybackItems.length > 0) {
       if (autoMatchImagery) onAutoMatchChange?.(false);
       onImageryChange(waybackItems[waybackItems.length - 1].releaseNum);
@@ -342,7 +349,10 @@ const YearImagerySelector = ({
                 size="small"
                 type={autoMatchImagery ? "primary" : "default"}
                 icon={<LinkOutlined />}
-                onClick={() => onAutoMatchChange?.(!autoMatchImagery)}
+                onClick={() => {
+                  onRequestLocalImagery?.();
+                  onAutoMatchChange?.(!autoMatchImagery);
+                }}
                 className="ml-1"
               />
             </Tooltip>
