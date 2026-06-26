@@ -25,7 +25,7 @@ import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { unByKey } from "ol/Observable";
 import { fromLonLat, toLonLat } from "ol/proj";
 import View from "ol/View";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 
 import { createStandardMapControls } from "../../utils/basemaps";
@@ -36,7 +36,7 @@ import {
   createPriwaOfflineAreaFeature,
   createPriwaOfflineAreaLayer,
 } from "./createPriwaOfflineAreaLayer";
-import { createPriwaCogLayer } from "./createPriwaCogLayer";
+import { createPriwaCogLayers } from "./createPriwaCogLayer";
 import {
   createPriwaPointFeature,
   createPriwaPointLayer,
@@ -47,6 +47,7 @@ import PriwaPointDrawer from "./PriwaPointDrawer";
 import PriwaPointListPanel from "./PriwaPointListPanel";
 import PriwaOfflineStatus from "./PriwaOfflineStatus";
 import { usePriwaOfflineBasemap } from "./usePriwaOfflineBasemap";
+import type { IPriwaMosaic } from "./usePriwaMosaics";
 import type { IPriwaSyncSummary } from "./priwaOfflineSync";
 import type {
   IPriwaCoordinate,
@@ -85,8 +86,9 @@ interface PriwaFieldMapProps {
   isLoadingPoints?: boolean;
   isSavingPoint?: boolean;
   projectName: string;
-  cogPath?: string | null;
+  mosaics?: IPriwaMosaic[];
   isCogLoading?: boolean;
+  cogErrorMessage?: string | null;
   errorMessage?: string | null;
   syncSummary?: IPriwaSyncSummary;
   onAddPoint: (point: IPriwaPoint) => Promise<void>;
@@ -101,8 +103,9 @@ export default function PriwaFieldMap({
   isLoadingPoints = false,
   isSavingPoint = false,
   projectName,
-  cogPath,
+  mosaics = [],
   isCogLoading = false,
+  cogErrorMessage = null,
   errorMessage = null,
   syncSummary,
   onAddPoint,
@@ -129,7 +132,7 @@ export default function PriwaFieldMap({
   const topographicLayerRef = useRef<ReturnType<
     typeof createPriwaTopographicLayer
   > | null>(null);
-  const cogLayerRef = useRef<TileLayerWebGL | null>(null);
+  const cogLayersRef = useRef<TileLayerWebGL[]>([]);
   const [isDrawerOpen, setDrawerOpen] = useState(false);
   const [isCogVisible, setCogVisible] = useState(true);
   const [isPlacingPoint, setPlacingPoint] = useState(false);
@@ -141,6 +144,10 @@ export default function PriwaFieldMap({
   const [formSessionId, setFormSessionId] = useState(0);
   const [isPointListOpen, setPointListOpen] = useState(false);
   const [baseLayer, setBaseLayer] = useState<PriwaBaseLayer>("aerial");
+  const visibleMosaics = useMemo(
+    () => mosaics.filter((mosaic) => mosaic.cogUrl.trim().length > 0),
+    [mosaics],
+  );
   const userLocation = useUserLocationLayer(mapRef);
   const {
     layer: userLocationLayer,
@@ -245,7 +252,7 @@ export default function PriwaFieldMap({
       topographicLayerRef.current = null;
       pointLayerRef.current = null;
       previewLayerRef.current = null;
-      cogLayerRef.current = null;
+      cogLayersRef.current = [];
     };
   }, [openPointForEditing, stopUserLocation, userLocationLayer]);
 
@@ -280,17 +287,21 @@ export default function PriwaFieldMap({
     const map = mapRef.current;
     if (!map) return;
 
-    if (cogLayerRef.current) {
-      map.removeLayer(cogLayerRef.current);
-      cogLayerRef.current = null;
+    if (cogLayersRef.current.length > 0) {
+      cogLayersRef.current.forEach((layer) => {
+        map.removeLayer(layer);
+      });
+      cogLayersRef.current = [];
     }
 
-    if (!cogPath || !isCogVisible) return;
+    if (visibleMosaics.length === 0 || !isCogVisible) return;
 
-    const cogLayer = createPriwaCogLayer(cogPath);
-    cogLayerRef.current = cogLayer;
-    map.getLayers().insertAt(2, cogLayer);
-  }, [cogPath, isCogVisible]);
+    const cogLayers = createPriwaCogLayers(visibleMosaics);
+    cogLayersRef.current = cogLayers;
+    cogLayers.forEach((layer, index) => {
+      map.getLayers().insertAt(2 + index, layer);
+    });
+  }, [visibleMosaics, isCogVisible]);
 
   const handlePreviewCoordinate = useCallback(
     (coordinate: IPriwaCoordinate | null) => {
@@ -387,6 +398,7 @@ export default function PriwaFieldMap({
   const pointListToggleLabel = isPointListOpen
     ? "Punktliste schließen"
     : "Punktliste öffnen";
+  const mosaicCount = visibleMosaics.length;
 
   const handleAddPoint = useCallback(
     async (point: IPriwaPoint) => {
@@ -471,14 +483,17 @@ export default function PriwaFieldMap({
           <div className="text-xs text-gray-500">
             {isCogLoading
               ? "Lade Drohnenlayer..."
-              : cogPath
-                ? "Optionaler Overlay"
-                : "Folgt in einem eigenen Schritt"}
+              : mosaicCount > 0
+                ? `${mosaicCount} Befliegung${mosaicCount === 1 ? "" : "en"}`
+                : "Keine Drohnenlayer hinterlegt"}
           </div>
+          {cogErrorMessage && (
+            <div className="mt-1 text-xs text-red-600">{cogErrorMessage}</div>
+          )}
         </div>
         <Switch
-          checked={!!cogPath && isCogVisible}
-          disabled={!cogPath}
+          checked={mosaicCount > 0 && isCogVisible}
+          disabled={mosaicCount === 0}
           onChange={setCogVisible}
         />
       </div>

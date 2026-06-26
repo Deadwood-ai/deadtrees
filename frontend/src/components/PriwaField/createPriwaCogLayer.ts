@@ -4,12 +4,24 @@ import { GeoTIFF } from "ol/source";
 import { Settings } from "../../config";
 import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 
-export const createPriwaCogLayer = (cogPath: string) =>
+export interface IPriwaCogLayerSource {
+  cogUrl: string;
+}
+
+export const resolvePriwaCogUrl = (cogUrl: string) => {
+  try {
+    return new URL(cogUrl).toString();
+  } catch {
+    return Settings.COG_BASE_URL + cogUrl.replace(/^\/+/, "");
+  }
+};
+
+export const createPriwaCogLayer = (cog: IPriwaCogLayerSource) =>
   new TileLayerWebGL({
     source: new GeoTIFF({
       sources: [
         {
-          url: Settings.COG_BASE_URL + cogPath,
+          url: resolvePriwaCogUrl(cog.cogUrl),
           nodata: 0,
           bands: [1, 2, 3],
         },
@@ -23,3 +35,6 @@ export const createPriwaCogLayer = (cogPath: string) =>
     cacheSize: 4096,
     preload: 0,
   });
+
+export const createPriwaCogLayers = (cogs: IPriwaCogLayerSource[]) =>
+  cogs.map((cog) => createPriwaCogLayer(cog));

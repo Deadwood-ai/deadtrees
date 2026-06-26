@@ -20,9 +20,9 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Keep api/requirements.txt as the source of truth, but skip packages that are
 # already provided by the distro geospatial stack to avoid slow source builds.
 COPY api/requirements.txt .
-RUN pip install --upgrade pip && \
+RUN pip install --no-cache-dir --upgrade pip && \
     grep -Ev '^(rasterio|geopandas|fiona|pyproj|shapely)(==.*)?$' requirements.txt > docker-requirements.txt && \
-    pip install -r docker-requirements.txt && \
+    pip install --no-cache-dir -r docker-requirements.txt && \
     rm docker-requirements.txt && \
     rm requirements.txt
 

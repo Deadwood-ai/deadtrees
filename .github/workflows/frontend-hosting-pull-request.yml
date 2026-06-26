@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - "frontend/**"
+      - ".github/scripts/firebase-hosting-deploy.sh"
       - ".github/workflows/frontend-hosting-merge.yml"
       - ".github/workflows/frontend-hosting-pull-request.yml"
 
 permissions:
   checks: write
   contents: read
+  issues: write
   pull-requests: write
 
 jobs:
@@ -69,7 +71,7 @@ jobs:
         id: firebase-channel
         run: |
           raw="pr${{ github.event.pull_request.number }}-${{ github.head_ref }}"
-          channel="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_-]+/_/g; s/^[_-]+|[_-]+$//g' | cut -c1-30)"
+          channel="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^-+|-+$//g' | cut -c1-30)"
           if [ -z "$channel" ]; then
             channel="pr${{ github.event.pull_request.number }}"
           fi
@@ -85,6 +87,53 @@ jobs:
           FIREBASE_TOOLS_VERSION: 15.22.2
           FIREBASE_CHANNEL_ID: ${{ steps.firebase-channel.outputs.channel }}
         run: ../.github/scripts/firebase-hosting-deploy.sh preview
+      - name: Comment Firebase preview URL
+        if: ${{ steps.firebase-preview.outcome == 'success' && steps.firebase-preview.outputs.preview_url != '' }}
+        uses: actions/github-script@v9
+        env:
+          FIREBASE_PREVIEW_URL: ${{ steps.firebase-preview.outputs.preview_url }}
+          FIREBASE_CHANNEL_ID: ${{ steps.firebase-channel.outputs.channel }}
+        with:
+          script: |
+            const marker = "<!-- firebase-hosting-preview-url -->";
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const previewUrl = process.env.FIREBASE_PREVIEW_URL;
+            const channelId = process.env.FIREBASE_CHANNEL_ID;
+            const body = [
+              marker,
+              "### Firebase preview",
+              "",
+              `Preview: ${previewUrl}`,
+              `Channel: \`${channelId}\``,
+              `Commit: \`${context.payload.pull_request.head.sha.slice(0, 7)}\``,
+            ].join("\n");
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find(
+              (comment) => comment.user?.type === "Bot" && comment.body?.includes(marker),
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
       - name: Warn when Firebase preview deploy fails
         if: ${{ steps.firebase-preview.outcome == 'failure' }}
         run: |

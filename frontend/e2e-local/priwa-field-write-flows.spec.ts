@@ -17,6 +17,7 @@ const updatedBaumnr = `${baumnr}-U`;
 let adminClient: SupabaseClient;
 let fieldUserId = "";
 let projectId = "";
+let mosaicDatasetId: number | null = null;
 
 test.describe("PRIWA local field write flows", () => {
   test.skip(
@@ -40,6 +41,7 @@ test.describe("PRIWA local field write flows", () => {
     const user = await createConfirmedUser(fieldUserEmail, fieldUserPassword);
     fieldUserId = user.id;
     projectId = await createPriwaProjectWithMembership(fieldUserId);
+    mosaicDatasetId = await createPriwaDatasetCog(fieldUserId);
   });
 
   test.afterAll(async () => {
@@ -53,6 +55,10 @@ test.describe("PRIWA local field write flows", () => {
         .delete()
         .eq("project_id", projectId);
       await adminClient.from("priwa_projects").delete().eq("id", projectId);
+    }
+
+    if (mosaicDatasetId !== null) {
+      await adminClient.from("v2_datasets").delete().eq("id", mosaicDatasetId);
     }
 
     await deleteAuthUsersByEmail(adminClient, fieldUserEmail);
@@ -145,6 +151,7 @@ async function expectOfflineBasemapControl(page: Page) {
   await page.getByRole("button", { name: "Layer auswählen" }).click();
   await expect(page.getByText("Kartenbasis")).toBeVisible();
   await expect(page.getByText("Luftbild", { exact: true })).toBeVisible();
+  await expect(page.getByText("1 Befliegung")).toBeVisible();
   await page.getByText("Karte", { exact: true }).click();
   await expect(page.locator(".ol-layer").first()).toBeVisible();
   await expect(page.getByText("Offline-Karten")).toBeHidden();
@@ -223,6 +230,61 @@ async function createPriwaProjectWithMembership(userId: string) {
   }
 
   return project.id as string;
+}
+
+async function createPriwaDatasetCog(userId: string) {
+  const { data: dataset, error: datasetError } = await adminClient
+    .from("v2_datasets")
+    .insert({
+      user_id: userId,
+      file_name: "priwa-e2e-test-flight.tif",
+      license: "CC BY",
+      platform: "drone",
+      authors: ["PRIWA E2E"],
+      aquisition_year: 2026,
+      aquisition_month: 6,
+      aquisition_day: 24,
+      additional_information: "PRIWA local E2E test flight.",
+      data_access: "public",
+      archived: false,
+    })
+    .select("id")
+    .single();
+
+  if (datasetError || !dataset) {
+    throw datasetError ?? new Error("Failed to create local PRIWA dataset");
+  }
+
+  const datasetId = dataset.id as number;
+  const { error: statusError } = await adminClient.from("v2_statuses").insert({
+    dataset_id: datasetId,
+    current_status: "idle",
+    is_upload_done: true,
+    is_ortho_done: true,
+    is_cog_done: true,
+    is_thumbnail_done: false,
+    is_deadwood_done: false,
+    is_forest_cover_done: false,
+    is_metadata_done: true,
+    has_error: false,
+    error_message: null,
+  });
+
+  if (statusError) throw statusError;
+
+  const { error: cogError } = await adminClient.from("v2_cogs").insert({
+    dataset_id: datasetId,
+    cog_file_name: "priwa-e2e-test-flight-cog.tif",
+    version: 1,
+    cog_info: {},
+    cog_processing_runtime: 0.1,
+    cog_path: "priwa/e2e/test-flight.tif",
+    cog_file_size: 234567,
+  });
+
+  if (cogError) throw cogError;
+
+  return datasetId;
 }
 
 async function waitForPointRow(
