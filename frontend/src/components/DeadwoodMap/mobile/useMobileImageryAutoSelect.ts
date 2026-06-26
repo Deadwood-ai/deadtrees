@@ -26,47 +26,27 @@ export const useMobileImageryAutoSelect = ({
   autoMatchImagery,
   predictionYear,
 }: Params) => {
-  const isSelectionValid =
-    selectedReleaseNum !== null &&
-    waybackItems.some((item) => item.releaseNum === selectedReleaseNum);
-
-  // Select imagery when items load or when the current selection is invalid.
+  // Select imagery when items load or when the prediction year changes. Manual
+  // mode keeps the active basemap sticky even if it is outside the local
+  // candidate list.
   useEffect(() => {
     if (!enabled) return;
     if (waybackItems.length === 0) return;
-    if (selectedReleaseNum && isSelectionValid) return;
 
     if (autoMatchImagery) {
       const closest = findClosestImagery(waybackItems, parseInt(predictionYear));
-      if (closest) onImageryChange(closest.releaseNum);
-    } else {
+      if (closest && closest.releaseNum !== selectedReleaseNum) {
+        onImageryChange(closest.releaseNum);
+      }
+    } else if (!selectedReleaseNum) {
       onImageryChange(waybackItems[waybackItems.length - 1].releaseNum);
     }
   }, [
     enabled,
     waybackItems,
     selectedReleaseNum,
-    isSelectionValid,
     autoMatchImagery,
     predictionYear,
     onImageryChange,
-  ]);
-
-  // Re-match imagery when the prediction year changes (if auto-match is on).
-  useEffect(() => {
-    if (!enabled || !autoMatchImagery) return;
-    if (waybackItems.length === 0 || !selectedReleaseNum) return;
-
-    const closest = findClosestImagery(waybackItems, parseInt(predictionYear));
-    if (closest && closest.releaseNum !== selectedReleaseNum) {
-      onImageryChange(closest.releaseNum);
-    }
-  }, [
-    enabled,
-    waybackItems,
-    selectedReleaseNum,
-    onImageryChange,
-    predictionYear,
-    autoMatchImagery,
   ]);
 };

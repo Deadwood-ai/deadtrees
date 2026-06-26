@@ -201,9 +201,6 @@ const DeadtreesMap = () => {
   >(null);
   const [flagDescription, setFlagDescription] = useState("");
   const [showFlagsLayer, setShowFlagsLayer] = useState(true);
-  const [currentZoom, setCurrentZoom] = useState<number>(
-    DeadwoodMapViewport.zoom || 10,
-  );
   const [flagCanFinish, setFlagCanFinish] = useState(false);
   const flagsLayerRef = useRef<VectorLayer<
     VectorSource<Feature<Polygon>>
@@ -257,7 +254,7 @@ const DeadtreesMap = () => {
   const [selectedReleaseNum, setSelectedReleaseNum] = useState<number | null>(
     DEFAULT_WAYBACK_RELEASE,
   );
-  const [autoMatchImagery, setAutoMatchImagery] = useState(true); // Auto-match imagery to prediction year
+  const [autoMatchImagery, setAutoMatchImagery] = useState(false); // Manual imagery selection by default
   const [shouldLoadLocalWaybackItems, setShouldLoadLocalWaybackItems] =
     useState(false);
 
@@ -274,13 +271,13 @@ const DeadtreesMap = () => {
     return null;
   });
 
-  // Fetch wayback items with actual imagery changes at current location (fast, no metadata)
-  // Uses debouncing: only re-fetches when user moves > 2km or zoom changes > 3 levels
+  // Fetch wayback items with actual imagery changes at current location.
+  // Candidate discovery is debounced and location-based; zooming should not
+  // replace the currently rendered basemap release.
   const { data: localWaybackItems = [], isLoading: isWaybackLoading } =
     useWaybackItemsDebounced(
       mapCenterLonLat?.lon,
       mapCenterLonLat?.lat,
-      currentZoom,
       DeadwoodMapStyle === "wayback" && shouldLoadLocalWaybackItems,
     );
 
@@ -580,8 +577,6 @@ const DeadtreesMap = () => {
             zoom,
           });
         }
-        setCurrentZoom(zoom || 10);
-
         // Update lon/lat center for wayback queries
         if (center) {
           const [lon, lat] = toLonLat(center);
