@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'frontend/**'
+      - '.github/scripts/firebase-hosting-deploy.sh'
       - '.github/workflows/frontend-hosting-merge.yml'
       - '.github/workflows/frontend-hosting-pull-request.yml'
 
