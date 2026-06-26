@@ -106,7 +106,7 @@ jobs:
               "",
               `Preview: ${previewUrl}`,
               `Channel: \`${channelId}\``,
-              `Commit: \`${context.sha.slice(0, 7)}\``,
+              `Commit: \`${context.payload.pull_request.head.sha.slice(0, 7)}\``,
             ].join("\n");
 
             const comments = await github.paginate(github.rest.issues.listComments, {
