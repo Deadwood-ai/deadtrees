@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  getWaybackItems,
   getWaybackItemsWithLocalChanges,
   getMetadata,
+  long2tile,
+  lat2tile,
   type WaybackItem,
   type WaybackMetadata,
 } from "@esri/wayback-core";
@@ -33,8 +36,10 @@ type WaybackPoint = {
 interface LoadWaybackItemsOptions {
   itemsTimeoutMs?: number;
   metadataTimeoutMs?: number;
+  getItems?: typeof getWaybackItems;
   getItemsWithLocalChanges?: typeof getWaybackItemsWithLocalChanges;
   getItemMetadata?: typeof getMetadata;
+  signal?: AbortSignal;
 }
 
 const withTimeout = async <T>(
@@ -71,52 +76,24 @@ const toWaybackItemWithMetadata = (
   resolution: metadata?.resolution,
 });
 
-export const loadWaybackItemsWithMetadata = async (
-  point: WaybackPoint,
-  zoomLevel: number,
-  {
-    itemsTimeoutMs = WAYBACK_ITEMS_TIMEOUT_MS,
-    metadataTimeoutMs = WAYBACK_METADATA_TIMEOUT_MS,
-    getItemsWithLocalChanges = getWaybackItemsWithLocalChanges,
-    getItemMetadata = getMetadata,
-  }: LoadWaybackItemsOptions = {},
-): Promise<WaybackItemWithMetadata[]> => {
-  let items: WaybackItem[];
+const toWaybackItemWithoutMetadata = (
+  item: WaybackItem,
+): WaybackItemWithMetadata => toWaybackItemWithMetadata(item, undefined);
 
-  try {
-    items = await withTimeout(
-      getItemsWithLocalChanges(point, zoomLevel),
-      itemsTimeoutMs,
-      `Wayback imagery discovery timed out after ${itemsTimeoutMs}ms`,
-    );
-  } catch (error) {
-    console.warn("Failed to load local Wayback imagery", error);
-    throw error;
-  }
+const sortWaybackItemsAscending = (
+  items: WaybackItemWithMetadata[],
+): WaybackItemWithMetadata[] =>
+  [...items].sort((a, b) => {
+    const dateA = a.acquisitionDate?.getTime() || a.releaseDatetime || 0;
+    const dateB = b.acquisitionDate?.getTime() || b.releaseDatetime || 0;
+    return dateA - dateB;
+  });
 
-  if (items.length === 0) return [];
-
-  const itemsWithMetadata = await Promise.all(
-    items.map(async (item): Promise<WaybackItemWithMetadata> => {
-      try {
-        const metadata = await withTimeout(
-          getItemMetadata(point, zoomLevel, item.releaseNum),
-          metadataTimeoutMs,
-          `Wayback metadata timed out after ${metadataTimeoutMs}ms for release ${item.releaseNum}`,
-        );
-        return toWaybackItemWithMetadata(item, metadata);
-      } catch (error) {
-        console.warn(
-          `Failed to fetch metadata for release ${item.releaseNum}:`,
-          error,
-        );
-        return toWaybackItemWithMetadata(item, undefined);
-      }
-    }),
-  );
-
+const dedupeWaybackItems = (
+  items: WaybackItemWithMetadata[],
+): WaybackItemWithMetadata[] => {
   const dateMap = new Map<string, WaybackItemWithMetadata>();
-  itemsWithMetadata.forEach((item) => {
+  items.forEach((item) => {
     const dateKey =
       item.acquisitionDate?.toISOString() ||
       item.releaseDateLabel ||
@@ -127,12 +104,74 @@ export const loadWaybackItemsWithMetadata = async (
     }
   });
 
-  return Array.from(dateMap.values()).sort((a, b) => {
-    const dateA = a.acquisitionDate?.getTime() || a.releaseDatetime || 0;
-    const dateB = b.acquisitionDate?.getTime() || b.releaseDatetime || 0;
-    return dateA - dateB;
-  });
+  return sortWaybackItemsAscending(Array.from(dateMap.values()));
 };
+
+export const loadGlobalWaybackItems = async ({
+  itemsTimeoutMs = WAYBACK_ITEMS_TIMEOUT_MS,
+  getItems = getWaybackItems,
+}: Pick<
+  LoadWaybackItemsOptions,
+  "itemsTimeoutMs" | "getItems"
+> = {}): Promise<WaybackItemWithMetadata[]> => {
+  const items = await withTimeout(
+    getItems(),
+    itemsTimeoutMs,
+    `Wayback release list timed out after ${itemsTimeoutMs}ms`,
+  );
+
+  return dedupeWaybackItems(items.map(toWaybackItemWithoutMetadata));
+};
+
+export const loadLocalWaybackItems = async (
+  point: WaybackPoint,
+  zoomLevel: number,
+  {
+    itemsTimeoutMs = WAYBACK_ITEMS_TIMEOUT_MS,
+    getItemsWithLocalChanges = getWaybackItemsWithLocalChanges,
+    signal,
+  }: LoadWaybackItemsOptions = {},
+): Promise<WaybackItemWithMetadata[]> => {
+  let items: WaybackItem[];
+
+  try {
+    items = await withTimeout(
+      getItemsWithLocalChanges(point, zoomLevel, {
+        signal,
+        onlyUseSizeToFilterDuplicates: true,
+      }),
+      itemsTimeoutMs,
+      `Wayback imagery discovery timed out after ${itemsTimeoutMs}ms`,
+    );
+  } catch (error) {
+    console.warn("Failed to load local Wayback imagery", error);
+    throw error;
+  }
+
+  if (items.length === 0) return [];
+
+  return dedupeWaybackItems(items.map(toWaybackItemWithoutMetadata));
+};
+
+export const loadWaybackMetadata = async (
+  point: WaybackPoint,
+  zoomLevel: number,
+  releaseNum: number,
+  {
+    metadataTimeoutMs = WAYBACK_METADATA_TIMEOUT_MS,
+    getItemMetadata = getMetadata,
+  }: Pick<
+    LoadWaybackItemsOptions,
+    "metadataTimeoutMs" | "getItemMetadata"
+  > = {},
+): Promise<WaybackMetadata | null> =>
+  withTimeout(
+    getItemMetadata(point, zoomLevel, releaseNum),
+    metadataTimeoutMs,
+    `Wayback metadata timed out after ${metadataTimeoutMs}ms for release ${releaseNum}`,
+  );
+
+export const loadWaybackItemsWithMetadata = loadLocalWaybackItems;
 
 /**
  * Calculate distance between two coordinates in meters (Haversine formula)
@@ -158,14 +197,14 @@ export const WAYBACK_CANDIDATE_THROTTLE_MS = 10_000;
  * Hook to fetch Wayback items with actual imagery changes at this location.
  *
  * Pipeline:
- * 1. Fetches items using getWaybackItemsWithLocalChanges (unique imagery at location)
- * 2. Fetches metadata for ALL items in parallel (acquisition date, provider, source)
- * 3. Deduplicates by acquisition date (same satellite capture = same image)
- * 4. Sorts by acquisition date ascending (oldest left, newest right)
+ * 1. Fetches the global Wayback release list for immediate, cheap candidates.
+ * 2. Optionally refines with local-change candidates after the user asks for it.
+ * 3. Deduplicates by release date and sorts ascending (oldest left, newest right).
  *
- * Only re-fetches when location changes significantly (>2km). Zoom changes do
- * not invalidate candidate discovery because the active basemap release should
- * stay stable while the map requests normal tiles for the new view.
+ * Local refinement only re-fetches when location changes significantly (>2km)
+ * and is cached by the coarse Wayback tile key. Zoom changes do not invalidate
+ * candidate discovery because the active basemap release should stay stable
+ * while the map requests normal tiles for the new view.
  */
 export const useWaybackItemsDebounced = (
   longitude: number | undefined,
@@ -178,6 +217,14 @@ export const useWaybackItemsDebounced = (
   const debounceHandleRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const throttleHandleRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const [stableCoords, setStableCoords] = useState<{ lon: number; lat: number } | null>(null);
+  const stableTileKey =
+    stableCoords !== null
+      ? {
+          level: WAYBACK_CANDIDATE_DISCOVERY_ZOOM,
+          column: long2tile(stableCoords.lon, WAYBACK_CANDIDATE_DISCOVERY_ZOOM),
+          row: lat2tile(stableCoords.lat, WAYBACK_CANDIDATE_DISCOVERY_ZOOM),
+        }
+      : null;
 
   useEffect(() => {
     if (!enabled || longitude === undefined || latitude === undefined) return;
@@ -232,25 +279,46 @@ export const useWaybackItemsDebounced = (
     };
   }, [longitude, latitude, enabled]);
 
-  return useQuery({
+  const globalItemsQuery = useQuery({
+    queryKey: ["wayback-items-global"],
+    queryFn: () => loadGlobalWaybackItems(),
+    enabled,
+    staleTime: 24 * 60 * 60 * 1000,
+    gcTime: 24 * 60 * 60 * 1000,
+  });
+
+  const localItemsQuery = useQuery({
     queryKey: [
-      "wayback-items-with-metadata",
-      stableCoords?.lon,
-      stableCoords?.lat,
-      WAYBACK_CANDIDATE_DISCOVERY_ZOOM,
+      "wayback-items-local",
+      stableTileKey?.level,
+      stableTileKey?.column,
+      stableTileKey?.row,
     ],
-    queryFn: async (): Promise<WaybackItemWithMetadata[]> => {
+    queryFn: async ({ signal }): Promise<WaybackItemWithMetadata[]> => {
       if (!stableCoords) return [];
 
       const point = { longitude: stableCoords.lon, latitude: stableCoords.lat };
 
-      return loadWaybackItemsWithMetadata(
+      return loadLocalWaybackItems(
         point,
         WAYBACK_CANDIDATE_DISCOVERY_ZOOM,
+        { signal },
       );
     },
     enabled: enabled && stableCoords !== null,
     staleTime: 30 * 60 * 1000, // Cache for 30 minutes
     gcTime: 60 * 60 * 1000, // Keep in cache for 1 hour
   });
+
+  const localItems = localItemsQuery.data ?? [];
+  const globalItems = globalItemsQuery.data ?? [];
+  const data = localItems.length > 0 ? localItems : globalItems;
+
+  return {
+    ...globalItemsQuery,
+    data,
+    isLoading: globalItemsQuery.isLoading && data.length === 0,
+    isFetching: globalItemsQuery.isFetching || localItemsQuery.isFetching,
+    error: localItemsQuery.error ?? globalItemsQuery.error,
+  };
 };

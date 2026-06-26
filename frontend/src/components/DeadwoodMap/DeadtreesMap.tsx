@@ -618,21 +618,6 @@ const DeadtreesMap = () => {
 
   // effects -----------------------------------------------------------
 
-  useEffect(() => {
-    if (DeadwoodMapStyle !== "wayback" || shouldLoadLocalWaybackItems) return;
-
-    const loadLocalImagery = () => setShouldLoadLocalWaybackItems(true);
-    if (typeof window.requestIdleCallback === "function") {
-      const idleHandle = window.requestIdleCallback(loadLocalImagery, {
-        timeout: 3000,
-      });
-      return () => window.cancelIdleCallback(idleHandle);
-    }
-
-    const timeoutHandle = window.setTimeout(loadLocalImagery, 1500);
-    return () => window.clearTimeout(timeoutHandle);
-  }, [DeadwoodMapStyle, shouldLoadLocalWaybackItems]);
-
   // update on bounds change after geocoder search
   useEffect(() => {
     if (map && bounds.length > 0) {
@@ -1112,9 +1097,6 @@ const DeadtreesMap = () => {
       setDeadwoodMapStyle((currentStyle) =>
         currentStyle === style ? "none" : style,
       );
-      if (style === "wayback") {
-        setShouldLoadLocalWaybackItems(true);
-      }
     },
     [setDeadwoodMapStyle],
   );
@@ -1390,7 +1372,11 @@ const DeadtreesMap = () => {
               isLoading={isWaybackLoading}
               isWaybackActive={DeadwoodMapStyle === "wayback"}
               autoMatchImagery={autoMatchImagery}
-              onAutoMatchChange={setAutoMatchImagery}
+              onAutoMatchChange={(enabled) => {
+                setShouldLoadLocalWaybackItems(true);
+                setAutoMatchImagery(enabled);
+              }}
+              onRequestLocalImagery={() => setShouldLoadLocalWaybackItems(true)}
               showForest={showForest}
               showDeadwood={showDeadwood}
               compactMode={isMobile}
