@@ -49,6 +49,19 @@ const formatResolution = (resolution: number | undefined): string => {
   return `${resolution}m`;
 };
 
+export const getImageryDate = (
+  item: WaybackItemWithMetadata | null | undefined,
+): Date | undefined => {
+  if (!item) return undefined;
+  if (item.acquisitionDate) return item.acquisitionDate;
+  if (item.releaseDatetime) return new Date(item.releaseDatetime);
+  if (item.releaseDateLabel) return new Date(item.releaseDateLabel);
+  return undefined;
+};
+
+const getImageryYear = (item: WaybackItemWithMetadata): number | undefined =>
+  getImageryDate(item)?.getFullYear();
+
 /**
  * Find the closest imagery to a target year, preferring older over newer
  */
@@ -59,8 +72,8 @@ export const findClosestImagery = (
   if (items.length === 0) return null;
 
   return items.reduce((closest, item) => {
-    const itemYear = item.acquisitionDate?.getFullYear() || 0;
-    const closestYear = closest.acquisitionDate?.getFullYear() || 0;
+    const itemYear = getImageryYear(item) || 0;
+    const closestYear = getImageryYear(closest) || 0;
 
     const itemDiff = itemYear - targetYear;
     const closestDiff = closestYear - targetYear;
@@ -122,7 +135,7 @@ const YearImagerySelector = ({
   waybackItems,
   isLoading = false,
   isWaybackActive = true,
-  autoMatchImagery = true,
+  autoMatchImagery = false,
   onAutoMatchChange,
   showForest = false,
   showDeadwood = false,
@@ -144,7 +157,7 @@ const YearImagerySelector = ({
   const yearsWithImagery = useMemo(() => {
     const years = new Set<string>();
     waybackItems.forEach((item) => {
-      const year = item.acquisitionDate?.getFullYear().toString();
+      const year = getImageryYear(item)?.toString();
       if (year) years.add(year);
     });
     return years;
@@ -172,46 +185,32 @@ const YearImagerySelector = ({
     [yearsWithImagery],
   );
 
-  // Check if current selection is valid (exists in current waybackItems)
-  const isSelectionValid =
-    selectedReleaseNum !== null &&
-    waybackItems.some((item) => item.releaseNum === selectedReleaseNum);
-
-  // Auto-select imagery when items load or when current selection becomes invalid
+  // Auto-select imagery when items load, when the prediction year changes, or
+  // when no basemap has been selected yet. Manual mode keeps the active
+  // basemap sticky even if it is outside the local candidate list.
   useEffect(() => {
-    if (waybackItems.length > 0 && (!selectedReleaseNum || !isSelectionValid)) {
-      if (autoMatchImagery) {
-        const targetYear = parseInt(predictionYear);
-        const closestItem = findClosestImagery(waybackItems, targetYear);
-        if (closestItem) {
-          onImageryChange(closestItem.releaseNum);
-        }
-      } else {
-        // Select the newest (rightmost) item
-        onImageryChange(waybackItems[waybackItems.length - 1].releaseNum);
+    if (waybackItems.length === 0) return;
+
+    if (autoMatchImagery) {
+      const targetYear = parseInt(predictionYear);
+      const closestItem = findClosestImagery(waybackItems, targetYear);
+      if (closestItem && closestItem.releaseNum !== selectedReleaseNum) {
+        onImageryChange(closestItem.releaseNum);
       }
+      return;
+    }
+
+    if (!selectedReleaseNum) {
+      // Select the newest (rightmost) item
+      onImageryChange(waybackItems[waybackItems.length - 1].releaseNum);
     }
   }, [
     waybackItems,
     selectedReleaseNum,
-    isSelectionValid,
     onImageryChange,
     autoMatchImagery,
     predictionYear,
   ]);
-
-  // Auto-match imagery when prediction year changes (if enabled)
-  useEffect(() => {
-    if (!autoMatchImagery || waybackItems.length === 0 || !selectedReleaseNum)
-      return;
-
-    const targetYear = parseInt(predictionYear);
-    const closestItem = findClosestImagery(waybackItems, targetYear);
-    if (closestItem && closestItem.releaseNum !== selectedReleaseNum) {
-      onImageryChange(closestItem.releaseNum);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [predictionYear, autoMatchImagery]); // Only trigger on year change or toggle change
 
   // Navigation for prediction year
   const predictionIndex = PREDICTION_YEARS.indexOf(predictionYear);
@@ -236,27 +235,55 @@ const YearImagerySelector = ({
   );
   const selectedItem =
     currentImageryIndex >= 0 ? waybackItems[currentImageryIndex] : null;
+  const hasSelectedBasemap = selectedReleaseNum !== null;
+  const isUsingDefaultBasemap = hasSelectedBasemap && !selectedItem;
   const hasMultipleImages = waybackItems.length > 1;
-  const isImageryFirst = currentImageryIndex <= 0;
-  const isImageryLast = currentImageryIndex >= waybackItems.length - 1;
+  const canNavigateImagery =
+    waybackItems.length > 0 && (hasMultipleImages || currentImageryIndex < 0);
+  const isSelectionOutsideCandidates = currentImageryIndex < 0;
+  const isImageryFirst =
+    waybackItems.length === 0 ||
+    (!isSelectionOutsideCandidates && currentImageryIndex <= 0);
+  const isImageryLast =
+    waybackItems.length === 0 ||
+    (!isSelectionOutsideCandidates &&
+      currentImageryIndex >= waybackItems.length - 1);
 
   // Navigation: ← goes to older (lower index), → goes to newer (higher index)
   const handleImageryPrev = () => {
+    if (isSelectionOutsideCandidates && waybackItems.length > 0) {
+      if (autoMatchImagery) onAutoMatchChange?.(false);
+      onImageryChange(waybackItems[waybackItems.length - 1].releaseNum);
+      return;
+    }
+
     if (!isImageryFirst && waybackItems[currentImageryIndex - 1]) {
+      if (autoMatchImagery) onAutoMatchChange?.(false);
       onImageryChange(waybackItems[currentImageryIndex - 1].releaseNum);
     }
   };
 
   const handleImageryNext = () => {
+    if (isSelectionOutsideCandidates && waybackItems.length > 0) {
+      if (autoMatchImagery) onAutoMatchChange?.(false);
+      onImageryChange(waybackItems[waybackItems.length - 1].releaseNum);
+      return;
+    }
+
     if (!isImageryLast && waybackItems[currentImageryIndex + 1]) {
+      if (autoMatchImagery) onAutoMatchChange?.(false);
       onImageryChange(waybackItems[currentImageryIndex + 1].releaseNum);
     }
   };
 
-  const hasNoImagery = waybackItems.length === 0 && !isLoading;
+  const shouldShowBlockingLoading = isLoading && !hasSelectedBasemap;
+  const hasNoImagery = waybackItems.length === 0 && !isLoading && !hasSelectedBasemap;
 
   // Get the base map year for display
-  const baseMapYear = selectedItem?.acquisitionDate?.getFullYear();
+  const selectedImageryDate = selectedItem
+    ? getImageryDate(selectedItem)
+    : undefined;
+  const baseMapYear = selectedImageryDate?.getFullYear();
   const yearsMatch = baseMapYear?.toString() === predictionYear;
   const compactTopButtonClass =
     "flex h-7 w-7 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-300";
@@ -367,7 +394,7 @@ const YearImagerySelector = ({
             )}
 
           <div className="flex w-full items-center justify-center gap-2 overflow-x-auto">
-            {isLoading ? (
+            {shouldShowBlockingLoading ? (
               <div className="flex items-center gap-2 text-gray-400">
                 <Spin
                   indicator={<LoadingOutlined style={{ fontSize: 14 }} spin />}
@@ -383,7 +410,7 @@ const YearImagerySelector = ({
             ) : (
               <>
                 {/* Navigation arrow: ← older */}
-                {hasMultipleImages && (
+                {canNavigateImagery && (
                   <button
                     onClick={handleImageryPrev}
                     disabled={isImageryFirst}
@@ -407,7 +434,7 @@ const YearImagerySelector = ({
                         <div className="text-center">
                           <div className="font-medium">Satellite Imagery</div>
                           <div className="mt-1">
-                            Captured: {formatDate(selectedItem.acquisitionDate)}
+                            Date: {formatDate(selectedImageryDate)}
                           </div>
                           {selectedItem.provider && (
                             <div>Provider: {selectedItem.provider}</div>
@@ -433,7 +460,7 @@ const YearImagerySelector = ({
                     >
                       <div className="flex cursor-help items-center gap-1.5 text-xs">
                         <span className="font-medium text-gray-700">
-                          {formatDate(selectedItem.acquisitionDate)}
+                          {formatDate(selectedImageryDate)}
                         </span>
                         {!compactMode && selectedItem.provider && (
                           <span className="text-gray-400">·</span>
@@ -459,14 +486,24 @@ const YearImagerySelector = ({
                       </div>
                     </Tooltip>
                   ) : (
-                    <span className="text-xs text-gray-400">
-                      No imagery selected
-                    </span>
+                    <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                      <span>Satellite basemap active</span>
+                      {isLoading && !compactMode && (
+                        <span className="text-gray-400">
+                          checking local imagery dates
+                        </span>
+                      )}
+                      {!isLoading && isUsingDefaultBasemap && !compactMode && (
+                        <span className="text-gray-400">
+                          local imagery dates unavailable
+                        </span>
+                      )}
+                    </div>
                   )}
                 </div>
 
                 {/* Navigation arrow: → newer */}
-                {hasMultipleImages && (
+                {canNavigateImagery && (
                   <button
                     onClick={handleImageryNext}
                     disabled={isImageryLast}

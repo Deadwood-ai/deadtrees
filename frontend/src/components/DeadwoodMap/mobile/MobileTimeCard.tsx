@@ -10,6 +10,7 @@ import {
 import type { WaybackItemWithMetadata } from "../../../hooks/useWaybackItems";
 import {
   findClosestImagery,
+  getImageryDate,
   PREDICTION_YEARS,
 } from "../YearImagerySelector";
 
@@ -69,8 +70,14 @@ const MobileTimeCard = ({
     (item) => item.releaseNum === selectedReleaseNum,
   );
   const selectedImagery = imageryIndex >= 0 ? waybackItems[imageryIndex] : null;
+  const isSelectionOutsideCandidates =
+    selectedReleaseNum !== null && imageryIndex < 0 && waybackItems.length > 0;
+  const canStepToOlder = isSelectionOutsideCandidates || imageryIndex > 0;
+  const canStepToNewer =
+    isSelectionOutsideCandidates ||
+    (imageryIndex >= 0 && imageryIndex < waybackItems.length - 1);
 
-  const imageryDate = formatDate(selectedImagery?.acquisitionDate);
+  const imageryDate = formatDate(getImageryDate(selectedImagery));
   const imageryPosition =
     imageryIndex >= 0 ? `${imageryIndex + 1} of ${waybackItems.length}` : null;
   // Date is the headline when known; otherwise fall back to the position so
@@ -97,6 +104,16 @@ const MobileTimeCard = ({
   };
 
   const stepImagery = (offset: number) => {
+    if (isSelectionOutsideCandidates) {
+      // Enter the discovered candidate list at its newest image while keeping
+      // the default basemap sticky until the user explicitly steps.
+      const newestCandidate = waybackItems[waybackItems.length - 1];
+      if (!newestCandidate) return;
+      if (autoMatchImagery) onAutoMatchChange(false);
+      onImageryChange(newestCandidate.releaseNum);
+      return;
+    }
+
     const item = waybackItems[imageryIndex + offset];
     if (!item) return;
     // Hand-picking an image breaks the link to the prediction year.
@@ -171,7 +188,7 @@ const MobileTimeCard = ({
             <div className={stepperRowClass}>
               <Button
                 icon={<LeftOutlined />}
-                disabled={imageryIndex <= 0}
+                disabled={!canStepToOlder}
                 onClick={() => stepImagery(-1)}
                 aria-label="Older satellite image"
                 className="!h-11 !w-11"
@@ -186,9 +203,7 @@ const MobileTimeCard = ({
               </div>
               <Button
                 icon={<RightOutlined />}
-                disabled={
-                  imageryIndex < 0 || imageryIndex >= waybackItems.length - 1
-                }
+                disabled={!canStepToNewer}
                 onClick={() => stepImagery(1)}
                 aria-label="Newer satellite image"
                 className="!h-11 !w-11"
