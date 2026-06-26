@@ -65,31 +65,27 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: npm ci
-      - id: firebase-preview-deploy
-        uses: FirebaseExtended/action-hosting-deploy@v0
+      - name: Compute Firebase preview channel
+        id: firebase-channel
+        run: |
+          raw="pr${{ github.event.pull_request.number }}-${{ github.head_ref }}"
+          channel="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_-]+/_/g; s/^[_-]+|[_-]+$//g' | cut -c1-30)"
+          if [ -z "$channel" ]; then
+            channel="pr${{ github.event.pull_request.number }}"
+          fi
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+      - name: Deploy to Firebase Hosting preview
+        id: firebase-preview
         continue-on-error: true
         env:
           FIREBASE_CLI_EXPERIMENTS: webframeworks
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DEADWOOD_D4A4B }}
-          projectId: deadwood-d4a4b
-          entryPoint: frontend
-          firebaseToolsVersion: 15.22.2
-      - name: Retry Firebase preview deploy
-        id: firebase-preview-retry
-        if: ${{ steps.firebase-preview-deploy.outcome == 'failure' }}
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        continue-on-error: true
-        env:
-          FIREBASE_CLI_EXPERIMENTS: webframeworks
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DEADWOOD_D4A4B }}
-          projectId: deadwood-d4a4b
-          entryPoint: frontend
-          firebaseToolsVersion: 15.22.2
-      - name: Warn when Firebase preview deploy is unavailable
-        if: ${{ steps.firebase-preview-deploy.outcome == 'failure' && steps.firebase-preview-retry.outcome == 'failure' }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DEADWOOD_D4A4B }}
+          FIREBASE_AUTH_MODE: access-token
+          FIREBASE_PROJECT_ID: deadwood-d4a4b
+          FIREBASE_TOOLS_VERSION: 15.22.2
+          FIREBASE_CHANNEL_ID: ${{ steps.firebase-channel.outputs.channel }}
+        run: ../.github/scripts/firebase-hosting-deploy.sh preview
+      - name: Warn when Firebase preview deploy fails
+        if: ${{ steps.firebase-preview.outcome == 'failure' }}
         run: |
           echo "::warning::Firebase preview deploy failed after retry. Frontend CI remains blocking; preview hosting is non-blocking for PRs because Firebase token exchange can fail independently of the code build."

@@ -496,6 +496,34 @@ test.describe("auditor local e2e", () => {
     ).toBeVisible();
   });
 
+  test("auditor sees the AI search on the dataset archive", async ({ page }) => {
+    await installAuthenticatedUser(page, { canAudit: true });
+
+    await page.goto("/dataset");
+    await dismissCookieBanner(page);
+
+    // The plain location/author search is always available; the open-vocabulary
+    // AI search is a core-team-only feature offered to auditors.
+    await expect(page.getByTestId("dataset-search-input")).toBeVisible();
+    await expect(
+      page.getByTestId("dataset-semantic-search-input"),
+    ).toBeVisible();
+  });
+
+  test("non-auditor does not see the AI search on the dataset archive", async ({
+    page,
+  }) => {
+    await installAuthenticatedUser(page, { canAudit: false });
+
+    await page.goto("/dataset");
+    await dismissCookieBanner(page);
+
+    await expect(page.getByTestId("dataset-search-input")).toBeVisible();
+    await expect(
+      page.getByTestId("dataset-semantic-search-input"),
+    ).toHaveCount(0);
+  });
+
   test("auditor can triage audit queues and inspect processing logs", async ({
     page,
   }) => {

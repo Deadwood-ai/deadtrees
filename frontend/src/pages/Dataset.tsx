@@ -26,6 +26,7 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { useDesktopOnlyFeature } from "../hooks/useDesktopOnlyFeature";
 import { useAnalytics } from "../hooks/useAnalytics";
 import { useSemanticSearch } from "../hooks/useSemanticSearch";
+import { useCanUseAiSearch } from "../hooks/useUserPrivileges";
 
 type FilterTag =
   | "platform"
@@ -87,8 +88,10 @@ export default function Dataset() {
   // Incremented on explicit filter actions to trigger map zoom
   const [filterZoomTrigger, setFilterZoomTrigger] = useState(0);
 
-  // Open-vocabulary (CLIP) search is public; backend rate limiting protects the
-  // embedding endpoint instead of hiding the feature behind auditor privileges.
+  // Open-vocabulary (CLIP) search is a core-team-only feature: the UI is offered
+  // only to users who can audit. (The /search/embed endpoint stays public +
+  // rate-limited; this just hides the feature from regular visitors.)
+  const { canUseAiSearch } = useCanUseAiSearch();
   const semantic = useSemanticSearch();
   const [semanticInput, setSemanticInput] = useState("");
 
@@ -270,6 +273,7 @@ export default function Dataset() {
       </div>
 
       <div className="flex flex-col gap-2 pb-4">
+        {canUseAiSearch && (
         <div className="flex flex-col gap-1">
           <Input.Search
             placeholder="AI search, e.g. 'standing dead trees', 'clearcut'"
@@ -315,6 +319,7 @@ export default function Dataset() {
             <div className="px-1 text-xs text-red-500">{semantic.error}</div>
           )}
         </div>
+        )}
         <div className="flex flex-col gap-2 sm:flex-row">
           <Input
             placeholder="Search by Authors or Location (Region, Province, City)"
