@@ -11,6 +11,7 @@ project_id="${FIREBASE_PROJECT_ID:-deadwood-d4a4b}"
 tools_version="${FIREBASE_TOOLS_VERSION:-15.22.2}"
 max_attempts="${FIREBASE_DEPLOY_ATTEMPTS:-4}"
 runner_temp="${RUNNER_TEMP:-/tmp}"
+auth_mode="${FIREBASE_AUTH_MODE:-access-token}"
 
 if [[ -z "${FIREBASE_SERVICE_ACCOUNT:-}" ]]; then
 	echo "FIREBASE_SERVICE_ACCOUNT is required" >&2
@@ -20,10 +21,90 @@ fi
 credential_file="$runner_temp/firebase-service-account.json"
 printf '%s' "$FIREBASE_SERVICE_ACCOUNT" >"$credential_file"
 chmod 600 "$credential_file"
-export GOOGLE_APPLICATION_CREDENTIALS="$credential_file"
 # Match FirebaseExtended/action-hosting-deploy so Firebase can attribute these CI deploys.
 export FIREBASE_DEPLOY_AGENT="${FIREBASE_DEPLOY_AGENT:-action-hosting-deploy}"
 trap 'rm -f "$credential_file"' EXIT
+
+mint_access_token() {
+	local assertion token_response access_token
+
+	# firebase-tools currently fails in GitHub Actions while using google-auth-library's
+	# ADC token exchange. Mint the same OAuth token with curl so transport retries are
+	# explicit and independent of the Firebase CLI's Node fetch path.
+	assertion="$(node - "$credential_file" <<'NODE'
+const crypto = require("crypto");
+const fs = require("fs");
+
+const credentialPath = process.argv[2];
+const credential = JSON.parse(fs.readFileSync(credentialPath, "utf8"));
+const now = Math.floor(Date.now() / 1000);
+
+function base64url(value) {
+  return Buffer.from(JSON.stringify(value))
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+}
+
+const header = { alg: "RS256", typ: "JWT" };
+const claims = {
+  iss: credential.client_email,
+  scope: "https://www.googleapis.com/auth/cloud-platform",
+  aud: "https://oauth2.googleapis.com/token",
+  iat: now,
+  exp: now + 3600,
+};
+const unsigned = `${base64url(header)}.${base64url(claims)}`;
+const signature = crypto
+  .createSign("RSA-SHA256")
+  .update(unsigned)
+  .sign(credential.private_key, "base64")
+  .replace(/=/g, "")
+  .replace(/\+/g, "-")
+  .replace(/\//g, "_");
+
+process.stdout.write(`${unsigned}.${signature}`);
+NODE
+)"
+
+	token_response="$(
+		curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 \
+			--silent --show-error \
+			--request POST "https://oauth2.googleapis.com/token" \
+			--header "Content-Type: application/x-www-form-urlencoded" \
+			--data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" \
+			--data-urlencode "assertion=$assertion"
+	)"
+	access_token="$(node -e '
+const fs = require("fs");
+const body = JSON.parse(fs.readFileSync(0, "utf8"));
+if (!body.access_token) {
+  console.error("OAuth token response did not include access_token");
+  process.exit(1);
+}
+process.stdout.write(body.access_token);
+' <<<"$token_response")"
+
+	if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+		echo "::add-mask::$access_token"
+	fi
+	export FIREBASE_TOKEN="$access_token"
+	unset GOOGLE_APPLICATION_CREDENTIALS
+}
+
+case "$auth_mode" in
+	access-token)
+		mint_access_token
+		;;
+	adc)
+		export GOOGLE_APPLICATION_CREDENTIALS="$credential_file"
+		;;
+	*)
+		echo "Unsupported FIREBASE_AUTH_MODE: $auth_mode" >&2
+		exit 2
+		;;
+esac
 
 if [[ "$mode" == "live" ]]; then
 	command=(npx --yes "firebase-tools@$tools_version" deploy --only hosting --project "$project_id" --json)

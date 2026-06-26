@@ -80,6 +80,7 @@ jobs:
         env:
           FIREBASE_CLI_EXPERIMENTS: webframeworks
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DEADWOOD_D4A4B }}
+          FIREBASE_AUTH_MODE: access-token
           FIREBASE_PROJECT_ID: deadwood-d4a4b
           FIREBASE_TOOLS_VERSION: 15.22.2
           FIREBASE_CHANNEL_ID: ${{ steps.firebase-channel.outputs.channel }}
