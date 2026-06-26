@@ -142,116 +142,47 @@ emit_preview_url() {
 	local preview_url
 
 	preview_url="$(
-		node - "$log_file" <<'NODE'
-const fs = require("fs");
-
-const text = fs.readFileSync(process.argv[2], "utf8");
-
-function* jsonObjects(input) {
-  let start = -1;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-
-  for (let index = 0; index < input.length; index += 1) {
-    const char = input[index];
-
-    if (start === -1) {
-      if (char === "{") {
-        start = index;
-        depth = 1;
-      }
-      continue;
-    }
-
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-
-    if (char === "\\") {
-      escaped = inString;
-      continue;
-    }
-
-    if (char === '"') {
-      inString = !inString;
-      continue;
-    }
-
-    if (inString) {
-      continue;
-    }
-
-    if (char === "{") {
-      depth += 1;
-    } else if (char === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        yield input.slice(start, index + 1);
-        start = -1;
-      }
-    }
-  }
-}
-
-function collectUrls(value, urls = []) {
-  if (!value || typeof value !== "object") {
-    return urls;
-  }
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      collectUrls(item, urls);
-    }
-    return urls;
-  }
-
-  for (const [key, item] of Object.entries(value)) {
-    if (
-      key.toLowerCase().includes("url") &&
-      typeof item === "string" &&
-      item.startsWith("https://")
-    ) {
-      urls.push(item);
-    }
-    collectUrls(item, urls);
-  }
-
-  return urls;
-}
-
-for (const candidate of jsonObjects(text)) {
-  let parsed;
-  try {
-    parsed = JSON.parse(candidate);
-  } catch {
-    continue;
-  }
-
-  const urls = collectUrls(parsed);
-  const previewUrl =
-    urls.find((url) => /\.web\.app\b/.test(url)) ??
-    urls.find((url) => /\.firebaseapp\.com\b/.test(url)) ??
-    urls[0];
-
-  if (previewUrl) {
-    process.stdout.write(previewUrl);
-    process.exit(0);
-  }
-}
-NODE
+		grep -Eo 'https://[^"[:space:]<>]+' "$log_file" |
+			grep -E '\.web\.app|\.firebaseapp\.com' |
+			head -n 1 || true
 	)"
 
 	if [[ -z "$preview_url" ]]; then
+		preview_url="$(
+			grep -Eo 'https://[^"[:space:]<>]+' "$log_file" |
+				head -n 1 || true
+		)"
+	fi
+
+	if [[ -z "$preview_url" ]]; then
 		echo "Firebase Hosting preview deploy succeeded, but no preview URL was found in the CLI output."
-		return
+		return 1
 	fi
 
 	echo "Firebase Hosting preview URL: $preview_url"
 	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
 		echo "preview_url=$preview_url" >>"$GITHUB_OUTPUT"
 	fi
+	return 0
+}
+
+emit_preview_channel_url() {
+	local lookup_log="$runner_temp/firebase-hosting-preview-channel-url.log"
+
+	set +e
+	npx --yes "firebase-tools@$tools_version" \
+		hosting:channel:open "$channel_id" \
+		--site "$project_id" \
+		--project "$project_id" 2>&1 | tee "$lookup_log"
+	local rc="${PIPESTATUS[0]}"
+	set -e
+
+	if [[ "$rc" -ne 0 ]]; then
+		echo "Firebase Hosting preview deploy succeeded, but the preview channel URL could not be fetched."
+		return
+	fi
+
+	emit_preview_url "$lookup_log"
 }
 
 for attempt in $(seq 1 "$max_attempts"); do
@@ -265,13 +196,21 @@ for attempt in $(seq 1 "$max_attempts"); do
 
 	if [[ "$rc" -eq 0 ]]; then
 		if [[ "$mode" == "preview" ]]; then
-			emit_preview_url "$log_file"
+			if ! emit_preview_url "$log_file"; then
+				emit_preview_channel_url
+			fi
 		fi
 		exit 0
 	fi
 
 	if [[ "$mode" == "live" ]] && is_live_already_active "$log_file"; then
 		echo "Firebase reports this Hosting version is already active on live; treating as a successful deploy."
+		exit 0
+	fi
+
+	if [[ "$mode" == "preview" ]] && grep -Fq 'current active version' "$log_file"; then
+		echo "Firebase reports this Hosting version is already active on the preview channel; treating as a successful deploy."
+		emit_preview_channel_url
 		exit 0
 	fi
 
