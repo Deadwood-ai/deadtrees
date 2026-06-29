@@ -81,6 +81,19 @@ const basemapOptions = [
   { value: "satellite-streets-v12", label: "Imagery" },
 ];
 
+// Label a model-prediction variant by its module + checkpoint so auditors can
+// tell different checkpoints of the same module apart (they share `module`).
+const variantOptionLabel = (label: ILabel): string => {
+  const module = label.model_config?.module;
+  const checkpoint = label.model_config?.checkpoint_name;
+  if (typeof module === "string" && typeof checkpoint === "string") {
+    return `${module} · ${checkpoint}`;
+  }
+  if (typeof checkpoint === "string") return checkpoint;
+  if (typeof module === "string") return module;
+  return `Label #${label.id}`;
+};
+
 const DatasetLayerControlPanel = ({
   mapStyle,
   onMapStyleChange,
@@ -163,7 +176,7 @@ const DatasetLayerControlPanel = ({
                 popupMatchSelectWidth={false}
                 options={forestVariants.map((l) => ({
                   value: l.id,
-                  label: l.model_config?.module ?? `Label #${l.id}`,
+                  label: variantOptionLabel(l),
                 }))}
               />
             )}
@@ -198,7 +211,7 @@ const DatasetLayerControlPanel = ({
                 popupMatchSelectWidth={false}
                 options={deadwoodVariants.map((l) => ({
                   value: l.id,
-                  label: l.model_config?.module ?? `Label #${l.id}`,
+                  label: variantOptionLabel(l),
                 }))}
               />
             )}

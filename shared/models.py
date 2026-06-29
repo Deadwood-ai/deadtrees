@@ -37,7 +37,7 @@ class LabelDataEnum(str, Enum):
 
 
 COMBINED_MODEL_MODULE = 'deadwood_treecover_combined_v2'
-COMBINED_MODEL_CHECKPOINT_NAME = 'mitb3_seed200_ckpt_epoch_6_best_macro_f1.safetensors'
+COMBINED_MODEL_CHECKPOINT_NAME = 'ckpt_weighted_brownweight15_goldentestweight7.safetensors'
 COMBINED_MODEL_CONFIG = {
 	'module': COMBINED_MODEL_MODULE,
 	'checkpoint_name': COMBINED_MODEL_CHECKPOINT_NAME,

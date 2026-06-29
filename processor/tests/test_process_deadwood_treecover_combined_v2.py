@@ -9,7 +9,7 @@ from shared.models import TaskTypeEnum, QueueTask, LabelDataEnum, LabelSourceEnu
 from processor.src.process_deadwood_treecover_combined_v2 import process_deadwood_treecover_combined_v2
 
 MODEL_PATH = str(
-	Path(__file__).parent.parent.parent / 'assets' / 'models' / 'mitb3_seed200_ckpt_epoch_6_best_macro_f1.safetensors'
+	Path(__file__).parent.parent.parent / 'assets' / 'models' / 'ckpt_weighted_brownweight15_goldentestweight7.safetensors'
 )
 
 
