@@ -36,6 +36,12 @@ MINIMUM_POLYGON_AREA = 0.1  # m²
 TILE_SIZE = 1024
 PADDING = 256
 
+# Douglas-Peucker simplification tolerance (metres) applied to both the deadwood
+# and treecover polygons. Pixel-traced masks at 5cm carry huge runs of redundant
+# near-collinear staircase vertices; simplifying at 10cm removes ~6x of them with
+# no visible change, keeping the stored geometry (and MVT/exports) light.
+SIMPLIFY_TOLERANCE = 0.10  # metres
+
 
 def _build_transform():
     return transforms.Compose(
@@ -223,5 +229,12 @@ class CombinedInference:
 
     def _filter_polygons(self, polygons, inference_crs, orig_crs):
         polygons = filter_polygons_by_area(polygons, MINIMUM_POLYGON_AREA)
-        polygons = reproject_polygons(polygons, inference_crs, orig_crs)
+        # Simplify while still in the metric inference CRS so the tolerance is in metres.
+        simplified = []
+        for polygon in polygons:
+            simple = polygon.simplify(SIMPLIFY_TOLERANCE, preserve_topology=True)
+            if not simple.is_empty:
+                simplified.append(simple)
+        print(f'Simplified {len(polygons)} polygons at {SIMPLIFY_TOLERANCE}m tolerance.')
+        polygons = reproject_polygons(simplified, inference_crs, orig_crs)
         return polygons
