@@ -22,7 +22,7 @@ from processor.src.utils.segmentation import (
     reproject_polygons,
 )
 
-CHECKPOINT_NAME = 'mitb3_seed200_ckpt_epoch_6_best_macro_f1.safetensors'
+CHECKPOINT_NAME = 'ckpt_weighted_brownweight15_goldentestweight7.safetensors'
 
 # Class indices as defined in the training config (config/base_segformer.yml)
 CLASS_BACKGROUND = 0
