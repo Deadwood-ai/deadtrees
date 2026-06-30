@@ -24,7 +24,7 @@ jobs:
       SUPABASE_DB_URL_PROD: ${{ secrets.SUPABASE_DB_URL_PROD }}
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v2
