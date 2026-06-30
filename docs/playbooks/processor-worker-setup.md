@@ -25,7 +25,8 @@ Every simultaneously running processor host needs a unique stable worker ID.
 Preferred default:
 
 - keep the compose mount `/etc/machine-id:/host/etc/machine-id:ro`
-- let the processor derive `host-<machine-id-prefix>` automatically
+- let the processor derive `host-<first-12-chars-of-machine-id>`
+  automatically
 
 Explicit override:
 
@@ -64,7 +65,8 @@ docker compose -f docker-compose.processor.yaml up -d processor
 ```
 
 If the host should auto-deploy like the existing production processor, install
-the same cron entries documented in `docs/playbooks/create-release.md`.
+the same cron entries from an existing production processor host. The expected
+entries are documented in `docs/playbooks/create-release.md`.
 
 ## Validation
 
