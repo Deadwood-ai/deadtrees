@@ -31,8 +31,11 @@ services:
       - ./processor:/app/processor
       - ./shared:/app/shared
       - ./assets:/app/assets
-      - ~/.ssh/processing-to-storage:/tmp/ssh-keys/processing-to-storage:ro
-      - ~/.ssh/processing-to-storage.pub:/tmp/ssh-keys/processing-to-storage.pub:ro
+      # Processor->storage keypair. Override PROCESSOR_SSH_KEY_PATH in .env when
+      # the default ~/.ssh lives on a filesystem the Docker daemon (root) cannot
+      # read — e.g. an NFS home with root-squash; point it at a local-disk path.
+      - ${PROCESSOR_SSH_KEY_PATH:-~/.ssh/processing-to-storage}:/tmp/ssh-keys/processing-to-storage:ro
+      - ${PROCESSOR_SSH_KEY_PATH:-~/.ssh/processing-to-storage}.pub:/tmp/ssh-keys/processing-to-storage.pub:ro
       # CRITICAL: Mount Docker socket for ODM processing (Docker-in-Docker)
       - /var/run/docker.sock:/var/run/docker.sock
       # Stable host identity for default processor worker IDs.

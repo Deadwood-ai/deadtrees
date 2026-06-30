@@ -21,6 +21,11 @@ storage server, Docker runtime, and required model/assets volume.
   `PROCESSOR_MEMORY_LIMIT`) in `.env` so the processor container's caps fit the
   machine. `PROCESSOR_CPU_LIMIT` must be `<=` the host's CPU core count, or
   `docker compose up` fails with a "range of CPUs" error. Defaults: `30` / `96G`.
+- The processor SSH keypair must sit on a filesystem the Docker daemon (root)
+  can read. If the home directory is on NFS with root-squash, the default
+  `~/.ssh/processing-to-storage` mount fails with
+  `mkdir /…/.ssh: permission denied`. Put the key on local disk (e.g. the
+  checkout's gitignored `.local/ssh/`) and set `PROCESSOR_SSH_KEY_PATH` to it.
 
 ## Worker Identity
 
