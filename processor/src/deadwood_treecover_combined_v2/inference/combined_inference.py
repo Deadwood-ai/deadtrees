@@ -8,6 +8,8 @@ import torch
 import torch.nn.functional as F
 from rasterio.windows import Window as RioWindow
 from safetensors import safe_open
+from shapely.geometry import MultiPolygon, Polygon
+from simplification.cutil import simplify_coords_vw
 from torch.utils.data import DataLoader
 from torchvision.transforms import transforms
 from torchvision.transforms.functional import crop
@@ -36,11 +38,88 @@ MINIMUM_POLYGON_AREA = 0.1  # m²
 TILE_SIZE = 1024
 PADDING = 256
 
-# Douglas-Peucker simplification tolerance (metres) applied to both the deadwood
-# and treecover polygons. Pixel-traced masks at 5cm carry huge runs of redundant
-# near-collinear staircase vertices; simplifying at 10cm removes ~6x of them with
-# no visible change, keeping the stored geometry (and MVT/exports) light.
-SIMPLIFY_TOLERANCE = 0.10  # metres
+# Polygon postprocessing applied to both deadwood and treecover polygons.
+# Pixel-traced masks at 5cm carry huge runs of redundant near-collinear staircase
+# vertices. The Auwald simplification study (temp/auwald_simplification_study.*)
+# compared methods on real forest-cover; "VW 0.0625 + Chaikin x1" won: ~82% vertex
+# savings (on par with Douglas-Peucker 10cm) but with smoother, less staircased
+# boundaries and fewer spurious tiny features/holes. We run it in two passes, both
+# in the metric inference CRS so the area threshold is in m²:
+#   1. Visvalingam-Whyatt simplification at a 0.0625 m² effective-area threshold.
+#   2. One Chaikin corner-cutting smoothing pass.
+VW_AREA_THRESHOLD = 0.0625  # m² — Visvalingam-Whyatt effective-area threshold
+CHAIKIN_ITERATIONS = 1      # corner-cutting smoothing passes after VW
+
+
+def _explode_polygons(geom):
+    """Flatten a geometry into its constituent (non-empty) Polygons."""
+    if geom is None or geom.is_empty:
+        return []
+    if geom.geom_type == 'Polygon':
+        return [geom]
+    if geom.geom_type in ('MultiPolygon', 'GeometryCollection'):
+        return [p for g in geom.geoms for p in _explode_polygons(g)]
+    return []
+
+
+def _chaikin_ring(coords, iterations):
+    """Chaikin corner-cutting on a single closed ring; returns a closed coord list."""
+    pts = [tuple(c) for c in coords]
+    if len(pts) > 1 and pts[0] == pts[-1]:
+        pts = pts[:-1]
+    for _ in range(iterations):
+        new_pts = []
+        n = len(pts)
+        for i in range(n):
+            p0 = pts[i]
+            p1 = pts[(i + 1) % n]
+            new_pts.append((0.75 * p0[0] + 0.25 * p1[0], 0.75 * p0[1] + 0.25 * p1[1]))
+            new_pts.append((0.25 * p0[0] + 0.75 * p1[0], 0.25 * p0[1] + 0.75 * p1[1]))
+        pts = new_pts
+    pts.append(pts[0])
+    return pts
+
+
+def _chaikin_polygon(polygon, iterations):
+    """Apply Chaikin smoothing to a polygon's exterior and interior rings."""
+    ext = _chaikin_ring(polygon.exterior.coords, iterations)
+    holes = [_chaikin_ring(r.coords, iterations) for r in polygon.interiors if len(r.coords) >= 4]
+    smoothed = Polygon(ext, holes)
+    return smoothed if smoothed.is_valid else smoothed.buffer(0)
+
+
+def _vw_simplify_polygon(polygon, area_threshold):
+    """Visvalingam-Whyatt simplification of a polygon's rings; None if the exterior
+    collapses below a triangle."""
+    ext = simplify_coords_vw(np.asarray(polygon.exterior.coords), area_threshold)
+    if len(ext) < 4:
+        return None
+    holes = []
+    for ring in polygon.interiors:
+        hole = simplify_coords_vw(np.asarray(ring.coords), area_threshold)
+        if len(hole) >= 4:
+            holes.append(hole)
+    simplified = Polygon(ext, holes)
+    return simplified if simplified.is_valid else simplified.buffer(0)
+
+
+def _simplify_and_smooth(polygon):
+    """VW simplification + Chaikin smoothing for one polygon (both in metric CRS).
+
+    Returns a list of Polygons. Falls back to ``[polygon]`` unchanged if the pipeline
+    collapses or errors, so no feature is silently dropped. A ``buffer(0)`` repair may
+    split a polygon into several, hence the list return.
+    """
+    try:
+        simplified = _vw_simplify_polygon(polygon, VW_AREA_THRESHOLD)
+        if simplified is None or simplified.is_empty:
+            return [polygon]
+        smoothed = []
+        for part in _explode_polygons(simplified):
+            smoothed.extend(_explode_polygons(_chaikin_polygon(part, CHAIKIN_ITERATIONS)))
+        return smoothed if smoothed else [polygon]
+    except Exception:
+        return [polygon]
 
 
 def _build_transform():
@@ -229,13 +308,12 @@ class CombinedInference:
 
     def _filter_polygons(self, polygons, inference_crs, orig_crs):
         polygons = filter_polygons_by_area(polygons, MINIMUM_POLYGON_AREA)
-        # Simplify while still in the metric inference CRS so the tolerance is in metres.
-        # Keep the original polygon on the rare chance simplify collapses it, so the
-        # feature count stays stable and no label is silently dropped.
+        # Simplify + smooth while still in the metric inference CRS so the VW area
+        # threshold is in m². Each input polygon yields one or more output polygons;
+        # on collapse it falls back to the original so no label is silently dropped.
         simplified = []
         for polygon in polygons:
-            simple = polygon.simplify(SIMPLIFY_TOLERANCE, preserve_topology=True)
-            simplified.append(polygon if simple.is_empty else simple)
-        print(f'Simplified {len(polygons)} polygons at {SIMPLIFY_TOLERANCE}m tolerance.')
+            simplified.extend(_simplify_and_smooth(polygon))
+        print(f'Simplified {len(polygons)} polygons (VW {VW_AREA_THRESHOLD}m² + Chaikin x{CHAIKIN_ITERATIONS}).')
         polygons = reproject_polygons(simplified, inference_crs, orig_crs)
         return polygons
