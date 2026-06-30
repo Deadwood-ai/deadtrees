@@ -78,6 +78,10 @@ by `docker-compose.processor.yaml`. Set `PROCESSOR_WORKER_ID` explicitly only
 when you need a different stable unique value. Do not reuse the same value on
 two simultaneously running processor hosts.
 
+For adding another processor host, use
+[`processor-worker-setup.md`](processor-worker-setup.md). Keep this release
+playbook focused on verifying the existing production deployment path.
+
 Useful verification commands:
 
 ```bash
