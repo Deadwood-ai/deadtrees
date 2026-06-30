@@ -29,6 +29,8 @@ debugpy
 xarray>=2023.1.0
 zarr>=2.13.0
 numpy>=1.24.0
+# Visvalingam-Whyatt polygon simplification (deadwood_treecover_combined_v2 postprocessing)
+simplification>=0.7,<2
 # Pin to 4.x: transformers 5.0 renamed SegFormer state-dict keys
 # (encoder.block.* -> stages.*, decode_head.linear_c -> linear_projections),
 # which breaks load_state_dict(strict=True) for the AOI and combined-model
