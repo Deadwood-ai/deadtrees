@@ -96,9 +96,11 @@ def _vw_simplify_polygon(polygon, area_threshold):
         return None
     holes = []
     for ring in polygon.interiors:
-        hole = simplify_coords_vw(np.asarray(ring.coords), area_threshold)
-        if len(hole) >= 4:
-            holes.append(hole)
+        coords = np.asarray(ring.coords)
+        hole = simplify_coords_vw(coords, area_threshold)
+        # Keep the original ring if VW collapses it below a triangle, so a valid hole
+        # (it already passed the area filter) is never silently filled in.
+        holes.append(hole if len(hole) >= 4 else coords)
     simplified = Polygon(ext, holes)
     return simplified if simplified.is_valid else simplified.buffer(0)
 
@@ -314,6 +316,10 @@ class CombinedInference:
         simplified = []
         for polygon in polygons:
             simplified.extend(_simplify_and_smooth(polygon))
+        # Re-filter by area: a buffer(0) repair can split one polygon into several,
+        # and VW/Chaikin can shrink one below the threshold, so sub-area slivers must
+        # not slip past the pre-simplification filter.
+        simplified = filter_polygons_by_area(simplified, MINIMUM_POLYGON_AREA)
         print(f'Simplified {len(polygons)} polygons (VW {VW_AREA_THRESHOLD}m² + Chaikin x{CHAIKIN_ITERATIONS}).')
         polygons = reproject_polygons(simplified, inference_crs, orig_crs)
         return polygons
