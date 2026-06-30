@@ -21,8 +21,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '30'
-          memory: '96G'
+          # Per-host caps so the same compose file deploys on machines of
+          # different sizes. Override in .env; PROCESSOR_CPU_LIMIT must be <= the
+          # host's CPU core count. Defaults match the original production sizing.
+          cpus: ${PROCESSOR_CPU_LIMIT:-30}
+          memory: ${PROCESSOR_MEMORY_LIMIT:-96G}
     runtime: nvidia
     volumes:
       - ./processor:/app/processor

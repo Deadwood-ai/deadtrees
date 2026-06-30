@@ -17,6 +17,10 @@ storage server, Docker runtime, and required model/assets volume.
 - The repository checkout is clean and tracks `origin/main`.
 - Required assets and model files are present under the paths mounted by
   `docker-compose.processor.yaml`.
+- On hosts smaller than the defaults, set `PROCESSOR_CPU_LIMIT` (and optionally
+  `PROCESSOR_MEMORY_LIMIT`) in `.env` so the processor container's caps fit the
+  machine. `PROCESSOR_CPU_LIMIT` must be `<=` the host's CPU core count, or
+  `docker compose up` fails with a "range of CPUs" error. Defaults: `30` / `96G`.
 
 ## Worker Identity
 
