@@ -15,10 +15,11 @@ def _num_points(polygon):
 	return len(polygon.exterior.coords) + sum(len(r.coords) for r in polygon.interiors)
 
 
-def test_filter_polygons_does_not_simplify(monkeypatch):
-	"""Forest cover is no longer simplified: vertex counts must be preserved,
-	only area filtering and reprojection happen."""
-	polygon = Point(0, 0).buffer(10, resolution=128)
+def test_filter_polygons_simplifies(monkeypatch):
+	"""_filter_polygons now applies a SIMPLIFY_TOLERANCE Douglas-Peucker pass:
+	vertex counts drop while the feature is preserved and reprojected."""
+	# Dense circle (~1024 vertices, ~6cm spacing) so a 10cm tolerance reduces it.
+	polygon = Point(0, 0).buffer(10, resolution=256)
 	inference_crs = CRS.from_epsg(32634)
 	orig_crs = CRS.from_epsg(4326)
 
@@ -32,17 +33,26 @@ def test_filter_polygons_does_not_simplify(monkeypatch):
 	monkeypatch.setattr(combined_inference, 'reproject_polygons', fake_reproject_polygons)
 
 	inference = CombinedInference.__new__(CombinedInference)
-
 	result = inference._filter_polygons([polygon], inference_crs, orig_crs)
 
 	assert len(result) == 1
-	# No vertex reduction: simplification has been removed.
-	assert _num_points(result[0]) == _num_points(polygon)
+	# Simplification removed redundant vertices.
+	assert _num_points(result[0]) < _num_points(polygon)
+	# Simplify happens in the metric inference CRS, then reprojection to the original CRS.
 	assert reproject_call['src_crs'] == inference_crs
 	assert reproject_call['dst_crs'] == orig_crs
 
 
-def test_simplification_feature_fully_removed():
-	"""The removed simplification feature must not leave behind helpers/attributes."""
-	assert not hasattr(combined_inference, 'FOREST_COVER_SIMPLIFICATION_TOLERANCE_M')
-	assert not hasattr(combined_inference, 'simplify_polygons_preserving_topology')
+def test_filter_polygons_preserves_feature_count_when_simplify_is_aggressive(monkeypatch):
+	"""Even with a tolerance far larger than the polygon, the feature is never
+	silently dropped (it falls back to the original on collapse)."""
+	polygon = Point(0, 0).buffer(10, resolution=128)
+
+	monkeypatch.setattr(combined_inference, 'reproject_polygons', lambda polys, s, d: polys)
+	monkeypatch.setattr(combined_inference, 'SIMPLIFY_TOLERANCE', 1e6)
+
+	inference = CombinedInference.__new__(CombinedInference)
+	result = inference._filter_polygons([polygon], CRS.from_epsg(32634), CRS.from_epsg(4326))
+
+	assert len(result) == 1
+	assert not result[0].is_empty
