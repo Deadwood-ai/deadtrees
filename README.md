@@ -57,6 +57,8 @@ The platform is deployed across two physical servers:
 All services are containerized using Docker Compose. Authentication and data management are handled through Supabase (PostgreSQL with row-level security).
 
 Processor deployment notes live in [docs/playbooks/processor-deploy.md](docs/playbooks/processor-deploy.md).
+Instructions for adding another processor worker live in
+[docs/playbooks/processor-worker-setup.md](docs/playbooks/processor-worker-setup.md).
 
 ## Web Application
 
