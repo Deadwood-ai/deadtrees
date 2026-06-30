@@ -2,6 +2,8 @@ import shutil
 import signal
 import sys
 import docker
+import socket
+from datetime import datetime, timezone
 from pathlib import Path
 from processor.src.process_geotiff import process_geotiff
 from processor.src.process_odm import process_odm
@@ -103,7 +105,7 @@ def _handle_graceful_shutdown(signum, frame):
 					'has_error': False,
 					'error_message': None,
 				}).eq('dataset_id', task.dataset_id).execute()
-				client.table(settings.queue_table).update({'is_processing': False}).eq('id', task.id).execute()
+			release_queue_task(token, task)
 		except Exception as e:
 			# Best-effort: if we cannot clean up, fall through and exit anyway. The
 			# task is then left as a stale active row and treated as a crash next run.
@@ -142,6 +144,22 @@ def refresh_processor_token(task: QueueTask, fallback_token: str | None = None) 
 		if fallback_token is not None:
 			return fallback_token
 		raise AuthenticationError('Invalid processor token', token=fallback_token, task_id=task.id)
+
+
+def get_worker_id() -> str:
+	"""Return a stable processor identity for queue ownership."""
+	if settings.PROCESSOR_WORKER_ID:
+		return settings.PROCESSOR_WORKER_ID
+	if settings.DEV_MODE:
+		return f'local-dev-{socket.gethostname()}'
+	for machine_id_path in (Path('/host/etc/machine-id'), Path('/etc/machine-id')):
+		try:
+			machine_id = machine_id_path.read_text().strip()
+		except OSError:
+			continue
+		if machine_id:
+			return f'host-{machine_id[:12]}'
+	raise RuntimeError('PROCESSOR_WORKER_ID must be set to a unique stable value for this processor host')
 
 
 def detect_crashed_stage(status_data: dict, task_types: list) -> str:
@@ -206,36 +224,153 @@ def get_next_task(token: str) -> QueueTask:
 	return QueueTask(**response.data[0])
 
 
-def get_active_task(token: str) -> QueueTask | None:
-	"""Get a task still marked as actively processing in the raw queue table.
-
-	Active tasks are excluded from `v2_queue_positions`, so crash recovery must
-	inspect `v2_queue` directly before looking for waiting work.
-	"""
-	with use_client(token) as client:
-		response = (
-			client.table(settings.queue_table)
-			.select('id,dataset_id,user_id,priority,is_processing,task_types')
-			.eq('is_processing', True)
-			.order('priority', desc=True)
-			.order('created_at')
-			.limit(1)
-			.execute()
-		)
-	if not response.data or len(response.data) == 0:
-		return None
-
-	task_data = response.data[0]
+def _queue_task_from_raw_row(task_data: dict, current_position: int = -1, estimated_time: float | None = None) -> QueueTask:
 	return QueueTask(
 		id=task_data['id'],
 		dataset_id=task_data['dataset_id'],
 		user_id=task_data['user_id'],
 		priority=task_data['priority'],
 		is_processing=task_data['is_processing'],
-		current_position=-1,
-		estimated_time=None,
+		claimed_by=task_data.get('claimed_by'),
+		claimed_at=task_data.get('claimed_at'),
+		current_position=current_position,
+		estimated_time=estimated_time,
 		task_types=task_data['task_types'],
 	)
+
+
+def _is_missing_queue_claim_column_error(error: Exception) -> bool:
+	message = str(error).lower()
+	return ('claimed_by' in message or 'claimed_at' in message) and (
+		'column' in message or 'schema cache' in message
+	)
+
+
+def get_active_task(token: str, worker_id: str) -> QueueTask | None:
+	"""Get this worker's task still marked as actively processing in the raw queue table.
+
+	Active tasks are excluded from `v2_queue_positions`, so crash recovery must
+	inspect `v2_queue` directly before looking for waiting work.
+	"""
+	with use_client(token) as client:
+		try:
+			response = (
+				client.table(settings.queue_table)
+				.select('*')
+				.eq('is_processing', True)
+				.eq('claimed_by', worker_id)
+				.order('priority', desc=True)
+				.order('created_at')
+				.limit(1)
+				.execute()
+			)
+			if not response.data or len(response.data) == 0:
+				response = (
+					client.table(settings.queue_table)
+					.select('*')
+					.eq('is_processing', True)
+					.is_('claimed_by', 'null')
+					.order('priority', desc=True)
+					.order('created_at')
+					.limit(1)
+					.execute()
+				)
+				if response.data:
+					legacy_task = response.data[0]
+					response = (
+						client.table(settings.queue_table)
+						.update({'claimed_by': worker_id, 'claimed_at': datetime.now(timezone.utc).isoformat()})
+						.eq('id', legacy_task['id'])
+						.eq('is_processing', True)
+						.is_('claimed_by', 'null')
+						.execute()
+					)
+		except Exception as e:
+			if not _is_missing_queue_claim_column_error(e):
+				raise
+			logger.warning('Queue claim columns are not available yet; falling back to legacy active-task recovery')
+			response = (
+				client.table(settings.queue_table)
+				.select('*')
+				.eq('is_processing', True)
+				.order('priority', desc=True)
+				.order('created_at')
+				.limit(1)
+				.execute()
+			)
+	if not response.data or len(response.data) == 0:
+		return None
+
+	return _queue_task_from_raw_row(response.data[0])
+
+
+def claim_task(token: str, task: QueueTask, worker_id: str) -> QueueTask | None:
+	"""Atomically claim a waiting queue row for this processor worker."""
+	claimed_at = datetime.now(timezone.utc).isoformat()
+	payload = {
+		'is_processing': True,
+		'claimed_by': worker_id,
+		'claimed_at': claimed_at,
+	}
+
+	with use_client(token) as client:
+		try:
+			response = (
+				client.table(settings.queue_table)
+				.update(payload)
+				.eq('id', task.id)
+				.eq('is_processing', False)
+				.is_('claimed_by', 'null')
+				.execute()
+			)
+		except Exception as e:
+			if not _is_missing_queue_claim_column_error(e):
+				raise
+			logger.warning('Queue claim columns are not available yet; falling back to legacy queue claim')
+			response = (
+				client.table(settings.queue_table)
+				.update({'is_processing': True})
+				.eq('id', task.id)
+				.eq('is_processing', False)
+				.execute()
+			)
+
+	if not response.data or len(response.data) == 0:
+		return None
+
+	claimed = _queue_task_from_raw_row(
+		response.data[0],
+		current_position=task.current_position,
+		estimated_time=task.estimated_time,
+	)
+	return claimed
+
+
+def _apply_queue_owner_filter(query, task: QueueTask):
+	if task.claimed_by:
+		return query.eq('claimed_by', task.claimed_by)
+	return query
+
+
+def delete_queue_task(token: str, task: QueueTask):
+	with use_client(token) as client:
+		query = client.table(settings.queue_table).delete().eq('id', task.id)
+		_apply_queue_owner_filter(query, task).execute()
+
+
+def release_queue_task(token: str, task: QueueTask):
+	with use_client(token) as client:
+		query = (
+			client.table(settings.queue_table)
+			.update({'is_processing': False, 'claimed_by': None, 'claimed_at': None})
+			.eq('id', task.id)
+		)
+		try:
+			_apply_queue_owner_filter(query, task).execute()
+		except Exception as e:
+			if not _is_missing_queue_claim_column_error(e):
+				raise
+			client.table(settings.queue_table).update({'is_processing': False}).eq('id', task.id).execute()
 
 
 def is_dataset_uploaded_or_processed(task: QueueTask, token: str) -> tuple:
@@ -322,8 +457,7 @@ def _fail_crashed_task(token: str, task: QueueTask, status: dict | None) -> None
 		logger.warning(f'Failed to create Linear issue for crash: {linear_error}')
 
 	# Remove from queue — the dataset must be explicitly re-triggered once fixed.
-	with use_client(token) as client:
-		client.table(settings.queue_table).delete().eq('id', task.id).execute()
+	delete_queue_task(token, task)
 
 
 def process_task(task: QueueTask, token: str):
@@ -348,16 +482,9 @@ def process_task(task: QueueTask, token: str):
 		),
 	)
 
-	# Keep queue bookkeeping aligned with the live worker state.
-	# `v2_statuses.current_status` remains the crash/source-of-truth signal,
-	# but `v2_queue.is_processing` is still consumed by ops snapshots and queue views.
-	# Register as in-flight before marking the row active so a SIGTERM in this gap
-	# cannot leave a stale is_processing=True row that looks like a hard crash.
+	# Register as in-flight after the queue row has been claimed so a SIGTERM can
+	# release this worker's task without touching another worker's active row.
 	_set_inflight_task(task)
-
-	with use_client(token) as client:
-		client.table(settings.queue_table).update({'is_processing': True}).eq('id', task.id).execute()
-
 	# remove processing path if it exists
 	if Path(settings.processing_path).exists():
 		shutil.rmtree(settings.processing_path, ignore_errors=True)
@@ -622,8 +749,7 @@ def process_task(task: QueueTask, token: str):
 
 		# Only delete task if all processing completed successfully
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-		with use_client(token) as client:
-			client.table(settings.queue_table).delete().eq('id', task.id).execute()
+		delete_queue_task(token, task)
 
 	except Exception as e:
 		# This path owns the failure bookkeeping; clear the in-flight marker now so a
@@ -651,8 +777,7 @@ def process_task(task: QueueTask, token: str):
 		# Delete task from queue on failure - error is already recorded in status table
 		try:
 			delete_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-			with use_client(delete_token) as client:
-				client.table(settings.queue_table).delete().eq('id', task.id).execute()
+			delete_queue_task(delete_token, task)
 			logger.info(
 				f'Removed failed task {task.id} from queue',
 				LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
@@ -683,9 +808,9 @@ def background_process():
 	1. Logs in as the processor service account.
 	2. Installs a graceful-shutdown handler so a deploy/restart (SIGTERM) cleanly
 	   re-queues the in-flight task for retry instead of leaving it stranded.
-	3. Handles any stale `is_processing=true` queue row left behind by a previous
-	   run. Because graceful stops self-clean via the shutdown handler, a leftover
-	   active row can only mean a hard kill (SIGKILL/OOM) or hard crash:
+	3. Handles this worker's stale `is_processing=true` queue row left behind by
+	   a previous run. Because graceful stops self-clean via the shutdown handler,
+	   a leftover active row can only mean a hard kill (SIGKILL/OOM) or hard crash:
 	   - If all requested stages are already done, the row is just removed.
 	   - Otherwise it is a genuine, non-retryable crash: the dataset is marked
 	     errored, a Linear issue is filed, and the task is removed from the queue.
@@ -694,8 +819,8 @@ def background_process():
 	4. Detects crashes the same way for the next waiting task, then processes the
 	   first healthy, ready task and exits.
 
-	docker compose up guarantees only one processor container runs at a time,
-	so `is_processing` is bookkeeping only, not the concurrency guard.
+	Multiple workers can read the same waiting row, but only one can atomically
+	claim it by flipping `is_processing=false` to true and recording `claimed_by`.
 	"""
 	# Install graceful-shutdown handlers so deploys/restarts re-queue cleanly.
 	signal.signal(signal.SIGTERM, _handle_graceful_shutdown)
@@ -706,8 +831,10 @@ def background_process():
 	if not user:
 		raise Exception(status_code=401, detail='Invalid token after fresh login')
 
+	worker_id = get_worker_id()
+
 	while True:
-		active_task = get_active_task(token)
+		active_task = get_active_task(token, worker_id)
 		if active_task is not None:
 			# A graceful stop (deploy/restart) re-queues its in-flight task via
 			# _handle_graceful_shutdown and leaves no active row. So a leftover
@@ -753,8 +880,7 @@ def background_process():
 					current_status=StatusEnum.idle,
 					has_error=False,
 				)
-				with use_client(token) as client:
-					client.table(settings.queue_table).delete().eq('id', active_task.id).execute()
+				delete_queue_task(token, active_task)
 				continue
 
 			# Genuine mid-stage crash — fail it instead of retrying.
@@ -769,6 +895,16 @@ def background_process():
 		is_ready, has_error = is_dataset_uploaded_or_processed(task, token)
 
 		if has_error:
+			claimed_task = claim_task(token, task, worker_id)
+			if claimed_task is None:
+				logger.info(
+					f'Skipping errored queue task {task.id}; another worker claimed it first',
+					LogContext(
+						category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+					),
+				)
+				continue
+
 			# Dataset already has errors - remove task from queue
 			logger.info(
 				f'Removing errored task {task.id} for dataset {task.dataset_id} from queue',
@@ -776,8 +912,7 @@ def background_process():
 					category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
 				),
 			)
-			with use_client(token) as client:
-				client.table(settings.queue_table).delete().eq('id', task.id).execute()
+			delete_queue_task(token, claimed_task)
 			continue
 
 		if not is_ready:
@@ -789,6 +924,17 @@ def background_process():
 				),
 			)
 			return
+
+		claimed_task = claim_task(token, task, worker_id)
+		if claimed_task is None:
+			logger.info(
+				f'Skipping queue task {task.id}; another worker claimed it first',
+				LogContext(
+					category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
+				),
+			)
+			continue
+		task = claimed_task
 
 		# CRASH DETECTION: check if a previous run crashed mid-processing
 		with use_client(token) as client:

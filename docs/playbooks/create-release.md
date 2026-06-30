@@ -73,6 +73,11 @@ reaches production and the processor keeps launching a stale image. The TCD imag
 build is heavy but layer-cached, so it only does real work when that Dockerfile or
 its base image changes.
 
+By default, the processor derives its worker ID from the host machine-id mounted
+by `docker-compose.processor.yaml`. Set `PROCESSOR_WORKER_ID` explicitly only
+when you need a different stable unique value. Do not reuse the same value on
+two simultaneously running processor hosts.
+
 Useful verification commands:
 
 ```bash

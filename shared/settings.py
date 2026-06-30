@@ -128,6 +128,7 @@ class Settings(BaseSettings):
 	# processor settings
 	PROCESSOR_USERNAME: str = 'processor@deadtrees.earth'
 	PROCESSOR_PASSWORD: str = 'processor'
+	PROCESSOR_WORKER_ID: str = ''
 	SSH_PRIVATE_KEY_PATH: str = '/app/ssh_key'
 	SSH_PRIVATE_KEY_PASSPHRASE: str = ''
 	ODM_AUTO_BOUNDARY: bool = False

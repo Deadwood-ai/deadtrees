@@ -105,7 +105,7 @@ def test_process_task_rejects_downstream_without_geotiff(monkeypatch):
 		process_task(task, 'initial-token')
 
 	assert 'require geotiff in the same processing request' in str(exc_info.value)
-	assert queue_updates == [(task.id, {'is_processing': True})]
+	assert queue_updates == []
 	assert deleted_task_ids == [task.id]
 	expected_error = format_missing_geotiff_error((TaskTypeEnum.thumbnail,))
 	assert status_updates == [

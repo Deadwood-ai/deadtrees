@@ -80,17 +80,17 @@ def test_process_task_success_path_with_refresh(monkeypatch):
 		task_types=[TaskTypeEnum.metadata],
 		priority=1,
 		is_processing=False,
+		claimed_by='worker-a',
 		current_position=1,
 		estimated_time=0.0,
 	)
 	stage_calls = []
-	deleted_task_ids = []
+	deleted_filters = []
 	processing_updates = []
 
 	class _DeleteQuery:
 		def eq(self, field, value):
-			assert field == 'id'
-			deleted_task_ids.append(value)
+			deleted_filters.append((field, value))
 			return self
 
 		def execute(self):
@@ -143,8 +143,9 @@ def test_process_task_success_path_with_refresh(monkeypatch):
 	process_task(task, 'initial-token')
 
 	assert stage_calls == [(task.id, str(settings.processing_path))]
-	assert processing_updates == [task.id]
-	assert deleted_task_ids == [task.id]
+	assert processing_updates == []
+	assert deleted_filters == [('id', task.id), ('claimed_by', 'worker-a')]
+
 
 @pytest.mark.unit
 def test_pipeline_stage_map_is_stable_and_ordered():
