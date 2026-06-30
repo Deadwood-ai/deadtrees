@@ -180,6 +180,8 @@ class TaskPayload(BaseModel):
 	user_id: str
 	priority: int = 2
 	is_processing: bool = False
+	claimed_by: Optional[str] = None
+	claimed_at: Optional[datetime] = None
 	created_at: Optional[datetime] = None
 	task_types: List[TaskTypeEnum]
 
@@ -190,6 +192,8 @@ class QueueTask(BaseModel):
 	user_id: str
 	priority: int
 	is_processing: bool
+	claimed_by: Optional[str] = None
+	claimed_at: Optional[datetime] = None
 	current_position: int
 	estimated_time: float | None = None
 	task_types: List[TaskTypeEnum]

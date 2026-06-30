@@ -32,6 +32,8 @@ services:
       - ~/.ssh/processing-to-storage.pub:/tmp/ssh-keys/processing-to-storage.pub:ro
       # CRITICAL: Mount Docker socket for ODM processing (Docker-in-Docker)
       - /var/run/docker.sock:/var/run/docker.sock
+      # Stable host identity for default processor worker IDs.
+      - /etc/machine-id:/host/etc/machine-id:ro
       # Mount /data for processing directory access
       - /data:/data
     environment:
@@ -46,6 +48,7 @@ services:
       STORAGE_SERVER_DATA_PATH: ${STORAGE_SERVER_DATA_PATH}
       PROCESSOR_USERNAME: processor@deadtrees.earth
       PROCESSOR_PASSWORD: ${PROCESSOR_PASSWORD}
+      PROCESSOR_WORKER_ID: ${PROCESSOR_WORKER_ID:-}
       SSH_PRIVATE_KEY_PASSPHRASE: ${SSH_PRIVATE_KEY_PASSPHRASE}
       SSH_PRIVATE_KEY_PATH: /root/.ssh/processing-to-storage
       DEV_MODE: "false"
