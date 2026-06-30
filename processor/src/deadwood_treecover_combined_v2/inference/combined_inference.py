@@ -230,11 +230,12 @@ class CombinedInference:
     def _filter_polygons(self, polygons, inference_crs, orig_crs):
         polygons = filter_polygons_by_area(polygons, MINIMUM_POLYGON_AREA)
         # Simplify while still in the metric inference CRS so the tolerance is in metres.
+        # Keep the original polygon on the rare chance simplify collapses it, so the
+        # feature count stays stable and no label is silently dropped.
         simplified = []
         for polygon in polygons:
             simple = polygon.simplify(SIMPLIFY_TOLERANCE, preserve_topology=True)
-            if not simple.is_empty:
-                simplified.append(simple)
+            simplified.append(polygon if simple.is_empty else simple)
         print(f'Simplified {len(polygons)} polygons at {SIMPLIFY_TOLERANCE}m tolerance.')
         polygons = reproject_polygons(simplified, inference_crs, orig_crs)
         return polygons
