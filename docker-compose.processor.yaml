@@ -5,14 +5,20 @@ services:
       context: .
       dockerfile: processor/Dockerfile
     network_mode: host
-    # command: python -m debugpy --listen 0.0.0.0:5678 --wait-for-client -m processor.src.processor
-    command: python -m processor.src.processor
-    # Self-heal if the processor container crashes (e.g. OOM collateral kill
-    # during a heavy ODM / treecover stage). Clean exits (exit 0 after finishing
-    # a task) are not restarted, so the existing cron-based polling model is
-    # preserved. Cap retries so a persistently broken container does not
-    # thrash forever.
-    restart: on-failure:5
+    # command: python -m debugpy --listen 0.0.0.0:5678 --wait-for-client -m processor.src.continuous_processor
+    # Persistent worker: drains the queue back-to-back and only backs off
+    # (PROCESSOR_IDLE_BACKOFF_SECONDS) when idle. Replaces the old
+    # one-task-per-cron-run model. The host no longer needs the per-minute
+    # `docker compose up` cron entry; auto_deploy_processor.sh should recreate
+    # this container with `up -d --build` so a new image triggers the graceful
+    # shutdown + re-queue path (see stop_grace_period / _handle_graceful_shutdown).
+    command: python -m processor.src.continuous_processor
+    # Keep the persistent worker running: restart it after a crash (e.g. OOM
+    # collateral kill during a heavy ODM / treecover stage) and after a host
+    # reboot. A poison task that repeatedly hard-crashes is failed (not retried)
+    # by the stale-active-task detection, so a restart loop makes forward
+    # progress rather than spinning on the same task forever.
+    restart: unless-stopped
     # Give the graceful-shutdown handler time to re-queue the in-flight task on a
     # deploy/restart (SIGTERM) before Docker escalates to SIGKILL. Without this,
     # the default 10s can expire mid-stage and a healthy job gets misclassified as

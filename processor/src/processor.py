@@ -800,11 +800,16 @@ def process_task(task: QueueTask, token: str):
 			shutil.rmtree(settings.processing_path, ignore_errors=True)
 
 
-def background_process():
+def background_process() -> bool:
 	"""
-	Cron-triggered processor: pick the next task from the queue and process it.
+	Process the next healthy task from the queue, if there is one.
 
-	On each run this function:
+	Returns True if a healthy task was claimed and processed, False if there was
+	nothing processable (empty queue or head task not uploaded yet). The
+	continuous worker (``continuous_processor.run_continuous``) uses this to
+	decide whether to drain the next task immediately or back off and re-poll.
+
+	On each call this function:
 	1. Logs in as the processor service account.
 	2. Installs a graceful-shutdown handler so a deploy/restart (SIGTERM) cleanly
 	   re-queues the in-flight task for retry instead of leaving it stranded.
@@ -817,7 +822,7 @@ def background_process():
 	     OOM/bug crashes are deterministic, so retrying only loops and wastes
 	     compute — we deliberately do not retry them.
 	4. Detects crashes the same way for the next waiting task, then processes the
-	   first healthy, ready task and exits.
+	   first healthy, ready task and returns.
 
 	Multiple workers can read the same waiting row, but only one can atomically
 	claim it by flipping `is_processing=false` to true and recording `claimed_by`.
@@ -890,7 +895,7 @@ def background_process():
 		task = get_next_task(token)
 		if task is None:
 			print('No tasks in the queue.')
-			return
+			return False
 
 		is_ready, has_error = is_dataset_uploaded_or_processed(task, token)
 
@@ -916,14 +921,14 @@ def background_process():
 			continue
 
 		if not is_ready:
-			# Not uploaded yet - skip, try again next cron run
+			# Not uploaded yet - skip, try again on a later poll
 			logger.info(
 				f'Skipping task {task.id} - dataset not uploaded yet; will retry later',
 				LogContext(
 					category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
 				),
 			)
-			return
+			return False
 
 		claimed_task = claim_task(token, task, worker_id)
 		if claimed_task is None:
@@ -958,7 +963,7 @@ def background_process():
 			),
 		)
 		process_task(task, token=token)
-		break  # processed one task, exit for cron
+		return True  # processed one healthy task
 
 
 if __name__ == '__main__':

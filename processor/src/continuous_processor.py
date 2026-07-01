@@ -7,7 +7,15 @@ from shared.settings import settings
 
 
 def run_continuous():
-	"""Run the processor in a continuous loop, checking the queue every 10 seconds"""
+	"""Run the processor as a persistent worker.
+
+	The worker drains the queue back-to-back: as long as ``background_process``
+	reports it processed a task, the next one is claimed immediately with no
+	wait. Only when the queue has nothing processable does the worker sleep for
+	``PROCESSOR_IDLE_BACKOFF_SECONDS`` before polling again. This replaces the
+	old one-task-per-cron-run model, where every task paid the wait for the next
+	cron minute plus container startup, login and cleanup overhead.
+	"""
 	logger.info('Starting continuous processor...')
 
 	# Perform startup cleanup to recover from crashes/restarts
@@ -21,11 +29,15 @@ def run_continuous():
 
 	while True:
 		try:
-			background_process()
+			did_work = background_process()
 		except Exception as e:
 			logger.error(f'Error in processor loop: {e}')
+			did_work = False
 
-		time.sleep(10)
+		# Back off only when there was nothing to do; while a backlog exists we
+		# loop straight into the next claim so no task waits on a fixed timer.
+		if not did_work:
+			time.sleep(settings.PROCESSOR_IDLE_BACKOFF_SECONDS)
 
 
 if __name__ == '__main__':

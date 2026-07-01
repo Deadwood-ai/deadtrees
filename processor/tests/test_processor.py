@@ -65,9 +65,9 @@ def test_background_process_no_tasks():
 	# Run the background process with empty queue
 	background_process()
 
-	# Verify it completes without error
-	# (The function should return None when no tasks are found)
-	assert background_process() is None
+	# Verify it reports that no work was done when the queue is empty, so the
+	# continuous worker knows to back off instead of hot-looping.
+	assert background_process() is False
 
 
 def test_process_task_success_path_with_refresh(monkeypatch):
