@@ -30,6 +30,7 @@ import AuditBadge from "./AuditBadge";
 import { useQueryClient } from "@tanstack/react-query";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useCanUploadPrivate } from "../hooks/useUserPrivileges";
+import { openDatasetDetail } from "../utils/datasetDetailNavigation";
 
 interface Dataset {
   id: number;
@@ -82,7 +83,7 @@ const DataTable: React.FC<DataTableProps> = ({
 }) => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const { data: userData, isLoading: isLoadingData } = useUserDatasets();
-  const { user } = useAuth();
+  const { status, user } = useAuth();
   const [datasetsInPublication, setDatasetsInPublication] = useState<number[]>([]);
 
   // State for edit modal
@@ -338,15 +339,14 @@ const DataTable: React.FC<DataTableProps> = ({
         label: "View Map",
         icon: <EnvironmentOutlined />,
         disabled: !canView,
-        onClick: async () => {
-          try {
-            await queryClient.invalidateQueries({ queryKey: ["public-datasets"] });
-            await queryClient.refetchQueries({ queryKey: ["public-datasets"] });
-          } catch (e) {
-            // no-op; navigation still proceeds
-          }
-          nav(`/dataset/${record.id}`);
-        },
+        onClick: () =>
+          openDatasetDetail({
+            queryClient,
+            navigate: nav,
+            dataset: record,
+            authStatus: status,
+            userId: user?.id,
+          }),
       },
       {
         key: "edit",
