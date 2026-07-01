@@ -4,6 +4,7 @@ import { supabase } from "./useSupabase";
 import { Settings } from "../config";
 import { IDataset, IDatasetArchiveItem } from "../types/dataset";
 import { fixTextEncoding } from "../utils/textUtils";
+import { getPublicDatasetByIdQueryKey } from "../utils/datasetDetailNavigation";
 
 interface DatasetQueryOptions {
   enabled?: boolean;
@@ -68,7 +69,7 @@ export function usePublicDatasetById(datasetId: number | undefined) {
   const { status, user } = useAuth();
 
 	return useQuery({
-		queryKey: ["public-dataset-by-id", datasetId, status, user?.id ?? "anonymous"],
+		queryKey: getPublicDatasetByIdQueryKey(datasetId, status, user?.id),
 		enabled: !!datasetId && status !== "checking",
 		queryFn: async () => {
 			if (!datasetId) return null;

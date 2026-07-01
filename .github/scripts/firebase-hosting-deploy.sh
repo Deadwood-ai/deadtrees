@@ -132,9 +132,44 @@ is_transient_firebase_auth_error() {
 		"$log_file"
 }
 
-is_live_already_active() {
+is_hosting_version_already_active() {
 	local log_file="$1"
-	grep -Fq 'current active version' "$log_file" && grep -Fq '/channels/live' "$log_file"
+	grep -Fq 'current active version' "$log_file" && grep -Fq '/channels/' "$log_file"
+}
+
+emit_preview_url() {
+	if [[ "$mode" != "preview" ]]; then
+		return 0
+	fi
+
+	local channel_response preview_url
+	channel_response="$(
+		curl --fail-with-body --retry 3 --retry-all-errors --retry-delay 3 \
+			--silent --show-error \
+			--header "Authorization: Bearer $FIREBASE_TOKEN" \
+			"https://firebasehosting.googleapis.com/v1beta1/projects/${project_id}/sites/${project_id}/channels/${channel_id}"
+	)"
+	preview_url="$(node -e '
+const fs = require("fs");
+const body = JSON.parse(fs.readFileSync(0, "utf8"));
+if (!body.url) {
+  console.error("Firebase channel response did not include url");
+  process.exit(1);
+}
+process.stdout.write(body.url);
+' <<<"$channel_response")"
+
+	echo "Firebase preview URL: $preview_url"
+	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+		echo "preview_url=$preview_url" >>"$GITHUB_OUTPUT"
+	fi
+	if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+		{
+			echo "### Firebase Hosting preview"
+			echo
+			echo "[Open preview]($preview_url)"
+		} >>"$GITHUB_STEP_SUMMARY"
+	fi
 }
 
 for attempt in $(seq 1 "$max_attempts"); do
@@ -147,11 +182,13 @@ for attempt in $(seq 1 "$max_attempts"); do
 	set -e
 
 	if [[ "$rc" -eq 0 ]]; then
+		emit_preview_url
 		exit 0
 	fi
 
-	if [[ "$mode" == "live" ]] && is_live_already_active "$log_file"; then
-		echo "Firebase reports this Hosting version is already active on live; treating as a successful deploy."
+	if is_hosting_version_already_active "$log_file"; then
+		echo "Firebase reports this Hosting version is already active on the target channel; treating as a successful deploy."
+		emit_preview_url
 		exit 0
 	fi
 
