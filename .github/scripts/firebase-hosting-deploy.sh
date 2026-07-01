@@ -132,9 +132,9 @@ is_transient_firebase_auth_error() {
 		"$log_file"
 }
 
-is_live_already_active() {
+is_hosting_version_already_active() {
 	local log_file="$1"
-	grep -Fq 'current active version' "$log_file" && grep -Fq '/channels/live' "$log_file"
+	grep -Fq 'current active version' "$log_file" && grep -Fq '/channels/' "$log_file"
 }
 
 for attempt in $(seq 1 "$max_attempts"); do
@@ -150,8 +150,8 @@ for attempt in $(seq 1 "$max_attempts"); do
 		exit 0
 	fi
 
-	if [[ "$mode" == "live" ]] && is_live_already_active "$log_file"; then
-		echo "Firebase reports this Hosting version is already active on live; treating as a successful deploy."
+	if is_hosting_version_already_active "$log_file"; then
+		echo "Firebase reports this Hosting version is already active on the target channel; treating as a successful deploy."
 		exit 0
 	fi
 
