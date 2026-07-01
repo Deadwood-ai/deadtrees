@@ -11,10 +11,15 @@ import pytest
 
 from processor.src import process_embeddings as pe
 from processor.src.embedding_search import PatchEmbedding
+from processor.src.embedding_search.patch_embedding import NODATA_THRESHOLD
 from shared import embedding_model as em
 from shared.embedding_model import BACKGROUND_PROMPTS, EMBEDDING_DIM
 
 pytestmark = pytest.mark.unit
+
+
+def test_nodata_threshold_requires_over_99pct_data():
+	assert NODATA_THRESHOLD == 0.01
 
 
 def test_embedding_to_pgvector_formats_six_decimals():

@@ -15,6 +15,7 @@ from torchvision.transforms.functional import crop
 from tqdm import tqdm
 
 from processor.src.utils.inference_dataset import InferenceDataset
+from processor.src.utils.nodata import read_nodata_mask
 from processor.src.utils.segmentation import (
 	filter_polygons_by_area,
 	image_reprojector,
@@ -183,8 +184,8 @@ class DeadwoodInference:
 						# Threshold per-tile so no float32 accumulator is kept in RAM.
 						binary_tile = (output_tile[0].numpy() > DEADWOOD_PROBABILITY_THRESHOLD).astype(np.uint8)
 
-						nodata_tile = vrt_src.read_masks(1, window=out_window)
-						binary_tile[nodata_tile == 0] = 0
+						nodata_tile = read_nodata_mask(vrt_src, out_window)
+						binary_tile[nodata_tile] = 0
 
 						dst.write(binary_tile, 1, window=out_window)
 

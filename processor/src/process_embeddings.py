@@ -58,7 +58,7 @@ def process_embeddings(task: QueueTask, token: str, temp_dir: Path):
 	"""Compute per-tile CLIP embeddings for a dataset and store them for search.
 
 	Mirrors the segmentation stages: resolve the ortho, ensure it is available
-	locally, reproject to 10cm, embed each <50% nodata tile with OpenCLIP
+	locally, reproject to 10cm, embed each >99% real-data tile with OpenCLIP
 	ViT-H/14, and replace any existing rows in ``v2_tile_embeddings``.
 	"""
 	import torch

@@ -32,6 +32,7 @@ from transformers import SegformerConfig, SegformerForSemanticSegmentation
 from tqdm import tqdm
 
 from processor.src.utils.inference_dataset import InferenceDataset
+from processor.src.utils.nodata import read_nodata_mask
 from processor.src.utils.segmentation import (
 	filter_polygons_by_area,
 	image_reprojector,
@@ -371,8 +372,8 @@ class AOIInference:
 						pred_tile = pred_tile[:, row_slice, col_slice]
 						mask_arr = (pred_tile[0].numpy() == CLASS_INSIDE_AOI).astype(np.uint8)
 
-						nodata_tile = vrt_src.read_masks(1, window=out_window)
-						mask_arr[nodata_tile == 0] = CLASS_OUTSIDE_AOI
+						nodata_tile = read_nodata_mask(vrt_src, out_window)
+						mask_arr[nodata_tile] = CLASS_OUTSIDE_AOI
 
 						dst_mask.write(mask_arr, 1, window=out_window)
 

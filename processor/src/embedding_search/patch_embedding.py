@@ -5,7 +5,12 @@ the deadtrees processor. The orthophoto is reprojected to a uniform 10cm ground
 sample distance (UTM) using the same :func:`image_reprojector` helper the
 segmentation stages use, then tiled into non-overlapping ``PATCH_SIZE`` windows.
 Tiles whose nodata fraction exceeds :data:`NODATA_THRESHOLD` are skipped so the
-CLIP embeddings are only computed over real imagery.
+CLIP embeddings are only computed over real imagery — tiles must be almost
+entirely (>99%) real data.
+
+nodata is detected robustly via the shared :func:`read_nodata_mask` helper,
+which honours a real alpha band, an internal mask, a declared nodata value, a
+mislabeled binary mask band and — as a last resort — solid white/black fill.
 
 Each returned :class:`PatchEmbedding` carries an L2-normalized image embedding
 plus the tile footprint as a WGS84 (EPSG:4326) polygon so the frontend can
@@ -27,6 +32,7 @@ from rasterio.windows import Window
 from shared.embedding_model import ModelBundle, encode_images
 
 from ..utils.segmentation import image_reprojector
+from ..utils.nodata import read_nodata_mask
 
 # A 512px CLIP patch at 10cm GSD covers 51.2m on the ground. Non-overlapping.
 PATCH_SIZE = 512
@@ -34,8 +40,9 @@ PATCH_STRIDE = 512
 # Force a uniform 10cm resolution. Orthos coarser than this are upsampled and
 # orthos finer than this are downsampled so every tile embeds the same scale.
 GSD_M = 0.10
-# Skip tiles with more than 50% nodata (user requirement: <50% nodata).
-NODATA_THRESHOLD = 0.5
+# Skip tiles unless they are >99% real data (i.e. at most 1% nodata). Tiles
+# clipping the ortho footprint carry a strip of fill that pollutes the embedding.
+NODATA_THRESHOLD = 0.01
 
 
 @dataclass
@@ -59,14 +66,15 @@ def _iter_tiles(vrt) -> Iterator[Tuple[Image.Image, PatchEmbedding]]:
 			win_w = min(PATCH_SIZE, width - x)
 			window = Window(x, y, win_w, win_h)
 
-			data = vrt.read(indexes=band_indexes, window=window, masked=True)
-
-			# Fraction of pixels that are nodata across all bands.
-			nodata_fraction = float(np.mean(np.all(data.mask, axis=0))) if data.mask is not np.ma.nomask else 0.0
+			# Fraction of pixels that are nodata (alpha / mask / declared nodata /
+			# mislabeled mask band / solid fill), resolved once by image_reprojector.
+			nodata = read_nodata_mask(vrt, window)
+			nodata_fraction = float(np.mean(nodata))
 			if nodata_fraction > NODATA_THRESHOLD:
 				continue
 
-			arr = np.where(data.mask, 0, data.data)
+			data = vrt.read(indexes=band_indexes, window=window)
+			arr = np.where(nodata, 0, data)
 			arr = np.moveaxis(arr, 0, -1)
 			arr = np.clip(arr, 0, 255).astype(np.uint8)
 			if arr.shape[2] == 1:

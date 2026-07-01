@@ -10,6 +10,7 @@ from shapely.affinity import affine_transform
 from shapely.geometry import Polygon
 
 from .crs import get_utm_string_from_latlon
+from .nodata import resolve_nodata_policy
 
 
 def merge_polygons(contours, hierarchy):
@@ -113,7 +114,7 @@ def image_reprojector(input_tif, min_res=0, max_res=1e9):
 			resolution=target_res,
 		)
 
-	return WarpedVRT(
+	vrt = WarpedVRT(
 		dataset,
 		crs=utm_crs,
 		transform=default_transform,
@@ -122,6 +123,10 @@ def image_reprojector(input_tif, min_res=0, max_res=1e9):
 		dtype='uint8',
 		nodata=0,
 	)
+	# Resolve nodata handling once from the source and stash it on the VRT so
+	# every consumer gets a correct mask via read_nodata_mask() — see nodata.py.
+	vrt.nodata_policy = resolve_nodata_policy(dataset)
+	return vrt
 
 
 def reproject_polygons(polygons, src_crs, dst_crs):
