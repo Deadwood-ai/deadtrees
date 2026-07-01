@@ -17,6 +17,7 @@ from transformers import SegformerConfig, SegformerForSemanticSegmentation
 from tqdm import tqdm
 
 from processor.src.utils.inference_dataset import InferenceDataset
+from processor.src.utils.nodata import read_nodata_mask
 from processor.src.utils.segmentation import (
     filter_polygons_by_area,
     image_reprojector,
@@ -275,8 +276,8 @@ class CombinedInference:
                         out_window = RioWindow(col_off=minx, row_off=miny, width=maxx - minx, height=maxy - miny)
                         class_arr = pred_tile[0].numpy().astype(np.uint8)
 
-                        nodata_tile = vrt_src.read_masks(1, window=out_window)
-                        class_arr[nodata_tile == 0] = CLASS_BACKGROUND
+                        nodata_tile = read_nodata_mask(vrt_src, out_window)
+                        class_arr[nodata_tile] = CLASS_BACKGROUND
 
                         dst_class.write(class_arr, 1, window=out_window)
                         dst_treecover.write((class_arr > 0).astype(np.uint8), 1, window=out_window)

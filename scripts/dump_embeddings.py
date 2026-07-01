@@ -2,8 +2,9 @@
 """Compute per-tile CLIP embeddings for one or more orthophotos and dump NDJSON.
 
 Reproduces the production `embeddings_v1` pipeline (reproject to 10cm -> 512px
-tiles -> drop >50% nodata -> OpenCLIP ViT-H/14) outside the processor, so search
-can be tested with precomputed embeddings. Reports timing per ortho.
+tiles -> keep only >99% real-data tiles -> OpenCLIP ViT-H/14) outside the
+processor, so search can be tested with precomputed embeddings. Reports timing
+per ortho.
 
     python scripts/dump_embeddings.py \
         204:/path/204_postfire.tif \
@@ -35,8 +36,25 @@ from shared.embedding_model import load_openclip, encode_images, tile_background
 
 PATCH = 512
 GSD_M = 0.10
-NODATA_THRESHOLD = 0.5
+# Keep only tiles that are >99% real data (at most 1% nodata).
+NODATA_THRESHOLD = 0.01
 BATCH = 16
+
+
+def nodata_mask(data: np.ndarray) -> np.ndarray:
+	"""Per-pixel nodata mask: declared mask + solid white/black fill heuristic.
+
+	Mirrors ``processor.src.embedding_search.patch_embedding._nodata_mask`` so
+	dumped embeddings match production. Some orthos ship a missing/wrong nodata
+	tag but pad with solid 0 (black) or 255 (white); those pass the declared
+	mask, so treat all-band pure 0/255 pixels as nodata too.
+	"""
+	values = data.data
+	if data.mask is not np.ma.nomask:
+		declared = np.all(data.mask, axis=0)
+	else:
+		declared = np.zeros(values.shape[1:], dtype=bool)
+	return declared | np.all(values == 0, axis=0) | np.all(values == 255, axis=0)
 
 
 def utm_epsg(lon: float, lat: float) -> int:
@@ -104,10 +122,11 @@ def main():
 				for xx in range(0, w, PATCH):
 					win = Window(xx, yy, min(PATCH, w - xx), min(PATCH, h - yy))
 					data = vrt.read(indexes=bands, window=win, masked=True)
-					ndf = float(np.mean(np.all(data.mask, axis=0))) if data.mask is not np.ma.nomask else 0.0
+					nodata = nodata_mask(data)
+					ndf = float(np.mean(nodata))
 					if ndf > NODATA_THRESHOLD:
 						continue
-					arr = np.where(data.mask, 0, data.data)
+					arr = np.where(nodata, 0, data.data)
 					arr = np.moveaxis(arr, 0, -1)
 					arr = np.clip(arr, 0, 255).astype(np.uint8)
 					if arr.shape[2] == 1:
