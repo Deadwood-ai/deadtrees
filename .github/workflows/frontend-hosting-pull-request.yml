@@ -10,6 +10,7 @@ on:
 permissions:
   checks: write
   contents: read
+  issues: write
   pull-requests: write
 
 jobs:
@@ -69,7 +70,7 @@ jobs:
         id: firebase-channel
         run: |
           raw="pr${{ github.event.pull_request.number }}-${{ github.head_ref }}"
-          channel="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_-]+/_/g; s/^[_-]+|[_-]+$//g' | cut -c1-30)"
+          channel="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^-+|-+$//g' | cut -c1-30)"
           if [ -z "$channel" ]; then
             channel="pr${{ github.event.pull_request.number }}"
           fi
@@ -85,6 +86,46 @@ jobs:
           FIREBASE_TOOLS_VERSION: 15.22.2
           FIREBASE_CHANNEL_ID: ${{ steps.firebase-channel.outputs.channel }}
         run: ../.github/scripts/firebase-hosting-deploy.sh preview
+      - name: Comment Firebase preview URL
+        if: ${{ steps.firebase-preview.outputs.preview_url != '' }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const marker = "<!-- deadtrees-frontend-preview -->";
+            const previewUrl = "${{ steps.firebase-preview.outputs.preview_url }}";
+            const body = [
+              marker,
+              "### Frontend preview",
+              "",
+              `[Open Firebase preview](${previewUrl})`,
+              "",
+              "Channel: `${{ steps.firebase-channel.outputs.channel }}`",
+              "Commit: `${{ github.event.pull_request.head.sha }}`",
+            ].join("\n");
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => comment.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
       - name: Warn when Firebase preview deploy fails
         if: ${{ steps.firebase-preview.outcome == 'failure' }}
         run: |
