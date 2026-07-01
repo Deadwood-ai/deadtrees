@@ -42,10 +42,14 @@ an explicit workflow fix. Manual migration repair or direct production SQL
 execution should be an explicitly approved emergency action only.
 
 Processing server automation is not represented as a GitHub workflow. It is a
-host-local cron setup on `processing-server`:
+host-local cron setup on `processing-server`. The processor now runs as a
+**persistent worker** (`command: python -m processor.src.continuous_processor`,
+`restart: unless-stopped`) that drains the queue back-to-back and only backs off
+when idle — it is no longer restarted once per task. As a result the old
+per-minute `docker compose up` cron entry is unnecessary (the container stays up
+on its own via the restart policy); only the auto-deploy entry remains:
 
 ```cron
-* * * * * cd /home/jj1049/prod/deadtrees && docker compose -f docker-compose.processor.yaml up
 * * * * * /home/jj1049/prod/deadtrees/auto_deploy_processor.sh
 ```
 
@@ -56,6 +60,10 @@ host-local cron setup on `processing-server`:
 - compares local `HEAD` with `origin/main`
 - runs `git pull origin main` when a new commit is available
 - runs `docker compose -f docker-compose.processor.yaml build processor tcd`
+- runs `docker compose -f docker-compose.processor.yaml up -d --build processor`
+  so a new image recreates the running container, triggering the graceful
+  shutdown + re-queue path for any in-flight task (see `stop_grace_period` /
+  `_handle_graceful_shutdown`)
 - writes status to `/home/jj1049/prod/deadtrees/auto-deploy.log`
 
 `docker-compose.processor.yaml` builds the processor locally on the processing

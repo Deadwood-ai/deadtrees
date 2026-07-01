@@ -129,6 +129,11 @@ class Settings(BaseSettings):
 	PROCESSOR_USERNAME: str = 'processor@deadtrees.earth'
 	PROCESSOR_PASSWORD: str = 'processor'
 	PROCESSOR_WORKER_ID: str = ''
+	# Seconds the continuous processor waits before re-polling the queue *only*
+	# when the last poll found no processable task. When there is a backlog the
+	# worker claims the next task immediately (zero wait), so this backoff never
+	# applies mid-drain.
+	PROCESSOR_IDLE_BACKOFF_SECONDS: int = 10
 	SSH_PRIVATE_KEY_PATH: str = '/app/ssh_key'
 	SSH_PRIVATE_KEY_PASSPHRASE: str = ''
 	ODM_AUTO_BOUNDARY: bool = False
