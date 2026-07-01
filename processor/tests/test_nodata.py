@@ -17,9 +17,13 @@ import rasterio
 import rasterio.enums as CI
 from rasterio.transform import from_origin
 
+from rasterio.windows import Window
+
 from processor.src.utils.nodata import (
 	NodataPolicy,
+	_connected,
 	_detect_mask_band,
+	_raster_edge_seed,
 	read_nodata_mask,
 	resolve_nodata_policy,
 )
@@ -151,6 +155,7 @@ class FakeVRT:
 		# Stored as a 2D band, matching rasterio's read(band_index) shape.
 		self._extra = None if extra_band is None else np.asarray(extra_band, dtype=np.uint8).reshape(self._rgb.shape[1:])
 		self.count = self._rgb.shape[0] + (0 if self._extra is None else 1)
+		self.height, self.width = self._rgb.shape[1:]
 		self.nodata_policy = policy
 
 	def read_masks(self, band, window=None):
@@ -192,6 +197,74 @@ def test_read_mask_white_fill_keeps_partially_bright_pixels():
 	rgb = np.array([[[255]], [[255]], [[200]]], dtype=np.uint8)
 	vrt = FakeVRT(rgb, np.zeros((1, 1), bool), NodataPolicy(treat_white_fill=True, treat_black_fill=True))
 	np.testing.assert_array_equal(read_nodata_mask(vrt), np.array([[False]]))
+
+
+def test_read_mask_keeps_interior_white_patch():
+	# A saturated-white patch surrounded by real data (window=None → all borders
+	# are raster edges) is NOT connected to any edge, so it must be kept.
+	rgb = np.full((3, 5, 5), 120, np.uint8)
+	rgb[:, 2, 2] = 255  # lone interior white pixel
+	vrt = FakeVRT(rgb, np.zeros((5, 5), bool), NodataPolicy(treat_white_fill=True))
+	assert not read_nodata_mask(vrt).any()
+
+
+def test_read_mask_flags_edge_connected_white_only():
+	# Two white blobs: one touching the top edge (padding) and one interior
+	# (real). Only the edge-connected one is nodata.
+	rgb = np.full((3, 5, 5), 120, np.uint8)
+	rgb[:, 0, 0] = 255  # top-left corner → connected to raster edge
+	rgb[:, 3, 3] = 255  # interior → kept
+	mask = read_nodata_mask(FakeVRT(rgb, np.zeros((5, 5), bool), NodataPolicy(treat_white_fill=True)))
+	assert mask[0, 0] and not mask[3, 3]
+
+
+# --------------------------------------------------------------------------- #
+# Connectivity helpers
+# --------------------------------------------------------------------------- #
+
+
+def test_raster_edge_seed_whole_raster_marks_all_borders():
+	seed = _raster_edge_seed(None, None, (3, 3))
+	# Every border pixel is a raster edge; the centre is not.
+	assert not seed[1, 1]
+	assert seed[0, :].all() and seed[-1, :].all() and seed[:, 0].all() and seed[:, -1].all()
+
+
+def test_raster_edge_seed_interior_window_marks_nothing():
+	class V:
+		height, width = 100, 100
+
+	# A window fully inside the raster touches no outer edge.
+	seed = _raster_edge_seed(V(), Window(col_off=10, row_off=10, width=8, height=8), (8, 8))
+	assert not seed.any()
+
+
+def test_raster_edge_seed_corner_window_marks_touching_edges():
+	class V:
+		height, width = 100, 100
+
+	seed = _raster_edge_seed(V(), Window(col_off=0, row_off=0, width=8, height=8), (8, 8))
+	assert seed[0, :].all() and seed[:, 0].all()  # top + left are raster edges
+	# Bottom/right are interior: not fully seeded, and the far corner is unset.
+	assert not seed[-1, :].all() and not seed[:, -1].all() and not seed[-1, -1]
+
+
+def test_connected_grows_only_within_fill_from_seed():
+	fill = np.array([[1, 1, 0], [0, 1, 0], [0, 1, 1]], dtype=bool)
+	seed = np.array([[1, 0, 0], [0, 0, 0], [0, 0, 0]], dtype=bool)
+	# The whole L-shape is connected to the seeded top-left.
+	np.testing.assert_array_equal(_connected(fill, seed), fill)
+
+
+def test_connected_ignores_unseeded_component():
+	fill = np.array([[1, 0, 0], [0, 0, 0], [0, 0, 1]], dtype=bool)
+	seed = np.array([[1, 0, 0], [0, 0, 0], [0, 0, 0]], dtype=bool)
+	np.testing.assert_array_equal(_connected(fill, seed), np.array([[1, 0, 0], [0, 0, 0], [0, 0, 0]], dtype=bool))
+
+
+def test_connected_returns_empty_without_seed():
+	fill = np.ones((3, 3), dtype=bool)
+	assert not _connected(fill, np.zeros((3, 3), dtype=bool)).any()
 
 
 # --------------------------------------------------------------------------- #
@@ -279,6 +352,23 @@ def test_e2e_untagged_white_fill(tmp_path):
 	try:
 		assert vrt.nodata_policy == NodataPolicy(treat_white_fill=True, treat_black_fill=True)
 		_assert_left_nodata_right_data(read_nodata_mask(vrt), left, right)
+	finally:
+		vrt.close()
+
+
+def test_e2e_untagged_white_fill_keeps_interior_patch(tmp_path):
+	# No metadata + white footprint padding on the left, PLUS a saturated-white
+	# block in the interior (e.g. snow). The padding is masked; the interior
+	# block is kept — the exact false-positive the connectivity guard prevents.
+	rgb, left, right = _split_data()
+	rgb[:, :, left] = 255  # left-edge padding
+	rgb[:, 12:20, 22:28] = 255  # interior white block, fully inside the data half
+	path = _write(tmp_path / 'white_plus_snow.tif', rgb)
+	vrt = image_reprojector(path)
+	try:
+		mask = read_nodata_mask(vrt)
+		assert mask[:, left].mean() > 0.9, 'left padding should be nodata'
+		assert not mask[12:20, 22:28].any(), 'interior white block must be kept'
 	finally:
 		vrt.close()
 

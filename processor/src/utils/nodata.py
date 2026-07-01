@@ -18,6 +18,12 @@ and therefore the only things this module adds — are a *mislabeled* binary mas
 band and, when the source carries no masking metadata whatsoever, a solid
 white/black fill fallback.
 
+That fill fallback is deliberately conservative: it only flags solid-white /
+solid-black pixels that are *connected* to already-known nodata or to a true
+raster edge, i.e. actual footprint padding. Saturated-white content inside the
+footprint (snow, calibration panels, sunlit roofs) is not connected to the
+border and is therefore kept.
+
 :func:`image_reprojector` resolves a :class:`NodataPolicy` once and stores it on
 the returned VRT as ``.nodata_policy``. Consumers call
 :func:`read_nodata_mask` instead of ``vrt.read_masks(1)`` to get a boolean tile
@@ -133,6 +139,56 @@ def resolve_nodata_policy(src) -> NodataPolicy:
 	return NodataPolicy(treat_white_fill=True, treat_black_fill=True)
 
 
+def _raster_edge_seed(vrt, window, shape) -> np.ndarray:
+	"""Boolean (H, W) marking window borders that lie on the raster's outer edge.
+
+	Footprint padding only occurs at true raster edges, so these pixels seed the
+	connected-fill search. ``window=None`` means the whole raster (all edges).
+	"""
+	h, w = shape
+	seed = np.zeros((h, w), dtype=bool)
+	if window is None:
+		seed[0, :] = seed[-1, :] = True
+		seed[:, 0] = seed[:, -1] = True
+		return seed
+	col_off = int(getattr(window, 'col_off', 0))
+	row_off = int(getattr(window, 'row_off', 0))
+	if row_off <= 0:
+		seed[0, :] = True
+	if col_off <= 0:
+		seed[:, 0] = True
+	if row_off + h >= vrt.height:
+		seed[-1, :] = True
+	if col_off + w >= vrt.width:
+		seed[:, -1] = True
+	return seed
+
+
+def _connected(fill: np.ndarray, seed: np.ndarray) -> np.ndarray:
+	"""Subset of ``fill`` reachable from ``seed`` via 4-connectivity, within ``fill``.
+
+	Iterative binary propagation to a fixpoint — no scipy/cv2 dependency. Only
+	runs on the fill-fallback path (metadata-less orthos), and the common
+	fully-padded tile short-circuits.
+	"""
+	reach = fill & seed
+	if not reach.any():
+		return np.zeros_like(fill)
+	if fill.all():
+		# Whole window is fill and at least one pixel is seeded → all padding.
+		return fill
+	while True:
+		grown = reach.copy()
+		grown[1:, :] |= reach[:-1, :]
+		grown[:-1, :] |= reach[1:, :]
+		grown[:, 1:] |= reach[:, :-1]
+		grown[:, :-1] |= reach[:, 1:]
+		grown &= fill
+		if grown.sum() == reach.sum():
+			return grown
+		reach = grown
+
+
 def read_nodata_mask(vrt, window=None) -> np.ndarray:
 	"""Boolean nodata mask (``True`` = nodata) for a window of an image_reprojector VRT.
 
@@ -149,9 +205,14 @@ def read_nodata_mask(vrt, window=None) -> np.ndarray:
 	if policy.treat_white_fill or policy.treat_black_fill:
 		n = min(3, vrt.count)
 		rgb = vrt.read(indexes=list(range(1, n + 1)), window=window)
+		fill = np.zeros(rgb.shape[1:], dtype=bool)
 		if policy.treat_white_fill:
-			mask = mask | np.all(rgb == 255, axis=0)
+			fill |= np.all(rgb == 255, axis=0)
 		if policy.treat_black_fill:
-			mask = mask | np.all(rgb == 0, axis=0)
+			fill |= np.all(rgb == 0, axis=0)
+		# Keep only footprint padding: fill connected to known nodata or a raster
+		# edge. Interior saturated content (snow, panels) is preserved.
+		seed = mask | _raster_edge_seed(vrt, window, fill.shape)
+		mask = mask | _connected(fill, seed)
 
 	return mask
