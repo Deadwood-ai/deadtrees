@@ -343,7 +343,7 @@ const DataTable: React.FC<DataTableProps> = ({
           openDatasetDetail({
             queryClient,
             navigate: nav,
-            dataset: record,
+            datasetId: record.id,
             authStatus: status,
             userId: user?.id,
           }),
