@@ -31,7 +31,7 @@ logger = UnifiedLogger(__name__)
 def _kill_dangling_dataset_resources(dataset_id: int):
 	"""Kill any running containers and remove volumes left over from an interrupted job."""
 	try:
-		client = docker.from_env()
+		client = docker.from_env(timeout=settings.DOCKER_CLIENT_TIMEOUT_SECONDS)
 		label_filter = f'dt_dataset_id={dataset_id}'
 
 		containers = client.containers.list(all=True, filters={'label': label_filter})

@@ -537,7 +537,9 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		token: Authentication token for logging
 		dataset_id: Dataset ID for logging
 	"""
-	client = docker.from_env()
+	# Generous read timeout: creating/starting the ODM container can block past the
+	# 60s docker default when the host disk is saturated after extracting the raw-image zip.
+	client = docker.from_env(timeout=settings.DOCKER_CLIENT_TIMEOUT_SECONDS)
 	volume_name = f'odm_processing_{dataset_id}'
 	retain_on_failure = retain_failed_artifacts_enabled_for_dataset(dataset_id)
 	resource_labels = dt_resource_labels(dataset_id=dataset_id, stage='odm', keep_eligible=retain_on_failure)

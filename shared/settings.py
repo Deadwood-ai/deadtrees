@@ -46,6 +46,15 @@ class Settings(BaseSettings):
 	TCD_CONTAINER_IMAGE: str = 'deadtrees-tcd:latest'
 	TCD_CONTAINER_TIMEOUT_SECONDS: int = 14400
 
+	# docker.from_env() defaults to a 60s read timeout on the daemon socket, which applies
+	# to control-plane calls (containers.create/start, put_archive, wait). When the host disk
+	# is saturated flushing a freshly-extracted multi-GB raw-image zip, the daemon can take
+	# well over 60s just to service a create/start, surfacing as spurious
+	# "UnixHTTPConnectionPool(host='localhost', port=None): Read timed out. (read timeout=60)"
+	# failures in the ODM copy-to-volume step. Give the daemon far more headroom; this is not
+	# a timeout on the ODM run itself (that is bounded separately by container.wait).
+	DOCKER_CLIENT_TIMEOUT_SECONDS: int = 600
+
 	# Base paths and directories
 	BASE_DIR: str = str(BASE)
 	# Default to repo-local assets in dev/test; container deployments can still override via env.
