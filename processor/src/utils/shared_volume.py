@@ -13,6 +13,17 @@ import time
 from pathlib import Path
 from shared.logger import logger
 from shared.logging import LogContext, LogCategory
+from shared.settings import settings
+
+
+def _docker_client() -> docker.DockerClient:
+	"""Docker client with a generous read timeout.
+
+	The default 60s socket read timeout is too low for daemon control-plane calls
+	(containers.create/start, put_archive) when the host disk is busy flushing a
+	freshly-extracted multi-GB raw-image zip. See DOCKER_CLIENT_TIMEOUT_SECONDS.
+	"""
+	return docker.from_env(timeout=settings.DOCKER_CLIENT_TIMEOUT_SECONDS)
 
 
 class _GeneratorStream(io.RawIOBase):
@@ -58,7 +69,7 @@ def copy_files_to_shared_volume(
 		dataset_id: Dataset ID for logging and project naming
 		token: Authentication token for logging
 	"""
-	client = docker.from_env()
+	client = _docker_client()
 	project_name = f'dataset_{dataset_id}'
 
 	logger.info(
@@ -165,7 +176,7 @@ def copy_results_from_shared_volume(volume_name: str, output_dir: Path, project_
 		dataset_id: Dataset ID for logging
 		token: Authentication token for logging
 	"""
-	client = docker.from_env()
+	client = _docker_client()
 
 	logger.info(
 		f'Copying ODM results from shared volume {volume_name} to {output_dir} using Docker API',
@@ -284,7 +295,7 @@ def cleanup_volume_and_references(
 	1) Removing any containers that reference it
 	2) Removing the volume with retry/backoff
 	"""
-	client = docker.from_env()
+	client = _docker_client()
 
 	# Remove referencing containers first
 	containers = _containers_referencing_volume(client, volume_name)

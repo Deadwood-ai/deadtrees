@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timezone
 from shared.logger import logger
 from shared.logging import LogContext, LogCategory
+from shared.settings import settings
 from processor.src.utils.debug_artifacts import retention_ttl_hours
 
 
@@ -29,7 +30,7 @@ def cleanup_orphaned_resources(token: str):
 	Args:
 		token: Authentication token for database operations
 	"""
-	client = docker.from_env()
+	client = docker.from_env(timeout=settings.DOCKER_CLIENT_TIMEOUT_SECONDS)
 	ttl_hours = retention_ttl_hours()
 
 	logger.info('=== STARTUP CLEANUP ===', LogContext(category=LogCategory.PROCESS, token=token))
