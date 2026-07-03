@@ -164,7 +164,10 @@ export default function ProfilePage() {
                           <span className="font-medium text-blue-900">Formats:</span> Standalone GeoTIFF (max 20GB) or ZIP with raw drone images - JPEG, JPG (max 30GB)
                         </li>
                         <li>
-                          <span className="font-medium text-blue-900">Raw Images:</span> For orthomosaic generation we recommend {">"}85%-front and {">"}70%-side overlap
+                          <span className="font-medium text-blue-900">Raw Images:</span> For orthomosaic generation, use the{" "}
+                          <Link to="/releases/drone-mapping-guide" className="font-semibold underline">
+                            drone mapping guide
+                          </Link>
                         </li>
                         <li>
                           <span className="font-medium text-blue-900">Requirements:</span> RGB/NIRRGB, {"<"}10cm resolution, any coordinate reference system

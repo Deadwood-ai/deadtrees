@@ -1,4 +1,4 @@
-import { DatabaseOutlined } from "@ant-design/icons";
+import { DatabaseOutlined, ReadOutlined } from "@ant-design/icons";
 import { Alert, Button, Skeleton, Tag } from "antd";
 import { useNavigate } from "react-router-dom";
 
@@ -9,6 +9,7 @@ import {
   getReleaseStats,
   type ReleaseStat,
   type ReleasePreviewTile,
+  type GuideRelease,
 } from "../data/releases";
 import { ReleasePreviewStrip } from "../components/Releases/ReleasePreviewStrip";
 import { usePrepackagedDatasets } from "../hooks/usePrepackagedDatasets";
@@ -94,6 +95,55 @@ function ReleaseCard({
   );
 }
 
+function GuideCard({
+  release,
+  onOpen,
+}: {
+  release: GuideRelease;
+  onOpen: () => void;
+}) {
+  return (
+    <article
+      className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md"
+      data-testid="release-card"
+    >
+      <div className="border-b border-gray-100 bg-white px-4 pt-4 md:px-6 md:pt-6">
+        <img
+          src={release.guide.primaryImage}
+          alt="Illustrated drone mapping workflow for the contributor guide"
+          loading="lazy"
+          className="mx-auto block w-full max-w-5xl rounded-lg border border-gray-200 bg-white"
+        />
+      </div>
+
+      <div className="px-6 pt-3 pb-6 md:px-10 md:pt-5 md:pb-10">
+        <div className="flex flex-wrap items-center gap-2">
+          <Tag className="m-0">{release.shortName}</Tag>
+        </div>
+
+        <h2 className="m-0 mt-5 max-w-3xl text-3xl font-semibold leading-tight text-gray-950 md:text-4xl">
+          {release.name}
+        </h2>
+        <p className="mt-4 max-w-3xl text-base leading-7 text-gray-600">
+          {release.summary}
+        </p>
+
+        <div className="mt-7 flex flex-wrap items-center gap-3">
+          <Button
+            type="primary"
+            size="large"
+            icon={<ReadOutlined />}
+            onClick={onOpen}
+            className="min-h-11"
+          >
+            Open guide
+          </Button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 function buildPrepackagedStats(pkg: IPrepackagedDatasetPackage): ReleaseStat[] {
   const v = getLatestPrepackagedVersion(pkg);
   if (!v) return [];
@@ -132,29 +182,36 @@ export default function Releases() {
             Published resources from deadtrees.earth
           </h1>
           <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-gray-600">
-            Stable datasets and benchmarks with metadata and previews for
-            scientific reuse—including versioned ZIP packages sourced from
-            public CC BY data (downloads require sign-in and use short-lived
-            links).
+            Stable datasets, benchmarks, guides, and data packages with metadata
+            and previews for scientific reuse. Versioned ZIP downloads require
+            sign-in and use short-lived links.
           </p>
         </div>
       </section>
 
       <section className="mx-auto max-w-7xl px-4 py-12 md:px-8 md:py-16">
         <div className="grid gap-6">
-          {publicReleases.map((release) => (
-            <ReleaseCard
-              key={release.slug}
-              previewTiles={getReleasePreviewTiles(release)}
-              isAvailable={release.status === "available"}
-              typeLabel={release.typeLabel}
-              shortName={release.shortName}
-              title={release.name}
-              summary={release.summary}
-              stats={getReleaseStats(release)}
-              onOpen={() => navigate(`/releases/${release.slug}`)}
-            />
-          ))}
+          {publicReleases.map((release) =>
+            release.type === "guide" ? (
+              <GuideCard
+                key={release.slug}
+                release={release}
+                onOpen={() => navigate(`/releases/${release.slug}`)}
+              />
+            ) : (
+              <ReleaseCard
+                key={release.slug}
+                previewTiles={getReleasePreviewTiles(release)}
+                isAvailable={release.status === "available"}
+                typeLabel={release.typeLabel}
+                shortName={release.shortName}
+                title={release.name}
+                summary={release.summary}
+                stats={getReleaseStats(release)}
+                onOpen={() => navigate(`/releases/${release.slug}`)}
+              />
+            ),
+          )}
 
           {isLoading && (
             <Skeleton active paragraph={{ rows: 6 }} className="p-2" />

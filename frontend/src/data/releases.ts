@@ -37,7 +37,11 @@ export interface DteAerialPatchImageSet {
   mortalityMask: string;
 }
 
-export type PublicReleaseType = "benchmark-dataset" | "dataset" | "model";
+export type PublicReleaseType =
+  | "benchmark-dataset"
+  | "dataset"
+  | "guide"
+  | "model";
 
 export interface ReleaseStat {
   label: string;
@@ -92,7 +96,18 @@ export interface DteAerialRelease extends PublicReleaseBase {
   };
 }
 
-export type PublicRelease = DteAerialRelease;
+export interface GuideRelease extends PublicReleaseBase {
+  type: "guide";
+  guide: {
+    audience: string;
+    primaryImage: string;
+    secondaryImage: string;
+    repositoryUrl: string;
+    steps: number;
+  };
+}
+
+export type PublicRelease = DteAerialRelease | GuideRelease;
 
 const DEFAULT_DTE_AERIAL_PREVIEW_SITE_IDS = [375, 1396, 5584];
 
@@ -542,7 +557,31 @@ export const getReleaseTeaserMeta = (release: PublicRelease) => {
     return `${benchmarkSites} sites - ${benchmarkPatches} patches - ${resolutionsCm.join(", ")} cm resolutions`;
   }
 
-  return release.shortName;
+  return "";
+};
+
+export const droneMappingGuideRelease: GuideRelease = {
+  slug: "drone-mapping-guide",
+  name: "Drone mapping guide",
+  shortName: "Drone mapping",
+  title:
+    "A contributor guide for planning drone survey flights and uploading forest imagery",
+  type: "guide",
+  typeLabel: "Contributor guide",
+  status: "available",
+  summary:
+    "A practical guide for drone pilots who want to collect high-resolution forest imagery for deadtrees.earth processing and AI model training.",
+  links: {
+    artifact:
+      "https://github.com/sarahhabershon/deadtrees_mapping_guide/blob/main/index.html",
+  },
+  guide: {
+    audience: "Drone pilots and field contributors",
+    primaryImage: "/assets/guides/drone-mapping/flight-workflow-cropped.jpg",
+    secondaryImage: "/assets/guides/drone-mapping/upload-workflow.png",
+    repositoryUrl: "https://github.com/sarahhabershon/deadtrees_mapping_guide",
+    steps: 4,
+  },
 };
 
 export const dteAerialRelease: DteAerialRelease = {
@@ -872,4 +911,7 @@ export const dteAerialRelease: DteAerialRelease = {
   },
 };
 
-export const publicReleases: PublicRelease[] = [dteAerialRelease];
+export const publicReleases: PublicRelease[] = [
+  droneMappingGuideRelease,
+  dteAerialRelease,
+];
