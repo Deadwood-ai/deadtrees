@@ -25,7 +25,7 @@ import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { unByKey } from "ol/Observable";
 import { fromLonLat, toLonLat } from "ol/proj";
 import View from "ol/View";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 
 import { createStandardMapControls } from "../../utils/basemaps";
@@ -36,7 +36,7 @@ import {
   createPriwaOfflineAreaFeature,
   createPriwaOfflineAreaLayer,
 } from "./createPriwaOfflineAreaLayer";
-import { createPriwaCogLayer } from "./createPriwaCogLayer";
+import { createPriwaCogLayers } from "./createPriwaCogLayer";
 import {
   createPriwaPointFeature,
   createPriwaPointLayer,
@@ -47,6 +47,7 @@ import PriwaPointDrawer from "./PriwaPointDrawer";
 import PriwaPointListPanel from "./PriwaPointListPanel";
 import PriwaOfflineStatus from "./PriwaOfflineStatus";
 import { usePriwaOfflineBasemap } from "./usePriwaOfflineBasemap";
+import type { IPriwaMosaic } from "./usePriwaMosaics";
 import type { IPriwaSyncSummary } from "./priwaOfflineSync";
 import type {
   IPriwaCoordinate,
@@ -56,6 +57,43 @@ import type {
 
 const FIELD_CENTER: [number, number] = [8.18013, 48.45596];
 type PriwaBaseLayer = "aerial" | "topographic";
+
+const formatPriwaMosaicDate = (value: string | null | undefined) => {
+  if (!value) return null;
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (match) {
+    return `${match[3]}.${match[2]}.${match[1]}`;
+  }
+
+  return value;
+};
+
+const mosaicDateRank = (value: string | null | undefined) => {
+  if (!value) return Number.NEGATIVE_INFINITY;
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? Number.NEGATIVE_INFINITY : timestamp;
+};
+
+const mosaicIdRank = (id: string) => {
+  const numericId = Number(id);
+  return Number.isFinite(numericId) ? numericId : Number.NEGATIVE_INFINITY;
+};
+
+const comparePriwaMosaics = (left: IPriwaMosaic, right: IPriwaMosaic) => {
+  const captureDifference =
+    mosaicDateRank(right.captureDate) - mosaicDateRank(left.captureDate);
+  if (captureDifference !== 0) return captureDifference;
+
+  const uploadDifference =
+    mosaicDateRank(right.createdAt) - mosaicDateRank(left.createdAt);
+  if (uploadDifference !== 0) return uploadDifference;
+
+  const idDifference = mosaicIdRank(right.id) - mosaicIdRank(left.id);
+  if (idDifference !== 0) return idDifference;
+
+  return right.id.localeCompare(left.id);
+};
 
 function MapLayersIcon() {
   return (
@@ -85,8 +123,9 @@ interface PriwaFieldMapProps {
   isLoadingPoints?: boolean;
   isSavingPoint?: boolean;
   projectName: string;
-  cogPath?: string | null;
+  mosaics?: IPriwaMosaic[];
   isCogLoading?: boolean;
+  cogErrorMessage?: string | null;
   errorMessage?: string | null;
   syncSummary?: IPriwaSyncSummary;
   onAddPoint: (point: IPriwaPoint) => Promise<void>;
@@ -101,8 +140,9 @@ export default function PriwaFieldMap({
   isLoadingPoints = false,
   isSavingPoint = false,
   projectName,
-  cogPath,
+  mosaics = [],
   isCogLoading = false,
+  cogErrorMessage = null,
   errorMessage = null,
   syncSummary,
   onAddPoint,
@@ -129,9 +169,12 @@ export default function PriwaFieldMap({
   const topographicLayerRef = useRef<ReturnType<
     typeof createPriwaTopographicLayer
   > | null>(null);
-  const cogLayerRef = useRef<TileLayerWebGL | null>(null);
+  const cogLayersRef = useRef<TileLayerWebGL[]>([]);
+  const knownMosaicIdsRef = useRef<Set<string>>(new Set());
   const [isDrawerOpen, setDrawerOpen] = useState(false);
-  const [isCogVisible, setCogVisible] = useState(true);
+  const [enabledMosaicIds, setEnabledMosaicIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [isPlacingPoint, setPlacingPoint] = useState(false);
   const [selectedCoordinate, setSelectedCoordinate] =
     useState<IPriwaCoordinate | null>(null);
@@ -141,6 +184,17 @@ export default function PriwaFieldMap({
   const [formSessionId, setFormSessionId] = useState(0);
   const [isPointListOpen, setPointListOpen] = useState(false);
   const [baseLayer, setBaseLayer] = useState<PriwaBaseLayer>("aerial");
+  const visibleMosaics = useMemo(
+    () =>
+      [...mosaics]
+        .filter((mosaic) => mosaic.cogUrl.trim().length > 0)
+        .sort(comparePriwaMosaics),
+    [mosaics],
+  );
+  const enabledMosaics = useMemo(
+    () => visibleMosaics.filter((mosaic) => enabledMosaicIds.has(mosaic.id)),
+    [enabledMosaicIds, visibleMosaics],
+  );
   const userLocation = useUserLocationLayer(mapRef);
   const {
     layer: userLocationLayer,
@@ -245,7 +299,7 @@ export default function PriwaFieldMap({
       topographicLayerRef.current = null;
       pointLayerRef.current = null;
       previewLayerRef.current = null;
-      cogLayerRef.current = null;
+      cogLayersRef.current = [];
     };
   }, [openPointForEditing, stopUserLocation, userLocationLayer]);
 
@@ -253,6 +307,23 @@ export default function PriwaFieldMap({
     aerialLayerRef.current?.setVisible(baseLayer === "aerial");
     topographicLayerRef.current?.setVisible(baseLayer === "topographic");
   }, [baseLayer]);
+
+  useEffect(() => {
+    const nextKnownIds = new Set(visibleMosaics.map((mosaic) => mosaic.id));
+    const previousKnownIds = knownMosaicIdsRef.current;
+
+    setEnabledMosaicIds((currentIds) => {
+      const nextEnabledIds = new Set<string>();
+      visibleMosaics.forEach((mosaic) => {
+        if (!previousKnownIds.has(mosaic.id) || currentIds.has(mosaic.id)) {
+          nextEnabledIds.add(mosaic.id);
+        }
+      });
+      return nextEnabledIds;
+    });
+
+    knownMosaicIdsRef.current = nextKnownIds;
+  }, [visibleMosaics]);
 
   useEffect(() => {
     const source = pointLayerRef.current?.getSource();
@@ -280,17 +351,22 @@ export default function PriwaFieldMap({
     const map = mapRef.current;
     if (!map) return;
 
-    if (cogLayerRef.current) {
-      map.removeLayer(cogLayerRef.current);
-      cogLayerRef.current = null;
+    if (cogLayersRef.current.length > 0) {
+      cogLayersRef.current.forEach((layer) => {
+        map.removeLayer(layer);
+      });
+      cogLayersRef.current = [];
     }
 
-    if (!cogPath || !isCogVisible) return;
+    if (enabledMosaics.length === 0) return;
 
-    const cogLayer = createPriwaCogLayer(cogPath);
-    cogLayerRef.current = cogLayer;
-    map.getLayers().insertAt(2, cogLayer);
-  }, [cogPath, isCogVisible]);
+    const cogLayers = createPriwaCogLayers(enabledMosaics);
+    cogLayersRef.current = cogLayers;
+    cogLayers.forEach((layer, index) => {
+      layer.setZIndex(20 + (enabledMosaics.length - index) / 100);
+      map.getLayers().insertAt(2 + index, layer);
+    });
+  }, [enabledMosaics]);
 
   const handlePreviewCoordinate = useCallback(
     (coordinate: IPriwaCoordinate | null) => {
@@ -387,6 +463,23 @@ export default function PriwaFieldMap({
   const pointListToggleLabel = isPointListOpen
     ? "Punktliste schließen"
     : "Punktliste öffnen";
+  const mosaicCount = visibleMosaics.length;
+  const enabledMosaicCount = enabledMosaics.length;
+
+  const setMosaicVisibility = useCallback(
+    (mosaicId: string, checked: boolean) => {
+      setEnabledMosaicIds((currentIds) => {
+        const nextIds = new Set(currentIds);
+        if (checked) {
+          nextIds.add(mosaicId);
+        } else {
+          nextIds.delete(mosaicId);
+        }
+        return nextIds;
+      });
+    },
+    [],
+  );
 
   const handleAddPoint = useCallback(
     async (point: IPriwaPoint) => {
@@ -443,7 +536,7 @@ export default function PriwaFieldMap({
   }, [clearOfflineBasemapArea]);
 
   const layerPanel = (
-    <div className="w-56 space-y-3">
+    <div className="w-[21rem] max-w-[calc(100vw-3rem)] space-y-3">
       <div>
         <Typography.Text strong>Layer</Typography.Text>
         <div className="text-xs text-gray-500">
@@ -465,22 +558,81 @@ export default function PriwaFieldMap({
           onChange={setBaseLayer}
         />
       </div>
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <div className="text-sm font-medium text-gray-900">Drohnenlayer</div>
-          <div className="text-xs text-gray-500">
-            {isCogLoading
-              ? "Lade Drohnenlayer..."
-              : cogPath
-                ? "Optionaler Overlay"
-                : "Folgt in einem eigenen Schritt"}
-          </div>
+      <div>
+        <div className="text-sm font-medium text-gray-900">Drohnenlayer</div>
+        <div className="text-xs text-gray-500">
+          {isCogLoading
+            ? "Lade Drohnenlayer..."
+            : mosaicCount > 0
+              ? `${enabledMosaicCount} von ${mosaicCount} Befliegung${
+                  mosaicCount === 1 ? "" : "en"
+                } sichtbar`
+              : "Keine Drohnenlayer hinterlegt"}
         </div>
-        <Switch
-          checked={!!cogPath && isCogVisible}
-          disabled={!cogPath}
-          onChange={setCogVisible}
-        />
+        {cogErrorMessage && (
+          <div className="mt-1 text-xs text-red-600">{cogErrorMessage}</div>
+        )}
+        {mosaicCount > 0 && (
+          <div className="mt-2 max-h-80 space-y-2 overflow-y-auto pr-1">
+            {visibleMosaics.map((mosaic) => {
+              const isVisible = enabledMosaicIds.has(mosaic.id);
+              const captureDate = formatPriwaMosaicDate(mosaic.captureDate);
+              const uploadDate = formatPriwaMosaicDate(mosaic.createdAt);
+              const authors =
+                mosaic.authors.length > 0
+                  ? mosaic.authors.join(", ")
+                  : "Keine Autorenangabe";
+
+              return (
+                <div
+                  key={mosaic.id}
+                  className="rounded-md border border-slate-200 bg-white px-2 py-2"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-slate-950">
+                        {mosaic.label}
+                      </div>
+                      <div className="mt-0.5 text-xs text-slate-500">
+                        Aufnahme: {captureDate ?? "ohne Datum"} · Upload:{" "}
+                        {uploadDate ?? "ohne Datum"}
+                      </div>
+                    </div>
+                    <Switch
+                      size="small"
+                      checked={isVisible}
+                      aria-label={`${mosaic.label} anzeigen`}
+                      onChange={(checked) =>
+                        setMosaicVisibility(mosaic.id, checked)
+                      }
+                    />
+                  </div>
+                  <details className="mt-1 text-xs text-slate-500">
+                    <summary className="cursor-pointer select-none">
+                      Details
+                    </summary>
+                    <dl className="mt-1 grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-2 gap-y-1">
+                      <dt className="text-slate-400">Autoren</dt>
+                      <dd className="min-w-0 break-words">{authors}</dd>
+                      <dt className="text-slate-400">Dataset ID</dt>
+                      <dd className="min-w-0 break-all">{mosaic.id}</dd>
+                      {mosaic.additionalInformation && (
+                        <>
+                          <dt className="text-slate-400">Info</dt>
+                          <dd className="min-w-0 break-words">
+                            {mosaic.additionalInformation}
+                          </dd>
+                        </>
+                      )}
+                      <dt className="text-slate-400">COG</dt>
+                      <dd className="min-w-0 break-all">{mosaic.cogUrl}</dd>
+                    </dl>
+                  </details>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
