@@ -92,6 +92,10 @@ export interface IDataset {
   has_ml_tiles: boolean | null;
   ml_tiles_completed_at?: string | null;
 
+  // Phenology match probability at the acquisition date, in [0, 1].
+  // Computed server-side in v2_full_dataset_view (see phenology_probability_at).
+  phenology_probability?: number | null;
+
   // Audit status fields (from database view)
   final_assessment: "ready" | "fixable_issues" | "no_issues" | "exclude_completely" | null;
   deadwood_quality: "great" | "sentinel_ok" | "bad" | null;

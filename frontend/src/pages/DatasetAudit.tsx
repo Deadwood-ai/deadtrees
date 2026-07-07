@@ -21,7 +21,6 @@ import {
 	Drawer,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useQuery } from "@tanstack/react-query";
 import {
 	SearchOutlined,
 	FilterOutlined,
@@ -42,7 +41,6 @@ import { usePendingCorrections } from "../hooks/usePendingCorrections";
 import { palette } from "../theme/palette";
 import { getBiomeEmoji, getBiomeTagColor, truncateBiomeLabel } from "../utils/biomeDisplay";
 import { useDatasetLogs, useProcessingOverview, ProcessingOverviewRow, ProcessingStatus } from "../hooks/useProcessingOverview";
-import { getAcquisitionPeriod } from "../utils/phenologyUtils";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAnalytics } from "../hooks/useAnalytics";
 import { isDatasetReadyForAudit } from "../utils/processingSteps";
@@ -119,25 +117,6 @@ const compareNullableNumbers = (a: number | null | undefined, b: number | null |
 	if (aNum === null) return 1; // nulls last
 	if (bNum === null) return -1;
 	return aNum - bNum;
-};
-
-const getPhenologyProbability = (dataset: IDataset, curve: number[] | null | undefined): number | null => {
-	if (!curve || curve.length === 0) return null;
-
-	const year = parseInt(dataset.aquisition_year, 10);
-	if (isNaN(year)) return null;
-
-	const parsedMonth = parseInt(dataset.aquisition_month, 10);
-	const parsedDay = parseInt(dataset.aquisition_day, 10);
-	const month = !isNaN(parsedMonth) && parsedMonth >= 1 && parsedMonth <= 12 ? parsedMonth : undefined;
-	const day = !isNaN(parsedDay) && parsedDay >= 1 && parsedDay <= 31 ? parsedDay : undefined;
-
-	const period = getAcquisitionPeriod(year, month, day);
-	const index = Math.max(0, Math.min(curve.length - 1, period.centerDay - 1));
-	const value = curve[index];
-	if (typeof value !== "number" || Number.isNaN(value)) return null;
-
-	return Math.max(0, Math.min(1, value / 255));
 };
 
 const getAcquisitionMonthIndex = (dataset: IDataset): number | null => {
@@ -491,58 +470,18 @@ function DatasetAuditInner() {
 		referenceDatasetIds,
 	]);
 
-	const pendingDatasetIds = useMemo(() => {
-		if (activeTab !== "pending") return [];
-		return filteredDatasets.map((dataset) => dataset.id);
-	}, [activeTab, filteredDatasets]);
-
-	const { data: pendingPhenologyProbabilityMap = new Map<number, number | null>(), isLoading: isPendingPhenologyLoading } = useQuery({
-		queryKey: ["audit-pending-phenology-probabilities", pendingDatasetIds],
-		enabled: activeTab === "pending" && pendingDatasetIds.length > 0,
-		queryFn: async () => {
-			const datasetById = new Map(filteredDatasets.map((dataset) => [dataset.id, dataset]));
-			const probabilities = new Map<number, number | null>();
-			pendingDatasetIds.forEach((id) => probabilities.set(id, null));
-
-			const chunkSize = 500;
-			for (let i = 0; i < pendingDatasetIds.length; i += chunkSize) {
-				const chunk = pendingDatasetIds.slice(i, i + chunkSize);
-				const { data, error } = await supabase
-					.from("v2_metadata")
-					.select("dataset_id, metadata")
-					.in("dataset_id", chunk);
-
-				if (error) throw error;
-
-				for (const row of data || []) {
-					const datasetId = (row as { dataset_id?: number }).dataset_id;
-					if (typeof datasetId !== "number") continue;
-
-					const curve = (row as { metadata?: { phenology?: { phenology_curve?: number[] } } }).metadata?.phenology?.phenology_curve;
-					const dataset = datasetById.get(datasetId);
-					if (!dataset) continue;
-
-					probabilities.set(datasetId, getPhenologyProbability(dataset, curve));
-				}
-			}
-
-			return probabilities;
-		},
-		staleTime: 5 * 60 * 1000,
-	});
-
+	// Phenology probability is computed server-side and arrives on each dataset
+	// (v2_full_dataset_view.phenology_probability), so no extra fetch is needed.
 	const sortedFilteredDatasets = useMemo(() => {
 		if (activeTab !== "pending") return filteredDatasets;
 
 		return [...filteredDatasets].sort((a, b) => {
-			const aProb = pendingPhenologyProbabilityMap.get(a.id);
-			const bProb = pendingPhenologyProbabilityMap.get(b.id);
-			const aValue = typeof aProb === "number" ? aProb : -1;
-			const bValue = typeof bProb === "number" ? bProb : -1;
+			const aValue = typeof a.phenology_probability === "number" ? a.phenology_probability : -1;
+			const bValue = typeof b.phenology_probability === "number" ? b.phenology_probability : -1;
 			if (bValue !== aValue) return bValue - aValue;
 			return b.id - a.id;
 		});
-	}, [activeTab, filteredDatasets, pendingPhenologyProbabilityMap]);
+	}, [activeTab, filteredDatasets]);
 
 	// Update navigation context with filtered dataset IDs (sorted by ID descending to match table order)
 	const filteredIds = useMemo(() => {
@@ -807,7 +746,7 @@ function DatasetAuditInner() {
 		title: "Phenology Prob.",
 		key: "phenology_probability",
 		render: (_: unknown, record: IDataset) => {
-			const probability = pendingPhenologyProbabilityMap.get(record.id);
+			const probability = record.phenology_probability;
 			if (typeof probability !== "number") {
 				return <Tag color="default">—</Tag>;
 			}
@@ -817,10 +756,8 @@ function DatasetAuditInner() {
 			return <Tag color={color}>{pct}%</Tag>;
 		},
 		sorter: (a: IDataset, b: IDataset) => {
-			const aProb = pendingPhenologyProbabilityMap.get(a.id);
-			const bProb = pendingPhenologyProbabilityMap.get(b.id);
-			const aValue = typeof aProb === "number" ? aProb : -1;
-			const bValue = typeof bProb === "number" ? bProb : -1;
+			const aValue = typeof a.phenology_probability === "number" ? a.phenology_probability : -1;
+			const bValue = typeof b.phenology_probability === "number" ? b.phenology_probability : -1;
 			return aValue - bValue;
 		},
 		width: 130,
@@ -1552,7 +1489,7 @@ function DatasetAuditInner() {
 						dataSource={sortedFilteredDatasets}
 						columns={columns}
 						rowKey="id"
-						loading={isDatasetLoading || isAuditsLoading || isFlaggedLoading || isCorrectionsLoading || isPendingPhenologyLoading}
+						loading={isDatasetLoading || isAuditsLoading || isFlaggedLoading || isCorrectionsLoading}
 						pagination={{
 							pageSize: 20,
 							showSizeChanger: true,
