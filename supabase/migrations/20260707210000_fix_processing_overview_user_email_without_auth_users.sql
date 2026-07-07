@@ -50,7 +50,7 @@ WITH (security_invoker = true) AS
     ( SELECT min(q.priority) AS min
            FROM v2_queue q
           WHERE q.dataset_id = d.id) AS queue_priority,
-    ( SELECT ue.email
+    ( SELECT ue.email::character varying(255)
            FROM public.get_user_emails(ARRAY[d.user_id]) ue
           LIMIT 1) AS user_email,
     ui.organisation,
