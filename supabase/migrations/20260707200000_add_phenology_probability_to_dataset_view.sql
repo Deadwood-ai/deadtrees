@@ -21,17 +21,20 @@ CREATE OR REPLACE FUNCTION public.phenology_probability_at(
 LANGUAGE sql
 IMMUTABLE
 AS $$
+  -- Ordered CASE branches: Postgres does not guarantee OR short-circuits, so the
+  -- type check must gate jsonb_array_length, and the year check must gate make_date.
   SELECT CASE
-    WHEN curve IS NULL
-      OR jsonb_typeof(curve) <> 'array'
-      OR jsonb_array_length(curve) = 0
-      OR y IS NULL OR y < 1 OR y > 9999
-      THEN NULL::real
+    WHEN curve IS NULL THEN NULL::real
+    WHEN jsonb_typeof(curve) <> 'array' THEN NULL::real
+    WHEN jsonb_array_length(curve) = 0 THEN NULL::real
+    WHEN y IS NULL OR y < 1 OR y > 9999 THEN NULL::real
     ELSE GREATEST(0::real, LEAST(1::real,
       NULLIF(curve ->> LEAST(GREATEST(center_day - 1, 0), jsonb_array_length(curve) - 1), '')::real / 255.0))
   END
   FROM (
     SELECT CASE
+      -- Invalid year: no valid day-of-year (outer CASE returns NULL for these).
+      WHEN y IS NULL OR y < 1 OR y > 9999 THEN 183
       -- Full date known: exact day-of-year (day capped to the month length).
       WHEN m BETWEEN 1 AND 12 AND d BETWEEN 1 AND 31
         THEN EXTRACT(DOY FROM make_date(y::int, m::int, 1))::int + LEAST(d::int, dim) - 1
@@ -43,7 +46,7 @@ AS $$
     END AS center_day
     FROM (
       SELECT CASE
-        WHEN m BETWEEN 1 AND 12
+        WHEN y BETWEEN 1 AND 9999 AND m BETWEEN 1 AND 12
           THEN EXTRACT(DAY FROM (make_date(y::int, m::int, 1) + interval '1 month - 1 day'))::int
         ELSE 30
       END AS dim
@@ -59,7 +62,13 @@ GRANT EXECUTE ON FUNCTION public.phenology_probability_at(jsonb, smallint, small
 -- so dependents and grants are preserved. `v2_full_dataset_view_public` selects
 -- explicit base columns and does NOT reference the new column, so the public map
 -- path is unaffected and pays none of the compute cost.
-CREATE OR REPLACE VIEW public.v2_full_dataset_view AS
+--
+-- security_invoker=true MUST be restated: this view is RLS-sensitive (readable by
+-- anon/authenticated over RLS-protected base tables) and a prior migration set it.
+-- CREATE OR REPLACE resets view options, so omitting it would silently revert the
+-- view to a security-definer view and bypass RLS.
+CREATE OR REPLACE VIEW public.v2_full_dataset_view
+WITH (security_invoker = true) AS
  WITH ds AS (
          SELECT v2_datasets.id,
             v2_datasets.user_id,
