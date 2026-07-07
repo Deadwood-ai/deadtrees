@@ -26,7 +26,7 @@ jobs:
       COMPOSE_DOCKER_CLI_BUILD: "1"
       CI: "true"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
@@ -38,7 +38,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
-      - uses: supabase/setup-cli@v2
+      - uses: supabase/setup-cli@v3
         with:
           version: latest
 
