@@ -14,6 +14,7 @@ import {
   FlagOutlined,
   LoginOutlined,
   InfoCircleOutlined,
+  MailOutlined,
 } from "@ant-design/icons";
 import { mapColors } from "../../theme/mapColors";
 import { palette } from "../../theme/palette";
@@ -99,6 +100,12 @@ const LayerControlPanel = ({
   const actionButtonSize = "small";
   const controlButtonClass = "";
   const shouldShowLegend = showLegend;
+
+  const productDownloadMailto = `mailto:info@deadtrees.earth?subject=${encodeURIComponent(
+    "Product Download Request",
+  )}&body=${encodeURIComponent(
+    "Hi deadtrees.earth team,\n\nI would like to download the satellite product. To process my request, please let us know:\n\nPlanned use of the product:\n(Please describe how you plan to use the product.)\n\nName and affiliation:\n\nThank you!\n",
+  )}`;
 
   return (
     <div
@@ -236,6 +243,27 @@ const LayerControlPanel = ({
           </div>
         </div>
       )}
+
+      {/* Product Download Section */}
+      <Divider className="my-2.5" />
+      <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">
+        Product Download
+      </div>
+      <Tooltip title="The satellite product is publicly available. Email us and let us know how you plan to use it to download the product.">
+        <Button
+          size={actionButtonSize}
+          icon={<MailOutlined />}
+          href={productDownloadMailto}
+          block
+          className={controlButtonClass}
+          style={{
+            borderColor: palette.primary[500],
+            color: palette.primary[500],
+          }}
+        >
+          Download Product
+        </Button>
+      </Tooltip>
 
       {/* Polygon Stats Section */}
       {onPolygonStatsClick && (
