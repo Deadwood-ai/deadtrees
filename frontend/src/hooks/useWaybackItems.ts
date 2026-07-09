@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   getWaybackItems,
@@ -129,6 +129,28 @@ export const enrichWaybackItemsWithMetadata = async (
   );
 
   return dedupeWaybackItems(enriched);
+};
+
+/**
+ * Overlay resolved acquisition metadata onto items that do not already carry an
+ * acquisition date (i.e. items sourced from the unenriched global release list).
+ * Items keep their original identity when no metadata applies, and the array
+ * identity is preserved when nothing changes, so downstream selection effects do
+ * not re-run needlessly.
+ */
+export const overlayAcquisitionMetadata = (
+  items: WaybackItemWithMetadata[],
+  resolveMetadata: (releaseNum: number) => WaybackMetadata | null | undefined,
+): WaybackItemWithMetadata[] => {
+  let changed = false;
+  const overlaid = items.map((item) => {
+    if (item.acquisitionDate) return item;
+    const metadata = resolveMetadata(item.releaseNum);
+    if (!metadata?.date) return item;
+    changed = true;
+    return toWaybackItemWithMetadata(item, metadata);
+  });
+  return changed ? overlaid : items;
 };
 
 const sortWaybackItemsAscending = (
@@ -266,11 +288,21 @@ export const WAYBACK_CANDIDATE_THROTTLE_MS = 10_000;
  * and is cached by the coarse Wayback tile key. Zoom changes do not invalidate
  * candidate discovery because the active basemap release should stay stable
  * while the map requests normal tiles for the new view.
+ *
+ * The global release list is location-independent and therefore only carries
+ * release dates, not the imagery's true acquisition date. Change detection is
+ * gated behind user interaction, so the global list is what the picker shows by
+ * default. To keep the displayed date honest before (and instead of) change
+ * detection, we eagerly fetch acquisition metadata for the currently selected
+ * release at the map center and merge it in. That is a single, tile-cached
+ * request per selection — cheap enough to run ungated, unlike enriching the
+ * entire release list.
  */
 export const useWaybackItemsDebounced = (
   longitude: number | undefined,
   latitude: number | undefined,
   enabled: boolean = true,
+  selectedReleaseNum: number | null = null,
 ) => {
   // Track the last fetched location
   const lastFetchRef = useRef<{ lon: number; lat: number } | null>(null);
@@ -371,15 +403,102 @@ export const useWaybackItemsDebounced = (
     gcTime: 60 * 60 * 1000, // Keep in cache for 1 hour
   });
 
+  // Acquisition metadata for the currently selected release at the map center.
+  // Keyed by the coarse Wayback tile so nearby views share the cached result.
+  // Runs ungated (no dependency on change detection) so the displayed date is
+  // the true acquisition date even when only the global release list is loaded.
+  const selectedTileColumn =
+    longitude !== undefined
+      ? long2tile(longitude, WAYBACK_CANDIDATE_DISCOVERY_ZOOM)
+      : null;
+  const selectedTileRow =
+    latitude !== undefined
+      ? lat2tile(latitude, WAYBACK_CANDIDATE_DISCOVERY_ZOOM)
+      : null;
+  const canFetchSelectedMetadata =
+    enabled &&
+    selectedReleaseNum !== null &&
+    selectedTileColumn !== null &&
+    selectedTileRow !== null;
+
+  const selectedMetadataQuery = useQuery({
+    queryKey: [
+      "wayback-selected-metadata",
+      selectedReleaseNum,
+      selectedTileColumn,
+      selectedTileRow,
+    ],
+    queryFn: () =>
+      loadWaybackMetadata(
+        { longitude: longitude as number, latitude: latitude as number },
+        WAYBACK_CANDIDATE_DISCOVERY_ZOOM,
+        selectedReleaseNum as number,
+      ),
+    enabled: canFetchSelectedMetadata,
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+  });
+
+  // Accumulate acquisition metadata for every release we have resolved at this
+  // tile. Making it sticky (rather than overlaying only the current selection)
+  // keeps dates monotonic: navigating never reverts an item to its release
+  // date, so auto-match cannot oscillate between items as their true dates are
+  // revealed one selection at a time.
+  const [metadataByReleaseTile, setMetadataByReleaseTile] = useState<
+    Map<string, WaybackMetadata>
+  >(new Map());
+
+  useEffect(() => {
+    const metadata = selectedMetadataQuery.data;
+    if (
+      !canFetchSelectedMetadata ||
+      selectedReleaseNum === null ||
+      !metadata?.date
+    ) {
+      return;
+    }
+    const key = `${selectedTileColumn}:${selectedTileRow}:${selectedReleaseNum}`;
+    setMetadataByReleaseTile((prev) => {
+      if (prev.has(key)) return prev;
+      const next = new Map(prev);
+      next.set(key, metadata);
+      return next;
+    });
+  }, [
+    selectedMetadataQuery.data,
+    canFetchSelectedMetadata,
+    selectedReleaseNum,
+    selectedTileColumn,
+    selectedTileRow,
+  ]);
+
   const localItems = localItemsQuery.data ?? [];
   const globalItems = globalItemsQuery.data ?? [];
-  const data = localItems.length > 0 ? localItems : globalItems;
+  const baseItems = localItems.length > 0 ? localItems : globalItems;
+
+  const data = useMemo(() => {
+    if (
+      metadataByReleaseTile.size === 0 ||
+      selectedTileColumn === null ||
+      selectedTileRow === null
+    ) {
+      return baseItems;
+    }
+    return overlayAcquisitionMetadata(baseItems, (releaseNum) =>
+      metadataByReleaseTile.get(
+        `${selectedTileColumn}:${selectedTileRow}:${releaseNum}`,
+      ),
+    );
+  }, [baseItems, metadataByReleaseTile, selectedTileColumn, selectedTileRow]);
 
   return {
     ...globalItemsQuery,
     data,
     isLoading: globalItemsQuery.isLoading && data.length === 0,
-    isFetching: globalItemsQuery.isFetching || localItemsQuery.isFetching,
+    isFetching:
+      globalItemsQuery.isFetching ||
+      localItemsQuery.isFetching ||
+      selectedMetadataQuery.isFetching,
     error: localItemsQuery.error ?? globalItemsQuery.error,
   };
 };

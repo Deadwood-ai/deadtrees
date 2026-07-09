@@ -279,6 +279,7 @@ const DeadtreesMap = () => {
       mapCenterLonLat?.lon,
       mapCenterLonLat?.lat,
       DeadwoodMapStyle === "wayback" && shouldLoadLocalWaybackItems,
+      selectedReleaseNum,
     );
 
   useMobileImageryAutoSelect({

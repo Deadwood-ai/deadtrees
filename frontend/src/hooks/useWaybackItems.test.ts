@@ -4,6 +4,8 @@ import {
   enrichWaybackItemsWithMetadata,
   loadGlobalWaybackItems,
   loadLocalWaybackItems,
+  overlayAcquisitionMetadata,
+  type WaybackItemWithMetadata,
 } from "./useWaybackItems";
 
 const point = { longitude: 10.451526, latitude: 51.165691 };
@@ -153,6 +155,50 @@ describe("loadLocalWaybackItems", () => {
         onlyUseSizeToFilterDuplicates: true,
       }),
     );
+  });
+});
+
+describe("overlayAcquisitionMetadata", () => {
+  const withoutMetadata = (
+    releaseNum: number,
+    releaseDateLabel: string,
+  ): WaybackItemWithMetadata => ({
+    ...waybackItem(releaseNum, releaseDateLabel),
+    metadata: undefined,
+  });
+
+  it("overlays the acquisition date for items missing one", () => {
+    const items = [withoutMetadata(200, "2021-01-01")];
+    const store = new Map([[200, metadata("2019-06-15")]]);
+
+    const result = overlayAcquisitionMetadata(items, (r) => store.get(r));
+
+    expect(result[0].acquisitionDate?.getUTCFullYear()).toBe(2019);
+    expect(result[0].provider).toBe("Maxar");
+  });
+
+  it("keeps existing acquisition dates and unresolved items untouched", () => {
+    const enriched: WaybackItemWithMetadata = {
+      ...waybackItem(100, "2020-01-01"),
+      acquisitionDate: new Date("2018-01-01"),
+    };
+    const unresolved = withoutMetadata(200, "2021-01-01");
+
+    const result = overlayAcquisitionMetadata(
+      [enriched, unresolved],
+      () => undefined,
+    );
+
+    expect(result[0].acquisitionDate?.getUTCFullYear()).toBe(2018);
+    expect(result[1].acquisitionDate).toBeUndefined();
+  });
+
+  it("preserves array identity when no item is overlaid", () => {
+    const items = [withoutMetadata(200, "2021-01-01")];
+
+    const result = overlayAcquisitionMetadata(items, () => undefined);
+
+    expect(result).toBe(items);
   });
 });
 
