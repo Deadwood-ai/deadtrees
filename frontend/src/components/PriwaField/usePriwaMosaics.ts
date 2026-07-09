@@ -8,6 +8,7 @@ export interface IPriwaMosaic {
   projectId: string;
   label: string;
   cogUrl: string;
+  bbox: string | null;
   captureDate: string | null;
   createdAt: string;
   authors: string[];
@@ -19,6 +20,7 @@ interface IPriwaMosaicRow {
   project_id: string;
   label: string;
   cog_url: string;
+  bbox: string | null;
   capture_date: string | null;
   created_at: string;
   authors: string[] | null;
@@ -29,6 +31,7 @@ interface IPriwaDatasetMosaicRow {
   id: number;
   file_name: string | null;
   cog_path: string | null;
+  bbox: string | null;
   aquisition_year: number | null;
   aquisition_month: number | null;
   aquisition_day: number | null;
@@ -84,7 +87,7 @@ const fetchPreviewFallbackMosaics = async (
   const { data, error } = await supabase
     .from(Settings.DATA_TABLE_PUBLIC)
     .select(
-      "id, file_name, cog_path, aquisition_year, aquisition_month, aquisition_day, created_at, authors, additional_information",
+      "id, file_name, cog_path, bbox, aquisition_year, aquisition_month, aquisition_day, created_at, authors, additional_information",
     )
     .eq("platform", "drone")
     .eq("is_cog_done", true)
@@ -102,6 +105,7 @@ const fetchPreviewFallbackMosaics = async (
       projectId,
       label: row.file_name || `Dataset ${row.id}`,
       cogUrl: row.cog_path as string,
+      bbox: row.bbox,
       captureDate: dateFromAcquisitionParts(row),
       createdAt: row.created_at,
       authors: row.authors ?? [],
@@ -135,6 +139,7 @@ export const fetchPriwaMosaics = async (
     projectId: row.project_id,
     label: row.label,
     cogUrl: row.cog_url,
+    bbox: row.bbox,
     captureDate: row.capture_date,
     createdAt: row.created_at,
     authors: row.authors ?? [],
