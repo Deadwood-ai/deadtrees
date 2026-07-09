@@ -97,10 +97,34 @@ export const createWaybackSource = (releaseNum: number) =>
     crossOrigin: "anonymous",
   });
 
+// Reuse one XYZ source per Wayback release so switching releases (or toggling
+// the basemap style) keeps each release's OpenLayers tile cache alive instead
+// of re-downloading the whole viewport. Bounded LRU so long browsing sessions
+// don't pin unlimited tile caches in memory.
+const waybackSourceCache = new Map<number, XYZ>();
+const WAYBACK_SOURCE_CACHE_MAX = 12;
+
+export const getCachedWaybackSource = (releaseNum: number): XYZ => {
+  const cached = waybackSourceCache.get(releaseNum);
+  if (cached) {
+    // Re-insert to mark as most recently used
+    waybackSourceCache.delete(releaseNum);
+    waybackSourceCache.set(releaseNum, cached);
+    return cached;
+  }
+  const source = createWaybackSource(releaseNum);
+  waybackSourceCache.set(releaseNum, source);
+  if (waybackSourceCache.size > WAYBACK_SOURCE_CACHE_MAX) {
+    const oldest = waybackSourceCache.keys().next().value;
+    if (oldest !== undefined) waybackSourceCache.delete(oldest);
+  }
+  return source;
+};
+
 export const createWaybackTileLayer = (releaseNum: number) =>
   new TileLayer({
     preload: 0,
-    source: createWaybackSource(releaseNum),
+    source: getCachedWaybackSource(releaseNum),
   });
 
 export const createOpenStreetMapFallbackLayer = () =>

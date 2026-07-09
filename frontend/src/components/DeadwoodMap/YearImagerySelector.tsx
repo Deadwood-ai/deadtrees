@@ -91,6 +91,31 @@ export const findClosestImagery = (
   });
 };
 
+/**
+ * Decide whether auto-match should switch to a different imagery release.
+ * Returns the release number to switch to, or null to keep the selection.
+ *
+ * Stays put when the currently selected item's imagery is from the same year
+ * as the best candidate: the year-match is already satisfied, and switching
+ * releases would reload the basemap for no visible benefit. This keeps
+ * auto-match stable while candidate lists and acquisition dates stream in.
+ */
+export const pickAutoMatchImagery = (
+  items: WaybackItemWithMetadata[],
+  targetYear: number,
+  selectedReleaseNum: number | null,
+): number | null => {
+  const closest = findClosestImagery(items, targetYear);
+  if (!closest || closest.releaseNum === selectedReleaseNum) return null;
+
+  const current = items.find((item) => item.releaseNum === selectedReleaseNum);
+  if (current && getImageryYear(current) === getImageryYear(closest)) {
+    return null;
+  }
+
+  return closest.releaseNum;
+};
+
 interface YearImagerySelectorProps {
   /** Currently selected prediction year */
   predictionYear: string;
@@ -104,6 +129,8 @@ interface YearImagerySelectorProps {
   waybackItems: WaybackItemWithMetadata[];
   /** Whether wayback data is loading */
   isLoading?: boolean;
+  /** Whether local change-detected candidates are being fetched */
+  isRefining?: boolean;
   /** Whether satellite basemap is active */
   isWaybackActive?: boolean;
   /** Whether to auto-match imagery to prediction year */
@@ -136,6 +163,7 @@ const YearImagerySelector = ({
   onImageryChange,
   waybackItems,
   isLoading = false,
+  isRefining = false,
   isWaybackActive = true,
   autoMatchImagery = false,
   onAutoMatchChange,
@@ -195,10 +223,17 @@ const YearImagerySelector = ({
     if (waybackItems.length === 0) return;
 
     if (autoMatchImagery) {
-      const targetYear = parseInt(predictionYear);
-      const closestItem = findClosestImagery(waybackItems, targetYear);
-      if (closestItem && closestItem.releaseNum !== selectedReleaseNum) {
-        onImageryChange(closestItem.releaseNum);
+      // Hold off while the location-specific candidate list is in flight:
+      // matching against the interim (global) list and then re-matching when
+      // the local list lands would swap the basemap twice.
+      if (isRefining) return;
+      const nextReleaseNum = pickAutoMatchImagery(
+        waybackItems,
+        parseInt(predictionYear),
+        selectedReleaseNum,
+      );
+      if (nextReleaseNum !== null) {
+        onImageryChange(nextReleaseNum);
       }
       return;
     }
@@ -213,6 +248,7 @@ const YearImagerySelector = ({
     onImageryChange,
     autoMatchImagery,
     predictionYear,
+    isRefining,
   ]);
 
   // Navigation for prediction year

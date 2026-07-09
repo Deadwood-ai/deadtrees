@@ -48,7 +48,7 @@ import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import {
   createOpenFreeMapLibertyLayerGroup,
   createStandardMapControls,
-  createWaybackSource,
+  getCachedWaybackSource,
   createWaybackTileLayer,
 } from "../../utils/basemaps";
 import LayerControlPanel from "./LayerControlPanel";
@@ -274,13 +274,16 @@ const DeadtreesMap = () => {
   // Fetch wayback items with actual imagery changes at current location.
   // Candidate discovery is debounced and location-based; zooming should not
   // replace the currently rendered basemap release.
-  const { data: localWaybackItems = [], isLoading: isWaybackLoading } =
-    useWaybackItemsDebounced(
-      mapCenterLonLat?.lon,
-      mapCenterLonLat?.lat,
-      DeadwoodMapStyle === "wayback" && shouldLoadLocalWaybackItems,
-      selectedReleaseNum,
-    );
+  const {
+    data: localWaybackItems = [],
+    isLoading: isWaybackLoading,
+    isRefining: isWaybackRefining,
+  } = useWaybackItemsDebounced(
+    mapCenterLonLat?.lon,
+    mapCenterLonLat?.lat,
+    DeadwoodMapStyle === "wayback" && shouldLoadLocalWaybackItems,
+    selectedReleaseNum,
+  );
 
   useMobileImageryAutoSelect({
     enabled: isMobile && DeadwoodMapStyle === "wayback",
@@ -289,6 +292,7 @@ const DeadtreesMap = () => {
     onImageryChange: setSelectedReleaseNum,
     autoMatchImagery,
     predictionYear: selectedYear,
+    isRefining: isWaybackRefining,
   });
 
   // Clicked location values (displayed in legend)
@@ -631,20 +635,26 @@ const DeadtreesMap = () => {
     map.getView().setRotation(0);
   }, [isMobile, map]);
 
-  // update on mapStyle change
+  // update on mapStyle change: visibility only — replacing the tile source
+  // here would discard the OpenLayers tile cache and re-download the viewport
   useEffect(() => {
-    const nextIsWayback = DeadwoodMapStyle === "wayback";
     libertyBasemapLayerRef.current?.setVisible(
       DeadwoodMapStyle === "streets-v12",
     );
-    waybackBasemapLayerRef.current?.setVisible(nextIsWayback);
+    waybackBasemapLayerRef.current?.setVisible(DeadwoodMapStyle === "wayback");
+  }, [DeadwoodMapStyle, map]);
 
-    if (selectedReleaseNum && waybackBasemapLayerRef.current) {
-      waybackBasemapLayerRef.current.setSource(
-        createWaybackSource(selectedReleaseNum),
-      );
+  // Swap the wayback source only when the selected release actually changes.
+  // Sources are cached per release, so returning to a recently viewed release
+  // reuses its already-loaded tiles instead of re-fetching them.
+  useEffect(() => {
+    const layer = waybackBasemapLayerRef.current;
+    if (!selectedReleaseNum || !layer) return;
+    const nextSource = getCachedWaybackSource(selectedReleaseNum);
+    if (layer.getSource() !== nextSource) {
+      layer.setSource(nextSource);
     }
-  }, [DeadwoodMapStyle, map, selectedReleaseNum]);
+  }, [map, selectedReleaseNum]);
 
   //update opacity of geotiff layers
   useEffect(() => {
@@ -1371,6 +1381,7 @@ const DeadtreesMap = () => {
               onImageryChange={setSelectedReleaseNum}
               waybackItems={localWaybackItems}
               isLoading={isWaybackLoading}
+              isRefining={isWaybackRefining}
               isWaybackActive={DeadwoodMapStyle === "wayback"}
               autoMatchImagery={autoMatchImagery}
               onAutoMatchChange={(enabled) => {

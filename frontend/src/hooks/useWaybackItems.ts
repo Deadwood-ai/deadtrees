@@ -499,6 +499,10 @@ export const useWaybackItemsDebounced = (
       globalItemsQuery.isFetching ||
       localItemsQuery.isFetching ||
       selectedMetadataQuery.isFetching,
+    // Local change-detection in flight: the authoritative, location-specific
+    // candidate list is about to replace the global one. Auto-matching should
+    // hold off until it lands to avoid switching basemaps twice.
+    isRefining: localItemsQuery.isFetching,
     error: localItemsQuery.error ?? globalItemsQuery.error,
   };
 };

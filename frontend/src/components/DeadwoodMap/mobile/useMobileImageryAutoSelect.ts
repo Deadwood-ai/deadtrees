@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { findClosestImagery } from "../YearImagerySelector";
+import { pickAutoMatchImagery } from "../YearImagerySelector";
 import type { WaybackItemWithMetadata } from "../../../hooks/useWaybackItems";
 
 interface Params {
@@ -10,6 +10,8 @@ interface Params {
   onImageryChange: (releaseNum: number) => void;
   autoMatchImagery: boolean;
   predictionYear: string;
+  /** Whether local change-detected candidates are being fetched */
+  isRefining?: boolean;
 }
 
 /**
@@ -25,6 +27,7 @@ export const useMobileImageryAutoSelect = ({
   onImageryChange,
   autoMatchImagery,
   predictionYear,
+  isRefining = false,
 }: Params) => {
   // Select imagery when items load or when the prediction year changes. Manual
   // mode keeps the active basemap sticky even if it is outside the local
@@ -34,9 +37,16 @@ export const useMobileImageryAutoSelect = ({
     if (waybackItems.length === 0) return;
 
     if (autoMatchImagery) {
-      const closest = findClosestImagery(waybackItems, parseInt(predictionYear));
-      if (closest && closest.releaseNum !== selectedReleaseNum) {
-        onImageryChange(closest.releaseNum);
+      // Wait for the location-specific candidate list before re-matching so
+      // the basemap is not swapped twice (see YearImagerySelector).
+      if (isRefining) return;
+      const nextReleaseNum = pickAutoMatchImagery(
+        waybackItems,
+        parseInt(predictionYear),
+        selectedReleaseNum,
+      );
+      if (nextReleaseNum !== null) {
+        onImageryChange(nextReleaseNum);
       }
     } else if (!selectedReleaseNum) {
       onImageryChange(waybackItems[waybackItems.length - 1].releaseNum);
@@ -48,5 +58,6 @@ export const useMobileImageryAutoSelect = ({
     autoMatchImagery,
     predictionYear,
     onImageryChange,
+    isRefining,
   ]);
 };

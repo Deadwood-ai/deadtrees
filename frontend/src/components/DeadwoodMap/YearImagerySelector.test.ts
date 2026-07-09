@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { WaybackItemWithMetadata } from "../../hooks/useWaybackItems";
-import { findClosestImagery } from "./YearImagerySelector";
+import {
+  findClosestImagery,
+  pickAutoMatchImagery,
+} from "./YearImagerySelector";
 
 const item = (
   releaseNum: number,
@@ -31,5 +34,33 @@ describe("findClosestImagery", () => {
     );
 
     expect(closest?.releaseNum).toBe(300);
+  });
+});
+
+describe("pickAutoMatchImagery", () => {
+  const items = [
+    item(100, "2019-05-01", "2019-05-01"),
+    item(200, "2022-07-28", "2022-07-28"),
+    item(300, "2023-05-28", "2023-05-28"),
+  ];
+
+  it("switches to the closest item for the target year", () => {
+    expect(pickAutoMatchImagery(items, 2022, 300)).toBe(200);
+  });
+
+  it("keeps the selection when it is already the closest item", () => {
+    expect(pickAutoMatchImagery(items, 2022, 200)).toBeNull();
+  });
+
+  it("keeps the selection when its imagery year already matches the candidate's", () => {
+    // Two releases with 2022 imagery; the picker's closest match is release
+    // 250, but the selected 200 is also from 2022 — switching would reload
+    // the basemap without changing the displayed year.
+    const sameYear = [...items, item(250, "2022-11-02", "2022-11-02")];
+    expect(pickAutoMatchImagery(sameYear, 2022, 200)).toBeNull();
+  });
+
+  it("switches when the selection is outside the candidate list", () => {
+    expect(pickAutoMatchImagery(items, 2022, 99999)).toBe(200);
   });
 });
