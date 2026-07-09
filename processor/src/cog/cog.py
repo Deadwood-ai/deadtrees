@@ -135,6 +135,13 @@ def _reproject_to_epsg3857(src_path: str, dst_path: str, token: str | None = Non
 
 	If the source has no usable CRS, gdalwarp fails here — which is the correct
 	behaviour: we would rather fail loudly than publish a mislocated COG.
+
+	The intermediate is written with lossless DEFLATE compression: it is a
+	transient file that is deleted right after the COG is built, and an
+	uncompressed GTiff of a production-size mosaic can expand to tens of GB and
+	exhaust the processor temp volume before the retry reaches gdal_translate.
+	DEFLATE keeps it bounded without adding a lossy generation ahead of the COG's
+	own JPEG step.
 	"""
 	command = [
 		'gdalwarp',
@@ -142,6 +149,10 @@ def _reproject_to_epsg3857(src_path: str, dst_path: str, token: str | None = Non
 		'EPSG:3857',
 		'-of',
 		'GTiff',
+		'-co',
+		'COMPRESS=DEFLATE',
+		'-co',
+		'PREDICTOR=2',
 		'-co',
 		'BIGTIFF=YES',
 		'-co',
