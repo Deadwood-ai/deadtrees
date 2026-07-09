@@ -577,7 +577,7 @@ export const droneMappingGuideRelease: GuideRelease = {
   },
   guide: {
     audience: "Drone pilots and field contributors",
-    primaryImage: "/assets/guides/drone-mapping/flight-workflow-cropped.jpg",
+    primaryImage: "/assets/guides/drone-mapping/flight-workflow-updated.png",
     secondaryImage: "/assets/guides/drone-mapping/upload-workflow.png",
     repositoryUrl: "https://github.com/sarahhabershon/deadtrees_mapping_guide",
     steps: 4,
