@@ -179,6 +179,7 @@ export default function PriwaFieldMap({
   > | null>(null);
   const cogLayersRef = useRef<TileLayerWebGL[]>([]);
   const knownMosaicIdsRef = useRef<Set<string>>(new Set());
+  const hoveredMosaicIdRef = useRef<string | null>(null);
   const toggleMosaicVisibilityRef = useRef<(mosaicId: string) => void>(() => {
     return;
   });
@@ -187,6 +188,7 @@ export default function PriwaFieldMap({
     new Set(),
   );
   const [selectedMosaicId, setSelectedMosaicId] = useState<string | null>(null);
+  const [hoveredMosaicId, setHoveredMosaicId] = useState<string | null>(null);
   const [isPlacingPoint, setPlacingPoint] = useState(false);
   const [selectedCoordinate, setSelectedCoordinate] =
     useState<IPriwaCoordinate | null>(null);
@@ -195,6 +197,7 @@ export default function PriwaFieldMap({
   const [editingPoint, setEditingPoint] = useState<IPriwaPoint | null>(null);
   const [formSessionId, setFormSessionId] = useState(0);
   const [isPointListOpen, setPointListOpen] = useState(false);
+  const [isLayerPanelOpen, setLayerPanelOpen] = useState(false);
   const [baseLayer, setBaseLayer] = useState<PriwaBaseLayer>("aerial");
   const visibleMosaics = useMemo(
     () =>
@@ -210,13 +213,23 @@ export default function PriwaFieldMap({
   const selectedMosaic = useMemo(
     () =>
       selectedMosaicId
-        ? visibleMosaics.find((mosaic) => mosaic.id === selectedMosaicId) ??
-          null
+        ? (visibleMosaics.find((mosaic) => mosaic.id === selectedMosaicId) ??
+          null)
         : null,
     [selectedMosaicId, visibleMosaics],
   );
-  const isSelectedMosaicVisible =
-    selectedMosaic !== null && enabledMosaicIds.has(selectedMosaic.id);
+  const hoveredMosaic = useMemo(
+    () =>
+      hoveredMosaicId
+        ? (visibleMosaics.find((mosaic) => mosaic.id === hoveredMosaicId) ??
+          null)
+        : null,
+    [hoveredMosaicId, visibleMosaics],
+  );
+  const inspectedMosaic = hoveredMosaic ?? selectedMosaic;
+  const inspectedMosaicIsHovered = hoveredMosaic !== null;
+  const isInspectedMosaicVisible =
+    inspectedMosaic !== null && enabledMosaicIds.has(inspectedMosaic.id);
   const userLocation = useUserLocationLayer(mapRef);
   const {
     layer: userLocationLayer,
@@ -240,6 +253,16 @@ export default function PriwaFieldMap({
     }
   }, [selectedMosaicId, visibleMosaics]);
 
+  useEffect(() => {
+    if (
+      hoveredMosaicId &&
+      !visibleMosaics.some((mosaic) => mosaic.id === hoveredMosaicId)
+    ) {
+      hoveredMosaicIdRef.current = null;
+      setHoveredMosaicId(null);
+    }
+  }, [hoveredMosaicId, visibleMosaics]);
+
   const toggleMosaicVisibilityFromFootprint = useCallback(
     (mosaicId: string) => {
       setEnabledMosaicIds((currentIds) => {
@@ -254,6 +277,7 @@ export default function PriwaFieldMap({
       });
 
       setSelectedMosaicId(mosaicId);
+      setLayerPanelOpen(true);
     },
     [],
   );
@@ -362,9 +386,50 @@ export default function PriwaFieldMap({
       }
     });
 
+    const clearHoveredMosaic = () => {
+      if (hoveredMosaicIdRef.current === null) return;
+
+      hoveredMosaicIdRef.current = null;
+      setHoveredMosaicId(null);
+      map.getTargetElement().style.cursor = "";
+    };
+
+    const pointerMoveKey = map.on("pointermove", (event) => {
+      if (isPlacingPointRef.current || event.dragging) {
+        clearHoveredMosaic();
+        return;
+      }
+
+      const mosaicId = map.forEachFeatureAtPixel(
+        event.pixel,
+        (feature) => {
+          const id = feature.get("mosaicId") as string | undefined;
+          return id ?? null;
+        },
+        {
+          hitTolerance: 12,
+          layerFilter: (layer) => layer === mosaicFootprintLayerRef.current,
+        },
+      );
+
+      const nextHoveredMosaicId = mosaicId ?? null;
+      if (hoveredMosaicIdRef.current === nextHoveredMosaicId) return;
+
+      hoveredMosaicIdRef.current = nextHoveredMosaicId;
+      setHoveredMosaicId(nextHoveredMosaicId);
+      map.getTargetElement().style.cursor = nextHoveredMosaicId
+        ? "pointer"
+        : "";
+    });
+
+    const viewport = map.getViewport();
+    viewport.addEventListener("pointerleave", clearHoveredMosaic);
+
     return () => {
       stopUserLocation();
       unByKey(clickKey);
+      unByKey(pointerMoveKey);
+      viewport.removeEventListener("pointerleave", clearHoveredMosaic);
       map.setTarget(undefined);
       mapRef.current = null;
       offlineAreaLayerRef.current = null;
@@ -482,7 +547,9 @@ export default function PriwaFieldMap({
 
   const zoomToMosaicFootprint = useCallback((mosaic: IPriwaMosaic) => {
     if (!mosaic.bbox) {
-      message.warning("Für diesen Drohnenlayer ist keine Kartengrenze verfügbar.");
+      message.warning(
+        "Für diesen Drohnenlayer ist keine Kartengrenze verfügbar.",
+      );
       return;
     }
 
@@ -493,11 +560,13 @@ export default function PriwaFieldMap({
     }
 
     setSelectedMosaicId(mosaic.id);
-    mapRef.current?.getView().fit(transformExtent(bbox, "EPSG:4326", "EPSG:3857"), {
-      duration: 500,
-      maxZoom: 19,
-      padding: [96, 96, 96, 96],
-    });
+    mapRef.current
+      ?.getView()
+      .fit(transformExtent(bbox, "EPSG:4326", "EPSG:3857"), {
+        duration: 500,
+        maxZoom: 19,
+        padding: [96, 96, 96, 96],
+      });
   }, []);
 
   const openNewPointDrawer = useCallback(() => {
@@ -688,6 +757,7 @@ export default function PriwaFieldMap({
             {visibleMosaics.map((mosaic) => {
               const isVisible = enabledMosaicIds.has(mosaic.id);
               const isSelected = mosaic.id === selectedMosaicId;
+              const isHovered = mosaic.id === hoveredMosaicId;
               const captureDate = formatPriwaMosaicDate(mosaic.captureDate);
               const uploadDate = formatPriwaMosaicDate(mosaic.createdAt);
               const authors =
@@ -701,14 +771,23 @@ export default function PriwaFieldMap({
                   className={`rounded-md border bg-white px-2 py-2 ${
                     isSelected
                       ? "border-orange-500 ring-2 ring-orange-200"
-                      : "border-slate-200"
+                      : isHovered
+                        ? "border-sky-500 ring-2 ring-sky-200"
+                        : "border-slate-200"
                   }`}
                   onClick={() => setSelectedMosaicId(mosaic.id)}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-slate-950">
-                        {mosaic.label}
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <div className="truncate text-sm font-medium text-slate-950">
+                          {mosaic.label}
+                        </div>
+                        {isHovered && (
+                          <span className="shrink-0 rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[0.65rem] font-medium uppercase leading-none text-sky-700">
+                            Karte
+                          </span>
+                        )}
                       </div>
                       <div className="mt-0.5 text-xs text-slate-500">
                         Aufnahme: {captureDate ?? "ohne Datum"} · Upload:{" "}
@@ -883,7 +962,13 @@ export default function PriwaFieldMap({
                 aria-label="Aktuelle Position aktivieren"
               />
             </Tooltip>
-            <Popover trigger="click" placement="rightTop" content={layerPanel}>
+            <Popover
+              trigger="click"
+              placement="rightTop"
+              content={layerPanel}
+              open={isLayerPanelOpen}
+              onOpenChange={setLayerPanelOpen}
+            >
               <Button
                 className="pointer-events-auto shadow-md"
                 shape="circle"
@@ -977,17 +1062,16 @@ export default function PriwaFieldMap({
               {locationHintLabel}
             </div>
           )}
-          {selectedMosaic && (
+          {inspectedMosaic && (
             <div className="max-w-sm rounded-md bg-white/90 px-2.5 py-1.5 text-right text-xs font-medium text-gray-700 shadow-sm backdrop-blur">
-              Drohnenlayer:{" "}
-              <span className="text-slate-950">{selectedMosaic.label}</span>{" "}
-              {isSelectedMosaicVisible ? "sichtbar" : "ausgeblendet"}
+              {inspectedMosaicIsHovered
+                ? "Drohnenlayer unter Cursor"
+                : "Drohnenlayer"}
+              : <span className="text-slate-950">{inspectedMosaic.label}</span>{" "}
+              {isInspectedMosaicVisible ? "sichtbar" : "ausgeblendet"}
             </div>
           )}
-          <PriwaOfflineStatus
-            syncSummary={syncSummary}
-            onSyncNow={onSyncNow}
-          />
+          <PriwaOfflineStatus syncSummary={syncSummary} onSyncNow={onSyncNow} />
         </div>
       )}
 
