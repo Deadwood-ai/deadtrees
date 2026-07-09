@@ -80,6 +80,57 @@ const toWaybackItemWithoutMetadata = (
   item: WaybackItem,
 ): WaybackItemWithMetadata => toWaybackItemWithMetadata(item, undefined);
 
+/**
+ * Enrich Wayback items with per-location acquisition metadata.
+ *
+ * The Wayback release date (`releaseDatetime`/`releaseDateLabel`) is only the
+ * date ESRI *published* a global World Imagery snapshot — it is not the date the
+ * imagery at this location was actually captured. ESRI keeps serving the same
+ * underlying imagery across many releases for areas that did not change, so the
+ * release date is frequently years newer than the acquisition date (e.g. a 2019
+ * swissimage orthophoto still surfaced under a 2022 release).
+ *
+ * We therefore query ESRI's metadata service for each candidate release at the
+ * given location and attach the true acquisition date. Failures degrade
+ * gracefully: an item that could not be enriched keeps `acquisitionDate`
+ * undefined and callers fall back to the release date for that item only.
+ */
+export const enrichWaybackItemsWithMetadata = async (
+  items: WaybackItemWithMetadata[],
+  point: WaybackPoint,
+  zoomLevel: number,
+  {
+    metadataTimeoutMs = WAYBACK_METADATA_TIMEOUT_MS,
+    getItemMetadata = getMetadata,
+    signal,
+  }: Pick<
+    LoadWaybackItemsOptions,
+    "metadataTimeoutMs" | "getItemMetadata" | "signal"
+  > = {},
+): Promise<WaybackItemWithMetadata[]> => {
+  const enriched = await Promise.all(
+    items.map(async (item) => {
+      try {
+        const metadata = await withTimeout(
+          getItemMetadata(point, zoomLevel, item.releaseNum),
+          metadataTimeoutMs,
+          `Wayback metadata timed out after ${metadataTimeoutMs}ms for release ${item.releaseNum}`,
+        );
+        if (signal?.aborted) return item;
+        return toWaybackItemWithMetadata(item, metadata);
+      } catch (error) {
+        console.warn(
+          `Failed to load Wayback metadata for release ${item.releaseNum}`,
+          error,
+        );
+        return item;
+      }
+    }),
+  );
+
+  return dedupeWaybackItems(enriched);
+};
+
 const sortWaybackItemsAscending = (
   items: WaybackItemWithMetadata[],
 ): WaybackItemWithMetadata[] =>
@@ -128,7 +179,9 @@ export const loadLocalWaybackItems = async (
   zoomLevel: number,
   {
     itemsTimeoutMs = WAYBACK_ITEMS_TIMEOUT_MS,
+    metadataTimeoutMs = WAYBACK_METADATA_TIMEOUT_MS,
     getItemsWithLocalChanges = getWaybackItemsWithLocalChanges,
+    getItemMetadata = getMetadata,
     signal,
   }: LoadWaybackItemsOptions = {},
 ): Promise<WaybackItemWithMetadata[]> => {
@@ -150,7 +203,15 @@ export const loadLocalWaybackItems = async (
 
   if (items.length === 0) return [];
 
-  return dedupeWaybackItems(items.map(toWaybackItemWithoutMetadata));
+  // Attach true acquisition dates so labels/dedupe use when the imagery was
+  // captured rather than when ESRI published the release. Enrichment already
+  // deduplicates (collapsing releases that share an acquisition date).
+  return enrichWaybackItemsWithMetadata(
+    items.map(toWaybackItemWithoutMetadata),
+    point,
+    zoomLevel,
+    { metadataTimeoutMs, getItemMetadata, signal },
+  );
 };
 
 export const loadWaybackMetadata = async (
