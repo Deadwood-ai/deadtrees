@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { WaybackItemWithMetadata } from "../../hooks/useWaybackItems";
 import {
   findClosestImagery,
+  getVerifiedImageryYears,
   pickAutoMatchImagery,
 } from "./YearImagerySelector";
 
@@ -34,6 +35,20 @@ describe("findClosestImagery", () => {
     );
 
     expect(closest?.releaseNum).toBe(300);
+  });
+});
+
+describe("getVerifiedImageryYears", () => {
+  it("only counts verified acquisition dates, never release-date fallbacks", () => {
+    const years = getVerifiedImageryYears([
+      item(100, "2021-01-06", "2019-06-15"), // released 2021, captured 2019
+      item(200, "2022-10-04"), // metadata not resolved yet
+      item(300, "2023-05-11", "2023-05-11"),
+    ]);
+
+    // 2019 and 2023 are verified; the unresolved item must not produce a
+    // (release-date) 2022 dot that would later jump to another year.
+    expect([...years].sort()).toEqual(["2019", "2023"]);
   });
 });
 

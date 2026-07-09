@@ -10,7 +10,11 @@ import {
   type WaybackMetadata,
 } from "@esri/wayback-core";
 
-export const WAYBACK_ITEMS_TIMEOUT_MS = 8_000;
+// Local change detection probes the tilemap of every Wayback release (~150),
+// which regularly needs more than 10s on a normal connection. A timeout that
+// is too tight makes discovery fail wholesale, leaving the release-date
+// global list on screen with no verified acquisition dates.
+export const WAYBACK_ITEMS_TIMEOUT_MS = 25_000;
 export const WAYBACK_METADATA_TIMEOUT_MS = 3_000;
 
 /**

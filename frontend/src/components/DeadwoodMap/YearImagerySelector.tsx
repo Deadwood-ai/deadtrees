@@ -63,6 +63,26 @@ const getImageryYear = (item: WaybackItemWithMetadata): number | undefined =>
   getImageryDate(item)?.getFullYear();
 
 /**
+ * Years for which imagery is verified to exist at this location.
+ *
+ * Only counts acquisition dates from ESRI's metadata service — never the
+ * release-date fallback. Release dates say when ESRI published a snapshot,
+ * not when the local imagery was captured, so a dot derived from them can
+ * "move" to a different year the moment the item's metadata resolves. Verified
+ * years are sticky: dots can only appear as knowledge grows, never jump.
+ */
+export const getVerifiedImageryYears = (
+  items: WaybackItemWithMetadata[],
+): Set<string> => {
+  const years = new Set<string>();
+  items.forEach((item) => {
+    const year = item.acquisitionDate?.getFullYear();
+    if (year !== undefined) years.add(year.toString());
+  });
+  return years;
+};
+
+/**
  * Find the closest imagery to a target year, preferring older over newer
  */
 export const findClosestImagery = (
@@ -184,15 +204,12 @@ const YearImagerySelector = ({
 
   // Items are already sorted by acquisition date (oldest first) from the hook
 
-  // Extract years that have imagery from waybackItems
-  const yearsWithImagery = useMemo(() => {
-    const years = new Set<string>();
-    waybackItems.forEach((item) => {
-      const year = getImageryYear(item)?.toString();
-      if (year) years.add(year);
-    });
-    return years;
-  }, [waybackItems]);
+  // Years with verified (acquisition-dated) imagery at this location. Never
+  // derived from release dates, so the dots stay put while metadata streams in.
+  const yearsWithImagery = useMemo(
+    () => getVerifiedImageryYears(waybackItems),
+    [waybackItems],
+  );
 
   // Dynamic options with visual indicator for years with imagery (no opacity - all years have predictions)
   const predictionYearOptions = useMemo(
