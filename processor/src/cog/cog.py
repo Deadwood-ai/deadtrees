@@ -11,7 +11,6 @@ def _build_cog_translate_command(
 	cog_target_path: str,
 	num_bands: int,
 	alpha_band_index: int | None = None,
-	force_epsg_3857: bool = False,
 ):
 	"""Build gdal_translate command with a safe strategy per band-count."""
 	if num_bands < 1:
@@ -97,9 +96,6 @@ def _build_cog_translate_command(
 	if add_alpha:
 		cmd_translate.extend(['-co', 'ALPHA=YES'])
 
-	if force_epsg_3857:
-		cmd_translate.extend(['-a_srs', 'EPSG:3857'])
-
 	return cmd_translate
 
 
@@ -115,6 +111,63 @@ def _run_gdal_translate(command: list[str], token: str | None = None, attempt: s
 		logger.error(
 			(
 				f'gdal_translate failed ({attempt}) exit_code={e.returncode}\n'
+				f'command: {" ".join(command)}\n'
+				f'stdout:\n{e.stdout or ""}\n'
+				f'stderr:\n{e.stderr or ""}'
+			),
+			extra={'token': token},
+		)
+		raise
+
+
+def _reproject_to_epsg3857(src_path: str, dst_path: str, token: str | None = None) -> None:
+	"""Reproject a raster into EPSG:3857 with gdalwarp.
+
+	This is the fallback used when the primary COG translate (which relies on the
+	COG driver's GoogleMapsCompatible reprojection) fails. It performs a REAL
+	reprojection of the pixel grid.
+
+	It must never be replaced by ``gdal_translate -a_srs EPSG:3857``: ``-a_srs``
+	only overrides the CRS *label* without touching the pixel coordinates, so a
+	source in UTM (or any other projected CRS) keeps its metre easting/northing
+	while being tagged as Web Mercator. The result lands thousands of kilometres
+	from the true location (see the 2026-02 batch of mis-georeferenced COGs).
+
+	If the source has no usable CRS, gdalwarp fails here — which is the correct
+	behaviour: we would rather fail loudly than publish a mislocated COG.
+	"""
+	command = [
+		'gdalwarp',
+		'-t_srs',
+		'EPSG:3857',
+		'-of',
+		'GTiff',
+		'-co',
+		'BIGTIFF=YES',
+		'-co',
+		'TILED=YES',
+		'-r',
+		'bilinear',
+		'-multi',
+		'--config',
+		'GDAL_NUM_THREADS',
+		'ALL_CPUS',
+		'--config',
+		'GDAL_CACHEMAX',
+		'32768',
+		src_path,
+		dst_path,
+	]
+	try:
+		result = subprocess.run(command, check=True, capture_output=True, text=True)
+		if result.stdout:
+			logger.info(f'gdalwarp stdout (reproject-3857):\n{result.stdout}', extra={'token': token})
+		if result.stderr:
+			logger.info(f'gdalwarp stderr (reproject-3857):\n{result.stderr}', extra={'token': token})
+	except subprocess.CalledProcessError as e:
+		logger.error(
+			(
+				f'gdalwarp reproject to EPSG:3857 failed exit_code={e.returncode}\n'
 				f'command: {" ".join(command)}\n'
 				f'stdout:\n{e.stdout or ""}\n'
 				f'stderr:\n{e.stderr or ""}'
@@ -188,7 +241,8 @@ def calculate_cog(
 		alpha_band_index=alpha_band_index,
 	)
 
-	# Try to process with original CRS first
+	# Try to process with original CRS first. The COG driver reprojects the
+	# source into the GoogleMapsCompatible (EPSG:3857) tiling scheme itself.
 	try:
 		logger.info(
 			f'Running COG processing with original CRS (bands={num_bands})',
@@ -196,19 +250,30 @@ def calculate_cog(
 		)
 		_run_gdal_translate(cmd_translate, token=token, attempt='original-crs')
 	except subprocess.CalledProcessError:
-		logger.info('Retrying COG processing with EPSG:3857', extra={'token': token})
+		# Fallback: explicitly reproject the source into EPSG:3857 with gdalwarp,
+		# then build the COG from the already-reprojected raster.
+		#
+		# NOTE: the fallback MUST reproject, not relabel. A previous version added
+		# `gdal_translate -a_srs EPSG:3857`, which only overwrites the CRS tag and
+		# leaves the projected-metre coordinates untouched, producing COGs that are
+		# tagged Web Mercator but positioned at their raw UTM coordinates (off by
+		# thousands of km). See _reproject_to_epsg3857.
+		logger.info('Primary COG failed; reprojecting source to EPSG:3857 and retrying', extra={'token': token})
+		reprojected_path = str(Path(cog_target_path).with_name(Path(cog_target_path).stem + '_3857_src.tif'))
 		try:
-			cmd_translate_epsg = _build_cog_translate_command(
-				tiff_file_path=tiff_file_path,
+			_reproject_to_epsg3857(tiff_file_path, reprojected_path, token=token)
+			cmd_translate_reprojected = _build_cog_translate_command(
+				tiff_file_path=reprojected_path,
 				cog_target_path=cog_target_path,
 				num_bands=num_bands,
 				alpha_band_index=alpha_band_index,
-				force_epsg_3857=True,
 			)
-			_run_gdal_translate(cmd_translate_epsg, token=token, attempt='epsg-3857-retry')
+			_run_gdal_translate(cmd_translate_reprojected, token=token, attempt='epsg-3857-reproject-retry')
 		except subprocess.CalledProcessError as e:
-			logger.error(f'Error running gdal_translate with EPSG:3857 retry: {e}', extra={'token': token})
+			logger.error(f'Error running COG creation after EPSG:3857 reprojection: {e}', extra={'token': token})
 			raise  # Re-raise the exception to stop execution if both attempts fail
+		finally:
+			Path(reprojected_path).unlink(missing_ok=True)
 
 	return cog_info(cog_target_path)
 

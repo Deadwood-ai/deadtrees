@@ -287,7 +287,7 @@ def test_two_band_high_nodata_standardise_then_cog_preserves_internal_mask(tmp_p
 		assert np.array_equal(actual_transparent, expected_transparent)
 
 
-def test_calculate_cog_logs_full_error_and_retries_with_epsg_3857(monkeypatch):
+def test_calculate_cog_logs_full_error_and_retries_by_reprojecting_to_epsg_3857(monkeypatch):
 	_patch_common(monkeypatch, band_count=3)
 	commands: list[list[str]] = []
 	error_messages: list[str] = []
@@ -309,9 +309,17 @@ def test_calculate_cog_logs_full_error_and_retries_with_epsg_3857(monkeypatch):
 
 	cog_module.calculate_cog('input.tif', 'output.tif')
 
-	assert len(commands) == 2
+	# Primary COG translate (fails) -> gdalwarp reproject to 3857 -> COG translate on reprojected source.
+	assert len(commands) == 3
+	# The primary attempt must never relabel the CRS.
 	assert '-a_srs' not in commands[0]
-	assert '-a_srs' in commands[1]
+	# The fallback must REPROJECT (gdalwarp -t_srs), never relabel with -a_srs, otherwise
+	# projected-metre coordinates get mistagged as Web Mercator and land far from the true location.
+	assert commands[1][0] == 'gdalwarp'
+	assert '-t_srs' in commands[1]
 	assert 'EPSG:3857' in commands[1]
+	assert '-a_srs' not in commands[1]
+	# The final COG is built from the reprojected raster, still without -a_srs.
+	assert '-a_srs' not in commands[2]
 	assert any('boom stderr' in message for message in error_messages)
 	assert any('partial stdout' in message for message in error_messages)
