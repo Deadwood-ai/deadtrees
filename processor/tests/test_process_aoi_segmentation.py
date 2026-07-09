@@ -137,6 +137,7 @@ def test_process_aoi_segmentation_success(aoi_task, auth_token):
 	auto_aois = [aoi for aoi in aoi_response.data if aoi['notes'] == AUTO_AOI_NOTES]
 	for aoi in auto_aois:
 		assert aoi['is_whole_image'] is False
+		assert aoi['source'] == 'ml_prediction'
 		assert aoi['geometry']['type'] == 'MultiPolygon'
 
 
@@ -152,6 +153,7 @@ def test_process_aoi_skips_when_human_aoi_exists(aoi_task, auth_token, test_proc
 			'coordinates': [[[[13.405, 52.52], [13.405, 52.521], [13.406, 52.521], [13.406, 52.52], [13.405, 52.52]]]],
 		},
 		is_whole_image=False,
+		source='manual',
 		notes='auditor drawn',
 	)
 	with use_client(auth_token) as client:

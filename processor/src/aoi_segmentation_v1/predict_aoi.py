@@ -29,8 +29,11 @@ def _existing_human_aoi(dataset_id: int, token: str) -> bool:
 	AOI on top of an auditor-drawn one — that would shadow the human work.
 	"""
 	with use_client(token) as client:
-		response = client.table(settings.aois_table).select('id,notes').eq('dataset_id', dataset_id).execute()
-	return any((row.get('notes') or '') != AUTO_AOI_NOTES for row in (response.data or []))
+		response = client.table(settings.aois_table).select('id,notes,source').eq('dataset_id', dataset_id).execute()
+	return any(
+		row.get('source') != 'ml_prediction' and (row.get('notes') or '') != AUTO_AOI_NOTES
+		for row in (response.data or [])
+	)
 
 
 def predict_aoi(dataset_id: int, file_path: Path, user_id: str, token: str):
@@ -107,12 +110,14 @@ def _save_aoi(polygons, dataset_id, user_id, token):
 		user_id=user_id,
 		geometry=geojson,
 		is_whole_image=False,
+		source='ml_prediction',
 		notes=AUTO_AOI_NOTES,
 	)
 
 	with use_client(token) as client:
 		# Replace only our own previous auto-generated AOI; never delete
 		# auditor-drawn AOIs (which carry different/no notes).
+		client.table(settings.aois_table).delete().eq('dataset_id', dataset_id).eq('source', 'ml_prediction').execute()
 		client.table(settings.aois_table).delete().eq('dataset_id', dataset_id).eq('notes', AUTO_AOI_NOTES).execute()
 		response = (
 			client.table(settings.aois_table)

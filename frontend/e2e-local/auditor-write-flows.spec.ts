@@ -133,6 +133,10 @@ test.describe("auditor local write flows", () => {
 
     await drawAuditAoi(page);
     await expect(page.getByText(/AOI defined/)).toBeVisible();
+    await page.getByRole("button", { name: /^save Save AOI$/i }).click();
+    await expect(page.getByText("Unsaved AOI edits")).toBeHidden({
+      timeout: 10_000,
+    });
 
     const finalAssessmentCard = card(page, "8. Final Assessment");
     await finalAssessmentCard.getByText(/Ready/).click();
@@ -428,7 +432,7 @@ async function expectAuditSideEffects() {
 
   const { data: aois, error: aoiError } = await adminClient
     .from("v2_aois")
-    .select("dataset_id,user_id,is_whole_image,geometry")
+    .select("dataset_id,user_id,is_whole_image,source,corrected_from_aoi_id,geometry")
     .eq("dataset_id", datasetId);
   expect(aoiError).toBeNull();
   expect(aois).toHaveLength(1);
@@ -436,6 +440,8 @@ async function expectAuditSideEffects() {
     dataset_id: datasetId,
     user_id: auditorUser.id,
     is_whole_image: false,
+    source: "manual",
+    corrected_from_aoi_id: null,
   });
   expect(aois?.[0].geometry).toMatchObject({ type: "MultiPolygon" });
 

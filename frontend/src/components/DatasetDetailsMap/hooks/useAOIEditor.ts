@@ -309,7 +309,7 @@ export function useAOIEditor({
 		setIsEditing(false);
 		setSelectedFeatureForEdit(null);
 		setShowEditableLayer(true);
-		message.success("AOI edits applied. Save audit to persist.");
+		message.success("AOI edits applied. Save AOI to persist.");
 	}, [clearInteractions]);
 
 	// Cancel editing (restore original)

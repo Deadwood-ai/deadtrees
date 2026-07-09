@@ -96,8 +96,11 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 		isMarkingReviewed,
 		hasAOI,
 		handleAOIChange,
+		handleSaveAOI,
 		aoiToolbarState,
 		setAoiToolbarState,
+		isAOIDirty,
+		isSavingAOI,
 		isDownloading,
 		startDownload,
 		finishDownload,
@@ -331,7 +334,13 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 
 						<ThumbnailCard thumbnailUrl={thumbnailUrl} />
 
-						<AOICard aoiToolbarState={aoiToolbarState} mapRef={mapRef} />
+						<AOICard
+							aoiToolbarState={aoiToolbarState}
+							mapRef={mapRef}
+							isDirty={isAOIDirty}
+							isSaving={isSavingAOI}
+							onSaveAOI={handleSaveAOI}
+						/>
 
 						<FinalAssessmentCard
 							dataset={dataset}

@@ -520,10 +520,18 @@ class AOI(BaseModel):
 	user_id: str
 	geometry: Dict  # Changed from MultiPolygonModel to Dict
 	is_whole_image: bool = False
+	source: str = 'manual'
+	corrected_from_aoi_id: Optional[int] = None
 	image_quality: Optional[int] = None
 	notes: Optional[str] = None
 	created_at: Optional[datetime] = None
 	updated_at: Optional[datetime] = None
+
+	@field_validator('source')
+	def validate_source(cls, v):
+		if v not in {'ml_prediction', 'manual', 'manual_correction'}:
+			raise ValueError('AOI source must be ml_prediction, manual, or manual_correction')
+		return v
 
 	@field_validator('image_quality')
 	def validate_image_quality(cls, v):

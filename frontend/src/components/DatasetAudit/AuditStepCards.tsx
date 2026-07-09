@@ -446,9 +446,12 @@ export function ThumbnailCard({ thumbnailUrl }: ThumbnailCardProps) {
 interface AOICardProps {
 	aoiToolbarState: AOIToolbarState;
 	mapRef: React.RefObject<AuditMapWithControlsHandle>;
+	isDirty: boolean;
+	isSaving: boolean;
+	onSaveAOI: () => void;
 }
 
-export function AOICard({ aoiToolbarState, mapRef }: AOICardProps) {
+export function AOICard({ aoiToolbarState, mapRef, isDirty, isSaving, onSaveAOI }: AOICardProps) {
 	return (
 		<Card size="small" className="mb-3 shadow-sm">
 			<div className="mb-2 flex items-center">
@@ -464,6 +467,14 @@ export function AOICard({ aoiToolbarState, mapRef }: AOICardProps) {
 					{aoiToolbarState.hasAOI && !aoiToolbarState.isDrawing && !aoiToolbarState.isEditing && (
 						<div className="rounded bg-green-50 px-2 py-1 text-xs text-green-700">
 							✓ AOI defined ({aoiToolbarState.polygonCount} polygon{aoiToolbarState.polygonCount !== 1 ? "s" : ""})
+						</div>
+					)}
+
+					{isDirty && (
+						<div className="rounded bg-amber-50 px-2 py-1 text-xs text-amber-700">
+							{aoiToolbarState.hasAOI
+								? "Unsaved AOI edits"
+								: "AOI draft cleared. Draw a replacement AOI to save."}
 						</div>
 					)}
 
@@ -512,7 +523,7 @@ export function AOICard({ aoiToolbarState, mapRef }: AOICardProps) {
 								size="small"
 								danger
 							>
-								Delete All
+								Clear Draft
 							</Button>
 						</div>
 					)}
@@ -527,7 +538,7 @@ export function AOICard({ aoiToolbarState, mapRef }: AOICardProps) {
 									size="small"
 									type="primary"
 								>
-									Save
+									Apply
 								</Button>
 								<Button
 									icon={<CloseOutlined />}
@@ -548,6 +559,18 @@ export function AOICard({ aoiToolbarState, mapRef }: AOICardProps) {
 								)}
 							</div>
 						</div>
+					)}
+
+					{!aoiToolbarState.isDrawing && !aoiToolbarState.isEditing && aoiToolbarState.hasAOI && isDirty && (
+						<Button
+							icon={<SaveOutlined />}
+							onClick={onSaveAOI}
+							size="small"
+							type="primary"
+							loading={isSaving}
+						>
+							Save AOI
+						</Button>
 					)}
 				</div>
 			)}
