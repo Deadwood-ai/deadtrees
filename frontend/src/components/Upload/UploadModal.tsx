@@ -40,6 +40,7 @@ import { clearLocalSupabaseSession, supabase } from "../../hooks/useSupabase";
 import { RcFile } from "antd/es/upload";
 import type { Dayjs } from "dayjs";
 import { useAnalytics } from "../../hooks/useAnalytics";
+import { Link } from "react-router-dom";
 // New interfaces
 interface IFormValues {
   license: ILicense;
@@ -378,7 +379,14 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
                     <p className="ant-upload-text mb-0">Click or drag file to this area</p>
                     <p className="ant-upload-hint mb-0 text-xs">
                       GeoTIFF (.tif, .tiff) max 20GB or ZIP with raw drone images (.zip) max 30GB, orthomosaic
-                      processing, (recom. overlap 85% vs. 75%)
+                      processing. For raw images, see the{" "}
+                      <Link
+                        to="/releases/drone-mapping-guide"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        drone mapping guide
+                      </Link>
+                      .
                     </p>
                   </div>
                 </div>

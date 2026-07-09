@@ -8,13 +8,20 @@ interface ReleasePreviewStripProps {
   className?: string;
 }
 
+const getDefaultClassName = (tileCount: number) =>
+  tileCount <= 2
+    ? "grid grid-cols-1 gap-px bg-gray-200 sm:grid-cols-2"
+    : "grid grid-cols-2 gap-px bg-gray-200 sm:grid-cols-6";
+
 export function ReleasePreviewStrip({
   tiles,
   tileClassName = "",
-  className = "grid grid-cols-2 gap-px bg-gray-200 sm:grid-cols-6",
+  className,
 }: ReleasePreviewStripProps) {
+  const resolvedClassName = className ?? getDefaultClassName(tiles.length);
+
   return (
-    <div className={className}>
+    <div className={resolvedClassName}>
       {tiles.map((tile) => {
         if (tile.kind === "image") {
           return (

@@ -335,6 +335,100 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
     ).toBeVisible();
   });
 
+  test("release listing opens the drone mapping guide", async ({ page }) => {
+    let feedbackRequestCount = 0;
+    await page.route("https://formspree.io/f/xpqgllrn", async (route) => {
+      feedbackRequestCount += 1;
+      expect(route.request().method()).toBe("POST");
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, next: "/thanks" }),
+      });
+    });
+
+    await page.goto("/releases");
+
+    const releaseCards = await expectReleasesReady(page);
+    const guideCard = releaseCards
+      .filter({
+        has: page.getByRole("heading", { name: "Drone mapping guide" }),
+      })
+      .first();
+
+    await expect(guideCard).toBeVisible();
+    await expect(guideCard.getByText("Contributor guide")).toHaveCount(0);
+    await expect(
+      guideCard.getByText("Drone mapping", { exact: true }),
+    ).toBeVisible();
+    await expect(guideCard.getByText("Available")).toHaveCount(0);
+    await expect(guideCard.getByText("4 steps")).toHaveCount(0);
+    await expect(guideCard.getByText("Raw images")).toHaveCount(0);
+
+    await guideCard.getByRole("button", { name: "Open guide" }).click();
+
+    await expect(page).toHaveURL(/\/releases\/drone-mapping-guide$/);
+    await expect(page.getByTestId("release-detail-page")).toBeVisible();
+    await expect(
+      page.getByRole("heading", {
+        name: "How to plan a survey flight for forest mapping",
+      }),
+    ).toBeVisible();
+    const workflow = page.getByTestId("drone-guide-workflow");
+    await expect(workflow).toBeVisible();
+    await expect(
+      workflow.locator("details[open] summary").filter({
+        hasText: "About the project",
+      }),
+    ).toBeVisible();
+    await expect(page.getByText("Why do we need this data?")).toBeVisible();
+    await workflow
+      .locator("summary")
+      .filter({ hasText: "Flight planning software" })
+      .click();
+    await expect(page.getByText("DJI Pilot 2")).toBeVisible();
+    await expect(page.getByText("DJI Mavic Pro Series")).toBeVisible();
+    await expect(page.getByText("DJI Matrice 400")).toBeVisible();
+    await expect(page.getByText("...see all compatible drones.")).toHaveCount(2);
+    await workflow
+      .locator("summary")
+      .filter({ hasText: "Planning & flying your mission" })
+      .click();
+    await expect(page.getByText("Front overlap")).toBeVisible();
+    await expect(page.getByText("80–120m (relative to ground)")).toBeVisible();
+    await expect(page.getByText("Wait for GPS lock")).toBeVisible();
+    await expect(page.getByText("Battery management")).toBeVisible();
+    await page.getByText("I have flight data").click();
+    await expect(page.getByText("Acquisition date")).toBeVisible();
+    await expect(page.getByText("Additional info")).toBeVisible();
+    await expect(page.getByText("tree cover + dead trees layer")).toBeVisible();
+    await expect(
+      page.getByText("Come back when processing is complete"),
+    ).toBeVisible();
+    await workflow
+      .locator("summary")
+      .filter({ hasText: "Questions and feedback" })
+      .click();
+    await expect(page.getByText("Guide author")).toBeVisible();
+    await expect(page.getByText("Sarah Habershon")).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "View Sarah’s RSC4Earth profile" }),
+    ).toHaveAttribute(
+      "href",
+      "https://rsc4earth.de/author/sarah-habershon/",
+    );
+    await page.getByLabel("Your email").fill("codex-feedback-test@example.com");
+    await page.getByLabel("Your question or feedback").fill("test feedback");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(
+      page.getByText("Thanks — we'll get back to you soon."),
+    ).toBeVisible();
+    await expect(page.getByLabel("Your email")).toHaveValue("");
+    await expect(page.getByLabel("Your question or feedback")).toHaveValue("");
+    expect(feedbackRequestCount).toBe(1);
+    await expect(page.getByTestId("release-artifacts")).toHaveCount(0);
+  });
+
   test("satellite map journey loads public layers and read-only controls", async ({
     page,
   }) => {

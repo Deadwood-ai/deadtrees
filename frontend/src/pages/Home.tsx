@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { Collapse } from "antd";
+import { Link } from "react-router-dom";
 
 import Hero from "../components/Home/Hero";
 import HowItWorks from "../components/Home/HowItWorks";
@@ -196,7 +197,11 @@ const FAQ = () => {
               </li>
               <li>
                 <strong>Format:</strong> GeoTIFF or ZIP of raw images
-                (recommended overlap 85% vs. 75%)
+                . For raw image uploads, see the{" "}
+                <Link to="/releases/drone-mapping-guide">
+                  drone mapping guide
+                </Link>
+                .
               </li>
 
               <li>
