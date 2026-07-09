@@ -89,6 +89,17 @@ export const createOpenFreeMapLibertyLayerGroup = () => {
   return group;
 };
 
+/**
+ * Default Wayback release used before any location-specific discovery runs.
+ *
+ * IMPORTANT: ESRI release numbers are NOT ordered by time (e.g. 31144 is the
+ * 2014-06-11 release while 32246 is 2026-06-30). Pick the newest entry from
+ * `getWaybackItems()` when bumping this; keep the date in sync — it lets the
+ * imagery picker resolve which candidate's image the default actually shows.
+ */
+export const DEFAULT_WAYBACK_RELEASE = 32246; // World Imagery (Wayback 2026-06-30)
+export const DEFAULT_WAYBACK_RELEASE_DATETIME = Date.UTC(2026, 5, 30);
+
 export const createWaybackSource = (releaseNum: number) =>
   new XYZ({
     url: getWaybackTileUrl(releaseNum),

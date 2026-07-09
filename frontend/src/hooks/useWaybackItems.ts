@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import {
   getWaybackItems,
   getWaybackItemsWithLocalChanges,
@@ -9,20 +9,52 @@ import {
   type WaybackItem,
   type WaybackMetadata,
 } from "@esri/wayback-core";
+import {
+  DEFAULT_WAYBACK_RELEASE,
+  DEFAULT_WAYBACK_RELEASE_DATETIME,
+} from "../utils/basemaps";
 
-// Local change detection probes the tilemap of every Wayback release (~150),
-// which regularly needs more than 10s on a normal connection. A timeout that
-// is too tight makes discovery fail wholesale, leaving the release-date
-// global list on screen with no verified acquisition dates.
-export const WAYBACK_ITEMS_TIMEOUT_MS = 25_000;
-export const WAYBACK_METADATA_TIMEOUT_MS = 3_000;
+/**
+ * ESRI World Imagery Wayback integration.
+ *
+ * ESRI has two different dates per release:
+ * - Release date: when ESRI published a global World Imagery snapshot. A new
+ *   release is cut whenever *any* region changes, so for a location that did
+ *   not change the release date runs years ahead of reality.
+ * - Acquisition date: when the imagery at a specific location was captured.
+ *   Only available from ESRI's per-release metadata service.
+ *
+ * The model here is a single, atomic, per-location candidate list:
+ * 1. Change detection (`getWaybackItemsWithLocalChanges`) finds the releases
+ *    where the imagery at the map center actually changed. Candidates
+ *    partition the release axis: between two changes every release serves
+ *    byte-identical tiles, so ANY release resolves to the latest candidate at
+ *    or before it (see `resolveWaybackCandidate`).
+ * 2. Every candidate is enriched with its acquisition metadata (bounded
+ *    concurrency, one retry pass) and the list is deduplicated by acquisition
+ *    date before it is returned. The UI never sees a partially-verified list,
+ *    so derived UI (year dots, labels, auto-match) is stable per location.
+ * 3. Only if discovery fails outright do we fall back to the global release
+ *    list, whose dates are unverified (release dates).
+ */
+
+// Discovery probes the tilemap of every Wayback release (~150) and regularly
+// needs >10s on a normal connection; a tight timeout fails wholesale and
+// forces the unverified fallback.
+export const WAYBACK_DISCOVERY_TIMEOUT_MS = 30_000;
+export const WAYBACK_METADATA_TIMEOUT_MS = 10_000;
+// ESRI throttles bursts of metadata queries; a small worker pool with a retry
+// pass is far more reliable than firing every request at once.
+export const WAYBACK_METADATA_CONCURRENCY = 6;
+export const WAYBACK_CANDIDATE_DISCOVERY_ZOOM = 12;
+export const WAYBACK_CANDIDATE_DEBOUNCE_MS = 1_000;
 
 /**
  * Extended WaybackItem with actual acquisition metadata
  */
 export interface WaybackItemWithMetadata extends WaybackItem {
   metadata?: WaybackMetadata;
-  /** Formatted acquisition date (from metadata.date) */
+  /** Verified acquisition date (from metadata.date); undefined = unverified */
   acquisitionDate?: Date;
   /** Provider name (e.g., "Maxar", "Airbus") */
   provider?: string;
@@ -38,8 +70,9 @@ type WaybackPoint = {
 };
 
 interface LoadWaybackItemsOptions {
-  itemsTimeoutMs?: number;
+  discoveryTimeoutMs?: number;
   metadataTimeoutMs?: number;
+  metadataConcurrency?: number;
   getItems?: typeof getWaybackItems;
   getItemsWithLocalChanges?: typeof getWaybackItemsWithLocalChanges;
   getItemMetadata?: typeof getMetadata;
@@ -68,93 +101,39 @@ const withTimeout = async <T>(
     );
   });
 
+/**
+ * Release dates for every release the app has seen, keyed by release number.
+ * ESRI release numbers are NOT ordered by time, so resolving which candidate
+ * covers a selected release requires its release DATE — including for
+ * selections that are no longer in the current candidate list (the hardcoded
+ * default release, or a candidate from a previously visited map tile).
+ */
+const releaseDatetimeByNum = new Map<number, number>([
+  [DEFAULT_WAYBACK_RELEASE, DEFAULT_WAYBACK_RELEASE_DATETIME],
+]);
+
+export const registerWaybackReleaseDate = (
+  releaseNum: number,
+  releaseDatetime: number,
+): void => {
+  releaseDatetimeByNum.set(releaseNum, releaseDatetime);
+};
+
 const toWaybackItemWithMetadata = (
   item: WaybackItem,
   metadata: WaybackMetadata | null | undefined,
-): WaybackItemWithMetadata => ({
-  ...item,
-  metadata: metadata ?? undefined,
-  acquisitionDate: metadata?.date ? new Date(metadata.date) : undefined,
-  provider: metadata?.provider,
-  source: metadata?.source,
-  resolution: metadata?.resolution,
-});
-
-const toWaybackItemWithoutMetadata = (
-  item: WaybackItem,
-): WaybackItemWithMetadata => toWaybackItemWithMetadata(item, undefined);
-
-/**
- * Enrich Wayback items with per-location acquisition metadata.
- *
- * The Wayback release date (`releaseDatetime`/`releaseDateLabel`) is only the
- * date ESRI *published* a global World Imagery snapshot — it is not the date the
- * imagery at this location was actually captured. ESRI keeps serving the same
- * underlying imagery across many releases for areas that did not change, so the
- * release date is frequently years newer than the acquisition date (e.g. a 2019
- * swissimage orthophoto still surfaced under a 2022 release).
- *
- * We therefore query ESRI's metadata service for each candidate release at the
- * given location and attach the true acquisition date. Failures degrade
- * gracefully: an item that could not be enriched keeps `acquisitionDate`
- * undefined and callers fall back to the release date for that item only.
- */
-export const enrichWaybackItemsWithMetadata = async (
-  items: WaybackItemWithMetadata[],
-  point: WaybackPoint,
-  zoomLevel: number,
-  {
-    metadataTimeoutMs = WAYBACK_METADATA_TIMEOUT_MS,
-    getItemMetadata = getMetadata,
-    signal,
-  }: Pick<
-    LoadWaybackItemsOptions,
-    "metadataTimeoutMs" | "getItemMetadata" | "signal"
-  > = {},
-): Promise<WaybackItemWithMetadata[]> => {
-  const enriched = await Promise.all(
-    items.map(async (item) => {
-      try {
-        const metadata = await withTimeout(
-          getItemMetadata(point, zoomLevel, item.releaseNum),
-          metadataTimeoutMs,
-          `Wayback metadata timed out after ${metadataTimeoutMs}ms for release ${item.releaseNum}`,
-        );
-        if (signal?.aborted) return item;
-        return toWaybackItemWithMetadata(item, metadata);
-      } catch (error) {
-        console.warn(
-          `Failed to load Wayback metadata for release ${item.releaseNum}`,
-          error,
-        );
-        return item;
-      }
-    }),
-  );
-
-  return dedupeWaybackItems(enriched);
-};
-
-/**
- * Overlay resolved acquisition metadata onto items that do not already carry an
- * acquisition date (i.e. items sourced from the unenriched global release list).
- * Items keep their original identity when no metadata applies, and the array
- * identity is preserved when nothing changes, so downstream selection effects do
- * not re-run needlessly.
- */
-export const overlayAcquisitionMetadata = (
-  items: WaybackItemWithMetadata[],
-  resolveMetadata: (releaseNum: number) => WaybackMetadata | null | undefined,
-): WaybackItemWithMetadata[] => {
-  let changed = false;
-  const overlaid = items.map((item) => {
-    if (item.acquisitionDate) return item;
-    const metadata = resolveMetadata(item.releaseNum);
-    if (!metadata?.date) return item;
-    changed = true;
-    return toWaybackItemWithMetadata(item, metadata);
-  });
-  return changed ? overlaid : items;
+): WaybackItemWithMetadata => {
+  if (item.releaseDatetime) {
+    registerWaybackReleaseDate(item.releaseNum, item.releaseDatetime);
+  }
+  return {
+    ...item,
+    metadata: metadata ?? undefined,
+    acquisitionDate: metadata?.date ? new Date(metadata.date) : undefined,
+    provider: metadata?.provider,
+    source: metadata?.source,
+    resolution: metadata?.resolution,
+  };
 };
 
 const sortWaybackItemsAscending = (
@@ -176,7 +155,9 @@ const dedupeWaybackItems = (
       item.releaseDateLabel ||
       String(item.releaseNum);
     const existing = dateMap.get(dateKey);
-    if (!existing || item.releaseNum > existing.releaseNum) {
+    // Keep the most recently *released* item per acquisition date (latest
+    // processing of the same capture). Release numbers are not temporal.
+    if (!existing || item.releaseDatetime > existing.releaseDatetime) {
       dateMap.set(dateKey, item);
     }
   });
@@ -184,329 +165,235 @@ const dedupeWaybackItems = (
   return sortWaybackItemsAscending(Array.from(dateMap.values()));
 };
 
-export const loadGlobalWaybackItems = async ({
-  itemsTimeoutMs = WAYBACK_ITEMS_TIMEOUT_MS,
-  getItems = getWaybackItems,
-}: Pick<
-  LoadWaybackItemsOptions,
-  "itemsTimeoutMs" | "getItems"
-> = {}): Promise<WaybackItemWithMetadata[]> => {
-  const items = await withTimeout(
-    getItems(),
-    itemsTimeoutMs,
-    `Wayback release list timed out after ${itemsTimeoutMs}ms`,
-  );
-
-  return dedupeWaybackItems(items.map(toWaybackItemWithoutMetadata));
-};
-
-export const loadLocalWaybackItems = async (
+/**
+ * Fetch acquisition metadata for every item with a small worker pool, then
+ * retry the failures once. Items that still fail keep `acquisitionDate`
+ * undefined (unverified) — they stay selectable but are excluded from
+ * verified-year UI.
+ */
+export const enrichWaybackItemsWithMetadata = async (
+  items: WaybackItemWithMetadata[],
   point: WaybackPoint,
   zoomLevel: number,
   {
-    itemsTimeoutMs = WAYBACK_ITEMS_TIMEOUT_MS,
     metadataTimeoutMs = WAYBACK_METADATA_TIMEOUT_MS,
-    getItemsWithLocalChanges = getWaybackItemsWithLocalChanges,
-    getItemMetadata = getMetadata,
-    signal,
-  }: LoadWaybackItemsOptions = {},
-): Promise<WaybackItemWithMetadata[]> => {
-  let items: WaybackItem[];
-
-  try {
-    items = await withTimeout(
-      getItemsWithLocalChanges(point, zoomLevel, {
-        signal,
-        onlyUseSizeToFilterDuplicates: true,
-      }),
-      itemsTimeoutMs,
-      `Wayback imagery discovery timed out after ${itemsTimeoutMs}ms`,
-    );
-  } catch (error) {
-    console.warn("Failed to load local Wayback imagery", error);
-    throw error;
-  }
-
-  if (items.length === 0) return [];
-
-  // Attach true acquisition dates so labels/dedupe use when the imagery was
-  // captured rather than when ESRI published the release. Enrichment already
-  // deduplicates (collapsing releases that share an acquisition date).
-  return enrichWaybackItemsWithMetadata(
-    items.map(toWaybackItemWithoutMetadata),
-    point,
-    zoomLevel,
-    { metadataTimeoutMs, getItemMetadata, signal },
-  );
-};
-
-export const loadWaybackMetadata = async (
-  point: WaybackPoint,
-  zoomLevel: number,
-  releaseNum: number,
-  {
-    metadataTimeoutMs = WAYBACK_METADATA_TIMEOUT_MS,
+    metadataConcurrency = WAYBACK_METADATA_CONCURRENCY,
     getItemMetadata = getMetadata,
   }: Pick<
     LoadWaybackItemsOptions,
-    "metadataTimeoutMs" | "getItemMetadata"
+    "metadataTimeoutMs" | "metadataConcurrency" | "getItemMetadata"
   > = {},
-): Promise<WaybackMetadata | null> =>
-  withTimeout(
-    getItemMetadata(point, zoomLevel, releaseNum),
-    metadataTimeoutMs,
-    `Wayback metadata timed out after ${metadataTimeoutMs}ms for release ${releaseNum}`,
+): Promise<WaybackItemWithMetadata[]> => {
+  const resolved = new Map<number, WaybackMetadata | null>();
+
+  const runPass = async (
+    passItems: WaybackItemWithMetadata[],
+  ): Promise<WaybackItemWithMetadata[]> => {
+    const queue = [...passItems];
+    const failed: WaybackItemWithMetadata[] = [];
+    const workers = Array.from(
+      { length: Math.min(metadataConcurrency, queue.length) },
+      async () => {
+        for (
+          let item = queue.shift();
+          item !== undefined;
+          item = queue.shift()
+        ) {
+          try {
+            const metadata = await withTimeout(
+              getItemMetadata(point, zoomLevel, item.releaseNum),
+              metadataTimeoutMs,
+              `Wayback metadata timed out after ${metadataTimeoutMs}ms for release ${item.releaseNum}`,
+            );
+            resolved.set(item.releaseNum, metadata);
+          } catch {
+            failed.push(item);
+          }
+        }
+      },
+    );
+    await Promise.all(workers);
+    return failed;
+  };
+
+  const failedOnce = await runPass(items);
+  const failedTwice = failedOnce.length > 0 ? await runPass(failedOnce) : [];
+  failedTwice.forEach((item) => {
+    console.warn(
+      `Wayback metadata unavailable for release ${item.releaseNum}; keeping unverified release date`,
+    );
+  });
+
+  return items.map((item) =>
+    toWaybackItemWithMetadata(item, resolved.get(item.releaseNum)),
   );
-
-export const loadWaybackItemsWithMetadata = loadLocalWaybackItems;
-
-/**
- * Calculate distance between two coordinates in meters (Haversine formula)
- */
-const getDistanceInMeters = (lon1: number, lat1: number, lon2: number, lat2: number): number => {
-  const R = 6371000; // Earth's radius in meters
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
 };
 
-// Distance threshold for re-fetching (2km - imagery doesn't change much spatially)
-const REFETCH_DISTANCE_METERS = 2000;
-export const WAYBACK_CANDIDATE_DISCOVERY_ZOOM = 12;
-export const WAYBACK_CANDIDATE_DEBOUNCE_MS = 1_000;
-export const WAYBACK_CANDIDATE_THROTTLE_MS = 10_000;
+/**
+ * The per-location candidate list: change-detected releases, fully enriched
+ * with acquisition metadata and deduplicated by acquisition date.
+ */
+export const loadWaybackCandidates = async (
+  point: WaybackPoint,
+  zoomLevel: number,
+  {
+    discoveryTimeoutMs = WAYBACK_DISCOVERY_TIMEOUT_MS,
+    metadataTimeoutMs,
+    metadataConcurrency,
+    getItemsWithLocalChanges = getWaybackItemsWithLocalChanges,
+    getItemMetadata,
+    signal,
+  }: LoadWaybackItemsOptions = {},
+): Promise<WaybackItemWithMetadata[]> => {
+  const items = await withTimeout(
+    getItemsWithLocalChanges(point, zoomLevel, {
+      signal,
+      onlyUseSizeToFilterDuplicates: true,
+    }),
+    discoveryTimeoutMs,
+    `Wayback imagery discovery timed out after ${discoveryTimeoutMs}ms`,
+  );
+
+  if (items.length === 0) return [];
+
+  const enriched = await enrichWaybackItemsWithMetadata(
+    items.map((item) => toWaybackItemWithMetadata(item, undefined)),
+    point,
+    zoomLevel,
+    { metadataTimeoutMs, metadataConcurrency, getItemMetadata },
+  );
+
+  return dedupeWaybackItems(enriched);
+};
 
 /**
- * Hook to fetch Wayback items with actual imagery changes at this location.
+ * Fallback when discovery fails outright: the global release list. Its dates
+ * are release dates (unverified) — callers should present them as such.
+ */
+export const loadGlobalWaybackItems = async ({
+  getItems = getWaybackItems,
+}: Pick<LoadWaybackItemsOptions, "getItems"> = {}): Promise<
+  WaybackItemWithMetadata[]
+> => {
+  const items = await getItems();
+  return dedupeWaybackItems(
+    items.map((item) => toWaybackItemWithMetadata(item, undefined)),
+  );
+};
+
+/**
+ * Resolve which candidate's imagery a given release actually shows at this
+ * location: the latest candidate released at or before it. Change detection
+ * guarantees releases between two candidates serve identical tiles.
  *
- * Pipeline:
- * 1. Fetches the global Wayback release list for immediate, cheap candidates.
- * 2. Optionally refines with local-change candidates after the user asks for it.
- * 3. Deduplicates by release date and sorts ascending (oldest left, newest right).
+ * Comparison is by release DATE (release numbers are not temporal). Returns
+ * null when the release predates the oldest candidate (no imagery that old
+ * at this location), its date is unknown, or the list is empty.
+ */
+export const resolveWaybackCandidate = (
+  items: WaybackItemWithMetadata[],
+  releaseNum: number | null,
+): WaybackItemWithMetadata | null => {
+  if (releaseNum === null) return null;
+
+  const exact = items.find((item) => item.releaseNum === releaseNum);
+  if (exact) return exact;
+
+  const releaseDatetime = releaseDatetimeByNum.get(releaseNum);
+  if (releaseDatetime === undefined) return null;
+
+  let best: WaybackItemWithMetadata | null = null;
+  for (const item of items) {
+    if (
+      item.releaseDatetime <= releaseDatetime &&
+      (best === null || item.releaseDatetime > best.releaseDatetime)
+    ) {
+      best = item;
+    }
+  }
+  return best;
+};
+
+/**
+ * Hook: per-location Wayback candidates for the map center.
  *
- * Local refinement only re-fetches when location changes significantly (>2km)
- * and is cached by the coarse Wayback tile key. Zoom changes do not invalidate
- * candidate discovery because the active basemap release should stay stable
- * while the map requests normal tiles for the new view.
- *
- * The global release list is location-independent and therefore only carries
- * release dates, not the imagery's true acquisition date. Change detection is
- * gated behind user interaction, so the global list is what the picker shows by
- * default. To keep the displayed date honest before (and instead of) change
- * detection, we eagerly fetch acquisition metadata for the currently selected
- * release at the map center and merge it in. That is a single, tile-cached
- * request per selection — cheap enough to run ungated, unlike enriching the
- * entire release list.
+ * The map center is debounced (1s) and mapped to a coarse Wayback tile; the
+ * candidate query is keyed by that tile, so panning within ~10km reuses the
+ * cached list and crossing a tile boundary loads the neighbouring one. While
+ * a new tile loads, the previous list stays on screen (placeholder data), so
+ * selection-derived UI never collapses mid-pan.
  */
 export const useWaybackItemsDebounced = (
   longitude: number | undefined,
   latitude: number | undefined,
   enabled: boolean = true,
-  selectedReleaseNum: number | null = null,
 ) => {
-  // Track the last fetched location
-  const lastFetchRef = useRef<{ lon: number; lat: number } | null>(null);
-  const lastFetchAtRef = useRef(0);
-  const debounceHandleRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
-  const throttleHandleRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
-  const [stableCoords, setStableCoords] = useState<{ lon: number; lat: number } | null>(null);
-  const stableTileKey =
-    stableCoords !== null
-      ? {
-          level: WAYBACK_CANDIDATE_DISCOVERY_ZOOM,
-          column: long2tile(stableCoords.lon, WAYBACK_CANDIDATE_DISCOVERY_ZOOM),
-          row: lat2tile(stableCoords.lat, WAYBACK_CANDIDATE_DISCOVERY_ZOOM),
-        }
-      : null;
+  const [stablePoint, setStablePoint] = useState<{
+    lon: number;
+    lat: number;
+    column: number;
+    row: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!enabled || longitude === undefined || latitude === undefined) return;
 
-    const last = lastFetchRef.current;
-    const nextCoords = { lon: longitude, lat: latitude };
-    const shouldFetch =
-      !last ||
-      getDistanceInMeters(last.lon, last.lat, longitude, latitude) >
-        REFETCH_DISTANCE_METERS;
-
-    if (!shouldFetch) return;
-
-    if (debounceHandleRef.current) {
-      globalThis.clearTimeout(debounceHandleRef.current);
-    }
-    if (throttleHandleRef.current) {
-      globalThis.clearTimeout(throttleHandleRef.current);
-    }
-
-    const applyNextCoords = () => {
-      lastFetchRef.current = nextCoords;
-      lastFetchAtRef.current = Date.now();
-      setStableCoords(nextCoords);
-    };
-
-    debounceHandleRef.current = globalThis.setTimeout(() => {
-      const elapsedSinceFetch = Date.now() - lastFetchAtRef.current;
-      if (
-        lastFetchAtRef.current === 0 ||
-        elapsedSinceFetch >= WAYBACK_CANDIDATE_THROTTLE_MS
-      ) {
-        applyNextCoords();
-        return;
-      }
-
-      throttleHandleRef.current = globalThis.setTimeout(
-        applyNextCoords,
-        WAYBACK_CANDIDATE_THROTTLE_MS - elapsedSinceFetch,
+    const handle = globalThis.setTimeout(() => {
+      const column = long2tile(longitude, WAYBACK_CANDIDATE_DISCOVERY_ZOOM);
+      const row = lat2tile(latitude, WAYBACK_CANDIDATE_DISCOVERY_ZOOM);
+      // Keep the previous object when the tile is unchanged so the query key
+      // (and everything derived from it) stays stable while panning in-tile.
+      setStablePoint((prev) =>
+        prev && prev.column === column && prev.row === row
+          ? prev
+          : { lon: longitude, lat: latitude, column, row },
       );
     }, WAYBACK_CANDIDATE_DEBOUNCE_MS);
 
-    return () => {
-      if (debounceHandleRef.current) {
-        globalThis.clearTimeout(debounceHandleRef.current);
-        debounceHandleRef.current = null;
-      }
-      if (throttleHandleRef.current) {
-        globalThis.clearTimeout(throttleHandleRef.current);
-        throttleHandleRef.current = null;
-      }
-    };
+    return () => globalThis.clearTimeout(handle);
   }, [longitude, latitude, enabled]);
 
-  const globalItemsQuery = useQuery({
+  const candidatesQuery = useQuery({
+    queryKey: ["wayback-candidates", stablePoint?.column, stablePoint?.row],
+    queryFn: ({ signal }): Promise<WaybackItemWithMetadata[]> =>
+      loadWaybackCandidates(
+        {
+          longitude: stablePoint?.lon as number,
+          latitude: stablePoint?.lat as number,
+        },
+        WAYBACK_CANDIDATE_DISCOVERY_ZOOM,
+        { signal },
+      ),
+    enabled: enabled && stablePoint !== null,
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    placeholderData: keepPreviousData,
+    retry: 1,
+  });
+
+  // Unverified fallback, fetched only after discovery has failed for good.
+  const fallbackQuery = useQuery({
     queryKey: ["wayback-items-global"],
     queryFn: () => loadGlobalWaybackItems(),
-    enabled,
+    enabled: enabled && candidatesQuery.isError,
     staleTime: 24 * 60 * 60 * 1000,
     gcTime: 24 * 60 * 60 * 1000,
   });
 
-  const localItemsQuery = useQuery({
-    queryKey: [
-      "wayback-items-local",
-      stableTileKey?.level,
-      stableTileKey?.column,
-      stableTileKey?.row,
-    ],
-    queryFn: async ({ signal }): Promise<WaybackItemWithMetadata[]> => {
-      if (!stableCoords) return [];
-
-      const point = { longitude: stableCoords.lon, latitude: stableCoords.lat };
-
-      return loadLocalWaybackItems(
-        point,
-        WAYBACK_CANDIDATE_DISCOVERY_ZOOM,
-        { signal },
-      );
-    },
-    enabled: enabled && stableCoords !== null,
-    staleTime: 30 * 60 * 1000, // Cache for 30 minutes
-    gcTime: 60 * 60 * 1000, // Keep in cache for 1 hour
-  });
-
-  // Acquisition metadata for the currently selected release at the map center.
-  // Keyed by the coarse Wayback tile so nearby views share the cached result.
-  // Runs ungated (no dependency on change detection) so the displayed date is
-  // the true acquisition date even when only the global release list is loaded.
-  const selectedTileColumn =
-    longitude !== undefined
-      ? long2tile(longitude, WAYBACK_CANDIDATE_DISCOVERY_ZOOM)
-      : null;
-  const selectedTileRow =
-    latitude !== undefined
-      ? lat2tile(latitude, WAYBACK_CANDIDATE_DISCOVERY_ZOOM)
-      : null;
-  const canFetchSelectedMetadata =
-    enabled &&
-    selectedReleaseNum !== null &&
-    selectedTileColumn !== null &&
-    selectedTileRow !== null;
-
-  const selectedMetadataQuery = useQuery({
-    queryKey: [
-      "wayback-selected-metadata",
-      selectedReleaseNum,
-      selectedTileColumn,
-      selectedTileRow,
-    ],
-    queryFn: () =>
-      loadWaybackMetadata(
-        { longitude: longitude as number, latitude: latitude as number },
-        WAYBACK_CANDIDATE_DISCOVERY_ZOOM,
-        selectedReleaseNum as number,
-      ),
-    enabled: canFetchSelectedMetadata,
-    staleTime: 30 * 60 * 1000,
-    gcTime: 60 * 60 * 1000,
-  });
-
-  // Accumulate acquisition metadata for every release we have resolved at this
-  // tile. Making it sticky (rather than overlaying only the current selection)
-  // keeps dates monotonic: navigating never reverts an item to its release
-  // date, so auto-match cannot oscillate between items as their true dates are
-  // revealed one selection at a time.
-  const [metadataByReleaseTile, setMetadataByReleaseTile] = useState<
-    Map<string, WaybackMetadata>
-  >(new Map());
-
-  useEffect(() => {
-    const metadata = selectedMetadataQuery.data;
-    if (
-      !canFetchSelectedMetadata ||
-      selectedReleaseNum === null ||
-      !metadata?.date
-    ) {
-      return;
-    }
-    const key = `${selectedTileColumn}:${selectedTileRow}:${selectedReleaseNum}`;
-    setMetadataByReleaseTile((prev) => {
-      if (prev.has(key)) return prev;
-      const next = new Map(prev);
-      next.set(key, metadata);
-      return next;
-    });
-  }, [
-    selectedMetadataQuery.data,
-    canFetchSelectedMetadata,
-    selectedReleaseNum,
-    selectedTileColumn,
-    selectedTileRow,
-  ]);
-
-  const localItems = localItemsQuery.data ?? [];
-  const globalItems = globalItemsQuery.data ?? [];
-  const baseItems = localItems.length > 0 ? localItems : globalItems;
-
-  const data = useMemo(() => {
-    if (
-      metadataByReleaseTile.size === 0 ||
-      selectedTileColumn === null ||
-      selectedTileRow === null
-    ) {
-      return baseItems;
-    }
-    return overlayAcquisitionMetadata(baseItems, (releaseNum) =>
-      metadataByReleaseTile.get(
-        `${selectedTileColumn}:${selectedTileRow}:${releaseNum}`,
-      ),
-    );
-  }, [baseItems, metadataByReleaseTile, selectedTileColumn, selectedTileRow]);
+  const candidates = candidatesQuery.data ?? [];
+  const isUnverifiedFallback =
+    candidatesQuery.isError && candidates.length === 0;
+  const data = isUnverifiedFallback ? (fallbackQuery.data ?? []) : candidates;
 
   return {
-    ...globalItemsQuery,
     data,
-    isLoading: globalItemsQuery.isLoading && data.length === 0,
-    isFetching:
-      globalItemsQuery.isFetching ||
-      localItemsQuery.isFetching ||
-      selectedMetadataQuery.isFetching,
-    // Local change-detection in flight: the authoritative, location-specific
-    // candidate list is about to replace the global one. Auto-matching should
-    // hold off until it lands to avoid switching basemaps twice.
-    isRefining: localItemsQuery.isFetching,
-    error: localItemsQuery.error ?? globalItemsQuery.error,
+    /** First discovery for this area still in flight (nothing to show yet) */
+    isLoading:
+      candidatesQuery.isPending && enabled && stablePoint !== null &&
+      data.length === 0,
+    isFetching: candidatesQuery.isFetching || fallbackQuery.isFetching,
+    /** Dates in `data` are unverified release dates (discovery failed) */
+    isUnverifiedFallback,
+    error: candidatesQuery.error ?? fallbackQuery.error ?? null,
   };
 };

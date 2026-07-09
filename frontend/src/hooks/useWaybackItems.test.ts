@@ -3,8 +3,9 @@ import type { WaybackItem, WaybackMetadata } from "@esri/wayback-core";
 import {
   enrichWaybackItemsWithMetadata,
   loadGlobalWaybackItems,
-  loadLocalWaybackItems,
-  overlayAcquisitionMetadata,
+  loadWaybackCandidates,
+  registerWaybackReleaseDate,
+  resolveWaybackCandidate,
   type WaybackItemWithMetadata,
 } from "./useWaybackItems";
 
@@ -25,6 +26,15 @@ const waybackItem = (
   releaseDatetime: new Date(releaseDateLabel).getTime(),
 });
 
+const enrichedItem = (
+  releaseNum: number,
+  releaseDateLabel: string,
+  acquisitionDate?: string,
+): WaybackItemWithMetadata => ({
+  ...waybackItem(releaseNum, releaseDateLabel),
+  acquisitionDate: acquisitionDate ? new Date(acquisitionDate) : undefined,
+});
+
 const metadata = (date: string): WaybackMetadata => ({
   date: new Date(date).getTime(),
   provider: "Maxar",
@@ -33,43 +43,16 @@ const metadata = (date: string): WaybackMetadata => ({
   accuracy: 5,
 });
 
-/**
- * Never resolve — a mock metadata fetch that stands in for the real network so
- * unenriched code paths do not accidentally hit ESRI. Callers that expect
- * enrichment must provide their own resolving mock.
- */
-const hangingMetadata = () => new Promise<WaybackMetadata | null>(() => undefined);
-
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("loadGlobalWaybackItems", () => {
-  it("loads release-list candidates without local tile probing", async () => {
-    const getItems = vi
-      .fn()
-      .mockResolvedValue([
-        waybackItem(100, "2020-01-01"),
-        waybackItem(300, "2022-01-01"),
-        waybackItem(200, "2021-01-01"),
-      ]);
-
-    const result = await loadGlobalWaybackItems({ getItems });
-
-    expect(getItems).toHaveBeenCalledTimes(1);
-    expect(result.map((item) => item.releaseNum)).toEqual([100, 200, 300]);
-    expect(result.every((item) => item.metadata === undefined)).toBe(true);
-  });
-});
-
-describe("loadLocalWaybackItems", () => {
+describe("loadWaybackCandidates", () => {
   it("keeps discovery timeouts retryable instead of caching empty imagery", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
-
     const startedAt = Date.now();
     await expect(
-      loadLocalWaybackItems(point, 12, {
-        itemsTimeoutMs: 10,
+      loadWaybackCandidates(point, 12, {
+        discoveryTimeoutMs: 10,
         getItemsWithLocalChanges: () =>
           new Promise<WaybackItem[]>(() => undefined),
       }),
@@ -78,64 +61,42 @@ describe("loadLocalWaybackItems", () => {
     expect(Date.now() - startedAt).toBeLessThan(250);
   });
 
-  it("attaches the acquisition date from location metadata", async () => {
+  it("returns candidates enriched with acquisition dates", async () => {
     const getItemsWithLocalChanges = vi
       .fn()
       .mockResolvedValue([waybackItem(31144, "2022-10-04")]);
     const getItemMetadata = vi.fn().mockResolvedValue(metadata("2019-06-15"));
 
-    const result = await loadLocalWaybackItems(point, 12, {
+    const result = await loadWaybackCandidates(point, 12, {
       getItemsWithLocalChanges,
       getItemMetadata,
     });
 
     expect(getItemMetadata).toHaveBeenCalledWith(point, 12, 31144);
     expect(result).toHaveLength(1);
-    expect(result[0].releaseNum).toBe(31144);
     // Displayed date must be the acquisition date (2019), not the release (2022).
     expect(result[0].acquisitionDate?.getUTCFullYear()).toBe(2019);
     expect(result[0].provider).toBe("Maxar");
   });
 
   it("collapses releases that share an acquisition date", async () => {
-    // Two distinct releases whose underlying imagery was captured on the same
-    // day must not appear as two separate selectable years.
+    // Release numbers are not temporal: the 2022 release has the LOWER number.
     const getItemsWithLocalChanges = vi
       .fn()
       .mockResolvedValue([
-        waybackItem(200, "2021-01-01"),
-        waybackItem(300, "2022-01-01"),
+        waybackItem(300, "2021-01-01"),
+        waybackItem(200, "2022-01-01"),
       ]);
     const getItemMetadata = vi.fn().mockResolvedValue(metadata("2019-06-15"));
 
-    const result = await loadLocalWaybackItems(point, 12, {
+    const result = await loadWaybackCandidates(point, 12, {
       getItemsWithLocalChanges,
       getItemMetadata,
     });
 
     expect(result).toHaveLength(1);
-    // Keeps the newest release number for the shared acquisition date.
-    expect(result[0].releaseNum).toBe(300);
-    expect(result[0].acquisitionDate?.getUTCFullYear()).toBe(2019);
-  });
-
-  it("keeps items whose metadata lookup fails, without acquisition dates", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const getItemsWithLocalChanges = vi
-      .fn()
-      .mockResolvedValue([waybackItem(31144, "2022-10-04")]);
-    const getItemMetadata = vi
-      .fn()
-      .mockRejectedValue(new Error("metadata unavailable"));
-
-    const result = await loadLocalWaybackItems(point, 12, {
-      getItemsWithLocalChanges,
-      getItemMetadata,
-    });
-
-    expect(result).toHaveLength(1);
-    expect(result[0].releaseNum).toBe(31144);
-    expect(result[0].acquisitionDate).toBeUndefined();
+    // Keeps the most recently released processing of the shared capture.
+    expect(result[0].releaseNum).toBe(200);
   });
 
   it("uses size-only local Wayback duplicate detection", async () => {
@@ -143,7 +104,7 @@ describe("loadLocalWaybackItems", () => {
       .fn()
       .mockResolvedValue([waybackItem(31144)]);
 
-    await loadLocalWaybackItems(point, 12, {
+    await loadWaybackCandidates(point, 12, {
       getItemsWithLocalChanges,
       getItemMetadata: vi.fn().mockResolvedValue(metadata("2019-06-15")),
     });
@@ -158,65 +119,141 @@ describe("loadLocalWaybackItems", () => {
   });
 });
 
-describe("overlayAcquisitionMetadata", () => {
-  const withoutMetadata = (
-    releaseNum: number,
-    releaseDateLabel: string,
-  ): WaybackItemWithMetadata => ({
-    ...waybackItem(releaseNum, releaseDateLabel),
-    metadata: undefined,
-  });
+describe("enrichWaybackItemsWithMetadata", () => {
+  it("retries failed metadata lookups once before giving up", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const getItemMetadata = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("throttled"))
+      .mockResolvedValue(metadata("2019-06-15"));
 
-  it("overlays the acquisition date for items missing one", () => {
-    const items = [withoutMetadata(200, "2021-01-01")];
-    const store = new Map([[200, metadata("2019-06-15")]]);
-
-    const result = overlayAcquisitionMetadata(items, (r) => store.get(r));
-
-    expect(result[0].acquisitionDate?.getUTCFullYear()).toBe(2019);
-    expect(result[0].provider).toBe("Maxar");
-  });
-
-  it("keeps existing acquisition dates and unresolved items untouched", () => {
-    const enriched: WaybackItemWithMetadata = {
-      ...waybackItem(100, "2020-01-01"),
-      acquisitionDate: new Date("2018-01-01"),
-    };
-    const unresolved = withoutMetadata(200, "2021-01-01");
-
-    const result = overlayAcquisitionMetadata(
-      [enriched, unresolved],
-      () => undefined,
+    const result = await enrichWaybackItemsWithMetadata(
+      [enrichedItem(31144, "2022-10-04")],
+      point,
+      12,
+      { getItemMetadata },
     );
 
-    expect(result[0].acquisitionDate?.getUTCFullYear()).toBe(2018);
-    expect(result[1].acquisitionDate).toBeUndefined();
+    // First attempt failed, retry pass succeeded → the year is verified.
+    expect(getItemMetadata).toHaveBeenCalledTimes(2);
+    expect(result[0].acquisitionDate?.getUTCFullYear()).toBe(2019);
   });
 
-  it("preserves array identity when no item is overlaid", () => {
-    const items = [withoutMetadata(200, "2021-01-01")];
+  it("keeps items unverified when metadata fails twice", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const getItemMetadata = vi
+      .fn()
+      .mockRejectedValue(new Error("metadata unavailable"));
 
-    const result = overlayAcquisitionMetadata(items, () => undefined);
+    const result = await enrichWaybackItemsWithMetadata(
+      [enrichedItem(31144, "2022-10-04")],
+      point,
+      12,
+      { getItemMetadata },
+    );
 
-    expect(result).toBe(items);
+    expect(getItemMetadata).toHaveBeenCalledTimes(2);
+    expect(result).toHaveLength(1);
+    expect(result[0].acquisitionDate).toBeUndefined();
   });
-});
 
-describe("enrichWaybackItemsWithMetadata", () => {
+  it("limits concurrent metadata requests to the configured pool size", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const getItemMetadata = vi.fn().mockImplementation(async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return metadata("2019-06-15");
+    });
+
+    const items = Array.from({ length: 10 }, (_, i) =>
+      enrichedItem(100 + i, "2022-10-04"),
+    );
+    await enrichWaybackItemsWithMetadata(items, point, 12, {
+      getItemMetadata,
+      metadataConcurrency: 3,
+    });
+
+    expect(getItemMetadata).toHaveBeenCalledTimes(10);
+    expect(maxInFlight).toBeLessThanOrEqual(3);
+  });
+
   it("degrades to the release date when a metadata lookup times out", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const item = {
-      ...waybackItem(31144, "2022-10-04"),
-      metadata: undefined,
-    };
 
-    const result = await enrichWaybackItemsWithMetadata([item], point, 12, {
-      metadataTimeoutMs: 10,
-      getItemMetadata: hangingMetadata,
-    });
+    const result = await enrichWaybackItemsWithMetadata(
+      [enrichedItem(31144, "2022-10-04")],
+      point,
+      12,
+      {
+        metadataTimeoutMs: 10,
+        getItemMetadata: () =>
+          new Promise<WaybackMetadata | null>(() => undefined),
+      },
+    );
 
     expect(result).toHaveLength(1);
     expect(result[0].acquisitionDate).toBeUndefined();
-    expect(result[0].releaseDatetime).toBe(item.releaseDatetime);
+    expect(result[0].releaseDatetime).toBeGreaterThan(0);
+  });
+});
+
+describe("loadGlobalWaybackItems", () => {
+  it("loads the unverified release list sorted ascending", async () => {
+    const getItems = vi
+      .fn()
+      .mockResolvedValue([
+        waybackItem(100, "2020-01-01"),
+        waybackItem(300, "2022-01-01"),
+        waybackItem(200, "2021-01-01"),
+      ]);
+
+    const result = await loadGlobalWaybackItems({ getItems });
+
+    expect(result.map((item) => item.releaseNum)).toEqual([100, 200, 300]);
+    expect(result.every((item) => item.acquisitionDate === undefined)).toBe(
+      true,
+    );
+  });
+});
+
+describe("resolveWaybackCandidate", () => {
+  // ESRI release numbers are NOT ordered by time — mirror that here.
+  const candidates = [
+    enrichedItem(48376, "2019-05-01", "2019-05-01"),
+    enrichedItem(7110, "2022-07-28", "2022-07-28"),
+    enrichedItem(57965, "2023-05-28", "2023-05-28"),
+  ];
+
+  it("returns the exact candidate when selected directly", () => {
+    expect(resolveWaybackCandidate(candidates, 7110)?.releaseNum).toBe(7110);
+  });
+
+  it("maps a release between two changes to the latest change before it", () => {
+    // A release published between the 2022 and 2023 changes serves the 2022
+    // change's tiles at this location — regardless of its release number.
+    registerWaybackReleaseDate(99001, new Date("2022-11-02").getTime());
+    expect(resolveWaybackCandidate(candidates, 99001)?.releaseNum).toBe(7110);
+  });
+
+  it("maps a release newer than the newest change to that newest change", () => {
+    registerWaybackReleaseDate(122, new Date("2026-06-30").getTime());
+    expect(resolveWaybackCandidate(candidates, 122)?.releaseNum).toBe(57965);
+  });
+
+  it("returns null when the release predates the oldest candidate", () => {
+    registerWaybackReleaseDate(99002, new Date("2014-02-20").getTime());
+    expect(resolveWaybackCandidate(candidates, 99002)).toBeNull();
+  });
+
+  it("returns null when the release date is unknown", () => {
+    expect(resolveWaybackCandidate(candidates, 424242)).toBeNull();
+  });
+
+  it("returns null for empty lists or no selection", () => {
+    expect(resolveWaybackCandidate([], 7110)).toBeNull();
+    expect(resolveWaybackCandidate(candidates, null)).toBeNull();
   });
 });

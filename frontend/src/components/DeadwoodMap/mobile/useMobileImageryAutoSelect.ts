@@ -10,8 +10,6 @@ interface Params {
   onImageryChange: (releaseNum: number) => void;
   autoMatchImagery: boolean;
   predictionYear: string;
-  /** Whether local change-detected candidates are being fetched */
-  isRefining?: boolean;
 }
 
 /**
@@ -27,7 +25,6 @@ export const useMobileImageryAutoSelect = ({
   onImageryChange,
   autoMatchImagery,
   predictionYear,
-  isRefining = false,
 }: Params) => {
   // Select imagery when items load or when the prediction year changes. Manual
   // mode keeps the active basemap sticky even if it is outside the local
@@ -37,9 +34,6 @@ export const useMobileImageryAutoSelect = ({
     if (waybackItems.length === 0) return;
 
     if (autoMatchImagery) {
-      // Wait for the location-specific candidate list before re-matching so
-      // the basemap is not swapped twice (see YearImagerySelector).
-      if (isRefining) return;
       const nextReleaseNum = pickAutoMatchImagery(
         waybackItems,
         parseInt(predictionYear),
@@ -58,6 +52,5 @@ export const useMobileImageryAutoSelect = ({
     autoMatchImagery,
     predictionYear,
     onImageryChange,
-    isRefining,
   ]);
 };

@@ -9,10 +9,8 @@ import {
 	createOpenFreeMapLibertyLayerGroup,
 	createWaybackTileLayer,
 	createWaybackSource,
+	DEFAULT_WAYBACK_RELEASE,
 } from "../../../utils/basemaps";
-
-// Latest Wayback release for satellite imagery
-const DEFAULT_WAYBACK_RELEASE = 31144;
 
 export type MapStyle = string;
 

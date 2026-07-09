@@ -7,10 +7,13 @@ import {
   RightOutlined,
 } from "@ant-design/icons";
 
-import type { WaybackItemWithMetadata } from "../../../hooks/useWaybackItems";
 import {
-  findClosestImagery,
+  resolveWaybackCandidate,
+  type WaybackItemWithMetadata,
+} from "../../../hooks/useWaybackItems";
+import {
   getImageryDate,
+  pickAutoMatchImagery,
   PREDICTION_YEARS,
 } from "../YearImagerySelector";
 
@@ -66,10 +69,15 @@ const MobileTimeCard = ({
   onAutoMatchChange,
 }: MobileTimeCardProps) => {
   const predictionIndex = PREDICTION_YEARS.indexOf(predictionYear);
-  const imageryIndex = waybackItems.findIndex(
-    (item) => item.releaseNum === selectedReleaseNum,
+  // Resolve the selection to the candidate whose imagery it actually shows
+  // (releases between two local changes serve identical tiles).
+  const selectedImagery = resolveWaybackCandidate(
+    waybackItems,
+    selectedReleaseNum,
   );
-  const selectedImagery = imageryIndex >= 0 ? waybackItems[imageryIndex] : null;
+  const imageryIndex = selectedImagery
+    ? waybackItems.indexOf(selectedImagery)
+    : -1;
   const isSelectionOutsideCandidates =
     selectedReleaseNum !== null && imageryIndex < 0 && waybackItems.length > 0;
   const canStepToOlder = isSelectionOutsideCandidates || imageryIndex > 0;
@@ -94,8 +102,12 @@ const MobileTimeCard = ({
 
   const matchImageryToYear = (year: string) => {
     if (!autoMatchImagery || waybackItems.length === 0) return;
-    const closest = findClosestImagery(waybackItems, Number.parseInt(year));
-    if (closest) onImageryChange(closest.releaseNum);
+    const nextReleaseNum = pickAutoMatchImagery(
+      waybackItems,
+      Number.parseInt(year),
+      selectedReleaseNum,
+    );
+    if (nextReleaseNum !== null) onImageryChange(nextReleaseNum);
   };
 
   const selectPredictionYear = (year: string) => {
@@ -125,11 +137,12 @@ const MobileTimeCard = ({
     const next = !autoMatchImagery;
     onAutoMatchChange(next);
     if (next && waybackItems.length > 0) {
-      const closest = findClosestImagery(
+      const nextReleaseNum = pickAutoMatchImagery(
         waybackItems,
         Number.parseInt(predictionYear),
+        selectedReleaseNum,
       );
-      if (closest) onImageryChange(closest.releaseNum);
+      if (nextReleaseNum !== null) onImageryChange(nextReleaseNum);
     }
   };
 

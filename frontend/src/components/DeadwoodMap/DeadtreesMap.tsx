@@ -49,6 +49,7 @@ import {
   createOpenFreeMapLibertyLayerGroup,
   createStandardMapControls,
   getCachedWaybackSource,
+  DEFAULT_WAYBACK_RELEASE,
   createWaybackTileLayer,
 } from "../../utils/basemaps";
 import LayerControlPanel from "./LayerControlPanel";
@@ -248,9 +249,8 @@ const DeadtreesMap = () => {
   } = usePublicTreeObservations();
 
   // Wayback imagery state - using debounced location-based query
-  // Default to a recent Wayback release (31144 = 2024) for immediate satellite display
-  // This gets updated when location-specific wayback items load
-  const DEFAULT_WAYBACK_RELEASE = 31144;
+  // Starts on the newest Wayback release for immediate satellite display and
+  // gets updated when location-specific wayback items load
   const [selectedReleaseNum, setSelectedReleaseNum] = useState<number | null>(
     DEFAULT_WAYBACK_RELEASE,
   );
@@ -277,12 +277,11 @@ const DeadtreesMap = () => {
   const {
     data: localWaybackItems = [],
     isLoading: isWaybackLoading,
-    isRefining: isWaybackRefining,
+    isUnverifiedFallback: isWaybackUnverified,
   } = useWaybackItemsDebounced(
     mapCenterLonLat?.lon,
     mapCenterLonLat?.lat,
     DeadwoodMapStyle === "wayback" && shouldLoadLocalWaybackItems,
-    selectedReleaseNum,
   );
 
   useMobileImageryAutoSelect({
@@ -292,7 +291,6 @@ const DeadtreesMap = () => {
     onImageryChange: setSelectedReleaseNum,
     autoMatchImagery,
     predictionYear: selectedYear,
-    isRefining: isWaybackRefining,
   });
 
   // Clicked location values (displayed in legend)
@@ -1381,7 +1379,7 @@ const DeadtreesMap = () => {
               onImageryChange={setSelectedReleaseNum}
               waybackItems={localWaybackItems}
               isLoading={isWaybackLoading}
-              isRefining={isWaybackRefining}
+              isUnverifiedFallback={isWaybackUnverified}
               isWaybackActive={DeadwoodMapStyle === "wayback"}
               autoMatchImagery={autoMatchImagery}
               onAutoMatchChange={(enabled) => {

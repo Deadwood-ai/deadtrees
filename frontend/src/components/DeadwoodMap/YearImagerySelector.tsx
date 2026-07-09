@@ -10,7 +10,10 @@ import {
   WarningOutlined,
   CheckCircleOutlined,
 } from "@ant-design/icons";
-import type { WaybackItemWithMetadata } from "../../hooks/useWaybackItems";
+import {
+  resolveWaybackCandidate,
+  type WaybackItemWithMetadata,
+} from "../../hooks/useWaybackItems";
 
 const { Text } = Typography;
 
@@ -115,10 +118,11 @@ export const findClosestImagery = (
  * Decide whether auto-match should switch to a different imagery release.
  * Returns the release number to switch to, or null to keep the selection.
  *
- * Stays put when the currently selected item's imagery is from the same year
- * as the best candidate: the year-match is already satisfied, and switching
- * releases would reload the basemap for no visible benefit. This keeps
- * auto-match stable while candidate lists and acquisition dates stream in.
+ * The selection is resolved to the candidate whose imagery it actually shows
+ * (releases between two local changes serve identical tiles). Auto-match
+ * stays put when the selection already shows the best candidate's imagery, or
+ * imagery from the same year — switching would reload the basemap without a
+ * visible benefit.
  */
 export const pickAutoMatchImagery = (
   items: WaybackItemWithMetadata[],
@@ -128,9 +132,10 @@ export const pickAutoMatchImagery = (
   const closest = findClosestImagery(items, targetYear);
   if (!closest || closest.releaseNum === selectedReleaseNum) return null;
 
-  const current = items.find((item) => item.releaseNum === selectedReleaseNum);
-  if (current && getImageryYear(current) === getImageryYear(closest)) {
-    return null;
+  const current = resolveWaybackCandidate(items, selectedReleaseNum);
+  if (current) {
+    if (current.releaseNum === closest.releaseNum) return null;
+    if (getImageryYear(current) === getImageryYear(closest)) return null;
   }
 
   return closest.releaseNum;
@@ -149,8 +154,8 @@ interface YearImagerySelectorProps {
   waybackItems: WaybackItemWithMetadata[];
   /** Whether wayback data is loading */
   isLoading?: boolean;
-  /** Whether local change-detected candidates are being fetched */
-  isRefining?: boolean;
+  /** Dates in waybackItems are unverified release dates (discovery failed) */
+  isUnverifiedFallback?: boolean;
   /** Whether satellite basemap is active */
   isWaybackActive?: boolean;
   /** Whether to auto-match imagery to prediction year */
@@ -183,7 +188,7 @@ const YearImagerySelector = ({
   onImageryChange,
   waybackItems,
   isLoading = false,
-  isRefining = false,
+  isUnverifiedFallback = false,
   isWaybackActive = true,
   autoMatchImagery = false,
   onAutoMatchChange,
@@ -240,10 +245,6 @@ const YearImagerySelector = ({
     if (waybackItems.length === 0) return;
 
     if (autoMatchImagery) {
-      // Hold off while the location-specific candidate list is in flight:
-      // matching against the interim (global) list and then re-matching when
-      // the local list lands would swap the basemap twice.
-      if (isRefining) return;
       const nextReleaseNum = pickAutoMatchImagery(
         waybackItems,
         parseInt(predictionYear),
@@ -265,7 +266,6 @@ const YearImagerySelector = ({
     onImageryChange,
     autoMatchImagery,
     predictionYear,
-    isRefining,
   ]);
 
   // Navigation for prediction year
@@ -285,12 +285,16 @@ const YearImagerySelector = ({
     }
   };
 
-  // Find currently selected item
-  const currentImageryIndex = waybackItems.findIndex(
-    (item) => item.releaseNum === selectedReleaseNum,
+  // Resolve the selection to the candidate whose imagery it actually shows:
+  // releases between two local changes serve identical tiles, so a selected
+  // release that is not itself a candidate still displays a candidate's image.
+  const selectedItem = resolveWaybackCandidate(
+    waybackItems,
+    selectedReleaseNum,
   );
-  const selectedItem =
-    currentImageryIndex >= 0 ? waybackItems[currentImageryIndex] : null;
+  const currentImageryIndex = selectedItem
+    ? waybackItems.indexOf(selectedItem)
+    : -1;
   const hasSelectedBasemap = selectedReleaseNum !== null;
   const isUsingDefaultBasemap = hasSelectedBasemap && !selectedItem;
   const hasMultipleImages = waybackItems.length > 1;
@@ -416,6 +420,18 @@ const YearImagerySelector = ({
       {/* Row 2: Base Layer with label and informative message */}
       {isWaybackActive && (
         <div className="flex w-full flex-col items-center gap-1 border-t border-gray-100 pt-2">
+          {/* Discovery failed: dates are ESRI release dates, not capture dates */}
+          {isUnverifiedFallback && !compactMode && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <WarningOutlined
+                className="text-amber-500"
+                style={{ fontSize: "12px" }}
+              />
+              <Text type="secondary">
+                Imagery history unavailable — dates show ESRI release dates
+              </Text>
+            </div>
+          )}
           {/* Informative message - always visible when imagery is loaded */}
           {!isLoading &&
             waybackItems.length > 0 &&
@@ -499,6 +515,11 @@ const YearImagerySelector = ({
                           <div className="mt-1">
                             Date: {formatDate(selectedImageryDate)}
                           </div>
+                          {!selectedItem.acquisitionDate && (
+                            <div className="text-gray-300">
+                              Release date — actual capture may be older
+                            </div>
+                          )}
                           {selectedItem.provider && (
                             <div>Provider: {selectedItem.provider}</div>
                           )}
@@ -524,6 +545,9 @@ const YearImagerySelector = ({
                       <div className="flex cursor-help items-center gap-1.5 text-xs">
                         <span className="font-medium text-gray-700">
                           {formatDate(selectedImageryDate)}
+                          {!selectedItem.acquisitionDate && (
+                            <span className="text-gray-400"> (release)</span>
+                          )}
                         </span>
                         {!compactMode && selectedItem.provider && (
                           <span className="text-gray-400">·</span>
