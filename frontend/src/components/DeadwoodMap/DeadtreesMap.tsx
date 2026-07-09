@@ -277,6 +277,7 @@ const DeadtreesMap = () => {
   const {
     data: localWaybackItems = [],
     isLoading: isWaybackLoading,
+    progress: waybackLoadProgress,
     isUnverifiedFallback: isWaybackUnverified,
   } = useWaybackItemsDebounced(
     mapCenterLonLat?.lon,
@@ -1374,11 +1375,18 @@ const DeadtreesMap = () => {
           <div className="absolute bottom-2 left-1/2 z-50 w-[calc(100vw-1rem)] -translate-x-1/2 md:w-auto">
             <YearImagerySelector
               predictionYear={selectedYear}
-              onPredictionYearChange={setSelectedYear}
+              onPredictionYearChange={(year) => {
+                // Touching the year selector is a strong signal that the user
+                // will browse imagery next — kick off candidate discovery now
+                // so auto-match has less (or nothing) left to wait for.
+                setShouldLoadLocalWaybackItems(true);
+                setSelectedYear(year);
+              }}
               selectedReleaseNum={selectedReleaseNum}
               onImageryChange={setSelectedReleaseNum}
               waybackItems={localWaybackItems}
               isLoading={isWaybackLoading}
+              loadProgress={waybackLoadProgress}
               isUnverifiedFallback={isWaybackUnverified}
               isWaybackActive={DeadwoodMapStyle === "wayback"}
               autoMatchImagery={autoMatchImagery}

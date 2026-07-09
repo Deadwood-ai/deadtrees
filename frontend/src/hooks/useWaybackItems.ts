@@ -69,6 +69,15 @@ type WaybackPoint = {
   latitude: number;
 };
 
+/**
+ * Loading progress for the candidate pipeline. Discovery (tilemap probing
+ * inside wayback-core) has no per-request hooks, so it reports as a phase;
+ * metadata enrichment reports real per-item counts.
+ */
+export type WaybackLoadProgress =
+  | { phase: "discovery" }
+  | { phase: "metadata"; done: number; total: number };
+
 interface LoadWaybackItemsOptions {
   discoveryTimeoutMs?: number;
   metadataTimeoutMs?: number;
@@ -77,6 +86,7 @@ interface LoadWaybackItemsOptions {
   getItemsWithLocalChanges?: typeof getWaybackItemsWithLocalChanges;
   getItemMetadata?: typeof getMetadata;
   signal?: AbortSignal;
+  onProgress?: (progress: WaybackLoadProgress) => void;
 }
 
 const withTimeout = async <T>(
@@ -179,12 +189,14 @@ export const enrichWaybackItemsWithMetadata = async (
     metadataTimeoutMs = WAYBACK_METADATA_TIMEOUT_MS,
     metadataConcurrency = WAYBACK_METADATA_CONCURRENCY,
     getItemMetadata = getMetadata,
+    onProgress,
   }: Pick<
     LoadWaybackItemsOptions,
-    "metadataTimeoutMs" | "metadataConcurrency" | "getItemMetadata"
+    "metadataTimeoutMs" | "metadataConcurrency" | "getItemMetadata" | "onProgress"
   > = {},
 ): Promise<WaybackItemWithMetadata[]> => {
   const resolved = new Map<number, WaybackMetadata | null>();
+  onProgress?.({ phase: "metadata", done: 0, total: items.length });
 
   const runPass = async (
     passItems: WaybackItemWithMetadata[],
@@ -206,6 +218,11 @@ export const enrichWaybackItemsWithMetadata = async (
               `Wayback metadata timed out after ${metadataTimeoutMs}ms for release ${item.releaseNum}`,
             );
             resolved.set(item.releaseNum, metadata);
+            onProgress?.({
+              phase: "metadata",
+              done: resolved.size,
+              total: items.length,
+            });
           } catch {
             failed.push(item);
           }
@@ -243,8 +260,10 @@ export const loadWaybackCandidates = async (
     getItemsWithLocalChanges = getWaybackItemsWithLocalChanges,
     getItemMetadata,
     signal,
+    onProgress,
   }: LoadWaybackItemsOptions = {},
 ): Promise<WaybackItemWithMetadata[]> => {
+  onProgress?.({ phase: "discovery" });
   const items = await withTimeout(
     getItemsWithLocalChanges(point, zoomLevel, {
       signal,
@@ -260,7 +279,7 @@ export const loadWaybackCandidates = async (
     items.map((item) => toWaybackItemWithMetadata(item, undefined)),
     point,
     zoomLevel,
-    { metadataTimeoutMs, metadataConcurrency, getItemMetadata },
+    { metadataTimeoutMs, metadataConcurrency, getItemMetadata, onProgress },
   );
 
   return dedupeWaybackItems(enriched);
@@ -279,6 +298,59 @@ export const loadGlobalWaybackItems = async ({
   return dedupeWaybackItems(
     items.map((item) => toWaybackItemWithMetadata(item, undefined)),
   );
+};
+
+// ---------------------------------------------------------------------------
+// Persistent per-tile candidate cache. Discovery + enrichment take 10-30s, so
+// cache the finished list in localStorage: revisiting an area (or reloading
+// the page) is instant. ESRI cuts new releases roughly monthly — a 24h TTL is
+// comfortably fresh.
+// ---------------------------------------------------------------------------
+const CANDIDATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const candidateCacheKey = (column: number, row: number) =>
+  `wayback-candidates:${WAYBACK_CANDIDATE_DISCOVERY_ZOOM}:${column}:${row}`;
+
+export const readCachedCandidates = (
+  column: number,
+  row: number,
+  storage: Pick<Storage, "getItem" | "removeItem"> | undefined = globalThis.localStorage,
+): WaybackItemWithMetadata[] | null => {
+  try {
+    const raw = storage?.getItem(candidateCacheKey(column, row));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      savedAt: number;
+      items: (Omit<WaybackItemWithMetadata, "acquisitionDate"> & {
+        acquisitionDate?: string;
+      })[];
+    };
+    if (Date.now() - parsed.savedAt > CANDIDATE_CACHE_TTL_MS) {
+      storage?.removeItem(candidateCacheKey(column, row));
+      return null;
+    }
+    return parsed.items.map((item) =>
+      // Revive Date fields and re-register release dates for resolution.
+      toWaybackItemWithMetadata(item as WaybackItem, item.metadata),
+    );
+  } catch {
+    return null;
+  }
+};
+
+export const writeCachedCandidates = (
+  column: number,
+  row: number,
+  items: WaybackItemWithMetadata[],
+  storage: Pick<Storage, "setItem"> | undefined = globalThis.localStorage,
+): void => {
+  try {
+    storage?.setItem(
+      candidateCacheKey(column, row),
+      JSON.stringify({ savedAt: Date.now(), items }),
+    );
+  } catch {
+    // Storage full or unavailable — the in-memory query cache still applies.
+  }
 };
 
 /**
@@ -334,6 +406,7 @@ export const useWaybackItemsDebounced = (
     column: number;
     row: number;
   } | null>(null);
+  const [progress, setProgress] = useState<WaybackLoadProgress | null>(null);
 
   useEffect(() => {
     if (!enabled || longitude === undefined || latitude === undefined) return;
@@ -355,15 +428,22 @@ export const useWaybackItemsDebounced = (
 
   const candidatesQuery = useQuery({
     queryKey: ["wayback-candidates", stablePoint?.column, stablePoint?.row],
-    queryFn: ({ signal }): Promise<WaybackItemWithMetadata[]> =>
-      loadWaybackCandidates(
-        {
-          longitude: stablePoint?.lon as number,
-          latitude: stablePoint?.lat as number,
-        },
+    queryFn: async ({ signal }): Promise<WaybackItemWithMetadata[]> => {
+      const { lon, lat, column, row } = stablePoint as NonNullable<
+        typeof stablePoint
+      >;
+
+      const cached = readCachedCandidates(column, row);
+      if (cached) return cached;
+
+      const candidates = await loadWaybackCandidates(
+        { longitude: lon, latitude: lat },
         WAYBACK_CANDIDATE_DISCOVERY_ZOOM,
-        { signal },
-      ),
+        { signal, onProgress: setProgress },
+      );
+      writeCachedCandidates(column, row, candidates);
+      return candidates;
+    },
     enabled: enabled && stablePoint !== null,
     staleTime: 30 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
@@ -385,13 +465,17 @@ export const useWaybackItemsDebounced = (
     candidatesQuery.isError && candidates.length === 0;
   const data = isUnverifiedFallback ? (fallbackQuery.data ?? []) : candidates;
 
+  const isFetching = candidatesQuery.isFetching || fallbackQuery.isFetching;
+
   return {
     data,
     /** First discovery for this area still in flight (nothing to show yet) */
     isLoading:
       candidatesQuery.isPending && enabled && stablePoint !== null &&
       data.length === 0,
-    isFetching: candidatesQuery.isFetching || fallbackQuery.isFetching,
+    isFetching,
+    /** Pipeline progress while fetching (discovery phase / metadata counts) */
+    progress: isFetching ? progress : null,
     /** Dates in `data` are unverified release dates (discovery failed) */
     isUnverifiedFallback,
     error: candidatesQuery.error ?? fallbackQuery.error ?? null,

@@ -4,9 +4,12 @@ import {
   enrichWaybackItemsWithMetadata,
   loadGlobalWaybackItems,
   loadWaybackCandidates,
+  readCachedCandidates,
   registerWaybackReleaseDate,
   resolveWaybackCandidate,
+  writeCachedCandidates,
   type WaybackItemWithMetadata,
+  type WaybackLoadProgress,
 } from "./useWaybackItems";
 
 const point = { longitude: 10.451526, latitude: 51.165691 };
@@ -197,6 +200,75 @@ describe("enrichWaybackItemsWithMetadata", () => {
     expect(result).toHaveLength(1);
     expect(result[0].acquisitionDate).toBeUndefined();
     expect(result[0].releaseDatetime).toBeGreaterThan(0);
+  });
+});
+
+describe("load progress reporting", () => {
+  it("reports the discovery phase and then real metadata counts", async () => {
+    const events: WaybackLoadProgress[] = [];
+    const getItemsWithLocalChanges = vi
+      .fn()
+      .mockResolvedValue([
+        waybackItem(100, "2021-01-01"),
+        waybackItem(200, "2022-01-01"),
+      ]);
+    const getItemMetadata = vi
+      .fn()
+      .mockResolvedValueOnce(metadata("2019-06-15"))
+      .mockResolvedValueOnce(metadata("2020-08-01"));
+
+    await loadWaybackCandidates(point, 12, {
+      getItemsWithLocalChanges,
+      getItemMetadata,
+      onProgress: (p) => events.push(p),
+    });
+
+    expect(events[0]).toEqual({ phase: "discovery" });
+    expect(events[1]).toEqual({ phase: "metadata", done: 0, total: 2 });
+    expect(events.at(-1)).toEqual({ phase: "metadata", done: 2, total: 2 });
+  });
+});
+
+describe("candidate cache", () => {
+  const fakeStorage = () => {
+    const store = new Map<string, string>();
+    return {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    };
+  };
+
+  it("round-trips candidates with revived acquisition dates", () => {
+    const storage = fakeStorage();
+    const items = [
+      {
+        ...waybackItem(200, "2022-01-01"),
+        metadata: metadata("2019-06-15"),
+        acquisitionDate: new Date("2019-06-15"),
+        provider: "Maxar",
+      } as WaybackItemWithMetadata,
+    ];
+
+    writeCachedCandidates(5, 7, items, storage);
+    const revived = readCachedCandidates(5, 7, storage);
+
+    expect(revived).toHaveLength(1);
+    expect(revived?.[0].acquisitionDate).toBeInstanceOf(Date);
+    expect(revived?.[0].acquisitionDate?.getUTCFullYear()).toBe(2019);
+    expect(revived?.[0].provider).toBe("Maxar");
+  });
+
+  it("misses for other tiles and expired entries", () => {
+    const storage = fakeStorage();
+    writeCachedCandidates(5, 7, [], storage);
+
+    expect(readCachedCandidates(6, 7, storage)).toBeNull();
+
+    // Expired entry: pretend 25h have passed since the write
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now + 25 * 60 * 60 * 1000);
+    expect(readCachedCandidates(5, 7, storage)).toBeNull();
   });
 });
 

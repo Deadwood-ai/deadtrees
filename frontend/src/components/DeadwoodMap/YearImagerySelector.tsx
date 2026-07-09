@@ -13,6 +13,7 @@ import {
 import {
   resolveWaybackCandidate,
   type WaybackItemWithMetadata,
+  type WaybackLoadProgress,
 } from "../../hooks/useWaybackItems";
 
 const { Text } = Typography;
@@ -154,6 +155,8 @@ interface YearImagerySelectorProps {
   waybackItems: WaybackItemWithMetadata[];
   /** Whether wayback data is loading */
   isLoading?: boolean;
+  /** Pipeline progress while imagery history loads */
+  loadProgress?: WaybackLoadProgress | null;
   /** Dates in waybackItems are unverified release dates (discovery failed) */
   isUnverifiedFallback?: boolean;
   /** Whether satellite basemap is active */
@@ -188,6 +191,7 @@ const YearImagerySelector = ({
   onImageryChange,
   waybackItems,
   isLoading = false,
+  loadProgress = null,
   isUnverifiedFallback = false,
   isWaybackActive = true,
   autoMatchImagery = false,
@@ -340,6 +344,14 @@ const YearImagerySelector = ({
     }
   };
 
+  // Progress label for the imagery-history pipeline. Discovery has no
+  // per-request granularity, so it shows an expected duration instead;
+  // metadata verification reports real counts.
+  const loadProgressLabel =
+    loadProgress?.phase === "metadata"
+      ? `verifying imagery dates ${loadProgress.done}/${loadProgress.total} …`
+      : "scanning imagery history — usually 10–20 s …";
+
   const shouldShowBlockingLoading = isLoading && !hasSelectedBasemap;
   const hasNoImagery = waybackItems.length === 0 && !isLoading && !hasSelectedBasemap;
 
@@ -478,9 +490,7 @@ const YearImagerySelector = ({
                 <Spin
                   indicator={<LoadingOutlined style={{ fontSize: 14 }} spin />}
                 />
-                <span className="text-xs">
-                  Finding basemap imagery for this area ...
-                </span>
+                <span className="text-xs">{loadProgressLabel}</span>
               </div>
             ) : hasNoImagery ? (
               <Text type="secondary" className="text-xs text-gray-400">
@@ -576,8 +586,16 @@ const YearImagerySelector = ({
                     <div className="flex items-center gap-1.5 text-xs text-gray-500">
                       <span>Satellite basemap active</span>
                       {isLoading && !compactMode && (
-                        <span className="text-gray-400">
-                          checking local imagery dates
+                        <span className="inline-flex items-center gap-1.5 text-gray-400">
+                          <Spin
+                            indicator={
+                              <LoadingOutlined
+                                style={{ fontSize: 11 }}
+                                spin
+                              />
+                            }
+                          />
+                          {loadProgressLabel}
                         </span>
                       )}
                       {!isLoading && isUsingDefaultBasemap && !compactMode && (
