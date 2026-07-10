@@ -138,6 +138,10 @@ class Settings(BaseSettings):
 	PROCESSOR_USERNAME: str = 'processor@deadtrees.earth'
 	PROCESSOR_PASSWORD: str = 'processor'
 	PROCESSOR_WORKER_ID: str = ''
+	# Comma-separated task types this worker refuses to run (e.g. 'odm_processing').
+	# A queue entry whose task_types include any blacklisted type is skipped so a
+	# capable worker picks it up instead. See `processor_task_blacklist`.
+	PROCESSOR_TASK_BLACKLIST: str = ''
 	SSH_PRIVATE_KEY_PATH: str = '/app/ssh_key'
 	SSH_PRIVATE_KEY_PASSPHRASE: str = ''
 	ODM_AUTO_BOUNDARY: bool = False
@@ -344,6 +348,11 @@ class Settings(BaseSettings):
 	@property
 	def tile_embeddings_table(self) -> str:
 		return self._tables['tile_embeddings']
+
+	@property
+	def processor_task_blacklist(self) -> list[str]:
+		"""Task type values this worker must not run, parsed from PROCESSOR_TASK_BLACKLIST."""
+		return [t.strip() for t in self.PROCESSOR_TASK_BLACKLIST.split(',') if t.strip()]
 
 
 settings = Settings()

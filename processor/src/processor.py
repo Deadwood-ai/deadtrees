@@ -208,8 +208,28 @@ def are_requested_stages_complete(status_data: dict, task_types: list) -> bool:
 	return bool(requested) and all(status_data.get(done_flag, False) for done_flag in requested)
 
 
+def get_task_blacklist() -> list[str]:
+	"""Return the validated set of task types this worker refuses to run.
+
+	Unknown entries in PROCESSOR_TASK_BLACKLIST are dropped with a warning so a
+	typo can't silently blacklist nothing (or everything).
+	"""
+	blacklist = []
+	for value in settings.processor_task_blacklist:
+		task_type = TaskTypeEnum.from_string(value)
+		if task_type is None:
+			logger.warning(f'Ignoring unknown task type in PROCESSOR_TASK_BLACKLIST: {value!r}')
+			continue
+		blacklist.append(task_type.value)
+	return blacklist
+
+
 def get_next_task(token: str) -> QueueTask:
 	"""Get the next task (QueueTask class) in the queue from supabase.
+
+	Queue entries whose `task_types` include any type in this worker's
+	blacklist (PROCESSOR_TASK_BLACKLIST) are skipped, so the highest-priority
+	task this worker is capable of running is returned instead.
 
 	Args:
 	    token (str): Client access token for supabase
@@ -217,8 +237,13 @@ def get_next_task(token: str) -> QueueTask:
 	Returns:
 	    QueueTask: The next task in the queue as a QueueTask class instance
 	"""
+	blacklist = get_task_blacklist()
 	with use_client(token) as client:
-		response = client.table(settings.queue_position_table).select('*').limit(1).execute()
+		query = client.table(settings.queue_position_table).select('*')
+		if blacklist:
+			# Skip rows whose task_types array overlaps the blacklist.
+			query = query.not_.overlaps('task_types', blacklist)
+		response = query.limit(1).execute()
 	if not response.data or len(response.data) == 0:
 		return None
 	return QueueTask(**response.data[0])
