@@ -36,6 +36,24 @@ TRANSIENT_ERROR_PATTERNS = (
 	'no existing session',
 )
 
+# A Postgres statement timeout (SQLSTATE 57014) is *deterministic*, not a network
+# blip: the same statement, re-issued unchanged, will exceed the same time budget
+# and be cancelled again. Blindly retrying it (its message contains "timeout", so
+# it would otherwise match TRANSIENT_ERROR_PATTERNS) just burns every attempt to
+# no effect. Callers must instead make the statement smaller (e.g. split the batch),
+# so we deliberately classify it as non-transient.
+STATEMENT_TIMEOUT_PATTERNS = (
+	'57014',
+	'statement timeout',
+	'canceling statement due to statement timeout',
+)
+
+
+def is_statement_timeout(exc: BaseException) -> bool:
+	"""True if the exception is a Postgres statement_timeout cancellation (SQLSTATE 57014)."""
+	message = str(exc).lower()
+	return any(pattern in message for pattern in STATEMENT_TIMEOUT_PATTERNS)
+
 
 def is_transient_error(exc: BaseException) -> bool:
 	"""Heuristic for whether an exception looks like a transient network failure.
@@ -44,7 +62,13 @@ def is_transient_error(exc: BaseException) -> bool:
 	bubble up through several layers (supabase -> httpx -> httpcore) and get
 	re-wrapped as plain ``Exception`` along the way, so the type is unreliable
 	but the underlying message is preserved.
+
+	A Postgres statement timeout is explicitly excluded: it looks like a timeout
+	but is deterministic, so retrying it unchanged never helps (see
+	``STATEMENT_TIMEOUT_PATTERNS``).
 	"""
+	if is_statement_timeout(exc):
+		return False
 	message = str(exc).lower()
 	return any(pattern in message for pattern in TRANSIENT_ERROR_PATTERNS)
 

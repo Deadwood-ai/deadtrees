@@ -19,9 +19,15 @@ from shared.db import use_client
 from shared.settings import settings
 from shared.logger import logger
 from shared.logging import LogContext, LogCategory
-from shared.retry import retry_on_transient_error
+from shared.retry import retry_on_transient_error, is_statement_timeout
 
-MAX_CHUNK_SIZE = 1024 * 1024 * 5  # 5MB per chunk
+# Each chunk is inserted as a single SQL statement, which must finish within the
+# database ``statement_timeout`` (8s for the ``authenticated`` role in production).
+# Insert time scales with both the byte size *and* the number of rows (each row
+# updates the spatial index), so we cap on both. These are first-line limits;
+# ``_insert_records_adaptive`` handles any chunk that still exceeds the budget.
+MAX_CHUNK_SIZE = 1024 * 1024 * 2  # 2MB of WKB per chunk
+MAX_CHUNK_GEOMETRIES = 2000  # rows per chunk
 
 
 def create_label_with_geometries(payload: LabelPayloadData, user_id: str, token: str) -> Label:
@@ -116,7 +122,9 @@ def create_label_with_geometries(payload: LabelPayloadData, user_id: str, token:
 				wkb_geom = wkb.dumps(polygon)
 				geom_size = len(wkb_geom)
 
-				if current_chunk_size + geom_size > MAX_CHUNK_SIZE and current_chunk:
+				exceeds_size = current_chunk_size + geom_size > MAX_CHUNK_SIZE
+				exceeds_count = len(current_chunk) >= MAX_CHUNK_GEOMETRIES
+				if current_chunk and (exceeds_size or exceeds_count):
 					# Upload current chunk
 					upload_geometry_chunk(
 						client, geom_table, GeometryModel, label_id, current_chunk, payload.properties, token
@@ -164,15 +172,53 @@ def upload_geometry_chunk(
 		geometry = GeometryModel(label_id=label_id, geometry=geom.__geo_interface__, properties=properties)
 		geometry_records.append(geometry.model_dump(exclude={'id', 'created_at'}))
 
+	try:
+		_insert_records_adaptive(client, table, geometry_records, label_id, token)
+	except Exception as e:
+		logger.error(f'Error uploading geometry chunk: {str(e)}', extra={'token': token})
+		raise Exception(f'Error uploading geometry chunk: {str(e)}')
+
+
+def _insert_records_adaptive(client, table: str, records: List[dict], label_id: int, token: str) -> None:
+	"""Insert ``records`` as one statement, splitting the batch if the DB cancels it.
+
+	A Postgres ``statement_timeout`` (SQLSTATE 57014) means the batch was too large
+	to insert within the time budget; the whole statement is rolled back atomically
+	(no partial rows), so we can safely halve the batch and retry each half. This
+	recurses down to a single record, which — if it *still* times out — is a genuine
+	problem and is re-raised. Transient network errors are handled per-insert by
+	``retry_on_transient_error`` and are not split.
+	"""
+	try:
+		_insert_records_with_retry(client, table, records, label_id)
+	except Exception as e:
+		if is_statement_timeout(e) and len(records) > 1:
+			mid = len(records) // 2
+			logger.warning(
+				f'Geometry insert hit statement timeout for {len(records)} records; '
+				f'splitting into {mid} + {len(records) - mid} and retrying',
+				extra={'token': token},
+			)
+			_insert_records_adaptive(client, table, records[:mid], label_id, token)
+			_insert_records_adaptive(client, table, records[mid:], label_id, token)
+		else:
+			raise
+
+
+def _insert_records_with_retry(client, table: str, records: List[dict], label_id: int) -> None:
+	"""Insert a single batch, retrying only on transient network failures.
+
+	Idempotency: read a baseline row count so that, if a transient failure drops the
+	connection *after* the insert committed, the retry can detect the rows already
+	landed and skip re-inserting (a PostgREST batch insert is atomic, so the count is
+	either the baseline or baseline + len(records)). If we can't read a baseline, fall
+	back to plain retry.
+	"""
+
 	def _count_existing() -> int:
 		response = client.table(table).select('id', count='exact').eq('label_id', label_id).execute()
 		return response.count or 0
 
-	# Baseline row count so that, if a transient failure drops the connection
-	# *after* the insert committed, the retry can detect the rows already landed
-	# and skip re-inserting (a PostgREST batch insert is atomic, so the count is
-	# either the baseline or baseline + len(records)). If we can't read a
-	# baseline, fall back to plain retry.
 	try:
 		count_before = _count_existing()
 	except Exception:
@@ -181,17 +227,13 @@ def upload_geometry_chunk(
 	def _already_committed() -> bool:
 		if count_before is None:
 			return False
-		return _count_existing() >= count_before + len(geometry_records)
+		return _count_existing() >= count_before + len(records)
 
 	@retry_on_transient_error(verify_succeeded=_already_committed)
 	def _insert() -> None:
-		client.table(table).insert(geometry_records).execute()
+		client.table(table).insert(records).execute()
 
-	try:
-		_insert()
-	except Exception as e:
-		logger.error(f'Error uploading geometry chunk: {str(e)}', extra={'token': token})
-		raise Exception(f'Error uploading geometry chunk: {str(e)}')
+	_insert()
 
 
 def delete_model_prediction_labels(

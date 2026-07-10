@@ -1,6 +1,6 @@
 import pytest
 
-from shared.retry import is_transient_error, retry_on_transient_error
+from shared.retry import is_statement_timeout, is_transient_error, retry_on_transient_error
 
 
 # ---------------------------------------------------------------------------
@@ -36,6 +36,51 @@ def test_is_transient_error_true_for_network_failures(message):
 )
 def test_is_transient_error_false_for_deterministic_errors(exc):
 	assert is_transient_error(exc) is False
+
+
+@pytest.mark.parametrize(
+	'message',
+	[
+		'canceling statement due to statement timeout',
+		"{'message': 'canceling statement due to statement timeout', 'code': '57014'}",
+		'ERROR: statement timeout',
+	],
+)
+def test_is_statement_timeout_true_for_postgres_cancellation(message):
+	assert is_statement_timeout(Exception(message)) is True
+
+
+@pytest.mark.parametrize(
+	'message',
+	[
+		'The write operation timed out',
+		'read operation timed out',
+		'Server disconnected without sending a response.',
+	],
+)
+def test_is_statement_timeout_false_for_network_timeouts(message):
+	assert is_statement_timeout(Exception(message)) is False
+
+
+def test_statement_timeout_is_not_transient():
+	"""A Postgres statement timeout contains 'timeout' but must NOT be retried."""
+	exc = Exception("{'message': 'canceling statement due to statement timeout', 'code': '57014'}")
+	assert is_transient_error(exc) is False
+
+
+def test_statement_timeout_reraised_immediately_without_retry(no_sleep):
+	calls = []
+
+	@retry_on_transient_error
+	def fn():
+		calls.append(1)
+		raise Exception('canceling statement due to statement timeout')
+
+	with pytest.raises(Exception, match='statement timeout'):
+		fn()
+
+	assert len(calls) == 1
+	assert no_sleep == []
 
 
 # ---------------------------------------------------------------------------
