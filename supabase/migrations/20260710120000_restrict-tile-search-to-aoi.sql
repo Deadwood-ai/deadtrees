@@ -47,6 +47,13 @@ as $$
 declare
   aoi_geom geometry;
 begin
+  -- Serialize concurrent recomputes of the same dataset (e.g. an AOI save racing a
+  -- processor activation, or two auditors saving at once). Without this, both run
+  -- the delete+insert below and the second can collide on the membership PK under
+  -- READ COMMITTED. Transaction-scoped; auto-released at commit/rollback. Different
+  -- datasets take different keys, so cross-dataset recomputes never contend.
+  perform pg_advisory_xact_lock(hashtext('recompute_tile_aoi_membership'), p_dataset_id::int);
+
   delete from public.v2_tile_aoi_membership where dataset_id = p_dataset_id;
 
   -- Nothing to do for the ~98% of AOI edits on datasets without embeddings.
@@ -252,6 +259,12 @@ as $$
   limit greatest(match_count, 1);
 $$;
 
+-- SECURITY DEFINER helper: keep it off the public API surface. It is only invoked
+-- internally — the v2_aois trigger and activate_tile_embeddings, both SECURITY
+-- DEFINER, so PostgreSQL checks EXECUTE against the owner, not the caller, and those
+-- keep working. Revoke the implicit PUBLIC grant so anon/authenticated clients can't
+-- call it directly to force recomputes for arbitrary datasets.
+revoke all on function public.recompute_tile_aoi_membership(bigint) from public;
 grant execute on function public.recompute_tile_aoi_membership(bigint) to service_role;
 
 -- Backfill membership for every dataset that already has embeddings.
