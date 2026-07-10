@@ -48,7 +48,8 @@ import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import {
   createOpenFreeMapLibertyLayerGroup,
   createStandardMapControls,
-  createWaybackSource,
+  getCachedWaybackSource,
+  DEFAULT_WAYBACK_RELEASE,
   createWaybackTileLayer,
 } from "../../utils/basemaps";
 import LayerControlPanel from "./LayerControlPanel";
@@ -248,9 +249,8 @@ const DeadtreesMap = () => {
   } = usePublicTreeObservations();
 
   // Wayback imagery state - using debounced location-based query
-  // Default to a recent Wayback release (31144 = 2024) for immediate satellite display
-  // This gets updated when location-specific wayback items load
-  const DEFAULT_WAYBACK_RELEASE = 31144;
+  // Starts on the newest Wayback release for immediate satellite display and
+  // gets updated when location-specific wayback items load
   const [selectedReleaseNum, setSelectedReleaseNum] = useState<number | null>(
     DEFAULT_WAYBACK_RELEASE,
   );
@@ -274,12 +274,16 @@ const DeadtreesMap = () => {
   // Fetch wayback items with actual imagery changes at current location.
   // Candidate discovery is debounced and location-based; zooming should not
   // replace the currently rendered basemap release.
-  const { data: localWaybackItems = [], isLoading: isWaybackLoading } =
-    useWaybackItemsDebounced(
-      mapCenterLonLat?.lon,
-      mapCenterLonLat?.lat,
-      DeadwoodMapStyle === "wayback" && shouldLoadLocalWaybackItems,
-    );
+  const {
+    data: localWaybackItems = [],
+    isLoading: isWaybackLoading,
+    progress: waybackLoadProgress,
+    isUnverifiedFallback: isWaybackUnverified,
+  } = useWaybackItemsDebounced(
+    mapCenterLonLat?.lon,
+    mapCenterLonLat?.lat,
+    DeadwoodMapStyle === "wayback" && shouldLoadLocalWaybackItems,
+  );
 
   useMobileImageryAutoSelect({
     enabled: isMobile && DeadwoodMapStyle === "wayback",
@@ -630,20 +634,26 @@ const DeadtreesMap = () => {
     map.getView().setRotation(0);
   }, [isMobile, map]);
 
-  // update on mapStyle change
+  // update on mapStyle change: visibility only — replacing the tile source
+  // here would discard the OpenLayers tile cache and re-download the viewport
   useEffect(() => {
-    const nextIsWayback = DeadwoodMapStyle === "wayback";
     libertyBasemapLayerRef.current?.setVisible(
       DeadwoodMapStyle === "streets-v12",
     );
-    waybackBasemapLayerRef.current?.setVisible(nextIsWayback);
+    waybackBasemapLayerRef.current?.setVisible(DeadwoodMapStyle === "wayback");
+  }, [DeadwoodMapStyle, map]);
 
-    if (selectedReleaseNum && waybackBasemapLayerRef.current) {
-      waybackBasemapLayerRef.current.setSource(
-        createWaybackSource(selectedReleaseNum),
-      );
+  // Swap the wayback source only when the selected release actually changes.
+  // Sources are cached per release, so returning to a recently viewed release
+  // reuses its already-loaded tiles instead of re-fetching them.
+  useEffect(() => {
+    const layer = waybackBasemapLayerRef.current;
+    if (!selectedReleaseNum || !layer) return;
+    const nextSource = getCachedWaybackSource(selectedReleaseNum);
+    if (layer.getSource() !== nextSource) {
+      layer.setSource(nextSource);
     }
-  }, [DeadwoodMapStyle, map, selectedReleaseNum]);
+  }, [map, selectedReleaseNum]);
 
   //update opacity of geotiff layers
   useEffect(() => {
@@ -1365,11 +1375,19 @@ const DeadtreesMap = () => {
           <div className="absolute bottom-2 left-1/2 z-50 w-[calc(100vw-1rem)] -translate-x-1/2 md:w-auto">
             <YearImagerySelector
               predictionYear={selectedYear}
-              onPredictionYearChange={setSelectedYear}
+              onPredictionYearChange={(year) => {
+                // Touching the year selector is a strong signal that the user
+                // will browse imagery next — kick off candidate discovery now
+                // so auto-match has less (or nothing) left to wait for.
+                setShouldLoadLocalWaybackItems(true);
+                setSelectedYear(year);
+              }}
               selectedReleaseNum={selectedReleaseNum}
               onImageryChange={setSelectedReleaseNum}
               waybackItems={localWaybackItems}
               isLoading={isWaybackLoading}
+              loadProgress={waybackLoadProgress}
+              isUnverifiedFallback={isWaybackUnverified}
               isWaybackActive={DeadwoodMapStyle === "wayback"}
               autoMatchImagery={autoMatchImagery}
               onAutoMatchChange={(enabled) => {

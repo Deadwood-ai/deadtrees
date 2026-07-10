@@ -11,6 +11,7 @@ import { fromLonLat } from "ol/proj";
 import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import { getDeadwoodCOGUrl, getForestCOGUrl } from "../../utils/getDeadwoodCOGUrl";
 import { getWaybackTileUrl } from "../../utils/waybackVersions";
+import { DEFAULT_WAYBACK_RELEASE } from "../../utils/basemaps";
 
 const LOCATIONS = [
   { name: "Harz Mountains", country: "DE", center: [10.6682, 51.7868], zoom: 12 },
@@ -54,7 +55,7 @@ const MiniSatelliteMap = () => {
 
       const basemapLayer = new TileLayer({
         source: new XYZ({
-          url: getWaybackTileUrl(31144),
+          url: getWaybackTileUrl(DEFAULT_WAYBACK_RELEASE),
           maxZoom: 19,
           crossOrigin: "anonymous",
         }),

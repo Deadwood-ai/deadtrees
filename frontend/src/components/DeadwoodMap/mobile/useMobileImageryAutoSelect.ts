@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { findClosestImagery } from "../YearImagerySelector";
+import { pickAutoMatchImagery } from "../YearImagerySelector";
 import type { WaybackItemWithMetadata } from "../../../hooks/useWaybackItems";
 
 interface Params {
@@ -34,9 +34,13 @@ export const useMobileImageryAutoSelect = ({
     if (waybackItems.length === 0) return;
 
     if (autoMatchImagery) {
-      const closest = findClosestImagery(waybackItems, parseInt(predictionYear));
-      if (closest && closest.releaseNum !== selectedReleaseNum) {
-        onImageryChange(closest.releaseNum);
+      const nextReleaseNum = pickAutoMatchImagery(
+        waybackItems,
+        parseInt(predictionYear),
+        selectedReleaseNum,
+      );
+      if (nextReleaseNum !== null) {
+        onImageryChange(nextReleaseNum);
       }
     } else if (!selectedReleaseNum) {
       onImageryChange(waybackItems[waybackItems.length - 1].releaseNum);

@@ -10,7 +10,11 @@ import {
   WarningOutlined,
   CheckCircleOutlined,
 } from "@ant-design/icons";
-import type { WaybackItemWithMetadata } from "../../hooks/useWaybackItems";
+import {
+  resolveWaybackCandidate,
+  type WaybackItemWithMetadata,
+  type WaybackLoadProgress,
+} from "../../hooks/useWaybackItems";
 
 const { Text } = Typography;
 
@@ -63,6 +67,26 @@ const getImageryYear = (item: WaybackItemWithMetadata): number | undefined =>
   getImageryDate(item)?.getFullYear();
 
 /**
+ * Years for which imagery is verified to exist at this location.
+ *
+ * Only counts acquisition dates from ESRI's metadata service — never the
+ * release-date fallback. Release dates say when ESRI published a snapshot,
+ * not when the local imagery was captured, so a dot derived from them can
+ * "move" to a different year the moment the item's metadata resolves. Verified
+ * years are sticky: dots can only appear as knowledge grows, never jump.
+ */
+export const getVerifiedImageryYears = (
+  items: WaybackItemWithMetadata[],
+): Set<string> => {
+  const years = new Set<string>();
+  items.forEach((item) => {
+    const year = item.acquisitionDate?.getFullYear();
+    if (year !== undefined) years.add(year.toString());
+  });
+  return years;
+};
+
+/**
  * Find the closest imagery to a target year, preferring older over newer
  */
 export const findClosestImagery = (
@@ -91,6 +115,33 @@ export const findClosestImagery = (
   });
 };
 
+/**
+ * Decide whether auto-match should switch to a different imagery release.
+ * Returns the release number to switch to, or null to keep the selection.
+ *
+ * The selection is resolved to the candidate whose imagery it actually shows
+ * (releases between two local changes serve identical tiles). Auto-match
+ * stays put when the selection already shows the best candidate's imagery, or
+ * imagery from the same year — switching would reload the basemap without a
+ * visible benefit.
+ */
+export const pickAutoMatchImagery = (
+  items: WaybackItemWithMetadata[],
+  targetYear: number,
+  selectedReleaseNum: number | null,
+): number | null => {
+  const closest = findClosestImagery(items, targetYear);
+  if (!closest || closest.releaseNum === selectedReleaseNum) return null;
+
+  const current = resolveWaybackCandidate(items, selectedReleaseNum);
+  if (current) {
+    if (current.releaseNum === closest.releaseNum) return null;
+    if (getImageryYear(current) === getImageryYear(closest)) return null;
+  }
+
+  return closest.releaseNum;
+};
+
 interface YearImagerySelectorProps {
   /** Currently selected prediction year */
   predictionYear: string;
@@ -104,6 +155,10 @@ interface YearImagerySelectorProps {
   waybackItems: WaybackItemWithMetadata[];
   /** Whether wayback data is loading */
   isLoading?: boolean;
+  /** Pipeline progress while imagery history loads */
+  loadProgress?: WaybackLoadProgress | null;
+  /** Dates in waybackItems are unverified release dates (discovery failed) */
+  isUnverifiedFallback?: boolean;
   /** Whether satellite basemap is active */
   isWaybackActive?: boolean;
   /** Whether to auto-match imagery to prediction year */
@@ -136,6 +191,8 @@ const YearImagerySelector = ({
   onImageryChange,
   waybackItems,
   isLoading = false,
+  loadProgress = null,
+  isUnverifiedFallback = false,
   isWaybackActive = true,
   autoMatchImagery = false,
   onAutoMatchChange,
@@ -156,15 +213,12 @@ const YearImagerySelector = ({
 
   // Items are already sorted by acquisition date (oldest first) from the hook
 
-  // Extract years that have imagery from waybackItems
-  const yearsWithImagery = useMemo(() => {
-    const years = new Set<string>();
-    waybackItems.forEach((item) => {
-      const year = getImageryYear(item)?.toString();
-      if (year) years.add(year);
-    });
-    return years;
-  }, [waybackItems]);
+  // Years with verified (acquisition-dated) imagery at this location. Never
+  // derived from release dates, so the dots stay put while metadata streams in.
+  const yearsWithImagery = useMemo(
+    () => getVerifiedImageryYears(waybackItems),
+    [waybackItems],
+  );
 
   // Dynamic options with visual indicator for years with imagery (no opacity - all years have predictions)
   const predictionYearOptions = useMemo(
@@ -195,10 +249,13 @@ const YearImagerySelector = ({
     if (waybackItems.length === 0) return;
 
     if (autoMatchImagery) {
-      const targetYear = parseInt(predictionYear);
-      const closestItem = findClosestImagery(waybackItems, targetYear);
-      if (closestItem && closestItem.releaseNum !== selectedReleaseNum) {
-        onImageryChange(closestItem.releaseNum);
+      const nextReleaseNum = pickAutoMatchImagery(
+        waybackItems,
+        parseInt(predictionYear),
+        selectedReleaseNum,
+      );
+      if (nextReleaseNum !== null) {
+        onImageryChange(nextReleaseNum);
       }
       return;
     }
@@ -232,12 +289,16 @@ const YearImagerySelector = ({
     }
   };
 
-  // Find currently selected item
-  const currentImageryIndex = waybackItems.findIndex(
-    (item) => item.releaseNum === selectedReleaseNum,
+  // Resolve the selection to the candidate whose imagery it actually shows:
+  // releases between two local changes serve identical tiles, so a selected
+  // release that is not itself a candidate still displays a candidate's image.
+  const selectedItem = resolveWaybackCandidate(
+    waybackItems,
+    selectedReleaseNum,
   );
-  const selectedItem =
-    currentImageryIndex >= 0 ? waybackItems[currentImageryIndex] : null;
+  const currentImageryIndex = selectedItem
+    ? waybackItems.indexOf(selectedItem)
+    : -1;
   const hasSelectedBasemap = selectedReleaseNum !== null;
   const isUsingDefaultBasemap = hasSelectedBasemap && !selectedItem;
   const hasMultipleImages = waybackItems.length > 1;
@@ -283,8 +344,17 @@ const YearImagerySelector = ({
     }
   };
 
+  // Progress label for the imagery-history pipeline. Discovery has no
+  // per-request granularity, so it shows an expected duration instead;
+  // metadata verification reports real counts.
+  const loadProgressLabel =
+    loadProgress?.phase === "metadata"
+      ? `verifying imagery dates ${loadProgress.done}/${loadProgress.total} …`
+      : "scanning imagery history — usually 10–20 s …";
+
   const shouldShowBlockingLoading = isLoading && !hasSelectedBasemap;
-  const hasNoImagery = waybackItems.length === 0 && !isLoading && !hasSelectedBasemap;
+  const hasNoImagery =
+    waybackItems.length === 0 && !isLoading && !hasSelectedBasemap;
 
   // Get the base map year for display
   const selectedImageryDate = selectedItem
@@ -363,6 +433,18 @@ const YearImagerySelector = ({
       {/* Row 2: Base Layer with label and informative message */}
       {isWaybackActive && (
         <div className="flex w-full flex-col items-center gap-1 border-t border-gray-100 pt-2">
+          {/* Discovery failed: dates are ESRI release dates, not capture dates */}
+          {isUnverifiedFallback && !compactMode && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <WarningOutlined
+                className="text-amber-500"
+                style={{ fontSize: "12px" }}
+              />
+              <Text type="secondary">
+                Imagery history unavailable — dates show ESRI release dates
+              </Text>
+            </div>
+          )}
           {/* Informative message - always visible when imagery is loaded */}
           {!isLoading &&
             waybackItems.length > 0 &&
@@ -409,9 +491,7 @@ const YearImagerySelector = ({
                 <Spin
                   indicator={<LoadingOutlined style={{ fontSize: 14 }} spin />}
                 />
-                <span className="text-xs">
-                  Finding basemap imagery for this area ...
-                </span>
+                <span className="text-xs">{loadProgressLabel}</span>
               </div>
             ) : hasNoImagery ? (
               <Text type="secondary" className="text-xs text-gray-400">
@@ -446,6 +526,11 @@ const YearImagerySelector = ({
                           <div className="mt-1">
                             Date: {formatDate(selectedImageryDate)}
                           </div>
+                          {!selectedItem.acquisitionDate && (
+                            <div className="text-gray-300">
+                              Release date — actual capture may be older
+                            </div>
+                          )}
                           {selectedItem.provider && (
                             <div>Provider: {selectedItem.provider}</div>
                           )}
@@ -471,6 +556,9 @@ const YearImagerySelector = ({
                       <div className="flex cursor-help items-center gap-1.5 text-xs">
                         <span className="font-medium text-gray-700">
                           {formatDate(selectedImageryDate)}
+                          {!selectedItem.acquisitionDate && (
+                            <span className="text-gray-400"> (release)</span>
+                          )}
                         </span>
                         {!compactMode && selectedItem.provider && (
                           <span className="text-gray-400">·</span>
@@ -499,15 +587,32 @@ const YearImagerySelector = ({
                     <div className="flex items-center gap-1.5 text-xs text-gray-500">
                       <span>Satellite basemap active</span>
                       {isLoading && !compactMode && (
-                        <span className="text-gray-400">
-                          checking local imagery dates
+                        <span className="inline-flex items-center gap-1.5 text-gray-400">
+                          <Spin
+                            indicator={
+                              <LoadingOutlined style={{ fontSize: 11 }} spin />
+                            }
+                          />
+                          {loadProgressLabel}
                         </span>
                       )}
-                      {!isLoading && isUsingDefaultBasemap && !compactMode && (
-                        <span className="text-gray-400">
-                          local imagery dates unavailable
-                        </span>
-                      )}
+                      {!isLoading &&
+                        isUsingDefaultBasemap &&
+                        !compactMode &&
+                        (onRequestLocalImagery ? (
+                          <Button
+                            type="link"
+                            size="small"
+                            onClick={onRequestLocalImagery}
+                            className="!h-auto !p-0 text-xs"
+                          >
+                            Browse imagery history
+                          </Button>
+                        ) : (
+                          <span className="text-gray-400">
+                            local imagery dates unavailable
+                          </span>
+                        ))}
                     </div>
                   )}
                 </div>
