@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import {
   registerWaybackReleaseDate,
   type WaybackItemWithMetadata,
@@ -8,6 +10,7 @@ import {
   getVerifiedImageryYears,
   pickAutoMatchImagery,
 } from "./YearImagerySelector";
+import YearImagerySelector from "./YearImagerySelector";
 
 const item = (
   releaseNum: number,
@@ -95,5 +98,24 @@ describe("pickAutoMatchImagery", () => {
     // The default (newest) release shows the newest candidate's imagery.
     registerWaybackReleaseDate(90002, new Date("2026-06-30").getTime());
     expect(pickAutoMatchImagery(items, 2023, 90002)).toBeNull();
+  });
+});
+
+describe("manual imagery history", () => {
+  it("offers an explicit load action before local candidates exist", () => {
+    const markup = renderToStaticMarkup(
+      createElement(YearImagerySelector, {
+        predictionYear: "2025",
+        onPredictionYearChange: () => undefined,
+        selectedReleaseNum: 32246,
+        onImageryChange: () => undefined,
+        waybackItems: [],
+        isLoading: false,
+        isWaybackActive: true,
+        onRequestLocalImagery: () => undefined,
+      }),
+    );
+
+    expect(markup).toContain("Browse imagery history");
   });
 });

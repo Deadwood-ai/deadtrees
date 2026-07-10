@@ -353,7 +353,8 @@ const YearImagerySelector = ({
       : "scanning imagery history — usually 10–20 s …";
 
   const shouldShowBlockingLoading = isLoading && !hasSelectedBasemap;
-  const hasNoImagery = waybackItems.length === 0 && !isLoading && !hasSelectedBasemap;
+  const hasNoImagery =
+    waybackItems.length === 0 && !isLoading && !hasSelectedBasemap;
 
   // Get the base map year for display
   const selectedImageryDate = selectedItem
@@ -589,20 +590,29 @@ const YearImagerySelector = ({
                         <span className="inline-flex items-center gap-1.5 text-gray-400">
                           <Spin
                             indicator={
-                              <LoadingOutlined
-                                style={{ fontSize: 11 }}
-                                spin
-                              />
+                              <LoadingOutlined style={{ fontSize: 11 }} spin />
                             }
                           />
                           {loadProgressLabel}
                         </span>
                       )}
-                      {!isLoading && isUsingDefaultBasemap && !compactMode && (
-                        <span className="text-gray-400">
-                          local imagery dates unavailable
-                        </span>
-                      )}
+                      {!isLoading &&
+                        isUsingDefaultBasemap &&
+                        !compactMode &&
+                        (onRequestLocalImagery ? (
+                          <Button
+                            type="link"
+                            size="small"
+                            onClick={onRequestLocalImagery}
+                            className="!h-auto !p-0 text-xs"
+                          >
+                            Browse imagery history
+                          </Button>
+                        ) : (
+                          <span className="text-gray-400">
+                            local imagery dates unavailable
+                          </span>
+                        ))}
                     </div>
                   )}
                 </div>

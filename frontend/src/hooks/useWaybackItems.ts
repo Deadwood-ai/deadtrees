@@ -56,6 +56,14 @@ export interface WaybackItemWithMetadata extends WaybackItem {
   metadata?: WaybackMetadata;
   /** Verified acquisition date (from metadata.date); undefined = unverified */
   acquisitionDate?: Date;
+  /** A transient metadata request failed after retries. */
+  metadataFetchFailed?: boolean;
+  /**
+   * First release timestamp covered by this item after same-acquisition
+   * releases are collapsed. The displayed release may be newer because we keep
+   * its latest processing, but resolution must retain the earliest boundary.
+   */
+  coverageStartDatetime?: number;
   /** Provider name (e.g., "Maxar", "Airbus") */
   provider?: string;
   /** Source/satellite name (e.g., "WV03", "Pleiades") */
@@ -132,6 +140,7 @@ export const registerWaybackReleaseDate = (
 const toWaybackItemWithMetadata = (
   item: WaybackItem,
   metadata: WaybackMetadata | null | undefined,
+  metadataFetchFailed = false,
 ): WaybackItemWithMetadata => {
   if (item.releaseDatetime) {
     registerWaybackReleaseDate(item.releaseNum, item.releaseDatetime);
@@ -140,6 +149,7 @@ const toWaybackItemWithMetadata = (
     ...item,
     metadata: metadata ?? undefined,
     acquisitionDate: metadata?.date ? new Date(metadata.date) : undefined,
+    metadataFetchFailed: metadataFetchFailed || undefined,
     provider: metadata?.provider,
     source: metadata?.source,
     resolution: metadata?.resolution,
@@ -165,11 +175,19 @@ const dedupeWaybackItems = (
       item.releaseDateLabel ||
       String(item.releaseNum);
     const existing = dateMap.get(dateKey);
+    const coverageStartDatetime = Math.min(
+      item.coverageStartDatetime ?? item.releaseDatetime,
+      existing?.coverageStartDatetime ?? existing?.releaseDatetime ?? Infinity,
+    );
     // Keep the most recently *released* item per acquisition date (latest
-    // processing of the same capture). Release numbers are not temporal.
-    if (!existing || item.releaseDatetime > existing.releaseDatetime) {
-      dateMap.set(dateKey, item);
-    }
+    // processing of the same capture), but retain the earliest release boundary
+    // so sticky selections inside the collapsed interval still resolve to it.
+    // Release numbers are not temporal.
+    const representative =
+      !existing || item.releaseDatetime > existing.releaseDatetime
+        ? item
+        : existing;
+    dateMap.set(dateKey, { ...representative, coverageStartDatetime });
   });
 
   return sortWaybackItemsAscending(Array.from(dateMap.values()));
@@ -192,7 +210,10 @@ export const enrichWaybackItemsWithMetadata = async (
     onProgress,
   }: Pick<
     LoadWaybackItemsOptions,
-    "metadataTimeoutMs" | "metadataConcurrency" | "getItemMetadata" | "onProgress"
+    | "metadataTimeoutMs"
+    | "metadataConcurrency"
+    | "getItemMetadata"
+    | "onProgress"
   > = {},
 ): Promise<WaybackItemWithMetadata[]> => {
   const resolved = new Map<number, WaybackMetadata | null>();
@@ -240,9 +261,14 @@ export const enrichWaybackItemsWithMetadata = async (
       `Wayback metadata unavailable for release ${item.releaseNum}; keeping unverified release date`,
     );
   });
+  const failedReleaseNums = new Set(failedTwice.map((item) => item.releaseNum));
 
   return items.map((item) =>
-    toWaybackItemWithMetadata(item, resolved.get(item.releaseNum)),
+    toWaybackItemWithMetadata(
+      item,
+      resolved.get(item.releaseNum),
+      failedReleaseNums.has(item.releaseNum),
+    ),
   );
 };
 
@@ -313,7 +339,9 @@ const candidateCacheKey = (column: number, row: number) =>
 export const readCachedCandidates = (
   column: number,
   row: number,
-  storage: Pick<Storage, "getItem" | "removeItem"> | undefined = globalThis.localStorage,
+  storage:
+    | Pick<Storage, "getItem" | "removeItem">
+    | undefined = globalThis.localStorage,
 ): WaybackItemWithMetadata[] | null => {
   try {
     const raw = storage?.getItem(candidateCacheKey(column, row));
@@ -353,6 +381,10 @@ export const writeCachedCandidates = (
   }
 };
 
+export const areWaybackCandidatesCacheable = (
+  items: WaybackItemWithMetadata[],
+): boolean => items.every((item) => !item.metadataFetchFailed);
+
 /**
  * Resolve which candidate's imagery a given release actually shows at this
  * location: the latest candidate released at or before it. Change detection
@@ -375,12 +407,12 @@ export const resolveWaybackCandidate = (
   if (releaseDatetime === undefined) return null;
 
   let best: WaybackItemWithMetadata | null = null;
+  let bestCoverageStart = -Infinity;
   for (const item of items) {
-    if (
-      item.releaseDatetime <= releaseDatetime &&
-      (best === null || item.releaseDatetime > best.releaseDatetime)
-    ) {
+    const coverageStart = item.coverageStartDatetime ?? item.releaseDatetime;
+    if (coverageStart <= releaseDatetime && coverageStart > bestCoverageStart) {
       best = item;
+      bestCoverageStart = coverageStart;
     }
   }
   return best;
@@ -441,7 +473,9 @@ export const useWaybackItemsDebounced = (
         WAYBACK_CANDIDATE_DISCOVERY_ZOOM,
         { signal, onProgress: setProgress },
       );
-      writeCachedCandidates(column, row, candidates);
+      if (areWaybackCandidatesCacheable(candidates)) {
+        writeCachedCandidates(column, row, candidates);
+      }
       return candidates;
     },
     enabled: enabled && stablePoint !== null,
@@ -471,7 +505,9 @@ export const useWaybackItemsDebounced = (
     data,
     /** First discovery for this area still in flight (nothing to show yet) */
     isLoading:
-      candidatesQuery.isPending && enabled && stablePoint !== null &&
+      candidatesQuery.isPending &&
+      enabled &&
+      stablePoint !== null &&
       data.length === 0,
     isFetching,
     /** Pipeline progress while fetching (discovery phase / metadata counts) */

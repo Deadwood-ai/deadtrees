@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WaybackItem, WaybackMetadata } from "@esri/wayback-core";
 import {
   enrichWaybackItemsWithMetadata,
+  areWaybackCandidatesCacheable,
   loadGlobalWaybackItems,
   loadWaybackCandidates,
   readCachedCandidates,
@@ -102,6 +103,35 @@ describe("loadWaybackCandidates", () => {
     expect(result[0].releaseNum).toBe(200);
   });
 
+  it("preserves the first release boundary when duplicate acquisitions collapse", async () => {
+    const getItemsWithLocalChanges = vi
+      .fn()
+      .mockResolvedValue([
+        waybackItem(300, "2020-01-01"),
+        waybackItem(100, "2021-01-01"),
+        waybackItem(200, "2022-01-01"),
+      ]);
+    const getItemMetadata = vi
+      .fn()
+      .mockImplementation(
+        (_point: typeof point, _zoom: number, releaseNum: number) =>
+          Promise.resolve(
+            metadata(releaseNum === 300 ? "2018-07-15" : "2019-06-15"),
+          ),
+      );
+
+    const result = await loadWaybackCandidates(point, 12, {
+      getItemsWithLocalChanges,
+      getItemMetadata,
+    });
+
+    expect(result.map((item) => item.releaseNum)).toEqual([300, 200]);
+    // Release 100 is removed from the picker because release 200 has the same
+    // acquisition. It still began the 2019 imagery interval, so resolving a
+    // sticky selection of release 100 must not fall back to the 2018 image.
+    expect(resolveWaybackCandidate(result, 100)?.releaseNum).toBe(200);
+  });
+
   it("uses size-only local Wayback duplicate detection", async () => {
     const getItemsWithLocalChanges = vi
       .fn()
@@ -158,6 +188,21 @@ describe("enrichWaybackItemsWithMetadata", () => {
     expect(getItemMetadata).toHaveBeenCalledTimes(2);
     expect(result).toHaveLength(1);
     expect(result[0].acquisitionDate).toBeUndefined();
+    expect(result[0].metadataFetchFailed).toBe(true);
+    expect(areWaybackCandidatesCacheable(result)).toBe(false);
+  });
+
+  it("keeps successful empty metadata responses cacheable", async () => {
+    const result = await enrichWaybackItemsWithMetadata(
+      [enrichedItem(31144, "2022-10-04")],
+      point,
+      12,
+      { getItemMetadata: vi.fn().mockResolvedValue(null) },
+    );
+
+    expect(result[0].acquisitionDate).toBeUndefined();
+    expect(result[0].metadataFetchFailed).toBeUndefined();
+    expect(areWaybackCandidatesCacheable(result)).toBe(true);
   });
 
   it("limits concurrent metadata requests to the configured pool size", async () => {
