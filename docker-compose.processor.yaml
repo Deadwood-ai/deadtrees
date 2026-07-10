@@ -55,6 +55,8 @@ services:
       PROCESSOR_USERNAME: processor@deadtrees.earth
       PROCESSOR_PASSWORD: ${PROCESSOR_PASSWORD}
       PROCESSOR_WORKER_ID: ${PROCESSOR_WORKER_ID:-}
+      # Comma-separated task types this worker refuses to run (e.g. odm_processing).
+      PROCESSOR_TASK_BLACKLIST: ${PROCESSOR_TASK_BLACKLIST:-}
       SSH_PRIVATE_KEY_PASSPHRASE: ${SSH_PRIVATE_KEY_PASSPHRASE}
       SSH_PRIVATE_KEY_PATH: /root/.ssh/processing-to-storage
       DEV_MODE: "false"
