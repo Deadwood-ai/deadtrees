@@ -62,6 +62,21 @@ def test_is_statement_timeout_false_for_network_timeouts(message):
 	assert is_statement_timeout(Exception(message)) is False
 
 
+@pytest.mark.parametrize(
+	'message',
+	[
+		# SQLSTATE 57014 is generic query_canceled, not only statement_timeout: a
+		# user/admin cancellation shares the code but must propagate, not be split.
+		"{'message': 'canceling statement due to user request', 'code': '57014'}",
+		'canceling statement due to user request',
+	],
+)
+def test_is_statement_timeout_false_for_other_query_cancellations(message):
+	assert is_statement_timeout(Exception(message)) is False
+	# ...and such a cancellation is not a network transient either, so it propagates.
+	assert is_transient_error(Exception(message)) is False
+
+
 def test_statement_timeout_is_not_transient():
 	"""A Postgres statement timeout contains 'timeout' but must NOT be retried."""
 	exc = Exception("{'message': 'canceling statement due to statement timeout', 'code': '57014'}")

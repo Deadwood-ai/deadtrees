@@ -36,21 +36,29 @@ TRANSIENT_ERROR_PATTERNS = (
 	'no existing session',
 )
 
-# A Postgres statement timeout (SQLSTATE 57014) is *deterministic*, not a network
-# blip: the same statement, re-issued unchanged, will exceed the same time budget
-# and be cancelled again. Blindly retrying it (its message contains "timeout", so
-# it would otherwise match TRANSIENT_ERROR_PATTERNS) just burns every attempt to
-# no effect. Callers must instead make the statement smaller (e.g. split the batch),
-# so we deliberately classify it as non-transient.
+# A Postgres statement timeout is *deterministic*, not a network blip: the same
+# statement, re-issued unchanged, will exceed the same time budget and be cancelled
+# again. Blindly retrying it (its message contains "timeout", so it would otherwise
+# match TRANSIENT_ERROR_PATTERNS) just burns every attempt to no effect. Callers must
+# instead make the statement smaller (e.g. split the batch), so we classify it as
+# non-transient.
+#
+# We match on the "statement timeout" *message*, NOT on SQLSTATE 57014 alone: 57014
+# is Postgres's generic query_canceled code, also raised for user/admin cancellations
+# (pg_cancel_backend -> "canceling statement due to user request"). Those must
+# propagate, not be split-and-retried, so only the timeout message qualifies.
 STATEMENT_TIMEOUT_PATTERNS = (
-	'57014',
-	'statement timeout',
 	'canceling statement due to statement timeout',
+	'statement timeout',
 )
 
 
 def is_statement_timeout(exc: BaseException) -> bool:
-	"""True if the exception is a Postgres statement_timeout cancellation (SQLSTATE 57014)."""
+	"""True if the exception is a Postgres statement_timeout cancellation.
+
+	Deliberately keyed on the statement-timeout message rather than SQLSTATE 57014,
+	which also covers non-timeout query cancellations that should not be split/retried.
+	"""
 	message = str(exc).lower()
 	return any(pattern in message for pattern in STATEMENT_TIMEOUT_PATTERNS)
 
