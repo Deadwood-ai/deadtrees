@@ -25,7 +25,7 @@ import { useDatasetFilter } from "../hooks/useDatasetFilterProvider";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useDesktopOnlyFeature } from "../hooks/useDesktopOnlyFeature";
 import { useAnalytics } from "../hooks/useAnalytics";
-import { useSemanticSearch } from "../hooks/useSemanticSearch";
+import { useSemanticSearch } from "../hooks/useSemanticSearchProvider";
 import { useCanUseAiSearch } from "../hooks/useUserPrivileges";
 
 type FilterTag =
@@ -93,7 +93,6 @@ export default function Dataset() {
   // rate-limited; this just hides the feature from regular visitors.)
   const { canUseAiSearch } = useCanUseAiSearch();
   const semantic = useSemanticSearch();
-  const [semanticInput, setSemanticInput] = useState("");
 
   // Debounced search handler
   useEffect(() => {
@@ -281,9 +280,9 @@ export default function Dataset() {
             enterButton
             allowClear
             loading={semantic.loading}
-            value={semanticInput}
+            value={semantic.input}
             onChange={(e) => {
-              setSemanticInput(e.target.value);
+              semantic.setInput(e.target.value);
               if (!e.target.value && semantic.query) semantic.clear();
             }}
             onSearch={(value) => {
@@ -306,10 +305,7 @@ export default function Dataset() {
                 type="link"
                 size="small"
                 className="h-auto p-0 text-xs"
-                onClick={() => {
-                  setSemanticInput("");
-                  semantic.clear();
-                }}
+                onClick={() => semantic.clear()}
               >
                 Clear
               </Button>

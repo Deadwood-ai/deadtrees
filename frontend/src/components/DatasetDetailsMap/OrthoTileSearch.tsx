@@ -11,6 +11,7 @@ import { Input, Tooltip } from "antd";
 import { InfoCircleOutlined } from "@ant-design/icons";
 
 import { searchTiles, ITileSearchResult } from "../../api/searchEmbeddings";
+import { useDatasetEmbeddingsReady } from "../../hooks/useDatasetAudit";
 
 interface OrthoTileSearchProps {
   map: OLMap | null;
@@ -66,6 +67,12 @@ export default function OrthoTileSearch({ map, datasetId, initialQuery }: OrthoT
   const [tiles, setTiles] = useState<ITileSearchResult[]>([]);
   const [layer, setLayer] = useState<VectorLayer<VectorSource> | null>(null);
   const autoRan = useRef(false);
+
+  // Embeddings are generated per dataset; the tile search is meaningless until
+  // they exist. `undefined` while the status loads — only treat as unavailable
+  // once we positively know embeddings aren't done yet.
+  const { data: embeddingsReady } = useDatasetEmbeddingsReady(datasetId);
+  const unavailable = embeddingsReady === false;
 
   // Create a dedicated highlight layer once the map is available.
   useEffect(() => {
@@ -148,18 +155,22 @@ export default function OrthoTileSearch({ map, datasetId, initialQuery }: OrthoT
   // Auto-run a query forwarded from the dataset list, once the map is ready.
   useEffect(() => {
     if (!map || autoRan.current) return;
+    if (!embeddingsReady) return; // wait until we know this dataset has embeddings
     if (initialQuery && initialQuery.trim()) {
       autoRan.current = true;
       run(initialQuery);
     }
-  }, [map, initialQuery, run]);
+  }, [map, initialQuery, run, embeddingsReady]);
 
   return (
     <div className="w-72 max-w-[80vw]">
       <Input.Search
-        placeholder="Search this orthophoto…"
+        placeholder={
+          unavailable ? "AI search not available yet" : "Search this orthophoto…"
+        }
         enterButton
         allowClear
+        disabled={unavailable}
         loading={loading}
         value={query}
         onChange={(e) => {
@@ -194,6 +205,15 @@ export default function OrthoTileSearch({ map, datasetId, initialQuery }: OrthoT
           </Tooltip>
         }
       />
+      {unavailable && (
+        <div
+          className="mt-1 rounded bg-white/90 px-2 py-0.5 text-xs text-gray-500 shadow"
+          data-testid="ortho-tile-search-unavailable"
+        >
+          AI search isn't available for this dataset yet — its embeddings haven't
+          been generated.
+        </div>
+      )}
       {matchCount !== null && (
         <div className="mt-1 flex items-center justify-between rounded bg-white/90 px-2 py-0.5 text-xs text-gray-600 shadow">
           <span>

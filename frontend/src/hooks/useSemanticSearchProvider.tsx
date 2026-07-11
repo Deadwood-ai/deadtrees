@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import React, { createContext, useCallback, useContext, useState } from "react";
 
 import { searchDatasets } from "../api/searchEmbeddings";
 
@@ -11,20 +11,43 @@ export interface SemanticSearchState {
   rankedIds: number[] | null;
   loading: boolean;
   error: string | null;
+  /** Current text in the search box (kept here so it survives navigation). */
+  input: string;
+  setInput: (value: string) => void;
   run: (query: string) => Promise<void>;
   clear: () => void;
 }
 
+const noop = () => {};
+
+const SemanticSearchContext = createContext<SemanticSearchState>({
+  query: null,
+  scores: null,
+  rankedIds: null,
+  loading: false,
+  error: null,
+  input: "",
+  setInput: noop,
+  run: async () => {},
+  clear: noop,
+});
+
 /**
- * Open-vocabulary dataset ranking. Coexists with the existing text filter: when
- * a query is active the caller restricts + reorders the dataset list by score.
+ * Open-vocabulary (CLIP) dataset ranking. Coexists with the existing text
+ * filter: when a query is active the caller restricts + reorders the dataset
+ * list by score.
+ *
+ * State lives in a provider mounted above the router (main.tsx), so that
+ * navigating into a dataset and pressing back preserves the active search and
+ * its results — mirroring how DatasetFilterProvider persists the text filters.
  */
-export function useSemanticSearch(): SemanticSearchState {
+export const SemanticSearchProvider = (props: { children: React.ReactNode }) => {
   const [query, setQuery] = useState<string | null>(null);
   const [scores, setScores] = useState<Map<number, number> | null>(null);
   const [rankedIds, setRankedIds] = useState<number[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [input, setInput] = useState("");
 
   const run = useCallback(async (q: string) => {
     const trimmed = q.trim();
@@ -57,7 +80,16 @@ export function useSemanticSearch(): SemanticSearchState {
     setScores(null);
     setRankedIds(null);
     setError(null);
+    setInput("");
   }, []);
 
-  return { query, scores, rankedIds, loading, error, run, clear };
-}
+  return (
+    <SemanticSearchContext.Provider
+      value={{ query, scores, rankedIds, loading, error, input, setInput, run, clear }}
+    >
+      {props.children}
+    </SemanticSearchContext.Provider>
+  );
+};
+
+export const useSemanticSearch = () => useContext(SemanticSearchContext);

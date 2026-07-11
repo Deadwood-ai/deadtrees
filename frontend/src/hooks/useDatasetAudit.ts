@@ -142,6 +142,26 @@ export function useDatasetAudit(datasetId: number | undefined) {
   });
 }
 
+// Whether a dataset's tile embeddings have been generated. Open-vocabulary tile
+// search only works once they exist, so the search UI reads this to disable
+// itself with a "not available yet" hint for datasets still awaiting embeddings.
+export function useDatasetEmbeddingsReady(datasetId: number | undefined) {
+  return useQuery({
+    queryKey: ["dataset-embeddings-ready", datasetId],
+    enabled: !!datasetId,
+    queryFn: async () => {
+      if (!datasetId) return false;
+      const { data, error } = await supabase
+        .from("v2_statuses")
+        .select("is_embeddings_done")
+        .eq("dataset_id", datasetId)
+        .maybeSingle();
+      if (error) throw error;
+      return Boolean(data?.is_embeddings_done);
+    },
+  });
+}
+
 // Bulk hook to get audits for a set of dataset IDs
 export function useDatasetAuditsByIds(datasetIds: number[]) {
   const idsKey = useMemo(

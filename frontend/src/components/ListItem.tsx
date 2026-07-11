@@ -60,26 +60,23 @@ const ListItem = ({
     }
   };
 
-  const openInNewTab = () => {
-    window.open(datasetUrl, "_blank", "noopener,noreferrer");
-  };
-
-  const onClickHandler = (e: React.MouseEvent) => {
-    // Ctrl/Cmd-click opens in a new tab, like a normal link.
-    if (e.ctrlKey || e.metaKey) {
-      openInNewTab();
-      return;
+  // The row is a real <a href> (stretched-link overlay below), so middle-click,
+  // right-click "Open in new tab", and Ctrl/Cmd-click all work natively. Only a
+  // plain left-click is intercepted for in-app (SPA) navigation.
+  const onAnchorClick = (e: React.MouseEvent) => {
+    if (
+      e.defaultPrevented ||
+      e.button !== 0 ||
+      e.metaKey ||
+      e.ctrlKey ||
+      e.shiftKey ||
+      e.altKey
+    ) {
+      return; // let the browser open a new tab/window natively
     }
+    e.preventDefault();
     setNavigationSource("dataset");
     navigate(datasetUrl);
-  };
-
-  // Middle-click (or any auxiliary button) opens the dataset in a new tab.
-  const onAuxClickHandler = (e: React.MouseEvent) => {
-    if (e.button === 1) {
-      e.preventDefault();
-      openInNewTab();
-    }
   };
 
   const onClickFilterHandler = (
@@ -113,14 +110,21 @@ const ListItem = ({
     <div
       key={index}
       data-testid="dataset-list-item"
-      className={`flex rounded-md p-2 transition duration-150 ease-in-out ${
+      className={`relative flex rounded-md p-2 transition duration-150 ease-in-out ${
         hoveredItem === item.id ? "bg-gray-200" : "bg-white hover:bg-gray-100"
       }`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      onClick={onClickHandler}
-      onAuxClick={onAuxClickHandler}
     >
+      {/* Stretched-link overlay: makes the whole row a native link so the
+          browser handles middle-click / right-click "open in new tab". The
+          interactive filter chips below sit above it (relative z-20). */}
+      <a
+        href={datasetUrl}
+        onClick={onAnchorClick}
+        aria-label={`Open dataset ${adminLevel3 || item.id}`}
+        className="absolute inset-0 z-10 cursor-pointer rounded-md"
+      />
       <div className="relative h-16 w-16 min-h-16 min-w-16 shrink-0 overflow-hidden rounded-lg">
         <img
           src={
@@ -139,7 +143,7 @@ const ListItem = ({
               <Button
                 type="text"
                 size="small"
-                className="max-content m-0 p-0 font-semibold truncate"
+                className="relative z-20 max-content m-0 p-0 font-semibold truncate"
                 onClick={(e) =>
                   onClickFilterHandler(e, adminLevel3, "admin_level_3")
                 }
@@ -153,7 +157,7 @@ const ListItem = ({
               <Button
                 type="text"
                 size="small"
-                className="max-content m-0 p-0 font-semibold shrink-0"
+                className="relative z-20 max-content m-0 p-0 font-semibold shrink-0"
                 onClick={(e) =>
                   onClickFilterHandler(e, adminLevel1, "admin_level_1")
                 }
@@ -195,7 +199,7 @@ const ListItem = ({
             <Tooltip title={item.authors?.join(", ")}>
               <Button
                 size="small"
-                className="inline-block max-w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-left font-medium"
+                className="relative z-20 inline-block max-w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-left font-medium"
                 onClick={(e) =>
                   onClickFilterHandler(e, firstAuthor, "authors_image")
                 }
@@ -214,7 +218,7 @@ const ListItem = ({
                 biomeName ? "dataset-biome-filter" : "dataset-biome-label"
               }
               color={biomeColor}
-              className="m-0 inline-flex w-fit shrink-0 cursor-pointer select-none"
+              className="relative z-20 m-0 inline-flex w-fit shrink-0 cursor-pointer select-none"
               onClick={(e) => {
                 if (!biomeName) return;
                 onClickFilterHandler(e, biomeName, "biome");
