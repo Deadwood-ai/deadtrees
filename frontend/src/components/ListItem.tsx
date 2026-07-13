@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Button, Tag, Tooltip } from "antd";
 import { useNavigate } from "react-router-dom";
 import { IDataAccess, IDataset, IDatasetArchiveItem } from "../types/dataset";
@@ -230,4 +231,4 @@ const ListItem = ({
   );
 };
 
-export default ListItem;
+export default memo(ListItem);

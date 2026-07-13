@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext } from "react";
+import React, { createContext, useState, useContext, useMemo } from "react";
 import { AdvancedFilters } from "../components/FilterModal";
 
 type FilterTag = "platform" | "license" | "authors_image" | "admin_level_1" | "admin_level_3" | "biome";
@@ -55,26 +55,26 @@ export const DatasetFilterProvider = (props: { children: React.ReactNode }) => {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [filterByViewport, setFilterByViewport] = useState(true);
 
-  return (
-    <DatasetFilterContext.Provider
-      value={{
-        filter,
-        setFilter,
-        filterTag,
-        setFilterTag,
-        advancedFilters,
-        setAdvancedFilters,
-        searchInput,
-        setSearchInput,
-        sortDirection,
-        setSortDirection,
-        filterByViewport,
-        setFilterByViewport,
-      }}
-    >
-      {props.children}
-    </DatasetFilterContext.Provider>
+  // A fresh object here would re-render every consumer on each provider render.
+  const value = useMemo(
+    () => ({
+      filter,
+      setFilter,
+      filterTag,
+      setFilterTag,
+      advancedFilters,
+      setAdvancedFilters,
+      searchInput,
+      setSearchInput,
+      sortDirection,
+      setSortDirection,
+      filterByViewport,
+      setFilterByViewport,
+    }),
+    [filter, filterTag, advancedFilters, searchInput, sortDirection, filterByViewport],
   );
+
+  return <DatasetFilterContext.Provider value={value}>{props.children}</DatasetFilterContext.Provider>;
 };
 
 export const useDatasetFilter = () => {
