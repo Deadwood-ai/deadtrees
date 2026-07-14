@@ -74,7 +74,7 @@ function DataList({
                     key={index}
                     item={item}
                     index={index}
-                    hoveredItem={hoveredItem}
+                    isHovered={hoveredItem === item.id}
                     setHoveredItem={setHoveredItem}
                     onFilterClick={onFilterClick}
                     score={scores?.get(item.id) ?? null}

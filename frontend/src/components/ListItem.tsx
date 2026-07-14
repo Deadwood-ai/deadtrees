@@ -15,7 +15,7 @@ interface ListItemProps {
   item: IDataset | IDatasetArchiveItem;
   index: number;
   setHoveredItem: ((id: number | null) => void) | undefined;
-  hoveredItem: number | null;
+  isHovered: boolean;
   onFilterClick: (
     filterValue: string,
     filterType:
@@ -36,7 +36,7 @@ const ListItem = ({
   item,
   index,
   setHoveredItem,
-  hoveredItem,
+  isHovered,
   onFilterClick,
   score,
   semanticQuery,
@@ -115,7 +115,7 @@ const ListItem = ({
       key={index}
       data-testid="dataset-list-item"
       className={`flex rounded-md p-2 transition duration-150 ease-in-out ${
-        hoveredItem === item.id ? "bg-gray-200" : "bg-white hover:bg-gray-100"
+        isHovered ? "bg-gray-200" : "bg-white hover:bg-gray-100"
       }`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}

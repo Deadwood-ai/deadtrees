@@ -28,6 +28,7 @@ import { useDatasetMap } from "../../hooks/useDatasetMapProvider";
 import "./tooltip.css";
 import { useDatasetDetailsMap } from "../../hooks/useDatasetDetailsMapProvider";
 import { palette } from "../../theme/palette";
+import { transitionDatasetFeatureHover } from "./datasetFeatureHover";
 
 export type DatasetMapColorMode = "quality" | "labels" | "year" | "timeline";
 
@@ -424,9 +425,18 @@ const DatasetMapOL = ({
                 },
               ) ?? null;
 
+            const nextHoveredId = hoveredFeature ? (hoveredFeature.get("id") as number) : null;
+            const previousHoveredId = hoveredFeatureIdRef.current;
+            hoveredFeatureIdRef.current = transitionDatasetFeatureHover(
+              featuresByIdRef.current,
+              previousHoveredId,
+              nextHoveredId,
+            );
+            if (previousHoveredId !== nextHoveredId) {
+              setHoveredItemRef.current(nextHoveredId);
+            }
+
             if (hoveredFeature) {
-              const featureId = hoveredFeature.get("id");
-              setHoveredItemRef.current(featureId);
               const targetElement = map.getTargetElement();
               if (targetElement) {
                 targetElement.style.cursor = "pointer";
@@ -444,27 +454,12 @@ const DatasetMapOL = ({
                 tooltipElement.innerHTML = tooltipContent;
                 tooltipElement.classList.remove("hidden");
               }
-
-              const hoverStyle = hoveredFeature.get("hoverStyle");
-              if (hoverStyle && hoveredFeature instanceof Feature) {
-                hoveredFeature.setStyle(hoverStyle);
-              }
             } else {
-              setHoveredItemRef.current(null);
               const targetElement = map.getTargetElement();
               if (targetElement) {
                 targetElement.style.cursor = "";
               }
               tooltip.getElement()?.classList.add("hidden");
-
-              vectorLayerExtendRef.current
-                ?.getSource()
-                ?.getFeatures()
-                .forEach((f) => f.setStyle(f.get("baseStyle")));
-              vectorLayerMarkerRef.current
-                ?.getSource()
-                ?.getFeatures()
-                .forEach((f) => f.setStyle(f.get("baseStyle")));
             }
           };
           map.on("pointermove", pointerMoveListener);
@@ -638,23 +633,11 @@ const DatasetMapOL = ({
   // actually changed are restyled — restyling all of them made every hover redraw
   // the whole layer.
   useEffect(() => {
-    const featuresById = featuresByIdRef.current;
-    const previouslyHovered = hoveredFeatureIdRef.current;
-    if (previouslyHovered === hoveredItem) return;
-
-    if (previouslyHovered !== null) {
-      for (const feature of featuresById.get(previouslyHovered) ?? []) {
-        feature.setStyle(feature.get("baseStyle"));
-      }
-    }
-
-    if (hoveredItem !== null) {
-      for (const feature of featuresById.get(hoveredItem) ?? []) {
-        feature.setStyle(feature.get("hoverStyle"));
-      }
-    }
-
-    hoveredFeatureIdRef.current = hoveredItem;
+    hoveredFeatureIdRef.current = transitionDatasetFeatureHover(
+      featuresByIdRef.current,
+      hoveredFeatureIdRef.current,
+      hoveredItem,
+    );
   }, [hoveredItem, data, mapLayersReady]);
 
   // Update visible features after data changes and map is rendered
