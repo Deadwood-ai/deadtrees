@@ -344,6 +344,15 @@
   color: #2d6b3f !important;
 }
 
+.priwa-point-table-row-focused > td,
+.priwa-point-table-row-focused:hover > td {
+  background: #ecfdf5 !important;
+}
+
+.priwa-point-table-row-focused > td:first-child {
+  box-shadow: inset 3px 0 #059669;
+}
+
 .dt-mobile-nav-shell {
   padding-top: calc(env(safe-area-inset-top, 0px) + 0.5rem);
 }
