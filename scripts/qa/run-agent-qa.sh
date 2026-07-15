@@ -17,6 +17,8 @@ FIXTURE_PACKS=()
 AGENT_BROWSER_SURFACE="browser"
 AGENT_MODEL="gpt-5.5 low"
 FOCUS=""
+VISIBLE_BROWSER=0
+BROWSER_ONLY=0
 
 usage() {
 	cat >&2 <<'USAGE'
@@ -34,6 +36,8 @@ Options:
                          Browser automation surface for generated worker prompts
   --agent-model <text>   Agent/model hint to include in worker prompts, default gpt-5.5 low
   --focus <text>         Additional feature-specific QA focus for workers
+  --visible-browser      Mark generated workers for live in-app Browser execution
+  --browser-only         Require bundled Browser for every UI interaction
   --dry-run              Generate manifest/prompts without readiness or seed
   --no-seed              Skip fixture seeding for non-dry runs
   --run-dir <path>       Override output directory
@@ -83,6 +87,15 @@ while [[ $# -gt 0 ]]; do
 			FOCUS="${2:-}"
 			shift 2
 			;;
+		--visible-browser)
+			VISIBLE_BROWSER=1
+			shift
+			;;
+		--browser-only)
+			BROWSER_ONLY=1
+			VISIBLE_BROWSER=1
+			shift
+			;;
 		--dry-run)
 			DRY_RUN=1
 			shift
@@ -123,6 +136,10 @@ case "$AGENT_BROWSER_SURFACE" in
 		exit 1
 		;;
 esac
+if [[ "$BROWSER_ONLY" == "1" && "$AGENT_BROWSER_SURFACE" != "browser" ]]; then
+	echo "--browser-only requires --agent-browser-surface browser" >&2
+	exit 1
+fi
 
 ENV_FILE="${DEADTREES_ISOLATED_ENV_FILE:-$REPO_ROOT/.local/supabase/current.env}"
 if [[ -f "$ENV_FILE" ]]; then
@@ -185,7 +202,7 @@ if [[ "${#FIXTURE_PACKS[@]}" -gt 0 ]]; then
 	FIXTURE_PACK_CSV="$(IFS=,; echo "${FIXTURE_PACKS[*]}")"
 fi
 
-python3 - "$REPO_ROOT" "$RUN_DIR" "$PROFILE" "$PARALLEL" "$DRY_RUN" "$PLAYBOOK_CSV" "$ENV_FILE" "$PERSONA_FILTER" "$BROWSER_FILTER" "$MUTATION_LEVEL_FILTER" "$FIXTURE_PACK_CSV" "$AGENT_BROWSER_SURFACE" "$AGENT_MODEL" "$FOCUS" <<'PY'
+python3 - "$REPO_ROOT" "$RUN_DIR" "$PROFILE" "$PARALLEL" "$DRY_RUN" "$PLAYBOOK_CSV" "$ENV_FILE" "$PERSONA_FILTER" "$BROWSER_FILTER" "$MUTATION_LEVEL_FILTER" "$FIXTURE_PACK_CSV" "$AGENT_BROWSER_SURFACE" "$AGENT_MODEL" "$FOCUS" "$VISIBLE_BROWSER" "$BROWSER_ONLY" <<'PY'
 import json
 import os
 import re
@@ -207,6 +224,8 @@ fixture_pack_filters = [item for item in sys.argv[11].split(",") if item]
 agent_browser_surface = sys.argv[12].strip()
 agent_model = sys.argv[13].strip() or "gpt-5.5 low"
 focus = sys.argv[14].strip()
+visible_browser = sys.argv[15] == "1"
+browser_only = sys.argv[16] == "1"
 playbook_dir = repo_root / "docs" / "qa" / "playbooks"
 
 
@@ -434,6 +453,8 @@ manifest = {
     },
     "agent_browser_surface": agent_browser_surface,
     "agent_model": agent_model,
+    "visible_browser": visible_browser,
+    "browser_only": browser_only,
     "focus": focus or None,
     "worker_count": worker_count,
     "playbook_count": len(playbooks),
@@ -465,6 +486,46 @@ the missing signal instead of inventing extra checks.
 """
         if focus
         else ""
+    )
+    live_viewing_block = (
+        """
+## Live Viewing
+
+This is an operator-visible manual QA run.
+
+- Use the in-app Browser, obtain its `visibility` capability, and call
+  `set(true)` before opening the first assigned route.
+- Keep the watchable journey in the bundled Browser. Do not switch it to
+  Browser Use, Chrome, or terminal Playwright.
+- Keep the Browser visible while navigating, clicking, typing, and cancelling
+  forms so the operator can watch the journey in real time.
+- Wait for the relevant rendered state after each action. Do not race through
+  controls merely to finish faster.
+- Do not hide the Browser or finalize its tabs until all assigned manual
+  playbooks are complete and the result file has been written.
+- Shell setup, validation, and non-browser diagnostics are supporting tools;
+  do not substitute them for the visible manual journey.
+"""
+        if visible_browser and agent_browser_surface == "browser"
+        else ""
+    )
+    browser_execution_rules = (
+        """- Use the bundled in-app Browser for every UI action and assertion.
+- Do not use Browser Use, Chrome, Computer Use, standalone Chromium, terminal
+  Playwright, or repository Playwright probes.
+- Use Browser-supported file chooser and download events for upload/download
+  playbooks. If Browser cannot operate a required control, report the affected
+  playbook as `blocked` with category `tooling-limitation`; do not switch tools.
+- Use shell commands only for environment setup/reset/validation, non-browser
+  diagnostics, evidence aggregation, and teardown."""
+        if browser_only
+        else f"""- Use the built-in Browser for ordinary route/locator checks unless a playbook explicitly says otherwise.
+- Do not use Browser Use default Chromium as primary evidence for real-app rendering unless `scripts/qa/browser-use-real-app-probe.sh` classifies it as `pass` for this route.
+- Use Browser Use CLI for per-worker session isolation or file-upload flows only when the selected backend has current DOM and screenshot evidence.
+- To make Browser Use visible for a human observer, run it in headed mode with either `--headed` or `BROWSER_USE_HEADED=1`.
+- Example headed Browser Use probe: `scripts/qa/browser-use-cli-probe.sh {worker_dir.relative_to(repo_root)}/browser-use-probe --exercise-upload --headed`.
+- Example headed worker session: `uvx --from browser-use browser-use --headed --session {worker['id']} open {frontend_url}`.
+- Use `scripts/qa/playwright-upload-probe.sh` as the deterministic upload fallback."""
     )
     common_result_contract = f"""## Result Contract
 
@@ -605,16 +666,11 @@ You are a QA subagent executing DeadTrees local agent QA playbooks.
 
 {worker_lock_lines}
 {focus_block}
+{live_viewing_block}
 
 ## Rules
 
-- Use the built-in Browser for ordinary route/locator checks unless a playbook explicitly says otherwise.
-- Do not use Browser Use default Chromium as primary evidence for real-app rendering unless `scripts/qa/browser-use-real-app-probe.sh` classifies it as `pass` for this route.
-- Use Browser Use CLI for per-worker session isolation or file-upload flows only when the selected backend has current DOM and screenshot evidence.
-- To make Browser Use visible for a human observer, run it in headed mode with either `--headed` or `BROWSER_USE_HEADED=1`.
-- Example headed Browser Use probe: `scripts/qa/browser-use-cli-probe.sh {worker_dir.relative_to(repo_root)}/browser-use-probe --exercise-upload --headed`.
-- Example headed worker session: `uvx --from browser-use browser-use --headed --session {worker['id']} open {frontend_url}`.
-- Use `scripts/qa/playwright-upload-probe.sh` as the deterministic upload fallback.
+{browser_execution_rules}
 - Keep browser/auth state isolated from other workers when the selected tool supports it.
 - Keep output compact and evidence-based.
 - Do not use production URLs, production credentials, or production data.

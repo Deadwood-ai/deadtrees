@@ -16,9 +16,11 @@ GEOTIFF_PROCESSING_STEPS = [
 	'cog',
 	'thumbnail',
 	'metadata',
+	'aoi_v1',
 	'deadwood_v1',
 	'treecover_v1',
 	'deadwood_treecover_combined_v2',
+	'embeddings_v1',
 ]
 
 RAW_IMAGES_PROCESSING_STEPS = [

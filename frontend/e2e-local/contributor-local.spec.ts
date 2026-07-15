@@ -227,9 +227,11 @@ test.describe("contributor local e2e", () => {
           "cog",
           "thumbnail",
           "metadata",
+          "aoi_v1",
           "deadwood_v1",
           "treecover_v1",
           "deadwood_treecover_combined_v2",
+          "embeddings_v1",
         ],
         priority: 4,
       });

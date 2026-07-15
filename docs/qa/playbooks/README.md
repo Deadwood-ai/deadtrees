@@ -1,8 +1,14 @@
 # Local Agent QA Playbooks
 
 These playbooks are structured journeys for Codex/browser agents. They are not
-Playwright tests. Use them after starting an isolated local stack and seeding
-the required fixture packs.
+Playwright tests. Use local playbooks after starting an isolated local stack
+and seeding the required fixture packs. The production read-only playbook is an
+explicit exception: it uses the dedicated live test account and must not create
+or mutate production data.
+
+For the repeatable production-read/local-write split, use
+[Daily Two-Lane Agent QA](../daily-two-lane-qa.md) and
+`scripts/qa/run-daily-qa.sh`.
 
 ## Common Setup
 
@@ -48,3 +54,4 @@ dataset IDs.
 | `labels-corrections-map` | contributor/auditor | local-write | `qa-labels` | `/dataset-label/91001`, `/dataset-corrections/91001` |
 | `priwa-field-workflow` | authenticated field user | local-write | `qa-priwa` | `/priwa-field` |
 | `negative-empty-error-states` | mixed | read-only | `qa-negative`, `qa-base` | `/dataset/999999`, `/dataset/91004`, `/dataset-audit` |
+| `production-readonly-regression` | anonymous/live test account | read-only | `production-live-readonly` | `/`, `/dataset`, `/dataset/:id`, `/deadtrees`, `/releases`, `/profile`, `/priwa-field` |
