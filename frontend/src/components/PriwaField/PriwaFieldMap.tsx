@@ -1,6 +1,7 @@
 import {
   Alert,
   Button,
+  Drawer,
   FloatButton,
   Popover,
   Progress,
@@ -28,6 +29,7 @@ import type { PointerEvent } from "react";
 
 import { createStandardMapControls } from "../../utils/basemaps";
 import parseBBox from "../../utils/parseBBox";
+import { useIsMobile } from "../../hooks/useIsMobile";
 import { useUserLocationLayer } from "../../hooks/useUserLocationLayer";
 import { createLglDop20Layer } from "./createLglDop20Layer";
 import { createPriwaTopographicLayer } from "./createPriwaTopographicLayer";
@@ -167,6 +169,7 @@ export default function PriwaFieldMap({
   const [focusedPointId, setFocusedPointId] = useState<string | null>(null);
   const [isLayerPanelOpen, setLayerPanelOpen] = useState(false);
   const [baseLayer, setBaseLayer] = useState<PriwaBaseLayer>("aerial");
+  const isMobile = useIsMobile();
   const { candidateCount, matchedMosaics, mosaicIdByPointId } =
     usePriwaMosaicMatches(points, mosaics);
   const visibleMosaics = useMemo(
@@ -700,24 +703,23 @@ export default function PriwaFieldMap({
     message.success("Offline-Basiskartenbereich entfernt");
   }, [clearOfflineBasemapArea]);
 
-  const layerPanel = (
-    <PriwaLayerPanel
-      baseLayer={baseLayer}
-      candidateMosaicCount={candidateCount}
-      matchedMosaics={matchedMosaics}
-      enabledMosaicIds={enabledMosaicIds}
-      selectedMosaicId={selectedMosaicId}
-      hoveredMosaicId={hoveredMosaicId}
-      isLoading={isMatchingMosaics}
-      isOpen={isLayerPanelOpen}
-      errorMessage={cogErrorMessage}
-      onBaseLayerChange={setBaseLayer}
-      onSelectMosaic={setSelectedMosaicId}
-      onSetMosaicVisibility={setMosaicVisibility}
-      onZoomToMosaic={zoomToMosaicFootprint}
-      onOpenPointInTable={openPointInTable}
-    />
-  );
+  const layerPanelProps = {
+    baseLayer,
+    candidateMosaicCount: candidateCount,
+    matchedMosaics,
+    enabledMosaicIds,
+    selectedMosaicId,
+    hoveredMosaicId,
+    isLoading: isMatchingMosaics,
+    isOpen: isLayerPanelOpen,
+    errorMessage: cogErrorMessage,
+    onBaseLayerChange: setBaseLayer,
+    onSelectMosaic: setSelectedMosaicId,
+    onSetMosaicVisibility: setMosaicVisibility,
+    onZoomToMosaic: zoomToMosaicFootprint,
+    onOpenPointInTable: openPointInTable,
+  };
+  const layerPanel = <PriwaLayerPanel {...layerPanelProps} />;
 
   const offlineMapPanel = (
     <div className="w-64 space-y-3">
@@ -829,21 +831,34 @@ export default function PriwaFieldMap({
                 aria-label="Aktuelle Position aktivieren"
               />
             </Tooltip>
-            <Popover
-              trigger="click"
-              placement="rightTop"
-              content={layerPanel}
-              open={isLayerPanelOpen}
-              onOpenChange={setLayerPanelOpen}
-            >
+            {isMobile ? (
               <Button
                 className="pointer-events-auto shadow-md"
                 shape="circle"
                 size="large"
                 icon={<MapLayersIcon />}
+                type={isLayerPanelOpen ? "primary" : "default"}
+                aria-pressed={isLayerPanelOpen}
                 aria-label="Layer auswählen"
+                onClick={() => setLayerPanelOpen(true)}
               />
-            </Popover>
+            ) : (
+              <Popover
+                trigger="click"
+                placement="rightTop"
+                content={layerPanel}
+                open={isLayerPanelOpen}
+                onOpenChange={setLayerPanelOpen}
+              >
+                <Button
+                  className="pointer-events-auto shadow-md"
+                  shape="circle"
+                  size="large"
+                  icon={<MapLayersIcon />}
+                  aria-label="Layer auswählen"
+                />
+              </Popover>
+            )}
             <Popover
               trigger="click"
               placement="rightTop"
@@ -892,6 +907,28 @@ export default function PriwaFieldMap({
             />
           )}
         </>
+      )}
+
+      {!isPlacingPoint && isMobile && (
+        <Drawer
+          title="Layer"
+          placement="bottom"
+          height="82dvh"
+          open={isLayerPanelOpen}
+          onClose={() => setLayerPanelOpen(false)}
+          rootClassName="priwa-layer-sheet-root"
+          className="md:hidden"
+          styles={{
+            header: { padding: "12px 16px" },
+            body: {
+              padding:
+                "12px 16px calc(env(safe-area-inset-bottom, 0px) + 16px)",
+              overflowY: "auto",
+            },
+          }}
+        >
+          <PriwaLayerPanel {...layerPanelProps} variant="sheet" />
+        </Drawer>
       )}
 
       {isPointListOpen && !isPlacingPoint && (
