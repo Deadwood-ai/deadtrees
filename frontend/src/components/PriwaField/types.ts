@@ -14,6 +14,8 @@ export type PriwaObserverName =
   | "Lukas Ruf"
   | "Markus Mayer"
   | "Stefan Treyer"
+  | "Tobias Merz"
+  | "Fabian Bohnert"
   | "andere";
 export type PriwaFund = "ja" | "ja_kein_buchdrucker" | "nein" | "unsicher";
 export type PriwaBaumart =

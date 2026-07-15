@@ -9,6 +9,7 @@ import type { IPriwaMosaic } from "./usePriwaMosaics";
 export type PriwaBaseLayer = "aerial" | "topographic";
 
 interface PriwaLayerPanelProps {
+  variant?: "popover" | "sheet";
   baseLayer: PriwaBaseLayer;
   candidateMosaicCount: number;
   matchedMosaics: IPriwaMatchedMosaic[];
@@ -37,6 +38,7 @@ const daysApartLabel = ({ minDaysApart, maxDaysApart }: IPriwaMatchedMosaic) =>
     : `${minDaysApart}–${maxDaysApart} Tage Abstand`;
 
 export default function PriwaLayerPanel({
+  variant = "popover",
   baseLayer,
   candidateMosaicCount,
   matchedMosaics,
@@ -52,6 +54,7 @@ export default function PriwaLayerPanel({
   onZoomToMosaic,
   onOpenPointInTable,
 }: PriwaLayerPanelProps) {
+  const isSheet = variant === "sheet";
   const mosaicListRef = useRef<HTMLDivElement | null>(null);
   const visibleCount = matchedMosaics.filter(({ mosaic }) =>
     enabledMosaicIds.has(mosaic.id),
@@ -69,9 +72,15 @@ export default function PriwaLayerPanel({
   }, [isOpen, selectedMosaicId]);
 
   return (
-    <div className="w-[21rem] max-w-[calc(100vw-3rem)] space-y-3">
+    <div
+      className={
+        isSheet
+          ? "w-full space-y-3"
+          : "w-[21rem] max-w-[calc(100vw-3rem)] space-y-3"
+      }
+    >
       <div>
-        <Typography.Text strong>Layer</Typography.Text>
+        {!isSheet && <Typography.Text strong>Layer</Typography.Text>}
         <div className="text-xs text-gray-500">
           PRIWA Punkte bleiben immer sichtbar.
         </div>
@@ -112,7 +121,11 @@ export default function PriwaLayerPanel({
         {matchedMosaics.length > 0 && (
           <div
             ref={mosaicListRef}
-            className="mt-2 max-h-80 space-y-2 overflow-y-auto pr-1"
+            className={
+              isSheet
+                ? "mt-2 space-y-2"
+                : "mt-2 max-h-80 space-y-2 overflow-y-auto pr-1"
+            }
           >
             {matchedMosaics.map((matchedMosaic) => {
               const { mosaic, points } = matchedMosaic;
