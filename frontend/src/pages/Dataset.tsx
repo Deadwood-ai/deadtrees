@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { Button, Tag, Input, Spin, Tooltip, Checkbox, Drawer } from "antd";
 import {
   ArrowDownOutlined,
@@ -126,15 +126,24 @@ export default function Dataset() {
     setSortDirection(sortDirection === "asc" ? "desc" : "asc");
   };
 
-  const handleFilterClick = (filterValue: string, filterType: FilterTag) => {
-    setFilter(filterValue);
-    setFilterTag(filterType);
-    setFilterZoomTrigger((n) => n + 1);
-    track("dataset_filter_applied", {
-      filter_type: filterType,
-      filter_value: filterValue,
-    });
-  };
+  // Stable identity keeps the memoised DataList/DatasetMapOL from re-rendering on
+  // every keystroke in the search box.
+  const handleFilterClick = useCallback(
+    (filterValue: string, filterType: FilterTag) => {
+      setFilter(filterValue);
+      setFilterTag(filterType);
+      setFilterZoomTrigger((n) => n + 1);
+      track("dataset_filter_applied", {
+        filter_type: filterType,
+        filter_value: filterValue,
+      });
+    },
+    [setFilter, setFilterTag, track],
+  );
+
+  const handleMapInteracted = useCallback(() => {
+    track("dataset_map_interacted", { interaction_type: "move" });
+  }, [track]);
 
   const handleFilterButtonClick = () => {
     setIsFilterModalVisible(true);
@@ -487,11 +496,7 @@ export default function Dataset() {
             setVisibleFeatures={setVisibleFeatures}
             filterZoomTrigger={filterZoomTrigger}
             colorMode={colorMode}
-            onMapInteracted={() =>
-              track("dataset_map_interacted", {
-                interaction_type: "move",
-              })
-            }
+            onMapInteracted={handleMapInteracted}
           />
         )}
       </div>

@@ -7,7 +7,8 @@ does not implement fixes directly.
 ## Contract
 
 - Run from `main`.
-- Start with `git status --branch`.
+- Start every refresh with `git fetch origin --prune`, then
+  `git status --branch`.
 - If the tree is clean and behind `origin/main`, pull with `git pull --ff-only`.
 - If the tree is dirty, do not pull or overwrite local changes until the changed
   files are understood.
@@ -41,6 +42,23 @@ this repo at the time this playbook was added:
 
 ## Cadence
 
+### Monitoring Boundary
+
+Codex operator threads are not continuous monitors. Treat this playbook as the
+procedure for a manual refresh, a scheduled wake-up, or an explicitly delegated
+check. Do not assume the main operator thread, a worker thread, or a status-check
+thread is always running in the background.
+
+For backups, use two independent signals:
+
+- freshness checks from `scripts/operator_status.py` when an operator check runs;
+- backup-server email alerts from Gmail/Zulip intake when a scheduled check,
+  weekly review, or incident follow-up runs.
+
+If backup freshness has not been checked in the current operator window, report it
+as skipped or stale evidence instead of inferring health from a previous Codex
+thread.
+
 ### Manual Status Refresh
 
 Start a manual operator refresh with the repo-local compact status script:
@@ -64,6 +82,12 @@ tracked script contains no credentials:
 - `DEADTREES_OPERATOR_STORAGE_HOST` for storage host disk probes.
 - `DEADTREES_OPERATOR_BACKUP_HOST` plus either `DEADTREES_OPERATOR_BACKUP_PATH`
   or `DEADTREES_OPERATOR_BACKUP_COMMAND` for backup freshness.
+  On the Freiburg network/VPN, prefer:
+
+  ```bash
+  DEADTREES_OPERATOR_BACKUP_HOST=remote-backup@dtbackup \
+    python3 scripts/operator_status.py --write-state --format markdown
+  ```
 
 After reading the script output, use connector checks for the surfaces that
 cannot be reliably accessed by repo-local tooling: PostHog, Linear, Gmail, and

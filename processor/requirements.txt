@@ -32,7 +32,7 @@ zarr>=2.13.0
 # path during normal reads. Keep the service below 2.5 until Rasterio removes it.
 numpy>=2,<2.5
 # Visvalingam-Whyatt polygon simplification (deadwood_treecover_combined_v2 postprocessing)
-simplification>=0.7,<2
+simplification>=1.0.0,<2
 # Pin to 4.x: transformers 5.0 renamed SegFormer state-dict keys
 # (encoder.block.* -> stages.*, decode_head.linear_c -> linear_projections),
 # which breaks load_state_dict(strict=True) for the AOI and combined-model
