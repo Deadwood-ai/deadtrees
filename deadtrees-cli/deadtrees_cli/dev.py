@@ -27,10 +27,11 @@ SERVICE_DEPENDENCIES = {
 	'processor-test': ['processor-test', 'nginx'],
 }
 SERVICE_BUILD_FILES = {
-	'api-test': ['api/Dockerfile', 'api/requirements.txt'],
+	'api-test': ['api/Dockerfile', 'api/requirements.txt', 'api/requirements-test.txt'],
 	'processor-test': [
 		'processor/Dockerfile',
 		'processor/requirements.txt',
+		'processor/requirements-test.txt',
 	],
 	'nginx': ['nginx/test-conf/Dockerfile', 'nginx/test-conf/storage-server.conf', 'nginx/test-conf/entrypoint.sh'],
 }

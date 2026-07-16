@@ -27,6 +27,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -52,19 +53,30 @@ jobs:
           fi
 
           base_tag="v$release_date"
-          previous_tag=$(git tag --list "${base_tag}*" --sort=-version:refname | head -n 1)
-          next_tag="$base_tag"
+          target_commitish="$(git rev-parse HEAD)"
+          existing_target_tag="$(
+            git tag --points-at "$target_commitish" --list "${base_tag}*" --sort=-version:refname \
+              | head -n 1
+          )"
 
-          if [ -n "$previous_tag" ]; then
-            if [ "$previous_tag" = "$base_tag" ]; then
-              next_tag="${base_tag}.1"
-            else
-              suffix="${previous_tag##${base_tag}.}"
-              if ! [[ "$suffix" =~ ^[0-9]+$ ]]; then
-                echo "Existing CalVer tag has an unexpected suffix: $previous_tag" >&2
-                exit 1
+          if [ -n "$existing_target_tag" ]; then
+            previous_tag="$existing_target_tag"
+            next_tag="$existing_target_tag"
+          else
+            previous_tag=$(git tag --list "${base_tag}*" --sort=-version:refname | head -n 1)
+            next_tag="$base_tag"
+
+            if [ -n "$previous_tag" ]; then
+              if [ "$previous_tag" = "$base_tag" ]; then
+                next_tag="${base_tag}.1"
+              else
+                suffix="${previous_tag##${base_tag}.}"
+                if ! [[ "$suffix" =~ ^[0-9]+$ ]]; then
+                  echo "Existing CalVer tag has an unexpected suffix: $previous_tag" >&2
+                  exit 1
+                fi
+                next_tag="${base_tag}.$((suffix + 1))"
               fi
-              next_tag="${base_tag}.$((suffix + 1))"
             fi
           fi
 
@@ -72,7 +84,7 @@ jobs:
             echo "previous_tag=$previous_tag"
             echo "next_tag=$next_tag"
             echo "release_date=$release_date"
-            echo "target_commitish=$(git rev-parse HEAD)"
+            echo "target_commitish=$target_commitish"
             echo "commit_sha=$(git rev-parse --short=12 HEAD)"
           } >> "$GITHUB_OUTPUT"
 
@@ -108,26 +120,43 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Create GitHub release
+      - name: Create or reuse GitHub release
         uses: actions/github-script@v9
         env:
           NEXT_TAG: ${{ steps.version.outputs.next_tag }}
           TARGET_COMMITISH: ${{ steps.version.outputs.target_commitish }}
         with:
           script: |
-            const response = await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: process.env.NEXT_TAG,
-              target_commitish: process.env.TARGET_COMMITISH,
-              name: process.env.NEXT_TAG,
-              generate_release_notes: true,
-              draft: false,
-              prerelease: false,
-            });
+            let release;
+
+            try {
+              const response = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: process.env.NEXT_TAG,
+              });
+              release = response.data;
+              core.info(`Reusing existing release ${process.env.NEXT_TAG}`);
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+
+              const response = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: process.env.NEXT_TAG,
+                target_commitish: process.env.TARGET_COMMITISH,
+                name: process.env.NEXT_TAG,
+                generate_release_notes: true,
+                draft: false,
+                prerelease: false,
+              });
+              release = response.data;
+            }
 
             await core.summary
-              .addHeading("Release created")
+              .addHeading("Release available")
               .addTable([
                 [
                   {data: "Tag", header: true},
@@ -137,7 +166,7 @@ jobs:
                 [
                   process.env.NEXT_TAG,
                   process.env.TARGET_COMMITISH,
-                  response.data.html_url,
+                  release.html_url,
                 ],
               ])
               .write();

@@ -13,11 +13,15 @@ permissions:
   issues: write
   pull-requests: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend-ci:
     name: frontend-ci
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: frontend
@@ -45,28 +49,8 @@ jobs:
           VITE_SUPABASE_SENTINEL_PROCESSING_ANON_KEY: ${{ secrets.VITE_SUPABASE_SENTINEL_PROCESSING_ANON_KEY }}
         run: npm run test:e2e
 
-  frontend-preview:
-    name: frontend-preview
-    if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: ubuntu-latest
-    needs:
-      - frontend-ci
-    defaults:
-      run:
-        working-directory: frontend
-    env:
-      VITE_MODE: production
-      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
-      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-      VITE_SAM_API_URL: ${{ secrets.VITE_SAM_API_URL }}
-      VITE_POSTHOG_PROJECT_KEY: ${{ secrets.VITE_POSTHOG_PROJECT_KEY }}
-      VITE_GEOPIFY_KEY: ${{ secrets.VITE_GEOPIFY_KEY }}
-      VITE_SUPABASE_SENTINEL_PROCESSING_URL: ${{ secrets.VITE_SUPABASE_SENTINEL_PROCESSING_URL }}
-      VITE_SUPABASE_SENTINEL_PROCESSING_ANON_KEY: ${{ secrets.VITE_SUPABASE_SENTINEL_PROCESSING_ANON_KEY }}
-    steps:
-      - uses: actions/checkout@v6
-      - run: npm ci
       - name: Compute Firebase preview channel
+        if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository }}
         id: firebase-channel
         run: |
           raw="pr${{ github.event.pull_request.number }}-${{ github.head_ref }}"
@@ -76,9 +60,18 @@ jobs:
           fi
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
       - name: Deploy to Firebase Hosting preview
+        if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository }}
         id: firebase-preview
         continue-on-error: true
         env:
+          VITE_MODE: production
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_SAM_API_URL: ${{ secrets.VITE_SAM_API_URL }}
+          VITE_POSTHOG_PROJECT_KEY: ${{ secrets.VITE_POSTHOG_PROJECT_KEY }}
+          VITE_GEOPIFY_KEY: ${{ secrets.VITE_GEOPIFY_KEY }}
+          VITE_SUPABASE_SENTINEL_PROCESSING_URL: ${{ secrets.VITE_SUPABASE_SENTINEL_PROCESSING_URL }}
+          VITE_SUPABASE_SENTINEL_PROCESSING_ANON_KEY: ${{ secrets.VITE_SUPABASE_SENTINEL_PROCESSING_ANON_KEY }}
           FIREBASE_CLI_EXPERIMENTS: webframeworks
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DEADWOOD_D4A4B }}
           FIREBASE_AUTH_MODE: access-token
@@ -87,7 +80,7 @@ jobs:
           FIREBASE_CHANNEL_ID: ${{ steps.firebase-channel.outputs.channel }}
         run: ../.github/scripts/firebase-hosting-deploy.sh preview
       - name: Comment Firebase preview URL
-        if: ${{ steps.firebase-preview.outputs.preview_url != '' }}
+        if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository && steps.firebase-preview.outputs.preview_url != '' }}
         uses: actions/github-script@v8
         with:
           script: |
@@ -127,6 +120,6 @@ jobs:
               });
             }
       - name: Warn when Firebase preview deploy fails
-        if: ${{ steps.firebase-preview.outcome == 'failure' }}
+        if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository && steps.firebase-preview.outcome == 'failure' }}
         run: |
           echo "::warning::Firebase preview deploy failed after retry. Frontend CI remains blocking; preview hosting is non-blocking for PRs because Firebase token exchange can fail independently of the code build."
