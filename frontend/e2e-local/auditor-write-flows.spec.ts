@@ -154,8 +154,16 @@ test.describe("auditor local write flows", () => {
     manualCorrectionAoiId = await expectManualCorrectionSaved(undefined, 2);
     await addManualCorrectionMetadata();
 
-    await drawAuditAoi(page);
+    await page.getByRole("button", { name: "Edit deadwood cover" }).click();
+    await expect(page.getByText("Editing deadwood cover")).toBeVisible();
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+
     const aoiCard = card(page, "7. Area of Interest (AOI)");
+    await aoiCard.getByRole("button", { name: "Edit" }).click();
+    await expect(aoiCard.getByRole("button", { name: "Cut" })).toBeVisible();
+    await aoiCard.getByRole("button", { name: "Cancel" }).click();
+
+    await drawAuditAoi(page);
     await expect(aoiCard.getByText(/AOI defined \(3 polygons\)/)).toBeVisible();
     await aoiCard.getByRole("button", { name: /Undo AOI Change/i }).click();
     await expect(aoiCard.getByText(/AOI defined \(2 polygons\)/)).toBeVisible();

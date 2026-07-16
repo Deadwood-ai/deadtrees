@@ -499,6 +499,7 @@ export function useAOIEditor({
 			clearInteractions();
 			map.removeLayer(editableAOILayer);
 			editableAOILayerRef.current = null;
+			lastInitialAOIRef.current = null;
 		};
 	}, [clearInteractions, enabled, mapRef]);
 
