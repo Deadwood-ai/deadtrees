@@ -2,6 +2,7 @@ import PriwaFieldMap from "../components/PriwaField/PriwaFieldMap";
 import { usePriwaOfflineStatus } from "../components/PriwaField/usePriwaOfflineStatus";
 import { usePriwaOfflineKaeferbaeume } from "../components/PriwaField/usePriwaOfflineKaeferbaeume";
 import { usePriwaMosaics } from "../components/PriwaField/usePriwaMosaics";
+import { usePriwaBefallsgruppen } from "../components/PriwaField/usePriwaBefallsgruppen";
 import { usePriwaProjectMemberships } from "../hooks/usePriwaProjectMemberships";
 import { Alert, Button, Result, Spin } from "antd";
 
@@ -31,6 +32,14 @@ export default function PriwaField() {
     isLoading: isLoadingMosaics,
     isRefetching: isRefetchingMosaics,
   } = usePriwaMosaics(activeMembership?.projectId);
+  const {
+    groups,
+    isLoading: isLoadingGroups,
+    error: groupsError,
+    saveGroup,
+    deleteGroup,
+    isSaving: isSavingGroup,
+  } = usePriwaBefallsgruppen(activeMembership?.projectId);
 
   if (!isOnline && isLoadingMemberships) {
     return (
@@ -98,6 +107,12 @@ export default function PriwaField() {
       isLoadingPoints={isLoadingPoints || isRefetching}
       isSavingPoint={isSaving}
       mosaics={mosaics}
+      groups={groups}
+      isLoadingGroups={isLoadingGroups}
+      isSavingGroup={isSavingGroup}
+      groupsErrorMessage={
+        groupsError instanceof Error ? groupsError.message : null
+      }
       isCogLoading={isLoadingMosaics || isRefetchingMosaics}
       cogErrorMessage={
         mosaicsError instanceof Error ? mosaicsError.message : null
@@ -106,6 +121,8 @@ export default function PriwaField() {
       onAddPoint={createPoint}
       onUpdatePoint={updatePoint}
       onDeletePoint={deletePoint}
+      onSaveGroup={saveGroup}
+      onDeleteGroup={deleteGroup}
       syncSummary={syncSummary}
       onSyncNow={syncNow}
     />

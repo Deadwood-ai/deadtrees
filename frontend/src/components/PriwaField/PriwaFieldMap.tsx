@@ -11,6 +11,7 @@ import {
 } from "antd";
 import {
   AimOutlined,
+  ClusterOutlined,
   DeleteOutlined,
   DownloadOutlined,
   EnvironmentOutlined,
@@ -24,6 +25,7 @@ import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { unByKey } from "ol/Observable";
 import { fromLonLat, toLonLat, transformExtent } from "ol/proj";
 import View from "ol/View";
+import { boundingExtent } from "ol/extent";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 
@@ -52,11 +54,15 @@ import PriwaPointDrawer from "./PriwaPointDrawer";
 import PriwaLayerPanel, { type PriwaBaseLayer } from "./PriwaLayerPanel";
 import PriwaPointListPanel from "./PriwaPointListPanel";
 import PriwaOfflineStatus from "./PriwaOfflineStatus";
+import PriwaBefallsgruppenPanel from "./PriwaBefallsgruppenPanel";
+import { groupsForPriwaMosaicMatching } from "./priwaBefallsgruppenState";
 import { usePriwaOfflineBasemap } from "./usePriwaOfflineBasemap";
 import { usePriwaMosaicMatches } from "./usePriwaMosaicMatches";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
 import type { IPriwaSyncSummary } from "./priwaOfflineSync";
 import type {
+  IPriwaBefallsgruppe,
+  IPriwaBefallsgruppeSaveInput,
   IPriwaCoordinate,
   IPriwaPoint,
   PriwaCoordinateSource,
@@ -93,13 +99,19 @@ interface PriwaFieldMapProps {
   isSavingPoint?: boolean;
   projectName: string;
   mosaics?: IPriwaMosaic[];
+  groups?: IPriwaBefallsgruppe[];
   isCogLoading?: boolean;
+  isLoadingGroups?: boolean;
+  isSavingGroup?: boolean;
+  groupsErrorMessage?: string | null;
   cogErrorMessage?: string | null;
   errorMessage?: string | null;
   syncSummary?: IPriwaSyncSummary;
   onAddPoint: (point: IPriwaPoint) => Promise<void>;
   onUpdatePoint: (point: IPriwaPoint) => Promise<void>;
   onDeletePoint: (pointId: string) => Promise<void>;
+  onSaveGroup: (input: IPriwaBefallsgruppeSaveInput) => Promise<unknown>;
+  onDeleteGroup: (groupId: string) => Promise<unknown>;
   onSyncNow?: () => Promise<void>;
 }
 
@@ -110,13 +122,19 @@ export default function PriwaFieldMap({
   isSavingPoint = false,
   projectName,
   mosaics = [],
+  groups = [],
   isCogLoading = false,
+  isLoadingGroups = false,
+  isSavingGroup = false,
+  groupsErrorMessage = null,
   cogErrorMessage = null,
   errorMessage = null,
   syncSummary,
   onAddPoint,
   onUpdatePoint,
   onDeletePoint,
+  onSaveGroup,
+  onDeleteGroup,
   onSyncNow,
 }: PriwaFieldMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -168,10 +186,16 @@ export default function PriwaFieldMap({
   const [isPointListOpen, setPointListOpen] = useState(false);
   const [focusedPointId, setFocusedPointId] = useState<string | null>(null);
   const [isLayerPanelOpen, setLayerPanelOpen] = useState(false);
+  const [isGroupPanelOpen, setGroupPanelOpen] = useState(false);
   const [baseLayer, setBaseLayer] = useState<PriwaBaseLayer>("aerial");
   const isMobile = useIsMobile();
+  const mosaicMatchGroups = useMemo(
+    () =>
+      groupsForPriwaMosaicMatching(groups, isLoadingGroups, groupsErrorMessage),
+    [groups, groupsErrorMessage, isLoadingGroups],
+  );
   const { candidateCount, matchedMosaics, mosaicIdByPointId } =
-    usePriwaMosaicMatches(points, mosaics);
+    usePriwaMosaicMatches(points, mosaics, mosaicMatchGroups);
   const visibleMosaics = useMemo(
     () => matchedMosaics.map(({ mosaic }) => mosaic),
     [matchedMosaics],
@@ -256,6 +280,7 @@ export default function PriwaFieldMap({
     (point: IPriwaPoint) => {
       selectMatchedMosaicForPoint(point);
       setPointListOpen(false);
+      setGroupPanelOpen(false);
       setFormSessionId((currentSessionId) => currentSessionId + 1);
       setEditingPoint(point);
       setSelectedCoordinate({ lat: point.lat, lon: point.lon });
@@ -531,8 +556,29 @@ export default function PriwaFieldMap({
   const openPointInTable = useCallback((point: IPriwaPoint) => {
     setFocusedPointId(point.id);
     setLayerPanelOpen(false);
+    setGroupPanelOpen(false);
     setPointListOpen(true);
   }, []);
+
+  const zoomToTrees = useCallback(
+    (treeIds: string[]) => {
+      const coordinates = points
+        .filter((point) => treeIds.includes(point.id))
+        .map((point) => fromLonLat([point.lon, point.lat]));
+      const view = mapRef.current?.getView();
+      if (!view || coordinates.length === 0) return;
+      if (coordinates.length === 1) {
+        view.animate({ center: coordinates[0], zoom: 20, duration: 500 });
+        return;
+      }
+      view.fit(boundingExtent(coordinates), {
+        duration: 500,
+        maxZoom: 20,
+        padding: [120, 120, 120, 120],
+      });
+    },
+    [points],
+  );
 
   const zoomToMosaicFootprint = useCallback((mosaic: IPriwaMosaic) => {
     if (!mosaic.bbox) {
@@ -560,6 +606,7 @@ export default function PriwaFieldMap({
 
   const openNewPointDrawer = useCallback(() => {
     setPointListOpen(false);
+    setGroupPanelOpen(false);
     setFormSessionId((currentSessionId) => currentSessionId + 1);
     setEditingPoint(null);
     setSelectedCoordinate(null);
@@ -569,6 +616,7 @@ export default function PriwaFieldMap({
 
   const requestMapPlacement = useCallback(() => {
     setPointListOpen(false);
+    setGroupPanelOpen(false);
     setDrawerOpen(false);
     setPlacingPoint(true);
   }, []);
@@ -712,7 +760,7 @@ export default function PriwaFieldMap({
     hoveredMosaicId,
     isLoading: isMatchingMosaics,
     isOpen: isLayerPanelOpen,
-    errorMessage: cogErrorMessage,
+    errorMessage: cogErrorMessage ?? groupsErrorMessage,
     onBaseLayerChange: setBaseLayer,
     onSelectMosaic: setSelectedMosaicId,
     onSetMosaicVisibility: setMosaicVisibility,
@@ -840,7 +888,10 @@ export default function PriwaFieldMap({
                 type={isLayerPanelOpen ? "primary" : "default"}
                 aria-pressed={isLayerPanelOpen}
                 aria-label="Layer auswählen"
-                onClick={() => setLayerPanelOpen(true)}
+                onClick={() => {
+                  setGroupPanelOpen(false);
+                  setLayerPanelOpen(true);
+                }}
               />
             ) : (
               <Popover
@@ -848,7 +899,10 @@ export default function PriwaFieldMap({
                 placement="rightTop"
                 content={layerPanel}
                 open={isLayerPanelOpen}
-                onOpenChange={setLayerPanelOpen}
+                onOpenChange={(isOpen) => {
+                  if (isOpen) setGroupPanelOpen(false);
+                  setLayerPanelOpen(isOpen);
+                }}
               >
                 <Button
                   className="pointer-events-auto shadow-md"
@@ -883,14 +937,31 @@ export default function PriwaFieldMap({
                 aria-pressed={isPointListOpen}
                 onClick={() => {
                   setFocusedPointId(null);
+                  setGroupPanelOpen(false);
                   setPointListOpen((currentIsOpen) => !currentIsOpen);
                 }}
                 aria-label={pointListToggleLabel}
               />
             </Tooltip>
+            <Tooltip title="Befallsgruppen">
+              <Button
+                className="pointer-events-auto shadow-md"
+                type={isGroupPanelOpen ? "primary" : "default"}
+                shape="circle"
+                size="large"
+                icon={<ClusterOutlined />}
+                aria-pressed={isGroupPanelOpen}
+                onClick={() => {
+                  setLayerPanelOpen(false);
+                  setPointListOpen(false);
+                  setGroupPanelOpen((currentIsOpen) => !currentIsOpen);
+                }}
+                aria-label="Befallsgruppen öffnen"
+              />
+            </Tooltip>
           </div>
 
-          {!isPointListOpen && !isDrawerOpen && (
+          {!isPointListOpen && !isGroupPanelOpen && !isDrawerOpen && (
             <FloatButton
               className="priwa-add-point-fab"
               shape="circle"
@@ -943,6 +1014,27 @@ export default function PriwaFieldMap({
           }}
           onEditPoint={openPointForEditing}
           onZoomToPoint={focusPointOnMap}
+        />
+      )}
+
+      {isGroupPanelOpen && !isPlacingPoint && (
+        <PriwaBefallsgruppenPanel
+          points={points}
+          mosaics={mosaics}
+          groups={groups}
+          mosaicIdByPointId={mosaicIdByPointId}
+          isMobile={isMobile}
+          isLoading={isLoadingGroups}
+          isSaving={isSavingGroup}
+          errorMessage={groupsErrorMessage}
+          onClose={() => setGroupPanelOpen(false)}
+          onSave={async (input) => {
+            await onSaveGroup(input);
+          }}
+          onDelete={async (groupId) => {
+            await onDeleteGroup(groupId);
+          }}
+          onZoomToTrees={zoomToTrees}
         />
       )}
 

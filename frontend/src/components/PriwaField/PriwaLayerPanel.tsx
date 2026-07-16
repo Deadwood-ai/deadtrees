@@ -1,5 +1,5 @@
 import { AimOutlined, TableOutlined } from "@ant-design/icons";
-import { Button, Segmented, Switch, Tooltip, Typography } from "antd";
+import { Button, Segmented, Switch, Tag, Tooltip, Typography } from "antd";
 import { useEffect, useRef } from "react";
 
 import type { IPriwaMatchedMosaic } from "./usePriwaMosaicMatches";
@@ -129,6 +129,18 @@ export default function PriwaLayerPanel({
           >
             {matchedMosaics.map((matchedMosaic) => {
               const { mosaic, points } = matchedMosaic;
+              const hasConfirmed = points.some(
+                ({ source }) => source === "confirmed",
+              );
+              const hasSuggestion = points.some(
+                ({ source }) => source === "suggestion",
+              );
+              const associationLabel =
+                hasConfirmed && hasSuggestion
+                  ? "Bestätigt + Vorschlag"
+                  : hasConfirmed
+                    ? "Befallsgruppe bestätigt"
+                    : "Automatischer Vorschlag";
               const isVisible = enabledMosaicIds.has(mosaic.id);
               const isSelected = mosaic.id === selectedMosaicId;
               const isHovered = mosaic.id === hoveredMosaicId;
@@ -172,6 +184,18 @@ export default function PriwaLayerPanel({
                         {points.length} Baum{points.length === 1 ? "" : "e"} ·{" "}
                         {daysApartLabel(matchedMosaic)}
                       </div>
+                      <Tag
+                        className="mt-1"
+                        color={
+                          hasConfirmed && hasSuggestion
+                            ? "blue"
+                            : hasConfirmed
+                              ? "green"
+                              : "gold"
+                        }
+                      >
+                        {associationLabel}
+                      </Tag>
                       <div className="mt-1.5 rounded border border-emerald-100 bg-emerald-50/70 px-2 py-1.5">
                         <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-emerald-800">
                           Zugeordnete Käferbäume
