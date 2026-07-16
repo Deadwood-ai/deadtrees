@@ -15,7 +15,8 @@ import {
   type DteAerialSite,
 } from "../../data/releases";
 import {
-  createOpenFreeMapLibertyLayerGroup,
+  acquireLibertyBasemapGroup,
+  releaseLibertyBasemapGroup,
   createStandardMapControls,
 } from "../../utils/basemaps";
 import { MASK_COLORS } from "./maskRendering";
@@ -72,9 +73,12 @@ export function DteAerialReleaseSiteMap({
       stopEvent: false,
     });
 
+    // Borrowed from the shared pool; returned (not disposed) in cleanup.
+    const basemapGroup = acquireLibertyBasemapGroup();
+
     const map = new OLMap({
       target: mapElementRef.current,
-      layers: [createOpenFreeMapLibertyLayerGroup(), markerLayer],
+      layers: [basemapGroup, markerLayer],
       overlays: [tooltipOverlay],
       controls: createStandardMapControls({
         includeZoom: false,
@@ -133,6 +137,8 @@ export function DteAerialReleaseSiteMap({
 
     return () => {
       map.un("pointermove", handlePointerMove);
+      map.removeLayer(basemapGroup);
+      releaseLibertyBasemapGroup(basemapGroup);
       map.setTarget(undefined);
     };
   }, [sites]);

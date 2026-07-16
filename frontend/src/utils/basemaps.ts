@@ -74,7 +74,7 @@ export const createStandardMapControls = ({
   return new Collection(controls);
 };
 
-export const createOpenFreeMapLibertyLayerGroup = () => {
+const createOpenFreeMapLibertyLayerGroup = () => {
   const libertyLayerGroup = new LayerGroup();
   const streetsFallbackLayer = createOpenStreetMapFallbackLayer();
   const group = new LayerGroup({
@@ -87,6 +87,40 @@ export const createOpenFreeMapLibertyLayerGroup = () => {
   });
 
   return group;
+};
+
+// ol-mapbox-style's apply() permanently registers every layer it styles in a
+// module-level cache (styleFunctionArgs in stylefunction.js) that is never
+// cleaned up and is not reachable through the package's public API. Each call
+// therefore pins the created basemap layer — together with its parsed vector
+// tiles, rendered tile canvases and, via the layer's map back-reference,
+// often the whole disposed map — for the lifetime of the page (~390MB RSS per
+// dataset-archive navigation cycle, measured on production).
+//
+// Instead of creating a fresh Liberty group per map mount, maps borrow one
+// from this pool and hand it back on unmount. apply() then runs once per
+// pooled group ever, so the olms cache stays bounded at the maximum number of
+// simultaneously mounted maps (in practice: 1). Reuse also keeps the style
+// and basemap tile caches warm across navigations.
+const libertyBasemapPool: LayerGroup[] = [];
+
+/**
+ * Borrow a Liberty basemap layer group. Callers MUST detach it from their map
+ * and return it via releaseLibertyBasemapGroup() in their cleanup — disposing
+ * it or its sources would break the next borrower.
+ */
+export const acquireLibertyBasemapGroup = (): LayerGroup => {
+  const group = libertyBasemapPool.pop() ?? createOpenFreeMapLibertyLayerGroup();
+  // Reset state a previous borrower may have left behind.
+  group.setVisible(true);
+  return group;
+};
+
+/** Return a borrowed Liberty basemap group to the pool (idempotent). */
+export const releaseLibertyBasemapGroup = (group: LayerGroup): void => {
+  if (!libertyBasemapPool.includes(group)) {
+    libertyBasemapPool.push(group);
+  }
 };
 
 /**

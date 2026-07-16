@@ -40,7 +40,7 @@ import {
   getTargetGroundSize,
   polygonToBBox,
 } from "../../utils/utm";
-import { createOpenFreeMapLibertyLayerGroup } from "../../utils/basemaps";
+import { acquireLibertyBasemapGroup, releaseLibertyBasemapGroup } from "../../utils/basemaps";
 import { palette } from "../../theme/palette";
 import { mapColors } from "../../theme/mapColors";
 import { getLayerVisibilityState } from "./utils/layerVisibilityState";
@@ -179,7 +179,8 @@ export default function ReferencePatchMap({
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
-    const basemap = createOpenFreeMapLibertyLayerGroup();
+    // Borrowed from the shared pool; returned (not disposed) in cleanup.
+    const basemap = acquireLibertyBasemapGroup();
 
     const vector = new VectorLayer({
       source: new VectorSource(),
@@ -355,6 +356,8 @@ export default function ReferencePatchMap({
     onGetMapRef?.(map);
 
     return () => {
+      map.removeLayer(basemap);
+      releaseLibertyBasemapGroup(basemap);
       map.setTarget(undefined);
       window.removeEventListener("resize", handleResize);
       ro.disconnect();

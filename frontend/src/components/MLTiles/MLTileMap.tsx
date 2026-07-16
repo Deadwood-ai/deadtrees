@@ -27,7 +27,7 @@ import {
   createAOIMaskLayer,
 } from "../DatasetDetailsMap/createVectorLayer";
 import { Settings } from "../../config";
-import { createOpenFreeMapLibertyLayerGroup } from "../../utils/basemaps";
+import { acquireLibertyBasemapGroup, releaseLibertyBasemapGroup } from "../../utils/basemaps";
 import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import { palette } from "../../theme/palette";
 import { polygonToBBox } from "../../utils/utm";
@@ -159,7 +159,8 @@ export default function MLTileMap({
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
-    const basemap = createOpenFreeMapLibertyLayerGroup();
+    // Borrowed from the shared pool; returned (not disposed) in cleanup.
+    const basemap = acquireLibertyBasemapGroup();
 
     const vector = new VectorLayer({
       source: new VectorSource(),
@@ -325,6 +326,8 @@ export default function MLTileMap({
     translateRef.current = translate;
 
     return () => {
+      map.removeLayer(basemap);
+      releaseLibertyBasemapGroup(basemap);
       map.setTarget(undefined);
       window.removeEventListener("resize", handleResize);
       ro.disconnect();

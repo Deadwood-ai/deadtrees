@@ -14,9 +14,9 @@ import { useNavigate } from "react-router-dom";
 import { IDataAccess, IDataset, IDatasetArchiveItem } from "../../types/dataset";
 import parseBBox from "../../utils/parseBBox";
 import {
-  applyOpenFreeMapLibertyStyle,
-  createOpenStreetMapFallbackLayer,
+  acquireLibertyBasemapGroup,
   createStandardMapControls,
+  releaseLibertyBasemapGroup,
 } from "../../utils/basemaps";
 import Style from "ol/style/Style";
 import Fill from "ol/style/Fill";
@@ -350,204 +350,185 @@ const DatasetMapOL = ({
       });
       mapRef.current = map as MapRef;
 
-      let disposed = false;
+      // Borrowed from the shared pool; returned (not disposed) in cleanup. The
+      // group already contains the OSM fallback layer.
+      const basemapGroup = acquireLibertyBasemapGroup();
+      map.getLayers().insertAt(0, basemapGroup);
 
-      void applyOpenFreeMapLibertyStyle(map)
-        .then(() => {
-          if (disposed) return;
+      const vectorSourceExtend = new VectorSource();
+      const vectorLayerExtend = new VectorLayer({
+        source: vectorSourceExtend,
+        minZoom: 9,
+        updateWhileAnimating: false,
+        updateWhileInteracting: false,
+      });
+      vectorLayerExtendRef.current = vectorLayerExtend;
+      map.addLayer(vectorLayerExtend);
 
-          const streetsFallbackLayer = createOpenStreetMapFallbackLayer();
-          map.addLayer(streetsFallbackLayer);
+      const vectorSourceMarker = new VectorSource();
+      const vectorLayerMarker = new VectorLayer({
+        source: vectorSourceMarker,
+        maxZoom: 11,
+        updateWhileAnimating: false,
+        updateWhileInteracting: false,
+      });
+      vectorLayerMarkerRef.current = vectorLayerMarker;
+      map.addLayer(vectorLayerMarker);
+      setMapLayersReady(true);
 
-          const vectorSourceExtend = new VectorSource();
-          const vectorLayerExtend = new VectorLayer({
-            source: vectorSourceExtend,
-            minZoom: 9,
-            updateWhileAnimating: false,
-            updateWhileInteracting: false,
-          });
-          vectorLayerExtendRef.current = vectorLayerExtend;
-          map.addLayer(vectorLayerExtend);
+      const element = document.createElement("div");
+      element.className = "tooltip hidden";
+      const tooltip = new Overlay({
+        element,
+        offset: [0, -50],
+        positioning: "top-center",
+      });
+      map.addOverlay(tooltip);
 
-          const vectorSourceMarker = new VectorSource();
-          const vectorLayerMarker = new VectorLayer({
-            source: vectorSourceMarker,
-            maxZoom: 11,
-            updateWhileAnimating: false,
-            updateWhileInteracting: false,
-          });
-          vectorLayerMarkerRef.current = vectorLayerMarker;
-          map.addLayer(vectorLayerMarker);
-          setMapLayersReady(true);
+      // Store listener references
+      const moveEndListener = () => {
+        const newViewport = {
+          center: map.getView().getCenter() as number[],
+          zoom: map.getView().getZoom() as number,
+        };
+        setDatasetViewport(newViewport);
+        updateVisibleFeatures();
+        if (!hasSeenInitialMoveEndRef.current) {
+          hasSeenInitialMoveEndRef.current = true;
+          return;
+        }
+        if (!hasTrackedInteractionRef.current) {
+          hasTrackedInteractionRef.current = true;
+          onMapInteracted?.();
+        }
+      };
+      map.on("moveend", moveEndListener);
 
-          const element = document.createElement("div");
-          element.className = "tooltip hidden";
-          const tooltip = new Overlay({
-            element,
-            offset: [0, -50],
-            positioning: "top-center",
-          });
-          map.addOverlay(tooltip);
+      mapRef.current!.moveEndListener = moveEndListener;
+      mapRef.current!.tooltip = tooltip;
 
-          // Store listener references
-          const moveEndListener = () => {
-            const newViewport = {
-              center: map.getView().getCenter() as number[],
-              zoom: map.getView().getZoom() as number,
-            };
-            setDatasetViewport(newViewport);
-            updateVisibleFeatures();
-            if (!hasSeenInitialMoveEndRef.current) {
-              hasSeenInitialMoveEndRef.current = true;
-              return;
-            }
-            if (!hasTrackedInteractionRef.current) {
-              hasTrackedInteractionRef.current = true;
-              onMapInteracted?.();
-            }
-          };
-          map.on("moveend", moveEndListener);
+      const pointerMoveListener = (evt: MapBrowserEvent) => {
+        if (evt.dragging) return;
+        const pixel = map.getEventPixel(evt.originalEvent);
 
-          mapRef.current!.moveEndListener = moveEndListener;
-          mapRef.current!.tooltip = tooltip;
+        const hoveredFeature =
+          map.forEachFeatureAtPixel<FeatureLike>(
+            pixel,
+            (feature) => feature,
+            {
+              layerFilter: (layer) =>
+                layer === vectorLayerExtendRef.current || layer === vectorLayerMarkerRef.current,
+            },
+          ) ?? null;
 
-          const pointerMoveListener = (evt: MapBrowserEvent) => {
-            if (evt.dragging) return;
-            const pixel = map.getEventPixel(evt.originalEvent);
+        const nextHoveredId = hoveredFeature ? (hoveredFeature.get("id") as number) : null;
+        const previousHoveredId = hoveredFeatureIdRef.current;
+        hoveredFeatureIdRef.current = transitionDatasetFeatureHover(
+          featuresByIdRef.current,
+          previousHoveredId,
+          nextHoveredId,
+        );
+        if (previousHoveredId !== nextHoveredId) {
+          setHoveredItemRef.current(nextHoveredId);
+        }
 
-            const hoveredFeature =
-              map.forEachFeatureAtPixel<FeatureLike>(
-                pixel,
-                (feature) => feature,
-                {
-                  layerFilter: (layer) =>
-                    layer === vectorLayerExtendRef.current || layer === vectorLayerMarkerRef.current,
-                },
-              ) ?? null;
+        if (hoveredFeature) {
+          const targetElement = map.getTargetElement();
+          if (targetElement) {
+            targetElement.style.cursor = "pointer";
+          }
+          tooltip.setPosition(evt.coordinate);
 
-            const nextHoveredId = hoveredFeature ? (hoveredFeature.get("id") as number) : null;
-            const previousHoveredId = hoveredFeatureIdRef.current;
-            hoveredFeatureIdRef.current = transitionDatasetFeatureHover(
-              featuresByIdRef.current,
-              previousHoveredId,
-              nextHoveredId,
-            );
-            if (previousHoveredId !== nextHoveredId) {
-              setHoveredItemRef.current(nextHoveredId);
-            }
+          const tooltipContent = `
+            <div class="tooltip-content">
+              <div>${hoveredFeature.get("title")} (${hoveredFeature.get("date")})</div>
+            </div>
+          `;
 
-            if (hoveredFeature) {
-              const targetElement = map.getTargetElement();
-              if (targetElement) {
-                targetElement.style.cursor = "pointer";
-              }
-              tooltip.setPosition(evt.coordinate);
+          const tooltipElement = tooltip.getElement();
+          if (tooltipElement) {
+            tooltipElement.innerHTML = tooltipContent;
+            tooltipElement.classList.remove("hidden");
+          }
+        } else {
+          const targetElement = map.getTargetElement();
+          if (targetElement) {
+            targetElement.style.cursor = "";
+          }
+          tooltip.getElement()?.classList.add("hidden");
+        }
+      };
+      map.on("pointermove", pointerMoveListener);
+      mapRef.current!.pointerMoveListener = pointerMoveListener;
 
-              const tooltipContent = `
-                <div class="tooltip-content">
-                  <div>${hoveredFeature.get("title")} (${hoveredFeature.get("date")})</div>
-                </div>
-              `;
+      const selectOnClick = new Select({
+        condition: (event) => event.type === "pointerup",
+        layers: [vectorLayerExtend, vectorLayerMarker],
+      });
 
-              const tooltipElement = tooltip.getElement();
-              if (tooltipElement) {
-                tooltipElement.innerHTML = tooltipContent;
-                tooltipElement.classList.remove("hidden");
-              }
-            } else {
-              const targetElement = map.getTargetElement();
-              if (targetElement) {
-                targetElement.style.cursor = "";
-              }
-              tooltip.getElement()?.classList.add("hidden");
-            }
-          };
-          map.on("pointermove", pointerMoveListener);
-          mapRef.current!.pointerMoveListener = pointerMoveListener;
+      map.addInteraction(selectOnClick);
+      const selectListener = (e: SelectEvent) => {
+        const selectedFeatures = e.selected;
+        if (selectedFeatures.length > 0) {
+          const feature = selectedFeatures[0];
+          const id = feature.get("id");
+          setNavigationSourceRef.current("dataset");
+          navigateRef.current(`/dataset/${id}`);
+        }
+      };
+      selectOnClick.on("select", selectListener);
+      mapRef.current!.selectOnClick = selectOnClick;
+      mapRef.current!.selectListener = selectListener;
 
-          const selectOnClick = new Select({
-            condition: (event) => event.type === "pointerup",
-            layers: [vectorLayerExtend, vectorLayerMarker],
-          });
-
-          map.addInteraction(selectOnClick);
-          const selectListener = (e: SelectEvent) => {
-            const selectedFeatures = e.selected;
-            if (selectedFeatures.length > 0) {
-              const feature = selectedFeatures[0];
-              const id = feature.get("id");
-              setNavigationSourceRef.current("dataset");
-              navigateRef.current(`/dataset/${id}`);
-            }
-          };
-          selectOnClick.on("select", selectListener);
-          mapRef.current!.selectOnClick = selectOnClick;
-          mapRef.current!.selectListener = selectListener;
-
-          requestAnimationFrame(() => {
-            map.updateSize();
-          });
-        })
-        .catch((error) => {
-          console.error("Failed to initialize OpenFreeMap Liberty on dataset map", error);
-        });
+      requestAnimationFrame(() => {
+        map.updateSize();
+      });
 
       return () => {
-        disposed = true;
-
-        if (mapRef.current) {
-          const map = mapRef.current;
-
-          if (map.selectOnClick && map.selectListener) {
-            map.selectOnClick.un("select", map.selectListener);
-            map.selectOnClick.dispose();
-          }
-
-          if (map.tooltip) {
-            map.removeOverlay(map.tooltip);
-            map.tooltip.dispose();
-          }
-
-          vectorLayerExtendRef.current?.getSource()?.dispose();
-          vectorLayerMarkerRef.current?.getSource()?.dispose();
-
-          vectorLayerExtendRef.current?.dispose();
-          vectorLayerMarkerRef.current?.dispose();
-
-          if (map.moveEndListener) {
-            map.un("moveend", map.moveEndListener);
-          }
-          if (map.pointerMoveListener) {
-            map.un("pointermove", map.pointerMoveListener);
-          }
-
-          if (map.tooltip) {
-            map.removeOverlay(map.tooltip);
-          }
-
-          map.getLayers().forEach((layer) => {
-            if (!layer) return;
-
-            const source = (layer as { getSource?: () => { dispose?: () => void } | null }).getSource?.();
-            if (source?.dispose) {
-              source.dispose();
-            }
-            map.removeLayer(layer);
-          });
-
-          map.getControls().clear();
-          map.getInteractions().clear();
-          map.getOverlays().clear();
-          map.setTarget(undefined);
-
-          mapRef.current = null;
-          vectorLayerExtendRef.current = null;
-          vectorLayerMarkerRef.current = null;
-          setMapLayersReady(false);
-        } else {
-          map.setTarget(undefined);
-          map.dispose();
+        const mapWithRefs = map as MapRef;
+        if (mapWithRefs.selectOnClick && mapWithRefs.selectListener) {
+          mapWithRefs.selectOnClick.un("select", mapWithRefs.selectListener);
+          map.removeInteraction(mapWithRefs.selectOnClick);
+          mapWithRefs.selectOnClick.dispose();
         }
+
+        if (mapWithRefs.moveEndListener) {
+          map.un("moveend", mapWithRefs.moveEndListener);
+        }
+        if (mapWithRefs.pointerMoveListener) {
+          map.un("pointermove", mapWithRefs.pointerMoveListener);
+        }
+
+        if (mapWithRefs.tooltip) {
+          map.removeOverlay(mapWithRefs.tooltip);
+          mapWithRefs.tooltip.dispose();
+        }
+
+        // Hand the pooled basemap back untouched — never dispose it.
+        map.removeLayer(basemapGroup);
+        releaseLibertyBasemapGroup(basemapGroup);
+
+        for (const layer of [vectorLayerExtend, vectorLayerMarker]) {
+          map.removeLayer(layer);
+          const source = layer.getSource();
+          source?.clear();
+          source?.dispose();
+          layer.dispose();
+        }
+
+        // Detach anything left so no layer keeps a back-reference to the map,
+        // then dispose the map itself.
+        map.getLayers().clear();
+        map.getControls().clear();
+        map.getInteractions().clear();
+        map.getOverlays().clear();
+        map.setTarget(undefined);
+        map.dispose();
+
+        mapRef.current = null;
+        vectorLayerExtendRef.current = null;
+        vectorLayerMarkerRef.current = null;
+        setMapLayersReady(false);
       };
     }
     // OpenLayers map initialization is mounted once; mutable refs keep viewport and callbacks current.

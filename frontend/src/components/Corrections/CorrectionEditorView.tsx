@@ -26,7 +26,7 @@ import { useAuth } from "../../hooks/useAuthProvider";
 import { createDeadwoodVectorLayer, createForestCoverVectorLayer } from "../DatasetDetailsMap/createVectorLayer";
 import { useDatasetLabelTypes } from "../../hooks/useDatasetLabelTypes";
 import { useDatasetDetailsMap } from "../../hooks/useDatasetDetailsMapProvider";
-import { createOpenFreeMapLibertyLayerGroup, createStandardMapControls } from "../../utils/basemaps";
+import { acquireLibertyBasemapGroup, releaseLibertyBasemapGroup, createStandardMapControls } from "../../utils/basemaps";
 import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import { hasForestCoverPredictionOutput } from "../../utils/predictionAvailability";
 
@@ -111,7 +111,8 @@ export default function CorrectionEditorView({ dataset, initialLayerType, onClos
 
     orthoLayerRef.current = orthoCogLayer;
 
-    const basemapLayer = createOpenFreeMapLibertyLayerGroup();
+    // Borrowed from the shared pool; returned (not disposed) in cleanup.
+    const basemapLayer = acquireLibertyBasemapGroup();
 
     // Create vector layers for visualization (read-only when not editing)
     // Enable correction styling to show pending/approved/deleted with different colors
@@ -166,6 +167,9 @@ export default function CorrectionEditorView({ dataset, initialLayerType, onClos
     }
 
     return () => {
+      // Hand the pooled basemap back untouched before the dispose loop below.
+      mapRef.current?.removeLayer(basemapLayer);
+      releaseLibertyBasemapGroup(basemapLayer);
       if (mapRef.current) {
         // Properly dispose layers and sources before disposing map
         mapRef.current.getLayers().forEach((layer) => {

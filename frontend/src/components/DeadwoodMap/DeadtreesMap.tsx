@@ -46,7 +46,8 @@ import {
 } from "../../utils/getDeadwoodCOGUrl";
 import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import {
-  createOpenFreeMapLibertyLayerGroup,
+  acquireLibertyBasemapGroup,
+  releaseLibertyBasemapGroup,
   createStandardMapControls,
   getCachedWaybackSource,
   DEFAULT_WAYBACK_RELEASE,
@@ -424,7 +425,8 @@ const DeadtreesMap = () => {
         center: DeadwoodMapViewport.center,
         zoom: DeadwoodMapViewport.zoom,
       });
-      const libertyBasemapLayer = createOpenFreeMapLibertyLayerGroup();
+      // Borrowed from the shared pool; returned (not disposed) in cleanup.
+      const libertyBasemapLayer = acquireLibertyBasemapGroup();
       libertyBasemapLayer.setVisible(DeadwoodMapStyle === "streets-v12");
 
       // Initialize with Wayback satellite imagery directly (using default release)
@@ -611,6 +613,12 @@ const DeadtreesMap = () => {
         clickedCellLayerRef.current.getSource()?.clear();
         clickedCellLayerRef.current.setSource(null);
         clickedCellLayerRef.current = null;
+      }
+
+      if (libertyBasemapLayerRef.current) {
+        currentMap?.removeLayer(libertyBasemapLayerRef.current);
+        releaseLibertyBasemapGroup(libertyBasemapLayerRef.current);
+        libertyBasemapLayerRef.current = null;
       }
 
       mapRef.current?.setTarget(undefined);
