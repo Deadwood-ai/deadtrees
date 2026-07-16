@@ -1,5 +1,5 @@
 import pytest
-from shared.db import use_client, login
+from shared.db import use_client, use_service_client, login
 from shared.settings import settings
 import uuid
 from shared.testing.fixtures import test_processor_user
@@ -159,6 +159,104 @@ def test_non_privileged_user_sees_nothing(setup_privileged_users, test_user2):
 	with use_client(user2_token) as client:
 		response = client.table('privileged_users').select('*').execute()
 		assert len(response.data) == 0
+
+
+def test_authenticated_user_cannot_promote_themselves(setup_privileged_users, test_user2):
+	"""Authorization assignments can only be written by the processor/service role."""
+	user_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+
+	with use_client(user_token) as client:
+		with pytest.raises(Exception, match='row-level security'):
+			client.table('privileged_users').insert(
+				{
+					'user_id': test_user2,
+					'can_upload_private': True,
+					'can_view_all_private': True,
+					'can_audit': True,
+				}
+			).execute()
+
+	processor_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD, use_cached_session=False)
+	with use_client(processor_token) as client:
+		response = client.table('privileged_users').select('id').eq('user_id', test_user2).execute()
+		assert response.data == []
+
+
+def test_non_auditor_cannot_write_search_query_log(setup_privileged_users, test_user2):
+	"""Best-effort query analytics remain restricted to auditors."""
+	user_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+
+	with use_client(user_token) as client:
+		with pytest.raises(Exception, match='row-level security'):
+			client.table('v2_search_queries').insert(
+				{'query': 'bypass attempt', 'user_id': test_user2}
+			).execute()
+
+
+def test_auditor_can_log_and_read_successful_search(setup_privileged_users):
+	"""The browser may record a successful search attributed to its auditor."""
+	row_id = None
+	try:
+		user_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
+		with use_client(user_token) as client:
+			response = client.table('v2_search_queries').insert(
+				{'query': 'standing dead trees'}
+			).execute()
+			row_id = response.data[0]['id']
+			response = client.table('v2_search_queries').select('*').eq('id', row_id).execute()
+			assert len(response.data) == 1
+			assert response.data[0]['query'] == 'standing dead trees'
+			assert response.data[0]['user_id'] == setup_privileged_users['test_user_id']
+	finally:
+		if row_id is not None:
+			with use_service_client() as client:
+				client.table('v2_search_queries').delete().eq('id', row_id).execute()
+
+
+def test_search_rpcs_reject_anonymous_and_non_auditor_callers(
+	setup_privileged_users_with_limited_permissions,
+):
+	"""Temporary rollout authorization is enforced by PostgreSQL, not only the UI."""
+	embedding = '[' + ','.join(['1'] + ['0'] * 1023) + ']'
+
+	with use_client() as client:
+		with pytest.raises(Exception, match='permission denied for function search_datasets_by_embedding'):
+			client.rpc(
+				'search_datasets_by_embedding',
+				{'query_embedding': embedding, 'match_count': 1},
+			).execute()
+
+	non_auditor_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
+	with use_client(non_auditor_token) as client:
+		with pytest.raises(Exception, match='AI search is restricted to auditors'):
+			client.rpc(
+				'search_datasets_by_embedding',
+				{'query_embedding': embedding, 'match_count': 1},
+			).execute()
+		with pytest.raises(Exception, match='AI search is restricted to auditors'):
+			client.rpc(
+				'search_tiles_by_embedding',
+				{'query_embedding': embedding, 'p_dataset_id': 999999999, 'match_count': 1},
+			).execute()
+
+
+def test_search_rpcs_allow_auditors(setup_privileged_users_with_limited_permissions):
+	"""Auditors retain direct-RPC access for both search surfaces."""
+	embedding = '[' + ','.join(['1'] + ['0'] * 1023) + ']'
+	auditor_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+
+	with use_client(auditor_token) as client:
+		datasets = client.rpc(
+			'search_datasets_by_embedding',
+			{'query_embedding': embedding, 'match_count': 1},
+		).execute()
+		tiles = client.rpc(
+			'search_tiles_by_embedding',
+			{'query_embedding': embedding, 'p_dataset_id': 999999999, 'match_count': 1},
+		).execute()
+
+	assert isinstance(datasets.data, list)
+	assert tiles.data == []
 
 
 def test_new_columns_are_set_correctly(setup_privileged_users):

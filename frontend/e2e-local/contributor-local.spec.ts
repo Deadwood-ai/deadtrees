@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { installLocalSession } from "./support/localAuth";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rgbGeoTiffFixture = path.resolve(
@@ -10,70 +11,21 @@ const rgbGeoTiffFixture = path.resolve(
 );
 
 const localSupabaseUrl =
-  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "http://127.0.0.1:54321";
-const localApiUrl = process.env.VITE_LOCAL_API_URL || "http://localhost:8080/api/v1";
+  process.env.VITE_SUPABASE_URL ||
+  process.env.SUPABASE_URL ||
+  "http://127.0.0.1:54321";
+const localApiUrl =
+  process.env.VITE_LOCAL_API_URL || "http://localhost:8080/api/v1";
 const contributor = {
   id: "00000000-0000-4000-8000-000000000001",
   email: "contributor-local-e2e@example.com",
 };
 
-const createUnsignedJwt = (payload: Record<string, unknown>) => {
-  const encode = (value: Record<string, unknown>) =>
-    Buffer.from(JSON.stringify(value)).toString("base64url");
-
-  return [
-    encode({ alg: "none", typ: "JWT" }),
-    encode({
-      aud: "authenticated",
-      role: "authenticated",
-      sub: contributor.id,
-      email: contributor.email,
-      exp: Math.floor(Date.now() / 1000) + 60 * 60,
-      ...payload,
-    }),
-    "local-e2e",
-  ].join(".");
-};
-
-const createLocalSession = () => {
-  const accessToken = createUnsignedJwt({});
-  const now = new Date().toISOString();
-
-  return {
-    access_token: accessToken,
-    token_type: "bearer",
-    expires_in: 3600,
-    expires_at: Math.floor(Date.now() / 1000) + 3600,
-    refresh_token: "local-e2e-refresh-token",
-    user: {
-      id: contributor.id,
-      aud: "authenticated",
-      role: "authenticated",
-      email: contributor.email,
-      email_confirmed_at: now,
-      app_metadata: { provider: "email", providers: ["email"] },
-      user_metadata: {},
-      created_at: now,
-      updated_at: now,
-    },
-  };
-};
-
 const installAuthenticatedContributor = async (page: Page) => {
-  const session = createLocalSession();
-
-  await page.addInitScript((localSession) => {
-    window.localStorage.setItem(
-      "sb-127-auth-token",
-      JSON.stringify(localSession),
-    );
-  }, session);
-
-  await page.route(`${localSupabaseUrl}/auth/v1/user`, async (route) => {
-    await route.fulfill({
-      contentType: "application/json",
-      json: session.user,
-    });
+  await installLocalSession(page, {
+    user: contributor,
+    supabaseUrl: localSupabaseUrl,
+    refreshToken: "local-e2e-refresh-token",
   });
 
   await page.route(`${localSupabaseUrl}/rest/v1/**`, async (route) => {
@@ -227,9 +179,11 @@ test.describe("contributor local e2e", () => {
           "cog",
           "thumbnail",
           "metadata",
+          "aoi_v1",
           "deadwood_v1",
           "treecover_v1",
           "deadwood_treecover_combined_v2",
+          "embeddings_v1",
         ],
         priority: 4,
       });
