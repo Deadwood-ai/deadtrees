@@ -1,9 +1,13 @@
 from pathlib import Path
 
+import pytest
+
 from shared.logging import LogContext, LogCategory
 from shared.settings import settings
 
 from processor.src.utils.local_ortho import ensure_local_ortho
+
+pytestmark = pytest.mark.unit
 
 
 def test_ensure_local_ortho_prefers_existing_local_file(tmp_path, monkeypatch):
