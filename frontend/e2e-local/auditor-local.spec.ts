@@ -351,6 +351,12 @@ const fulfillSupabaseRequest = async (
       return;
     }
 
+    if (resource === "v2_aois" && savedAoiPayloads.length > 0) {
+      const latestAoi = savedAoiPayloads.at(-1);
+      await fulfillJson(route, wantsObject ? latestAoi : [latestAoi]);
+      return;
+    }
+
     await fulfillJson(route, wantsObject ? null : []);
     return;
   }
