@@ -50,6 +50,32 @@ create trigger normalize_legacy_processor_aoi_source
   for each row
   execute function public.normalize_legacy_processor_aoi_source();
 
+create or replace function public.enforce_aoi_identity_immutable()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if new.dataset_id is distinct from old.dataset_id
+    or new.user_id is distinct from old.user_id
+    or new.source is distinct from old.source
+    or new.corrected_from_aoi_id is distinct from old.corrected_from_aoi_id
+  then
+    raise exception 'AOI ownership and provenance fields are immutable'
+      using errcode = '42501';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists enforce_aoi_identity_immutable on public.v2_aois;
+create trigger enforce_aoi_identity_immutable
+  before update on public.v2_aois
+  for each row
+  execute function public.enforce_aoi_identity_immutable();
+
 create index if not exists idx_aois_dataset_source_created_at
   on public.v2_aois(dataset_id, source, created_at desc);
 

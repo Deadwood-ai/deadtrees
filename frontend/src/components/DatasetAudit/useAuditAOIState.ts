@@ -3,8 +3,7 @@ import { message } from "antd";
 
 import { useDatasetAOI, useSaveDatasetAOI } from "../../hooks/useDatasetAudit";
 import type { AOIToolbarState } from "../DatasetDetailsMap/hooks/useAOIEditor";
-
-type AOIGeometry = GeoJSON.MultiPolygon | GeoJSON.Polygon;
+import { type AOIGeometry, reconcileAOISave } from "./aoiSaveReconciliation";
 
 const EMPTY_TOOLBAR_STATE: AOIToolbarState = {
 	isDrawing: false,
@@ -81,7 +80,6 @@ export function useAuditAOIState(datasetId: number) {
 			message.warning("Draw an AOI before saving it.");
 			return;
 		}
-
 		try {
 			const savedAOI = await saveAOI({
 				dataset_id: datasetId,
@@ -90,10 +88,19 @@ export function useAuditAOIState(datasetId: number) {
 			});
 			const savedGeometry = savedAOI.geometry as AOIGeometry;
 			savedGeometryRef.current = savedGeometry;
-			currentGeometryRef.current = savedGeometry;
-			setHasAOI(true);
-			setIsDirty(false);
-			message.success("AOI saved");
+			const reconciliation = reconcileAOISave(
+				currentGeometryRef.current,
+				geometry,
+				savedGeometry,
+			);
+			currentGeometryRef.current = reconciliation.currentGeometry;
+			setHasAOI(!!reconciliation.currentGeometry);
+			setIsDirty(reconciliation.isDirty);
+			message.success(
+				reconciliation.hasNewerEdits
+					? "AOI saved. Newer edits remain unsaved."
+					: "AOI saved"
+			);
 		} catch (error) {
 			console.error("Failed to save AOI:", error);
 			message.error("Failed to save AOI");
