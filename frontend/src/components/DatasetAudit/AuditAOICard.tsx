@@ -61,6 +61,7 @@ export default function AuditAOICard({
 							icon={<PlusOutlined />}
 							onClick={() => mapRef.current?.startDrawing()}
 							size="small"
+							disabled={isSaving}
 						>
 							Draw AOI Polygon
 						</Button>
@@ -82,6 +83,7 @@ export default function AuditAOICard({
 								icon={<EditOutlined />}
 								onClick={() => mapRef.current?.startEditing()}
 								size="small"
+								disabled={isSaving}
 							>
 								Edit
 							</Button>
@@ -89,6 +91,7 @@ export default function AuditAOICard({
 								icon={<PlusOutlined />}
 								onClick={() => mapRef.current?.addAnotherPolygon()}
 								size="small"
+								disabled={isSaving}
 							>
 								Add
 							</Button>
@@ -96,6 +99,7 @@ export default function AuditAOICard({
 								icon={<DeleteOutlined />}
 								onClick={() => mapRef.current?.deleteAOI()}
 								size="small"
+								disabled={isSaving}
 								danger
 							>
 								Clear Draft
@@ -172,6 +176,7 @@ export default function AuditAOICard({
 							icon={<UndoOutlined />}
 							onClick={() => mapRef.current?.undoAOIChange()}
 							size="small"
+							disabled={isSaving}
 						>
 							Undo AOI Change
 						</Button>

@@ -5,7 +5,7 @@ alter table public.v2_aois
   add column if not exists source text not null default 'manual';
 
 alter table public.v2_aois
-  add column if not exists corrected_from_aoi_id bigint references public.v2_aois(id) on delete set null;
+  add column if not exists corrected_from_aoi_id bigint references public.v2_aois(id) on delete restrict;
 
 alter table public.v2_aois
   drop constraint if exists v2_aois_source_check;
