@@ -70,3 +70,27 @@ updates:
     groups:
       actions-all:
         patterns: ["*"]
+
+  # Python services and developer CLI
+  - package-ecosystem: "pip"
+    directories:
+      - "/api"
+      - "/processor"
+      - "/deadtrees-cli"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-patch-minor:
+        update-types: ["patch", "minor"]
+
+  # Pinned GDAL runtime images
+  - package-ecosystem: "docker"
+    directories:
+      - "/api"
+      - "/processor"
+    schedule:
+      interval: "weekly"
+    groups:
+      service-base-images:
+        patterns: ["*"]

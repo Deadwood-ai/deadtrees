@@ -1,2 +1,4 @@
 pytest
 debugpy
+# Starlette 1.x TestClient backend; production outbound calls still use httpx.
+httpx2>=2.7,<3

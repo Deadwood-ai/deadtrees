@@ -7,7 +7,8 @@ python-dotenv
 python-multipart
 supabase
 gotrue
-rasterio==1.4.2
+numpy>=2,<2.5
+rasterio==1.5.0
 rio-cogeo
 fire
 overpy
@@ -18,7 +19,6 @@ aiofiles
 boto3
 httpx
 tqdm
-fastapi[testclient]
 pyarrow
 fiona
 pillow

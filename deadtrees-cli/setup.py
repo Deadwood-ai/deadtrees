@@ -19,7 +19,7 @@ setup(
 		'pydantic>=2.0.0',
 		'shapely>=2.0.0',
 		'geopandas>=0.13.0',
-		'rasterio>=1.4.2',
+		'rasterio>=1.5.0',
 		'pydantic-geojson==0.2.0',
 		'supabase>=1.0.3',
 		'pydantic-partial>=0.3.1',

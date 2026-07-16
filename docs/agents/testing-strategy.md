@@ -166,7 +166,18 @@ processing-server validation lane.
 
 Production Docker targets install only runtime dependencies. The `test` targets
 add `requirements-test.txt`, test sources, pytest configuration, and debugger
-support for local and CI validation.
+support for local and CI validation. Both targets run `pip check` during the
+image build so incompatible dependency resolutions fail before tests or deploys.
+The API installs geospatial Python packages from `api/requirements.txt` instead
+of inheriting hidden Python packages from the GDAL base image.
+
+Dependabot monitors the API, processor, and CLI Python manifests as well as the
+pinned API and processor base images. Keep compatibility-sensitive packages
+explicitly constrained in their service manifest so update PRs exercise the
+relevant CI lane. NumPy is temporarily constrained below 2.5 because Rasterio
+1.5 still uses the ndarray shape-mutation path deprecated in NumPy 2.5; remove
+that upper bound only after the processor geospatial tests run without those
+warnings.
 
 Keep authenticated contributor journeys out of the production-read Playwright
 suite. Use the local contributor smoke when a frontend change touches upload,

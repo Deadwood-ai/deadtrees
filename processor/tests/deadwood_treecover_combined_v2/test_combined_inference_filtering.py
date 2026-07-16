@@ -21,7 +21,7 @@ def test_filter_polygons_simplifies(monkeypatch):
 	"""_filter_polygons applies VW simplification + Chaikin smoothing: vertex counts
 	drop while the feature is preserved and reprojected."""
 	# Dense circle (~1024 vertices, ~6cm spacing) so VW 0.0625m² reduces it.
-	polygon = Point(0, 0).buffer(10, resolution=256)
+	polygon = Point(0, 0).buffer(10, quad_segs=256)
 	inference_crs = CRS.from_epsg(32634)
 	orig_crs = CRS.from_epsg(4326)
 
@@ -48,7 +48,7 @@ def test_filter_polygons_simplifies(monkeypatch):
 def test_filter_polygons_preserves_feature_count_when_vw_is_aggressive(monkeypatch):
 	"""Even with an area threshold far larger than the polygon, the feature is never
 	silently dropped (it falls back to the original on collapse)."""
-	polygon = Point(0, 0).buffer(10, resolution=128)
+	polygon = Point(0, 0).buffer(10, quad_segs=128)
 
 	monkeypatch.setattr(combined_inference, 'reproject_polygons', lambda polys, s, d: polys)
 	monkeypatch.setattr(combined_inference, 'VW_AREA_THRESHOLD', 1e6)
@@ -62,8 +62,8 @@ def test_filter_polygons_preserves_feature_count_when_vw_is_aggressive(monkeypat
 
 def test_simplify_and_smooth_preserves_holes():
 	"""A polygon with a sizeable hole keeps its hole through VW + Chaikin."""
-	exterior = Point(0, 0).buffer(10, resolution=128)
-	hole = Point(0, 0).buffer(3, resolution=128)
+	exterior = Point(0, 0).buffer(10, quad_segs=128)
+	hole = Point(0, 0).buffer(3, quad_segs=128)
 	polygon = Polygon(exterior.exterior.coords, [hole.exterior.coords])
 
 	result = combined_inference._simplify_and_smooth(polygon)
@@ -76,7 +76,7 @@ def test_simplify_and_smooth_preserves_holes():
 def test_simplify_and_smooth_returns_polygons():
 	"""Output geometries are always Polygons (never Multi*), matching the
 	one-Polygon-in / list-of-Polygons-out contract downstream relies on."""
-	polygon = Point(0, 0).buffer(10, resolution=256)
+	polygon = Point(0, 0).buffer(10, quad_segs=256)
 
 	result = combined_inference._simplify_and_smooth(polygon)
 
