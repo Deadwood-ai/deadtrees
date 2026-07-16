@@ -9,7 +9,7 @@ from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask, AOI
 
 from processor.src.process_aoi_segmentation import process_aoi_segmentation
-from processor.src.aoi_segmentation_v1.predict_aoi import AUTO_AOI_NOTES
+from processor.src.aoi_segmentation_v1.predict_aoi import AUTO_AOI_NOTES, _aoi_insert_payload
 from processor.src.aoi_segmentation_v1.inference.aoi_inference import cleanup_aoi_polygon, _clip_prediction_tile
 
 MODEL_PATH = str(Path(__file__).parent.parent.parent / 'assets' / 'models' / 'b1_50epoch_best_macro_f1.safetensors')
@@ -56,6 +56,41 @@ def test_aoi_model_loads():
 	with torch.no_grad():
 		logits = model.model(pixel_values=dummy).logits
 	assert logits.shape[1] == 2  # binary: outside_aoi, inside_aoi
+
+
+@pytest.mark.unit
+def test_aoi_insert_payload_remains_compatible_with_pre_provenance_schema():
+	aoi = AOI(
+		dataset_id=1,
+		user_id='00000000-0000-0000-0000-000000000001',
+		geometry={'type': 'MultiPolygon', 'coordinates': []},
+		is_whole_image=False,
+		source='ml_prediction',
+	)
+
+	payload = _aoi_insert_payload(aoi)
+
+	assert 'source' not in payload
+	assert 'corrected_from_aoi_id' not in payload
+
+
+def test_legacy_processor_aoi_insert_is_recorded_as_prediction(aoi_task, auth_token):
+	"""Processors deployed before AOI provenance can still insert predictions."""
+	legacy_aoi = {
+		'dataset_id': aoi_task.dataset_id,
+		'user_id': aoi_task.user_id,
+		'geometry': {
+			'type': 'MultiPolygon',
+			'coordinates': [[[[13.405, 52.52], [13.405, 52.521], [13.406, 52.521], [13.406, 52.52], [13.405, 52.52]]]],
+		},
+		'is_whole_image': False,
+		'notes': AUTO_AOI_NOTES,
+	}
+
+	with use_client(auth_token) as client:
+		response = client.table(settings.aois_table).insert(legacy_aoi).execute()
+
+	assert response.data[0]['source'] == 'ml_prediction'
 
 
 @pytest.mark.unit
