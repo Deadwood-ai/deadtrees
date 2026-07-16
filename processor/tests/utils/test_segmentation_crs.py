@@ -1,4 +1,8 @@
+import pytest
+
 from processor.src.utils.crs import get_utm_string_from_latlon
+
+pytestmark = pytest.mark.unit
 
 
 def test_get_utm_string_from_latlon_uses_northern_epsg_codes():

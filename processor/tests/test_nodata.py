@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 import rasterio
 import rasterio.enums as CI
+from rasterio.errors import NodataShadowWarning
 from rasterio.transform import from_origin
 
 from rasterio.windows import Window
@@ -313,7 +314,8 @@ def test_e2e_alpha_band(tmp_path):
 	path = _write(tmp_path / 'alpha.tif', np.concatenate([rgb, alpha]), alpha=True)
 	vrt = image_reprojector(path)
 	try:
-		_assert_left_nodata_right_data(read_nodata_mask(vrt), left, right)
+		with pytest.warns(NodataShadowWarning):
+			_assert_left_nodata_right_data(read_nodata_mask(vrt), left, right)
 	finally:
 		vrt.close()
 

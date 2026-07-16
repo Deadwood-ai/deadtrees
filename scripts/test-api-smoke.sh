@@ -55,7 +55,13 @@ api_smoke_tests=(
 	api/tests/db/test_dataset_audit.py
 	api/tests/db/test_dataset_edit_history.py
 	api/tests/db/test_data_publication.py
+	api/tests/db/test_process_priority.py
+	api/tests/db/test_odm_database.py
+	api/tests/db/test_priwa_field_schema.py
 	api/tests/test_notifications.py
+	api/tests/test_search_embed.py
+	api/tests/test_export_reference_patches.py
+	shared/tests
 )
 
 docker compose -f docker-compose.test.yaml exec -T api-test \

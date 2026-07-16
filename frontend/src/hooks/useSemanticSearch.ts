@@ -1,63 +1,74 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo } from "react";
+import { skipToken, useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 
 import { searchDatasets } from "../api/searchEmbeddings";
-
-export interface SemanticSearchState {
-  /** The query that produced the current results (null when inactive). */
-  query: string | null;
-  /** dataset_id -> best tile similarity (0..1), ordered by relevance. */
-  scores: Map<number, number> | null;
-  /** dataset_ids ordered most-relevant first. */
-  rankedIds: number[] | null;
-  loading: boolean;
-  error: string | null;
-  run: (query: string) => Promise<void>;
-  clear: () => void;
-}
+import { useAuth } from "./useAuthProvider";
 
 /**
- * Open-vocabulary dataset ranking. Coexists with the existing text filter: when
- * a query is active the caller restricts + reorders the dataset list by score.
+ * URL-backed semantic dataset search.
+ *
+ * The URL is the durable UI state; React Query owns request lifecycle, cache,
+ * and account-specific server state. Old requests cannot overwrite a newer
+ * query because each query/user pair has an independent cache key.
  */
-export function useSemanticSearch(): SemanticSearchState {
-  const [query, setQuery] = useState<string | null>(null);
-  const [scores, setScores] = useState<Map<number, number> | null>(null);
-  const [rankedIds, setRankedIds] = useState<number[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+export function useSemanticSearch(enabled: boolean) {
+  const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlQuery = searchParams.get("q")?.trim() || null;
+  const query = enabled ? urlQuery : null;
+  const actorKey = user?.id ?? "anonymous";
 
-  const run = useCallback(async (q: string) => {
-    const trimmed = q.trim();
-    if (!trimmed) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const results = await searchDatasets(trimmed);
-      const scoreMap = new Map<number, number>();
-      const ids: number[] = [];
-      for (const r of results) {
-        scoreMap.set(r.dataset_id, r.similarity);
-        ids.push(r.dataset_id);
+  const {
+    data,
+    error,
+    isFetching,
+    refetch,
+  } = useQuery({
+    queryKey: ["semantic-search", actorKey, query],
+    queryFn: query ? () => searchDatasets(query) : skipToken,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const scores = useMemo(() => {
+    if (!query || !data) return null;
+    return new Map(
+      data.map((result) => [result.dataset_id, result.similarity]),
+    );
+  }, [query, data]);
+
+  const run = useCallback(
+    (value: string) => {
+      const nextQuery = value.trim();
+      if (!nextQuery) return;
+      if (nextQuery === query) {
+        void refetch();
+        return;
       }
-      setScores(scoreMap);
-      setRankedIds(ids);
-      setQuery(trimmed);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Search failed");
-      setScores(null);
-      setRankedIds(null);
-      setQuery(null);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current);
+        next.set("q", nextQuery);
+        return next;
+      });
+    },
+    [query, refetch, setSearchParams],
+  );
 
   const clear = useCallback(() => {
-    setQuery(null);
-    setScores(null);
-    setRankedIds(null);
-    setError(null);
-  }, []);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete("q");
+      return next;
+    });
+  }, [setSearchParams]);
 
-  return { query, scores, rankedIds, loading, error, run, clear };
+  return {
+    query,
+    scores,
+    loading: isFetching,
+    error: error instanceof Error ? error.message : null,
+    run,
+    clear,
+  };
 }

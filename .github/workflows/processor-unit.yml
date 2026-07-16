@@ -1,0 +1,49 @@
+name: Processor Unit
+
+on:
+  pull_request:
+    paths:
+      - "processor/**"
+      - "shared/**"
+      - "pytest.ini"
+      - ".dockerignore"
+      - ".github/workflows/processor-unit.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  processor-unit:
+    name: processor-unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build processor test image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./processor/Dockerfile
+          target: test
+          load: true
+          tags: deadtrees-processor-test:ci
+          build-args: |
+            TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+          cache-from: type=gha,scope=processor-unit
+          cache-to: type=gha,mode=max,scope=processor-unit
+
+      - name: Run CPU-safe processor unit tests
+        run: |
+          cp .env.example .env
+          docker run --rm \
+            --env-file .env \
+            --env PYTHONPATH=/app \
+            deadtrees-processor-test:ci \
+            python -m pytest -q -m unit processor/tests

@@ -18,6 +18,8 @@ from processor.src.utils.geometry_validation import (
 	filter_degenerate_geometries,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestValidateAndFixPolygon:
 	"""Test single polygon validation and fixing"""
