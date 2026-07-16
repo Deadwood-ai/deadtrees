@@ -205,12 +205,14 @@ export function useSaveDatasetAOI() {
       }
 
       // Check if AOI already exists for this dataset
-      const { data: existingAOI } = await supabase
+      const { data: existingAOI, error: existingAOIError } = await supabase
         .from("v2_aois")
         .select("id,user_id,source,corrected_from_aoi_id")
         .eq("dataset_id", aoiData.dataset_id)
         .order("created_at", { ascending: false })
         .limit(1);
+
+      if (existingAOIError) throw existingAOIError;
 
       let result;
       const latestAOI = existingAOI?.[0];

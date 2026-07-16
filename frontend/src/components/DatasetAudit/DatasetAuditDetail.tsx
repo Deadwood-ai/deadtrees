@@ -20,9 +20,9 @@ import {
 	PredictionQualityCard,
 	COGQualityCard,
 	ThumbnailCard,
-	AOICard,
 	FinalAssessmentCard,
 } from "./AuditStepCards";
+import AuditAOICard from "./AuditAOICard";
 import AuditMapWithControls, { AuditMapWithControlsHandle } from "./AuditMapWithControls";
 import { MAP_AUDIT_SIDEBAR_WIDTH_CLASS, MAP_FLOATING_TOP_CLASS } from "../../theme/mapLayout";
 import { resolveDownloadUrl } from "../../utils/downloadUrl";
@@ -334,7 +334,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 
 						<ThumbnailCard thumbnailUrl={thumbnailUrl} />
 
-						<AOICard
+						<AuditAOICard
 							aoiToolbarState={aoiToolbarState}
 							mapRef={mapRef}
 							isDirty={isAOIDirty}

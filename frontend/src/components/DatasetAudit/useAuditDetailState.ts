@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Form, message, notification } from "antd";
 import confetti from "canvas-confetti";
@@ -11,8 +11,6 @@ import {
 	useClearAuditLock,
 	useOrthoMetadata,
 	useMarkAsReviewed,
-	useDatasetAOI,
-	useSaveDatasetAOI,
 } from "../../hooks/useDatasetAudit";
 import { useAuth } from "../../hooks/useAuthProvider";
 import { useDownload } from "../../hooks/useDownloadProvider";
@@ -23,7 +21,7 @@ import { usePhenologyData } from "../../hooks/usePhenologyData";
 import { useSeasonPrompt } from "../../hooks/useSeasonPrompt";
 import { supabase } from "../../hooks/useSupabase";
 import { trackAppEvent } from "../../utils/analytics";
-import { AOIToolbarState } from "../DatasetDetailsMap/DatasetDetailsMap";
+import { useAuditAOIState } from "./useAuditAOIState";
 
 export interface UseAuditDetailStateProps {
 	dataset: IDataset;
@@ -83,9 +81,6 @@ const getDailyAuditCount = async (userId: string) => {
 	return count ?? 0;
 };
 
-const serializeAOIGeometry = (geometry: GeoJSON.MultiPolygon | GeoJSON.Polygon | null) =>
-	geometry ? JSON.stringify(geometry) : "";
-
 const fireConfetti = (count: number) => {
 	const safeCount = Math.max(1, count);
 	const intensity = Math.min(safeCount, 25);
@@ -118,34 +113,26 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	// Download state
 	const { isDownloading, startDownload, finishDownload, currentDownloadId } = useDownload();
 
-	// AOI state
-	const currentAOIGeometry = useRef<GeoJSON.MultiPolygon | GeoJSON.Polygon | null>(null);
-	const savedAOIGeometry = useRef<GeoJSON.MultiPolygon | GeoJSON.Polygon | null>(null);
-	const hasLoadedSavedAOI = useRef(false);
-	const [hasAOI, setHasAOI] = useState(false);
-	const [isAOILoaded, setIsAOILoaded] = useState(false);
-	const [isAOIDirty, setIsAOIDirty] = useState(false);
-
-	// AOI toolbar state (reported from map component)
-	const [aoiToolbarState, setAoiToolbarState] = useState<AOIToolbarState>({
-		isDrawing: false,
-		isEditing: false,
-		hasAOI: false,
-		isAOILoading: true,
-		selectedFeatureForEdit: false,
-		polygonCount: 0,
-	});
+	const {
+		currentGeometryRef: currentAOIGeometry,
+		hasAOI,
+		isLoaded: isAOILoaded,
+		isDirty: isAOIDirty,
+		isSaving: isSavingAOI,
+		toolbarState: aoiToolbarState,
+		setToolbarState: setAoiToolbarState,
+		handleChange: handleAOIChange,
+		handleSave: handleSaveAOI,
+	} = useAuditAOIState(dataset.id);
 
 	// Data hooks
 	const { data: auditData, isLoading: isAuditLoading } = useDatasetAudit(dataset.id);
 	const { data: flags = [], isLoading: isFlagsLoading } = useDatasetFlags(dataset.id);
 	const { mutateAsync: updateFlagStatus, isPending: isUpdatingFlag } = useUpdateFlagStatus();
 	const { mutateAsync: saveAudit, isPending: isSavingAudit } = useSaveDatasetAudit();
-	const { mutateAsync: saveAOI, isPending: isSavingAOI } = useSaveDatasetAOI();
 	const { mutateAsync: markAsReviewed, isPending: isMarkingReviewed } = useMarkAsReviewed();
 	const { data: orthoMetadata, isLoading: isOrthoLoading } = useOrthoMetadata(dataset.id);
 	const { data: phenologyData, isLoading: isPhenologyLoading } = usePhenologyData(dataset.id);
-	const { data: aoiData, isLoading: isAOIDataLoading } = useDatasetAOI(dataset.id);
 
 	// Navigation context
 	const { getNextDatasetId, currentIndex, totalCount } = useAuditNavigation();
@@ -181,12 +168,6 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		setIsLockingAudit(true);
 		setAuditLockError(null);
 		setHasFormChanges(false);
-		setHasAOI(false);
-		setIsAOILoaded(false);
-		setIsAOIDirty(false);
-		currentAOIGeometry.current = null;
-		savedAOIGeometry.current = null;
-		hasLoadedSavedAOI.current = false;
 		form.resetFields();
 
 		const lockAudit = async () => {
@@ -230,71 +211,6 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 			formElement.removeEventListener("input", handleFormChange);
 		};
 	}, []);
-
-	// AOI change handler
-	const handleAOIChange = useCallback((geometry: GeoJSON.MultiPolygon | GeoJSON.Polygon | null) => {
-		console.debug("AOI changed:", geometry ? "AOI present" : "AOI cleared");
-		currentAOIGeometry.current = geometry;
-		setHasAOI(!!geometry);
-		setIsAOILoaded(true);
-		setIsAOIDirty(
-			hasLoadedSavedAOI.current &&
-			serializeAOIGeometry(geometry) !== serializeAOIGeometry(savedAOIGeometry.current)
-		);
-	}, []);
-
-	const handleSaveAOI = useCallback(async () => {
-		if (!currentAOIGeometry.current) {
-			message.warning("Draw an AOI before saving it.");
-			return;
-		}
-
-		try {
-			const savedAOI = await saveAOI({
-				dataset_id: dataset.id,
-				geometry: currentAOIGeometry.current,
-				is_whole_image: false,
-			});
-			savedAOIGeometry.current = savedAOI.geometry as GeoJSON.MultiPolygon | GeoJSON.Polygon;
-			currentAOIGeometry.current = savedAOIGeometry.current;
-			setHasAOI(true);
-			setIsAOIDirty(false);
-			message.success("AOI saved");
-		} catch (error) {
-			console.error("Failed to save AOI:", error);
-			message.error("Failed to save AOI");
-		}
-	}, [dataset.id, saveAOI]);
-
-	// Mark AOI as loaded once the AOI query completes (even if empty)
-	useEffect(() => {
-		if (isAOIDataLoading || hasLoadedSavedAOI.current) return;
-
-		const savedGeometry = aoiData?.geometry
-			? aoiData.geometry as GeoJSON.MultiPolygon | GeoJSON.Polygon
-			: null;
-		savedAOIGeometry.current = savedGeometry;
-		hasLoadedSavedAOI.current = true;
-
-		const currentGeometry = currentAOIGeometry.current;
-		if (currentGeometry && serializeAOIGeometry(currentGeometry) !== serializeAOIGeometry(savedGeometry)) {
-			setHasAOI(true);
-			setIsAOIDirty(true);
-			setIsAOILoaded(true);
-			return;
-		}
-
-		if (savedGeometry) {
-			currentAOIGeometry.current = savedGeometry;
-			setHasAOI(true);
-		} else {
-			currentAOIGeometry.current = null;
-			setHasAOI(false);
-		}
-
-		setIsAOIDirty(false);
-		setIsAOILoaded(true);
-	}, [isAOIDataLoading, aoiData]);
 
 	// Form submit handler
 	const handleSubmit = async (values: AuditFormValues) => {

@@ -115,10 +115,8 @@ def _save_aoi(polygons, dataset_id, user_id, token):
 	)
 
 	with use_client(token) as client:
-		# Replace only our own previous auto-generated AOI; never delete
-		# auditor-drawn AOIs (which carry different/no notes).
+		# Replace only model predictions; never delete auditor-drawn AOIs.
 		client.table(settings.aois_table).delete().eq('dataset_id', dataset_id).eq('source', 'ml_prediction').execute()
-		client.table(settings.aois_table).delete().eq('dataset_id', dataset_id).eq('notes', AUTO_AOI_NOTES).execute()
 		response = (
 			client.table(settings.aois_table)
 			.insert(aoi.model_dump(exclude={'id', 'created_at', 'updated_at'}))

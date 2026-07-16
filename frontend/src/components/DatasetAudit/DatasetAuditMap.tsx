@@ -63,6 +63,10 @@ export interface DatasetAuditMapHandle {
 	addAnotherPolygon: () => void;
 	deleteAOI: () => void;
 	deleteSelectedPolygon: () => void;
+	mergeSelectedPolygons: () => void;
+	clipSelectedPolygons: () => void;
+	cutSelectedPolygon: () => void;
+	undoAOIChange: () => void;
 }
 
 /**
@@ -291,6 +295,10 @@ const DatasetAuditMap = forwardRef<DatasetAuditMapHandle, DatasetAuditMapProps>(
 		addAnotherPolygon: () => aoiEditor.addAnotherPolygon(),
 		deleteAOI: () => aoiEditor.deleteAOI(),
 		deleteSelectedPolygon: () => aoiEditor.deleteSelectedPolygon(),
+		mergeSelectedPolygons: () => aoiEditor.mergeSelectedPolygons(),
+		clipSelectedPolygons: () => aoiEditor.clipSelectedPolygons(),
+		cutSelectedPolygon: () => aoiEditor.cutSelectedPolygon(),
+		undoAOIChange: () => aoiEditor.undo(),
 	}), [refreshVectors, zoomToExtent, flashLocation, getMap, aoiEditor]);
 
 	if (!data) return null;

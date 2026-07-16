@@ -1,46 +1,59 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { message } from "antd";
 import type { Map as OLMap } from "ol";
+import Feature from "ol/Feature";
+import type Geometry from "ol/geom/Geometry";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import { Draw, Modify, Select } from "ol/interaction";
-import { Style, Fill, Stroke, Circle as CircleStyle } from "ol/style";
-import { click } from "ol/events/condition";
-import { Polygon, MultiPolygon } from "ol/geom";
-import Feature from "ol/Feature";
-import type { Geometry } from "ol/geom";
-import GeoJSON from "ol/format/GeoJSON";
-import type { FeatureLike } from "ol/Feature";
-import { palette } from "../../../theme/palette";
+import { click, shiftKeyOnly } from "ol/events/condition";
+import { Circle as CircleStyle, Fill, Stroke, Style } from "ol/style";
+
 import { mapColors } from "../../../theme/mapColors";
+import { palette } from "../../../theme/palette";
+import {
+	clipAOIGeometries,
+	cutAOIGeometry,
+	mergeAOIGeometries,
+	polygonParts,
+} from "./aoiGeometryOperations";
+import {
+	type AOIDraftCheckpoint,
+	type AOIGeometry,
+	useAOIDraft,
+} from "./useAOIDraft";
+
+type AOIEditorMode = "idle" | "drawing" | "editing" | "cutting";
+export type AOIDrawingMode = "add" | "cut" | null;
 
 export interface AOIToolbarState {
 	isDrawing: boolean;
+	drawingMode: AOIDrawingMode;
 	isEditing: boolean;
 	hasAOI: boolean;
 	isAOILoading: boolean;
-	selectedFeatureForEdit: boolean;
+	selectionCount: number;
 	polygonCount: number;
+	canUndo: boolean;
 }
 
 export interface UseAOIEditorOptions {
 	mapRef: React.MutableRefObject<OLMap | null>;
 	mapContainerRef: React.MutableRefObject<HTMLDivElement | null>;
 	enabled: boolean;
-	initialAOI?: GeoJSON.MultiPolygon | GeoJSON.Polygon | null;
+	initialAOI?: AOIGeometry | null;
 	isAOILoading?: boolean;
-	onAOIChange?: (geometry: GeoJSON.MultiPolygon | GeoJSON.Polygon | null) => void;
+	onAOIChange?: (geometry: AOIGeometry | null) => void;
 	onToolbarStateChange?: (state: AOIToolbarState) => void;
 }
 
 export interface UseAOIEditorReturn {
-	// State
 	isDrawing: boolean;
+	drawingMode: AOIDrawingMode;
 	isEditing: boolean;
 	hasAOI: boolean;
-	selectedFeatureForEdit: FeatureLike | null;
-
-	// Actions
+	selectionCount: number;
+	canUndo: boolean;
 	startDrawing: () => void;
 	cancelDrawing: () => void;
 	startEditing: () => void;
@@ -49,15 +62,13 @@ export interface UseAOIEditorReturn {
 	addAnotherPolygon: () => void;
 	deleteAOI: () => void;
 	deleteSelectedPolygon: () => void;
-
-	// Layer
-	editableAOILayer: VectorLayer<VectorSource> | null;
+	mergeSelectedPolygons: () => void;
+	clipSelectedPolygons: () => void;
+	cutSelectedPolygon: () => void;
+	undo: () => void;
+	editableAOILayer: VectorLayer<VectorSource<Feature<Geometry>>> | null;
 }
 
-/**
- * Hook for AOI (Area of Interest) drawing and editing
- * Extracted from DatasetDetailsMap to improve maintainability
- */
 export function useAOIEditor({
 	mapRef,
 	mapContainerRef,
@@ -67,174 +78,164 @@ export function useAOIEditor({
 	onAOIChange,
 	onToolbarStateChange,
 }: UseAOIEditorOptions): UseAOIEditorReturn {
-	// State
-	const [isDrawing, setIsDrawing] = useState(false);
-	const [isEditing, setIsEditing] = useState(false);
-	const [hasAOI, setHasAOI] = useState(false);
-	const [selectedFeatureForEdit, setSelectedFeatureForEdit] = useState<FeatureLike | null>(null);
+	const [mode, setMode] = useState<AOIEditorMode>("idle");
+	const [selectionCount, setSelectionCount] = useState(0);
 	const [showEditableLayer, setShowEditableLayer] = useState(false);
 
-	// Refs
-	const editableAOILayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+	const editableAOILayerRef = useRef<VectorLayer<VectorSource<Feature<Geometry>>> | null>(null);
 	const drawInteractionRef = useRef<Draw | null>(null);
 	const modifyInteractionRef = useRef<Modify | null>(null);
 	const selectInteractionRef = useRef<Select | null>(null);
-	const currentAOIRef = useRef<GeoJSON.MultiPolygon | GeoJSON.Polygon | null>(null);
+	const editCheckpointRef = useRef<AOIDraftCheckpoint | null>(null);
+	const lastInitialAOIRef = useRef<string | null>(null);
 
-	// Helper: Get current geometry from editable AOI layer
-	const getCurrentGeometry = useCallback((): GeoJSON.MultiPolygon | GeoJSON.Polygon | null => {
-		if (!editableAOILayerRef.current) return null;
-		const source = editableAOILayerRef.current.getSource();
-		if (!source) return null;
+	const isDrawing = mode === "drawing" || mode === "cutting";
+	const isEditing = mode === "editing" || mode === "cutting";
+	const drawingMode: AOIDrawingMode = mode === "drawing"
+		? "add"
+		: mode === "cutting" ? "cut" : null;
 
-		const features = source.getFeatures();
-		if (features.length === 0) return null;
+	const getSource = useCallback(
+		() => editableAOILayerRef.current?.getSource() ?? null,
+		[],
+	);
+	const {
+		geometry,
+		canUndo,
+		syncFromSource,
+		reset,
+		snapshot,
+		undo: undoDraft,
+		checkpoint,
+		restore,
+	} = useAOIDraft({ getSource, onChange: onAOIChange });
+	const hasAOI = !!geometry;
 
-		const format = new GeoJSON();
-
-		if (features.length === 1) {
-			const feature = features[0];
-			const geometry = feature.getGeometry();
-
-			if (geometry instanceof Polygon) {
-				const geoJsonGeometry = format.writeGeometryObject(geometry, {
-					dataProjection: "EPSG:4326",
-					featureProjection: "EPSG:3857",
-				}) as GeoJSON.Polygon;
-
-				return {
-					type: "MultiPolygon",
-					coordinates: [geoJsonGeometry.coordinates],
-				};
-			} else if (geometry instanceof MultiPolygon) {
-				return format.writeGeometryObject(geometry, {
-					dataProjection: "EPSG:4326",
-					featureProjection: "EPSG:3857",
-				}) as GeoJSON.MultiPolygon;
-			}
-		} else if (features.length > 1) {
-			const polygonCoordinates: number[][][][] = [];
-
-			features.forEach((feature) => {
-				const geometry = feature.getGeometry();
-				if (geometry instanceof Polygon) {
-					const geoJsonGeometry = format.writeGeometryObject(geometry, {
-						dataProjection: "EPSG:4326",
-						featureProjection: "EPSG:3857",
-					}) as GeoJSON.Polygon;
-					polygonCoordinates.push(geoJsonGeometry.coordinates);
-				}
-			});
-
-			if (polygonCoordinates.length > 0) {
-				return {
-					type: "MultiPolygon",
-					coordinates: polygonCoordinates,
-				};
-			}
-		}
-
-		return null;
+	const clearSelection = useCallback(() => {
+		selectInteractionRef.current?.getFeatures().clear();
+		setSelectionCount(0);
 	}, []);
 
-	// Helper: Update AOI state and notify parent
-	const updateAOIWithGeometry = useCallback((geometry: GeoJSON.MultiPolygon | GeoJSON.Polygon | null) => {
-		currentAOIRef.current = geometry;
-		setHasAOI(!!geometry);
-		onAOIChange?.(geometry);
-	}, [onAOIChange]);
-
-	// Helper: Clear all interactions
-	const clearInteractions = useCallback(() => {
-		if (mapRef.current) {
-			if (drawInteractionRef.current) {
-				mapRef.current.removeInteraction(drawInteractionRef.current);
-				drawInteractionRef.current = null;
-			}
-			if (selectInteractionRef.current) {
-				mapRef.current.removeInteraction(selectInteractionRef.current);
-				selectInteractionRef.current = null;
-			}
-			if (modifyInteractionRef.current) {
-				mapRef.current.removeInteraction(modifyInteractionRef.current);
-				modifyInteractionRef.current = null;
-			}
+	const syncSelection = useCallback(() => {
+		const selection = selectInteractionRef.current?.getFeatures();
+		if (!selection) {
+			setSelectionCount(0);
+			return;
 		}
+
+		while (selection.getLength() > 2) {
+			selection.removeAt(0);
+		}
+		setSelectionCount(selection.getLength());
+	}, []);
+
+	const removeDrawInteraction = useCallback(() => {
+		if (mapRef.current && drawInteractionRef.current) {
+			mapRef.current.removeInteraction(drawInteractionRef.current);
+		}
+		drawInteractionRef.current = null;
+	}, [mapRef]);
+
+	const clearInteractions = useCallback(() => {
+		removeDrawInteraction();
+		if (mapRef.current && selectInteractionRef.current) {
+			mapRef.current.removeInteraction(selectInteractionRef.current);
+		}
+		if (mapRef.current && modifyInteractionRef.current) {
+			mapRef.current.removeInteraction(modifyInteractionRef.current);
+		}
+		selectInteractionRef.current = null;
+		modifyInteractionRef.current = null;
+		setSelectionCount(0);
 
 		if (mapContainerRef.current) {
 			mapContainerRef.current.style.cursor = "";
 		}
-	}, [mapRef, mapContainerRef]);
+	}, [mapContainerRef, mapRef, removeDrawInteraction]);
 
-	// Keep editable AOI layer hidden unless the AOI editor is actively being used.
 	const setEditableLayerVisibility = useCallback((visible: boolean) => {
 		editableAOILayerRef.current?.setVisible(visible);
 	}, []);
 
-	// Start drawing a new polygon
+	const finishDrawing = useCallback((nextMode: "idle" | "editing") => {
+		removeDrawInteraction();
+		setMode(nextMode);
+		if (nextMode === "editing") {
+			selectInteractionRef.current?.setActive(true);
+			modifyInteractionRef.current?.setActive(true);
+			if (mapContainerRef.current) {
+				mapContainerRef.current.style.cursor = "pointer";
+			}
+		} else if (mapContainerRef.current) {
+			mapContainerRef.current.style.cursor = "";
+		}
+	}, [mapContainerRef, removeDrawInteraction]);
+
 	const startDrawing = useCallback(() => {
-		if (!enabled) return;
-		clearInteractions();
-		if (!mapRef.current || !editableAOILayerRef.current) return;
-		setEditableLayerVisibility(true);
-		const source = editableAOILayerRef.current.getSource();
+		if (!enabled || !mapRef.current) return;
+		const source = getSource();
 		if (!source) return;
 
+		clearInteractions();
+		setEditableLayerVisibility(true);
+
 		const draw = new Draw({
-			source: source,
+			source,
 			type: "Polygon",
+			freehandCondition: shiftKeyOnly,
 			style: new Style({
 				stroke: new Stroke({
 					color: mapColors.aoi.stroke,
 					width: 2,
 					lineDash: [5, 5],
 				}),
-				fill: new Fill({
-					color: mapColors.aoi.fill,
-				}),
+				fill: new Fill({ color: mapColors.aoi.fill }),
 			}),
 		});
 
-		draw.on("drawend", () => {
-			setTimeout(() => {
+		draw.once("drawstart", snapshot);
+		draw.once("drawend", (event) => {
+			const drawnFeature = event.feature;
+			queueMicrotask(() => {
+				if (!source.getFeatures().includes(drawnFeature)) {
+					source.addFeature(drawnFeature);
+				}
 				clearInteractions();
-				setIsDrawing(false);
+				setMode("idle");
 				setShowEditableLayer(true);
-				const currentGeometry = getCurrentGeometry();
-				updateAOIWithGeometry(currentGeometry);
+				syncFromSource();
 				message.success("Polygon drawn successfully.");
-			}, 10);
+			});
 		});
 
 		mapRef.current.addInteraction(draw);
 		drawInteractionRef.current = draw;
-		setIsDrawing(true);
-		setIsEditing(false);
-
+		setMode("drawing");
 		if (mapContainerRef.current) {
 			mapContainerRef.current.style.cursor = "crosshair";
 		}
-	}, [enabled, mapRef, mapContainerRef, clearInteractions, getCurrentGeometry, updateAOIWithGeometry, setEditableLayerVisibility]);
+	}, [
+		clearInteractions,
+		enabled,
+		getSource,
+		mapContainerRef,
+		mapRef,
+		setEditableLayerVisibility,
+		snapshot,
+		syncFromSource,
+	]);
 
-	// Add another polygon
-	const addAnotherPolygon = useCallback(() => startDrawing(), [startDrawing]);
-
-	// Cancel drawing
 	const cancelDrawing = useCallback(() => {
-		clearInteractions();
-		setIsDrawing(false);
-		setShowEditableLayer(false);
-		message.info("Drawing cancelled");
-	}, [clearInteractions]);
+		const wasCutting = mode === "cutting";
+		finishDrawing(wasCutting ? "editing" : "idle");
+		setShowEditableLayer(wasCutting || hasAOI);
+		message.info(wasCutting ? "Cut cancelled" : "Drawing cancelled");
+	}, [finishDrawing, hasAOI, mode]);
 
-	// Setup editing interactions
 	const setupEditingInteractions = useCallback(() => {
 		if (!mapRef.current || !editableAOILayerRef.current) return false;
-		const source = editableAOILayerRef.current.getSource();
-		if (!source || source.getFeatures().length === 0) {
-			console.warn("setupEditingInteractions: No features in source to edit.");
-			return false;
-		}
+		const source = getSource();
+		if (!source || source.getFeatures().length === 0) return false;
 
 		clearInteractions();
 
@@ -246,15 +247,8 @@ export function useAOIEditor({
 				fill: new Fill({ color: "rgba(0, 255, 255, 0.1)" }),
 			}),
 		});
-
-		select.on("select", (event) => {
-			const selectedFeatures = event.target.getFeatures();
-			if (selectedFeatures.getLength() > 0) {
-				setSelectedFeatureForEdit(selectedFeatures.item(0));
-			} else {
-				setSelectedFeatureForEdit(null);
-			}
-		});
+		selectInteractionRef.current = select;
+		select.on("select", syncSelection);
 
 		const modify = new Modify({
 			features: select.getFeatures(),
@@ -266,270 +260,315 @@ export function useAOIEditor({
 				}),
 			}),
 		});
-
+		modify.once("modifystart", snapshot);
 		modify.on("modifyend", () => {
-			const currentGeometry = getCurrentGeometry();
-			if (currentGeometry) {
-				updateAOIWithGeometry(currentGeometry);
-			}
+			syncFromSource();
+			modify.once("modifystart", snapshot);
 		});
+		modifyInteractionRef.current = modify;
 
 		mapRef.current.addInteraction(select);
 		mapRef.current.addInteraction(modify);
-		selectInteractionRef.current = select;
-		modifyInteractionRef.current = modify;
 		return true;
-	}, [mapRef, clearInteractions, getCurrentGeometry, updateAOIWithGeometry]);
+	}, [clearInteractions, getSource, mapRef, snapshot, syncFromSource, syncSelection]);
 
-	// Start editing existing AOI
 	const startEditing = useCallback(() => {
-		if (!enabled) return;
-		if (!hasAOI) {
+		if (!enabled || !hasAOI) {
 			message.error("No AOI to edit.");
 			return;
 		}
+
+		editCheckpointRef.current = checkpoint();
 		setEditableLayerVisibility(true);
-		setIsDrawing(false);
-		setSelectedFeatureForEdit(null);
-		if (setupEditingInteractions()) {
-			setIsEditing(true);
-			message.info("Click on a polygon to select and edit it.");
-
-			if (mapContainerRef.current) {
-				mapContainerRef.current.style.cursor = "pointer";
-			}
-		} else {
+		clearSelection();
+		if (!setupEditingInteractions()) {
+			editCheckpointRef.current = null;
 			message.error("Could not start editing. AOI feature might be missing.");
+			return;
 		}
-	}, [enabled, hasAOI, mapContainerRef, setupEditingInteractions, setEditableLayerVisibility]);
 
-	// Save editing
+		setMode("editing");
+		message.info("Click a polygon to edit it. Shift-click to select two polygons.");
+		if (mapContainerRef.current) {
+			mapContainerRef.current.style.cursor = "pointer";
+		}
+	}, [
+		clearSelection,
+		checkpoint,
+		enabled,
+		hasAOI,
+		mapContainerRef,
+		setEditableLayerVisibility,
+		setupEditingInteractions,
+	]);
+
 	const saveEditing = useCallback(() => {
 		clearInteractions();
-		setIsEditing(false);
-		setSelectedFeatureForEdit(null);
+		editCheckpointRef.current = null;
+		setMode("idle");
 		setShowEditableLayer(true);
 		message.success("AOI edits applied. Save AOI to persist.");
 	}, [clearInteractions]);
 
-	// Cancel editing (restore original)
 	const cancelEditing = useCallback(() => {
 		clearInteractions();
-		setIsEditing(false);
-		setShowEditableLayer(false);
-		setSelectedFeatureForEdit(null);
-
-		// Reload original AOI if available
-		if (initialAOI && editableAOILayerRef.current) {
-			const source = editableAOILayerRef.current.getSource();
-			source?.clear();
-
-			try {
-				const format = new GeoJSON();
-				const loadedGeometry = initialAOI;
-
-				if (loadedGeometry.type === "MultiPolygon") {
-					loadedGeometry.coordinates.forEach((polygonCoords) => {
-						const polygonGeometry: GeoJSON.Polygon = {
-							type: "Polygon",
-							coordinates: polygonCoords,
-						};
-
-						const features = format.readFeatures(polygonGeometry, {
-							dataProjection: "EPSG:4326",
-							featureProjection: "EPSG:3857",
-						});
-
-						features.forEach(f => {
-							if (f && f.getGeometry()) {
-								source?.addFeature(f);
-							}
-						});
-					});
-				} else if (loadedGeometry.type === "Polygon") {
-					const features = format.readFeatures(loadedGeometry, {
-						dataProjection: "EPSG:4326",
-						featureProjection: "EPSG:3857",
-					});
-
-					features.forEach(f => {
-						if (f && f.getGeometry()) {
-							source?.addFeature(f);
-						}
-					});
-				}
-
-				updateAOIWithGeometry(initialAOI);
-			} catch (error) {
-				console.error("Error restoring AOI after cancel:", error);
-			}
+		const editCheckpoint = editCheckpointRef.current;
+		if (editCheckpoint) {
+			restore(editCheckpoint);
 		}
-
+		editCheckpointRef.current = null;
+		setMode("idle");
+		setShowEditableLayer(!!editCheckpoint?.geometry);
 		message.info("Editing cancelled.");
-	}, [clearInteractions, initialAOI, updateAOIWithGeometry]);
+	}, [clearInteractions, restore]);
 
-	// Delete selected polygon
+	const replaceSelectedFeatures = useCallback((parts: ReturnType<typeof polygonParts>) => {
+		const source = getSource();
+		const select = selectInteractionRef.current;
+		if (!source || !select) return;
+
+		const selected = [...select.getFeatures().getArray()] as Feature<Geometry>[];
+		selected.forEach((feature) => source.removeFeature(feature));
+
+		const replacements = parts.map((polygon) => new Feature<Geometry>(polygon.clone()));
+		source.addFeatures(replacements);
+		select.getFeatures().clear();
+		replacements.slice(0, 2).forEach((feature) => select.getFeatures().push(feature));
+		syncSelection();
+		syncFromSource();
+	}, [getSource, syncFromSource, syncSelection]);
+
 	const deleteSelectedPolygon = useCallback(() => {
-		if (!selectedFeatureForEdit || !editableAOILayerRef.current) {
-			message.error("No polygon selected for deletion.");
+		const source = getSource();
+		const selected = selectInteractionRef.current?.getFeatures().getArray() as Feature<Geometry>[] | undefined;
+		if (!source || !selected || selected.length === 0) {
+			message.error("Select at least one polygon to delete.");
 			return;
 		}
 
-		const source = editableAOILayerRef.current.getSource();
-		if (!source) return;
-
-		source.removeFeature(selectedFeatureForEdit as Feature<Geometry>);
-		setSelectedFeatureForEdit(null);
-
-		const currentGeometry = getCurrentGeometry();
-		updateAOIWithGeometry(currentGeometry);
+		snapshot();
+		selected.forEach((feature) => source.removeFeature(feature));
+		clearSelection();
+		const currentGeometry = syncFromSource();
 
 		if (currentGeometry) {
-			message.success("Selected polygon deleted.");
+			message.success(`${selected.length} polygon${selected.length === 1 ? "" : "s"} deleted.`);
 		} else {
-			setIsEditing(false);
-			setShowEditableLayer(false);
 			clearInteractions();
+			editCheckpointRef.current = null;
+			setMode("idle");
+			setShowEditableLayer(false);
 			message.success("Last polygon deleted. Exiting edit mode.");
 		}
-	}, [selectedFeatureForEdit, getCurrentGeometry, updateAOIWithGeometry, clearInteractions]);
+	}, [clearInteractions, clearSelection, getSource, snapshot, syncFromSource]);
 
-	// Delete entire AOI
+	const mergeSelectedPolygons = useCallback(() => {
+		const selected = selectInteractionRef.current?.getFeatures().getArray() as Feature<Geometry>[] | undefined;
+		if (!selected || selected.length !== 2) {
+			message.warning("Shift-click exactly two polygons to merge.");
+			return;
+		}
+
+		const first = selected[0].getGeometry();
+		const second = selected[1].getGeometry();
+		if (!first || !second) return;
+		const merged = mergeAOIGeometries(first, second);
+		if (!merged) {
+			message.error("Failed to merge the selected polygons.");
+			return;
+		}
+
+		snapshot();
+		replaceSelectedFeatures(merged);
+		message.success("Polygons merged.");
+	}, [replaceSelectedFeatures, snapshot]);
+
+	const clipSelectedPolygons = useCallback(() => {
+		const selected = selectInteractionRef.current?.getFeatures().getArray() as Feature<Geometry>[] | undefined;
+		if (!selected || selected.length !== 2) {
+			message.warning("Shift-click exactly two polygons to clip.");
+			return;
+		}
+
+		const first = selected[0].getGeometry();
+		const second = selected[1].getGeometry();
+		if (!first || !second) return;
+		const clipped = clipAOIGeometries(first, second);
+		if (!clipped) {
+			message.error("Failed to clip polygons. The result may be empty.");
+			return;
+		}
+
+		snapshot();
+		replaceSelectedFeatures(clipped);
+		message.success("Smaller polygon clipped from larger polygon.");
+	}, [replaceSelectedFeatures, snapshot]);
+
+	const cutSelectedPolygon = useCallback(() => {
+		if (!mapRef.current) return;
+		const select = selectInteractionRef.current;
+		const selected = select?.getFeatures().getArray() as Feature<Geometry>[] | undefined;
+		if (!select || !selected || selected.length !== 1) {
+			message.warning("Select one polygon before cutting.");
+			return;
+		}
+
+		const targetGeometry = selected[0].getGeometry();
+		if (!targetGeometry) return;
+
+		removeDrawInteraction();
+		select.setActive(false);
+		modifyInteractionRef.current?.setActive(false);
+
+		const draw = new Draw({
+			source: new VectorSource<Feature<Geometry>>(),
+			type: "Polygon",
+			freehandCondition: shiftKeyOnly,
+			style: new Style({
+				stroke: new Stroke({ color: palette.state.selected, width: 3 }),
+				fill: new Fill({ color: "rgba(255, 200, 0, 0.35)" }),
+			}),
+		});
+
+		draw.once("drawend", (event) => {
+			const cutter = event.feature.getGeometry();
+			const cutParts = cutter ? cutAOIGeometry(targetGeometry, cutter) : null;
+			if (!cutParts) {
+				message.error("Failed to cut polygon. The result may be empty.");
+			} else {
+				snapshot();
+				replaceSelectedFeatures(cutParts);
+				message.success("Polygon cut.");
+			}
+			queueMicrotask(() => finishDrawing("editing"));
+		});
+
+		mapRef.current.addInteraction(draw);
+		drawInteractionRef.current = draw;
+		setMode("cutting");
+		if (mapContainerRef.current) {
+			mapContainerRef.current.style.cursor = "crosshair";
+		}
+	}, [
+		finishDrawing,
+		mapContainerRef,
+		mapRef,
+		removeDrawInteraction,
+		replaceSelectedFeatures,
+		snapshot,
+	]);
+
 	const deleteAOI = useCallback(() => {
 		if (!enabled) return;
-		clearInteractions();
-		const source = editableAOILayerRef.current?.getSource();
-		source?.clear();
-		updateAOIWithGeometry(null);
-		setIsEditing(false);
-		setIsDrawing(false);
-		setShowEditableLayer(false);
-		message.success("AOI deleted.");
-	}, [enabled, clearInteractions, updateAOIWithGeometry]);
-
-	// Initialize editable AOI layer when enabled and map is ready
-	useEffect(() => {
-		if (!enabled || !mapRef.current) return;
-
-		// Create editable AOI layer if not already created
-		if (!editableAOILayerRef.current) {
-			const editableAOISource = new VectorSource();
-			const editableAOILayer = new VectorLayer({
-				source: editableAOISource,
-				style: new Style({
-					stroke: new Stroke({
-						color: mapColors.aoi.stroke,
-						width: 3,
-					}),
-					fill: new Fill({
-						color: mapColors.aoi.fill,
-					}),
-				}),
-				zIndex: 100,
-			});
-			editableAOILayer.setVisible(false);
-
-			mapRef.current.addLayer(editableAOILayer);
-			editableAOILayerRef.current = editableAOILayer;
-
-			// Load existing AOI if available
-			if (initialAOI) {
-				try {
-					const format = new GeoJSON();
-					const loadedGeometry = initialAOI;
-
-					if (loadedGeometry.type === "MultiPolygon") {
-						loadedGeometry.coordinates.forEach((polygonCoords) => {
-							const polygonGeometry: GeoJSON.Polygon = {
-								type: "Polygon",
-								coordinates: polygonCoords,
-							};
-
-							const features = format.readFeatures(polygonGeometry, {
-								dataProjection: "EPSG:4326",
-								featureProjection: "EPSG:3857",
-							});
-
-							features.forEach(f => {
-								if (f && f.getGeometry()) {
-									editableAOISource.addFeature(f);
-								}
-							});
-						});
-					} else if (loadedGeometry.type === "Polygon") {
-						const features = format.readFeatures(loadedGeometry, {
-							dataProjection: "EPSG:4326",
-							featureProjection: "EPSG:3857",
-						});
-
-						features.forEach(f => {
-							if (f && f.getGeometry()) {
-								editableAOISource.addFeature(f);
-							}
-						});
-					}
-
-					currentAOIRef.current = loadedGeometry;
-					setHasAOI(true);
-					onAOIChange?.(loadedGeometry);
-				} catch (error) {
-					console.error("Error loading existing AOI for editing:", error);
-				}
-			}
+		if (geometry) {
+			snapshot();
 		}
+		clearInteractions();
+		getSource()?.clear();
+		syncFromSource();
+		editCheckpointRef.current = null;
+		setMode("idle");
+		setShowEditableLayer(false);
+		message.success("AOI draft cleared.");
+	}, [clearInteractions, enabled, geometry, getSource, snapshot, syncFromSource]);
+
+	const undo = useCallback(() => {
+		clearSelection();
+		if (!undoDraft()) return;
+		setShowEditableLayer(true);
+		message.success("AOI change undone.");
+	}, [clearSelection, undoDraft]);
+
+	useEffect(() => {
+		if (!enabled || !mapRef.current || editableAOILayerRef.current) return;
+
+		const map = mapRef.current;
+		const editableAOILayer = new VectorLayer({
+			source: new VectorSource(),
+			style: new Style({
+				stroke: new Stroke({ color: mapColors.aoi.stroke, width: 3 }),
+				fill: new Fill({ color: mapColors.aoi.fill }),
+			}),
+			zIndex: 100,
+		});
+		editableAOILayer.setVisible(false);
+		map.addLayer(editableAOILayer);
+		editableAOILayerRef.current = editableAOILayer;
 
 		return () => {
 			clearInteractions();
+			map.removeLayer(editableAOILayer);
+			editableAOILayerRef.current = null;
 		};
-	}, [enabled, mapRef, initialAOI, onAOIChange, clearInteractions]);
+	}, [clearInteractions, enabled, mapRef]);
 
-	// Ensure visibility tracks AOI editing mode only.
+	useEffect(() => {
+		if (!enabled || isAOILoading || !editableAOILayerRef.current || isEditing || isDrawing) return;
+
+		const serializedInitialAOI = JSON.stringify(initialAOI ?? null);
+		if (lastInitialAOIRef.current === serializedInitialAOI) return;
+
+		lastInitialAOIRef.current = serializedInitialAOI;
+		reset(initialAOI ?? null);
+	}, [enabled, initialAOI, isAOILoading, isDrawing, isEditing, reset]);
+
 	useEffect(() => {
 		if (!enabled) {
 			setEditableLayerVisibility(false);
 			return;
 		}
 		setEditableLayerVisibility(isDrawing || isEditing || showEditableLayer);
-	}, [enabled, isDrawing, isEditing, showEditableLayer, setEditableLayerVisibility]);
+	}, [enabled, isDrawing, isEditing, setEditableLayerVisibility, showEditableLayer]);
 
-	// Report state changes to parent
 	useEffect(() => {
 		if (!enabled || !onToolbarStateChange) return;
 
-		const polygonCount = currentAOIRef.current?.type === "MultiPolygon"
-			? currentAOIRef.current.coordinates.length
-			: currentAOIRef.current?.type === "Polygon" ? 1 : 0;
+		const polygonCount = geometry?.type === "MultiPolygon"
+			? geometry.coordinates.length
+			: geometry ? 1 : 0;
 
 		onToolbarStateChange({
 			isDrawing,
+			drawingMode,
 			isEditing,
 			hasAOI,
 			isAOILoading,
-			selectedFeatureForEdit: !!selectedFeatureForEdit,
+			selectionCount,
 			polygonCount,
+			canUndo,
 		});
-	}, [enabled, isDrawing, isEditing, hasAOI, isAOILoading, selectedFeatureForEdit, onToolbarStateChange]);
-
-	// Cleanup on unmount
-	useEffect(() => {
-		return () => {
-			clearInteractions();
-		};
-	}, [clearInteractions]);
+	}, [
+		canUndo,
+		drawingMode,
+		enabled,
+		geometry,
+		hasAOI,
+		isAOILoading,
+		isDrawing,
+		isEditing,
+		onToolbarStateChange,
+		selectionCount,
+	]);
 
 	return {
 		isDrawing,
+		drawingMode,
 		isEditing,
 		hasAOI,
-		selectedFeatureForEdit,
+		selectionCount,
+		canUndo,
 		startDrawing,
 		cancelDrawing,
 		startEditing,
 		saveEditing,
 		cancelEditing,
-		addAnotherPolygon,
+		addAnotherPolygon: startDrawing,
 		deleteAOI,
 		deleteSelectedPolygon,
+		mergeSelectedPolygons,
+		clipSelectedPolygons,
+		cutSelectedPolygon,
+		undo,
 		editableAOILayer: editableAOILayerRef.current,
 	};
 }
