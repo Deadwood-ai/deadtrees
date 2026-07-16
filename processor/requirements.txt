@@ -30,7 +30,7 @@ xarray>=2023.1.0
 zarr>=2.13.0
 # Rasterio 1.5 still triggers NumPy 2.5's deprecated ndarray shape mutation
 # path during normal reads. Keep the service below 2.5 until Rasterio removes it.
-numpy>=2,<2.5
+numpy>=2.5.1,<2.6
 # Visvalingam-Whyatt polygon simplification (deadwood_treecover_combined_v2 postprocessing)
 simplification>=0.7,<2
 # Pin to 4.x: transformers 5.0 renamed SegFormer state-dict keys
