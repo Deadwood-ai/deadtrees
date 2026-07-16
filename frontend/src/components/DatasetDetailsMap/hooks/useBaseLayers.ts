@@ -6,7 +6,8 @@ import { XYZ } from "ol/source";
 import type { Map as OLMap } from "ol";
 
 import {
-	createOpenFreeMapLibertyLayerGroup,
+	acquireLibertyBasemapGroup,
+	releaseLibertyBasemapGroup,
 	createWaybackTileLayer,
 	createWaybackSource,
 	DEFAULT_WAYBACK_RELEASE,
@@ -68,7 +69,8 @@ export function useBaseLayers({
 		if (!map || isInitializedRef.current) return;
 
 		const isSatellite = mapStyle === "satellite-streets-v12";
-		const libertyLayer = createOpenFreeMapLibertyLayerGroup();
+		// Borrowed from the shared pool; returned (not disposed) in cleanup.
+		const libertyLayer = acquireLibertyBasemapGroup();
 		libertyLayer.setVisible(!isSatellite);
 
 		const waybackLayer = createWaybackTileLayer(DEFAULT_WAYBACK_RELEASE);
@@ -87,6 +89,7 @@ export function useBaseLayers({
 			if (map) {
 				if (libertyLayerRef.current) {
 					map.removeLayer(libertyLayerRef.current);
+					releaseLibertyBasemapGroup(libertyLayerRef.current);
 					libertyLayerRef.current = null;
 				}
 				if (waybackLayerRef.current) {

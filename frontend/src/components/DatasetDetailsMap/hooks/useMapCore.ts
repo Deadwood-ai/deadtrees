@@ -305,21 +305,21 @@ export function useMapCore({
 			return () => {
 				isDisposed = true;
 				if (mapRef.current) {
-					// Remove all layers
-					mapRef.current.getLayers().forEach((layer) => {
-						disposeLayerWithSource(layer as DisposableLayer);
-					});
-
 					mapRef.current.setTarget(undefined);
-				mapRef.current.dispose();
-				mapRef.current = null;
-				orthoLayerRef.current = null;
-				hasSeenInitialMoveEndRef.current = false;
-				hasTrackedInteractionRef.current = false;
+					// Detach all layers so none keeps a back-reference to the disposed
+					// map, but do NOT dispose them here: each layer is owned by the hook
+					// that created it (useBaseLayers, useVectorLayers, ...), and the
+					// pooled liberty basemap group must survive for its next borrower.
+					// This hook only owns the ortho layer, disposed below.
+					mapRef.current.getLayers().clear();
+					mapRef.current.dispose();
+					mapRef.current = null;
+					hasSeenInitialMoveEndRef.current = false;
+					hasTrackedInteractionRef.current = false;
 					setIsMapReady(false);
 					setExtent(null);
 				}
-				if (!mapRef.current && orthoLayerRef.current) {
+				if (orthoLayerRef.current) {
 					disposeLayerWithSource(orthoLayerRef.current as DisposableLayer);
 					orthoLayerRef.current = null;
 				}

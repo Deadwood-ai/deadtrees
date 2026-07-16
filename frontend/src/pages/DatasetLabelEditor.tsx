@@ -23,7 +23,7 @@ import { Style, Stroke, Fill } from "ol/style";
 import type { StyleFunction as OLStyleFunction } from "ol/style/Style";
 import type { IDataset } from "../types/dataset";
 import type MapBrowserEvent from "ol/MapBrowserEvent";
-import { createOpenFreeMapLibertyLayerGroup } from "../utils/basemaps";
+import { acquireLibertyBasemapGroup, releaseLibertyBasemapGroup } from "../utils/basemaps";
 import { COG_SOURCE_OPTIONS } from "../utils/cogSourceOptions";
 import { palette } from "../theme/palette";
 
@@ -71,7 +71,8 @@ export default function DatasetLabelEditor() {
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current || !dataset) return;
 
-    const basemapLayer = createOpenFreeMapLibertyLayerGroup();
+    // Borrowed from the shared pool; returned (not disposed) in cleanup.
+    const basemapLayer = acquireLibertyBasemapGroup();
 
     let orthoCogLayer: TileLayerWebGL | undefined;
     if (dataset?.cog_path) {
@@ -126,9 +127,11 @@ export default function DatasetLabelEditor() {
 
     return () => {
       if (mapRef.current) {
+        mapRef.current.removeLayer(basemapLayer);
         mapRef.current.setTarget(undefined);
         mapRef.current = null;
       }
+      releaseLibertyBasemapGroup(basemapLayer);
       serverLayerRef.current = null;
       baseServerStyleRef.current = null;
     };
