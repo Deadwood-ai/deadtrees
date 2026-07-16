@@ -6,10 +6,10 @@ from shapely.geometry import Polygon
 
 from shared.db import use_client
 from shared.settings import settings
-from shared.models import TaskTypeEnum, QueueTask, AOI
+from shared.models import TaskTypeEnum, QueueTask, AOI, aoi_insert_payload
 
 from processor.src.process_aoi_segmentation import process_aoi_segmentation
-from processor.src.aoi_segmentation_v1.predict_aoi import AUTO_AOI_NOTES, _aoi_insert_payload
+from processor.src.aoi_segmentation_v1.predict_aoi import AUTO_AOI_NOTES
 from processor.src.aoi_segmentation_v1.inference.aoi_inference import cleanup_aoi_polygon, _clip_prediction_tile
 
 MODEL_PATH = str(Path(__file__).parent.parent.parent / 'assets' / 'models' / 'b1_50epoch_best_macro_f1.safetensors')
@@ -68,7 +68,7 @@ def test_aoi_insert_payload_remains_compatible_with_pre_provenance_schema():
 		source='ml_prediction',
 	)
 
-	payload = _aoi_insert_payload(aoi)
+	payload = aoi_insert_payload(aoi)
 
 	assert 'source' not in payload
 	assert 'corrected_from_aoi_id' not in payload

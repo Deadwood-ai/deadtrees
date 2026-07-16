@@ -534,6 +534,11 @@ class AOI(BaseModel):
 		return v
 
 
+def aoi_insert_payload(aoi: AOI) -> Dict:
+	"""Serialize AOIs for rolling compatibility with the pre-provenance schema."""
+	return aoi.model_dump(exclude={'id', 'created_at', 'updated_at', 'source', 'corrected_from_aoi_id'})
+
+
 class Label(BaseModel):
 	"""Label model for v2_labels table"""
 
