@@ -7,6 +7,8 @@ pytest.importorskip('torch')
 pytest.importorskip('torchvision')
 pytest.importorskip('transformers')
 
+pytestmark = pytest.mark.unit
+
 from processor.src.deadwood_treecover_combined_v2.inference import combined_inference
 from processor.src.deadwood_treecover_combined_v2.inference.combined_inference import CombinedInference
 

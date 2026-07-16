@@ -2,6 +2,8 @@ import pytest
 
 from processor.src.utils import linear_issues
 
+pytestmark = pytest.mark.unit
+
 
 class MockResponse:
 	def __init__(self, status_code: int, payload: dict):

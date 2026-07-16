@@ -64,7 +64,7 @@ rename while behavior is unchanged, the test is probably too coupled.
 | Python critical lint   | `scripts/lint-python.sh`                                                | syntax/runtime-name safety for API, shared models, processor, CLI, and scripts      |
 | API/router             | `scripts/test-api-smoke.sh` or `deadtrees dev test api <path>`          | FastAPI routes, upload/download/process/auth behavior                               |
 | Database/RLS/migration | focused API DB tests plus migration review/reset where practical        | schema, policies, RPCs, views, generated contracts                                  |
-| Processor CPU          | `deadtrees dev test processor <path>`                                   | queue orchestration, GeoTIFF/COG/metadata, non-GPU utilities                        |
+| Processor CPU          | focused `deadtrees dev test processor <path>` or the unit command below  | queue orchestration, GeoTIFF/COG/metadata, non-GPU utilities                        |
 | Processor GPU/model    | processing-server dev checkout                                          | model loading, CUDA/NVIDIA runtime, full combined-model execution, ODM-heavy checks |
 | Storage/export         | focused API/export tests plus local nginx/storage fixtures              | signed URLs, download bundles, reference exports, token safety                      |
 | Ops/release            | workflow syntax, docs/playbook checks, and post-merge verification plan | GitHub Actions, deploy scripts, cron, release automation                            |
@@ -138,10 +138,35 @@ The suite covers:
 - dataset audit persistence and constraints
 - dataset edit history triggers and authorization
 - data publication tables and basic publication operations
+- ODM database schema, constraints, and completion flags
+- PRIWA membership, write authorization, and protected field contracts
 - notification email rendering and Mailpit delivery
+- search embedding route validation and rate limiting
+- reference patch export selection and cleanup behavior
+- shared model, retry, database-client, status, and ZIP safety utilities
 
 Keep this suite backend-lite. Add processor/GPU/ODM checks to the processing
 server validation lane instead of expanding API smoke into full-system testing.
+
+## Processor Unit CI
+
+The path-filtered `processor-unit` GitHub Actions workflow builds the processor
+Dockerfile's `test` target and runs:
+
+```bash
+docker compose -f docker-compose.test.yaml exec processor-test \
+  python -m pytest -q -m unit processor/tests
+```
+
+This lane is intentionally CPU-safe. Mark deterministic tests `unit` when they
+mock only external or expensive boundaries and do not require Supabase, SSH,
+Docker-in-Docker, downloaded assets, CUDA, or model checkpoints. Keep GPU/model
+loading, ODM-heavy execution, and processing-server integration in the
+processing-server validation lane.
+
+Production Docker targets install only runtime dependencies. The `test` targets
+add `requirements-test.txt`, test sources, pytest configuration, and debugger
+support for local and CI validation.
 
 Keep authenticated contributor journeys out of the production-read Playwright
 suite. Use the local contributor smoke when a frontend change touches upload,

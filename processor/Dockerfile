@@ -1,8 +1,11 @@
 # Start with a pinned GDAL image so Python/GDAL don't drift underneath the processor.
-FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.3@sha256:b50822a4059629f6a579908584e25e6adccfc70a57914290dd01217f19871d08
+FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.3@sha256:b50822a4059629f6a579908584e25e6adccfc70a57914290dd01217f19871d08 AS runtime
 
 # Install Python and development tools
-RUN apt-get update && apt-get install -y \
+# The pinned GDAL image currently carries an Apache Arrow apt source whose
+# signing key has expired. The processor does not use that apt source.
+RUN rm -f /etc/apt/sources.list.d/apache-arrow*.list /etc/apt/sources.list.d/apache-arrow*.sources && \
+    apt-get update && apt-get install -y \
     python3-pip \
     python3-dev \
     python3-venv \
@@ -32,13 +35,10 @@ RUN pip3 install --no-cache-dir torch==2.4.1 torchvision==0.19.1
 COPY processor/requirements.txt /app/processor/requirements.txt
 RUN pip3 install --no-cache-dir -r /app/processor/requirements.txt
 
-# Copy application files
-COPY ./processor /app/processor
-COPY ./shared /app/shared
-
-# Copy pytest configuration for custom marks
-COPY pytest.ini /app/pytest.ini
-COPY .dockerignore /app/.dockerignore
+# Copy production application files
+COPY ./processor/src /app/processor/src
+COPY ./shared/*.py /app/shared/
+COPY ./shared/testing/safety.py /app/shared/testing/safety.py
 
 # Copy entrypoint script and make it executable
 COPY processor/entrypoint.sh /entrypoint.sh
@@ -54,3 +54,16 @@ ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python", "-m", "processor.src.processor"]
 
 # Note: Model file should be mounted at runtime
+
+FROM runtime AS test
+
+COPY processor/requirements-test.txt /tmp/requirements-test.txt
+RUN pip3 install --no-cache-dir -r /tmp/requirements-test.txt && \
+    rm /tmp/requirements-test.txt
+
+COPY ./processor/tests /app/processor/tests
+COPY ./shared/testing /app/shared/testing
+COPY pytest.ini /app/pytest.ini
+COPY .dockerignore /app/.dockerignore
+
+FROM runtime AS production

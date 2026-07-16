@@ -18,10 +18,6 @@ aiofiles
 boto3
 httpx
 tqdm
-pytest
-pytest-mock
-pytest-cov
-debugpy
 fastapi[testclient]
 pyarrow
 fiona
@@ -29,5 +25,8 @@ pillow
 pyproj
 shapely
 pyogrio
-# Open-vocabulary tile search: CPU text-query encoder (pulls torch).
+# Open-vocabulary tile search: keep the text encoder on the processor-compatible
+# PyTorch pair; the API Dockerfile installs CPU wheels for amd64.
+torch==2.4.1
+torchvision==0.19.1
 open-clip-torch>=2.24.0

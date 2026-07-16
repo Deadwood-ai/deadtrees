@@ -5,9 +5,12 @@ test the area threshold but then appended the *original* polygon, so sub-thresho
 holes were never actually removed from the stored geometry.
 """
 
+import pytest
 from shapely.geometry import Polygon
 
 from processor.src.utils.segmentation import filter_polygons_by_area
+
+pytestmark = pytest.mark.unit
 
 
 def _square(size, origin=(0.0, 0.0)):
