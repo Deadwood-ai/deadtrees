@@ -7,7 +7,7 @@ python-dotenv
 python-multipart
 supabase
 gotrue
-numpy>=2,<2.5
+numpy>=2.5.1,<2.6
 rasterio==1.5.0
 rio-cogeo
 fire
