@@ -4,7 +4,8 @@ import { useAuth } from "./useAuthProvider";
 import { useCanAudit } from "./useUserPrivileges";
 import { useMemo } from "react";
 import {
-  type ExistingAOIIdentity,
+  type ExistingAOI,
+  resolveAOIRevisionMetadata,
   resolveAOISaveTarget,
 } from "./aoiSaveProvenance";
 
@@ -211,7 +212,7 @@ export function useSaveDatasetAOI() {
       // Check if AOI already exists for this dataset
       const { data: existingAOI, error: existingAOIError } = await supabase
         .from("v2_aois")
-        .select("id,user_id,source,corrected_from_aoi_id")
+        .select("id,user_id,source,corrected_from_aoi_id,image_quality,notes")
         .eq("dataset_id", aoiData.dataset_id)
         .order("created_at", { ascending: false })
         .limit(1);
@@ -219,8 +220,9 @@ export function useSaveDatasetAOI() {
       if (existingAOIError) throw existingAOIError;
 
       let result;
-      const latestAOI = existingAOI?.[0] as ExistingAOIIdentity | undefined;
+      const latestAOI = existingAOI?.[0] as ExistingAOI | undefined;
       const saveTarget = resolveAOISaveTarget(latestAOI, user.id);
+      const revisionMetadata = resolveAOIRevisionMetadata(latestAOI, aoiData);
       const updatedAt = new Date().toISOString();
 
       if (saveTarget.kind === "update") {
@@ -250,8 +252,8 @@ export function useSaveDatasetAOI() {
             user_id: user.id,
             geometry: aoiData.geometry,
             is_whole_image: aoiData.is_whole_image,
-            ...(aoiData.image_quality !== undefined ? { image_quality: aoiData.image_quality } : {}),
-            ...(aoiData.notes !== undefined ? { notes: aoiData.notes } : {}),
+            image_quality: revisionMetadata.image_quality,
+            notes: revisionMetadata.notes,
             source: saveTarget.source,
             corrected_from_aoi_id: saveTarget.correctedFromAOIId,
             updated_at: updatedAt,
@@ -265,8 +267,8 @@ export function useSaveDatasetAOI() {
 
       return result;
     },
-    onSuccess: (_, variables) => {
-      // Invalidate relevant queries
+    onSuccess: (savedAOI, variables) => {
+      queryClient.setQueryData(["dataset-aoi", variables.dataset_id], savedAOI);
       queryClient.invalidateQueries({ queryKey: ["dataset-aoi", variables.dataset_id] });
     },
   });

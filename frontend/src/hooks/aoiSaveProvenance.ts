@@ -1,10 +1,17 @@
 export type AOISource = "ml_prediction" | "manual" | "manual_correction";
 
-export interface ExistingAOIIdentity {
+export interface ExistingAOI {
 	id: number;
 	user_id: string;
 	source: AOISource;
 	corrected_from_aoi_id: number | null;
+	image_quality?: number | null;
+	notes?: string | null;
+}
+
+export interface AOIMetadata {
+	image_quality?: number | null;
+	notes?: string | null;
 }
 
 export type AOISaveTarget =
@@ -16,7 +23,7 @@ export type AOISaveTarget =
 	};
 
 export function resolveAOISaveTarget(
-	latestAOI: ExistingAOIIdentity | undefined,
+	latestAOI: ExistingAOI | undefined,
 	currentUserId: string,
 ): AOISaveTarget {
 	if (
@@ -47,5 +54,21 @@ export function resolveAOISaveTarget(
 		kind: "insert",
 		source: "manual",
 		correctedFromAOIId: null,
+	};
+}
+
+export function resolveAOIRevisionMetadata(
+	latestAOI: ExistingAOI | undefined,
+	requestedMetadata: AOIMetadata,
+): Required<AOIMetadata> {
+	const canInheritManualMetadata = latestAOI?.source !== "ml_prediction";
+
+	return {
+		image_quality: requestedMetadata.image_quality !== undefined
+			? requestedMetadata.image_quality
+			: canInheritManualMetadata ? latestAOI?.image_quality ?? null : null,
+		notes: requestedMetadata.notes !== undefined
+			? requestedMetadata.notes
+			: canInheritManualMetadata ? latestAOI?.notes ?? null : null,
 	};
 }

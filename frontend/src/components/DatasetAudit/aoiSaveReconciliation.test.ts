@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { type AOIGeometry, reconcileAOISave } from "./aoiSaveReconciliation";
+import {
+	type AOIGeometry,
+	isSameAOIGeometry,
+	reconcileAOIChange,
+	reconcileAOISave,
+} from "./aoiSaveReconciliation";
 
 const polygon = (offset: number): AOIGeometry => ({
 	type: "Polygon",
@@ -10,6 +15,42 @@ const polygon = (offset: number): AOIGeometry => ({
 		[offset + 1, offset + 1],
 		[offset, offset],
 	]],
+});
+
+describe("isSameAOIGeometry", () => {
+	it("recognizes an equivalent geometry republished by the map", () => {
+		expect(isSameAOIGeometry(polygon(0), polygon(0))).toBe(true);
+	});
+
+	it("distinguishes a manual draft from the saved geometry", () => {
+		expect(isSameAOIGeometry(polygon(0), polygon(2))).toBe(false);
+	});
+});
+
+describe("reconcileAOIChange", () => {
+	it("refreshes the saved baseline when the map republishes server geometry", () => {
+		const previousSaved = polygon(0);
+		const refreshedServer = polygon(2);
+
+		expect(reconcileAOIChange(
+			refreshedServer,
+			previousSaved,
+			refreshedServer,
+		)).toEqual({
+			savedGeometry: refreshedServer,
+			isDirty: false,
+		});
+	});
+
+	it("keeps a manual geometry dirty against the saved baseline", () => {
+		const saved = polygon(0);
+		const draft = polygon(2);
+
+		expect(reconcileAOIChange(draft, saved, saved)).toEqual({
+			savedGeometry: saved,
+			isDirty: true,
+		});
+	});
 });
 
 describe("reconcileAOISave", () => {
