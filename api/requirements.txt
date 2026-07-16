@@ -29,4 +29,4 @@ pyogrio
 # PyTorch pair; the API Dockerfile installs CPU wheels for amd64.
 torch==2.4.1
 torchvision==0.19.1
-open-clip-torch>=2.24.0
+open-clip-torch>=3.3.0
