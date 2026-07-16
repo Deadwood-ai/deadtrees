@@ -1,5 +1,6 @@
-import { useEffect, useRef, useCallback, useState } from "react";
-import { Map, View } from "ol";
+import { useEffect, useRef, useCallback, useState, memo } from "react";
+// Aliased so that `Map` keeps referring to the built-in Map in this module.
+import { Map as OLMap, View } from "ol";
 import type MapBrowserEvent from "ol/MapBrowserEvent";
 import { defaults as defaultInteractions } from "ol/interaction";
 import VectorLayer from "ol/layer/Vector";
@@ -27,6 +28,7 @@ import { useDatasetMap } from "../../hooks/useDatasetMapProvider";
 import "./tooltip.css";
 import { useDatasetDetailsMap } from "../../hooks/useDatasetDetailsMapProvider";
 import { palette } from "../../theme/palette";
+import { transitionDatasetFeatureHover } from "./datasetFeatureHover";
 
 export type DatasetMapColorMode = "quality" | "labels" | "year" | "timeline";
 
@@ -71,6 +73,34 @@ const createHoverExtentStyle = (spec: DatasetVisualSpec): Style =>
     fill: new Fill({ color: withAlpha(spec.fill, 0.52) }),
     stroke: new Stroke({ color: "#ffffff", width: 2.5 }),
   });
+
+interface DatasetStyleBundle {
+  extent: Style;
+  extentHover: Style;
+  marker: Style;
+  markerHover: Style;
+}
+
+// A dataset's styling depends only on its visual spec, of which there are a
+// handful. Styles are immutable here (features only ever get one assigned), so
+// they can be shared instead of allocating 4 per dataset — ~30k objects, and the
+// GC churn that comes with them — on every map rebuild.
+const styleBundleCache = new Map<string, DatasetStyleBundle>();
+
+const getStyleBundle = (spec: DatasetVisualSpec): DatasetStyleBundle => {
+  const key = `${spec.fill}|${spec.stroke}|${spec.marker}`;
+  let bundle = styleBundleCache.get(key);
+  if (!bundle) {
+    bundle = {
+      extent: createExtentStyle(spec),
+      extentHover: createHoverExtentStyle(spec),
+      marker: createMarkerStyle(spec),
+      markerHover: createMarkerStyle(spec, true),
+    };
+    styleBundleCache.set(key, bundle);
+  }
+  return bundle;
+};
 
 type DatasetMapItem = IDataset | IDatasetArchiveItem;
 
@@ -179,18 +209,47 @@ const getDatasetVisualSpec = (dataset: DatasetMapItem, mode: DatasetMapColorMode
   };
 };
 
+// toLocaleDateString builds a fresh Intl.DateTimeFormat on every call (~60µs).
+// The map formats a date for each of its ~15k features on every rebuild, so the
+// formatters are hoisted and results memoised by date — the archive only holds a
+// few hundred distinct acquisition dates.
+const dateFormatters = new Map<string, Intl.DateTimeFormat>();
+
+const getDateFormatter = (hasMonth: boolean, hasDay: boolean): Intl.DateTimeFormat => {
+  const key = `${hasMonth}|${hasDay}`;
+  let formatter = dateFormatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: hasMonth ? "long" : undefined,
+      day: hasDay ? "numeric" : undefined,
+    });
+    dateFormatters.set(key, formatter);
+  }
+  return formatter;
+};
+
+const acquisitionDateCache = new Map<string, string>();
+
 const formatAcquisitionDate = (dataset: DatasetMapItem): string => {
+  const cacheKey = `${dataset.aquisition_year}|${dataset.aquisition_month ?? ""}|${dataset.aquisition_day ?? ""}`;
+  const cached = acquisitionDateCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   const year = Number.parseInt(dataset.aquisition_year, 10);
-  if (Number.isNaN(year)) return "Unknown date";
+  if (Number.isNaN(year)) {
+    acquisitionDateCache.set(cacheKey, "Unknown date");
+    return "Unknown date";
+  }
 
   const month = dataset.aquisition_month ? Number.parseInt(dataset.aquisition_month, 10) : 1;
   const day = dataset.aquisition_day ? Number.parseInt(dataset.aquisition_day, 10) : 1;
 
-  return new Date(year, Math.max(month - 1, 0), Math.max(day, 1)).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: dataset.aquisition_month ? "long" : undefined,
-    day: dataset.aquisition_day ? "numeric" : undefined,
-  });
+  const formatted = getDateFormatter(Boolean(dataset.aquisition_month), Boolean(dataset.aquisition_day)).format(
+    new Date(year, Math.max(month - 1, 0), Math.max(day, 1)),
+  );
+  acquisitionDateCache.set(cacheKey, formatted);
+  return formatted;
 };
 
 const buildTooltipTitle = (dataset: DatasetMapItem): string => {
@@ -204,7 +263,7 @@ const buildTooltipTitle = (dataset: DatasetMapItem): string => {
   return `Dataset #${dataset.id}${suffix}`;
 };
 
-interface MapRef extends Map {
+interface MapRef extends OLMap {
   moveEndListener?: () => void;
   pointerMoveListener?: (evt: MapBrowserEvent) => void;
   selectOnClick?: Select;
@@ -234,6 +293,10 @@ const DatasetMapOL = ({
   const vectorLayerExtendRef = useRef<VectorLayer<VectorSource> | null>(null);
   const vectorLayerMarkerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const mapContainer = useRef<HTMLDivElement>(null);
+  // Lets hover highlighting touch just the affected features instead of scanning
+  // every feature on the map on each hover.
+  const featuresByIdRef = useRef<Map<number, Feature[]>>(new Map());
+  const hoveredFeatureIdRef = useRef<number | null>(null);
   const { DatasetViewport, setDatasetViewport } = useDatasetMap();
   // Track previous trigger value to only zoom on explicit filter actions
   const prevZoomTriggerRef = useRef(filterZoomTrigger);
@@ -278,7 +341,7 @@ const DatasetMapOL = ({
         zoom: DatasetViewport.zoom,
       });
 
-      const map = new Map({
+      const map = new OLMap({
         target: mapContainer.current,
         layers: [],
         controls: createStandardMapControls(),
@@ -362,9 +425,18 @@ const DatasetMapOL = ({
                 },
               ) ?? null;
 
+            const nextHoveredId = hoveredFeature ? (hoveredFeature.get("id") as number) : null;
+            const previousHoveredId = hoveredFeatureIdRef.current;
+            hoveredFeatureIdRef.current = transitionDatasetFeatureHover(
+              featuresByIdRef.current,
+              previousHoveredId,
+              nextHoveredId,
+            );
+            if (previousHoveredId !== nextHoveredId) {
+              setHoveredItemRef.current(nextHoveredId);
+            }
+
             if (hoveredFeature) {
-              const featureId = hoveredFeature.get("id");
-              setHoveredItemRef.current(featureId);
               const targetElement = map.getTargetElement();
               if (targetElement) {
                 targetElement.style.cursor = "pointer";
@@ -382,27 +454,12 @@ const DatasetMapOL = ({
                 tooltipElement.innerHTML = tooltipContent;
                 tooltipElement.classList.remove("hidden");
               }
-
-              const hoverStyle = hoveredFeature.get("hoverStyle");
-              if (hoverStyle && hoveredFeature instanceof Feature) {
-                hoveredFeature.setStyle(hoverStyle);
-              }
             } else {
-              setHoveredItemRef.current(null);
               const targetElement = map.getTargetElement();
               if (targetElement) {
                 targetElement.style.cursor = "";
               }
               tooltip.getElement()?.classList.add("hidden");
-
-              vectorLayerExtendRef.current
-                ?.getSource()
-                ?.getFeatures()
-                .forEach((f) => f.setStyle(f.get("baseStyle")));
-              vectorLayerMarkerRef.current
-                ?.getSource()
-                ?.getFeatures()
-                .forEach((f) => f.setStyle(f.get("baseStyle")));
             }
           };
           map.on("pointermove", pointerMoveListener);
@@ -507,16 +564,22 @@ const DatasetMapOL = ({
 
       vectorSourceExtend.clear();
       vectorSourceMarker.clear();
+      // Features are rebuilt from scratch, so any previous hover highlight is gone
+      // with them.
+      featuresByIdRef.current = new Map();
+      hoveredFeatureIdRef.current = null;
 
       data.forEach((dataset) => {
         if (dataset.bbox) {
           const parsedBBox = parseBBox(dataset.bbox);
           if (parsedBBox) {
             const visualSpec = getDatasetVisualSpec(dataset, colorMode);
-            const extentStyle = createExtentStyle(visualSpec);
-            const extentHoverStyle = createHoverExtentStyle(visualSpec);
-            const markerStyle = createMarkerStyle(visualSpec);
-            const markerHoverStyle = createMarkerStyle(visualSpec, true);
+            const {
+              extent: extentStyle,
+              extentHover: extentHoverStyle,
+              marker: markerStyle,
+              markerHover: markerHoverStyle,
+            } = getStyleBundle(visualSpec);
             const extentFeature = new Feature(fromExtent(parsedBBox).transform("EPSG:4326", "EPSG:3857"));
             extentFeature.setProperties({
               id: dataset.id,
@@ -542,6 +605,8 @@ const DatasetMapOL = ({
             });
             pointFeature.setStyle(markerStyle);
             vectorSourceMarker.addFeature(pointFeature);
+
+            featuresByIdRef.current.set(dataset.id, [extentFeature, pointFeature]);
           }
         }
       });
@@ -564,26 +629,16 @@ const DatasetMapOL = ({
     }
   }, [data, filterZoomTrigger, colorMode, mapLayersReady]);
 
-  // Handle feature highlighting separately
+  // Handle feature highlighting separately. Only the features whose highlight
+  // actually changed are restyled — restyling all of them made every hover redraw
+  // the whole layer.
   useEffect(() => {
-    // console.log("hoveredItem changed", hoveredItem);
-    if (vectorLayerExtendRef.current && vectorLayerMarkerRef.current) {
-      const vectorSourceExtend = vectorLayerExtendRef.current.getSource();
-      const vectorSourceMarker = vectorLayerMarkerRef.current.getSource();
-
-      if (!vectorSourceExtend || !vectorSourceMarker) return;
-
-      vectorSourceExtend.getFeatures().forEach((feature) => {
-        const featureId = feature.get("id");
-        feature.setStyle(featureId === hoveredItem ? feature.get("hoverStyle") : feature.get("baseStyle"));
-      });
-
-      vectorSourceMarker.getFeatures().forEach((feature) => {
-        const featureId = feature.get("id");
-        feature.setStyle(featureId === hoveredItem ? feature.get("hoverStyle") : feature.get("baseStyle"));
-      });
-    }
-  }, [hoveredItem]);
+    hoveredFeatureIdRef.current = transitionDatasetFeatureHover(
+      featuresByIdRef.current,
+      hoveredFeatureIdRef.current,
+      hoveredItem,
+    );
+  }, [hoveredItem, data, mapLayersReady]);
 
   // Update visible features after data changes and map is rendered
   useEffect(() => {
@@ -608,4 +663,6 @@ const DatasetMapOL = ({
   return <div ref={mapContainer} style={{ width: "100%", height: "100%", borderRadius: 8 }}></div>;
 };
 
-export default DatasetMapOL;
+// Memoised so that typing in the archive search box — which re-renders the page
+// on every keystroke — does not re-render the map subtree.
+export default memo(DatasetMapOL);
