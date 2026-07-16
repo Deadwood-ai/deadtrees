@@ -178,7 +178,13 @@ explicitly constrained in their service manifest so update PRs exercise the
 relevant CI lane. NumPy is temporarily constrained below 2.5 because Rasterio
 1.5 still uses the ndarray shape-mutation path deprecated in NumPy 2.5; remove
 that upper bound only after the processor geospatial tests run without those
-warnings.
+warnings. Dependabot groups routine Python updates and compatibility-envelope
+patches separately. All PyTorch/Torchvision upgrades are manual so the tested
+pair cannot move independently. NumPy, Rasterio, OpenCLIP,
+segmentation-models-pytorch, and Transformers feature-line upgrades are also
+manual maintenance work. GDAL base images receive automated patch or digest
+refreshes only because feature-line changes can also change the bundled
+Ubuntu/Python runtime and available PyTorch wheels.
 
 Keep authenticated contributor journeys out of the production-read Playwright
 suite. Use the local contributor smoke when a frontend change touches upload,
