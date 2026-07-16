@@ -3,6 +3,10 @@ import { supabase } from "./useSupabase";
 import { useAuth } from "./useAuthProvider";
 import { useCanAudit } from "./useUserPrivileges";
 import { useMemo } from "react";
+import {
+  type ExistingAOIIdentity,
+  resolveAOISaveTarget,
+} from "./aoiSaveProvenance";
 
 // Update the enum type to match your backend
 export type PredictionQuality = "great" | "sentinel_ok" | "bad";
@@ -215,12 +219,12 @@ export function useSaveDatasetAOI() {
       if (existingAOIError) throw existingAOIError;
 
       let result;
-      const latestAOI = existingAOI?.[0];
+      const latestAOI = existingAOI?.[0] as ExistingAOIIdentity | undefined;
+      const saveTarget = resolveAOISaveTarget(latestAOI, user.id);
       const updatedAt = new Date().toISOString();
 
-      if (latestAOI && latestAOI.source !== "ml_prediction") {
-        // Manual AOIs are directly editable by auditors. Preserve provenance
-        // fields and row ownership; only update the actual AOI content.
+      if (saveTarget.kind === "update") {
+        // Authors update their own manual AOI row directly.
         const { data, error } = await supabase
           .from("v2_aois")
           .update({
@@ -230,15 +234,15 @@ export function useSaveDatasetAOI() {
             ...(aoiData.notes !== undefined ? { notes: aoiData.notes } : {}),
             updated_at: updatedAt,
           })
-          .eq("id", latestAOI.id)
+          .eq("id", saveTarget.id)
           .select()
           .single();
 
         if (error) throw error;
         result = data;
       } else {
-        // Preserve ML AOIs by inserting a linked manual correction. If no AOI
-        // exists yet, create a plain manual AOI.
+        // Preserve authorship across auditors by inserting a new manual row.
+        // Corrections keep pointing to the original ML prediction.
         const { data, error } = await supabase
           .from("v2_aois")
           .insert({
@@ -248,8 +252,8 @@ export function useSaveDatasetAOI() {
             is_whole_image: aoiData.is_whole_image,
             ...(aoiData.image_quality !== undefined ? { image_quality: aoiData.image_quality } : {}),
             ...(aoiData.notes !== undefined ? { notes: aoiData.notes } : {}),
-            source: latestAOI?.source === "ml_prediction" ? "manual_correction" : "manual",
-            corrected_from_aoi_id: latestAOI?.source === "ml_prediction" ? latestAOI.id : null,
+            source: saveTarget.source,
+            corrected_from_aoi_id: saveTarget.correctedFromAOIId,
             updated_at: updatedAt,
           })
           .select()
