@@ -43,6 +43,10 @@ export interface AuditMapWithControlsHandle {
 	addAnotherPolygon: () => void;
 	deleteAOI: () => void;
 	deleteSelectedPolygon: () => void;
+	mergeSelectedPolygons: () => void;
+	clipSelectedPolygons: () => void;
+	cutSelectedPolygon: () => void;
+	undoAOIChange: () => void;
 }
 
 /**
@@ -108,6 +112,10 @@ const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWith
 			addAnotherPolygon: () => mapRef.current?.addAnotherPolygon(),
 			deleteAOI: () => mapRef.current?.deleteAOI(),
 			deleteSelectedPolygon: () => mapRef.current?.deleteSelectedPolygon(),
+			mergeSelectedPolygons: () => mapRef.current?.mergeSelectedPolygons(),
+			clipSelectedPolygons: () => mapRef.current?.clipSelectedPolygons(),
+			cutSelectedPolygon: () => mapRef.current?.cutSelectedPolygon(),
+			undoAOIChange: () => mapRef.current?.undoAOIChange(),
 		}), []);
 
 		// Handlers for correction review

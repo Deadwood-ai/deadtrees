@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Form, message, notification } from "antd";
 import confetti from "canvas-confetti";
@@ -11,7 +11,6 @@ import {
 	useClearAuditLock,
 	useOrthoMetadata,
 	useMarkAsReviewed,
-	useDatasetAOI,
 } from "../../hooks/useDatasetAudit";
 import { useAuth } from "../../hooks/useAuthProvider";
 import { useDownload } from "../../hooks/useDownloadProvider";
@@ -22,7 +21,7 @@ import { usePhenologyData } from "../../hooks/usePhenologyData";
 import { useSeasonPrompt } from "../../hooks/useSeasonPrompt";
 import { supabase } from "../../hooks/useSupabase";
 import { trackAppEvent } from "../../utils/analytics";
-import { AOIToolbarState } from "../DatasetDetailsMap/DatasetDetailsMap";
+import { useAuditAOIState } from "./useAuditAOIState";
 
 export interface UseAuditDetailStateProps {
 	dataset: IDataset;
@@ -114,20 +113,17 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	// Download state
 	const { isDownloading, startDownload, finishDownload, currentDownloadId } = useDownload();
 
-	// AOI state
-	const currentAOIGeometry = useRef<GeoJSON.MultiPolygon | GeoJSON.Polygon | null>(null);
-	const [hasAOI, setHasAOI] = useState(false);
-	const [isAOILoaded, setIsAOILoaded] = useState(false);
-
-	// AOI toolbar state (reported from map component)
-	const [aoiToolbarState, setAoiToolbarState] = useState<AOIToolbarState>({
-		isDrawing: false,
-		isEditing: false,
-		hasAOI: false,
-		isAOILoading: true,
-		selectedFeatureForEdit: false,
-		polygonCount: 0,
-	});
+	const {
+		currentGeometryRef: currentAOIGeometry,
+		hasAOI,
+		isLoaded: isAOILoaded,
+		isDirty: isAOIDirty,
+		isSaving: isSavingAOI,
+		toolbarState: aoiToolbarState,
+		setToolbarState: setAoiToolbarState,
+		handleChange: handleAOIChange,
+		handleSave: handleSaveAOI,
+	} = useAuditAOIState(dataset.id);
 
 	// Data hooks
 	const { data: auditData, isLoading: isAuditLoading } = useDatasetAudit(dataset.id);
@@ -137,7 +133,6 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	const { mutateAsync: markAsReviewed, isPending: isMarkingReviewed } = useMarkAsReviewed();
 	const { data: orthoMetadata, isLoading: isOrthoLoading } = useOrthoMetadata(dataset.id);
 	const { data: phenologyData, isLoading: isPhenologyLoading } = usePhenologyData(dataset.id);
-	const { data: aoiData, isLoading: isAOIDataLoading } = useDatasetAOI(dataset.id);
 
 	// Navigation context
 	const { getNextDatasetId, currentIndex, totalCount } = useAuditNavigation();
@@ -173,9 +168,6 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		setIsLockingAudit(true);
 		setAuditLockError(null);
 		setHasFormChanges(false);
-		setHasAOI(false);
-		setIsAOILoaded(false);
-		currentAOIGeometry.current = null;
 		form.resetFields();
 
 		const lockAudit = async () => {
@@ -220,53 +212,41 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		};
 	}, []);
 
-	// AOI change handler
-	const handleAOIChange = useCallback((geometry: GeoJSON.MultiPolygon | GeoJSON.Polygon | null) => {
-		console.debug("AOI changed:", geometry ? "AOI present" : "AOI cleared");
-		currentAOIGeometry.current = geometry;
-		setHasAOI(!!geometry);
-		setIsAOILoaded(true);
-	}, []);
-
-	// Mark AOI as loaded once the AOI query completes (even if empty)
-	useEffect(() => {
-		if (isAOIDataLoading || isAOILoaded) return;
-
-		if (aoiData?.geometry) {
-			currentAOIGeometry.current = aoiData.geometry as GeoJSON.MultiPolygon | GeoJSON.Polygon;
-			setHasAOI(true);
-		} else {
-			currentAOIGeometry.current = null;
-			setHasAOI(false);
-		}
-
-		setIsAOILoaded(true);
-	}, [isAOIDataLoading, isAOILoaded, aoiData]);
-
 	// Form submit handler
 	const handleSubmit = async (values: AuditFormValues) => {
 		if (!isAOILoaded) {
+			setNavigateToNext(false);
 			message.warning("AOI is still loading, please wait...");
 			return;
 		}
 
 		if (flags.some((f) => f.status === "open")) {
+			setNavigateToNext(false);
 			message.error("There are open user-reported issues. Please acknowledge them before saving.");
 			return;
 		}
 
 		if (values.final_assessment === "fixable_issues" && !values.notes?.trim()) {
+			setNavigateToNext(false);
 			message.error("Please provide detailed notes for the fixable issues");
 			return;
 		}
 
 		if (values.final_assessment === "exclude_completely" && !values.notes?.trim()) {
+			setNavigateToNext(false);
 			message.error("Please provide detailed notes for excluding this dataset");
 			return;
 		}
 
 		if (values.final_assessment === "no_issues" && !currentAOIGeometry.current) {
+			setNavigateToNext(false);
 			message.error("Please draw an AOI on the map before submitting");
+			return;
+		}
+
+		if (isAOIDirty) {
+			setNavigateToNext(false);
+			message.warning("Please save AOI edits before saving the audit.");
 			return;
 		}
 
@@ -277,7 +257,6 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 				...values,
 				dataset_id: dataset.id,
 				aoi_done: !!currentAOIGeometry.current,
-				aoiGeometry: currentAOIGeometry.current || undefined,
 			};
 
 			const isCompletion = !auditData;
@@ -331,6 +310,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 			message.error("Failed to save audit data");
 		} finally {
 			setIsSubmitting(false);
+			setNavigateToNext(false);
 		}
 	};
 
@@ -344,6 +324,15 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	};
 
 	const handleMarkReviewedAndNext = async () => {
+		if (isSavingAOI) {
+			message.warning("Please wait for the AOI save to finish.");
+			return;
+		}
+		if (isAOIDirty) {
+			message.warning("Please save AOI edits before marking the audit reviewed.");
+			return;
+		}
+
 		try {
 			await markAsReviewed(dataset.id);
 			const nextId = getNextDatasetId(dataset.id);
@@ -410,8 +399,11 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		hasAOI,
 		isAOILoaded,
 		handleAOIChange,
+		handleSaveAOI,
 		aoiToolbarState,
 		setAoiToolbarState,
+		isAOIDirty,
+		isSavingAOI,
 
 		// Download
 		isDownloading,

@@ -17,6 +17,7 @@ class FakeQuery:
 		self.rows = [dict(row) for row in rows]
 		self.filters = []
 		self.order_columns = []
+		self.limit_count = None
 
 	def select(self, *_args, **_kwargs):
 		return self
@@ -29,8 +30,12 @@ class FakeQuery:
 		self.filters.append(('in', column, tuple(values)))
 		return self
 
-	def order(self, column):
-		self.order_columns.append(column)
+	def order(self, column, desc=False):
+		self.order_columns.append((column, desc))
+		return self
+
+	def limit(self, count):
+		self.limit_count = count
 		return self
 
 	def execute(self):
@@ -42,10 +47,10 @@ class FakeQuery:
 			elif filter_type == 'in':
 				rows = [row for row in rows if row.get(column) in value]
 
-		for column in reversed(self.order_columns):
-			rows = sorted(rows, key=lambda row: row.get(column))
+		for column, desc in reversed(self.order_columns):
+			rows = sorted(rows, key=lambda row: row.get(column), reverse=desc)
 
-		return SimpleNamespace(data=rows)
+		return SimpleNamespace(data=rows[:self.limit_count] if self.limit_count is not None else rows)
 
 
 class FakeClient:
@@ -103,6 +108,28 @@ def make_patch(
 def install_fake_db(monkeypatch, tables):
 	monkeypatch.setattr(export_module, 'use_client', lambda _token: FakeUseClient(tables))
 	monkeypatch.setattr(export_module, 'fetch_reference_datasets', lambda _token: [10])
+
+
+def test_fetch_aoi_geometry_uses_latest_manual_correction(monkeypatch):
+	prediction_geometry = {'type': 'Polygon', 'coordinates': [[[0, 0], [1, 0], [0, 0]]]}
+	correction_geometry = {'type': 'Polygon', 'coordinates': [[[2, 2], [3, 2], [2, 2]]]}
+	tables = {
+		'v2_aois': [
+			{
+				'dataset_id': 10,
+				'geometry': prediction_geometry,
+				'created_at': '2026-07-16T10:00:00+00:00',
+			},
+			{
+				'dataset_id': 10,
+				'geometry': correction_geometry,
+				'created_at': '2026-07-16T11:00:00+00:00',
+			},
+		]
+	}
+	install_fake_db(monkeypatch, tables)
+
+	assert export_module.fetch_aoi_geometry('token', 10) == correction_geometry
 
 
 def test_fetch_validated_patches_includes_single_label_validations_by_default(monkeypatch):

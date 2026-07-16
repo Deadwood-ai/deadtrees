@@ -520,6 +520,8 @@ class AOI(BaseModel):
 	user_id: str
 	geometry: Dict  # Changed from MultiPolygonModel to Dict
 	is_whole_image: bool = False
+	source: Literal['ml_prediction', 'manual', 'manual_correction'] = 'manual'
+	corrected_from_aoi_id: Optional[int] = None
 	image_quality: Optional[int] = None
 	notes: Optional[str] = None
 	created_at: Optional[datetime] = None
@@ -530,6 +532,11 @@ class AOI(BaseModel):
 		if v is not None and not 1 <= v <= 3:
 			raise ValueError('Image quality must be between 1 and 3')
 		return v
+
+
+def aoi_insert_payload(aoi: AOI) -> Dict:
+	"""Serialize AOIs for rolling compatibility with the pre-provenance schema."""
+	return aoi.model_dump(exclude={'id', 'created_at', 'updated_at', 'source', 'corrected_from_aoi_id'})
 
 
 class Label(BaseModel):

@@ -6,7 +6,7 @@ from shapely.geometry import Polygon
 
 from shared.db import use_client
 from shared.settings import settings
-from shared.models import TaskTypeEnum, QueueTask, AOI
+from shared.models import TaskTypeEnum, QueueTask, AOI, aoi_insert_payload
 
 from processor.src.process_aoi_segmentation import process_aoi_segmentation
 from processor.src.aoi_segmentation_v1.predict_aoi import AUTO_AOI_NOTES
@@ -56,6 +56,41 @@ def test_aoi_model_loads():
 	with torch.no_grad():
 		logits = model.model(pixel_values=dummy).logits
 	assert logits.shape[1] == 2  # binary: outside_aoi, inside_aoi
+
+
+@pytest.mark.unit
+def test_aoi_insert_payload_remains_compatible_with_pre_provenance_schema():
+	aoi = AOI(
+		dataset_id=1,
+		user_id='00000000-0000-0000-0000-000000000001',
+		geometry={'type': 'MultiPolygon', 'coordinates': []},
+		is_whole_image=False,
+		source='ml_prediction',
+	)
+
+	payload = aoi_insert_payload(aoi)
+
+	assert 'source' not in payload
+	assert 'corrected_from_aoi_id' not in payload
+
+
+def test_legacy_processor_aoi_insert_is_recorded_as_prediction(aoi_task, auth_token):
+	"""Processors deployed before AOI provenance can still insert predictions."""
+	legacy_aoi = {
+		'dataset_id': aoi_task.dataset_id,
+		'user_id': aoi_task.user_id,
+		'geometry': {
+			'type': 'MultiPolygon',
+			'coordinates': [[[[13.405, 52.52], [13.405, 52.521], [13.406, 52.521], [13.406, 52.52], [13.405, 52.52]]]],
+		},
+		'is_whole_image': False,
+		'notes': AUTO_AOI_NOTES,
+	}
+
+	with use_client(auth_token) as client:
+		response = client.table(settings.aois_table).insert(legacy_aoi).execute()
+
+	assert response.data[0]['source'] == 'ml_prediction'
 
 
 @pytest.mark.unit
@@ -137,6 +172,7 @@ def test_process_aoi_segmentation_success(aoi_task, auth_token):
 	auto_aois = [aoi for aoi in aoi_response.data if aoi['notes'] == AUTO_AOI_NOTES]
 	for aoi in auto_aois:
 		assert aoi['is_whole_image'] is False
+		assert aoi['source'] == 'ml_prediction'
 		assert aoi['geometry']['type'] == 'MultiPolygon'
 
 
@@ -152,6 +188,7 @@ def test_process_aoi_skips_when_human_aoi_exists(aoi_task, auth_token, test_proc
 			'coordinates': [[[[13.405, 52.52], [13.405, 52.521], [13.406, 52.521], [13.406, 52.52], [13.405, 52.52]]]],
 		},
 		is_whole_image=False,
+		source='manual',
 		notes='auditor drawn',
 	)
 	with use_client(auth_token) as client:

@@ -3,6 +3,11 @@ import { supabase } from "./useSupabase";
 import { useAuth } from "./useAuthProvider";
 import { useCanAudit } from "./useUserPrivileges";
 import { useMemo } from "react";
+import {
+  type ExistingAOI,
+  resolveAOIRevisionMetadata,
+  resolveAOISaveTarget,
+} from "./aoiSaveProvenance";
 
 // Update the enum type to match your backend
 export type PredictionQuality = "great" | "sentinel_ok" | "bad";
@@ -40,8 +45,10 @@ export interface AOIData {
   user_id?: string;
   geometry: GeoJSON.MultiPolygon | GeoJSON.Polygon;
   is_whole_image: boolean;
-  image_quality?: number;
-  notes?: string;
+  source?: "ml_prediction" | "manual" | "manual_correction";
+  corrected_from_aoi_id?: number | null;
+  image_quality?: number | null;
+  notes?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -198,43 +205,59 @@ export function useSaveDatasetAOI() {
 
   return useMutation({
     mutationFn: async (aoiData: AOIData) => {
-      const aoiValues = { ...aoiData };
-      delete aoiValues.id;
-      delete aoiValues.created_at;
-      delete aoiValues.updated_at;
-      const dataToSave = {
-        ...aoiValues,
-        user_id: user?.id,
-        updated_at: new Date().toISOString(),
-      };
+      if (!user?.id) {
+        throw new Error("User must be logged in to save AOI");
+      }
 
       // Check if AOI already exists for this dataset
-      const { data: existingAOI } = await supabase
+      const { data: existingAOI, error: existingAOIError } = await supabase
         .from("v2_aois")
-        .select("id,user_id")
+        .select("id,user_id,source,corrected_from_aoi_id,image_quality,notes")
         .eq("dataset_id", aoiData.dataset_id)
         .order("created_at", { ascending: false })
         .limit(1);
 
+      if (existingAOIError) throw existingAOIError;
+
       let result;
-      const latestAOI = existingAOI?.[0];
-      if (latestAOI && latestAOI.user_id === user?.id) {
-        // Update the same AOI row the map displayed when the current user owns it.
+      const latestAOI = existingAOI?.[0] as ExistingAOI | undefined;
+      const saveTarget = resolveAOISaveTarget(latestAOI, user.id);
+      const revisionMetadata = resolveAOIRevisionMetadata(latestAOI, aoiData);
+      const updatedAt = new Date().toISOString();
+
+      if (saveTarget.kind === "update") {
+        // Authors update their own manual AOI row directly.
         const { data, error } = await supabase
           .from("v2_aois")
-          .update(dataToSave)
-          .eq("id", latestAOI.id)
+          .update({
+            geometry: aoiData.geometry,
+            is_whole_image: aoiData.is_whole_image,
+            ...(aoiData.image_quality !== undefined ? { image_quality: aoiData.image_quality } : {}),
+            ...(aoiData.notes !== undefined ? { notes: aoiData.notes } : {}),
+            updated_at: updatedAt,
+          })
+          .eq("id", saveTarget.id)
           .select()
           .single();
 
         if (error) throw error;
         result = data;
       } else {
-        // Auto-generated AOIs are processor-owned. Auditors claim edits by
-        // inserting a fresh row, which makes reruns treat the edit as human work.
+        // Preserve authorship across auditors by inserting a new manual row.
+        // Corrections keep pointing to the original ML prediction.
         const { data, error } = await supabase
           .from("v2_aois")
-          .insert({ ...dataToSave, notes: null })
+          .insert({
+            dataset_id: aoiData.dataset_id,
+            user_id: user.id,
+            geometry: aoiData.geometry,
+            is_whole_image: aoiData.is_whole_image,
+            image_quality: revisionMetadata.image_quality,
+            notes: revisionMetadata.notes,
+            source: saveTarget.source,
+            corrected_from_aoi_id: saveTarget.correctedFromAOIId,
+            updated_at: updatedAt,
+          })
           .select()
           .single();
 
@@ -244,8 +267,8 @@ export function useSaveDatasetAOI() {
 
       return result;
     },
-    onSuccess: (_, variables) => {
-      // Invalidate relevant queries
+    onSuccess: (savedAOI, variables) => {
+      queryClient.setQueryData(["dataset-aoi", variables.dataset_id], savedAOI);
       queryClient.invalidateQueries({ queryKey: ["dataset-aoi", variables.dataset_id] });
     },
   });
@@ -346,34 +369,12 @@ export function useSaveDatasetAudit() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (auditData: AuditFormValues & { aoiGeometry?: GeoJSON.MultiPolygon | GeoJSON.Polygon }) => {
-      const { aoiGeometry, ...auditFormData } = auditData;
-
+    mutationFn: async (auditData: AuditFormValues) => {
       const dataToSave = {
-        ...auditFormData,
+        ...auditData,
         audited_by: user?.id,
         audit_date: new Date().toISOString(),
       };
-
-      // If AOI geometry is provided, save it first
-      if (aoiGeometry) {
-        const aoiData: AOIData = {
-          dataset_id: auditData.dataset_id!,
-          user_id: user?.id,
-          geometry: aoiGeometry,
-          is_whole_image: false,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-
-        const { error: aoiError } = await supabase.from("v2_aois").insert(aoiData);
-        if (aoiError) {
-          console.error("Failed to save AOI:", aoiError);
-          throw new Error("Failed to save AOI data");
-        }
-
-        dataToSave.aoi_done = true;
-      }
 
       // Check if audit already exists
       const { data: existingAudits } = await supabase

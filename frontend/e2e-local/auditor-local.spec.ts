@@ -351,6 +351,12 @@ const fulfillSupabaseRequest = async (
       return;
     }
 
+    if (resource === "v2_aois" && savedAoiPayloads.length > 0) {
+      const latestAoi = savedAoiPayloads.at(-1);
+      await fulfillJson(route, wantsObject ? latestAoi : [latestAoi]);
+      return;
+    }
+
     await fulfillJson(route, wantsObject ? null : []);
     return;
   }
@@ -618,6 +624,11 @@ test.describe("auditor local e2e", () => {
 
     await drawAuditAoi(page);
     await expect(page.getByText(/AOI defined/)).toBeVisible();
+    await page.getByRole("button", { name: /^save Save AOI$/i }).click();
+    await expect
+      .poll(() => savedAoiPayloads.length, { timeout: 10_000 })
+      .toBe(1);
+    await expect(page.getByText("Unsaved AOI edits")).toBeHidden();
 
     const finalAssessmentCard = card(page, "8. Final Assessment");
     await finalAssessmentCard.getByText(/Ready/).click();
@@ -627,9 +638,6 @@ test.describe("auditor local e2e", () => {
 
     await page.getByRole("button", { name: /^save Save$/i }).click();
 
-    await expect
-      .poll(() => savedAoiPayloads.length, { timeout: 10_000 })
-      .toBe(1);
     await expect
       .poll(() => savedAuditPayloads.length, { timeout: 10_000 })
       .toBe(1);

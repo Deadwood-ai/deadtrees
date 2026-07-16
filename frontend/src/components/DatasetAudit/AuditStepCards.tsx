@@ -1,11 +1,13 @@
 import { useEffect, useRef } from "react";
 import { Card, Typography, Form, Radio, Input, Space, Tooltip, Tag, Button, Image, Collapse, message, notification, Popconfirm } from "antd";
-import { CopyOutlined, DownloadOutlined, EditOutlined, DeleteOutlined, CloseOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
+import {
+	CopyOutlined,
+	DownloadOutlined,
+} from "@ant-design/icons";
 import { createConditionalRule, formatAcquisitionDate } from "./auditConstants";
 import { IDataset } from "../../types/dataset";
 import { OrthoMetadata } from "../../hooks/useDatasetAudit";
 import { DatasetFlag, FlagStatus } from "../../types/flags";
-import { AOIToolbarState, AuditMapWithControlsHandle } from "./AuditMapWithControls";
 import type { PhenologyMetadata } from "../../types/phenology";
 import PhenologyBar from "../PhenologyBar/PhenologyBar";
 
@@ -437,144 +439,6 @@ export function ThumbnailCard({ thumbnailUrl }: ThumbnailCardProps) {
 					placeholder="Thumbnail issue details (colors, zoom level, white background, artifacts)..."
 					className="text-xs"
 				/>
-			</Form.Item>
-		</Card>
-	);
-}
-
-// === AOI Card (Step 7) ===
-interface AOICardProps {
-	aoiToolbarState: AOIToolbarState;
-	mapRef: React.RefObject<AuditMapWithControlsHandle>;
-}
-
-export function AOICard({ aoiToolbarState, mapRef }: AOICardProps) {
-	return (
-		<Card size="small" className="mb-3 shadow-sm">
-			<div className="mb-2 flex items-center">
-				<Text strong className="text-xs">7. Area of Interest (AOI)</Text>
-			</div>
-
-			{/* AOI Status */}
-			{aoiToolbarState.isAOILoading ? (
-				<div className="text-xs text-gray-500">Loading AOI...</div>
-			) : (
-				<div className="space-y-2">
-					{/* Status indicator */}
-					{aoiToolbarState.hasAOI && !aoiToolbarState.isDrawing && !aoiToolbarState.isEditing && (
-						<div className="rounded bg-green-50 px-2 py-1 text-xs text-green-700">
-							✓ AOI defined ({aoiToolbarState.polygonCount} polygon{aoiToolbarState.polygonCount !== 1 ? "s" : ""})
-						</div>
-					)}
-
-					{/* Toolbar buttons based on state */}
-					{!aoiToolbarState.isDrawing && !aoiToolbarState.isEditing && !aoiToolbarState.hasAOI && (
-						<Button
-							icon={<PlusOutlined />}
-							onClick={() => mapRef.current?.startDrawing()}
-							size="small"
-						>
-							Draw AOI Polygon
-						</Button>
-					)}
-
-					{aoiToolbarState.isDrawing && (
-						<div className="flex gap-2">
-							<Button
-								icon={<CloseOutlined />}
-								onClick={() => mapRef.current?.cancelDrawing()}
-								size="small"
-							>
-								Cancel Drawing
-							</Button>
-						</div>
-					)}
-
-					{!aoiToolbarState.isDrawing && !aoiToolbarState.isEditing && aoiToolbarState.hasAOI && (
-						<div className="flex flex-wrap gap-2">
-							<Button
-								icon={<EditOutlined />}
-								onClick={() => mapRef.current?.startEditing()}
-								size="small"
-							>
-								Edit
-							</Button>
-							<Button
-								icon={<PlusOutlined />}
-								onClick={() => mapRef.current?.addAnotherPolygon()}
-								size="small"
-							>
-								Add
-							</Button>
-							<Button
-								icon={<DeleteOutlined />}
-								onClick={() => mapRef.current?.deleteAOI()}
-								size="small"
-								danger
-							>
-								Delete All
-							</Button>
-						</div>
-					)}
-
-					{aoiToolbarState.isEditing && (
-						<div className="space-y-2">
-							<div className="text-xs text-gray-500">Click polygon to select, drag vertices to modify</div>
-							<div className="flex flex-wrap gap-2">
-								<Button
-									icon={<SaveOutlined />}
-									onClick={() => mapRef.current?.saveEditing()}
-									size="small"
-									type="primary"
-								>
-									Save
-								</Button>
-								<Button
-									icon={<CloseOutlined />}
-									onClick={() => mapRef.current?.cancelEditing()}
-									size="small"
-								>
-									Cancel
-								</Button>
-								{aoiToolbarState.selectedFeatureForEdit && (
-									<Button
-										icon={<DeleteOutlined />}
-										onClick={() => mapRef.current?.deleteSelectedPolygon()}
-										size="small"
-										danger
-									>
-										Delete
-									</Button>
-								)}
-							</div>
-						</div>
-					)}
-				</div>
-			)}
-
-			{/* AOI requirement status */}
-			<Form.Item
-				shouldUpdate={(prevValues, currentValues) =>
-					prevValues.final_assessment !== currentValues.final_assessment
-				}
-				className="mb-0 mt-2"
-			>
-				{({ getFieldValue }) => {
-					const assessment = getFieldValue("final_assessment");
-					const aoiRequired = assessment === "no_issues";
-
-					if (aoiToolbarState.hasAOI) return null;
-
-					return (
-						<div className="text-xs">
-							{aoiRequired ? (
-								<div className="text-orange-600">AOI required for "Ready" assessment</div>
-							) : (
-								<div className="text-gray-500">AOI optional for this assessment</div>
-							)}
-						</div>
-					);
-				}}
 			</Form.Item>
 		</Card>
 	);

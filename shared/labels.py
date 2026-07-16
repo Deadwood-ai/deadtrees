@@ -9,6 +9,7 @@ from shared.models import (
 	Label,
 	ModelPreference,
 	AOI,
+	aoi_insert_payload,
 	DeadwoodGeometry,
 	ForestCoverGeometry,
 	LabelDataEnum,
@@ -65,7 +66,7 @@ def create_label_with_geometries(payload: LabelPayloadData, user_id: str, token:
 				try:
 					response = (
 						client.table(settings.aois_table)
-						.insert(aoi.model_dump(exclude={'id', 'created_at', 'updated_at'}))
+						.insert(aoi_insert_payload(aoi))
 						.execute()
 					)
 					aoi_id = response.data[0]['id']

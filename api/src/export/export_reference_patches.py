@@ -241,10 +241,17 @@ def fetch_aoi_geometry(token: str, dataset_id: int) -> Optional[dict]:
 	"""Fetch AOI geometry for a dataset."""
 	try:
 		with use_client(token) as client:
-			response = client.from_('v2_aois').select('geometry').eq('dataset_id', dataset_id).execute()
+			response = (
+				client.from_('v2_aois')
+				.select('geometry')
+				.eq('dataset_id', dataset_id)
+				.order('created_at', desc=True)
+				.limit(1)
+				.execute()
+			)
 			if response.data and len(response.data) > 0:
 				return response.data[0]['geometry']
-			return None
+		return None
 	except Exception as e:
 		print(f'⚠️  Error fetching AOI: {e}')
 		return None
