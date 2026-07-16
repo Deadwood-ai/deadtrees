@@ -505,10 +505,8 @@ export default function DatasetDetails() {
           />
         </Suspense>
 
-        {/* Open-vocabulary tile search is a core-team-only feature, gated to the
-            same auditors who get the AI search on the dataset archive. The
-            /search/embed endpoint stays public + rate-limited; this only hides
-            the UI from regular visitors. */}
+        {/* Open-vocabulary tile search is temporarily auditor-only. PostgreSQL
+            enforces the same capability even if callers bypass this UI gate. */}
         {canUseAiSearch && !isEditing && dataset && (
           <div className="pointer-events-none absolute left-1/2 top-24 z-30 -translate-x-1/2">
             <div className="pointer-events-auto">

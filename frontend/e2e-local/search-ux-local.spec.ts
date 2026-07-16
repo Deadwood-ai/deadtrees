@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { installLocalSession } from "./support/localAuth";
 
 // Exercises the open-vocabulary search UX changes on the dataset archive and
 // dataset details pages, driven entirely through mocked Supabase/API responses
@@ -10,7 +11,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 //   1. semantic search results persist across navigate-away + browser back
 //   2. result rows are real links -> middle-click opens a new tab
 //   3. the per-orthophoto AI search disables itself when embeddings are missing
-//   4. running a search logs a row into v2_search_queries
+//   4. successful auditor searches use embed -> RPC -> analytics ordering
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rgbGeoTiffFixture = path.resolve(
@@ -19,7 +20,9 @@ const rgbGeoTiffFixture = path.resolve(
 );
 
 const localSupabaseUrl =
-  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "http://127.0.0.1:54321";
+  process.env.VITE_SUPABASE_URL ||
+  process.env.SUPABASE_URL ||
+  "http://127.0.0.1:54321";
 
 const auditor = {
   id: "00000000-0000-4000-8000-0000000000c3",
@@ -86,46 +89,14 @@ const fullDataset = (id: number, region: string) => ({
   has_ml_tiles: false,
 });
 
-// Captured v2_search_queries inserts, asserted by the logging test.
+let embedRequests: Array<Record<string, unknown>> = [];
+let rpcRequests: Array<{
+  name: string;
+  body: Record<string, unknown>;
+}> = [];
 let loggedQueries: Array<Record<string, unknown>> = [];
-
-const createUnsignedJwt = () => {
-  const encode = (value: Record<string, unknown>) =>
-    Buffer.from(JSON.stringify(value)).toString("base64url");
-  return [
-    encode({ alg: "none", typ: "JWT" }),
-    encode({
-      aud: "authenticated",
-      role: "authenticated",
-      sub: auditor.id,
-      email: auditor.email,
-      exp: Math.floor(Date.now() / 1000) + 3600,
-    }),
-    "local-e2e",
-  ].join(".");
-};
-
-const createLocalSession = () => {
-  const now = new Date().toISOString();
-  return {
-    access_token: createUnsignedJwt(),
-    token_type: "bearer",
-    expires_in: 3600,
-    expires_at: Math.floor(Date.now() / 1000) + 3600,
-    refresh_token: "search-ux-e2e-refresh",
-    user: {
-      id: auditor.id,
-      aud: "authenticated",
-      role: "authenticated",
-      email: auditor.email,
-      email_confirmed_at: now,
-      app_metadata: { provider: "email", providers: ["email"] },
-      user_metadata: {},
-      created_at: now,
-      updated_at: now,
-    },
-  };
-};
+let searchEvents: string[] = [];
+let failDatasetRanking = false;
 
 const fulfillJson = async (route: Route, json: unknown) => {
   await route.fulfill({
@@ -136,8 +107,22 @@ const fulfillJson = async (route: Route, json: unknown) => {
 };
 
 const fulfillRpc = async (route: Route, rpcName: string | undefined) => {
+  const body = route.request().postDataJSON() as Record<string, unknown>;
+  rpcRequests.push({ name: rpcName ?? "unknown", body });
+
   if (rpcName === "search_datasets_by_embedding") {
-    // Rank the embeddings-enabled dataset first.
+    searchEvents.push("dataset-rpc");
+    if (failDatasetRanking) {
+      await route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        json: {
+          code: "42501",
+          message: "AI search is restricted to auditors",
+        },
+      });
+      return;
+    }
     await fulfillJson(route, [
       { dataset_id: datasetWithEmbeddings, similarity: 0.92, tile_count: 3 },
       { dataset_id: datasetWithoutEmbeddings, similarity: 0.41, tile_count: 1 },
@@ -145,19 +130,23 @@ const fulfillRpc = async (route: Route, rpcName: string | undefined) => {
     return;
   }
   if (rpcName === "search_tiles_by_embedding") {
-    await fulfillJson(route, []);
-    return;
+    searchEvents.push("tile-rpc");
   }
   await fulfillJson(route, []);
 };
 
-const fulfillSupabaseRequest = async (route: Route, canAudit: boolean) => {
+const fulfillSupabaseRequest = async (
+  route: Route,
+  canAudit: boolean,
+  embeddingsStatusError: boolean,
+) => {
   const request = route.request();
   const url = new URL(request.url());
   const segments = url.pathname.split("/").filter(Boolean);
   const resource = segments.at(-1);
   const method = request.method();
-  const wantsObject = request.headers()["accept"]?.includes("vnd.pgrst.object") ?? false;
+  const wantsObject =
+    request.headers()["accept"]?.includes("vnd.pgrst.object") ?? false;
 
   if (segments.at(-2) === "rpc") {
     await fulfillRpc(route, resource);
@@ -181,20 +170,41 @@ const fulfillSupabaseRequest = async (route: Route, canAudit: boolean) => {
     return;
   }
 
-  if (resource === "v2_full_dataset_view_public" || resource === "v2_full_dataset_view") {
+  if (
+    resource === "v2_full_dataset_view_public" ||
+    resource === "v2_full_dataset_view"
+  ) {
     const idFilter = url.searchParams.get("id");
     const id = idFilter?.startsWith("eq.") ? Number(idFilter.slice(3)) : null;
-    const row = id ? fullDataset(id, id === datasetWithEmbeddings ? "Alphaville" : "Betatown") : null;
+    const row = id
+      ? fullDataset(
+          id,
+          id === datasetWithEmbeddings ? "Alphaville" : "Betatown",
+        )
+      : null;
     await fulfillJson(route, wantsObject ? row : row ? [row] : []);
     return;
   }
 
   if (resource === "v2_statuses") {
-    // useDatasetEmbeddingsReady reads is_embeddings_done for one dataset.
+    if (embeddingsStatusError) {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        json: { message: "unavailable" },
+      });
+      return;
+    }
+    // The embeddings-availability hook reads one status row per dataset.
     const idFilter = url.searchParams.get("dataset_id");
     const id = idFilter?.startsWith("eq.") ? Number(idFilter.slice(3)) : null;
     const isDone = id === datasetWithEmbeddings;
-    await fulfillJson(route, wantsObject ? { is_embeddings_done: isDone } : [{ is_embeddings_done: isDone }]);
+    await fulfillJson(
+      route,
+      wantsObject
+        ? { is_embeddings_done: isDone }
+        : [{ is_embeddings_done: isDone }],
+    );
     return;
   }
 
@@ -203,6 +213,7 @@ const fulfillSupabaseRequest = async (route: Route, canAudit: boolean) => {
       const payload = request.postDataJSON();
       const rows = Array.isArray(payload) ? payload : [payload];
       loggedQueries.push(...(rows as Array<Record<string, unknown>>));
+      searchEvents.push("log");
       await fulfillJson(route, rows);
       return;
     }
@@ -214,25 +225,28 @@ const fulfillSupabaseRequest = async (route: Route, canAudit: boolean) => {
   await fulfillJson(route, wantsObject ? null : []);
 };
 
-const installAuditor = async (page: Page, canAudit = true) => {
-  const session = createLocalSession();
-
-  await page.addInitScript((localSession) => {
-    window.localStorage.setItem("sb-127-auth-token", JSON.stringify(localSession));
-    window.localStorage.setItem("cookieConsent", "accepted");
-  }, session);
-
-  await page.route(`${localSupabaseUrl}/auth/v1/user`, async (route) => {
-    await route.fulfill({ contentType: "application/json", json: session.user });
+const installAuditor = async (
+  page: Page,
+  canAudit = true,
+  embeddingsStatusError = false,
+) => {
+  await installLocalSession(page, {
+    user: auditor,
+    supabaseUrl: localSupabaseUrl,
+    refreshToken: "search-ux-e2e-refresh",
+    acceptCookies: true,
   });
 
   await page.route(`${localSupabaseUrl}/rest/v1/**`, async (route) => {
-    await fulfillSupabaseRequest(route, canAudit);
+    await fulfillSupabaseRequest(route, canAudit, embeddingsStatusError);
   });
 
-  // The text -> embedding endpoint; the RPC is mocked, so the vector is unused.
   await page.route("**/search/embed", async (route) => {
-    await route.fulfill({ contentType: "application/json", json: { embedding: "[0,0,0]" } });
+    embedRequests.push(
+      route.request().postDataJSON() as Record<string, unknown>,
+    );
+    searchEvents.push("embed");
+    await fulfillJson(route, { embedding: "[1,0,0]" });
   });
 
   // Serve the fixture GeoTIFF for the details-page COG so the map can init.
@@ -258,45 +272,157 @@ const runSemanticSearch = async (page: Page, query: string) => {
 
 test.describe("search UX (local)", () => {
   test.beforeEach(() => {
+    embedRequests = [];
+    rpcRequests = [];
     loggedQueries = [];
+    searchEvents = [];
+    failDatasetRanking = false;
   });
 
-  test("semantic results persist after visiting a dataset and pressing back", async ({ page }) => {
+  test("semantic results persist after visiting a dataset and pressing back", async ({
+    page,
+  }) => {
     await installAuditor(page);
     await page.goto("/dataset");
 
     await runSemanticSearch(page, "forest");
+    await expect(page).toHaveURL(/\/dataset\?q=forest$/);
     const items = page.getByTestId("dataset-list-item");
     await expect(items.first()).toBeVisible();
-    await expect(page.getByTestId("dataset-semantic-score").first()).toBeVisible();
+    await expect(
+      page.getByTestId("dataset-semantic-score").first(),
+    ).toBeVisible();
     const countBefore = await items.count();
 
     // Navigate into the top result, then use the browser back button.
     await items.first().click();
-    await page.waitForURL(new RegExp(`/dataset/${datasetWithEmbeddings}(\\?.*)?$`));
+    await page.waitForURL(
+      new RegExp(`/dataset/${datasetWithEmbeddings}(\\?.*)?$`),
+    );
     await page.goBack();
     await page.waitForURL(/\/dataset(\?.*)?$/);
 
     // The active query, its "Ranked by" chip and the ranked results survive.
     await expect(page.getByText(/Ranked by/)).toBeVisible();
-    await expect(page.getByTestId("dataset-semantic-score").first()).toBeVisible();
-    expect(await page.getByTestId("dataset-list-item").count()).toBe(countBefore);
+    await expect(
+      page.getByTestId("dataset-semantic-score").first(),
+    ).toBeVisible();
+    expect(await page.getByTestId("dataset-list-item").count()).toBe(
+      countBefore,
+    );
   });
 
-  test("a search logs a row into v2_search_queries", async ({ page }) => {
+  test("a successful search embeds, ranks, then records analytics", async ({
+    page,
+  }) => {
     await installAuditor(page);
     await page.goto("/dataset");
 
     await runSemanticSearch(page, "clearcut");
 
-    await expect.poll(() => loggedQueries.length).toBeGreaterThan(0);
-    const logged = loggedQueries.find((row) => row.query === "clearcut");
-    expect(logged).toBeTruthy();
-    // Global search -> no dataset scope; user_id is filled server-side by default.
-    expect(logged?.dataset_id ?? null).toBeNull();
+    await expect.poll(() => loggedQueries.length).toBe(1);
+    expect(embedRequests).toEqual([{ query: "clearcut" }]);
+    expect(rpcRequests).toHaveLength(1);
+    expect(rpcRequests[0]).toMatchObject({
+      name: "search_datasets_by_embedding",
+      body: { query_embedding: "[1,0,0]" },
+    });
+    expect(loggedQueries[0]).toMatchObject({
+      query: "clearcut",
+      dataset_id: null,
+    });
+    expect(searchEvents.slice(0, 3)).toEqual([
+      "embed",
+      "dataset-rpc",
+      "log",
+    ]);
+
+    await page.getByPlaceholder(/AI search/).press("Enter");
+    await expect.poll(() => loggedQueries.length).toBe(2);
+    expect(embedRequests).toHaveLength(2);
+    expect(rpcRequests).toHaveLength(2);
   });
 
-  test("result rows open in a new tab on middle-click", async ({ page, context }) => {
+  test("a failed ranking RPC is not recorded as a successful search", async ({
+    page,
+  }) => {
+    await installAuditor(page);
+    failDatasetRanking = true;
+    await page.goto("/dataset");
+
+    const input = page.getByPlaceholder(/AI search/);
+    await input.fill("forest");
+    await input.press("Enter");
+
+    await expect(
+      page.getByText("AI search is restricted to auditors"),
+    ).toBeVisible();
+    expect(embedRequests).toEqual([{ query: "forest" }]);
+    expect(loggedQueries).toHaveLength(0);
+  });
+
+  test("clearing an in-flight search cannot restore stale results", async ({
+    page,
+  }) => {
+    await installAuditor(page);
+
+    let started = false;
+    let releaseSearch!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      releaseSearch = resolve;
+    });
+    await page.route(
+      `${localSupabaseUrl}/rest/v1/rpc/search_datasets_by_embedding`,
+      async (route) => {
+        started = true;
+        await pending;
+        await fulfillJson(route, [
+          { dataset_id: datasetWithEmbeddings, similarity: 0.92, tile_count: 3 },
+        ]);
+      },
+    );
+
+    await page.goto("/dataset");
+    await page
+      .getByRole("checkbox", { name: "Filter list by map view" })
+      .uncheck();
+    const input = page.getByPlaceholder(/AI search/);
+    await input.fill("forest");
+    await input.press("Enter");
+    await expect.poll(() => started).toBe(true);
+    await expect(page).toHaveURL(/\?q=forest$/);
+
+    await input.fill("");
+    await expect(page).toHaveURL(/\/dataset$/);
+    releaseSearch();
+
+    await expect(page.getByText(/Ranked by/)).toHaveCount(0);
+    await expect(page.getByTestId("dataset-list-item")).toHaveCount(
+      archiveItems.length,
+    );
+  });
+
+  test("permission loss cannot leave the archive invisibly filtered", async ({
+    page,
+  }) => {
+    await installAuditor(page, false);
+    await page.goto("/dataset?q=forest");
+
+    await expect(page.getByTestId("dataset-semantic-search-input")).toHaveCount(
+      0,
+    );
+    await expect(page.getByTestId("dataset-list-item")).toHaveCount(
+      archiveItems.length,
+    );
+    expect(embedRequests).toHaveLength(0);
+    expect(rpcRequests).toHaveLength(0);
+    expect(loggedQueries).toHaveLength(0);
+  });
+
+  test("result rows open in a new tab on middle-click", async ({
+    page,
+    context,
+  }) => {
     await installAuditor(page);
     await page.goto("/dataset");
     await runSemanticSearch(page, "water");
@@ -307,28 +433,50 @@ test.describe("search UX (local)", () => {
     await firstRow.click({ button: "middle" });
     const popup = await popupPromise;
     // The tab opens at about:blank then navigates to the anchor href.
-    await popup.waitForURL(new RegExp(`/dataset/${datasetWithEmbeddings}(\\?.*)?$`));
+    await popup.waitForURL(
+      new RegExp(`/dataset/${datasetWithEmbeddings}(\\?.*)?$`),
+    );
     expect(popup.url()).toContain(`/dataset/${datasetWithEmbeddings}`);
     await popup.close();
   });
 
-  test("per-orthophoto AI search is disabled when embeddings are missing", async ({ page }) => {
+  test("per-orthophoto AI search is disabled when embeddings are missing", async ({
+    page,
+  }) => {
     await installAuditor(page);
 
     // Dataset 5002 has is_embeddings_done = false.
     await page.goto(`/dataset/${datasetWithoutEmbeddings}`);
 
-    await expect(page.getByTestId("ortho-tile-search-unavailable")).toBeVisible();
+    await expect(
+      page.getByTestId("ortho-tile-search-unavailable"),
+    ).toBeVisible();
     await expect(page.getByPlaceholder(/not available/)).toBeDisabled();
   });
 
-  test("per-orthophoto AI search is enabled when embeddings exist", async ({ page }) => {
+  test("per-orthophoto AI search is enabled when embeddings exist", async ({
+    page,
+  }) => {
     await installAuditor(page);
 
     // Dataset 5001 has is_embeddings_done = true.
     await page.goto(`/dataset/${datasetWithEmbeddings}`);
 
     await expect(page.getByPlaceholder(/Search this orthophoto/)).toBeEnabled();
-    await expect(page.getByTestId("ortho-tile-search-unavailable")).toHaveCount(0);
+    await expect(page.getByTestId("ortho-tile-search-unavailable")).toHaveCount(
+      0,
+    );
+  });
+
+  test("embedding readiness failures are explicit and keep search disabled", async ({
+    page,
+  }) => {
+    await installAuditor(page, true, true);
+    await page.goto(`/dataset/${datasetWithEmbeddings}`);
+
+    await expect(
+      page.getByTestId("ortho-tile-search-availability-error"),
+    ).toBeVisible();
+    await expect(page.getByPlaceholder(/status unavailable/)).toBeDisabled();
   });
 });

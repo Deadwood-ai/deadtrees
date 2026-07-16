@@ -25,7 +25,7 @@ import { useDatasetFilter } from "../hooks/useDatasetFilterProvider";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useDesktopOnlyFeature } from "../hooks/useDesktopOnlyFeature";
 import { useAnalytics } from "../hooks/useAnalytics";
-import { useSemanticSearch } from "../hooks/useSemanticSearchProvider";
+import { useSemanticSearch } from "../hooks/useSemanticSearch";
 import { useCanUseAiSearch } from "../hooks/useUserPrivileges";
 
 type FilterTag =
@@ -88,11 +88,15 @@ export default function Dataset() {
   // Incremented on explicit filter actions to trigger map zoom
   const [filterZoomTrigger, setFilterZoomTrigger] = useState(0);
 
-  // Open-vocabulary (CLIP) search is a core-team-only feature: the UI is offered
-  // only to users who can audit. (The /search/embed endpoint stays public +
-  // rate-limited; this just hides the feature from regular visitors.)
+  // Open-vocabulary (CLIP) search is temporarily auditor-only. PostgreSQL
+  // enforces the same capability even if callers bypass this UI gate.
   const { canUseAiSearch } = useCanUseAiSearch();
-  const semantic = useSemanticSearch();
+  const semantic = useSemanticSearch(canUseAiSearch);
+  const [semanticInput, setSemanticInput] = useState("");
+
+  useEffect(() => {
+    setSemanticInput(semantic.query ?? "");
+  }, [semantic.query]);
 
   // Debounced search handler
   useEffect(() => {
@@ -273,48 +277,49 @@ export default function Dataset() {
 
       <div className="flex flex-col gap-2 pb-4">
         {canUseAiSearch && (
-        <div className="flex flex-col gap-1">
-          <Input.Search
-            placeholder="AI search, e.g. 'standing dead trees', 'clearcut'"
-            data-testid="dataset-semantic-search-input"
-            enterButton
-            allowClear
-            loading={semantic.loading}
-            value={semantic.input}
-            onChange={(e) => {
-              semantic.setInput(e.target.value);
-              if (!e.target.value && semantic.query) semantic.clear();
-            }}
-            onSearch={(value) => {
-              if (value.trim()) {
-                semantic.run(value);
-                track("dataset_semantic_search_used", {
-                  search_length: value.trim().length,
-                });
-              } else {
-                semantic.clear();
-              }
-            }}
-          />
-          {semantic.query && (
-            <div className="flex items-center justify-between px-1 text-xs text-gray-500">
-              <span>
-                Ranked by “{semantic.query}” · {semantic.scores?.size ?? 0} matches
-              </span>
-              <Button
-                type="link"
-                size="small"
-                className="h-auto p-0 text-xs"
-                onClick={() => semantic.clear()}
-              >
-                Clear
-              </Button>
-            </div>
-          )}
-          {semantic.error && (
-            <div className="px-1 text-xs text-red-500">{semantic.error}</div>
-          )}
-        </div>
+          <div className="flex flex-col gap-1">
+            <Input.Search
+              placeholder="AI search, e.g. 'standing dead trees', 'clearcut'"
+              data-testid="dataset-semantic-search-input"
+              enterButton
+              allowClear
+              loading={semantic.loading}
+              value={semanticInput}
+              onChange={(e) => {
+                setSemanticInput(e.target.value);
+                if (!e.target.value && semantic.query) semantic.clear();
+              }}
+              onSearch={(value) => {
+                if (value.trim()) {
+                  semantic.run(value);
+                  track("dataset_semantic_search_used", {
+                    search_length: value.trim().length,
+                  });
+                } else {
+                  semantic.clear();
+                }
+              }}
+            />
+            {semantic.query && (
+              <div className="flex items-center justify-between px-1 text-xs text-gray-500">
+                <span>
+                  Ranked by “{semantic.query}” · {semantic.scores?.size ?? 0}{" "}
+                  matches
+                </span>
+                <Button
+                  type="link"
+                  size="small"
+                  className="h-auto p-0 text-xs"
+                  onClick={() => semantic.clear()}
+                >
+                  Clear
+                </Button>
+              </div>
+            )}
+            {semantic.error && (
+              <div className="px-1 text-xs text-red-500">{semantic.error}</div>
+            )}
+          </div>
         )}
         <div className="flex flex-col gap-2 sm:flex-row">
           <Input
