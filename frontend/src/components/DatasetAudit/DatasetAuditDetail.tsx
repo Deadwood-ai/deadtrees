@@ -364,6 +364,8 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 								isSaving={isSaving}
 								navigateToNext={navigateToNext}
 								isMarkingReviewed={isMarkingReviewed}
+								isAOIDirty={isAOIDirty}
+								isSavingAOI={isSavingAOI}
 								onCancel={handleCancel}
 								onSave={() => form.submit()}
 								onSaveAndNext={handleSaveAndNext}

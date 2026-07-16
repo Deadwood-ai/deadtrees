@@ -20,6 +20,8 @@ interface AuditFooterProps {
 	isSaving: boolean;
 	navigateToNext: boolean;
 	isMarkingReviewed: boolean;
+	isAOIDirty: boolean;
+	isSavingAOI: boolean;
 
 	// Handlers
 	onCancel: () => void;
@@ -40,6 +42,8 @@ export default function AuditFooter({
 	isSaving,
 	navigateToNext,
 	isMarkingReviewed,
+	isAOIDirty,
+	isSavingAOI,
 	onCancel,
 	onSave,
 	onSaveAndNext,
@@ -62,9 +66,13 @@ export default function AuditFooter({
 			: "No datasets in filter";
 
 	// Tooltip text for Review & Next
-	const reviewNextTooltip = hasNext
-		? `Mark reviewed and go to #${nextDatasetId} (${positionText} in current filter)`
-		: "Mark reviewed and return to list";
+	const reviewNextTooltip = isSavingAOI
+		? "Wait for the AOI save to finish"
+		: isAOIDirty
+			? "Save AOI edits before marking this audit reviewed"
+			: hasNext
+				? `Mark reviewed and go to #${nextDatasetId} (${positionText} in current filter)`
+				: "Mark reviewed and return to list";
 
 	return (
 		<div className="flex items-center justify-between gap-2">
@@ -113,6 +121,7 @@ export default function AuditFooter({
 							onClick={onMarkReviewedAndNext}
 							loading={isMarkingReviewed}
 							icon={<CheckCircleOutlined />}
+							disabled={isAOIDirty || isSavingAOI}
 						>
 							{hasNext ? "Review & Next" : "Mark Reviewed"}
 						</Button>

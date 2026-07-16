@@ -156,30 +156,26 @@ create policy "Allow users to update manual AOIs"
   to authenticated
   using (
     source in ('manual', 'manual_correction')
+    and auth.uid() = user_id
     and (
-      (
-        auth.uid() = user_id
-        and exists (
-          select 1
-          from public.v2_datasets d
-          where d.id = dataset_id
-            and d.user_id = auth.uid()
-        )
+      exists (
+        select 1
+        from public.v2_datasets d
+        where d.id = dataset_id
+          and d.user_id = auth.uid()
       )
       or can_audit()
     )
   )
   with check (
     source in ('manual', 'manual_correction')
+    and auth.uid() = user_id
     and (
-      (
-        auth.uid() = user_id
-        and exists (
-          select 1
-          from public.v2_datasets d
-          where d.id = dataset_id
-            and d.user_id = auth.uid()
-        )
+      exists (
+        select 1
+        from public.v2_datasets d
+        where d.id = dataset_id
+          and d.user_id = auth.uid()
       )
       or can_audit()
     )

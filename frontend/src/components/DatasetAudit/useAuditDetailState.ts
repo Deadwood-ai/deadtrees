@@ -317,6 +317,15 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	};
 
 	const handleMarkReviewedAndNext = async () => {
+		if (isSavingAOI) {
+			message.warning("Please wait for the AOI save to finish.");
+			return;
+		}
+		if (isAOIDirty) {
+			message.warning("Please save AOI edits before marking the audit reviewed.");
+			return;
+		}
+
 		try {
 			await markAsReviewed(dataset.id);
 			const nextId = getNextDatasetId(dataset.id);
