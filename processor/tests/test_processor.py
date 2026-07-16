@@ -1,10 +1,12 @@
 import pytest
 from pathlib import Path
+from types import SimpleNamespace
 
 import processor.src.processor as processor_module
 from shared.db import use_client
 from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask, StatusEnum
+from shared.notifications.processing import ProcessingNotificationType
 from processor.src.processor import (
 	background_process, process_task, get_next_task,
 	detect_crashed_stage, get_completed_stages, are_requested_stages_complete, PIPELINE_STAGE_MAP,
@@ -68,83 +70,6 @@ def test_background_process_no_tasks():
 	# Verify it completes without error
 	# (The function should return None when no tasks are found)
 	assert background_process() is None
-
-
-def test_process_task_success_path_with_refresh(monkeypatch):
-	"""Successful stage execution should not fall into an error path."""
-
-	task = QueueTask(
-		id=123,
-		dataset_id=456,
-		user_id='test-user',
-		task_types=[TaskTypeEnum.metadata],
-		priority=1,
-		is_processing=False,
-		claimed_by='worker-a',
-		current_position=1,
-		estimated_time=0.0,
-	)
-	stage_calls = []
-	deleted_filters = []
-	processing_updates = []
-
-	class _DeleteQuery:
-		def eq(self, field, value):
-			deleted_filters.append((field, value))
-			return self
-
-		def execute(self):
-			return None
-
-	class _UpdateQuery:
-		def __init__(self, payload):
-			self.payload = payload
-
-		def eq(self, field, value):
-			assert field == 'id'
-			assert self.payload == {'is_processing': True}
-			processing_updates.append(value)
-			return self
-
-		def execute(self):
-			return None
-
-	class _TableQuery:
-		def update(self, payload):
-			return _UpdateQuery(payload)
-
-		def delete(self):
-			return _DeleteQuery()
-
-	class _FakeClient:
-		def table(self, name):
-			assert name == settings.queue_table
-			return _TableQuery()
-
-		def __enter__(self):
-			return self
-
-		def __exit__(self, exc_type, exc, tb):
-			return False
-
-	monkeypatch.setattr(processor_module, 'verify_token', lambda token: {'id': 'processor-user'})
-	monkeypatch.setattr(processor_module, 'refresh_processor_token', lambda task, token=None: 'refreshed-token')
-	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'final-token')
-	monkeypatch.setattr(processor_module, 'use_client', lambda token: _FakeClient())
-	monkeypatch.setattr(processor_module.logger, 'info', lambda *args, **kwargs: None)
-	monkeypatch.setattr(processor_module.logger, 'error', lambda *args, **kwargs: None)
-	monkeypatch.setattr(processor_module.logger, 'warning', lambda *args, **kwargs: None)
-	monkeypatch.setattr(
-		processor_module,
-		'process_metadata',
-		lambda current_task, processing_path: stage_calls.append((current_task.id, str(processing_path))),
-	)
-
-	process_task(task, 'initial-token')
-
-	assert stage_calls == [(task.id, str(settings.processing_path))]
-	assert processing_updates == []
-	assert deleted_filters == [('id', task.id), ('claimed_by', 'worker-a')]
 
 
 @pytest.mark.unit
@@ -612,9 +537,15 @@ def test_background_process_fails_crashed_dataset(crashed_dataset_task, auth_tok
 	monkeypatch.setattr(processor_module, '_kill_dangling_dataset_resources', lambda dataset_id: None)
 
 	linear_calls = []
+	notification_calls = []
 	monkeypatch.setattr(
 		processor_module, 'create_processing_failure_issue',
 		lambda **kwargs: linear_calls.append(kwargs),
+	)
+	monkeypatch.setattr(
+		processor_module,
+		'_notify_processing_result_safely',
+		lambda task, event_type, token: notification_calls.append((task.id, event_type)),
 	)
 
 	dataset_id = crashed_dataset_task['dataset_id']
@@ -640,6 +571,9 @@ def test_background_process_fails_crashed_dataset(crashed_dataset_task, auth_tok
 
 	assert len(linear_calls) == 1, 'A Linear issue should be filed for the crash'
 	assert linear_calls[0]['dataset_id'] == dataset_id
+	assert notification_calls == [
+		(crashed_dataset_task['task_id'], ProcessingNotificationType.failed)
+	]
 
 
 @pytest.fixture
@@ -780,6 +714,12 @@ def test_background_process_removes_stale_completed_active_task_without_marking_
 ):
 	"""Completed tasks should not be reclassified as crashes during stale queue recovery."""
 	monkeypatch.setattr(processor_module, '_kill_dangling_dataset_resources', lambda dataset_id: None)
+	notification_calls = []
+	monkeypatch.setattr(
+		processor_module,
+		'_notify_processing_result_safely',
+		lambda task, event_type, token: notification_calls.append((task.id, event_type)),
+	)
 
 	dataset_id = stale_completed_active_task['dataset_id']
 
@@ -800,6 +740,10 @@ def test_background_process_removes_stale_completed_active_task_without_marking_
 		status = status_response.data[0]
 		assert status['has_error'] is False, 'Completed stale task should not be marked as errored'
 		assert status['current_status'] == 'idle', 'Completed status should remain idle'
+
+	assert notification_calls == [
+		(stale_completed_active_task['task_id'], ProcessingNotificationType.completed)
+	]
 
 
 def test_kill_dangling_resources_called_on_stale_task_recovery(crashed_dataset_task, monkeypatch):

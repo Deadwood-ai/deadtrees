@@ -13,6 +13,7 @@ import PublicationsTable from "../components/PublicationsTable";
 import { useIsMobile } from "../hooks/useIsMobile";
 import DesktopOnlyFeatureNotice from "../components/DesktopOnlyFeatureNotice";
 import { useAnalytics } from "../hooks/useAnalytics";
+import ProcessingEmailPreference from "../components/ProcessingEmailPreference";
 
 interface ProfileAvatarProps {
   email: string;
@@ -111,9 +112,11 @@ export default function ProfilePage() {
               </div>
             </div>
 
+            <ProcessingEmailPreference userId={user?.id} />
+
             <DesktopOnlyFeatureNotice
               title="Account Tools Are Desktop Only"
-              description="Uploads, downloads, dataset publishing, and account management are currently disabled on mobile. This workspace is being simplified for small screens. Please open your account on a desktop browser for file management."
+              description="Uploads, downloads, dataset publishing, and file management are currently disabled on mobile. Please open your account on a desktop browser for those tools."
               actions={
                 <>
                   <Button type="primary" onClick={() => navigate("/deadtrees")}>
@@ -179,6 +182,7 @@ export default function ProfilePage() {
               </div>
             </div>
           </div>
+          <ProcessingEmailPreference userId={user?.id} />
           <div className="w-full">
             <div className="mb-6 flex flex-col gap-3 md:flex-row md:justify-between md:items-center">
               <div className="w-full md:w-auto overflow-x-auto">

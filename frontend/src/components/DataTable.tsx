@@ -161,7 +161,7 @@ const DataTable: React.FC<DataTableProps> = ({
   console.debug("userData in DataTable", userData);
 
   const isDatasetComplete = (record: Dataset): boolean => {
-    return !!(record.is_thumbnail_done && isDatasetProcessingComplete(record));
+    return isDatasetProcessingComplete(record);
   };
 
   // Dataset is viewable on the map - use centralized utility

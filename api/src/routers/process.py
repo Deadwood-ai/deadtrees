@@ -157,6 +157,11 @@ def create_processing_task(
 					LogContext(category=LogCategory.ADD_PROCESS, user_id=user.id, dataset_id=dataset_id, token=token),
 				)
 				raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
+			dataset = response.data[0]
+			is_owner = str(dataset['user_id']) == str(user.id)
+			is_privileged = bool(client.rpc('can_view_all_private_data').execute().data) if not is_owner else False
+			if not is_owner and not is_privileged:
+				raise HTTPException(status_code=403, detail='Only the dataset owner or a privileged user can process it.')
 	except HTTPException:
 		raise
 	except Exception as e:

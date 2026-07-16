@@ -51,6 +51,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 # create a folder for the application
 WORKDIR /app
 COPY ./shared/*.py /app/shared/
+COPY ./shared/notifications /app/shared/notifications
 COPY ./shared/testing/safety.py /app/shared/testing/safety.py
 COPY ./api/src /app/api/src
 # COPY ./run.py /app/run.py

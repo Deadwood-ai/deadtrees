@@ -71,7 +71,7 @@ export function useDatasetSubscription() {
             // Helper function to check if processing is complete
             const isProcessingComplete = (data: StatusPayloadData | null): boolean => {
               if (!data) return false;
-              return data.is_thumbnail_done && isDatasetProcessingComplete({ ...data, file_name: datasetInfo.file_name });
+              return isDatasetProcessingComplete({ ...data, file_name: datasetInfo.file_name });
             };
 
             // Check if processing just completed (was incomplete before, now complete)

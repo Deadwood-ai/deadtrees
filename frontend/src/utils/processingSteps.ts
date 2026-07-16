@@ -120,6 +120,7 @@ export function isDatasetProcessingComplete(dataset: DatasetProgress): boolean {
     dataset.is_ortho_done &&
     dataset.is_metadata_done &&
     dataset.is_cog_done &&
+    dataset.is_thumbnail_done &&
     isPredictionProcessingComplete(dataset) &&
     (!dataset.is_aoi_required || dataset.is_aoi_done)
   );

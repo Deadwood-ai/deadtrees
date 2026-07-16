@@ -2,48 +2,48 @@
 Tests for the email notification system.
 
 Uses Mailpit (local email testing server) to capture and verify sent emails.
-All test emails are sent to jesvajnajehle@gmail.com.
+All test emails are captured locally by Mailpit.
 
 Requires Mailpit SMTP port to be enabled in supabase/config.toml:
   smtp_port = 54325
 """
 
 import pytest
-from api.src.notifications.email import send_email
 from api.src.notifications.notify import notify_dataset_failed, notify_dataset_completed
-from api.src.notifications.templates import dataset_failed_email, dataset_completed_email
 from api.src.notifications.mailpit import (
 	purge_messages,
 	get_messages,
 	assert_email_received,
 	get_message_by_id,
 )
+from shared.notifications.email import send_email
+from shared.notifications.templates import dataset_completed_email, dataset_failed_email
 
-TEST_EMAIL = "jesvajnajehle@gmail.com"
+TEST_EMAIL = "processing-notifications@example.com"
 
 
 # ---- Template unit tests ----
 
 def test_failed_template_generates_subject_and_body():
 	"""Template for failure should contain dataset ID and error."""
-	subject, body = dataset_failed_email(999, "my_ortho.tif", "CUDA out of memory")
+	subject, text_body, html_body = dataset_failed_email(999, "my_ortho.tif", "CUDA out of memory")
 
 	assert "999" in subject
 	assert "Failed" in subject
-	assert "999" in body
-	assert "my_ortho.tif" in body
-	assert "CUDA out of memory" in body
+	assert "999" in text_body
+	assert "my_ortho.tif" in html_body
+	assert "CUDA out of memory" not in html_body
 
 
 def test_completed_template_generates_subject_and_body():
 	"""Template for completion should contain dataset ID and link."""
-	subject, body = dataset_completed_email(1234, "forest_scan.tif")
+	subject, text_body, html_body = dataset_completed_email(1234, "forest_scan.tif")
 
 	assert "1234" in subject
 	assert "Complete" in subject
-	assert "1234" in body
-	assert "forest_scan.tif" in body
-	assert "View Dataset" in body
+	assert "1234" in text_body
+	assert "forest_scan.tif" in html_body
+	assert "View Dataset" in html_body
 
 
 # ---- Email sending + Mailpit verification tests ----
@@ -99,8 +99,8 @@ def test_send_success_notification_email(clean_mailpit):
 	assert "deadtrees" in from_addr.lower() or "notifications" in from_addr.lower()
 
 
-def test_send_failure_email_body_contains_error(clean_mailpit):
-	"""Verify the failure email HTML body includes the error message."""
+def test_send_failure_email_body_hides_internal_error(clean_mailpit):
+	"""Verify failure emails do not expose processor internals."""
 	error_msg = "GDAL error: cannot open file"
 
 	result = notify_dataset_failed(
@@ -121,7 +121,7 @@ def test_send_failure_email_body_contains_error(clean_mailpit):
 	assert full_msg is not None
 
 	html_body = full_msg.get("HTML", "")
-	assert error_msg in html_body
+	assert error_msg not in html_body
 	assert "broken_file.tif" in html_body
 
 
@@ -145,7 +145,7 @@ def test_send_success_email_body_contains_link(clean_mailpit):
 
 	html_body = full_msg.get("HTML", "")
 	assert "good_ortho.tif" in html_body
-	assert "datasets/7777" in html_body
+	assert "dataset/7777" in html_body
 
 
 def test_multiple_notifications_in_sequence(clean_mailpit):

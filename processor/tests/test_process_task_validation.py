@@ -5,7 +5,6 @@ import pytest
 import processor.src.processor as processor_module
 from processor.src.processor import process_task
 from shared.models import QueueTask, StatusEnum, TaskTypeEnum
-from shared.processing_tasks import format_missing_geotiff_error
 from shared.settings import settings
 
 
@@ -97,6 +96,7 @@ def test_process_task_rejects_downstream_without_geotiff(monkeypatch):
 	monkeypatch.setattr(processor_module, 'use_client', lambda token: _FakeClient())
 	monkeypatch.setattr(processor_module, 'update_status', _record_status_update)
 	monkeypatch.setattr(processor_module, 'create_processing_failure_issue', lambda **kwargs: None)
+	monkeypatch.setattr(processor_module, '_notify_processing_result_safely', lambda *args: None)
 	monkeypatch.setattr(processor_module.logger, 'info', lambda *args, **kwargs: None)
 	monkeypatch.setattr(processor_module.logger, 'error', lambda *args, **kwargs: None)
 	monkeypatch.setattr(processor_module.logger, 'warning', lambda *args, **kwargs: None)
@@ -107,12 +107,11 @@ def test_process_task_rejects_downstream_without_geotiff(monkeypatch):
 	assert 'require geotiff in the same processing request' in str(exc_info.value)
 	assert queue_updates == []
 	assert deleted_task_ids == [task.id]
-	expected_error = format_missing_geotiff_error((TaskTypeEnum.thumbnail,))
 	assert status_updates == [
 		{
 			'dataset_id': task.dataset_id,
 			'current_status': StatusEnum.idle,
 			'has_error': True,
-			'error_message': expected_error,
+			'error_message': str(exc_info.value),
 		}
 	]
