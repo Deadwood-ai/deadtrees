@@ -11,10 +11,9 @@ RUN rm -f /etc/apt/sources.list.d/apache-arrow*.list /etc/apt/sources.list.d/apa
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Create and activate virtual environment
+# Create and activate virtual environment.
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-ENV PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cu121
 
 # Set environment variables for GDAL
 RUN echo "GDAL_VERSION=$(gdal-config --version)" >> /etc/environment
@@ -25,12 +24,20 @@ ENV CPLUS_INCLUDE_PATH=/usr/include/gdal \
 WORKDIR /app
 RUN mkdir -p /data
 
-# PyTorch 2.4 adds Python 3.12 support for torch.compile while still offering CUDA 12.1 wheels.
-RUN pip3 install --no-cache-dir torch==2.4.1 torchvision==0.19.1
-
-# Copy and install main requirements
+# Keep dependency versions in processor/requirements.txt. Production amd64
+# builds default to CUDA 12.1 wheels; CPU CI overrides only the wheel source.
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu121
 COPY processor/requirements.txt /app/processor/requirements.txt
-RUN pip3 install --no-cache-dir -r /app/processor/requirements.txt && \
+RUN grep -E '^(torch|torchvision)==' /app/processor/requirements.txt > /tmp/torch-requirements.txt && \
+    if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+        pip3 install --no-cache-dir --index-url "${TORCH_INDEX_URL}" \
+            -r /tmp/torch-requirements.txt; \
+    else \
+        pip3 install --no-cache-dir -r /tmp/torch-requirements.txt; \
+    fi && \
+    grep -Ev '^(torch|torchvision)(==.*)?$' /app/processor/requirements.txt > /tmp/docker-requirements.txt && \
+    pip3 install --no-cache-dir -r /tmp/docker-requirements.txt && \
+    rm /tmp/torch-requirements.txt /tmp/docker-requirements.txt && \
     python -m pip check
 
 FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.3@sha256:b50822a4059629f6a579908584e25e6adccfc70a57914290dd01217f19871d08 AS runtime
@@ -43,7 +50,6 @@ RUN rm -f /etc/apt/sources.list.d/apache-arrow*.list /etc/apt/sources.list.d/apa
 
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-ENV PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cu121
 
 # Set environment variables for GDAL
 RUN echo "GDAL_VERSION=$(gdal-config --version)" >> /etc/environment

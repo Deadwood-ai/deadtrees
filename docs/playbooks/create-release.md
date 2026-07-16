@@ -33,10 +33,10 @@ GitHub Actions on pushes to `main`:
 - `.github/workflows/create-release.yml` creates the CalVer GitHub Release and
   builds/pushes the API image to `ghcr.io/deadwood-ai/deadwood-api`.
 
-The release is created before the API image is built so a container-registry or
-Docker build failure does not erase the repository milestone. A rerun for the
-same commit reuses its existing same-day CalVer tag and release, then retries
-the image publication instead of creating a duplicate release.
+The release is published only after the API image succeeds, so the tag, release,
+and container artifact do not intentionally diverge. A rerun for a commit that
+already completed reuses its existing same-day CalVer tag and release instead
+of creating a duplicate release.
 
 Do not use local/manual SQL as the normal production migration path. If the
 Supabase workflow fails, diagnose the workflow failure before proceeding with

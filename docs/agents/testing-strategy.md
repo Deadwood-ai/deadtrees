@@ -154,15 +154,16 @@ The path-filtered `processor-unit` GitHub Actions workflow builds the processor
 Dockerfile's `test` target and runs:
 
 ```bash
-docker compose -f docker-compose.test.yaml exec processor-test \
-  python -m pytest -q -m unit processor/tests
+python -m pytest -q -m unit processor/tests
 ```
 
-This lane is intentionally CPU-safe. Mark deterministic tests `unit` when they
-mock only external or expensive boundaries and do not require Supabase, SSH,
-Docker-in-Docker, downloaded assets, CUDA, or model checkpoints. Keep GPU/model
-loading, ODM-heavy execution, and processing-server integration in the
-processing-server validation lane.
+The command runs inside the built test image. This lane is intentionally
+CPU-safe. Mark deterministic tests `unit` when they mock only external or
+expensive boundaries and do not require Supabase, SSH, Docker-in-Docker,
+downloaded assets, CUDA, or model checkpoints. Keep GPU/model loading, ODM-heavy
+execution, and processing-server integration in the processing-server
+validation lane. The CI build explicitly selects CPU PyTorch wheels while the
+production processor build retains its CUDA wheel source.
 
 Production Docker targets install only runtime dependencies. The `test` targets
 add `requirements-test.txt`, test sources, pytest configuration, and debugger

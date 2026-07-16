@@ -20,6 +20,10 @@ scikit-learn
 matplotlib
 safetensors
 segmentation_models_pytorch
+# Keep this pair aligned with the model checkpoints and open-clip stack. The
+# Dockerfile selects CUDA or CPU wheels without owning a second set of pins.
+torch==2.4.1
+torchvision==0.19.1
 open-clip-torch>=2.24.0
 opencv-python
 xarray>=2023.1.0

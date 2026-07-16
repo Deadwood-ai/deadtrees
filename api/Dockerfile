@@ -19,18 +19,21 @@ RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Keep api/requirements.txt as the single source of truth. Torch is installed
-# separately so amd64 API images use CPU-only wheels.
+# separately so amd64 API images use CPU-only wheels without duplicating version
+# pins in this Dockerfile.
 COPY api/requirements.txt .
 RUN pip install --upgrade pip && \
+    grep -E '^(torch|torchvision)==' requirements.txt > torch-requirements.txt && \
     if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
         pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
-            torch==2.4.1 torchvision==0.19.1; \
+            -r torch-requirements.txt; \
     else \
-        pip install --no-cache-dir torch==2.4.1 torchvision==0.19.1; \
+        pip install --no-cache-dir -r torch-requirements.txt; \
     fi && \
     grep -Ev '^(torch|torchvision)(==.*)?$' requirements.txt > docker-requirements.txt && \
     pip install --no-cache-dir -r docker-requirements.txt && \
     python -m pip check && \
+    rm torch-requirements.txt && \
     rm docker-requirements.txt && \
     rm requirements.txt
 
