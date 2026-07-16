@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import shlex
 import subprocess
 import sys
 import time
@@ -24,6 +26,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_API_URL = 'https://data2.deadtrees.earth/api/v1/openapi.json'
 DEFAULT_STATE_FILE = ROOT / '.local/operator/operator-state.json'
 DEFAULT_LATEST_FILE = ROOT / '.local/operator/operator-latest.md'
+DEFAULT_BACKUP_MAX_AGE_HOURS = 36
+ARCHIVE_TIMESTAMP_RE = re.compile(r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})')
 
 
 def utc_now() -> str:
@@ -197,12 +201,14 @@ def ssh_probe(env_name: str, command: str, timeout: int) -> dict[str, Any]:
 		return {'ok': False, 'host_env': env_name, 'error': compact_error(result)}
 
 	lines = [line.strip() for line in result['stdout'].splitlines() if line.strip()]
+	archives = parse_archive_lines(lines)
 	return {
 		'ok': True,
 		'host_env': env_name,
 		'lines': lines[:12],
 		'disks': parse_disk_lines(lines),
-		'archives': parse_archive_lines(lines),
+		'archives': archives,
+		'archive_ages_hours': parse_archive_ages_hours(archives),
 		'duration_ms': result['duration_ms'],
 	}
 
@@ -231,21 +237,60 @@ def parse_archive_lines(lines: list[str]) -> dict[str, str]:
 	return archives
 
 
+def parse_archive_ages_hours(archives: dict[str, str]) -> dict[str, float]:
+	now = datetime.now(timezone.utc)
+	ages: dict[str, float] = {}
+	for name, archive in archives.items():
+		match = ARCHIVE_TIMESTAMP_RE.search(archive)
+		if not match:
+			continue
+		try:
+			archive_time = datetime.fromisoformat(match.group(1)).replace(tzinfo=timezone.utc)
+		except ValueError:
+			continue
+		ages[name] = round((now - archive_time).total_seconds() / 3600, 1)
+	return ages
+
+
+def backup_command() -> str:
+	configured = os.environ.get('DEADTREES_OPERATOR_BACKUP_COMMAND')
+	if configured:
+		return configured
+
+	backup_path = os.environ.get('DEADTREES_OPERATOR_BACKUP_PATH')
+	if backup_path:
+		quoted_path = shlex.quote(backup_path)
+		return (
+			f"find {quoted_path} -type f -printf '%T@ %TY-%Tm-%TdT%TH:%TM %p\\n' 2>/dev/null "
+			"| sort -nr | head -n 5"
+		)
+
+	return (
+		"set -e; "
+		"borgmatic=/home/remote-backup/.local/bin/borgmatic; "
+		"config_dir=/home/remote-backup/.config/borgmatic; "
+		"if [ ! -x \"$borgmatic\" ]; then echo \"borgmatic not executable: $borgmatic\" >&2; exit 1; fi; "
+		"for spec in database_dump:database_dump.yaml storage:storage.yaml; do "
+		"name=${spec%%:*}; "
+		"config=$config_dir/${spec#*:}; "
+		"latest=$(\"$borgmatic\" --config \"$config\" list --last 1 "
+		"| awk '/^[[:alnum:]_.-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}T/ {print $1}' "
+		"| tail -n 1); "
+		"test -n \"$latest\"; "
+		"printf 'archive=%s:%s\\n' \"$name\" \"$latest\"; "
+		"done"
+	)
+
+
 def host_summaries(timeout: int) -> dict[str, Any]:
 	df_command = (
 		"printf 'host=%s\\n' \"$(hostname)\"; "
 		"df -P / /data 2>/dev/null | awk 'NR>1 {print \"disk=\" $6 \":\" $5}'"
 	)
-	backup_command = os.environ.get(
-		'DEADTREES_OPERATOR_BACKUP_COMMAND',
-		"test -n \"$DEADTREES_OPERATOR_BACKUP_PATH\" && "
-		"find \"$DEADTREES_OPERATOR_BACKUP_PATH\" -type f -printf '%T@ %TY-%Tm-%TdT%TH:%TM %p\\n' 2>/dev/null "
-		"| sort -nr | head -n 5",
-	)
 	return {
 		'processing': ssh_probe('DEADTREES_OPERATOR_PROCESSING_HOST', df_command, timeout),
 		'storage': ssh_probe('DEADTREES_OPERATOR_STORAGE_HOST', df_command, timeout),
-		'backups': ssh_probe('DEADTREES_OPERATOR_BACKUP_HOST', backup_command, timeout),
+		'backups': ssh_probe('DEADTREES_OPERATOR_BACKUP_HOST', backup_command(), timeout),
 	}
 
 
@@ -303,6 +348,11 @@ def classify(snapshot: dict[str, Any]) -> tuple[str, list[str], list[str]]:
 		for path, percent in value.get('disks', {}).items():
 			if percent >= 80:
 				risks.append(f'{key} disk {path} is {percent}% full')
+		if key == 'backups' and value.get('archive_ages_hours'):
+			max_age_hours = int(os.environ.get('DEADTREES_OPERATOR_BACKUP_MAX_AGE_HOURS', DEFAULT_BACKUP_MAX_AGE_HOURS))
+			for archive_name, age_hours in value['archive_ages_hours'].items():
+				if age_hours > max_age_hours:
+					risks.append(f'{archive_name} backup archive is {age_hours}h old')
 
 	for key, value in snapshot['connectors'].items():
 		if value.get('ok') is None:
@@ -413,7 +463,15 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
 		if value.get('disks'):
 			parts.append('disks ' + ', '.join(f'{path}={percent}%' for path, percent in value['disks'].items()))
 		if value.get('archives'):
-			parts.append('archives ' + ', '.join(f'{name}={archive}' for name, archive in value['archives'].items()))
+			archive_ages = value.get('archive_ages_hours', {})
+			parts.append(
+				'archives '
+				+ ', '.join(
+					f'{name}={archive}'
+					+ (f' age={archive_ages[name]}h' if name in archive_ages else '')
+					for name, archive in value['archives'].items()
+				)
+			)
 		summary = '; '.join(parts)
 		if not summary:
 			summary = '; '.join(value.get('lines', [])[:4]) if value.get('lines') else value.get('skipped') or value.get('error')
