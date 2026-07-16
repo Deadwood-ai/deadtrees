@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { installLocalSession } from "./support/localAuth";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rgbGeoTiffFixture = path.resolve(
@@ -11,7 +12,9 @@ const rgbGeoTiffFixture = path.resolve(
 );
 
 const localSupabaseUrl =
-  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "http://127.0.0.1:54321";
+  process.env.VITE_SUPABASE_URL ||
+  process.env.SUPABASE_URL ||
+  "http://127.0.0.1:54321";
 const auditor = {
   id: "00000000-0000-4000-8000-0000000000a1",
   email: "auditor-local-e2e@example.com",
@@ -156,65 +159,14 @@ const flags = [
 let savedAuditPayloads: Array<Record<string, unknown>> = [];
 let savedAoiPayloads: Array<Record<string, unknown>> = [];
 
-const createUnsignedJwt = (payload: Record<string, unknown>) => {
-  const encode = (value: Record<string, unknown>) =>
-    Buffer.from(JSON.stringify(value)).toString("base64url");
-
-  return [
-    encode({ alg: "none", typ: "JWT" }),
-    encode({
-      aud: "authenticated",
-      role: "authenticated",
-      sub: auditor.id,
-      email: auditor.email,
-      exp: Math.floor(Date.now() / 1000) + 60 * 60,
-      ...payload,
-    }),
-    "local-e2e",
-  ].join(".");
-};
-
-const createLocalSession = () => {
-  const now = new Date().toISOString();
-
-  return {
-    access_token: createUnsignedJwt({}),
-    token_type: "bearer",
-    expires_in: 3600,
-    expires_at: Math.floor(Date.now() / 1000) + 3600,
-    refresh_token: "local-auditor-e2e-refresh-token",
-    user: {
-      id: auditor.id,
-      aud: "authenticated",
-      role: "authenticated",
-      email: auditor.email,
-      email_confirmed_at: now,
-      app_metadata: { provider: "email", providers: ["email"] },
-      user_metadata: {},
-      created_at: now,
-      updated_at: now,
-    },
-  };
-};
-
 const installAuthenticatedUser = async (
   page: Page,
   options: { canAudit: boolean },
 ) => {
-  const session = createLocalSession();
-
-  await page.addInitScript((localSession) => {
-    window.localStorage.setItem(
-      "sb-127-auth-token",
-      JSON.stringify(localSession),
-    );
-  }, session);
-
-  await page.route(`${localSupabaseUrl}/auth/v1/user`, async (route) => {
-    await route.fulfill({
-      contentType: "application/json",
-      json: session.user,
-    });
+  await installLocalSession(page, {
+    user: auditor,
+    supabaseUrl: localSupabaseUrl,
+    refreshToken: "local-auditor-e2e-refresh-token",
   });
 
   await page.route(`${localSupabaseUrl}/rest/v1/**`, async (route) => {
@@ -290,8 +242,13 @@ const fulfillSupabaseRequest = async (
   if (resource === "v2_full_dataset_view") {
     const idFilter = url.searchParams.get("id");
     if (idFilter?.startsWith("eq.")) {
-      const dataset = datasets.find((row) => row.id === Number(idFilter.slice(3)));
-      await fulfillJson(route, wantsObject ? dataset ?? null : dataset ? [dataset] : []);
+      const dataset = datasets.find(
+        (row) => row.id === Number(idFilter.slice(3)),
+      );
+      await fulfillJson(
+        route,
+        wantsObject ? (dataset ?? null) : dataset ? [dataset] : [],
+      );
       return;
     }
 
@@ -411,7 +368,10 @@ const fulfillSupabaseRequest = async (
       const payload = request.postDataJSON() ?? {};
       const rows = Array.isArray(payload) ? payload : [payload];
       savedAuditPayloads.push(...(rows as Array<Record<string, unknown>>));
-      await fulfillJson(route, rows.map((row) => ({ ...row, id: 1 })));
+      await fulfillJson(
+        route,
+        rows.map((row) => ({ ...row, id: 1 })),
+      );
       return;
     }
 
@@ -496,7 +456,9 @@ test.describe("auditor local e2e", () => {
     ).toBeVisible();
   });
 
-  test("auditor sees the AI search on the dataset archive", async ({ page }) => {
+  test("auditor sees the AI search on the dataset archive", async ({
+    page,
+  }) => {
     await installAuthenticatedUser(page, { canAudit: true });
 
     await page.goto("/dataset");
@@ -519,9 +481,9 @@ test.describe("auditor local e2e", () => {
     await dismissCookieBanner(page);
 
     await expect(page.getByTestId("dataset-search-input")).toBeVisible();
-    await expect(
-      page.getByTestId("dataset-semantic-search-input"),
-    ).toHaveCount(0);
+    await expect(page.getByTestId("dataset-semantic-search-input")).toHaveCount(
+      0,
+    );
   });
 
   test("auditor can triage audit queues and inspect processing logs", async ({
@@ -563,7 +525,9 @@ test.describe("auditor local e2e", () => {
       hasText: incompleteDataset.file_name,
     });
     await expect(processingRow).toBeVisible();
-    await expect(processingRow.getByText("FAILED", { exact: true })).toBeVisible();
+    await expect(
+      processingRow.getByText("FAILED", { exact: true }),
+    ).toBeVisible();
     await expect(
       processingRow.getByText("COG conversion failed in local smoke fixture"),
     ).toBeVisible();
@@ -621,12 +585,8 @@ test.describe("auditor local e2e", () => {
       page.locator('[data-testid="dataset-audit-map"] .ol-viewport'),
     ).toBeVisible({ timeout: 20_000 });
 
-    await card(page, "1. Georeferencing Accuracy")
-      .getByText(/Good/)
-      .click();
-    await card(page, "2. Acquisition Date")
-      .getByText(/Valid/)
-      .click();
+    await card(page, "1. Georeferencing Accuracy").getByText(/Good/).click();
+    await card(page, "2. Acquisition Date").getByText(/Valid/).click();
 
     const phenologyCard = card(page, "3. Phenology / Season");
     await phenologyCard.getByText(/In Season/).click();

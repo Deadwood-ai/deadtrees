@@ -19,6 +19,7 @@ vi.mock("posthog-js", () => ({
 let createAnalyticsPayload: typeof import("./analytics").createAnalyticsPayload;
 let deriveUserSegment: typeof import("./analytics").deriveUserSegment;
 let initializePostHog: typeof import("./analytics").initializePostHog;
+let resolvePostHogApiHost: typeof import("./analytics").resolvePostHogApiHost;
 let sanitizeAnalyticsUrl: typeof import("./analytics").sanitizeAnalyticsUrl;
 let sanitizeEventProperties: typeof import("./analytics").sanitizeEventProperties;
 let sanitizePostHogCapture: typeof import("./analytics").sanitizePostHogCapture;
@@ -27,6 +28,7 @@ let trackPageView: typeof import("./analytics").trackPageView;
 beforeEach(async () => {
   vi.resetModules();
   vi.stubEnv("VITE_POSTHOG_PROJECT_KEY", "ph_test_key");
+  vi.stubEnv("VITE_POSTHOG_API_HOST", "https://canopy.deadtrees.earth");
   const storage = (() => {
     const values = new Map<string, string>();
     return {
@@ -59,6 +61,7 @@ beforeEach(async () => {
   createAnalyticsPayload = analytics.createAnalyticsPayload;
   deriveUserSegment = analytics.deriveUserSegment;
   initializePostHog = analytics.initializePostHog;
+  resolvePostHogApiHost = analytics.resolvePostHogApiHost;
   sanitizeAnalyticsUrl = analytics.sanitizeAnalyticsUrl;
   sanitizeEventProperties = analytics.sanitizeEventProperties;
   sanitizePostHogCapture = analytics.sanitizePostHogCapture;
@@ -203,6 +206,34 @@ describe("createAnalyticsPayload", () => {
 });
 
 describe("initializePostHog", () => {
+  it("uses the managed proxy and EU UI host", () => {
+    initializePostHog("accepted");
+
+    expect(posthogMock.init).toHaveBeenCalledWith(
+      "ph_test_key",
+      expect.objectContaining({
+        api_host: "https://canopy.deadtrees.earth",
+        ui_host: "https://eu.posthog.com",
+      }),
+    );
+  });
+
+  it("falls back to direct EU ingestion when the proxy host is unset", async () => {
+    vi.stubEnv("VITE_POSTHOG_API_HOST", "");
+    vi.resetModules();
+    const analytics = await import("./analytics");
+
+    analytics.initializePostHog("pending");
+
+    expect(posthogMock.init).toHaveBeenCalledWith(
+      "ph_test_key",
+      expect.objectContaining({
+        api_host: "https://eu.i.posthog.com",
+        ui_host: "https://eu.posthog.com",
+      }),
+    );
+  });
+
   it("initializes PostHog even when an old opt-in cookie exists", () => {
     localStorage.setItem("cookieConsent", "accepted");
     localStorage.setItem("cookieConsentVersion", "1.0");
@@ -215,6 +246,8 @@ describe("initializePostHog", () => {
       expect.objectContaining({
         persistence: "memory",
         autocapture: false,
+        capture_exceptions: false,
+        disable_session_recording: true,
         capture_pageview: false,
       }),
     );
@@ -240,6 +273,8 @@ describe("initializePostHog", () => {
       expect.objectContaining({
         persistence: "memory",
         autocapture: false,
+        capture_exceptions: false,
+        disable_session_recording: true,
         capture_pageview: false,
         capture_pageleave: false,
       }),
@@ -249,6 +284,8 @@ describe("initializePostHog", () => {
       expect.objectContaining({
         persistence: "cookie",
         autocapture: true,
+        capture_exceptions: true,
+        disable_session_recording: false,
         capture_pageview: false,
         capture_pageleave: false,
       }),
@@ -262,6 +299,42 @@ describe("initializePostHog", () => {
     initializePostHog("pending");
 
     expect(posthogMock.clear_opt_in_out_capturing).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps rejected consent in limited mode and opts out of capture", () => {
+    initializePostHog("rejected");
+
+    expect(posthogMock.init).toHaveBeenCalledWith(
+      "ph_test_key",
+      expect.objectContaining({
+        persistence: "memory",
+        autocapture: false,
+        capture_exceptions: false,
+        disable_session_recording: true,
+      }),
+    );
+    expect(posthogMock.opt_out_capturing).toHaveBeenCalledTimes(1);
+    expect(posthogMock.opt_in_capturing).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolvePostHogApiHost", () => {
+  it("normalizes a secure proxy origin", () => {
+    expect(resolvePostHogApiHost(" https://canopy.deadtrees.earth/ ")).toBe(
+      "https://canopy.deadtrees.earth",
+    );
+  });
+
+  it.each([
+    undefined,
+    "",
+    "http://canopy.deadtrees.earth",
+    "https://canopy.deadtrees.earth/path",
+    "not-a-url",
+  ])("uses the direct EU fallback for %s", (configuredHost) => {
+    expect(resolvePostHogApiHost(configuredHost)).toBe(
+      "https://eu.i.posthog.com",
+    );
   });
 });
 

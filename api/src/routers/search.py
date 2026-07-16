@@ -2,13 +2,10 @@
 
 The heavy lifting (ranking datasets/tiles) happens in Postgres via the
 ``search_datasets_by_embedding`` / ``search_tiles_by_embedding`` RPCs, which the
-frontend calls directly through supabase-js so row-level security enforces
-per-user dataset visibility. This endpoint's only job is to turn a free-text
-query into the matching OpenCLIP ViT-H/14 text embedding (as a pgvector literal)
+frontend calls directly through supabase-js. The ranking RPCs temporarily
+require auditor access and retain the caller's auth context for dataset
+visibility. This endpoint only turns free text into the OpenCLIP text embedding
 that those RPCs expect.
-
-The model is loaded lazily on the first request and cached for the process
-lifetime (see ``shared.embedding_model.get_text_bundle``).
 """
 
 import logging
@@ -17,7 +14,6 @@ from functools import lru_cache
 from ipaddress import ip_address, ip_network
 from threading import Lock
 from time import monotonic
-
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -118,22 +114,29 @@ def _check_search_embed_rate_limit(client_key: str, now: float | None = None) ->
 		requests.append(now)
 
 
-@router.post('/embed', response_model=EmbedResponse)
-def embed_query(payload: EmbedRequest, request: Request) -> EmbedResponse:
-	"""Encode a text query into a pgvector literal for similarity ranking."""
-	_check_search_embed_rate_limit(_search_client_key(request))
-
-	query = payload.query.strip()
+def _normalize_query(query: str) -> str:
+	query = query.strip()
 	if not query:
 		raise HTTPException(status_code=400, detail='Query must not be empty')
 	if len(query) > MAX_QUERY_LENGTH:
 		raise HTTPException(status_code=400, detail=f'Query exceeds {MAX_QUERY_LENGTH} characters')
+	return query
 
+
+def _embed_query(query: str) -> str:
 	try:
 		vector = embed_text(query)
 	except Exception as e:  # model load / inference failure
 		logger.error(f'Failed to embed query: {e}', exc_info=True)
 		raise HTTPException(status_code=503, detail='Search model unavailable')
 
-	literal = '[' + ','.join(f'{v:.6f}' for v in vector) + ']'
+	return '[' + ','.join(f'{v:.6f}' for v in vector) + ']'
+
+
+@router.post('/embed', response_model=EmbedResponse)
+def embed_query(payload: EmbedRequest, request: Request) -> EmbedResponse:
+	"""Encode a text query into a pgvector literal for similarity ranking."""
+	_check_search_embed_rate_limit(_search_client_key(request))
+	query = _normalize_query(payload.query)
+	literal = _embed_query(query)
 	return EmbedResponse(embedding=literal, dim=EMBEDDING_DIM)
