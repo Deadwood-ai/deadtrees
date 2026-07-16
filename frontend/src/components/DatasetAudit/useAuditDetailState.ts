@@ -215,31 +215,37 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	// Form submit handler
 	const handleSubmit = async (values: AuditFormValues) => {
 		if (!isAOILoaded) {
+			setNavigateToNext(false);
 			message.warning("AOI is still loading, please wait...");
 			return;
 		}
 
 		if (flags.some((f) => f.status === "open")) {
+			setNavigateToNext(false);
 			message.error("There are open user-reported issues. Please acknowledge them before saving.");
 			return;
 		}
 
 		if (values.final_assessment === "fixable_issues" && !values.notes?.trim()) {
+			setNavigateToNext(false);
 			message.error("Please provide detailed notes for the fixable issues");
 			return;
 		}
 
 		if (values.final_assessment === "exclude_completely" && !values.notes?.trim()) {
+			setNavigateToNext(false);
 			message.error("Please provide detailed notes for excluding this dataset");
 			return;
 		}
 
 		if (values.final_assessment === "no_issues" && !currentAOIGeometry.current) {
+			setNavigateToNext(false);
 			message.error("Please draw an AOI on the map before submitting");
 			return;
 		}
 
 		if (isAOIDirty) {
+			setNavigateToNext(false);
 			message.warning("Please save AOI edits before saving the audit.");
 			return;
 		}
@@ -304,6 +310,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 			message.error("Failed to save audit data");
 		} finally {
 			setIsSubmitting(false);
+			setNavigateToNext(false);
 		}
 	};
 
