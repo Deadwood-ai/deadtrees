@@ -1,7 +1,11 @@
 from types import SimpleNamespace
 
+import pytest
+
 from shared.models import Label, LabelDataEnum, LabelSourceEnum, LabelTypeEnum
 from processor.src.utils import prediction_labels
+
+pytestmark = pytest.mark.unit
 
 
 class FakeLabelsQuery:

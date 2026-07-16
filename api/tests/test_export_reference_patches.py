@@ -5,8 +5,11 @@ from types import SimpleNamespace
 
 import fiona
 import geopandas as gpd
+import pytest
 
 from api.src.export import export_reference_patches as export_module
+
+pytestmark = pytest.mark.unit
 
 
 class FakeQuery:

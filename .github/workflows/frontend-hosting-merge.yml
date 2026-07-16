@@ -9,6 +9,10 @@ on:
       - '.github/workflows/frontend-hosting-merge.yml'
       - '.github/workflows/frontend-hosting-pull-request.yml'
 
+concurrency:
+  group: frontend-production
+  cancel-in-progress: true
+
 jobs:
   frontend-deploy:
     name: frontend-deploy

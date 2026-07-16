@@ -15,11 +15,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   api-smoke:
     name: api-smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       COMPOSE_PROJECT_NAME: deadtrees-api-smoke
       DOCKER_BUILDKIT: "1"
@@ -35,12 +39,13 @@ jobs:
           cache-dependency-path: |
             deadtrees-cli/setup.py
             api/requirements.txt
+            api/requirements-test.txt
 
       - uses: docker/setup-buildx-action@v4
 
       - uses: supabase/setup-cli@v2
         with:
-          version: latest
+          version: 2.40.7
 
       - name: Prepare local env
         run: |

@@ -5,6 +5,8 @@ from processor.src.processor import background_process, claim_task, get_active_t
 from shared.models import QueueTask, TaskTypeEnum
 from shared.settings import settings
 
+pytestmark = pytest.mark.unit
+
 
 def test_get_worker_id_requires_explicit_id_outside_dev(monkeypatch):
 	monkeypatch.setattr(processor_module.settings, 'PROCESSOR_WORKER_ID', '')

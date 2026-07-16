@@ -60,11 +60,11 @@ def _no_rtk_zip_path() -> Path | None:
 
 
 # ---------------------------------------------------------------------------
-# Fast unit tests — no Docker, no SSH, no DB (run in default suite)
+# Local fixture integration tests — no Docker, SSH, or DB, but require downloaded assets
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_analyze_extracted_files_detects_rtk_and_images():
 	"""RTK files and 5 JPG images are correctly detected after local extraction."""
 	zip_path = _rtk_zip_path()
@@ -83,7 +83,7 @@ def test_analyze_extracted_files_detects_rtk_and_images():
 	assert len(rtk_metadata['detected_extensions']) > 0
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_analyze_extracted_files_no_rtk():
 	"""A ZIP without RTK files reports has_rtk_data=False and correct image count."""
 	zip_path = _no_rtk_zip_path()
@@ -101,7 +101,7 @@ def test_analyze_extracted_files_no_rtk():
 	assert rtk_metadata['rtk_file_count'] == 0
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_extract_exif_from_real_drone_images():
 	"""EXIF extraction returns camera make/model and GPS fields from real DJI images."""
 	zip_path = _rtk_zip_path()

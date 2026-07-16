@@ -64,7 +64,7 @@ rename while behavior is unchanged, the test is probably too coupled.
 | Python critical lint   | `scripts/lint-python.sh`                                                | syntax/runtime-name safety for API, shared models, processor, CLI, and scripts      |
 | API/router             | `scripts/test-api-smoke.sh` or `deadtrees dev test api <path>`          | FastAPI routes, upload/download/process/auth behavior                               |
 | Database/RLS/migration | focused API DB tests plus migration review/reset where practical        | schema, policies, RPCs, views, generated contracts                                  |
-| Processor CPU          | `deadtrees dev test processor <path>`                                   | queue orchestration, GeoTIFF/COG/metadata, non-GPU utilities                        |
+| Processor CPU          | focused `deadtrees dev test processor <path>` or the unit command below  | queue orchestration, GeoTIFF/COG/metadata, non-GPU utilities                        |
 | Processor GPU/model    | processing-server dev checkout                                          | model loading, CUDA/NVIDIA runtime, full combined-model execution, ODM-heavy checks |
 | Storage/export         | focused API/export tests plus local nginx/storage fixtures              | signed URLs, download bundles, reference exports, token safety                      |
 | Ops/release            | workflow syntax, docs/playbook checks, and post-merge verification plan | GitHub Actions, deploy scripts, cron, release automation                            |
@@ -138,10 +138,47 @@ The suite covers:
 - dataset audit persistence and constraints
 - dataset edit history triggers and authorization
 - data publication tables and basic publication operations
+- ODM database schema, constraints, and completion flags
+- PRIWA membership, write authorization, and protected field contracts
 - notification email rendering and Mailpit delivery
+- search embedding route validation and rate limiting
+- reference patch export selection and cleanup behavior
+- shared model, retry, database-client, status, and ZIP safety utilities
 
 Keep this suite backend-lite. Add processor/GPU/ODM checks to the processing
 server validation lane instead of expanding API smoke into full-system testing.
+
+## Processor Unit CI
+
+The path-filtered `processor-unit` GitHub Actions workflow builds the processor
+Dockerfile's `test` target and runs:
+
+```bash
+python -m pytest -q -m unit processor/tests
+```
+
+The command runs inside the built test image. This lane is intentionally
+CPU-safe. Mark deterministic tests `unit` when they mock only external or
+expensive boundaries and do not require Supabase, SSH, Docker-in-Docker,
+downloaded assets, CUDA, or model checkpoints. Keep GPU/model loading, ODM-heavy
+execution, and processing-server integration in the processing-server
+validation lane. The CI build explicitly selects CPU PyTorch wheels while the
+production processor build retains its CUDA wheel source.
+
+Production Docker targets install only runtime dependencies. The `test` targets
+add `requirements-test.txt`, test sources, pytest configuration, and debugger
+support for local and CI validation. Both targets run `pip check` during the
+image build so incompatible dependency resolutions fail before tests or deploys.
+The API installs geospatial Python packages from `api/requirements.txt` instead
+of inheriting hidden Python packages from the GDAL base image.
+
+Dependabot monitors the API, processor, and CLI Python manifests as well as the
+pinned API and processor base images. Keep compatibility-sensitive packages
+explicitly constrained in their service manifest so update PRs exercise the
+relevant CI lane. NumPy is temporarily constrained below 2.5 because Rasterio
+1.5 still uses the ndarray shape-mutation path deprecated in NumPy 2.5; remove
+that upper bound only after the processor geospatial tests run without those
+warnings.
 
 Keep authenticated contributor journeys out of the production-read Playwright
 suite. Use the local contributor smoke when a frontend change touches upload,

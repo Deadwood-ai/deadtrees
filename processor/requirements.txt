@@ -6,7 +6,7 @@ python-multipart
 supabase
 gotrue
 prometheus-client
-rasterio==1.4.2
+rasterio==1.5.0
 rio-cogeo
 fire
 pillow>=10.0.0
@@ -20,15 +20,17 @@ scikit-learn
 matplotlib
 safetensors
 segmentation_models_pytorch
+# Keep this pair aligned with the model checkpoints and open-clip stack. The
+# Dockerfile selects CUDA or CPU wheels without owning a second set of pins.
+torch==2.4.1
+torchvision==0.19.1
 open-clip-torch>=2.24.0
 opencv-python
-pytest
-pytest-cov
-pytest-asyncio
-debugpy
 xarray>=2023.1.0
 zarr>=2.13.0
-numpy>=1.24.0
+# Rasterio 1.5 still triggers NumPy 2.5's deprecated ndarray shape mutation
+# path during normal reads. Keep the service below 2.5 until Rasterio removes it.
+numpy>=2,<2.5
 # Visvalingam-Whyatt polygon simplification (deadwood_treecover_combined_v2 postprocessing)
 simplification>=0.7,<2
 # Pin to 4.x: transformers 5.0 renamed SegFormer state-dict keys

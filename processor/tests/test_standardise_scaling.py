@@ -26,8 +26,6 @@ from processor.src.geotiff.standardise_geotiff import (
 )
 
 
-pytestmark = pytest.mark.unit
-
 TEST_DATA_DIR = Path(__file__).parent.parent.parent / 'assets' / 'test_data'
 WORLDVIEW_FIXTURE = TEST_DATA_DIR / 'worldview_uint16_crop.tif'
 
@@ -49,6 +47,7 @@ def output_path(tmp_path):
 	return str(tmp_path / 'converted.tif')
 
 
+@pytest.mark.integration
 def test_uint16_scaling_produces_visible_output(worldview_input, output_path):
 	"""
 	Core regression test: uint16 satellite imagery must not produce black output.
@@ -106,6 +105,7 @@ def test_uint16_scaling_produces_visible_output(worldview_input, output_path):
 			)
 
 
+@pytest.mark.integration
 def test_uint16_scaling_clips_outliers(worldview_input, output_path):
 	"""
 	Outlier pixels above the 98th percentile should be clipped to 255 (white),
@@ -137,6 +137,7 @@ def test_uint16_scaling_clips_outliers(worldview_input, output_path):
 			)
 
 
+@pytest.mark.unit
 def test_uint8_input_skips_scaling(tmp_path):
 	"""
 	uint8 images should pass through without any scaling applied.
@@ -173,6 +174,7 @@ def test_uint8_input_skips_scaling(tmp_path):
 	assert result_path == input_path, 'uint8 input should not be converted'
 
 
+@pytest.mark.unit
 def test_uint16_high_nodata_survives_byte_conversion_as_alpha(tmp_path):
 	"""
 	Regression for AWI dataset 10388.
@@ -235,6 +237,7 @@ def test_uint16_high_nodata_survives_byte_conversion_as_alpha(tmp_path):
 		assert np.max(rgb[:, ~nodata_mask]) > 100
 
 
+@pytest.mark.unit
 def test_single_band_high_nodata_gets_alpha_without_rgb_assumption(tmp_path):
 	input_path = tmp_path / 'single_band_65535_background.tif'
 	output_path = tmp_path / 'single_band_standardized.tif'
@@ -275,6 +278,7 @@ def test_single_band_high_nodata_gets_alpha_without_rgb_assumption(tmp_path):
 		assert np.max(gray[~nodata_mask]) > 100
 
 
+@pytest.mark.unit
 def test_float_detected_sentinel_nodata_gets_alpha(tmp_path):
 	input_path = tmp_path / 'float_sentinel_background.tif'
 	output_path = tmp_path / 'float_standardized.tif'
@@ -338,10 +342,12 @@ def test_float_detected_sentinel_nodata_gets_alpha(tmp_path):
 		(-12.5, 'int16', False),
 	],
 )
+@pytest.mark.unit
 def test_detected_integer_nodata_plausibility(value, dtype, expected):
 	assert _is_plausible_detected_nodata(value, dtype) is expected
 
 
+@pytest.mark.unit
 def test_uint16_zero_detected_nodata_gets_alpha(tmp_path):
 	input_path = tmp_path / 'uint16_zero_background.tif'
 	output_path = tmp_path / 'zero_background_standardized.tif'
@@ -385,6 +391,7 @@ def test_uint16_zero_detected_nodata_gets_alpha(tmp_path):
 		assert np.all(alpha[~nodata_mask] == 255)
 
 
+@pytest.mark.unit
 def test_source_alpha_pixels_are_excluded_from_scaling(tmp_path):
 	input_path = tmp_path / 'uint16_rgba_transparent_outliers.tif'
 	output_path = tmp_path / 'rgba_standardized.tif'
@@ -433,6 +440,7 @@ def test_source_alpha_pixels_are_excluded_from_scaling(tmp_path):
 		assert np.max(rgb[:, ~transparent_mask]) > 100
 
 
+@pytest.mark.unit
 def test_final_warp_uses_deflate_for_low_band_jpeg_without_alpha_or_nodata(monkeypatch):
 	commands: list[list[str]] = []
 
@@ -463,6 +471,7 @@ def test_final_warp_uses_deflate_for_low_band_jpeg_without_alpha_or_nodata(monke
 	assert 'COMPRESS=JPEG' not in command
 
 
+@pytest.mark.unit
 def test_uint16_source_alpha_survives_byte_conversion(tmp_path):
 	input_path = tmp_path / 'uint16_rgba_alpha_only.tif'
 	output_path = tmp_path / 'rgba_standardized.tif'

@@ -4,6 +4,8 @@ from urllib3.exceptions import ReadTimeoutError
 
 from processor.src.treecover_segmentation_oam_tcd import predict_treecover
 
+pytestmark = pytest.mark.unit
+
 
 class _FakeImages:
 	def get(self, _image):

@@ -11,6 +11,7 @@ services:
     build:
       context: .
       dockerfile: processor/Dockerfile
+      target: test
       # Only include essential files for build (excludes assets via .dockerignore)
     gpus: all
     runtime: nvidia
@@ -72,6 +73,7 @@ services:
     build:
       context: .
       dockerfile: api/Dockerfile
+      target: test
     env_file:
       # Load local Supabase keys from repo .env, avoiding accidental shell overrides.
       - ./.env
