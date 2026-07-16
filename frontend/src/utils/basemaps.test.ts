@@ -1,5 +1,36 @@
-import { describe, expect, it } from "vitest";
-import { getCachedWaybackSource } from "./basemaps";
+import { describe, expect, it, vi } from "vitest";
+import { apply } from "ol-mapbox-style";
+
+import {
+  acquireLibertyBasemapGroup,
+  getCachedWaybackSource,
+  releaseLibertyBasemapGroup,
+} from "./basemaps";
+
+vi.mock("ol-mapbox-style", () => ({
+  apply: vi.fn(() => Promise.resolve()),
+}));
+
+describe("Liberty basemap pool", () => {
+  it("reuses returned groups without sharing a group between concurrent maps", () => {
+    const first = acquireLibertyBasemapGroup();
+    const concurrent = acquireLibertyBasemapGroup();
+
+    expect(concurrent).not.toBe(first);
+    expect(vi.mocked(apply)).toHaveBeenCalledTimes(2);
+
+    first.setVisible(false);
+    releaseLibertyBasemapGroup(first);
+
+    const reused = acquireLibertyBasemapGroup();
+    expect(reused).toBe(first);
+    expect(reused.getVisible()).toBe(true);
+    expect(vi.mocked(apply)).toHaveBeenCalledTimes(2);
+
+    releaseLibertyBasemapGroup(reused);
+    releaseLibertyBasemapGroup(concurrent);
+  });
+});
 
 describe("getCachedWaybackSource", () => {
   it("returns the same source instance for the same release", () => {

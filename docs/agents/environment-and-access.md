@@ -174,6 +174,11 @@ test suite, local QA, browser/app verification, or a fix that should be tested
 against the integrated local environment. After finishing, stop the stack with
 `scripts/qa/env.sh down` unless the user wants to keep it running.
 
+Codex environment cleanup is wired to `scripts/qa/env.sh cleanup`, which tears
+down an already-rendered QA stack without creating new runtime state. Treat that
+as a last-resort closeout hook; still run `scripts/qa/env.sh down` explicitly
+before abandoning a worktree or thread.
+
 ## Secret Hygiene
 
 - Redact command output that includes `password`, `token`, `secret`, `key`,
