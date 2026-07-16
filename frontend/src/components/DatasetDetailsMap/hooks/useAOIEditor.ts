@@ -104,6 +104,7 @@ export function useAOIEditor({
 		canUndo,
 		syncFromSource,
 		reset,
+		repopulateSource,
 		snapshot,
 		undo: undoDraft,
 		checkpoint,
@@ -494,14 +495,14 @@ export function useAOIEditor({
 		editableAOILayer.setVisible(false);
 		map.addLayer(editableAOILayer);
 		editableAOILayerRef.current = editableAOILayer;
+		repopulateSource();
 
 		return () => {
 			clearInteractions();
 			map.removeLayer(editableAOILayer);
 			editableAOILayerRef.current = null;
-			lastInitialAOIRef.current = null;
 		};
-	}, [clearInteractions, enabled, mapRef]);
+	}, [clearInteractions, enabled, mapRef, repopulateSource]);
 
 	useEffect(() => {
 		if (!enabled || isAOILoading || !editableAOILayerRef.current || isEditing || isDrawing) return;

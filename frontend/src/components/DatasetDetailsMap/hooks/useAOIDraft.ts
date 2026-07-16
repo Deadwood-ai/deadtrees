@@ -58,9 +58,9 @@ export function useAOIDraft({ getSource, onChange }: UseAOIDraftOptions) {
 			: null;
 	}, [getSource]);
 
-	const replace = useCallback((nextGeometry: AOIGeometry | null) => {
+	const writeSource = useCallback((nextGeometry: AOIGeometry | null) => {
 		const source = getSource();
-		if (!source) return;
+		if (!source) return false;
 
 		source.clear();
 		if (nextGeometry) {
@@ -73,9 +73,17 @@ export function useAOIDraft({ getSource, onChange }: UseAOIDraftOptions) {
 				polygonParts(projectedGeometry).map((polygon) => new Feature<Geometry>(polygon.clone())),
 			);
 		}
+		return true;
+	}, [getSource]);
 
+	const replace = useCallback((nextGeometry: AOIGeometry | null) => {
+		if (!writeSource(nextGeometry)) return;
 		publish(nextGeometry);
-	}, [getSource, publish]);
+	}, [publish, writeSource]);
+
+	const repopulateSource = useCallback(() => {
+		writeSource(geometryRef.current);
+	}, [writeSource]);
 
 	const syncFromSource = useCallback(() => {
 		const nextGeometry = readSource();
@@ -126,6 +134,7 @@ export function useAOIDraft({ getSource, onChange }: UseAOIDraftOptions) {
 		canUndo,
 		syncFromSource,
 		reset,
+		repopulateSource,
 		snapshot,
 		undo,
 		checkpoint,
