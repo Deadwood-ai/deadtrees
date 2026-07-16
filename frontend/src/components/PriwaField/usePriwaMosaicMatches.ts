@@ -1,12 +1,13 @@
 import { useMemo } from "react";
 
 import { matchPriwaPointsToMosaics } from "./priwaMosaicMatching";
-import type { IPriwaPoint } from "./types";
+import type { IPriwaBefallsgruppe, IPriwaPoint } from "./types";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
 
 export interface IPriwaMatchedPoint {
   point: IPriwaPoint;
   daysApart: number;
+  source: "confirmed" | "suggestion";
 }
 
 export interface IPriwaMatchedMosaic {
@@ -46,17 +47,60 @@ const compareMatchedPoints = (
   });
 };
 
+const daysBetweenDates = (
+  left: string | null | undefined,
+  right: string | null | undefined,
+) => {
+  if (!left || !right) return 0;
+  const leftDate = Date.parse(left);
+  const rightDate = Date.parse(right);
+  if (Number.isNaN(leftDate) || Number.isNaN(rightDate)) return 0;
+  return Math.round(Math.abs(leftDate - rightDate) / (24 * 60 * 60 * 1000));
+};
+
 export const buildPriwaMosaicMatchIndex = (
   points: IPriwaPoint[],
   mosaics: IPriwaMosaic[],
+  groups: IPriwaBefallsgruppe[] = [],
 ) => {
   const candidates = [...mosaics]
     .filter((mosaic) => mosaic.cogUrl.trim().length > 0)
     .sort(compareMosaics);
-  const matches = matchPriwaPointsToMosaics(points, candidates);
   const pointsById = new Map(points.map((point) => [point.id, point]));
   const matchesByMosaicId = new Map<string, IPriwaMatchedPoint[]>();
   const mosaicIdByPointId: Record<string, string> = {};
+  const confirmedTreeIds = new Set(groups.flatMap((group) => group.treeIds));
+
+  groups.forEach((group) => {
+    group.datasetIds.forEach((datasetId) => {
+      const mosaic = candidates.find((candidate) => candidate.id === datasetId);
+      if (!mosaic) return;
+
+      group.treeIds.forEach((treeId) => {
+        const point = pointsById.get(treeId);
+        if (!point) return;
+        const mosaicPoints = matchesByMosaicId.get(mosaic.id) ?? [];
+        if (
+          !mosaicPoints.some(
+            ({ point: matchedPoint }) => matchedPoint.id === treeId,
+          )
+        ) {
+          mosaicPoints.push({
+            point,
+            daysApart: daysBetweenDates(point.datum, mosaic.captureDate),
+            source: "confirmed",
+          });
+          matchesByMosaicId.set(mosaic.id, mosaicPoints);
+        }
+        mosaicIdByPointId[treeId] ??= mosaic.id;
+      });
+    });
+  });
+
+  const matches = matchPriwaPointsToMosaics(
+    points.filter((point) => !confirmedTreeIds.has(point.id)),
+    candidates,
+  );
 
   matches.forEach((match) => {
     const point = pointsById.get(match.pointId);
@@ -64,7 +108,11 @@ export const buildPriwaMosaicMatchIndex = (
 
     mosaicIdByPointId[point.id] = match.mosaicId;
     const mosaicPoints = matchesByMosaicId.get(match.mosaicId) ?? [];
-    mosaicPoints.push({ point, daysApart: match.daysApart });
+    mosaicPoints.push({
+      point,
+      daysApart: match.daysApart,
+      source: "suggestion",
+    });
     matchesByMosaicId.set(match.mosaicId, mosaicPoints);
   });
 
@@ -94,5 +142,9 @@ export const buildPriwaMosaicMatchIndex = (
 export const usePriwaMosaicMatches = (
   points: IPriwaPoint[],
   mosaics: IPriwaMosaic[],
+  groups: IPriwaBefallsgruppe[] = [],
 ) =>
-  useMemo(() => buildPriwaMosaicMatchIndex(points, mosaics), [mosaics, points]);
+  useMemo(
+    () => buildPriwaMosaicMatchIndex(points, mosaics, groups),
+    [groups, mosaics, points],
+  );
