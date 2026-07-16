@@ -1,5 +1,5 @@
 # Start with a pinned GDAL image so Python/GDAL don't drift underneath the processor.
-FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.3@sha256:b50822a4059629f6a579908584e25e6adccfc70a57914290dd01217f19871d08 AS builder
+FROM ghcr.io/osgeo/gdal:ubuntu-full-3.13.1@sha256:aff1d5515aa0e9b50be34ab11d6c0c2cfabc23cdcb7a2e0bc5748101eedb3e4a AS builder
 
 # The pinned GDAL image currently carries an Apache Arrow apt source whose
 # signing key has expired. The processor does not use that apt source.
@@ -40,7 +40,7 @@ RUN grep -E '^(torch|torchvision)==' /app/processor/requirements.txt > /tmp/torc
     rm /tmp/torch-requirements.txt /tmp/docker-requirements.txt && \
     python -m pip check
 
-FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.3@sha256:b50822a4059629f6a579908584e25e6adccfc70a57914290dd01217f19871d08 AS runtime
+FROM ghcr.io/osgeo/gdal:ubuntu-full-3.13.1@sha256:aff1d5515aa0e9b50be34ab11d6c0c2cfabc23cdcb7a2e0bc5748101eedb3e4a AS runtime
 
 RUN rm -f /etc/apt/sources.list.d/apache-arrow*.list /etc/apt/sources.list.d/apache-arrow*.sources && \
     apt-get update && apt-get install -y --no-install-recommends \
