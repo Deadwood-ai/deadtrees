@@ -896,6 +896,8 @@ def test_download_labels_with_aoi(auth_token, test_dataset_with_label):
 		assert len(gdf_aoi) > 0, 'AOI layer has no data'
 		assert gdf_aoi.iloc[0]['image_quality'] == 1
 		assert gdf_aoi.iloc[0]['notes'] == 'Test AOI from real data'
+		assert gdf_aoi.iloc[0]['source'] == 'manual'
+		assert pd.isna(gdf_aoi.iloc[0]['corrected_from_aoi_id'])
 
 
 def test_download_labels_without_aoi(auth_token, test_dataset_with_label_no_aoi):

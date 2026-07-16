@@ -152,6 +152,7 @@ test.describe("auditor local write flows", () => {
       timeout: 10_000,
     });
     manualCorrectionAoiId = await expectManualCorrectionSaved(undefined, 2);
+    await addManualCorrectionMetadata();
 
     await drawAuditAoi(page);
     const aoiCard = card(page, "7. Area of Interest (AOI)");
@@ -175,7 +176,10 @@ test.describe("auditor local write flows", () => {
     await expect(page.getByText("Unsaved AOI edits")).toBeHidden({
       timeout: 10_000,
     });
-    await expectManualCorrectionSaved(manualCorrectionAoiId, 3);
+    await expectManualCorrectionSaved(manualCorrectionAoiId, 3, {
+      image_quality: 2,
+      notes: "Auditor metadata to preserve",
+    });
 
     const finalAssessmentCard = card(page, "8. Final Assessment");
     await finalAssessmentCard.getByText(/Ready/).click();
@@ -435,14 +439,18 @@ async function drawAuditAoi(page: Page) {
   await page.mouse.dblclick(points[3].x, points[3].y);
 }
 
-async function expectManualCorrectionSaved(expectedId?: number, expectedPolygonCount?: number) {
+async function expectManualCorrectionSaved(
+  expectedId?: number,
+  expectedPolygonCount?: number,
+  expectedMetadata?: { image_quality: number; notes: string },
+) {
   let correctionId = 0;
 
   await expect
     .poll(async () => {
       const { data, error } = await adminClient
         .from("v2_aois")
-        .select("id,source,corrected_from_aoi_id,geometry")
+        .select("id,source,corrected_from_aoi_id,geometry,image_quality,notes")
         .eq("dataset_id", datasetId)
         .eq("source", "manual_correction")
         .single();
@@ -452,18 +460,33 @@ async function expectManualCorrectionSaved(expectedId?: number, expectedPolygonC
         source: data.source,
         corrected_from_aoi_id: data.corrected_from_aoi_id,
         polygonCount: data.geometry?.coordinates?.length,
+        image_quality: data.image_quality,
+        notes: data.notes,
       };
     })
     .toMatchObject({
       source: "manual_correction",
       corrected_from_aoi_id: machinePredictionAoiId,
       ...(expectedPolygonCount === undefined ? {} : { polygonCount: expectedPolygonCount }),
+      ...(expectedMetadata ?? {}),
     });
 
   if (expectedId) {
     expect(correctionId).toBe(expectedId);
   }
   return correctionId;
+}
+
+async function addManualCorrectionMetadata() {
+  const { error } = await adminClient
+    .from("v2_aois")
+    .update({
+      image_quality: 2,
+      notes: "Auditor metadata to preserve",
+    })
+    .eq("id", manualCorrectionAoiId);
+
+  expect(error).toBeNull();
 }
 
 async function expectAuditLock(expected: boolean) {

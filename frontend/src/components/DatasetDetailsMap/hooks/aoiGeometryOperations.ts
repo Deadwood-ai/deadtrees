@@ -2,7 +2,7 @@ import type Geometry from "ol/geom/Geometry";
 import MultiPolygon from "ol/geom/MultiPolygon";
 import Polygon from "ol/geom/Polygon";
 
-import { difference, union } from "../../../utils/geometry";
+import { difference, intersects, union } from "../../../utils/geometry";
 
 export function polygonParts(geometry: Geometry): Polygon[] {
 	if (geometry instanceof Polygon) {
@@ -22,6 +22,10 @@ export function mergeAOIGeometries(first: Geometry, second: Geometry): Polygon[]
 }
 
 export function clipAOIGeometries(first: Geometry, second: Geometry): Polygon[] | null {
+	if (!intersects(first, second)) {
+		return null;
+	}
+
 	const firstArea = first instanceof Polygon || first instanceof MultiPolygon ? first.getArea() : 0;
 	const secondArea = second instanceof Polygon || second instanceof MultiPolygon ? second.getArea() : 0;
 	const clipped = firstArea >= secondArea

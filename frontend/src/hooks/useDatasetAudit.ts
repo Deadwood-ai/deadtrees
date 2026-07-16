@@ -42,8 +42,8 @@ export interface AOIData {
   is_whole_image: boolean;
   source?: "ml_prediction" | "manual" | "manual_correction";
   corrected_from_aoi_id?: number | null;
-  image_quality?: number;
-  notes?: string;
+  image_quality?: number | null;
+  notes?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -226,8 +226,8 @@ export function useSaveDatasetAOI() {
           .update({
             geometry: aoiData.geometry,
             is_whole_image: aoiData.is_whole_image,
-            image_quality: aoiData.image_quality ?? null,
-            notes: aoiData.notes ?? null,
+            ...(aoiData.image_quality !== undefined ? { image_quality: aoiData.image_quality } : {}),
+            ...(aoiData.notes !== undefined ? { notes: aoiData.notes } : {}),
             updated_at: updatedAt,
           })
           .eq("id", latestAOI.id)
@@ -246,8 +246,8 @@ export function useSaveDatasetAOI() {
             user_id: user.id,
             geometry: aoiData.geometry,
             is_whole_image: aoiData.is_whole_image,
-            image_quality: aoiData.image_quality ?? null,
-            notes: aoiData.notes ?? null,
+            ...(aoiData.image_quality !== undefined ? { image_quality: aoiData.image_quality } : {}),
+            ...(aoiData.notes !== undefined ? { notes: aoiData.notes } : {}),
             source: latestAOI?.source === "ml_prediction" ? "manual_correction" : "manual",
             corrected_from_aoi_id: latestAOI?.source === "ml_prediction" ? latestAOI.id : null,
             updated_at: updatedAt,

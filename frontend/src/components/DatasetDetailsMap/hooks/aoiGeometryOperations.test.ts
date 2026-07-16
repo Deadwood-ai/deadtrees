@@ -37,6 +37,15 @@ describe("AOI geometry operations", () => {
 		expect(clipped?.[0].getArea()).toBe(75);
 	});
 
+	it("rejects clipping disjoint polygons", () => {
+		const clipped = clipAOIGeometries(
+			square(0, 0, 10, 10),
+			square(20, 20, 30, 30),
+		);
+
+		expect(clipped).toBeNull();
+	});
+
 	it("cuts a drawn hole from a selected polygon", () => {
 		const cut = cutAOIGeometry(
 			square(0, 0, 10, 10),

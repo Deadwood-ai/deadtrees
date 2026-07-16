@@ -777,6 +777,8 @@ def export_dataset_aois(dataset_id: int, gpkg_file: str):
 						'notes': aoi.get('notes'),
 						'is_whole_image': aoi.get('is_whole_image'),
 						'aoi_id': aoi['id'],
+						'source': aoi.get('source', 'manual'),
+						'corrected_from_aoi_id': aoi.get('corrected_from_aoi_id'),
 					},
 				}
 			)
