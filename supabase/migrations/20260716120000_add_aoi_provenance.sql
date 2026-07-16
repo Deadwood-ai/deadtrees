@@ -5,7 +5,10 @@ alter table public.v2_aois
   add column if not exists source text not null default 'manual';
 
 alter table public.v2_aois
-  add column if not exists corrected_from_aoi_id bigint references public.v2_aois(id) on delete restrict;
+  add column if not exists corrected_from_aoi_id bigint
+  references public.v2_aois(id)
+  on delete no action
+  deferrable initially deferred;
 
 alter table public.v2_aois
   drop constraint if exists v2_aois_source_check;
@@ -49,6 +52,43 @@ create trigger normalize_legacy_processor_aoi_source
   before insert on public.v2_aois
   for each row
   execute function public.normalize_legacy_processor_aoi_source();
+
+create or replace function public.validate_aoi_provenance_link()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.source = 'manual_correction' then
+    if new.corrected_from_aoi_id is null
+      or not exists (
+        select 1
+        from public.v2_aois prediction
+        where prediction.id = new.corrected_from_aoi_id
+          and prediction.dataset_id = new.dataset_id
+          and prediction.source = 'ml_prediction'
+      )
+    then
+      raise exception 'Manual AOI corrections must reference a prediction from the same dataset'
+        using errcode = '23514';
+    end if;
+  elsif new.corrected_from_aoi_id is not null then
+    raise exception 'Only manual AOI corrections may reference a prediction'
+      using errcode = '23514';
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke all on function public.validate_aoi_provenance_link() from public;
+
+drop trigger if exists validate_aoi_provenance_link on public.v2_aois;
+create trigger validate_aoi_provenance_link
+  before insert or update on public.v2_aois
+  for each row
+  execute function public.validate_aoi_provenance_link();
 
 create or replace function public.enforce_aoi_identity_immutable()
 returns trigger
