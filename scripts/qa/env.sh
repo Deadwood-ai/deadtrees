@@ -16,7 +16,7 @@ vite_session_name() {
 
 usage() {
 	cat >&2 <<'USAGE'
-Usage: scripts/qa/env.sh <render|up|status|reset|down>
+Usage: scripts/qa/env.sh <render|up|status|reset|down|cleanup>
 
 Manages the local isolated QA environment for this worktree.
 
@@ -26,12 +26,36 @@ Commands:
   status  Check Supabase/Auth, API, Mailpit, and frontend readiness.
   reset   Reseed qa-full and refresh fixture assets.
   down    Stop Vite, app services, and isolated Supabase.
+  cleanup Stop an already-rendered QA stack without creating new runtime state.
 USAGE
 }
 
 source_isolated_env() {
 	local env_file
 	env_file="$("$REPO_ROOT/scripts/dev/isolated-supabase.sh" env)"
+	set -a
+	# shellcheck disable=SC1090
+	source "$env_file"
+	set +a
+}
+
+existing_isolated_env_file() {
+	if [[ -n "${DEADTREES_ISOLATED_ENV_FILE:-}" && -f "$DEADTREES_ISOLATED_ENV_FILE" ]]; then
+		printf '%s\n' "$DEADTREES_ISOLATED_ENV_FILE"
+		return 0
+	fi
+	if [[ -f "$REPO_ROOT/.local/supabase/current.env" ]]; then
+		printf '%s\n' "$REPO_ROOT/.local/supabase/current.env"
+		return 0
+	fi
+	return 1
+}
+
+source_existing_isolated_env() {
+	local env_file
+	if ! env_file="$(existing_isolated_env_file)"; then
+		return 1
+	fi
 	set -a
 	# shellcheck disable=SC1090
 	source "$env_file"
@@ -246,6 +270,22 @@ down() {
 	source_isolated_env
 	stop_vite
 	"$REPO_ROOT/venv/bin/deadtrees" dev stop || true
+	export DEADTREES_WORKTREE_SLUG="${DEADTREES_WORKTREE_SLUG:-$DEADTREES_ISOLATED_SLUG}"
+	"$REPO_ROOT/scripts/dev/isolated-supabase.sh" stop || true
+}
+
+cleanup() {
+	if ! source_existing_isolated_env; then
+		echo "No rendered QA environment found; nothing to clean up."
+		return 0
+	fi
+	stop_vite
+	if [[ -x "$REPO_ROOT/venv/bin/deadtrees" ]]; then
+		"$REPO_ROOT/venv/bin/deadtrees" dev stop || true
+	else
+		echo "Missing $REPO_ROOT/venv/bin/deadtrees; skipping app service cleanup."
+	fi
+	export DEADTREES_WORKTREE_SLUG="${DEADTREES_WORKTREE_SLUG:-$DEADTREES_ISOLATED_SLUG}"
 	"$REPO_ROOT/scripts/dev/isolated-supabase.sh" stop || true
 }
 
@@ -265,6 +305,9 @@ case "$COMMAND" in
 		;;
 	down)
 		down
+		;;
+	cleanup)
+		cleanup
 		;;
 	-h|--help|"")
 		usage

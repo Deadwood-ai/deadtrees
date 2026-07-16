@@ -48,14 +48,64 @@ scripts/qa/validate-isolated-env.sh
 
 ## Review guidelines
 
-- Prioritize concrete P0/P1 risks: correctness bugs, security regressions, data loss, broken authorization, production deployment hazards, and missing validation for high-risk changes.
-- Treat readability, maintainability, and testability as review concerns when they create concrete future risk: duplicated workflow logic, unclear ownership, hidden side effects, brittle coupling, hard-to-test flows, oversized unstructured functions, or confusing domain names.
-- For architecture-sensitive changes, check whether the PR spreads behavior across callers, weakens locality, or introduces shallow pass-through modules that make future changes harder to verify.
-- For changed interfaces, check that callers do not need to know hidden ordering, config, error modes, permission rules, storage details, or deployment assumptions that should stay behind one module interface.
+- Review the PR merge diff and inspect affected callers, tests, contracts, and
+  surrounding code before reporting a finding. Verify each finding against the
+  actual code path; do not report speculative edge cases.
+- Report only high-confidence P0/P1 issues with a concrete correctness, security,
+  data-loss, production, testability, or maintainability risk introduced by the PR.
+- Do not approve merely because behavior appears correct or tests pass. The PR must
+  not leave the changed code structurally worse, more tangled, or materially harder
+  to understand, test, and change.
+- Be ambitious about structural simplification. For every meaningful change, ask
+  whether a "code judo" reframing could delete whole branches, flags, wrappers,
+  modes, duplicate flows, conditionals, concepts, or layers while preserving
+  behavior. Prefer deleting complexity over rearranging or distributing it.
+- Prioritize structural regressions and clear missed simplifications before local
+  cleanup: spaghetti growth, confused ownership, abstraction or boundary leaks,
+  unnecessary concepts, and oversized modules matter more than cosmetic issues.
+- Treat readability, maintainability, and testability as review concerns when they
+  create concrete future risk: duplicated workflow logic, unclear ownership, hidden
+  side effects, brittle coupling, hard-to-test flows, oversized unstructured
+  functions, or confusing domain names.
+- Flag ad-hoc conditionals, one-off booleans, nullable modes, or feature checks
+  scattered through unrelated or shared flows when they make behavior materially
+  harder to reason about. Prefer a focused abstraction, typed model, dispatcher, or
+  canonical owner that makes branches disappear.
+- For architecture-sensitive changes, check whether the PR spreads behavior across
+  callers, weakens locality, leaks feature logic into shared paths, duplicates an
+  existing canonical helper, or introduces shallow pass-through modules that make
+  future changes harder to verify.
+- Flag thin wrappers, identity abstractions, unnecessary generic mechanisms, and
+  cast-heavy or overly optional contracts when they obscure the real invariant
+  without simplifying the API.
+- For changed interfaces, check that callers do not need to know hidden ordering,
+  config, error modes, permission rules, storage details, or deployment assumptions
+  that should stay behind one module interface.
+- Treat the following as presumptive P1 blockers unless the PR provides a compelling
+  structural justification:
+  - a file crossing from below 1000 lines to above 1000 lines;
+  - new special-case branches, nullable modes, or feature checks tangled into an
+    already busy or unrelated flow;
+  - feature-specific behavior scattered across shared code instead of owned by one
+    canonical module;
+  - an unnecessary wrapper, pass-through abstraction, generic mechanism, cast, or
+    optional contract that makes the real design less direct;
+  - duplicated logic or a bespoke helper where an existing canonical helper or
+    layer already owns the concept;
+  - a refactor that moves complexity around without reducing the concepts a reader
+    must understand.
+- Flag related updates that can leave state partially applied, and flag sequential
+  orchestration of independent work when it introduces avoidable failure coupling
+  or materially complicates the flow.
 - For database, storage, deployment, or production-connected changes, require evidence of repo-approved validation and flag unsafe production assumptions.
 - For security, flag changes that weaken auth, authorization, RLS/policies, tenancy isolation, signed URL handling, upload validation, secret handling, logging of sensitive data, CORS/cookie/session controls, or privilege boundaries.
 - Treat credentials, bearer tokens, database URLs, private keys, raw production access notes, and PII in tracked files or logs as P1.
-- Do not flag subjective style preferences, formatting, or broad cleanup ideas unless they affect correctness, security, maintainability, or testability in the changed code.
+- Prefer a small number of high-conviction findings over a long list of nits. Each
+  finding should identify the concrete risk, the smallest reasonable fix, and the
+  validation that would prove the fix.
+- Do not flag subjective style preferences, formatting, naming-only suggestions, or
+  broad cleanup ideas unless they affect correctness, security, maintainability, or
+  testability in the changed code.
 
 ## Git And PRs
 
