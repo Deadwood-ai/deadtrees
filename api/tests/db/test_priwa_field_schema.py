@@ -346,6 +346,55 @@ def test_priwa_member_can_confirm_edit_and_merge_befallsgruppen(priwa_project):
 	assert len(remaining_members.data) == 2
 
 
+def test_priwa_soft_delete_removes_tree_from_befallsgruppe(priwa_project):
+	"""Soft-deleted trees leave groups, and groups disappear when their last tree is deleted."""
+	member_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
+
+	with use_client(member_token) as client:
+		first_tree = client.table('priwa_kaeferbaeume').insert(
+			kaeferbaum_payload(priwa_project['id'], baumnr='BG-DELETE-1')
+		).execute().data[0]
+		second_tree = client.table('priwa_kaeferbaeume').insert(
+			kaeferbaum_payload(
+				priwa_project['id'],
+				geom=priwa_point(lon=8.2046),
+				baumnr='BG-DELETE-2',
+			)
+		).execute().data[0]
+		group_id = client.rpc(
+			'priwa_save_befallsgruppe',
+			{
+				'p_project_id': priwa_project['id'],
+				'p_name': 'Deletion cleanup',
+				'p_tree_ids': [first_tree['id'], second_tree['id']],
+				'p_dataset_ids': [],
+			},
+		).execute().data
+
+		client.table('priwa_kaeferbaeume').update(
+			{'deleted_at': datetime.now(timezone.utc).isoformat()}
+		).eq('id', first_tree['id']).execute()
+		remaining_members = client.table('priwa_befallsgruppe_members').select(
+			'tree_id'
+		).eq('group_id', group_id).execute()
+		remaining_group = client.table('priwa_befallsgruppen').select('id').eq(
+			'id', group_id
+		).execute()
+
+	assert remaining_members.data == [{'tree_id': second_tree['id']}]
+	assert remaining_group.data == [{'id': group_id}]
+
+	with use_client(member_token) as client:
+		client.table('priwa_kaeferbaeume').update(
+			{'deleted_at': datetime.now(timezone.utc).isoformat()}
+		).eq('id', second_tree['id']).execute()
+		deleted_group = client.table('priwa_befallsgruppen').select('id').eq(
+			'id', group_id
+		).execute()
+
+	assert deleted_group.data == []
+
+
 def test_priwa_befallsgruppen_are_hidden_and_not_writable_for_non_members(priwa_project):
 	"""Befallsgruppe tables and save RPC inherit PRIWA project membership boundaries."""
 	member_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)

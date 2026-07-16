@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../../hooks/useSupabase";
 import { useAuth } from "../../hooks/useAuthProvider";
 import type { IPriwaPoint, PriwaCoordinateSource } from "./types";
+import { priwaBefallsgruppenQueryKey } from "./usePriwaBefallsgruppen";
 
 type PriwaDbLocationSource = "qr_exact" | "gps_estimated" | "map_estimated";
 
@@ -197,6 +198,14 @@ export function usePriwaKaeferbaeume(projectId: string | null | undefined) {
       queryKey: priwaPointsQueryKey(projectId),
     });
   };
+  const invalidatePointsAndGroups = async () => {
+    await Promise.all([
+      invalidatePoints(),
+      queryClient.invalidateQueries({
+        queryKey: priwaBefallsgruppenQueryKey(projectId),
+      }),
+    ]);
+  };
 
   const createPoint = useMutation({
     mutationFn: async (point: IPriwaPoint) => {
@@ -219,7 +228,7 @@ export function usePriwaKaeferbaeume(projectId: string | null | undefined) {
       if (!userId) throw new Error("PRIWA user session is required.");
       await softDeletePriwaKaeferbaum(pointId, userId);
     },
-    onSuccess: invalidatePoints,
+    onSuccess: invalidatePointsAndGroups,
   });
 
   return {

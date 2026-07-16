@@ -165,6 +165,46 @@ after insert or delete on public.priwa_befallsgruppe_members
 deferrable initially deferred
 for each row execute function public.priwa_require_nonempty_befallsgruppe();
 
+create or replace function public.priwa_cleanup_deleted_tree_befallsgruppe()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+    affected_group_id uuid;
+begin
+    if OLD.deleted_at is not null or NEW.deleted_at is null then
+        return null;
+    end if;
+
+    select members.group_id
+    into affected_group_id
+    from public.priwa_befallsgruppe_members members
+    where members.tree_id = NEW.id;
+
+    if affected_group_id is null then
+        return null;
+    end if;
+
+    delete from public.priwa_befallsgruppe_members members
+    where members.tree_id = NEW.id;
+
+    delete from public.priwa_befallsgruppen groups
+    where groups.id = affected_group_id
+      and not exists (
+          select 1
+          from public.priwa_befallsgruppe_members members
+          where members.group_id = groups.id
+      );
+
+    return null;
+end;
+$$;
+
+create trigger priwa_kaeferbaeume_cleanup_deleted_tree_group
+after update of deleted_at on public.priwa_kaeferbaeume
+for each row execute function public.priwa_cleanup_deleted_tree_befallsgruppe();
+
 create policy "PRIWA members can read Befallsgruppen"
 on "public"."priwa_befallsgruppen"
 for select
@@ -464,6 +504,7 @@ grant all on table "public"."priwa_befallsgruppe_flights" to "service_role";
 
 revoke all on function public.priwa_set_befallsgruppe_actor_fields() from public;
 revoke all on function public.priwa_require_nonempty_befallsgruppe() from public;
+revoke all on function public.priwa_cleanup_deleted_tree_befallsgruppe() from public;
 revoke all on function public.priwa_save_befallsgruppe(
     uuid, text, uuid[], bigint[], uuid, text, double precision, text, text
 ) from public;

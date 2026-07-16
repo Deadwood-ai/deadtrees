@@ -55,6 +55,7 @@ import PriwaLayerPanel, { type PriwaBaseLayer } from "./PriwaLayerPanel";
 import PriwaPointListPanel from "./PriwaPointListPanel";
 import PriwaOfflineStatus from "./PriwaOfflineStatus";
 import PriwaBefallsgruppenPanel from "./PriwaBefallsgruppenPanel";
+import { groupsForPriwaMosaicMatching } from "./priwaBefallsgruppenState";
 import { usePriwaOfflineBasemap } from "./usePriwaOfflineBasemap";
 import { usePriwaMosaicMatches } from "./usePriwaMosaicMatches";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
@@ -188,21 +189,16 @@ export default function PriwaFieldMap({
   const [isGroupPanelOpen, setGroupPanelOpen] = useState(false);
   const [baseLayer, setBaseLayer] = useState<PriwaBaseLayer>("aerial");
   const isMobile = useIsMobile();
+  const mosaicMatchGroups = useMemo(
+    () =>
+      groupsForPriwaMosaicMatching(groups, isLoadingGroups, groupsErrorMessage),
+    [groups, groupsErrorMessage, isLoadingGroups],
+  );
   const { candidateCount, matchedMosaics, mosaicIdByPointId } =
-    usePriwaMosaicMatches(points, mosaics, groups);
-  const canResolveMosaicMatches =
-    !isLoadingGroups && groupsErrorMessage === null;
-  const resolvedMatchedMosaics = useMemo(
-    () => (canResolveMosaicMatches ? matchedMosaics : []),
-    [canResolveMosaicMatches, matchedMosaics],
-  );
-  const resolvedMosaicIdByPointId = useMemo(
-    () => (canResolveMosaicMatches ? mosaicIdByPointId : {}),
-    [canResolveMosaicMatches, mosaicIdByPointId],
-  );
+    usePriwaMosaicMatches(points, mosaics, mosaicMatchGroups);
   const visibleMosaics = useMemo(
-    () => resolvedMatchedMosaics.map(({ mosaic }) => mosaic),
-    [resolvedMatchedMosaics],
+    () => matchedMosaics.map(({ mosaic }) => mosaic),
+    [matchedMosaics],
   );
   const enabledMosaics = useMemo(
     () => visibleMosaics.filter((mosaic) => enabledMosaicIds.has(mosaic.id)),
@@ -272,12 +268,12 @@ export default function PriwaFieldMap({
 
   const selectMatchedMosaicForPoint = useCallback(
     (point: IPriwaPoint) => {
-      const mosaicId = resolvedMosaicIdByPointId[point.id];
+      const mosaicId = mosaicIdByPointId[point.id];
       if (!mosaicId) return;
 
       setSelectedMosaicId(mosaicId);
     },
-    [resolvedMosaicIdByPointId],
+    [mosaicIdByPointId],
   );
 
   const openPointForEditing = useCallback(
@@ -684,7 +680,7 @@ export default function PriwaFieldMap({
   const pointListToggleLabel = isPointListOpen
     ? "Punktliste schließen"
     : "Punktliste öffnen";
-  const isMatchingMosaics = isCogLoading || isLoadingPoints || isLoadingGroups;
+  const isMatchingMosaics = isCogLoading || isLoadingPoints;
 
   const setMosaicVisibility = useCallback(
     (mosaicId: string, checked: boolean) => {
@@ -758,7 +754,7 @@ export default function PriwaFieldMap({
   const layerPanelProps = {
     baseLayer,
     candidateMosaicCount: candidateCount,
-    matchedMosaics: resolvedMatchedMosaics,
+    matchedMosaics,
     enabledMosaicIds,
     selectedMosaicId,
     hoveredMosaicId,
@@ -1026,7 +1022,7 @@ export default function PriwaFieldMap({
           points={points}
           mosaics={mosaics}
           groups={groups}
-          mosaicIdByPointId={resolvedMosaicIdByPointId}
+          mosaicIdByPointId={mosaicIdByPointId}
           isMobile={isMobile}
           isLoading={isLoadingGroups}
           isSaving={isSavingGroup}

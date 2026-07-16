@@ -1,10 +1,11 @@
 import { AimOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import { Button, Empty, Tag, message } from "antd";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import PriwaBefallsgruppeEditor, {
   type IPriwaBefallsgruppeEditorDraft,
 } from "./PriwaBefallsgruppeEditor";
+import { arePriwaBefallsgruppenReady } from "./priwaBefallsgruppenState";
 import {
   suggestPriwaBefallsgruppen,
   type IPriwaBefallsgruppeSuggestion,
@@ -53,14 +54,25 @@ export default function PriwaBefallsgruppenPanel({
   const [draft, setDraft] = useState<IPriwaBefallsgruppeEditorDraft | null>(
     null,
   );
+  const isGroupStateReady = arePriwaBefallsgruppenReady(
+    isLoading,
+    errorMessage,
+  );
   const confirmedTreeIds = useMemo(
     () => new Set(groups.flatMap((group) => group.treeIds)),
     [groups],
   );
   const suggestions = useMemo(
-    () => suggestPriwaBefallsgruppen(points, confirmedTreeIds),
-    [confirmedTreeIds, points],
+    () =>
+      isGroupStateReady
+        ? suggestPriwaBefallsgruppen(points, confirmedTreeIds)
+        : [],
+    [confirmedTreeIds, isGroupStateReady, points],
   );
+
+  useEffect(() => {
+    if (!isGroupStateReady) setDraft(null);
+  }, [isGroupStateReady]);
 
   const openSuggestion = (
     suggestion: IPriwaBefallsgruppeSuggestion,
@@ -85,6 +97,12 @@ export default function PriwaBefallsgruppenPanel({
   };
 
   const save = async (input: IPriwaBefallsgruppeSaveInput) => {
+    if (!isGroupStateReady) {
+      message.error(
+        "Befallsgruppen können erst nach erfolgreichem Laden bearbeitet werden.",
+      );
+      return;
+    }
     try {
       await onSave(input);
       message.success("Befallsgruppe gespeichert");
@@ -98,6 +116,12 @@ export default function PriwaBefallsgruppenPanel({
     }
   };
   const remove = async (groupId: string) => {
+    if (!isGroupStateReady) {
+      message.error(
+        "Befallsgruppen können erst nach erfolgreichem Laden bearbeitet werden.",
+      );
+      return;
+    }
     try {
       await onDelete(groupId);
       message.success("Befallsgruppe gelöscht");
@@ -127,6 +151,7 @@ export default function PriwaBefallsgruppenPanel({
             <Button
               size="small"
               icon={<PlusOutlined />}
+              disabled={!isGroupStateReady}
               onClick={() =>
                 setDraft({
                   name: `Befallsgruppe ${groups.length + 1}`,
@@ -188,6 +213,7 @@ export default function PriwaBefallsgruppenPanel({
                     <Button
                       size="small"
                       icon={<EditOutlined />}
+                      disabled={!isGroupStateReady}
                       onClick={() => setDraft(group)}
                     >
                       Bearbeiten
@@ -195,7 +221,7 @@ export default function PriwaBefallsgruppenPanel({
                   </div>
                 </div>
               ))}
-              {!isLoading && groups.length === 0 && (
+              {isGroupStateReady && groups.length === 0 && (
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
                   description="Noch keine bestätigte Gruppe"
@@ -258,7 +284,18 @@ export default function PriwaBefallsgruppenPanel({
                   </div>
                 </div>
               ))}
-              {!isLoading && suggestions.length === 0 && (
+              {isLoading && (
+                <div className="rounded border border-slate-200 p-3 text-center text-xs text-slate-500">
+                  Bestätigte Gruppen werden geladen…
+                </div>
+              )}
+              {!isLoading && errorMessage && (
+                <div className="rounded border border-amber-200 bg-amber-50 p-3 text-center text-xs text-amber-800">
+                  Vorschläge sind deaktiviert, bis die bestätigten Gruppen
+                  geladen werden konnten.
+                </div>
+              )}
+              {isGroupStateReady && suggestions.length === 0 && (
                 <div className="rounded border border-slate-200 p-3 text-center text-xs text-slate-500">
                   Keine neuen räumlich-zeitlichen Vorschläge
                 </div>
@@ -269,7 +306,7 @@ export default function PriwaBefallsgruppenPanel({
       </section>
 
       <PriwaBefallsgruppeEditor
-        open={draft !== null}
+        open={draft !== null && isGroupStateReady}
         isMobile={isMobile}
         draft={draft}
         points={points}

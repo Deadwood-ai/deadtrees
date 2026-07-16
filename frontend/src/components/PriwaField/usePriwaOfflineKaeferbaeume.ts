@@ -17,7 +17,11 @@ import {
   mergePriwaOfflinePoints,
   stripPriwaPointSyncState,
 } from "./priwaOfflineSync";
-import { fetchPriwaKaeferbaeume, priwaPointsQueryKey } from "./usePriwaKaeferbaeume";
+import { priwaBefallsgruppenQueryKey } from "./usePriwaBefallsgruppen";
+import {
+  fetchPriwaKaeferbaeume,
+  priwaPointsQueryKey,
+} from "./usePriwaKaeferbaeume";
 import { usePriwaSyncQueueRunner } from "./usePriwaSyncQueueRunner";
 
 const upsertLocalPoint = (points: IPriwaPoint[], point: IPriwaPoint) => {
@@ -110,9 +114,14 @@ export function usePriwaOfflineKaeferbaeume(
   }, []);
 
   const onQueueDrained = useCallback(async () => {
-    await queryClient.invalidateQueries({
-      queryKey: priwaPointsQueryKey(projectId),
-    });
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: priwaPointsQueryKey(projectId),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: priwaBefallsgruppenQueryKey(projectId),
+      }),
+    ]);
   }, [projectId, queryClient]);
 
   const { isSyncingQueue, syncQueue, updateStoredQueue } =
@@ -174,7 +183,7 @@ export function usePriwaOfflineKaeferbaeume(
   const points = useMemo(
     () =>
       mergePriwaOfflinePoints(
-        cachedPoints.length > 0 ? cachedPoints : pointsQuery.data ?? [],
+        cachedPoints.length > 0 ? cachedPoints : (pointsQuery.data ?? []),
         queue,
       ),
     [cachedPoints, pointsQuery.data, queue],
@@ -189,8 +198,10 @@ export function usePriwaOfflineKaeferbaeume(
       (pointsQuery.isLoading && !hasCachedPoints && queue.length === 0),
     isRefetching: pointsQuery.isRefetching || isSyncingQueue,
     error: hasCachedPoints ? null : pointsQuery.error,
-    createPoint: (point: IPriwaPoint) => enqueueMutation("create", point.id, point),
-    updatePoint: (point: IPriwaPoint) => enqueueMutation("update", point.id, point),
+    createPoint: (point: IPriwaPoint) =>
+      enqueueMutation("create", point.id, point),
+    updatePoint: (point: IPriwaPoint) =>
+      enqueueMutation("update", point.id, point),
     deletePoint: (pointId: string) => enqueueMutation("delete", pointId),
     isSaving: isSyncingQueue,
     syncSummary,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { groupsForPriwaMosaicMatching } from "./priwaBefallsgruppenState";
 import type { IPriwaBefallsgruppe, IPriwaPoint } from "./types";
 import { buildPriwaMosaicMatchIndex } from "./usePriwaMosaicMatches";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
@@ -68,5 +69,18 @@ describe("buildPriwaMosaicMatchIndex with confirmed groups", () => {
 
     expect(result.matchedMosaics).toEqual([]);
     expect(result.mosaicIdByPointId).toEqual({});
+  });
+
+  it("keeps automatic matches when confirmed groups fail to load", () => {
+    const groups = groupsForPriwaMosaicMatching(
+      [group([mosaic.id])],
+      false,
+      "network error",
+    );
+    const result = buildPriwaMosaicMatchIndex([point], [mosaic], groups);
+
+    expect(result.matchedMosaics).toHaveLength(1);
+    expect(result.matchedMosaics[0].points[0].source).toBe("suggestion");
+    expect(result.mosaicIdByPointId).toEqual({ "tree-1": "10512" });
   });
 });
