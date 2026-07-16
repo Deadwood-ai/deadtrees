@@ -11,6 +11,10 @@ LINK_SHARED=true
 INSTALL_FRONTEND=true
 INSTALL_PYTHON=true
 ENSURE_ASSETS=true
+FETCH_GIT=true
+ALLOW_STALE_BASE=false
+GIT_PREFLIGHT_ONLY=false
+BASE_REF="origin/main"
 
 usage() {
   cat <<'EOF'
@@ -25,6 +29,10 @@ Options:
   --skip-frontend-install  Do not run npm --prefix frontend ci
   --skip-python-install    Do not create/update venv or install deadtrees-cli
   --skip-assets            Do not download missing test assets
+  --skip-git-fetch         Check the cached base ref without fetching origin
+  --allow-stale-base       Warn instead of failing when HEAD is behind the base ref
+  --base-ref REF           Require HEAD to include REF (default: origin/main)
+  --git-preflight-only     Fetch and check the base ref, then exit
   -h, --help               Show this help
 EOF
 }
@@ -76,6 +84,23 @@ while [[ $# -gt 0 ]]; do
       ENSURE_ASSETS=false
       shift
       ;;
+    --skip-git-fetch)
+      FETCH_GIT=false
+      shift
+      ;;
+    --allow-stale-base)
+      ALLOW_STALE_BASE=true
+      shift
+      ;;
+    --base-ref)
+      [[ $# -ge 2 ]] || die "--base-ref requires a ref"
+      BASE_REF="$2"
+      shift 2
+      ;;
+    --git-preflight-only)
+      GIT_PREFLIGHT_ONLY=true
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -88,6 +113,39 @@ done
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
+}
+
+check_git_base() {
+  local counts
+  local ahead
+  local behind
+
+  if [[ "$FETCH_GIT" == true ]]; then
+    git -C "$REPO_ROOT" remote get-url origin >/dev/null 2>&1 \
+      || die "Cannot refresh the base: git remote 'origin' is not configured"
+    log "Refreshing remote refs from origin"
+    git -C "$REPO_ROOT" fetch origin --prune
+  else
+    log "Skipping git fetch; checking cached ref $BASE_REF"
+  fi
+
+  git -C "$REPO_ROOT" rev-parse --verify --quiet "${BASE_REF}^{commit}" >/dev/null \
+    || die "Base ref is unavailable: $BASE_REF"
+
+  counts="$(git -C "$REPO_ROOT" rev-list --left-right --count "HEAD...$BASE_REF")"
+  read -r ahead behind <<<"$counts"
+
+  if (( behind == 0 )); then
+    log "HEAD includes current $BASE_REF"
+    return
+  fi
+
+  if [[ "$ALLOW_STALE_BASE" == true ]]; then
+    log "WARNING: HEAD is $behind commit(s) behind $BASE_REF and $ahead commit(s) ahead"
+    return
+  fi
+
+  die "HEAD is $behind commit(s) behind $BASE_REF. Merge/rebase the refreshed base or recreate the worktree. Use --allow-stale-base only when this older base is intentional."
 }
 
 detect_default_shared_root() {
@@ -278,6 +336,13 @@ ensure_assets_and_keys() {
 
 require_command git
 require_command python3
+
+check_git_base
+
+if [[ "$GIT_PREFLIGHT_ONLY" == true ]]; then
+  log "Git base preflight complete"
+  exit 0
+fi
 
 if [[ "$INSTALL_FRONTEND" == true ]]; then
   require_command npm

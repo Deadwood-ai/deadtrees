@@ -4,6 +4,34 @@ import posthog from "posthog-js";
 const POSTHOG_PROJECT_KEY = import.meta.env.VITE_POSTHOG_PROJECT_KEY as
   | string
   | undefined;
+export const POSTHOG_DIRECT_EU_API_HOST = "https://eu.i.posthog.com";
+export const POSTHOG_UI_HOST = "https://eu.posthog.com";
+
+export const resolvePostHogApiHost = (
+  configuredHost?: string,
+): string => {
+  const candidate = configuredHost?.trim();
+  if (!candidate) return POSTHOG_DIRECT_EU_API_HOST;
+
+  try {
+    const url = new URL(candidate);
+    const isSecureOrigin =
+      url.protocol === "https:" &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      url.pathname === "/";
+
+    return isSecureOrigin ? url.origin : POSTHOG_DIRECT_EU_API_HOST;
+  } catch {
+    return POSTHOG_DIRECT_EU_API_HOST;
+  }
+};
+
+const POSTHOG_API_HOST = resolvePostHogApiHost(
+  import.meta.env.VITE_POSTHOG_API_HOST as string | undefined,
+);
 let hasInitializedPostHog = false;
 let initializedPostHogMode: "limited" | "accepted" | null = null;
 
@@ -475,9 +503,12 @@ export const initializePostHog = (consent: string | null = null): void => {
 
   const mode = consent === "accepted" ? "accepted" : "limited";
   const posthogConfig = {
-    api_host: "https://eu.i.posthog.com",
+    api_host: POSTHOG_API_HOST,
+    ui_host: POSTHOG_UI_HOST,
     persistence: mode === "accepted" ? "cookie" : "memory",
     autocapture: mode === "accepted",
+    capture_exceptions: mode === "accepted",
+    disable_session_recording: mode !== "accepted",
     capture_pageview: false,
     capture_pageleave: false,
     before_send: sanitizePostHogCapture,

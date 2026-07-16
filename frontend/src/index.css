@@ -136,6 +136,16 @@
   max-height: 100dvh;
 }
 
+.priwa-layer-sheet-root .ant-drawer-content {
+  border-radius: 16px 16px 0 0;
+  overflow: hidden;
+}
+
+.priwa-layer-sheet-root .ant-drawer-body {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
 .logo-scroll {
   overflow: hidden;
   width: 100%;
@@ -342,6 +352,15 @@
 .priwa-add-point-fab .anticon {
   font-size: 20px;
   color: #2d6b3f !important;
+}
+
+.priwa-point-table-row-focused > td,
+.priwa-point-table-row-focused:hover > td {
+  background: #ecfdf5 !important;
+}
+
+.priwa-point-table-row-focused > td:first-child {
+  box-shadow: inset 3px 0 #059669;
 }
 
 .dt-mobile-nav-shell {

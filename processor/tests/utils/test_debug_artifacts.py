@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 
+import pytest
+
 from processor.src.utils.debug_artifacts import (
 	_env_bool,
 	_env_int,
@@ -8,6 +10,8 @@ from processor.src.utils.debug_artifacts import (
 	debug_bundle_base_dir,
 	dt_resource_labels,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_env_bool_parsing(monkeypatch):
@@ -75,4 +79,3 @@ def test_dt_resource_labels_shape(monkeypatch):
 	assert labels['dt_keep'] == 'true'
 	assert labels['dt_ttl_hours'] == '12'
 	assert int(labels['dt_created_at_unix']) > 0
-

@@ -70,3 +70,80 @@ updates:
     groups:
       actions-all:
         patterns: ["*"]
+
+  # Python services and developer CLI
+  - package-ecosystem: "pip"
+    directories:
+      - "/api"
+      - "/processor"
+      - "/deadtrees-cli"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 1
+    groups:
+      compatibility-patches:
+        patterns:
+          - "numpy"
+          - "rasterio"
+          - "open-clip-torch"
+          - "segmentation-models-pytorch"
+          - "transformers"
+        update-types: ["patch"]
+      python-safe-updates:
+        patterns: ["*"]
+        exclude-patterns:
+          - "numpy"
+          - "rasterio"
+          - "torch"
+          - "torchvision"
+          - "open-clip-torch"
+          - "segmentation-models-pytorch"
+          - "transformers"
+        update-types: ["patch", "minor"]
+    ignore:
+      # These packages define the geospatial/model compatibility envelope.
+      # Patch releases stay grouped above; feature-line upgrades are explicit
+      # maintenance work with processor/API image and checkpoint validation.
+      - dependency-name: "numpy"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
+      - dependency-name: "rasterio"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
+      # PyTorch and Torchvision are a tested pair. Dependabot groups do not
+      # guarantee that both packages have an update in the same run.
+      - dependency-name: "torch"
+      - dependency-name: "torchvision"
+      - dependency-name: "open-clip-torch"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
+      - dependency-name: "segmentation-models-pytorch"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
+      - dependency-name: "transformers"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
+
+  # Pinned GDAL runtime images
+  - package-ecosystem: "docker"
+    directories:
+      - "/api"
+      - "/processor"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 1
+    groups:
+      service-base-images:
+        patterns: ["*"]
+    ignore:
+      # A GDAL feature-line change can also change Ubuntu/Python and therefore
+      # the available PyTorch wheels. Allow patch/digest refreshes only.
+      - dependency-name: "osgeo/gdal"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"

@@ -106,6 +106,16 @@ This keeps new Codex worktrees usable without committing secrets. If a copied
 local file is stale, update the primary checkout's local-only file rather than
 adding secrets to tracked docs.
 
+The setup script fetches `origin` and fails before installing dependencies when
+the worktree does not include current `origin/main`. Use `--base-ref REF` when
+the user explicitly names another base. `--allow-stale-base` is reserved for
+intentional older-base work, and `--skip-git-fetch` is for deliberate offline
+use with a trusted cached ref. To run only this check:
+
+```bash
+bash scripts/setup-worktree.sh --git-preflight-only
+```
+
 Start implementation, QA, and broad test work from current `origin/main` unless
 the user names another base:
 
@@ -163,6 +173,11 @@ default step for every exploratory thread. Run it when the user asks for a full
 test suite, local QA, browser/app verification, or a fix that should be tested
 against the integrated local environment. After finishing, stop the stack with
 `scripts/qa/env.sh down` unless the user wants to keep it running.
+
+Codex environment cleanup is wired to `scripts/qa/env.sh cleanup`, which tears
+down an already-rendered QA stack without creating new runtime state. Treat that
+as a last-resort closeout hook; still run `scripts/qa/env.sh down` explicitly
+before abandoning a worktree or thread.
 
 ## Secret Hygiene
 

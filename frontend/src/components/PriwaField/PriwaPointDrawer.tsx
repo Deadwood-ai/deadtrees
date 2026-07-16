@@ -46,6 +46,8 @@ const observerOptions: Array<{ label: string; value: PriwaObserverName }> = [
   { label: "Lukas Ruf", value: "Lukas Ruf" },
   { label: "Markus Mayer", value: "Markus Mayer" },
   { label: "Stefan Treyer", value: "Stefan Treyer" },
+  { label: "Tobias Merz", value: "Tobias Merz" },
+  { label: "Fabian Bohnert", value: "Fabian Bohnert" },
   { label: "Andere", value: "andere" },
 ];
 
@@ -345,7 +347,9 @@ export default function PriwaPointDrawer({
         gps: willUseEstimatedGps ? "nein" : "ja",
         isEstimatedLocation: savedCoordinateSource !== "qr",
         rawQrValue:
-          savedCoordinateSource === "qr" ? rawQrValue.trim() || undefined : undefined,
+          savedCoordinateSource === "qr"
+            ? rawQrValue.trim() || undefined
+            : undefined,
       };
 
       if (editingPoint) {

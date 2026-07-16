@@ -3,6 +3,8 @@ import pytest
 
 from processor.src.utils.ssh import _connect_with_retry
 
+pytestmark = pytest.mark.unit
+
 
 class _FakeSSH:
 	"""Minimal stand-in for paramiko.SSHClient recording connect attempts."""

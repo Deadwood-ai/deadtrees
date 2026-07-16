@@ -23,7 +23,7 @@ Check the surfaces relevant to the question:
 - processing server/container heartbeat when host access is needed
 - frontend smoke behavior when user-visible symptoms are possible
 - PostHog traffic, exceptions, uploads, downloads, and audit events
-- Zulip reports and automation summaries when relevant
+- Gmail backup alerts, Zulip reports, and automation summaries when relevant
 - reference exports and backups for data freshness incidents
 
 ## Operator Chat Integration
@@ -44,6 +44,36 @@ full platform check inside that broader operator cadence.
 
    Use this as the first-pass summary, then drill down only into warnings,
    failures, skipped surfaces, or user-visible symptoms.
+
+   To include backup freshness when connected to the university network or VPN,
+   point the backup probe at the backup user. The script uses the documented
+   Borgmatic path on `dtbackup`, lists the latest database and storage archives,
+   and warns when parsed archive timestamps are older than 36 hours:
+
+   ```bash
+   DEADTREES_OPERATOR_BACKUP_HOST=remote-backup@dtbackup \
+     python3 scripts/operator_status.py --write-state --format markdown
+   ```
+
+   When checking backups, also inspect backup-server email alerts for the same
+   operator window, or for the last two months during weekly/full reviews:
+
+   ```text
+   in:anywhere from:dtbackup@gmx.de after:YYYY/MM/DD before:YYYY/MM/DD
+   ```
+
+   Treat the backup surface as fully checked only when both signals are covered:
+   latest Borg archives are fresh, and recent alert emails contain no unresolved
+   `URGENT`, degraded, failed-device, rebuild, or Borgmatic failure signal.
+
+   If the backup probe fails through `dtbackup`, distinguish host reachability
+   from backup-tool access:
+
+   ```bash
+   ssh -o BatchMode=yes -o ConnectTimeout=5 dtbackup 'hostname'
+   ssh -o BatchMode=yes -o ConnectTimeout=5 remote-backup@dtbackup \
+     '/home/remote-backup/.local/bin/borgmatic --config /home/remote-backup/.config/borgmatic/database_dump.yaml list --last 1'
+   ```
 
 1. Confirm local access files exist if host or MCP access is needed:
 
@@ -70,6 +100,7 @@ full platform check inside that broader operator cadence.
    ```bash
    ssh -o BatchMode=yes -o ConnectTimeout=5 storage-server 'hostname'
    ssh -o BatchMode=yes -o ConnectTimeout=5 processing-server 'hostname'
+   ssh -o BatchMode=yes -o ConnectTimeout=5 remote-backup@dtbackup 'hostname'
    ```
 
 ## Database Queries
@@ -116,6 +147,44 @@ tail -n 80 /data/logs/api_container.log
 If processing-server SSH is blocked, use database logs as primary evidence and
 state that host-level corroboration was unavailable.
 
+## Backup Checks
+
+Backup freshness is not continuously monitored by a Codex thread. During daily
+or weekly operator checks, combine the live Borg freshness probe with a bounded
+Gmail alert search.
+
+Checklist:
+
+1. Run the Borg freshness probe with `DEADTREES_OPERATOR_BACKUP_HOST=remote-backup@dtbackup`.
+2. Search backup-server alert email from `dtbackup@gmx.de` for the check window.
+3. If any alert mentions degraded RAID, failed devices, rebuild activity, or
+   Borgmatic/backup failures, verify current host state and current archives
+   before reporting backups as healthy.
+
+Use this two-month audit query when checking whether backup-server alerting has
+reported bigger issues:
+
+```text
+in:anywhere from:dtbackup@gmx.de after:YYYY/MM/DD before:YYYY/MM/DD
+```
+
+Then narrow likely incidents with:
+
+```text
+in:anywhere from:dtbackup@gmx.de after:YYYY/MM/DD before:YYYY/MM/DD (URGENT OR Failed OR Degraded OR Rebuild OR "Device Failed" OR "Time Out Error")
+in:anywhere after:YYYY/MM/DD before:YYYY/MM/DD (borgmatic OR "remote-backup" OR database_dump OR pg_dump) (failed OR failure OR error OR warning OR cron)
+```
+
+Interpretation guide:
+
+- `RaidAlert-URGENT`, `Volume Degraded`, `RaidSet Degraded`, or `Device Failed`
+  is a real storage incident until host-side state proves recovery.
+- `Start Rebuilding`, `HotSpare Used`, and `Complete Rebuild` describe the
+  recovery sequence; confirm current `/proc/mdstat`, `/mnt/raid` mount, and
+  latest Borg archives before closing the incident.
+- monthly `raid_scrub_check.sh` cron emails that only say scrubs started are
+  informational unless followed by error output or RAID alerts.
+
 ## Final Report
 
 Include:
@@ -124,7 +193,8 @@ Include:
 - window checked with concrete dates/times
 - upload/processing throughput counts
 - failures and stuck queues with dataset IDs where useful
-- API/storage/frontend/PostHog/Zulip/export/backups status as checked
+- API/storage/frontend/PostHog/Zulip/export status as checked
+- backups status, including Borg archive freshness and backup-alert email review
 - skipped or blocked surfaces
 - confidence and one improvement for the next check
 

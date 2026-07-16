@@ -14,6 +14,8 @@ export type PriwaObserverName =
   | "Lukas Ruf"
   | "Markus Mayer"
   | "Stefan Treyer"
+  | "Tobias Merz"
+  | "Fabian Bohnert"
   | "andere";
 export type PriwaFund = "ja" | "ja_kein_buchdrucker" | "nein" | "unsicher";
 export type PriwaBaumart =
@@ -36,6 +38,7 @@ export type PriwaNadel =
   | "rot/braun"
   | "abgefallen";
 export type PriwaPercentClass = "0%" | "bis25%" | "bis50%" | ">50%";
+export type PriwaBefallsgruppeOrigin = "suggestion" | "manual";
 
 export interface IPriwaPoint extends IPriwaCoordinate {
   id: string;
@@ -62,4 +65,29 @@ export interface IPriwaPoint extends IPriwaCoordinate {
   syncStatus?: PriwaPointSyncStatus;
   syncOperation?: PriwaPointSyncOperation;
   syncError?: string;
+}
+
+export interface IPriwaBefallsgruppe {
+  id: string;
+  projectId: string;
+  name: string;
+  origin: PriwaBefallsgruppeOrigin;
+  confidence: number | null;
+  suggestionReason: string | null;
+  algorithmVersion: string | null;
+  treeIds: string[];
+  datasetIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IPriwaBefallsgruppeSaveInput {
+  id?: string;
+  name: string;
+  origin: PriwaBefallsgruppeOrigin;
+  confidence?: number | null;
+  suggestionReason?: string | null;
+  algorithmVersion?: string | null;
+  treeIds: string[];
+  datasetIds: string[];
 }

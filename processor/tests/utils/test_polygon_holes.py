@@ -3,6 +3,8 @@ from shapely.geometry import Polygon
 import json
 from processor.src.utils.segmentation import reproject_polygons
 
+pytestmark = pytest.mark.unit
+
 
 def test_polygon_with_holes_conversion():
 	"""Test conversion of polygons with holes to GeoJSON format"""
