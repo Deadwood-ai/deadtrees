@@ -62,6 +62,7 @@ def priwa_project(test_user, test_user2):
 		yield {'id': project_id, 'slug': slug, 'member_id': test_user, 'non_member_id': test_user2}
 	finally:
 		with use_service_client() as client:
+			client.table('priwa_befallsgruppen').delete().eq('project_id', project_id).execute()
 			client.table('priwa_kaeferbaeume').delete().eq('project_id', project_id).execute()
 			client.table('priwa_project_memberships').delete().eq('project_id', project_id).execute()
 			client.table('priwa_projects').delete().eq('id', project_id).execute()
@@ -252,4 +253,190 @@ def test_priwa_non_member_cannot_write_kaeferbaum(priwa_project):
 		with pytest.raises(Exception):
 			client.table('priwa_kaeferbaeume').insert(
 				kaeferbaum_payload(priwa_project['id'])
+			).execute()
+
+
+def test_priwa_member_can_confirm_edit_and_merge_befallsgruppen(priwa_project):
+	"""Saved groups are authoritative and selected trees can be moved between groups."""
+	member_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
+
+	with use_client(member_token) as client:
+		first_tree = client.table('priwa_kaeferbaeume').insert(
+			kaeferbaum_payload(priwa_project['id'], baumnr='BG-001')
+		).execute().data[0]
+		second_tree = client.table('priwa_kaeferbaeume').insert(
+			kaeferbaum_payload(
+				priwa_project['id'],
+				geom=priwa_point(lon=8.2046),
+				baumnr='BG-002',
+				name='Different Observer',
+			)
+		).execute().data[0]
+
+		first_group_id = client.rpc(
+			'priwa_save_befallsgruppe',
+			{
+				'p_project_id': priwa_project['id'],
+				'p_name': 'Suggested group',
+				'p_tree_ids': [first_tree['id']],
+				'p_dataset_ids': [],
+				'p_origin': 'suggestion',
+				'p_confidence': 0.82,
+				'p_suggestion_reason': 'Nearby trees and dates',
+				'p_algorithm_version': 'location-date-v1',
+			},
+		).execute().data
+		second_group_id = client.rpc(
+			'priwa_save_befallsgruppe',
+			{
+				'p_project_id': priwa_project['id'],
+				'p_name': 'Manual group',
+				'p_tree_ids': [second_tree['id']],
+				'p_dataset_ids': [],
+				'p_origin': 'manual',
+			},
+		).execute().data
+
+		client.rpc(
+			'priwa_save_befallsgruppe',
+			{
+				'p_project_id': priwa_project['id'],
+				'p_group_id': first_group_id,
+				'p_name': 'Merged confirmed group',
+				'p_tree_ids': [first_tree['id'], second_tree['id']],
+				'p_dataset_ids': [],
+				'p_origin': 'suggestion',
+				'p_confidence': 0.82,
+				'p_suggestion_reason': 'User-reviewed suggestion',
+				'p_algorithm_version': 'location-date-v1',
+			},
+		).execute()
+
+		groups = client.table('priwa_befallsgruppen').select('*').eq(
+			'project_id', priwa_project['id']
+		).execute()
+		members = client.table('priwa_befallsgruppe_members').select('*').eq(
+			'group_id', first_group_id
+		).execute()
+		flights = client.table('priwa_befallsgruppe_flights').select('*').eq(
+			'group_id', first_group_id
+		).execute()
+
+	assert len(groups.data) == 1
+	assert groups.data[0]['id'] == first_group_id
+	assert groups.data[0]['name'] == 'Merged confirmed group'
+	assert groups.data[0]['created_by'] == priwa_project['member_id']
+	assert groups.data[0]['updated_by'] == priwa_project['member_id']
+	assert {member['tree_id'] for member in members.data} == {
+		first_tree['id'],
+		second_tree['id'],
+	}
+	assert flights.data == []
+	assert second_group_id not in {group['id'] for group in groups.data}
+
+	with use_client(member_token) as client:
+		with pytest.raises(Exception):
+			client.table('priwa_befallsgruppe_members').delete().eq(
+				'group_id', first_group_id
+			).execute()
+		remaining_members = client.table('priwa_befallsgruppe_members').select('*').eq(
+			'group_id', first_group_id
+		).execute()
+
+	assert len(remaining_members.data) == 2
+
+
+def test_priwa_soft_delete_removes_tree_from_befallsgruppe(priwa_project):
+	"""Soft-deleted trees leave groups, and groups disappear when their last tree is deleted."""
+	member_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
+
+	with use_client(member_token) as client:
+		first_tree = client.table('priwa_kaeferbaeume').insert(
+			kaeferbaum_payload(priwa_project['id'], baumnr='BG-DELETE-1')
+		).execute().data[0]
+		second_tree = client.table('priwa_kaeferbaeume').insert(
+			kaeferbaum_payload(
+				priwa_project['id'],
+				geom=priwa_point(lon=8.2046),
+				baumnr='BG-DELETE-2',
+			)
+		).execute().data[0]
+		group_id = client.rpc(
+			'priwa_save_befallsgruppe',
+			{
+				'p_project_id': priwa_project['id'],
+				'p_name': 'Deletion cleanup',
+				'p_tree_ids': [first_tree['id'], second_tree['id']],
+				'p_dataset_ids': [],
+			},
+		).execute().data
+
+		client.table('priwa_kaeferbaeume').update(
+			{'deleted_at': datetime.now(timezone.utc).isoformat()}
+		).eq('id', first_tree['id']).execute()
+		remaining_members = client.table('priwa_befallsgruppe_members').select(
+			'tree_id'
+		).eq('group_id', group_id).execute()
+		remaining_group = client.table('priwa_befallsgruppen').select('id').eq(
+			'id', group_id
+		).execute()
+
+	assert remaining_members.data == [{'tree_id': second_tree['id']}]
+	assert remaining_group.data == [{'id': group_id}]
+
+	with use_client(member_token) as client:
+		client.table('priwa_kaeferbaeume').update(
+			{'deleted_at': datetime.now(timezone.utc).isoformat()}
+		).eq('id', second_tree['id']).execute()
+		deleted_group = client.table('priwa_befallsgruppen').select('id').eq(
+			'id', group_id
+		).execute()
+
+	assert deleted_group.data == []
+
+
+def test_priwa_befallsgruppen_are_hidden_and_not_writable_for_non_members(priwa_project):
+	"""Befallsgruppe tables and save RPC inherit PRIWA project membership boundaries."""
+	member_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
+	non_member_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+
+	with use_client(member_token) as client:
+		tree = client.table('priwa_kaeferbaeume').insert(
+			kaeferbaum_payload(priwa_project['id'], baumnr='BG-RLS')
+		).execute().data[0]
+		group_id = client.rpc(
+			'priwa_save_befallsgruppe',
+			{
+				'p_project_id': priwa_project['id'],
+				'p_name': 'Protected group',
+				'p_tree_ids': [tree['id']],
+				'p_dataset_ids': [],
+			},
+		).execute().data
+
+	with use_client(non_member_token) as client:
+		assert client.table('priwa_befallsgruppen').select('*').eq('id', group_id).execute().data == []
+		assert client.table('priwa_befallsgruppe_members').select('*').eq(
+			'group_id', group_id
+		).execute().data == []
+		with pytest.raises(Exception):
+			client.rpc(
+				'priwa_save_befallsgruppe',
+				{
+					'p_project_id': priwa_project['id'],
+					'p_name': 'Forbidden group',
+					'p_tree_ids': [tree['id']],
+					'p_dataset_ids': [],
+				},
+			).execute()
+
+	with use_client(member_token) as client:
+		with pytest.raises(Exception):
+			client.table('priwa_befallsgruppe_flights').insert(
+				{
+					'group_id': group_id,
+					'dataset_id': 91001,
+					'source': 'manual',
+					'created_by': priwa_project['member_id'],
+				}
 			).execute()

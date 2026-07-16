@@ -95,9 +95,15 @@ vi.mock("./usePriwaKaeferbaeume", () => ({
   upsertPriwaKaeferbaum: vi.fn(),
 }));
 
+vi.mock("./usePriwaBefallsgruppen", () => ({
+  priwaBefallsgruppenQueryKey: vi.fn((projectId) => [
+    "priwa-befallsgruppen",
+    projectId,
+  ]),
+}));
+
 vi.mock("./priwaOfflineStore", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("./priwaOfflineStore")>();
+  const actual = await importOriginal<typeof import("./priwaOfflineStore")>();
   return {
     ...actual,
     loadCachedPriwaPoints: vi.fn(),
@@ -117,9 +123,8 @@ describe("usePriwaOfflineKaeferbaeume", () => {
 
   it("merges cached points with queued local edits", async () => {
     stateValues = [[basePoint], [queuedUpdate], false, false];
-    const { usePriwaOfflineKaeferbaeume } = await import(
-      "./usePriwaOfflineKaeferbaeume"
-    );
+    const { usePriwaOfflineKaeferbaeume } =
+      await import("./usePriwaOfflineKaeferbaeume");
 
     const result = usePriwaOfflineKaeferbaeume("project-1");
 
@@ -144,9 +149,8 @@ describe("usePriwaOfflineKaeferbaeume", () => {
     const offlineStore = await import("./priwaOfflineStore");
     (offlineStore.loadCachedPriwaPoints as Mock).mockResolvedValue([]);
     (offlineStore.loadPriwaSyncQueue as Mock).mockResolvedValue([]);
-    const { usePriwaOfflineKaeferbaeume } = await import(
-      "./usePriwaOfflineKaeferbaeume"
-    );
+    const { usePriwaOfflineKaeferbaeume } =
+      await import("./usePriwaOfflineKaeferbaeume");
 
     const result = usePriwaOfflineKaeferbaeume("project-1");
     await result.createPoint(basePoint);
@@ -174,9 +178,8 @@ describe("usePriwaOfflineKaeferbaeume", () => {
   it("uses the local cache ahead of stale query data when both exist", async () => {
     queryData = [{ ...basePoint, baumnr: "server-stale" }];
     stateValues = [[{ ...basePoint, baumnr: "cache-fresh" }], [], false, false];
-    const { usePriwaOfflineKaeferbaeume } = await import(
-      "./usePriwaOfflineKaeferbaeume"
-    );
+    const { usePriwaOfflineKaeferbaeume } =
+      await import("./usePriwaOfflineKaeferbaeume");
 
     const result = usePriwaOfflineKaeferbaeume("project-1");
 
