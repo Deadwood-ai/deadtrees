@@ -161,7 +161,7 @@ let savedAoiPayloads: Array<Record<string, unknown>> = [];
 
 const installAuthenticatedUser = async (
   page: Page,
-  options: { canAudit: boolean },
+  options: { canAudit: boolean; auditDatasetRequestFails?: boolean },
 ) => {
   await installLocalSession(page, {
     user: auditor,
@@ -212,7 +212,7 @@ const installAuthenticatedUser = async (
 
 const fulfillSupabaseRequest = async (
   route: Route,
-  options: { canAudit: boolean },
+  options: { canAudit: boolean; auditDatasetRequestFails?: boolean },
 ) => {
   const request = route.request();
   const url = new URL(request.url());
@@ -249,6 +249,22 @@ const fulfillSupabaseRequest = async (
         route,
         wantsObject ? (dataset ?? null) : dataset ? [dataset] : [],
       );
+      return;
+    }
+
+    const selectedColumns = url.searchParams.get("select");
+    if (
+      options.auditDatasetRequestFails &&
+      (selectedColumns === "*" || selectedColumns?.split(",").includes("is_audited"))
+    ) {
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        json: {
+          code: "57014",
+          message: "canceling statement due to statement timeout",
+        },
+      });
       return;
     }
 
@@ -548,6 +564,63 @@ test.describe("auditor local e2e", () => {
     ).toBeVisible();
   });
 
+  test("audit queue uses an explicit lightweight dataset projection", async ({
+    page,
+  }) => {
+    await installAuthenticatedUser(page, { canAudit: true });
+
+    const datasetRequest = page.waitForRequest((request) => {
+      const url = new URL(request.url());
+      const selectedColumns = url.searchParams.get("select");
+      return (
+        url.pathname.endsWith("/v2_full_dataset_view") &&
+        (selectedColumns === "*" ||
+          selectedColumns?.split(",").includes("is_audited") === true)
+      );
+    });
+
+    await page.goto("/dataset-audit");
+    await dismissCookieBanner(page);
+    const request = await datasetRequest;
+    const selectedColumns = new URL(request.url()).searchParams
+      .get("select")
+      ?.split(",");
+
+    expect(selectedColumns).toBeDefined();
+    expect(selectedColumns).not.toContain("*");
+    expect(selectedColumns).toEqual(
+      expect.arrayContaining([
+        "id",
+        "file_name",
+        "is_audited",
+        "is_metadata_done",
+        "phenology_probability",
+      ]),
+    );
+    await expect(page.getByText("Local Forest")).toBeVisible();
+  });
+
+  test("audit queue reports dataset load failures instead of showing zero", async ({
+    page,
+  }) => {
+    await installAuthenticatedUser(page, {
+      canAudit: true,
+      auditDatasetRequestFails: true,
+    });
+
+    await page.goto("/dataset-audit");
+    await dismissCookieBanner(page);
+
+    await expect(
+      page.getByText("Could not load audit datasets", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("The audit queue could not be loaded. Please try again."),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+    await expect(page.getByText("📋 Pending")).toHaveCount(0);
+  });
+
   test("auditor start action checks the lock before opening detail", async ({
     page,
   }) => {
@@ -569,6 +642,24 @@ test.describe("auditor local e2e", () => {
     await expect(page.getByText("1. Georeferencing Accuracy")).toBeVisible();
     await expect(
       page.getByRole("button", { name: /^save Save$/i }),
+    ).toBeVisible();
+  });
+
+  test("direct audit detail links retain queue navigation context", async ({
+    page,
+  }) => {
+    await installAuthenticatedUser(page, { canAudit: true });
+
+    await page.goto(`/dataset-audit/${completeDataset.id}`);
+    await dismissCookieBanner(page);
+
+    await expect(
+      page.getByRole("heading", {
+        name: new RegExp(`Audit: ${completeDataset.id}`),
+      }),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(
+      page.getByRole("button", { name: /^right Save & Next$/i }),
     ).toBeVisible();
   });
 

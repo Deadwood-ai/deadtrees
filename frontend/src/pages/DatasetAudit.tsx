@@ -29,9 +29,10 @@ import {
 } from "@ant-design/icons";
 import { useAuth } from "../hooks/useAuthProvider";
 import { useCanAudit } from "../hooks/useUserPrivileges";
-import { useDatasets } from "../hooks/useDatasets";
+import { useDatasetById } from "../hooks/useDatasets";
+import { useAuditDatasets } from "../hooks/useAuditDatasets";
+import type { AuditDataset } from "../hooks/useAuditDatasets";
 import DatasetAuditDetail from "../components/DatasetAudit/DatasetAuditDetail";
-import { IDataset } from "../types/dataset";
 import { useDatasetAudits, DatasetAuditUserInfo, useDatasetContributors } from "../hooks/useDatasetAudit";
 import { supabase } from "../hooks/useSupabase";
 import { useFlaggedDatasets } from "../hooks/useDatasetFlags";
@@ -65,7 +66,7 @@ const PROCESSING_STATE_OPTIONS: Array<{ label: string; value: ProcessingStateFil
 	{ label: "Metadata", value: "metadata" },
 ];
 
-const PROCESSING_STATE_TO_FIELD: Record<ProcessingStateFilterKey, keyof IDataset> = {
+const PROCESSING_STATE_TO_FIELD: Record<ProcessingStateFilterKey, keyof AuditDataset> = {
 	ortho: "is_ortho_done",
 	cog: "is_cog_done",
 	thumbnail: "is_thumbnail_done",
@@ -86,18 +87,18 @@ const formatHours = (value: number | null | undefined): string => {
 // Helper function to check if a dataset is ready to be audited.
 // Auditing only depends on the legacy pipeline; it must not be gated on the v2
 // combined segmentation model, AOI generation, or the current processing status.
-const isProcessingComplete = (dataset: IDataset) => {
+const isProcessingComplete = (dataset: AuditDataset) => {
 	return isDatasetReadyForAudit(dataset);
 };
 
 // Helper to format location
-const formatLocation = (dataset: IDataset): string => {
+const formatLocation = (dataset: AuditDataset): string => {
 	const parts = [dataset.admin_level_3, dataset.admin_level_1].filter(Boolean);
 	return parts.length > 0 ? parts.join(", ") : "Unknown";
 };
 
 // Helper to format acquisition date
-const formatAcquisitionDate = (dataset: IDataset): string => {
+const formatAcquisitionDate = (dataset: AuditDataset): string => {
 	const { aquisition_year, aquisition_month, aquisition_day } = dataset;
 	if (!aquisition_year) return "Unknown";
 	const parts = [String(aquisition_year)];
@@ -119,14 +120,14 @@ const compareNullableNumbers = (a: number | null | undefined, b: number | null |
 	return aNum - bNum;
 };
 
-const getAcquisitionMonthIndex = (dataset: IDataset): number | null => {
+const getAcquisitionMonthIndex = (dataset: AuditDataset): number | null => {
 	const year = parseInt(dataset.aquisition_year, 10);
 	const month = parseInt(dataset.aquisition_month, 10);
 	if (isNaN(year) || isNaN(month) || month < 1 || month > 12) return null;
 	return year * 12 + (month - 1);
 };
 
-const getAcquisitionDateSortKey = (dataset: IDataset): number | null => {
+const getAcquisitionDateSortKey = (dataset: AuditDataset): number | null => {
 	const year = parseInt(dataset.aquisition_year, 10);
 	const month = parseInt(dataset.aquisition_month, 10);
 	const day = parseInt(dataset.aquisition_day, 10);
@@ -194,7 +195,19 @@ function DatasetAuditInner() {
 	const { user } = useAuth();
 	const isAuthLoading = false;
 	const { canAudit, isLoading: isAuditPrivilegeLoading } = useCanAudit();
-	const { data: datasets, isLoading: isDatasetLoading } = useDatasets();
+	const datasetId = id ? Number(id) : undefined;
+	const {
+		data: datasets,
+		isLoading: isDatasetLoading,
+		isError: isDatasetError,
+		refetch: refetchDatasets,
+	} = useAuditDatasets();
+	const {
+		data: detailDataset,
+		isLoading: isDetailDatasetLoading,
+		isError: isDetailDatasetError,
+		refetch: refetchDetailDataset,
+	} = useDatasetById(datasetId);
 	const { data: audits, isLoading: isAuditsLoading } = useDatasetAudits();
 	const { data: flaggedAgg = [], isLoading: isFlaggedLoading } = useFlaggedDatasets();
 	const { data: referenceDatasetIds = new Set() } = useReferenceDatasetIds();
@@ -568,10 +581,30 @@ function DatasetAuditInner() {
 
 	// Detail view
 	if (id) {
-		const dataset = datasets?.find((d) => d.id.toString() === id);
-		if (isDatasetLoading) return <div>Loading dataset...</div>;
-		if (!dataset) return <div>Dataset not found</div>;
-		return <DatasetAuditDetail dataset={dataset} />;
+		if (isDetailDatasetLoading) return <div>Loading dataset...</div>;
+		if (isDetailDatasetError) {
+			return (
+				<Result
+					status="error"
+					title="Could not load dataset"
+					subTitle="The dataset could not be loaded. Please try again."
+					extra={<Button onClick={() => refetchDetailDataset()}>Try again</Button>}
+				/>
+			);
+		}
+		if (!detailDataset) return <div>Dataset not found</div>;
+		return <DatasetAuditDetail dataset={detailDataset} />;
+	}
+
+	if (isDatasetError) {
+		return (
+			<Result
+				status="error"
+				title="Could not load audit datasets"
+				subTitle="The audit queue could not be loaded. Please try again."
+				extra={<Button onClick={() => refetchDatasets()}>Try again</Button>}
+			/>
+		);
 	}
 
 	const processingColumns: ColumnsType<ProcessingOverviewRow> = [
@@ -677,7 +710,7 @@ function DatasetAuditInner() {
 	];
 
 	// Build columns based on active tab
-	const baseColumns: ColumnsType<IDataset> = [
+	const baseColumns: ColumnsType<AuditDataset> = [
 		{
 			title: "ID",
 			dataIndex: "id",
@@ -717,7 +750,7 @@ function DatasetAuditInner() {
 	const seasonColumn = {
 		title: "Season",
 		key: "season",
-		render: (_: unknown, record: IDataset) => {
+		render: (_: unknown, record: AuditDataset) => {
 			const audit = auditMap.get(record.id);
 			// has_valid_phenology: true = in season, false = out of season, null = not determined
 			if (!audit || audit.has_valid_phenology === null) {
@@ -729,7 +762,7 @@ function DatasetAuditInner() {
 				<Tag color="orange">Out of Season</Tag>
 			);
 		},
-		sorter: (a: IDataset, b: IDataset) => {
+		sorter: (a: AuditDataset, b: AuditDataset) => {
 			const aAudit = auditMap.get(a.id);
 			const bAudit = auditMap.get(b.id);
 			const rank = (val: boolean | null | undefined) => {
@@ -745,7 +778,7 @@ function DatasetAuditInner() {
 	const pendingPhenologyProbabilityColumn = {
 		title: "Phenology Prob.",
 		key: "phenology_probability",
-		render: (_: unknown, record: IDataset) => {
+		render: (_: unknown, record: AuditDataset) => {
 			const probability = record.phenology_probability;
 			if (typeof probability !== "number") {
 				return <Tag color="default">—</Tag>;
@@ -755,7 +788,7 @@ function DatasetAuditInner() {
 			const color = pct >= 70 ? "green" : pct >= 40 ? "gold" : "red";
 			return <Tag color={color}>{pct}%</Tag>;
 		},
-		sorter: (a: IDataset, b: IDataset) => {
+		sorter: (a: AuditDataset, b: AuditDataset) => {
 			const aValue = typeof a.phenology_probability === "number" ? a.phenology_probability : -1;
 			const bValue = typeof b.phenology_probability === "number" ? b.phenology_probability : -1;
 			return aValue - bValue;
@@ -767,7 +800,7 @@ function DatasetAuditInner() {
 	const notesColumn = {
 		title: "Notes",
 		key: "notes",
-		render: (_: unknown, record: IDataset) => {
+		render: (_: unknown, record: AuditDataset) => {
 			const audit = auditMap.get(record.id);
 			const notes = audit?.notes;
 			if (!notes) return <span className="text-gray-400">—</span>;
@@ -778,7 +811,7 @@ function DatasetAuditInner() {
 				</Tooltip>
 			);
 		},
-		sorter: (a: IDataset, b: IDataset) => {
+		sorter: (a: AuditDataset, b: AuditDataset) => {
 			const aNotes = auditMap.get(a.id)?.notes || "";
 			const bNotes = auditMap.get(b.id)?.notes || "";
 			return compareNullableStrings(aNotes, bNotes);
@@ -789,7 +822,7 @@ function DatasetAuditInner() {
 	const flagsColumn = {
 		title: "Flags",
 		key: "flags",
-		render: (_: unknown, record: IDataset) => {
+		render: (_: unknown, record: AuditDataset) => {
 			const flagData = flaggedMap.get(record.id);
 			if (!flagData) return null;
 			const openCount = flagData.open_count ?? 0;
@@ -804,7 +837,7 @@ function DatasetAuditInner() {
 				</Tooltip>
 			);
 		},
-		sorter: (a: IDataset, b: IDataset) => {
+		sorter: (a: AuditDataset, b: AuditDataset) => {
 			const aFlag = flaggedMap.get(a.id);
 			const bFlag = flaggedMap.get(b.id);
 			const aCount = (aFlag?.open_count ?? 0) + (aFlag?.acknowledged_count ?? 0);
@@ -817,7 +850,7 @@ function DatasetAuditInner() {
 	const correctionsColumn = {
 		title: "Pending Edits",
 		key: "corrections",
-		render: (_: unknown, record: IDataset) => {
+		render: (_: unknown, record: AuditDataset) => {
 			const count = correctionsMap.get(record.id);
 			if (!count) return <span className="text-gray-400">—</span>;
 			return (
@@ -828,14 +861,14 @@ function DatasetAuditInner() {
 				</Tooltip>
 			);
 		},
-		sorter: (a: IDataset, b: IDataset) => (correctionsMap.get(a.id) || 0) - (correctionsMap.get(b.id) || 0),
+		sorter: (a: AuditDataset, b: AuditDataset) => (correctionsMap.get(a.id) || 0) - (correctionsMap.get(b.id) || 0),
 		width: 100,
 	};
 
 	const contributorColumn = {
 		title: "Contributor",
 		key: "contributor",
-		render: (_: unknown, record: IDataset) => {
+		render: (_: unknown, record: AuditDataset) => {
 			// First try contributor map, then fall back to audit map
 			const email = contributorMap.get(record.id) || auditMap.get(record.id)?.uploaded_by_email;
 			if (!email) return <span className="text-gray-400">—</span>;
@@ -855,7 +888,7 @@ function DatasetAuditInner() {
 				</Tooltip>
 			);
 		},
-		sorter: (a: IDataset, b: IDataset) => {
+		sorter: (a: AuditDataset, b: AuditDataset) => {
 			const aEmail = contributorMap.get(a.id) || auditMap.get(a.id)?.uploaded_by_email || "";
 			const bEmail = contributorMap.get(b.id) || auditMap.get(b.id)?.uploaded_by_email || "";
 			return compareNullableStrings(aEmail, bEmail);
@@ -866,7 +899,7 @@ function DatasetAuditInner() {
 	const auditorColumn = {
 		title: "Auditor",
 		key: "auditor",
-		render: (_: unknown, record: IDataset) => {
+		render: (_: unknown, record: AuditDataset) => {
 			const audit = auditMap.get(record.id);
 			if (!audit?.audited_by_email) return <span className="text-gray-400">—</span>;
 			return (
@@ -885,7 +918,7 @@ function DatasetAuditInner() {
 				</Tooltip>
 			);
 		},
-		sorter: (a: IDataset, b: IDataset) => {
+		sorter: (a: AuditDataset, b: AuditDataset) => {
 			const aEmail = auditMap.get(a.id)?.audited_by_email || "";
 			const bEmail = auditMap.get(b.id)?.audited_by_email || "";
 			return compareNullableStrings(aEmail, bEmail);
@@ -896,7 +929,7 @@ function DatasetAuditInner() {
 	const statusColumn = {
 		title: "Status",
 		key: "status",
-		render: (_: unknown, record: IDataset) => {
+		render: (_: unknown, record: AuditDataset) => {
 			const audit = auditMap.get(record.id);
 			if (!audit) return <Tag color="orange">Not audited yet</Tag>;
 
@@ -930,7 +963,7 @@ function DatasetAuditInner() {
 				</Space>
 			);
 		},
-		sorter: (a: IDataset, b: IDataset) => {
+		sorter: (a: AuditDataset, b: AuditDataset) => {
 			const aAudit = auditMap.get(a.id);
 			const bAudit = auditMap.get(b.id);
 
@@ -965,7 +998,7 @@ function DatasetAuditInner() {
 	const actionsColumn = {
 		title: "Actions",
 		key: "actions",
-		render: (_: unknown, record: IDataset) => {
+		render: (_: unknown, record: AuditDataset) => {
 			const isComplete = isProcessingComplete(record);
 			const buttonLabel = record.is_audited ? "Review" : "Start Audit";
 			const tooltipText = !isComplete
@@ -987,14 +1020,14 @@ function DatasetAuditInner() {
 	const referencePatchesColumn = {
 		title: "Reference Patches",
 		key: "reference_patches",
-		render: (_: unknown, record: IDataset) => (
+		render: (_: unknown, record: AuditDataset) => (
 			<Tooltip title="Open Reference Patch Editor for this dataset">
 				<Button size="small" onClick={() => navigate(`/dataset-audit/${record.id}/reference-patches`)}>
 					{record.has_ml_tiles ? "Continue Patches" : "Generate Patches"}
 				</Button>
 			</Tooltip>
 		),
-		sorter: (a: IDataset, b: IDataset) => {
+		sorter: (a: AuditDataset, b: AuditDataset) => {
 			const aHas = a.has_ml_tiles ? 1 : 0;
 			const bHas = b.has_ml_tiles ? 1 : 0;
 			if (aHas !== bHas) return aHas - bHas;
@@ -1004,7 +1037,7 @@ function DatasetAuditInner() {
 	};
 
 	// Assemble columns based on tab
-	let columns: ColumnsType<IDataset>;
+	let columns: ColumnsType<AuditDataset>;
 	if (activeTab === "pending") {
 		// Pending: include derived phenology probability, flags and contributor
 		columns = [...baseColumns, pendingPhenologyProbabilityColumn, flagsColumn, contributorColumn, actionsColumn];
