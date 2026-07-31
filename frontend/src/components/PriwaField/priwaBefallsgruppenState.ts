@@ -10,3 +10,12 @@ export const groupsForPriwaMosaicMatching = (
   isLoading: boolean,
   errorMessage: string | null,
 ) => (arePriwaBefallsgruppenReady(isLoading, errorMessage) ? groups : []);
+
+export const indexPriwaBefallsgruppenByTreeId = (
+  groups: IPriwaBefallsgruppe[],
+) =>
+  Object.fromEntries(
+    groups.flatMap((group) =>
+      group.treeIds.map((treeId) => [treeId, group] as const),
+    ),
+  ) as Record<string, IPriwaBefallsgruppe>;

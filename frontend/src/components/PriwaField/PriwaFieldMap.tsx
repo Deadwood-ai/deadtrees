@@ -50,6 +50,10 @@ import {
   createPriwaPreviewFeature,
   createPriwaPreviewLayer,
 } from "./createPriwaPointLayer";
+import {
+  createPriwaBefallsgruppeFeature,
+  createPriwaBefallsgruppeLayer,
+} from "./createPriwaBefallsgruppeLayer";
 import PriwaPointDrawer from "./PriwaPointDrawer";
 import PriwaLayerPanel, { type PriwaBaseLayer } from "./PriwaLayerPanel";
 import PriwaPointListPanel from "./PriwaPointListPanel";
@@ -58,7 +62,7 @@ import PriwaBefallsgruppenPanel from "./PriwaBefallsgruppenPanel";
 import { groupsForPriwaMosaicMatching } from "./priwaBefallsgruppenState";
 import { usePriwaOfflineBasemap } from "./usePriwaOfflineBasemap";
 import { usePriwaMosaicMatches } from "./usePriwaMosaicMatches";
-import type { IPriwaMosaic } from "./usePriwaMosaics";
+import type { IPriwaMosaic, PriwaFlightType } from "./usePriwaMosaics";
 import type { IPriwaSyncSummary } from "./priwaOfflineSync";
 import type {
   IPriwaBefallsgruppe,
@@ -112,6 +116,11 @@ interface PriwaFieldMapProps {
   onDeletePoint: (pointId: string) => Promise<void>;
   onSaveGroup: (input: IPriwaBefallsgruppeSaveInput) => Promise<unknown>;
   onDeleteGroup: (groupId: string) => Promise<unknown>;
+  onSetFlightType: (input: {
+    datasetId: string;
+    flightType: PriwaFlightType;
+  }) => Promise<unknown>;
+  isClassifyingFlight?: boolean;
   onSyncNow?: () => Promise<void>;
 }
 
@@ -135,6 +144,8 @@ export default function PriwaFieldMap({
   onDeletePoint,
   onSaveGroup,
   onDeleteGroup,
+  onSetFlightType,
+  isClassifyingFlight = false,
   onSyncNow,
 }: PriwaFieldMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -144,6 +155,9 @@ export default function PriwaFieldMap({
   const pointLayerRef = useRef<ReturnType<typeof createPriwaPointLayer> | null>(
     null,
   );
+  const groupLayerRef = useRef<ReturnType<
+    typeof createPriwaBefallsgruppeLayer
+  > | null>(null);
   const previewLayerRef = useRef<ReturnType<
     typeof createPriwaPreviewLayer
   > | null>(null);
@@ -187,6 +201,9 @@ export default function PriwaFieldMap({
   const [focusedPointId, setFocusedPointId] = useState<string | null>(null);
   const [isLayerPanelOpen, setLayerPanelOpen] = useState(false);
   const [isGroupPanelOpen, setGroupPanelOpen] = useState(false);
+  const [groupDraftDatasetId, setGroupDraftDatasetId] = useState<string | null>(
+    null,
+  );
   const [baseLayer, setBaseLayer] = useState<PriwaBaseLayer>("aerial");
   const isMobile = useIsMobile();
   const mosaicMatchGroups = useMemo(
@@ -194,31 +211,39 @@ export default function PriwaFieldMap({
       groupsForPriwaMosaicMatching(groups, isLoadingGroups, groupsErrorMessage),
     [groups, groupsErrorMessage, isLoadingGroups],
   );
-  const { candidateCount, matchedMosaics, mosaicIdByPointId } =
-    usePriwaMosaicMatches(points, mosaics, mosaicMatchGroups);
-  const visibleMosaics = useMemo(
-    () => matchedMosaics.map(({ mosaic }) => mosaic),
-    [matchedMosaics],
+  const {
+    candidateCount,
+    matchedMosaics,
+    unmatchedMosaics,
+    excludedMosaics,
+    mosaicIdByPointId,
+  } = usePriwaMosaicMatches(points, mosaics, mosaicMatchGroups);
+  const reviewMosaics = useMemo(
+    () => [
+      ...matchedMosaics.map(({ mosaic }) => mosaic),
+      ...unmatchedMosaics.map(({ mosaic }) => mosaic),
+    ],
+    [matchedMosaics, unmatchedMosaics],
   );
   const enabledMosaics = useMemo(
-    () => visibleMosaics.filter((mosaic) => enabledMosaicIds.has(mosaic.id)),
-    [enabledMosaicIds, visibleMosaics],
+    () => reviewMosaics.filter((mosaic) => enabledMosaicIds.has(mosaic.id)),
+    [enabledMosaicIds, reviewMosaics],
   );
   const selectedMosaic = useMemo(
     () =>
       selectedMosaicId
-        ? (visibleMosaics.find((mosaic) => mosaic.id === selectedMosaicId) ??
+        ? (reviewMosaics.find((mosaic) => mosaic.id === selectedMosaicId) ??
           null)
         : null,
-    [selectedMosaicId, visibleMosaics],
+    [reviewMosaics, selectedMosaicId],
   );
   const hoveredMosaic = useMemo(
     () =>
       hoveredMosaicId
-        ? (visibleMosaics.find((mosaic) => mosaic.id === hoveredMosaicId) ??
+        ? (reviewMosaics.find((mosaic) => mosaic.id === hoveredMosaicId) ??
           null)
         : null,
-    [hoveredMosaicId, visibleMosaics],
+    [hoveredMosaicId, reviewMosaics],
   );
   const inspectedMosaic = hoveredMosaic ?? selectedMosaic;
   const inspectedMosaicIsHovered = hoveredMosaic !== null;
@@ -241,21 +266,21 @@ export default function PriwaFieldMap({
   useEffect(() => {
     if (
       selectedMosaicId &&
-      !visibleMosaics.some((mosaic) => mosaic.id === selectedMosaicId)
+      !reviewMosaics.some((mosaic) => mosaic.id === selectedMosaicId)
     ) {
       setSelectedMosaicId(null);
     }
-  }, [selectedMosaicId, visibleMosaics]);
+  }, [reviewMosaics, selectedMosaicId]);
 
   useEffect(() => {
     if (
       hoveredMosaicId &&
-      !visibleMosaics.some((mosaic) => mosaic.id === hoveredMosaicId)
+      !reviewMosaics.some((mosaic) => mosaic.id === hoveredMosaicId)
     ) {
       hoveredMosaicIdRef.current = null;
       setHoveredMosaicId(null);
     }
-  }, [hoveredMosaicId, visibleMosaics]);
+  }, [hoveredMosaicId, reviewMosaics]);
 
   const selectMosaicFromFootprint = useCallback((mosaicId: string) => {
     setSelectedMosaicId(mosaicId);
@@ -310,12 +335,14 @@ export default function PriwaFieldMap({
     const dopLayer = createLglDop20Layer();
     const offlineAreaLayer = createPriwaOfflineAreaLayer();
     const mosaicFootprintLayer = createPriwaMosaicFootprintLayer();
+    const groupLayer = createPriwaBefallsgruppeLayer();
     const pointLayer = createPriwaPointLayer([]);
     const previewLayer = createPriwaPreviewLayer();
     aerialLayerRef.current = dopLayer;
     topographicLayerRef.current = topographicLayer;
     offlineAreaLayerRef.current = offlineAreaLayer;
     mosaicFootprintLayerRef.current = mosaicFootprintLayer;
+    groupLayerRef.current = groupLayer;
     pointLayerRef.current = pointLayer;
     previewLayerRef.current = previewLayer;
 
@@ -326,6 +353,7 @@ export default function PriwaFieldMap({
         dopLayer,
         offlineAreaLayer,
         mosaicFootprintLayer,
+        groupLayer,
         pointLayer,
         previewLayer,
         userLocationLayer,
@@ -436,6 +464,7 @@ export default function PriwaFieldMap({
       aerialLayerRef.current = null;
       topographicLayerRef.current = null;
       mosaicFootprintLayerRef.current = null;
+      groupLayerRef.current = null;
       pointLayerRef.current = null;
       previewLayerRef.current = null;
       cogLayersRef.current = [];
@@ -448,13 +477,17 @@ export default function PriwaFieldMap({
   }, [baseLayer]);
 
   useEffect(() => {
-    const nextKnownIds = new Set(visibleMosaics.map((mosaic) => mosaic.id));
+    const nextKnownIds = new Set(reviewMosaics.map((mosaic) => mosaic.id));
+    const matchedIds = new Set(matchedMosaics.map(({ mosaic }) => mosaic.id));
     const previousKnownIds = knownMosaicIdsRef.current;
 
     setEnabledMosaicIds((currentIds) => {
       const nextEnabledIds = new Set<string>();
-      visibleMosaics.forEach((mosaic) => {
-        if (!previousKnownIds.has(mosaic.id) || currentIds.has(mosaic.id)) {
+      reviewMosaics.forEach((mosaic) => {
+        if (
+          currentIds.has(mosaic.id) ||
+          (!previousKnownIds.has(mosaic.id) && matchedIds.has(mosaic.id))
+        ) {
           nextEnabledIds.add(mosaic.id);
         }
       });
@@ -462,7 +495,7 @@ export default function PriwaFieldMap({
     });
 
     knownMosaicIdsRef.current = nextKnownIds;
-  }, [visibleMosaics]);
+  }, [matchedMosaics, reviewMosaics]);
 
   useEffect(() => {
     const source = pointLayerRef.current?.getSource();
@@ -473,6 +506,17 @@ export default function PriwaFieldMap({
       source.addFeature(createPriwaPointFeature(point)),
     );
   }, [points]);
+
+  useEffect(() => {
+    const source = groupLayerRef.current?.getSource();
+    if (!source) return;
+
+    source.clear();
+    groups.forEach((group) => {
+      const feature = createPriwaBefallsgruppeFeature(group, points);
+      if (feature) source.addFeature(feature);
+    });
+  }, [groups, points]);
 
   useEffect(() => {
     const source = offlineAreaLayerRef.current?.getSource();
@@ -491,17 +535,25 @@ export default function PriwaFieldMap({
     if (!source) return;
 
     source.clear();
-    visibleMosaics.forEach((mosaic) => {
-      const feature = createPriwaMosaicFootprintFeature({
-        mosaic,
-        isSelected: mosaic.id === selectedMosaicId,
-        isVisible: enabledMosaicIds.has(mosaic.id),
+    const matchedIds = new Set(matchedMosaics.map(({ mosaic }) => mosaic.id));
+    reviewMosaics
+      .filter(
+        (mosaic) =>
+          matchedIds.has(mosaic.id) ||
+          enabledMosaicIds.has(mosaic.id) ||
+          mosaic.id === selectedMosaicId,
+      )
+      .forEach((mosaic) => {
+        const feature = createPriwaMosaicFootprintFeature({
+          mosaic,
+          isSelected: mosaic.id === selectedMosaicId,
+          isVisible: enabledMosaicIds.has(mosaic.id),
+        });
+        if (feature) {
+          source.addFeature(feature);
+        }
       });
-      if (feature) {
-        source.addFeature(feature);
-      }
-    });
-  }, [enabledMosaicIds, selectedMosaicId, visibleMosaics]);
+  }, [enabledMosaicIds, matchedMosaics, reviewMosaics, selectedMosaicId]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -697,6 +749,62 @@ export default function PriwaFieldMap({
     [],
   );
 
+  const setFlightType = useCallback(
+    async (datasetId: string, flightType: PriwaFlightType) => {
+      try {
+        await onSetFlightType({ datasetId, flightType });
+        message.success(
+          flightType === "umfeldbefliegung"
+            ? "Als Umfeldbefliegung markiert"
+            : flightType === "not_priwa"
+              ? "Aus PRIWA ausgeschlossen"
+              : "Prüfstatus zurückgesetzt",
+        );
+      } catch (error) {
+        message.error(
+          error instanceof Error
+            ? error.message
+            : "Befliegung konnte nicht klassifiziert werden.",
+        );
+      }
+    },
+    [onSetFlightType],
+  );
+
+  const assignMosaicToGroup = useCallback(
+    async (mosaic: IPriwaMosaic, groupId: string) => {
+      const group = groups.find((candidate) => candidate.id === groupId);
+      if (!group) return;
+      try {
+        await onSaveGroup({
+          id: group.id,
+          name: group.name,
+          origin: group.origin,
+          confidence: group.confidence,
+          suggestionReason: group.suggestionReason,
+          algorithmVersion: group.algorithmVersion,
+          treeIds: group.treeIds,
+          datasetIds: Array.from(new Set([...group.datasetIds, mosaic.id])),
+        });
+        message.success(`${mosaic.label} wurde ${group.name} zugeordnet`);
+      } catch (error) {
+        message.error(
+          error instanceof Error
+            ? error.message
+            : "Befliegung konnte nicht zugeordnet werden.",
+        );
+      }
+    },
+    [groups, onSaveGroup],
+  );
+
+  const createGroupForMosaic = useCallback((mosaic: IPriwaMosaic) => {
+    setGroupDraftDatasetId(mosaic.id);
+    setLayerPanelOpen(false);
+    setPointListOpen(false);
+    setGroupPanelOpen(true);
+  }, []);
+
   const handleAddPoint = useCallback(
     async (point: IPriwaPoint) => {
       await onAddPoint(point);
@@ -755,15 +863,22 @@ export default function PriwaFieldMap({
     baseLayer,
     candidateMosaicCount: candidateCount,
     matchedMosaics,
+    unmatchedMosaics,
+    excludedMosaics,
+    groups,
     enabledMosaicIds,
     selectedMosaicId,
     hoveredMosaicId,
     isLoading: isMatchingMosaics,
     isOpen: isLayerPanelOpen,
+    isClassifyingFlight,
     errorMessage: cogErrorMessage ?? groupsErrorMessage,
     onBaseLayerChange: setBaseLayer,
     onSelectMosaic: setSelectedMosaicId,
     onSetMosaicVisibility: setMosaicVisibility,
+    onSetFlightType: setFlightType,
+    onAssignMosaicToGroup: assignMosaicToGroup,
+    onCreateGroupForMosaic: createGroupForMosaic,
     onZoomToMosaic: zoomToMosaicFootprint,
     onOpenPointInTable: openPointInTable,
   };
@@ -952,6 +1067,7 @@ export default function PriwaFieldMap({
                 icon={<ClusterOutlined />}
                 aria-pressed={isGroupPanelOpen}
                 onClick={() => {
+                  setGroupDraftDatasetId(null);
                   setLayerPanelOpen(false);
                   setPointListOpen(false);
                   setGroupPanelOpen((currentIsOpen) => !currentIsOpen);
@@ -1005,6 +1121,7 @@ export default function PriwaFieldMap({
       {isPointListOpen && !isPlacingPoint && (
         <PriwaPointListPanel
           points={points}
+          groups={groups}
           projectName={projectName}
           isLoading={isLoadingPoints}
           focusedPointId={focusedPointId}
@@ -1020,16 +1137,23 @@ export default function PriwaFieldMap({
       {isGroupPanelOpen && !isPlacingPoint && (
         <PriwaBefallsgruppenPanel
           points={points}
-          mosaics={mosaics}
+          mosaics={mosaics.filter(
+            (mosaic) => mosaic.flightType !== "not_priwa",
+          )}
           groups={groups}
+          initialDatasetId={groupDraftDatasetId}
           mosaicIdByPointId={mosaicIdByPointId}
           isMobile={isMobile}
           isLoading={isLoadingGroups}
           isSaving={isSavingGroup}
           errorMessage={groupsErrorMessage}
-          onClose={() => setGroupPanelOpen(false)}
+          onClose={() => {
+            setGroupDraftDatasetId(null);
+            setGroupPanelOpen(false);
+          }}
           onSave={async (input) => {
             await onSaveGroup(input);
+            setGroupDraftDatasetId(null);
           }}
           onDelete={async (groupId) => {
             await onDeleteGroup(groupId);

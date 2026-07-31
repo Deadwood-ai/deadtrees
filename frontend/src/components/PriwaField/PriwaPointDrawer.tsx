@@ -597,6 +597,9 @@ export default function PriwaPointDrawer({
               <Form.Item label="Bohrmehl" name="bm">
                 <Select options={yesNoOptions} />
               </Form.Item>
+              <Form.Item label="Bohrloch" name="bohrloch">
+                <Select options={bohrlochOptions} />
+              </Form.Item>
               <Form.Item label="Harz" name="harz">
                 <Select options={harzOptions} />
               </Form.Item>
@@ -614,9 +617,6 @@ export default function PriwaPointDrawer({
               </Form.Item>
               <Form.Item label="Rindenverlust" name="rinde">
                 <Select options={percentOptions} />
-              </Form.Item>
-              <Form.Item label="Bohrloch" name="bohrloch">
-                <Select options={bohrlochOptions} />
               </Form.Item>
             </div>
           </section>

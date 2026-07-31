@@ -36,6 +36,7 @@ const mosaic: IPriwaMosaic = {
   createdAt: "2026-07-12T12:00:00.000Z",
   authors: [],
   additionalInformation: null,
+  flightType: null,
 };
 const group = (datasetIds: string[]): IPriwaBefallsgruppe => ({
   id: "group-1",
@@ -52,6 +53,39 @@ const group = (datasetIds: string[]): IPriwaBefallsgruppe => ({
 });
 
 describe("buildPriwaMosaicMatchIndex with confirmed groups", () => {
+  it("keeps an unmatched flight visible with a concrete review reason", () => {
+    const outsideMosaic = {
+      ...mosaic,
+      id: "outside-flight",
+      bbox: "BOX(9.1 49.4,9.2 49.5)",
+    };
+
+    const result = buildPriwaMosaicMatchIndex([point], [outsideMosaic], []);
+
+    expect(result.matchedMosaics).toEqual([]);
+    expect(result.unmatchedMosaics).toEqual([
+      {
+        mosaic: outsideMosaic,
+        reasonCode: "no-trees-in-footprint",
+        reason: "Keine Käferbäume liegen innerhalb der Kartengrenze.",
+      },
+    ]);
+  });
+
+  it("keeps explicitly excluded flights separate from PRIWA review", () => {
+    const excludedMosaic = {
+      ...mosaic,
+      id: "excluded-flight",
+      flightType: "not_priwa" as const,
+    };
+
+    const result = buildPriwaMosaicMatchIndex([point], [excludedMosaic], []);
+
+    expect(result.matchedMosaics).toEqual([]);
+    expect(result.unmatchedMosaics).toEqual([]);
+    expect(result.excludedMosaics).toEqual([excludedMosaic]);
+  });
+
   it("uses explicit group flight links instead of the heuristic", () => {
     const result = buildPriwaMosaicMatchIndex(
       [point],

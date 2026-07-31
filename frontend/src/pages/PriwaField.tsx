@@ -31,6 +31,8 @@ export default function PriwaField() {
     error: mosaicsError,
     isLoading: isLoadingMosaics,
     isRefetching: isRefetchingMosaics,
+    setFlightType,
+    isClassifyingFlight,
   } = usePriwaMosaics(activeMembership?.projectId);
   const {
     groups,
@@ -123,6 +125,8 @@ export default function PriwaField() {
       onDeletePoint={deletePoint}
       onSaveGroup={saveGroup}
       onDeleteGroup={deleteGroup}
+      onSetFlightType={setFlightType}
+      isClassifyingFlight={isClassifyingFlight}
       syncSummary={syncSummary}
       onSyncNow={syncNow}
     />

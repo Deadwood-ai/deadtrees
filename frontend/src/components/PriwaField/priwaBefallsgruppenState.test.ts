@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   arePriwaBefallsgruppenReady,
   groupsForPriwaMosaicMatching,
+  indexPriwaBefallsgruppenByTreeId,
 } from "./priwaBefallsgruppenState";
 import type { IPriwaBefallsgruppe } from "./types";
 
@@ -33,5 +34,11 @@ describe("PRIWA Befallsgruppen availability", () => {
       groupsForPriwaMosaicMatching([group], false, "network error"),
     ).toEqual([]);
     expect(groupsForPriwaMosaicMatching([group], false, null)).toEqual([group]);
+  });
+
+  it("indexes confirmed groups for tree table and list presentation", () => {
+    expect(indexPriwaBefallsgruppenByTreeId([group])).toEqual({
+      "tree-1": group,
+    });
   });
 });

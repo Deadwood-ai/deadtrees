@@ -21,6 +21,7 @@ interface PriwaBefallsgruppenPanelProps {
   points: IPriwaPoint[];
   mosaics: IPriwaMosaic[];
   groups: IPriwaBefallsgruppe[];
+  initialDatasetId?: string | null;
   mosaicIdByPointId: Record<string, string>;
   isMobile: boolean;
   isLoading: boolean;
@@ -41,6 +42,7 @@ export default function PriwaBefallsgruppenPanel({
   points,
   mosaics,
   groups,
+  initialDatasetId = null,
   mosaicIdByPointId,
   isMobile,
   isLoading,
@@ -52,7 +54,15 @@ export default function PriwaBefallsgruppenPanel({
   onZoomToTrees,
 }: PriwaBefallsgruppenPanelProps) {
   const [draft, setDraft] = useState<IPriwaBefallsgruppeEditorDraft | null>(
-    null,
+    () =>
+      initialDatasetId
+        ? {
+            name: `Befallsgruppe ${groups.length + 1}`,
+            origin: "manual",
+            treeIds: [],
+            datasetIds: [initialDatasetId],
+          }
+        : null,
   );
   const isGroupStateReady = arePriwaBefallsgruppenReady(
     isLoading,

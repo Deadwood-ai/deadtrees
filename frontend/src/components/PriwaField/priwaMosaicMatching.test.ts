@@ -40,6 +40,7 @@ const mosaic = (overrides: Partial<IPriwaMosaic> = {}): IPriwaMosaic => ({
   createdAt: "2026-06-18T08:00:00.000Z",
   authors: ["PRIWA"],
   additionalInformation: null,
+  flightType: null,
   ...overrides,
 });
 

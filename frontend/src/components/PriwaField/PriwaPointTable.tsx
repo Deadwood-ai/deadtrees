@@ -14,10 +14,11 @@ import {
   getPriwaPointTitle,
   isPriwaPointQaCandidate,
 } from "./priwaPointQa";
-import type { IPriwaPoint } from "./types";
+import type { IPriwaBefallsgruppe, IPriwaPoint } from "./types";
 
 interface PriwaPointTableProps {
   points: IPriwaPoint[];
+  groupByTreeId: Record<string, IPriwaBefallsgruppe>;
   focusedPointId?: string | null;
   onEditPoint: (point: IPriwaPoint) => void;
   onZoomToPoint: (point: IPriwaPoint) => void;
@@ -25,6 +26,7 @@ interface PriwaPointTableProps {
 
 export default function PriwaPointTable({
   points,
+  groupByTreeId,
   focusedPointId = null,
   onEditPoint,
   onZoomToPoint,
@@ -61,6 +63,21 @@ export default function PriwaPointTable({
         render: (_, point) => getPriwaPointTitle(point),
       },
       { title: "Datum", dataIndex: "datum", width: 118 },
+      {
+        title: "Befallsgruppe",
+        key: "befallsgruppe",
+        width: 180,
+        render: (_, point) => {
+          const group = groupByTreeId[point.id];
+          return group ? (
+            <Tag className="m-0" color="green">
+              {group.name}
+            </Tag>
+          ) : (
+            <span className="text-slate-400">Nicht zugeordnet</span>
+          );
+        },
+      },
       { title: "Baumart", dataIndex: "baumart", width: 150 },
       {
         title: "Fund",
@@ -122,7 +139,7 @@ export default function PriwaPointTable({
         ),
       },
     ],
-    [onEditPoint, onZoomToPoint],
+    [groupByTreeId, onEditPoint, onZoomToPoint],
   );
 
   return (

@@ -1,7 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Settings } from "../../config";
 import { supabase } from "../../hooks/useSupabase";
+
+export type PriwaFlightType = "umfeldbefliegung" | "not_priwa" | null;
 
 export interface IPriwaMosaic {
   id: string;
@@ -13,6 +15,7 @@ export interface IPriwaMosaic {
   createdAt: string;
   authors: string[];
   additionalInformation: string | null;
+  flightType: PriwaFlightType;
 }
 
 interface IPriwaMosaicRow {
@@ -25,6 +28,7 @@ interface IPriwaMosaicRow {
   created_at: string;
   authors: string[] | null;
   additional_information: string | null;
+  flight_type: PriwaFlightType;
 }
 
 interface IPriwaDatasetMosaicRow {
@@ -40,7 +44,7 @@ interface IPriwaDatasetMosaicRow {
   additional_information: string | null;
 }
 
-const PRIWA_MOSAIC_LIMIT = 50;
+const PRIWA_MOSAIC_PAGE_SIZE = 100;
 const PRIWA_PREVIEW_AUTHOR_MARKERS = new Set([
   "prima",
   "prima-wald",
@@ -99,7 +103,7 @@ const fetchPreviewFallbackMosaics = async (
 
   return ((data ?? []) as IPriwaDatasetMosaicRow[])
     .filter((row) => row.cog_path && hasPriwaPreviewAuthor(row.authors))
-    .slice(0, PRIWA_MOSAIC_LIMIT)
+    .slice(0, PRIWA_MOSAIC_PAGE_SIZE)
     .map((row) => ({
       id: String(row.id),
       projectId,
@@ -110,31 +114,64 @@ const fetchPreviewFallbackMosaics = async (
       createdAt: row.created_at,
       authors: row.authors ?? [],
       additionalInformation: row.additional_information,
+      flightType: null,
     }));
 };
 
-export const priwaMosaicsQueryKey = (
-  projectId: string | null | undefined,
-) => ["priwa-project-mosaics", projectId];
+export const priwaMosaicsQueryKey = (projectId: string | null | undefined) => [
+  "priwa-project-mosaics",
+  projectId,
+];
+
+export const setPriwaFlightType = async (
+  projectId: string,
+  datasetId: string,
+  flightType: PriwaFlightType,
+) => {
+  const normalizedDatasetId = Number(datasetId);
+  if (!Number.isSafeInteger(normalizedDatasetId)) {
+    throw new Error("Die Befliegung hat keine gültige Dataset ID.");
+  }
+
+  const { error } = await supabase.rpc("priwa_set_project_flight_type", {
+    p_project_id: projectId,
+    p_dataset_id: normalizedDatasetId,
+    p_flight_type: flightType,
+  });
+  if (error) throw error;
+};
 
 export const fetchPriwaMosaics = async (
   projectId: string,
 ): Promise<IPriwaMosaic[]> => {
-  const { data, error } = await supabase
-    .rpc("priwa_project_latest_flight_mosaics", {
-      p_project_id: projectId,
-      p_limit: PRIWA_MOSAIC_LIMIT,
-    });
+  const rows: IPriwaMosaicRow[] = [];
+  let offset = 0;
 
-  if (error) {
-    if (isMissingPriwaMosaicRpc(error)) {
-      return fetchPreviewFallbackMosaics(projectId);
+  while (true) {
+    const { data, error } = await supabase.rpc(
+      "priwa_project_latest_flight_mosaics",
+      {
+        p_project_id: projectId,
+        p_limit: PRIWA_MOSAIC_PAGE_SIZE,
+        p_offset: offset,
+      },
+    );
+
+    if (error) {
+      if (offset === 0 && isMissingPriwaMosaicRpc(error)) {
+        return fetchPreviewFallbackMosaics(projectId);
+      }
+
+      throw error;
     }
 
-    throw error;
+    const page = (data ?? []) as IPriwaMosaicRow[];
+    rows.push(...page);
+    if (page.length < PRIWA_MOSAIC_PAGE_SIZE) break;
+    offset += PRIWA_MOSAIC_PAGE_SIZE;
   }
 
-  return ((data ?? []) as IPriwaMosaicRow[]).map((row) => ({
+  return rows.map((row) => ({
     id: row.id,
     projectId: row.project_id,
     label: row.label,
@@ -144,11 +181,13 @@ export const fetchPriwaMosaics = async (
     createdAt: row.created_at,
     authors: row.authors ?? [],
     additionalInformation: row.additional_information,
+    flightType: row.flight_type,
   }));
 };
 
 export function usePriwaMosaics(projectId: string | null | undefined) {
-  return useQuery({
+  const queryClient = useQueryClient();
+  const query = useQuery({
     queryKey: priwaMosaicsQueryKey(projectId),
     enabled: !!projectId,
     queryFn: () => fetchPriwaMosaics(projectId as string),
@@ -156,4 +195,27 @@ export function usePriwaMosaics(projectId: string | null | undefined) {
     gcTime: 10 * 60 * 1000,
     retry: 1,
   });
+  const classificationMutation = useMutation({
+    mutationFn: ({
+      datasetId,
+      flightType,
+    }: {
+      datasetId: string;
+      flightType: PriwaFlightType;
+    }) => {
+      if (!projectId) throw new Error("Kein PRIWA Projekt ausgewählt.");
+      return setPriwaFlightType(projectId, datasetId, flightType);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: priwaMosaicsQueryKey(projectId),
+      });
+    },
+  });
+
+  return {
+    ...query,
+    setFlightType: classificationMutation.mutateAsync,
+    isClassifyingFlight: classificationMutation.isPending,
+  };
 }
