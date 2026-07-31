@@ -1,6 +1,7 @@
 import { Button, Spin, Switch } from "antd";
 import {
   CameraOutlined,
+  HistoryOutlined,
   LeftOutlined,
   LinkOutlined,
   LoadingOutlined,
@@ -36,6 +37,8 @@ interface MobileTimeCardProps {
   onImageryChange: (releaseNum: number) => void;
   /** Drop back to the live (fast) imagery basemap */
   onUseLiveImagery: () => void;
+  /** Start discovering the historical releases at this location */
+  onBrowseHistory: () => void;
   onAutoMatchChange: (enabled: boolean) => void;
 }
 
@@ -76,6 +79,7 @@ const MobileTimeCard = ({
   onPredictionYearChange,
   onImageryChange,
   onUseLiveImagery,
+  onBrowseHistory,
   onAutoMatchChange,
 }: MobileTimeCardProps) => {
   const predictionIndex = PREDICTION_YEARS.indexOf(predictionYear);
@@ -207,6 +211,27 @@ const MobileTimeCard = ({
                 indicator={<LoadingOutlined style={{ fontSize: 16 }} spin />}
               />
               Finding imagery
+            </div>
+          ) : isUsingLiveImagery && waybackItems.length === 0 ? (
+            // Live basemap with discovery stood down. There is one image to
+            // show and nothing to step through, so offer the way in rather
+            // than claiming no imagery exists here.
+            <div className="rounded-2xl bg-slate-50 px-4 py-2.5 text-center">
+              <div className="truncate text-sm font-semibold text-slate-950">
+                Latest imagery
+              </div>
+              <div className="mt-0.5 truncate text-xs text-slate-500">
+                Most recent available
+              </div>
+              <Button
+                type="link"
+                size="small"
+                icon={<HistoryOutlined />}
+                onClick={onBrowseHistory}
+                className="!mt-1 !h-auto !p-0 text-xs"
+              >
+                Browse historical imagery
+              </Button>
             </div>
           ) : waybackItems.length === 0 ? (
             <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">

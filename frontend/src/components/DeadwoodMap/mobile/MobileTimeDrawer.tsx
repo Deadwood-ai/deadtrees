@@ -18,6 +18,8 @@ interface MobileTimeDrawerProps {
   onPredictionYearChange: (year: string) => void;
   onImageryChange: (releaseNum: number) => void;
   onUseLiveImagery: () => void;
+  /** Start discovering the historical releases at this location */
+  onBrowseHistory: () => void;
   onAutoMatchChange: (enabled: boolean) => void;
 }
 
@@ -40,6 +42,7 @@ const MobileTimeDrawer = ({
   onPredictionYearChange,
   onImageryChange,
   onUseLiveImagery,
+  onBrowseHistory,
   onAutoMatchChange,
 }: MobileTimeDrawerProps) => {
   const productName =
@@ -71,6 +74,7 @@ const MobileTimeDrawer = ({
         onPredictionYearChange={onPredictionYearChange}
         onImageryChange={onImageryChange}
         onUseLiveImagery={onUseLiveImagery}
+        onBrowseHistory={onBrowseHistory}
         onAutoMatchChange={onAutoMatchChange}
       />
     </MobileBottomSheet>

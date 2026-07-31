@@ -514,8 +514,18 @@ export const useWaybackItemsDebounced = (
 
   const candidates = candidatesQuery.data ?? [];
   const isUnverifiedFallback =
-    candidatesQuery.isError && candidates.length === 0;
-  const data = isUnverifiedFallback ? (fallbackQuery.data ?? []) : candidates;
+    enabled && candidatesQuery.isError && candidates.length === 0;
+  const resolvedData = isUnverifiedFallback
+    ? (fallbackQuery.data ?? [])
+    : candidates;
+
+  // While standing down, report no candidates at all. The debounce effect
+  // stops tracking the map center when disabled, so `stablePoint` — and with
+  // it the query key and any `keepPreviousData` placeholder — is frozen on
+  // whichever tile was last discovered. Handing that list back would let a
+  // caller act on another area's candidates after the user has panned away.
+  // Re-enabling re-debounces from the current center.
+  const data = enabled ? resolvedData : [];
 
   const isFetching = candidatesQuery.isFetching || fallbackQuery.isFetching;
 

@@ -1465,6 +1465,7 @@ const DeadtreesMap = () => {
           selectedReleaseNum={selectedReleaseNum}
           onImageryChange={handleImageryChange}
           onUseLiveImagery={handleUseLiveImagery}
+          onBrowseHistory={() => setShouldLoadLocalWaybackItems(true)}
           waybackItems={localWaybackItems}
           isLoadingImagery={isWaybackLoading}
           isWaybackActive={DeadwoodMapStyle === "wayback"}

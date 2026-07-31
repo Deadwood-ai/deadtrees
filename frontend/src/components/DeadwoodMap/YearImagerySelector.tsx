@@ -309,8 +309,12 @@ const YearImagerySelector = ({
 
     setHasRequestedHistoryMode(true);
     onRequestLocalImagery?.();
-    // Candidates already discovered: enter the list at its newest image.
-    // Otherwise the effect above takes over when discovery finishes.
+    // Candidates already discovered for the current location: enter the list
+    // at its newest image. Coming from Latest this list is empty — the hook
+    // reports no candidates while discovery is stood down, precisely so a
+    // stale list from an area the user has since panned away from cannot be
+    // selected here — and the effect above takes over once discovery for the
+    // current tile finishes.
     if (waybackItems.length > 0) {
       onImageryChange(waybackItems[waybackItems.length - 1].releaseNum);
     }
