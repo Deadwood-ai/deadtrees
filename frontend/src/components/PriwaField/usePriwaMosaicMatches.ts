@@ -1,6 +1,10 @@
 import { useMemo } from "react";
 
-import { matchPriwaPointsToMosaics } from "./priwaMosaicMatching";
+import {
+  explainUnmatchedPriwaMosaic,
+  matchPriwaPointsToMosaics,
+  type PriwaMosaicUnmatchedReasonCode,
+} from "./priwaMosaicMatching";
 import type { IPriwaBefallsgruppe, IPriwaPoint } from "./types";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
 
@@ -15,6 +19,12 @@ export interface IPriwaMatchedMosaic {
   points: IPriwaMatchedPoint[];
   minDaysApart: number;
   maxDaysApart: number;
+}
+
+export interface IPriwaUnmatchedMosaic {
+  mosaic: IPriwaMosaic;
+  reasonCode: PriwaMosaicUnmatchedReasonCode;
+  reason: string;
 }
 
 const dateRank = (value: string | null | undefined) => {
@@ -63,9 +73,15 @@ export const buildPriwaMosaicMatchIndex = (
   mosaics: IPriwaMosaic[],
   groups: IPriwaBefallsgruppe[] = [],
 ) => {
-  const candidates = [...mosaics]
+  const allCandidates = [...mosaics]
     .filter((mosaic) => mosaic.cogUrl.trim().length > 0)
     .sort(compareMosaics);
+  const excludedMosaics = allCandidates.filter(
+    (mosaic) => mosaic.flightType === "not_priwa",
+  );
+  const candidates = allCandidates.filter(
+    (mosaic) => mosaic.flightType !== "not_priwa",
+  );
   const pointsById = new Map(points.map((point) => [point.id, point]));
   const matchesByMosaicId = new Map<string, IPriwaMatchedPoint[]>();
   const mosaicIdByPointId: Record<string, string> = {};
@@ -131,10 +147,21 @@ export const buildPriwaMosaicMatchIndex = (
       },
     ];
   });
+  const matchedMosaicIds = new Set(
+    matchedMosaics.map(({ mosaic }) => mosaic.id),
+  );
+  const unmatchedMosaics = candidates
+    .filter((mosaic) => !matchedMosaicIds.has(mosaic.id))
+    .map<IPriwaUnmatchedMosaic>((mosaic) => ({
+      mosaic,
+      ...explainUnmatchedPriwaMosaic(points, mosaic),
+    }));
 
   return {
     candidateCount: candidates.length,
     matchedMosaics,
+    unmatchedMosaics,
+    excludedMosaics,
     mosaicIdByPointId,
   };
 };

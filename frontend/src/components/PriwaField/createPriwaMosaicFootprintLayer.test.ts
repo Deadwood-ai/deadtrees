@@ -16,6 +16,7 @@ const mosaic: IPriwaMosaic = {
   createdAt: "2026-06-22T10:00:00.000Z",
   authors: ["PRIWA Wald"],
   additionalInformation: null,
+  flightType: null,
 };
 
 describe("createPriwaMosaicFootprintLayer", () => {

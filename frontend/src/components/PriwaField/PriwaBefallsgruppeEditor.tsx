@@ -14,22 +14,11 @@ import { useEffect, useMemo } from "react";
 
 import type {
   IPriwaBefallsgruppe,
+  IPriwaBefallsgruppeEditorDraft,
   IPriwaBefallsgruppeSaveInput,
   IPriwaPoint,
-  PriwaBefallsgruppeOrigin,
 } from "./types";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
-
-export interface IPriwaBefallsgruppeEditorDraft {
-  id?: string;
-  name: string;
-  origin: PriwaBefallsgruppeOrigin;
-  confidence?: number | null;
-  suggestionReason?: string | null;
-  algorithmVersion?: string | null;
-  treeIds: string[];
-  datasetIds: string[];
-}
 
 interface IPriwaBefallsgruppeEditorValues {
   name: string;

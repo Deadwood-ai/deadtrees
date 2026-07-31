@@ -33,7 +33,10 @@ describe("fetchPriwaMosaics", () => {
     supabaseMock.datasetQuery.eq.mockReturnValue(supabaseMock.datasetQuery);
     supabaseMock.datasetQuery.not.mockReturnValue(supabaseMock.datasetQuery);
     supabaseMock.datasetQuery.order.mockReturnValue(supabaseMock.datasetQuery);
-    supabaseMock.datasetQuery.limit.mockResolvedValue({ data: [], error: null });
+    supabaseMock.datasetQuery.limit.mockResolvedValue({
+      data: [],
+      error: null,
+    });
     supabaseMock.rpc.mockResolvedValue({
       data: [
         {
@@ -46,6 +49,7 @@ describe("fetchPriwaMosaics", () => {
           created_at: "2026-06-25T08:30:00.000Z",
           authors: ["PRIWA Wald"],
           additional_information: "Sommerbefliegung",
+          flight_type: null,
         },
       ],
       error: null,
@@ -66,6 +70,7 @@ describe("fetchPriwaMosaics", () => {
         createdAt: "2026-06-25T08:30:00.000Z",
         authors: ["PRIWA Wald"],
         additionalInformation: "Sommerbefliegung",
+        flightType: null,
       },
     ]);
 
@@ -73,7 +78,8 @@ describe("fetchPriwaMosaics", () => {
       "priwa_project_latest_flight_mosaics",
       {
         p_project_id: "project-1",
-        p_limit: 50,
+        p_limit: 100,
+        p_offset: 0,
       },
     );
   });
@@ -129,6 +135,7 @@ describe("fetchPriwaMosaics", () => {
         createdAt: "2026-06-22T12:12:44.567Z",
         authors: ["PRIMA-Wald"],
         additionalInformation: "Fallback mosaic",
+        flightType: null,
       },
     ]);
 
@@ -147,6 +154,76 @@ describe("fetchPriwaMosaics", () => {
       "cog_path",
       "is",
       null,
+    );
+  });
+
+  it("loads every page instead of silently truncating at 50 flights", async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: String(index + 1),
+      project_id: "project-1",
+      label: `Flug ${index + 1}`,
+      cog_url: `flight-${index + 1}.tif`,
+      bbox: "BOX(8.1 48.4,8.2 48.5)",
+      capture_date: "2026-06-24",
+      created_at: "2026-06-25T08:30:00.000Z",
+      authors: ["PRIWA"],
+      additional_information: null,
+      flight_type: null,
+    }));
+    const finalPage = [
+      {
+        ...firstPage[0],
+        id: "101",
+        label: "Flug 101",
+        cog_url: "flight-101.tif",
+      },
+    ];
+    supabaseMock.rpc
+      .mockResolvedValueOnce({ data: firstPage, error: null })
+      .mockResolvedValueOnce({ data: finalPage, error: null });
+
+    const { fetchPriwaMosaics } = await import("./usePriwaMosaics");
+    const result = await fetchPriwaMosaics("project-1");
+
+    expect(result).toHaveLength(101);
+    expect(supabaseMock.rpc).toHaveBeenNthCalledWith(
+      1,
+      "priwa_project_latest_flight_mosaics",
+      {
+        p_project_id: "project-1",
+        p_limit: 100,
+        p_offset: 0,
+      },
+    );
+    expect(supabaseMock.rpc).toHaveBeenNthCalledWith(
+      2,
+      "priwa_project_latest_flight_mosaics",
+      {
+        p_project_id: "project-1",
+        p_limit: 100,
+        p_offset: 100,
+      },
+    );
+  });
+
+  it("persists an explicit editable flight classification", async () => {
+    supabaseMock.rpc.mockResolvedValueOnce({
+      data: "umfeldbefliegung",
+      error: null,
+    });
+    const { setPriwaFlightType } = await import("./usePriwaMosaics");
+
+    await expect(
+      setPriwaFlightType("project-1", "10512", "umfeldbefliegung"),
+    ).resolves.toBeUndefined();
+
+    expect(supabaseMock.rpc).toHaveBeenCalledWith(
+      "priwa_set_project_flight_type",
+      {
+        p_project_id: "project-1",
+        p_dataset_id: 10512,
+        p_flight_type: "umfeldbefliegung",
+      },
     );
   });
 });

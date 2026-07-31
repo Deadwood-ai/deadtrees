@@ -12,16 +12,18 @@ import {
   getPriwaPointTitle,
   isPriwaPointQaCandidate,
 } from "./priwaPointQa";
-import type { IPriwaPoint } from "./types";
+import type { IPriwaBefallsgruppe, IPriwaPoint } from "./types";
 
 interface PriwaPointCompactListProps {
   points: IPriwaPoint[];
+  groupByTreeId: Record<string, IPriwaBefallsgruppe>;
   onEditPoint: (point: IPriwaPoint) => void;
   onZoomToPoint: (point: IPriwaPoint) => void;
 }
 
 export default function PriwaPointCompactList({
   points,
+  groupByTreeId,
   onEditPoint,
   onZoomToPoint,
 }: PriwaPointCompactListProps) {
@@ -29,6 +31,7 @@ export default function PriwaPointCompactList({
     <div className="divide-y divide-slate-100">
       {points.map((point) => {
         const isQa = isPriwaPointQaCandidate(point);
+        const group = groupByTreeId[point.id];
         return (
           <article
             key={point.id}
@@ -57,6 +60,11 @@ export default function PriwaPointCompactList({
                   {getPriwaPointSourceLabel(point)}
                 </Tag>
                 <Tag className="m-0">{getPriwaFundLabel(point)}</Tag>
+                {group && (
+                  <Tag className="m-0" color="green">
+                    {group.name}
+                  </Tag>
+                )}
                 {point.syncStatus && point.syncStatus !== "synced" && (
                   <Tag
                     className="m-0"

@@ -6,6 +6,7 @@ import type {
   IPriwaBefallsgruppeSaveInput,
   PriwaBefallsgruppeOrigin,
 } from "./types";
+import { priwaMosaicsQueryKey } from "./usePriwaMosaics";
 
 interface IPriwaBefallsgruppeRow {
   id: string;
@@ -99,6 +100,25 @@ export const deletePriwaBefallsgruppe = async (groupId: string) => {
   if (error) throw error;
 };
 
+export const addPriwaFlightToBefallsgruppe = async (
+  projectId: string,
+  groupId: string,
+  datasetId: string,
+) => {
+  const normalizedDatasetId = Number(datasetId);
+  if (!Number.isSafeInteger(normalizedDatasetId) || normalizedDatasetId <= 0) {
+    throw new Error("Die Umfeldbefliegung hat keine gültige ID.");
+  }
+
+  const { error } = await supabase.rpc("priwa_add_flight_to_befallsgruppe", {
+    p_project_id: projectId,
+    p_group_id: groupId,
+    p_dataset_id: normalizedDatasetId,
+  });
+
+  if (error) throw error;
+};
+
 export function usePriwaBefallsgruppen(projectId: string | null | undefined) {
   const queryClient = useQueryClient();
   const query = useQuery({
@@ -108,22 +128,44 @@ export function usePriwaBefallsgruppen(projectId: string | null | undefined) {
     staleTime: 30 * 1000,
   });
 
-  const invalidate = async () => {
-    await queryClient.invalidateQueries({
+  const invalidateGroupsAndMosaics = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: priwaBefallsgruppenQueryKey(projectId),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: priwaMosaicsQueryKey(projectId),
+      }),
+    ]);
+  };
+  const invalidateGroups = async () =>
+    queryClient.invalidateQueries({
       queryKey: priwaBefallsgruppenQueryKey(projectId),
     });
-  };
 
   const saveMutation = useMutation({
     mutationFn: async (input: IPriwaBefallsgruppeSaveInput) => {
       if (!projectId) throw new Error("PRIWA Projekt ist nicht verfügbar.");
       return savePriwaBefallsgruppe(projectId, input);
     },
-    onSuccess: invalidate,
+    onSuccess: invalidateGroupsAndMosaics,
+  });
+  const addFlightMutation = useMutation({
+    mutationFn: ({
+      groupId,
+      datasetId,
+    }: {
+      groupId: string;
+      datasetId: string;
+    }) => {
+      if (!projectId) throw new Error("PRIWA Projekt ist nicht verfügbar.");
+      return addPriwaFlightToBefallsgruppe(projectId, groupId, datasetId);
+    },
+    onSuccess: invalidateGroupsAndMosaics,
   });
   const deleteMutation = useMutation({
     mutationFn: deletePriwaBefallsgruppe,
-    onSuccess: invalidate,
+    onSuccess: invalidateGroups,
   });
 
   return {
@@ -131,7 +173,11 @@ export function usePriwaBefallsgruppen(projectId: string | null | undefined) {
     isLoading: query.isLoading,
     error: query.error,
     saveGroup: saveMutation.mutateAsync,
+    addFlightToGroup: addFlightMutation.mutateAsync,
     deleteGroup: deleteMutation.mutateAsync,
-    isSaving: saveMutation.isPending || deleteMutation.isPending,
+    isSaving:
+      saveMutation.isPending ||
+      addFlightMutation.isPending ||
+      deleteMutation.isPending,
   };
 }

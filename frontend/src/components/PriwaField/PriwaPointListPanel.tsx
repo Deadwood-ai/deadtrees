@@ -4,9 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import PriwaPointCompactList from "./PriwaPointCompactList";
 import PriwaPointTable from "./PriwaPointTable";
+import { indexPriwaBefallsgruppenByTreeId } from "./priwaBefallsgruppenState";
 import { downloadPriwaPointsCsv } from "./priwaPointCsv";
 import { isPriwaPointQaCandidate } from "./priwaPointQa";
-import type { IPriwaPoint } from "./types";
+import type { IPriwaBefallsgruppe, IPriwaPoint } from "./types";
 
 type PriwaPointFilter = "all" | "qa";
 type PriwaPointView = "list" | "table";
@@ -30,6 +31,7 @@ const loadInitialPointView = (): PriwaPointView => {
 
 interface PriwaPointListPanelProps {
   points: IPriwaPoint[];
+  groups: IPriwaBefallsgruppe[];
   projectName: string;
   isLoading?: boolean;
   focusedPointId?: string | null;
@@ -40,6 +42,7 @@ interface PriwaPointListPanelProps {
 
 export default function PriwaPointListPanel({
   points,
+  groups,
   projectName,
   isLoading = false,
   focusedPointId = null,
@@ -50,6 +53,10 @@ export default function PriwaPointListPanel({
   const [filter, setFilter] = useState<PriwaPointFilter>("all");
   const [view, setView] = useState<PriwaPointView>(loadInitialPointView);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const groupByTreeId = useMemo(
+    () => indexPriwaBefallsgruppenByTreeId(groups),
+    [groups],
+  );
   const qaPoints = useMemo(
     () => points.filter(isPriwaPointQaCandidate),
     [points],
@@ -202,12 +209,14 @@ export default function PriwaPointListPanel({
         ) : view === "list" ? (
           <PriwaPointCompactList
             points={visiblePoints}
+            groupByTreeId={groupByTreeId}
             onEditPoint={onEditPoint}
             onZoomToPoint={onZoomToPoint}
           />
         ) : (
           <PriwaPointTable
             points={visiblePoints}
+            groupByTreeId={groupByTreeId}
             focusedPointId={focusedPointId}
             onEditPoint={onEditPoint}
             onZoomToPoint={onZoomToPoint}

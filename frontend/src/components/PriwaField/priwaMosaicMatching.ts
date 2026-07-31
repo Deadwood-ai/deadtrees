@@ -13,6 +13,18 @@ export interface IPriwaPointMosaicMatch {
   daysApart: number;
 }
 
+export type PriwaMosaicUnmatchedReasonCode =
+  | "missing-footprint"
+  | "missing-capture-date"
+  | "no-trees-in-footprint"
+  | "no-trees-in-date-window"
+  | "closer-flight-selected";
+
+export interface IPriwaMosaicUnmatchedReason {
+  reasonCode: PriwaMosaicUnmatchedReasonCode;
+  reason: string;
+}
+
 interface IPriwaMosaicCandidate {
   mosaic: IPriwaMosaic;
   captureDay: number;
@@ -82,6 +94,57 @@ const pointIsInsideMosaic = (point: IPriwaPoint, mosaic: IPriwaMosaic) => {
     point.lat >= minLat &&
     point.lat <= maxLat
   );
+};
+
+export const explainUnmatchedPriwaMosaic = (
+  points: IPriwaPoint[],
+  mosaic: IPriwaMosaic,
+  maxDaysApart = PRIWA_MOSAIC_MATCH_MAX_DAYS,
+): IPriwaMosaicUnmatchedReason => {
+  if (!mosaic.bbox || !parseBBox(mosaic.bbox)) {
+    return {
+      reasonCode: "missing-footprint",
+      reason: "Die Kartengrenze der Befliegung fehlt oder ist ungültig.",
+    };
+  }
+
+  const captureDay = dateOnlyToUtcDay(mosaic.captureDate);
+  if (captureDay === null) {
+    return {
+      reasonCode: "missing-capture-date",
+      reason: "Das Aufnahmedatum der Befliegung fehlt oder ist ungültig.",
+    };
+  }
+
+  const pointsInFootprint = points.filter((point) =>
+    pointIsInsideMosaic(point, mosaic),
+  );
+  if (pointsInFootprint.length === 0) {
+    return {
+      reasonCode: "no-trees-in-footprint",
+      reason: "Keine Käferbäume liegen innerhalb der Kartengrenze.",
+    };
+  }
+
+  const normalizedMaxDays = Math.max(0, Math.floor(maxDaysApart));
+  const hasPointInDateWindow = pointsInFootprint.some((point) => {
+    const pointDay = dateOnlyToUtcDay(point.datum);
+    return (
+      pointDay !== null && Math.abs(captureDay - pointDay) <= normalizedMaxDays
+    );
+  });
+  if (!hasPointInDateWindow) {
+    return {
+      reasonCode: "no-trees-in-date-window",
+      reason: `Die Bäume in der Kartengrenze liegen mehr als ${normalizedMaxDays} Tage vom Flugdatum entfernt.`,
+    };
+  }
+
+  return {
+    reasonCode: "closer-flight-selected",
+    reason:
+      "Passende Käferbäume wurden einer zeitlich näheren Befliegung vorgeschlagen.",
+  };
 };
 
 export const matchPriwaPointsToMosaics = (

@@ -5,10 +5,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$FRONTEND_DIR/.." && pwd)"
 
-ENV_FILE="$REPO_ROOT/.env"
+ENV_FILE="${DEADTREES_ISOLATED_ENV_FILE:-$REPO_ROOT/.local/supabase/current.env}"
+if [[ ! -f "$ENV_FILE" ]]; then
+  ENV_FILE="$REPO_ROOT/.env"
+fi
 if [[ ! -f "$ENV_FILE" ]]; then
   ENV_FILE="$REPO_ROOT/.env.example"
 fi
+
+set -a
+source "$ENV_FILE"
+set +a
 
 for key in SUPABASE_SERVICE_ROLE_KEY SUPABASE_ANON_KEY; do
   value="$(grep -E "^${key}=" "$ENV_FILE" | tail -n 1 | cut -d= -f2- || true)"

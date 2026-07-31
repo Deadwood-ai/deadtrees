@@ -14,7 +14,21 @@ const fundColors: Record<PriwaFund, string> = {
   unsicher: "rgba(217, 119, 6, 0.96)",
 };
 
-const pointStyle = (point: IPriwaPoint) => {
+const formatPointDate = (value: string) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : value;
+};
+
+const pointLabel = (point: IPriwaPoint, resolution: number) => {
+  if (resolution > 1.2) return undefined;
+  const primary = `${point.baumart} · ${formatPointDate(point.datum)}`;
+  return resolution <= 0.7 && point.baumnr
+    ? `${primary}\nBaum ${point.baumnr}`
+    : primary;
+};
+
+const pointStyle = (point: IPriwaPoint, resolution: number) => {
+  const label = pointLabel(point, resolution);
   const coreStyle = new Style({
     image: new CircleStyle({
       radius: point.isEstimatedLocation ? 7 : 8,
@@ -26,10 +40,10 @@ const pointStyle = (point: IPriwaPoint) => {
         width: point.isEstimatedLocation ? 2 : 3,
       }),
     }),
-    text: point.baumnr
+    text: label
       ? new Text({
-          text: point.baumnr,
-          offsetY: -18,
+          text: label,
+          offsetY: -24,
           font: "600 12px Inter, system-ui, sans-serif",
           fill: new Fill({ color: "#111827" }),
           stroke: new Stroke({ color: "rgba(255,255,255,0.96)", width: 4 }),
@@ -82,7 +96,7 @@ export const createPriwaPointFeature = (point: IPriwaPoint) => {
     point,
   });
   feature.setId(point.id);
-  feature.setStyle(pointStyle(point));
+  feature.setStyle((_feature, resolution) => pointStyle(point, resolution));
   return feature;
 };
 
