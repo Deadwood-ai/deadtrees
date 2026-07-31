@@ -102,8 +102,10 @@ describe("pickAutoMatchImagery", () => {
 });
 
 describe("manual imagery history", () => {
-  it("offers an explicit load action before local candidates exist", () => {
-    const markup = renderToStaticMarkup(
+  const renderSelector = (
+    overrides: Partial<Parameters<typeof YearImagerySelector>[0]> = {},
+  ) =>
+    renderToStaticMarkup(
       createElement(YearImagerySelector, {
         predictionYear: "2025",
         onPredictionYearChange: () => undefined,
@@ -113,9 +115,40 @@ describe("manual imagery history", () => {
         isLoading: false,
         isWaybackActive: true,
         onRequestLocalImagery: () => undefined,
+        onUseLiveImagery: () => undefined,
+        ...overrides,
       }),
     );
 
-    expect(markup).toContain("Browse imagery history");
+  it("offers an explicit way into the imagery history before candidates exist", () => {
+    const markup = renderSelector({ isUsingLiveImagery: true });
+
+    expect(markup).toContain("Historical");
+    expect(markup).toContain("Latest imagery");
+  });
+
+  // The Wayback archive host is far slower than the live imagery endpoint, so
+  // the way back must be visible whenever a historical release is on screen —
+  // not hidden behind a state the user has to discover.
+  it("keeps the way back to live imagery visible on a historical release", () => {
+    const markup = renderSelector({
+      isUsingLiveImagery: false,
+      isBrowsingImageryHistory: true,
+      waybackItems: [item(7110, "2022-07-28", "2022-07-28")],
+      selectedReleaseNum: 7110,
+    });
+
+    expect(markup).toContain("Latest");
+  });
+
+  // Auto-match pairs the basemap with the prediction year, which is only
+  // meaningful once there is more than the single live image to choose from.
+  it("hides the auto-match toggle until the history is opened", () => {
+    expect(
+      renderSelector({ isUsingLiveImagery: true }),
+    ).not.toContain("anticon-link");
+    expect(
+      renderSelector({ isUsingLiveImagery: true, isBrowsingImageryHistory: true }),
+    ).toContain("anticon-link");
   });
 });

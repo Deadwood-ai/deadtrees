@@ -269,6 +269,17 @@ const DeadtreesMap = () => {
   const [shouldLoadLocalWaybackItems, setShouldLoadLocalWaybackItems] =
     useState(false);
 
+  // Drop back to the fast live-imagery basemap. Auto-match has to go off with
+  // it: it would otherwise immediately re-select a Wayback release and undo
+  // the switch on the next render. Candidate discovery is stood down too —
+  // it costs ~150 tilemap probes per location and the user just said they do
+  // not want the historical basemap.
+  const handleUseLiveImagery = useCallback(() => {
+    setHasSelectedWaybackRelease(false);
+    setAutoMatchImagery(false);
+    setShouldLoadLocalWaybackItems(false);
+  }, []);
+
   // Track map center in lon/lat for location-specific wayback queries
   const [mapCenterLonLat, setMapCenterLonLat] = useState<{
     lon: number;
@@ -1399,10 +1410,10 @@ const DeadtreesMap = () => {
             <YearImagerySelector
               predictionYear={selectedYear}
               onPredictionYearChange={(year) => {
-                // Touching the year selector is a strong signal that the user
-                // will browse imagery next — kick off candidate discovery now
-                // so auto-match has less (or nothing) left to wait for.
-                setShouldLoadLocalWaybackItems(true);
+                // Deliberately does NOT kick off candidate discovery. Picking a
+                // prediction year says nothing about wanting the historical
+                // basemap, and pre-warming here would silently restart the
+                // ~150-probe scan straight after the user chose "Latest".
                 setSelectedYear(year);
               }}
               selectedReleaseNum={selectedReleaseNum}
@@ -1412,6 +1423,9 @@ const DeadtreesMap = () => {
               loadProgress={waybackLoadProgress}
               isUnverifiedFallback={isWaybackUnverified}
               isWaybackActive={DeadwoodMapStyle === "wayback"}
+              isUsingLiveImagery={!hasSelectedWaybackRelease}
+              onUseLiveImagery={handleUseLiveImagery}
+              isBrowsingImageryHistory={shouldLoadLocalWaybackItems}
               autoMatchImagery={autoMatchImagery}
               onAutoMatchChange={(enabled) => {
                 setShouldLoadLocalWaybackItems(true);
@@ -1450,9 +1464,11 @@ const DeadtreesMap = () => {
           onPredictionYearChange={setSelectedYear}
           selectedReleaseNum={selectedReleaseNum}
           onImageryChange={handleImageryChange}
+          onUseLiveImagery={handleUseLiveImagery}
           waybackItems={localWaybackItems}
           isLoadingImagery={isWaybackLoading}
           isWaybackActive={DeadwoodMapStyle === "wayback"}
+          isUsingLiveImagery={!hasSelectedWaybackRelease}
           autoMatchImagery={autoMatchImagery}
           onAutoMatchChange={setAutoMatchImagery}
           showForest={showForest}

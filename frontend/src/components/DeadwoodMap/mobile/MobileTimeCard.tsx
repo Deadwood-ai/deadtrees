@@ -5,6 +5,7 @@ import {
   LinkOutlined,
   LoadingOutlined,
   RightOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
 
 import {
@@ -25,9 +26,16 @@ interface MobileTimeCardProps {
   isLoadingImagery: boolean;
   waybackItems: WaybackItemWithMetadata[];
   selectedReleaseNum: number | null;
+  /**
+   * Whether the basemap renders live World Imagery rather than a historical
+   * Wayback release. Live imagery loads far faster, so it is the default.
+   */
+  isUsingLiveImagery: boolean;
   autoMatchImagery: boolean;
   onPredictionYearChange: (year: string) => void;
   onImageryChange: (releaseNum: number) => void;
+  /** Drop back to the live (fast) imagery basemap */
+  onUseLiveImagery: () => void;
   onAutoMatchChange: (enabled: boolean) => void;
 }
 
@@ -63,18 +71,21 @@ const MobileTimeCard = ({
   isLoadingImagery,
   waybackItems,
   selectedReleaseNum,
+  isUsingLiveImagery,
   autoMatchImagery,
   onPredictionYearChange,
   onImageryChange,
+  onUseLiveImagery,
   onAutoMatchChange,
 }: MobileTimeCardProps) => {
   const predictionIndex = PREDICTION_YEARS.indexOf(predictionYear);
   // Resolve the selection to the candidate whose imagery it actually shows
-  // (releases between two local changes serve identical tiles).
-  const selectedImagery = resolveWaybackCandidate(
-    waybackItems,
-    selectedReleaseNum,
-  );
+  // (releases between two local changes serve identical tiles). On live
+  // imagery no candidate is on screen, so the steppers enter the list from
+  // outside just as they do for the default basemap.
+  const selectedImagery = isUsingLiveImagery
+    ? null
+    : resolveWaybackCandidate(waybackItems, selectedReleaseNum);
   const imageryIndex = selectedImagery
     ? waybackItems.indexOf(selectedImagery)
     : -1;
@@ -90,15 +101,19 @@ const MobileTimeCard = ({
     imageryIndex >= 0 ? `${imageryIndex + 1} of ${waybackItems.length}` : null;
   // Date is the headline when known; otherwise fall back to the position so
   // we never shout "Unknown date" at the user.
-  const imageryPrimary =
-    imageryDate ?? (imageryPosition ? `Image ${imageryPosition}` : "Satellite image");
-  const imagerySecondary = [
-    imageryDate ? imageryPosition : null,
-    selectedImagery?.provider || selectedImagery?.source,
-    formatResolution(selectedImagery?.resolution),
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const imageryPrimary = isUsingLiveImagery
+    ? "Latest imagery"
+    : (imageryDate ??
+      (imageryPosition ? `Image ${imageryPosition}` : "Satellite image"));
+  const imagerySecondary = isUsingLiveImagery
+    ? "Most recent available"
+    : [
+        imageryDate ? imageryPosition : null,
+        selectedImagery?.provider || selectedImagery?.source,
+        formatResolution(selectedImagery?.resolution),
+      ]
+        .filter(Boolean)
+        .join(" · ");
 
   const matchImageryToYear = (year: string) => {
     if (!autoMatchImagery || waybackItems.length === 0) return;
@@ -222,6 +237,21 @@ const MobileTimeCard = ({
                 className="!h-11 !w-11"
               />
             </div>
+          )}
+
+          {/* Escape hatch back to the fast basemap: historical releases come
+              from the Wayback archive host, which is much slower than the
+              live imagery endpoint. */}
+          {!isUsingLiveImagery && !isLoadingImagery && (
+            <Button
+              type="link"
+              size="small"
+              icon={<ThunderboltOutlined />}
+              onClick={onUseLiveImagery}
+              className="!mt-2 !h-auto !p-0 text-xs"
+            >
+              Back to latest imagery
+            </Button>
           )}
         </div>
       )}

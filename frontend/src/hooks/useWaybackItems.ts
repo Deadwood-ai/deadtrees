@@ -1,5 +1,9 @@
 import { useState, useEffect } from "react";
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import {
+  useQuery,
+  useQueryClient,
+  keepPreviousData,
+} from "@tanstack/react-query";
 import {
   getWaybackItems,
   getWaybackItemsWithLocalChanges,
@@ -439,6 +443,20 @@ export const useWaybackItemsDebounced = (
     row: number;
   } | null>(null);
   const [progress, setProgress] = useState<WaybackLoadProgress | null>(null);
+  const queryClient = useQueryClient();
+
+  // Stand down when the caller opts out (e.g. the user switched back to the
+  // live basemap). Flipping `enabled` to false stops React Query from
+  // *starting* a fetch but does not abort one already in flight, and discovery
+  // probes ~150 releases over up to 30s — so cancel it explicitly. The query
+  // function receives the signal, so the in-flight requests are torn down.
+  useEffect(() => {
+    if (enabled) return;
+
+    void queryClient.cancelQueries({ queryKey: ["wayback-candidates"] });
+    void queryClient.cancelQueries({ queryKey: ["wayback-items-global"] });
+    setProgress(null);
+  }, [enabled, queryClient]);
 
   useEffect(() => {
     if (!enabled || longitude === undefined || latitude === undefined) return;
