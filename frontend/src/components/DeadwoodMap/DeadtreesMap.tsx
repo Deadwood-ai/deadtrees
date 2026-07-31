@@ -51,7 +51,8 @@ import {
   createStandardMapControls,
   getCachedWaybackSource,
   DEFAULT_WAYBACK_RELEASE,
-  createWaybackTileLayer,
+  createWorldImageryTileLayer,
+  getSharedWorldImagerySource,
 } from "../../utils/basemaps";
 import LayerControlPanel from "./LayerControlPanel";
 import LocationControls from "./LocationControls";
@@ -184,7 +185,7 @@ const DeadtreesMap = () => {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
   const libertyBasemapLayerRef = useRef<LayerGroup | null>(null);
-  const waybackBasemapLayerRef = useRef<TileLayer<XYZ> | null>(null);
+  const imageryBasemapLayerRef = useRef<TileLayer<XYZ> | null>(null);
   const forestLayerRef = useRef<TileLayerWebGL | null>(null);
   const deadwoodLayerRef = useRef<TileLayerWebGL | null>(null);
   const hasAutoSelectedImageryRef = useRef(false); // Track if we've done initial auto-selection
@@ -249,12 +250,21 @@ const DeadtreesMap = () => {
     createObservation: createPublicTreeObservation,
   } = usePublicTreeObservations();
 
-  // Wayback imagery state - using debounced location-based query
-  // Starts on the newest Wayback release for immediate satellite display and
-  // gets updated when location-specific wayback items load
+  // Wayback imagery state - using debounced location-based query.
+  // The selection starts on the newest Wayback release so the imagery timeline
+  // has a sensible anchor, but the basemap itself renders from the live World
+  // Imagery endpoint until the user actually picks a release (see
+  // hasSelectedWaybackRelease) — the Wayback host is far too slow to sit in
+  // the default page load path.
   const [selectedReleaseNum, setSelectedReleaseNum] = useState<number | null>(
     DEFAULT_WAYBACK_RELEASE,
   );
+  const [hasSelectedWaybackRelease, setHasSelectedWaybackRelease] =
+    useState(false);
+  const handleImageryChange = useCallback((releaseNum: number) => {
+    setSelectedReleaseNum(releaseNum);
+    setHasSelectedWaybackRelease(true);
+  }, []);
   const [autoMatchImagery, setAutoMatchImagery] = useState(false); // Manual imagery selection by default
   const [shouldLoadLocalWaybackItems, setShouldLoadLocalWaybackItems] =
     useState(false);
@@ -290,7 +300,7 @@ const DeadtreesMap = () => {
     enabled: isMobile && DeadwoodMapStyle === "wayback",
     waybackItems: localWaybackItems,
     selectedReleaseNum,
-    onImageryChange: setSelectedReleaseNum,
+    onImageryChange: handleImageryChange,
     autoMatchImagery,
     predictionYear: selectedYear,
   });
@@ -429,13 +439,14 @@ const DeadtreesMap = () => {
       const libertyBasemapLayer = acquireLibertyBasemapGroup();
       libertyBasemapLayer.setVisible(DeadwoodMapStyle === "streets-v12");
 
-      // Initialize with Wayback satellite imagery directly (using default release)
-      const waybackBasemapLayer = createWaybackTileLayer(
-        DEFAULT_WAYBACK_RELEASE,
-      );
-      waybackBasemapLayer.setVisible(DeadwoodMapStyle === "wayback");
+      // Start on live World Imagery — same pictures as the newest Wayback
+      // release but ~70x faster to load. The layer only switches to a Wayback
+      // source once the user picks a historical release in the imagery
+      // timeline (see the source-swap effect below).
+      const imageryBasemapLayer = createWorldImageryTileLayer();
+      imageryBasemapLayer.setVisible(DeadwoodMapStyle === "wayback");
       libertyBasemapLayerRef.current = libertyBasemapLayer;
-      waybackBasemapLayerRef.current = waybackBasemapLayer;
+      imageryBasemapLayerRef.current = imageryBasemapLayer;
       // Create only 2 layers - one for forest, one for deadwood (for current year)
       // Forest layer: Light green → Dark green gradient based on cover intensity
       const forestLayer = new TileLayerWebGL({
@@ -527,7 +538,7 @@ const DeadtreesMap = () => {
         // Layer order: basemap -> model rasters -> overlays -> user location
         layers: [
           libertyBasemapLayer,
-          waybackBasemapLayer,
+          imageryBasemapLayer,
           forestLayer,
           deadwoodLayer,
           clickedCellLayer,
@@ -648,20 +659,24 @@ const DeadtreesMap = () => {
     libertyBasemapLayerRef.current?.setVisible(
       DeadwoodMapStyle === "streets-v12",
     );
-    waybackBasemapLayerRef.current?.setVisible(DeadwoodMapStyle === "wayback");
+    imageryBasemapLayerRef.current?.setVisible(DeadwoodMapStyle === "wayback");
   }, [DeadwoodMapStyle, map]);
 
-  // Swap the wayback source only when the selected release actually changes.
-  // Sources are cached per release, so returning to a recently viewed release
-  // reuses its already-loaded tiles instead of re-fetching them.
+  // Swap the imagery source only when the selection actually changes. Until
+  // the user picks a release from the timeline we stay on live World Imagery;
+  // after that, sources are cached per release so returning to a recently
+  // viewed release reuses its already-loaded tiles instead of re-fetching them.
   useEffect(() => {
-    const layer = waybackBasemapLayerRef.current;
-    if (!selectedReleaseNum || !layer) return;
-    const nextSource = getCachedWaybackSource(selectedReleaseNum);
+    const layer = imageryBasemapLayerRef.current;
+    if (!layer) return;
+    const nextSource =
+      hasSelectedWaybackRelease && selectedReleaseNum
+        ? getCachedWaybackSource(selectedReleaseNum)
+        : getSharedWorldImagerySource();
     if (layer.getSource() !== nextSource) {
       layer.setSource(nextSource);
     }
-  }, [map, selectedReleaseNum]);
+  }, [map, selectedReleaseNum, hasSelectedWaybackRelease]);
 
   //update opacity of geotiff layers
   useEffect(() => {
@@ -1391,7 +1406,7 @@ const DeadtreesMap = () => {
                 setSelectedYear(year);
               }}
               selectedReleaseNum={selectedReleaseNum}
-              onImageryChange={setSelectedReleaseNum}
+              onImageryChange={handleImageryChange}
               waybackItems={localWaybackItems}
               isLoading={isWaybackLoading}
               loadProgress={waybackLoadProgress}
@@ -1434,7 +1449,7 @@ const DeadtreesMap = () => {
           predictionYear={selectedYear}
           onPredictionYearChange={setSelectedYear}
           selectedReleaseNum={selectedReleaseNum}
-          onImageryChange={setSelectedReleaseNum}
+          onImageryChange={handleImageryChange}
           waybackItems={localWaybackItems}
           isLoadingImagery={isWaybackLoading}
           isWaybackActive={DeadwoodMapStyle === "wayback"}
