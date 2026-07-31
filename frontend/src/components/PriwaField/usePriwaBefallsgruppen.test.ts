@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const reactQueryMock = vi.hoisted(() => ({
+  invalidateQueries: vi.fn().mockResolvedValue(undefined),
+}));
+
 const supabaseMock = vi.hoisted(() => {
   const order = vi.fn();
   const eq = vi.fn(() => ({ order }));
@@ -10,6 +14,30 @@ const supabaseMock = vi.hoisted(() => {
   const rpc = vi.fn();
   return { deleteEq, eq, from, order, remove, rpc, select };
 });
+
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: vi.fn(() => ({
+    data: [],
+    error: null,
+    isLoading: false,
+  })),
+  useQueryClient: vi.fn(() => ({
+    invalidateQueries: reactQueryMock.invalidateQueries,
+  })),
+  useMutation: vi.fn(
+    (options: {
+      mutationFn: (input: unknown) => Promise<unknown>;
+      onSuccess?: () => Promise<unknown>;
+    }) => ({
+      isPending: false,
+      mutateAsync: async (input: unknown) => {
+        const result = await options.mutationFn(input);
+        await options.onSuccess?.();
+        return result;
+      },
+    }),
+  ),
+}));
 
 vi.mock("../../hooks/useSupabase", () => ({
   supabase: {
@@ -108,5 +136,40 @@ describe("PRIWA Befallsgruppen data access", () => {
       }),
     ).rejects.toThrow("keine gültige ID");
     expect(supabaseMock.rpc).not.toHaveBeenCalled();
+  });
+
+  it("adds one flight atomically instead of replacing the group snapshot", async () => {
+    const { addPriwaFlightToBefallsgruppe } =
+      await import("./usePriwaBefallsgruppen");
+
+    await addPriwaFlightToBefallsgruppe("project-1", "group-1", "10513");
+
+    expect(supabaseMock.rpc).toHaveBeenCalledWith(
+      "priwa_add_flight_to_befallsgruppe",
+      {
+        p_project_id: "project-1",
+        p_group_id: "group-1",
+        p_dataset_id: 10513,
+      },
+    );
+  });
+
+  it("refreshes both groups and flight classifications after group saves", async () => {
+    const { usePriwaBefallsgruppen } = await import("./usePriwaBefallsgruppen");
+    const { saveGroup } = usePriwaBefallsgruppen("project-1");
+
+    await saveGroup({
+      name: "New confirmed group",
+      origin: "manual",
+      treeIds: ["tree-1"],
+      datasetIds: ["10512"],
+    });
+
+    expect(reactQueryMock.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["priwa-befallsgruppen", "project-1"],
+    });
+    expect(reactQueryMock.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["priwa-project-mosaics", "project-1"],
+    });
   });
 });

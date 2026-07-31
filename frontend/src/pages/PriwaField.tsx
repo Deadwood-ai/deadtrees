@@ -39,6 +39,7 @@ export default function PriwaField() {
     isLoading: isLoadingGroups,
     error: groupsError,
     saveGroup,
+    addFlightToGroup,
     deleteGroup,
     isSaving: isSavingGroup,
   } = usePriwaBefallsgruppen(activeMembership?.projectId);
@@ -124,6 +125,7 @@ export default function PriwaField() {
       onUpdatePoint={updatePoint}
       onDeletePoint={deletePoint}
       onSaveGroup={saveGroup}
+      onAssignFlightToGroup={addFlightToGroup}
       onDeleteGroup={deleteGroup}
       onSetFlightType={setFlightType}
       isClassifyingFlight={isClassifyingFlight}

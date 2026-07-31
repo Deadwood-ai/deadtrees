@@ -115,6 +115,10 @@ interface PriwaFieldMapProps {
   onUpdatePoint: (point: IPriwaPoint) => Promise<void>;
   onDeletePoint: (pointId: string) => Promise<void>;
   onSaveGroup: (input: IPriwaBefallsgruppeSaveInput) => Promise<unknown>;
+  onAssignFlightToGroup: (input: {
+    groupId: string;
+    datasetId: string;
+  }) => Promise<unknown>;
   onDeleteGroup: (groupId: string) => Promise<unknown>;
   onSetFlightType: (input: {
     datasetId: string;
@@ -143,6 +147,7 @@ export default function PriwaFieldMap({
   onUpdatePoint,
   onDeletePoint,
   onSaveGroup,
+  onAssignFlightToGroup,
   onDeleteGroup,
   onSetFlightType,
   isClassifyingFlight = false,
@@ -776,15 +781,9 @@ export default function PriwaFieldMap({
       const group = groups.find((candidate) => candidate.id === groupId);
       if (!group) return;
       try {
-        await onSaveGroup({
-          id: group.id,
-          name: group.name,
-          origin: group.origin,
-          confidence: group.confidence,
-          suggestionReason: group.suggestionReason,
-          algorithmVersion: group.algorithmVersion,
-          treeIds: group.treeIds,
-          datasetIds: Array.from(new Set([...group.datasetIds, mosaic.id])),
+        await onAssignFlightToGroup({
+          groupId: group.id,
+          datasetId: mosaic.id,
         });
         message.success(`${mosaic.label} wurde ${group.name} zugeordnet`);
       } catch (error) {
@@ -795,7 +794,7 @@ export default function PriwaFieldMap({
         );
       }
     },
-    [groups, onSaveGroup],
+    [groups, onAssignFlightToGroup],
   );
 
   const createGroupForMosaic = useCallback((mosaic: IPriwaMosaic) => {

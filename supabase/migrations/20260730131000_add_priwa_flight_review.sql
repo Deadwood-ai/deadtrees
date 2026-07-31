@@ -28,6 +28,36 @@ alter table "public"."priwa_project_flights" enable row level security;
 
 create schema if not exists internal;
 
+create or replace function internal.priwa_is_eligible_project_flight(
+    p_project_id uuid,
+    p_dataset_id bigint
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+    select
+        public.priwa_is_project_member(p_project_id)
+        and exists (
+            select 1
+            from public.v2_full_dataset_view_public dataset
+            join public.priwa_project_memberships uploader_membership
+              on uploader_membership.project_id = p_project_id
+             and uploader_membership.user_id = dataset.user_id
+            where dataset.id = p_dataset_id
+              and dataset.platform::text = 'drone'
+              and dataset.is_cog_done is true
+              and dataset.cog_path is not null
+        );
+$$;
+
+revoke all on function internal.priwa_is_eligible_project_flight(uuid, bigint) from public;
+revoke all on function internal.priwa_is_eligible_project_flight(uuid, bigint) from anon;
+grant execute on function internal.priwa_is_eligible_project_flight(uuid, bigint)
+to authenticated, service_role;
+
 create or replace function internal.priwa_validate_project_flight()
 returns trigger
 language plpgsql
@@ -41,16 +71,9 @@ begin
             raise exception 'PRIWA project membership is required';
         end if;
 
-        if not exists (
-            select 1
-            from public.v2_full_dataset_view_public dataset
-            join public.priwa_project_memberships uploader_membership
-              on uploader_membership.project_id = NEW.project_id
-             and uploader_membership.user_id = dataset.user_id
-            where dataset.id = NEW.dataset_id
-              and dataset.platform::text = 'drone'
-              and dataset.is_cog_done is true
-              and dataset.cog_path is not null
+        if not internal.priwa_is_eligible_project_flight(
+            NEW.project_id,
+            NEW.dataset_id
         ) then
             raise exception 'Flight is not an eligible PRIWA project COG';
         end if;
@@ -158,6 +181,74 @@ for each row execute function internal.priwa_confirm_assigned_group_flight();
 revoke all on function internal.priwa_confirm_assigned_group_flight() from public;
 revoke all on function internal.priwa_confirm_assigned_group_flight() from anon;
 revoke all on function internal.priwa_confirm_assigned_group_flight() from authenticated;
+
+create or replace function internal.priwa_preserve_assigned_project_flight()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+    if exists (
+        select 1
+        from public.priwa_befallsgruppe_flights group_flight
+        join public.priwa_befallsgruppen groups
+          on groups.id = group_flight.group_id
+        where groups.project_id = OLD.project_id
+          and group_flight.dataset_id = OLD.dataset_id
+    ) then
+        raise exception 'A flight assigned to a Befallsgruppe cannot be reset';
+    end if;
+    return OLD;
+end;
+$$;
+
+create trigger priwa_project_flights_preserve_assigned
+before delete on public.priwa_project_flights
+for each row execute function internal.priwa_preserve_assigned_project_flight();
+
+revoke all on function internal.priwa_preserve_assigned_project_flight() from public;
+revoke all on function internal.priwa_preserve_assigned_project_flight() from anon;
+revoke all on function internal.priwa_preserve_assigned_project_flight() from authenticated;
+
+insert into public.priwa_project_flights (
+    project_id,
+    dataset_id,
+    flight_type,
+    reviewed_by,
+    reviewed_at
+)
+select distinct on (groups.project_id, group_flight.dataset_id)
+    groups.project_id,
+    group_flight.dataset_id,
+    'umfeldbefliegung',
+    group_flight.created_by,
+    group_flight.created_at
+from public.priwa_befallsgruppe_flights group_flight
+join public.priwa_befallsgruppen groups
+  on groups.id = group_flight.group_id
+order by
+    groups.project_id,
+    group_flight.dataset_id,
+    group_flight.created_at,
+    group_flight.group_id;
+
+do $$
+begin
+    if exists (
+        select 1
+        from public.priwa_befallsgruppe_flights group_flight
+        join public.priwa_befallsgruppen groups
+          on groups.id = group_flight.group_id
+        left join public.priwa_project_flights project_flight
+          on project_flight.project_id = groups.project_id
+         and project_flight.dataset_id = group_flight.dataset_id
+         and project_flight.flight_type = 'umfeldbefliegung'
+        where project_flight.dataset_id is null
+    ) then
+        raise exception 'PRIWA flight classification backfill is incomplete';
+    end if;
+end;
+$$;
 
 grant select, insert, update, delete
 on table "public"."priwa_project_flights" to "authenticated";
@@ -296,16 +387,12 @@ with check (
     and exists (
         select 1
         from public.priwa_befallsgruppen groups
-        join public.v2_full_dataset_view_public dataset
-          on dataset.id = dataset_id
-        join public.priwa_project_memberships uploader_membership
-          on uploader_membership.project_id = groups.project_id
-         and uploader_membership.user_id = dataset.user_id
         where groups.id = group_id
           and public.priwa_is_project_member(groups.project_id)
-          and dataset.platform::text = 'drone'
-          and dataset.is_cog_done is true
-          and dataset.cog_path is not null
+          and internal.priwa_is_eligible_project_flight(
+              groups.project_id,
+              dataset_id
+          )
     )
 );
 
@@ -376,17 +463,14 @@ begin
         raise exception 'Every selected tree must be active and belong to the project';
     end if;
 
-    if cardinality(normalized_dataset_ids) > 0 and (
-        select count(*)
-        from public.v2_full_dataset_view_public dataset
-        join public.priwa_project_memberships uploader_membership
-          on uploader_membership.project_id = p_project_id
-         and uploader_membership.user_id = dataset.user_id
-        where dataset.id = any(normalized_dataset_ids)
-          and dataset.platform::text = 'drone'
-          and dataset.is_cog_done is true
-          and dataset.cog_path is not null
-    ) <> cardinality(normalized_dataset_ids) then
+    if exists (
+        select 1
+        from unnest(normalized_dataset_ids) dataset_id
+        where not internal.priwa_is_eligible_project_flight(
+            p_project_id,
+            dataset_id
+        )
+    ) then
         raise exception 'Every selected flight must belong to the PRIWA project';
     end if;
 
@@ -475,6 +559,59 @@ begin
     return saved_group_id;
 end;
 $$;
+
+create or replace function public.priwa_add_flight_to_befallsgruppe(
+    p_project_id uuid,
+    p_group_id uuid,
+    p_dataset_id bigint
+)
+returns void
+language plpgsql
+set search_path = ''
+as $$
+declare
+    current_actor uuid := (select auth.uid());
+begin
+    if current_actor is null or not public.priwa_is_project_member(p_project_id) then
+        raise exception 'PRIWA project membership is required';
+    end if;
+
+    if not exists (
+        select 1
+        from public.priwa_befallsgruppen groups
+        where groups.id = p_group_id
+          and groups.project_id = p_project_id
+    ) then
+        raise exception 'Befallsgruppe does not belong to the project';
+    end if;
+
+    if not internal.priwa_is_eligible_project_flight(
+        p_project_id,
+        p_dataset_id
+    ) then
+        raise exception 'Flight is not an eligible PRIWA project COG';
+    end if;
+
+    insert into public.priwa_befallsgruppe_flights (
+        group_id,
+        dataset_id,
+        source,
+        created_by
+    )
+    values (
+        p_group_id,
+        p_dataset_id,
+        'manual',
+        current_actor
+    )
+    on conflict (group_id, dataset_id) do nothing;
+end;
+$$;
+
+revoke all on function public.priwa_add_flight_to_befallsgruppe(uuid, uuid, bigint) from public;
+revoke all on function public.priwa_add_flight_to_befallsgruppe(uuid, uuid, bigint) from anon;
+grant execute on function public.priwa_add_flight_to_befallsgruppe(uuid, uuid, bigint)
+to authenticated, service_role;
 
 create or replace function public.priwa_set_project_flight_type(
     p_project_id uuid,

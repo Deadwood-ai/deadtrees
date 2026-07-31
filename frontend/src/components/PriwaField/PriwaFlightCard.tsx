@@ -128,7 +128,11 @@ export default function PriwaFlightCard({
           loading={isClassifyingFlight}
           disabled={isClassifyingFlight}
           options={[
-            { label: "Noch nicht geprüft", value: "unreviewed" },
+            {
+              label: "Noch nicht geprüft",
+              value: "unreviewed",
+              disabled: hasConfirmed,
+            },
             { label: "Umfeldbefliegung", value: "umfeldbefliegung" },
             {
               label: "Nicht PRIWA-relevant",

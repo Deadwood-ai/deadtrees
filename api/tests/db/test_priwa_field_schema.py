@@ -36,6 +36,59 @@ def kaeferbaum_payload(project_id, **overrides):
 	return payload
 
 
+def create_processed_priwa_flight(client, user_id, file_stem):
+	"""Create one eligible processed drone COG and return its dataset ID."""
+	dataset = client.table(settings.datasets_table).insert(
+		{
+			'user_id': user_id,
+			'file_name': f'{file_stem}.tif',
+			'license': 'CC BY',
+			'platform': 'drone',
+			'authors': ['PRIWA Test'],
+			'data_access': 'public',
+			'aquisition_year': 2026,
+			'aquisition_month': 7,
+			'aquisition_day': 30,
+			'archived': False,
+		}
+	).execute().data[0]
+	dataset_id = dataset['id']
+	client.table('v2_statuses').insert(
+		{
+			'dataset_id': dataset_id,
+			'current_status': 'idle',
+			'is_upload_done': True,
+			'is_ortho_done': True,
+			'is_cog_done': True,
+			'has_error': False,
+		}
+	).execute()
+	client.table('v2_orthos').insert(
+		{
+			'dataset_id': dataset_id,
+			'ortho_file_name': f'{file_stem}.tif',
+			'version': 1,
+			'sha256': f'{file_stem}-{dataset_id}',
+			'bbox': 'BOX(8.20 48.40,8.21 48.41)',
+			'ortho_upload_runtime': 0.1,
+			'ortho_file_size': 1,
+			'ortho_info': {},
+		}
+	).execute()
+	client.table('v2_cogs').insert(
+		{
+			'dataset_id': dataset_id,
+			'cog_file_name': f'{file_stem}-cog.tif',
+			'version': 1,
+			'cog_info': {},
+			'cog_processing_runtime': 0.1,
+			'cog_path': f'qa/cogs/{file_stem}-{dataset_id}.tif',
+			'cog_file_size': 1,
+		}
+	).execute()
+	return dataset_id
+
+
 @pytest.fixture(scope='function')
 def priwa_project(test_user, test_user2):
 	"""Create an isolated PRIWA project with one member and one non-member."""
@@ -72,54 +125,11 @@ def priwa_project(test_user, test_user2):
 def priwa_flight_dataset(test_user):
 	"""Create one public processed drone COG owned by the PRIWA test member."""
 	with use_service_client() as client:
-		dataset = client.table(settings.datasets_table).insert(
-			{
-				'user_id': test_user,
-				'file_name': 'priwa-flight-review.tif',
-				'license': 'CC BY',
-				'platform': 'drone',
-				'authors': ['PRIWA Test'],
-				'data_access': 'public',
-				'aquisition_year': 2026,
-				'aquisition_month': 7,
-				'aquisition_day': 30,
-				'archived': False,
-			}
-		).execute().data[0]
-		dataset_id = dataset['id']
-		client.table('v2_statuses').insert(
-			{
-				'dataset_id': dataset_id,
-				'current_status': 'idle',
-				'is_upload_done': True,
-				'is_ortho_done': True,
-				'is_cog_done': True,
-				'has_error': False,
-			}
-		).execute()
-		client.table('v2_orthos').insert(
-			{
-				'dataset_id': dataset_id,
-				'ortho_file_name': 'priwa-flight-review.tif',
-				'version': 1,
-				'sha256': f'priwa-flight-review-{dataset_id}',
-				'bbox': 'BOX(8.20 48.40,8.21 48.41)',
-				'ortho_upload_runtime': 0.1,
-				'ortho_file_size': 1,
-				'ortho_info': {},
-			}
-		).execute()
-		client.table('v2_cogs').insert(
-			{
-				'dataset_id': dataset_id,
-				'cog_file_name': 'priwa-flight-review-cog.tif',
-				'version': 1,
-				'cog_info': {},
-				'cog_processing_runtime': 0.1,
-				'cog_path': f'qa/cogs/priwa-flight-review-{dataset_id}.tif',
-				'cog_file_size': 1,
-			}
-		).execute()
+		dataset_id = create_processed_priwa_flight(
+			client,
+			test_user,
+			'priwa-flight-review',
+		)
 
 	try:
 		yield dataset_id
@@ -448,6 +458,23 @@ def test_priwa_member_can_classify_a_project_flight(priwa_project, priwa_flight_
 
 	assert visible_classifications.data == []
 
+	with use_client(member_token) as client:
+		client.rpc(
+			'priwa_set_project_flight_type',
+			{
+				'p_project_id': priwa_project['id'],
+				'p_dataset_id': priwa_flight_dataset,
+				'p_flight_type': None,
+			},
+		).execute()
+		reset_classifications = client.table('priwa_project_flights').select(
+			'flight_type'
+		).eq('project_id', priwa_project['id']).eq(
+			'dataset_id', priwa_flight_dataset
+		).execute()
+
+	assert reset_classifications.data == []
+
 
 def test_priwa_group_assignment_confirms_flight_and_prevents_exclusion(
 	priwa_project, priwa_flight_dataset
@@ -485,6 +512,94 @@ def test_priwa_group_assignment_confirms_flight_and_prevents_exclusion(
 					'p_flight_type': 'not_priwa',
 				},
 			).execute()
+		with pytest.raises(Exception):
+			client.rpc(
+				'priwa_set_project_flight_type',
+				{
+					'p_project_id': priwa_project['id'],
+					'p_dataset_id': priwa_flight_dataset,
+					'p_flight_type': None,
+				},
+			).execute()
+		with pytest.raises(Exception):
+			client.table('priwa_project_flights').delete().eq(
+				'project_id', priwa_project['id']
+			).eq('dataset_id', priwa_flight_dataset).execute()
+
+
+def test_priwa_member_can_atomically_assign_teammate_flight(
+	priwa_project, test_user2
+):
+	"""Eligibility must include COGs uploaded by a different project member."""
+	member_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
+	dataset_id = None
+
+	try:
+		with use_service_client() as client:
+			client.table('priwa_project_memberships').insert(
+				{
+					'project_id': priwa_project['id'],
+					'user_id': test_user2,
+					'role': 'field_user',
+				}
+			).execute()
+			dataset_id = create_processed_priwa_flight(
+				client,
+				test_user2,
+				'priwa-teammate-flight',
+			)
+
+		with use_client(member_token) as client:
+			flights = client.rpc(
+				'priwa_project_latest_flight_mosaics',
+				{
+					'p_project_id': priwa_project['id'],
+					'p_limit': 100,
+					'p_offset': 0,
+				},
+			).execute()
+			assert str(dataset_id) in {flight['id'] for flight in flights.data}
+
+			tree = client.table('priwa_kaeferbaeume').insert(
+				kaeferbaum_payload(priwa_project['id'], baumnr='BG-TEAMMATE')
+			).execute().data[0]
+			group_id = client.rpc(
+				'priwa_save_befallsgruppe',
+				{
+					'p_project_id': priwa_project['id'],
+					'p_name': 'Teammate flight group',
+					'p_tree_ids': [tree['id']],
+					'p_dataset_ids': [],
+					'p_origin': 'manual',
+				},
+			).execute().data
+			for _ in range(2):
+				client.rpc(
+					'priwa_add_flight_to_befallsgruppe',
+					{
+						'p_project_id': priwa_project['id'],
+						'p_group_id': group_id,
+						'p_dataset_id': dataset_id,
+					},
+				).execute()
+
+			assignments = client.table('priwa_befallsgruppe_flights').select(
+				'dataset_id'
+			).eq('group_id', group_id).execute()
+			classification = client.table('priwa_project_flights').select(
+				'flight_type'
+			).eq('project_id', priwa_project['id']).eq(
+				'dataset_id', dataset_id
+			).single().execute()
+
+		assert assignments.data == [{'dataset_id': dataset_id}]
+		assert classification.data['flight_type'] == 'umfeldbefliegung'
+	finally:
+		if dataset_id is not None:
+			with use_service_client() as client:
+				client.table(settings.datasets_table).delete().eq(
+					'id', dataset_id
+				).execute()
 
 
 def test_priwa_group_assignment_accepts_flight_after_first_catalog_page(
