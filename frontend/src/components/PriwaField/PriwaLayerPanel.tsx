@@ -11,7 +11,7 @@ import type { IPriwaMosaic, PriwaFlightType } from "./usePriwaMosaics";
 
 export type PriwaBaseLayer = "aerial" | "topographic";
 
-interface PriwaLayerPanelProps {
+export interface PriwaLayerPanelProps {
   variant?: "popover" | "sheet";
   baseLayer: PriwaBaseLayer;
   candidateMosaicCount: number;

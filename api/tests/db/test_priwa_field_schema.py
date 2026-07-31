@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
+import threading
 import uuid
 
+import psycopg
 import pytest
 
 from shared.db import login, use_client, use_service_client
@@ -87,6 +89,21 @@ def create_processed_priwa_flight(client, user_id, file_stem):
 		}
 	).execute()
 	return dataset_id
+
+
+def authenticated_db_connection(user_id):
+	"""Open a transaction-scoped authenticated DB session for concurrency tests."""
+	connection = psycopg.connect(settings.SUPABASE_DB_URL)
+	with connection.cursor() as cursor:
+		cursor.execute('set role authenticated')
+		cursor.execute(
+			"select set_config('request.jwt.claim.sub', %s, false)",
+			(str(user_id),),
+		)
+		cursor.execute(
+			"select set_config('request.jwt.claim.role', 'authenticated', false)"
+		)
+	return connection
 
 
 @pytest.fixture(scope='function')
@@ -525,6 +542,107 @@ def test_priwa_group_assignment_confirms_flight_and_prevents_exclusion(
 			client.table('priwa_project_flights').delete().eq(
 				'project_id', priwa_project['id']
 			).eq('dataset_id', priwa_flight_dataset).execute()
+
+
+def test_priwa_classification_and_assignment_serialize_across_sessions(
+	priwa_project, priwa_flight_dataset
+):
+	"""Concurrent classification and assignment cannot commit conflicting states."""
+	member_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
+
+	with use_client(member_token) as client:
+		tree = client.table('priwa_kaeferbaeume').insert(
+			kaeferbaum_payload(priwa_project['id'], baumnr='BG-RACE')
+		).execute().data[0]
+		group_id = client.rpc(
+			'priwa_save_befallsgruppe',
+			{
+				'p_project_id': priwa_project['id'],
+				'p_name': 'Concurrent flight group',
+				'p_tree_ids': [tree['id']],
+				'p_dataset_ids': [],
+				'p_origin': 'manual',
+			},
+		).execute().data
+
+	classification_connection = authenticated_db_connection(
+		priwa_project['member_id']
+	)
+	assignment_connection = authenticated_db_connection(priwa_project['member_id'])
+	assignment_finished = threading.Event()
+	assignment_errors = []
+
+	def assign_flight():
+		try:
+			with assignment_connection.cursor() as cursor:
+				cursor.execute(
+					'select public.priwa_add_flight_to_befallsgruppe(%s, %s, %s)',
+					(priwa_project['id'], group_id, priwa_flight_dataset),
+				)
+			assignment_connection.commit()
+		except Exception as error:
+			assignment_connection.rollback()
+			assignment_errors.append(error)
+		finally:
+			assignment_finished.set()
+
+	try:
+		with classification_connection.cursor() as cursor:
+			cursor.execute(
+				'select public.priwa_set_project_flight_type(%s, %s, %s)',
+				(
+					priwa_project['id'],
+					priwa_flight_dataset,
+					'not_priwa',
+				),
+			)
+
+		assignment_thread = threading.Thread(target=assign_flight)
+		assignment_thread.start()
+		assert not assignment_finished.wait(0.25)
+
+		classification_connection.commit()
+		assignment_thread.join(timeout=5)
+		assert assignment_finished.is_set()
+	finally:
+		classification_connection.close()
+		assignment_connection.close()
+
+	assert len(assignment_errors) == 1
+	assert 'excluded flight' in str(assignment_errors[0]).lower()
+
+	with use_client(member_token) as client:
+		classification = client.table('priwa_project_flights').select(
+			'flight_type'
+		).eq('project_id', priwa_project['id']).eq(
+			'dataset_id', priwa_flight_dataset
+		).single().execute()
+		assignments = client.table('priwa_befallsgruppe_flights').select(
+			'dataset_id'
+		).eq('group_id', group_id).execute()
+
+	assert classification.data['flight_type'] == 'not_priwa'
+	assert assignments.data == []
+
+
+def test_priwa_actorless_backfill_preserves_historical_review_timestamp(
+	priwa_project, priwa_flight_dataset
+):
+	"""Migration-style service writes retain the assignment's original timestamp."""
+	historical_reviewed_at = datetime(2026, 1, 15, 8, 30, tzinfo=timezone.utc)
+
+	with use_service_client() as client:
+		classification = client.table('priwa_project_flights').insert(
+			{
+				'project_id': priwa_project['id'],
+				'dataset_id': priwa_flight_dataset,
+				'flight_type': 'umfeldbefliegung',
+				'reviewed_by': priwa_project['member_id'],
+				'reviewed_at': historical_reviewed_at.isoformat(),
+			}
+		).execute().data[0]
+
+	assert datetime.fromisoformat(classification['reviewed_at']) == historical_reviewed_at
 
 
 def test_priwa_member_can_atomically_assign_teammate_flight(

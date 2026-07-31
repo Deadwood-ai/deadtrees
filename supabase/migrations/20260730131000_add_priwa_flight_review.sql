@@ -28,6 +28,29 @@ alter table "public"."priwa_project_flights" enable row level security;
 
 create schema if not exists internal;
 
+create or replace function internal.priwa_lock_project_flight(
+    p_project_id uuid,
+    p_dataset_id bigint
+)
+returns void
+language sql
+volatile
+security definer
+set search_path = ''
+as $$
+    select pg_catalog.pg_advisory_xact_lock(
+        pg_catalog.hashtextextended(
+            p_project_id::text || ':' || p_dataset_id::text,
+            0
+        )
+    );
+$$;
+
+revoke all on function internal.priwa_lock_project_flight(uuid, bigint) from public;
+revoke all on function internal.priwa_lock_project_flight(uuid, bigint) from anon;
+grant execute on function internal.priwa_lock_project_flight(uuid, bigint)
+to authenticated, service_role;
+
 create or replace function internal.priwa_is_eligible_project_flight(
     p_project_id uuid,
     p_dataset_id bigint
@@ -66,6 +89,16 @@ as $$
 declare
     current_actor uuid := (select auth.uid());
 begin
+    if TG_OP = 'UPDATE' then
+        NEW.project_id = OLD.project_id;
+        NEW.dataset_id = OLD.dataset_id;
+    end if;
+
+    perform internal.priwa_lock_project_flight(
+        NEW.project_id,
+        NEW.dataset_id
+    );
+
     if current_actor is not null then
         if not public.priwa_is_project_member(NEW.project_id) then
             raise exception 'PRIWA project membership is required';
@@ -90,13 +123,9 @@ begin
         end if;
 
         NEW.reviewed_by = current_actor;
+        NEW.reviewed_at = now();
     end if;
 
-    if TG_OP = 'UPDATE' then
-        NEW.project_id = OLD.project_id;
-        NEW.dataset_id = OLD.dataset_id;
-    end if;
-    NEW.reviewed_at = now();
     return NEW;
 end;
 $$;
@@ -114,7 +143,19 @@ returns trigger
 language plpgsql
 set search_path = ''
 as $$
+declare
+    group_project_id uuid;
 begin
+    select groups.project_id
+      into group_project_id
+      from public.priwa_befallsgruppen groups
+     where groups.id = NEW.group_id;
+
+    perform internal.priwa_lock_project_flight(
+        group_project_id,
+        NEW.dataset_id
+    );
+
     if exists (
         select 1
         from public.priwa_befallsgruppen groups
@@ -188,6 +229,11 @@ language plpgsql
 set search_path = ''
 as $$
 begin
+    perform internal.priwa_lock_project_flight(
+        OLD.project_id,
+        OLD.dataset_id
+    );
+
     if exists (
         select 1
         from public.priwa_befallsgruppe_flights group_flight
@@ -463,6 +509,13 @@ begin
         raise exception 'Every selected tree must be active and belong to the project';
     end if;
 
+    perform internal.priwa_lock_project_flight(
+        p_project_id,
+        dataset_id
+    )
+    from unnest(normalized_dataset_ids) dataset_id
+    order by dataset_id;
+
     if exists (
         select 1
         from unnest(normalized_dataset_ids) dataset_id
@@ -585,6 +638,11 @@ begin
         raise exception 'Befallsgruppe does not belong to the project';
     end if;
 
+    perform internal.priwa_lock_project_flight(
+        p_project_id,
+        p_dataset_id
+    );
+
     if not internal.priwa_is_eligible_project_flight(
         p_project_id,
         p_dataset_id
@@ -626,6 +684,11 @@ begin
     if not public.priwa_is_project_member(p_project_id) then
         raise exception 'PRIWA project membership is required';
     end if;
+
+    perform internal.priwa_lock_project_flight(
+        p_project_id,
+        p_dataset_id
+    );
 
     if p_flight_type is null then
         delete from public.priwa_project_flights project_flight

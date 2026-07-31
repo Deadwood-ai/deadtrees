@@ -91,3 +91,5 @@ export interface IPriwaBefallsgruppeSaveInput {
   treeIds: string[];
   datasetIds: string[];
 }
+
+export type IPriwaBefallsgruppeEditorDraft = IPriwaBefallsgruppeSaveInput;

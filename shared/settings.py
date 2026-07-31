@@ -104,6 +104,7 @@ class Settings(BaseSettings):
 	SUPABASE_KEY: str
 	SUPABASE_ANON_KEY: str = ''
 	SUPABASE_SERVICE_ROLE_KEY: str = ''  # Optional: for accessing auth.users table
+	SUPABASE_DB_URL: str = ''  # Local/test-only direct connection for DB concurrency checks
 
 	# some basic settings for the UVICORN server
 	UVICORN_HOST: str = '127.0.0.1' if DEV_MODE else '0.0.0.0'

@@ -1,17 +1,19 @@
 import { AimOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import { Button, Empty, Tag, message } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import PriwaBefallsgruppeEditor, {
-  type IPriwaBefallsgruppeEditorDraft,
-} from "./PriwaBefallsgruppeEditor";
-import { arePriwaBefallsgruppenReady } from "./priwaBefallsgruppenState";
+import PriwaBefallsgruppeEditor from "./PriwaBefallsgruppeEditor";
+import {
+  arePriwaBefallsgruppenReady,
+  resolveInitialFlightGroupDraft,
+} from "./priwaBefallsgruppenState";
 import {
   suggestPriwaBefallsgruppen,
   type IPriwaBefallsgruppeSuggestion,
 } from "./priwaBefallsgruppeSuggestions";
 import type {
   IPriwaBefallsgruppe,
+  IPriwaBefallsgruppeEditorDraft,
   IPriwaBefallsgruppeSaveInput,
   IPriwaPoint,
 } from "./types";
@@ -53,17 +55,9 @@ export default function PriwaBefallsgruppenPanel({
   onDelete,
   onZoomToTrees,
 }: PriwaBefallsgruppenPanelProps) {
-  const [draft, setDraft] = useState<IPriwaBefallsgruppeEditorDraft | null>(
-    () =>
-      initialDatasetId
-        ? {
-            name: `Befallsgruppe ${groups.length + 1}`,
-            origin: "manual",
-            treeIds: [],
-            datasetIds: [initialDatasetId],
-          }
-        : null,
-  );
+  const [draft, setDraft] =
+    useState<IPriwaBefallsgruppeEditorDraft | null>(null);
+  const initializedDatasetIdRef = useRef<string | null>(null);
   const isGroupStateReady = arePriwaBefallsgruppenReady(
     isLoading,
     errorMessage,
@@ -81,8 +75,27 @@ export default function PriwaBefallsgruppenPanel({
   );
 
   useEffect(() => {
-    if (!isGroupStateReady) setDraft(null);
-  }, [isGroupStateReady]);
+    if (!initialDatasetId) {
+      initializedDatasetIdRef.current = null;
+      return;
+    }
+    if (
+      !isGroupStateReady ||
+      initializedDatasetIdRef.current === initialDatasetId
+    ) {
+      return;
+    }
+
+    initializedDatasetIdRef.current = initialDatasetId;
+    setDraft((currentDraft) =>
+      resolveInitialFlightGroupDraft(
+        currentDraft,
+        initialDatasetId,
+        groups.length,
+        isGroupStateReady,
+      ),
+    );
+  }, [groups.length, initialDatasetId, isGroupStateReady]);
 
   const openSuggestion = (
     suggestion: IPriwaBefallsgruppeSuggestion,

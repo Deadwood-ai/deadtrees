@@ -4,6 +4,7 @@ import {
   arePriwaBefallsgruppenReady,
   groupsForPriwaMosaicMatching,
   indexPriwaBefallsgruppenByTreeId,
+  resolveInitialFlightGroupDraft,
 } from "./priwaBefallsgruppenState";
 import type { IPriwaBefallsgruppe } from "./types";
 
@@ -39,6 +40,25 @@ describe("PRIWA Befallsgruppen availability", () => {
   it("indexes confirmed groups for tree table and list presentation", () => {
     expect(indexPriwaBefallsgruppenByTreeId([group])).toEqual({
       "tree-1": group,
+    });
+  });
+
+  it("retains a preselected flight until confirmed groups finish loading", () => {
+    const whileLoading = resolveInitialFlightGroupDraft(
+      null,
+      "10512",
+      1,
+      false,
+    );
+    expect(whileLoading).toBeNull();
+
+    expect(
+      resolveInitialFlightGroupDraft(whileLoading, "10512", 1, true),
+    ).toEqual({
+      name: "Befallsgruppe 2",
+      origin: "manual",
+      treeIds: [],
+      datasetIds: ["10512"],
     });
   });
 });
