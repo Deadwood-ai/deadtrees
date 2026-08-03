@@ -134,6 +134,34 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
     );
   });
 
+  test("mobile Home imagery attribution reveals the full providers", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/");
+    await page
+      .getByRole("button", { name: "Accept" })
+      .click({ timeout: 5_000 })
+      .catch(() => undefined);
+
+    const miniSatelliteMap = page.getByTestId("home-mini-satellite-map");
+    await miniSatelliteMap.scrollIntoViewIfNeeded();
+    const attribution = miniSatelliteMap.locator(
+      ".dt-map-attribution-control",
+    );
+    const disclosure = attribution.locator(".dt-attribution-mobile");
+    await expect(disclosure.locator("summary")).toHaveText(
+      "Powered by Esri · Contributors ⓘ",
+    );
+    const fullCredit = disclosure.locator(".dt-attribution-mobile-full");
+    await expect(fullCredit).toBeHidden();
+    await disclosure.locator("summary").click({ timeout: 5_000 });
+    await expect(fullCredit).toHaveText(
+      "Vantor, Earthstar Geographics & GIS User Community",
+    );
+    await expect(fullCredit).toBeVisible();
+  });
+
   test("public info and auth routes render their base read-only states", async ({
     page,
   }) => {
