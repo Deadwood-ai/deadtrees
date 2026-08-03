@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Segmented, Tooltip, Typography, Spin, Button, Select } from "antd";
 import {
   LeftOutlined,
@@ -256,68 +256,13 @@ const YearImagerySelector = ({
     [yearsWithImagery],
   );
 
-  // Whether the user asked for the historical basemap. Candidate discovery
-  // takes 10-20s, so the request has to be remembered and acted on once the
-  // candidates actually arrive.
-  const [hasRequestedHistoryMode, setHasRequestedHistoryMode] = useState(false);
-
-  // Auto-select imagery when items load, when the prediction year changes, or
-  // when no basemap has been selected yet. Manual mode keeps the active
-  // basemap sticky even if it is outside the local candidate list.
-  useEffect(() => {
-    if (waybackItems.length === 0) return;
-
-    if (autoMatchImagery) {
-      const nextReleaseNum = pickAutoMatchImagery(
-        waybackItems,
-        parseInt(predictionYear),
-        selectedReleaseNum,
-      );
-      if (nextReleaseNum !== null) {
-        onImageryChange(nextReleaseNum);
-      }
-      return;
-    }
-
-    if (!selectedReleaseNum) {
-      // Select the newest (rightmost) item
-      onImageryChange(waybackItems[waybackItems.length - 1].releaseNum);
-      return;
-    }
-
-    // Candidates finished loading after the user switched to History — drop
-    // them on the newest historical release so the mode matches the basemap.
-    if (hasRequestedHistoryMode && isUsingLiveImagery) {
-      onImageryChange(waybackItems[waybackItems.length - 1].releaseNum);
-    }
-  }, [
-    waybackItems,
-    selectedReleaseNum,
-    onImageryChange,
-    autoMatchImagery,
-    predictionYear,
-    hasRequestedHistoryMode,
-    isUsingLiveImagery,
-  ]);
-
   const handleBasemapModeChange = (mode: string) => {
     if (mode === "live") {
-      setHasRequestedHistoryMode(false);
       onUseLiveImagery?.();
       return;
     }
 
-    setHasRequestedHistoryMode(true);
     onRequestLocalImagery?.();
-    // Candidates already discovered for the current location: enter the list
-    // at its newest image. Coming from Latest this list is empty — the hook
-    // reports no candidates while discovery is stood down, precisely so a
-    // stale list from an area the user has since panned away from cannot be
-    // selected here — and the effect above takes over once discovery for the
-    // current tile finishes.
-    if (waybackItems.length > 0) {
-      onImageryChange(waybackItems[waybackItems.length - 1].releaseNum);
-    }
   };
 
   // Navigation for prediction year
@@ -679,55 +624,6 @@ const YearImagerySelector = ({
                   </button>
                 )}
 
-                {/* Always-visible switch between the fast live basemap and the
-                    historical releases. Historical tiles come from the Wayback
-                    archive host, which is far slower than the live imagery
-                    endpoint, so the way back must never be hidden behind a
-                    state the user has to discover. */}
-                {onUseLiveImagery && (
-                  <Segmented
-                    size="small"
-                    value={
-                      isUsingLiveImagery && !hasRequestedHistoryMode
-                        ? "live"
-                        : "history"
-                    }
-                    onChange={(value) =>
-                      handleBasemapModeChange(value as string)
-                    }
-                    options={[
-                      {
-                        value: "live",
-                        label: (
-                          // Tooltip per option rather than one for the whole
-                          // control, so it centres on the hovered segment.
-                          <Tooltip
-                            title="Shows latest available imagery (faster)"
-                            arrow={false}
-                          >
-                            <span className="inline-flex items-center gap-1">
-                              <ThunderboltOutlined style={{ fontSize: 11 }} />
-                              Latest
-                            </span>
-                          </Tooltip>
-                        ),
-                      },
-                      {
-                        value: "history",
-                        label: (
-                          <Tooltip
-                            title="Browse historical imagery through the ArcGIS Wayback machine (slower)"
-                            arrow={false}
-                          >
-                            <span>Historical</span>
-                          </Tooltip>
-                        ),
-                      },
-                    ]}
-                    className="ml-1"
-                  />
-                )}
-
                 {/* Info icon at bottom right */}
                 <Tooltip
                   title={
@@ -753,6 +649,47 @@ const YearImagerySelector = ({
                   />
                 </Tooltip>
               </>
+            )}
+
+            {/* Keep the escape hatch visible during discovery and empty
+                results. Historical tiles come from the much slower Wayback
+                archive, so users must always be able to return to Latest. */}
+            {onUseLiveImagery && (
+              <Segmented
+                size="small"
+                value={isBrowsingImageryHistory ? "history" : "live"}
+                onChange={(value) => handleBasemapModeChange(value as string)}
+                options={[
+                  {
+                    value: "live",
+                    label: (
+                      // Tooltip per option rather than one for the whole
+                      // control, so it centres on the hovered segment.
+                      <Tooltip
+                        title="Shows latest available imagery (faster)"
+                        arrow={false}
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          <ThunderboltOutlined style={{ fontSize: 11 }} />
+                          Latest
+                        </span>
+                      </Tooltip>
+                    ),
+                  },
+                  {
+                    value: "history",
+                    label: (
+                      <Tooltip
+                        title="Browse historical imagery through the ArcGIS Wayback machine (slower)"
+                        arrow={false}
+                      >
+                        <span>Historical</span>
+                      </Tooltip>
+                    ),
+                  },
+                ]}
+                className="ml-1"
+              />
             )}
           </div>
         </div>

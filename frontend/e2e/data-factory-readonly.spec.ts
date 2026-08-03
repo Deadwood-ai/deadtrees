@@ -537,4 +537,35 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
     await page.waitForTimeout(1_500);
     expect(waybackRequests).toHaveLength(0);
   });
+
+  test("pending history selection survives a mobile-to-desktop breakpoint change", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/deadtrees");
+    await page
+      .getByRole("button", { name: "I Understand" })
+      .click({ timeout: 5_000 })
+      .catch(() => undefined);
+
+    await page
+      .getByRole("button", {
+        name: /Prediction year .* Change time settings/,
+      })
+      .click();
+    await page
+      .getByRole("button", { name: "Browse historical imagery" })
+      .click();
+
+    await page.setViewportSize({ width: 1024, height: 768 });
+    const desktopSelector = page.getByTestId(
+      "desktop-year-imagery-selector",
+    );
+    await expect(desktopSelector).toBeVisible();
+    await expect(
+      desktopSelector
+        .locator(".ant-segmented-item")
+        .filter({ hasText: "Historical" }),
+    ).toHaveClass(/ant-segmented-item-selected/);
+  });
 });
