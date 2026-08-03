@@ -1,7 +1,6 @@
 import os
 import sys
 import tempfile
-from pathlib import Path
 
 import numpy as np
 import rasterio
@@ -49,10 +48,6 @@ class DeadwoodInference:
 		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 		self.load_model()
 
-	def get_cache_path(self):
-		model_path = Path(self.model_path)
-		return model_path.parent / f'{DEADWOOD_MODEL_NAME}_pretrained.pt'
-
 	def load_model(self):
 		version_parts = torch.__version__.split('+', 1)[0].split('.')
 		torch_version = tuple(int(part) for part in version_parts[:3])
@@ -61,23 +56,14 @@ class DeadwoodInference:
 			print('Invalid model name: ', DEADWOOD_MODEL_NAME, 'Exiting...')
 			exit()
 
-		cache_path = self.get_cache_path()
-		if cache_path.exists():
-			model = smp.Unet(
-				encoder_name='mit_b5',
-				encoder_weights=None,
-				in_channels=3,
-				classes=1,
-			).to(memory_format=torch.channels_last)
-			model.load_state_dict(torch.load(str(cache_path)))
-		else:
-			model = smp.Unet(
-				encoder_name='mit_b5',
-				encoder_weights='imagenet',
-				in_channels=3,
-				classes=1,
-			).to(memory_format=torch.channels_last)
-			torch.save(model.state_dict(), str(cache_path))
+		# The safetensors checkpoint contains the complete state dict, so no
+		# separately downloaded or pickle-serialized encoder weights are needed.
+		model = smp.Unet(
+			encoder_name='mit_b5',
+			encoder_weights=None,
+			in_channels=3,
+			classes=1,
+		).to(memory_format=torch.channels_last)
 
 		if hasattr(torch, 'compile') and (sys.version_info < (3, 12) or torch_version >= (2, 4, 0)):
 			model = torch.compile(model, backend='aot_eager')
