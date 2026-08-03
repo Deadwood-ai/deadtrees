@@ -124,15 +124,19 @@ describe("loadWaybackCandidates", () => {
 
   it("keeps discovery timeouts retryable instead of caching empty imagery", async () => {
     const startedAt = Date.now();
+    let discoverySignal: AbortSignal | undefined;
     await expect(
       loadWaybackCandidates(point, 12, {
         discoveryTimeoutMs: 10,
-        getItemsWithLocalChanges: () =>
-          new Promise<WaybackItem[]>(() => undefined),
+        getItemsWithLocalChanges: (_point, _zoom, options) => {
+          discoverySignal = options?.signal;
+          return new Promise<WaybackItem[]>(() => undefined);
+        },
       }),
     ).rejects.toThrow("Wayback imagery discovery timed out");
 
     expect(Date.now() - startedAt).toBeLessThan(250);
+    expect(discoverySignal?.aborted).toBe(true);
   });
 
   it("returns candidates enriched with acquisition dates", async () => {

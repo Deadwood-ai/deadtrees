@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getWaybackItems,
-  getWaybackItemsWithLocalChanges,
   getMetadata,
   long2tile,
   lat2tile,
@@ -13,6 +12,10 @@ import {
   DEFAULT_WAYBACK_RELEASE,
   DEFAULT_WAYBACK_RELEASE_DATETIME,
 } from "../utils/basemaps";
+import {
+  discoverWaybackItemsWithLocalChanges,
+  type WaybackPoint,
+} from "../utils/waybackDiscovery";
 
 /**
  * ESRI World Imagery Wayback integration.
@@ -25,7 +28,7 @@ import {
  *   Only available from ESRI's per-release metadata service.
  *
  * The model here is a single, atomic, per-location candidate list:
- * 1. Change detection (`getWaybackItemsWithLocalChanges`) finds the releases
+ * 1. Abort-aware change detection finds the releases
  *    where the imagery at the map center actually changed. Candidates
  *    partition the release axis: between two changes every release serves
  *    byte-identical tiles, so ANY release resolves to the latest candidate at
@@ -115,11 +118,6 @@ export interface WaybackItemWithMetadata extends WaybackItem {
   resolution?: number;
 }
 
-type WaybackPoint = {
-  longitude: number;
-  latitude: number;
-};
-
 /**
  * Loading progress for the candidate pipeline. Discovery (tilemap probing
  * inside wayback-core) has no per-request hooks, so it reports as a phase;
@@ -134,7 +132,7 @@ interface LoadWaybackItemsOptions {
   metadataTimeoutMs?: number;
   metadataConcurrency?: number;
   getItems?: typeof getWaybackItems;
-  getItemsWithLocalChanges?: typeof getWaybackItemsWithLocalChanges;
+  getItemsWithLocalChanges?: typeof discoverWaybackItemsWithLocalChanges;
   getItemMetadata?: typeof getMetadata;
   signal?: AbortSignal;
   onProgress?: (progress: WaybackLoadProgress) => void;
@@ -145,6 +143,7 @@ const withTimeout = async <T>(
   timeoutMs: number,
   message: string,
   signal?: AbortSignal,
+  onTimeout?: (error: Error) => void,
 ): Promise<T> =>
   new Promise<T>((resolve, reject) => {
     let timeoutHandle: ReturnType<typeof globalThis.setTimeout> | undefined;
@@ -180,7 +179,9 @@ const withTimeout = async <T>(
 
     signal?.addEventListener("abort", handleAbort, { once: true });
     timeoutHandle = globalThis.setTimeout(() => {
-      settle(() => reject(new Error(message)));
+      const error = new Error(message);
+      onTimeout?.(error);
+      settle(() => reject(error));
     }, timeoutMs);
 
     promise.then(
@@ -374,22 +375,33 @@ export const loadWaybackCandidates = async (
     discoveryTimeoutMs = WAYBACK_DISCOVERY_TIMEOUT_MS,
     metadataTimeoutMs,
     metadataConcurrency,
-    getItemsWithLocalChanges = getWaybackItemsWithLocalChanges,
+    getItemsWithLocalChanges = discoverWaybackItemsWithLocalChanges,
     getItemMetadata,
     signal,
     onProgress,
   }: LoadWaybackItemsOptions = {},
 ): Promise<WaybackItemWithMetadata[]> => {
+  throwIfAborted(signal);
   onProgress?.({ phase: "discovery" });
-  const items = await withTimeout(
-    getItemsWithLocalChanges(point, zoomLevel, {
+  const discoveryController = new AbortController();
+  const abortDiscovery = () => discoveryController.abort(signal?.reason);
+  signal?.addEventListener("abort", abortDiscovery, { once: true });
+  const timeoutMessage = `Wayback imagery discovery timed out after ${discoveryTimeoutMs}ms`;
+  let items: WaybackItem[];
+  try {
+    items = await withTimeout(
+      getItemsWithLocalChanges(point, zoomLevel, {
+        signal: discoveryController.signal,
+        onlyUseSizeToFilterDuplicates: true,
+      }),
+      discoveryTimeoutMs,
+      timeoutMessage,
       signal,
-      onlyUseSizeToFilterDuplicates: true,
-    }),
-    discoveryTimeoutMs,
-    `Wayback imagery discovery timed out after ${discoveryTimeoutMs}ms`,
-    signal,
-  );
+      (timeoutError) => discoveryController.abort(timeoutError),
+    );
+  } finally {
+    signal?.removeEventListener("abort", abortDiscovery);
+  }
 
   throwIfAborted(signal);
   if (items.length === 0) return [];

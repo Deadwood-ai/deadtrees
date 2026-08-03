@@ -556,9 +556,9 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
     await page.waitForTimeout(1_500);
     expect(waybackRequests).toHaveLength(0);
 
-    // Pending discovery exposes a real escape hatch. Returning to Latest
-    // before the one-second debounce expires must stand the query down rather
-    // than letting the expensive Wayback scan start in the background.
+    // Pending discovery exposes a real escape hatch. Let the request layer
+    // start, then verify returning to Latest aborts the active walk instead of
+    // allowing more Wayback probes to continue in the background.
     await page
       .getByRole("button", { name: "Browse historical imagery" })
       .click();
@@ -566,12 +566,16 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
       name: "Back to latest imagery",
     });
     await expect(backToLatest).toBeVisible();
+    await expect
+      .poll(() => waybackRequests.length, { timeout: 20_000 })
+      .toBeGreaterThan(0);
     await backToLatest.click();
     await expect(
       page.getByRole("button", { name: "Browse historical imagery" }),
     ).toBeVisible();
+    const requestCountAfterCancel = waybackRequests.length;
     await page.waitForTimeout(1_500);
-    expect(waybackRequests).toHaveLength(0);
+    expect(waybackRequests).toHaveLength(requestCountAfterCancel);
   });
 
   test("pending history selection survives a mobile-to-desktop breakpoint change", async ({
