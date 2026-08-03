@@ -118,8 +118,8 @@
 
   .dt-deadtrees-map .dt-map-attribution-control {
     bottom: 64px;
-    right: 8px;
-    left: auto;
+    right: auto;
+    left: 8px;
   }
 
   .dt-attribution-full {

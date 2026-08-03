@@ -550,15 +550,8 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
       mobileAttribution.locator(".dt-attribution-full"),
     ).toBeHidden();
     expect(mobileAttributionBox!.width).toBeLessThan(290);
-    expect(
-      390 - (mobileAttributionBox!.x + mobileAttributionBox!.width),
-    ).toBeGreaterThanOrEqual(4);
-    expect(
-      390 - (mobileAttributionBox!.x + mobileAttributionBox!.width),
-    ).toBeLessThanOrEqual(12);
-    expect(mobileAttributionBox!.x).toBeGreaterThan(
-      mobileTimePillBox!.x + mobileTimePillBox!.width,
-    );
+    expect(mobileAttributionBox!.x).toBeGreaterThanOrEqual(4);
+    expect(mobileAttributionBox!.x).toBeLessThanOrEqual(12);
     const mobileControlGap =
       mobileTimePillBox!.y -
       (mobileAttributionBox!.y + mobileAttributionBox!.height);
