@@ -13,8 +13,13 @@ export const OPENFREEMAP_LIBERTY_STYLE_URL = "https://tiles.openfreemap.org/styl
 export const OPENFREEMAP_ATTRIBUTION = "OpenFreeMap © OpenMapTiles Data from OpenStreetMap";
 export const OPENFREEMAP_MAX_ZOOM = 14;
 export const OPENSTREETMAP_ATTRIBUTION = "© OpenStreetMap contributors";
-export const ESRI_WORLD_IMAGERY_ATTRIBUTION =
+export const ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL =
   "Powered by Esri · Vantor, Earthstar Geographics & GIS User Community";
+export const ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE =
+  "Esri · Vantor · Earthstar · GIS User Community";
+export const ESRI_WORLD_IMAGERY_ATTRIBUTION =
+  `<span class="dt-attribution-full">${ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL}</span>` +
+  `<span class="dt-attribution-mobile" aria-label="${ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL}" title="${ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL}">${ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE}</span>`;
 export const WAYBACK_ATTRIBUTION = ESRI_WORLD_IMAGERY_ATTRIBUTION;
 export const WORLD_IMAGERY_ATTRIBUTION = ESRI_WORLD_IMAGERY_ATTRIBUTION;
 

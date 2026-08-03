@@ -543,7 +543,22 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
       .boundingBox();
     expect(mobileAttributionBox).not.toBeNull();
     expect(mobileTimePillBox).not.toBeNull();
-    expect(mobileAttributionBox!.width).toBeLessThan(360);
+    await expect(
+      mobileAttribution.locator(".dt-attribution-mobile"),
+    ).toHaveText("Esri · Vantor · Earthstar · GIS User Community");
+    await expect(
+      mobileAttribution.locator(".dt-attribution-full"),
+    ).toBeHidden();
+    expect(mobileAttributionBox!.width).toBeLessThan(260);
+    expect(
+      390 - (mobileAttributionBox!.x + mobileAttributionBox!.width),
+    ).toBeGreaterThanOrEqual(4);
+    expect(
+      390 - (mobileAttributionBox!.x + mobileAttributionBox!.width),
+    ).toBeLessThanOrEqual(12);
+    expect(mobileAttributionBox!.x).toBeGreaterThan(
+      mobileTimePillBox!.x + mobileTimePillBox!.width,
+    );
     const mobileControlGap =
       mobileTimePillBox!.y -
       (mobileAttributionBox!.y + mobileAttributionBox!.height);

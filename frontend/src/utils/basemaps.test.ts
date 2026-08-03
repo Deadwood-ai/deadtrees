@@ -4,6 +4,9 @@ import { apply } from "ol-mapbox-style";
 import {
   acquireLibertyBasemapGroup,
   createWorldImagerySource,
+  ESRI_WORLD_IMAGERY_ATTRIBUTION,
+  ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL,
+  ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE,
   getCachedWaybackSource,
   releaseLibertyBasemapGroup,
 } from "./basemaps";
@@ -18,14 +21,17 @@ const resolveAttributions = (
 
 describe("Esri imagery attribution", () => {
   it("credits Esri and the current World Imagery data providers", () => {
-    const expectedAttribution =
-      "Powered by Esri · Vantor, Earthstar Geographics & GIS User Community";
-
     expect(resolveAttributions(createWorldImagerySource())).toContain(
-      expectedAttribution,
+      ESRI_WORLD_IMAGERY_ATTRIBUTION,
     );
     expect(resolveAttributions(getCachedWaybackSource(31144))).toContain(
-      expectedAttribution,
+      ESRI_WORLD_IMAGERY_ATTRIBUTION,
+    );
+    expect(ESRI_WORLD_IMAGERY_ATTRIBUTION).toContain(
+      ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL,
+    );
+    expect(ESRI_WORLD_IMAGERY_ATTRIBUTION).toContain(
+      ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE,
     );
   });
 });

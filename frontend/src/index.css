@@ -83,6 +83,10 @@
   margin: 0;
 }
 
+.dt-attribution-mobile {
+  display: none;
+}
+
 @media (max-width: 359px) {
   .dt-map-attribution-control {
     white-space: normal;
@@ -114,6 +118,16 @@
 
   .dt-deadtrees-map .dt-map-attribution-control {
     bottom: 64px;
+    right: 8px;
+    left: auto;
+  }
+
+  .dt-attribution-full {
+    display: none;
+  }
+
+  .dt-attribution-mobile {
+    display: inline;
   }
 
   .dt-mobile-navigation-drawer-root .ant-drawer-content,
