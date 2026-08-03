@@ -7,7 +7,7 @@
 /* Shared OpenLayers controls for public maps */
 .dt-map-attribution-control {
   position: absolute;
-  bottom: 12px;
+  bottom: 88px;
   left: 12px;
   right: auto;
   max-width: min(320px, calc(100% - 24px));
