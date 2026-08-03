@@ -5,8 +5,18 @@ import { UploadOutlined } from "@ant-design/icons";
 import { useDesktopOnlyFeature } from "../../hooks/useDesktopOnlyFeature";
 import { useAnalytics } from "../../hooks/useAnalytics";
 
-const UploadButton = () => {
-  const [modals, setModals] = useState<{ key: string; isVisible: boolean }[]>([]);
+interface UploadButtonProps {
+  label?: string;
+  size?: "small" | "middle" | "large";
+}
+
+const UploadButton = ({
+  label = "Upload Data",
+  size = "large",
+}: UploadButtonProps) => {
+  const [modals, setModals] = useState<{ key: string; isVisible: boolean }[]>(
+    [],
+  );
   const { isMobile, runDesktopOnlyAction } = useDesktopOnlyFeature();
   const { track } = useAnalytics("profile");
 
@@ -22,7 +32,7 @@ const UploadButton = () => {
   return (
     <>
       <Button
-        size="large"
+        size={size}
         icon={<UploadOutlined />}
         type="primary"
         onClick={() => {
@@ -34,7 +44,7 @@ const UploadButton = () => {
           runDesktopOnlyAction("upload", showModal);
         }}
       >
-        Upload Data
+        {label}
       </Button>
       {modals.map((modal) => (
         <UploadModal

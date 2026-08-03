@@ -15,26 +15,31 @@ import type { IPriwaBefallsgruppe, IPriwaPoint } from "./types";
 
 export const PRIWA_BEFALLSGRUPPE_BUFFER_METERS = 15;
 
-const groupStyle = (name: string) =>
+const groupStyle = (name: string, isSelected: boolean) =>
   new Style({
-    fill: new Fill({ color: "rgba(5, 150, 105, 0.14)" }),
+    fill: new Fill({
+      color: isSelected ? "rgba(5, 150, 105, 0.20)" : "rgba(5, 150, 105, 0.05)",
+    }),
     stroke: new Stroke({
-      color: "rgba(4, 120, 87, 0.95)",
-      width: 2,
+      color: isSelected ? "rgba(4, 120, 87, 0.98)" : "rgba(4, 120, 87, 0.48)",
+      width: isSelected ? 3 : 1.5,
       lineDash: [7, 5],
     }),
-    text: new Text({
-      text: name,
-      font: "600 12px Inter, system-ui, sans-serif",
-      fill: new Fill({ color: "#065f46" }),
-      stroke: new Stroke({ color: "rgba(255,255,255,0.96)", width: 4 }),
-      overflow: true,
-    }),
+    text: isSelected
+      ? new Text({
+          text: name,
+          font: "600 12px Inter, system-ui, sans-serif",
+          fill: new Fill({ color: "#065f46" }),
+          stroke: new Stroke({ color: "rgba(255,255,255,0.96)", width: 4 }),
+          overflow: true,
+        })
+      : undefined,
   });
 
 export const createPriwaBefallsgruppeFeature = (
   group: IPriwaBefallsgruppe,
   points: IPriwaPoint[],
+  isSelected = false,
 ) => {
   const pointsById = new Map(points.map((point) => [point.id, point]));
   const bufferedTrees = group.treeIds.flatMap((treeId) => {
@@ -67,7 +72,7 @@ export const createPriwaBefallsgruppeFeature = (
     groupName: group.name,
     treeIds: group.treeIds,
   });
-  feature.setStyle(groupStyle(group.name));
+  feature.setStyle(groupStyle(group.name, isSelected));
   return feature;
 };
 
