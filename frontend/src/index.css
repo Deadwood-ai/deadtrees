@@ -7,16 +7,18 @@
 /* Shared OpenLayers controls for public maps */
 .dt-map-attribution-control {
   position: absolute;
-  bottom: 88px;
+  bottom: 12px;
   left: 12px;
   right: auto;
-  max-width: min(320px, calc(100% - 24px));
+  max-width: min(440px, calc(100% - 24px));
   background-color: rgba(255, 255, 255, 0.92);
   border: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: 14px;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
-  padding: 4px 8px;
-  font-size: 11px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.14);
+  padding: 3px 7px;
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
   z-index: 40;
 }
 
@@ -62,25 +64,12 @@
   line-height: 1;
 }
 
-.dt-map-zoom-control button:hover,
-.dt-map-attribution-control button:hover {
+.dt-map-zoom-control button:hover {
   background: rgba(255, 255, 255, 1) !important;
 }
 
 .dt-map-attribution-control button {
-  background-color: transparent;
-  border: 0;
-  cursor: pointer;
-  font-size: 14px;
-  color: var(--dt-text-primary);
-  min-width: 32px;
-  min-height: 32px;
-  width: 32px;
-  height: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 10px;
+  display: none;
 }
 
 .dt-map-attribution-control ul {
@@ -91,7 +80,22 @@
 
 .dt-map-attribution-control li {
   display: inline;
-  margin: 0 4px;
+  margin: 0;
+}
+
+@media (max-width: 359px) {
+  .dt-map-attribution-control {
+    white-space: normal;
+  }
+}
+
+/* The medium desktop map has a centered year/history controller. Lift only
+   this map's attribution above it; wide layouts have enough horizontal room
+   to use the conventional bottom-left position. */
+@media (min-width: 768px) and (max-width: 1439px) {
+  .dt-deadtrees-map .dt-map-attribution-control {
+    bottom: 88px;
+  }
 }
 
 @media (max-width: 767px) {
@@ -100,12 +104,16 @@
   }
 
   .dt-map-attribution-control {
-    bottom: 72px;
+    bottom: 8px;
     left: 8px;
     max-width: calc(100% - 16px);
-    padding: 3px 6px;
+    padding: 2px 5px;
     font-size: 9px;
     line-height: 1.2;
+  }
+
+  .dt-deadtrees-map .dt-map-attribution-control {
+    bottom: 64px;
   }
 
   .dt-mobile-navigation-drawer-root .ant-drawer-content,

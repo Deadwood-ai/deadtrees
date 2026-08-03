@@ -19,7 +19,7 @@ const resolveAttributions = (
 describe("Esri imagery attribution", () => {
   it("credits Esri and the current World Imagery data providers", () => {
     const expectedAttribution =
-      "Powered by Esri | Esri, Vantor, Earthstar Geographics, and the GIS User Community";
+      "Powered by Esri · Vantor, Earthstar Geographics & GIS User Community";
 
     expect(resolveAttributions(createWorldImagerySource())).toContain(
       expectedAttribution,

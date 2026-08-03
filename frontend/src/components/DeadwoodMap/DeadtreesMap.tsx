@@ -1337,6 +1337,7 @@ const DeadtreesMap = () => {
   return (
     <div className="h-full w-full">
       <div
+        className="dt-deadtrees-map"
         style={{
           width: "100%",
           height: "100%",

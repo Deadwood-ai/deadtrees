@@ -14,7 +14,7 @@ export const OPENFREEMAP_ATTRIBUTION = "OpenFreeMap © OpenMapTiles Data from Op
 export const OPENFREEMAP_MAX_ZOOM = 14;
 export const OPENSTREETMAP_ATTRIBUTION = "© OpenStreetMap contributors";
 export const ESRI_WORLD_IMAGERY_ATTRIBUTION =
-  "Powered by Esri | Esri, Vantor, Earthstar Geographics, and the GIS User Community";
+  "Powered by Esri · Vantor, Earthstar Geographics & GIS User Community";
 export const WAYBACK_ATTRIBUTION = ESRI_WORLD_IMAGERY_ATTRIBUTION;
 export const WORLD_IMAGERY_ATTRIBUTION = ESRI_WORLD_IMAGERY_ATTRIBUTION;
 

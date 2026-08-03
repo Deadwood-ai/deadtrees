@@ -130,7 +130,7 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
     await expect(
       miniSatelliteMap.locator(".dt-map-attribution-control"),
     ).toContainText(
-      "Powered by Esri | Esri, Vantor, Earthstar Geographics, and the GIS User Community",
+      "Powered by Esri · Vantor, Earthstar Geographics & GIS User Community",
     );
   });
 
@@ -483,7 +483,7 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
         .getByTestId("deadtrees-map")
         .locator(".dt-map-attribution-control"),
     ).toContainText(
-      "Powered by Esri | Esri, Vantor, Earthstar Geographics, and the GIS User Community",
+      "Powered by Esri · Vantor, Earthstar Geographics & GIS User Community",
     );
     expect(earlyWaybackMetadataRequests).toHaveLength(0);
     await expect(
@@ -532,6 +532,25 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
       page.getByRole("button", { name: "Browse historical imagery" }),
     ).toBeVisible();
 
+    const mobileAttribution = page
+      .getByTestId("deadtrees-map")
+      .locator(".dt-map-attribution-control");
+    const mobileAttributionBox = await mobileAttribution.boundingBox();
+    const mobileTimePillBox = await page
+      .getByRole("button", {
+        name: /Prediction year .* Change time settings/,
+      })
+      .boundingBox();
+    expect(mobileAttributionBox).not.toBeNull();
+    expect(mobileTimePillBox).not.toBeNull();
+    expect(mobileAttributionBox!.width).toBeLessThan(360);
+    const mobileControlGap =
+      mobileTimePillBox!.y -
+      (mobileAttributionBox!.y + mobileAttributionBox!.height);
+    expect(mobileControlGap).toBeGreaterThanOrEqual(4);
+    expect(mobileControlGap).toBeLessThanOrEqual(12);
+    await expect(mobileAttribution.locator("button")).toBeHidden();
+
     // Discovery is debounced for one second. Opening the drawer must remain a
     // prediction-year-only action until the explicit history button is used.
     await page.waitForTimeout(1_500);
@@ -574,7 +593,7 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
       .getByRole("button", { name: "Browse historical imagery" })
       .click();
 
-    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.setViewportSize({ width: 1799, height: 1195 });
     const desktopSelector = page.getByTestId(
       "desktop-year-imagery-selector",
     );
@@ -584,5 +603,15 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
         .locator(".ant-segmented-item")
         .filter({ hasText: "Historical" }),
     ).toHaveClass(/ant-segmented-item-selected/);
+
+    const desktopAttributionBox = await page
+      .getByTestId("deadtrees-map")
+      .locator(".dt-map-attribution-control")
+      .boundingBox();
+    expect(desktopAttributionBox).not.toBeNull();
+    expect(desktopAttributionBox!.height).toBeLessThan(32);
+    expect(
+      1195 - (desktopAttributionBox!.y + desktopAttributionBox!.height),
+    ).toBeLessThanOrEqual(16);
   });
 });
