@@ -4,6 +4,7 @@ export interface IPriwaCoordinate {
 }
 
 export type PriwaCoordinateSource = "qr" | "gps" | "map";
+export type PriwaBaseLayer = "aerial" | "topographic";
 export type PriwaGpsQuality = "ja" | "nein";
 export type PriwaPointSyncOperation = "create" | "update" | "delete";
 export type PriwaPointSyncStatus = "synced" | "pending" | "syncing" | "failed";
@@ -29,14 +30,9 @@ export type PriwaBaumart =
 export type PriwaYesNo = "ja" | "nein";
 export type PriwaBohrloch = "ja" | "nein" | "ja_kein_buchdrucker";
 export type PriwaHarz =
-  | "vereinzelte Harztropfen"
-  | "mittlerer/flächiger Harzfluss"
-  | "nein";
+  "vereinzelte Harztropfen" | "mittlerer/flächiger Harzfluss" | "nein";
 export type PriwaNadel =
-  | "grün"
-  | "fahlgrün/gelblich"
-  | "rot/braun"
-  | "abgefallen";
+  "grün" | "fahlgrün/gelblich" | "rot/braun" | "abgefallen";
 export type PriwaPercentClass = "0%" | "bis25%" | "bis50%" | ">50%";
 export type PriwaBefallsgruppeOrigin = "suggestion" | "manual";
 

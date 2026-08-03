@@ -13,6 +13,7 @@ interface UsePriwaFlightReviewOptions {
   groups: IPriwaBefallsgruppe[];
   isLoadingGroups: boolean;
   groupsErrorMessage: string | null;
+  enableMosaics: boolean;
   onSetFlightType: (input: {
     datasetId: string;
     flightType: PriwaFlightType;
@@ -29,6 +30,7 @@ export function usePriwaFlightReview({
   groups,
   isLoadingGroups,
   groupsErrorMessage,
+  enableMosaics,
   onSetFlightType,
   onAssignFlightToGroup,
 }: UsePriwaFlightReviewOptions) {
@@ -36,16 +38,7 @@ export function usePriwaFlightReview({
     new Set(),
   );
   const [selectedMosaicId, setSelectedMosaicId] = useState<string | null>(null);
-  const [hoveredMosaicId, setHoveredMosaicIdState] = useState<string | null>(
-    null,
-  );
-  const [groupDraftDatasetId, setGroupDraftDatasetId] = useState<string | null>(
-    null,
-  );
-  const [isLayerPanelOpen, setLayerPanelOpen] = useState(false);
-  const [isGroupPanelOpen, setGroupPanelOpen] = useState(false);
   const knownMosaicIdsRef = useRef<Set<string>>(new Set());
-  const hoveredMosaicIdRef = useRef<string | null>(null);
   const mosaicMatchGroups = useMemo(
     () =>
       groupsForPriwaMosaicMatching(groups, isLoadingGroups, groupsErrorMessage),
@@ -60,8 +53,11 @@ export function usePriwaFlightReview({
     [matches.matchedMosaics, matches.unmatchedMosaics],
   );
   const enabledMosaics = useMemo(
-    () => reviewMosaics.filter((mosaic) => enabledMosaicIds.has(mosaic.id)),
-    [enabledMosaicIds, reviewMosaics],
+    () =>
+      enableMosaics
+        ? reviewMosaics.filter((mosaic) => enabledMosaicIds.has(mosaic.id))
+        : [],
+    [enableMosaics, enabledMosaicIds, reviewMosaics],
   );
   const selectedMosaic = useMemo(
     () =>
@@ -71,21 +67,6 @@ export function usePriwaFlightReview({
         : null,
     [reviewMosaics, selectedMosaicId],
   );
-  const hoveredMosaic = useMemo(
-    () =>
-      hoveredMosaicId
-        ? (reviewMosaics.find((mosaic) => mosaic.id === hoveredMosaicId) ??
-          null)
-        : null,
-    [hoveredMosaicId, reviewMosaics],
-  );
-  const inspectedMosaic = hoveredMosaic ?? selectedMosaic;
-
-  const setHoveredMosaicId = useCallback((mosaicId: string | null) => {
-    hoveredMosaicIdRef.current = mosaicId;
-    setHoveredMosaicIdState(mosaicId);
-  }, []);
-
   useEffect(() => {
     if (
       selectedMosaicId &&
@@ -94,15 +75,6 @@ export function usePriwaFlightReview({
       setSelectedMosaicId(null);
     }
   }, [reviewMosaics, selectedMosaicId]);
-
-  useEffect(() => {
-    if (
-      hoveredMosaicId &&
-      !reviewMosaics.some((mosaic) => mosaic.id === hoveredMosaicId)
-    ) {
-      setHoveredMosaicId(null);
-    }
-  }, [hoveredMosaicId, reviewMosaics, setHoveredMosaicId]);
 
   useEffect(() => {
     const nextKnownIds = new Set(reviewMosaics.map((mosaic) => mosaic.id));
@@ -134,6 +106,11 @@ export function usePriwaFlightReview({
     },
     [],
   );
+
+  const showOnlyMosaics = useCallback((mosaicIds: string[]) => {
+    setEnabledMosaicIds(new Set(mosaicIds));
+    setSelectedMosaicId(mosaicIds[0] ?? null);
+  }, []);
 
   const selectMatchedMosaicForPoint = useCallback(
     (point: IPriwaPoint) => {
@@ -187,36 +164,18 @@ export function usePriwaFlightReview({
     [groups, onAssignFlightToGroup],
   );
 
-  const openGroupDraftForMosaic = useCallback((mosaicId: string) => {
-    setGroupDraftDatasetId(mosaicId);
-    setLayerPanelOpen(false);
-    setGroupPanelOpen(true);
-  }, []);
-
   return {
     ...matches,
     reviewMosaics,
     enabledMosaics,
     enabledMosaicIds,
+    selectedMosaic,
     selectedMosaicId,
-    hoveredMosaicId,
-    hoveredMosaicIdRef,
-    inspectedMosaic,
-    inspectedMosaicIsHovered: hoveredMosaic !== null,
-    isInspectedMosaicVisible:
-      inspectedMosaic !== null && enabledMosaicIds.has(inspectedMosaic.id),
-    isLayerPanelOpen,
-    isGroupPanelOpen,
-    groupDraftDatasetId,
-    setGroupDraftDatasetId,
-    setLayerPanelOpen,
-    setGroupPanelOpen,
     setSelectedMosaicId,
-    setHoveredMosaicId,
     setMosaicVisibility,
+    showOnlyMosaics,
     selectMatchedMosaicForPoint,
     setFlightType,
     assignMosaicToGroup,
-    openGroupDraftForMosaic,
   };
 }

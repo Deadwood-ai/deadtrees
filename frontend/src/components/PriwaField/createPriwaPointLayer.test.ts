@@ -26,7 +26,7 @@ const point: IPriwaPoint = {
 };
 
 describe("createPriwaPointFeature", () => {
-  it("labels close map points with species, discovery date, and secondary tree number", () => {
+  it("uses the tree number as the compact desktop map label", () => {
     const feature = createPriwaPointFeature(point);
     const styles = feature.getStyleFunction()?.(feature, 0.5);
     const styleList = Array.isArray(styles) ? styles : [styles];
@@ -34,6 +34,14 @@ describe("createPriwaPointFeature", () => {
       .map((style) => style?.getText()?.getText())
       .filter(Boolean);
 
-    expect(labels).toContain("Fichte · 30.07.2026\nBaum 101");
+    expect(labels).toContain("Baum 101");
+  });
+
+  it("can suppress labels for dense or mobile map views", () => {
+    const feature = createPriwaPointFeature(point, false, false);
+    const styles = feature.getStyleFunction()?.(feature, 0.5);
+    const styleList = Array.isArray(styles) ? styles : [styles];
+
+    expect(styleList.every((style) => !style?.getText()?.getText())).toBe(true);
   });
 });

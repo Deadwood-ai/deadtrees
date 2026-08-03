@@ -21,14 +21,18 @@ const formatPointDate = (value: string) => {
 
 const pointLabel = (point: IPriwaPoint, resolution: number) => {
   if (resolution > 1.2) return undefined;
-  const primary = `${point.baumart} · ${formatPointDate(point.datum)}`;
-  return resolution <= 0.7 && point.baumnr
-    ? `${primary}\nBaum ${point.baumnr}`
-    : primary;
+  return point.baumnr
+    ? `Baum ${point.baumnr}`
+    : `${point.baumart} · ${formatPointDate(point.datum)}`;
 };
 
-const pointStyle = (point: IPriwaPoint, resolution: number) => {
-  const label = pointLabel(point, resolution);
+const pointStyle = (
+  point: IPriwaPoint,
+  resolution: number,
+  isSelected: boolean,
+  showLabel: boolean,
+) => {
+  const label = showLabel ? pointLabel(point, resolution) : undefined;
   const coreStyle = new Style({
     image: new CircleStyle({
       radius: point.isEstimatedLocation ? 7 : 8,
@@ -69,11 +73,27 @@ const pointStyle = (point: IPriwaPoint, resolution: number) => {
         })
       : null;
 
+  const selectionStyle = isSelected
+    ? new Style({
+        image: new CircleStyle({
+          radius: 16,
+          fill: new Fill({ color: "rgba(255,255,255,0.01)" }),
+          stroke: new Stroke({ color: "rgba(5, 150, 105, 0.98)", width: 4 }),
+        }),
+      })
+    : null;
+
   if (!point.isEstimatedLocation) {
-    return syncStyle ? [syncStyle, coreStyle] : coreStyle;
+    const styles = [
+      ...(selectionStyle ? [selectionStyle] : []),
+      ...(syncStyle ? [syncStyle] : []),
+      coreStyle,
+    ];
+    return styles.length === 1 ? coreStyle : styles;
   }
 
   return [
+    ...(selectionStyle ? [selectionStyle] : []),
     ...(syncStyle ? [syncStyle] : []),
     new Style({
       image: new CircleStyle({
@@ -90,20 +110,26 @@ const pointStyle = (point: IPriwaPoint, resolution: number) => {
   ];
 };
 
-export const createPriwaPointFeature = (point: IPriwaPoint) => {
+export const createPriwaPointFeature = (
+  point: IPriwaPoint,
+  isSelected = false,
+  showLabel = true,
+) => {
   const feature = new Feature({
     geometry: new Point(fromLonLat([point.lon, point.lat])),
     point,
   });
   feature.setId(point.id);
-  feature.setStyle((_feature, resolution) => pointStyle(point, resolution));
+  feature.setStyle((_feature, resolution) =>
+    pointStyle(point, resolution, isSelected, showLabel),
+  );
   return feature;
 };
 
 export const createPriwaPointLayer = (points: IPriwaPoint[]) =>
   new VectorLayer({
     source: new VectorSource({
-      features: points.map(createPriwaPointFeature),
+      features: points.map((point) => createPriwaPointFeature(point)),
     }),
     zIndex: 40,
   });

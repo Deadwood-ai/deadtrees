@@ -16,9 +16,7 @@ import type { IPriwaBefallsgruppe, IPriwaPoint } from "./types";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
 import type { IPriwaMatchedMosaic } from "./usePriwaMosaicMatches";
 
-type PriwaBefallsgruppeLayer = ReturnType<
-  typeof createPriwaBefallsgruppeLayer
->;
+type PriwaBefallsgruppeLayer = ReturnType<typeof createPriwaBefallsgruppeLayer>;
 type PriwaMosaicFootprintLayer = ReturnType<
   typeof createPriwaMosaicFootprintLayer
 >;
@@ -40,16 +38,22 @@ interface UsePriwaReviewMapLayersOptions {
   enabledMosaics: IPriwaMosaic[];
   enabledMosaicIds: Set<string>;
   selectedMosaicId: string | null;
+  selectedGroupId: string | null;
 }
 
 export const syncPriwaBefallsgruppeLayer = (
   source: PriwaBefallsgruppeSource,
   groups: IPriwaBefallsgruppe[],
   points: IPriwaPoint[],
+  selectedGroupId: string | null = null,
 ) => {
   source.clear();
   groups.forEach((group) => {
-    const feature = createPriwaBefallsgruppeFeature(group, points);
+    const feature = createPriwaBefallsgruppeFeature(
+      group,
+      points,
+      group.id === selectedGroupId,
+    );
     if (feature) source.addFeature(feature);
   });
 };
@@ -91,13 +95,16 @@ export function usePriwaReviewMapLayers({
   enabledMosaics,
   enabledMosaicIds,
   selectedMosaicId,
+  selectedGroupId,
 }: UsePriwaReviewMapLayersOptions) {
   const cogLayersRef = useRef<TileLayerWebGL[]>([]);
 
   useEffect(() => {
     const source = groupLayerRef.current?.getSource();
-    if (source) syncPriwaBefallsgruppeLayer(source, groups, points);
-  }, [groupLayerRef, groups, points]);
+    if (source) {
+      syncPriwaBefallsgruppeLayer(source, groups, points, selectedGroupId);
+    }
+  }, [groupLayerRef, groups, points, selectedGroupId]);
 
   useEffect(() => {
     const source = mosaicFootprintLayerRef.current?.getSource();

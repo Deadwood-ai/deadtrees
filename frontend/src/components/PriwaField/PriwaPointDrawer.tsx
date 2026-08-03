@@ -189,6 +189,7 @@ const createFormValuesFromPoint = (
 
 interface PriwaPointDrawerProps {
   open: boolean;
+  isMobile: boolean;
   formSessionId: number;
   editingPoint: IPriwaPoint | null;
   selectedCoordinate: IPriwaCoordinate | null;
@@ -206,6 +207,7 @@ interface PriwaPointDrawerProps {
 
 export default function PriwaPointDrawer({
   open,
+  isMobile,
   formSessionId,
   editingPoint,
   selectedCoordinate,
@@ -404,8 +406,9 @@ export default function PriwaPointDrawer({
       title={editingPoint ? "Käferbaum bearbeiten" : "Käferbaum aufnehmen"}
       open={open}
       onClose={onClose}
-      placement="right"
-      width="min(430px, 100vw)"
+      placement={isMobile ? "bottom" : "right"}
+      width={isMobile ? undefined : "min(430px, 100vw)"}
+      height={isMobile ? "88dvh" : undefined}
       rootClassName="priwa-point-drawer-root"
       className="priwa-point-drawer"
       destroyOnClose={false}
@@ -587,55 +590,65 @@ export default function PriwaPointDrawer({
                   </div>
                 ),
               },
+              {
+                key: "befall",
+                label: (
+                  <Typography.Text strong>
+                    Weitere Befallsmerkmale
+                  </Typography.Text>
+                ),
+                forceRender: true,
+                children: (
+                  <div className="grid grid-cols-1 gap-x-2 sm:grid-cols-2">
+                    <Form.Item label="Bohrmehl" name="bm">
+                      <Select options={yesNoOptions} />
+                    </Form.Item>
+                    <Form.Item label="Bohrloch" name="bohrloch">
+                      <Select options={bohrlochOptions} />
+                    </Form.Item>
+                    <Form.Item label="Harz" name="harz">
+                      <Select options={harzOptions} />
+                    </Form.Item>
+                    <Form.Item
+                      label="Grüne Nadeln am Boden"
+                      name="grueneNadelnAmBoden"
+                    >
+                      <Select options={yesNoOptions} />
+                    </Form.Item>
+                    <Form.Item label="Nadelverlust" name="kv">
+                      <Select options={percentOptions} />
+                    </Form.Item>
+                    <Form.Item label="Nadelverfärbung" name="nadel">
+                      <Select options={nadelOptions} />
+                    </Form.Item>
+                    <Form.Item label="Rindenverlust" name="rinde">
+                      <Select options={percentOptions} />
+                    </Form.Item>
+                  </div>
+                ),
+              },
+              {
+                key: "optional",
+                label: <Typography.Text strong>Kommentar</Typography.Text>,
+                forceRender: true,
+                children: (
+                  <Form.Item
+                    className="priwa-comment-form-item"
+                    label="Kommentar"
+                    name="kom"
+                    rules={[{ max: 200, message: "Maximal 200 Zeichen" }]}
+                  >
+                    <Input.TextArea
+                      maxLength={200}
+                      showCount
+                      autoSize={{ minRows: 2, maxRows: 4 }}
+                    />
+                  </Form.Item>
+                ),
+              },
             ]}
             className="rounded-md border border-gray-200 bg-white [&_.ant-collapse-content-box]:pb-1 [&_.ant-collapse-content-box]:pt-0 [&_.ant-collapse-header]:px-0 [&_.ant-collapse-header]:py-1.5"
           />
-
-          <section className="mt-3 space-y-2 border-t border-gray-200 pt-3">
-            <Typography.Text strong>Befall</Typography.Text>
-            <div className="grid grid-cols-1 gap-x-2 sm:grid-cols-2">
-              <Form.Item label="Bohrmehl" name="bm">
-                <Select options={yesNoOptions} />
-              </Form.Item>
-              <Form.Item label="Bohrloch" name="bohrloch">
-                <Select options={bohrlochOptions} />
-              </Form.Item>
-              <Form.Item label="Harz" name="harz">
-                <Select options={harzOptions} />
-              </Form.Item>
-              <Form.Item
-                label="Grüne Nadeln am Boden"
-                name="grueneNadelnAmBoden"
-              >
-                <Select options={yesNoOptions} />
-              </Form.Item>
-              <Form.Item label="Nadelverlust" name="kv">
-                <Select options={percentOptions} />
-              </Form.Item>
-              <Form.Item label="Nadelverfärbung" name="nadel">
-                <Select options={nadelOptions} />
-              </Form.Item>
-              <Form.Item label="Rindenverlust" name="rinde">
-                <Select options={percentOptions} />
-              </Form.Item>
-            </div>
-          </section>
-
-          <section className="mt-3 space-y-2 border-t border-gray-200 pt-3">
-            <Typography.Text strong>Optional</Typography.Text>
-            <Form.Item
-              className="priwa-comment-form-item"
-              label="Kommentar"
-              name="kom"
-              rules={[{ max: 200, message: "Maximal 200 Zeichen" }]}
-            >
-              <Input.TextArea
-                maxLength={200}
-                showCount
-                autoSize={{ minRows: 2, maxRows: 4 }}
-              />
-            </Form.Item>
-          </section>
 
           <Button
             className="mt-3"

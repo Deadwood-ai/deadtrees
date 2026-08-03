@@ -4,7 +4,9 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { expect, test, type Page } from "@playwright/test";
 
 const localSupabaseUrl =
-  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "http://127.0.0.1:54321";
+  process.env.VITE_SUPABASE_URL ||
+  process.env.SUPABASE_URL ||
+  "http://127.0.0.1:54321";
 
 const uniqueRunId = `${Date.now()}-${randomUUID()}`;
 const fieldUserEmail = `priwa-write-${uniqueRunId}@example.com`;
@@ -123,6 +125,8 @@ async function createMapEstimatedPoint(page: Page, pointBaumnr: string) {
 }
 
 async function expectCommentCounterClearOfSaveButton(page: Page) {
+  await page.getByRole("button", { name: "Kommentar" }).click();
+  await expect(page.getByLabel("Kommentar")).toBeVisible();
   await page.getByLabel("Kommentar").scrollIntoViewIfNeeded();
 
   const counter = page.locator(
