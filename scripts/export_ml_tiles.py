@@ -85,7 +85,8 @@ def download_cog_to_temp(cog_url: str) -> Path:
 	Raises:
 		Exception: If download fails
 	"""
-	temp_file = Path(tempfile.mktemp(suffix='.tif'))
+	with tempfile.NamedTemporaryFile(suffix='.tif', delete=False) as reserved_file:
+		temp_file = Path(reserved_file.name)
 
 	try:
 		urllib.request.urlretrieve(cog_url, temp_file)

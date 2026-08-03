@@ -87,6 +87,14 @@ class DevCommands:
 			print(f'Error: {str(e)}')
 			raise
 
+	def _print_dev_accounts(self):
+		"""Print local account identifiers without exposing configured passwords."""
+		print('📧 Available test users:')
+		print(f'   • Test User: {settings.TEST_USER_EMAIL}')
+		print(f'   • Test User 2: {settings.TEST_USER_EMAIL2}')
+		print(f'   • Processor: {settings.PROCESSOR_USERNAME}')
+		print('   Passwords are loaded from the local environment and are not displayed.')
+
 	def _get_compose_services(self) -> List[str]:
 		"""Get the list of services defined in the test compose file."""
 		result = subprocess.run(
@@ -655,10 +663,7 @@ class DevCommands:
 				self._run_command(self._compose_lifecycle_cmd('up', flags=['-d']))
 
 			print('🚀 Development environment started!')
-			print('📧 Available test users:')
-			print(f'   • Test User: {settings.TEST_USER_EMAIL} / {settings.TEST_USER_PASSWORD}')
-			print(f'   • Test User 2: {settings.TEST_USER_EMAIL2} / {settings.TEST_USER_PASSWORD2}')
-			print(f'   • Processor: {settings.PROCESSOR_USERNAME} / {settings.PROCESSOR_PASSWORD}')
+			self._print_dev_accounts()
 			print('')
 			print('🔄 Starting continuous processor... (Press Ctrl+C to stop and cleanup)')
 

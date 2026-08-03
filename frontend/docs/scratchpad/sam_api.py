@@ -11,7 +11,7 @@ import pathlib
 import os
 import json
 from typing import Optional, List
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
 # Modal image with dependencies
 WEIGHTS_PATH = "/tmp/Ultralytics/cache/assets/sam2.1_b.pt"
@@ -274,7 +274,7 @@ async def segment_endpoint(
 
     except Exception as e:
         print(f"Error in segmentation: {str(e)}")
-        return {"error": str(e)}
+        return JSONResponse(status_code=500, content={"error": "Segmentation failed"})
 
 
 @app.function(image=image)
