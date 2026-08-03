@@ -348,7 +348,10 @@ const YearImagerySelector = ({
 
   const shouldShowBlockingLoading = isLoading && !hasSelectedBasemap;
   const hasNoImagery =
-    waybackItems.length === 0 && !isLoading && !hasSelectedBasemap;
+    isBrowsingImageryHistory &&
+    waybackItems.length === 0 &&
+    !isLoading &&
+    !hasSelectedBasemap;
 
   // Get the base map year for display
   const selectedImageryDate = selectedItem

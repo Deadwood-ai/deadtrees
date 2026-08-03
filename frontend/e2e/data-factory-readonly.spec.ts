@@ -536,6 +536,23 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
     // prediction-year-only action until the explicit history button is used.
     await page.waitForTimeout(1_500);
     expect(waybackRequests).toHaveLength(0);
+
+    // Pending discovery exposes a real escape hatch. Returning to Latest
+    // before the one-second debounce expires must stand the query down rather
+    // than letting the expensive Wayback scan start in the background.
+    await page
+      .getByRole("button", { name: "Browse historical imagery" })
+      .click();
+    const backToLatest = page.getByRole("button", {
+      name: "Back to latest imagery",
+    });
+    await expect(backToLatest).toBeVisible();
+    await backToLatest.click();
+    await expect(
+      page.getByRole("button", { name: "Browse historical imagery" }),
+    ).toBeVisible();
+    await page.waitForTimeout(1_500);
+    expect(waybackRequests).toHaveLength(0);
   });
 
   test("pending history selection survives a mobile-to-desktop breakpoint change", async ({

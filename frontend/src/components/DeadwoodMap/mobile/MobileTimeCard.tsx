@@ -15,7 +15,6 @@ import {
 } from "../../../hooks/useWaybackItems";
 import {
   getImageryDate,
-  pickAutoMatchImagery,
   PREDICTION_YEARS,
 } from "../YearImagerySelector";
 
@@ -32,6 +31,8 @@ interface MobileTimeCardProps {
    * Wayback release. Live imagery loads far faster, so it is the default.
    */
   isUsingLiveImagery: boolean;
+  /** Whether historical discovery or selection is currently active */
+  isBrowsingImageryHistory: boolean;
   autoMatchImagery: boolean;
   onPredictionYearChange: (year: string) => void;
   onImageryChange: (releaseNum: number) => void;
@@ -75,6 +76,7 @@ const MobileTimeCard = ({
   waybackItems,
   selectedReleaseNum,
   isUsingLiveImagery,
+  isBrowsingImageryHistory,
   autoMatchImagery,
   onPredictionYearChange,
   onImageryChange,
@@ -119,21 +121,6 @@ const MobileTimeCard = ({
         .filter(Boolean)
         .join(" · ");
 
-  const matchImageryToYear = (year: string) => {
-    if (!autoMatchImagery || waybackItems.length === 0) return;
-    const nextReleaseNum = pickAutoMatchImagery(
-      waybackItems,
-      Number.parseInt(year),
-      selectedReleaseNum,
-    );
-    if (nextReleaseNum !== null) onImageryChange(nextReleaseNum);
-  };
-
-  const selectPredictionYear = (year: string) => {
-    onPredictionYearChange(year);
-    matchImageryToYear(year);
-  };
-
   const stepImagery = (offset: number) => {
     if (isSelectionOutsideCandidates) {
       // Enter the discovered candidate list at its newest image while keeping
@@ -153,16 +140,7 @@ const MobileTimeCard = ({
   };
 
   const toggleAutoMatch = () => {
-    const next = !autoMatchImagery;
-    onAutoMatchChange(next);
-    if (next && waybackItems.length > 0) {
-      const nextReleaseNum = pickAutoMatchImagery(
-        waybackItems,
-        Number.parseInt(predictionYear),
-        selectedReleaseNum,
-      );
-      if (nextReleaseNum !== null) onImageryChange(nextReleaseNum);
-    }
+    onAutoMatchChange(!autoMatchImagery);
   };
 
   const showImagerySection =
@@ -174,7 +152,9 @@ const MobileTimeCard = ({
         <Button
           icon={<LeftOutlined />}
           disabled={predictionIndex <= 0}
-          onClick={() => selectPredictionYear(PREDICTION_YEARS[predictionIndex - 1])}
+          onClick={() =>
+            onPredictionYearChange(PREDICTION_YEARS[predictionIndex - 1])
+          }
           aria-label="Previous prediction year"
           className="!h-11 !w-11"
         />
@@ -192,7 +172,9 @@ const MobileTimeCard = ({
         <Button
           icon={<RightOutlined />}
           disabled={predictionIndex >= PREDICTION_YEARS.length - 1}
-          onClick={() => selectPredictionYear(PREDICTION_YEARS[predictionIndex + 1])}
+          onClick={() =>
+            onPredictionYearChange(PREDICTION_YEARS[predictionIndex + 1])
+          }
           aria-label="Next prediction year"
           className="!h-11 !w-11"
         />
@@ -267,7 +249,7 @@ const MobileTimeCard = ({
           {/* Escape hatch back to the fast basemap: historical releases come
               from the Wayback archive host, which is much slower than the
               live imagery endpoint. */}
-          {!isUsingLiveImagery && !isLoadingImagery && (
+          {isBrowsingImageryHistory && (
             <Button
               type="link"
               size="small"

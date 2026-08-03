@@ -11,6 +11,8 @@ interface MobileTimeDrawerProps {
   isWaybackActive: boolean;
   /** Whether the basemap renders live imagery rather than a Wayback release */
   isUsingLiveImagery: boolean;
+  /** Whether historical discovery or selection is currently active */
+  isBrowsingImageryHistory: boolean;
   autoMatchImagery: boolean;
   showForest: boolean;
   showDeadwood: boolean;
@@ -35,6 +37,7 @@ const MobileTimeDrawer = ({
   isLoadingImagery,
   isWaybackActive,
   isUsingLiveImagery,
+  isBrowsingImageryHistory,
   autoMatchImagery,
   showForest,
   showDeadwood,
@@ -70,6 +73,7 @@ const MobileTimeDrawer = ({
         waybackItems={waybackItems}
         selectedReleaseNum={selectedReleaseNum}
         isUsingLiveImagery={isUsingLiveImagery}
+        isBrowsingImageryHistory={isBrowsingImageryHistory}
         autoMatchImagery={autoMatchImagery}
         onPredictionYearChange={onPredictionYearChange}
         onImageryChange={onImageryChange}

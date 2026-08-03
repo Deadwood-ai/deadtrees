@@ -1491,6 +1491,7 @@ const DeadtreesMap = () => {
           isLoadingImagery={isWaybackLoading}
           isWaybackActive={DeadwoodMapStyle === "wayback"}
           isUsingLiveImagery={isUsingLiveImagery}
+          isBrowsingImageryHistory={isBrowsingImageryHistory}
           autoMatchImagery={autoMatchImagery}
           onAutoMatchChange={setAutoMatchImagery}
           showForest={showForest}

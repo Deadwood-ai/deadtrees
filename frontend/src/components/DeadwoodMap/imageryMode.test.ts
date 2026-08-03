@@ -31,4 +31,13 @@ describe("imageryModeReducer", () => {
       ),
     ).toEqual(LIVE_IMAGERY_MODE);
   });
+
+  it("does not replace an explicitly selected release when history is reopened", () => {
+    expect(
+      imageryModeReducer(
+        { kind: "historical", releaseNum: 7110 },
+        { type: "browse-history" },
+      ),
+    ).toEqual({ kind: "historical", releaseNum: 7110 });
+  });
 });

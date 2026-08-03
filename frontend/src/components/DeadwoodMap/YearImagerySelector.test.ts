@@ -121,10 +121,14 @@ describe("manual imagery history", () => {
     );
 
   it("offers an explicit way into the imagery history before candidates exist", () => {
-    const markup = renderSelector({ isUsingLiveImagery: true });
+    const markup = renderSelector({
+      isUsingLiveImagery: true,
+      selectedReleaseNum: null,
+    });
 
     expect(markup).toContain("Historical");
     expect(markup).toContain("Latest imagery");
+    expect(markup).not.toContain("No satellite imagery available");
   });
 
   // The Wayback archive host is far slower than the live imagery endpoint, so
