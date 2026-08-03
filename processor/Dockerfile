@@ -25,8 +25,8 @@ WORKDIR /app
 RUN mkdir -p /data
 
 # Keep dependency versions in processor/requirements.txt. Production amd64
-# builds default to CUDA 12.1 wheels; CPU CI overrides only the wheel source.
-ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu121
+# builds default to CUDA 12.4 wheels; CPU CI overrides only the wheel source.
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu124
 COPY processor/requirements.txt /app/processor/requirements.txt
 RUN grep -E '^(torch|torchvision)==' /app/processor/requirements.txt > /tmp/torch-requirements.txt && \
     if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
