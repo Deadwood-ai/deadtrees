@@ -1373,9 +1373,6 @@ const DeadtreesMap = () => {
           hasLocationFix={userLocation.hasFix}
           onLocate={() => locateUser(true)}
           onOpenPanel={(panel) => {
-            if (panel === "time") {
-              setShouldLoadLocalWaybackItems(true);
-            }
             setMobileMapPanel((currentPanel) =>
               currentPanel === panel ? null : panel,
             );
@@ -1387,7 +1384,6 @@ const DeadtreesMap = () => {
           active={mobileMapPanel === "time"}
           hidden={hideMobileFloatingControls}
           onClick={() => {
-            setShouldLoadLocalWaybackItems(true);
             setMobileMapPanel((currentPanel) =>
               currentPanel === "time" ? null : "time",
             );
