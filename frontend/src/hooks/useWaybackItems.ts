@@ -1,9 +1,5 @@
 import { useState, useEffect } from "react";
-import {
-  useQuery,
-  useQueryClient,
-  keepPreviousData,
-} from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getWaybackItems,
   getWaybackItemsWithLocalChanges,
@@ -52,6 +48,49 @@ export const WAYBACK_METADATA_TIMEOUT_MS = 10_000;
 export const WAYBACK_METADATA_CONCURRENCY = 6;
 export const WAYBACK_CANDIDATE_DISCOVERY_ZOOM = 12;
 export const WAYBACK_CANDIDATE_DEBOUNCE_MS = 1_000;
+
+export type WaybackCandidateTile = {
+  column: number;
+  row: number;
+};
+
+export const getWaybackCandidateTile = (
+  longitude: number,
+  latitude: number,
+): WaybackCandidateTile => ({
+  column: long2tile(longitude, WAYBACK_CANDIDATE_DISCOVERY_ZOOM),
+  row: lat2tile(latitude, WAYBACK_CANDIDATE_DISCOVERY_ZOOM),
+});
+
+export const shouldExposeWaybackCandidates = ({
+  enabled,
+  longitude,
+  latitude,
+  candidateTile,
+  isPlaceholderData,
+}: {
+  enabled: boolean;
+  longitude: number | undefined;
+  latitude: number | undefined;
+  candidateTile: WaybackCandidateTile | null;
+  isPlaceholderData: boolean;
+}): boolean => {
+  if (
+    !enabled ||
+    longitude === undefined ||
+    latitude === undefined ||
+    candidateTile === null ||
+    isPlaceholderData
+  ) {
+    return false;
+  }
+
+  const currentTile = getWaybackCandidateTile(longitude, latitude);
+  return (
+    candidateTile.column === currentTile.column &&
+    candidateTile.row === currentTile.row
+  );
+};
 
 /**
  * Extended WaybackItem with actual acquisition metadata
@@ -427,9 +466,9 @@ export const resolveWaybackCandidate = (
  *
  * The map center is debounced (1s) and mapped to a coarse Wayback tile; the
  * candidate query is keyed by that tile, so panning within ~10km reuses the
- * cached list and crossing a tile boundary loads the neighbouring one. While
- * a new tile loads, the previous list stays on screen (placeholder data), so
- * selection-derived UI never collapses mid-pan.
+ * cached list and crossing a tile boundary loads the neighbouring one. Results
+ * from another tile stay hidden while the debounce and new query catch up, so
+ * selection-derived UI cannot act on imagery for a previous location.
  */
 export const useWaybackItemsDebounced = (
   longitude: number | undefined,
@@ -455,6 +494,7 @@ export const useWaybackItemsDebounced = (
 
     void queryClient.cancelQueries({ queryKey: ["wayback-candidates"] });
     void queryClient.cancelQueries({ queryKey: ["wayback-items-global"] });
+    setStablePoint(null);
     setProgress(null);
   }, [enabled, queryClient]);
 
@@ -462,8 +502,7 @@ export const useWaybackItemsDebounced = (
     if (!enabled || longitude === undefined || latitude === undefined) return;
 
     const handle = globalThis.setTimeout(() => {
-      const column = long2tile(longitude, WAYBACK_CANDIDATE_DISCOVERY_ZOOM);
-      const row = lat2tile(latitude, WAYBACK_CANDIDATE_DISCOVERY_ZOOM);
+      const { column, row } = getWaybackCandidateTile(longitude, latitude);
       // Keep the previous object when the tile is unchanged so the query key
       // (and everything derived from it) stays stable while panning in-tile.
       setStablePoint((prev) =>
@@ -475,6 +514,17 @@ export const useWaybackItemsDebounced = (
 
     return () => globalThis.clearTimeout(handle);
   }, [longitude, latitude, enabled]);
+
+  const stableTile = stablePoint
+    ? { column: stablePoint.column, row: stablePoint.row }
+    : null;
+  const hasCurrentStablePoint = shouldExposeWaybackCandidates({
+    enabled,
+    longitude,
+    latitude,
+    candidateTile: stableTile,
+    isPlaceholderData: false,
+  });
 
   const candidatesQuery = useQuery({
     queryKey: ["wayback-candidates", stablePoint?.column, stablePoint?.row],
@@ -496,10 +546,9 @@ export const useWaybackItemsDebounced = (
       }
       return candidates;
     },
-    enabled: enabled && stablePoint !== null,
+    enabled: hasCurrentStablePoint,
     staleTime: 30 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
-    placeholderData: keepPreviousData,
     retry: 1,
   });
 
@@ -507,35 +556,44 @@ export const useWaybackItemsDebounced = (
   const fallbackQuery = useQuery({
     queryKey: ["wayback-items-global"],
     queryFn: () => loadGlobalWaybackItems(),
-    enabled: enabled && candidatesQuery.isError,
+    enabled: hasCurrentStablePoint && candidatesQuery.isError,
     staleTime: 24 * 60 * 60 * 1000,
     gcTime: 24 * 60 * 60 * 1000,
   });
 
   const candidates = candidatesQuery.data ?? [];
   const isUnverifiedFallback =
-    enabled && candidatesQuery.isError && candidates.length === 0;
+    hasCurrentStablePoint &&
+    candidatesQuery.isError &&
+    candidates.length === 0;
   const resolvedData = isUnverifiedFallback
     ? (fallbackQuery.data ?? [])
     : candidates;
 
-  // While standing down, report no candidates at all. The debounce effect
-  // stops tracking the map center when disabled, so `stablePoint` — and with
-  // it the query key and any `keepPreviousData` placeholder — is frozen on
-  // whichever tile was last discovered. Handing that list back would let a
-  // caller act on another area's candidates after the user has panned away.
-  // Re-enabling re-debounces from the current center.
-  const data = enabled ? resolvedData : [];
+  // Never expose a result unless its query tile still matches the current map
+  // center. This closes both stale windows: re-enabling before the debounce
+  // updates stablePoint, and React Query carrying placeholder data across keys.
+  const canExposeCandidates = shouldExposeWaybackCandidates({
+    enabled,
+    longitude,
+    latitude,
+    candidateTile: stableTile,
+    isPlaceholderData: candidatesQuery.isPlaceholderData,
+  });
+  const data = canExposeCandidates ? resolvedData : [];
 
-  const isFetching = candidatesQuery.isFetching || fallbackQuery.isFetching;
+  const isFetching =
+    hasCurrentStablePoint &&
+    (candidatesQuery.isFetching || fallbackQuery.isFetching);
 
   return {
     data,
     /** First discovery for this area still in flight (nothing to show yet) */
     isLoading:
-      candidatesQuery.isPending &&
       enabled &&
-      stablePoint !== null &&
+      longitude !== undefined &&
+      latitude !== undefined &&
+      (!hasCurrentStablePoint || candidatesQuery.isPending) &&
       data.length === 0,
     isFetching,
     /** Pipeline progress while fetching (discovery phase / metadata counts) */

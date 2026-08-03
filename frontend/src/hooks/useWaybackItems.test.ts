@@ -3,11 +3,13 @@ import type { WaybackItem, WaybackMetadata } from "@esri/wayback-core";
 import {
   enrichWaybackItemsWithMetadata,
   areWaybackCandidatesCacheable,
+  getWaybackCandidateTile,
   loadGlobalWaybackItems,
   loadWaybackCandidates,
   readCachedCandidates,
   registerWaybackReleaseDate,
   resolveWaybackCandidate,
+  shouldExposeWaybackCandidates,
   writeCachedCandidates,
   type WaybackItemWithMetadata,
   type WaybackLoadProgress,
@@ -49,6 +51,45 @@ const metadata = (date: string): WaybackMetadata => ({
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe("candidate location safety", () => {
+  const tileA = getWaybackCandidateTile(point.longitude, point.latitude);
+
+  it("exposes verified candidates for the current tile", () => {
+    expect(
+      shouldExposeWaybackCandidates({
+        enabled: true,
+        ...point,
+        candidateTile: tileA,
+        isPlaceholderData: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps a previous tile hidden until discovery catches up after re-enabling", () => {
+    const atTileB = { longitude: 13.4, latitude: 52.5 };
+
+    expect(
+      shouldExposeWaybackCandidates({
+        enabled: true,
+        ...atTileB,
+        candidateTile: tileA,
+        isPlaceholderData: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("never exposes placeholder candidates from another query", () => {
+    expect(
+      shouldExposeWaybackCandidates({
+        enabled: true,
+        ...point,
+        candidateTile: tileA,
+        isPlaceholderData: true,
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("loadWaybackCandidates", () => {
