@@ -87,6 +87,21 @@
   display: none;
 }
 
+.dt-attribution-mobile summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.dt-attribution-mobile summary::-webkit-details-marker {
+  display: none;
+}
+
+.dt-attribution-mobile-full {
+  display: block;
+  padding-top: 2px;
+  white-space: normal;
+}
+
 @media (max-width: 359px) {
   .dt-map-attribution-control {
     white-space: normal;
@@ -127,7 +142,7 @@
   }
 
   .dt-attribution-mobile {
-    display: inline;
+    display: inline-block;
   }
 
   .dt-mobile-navigation-drawer-root .ant-drawer-content,

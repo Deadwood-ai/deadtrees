@@ -16,10 +16,13 @@ export const OPENSTREETMAP_ATTRIBUTION = "© OpenStreetMap contributors";
 export const ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL =
   "Powered by Esri · Vantor, Earthstar Geographics & GIS User Community";
 export const ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE =
-  "Powered by Esri · Vantor · Earthstar · GIS Community";
+  "Powered by Esri · Contributors ⓘ";
+export const ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE_FULL =
+  "Vantor, Earthstar Geographics & GIS User Community";
 export const ESRI_WORLD_IMAGERY_ATTRIBUTION =
   `<span class="dt-attribution-full">${ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL}</span>` +
-  `<span class="dt-attribution-mobile" aria-label="${ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL}" title="${ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL}">${ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE}</span>`;
+  `<details class="dt-attribution-mobile"><summary>${ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE}</summary>` +
+  `<span class="dt-attribution-mobile-full">${ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE_FULL}</span></details>`;
 export const WAYBACK_ATTRIBUTION = ESRI_WORLD_IMAGERY_ATTRIBUTION;
 export const WORLD_IMAGERY_ATTRIBUTION = ESRI_WORLD_IMAGERY_ATTRIBUTION;
 

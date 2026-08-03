@@ -522,15 +522,10 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
       .getByRole("button", { name: "I Understand" })
       .click({ timeout: 5_000 })
       .catch(() => undefined);
-
     await page
-      .getByRole("button", {
-        name: /Prediction year .* Change time settings/,
-      })
-      .click();
-    await expect(
-      page.getByRole("button", { name: "Browse historical imagery" }),
-    ).toBeVisible();
+      .getByRole("button", { name: "Accept" })
+      .click({ timeout: 5_000 })
+      .catch(() => undefined);
 
     const mobileAttribution = page
       .getByTestId("deadtrees-map")
@@ -543,9 +538,23 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
       .boundingBox();
     expect(mobileAttributionBox).not.toBeNull();
     expect(mobileTimePillBox).not.toBeNull();
-    await expect(
-      mobileAttribution.locator(".dt-attribution-mobile"),
-    ).toHaveText("Powered by Esri · Vantor · Earthstar · GIS Community");
+    const mobileAttributionDisclosure = mobileAttribution.locator(
+      ".dt-attribution-mobile",
+    );
+    await expect(mobileAttributionDisclosure.locator("summary")).toHaveText(
+      "Powered by Esri · Contributors ⓘ",
+    );
+    const mobileFullAttribution = mobileAttributionDisclosure.locator(
+      ".dt-attribution-mobile-full",
+    );
+    await expect(mobileFullAttribution).toBeHidden();
+    await mobileAttributionDisclosure.locator("summary").click();
+    await expect(mobileFullAttribution).toHaveText(
+      "Vantor, Earthstar Geographics & GIS User Community",
+    );
+    await expect(mobileFullAttribution).toBeVisible();
+    await mobileAttributionDisclosure.locator("summary").click();
+    await expect(mobileFullAttribution).toBeHidden();
     await expect(
       mobileAttribution.locator(".dt-attribution-full"),
     ).toBeHidden();
@@ -558,6 +567,15 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
     expect(mobileControlGap).toBeGreaterThanOrEqual(4);
     expect(mobileControlGap).toBeLessThanOrEqual(12);
     await expect(mobileAttribution.locator("button")).toBeHidden();
+
+    await page
+      .getByRole("button", {
+        name: /Prediction year .* Change time settings/,
+      })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Browse historical imagery" }),
+    ).toBeVisible();
 
     // Discovery is debounced for one second. Opening the drawer must remain a
     // prediction-year-only action until the explicit history button is used.

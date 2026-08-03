@@ -7,6 +7,7 @@ import {
   ESRI_WORLD_IMAGERY_ATTRIBUTION,
   ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL,
   ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE,
+  ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE_FULL,
   getCachedWaybackSource,
   releaseLibertyBasemapGroup,
 } from "./basemaps";
@@ -32,6 +33,9 @@ describe("Esri imagery attribution", () => {
     );
     expect(ESRI_WORLD_IMAGERY_ATTRIBUTION).toContain(
       ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE,
+    );
+    expect(ESRI_WORLD_IMAGERY_ATTRIBUTION).toContain(
+      ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE_FULL,
     );
   });
 });
