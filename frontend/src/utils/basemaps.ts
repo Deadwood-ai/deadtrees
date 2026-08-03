@@ -13,8 +13,10 @@ export const OPENFREEMAP_LIBERTY_STYLE_URL = "https://tiles.openfreemap.org/styl
 export const OPENFREEMAP_ATTRIBUTION = "OpenFreeMap © OpenMapTiles Data from OpenStreetMap";
 export const OPENFREEMAP_MAX_ZOOM = 14;
 export const OPENSTREETMAP_ATTRIBUTION = "© OpenStreetMap contributors";
-export const WAYBACK_ATTRIBUTION = "Imagery © Esri World Imagery Wayback, Maxar, Earthstar Geographics";
-export const WORLD_IMAGERY_ATTRIBUTION = "Imagery © Esri World Imagery, Maxar, Earthstar Geographics";
+export const ESRI_WORLD_IMAGERY_ATTRIBUTION =
+  "Powered by Esri | Esri, Vantor, Earthstar Geographics, and the GIS User Community";
+export const WAYBACK_ATTRIBUTION = ESRI_WORLD_IMAGERY_ATTRIBUTION;
+export const WORLD_IMAGERY_ATTRIBUTION = ESRI_WORLD_IMAGERY_ATTRIBUTION;
 
 type StrokeWithOffsetCompat = Stroke & {
   dtOffset_?: number;
@@ -45,12 +47,10 @@ export const applyOpenFreeMapLibertyStyle = (target: Parameters<typeof apply>[0]
 
 export const createStandardMapControls = ({
   includeZoom = true,
-  includeAttribution = false,
-  attributionCollapsed = true,
+  includeAttribution = true,
 }: {
   includeZoom?: boolean;
   includeAttribution?: boolean;
-  attributionCollapsed?: boolean;
 } = {}) => {
   const controls: Control[] = [];
 
@@ -66,8 +66,7 @@ export const createStandardMapControls = ({
     controls.push(
       new Attribution({
         className: "dt-map-attribution-control",
-        collapsible: true,
-        collapsed: attributionCollapsed,
+        collapsible: false,
       }),
     );
   }

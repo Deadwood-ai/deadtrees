@@ -123,6 +123,15 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
         { timeout: 20_000 },
       )
       .toBe(true);
+
+    const miniSatelliteMap = page.getByTestId("home-mini-satellite-map");
+    await miniSatelliteMap.scrollIntoViewIfNeeded();
+    await expect(miniSatelliteMap.locator(".ol-viewport")).toBeVisible();
+    await expect(
+      miniSatelliteMap.locator(".dt-map-attribution-control"),
+    ).toContainText(
+      "Powered by Esri | Esri, Vantor, Earthstar Geographics, and the GIS User Community",
+    );
   });
 
   test("public info and auth routes render their base read-only states", async ({
@@ -252,6 +261,15 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
       page.locator('[data-testid="dataset-detail-map"] .ol-viewport'),
     ).toBeVisible({ timeout: 45_000 });
     await expect(page.getByTestId("dataset-layer-controls")).toBeVisible();
+    await page
+      .getByTestId("dataset-layer-controls")
+      .getByText("Imagery", { exact: true })
+      .click();
+    await expect(
+      page
+        .getByTestId("dataset-detail-map")
+        .locator(".dt-map-attribution-control"),
+    ).toContainText("Powered by Esri");
     await expect(page.getByTestId("dataset-download-section")).toBeVisible();
     await expect(
       page
@@ -460,6 +478,13 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
 
     const controls = page.getByTestId("deadtrees-layer-controls");
     await expect(controls).toBeVisible();
+    await expect(
+      page
+        .getByTestId("deadtrees-map")
+        .locator(".dt-map-attribution-control"),
+    ).toContainText(
+      "Powered by Esri | Esri, Vantor, Earthstar Geographics, and the GIS User Community",
+    );
     expect(earlyWaybackMetadataRequests).toHaveLength(0);
     await expect(
       controls.getByRole("checkbox", { name: "Tree cover [%]" }),

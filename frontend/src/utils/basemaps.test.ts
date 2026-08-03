@@ -3,6 +3,7 @@ import { apply } from "ol-mapbox-style";
 
 import {
   acquireLibertyBasemapGroup,
+  createWorldImagerySource,
   getCachedWaybackSource,
   releaseLibertyBasemapGroup,
 } from "./basemaps";
@@ -10,6 +11,24 @@ import {
 vi.mock("ol-mapbox-style", () => ({
   apply: vi.fn(() => Promise.resolve()),
 }));
+
+const resolveAttributions = (
+  source: ReturnType<typeof createWorldImagerySource>,
+) => source.getAttributions()?.(null as never) ?? [];
+
+describe("Esri imagery attribution", () => {
+  it("credits Esri and the current World Imagery data providers", () => {
+    const expectedAttribution =
+      "Powered by Esri | Esri, Vantor, Earthstar Geographics, and the GIS User Community";
+
+    expect(resolveAttributions(createWorldImagerySource())).toContain(
+      expectedAttribution,
+    );
+    expect(resolveAttributions(getCachedWaybackSource(31144))).toContain(
+      expectedAttribution,
+    );
+  });
+});
 
 describe("Liberty basemap pool", () => {
   it("reuses returned groups without sharing a group between concurrent maps", () => {

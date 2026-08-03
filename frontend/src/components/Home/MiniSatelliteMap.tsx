@@ -9,7 +9,10 @@ import { fromLonLat } from "ol/proj";
 
 import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import { getDeadwoodCOGUrl, getForestCOGUrl } from "../../utils/getDeadwoodCOGUrl";
-import { createWorldImagerySource } from "../../utils/basemaps";
+import {
+  createStandardMapControls,
+  createWorldImagerySource,
+} from "../../utils/basemaps";
 
 const LOCATIONS = [
   { name: "Harz Mountains", country: "DE", center: [10.6682, 51.7868], zoom: 12 },
@@ -95,7 +98,7 @@ const MiniSatelliteMap = () => {
         target: mapContainer.current,
         layers: [basemapLayer, forestLayer, deadwoodLayer],
         view: initialView,
-        controls: [],
+        controls: createStandardMapControls({ includeZoom: false }),
         interactions: [], // keep interactions disabled so the user doesn't get stuck panning it while scrolling the page
       });
 

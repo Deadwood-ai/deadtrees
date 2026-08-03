@@ -100,7 +100,12 @@
   }
 
   .dt-map-attribution-control {
-    display: none !important;
+    bottom: 72px;
+    left: 8px;
+    max-width: calc(100% - 16px);
+    padding: 3px 6px;
+    font-size: 9px;
+    line-height: 1.2;
   }
 
   .dt-mobile-navigation-drawer-root .ant-drawer-content,
