@@ -6,6 +6,7 @@ from shared.logger import logger
 from shared.settings import settings
 from shared.testing.safety import test_environment_only
 from shared.retry import retry_on_transient_error
+from shared.ssh import create_verified_ssh_client
 
 from shared.logging import LogContext, LogCategory
 
@@ -31,8 +32,7 @@ def pull_file_from_storage_server(remote_file_path: str, local_file_path: str, t
 		)
 		return
 
-	with paramiko.SSHClient() as ssh:
-		ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+	with create_verified_ssh_client(settings.SSH_KNOWN_HOSTS_PATH) as ssh:
 		pkey = paramiko.Ed25519Key.from_private_key_file(settings.SSH_PRIVATE_KEY_PATH)
 		logger.info(
 			f'Connecting to storage server: {settings.STORAGE_SERVER_IP} as {settings.STORAGE_SERVER_USERNAME}',
@@ -88,8 +88,7 @@ def pull_file_from_storage_server(remote_file_path: str, local_file_path: str, t
 
 
 def push_file_to_storage_server(local_file_path: str, remote_file_path: str, token: str, dataset_id: int):
-	with paramiko.SSHClient() as ssh:
-		ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+	with create_verified_ssh_client(settings.SSH_KNOWN_HOSTS_PATH) as ssh:
 		pkey = paramiko.Ed25519Key.from_private_key_file(settings.SSH_PRIVATE_KEY_PATH)
 		logger.info(
 			f'Connecting to storage server: {settings.STORAGE_SERVER_IP} as {settings.STORAGE_SERVER_USERNAME}',
@@ -239,8 +238,7 @@ def push_file_to_storage_server(local_file_path: str, remote_file_path: str, tok
 @test_environment_only
 def cleanup_storage_server_directory(directory_path: str, token: str):
 	"""Clean up a directory on the storage server via SSH"""
-	with paramiko.SSHClient() as ssh:
-		ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+	with create_verified_ssh_client(settings.SSH_KNOWN_HOSTS_PATH) as ssh:
 		pkey = paramiko.Ed25519Key.from_private_key_file(settings.SSH_PRIVATE_KEY_PATH)
 
 		try:
@@ -277,8 +275,7 @@ def check_file_exists_on_storage(remote_file_path: str, token: str) -> bool:
 	Returns:
 		bool: True if file exists, False otherwise
 	"""
-	with paramiko.SSHClient() as ssh:
-		ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+	with create_verified_ssh_client(settings.SSH_KNOWN_HOSTS_PATH) as ssh:
 		pkey = paramiko.Ed25519Key.from_private_key_file(settings.SSH_PRIVATE_KEY_PATH)
 
 		port = 2222 if settings.DEV_MODE else 22

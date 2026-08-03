@@ -62,6 +62,7 @@ RUN mkdir -p /data
 
 # Copy production application files
 COPY ./processor/src /app/processor/src
+COPY ./processor/config /app/processor/config
 COPY ./shared/*.py /app/shared/
 COPY ./shared/testing/safety.py /app/shared/testing/safety.py
 

@@ -26,6 +26,8 @@ storage server, Docker runtime, and required model/assets volume.
   `~/.ssh/processing-to-storage` mount fails with
   `mkdir /…/.ssh: permission denied`. Put the key on local disk (e.g. the
   checkout's gitignored `.local/ssh/`) and set `PROCESSOR_SSH_KEY_PATH` to it.
+- The storage server's reviewed public Ed25519 host key is pinned in
+  `processor/config/storage_known_hosts` and loaded by every processor container.
 
 ## Worker Identity
 
@@ -55,6 +57,7 @@ The production compose file expects these host resources to exist:
 - `/data`
 - Docker socket for ODM and model helper containers
 - processor SSH private/public keys
+- reviewed storage-server host key from `processor/config/storage_known_hosts`
 - `/etc/machine-id` mounted read-only at `/host/etc/machine-id`
 
 Do not put runtime output under the git checkout. Keep temporary processing
@@ -126,6 +129,10 @@ Healthy signs:
 - Dirty checkout: resolve local changes before relying on cron auto-deploy.
 - Missing storage SSH access: fix the processor keypair and storage host
   authorization before starting queue work.
+- Storage host-key mismatch: stop and verify the new fingerprint through an
+  authenticated or out-of-band channel. Update `processor/config/storage_known_hosts`
+  through review and redeploy; never learn a replacement key from the failing
+  connection or switch back to automatic host-key acceptance.
 - Missing Docker socket or NVIDIA runtime: ODM/model child containers may fail
   even though the processor container starts.
 - Permanently dead worker with an owned active row: manual queue intervention is

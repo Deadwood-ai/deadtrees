@@ -304,10 +304,9 @@ ensure_frontend_deps() {
   npm --prefix "$REPO_ROOT/frontend" ci
 }
 
-ensure_assets_and_keys() {
+ensure_assets() {
   local need_assets=false
   local need_processor_assets=false
-  local need_ssh=false
 
   [[ -f "$REPO_ROOT/assets/test_data/test-data.tif" ]] || need_assets=true
   [[ -f "$REPO_ROOT/assets/test_data/test-data-small.tif" ]] || need_assets=true
@@ -318,9 +317,6 @@ ensure_assets_and_keys() {
   [[ -d "$REPO_ROOT/assets/pheno/modispheno_aggregated_normalized_filled.zarr" ]] || need_processor_assets=true
   [[ -f "$REPO_ROOT/assets/test_data/worldview_uint16_crop.tif" ]] || need_processor_assets=true
 
-  [[ -f "$REPO_ROOT/.local/ssh/processing-to-storage" ]] || need_ssh=true
-  [[ -f "$REPO_ROOT/.local/ssh/processing-to-storage.pub" ]] || need_ssh=true
-
   if [[ "$need_assets" == true ]]; then
     make -C "$REPO_ROOT" download-assets
   fi
@@ -328,6 +324,16 @@ ensure_assets_and_keys() {
   if [[ "$need_processor_assets" == true ]]; then
     make -C "$REPO_ROOT" download-processor-assets
   fi
+}
+
+ensure_local_test_ssh() {
+  local need_ssh=false
+
+  [[ -f "$REPO_ROOT/.local/ssh/processing-to-storage" ]] || need_ssh=true
+  [[ -f "$REPO_ROOT/.local/ssh/processing-to-storage.pub" ]] || need_ssh=true
+  [[ -f "$REPO_ROOT/.local/ssh/storage-host" ]] || need_ssh=true
+  [[ -f "$REPO_ROOT/.local/ssh/storage-host.pub" ]] || need_ssh=true
+  [[ -f "$REPO_ROOT/.local/ssh/known_hosts" ]] || need_ssh=true
 
   if [[ "$need_ssh" == true ]]; then
     make -C "$REPO_ROOT" setup-local-test-ssh
@@ -348,9 +354,7 @@ if [[ "$INSTALL_FRONTEND" == true ]]; then
   require_command npm
 fi
 
-if [[ "$ENSURE_ASSETS" == true ]]; then
-  require_command make
-fi
+require_command make
 
 if [[ -z "$SHARED_ROOT" ]]; then
   SHARED_ROOT="$(detect_default_shared_root)"
@@ -379,6 +383,8 @@ if [[ "$LINK_SHARED" == true ]]; then
   link_shared_path ".local/ssh"
 fi
 
+ensure_local_test_ssh
+
 if [[ "$INSTALL_PYTHON" == true ]]; then
   ensure_python_env
 fi
@@ -388,7 +394,7 @@ if [[ "$INSTALL_FRONTEND" == true ]]; then
 fi
 
 if [[ "$ENSURE_ASSETS" == true ]]; then
-  ensure_assets_and_keys
+  ensure_assets
 fi
 
 cat <<EOF

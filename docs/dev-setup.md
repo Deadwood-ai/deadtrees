@@ -250,9 +250,12 @@ make setup-local-test-ssh
 make download-processor-assets
 ```
 
-This writes an ignored keypair to `.local/ssh/processing-to-storage` and `.local/ssh/processing-to-storage.pub`.
+This writes an ignored processor keypair, a stable local storage-server host key, and the matching
+`.local/ssh/known_hosts` trust store under `.local/ssh/`.
 If you prefer a different key location, set absolute paths in `LOCAL_TEST_SSH_PRIVATE_KEY_PATH` and
-`LOCAL_TEST_SSH_PUBLIC_KEY_PATH` before running `docker compose -f docker-compose.test.yaml ...`.
+`LOCAL_TEST_SSH_PUBLIC_KEY_PATH` before running `docker compose -f docker-compose.test.yaml ...`. Override the
+local host-key and trust-store paths with the corresponding `LOCAL_TEST_SSH_HOST_*` and
+`LOCAL_TEST_SSH_KNOWN_HOSTS_PATH` variables only when the whole matching set is provisioned together.
 
 ## Processor-server validation workflow
 

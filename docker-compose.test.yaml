@@ -35,6 +35,7 @@ services:
       # Mount a dedicated local test keypair so processor integration tests can SSH into nginx.
       - ${LOCAL_TEST_SSH_PRIVATE_KEY_PATH:-./.local/ssh/processing-to-storage}:/tmp/ssh-keys/processing-to-storage:ro
       - ${LOCAL_TEST_SSH_PUBLIC_KEY_PATH:-./.local/ssh/processing-to-storage.pub}:/tmp/ssh-keys/processing-to-storage.pub:ro
+      - ${LOCAL_TEST_SSH_KNOWN_HOSTS_PATH:-./.local/ssh/known_hosts}:/tmp/ssh-keys/known_hosts:ro
       # Docker socket for ODM container execution
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
@@ -54,6 +55,7 @@ services:
       # Match the mounted SSH key location inside the test container.
       - SSH_PRIVATE_KEY_PATH=/tmp/ssh-keys/processing-to-storage
       - SSH_PRIVATE_KEY_PASSPHRASE=
+      - SSH_KNOWN_HOSTS_PATH=/tmp/ssh-keys/known_hosts
       - ENV=development
 
       # NVIDIA GPU configuration
@@ -132,6 +134,8 @@ services:
       - ${LOCAL_DATA_ROOT:-./data}:/data/:rw
       # Mount the matching public key so nginx can authorize processor-test SSH access.
       - ${LOCAL_TEST_SSH_PUBLIC_KEY_PATH:-./.local/ssh/processing-to-storage.pub}:/tmp/ssh-keys/processing-to-storage.pub:ro
+      - ${LOCAL_TEST_SSH_HOST_KEY_PATH:-./.local/ssh/storage-host}:/etc/ssh/ssh_host_ed25519_key:ro
+      - ${LOCAL_TEST_SSH_HOST_PUBLIC_KEY_PATH:-./.local/ssh/storage-host.pub}:/etc/ssh/ssh_host_ed25519_key.pub:ro
       - ./nginx/test-conf:/etc/nginx/conf.d/:ro
 
 
