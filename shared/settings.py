@@ -145,6 +145,7 @@ class Settings(BaseSettings):
 	PROCESSOR_TASK_BLACKLIST: str = ''
 	SSH_PRIVATE_KEY_PATH: str = '/app/ssh_key'
 	SSH_PRIVATE_KEY_PASSPHRASE: str = ''
+	SSH_KNOWN_HOSTS_PATH: str = '~/.ssh/known_hosts'
 	ODM_AUTO_BOUNDARY: bool = False
 	ODM_SKY_REMOVAL: bool = False
 	ODM_BG_REMOVAL: bool = False

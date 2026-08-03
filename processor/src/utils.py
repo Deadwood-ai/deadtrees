@@ -6,6 +6,7 @@ from shared.logger import logger
 from shared.settings import settings
 from shared.models import StatusEnum
 from shared.db import use_client
+from shared.ssh import create_verified_ssh_client
 
 
 def pull_file_from_storage_server(remote_file_path: str, local_file_path: str, token: str):
@@ -14,8 +15,7 @@ def pull_file_from_storage_server(remote_file_path: str, local_file_path: str, t
 		logger.info(f'File already exists locally at: {local_file_path}')
 		return
 
-	with paramiko.SSHClient() as ssh:
-		ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+	with create_verified_ssh_client(settings.SSH_KNOWN_HOSTS_PATH) as ssh:
 		pkey = paramiko.RSAKey.from_private_key_file(
 			settings.SSH_PRIVATE_KEY_PATH, password=settings.SSH_PRIVATE_KEY_PASSPHRASE
 		)
@@ -49,8 +49,7 @@ def pull_file_from_storage_server(remote_file_path: str, local_file_path: str, t
 
 
 def push_file_to_storage_server(local_file_path: str, remote_file_path: str, token: str):
-	with paramiko.SSHClient() as ssh:
-		ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+	with create_verified_ssh_client(settings.SSH_KNOWN_HOSTS_PATH) as ssh:
 		pkey = paramiko.RSAKey.from_private_key_file(
 			settings.SSH_PRIVATE_KEY_PATH, password=settings.SSH_PRIVATE_KEY_PASSPHRASE
 		)

@@ -41,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from shared.db import login, use_client
 from shared.settings import settings
+from shared.ssh import create_verified_ssh_client
 
 # Setup standard Python logging
 logging.basicConfig(
@@ -91,8 +92,8 @@ def get_datasets_needing_migration(token: str, dataset_id: int | None = None) ->
 def get_ssh_connection() -> paramiko.SSHClient:
 	"""Create SSH connection to storage server."""
 	import os
-	ssh = paramiko.SSHClient()
-	ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+	ssh = create_verified_ssh_client(settings.SSH_KNOWN_HOSTS_PATH)
 
 	# Expand ~ in path and load key with passphrase if set
 	key_path = os.path.expanduser(settings.SSH_PRIVATE_KEY_PATH)

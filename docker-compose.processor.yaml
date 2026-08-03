@@ -59,6 +59,7 @@ services:
       PROCESSOR_TASK_BLACKLIST: ${PROCESSOR_TASK_BLACKLIST:-}
       SSH_PRIVATE_KEY_PASSPHRASE: ${SSH_PRIVATE_KEY_PASSPHRASE}
       SSH_PRIVATE_KEY_PATH: /root/.ssh/processing-to-storage
+      SSH_KNOWN_HOSTS_PATH: /app/processor/config/storage_known_hosts
       DEV_MODE: "false"
       ODM_AUTO_BOUNDARY: "true"
       ODM_SKY_REMOVAL: "true"
