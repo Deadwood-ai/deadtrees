@@ -545,11 +545,11 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
     expect(mobileTimePillBox).not.toBeNull();
     await expect(
       mobileAttribution.locator(".dt-attribution-mobile"),
-    ).toHaveText("Esri · Vantor · Earthstar · GIS User Community");
+    ).toHaveText("Powered by Esri · Vantor · Earthstar · GIS Community");
     await expect(
       mobileAttribution.locator(".dt-attribution-full"),
     ).toBeHidden();
-    expect(mobileAttributionBox!.width).toBeLessThan(260);
+    expect(mobileAttributionBox!.width).toBeLessThan(290);
     expect(
       390 - (mobileAttributionBox!.x + mobileAttributionBox!.width),
     ).toBeGreaterThanOrEqual(4);

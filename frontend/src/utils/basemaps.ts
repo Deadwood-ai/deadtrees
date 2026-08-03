@@ -16,7 +16,7 @@ export const OPENSTREETMAP_ATTRIBUTION = "© OpenStreetMap contributors";
 export const ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL =
   "Powered by Esri · Vantor, Earthstar Geographics & GIS User Community";
 export const ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE =
-  "Esri · Vantor · Earthstar · GIS User Community";
+  "Powered by Esri · Vantor · Earthstar · GIS Community";
 export const ESRI_WORLD_IMAGERY_ATTRIBUTION =
   `<span class="dt-attribution-full">${ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL}</span>` +
   `<span class="dt-attribution-mobile" aria-label="${ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL}" title="${ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL}">${ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE}</span>`;
