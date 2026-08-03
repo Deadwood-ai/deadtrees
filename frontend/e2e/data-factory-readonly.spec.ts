@@ -613,5 +613,20 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
     expect(
       1195 - (desktopAttributionBox!.y + desktopAttributionBox!.height),
     ).toBeLessThanOrEqual(16);
+
+    await page.setViewportSize({ width: 1024, height: 768 });
+    const mediumAttributionBox = await page
+      .getByTestId("deadtrees-map")
+      .locator(".dt-map-attribution-control")
+      .boundingBox();
+    const mediumTimeSelectorBox = await page
+      .getByTestId("desktop-year-imagery-selector")
+      .boundingBox();
+    expect(mediumAttributionBox).not.toBeNull();
+    expect(mediumTimeSelectorBox).not.toBeNull();
+    expect(
+      mediumTimeSelectorBox!.y -
+        (mediumAttributionBox!.y + mediumAttributionBox!.height),
+    ).toBeGreaterThanOrEqual(8);
   });
 });
