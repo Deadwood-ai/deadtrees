@@ -144,23 +144,64 @@ const withTimeout = async <T>(
   promise: Promise<T>,
   timeoutMs: number,
   message: string,
+  signal?: AbortSignal,
 ): Promise<T> =>
   new Promise<T>((resolve, reject) => {
-    const timeoutHandle = globalThis.setTimeout(() => {
-      reject(new Error(message));
+    let timeoutHandle: ReturnType<typeof globalThis.setTimeout> | undefined;
+    let settled = false;
+
+    const cleanup = () => {
+      if (timeoutHandle !== undefined) {
+        globalThis.clearTimeout(timeoutHandle);
+      }
+      signal?.removeEventListener("abort", handleAbort);
+    };
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+    const handleAbort = () => {
+      const reason = signal?.reason;
+      const error =
+        reason instanceof Error
+          ? reason
+          : Object.assign(new Error("Wayback request aborted"), {
+              name: "AbortError",
+            });
+      settle(() => reject(error));
+    };
+
+    if (signal?.aborted) {
+      handleAbort();
+      return;
+    }
+
+    signal?.addEventListener("abort", handleAbort, { once: true });
+    timeoutHandle = globalThis.setTimeout(() => {
+      settle(() => reject(new Error(message)));
     }, timeoutMs);
 
     promise.then(
       (value) => {
-        globalThis.clearTimeout(timeoutHandle);
-        resolve(value);
+        settle(() => resolve(value));
       },
       (error) => {
-        globalThis.clearTimeout(timeoutHandle);
-        reject(error);
+        settle(() => reject(error));
       },
     );
   });
+
+const throwIfAborted = (signal?: AbortSignal): void => {
+  if (!signal?.aborted) return;
+
+  const reason = signal.reason;
+  if (reason instanceof Error) throw reason;
+  throw Object.assign(new Error("Wayback request aborted"), {
+    name: "AbortError",
+  });
+};
 
 /**
  * Release dates for every release the app has seen, keyed by release number.
@@ -250,12 +291,14 @@ export const enrichWaybackItemsWithMetadata = async (
     metadataTimeoutMs = WAYBACK_METADATA_TIMEOUT_MS,
     metadataConcurrency = WAYBACK_METADATA_CONCURRENCY,
     getItemMetadata = getMetadata,
+    signal,
     onProgress,
   }: Pick<
     LoadWaybackItemsOptions,
     | "metadataTimeoutMs"
     | "metadataConcurrency"
     | "getItemMetadata"
+    | "signal"
     | "onProgress"
   > = {},
 ): Promise<WaybackItemWithMetadata[]> => {
@@ -275,11 +318,13 @@ export const enrichWaybackItemsWithMetadata = async (
           item !== undefined;
           item = queue.shift()
         ) {
+          throwIfAborted(signal);
           try {
             const metadata = await withTimeout(
               getItemMetadata(point, zoomLevel, item.releaseNum),
               metadataTimeoutMs,
               `Wayback metadata timed out after ${metadataTimeoutMs}ms for release ${item.releaseNum}`,
+              signal,
             );
             resolved.set(item.releaseNum, metadata);
             onProgress?.({
@@ -287,7 +332,8 @@ export const enrichWaybackItemsWithMetadata = async (
               done: resolved.size,
               total: items.length,
             });
-          } catch {
+          } catch (error) {
+            if (signal?.aborted) throw error;
             failed.push(item);
           }
         }
@@ -298,7 +344,9 @@ export const enrichWaybackItemsWithMetadata = async (
   };
 
   const failedOnce = await runPass(items);
+  throwIfAborted(signal);
   const failedTwice = failedOnce.length > 0 ? await runPass(failedOnce) : [];
+  throwIfAborted(signal);
   failedTwice.forEach((item) => {
     console.warn(
       `Wayback metadata unavailable for release ${item.releaseNum}; keeping unverified release date`,
@@ -340,15 +388,23 @@ export const loadWaybackCandidates = async (
     }),
     discoveryTimeoutMs,
     `Wayback imagery discovery timed out after ${discoveryTimeoutMs}ms`,
+    signal,
   );
 
+  throwIfAborted(signal);
   if (items.length === 0) return [];
 
   const enriched = await enrichWaybackItemsWithMetadata(
     items.map((item) => toWaybackItemWithMetadata(item, undefined)),
     point,
     zoomLevel,
-    { metadataTimeoutMs, metadataConcurrency, getItemMetadata, onProgress },
+    {
+      metadataTimeoutMs,
+      metadataConcurrency,
+      getItemMetadata,
+      signal,
+      onProgress,
+    },
   );
 
   return dedupeWaybackItems(enriched);

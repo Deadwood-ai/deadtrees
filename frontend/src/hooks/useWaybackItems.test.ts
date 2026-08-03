@@ -93,6 +93,35 @@ describe("candidate location safety", () => {
 });
 
 describe("loadWaybackCandidates", () => {
+  it("stops metadata enrichment when discovery is aborted", async () => {
+    const controller = new AbortController();
+    let markFirstRequestStarted: (() => void) | undefined;
+    const firstRequestStarted = new Promise<void>((resolve) => {
+      markFirstRequestStarted = resolve;
+    });
+    const getItemMetadata = vi.fn(() => {
+      markFirstRequestStarted?.();
+      return new Promise<WaybackMetadata | null>(() => undefined);
+    });
+    const work = loadWaybackCandidates(point, 12, {
+      getItemsWithLocalChanges: vi.fn().mockResolvedValue([
+        waybackItem(100, "2020-01-01"),
+        waybackItem(200, "2021-01-01"),
+        waybackItem(300, "2022-01-01"),
+      ]),
+      getItemMetadata,
+      metadataConcurrency: 1,
+      metadataTimeoutMs: 50,
+      signal: controller.signal,
+    });
+
+    await firstRequestStarted;
+    controller.abort();
+
+    await expect(work).rejects.toMatchObject({ name: "AbortError" });
+    expect(getItemMetadata).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps discovery timeouts retryable instead of caching empty imagery", async () => {
     const startedAt = Date.now();
     await expect(
