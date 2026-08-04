@@ -1,17 +1,10 @@
-import {
-  ColumnWidthOutlined,
-  DownloadOutlined,
-  EnvironmentOutlined,
-} from "@ant-design/icons";
+import { DownloadOutlined, EnvironmentOutlined } from "@ant-design/icons";
 import { Button, Empty, Segmented } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type {
-  CSSProperties,
-  KeyboardEvent as ReactKeyboardEvent,
-  PointerEvent as ReactPointerEvent,
-} from "react";
+import type { CSSProperties } from "react";
 
 import PriwaPointCompactList from "./PriwaPointCompactList";
+import PriwaPointPanelResizeHandle from "./PriwaPointPanelResizeHandle";
 import PriwaPointTable from "./PriwaPointTable";
 import { indexPriwaBefallsgruppenByTreeId } from "./priwaBefallsgruppenState";
 import { downloadPriwaPointsCsv } from "./priwaPointCsv";
@@ -23,9 +16,6 @@ type PriwaPointView = "list" | "table";
 
 const PRIWA_POINT_VIEW_STORAGE_KEY = "deadtrees-priwa-field:point-view";
 const DEFAULT_DESKTOP_PANEL_WIDTH = "calc(100vw - 2rem)";
-const MIN_DESKTOP_PANEL_WIDTH = 560;
-const DESKTOP_PANEL_VIEWPORT_MARGIN = 32;
-const KEYBOARD_RESIZE_STEP = 32;
 
 const loadInitialPointView = (): PriwaPointView => {
   if (typeof window === "undefined") return "table";
@@ -66,13 +56,7 @@ export default function PriwaPointListPanel({
   const [filter, setFilter] = useState<PriwaPointFilter>("all");
   const [view, setView] = useState<PriwaPointView>(loadInitialPointView);
   const panelRef = useRef<HTMLElement | null>(null);
-  const desktopPanelWidthRef = useRef<number | null>(null);
-  const pendingDesktopPanelWidthRef = useRef<number | null>(null);
-  const resizeAnimationFrameRef = useRef<number | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
-  const resizeStartRef = useRef<{ clientX: number; width: number } | null>(
-    null,
-  );
   const groupByTreeId = useMemo(
     () => indexPriwaBefallsgruppenByTreeId(groups),
     [groups],
@@ -107,95 +91,14 @@ export default function PriwaPointListPanel({
     }
   };
 
-  const clampDesktopPanelWidth = useCallback((width: number) => {
-    const maxWidth = Math.max(
-      MIN_DESKTOP_PANEL_WIDTH,
-      window.innerWidth - DESKTOP_PANEL_VIEWPORT_MARGIN,
-    );
-    return Math.min(maxWidth, Math.max(MIN_DESKTOP_PANEL_WIDTH, width));
-  }, []);
-
-  const resizeDesktopPanel = useCallback(
-    (width: number) => {
-      pendingDesktopPanelWidthRef.current = clampDesktopPanelWidth(width);
-      if (resizeAnimationFrameRef.current !== null) return;
-
-      resizeAnimationFrameRef.current = window.requestAnimationFrame(() => {
-        const nextWidth = pendingDesktopPanelWidthRef.current;
-        if (nextWidth !== null) {
-          desktopPanelWidthRef.current = nextWidth;
-          panelRef.current?.style.setProperty(
-            "--priwa-point-panel-width",
-            `${nextWidth}px`,
-          );
-        }
-        resizeAnimationFrameRef.current = null;
-      });
-    },
-    [clampDesktopPanelWidth],
-  );
-
-  const startDesktopResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const panelWidth = panelRef.current?.getBoundingClientRect().width;
-    if (!panelWidth) return;
-
-    resizeStartRef.current = { clientX: event.clientX, width: panelWidth };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    event.preventDefault();
-  };
-
-  const continueDesktopResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const resizeStart = resizeStartRef.current;
-    if (!resizeStart) return;
-
-    resizeDesktopPanel(
-      resizeStart.width + (event.clientX - resizeStart.clientX),
-    );
-  };
-
-  const finishDesktopResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    resizeStartRef.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  };
-
-  const resizeDesktopPanelWithKeyboard = (
-    event: ReactKeyboardEvent<HTMLDivElement>,
-  ) => {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-
-    const currentWidth = panelRef.current?.getBoundingClientRect().width;
-    if (!currentWidth) return;
-
-    resizeDesktopPanel(
-      currentWidth +
-        (event.key === "ArrowRight"
-          ? KEYBOARD_RESIZE_STEP
-          : -KEYBOARD_RESIZE_STEP),
-    );
-    event.preventDefault();
-  };
-
   const getTableScrollContainer = useCallback(
     () => contentRef.current ?? window,
     [],
   );
 
   const panelStyle = {
-    "--priwa-point-panel-width": desktopPanelWidthRef.current
-      ? `${desktopPanelWidthRef.current}px`
-      : DEFAULT_DESKTOP_PANEL_WIDTH,
+    "--priwa-point-panel-width": DEFAULT_DESKTOP_PANEL_WIDTH,
   } as CSSProperties;
-
-  useEffect(
-    () => () => {
-      if (resizeAnimationFrameRef.current !== null) {
-        window.cancelAnimationFrame(resizeAnimationFrameRef.current);
-      }
-    },
-    [],
-  );
 
   useEffect(() => {
     if (!focusedPointId) return;
@@ -226,25 +129,7 @@ export default function PriwaPointListPanel({
       style={panelStyle}
       className="pointer-events-auto absolute inset-x-2 bottom-2 z-[58] flex max-h-[64dvh] flex-col overflow-hidden rounded-md bg-white shadow-xl ring-1 ring-slate-900/10 md:bottom-5 md:left-4 md:right-auto md:top-24 md:w-[var(--priwa-point-panel-width)] md:max-w-[calc(100vw-2rem)] md:max-h-[calc(100dvh-8rem)]"
     >
-      <div
-        role="separator"
-        aria-label="Tabellenbreite ändern"
-        aria-orientation="vertical"
-        tabIndex={0}
-        title="Tabellenbreite ändern"
-        data-testid="priwa-point-list-resize-handle"
-        className="absolute right-0 top-1/2 z-10 hidden h-14 w-6 -translate-y-1/2 cursor-col-resize touch-none items-center justify-center rounded-l-md border border-r-0 border-slate-300 bg-white/95 text-slate-500 shadow-sm outline-none hover:border-emerald-500 hover:text-emerald-700 focus-visible:border-emerald-500 focus-visible:text-emerald-700 md:flex"
-        onPointerDown={startDesktopResize}
-        onPointerMove={continueDesktopResize}
-        onPointerUp={finishDesktopResize}
-        onPointerCancel={finishDesktopResize}
-        onLostPointerCapture={() => {
-          resizeStartRef.current = null;
-        }}
-        onKeyDown={resizeDesktopPanelWithKeyboard}
-      >
-        <ColumnWidthOutlined />
-      </div>
+      <PriwaPointPanelResizeHandle panelRef={panelRef} />
       <header className="flex items-start justify-between gap-3 border-b border-slate-200 px-3 py-2.5">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-slate-950">Käferbäume</div>

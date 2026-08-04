@@ -248,14 +248,12 @@ export default function PriwaPointDrawer({
     if (editingPoint) {
       form.setFieldsValue(createFormValuesFromPoint(editingPoint));
       setRawQrValue(editingPoint.rawQrValue ?? "");
-      setActiveCollapseKeys(defaultFormSectionKeys(isMobile));
       return;
     }
 
     form.setFieldsValue(createDefaultFormValues(loadStoredObserverName()));
     setRawQrValue("");
-    setActiveCollapseKeys(defaultFormSectionKeys(isMobile));
-  }, [editingPoint, form, formSessionId, isMobile]);
+  }, [editingPoint, form, formSessionId]);
 
   useEffect(() => {
     if (!open) return;

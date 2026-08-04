@@ -196,6 +196,7 @@ export default function PriwaReviewWorkbench({
           <PriwaReviewUploadDetails item={selectedItem} {...detailProps} />
         ) : (
           <PriwaReviewGroupDetails
+            key={selectedItem.key}
             item={selectedItem}
             points={points}
             mosaics={mosaics}

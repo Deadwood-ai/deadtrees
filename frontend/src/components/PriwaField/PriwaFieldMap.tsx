@@ -793,6 +793,7 @@ export default function PriwaFieldMap({
       )}
 
       <PriwaPointDrawer
+        key={formSessionId}
         isMobile={isMobile}
         open={isDrawerOpen}
         formSessionId={formSessionId}

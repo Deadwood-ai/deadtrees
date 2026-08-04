@@ -112,7 +112,11 @@ test.describe("PRIWA local field write flows", () => {
       `${page.viewportSize()!.height}px`,
     );
     await expect(page.getByLabel("Bohrmehl")).toBeVisible();
-    await expect(page.getByLabel("Kommentar")).toBeVisible();
+    const comment = page.getByLabel("Kommentar");
+    await expect(comment).toBeVisible();
+    await comment.fill("Bleibt beim Drehen erhalten");
+    await page.setViewportSize({ width: 820, height: 852 });
+    await expect(comment).toHaveValue("Bleibt beim Drehen erhalten");
   });
 
   test("offline create, update, and delete sync into local Supabase", async ({

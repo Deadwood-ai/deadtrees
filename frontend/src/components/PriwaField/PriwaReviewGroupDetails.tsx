@@ -4,7 +4,7 @@ import {
   EditOutlined,
 } from "@ant-design/icons";
 import { Button, Tag } from "antd";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import type { IPriwaBefallsgruppeSaveInput, IPriwaPoint } from "./types";
 import type { IPriwaMosaic, PriwaFlightType } from "./usePriwaMosaics";
@@ -66,10 +66,6 @@ export default function PriwaReviewGroupDetails({
   const [suggestedAssignmentIds, setSuggestedAssignmentIds] = useState(
     item.draft.datasetIds,
   );
-
-  useEffect(() => {
-    setSuggestedAssignmentIds(item.draft.datasetIds);
-  }, [item.key, item.draft.datasetIds]);
 
   const setAssignment = (mosaic: IPriwaMosaic, isAssigned: boolean) => {
     if (item.kind === "suggested-group") {
