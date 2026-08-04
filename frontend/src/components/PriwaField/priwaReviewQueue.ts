@@ -18,6 +18,30 @@ export const filterPriwaReviewItems = (
         : item.kind === "unassigned-upload",
   );
 
+export const filterForPriwaReviewItem = (
+  item: IPriwaReviewItem,
+): PriwaReviewFilter => {
+  if (item.kind === "unassigned-upload") return "uploads";
+  return isOpenPriwaReviewItem(item) ? "open" : "complete";
+};
+
+export const resolvePriwaFilteredReviewSelection = (
+  items: IPriwaReviewItem[],
+  filter: PriwaReviewFilter,
+  selectedKey: string | null,
+  preferExternalSelection: boolean,
+) => {
+  const visibleItems = filterPriwaReviewItems(items, filter);
+  return (
+    visibleItems.find((item) => item.key === selectedKey) ??
+    (preferExternalSelection
+      ? items.find((item) => item.key === selectedKey)
+      : null) ??
+    visibleItems[0] ??
+    null
+  );
+};
+
 export const resolvePriwaReviewSelection = (
   items: IPriwaReviewItem[],
   selectedKey: string | null,

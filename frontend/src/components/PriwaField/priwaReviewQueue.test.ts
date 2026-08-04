@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { IPriwaReviewItem } from "./priwaReviewWorkspace";
 import {
   filterPriwaReviewItems,
+  filterForPriwaReviewItem,
   findPriwaReviewItemByGroup,
   findPriwaReviewItemByMosaic,
   findPriwaReviewItemByPoint,
   resolvePriwaReviewSelection,
+  resolvePriwaFilteredReviewSelection,
 } from "./priwaReviewQueue";
 
 const openGroup = {
@@ -83,6 +85,31 @@ describe("PRIWA review queue", () => {
     expect(filterPriwaReviewItems(items, "open")).toEqual([openGroup, upload]);
     expect(filterPriwaReviewItems(items, "complete")).toEqual([completeGroup]);
     expect(filterPriwaReviewItems(items, "uploads")).toEqual([upload]);
+  });
+
+  it("selects the queue filter that can show an externally selected item", () => {
+    expect(filterForPriwaReviewItem(openGroup)).toBe("open");
+    expect(filterForPriwaReviewItem(completeGroup)).toBe("complete");
+    expect(filterForPriwaReviewItem(upload)).toBe("uploads");
+  });
+
+  it("lets a completed map selection escape the active open filter", () => {
+    expect(
+      resolvePriwaFilteredReviewSelection(
+        items,
+        "open",
+        completeGroup.key,
+        true,
+      ),
+    ).toBe(completeGroup);
+    expect(
+      resolvePriwaFilteredReviewSelection(
+        items,
+        "open",
+        completeGroup.key,
+        false,
+      ),
+    ).toBe(openGroup);
   });
 
   it("maps map features back to their canonical review item", () => {

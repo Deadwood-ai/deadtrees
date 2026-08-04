@@ -1,4 +1,4 @@
-import { Alert, Button, FloatButton, Grid, Tooltip, message } from "antd";
+import { Alert, Button, FloatButton, Tooltip, message } from "antd";
 import {
   AimOutlined,
   EnvironmentOutlined,
@@ -40,6 +40,10 @@ import PriwaBaseLayerControl from "./PriwaBaseLayerControl";
 import PriwaMobileFieldTools from "./PriwaMobileFieldTools";
 import PriwaOfflineMapControl from "./PriwaOfflineMapControl";
 import PriwaReviewWorkbench from "./PriwaReviewWorkbench";
+import {
+  getPriwaReviewMapCenter,
+  getPriwaReviewTargetPixel,
+} from "./priwaReviewMapFocus";
 import { usePriwaOfflineBasemap } from "./usePriwaOfflineBasemap";
 import { usePriwaReviewController } from "./usePriwaReviewController";
 import { usePriwaReviewMapLayers } from "./usePriwaReviewMapLayers";
@@ -165,7 +169,6 @@ export default function PriwaFieldMap({
   const [reviewPointId, setReviewPointId] = useState<string | null>(null);
   const [baseLayer, setBaseLayer] = useState<PriwaBaseLayer>("aerial");
   const isMobile = useIsMobile();
-  const screens = Grid.useBreakpoint();
   const userLocation = useUserLocationLayer(mapRef);
   const {
     layer: userLocationLayer,
@@ -511,6 +514,39 @@ export default function PriwaFieldMap({
     [selectMatchedMosaicForPoint, zoomToCoordinate],
   );
 
+  const focusReviewPointOnMap = useCallback((point: IPriwaPoint) => {
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const map = mapRef.current;
+        const mapSize = map?.getSize();
+        const view = map?.getView();
+        if (!map || !mapSize || !view) return;
+
+        const zoom = 20;
+        const resolution = view.getResolutionForZoom(zoom);
+        const mapRect = map.getTargetElement().getBoundingClientRect();
+        const queueRect = document
+          .querySelector<HTMLElement>("[data-priwa-review-queue-panel]")
+          ?.getBoundingClientRect();
+        const treePanelRect = document
+          .querySelector<HTMLElement>("[data-priwa-review-tree-panel]")
+          ?.getBoundingClientRect();
+        const targetPixel = getPriwaReviewTargetPixel(
+          mapRect,
+          queueRect ?? null,
+          treePanelRect ?? null,
+        );
+        const center = getPriwaReviewMapCenter(
+          fromLonLat([point.lon, point.lat]),
+          mapSize,
+          targetPixel,
+          resolution,
+        );
+        view.animate({ center, zoom, duration: 500 });
+      }),
+    );
+  }, []);
+
   useEffect(() => {
     selectReviewItemFromMosaicRef.current = (mosaicId) => {
       setReviewPointId(null);
@@ -523,8 +559,10 @@ export default function PriwaFieldMap({
     selectReviewItemFromPointRef.current = (point) => {
       setReviewPointId(point.id);
       selectReviewItemFromPoint(point);
+      focusReviewPointOnMap(point);
     };
   }, [
+    focusReviewPointOnMap,
     selectReviewItemFromGroup,
     selectReviewItemFromMosaic,
     selectReviewItemFromPoint,
@@ -540,19 +578,22 @@ export default function PriwaFieldMap({
     (point: IPriwaPoint) => {
       setReviewPointId(point.id);
       selectReviewItemFromPoint(point);
-      focusPointOnMap(point);
+      selectMatchedMosaicForPoint(point);
+      focusReviewPointOnMap(point);
     },
-    [focusPointOnMap, selectReviewItemFromPoint],
+    [
+      focusReviewPointOnMap,
+      selectMatchedMosaicForPoint,
+      selectReviewItemFromPoint,
+    ],
   );
 
   const openReviewPointForEditing = useCallback(
     (point: IPriwaPoint) => {
-      setReviewPointId(point.id);
-      selectReviewItemFromPoint(point);
-      focusPointOnMap(point);
-      openPointForEditing(point);
+      selectReviewPoint(point);
+      requestAnimationFrame(() => openPointForEditing(point));
     },
-    [focusPointOnMap, openPointForEditing, selectReviewItemFromPoint],
+    [openPointForEditing, selectReviewPoint],
   );
 
   const openNewPointDrawer = useCallback(() => {
@@ -672,6 +713,11 @@ export default function PriwaFieldMap({
 
   const dataErrorMessage =
     errorMessage ?? groupsErrorMessage ?? cogErrorMessage;
+  const isReviewTreeEditing =
+    !isMobile &&
+    isDrawerOpen &&
+    !!editingPoint &&
+    editingPoint.id === reviewPointId;
 
   return (
     <div
@@ -750,7 +796,7 @@ export default function PriwaFieldMap({
         />
       )}
 
-      {!isMobile && !isPointListOpen && !isPlacingPoint && (
+      {!isMobile && !isPointListOpen && (
         <PriwaReviewWorkbench
           items={reviewItems}
           points={points}
@@ -761,6 +807,8 @@ export default function PriwaFieldMap({
           isClassifyingFlight={isClassifyingFlight}
           enabledMosaicIds={enabledMosaicIds}
           selectedTreeId={reviewPointId}
+          isTreeEditing={isReviewTreeEditing}
+          isHidden={isPlacingPoint}
           onSelect={selectReviewItem}
           onOpenData={() => {
             setReviewPointId(null);
@@ -858,14 +906,7 @@ export default function PriwaFieldMap({
         onRequestMapPlacement={requestMapPlacement}
         onPreviewCoordinate={handlePreviewCoordinate}
         onZoomToPoint={zoomToCoordinate}
-        presentation={
-          !isMobile &&
-          !!screens.xl &&
-          !!editingPoint &&
-          editingPoint.id === reviewPointId
-            ? "review-inspector"
-            : "overlay"
-        }
+        presentation={isReviewTreeEditing ? "embedded" : "overlay"}
       />
 
       <PriwaBefallsgruppeEditor

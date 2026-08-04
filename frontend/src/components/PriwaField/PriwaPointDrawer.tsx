@@ -206,7 +206,7 @@ interface PriwaPointDrawerProps {
   onRequestMapPlacement: () => void;
   onPreviewCoordinate: (coordinate: IPriwaCoordinate | null) => void;
   onZoomToPoint: (coordinate: IPriwaCoordinate) => void;
-  presentation?: "overlay" | "review-inspector";
+  presentation?: "overlay" | "embedded";
 }
 
 export default function PriwaPointDrawer({
@@ -227,7 +227,7 @@ export default function PriwaPointDrawer({
   onZoomToPoint,
   presentation = "overlay",
 }: PriwaPointDrawerProps) {
-  const isReviewInspector = presentation === "review-inspector";
+  const isEmbedded = presentation === "embedded";
   const [form] = Form.useForm<IPriwaPointFormValues>();
   const [rawQrValue, setRawQrValue] = useState("");
   const [coordinate, setCoordinate] = useState<IPriwaCoordinate | null>(null);
@@ -422,21 +422,19 @@ export default function PriwaPointDrawer({
       open={open}
       onClose={onClose}
       placement={isMobile ? "bottom" : "right"}
-      width={
-        isMobile ? undefined : isReviewInspector ? "100%" : "min(430px, 100vw)"
-      }
+      width={isMobile ? undefined : isEmbedded ? "100%" : "min(430px, 100vw)"}
       height={isMobile ? "100dvh" : undefined}
-      getContainer={isReviewInspector ? false : undefined}
-      mask={!isReviewInspector}
+      getContainer={
+        isEmbedded
+          ? () => document.getElementById("priwa-review-tree-panel")!
+          : undefined
+      }
+      mask={!isEmbedded}
       rootStyle={
-        isReviewInspector
+        isEmbedded
           ? {
               position: "absolute",
-              bottom: "1.25rem",
-              left: "auto",
-              right: "24.5rem",
-              top: "6rem",
-              width: "22rem",
+              inset: 0,
             }
           : undefined
       }
@@ -456,7 +454,7 @@ export default function PriwaPointDrawer({
           maxHeight: "100dvh",
           maxWidth: "100vw",
           overflowX: "hidden",
-          ...(isReviewInspector
+          ...(isEmbedded
             ? {
                 border: "1px solid rgb(226 232 240)",
                 borderRadius: 12,
