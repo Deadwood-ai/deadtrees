@@ -225,3 +225,11 @@ export const setPriwaDatasetAssignment = (
   isAssigned
     ? [...new Set([...datasetIds, datasetId])]
     : datasetIds.filter((candidateId) => candidateId !== datasetId);
+
+export const reconcilePriwaDatasetAssignments = (
+  selectedDatasetIds: string[],
+  candidateDatasetIds: string[],
+) => {
+  const candidateIds = new Set(candidateDatasetIds);
+  return selectedDatasetIds.filter((datasetId) => candidateIds.has(datasetId));
+};

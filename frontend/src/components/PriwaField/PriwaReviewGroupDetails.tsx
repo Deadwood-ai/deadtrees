@@ -9,6 +9,7 @@ import { useState } from "react";
 import type { IPriwaBefallsgruppeSaveInput, IPriwaPoint } from "./types";
 import type { IPriwaMosaic, PriwaFlightType } from "./usePriwaMosaics";
 import {
+  reconcilePriwaDatasetAssignments,
   setPriwaDatasetAssignment,
   type IPriwaGroupReviewItem,
 } from "./priwaReviewWorkspace";
@@ -66,11 +67,18 @@ export default function PriwaReviewGroupDetails({
   const [suggestedAssignmentIds, setSuggestedAssignmentIds] = useState(
     item.draft.datasetIds,
   );
+  const eligibleSuggestedAssignmentIds = reconcilePriwaDatasetAssignments(
+    suggestedAssignmentIds,
+    item.suggestedDatasetIds,
+  );
 
   const setAssignment = (mosaic: IPriwaMosaic, isAssigned: boolean) => {
     if (item.kind === "suggested-group") {
       setSuggestedAssignmentIds((currentIds) =>
-        setPriwaDatasetAssignment(currentIds, mosaic.id, isAssigned),
+        reconcilePriwaDatasetAssignments(
+          setPriwaDatasetAssignment(currentIds, mosaic.id, isAssigned),
+          item.suggestedDatasetIds,
+        ),
       );
       return;
     }
@@ -211,7 +219,7 @@ export default function PriwaReviewGroupDetails({
               isVisible={enabledMosaicIds.has(mosaic.id)}
               isAssigned={
                 item.kind === "suggested-group" &&
-                suggestedAssignmentIds.includes(mosaic.id)
+                eligibleSuggestedAssignmentIds.includes(mosaic.id)
               }
               isSaving={isSavingGroup}
               assignmentLabel={
@@ -261,7 +269,7 @@ export default function PriwaReviewGroupDetails({
             onClick={() =>
               void onSaveGroup({
                 ...item.draft,
-                datasetIds: suggestedAssignmentIds,
+                datasetIds: eligibleSuggestedAssignmentIds,
               })
             }
           >
@@ -276,7 +284,7 @@ export default function PriwaReviewGroupDetails({
               ...item.draft,
               datasetIds:
                 item.kind === "suggested-group"
-                  ? suggestedAssignmentIds
+                  ? eligibleSuggestedAssignmentIds
                   : item.draft.datasetIds,
             })
           }

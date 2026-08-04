@@ -4,6 +4,7 @@ import type { IPriwaBefallsgruppe, IPriwaPoint } from "./types";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
 import {
   buildPriwaReviewWorkspace,
+  reconcilePriwaDatasetAssignments,
   reviewItemDatasetIds,
   setPriwaDatasetAssignment,
 } from "./priwaReviewWorkspace";
@@ -49,6 +50,26 @@ describe("setPriwaDatasetAssignment", () => {
         false,
       ),
     ).toEqual(["flight-1", "flight-3"]);
+  });
+});
+
+describe("reconcilePriwaDatasetAssignments", () => {
+  it("drops a classified flight after a workspace rerender", () => {
+    expect(
+      reconcilePriwaDatasetAssignments(
+        ["flight-1", "flight-2"],
+        ["flight-1"],
+      ),
+    ).toEqual(["flight-1"]);
+  });
+
+  it("does not reselect flights the reviewer explicitly deselected", () => {
+    expect(
+      reconcilePriwaDatasetAssignments(
+        ["flight-1"],
+        ["flight-1", "flight-2"],
+      ),
+    ).toEqual(["flight-1"]);
   });
 });
 
