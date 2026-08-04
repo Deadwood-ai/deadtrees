@@ -5,6 +5,7 @@ import type { IPriwaMosaic } from "./usePriwaMosaics";
 import {
   buildPriwaReviewWorkspace,
   reviewItemDatasetIds,
+  setPriwaDatasetAssignment,
 } from "./priwaReviewWorkspace";
 
 const point = (id: string, lon: number, date = "2026-06-12"): IPriwaPoint => ({
@@ -27,6 +28,28 @@ const point = (id: string, lon: number, date = "2026-06-12"): IPriwaPoint => ({
   capturedAt: `${date}T10:00:00Z`,
   coordinateSource: "qr",
   gps: "ja",
+});
+
+describe("setPriwaDatasetAssignment", () => {
+  it("adds an assignment once without replacing adjacent flights", () => {
+    expect(setPriwaDatasetAssignment(["flight-1"], "flight-2", true)).toEqual([
+      "flight-1",
+      "flight-2",
+    ]);
+    expect(
+      setPriwaDatasetAssignment(["flight-1", "flight-2"], "flight-2", true),
+    ).toEqual(["flight-1", "flight-2"]);
+  });
+
+  it("removes only the selected assignment", () => {
+    expect(
+      setPriwaDatasetAssignment(
+        ["flight-1", "flight-2", "flight-3"],
+        "flight-2",
+        false,
+      ),
+    ).toEqual(["flight-1", "flight-3"]);
+  });
 });
 
 const mosaic = (

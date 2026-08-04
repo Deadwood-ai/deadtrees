@@ -29,14 +29,16 @@ interface PriwaReviewWorkbenchProps {
   isLoading: boolean;
   isSavingGroup: boolean;
   isClassifyingFlight: boolean;
+  enabledMosaicIds: Set<string>;
   onSelect: (item: IPriwaReviewItem) => void;
   onOpenData: () => void;
   onCreateGroup: () => void;
   onFocusTree: (point: IPriwaPoint) => void;
   onEditTree: (point: IPriwaPoint) => void;
   onEditGroup: (draft: IPriwaBefallsgruppeSaveInput) => void;
-  onConfirmSuggestion: (draft: IPriwaBefallsgruppeSaveInput) => Promise<void>;
+  onSaveGroup: (draft: IPriwaBefallsgruppeSaveInput) => Promise<void>;
   onAssignFlight: (groupId: string, datasetId: string) => Promise<void>;
+  onSetMosaicVisibility: (mosaicId: string, isVisible: boolean) => void;
   onSetFlightType: (
     datasetId: string,
     flightType: PriwaFlightType,
@@ -179,7 +181,7 @@ export default function PriwaReviewWorkbench({
           <Button icon={<PlusOutlined />} onClick={onCreateGroup}>
             Neue Gruppe
           </Button>
-          <UploadButton label="Befliegung hochladen" size="middle" />
+          <UploadButton label="Befliegung" size="middle" />
         </footer>
       </aside>
 

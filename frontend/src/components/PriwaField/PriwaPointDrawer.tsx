@@ -12,7 +12,6 @@ import {
 } from "antd";
 import {
   AimOutlined,
-  CheckCircleFilled,
   DownOutlined,
   EnvironmentOutlined,
   QrcodeOutlined,
@@ -22,6 +21,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import { parseGoogleMapsCoordinates } from "./parseGoogleMapsCoordinates";
+import { getPriwaCoordinateSourcePresentation } from "./priwaCoordinateSource";
 import QrCoordinateScanner from "./QrCoordinateScanner";
 import type {
   IPriwaCoordinate,
@@ -38,6 +38,9 @@ import type {
 } from "./types";
 
 const today = () => new Date().toISOString().slice(0, 10);
+
+const defaultFormSectionKeys = (isMobile: boolean) =>
+  isMobile ? ["baum", "befall", "optional"] : ["baum"];
 
 const observerOptions: Array<{ label: string; value: PriwaObserverName }> = [
   { label: "Sigi Huber", value: "Sigi Huber" },
@@ -228,7 +231,9 @@ export default function PriwaPointDrawer({
   const [coordinateSource, setCoordinateSource] =
     useState<PriwaCoordinateSource>("qr");
   const [isQrScannerOpen, setQrScannerOpen] = useState(false);
-  const [activeCollapseKeys, setActiveCollapseKeys] = useState<string[]>([]);
+  const [activeCollapseKeys, setActiveCollapseKeys] = useState<string[]>(() =>
+    defaultFormSectionKeys(isMobile),
+  );
   const [defaultObserverName, setDefaultObserverName] =
     useState<PriwaObserverName>(() => loadStoredObserverName());
 
@@ -243,14 +248,14 @@ export default function PriwaPointDrawer({
     if (editingPoint) {
       form.setFieldsValue(createFormValuesFromPoint(editingPoint));
       setRawQrValue(editingPoint.rawQrValue ?? "");
-      setActiveCollapseKeys(["baum"]);
+      setActiveCollapseKeys(defaultFormSectionKeys(isMobile));
       return;
     }
 
     form.setFieldsValue(createDefaultFormValues(loadStoredObserverName()));
     setRawQrValue("");
-    setActiveCollapseKeys(["baum"]);
-  }, [editingPoint, form, formSessionId]);
+    setActiveCollapseKeys(defaultFormSectionKeys(isMobile));
+  }, [editingPoint, form, formSessionId, isMobile]);
 
   useEffect(() => {
     if (!open) return;
@@ -292,21 +297,31 @@ export default function PriwaPointDrawer({
 
   const effectiveCoordinate = coordinate ?? currentUserCoordinate;
   const willUseEstimatedGps = !coordinate && !!currentUserCoordinate;
-  const positionLabel = willUseEstimatedGps
-    ? "GPS geschätzt"
+  const effectiveCoordinateSource = willUseEstimatedGps
+    ? "gps"
     : coordinate
-      ? coordinateSource === "qr"
-        ? "QR"
-        : coordinateSource === "map"
-          ? "Karte"
-          : "GPS"
-      : "Keine Position";
-  const positionDetail = effectiveCoordinate
+      ? coordinateSource
+      : null;
+  const isEstimatedPosition =
+    effectiveCoordinateSource !== null && effectiveCoordinateSource !== "qr";
+  const positionLabel = effectiveCoordinateSource
+    ? getPriwaCoordinateSourcePresentation(effectiveCoordinateSource).detailLabel
+    : "Keine Position";
+  const positionQualityLabel = isEstimatedPosition
+    ? "Geschätzt"
+    : "Bestätigt";
+  const positionCoordinates = effectiveCoordinate
     ? `${effectiveCoordinate.lat.toFixed(5)}, ${effectiveCoordinate.lon.toFixed(5)}`
-    : "QR, GPS oder Karte";
-  const hasConfirmedLocation = !!coordinate;
-  const requiresBaumnr =
-    willUseEstimatedGps || (hasConfirmedLocation && coordinateSource !== "qr");
+    : null;
+  const positionIcon =
+    effectiveCoordinateSource === "qr" ? (
+      <QrcodeOutlined />
+    ) : effectiveCoordinateSource === "map" ? (
+      <AimOutlined />
+    ) : (
+      <EnvironmentOutlined />
+    );
+  const requiresBaumnr = isEstimatedPosition;
 
   const handleSave = async () => {
     if (!effectiveCoordinate) return;
@@ -408,7 +423,7 @@ export default function PriwaPointDrawer({
       onClose={onClose}
       placement={isMobile ? "bottom" : "right"}
       width={isMobile ? undefined : "min(430px, 100vw)"}
-      height={isMobile ? "88dvh" : undefined}
+      height={isMobile ? "100dvh" : undefined}
       rootClassName="priwa-point-drawer-root"
       className="priwa-point-drawer"
       destroyOnClose={false}
@@ -431,8 +446,10 @@ export default function PriwaPointDrawer({
       <div className="space-y-3">
         <section
           className={
-            hasConfirmedLocation
+            effectiveCoordinate && !isEstimatedPosition
               ? "rounded-md border border-emerald-500 bg-emerald-50 p-2.5 shadow-sm shadow-emerald-900/10"
+              : effectiveCoordinate
+                ? "rounded-md border border-amber-400 bg-amber-50 p-2.5 shadow-sm shadow-amber-900/10"
               : "rounded-md border border-gray-200 bg-gray-50 p-2.5"
           }
         >
@@ -440,36 +457,45 @@ export default function PriwaPointDrawer({
             <div className="flex min-w-0 items-center gap-2">
               <div
                 className={
-                  hasConfirmedLocation
+                  effectiveCoordinate && !isEstimatedPosition
                     ? "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white"
+                    : effectiveCoordinate
+                      ? "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white"
                     : "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-200 text-gray-500"
                 }
               >
-                {hasConfirmedLocation ? (
-                  <CheckCircleFilled />
-                ) : (
-                  <EnvironmentOutlined />
-                )}
+                {positionIcon}
               </div>
               <div className="min-w-0">
                 <Typography.Text
                   strong
                   className={
-                    hasConfirmedLocation ? "text-emerald-900" : "text-gray-900"
+                    effectiveCoordinate && !isEstimatedPosition
+                      ? "text-emerald-900"
+                      : effectiveCoordinate
+                        ? "text-amber-900"
+                        : "text-gray-900"
                   }
                 >
-                  {hasConfirmedLocation ? "Position gesetzt" : positionLabel}
+                  {positionLabel}
                 </Typography.Text>
                 <div
                   className={
-                    hasConfirmedLocation
+                    effectiveCoordinate && !isEstimatedPosition
                       ? "truncate text-xs font-medium text-emerald-800"
+                      : effectiveCoordinate
+                        ? "truncate text-xs font-medium text-amber-800"
                       : "truncate text-xs text-gray-500"
                   }
                 >
-                  {hasConfirmedLocation
-                    ? `${positionLabel} · ${positionDetail}`
-                    : positionDetail}
+                  {positionCoordinates ? (
+                    <>
+                      <span>{positionQualityLabel}</span>
+                      <span>{` · ${positionCoordinates}`}</span>
+                    </>
+                  ) : (
+                    "QR, GPS oder Karte"
+                  )}
                 </div>
               </div>
             </div>
@@ -478,23 +504,29 @@ export default function PriwaPointDrawer({
                 className="h-11 w-12"
                 style={{ height: 44, minWidth: 48, width: 48 }}
                 icon={<QrcodeOutlined />}
+                type={effectiveCoordinateSource === "qr" ? "primary" : "default"}
                 onClick={() => setQrScannerOpen(true)}
                 aria-label="QR scannen"
+                aria-pressed={effectiveCoordinateSource === "qr"}
               />
               <Button
                 className="h-11 w-12"
                 style={{ height: 44, minWidth: 48, width: 48 }}
                 icon={<EnvironmentOutlined />}
+                type={effectiveCoordinateSource === "gps" ? "primary" : "default"}
                 disabled={!currentUserCoordinate}
                 onClick={useCurrentGpsCoordinate}
                 aria-label="GPS übernehmen"
+                aria-pressed={effectiveCoordinateSource === "gps"}
               />
               <Button
                 className="h-11 w-12"
                 style={{ height: 44, minWidth: 48, width: 48 }}
                 icon={<AimOutlined />}
+                type={effectiveCoordinateSource === "map" ? "primary" : "default"}
                 onClick={onRequestMapPlacement}
                 aria-label="Auf Karte setzen"
+                aria-pressed={effectiveCoordinateSource === "map"}
               />
             </div>
           </div>

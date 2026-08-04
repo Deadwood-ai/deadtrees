@@ -1,6 +1,11 @@
 import { DownloadOutlined, EnvironmentOutlined } from "@ant-design/icons";
 import { Button, Empty, Segmented } from "antd";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from "react";
 
 import PriwaPointCompactList from "./PriwaPointCompactList";
 import PriwaPointTable from "./PriwaPointTable";
@@ -13,6 +18,10 @@ type PriwaPointFilter = "all" | "qa";
 type PriwaPointView = "list" | "table";
 
 const PRIWA_POINT_VIEW_STORAGE_KEY = "deadtrees-priwa-field:point-view";
+const DEFAULT_DESKTOP_PANEL_WIDTH = "calc(100vw - 2rem)";
+const MIN_DESKTOP_PANEL_WIDTH = 560;
+const DESKTOP_PANEL_VIEWPORT_MARGIN = 32;
+const KEYBOARD_RESIZE_STEP = 32;
 
 const loadInitialPointView = (): PriwaPointView => {
   if (typeof window === "undefined") return "table";
@@ -52,7 +61,14 @@ export default function PriwaPointListPanel({
 }: PriwaPointListPanelProps) {
   const [filter, setFilter] = useState<PriwaPointFilter>("all");
   const [view, setView] = useState<PriwaPointView>(loadInitialPointView);
+  const [desktopPanelWidth, setDesktopPanelWidth] = useState<number | null>(
+    null,
+  );
+  const panelRef = useRef<HTMLElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const resizeStartRef = useRef<{ clientX: number; width: number } | null>(
+    null,
+  );
   const groupByTreeId = useMemo(
     () => indexPriwaBefallsgruppenByTreeId(groups),
     [groups],
@@ -87,6 +103,73 @@ export default function PriwaPointListPanel({
     }
   };
 
+  const clampDesktopPanelWidth = useCallback((width: number) => {
+    const maxWidth = Math.max(
+      MIN_DESKTOP_PANEL_WIDTH,
+      window.innerWidth - DESKTOP_PANEL_VIEWPORT_MARGIN,
+    );
+    return Math.min(maxWidth, Math.max(MIN_DESKTOP_PANEL_WIDTH, width));
+  }, []);
+
+  const resizeDesktopPanel = useCallback(
+    (width: number) => setDesktopPanelWidth(clampDesktopPanelWidth(width)),
+    [clampDesktopPanelWidth],
+  );
+
+  const startDesktopResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const panelWidth = panelRef.current?.getBoundingClientRect().width;
+    if (!panelWidth) return;
+
+    resizeStartRef.current = { clientX: event.clientX, width: panelWidth };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+
+  const continueDesktopResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const resizeStart = resizeStartRef.current;
+    if (!resizeStart) return;
+
+    resizeDesktopPanel(
+      resizeStart.width + (event.clientX - resizeStart.clientX),
+    );
+  };
+
+  const finishDesktopResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    resizeStartRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const resizeDesktopPanelWithKeyboard = (
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+
+    const currentWidth =
+      desktopPanelWidth ?? panelRef.current?.getBoundingClientRect().width;
+    if (!currentWidth) return;
+
+    resizeDesktopPanel(
+      currentWidth +
+        (event.key === "ArrowRight"
+          ? KEYBOARD_RESIZE_STEP
+          : -KEYBOARD_RESIZE_STEP),
+    );
+    event.preventDefault();
+  };
+
+  const getTableScrollContainer = useCallback(
+    () => contentRef.current ?? window,
+    [],
+  );
+
+  const panelStyle = {
+    "--priwa-point-panel-width": desktopPanelWidth
+      ? `${desktopPanelWidth}px`
+      : DEFAULT_DESKTOP_PANEL_WIDTH,
+  } as CSSProperties;
+
   useEffect(() => {
     if (!focusedPointId) return;
 
@@ -110,7 +193,29 @@ export default function PriwaPointListPanel({
   }, [filter, focusedPointId, view, visiblePoints]);
 
   return (
-    <section className="pointer-events-auto absolute inset-x-2 bottom-2 z-[58] flex max-h-[64dvh] flex-col overflow-hidden rounded-md bg-white shadow-xl ring-1 ring-slate-900/10 md:bottom-5 md:left-4 md:right-4 md:top-24 md:max-h-[calc(100dvh-8rem)]">
+    <section
+      ref={panelRef}
+      data-testid="priwa-point-list-panel"
+      style={panelStyle}
+      className="pointer-events-auto absolute inset-x-2 bottom-2 z-[58] flex max-h-[64dvh] flex-col overflow-hidden rounded-md bg-white shadow-xl ring-1 ring-slate-900/10 md:bottom-5 md:left-4 md:right-auto md:top-24 md:w-[var(--priwa-point-panel-width)] md:max-w-[calc(100vw-2rem)] md:max-h-[calc(100dvh-8rem)]"
+    >
+      <div
+        role="separator"
+        aria-label="Tabellenbreite ändern"
+        aria-orientation="vertical"
+        tabIndex={0}
+        title="Tabellenbreite ändern"
+        data-testid="priwa-point-list-resize-handle"
+        className="absolute right-0 top-1/2 z-10 hidden h-24 w-2 -translate-y-1/2 cursor-col-resize touch-none bg-transparent outline-none after:absolute after:bottom-0 after:right-0 after:top-0 after:w-0.5 after:bg-slate-300 hover:after:bg-emerald-500 focus-visible:after:bg-emerald-500 md:block"
+        onPointerDown={startDesktopResize}
+        onPointerMove={continueDesktopResize}
+        onPointerUp={finishDesktopResize}
+        onPointerCancel={finishDesktopResize}
+        onLostPointerCapture={() => {
+          resizeStartRef.current = null;
+        }}
+        onKeyDown={resizeDesktopPanelWithKeyboard}
+      />
       <header className="flex items-start justify-between gap-3 border-b border-slate-200 px-3 py-2.5">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-slate-950">Käferbäume</div>
@@ -218,6 +323,7 @@ export default function PriwaPointListPanel({
             points={visiblePoints}
             groupByTreeId={groupByTreeId}
             focusedPointId={focusedPointId}
+            getScrollContainer={getTableScrollContainer}
             onEditPoint={onEditPoint}
             onZoomToPoint={onZoomToPoint}
           />

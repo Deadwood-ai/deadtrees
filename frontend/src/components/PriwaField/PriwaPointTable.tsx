@@ -20,6 +20,7 @@ interface PriwaPointTableProps {
   points: IPriwaPoint[];
   groupByTreeId: Record<string, IPriwaBefallsgruppe>;
   focusedPointId?: string | null;
+  getScrollContainer: () => Window | HTMLElement;
   onEditPoint: (point: IPriwaPoint) => void;
   onZoomToPoint: (point: IPriwaPoint) => void;
 }
@@ -28,6 +29,7 @@ export default function PriwaPointTable({
   points,
   groupByTreeId,
   focusedPointId = null,
+  getScrollContainer,
   onEditPoint,
   onZoomToPoint,
 }: PriwaPointTableProps) {
@@ -150,6 +152,7 @@ export default function PriwaPointTable({
       dataSource={points}
       pagination={false}
       scroll={{ x: "max-content" }}
+      sticky={{ getContainer: getScrollContainer }}
       rowClassName={(point) =>
         point.id === focusedPointId
           ? "priwa-point-table-row-focused cursor-pointer"

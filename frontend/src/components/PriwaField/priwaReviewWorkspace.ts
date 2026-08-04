@@ -208,3 +208,12 @@ export const reviewItemDatasetIds = (item: IPriwaReviewItem) =>
   item.kind === "unassigned-upload"
     ? [item.mosaic.id]
     : [...new Set([...item.assignedDatasetIds, ...item.suggestedDatasetIds])];
+
+export const setPriwaDatasetAssignment = (
+  datasetIds: string[],
+  datasetId: string,
+  isAssigned: boolean,
+) =>
+  isAssigned
+    ? [...new Set([...datasetIds, datasetId])]
+    : datasetIds.filter((candidateId) => candidateId !== datasetId);

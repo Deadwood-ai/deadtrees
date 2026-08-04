@@ -5,6 +5,7 @@ import { fromLonLat } from "ol/proj";
 import VectorSource from "ol/source/Vector";
 import { Circle as CircleStyle, Fill, Stroke, Style, Text } from "ol/style";
 
+import { getPriwaCoordinateSourcePresentation } from "./priwaCoordinateSource";
 import type { IPriwaCoordinate, IPriwaPoint, PriwaFund } from "./types";
 
 const fundColors: Record<PriwaFund, string> = {
@@ -14,15 +15,17 @@ const fundColors: Record<PriwaFund, string> = {
   unsicher: "rgba(217, 119, 6, 0.96)",
 };
 
+const MAX_POINT_LABEL_RESOLUTION = 2.4;
+
 const formatPointDate = (value: string) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
   return match ? `${match[3]}.${match[2]}.${match[1]}` : value;
 };
 
 const pointLabel = (point: IPriwaPoint, resolution: number) => {
-  if (resolution > 1.2) return undefined;
+  if (resolution > MAX_POINT_LABEL_RESOLUTION) return undefined;
   return point.baumnr
-    ? `Baum ${point.baumnr}`
+    ? point.baumnr
     : `${point.baumart} · ${formatPointDate(point.datum)}`;
 };
 
@@ -30,9 +33,12 @@ const pointStyle = (
   point: IPriwaPoint,
   resolution: number,
   isSelected: boolean,
-  showLabel: boolean,
 ) => {
-  const label = showLabel ? pointLabel(point, resolution) : undefined;
+  const label = pointLabel(point, resolution);
+  const sourceLabel =
+    resolution <= MAX_POINT_LABEL_RESOLUTION
+      ? getPriwaCoordinateSourcePresentation(point.coordinateSource).mapLabel
+      : undefined;
   const coreStyle = new Style({
     image: new CircleStyle({
       radius: point.isEstimatedLocation ? 7 : 8,
@@ -54,6 +60,18 @@ const pointStyle = (
         })
       : undefined,
   });
+  const sourceStyle = sourceLabel
+    ? new Style({
+        text: new Text({
+          text: sourceLabel,
+          offsetY: 19,
+          font: "600 10px Inter, system-ui, sans-serif",
+          fill: new Fill({ color: "#374151" }),
+          backgroundFill: new Fill({ color: "rgba(255,255,255,0.9)" }),
+          padding: [1, 3, 1, 3],
+        }),
+      })
+    : null;
 
   const syncStyle =
     point.syncStatus && point.syncStatus !== "synced"
@@ -88,6 +106,7 @@ const pointStyle = (
       ...(selectionStyle ? [selectionStyle] : []),
       ...(syncStyle ? [syncStyle] : []),
       coreStyle,
+      ...(sourceStyle ? [sourceStyle] : []),
     ];
     return styles.length === 1 ? coreStyle : styles;
   }
@@ -107,13 +126,13 @@ const pointStyle = (
       }),
     }),
     coreStyle,
+    ...(sourceStyle ? [sourceStyle] : []),
   ];
 };
 
 export const createPriwaPointFeature = (
   point: IPriwaPoint,
   isSelected = false,
-  showLabel = true,
 ) => {
   const feature = new Feature({
     geometry: new Point(fromLonLat([point.lon, point.lat])),
@@ -121,7 +140,7 @@ export const createPriwaPointFeature = (
   });
   feature.setId(point.id);
   feature.setStyle((_feature, resolution) =>
-    pointStyle(point, resolution, isSelected, showLabel),
+    pointStyle(point, resolution, isSelected),
   );
   return feature;
 };

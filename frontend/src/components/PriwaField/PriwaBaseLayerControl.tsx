@@ -1,5 +1,5 @@
-import { GlobalOutlined } from "@ant-design/icons";
-import { Button, Popover, Segmented } from "antd";
+import { GlobalOutlined, PictureOutlined } from "@ant-design/icons";
+import { Button, Tooltip } from "antd";
 
 import type { PriwaBaseLayer } from "./types";
 
@@ -12,34 +12,22 @@ export default function PriwaBaseLayerControl({
   value,
   onChange,
 }: PriwaBaseLayerControlProps) {
+  const isAerial = value === "aerial";
+  const actionLabel = isAerial
+    ? "Zu Karte wechseln"
+    : "Zu Luftbild wechseln";
+
   return (
-    <Popover
-      trigger="click"
-      placement="rightTop"
-      content={
-        <div className="w-56">
-          <div className="mb-2 text-sm font-medium text-slate-900">
-            Kartenbasis
-          </div>
-          <Segmented<PriwaBaseLayer>
-            block
-            value={value}
-            options={[
-              { label: "Luftbild", value: "aerial" },
-              { label: "Karte", value: "topographic" },
-            ]}
-            onChange={onChange}
-          />
-        </div>
-      }
-    >
+    <Tooltip title={actionLabel} placement="right">
       <Button
         className="pointer-events-auto shadow-md"
         shape="circle"
         size="large"
-        icon={<GlobalOutlined />}
-        aria-label="Layer auswählen"
+        icon={isAerial ? <PictureOutlined /> : <GlobalOutlined />}
+        aria-label={actionLabel}
+        data-active-layer={value}
+        onClick={() => onChange(isAerial ? "topographic" : "aerial")}
       />
-    </Popover>
+    </Tooltip>
   );
 }

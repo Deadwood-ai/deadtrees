@@ -1,4 +1,4 @@
-import { Alert, Button, Tooltip, message } from "antd";
+import { Alert, Button, FloatButton, Tooltip, message } from "antd";
 import {
   AimOutlined,
   EnvironmentOutlined,
@@ -259,6 +259,7 @@ export default function PriwaFieldMap({
     saveGroup,
     deleteGroup,
     assignFlight,
+    setMosaicVisibility,
     createGroup,
     createGroupForFlight,
   } = review;
@@ -423,14 +424,10 @@ export default function PriwaFieldMap({
     source.clear();
     points.forEach((point) =>
       source.addFeature(
-        createPriwaPointFeature(
-          point,
-          selectedTreeIds.has(point.id),
-          !isMobile && selectedTreeIds.size === 0,
-        ),
+        createPriwaPointFeature(point, selectedTreeIds.has(point.id)),
       ),
     );
-  }, [isMobile, points, selectedTreeIds]);
+  }, [points, selectedTreeIds]);
 
   useEffect(() => {
     if (
@@ -586,9 +583,7 @@ export default function PriwaFieldMap({
       ? "Richtung: Standort-Button antippen"
       : userLocation.isLocating
         ? "Standort wird angefragt"
-        : locationButtonActive
-          ? null
-          : "Standort-Button antippen";
+        : null;
   const handleAddPoint = useCallback(
     async (point: IPriwaPoint) => {
       await onAddPoint(point);
@@ -669,6 +664,7 @@ export default function PriwaFieldMap({
               aria-label="Aktuelle Position aktivieren"
             />
           </Tooltip>
+          <PriwaBaseLayerControl value={baseLayer} onChange={setBaseLayer} />
           <PriwaOfflineMapControl
             area={offlineBasemapArea}
             cacheState={basemapCacheState}
@@ -676,8 +672,13 @@ export default function PriwaFieldMap({
             onCache={handleCacheBasemapArea}
             onClear={handleClearBasemapArea}
           />
-          {!isMobile && (
-            <PriwaBaseLayerControl value={baseLayer} onChange={setBaseLayer} />
+          {isMobile && (
+            <PriwaMobileFieldTools
+              points={points}
+              groups={groups}
+              onEditPoint={openPointForEditing}
+              onZoomToPoint={focusPointOnMap}
+            />
           )}
           {!isMobile && !isPointListOpen && !isDrawerOpen && (
             <Tooltip title="Käferbaum aufnehmen">
@@ -694,6 +695,21 @@ export default function PriwaFieldMap({
         </div>
       )}
 
+      {isMobile && !isDrawerOpen && !isPointListOpen && !isPlacingPoint && (
+        <FloatButton
+          className="priwa-add-point-fab"
+          shape="circle"
+          icon={<PlusOutlined />}
+          tooltip={{ title: "Punkt aufnehmen", placement: "left" }}
+          onClick={openNewPointDrawer}
+          aria-label="Punkt aufnehmen"
+          style={{
+            right: "max(20px, calc(env(safe-area-inset-right, 0px) + 20px))",
+            bottom: "max(20px, calc(env(safe-area-inset-bottom, 0px) + 20px))",
+          }}
+        />
+      )}
+
       {!isMobile && !isPointListOpen && !isPlacingPoint && (
         <PriwaReviewWorkbench
           items={reviewItems}
@@ -703,6 +719,7 @@ export default function PriwaFieldMap({
           isLoading={isWorkspaceLoading}
           isSavingGroup={isSavingGroup}
           isClassifyingFlight={isClassifyingFlight}
+          enabledMosaicIds={enabledMosaicIds}
           onSelect={selectReviewItem}
           onOpenData={() => {
             setFocusedPointId(null);
@@ -712,22 +729,11 @@ export default function PriwaFieldMap({
           onFocusTree={focusPointOnMap}
           onEditTree={openPointForEditing}
           onEditGroup={setGroupEditorDraft}
-          onConfirmSuggestion={saveGroup}
+          onSaveGroup={saveGroup}
           onAssignFlight={assignFlight}
+          onSetMosaicVisibility={setMosaicVisibility}
           onSetFlightType={setFlightType}
           onCreateGroupForFlight={createGroupForFlight}
-        />
-      )}
-
-      {isMobile && !isDrawerOpen && !isPlacingPoint && (
-        <PriwaMobileFieldTools
-          points={points}
-          groups={groups}
-          baseLayer={baseLayer}
-          onBaseLayerChange={setBaseLayer}
-          onAddPoint={openNewPointDrawer}
-          onEditPoint={openPointForEditing}
-          onZoomToPoint={focusPointOnMap}
         />
       )}
 

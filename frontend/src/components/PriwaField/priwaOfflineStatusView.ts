@@ -8,7 +8,7 @@ export interface IPriwaOfflineStatusView {
 export const getPriwaOfflineStatusView = (
   serviceWorkerStatus: PriwaServiceWorkerStatus,
   isOnline: boolean,
-): IPriwaOfflineStatusView => {
+): IPriwaOfflineStatusView | null => {
   if (!isOnline && serviceWorkerStatus === "ready") {
     return { label: "Offline bereit", color: "success" };
   }
@@ -33,9 +33,5 @@ export const getPriwaOfflineStatusView = (
     return { label: "Offline nicht unterstützt", color: "warning" };
   }
 
-  if (serviceWorkerStatus === "disabled") {
-    return { label: "Offline nur im Build", color: "default" };
-  }
-
-  return { label: "Offline nur im Build", color: "default" };
+  return null;
 };

@@ -4,15 +4,20 @@ import {
   EditOutlined,
 } from "@ant-design/icons";
 import { Button, Tag } from "antd";
+import { useEffect, useState } from "react";
 
 import type { IPriwaBefallsgruppeSaveInput, IPriwaPoint } from "./types";
 import type { IPriwaMosaic, PriwaFlightType } from "./usePriwaMosaics";
-import type { IPriwaGroupReviewItem } from "./priwaReviewWorkspace";
+import {
+  setPriwaDatasetAssignment,
+  type IPriwaGroupReviewItem,
+} from "./priwaReviewWorkspace";
 import {
   formatPriwaReviewDate,
   getPriwaGroupDateRange,
   priwaReviewStatusPresentation,
 } from "./priwaReviewPresentation";
+import PriwaReviewFlightCard from "./PriwaReviewFlightCard";
 
 interface PriwaReviewGroupDetailsProps {
   item: IPriwaGroupReviewItem;
@@ -20,11 +25,13 @@ interface PriwaReviewGroupDetailsProps {
   mosaics: IPriwaMosaic[];
   isSavingGroup: boolean;
   isClassifyingFlight: boolean;
+  enabledMosaicIds: Set<string>;
   onFocusTree: (point: IPriwaPoint) => void;
   onEditTree: (point: IPriwaPoint) => void;
   onEditGroup: (draft: IPriwaBefallsgruppeSaveInput) => void;
-  onConfirmSuggestion: (draft: IPriwaBefallsgruppeSaveInput) => Promise<void>;
+  onSaveGroup: (draft: IPriwaBefallsgruppeSaveInput) => Promise<void>;
   onAssignFlight: (groupId: string, datasetId: string) => Promise<void>;
+  onSetMosaicVisibility: (mosaicId: string, isVisible: boolean) => void;
   onSetFlightType: (
     datasetId: string,
     flightType: PriwaFlightType,
@@ -37,11 +44,13 @@ export default function PriwaReviewGroupDetails({
   mosaics,
   isSavingGroup,
   isClassifyingFlight,
+  enabledMosaicIds,
   onFocusTree,
   onEditTree,
   onEditGroup,
-  onConfirmSuggestion,
+  onSaveGroup,
   onAssignFlight,
+  onSetMosaicVisibility,
   onSetFlightType,
 }: PriwaReviewGroupDetailsProps) {
   const pointsById = new Map(points.map((point) => [point.id, point]));
@@ -54,6 +63,36 @@ export default function PriwaReviewGroupDetails({
     const mosaic = mosaicsById.get(id);
     return mosaic ? [mosaic] : [];
   });
+  const [suggestedAssignmentIds, setSuggestedAssignmentIds] = useState(
+    item.draft.datasetIds,
+  );
+
+  useEffect(() => {
+    setSuggestedAssignmentIds(item.draft.datasetIds);
+  }, [item.key, item.draft.datasetIds]);
+
+  const setAssignment = (mosaic: IPriwaMosaic, isAssigned: boolean) => {
+    if (item.kind === "suggested-group") {
+      setSuggestedAssignmentIds((currentIds) =>
+        setPriwaDatasetAssignment(currentIds, mosaic.id, isAssigned),
+      );
+      return;
+    }
+
+    if (isAssigned && item.group) {
+      void onAssignFlight(item.group.id, mosaic.id);
+      return;
+    }
+
+    void onSaveGroup({
+      ...item.draft,
+      datasetIds: setPriwaDatasetAssignment(
+        item.assignedDatasetIds,
+        mosaic.id,
+        false,
+      ),
+    });
+  };
 
   return (
     <div className="space-y-5">
@@ -127,18 +166,27 @@ export default function PriwaReviewGroupDetails({
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
           Umfeldbefliegung
         </h3>
+        <p className="-mt-1 mb-2 text-xs text-slate-500">
+          Auge: auf Karte anzeigen · Auswahl: der Gruppe zuordnen
+        </p>
         <div className="space-y-2">
           {assignedMosaics.map((mosaic) => (
-            <div
+            <PriwaReviewFlightCard
               key={mosaic.id}
-              className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5"
+              mosaic={mosaic}
+              tone="assigned"
+              isVisible={enabledMosaicIds.has(mosaic.id)}
+              isAssigned
+              isSaving={isSavingGroup}
+              assignmentLabel="Dieser Gruppe zugeordnet"
+              assignmentAriaLabel={`Zuordnung von ${mosaic.label} zur Gruppe aufheben`}
+              onVisibilityChange={(isVisible) =>
+                onSetMosaicVisibility(mosaic.id, isVisible)
+              }
+              onAssignmentChange={(isAssigned) =>
+                setAssignment(mosaic, isAssigned)
+              }
             >
-              <div className="text-sm font-medium text-slate-950">
-                {mosaic.label}
-              </div>
-              <div className="mt-0.5 text-xs text-slate-500">
-                Aufnahme {formatPriwaReviewDate(mosaic.captureDate)}
-              </div>
               {mosaic.flightType === "umfeldbefliegung" ? (
                 <div className="mt-2 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
                   <CheckCircleFilled /> Als Umfeldbefliegung bestätigt
@@ -156,33 +204,38 @@ export default function PriwaReviewGroupDetails({
                   Befliegung bestätigen
                 </Button>
               )}
-            </div>
+            </PriwaReviewFlightCard>
           ))}
 
           {suggestedMosaics.map((mosaic) => (
-            <div
+            <PriwaReviewFlightCard
               key={mosaic.id}
-              className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2.5"
+              mosaic={mosaic}
+              tone="suggested"
+              isVisible={enabledMosaicIds.has(mosaic.id)}
+              isAssigned={
+                item.kind === "suggested-group" &&
+                suggestedAssignmentIds.includes(mosaic.id)
+              }
+              isSaving={isSavingGroup}
+              assignmentLabel={
+                item.kind === "suggested-group"
+                  ? "Beim Übernehmen zuordnen"
+                  : "Dieser Gruppe zuordnen"
+              }
+              assignmentAriaLabel={
+                item.kind === "suggested-group"
+                  ? `${mosaic.label} beim Übernehmen zuordnen`
+                  : `${mosaic.label} dieser Gruppe zuordnen`
+              }
+              onVisibilityChange={(isVisible) =>
+                onSetMosaicVisibility(mosaic.id, isVisible)
+              }
+              onAssignmentChange={(isAssigned) =>
+                setAssignment(mosaic, isAssigned)
+              }
             >
-              <div className="text-sm font-medium text-blue-950">
-                {mosaic.label}
-              </div>
-              <div className="mt-0.5 text-xs text-blue-800">
-                Vorschlag · Aufnahme {formatPriwaReviewDate(mosaic.captureDate)}
-              </div>
               <div className="mt-2 flex flex-wrap gap-2">
-                {item.group && (
-                  <Button
-                    size="small"
-                    type="primary"
-                    loading={isSavingGroup}
-                    onClick={() =>
-                      void onAssignFlight(item.group!.id, mosaic.id)
-                    }
-                  >
-                    Befliegung zuordnen
-                  </Button>
-                )}
                 <Button
                   size="small"
                   danger
@@ -192,7 +245,7 @@ export default function PriwaReviewGroupDetails({
                   Nicht PRIWA-relevant
                 </Button>
               </div>
-            </div>
+            </PriwaReviewFlightCard>
           ))}
 
           {assignedMosaics.length === 0 && suggestedMosaics.length === 0 && (
@@ -209,7 +262,12 @@ export default function PriwaReviewGroupDetails({
             type="primary"
             icon={<CheckCircleFilled />}
             loading={isSavingGroup}
-            onClick={() => void onConfirmSuggestion(item.draft)}
+            onClick={() =>
+              void onSaveGroup({
+                ...item.draft,
+                datasetIds: suggestedAssignmentIds,
+              })
+            }
           >
             Vorschlag übernehmen
           </Button>
@@ -217,7 +275,15 @@ export default function PriwaReviewGroupDetails({
         <Button
           icon={<EditOutlined />}
           disabled={isSavingGroup}
-          onClick={() => onEditGroup(item.draft)}
+          onClick={() =>
+            onEditGroup({
+              ...item.draft,
+              datasetIds:
+                item.kind === "suggested-group"
+                  ? suggestedAssignmentIds
+                  : item.draft.datasetIds,
+            })
+          }
         >
           Zusammensetzung bearbeiten
         </Button>

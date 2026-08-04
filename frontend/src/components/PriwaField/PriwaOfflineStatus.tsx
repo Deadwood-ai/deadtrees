@@ -27,19 +27,21 @@ export default function PriwaOfflineStatus({
     isOnline,
   );
   const syncLabel = getSyncLabel(syncSummary);
-  const label = syncLabel ?? statusView.label;
+  const label = syncLabel ?? statusView?.label;
   const color =
     syncSummary && syncSummary.failed > 0
       ? "error"
       : syncSummary && syncSummary.total > 0
         ? "processing"
-        : statusView.color;
+        : (statusView?.color ?? "default");
   const tooltipTitle =
     serviceWorker.errorMessage ??
     (syncSummary && syncSummary.total > 0
       ? `${syncSummary.pending} ausstehend, ${syncSummary.syncing} wird synchronisiert, ${syncSummary.failed} fehlgeschlagen`
-      : statusView.label);
+      : statusView?.label);
   const hasSyncWork = (syncSummary?.total ?? 0) > 0;
+  if (!label || !tooltipTitle) return null;
+
   const statusTag = (
     <Tag
       className="pointer-events-auto m-0 rounded-md border-0 px-2.5 py-1 text-xs font-medium shadow-sm"
