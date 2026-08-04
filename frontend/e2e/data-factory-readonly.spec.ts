@@ -504,6 +504,19 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
       .click({ timeout: 5_000 })
       .catch(() => undefined);
 
+    const locationSearch = page.getByTestId("location-search-control");
+    await expect(
+      locationSearch.getByPlaceholder("Search location..."),
+    ).toBeVisible();
+    await expect(
+      locationSearch.getByText("Location", { exact: true }),
+    ).toHaveCount(0);
+    const locationSearchBox = await locationSearch.boundingBox();
+    expect(locationSearchBox).not.toBeNull();
+    expect(locationSearchBox!.height).toBeLessThanOrEqual(60);
+    expect(locationSearchBox!.width).toBeGreaterThanOrEqual(260);
+    expect(locationSearchBox!.width).toBeLessThanOrEqual(320);
+
     const controls = page.getByTestId("deadtrees-layer-controls");
     await expect(controls).toBeVisible();
     await expect(
