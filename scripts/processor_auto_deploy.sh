@@ -24,6 +24,14 @@ log() {
 	printf '%s: %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$*" >> "${LOG_FILE}"
 }
 
+require_head_is_ancestor_of_remote() {
+	local remote_ref="$1"
+	if ! git merge-base --is-ancestor HEAD "${remote_ref}"; then
+		log "Refusing deploy because HEAD contains local commits outside ${remote_ref}"
+		exit 1
+	fi
+}
+
 require_clean_checkout() {
 	local dirty
 	dirty="$(
@@ -92,6 +100,7 @@ mkdir -p "${CONTROL_DIR}"
 require_clean_checkout
 
 git fetch origin "${BRANCH}" >> "${LOG_FILE}" 2>&1
+require_head_is_ancestor_of_remote "origin/${BRANCH}"
 
 local_sha="$(git rev-parse HEAD)"
 remote_sha="$(git rev-parse "origin/${BRANCH}")"
@@ -111,6 +120,11 @@ python3 "${STATUS_SCRIPT}" wait-for-idle \
 	--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
 
 git pull --ff-only origin "${BRANCH}" >> "${LOG_FILE}" 2>&1
+deployed_sha="$(git rev-parse HEAD)"
+if [ "${deployed_sha}" != "${remote_sha}" ]; then
+	log "Refusing deploy because HEAD (${deployed_sha}) does not match fetched ${remote_sha}"
+	exit 1
+fi
 require_clean_checkout
 docker compose -f "${COMPOSE_FILE}" build processor tcd >> "${LOG_FILE}" 2>&1
 rm -f "${DRAIN_ACK_PATH}"
