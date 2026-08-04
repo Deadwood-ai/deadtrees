@@ -1,17 +1,73 @@
 # Processor Deploy Notes
 
-The processor image is built from the repository root with `docker-compose.processor.yaml`.
-Keep runtime output out of the git checkout so deploy builds only send source files as Docker
-context.
+The processor image is built from the repository root with
+`docker-compose.processor.yaml`. Keep runtime output out of the git checkout so
+deploy builds only send source files as Docker context.
 
 For provisioning an additional processor host, use
 [`processor-worker-setup.md`](processor-worker-setup.md). This file only covers
 deployment hygiene for an existing processor checkout.
 
-Processor runtime artifacts should live under `/data`, for example `/data/processing_dir`, or
-another non-repo path mounted into the processor container. Do not leave ODM or tree-cover
-temporary output under the checkout, especially under `processor/temp/`, before rebuilding the
-processor image.
+Processor runtime artifacts should live under `/data`, for example
+`/data/processing_dir`, or another non-repo path mounted into the processor
+container. Do not leave ODM or tree-cover temporary output under the checkout,
+especially under `processor/temp/`, before rebuilding the processor image.
 
-Before cleaning old artifacts on `processing-server`, confirm no active processor or ODM task still
-depends on them.
+## Current Production Model
+
+- one long-lived processor container per host
+- `command: python -m processor.src.continuous_processor`
+- `restart: unless-stopped`
+- deploys and Docker maintenance go through tracked scripts under `scripts/`
+- the worker must be drained before any planned restart or Docker daemon change
+
+The drain control file defaults to
+`/data/processor-control/drain-request.json`. While that file exists the worker
+finishes its current task and refuses to claim a new one.
+
+## Deploy Steps
+
+Use `scripts/processor_auto_deploy.sh` on the host instead of ad hoc `docker
+compose` commands. The script:
+
+1. records the current SHA and rollback command in `auto-deploy.log`;
+2. requests a drain;
+3. waits until the host worker has no active claimed queue row;
+4. fast-forwards the checkout to `origin/main`;
+5. rebuilds `processor` and `tcd`;
+6. force-recreates the processor container; and
+7. clears the drain request after the new container is running.
+
+If the script fails after setting the drain request, it intentionally leaves the
+drain file in place so the worker does not resume unexpectedly on a partially
+updated checkout.
+
+## Docker Maintenance
+
+Use `scripts/processor_docker_maintenance.sh` for Docker Snap refreshes or any
+planned daemon restart. The script renews the Snap hold, drains the worker,
+stops the container, refreshes Docker, re-applies the hold, restarts the
+processor, and logs to `processor-maintenance.log`.
+
+The recommended hold-renew command is:
+
+```bash
+PROCESSOR_SNAP_HOLD_DURATION=7d ./scripts/processor_docker_maintenance.sh --renew-hold-only
+```
+
+Do not run `snap refresh docker`, `systemctl restart snap.docker.dockerd`, or
+other daemon restarts directly on a busy processor host without first draining
+the worker or proving it is idle.
+
+## Manual Checks
+
+```bash
+python3 scripts/processor_runtime_control.py status
+tail -80 auto-deploy.log
+tail -80 processor-maintenance.log
+docker inspect deadtrees-processor-1 --format 'Cmd={{json .Config.Cmd}} RestartPolicy={{.HostConfig.RestartPolicy.Name}} StartedAt={{.State.StartedAt}}'
+snap refresh --time
+```
+
+Before cleaning old artifacts on `processing-server`, confirm no active
+processor or ODM task still depends on them.

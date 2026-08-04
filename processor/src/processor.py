@@ -224,6 +224,11 @@ def get_task_blacklist() -> list[str]:
 	return blacklist
 
 
+def is_drain_requested() -> bool:
+	"""Return True when host maintenance has paused new queue claims for this worker."""
+	return settings.processor_drain_request_path.exists()
+
+
 def get_next_task(token: str) -> QueueTask:
 	"""Get the next task (QueueTask class) in the queue from supabase.
 
@@ -825,11 +830,15 @@ def process_task(task: QueueTask, token: str):
 			shutil.rmtree(settings.processing_path, ignore_errors=True)
 
 
-def background_process():
+def background_process() -> bool:
 	"""
-	Cron-triggered processor: pick the next task from the queue and process it.
+	Process the next healthy task from the queue, if there is one.
 
-	On each run this function:
+	Returns True when this worker claimed a task and handled it (successfully or
+	with a recorded processing failure), False when the queue is idle, the worker
+	is intentionally drained for maintenance, or the head task is not ready yet.
+
+	On each call this function:
 	1. Logs in as the processor service account.
 	2. Installs a graceful-shutdown handler so a deploy/restart (SIGTERM) cleanly
 	   re-queues the in-flight task for retry instead of leaving it stranded.
@@ -842,7 +851,7 @@ def background_process():
 	     OOM/bug crashes are deterministic, so retrying only loops and wastes
 	     compute — we deliberately do not retry them.
 	4. Detects crashes the same way for the next waiting task, then processes the
-	   first healthy, ready task and exits.
+	   first healthy, ready task and returns.
 
 	Multiple workers can read the same waiting row, but only one can atomically
 	claim it by flipping `is_processing=false` to true and recording `claimed_by`.
@@ -912,10 +921,13 @@ def background_process():
 			_fail_crashed_task(token, active_task, status)
 			continue
 
+		if is_drain_requested():
+			return False
+
 		task = get_next_task(token)
 		if task is None:
 			print('No tasks in the queue.')
-			return
+			return False
 
 		is_ready, has_error = is_dataset_uploaded_or_processed(task, token)
 
@@ -941,14 +953,14 @@ def background_process():
 			continue
 
 		if not is_ready:
-			# Not uploaded yet - skip, try again next cron run
+			# Not uploaded yet - skip, try again on a later poll
 			logger.info(
 				f'Skipping task {task.id} - dataset not uploaded yet; will retry later',
 				LogContext(
 					category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
 				),
 			)
-			return
+			return False
 
 		claimed_task = claim_task(token, task, worker_id)
 		if claimed_task is None:
@@ -982,8 +994,14 @@ def background_process():
 				category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
 			),
 		)
-		process_task(task, token=token)
-		break  # processed one task, exit for cron
+		try:
+			process_task(task, token=token)
+		except Exception:
+			# The task was claimed and the failure path already recorded and
+			# dequeued it inside process_task, so the continuous worker should
+			# continue draining without treating this like idle.
+			return True
+		return True
 
 
 if __name__ == '__main__':

@@ -1,4 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+set -euo pipefail
 
 # Navigate to the project directory
 cd /home/jj1049/prod/deadtrees
@@ -15,20 +17,14 @@ if [ -f .env ]; then
 fi
 
 # Check if the container is already running
-if docker-compose -f docker-compose.processor.yaml ps | grep -q "processor"; then
+if docker compose -f docker-compose.processor.yaml ps | grep -q "processor"; then
   echo "Processor container is already running. Skipping startup." >> $LOG_FILE
 else
   # Start the container
   echo "Starting processor container..." >> $LOG_FILE
-  docker-compose -f docker-compose.processor.yaml up -d
-  
-  # Check if the container started successfully
-  if [ $? -eq 0 ]; then
-    echo "Processor container started successfully." >> $LOG_FILE
-  else
-    echo "Failed to start processor container. See Docker logs for details." >> $LOG_FILE
-  fi
+  docker compose -f docker-compose.processor.yaml up -d processor
+  echo "Processor container started successfully." >> $LOG_FILE
 fi
 
 echo "Script completed at $(date)" >> $LOG_FILE
-echo "===============================================" >> $LOG_FILE 
+echo "===============================================" >> $LOG_FILE

@@ -9,9 +9,8 @@ monorepo without changing the existing continuous deployment model.
 - production database migrations apply from `main`
 - GitHub Releases are created automatically on pushes to `main`
 - the API Docker image is built and pushed as part of the release workflow
-- the production processor server has a host-local cron auto-deploy script that
-  pulls `main` into `/home/jj1049/prod/deadtrees` and rebuilds the processor
-  service
+- the production processor server runs one persistent processor container plus
+  host-local scripts for deploys and explicit Docker maintenance
 - release tags and notes document what reached `main`; they are not a separate
   approval gate
 
@@ -47,26 +46,43 @@ an explicit workflow fix. Manual migration repair or direct production SQL
 execution should be an explicitly approved emergency action only.
 
 Processing server automation is not represented as a GitHub workflow. It is a
-host-local cron setup on `processing-server`:
+host-local script setup on `processing-server`:
 
 ```cron
-* * * * * cd /home/jj1049/prod/deadtrees && docker compose -f docker-compose.processor.yaml up
-* * * * * /home/jj1049/prod/deadtrees/auto_deploy_processor.sh
+* * * * * cd /home/jj1049/prod/deadtrees && ./scripts/processor_auto_deploy.sh
+0 3 * * * cd /home/jj1049/prod/deadtrees && PROCESSOR_SNAP_HOLD_DURATION=7d ./scripts/processor_docker_maintenance.sh --renew-hold-only
 ```
 
-`/home/jj1049/prod/deadtrees/auto_deploy_processor.sh`:
+Do not reintroduce a per-minute `docker compose up` cron entry. The processor
+now runs continuously as `python -m processor.src.continuous_processor` with
+`restart: unless-stopped`, so Docker itself keeps the container alive between
+tasks and host reboots.
+
+`scripts/processor_auto_deploy.sh`:
 
 - operates on `/home/jj1049/prod/deadtrees`
+- acquires a host-local lock so deploy and maintenance operations cannot overlap
 - fetches `origin/main`
 - compares local `HEAD` with `origin/main`
-- runs `git pull origin main` when a new commit is available
+- records the pre-change SHA and rollback command in `auto-deploy.log`
+- creates a drain request so the running worker stops claiming new tasks
+- waits for the current host worker to finish its in-flight task
+- runs `git pull --ff-only origin main` when a new commit is available
 - runs `docker compose -f docker-compose.processor.yaml build processor tcd`
+- recreates the processor with `docker compose -f docker-compose.processor.yaml up -d --force-recreate processor`
+- clears the drain request after the new container is up
 - writes status to `/home/jj1049/prod/deadtrees/auto-deploy.log`
 
 `docker-compose.processor.yaml` builds the processor locally on the processing
 server and bind-mounts `./processor`, `./shared`, `./assets`, `/data`, and the
 Docker socket. It uses the NVIDIA runtime and does not consume the API image
 published by the release workflow.
+
+`scripts/processor_docker_maintenance.sh` is the only approved path for Docker
+Snap refreshes or daemon restarts on the processor host. It renews the Snap
+hold first, drains the worker, stops the container, runs `snap refresh docker`,
+re-applies the hold, restarts the processor, and logs the outcome to
+`processor-maintenance.log`.
 
 The `tcd` service is a build-only service (gated behind the `build` profile, so
 `docker compose up` never starts it). It exists solely so the deploy rebuilds the
@@ -90,10 +106,13 @@ playbook focused on verifying the existing production deployment path.
 Useful verification commands:
 
 ```bash
-ssh processing-server 'crontab -l | grep -E "auto_deploy_processor|docker compose -f docker-compose.processor"'
+ssh processing-server 'crontab -l | grep -E "processor_auto_deploy|processor_docker_maintenance"'
 ssh processing-server 'cd /home/jj1049/prod/deadtrees && git log -1 --oneline --decorate'
 ssh processing-server 'cd /home/jj1049/prod/deadtrees && tail -80 auto-deploy.log'
+ssh processing-server 'cd /home/jj1049/prod/deadtrees && python3 scripts/processor_runtime_control.py status'
+ssh processing-server 'snap refresh --time'
 ssh processing-server 'docker ps --format "{{.Names}}\t{{.Status}}\t{{.Image}}" | grep deadtrees-processor'
+ssh processing-server 'docker inspect deadtrees-processor-1 --format "Cmd={{json .Config.Cmd}} RestartPolicy={{.HostConfig.RestartPolicy.Name}}"'
 ```
 
 For changes that touch `supabase/**`, `api/**`, `processor/**`, or shared task

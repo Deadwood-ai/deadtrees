@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+LOCK_DIR="${REPO_DIR}/.local/locks"
+LOCK_FILE="${LOCK_DIR}/processor-runtime.lock"
+LOG_FILE="${REPO_DIR}/processor-maintenance.log"
+STATUS_SCRIPT="${REPO_DIR}/scripts/processor_runtime_control.py"
+COMPOSE_FILE="${REPO_DIR}/docker-compose.processor.yaml"
+HOLD_DURATION="${PROCESSOR_SNAP_HOLD_DURATION:-7d}"
+DRAIN_TIMEOUT_SECONDS="${PROCESSOR_DRAIN_TIMEOUT_SECONDS:-43200}"
+DRAIN_POLL_SECONDS="${PROCESSOR_DRAIN_POLL_SECONDS:-15}"
+RENEW_HOLD_ONLY=0
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		--renew-hold-only)
+			RENEW_HOLD_ONLY=1
+			shift
+			;;
+		--hold-duration)
+			HOLD_DURATION="$2"
+			shift 2
+			;;
+		*)
+			echo "Unknown argument: $1" >&2
+			exit 2
+			;;
+	esac
+done
+
+mkdir -p "${LOCK_DIR}"
+touch "${LOG_FILE}"
+
+log() {
+	printf '%s: %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$*" >> "${LOG_FILE}"
+}
+
+exec 9>"${LOCK_FILE}"
+if ! flock -n 9; then
+	log "Skipping Docker maintenance because another processor runtime operation already holds ${LOCK_FILE}"
+	exit 0
+fi
+
+drain_set=0
+trap 'rc=$?; if [ "${rc}" -ne 0 ] && [ "${drain_set}" -eq 1 ]; then log "Docker maintenance failed; drain request remains in place for operator review"; fi' EXIT
+
+cd "${REPO_DIR}"
+
+snap refresh --hold="${HOLD_DURATION}" docker >> "${LOG_FILE}" 2>&1
+log "Renewed Docker snap hold for ${HOLD_DURATION}"
+
+if [ "${RENEW_HOLD_ONLY}" -eq 1 ]; then
+	exit 0
+fi
+
+python3 "${STATUS_SCRIPT}" set-drain --reason "docker-maintenance" >> "${LOG_FILE}" 2>&1
+drain_set=1
+python3 "${STATUS_SCRIPT}" wait-for-idle \
+	--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
+	--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
+
+docker compose -f "${COMPOSE_FILE}" stop processor >> "${LOG_FILE}" 2>&1
+snap refresh docker >> "${LOG_FILE}" 2>&1
+snap refresh --hold="${HOLD_DURATION}" docker >> "${LOG_FILE}" 2>&1
+docker compose -f "${COMPOSE_FILE}" up -d processor >> "${LOG_FILE}" 2>&1
+docker inspect deadtrees-processor-1 \
+	--format 'Cmd={{json .Config.Cmd}} RestartPolicy={{.HostConfig.RestartPolicy.Name}} StartedAt={{.State.StartedAt}}' \
+	>> "${LOG_FILE}" 2>&1 || true
+
+python3 "${STATUS_SCRIPT}" clear-drain >> "${LOG_FILE}" 2>&1
+drain_set=0
+
+log "Docker maintenance complete"

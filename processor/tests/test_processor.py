@@ -65,9 +65,74 @@ def test_background_process_no_tasks():
 	# Run the background process with empty queue
 	background_process()
 
-	# Verify it completes without error
-	# (The function should return None when no tasks are found)
-	assert background_process() is None
+	# Verify it reports that no work was done when the queue is empty, so the
+	# continuous worker knows to back off instead of hot-looping.
+	assert background_process() is False
+
+
+@pytest.mark.unit
+def test_background_process_returns_false_while_drained(monkeypatch):
+	monkeypatch.setattr(processor_module.signal, 'signal', lambda *args, **kwargs: None)
+	monkeypatch.setattr(processor_module, 'login_verified', lambda username, password: ('token', object()))
+	monkeypatch.setattr(processor_module, 'get_worker_id', lambda: 'worker-a')
+	monkeypatch.setattr(processor_module, 'get_active_task', lambda token, worker_id: None)
+	monkeypatch.setattr(processor_module, 'is_drain_requested', lambda: True)
+	monkeypatch.setattr(processor_module, 'get_next_task', lambda token: pytest.fail('should not claim new work'))
+
+	assert background_process() is False
+
+
+@pytest.mark.unit
+def test_background_process_returns_true_when_claimed_task_fails(monkeypatch):
+	task = QueueTask(
+		id=123,
+		dataset_id=456,
+		user_id='test-user',
+		task_types=[TaskTypeEnum.metadata],
+		priority=1,
+		is_processing=True,
+		claimed_by='worker-a',
+		current_position=1,
+		estimated_time=0.0,
+	)
+	logger_messages = []
+
+	class _SelectQuery:
+		def eq(self, field, value):
+			return self
+
+		def execute(self):
+			return type('Response', (), {'data': [{'current_status': 'idle'}]})()
+
+	class _FakeClient:
+		def table(self, name):
+			assert name == settings.statuses_table
+			return type('Table', (), {'select': lambda self, fields: _SelectQuery()})()
+
+		def __enter__(self):
+			return self
+
+		def __exit__(self, exc_type, exc, tb):
+			return False
+
+	monkeypatch.setattr(processor_module.signal, 'signal', lambda *args, **kwargs: None)
+	monkeypatch.setattr(processor_module, 'login_verified', lambda username, password: ('token', object()))
+	monkeypatch.setattr(processor_module, 'get_worker_id', lambda: 'worker-a')
+	monkeypatch.setattr(processor_module, 'get_active_task', lambda token, worker_id: None)
+	monkeypatch.setattr(processor_module, 'is_drain_requested', lambda: False)
+	monkeypatch.setattr(processor_module, 'get_next_task', lambda token: task)
+	monkeypatch.setattr(processor_module, 'is_dataset_uploaded_or_processed', lambda task, token: (True, False))
+	monkeypatch.setattr(processor_module, 'claim_task', lambda token, task, worker_id: task)
+	monkeypatch.setattr(processor_module, 'use_client', lambda token: _FakeClient())
+	monkeypatch.setattr(
+		processor_module,
+		'process_task',
+		lambda task, token: (_ for _ in ()).throw(RuntimeError('boom')),
+	)
+	monkeypatch.setattr(processor_module.logger, 'info', lambda *args, **kwargs: logger_messages.append(args[0]))
+
+	assert background_process() is True
+	assert any('Start processing queued task' in message for message in logger_messages)
 
 
 def test_process_task_success_path_with_refresh(monkeypatch):

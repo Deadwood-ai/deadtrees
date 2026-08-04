@@ -77,8 +77,8 @@ docker compose -f docker-compose.processor.yaml up -d processor
 ```
 
 If the host should auto-deploy like the existing production processor, install
-the same cron entries from an existing production processor host. The expected
-entries are documented in `docs/playbooks/create-release.md`.
+the tracked host scripts rather than a `docker compose up` cron loop. The
+expected entries are documented in `docs/playbooks/create-release.md`.
 
 ## Validation
 
@@ -143,6 +143,8 @@ Healthy signs:
 For planned shutdown:
 
 ```bash
+python3 scripts/processor_runtime_control.py set-drain --reason planned-shutdown
+python3 scripts/processor_runtime_control.py wait-for-idle --timeout-seconds 43200
 docker compose -f docker-compose.processor.yaml stop processor
 ```
 
