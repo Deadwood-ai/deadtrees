@@ -12,13 +12,11 @@ interface PriwaMobileFieldToolsProps {
   points: IPriwaPoint[];
   groups: IPriwaBefallsgruppe[];
   mosaics: IPriwaMosaic[];
-  enabledMosaicIds: Set<string>;
   areFlightBoundariesVisible: boolean;
   isFlightSheetOpen: boolean;
   focusedFlightId: string | null;
   onEditPoint: (point: IPriwaPoint) => void;
   onZoomToPoint: (point: IPriwaPoint) => void;
-  onSetMosaicVisibility: (mosaicId: string, visible: boolean) => void;
   onZoomToMosaic: (mosaic: IPriwaMosaic) => void;
   onFlightBoundariesVisibilityChange: (visible: boolean) => void;
   onFlightSheetOpenChange: (open: boolean) => void;
@@ -28,13 +26,11 @@ export default function PriwaMobileFieldTools({
   points,
   groups,
   mosaics,
-  enabledMosaicIds,
   areFlightBoundariesVisible,
   isFlightSheetOpen,
   focusedFlightId,
   onEditPoint,
   onZoomToPoint,
-  onSetMosaicVisibility,
   onZoomToMosaic,
   onFlightBoundariesVisibilityChange,
   onFlightSheetOpenChange,
@@ -77,11 +73,9 @@ export default function PriwaMobileFieldTools({
 
       <PriwaMobileFlightSheet
         mosaics={mosaics}
-        enabledMosaicIds={enabledMosaicIds}
         areBoundariesVisible={areFlightBoundariesVisible}
         isOpen={isFlightSheetOpen}
         focusedMosaicId={focusedFlightId}
-        onSetMosaicVisibility={onSetMosaicVisibility}
         onZoomToMosaic={onZoomToMosaic}
         onBoundariesVisibilityChange={onFlightBoundariesVisibilityChange}
         onOpenChange={onFlightSheetOpenChange}

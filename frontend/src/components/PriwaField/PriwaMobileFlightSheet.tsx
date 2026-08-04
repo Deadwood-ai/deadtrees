@@ -7,11 +7,9 @@ import type { IPriwaMosaic } from "./usePriwaMosaics";
 
 interface PriwaMobileFlightSheetProps {
   mosaics: IPriwaMosaic[];
-  enabledMosaicIds: Set<string>;
   areBoundariesVisible: boolean;
   isOpen: boolean;
   focusedMosaicId: string | null;
-  onSetMosaicVisibility: (mosaicId: string, visible: boolean) => void;
   onZoomToMosaic: (mosaic: IPriwaMosaic) => void;
   onBoundariesVisibilityChange: (visible: boolean) => void;
   onOpenChange: (open: boolean) => void;
@@ -19,11 +17,9 @@ interface PriwaMobileFlightSheetProps {
 
 export default function PriwaMobileFlightSheet({
   mosaics,
-  enabledMosaicIds,
   areBoundariesVisible,
   isOpen,
   focusedMosaicId,
-  onSetMosaicVisibility,
   onZoomToMosaic,
   onBoundariesVisibilityChange,
   onOpenChange,
@@ -81,7 +77,8 @@ export default function PriwaMobileFlightSheet({
               />
             </div>
             <p className="mt-1">
-              Ein Luftbild wird erst geladen, wenn du es einzeln einschaltest.
+              Auf Mobilgeräten werden nur die Grenzen bestätigt erfasster
+              Umfeldbefliegungen angezeigt.
             </p>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -131,7 +128,7 @@ export default function PriwaMobileFlightSheet({
                       </Tag>
                     </div>
 
-                    <div className="mt-3 flex items-center justify-between gap-3">
+                    <div className="mt-3">
                       <Button
                         size="small"
                         icon={<AimOutlined />}
@@ -144,17 +141,6 @@ export default function PriwaMobileFlightSheet({
                       >
                         Grenze zeigen
                       </Button>
-                      <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
-                        Luftbild
-                        <Switch
-                          size="small"
-                          checked={enabledMosaicIds.has(mosaic.id)}
-                          onChange={(checked) =>
-                            onSetMosaicVisibility(mosaic.id, checked)
-                          }
-                          aria-label={`Luftbild ${mosaic.label} anzeigen`}
-                        />
-                      </label>
                     </div>
                     {!mosaic.bbox && (
                       <div className="mt-2 text-xs text-amber-700">
