@@ -50,7 +50,7 @@ export const indexConfirmedPriwaFlightLabelsByTreeId = (
   groups.forEach((group) => {
     const labels = [...new Set(group.datasetIds)].flatMap((datasetId) => {
       const mosaic = mosaicById.get(datasetId);
-      return mosaic ? [mosaic.label] : [];
+      return mosaic?.flightType === "umfeldbefliegung" ? [mosaic.label] : [];
     });
     group.treeIds.forEach((treeId) => {
       labelsByTreeId[treeId] = labels;

@@ -37,6 +37,30 @@ const mosaics: IPriwaMosaic[] = [
     additionalInformation: null,
     flightType: "umfeldbefliegung",
   },
+  {
+    id: "10513",
+    projectId: "project-1",
+    label: "pending-flight.zip",
+    cogUrl: "10513_cog.tif",
+    bbox: null,
+    captureDate: "2026-07-15",
+    createdAt: "2026-07-15T09:00:00.000Z",
+    authors: [],
+    additionalInformation: null,
+    flightType: null,
+  },
+  {
+    id: "10514",
+    projectId: "project-1",
+    label: "excluded-flight.zip",
+    cogUrl: "10514_cog.tif",
+    bbox: null,
+    captureDate: "2026-07-15",
+    createdAt: "2026-07-15T10:00:00.000Z",
+    authors: [],
+    additionalInformation: null,
+    flightType: "not_priwa",
+  },
 ];
 
 describe("PRIWA Befallsgruppen availability", () => {
@@ -67,7 +91,7 @@ describe("PRIWA Befallsgruppen availability", () => {
           {
             ...group,
             treeIds: ["tree-1", "tree-2"],
-            datasetIds: ["10512", "10512", "missing"],
+            datasetIds: ["10512", "10512", "10513", "10514", "missing"],
           },
         ],
         mosaics,
