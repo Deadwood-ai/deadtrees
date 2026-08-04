@@ -51,6 +51,15 @@ export const resolvePriwaReviewSelection = (
   items[0] ??
   null;
 
+export const resolvePriwaReviewItemToActivate = (
+  items: IPriwaReviewItem[],
+  selectedKey: string | null,
+  activatedKey: string | null,
+) =>
+  selectedKey === activatedKey
+    ? null
+    : (items.find((item) => item.key === selectedKey) ?? null);
+
 export const findPriwaReviewItemByMosaic = (
   items: IPriwaReviewItem[],
   mosaicId: string,
@@ -79,5 +88,4 @@ export const shouldClosePriwaReviewTree = (
   selectedTreeId: string | null,
 ) =>
   !!selectedTreeId &&
-  (item.kind === "unassigned-upload" ||
-    !item.treeIds.includes(selectedTreeId));
+  (item.kind === "unassigned-upload" || !item.treeIds.includes(selectedTreeId));

@@ -1,5 +1,5 @@
 import { App } from "antd";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { arePriwaBefallsgruppenReady } from "./priwaBefallsgruppenState";
 import {
@@ -11,6 +11,7 @@ import {
   findPriwaReviewItemByGroup,
   findPriwaReviewItemByMosaic,
   findPriwaReviewItemByPoint,
+  resolvePriwaReviewItemToActivate,
   resolvePriwaReviewSelection,
 } from "./priwaReviewQueue";
 import type {
@@ -78,6 +79,7 @@ export function usePriwaReviewController({
   const [selectedReviewKey, setSelectedReviewKey] = useState<string | null>(
     () => readPersistedReviewSelection(projectId),
   );
+  const activatedReviewKeyRef = useRef<string | null>(null);
   const [groupEditorDraft, setGroupEditorDraft] =
     useState<IPriwaBefallsgruppeEditorDraft | null>(null);
   const flightReview = usePriwaFlightReview({
@@ -143,6 +145,7 @@ export function usePriwaReviewController({
 
   const activateReviewItem = useCallback(
     (item: IPriwaReviewItem) => {
+      activatedReviewKeyRef.current = item.key;
       persistReviewSelection(item.key);
       showOnlyMosaics(reviewItemDatasetIds(item));
     },
@@ -163,10 +166,17 @@ export function usePriwaReviewController({
 
   useEffect(() => {
     if (isMobile || isWorkspaceLoading) return;
-    if (
-      selectedReviewKey &&
-      reviewItems.some((item) => item.key === selectedReviewKey)
-    ) {
+
+    const selectedItemToActivate = resolvePriwaReviewItemToActivate(
+      reviewItems,
+      selectedReviewKey,
+      activatedReviewKeyRef.current,
+    );
+    if (selectedItemToActivate) {
+      selectReviewItem(selectedItemToActivate);
+      return;
+    }
+    if (reviewItems.some((item) => item.key === selectedReviewKey)) {
       return;
     }
 
@@ -175,7 +185,10 @@ export function usePriwaReviewController({
       selectedReviewKey,
     );
     if (nextItem) selectReviewItem(nextItem);
-    else persistReviewSelection(null);
+    else {
+      activatedReviewKeyRef.current = null;
+      persistReviewSelection(null);
+    }
   }, [
     isMobile,
     isWorkspaceLoading,
