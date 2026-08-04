@@ -5,6 +5,7 @@ import type { IPriwaMosaic } from "./usePriwaMosaics";
 import {
   buildPriwaReviewWorkspace,
   reconcilePriwaDatasetAssignments,
+  resolvePriwaSuggestedAssignments,
   reviewItemDatasetIds,
   setPriwaDatasetAssignment,
 } from "./priwaReviewWorkspace";
@@ -70,6 +71,25 @@ describe("reconcilePriwaDatasetAssignments", () => {
         ["flight-1", "flight-2"],
       ),
     ).toEqual(["flight-1"]);
+  });
+});
+
+describe("resolvePriwaSuggestedAssignments", () => {
+  it("selects a flight that arrives before the reviewer changes the draft", () => {
+    expect(resolvePriwaSuggestedAssignments(null, [], [])).toEqual([]);
+    expect(
+      resolvePriwaSuggestedAssignments(
+        null,
+        ["flight-1"],
+        ["flight-1"],
+      ),
+    ).toEqual(["flight-1"]);
+  });
+
+  it("preserves an explicit reviewer deselection across later rerenders", () => {
+    expect(
+      resolvePriwaSuggestedAssignments([], ["flight-1"], ["flight-1"]),
+    ).toEqual([]);
   });
 });
 
