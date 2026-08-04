@@ -123,6 +123,43 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
         { timeout: 20_000 },
       )
       .toBe(true);
+
+    const miniSatelliteMap = page.getByTestId("home-mini-satellite-map");
+    await miniSatelliteMap.scrollIntoViewIfNeeded();
+    await expect(miniSatelliteMap.locator(".ol-viewport")).toBeVisible();
+    await expect(
+      miniSatelliteMap.locator(".dt-map-attribution-control"),
+    ).toContainText(
+      "Powered by Esri · Vantor, Earthstar Geographics & GIS User Community",
+    );
+  });
+
+  test("mobile Home imagery attribution reveals the full providers", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/");
+    await page
+      .getByRole("button", { name: "Accept" })
+      .click({ timeout: 5_000 })
+      .catch(() => undefined);
+
+    const miniSatelliteMap = page.getByTestId("home-mini-satellite-map");
+    await miniSatelliteMap.scrollIntoViewIfNeeded();
+    const attribution = miniSatelliteMap.locator(
+      ".dt-map-attribution-control",
+    );
+    const disclosure = attribution.locator(".dt-attribution-mobile");
+    await expect(disclosure.locator("summary")).toHaveText(
+      "Powered by Esri · Sources ⓘ",
+    );
+    const fullCredit = disclosure.locator(".dt-attribution-mobile-full");
+    await expect(fullCredit).toBeHidden();
+    await disclosure.locator("summary").click({ timeout: 5_000 });
+    await expect(fullCredit).toHaveText(
+      "Vantor, Earthstar Geographics & GIS User Community",
+    );
+    await expect(fullCredit).toBeVisible();
   });
 
   test("public info and auth routes render their base read-only states", async ({
@@ -252,6 +289,15 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
       page.locator('[data-testid="dataset-detail-map"] .ol-viewport'),
     ).toBeVisible({ timeout: 45_000 });
     await expect(page.getByTestId("dataset-layer-controls")).toBeVisible();
+    await page
+      .getByTestId("dataset-layer-controls")
+      .getByText("Imagery", { exact: true })
+      .click();
+    await expect(
+      page
+        .getByTestId("dataset-detail-map")
+        .locator(".dt-map-attribution-control"),
+    ).toContainText("Powered by Esri");
     await expect(page.getByTestId("dataset-download-section")).toBeVisible();
     await expect(
       page
@@ -460,6 +506,13 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
 
     const controls = page.getByTestId("deadtrees-layer-controls");
     await expect(controls).toBeVisible();
+    await expect(
+      page
+        .getByTestId("deadtrees-map")
+        .locator(".dt-map-attribution-control"),
+    ).toContainText(
+      "Powered by Esri · Vantor, Earthstar Geographics & GIS User Community",
+    );
     expect(earlyWaybackMetadataRequests).toHaveLength(0);
     await expect(
       controls.getByRole("checkbox", { name: "Tree cover [%]" }),
@@ -475,5 +528,163 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
 
     await expect(controls.getByText("Layer Opacity")).toBeVisible();
     await expect(controls.getByText("Model Info")).toBeVisible();
+  });
+
+  test("mobile time controls keep historical discovery opt-in", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const waybackRequests: string[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (
+        url.hostname !== "127.0.0.1" &&
+        url.href.toLowerCase().includes("wayback")
+      ) {
+        waybackRequests.push(url.href);
+      }
+    });
+
+    await page.goto("/deadtrees");
+    await page
+      .getByRole("button", { name: "I Understand" })
+      .click({ timeout: 5_000 })
+      .catch(() => undefined);
+    await page
+      .getByRole("button", { name: "Accept" })
+      .click({ timeout: 5_000 })
+      .catch(() => undefined);
+
+    const mobileAttribution = page
+      .getByTestId("deadtrees-map")
+      .locator(".dt-map-attribution-control");
+    const mobileAttributionBox = await mobileAttribution.boundingBox();
+    const mobileTimePillBox = await page
+      .getByRole("button", {
+        name: /Prediction year .* Change time settings/,
+      })
+      .boundingBox();
+    expect(mobileAttributionBox).not.toBeNull();
+    expect(mobileTimePillBox).not.toBeNull();
+    const mobileAttributionDisclosure = mobileAttribution.locator(
+      ".dt-attribution-mobile",
+    );
+    await expect(mobileAttributionDisclosure.locator("summary")).toHaveText(
+      "Powered by Esri · Sources ⓘ",
+    );
+    const mobileFullAttribution = mobileAttributionDisclosure.locator(
+      ".dt-attribution-mobile-full",
+    );
+    await expect(mobileFullAttribution).toBeHidden();
+    await mobileAttributionDisclosure.locator("summary").click();
+    await expect(mobileFullAttribution).toHaveText(
+      "Vantor, Earthstar Geographics & GIS User Community",
+    );
+    await expect(mobileFullAttribution).toBeVisible();
+    await mobileAttributionDisclosure.locator("summary").click();
+    await expect(mobileFullAttribution).toBeHidden();
+    await expect(
+      mobileAttribution.locator(".dt-attribution-full"),
+    ).toBeHidden();
+    expect(mobileAttributionBox!.width).toBeLessThan(290);
+    expect(mobileAttributionBox!.x).toBeGreaterThanOrEqual(4);
+    expect(mobileAttributionBox!.x).toBeLessThanOrEqual(12);
+    const mobileControlGap =
+      mobileTimePillBox!.y -
+      (mobileAttributionBox!.y + mobileAttributionBox!.height);
+    expect(mobileControlGap).toBeGreaterThanOrEqual(4);
+    expect(mobileControlGap).toBeLessThanOrEqual(12);
+    await expect(mobileAttribution.locator("button")).toBeHidden();
+
+    await page
+      .getByRole("button", {
+        name: /Prediction year .* Change time settings/,
+      })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Browse historical imagery" }),
+    ).toBeVisible();
+
+    // Discovery is debounced for one second. Opening the drawer must remain a
+    // prediction-year-only action until the explicit history button is used.
+    await page.waitForTimeout(1_500);
+    expect(waybackRequests).toHaveLength(0);
+
+    // Pending discovery exposes a real escape hatch. Let the request layer
+    // start, then verify returning to Latest aborts the active walk instead of
+    // allowing more Wayback probes to continue in the background.
+    await page
+      .getByRole("button", { name: "Browse historical imagery" })
+      .click();
+    const backToLatest = page.getByRole("button", {
+      name: "Back to latest imagery",
+    });
+    await expect(backToLatest).toBeVisible();
+    await expect
+      .poll(() => waybackRequests.length, { timeout: 20_000 })
+      .toBeGreaterThan(0);
+    await backToLatest.click();
+    await expect(
+      page.getByRole("button", { name: "Browse historical imagery" }),
+    ).toBeVisible();
+    const requestCountAfterCancel = waybackRequests.length;
+    await page.waitForTimeout(1_500);
+    expect(waybackRequests).toHaveLength(requestCountAfterCancel);
+  });
+
+  test("pending history selection survives a mobile-to-desktop breakpoint change", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/deadtrees");
+    await page
+      .getByRole("button", { name: "I Understand" })
+      .click({ timeout: 5_000 })
+      .catch(() => undefined);
+
+    await page
+      .getByRole("button", {
+        name: /Prediction year .* Change time settings/,
+      })
+      .click();
+    await page
+      .getByRole("button", { name: "Browse historical imagery" })
+      .click();
+
+    await page.setViewportSize({ width: 1799, height: 1195 });
+    const desktopSelector = page.getByTestId(
+      "desktop-year-imagery-selector",
+    );
+    await expect(desktopSelector).toBeVisible();
+    await expect(
+      desktopSelector
+        .locator(".ant-segmented-item")
+        .filter({ hasText: "Historical" }),
+    ).toHaveClass(/ant-segmented-item-selected/);
+
+    const desktopAttributionBox = await page
+      .getByTestId("deadtrees-map")
+      .locator(".dt-map-attribution-control")
+      .boundingBox();
+    expect(desktopAttributionBox).not.toBeNull();
+    expect(desktopAttributionBox!.height).toBeLessThan(32);
+    expect(
+      1195 - (desktopAttributionBox!.y + desktopAttributionBox!.height),
+    ).toBeLessThanOrEqual(16);
+
+    await page.setViewportSize({ width: 1024, height: 768 });
+    const mediumAttributionBox = await page
+      .getByTestId("deadtrees-map")
+      .locator(".dt-map-attribution-control")
+      .boundingBox();
+    const mediumTimeSelectorBox = await page
+      .getByTestId("desktop-year-imagery-selector")
+      .boundingBox();
+    expect(mediumAttributionBox).not.toBeNull();
+    expect(mediumTimeSelectorBox).not.toBeNull();
+    expect(
+      mediumTimeSelectorBox!.y -
+        (mediumAttributionBox!.y + mediumAttributionBox!.height),
+    ).toBeGreaterThanOrEqual(8);
   });
 });

@@ -9,12 +9,19 @@ interface MobileTimeDrawerProps {
   waybackItems: WaybackItemWithMetadata[];
   isLoadingImagery: boolean;
   isWaybackActive: boolean;
+  /** Whether the basemap renders live imagery rather than a Wayback release */
+  isUsingLiveImagery: boolean;
+  /** Whether historical discovery or selection is currently active */
+  isBrowsingImageryHistory: boolean;
   autoMatchImagery: boolean;
   showForest: boolean;
   showDeadwood: boolean;
   onClose: () => void;
   onPredictionYearChange: (year: string) => void;
   onImageryChange: (releaseNum: number) => void;
+  onUseLiveImagery: () => void;
+  /** Start discovering the historical releases at this location */
+  onBrowseHistory: () => void;
   onAutoMatchChange: (enabled: boolean) => void;
 }
 
@@ -29,12 +36,16 @@ const MobileTimeDrawer = ({
   waybackItems,
   isLoadingImagery,
   isWaybackActive,
+  isUsingLiveImagery,
+  isBrowsingImageryHistory,
   autoMatchImagery,
   showForest,
   showDeadwood,
   onClose,
   onPredictionYearChange,
   onImageryChange,
+  onUseLiveImagery,
+  onBrowseHistory,
   onAutoMatchChange,
 }: MobileTimeDrawerProps) => {
   const productName =
@@ -61,9 +72,13 @@ const MobileTimeDrawer = ({
         isLoadingImagery={isLoadingImagery}
         waybackItems={waybackItems}
         selectedReleaseNum={selectedReleaseNum}
+        isUsingLiveImagery={isUsingLiveImagery}
+        isBrowsingImageryHistory={isBrowsingImageryHistory}
         autoMatchImagery={autoMatchImagery}
         onPredictionYearChange={onPredictionYearChange}
         onImageryChange={onImageryChange}
+        onUseLiveImagery={onUseLiveImagery}
+        onBrowseHistory={onBrowseHistory}
         onAutoMatchChange={onAutoMatchChange}
       />
     </MobileBottomSheet>

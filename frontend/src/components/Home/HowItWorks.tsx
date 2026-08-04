@@ -55,6 +55,7 @@ const DeferredMiniSatelliteMap = () => (
     className="h-full w-full"
     placeholder={<div className="h-full w-full animate-pulse bg-gray-100" />}
     rootMargin="250px 0px"
+    testId="home-mini-satellite-map"
   >
     <Suspense fallback={<div className="h-full w-full animate-pulse bg-gray-100" />}>
       <MiniSatelliteMap />

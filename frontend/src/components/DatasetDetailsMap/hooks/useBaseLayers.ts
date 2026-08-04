@@ -8,9 +8,7 @@ import type { Map as OLMap } from "ol";
 import {
 	acquireLibertyBasemapGroup,
 	releaseLibertyBasemapGroup,
-	createWaybackTileLayer,
-	createWaybackSource,
-	DEFAULT_WAYBACK_RELEASE,
+	createWorldImagerySource,
 } from "../../../utils/basemaps";
 
 export type MapStyle = string;
@@ -73,7 +71,13 @@ export function useBaseLayers({
 		const libertyLayer = acquireLibertyBasemapGroup();
 		libertyLayer.setVisible(!isSatellite);
 
-		const waybackLayer = createWaybackTileLayer(DEFAULT_WAYBACK_RELEASE);
+		// Live Esri World Imagery. This map has no imagery-history timeline, so
+		// there is no reason to pay the Wayback archive host's multi-second tile
+		// latency for the same pictures.
+		const waybackLayer = new TileLayer({
+			preload: 0,
+			source: createWorldImagerySource(),
+		});
 		waybackLayer.setVisible(isSatellite);
 
 		// Insert at bottom so basemaps sit below ortho
@@ -110,7 +114,8 @@ export function useBaseLayers({
 		const isSatellite = mapStyle === "satellite-streets-v12";
 		libertyLayerRef.current.setVisible(!isSatellite);
 		waybackLayerRef.current.setVisible(isSatellite);
-		waybackLayerRef.current.setSource(createWaybackSource(DEFAULT_WAYBACK_RELEASE));
+		// Source is constant — re-setting it here would only throw away the
+		// already-downloaded imagery tiles.
 		basemapLayerRef.current = isSatellite ? waybackLayerRef.current : libertyLayerRef.current;
 	}, [mapStyle]);
 

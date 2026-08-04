@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Button,
@@ -50,12 +50,14 @@ import {
   releaseLibertyBasemapGroup,
   createStandardMapControls,
   getCachedWaybackSource,
-  DEFAULT_WAYBACK_RELEASE,
-  createWaybackTileLayer,
+  createWorldImageryTileLayer,
+  getSharedWorldImagerySource,
 } from "../../utils/basemaps";
 import LayerControlPanel from "./LayerControlPanel";
 import LocationControls from "./LocationControls";
-import YearImagerySelector from "./YearImagerySelector";
+import YearImagerySelector, {
+  pickAutoMatchImagery,
+} from "./YearImagerySelector";
 import PolygonStatsModal from "./PolygonStatsModal";
 import MobileAddTreeButton from "./mobile/MobileAddTreeButton";
 import MobileAnalysisDrawer from "./mobile/MobileAnalysisDrawer";
@@ -64,7 +66,10 @@ import MobileTimeDrawer from "./mobile/MobileTimeDrawer";
 import MobileTimePill from "./mobile/MobileTimePill";
 import MobileMapControls from "./mobile/MobileMapControls";
 import type { MobileMapPanel } from "./mobile/MobileMapControls";
-import { useMobileImageryAutoSelect } from "./mobile/useMobileImageryAutoSelect";
+import {
+  LIVE_IMAGERY_MODE,
+  imageryModeReducer,
+} from "./imageryMode";
 import { useDatasetMap } from "../../hooks/useDatasetMapProvider";
 import { useAuth } from "../../hooks/useAuthProvider";
 import { useCanAudit } from "../../hooks/useUserPrivileges";
@@ -184,7 +189,7 @@ const DeadtreesMap = () => {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
   const libertyBasemapLayerRef = useRef<LayerGroup | null>(null);
-  const waybackBasemapLayerRef = useRef<TileLayer<XYZ> | null>(null);
+  const imageryBasemapLayerRef = useRef<TileLayer<XYZ> | null>(null);
   const forestLayerRef = useRef<TileLayerWebGL | null>(null);
   const deadwoodLayerRef = useRef<TileLayerWebGL | null>(null);
   const hasAutoSelectedImageryRef = useRef(false); // Track if we've done initial auto-selection
@@ -249,15 +254,34 @@ const DeadtreesMap = () => {
     createObservation: createPublicTreeObservation,
   } = usePublicTreeObservations();
 
-  // Wayback imagery state - using debounced location-based query
-  // Starts on the newest Wayback release for immediate satellite display and
-  // gets updated when location-specific wayback items load
-  const [selectedReleaseNum, setSelectedReleaseNum] = useState<number | null>(
-    DEFAULT_WAYBACK_RELEASE,
+  // One parent-owned mode survives desktop/mobile breakpoint changes. In
+  // particular, "discovering" remembers a history request until candidates
+  // arrive even if the responsive selector that initiated it unmounts.
+  const [imageryMode, dispatchImageryMode] = useReducer(
+    imageryModeReducer,
+    LIVE_IMAGERY_MODE,
   );
+  const selectedReleaseNum =
+    imageryMode.kind === "historical" ? imageryMode.releaseNum : null;
+  const isUsingLiveImagery = imageryMode.kind !== "historical";
+  const isBrowsingImageryHistory = imageryMode.kind !== "live";
+  const handleImageryChange = useCallback((releaseNum: number) => {
+    dispatchImageryMode({ type: "select-release", releaseNum });
+  }, []);
+  const handleBrowseHistory = useCallback(() => {
+    dispatchImageryMode({ type: "browse-history" });
+  }, []);
   const [autoMatchImagery, setAutoMatchImagery] = useState(false); // Manual imagery selection by default
-  const [shouldLoadLocalWaybackItems, setShouldLoadLocalWaybackItems] =
-    useState(false);
+
+  // Drop back to the fast live-imagery basemap. Auto-match has to go off with
+  // it: it would otherwise immediately re-select a Wayback release and undo
+  // the switch on the next render. Candidate discovery is stood down too —
+  // it costs ~150 tilemap probes per location and the user just said they do
+  // not want the historical basemap.
+  const handleUseLiveImagery = useCallback(() => {
+    dispatchImageryMode({ type: "use-live" });
+    setAutoMatchImagery(false);
+  }, []);
 
   // Track map center in lon/lat for location-specific wayback queries
   const [mapCenterLonLat, setMapCenterLonLat] = useState<{
@@ -283,17 +307,39 @@ const DeadtreesMap = () => {
   } = useWaybackItemsDebounced(
     mapCenterLonLat?.lon,
     mapCenterLonLat?.lat,
-    DeadwoodMapStyle === "wayback" && shouldLoadLocalWaybackItems,
+    DeadwoodMapStyle === "wayback" && isBrowsingImageryHistory,
   );
 
-  useMobileImageryAutoSelect({
-    enabled: isMobile && DeadwoodMapStyle === "wayback",
-    waybackItems: localWaybackItems,
-    selectedReleaseNum,
-    onImageryChange: setSelectedReleaseNum,
+  // Resolve pending history and auto-match in the parent so the behavior does
+  // not depend on which responsive selector happens to be mounted.
+  useEffect(() => {
+    if (imageryMode.kind === "live" || localWaybackItems.length === 0) return;
+
+    if (autoMatchImagery) {
+      const matchedReleaseNum = pickAutoMatchImagery(
+        localWaybackItems,
+        Number.parseInt(selectedYear),
+        selectedReleaseNum,
+      );
+      if (matchedReleaseNum !== null) {
+        handleImageryChange(matchedReleaseNum);
+      }
+      return;
+    }
+
+    if (imageryMode.kind === "discovering") {
+      handleImageryChange(
+        localWaybackItems[localWaybackItems.length - 1].releaseNum,
+      );
+    }
+  }, [
     autoMatchImagery,
-    predictionYear: selectedYear,
-  });
+    handleImageryChange,
+    imageryMode.kind,
+    localWaybackItems,
+    selectedReleaseNum,
+    selectedYear,
+  ]);
 
   // Clicked location values (displayed in legend)
   const [clickedValues, setClickedValues] = useState<ClickedValues | null>(
@@ -429,13 +475,14 @@ const DeadtreesMap = () => {
       const libertyBasemapLayer = acquireLibertyBasemapGroup();
       libertyBasemapLayer.setVisible(DeadwoodMapStyle === "streets-v12");
 
-      // Initialize with Wayback satellite imagery directly (using default release)
-      const waybackBasemapLayer = createWaybackTileLayer(
-        DEFAULT_WAYBACK_RELEASE,
-      );
-      waybackBasemapLayer.setVisible(DeadwoodMapStyle === "wayback");
+      // Start on live World Imagery — same pictures as the newest Wayback
+      // release but ~70x faster to load. The layer only switches to a Wayback
+      // source once the user picks a historical release in the imagery
+      // timeline (see the source-swap effect below).
+      const imageryBasemapLayer = createWorldImageryTileLayer();
+      imageryBasemapLayer.setVisible(DeadwoodMapStyle === "wayback");
       libertyBasemapLayerRef.current = libertyBasemapLayer;
-      waybackBasemapLayerRef.current = waybackBasemapLayer;
+      imageryBasemapLayerRef.current = imageryBasemapLayer;
       // Create only 2 layers - one for forest, one for deadwood (for current year)
       // Forest layer: Light green → Dark green gradient based on cover intensity
       const forestLayer = new TileLayerWebGL({
@@ -527,7 +574,7 @@ const DeadtreesMap = () => {
         // Layer order: basemap -> model rasters -> overlays -> user location
         layers: [
           libertyBasemapLayer,
-          waybackBasemapLayer,
+          imageryBasemapLayer,
           forestLayer,
           deadwoodLayer,
           clickedCellLayer,
@@ -648,20 +695,24 @@ const DeadtreesMap = () => {
     libertyBasemapLayerRef.current?.setVisible(
       DeadwoodMapStyle === "streets-v12",
     );
-    waybackBasemapLayerRef.current?.setVisible(DeadwoodMapStyle === "wayback");
+    imageryBasemapLayerRef.current?.setVisible(DeadwoodMapStyle === "wayback");
   }, [DeadwoodMapStyle, map]);
 
-  // Swap the wayback source only when the selected release actually changes.
-  // Sources are cached per release, so returning to a recently viewed release
-  // reuses its already-loaded tiles instead of re-fetching them.
+  // Swap the imagery source only when the selection actually changes. Until
+  // the user picks a release from the timeline we stay on live World Imagery;
+  // after that, sources are cached per release so returning to a recently
+  // viewed release reuses its already-loaded tiles instead of re-fetching them.
   useEffect(() => {
-    const layer = waybackBasemapLayerRef.current;
-    if (!selectedReleaseNum || !layer) return;
-    const nextSource = getCachedWaybackSource(selectedReleaseNum);
+    const layer = imageryBasemapLayerRef.current;
+    if (!layer) return;
+    const nextSource =
+      imageryMode.kind === "historical"
+        ? getCachedWaybackSource(imageryMode.releaseNum)
+        : getSharedWorldImagerySource();
     if (layer.getSource() !== nextSource) {
       layer.setSource(nextSource);
     }
-  }, [map, selectedReleaseNum]);
+  }, [imageryMode, map]);
 
   //update opacity of geotiff layers
   useEffect(() => {
@@ -1286,6 +1337,7 @@ const DeadtreesMap = () => {
   return (
     <div className="h-full w-full">
       <div
+        className="dt-deadtrees-map"
         style={{
           width: "100%",
           height: "100%",
@@ -1347,9 +1399,6 @@ const DeadtreesMap = () => {
           hasLocationFix={userLocation.hasFix}
           onLocate={() => locateUser(true)}
           onOpenPanel={(panel) => {
-            if (panel === "time") {
-              setShouldLoadLocalWaybackItems(true);
-            }
             setMobileMapPanel((currentPanel) =>
               currentPanel === panel ? null : panel,
             );
@@ -1361,7 +1410,6 @@ const DeadtreesMap = () => {
           active={mobileMapPanel === "time"}
           hidden={hideMobileFloatingControls}
           onClick={() => {
-            setShouldLoadLocalWaybackItems(true);
             setMobileMapPanel((currentPanel) =>
               currentPanel === "time" ? null : "time",
             );
@@ -1380,29 +1428,32 @@ const DeadtreesMap = () => {
 
         {/* Bottom Center - Combined Year and Imagery Selector (desktop) */}
         {!isMobile && !shouldHideYearImagerySelector && (
-          <div className="absolute bottom-2 left-1/2 z-50 w-[calc(100vw-1rem)] -translate-x-1/2 md:w-auto">
+          <div
+            className="absolute bottom-2 left-1/2 z-50 w-[calc(100vw-1rem)] -translate-x-1/2 md:w-auto"
+            data-testid="desktop-year-imagery-selector"
+          >
             <YearImagerySelector
               predictionYear={selectedYear}
               onPredictionYearChange={(year) => {
-                // Touching the year selector is a strong signal that the user
-                // will browse imagery next — kick off candidate discovery now
-                // so auto-match has less (or nothing) left to wait for.
-                setShouldLoadLocalWaybackItems(true);
+                // Deliberately does NOT kick off candidate discovery. Picking a
+                // prediction year says nothing about wanting the historical
+                // basemap, and pre-warming here would silently restart the
+                // ~150-probe scan straight after the user chose "Latest".
                 setSelectedYear(year);
               }}
               selectedReleaseNum={selectedReleaseNum}
-              onImageryChange={setSelectedReleaseNum}
+              onImageryChange={handleImageryChange}
               waybackItems={localWaybackItems}
               isLoading={isWaybackLoading}
               loadProgress={waybackLoadProgress}
               isUnverifiedFallback={isWaybackUnverified}
               isWaybackActive={DeadwoodMapStyle === "wayback"}
+              isUsingLiveImagery={isUsingLiveImagery}
+              onUseLiveImagery={handleUseLiveImagery}
+              isBrowsingImageryHistory={isBrowsingImageryHistory}
               autoMatchImagery={autoMatchImagery}
-              onAutoMatchChange={(enabled) => {
-                setShouldLoadLocalWaybackItems(true);
-                setAutoMatchImagery(enabled);
-              }}
-              onRequestLocalImagery={() => setShouldLoadLocalWaybackItems(true)}
+              onAutoMatchChange={setAutoMatchImagery}
+              onRequestLocalImagery={handleBrowseHistory}
               showForest={showForest}
               showDeadwood={showDeadwood}
               compactMode={isMobile}
@@ -1434,10 +1485,14 @@ const DeadtreesMap = () => {
           predictionYear={selectedYear}
           onPredictionYearChange={setSelectedYear}
           selectedReleaseNum={selectedReleaseNum}
-          onImageryChange={setSelectedReleaseNum}
+          onImageryChange={handleImageryChange}
+          onUseLiveImagery={handleUseLiveImagery}
+          onBrowseHistory={handleBrowseHistory}
           waybackItems={localWaybackItems}
           isLoadingImagery={isWaybackLoading}
           isWaybackActive={DeadwoodMapStyle === "wayback"}
+          isUsingLiveImagery={isUsingLiveImagery}
+          isBrowsingImageryHistory={isBrowsingImageryHistory}
           autoMatchImagery={autoMatchImagery}
           onAutoMatchChange={setAutoMatchImagery}
           showForest={showForest}

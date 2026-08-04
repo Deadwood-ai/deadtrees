@@ -13,7 +13,18 @@ export const OPENFREEMAP_LIBERTY_STYLE_URL = "https://tiles.openfreemap.org/styl
 export const OPENFREEMAP_ATTRIBUTION = "OpenFreeMap © OpenMapTiles Data from OpenStreetMap";
 export const OPENFREEMAP_MAX_ZOOM = 14;
 export const OPENSTREETMAP_ATTRIBUTION = "© OpenStreetMap contributors";
-export const WAYBACK_ATTRIBUTION = "Imagery © Esri World Imagery Wayback, Maxar, Earthstar Geographics";
+export const ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL =
+  "Powered by Esri · Vantor, Earthstar Geographics & GIS User Community";
+export const ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE =
+  "Powered by Esri · Sources ⓘ";
+export const ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE_FULL =
+  "Vantor, Earthstar Geographics & GIS User Community";
+export const ESRI_WORLD_IMAGERY_ATTRIBUTION =
+  `<span class="dt-attribution-full">${ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL}</span>` +
+  `<details class="dt-attribution-mobile"><summary>${ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE}</summary>` +
+  `<span class="dt-attribution-mobile-full">${ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE_FULL}</span></details>`;
+export const WAYBACK_ATTRIBUTION = ESRI_WORLD_IMAGERY_ATTRIBUTION;
+export const WORLD_IMAGERY_ATTRIBUTION = ESRI_WORLD_IMAGERY_ATTRIBUTION;
 
 type StrokeWithOffsetCompat = Stroke & {
   dtOffset_?: number;
@@ -44,12 +55,10 @@ export const applyOpenFreeMapLibertyStyle = (target: Parameters<typeof apply>[0]
 
 export const createStandardMapControls = ({
   includeZoom = true,
-  includeAttribution = false,
-  attributionCollapsed = true,
+  includeAttribution = true,
 }: {
   includeZoom?: boolean;
   includeAttribution?: boolean;
-  attributionCollapsed?: boolean;
 } = {}) => {
   const controls: Control[] = [];
 
@@ -65,8 +74,7 @@ export const createStandardMapControls = ({
     controls.push(
       new Attribution({
         className: "dt-map-attribution-control",
-        collapsible: true,
-        collapsed: attributionCollapsed,
+        collapsible: false,
       }),
     );
   }
@@ -134,7 +142,44 @@ export const releaseLibertyBasemapGroup = (group: LayerGroup): void => {
 export const DEFAULT_WAYBACK_RELEASE = 32246; // World Imagery (Wayback 2026-06-30)
 export const DEFAULT_WAYBACK_RELEASE_DATETIME = Date.UTC(2026, 5, 30);
 
-export const createWaybackSource = (releaseNum: number) =>
+/**
+ * Live Esri World Imagery — the same pictures as the newest Wayback release,
+ * served from Esri's regular (CDN-backed) tile endpoint.
+ *
+ * The Wayback host is an archive service, not a delivery CDN: measured from
+ * Europe it answers 8-16KB JPEGs in 3-6s with ~25% outright failures
+ * (ERR_CONNECTION_RESET / ERR_TIMED_OUT), and because the browser opens ~6
+ * parallel connections per host those queue up into ~14s median tile latency.
+ * The identical tiles from this endpoint arrive in 40-115ms. Only reach for
+ * Wayback when the user actually asks for a historical release.
+ */
+export const WORLD_IMAGERY_TILE_URL =
+  "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+
+export const createWorldImagerySource = () =>
+  new XYZ({
+    url: WORLD_IMAGERY_TILE_URL,
+    attributions: WORLD_IMAGERY_ATTRIBUTION,
+    maxZoom: 19,
+    crossOrigin: "anonymous",
+  });
+
+// One shared source so toggling basemaps (or remounting a map) keeps the
+// already-downloaded imagery tiles in the OpenLayers cache.
+let worldImagerySource: XYZ | null = null;
+
+export const getSharedWorldImagerySource = (): XYZ => {
+  worldImagerySource ??= createWorldImagerySource();
+  return worldImagerySource;
+};
+
+export const createWorldImageryTileLayer = () =>
+  new TileLayer({
+    preload: 0,
+    source: getSharedWorldImagerySource(),
+  });
+
+const createWaybackSource = (releaseNum: number) =>
   new XYZ({
     url: getWaybackTileUrl(releaseNum),
     attributions: WAYBACK_ATTRIBUTION,
@@ -165,12 +210,6 @@ export const getCachedWaybackSource = (releaseNum: number): XYZ => {
   }
   return source;
 };
-
-export const createWaybackTileLayer = (releaseNum: number) =>
-  new TileLayer({
-    preload: 0,
-    source: getCachedWaybackSource(releaseNum),
-  });
 
 export const createOpenStreetMapFallbackLayer = () =>
   new TileLayer({

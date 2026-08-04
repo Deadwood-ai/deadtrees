@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getWaybackItems,
-  getWaybackItemsWithLocalChanges,
   getMetadata,
   long2tile,
   lat2tile,
@@ -13,6 +12,10 @@ import {
   DEFAULT_WAYBACK_RELEASE,
   DEFAULT_WAYBACK_RELEASE_DATETIME,
 } from "../utils/basemaps";
+import {
+  discoverWaybackItemsWithLocalChanges,
+  type WaybackPoint,
+} from "../utils/waybackDiscovery";
 
 /**
  * ESRI World Imagery Wayback integration.
@@ -25,7 +28,7 @@ import {
  *   Only available from ESRI's per-release metadata service.
  *
  * The model here is a single, atomic, per-location candidate list:
- * 1. Change detection (`getWaybackItemsWithLocalChanges`) finds the releases
+ * 1. Abort-aware change detection finds the releases
  *    where the imagery at the map center actually changed. Candidates
  *    partition the release axis: between two changes every release serves
  *    byte-identical tiles, so ANY release resolves to the latest candidate at
@@ -48,6 +51,49 @@ export const WAYBACK_METADATA_TIMEOUT_MS = 10_000;
 export const WAYBACK_METADATA_CONCURRENCY = 6;
 export const WAYBACK_CANDIDATE_DISCOVERY_ZOOM = 12;
 export const WAYBACK_CANDIDATE_DEBOUNCE_MS = 1_000;
+
+export type WaybackCandidateTile = {
+  column: number;
+  row: number;
+};
+
+export const getWaybackCandidateTile = (
+  longitude: number,
+  latitude: number,
+): WaybackCandidateTile => ({
+  column: long2tile(longitude, WAYBACK_CANDIDATE_DISCOVERY_ZOOM),
+  row: lat2tile(latitude, WAYBACK_CANDIDATE_DISCOVERY_ZOOM),
+});
+
+export const shouldExposeWaybackCandidates = ({
+  enabled,
+  longitude,
+  latitude,
+  candidateTile,
+  isPlaceholderData,
+}: {
+  enabled: boolean;
+  longitude: number | undefined;
+  latitude: number | undefined;
+  candidateTile: WaybackCandidateTile | null;
+  isPlaceholderData: boolean;
+}): boolean => {
+  if (
+    !enabled ||
+    longitude === undefined ||
+    latitude === undefined ||
+    candidateTile === null ||
+    isPlaceholderData
+  ) {
+    return false;
+  }
+
+  const currentTile = getWaybackCandidateTile(longitude, latitude);
+  return (
+    candidateTile.column === currentTile.column &&
+    candidateTile.row === currentTile.row
+  );
+};
 
 /**
  * Extended WaybackItem with actual acquisition metadata
@@ -72,11 +118,6 @@ export interface WaybackItemWithMetadata extends WaybackItem {
   resolution?: number;
 }
 
-type WaybackPoint = {
-  longitude: number;
-  latitude: number;
-};
-
 /**
  * Loading progress for the candidate pipeline. Discovery (tilemap probing
  * inside wayback-core) has no per-request hooks, so it reports as a phase;
@@ -91,7 +132,7 @@ interface LoadWaybackItemsOptions {
   metadataTimeoutMs?: number;
   metadataConcurrency?: number;
   getItems?: typeof getWaybackItems;
-  getItemsWithLocalChanges?: typeof getWaybackItemsWithLocalChanges;
+  getItemsWithLocalChanges?: typeof discoverWaybackItemsWithLocalChanges;
   getItemMetadata?: typeof getMetadata;
   signal?: AbortSignal;
   onProgress?: (progress: WaybackLoadProgress) => void;
@@ -101,23 +142,67 @@ const withTimeout = async <T>(
   promise: Promise<T>,
   timeoutMs: number,
   message: string,
+  signal?: AbortSignal,
+  onTimeout?: (error: Error) => void,
 ): Promise<T> =>
   new Promise<T>((resolve, reject) => {
-    const timeoutHandle = globalThis.setTimeout(() => {
-      reject(new Error(message));
+    let timeoutHandle: ReturnType<typeof globalThis.setTimeout> | undefined;
+    let settled = false;
+
+    const cleanup = () => {
+      if (timeoutHandle !== undefined) {
+        globalThis.clearTimeout(timeoutHandle);
+      }
+      signal?.removeEventListener("abort", handleAbort);
+    };
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+    const handleAbort = () => {
+      const reason = signal?.reason;
+      const error =
+        reason instanceof Error
+          ? reason
+          : Object.assign(new Error("Wayback request aborted"), {
+              name: "AbortError",
+            });
+      settle(() => reject(error));
+    };
+
+    if (signal?.aborted) {
+      handleAbort();
+      return;
+    }
+
+    signal?.addEventListener("abort", handleAbort, { once: true });
+    timeoutHandle = globalThis.setTimeout(() => {
+      const error = new Error(message);
+      onTimeout?.(error);
+      settle(() => reject(error));
     }, timeoutMs);
 
     promise.then(
       (value) => {
-        globalThis.clearTimeout(timeoutHandle);
-        resolve(value);
+        settle(() => resolve(value));
       },
       (error) => {
-        globalThis.clearTimeout(timeoutHandle);
-        reject(error);
+        settle(() => reject(error));
       },
     );
   });
+
+const throwIfAborted = (signal?: AbortSignal): void => {
+  if (!signal?.aborted) return;
+
+  const reason = signal.reason;
+  if (reason instanceof Error) throw reason;
+  throw Object.assign(new Error("Wayback request aborted"), {
+    name: "AbortError",
+  });
+};
 
 /**
  * Release dates for every release the app has seen, keyed by release number.
@@ -207,12 +292,14 @@ export const enrichWaybackItemsWithMetadata = async (
     metadataTimeoutMs = WAYBACK_METADATA_TIMEOUT_MS,
     metadataConcurrency = WAYBACK_METADATA_CONCURRENCY,
     getItemMetadata = getMetadata,
+    signal,
     onProgress,
   }: Pick<
     LoadWaybackItemsOptions,
     | "metadataTimeoutMs"
     | "metadataConcurrency"
     | "getItemMetadata"
+    | "signal"
     | "onProgress"
   > = {},
 ): Promise<WaybackItemWithMetadata[]> => {
@@ -232,11 +319,13 @@ export const enrichWaybackItemsWithMetadata = async (
           item !== undefined;
           item = queue.shift()
         ) {
+          throwIfAborted(signal);
           try {
             const metadata = await withTimeout(
               getItemMetadata(point, zoomLevel, item.releaseNum),
               metadataTimeoutMs,
               `Wayback metadata timed out after ${metadataTimeoutMs}ms for release ${item.releaseNum}`,
+              signal,
             );
             resolved.set(item.releaseNum, metadata);
             onProgress?.({
@@ -244,7 +333,8 @@ export const enrichWaybackItemsWithMetadata = async (
               done: resolved.size,
               total: items.length,
             });
-          } catch {
+          } catch (error) {
+            if (signal?.aborted) throw error;
             failed.push(item);
           }
         }
@@ -255,7 +345,9 @@ export const enrichWaybackItemsWithMetadata = async (
   };
 
   const failedOnce = await runPass(items);
+  throwIfAborted(signal);
   const failedTwice = failedOnce.length > 0 ? await runPass(failedOnce) : [];
+  throwIfAborted(signal);
   failedTwice.forEach((item) => {
     console.warn(
       `Wayback metadata unavailable for release ${item.releaseNum}; keeping unverified release date`,
@@ -283,29 +375,48 @@ export const loadWaybackCandidates = async (
     discoveryTimeoutMs = WAYBACK_DISCOVERY_TIMEOUT_MS,
     metadataTimeoutMs,
     metadataConcurrency,
-    getItemsWithLocalChanges = getWaybackItemsWithLocalChanges,
+    getItemsWithLocalChanges = discoverWaybackItemsWithLocalChanges,
     getItemMetadata,
     signal,
     onProgress,
   }: LoadWaybackItemsOptions = {},
 ): Promise<WaybackItemWithMetadata[]> => {
+  throwIfAborted(signal);
   onProgress?.({ phase: "discovery" });
-  const items = await withTimeout(
-    getItemsWithLocalChanges(point, zoomLevel, {
+  const discoveryController = new AbortController();
+  const abortDiscovery = () => discoveryController.abort(signal?.reason);
+  signal?.addEventListener("abort", abortDiscovery, { once: true });
+  const timeoutMessage = `Wayback imagery discovery timed out after ${discoveryTimeoutMs}ms`;
+  let items: WaybackItem[];
+  try {
+    items = await withTimeout(
+      getItemsWithLocalChanges(point, zoomLevel, {
+        signal: discoveryController.signal,
+        onlyUseSizeToFilterDuplicates: true,
+      }),
+      discoveryTimeoutMs,
+      timeoutMessage,
       signal,
-      onlyUseSizeToFilterDuplicates: true,
-    }),
-    discoveryTimeoutMs,
-    `Wayback imagery discovery timed out after ${discoveryTimeoutMs}ms`,
-  );
+      (timeoutError) => discoveryController.abort(timeoutError),
+    );
+  } finally {
+    signal?.removeEventListener("abort", abortDiscovery);
+  }
 
+  throwIfAborted(signal);
   if (items.length === 0) return [];
 
   const enriched = await enrichWaybackItemsWithMetadata(
     items.map((item) => toWaybackItemWithMetadata(item, undefined)),
     point,
     zoomLevel,
-    { metadataTimeoutMs, metadataConcurrency, getItemMetadata, onProgress },
+    {
+      metadataTimeoutMs,
+      metadataConcurrency,
+      getItemMetadata,
+      signal,
+      onProgress,
+    },
   );
 
   return dedupeWaybackItems(enriched);
@@ -423,9 +534,9 @@ export const resolveWaybackCandidate = (
  *
  * The map center is debounced (1s) and mapped to a coarse Wayback tile; the
  * candidate query is keyed by that tile, so panning within ~10km reuses the
- * cached list and crossing a tile boundary loads the neighbouring one. While
- * a new tile loads, the previous list stays on screen (placeholder data), so
- * selection-derived UI never collapses mid-pan.
+ * cached list and crossing a tile boundary loads the neighbouring one. Results
+ * from another tile stay hidden while the debounce and new query catch up, so
+ * selection-derived UI cannot act on imagery for a previous location.
  */
 export const useWaybackItemsDebounced = (
   longitude: number | undefined,
@@ -439,13 +550,27 @@ export const useWaybackItemsDebounced = (
     row: number;
   } | null>(null);
   const [progress, setProgress] = useState<WaybackLoadProgress | null>(null);
+  const queryClient = useQueryClient();
+
+  // Stand down when the caller opts out (e.g. the user switched back to the
+  // live basemap). Flipping `enabled` to false stops React Query from
+  // *starting* a fetch but does not abort one already in flight, and discovery
+  // probes ~150 releases over up to 30s — so cancel it explicitly. The query
+  // function receives the signal, so the in-flight requests are torn down.
+  useEffect(() => {
+    if (enabled) return;
+
+    void queryClient.cancelQueries({ queryKey: ["wayback-candidates"] });
+    void queryClient.cancelQueries({ queryKey: ["wayback-items-global"] });
+    setStablePoint(null);
+    setProgress(null);
+  }, [enabled, queryClient]);
 
   useEffect(() => {
     if (!enabled || longitude === undefined || latitude === undefined) return;
 
     const handle = globalThis.setTimeout(() => {
-      const column = long2tile(longitude, WAYBACK_CANDIDATE_DISCOVERY_ZOOM);
-      const row = lat2tile(latitude, WAYBACK_CANDIDATE_DISCOVERY_ZOOM);
+      const { column, row } = getWaybackCandidateTile(longitude, latitude);
       // Keep the previous object when the tile is unchanged so the query key
       // (and everything derived from it) stays stable while panning in-tile.
       setStablePoint((prev) =>
@@ -457,6 +582,17 @@ export const useWaybackItemsDebounced = (
 
     return () => globalThis.clearTimeout(handle);
   }, [longitude, latitude, enabled]);
+
+  const stableTile = stablePoint
+    ? { column: stablePoint.column, row: stablePoint.row }
+    : null;
+  const hasCurrentStablePoint = shouldExposeWaybackCandidates({
+    enabled,
+    longitude,
+    latitude,
+    candidateTile: stableTile,
+    isPlaceholderData: false,
+  });
 
   const candidatesQuery = useQuery({
     queryKey: ["wayback-candidates", stablePoint?.column, stablePoint?.row],
@@ -478,10 +614,9 @@ export const useWaybackItemsDebounced = (
       }
       return candidates;
     },
-    enabled: enabled && stablePoint !== null,
+    enabled: hasCurrentStablePoint,
     staleTime: 30 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
-    placeholderData: keepPreviousData,
     retry: 1,
   });
 
@@ -489,25 +624,44 @@ export const useWaybackItemsDebounced = (
   const fallbackQuery = useQuery({
     queryKey: ["wayback-items-global"],
     queryFn: () => loadGlobalWaybackItems(),
-    enabled: enabled && candidatesQuery.isError,
+    enabled: hasCurrentStablePoint && candidatesQuery.isError,
     staleTime: 24 * 60 * 60 * 1000,
     gcTime: 24 * 60 * 60 * 1000,
   });
 
   const candidates = candidatesQuery.data ?? [];
   const isUnverifiedFallback =
-    candidatesQuery.isError && candidates.length === 0;
-  const data = isUnverifiedFallback ? (fallbackQuery.data ?? []) : candidates;
+    hasCurrentStablePoint &&
+    candidatesQuery.isError &&
+    candidates.length === 0;
+  const resolvedData = isUnverifiedFallback
+    ? (fallbackQuery.data ?? [])
+    : candidates;
 
-  const isFetching = candidatesQuery.isFetching || fallbackQuery.isFetching;
+  // Never expose a result unless its query tile still matches the current map
+  // center. This closes both stale windows: re-enabling before the debounce
+  // updates stablePoint, and React Query carrying placeholder data across keys.
+  const canExposeCandidates = shouldExposeWaybackCandidates({
+    enabled,
+    longitude,
+    latitude,
+    candidateTile: stableTile,
+    isPlaceholderData: candidatesQuery.isPlaceholderData,
+  });
+  const data = canExposeCandidates ? resolvedData : [];
+
+  const isFetching =
+    hasCurrentStablePoint &&
+    (candidatesQuery.isFetching || fallbackQuery.isFetching);
 
   return {
     data,
     /** First discovery for this area still in flight (nothing to show yet) */
     isLoading:
-      candidatesQuery.isPending &&
       enabled &&
-      stablePoint !== null &&
+      longitude !== undefined &&
+      latitude !== undefined &&
+      (!hasCurrentStablePoint || candidatesQuery.isPending) &&
       data.length === 0,
     isFetching,
     /** Pipeline progress while fetching (discovery phase / metadata counts) */

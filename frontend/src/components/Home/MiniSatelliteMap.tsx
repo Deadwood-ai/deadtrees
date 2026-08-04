@@ -3,15 +3,16 @@ import { Segmented, Select } from "antd";
 import "ol/ol.css";
 import { Map, View } from "ol";
 import TileLayer from "ol/layer/Tile";
-import { XYZ } from "ol/source";
 import { GeoTIFF } from "ol/source";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { fromLonLat } from "ol/proj";
 
 import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import { getDeadwoodCOGUrl, getForestCOGUrl } from "../../utils/getDeadwoodCOGUrl";
-import { getWaybackTileUrl } from "../../utils/waybackVersions";
-import { DEFAULT_WAYBACK_RELEASE } from "../../utils/basemaps";
+import {
+  createStandardMapControls,
+  createWorldImagerySource,
+} from "../../utils/basemaps";
 
 const LOCATIONS = [
   { name: "Harz Mountains", country: "DE", center: [10.6682, 51.7868], zoom: 12 },
@@ -53,12 +54,10 @@ const MiniSatelliteMap = () => {
         enableRotation: false,
       });
 
+      // Live World Imagery: this is the landing-page map, so basemap latency is
+      // the first thing a visitor sees.
       const basemapLayer = new TileLayer({
-        source: new XYZ({
-          url: getWaybackTileUrl(DEFAULT_WAYBACK_RELEASE),
-          maxZoom: 19,
-          crossOrigin: "anonymous",
-        }),
+        source: createWorldImagerySource(),
       });
 
       const forestLayer = new TileLayerWebGL({
@@ -99,7 +98,7 @@ const MiniSatelliteMap = () => {
         target: mapContainer.current,
         layers: [basemapLayer, forestLayer, deadwoodLayer],
         view: initialView,
-        controls: [],
+        controls: createStandardMapControls({ includeZoom: false }),
         interactions: [], // keep interactions disabled so the user doesn't get stuck panning it while scrolling the page
       });
 

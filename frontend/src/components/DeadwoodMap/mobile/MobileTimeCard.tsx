@@ -1,10 +1,12 @@
 import { Button, Spin, Switch } from "antd";
 import {
   CameraOutlined,
+  HistoryOutlined,
   LeftOutlined,
   LinkOutlined,
   LoadingOutlined,
   RightOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
 
 import {
@@ -13,7 +15,6 @@ import {
 } from "../../../hooks/useWaybackItems";
 import {
   getImageryDate,
-  pickAutoMatchImagery,
   PREDICTION_YEARS,
 } from "../YearImagerySelector";
 
@@ -25,9 +26,20 @@ interface MobileTimeCardProps {
   isLoadingImagery: boolean;
   waybackItems: WaybackItemWithMetadata[];
   selectedReleaseNum: number | null;
+  /**
+   * Whether the basemap renders live World Imagery rather than a historical
+   * Wayback release. Live imagery loads far faster, so it is the default.
+   */
+  isUsingLiveImagery: boolean;
+  /** Whether historical discovery or selection is currently active */
+  isBrowsingImageryHistory: boolean;
   autoMatchImagery: boolean;
   onPredictionYearChange: (year: string) => void;
   onImageryChange: (releaseNum: number) => void;
+  /** Drop back to the live (fast) imagery basemap */
+  onUseLiveImagery: () => void;
+  /** Start discovering the historical releases at this location */
+  onBrowseHistory: () => void;
   onAutoMatchChange: (enabled: boolean) => void;
 }
 
@@ -63,18 +75,23 @@ const MobileTimeCard = ({
   isLoadingImagery,
   waybackItems,
   selectedReleaseNum,
+  isUsingLiveImagery,
+  isBrowsingImageryHistory,
   autoMatchImagery,
   onPredictionYearChange,
   onImageryChange,
+  onUseLiveImagery,
+  onBrowseHistory,
   onAutoMatchChange,
 }: MobileTimeCardProps) => {
   const predictionIndex = PREDICTION_YEARS.indexOf(predictionYear);
   // Resolve the selection to the candidate whose imagery it actually shows
-  // (releases between two local changes serve identical tiles).
-  const selectedImagery = resolveWaybackCandidate(
-    waybackItems,
-    selectedReleaseNum,
-  );
+  // (releases between two local changes serve identical tiles). On live
+  // imagery no candidate is on screen, so the steppers enter the list from
+  // outside just as they do for the default basemap.
+  const selectedImagery = isUsingLiveImagery
+    ? null
+    : resolveWaybackCandidate(waybackItems, selectedReleaseNum);
   const imageryIndex = selectedImagery
     ? waybackItems.indexOf(selectedImagery)
     : -1;
@@ -90,30 +107,19 @@ const MobileTimeCard = ({
     imageryIndex >= 0 ? `${imageryIndex + 1} of ${waybackItems.length}` : null;
   // Date is the headline when known; otherwise fall back to the position so
   // we never shout "Unknown date" at the user.
-  const imageryPrimary =
-    imageryDate ?? (imageryPosition ? `Image ${imageryPosition}` : "Satellite image");
-  const imagerySecondary = [
-    imageryDate ? imageryPosition : null,
-    selectedImagery?.provider || selectedImagery?.source,
-    formatResolution(selectedImagery?.resolution),
-  ]
-    .filter(Boolean)
-    .join(" · ");
-
-  const matchImageryToYear = (year: string) => {
-    if (!autoMatchImagery || waybackItems.length === 0) return;
-    const nextReleaseNum = pickAutoMatchImagery(
-      waybackItems,
-      Number.parseInt(year),
-      selectedReleaseNum,
-    );
-    if (nextReleaseNum !== null) onImageryChange(nextReleaseNum);
-  };
-
-  const selectPredictionYear = (year: string) => {
-    onPredictionYearChange(year);
-    matchImageryToYear(year);
-  };
+  const imageryPrimary = isUsingLiveImagery
+    ? "Latest imagery"
+    : (imageryDate ??
+      (imageryPosition ? `Image ${imageryPosition}` : "Satellite image"));
+  const imagerySecondary = isUsingLiveImagery
+    ? "Most recent available"
+    : [
+        imageryDate ? imageryPosition : null,
+        selectedImagery?.provider || selectedImagery?.source,
+        formatResolution(selectedImagery?.resolution),
+      ]
+        .filter(Boolean)
+        .join(" · ");
 
   const stepImagery = (offset: number) => {
     if (isSelectionOutsideCandidates) {
@@ -134,16 +140,7 @@ const MobileTimeCard = ({
   };
 
   const toggleAutoMatch = () => {
-    const next = !autoMatchImagery;
-    onAutoMatchChange(next);
-    if (next && waybackItems.length > 0) {
-      const nextReleaseNum = pickAutoMatchImagery(
-        waybackItems,
-        Number.parseInt(predictionYear),
-        selectedReleaseNum,
-      );
-      if (nextReleaseNum !== null) onImageryChange(nextReleaseNum);
-    }
+    onAutoMatchChange(!autoMatchImagery);
   };
 
   const showImagerySection =
@@ -155,7 +152,9 @@ const MobileTimeCard = ({
         <Button
           icon={<LeftOutlined />}
           disabled={predictionIndex <= 0}
-          onClick={() => selectPredictionYear(PREDICTION_YEARS[predictionIndex - 1])}
+          onClick={() =>
+            onPredictionYearChange(PREDICTION_YEARS[predictionIndex - 1])
+          }
           aria-label="Previous prediction year"
           className="!h-11 !w-11"
         />
@@ -173,7 +172,9 @@ const MobileTimeCard = ({
         <Button
           icon={<RightOutlined />}
           disabled={predictionIndex >= PREDICTION_YEARS.length - 1}
-          onClick={() => selectPredictionYear(PREDICTION_YEARS[predictionIndex + 1])}
+          onClick={() =>
+            onPredictionYearChange(PREDICTION_YEARS[predictionIndex + 1])
+          }
           aria-label="Next prediction year"
           className="!h-11 !w-11"
         />
@@ -192,6 +193,27 @@ const MobileTimeCard = ({
                 indicator={<LoadingOutlined style={{ fontSize: 16 }} spin />}
               />
               Finding imagery
+            </div>
+          ) : isUsingLiveImagery && waybackItems.length === 0 ? (
+            // Live basemap with discovery stood down. There is one image to
+            // show and nothing to step through, so offer the way in rather
+            // than claiming no imagery exists here.
+            <div className="rounded-2xl bg-slate-50 px-4 py-2.5 text-center">
+              <div className="truncate text-sm font-semibold text-slate-950">
+                Latest imagery
+              </div>
+              <div className="mt-0.5 truncate text-xs text-slate-500">
+                Most recent available
+              </div>
+              <Button
+                type="link"
+                size="small"
+                icon={<HistoryOutlined />}
+                onClick={onBrowseHistory}
+                className="!mt-1 !h-auto !p-0 text-xs"
+              >
+                Browse historical imagery
+              </Button>
             </div>
           ) : waybackItems.length === 0 ? (
             <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
@@ -222,6 +244,21 @@ const MobileTimeCard = ({
                 className="!h-11 !w-11"
               />
             </div>
+          )}
+
+          {/* Escape hatch back to the fast basemap: historical releases come
+              from the Wayback archive host, which is much slower than the
+              live imagery endpoint. */}
+          {isBrowsingImageryHistory && (
+            <Button
+              type="link"
+              size="small"
+              icon={<ThunderboltOutlined />}
+              onClick={onUseLiveImagery}
+              className="!mt-2 !h-auto !p-0 text-xs"
+            >
+              Back to latest imagery
+            </Button>
           )}
         </div>
       )}

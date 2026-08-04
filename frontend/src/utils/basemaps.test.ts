@@ -3,6 +3,11 @@ import { apply } from "ol-mapbox-style";
 
 import {
   acquireLibertyBasemapGroup,
+  createWorldImagerySource,
+  ESRI_WORLD_IMAGERY_ATTRIBUTION,
+  ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL,
+  ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE,
+  ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE_FULL,
   getCachedWaybackSource,
   releaseLibertyBasemapGroup,
 } from "./basemaps";
@@ -10,6 +15,33 @@ import {
 vi.mock("ol-mapbox-style", () => ({
   apply: vi.fn(() => Promise.resolve()),
 }));
+
+const resolveAttributions = (
+  source: ReturnType<typeof createWorldImagerySource>,
+) => source.getAttributions()?.(null as never) ?? [];
+
+describe("Esri imagery attribution", () => {
+  it("credits Esri and the current World Imagery data providers", () => {
+    expect(resolveAttributions(createWorldImagerySource())).toContain(
+      ESRI_WORLD_IMAGERY_ATTRIBUTION,
+    );
+    expect(resolveAttributions(getCachedWaybackSource(31144))).toContain(
+      ESRI_WORLD_IMAGERY_ATTRIBUTION,
+    );
+    expect(ESRI_WORLD_IMAGERY_ATTRIBUTION).toContain(
+      ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL,
+    );
+    expect(ESRI_WORLD_IMAGERY_ATTRIBUTION).toContain(
+      ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE,
+    );
+    expect(ESRI_WORLD_IMAGERY_ATTRIBUTION).toContain(
+      "Powered by Esri · Sources ⓘ",
+    );
+    expect(ESRI_WORLD_IMAGERY_ATTRIBUTION).toContain(
+      ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE_FULL,
+    );
+  });
+});
 
 describe("Liberty basemap pool", () => {
   it("reuses returned groups without sharing a group between concurrent maps", () => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { Segmented, Tooltip, Typography, Spin, Button, Select } from "antd";
 import {
   LeftOutlined,
@@ -9,6 +9,7 @@ import {
   InfoCircleOutlined,
   WarningOutlined,
   CheckCircleOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
 import {
   resolveWaybackCandidate,
@@ -161,6 +162,16 @@ interface YearImagerySelectorProps {
   isUnverifiedFallback?: boolean;
   /** Whether satellite basemap is active */
   isWaybackActive?: boolean;
+  /**
+   * Whether the basemap currently renders live World Imagery rather than a
+   * historical Wayback release. Live imagery loads ~70x faster, so it is the
+   * default until the user asks for history.
+   */
+  isUsingLiveImagery?: boolean;
+  /** Callback to drop back to the live (fast) imagery basemap */
+  onUseLiveImagery?: () => void;
+  /** Whether the user has opted into browsing the imagery history */
+  isBrowsingImageryHistory?: boolean;
   /** Whether to auto-match imagery to prediction year */
   autoMatchImagery?: boolean;
   /** Callback when auto-match setting changes */
@@ -194,6 +205,9 @@ const YearImagerySelector = ({
   loadProgress = null,
   isUnverifiedFallback = false,
   isWaybackActive = true,
+  isUsingLiveImagery = false,
+  onUseLiveImagery,
+  isBrowsingImageryHistory = false,
   autoMatchImagery = false,
   onAutoMatchChange,
   onRequestLocalImagery,
@@ -242,35 +256,14 @@ const YearImagerySelector = ({
     [yearsWithImagery],
   );
 
-  // Auto-select imagery when items load, when the prediction year changes, or
-  // when no basemap has been selected yet. Manual mode keeps the active
-  // basemap sticky even if it is outside the local candidate list.
-  useEffect(() => {
-    if (waybackItems.length === 0) return;
-
-    if (autoMatchImagery) {
-      const nextReleaseNum = pickAutoMatchImagery(
-        waybackItems,
-        parseInt(predictionYear),
-        selectedReleaseNum,
-      );
-      if (nextReleaseNum !== null) {
-        onImageryChange(nextReleaseNum);
-      }
+  const handleBasemapModeChange = (mode: string) => {
+    if (mode === "live") {
+      onUseLiveImagery?.();
       return;
     }
 
-    if (!selectedReleaseNum) {
-      // Select the newest (rightmost) item
-      onImageryChange(waybackItems[waybackItems.length - 1].releaseNum);
-    }
-  }, [
-    waybackItems,
-    selectedReleaseNum,
-    onImageryChange,
-    autoMatchImagery,
-    predictionYear,
-  ]);
+    onRequestLocalImagery?.();
+  };
 
   // Navigation for prediction year
   const predictionIndex = PREDICTION_YEARS.indexOf(predictionYear);
@@ -292,10 +285,11 @@ const YearImagerySelector = ({
   // Resolve the selection to the candidate whose imagery it actually shows:
   // releases between two local changes serve identical tiles, so a selected
   // release that is not itself a candidate still displays a candidate's image.
-  const selectedItem = resolveWaybackCandidate(
-    waybackItems,
-    selectedReleaseNum,
-  );
+  // On live imagery nothing from the candidate list is on screen, so the
+  // selection resolves to nothing and the steppers enter the list from outside.
+  const selectedItem = isUsingLiveImagery
+    ? null
+    : resolveWaybackCandidate(waybackItems, selectedReleaseNum);
   const currentImageryIndex = selectedItem
     ? waybackItems.indexOf(selectedItem)
     : -1;
@@ -354,7 +348,10 @@ const YearImagerySelector = ({
 
   const shouldShowBlockingLoading = isLoading && !hasSelectedBasemap;
   const hasNoImagery =
-    waybackItems.length === 0 && !isLoading && !hasSelectedBasemap;
+    isBrowsingImageryHistory &&
+    waybackItems.length === 0 &&
+    !isLoading &&
+    !hasSelectedBasemap;
 
   // Get the base map year for display
   const selectedImageryDate = selectedItem
@@ -406,8 +403,10 @@ const YearImagerySelector = ({
             <RightOutlined />
           </button>
 
-          {/* Auto-match toggle */}
-          {isWaybackActive && (
+          {/* Auto-match toggle. Only meaningful once the user has opted into
+              the imagery history — before that there is a single (live) image
+              to show, so there is nothing to match a year against. */}
+          {isWaybackActive && isBrowsingImageryHistory && (
             <Tooltip
               title={
                 autoMatchImagery
@@ -585,7 +584,11 @@ const YearImagerySelector = ({
                     </Tooltip>
                   ) : (
                     <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                      <span>Satellite basemap active</span>
+                      <span className="font-medium text-gray-700">
+                        {isUsingLiveImagery
+                          ? "Latest imagery"
+                          : "Satellite basemap active"}
+                      </span>
                       {isLoading && !compactMode && (
                         <span className="inline-flex items-center gap-1.5 text-gray-400">
                           <Spin
@@ -596,23 +599,18 @@ const YearImagerySelector = ({
                           {loadProgressLabel}
                         </span>
                       )}
+                      {/* The Latest/History switch below is the entry point
+                          into the imagery history, so no separate "browse"
+                          link is needed. */}
                       {!isLoading &&
                         isUsingDefaultBasemap &&
+                        !isBrowsingImageryHistory &&
                         !compactMode &&
-                        (onRequestLocalImagery ? (
-                          <Button
-                            type="link"
-                            size="small"
-                            onClick={onRequestLocalImagery}
-                            className="!h-auto !p-0 text-xs"
-                          >
-                            Browse imagery history
-                          </Button>
-                        ) : (
+                        !onRequestLocalImagery && (
                           <span className="text-gray-400">
                             local imagery dates unavailable
                           </span>
-                        ))}
+                        )}
                     </div>
                   )}
                 </div>
@@ -654,6 +652,47 @@ const YearImagerySelector = ({
                   />
                 </Tooltip>
               </>
+            )}
+
+            {/* Keep the escape hatch visible during discovery and empty
+                results. Historical tiles come from the much slower Wayback
+                archive, so users must always be able to return to Latest. */}
+            {onUseLiveImagery && (
+              <Segmented
+                size="small"
+                value={isBrowsingImageryHistory ? "history" : "live"}
+                onChange={(value) => handleBasemapModeChange(value as string)}
+                options={[
+                  {
+                    value: "live",
+                    label: (
+                      // Tooltip per option rather than one for the whole
+                      // control, so it centres on the hovered segment.
+                      <Tooltip
+                        title="Shows latest available imagery (faster)"
+                        arrow={false}
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          <ThunderboltOutlined style={{ fontSize: 11 }} />
+                          Latest
+                        </span>
+                      </Tooltip>
+                    ),
+                  },
+                  {
+                    value: "history",
+                    label: (
+                      <Tooltip
+                        title="Browse historical imagery through the ArcGIS Wayback machine (slower)"
+                        arrow={false}
+                      >
+                        <span>Historical</span>
+                      </Tooltip>
+                    ),
+                  },
+                ]}
+                className="ml-1"
+              />
             )}
           </div>
         </div>

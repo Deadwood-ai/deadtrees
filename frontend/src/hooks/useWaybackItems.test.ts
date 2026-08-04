@@ -3,11 +3,13 @@ import type { WaybackItem, WaybackMetadata } from "@esri/wayback-core";
 import {
   enrichWaybackItemsWithMetadata,
   areWaybackCandidatesCacheable,
+  getWaybackCandidateTile,
   loadGlobalWaybackItems,
   loadWaybackCandidates,
   readCachedCandidates,
   registerWaybackReleaseDate,
   resolveWaybackCandidate,
+  shouldExposeWaybackCandidates,
   writeCachedCandidates,
   type WaybackItemWithMetadata,
   type WaybackLoadProgress,
@@ -51,18 +53,90 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("candidate location safety", () => {
+  const tileA = getWaybackCandidateTile(point.longitude, point.latitude);
+
+  it("exposes verified candidates for the current tile", () => {
+    expect(
+      shouldExposeWaybackCandidates({
+        enabled: true,
+        ...point,
+        candidateTile: tileA,
+        isPlaceholderData: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps a previous tile hidden until discovery catches up after re-enabling", () => {
+    const atTileB = { longitude: 13.4, latitude: 52.5 };
+
+    expect(
+      shouldExposeWaybackCandidates({
+        enabled: true,
+        ...atTileB,
+        candidateTile: tileA,
+        isPlaceholderData: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("never exposes placeholder candidates from another query", () => {
+    expect(
+      shouldExposeWaybackCandidates({
+        enabled: true,
+        ...point,
+        candidateTile: tileA,
+        isPlaceholderData: true,
+      }),
+    ).toBe(false);
+  });
+});
+
 describe("loadWaybackCandidates", () => {
+  it("stops metadata enrichment when discovery is aborted", async () => {
+    const controller = new AbortController();
+    let markFirstRequestStarted: (() => void) | undefined;
+    const firstRequestStarted = new Promise<void>((resolve) => {
+      markFirstRequestStarted = resolve;
+    });
+    const getItemMetadata = vi.fn(() => {
+      markFirstRequestStarted?.();
+      return new Promise<WaybackMetadata | null>(() => undefined);
+    });
+    const work = loadWaybackCandidates(point, 12, {
+      getItemsWithLocalChanges: vi.fn().mockResolvedValue([
+        waybackItem(100, "2020-01-01"),
+        waybackItem(200, "2021-01-01"),
+        waybackItem(300, "2022-01-01"),
+      ]),
+      getItemMetadata,
+      metadataConcurrency: 1,
+      metadataTimeoutMs: 50,
+      signal: controller.signal,
+    });
+
+    await firstRequestStarted;
+    controller.abort();
+
+    await expect(work).rejects.toMatchObject({ name: "AbortError" });
+    expect(getItemMetadata).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps discovery timeouts retryable instead of caching empty imagery", async () => {
     const startedAt = Date.now();
+    let discoverySignal: AbortSignal | undefined;
     await expect(
       loadWaybackCandidates(point, 12, {
         discoveryTimeoutMs: 10,
-        getItemsWithLocalChanges: () =>
-          new Promise<WaybackItem[]>(() => undefined),
+        getItemsWithLocalChanges: (_point, _zoom, options) => {
+          discoverySignal = options?.signal;
+          return new Promise<WaybackItem[]>(() => undefined);
+        },
       }),
     ).rejects.toThrow("Wayback imagery discovery timed out");
 
     expect(Date.now() - startedAt).toBeLessThan(250);
+    expect(discoverySignal?.aborted).toBe(true);
   });
 
   it("returns candidates enriched with acquisition dates", async () => {
