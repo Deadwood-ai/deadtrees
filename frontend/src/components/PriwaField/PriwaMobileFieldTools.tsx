@@ -5,19 +5,35 @@ import { useMemo, useState } from "react";
 import { indexPriwaBefallsgruppenByTreeId } from "./priwaBefallsgruppenState";
 import PriwaPointCompactList from "./PriwaPointCompactList";
 import type { IPriwaBefallsgruppe, IPriwaPoint } from "./types";
+import PriwaMobileFlightSheet from "./PriwaMobileFlightSheet";
+import type { IPriwaMosaic } from "./usePriwaMosaics";
 
 interface PriwaMobileFieldToolsProps {
   points: IPriwaPoint[];
   groups: IPriwaBefallsgruppe[];
+  mosaics: IPriwaMosaic[];
+  areFlightBoundariesVisible: boolean;
+  isFlightSheetOpen: boolean;
+  focusedFlightId: string | null;
   onEditPoint: (point: IPriwaPoint) => void;
   onZoomToPoint: (point: IPriwaPoint) => void;
+  onZoomToMosaic: (mosaic: IPriwaMosaic) => void;
+  onFlightBoundariesVisibilityChange: (visible: boolean) => void;
+  onFlightSheetOpenChange: (open: boolean) => void;
 }
 
 export default function PriwaMobileFieldTools({
   points,
   groups,
+  mosaics,
+  areFlightBoundariesVisible,
+  isFlightSheetOpen,
+  focusedFlightId,
   onEditPoint,
   onZoomToPoint,
+  onZoomToMosaic,
+  onFlightBoundariesVisibilityChange,
+  onFlightSheetOpenChange,
 }: PriwaMobileFieldToolsProps) {
   const [isTreeListOpen, setTreeListOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -54,6 +70,16 @@ export default function PriwaMobileFieldTools({
           aria-pressed={isTreeListOpen}
         />
       </Tooltip>
+
+      <PriwaMobileFlightSheet
+        mosaics={mosaics}
+        areBoundariesVisible={areFlightBoundariesVisible}
+        isOpen={isFlightSheetOpen}
+        focusedMosaicId={focusedFlightId}
+        onZoomToMosaic={onZoomToMosaic}
+        onBoundariesVisibilityChange={onFlightBoundariesVisibilityChange}
+        onOpenChange={onFlightSheetOpenChange}
+      />
 
       <Drawer
         title={`Käferbäume (${points.length})`}

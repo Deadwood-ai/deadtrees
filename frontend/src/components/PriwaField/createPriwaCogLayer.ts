@@ -8,6 +8,8 @@ export interface IPriwaCogLayerSource {
   cogUrl: string;
 }
 
+export const PRIWA_COG_MAX_ZOOM = 23;
+
 export const resolvePriwaCogUrl = (cogUrl: string) => {
   try {
     return new URL(cogUrl).toString();
@@ -30,7 +32,7 @@ export const createPriwaCogLayer = (cog: IPriwaCogLayerSource) =>
       sourceOptions: COG_SOURCE_OPTIONS,
     }),
     opacity: 0.82,
-    maxZoom: 23,
+    maxZoom: PRIWA_COG_MAX_ZOOM,
     zIndex: 10,
     cacheSize: 4096,
     preload: 0,

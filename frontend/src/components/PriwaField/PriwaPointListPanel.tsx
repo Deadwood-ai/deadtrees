@@ -5,11 +5,20 @@ import type { CSSProperties } from "react";
 
 import PriwaPointCompactList from "./PriwaPointCompactList";
 import PriwaPointPanelResizeHandle from "./PriwaPointPanelResizeHandle";
+import PriwaPointSearchControl from "./PriwaPointSearchControl";
 import PriwaPointTable from "./PriwaPointTable";
-import { indexPriwaBefallsgruppenByTreeId } from "./priwaBefallsgruppenState";
+import {
+  indexPriwaBefallsgruppenByTreeId,
+  indexConfirmedPriwaFlightLabelsByTreeId,
+} from "./priwaBefallsgruppenState";
 import { downloadPriwaPointsCsv } from "./priwaPointCsv";
 import { isPriwaPointQaCandidate } from "./priwaPointQa";
+import {
+  filterPriwaPointsBySearch,
+  type PriwaPointSearchField,
+} from "./priwaPointTableData";
 import type { IPriwaBefallsgruppe, IPriwaPoint } from "./types";
+import type { IPriwaMosaic } from "./usePriwaMosaics";
 
 type PriwaPointFilter = "all" | "qa";
 type PriwaPointView = "list" | "table";
@@ -35,6 +44,7 @@ const loadInitialPointView = (): PriwaPointView => {
 interface PriwaPointListPanelProps {
   points: IPriwaPoint[];
   groups: IPriwaBefallsgruppe[];
+  mosaics: IPriwaMosaic[];
   projectName: string;
   isLoading?: boolean;
   focusedPointId?: string | null;
@@ -46,6 +56,7 @@ interface PriwaPointListPanelProps {
 export default function PriwaPointListPanel({
   points,
   groups,
+  mosaics,
   projectName,
   isLoading = false,
   focusedPointId = null,
@@ -54,12 +65,18 @@ export default function PriwaPointListPanel({
   onZoomToPoint,
 }: PriwaPointListPanelProps) {
   const [filter, setFilter] = useState<PriwaPointFilter>("all");
+  const [search, setSearch] = useState("");
+  const [searchField, setSearchField] = useState<PriwaPointSearchField>("all");
   const [view, setView] = useState<PriwaPointView>(loadInitialPointView);
   const panelRef = useRef<HTMLElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const groupByTreeId = useMemo(
     () => indexPriwaBefallsgruppenByTreeId(groups),
     [groups],
+  );
+  const confirmedFlightLabelsByTreeId = useMemo(
+    () => indexConfirmedPriwaFlightLabelsByTreeId(groups, mosaics),
+    [groups, mosaics],
   );
   const qaPoints = useMemo(
     () => points.filter(isPriwaPointQaCandidate),
@@ -68,7 +85,24 @@ export default function PriwaPointListPanel({
   const exactCount = points.filter(
     (point) => point.coordinateSource === "qr",
   ).length;
-  const visiblePoints = filter === "qa" ? qaPoints : points;
+  const filteredPoints = filter === "qa" ? qaPoints : points;
+  const visiblePoints = useMemo(
+    () =>
+      filterPriwaPointsBySearch(
+        filteredPoints,
+        search,
+        searchField,
+        groupByTreeId,
+        confirmedFlightLabelsByTreeId,
+      ),
+    [
+      confirmedFlightLabelsByTreeId,
+      filteredPoints,
+      groupByTreeId,
+      search,
+      searchField,
+    ],
+  );
   const focusedPoint = useMemo(
     () => points.find((point) => point.id === focusedPointId) ?? null,
     [focusedPointId, points],
@@ -78,9 +112,11 @@ export default function PriwaPointListPanel({
   ).length;
   const emptyDescription = isLoading
     ? "Lade Punkte..."
-    : filter === "qa" && points.length > 0
-      ? "Keine QA-Punkte"
-      : "Keine Punkte";
+    : search.trim()
+      ? "Keine passenden Punkte"
+      : filter === "qa" && points.length > 0
+        ? "Keine QA-Punkte"
+        : "Keine Punkte";
 
   const changeView = (nextView: PriwaPointView) => {
     setView(nextView);
@@ -104,6 +140,8 @@ export default function PriwaPointListPanel({
     if (!focusedPointId) return;
 
     setFilter("all");
+    setSearch("");
+    setSearchField("all");
     setView("table");
   }, [focusedPointId]);
 
@@ -143,7 +181,13 @@ export default function PriwaPointListPanel({
             size="small"
             icon={<DownloadOutlined />}
             disabled={points.length === 0}
-            onClick={() => downloadPriwaPointsCsv(points, projectName)}
+            onClick={() =>
+              downloadPriwaPointsCsv(
+                points,
+                projectName,
+                confirmedFlightLabelsByTreeId,
+              )
+            }
           >
             CSV
           </Button>
@@ -174,7 +218,7 @@ export default function PriwaPointListPanel({
         </div>
       </div>
 
-      <div className="grid gap-2 border-b border-slate-200 px-3 py-2 md:grid-cols-2">
+      <div className="grid gap-2 border-b border-slate-200 px-3 py-2 md:grid-cols-3">
         <div>
           <div className="mb-1 text-xs font-medium text-slate-500">Ansicht</div>
           <Segmented<PriwaPointView>
@@ -203,6 +247,12 @@ export default function PriwaPointListPanel({
             ]}
           />
         </div>
+        <PriwaPointSearchControl
+          field={searchField}
+          search={search}
+          onFieldChange={setSearchField}
+          onSearchChange={setSearch}
+        />
       </div>
 
       {focusedPoint && (
@@ -236,6 +286,7 @@ export default function PriwaPointListPanel({
           <PriwaPointTable
             points={visiblePoints}
             groupByTreeId={groupByTreeId}
+            confirmedFlightLabelsByTreeId={confirmedFlightLabelsByTreeId}
             focusedPointId={focusedPointId}
             getScrollContainer={getTableScrollContainer}
             onEditPoint={onEditPoint}
