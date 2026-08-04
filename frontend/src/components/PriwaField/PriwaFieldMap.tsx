@@ -11,7 +11,7 @@ import { unByKey } from "ol/Observable";
 import { fromLonLat, toLonLat, transformExtent } from "ol/proj";
 import View from "ol/View";
 import { boundingExtent } from "ol/extent";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 
 import { createStandardMapControls } from "../../utils/basemaps";
@@ -60,6 +60,7 @@ import type {
 } from "./types";
 
 const FIELD_CENTER: [number, number] = [8.18013, 48.45596];
+const EMPTY_MOSAIC_IDS = new Set<string>();
 
 interface PriwaFieldMapProps {
   points: IPriwaPoint[];
@@ -169,12 +170,6 @@ export default function PriwaFieldMap({
   const [focusedPointId, setFocusedPointId] = useState<string | null>(null);
   const [reviewPointId, setReviewPointId] = useState<string | null>(null);
   const [baseLayer, setBaseLayer] = useState<PriwaBaseLayer>("aerial");
-  const [areMobileFlightBoundariesVisible, setMobileFlightBoundariesVisible] =
-    useState(true);
-  const [isMobileFlightSheetOpen, setMobileFlightSheetOpen] = useState(false);
-  const [focusedMobileFlightId, setFocusedMobileFlightId] = useState<
-    string | null
-  >(null);
   const isMobile = useIsMobile();
   const userLocation = useUserLocationLayer(mapRef);
   const {
@@ -279,29 +274,6 @@ export default function PriwaFieldMap({
     createGroup,
     createGroupForFlight,
   } = review;
-  const confirmedMobileMosaics = useMemo(
-    () =>
-      reviewMosaics.filter(
-        (mosaic) => mosaic.flightType === "umfeldbefliegung",
-      ),
-    [reviewMosaics],
-  );
-  const footprintMosaics = useMemo(
-    () =>
-      isMobile
-        ? confirmedMobileMosaics
-        : matchedMosaics.map(({ mosaic }) => mosaic),
-    [confirmedMobileMosaics, isMobile, matchedMosaics],
-  );
-  const mapEnabledMosaics = useMemo(
-    () => (isMobile ? [] : enabledMosaics),
-    [enabledMosaics, isMobile],
-  );
-  const mapEnabledMosaicIds = useMemo(
-    () => (isMobile ? new Set<string>() : enabledMosaicIds),
-    [enabledMosaicIds, isMobile],
-  );
-
   const openPointForEditing = useCallback(
     (point: IPriwaPoint) => {
       selectMatchedMosaicForPoint(point);
@@ -431,10 +403,7 @@ export default function PriwaFieldMap({
       );
 
       if (mosaicId) {
-        if (window.matchMedia("(max-width: 767px)").matches) {
-          setFocusedMobileFlightId(mosaicId);
-          setMobileFlightSheetOpen(true);
-        } else {
+        if (!window.matchMedia("(max-width: 767px)").matches) {
           selectReviewItemFromMosaicRef.current(mosaicId);
         }
         return;
@@ -516,11 +485,10 @@ export default function PriwaFieldMap({
     mosaicFootprintLayerRef,
     groups: isMobile ? [] : groups,
     points,
-    footprintMosaics,
-    reviewMosaics,
-    enabledMosaics: mapEnabledMosaics,
-    enabledMosaicIds: mapEnabledMosaicIds,
-    showMosaicFootprints: !isMobile || areMobileFlightBoundariesVisible,
+    matchedMosaics: isMobile ? [] : matchedMosaics,
+    reviewMosaics: isMobile ? [] : reviewMosaics,
+    enabledMosaics: isMobile ? [] : enabledMosaics,
+    enabledMosaicIds: isMobile ? EMPTY_MOSAIC_IDS : enabledMosaicIds,
     selectedMosaicId: isMobile ? null : selectedMosaicId,
     selectedGroupId: isMobile ? null : selectedGroupId,
   });
@@ -803,17 +771,8 @@ export default function PriwaFieldMap({
             <PriwaMobileFieldTools
               points={points}
               groups={groups}
-              mosaics={confirmedMobileMosaics}
-              areFlightBoundariesVisible={areMobileFlightBoundariesVisible}
-              isFlightSheetOpen={isMobileFlightSheetOpen}
-              focusedFlightId={focusedMobileFlightId}
               onEditPoint={openPointForEditing}
               onZoomToPoint={focusPointOnMap}
-              onZoomToMosaic={zoomToMosaicFootprint}
-              onFlightBoundariesVisibilityChange={
-                setMobileFlightBoundariesVisible
-              }
-              onFlightSheetOpenChange={setMobileFlightSheetOpen}
             />
           )}
           {!isMobile && !isPointListOpen && !isDrawerOpen && (

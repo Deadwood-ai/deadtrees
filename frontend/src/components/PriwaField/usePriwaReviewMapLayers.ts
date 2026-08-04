@@ -14,6 +14,7 @@ import {
 } from "./createPriwaMosaicFootprintLayer";
 import type { IPriwaBefallsgruppe, IPriwaPoint } from "./types";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
+import type { IPriwaMatchedMosaic } from "./usePriwaMosaicMatches";
 
 type PriwaBefallsgruppeLayer = ReturnType<typeof createPriwaBefallsgruppeLayer>;
 type PriwaMosaicFootprintLayer = ReturnType<
@@ -32,11 +33,10 @@ interface UsePriwaReviewMapLayersOptions {
   mosaicFootprintLayerRef: MutableRefObject<PriwaMosaicFootprintLayer | null>;
   groups: IPriwaBefallsgruppe[];
   points: IPriwaPoint[];
-  footprintMosaics: IPriwaMosaic[];
+  matchedMosaics: IPriwaMatchedMosaic[];
   reviewMosaics: IPriwaMosaic[];
   enabledMosaics: IPriwaMosaic[];
   enabledMosaicIds: Set<string>;
-  showMosaicFootprints: boolean;
   selectedMosaicId: string | null;
   selectedGroupId: string | null;
 }
@@ -60,19 +60,17 @@ export const syncPriwaBefallsgruppeLayer = (
 
 export const syncPriwaMosaicFootprintLayer = (
   source: PriwaMosaicFootprintSource,
-  footprintMosaics: IPriwaMosaic[],
+  matchedMosaics: IPriwaMatchedMosaic[],
   reviewMosaics: IPriwaMosaic[],
   enabledMosaicIds: Set<string>,
   selectedMosaicId: string | null,
-  showMosaicFootprints = true,
 ) => {
   source.clear();
-  if (!showMosaicFootprints) return;
-  const footprintIds = new Set(footprintMosaics.map((mosaic) => mosaic.id));
+  const matchedIds = new Set(matchedMosaics.map(({ mosaic }) => mosaic.id));
   reviewMosaics
     .filter(
       (mosaic) =>
-        footprintIds.has(mosaic.id) ||
+        matchedIds.has(mosaic.id) ||
         enabledMosaicIds.has(mosaic.id) ||
         mosaic.id === selectedMosaicId,
     )
@@ -92,11 +90,10 @@ export function usePriwaReviewMapLayers({
   mosaicFootprintLayerRef,
   groups,
   points,
-  footprintMosaics,
+  matchedMosaics,
   reviewMosaics,
   enabledMosaics,
   enabledMosaicIds,
-  showMosaicFootprints,
   selectedMosaicId,
   selectedGroupId,
 }: UsePriwaReviewMapLayersOptions) {
@@ -116,20 +113,18 @@ export function usePriwaReviewMapLayers({
     if (source) {
       syncPriwaMosaicFootprintLayer(
         source,
-        footprintMosaics,
+        matchedMosaics,
         reviewMosaics,
         enabledMosaicIds,
         selectedMosaicId,
-        showMosaicFootprints,
       );
     }
   }, [
     enabledMosaicIds,
-    footprintMosaics,
+    matchedMosaics,
     mosaicFootprintLayerRef,
     reviewMosaics,
     selectedMosaicId,
-    showMosaicFootprints,
   ]);
 
   useEffect(() => {
