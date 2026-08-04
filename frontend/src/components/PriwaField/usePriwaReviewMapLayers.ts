@@ -1,13 +1,13 @@
 import type { MutableRefObject } from "react";
 import { useEffect, useRef } from "react";
-import { Map } from "ol";
+import { Map as OlMap } from "ol";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 
 import {
   createPriwaBefallsgruppeFeature,
   createPriwaBefallsgruppeLayer,
 } from "./createPriwaBefallsgruppeLayer";
-import { createPriwaCogLayers } from "./createPriwaCogLayer";
+import { createPriwaCogLayer } from "./createPriwaCogLayer";
 import {
   createPriwaMosaicFootprintFeature,
   createPriwaMosaicFootprintLayer,
@@ -28,7 +28,7 @@ type PriwaMosaicFootprintSource = NonNullable<
 >;
 
 interface UsePriwaReviewMapLayersOptions {
-  mapRef: MutableRefObject<Map | null>;
+  mapRef: MutableRefObject<OlMap | null>;
   groupLayerRef: MutableRefObject<PriwaBefallsgruppeLayer | null>;
   mosaicFootprintLayerRef: MutableRefObject<PriwaMosaicFootprintLayer | null>;
   groups: IPriwaBefallsgruppe[];
@@ -97,7 +97,9 @@ export function usePriwaReviewMapLayers({
   selectedMosaicId,
   selectedGroupId,
 }: UsePriwaReviewMapLayersOptions) {
-  const cogLayersRef = useRef<TileLayerWebGL[]>([]);
+  const cogLayersRef = useRef<
+    globalThis.Map<string, { cogUrl: string; layer: TileLayerWebGL }>
+  >(new globalThis.Map());
 
   useEffect(() => {
     const source = groupLayerRef.current?.getSource();
@@ -129,17 +131,48 @@ export function usePriwaReviewMapLayers({
     const map = mapRef.current;
     if (!map) return;
 
-    cogLayersRef.current.forEach((layer) => map.removeLayer(layer));
-    const cogLayers = createPriwaCogLayers(enabledMosaics);
-    cogLayersRef.current = cogLayers;
-    cogLayers.forEach((layer, index) => {
-      layer.setZIndex(20 + (enabledMosaics.length - index) / 100);
-      map.getLayers().insertAt(2 + index, layer);
+    const enabledMosaicIds = new Set(
+      enabledMosaics.map((mosaic) => mosaic.id),
+    );
+    cogLayersRef.current.forEach(({ layer }, mosaicId) => {
+      if (enabledMosaicIds.has(mosaicId)) return;
+      map.removeLayer(layer);
+      layer.dispose();
+      cogLayersRef.current.delete(mosaicId);
     });
 
-    return () => {
-      cogLayers.forEach((layer) => map.removeLayer(layer));
-      if (cogLayersRef.current === cogLayers) cogLayersRef.current = [];
-    };
+    enabledMosaics.forEach((mosaic, index) => {
+      const current = cogLayersRef.current.get(mosaic.id);
+      let layer = current?.layer;
+      if (current && current.cogUrl !== mosaic.cogUrl) {
+        map.removeLayer(current.layer);
+        current.layer.dispose();
+        cogLayersRef.current.delete(mosaic.id);
+        layer = undefined;
+      }
+
+      if (!layer) {
+        layer = createPriwaCogLayer(mosaic);
+        cogLayersRef.current.set(mosaic.id, {
+          cogUrl: mosaic.cogUrl,
+          layer,
+        });
+        map.addLayer(layer);
+      }
+
+      layer.setZIndex(20 + (enabledMosaics.length - index) / 100);
+    });
   }, [enabledMosaics, mapRef]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const cogLayers = cogLayersRef.current;
+    return () => {
+      cogLayers.forEach(({ layer }) => {
+        map?.removeLayer(layer);
+        layer.dispose();
+      });
+      cogLayers.clear();
+    };
+  }, [mapRef]);
 }

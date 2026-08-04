@@ -1,5 +1,5 @@
 import { message } from "antd";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { groupsForPriwaMosaicMatching } from "./priwaBefallsgruppenState";
 import { reconcilePriwaMosaicVisibility } from "./priwaFlightReviewState";
@@ -38,7 +38,6 @@ export function usePriwaFlightReview({
     new Set(),
   );
   const [selectedMosaicId, setSelectedMosaicId] = useState<string | null>(null);
-  const knownMosaicIdsRef = useRef<Set<string>>(new Set());
   const mosaicMatchGroups = useMemo(
     () =>
       groupsForPriwaMosaicMatching(groups, isLoadingGroups, groupsErrorMessage),
@@ -77,23 +76,13 @@ export function usePriwaFlightReview({
   }, [reviewMosaics, selectedMosaicId]);
 
   useEffect(() => {
-    const nextKnownIds = new Set(reviewMosaics.map((mosaic) => mosaic.id));
-    const matchedIds = new Set(
-      matches.matchedMosaics.map(({ mosaic }) => mosaic.id),
-    );
-    const previousKnownIds = knownMosaicIdsRef.current;
-
     setEnabledMosaicIds((currentIds) =>
       reconcilePriwaMosaicVisibility(
         currentIds,
-        previousKnownIds,
         reviewMosaics.map((mosaic) => mosaic.id),
-        matchedIds,
       ),
     );
-
-    knownMosaicIdsRef.current = nextKnownIds;
-  }, [matches.matchedMosaics, reviewMosaics]);
+  }, [reviewMosaics]);
 
   const setMosaicVisibility = useCallback(
     (mosaicId: string, checked: boolean) => {

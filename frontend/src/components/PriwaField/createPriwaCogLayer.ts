@@ -35,6 +35,3 @@ export const createPriwaCogLayer = (cog: IPriwaCogLayerSource) =>
     cacheSize: 4096,
     preload: 0,
   });
-
-export const createPriwaCogLayers = (cogs: IPriwaCogLayerSource[]) =>
-  cogs.map((cog) => createPriwaCogLayer(cog));
