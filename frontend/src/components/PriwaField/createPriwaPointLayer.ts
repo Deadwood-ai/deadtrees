@@ -33,6 +33,7 @@ const pointStyle = (
   point: IPriwaPoint,
   resolution: number,
   isSelected: boolean,
+  isFocused: boolean,
 ) => {
   const label = pointLabel(point, resolution);
   const sourceLabel =
@@ -100,10 +101,20 @@ const pointStyle = (
         }),
       })
     : null;
+  const focusStyle = isFocused
+    ? new Style({
+        image: new CircleStyle({
+          radius: 20,
+          fill: new Fill({ color: "rgba(255,255,255,0.01)" }),
+          stroke: new Stroke({ color: "rgba(245, 158, 11, 0.98)", width: 4 }),
+        }),
+      })
+    : null;
 
   if (!point.isEstimatedLocation) {
     const styles = [
       ...(selectionStyle ? [selectionStyle] : []),
+      ...(focusStyle ? [focusStyle] : []),
       ...(syncStyle ? [syncStyle] : []),
       coreStyle,
       ...(sourceStyle ? [sourceStyle] : []),
@@ -113,6 +124,7 @@ const pointStyle = (
 
   return [
     ...(selectionStyle ? [selectionStyle] : []),
+    ...(focusStyle ? [focusStyle] : []),
     ...(syncStyle ? [syncStyle] : []),
     new Style({
       image: new CircleStyle({
@@ -133,6 +145,7 @@ const pointStyle = (
 export const createPriwaPointFeature = (
   point: IPriwaPoint,
   isSelected = false,
+  isFocused = false,
 ) => {
   const feature = new Feature({
     geometry: new Point(fromLonLat([point.lon, point.lat])),
@@ -140,7 +153,7 @@ export const createPriwaPointFeature = (
   });
   feature.setId(point.id);
   feature.setStyle((_feature, resolution) =>
-    pointStyle(point, resolution, isSelected),
+    pointStyle(point, resolution, isSelected, isFocused),
   );
   return feature;
 };

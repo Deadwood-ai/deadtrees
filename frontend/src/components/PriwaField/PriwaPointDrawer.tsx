@@ -206,6 +206,7 @@ interface PriwaPointDrawerProps {
   onRequestMapPlacement: () => void;
   onPreviewCoordinate: (coordinate: IPriwaCoordinate | null) => void;
   onZoomToPoint: (coordinate: IPriwaCoordinate) => void;
+  presentation?: "overlay" | "review-inspector";
 }
 
 export default function PriwaPointDrawer({
@@ -224,7 +225,9 @@ export default function PriwaPointDrawer({
   onRequestMapPlacement,
   onPreviewCoordinate,
   onZoomToPoint,
+  presentation = "overlay",
 }: PriwaPointDrawerProps) {
+  const isReviewInspector = presentation === "review-inspector";
   const [form] = Form.useForm<IPriwaPointFormValues>();
   const [rawQrValue, setRawQrValue] = useState("");
   const [coordinate, setCoordinate] = useState<IPriwaCoordinate | null>(null);
@@ -303,11 +306,10 @@ export default function PriwaPointDrawer({
   const isEstimatedPosition =
     effectiveCoordinateSource !== null && effectiveCoordinateSource !== "qr";
   const positionLabel = effectiveCoordinateSource
-    ? getPriwaCoordinateSourcePresentation(effectiveCoordinateSource).detailLabel
+    ? getPriwaCoordinateSourcePresentation(effectiveCoordinateSource)
+        .detailLabel
     : "Keine Position";
-  const positionQualityLabel = isEstimatedPosition
-    ? "Geschätzt"
-    : "Bestätigt";
+  const positionQualityLabel = isEstimatedPosition ? "Geschätzt" : "Bestätigt";
   const positionCoordinates = effectiveCoordinate
     ? `${effectiveCoordinate.lat.toFixed(5)}, ${effectiveCoordinate.lon.toFixed(5)}`
     : null;
@@ -420,8 +422,24 @@ export default function PriwaPointDrawer({
       open={open}
       onClose={onClose}
       placement={isMobile ? "bottom" : "right"}
-      width={isMobile ? undefined : "min(430px, 100vw)"}
+      width={
+        isMobile ? undefined : isReviewInspector ? "100%" : "min(430px, 100vw)"
+      }
       height={isMobile ? "100dvh" : undefined}
+      getContainer={isReviewInspector ? false : undefined}
+      mask={!isReviewInspector}
+      rootStyle={
+        isReviewInspector
+          ? {
+              position: "absolute",
+              bottom: "1.25rem",
+              left: "auto",
+              right: "24.5rem",
+              top: "6rem",
+              width: "22rem",
+            }
+          : undefined
+      }
       rootClassName="priwa-point-drawer-root"
       className="priwa-point-drawer"
       destroyOnClose={false}
@@ -438,6 +456,14 @@ export default function PriwaPointDrawer({
           maxHeight: "100dvh",
           maxWidth: "100vw",
           overflowX: "hidden",
+          ...(isReviewInspector
+            ? {
+                border: "1px solid rgb(226 232 240)",
+                borderRadius: 12,
+                boxShadow: "0 20px 25px -5px rgb(15 23 42 / 0.18)",
+                overflowY: "hidden",
+              }
+            : {}),
         },
       }}
     >
@@ -448,7 +474,7 @@ export default function PriwaPointDrawer({
               ? "rounded-md border border-emerald-500 bg-emerald-50 p-2.5 shadow-sm shadow-emerald-900/10"
               : effectiveCoordinate
                 ? "rounded-md border border-amber-400 bg-amber-50 p-2.5 shadow-sm shadow-amber-900/10"
-              : "rounded-md border border-gray-200 bg-gray-50 p-2.5"
+                : "rounded-md border border-gray-200 bg-gray-50 p-2.5"
           }
         >
           <div className="flex items-center justify-between gap-3">
@@ -459,7 +485,7 @@ export default function PriwaPointDrawer({
                     ? "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white"
                     : effectiveCoordinate
                       ? "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white"
-                    : "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-200 text-gray-500"
+                      : "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-200 text-gray-500"
                 }
               >
                 {positionIcon}
@@ -483,7 +509,7 @@ export default function PriwaPointDrawer({
                       ? "truncate text-xs font-medium text-emerald-800"
                       : effectiveCoordinate
                         ? "truncate text-xs font-medium text-amber-800"
-                      : "truncate text-xs text-gray-500"
+                        : "truncate text-xs text-gray-500"
                   }
                 >
                   {positionCoordinates ? (
@@ -502,7 +528,9 @@ export default function PriwaPointDrawer({
                 className="h-11 w-12"
                 style={{ height: 44, minWidth: 48, width: 48 }}
                 icon={<QrcodeOutlined />}
-                type={effectiveCoordinateSource === "qr" ? "primary" : "default"}
+                type={
+                  effectiveCoordinateSource === "qr" ? "primary" : "default"
+                }
                 onClick={() => setQrScannerOpen(true)}
                 aria-label="QR scannen"
                 aria-pressed={effectiveCoordinateSource === "qr"}
@@ -511,7 +539,9 @@ export default function PriwaPointDrawer({
                 className="h-11 w-12"
                 style={{ height: 44, minWidth: 48, width: 48 }}
                 icon={<EnvironmentOutlined />}
-                type={effectiveCoordinateSource === "gps" ? "primary" : "default"}
+                type={
+                  effectiveCoordinateSource === "gps" ? "primary" : "default"
+                }
                 disabled={!currentUserCoordinate}
                 onClick={useCurrentGpsCoordinate}
                 aria-label="GPS übernehmen"
@@ -521,7 +551,9 @@ export default function PriwaPointDrawer({
                 className="h-11 w-12"
                 style={{ height: 44, minWidth: 48, width: 48 }}
                 icon={<AimOutlined />}
-                type={effectiveCoordinateSource === "map" ? "primary" : "default"}
+                type={
+                  effectiveCoordinateSource === "map" ? "primary" : "default"
+                }
                 onClick={onRequestMapPlacement}
                 aria-label="Auf Karte setzen"
                 aria-pressed={effectiveCoordinateSource === "map"}

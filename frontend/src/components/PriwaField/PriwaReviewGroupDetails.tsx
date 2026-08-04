@@ -27,6 +27,7 @@ interface PriwaReviewGroupDetailsProps {
   isSavingGroup: boolean;
   isClassifyingFlight: boolean;
   enabledMosaicIds: Set<string>;
+  selectedTreeId: string | null;
   onFocusTree: (point: IPriwaPoint) => void;
   onEditTree: (point: IPriwaPoint) => void;
   onEditGroup: (draft: IPriwaBefallsgruppeSaveInput) => void;
@@ -46,6 +47,7 @@ export default function PriwaReviewGroupDetails({
   isSavingGroup,
   isClassifyingFlight,
   enabledMosaicIds,
+  selectedTreeId,
   onFocusTree,
   onEditTree,
   onEditGroup,
@@ -133,7 +135,14 @@ export default function PriwaReviewGroupDetails({
             const point = pointsById.get(treeId);
             if (!point) return null;
             return (
-              <div key={treeId} className="flex items-center gap-2 px-2.5 py-2">
+              <div
+                key={treeId}
+                className={`flex items-center gap-2 px-2.5 py-2 transition ${
+                  selectedTreeId === treeId
+                    ? "bg-emerald-50 ring-1 ring-inset ring-emerald-300"
+                    : ""
+                }`}
+              >
                 <button
                   type="button"
                   className="min-w-0 flex-1 text-left"

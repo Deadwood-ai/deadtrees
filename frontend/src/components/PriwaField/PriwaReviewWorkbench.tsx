@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import UploadButton from "../Upload/UploadButton";
 import PriwaReviewGroupDetails from "./PriwaReviewGroupDetails";
+import PriwaReviewTreeInspector from "./PriwaReviewTreeInspector";
 import PriwaReviewUploadDetails from "./PriwaReviewUploadDetails";
 import {
   formatPriwaReviewDate,
@@ -30,11 +31,13 @@ interface PriwaReviewWorkbenchProps {
   isSavingGroup: boolean;
   isClassifyingFlight: boolean;
   enabledMosaicIds: Set<string>;
+  selectedTreeId: string | null;
   onSelect: (item: IPriwaReviewItem) => void;
   onOpenData: () => void;
   onCreateGroup: () => void;
   onFocusTree: (point: IPriwaPoint) => void;
   onEditTree: (point: IPriwaPoint) => void;
+  onCloseTree: () => void;
   onEditGroup: (draft: IPriwaBefallsgruppeSaveInput) => void;
   onSaveGroup: (draft: IPriwaBefallsgruppeSaveInput) => Promise<void>;
   onAssignFlight: (groupId: string, datasetId: string) => Promise<void>;
@@ -95,9 +98,11 @@ export default function PriwaReviewWorkbench({
   mosaics,
   selectedKey,
   isLoading,
+  selectedTreeId,
   onSelect,
   onOpenData,
   onCreateGroup,
+  onCloseTree,
   ...detailProps
 }: PriwaReviewWorkbenchProps) {
   const [filter, setFilter] = useState<PriwaReviewFilter>("open");
@@ -110,6 +115,23 @@ export default function PriwaReviewWorkbench({
     visibleItems[0] ??
     null;
   const openCount = items.filter(isOpenPriwaReviewItem).length;
+  const selectedTree =
+    selectedItem?.kind !== "unassigned-upload" &&
+    selectedTreeId &&
+    selectedItem.treeIds.includes(selectedTreeId)
+      ? (points.find((point) => point.id === selectedTreeId) ?? null)
+      : null;
+
+  const selectItem = (item: IPriwaReviewItem) => {
+    if (
+      selectedTreeId &&
+      (item.kind === "unassigned-upload" ||
+        !item.treeIds.includes(selectedTreeId))
+    ) {
+      onCloseTree();
+    }
+    onSelect(item);
+  };
 
   useEffect(() => {
     if (selectedItem && selectedItem.key !== selectedKey) {
@@ -144,7 +166,10 @@ export default function PriwaReviewWorkbench({
             block
             size="small"
             value={filter}
-            onChange={setFilter}
+            onChange={(nextFilter) => {
+              onCloseTree();
+              setFilter(nextFilter);
+            }}
             options={[
               { label: "Offen", value: "open" },
               { label: "Fertig", value: "complete" },
@@ -159,7 +184,7 @@ export default function PriwaReviewWorkbench({
               item={item}
               points={points}
               isSelected={item.key === selectedItem?.key}
-              onSelect={() => onSelect(item)}
+              onSelect={() => selectItem(item)}
             />
           ))}
           {!isLoading && visibleItems.length === 0 && (
@@ -185,24 +210,54 @@ export default function PriwaReviewWorkbench({
         </footer>
       </aside>
 
-      <aside className="pointer-events-auto absolute bottom-5 right-4 top-24 w-[23rem] overflow-y-auto rounded-xl border border-slate-200 bg-white/95 p-4 shadow-xl backdrop-blur">
-        {!selectedItem ? (
-          <Empty
-            className="pt-24"
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="Eintrag zum Prüfen auswählen"
+      {selectedTree && (
+        <aside
+          data-testid="priwa-tree-inspector-panel"
+          className="pointer-events-auto absolute bottom-5 right-[24.5rem] top-24 hidden w-[22rem] overflow-y-auto rounded-xl border border-slate-200 bg-white/95 p-4 shadow-xl backdrop-blur min-[1200px]:block"
+        >
+          <PriwaReviewTreeInspector
+            point={selectedTree}
+            onClose={onCloseTree}
+            onEdit={detailProps.onEditTree}
+            onFocus={detailProps.onFocusTree}
           />
-        ) : selectedItem.kind === "unassigned-upload" ? (
-          <PriwaReviewUploadDetails item={selectedItem} {...detailProps} />
-        ) : (
-          <PriwaReviewGroupDetails
-            key={selectedItem.key}
-            item={selectedItem}
-            points={points}
-            mosaics={mosaics}
-            {...detailProps}
-          />
+        </aside>
+      )}
+
+      <aside
+        data-testid="priwa-review-detail-panel"
+        className="pointer-events-auto absolute bottom-5 right-4 top-24 w-[23rem] overflow-y-auto rounded-xl border border-slate-200 bg-white/95 p-4 shadow-xl backdrop-blur"
+      >
+        {selectedTree && (
+          <div className="min-[1200px]:hidden">
+            <PriwaReviewTreeInspector
+              point={selectedTree}
+              onClose={onCloseTree}
+              onEdit={detailProps.onEditTree}
+              onFocus={detailProps.onFocusTree}
+            />
+          </div>
         )}
+        <div className={selectedTree ? "hidden min-[1200px]:block" : ""}>
+          {!selectedItem ? (
+            <Empty
+              className="pt-24"
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="Eintrag zum Prüfen auswählen"
+            />
+          ) : selectedItem.kind === "unassigned-upload" ? (
+            <PriwaReviewUploadDetails item={selectedItem} {...detailProps} />
+          ) : (
+            <PriwaReviewGroupDetails
+              key={selectedItem.key}
+              item={selectedItem}
+              points={points}
+              mosaics={mosaics}
+              selectedTreeId={selectedTreeId}
+              {...detailProps}
+            />
+          )}
+        </div>
       </aside>
     </div>
   );

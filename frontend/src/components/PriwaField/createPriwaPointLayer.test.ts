@@ -44,17 +44,18 @@ describe("createPriwaPointFeature", () => {
     ["qr", "QR"],
     ["gps", "GPS"],
     ["map", "Karte"],
-  ] as const)("labels %s coordinates as %s", (coordinateSource, sourceLabel) => {
-    const feature = createPriwaPointFeature({ ...point, coordinateSource });
-    const styles = feature.getStyleFunction()?.(feature, 0.5);
-    const styleList = Array.isArray(styles) ? styles : [styles];
+  ] as const)(
+    "labels %s coordinates as %s",
+    (coordinateSource, sourceLabel) => {
+      const feature = createPriwaPointFeature({ ...point, coordinateSource });
+      const styles = feature.getStyleFunction()?.(feature, 0.5);
+      const styleList = Array.isArray(styles) ? styles : [styles];
 
-    expect(
-      styleList
-        .map((style) => style?.getText()?.getText())
-        .filter(Boolean),
-    ).toContain(sourceLabel);
-  });
+      expect(
+        styleList.map((style) => style?.getText()?.getText()).filter(Boolean),
+      ).toContain(sourceLabel);
+    },
+  );
 
   it("shows mobile tree numbers nearby and hides them at overview zoom", () => {
     const feature = createPriwaPointFeature(point);
@@ -94,6 +95,23 @@ describe("createPriwaPointFeature", () => {
         return (
           image instanceof CircleStyle &&
           image.getStroke()?.getLineDash()?.join() === "4,4"
+        );
+      }),
+    ).toBe(true);
+  });
+
+  it("adds a distinct focus ring for the tree shown in the inspector", () => {
+    const feature = createPriwaPointFeature(point, true, true);
+    const styles = feature.getStyleFunction()?.(feature, 0.5);
+    const styleList = Array.isArray(styles) ? styles : [styles];
+
+    expect(
+      styleList.some((style) => {
+        const image = style?.getImage();
+        return (
+          image instanceof CircleStyle &&
+          image.getRadius() === 20 &&
+          image.getStroke()?.getColor() === "rgba(245, 158, 11, 0.98)"
         );
       }),
     ).toBe(true);

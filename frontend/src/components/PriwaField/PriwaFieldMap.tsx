@@ -1,4 +1,4 @@
-import { Alert, Button, FloatButton, Tooltip, message } from "antd";
+import { Alert, Button, FloatButton, Grid, Tooltip, message } from "antd";
 import {
   AimOutlined,
   EnvironmentOutlined,
@@ -162,8 +162,10 @@ export default function PriwaFieldMap({
   const [formSessionId, setFormSessionId] = useState(0);
   const [isPointListOpen, setPointListOpen] = useState(false);
   const [focusedPointId, setFocusedPointId] = useState<string | null>(null);
+  const [reviewPointId, setReviewPointId] = useState<string | null>(null);
   const [baseLayer, setBaseLayer] = useState<PriwaBaseLayer>("aerial");
   const isMobile = useIsMobile();
+  const screens = Grid.useBreakpoint();
   const userLocation = useUserLocationLayer(mapRef);
   const {
     layer: userLocationLayer,
@@ -424,10 +426,14 @@ export default function PriwaFieldMap({
     source.clear();
     points.forEach((point) =>
       source.addFeature(
-        createPriwaPointFeature(point, selectedTreeIds.has(point.id)),
+        createPriwaPointFeature(
+          point,
+          selectedTreeIds.has(point.id),
+          point.id === reviewPointId,
+        ),
       ),
     );
-  }, [points, selectedTreeIds]);
+  }, [points, reviewPointId, selectedTreeIds]);
 
   useEffect(() => {
     if (
@@ -506,14 +512,48 @@ export default function PriwaFieldMap({
   );
 
   useEffect(() => {
-    selectReviewItemFromMosaicRef.current = selectReviewItemFromMosaic;
-    selectReviewItemFromGroupRef.current = selectReviewItemFromGroup;
-    selectReviewItemFromPointRef.current = selectReviewItemFromPoint;
+    selectReviewItemFromMosaicRef.current = (mosaicId) => {
+      setReviewPointId(null);
+      selectReviewItemFromMosaic(mosaicId);
+    };
+    selectReviewItemFromGroupRef.current = (groupId) => {
+      setReviewPointId(null);
+      selectReviewItemFromGroup(groupId);
+    };
+    selectReviewItemFromPointRef.current = (point) => {
+      setReviewPointId(point.id);
+      selectReviewItemFromPoint(point);
+    };
   }, [
     selectReviewItemFromGroup,
     selectReviewItemFromMosaic,
     selectReviewItemFromPoint,
   ]);
+
+  useEffect(() => {
+    if (reviewPointId && !points.some((point) => point.id === reviewPointId)) {
+      setReviewPointId(null);
+    }
+  }, [points, reviewPointId]);
+
+  const selectReviewPoint = useCallback(
+    (point: IPriwaPoint) => {
+      setReviewPointId(point.id);
+      selectReviewItemFromPoint(point);
+      focusPointOnMap(point);
+    },
+    [focusPointOnMap, selectReviewItemFromPoint],
+  );
+
+  const openReviewPointForEditing = useCallback(
+    (point: IPriwaPoint) => {
+      setReviewPointId(point.id);
+      selectReviewItemFromPoint(point);
+      focusPointOnMap(point);
+      openPointForEditing(point);
+    },
+    [focusPointOnMap, openPointForEditing, selectReviewItemFromPoint],
+  );
 
   const openNewPointDrawer = useCallback(() => {
     setPointListOpen(false);
@@ -720,14 +760,20 @@ export default function PriwaFieldMap({
           isSavingGroup={isSavingGroup}
           isClassifyingFlight={isClassifyingFlight}
           enabledMosaicIds={enabledMosaicIds}
+          selectedTreeId={reviewPointId}
           onSelect={selectReviewItem}
           onOpenData={() => {
+            setReviewPointId(null);
             setFocusedPointId(null);
             setPointListOpen(true);
           }}
-          onCreateGroup={createGroup}
-          onFocusTree={focusPointOnMap}
-          onEditTree={openPointForEditing}
+          onCreateGroup={() => {
+            setReviewPointId(null);
+            createGroup();
+          }}
+          onFocusTree={selectReviewPoint}
+          onEditTree={openReviewPointForEditing}
+          onCloseTree={() => setReviewPointId(null)}
           onEditGroup={setGroupEditorDraft}
           onSaveGroup={saveGroup}
           onAssignFlight={assignFlight}
@@ -812,6 +858,14 @@ export default function PriwaFieldMap({
         onRequestMapPlacement={requestMapPlacement}
         onPreviewCoordinate={handlePreviewCoordinate}
         onZoomToPoint={zoomToCoordinate}
+        presentation={
+          !isMobile &&
+          !!screens.xl &&
+          !!editingPoint &&
+          editingPoint.id === reviewPointId
+            ? "review-inspector"
+            : "overlay"
+        }
       />
 
       <PriwaBefallsgruppeEditor
