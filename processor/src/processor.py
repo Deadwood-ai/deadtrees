@@ -26,13 +26,7 @@ from .utils.drain_control import (
 	acknowledge_drain_request,
 	is_drain_requested,
 )
-from .utils.queue_runtime import (
-	claim_task,
-	delete_queue_task,
-	get_active_task,
-	get_next_task,
-	release_queue_task,
-)
+from .utils import queue_runtime
 from shared.logging import LogContext, LogCategory, UnifiedLogger, SupabaseHandler
 
 # Initialize logger with proper cleanup
@@ -217,6 +211,26 @@ def are_requested_stages_complete(status_data: dict, task_types: list) -> bool:
 		for flag in _stage_done_flags(done_flags)
 	]
 	return bool(requested) and all(status_data.get(done_flag, False) for done_flag in requested)
+
+
+def get_next_task(token: str) -> QueueTask | None:
+	return queue_runtime.get_next_task(token, client_factory=use_client)
+
+
+def get_active_task(token: str, worker_id: str) -> QueueTask | None:
+	return queue_runtime.get_active_task(token, worker_id, client_factory=use_client, logger_instance=logger)
+
+
+def claim_task(token: str, task: QueueTask, worker_id: str) -> QueueTask | None:
+	return queue_runtime.claim_task(token, task, worker_id, client_factory=use_client, logger_instance=logger)
+
+
+def delete_queue_task(token: str, task: QueueTask) -> None:
+	queue_runtime.delete_queue_task(token, task, client_factory=use_client)
+
+
+def release_queue_task(token: str, task: QueueTask) -> None:
+	queue_runtime.release_queue_task(token, task, client_factory=use_client)
 
 
 def is_dataset_uploaded_or_processed(task: QueueTask, token: str) -> tuple:

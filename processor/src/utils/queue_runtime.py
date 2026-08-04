@@ -20,10 +20,10 @@ def get_task_blacklist() -> list[str]:
 	return blacklist
 
 
-def get_next_task(token: str) -> QueueTask | None:
+def get_next_task(token: str, client_factory=use_client) -> QueueTask | None:
 	"""Return the highest-priority waiting task this worker can run."""
 	blacklist = get_task_blacklist()
-	with use_client(token) as client:
+	with client_factory(token) as client:
 		query = client.table(settings.queue_position_table).select('*')
 		if blacklist:
 			query = query.not_.overlaps('task_types', blacklist)
@@ -55,9 +55,9 @@ def _is_missing_queue_claim_column_error(error: Exception) -> bool:
 	)
 
 
-def get_active_task(token: str, worker_id: str) -> QueueTask | None:
+def get_active_task(token: str, worker_id: str, client_factory=use_client, logger_instance=logger) -> QueueTask | None:
 	"""Return this worker's in-progress row, or adopt a legacy unowned row."""
-	with use_client(token) as client:
+	with client_factory(token) as client:
 		try:
 			response = (
 				client.table(settings.queue_table)
@@ -93,7 +93,7 @@ def get_active_task(token: str, worker_id: str) -> QueueTask | None:
 		except Exception as e:
 			if not _is_missing_queue_claim_column_error(e):
 				raise
-			logger.warning('Queue claim columns are not available yet; falling back to legacy active-task recovery')
+			logger_instance.warning('Queue claim columns are not available yet; falling back to legacy active-task recovery')
 			response = (
 				client.table(settings.queue_table)
 				.select('*')
@@ -109,7 +109,7 @@ def get_active_task(token: str, worker_id: str) -> QueueTask | None:
 	return _queue_task_from_raw_row(response.data[0])
 
 
-def claim_task(token: str, task: QueueTask, worker_id: str) -> QueueTask | None:
+def claim_task(token: str, task: QueueTask, worker_id: str, client_factory=use_client, logger_instance=logger) -> QueueTask | None:
 	"""Atomically claim a waiting queue row for this processor worker."""
 	claimed_at = datetime.now(timezone.utc).isoformat()
 	payload = {
@@ -118,7 +118,7 @@ def claim_task(token: str, task: QueueTask, worker_id: str) -> QueueTask | None:
 		'claimed_at': claimed_at,
 	}
 
-	with use_client(token) as client:
+	with client_factory(token) as client:
 		try:
 			response = (
 				client.table(settings.queue_table)
@@ -131,7 +131,7 @@ def claim_task(token: str, task: QueueTask, worker_id: str) -> QueueTask | None:
 		except Exception as e:
 			if not _is_missing_queue_claim_column_error(e):
 				raise
-			logger.warning('Queue claim columns are not available yet; falling back to legacy queue claim')
+			logger_instance.warning('Queue claim columns are not available yet; falling back to legacy queue claim')
 			response = (
 				client.table(settings.queue_table)
 				.update({'is_processing': True})
@@ -156,14 +156,14 @@ def _apply_queue_owner_filter(query, task: QueueTask):
 	return query
 
 
-def delete_queue_task(token: str, task: QueueTask) -> None:
-	with use_client(token) as client:
+def delete_queue_task(token: str, task: QueueTask, client_factory=use_client) -> None:
+	with client_factory(token) as client:
 		query = client.table(settings.queue_table).delete().eq('id', task.id)
 		_apply_queue_owner_filter(query, task).execute()
 
 
-def release_queue_task(token: str, task: QueueTask) -> None:
-	with use_client(token) as client:
+def release_queue_task(token: str, task: QueueTask, client_factory=use_client) -> None:
+	with client_factory(token) as client:
 		query = (
 			client.table(settings.queue_table)
 			.update({'is_processing': False, 'claimed_by': None, 'claimed_at': None})
