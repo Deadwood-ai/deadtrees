@@ -81,5 +81,15 @@ describe("PRIWA review map-layer synchronization", () => {
     expect(features).toHaveLength(1);
     expect(features[0].get("mosaicId")).toBe(mosaic.id);
     expect(features[0].getStyle()).toHaveLength(2);
+
+    syncPriwaMosaicFootprintLayer(
+      source,
+      [mosaic],
+      [mosaic],
+      new Set([mosaic.id]),
+      mosaic.id,
+      false,
+    );
+    expect(source.getFeatures()).toEqual([]);
   });
 });

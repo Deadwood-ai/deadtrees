@@ -36,6 +36,7 @@ interface UsePriwaReviewMapLayersOptions {
   reviewMosaics: IPriwaMosaic[];
   enabledMosaics: IPriwaMosaic[];
   enabledMosaicIds: Set<string>;
+  showMosaicFootprints: boolean;
   selectedMosaicId: string | null;
   selectedGroupId: string | null;
 }
@@ -63,8 +64,10 @@ export const syncPriwaMosaicFootprintLayer = (
   reviewMosaics: IPriwaMosaic[],
   enabledMosaicIds: Set<string>,
   selectedMosaicId: string | null,
+  showMosaicFootprints = true,
 ) => {
   source.clear();
+  if (!showMosaicFootprints) return;
   const footprintIds = new Set(footprintMosaics.map((mosaic) => mosaic.id));
   reviewMosaics
     .filter(
@@ -93,6 +96,7 @@ export function usePriwaReviewMapLayers({
   reviewMosaics,
   enabledMosaics,
   enabledMosaicIds,
+  showMosaicFootprints,
   selectedMosaicId,
   selectedGroupId,
 }: UsePriwaReviewMapLayersOptions) {
@@ -116,6 +120,7 @@ export function usePriwaReviewMapLayers({
         reviewMosaics,
         enabledMosaicIds,
         selectedMosaicId,
+        showMosaicFootprints,
       );
     }
   }, [
@@ -124,6 +129,7 @@ export function usePriwaReviewMapLayers({
     mosaicFootprintLayerRef,
     reviewMosaics,
     selectedMosaicId,
+    showMosaicFootprints,
   ]);
 
   useEffect(() => {

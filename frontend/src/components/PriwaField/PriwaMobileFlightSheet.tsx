@@ -1,6 +1,6 @@
 import { AimOutlined, BorderOutlined } from "@ant-design/icons";
 import { Button, Drawer, Empty, Switch, Tag, Tooltip } from "antd";
-import { useState } from "react";
+import { useEffect, useRef } from "react";
 
 import { formatPriwaReviewDate } from "./priwaReviewPresentation";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
@@ -8,17 +8,35 @@ import type { IPriwaMosaic } from "./usePriwaMosaics";
 interface PriwaMobileFlightSheetProps {
   mosaics: IPriwaMosaic[];
   enabledMosaicIds: Set<string>;
+  areBoundariesVisible: boolean;
+  isOpen: boolean;
+  focusedMosaicId: string | null;
   onSetMosaicVisibility: (mosaicId: string, visible: boolean) => void;
   onZoomToMosaic: (mosaic: IPriwaMosaic) => void;
+  onBoundariesVisibilityChange: (visible: boolean) => void;
+  onOpenChange: (open: boolean) => void;
 }
 
 export default function PriwaMobileFlightSheet({
   mosaics,
   enabledMosaicIds,
+  areBoundariesVisible,
+  isOpen,
+  focusedMosaicId,
   onSetMosaicVisibility,
   onZoomToMosaic,
+  onBoundariesVisibilityChange,
+  onOpenChange,
 }: PriwaMobileFlightSheetProps) {
-  const [isOpen, setOpen] = useState(false);
+  const focusedCardRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || !focusedMosaicId) return;
+    const frame = window.requestAnimationFrame(() => {
+      focusedCardRef.current?.scrollIntoView({ block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusedMosaicId, isOpen]);
 
   return (
     <>
@@ -28,9 +46,10 @@ export default function PriwaMobileFlightSheet({
           shape="circle"
           size="large"
           icon={<BorderOutlined />}
-          onClick={() => setOpen(true)}
+          type={areBoundariesVisible ? "primary" : "default"}
+          onClick={() => onOpenChange(true)}
           aria-label="Befliegungen öffnen"
-          aria-pressed={isOpen}
+          aria-pressed={areBoundariesVisible}
         />
       </Tooltip>
 
@@ -39,7 +58,7 @@ export default function PriwaMobileFlightSheet({
         placement="bottom"
         height="72dvh"
         open={isOpen}
-        onClose={() => setOpen(false)}
+        onClose={() => onOpenChange(false)}
         rootClassName="priwa-layer-sheet-root"
         className="md:hidden"
         styles={{
@@ -52,8 +71,18 @@ export default function PriwaMobileFlightSheet({
       >
         <div className="flex h-full min-h-0 flex-col">
           <div className="border-b border-slate-200 bg-cyan-50 px-4 py-3 text-xs text-cyan-950">
-            Die Kartengrenzen benötigen kaum Daten. Ein Luftbild wird erst
-            geladen, wenn du es einschaltest.
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-medium">Befliegungsgrenzen anzeigen</span>
+              <Switch
+                size="small"
+                checked={areBoundariesVisible}
+                onChange={onBoundariesVisibilityChange}
+                aria-label="Alle Befliegungsgrenzen anzeigen"
+              />
+            </div>
+            <p className="mt-1">
+              Ein Luftbild wird erst geladen, wenn du es einzeln einschaltest.
+            </p>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
             {mosaics.length === 0 ? (
@@ -67,7 +96,14 @@ export default function PriwaMobileFlightSheet({
                 {mosaics.map((mosaic) => (
                   <div
                     key={mosaic.id}
-                    className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+                    ref={
+                      mosaic.id === focusedMosaicId ? focusedCardRef : undefined
+                    }
+                    className={`rounded-lg border bg-white p-3 shadow-sm ${
+                      mosaic.id === focusedMosaicId
+                        ? "border-emerald-600 ring-2 ring-emerald-100"
+                        : "border-slate-200"
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -101,8 +137,9 @@ export default function PriwaMobileFlightSheet({
                         icon={<AimOutlined />}
                         disabled={!mosaic.bbox}
                         onClick={() => {
+                          onBoundariesVisibilityChange(true);
                           onZoomToMosaic(mosaic);
-                          setOpen(false);
+                          onOpenChange(false);
                         }}
                       >
                         Grenze zeigen

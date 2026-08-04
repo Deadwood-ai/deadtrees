@@ -169,6 +169,12 @@ export default function PriwaFieldMap({
   const [focusedPointId, setFocusedPointId] = useState<string | null>(null);
   const [reviewPointId, setReviewPointId] = useState<string | null>(null);
   const [baseLayer, setBaseLayer] = useState<PriwaBaseLayer>("aerial");
+  const [areMobileFlightBoundariesVisible, setMobileFlightBoundariesVisible] =
+    useState(true);
+  const [isMobileFlightSheetOpen, setMobileFlightSheetOpen] = useState(false);
+  const [focusedMobileFlightId, setFocusedMobileFlightId] = useState<
+    string | null
+  >(null);
   const isMobile = useIsMobile();
   const userLocation = useUserLocationLayer(mapRef);
   const {
@@ -273,10 +279,28 @@ export default function PriwaFieldMap({
     createGroup,
     createGroupForFlight,
   } = review;
+  const confirmedMobileMosaics = useMemo(
+    () =>
+      reviewMosaics.filter(
+        (mosaic) => mosaic.flightType === "umfeldbefliegung",
+      ),
+    [reviewMosaics],
+  );
   const footprintMosaics = useMemo(
     () =>
-      isMobile ? reviewMosaics : matchedMosaics.map(({ mosaic }) => mosaic),
-    [isMobile, matchedMosaics, reviewMosaics],
+      isMobile
+        ? confirmedMobileMosaics
+        : matchedMosaics.map(({ mosaic }) => mosaic),
+    [confirmedMobileMosaics, isMobile, matchedMosaics],
+  );
+  const mapEnabledMosaics = useMemo(
+    () =>
+      isMobile
+        ? enabledMosaics.filter(
+            (mosaic) => mosaic.flightType === "umfeldbefliegung",
+          )
+        : enabledMosaics,
+    [enabledMosaics, isMobile],
   );
 
   const openPointForEditing = useCallback(
@@ -408,7 +432,10 @@ export default function PriwaFieldMap({
       );
 
       if (mosaicId) {
-        if (!window.matchMedia("(max-width: 767px)").matches) {
+        if (window.matchMedia("(max-width: 767px)").matches) {
+          setFocusedMobileFlightId(mosaicId);
+          setMobileFlightSheetOpen(true);
+        } else {
           selectReviewItemFromMosaicRef.current(mosaicId);
         }
         return;
@@ -492,8 +519,9 @@ export default function PriwaFieldMap({
     points,
     footprintMosaics,
     reviewMosaics,
-    enabledMosaics,
+    enabledMosaics: mapEnabledMosaics,
     enabledMosaicIds,
+    showMosaicFootprints: !isMobile || areMobileFlightBoundariesVisible,
     selectedMosaicId: isMobile ? null : selectedMosaicId,
     selectedGroupId: isMobile ? null : selectedGroupId,
   });
@@ -776,12 +804,19 @@ export default function PriwaFieldMap({
             <PriwaMobileFieldTools
               points={points}
               groups={groups}
-              mosaics={reviewMosaics}
+              mosaics={confirmedMobileMosaics}
               enabledMosaicIds={enabledMosaicIds}
+              areFlightBoundariesVisible={areMobileFlightBoundariesVisible}
+              isFlightSheetOpen={isMobileFlightSheetOpen}
+              focusedFlightId={focusedMobileFlightId}
               onEditPoint={openPointForEditing}
               onZoomToPoint={focusPointOnMap}
               onSetMosaicVisibility={setMosaicVisibility}
               onZoomToMosaic={zoomToMosaicFootprint}
+              onFlightBoundariesVisibilityChange={
+                setMobileFlightBoundariesVisible
+              }
+              onFlightSheetOpenChange={setMobileFlightSheetOpen}
             />
           )}
           {!isMobile && !isPointListOpen && !isDrawerOpen && (
