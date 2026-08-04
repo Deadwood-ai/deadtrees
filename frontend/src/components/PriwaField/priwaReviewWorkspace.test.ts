@@ -102,6 +102,22 @@ describe("buildPriwaReviewWorkspace", () => {
     });
   });
 
+  it("suggests every overlapping flight inside the date window", () => {
+    const items = buildPriwaReviewWorkspace(
+      [point("1", 8.15)],
+      [
+        { ...mosaic("flight-near"), captureDate: "2026-06-13" },
+        { ...mosaic("flight-far"), captureDate: "2026-06-17" },
+      ],
+      [group(["1"])],
+    );
+
+    expect(items[0]).toMatchObject({
+      key: "group:group-1",
+      suggestedDatasetIds: ["flight-near", "flight-far"],
+    });
+  });
+
   it("marks a confirmed reviewed group complete", () => {
     const items = buildPriwaReviewWorkspace(
       [point("1", 8.15)],

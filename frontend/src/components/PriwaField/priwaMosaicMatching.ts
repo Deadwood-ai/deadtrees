@@ -152,6 +152,25 @@ export const matchPriwaPointsToMosaics = (
   mosaics: IPriwaMosaic[],
   maxDaysApart = PRIWA_MOSAIC_MATCH_MAX_DAYS,
 ): IPriwaPointMosaicMatch[] => {
+  const candidates = matchPriwaPointsToMosaicCandidates(
+    points,
+    mosaics,
+    maxDaysApart,
+  );
+  const matchedPointIds = new Set<string>();
+
+  return candidates.filter(({ pointId }) => {
+    if (matchedPointIds.has(pointId)) return false;
+    matchedPointIds.add(pointId);
+    return true;
+  });
+};
+
+export const matchPriwaPointsToMosaicCandidates = (
+  points: IPriwaPoint[],
+  mosaics: IPriwaMosaic[],
+  maxDaysApart = PRIWA_MOSAIC_MATCH_MAX_DAYS,
+): IPriwaPointMosaicMatch[] => {
   const normalizedMaxDays = Math.max(0, Math.floor(maxDaysApart));
 
   return points.flatMap((point) => {
@@ -170,15 +189,10 @@ export const matchPriwaPointsToMosaics = (
       return [{ mosaic, captureDay, daysApart }];
     });
 
-    const bestCandidate = candidates.sort(compareCandidates)[0];
-    if (!bestCandidate) return [];
-
-    return [
-      {
-        pointId: point.id,
-        mosaicId: bestCandidate.mosaic.id,
-        daysApart: bestCandidate.daysApart,
-      },
-    ];
+    return candidates.sort(compareCandidates).map(({ mosaic, daysApart }) => ({
+      pointId: point.id,
+      mosaicId: mosaic.id,
+      daysApart,
+    }));
   });
 };

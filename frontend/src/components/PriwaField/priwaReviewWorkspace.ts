@@ -6,6 +6,7 @@ import type {
 } from "./types";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
 import { buildPriwaMosaicMatchIndex } from "./usePriwaMosaicMatches";
+import { matchPriwaPointsToMosaicCandidates } from "./priwaMosaicMatching";
 
 export type PriwaReviewStatus =
   | "group_suggestion"
@@ -79,12 +80,23 @@ export const buildPriwaReviewWorkspace = (
 ): IPriwaReviewItem[] => {
   const mosaicsById = new Map(mosaics.map((mosaic) => [mosaic.id, mosaic]));
   const rawMatches = buildPriwaMosaicMatchIndex(points, mosaics);
+  const candidateMosaics = [
+    ...rawMatches.matchedMosaics.map(({ mosaic }) => mosaic),
+    ...rawMatches.unmatchedMosaics.map(({ mosaic }) => mosaic),
+  ];
+  const candidateDatasetIdsByPointId = new Map<string, string[]>();
+  matchPriwaPointsToMosaicCandidates(points, candidateMosaics).forEach(
+    ({ pointId, mosaicId }) => {
+      const datasetIds = candidateDatasetIdsByPointId.get(pointId) ?? [];
+      datasetIds.push(mosaicId);
+      candidateDatasetIdsByPointId.set(pointId, datasetIds);
+    },
+  );
   const candidateDatasetIdsForTrees = (treeIds: string[]) =>
     unique(
-      treeIds.flatMap((treeId) => {
-        const datasetId = rawMatches.mosaicIdByPointId[treeId];
-        return datasetId ? [datasetId] : [];
-      }),
+      treeIds.flatMap(
+        (treeId) => candidateDatasetIdsByPointId.get(treeId) ?? [],
+      ),
     );
 
   const savedItems: IPriwaGroupReviewItem[] = groups.map((group) => {
@@ -159,10 +171,6 @@ export const buildPriwaReviewWorkspace = (
       reason,
     ]),
   );
-  const candidateMosaics = [
-    ...rawMatches.matchedMosaics.map(({ mosaic }) => mosaic),
-    ...rawMatches.unmatchedMosaics.map(({ mosaic }) => mosaic),
-  ];
   const uploadItems: IPriwaUploadReviewItem[] = candidateMosaics
     .filter((mosaic) => !claimedDatasetIds.has(mosaic.id))
     .map((mosaic) => ({
