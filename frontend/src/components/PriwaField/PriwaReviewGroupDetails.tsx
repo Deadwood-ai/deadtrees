@@ -28,6 +28,7 @@ interface PriwaReviewGroupDetailsProps {
   isClassifyingFlight: boolean;
   enabledMosaicIds: Set<string>;
   selectedTreeId: string | null;
+  onSelectTree: (point: IPriwaPoint) => void;
   onFocusTree: (point: IPriwaPoint) => void;
   onEditTree: (point: IPriwaPoint) => void;
   onEditGroup: (draft: IPriwaBefallsgruppeSaveInput) => void;
@@ -48,6 +49,7 @@ export default function PriwaReviewGroupDetails({
   isClassifyingFlight,
   enabledMosaicIds,
   selectedTreeId,
+  onSelectTree,
   onFocusTree,
   onEditTree,
   onEditGroup,
@@ -146,7 +148,7 @@ export default function PriwaReviewGroupDetails({
                 <button
                   type="button"
                   className="min-w-0 flex-1 text-left"
-                  onClick={() => onFocusTree(point)}
+                  onClick={() => onSelectTree(point)}
                 >
                   <span className="block truncate text-sm font-medium text-slate-900">
                     {point.baumnr ? `Baum ${point.baumnr}` : "Ohne Baumnr"}

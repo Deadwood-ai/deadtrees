@@ -559,10 +559,8 @@ export default function PriwaFieldMap({
     selectReviewItemFromPointRef.current = (point) => {
       setReviewPointId(point.id);
       selectReviewItemFromPoint(point);
-      focusReviewPointOnMap(point);
     };
   }, [
-    focusReviewPointOnMap,
     selectReviewItemFromGroup,
     selectReviewItemFromMosaic,
     selectReviewItemFromPoint,
@@ -579,13 +577,16 @@ export default function PriwaFieldMap({
       setReviewPointId(point.id);
       selectReviewItemFromPoint(point);
       selectMatchedMosaicForPoint(point);
+    },
+    [selectMatchedMosaicForPoint, selectReviewItemFromPoint],
+  );
+
+  const focusSelectedReviewPoint = useCallback(
+    (point: IPriwaPoint) => {
+      selectReviewPoint(point);
       focusReviewPointOnMap(point);
     },
-    [
-      focusReviewPointOnMap,
-      selectMatchedMosaicForPoint,
-      selectReviewItemFromPoint,
-    ],
+    [focusReviewPointOnMap, selectReviewPoint],
   );
 
   const openReviewPointForEditing = useCallback(
@@ -819,7 +820,8 @@ export default function PriwaFieldMap({
             setReviewPointId(null);
             createGroup();
           }}
-          onFocusTree={selectReviewPoint}
+          onSelectTree={selectReviewPoint}
+          onFocusTree={focusSelectedReviewPoint}
           onEditTree={openReviewPointForEditing}
           onCloseTree={() => setReviewPointId(null)}
           onEditGroup={setGroupEditorDraft}

@@ -29,7 +29,29 @@ describe("createPriwaMosaicFootprintLayer", () => {
 
     expect(feature?.get("mosaicId")).toBe("10513");
     expect(feature?.getGeometry()?.getType()).toBe("Polygon");
-    expect(feature?.getStyle()).toBeTruthy();
+    const styles = feature?.getStyle();
+    expect(Array.isArray(styles)).toBe(true);
+    if (!Array.isArray(styles)) throw new Error("Expected layered COG style");
+    expect(styles).toHaveLength(2);
+    expect(styles?.[0].getStroke()?.getWidth()).toBe(5);
+    expect(styles?.[1].getStroke()?.getColor()).toBe(
+      "rgba(251, 146, 60, 1)",
+    );
+  });
+
+  it("uses a high-contrast cyan accent for hidden COG boundaries", () => {
+    const feature = createPriwaMosaicFootprintFeature({
+      mosaic,
+      isSelected: false,
+      isVisible: false,
+    });
+    const styles = feature?.getStyle();
+
+    expect(Array.isArray(styles)).toBe(true);
+    if (!Array.isArray(styles)) throw new Error("Expected layered COG style");
+    expect(styles?.[1].getStroke()?.getColor()).toBe(
+      "rgba(34, 211, 238, 1)",
+    );
   });
 
   it("skips mosaics without parseable bbox values", () => {

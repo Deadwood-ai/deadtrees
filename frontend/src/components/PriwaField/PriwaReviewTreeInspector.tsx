@@ -31,11 +31,13 @@ const percentLabel = (value: string) =>
 
 function Detail({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0">
-      <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+    <div className="min-w-0 !text-left">
+      <dt className="!text-left text-[11px] font-medium uppercase tracking-wide text-slate-400">
         {label}
       </dt>
-      <dd className="mt-0.5 break-words text-sm text-slate-800">{value}</dd>
+      <dd className="m-0 mt-0.5 break-words !text-left text-sm text-slate-800">
+        {value}
+      </dd>
     </div>
   );
 }

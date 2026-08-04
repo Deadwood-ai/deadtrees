@@ -1,6 +1,6 @@
 import { PlusOutlined, TableOutlined } from "@ant-design/icons";
 import { Button, Empty, Segmented, Tag } from "antd";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import UploadButton from "../Upload/UploadButton";
 import PriwaReviewDetailsLayout from "./PriwaReviewDetailsLayout";
@@ -22,6 +22,7 @@ import {
   filterForPriwaReviewItem,
   filterPriwaReviewItems,
   resolvePriwaFilteredReviewSelection,
+  shouldClosePriwaReviewTree,
   type PriwaReviewFilter,
 } from "./priwaReviewQueue";
 
@@ -40,6 +41,7 @@ interface PriwaReviewWorkbenchProps {
   onSelect: (item: IPriwaReviewItem) => void;
   onOpenData: () => void;
   onCreateGroup: () => void;
+  onSelectTree: (point: IPriwaPoint) => void;
   onFocusTree: (point: IPriwaPoint) => void;
   onEditTree: (point: IPriwaPoint) => void;
   onCloseTree: () => void;
@@ -128,22 +130,22 @@ export default function PriwaReviewWorkbench({
   );
   const openCount = items.filter(isOpenPriwaReviewItem).length;
   const selectedTree =
-    selectedItem?.kind !== "unassigned-upload" &&
     selectedTreeId &&
-    selectedItem.treeIds.includes(selectedTreeId)
+    (isTreeEditing ||
+      (selectedItem?.kind !== "unassigned-upload" &&
+        selectedItem.treeIds.includes(selectedTreeId)))
       ? (points.find((point) => point.id === selectedTreeId) ?? null)
       : null;
 
-  const selectItem = (item: IPriwaReviewItem) => {
-    if (
-      selectedTreeId &&
-      (item.kind === "unassigned-upload" ||
-        !item.treeIds.includes(selectedTreeId))
-    ) {
-      onCloseTree();
-    }
-    onSelect(item);
-  };
+  const selectItem = useCallback(
+    (item: IPriwaReviewItem) => {
+      if (shouldClosePriwaReviewTree(item, selectedTreeId)) {
+        onCloseTree();
+      }
+      onSelect(item);
+    },
+    [onCloseTree, onSelect, selectedTreeId],
+  );
 
   useEffect(() => {
     previousSelectedKeyRef.current = selectedKey;
@@ -153,12 +155,12 @@ export default function PriwaReviewWorkbench({
       return;
     }
     if (selectedItem && selectedItem.key !== selectedKey) {
-      onSelect(selectedItem);
+      selectItem(selectedItem);
     }
   }, [
     externallySelectedItem,
     filter,
-    onSelect,
+    selectItem,
     selectedItem,
     selectedKey,
     selectionChanged,

@@ -9,6 +9,7 @@ import {
   findPriwaReviewItemByPoint,
   resolvePriwaReviewSelection,
   resolvePriwaFilteredReviewSelection,
+  shouldClosePriwaReviewTree,
 } from "./priwaReviewQueue";
 
 const openGroup = {
@@ -117,5 +118,11 @@ describe("PRIWA review queue", () => {
     expect(findPriwaReviewItemByMosaic(items, "flight-2")).toBe(completeGroup);
     expect(findPriwaReviewItemByGroup(items, "group-1")).toBe(completeGroup);
     expect(findPriwaReviewItemByPoint(items, "tree-1")).toBe(openGroup);
+  });
+
+  it("moves an open tree editor out of the embedded panel when the queue advances", () => {
+    expect(shouldClosePriwaReviewTree(openGroup, "tree-1")).toBe(false);
+    expect(shouldClosePriwaReviewTree(completeGroup, "tree-1")).toBe(true);
+    expect(shouldClosePriwaReviewTree(upload, "tree-1")).toBe(true);
   });
 });

@@ -9,6 +9,7 @@ const queue = { left: 16, right: 352, top: 96, bottom: 780 };
 
 describe("PRIWA review map focus", () => {
   it.each([
+    [1200, 456],
     [1280, 536],
     [1440, 696],
   ])(

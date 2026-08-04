@@ -11,8 +11,6 @@ interface IPriwaReviewTargetPixel {
 }
 
 const PANEL_GAP_PX = 16;
-const MIN_VISIBLE_MAP_WIDTH_PX = 96;
-
 export const getPriwaReviewTargetPixel = (
   mapRect: IPriwaReviewRect,
   queueRect: IPriwaReviewRect | null,
@@ -24,8 +22,8 @@ export const getPriwaReviewTargetPixel = (
   const visibleRight = treePanelRect
     ? Math.min(mapRect.right, treePanelRect.left - PANEL_GAP_PX)
     : mapRect.right;
-  const hasUsefulGap = visibleRight - visibleLeft >= MIN_VISIBLE_MAP_WIDTH_PX;
-  const targetX = hasUsefulGap
+  const hasVisibleGap = visibleRight > visibleLeft;
+  const targetX = hasVisibleGap
     ? (visibleLeft + visibleRight) / 2
     : (mapRect.left + mapRect.right) / 2;
 

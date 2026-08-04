@@ -104,9 +104,9 @@ export function usePriwaFlightReview({
   const selectMatchedMosaicForPoint = useCallback(
     (point: IPriwaPoint) => {
       const mosaicId = matches.mosaicIdByPointId[point.id];
-      if (mosaicId) setSelectedMosaicId(mosaicId);
+      if (mosaicId) showOnlyMosaics([mosaicId]);
     },
-    [matches.mosaicIdByPointId],
+    [matches.mosaicIdByPointId, showOnlyMosaics],
   );
 
   const setFlightType = useCallback(

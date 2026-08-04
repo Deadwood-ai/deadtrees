@@ -73,3 +73,11 @@ export const findPriwaReviewItemByPoint = (
     (item) =>
       item.kind !== "unassigned-upload" && item.treeIds.includes(pointId),
   ) ?? null;
+
+export const shouldClosePriwaReviewTree = (
+  item: IPriwaReviewItem,
+  selectedTreeId: string | null,
+) =>
+  !!selectedTreeId &&
+  (item.kind === "unassigned-upload" ||
+    !item.treeIds.includes(selectedTreeId));
