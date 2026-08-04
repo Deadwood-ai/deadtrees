@@ -14,11 +14,13 @@ import {
   getPriwaPointTitle,
   isPriwaPointQaCandidate,
 } from "./priwaPointQa";
+import { comparePriwaTableText } from "./priwaPointTableData";
 import type { IPriwaBefallsgruppe, IPriwaPoint } from "./types";
 
 interface PriwaPointTableProps {
   points: IPriwaPoint[];
   groupByTreeId: Record<string, IPriwaBefallsgruppe>;
+  confirmedFlightLabelsByTreeId: Record<string, string[]>;
   focusedPointId?: string | null;
   getScrollContainer: () => Window | HTMLElement;
   onEditPoint: (point: IPriwaPoint) => void;
@@ -28,6 +30,7 @@ interface PriwaPointTableProps {
 export default function PriwaPointTable({
   points,
   groupByTreeId,
+  confirmedFlightLabelsByTreeId,
   focusedPointId = null,
   getScrollContainer,
   onEditPoint,
@@ -62,13 +65,25 @@ export default function PriwaPointTable({
         title: "Baumnr",
         dataIndex: "baumnr",
         width: 110,
+        sorter: (left, right) =>
+          comparePriwaTableText(left.baumnr, right.baumnr),
         render: (_, point) => getPriwaPointTitle(point),
       },
-      { title: "Datum", dataIndex: "datum", width: 118 },
+      {
+        title: "Datum",
+        dataIndex: "datum",
+        width: 118,
+        sorter: (left, right) => left.datum.localeCompare(right.datum),
+      },
       {
         title: "Befallsgruppe",
         key: "befallsgruppe",
         width: 180,
+        sorter: (left, right) =>
+          comparePriwaTableText(
+            groupByTreeId[left.id]?.name,
+            groupByTreeId[right.id]?.name,
+          ),
         render: (_, point) => {
           const group = groupByTreeId[point.id];
           return group ? (
@@ -80,11 +95,43 @@ export default function PriwaPointTable({
           );
         },
       },
-      { title: "Baumart", dataIndex: "baumart", width: 150 },
+      {
+        title: "Bestätigte Befliegungsdateien",
+        key: "flightFilenames",
+        width: 280,
+        sorter: (left, right) =>
+          comparePriwaTableText(
+            confirmedFlightLabelsByTreeId[left.id]?.join(" | "),
+            confirmedFlightLabelsByTreeId[right.id]?.join(" | "),
+          ),
+        render: (_, point) => {
+          const labels = confirmedFlightLabelsByTreeId[point.id] ?? [];
+          const filenames = labels.join(" | ");
+          return filenames ? (
+            <span className="block max-w-[17rem] truncate" title={filenames}>
+              {filenames}
+            </span>
+          ) : (
+            <span className="text-slate-400">—</span>
+          );
+        },
+      },
+      {
+        title: "Baumart",
+        dataIndex: "baumart",
+        width: 150,
+        sorter: (left, right) =>
+          comparePriwaTableText(left.baumart, right.baumart),
+      },
       {
         title: "Fund",
         dataIndex: "fund",
         width: 150,
+        sorter: (left, right) =>
+          comparePriwaTableText(
+            getPriwaFundLabel(left),
+            getPriwaFundLabel(right),
+          ),
         render: (_, point) => getPriwaFundLabel(point),
       },
       { title: "Bohrmehl", dataIndex: "bm", width: 105 },
@@ -98,7 +145,12 @@ export default function PriwaPointTable({
       { title: "Nadelverfärbung", dataIndex: "nadel", width: 160 },
       { title: "Rindenverlust", dataIndex: "rinde", width: 125 },
       { title: "Nadelverlust", dataIndex: "kv", width: 125 },
-      { title: "Name", dataIndex: "name", width: 150 },
+      {
+        title: "Name",
+        dataIndex: "name",
+        width: 150,
+        sorter: (left, right) => comparePriwaTableText(left.name, right.name),
+      },
       {
         title: "Koordinaten",
         key: "coordinates",
@@ -141,7 +193,7 @@ export default function PriwaPointTable({
         ),
       },
     ],
-    [groupByTreeId, onEditPoint, onZoomToPoint],
+    [confirmedFlightLabelsByTreeId, groupByTreeId, onEditPoint, onZoomToPoint],
   );
 
   return (

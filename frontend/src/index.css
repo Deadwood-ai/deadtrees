@@ -4,6 +4,18 @@
 
 /* Theme variables are injected at runtime from src/theme/palette.ts */
 
+.dt-full-height-layout {
+  height: 100dvh;
+}
+
+/* WebKit can exclude the bottom safe area from dvh in installed web apps.
+ * Legacy vh includes that inset, keeping full-screen map routes edge-to-edge. */
+@media (display-mode: standalone) {
+  .dt-full-height-layout {
+    height: 100vh;
+  }
+}
+
 /* Shared OpenLayers controls for public maps */
 .dt-map-attribution-control {
   position: absolute;

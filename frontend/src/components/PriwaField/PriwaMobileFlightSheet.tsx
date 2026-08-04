@@ -1,0 +1,136 @@
+import { AimOutlined, BorderOutlined } from "@ant-design/icons";
+import { Button, Drawer, Empty, Switch, Tag, Tooltip } from "antd";
+import { useState } from "react";
+
+import { formatPriwaReviewDate } from "./priwaReviewPresentation";
+import type { IPriwaMosaic } from "./usePriwaMosaics";
+
+interface PriwaMobileFlightSheetProps {
+  mosaics: IPriwaMosaic[];
+  enabledMosaicIds: Set<string>;
+  onSetMosaicVisibility: (mosaicId: string, visible: boolean) => void;
+  onZoomToMosaic: (mosaic: IPriwaMosaic) => void;
+}
+
+export default function PriwaMobileFlightSheet({
+  mosaics,
+  enabledMosaicIds,
+  onSetMosaicVisibility,
+  onZoomToMosaic,
+}: PriwaMobileFlightSheetProps) {
+  const [isOpen, setOpen] = useState(false);
+
+  return (
+    <>
+      <Tooltip title="Befliegungen" placement="right">
+        <Button
+          className="pointer-events-auto shadow-md md:hidden"
+          shape="circle"
+          size="large"
+          icon={<BorderOutlined />}
+          onClick={() => setOpen(true)}
+          aria-label="Befliegungen öffnen"
+          aria-pressed={isOpen}
+        />
+      </Tooltip>
+
+      <Drawer
+        title={`Befliegungen (${mosaics.length})`}
+        placement="bottom"
+        height="72dvh"
+        open={isOpen}
+        onClose={() => setOpen(false)}
+        rootClassName="priwa-layer-sheet-root"
+        className="md:hidden"
+        styles={{
+          header: { padding: "12px 16px" },
+          body: {
+            padding: "0 0 calc(env(safe-area-inset-bottom, 0px) + 16px)",
+            overflow: "hidden",
+          },
+        }}
+      >
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="border-b border-slate-200 bg-cyan-50 px-4 py-3 text-xs text-cyan-950">
+            Die Kartengrenzen benötigen kaum Daten. Ein Luftbild wird erst
+            geladen, wenn du es einschaltest.
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            {mosaics.length === 0 ? (
+              <Empty
+                className="py-12"
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description="Keine Befliegungen verfügbar"
+              />
+            ) : (
+              <div className="space-y-2">
+                {mosaics.map((mosaic) => (
+                  <div
+                    key={mosaic.id}
+                    className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div
+                          className="truncate text-sm font-semibold text-slate-900"
+                          title={mosaic.label}
+                        >
+                          {mosaic.label}
+                        </div>
+                        <div className="mt-0.5 text-xs text-slate-500">
+                          Aufnahme {formatPriwaReviewDate(mosaic.captureDate)}
+                        </div>
+                      </div>
+                      <Tag
+                        className="m-0 shrink-0"
+                        color={
+                          mosaic.flightType === "umfeldbefliegung"
+                            ? "green"
+                            : "gold"
+                        }
+                      >
+                        {mosaic.flightType === "umfeldbefliegung"
+                          ? "Bestätigt"
+                          : "Vorschlag"}
+                      </Tag>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                      <Button
+                        size="small"
+                        icon={<AimOutlined />}
+                        disabled={!mosaic.bbox}
+                        onClick={() => {
+                          onZoomToMosaic(mosaic);
+                          setOpen(false);
+                        }}
+                      >
+                        Grenze zeigen
+                      </Button>
+                      <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
+                        Luftbild
+                        <Switch
+                          size="small"
+                          checked={enabledMosaicIds.has(mosaic.id)}
+                          onChange={(checked) =>
+                            onSetMosaicVisibility(mosaic.id, checked)
+                          }
+                          aria-label={`Luftbild ${mosaic.label} anzeigen`}
+                        />
+                      </label>
+                    </div>
+                    {!mosaic.bbox && (
+                      <div className="mt-2 text-xs text-amber-700">
+                        Keine Kartengrenze verfügbar
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </Drawer>
+    </>
+  );
+}

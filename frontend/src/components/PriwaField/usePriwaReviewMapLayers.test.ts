@@ -7,7 +7,6 @@ import {
   syncPriwaBefallsgruppeLayer,
   syncPriwaMosaicFootprintLayer,
 } from "./usePriwaReviewMapLayers";
-import type { IPriwaMatchedMosaic } from "./usePriwaMosaicMatches";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
 
 const point: IPriwaPoint = {
@@ -56,30 +55,23 @@ const mosaic: IPriwaMosaic = {
   additionalInformation: null,
   flightType: "umfeldbefliegung",
 };
-const match: IPriwaMatchedMosaic = {
-  mosaic,
-  points: [{ point, daysApart: 2, source: "confirmed" }],
-  minDaysApart: 2,
-  maxDaysApart: 2,
-};
-
 describe("PRIWA review map-layer synchronization", () => {
   it("replaces stale Befallsgruppe features with the current group state", () => {
     const source = createPriwaBefallsgruppeLayer().getSource()!;
     syncPriwaBefallsgruppeLayer(source, [group], [point]);
-    expect(source.getFeatures().map((feature) => feature.get("groupId"))).toEqual(
-      ["group-1"],
-    );
+    expect(
+      source.getFeatures().map((feature) => feature.get("groupId")),
+    ).toEqual(["group-1"]);
 
     syncPriwaBefallsgruppeLayer(source, [], [point]);
     expect(source.getFeatures()).toEqual([]);
   });
 
-  it("keeps matched footprints and applies selected and visibility state", () => {
+  it("keeps requested footprints and applies selected and visibility state", () => {
     const source = createPriwaMosaicFootprintLayer().getSource()!;
     syncPriwaMosaicFootprintLayer(
       source,
-      [match],
+      [mosaic],
       [mosaic],
       new Set([mosaic.id]),
       mosaic.id,

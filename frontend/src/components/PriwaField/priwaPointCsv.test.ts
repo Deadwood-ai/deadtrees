@@ -28,9 +28,13 @@ const basePoint: IPriwaPoint = {
 
 describe("priwaPointsToCsv", () => {
   it("exports PRIWA points with all field columns and escaped text", () => {
-    expect(priwaPointsToCsv([basePoint]).split("\n")).toEqual([
-      '"id","baumnr","fund","baumart","bohrmehl","bohrloch","harz","gruene_nadeln_am_boden","nadelverfaerbung","rindenverlust","nadelverlust","name","datum","latitude","longitude","coordinate_source","is_estimated_location","captured_at","kommentar","sync_status"',
-      '"point-1","B-17","ja","Fichte","ja","nein","nein","ja","fahlgrün/gelblich","bis25%","0%","Sigi Huber","2026-07-07","48.12345","8.54321","qr","false","2026-07-07T08:30:00.000Z","Nahe ""Rückeweg""","synced"',
+    expect(
+      priwaPointsToCsv([basePoint], {
+        "point-1": ['north "review", 1.zip', "south.zip"],
+      }).split("\n"),
+    ).toEqual([
+      '"id","baumnr","fund","baumart","bohrmehl","bohrloch","harz","gruene_nadeln_am_boden","nadelverfaerbung","rindenverlust","nadelverlust","name","datum","latitude","longitude","coordinate_source","is_estimated_location","captured_at","kommentar","sync_status","bestaetigte_befliegungsdateien"',
+      '"point-1","B-17","ja","Fichte","ja","nein","nein","ja","fahlgrün/gelblich","bis25%","0%","Sigi Huber","2026-07-07","48.12345","8.54321","qr","false","2026-07-07T08:30:00.000Z","Nahe ""Rückeweg""","synced","north ""review"", 1.zip | south.zip"',
     ]);
   });
 });

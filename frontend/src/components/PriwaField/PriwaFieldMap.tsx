@@ -1,4 +1,4 @@
-import { Alert, Button, FloatButton, Tooltip, message } from "antd";
+import { Alert, App, Button, FloatButton, Tooltip } from "antd";
 import {
   AimOutlined,
   EnvironmentOutlined,
@@ -11,7 +11,7 @@ import { unByKey } from "ol/Observable";
 import { fromLonLat, toLonLat, transformExtent } from "ol/proj";
 import View from "ol/View";
 import { boundingExtent } from "ol/extent";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 
 import { createStandardMapControls } from "../../utils/basemaps";
@@ -19,6 +19,7 @@ import parseBBox from "../../utils/parseBBox";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { useUserLocationLayer } from "../../hooks/useUserLocationLayer";
 import { createLglDop20Layer } from "./createLglDop20Layer";
+import { PRIWA_COG_MAX_ZOOM } from "./createPriwaCogLayer";
 import { createPriwaTopographicLayer } from "./createPriwaTopographicLayer";
 import {
   createPriwaOfflineAreaFeature,
@@ -59,7 +60,6 @@ import type {
 } from "./types";
 
 const FIELD_CENTER: [number, number] = [8.18013, 48.45596];
-const EMPTY_MOSAIC_IDS = new Set<string>();
 
 interface PriwaFieldMapProps {
   points: IPriwaPoint[];
@@ -118,6 +118,7 @@ export default function PriwaFieldMap({
   isClassifyingFlight = false,
   onSyncNow,
 }: PriwaFieldMapProps) {
+  const { message } = App.useApp();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
   const isPlacingPointRef = useRef(false);
@@ -203,30 +204,34 @@ export default function PriwaFieldMap({
     [points],
   );
 
-  const zoomToMosaicFootprint = useCallback((mosaic: IPriwaMosaic) => {
-    if (!mosaic.bbox) {
-      message.warning(
-        "Für diesen Drohnenlayer ist keine Kartengrenze verfügbar.",
-      );
-      return;
-    }
+  const zoomToMosaicFootprint = useCallback(
+    (mosaic: IPriwaMosaic) => {
+      if (!mosaic.bbox) {
+        message.warning(
+          "Für diesen Drohnenlayer ist keine Kartengrenze verfügbar.",
+        );
+        return;
+      }
 
-    const bbox = parseBBox(mosaic.bbox);
-    if (!bbox) {
-      message.warning("Kartengrenze konnte nicht gelesen werden.");
-      return;
-    }
+      const bbox = parseBBox(mosaic.bbox);
+      if (!bbox) {
+        message.warning("Kartengrenze konnte nicht gelesen werden.");
+        return;
+      }
 
-    mapRef.current
-      ?.getView()
-      .fit(transformExtent(bbox, "EPSG:4326", "EPSG:3857"), {
-        duration: 500,
-        maxZoom: 19,
-        padding: [96, 96, 96, 96],
-      });
-  }, []);
+      mapRef.current
+        ?.getView()
+        .fit(transformExtent(bbox, "EPSG:4326", "EPSG:3857"), {
+          duration: 500,
+          maxZoom: 19,
+          padding: [96, 96, 96, 96],
+        });
+    },
+    [message],
+  );
 
   const review = usePriwaReviewController({
+    projectId,
     points,
     mosaics,
     groups,
@@ -268,6 +273,11 @@ export default function PriwaFieldMap({
     createGroup,
     createGroupForFlight,
   } = review;
+  const footprintMosaics = useMemo(
+    () =>
+      isMobile ? reviewMosaics : matchedMosaics.map(({ mosaic }) => mosaic),
+    [isMobile, matchedMosaics, reviewMosaics],
+  );
 
   const openPointForEditing = useCallback(
     (point: IPriwaPoint) => {
@@ -329,7 +339,7 @@ export default function PriwaFieldMap({
         center: fromLonLat(FIELD_CENTER),
         zoom: 19,
         minZoom: 8,
-        maxZoom: 21,
+        maxZoom: PRIWA_COG_MAX_ZOOM,
         projection: "EPSG:3857",
       }),
       interactions: defaultInteractions({
@@ -398,7 +408,10 @@ export default function PriwaFieldMap({
       );
 
       if (mosaicId) {
-        selectReviewItemFromMosaicRef.current(mosaicId);
+        if (!window.matchMedia("(max-width: 767px)").matches) {
+          selectReviewItemFromMosaicRef.current(mosaicId);
+        }
+        return;
       }
     });
 
@@ -477,10 +490,10 @@ export default function PriwaFieldMap({
     mosaicFootprintLayerRef,
     groups: isMobile ? [] : groups,
     points,
-    matchedMosaics: isMobile ? [] : matchedMosaics,
-    reviewMosaics: isMobile ? [] : reviewMosaics,
-    enabledMosaics: isMobile ? [] : enabledMosaics,
-    enabledMosaicIds: isMobile ? EMPTY_MOSAIC_IDS : enabledMosaicIds,
+    footprintMosaics,
+    reviewMosaics,
+    enabledMosaics,
+    enabledMosaicIds,
     selectedMosaicId: isMobile ? null : selectedMosaicId,
     selectedGroupId: isMobile ? null : selectedGroupId,
   });
@@ -671,7 +684,7 @@ export default function PriwaFieldMap({
       await onAddPoint(point);
       message.success("Käferbaum gespeichert");
     },
-    [onAddPoint],
+    [message, onAddPoint],
   );
 
   const handleUpdatePoint = useCallback(
@@ -679,7 +692,7 @@ export default function PriwaFieldMap({
       await onUpdatePoint(point);
       message.success("Käferbaum aktualisiert");
     },
-    [onUpdatePoint],
+    [message, onUpdatePoint],
   );
 
   const handleDeletePoint = useCallback(
@@ -689,7 +702,7 @@ export default function PriwaFieldMap({
       setDrawerOpen(false);
       setEditingPoint(null);
     },
-    [onDeletePoint],
+    [message, onDeletePoint],
   );
 
   const handleCacheBasemapArea = useCallback(async () => {
@@ -705,12 +718,12 @@ export default function PriwaFieldMap({
           : "Basiskarte konnte nicht offline gespeichert werden.",
       );
     }
-  }, [cacheCurrentMapArea]);
+  }, [cacheCurrentMapArea, message]);
 
   const handleClearBasemapArea = useCallback(async () => {
     await clearOfflineBasemapArea();
     message.success("Offline-Basiskartenbereich entfernt");
-  }, [clearOfflineBasemapArea]);
+  }, [clearOfflineBasemapArea, message]);
 
   const dataErrorMessage =
     errorMessage ?? groupsErrorMessage ?? cogErrorMessage;
@@ -763,8 +776,12 @@ export default function PriwaFieldMap({
             <PriwaMobileFieldTools
               points={points}
               groups={groups}
+              mosaics={reviewMosaics}
+              enabledMosaicIds={enabledMosaicIds}
               onEditPoint={openPointForEditing}
               onZoomToPoint={focusPointOnMap}
+              onSetMosaicVisibility={setMosaicVisibility}
+              onZoomToMosaic={zoomToMosaicFootprint}
             />
           )}
           {!isMobile && !isPointListOpen && !isDrawerOpen && (
@@ -837,6 +854,7 @@ export default function PriwaFieldMap({
         <PriwaPointListPanel
           points={points}
           groups={groups}
+          mosaics={mosaics}
           projectName={projectName}
           isLoading={isLoadingPoints}
           focusedPointId={focusedPointId}
