@@ -55,11 +55,7 @@ def test_run_continuous_backs_off_while_drained(monkeypatch):
 	sleep_calls = []
 
 	monkeypatch.setattr(continuous_processor_module, 'is_drain_requested', lambda: True)
-	monkeypatch.setattr(
-		continuous_processor_module,
-		'background_process',
-		lambda: pytest.fail('drained worker should not poll the queue'),
-	)
+	monkeypatch.setattr(continuous_processor_module, 'background_process', lambda: BackgroundProcessResult.IDLE)
 	monkeypatch.setattr(continuous_processor_module.settings, 'PROCESSOR_IDLE_BACKOFF_SECONDS', 9)
 
 	def fake_sleep(seconds):

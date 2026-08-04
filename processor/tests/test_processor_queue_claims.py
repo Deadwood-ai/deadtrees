@@ -1,6 +1,7 @@
 import pytest
 
 import processor.src.processor as processor_module
+import processor.src.utils.queue_runtime as queue_runtime_module
 from processor.src.processor import background_process, claim_task, get_active_task, get_worker_id
 from shared.models import QueueTask, TaskTypeEnum
 from shared.settings import settings
@@ -88,7 +89,7 @@ def test_claim_task_atomically_marks_waiting_row(monkeypatch):
 		def __exit__(self, exc_type, exc, tb):
 			return False
 
-	monkeypatch.setattr(processor_module, 'use_client', lambda token: _FakeClient())
+	monkeypatch.setattr(queue_runtime_module, 'use_client', lambda token: _FakeClient())
 
 	claimed = claim_task('token', task, 'worker-a')
 
@@ -141,7 +142,7 @@ def test_claim_task_returns_none_when_row_is_already_claimed(monkeypatch):
 		def __exit__(self, exc_type, exc, tb):
 			return False
 
-	monkeypatch.setattr(processor_module, 'use_client', lambda token: _FakeClient())
+	monkeypatch.setattr(queue_runtime_module, 'use_client', lambda token: _FakeClient())
 
 	assert claim_task('token', task, 'worker-a') is None
 
@@ -199,8 +200,8 @@ def test_claim_task_falls_back_while_claim_columns_are_missing(monkeypatch):
 		def __exit__(self, exc_type, exc, tb):
 			return False
 
-	monkeypatch.setattr(processor_module, 'use_client', lambda token: _FakeClient())
-	monkeypatch.setattr(processor_module.logger, 'warning', lambda *args, **kwargs: None)
+	monkeypatch.setattr(queue_runtime_module, 'use_client', lambda token: _FakeClient())
+	monkeypatch.setattr(queue_runtime_module.logger, 'warning', lambda *args, **kwargs: None)
 
 	claimed = claim_task('token', task, 'worker-a')
 
@@ -269,7 +270,7 @@ def test_get_active_task_atomically_adopts_legacy_active_row(monkeypatch):
 		def __exit__(self, exc_type, exc, tb):
 			return False
 
-	monkeypatch.setattr(processor_module, 'use_client', lambda token: _FakeClient())
+	monkeypatch.setattr(queue_runtime_module, 'use_client', lambda token: _FakeClient())
 
 	task = get_active_task('token', 'worker-a')
 
@@ -325,8 +326,8 @@ def test_get_active_task_falls_back_while_claim_columns_are_missing(monkeypatch)
 		def __exit__(self, exc_type, exc, tb):
 			return False
 
-	monkeypatch.setattr(processor_module, 'use_client', lambda token: _FakeClient())
-	monkeypatch.setattr(processor_module.logger, 'warning', lambda *args, **kwargs: None)
+	monkeypatch.setattr(queue_runtime_module, 'use_client', lambda token: _FakeClient())
+	monkeypatch.setattr(queue_runtime_module.logger, 'warning', lambda *args, **kwargs: None)
 
 	task = get_active_task('token', 'worker-a')
 
@@ -391,7 +392,7 @@ def test_get_active_task_returns_none_when_legacy_adoption_race_is_lost(monkeypa
 		def __exit__(self, exc_type, exc, tb):
 			return False
 
-	monkeypatch.setattr(processor_module, 'use_client', lambda token: _FakeClient())
+	monkeypatch.setattr(queue_runtime_module, 'use_client', lambda token: _FakeClient())
 
 	assert get_active_task('token', 'worker-a') is None
 

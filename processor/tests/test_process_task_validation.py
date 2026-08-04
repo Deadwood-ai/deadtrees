@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 import processor.src.processor as processor_module
+import processor.src.utils.queue_runtime as queue_runtime_module
 from processor.src.processor import process_task
 from shared.models import QueueTask, StatusEnum, TaskTypeEnum
 from shared.processing_tasks import format_missing_geotiff_error
@@ -94,7 +95,7 @@ def test_process_task_rejects_downstream_without_geotiff(monkeypatch):
 
 	monkeypatch.setattr(processor_module, 'verify_token', lambda token: {'id': 'processor-user'})
 	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'delete-token')
-	monkeypatch.setattr(processor_module, 'use_client', lambda token: _FakeClient())
+	monkeypatch.setattr(queue_runtime_module, 'use_client', lambda token: _FakeClient())
 	monkeypatch.setattr(processor_module, 'update_status', _record_status_update)
 	monkeypatch.setattr(processor_module, 'create_processing_failure_issue', lambda **kwargs: None)
 	monkeypatch.setattr(processor_module.logger, 'info', lambda *args, **kwargs: None)

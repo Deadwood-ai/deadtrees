@@ -2,6 +2,7 @@ import pytest
 from pathlib import Path
 
 import processor.src.processor as processor_module
+import processor.src.utils.queue_runtime as queue_runtime_module
 from shared.db import use_client
 from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask, StatusEnum
@@ -233,7 +234,7 @@ def test_process_task_success_path_with_refresh(monkeypatch):
 	monkeypatch.setattr(processor_module, 'verify_token', lambda token: {'id': 'processor-user'})
 	monkeypatch.setattr(processor_module, 'refresh_processor_token', lambda task, token=None: 'refreshed-token')
 	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'final-token')
-	monkeypatch.setattr(processor_module, 'use_client', lambda token: _FakeClient())
+	monkeypatch.setattr(queue_runtime_module, 'use_client', lambda token: _FakeClient())
 	monkeypatch.setattr(processor_module.logger, 'info', lambda *args, **kwargs: None)
 	monkeypatch.setattr(processor_module.logger, 'error', lambda *args, **kwargs: None)
 	monkeypatch.setattr(processor_module.logger, 'warning', lambda *args, **kwargs: None)

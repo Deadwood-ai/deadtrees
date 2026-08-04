@@ -20,8 +20,10 @@ def get_task_blacklist() -> list[str]:
 	return blacklist
 
 
-def get_next_task(token: str, client_factory=use_client) -> QueueTask | None:
+def get_next_task(token: str, client_factory=None) -> QueueTask | None:
 	"""Return the highest-priority waiting task this worker can run."""
+	if client_factory is None:
+		client_factory = use_client
 	blacklist = get_task_blacklist()
 	with client_factory(token) as client:
 		query = client.table(settings.queue_position_table).select('*')
@@ -55,8 +57,12 @@ def _is_missing_queue_claim_column_error(error: Exception) -> bool:
 	)
 
 
-def get_active_task(token: str, worker_id: str, client_factory=use_client, logger_instance=logger) -> QueueTask | None:
+def get_active_task(token: str, worker_id: str, client_factory=None, logger_instance=None) -> QueueTask | None:
 	"""Return this worker's in-progress row, or adopt a legacy unowned row."""
+	if client_factory is None:
+		client_factory = use_client
+	if logger_instance is None:
+		logger_instance = logger
 	with client_factory(token) as client:
 		try:
 			response = (
@@ -109,8 +115,12 @@ def get_active_task(token: str, worker_id: str, client_factory=use_client, logge
 	return _queue_task_from_raw_row(response.data[0])
 
 
-def claim_task(token: str, task: QueueTask, worker_id: str, client_factory=use_client, logger_instance=logger) -> QueueTask | None:
+def claim_task(token: str, task: QueueTask, worker_id: str, client_factory=None, logger_instance=None) -> QueueTask | None:
 	"""Atomically claim a waiting queue row for this processor worker."""
+	if client_factory is None:
+		client_factory = use_client
+	if logger_instance is None:
+		logger_instance = logger
 	claimed_at = datetime.now(timezone.utc).isoformat()
 	payload = {
 		'is_processing': True,
@@ -156,13 +166,17 @@ def _apply_queue_owner_filter(query, task: QueueTask):
 	return query
 
 
-def delete_queue_task(token: str, task: QueueTask, client_factory=use_client) -> None:
+def delete_queue_task(token: str, task: QueueTask, client_factory=None) -> None:
+	if client_factory is None:
+		client_factory = use_client
 	with client_factory(token) as client:
 		query = client.table(settings.queue_table).delete().eq('id', task.id)
 		_apply_queue_owner_filter(query, task).execute()
 
 
-def release_queue_task(token: str, task: QueueTask, client_factory=use_client) -> None:
+def release_queue_task(token: str, task: QueueTask, client_factory=None) -> None:
+	if client_factory is None:
+		client_factory = use_client
 	with client_factory(token) as client:
 		query = (
 			client.table(settings.queue_table)

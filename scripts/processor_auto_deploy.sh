@@ -13,6 +13,9 @@ BRANCH="${PROCESSOR_DEPLOY_BRANCH:-main}"
 DRAIN_TIMEOUT_SECONDS="${PROCESSOR_DRAIN_TIMEOUT_SECONDS:-43200}"
 DRAIN_POLL_SECONDS="${PROCESSOR_DRAIN_POLL_SECONDS:-15}"
 CONTROL_DIR="$(dirname "${PROCESSOR_DRAIN_REQUEST_PATH:-/data/processor-control/drain-request.json}")"
+DRAIN_ACK_PATH="${PROCESSOR_DRAIN_ACK_PATH:-/data/processor-control/drain-ack.json}"
+STARTUP_TIMEOUT_SECONDS="${PROCESSOR_STARTUP_TIMEOUT_SECONDS:-300}"
+READINESS_POLL_SECONDS="${PROCESSOR_READINESS_POLL_SECONDS:-5}"
 
 mkdir -p "${LOCK_DIR}"
 touch "${LOG_FILE}"
@@ -34,6 +37,45 @@ require_clean_checkout() {
 		log "Refusing deploy from dirty checkout: ${dirty//$'\n'/'; '}"
 		exit 1
 	fi
+}
+
+wait_for_processor_running() {
+	local deadline=$((SECONDS + STARTUP_TIMEOUT_SECONDS))
+	local stable_polls=0
+	local last_restart_count=""
+	local inspect_output=""
+	local status=""
+	local restarting=""
+	local restart_count=""
+	local exit_code=""
+
+	while [ "${SECONDS}" -lt "${deadline}" ]; do
+		inspect_output="$(docker inspect deadtrees-processor-1 --format '{{.State.Status}} {{.State.Restarting}} {{.RestartCount}} {{.State.ExitCode}}' 2>/dev/null || true)"
+		if [ -n "${inspect_output}" ]; then
+			read -r status restarting restart_count exit_code <<< "${inspect_output}"
+			log "Waiting for processor readiness: status=${status} restarting=${restarting} restart_count=${restart_count} exit_code=${exit_code}"
+			if [ "${status}" = "running" ] && [ "${restarting}" = "false" ]; then
+				if [ "${restart_count}" = "${last_restart_count}" ]; then
+					stable_polls=$((stable_polls + 1))
+				else
+					stable_polls=1
+					last_restart_count="${restart_count}"
+				fi
+				if [ "${stable_polls}" -ge 2 ]; then
+					return 0
+				fi
+			else
+				stable_polls=0
+				last_restart_count="${restart_count}"
+			fi
+		else
+			log "Waiting for processor readiness: container deadtrees-processor-1 is not inspectable yet"
+		fi
+		sleep "${READINESS_POLL_SECONDS}"
+	done
+
+	log "Processor failed readiness check within ${STARTUP_TIMEOUT_SECONDS}s"
+	return 1
 }
 
 exec 9>"${LOCK_FILE}"
@@ -60,7 +102,7 @@ if [ "${local_sha}" = "${remote_sha}" ]; then
 fi
 
 log "Preparing deploy from ${local_sha} to ${remote_sha}"
-log "Rollback path: git reset --hard ${local_sha} && docker compose -f ${COMPOSE_FILE} up -d --force-recreate processor"
+log "Rollback path: git reset --hard ${local_sha} && docker compose -f ${COMPOSE_FILE} build processor tcd && docker compose -f ${COMPOSE_FILE} up -d --force-recreate processor"
 
 python3 "${STATUS_SCRIPT}" set-drain --reason "auto-deploy ${remote_sha}" >> "${LOG_FILE}" 2>&1
 drain_set=1
@@ -71,10 +113,15 @@ python3 "${STATUS_SCRIPT}" wait-for-idle \
 git pull --ff-only origin "${BRANCH}" >> "${LOG_FILE}" 2>&1
 require_clean_checkout
 docker compose -f "${COMPOSE_FILE}" build processor tcd >> "${LOG_FILE}" 2>&1
+rm -f "${DRAIN_ACK_PATH}"
 docker compose -f "${COMPOSE_FILE}" up -d --force-recreate processor >> "${LOG_FILE}" 2>&1
+python3 "${STATUS_SCRIPT}" wait-for-idle \
+	--timeout-seconds "${STARTUP_TIMEOUT_SECONDS}" \
+	--poll-seconds "${READINESS_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
+wait_for_processor_running
 docker inspect deadtrees-processor-1 \
 	--format 'Cmd={{json .Config.Cmd}} RestartPolicy={{.HostConfig.RestartPolicy.Name}} StartedAt={{.State.StartedAt}}' \
-	>> "${LOG_FILE}" 2>&1 || true
+	>> "${LOG_FILE}" 2>&1
 
 python3 "${STATUS_SCRIPT}" clear-drain >> "${LOG_FILE}" 2>&1
 drain_set=0
