@@ -35,6 +35,9 @@ describe("Esri imagery attribution", () => {
       ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE,
     );
     expect(ESRI_WORLD_IMAGERY_ATTRIBUTION).toContain(
+      "Powered by Esri · Sources ⓘ",
+    );
+    expect(ESRI_WORLD_IMAGERY_ATTRIBUTION).toContain(
       ESRI_WORLD_IMAGERY_ATTRIBUTION_MOBILE_FULL,
     );
   });

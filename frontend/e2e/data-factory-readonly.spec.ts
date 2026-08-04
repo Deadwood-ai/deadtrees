@@ -151,7 +151,7 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
     );
     const disclosure = attribution.locator(".dt-attribution-mobile");
     await expect(disclosure.locator("summary")).toHaveText(
-      "Powered by Esri · Contributors ⓘ",
+      "Powered by Esri · Sources ⓘ",
     );
     const fullCredit = disclosure.locator(".dt-attribution-mobile-full");
     await expect(fullCredit).toBeHidden();
@@ -570,7 +570,7 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
       ".dt-attribution-mobile",
     );
     await expect(mobileAttributionDisclosure.locator("summary")).toHaveText(
-      "Powered by Esri · Contributors ⓘ",
+      "Powered by Esri · Sources ⓘ",
     );
     const mobileFullAttribution = mobileAttributionDisclosure.locator(
       ".dt-attribution-mobile-full",
