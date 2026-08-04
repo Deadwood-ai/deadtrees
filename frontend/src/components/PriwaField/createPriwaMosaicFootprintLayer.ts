@@ -13,51 +13,40 @@ export interface IPriwaMosaicFootprintFeatureOptions {
   isVisible: boolean;
 }
 
-const visibleStyle = new Style({
+const boundaryHaloStyle = new Style({
   stroke: new Stroke({
-    color: "rgba(249, 115, 22, 0.95)",
+    color: "rgba(15, 23, 42, 0.9)",
+    width: 5,
+  }),
+});
+
+const visibleAccentStyle = new Style({
+  stroke: new Stroke({
+    color: "rgba(251, 146, 60, 1)",
     width: 2.5,
     lineDash: [8, 5],
   }),
 });
 
-const hiddenStyle = new Style({
+const hiddenAccentStyle = new Style({
   stroke: new Stroke({
-    color: "rgba(100, 116, 139, 0.9)",
-    width: 2,
+    color: "rgba(34, 211, 238, 1)",
+    width: 2.5,
     lineDash: [3, 5],
   }),
 });
 
-const selectedVisibleStyle = new Style({
+const selectedHaloStyle = new Style({
   stroke: new Stroke({
     color: "rgba(255, 255, 255, 0.98)",
-    width: 5,
+    width: 6,
   }),
 });
 
-const selectedAccentStyle = new Style({
-  stroke: new Stroke({
-    color: "rgba(249, 115, 22, 0.98)",
-    width: 2,
-    lineDash: [8, 5],
-  }),
-});
-
-const selectedHiddenStyle = new Style({
-  stroke: new Stroke({
-    color: "rgba(15, 23, 42, 0.98)",
-    width: 5,
-  }),
-});
-
-const selectedHiddenAccentStyle = new Style({
-  stroke: new Stroke({
-    color: "rgba(203, 213, 225, 0.98)",
-    width: 2,
-    lineDash: [3, 5],
-  }),
-});
+const styleForFootprint = (isSelected: boolean, isVisible: boolean) => [
+  isSelected ? selectedHaloStyle : boundaryHaloStyle,
+  isVisible ? visibleAccentStyle : hiddenAccentStyle,
+];
 
 export const createPriwaMosaicFootprintFeature = ({
   mosaic,
@@ -75,15 +64,7 @@ export const createPriwaMosaicFootprintFeature = ({
     mosaicId: mosaic.id,
   });
   feature.setId(`priwa-mosaic-footprint-${mosaic.id}`);
-  feature.setStyle(
-    isSelected
-      ? isVisible
-        ? [selectedVisibleStyle, selectedAccentStyle]
-        : [selectedHiddenStyle, selectedHiddenAccentStyle]
-      : isVisible
-        ? visibleStyle
-        : hiddenStyle,
-  );
+  feature.setStyle(styleForFootprint(isSelected, isVisible));
 
   return feature;
 };

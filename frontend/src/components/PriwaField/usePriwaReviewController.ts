@@ -105,17 +105,24 @@ export function usePriwaReviewController({
       : null;
   const isWorkspaceLoading = isLoadingPoints || isLoadingGroups || isCogLoading;
 
-  const selectReviewItem = useCallback(
+  const activateReviewItem = useCallback(
     (item: IPriwaReviewItem) => {
       setSelectedReviewKey(item.key);
       showOnlyMosaics(reviewItemDatasetIds(item));
+    },
+    [showOnlyMosaics],
+  );
+
+  const selectReviewItem = useCallback(
+    (item: IPriwaReviewItem) => {
+      activateReviewItem(item);
       if (item.kind === "unassigned-upload") {
         zoomToMosaicFootprint(item.mosaic);
       } else {
         zoomToTrees(item.treeIds);
       }
     },
-    [showOnlyMosaics, zoomToMosaicFootprint, zoomToTrees],
+    [activateReviewItem, zoomToMosaicFootprint, zoomToTrees],
   );
 
   useEffect(() => {
@@ -158,9 +165,9 @@ export function usePriwaReviewController({
   const selectReviewItemFromPoint = useCallback(
     (point: IPriwaPoint) => {
       const item = findPriwaReviewItemByPoint(reviewItems, point.id);
-      if (item) selectReviewItem(item);
+      if (item) activateReviewItem(item);
     },
-    [reviewItems, selectReviewItem],
+    [activateReviewItem, reviewItems],
   );
 
   const saveGroup = useCallback(

@@ -43,14 +43,8 @@ describe("PRIWA offline status labels", () => {
     });
   });
 
-  it("handles disabled and unexpected states with the build-only fallback", () => {
-    expect(getPriwaOfflineStatusView("disabled", true)).toEqual({
-      label: "Offline nur im Build",
-      color: "default",
-    });
-    expect(getPriwaOfflineStatusView("unknown" as never, true)).toEqual({
-      label: "Offline nur im Build",
-      color: "default",
-    });
+  it("hides development-only and unexpected online states", () => {
+    expect(getPriwaOfflineStatusView("disabled", true)).toBeNull();
+    expect(getPriwaOfflineStatusView("unknown" as never, true)).toBeNull();
   });
 });

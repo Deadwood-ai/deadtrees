@@ -4,6 +4,7 @@ import type { IPriwaPoint } from "./types";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
 import {
   PRIWA_MOSAIC_MATCH_MAX_DAYS,
+  matchPriwaPointsToMosaicCandidates,
   matchPriwaPointsToMosaics,
 } from "./priwaMosaicMatching";
 
@@ -104,6 +105,24 @@ describe("matchPriwaPointsToMosaics", () => {
         mosaicId: "after",
         daysApart: 1,
       },
+    ]);
+  });
+
+  it("keeps every spatial and date-valid flight available for review", () => {
+    const fiveDaysBefore = mosaic({
+      id: "before",
+      captureDate: "2026-06-10",
+    });
+    const oneDayAfter = mosaic({ id: "after", captureDate: "2026-06-16" });
+
+    expect(
+      matchPriwaPointsToMosaicCandidates(
+        [point()],
+        [fiveDaysBefore, oneDayAfter],
+      ),
+    ).toEqual([
+      { pointId: "point-1", mosaicId: "after", daysApart: 1 },
+      { pointId: "point-1", mosaicId: "before", daysApart: 5 },
     ]);
   });
 

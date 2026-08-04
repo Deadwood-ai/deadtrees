@@ -1,22 +1,14 @@
-import {
-  EnvironmentOutlined,
-  PlusOutlined,
-  SearchOutlined,
-  UnorderedListOutlined,
-} from "@ant-design/icons";
-import { Button, Drawer, Empty, Input } from "antd";
+import { SearchOutlined, UnorderedListOutlined } from "@ant-design/icons";
+import { Button, Drawer, Empty, Input, Tooltip } from "antd";
 import { useMemo, useState } from "react";
 
 import { indexPriwaBefallsgruppenByTreeId } from "./priwaBefallsgruppenState";
 import PriwaPointCompactList from "./PriwaPointCompactList";
-import type { IPriwaBefallsgruppe, IPriwaPoint, PriwaBaseLayer } from "./types";
+import type { IPriwaBefallsgruppe, IPriwaPoint } from "./types";
 
 interface PriwaMobileFieldToolsProps {
   points: IPriwaPoint[];
   groups: IPriwaBefallsgruppe[];
-  baseLayer: PriwaBaseLayer;
-  onBaseLayerChange: (baseLayer: PriwaBaseLayer) => void;
-  onAddPoint: () => void;
   onEditPoint: (point: IPriwaPoint) => void;
   onZoomToPoint: (point: IPriwaPoint) => void;
 }
@@ -24,9 +16,6 @@ interface PriwaMobileFieldToolsProps {
 export default function PriwaMobileFieldTools({
   points,
   groups,
-  baseLayer,
-  onBaseLayerChange,
-  onAddPoint,
   onEditPoint,
   onZoomToPoint,
 }: PriwaMobileFieldToolsProps) {
@@ -54,38 +43,17 @@ export default function PriwaMobileFieldTools({
 
   return (
     <>
-      <nav
-        aria-label="PRIWA Feldaktionen"
-        className="pointer-events-auto absolute bottom-3 left-3 right-3 z-[56] grid grid-cols-[1fr_1.35fr_1fr] gap-2 rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-xl backdrop-blur md:hidden"
-        style={{
-          paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 8px)",
-        }}
-      >
+      <Tooltip title="Bäume" placement="right">
         <Button
-          className="h-12"
+          className="pointer-events-auto shadow-md md:hidden"
+          shape="circle"
+          size="large"
           icon={<UnorderedListOutlined />}
           onClick={() => setTreeListOpen(true)}
-        >
-          Bäume
-        </Button>
-        <Button
-          className="h-12"
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={onAddPoint}
-        >
-          Aufnehmen
-        </Button>
-        <Button
-          className="h-12"
-          icon={<EnvironmentOutlined />}
-          onClick={() =>
-            onBaseLayerChange(baseLayer === "aerial" ? "topographic" : "aerial")
-          }
-        >
-          {baseLayer === "aerial" ? "Karte" : "Luftbild"}
-        </Button>
-      </nav>
+          aria-label="Baumliste öffnen"
+          aria-pressed={isTreeListOpen}
+        />
+      </Tooltip>
 
       <Drawer
         title={`Käferbäume (${points.length})`}

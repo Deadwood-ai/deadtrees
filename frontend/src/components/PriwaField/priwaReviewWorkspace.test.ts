@@ -4,7 +4,9 @@ import type { IPriwaBefallsgruppe, IPriwaPoint } from "./types";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
 import {
   buildPriwaReviewWorkspace,
+  reconcilePriwaDatasetAssignments,
   reviewItemDatasetIds,
+  setPriwaDatasetAssignment,
 } from "./priwaReviewWorkspace";
 
 const point = (id: string, lon: number, date = "2026-06-12"): IPriwaPoint => ({
@@ -27,6 +29,48 @@ const point = (id: string, lon: number, date = "2026-06-12"): IPriwaPoint => ({
   capturedAt: `${date}T10:00:00Z`,
   coordinateSource: "qr",
   gps: "ja",
+});
+
+describe("setPriwaDatasetAssignment", () => {
+  it("adds an assignment once without replacing adjacent flights", () => {
+    expect(setPriwaDatasetAssignment(["flight-1"], "flight-2", true)).toEqual([
+      "flight-1",
+      "flight-2",
+    ]);
+    expect(
+      setPriwaDatasetAssignment(["flight-1", "flight-2"], "flight-2", true),
+    ).toEqual(["flight-1", "flight-2"]);
+  });
+
+  it("removes only the selected assignment", () => {
+    expect(
+      setPriwaDatasetAssignment(
+        ["flight-1", "flight-2", "flight-3"],
+        "flight-2",
+        false,
+      ),
+    ).toEqual(["flight-1", "flight-3"]);
+  });
+});
+
+describe("reconcilePriwaDatasetAssignments", () => {
+  it("drops a classified flight after a workspace rerender", () => {
+    expect(
+      reconcilePriwaDatasetAssignments(
+        ["flight-1", "flight-2"],
+        ["flight-1"],
+      ),
+    ).toEqual(["flight-1"]);
+  });
+
+  it("does not reselect flights the reviewer explicitly deselected", () => {
+    expect(
+      reconcilePriwaDatasetAssignments(
+        ["flight-1"],
+        ["flight-1", "flight-2"],
+      ),
+    ).toEqual(["flight-1"]);
+  });
 });
 
 const mosaic = (
@@ -76,6 +120,22 @@ describe("buildPriwaReviewWorkspace", () => {
       kind: "saved-group",
       status: "flight_suggested",
       suggestedDatasetIds: ["flight-1"],
+    });
+  });
+
+  it("suggests every overlapping flight inside the date window", () => {
+    const items = buildPriwaReviewWorkspace(
+      [point("1", 8.15)],
+      [
+        { ...mosaic("flight-near"), captureDate: "2026-06-13" },
+        { ...mosaic("flight-far"), captureDate: "2026-06-17" },
+      ],
+      [group(["1"])],
+    );
+
+    expect(items[0]).toMatchObject({
+      key: "group:group-1",
+      suggestedDatasetIds: ["flight-near", "flight-far"],
     });
   });
 

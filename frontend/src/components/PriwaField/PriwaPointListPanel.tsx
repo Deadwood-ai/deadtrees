@@ -1,8 +1,10 @@
 import { DownloadOutlined, EnvironmentOutlined } from "@ant-design/icons";
 import { Button, Empty, Segmented } from "antd";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 
 import PriwaPointCompactList from "./PriwaPointCompactList";
+import PriwaPointPanelResizeHandle from "./PriwaPointPanelResizeHandle";
 import PriwaPointTable from "./PriwaPointTable";
 import { indexPriwaBefallsgruppenByTreeId } from "./priwaBefallsgruppenState";
 import { downloadPriwaPointsCsv } from "./priwaPointCsv";
@@ -13,6 +15,7 @@ type PriwaPointFilter = "all" | "qa";
 type PriwaPointView = "list" | "table";
 
 const PRIWA_POINT_VIEW_STORAGE_KEY = "deadtrees-priwa-field:point-view";
+const DEFAULT_DESKTOP_PANEL_WIDTH = "calc(100vw - 2rem)";
 
 const loadInitialPointView = (): PriwaPointView => {
   if (typeof window === "undefined") return "table";
@@ -52,6 +55,7 @@ export default function PriwaPointListPanel({
 }: PriwaPointListPanelProps) {
   const [filter, setFilter] = useState<PriwaPointFilter>("all");
   const [view, setView] = useState<PriwaPointView>(loadInitialPointView);
+  const panelRef = useRef<HTMLElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const groupByTreeId = useMemo(
     () => indexPriwaBefallsgruppenByTreeId(groups),
@@ -87,6 +91,15 @@ export default function PriwaPointListPanel({
     }
   };
 
+  const getTableScrollContainer = useCallback(
+    () => contentRef.current ?? window,
+    [],
+  );
+
+  const panelStyle = {
+    "--priwa-point-panel-width": DEFAULT_DESKTOP_PANEL_WIDTH,
+  } as CSSProperties;
+
   useEffect(() => {
     if (!focusedPointId) return;
 
@@ -110,7 +123,13 @@ export default function PriwaPointListPanel({
   }, [filter, focusedPointId, view, visiblePoints]);
 
   return (
-    <section className="pointer-events-auto absolute inset-x-2 bottom-2 z-[58] flex max-h-[64dvh] flex-col overflow-hidden rounded-md bg-white shadow-xl ring-1 ring-slate-900/10 md:bottom-5 md:left-4 md:right-4 md:top-24 md:max-h-[calc(100dvh-8rem)]">
+    <section
+      ref={panelRef}
+      data-testid="priwa-point-list-panel"
+      style={panelStyle}
+      className="pointer-events-auto absolute inset-x-2 bottom-2 z-[58] flex max-h-[64dvh] flex-col overflow-hidden rounded-md bg-white shadow-xl ring-1 ring-slate-900/10 md:bottom-5 md:left-4 md:right-auto md:top-24 md:w-[var(--priwa-point-panel-width)] md:max-w-[calc(100vw-2rem)] md:max-h-[calc(100dvh-8rem)]"
+    >
+      <PriwaPointPanelResizeHandle panelRef={panelRef} />
       <header className="flex items-start justify-between gap-3 border-b border-slate-200 px-3 py-2.5">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-slate-950">Käferbäume</div>
@@ -218,6 +237,7 @@ export default function PriwaPointListPanel({
             points={visiblePoints}
             groupByTreeId={groupByTreeId}
             focusedPointId={focusedPointId}
+            getScrollContainer={getTableScrollContainer}
             onEditPoint={onEditPoint}
             onZoomToPoint={onZoomToPoint}
           />

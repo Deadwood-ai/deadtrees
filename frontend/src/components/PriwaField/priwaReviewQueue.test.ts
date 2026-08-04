@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 import type { IPriwaReviewItem } from "./priwaReviewWorkspace";
 import {
   filterPriwaReviewItems,
+  filterForPriwaReviewItem,
   findPriwaReviewItemByGroup,
   findPriwaReviewItemByMosaic,
   findPriwaReviewItemByPoint,
   resolvePriwaReviewSelection,
+  resolvePriwaFilteredReviewSelection,
+  shouldClosePriwaReviewTree,
 } from "./priwaReviewQueue";
 
 const openGroup = {
@@ -85,10 +88,41 @@ describe("PRIWA review queue", () => {
     expect(filterPriwaReviewItems(items, "uploads")).toEqual([upload]);
   });
 
+  it("selects the queue filter that can show an externally selected item", () => {
+    expect(filterForPriwaReviewItem(openGroup)).toBe("open");
+    expect(filterForPriwaReviewItem(completeGroup)).toBe("complete");
+    expect(filterForPriwaReviewItem(upload)).toBe("uploads");
+  });
+
+  it("lets a completed map selection escape the active open filter", () => {
+    expect(
+      resolvePriwaFilteredReviewSelection(
+        items,
+        "open",
+        completeGroup.key,
+        true,
+      ),
+    ).toBe(completeGroup);
+    expect(
+      resolvePriwaFilteredReviewSelection(
+        items,
+        "open",
+        completeGroup.key,
+        false,
+      ),
+    ).toBe(openGroup);
+  });
+
   it("maps map features back to their canonical review item", () => {
     expect(findPriwaReviewItemByMosaic(items, "flight-1")).toBe(openGroup);
     expect(findPriwaReviewItemByMosaic(items, "flight-2")).toBe(completeGroup);
     expect(findPriwaReviewItemByGroup(items, "group-1")).toBe(completeGroup);
     expect(findPriwaReviewItemByPoint(items, "tree-1")).toBe(openGroup);
+  });
+
+  it("moves an open tree editor out of the embedded panel when the queue advances", () => {
+    expect(shouldClosePriwaReviewTree(openGroup, "tree-1")).toBe(false);
+    expect(shouldClosePriwaReviewTree(completeGroup, "tree-1")).toBe(true);
+    expect(shouldClosePriwaReviewTree(upload, "tree-1")).toBe(true);
   });
 });
