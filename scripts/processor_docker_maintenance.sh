@@ -13,6 +13,7 @@ HOLD_DURATION="${PROCESSOR_SNAP_HOLD_DURATION:-7d}"
 DRAIN_TIMEOUT_SECONDS="${PROCESSOR_DRAIN_TIMEOUT_SECONDS:-43200}"
 DRAIN_POLL_SECONDS="${PROCESSOR_DRAIN_POLL_SECONDS:-15}"
 RENEW_HOLD_ONLY=0
+CONTROL_DIR="$(dirname "${PROCESSOR_DRAIN_REQUEST_PATH:-/data/processor-control/drain-request.json}")"
 
 while [ "$#" -gt 0 ]; do
 	case "$1" in
@@ -38,6 +39,21 @@ log() {
 	printf '%s: %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$*" >> "${LOG_FILE}"
 }
 
+require_clean_checkout() {
+	local dirty
+	dirty="$(
+		git status --porcelain --untracked-files=all -- \
+			. \
+			':(exclude).local/locks' \
+			':(exclude)auto-deploy.log' \
+			':(exclude)processor-maintenance.log'
+	)"
+	if [ -n "${dirty}" ]; then
+		log "Refusing Docker maintenance from dirty checkout: ${dirty//$'\n'/'; '}"
+		exit 1
+	fi
+}
+
 exec 9>"${LOCK_FILE}"
 if ! flock -n 9; then
 	log "Skipping Docker maintenance because another processor runtime operation already holds ${LOCK_FILE}"
@@ -48,6 +64,8 @@ drain_set=0
 trap 'rc=$?; if [ "${rc}" -ne 0 ] && [ "${drain_set}" -eq 1 ]; then log "Docker maintenance failed; drain request remains in place for operator review"; fi' EXIT
 
 cd "${REPO_DIR}"
+mkdir -p "${CONTROL_DIR}"
+require_clean_checkout
 
 snap refresh --hold="${HOLD_DURATION}" docker >> "${LOG_FILE}" 2>&1
 log "Renewed Docker snap hold for ${HOLD_DURATION}"
@@ -65,6 +83,7 @@ python3 "${STATUS_SCRIPT}" wait-for-idle \
 docker compose -f "${COMPOSE_FILE}" stop processor >> "${LOG_FILE}" 2>&1
 snap refresh docker >> "${LOG_FILE}" 2>&1
 snap refresh --hold="${HOLD_DURATION}" docker >> "${LOG_FILE}" 2>&1
+require_clean_checkout
 docker compose -f "${COMPOSE_FILE}" up -d processor >> "${LOG_FILE}" 2>&1
 docker inspect deadtrees-processor-1 \
 	--format 'Cmd={{json .Config.Cmd}} RestartPolicy={{.HostConfig.RestartPolicy.Name}} StartedAt={{.State.StartedAt}}' \

@@ -1,5 +1,10 @@
 import time
-from processor.src.processor import background_process, is_drain_requested
+from processor.src.processor import background_process, get_worker_id
+from processor.src.utils.drain_control import (
+	BackgroundProcessResult,
+	acknowledge_drain_request,
+	is_drain_requested,
+)
 from processor.src.utils.startup_cleanup import cleanup_orphaned_resources, cleanup_old_temp_directories
 from shared.logger import logger
 from shared.db import login
@@ -9,6 +14,7 @@ from shared.settings import settings
 def run_continuous():
 	"""Run the processor as a persistent worker until it is stopped."""
 	logger.info('Starting continuous processor...')
+	worker_id = get_worker_id()
 
 	# Perform startup cleanup to recover from crashes/restarts
 	try:
@@ -26,6 +32,7 @@ def run_continuous():
 			if not drain_logged:
 				logger.info('Processor drain requested; holding new queue claims until the control file is cleared')
 				drain_logged = True
+			acknowledge_drain_request(worker_id)
 			time.sleep(settings.PROCESSOR_IDLE_BACKOFF_SECONDS)
 			continue
 
@@ -34,12 +41,12 @@ def run_continuous():
 			drain_logged = False
 
 		try:
-			did_work = background_process()
+			result = background_process()
 		except Exception:
 			logger.exception('Error in processor loop')
-			did_work = False
+			result = BackgroundProcessResult.FAILED
 
-		if not did_work:
+		if result is not BackgroundProcessResult.WORKED:
 			time.sleep(settings.PROCESSOR_IDLE_BACKOFF_SECONDS)
 
 

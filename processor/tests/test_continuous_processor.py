@@ -1,6 +1,7 @@
 import pytest
 
 import processor.src.continuous_processor as continuous_processor_module
+from processor.src.utils.drain_control import BackgroundProcessResult
 
 pytestmark = pytest.mark.unit
 
@@ -26,7 +27,11 @@ def _patch_startup(monkeypatch, *, exception_messages=None):
 
 def test_run_continuous_drains_back_to_back_before_sleeping(monkeypatch):
 	_patch_startup(monkeypatch)
-	results = iter([True, True, False])
+	results = iter([
+		BackgroundProcessResult.WORKED,
+		BackgroundProcessResult.WORKED,
+		BackgroundProcessResult.IDLE,
+	])
 	sleep_calls = []
 
 	monkeypatch.setattr(continuous_processor_module, 'is_drain_requested', lambda: False)
@@ -67,6 +72,27 @@ def test_run_continuous_backs_off_while_drained(monkeypatch):
 		continuous_processor_module.run_continuous()
 
 	assert sleep_calls == [9]
+
+
+def test_run_continuous_backs_off_after_claimed_task_failures(monkeypatch):
+	_patch_startup(monkeypatch)
+	results = iter([BackgroundProcessResult.FAILED])
+	sleep_calls = []
+
+	monkeypatch.setattr(continuous_processor_module, 'is_drain_requested', lambda: False)
+	monkeypatch.setattr(continuous_processor_module, 'background_process', lambda: next(results))
+	monkeypatch.setattr(continuous_processor_module.settings, 'PROCESSOR_IDLE_BACKOFF_SECONDS', 11)
+
+	def fake_sleep(seconds):
+		sleep_calls.append(seconds)
+		raise StopLoop
+
+	monkeypatch.setattr(continuous_processor_module.time, 'sleep', fake_sleep)
+
+	with pytest.raises(StopLoop):
+		continuous_processor_module.run_continuous()
+
+	assert sleep_calls == [11]
 
 
 def test_run_continuous_logs_tracebacks_and_backs_off_on_loop_errors(monkeypatch):

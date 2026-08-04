@@ -12,12 +12,28 @@ COMPOSE_FILE="${REPO_DIR}/docker-compose.processor.yaml"
 BRANCH="${PROCESSOR_DEPLOY_BRANCH:-main}"
 DRAIN_TIMEOUT_SECONDS="${PROCESSOR_DRAIN_TIMEOUT_SECONDS:-43200}"
 DRAIN_POLL_SECONDS="${PROCESSOR_DRAIN_POLL_SECONDS:-15}"
+CONTROL_DIR="$(dirname "${PROCESSOR_DRAIN_REQUEST_PATH:-/data/processor-control/drain-request.json}")"
 
 mkdir -p "${LOCK_DIR}"
 touch "${LOG_FILE}"
 
 log() {
 	printf '%s: %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$*" >> "${LOG_FILE}"
+}
+
+require_clean_checkout() {
+	local dirty
+	dirty="$(
+		git status --porcelain --untracked-files=all -- \
+			. \
+			':(exclude).local/locks' \
+			':(exclude)auto-deploy.log' \
+			':(exclude)processor-maintenance.log'
+	)"
+	if [ -n "${dirty}" ]; then
+		log "Refusing deploy from dirty checkout: ${dirty//$'\n'/'; '}"
+		exit 1
+	fi
 }
 
 exec 9>"${LOCK_FILE}"
@@ -30,6 +46,8 @@ drain_set=0
 trap 'rc=$?; if [ "${rc}" -ne 0 ] && [ "${drain_set}" -eq 1 ]; then log "Deployment failed; drain request remains in place for inspection and rollback"; fi' EXIT
 
 cd "${REPO_DIR}"
+mkdir -p "${CONTROL_DIR}"
+require_clean_checkout
 
 git fetch origin "${BRANCH}" >> "${LOG_FILE}" 2>&1
 
@@ -51,6 +69,7 @@ python3 "${STATUS_SCRIPT}" wait-for-idle \
 	--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
 
 git pull --ff-only origin "${BRANCH}" >> "${LOG_FILE}" 2>&1
+require_clean_checkout
 docker compose -f "${COMPOSE_FILE}" build processor tcd >> "${LOG_FILE}" 2>&1
 docker compose -f "${COMPOSE_FILE}" up -d --force-recreate processor >> "${LOG_FILE}" 2>&1
 docker inspect deadtrees-processor-1 \
