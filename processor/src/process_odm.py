@@ -31,10 +31,44 @@ from processor.src.utils.debug_artifacts import (
 	build_container_forensics,
 	write_debug_bundle,
 )
-from shared.exif_utils import extract_comprehensive_exif
+from shared.exif_utils import extract_camera_nadir_deviation_degrees, extract_comprehensive_exif
 
 # RTK file extensions as specified in requirements
 RTK_EXTENSIONS = {'.RTK', '.MRK', '.RTL', '.RTB', '.RPOS', '.RTS', '.IMU'}
+ORIENTATION_THRESHOLD_TOLERANCE_DEGREES = 0.1
+
+
+def _filter_images_by_camera_orientation(
+	image_files: list[Path], max_nadir_deviation_degrees: float
+) -> tuple[list[Path], list[tuple[Path, float, str]], list[Path]]:
+	"""Keep nadir images and images whose camera pitch metadata is unavailable.
+
+	Camera metadata conventions differ by manufacturer. The shared orientation
+	reader normalizes supported schemas to degrees away from nadir. Unknown
+	metadata remains eligible so unsupported and non-drone imagery is not
+	automatically rejected.
+	"""
+	if not 0 <= max_nadir_deviation_degrees <= 90:
+		raise ValueError('Maximum nadir deviation must be between 0 and 90 degrees')
+
+	kept: list[Path] = []
+	excluded: list[tuple[Path, float, str]] = []
+	unknown: list[Path] = []
+
+	for image_file in image_files:
+		orientation = extract_camera_nadir_deviation_degrees(image_file)
+		if orientation is None:
+			kept.append(image_file)
+			unknown.append(image_file)
+			continue
+
+		deviation_from_nadir, source_tag, _ = orientation
+		if deviation_from_nadir <= max_nadir_deviation_degrees + ORIENTATION_THRESHOLD_TOLERANCE_DEGREES:
+			kept.append(image_file)
+		else:
+			excluded.append((image_file, deviation_from_nadir, source_tag))
+
+	return kept, excluded, unknown
 
 
 def _build_odm_command() -> tuple[list[str], str, str]:
@@ -619,7 +653,43 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			)
 
 	logger.info(
-		f'Preparing to copy {len(valid_image_files)} valid images to shared volume (filtered out {len(image_files) - len(valid_image_files)} potentially corrupt images)',
+		f'Image-size validation kept {len(valid_image_files)} images and filtered out '
+		f'{len(image_files) - len(valid_image_files)} potentially corrupt images',
+		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+	)
+
+	valid_image_files, orientation_excluded, orientation_unknown = _filter_images_by_camera_orientation(
+		valid_image_files,
+		max_nadir_deviation_degrees=settings.ODM_MAX_NADIR_DEVIATION_DEGREES,
+	)
+
+	logger.info(
+		f'Camera-orientation filter kept {len(valid_image_files)} images, '
+		f'excluded {len(orientation_excluded)} images outside '
+		f'nadir +/- {settings.ODM_MAX_NADIR_DEVIATION_DEGREES:g} degrees '
+		f'(with {ORIENTATION_THRESHOLD_TOLERANCE_DEGREES:g} degree metadata tolerance), and retained '
+		f'{len(orientation_unknown)} images without supported camera-orientation metadata',
+		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+	)
+
+	if orientation_excluded:
+		excluded_sample = ', '.join(
+			f'{path.name} ({deviation:g} deg off nadir via {source_tag})'
+			for path, deviation, source_tag in orientation_excluded[:10]
+		)
+		logger.warning(
+			f'Excluded non-nadir ODM images: {excluded_sample}'
+			f'{" ..." if len(orientation_excluded) > 10 else ""}',
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+		)
+
+	if not valid_image_files:
+		raise Exception(
+			f'No images remain within nadir +/- {settings.ODM_MAX_NADIR_DEVIATION_DEGREES:g} degrees'
+		)
+
+	logger.info(
+		f'Preparing to copy {len(valid_image_files)} orientation-eligible images to the shared ODM volume',
 		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 	)
 

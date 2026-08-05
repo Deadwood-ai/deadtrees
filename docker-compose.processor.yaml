@@ -63,6 +63,7 @@ services:
       DEV_MODE: "false"
       ODM_AUTO_BOUNDARY: "true"
       ODM_SKY_REMOVAL: "true"
+      ODM_MAX_NADIR_DEVIATION_DEGREES: "10"
       # Service role key for accessing auth.users (user email lookup)
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
       # Linear integration for processing failure notifications

@@ -22,7 +22,9 @@ from processor.src.process_odm import (
 	_analyze_extracted_files,
 	_extract_exif_from_images,
 	_build_odm_command,
+	_filter_images_by_camera_orientation,
 )
+from shared.exif_utils import extract_camera_nadir_deviation_degrees
 from processor.src.utils.ssh import push_file_to_storage_server, check_file_exists_on_storage
 
 
@@ -152,6 +154,96 @@ def test_build_odm_command_skips_auto_boundary_when_disabled(monkeypatch):
 	command, _, _ = _build_odm_command()
 
 	assert '--auto-boundary' not in command
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+	('xmp', 'expected_orientation'),
+	[
+		(
+			b'<rdf:Description drone-dji:GimbalPitchDegree="-90.00" />',
+			(0.0, 'GimbalPitchDegree', -90.0),
+		),
+		(
+			b'<drone-parrot:CameraPitchDegree>-82.0</drone-parrot:CameraPitchDegree>',
+			(8.0, 'CameraPitchDegree', -82.0),
+		),
+		(b'<rdf:Description Camera:Pitch="+7.5" />', (7.5, 'Camera:Pitch', 7.5)),
+		(
+			b'<skydio:CameraOrientationNED>0.2, -84.0, 146.5</skydio:CameraOrientationNED>',
+			(6.0, 'CameraOrientationNED', -84.0),
+		),
+	],
+)
+def test_extract_camera_nadir_deviation_supports_multiple_schemas(tmp_path, xmp, expected_orientation):
+	"""Vendor and cross-vendor XMP conventions should normalize to off-nadir degrees."""
+	image_path = tmp_path / 'drone.jpg'
+	image_path.write_bytes(b'\xff\xd8' + xmp + b'\xff\xd9')
+
+	assert extract_camera_nadir_deviation_degrees(image_path) == expected_orientation
+
+
+@pytest.mark.unit
+def test_extract_camera_nadir_deviation_ignores_vehicle_pitch(tmp_path):
+	"""Aircraft attitude must not be mistaken for the camera viewing direction."""
+	image_path = tmp_path / 'drone.jpg'
+	image_path.write_bytes(b'<rdf:Description drone-dji:FlightPitchDegree="0.5" />')
+
+	assert extract_camera_nadir_deviation_degrees(image_path) is None
+
+
+@pytest.mark.unit
+def test_extract_camera_nadir_deviation_scans_late_dng_xmp(tmp_path):
+	"""Orientation XMP should be found even when a TIFF/DNG container stores it late."""
+	image_path = tmp_path / 'drone.dng'
+	image_path.write_bytes(
+		b'II*\x00'
+		+ b'\x00' * (1024 * 1024)
+		+ b'<drone-parrot:CameraPitchDegree>-85.0</drone-parrot:CameraPitchDegree>'
+	)
+
+	assert extract_camera_nadir_deviation_degrees(image_path) == (5.0, 'CameraPitchDegree', -85.0)
+
+
+@pytest.mark.unit
+def test_filter_images_by_camera_orientation_keeps_only_nadir_candidates(tmp_path):
+	"""The ODM input set should reject oblique images but retain unknown metadata."""
+	image_xmp = {
+		'nadir-negative.jpg': ('GimbalPitchDegree', '-90.0'),
+		'nadir-positive.jpg': ('CameraPitchDegree', '+90.0'),
+		'boundary.jpg': ('Camera:Pitch', '+10.0'),
+		'rounded-boundary.jpg': ('GimbalPitchDegree', '-79.97'),
+		'oblique.jpg': ('Camera:Pitch', '+45.0'),
+	}
+	paths = []
+	for filename, (tag, pitch) in image_xmp.items():
+		path = tmp_path / filename
+		path.write_bytes(
+			b'\xff\xd8<rdf:Description '
+			+ tag.encode()
+			+ b'="'
+			+ pitch.encode()
+			+ b'" />\xff\xd9'
+		)
+		paths.append(path)
+
+	unknown_path = tmp_path / 'unknown.jpg'
+	unknown_path.write_bytes(b'\xff\xd8no pitch metadata\xff\xd9')
+	paths.append(unknown_path)
+
+	kept, excluded, unknown = _filter_images_by_camera_orientation(paths, max_nadir_deviation_degrees=10.0)
+
+	assert {path.name for path in kept} == {
+		'nadir-negative.jpg',
+		'nadir-positive.jpg',
+		'boundary.jpg',
+		'rounded-boundary.jpg',
+		'unknown.jpg',
+	}
+	assert [(path.name, deviation, source) for path, deviation, source in excluded] == [
+		('oblique.jpg', 45.0, 'Camera:Pitch')
+	]
+	assert unknown == [unknown_path]
 
 
 @pytest.fixture
