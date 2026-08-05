@@ -116,8 +116,8 @@ scripts/qa/validate-isolated-env.sh
 - Use Conventional Commit format: `type(scope): short summary`.
 - Allowed types: `feat`, `fix`, `docs`, `chore`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`.
 - Good example: `fix(frontend): align tree and deadwood cover labels`.
-- PR bodies should be concise and changelog-friendly: what changed, why, who it helps,
-  validation done, and any user-visible risk.
+- Use [`.github/pull_request_template.md`](.github/pull_request_template.md) for PR descriptions and keep the body synchronized with the final diff and validation evidence.
+- Add the applicable release-grouping labels from [`.github/release.yml`](.github/release.yml).
 
 ## Local-Only Access
 
