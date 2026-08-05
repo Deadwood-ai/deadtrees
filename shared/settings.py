@@ -149,6 +149,7 @@ class Settings(BaseSettings):
 	ODM_AUTO_BOUNDARY: bool = False
 	ODM_SKY_REMOVAL: bool = False
 	ODM_BG_REMOVAL: bool = False
+	ODM_MAX_NADIR_DEVIATION_DEGREES: float = 10.0
 
 	# Linear integration for processing failure notifications
 	LINEAR_ENABLED: bool = False
