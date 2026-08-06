@@ -79,6 +79,7 @@ cd /home/jj1049/prod/deadtrees
 git fetch origin main
 git checkout main
 git pull --ff-only origin main
+mkdir -p .local/processor-control
 docker compose -f docker-compose.processor.yaml build processor tcd
 docker compose -f docker-compose.processor.yaml up -d processor
 ```
