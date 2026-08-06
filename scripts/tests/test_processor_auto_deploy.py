@@ -82,7 +82,10 @@ class DeployHarness:
 			"#!/bin/sh\n"
 			f"echo \"$@\" >> {self.docker_log}\n"
 			"if [ \"$1\" = inspect ]; then\n"
-			f"  if [ -e {self.docker_running} ]; then echo 'running false 0 0'; exit 0; fi\n"
+			f"  if [ -e {self.docker_running} ]; then\n"
+			"    case \"$*\" in *RestartCount*) echo 'running false 0 0' ;; *) echo 'running false' ;; esac\n"
+			"    exit 0\n"
+			"  fi\n"
 			"  exit 1\n"
 			"fi\n"
 			"if [ \"$1\" = compose ] && echo \"$@\" | grep -q ' up '; then\n"
@@ -97,6 +100,7 @@ class DeployHarness:
 		self.env["PATH"] = f"{self.bin_dir}:{self.env['PATH']}"
 		self.env["PROCESSOR_DRAIN_REQUEST_PATH"] = str(self.control_dir / "drain-request.json")
 		self.env["PROCESSOR_DRAIN_ACK_PATH"] = str(self.control_dir / "drain-ack.json")
+		self.env["PROCESSOR_DRAIN_POLL_SECONDS"] = "0"
 		self.env["PROCESSOR_READINESS_POLL_SECONDS"] = "0"
 		self.env["PROCESSOR_STARTUP_TIMEOUT_SECONDS"] = "2"
 
@@ -175,4 +179,24 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			self.assertIn(
 				"wait-for-idle --allow-unacknowledged-stopped-worker",
 				harness.python_log.read_text(),
+			)
+
+	def test_recovery_deploy_rechecks_worker_liveness_while_waiting_for_ack(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			harness.push_change("repair deploy\n")
+			hook = harness.tmp_path / "crash-worker.sh"
+			hook.write_text(f"rm -f {harness.docker_running}\nsleep 10\n")
+
+			result = harness.run_deploy(wait_hook=hook)
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertIn("stop processor", harness.docker_log.read_text())
+			self.assertIn(
+				"wait-for-idle --allow-unacknowledged-stopped-worker",
+				harness.python_log.read_text(),
+			)
+			self.assertIn(
+				"Processor became unavailable while draining",
+				(harness.worktree / "auto-deploy.log").read_text(),
 			)

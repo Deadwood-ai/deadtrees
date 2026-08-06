@@ -57,6 +57,53 @@ require_clean_checkout() {
 	fi
 }
 
+processor_is_available() {
+	local inspect_output=""
+	local status=""
+	local restarting=""
+
+	inspect_output="$(docker inspect deadtrees-processor-1 --format '{{.State.Status}} {{.State.Restarting}}' 2>/dev/null || true)"
+	if [ -z "${inspect_output}" ]; then
+		return 1
+	fi
+	read -r status restarting <<< "${inspect_output}"
+	[ "${status}" = "running" ] && [ "${restarting}" = "false" ]
+}
+
+wait_for_drain_with_recovery() {
+	local wait_pid
+
+	if ! processor_is_available; then
+		log "Processor is unavailable; entering stopped-worker recovery mode"
+		docker compose -f "${COMPOSE_FILE}" stop processor >> "${LOG_FILE}" 2>&1
+		python3 "${STATUS_SCRIPT}" wait-for-idle \
+			--allow-unacknowledged-stopped-worker \
+			--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
+			--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
+		return
+	fi
+
+	python3 "${STATUS_SCRIPT}" wait-for-idle \
+		--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
+		--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1 &
+	wait_pid=$!
+	while kill -0 "${wait_pid}" 2>/dev/null; do
+		if ! processor_is_available; then
+			log "Processor became unavailable while draining; entering stopped-worker recovery mode"
+			kill "${wait_pid}" 2>/dev/null || true
+			wait "${wait_pid}" 2>/dev/null || true
+			docker compose -f "${COMPOSE_FILE}" stop processor >> "${LOG_FILE}" 2>&1
+			python3 "${STATUS_SCRIPT}" wait-for-idle \
+				--allow-unacknowledged-stopped-worker \
+				--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
+				--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
+			return
+		fi
+		sleep "${DRAIN_POLL_SECONDS}"
+	done
+	wait "${wait_pid}"
+}
+
 wait_for_processor_running() {
 	local deadline=$((SECONDS + STARTUP_TIMEOUT_SECONDS))
 	local stable_polls=0
@@ -107,7 +154,6 @@ trap 'rc=$?; if [ "${rc}" -ne 0 ] && [ "${drain_set}" -eq 1 ]; then log "Docker 
 
 cd "${REPO_DIR}"
 mkdir -p "${CONTROL_DIR}"
-require_clean_checkout
 
 snap refresh --hold="${HOLD_DURATION}" docker >> "${LOG_FILE}" 2>&1
 log "Renewed Docker snap hold for ${HOLD_DURATION}"
@@ -116,11 +162,11 @@ if [ "${RENEW_HOLD_ONLY}" -eq 1 ]; then
 	exit 0
 fi
 
+require_clean_checkout
+
 python3 "${STATUS_SCRIPT}" set-drain --reason "docker-maintenance" >> "${LOG_FILE}" 2>&1
 drain_set=1
-python3 "${STATUS_SCRIPT}" wait-for-idle \
-	--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
-	--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
+wait_for_drain_with_recovery
 
 docker compose -f "${COMPOSE_FILE}" stop processor >> "${LOG_FILE}" 2>&1
 snap refresh docker >> "${LOG_FILE}" 2>&1

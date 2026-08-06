@@ -43,9 +43,10 @@ drain file in place so the worker does not resume unexpectedly on a partially
 updated checkout.
 
 If the existing processor is stopped or crash-looping before it can acknowledge
-the drain, the deploy script stops the container and enters recovery mode. That
-mode can continue without an acknowledgement only when the database proves the
-worker has no active queue row and there is no legacy unowned active row.
+the drain, including if it fails after the initial availability check, the deploy
+script stops the container and enters recovery mode. That mode can continue
+without an acknowledgement only when the database proves the worker has no
+active queue row and there is no legacy unowned active row.
 
 ## Docker Maintenance
 
@@ -53,6 +54,10 @@ Use `scripts/processor_docker_maintenance.sh` for Docker Snap refreshes or any
 planned daemon restart. The script renews the Snap hold, drains the worker,
 stops the container, refreshes Docker, re-applies the hold, restarts the
 processor, and logs to `processor-maintenance.log`.
+
+Hold renewal does not depend on checkout cleanliness because it never builds or
+deploys repository code. Full maintenance still requires a clean checkout and
+uses the same stopped-worker/no-active-row recovery guard as auto-deploy.
 
 The recommended hold-renew command is:
 

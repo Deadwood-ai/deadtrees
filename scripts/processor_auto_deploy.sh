@@ -60,6 +60,40 @@ processor_is_available() {
 	[ "${status}" = "running" ] && [ "${restarting}" = "false" ]
 }
 
+wait_for_drain_with_recovery() {
+	local wait_pid
+
+	if ! processor_is_available; then
+		log "Processor is unavailable; entering stopped-worker recovery mode"
+		docker compose -f "${COMPOSE_FILE}" stop processor >> "${LOG_FILE}" 2>&1
+		python3 "${STATUS_SCRIPT}" wait-for-idle \
+			--allow-unacknowledged-stopped-worker \
+			--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
+			--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
+		return
+	fi
+
+	python3 "${STATUS_SCRIPT}" wait-for-idle \
+		--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
+		--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1 &
+	wait_pid=$!
+	while kill -0 "${wait_pid}" 2>/dev/null; do
+		if ! processor_is_available; then
+			log "Processor became unavailable while draining; entering stopped-worker recovery mode"
+			kill "${wait_pid}" 2>/dev/null || true
+			wait "${wait_pid}" 2>/dev/null || true
+			docker compose -f "${COMPOSE_FILE}" stop processor >> "${LOG_FILE}" 2>&1
+			python3 "${STATUS_SCRIPT}" wait-for-idle \
+				--allow-unacknowledged-stopped-worker \
+				--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
+				--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
+			return
+		fi
+		sleep "${DRAIN_POLL_SECONDS}"
+	done
+	wait "${wait_pid}"
+}
+
 wait_for_processor_running() {
 	local deadline=$((SECONDS + STARTUP_TIMEOUT_SECONDS))
 	local stable_polls=0
@@ -128,18 +162,7 @@ log "Rollback path: git reset --hard ${local_sha} && docker compose -f ${COMPOSE
 
 python3 "${STATUS_SCRIPT}" set-drain --reason "auto-deploy ${remote_sha}" >> "${LOG_FILE}" 2>&1
 drain_set=1
-if processor_is_available; then
-	python3 "${STATUS_SCRIPT}" wait-for-idle \
-		--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
-		--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
-else
-	log "Processor is unavailable; entering stopped-worker recovery mode"
-	docker compose -f "${COMPOSE_FILE}" stop processor >> "${LOG_FILE}" 2>&1
-	python3 "${STATUS_SCRIPT}" wait-for-idle \
-		--allow-unacknowledged-stopped-worker \
-		--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
-		--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
-fi
+wait_for_drain_with_recovery
 
 git merge --ff-only "${remote_sha}" >> "${LOG_FILE}" 2>&1
 deployed_sha="$(git rev-parse HEAD)"
