@@ -24,6 +24,7 @@ def run_continuous():
 		logger.error(f'Startup cleanup failed (continuing anyway): {e}')
 
 	drain_logged = False
+	consecutive_loop_failures = 0
 
 	while True:
 		drain_requested = is_drain_requested()
@@ -37,8 +38,16 @@ def run_continuous():
 		try:
 			result = background_process()
 		except Exception:
+			consecutive_loop_failures += 1
 			logger.exception('Error in processor loop')
+			if consecutive_loop_failures >= settings.PROCESSOR_LOOP_FAILURE_LIMIT:
+				logger.error(
+					f'Processor loop failed {consecutive_loop_failures} consecutive times; exiting for supervised restart'
+				)
+				raise
 			result = BackgroundProcessResult.FAILED
+		else:
+			consecutive_loop_failures = 0
 
 		if result is not BackgroundProcessResult.WORKED:
 			time.sleep(settings.PROCESSOR_IDLE_BACKOFF_SECONDS)

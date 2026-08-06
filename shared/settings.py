@@ -144,6 +144,9 @@ class Settings(BaseSettings):
 	# Seconds the continuous processor waits before re-polling the queue when it
 	# is idle or intentionally drained for deployment/maintenance.
 	PROCESSOR_IDLE_BACKOFF_SECONDS: int = 10
+	# Consecutive loop-level exceptions before the worker exits so Docker exposes
+	# a restart state to host-side repair deployment.
+	PROCESSOR_LOOP_FAILURE_LIMIT: int = 3
 	# Host-local control file used to stop this worker from claiming new tasks
 	# while it drains the current one for deployment or Docker maintenance.
 	PROCESSOR_DRAIN_REQUEST_PATH: str = '/data/processor-control/drain-request.json'

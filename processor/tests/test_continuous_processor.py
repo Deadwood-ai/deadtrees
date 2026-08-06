@@ -15,6 +15,7 @@ def _patch_startup(monkeypatch, *, exception_messages=None):
 	monkeypatch.setattr(continuous_processor_module, 'cleanup_orphaned_resources', lambda token: None)
 	monkeypatch.setattr(continuous_processor_module, 'cleanup_old_temp_directories', lambda token: None)
 	monkeypatch.setattr(continuous_processor_module.logger, 'info', lambda *args, **kwargs: None)
+	monkeypatch.setattr(continuous_processor_module.logger, 'error', lambda *args, **kwargs: None)
 	if exception_messages is None:
 		monkeypatch.setattr(continuous_processor_module.logger, 'exception', lambda *args, **kwargs: None)
 	else:
@@ -115,3 +116,22 @@ def test_run_continuous_logs_tracebacks_and_backs_off_on_loop_errors(monkeypatch
 
 	assert exception_messages == ['Error in processor loop']
 	assert sleep_calls == [5]
+
+
+def test_run_continuous_exits_after_bounded_loop_errors(monkeypatch):
+	exception_messages = []
+	_patch_startup(monkeypatch, exception_messages=exception_messages)
+
+	monkeypatch.setattr(continuous_processor_module, 'is_drain_requested', lambda: False)
+	monkeypatch.setattr(
+		continuous_processor_module,
+		'background_process',
+		lambda: (_ for _ in ()).throw(RuntimeError('queue contract broken')),
+	)
+	monkeypatch.setattr(continuous_processor_module.settings, 'PROCESSOR_LOOP_FAILURE_LIMIT', 2)
+	monkeypatch.setattr(continuous_processor_module.time, 'sleep', lambda seconds: None)
+
+	with pytest.raises(RuntimeError, match='queue contract broken'):
+		continuous_processor_module.run_continuous()
+
+	assert exception_messages == ['Error in processor loop', 'Error in processor loop']
