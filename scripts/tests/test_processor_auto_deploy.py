@@ -43,6 +43,7 @@ class DeployHarness:
 		self.docker_log = tmp_path / "docker.log"
 		self.docker_running = tmp_path / "docker-running"
 		self.inspect_failed_once = tmp_path / "inspect-failed-once"
+		self.build_failed_once = tmp_path / "build-failed-once"
 		self.wait_hook_marker = tmp_path / "wait-hook-ran"
 
 		run("git", "init", "--bare", "--initial-branch=main", str(self.origin), cwd=tmp_path)
@@ -52,6 +53,7 @@ class DeployHarness:
 		(self.seed / "scripts").mkdir()
 		(self.seed / "README.md").write_text("initial\n")
 		(self.seed / "docker-compose.processor.yaml").write_text("services: {}\n")
+		(self.seed / ".gitignore").write_text("/.local\n.env\n")
 		shutil.copy2(SCRIPT, self.seed / "scripts" / "processor_auto_deploy.sh")
 		(self.seed / "scripts" / "processor_runtime_control.py").write_text("# test stub\n")
 		git(self.seed, "add", ".")
@@ -98,6 +100,11 @@ class DeployHarness:
 			"fi\n"
 			"if [ \"$1\" = compose ] && echo \"$@\" | grep -q ' up '; then\n"
 			f"  touch {self.docker_running}\n"
+			"fi\n"
+			"if [ \"$1\" = compose ] && echo \"$@\" | grep -q ' build ' && "
+			f"[ -n \"${{PROCESSOR_TEST_BUILD_FAIL_ONCE:-}}\" ] && [ ! -e {self.build_failed_once} ]; then\n"
+			f"  touch {self.build_failed_once}\n"
+			"  exit 1\n"
 			"fi\n"
 			"exit 0\n",
 		)
@@ -239,3 +246,23 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			self.assertEqual(result.returncode, 0, result.stderr)
 			self.assertFalse(custom_ack.exists())
 			self.assertIn("clear-ack", harness.python_log.read_text())
+
+	def test_retries_failed_post_merge_deploy_until_sha_is_activated(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			target_sha = harness.push_change("retry deploy\n")
+			harness.env["PROCESSOR_TEST_BUILD_FAIL_ONCE"] = "1"
+
+			first_result = harness.run_deploy()
+
+			self.assertNotEqual(first_result.returncode, 0)
+			self.assertEqual(git(harness.worktree, "rev-parse", "HEAD").stdout.strip(), target_sha)
+			self.assertFalse((harness.worktree / ".local" / "processor-activated-sha").exists())
+
+			second_result = harness.run_deploy()
+
+			self.assertEqual(second_result.returncode, 0, second_result.stderr)
+			self.assertEqual(
+				(harness.worktree / ".local" / "processor-activated-sha").read_text().strip(),
+				target_sha,
+			)

@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 LOCK_DIR="${REPO_DIR}/.local/locks"
 LOCK_FILE="${LOCK_DIR}/processor-runtime.lock"
+ACTIVATED_SHA_FILE="${REPO_DIR}/.local/processor-activated-sha"
+ROLLBACK_SHA_FILE="${REPO_DIR}/.local/processor-rollback-sha"
 LOG_FILE="${REPO_DIR}/auto-deploy.log"
 STATUS_SCRIPT="${REPO_DIR}/scripts/processor_runtime_control.py"
 COMPOSE_FILE="${REPO_DIR}/docker-compose.processor.yaml"
@@ -182,14 +184,20 @@ require_head_is_ancestor_of_remote "origin/${BRANCH}"
 
 local_sha="$(git rev-parse HEAD)"
 remote_sha="$(git rev-parse "origin/${BRANCH}")"
+activated_sha="$(cat "${ACTIVATED_SHA_FILE}" 2>/dev/null || true)"
 
-if [ "${local_sha}" = "${remote_sha}" ]; then
+if [ "${local_sha}" = "${remote_sha}" ] && [ "${activated_sha}" = "${remote_sha}" ]; then
 	log "No changes"
 	exit 0
 fi
 
 log "Preparing deploy from ${local_sha} to ${remote_sha}"
-log "Rollback path: git reset --hard ${local_sha} && docker compose -f ${COMPOSE_FILE} build processor tcd && docker compose -f ${COMPOSE_FILE} up -d --force-recreate processor"
+if [ "${local_sha}" != "${remote_sha}" ]; then
+	printf '%s\n' "${local_sha}" > "${ROLLBACK_SHA_FILE}.tmp"
+	mv "${ROLLBACK_SHA_FILE}.tmp" "${ROLLBACK_SHA_FILE}"
+fi
+rollback_sha="$(cat "${ROLLBACK_SHA_FILE}" 2>/dev/null || printf '%s' "${local_sha}")"
+log "Rollback path: git reset --hard ${rollback_sha} && docker compose -f ${COMPOSE_FILE} build processor tcd && docker compose -f ${COMPOSE_FILE} up -d --force-recreate processor"
 
 python3 "${STATUS_SCRIPT}" set-drain --reason "auto-deploy ${remote_sha}" >> "${LOG_FILE}" 2>&1
 drain_set=1
@@ -215,5 +223,8 @@ docker inspect deadtrees-processor-1 \
 
 python3 "${STATUS_SCRIPT}" clear-drain >> "${LOG_FILE}" 2>&1
 drain_set=0
+
+printf '%s\n' "${deployed_sha}" > "${ACTIVATED_SHA_FILE}.tmp"
+mv "${ACTIVATED_SHA_FILE}.tmp" "${ACTIVATED_SHA_FILE}"
 
 log "Deployment complete ($(git rev-parse --short HEAD))"

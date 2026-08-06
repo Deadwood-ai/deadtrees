@@ -39,11 +39,13 @@ compose` commands. The script:
 4. fast-forwards the checkout to the exact `origin/main` SHA fetched before draining;
 5. rebuilds `processor` and `tcd`;
 6. force-recreates the processor container; and
-7. clears the drain request after the new container is running.
+7. clears the drain request after the new container is running; and
+8. records the successfully activated SHA under `.local/`.
 
 If the script fails after setting the drain request, it intentionally leaves the
 drain file in place so the worker does not resume unexpectedly on a partially
-updated checkout.
+updated checkout. The next cron run retries until that SHA is successfully
+activated; checkout advancement alone is not treated as deployment success.
 
 If the existing processor is stopped or crash-looping before it can acknowledge
 the drain, including if it fails after the initial availability check, the deploy
