@@ -7,6 +7,7 @@ import {
   findPriwaReviewItemByGroup,
   findPriwaReviewItemByMosaic,
   findPriwaReviewItemByPoint,
+  resolvePriwaReviewItemToActivate,
   resolvePriwaReviewSelection,
   resolvePriwaFilteredReviewSelection,
   shouldClosePriwaReviewTree,
@@ -80,6 +81,20 @@ describe("PRIWA review queue", () => {
     );
     expect(resolvePriwaReviewSelection(items, "removed")).toBe(openGroup);
     expect(resolvePriwaReviewSelection([], null)).toBeNull();
+  });
+
+  it("rehydrates a persisted selection exactly once", () => {
+    expect(
+      resolvePriwaReviewItemToActivate(items, completeGroup.key, null),
+    ).toBe(completeGroup);
+    expect(
+      resolvePriwaReviewItemToActivate(
+        items,
+        completeGroup.key,
+        completeGroup.key,
+      ),
+    ).toBeNull();
+    expect(resolvePriwaReviewItemToActivate(items, "removed", null)).toBeNull();
   });
 
   it("filters the queue without changing its source order", () => {

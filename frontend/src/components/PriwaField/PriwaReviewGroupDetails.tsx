@@ -9,7 +9,7 @@ import { useState } from "react";
 import type { IPriwaBefallsgruppeSaveInput, IPriwaPoint } from "./types";
 import type { IPriwaMosaic, PriwaFlightType } from "./usePriwaMosaics";
 import {
-  reconcilePriwaDatasetAssignments,
+  resolvePriwaSuggestedAssignments,
   setPriwaDatasetAssignment,
   type IPriwaGroupReviewItem,
 } from "./priwaReviewWorkspace";
@@ -68,20 +68,25 @@ export default function PriwaReviewGroupDetails({
     const mosaic = mosaicsById.get(id);
     return mosaic ? [mosaic] : [];
   });
-  const [suggestedAssignmentIds, setSuggestedAssignmentIds] = useState(
+  const [suggestedAssignmentOverrideIds, setSuggestedAssignmentOverrideIds] =
+    useState<string[] | null>(null);
+  const eligibleSuggestedAssignmentIds = resolvePriwaSuggestedAssignments(
+    suggestedAssignmentOverrideIds,
     item.draft.datasetIds,
-  );
-  const eligibleSuggestedAssignmentIds = reconcilePriwaDatasetAssignments(
-    suggestedAssignmentIds,
     item.suggestedDatasetIds,
   );
 
   const setAssignment = (mosaic: IPriwaMosaic, isAssigned: boolean) => {
     if (item.kind === "suggested-group") {
-      setSuggestedAssignmentIds((currentIds) =>
-        reconcilePriwaDatasetAssignments(
-          setPriwaDatasetAssignment(currentIds, mosaic.id, isAssigned),
-          item.suggestedDatasetIds,
+      setSuggestedAssignmentOverrideIds((currentOverrideIds) =>
+        setPriwaDatasetAssignment(
+          resolvePriwaSuggestedAssignments(
+            currentOverrideIds,
+            item.draft.datasetIds,
+            item.suggestedDatasetIds,
+          ),
+          mosaic.id,
+          isAssigned,
         ),
       );
       return;

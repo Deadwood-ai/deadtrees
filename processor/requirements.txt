@@ -12,6 +12,7 @@ fire
 pillow>=10.0.0
 paramiko
 requests
+httpx
 docker>=6.1.0
 tqdm
 geopandas

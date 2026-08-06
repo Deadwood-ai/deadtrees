@@ -2,6 +2,7 @@ import type {
   IPriwaBefallsgruppe,
   IPriwaBefallsgruppeEditorDraft,
 } from "./types";
+import type { IPriwaMosaic } from "./usePriwaMosaics";
 
 export const arePriwaBefallsgruppenReady = (
   isLoading: boolean,
@@ -38,3 +39,23 @@ export const indexPriwaBefallsgruppenByTreeId = (
       group.treeIds.map((treeId) => [treeId, group] as const),
     ),
   ) as Record<string, IPriwaBefallsgruppe>;
+
+export const indexConfirmedPriwaFlightLabelsByTreeId = (
+  groups: IPriwaBefallsgruppe[],
+  mosaics: IPriwaMosaic[],
+) => {
+  const mosaicById = new Map(mosaics.map((mosaic) => [mosaic.id, mosaic]));
+  const labelsByTreeId: Record<string, string[]> = {};
+
+  groups.forEach((group) => {
+    const labels = [...new Set(group.datasetIds)].flatMap((datasetId) => {
+      const mosaic = mosaicById.get(datasetId);
+      return mosaic?.flightType === "umfeldbefliegung" ? [mosaic.label] : [];
+    });
+    group.treeIds.forEach((treeId) => {
+      labelsByTreeId[treeId] = labels;
+    });
+  });
+
+  return labelsByTreeId;
+};

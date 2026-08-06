@@ -58,6 +58,7 @@ api_smoke_tests=(
 	api/tests/db/test_process_priority.py
 	api/tests/db/test_odm_database.py
 	api/tests/db/test_priwa_field_schema.py
+	api/tests/db/test_processing_notification_preferences.py
 	api/tests/test_notifications.py
 	api/tests/test_search_embed.py
 	api/tests/test_export_reference_patches.py

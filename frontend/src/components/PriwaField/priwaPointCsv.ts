@@ -21,6 +21,7 @@ const csvHeaders = [
   "captured_at",
   "kommentar",
   "sync_status",
+  "bestaetigte_befliegungsdateien",
 ];
 
 const escapeCsvCell = (value: string | number | boolean | null | undefined) => {
@@ -28,7 +29,10 @@ const escapeCsvCell = (value: string | number | boolean | null | undefined) => {
   return `"${normalized.replace(/"/g, '""')}"`;
 };
 
-export const priwaPointsToCsv = (points: IPriwaPoint[]) => {
+export const priwaPointsToCsv = (
+  points: IPriwaPoint[],
+  confirmedFlightLabelsByTreeId: Record<string, string[]>,
+) => {
   const rows = points.map((point) => [
     point.id,
     point.baumnr,
@@ -50,6 +54,7 @@ export const priwaPointsToCsv = (points: IPriwaPoint[]) => {
     point.capturedAt,
     point.kom,
     point.syncStatus ?? "synced",
+    (confirmedFlightLabelsByTreeId[point.id] ?? []).join(" | "),
   ]);
 
   return [
@@ -61,8 +66,9 @@ export const priwaPointsToCsv = (points: IPriwaPoint[]) => {
 export const downloadPriwaPointsCsv = (
   points: IPriwaPoint[],
   projectName: string,
+  confirmedFlightLabelsByTreeId: Record<string, string[]>,
 ) => {
-  const csv = priwaPointsToCsv(points);
+  const csv = priwaPointsToCsv(points, confirmedFlightLabelsByTreeId);
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");

@@ -137,13 +137,14 @@ class DeployHarness:
 		git(self.upstream, "push", "origin", "main")
 		return git(self.upstream, "rev-parse", "HEAD").stdout.strip()
 
-	def run_deploy(self, *, wait_hook: Path | None = None) -> subprocess.CompletedProcess[str]:
+	def run_deploy(self, *script_args: str, wait_hook: Path | None = None) -> subprocess.CompletedProcess[str]:
 		env = self.env.copy()
 		if wait_hook is not None:
 			env["PROCESSOR_TEST_WAIT_HOOK"] = str(wait_hook)
 		return run(
 			"bash",
 			"scripts/processor_auto_deploy.sh",
+			*script_args,
 			cwd=self.worktree,
 			check=False,
 			env=env,
@@ -271,7 +272,7 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			self.assertFalse(custom_ack.exists())
 			self.assertIn("clear-ack", harness.python_log.read_text())
 
-	def test_retries_failed_post_merge_deploy_until_sha_is_activated(self) -> None:
+	def test_failed_deploy_requires_explicit_resume_before_retry(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			harness = DeployHarness(Path(tmp_dir))
 			target_sha = harness.push_change("retry deploy\n")
@@ -282,16 +283,25 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			self.assertNotEqual(first_result.returncode, 0)
 			self.assertEqual(git(harness.worktree, "rev-parse", "HEAD").stdout.strip(), target_sha)
 			self.assertFalse((harness.worktree / ".local" / "processor-activated-sha").exists())
+			self.assertTrue((harness.worktree / ".local" / "processor-deploy-paused").exists())
 
 			second_result = harness.run_deploy()
 
 			self.assertEqual(second_result.returncode, 0, second_result.stderr)
+			self.assertFalse((harness.worktree / ".local" / "processor-activated-sha").exists())
+
+			resume_result = harness.run_deploy("--resume")
+			third_result = harness.run_deploy()
+
+			self.assertEqual(resume_result.returncode, 0, resume_result.stderr)
+			self.assertEqual(third_result.returncode, 0, third_result.stderr)
+			self.assertFalse((harness.worktree / ".local" / "processor-deploy-paused").exists())
 			self.assertEqual(
 				(harness.worktree / ".local" / "processor-activated-sha").read_text().strip(),
 				target_sha,
 			)
 
-	def test_failed_successive_shas_preserve_last_activated_rollback(self) -> None:
+	def test_paused_deploy_does_not_apply_new_remote_sha_until_resumed(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			harness = DeployHarness(Path(tmp_dir))
 			activated_sha = git(harness.worktree, "rev-parse", "HEAD").stdout.strip()
@@ -307,11 +317,15 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			harness.env["PROCESSOR_TEST_BUILD_FAIL_ONCE"] = "1"
 			self.assertNotEqual(harness.run_deploy().returncode, 0)
 
-			harness.push_change("failed C\n")
-			harness.build_failed_once.unlink()
-			self.assertNotEqual(harness.run_deploy().returncode, 0)
+			new_target_sha = harness.push_change("fixed C\n")
+			paused_result = harness.run_deploy()
+			self.assertEqual(paused_result.returncode, 0, paused_result.stderr)
+			self.assertNotEqual(git(harness.worktree, "rev-parse", "HEAD").stdout.strip(), new_target_sha)
 
+			self.assertEqual(harness.run_deploy("--resume").returncode, 0)
+			resumed_result = harness.run_deploy()
+			self.assertEqual(resumed_result.returncode, 0, resumed_result.stderr)
 			self.assertEqual(
-				(harness.worktree / ".local" / "processor-rollback-sha").read_text().strip(),
-				activated_sha,
+				(harness.worktree / ".local" / "processor-activated-sha").read_text().strip(),
+				new_target_sha,
 			)

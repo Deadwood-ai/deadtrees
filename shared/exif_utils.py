@@ -8,6 +8,7 @@ with particular focus on acquisition date and comprehensive metadata extraction.
 from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
+import re
 
 try:
 	from PIL import Image
@@ -21,6 +22,82 @@ from shared.logging import LogCategory, LogContext, UnifiedLogger, SupabaseHandl
 # Create logger instance
 logger = UnifiedLogger(__name__)
 logger.add_supabase_handler(SupabaseHandler())
+
+
+_METADATA_SCAN_CHUNK_BYTES = 1024 * 1024
+_METADATA_SCAN_OVERLAP_BYTES = 4096
+_ORIENTATION_XMP_PATTERN = re.compile(
+	r'(?:\b(?P<attr_name>(?:(?:[\w.-]+:)?(?:GimbalPitchDegree|CameraPitchDegree|CameraOrientationNED)|Camera:Pitch))'
+	r'\s*=\s*["\']\s*(?P<attr_value>[^"\']+))|'
+	r'(?:<(?P<element_name>(?:(?:[\w.-]+:)?(?:GimbalPitchDegree|CameraPitchDegree|CameraOrientationNED)|Camera:Pitch))'
+	r'\b[^>]*>\s*(?P<element_value>[^<]+))'.encode(),
+	re.IGNORECASE,
+)
+_ORIENTATION_NUMBER_PATTERN = re.compile(rb'[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?')
+
+
+def _normalise_camera_orientation(name: bytes, value: bytes) -> Optional[tuple[float, str, float]]:
+	"""Convert a supported metadata convention to off-nadir degrees."""
+	qualified_name = name.decode('ascii', errors='ignore')
+	local_name = qualified_name.rsplit(':', 1)[-1]
+	numbers = _ORIENTATION_NUMBER_PATTERN.findall(value)
+
+	if local_name.lower() == 'cameraorientationned':
+		# Skydio documents this field as roll, pitch, yaw in NED coordinates.
+		if len(numbers) < 3:
+			return None
+		raw_pitch = float(numbers[1])
+		return abs(abs(raw_pitch) - 90.0), 'CameraOrientationNED', raw_pitch
+
+	if not numbers:
+		return None
+
+	raw_pitch = float(numbers[0])
+	if qualified_name.lower() == 'camera:pitch':
+		# The cross-vendor Pix4D camera convention defines 0 degrees as nadir.
+		return abs(raw_pitch), 'Camera:Pitch', raw_pitch
+
+	if local_name.lower() in {'gimbalpitchdegree', 'camerapitchdegree'}:
+		# DJI, Autel and Parrot NED-style fields define nadir as +/- 90 degrees.
+		return abs(abs(raw_pitch) - 90.0), local_name, raw_pitch
+
+	return None
+
+
+def extract_camera_nadir_deviation_degrees(image_path: Path) -> Optional[tuple[float, str, float]]:
+	"""Read supported XMP camera orientations and normalize them to off-nadir degrees.
+
+	The parser is container-independent and scans the file in bounded chunks, so
+	it works with XMP embedded in formats such as JPEG, TIFF and DNG. Ambiguous
+	aircraft-body pitch fields are intentionally ignored.
+
+	Returns:
+		``(off_nadir_degrees, source_tag, raw_pitch)`` or ``None`` when no
+		supported camera-orientation metadata is present.
+	"""
+	fallback_orientation = None
+	overlap = b''
+
+	try:
+		with image_path.open('rb') as image_file:
+			while chunk := image_file.read(_METADATA_SCAN_CHUNK_BYTES):
+				metadata_window = overlap + chunk
+				for match in _ORIENTATION_XMP_PATTERN.finditer(metadata_window):
+					name = match.group('attr_name') or match.group('element_name')
+					value = match.group('attr_value') or match.group('element_value')
+					orientation = _normalise_camera_orientation(name, value)
+					if orientation is None:
+						continue
+
+					if orientation[1] != 'Camera:Pitch':
+						return orientation
+					fallback_orientation = orientation
+
+				overlap = metadata_window[-_METADATA_SCAN_OVERLAP_BYTES:]
+	except (OSError, ValueError):
+		return None
+
+	return fallback_orientation
 
 
 def _sanitize_text_for_db(text: str) -> str:

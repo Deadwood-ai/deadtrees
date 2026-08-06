@@ -4,9 +4,11 @@ import {
   arePriwaBefallsgruppenReady,
   groupsForPriwaMosaicMatching,
   indexPriwaBefallsgruppenByTreeId,
+  indexConfirmedPriwaFlightLabelsByTreeId,
   resolveInitialFlightGroupDraft,
 } from "./priwaBefallsgruppenState";
 import type { IPriwaBefallsgruppe } from "./types";
+import type { IPriwaMosaic } from "./usePriwaMosaics";
 
 const group: IPriwaBefallsgruppe = {
   id: "group-1",
@@ -21,6 +23,45 @@ const group: IPriwaBefallsgruppe = {
   createdAt: "2026-07-16T08:00:00.000Z",
   updatedAt: "2026-07-16T08:00:00.000Z",
 };
+
+const mosaics: IPriwaMosaic[] = [
+  {
+    id: "10512",
+    projectId: "project-1",
+    label: "north-flight.zip",
+    cogUrl: "10512_cog.tif",
+    bbox: null,
+    captureDate: "2026-07-15",
+    createdAt: "2026-07-15T08:00:00.000Z",
+    authors: [],
+    additionalInformation: null,
+    flightType: "umfeldbefliegung",
+  },
+  {
+    id: "10513",
+    projectId: "project-1",
+    label: "pending-flight.zip",
+    cogUrl: "10513_cog.tif",
+    bbox: null,
+    captureDate: "2026-07-15",
+    createdAt: "2026-07-15T09:00:00.000Z",
+    authors: [],
+    additionalInformation: null,
+    flightType: null,
+  },
+  {
+    id: "10514",
+    projectId: "project-1",
+    label: "excluded-flight.zip",
+    cogUrl: "10514_cog.tif",
+    bbox: null,
+    captureDate: "2026-07-15",
+    createdAt: "2026-07-15T10:00:00.000Z",
+    authors: [],
+    additionalInformation: null,
+    flightType: "not_priwa",
+  },
+];
 
 describe("PRIWA Befallsgruppen availability", () => {
   it("allows confirmed-group behavior only after a successful load", () => {
@@ -40,6 +81,24 @@ describe("PRIWA Befallsgruppen availability", () => {
   it("indexes confirmed groups for tree table and list presentation", () => {
     expect(indexPriwaBefallsgruppenByTreeId([group])).toEqual({
       "tree-1": group,
+    });
+  });
+
+  it("indexes assigned flight filenames for every tree in a confirmed group", () => {
+    expect(
+      indexConfirmedPriwaFlightLabelsByTreeId(
+        [
+          {
+            ...group,
+            treeIds: ["tree-1", "tree-2"],
+            datasetIds: ["10512", "10512", "10513", "10514", "missing"],
+          },
+        ],
+        mosaics,
+      ),
+    ).toEqual({
+      "tree-1": ["north-flight.zip"],
+      "tree-2": ["north-flight.zip"],
     });
   });
 

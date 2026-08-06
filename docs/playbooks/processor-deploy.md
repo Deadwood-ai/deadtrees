@@ -33,7 +33,7 @@ that mount only inside its own namespace, where host deploy scripts cannot see i
 Use `scripts/processor_auto_deploy.sh` on the host instead of ad hoc `docker
 compose` commands. The script:
 
-1. records the current SHA and rollback command in `auto-deploy.log`;
+1. records the current and target SHAs in `auto-deploy.log`;
 2. requests a drain;
 3. waits until the host worker has no active claimed queue row;
 4. fast-forwards the checkout to the exact `origin/main` SHA fetched before draining;
@@ -43,9 +43,12 @@ compose` commands. The script:
 8. records the successfully activated SHA under `.local/`.
 
 If the script fails after setting the drain request, it intentionally leaves the
-drain file in place so the worker does not resume unexpectedly on a partially
-updated checkout. The next cron run retries until that SHA is successfully
-activated; checkout advancement alone is not treated as deployment success.
+drain file in place and creates `.local/processor-deploy-paused`, so the worker
+does not resume unexpectedly on a partially updated checkout and cron does not
+reapply a known-bad release. After fixing or replacing the target release, run
+`./scripts/processor_auto_deploy.sh --resume`; the next cron run retries while
+the drain remains in place. Checkout advancement alone is not deployment
+success, and resetting the bind-mounted checkout is not a safe rollback.
 
 If the existing processor is stopped or crash-looping before it can acknowledge
 the drain, including if it fails after the initial availability check, the deploy

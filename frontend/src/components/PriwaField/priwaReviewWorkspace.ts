@@ -233,3 +233,13 @@ export const reconcilePriwaDatasetAssignments = (
   const candidateIds = new Set(candidateDatasetIds);
   return selectedDatasetIds.filter((datasetId) => candidateIds.has(datasetId));
 };
+
+export const resolvePriwaSuggestedAssignments = (
+  reviewerOverrideIds: string[] | null,
+  draftDatasetIds: string[],
+  candidateDatasetIds: string[],
+) =>
+  reconcilePriwaDatasetAssignments(
+    reviewerOverrideIds ?? draftDatasetIds,
+    candidateDatasetIds,
+  );

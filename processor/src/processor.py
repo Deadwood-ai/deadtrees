@@ -11,6 +11,11 @@ from shared.settings import settings
 from shared.db import use_client, login, login_verified, verify_token
 from shared.status import update_status
 from shared.processing_tasks import downstream_tasks_missing_geotiff, format_missing_geotiff_error
+from .processing_notifications import (
+	ProcessingNotificationType,
+	notify_processing_result_safely as _notify_processing_result_safely,
+	reconcile_processing_notifications_safely as _reconcile_processing_notifications_safely,
+)
 from .process_thumbnail import process_thumbnail
 from .process_cog import process_cog
 from .process_deadwood_segmentation import process_deadwood_segmentation
@@ -302,6 +307,8 @@ def _fail_crashed_task(token: str, task: QueueTask, status: dict | None) -> None
 	except Exception as linear_error:
 		logger.warning(f'Failed to create Linear issue for crash: {linear_error}')
 
+	_notify_processing_result_safely(task, ProcessingNotificationType.failed, token)
+
 	# Remove from queue — the dataset must be explicitly re-triggered once fixed.
 	delete_queue_task(token, task)
 
@@ -339,13 +346,6 @@ def process_task(task: QueueTask, token: str):
 		downstream_without_geotiff = downstream_tasks_missing_geotiff(task.task_types)
 		if downstream_without_geotiff:
 			error_message = format_missing_geotiff_error(downstream_without_geotiff)
-			update_status(
-				token,
-				dataset_id=task.dataset_id,
-				current_status=StatusEnum.idle,
-				has_error=True,
-				error_message=error_message,
-			)
 			raise ProcessingError(
 				error_message,
 				task_type='geotiff_dependency',
@@ -593,10 +593,6 @@ def process_task(task: QueueTask, token: str):
 				)
 				raise ProcessingError(str(e), task_type='embedding_processing', task_id=task.id, dataset_id=task.dataset_id)
 
-		# Only delete task if all processing completed successfully
-		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-		delete_queue_task(token, task)
-
 	except Exception as e:
 		# This path owns the failure bookkeeping; clear the in-flight marker now so a
 		# SIGTERM mid-handling cannot re-queue the failed task or clear its error.
@@ -606,8 +602,14 @@ def process_task(task: QueueTask, token: str):
 			f'Processing failed: {str(e)}',
 			LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 		)
+		update_status(
+			token,
+			dataset_id=task.dataset_id,
+			current_status=StatusEnum.idle,
+			has_error=True,
+			error_message=str(e),
+		)
 
-		# Create Linear issue for processing failure
 		try:
 			stage = e.task_type if isinstance(e, ProcessingError) else 'processing'
 			create_processing_failure_issue(
@@ -617,10 +619,10 @@ def process_task(task: QueueTask, token: str):
 				error_message=str(e),
 			)
 		except Exception as linear_error:
-			# Never let Linear issue creation block processing
 			logger.warning(f'Failed to create Linear issue: {linear_error}')
 
-		# Delete task from queue on failure - error is already recorded in status table
+		_notify_processing_result_safely(task, ProcessingNotificationType.failed, token)
+
 		try:
 			delete_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 			delete_queue_task(delete_token, task)
@@ -633,15 +635,19 @@ def process_task(task: QueueTask, token: str):
 				f'Failed to remove task {task.id} from queue: {delete_error}',
 				LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 			)
-		raise  # Re-raise the exception to ensure the error is properly handled
+		raise
+
+	else:
+		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
+		# All processing stages are complete. Keep the queue row claimed so a stop
+		# during notification I/O is recovered as completed work, not reprocessed.
+		_set_inflight_task(None)
+		_notify_processing_result_safely(task, ProcessingNotificationType.completed, token)
+		delete_queue_task(token, task)
 
 	finally:
-		# No longer in-flight: the task has either completed, been failed and
-		# dequeued, or is about to re-raise. A shutdown from here on must not
-		# re-queue it.
 		_set_inflight_task(None)
 
-		# Clean up processing path regardless of success/failure
 		if not settings.DEV_MODE:
 			shutil.rmtree(settings.processing_path, ignore_errors=True)
 
@@ -676,20 +682,17 @@ def background_process() -> BackgroundProcessResult:
 	signal.signal(signal.SIGTERM, _handle_graceful_shutdown)
 	signal.signal(signal.SIGINT, _handle_graceful_shutdown)
 
-	# use the processor to log in
 	token, user = login_verified(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 	if not user:
 		raise Exception(status_code=401, detail='Invalid token after fresh login')
 
 	worker_id = get_worker_id()
+	active_recovery_attempted = False
 
 	while True:
-		active_task = get_active_task(token, worker_id)
+		active_task = None if active_recovery_attempted else get_active_task(token, worker_id)
+		active_recovery_attempted = True
 		if active_task is not None:
-			# A graceful stop (deploy/restart) re-queues its in-flight task via
-			# _handle_graceful_shutdown and leaves no active row. So a leftover
-			# is_processing=True row here means the previous run was hard-killed
-			# (SIGKILL/OOM) or crashed without cleanup — a genuine fault.
 			logger.warning(
 				f'Found stale active queue task {active_task.id} for dataset {active_task.dataset_id}; '
 				'previous run died without graceful shutdown',
@@ -709,6 +712,15 @@ def background_process() -> BackgroundProcessResult:
 
 			status = status_resp.data[0] if status_resp.data else None
 
+			if status is not None and status.get('has_error'):
+				try:
+					_notify_processing_result_safely(active_task, ProcessingNotificationType.failed, token)
+				except Exception as notification_error:
+					logger.warning(f'Keeping failed task {active_task.id} until notification persistence recovers: {notification_error}')
+					continue
+				delete_queue_task(token, active_task)
+				continue
+
 			if status is not None and are_requested_stages_complete(status, active_task.task_types):
 				# Crashed only after finishing all requested stages — no fault to
 				# report, just remove the stale queue row.
@@ -721,20 +733,25 @@ def background_process() -> BackgroundProcessResult:
 						token=token,
 					),
 				)
-				# Reset to idle too: if the crash happened after finishing all stages
-				# but before status was set back to idle, leaving it non-idle would
-				# make a later queued task for this dataset hit the crash path.
 				update_status(
 					token,
 					dataset_id=active_task.dataset_id,
 					current_status=StatusEnum.idle,
 					has_error=False,
 				)
+				try:
+					_notify_processing_result_safely(active_task, ProcessingNotificationType.completed, token)
+				except Exception as notification_error:
+					logger.warning(f'Keeping completed task {active_task.id} until notification persistence recovers: {notification_error}')
+					continue
 				delete_queue_task(token, active_task)
 				continue
 
 			# Genuine mid-stage crash — fail it instead of retrying.
-			_fail_crashed_task(token, active_task, status)
+			try:
+				_fail_crashed_task(token, active_task, status)
+			except Exception as finalization_error:
+				logger.warning(f'Keeping failed task {active_task.id} until finalization recovers: {finalization_error}')
 			continue
 
 		if is_drain_requested():
@@ -744,6 +761,7 @@ def background_process() -> BackgroundProcessResult:
 		task = get_next_task(token)
 		if task is None:
 			print('No tasks in the queue.')
+			_reconcile_processing_notifications_safely()
 			return BackgroundProcessResult.IDLE
 
 		if is_drain_requested():
@@ -781,6 +799,7 @@ def background_process() -> BackgroundProcessResult:
 					category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
 				),
 			)
+			_reconcile_processing_notifications_safely()
 			return BackgroundProcessResult.IDLE
 
 		claimed_task = claim_task(token, task, worker_id)
@@ -823,7 +842,9 @@ def background_process() -> BackgroundProcessResult:
 		try:
 			process_task(task, token=token)
 		except Exception:
+			_reconcile_processing_notifications_safely()
 			return BackgroundProcessResult.FAILED
+		_reconcile_processing_notifications_safely()
 		return BackgroundProcessResult.WORKED
 
 

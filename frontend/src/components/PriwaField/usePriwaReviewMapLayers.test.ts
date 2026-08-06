@@ -62,14 +62,13 @@ const match: IPriwaMatchedMosaic = {
   minDaysApart: 2,
   maxDaysApart: 2,
 };
-
 describe("PRIWA review map-layer synchronization", () => {
   it("replaces stale Befallsgruppe features with the current group state", () => {
     const source = createPriwaBefallsgruppeLayer().getSource()!;
     syncPriwaBefallsgruppeLayer(source, [group], [point]);
-    expect(source.getFeatures().map((feature) => feature.get("groupId"))).toEqual(
-      ["group-1"],
-    );
+    expect(
+      source.getFeatures().map((feature) => feature.get("groupId")),
+    ).toEqual(["group-1"]);
 
     syncPriwaBefallsgruppeLayer(source, [], [point]);
     expect(source.getFeatures()).toEqual([]);
@@ -89,5 +88,20 @@ describe("PRIWA review map-layer synchronization", () => {
     expect(features).toHaveLength(1);
     expect(features[0].get("mosaicId")).toBe(mosaic.id);
     expect(features[0].getStyle()).toHaveLength(2);
+  });
+
+  it("clears stale flight footprints when mobile supplies no flight state", () => {
+    const source = createPriwaMosaicFootprintLayer().getSource()!;
+    syncPriwaMosaicFootprintLayer(
+      source,
+      [match],
+      [mosaic],
+      new Set([mosaic.id]),
+      mosaic.id,
+    );
+    expect(source.getFeatures()).toHaveLength(1);
+
+    syncPriwaMosaicFootprintLayer(source, [], [], new Set(), null);
+    expect(source.getFeatures()).toEqual([]);
   });
 });

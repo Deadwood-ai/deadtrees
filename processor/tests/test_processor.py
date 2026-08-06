@@ -1,5 +1,6 @@
 import pytest
 from pathlib import Path
+from types import SimpleNamespace
 
 import processor.src.processor as processor_module
 import processor.src.utils.queue_runtime as queue_runtime_module
@@ -7,6 +8,7 @@ from shared.db import use_client
 from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask, StatusEnum
 from processor.src.utils.drain_control import BackgroundProcessResult
+from shared.notifications.processing import ProcessingNotificationType
 from processor.src.processor import (
 	background_process, process_task, get_next_task,
 	detect_crashed_stage, get_completed_stages, are_requested_stages_complete, PIPELINE_STAGE_MAP,
@@ -716,9 +718,15 @@ def test_background_process_fails_crashed_dataset(crashed_dataset_task, auth_tok
 	monkeypatch.setattr(processor_module, '_kill_dangling_dataset_resources', lambda dataset_id: None)
 
 	linear_calls = []
+	notification_calls = []
 	monkeypatch.setattr(
 		processor_module, 'create_processing_failure_issue',
 		lambda **kwargs: linear_calls.append(kwargs),
+	)
+	monkeypatch.setattr(
+		processor_module,
+		'_notify_processing_result_safely',
+		lambda task, event_type, token: notification_calls.append((task.id, event_type)),
 	)
 
 	dataset_id = crashed_dataset_task['dataset_id']
@@ -744,6 +752,9 @@ def test_background_process_fails_crashed_dataset(crashed_dataset_task, auth_tok
 
 	assert len(linear_calls) == 1, 'A Linear issue should be filed for the crash'
 	assert linear_calls[0]['dataset_id'] == dataset_id
+	assert notification_calls == [
+		(crashed_dataset_task['task_id'], ProcessingNotificationType.failed)
+	]
 
 
 @pytest.fixture
@@ -884,6 +895,12 @@ def test_background_process_removes_stale_completed_active_task_without_marking_
 ):
 	"""Completed tasks should not be reclassified as crashes during stale queue recovery."""
 	monkeypatch.setattr(processor_module, '_kill_dangling_dataset_resources', lambda dataset_id: None)
+	notification_calls = []
+	monkeypatch.setattr(
+		processor_module,
+		'_notify_processing_result_safely',
+		lambda task, event_type, token: notification_calls.append((task.id, event_type)),
+	)
 
 	dataset_id = stale_completed_active_task['dataset_id']
 
@@ -904,6 +921,10 @@ def test_background_process_removes_stale_completed_active_task_without_marking_
 		status = status_response.data[0]
 		assert status['has_error'] is False, 'Completed stale task should not be marked as errored'
 		assert status['current_status'] == 'idle', 'Completed status should remain idle'
+
+	assert notification_calls == [
+		(stale_completed_active_task['task_id'], ProcessingNotificationType.completed)
+	]
 
 
 def test_kill_dangling_resources_called_on_stale_task_recovery(crashed_dataset_task, monkeypatch):

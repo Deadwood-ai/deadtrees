@@ -1,5 +1,5 @@
-import { message } from "antd";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { App } from "antd";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { arePriwaBefallsgruppenReady } from "./priwaBefallsgruppenState";
 import {
@@ -11,6 +11,7 @@ import {
   findPriwaReviewItemByGroup,
   findPriwaReviewItemByMosaic,
   findPriwaReviewItemByPoint,
+  resolvePriwaReviewItemToActivate,
   resolvePriwaReviewSelection,
 } from "./priwaReviewQueue";
 import type {
@@ -23,6 +24,7 @@ import { usePriwaFlightReview } from "./usePriwaFlightReview";
 import type { IPriwaMosaic, PriwaFlightType } from "./usePriwaMosaics";
 
 interface UsePriwaReviewControllerOptions {
+  projectId: string;
   points: IPriwaPoint[];
   mosaics: IPriwaMosaic[];
   groups: IPriwaBefallsgruppe[];
@@ -45,7 +47,19 @@ interface UsePriwaReviewControllerOptions {
   zoomToMosaicFootprint: (mosaic: IPriwaMosaic) => void;
 }
 
+const reviewSelectionStorageKey = (projectId: string) =>
+  `deadtrees-priwa-field:review-selection:${projectId}`;
+
+const readPersistedReviewSelection = (projectId: string) => {
+  try {
+    return window.sessionStorage.getItem(reviewSelectionStorageKey(projectId));
+  } catch {
+    return null;
+  }
+};
+
 export function usePriwaReviewController({
+  projectId,
   points,
   mosaics,
   groups,
@@ -61,9 +75,11 @@ export function usePriwaReviewController({
   zoomToTrees,
   zoomToMosaicFootprint,
 }: UsePriwaReviewControllerOptions) {
+  const { message } = App.useApp();
   const [selectedReviewKey, setSelectedReviewKey] = useState<string | null>(
-    null,
+    () => readPersistedReviewSelection(projectId),
   );
+  const activatedReviewKeyRef = useRef<string | null>(null);
   const [groupEditorDraft, setGroupEditorDraft] =
     useState<IPriwaBefallsgruppeEditorDraft | null>(null);
   const flightReview = usePriwaFlightReview({
@@ -72,7 +88,8 @@ export function usePriwaReviewController({
     groups,
     isLoadingGroups,
     groupsErrorMessage,
-    enableMosaics: !isMobile,
+    enableMosaics: true,
+    autoEnableMatchedMosaics: !isMobile,
     onSetFlightType,
     onAssignFlightToGroup,
   });
@@ -105,12 +122,34 @@ export function usePriwaReviewController({
       : null;
   const isWorkspaceLoading = isLoadingPoints || isLoadingGroups || isCogLoading;
 
+  const persistReviewSelection = useCallback(
+    (key: string | null) => {
+      setSelectedReviewKey(key);
+      try {
+        if (key) {
+          window.sessionStorage.setItem(
+            reviewSelectionStorageKey(projectId),
+            key,
+          );
+        } else {
+          window.sessionStorage.removeItem(
+            reviewSelectionStorageKey(projectId),
+          );
+        }
+      } catch {
+        // Selection persistence is a convenience; private browsing may disable it.
+      }
+    },
+    [projectId],
+  );
+
   const activateReviewItem = useCallback(
     (item: IPriwaReviewItem) => {
-      setSelectedReviewKey(item.key);
+      activatedReviewKeyRef.current = item.key;
+      persistReviewSelection(item.key);
       showOnlyMosaics(reviewItemDatasetIds(item));
     },
-    [showOnlyMosaics],
+    [persistReviewSelection, showOnlyMosaics],
   );
 
   const selectReviewItem = useCallback(
@@ -127,10 +166,17 @@ export function usePriwaReviewController({
 
   useEffect(() => {
     if (isMobile || isWorkspaceLoading) return;
-    if (
-      selectedReviewKey &&
-      reviewItems.some((item) => item.key === selectedReviewKey)
-    ) {
+
+    const selectedItemToActivate = resolvePriwaReviewItemToActivate(
+      reviewItems,
+      selectedReviewKey,
+      activatedReviewKeyRef.current,
+    );
+    if (selectedItemToActivate) {
+      selectReviewItem(selectedItemToActivate);
+      return;
+    }
+    if (reviewItems.some((item) => item.key === selectedReviewKey)) {
       return;
     }
 
@@ -139,11 +185,15 @@ export function usePriwaReviewController({
       selectedReviewKey,
     );
     if (nextItem) selectReviewItem(nextItem);
-    else setSelectedReviewKey(null);
+    else {
+      activatedReviewKeyRef.current = null;
+      persistReviewSelection(null);
+    }
   }, [
     isMobile,
     isWorkspaceLoading,
     reviewItems,
+    persistReviewSelection,
     selectReviewItem,
     selectedReviewKey,
   ]);
@@ -178,8 +228,15 @@ export function usePriwaReviewController({
             "Befallsgruppen können erst nach erfolgreichem Laden bearbeitet werden.",
           );
         }
-        await onSaveGroup(input);
-        message.success("Befallsgruppe gespeichert");
+        const savedGroupId = await onSaveGroup(input);
+        if (typeof savedGroupId === "string") {
+          persistReviewSelection(`group:${savedGroupId}`);
+        }
+        message.success(
+          input.datasetIds.length > 0
+            ? "Befallsgruppe und Befliegung gespeichert"
+            : "Befallsgruppe gespeichert · Befliegung noch offen",
+        );
         setGroupEditorDraft(null);
       } catch (error) {
         message.error(
@@ -190,7 +247,7 @@ export function usePriwaReviewController({
         throw error;
       }
     },
-    [isGroupStateReady, onSaveGroup],
+    [isGroupStateReady, message, onSaveGroup, persistReviewSelection],
   );
 
   const deleteGroup = useCallback(
@@ -213,7 +270,7 @@ export function usePriwaReviewController({
         throw error;
       }
     },
-    [isGroupStateReady, onDeleteGroup],
+    [isGroupStateReady, message, onDeleteGroup],
   );
 
   const assignFlight = useCallback(
@@ -227,7 +284,7 @@ export function usePriwaReviewController({
       const mosaic = mosaics.find((candidate) => candidate.id === datasetId);
       if (mosaic) await assignMosaicToGroup(mosaic, groupId);
     },
-    [assignMosaicToGroup, isGroupStateReady, mosaics],
+    [assignMosaicToGroup, isGroupStateReady, message, mosaics],
   );
 
   const createGroupForFlight = useCallback(

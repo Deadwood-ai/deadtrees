@@ -29,6 +29,8 @@ _tables = {
 	'queue_positions': 'v2_queue_positions',
 	'model_preferences': 'v2_model_preferences',
 	'tile_embeddings': 'v2_tile_embeddings',
+	'notification_preferences': 'user_notification_preferences',
+	'processing_notification_events': 'processing_notification_events',
 }
 
 
@@ -156,6 +158,7 @@ class Settings(BaseSettings):
 	ODM_AUTO_BOUNDARY: bool = False
 	ODM_SKY_REMOVAL: bool = False
 	ODM_BG_REMOVAL: bool = False
+	ODM_MAX_NADIR_DEVIATION_DEGREES: float = 10.0
 
 	# Linear integration for processing failure notifications
 	LINEAR_ENABLED: bool = False
@@ -178,6 +181,7 @@ class Settings(BaseSettings):
 	BREVO_API_KEY: str = ''
 	NOTIFICATION_SENDER_EMAIL: str = 'notifications@deadtrees.earth'
 	NOTIFICATION_SENDER_NAME: str = 'DeadTrees'
+	PROCESSING_EMAIL_NOTIFICATIONS_ENABLED: bool = False
 
 	# Mailpit (local test email server) - used when ENV=development
 	MAILPIT_SMTP_HOST: str = 'localhost'
@@ -353,6 +357,14 @@ class Settings(BaseSettings):
 	@property
 	def model_preferences_table(self) -> str:
 		return self._tables['model_preferences']
+
+	@property
+	def notification_preferences_table(self) -> str:
+		return self._tables['notification_preferences']
+
+	@property
+	def processing_notification_events_table(self) -> str:
+		return self._tables['processing_notification_events']
 
 	@property
 	def tile_embeddings_table(self) -> str:

@@ -1,4 +1,4 @@
-import { message } from "antd";
+import { App } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { groupsForPriwaMosaicMatching } from "./priwaBefallsgruppenState";
@@ -14,6 +14,7 @@ interface UsePriwaFlightReviewOptions {
   isLoadingGroups: boolean;
   groupsErrorMessage: string | null;
   enableMosaics: boolean;
+  autoEnableMatchedMosaics: boolean;
   onSetFlightType: (input: {
     datasetId: string;
     flightType: PriwaFlightType;
@@ -31,9 +32,11 @@ export function usePriwaFlightReview({
   isLoadingGroups,
   groupsErrorMessage,
   enableMosaics,
+  autoEnableMatchedMosaics,
   onSetFlightType,
   onAssignFlightToGroup,
 }: UsePriwaFlightReviewOptions) {
+  const { message } = App.useApp();
   const [enabledMosaicIds, setEnabledMosaicIds] = useState<Set<string>>(
     new Set(),
   );
@@ -103,10 +106,11 @@ export function usePriwaFlightReview({
 
   const selectMatchedMosaicForPoint = useCallback(
     (point: IPriwaPoint) => {
+      if (!autoEnableMatchedMosaics) return;
       const mosaicId = matches.mosaicIdByPointId[point.id];
       if (mosaicId) showOnlyMosaics([mosaicId]);
     },
-    [matches.mosaicIdByPointId, showOnlyMosaics],
+    [autoEnableMatchedMosaics, matches.mosaicIdByPointId, showOnlyMosaics],
   );
 
   const setFlightType = useCallback(
@@ -128,7 +132,7 @@ export function usePriwaFlightReview({
         );
       }
     },
-    [onSetFlightType],
+    [message, onSetFlightType],
   );
 
   const assignMosaicToGroup = useCallback(
@@ -150,7 +154,7 @@ export function usePriwaFlightReview({
         );
       }
     },
-    [groups, onAssignFlightToGroup],
+    [groups, message, onAssignFlightToGroup],
   );
 
   return {

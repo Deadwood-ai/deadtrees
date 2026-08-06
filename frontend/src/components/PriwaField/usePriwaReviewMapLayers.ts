@@ -131,9 +131,7 @@ export function usePriwaReviewMapLayers({
     const map = mapRef.current;
     if (!map) return;
 
-    const enabledMosaicIds = new Set(
-      enabledMosaics.map((mosaic) => mosaic.id),
-    );
+    const enabledMosaicIds = new Set(enabledMosaics.map((mosaic) => mosaic.id));
     cogLayersRef.current.forEach(({ layer }, mosaicId) => {
       if (enabledMosaicIds.has(mosaicId)) return;
       map.removeLayer(layer);

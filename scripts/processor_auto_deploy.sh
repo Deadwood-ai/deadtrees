@@ -7,7 +7,7 @@ REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 LOCK_DIR="${REPO_DIR}/.local/locks"
 LOCK_FILE="${LOCK_DIR}/processor-runtime.lock"
 ACTIVATED_SHA_FILE="${REPO_DIR}/.local/processor-activated-sha"
-ROLLBACK_SHA_FILE="${REPO_DIR}/.local/processor-rollback-sha"
+PAUSE_FILE="${REPO_DIR}/.local/processor-deploy-paused"
 LOG_FILE="${REPO_DIR}/auto-deploy.log"
 STATUS_SCRIPT="${REPO_DIR}/scripts/processor_runtime_control.py"
 COMPOSE_FILE="${REPO_DIR}/docker-compose.processor.yaml"
@@ -18,6 +18,15 @@ STARTUP_TIMEOUT_SECONDS="${PROCESSOR_STARTUP_TIMEOUT_SECONDS:-300}"
 READINESS_POLL_SECONDS="${PROCESSOR_READINESS_POLL_SECONDS:-5}"
 UNAVAILABLE_CONFIRMATIONS="${PROCESSOR_UNAVAILABLE_CONFIRMATIONS:-3}"
 UNAVAILABLE_POLL_SECONDS="${PROCESSOR_UNAVAILABLE_POLL_SECONDS:-5}"
+RESUME_DEPLOY=0
+
+if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != "--resume" ]; }; then
+	echo "Usage: processor_auto_deploy.sh [--resume]" >&2
+	exit 2
+fi
+if [ "${1:-}" = "--resume" ]; then
+	RESUME_DEPLOY=1
+fi
 
 mkdir -p "${LOCK_DIR}"
 if [ ! -e "${LOCK_FILE}" ]; then
@@ -66,13 +75,32 @@ on_exit() {
 	trap - EXIT
 	cleanup_processor_runtime_waiter
 	if [ "${rc}" -ne 0 ] && [ "${drain_set}" -eq 1 ]; then
-		log "Deployment failed; drain request remains in place for inspection and rollback"
+		printf 'failed_at=%s head=%s target=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+			"$(git rev-parse HEAD 2>/dev/null || printf unknown)" "${remote_sha:-unknown}" > "${PAUSE_FILE}.tmp"
+		mv "${PAUSE_FILE}.tmp" "${PAUSE_FILE}"
+		log "Deployment failed; drain remains set and automatic deploy is paused. Fix the target release, then run ./scripts/processor_auto_deploy.sh --resume"
 	fi
 	exit "${rc}"
 }
 trap on_exit EXIT
 
 cd "${REPO_DIR}"
+
+if [ "${RESUME_DEPLOY}" -eq 1 ]; then
+	if [ -e "${PAUSE_FILE}" ]; then
+		rm "${PAUSE_FILE}"
+		log "Automatic processor deploy resumed; the next cron run will retry while preserving the existing drain"
+	else
+		log "Automatic processor deploy was not paused"
+	fi
+	exit 0
+fi
+
+if [ -e "${PAUSE_FILE}" ]; then
+	log "Skipping deploy because automatic processor deploy is paused; inspect ${PAUSE_FILE}"
+	exit 0
+fi
+
 require_clean_checkout
 
 git fetch origin "${BRANCH}" >> "${LOG_FILE}" 2>&1
@@ -88,13 +116,6 @@ if [ "${local_sha}" = "${remote_sha}" ] && [ "${activated_sha}" = "${remote_sha}
 fi
 
 log "Preparing deploy from ${local_sha} to ${remote_sha}"
-if [ "${local_sha}" != "${remote_sha}" ]; then
-	rollback_target="${activated_sha:-${local_sha}}"
-	printf '%s\n' "${rollback_target}" > "${ROLLBACK_SHA_FILE}.tmp"
-	mv "${ROLLBACK_SHA_FILE}.tmp" "${ROLLBACK_SHA_FILE}"
-fi
-rollback_sha="$(cat "${ROLLBACK_SHA_FILE}" 2>/dev/null || printf '%s' "${local_sha}")"
-log "Rollback path: git reset --hard ${rollback_sha} && docker compose -f ${COMPOSE_FILE} build processor tcd && docker compose -f ${COMPOSE_FILE} up -d --force-recreate processor"
 
 python3 "${STATUS_SCRIPT}" set-drain --reason "auto-deploy ${remote_sha}" >> "${LOG_FILE}" 2>&1
 drain_set=1

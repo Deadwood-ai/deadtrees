@@ -54,6 +54,9 @@ Expected app/runtime keys include:
 - `LINEAR_TEAM_ID`
 - `FREIDATA_TOKEN`
 - `BREVO_API_KEY`
+- `NOTIFICATION_SENDER_EMAIL`
+- `NOTIFICATION_SENDER_NAME`
+- `PROCESSING_EMAIL_NOTIFICATIONS_ENABLED`
 
 Do not add VPN passwords, manual SSH passwords, personal tokens, or explanatory
 access notes to root `.env`. Put those in local-only access notes or the user

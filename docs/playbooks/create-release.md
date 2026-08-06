@@ -122,7 +122,7 @@ tasks and host reboots.
 - acquires a host-local lock so deploy and maintenance operations cannot overlap
 - fetches `origin/main`
 - compares local `HEAD` with `origin/main`
-- records the pre-change SHA and rollback command in `auto-deploy.log`
+- pauses automatic retries after a drained deploy failure until an operator resumes them
 - creates a drain request so the running worker stops claiming new tasks
 - waits for the current host worker to finish its in-flight task
 - runs `git pull --ff-only origin main` when a new commit is available
@@ -130,6 +130,11 @@ tasks and host reboots.
 - recreates the processor with `docker compose -f docker-compose.processor.yaml up -d --force-recreate processor`
 - clears the drain request after the new container is up
 - writes status to `/home/jj1049/prod/deadtrees/auto-deploy.log`
+
+If a deploy fails after draining, fix or replace the target release first, then
+run `./scripts/processor_auto_deploy.sh --resume`. The next cron run retries the
+deploy while the existing drain remains in place. Do not reset the bind-mounted
+checkout as an ad hoc rollback.
 
 `docker-compose.processor.yaml` builds the processor locally on the processing
 server and bind-mounts `./processor`, `./shared`, `./assets`, `/data`, and the

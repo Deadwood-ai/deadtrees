@@ -1,5 +1,6 @@
 import {
   Alert,
+  App,
   Button,
   Collapse,
   Drawer,
@@ -8,7 +9,6 @@ import {
   Modal,
   Select,
   Typography,
-  message,
 } from "antd";
 import {
   AimOutlined,
@@ -227,6 +227,7 @@ export default function PriwaPointDrawer({
   onZoomToPoint,
   presentation = "overlay",
 }: PriwaPointDrawerProps) {
+  const { message } = App.useApp();
   const isEmbedded = presentation === "embedded";
   const [form] = Form.useForm<IPriwaPointFormValues>();
   const [rawQrValue, setRawQrValue] = useState("");

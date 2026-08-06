@@ -1,5 +1,5 @@
 import { Outlet, Route, Routes, useLocation } from "react-router-dom";
-import { ConfigProvider, Layout } from "antd";
+import { App as AntdApp, ConfigProvider, Layout } from "antd";
 import { useEffect } from "react";
 import { trackPageView, initializePostHog } from "./utils/analytics";
 import { AOIProvider } from "./contexts/AOIContext";
@@ -59,9 +59,9 @@ function LayoutWrapper() {
   return (
     <div>
       <Layout
+        className={shouldUseFullHeight ? "dt-full-height-layout" : undefined}
         style={{
           margin: "0 auto",
-          height: shouldUseFullHeight ? "100dvh" : "auto",
           backgroundColor: "var(--dt-surface-base)",
         }}
       >
@@ -192,11 +192,13 @@ function AppWithTracking() {
 export default function App() {
   return (
     <ConfigProvider theme={antdTheme}>
-      <AOIProvider>
-        <AuditNavigationProvider>
-          <AppWithTracking />
-        </AuditNavigationProvider>
-      </AOIProvider>
+      <AntdApp>
+        <AOIProvider>
+          <AuditNavigationProvider>
+            <AppWithTracking />
+          </AuditNavigationProvider>
+        </AOIProvider>
+      </AntdApp>
     </ConfigProvider>
   );
 }
