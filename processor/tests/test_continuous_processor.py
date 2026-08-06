@@ -32,7 +32,6 @@ def _patch_startup(monkeypatch, *, exception_messages=None):
 	monkeypatch.setattr(continuous_processor_module, 'cleanup_old_temp_directories', lambda token: None)
 	monkeypatch.setattr(continuous_processor_module.logger, 'info', lambda *args, **kwargs: None)
 	monkeypatch.setattr(continuous_processor_module.logger, 'error', lambda *args, **kwargs: None)
-	monkeypatch.setattr(continuous_processor_module, 'clear_loop_unhealthy', lambda: None)
 	monkeypatch.setattr(continuous_processor_module, 'mark_loop_unhealthy', lambda failure_count: None)
 	if exception_messages is None:
 		monkeypatch.setattr(continuous_processor_module.logger, 'exception', lambda *args, **kwargs: None)
@@ -156,21 +155,3 @@ def test_run_continuous_exits_after_bounded_loop_errors(monkeypatch):
 
 	assert exception_messages == ['Error in processor loop', 'Error in processor loop']
 	assert unhealthy_counts == [2]
-
-
-def test_run_continuous_clears_unhealthy_marker_after_successful_poll(monkeypatch):
-	_patch_startup(monkeypatch)
-	clears = []
-	monkeypatch.setattr(continuous_processor_module, 'is_drain_requested', lambda: False)
-	monkeypatch.setattr(
-		continuous_processor_module,
-		'background_process',
-		lambda: BackgroundProcessResult.IDLE,
-	)
-	monkeypatch.setattr(continuous_processor_module, 'clear_loop_unhealthy', lambda: clears.append(True))
-	monkeypatch.setattr(continuous_processor_module.time, 'sleep', lambda seconds: (_ for _ in ()).throw(StopLoop()))
-
-	with pytest.raises(StopLoop):
-		continuous_processor_module.run_continuous()
-
-	assert clears == [True]

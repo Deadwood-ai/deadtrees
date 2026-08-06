@@ -103,6 +103,7 @@ def test_background_process_returns_true_when_claimed_task_fails(monkeypatch):
 		estimated_time=0.0,
 	)
 	logger_messages = []
+	health_events = []
 
 	class _SelectQuery:
 		def eq(self, field, value):
@@ -126,6 +127,7 @@ def test_background_process_returns_true_when_claimed_task_fails(monkeypatch):
 	monkeypatch.setattr(processor_module, 'login_verified', lambda username, password: ('token', object()))
 	monkeypatch.setattr(processor_module, 'get_worker_id', lambda: 'worker-a')
 	monkeypatch.setattr(processor_module, 'get_active_task', lambda token, worker_id: None)
+	monkeypatch.setattr(processor_module, 'clear_loop_unhealthy', lambda: health_events.append('healthy'))
 	monkeypatch.setattr(processor_module, 'is_drain_requested', lambda: False)
 	monkeypatch.setattr(processor_module, 'get_next_task', lambda token: task)
 	monkeypatch.setattr(processor_module, 'is_dataset_uploaded_or_processed', lambda task, token: (True, False))
@@ -134,11 +136,12 @@ def test_background_process_returns_true_when_claimed_task_fails(monkeypatch):
 	monkeypatch.setattr(
 		processor_module,
 		'process_task',
-		lambda task, token: (_ for _ in ()).throw(RuntimeError('boom')),
+		lambda task, token: health_events.append('processing') or (_ for _ in ()).throw(RuntimeError('boom')),
 	)
 	monkeypatch.setattr(processor_module.logger, 'info', lambda *args, **kwargs: logger_messages.append(args[0]))
 
 	assert background_process() is BackgroundProcessResult.FAILED
+	assert health_events == ['healthy', 'processing']
 	assert any('Start processing queued task' in message for message in logger_messages)
 
 

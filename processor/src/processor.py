@@ -29,6 +29,7 @@ from .utils.linear_issues import create_processing_failure_issue
 from .utils.drain_control import (
 	BackgroundProcessResult,
 	acknowledge_drain_request,
+	clear_loop_unhealthy,
 	is_drain_requested,
 )
 from .utils.queue_runtime import (
@@ -691,6 +692,10 @@ def background_process() -> BackgroundProcessResult:
 
 	while True:
 		active_task = None if active_recovery_attempted else get_active_task(token, worker_id)
+		# A successful active-queue poll proves the restarted worker can reach the
+		# queue. Clear any persisted crash-loop marker before recovery or processing
+		# can become long-running, so host maintenance does not stop healthy work.
+		clear_loop_unhealthy()
 		active_recovery_attempted = True
 		if active_task is not None:
 			logger.warning(

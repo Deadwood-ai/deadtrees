@@ -2,7 +2,6 @@ import time
 from processor.src.processor import background_process
 from processor.src.utils.drain_control import (
 	BackgroundProcessResult,
-	clear_loop_unhealthy,
 	is_drain_requested,
 	mark_loop_unhealthy,
 )
@@ -51,7 +50,6 @@ def run_continuous():
 			result = BackgroundProcessResult.FAILED
 		else:
 			consecutive_loop_failures = 0
-			clear_loop_unhealthy()
 
 		if result is not BackgroundProcessResult.WORKED:
 			time.sleep(settings.PROCESSOR_IDLE_BACKOFF_SECONDS)
