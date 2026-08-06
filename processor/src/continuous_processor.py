@@ -2,7 +2,9 @@ import time
 from processor.src.processor import background_process
 from processor.src.utils.drain_control import (
 	BackgroundProcessResult,
+	clear_loop_unhealthy,
 	is_drain_requested,
+	mark_loop_unhealthy,
 )
 from processor.src.utils.startup_cleanup import cleanup_orphaned_resources, cleanup_old_temp_directories
 from shared.logger import logger
@@ -41,6 +43,7 @@ def run_continuous():
 			consecutive_loop_failures += 1
 			logger.exception('Error in processor loop')
 			if consecutive_loop_failures >= settings.PROCESSOR_LOOP_FAILURE_LIMIT:
+				mark_loop_unhealthy(consecutive_loop_failures)
 				logger.error(
 					f'Processor loop failed {consecutive_loop_failures} consecutive times; exiting for supervised restart'
 				)
@@ -48,6 +51,7 @@ def run_continuous():
 			result = BackgroundProcessResult.FAILED
 		else:
 			consecutive_loop_failures = 0
+			clear_loop_unhealthy()
 
 		if result is not BackgroundProcessResult.WORKED:
 			time.sleep(settings.PROCESSOR_IDLE_BACKOFF_SECONDS)

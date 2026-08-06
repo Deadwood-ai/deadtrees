@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
@@ -29,6 +30,10 @@ def drain_ack_path() -> Path:
 	return Path(settings.PROCESSOR_DRAIN_ACK_PATH)
 
 
+def unhealthy_path() -> Path:
+	return Path(settings.PROCESSOR_UNHEALTHY_PATH)
+
+
 def load_drain_request() -> dict | None:
 	return _read_json(drain_request_path())
 
@@ -45,6 +50,22 @@ def drain_ack_matches_request(request: dict | None, ack: dict | None) -> bool:
 
 def is_drain_requested() -> bool:
 	return load_drain_request() is not None
+
+
+def mark_loop_unhealthy(failure_count: int) -> None:
+	path = unhealthy_path()
+	payload = {
+		'failed_at': datetime.now(timezone.utc).isoformat(),
+		'failure_count': failure_count,
+		'release_sha': settings.PROCESSOR_RELEASE_SHA,
+	}
+	temporary_path = path.with_suffix(f'{path.suffix}.tmp')
+	temporary_path.write_text(json.dumps(payload, indent=2) + '\n')
+	temporary_path.replace(path)
+
+
+def clear_loop_unhealthy() -> None:
+	unhealthy_path().unlink(missing_ok=True)
 
 
 def acknowledge_drain_request(worker_id: str) -> dict | None:

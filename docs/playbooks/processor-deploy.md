@@ -56,6 +56,13 @@ script stops the container and enters recovery mode. That mode can continue
 without an acknowledgement only when the database proves the worker has no
 active queue row and there is no legacy unowned active row.
 
+After repeated queue-loop failures, the worker records
+`.local/processor-control/loop-unhealthy.json` before exiting. The marker
+survives Docker's automatic restart, so host deploy and maintenance checks can
+enter recovery even when they miss the brief restart transition. A successful
+queue poll clears the marker; do not remove it manually to make a failing worker
+appear healthy.
+
 The host scripts require repeated stopped-state observations before entering
 recovery; a single failed Docker inspection cannot stop an active worker. During
 long drains the control tool reuses its Supabase session, refreshing only after

@@ -88,6 +88,10 @@ def _drain_ack_path() -> Path:
 	return _host_control_path('drain-ack.json')
 
 
+def _unhealthy_path() -> Path:
+	return _host_control_path('loop-unhealthy.json')
+
+
 def _worker_id() -> str:
 	worker_id = ENV.get('PROCESSOR_WORKER_ID', '').strip()
 	if worker_id:
@@ -325,6 +329,15 @@ def cmd_clear_ack(_: argparse.Namespace) -> int:
 	return 0
 
 
+def cmd_worker_health(_: argparse.Namespace) -> int:
+	marker = _read_json(_unhealthy_path())
+	if marker is not None or _unhealthy_path().exists():
+		print(json.dumps({'healthy': False, 'marker': marker}, indent=2, default=str))
+		return 1
+	print(json.dumps({'healthy': True}, indent=2))
+	return 0
+
+
 def cmd_activation_ready(args: argparse.Namespace) -> int:
 	worker_id = _worker_id()
 	previous_worker_id = _activated_worker_id()
@@ -457,6 +470,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 	clear_ack = subparsers.add_parser('clear-ack', help='Clear only the worker drain acknowledgement.')
 	clear_ack.set_defaults(func=cmd_clear_ack)
+
+	worker_health = subparsers.add_parser(
+		'worker-health',
+		help='Report whether the persistent worker recorded a bounded loop failure.',
+	)
+	worker_health.set_defaults(func=cmd_worker_health)
 
 	activation_ready = subparsers.add_parser(
 		'activation-ready',

@@ -47,6 +47,7 @@ class DeployHarness:
 		self.activation_write_failed_once = tmp_path / "activation-write-failed-once"
 		self.wait_hook_marker = tmp_path / "wait-hook-ran"
 		self.waiter_fd_log = tmp_path / "waiter-fd.log"
+		self.unhealthy_marker = self.control_dir / "loop-unhealthy.json"
 
 		run("git", "init", "--bare", "--initial-branch=main", str(self.origin), cwd=tmp_path)
 		run("git", "init", "--initial-branch=main", str(self.seed), cwd=tmp_path)
@@ -89,6 +90,10 @@ class DeployHarness:
 			"fi\n"
 			"if echo \"$@\" | grep -q activation-ready; then\n"
 			"  exit \"${PROCESSOR_TEST_ACTIVATION_READY:-1}\"\n"
+			"fi\n"
+			"if echo \"$@\" | grep -q worker-health; then\n"
+			"  if [ -e \"${PROCESSOR_TEST_UNHEALTHY_PATH:-}\" ]; then exit 1; fi\n"
+			"  exit 0\n"
 			"fi\n"
 			"exit 0\n",
 		)
@@ -146,6 +151,7 @@ class DeployHarness:
 		self.env["PROCESSOR_UNAVAILABLE_POLL_SECONDS"] = "0"
 		self.env["PROCESSOR_READINESS_POLL_SECONDS"] = "0"
 		self.env["PROCESSOR_STARTUP_TIMEOUT_SECONDS"] = "2"
+		self.env["PROCESSOR_TEST_UNHEALTHY_PATH"] = str(self.unhealthy_marker)
 
 	def push_change(self, text: str) -> str:
 		(self.upstream / "README.md").write_text(text)
@@ -276,6 +282,22 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 
 			self.assertEqual(result.returncode, 0, result.stderr)
 			self.assertIn("compose -f", harness.docker_log.read_text())
+			self.assertIn("stop processor", harness.docker_log.read_text())
+			self.assertIn(
+				"wait-for-idle --allow-unacknowledged-stopped-worker",
+				harness.python_log.read_text(),
+			)
+
+	def test_recovery_deploy_stops_running_worker_with_persisted_loop_failure(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			harness.push_change("repair unhealthy loop\n")
+			harness.control_dir.mkdir(parents=True)
+			harness.unhealthy_marker.write_text('{"failure_count": 3}\n')
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
 			self.assertIn("stop processor", harness.docker_log.read_text())
 			self.assertIn(
 				"wait-for-idle --allow-unacknowledged-stopped-worker",

@@ -62,6 +62,7 @@ services:
       PROCESSOR_RELEASE_SHA: ${PROCESSOR_RELEASE_SHA:-unknown}
       PROCESSOR_DRAIN_REQUEST_PATH: /processor-control/drain-request.json
       PROCESSOR_DRAIN_ACK_PATH: /processor-control/drain-ack.json
+      PROCESSOR_UNHEALTHY_PATH: /processor-control/loop-unhealthy.json
       # Comma-separated task types this worker refuses to run (e.g. odm_processing).
       PROCESSOR_TASK_BLACKLIST: ${PROCESSOR_TASK_BLACKLIST:-}
       SSH_PRIVATE_KEY_PASSPHRASE: ${SSH_PRIVATE_KEY_PASSPHRASE}

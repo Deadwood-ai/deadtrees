@@ -11,9 +11,20 @@ cleanup_processor_runtime_waiter() {
 
 processor_availability() {
 	local container_id=""
+	local health_rc=0
 	local inspect_output=""
 	local status=""
 	local restarting=""
+
+	if python3 "${STATUS_SCRIPT}" worker-health >/dev/null 2>&1; then
+		:
+	else
+		health_rc=$?
+		if [ "${health_rc}" -eq 1 ]; then
+			return 1
+		fi
+		return 2
+	fi
 
 	container_id="$(docker compose -f "${COMPOSE_FILE}" ps -q processor 2>/dev/null || true)"
 	inspect_output="$(docker inspect "${container_id}" --format '{{.State.Status}} {{.State.Restarting}}' 2>/dev/null || true)"

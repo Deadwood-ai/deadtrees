@@ -34,6 +34,17 @@ def test_ack_release_sha_must_match_when_expected():
 	assert not runtime_control._ack_matches_request(request, ack, 'worker-a', 'release-b')
 
 
+def test_worker_health_rejects_even_malformed_persisted_marker(monkeypatch, tmp_path):
+	marker = tmp_path / 'loop-unhealthy.json'
+	marker.write_text('interrupted write')
+	monkeypatch.setattr(runtime_control, '_unhealthy_path', lambda: marker)
+
+	assert runtime_control.cmd_worker_health(argparse.Namespace()) == 1
+
+	marker.unlink()
+	assert runtime_control.cmd_worker_health(argparse.Namespace()) == 0
+
+
 def test_wait_for_idle_allows_stopped_worker_without_active_rows(monkeypatch):
 	monkeypatch.setattr(runtime_control, '_login', lambda: 'token')
 	monkeypatch.setattr(runtime_control, '_fetch_queue_state', lambda worker_id, **kwargs: _state())
