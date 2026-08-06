@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 SCRIPT = Path(__file__).parents[1] / "processor_docker_maintenance.sh"
+SNAP_CONTROL_SCRIPT = Path(__file__).parents[1] / "processor_snap_control.sh"
 
 
 def run(*args: str, cwd: Path, check: bool = True, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -27,6 +28,7 @@ class MaintenanceHarness:
 		self.python_log = tmp_path / "python.log"
 		self.docker_log = tmp_path / "docker.log"
 		self.snap_log = tmp_path / "snap.log"
+		self.sudo_log = tmp_path / "sudo.log"
 		self.docker_running = tmp_path / "docker-running"
 		self.repo.mkdir()
 		(self.repo / "scripts").mkdir()
@@ -43,7 +45,7 @@ class MaintenanceHarness:
 
 		self.bin_dir.mkdir()
 		make_executable(self.bin_dir / "flock", "#!/bin/sh\nexit 0\n")
-		make_executable(self.bin_dir / "id", "#!/bin/sh\necho \"${PROCESSOR_TEST_UID:-0}\"\n")
+		make_executable(self.bin_dir / "sudo", f"#!/bin/sh\necho \"$@\" >> {self.sudo_log}\n[ \"$1\" = -n ] && shift\nexec \"$@\"\n")
 		make_executable(
 			self.bin_dir / "python3",
 			f"#!/bin/sh\necho \"$@\" >> {self.python_log}\n"
@@ -52,7 +54,7 @@ class MaintenanceHarness:
 			"fi\n"
 			"exit 0\n",
 		)
-		make_executable(self.bin_dir / "snap", f"#!/bin/sh\necho \"$@\" >> {self.snap_log}\nexit 0\n")
+		make_executable(self.bin_dir / "snap-control", f"#!/bin/sh\necho \"$@\" >> {self.snap_log}\nexit 0\n")
 		make_executable(
 			self.bin_dir / "docker",
 			"#!/bin/sh\n"
@@ -84,6 +86,7 @@ class MaintenanceHarness:
 		self.env["PROCESSOR_UNAVAILABLE_POLL_SECONDS"] = "0"
 		self.env["PROCESSOR_READINESS_POLL_SECONDS"] = "0"
 		self.env["PROCESSOR_STARTUP_TIMEOUT_SECONDS"] = "2"
+		self.env["PROCESSOR_SNAP_CONTROL"] = str(self.bin_dir / "snap-control")
 
 	def run(self, *args: str) -> subprocess.CompletedProcess[str]:
 		return run(
@@ -97,6 +100,24 @@ class MaintenanceHarness:
 
 
 class ProcessorDockerMaintenanceTest(unittest.TestCase):
+	def test_snap_control_limits_root_action_to_validated_docker_operations(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			tmp_path = Path(tmp_dir)
+			invalid = run(
+				"bash",
+				str(SNAP_CONTROL_SCRIPT),
+				"hold",
+				"7d;touch /tmp/unsafe",
+				cwd=tmp_path,
+				check=False,
+			)
+
+			self.assertEqual(invalid.returncode, 2)
+			self.assertIn("Hold duration", invalid.stderr)
+			script = SNAP_CONTROL_SCRIPT.read_text()
+			self.assertIn('exec /usr/bin/snap refresh --hold="${duration}" docker', script)
+			self.assertIn('exec /usr/bin/snap refresh docker', script)
+
 	def test_renew_hold_only_ignores_dirty_checkout(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			harness = MaintenanceHarness(Path(tmp_dir), processor_available=True)
@@ -105,7 +126,7 @@ class ProcessorDockerMaintenanceTest(unittest.TestCase):
 			result = harness.run("--renew-hold-only")
 
 			self.assertEqual(result.returncode, 0, result.stderr)
-			self.assertIn("refresh --hold=7d docker", harness.snap_log.read_text())
+			self.assertIn("hold 7d", harness.snap_log.read_text())
 			self.assertFalse(harness.python_log.exists())
 
 	def test_unavailable_worker_uses_verified_recovery_before_maintenance(self) -> None:
@@ -121,18 +142,16 @@ class ProcessorDockerMaintenanceTest(unittest.TestCase):
 				harness.python_log.read_text(),
 			)
 
-	def test_non_root_scheduled_user_cannot_run_snap_maintenance(self) -> None:
+	def test_maintenance_uses_noninteractive_trusted_snap_helper(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			harness = MaintenanceHarness(Path(tmp_dir), processor_available=True)
-			harness.env["PROCESSOR_TEST_UID"] = "1000"
 
 			result = harness.run("--renew-hold-only")
 
-			self.assertNotEqual(result.returncode, 0)
-			self.assertFalse(harness.snap_log.exists())
-			self.assertIn("must run as root", (harness.repo / "processor-maintenance.log").read_text())
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertIn(f"-n {harness.bin_dir / 'snap-control'} hold 7d", harness.sudo_log.read_text())
 
-	def test_root_renewal_creates_cross_user_writable_runtime_lock(self) -> None:
+	def test_hold_renewal_creates_runtime_lock(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			harness = MaintenanceHarness(Path(tmp_dir), processor_available=True)
 

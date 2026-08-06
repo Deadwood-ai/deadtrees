@@ -52,13 +52,29 @@ Normal checkout-owner crontab:
 
 ```cron
 * * * * * cd /home/jj1049/prod/deadtrees && ./scripts/processor_auto_deploy.sh
-```
-
-Root crontab, because Snap hold and refresh operations are privileged:
-
-```cron
 0 3 * * * cd /home/jj1049/prod/deadtrees && PROCESSOR_SNAP_HOLD_DURATION=7d ./scripts/processor_docker_maintenance.sh --renew-hold-only
 ```
+
+The maintenance script runs as the checkout owner. Its only privileged action is
+delegated to a root-owned helper outside the writable checkout. Install the
+reviewed helper and its narrow sudo rule once before scheduling maintenance:
+
+```bash
+sudo install -o root -g root -m 0755 scripts/processor_snap_control.sh \
+  /usr/local/sbin/deadtrees-processor-snap-control
+printf '%s\n' 'jj1049 ALL=(root) NOPASSWD: /usr/local/sbin/deadtrees-processor-snap-control hold *, /usr/local/sbin/deadtrees-processor-snap-control refresh' \
+  | sudo tee /etc/sudoers.d/deadtrees-processor-snap-control >/dev/null
+sudo chmod 0440 /etc/sudoers.d/deadtrees-processor-snap-control
+sudo visudo -cf /etc/sudoers.d/deadtrees-processor-snap-control
+stat -c '%U %G %a %n' /usr/local/sbin/deadtrees-processor-snap-control \
+  /etc/sudoers.d/deadtrees-processor-snap-control
+test ! -w /usr/local/sbin/deadtrees-processor-snap-control
+sudo -n /usr/local/sbin/deadtrees-processor-snap-control hold 7d
+```
+
+The installed helper accepts only `hold DURATION` and `refresh` for the Docker
+Snap. Root never executes code, Compose configuration, or environment files from
+the checkout.
 
 ### One-time legacy cron cutover
 
@@ -72,17 +88,17 @@ mkdir -p .local/cron-backups
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 
 crontab -l > ".local/cron-backups/checkout-owner-${stamp}.cron" 2>/dev/null || true
-awk '!/auto_deploy_processor\.sh/ && !/docker compose .*docker-compose\.processor\.yaml up/ && !/processor_auto_deploy\.sh/' \
+awk '!/auto_deploy_processor\.sh/ && !/docker compose .*docker-compose\.processor\.yaml up/ && !/processor_auto_deploy\.sh/ && !/processor_docker_maintenance\.sh/' \
   ".local/cron-backups/checkout-owner-${stamp}.cron" > /tmp/deadtrees-checkout-owner.cron
 printf '%s\n' '* * * * * cd /home/jj1049/prod/deadtrees && ./scripts/processor_auto_deploy.sh' \
+  >> /tmp/deadtrees-checkout-owner.cron
+printf '%s\n' '0 3 * * * cd /home/jj1049/prod/deadtrees && PROCESSOR_SNAP_HOLD_DURATION=7d ./scripts/processor_docker_maintenance.sh --renew-hold-only' \
   >> /tmp/deadtrees-checkout-owner.cron
 crontab /tmp/deadtrees-checkout-owner.cron
 
 sudo crontab -l > ".local/cron-backups/root-${stamp}.cron" 2>/dev/null || true
 awk '!/processor_docker_maintenance\.sh/' ".local/cron-backups/root-${stamp}.cron" \
   > /tmp/deadtrees-root.cron
-printf '%s\n' '0 3 * * * cd /home/jj1049/prod/deadtrees && PROCESSOR_SNAP_HOLD_DURATION=7d ./scripts/processor_docker_maintenance.sh --renew-hold-only' \
-  >> /tmp/deadtrees-root.cron
 sudo crontab /tmp/deadtrees-root.cron
 
 crontab -l
@@ -91,9 +107,9 @@ sudo crontab -l
 ```
 
 Do not continue the rollout unless the checkout-owner output contains exactly
-one tracked auto-deploy job, the root output contains exactly one hold-renewal
-job, and neither legacy launcher remains. Restore the timestamped backups if a
-verification fails.
+one tracked auto-deploy job and one hold-renewal job, root's output contains no
+checkout-based processor job, and neither legacy launcher remains. Restore the
+timestamped backups if a verification fails.
 
 Do not reintroduce a per-minute `docker compose up` cron entry. The processor
 now runs continuously as `python -m processor.src.continuous_processor` with

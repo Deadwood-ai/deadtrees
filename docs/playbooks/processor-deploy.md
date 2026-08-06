@@ -65,11 +65,12 @@ planned daemon restart. The script renews the Snap hold, drains the worker,
 stops the container, refreshes Docker, re-applies the hold, restarts the
 processor, and logs to `processor-maintenance.log`.
 
-Run the maintenance script from root's cron. It intentionally refuses non-root
-execution because Snap hold and refresh operations are privileged. Keep
-`processor_auto_deploy.sh` in the normal checkout owner's crontab. The shared
-runtime lock is a deliberately content-free, cross-user-writable file so these
-two scheduled users still serialize deploy and maintenance operations.
+Run the maintenance script from the checkout-owner cron. It delegates only the
+validated Docker Snap hold or refresh command to the root-owned
+`/usr/local/sbin/deadtrees-processor-snap-control` helper through a narrow sudo
+rule. Root must never execute scripts, Compose configuration, or environment
+files from the writable checkout. The shared runtime lock serializes deploy and
+maintenance operations.
 
 Hold renewal does not depend on checkout cleanliness because it never builds or
 deploys repository code. Full maintenance still requires a clean checkout and

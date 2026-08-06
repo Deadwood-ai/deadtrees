@@ -10,6 +10,7 @@ LOG_FILE="${REPO_DIR}/processor-maintenance.log"
 STATUS_SCRIPT="${REPO_DIR}/scripts/processor_runtime_control.py"
 COMPOSE_FILE="${REPO_DIR}/docker-compose.processor.yaml"
 HOLD_DURATION="${PROCESSOR_SNAP_HOLD_DURATION:-7d}"
+SNAP_CONTROL="${PROCESSOR_SNAP_CONTROL:-/usr/local/sbin/deadtrees-processor-snap-control}"
 DRAIN_TIMEOUT_SECONDS="${PROCESSOR_DRAIN_TIMEOUT_SECONDS:-43200}"
 DRAIN_POLL_SECONDS="${PROCESSOR_DRAIN_POLL_SECONDS:-15}"
 RENEW_HOLD_ONLY=0
@@ -45,15 +46,10 @@ log() {
 	printf '%s: %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$*" >> "${LOG_FILE}"
 }
 
-if [ "$(id -u)" -ne 0 ]; then
-	log "Docker Snap maintenance must run as root"
-	exit 1
-fi
-
 require_clean_checkout() {
 	local dirty
 	dirty="$(
-		git -c safe.directory="${REPO_DIR}" status --porcelain --untracked-files=all -- \
+		git status --porcelain --untracked-files=all -- \
 			. \
 			':(exclude).local/locks' \
 			':(exclude)auto-deploy.log' \
@@ -87,7 +83,7 @@ trap on_exit EXIT
 
 cd "${REPO_DIR}"
 
-snap refresh --hold="${HOLD_DURATION}" docker >> "${LOG_FILE}" 2>&1
+sudo -n "${SNAP_CONTROL}" hold "${HOLD_DURATION}" >> "${LOG_FILE}" 2>&1
 log "Renewed Docker snap hold for ${HOLD_DURATION}"
 
 if [ "${RENEW_HOLD_ONLY}" -eq 1 ]; then
@@ -101,8 +97,8 @@ drain_set=1
 wait_for_drain_with_recovery
 
 docker compose -f "${COMPOSE_FILE}" stop processor >> "${LOG_FILE}" 2>&1
-snap refresh docker >> "${LOG_FILE}" 2>&1
-snap refresh --hold="${HOLD_DURATION}" docker >> "${LOG_FILE}" 2>&1
+sudo -n "${SNAP_CONTROL}" refresh >> "${LOG_FILE}" 2>&1
+sudo -n "${SNAP_CONTROL}" hold "${HOLD_DURATION}" >> "${LOG_FILE}" 2>&1
 require_clean_checkout
 python3 "${STATUS_SCRIPT}" clear-ack >> "${LOG_FILE}" 2>&1
 docker compose -f "${COMPOSE_FILE}" up -d processor >> "${LOG_FILE}" 2>&1
