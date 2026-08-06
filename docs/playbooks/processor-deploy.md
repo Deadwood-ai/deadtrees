@@ -89,7 +89,7 @@ uses the same stopped-worker/no-active-row recovery guard as auto-deploy.
 The recommended hold-renew command is:
 
 ```bash
-PROCESSOR_SNAP_HOLD_DURATION=7d ./scripts/processor_docker_maintenance.sh --renew-hold-only
+PROCESSOR_SNAP_HOLD_DURATION=168h ./scripts/processor_docker_maintenance.sh --renew-hold-only
 ```
 
 Do not run `snap refresh docker`, `systemctl restart snap.docker.dockerd`, or

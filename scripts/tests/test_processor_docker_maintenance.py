@@ -130,6 +130,15 @@ class ProcessorDockerMaintenanceTest(unittest.TestCase):
 
 			self.assertEqual(invalid.returncode, 2)
 			self.assertIn("Hold duration", invalid.stderr)
+			unsupported_days = run(
+				"bash",
+				str(SNAP_CONTROL_SCRIPT),
+				"hold",
+				"7d",
+				cwd=tmp_path,
+				check=False,
+			)
+			self.assertEqual(unsupported_days.returncode, 2)
 			script = SNAP_CONTROL_SCRIPT.read_text()
 			self.assertIn('exec /usr/bin/snap refresh --hold="${duration}" docker', script)
 			self.assertIn('exec /usr/bin/snap refresh docker', script)
@@ -142,7 +151,7 @@ class ProcessorDockerMaintenanceTest(unittest.TestCase):
 			result = harness.run("--renew-hold-only")
 
 			self.assertEqual(result.returncode, 0, result.stderr)
-			self.assertIn("hold 7d", harness.snap_log.read_text())
+			self.assertIn("hold 168h", harness.snap_log.read_text())
 			self.assertFalse(harness.python_log.exists())
 
 	def test_unavailable_worker_uses_verified_recovery_before_maintenance(self) -> None:
@@ -168,7 +177,7 @@ class ProcessorDockerMaintenanceTest(unittest.TestCase):
 
 			self.assertNotEqual(result.returncode, 0)
 			self.assertFalse(harness.python_log.exists())
-			self.assertEqual(harness.snap_log.read_text().splitlines(), ["hold 7d"])
+			self.assertEqual(harness.snap_log.read_text().splitlines(), ["hold 168h"])
 			self.assertIn("does not match activated SHA", (harness.repo / "processor-maintenance.log").read_text())
 
 	def test_maintenance_uses_noninteractive_trusted_snap_helper(self) -> None:
@@ -178,7 +187,7 @@ class ProcessorDockerMaintenanceTest(unittest.TestCase):
 			result = harness.run("--renew-hold-only")
 
 			self.assertEqual(result.returncode, 0, result.stderr)
-			self.assertIn(f"-n {harness.bin_dir / 'snap-control'} hold 7d", harness.sudo_log.read_text())
+			self.assertIn(f"-n {harness.bin_dir / 'snap-control'} hold 168h", harness.sudo_log.read_text())
 
 	def test_hold_renewal_creates_runtime_lock(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:

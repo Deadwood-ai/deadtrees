@@ -52,7 +52,7 @@ Normal checkout-owner crontab:
 
 ```cron
 * * * * * cd /home/jj1049/prod/deadtrees && ./scripts/processor_auto_deploy.sh
-0 3 * * * cd /home/jj1049/prod/deadtrees && PROCESSOR_SNAP_HOLD_DURATION=7d ./scripts/processor_docker_maintenance.sh --renew-hold-only
+0 3 * * * cd /home/jj1049/prod/deadtrees && PROCESSOR_SNAP_HOLD_DURATION=168h ./scripts/processor_docker_maintenance.sh --renew-hold-only
 ```
 
 The maintenance script runs as the checkout owner. Its only privileged action is
@@ -69,7 +69,7 @@ sudo visudo -cf /etc/sudoers.d/deadtrees-processor-snap-control
 stat -c '%U %G %a %n' /usr/local/sbin/deadtrees-processor-snap-control \
   /etc/sudoers.d/deadtrees-processor-snap-control
 test ! -w /usr/local/sbin/deadtrees-processor-snap-control
-sudo -n /usr/local/sbin/deadtrees-processor-snap-control hold 7d
+sudo -n /usr/local/sbin/deadtrees-processor-snap-control hold 168h
 ```
 
 The installed helper accepts only `hold DURATION` and `refresh` for the Docker
@@ -92,7 +92,7 @@ awk '!/auto_deploy_processor\.sh/ && !/docker compose .*docker-compose\.processo
   ".local/cron-backups/checkout-owner-${stamp}.cron" > /tmp/deadtrees-checkout-owner.cron
 printf '%s\n' '* * * * * cd /home/jj1049/prod/deadtrees && ./scripts/processor_auto_deploy.sh' \
   >> /tmp/deadtrees-checkout-owner.cron
-printf '%s\n' '0 3 * * * cd /home/jj1049/prod/deadtrees && PROCESSOR_SNAP_HOLD_DURATION=7d ./scripts/processor_docker_maintenance.sh --renew-hold-only' \
+printf '%s\n' '0 3 * * * cd /home/jj1049/prod/deadtrees && PROCESSOR_SNAP_HOLD_DURATION=168h ./scripts/processor_docker_maintenance.sh --renew-hold-only' \
   >> /tmp/deadtrees-checkout-owner.cron
 crontab /tmp/deadtrees-checkout-owner.cron
 
