@@ -16,8 +16,8 @@ case "${1:-}" in
 			exit 2
 		fi
 		duration="${2:-}"
-		if ! [[ "${duration}" =~ ^[1-9][0-9]*[smhd]$ ]]; then
-			echo "Hold duration must be a positive integer followed by s, m, h, or d" >&2
+		if ! [[ "${duration}" =~ ^[1-9][0-9]*[smh]$ ]]; then
+			echo "Hold duration must be a positive integer followed by s, m, or h" >&2
 			exit 2
 		fi
 		require_root
