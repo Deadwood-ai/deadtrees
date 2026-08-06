@@ -14,6 +14,7 @@ const completeCore: DatasetProgress = {
   is_ortho_done: true,
   is_metadata_done: true,
   is_cog_done: true,
+  is_thumbnail_done: true,
   is_odm_done: false,
   is_aoi_done: false,
   is_aoi_required: false,
@@ -119,6 +120,17 @@ describe("processing step completion", () => {
     expect(isDatasetProcessingComplete(dataset)).toBe(false);
     expect(progress.isComplete).toBe(false);
     expect(progress.currentStepInfo.key).toBe("deadwood");
+  });
+
+  it("does not complete until the user-visible thumbnail is ready", () => {
+    const dataset: DatasetProgress = {
+      ...completeCore,
+      is_thumbnail_done: false,
+      is_deadwood_done: true,
+      is_forest_cover_done: true,
+    };
+
+    expect(isDatasetProcessingComplete(dataset)).toBe(false);
   });
 
   it("keeps an existing dataset complete without the embeddings stage", () => {

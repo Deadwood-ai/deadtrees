@@ -57,6 +57,9 @@ services:
       - SSH_PRIVATE_KEY_PASSPHRASE=
       - SSH_KNOWN_HOSTS_PATH=/tmp/ssh-keys/known_hosts
       - ENV=development
+      - MAILPIT_SMTP_HOST=mailpit
+      - MAILPIT_SMTP_PORT=1025
+      - MAILPIT_API_URL=http://mailpit:8025
 
       # NVIDIA GPU configuration
       - NVIDIA_VISIBLE_DEVICES=all

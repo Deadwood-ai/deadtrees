@@ -66,6 +66,9 @@ services:
       LINEAR_ENABLED: ${LINEAR_ENABLED:-true}
       LINEAR_API_KEY: ${LINEAR_API_KEY:-}
       LINEAR_TEAM_ID: ${LINEAR_TEAM_ID:-ba4011bf-0b5c-4631-9f88-1034ab4ef541}
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      NOTIFICATION_SENDER_EMAIL: ${NOTIFICATION_SENDER_EMAIL:-notifications@deadtrees.earth}
+      NOTIFICATION_SENDER_NAME: ${NOTIFICATION_SENDER_NAME:-DeadTrees}
 
     # command: python run.py server --reload=False
 

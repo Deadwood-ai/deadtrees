@@ -69,6 +69,11 @@ services:
       # Linear integration for processing failure notifications
       LINEAR_ENABLED: ${LINEAR_ENABLED:-false}
       LINEAR_API_KEY: ${LINEAR_API_KEY:-}
+      # Processing result emails are off until explicitly enabled after deploy.
+      PROCESSING_EMAIL_NOTIFICATIONS_ENABLED: ${PROCESSING_EMAIL_NOTIFICATIONS_ENABLED:-false}
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      NOTIFICATION_SENDER_EMAIL: ${NOTIFICATION_SENDER_EMAIL:-notifications@deadtrees.earth}
+      NOTIFICATION_SENDER_NAME: ${NOTIFICATION_SENDER_NAME:-DeadTrees}
       # SSH_KEY_PATH: /root/.ssh/processing-to-storage
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility

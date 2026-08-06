@@ -207,6 +207,39 @@ def test_create_processing_task_unauthorized(test_dataset):
 	assert response.status_code == 401
 
 
+def test_create_processing_task_rejects_public_non_owner_without_mutating_status(test_dataset, test_user2):
+	with use_service_client() as service_client:
+		initial_status = {
+			'current_status': 'idle',
+			'has_error': True,
+			'error_message': 'existing failure',
+			'is_metadata_done': True,
+			'is_aoi_required': False,
+		}
+		service_client.table(settings.statuses_table).update(initial_status).eq('dataset_id', test_dataset).execute()
+
+	non_owner_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+	response = client.put(
+		f'/datasets/{test_dataset}/process',
+		json={'task_types': ['metadata']},
+		headers={'Authorization': f'Bearer {non_owner_token}'},
+	)
+
+	assert response.status_code == 403
+	with use_service_client() as service_client:
+		status = (
+			service_client.table(settings.statuses_table)
+			.select(','.join(initial_status))
+			.eq('dataset_id', test_dataset)
+			.single()
+			.execute()
+			.data
+		)
+		queue = service_client.table(settings.queue_table).select('id').eq('dataset_id', test_dataset).execute().data
+	assert status == initial_status
+	assert queue == []
+
+
 def test_create_processing_task_invalid_dataset(auth_token):
 	"""Test process creation for non-existent dataset"""
 	response = client.put(

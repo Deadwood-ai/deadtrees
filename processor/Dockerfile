@@ -64,6 +64,7 @@ RUN mkdir -p /data
 COPY ./processor/src /app/processor/src
 COPY ./processor/config /app/processor/config
 COPY ./shared/*.py /app/shared/
+COPY ./shared/notifications /app/shared/notifications
 COPY ./shared/testing/safety.py /app/shared/testing/safety.py
 
 # Copy entrypoint script and make it executable
