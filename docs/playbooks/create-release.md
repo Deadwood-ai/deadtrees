@@ -46,10 +46,17 @@ an explicit workflow fix. Manual migration repair or direct production SQL
 execution should be an explicitly approved emergency action only.
 
 Processing server automation is not represented as a GitHub workflow. It is a
-host-local script setup on `processing-server`:
+host-local script setup on `processing-server`.
+
+Normal checkout-owner crontab:
 
 ```cron
 * * * * * cd /home/jj1049/prod/deadtrees && ./scripts/processor_auto_deploy.sh
+```
+
+Root crontab, because Snap hold and refresh operations are privileged:
+
+```cron
 0 3 * * * cd /home/jj1049/prod/deadtrees && PROCESSOR_SNAP_HOLD_DURATION=7d ./scripts/processor_docker_maintenance.sh --renew-hold-only
 ```
 

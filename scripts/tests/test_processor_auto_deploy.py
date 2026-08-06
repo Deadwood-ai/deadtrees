@@ -87,6 +87,10 @@ class DeployHarness:
 			self.bin_dir / "docker",
 			"#!/bin/sh\n"
 			f"echo \"$@\" >> {self.docker_log}\n"
+			"if [ \"$1\" = compose ] && echo \"$@\" | grep -q ' ps -q processor'; then\n"
+			f"  if [ -e {self.docker_running} ]; then echo processor-container-id; fi\n"
+			"  exit 0\n"
+			"fi\n"
 			"if [ \"$1\" = inspect ]; then\n"
 			f"  if [ -n \"${{PROCESSOR_TEST_INSPECT_FAIL_ONCE:-}}\" ] && [ ! -e {self.inspect_failed_once} ]; then\n"
 			f"    touch {self.inspect_failed_once}\n"
@@ -227,6 +231,8 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 
 			self.assertEqual(result.returncode, 0, result.stderr)
 			self.assertNotIn("stop processor", harness.docker_log.read_text())
+			self.assertIn("ps -q processor", harness.docker_log.read_text())
+			self.assertNotIn("inspect deadtrees-processor-1", harness.docker_log.read_text())
 
 	def test_custom_control_directory_ack_is_cleared_through_runtime_control(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:

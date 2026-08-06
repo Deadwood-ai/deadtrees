@@ -186,10 +186,14 @@ def _load_drain_state() -> tuple[dict | None, dict | None]:
 	return _read_json(_drain_request_path()), _read_json(_drain_ack_path())
 
 
-def _ack_matches_request(request: dict | None, ack: dict | None) -> bool:
+def _ack_matches_request(request: dict | None, ack: dict | None, worker_id: str) -> bool:
 	if request is None or ack is None:
 		return False
-	return ack.get('request_id') == request.get('request_id') and ack.get('requested_at') == request.get('requested_at')
+	return (
+		ack.get('request_id') == request.get('request_id')
+		and ack.get('requested_at') == request.get('requested_at')
+		and ack.get('acknowledged_by') == worker_id
+	)
 
 
 def _fetch_queue_rows(token: str, *, claimed_by: str | None = None, null_claimed_by: bool = False) -> list[dict]:
@@ -222,7 +226,7 @@ def _fetch_queue_state(worker_id: str, *, token: str | None = None, include_wait
 		'worker_id': worker_id,
 		'drain_request': request,
 		'drain_ack': ack,
-		'ack_matches_request': _ack_matches_request(request, ack),
+		'ack_matches_request': _ack_matches_request(request, ack, worker_id),
 		'active_for_worker': _fetch_queue_rows(token, claimed_by=worker_id),
 		'active_without_owner': _fetch_queue_rows(token, null_claimed_by=True),
 	}
@@ -310,7 +314,7 @@ def cmd_wait_for_idle(args: argparse.Namespace) -> int:
 			)
 			return 0
 
-		if _ack_matches_request(request, ack) and not state['active_for_worker']:
+		if _ack_matches_request(request, ack, worker_id) and not state['active_for_worker']:
 			print(
 				json.dumps(
 					{
@@ -332,7 +336,7 @@ def cmd_wait_for_idle(args: argparse.Namespace) -> int:
 					'worker_id': worker_id,
 					'drain_request': request,
 					'drain_ack': ack,
-					'ack_matches_request': _ack_matches_request(request, ack),
+					'ack_matches_request': _ack_matches_request(request, ack, worker_id),
 					'active_for_worker': state['active_for_worker'],
 				},
 				indent=2,

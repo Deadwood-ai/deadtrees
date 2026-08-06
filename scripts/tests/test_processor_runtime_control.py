@@ -20,6 +20,10 @@ def _state(*, active_for_worker=None, active_without_owner=None):
 	}
 
 
+def _matching_ack():
+	return {'request_id': 'request-a', 'requested_at': 'now', 'acknowledged_by': 'worker-a'}
+
+
 def test_wait_for_idle_allows_stopped_worker_without_active_rows(monkeypatch):
 	monkeypatch.setattr(runtime_control, '_login', lambda: 'token')
 	monkeypatch.setattr(runtime_control, '_fetch_queue_state', lambda worker_id, **kwargs: _state())
@@ -54,13 +58,14 @@ def test_wait_for_idle_rejects_stopped_worker_recovery_with_active_row(monkeypat
 def test_wait_for_idle_reuses_login_and_skips_waiting_preview(monkeypatch):
 	login_calls = []
 	preview_calls = []
+	monkeypatch.setattr(runtime_control, '_worker_id', lambda: 'worker-a')
 	monkeypatch.setattr(runtime_control, '_login', lambda: login_calls.append(True) or 'token')
 	monkeypatch.setattr(
 		runtime_control,
 		'_load_drain_state',
 		lambda: (
 			{'request_id': 'request-a', 'requested_at': 'now'},
-			{'request_id': 'request-a', 'requested_at': 'now'},
+			_matching_ack(),
 		),
 	)
 	monkeypatch.setattr(runtime_control, '_fetch_queue_rows', lambda token, **kwargs: [])
@@ -80,6 +85,7 @@ def test_wait_for_idle_refreshes_expired_token_once(monkeypatch):
 	tokens = iter(['expired-token', 'fresh-token'])
 	login_calls = []
 	seen_tokens = []
+	monkeypatch.setattr(runtime_control, '_worker_id', lambda: 'worker-a')
 	monkeypatch.setattr(runtime_control, '_login', lambda: login_calls.append(True) or next(tokens))
 
 	def fetch_state(worker_id, *, token, include_waiting_preview):
@@ -89,7 +95,7 @@ def test_wait_for_idle_refreshes_expired_token_once(monkeypatch):
 			raise runtime_control.AuthenticationExpiredError('expired')
 		return {
 			**_state(),
-			'drain_ack': {'request_id': 'request-a', 'requested_at': 'now'},
+			'drain_ack': _matching_ack(),
 		}
 
 	monkeypatch.setattr(runtime_control, '_fetch_queue_state', fetch_state)
@@ -102,13 +108,14 @@ def test_wait_for_idle_refreshes_expired_token_once(monkeypatch):
 
 def test_wait_for_idle_reuses_login_across_multiple_polls(monkeypatch):
 	login_calls = []
+	monkeypatch.setattr(runtime_control, '_worker_id', lambda: 'worker-a')
 	states = iter(
 		[
 			_state(active_for_worker=[{'id': 1}]),
 			_state(active_for_worker=[{'id': 1}]),
 			{
 				**_state(),
-				'drain_ack': {'request_id': 'request-a', 'requested_at': 'now'},
+				'drain_ack': _matching_ack(),
 			},
 		]
 	)
@@ -141,3 +148,21 @@ def test_control_paths_support_absolute_host_override(monkeypatch, tmp_path):
 
 	assert runtime_control._drain_request_path() == tmp_path / 'drain-request.json'
 	assert runtime_control._drain_ack_path() == tmp_path / 'drain-ack.json'
+
+
+def test_wait_for_idle_rejects_acknowledgement_from_previous_worker_id(monkeypatch):
+	monkeypatch.setattr(runtime_control, '_login', lambda: 'token')
+	monkeypatch.setattr(
+		runtime_control,
+		'_fetch_queue_state',
+		lambda worker_id, **kwargs: {
+			**_state(),
+			'drain_ack': {'request_id': 'request-a', 'requested_at': 'now', 'acknowledged_by': 'worker-old'},
+		},
+	)
+	monotonic_values = iter([0.0, 2.0])
+	monkeypatch.setattr(runtime_control.time, 'monotonic', lambda: next(monotonic_values))
+	monkeypatch.setattr(runtime_control.time, 'sleep', lambda seconds: None)
+	args = argparse.Namespace(timeout_seconds=1, poll_seconds=0, allow_unacknowledged_stopped_worker=False)
+
+	assert runtime_control.cmd_wait_for_idle(args) == 1

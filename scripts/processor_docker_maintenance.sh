@@ -42,10 +42,15 @@ log() {
 	printf '%s: %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$*" >> "${LOG_FILE}"
 }
 
+if [ "$(id -u)" -ne 0 ]; then
+	log "Docker Snap maintenance must run as root"
+	exit 1
+fi
+
 require_clean_checkout() {
 	local dirty
 	dirty="$(
-		git status --porcelain --untracked-files=all -- \
+		git -c safe.directory="${REPO_DIR}" status --porcelain --untracked-files=all -- \
 			. \
 			':(exclude).local/locks' \
 			':(exclude)auto-deploy.log' \
@@ -58,11 +63,13 @@ require_clean_checkout() {
 }
 
 processor_availability() {
+	local container_id=""
 	local inspect_output=""
 	local status=""
 	local restarting=""
 
-	inspect_output="$(docker inspect deadtrees-processor-1 --format '{{.State.Status}} {{.State.Restarting}}' 2>/dev/null || true)"
+	container_id="$(docker compose -f "${COMPOSE_FILE}" ps -q processor 2>/dev/null || true)"
+	inspect_output="$(docker inspect "${container_id}" --format '{{.State.Status}} {{.State.Restarting}}' 2>/dev/null || true)"
 	if [ -n "${inspect_output}" ]; then
 		read -r status restarting <<< "${inspect_output}"
 		if [ "${status}" = "running" ] && [ "${restarting}" = "false" ]; then
@@ -145,9 +152,11 @@ wait_for_processor_running() {
 	local restarting=""
 	local restart_count=""
 	local exit_code=""
+	local container_id=""
 
 	while [ "${SECONDS}" -lt "${deadline}" ]; do
-		inspect_output="$(docker inspect deadtrees-processor-1 --format '{{.State.Status}} {{.State.Restarting}} {{.RestartCount}} {{.State.ExitCode}}' 2>/dev/null || true)"
+		container_id="$(docker compose -f "${COMPOSE_FILE}" ps -q processor 2>/dev/null || true)"
+		inspect_output="$(docker inspect "${container_id}" --format '{{.State.Status}} {{.State.Restarting}} {{.RestartCount}} {{.State.ExitCode}}' 2>/dev/null || true)"
 		if [ -n "${inspect_output}" ]; then
 			read -r status restarting restart_count exit_code <<< "${inspect_output}"
 			log "Waiting for processor readiness: status=${status} restarting=${restarting} restart_count=${restart_count} exit_code=${exit_code}"
@@ -166,7 +175,7 @@ wait_for_processor_running() {
 				last_restart_count="${restart_count}"
 			fi
 		else
-			log "Waiting for processor readiness: container deadtrees-processor-1 is not inspectable yet"
+			log "Waiting for processor readiness: Compose processor container is not inspectable yet"
 		fi
 		sleep "${READINESS_POLL_SECONDS}"
 	done
@@ -209,7 +218,12 @@ python3 "${STATUS_SCRIPT}" wait-for-idle \
 	--timeout-seconds "${STARTUP_TIMEOUT_SECONDS}" \
 	--poll-seconds "${READINESS_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
 wait_for_processor_running
-docker inspect deadtrees-processor-1 \
+processor_container_id="$(docker compose -f "${COMPOSE_FILE}" ps -q processor)"
+if [ -z "${processor_container_id}" ]; then
+	log "Processor readiness passed but Compose returned no processor container ID"
+	exit 1
+fi
+docker inspect "${processor_container_id}" \
 	--format 'Cmd={{json .Config.Cmd}} RestartPolicy={{.HostConfig.RestartPolicy.Name}} StartedAt={{.State.StartedAt}}' \
 	>> "${LOG_FILE}" 2>&1
 

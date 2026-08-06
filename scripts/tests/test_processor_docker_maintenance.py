@@ -41,6 +41,7 @@ class MaintenanceHarness:
 
 		self.bin_dir.mkdir()
 		make_executable(self.bin_dir / "flock", "#!/bin/sh\nexit 0\n")
+		make_executable(self.bin_dir / "id", "#!/bin/sh\necho \"${PROCESSOR_TEST_UID:-0}\"\n")
 		make_executable(
 			self.bin_dir / "python3",
 			f"#!/bin/sh\necho \"$@\" >> {self.python_log}\n"
@@ -54,6 +55,10 @@ class MaintenanceHarness:
 			self.bin_dir / "docker",
 			"#!/bin/sh\n"
 			f"echo \"$@\" >> {self.docker_log}\n"
+			"if [ \"$1\" = compose ] && echo \"$@\" | grep -q ' ps -q processor'; then\n"
+			f"  if [ -e {self.docker_running} ]; then echo processor-container-id; fi\n"
+			"  exit 0\n"
+			"fi\n"
 			"if [ \"$1\" = inspect ]; then\n"
 			f"  if [ -e {self.docker_running} ]; then\n"
 			"    case \"$*\" in *RestartCount*) echo 'running false 0 0' ;; *) echo 'running false' ;; esac\n"
@@ -113,6 +118,17 @@ class ProcessorDockerMaintenanceTest(unittest.TestCase):
 				"wait-for-idle --allow-unacknowledged-stopped-worker",
 				harness.python_log.read_text(),
 			)
+
+	def test_non_root_scheduled_user_cannot_run_snap_maintenance(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = MaintenanceHarness(Path(tmp_dir), processor_available=True)
+			harness.env["PROCESSOR_TEST_UID"] = "1000"
+
+			result = harness.run("--renew-hold-only")
+
+			self.assertNotEqual(result.returncode, 0)
+			self.assertFalse(harness.snap_log.exists())
+			self.assertIn("must run as root", (harness.repo / "processor-maintenance.log").read_text())
 
 
 if __name__ == "__main__":

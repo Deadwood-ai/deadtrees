@@ -65,6 +65,10 @@ planned daemon restart. The script renews the Snap hold, drains the worker,
 stops the container, refreshes Docker, re-applies the hold, restarts the
 processor, and logs to `processor-maintenance.log`.
 
+Run the maintenance script from root's cron. It intentionally refuses non-root
+execution because Snap hold and refresh operations are privileged. Keep
+`processor_auto_deploy.sh` in the normal checkout owner's crontab.
+
 Hold renewal does not depend on checkout cleanliness because it never builds or
 deploys repository code. Full maintenance still requires a clean checkout and
 uses the same stopped-worker/no-active-row recovery guard as auto-deploy.
