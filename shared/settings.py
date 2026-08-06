@@ -141,6 +141,18 @@ class Settings(BaseSettings):
 	PROCESSOR_USERNAME: str = 'processor@deadtrees.earth'
 	PROCESSOR_PASSWORD: str = 'processor'
 	PROCESSOR_WORKER_ID: str = ''
+	# Seconds the continuous processor waits before re-polling the queue when it
+	# is idle or intentionally drained for deployment/maintenance.
+	PROCESSOR_IDLE_BACKOFF_SECONDS: int = 10
+	# Consecutive loop-level exceptions before the worker exits so Docker exposes
+	# a restart state to host-side repair deployment.
+	PROCESSOR_LOOP_FAILURE_LIMIT: int = 3
+	PROCESSOR_RELEASE_SHA: str = 'unknown'
+	# Host-local control file used to stop this worker from claiming new tasks
+	# while it drains the current one for deployment or Docker maintenance.
+	PROCESSOR_DRAIN_REQUEST_PATH: str = '/data/processor-control/drain-request.json'
+	PROCESSOR_DRAIN_ACK_PATH: str = '/data/processor-control/drain-ack.json'
+	PROCESSOR_UNHEALTHY_PATH: str = '/data/processor-control/loop-unhealthy.json'
 	# Comma-separated task types this worker refuses to run (e.g. 'odm_processing').
 	# A queue entry whose task_types include any blacklisted type is skipped so a
 	# capable worker picks it up instead. See `processor_task_blacklist`.
@@ -367,6 +379,5 @@ class Settings(BaseSettings):
 	def processor_task_blacklist(self) -> list[str]:
 		"""Task type values this worker must not run, parsed from PROCESSOR_TASK_BLACKLIST."""
 		return [t.strip() for t in self.PROCESSOR_TASK_BLACKLIST.split(',') if t.strip()]
-
 
 settings = Settings()

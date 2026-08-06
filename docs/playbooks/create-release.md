@@ -9,9 +9,8 @@ monorepo without changing the existing continuous deployment model.
 - production database migrations apply from `main`
 - GitHub Releases are created automatically on pushes to `main`
 - the API Docker image is built and pushed as part of the release workflow
-- the production processor server has a host-local cron auto-deploy script that
-  pulls `main` into `/home/jj1049/prod/deadtrees` and rebuilds the processor
-  service
+- the production processor server runs one persistent processor container plus
+  host-local scripts for deploys and explicit Docker maintenance
 - release tags and notes document what reached `main`; they are not a separate
   approval gate
 
@@ -47,26 +46,106 @@ an explicit workflow fix. Manual migration repair or direct production SQL
 execution should be an explicitly approved emergency action only.
 
 Processing server automation is not represented as a GitHub workflow. It is a
-host-local cron setup on `processing-server`:
+host-local script setup on `processing-server`.
+
+Normal checkout-owner crontab:
 
 ```cron
-* * * * * cd /home/jj1049/prod/deadtrees && docker compose -f docker-compose.processor.yaml up
-* * * * * /home/jj1049/prod/deadtrees/auto_deploy_processor.sh
+* * * * * cd /home/jj1049/prod/deadtrees && ./scripts/processor_auto_deploy.sh
+0 3 * * * cd /home/jj1049/prod/deadtrees && PROCESSOR_SNAP_HOLD_DURATION=7d ./scripts/processor_docker_maintenance.sh --renew-hold-only
 ```
 
-`/home/jj1049/prod/deadtrees/auto_deploy_processor.sh`:
+The maintenance script runs as the checkout owner. Its only privileged action is
+delegated to a root-owned helper outside the writable checkout. Install the
+reviewed helper and its narrow sudo rule once before scheduling maintenance:
+
+```bash
+sudo install -o root -g root -m 0755 scripts/processor_snap_control.sh \
+  /usr/local/sbin/deadtrees-processor-snap-control
+printf '%s\n' 'jj1049 ALL=(root) NOPASSWD: /usr/local/sbin/deadtrees-processor-snap-control hold *, /usr/local/sbin/deadtrees-processor-snap-control refresh' \
+  | sudo tee /etc/sudoers.d/deadtrees-processor-snap-control >/dev/null
+sudo chmod 0440 /etc/sudoers.d/deadtrees-processor-snap-control
+sudo visudo -cf /etc/sudoers.d/deadtrees-processor-snap-control
+stat -c '%U %G %a %n' /usr/local/sbin/deadtrees-processor-snap-control \
+  /etc/sudoers.d/deadtrees-processor-snap-control
+test ! -w /usr/local/sbin/deadtrees-processor-snap-control
+sudo -n /usr/local/sbin/deadtrees-processor-snap-control hold 7d
+```
+
+The installed helper accepts only `hold DURATION` and `refresh` for the Docker
+Snap. Root never executes code, Compose configuration, or environment files from
+the checkout.
+
+### One-time legacy cron cutover
+
+Before the first persistent-worker rollout, back up and replace the installed
+legacy jobs. Preserve unrelated entries and verify both scheduled users before
+starting the new container:
+
+```bash
+cd /home/jj1049/prod/deadtrees
+mkdir -p .local/cron-backups
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+
+crontab -l > ".local/cron-backups/checkout-owner-${stamp}.cron" 2>/dev/null || true
+awk '!/auto_deploy_processor\.sh/ && !/docker compose .*docker-compose\.processor\.yaml up/ && !/processor_auto_deploy\.sh/ && !/processor_docker_maintenance\.sh/' \
+  ".local/cron-backups/checkout-owner-${stamp}.cron" > /tmp/deadtrees-checkout-owner.cron
+printf '%s\n' '* * * * * cd /home/jj1049/prod/deadtrees && ./scripts/processor_auto_deploy.sh' \
+  >> /tmp/deadtrees-checkout-owner.cron
+printf '%s\n' '0 3 * * * cd /home/jj1049/prod/deadtrees && PROCESSOR_SNAP_HOLD_DURATION=7d ./scripts/processor_docker_maintenance.sh --renew-hold-only' \
+  >> /tmp/deadtrees-checkout-owner.cron
+crontab /tmp/deadtrees-checkout-owner.cron
+
+sudo crontab -l > ".local/cron-backups/root-${stamp}.cron" 2>/dev/null || true
+awk '!/processor_docker_maintenance\.sh/' ".local/cron-backups/root-${stamp}.cron" \
+  > /tmp/deadtrees-root.cron
+sudo crontab /tmp/deadtrees-root.cron
+
+crontab -l
+sudo crontab -l
+! crontab -l | grep -E 'auto_deploy_processor|docker compose .*docker-compose\.processor\.yaml up'
+```
+
+Do not continue the rollout unless the checkout-owner output contains exactly
+one tracked auto-deploy job and one hold-renewal job, root's output contains no
+checkout-based processor job, and neither legacy launcher remains. Restore the
+timestamped backups if a verification fails.
+
+Do not reintroduce a per-minute `docker compose up` cron entry. The processor
+now runs continuously as `python -m processor.src.continuous_processor` with
+`restart: unless-stopped`, so Docker itself keeps the container alive between
+tasks and host reboots.
+
+`scripts/processor_auto_deploy.sh`:
 
 - operates on `/home/jj1049/prod/deadtrees`
+- acquires a host-local lock so deploy and maintenance operations cannot overlap
 - fetches `origin/main`
 - compares local `HEAD` with `origin/main`
-- runs `git pull origin main` when a new commit is available
+- pauses automatic retries after a drained deploy failure until an operator resumes them
+- creates a drain request so the running worker stops claiming new tasks
+- waits for the current host worker to finish its in-flight task
+- runs `git pull --ff-only origin main` when a new commit is available
 - runs `docker compose -f docker-compose.processor.yaml build processor tcd`
+- recreates the processor with `docker compose -f docker-compose.processor.yaml up -d --force-recreate processor`
+- clears the drain request after the new container is up
 - writes status to `/home/jj1049/prod/deadtrees/auto-deploy.log`
+
+If a deploy fails after draining, fix or replace the target release first, then
+run `./scripts/processor_auto_deploy.sh --resume`. The next cron run retries the
+deploy while the existing drain remains in place. Do not reset the bind-mounted
+checkout as an ad hoc rollback.
 
 `docker-compose.processor.yaml` builds the processor locally on the processing
 server and bind-mounts `./processor`, `./shared`, `./assets`, `/data`, and the
 Docker socket. It uses the NVIDIA runtime and does not consume the API image
 published by the release workflow.
+
+`scripts/processor_docker_maintenance.sh` is the only approved path for Docker
+Snap refreshes or daemon restarts on the processor host. It renews the Snap
+hold first, drains the worker, stops the container, runs `snap refresh docker`,
+re-applies the hold, restarts the processor, and logs the outcome to
+`processor-maintenance.log`.
 
 The `tcd` service is a build-only service (gated behind the `build` profile, so
 `docker compose up` never starts it). It exists solely so the deploy rebuilds the
@@ -90,10 +169,13 @@ playbook focused on verifying the existing production deployment path.
 Useful verification commands:
 
 ```bash
-ssh processing-server 'crontab -l | grep -E "auto_deploy_processor|docker compose -f docker-compose.processor"'
+ssh processing-server 'crontab -l | grep -E "processor_auto_deploy|processor_docker_maintenance"'
 ssh processing-server 'cd /home/jj1049/prod/deadtrees && git log -1 --oneline --decorate'
 ssh processing-server 'cd /home/jj1049/prod/deadtrees && tail -80 auto-deploy.log'
+ssh processing-server 'cd /home/jj1049/prod/deadtrees && python3 scripts/processor_runtime_control.py status'
+ssh processing-server 'snap refresh --time'
 ssh processing-server 'docker ps --format "{{.Names}}\t{{.Status}}\t{{.Image}}" | grep deadtrees-processor'
+ssh processing-server 'docker inspect deadtrees-processor-1 --format "Cmd={{json .Config.Cmd}} RestartPolicy={{.HostConfig.RestartPolicy.Name}}"'
 ```
 
 For changes that touch `supabase/**`, `api/**`, `processor/**`, or shared task

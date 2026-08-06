@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 import processor.src.processor as processor_module
+import processor.src.utils.queue_runtime as queue_runtime_module
 from processor.src import processing_notifications
 from processor.src.processor import background_process, process_task
 from shared.db import use_service_client
@@ -207,7 +208,7 @@ def test_process_task_success_path_with_refresh(monkeypatch):
 	monkeypatch.setattr(processor_module, 'verify_token', lambda token: {'id': 'processor-user'})
 	monkeypatch.setattr(processor_module, 'refresh_processor_token', lambda task, token=None: 'refreshed-token')
 	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'final-token')
-	monkeypatch.setattr(processor_module, 'use_client', lambda token: _FakeClient())
+	monkeypatch.setattr(queue_runtime_module, 'use_client', lambda token: _FakeClient())
 	monkeypatch.setattr(processor_module.logger, 'info', lambda *args, **kwargs: None)
 	monkeypatch.setattr(processor_module.logger, 'error', lambda *args, **kwargs: None)
 	monkeypatch.setattr(processor_module.logger, 'warning', lambda *args, **kwargs: None)

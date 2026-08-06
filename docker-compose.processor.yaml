@@ -5,14 +5,12 @@ services:
       context: .
       dockerfile: processor/Dockerfile
     network_mode: host
-    # command: python -m debugpy --listen 0.0.0.0:5678 --wait-for-client -m processor.src.processor
-    command: python -m processor.src.processor
-    # Self-heal if the processor container crashes (e.g. OOM collateral kill
-    # during a heavy ODM / treecover stage). Clean exits (exit 0 after finishing
-    # a task) are not restarted, so the existing cron-based polling model is
-    # preserved. Cap retries so a persistently broken container does not
-    # thrash forever.
-    restart: on-failure:5
+    # command: python -m debugpy --listen 0.0.0.0:5678 --wait-for-client -m processor.src.continuous_processor
+    command: python -m processor.src.continuous_processor
+    # Keep the persistent worker alive across crashes and host reboots. Planned
+    # deploys and Docker maintenance drain the worker explicitly before
+    # recreation, so the container should stay up between changes.
+    restart: unless-stopped
     # Give the graceful-shutdown handler time to re-queue the in-flight task on a
     # deploy/restart (SIGTERM) before Docker escalates to SIGKILL. Without this,
     # the default 10s can expire mid-stage and a healthy job gets misclassified as
@@ -42,6 +40,10 @@ services:
       - /etc/machine-id:/host/etc/machine-id:ro
       # Mount /data for processing directory access
       - /data:/data
+      # Host deploy/maintenance scripts and the worker share drain state here.
+      # Keep this separate from /data because Snap-packaged Docker can expose
+      # /data only inside its mount namespace, making it invisible to host tools.
+      - ${PROCESSOR_CONTROL_DIR:-./.local/processor-control}:/processor-control
     environment:
       BASE_DIR: /data
       # Persist the OpenCLIP weights on the /data mount (shared with the API) so
@@ -55,6 +57,12 @@ services:
       PROCESSOR_USERNAME: processor@deadtrees.earth
       PROCESSOR_PASSWORD: ${PROCESSOR_PASSWORD}
       PROCESSOR_WORKER_ID: ${PROCESSOR_WORKER_ID:-}
+      PROCESSOR_IDLE_BACKOFF_SECONDS: ${PROCESSOR_IDLE_BACKOFF_SECONDS:-10}
+      PROCESSOR_LOOP_FAILURE_LIMIT: ${PROCESSOR_LOOP_FAILURE_LIMIT:-3}
+      PROCESSOR_RELEASE_SHA: ${PROCESSOR_RELEASE_SHA:-unknown}
+      PROCESSOR_DRAIN_REQUEST_PATH: /processor-control/drain-request.json
+      PROCESSOR_DRAIN_ACK_PATH: /processor-control/drain-ack.json
+      PROCESSOR_UNHEALTHY_PATH: /processor-control/loop-unhealthy.json
       # Comma-separated task types this worker refuses to run (e.g. odm_processing).
       PROCESSOR_TASK_BLACKLIST: ${PROCESSOR_TASK_BLACKLIST:-}
       SSH_PRIVATE_KEY_PASSPHRASE: ${SSH_PRIVATE_KEY_PASSPHRASE}

@@ -3,9 +3,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import processor.src.processor as processor_module
+import processor.src.utils.queue_runtime as queue_runtime_module
 from shared.db import use_client
 from shared.settings import settings
 from shared.models import TaskTypeEnum, QueueTask, StatusEnum
+from processor.src.utils.drain_control import BackgroundProcessResult
 from shared.notifications.processing import ProcessingNotificationType
 from processor.src.processor import (
 	background_process, process_task, get_next_task,
@@ -67,9 +69,193 @@ def test_background_process_no_tasks():
 	# Run the background process with empty queue
 	background_process()
 
-	# Verify it completes without error
-	# (The function should return None when no tasks are found)
-	assert background_process() is None
+	# Verify it reports that no work was done when the queue is empty, so the
+	# continuous worker knows to back off instead of hot-looping.
+	assert background_process() is BackgroundProcessResult.IDLE
+
+
+@pytest.mark.unit
+def test_background_process_returns_false_while_drained(monkeypatch):
+	queue_reads = []
+	monkeypatch.setattr(processor_module.signal, 'signal', lambda *args, **kwargs: None)
+	monkeypatch.setattr(processor_module, 'login_verified', lambda username, password: ('token', object()))
+	monkeypatch.setattr(processor_module, 'get_worker_id', lambda: 'worker-a')
+	monkeypatch.setattr(processor_module, 'get_active_task', lambda token, worker_id: None)
+	monkeypatch.setattr(processor_module, 'is_drain_requested', lambda: True)
+	monkeypatch.setattr(processor_module, 'acknowledge_drain_request', lambda worker_id: None)
+	monkeypatch.setattr(processor_module, 'get_next_task', lambda token: queue_reads.append(token) or None)
+
+	assert background_process() is BackgroundProcessResult.IDLE
+	assert queue_reads == ['token']
+
+
+@pytest.mark.unit
+def test_background_process_returns_true_when_claimed_task_fails(monkeypatch):
+	task = QueueTask(
+		id=123,
+		dataset_id=456,
+		user_id='test-user',
+		task_types=[TaskTypeEnum.metadata],
+		priority=1,
+		is_processing=True,
+		claimed_by='worker-a',
+		current_position=1,
+		estimated_time=0.0,
+	)
+	logger_messages = []
+	health_events = []
+
+	class _SelectQuery:
+		def eq(self, field, value):
+			return self
+
+		def execute(self):
+			return type('Response', (), {'data': [{'current_status': 'idle'}]})()
+
+	class _FakeClient:
+		def table(self, name):
+			assert name == settings.statuses_table
+			return type('Table', (), {'select': lambda self, fields: _SelectQuery()})()
+
+		def __enter__(self):
+			return self
+
+		def __exit__(self, exc_type, exc, tb):
+			return False
+
+	monkeypatch.setattr(processor_module.signal, 'signal', lambda *args, **kwargs: None)
+	monkeypatch.setattr(processor_module, 'login_verified', lambda username, password: ('token', object()))
+	monkeypatch.setattr(processor_module, 'get_worker_id', lambda: 'worker-a')
+	monkeypatch.setattr(processor_module, 'get_active_task', lambda token, worker_id: None)
+	monkeypatch.setattr(processor_module, 'clear_loop_unhealthy', lambda: health_events.append('healthy'))
+	monkeypatch.setattr(processor_module, 'is_drain_requested', lambda: False)
+	monkeypatch.setattr(processor_module, 'get_next_task', lambda token: task)
+	monkeypatch.setattr(processor_module, 'is_dataset_uploaded_or_processed', lambda task, token: (True, False))
+	monkeypatch.setattr(processor_module, 'claim_task', lambda token, task, worker_id: task)
+	monkeypatch.setattr(processor_module, 'use_client', lambda token: _FakeClient())
+	monkeypatch.setattr(
+		processor_module,
+		'process_task',
+		lambda task, token: health_events.append('processing') or (_ for _ in ()).throw(RuntimeError('boom')),
+	)
+	monkeypatch.setattr(processor_module.logger, 'info', lambda *args, **kwargs: logger_messages.append(args[0]))
+
+	assert background_process() is BackgroundProcessResult.FAILED
+	assert health_events == ['healthy', 'processing']
+	assert any('Start processing queued task' in message for message in logger_messages)
+
+
+@pytest.mark.unit
+def test_background_process_releases_claim_when_drain_arrives_after_claim(monkeypatch):
+	task = QueueTask(
+		id=123,
+		dataset_id=456,
+		user_id='test-user',
+		task_types=[TaskTypeEnum.metadata],
+		priority=1,
+		is_processing=True,
+		claimed_by='worker-a',
+		current_position=1,
+		estimated_time=0.0,
+	)
+	released = []
+	drain_checks = iter([False, False, True])
+
+	monkeypatch.setattr(processor_module.signal, 'signal', lambda *args, **kwargs: None)
+	monkeypatch.setattr(processor_module, 'login_verified', lambda username, password: ('token', object()))
+	monkeypatch.setattr(processor_module, 'get_worker_id', lambda: 'worker-a')
+	monkeypatch.setattr(processor_module, 'get_active_task', lambda token, worker_id: None)
+	monkeypatch.setattr(processor_module, 'is_drain_requested', lambda: next(drain_checks))
+	monkeypatch.setattr(processor_module, 'acknowledge_drain_request', lambda worker_id: None)
+	monkeypatch.setattr(processor_module, 'get_next_task', lambda token: task)
+	monkeypatch.setattr(processor_module, 'is_dataset_uploaded_or_processed', lambda task, token: (True, False))
+	monkeypatch.setattr(processor_module, 'claim_task', lambda token, task, worker_id: task)
+	monkeypatch.setattr(processor_module, 'release_queue_task', lambda token, task: released.append(task.id))
+	monkeypatch.setattr(
+		processor_module,
+		'process_task',
+		lambda task, token: pytest.fail('drained worker should release the claim before starting work'),
+	)
+
+	assert background_process() is BackgroundProcessResult.IDLE
+	assert released == [task.id]
+
+
+def test_process_task_success_path_with_refresh(monkeypatch):
+	"""Successful stage execution should not fall into an error path."""
+
+	task = QueueTask(
+		id=123,
+		dataset_id=456,
+		user_id='test-user',
+		task_types=[TaskTypeEnum.metadata],
+		priority=1,
+		is_processing=False,
+		claimed_by='worker-a',
+		current_position=1,
+		estimated_time=0.0,
+	)
+	stage_calls = []
+	deleted_filters = []
+	processing_updates = []
+
+	class _DeleteQuery:
+		def eq(self, field, value):
+			deleted_filters.append((field, value))
+			return self
+
+		def execute(self):
+			return None
+
+	class _UpdateQuery:
+		def __init__(self, payload):
+			self.payload = payload
+
+		def eq(self, field, value):
+			assert field == 'id'
+			assert self.payload == {'is_processing': True}
+			processing_updates.append(value)
+			return self
+
+		def execute(self):
+			return None
+
+	class _TableQuery:
+		def update(self, payload):
+			return _UpdateQuery(payload)
+
+		def delete(self):
+			return _DeleteQuery()
+
+	class _FakeClient:
+		def table(self, name):
+			assert name == settings.queue_table
+			return _TableQuery()
+
+		def __enter__(self):
+			return self
+
+		def __exit__(self, exc_type, exc, tb):
+			return False
+
+	monkeypatch.setattr(processor_module, 'verify_token', lambda token: {'id': 'processor-user'})
+	monkeypatch.setattr(processor_module, 'refresh_processor_token', lambda task, token=None: 'refreshed-token')
+	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'final-token')
+	monkeypatch.setattr(queue_runtime_module, 'use_client', lambda token: _FakeClient())
+	monkeypatch.setattr(processor_module.logger, 'info', lambda *args, **kwargs: None)
+	monkeypatch.setattr(processor_module.logger, 'error', lambda *args, **kwargs: None)
+	monkeypatch.setattr(processor_module.logger, 'warning', lambda *args, **kwargs: None)
+	monkeypatch.setattr(
+		processor_module,
+		'process_metadata',
+		lambda current_task, processing_path: stage_calls.append((current_task.id, str(processing_path))),
+	)
+
+	process_task(task, 'initial-token')
+
+	assert stage_calls == [(task.id, str(settings.processing_path))]
+	assert processing_updates == []
+	assert deleted_filters == [('id', task.id), ('claimed_by', 'worker-a')]
 
 
 @pytest.mark.unit

@@ -1,0 +1,415 @@
+import os
+import shutil
+import stat
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+
+SCRIPT = Path(__file__).parents[1] / "processor_auto_deploy.sh"
+
+
+def run(*args: str, cwd: Path, check: bool = True, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+	return subprocess.run(
+		args,
+		cwd=cwd,
+		check=check,
+		text=True,
+		capture_output=True,
+		env=env,
+	)
+
+
+def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+	return run("git", *args, cwd=repo)
+
+
+def make_executable(path: Path, body: str) -> None:
+	path.write_text(body)
+	path.chmod(path.stat().st_mode | stat.S_IEXEC)
+
+
+class DeployHarness:
+	def __init__(self, tmp_path: Path, *, processor_available: bool = True):
+		self.tmp_path = tmp_path
+		self.origin = tmp_path / "origin.git"
+		self.seed = tmp_path / "seed"
+		self.worktree = tmp_path / "worktree"
+		self.upstream = tmp_path / "upstream"
+		self.bin_dir = tmp_path / "bin"
+		self.control_dir = tmp_path / "control"
+		self.python_log = tmp_path / "python.log"
+		self.docker_log = tmp_path / "docker.log"
+		self.docker_running = tmp_path / "docker-running"
+		self.inspect_failed_once = tmp_path / "inspect-failed-once"
+		self.build_failed_once = tmp_path / "build-failed-once"
+		self.activation_write_failed_once = tmp_path / "activation-write-failed-once"
+		self.wait_hook_marker = tmp_path / "wait-hook-ran"
+		self.waiter_fd_log = tmp_path / "waiter-fd.log"
+		self.unhealthy_marker = self.control_dir / "loop-unhealthy.json"
+
+		run("git", "init", "--bare", "--initial-branch=main", str(self.origin), cwd=tmp_path)
+		run("git", "init", "--initial-branch=main", str(self.seed), cwd=tmp_path)
+		git(self.seed, "config", "user.name", "DeadTrees Tests")
+		git(self.seed, "config", "user.email", "tests@deadtrees.example")
+		(self.seed / "scripts").mkdir()
+		(self.seed / "scripts" / "lib").mkdir()
+		(self.seed / "README.md").write_text("initial\n")
+		(self.seed / "docker-compose.processor.yaml").write_text("services: {}\n")
+		(self.seed / ".gitignore").write_text("/.local\n.env\n")
+		shutil.copy2(SCRIPT, self.seed / "scripts" / "processor_auto_deploy.sh")
+		shutil.copy2(SCRIPT.parent / "lib" / "processor_runtime.sh", self.seed / "scripts" / "lib" / "processor_runtime.sh")
+		(self.seed / "scripts" / "processor_runtime_control.py").write_text("# test stub\n")
+		git(self.seed, "add", ".")
+		git(self.seed, "commit", "-m", "initial")
+		git(self.seed, "remote", "add", "origin", str(self.origin))
+		git(self.seed, "push", "-u", "origin", "main")
+
+		run("git", "clone", str(self.origin), str(self.worktree), cwd=tmp_path)
+		run("git", "clone", str(self.origin), str(self.upstream), cwd=tmp_path)
+		for repo in (self.worktree, self.upstream):
+			git(repo, "config", "user.name", "DeadTrees Tests")
+			git(repo, "config", "user.email", "tests@deadtrees.example")
+
+		self.bin_dir.mkdir()
+		make_executable(
+			self.bin_dir / "python3",
+			"#!/bin/sh\n"
+			f"echo \"$@\" >> {self.python_log}\n"
+			"if echo \"$@\" | grep -q wait-for-idle; then\n"
+			f"  if ( : <&9 ) 2>/dev/null; then echo \"inherited $*\" >> {self.waiter_fd_log}; else echo \"closed $*\" >> {self.waiter_fd_log}; fi\n"
+			"fi\n"
+			"if echo \"$@\" | grep -q wait-for-idle && "
+			f"[ -n \"${{PROCESSOR_TEST_WAIT_HOOK:-}}\" ] && [ ! -e {self.wait_hook_marker} ]; then\n"
+			f"  touch {self.wait_hook_marker}\n"
+			"  sh \"$PROCESSOR_TEST_WAIT_HOOK\"\n"
+			"fi\n"
+			"if echo \"$@\" | grep -q clear-ack && [ -n \"${PROCESSOR_TEST_ACK_PATH:-}\" ]; then\n"
+			"  rm -f \"$PROCESSOR_TEST_ACK_PATH\"\n"
+			"fi\n"
+			"if echo \"$@\" | grep -q activation-ready; then\n"
+			"  exit \"${PROCESSOR_TEST_ACTIVATION_READY:-1}\"\n"
+			"fi\n"
+			"if echo \"$@\" | grep -q worker-health; then\n"
+			"  if [ -e \"${PROCESSOR_TEST_UNHEALTHY_PATH:-}\" ]; then exit 1; fi\n"
+			"  exit 0\n"
+			"fi\n"
+			"exit 0\n",
+		)
+		make_executable(self.bin_dir / "flock", "#!/bin/sh\nexit 0\n")
+		make_executable(
+			self.bin_dir / "mv",
+			"#!/bin/sh\n"
+			"target=''\n"
+			"for arg in \"$@\"; do target=\"$arg\"; done\n"
+			"if [ -n \"${PROCESSOR_TEST_ACTIVATION_WRITE_FAIL_ONCE:-}\" ] && "
+			"echo \"$target\" | grep -q 'processor-activated-sha$' && "
+			f"[ ! -e {self.activation_write_failed_once} ]; then\n"
+			f"  touch {self.activation_write_failed_once}\n"
+			"  exit 1\n"
+			"fi\n"
+			"exec /bin/mv \"$@\"\n",
+		)
+		make_executable(
+			self.bin_dir / "docker",
+			"#!/bin/sh\n"
+			f"echo \"$@\" >> {self.docker_log}\n"
+			"if [ \"$1\" = compose ] && echo \"$@\" | grep -q ' ps -q processor'; then\n"
+			f"  if [ -e {self.docker_running} ]; then echo processor-container-id; fi\n"
+			"  exit 0\n"
+			"fi\n"
+			"if [ \"$1\" = inspect ]; then\n"
+			f"  if [ -n \"${{PROCESSOR_TEST_INSPECT_FAIL_ONCE:-}}\" ] && [ ! -e {self.inspect_failed_once} ]; then\n"
+			f"    touch {self.inspect_failed_once}\n"
+			"    exit 1\n"
+			"  fi\n"
+			f"  if [ -e {self.docker_running} ]; then\n"
+			"    case \"$*\" in *RestartCount*) echo 'running false 0 0' ;; *) echo 'running false' ;; esac\n"
+			"    exit 0\n"
+			"  fi\n"
+			"  exit 1\n"
+			"fi\n"
+			"if [ \"$1\" = compose ] && echo \"$@\" | grep -q ' up '; then\n"
+			f"  touch {self.docker_running}\n"
+			"fi\n"
+			"if [ \"$1\" = compose ] && echo \"$@\" | grep -q ' build ' && "
+			f"[ -n \"${{PROCESSOR_TEST_BUILD_FAIL_ONCE:-}}\" ] && [ ! -e {self.build_failed_once} ]; then\n"
+			f"  touch {self.build_failed_once}\n"
+			"  exit 1\n"
+			"fi\n"
+			"exit 0\n",
+		)
+		if processor_available:
+			self.docker_running.touch()
+
+		self.env = os.environ.copy()
+		self.env["PATH"] = f"{self.bin_dir}:{self.env['PATH']}"
+		self.env["PROCESSOR_DRAIN_REQUEST_PATH"] = str(self.control_dir / "drain-request.json")
+		self.env["PROCESSOR_DRAIN_ACK_PATH"] = str(self.control_dir / "drain-ack.json")
+		self.env["PROCESSOR_DRAIN_POLL_SECONDS"] = "0"
+		self.env["PROCESSOR_UNAVAILABLE_POLL_SECONDS"] = "0"
+		self.env["PROCESSOR_READINESS_POLL_SECONDS"] = "0"
+		self.env["PROCESSOR_STARTUP_TIMEOUT_SECONDS"] = "2"
+		self.env["PROCESSOR_TEST_UNHEALTHY_PATH"] = str(self.unhealthy_marker)
+
+	def push_change(self, text: str) -> str:
+		(self.upstream / "README.md").write_text(text)
+		git(self.upstream, "add", "README.md")
+		git(self.upstream, "commit", "-m", text.strip())
+		git(self.upstream, "push", "origin", "main")
+		return git(self.upstream, "rev-parse", "HEAD").stdout.strip()
+
+	def run_deploy(self, *script_args: str, wait_hook: Path | None = None) -> subprocess.CompletedProcess[str]:
+		env = self.env.copy()
+		if wait_hook is not None:
+			env["PROCESSOR_TEST_WAIT_HOOK"] = str(wait_hook)
+		return run(
+			"bash",
+			"scripts/processor_auto_deploy.sh",
+			*script_args,
+			cwd=self.worktree,
+			check=False,
+			env=env,
+		)
+
+
+class ProcessorAutoDeployTest(unittest.TestCase):
+	def test_target_release_runs_its_activation_logic_before_marking_active(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			activation_hook = harness.tmp_path / "target-activation-ran"
+			target_script = harness.upstream / "scripts" / "processor_auto_deploy.sh"
+			target_script.write_text(
+				target_script.read_text().replace(
+					'log "Deployment complete ($(git rev-parse --short HEAD))"',
+					f'touch {activation_hook}\nlog "Deployment complete ($(git rev-parse --short HEAD))"',
+				)
+			)
+			git(harness.upstream, "add", "scripts/processor_auto_deploy.sh")
+			git(harness.upstream, "commit", "-m", "add target activation hook")
+			git(harness.upstream, "push", "origin", "main")
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertTrue(activation_hook.exists())
+
+	def test_no_change_run_completes_interrupted_activation(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			self.assertEqual(harness.run_deploy().returncode, 0)
+			harness.env["PROCESSOR_TEST_ACTIVATION_READY"] = "0"
+			before = harness.python_log.read_text().count("clear-drain")
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertEqual(harness.python_log.read_text().count("clear-drain"), before + 1)
+
+	def test_activation_marker_failure_keeps_drain_and_pauses_deploy(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			harness.push_change("marker failure\n")
+			harness.env["PROCESSOR_TEST_ACTIVATION_WRITE_FAIL_ONCE"] = "1"
+
+			result = harness.run_deploy()
+
+			self.assertNotEqual(result.returncode, 0)
+			self.assertFalse((harness.worktree / ".local" / "processor-activated-sha").exists())
+			self.assertTrue((harness.worktree / ".local" / "processor-deploy-paused").exists())
+			self.assertNotIn("clear-drain", harness.python_log.read_text())
+
+	def test_background_drain_waiter_does_not_inherit_runtime_lock(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			harness.push_change("lock-safe deploy\n")
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			observations = harness.waiter_fd_log.read_text().splitlines()
+			self.assertTrue(observations[0].startswith("closed "), observations)
+			self.assertIn("record-worker-id", harness.python_log.read_text())
+
+	def test_rejects_local_ahead_checkout_before_drain(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			(harness.worktree / "README.md").write_text("initial\nlocal ahead work\n")
+			git(harness.worktree, "add", "README.md")
+			git(harness.worktree, "commit", "-m", "local ahead")
+
+			result = harness.run_deploy()
+
+			self.assertNotEqual(result.returncode, 0)
+			self.assertFalse(harness.python_log.exists())
+			self.assertIn(
+				"Refusing deploy because HEAD contains local commits outside origin/main",
+				(harness.worktree / "auto-deploy.log").read_text(),
+			)
+
+	def test_deploys_exact_fetched_sha_when_origin_advances_during_drain(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			selected_sha = harness.push_change("selected deploy\n")
+			hook = harness.tmp_path / "advance-origin.sh"
+			hook.write_text(
+				f"cd {harness.upstream}\n"
+				"printf 'later deploy\\n' > README.md\n"
+				"git add README.md\n"
+				"git commit -m 'later deploy'\n"
+				"git push origin main\n"
+			)
+
+			first_result = harness.run_deploy(wait_hook=hook)
+
+			self.assertEqual(first_result.returncode, 0, first_result.stderr)
+			self.assertEqual(git(harness.worktree, "rev-parse", "HEAD").stdout.strip(), selected_sha)
+			later_sha = git(harness.upstream, "rev-parse", "HEAD").stdout.strip()
+			self.assertNotEqual(selected_sha, later_sha)
+
+			second_result = harness.run_deploy()
+
+			self.assertEqual(second_result.returncode, 0, second_result.stderr)
+			self.assertEqual(git(harness.worktree, "rev-parse", "HEAD").stdout.strip(), later_sha)
+
+	def test_recovery_deploy_stops_unavailable_worker_and_allows_missing_ack(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir), processor_available=False)
+			harness.push_change("repair deploy\n")
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertIn("compose -f", harness.docker_log.read_text())
+			self.assertIn("stop processor", harness.docker_log.read_text())
+			self.assertIn(
+				"wait-for-idle --allow-unacknowledged-stopped-worker",
+				harness.python_log.read_text(),
+			)
+
+	def test_recovery_deploy_stops_running_worker_with_persisted_loop_failure(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			harness.push_change("repair unhealthy loop\n")
+			harness.control_dir.mkdir(parents=True)
+			harness.unhealthy_marker.write_text('{"failure_count": 3}\n')
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertIn("stop processor", harness.docker_log.read_text())
+			self.assertIn(
+				"wait-for-idle --allow-unacknowledged-stopped-worker",
+				harness.python_log.read_text(),
+			)
+
+	def test_recovery_deploy_rechecks_worker_liveness_while_waiting_for_ack(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			harness.push_change("repair deploy\n")
+			hook = harness.tmp_path / "crash-worker.sh"
+			hook.write_text(f"rm -f {harness.docker_running}\nsleep 10\n")
+
+			result = harness.run_deploy(wait_hook=hook)
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertIn("stop processor", harness.docker_log.read_text())
+			self.assertIn(
+				"wait-for-idle --allow-unacknowledged-stopped-worker",
+				harness.python_log.read_text(),
+			)
+			self.assertIn(
+				"Processor became unavailable while draining",
+				(harness.worktree / "auto-deploy.log").read_text(),
+			)
+
+	def test_single_failed_inspect_does_not_stop_running_worker(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			harness.push_change("normal deploy\n")
+			harness.env["PROCESSOR_TEST_INSPECT_FAIL_ONCE"] = "1"
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertNotIn("stop processor", harness.docker_log.read_text())
+			self.assertIn("ps -q processor", harness.docker_log.read_text())
+			self.assertNotIn("inspect deadtrees-processor-1", harness.docker_log.read_text())
+
+	def test_custom_control_directory_ack_is_cleared_through_runtime_control(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			harness.push_change("custom paths\n")
+			custom_ack = harness.tmp_path / "env-only-control" / "ack.json"
+			custom_ack.parent.mkdir()
+			custom_ack.write_text("stale\n")
+			(harness.worktree / ".env").write_text(f"PROCESSOR_CONTROL_DIR={custom_ack.parent}\n")
+			(harness.worktree / ".git" / "info" / "exclude").write_text(".env\n")
+			harness.env.pop("PROCESSOR_DRAIN_REQUEST_PATH")
+			harness.env.pop("PROCESSOR_DRAIN_ACK_PATH")
+			harness.env["PROCESSOR_TEST_ACK_PATH"] = str(custom_ack)
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertFalse(custom_ack.exists())
+			self.assertIn("clear-ack", harness.python_log.read_text())
+
+	def test_failed_deploy_requires_explicit_resume_before_retry(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			target_sha = harness.push_change("retry deploy\n")
+			harness.env["PROCESSOR_TEST_BUILD_FAIL_ONCE"] = "1"
+
+			first_result = harness.run_deploy()
+
+			self.assertNotEqual(first_result.returncode, 0)
+			self.assertEqual(git(harness.worktree, "rev-parse", "HEAD").stdout.strip(), target_sha)
+			self.assertFalse((harness.worktree / ".local" / "processor-activated-sha").exists())
+			self.assertTrue((harness.worktree / ".local" / "processor-deploy-paused").exists())
+
+			second_result = harness.run_deploy()
+
+			self.assertEqual(second_result.returncode, 0, second_result.stderr)
+			self.assertFalse((harness.worktree / ".local" / "processor-activated-sha").exists())
+
+			resume_result = harness.run_deploy("--resume")
+			third_result = harness.run_deploy()
+
+			self.assertEqual(resume_result.returncode, 0, resume_result.stderr)
+			self.assertEqual(third_result.returncode, 0, third_result.stderr)
+			self.assertFalse((harness.worktree / ".local" / "processor-deploy-paused").exists())
+			self.assertEqual(
+				(harness.worktree / ".local" / "processor-activated-sha").read_text().strip(),
+				target_sha,
+			)
+
+	def test_paused_deploy_does_not_apply_new_remote_sha_until_resumed(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			activated_sha = git(harness.worktree, "rev-parse", "HEAD").stdout.strip()
+
+			initial_result = harness.run_deploy()
+			self.assertEqual(initial_result.returncode, 0, initial_result.stderr)
+			self.assertEqual(
+				(harness.worktree / ".local" / "processor-activated-sha").read_text().strip(),
+				activated_sha,
+			)
+
+			harness.push_change("failed B\n")
+			harness.env["PROCESSOR_TEST_BUILD_FAIL_ONCE"] = "1"
+			self.assertNotEqual(harness.run_deploy().returncode, 0)
+
+			new_target_sha = harness.push_change("fixed C\n")
+			paused_result = harness.run_deploy()
+			self.assertEqual(paused_result.returncode, 0, paused_result.stderr)
+			self.assertNotEqual(git(harness.worktree, "rev-parse", "HEAD").stdout.strip(), new_target_sha)
+
+			self.assertEqual(harness.run_deploy("--resume").returncode, 0)
+			resumed_result = harness.run_deploy()
+			self.assertEqual(resumed_result.returncode, 0, resumed_result.stderr)
+			self.assertEqual(
+				(harness.worktree / ".local" / "processor-activated-sha").read_text().strip(),
+				new_target_sha,
+			)

@@ -3,7 +3,6 @@ import signal
 import sys
 import docker
 import socket
-from datetime import datetime, timezone
 from pathlib import Path
 from processor.src.process_geotiff import process_geotiff
 from processor.src.process_odm import process_odm
@@ -27,6 +26,19 @@ from .process_embeddings import process_embeddings
 from .process_metadata import process_metadata
 from .exceptions import AuthenticationError, ProcessingError
 from .utils.linear_issues import create_processing_failure_issue
+from .utils.drain_control import (
+	BackgroundProcessResult,
+	acknowledge_drain_request,
+	clear_loop_unhealthy,
+	is_drain_requested,
+)
+from .utils.queue_runtime import (
+	claim_task,
+	delete_queue_task,
+	get_active_task,
+	get_next_task,
+	release_queue_task,
+)
 from shared.logging import LogContext, LogCategory, UnifiedLogger, SupabaseHandler
 
 # Initialize logger with proper cleanup
@@ -211,196 +223,6 @@ def are_requested_stages_complete(status_data: dict, task_types: list) -> bool:
 		for flag in _stage_done_flags(done_flags)
 	]
 	return bool(requested) and all(status_data.get(done_flag, False) for done_flag in requested)
-
-
-def get_task_blacklist() -> list[str]:
-	"""Return the validated set of task types this worker refuses to run.
-
-	Unknown entries in PROCESSOR_TASK_BLACKLIST are dropped with a warning so a
-	typo can't silently blacklist nothing (or everything).
-	"""
-	blacklist = []
-	for value in settings.processor_task_blacklist:
-		task_type = TaskTypeEnum.from_string(value)
-		if task_type is None:
-			logger.warning(f'Ignoring unknown task type in PROCESSOR_TASK_BLACKLIST: {value!r}')
-			continue
-		blacklist.append(task_type.value)
-	return blacklist
-
-
-def get_next_task(token: str) -> QueueTask:
-	"""Get the next task (QueueTask class) in the queue from supabase.
-
-	Queue entries whose `task_types` include any type in this worker's
-	blacklist (PROCESSOR_TASK_BLACKLIST) are skipped, so the highest-priority
-	task this worker is capable of running is returned instead.
-
-	Args:
-	    token (str): Client access token for supabase
-
-	Returns:
-	    QueueTask: The next task in the queue as a QueueTask class instance
-	"""
-	blacklist = get_task_blacklist()
-	with use_client(token) as client:
-		query = client.table(settings.queue_position_table).select('*')
-		if blacklist:
-			# Skip rows whose task_types array overlaps the blacklist.
-			query = query.not_.overlaps('task_types', blacklist)
-		response = query.limit(1).execute()
-	if not response.data or len(response.data) == 0:
-		return None
-	return QueueTask(**response.data[0])
-
-
-def _queue_task_from_raw_row(task_data: dict, current_position: int = -1, estimated_time: float | None = None) -> QueueTask:
-	return QueueTask(
-		id=task_data['id'],
-		dataset_id=task_data['dataset_id'],
-		user_id=task_data['user_id'],
-		priority=task_data['priority'],
-		is_processing=task_data['is_processing'],
-		claimed_by=task_data.get('claimed_by'),
-		claimed_at=task_data.get('claimed_at'),
-		current_position=current_position,
-		estimated_time=estimated_time,
-		task_types=task_data['task_types'],
-	)
-
-
-def _is_missing_queue_claim_column_error(error: Exception) -> bool:
-	message = str(error).lower()
-	return ('claimed_by' in message or 'claimed_at' in message) and (
-		'column' in message or 'schema cache' in message
-	)
-
-
-def get_active_task(token: str, worker_id: str) -> QueueTask | None:
-	"""Get this worker's task still marked as actively processing in the raw queue table.
-
-	Active tasks are excluded from `v2_queue_positions`, so crash recovery must
-	inspect `v2_queue` directly before looking for waiting work.
-	"""
-	with use_client(token) as client:
-		try:
-			response = (
-				client.table(settings.queue_table)
-				.select('*')
-				.eq('is_processing', True)
-				.eq('claimed_by', worker_id)
-				.order('priority', desc=True)
-				.order('created_at')
-				.limit(1)
-				.execute()
-			)
-			if not response.data or len(response.data) == 0:
-				response = (
-					client.table(settings.queue_table)
-					.select('*')
-					.eq('is_processing', True)
-					.is_('claimed_by', 'null')
-					.order('priority', desc=True)
-					.order('created_at')
-					.limit(1)
-					.execute()
-				)
-				if response.data:
-					legacy_task = response.data[0]
-					response = (
-						client.table(settings.queue_table)
-						.update({'claimed_by': worker_id, 'claimed_at': datetime.now(timezone.utc).isoformat()})
-						.eq('id', legacy_task['id'])
-						.eq('is_processing', True)
-						.is_('claimed_by', 'null')
-						.execute()
-					)
-		except Exception as e:
-			if not _is_missing_queue_claim_column_error(e):
-				raise
-			logger.warning('Queue claim columns are not available yet; falling back to legacy active-task recovery')
-			response = (
-				client.table(settings.queue_table)
-				.select('*')
-				.eq('is_processing', True)
-				.order('priority', desc=True)
-				.order('created_at')
-				.limit(1)
-				.execute()
-			)
-	if not response.data or len(response.data) == 0:
-		return None
-
-	return _queue_task_from_raw_row(response.data[0])
-
-
-def claim_task(token: str, task: QueueTask, worker_id: str) -> QueueTask | None:
-	"""Atomically claim a waiting queue row for this processor worker."""
-	claimed_at = datetime.now(timezone.utc).isoformat()
-	payload = {
-		'is_processing': True,
-		'claimed_by': worker_id,
-		'claimed_at': claimed_at,
-	}
-
-	with use_client(token) as client:
-		try:
-			response = (
-				client.table(settings.queue_table)
-				.update(payload)
-				.eq('id', task.id)
-				.eq('is_processing', False)
-				.is_('claimed_by', 'null')
-				.execute()
-			)
-		except Exception as e:
-			if not _is_missing_queue_claim_column_error(e):
-				raise
-			logger.warning('Queue claim columns are not available yet; falling back to legacy queue claim')
-			response = (
-				client.table(settings.queue_table)
-				.update({'is_processing': True})
-				.eq('id', task.id)
-				.eq('is_processing', False)
-				.execute()
-			)
-
-	if not response.data or len(response.data) == 0:
-		return None
-
-	claimed = _queue_task_from_raw_row(
-		response.data[0],
-		current_position=task.current_position,
-		estimated_time=task.estimated_time,
-	)
-	return claimed
-
-
-def _apply_queue_owner_filter(query, task: QueueTask):
-	if task.claimed_by:
-		return query.eq('claimed_by', task.claimed_by)
-	return query
-
-
-def delete_queue_task(token: str, task: QueueTask):
-	with use_client(token) as client:
-		query = client.table(settings.queue_table).delete().eq('id', task.id)
-		_apply_queue_owner_filter(query, task).execute()
-
-
-def release_queue_task(token: str, task: QueueTask):
-	with use_client(token) as client:
-		query = (
-			client.table(settings.queue_table)
-			.update({'is_processing': False, 'claimed_by': None, 'claimed_at': None})
-			.eq('id', task.id)
-		)
-		try:
-			_apply_queue_owner_filter(query, task).execute()
-		except Exception as e:
-			if not _is_missing_queue_claim_column_error(e):
-				raise
-			client.table(settings.queue_table).update({'is_processing': False}).eq('id', task.id).execute()
 
 
 def is_dataset_uploaded_or_processed(task: QueueTask, token: str) -> tuple:
@@ -831,8 +653,32 @@ def process_task(task: QueueTask, token: str):
 			shutil.rmtree(settings.processing_path, ignore_errors=True)
 
 
-def background_process():
-	"""Recover this worker's active task, then atomically claim and process one waiting task."""
+def background_process() -> BackgroundProcessResult:
+	"""
+	Process the next healthy task from the queue, if there is one.
+
+	Returns WORKED when this worker claimed and completed a task, FAILED when it
+	claimed a task but the processing path raised after bookkeeping, and IDLE
+	when the queue has no ready work or the host requested a drain.
+
+	On each call this function:
+	1. Logs in as the processor service account.
+	2. Installs a graceful-shutdown handler so a deploy/restart (SIGTERM) cleanly
+	   re-queues the in-flight task for retry instead of leaving it stranded.
+	3. Handles this worker's stale `is_processing=true` queue row left behind by
+	   a previous run. Because graceful stops self-clean via the shutdown handler,
+	   a leftover active row can only mean a hard kill (SIGKILL/OOM) or hard crash:
+	   - If all requested stages are already done, the row is just removed.
+	   - Otherwise it is a genuine, non-retryable crash: the dataset is marked
+	     errored, a Linear issue is filed, and the task is removed from the queue.
+	     OOM/bug crashes are deterministic, so retrying only loops and wastes
+	     compute — we deliberately do not retry them.
+	4. Detects crashes the same way for the next waiting task, then processes the
+	   first healthy, ready task and returns.
+
+	Multiple workers can read the same waiting row, but only one can atomically
+	claim it by flipping `is_processing=false` to true and recording `claimed_by`.
+	"""
 	# Install graceful-shutdown handlers so deploys/restarts re-queue cleanly.
 	signal.signal(signal.SIGTERM, _handle_graceful_shutdown)
 	signal.signal(signal.SIGINT, _handle_graceful_shutdown)
@@ -846,6 +692,10 @@ def background_process():
 
 	while True:
 		active_task = None if active_recovery_attempted else get_active_task(token, worker_id)
+		# A successful active-queue poll proves the restarted worker can reach the
+		# queue. Clear any persisted crash-loop marker before recovery or processing
+		# can become long-running, so host maintenance does not stop healthy work.
+		clear_loop_unhealthy()
 		active_recovery_attempted = True
 		if active_task is not None:
 			logger.warning(
@@ -909,11 +759,22 @@ def background_process():
 				logger.warning(f'Keeping failed task {active_task.id} until finalization recovers: {finalization_error}')
 			continue
 
+		if is_drain_requested():
+			# Exercise the release's queue-read contract before advertising readiness.
+			# This is read-only: no task is claimed while a drain is active.
+			get_next_task(token)
+			acknowledge_drain_request(worker_id)
+			return BackgroundProcessResult.IDLE
+
 		task = get_next_task(token)
 		if task is None:
 			print('No tasks in the queue.')
 			_reconcile_processing_notifications_safely()
-			return
+			return BackgroundProcessResult.IDLE
+
+		if is_drain_requested():
+			acknowledge_drain_request(worker_id)
+			return BackgroundProcessResult.IDLE
 
 		is_ready, has_error = is_dataset_uploaded_or_processed(task, token)
 
@@ -939,7 +800,7 @@ def background_process():
 			continue
 
 		if not is_ready:
-			# Not uploaded yet - skip, try again next cron run
+			# Not uploaded yet - skip, try again on a later poll
 			logger.info(
 				f'Skipping task {task.id} - dataset not uploaded yet; will retry later',
 				LogContext(
@@ -947,7 +808,7 @@ def background_process():
 				),
 			)
 			_reconcile_processing_notifications_safely()
-			return
+			return BackgroundProcessResult.IDLE
 
 		claimed_task = claim_task(token, task, worker_id)
 		if claimed_task is None:
@@ -959,6 +820,11 @@ def background_process():
 			)
 			continue
 		task = claimed_task
+
+		if is_drain_requested():
+			acknowledge_drain_request(worker_id)
+			release_queue_task(token, task)
+			return BackgroundProcessResult.IDLE
 
 		# CRASH DETECTION: check if a previous run crashed mid-processing
 		with use_client(token) as client:
@@ -981,9 +847,13 @@ def background_process():
 				category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
 			),
 		)
-		process_task(task, token=token)
+		try:
+			process_task(task, token=token)
+		except Exception:
+			_reconcile_processing_notifications_safely()
+			return BackgroundProcessResult.FAILED
 		_reconcile_processing_notifications_safely()
-		break  # processed one task, exit for cron
+		return BackgroundProcessResult.WORKED
 
 
 if __name__ == '__main__':
