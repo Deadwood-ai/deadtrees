@@ -48,6 +48,11 @@ script stops the container and enters recovery mode. That mode can continue
 without an acknowledgement only when the database proves the worker has no
 active queue row and there is no legacy unowned active row.
 
+The host scripts require repeated stopped-state observations before entering
+recovery; a single failed Docker inspection cannot stop an active worker. During
+long drains the control tool reuses its Supabase session, refreshing only after
+an authentication-expiry response.
+
 ## Docker Maintenance
 
 Use `scripts/processor_docker_maintenance.sh` for Docker Snap refreshes or any

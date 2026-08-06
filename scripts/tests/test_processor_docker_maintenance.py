@@ -41,7 +41,14 @@ class MaintenanceHarness:
 
 		self.bin_dir.mkdir()
 		make_executable(self.bin_dir / "flock", "#!/bin/sh\nexit 0\n")
-		make_executable(self.bin_dir / "python3", f"#!/bin/sh\necho \"$@\" >> {self.python_log}\nexit 0\n")
+		make_executable(
+			self.bin_dir / "python3",
+			f"#!/bin/sh\necho \"$@\" >> {self.python_log}\n"
+			"if echo \"$@\" | grep -q clear-ack && [ -n \"${PROCESSOR_TEST_ACK_PATH:-}\" ]; then\n"
+			"  rm -f \"$PROCESSOR_TEST_ACK_PATH\"\n"
+			"fi\n"
+			"exit 0\n",
+		)
 		make_executable(self.bin_dir / "snap", f"#!/bin/sh\necho \"$@\" >> {self.snap_log}\nexit 0\n")
 		make_executable(
 			self.bin_dir / "docker",
@@ -67,6 +74,7 @@ class MaintenanceHarness:
 		self.env["PROCESSOR_DRAIN_REQUEST_PATH"] = str(self.control_dir / "drain-request.json")
 		self.env["PROCESSOR_DRAIN_ACK_PATH"] = str(self.control_dir / "drain-ack.json")
 		self.env["PROCESSOR_DRAIN_POLL_SECONDS"] = "0"
+		self.env["PROCESSOR_UNAVAILABLE_POLL_SECONDS"] = "0"
 		self.env["PROCESSOR_READINESS_POLL_SECONDS"] = "0"
 		self.env["PROCESSOR_STARTUP_TIMEOUT_SECONDS"] = "2"
 

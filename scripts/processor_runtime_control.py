@@ -22,6 +22,10 @@ DEFAULT_DRAIN_ACK_PATH = '/data/processor-control/drain-ack.json'
 DEFAULT_PROCESSOR_USERNAME = 'processor@deadtrees.earth'
 
 
+class AuthenticationExpiredError(RuntimeError):
+	pass
+
+
 def _load_env_file(path: Path) -> dict[str, str]:
 	env: dict[str, str] = {}
 	if not path.exists():
@@ -146,6 +150,8 @@ def _request_json(
 			body = response.read().decode('utf-8')
 	except urllib.error.HTTPError as exc:
 		detail = exc.read().decode('utf-8', errors='replace')
+		if exc.code == 401:
+			raise AuthenticationExpiredError(detail) from exc
 		raise SystemExit(f'{method} {url} failed: {exc.code} {detail}') from exc
 
 	return json.loads(body) if body else {}
@@ -202,18 +208,21 @@ def _fetch_waiting_count_preview(token: str) -> int:
 	return len(rows)
 
 
-def _fetch_queue_state(worker_id: str) -> dict:
-	token = _login()
+def _fetch_queue_state(worker_id: str, *, token: str | None = None, include_waiting_preview: bool = True) -> dict:
+	if token is None:
+		token = _login()
 	request, ack = _load_drain_state()
-	return {
+	state = {
 		'worker_id': worker_id,
 		'drain_request': request,
 		'drain_ack': ack,
 		'ack_matches_request': _ack_matches_request(request, ack),
 		'active_for_worker': _fetch_queue_rows(token, claimed_by=worker_id),
 		'active_without_owner': _fetch_queue_rows(token, null_claimed_by=True),
-		'waiting_count_preview': _fetch_waiting_count_preview(token),
 	}
+	if include_waiting_preview:
+		state['waiting_count_preview'] = _fetch_waiting_count_preview(token)
+	return state
 
 
 def cmd_status(_: argparse.Namespace) -> int:
@@ -251,12 +260,23 @@ def cmd_clear_drain(_: argparse.Namespace) -> int:
 	return 0
 
 
+def cmd_clear_ack(_: argparse.Namespace) -> int:
+	cleared_ack = _clear_file(_drain_ack_path())
+	print(json.dumps({'cleared_ack': cleared_ack, 'ack_path': str(_drain_ack_path())}, indent=2))
+	return 0
+
+
 def cmd_wait_for_idle(args: argparse.Namespace) -> int:
 	worker_id = _worker_id()
 	deadline = time.monotonic() + args.timeout_seconds if args.timeout_seconds > 0 else None
+	token = _login()
 
 	while True:
-		state = _fetch_queue_state(worker_id)
+		try:
+			state = _fetch_queue_state(worker_id, token=token, include_waiting_preview=False)
+		except AuthenticationExpiredError:
+			token = _login()
+			state = _fetch_queue_state(worker_id, token=token, include_waiting_preview=False)
 		request = state['drain_request']
 		ack = state['drain_ack']
 
@@ -335,6 +355,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 	clear_drain = subparsers.add_parser('clear-drain', help='Clear the drain request so the worker can resume.')
 	clear_drain.set_defaults(func=cmd_clear_drain)
+
+	clear_ack = subparsers.add_parser('clear-ack', help='Clear only the worker drain acknowledgement.')
+	clear_ack.set_defaults(func=cmd_clear_ack)
 
 	wait_for_idle = subparsers.add_parser(
 		'wait-for-idle',

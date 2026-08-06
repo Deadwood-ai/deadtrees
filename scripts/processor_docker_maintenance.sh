@@ -13,10 +13,10 @@ HOLD_DURATION="${PROCESSOR_SNAP_HOLD_DURATION:-7d}"
 DRAIN_TIMEOUT_SECONDS="${PROCESSOR_DRAIN_TIMEOUT_SECONDS:-43200}"
 DRAIN_POLL_SECONDS="${PROCESSOR_DRAIN_POLL_SECONDS:-15}"
 RENEW_HOLD_ONLY=0
-CONTROL_DIR="$(dirname "${PROCESSOR_DRAIN_REQUEST_PATH:-/data/processor-control/drain-request.json}")"
-DRAIN_ACK_PATH="${PROCESSOR_DRAIN_ACK_PATH:-/data/processor-control/drain-ack.json}"
 STARTUP_TIMEOUT_SECONDS="${PROCESSOR_STARTUP_TIMEOUT_SECONDS:-300}"
 READINESS_POLL_SECONDS="${PROCESSOR_READINESS_POLL_SECONDS:-5}"
+UNAVAILABLE_CONFIRMATIONS="${PROCESSOR_UNAVAILABLE_CONFIRMATIONS:-3}"
+UNAVAILABLE_POLL_SECONDS="${PROCESSOR_UNAVAILABLE_POLL_SECONDS:-5}"
 
 while [ "$#" -gt 0 ]; do
 	case "$1" in
@@ -57,23 +57,55 @@ require_clean_checkout() {
 	fi
 }
 
-processor_is_available() {
+processor_availability() {
 	local inspect_output=""
 	local status=""
 	local restarting=""
 
 	inspect_output="$(docker inspect deadtrees-processor-1 --format '{{.State.Status}} {{.State.Restarting}}' 2>/dev/null || true)"
-	if [ -z "${inspect_output}" ]; then
+	if [ -n "${inspect_output}" ]; then
+		read -r status restarting <<< "${inspect_output}"
+		if [ "${status}" = "running" ] && [ "${restarting}" = "false" ]; then
+			return 0
+		fi
+		if [ "${restarting}" = "true" ] || [[ "${status}" =~ ^(created|exited|dead|removing)$ ]]; then
+			return 1
+		fi
+		return 2
+	fi
+
+	if docker info >/dev/null 2>&1; then
 		return 1
 	fi
-	read -r status restarting <<< "${inspect_output}"
-	[ "${status}" = "running" ] && [ "${restarting}" = "false" ]
+	return 2
+}
+
+confirm_processor_unavailable() {
+	local attempt=1
+	local availability_rc
+
+	while [ "${attempt}" -le "${UNAVAILABLE_CONFIRMATIONS}" ]; do
+		if processor_availability; then
+			return 1
+		else
+			availability_rc=$?
+		fi
+		if [ "${availability_rc}" -ne 1 ]; then
+			log "Processor availability probe was inconclusive; continuing the normal drain wait"
+			return 1
+		fi
+		if [ "${attempt}" -lt "${UNAVAILABLE_CONFIRMATIONS}" ]; then
+			sleep "${UNAVAILABLE_POLL_SECONDS}"
+		fi
+		attempt=$((attempt + 1))
+	done
+	return 0
 }
 
 wait_for_drain_with_recovery() {
 	local wait_pid
 
-	if ! processor_is_available; then
+	if confirm_processor_unavailable; then
 		log "Processor is unavailable; entering stopped-worker recovery mode"
 		docker compose -f "${COMPOSE_FILE}" stop processor >> "${LOG_FILE}" 2>&1
 		python3 "${STATUS_SCRIPT}" wait-for-idle \
@@ -88,7 +120,7 @@ wait_for_drain_with_recovery() {
 		--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1 &
 	wait_pid=$!
 	while kill -0 "${wait_pid}" 2>/dev/null; do
-		if ! processor_is_available; then
+		if confirm_processor_unavailable; then
 			log "Processor became unavailable while draining; entering stopped-worker recovery mode"
 			kill "${wait_pid}" 2>/dev/null || true
 			wait "${wait_pid}" 2>/dev/null || true
@@ -153,7 +185,6 @@ drain_set=0
 trap 'rc=$?; if [ "${rc}" -ne 0 ] && [ "${drain_set}" -eq 1 ]; then log "Docker maintenance failed; drain request remains in place for operator review"; fi' EXIT
 
 cd "${REPO_DIR}"
-mkdir -p "${CONTROL_DIR}"
 
 snap refresh --hold="${HOLD_DURATION}" docker >> "${LOG_FILE}" 2>&1
 log "Renewed Docker snap hold for ${HOLD_DURATION}"
@@ -172,7 +203,7 @@ docker compose -f "${COMPOSE_FILE}" stop processor >> "${LOG_FILE}" 2>&1
 snap refresh docker >> "${LOG_FILE}" 2>&1
 snap refresh --hold="${HOLD_DURATION}" docker >> "${LOG_FILE}" 2>&1
 require_clean_checkout
-rm -f "${DRAIN_ACK_PATH}"
+python3 "${STATUS_SCRIPT}" clear-ack >> "${LOG_FILE}" 2>&1
 docker compose -f "${COMPOSE_FILE}" up -d processor >> "${LOG_FILE}" 2>&1
 python3 "${STATUS_SCRIPT}" wait-for-idle \
 	--timeout-seconds "${STARTUP_TIMEOUT_SECONDS}" \

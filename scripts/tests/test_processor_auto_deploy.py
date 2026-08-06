@@ -42,6 +42,7 @@ class DeployHarness:
 		self.python_log = tmp_path / "python.log"
 		self.docker_log = tmp_path / "docker.log"
 		self.docker_running = tmp_path / "docker-running"
+		self.inspect_failed_once = tmp_path / "inspect-failed-once"
 		self.wait_hook_marker = tmp_path / "wait-hook-ran"
 
 		run("git", "init", "--bare", "--initial-branch=main", str(self.origin), cwd=tmp_path)
@@ -74,6 +75,9 @@ class DeployHarness:
 			f"  touch {self.wait_hook_marker}\n"
 			"  sh \"$PROCESSOR_TEST_WAIT_HOOK\"\n"
 			"fi\n"
+			"if echo \"$@\" | grep -q clear-ack && [ -n \"${PROCESSOR_TEST_ACK_PATH:-}\" ]; then\n"
+			"  rm -f \"$PROCESSOR_TEST_ACK_PATH\"\n"
+			"fi\n"
 			"exit 0\n",
 		)
 		make_executable(self.bin_dir / "flock", "#!/bin/sh\nexit 0\n")
@@ -82,6 +86,10 @@ class DeployHarness:
 			"#!/bin/sh\n"
 			f"echo \"$@\" >> {self.docker_log}\n"
 			"if [ \"$1\" = inspect ]; then\n"
+			f"  if [ -n \"${{PROCESSOR_TEST_INSPECT_FAIL_ONCE:-}}\" ] && [ ! -e {self.inspect_failed_once} ]; then\n"
+			f"    touch {self.inspect_failed_once}\n"
+			"    exit 1\n"
+			"  fi\n"
 			f"  if [ -e {self.docker_running} ]; then\n"
 			"    case \"$*\" in *RestartCount*) echo 'running false 0 0' ;; *) echo 'running false' ;; esac\n"
 			"    exit 0\n"
@@ -101,6 +109,7 @@ class DeployHarness:
 		self.env["PROCESSOR_DRAIN_REQUEST_PATH"] = str(self.control_dir / "drain-request.json")
 		self.env["PROCESSOR_DRAIN_ACK_PATH"] = str(self.control_dir / "drain-ack.json")
 		self.env["PROCESSOR_DRAIN_POLL_SECONDS"] = "0"
+		self.env["PROCESSOR_UNAVAILABLE_POLL_SECONDS"] = "0"
 		self.env["PROCESSOR_READINESS_POLL_SECONDS"] = "0"
 		self.env["PROCESSOR_STARTUP_TIMEOUT_SECONDS"] = "2"
 
@@ -200,3 +209,32 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 				"Processor became unavailable while draining",
 				(harness.worktree / "auto-deploy.log").read_text(),
 			)
+
+	def test_single_failed_inspect_does_not_stop_running_worker(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			harness.push_change("normal deploy\n")
+			harness.env["PROCESSOR_TEST_INSPECT_FAIL_ONCE"] = "1"
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertNotIn("stop processor", harness.docker_log.read_text())
+
+	def test_custom_ack_path_is_cleared_through_runtime_control(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			harness.push_change("custom paths\n")
+			custom_ack = harness.tmp_path / "env-only-control" / "ack.json"
+			custom_ack.parent.mkdir()
+			custom_ack.write_text("stale\n")
+			(harness.worktree / ".env").write_text(f"PROCESSOR_DRAIN_ACK_PATH={custom_ack}\n")
+			(harness.worktree / ".git" / "info" / "exclude").write_text(".env\n")
+			harness.env.pop("PROCESSOR_DRAIN_ACK_PATH")
+			harness.env["PROCESSOR_TEST_ACK_PATH"] = str(custom_ack)
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertFalse(custom_ack.exists())
+			self.assertIn("clear-ack", harness.python_log.read_text())
