@@ -63,7 +63,6 @@ require_clean_checkout() {
 }
 
 require_activated_checkout() {
-	local activated_sha
 	local head_sha
 	activated_sha="$(cat "${ACTIVATED_SHA_FILE}" 2>/dev/null || true)"
 	head_sha="$(git rev-parse HEAD)"
@@ -114,8 +113,9 @@ sudo -n "${SNAP_CONTROL}" refresh >> "${LOG_FILE}" 2>&1
 sudo -n "${SNAP_CONTROL}" hold "${HOLD_DURATION}" >> "${LOG_FILE}" 2>&1
 require_clean_checkout
 python3 "${STATUS_SCRIPT}" clear-ack >> "${LOG_FILE}" 2>&1
-docker compose -f "${COMPOSE_FILE}" up -d processor >> "${LOG_FILE}" 2>&1
+PROCESSOR_RELEASE_SHA="${activated_sha}" docker compose -f "${COMPOSE_FILE}" up -d processor >> "${LOG_FILE}" 2>&1
 python3 "${STATUS_SCRIPT}" wait-for-idle \
+	--expected-release-sha "${activated_sha}" \
 	--timeout-seconds "${STARTUP_TIMEOUT_SECONDS}" \
 	--poll-seconds "${READINESS_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
 wait_for_processor_running

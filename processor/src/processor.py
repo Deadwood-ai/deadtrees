@@ -755,6 +755,9 @@ def background_process() -> BackgroundProcessResult:
 			continue
 
 		if is_drain_requested():
+			# Exercise the release's queue-read contract before advertising readiness.
+			# This is read-only: no task is claimed while a drain is active.
+			get_next_task(token)
 			acknowledge_drain_request(worker_id)
 			return BackgroundProcessResult.IDLE
 

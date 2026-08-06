@@ -87,6 +87,9 @@ class DeployHarness:
 			"if echo \"$@\" | grep -q clear-ack && [ -n \"${PROCESSOR_TEST_ACK_PATH:-}\" ]; then\n"
 			"  rm -f \"$PROCESSOR_TEST_ACK_PATH\"\n"
 			"fi\n"
+			"if echo \"$@\" | grep -q activation-ready; then\n"
+			"  exit \"${PROCESSOR_TEST_ACTIVATION_READY:-1}\"\n"
+			"fi\n"
 			"exit 0\n",
 		)
 		make_executable(self.bin_dir / "flock", "#!/bin/sh\nexit 0\n")
@@ -166,6 +169,38 @@ class DeployHarness:
 
 
 class ProcessorAutoDeployTest(unittest.TestCase):
+	def test_target_release_runs_its_activation_logic_before_marking_active(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			activation_hook = harness.tmp_path / "target-activation-ran"
+			target_script = harness.upstream / "scripts" / "processor_auto_deploy.sh"
+			target_script.write_text(
+				target_script.read_text().replace(
+					'log "Deployment complete ($(git rev-parse --short HEAD))"',
+					f'touch {activation_hook}\nlog "Deployment complete ($(git rev-parse --short HEAD))"',
+				)
+			)
+			git(harness.upstream, "add", "scripts/processor_auto_deploy.sh")
+			git(harness.upstream, "commit", "-m", "add target activation hook")
+			git(harness.upstream, "push", "origin", "main")
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertTrue(activation_hook.exists())
+
+	def test_no_change_run_completes_interrupted_activation(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			self.assertEqual(harness.run_deploy().returncode, 0)
+			harness.env["PROCESSOR_TEST_ACTIVATION_READY"] = "0"
+			before = harness.python_log.read_text().count("clear-drain")
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertEqual(harness.python_log.read_text().count("clear-drain"), before + 1)
+
 	def test_activation_marker_failure_keeps_drain_and_pauses_deploy(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			harness = DeployHarness(Path(tmp_dir))

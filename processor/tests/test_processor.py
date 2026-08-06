@@ -76,15 +76,17 @@ def test_background_process_no_tasks():
 
 @pytest.mark.unit
 def test_background_process_returns_false_while_drained(monkeypatch):
+	queue_reads = []
 	monkeypatch.setattr(processor_module.signal, 'signal', lambda *args, **kwargs: None)
 	monkeypatch.setattr(processor_module, 'login_verified', lambda username, password: ('token', object()))
 	monkeypatch.setattr(processor_module, 'get_worker_id', lambda: 'worker-a')
 	monkeypatch.setattr(processor_module, 'get_active_task', lambda token, worker_id: None)
 	monkeypatch.setattr(processor_module, 'is_drain_requested', lambda: True)
 	monkeypatch.setattr(processor_module, 'acknowledge_drain_request', lambda worker_id: None)
-	monkeypatch.setattr(processor_module, 'get_next_task', lambda token: pytest.fail('should not claim new work'))
+	monkeypatch.setattr(processor_module, 'get_next_task', lambda token: queue_reads.append(token) or None)
 
 	assert background_process() is BackgroundProcessResult.IDLE
+	assert queue_reads == ['token']
 
 
 @pytest.mark.unit

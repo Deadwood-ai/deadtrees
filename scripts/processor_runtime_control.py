@@ -205,14 +205,20 @@ def _load_drain_state() -> tuple[dict | None, dict | None]:
 	return _read_json(_drain_request_path()), _read_json(_drain_ack_path())
 
 
-def _ack_matches_request(request: dict | None, ack: dict | None, worker_id: str) -> bool:
+def _ack_matches_request(
+	request: dict | None,
+	ack: dict | None,
+	worker_id: str,
+	expected_release_sha: str | None = None,
+) -> bool:
 	if request is None or ack is None:
 		return False
-	return (
+	matches = (
 		ack.get('request_id') == request.get('request_id')
 		and ack.get('requested_at') == request.get('requested_at')
 		and ack.get('acknowledged_by') == worker_id
 	)
+	return matches and (expected_release_sha is None or ack.get('release_sha') == expected_release_sha)
 
 
 def _fetch_queue_rows(token: str, *, claimed_by: str | None = None, null_claimed_by: bool = False) -> list[dict]:
@@ -319,6 +325,25 @@ def cmd_clear_ack(_: argparse.Namespace) -> int:
 	return 0
 
 
+def cmd_activation_ready(args: argparse.Namespace) -> int:
+	worker_id = _worker_id()
+	previous_worker_id = _activated_worker_id()
+	request, ack = _load_drain_state()
+	if request is None or request.get('reason') != f'auto-deploy {args.release_sha}':
+		return 1
+	if not _ack_matches_request(request, ack, worker_id, args.release_sha):
+		return 1
+	state = _fetch_queue_state(
+		worker_id,
+		previous_worker_id=previous_worker_id,
+		include_waiting_preview=False,
+	)
+	if state['active_for_worker'] or state['active_for_previous_worker'] or state['active_without_owner']:
+		return 1
+	print(json.dumps({'activation_ready': True, 'release_sha': args.release_sha}, indent=2))
+	return 0
+
+
 def cmd_wait_for_idle(args: argparse.Namespace) -> int:
 	worker_id = _worker_id()
 	previous_worker_id = _activated_worker_id()
@@ -371,7 +396,7 @@ def cmd_wait_for_idle(args: argparse.Namespace) -> int:
 			)
 			return 0
 
-		if _ack_matches_request(request, ack, worker_id) and not active_for_known_workers:
+		if _ack_matches_request(request, ack, worker_id, getattr(args, 'expected_release_sha', None)) and not active_for_known_workers:
 			print(
 				json.dumps(
 					{
@@ -433,12 +458,20 @@ def build_parser() -> argparse.ArgumentParser:
 	clear_ack = subparsers.add_parser('clear-ack', help='Clear only the worker drain acknowledgement.')
 	clear_ack.set_defaults(func=cmd_clear_ack)
 
+	activation_ready = subparsers.add_parser(
+		'activation-ready',
+		help='Verify an interrupted auto-deploy is safe to finish.',
+	)
+	activation_ready.add_argument('--release-sha', required=True)
+	activation_ready.set_defaults(func=cmd_activation_ready)
+
 	wait_for_idle = subparsers.add_parser(
 		'wait-for-idle',
 		help='Wait until this worker has acknowledged the current drain request and holds no active task.',
 	)
 	wait_for_idle.add_argument('--timeout-seconds', type=int, default=0, help='0 waits forever.')
 	wait_for_idle.add_argument('--poll-seconds', type=int, default=15)
+	wait_for_idle.add_argument('--expected-release-sha')
 	wait_for_idle.add_argument(
 		'--allow-unacknowledged-stopped-worker',
 		action='store_true',

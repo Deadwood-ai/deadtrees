@@ -26,6 +26,14 @@ def _matching_ack():
 	return {'request_id': 'request-a', 'requested_at': 'now', 'acknowledged_by': 'worker-a'}
 
 
+def test_ack_release_sha_must_match_when_expected():
+	request = {'request_id': 'request-a', 'requested_at': 'now'}
+	ack = {**_matching_ack(), 'release_sha': 'release-a'}
+
+	assert runtime_control._ack_matches_request(request, ack, 'worker-a', 'release-a')
+	assert not runtime_control._ack_matches_request(request, ack, 'worker-a', 'release-b')
+
+
 def test_wait_for_idle_allows_stopped_worker_without_active_rows(monkeypatch):
 	monkeypatch.setattr(runtime_control, '_login', lambda: 'token')
 	monkeypatch.setattr(runtime_control, '_fetch_queue_state', lambda worker_id, **kwargs: _state())

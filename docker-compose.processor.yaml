@@ -59,6 +59,7 @@ services:
       PROCESSOR_WORKER_ID: ${PROCESSOR_WORKER_ID:-}
       PROCESSOR_IDLE_BACKOFF_SECONDS: ${PROCESSOR_IDLE_BACKOFF_SECONDS:-10}
       PROCESSOR_LOOP_FAILURE_LIMIT: ${PROCESSOR_LOOP_FAILURE_LIMIT:-3}
+      PROCESSOR_RELEASE_SHA: ${PROCESSOR_RELEASE_SHA:-unknown}
       PROCESSOR_DRAIN_REQUEST_PATH: /processor-control/drain-request.json
       PROCESSOR_DRAIN_ACK_PATH: /processor-control/drain-ack.json
       # Comma-separated task types this worker refuses to run (e.g. odm_processing).

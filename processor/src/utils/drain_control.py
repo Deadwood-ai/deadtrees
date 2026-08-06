@@ -56,6 +56,7 @@ def acknowledge_drain_request(worker_id: str) -> dict | None:
 		'request_id': request.get('request_id'),
 		'requested_at': request.get('requested_at'),
 		'acknowledged_by': worker_id,
+		'release_sha': settings.PROCESSOR_RELEASE_SHA,
 	}
 	drain_ack_path().write_text(json.dumps(ack, indent=2) + '\n')
 	return ack

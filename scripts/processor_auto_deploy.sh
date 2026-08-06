@@ -19,8 +19,10 @@ READINESS_POLL_SECONDS="${PROCESSOR_READINESS_POLL_SECONDS:-5}"
 UNAVAILABLE_CONFIRMATIONS="${PROCESSOR_UNAVAILABLE_CONFIRMATIONS:-3}"
 UNAVAILABLE_POLL_SECONDS="${PROCESSOR_UNAVAILABLE_POLL_SECONDS:-5}"
 RESUME_DEPLOY=0
+DEPLOY_PHASE="${PROCESSOR_DEPLOY_PHASE:-prepare}"
+DEPLOY_TARGET_SHA="${PROCESSOR_DEPLOY_TARGET_SHA:-}"
 
-if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != "--resume" ]; }; then
+if [ "${DEPLOY_PHASE}" = "prepare" ] && { [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != "--resume" ]; }; }; then
 	echo "Usage: processor_auto_deploy.sh [--resume]" >&2
 	exit 2
 fi
@@ -63,10 +65,12 @@ require_clean_checkout() {
 
 source "${SCRIPT_DIR}/lib/processor_runtime.sh"
 
-exec 9<>"${LOCK_FILE}"
-if ! flock -n 9; then
-	log "Skipping deploy check because another processor runtime operation already holds ${LOCK_FILE}"
-	exit 0
+if [ "${PROCESSOR_RUNTIME_LOCK_HELD:-0}" != "1" ]; then
+	exec 9<>"${LOCK_FILE}"
+	if ! flock -n 9; then
+		log "Skipping deploy check because another processor runtime operation already holds ${LOCK_FILE}"
+		exit 0
+	fi
 fi
 
 drain_set=0
@@ -86,52 +90,76 @@ trap on_exit EXIT
 
 cd "${REPO_DIR}"
 
-if [ "${RESUME_DEPLOY}" -eq 1 ]; then
-	if [ -e "${PAUSE_FILE}" ]; then
-		rm "${PAUSE_FILE}"
-		log "Automatic processor deploy resumed; the next cron run will retry while preserving the existing drain"
-	else
-		log "Automatic processor deploy was not paused"
+if [ "${DEPLOY_PHASE}" = "activate" ]; then
+	remote_sha="${DEPLOY_TARGET_SHA}"
+	drain_set=1
+	deployed_sha="$(git rev-parse HEAD)"
+	if [ -z "${remote_sha}" ] || [ "${deployed_sha}" != "${remote_sha}" ]; then
+		log "Refusing activation because HEAD ${deployed_sha} does not match target ${remote_sha:-missing}"
+		exit 1
 	fi
-	exit 0
+	# Continue below with the target release's freshly loaded activation logic.
+else
+	if [ "${RESUME_DEPLOY}" -eq 1 ]; then
+		if [ -e "${PAUSE_FILE}" ]; then
+			rm "${PAUSE_FILE}"
+			log "Automatic processor deploy resumed; the next cron run will retry while preserving the existing drain"
+		else
+			log "Automatic processor deploy was not paused"
+		fi
+		exit 0
+	fi
+
+	if [ -e "${PAUSE_FILE}" ]; then
+		log "Skipping deploy because automatic processor deploy is paused; inspect ${PAUSE_FILE}"
+		exit 0
+	fi
+
+	require_clean_checkout
+
+	git fetch origin "${BRANCH}" >> "${LOG_FILE}" 2>&1
+	require_head_is_ancestor_of_remote "origin/${BRANCH}"
+
+	local_sha="$(git rev-parse HEAD)"
+	remote_sha="$(git rev-parse "origin/${BRANCH}")"
+	activated_sha="$(cat "${ACTIVATED_SHA_FILE}" 2>/dev/null || true)"
+
+	if [ "${local_sha}" = "${remote_sha}" ] && [ "${activated_sha}" = "${remote_sha}" ]; then
+		if python3 "${STATUS_SCRIPT}" activation-ready --release-sha "${remote_sha}" >> "${LOG_FILE}" 2>&1; then
+			wait_for_processor_running
+			python3 "${STATUS_SCRIPT}" clear-drain >> "${LOG_FILE}" 2>&1
+			log "Completed interrupted activation for ${remote_sha}"
+		else
+			log "No changes"
+		fi
+		exit 0
+	fi
+
+	log "Preparing deploy from ${local_sha} to ${remote_sha}"
+
+	python3 "${STATUS_SCRIPT}" set-drain --reason "auto-deploy ${remote_sha}" >> "${LOG_FILE}" 2>&1
+	drain_set=1
+	wait_for_drain_with_recovery
+
+	git merge --ff-only "${remote_sha}" >> "${LOG_FILE}" 2>&1
+	deployed_sha="$(git rev-parse HEAD)"
+	if [ "${deployed_sha}" != "${remote_sha}" ]; then
+		log "Refusing deploy because HEAD (${deployed_sha}) does not match fetched ${remote_sha}"
+		exit 1
+	fi
+	require_clean_checkout
+	PROCESSOR_DEPLOY_PHASE=activate \
+		PROCESSOR_DEPLOY_TARGET_SHA="${deployed_sha}" \
+		PROCESSOR_RUNTIME_LOCK_HELD=1 \
+		exec "${REPO_DIR}/scripts/processor_auto_deploy.sh"
 fi
 
-if [ -e "${PAUSE_FILE}" ]; then
-	log "Skipping deploy because automatic processor deploy is paused; inspect ${PAUSE_FILE}"
-	exit 0
-fi
-
-require_clean_checkout
-
-git fetch origin "${BRANCH}" >> "${LOG_FILE}" 2>&1
-require_head_is_ancestor_of_remote "origin/${BRANCH}"
-
-local_sha="$(git rev-parse HEAD)"
-remote_sha="$(git rev-parse "origin/${BRANCH}")"
-activated_sha="$(cat "${ACTIVATED_SHA_FILE}" 2>/dev/null || true)"
-
-if [ "${local_sha}" = "${remote_sha}" ] && [ "${activated_sha}" = "${remote_sha}" ]; then
-	log "No changes"
-	exit 0
-fi
-
-log "Preparing deploy from ${local_sha} to ${remote_sha}"
-
-python3 "${STATUS_SCRIPT}" set-drain --reason "auto-deploy ${remote_sha}" >> "${LOG_FILE}" 2>&1
-drain_set=1
-wait_for_drain_with_recovery
-
-git merge --ff-only "${remote_sha}" >> "${LOG_FILE}" 2>&1
-deployed_sha="$(git rev-parse HEAD)"
-if [ "${deployed_sha}" != "${remote_sha}" ]; then
-	log "Refusing deploy because HEAD (${deployed_sha}) does not match fetched ${remote_sha}"
-	exit 1
-fi
 require_clean_checkout
 docker compose -f "${COMPOSE_FILE}" build processor tcd >> "${LOG_FILE}" 2>&1
 python3 "${STATUS_SCRIPT}" clear-ack >> "${LOG_FILE}" 2>&1
-docker compose -f "${COMPOSE_FILE}" up -d --force-recreate processor >> "${LOG_FILE}" 2>&1
+PROCESSOR_RELEASE_SHA="${deployed_sha}" docker compose -f "${COMPOSE_FILE}" up -d --force-recreate processor >> "${LOG_FILE}" 2>&1
 python3 "${STATUS_SCRIPT}" wait-for-idle \
+	--expected-release-sha "${deployed_sha}" \
 	--timeout-seconds "${STARTUP_TIMEOUT_SECONDS}" \
 	--poll-seconds "${READINESS_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
 wait_for_processor_running
