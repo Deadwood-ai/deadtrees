@@ -221,15 +221,16 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			self.assertEqual(result.returncode, 0, result.stderr)
 			self.assertNotIn("stop processor", harness.docker_log.read_text())
 
-	def test_custom_ack_path_is_cleared_through_runtime_control(self) -> None:
+	def test_custom_control_directory_ack_is_cleared_through_runtime_control(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			harness = DeployHarness(Path(tmp_dir))
 			harness.push_change("custom paths\n")
 			custom_ack = harness.tmp_path / "env-only-control" / "ack.json"
 			custom_ack.parent.mkdir()
 			custom_ack.write_text("stale\n")
-			(harness.worktree / ".env").write_text(f"PROCESSOR_DRAIN_ACK_PATH={custom_ack}\n")
+			(harness.worktree / ".env").write_text(f"PROCESSOR_CONTROL_DIR={custom_ack.parent}\n")
 			(harness.worktree / ".git" / "info" / "exclude").write_text(".env\n")
+			harness.env.pop("PROCESSOR_DRAIN_REQUEST_PATH")
 			harness.env.pop("PROCESSOR_DRAIN_ACK_PATH")
 			harness.env["PROCESSOR_TEST_ACK_PATH"] = str(custom_ack)
 

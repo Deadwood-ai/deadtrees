@@ -21,9 +21,12 @@ especially under `processor/temp/`, before rebuilding the processor image.
 - deploys and Docker maintenance go through tracked scripts under `scripts/`
 - the worker must be drained before any planned restart or Docker daemon change
 
-The drain control file defaults to
-`/data/processor-control/drain-request.json`. While that file exists the worker
-finishes its current task and refuses to claim a new one.
+The host-side drain control file defaults to
+`.local/processor-control/drain-request.json` in the production checkout. Compose
+bind-mounts that gitignored directory at `/processor-control` in the worker. While
+the request exists the worker finishes its current task and refuses to claim a
+new one. Keep control state separate from `/data`: Snap-packaged Docker can expose
+that mount only inside its own namespace, where host deploy scripts cannot see it.
 
 ## Deploy Steps
 

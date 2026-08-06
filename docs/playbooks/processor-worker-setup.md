@@ -55,6 +55,7 @@ The production compose file expects these host resources to exist:
 - `./processor` and `./shared`
 - `./assets`
 - `/data`
+- gitignored `.local/processor-control`, mounted at `/processor-control`
 - Docker socket for ODM and model helper containers
 - processor SSH private/public keys
 - reviewed storage-server host key from `processor/config/storage_known_hosts`
@@ -62,6 +63,12 @@ The production compose file expects these host resources to exist:
 
 Do not put runtime output under the git checkout. Keep temporary processing
 artifacts under `/data`, for example `/data/processing_dir`.
+
+Drain control files are the exception: create `.local/processor-control` in the
+checkout and keep it writable by the host account running deploy cron. Compose
+bind-mounts that small directory into the worker; processing output does not go
+there. Set `PROCESSOR_CONTROL_DIR` only when the host needs a different source
+path.
 
 ## Bring-Up
 

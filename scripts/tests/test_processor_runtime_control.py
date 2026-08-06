@@ -127,3 +127,17 @@ def test_wait_for_idle_reuses_login_across_multiple_polls(monkeypatch):
 	assert runtime_control.cmd_wait_for_idle(args) == 0
 	assert len(login_calls) == 1
 	assert seen_tokens == ['token', 'token', 'token']
+
+
+def test_control_paths_default_to_gitignored_repo_directory(monkeypatch):
+	monkeypatch.setattr(runtime_control, 'ENV', {})
+
+	assert runtime_control._drain_request_path() == runtime_control.REPO_ROOT / '.local/processor-control/drain-request.json'
+	assert runtime_control._drain_ack_path() == runtime_control.REPO_ROOT / '.local/processor-control/drain-ack.json'
+
+
+def test_control_paths_support_absolute_host_override(monkeypatch, tmp_path):
+	monkeypatch.setattr(runtime_control, 'ENV', {'PROCESSOR_CONTROL_DIR': str(tmp_path)})
+
+	assert runtime_control._drain_request_path() == tmp_path / 'drain-request.json'
+	assert runtime_control._drain_ack_path() == tmp_path / 'drain-ack.json'

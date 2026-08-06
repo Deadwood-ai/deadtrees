@@ -40,6 +40,10 @@ services:
       - /etc/machine-id:/host/etc/machine-id:ro
       # Mount /data for processing directory access
       - /data:/data
+      # Host deploy/maintenance scripts and the worker share drain state here.
+      # Keep this separate from /data because Snap-packaged Docker can expose
+      # /data only inside its mount namespace, making it invisible to host tools.
+      - ${PROCESSOR_CONTROL_DIR:-./.local/processor-control}:/processor-control
     environment:
       BASE_DIR: /data
       # Persist the OpenCLIP weights on the /data mount (shared with the API) so
@@ -54,8 +58,8 @@ services:
       PROCESSOR_PASSWORD: ${PROCESSOR_PASSWORD}
       PROCESSOR_WORKER_ID: ${PROCESSOR_WORKER_ID:-}
       PROCESSOR_IDLE_BACKOFF_SECONDS: ${PROCESSOR_IDLE_BACKOFF_SECONDS:-10}
-      PROCESSOR_DRAIN_REQUEST_PATH: ${PROCESSOR_DRAIN_REQUEST_PATH:-/data/processor-control/drain-request.json}
-      PROCESSOR_DRAIN_ACK_PATH: ${PROCESSOR_DRAIN_ACK_PATH:-/data/processor-control/drain-ack.json}
+      PROCESSOR_DRAIN_REQUEST_PATH: /processor-control/drain-request.json
+      PROCESSOR_DRAIN_ACK_PATH: /processor-control/drain-ack.json
       # Comma-separated task types this worker refuses to run (e.g. odm_processing).
       PROCESSOR_TASK_BLACKLIST: ${PROCESSOR_TASK_BLACKLIST:-}
       SSH_PRIVATE_KEY_PASSPHRASE: ${SSH_PRIVATE_KEY_PASSPHRASE}

@@ -17,8 +17,7 @@ from pathlib import Path
 
 QUEUE_TABLE = 'v2_queue'
 QUEUE_POSITION_TABLE = 'v2_queue_positions'
-DEFAULT_DRAIN_REQUEST_PATH = '/data/processor-control/drain-request.json'
-DEFAULT_DRAIN_ACK_PATH = '/data/processor-control/drain-ack.json'
+DEFAULT_CONTROL_DIR = '.local/processor-control'
 DEFAULT_PROCESSOR_USERNAME = 'processor@deadtrees.earth'
 
 
@@ -73,12 +72,19 @@ def _processor_password() -> str:
 	return _require_env('PROCESSOR_PASSWORD')
 
 
+def _host_control_path(filename: str) -> Path:
+	control_dir = Path(ENV.get('PROCESSOR_CONTROL_DIR', DEFAULT_CONTROL_DIR))
+	if not control_dir.is_absolute():
+		control_dir = REPO_ROOT / control_dir
+	return control_dir / filename
+
+
 def _drain_request_path() -> Path:
-	return Path(ENV.get('PROCESSOR_DRAIN_REQUEST_PATH', DEFAULT_DRAIN_REQUEST_PATH))
+	return _host_control_path('drain-request.json')
 
 
 def _drain_ack_path() -> Path:
-	return Path(ENV.get('PROCESSOR_DRAIN_ACK_PATH', DEFAULT_DRAIN_ACK_PATH))
+	return _host_control_path('drain-ack.json')
 
 
 def _worker_id() -> str:
