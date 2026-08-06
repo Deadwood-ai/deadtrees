@@ -44,6 +44,7 @@ class DeployHarness:
 		self.docker_running = tmp_path / "docker-running"
 		self.inspect_failed_once = tmp_path / "inspect-failed-once"
 		self.build_failed_once = tmp_path / "build-failed-once"
+		self.activation_write_failed_once = tmp_path / "activation-write-failed-once"
 		self.wait_hook_marker = tmp_path / "wait-hook-ran"
 		self.waiter_fd_log = tmp_path / "waiter-fd.log"
 
@@ -89,6 +90,19 @@ class DeployHarness:
 			"exit 0\n",
 		)
 		make_executable(self.bin_dir / "flock", "#!/bin/sh\nexit 0\n")
+		make_executable(
+			self.bin_dir / "mv",
+			"#!/bin/sh\n"
+			"target=''\n"
+			"for arg in \"$@\"; do target=\"$arg\"; done\n"
+			"if [ -n \"${PROCESSOR_TEST_ACTIVATION_WRITE_FAIL_ONCE:-}\" ] && "
+			"echo \"$target\" | grep -q 'processor-activated-sha$' && "
+			f"[ ! -e {self.activation_write_failed_once} ]; then\n"
+			f"  touch {self.activation_write_failed_once}\n"
+			"  exit 1\n"
+			"fi\n"
+			"exec /bin/mv \"$@\"\n",
+		)
 		make_executable(
 			self.bin_dir / "docker",
 			"#!/bin/sh\n"
@@ -152,6 +166,19 @@ class DeployHarness:
 
 
 class ProcessorAutoDeployTest(unittest.TestCase):
+	def test_activation_marker_failure_keeps_drain_and_pauses_deploy(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			harness.push_change("marker failure\n")
+			harness.env["PROCESSOR_TEST_ACTIVATION_WRITE_FAIL_ONCE"] = "1"
+
+			result = harness.run_deploy()
+
+			self.assertNotEqual(result.returncode, 0)
+			self.assertFalse((harness.worktree / ".local" / "processor-activated-sha").exists())
+			self.assertTrue((harness.worktree / ".local" / "processor-deploy-paused").exists())
+			self.assertNotIn("clear-drain", harness.python_log.read_text())
+
 	def test_background_drain_waiter_does_not_inherit_runtime_lock(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			harness = DeployHarness(Path(tmp_dir))
