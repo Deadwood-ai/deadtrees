@@ -35,6 +35,7 @@ class MaintenanceHarness:
 		(self.repo / "scripts").mkdir()
 		(self.repo / "scripts" / "lib").mkdir()
 		(self.repo / "docker-compose.processor.yaml").write_text("services: {}\n")
+		(self.repo / ".gitignore").write_text("/.local\n")
 		shutil.copy2(SCRIPT, self.repo / "scripts" / "processor_docker_maintenance.sh")
 		shutil.copy2(SCRIPT.parent / "lib" / "processor_runtime.sh", self.repo / "scripts" / "lib" / "processor_runtime.sh")
 		(self.repo / "scripts" / "processor_runtime_control.py").write_text("# test stub\n")
@@ -43,6 +44,9 @@ class MaintenanceHarness:
 		run("git", "config", "user.email", "tests@deadtrees.example", cwd=self.repo)
 		run("git", "add", ".", cwd=self.repo)
 		run("git", "commit", "-m", "initial", cwd=self.repo)
+		(self.repo / ".local").mkdir()
+		activated_sha = run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
+		(self.repo / ".local" / "processor-activated-sha").write_text(f"{activated_sha}\n")
 
 		self.bin_dir.mkdir()
 		make_executable(self.bin_dir / "flock", "#!/bin/sh\nexit 0\n")
@@ -154,6 +158,18 @@ class ProcessorDockerMaintenanceTest(unittest.TestCase):
 				harness.python_log.read_text(),
 			)
 			self.assertIn("record-worker-id", harness.python_log.read_text())
+
+	def test_full_maintenance_rejects_checkout_not_matching_activated_sha(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = MaintenanceHarness(Path(tmp_dir), processor_available=True)
+			(harness.repo / ".local" / "processor-activated-sha").write_text("older-activated-sha\n")
+
+			result = harness.run()
+
+			self.assertNotEqual(result.returncode, 0)
+			self.assertFalse(harness.python_log.exists())
+			self.assertEqual(harness.snap_log.read_text().splitlines(), ["hold 7d"])
+			self.assertIn("does not match activated SHA", (harness.repo / "processor-maintenance.log").read_text())
 
 	def test_maintenance_uses_noninteractive_trusted_snap_helper(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:

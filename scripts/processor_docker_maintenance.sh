@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 LOCK_DIR="${REPO_DIR}/.local/locks"
 LOCK_FILE="${LOCK_DIR}/processor-runtime.lock"
+ACTIVATED_SHA_FILE="${REPO_DIR}/.local/processor-activated-sha"
 LOG_FILE="${REPO_DIR}/processor-maintenance.log"
 STATUS_SCRIPT="${REPO_DIR}/scripts/processor_runtime_control.py"
 COMPOSE_FILE="${REPO_DIR}/docker-compose.processor.yaml"
@@ -61,6 +62,17 @@ require_clean_checkout() {
 	fi
 }
 
+require_activated_checkout() {
+	local activated_sha
+	local head_sha
+	activated_sha="$(cat "${ACTIVATED_SHA_FILE}" 2>/dev/null || true)"
+	head_sha="$(git rev-parse HEAD)"
+	if [ -z "${activated_sha}" ] || [ "${activated_sha}" != "${head_sha}" ]; then
+		log "Refusing Docker maintenance because HEAD ${head_sha} does not match activated SHA ${activated_sha:-missing}"
+		exit 1
+	fi
+}
+
 source "${SCRIPT_DIR}/lib/processor_runtime.sh"
 
 exec 9<>"${LOCK_FILE}"
@@ -91,6 +103,7 @@ if [ "${RENEW_HOLD_ONLY}" -eq 1 ]; then
 fi
 
 require_clean_checkout
+require_activated_checkout
 
 python3 "${STATUS_SCRIPT}" set-drain --reason "docker-maintenance" >> "${LOG_FILE}" 2>&1
 drain_set=1
