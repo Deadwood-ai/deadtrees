@@ -20,6 +20,9 @@ UNAVAILABLE_CONFIRMATIONS="${PROCESSOR_UNAVAILABLE_CONFIRMATIONS:-3}"
 UNAVAILABLE_POLL_SECONDS="${PROCESSOR_UNAVAILABLE_POLL_SECONDS:-5}"
 
 mkdir -p "${LOCK_DIR}"
+if [ ! -e "${LOCK_FILE}" ]; then
+	(umask 000; : > "${LOCK_FILE}")
+fi
 touch "${LOG_FILE}"
 
 log() {
@@ -171,7 +174,7 @@ wait_for_processor_running() {
 	return 1
 }
 
-exec 9>"${LOCK_FILE}"
+exec 9<>"${LOCK_FILE}"
 if ! flock -n 9; then
 	log "Skipping deploy check because another processor runtime operation already holds ${LOCK_FILE}"
 	exit 0
@@ -197,7 +200,8 @@ fi
 
 log "Preparing deploy from ${local_sha} to ${remote_sha}"
 if [ "${local_sha}" != "${remote_sha}" ]; then
-	printf '%s\n' "${local_sha}" > "${ROLLBACK_SHA_FILE}.tmp"
+	rollback_target="${activated_sha:-${local_sha}}"
+	printf '%s\n' "${rollback_target}" > "${ROLLBACK_SHA_FILE}.tmp"
 	mv "${ROLLBACK_SHA_FILE}.tmp" "${ROLLBACK_SHA_FILE}"
 fi
 rollback_sha="$(cat "${ROLLBACK_SHA_FILE}" 2>/dev/null || printf '%s' "${local_sha}")"

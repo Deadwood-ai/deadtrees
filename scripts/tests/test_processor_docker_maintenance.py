@@ -130,6 +130,16 @@ class ProcessorDockerMaintenanceTest(unittest.TestCase):
 			self.assertFalse(harness.snap_log.exists())
 			self.assertIn("must run as root", (harness.repo / "processor-maintenance.log").read_text())
 
+	def test_root_renewal_creates_cross_user_writable_runtime_lock(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = MaintenanceHarness(Path(tmp_dir), processor_available=True)
+
+			result = harness.run("--renew-hold-only")
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			lock_mode = (harness.repo / ".local" / "locks" / "processor-runtime.lock").stat().st_mode
+			self.assertEqual(stat.S_IMODE(lock_mode), 0o666)
+
 
 if __name__ == "__main__":
 	unittest.main()

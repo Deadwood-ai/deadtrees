@@ -272,3 +272,28 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 				(harness.worktree / ".local" / "processor-activated-sha").read_text().strip(),
 				target_sha,
 			)
+
+	def test_failed_successive_shas_preserve_last_activated_rollback(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			activated_sha = git(harness.worktree, "rev-parse", "HEAD").stdout.strip()
+
+			initial_result = harness.run_deploy()
+			self.assertEqual(initial_result.returncode, 0, initial_result.stderr)
+			self.assertEqual(
+				(harness.worktree / ".local" / "processor-activated-sha").read_text().strip(),
+				activated_sha,
+			)
+
+			harness.push_change("failed B\n")
+			harness.env["PROCESSOR_TEST_BUILD_FAIL_ONCE"] = "1"
+			self.assertNotEqual(harness.run_deploy().returncode, 0)
+
+			harness.push_change("failed C\n")
+			harness.build_failed_once.unlink()
+			self.assertNotEqual(harness.run_deploy().returncode, 0)
+
+			self.assertEqual(
+				(harness.worktree / ".local" / "processor-rollback-sha").read_text().strip(),
+				activated_sha,
+			)

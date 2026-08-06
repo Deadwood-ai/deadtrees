@@ -36,6 +36,9 @@ while [ "$#" -gt 0 ]; do
 done
 
 mkdir -p "${LOCK_DIR}"
+if [ ! -e "${LOCK_FILE}" ]; then
+	(umask 000; : > "${LOCK_FILE}")
+fi
 touch "${LOG_FILE}"
 
 log() {
@@ -184,7 +187,7 @@ wait_for_processor_running() {
 	return 1
 }
 
-exec 9>"${LOCK_FILE}"
+exec 9<>"${LOCK_FILE}"
 if ! flock -n 9; then
 	log "Skipping Docker maintenance because another processor runtime operation already holds ${LOCK_FILE}"
 	exit 0
