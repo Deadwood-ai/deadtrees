@@ -47,6 +47,19 @@ require_clean_checkout() {
 	fi
 }
 
+processor_is_available() {
+	local inspect_output=""
+	local status=""
+	local restarting=""
+
+	inspect_output="$(docker inspect deadtrees-processor-1 --format '{{.State.Status}} {{.State.Restarting}}' 2>/dev/null || true)"
+	if [ -z "${inspect_output}" ]; then
+		return 1
+	fi
+	read -r status restarting <<< "${inspect_output}"
+	[ "${status}" = "running" ] && [ "${restarting}" = "false" ]
+}
+
 wait_for_processor_running() {
 	local deadline=$((SECONDS + STARTUP_TIMEOUT_SECONDS))
 	local stable_polls=0
@@ -115,11 +128,20 @@ log "Rollback path: git reset --hard ${local_sha} && docker compose -f ${COMPOSE
 
 python3 "${STATUS_SCRIPT}" set-drain --reason "auto-deploy ${remote_sha}" >> "${LOG_FILE}" 2>&1
 drain_set=1
-python3 "${STATUS_SCRIPT}" wait-for-idle \
-	--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
-	--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
+if processor_is_available; then
+	python3 "${STATUS_SCRIPT}" wait-for-idle \
+		--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
+		--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
+else
+	log "Processor is unavailable; entering stopped-worker recovery mode"
+	docker compose -f "${COMPOSE_FILE}" stop processor >> "${LOG_FILE}" 2>&1
+	python3 "${STATUS_SCRIPT}" wait-for-idle \
+		--allow-unacknowledged-stopped-worker \
+		--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
+		--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
+fi
 
-git pull --ff-only origin "${BRANCH}" >> "${LOG_FILE}" 2>&1
+git merge --ff-only "${remote_sha}" >> "${LOG_FILE}" 2>&1
 deployed_sha="$(git rev-parse HEAD)"
 if [ "${deployed_sha}" != "${remote_sha}" ]; then
 	log "Refusing deploy because HEAD (${deployed_sha}) does not match fetched ${remote_sha}"

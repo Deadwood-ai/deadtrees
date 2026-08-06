@@ -268,6 +268,22 @@ def cmd_wait_for_idle(args: argparse.Namespace) -> int:
 			print(json.dumps({'legacy_active_rows': state['active_without_owner']}, indent=2, default=str))
 			return 2
 
+		if args.allow_unacknowledged_stopped_worker and not state['active_for_worker']:
+			print(
+				json.dumps(
+					{
+						'idle': True,
+						'worker_id': worker_id,
+						'drain_request': request,
+						'drain_ack': ack,
+						'recovery_mode': 'stopped_worker_without_active_rows',
+					},
+					indent=2,
+					default=str,
+				)
+			)
+			return 0
+
 		if _ack_matches_request(request, ack) and not state['active_for_worker']:
 			print(
 				json.dumps(
@@ -326,6 +342,14 @@ def build_parser() -> argparse.ArgumentParser:
 	)
 	wait_for_idle.add_argument('--timeout-seconds', type=int, default=0, help='0 waits forever.')
 	wait_for_idle.add_argument('--poll-seconds', type=int, default=15)
+	wait_for_idle.add_argument(
+		'--allow-unacknowledged-stopped-worker',
+		action='store_true',
+		help=(
+			'Allow idle without a drain acknowledgement only after the caller has stopped an unavailable worker; '
+			'any owned or legacy active queue row still blocks recovery.'
+		),
+	)
 	wait_for_idle.set_defaults(func=cmd_wait_for_idle)
 
 	return parser

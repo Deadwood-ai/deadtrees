@@ -33,7 +33,7 @@ compose` commands. The script:
 1. records the current SHA and rollback command in `auto-deploy.log`;
 2. requests a drain;
 3. waits until the host worker has no active claimed queue row;
-4. fast-forwards the checkout to `origin/main`;
+4. fast-forwards the checkout to the exact `origin/main` SHA fetched before draining;
 5. rebuilds `processor` and `tcd`;
 6. force-recreates the processor container; and
 7. clears the drain request after the new container is running.
@@ -41,6 +41,11 @@ compose` commands. The script:
 If the script fails after setting the drain request, it intentionally leaves the
 drain file in place so the worker does not resume unexpectedly on a partially
 updated checkout.
+
+If the existing processor is stopped or crash-looping before it can acknowledge
+the drain, the deploy script stops the container and enters recovery mode. That
+mode can continue without an acknowledgement only when the database proves the
+worker has no active queue row and there is no legacy unowned active row.
 
 ## Docker Maintenance
 
