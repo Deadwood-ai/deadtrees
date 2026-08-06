@@ -1,5 +1,6 @@
 import argparse
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -148,6 +149,17 @@ def test_control_paths_support_absolute_host_override(monkeypatch, tmp_path):
 
 	assert runtime_control._drain_request_path() == tmp_path / 'drain-request.json'
 	assert runtime_control._drain_ack_path() == tmp_path / 'drain-ack.json'
+
+
+def test_write_json_atomically_replaces_read_only_file(tmp_path):
+	path = tmp_path / 'drain-request.json'
+	path.write_text('{"stale": true}\n')
+	path.chmod(0o444)
+
+	runtime_control._write_json(path, {'request_id': 'new-request'})
+
+	assert json.loads(path.read_text()) == {'request_id': 'new-request'}
+	assert list(tmp_path.glob('.*.tmp')) == []
 
 
 def test_wait_for_idle_rejects_acknowledgement_from_previous_worker_id(monkeypatch):

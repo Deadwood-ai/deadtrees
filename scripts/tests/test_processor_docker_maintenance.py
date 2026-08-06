@@ -30,8 +30,10 @@ class MaintenanceHarness:
 		self.docker_running = tmp_path / "docker-running"
 		self.repo.mkdir()
 		(self.repo / "scripts").mkdir()
+		(self.repo / "scripts" / "lib").mkdir()
 		(self.repo / "docker-compose.processor.yaml").write_text("services: {}\n")
 		shutil.copy2(SCRIPT, self.repo / "scripts" / "processor_docker_maintenance.sh")
+		shutil.copy2(SCRIPT.parent / "lib" / "processor_runtime.sh", self.repo / "scripts" / "lib" / "processor_runtime.sh")
 		(self.repo / "scripts" / "processor_runtime_control.py").write_text("# test stub\n")
 		run("git", "init", "--initial-branch=main", cwd=self.repo)
 		run("git", "config", "user.name", "DeadTrees Tests", cwd=self.repo)

@@ -50,6 +50,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+!scripts/lib/
+!scripts/lib/*.sh
 lib64/
 parts/
 sdist/
