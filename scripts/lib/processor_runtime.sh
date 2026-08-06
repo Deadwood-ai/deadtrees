@@ -1,3 +1,14 @@
+PROCESSOR_DRAIN_WAIT_PID=""
+
+cleanup_processor_runtime_waiter() {
+	local wait_pid="${PROCESSOR_DRAIN_WAIT_PID:-}"
+	if [ -n "${wait_pid}" ] && kill -0 "${wait_pid}" 2>/dev/null; then
+		kill "${wait_pid}" 2>/dev/null || true
+		wait "${wait_pid}" 2>/dev/null || true
+	fi
+	PROCESSOR_DRAIN_WAIT_PID=""
+}
+
 processor_availability() {
 	local container_id=""
 	local inspect_output=""
@@ -60,13 +71,15 @@ wait_for_drain_with_recovery() {
 
 	python3 "${STATUS_SCRIPT}" wait-for-idle \
 		--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
-		--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1 &
+		--poll-seconds "${DRAIN_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1 9>&- &
 	wait_pid=$!
+	PROCESSOR_DRAIN_WAIT_PID="${wait_pid}"
 	while kill -0 "${wait_pid}" 2>/dev/null; do
 		if confirm_processor_unavailable; then
 			log "Processor became unavailable while draining; entering stopped-worker recovery mode"
 			kill "${wait_pid}" 2>/dev/null || true
 			wait "${wait_pid}" 2>/dev/null || true
+			PROCESSOR_DRAIN_WAIT_PID=""
 			docker compose -f "${COMPOSE_FILE}" stop processor >> "${LOG_FILE}" 2>&1
 			python3 "${STATUS_SCRIPT}" wait-for-idle \
 				--allow-unacknowledged-stopped-worker \
@@ -76,7 +89,14 @@ wait_for_drain_with_recovery() {
 		fi
 		sleep "${DRAIN_POLL_SECONDS}"
 	done
-	wait "${wait_pid}"
+	if wait "${wait_pid}"; then
+		PROCESSOR_DRAIN_WAIT_PID=""
+		return 0
+	else
+		local wait_rc=$?
+		PROCESSOR_DRAIN_WAIT_PID=""
+		return "${wait_rc}"
+	fi
 }
 
 wait_for_processor_running() {

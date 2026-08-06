@@ -61,7 +61,16 @@ if ! flock -n 9; then
 fi
 
 drain_set=0
-trap 'rc=$?; if [ "${rc}" -ne 0 ] && [ "${drain_set}" -eq 1 ]; then log "Deployment failed; drain request remains in place for inspection and rollback"; fi' EXIT
+on_exit() {
+	local rc=$?
+	trap - EXIT
+	cleanup_processor_runtime_waiter
+	if [ "${rc}" -ne 0 ] && [ "${drain_set}" -eq 1 ]; then
+		log "Deployment failed; drain request remains in place for inspection and rollback"
+	fi
+	exit "${rc}"
+}
+trap on_exit EXIT
 
 cd "${REPO_DIR}"
 require_clean_checkout
@@ -106,6 +115,7 @@ python3 "${STATUS_SCRIPT}" wait-for-idle \
 	--poll-seconds "${READINESS_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
 wait_for_processor_running
 inspect_processor_runtime
+python3 "${STATUS_SCRIPT}" record-worker-id >> "${LOG_FILE}" 2>&1
 
 python3 "${STATUS_SCRIPT}" clear-drain >> "${LOG_FILE}" 2>&1
 drain_set=0

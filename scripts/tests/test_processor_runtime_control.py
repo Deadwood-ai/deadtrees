@@ -11,12 +11,13 @@ runtime_control = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runtime_control)
 
 
-def _state(*, active_for_worker=None, active_without_owner=None):
+def _state(*, active_for_worker=None, active_for_previous_worker=None, active_without_owner=None):
 	return {
 		'worker_id': 'worker-a',
 		'drain_request': {'request_id': 'request-a', 'requested_at': 'now'},
 		'drain_ack': None,
 		'active_for_worker': active_for_worker or [],
+		'active_for_previous_worker': active_for_previous_worker or [],
 		'active_without_owner': active_without_owner or [],
 	}
 
@@ -56,6 +57,40 @@ def test_wait_for_idle_rejects_stopped_worker_recovery_with_active_row(monkeypat
 	assert runtime_control.cmd_wait_for_idle(args) == 1
 
 
+def test_wait_for_idle_rejects_stopped_recovery_with_previous_worker_active_row(monkeypatch):
+	monkeypatch.setattr(runtime_control, '_activated_worker_id', lambda: 'worker-old')
+	monkeypatch.setattr(runtime_control, '_login', lambda: 'token')
+
+	def fetch_state(worker_id, **kwargs):
+		assert kwargs['previous_worker_id'] == 'worker-old'
+		return _state(active_for_previous_worker=[{'id': 124, 'claimed_by': 'worker-old'}])
+
+	monkeypatch.setattr(
+		runtime_control,
+		'_fetch_queue_state',
+		fetch_state,
+	)
+	monotonic_values = iter([0.0, 2.0])
+	monkeypatch.setattr(runtime_control.time, 'monotonic', lambda: next(monotonic_values))
+	monkeypatch.setattr(runtime_control.time, 'sleep', lambda seconds: None)
+	args = argparse.Namespace(
+		timeout_seconds=1,
+		poll_seconds=0,
+		allow_unacknowledged_stopped_worker=True,
+	)
+
+	assert runtime_control.cmd_wait_for_idle(args) == 1
+
+
+def test_record_worker_id_persists_identity_for_next_recovery(monkeypatch, tmp_path):
+	path = tmp_path / 'processor-activated-worker-id'
+	monkeypatch.setattr(runtime_control, '_worker_id', lambda: 'worker-current')
+	monkeypatch.setattr(runtime_control, '_activated_worker_id_path', lambda: path)
+
+	assert runtime_control.cmd_record_worker_id(argparse.Namespace()) == 0
+	assert runtime_control._activated_worker_id() == 'worker-current'
+
+
 def test_wait_for_idle_reuses_login_and_skips_waiting_preview(monkeypatch):
 	login_calls = []
 	preview_calls = []
@@ -89,8 +124,9 @@ def test_wait_for_idle_refreshes_expired_token_once(monkeypatch):
 	monkeypatch.setattr(runtime_control, '_worker_id', lambda: 'worker-a')
 	monkeypatch.setattr(runtime_control, '_login', lambda: login_calls.append(True) or next(tokens))
 
-	def fetch_state(worker_id, *, token, include_waiting_preview):
+	def fetch_state(worker_id, *, previous_worker_id, token, include_waiting_preview):
 		seen_tokens.append(token)
+		assert previous_worker_id is None
 		assert include_waiting_preview is False
 		if token == 'expired-token':
 			raise runtime_control.AuthenticationExpiredError('expired')
@@ -124,8 +160,9 @@ def test_wait_for_idle_reuses_login_across_multiple_polls(monkeypatch):
 	monkeypatch.setattr(runtime_control, '_login', lambda: login_calls.append(True) or 'token')
 	monkeypatch.setattr(runtime_control.time, 'sleep', lambda seconds: None)
 
-	def fetch_state(worker_id, *, token, include_waiting_preview):
+	def fetch_state(worker_id, *, previous_worker_id, token, include_waiting_preview):
 		seen_tokens.append(token)
+		assert previous_worker_id is None
 		assert include_waiting_preview is False
 		return next(states)
 

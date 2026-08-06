@@ -18,6 +18,7 @@ from pathlib import Path
 QUEUE_TABLE = 'v2_queue'
 QUEUE_POSITION_TABLE = 'v2_queue_positions'
 DEFAULT_CONTROL_DIR = '.local/processor-control'
+DEFAULT_ACTIVATED_WORKER_ID_FILE = '.local/processor-activated-worker-id'
 DEFAULT_PROCESSOR_USERNAME = 'processor@deadtrees.earth'
 
 
@@ -99,6 +100,19 @@ def _worker_id() -> str:
 		if machine_id:
 			return f'host-{machine_id[:12]}'
 	return f'host-{socket.gethostname()}'
+
+
+def _activated_worker_id_path() -> Path:
+	path = Path(ENV.get('PROCESSOR_ACTIVATED_WORKER_ID_FILE', DEFAULT_ACTIVATED_WORKER_ID_FILE))
+	return path if path.is_absolute() else REPO_ROOT / path
+
+
+def _activated_worker_id() -> str | None:
+	payload = _read_json(_activated_worker_id_path())
+	if not payload:
+		return None
+	worker_id = payload.get('worker_id')
+	return worker_id.strip() if isinstance(worker_id, str) and worker_id.strip() else None
 
 
 def _utc_now() -> str:
@@ -223,7 +237,13 @@ def _fetch_waiting_count_preview(token: str) -> int:
 	return len(rows)
 
 
-def _fetch_queue_state(worker_id: str, *, token: str | None = None, include_waiting_preview: bool = True) -> dict:
+def _fetch_queue_state(
+	worker_id: str,
+	*,
+	previous_worker_id: str | None = None,
+	token: str | None = None,
+	include_waiting_preview: bool = True,
+) -> dict:
 	if token is None:
 		token = _login()
 	request, ack = _load_drain_state()
@@ -233,6 +253,11 @@ def _fetch_queue_state(worker_id: str, *, token: str | None = None, include_wait
 		'drain_ack': ack,
 		'ack_matches_request': _ack_matches_request(request, ack, worker_id),
 		'active_for_worker': _fetch_queue_rows(token, claimed_by=worker_id),
+		'active_for_previous_worker': (
+			_fetch_queue_rows(token, claimed_by=previous_worker_id)
+			if previous_worker_id and previous_worker_id != worker_id
+			else []
+		),
 		'active_without_owner': _fetch_queue_rows(token, null_claimed_by=True),
 	}
 	if include_waiting_preview:
@@ -241,7 +266,20 @@ def _fetch_queue_state(worker_id: str, *, token: str | None = None, include_wait
 
 
 def cmd_status(_: argparse.Namespace) -> int:
-	print(json.dumps(_fetch_queue_state(_worker_id()), indent=2, default=str))
+	print(
+		json.dumps(
+			_fetch_queue_state(_worker_id(), previous_worker_id=_activated_worker_id()),
+			indent=2,
+			default=str,
+		)
+	)
+	return 0
+
+
+def cmd_record_worker_id(_: argparse.Namespace) -> int:
+	worker_id = _worker_id()
+	_write_json(_activated_worker_id_path(), {'worker_id': worker_id})
+	print(json.dumps({'worker_id': worker_id, 'path': str(_activated_worker_id_path())}, indent=2))
 	return 0
 
 
@@ -283,15 +321,26 @@ def cmd_clear_ack(_: argparse.Namespace) -> int:
 
 def cmd_wait_for_idle(args: argparse.Namespace) -> int:
 	worker_id = _worker_id()
+	previous_worker_id = _activated_worker_id()
 	deadline = time.monotonic() + args.timeout_seconds if args.timeout_seconds > 0 else None
 	token = _login()
 
 	while True:
 		try:
-			state = _fetch_queue_state(worker_id, token=token, include_waiting_preview=False)
+			state = _fetch_queue_state(
+				worker_id,
+				previous_worker_id=previous_worker_id,
+				token=token,
+				include_waiting_preview=False,
+			)
 		except AuthenticationExpiredError:
 			token = _login()
-			state = _fetch_queue_state(worker_id, token=token, include_waiting_preview=False)
+			state = _fetch_queue_state(
+				worker_id,
+				previous_worker_id=previous_worker_id,
+				token=token,
+				include_waiting_preview=False,
+			)
 		request = state['drain_request']
 		ack = state['drain_ack']
 
@@ -303,12 +352,15 @@ def cmd_wait_for_idle(args: argparse.Namespace) -> int:
 			print(json.dumps({'legacy_active_rows': state['active_without_owner']}, indent=2, default=str))
 			return 2
 
-		if args.allow_unacknowledged_stopped_worker and not state['active_for_worker']:
+		active_for_known_workers = state['active_for_worker'] + state['active_for_previous_worker']
+
+		if args.allow_unacknowledged_stopped_worker and not active_for_known_workers:
 			print(
 				json.dumps(
 					{
 						'idle': True,
 						'worker_id': worker_id,
+						'previous_worker_id': previous_worker_id,
 						'drain_request': request,
 						'drain_ack': ack,
 						'recovery_mode': 'stopped_worker_without_active_rows',
@@ -319,7 +371,7 @@ def cmd_wait_for_idle(args: argparse.Namespace) -> int:
 			)
 			return 0
 
-		if _ack_matches_request(request, ack, worker_id) and not state['active_for_worker']:
+		if _ack_matches_request(request, ack, worker_id) and not active_for_known_workers:
 			print(
 				json.dumps(
 					{
@@ -343,6 +395,7 @@ def cmd_wait_for_idle(args: argparse.Namespace) -> int:
 					'drain_ack': ack,
 					'ack_matches_request': _ack_matches_request(request, ack, worker_id),
 					'active_for_worker': state['active_for_worker'],
+					'active_for_previous_worker': state['active_for_previous_worker'],
 				},
 				indent=2,
 				default=str,
@@ -363,6 +416,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 	status = subparsers.add_parser('status', help='Print the current worker drain and queue state.')
 	status.set_defaults(func=cmd_status)
+
+	record_worker_id = subparsers.add_parser(
+		'record-worker-id',
+		help='Record the worker identity activated by the latest successful deploy.',
+	)
+	record_worker_id.set_defaults(func=cmd_record_worker_id)
 
 	set_drain = subparsers.add_parser('set-drain', help='Request a drain so this worker stops claiming new tasks.')
 	set_drain.add_argument('--reason', required=True, help='Short operator reason for the drain request.')

@@ -74,7 +74,16 @@ if ! flock -n 9; then
 fi
 
 drain_set=0
-trap 'rc=$?; if [ "${rc}" -ne 0 ] && [ "${drain_set}" -eq 1 ]; then log "Docker maintenance failed; drain request remains in place for operator review"; fi' EXIT
+on_exit() {
+	local rc=$?
+	trap - EXIT
+	cleanup_processor_runtime_waiter
+	if [ "${rc}" -ne 0 ] && [ "${drain_set}" -eq 1 ]; then
+		log "Docker maintenance failed; drain request remains in place for operator review"
+	fi
+	exit "${rc}"
+}
+trap on_exit EXIT
 
 cd "${REPO_DIR}"
 

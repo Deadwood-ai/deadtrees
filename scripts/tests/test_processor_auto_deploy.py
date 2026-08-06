@@ -45,6 +45,7 @@ class DeployHarness:
 		self.inspect_failed_once = tmp_path / "inspect-failed-once"
 		self.build_failed_once = tmp_path / "build-failed-once"
 		self.wait_hook_marker = tmp_path / "wait-hook-ran"
+		self.waiter_fd_log = tmp_path / "waiter-fd.log"
 
 		run("git", "init", "--bare", "--initial-branch=main", str(self.origin), cwd=tmp_path)
 		run("git", "init", "--initial-branch=main", str(self.seed), cwd=tmp_path)
@@ -74,6 +75,9 @@ class DeployHarness:
 			self.bin_dir / "python3",
 			"#!/bin/sh\n"
 			f"echo \"$@\" >> {self.python_log}\n"
+			"if echo \"$@\" | grep -q wait-for-idle; then\n"
+			f"  if ( : <&9 ) 2>/dev/null; then echo \"inherited $*\" >> {self.waiter_fd_log}; else echo \"closed $*\" >> {self.waiter_fd_log}; fi\n"
+			"fi\n"
 			"if echo \"$@\" | grep -q wait-for-idle && "
 			f"[ -n \"${{PROCESSOR_TEST_WAIT_HOOK:-}}\" ] && [ ! -e {self.wait_hook_marker} ]; then\n"
 			f"  touch {self.wait_hook_marker}\n"
@@ -147,6 +151,18 @@ class DeployHarness:
 
 
 class ProcessorAutoDeployTest(unittest.TestCase):
+	def test_background_drain_waiter_does_not_inherit_runtime_lock(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			harness.push_change("lock-safe deploy\n")
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			observations = harness.waiter_fd_log.read_text().splitlines()
+			self.assertTrue(observations[0].startswith("closed "), observations)
+			self.assertIn("record-worker-id", harness.python_log.read_text())
+
 	def test_rejects_local_ahead_checkout_before_drain(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			harness = DeployHarness(Path(tmp_dir))

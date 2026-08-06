@@ -60,6 +60,41 @@ Root crontab, because Snap hold and refresh operations are privileged:
 0 3 * * * cd /home/jj1049/prod/deadtrees && PROCESSOR_SNAP_HOLD_DURATION=7d ./scripts/processor_docker_maintenance.sh --renew-hold-only
 ```
 
+### One-time legacy cron cutover
+
+Before the first persistent-worker rollout, back up and replace the installed
+legacy jobs. Preserve unrelated entries and verify both scheduled users before
+starting the new container:
+
+```bash
+cd /home/jj1049/prod/deadtrees
+mkdir -p .local/cron-backups
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+
+crontab -l > ".local/cron-backups/checkout-owner-${stamp}.cron" 2>/dev/null || true
+awk '!/auto_deploy_processor\.sh/ && !/docker compose .*docker-compose\.processor\.yaml up/ && !/processor_auto_deploy\.sh/' \
+  ".local/cron-backups/checkout-owner-${stamp}.cron" > /tmp/deadtrees-checkout-owner.cron
+printf '%s\n' '* * * * * cd /home/jj1049/prod/deadtrees && ./scripts/processor_auto_deploy.sh' \
+  >> /tmp/deadtrees-checkout-owner.cron
+crontab /tmp/deadtrees-checkout-owner.cron
+
+sudo crontab -l > ".local/cron-backups/root-${stamp}.cron" 2>/dev/null || true
+awk '!/processor_docker_maintenance\.sh/' ".local/cron-backups/root-${stamp}.cron" \
+  > /tmp/deadtrees-root.cron
+printf '%s\n' '0 3 * * * cd /home/jj1049/prod/deadtrees && PROCESSOR_SNAP_HOLD_DURATION=7d ./scripts/processor_docker_maintenance.sh --renew-hold-only' \
+  >> /tmp/deadtrees-root.cron
+sudo crontab /tmp/deadtrees-root.cron
+
+crontab -l
+sudo crontab -l
+! crontab -l | grep -E 'auto_deploy_processor|docker compose .*docker-compose\.processor\.yaml up'
+```
+
+Do not continue the rollout unless the checkout-owner output contains exactly
+one tracked auto-deploy job, the root output contains exactly one hold-renewal
+job, and neither legacy launcher remains. Restore the timestamped backups if a
+verification fails.
+
 Do not reintroduce a per-minute `docker compose up` cron entry. The processor
 now runs continuously as `python -m processor.src.continuous_processor` with
 `restart: unless-stopped`, so Docker itself keeps the container alive between
