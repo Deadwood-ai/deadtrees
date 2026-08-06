@@ -2,6 +2,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -45,7 +46,18 @@ class MaintenanceHarness:
 
 		self.bin_dir.mkdir()
 		make_executable(self.bin_dir / "flock", "#!/bin/sh\nexit 0\n")
-		make_executable(self.bin_dir / "sudo", f"#!/bin/sh\necho \"$@\" >> {self.sudo_log}\n[ \"$1\" = -n ] && shift\nexec \"$@\"\n")
+		make_executable(
+			self.bin_dir / "sudo",
+			f"#!{sys.executable}\n"
+			"import os\n"
+			"import sys\n"
+			f"with open({str(self.sudo_log)!r}, 'a') as log:\n"
+			"    log.write(' '.join(sys.argv[1:]) + '\\n')\n"
+			"args = sys.argv[1:]\n"
+			"if args and args[0] == '-n':\n"
+			"    args = args[1:]\n"
+			"os.execv(args[0], args)\n",
+		)
 		make_executable(
 			self.bin_dir / "python3",
 			f"#!/bin/sh\necho \"$@\" >> {self.python_log}\n"
@@ -141,6 +153,7 @@ class ProcessorDockerMaintenanceTest(unittest.TestCase):
 				"wait-for-idle --allow-unacknowledged-stopped-worker",
 				harness.python_log.read_text(),
 			)
+			self.assertIn("record-worker-id", harness.python_log.read_text())
 
 	def test_maintenance_uses_noninteractive_trusted_snap_helper(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:

@@ -107,6 +107,7 @@ python3 "${STATUS_SCRIPT}" wait-for-idle \
 	--poll-seconds "${READINESS_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
 wait_for_processor_running
 inspect_processor_runtime
+python3 "${STATUS_SCRIPT}" record-worker-id >> "${LOG_FILE}" 2>&1
 
 python3 "${STATUS_SCRIPT}" clear-drain >> "${LOG_FILE}" 2>&1
 drain_set=0
