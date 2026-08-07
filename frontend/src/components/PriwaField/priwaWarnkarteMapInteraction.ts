@@ -50,9 +50,14 @@ export const attachPriwaWarnkarteInteraction = (
   const visibilityKey = layer.on("change:visible", () => {
     if (!layer.getVisible()) hide();
   });
+  const sourceClearKey = layer.getSource()?.on("clear", hide);
 
   return () => {
-    unByKey([clickKey, visibilityKey]);
+    unByKey(
+      sourceClearKey
+        ? [clickKey, visibilityKey, sourceClearKey]
+        : [clickKey, visibilityKey],
+    );
     map.removeOverlay(overlay);
     element.remove();
   };

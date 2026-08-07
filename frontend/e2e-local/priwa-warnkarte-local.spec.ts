@@ -79,6 +79,28 @@ async function fulfillSupabaseRequest(route: Route) {
     return;
   }
 
+  if (resource === "priwa_befallsgruppen") {
+    await route.fulfill({
+      contentType: "application/json",
+      json: [
+        {
+          id: "00000000-0000-4000-8000-0000000000d5",
+          project_id: projectId,
+          name: "Befallsgruppe Test",
+          origin: "manual",
+          confidence: null,
+          suggestion_reason: null,
+          algorithm_version: null,
+          created_at: "2024-06-25T12:00:00Z",
+          updated_at: "2024-06-25T12:00:00Z",
+          priwa_befallsgruppe_members: [],
+          priwa_befallsgruppe_flights: [],
+        },
+      ],
+    });
+    return;
+  }
+
   await route.fulfill({
     contentType: "application/json",
     headers: { "content-range": "0-0/0" },
@@ -221,12 +243,16 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await page.getByTestId("priwa-field-map").click({
       position: { x: 720, y: 450 },
     });
-    await expect(page.getByRole("tooltip")).toContainText(
+    const probabilityTooltip = page.locator(".priwa-warnkarte-tooltip");
+    await expect(probabilityTooltip).toContainText(
       "Wahrscheinlichkeit: 60 %",
     );
 
     await expect(warnkarteControl).toBeVisible();
     await expect(warnkarteControl).toHaveClass(/ant-btn-circle/);
+    await expect(page.getByTestId("priwa-review-detail-panel")).toContainText(
+      "Befallsgruppe Test",
+    );
     await warnkarteControl.click();
     await expect(page.getByTestId("priwa-warnkarte-admin-panel")).toBeVisible();
     await expect(page.getByText("Aktiv", { exact: true })).toHaveCount(1);
@@ -252,6 +278,7 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await expect(
       page.getByText(/Vorschau · Warnkarte 01.07.2024/),
     ).toBeVisible();
+    await expect(probabilityTooltip).toBeHidden();
 
     const newVersion = page.getByText("Warnkarte vom 01.07.2024").last();
     const versionRow = newVersion.locator("xpath=ancestor::li");
@@ -274,6 +301,9 @@ test.describe("PRIWA Warnkarte local UI", () => {
       0,
     );
     await expect(page.getByTestId("priwa-review-detail-panel")).toBeVisible();
+    await expect(page.getByTestId("priwa-review-detail-panel")).toContainText(
+      "Befallsgruppe Test",
+    );
   });
 
   test("desktop admin cannot replace a file while its validation is pending", async ({

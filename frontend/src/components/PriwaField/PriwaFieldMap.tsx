@@ -45,7 +45,9 @@ import PriwaBefallsgruppeEditor from "./PriwaBefallsgruppeEditor";
 import PriwaBaseLayerControl from "./PriwaBaseLayerControl";
 import PriwaMobileFieldTools from "./PriwaMobileFieldTools";
 import PriwaOfflineMapControl from "./PriwaOfflineMapControl";
-import PriwaReviewWorkbench from "./PriwaReviewWorkbench";
+import PriwaReviewWorkbench, {
+  type PriwaReviewDetailMode,
+} from "./PriwaReviewWorkbench";
 import {
   getPriwaReviewMapCenter,
   getPriwaReviewTargetPixel,
@@ -77,7 +79,7 @@ interface PriwaFieldMapProps {
   warnkarteOverlay?: IPriwaWarnkarteOverlay | null;
   warnkarteVisible?: boolean;
   additionalMapControl?: ReactNode;
-  reviewDetailOverlay?: ReactNode;
+  reviewDetailMode?: PriwaReviewDetailMode;
   mosaics?: IPriwaMosaic[];
   groups?: IPriwaBefallsgruppe[];
   isCogLoading?: boolean;
@@ -113,7 +115,7 @@ export default function PriwaFieldMap({
   warnkarteOverlay = null,
   warnkarteVisible = true,
   additionalMapControl,
-  reviewDetailOverlay,
+  reviewDetailMode,
   mosaics = [],
   groups = [],
   isCogLoading = false,
@@ -854,7 +856,7 @@ export default function PriwaFieldMap({
           selectedTreeId={reviewPointId}
           isTreeEditing={isReviewTreeEditing}
           isHidden={isPlacingPoint}
-          detailOverlay={reviewDetailOverlay}
+          detailMode={reviewDetailMode}
           onSelect={selectReviewItem}
           onOpenData={() => {
             setReviewPointId(null);

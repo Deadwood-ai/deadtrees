@@ -13,7 +13,8 @@ import {
   PriwaWarnkarteVisibilityControl,
 } from "../components/PriwaField/PriwaWarnkarteMapControls";
 import { usePriwaWarnkarte } from "../components/PriwaField/usePriwaWarnkarte";
-import { useState } from "react";
+import type { PriwaReviewDetailMode } from "../components/PriwaField/PriwaReviewWorkbench";
+import { useCallback, useMemo, useState } from "react";
 
 export default function PriwaField() {
   const [isWarnkarteAdminOpen, setWarnkarteAdminOpen] = useState(false);
@@ -58,6 +59,47 @@ export default function PriwaField() {
   const warnkarte = usePriwaWarnkarte(
     activeMembership?.projectId ?? "",
     canManageWarnkarte,
+  );
+  const closeWarnkarteAdmin = useCallback(
+    () => setWarnkarteAdminOpen(false),
+    [],
+  );
+  const warnkarteDetailMode = useMemo<PriwaReviewDetailMode | undefined>(
+    () =>
+      canManageWarnkarte && isWarnkarteAdminOpen
+        ? {
+            kind: "warnkarte-management",
+            content: (
+              <PriwaWarnkarteAdminPanel
+                versions={warnkarte.versions}
+                versionsError={warnkarte.versionsError}
+                isLoadingVersions={warnkarte.isLoadingVersions}
+                previewVersionId={warnkarte.previewOverlay?.version_id ?? null}
+                onClearPreview={warnkarte.clearPreview}
+                onValidate={warnkarte.validateFile}
+                onImport={warnkarte.importFile}
+                onPreview={warnkarte.previewVersion}
+                onPublish={warnkarte.publishVersion}
+                onClose={closeWarnkarteAdmin}
+              />
+            ),
+            onDismiss: closeWarnkarteAdmin,
+          }
+        : undefined,
+    [
+      canManageWarnkarte,
+      closeWarnkarteAdmin,
+      isWarnkarteAdminOpen,
+      warnkarte.clearPreview,
+      warnkarte.importFile,
+      warnkarte.isLoadingVersions,
+      warnkarte.previewOverlay?.version_id,
+      warnkarte.previewVersion,
+      warnkarte.publishVersion,
+      warnkarte.validateFile,
+      warnkarte.versions,
+      warnkarte.versionsError,
+    ],
   );
 
   if (!isOnline && isLoadingMemberships) {
@@ -134,21 +176,6 @@ export default function PriwaField() {
       )}
     </>
   );
-  const warnkarteAdminPanel =
-    canManageWarnkarte && isWarnkarteAdminOpen ? (
-      <PriwaWarnkarteAdminPanel
-        versions={warnkarte.versions}
-        versionsError={warnkarte.versionsError}
-        isLoadingVersions={warnkarte.isLoadingVersions}
-        previewVersionId={warnkarte.previewOverlay?.version_id ?? null}
-        onClearPreview={warnkarte.clearPreview}
-        onValidate={warnkarte.validateFile}
-        onImport={warnkarte.importFile}
-        onPreview={warnkarte.previewVersion}
-        onPublish={warnkarte.publishVersion}
-        onClose={() => setWarnkarteAdminOpen(false)}
-      />
-    ) : null;
 
   return (
     <div className="relative min-h-[100dvh]">
@@ -159,7 +186,7 @@ export default function PriwaField() {
         warnkarteOverlay={warnkarte.displayedOverlay}
         warnkarteVisible={warnkarte.isVisible}
         additionalMapControl={warnkarteControls}
-        reviewDetailOverlay={warnkarteAdminPanel}
+        reviewDetailMode={warnkarteDetailMode}
         isLoadingPoints={isLoadingPoints || isRefetching}
         isSavingPoint={isSaving}
         mosaics={mosaics}
