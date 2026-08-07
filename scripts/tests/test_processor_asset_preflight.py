@@ -1,7 +1,9 @@
 import json
 import os
+import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -102,6 +104,23 @@ class ProcessorAssetPreflightTest(unittest.TestCase):
 
 			self.assertIn(geopackage, missing)
 
+	def test_gadm_without_runtime_admin_columns_is_missing(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			assets_dir = Path(tmp_dir)
+			geopackage = assets_dir / GADM_ASSET_PATH
+			geopackage.parent.mkdir(parents=True)
+			with closing(sqlite3.connect(geopackage)) as database:
+				with database:
+					database.execute('CREATE TABLE gpkg_contents (table_name TEXT)')
+					database.execute("INSERT INTO gpkg_contents VALUES ('gadm_410')")
+					database.execute(
+						'CREATE TABLE gadm_410 (geom TEXT, GID_0 TEXT, NAME_0 TEXT, CONTINENT TEXT)'
+					)
+
+			missing = missing_assets(assets_dir)
+
+			self.assertIn(geopackage, missing)
+
 	def test_zarr_with_only_one_chunk_per_array_is_missing(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			assets_dir = Path(tmp_dir)
@@ -133,3 +152,11 @@ class ProcessorAssetPreflightTest(unittest.TestCase):
 			missing = missing_assets(assets_dir)
 
 			self.assertIn(zgroup, missing)
+
+	def test_blacklisted_model_stage_does_not_require_its_checkpoint(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			assets_dir = Path(tmp_dir)
+
+			missing = missing_assets(assets_dir, {'aoi_v1'})
+
+			self.assertNotIn(assets_dir / 'models/b1_50epoch_best_macro_f1.safetensors', missing)

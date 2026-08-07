@@ -14,8 +14,10 @@ from contextlib import closing
 from pathlib import Path
 
 from shared.asset_manifest import (
+	AOI_V1_MODEL_CHECKPOINT_NAME,
 	GEOPACKAGE_SPECS,
 	PHENOLOGY_ARRAY_SPECS,
+	PHENOLOGY_ASSET_PATH,
 	processor_model_checkpoint_specs,
 	required_processor_asset_directories,
 	required_processor_asset_files,
@@ -206,6 +208,16 @@ class DeployHarness:
 				path.write_text(json.dumps({"shape": shape, "chunks": chunks}))
 			else:
 				path.write_text("fixture\n")
+		consolidated_metadata = {".zgroup": {"zarr_format": 2}, ".zattrs": {}}
+		for name, (shape, _, _) in PHENOLOGY_ARRAY_SPECS.items():
+			array_dir = repo / "assets" / "pheno/modispheno_aggregated_normalized_filled.zarr" / name
+			consolidated_metadata[f"{name}/.zarray"] = json.loads((array_dir / ".zarray").read_text())
+			consolidated_metadata[f"{name}/.zattrs"] = {
+				"_ARRAY_DIMENSIONS": [f"dimension_{index}" for index in range(len(shape))]
+			}
+		(repo / "assets/pheno/modispheno_aggregated_normalized_filled.zarr/.zmetadata").write_text(
+			json.dumps({"metadata": consolidated_metadata, "zarr_consolidated_format": 1})
+		)
 		for relative in required_processor_asset_directories():
 			array_dir = repo / "assets" / relative
 			shape, chunks, omitted_chunks = PHENOLOGY_ARRAY_SPECS[array_dir.name]
@@ -251,6 +263,27 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			docker_log = harness.docker_log.read_text() if harness.docker_log.exists() else ""
 			self.assertNotIn(" build ", docker_log)
 			self.assertNotIn(" up ", docker_log)
+
+	def test_corrupt_consolidated_zarr_metadata_blocks_activation(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			(harness.worktree / 'assets' / PHENOLOGY_ASSET_PATH / '.zmetadata').write_text('not-json')
+
+			result = harness.run_deploy()
+
+			self.assertNotEqual(result.returncode, 0)
+			self.assertIn("set-drain --reason required processor assets missing", harness.python_log.read_text())
+
+	def test_blacklisted_model_stage_does_not_block_activation(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			(harness.worktree / 'assets/models' / AOI_V1_MODEL_CHECKPOINT_NAME).unlink()
+			harness.env['PROCESSOR_TASK_BLACKLIST'] = 'aoi_v1'
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertIn(" build ", harness.docker_log.read_text())
 
 	def test_external_assets_directory_passes_preflight(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:

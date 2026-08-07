@@ -148,6 +148,16 @@ class MaintenanceHarness:
 				path.write_text(json.dumps({"shape": shape, "chunks": chunks}))
 			else:
 				path.write_text("fixture\n")
+		consolidated_metadata = {".zgroup": {"zarr_format": 2}, ".zattrs": {}}
+		for name, (shape, _, _) in PHENOLOGY_ARRAY_SPECS.items():
+			array_dir = self.repo / "assets" / "pheno/modispheno_aggregated_normalized_filled.zarr" / name
+			consolidated_metadata[f"{name}/.zarray"] = json.loads((array_dir / ".zarray").read_text())
+			consolidated_metadata[f"{name}/.zattrs"] = {
+				"_ARRAY_DIMENSIONS": [f"dimension_{index}" for index in range(len(shape))]
+			}
+		(self.repo / "assets/pheno/modispheno_aggregated_normalized_filled.zarr/.zmetadata").write_text(
+			json.dumps({"metadata": consolidated_metadata, "zarr_consolidated_format": 1})
+		)
 		for relative in required_processor_asset_directories():
 			array_dir = self.repo / "assets" / relative
 			shape, chunks, omitted_chunks = PHENOLOGY_ARRAY_SPECS[array_dir.name]
