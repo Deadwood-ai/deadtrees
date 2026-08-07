@@ -17,19 +17,11 @@ export interface ProcessingOverviewRow {
 	user_email: string | null;
 	queue_priority: number | null;
 	queued_at: string | null;
-	is_upload_done: boolean | null;
-	is_odm_done: boolean | null;
-	is_ortho_done: boolean | null;
-	is_cog_done: boolean | null;
-	is_thumbnail_done: boolean | null;
-	is_metadata_done: boolean | null;
-	is_deadwood_done: boolean | null;
-	is_forest_cover_done: boolean | null;
-	is_combined_model_done: boolean | null;
-	is_aoi_done: boolean | null;
-	is_aoi_required: boolean | null;
 	last_20_logs: string | null;
 }
+
+const PROCESSING_OVERVIEW_COLUMNS =
+	"dataset_id,file_name,processing_status,current_status,has_error,error_message,hours_in_current_status,status_last_updated,user_email,queue_priority,queued_at,last_20_logs";
 
 export interface DatasetLogRow {
 	id: number;
@@ -49,10 +41,13 @@ export function useProcessingOverview() {
 		queryKey: ["processing-overview"],
 		enabled: !!user?.id && canAudit,
 		queryFn: async () => {
-			const { data, error } = await supabase.from("v2_processing_overview").select("*");
+			const { data, error } = await supabase
+				.from("v2_processing_overview")
+				.select(PROCESSING_OVERVIEW_COLUMNS);
 			if (error) throw error;
 			return (data || []) as ProcessingOverviewRow[];
 		},
+		retry: false,
 		staleTime: 60 * 1000,
 	});
 }
