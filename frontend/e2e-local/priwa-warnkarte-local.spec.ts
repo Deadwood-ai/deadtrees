@@ -86,7 +86,10 @@ async function fulfillSupabaseRequest(route: Route) {
   });
 }
 
-async function installWarnkarteApi(page: Page) {
+async function installWarnkarteApi(
+  page: Page,
+  { validateDelayMs = 0 }: { validateDelayMs?: number } = {},
+) {
   let published = false;
 
   await page.route("**/priwa/warnkarte/active?*", async (route) => {
@@ -132,6 +135,9 @@ async function installWarnkarteApi(page: Page) {
     });
   });
   await page.route("**/priwa/warnkarte/validate", async (route) => {
+    if (validateDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, validateDelayMs));
+    }
     await route.fulfill({
       contentType: "application/json",
       json: {
@@ -228,6 +234,28 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await expect(
       page.getByText("Warnkarte vom 01.07.2024").first(),
     ).toBeVisible();
+  });
+
+  test("desktop admin cannot replace a file while its validation is pending", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await installWarnkarteAdmin(page);
+    await installWarnkarteApi(page, { validateDelayMs: 750 });
+    await page.goto("/priwa-field");
+
+    await page.getByRole("button", { name: "Warnkarte verwalten" }).click();
+    const fileInput = page.locator('input[type="file"]');
+    await fileInput.setInputFiles({
+      name: "warnkarte_2024-07-01.gpkg",
+      mimeType: "application/geopackage+sqlite3",
+      buffer: Buffer.from("mocked direct geopackage"),
+    });
+    await page.getByRole("button", { name: "Datei validieren" }).click();
+
+    await expect(fileInput).toBeDisabled();
+    await expect(page.getByText("01.07.2024", { exact: true })).toBeVisible();
+    await expect(fileInput).toBeEnabled();
   });
 
   test("mobile shows the published overlay label without management controls", async ({

@@ -113,12 +113,8 @@ def ensure_unique_checksum(token: str, project_id: str, validated: ValidatedWarn
 		)
 
 
-def rows_to_feature_collection(
-	rows: list[dict[str, Any]],
-	*,
-	version_id: str | None = None,
-) -> dict[str, Any]:
-	if not rows:
+def overlay_from_rpc_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+	if not rows or not isinstance(rows[0].get('payload'), dict):
 		return {
 			'version_id': None,
 			'source_date': None,
@@ -126,19 +122,7 @@ def rows_to_feature_collection(
 			'features': [],
 		}
 
-	return {
-		'version_id': version_id,
-		'source_date': rows[0]['source_date'],
-		'type': 'FeatureCollection',
-		'features': [
-			{
-				'type': 'Feature',
-				'geometry': row['geometry'],
-				'properties': {'probability': float(row['probability'])},
-			}
-			for row in rows
-		],
-	}
+	return rows[0]['payload']
 
 
 @router.post('/validate', response_model=WarnkarteValidationSummary)
@@ -299,7 +283,7 @@ def get_active_warnkarte(
 	require_project_access(token, project_id, admin=False)
 	with use_client(token) as client:
 		rows = client.rpc('priwa_current_warnkarte', {'p_project_id': project_id}).execute().data or []
-	return rows_to_feature_collection(rows)
+	return overlay_from_rpc_rows(rows)
 
 
 @router.get('/versions/{version_id}/overlay')
@@ -329,4 +313,4 @@ def get_warnkarte_version_overlay(
 				'details': {'version_id': version_id},
 			},
 		)
-	return rows_to_feature_collection(rows, version_id=version_id)
+	return overlay_from_rpc_rows(rows)

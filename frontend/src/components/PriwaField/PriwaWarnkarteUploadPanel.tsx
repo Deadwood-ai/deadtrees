@@ -43,6 +43,7 @@ export default function PriwaWarnkarteUploadPanel({
       </Typography.Paragraph>
       <Upload
         accept=".gpkg"
+        disabled={isBusy}
         maxCount={1}
         beforeUpload={(nextFile) => {
           onFileChange(nextFile);

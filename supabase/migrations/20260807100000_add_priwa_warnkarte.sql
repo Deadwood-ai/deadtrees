@@ -296,11 +296,7 @@ as $$
 $$;
 
 create or replace function internal.priwa_current_warnkarte(p_project_id uuid)
-returns table (
-    source_date date,
-    probability numeric,
-    geometry jsonb
-)
+returns table (payload jsonb)
 language sql
 stable
 security definer
@@ -314,22 +310,27 @@ as $$
         order by publication.published_at desc, publication.id desc
         limit 1
     )
-    select
-        version.source_date,
-        polygon.probability,
-        public.st_asgeojson(polygon.geom)::jsonb
+    select jsonb_build_object(
+        'version_id', null,
+        'source_date', version.source_date,
+        'type', 'FeatureCollection',
+        'features', jsonb_agg(
+            jsonb_build_object(
+                'type', 'Feature',
+                'geometry', public.st_asgeojson(polygon.geom)::jsonb,
+                'properties', jsonb_build_object('probability', polygon.probability)
+            )
+            order by polygon.source_fid
+        )
+    )
     from current_publication publication
     join public.priwa_warnkarte_versions version on version.id = publication.version_id
     join public.priwa_warnkarte_polygons polygon on polygon.version_id = version.id
-    order by polygon.source_fid;
+    group by version.id, version.source_date;
 $$;
 
 create or replace function public.priwa_current_warnkarte(p_project_id uuid)
-returns table (
-    source_date date,
-    probability numeric,
-    geometry jsonb
-)
+returns table (payload jsonb)
 language sql
 stable
 set search_path = ''
@@ -341,43 +342,38 @@ create or replace function internal.priwa_warnkarte_version_overlay(
     p_project_id uuid,
     p_version_id uuid
 )
-returns table (
-    version_id uuid,
-    source_date date,
-    source_fid bigint,
-    probability numeric,
-    geometry jsonb
-)
+returns table (payload jsonb)
 language sql
 stable
 security definer
 set search_path = ''
 as $$
-    select
-        version.id,
-        version.source_date,
-        polygon.source_fid,
-        polygon.probability,
-        public.st_asgeojson(polygon.geom)::jsonb
+    select jsonb_build_object(
+        'version_id', version.id,
+        'source_date', version.source_date,
+        'type', 'FeatureCollection',
+        'features', jsonb_agg(
+            jsonb_build_object(
+                'type', 'Feature',
+                'geometry', public.st_asgeojson(polygon.geom)::jsonb,
+                'properties', jsonb_build_object('probability', polygon.probability)
+            )
+            order by polygon.source_fid
+        )
+    )
     from public.priwa_warnkarte_versions version
     join public.priwa_warnkarte_polygons polygon on polygon.version_id = version.id
     where version.id = p_version_id
       and version.project_id = p_project_id
       and public.priwa_is_project_admin(p_project_id)
-    order by polygon.source_fid;
+    group by version.id, version.source_date;
 $$;
 
 create or replace function public.priwa_warnkarte_version_overlay(
     p_project_id uuid,
     p_version_id uuid
 )
-returns table (
-    version_id uuid,
-    source_date date,
-    source_fid bigint,
-    probability numeric,
-    geometry jsonb
-)
+returns table (payload jsonb)
 language sql
 stable
 set search_path = ''

@@ -190,6 +190,7 @@ def test_duplicate_checksum_and_polygon_failure_are_atomic(warnkarte_project):
 def test_publication_and_reversion_use_latest_append_only_record(warnkarte_project):
 	admin_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
 	member_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+	large_overlay_polygons = [polygon_payload(fid, '0.9', x_offset=fid * 20) for fid in range(1, 1002)]
 
 	with use_service_client() as client:
 		old_version_id = import_version(
@@ -205,20 +206,44 @@ def test_publication_and_reversion_use_latest_append_only_record(warnkarte_proje
 			warnkarte_project['id'],
 			'new',
 			'2024-07-01',
-			[polygon_payload(2, '0.9', x_offset=30)],
+			large_overlay_polygons,
 		)
 
 	with use_client(admin_token) as client:
+		preview = (
+			client.rpc(
+				'priwa_warnkarte_version_overlay',
+				{'p_project_id': warnkarte_project['id'], 'p_version_id': new_version_id},
+			)
+			.execute()
+			.data
+		)
+		assert len(preview) == 1
+		assert len(preview[0]['payload']['features']) == 1001
+
 		client.rpc('priwa_publish_warnkarte', {'p_version_id': old_version_id}).execute()
 		client.rpc('priwa_publish_warnkarte', {'p_version_id': new_version_id}).execute()
+
+	with use_client(member_token) as client:
+		large_active = client.rpc('priwa_current_warnkarte', {'p_project_id': warnkarte_project['id']}).execute().data
+
+	assert len(large_active) == 1
+	assert len(large_active[0]['payload']['features']) == 1001
+	assert large_active[0]['payload']['version_id'] is None
+	assert large_active[0]['payload']['source_date'] == '2024-07-01'
+	assert set(large_active[0]['payload']) == {'version_id', 'source_date', 'type', 'features'}
+	assert set(large_active[0]['payload']['features'][0]) == {'type', 'geometry', 'properties'}
+	assert set(large_active[0]['payload']['features'][0]['properties']) == {'probability'}
+
+	with use_client(admin_token) as client:
 		client.rpc('priwa_publish_warnkarte', {'p_version_id': old_version_id}).execute()
 
 	with use_client(member_token) as client:
 		active = client.rpc('priwa_current_warnkarte', {'p_project_id': warnkarte_project['id']}).execute().data
 
 	assert len(active) == 1
-	assert active[0]['source_date'] == '2024-06-25'
-	assert set(active[0]) == {'source_date', 'probability', 'geometry'}
+	assert active[0]['payload']['source_date'] == '2024-06-25'
+	assert len(active[0]['payload']['features']) == 1
 
 	with use_service_client() as client:
 		publications = (

@@ -36,30 +36,32 @@ def validated_warnkarte():
 	)
 
 
-def test_safe_member_feature_collection_excludes_provenance_and_source_ids():
-	response = priwa_warnkarte.rows_to_feature_collection(
+def test_aggregated_member_overlay_is_returned_without_row_truncation():
+	features = [
+		{
+			'type': 'Feature',
+			'geometry': {'type': 'Polygon', 'coordinates': []},
+			'properties': {'probability': 0.6},
+		}
+		for _ in range(1001)
+	]
+	response = priwa_warnkarte.overlay_from_rpc_rows(
 		[
 			{
-				'version_id': 'hidden-version',
-				'source_date': '2024-06-25',
-				'source_fid': 77,
-				'probability': '0.6',
-				'geometry': {'type': 'Polygon', 'coordinates': []},
-				'source_filename': 'hidden.gpkg',
-				'checksum_sha256': 'hidden',
+				'payload': {
+					'version_id': None,
+					'source_date': '2024-06-25',
+					'type': 'FeatureCollection',
+					'features': features,
+				}
 			}
 		]
 	)
 
 	assert response['version_id'] is None
 	assert response['source_date'] == '2024-06-25'
-	assert response['features'] == [
-		{
-			'type': 'Feature',
-			'geometry': {'type': 'Polygon', 'coordinates': []},
-			'properties': {'probability': 0.6},
-		}
-	]
+	assert len(response['features']) == 1001
+	assert response['features'] == features
 
 
 def test_validation_error_keeps_structured_expected_and_detected_crs(monkeypatch):
