@@ -344,22 +344,11 @@ def cmd_activation_ready(args: argparse.Namespace) -> int:
 	return 0
 
 
-def cmd_asset_recovery_ready(_: argparse.Namespace) -> int:
-	worker_id = _worker_id()
-	previous_worker_id = _activated_worker_id()
-	request, ack = _load_drain_state()
+def cmd_asset_recovery_pending(_: argparse.Namespace) -> int:
+	request, _ = _load_drain_state()
 	if request is None or request.get('reason') != 'required processor assets missing':
 		return 1
-	if not _ack_matches_request(request, ack, worker_id):
-		return 1
-	state = _fetch_queue_state(
-		worker_id,
-		previous_worker_id=previous_worker_id,
-		include_waiting_preview=False,
-	)
-	if state['active_for_worker'] or state['active_for_previous_worker'] or state['active_without_owner']:
-		return 1
-	print(json.dumps({'asset_recovery_ready': True}, indent=2))
+	print(json.dumps({'asset_recovery_pending': True}, indent=2))
 	return 0
 
 
@@ -490,11 +479,11 @@ def build_parser() -> argparse.ArgumentParser:
 	activation_ready.add_argument('--release-sha', required=True)
 	activation_ready.set_defaults(func=cmd_activation_ready)
 
-	asset_recovery_ready = subparsers.add_parser(
-		'asset-recovery-ready',
-		help='Verify a repaired asset-loss drain is safe to clear.',
+	asset_recovery_pending = subparsers.add_parser(
+		'asset-recovery-pending',
+		help='Verify that the current drain was caused by missing processor assets.',
 	)
-	asset_recovery_ready.set_defaults(func=cmd_asset_recovery_ready)
+	asset_recovery_pending.set_defaults(func=cmd_asset_recovery_pending)
 
 	wait_for_idle = subparsers.add_parser(
 		'wait-for-idle',

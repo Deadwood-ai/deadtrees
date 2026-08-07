@@ -137,11 +137,25 @@ else
 			drain_set=1
 			exit 1
 		fi
-		if python3 "${STATUS_SCRIPT}" activation-ready --release-sha "${remote_sha}" >> "${LOG_FILE}" 2>&1 || \
-			python3 "${STATUS_SCRIPT}" asset-recovery-ready >> "${LOG_FILE}" 2>&1; then
+		if python3 "${STATUS_SCRIPT}" activation-ready --release-sha "${remote_sha}" >> "${LOG_FILE}" 2>&1; then
 			wait_for_processor_running
 			python3 "${STATUS_SCRIPT}" clear-drain >> "${LOG_FILE}" 2>&1
 			log "Completed interrupted activation for ${remote_sha}"
+		elif python3 "${STATUS_SCRIPT}" asset-recovery-pending >> "${LOG_FILE}" 2>&1; then
+			drain_set=1
+			wait_for_drain_with_recovery
+			python3 "${STATUS_SCRIPT}" clear-ack >> "${LOG_FILE}" 2>&1
+			PROCESSOR_RELEASE_SHA="${remote_sha}" docker compose -f "${COMPOSE_FILE}" up -d --force-recreate processor >> "${LOG_FILE}" 2>&1
+			python3 "${STATUS_SCRIPT}" wait-for-idle \
+				--expected-release-sha "${remote_sha}" \
+				--timeout-seconds "${STARTUP_TIMEOUT_SECONDS}" \
+				--poll-seconds "${READINESS_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
+			wait_for_processor_running
+			inspect_processor_runtime
+			python3 "${STATUS_SCRIPT}" record-worker-id >> "${LOG_FILE}" 2>&1
+			python3 "${STATUS_SCRIPT}" clear-drain >> "${LOG_FILE}" 2>&1
+			drain_set=0
+			log "Recovered processor after restoring required assets"
 		else
 			log "No changes"
 		fi

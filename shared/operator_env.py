@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from string import Template
 
 
 def load_env_file(path: Path) -> dict[str, str]:
@@ -17,5 +18,5 @@ def load_env_file(path: Path) -> dict[str, str]:
 		value = value.strip()
 		if value and value[0] == value[-1] and value[0] in {'"', "'"}:
 			value = value[1:-1]
-		env[key.strip()] = os.path.expandvars(value)
+		env[key.strip()] = Template(value).safe_substitute({**os.environ, **env})
 	return env

@@ -100,8 +100,8 @@ class DeployHarness:
 			"if echo \"$@\" | grep -q activation-ready; then\n"
 			"  exit \"${PROCESSOR_TEST_ACTIVATION_READY:-1}\"\n"
 			"fi\n"
-			"if echo \"$@\" | grep -q asset-recovery-ready; then\n"
-			"  exit \"${PROCESSOR_TEST_ASSET_RECOVERY_READY:-1}\"\n"
+			"if echo \"$@\" | grep -q asset-recovery-pending; then\n"
+			"  exit \"${PROCESSOR_TEST_ASSET_RECOVERY_PENDING:-1}\"\n"
 			"fi\n"
 			"if echo \"$@\" | grep -q worker-health; then\n"
 			"  if [ -e \"${PROCESSOR_TEST_UNHEALTHY_PATH:-}\" ]; then exit 1; fi\n"
@@ -172,7 +172,7 @@ class DeployHarness:
 			path.parent.mkdir(parents=True, exist_ok=True)
 			path.write_text("fixture\n")
 		for relative in required_processor_asset_directories():
-			path = repo / "assets" / relative / ".fixture"
+			path = repo / "assets" / relative / "0"
 			path.parent.mkdir(parents=True, exist_ok=True)
 			path.write_text("fixture\n")
 
@@ -226,6 +226,21 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			self.assertEqual(result.returncode, 0, result.stderr)
 			self.assertIn(" build ", harness.docker_log.read_text())
 
+	def test_external_assets_directory_expands_same_file_variable(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			external_assets = harness.tmp_path / "shared-assets"
+			shutil.copytree(harness.worktree / "assets", external_assets)
+			shutil.rmtree(harness.worktree / "assets")
+			(harness.worktree / ".env").write_text(
+				f"ASSET_ROOT={harness.tmp_path}\nPROCESSOR_ASSETS_DIR=${{ASSET_ROOT}}/shared-assets\n"
+			)
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertIn(" build ", harness.docker_log.read_text())
+
 	def test_target_release_can_remove_an_obsolete_asset_requirement(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			harness = DeployHarness(Path(tmp_dir))
@@ -254,12 +269,33 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			self.assertNotEqual(harness.run_deploy().returncode, 0)
 			model.write_text("restored\n")
 			self.assertEqual(harness.run_deploy("--resume").returncode, 0)
-			harness.env["PROCESSOR_TEST_ASSET_RECOVERY_READY"] = "0"
+			harness.env["PROCESSOR_TEST_ASSET_RECOVERY_PENDING"] = "0"
 
 			result = harness.run_deploy()
 
 			self.assertEqual(result.returncode, 0, result.stderr)
-			self.assertIn("asset-recovery-ready", harness.python_log.read_text())
+			self.assertIn("asset-recovery-pending", harness.python_log.read_text())
+			self.assertIn("clear-drain", harness.python_log.read_text())
+			self.assertIn("up -d --force-recreate processor", harness.docker_log.read_text())
+
+	def test_restored_assets_recover_when_worker_is_unavailable(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			self.assertEqual(harness.run_deploy().returncode, 0)
+			model = harness.worktree / "assets" / "models" / "segformer_b5_full_epoch_100.safetensors"
+			model.unlink()
+
+			self.assertNotEqual(harness.run_deploy().returncode, 0)
+			model.write_text("restored\n")
+			harness.docker_running.unlink()
+			self.assertEqual(harness.run_deploy("--resume").returncode, 0)
+			harness.env["PROCESSOR_TEST_ASSET_RECOVERY_PENDING"] = "0"
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertIn("wait-for-idle --allow-unacknowledged-stopped-worker", harness.python_log.read_text())
+			self.assertIn("up -d --force-recreate processor", harness.docker_log.read_text())
 			self.assertIn("clear-drain", harness.python_log.read_text())
 
 	def test_target_release_runs_its_activation_logic_before_marking_active(self) -> None:

@@ -118,7 +118,7 @@ class MaintenanceHarness:
 			path.parent.mkdir(parents=True, exist_ok=True)
 			path.write_text("fixture\n")
 		for relative in required_processor_asset_directories():
-			path = self.repo / "assets" / relative / ".fixture"
+			path = self.repo / "assets" / relative / "0"
 			path.parent.mkdir(parents=True, exist_ok=True)
 			path.write_text("fixture\n")
 

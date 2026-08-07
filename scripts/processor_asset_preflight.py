@@ -30,7 +30,8 @@ def missing_assets(assets_dir: Path) -> list[Path]:
 	missing.extend(
 		assets_dir / relative
 		for relative in asset_manifest.required_processor_asset_directories()
-		if not (assets_dir / relative).is_dir() or not any((assets_dir / relative).iterdir())
+		if not (assets_dir / relative).is_dir()
+		or not any(path.is_file() and not path.name.startswith('.') for path in (assets_dir / relative).iterdir())
 	)
 	return missing
 
