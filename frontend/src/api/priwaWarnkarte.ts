@@ -77,6 +77,14 @@ async function parseResponse<T>(response: Response): Promise<T> {
     );
   }
 
+  if (response.status === 404 && detail === "Not Found") {
+    throw new PriwaWarnkarteApiError(
+      "WARNKARTE_API_UNAVAILABLE",
+      "Die Warnkarten-Funktion ist in dieser Vorschau noch nicht verfügbar. Die Datei wurde nicht validiert.",
+      { status: response.status },
+    );
+  }
+
   throw new PriwaWarnkarteApiError(
     "REQUEST_FAILED",
     typeof detail === "string"

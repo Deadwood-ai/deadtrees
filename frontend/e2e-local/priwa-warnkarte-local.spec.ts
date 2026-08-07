@@ -204,13 +204,20 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await page.goto("/priwa-field");
 
     await expect(page.getByText("Warnkarte vom 25.06.2024")).toBeVisible();
-    await page.getByRole("button", { name: "Warnkarte verwalten" }).click();
+    const warnkarteControl = page
+      .locator(".priwa-map-control-stack")
+      .getByRole("button", { name: "Warnkarte verwalten" });
+    await expect(warnkarteControl).toBeVisible();
+    await expect(warnkarteControl).toHaveClass(/ant-btn-circle/);
+    await warnkarteControl.click();
     await page.locator('input[type="file"]').setInputFiles({
       name: "warnkarte_2024-07-01.gpkg",
       mimeType: "application/geopackage+sqlite3",
       buffer: Buffer.from("mocked direct geopackage"),
     });
-    await page.getByRole("button", { name: "Datei validieren" }).click();
+    await expect(
+      page.getByRole("button", { name: "Datei validieren" }),
+    ).toHaveCount(0);
     await expect(page.getByText("01.07.2024", { exact: true })).toBeVisible();
     await page.getByRole("checkbox").check();
     await page
@@ -251,11 +258,42 @@ test.describe("PRIWA Warnkarte local UI", () => {
       mimeType: "application/geopackage+sqlite3",
       buffer: Buffer.from("mocked direct geopackage"),
     });
-    await page.getByRole("button", { name: "Datei validieren" }).click();
 
     await expect(fileInput).toBeDisabled();
+    await expect(page.getByText("GeoPackage wird validiert …")).toBeVisible();
     await expect(page.getByText("01.07.2024", { exact: true })).toBeVisible();
     await expect(fileInput).toBeEnabled();
+  });
+
+  test("desktop preview explains when Warnkarte API routes are not deployed", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await installWarnkarteAdmin(page);
+    await installWarnkarteApi(page);
+    const unavailable = (route: Route) =>
+      route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        json: { detail: "Not Found" },
+      });
+    await page.route("**/priwa/warnkarte/versions?*", unavailable);
+    await page.route("**/priwa/warnkarte/validate", unavailable);
+    await page.goto("/priwa-field");
+
+    await page.getByRole("button", { name: "Warnkarte verwalten" }).click();
+    const explanation =
+      "Die Warnkarten-Funktion ist in dieser Vorschau noch nicht verfügbar. Die Datei wurde nicht validiert.";
+    await expect(page.getByText(explanation)).toHaveCount(1);
+
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "warnkarte_2024-07-01.gpkg",
+      mimeType: "application/geopackage+sqlite3",
+      buffer: Buffer.from("mocked direct geopackage"),
+    });
+
+    await expect(page.getByText(explanation)).toHaveCount(2);
+    await expect(page.getByText("Not Found", { exact: true })).toHaveCount(0);
   });
 
   test("mobile shows the published overlay label without management controls", async ({

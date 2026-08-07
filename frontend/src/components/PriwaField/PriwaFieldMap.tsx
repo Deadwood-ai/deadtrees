@@ -12,7 +12,7 @@ import { fromLonLat, toLonLat, transformExtent } from "ol/proj";
 import View from "ol/View";
 import { boundingExtent } from "ol/extent";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { PointerEvent } from "react";
+import type { PointerEvent, ReactNode } from "react";
 
 import { createStandardMapControls } from "../../utils/basemaps";
 import parseBBox from "../../utils/parseBBox";
@@ -74,6 +74,7 @@ interface PriwaFieldMapProps {
   isSavingPoint?: boolean;
   projectName: string;
   warnkarteOverlay?: IPriwaWarnkarteOverlay | null;
+  additionalMapControl?: ReactNode;
   mosaics?: IPriwaMosaic[];
   groups?: IPriwaBefallsgruppe[];
   isCogLoading?: boolean;
@@ -107,6 +108,7 @@ export default function PriwaFieldMap({
   isSavingPoint = false,
   projectName,
   warnkarteOverlay = null,
+  additionalMapControl,
   mosaics = [],
   groups = [],
   isCogLoading = false,
@@ -786,6 +788,7 @@ export default function PriwaFieldMap({
             onCache={handleCacheBasemapArea}
             onClear={handleClearBasemapArea}
           />
+          {additionalMapControl}
           {isMobile && (
             <PriwaMobileFieldTools
               points={points}

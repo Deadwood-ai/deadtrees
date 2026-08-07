@@ -1,5 +1,14 @@
 import { WarningOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Divider, Drawer, Spin, Typography } from "antd";
+import {
+  Alert,
+  App,
+  Button,
+  Divider,
+  Drawer,
+  Spin,
+  Tooltip,
+  Typography,
+} from "antd";
 import { useState } from "react";
 
 import type {
@@ -54,10 +63,15 @@ export default function PriwaWarnkarteAdminDrawer({
     }
   };
 
-  const validate = () => {
-    if (!file) return;
+  const selectFile = (nextFile: File | null) => {
+    setFile(nextFile);
+    setSummary(null);
+    setConfirmed(false);
+    setErrorMessage(null);
+    if (!nextFile) return;
+
     void run(async () => {
-      setSummary(await onValidate(file));
+      setSummary(await onValidate(nextFile));
       setConfirmed(false);
     });
   };
@@ -86,13 +100,16 @@ export default function PriwaWarnkarteAdminDrawer({
 
   return (
     <>
-      <Button
-        className="absolute right-4 top-4 z-[70] shadow-md"
-        icon={<WarningOutlined />}
-        onClick={() => setOpen(true)}
-      >
-        Warnkarte verwalten
-      </Button>
+      <Tooltip title="Warnkarte verwalten" placement="right">
+        <Button
+          className="pointer-events-auto shadow-md"
+          shape="circle"
+          size="large"
+          icon={<WarningOutlined />}
+          aria-label="Warnkarte verwalten"
+          onClick={() => setOpen(true)}
+        />
+      </Tooltip>
       <Drawer
         title="PRIWA Warnkarte verwalten"
         width={620}
@@ -106,19 +123,12 @@ export default function PriwaWarnkarteAdminDrawer({
       >
         <Typography.Title level={5}>Neue Version</Typography.Title>
         <PriwaWarnkarteUploadPanel
-          file={file}
           summary={summary}
           isConfirmed={isConfirmed}
           isBusy={isBusy}
           errorMessage={errorMessage}
-          onFileChange={(nextFile) => {
-            setFile(nextFile);
-            setSummary(null);
-            setConfirmed(false);
-            setErrorMessage(null);
-          }}
+          onFileChange={selectFile}
           onConfirmedChange={setConfirmed}
-          onValidate={validate}
           onImport={importFile}
         />
         <Divider />

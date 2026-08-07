@@ -13,26 +13,22 @@ import type { IPriwaWarnkarteValidationSummary } from "../../api/priwaWarnkarte"
 import { formatPriwaWarnkarteDate } from "./priwaWarnkartePresentation";
 
 interface PriwaWarnkarteUploadPanelProps {
-  file: File | null;
   summary: IPriwaWarnkarteValidationSummary | null;
   isConfirmed: boolean;
   isBusy: boolean;
   errorMessage: string | null;
   onFileChange: (file: File | null) => void;
   onConfirmedChange: (confirmed: boolean) => void;
-  onValidate: () => void;
   onImport: () => void;
 }
 
 export default function PriwaWarnkarteUploadPanel({
-  file,
   summary,
   isConfirmed,
   isBusy,
   errorMessage,
   onFileChange,
   onConfirmedChange,
-  onValidate,
   onImport,
 }: PriwaWarnkarteUploadPanelProps) {
   return (
@@ -56,14 +52,15 @@ export default function PriwaWarnkarteUploadPanel({
       >
         <Button icon={<UploadOutlined />}>GeoPackage auswählen</Button>
       </Upload>
-      <Button
-        type="primary"
-        disabled={!file || isBusy}
-        loading={isBusy && !summary}
-        onClick={onValidate}
-      >
-        Datei validieren
-      </Button>
+
+      {isBusy && !summary && (
+        <Alert
+          type="info"
+          showIcon
+          message="GeoPackage wird validiert …"
+          description="Die Datei wird geprüft. Anschließend werden Datum, Layer, CRS und Polygonanzahl angezeigt."
+        />
+      )}
 
       {errorMessage && (
         <Alert

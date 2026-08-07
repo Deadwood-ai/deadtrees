@@ -112,6 +112,20 @@ export default function PriwaField() {
     );
   }
 
+  const warnkarteAdminControl = canManageWarnkarte ? (
+    <PriwaWarnkarteAdminDrawer
+      versions={warnkarte.versions}
+      versionsError={warnkarte.versionsError}
+      isLoadingVersions={warnkarte.isLoadingVersions}
+      previewVersionId={warnkarte.previewOverlay?.version_id ?? null}
+      onClearPreview={warnkarte.clearPreview}
+      onValidate={warnkarte.validateFile}
+      onImport={warnkarte.importFile}
+      onPreview={warnkarte.previewVersion}
+      onPublish={warnkarte.publishVersion}
+    />
+  ) : null;
+
   return (
     <div className="relative min-h-[100dvh]">
       <PriwaFieldMap
@@ -119,6 +133,7 @@ export default function PriwaField() {
         projectId={activeMembership.projectId}
         projectName={activeMembership.projectName}
         warnkarteOverlay={warnkarte.displayedOverlay}
+        additionalMapControl={warnkarteAdminControl}
         isLoadingPoints={isLoadingPoints || isRefetching}
         isSavingPoint={isSaving}
         mosaics={mosaics}
@@ -148,19 +163,6 @@ export default function PriwaField() {
         sourceDate={warnkarte.displayedOverlay?.source_date ?? null}
         isPreviewing={warnkarte.isPreviewing}
       />
-      {canManageWarnkarte && (
-        <PriwaWarnkarteAdminDrawer
-          versions={warnkarte.versions}
-          versionsError={warnkarte.versionsError}
-          isLoadingVersions={warnkarte.isLoadingVersions}
-          previewVersionId={warnkarte.previewOverlay?.version_id ?? null}
-          onClearPreview={warnkarte.clearPreview}
-          onValidate={warnkarte.validateFile}
-          onImport={warnkarte.importFile}
-          onPreview={warnkarte.previewVersion}
-          onPublish={warnkarte.publishVersion}
-        />
-      )}
       {warnkarte.overlayError && (
         <Alert
           className="absolute bottom-4 left-1/2 z-[65] w-[min(32rem,calc(100%-2rem))] -translate-x-1/2 shadow-lg"
