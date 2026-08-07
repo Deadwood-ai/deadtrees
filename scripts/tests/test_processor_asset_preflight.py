@@ -1,10 +1,11 @@
+import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from shared.asset_manifest import PHENOLOGY_ASSET_PATH
+from shared.asset_manifest import GADM_ASSET_PATH, PHENOLOGY_ARRAY_SPECS, PHENOLOGY_ASSET_PATH
 from shared.operator_env import load_env_file
 from scripts.processor_asset_preflight import missing_assets, resolve_assets_dir
 
@@ -38,6 +39,7 @@ class ProcessorAssetPreflightTest(unittest.TestCase):
 				'PROCESSOR_ASSETS_DIR=${ASSET_ROOT}/assets\n'
 				'PROCESSOR_PASSWORD=prefix$$suffix\n'
 				"LITERAL_PATH='$ASSET_ROOT/assets'\n"
+				'COMMENTED_VALUE=secret # rotated\n'
 			)
 			with patch.dict(os.environ, {'ASSET_ROOT': '/from-shell'}):
 				env = load_env_file(env_file)
@@ -45,6 +47,7 @@ class ProcessorAssetPreflightTest(unittest.TestCase):
 			self.assertEqual(env['PROCESSOR_ASSETS_DIR'], '/from-shell/assets')
 			self.assertEqual(env['PROCESSOR_PASSWORD'], 'prefix$$suffix')
 			self.assertEqual(env['LITERAL_PATH'], '$ASSET_ROOT/assets')
+			self.assertEqual(env['COMMENTED_VALUE'], 'secret')
 
 	def test_empty_shell_assets_override_uses_compose_default(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
@@ -66,3 +69,31 @@ class ProcessorAssetPreflightTest(unittest.TestCase):
 			missing = missing_assets(assets_dir)
 
 			self.assertIn(checkpoint, missing)
+
+	def test_truncated_nonempty_geopackage_is_missing(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			assets_dir = Path(tmp_dir)
+			geopackage = assets_dir / GADM_ASSET_PATH
+			geopackage.parent.mkdir(parents=True)
+			geopackage.write_bytes(b'SQLite format 3\x00partial')
+
+			missing = missing_assets(assets_dir)
+
+			self.assertIn(geopackage, missing)
+
+	def test_zarr_with_only_one_chunk_per_array_is_missing(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			assets_dir = Path(tmp_dir)
+			store = assets_dir / PHENOLOGY_ASSET_PATH
+			store.mkdir(parents=True)
+			(store / '.zgroup').write_text('{}')
+			(store / '.zmetadata').write_text('{}')
+			for name, (shape, chunks, _) in PHENOLOGY_ARRAY_SPECS.items():
+				array_dir = store / name
+				array_dir.mkdir()
+				(array_dir / '.zarray').write_text(json.dumps({'shape': shape, 'chunks': chunks}))
+				(array_dir / '.'.join('0' for _ in shape)).write_text('partial')
+
+			missing = missing_assets(assets_dir)
+
+			self.assertIn(store, missing)

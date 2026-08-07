@@ -1,15 +1,21 @@
+import itertools
 import json
+import math
 import os
 import shutil
+import sqlite3
 import stat
 import struct
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from shared.asset_manifest import (
+	GEOPACKAGE_SPECS,
+	PHENOLOGY_ARRAY_SPECS,
 	processor_model_checkpoint_specs,
 	required_processor_asset_directories,
 	required_processor_asset_files,
@@ -187,12 +193,28 @@ class DeployHarness:
 					{name: {"dtype": "F32", "shape": [0], "data_offsets": [0, 0]} for name in names}
 				).encode()
 				path.write_bytes(struct.pack("<Q", len(header)) + header)
+			elif path.suffix == ".gpkg":
+				layer, required_columns = GEOPACKAGE_SPECS[relative]
+				with closing(sqlite3.connect(path)) as database:
+					with database:
+						database.execute("CREATE TABLE gpkg_contents (table_name TEXT)")
+						database.execute("INSERT INTO gpkg_contents VALUES (?)", (layer,))
+						columns = ", ".join(f'"{column}" TEXT' for column in required_columns)
+						database.execute(f'CREATE TABLE "{layer}" ({columns})')
+			elif path.name == ".zarray":
+				shape, chunks, _ = PHENOLOGY_ARRAY_SPECS[path.parent.name]
+				path.write_text(json.dumps({"shape": shape, "chunks": chunks}))
 			else:
 				path.write_text("fixture\n")
 		for relative in required_processor_asset_directories():
-			path = repo / "assets" / relative / "0"
-			path.parent.mkdir(parents=True, exist_ok=True)
-			path.write_text("fixture\n")
+			array_dir = repo / "assets" / relative
+			shape, chunks, omitted_chunks = PHENOLOGY_ARRAY_SPECS[array_dir.name]
+			for coordinates in itertools.product(*(range(math.ceil(size / chunk)) for size, chunk in zip(shape, chunks))):
+				path = array_dir / ".".join(map(str, coordinates))
+				if path.name in omitted_chunks:
+					continue
+				path.parent.mkdir(parents=True, exist_ok=True)
+				path.write_text("fixture\n")
 
 	def push_change(self, text: str) -> str:
 		(self.upstream / "README.md").write_text(text)
