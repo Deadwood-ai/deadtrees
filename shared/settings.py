@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
+from datetime import date
 from pathlib import Path
 import os
 
@@ -189,6 +190,7 @@ class Settings(BaseSettings):
 	NOTIFICATION_SENDER_EMAIL: str = 'notifications@deadtrees.earth'
 	NOTIFICATION_SENDER_NAME: str = 'DeadTrees'
 	PROCESSING_EMAIL_NOTIFICATIONS_ENABLED: bool = False
+	PROCESSING_FAILURE_EMAIL_HOLIDAY_NOTE_UNTIL: date | None = date(2026, 9, 15)
 
 	# Mailpit (local test email server) - used when ENV=development
 	MAILPIT_SMTP_HOST: str = 'localhost'

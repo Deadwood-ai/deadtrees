@@ -10,7 +10,11 @@ from typing import Optional
 
 from shared.db import use_service_client
 from shared.notifications.email import send_email
-from shared.notifications.templates import dataset_completed_email, dataset_failed_email
+from shared.notifications.templates import (
+	dataset_completed_email,
+	dataset_failed_email,
+	processing_failure_holiday_note_is_active,
+)
 from shared.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -77,7 +81,14 @@ def notify_dataset_failed(
 	if not file_name:
 		file_name = _get_dataset_file_name(dataset_id)
 
-	subject, text_body, html_body = dataset_failed_email(dataset_id, file_name, error_message)
+	subject, text_body, html_body = dataset_failed_email(
+		dataset_id,
+		file_name,
+		error_message,
+		include_holiday_note=processing_failure_holiday_note_is_active(
+			settings.PROCESSING_FAILURE_EMAIL_HOLIDAY_NOTE_UNTIL
+		),
+	)
 	return send_email(to_email, subject, html_body, text_body=text_body)
 
 

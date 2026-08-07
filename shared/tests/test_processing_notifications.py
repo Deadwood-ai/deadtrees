@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
@@ -11,7 +12,11 @@ from shared.notifications.processing import (
 	build_recipient_roles,
 	is_dataset_user_visible_ready,
 )
-from shared.notifications.templates import dataset_completed_email, dataset_failed_email
+from shared.notifications.templates import (
+	dataset_completed_email,
+	dataset_failed_email,
+	processing_failure_holiday_note_is_active,
+)
 
 
 def complete_status() -> dict:
@@ -120,6 +125,36 @@ def test_templates_escape_user_controlled_content_and_use_canonical_route():
 	assert internal_error not in failed_html
 	assert '&lt;img' in failed_html
 	assert 'https://deadtrees.earth/dataset/123' in completed_html
+
+
+@pytest.mark.unit
+def test_failure_template_holiday_note_is_explicit_and_date_bounded():
+	_, text_body, html_body = dataset_failed_email(123, 'forest.tif', include_holiday_note=True)
+	_, plain_text_body, plain_html_body = dataset_failed_email(123, 'forest.tif')
+
+	assert 'Most of our team are currently on holiday' in text_body
+	assert 'Most of our team are currently on holiday' in html_body
+	assert 'Most of our team are currently on holiday' not in plain_text_body
+	assert 'Most of our team are currently on holiday' not in plain_html_body
+	assert processing_failure_holiday_note_is_active(date(2026, 9, 15), today=date(2026, 9, 15)) is True
+	assert processing_failure_holiday_note_is_active(date(2026, 9, 15), today=date(2026, 9, 16)) is False
+	assert processing_failure_holiday_note_is_active(None, today=date(2026, 8, 7)) is False
+
+
+@pytest.mark.unit
+def test_failure_event_render_uses_configured_holiday_cutoff(monkeypatch):
+	monkeypatch.setattr(
+		processing_notifications.settings,
+		'PROCESSING_FAILURE_EMAIL_HOLIDAY_NOTE_UNTIL',
+		date(9999, 12, 31),
+	)
+	_, text_body, _ = processing_notifications._render_event(
+		ProcessingNotificationType.failed,
+		123,
+		'forest.tif',
+	)
+
+	assert 'Most of our team are currently on holiday' in text_body
 
 
 @pytest.mark.unit
