@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import {
   fetchActivePriwaWarnkarte,
@@ -18,6 +18,7 @@ export function usePriwaWarnkarte(projectId: string, canManage: boolean) {
   const queryClient = useQueryClient();
   const [selectedOverlay, setSelectedOverlay] =
     useState<IPriwaWarnkarteOverlay | null>(null);
+  const selectedOverlayRequest = useRef(0);
   const [isVisible, setVisible] = useState(true);
 
   const activeQuery = useQuery({
@@ -41,6 +42,7 @@ export function usePriwaWarnkarte(projectId: string, canManage: boolean) {
     validatePriwaWarnkarte(projectId, file, requireToken());
 
   const importFile = async (file: File, confirmedDate: string) => {
+    const request = ++selectedOverlayRequest.current;
     const imported = await importPriwaWarnkarte(
       projectId,
       file,
@@ -55,20 +57,26 @@ export function usePriwaWarnkarte(projectId: string, canManage: boolean) {
       imported.version_id,
       requireToken(),
     );
-    setSelectedOverlay(overlay);
+    if (request === selectedOverlayRequest.current) {
+      setSelectedOverlay(overlay);
+    }
     return imported;
   };
 
   const showVersion = async (versionId: string) => {
+    const request = ++selectedOverlayRequest.current;
     const overlay = await fetchPriwaWarnkarteVersionOverlay(
       projectId,
       versionId,
       requireToken(),
     );
-    setSelectedOverlay(overlay);
+    if (request === selectedOverlayRequest.current) {
+      setSelectedOverlay(overlay);
+    }
   };
 
   const publishVersion = async (versionId: string) => {
+    const request = ++selectedOverlayRequest.current;
     await publishPriwaWarnkarteVersion(versionId, requireToken());
     await Promise.all([
       queryClient.invalidateQueries({
@@ -78,10 +86,15 @@ export function usePriwaWarnkarte(projectId: string, canManage: boolean) {
         queryKey: ["priwa-warnkarte", projectId, "versions"],
       }),
     ]);
-    setSelectedOverlay(null);
+    if (request === selectedOverlayRequest.current) {
+      setSelectedOverlay(null);
+    }
   };
 
-  const clearSelectedVersion = useCallback(() => setSelectedOverlay(null), []);
+  const clearSelectedVersion = useCallback(() => {
+    selectedOverlayRequest.current += 1;
+    setSelectedOverlay(null);
+  }, []);
 
   return {
     activeOverlay: activeQuery.data ?? null,

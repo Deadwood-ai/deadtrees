@@ -144,7 +144,10 @@ async function fulfillSupabaseRequest(route: Route) {
 
 async function installWarnkarteApi(
   page: Page,
-  { validateDelayMs = 0 }: { validateDelayMs?: number } = {},
+  {
+    validateDelayMs = 0,
+    overlayDelayMs = 0,
+  }: { validateDelayMs?: number; overlayDelayMs?: number } = {},
 ) {
   let published = false;
 
@@ -227,6 +230,9 @@ async function installWarnkarteApi(
   await page.route(
     "**/priwa/warnkarte/versions/version-new/overlay?*",
     async (route) => {
+      if (overlayDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, overlayDelayMs));
+      }
       await route.fulfill({
         contentType: "application/json",
         json: {
@@ -351,6 +357,35 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await expect(page.getByTestId("priwa-review-detail-panel")).toBeVisible();
     await expect(page.getByTestId("priwa-review-detail-panel")).toContainText(
       "Befallsgruppe Test",
+    );
+  });
+
+  test("closing management discards a pending version selection", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await installWarnkarteAdmin(page);
+    await installWarnkarteApi(page, { overlayDelayMs: 500 });
+    await page.goto("/priwa-field");
+
+    await page.getByRole("button", { name: "Warnkarte verwalten" }).click();
+    const overlayResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/versions/version-new/overlay") &&
+        response.status() === 200,
+    );
+    await page.getByRole("radio", { name: "Auf Karte anzeigen" }).click();
+    await page
+      .getByTestId("priwa-warnkarte-admin-panel")
+      .getByRole("button", { name: "Warnkarten-Verwaltung schließen" })
+      .click();
+    await overlayResponse;
+
+    await expect(page.getByTestId("priwa-warnkarte-admin-panel")).toHaveCount(
+      0,
+    );
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toContainText(
+      "Warnkarte 25.06.2024",
     );
   });
 

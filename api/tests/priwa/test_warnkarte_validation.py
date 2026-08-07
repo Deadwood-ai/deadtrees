@@ -118,6 +118,21 @@ def test_accepts_more_than_the_previous_polygon_count_limit(tmp_path):
 	assert validated.feature_count == feature_count
 
 
+def test_rejects_an_oversized_normalized_import_payload(tmp_path, monkeypatch):
+	path = write_warnkarte(
+		tmp_path / 'warnkarte_2024-06-25.gpkg',
+		probabilities=(0.5,),
+	)
+	monkeypatch.setattr(warnkarte_module, 'MAX_IMPORT_PAYLOAD_BYTES', 4)
+
+	with pytest.raises(WarnkarteValidationError) as error:
+		validate_path(path)
+
+	assert error.value.code == 'IMPORT_PAYLOAD_TOO_LARGE'
+	assert error.value.status_code == 413
+	assert error.value.details['max_bytes'] == 4
+
+
 def test_rejects_excessive_geometry_complexity_with_structured_413(tmp_path, monkeypatch):
 	path = write_warnkarte(
 		tmp_path / 'warnkarte_2024-06-25.gpkg',
