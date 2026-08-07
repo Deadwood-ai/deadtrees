@@ -41,6 +41,7 @@ class ProcessorAssetPreflightTest(unittest.TestCase):
 				'PROCESSOR_ASSETS_DIR=${ASSET_ROOT}/assets\n'
 				'PROCESSOR_PASSWORD=prefix$$suffix\n'
 				"LITERAL_PATH='$ASSET_ROOT/assets'\n"
+				'ESCAPED_PASSWORD="secret\\tvalue\\\\path\\"quote"\n'
 				'COMMENTED_VALUE=secret # rotated\n'
 			)
 			with patch.dict(os.environ, {'ASSET_ROOT': '/from-shell'}):
@@ -49,6 +50,7 @@ class ProcessorAssetPreflightTest(unittest.TestCase):
 			self.assertEqual(env['PROCESSOR_ASSETS_DIR'], '/from-shell/assets')
 			self.assertEqual(env['PROCESSOR_PASSWORD'], 'prefix$$suffix')
 			self.assertEqual(env['LITERAL_PATH'], '$ASSET_ROOT/assets')
+			self.assertEqual(env['ESCAPED_PASSWORD'], 'secret\tvalue\\path"quote')
 			self.assertEqual(env['COMMENTED_VALUE'], 'secret')
 
 	def test_empty_shell_assets_override_uses_compose_default(self) -> None:

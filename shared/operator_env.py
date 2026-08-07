@@ -9,6 +9,7 @@ ENV_REFERENCE = re.compile(
 	r'(?<!\$)\$(?:\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)'
 	r'(?:(?P<operator>:-|-|:\+|\+|:\?|\?)(?P<operand>[^{}]*))?\}|(?P<plain>[A-Za-z_][A-Za-z0-9_]*))'
 )
+DOUBLE_QUOTED_ESCAPES = {'n': '\n', 'r': '\r', 't': '\t', '\\': '\\', '"': '"'}
 
 
 def _expand_references(value: str, variables: dict[str, str]) -> str:
@@ -43,11 +44,23 @@ def _parse_value(raw_value: str) -> tuple[str, bool]:
 	value = raw_value.strip()
 	if value.startswith(("'", '"')):
 		quote = value[0]
+		parsed = []
 		escaped = False
-		for index, character in enumerate(value[1:], start=1):
-			if character == quote and not escaped:
-				return value[1:index], quote == "'"
-			escaped = character == '\\' and not escaped
+		for character in value[1:]:
+			if escaped:
+				if quote == '"':
+					parsed.append(DOUBLE_QUOTED_ESCAPES.get(character, f'\\{character}'))
+				else:
+					parsed.append("'" if character == "'" else f'\\{character}')
+				escaped = False
+			elif character == '\\':
+				escaped = True
+			elif character == quote:
+				return ''.join(parsed), quote == "'"
+			else:
+				parsed.append(character)
+		if escaped:
+			parsed.append('\\')
 		return value, False
 	value = re.split(r'\s+#', value, maxsplit=1)[0].rstrip()
 	return value, False
