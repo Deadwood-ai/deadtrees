@@ -1,20 +1,54 @@
+from datetime import date
 from html import escape
+
+from shared.settings import settings
 
 
 ACCOUNT_URL = 'https://deadtrees.earth/profile'
+
+
+def processing_failure_holiday_note_is_active(
+	until: date | None,
+	*,
+	today: date | None = None,
+) -> bool:
+	return until is not None and (today or date.today()) <= until
 
 
 def dataset_failed_email(
 	dataset_id: int,
 	file_name: str,
 	error_message: str | None = None,
+	*,
+	today: date | None = None,
 ) -> tuple[str, str, str]:
 	"""Return a user-safe failure email without exposing processor internals."""
 	safe_file_name = escape(file_name)
 	subject = f'Dataset {dataset_id} - Processing Failed'
+	include_holiday_note = processing_failure_holiday_note_is_active(
+		settings.PROCESSING_FAILURE_EMAIL_HOLIDAY_NOTE_UNTIL,
+		today=today,
+	)
+	holiday_note_text = (
+		'\n\nA note on our current availability\n\n'
+		'Most of our team are currently on holiday, so our follow-up may take longer than usual. '
+		'We will return to it as soon as the relevant team members are available.'
+		if include_holiday_note
+		else ''
+	)
+	holiday_note_html = (
+		'<div style="margin: 20px 0; padding: 16px 18px; background: #fff; border: 1px solid #dee2e6; border-radius: 6px;">'
+			'<p style="color: #333; margin: 0 0 8px; font-weight: bold;">A note on our current availability</p>'
+			'<p style="color: #555; margin: 0;">Most of our team are currently on holiday, so our follow-up may take longer than usual. '
+			'We will return to it as soon as the relevant team members are available.</p>'
+		'</div>'
+		if include_holiday_note
+		else ''
+	)
 	text_body = (
 		f'Processing failed for dataset {dataset_id} ({file_name}).\n\n'
-		'The DeadTrees team has recorded the failure. You can retry processing from your account.\n\n'
+		'The DeadTrees team has recorded the failure. You can retry processing from your account.'
+		f'{holiday_note_text}\n\n'
 		f'Manage processing emails: {ACCOUNT_URL}'
 	)
 	html_body = f"""
@@ -35,6 +69,7 @@ def dataset_failed_email(
 				</tr>
 			</table>
 			<p style="color: #333;">The DeadTrees team has recorded the failure. You can retry processing from your account.</p>
+			{holiday_note_html}
 			<p style="color: #666; font-size: 13px;">
 				If the problem persists, contact
 				<a href="mailto:info@deadtrees.earth" style="color: #2980b9;">info@deadtrees.earth</a>.
