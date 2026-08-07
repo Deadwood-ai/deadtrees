@@ -3,7 +3,6 @@ import { formatPriwaWarnkarteDate } from "./priwaWarnkartePresentation";
 
 interface PriwaWarnkarteLegendProps {
   sourceDate: string | null;
-  isPreviewing: boolean;
 }
 
 const bandLabel = (index: number) =>
@@ -13,7 +12,6 @@ const bandLabel = (index: number) =>
 
 export default function PriwaWarnkarteLegend({
   sourceDate,
-  isPreviewing,
 }: PriwaWarnkarteLegendProps) {
   const date = formatPriwaWarnkarteDate(sourceDate);
   if (!date) return null;
@@ -26,7 +24,7 @@ export default function PriwaWarnkarteLegend({
     >
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-xs font-semibold text-slate-900">
-          {isPreviewing ? "Vorschau · " : ""}Warnkarte {date}
+          Warnkarte {date}
         </span>
         <span className="text-[10px] text-slate-500">Wahrscheinlichkeit</span>
       </div>

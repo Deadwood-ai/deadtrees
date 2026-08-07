@@ -14,12 +14,11 @@ interface PriwaWarnkarteAdminPanelProps {
   versions: IPriwaWarnkarteVersion[];
   versionsError: unknown;
   isLoadingVersions: boolean;
-  previewVersionId: string | null;
+  visibleVersionId: string | null;
   onClose: () => void;
-  onClearPreview: () => void;
   onValidate: (file: File) => Promise<IPriwaWarnkarteValidationSummary>;
   onImport: (file: File, confirmedDate: string) => Promise<unknown>;
-  onPreview: (versionId: string) => Promise<void>;
+  onShowVersion: (versionId: string) => Promise<void>;
   onPublish: (versionId: string) => Promise<void>;
 }
 
@@ -27,12 +26,11 @@ export default function PriwaWarnkarteAdminPanel({
   versions,
   versionsError,
   isLoadingVersions,
-  previewVersionId,
+  visibleVersionId,
   onClose,
-  onClearPreview,
   onValidate,
   onImport,
-  onPreview,
+  onShowVersion,
   onPublish,
 }: PriwaWarnkarteAdminPanelProps) {
   const { message } = App.useApp();
@@ -73,15 +71,14 @@ export default function PriwaWarnkarteAdminPanel({
     void run(async () => {
       await onImport(file, summary.authoritative_date);
       message.success(
-        "Warnkarte unveröffentlicht importiert. Die Vorschau ist aktiv.",
+        "Warnkarte unveröffentlicht importiert und auf der Karte angezeigt.",
       );
     });
   };
 
-  const preview = (versionId: string) =>
+  const showVersion = (versionId: string) =>
     void run(async () => {
-      await onPreview(versionId);
-      message.success("Warnkarten-Vorschau geladen.");
+      await onShowVersion(versionId);
     });
 
   const publish = (versionId: string) =>
@@ -109,12 +106,6 @@ export default function PriwaWarnkarteAdminPanel({
         />
       </header>
 
-      {previewVersionId && (
-        <Button className="mb-4" block onClick={onClearPreview}>
-          Vorschau beenden
-        </Button>
-      )}
-
       <Typography.Title level={5}>Neue Version</Typography.Title>
       <PriwaWarnkarteUploadPanel
         summary={summary}
@@ -128,8 +119,8 @@ export default function PriwaWarnkarteAdminPanel({
       <Divider />
       <Typography.Title level={5}>Importierte Versionen</Typography.Title>
       <Typography.Paragraph type="secondary" className="!mt-0 text-xs">
-        Es ist immer genau eine Version aktiv. Frühere Versionen bleiben
-        erhalten und können erneut veröffentlicht werden.
+        Wähle genau eine Version für die Karte aus. „Aktiv“ kennzeichnet die für
+        alle Mitglieder veröffentlichte Version.
       </Typography.Paragraph>
       {!!versionsError && (
         <Alert
@@ -146,9 +137,9 @@ export default function PriwaWarnkarteAdminPanel({
       ) : (
         <PriwaWarnkarteVersionList
           versions={versions}
-          previewVersionId={previewVersionId}
+          visibleVersionId={visibleVersionId}
           isBusy={isBusy}
-          onPreview={preview}
+          onShowVersion={showVersion}
           onPublish={publish}
         />
       )}

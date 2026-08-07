@@ -60,10 +60,11 @@ export default function PriwaField() {
     activeMembership?.projectId ?? "",
     canManageWarnkarte,
   );
-  const closeWarnkarteAdmin = useCallback(
-    () => setWarnkarteAdminOpen(false),
-    [],
-  );
+  const { clearSelectedVersion } = warnkarte;
+  const closeWarnkarteAdmin = useCallback(() => {
+    clearSelectedVersion();
+    setWarnkarteAdminOpen(false);
+  }, [clearSelectedVersion]);
   const warnkarteDetailMode = useMemo<PriwaReviewDetailMode | undefined>(
     () =>
       canManageWarnkarte && isWarnkarteAdminOpen
@@ -74,11 +75,15 @@ export default function PriwaField() {
                 versions={warnkarte.versions}
                 versionsError={warnkarte.versionsError}
                 isLoadingVersions={warnkarte.isLoadingVersions}
-                previewVersionId={warnkarte.previewOverlay?.version_id ?? null}
-                onClearPreview={warnkarte.clearPreview}
+                visibleVersionId={
+                  warnkarte.selectedOverlay?.version_id ??
+                  warnkarte.versions.find((version) => version.is_current)
+                    ?.id ??
+                  null
+                }
                 onValidate={warnkarte.validateFile}
                 onImport={warnkarte.importFile}
-                onPreview={warnkarte.previewVersion}
+                onShowVersion={warnkarte.showVersion}
                 onPublish={warnkarte.publishVersion}
                 onClose={closeWarnkarteAdmin}
               />
@@ -90,11 +95,10 @@ export default function PriwaField() {
       canManageWarnkarte,
       closeWarnkarteAdmin,
       isWarnkarteAdminOpen,
-      warnkarte.clearPreview,
       warnkarte.importFile,
       warnkarte.isLoadingVersions,
-      warnkarte.previewOverlay?.version_id,
-      warnkarte.previewVersion,
+      warnkarte.selectedOverlay?.version_id,
+      warnkarte.showVersion,
       warnkarte.publishVersion,
       warnkarte.validateFile,
       warnkarte.versions,
@@ -171,7 +175,11 @@ export default function PriwaField() {
       {canManageWarnkarte && (
         <PriwaWarnkarteAdminControl
           isOpen={isWarnkarteAdminOpen}
-          onToggle={() => setWarnkarteAdminOpen((open) => !open)}
+          onToggle={() =>
+            isWarnkarteAdminOpen
+              ? closeWarnkarteAdmin()
+              : setWarnkarteAdminOpen(true)
+          }
         />
       )}
     </>
@@ -215,7 +223,6 @@ export default function PriwaField() {
       {hasWarnkarte && warnkarte.isVisible && (
         <PriwaWarnkarteLegend
           sourceDate={warnkarte.displayedOverlay?.source_date ?? null}
-          isPreviewing={warnkarte.isPreviewing}
         />
       )}
       {warnkarte.overlayError && (

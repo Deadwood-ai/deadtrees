@@ -764,6 +764,11 @@ export default function PriwaFieldMap({
     isDrawerOpen &&
     !!editingPoint &&
     editingPoint.id === reviewPointId;
+  const closeReviewTree = useCallback(() => {
+    setReviewPointId(null);
+    setDrawerOpen(false);
+    setEditingPoint(null);
+  }, []);
 
   return (
     <div
@@ -870,7 +875,7 @@ export default function PriwaFieldMap({
           onSelectTree={selectReviewPoint}
           onFocusTree={focusSelectedReviewPoint}
           onEditTree={openReviewPointForEditing}
-          onCloseTree={() => setReviewPointId(null)}
+          onCloseTree={closeReviewTree}
           onEditGroup={setGroupEditorDraft}
           onSaveGroup={saveGroup}
           onAssignFlight={assignFlight}

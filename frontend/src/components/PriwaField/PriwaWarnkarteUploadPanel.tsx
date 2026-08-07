@@ -111,7 +111,7 @@ export default function PriwaWarnkarteUploadPanel({
             loading={isBusy}
             onClick={onImport}
           >
-            Unveröffentlicht importieren und Vorschau öffnen
+            Unveröffentlicht importieren und anzeigen
           </Button>
         </>
       )}

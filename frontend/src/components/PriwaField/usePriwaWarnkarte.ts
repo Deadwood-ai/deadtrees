@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import {
   fetchActivePriwaWarnkarte,
@@ -16,7 +16,7 @@ export function usePriwaWarnkarte(projectId: string, canManage: boolean) {
   const { session } = useAuth();
   const token = session?.access_token ?? null;
   const queryClient = useQueryClient();
-  const [previewOverlay, setPreviewOverlay] =
+  const [selectedOverlay, setSelectedOverlay] =
     useState<IPriwaWarnkarteOverlay | null>(null);
   const [isVisible, setVisible] = useState(true);
 
@@ -55,22 +55,21 @@ export function usePriwaWarnkarte(projectId: string, canManage: boolean) {
       imported.version_id,
       requireToken(),
     );
-    setPreviewOverlay(overlay);
+    setSelectedOverlay(overlay);
     return imported;
   };
 
-  const previewVersion = async (versionId: string) => {
+  const showVersion = async (versionId: string) => {
     const overlay = await fetchPriwaWarnkarteVersionOverlay(
       projectId,
       versionId,
       requireToken(),
     );
-    setPreviewOverlay(overlay);
+    setSelectedOverlay(overlay);
   };
 
   const publishVersion = async (versionId: string) => {
     await publishPriwaWarnkarteVersion(versionId, requireToken());
-    setPreviewOverlay(null);
     await Promise.all([
       queryClient.invalidateQueries({
         queryKey: ["priwa-warnkarte", projectId, "active"],
@@ -79,22 +78,24 @@ export function usePriwaWarnkarte(projectId: string, canManage: boolean) {
         queryKey: ["priwa-warnkarte", projectId, "versions"],
       }),
     ]);
+    setSelectedOverlay(null);
   };
+
+  const clearSelectedVersion = useCallback(() => setSelectedOverlay(null), []);
 
   return {
     activeOverlay: activeQuery.data ?? null,
-    displayedOverlay: previewOverlay ?? activeQuery.data ?? null,
-    isPreviewing: previewOverlay !== null,
+    displayedOverlay: selectedOverlay ?? activeQuery.data ?? null,
     isVisible,
     overlayError: activeQuery.error,
-    previewOverlay,
+    selectedOverlay,
     versions: versionsQuery.data ?? [],
     versionsError: versionsQuery.error,
     isLoadingVersions: versionsQuery.isLoading,
-    clearPreview: () => setPreviewOverlay(null),
+    clearSelectedVersion,
     toggleVisibility: () => setVisible((visible) => !visible),
     importFile,
-    previewVersion,
+    showVersion,
     publishVersion,
     validateFile,
   };

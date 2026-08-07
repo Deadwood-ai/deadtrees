@@ -1,21 +1,30 @@
-import { Button, Empty, List, Popconfirm, Space, Tag, Typography } from "antd";
+import {
+  Button,
+  Empty,
+  List,
+  Popconfirm,
+  Radio,
+  Space,
+  Tag,
+  Typography,
+} from "antd";
 
 import type { IPriwaWarnkarteVersion } from "../../api/priwaWarnkarte";
 import { formatPriwaWarnkarteDate } from "./priwaWarnkartePresentation";
 
 interface PriwaWarnkarteVersionListProps {
   versions: IPriwaWarnkarteVersion[];
-  previewVersionId: string | null;
+  visibleVersionId: string | null;
   isBusy: boolean;
-  onPreview: (versionId: string) => void;
+  onShowVersion: (versionId: string) => void;
   onPublish: (versionId: string) => void;
 }
 
 export default function PriwaWarnkarteVersionList({
   versions,
-  previewVersionId,
+  visibleVersionId,
   isBusy,
-  onPreview,
+  onShowVersion,
   onPublish,
 }: PriwaWarnkarteVersionListProps) {
   if (versions.length === 0) {
@@ -28,61 +37,68 @@ export default function PriwaWarnkarteVersionList({
   }
 
   return (
-    <List
-      dataSource={versions}
-      renderItem={(version) => {
-        const actions = [
-          <Button
-            key="preview"
-            size="small"
-            disabled={isBusy}
-            onClick={() => onPreview(version.id)}
-          >
-            Vorschau
-          </Button>,
-        ];
-        if (!version.is_current) {
-          actions.push(
-            <Popconfirm
-              key="publish"
-              title="Diese Version als aktive Warnkarte veröffentlichen?"
-              description="Die bisherige Version bleibt erhalten und kann erneut veröffentlicht werden."
-              okText="Veröffentlichen"
-              cancelText="Abbrechen"
-              onConfirm={() => onPublish(version.id)}
-            >
-              <Button size="small" type="primary" danger disabled={isBusy}>
-                Veröffentlichen
-              </Button>
-            </Popconfirm>,
-          );
-        }
-
-        return (
-          <List.Item actions={actions}>
-            <List.Item.Meta
-              title={
-                <Space wrap>
-                  <span>
+    <Radio.Group
+      className="w-full"
+      value={visibleVersionId}
+      onChange={(event) => onShowVersion(event.target.value)}
+    >
+      <List
+        className="w-full"
+        dataSource={versions}
+        renderItem={(version) => {
+          const isVisible = visibleVersionId === version.id;
+          return (
+            <List.Item className="!block !px-0">
+              <div
+                className={`rounded-lg border p-3 ${
+                  isVisible
+                    ? "border-emerald-300 bg-emerald-50/70"
+                    : "border-slate-200 bg-white"
+                }`}
+              >
+                <Space wrap size={[6, 4]}>
+                  <Typography.Text strong>
                     Warnkarte vom{" "}
                     {formatPriwaWarnkarteDate(version.source_date)}
-                  </span>
+                  </Typography.Text>
                   {version.is_current && <Tag color="red">Aktiv</Tag>}
-                  {previewVersionId === version.id && (
-                    <Tag color="gold">Vorschau</Tag>
-                  )}
+                  {isVisible && <Tag color="green">Sichtbar</Tag>}
                 </Space>
-              }
-              description={
-                <Typography.Text type="secondary">
+                <Typography.Paragraph
+                  type="secondary"
+                  className="!mb-3 !mt-1 text-xs"
+                >
                   {version.feature_count} Polygone · importiert{" "}
                   {new Date(version.imported_at).toLocaleString("de-DE")}
-                </Typography.Text>
-              }
-            />
-          </List.Item>
-        );
-      }}
-    />
+                </Typography.Paragraph>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Radio value={version.id} disabled={isBusy}>
+                    {isVisible ? "Auf Karte sichtbar" : "Auf Karte anzeigen"}
+                  </Radio>
+                  {!version.is_current && (
+                    <Popconfirm
+                      title="Diese Version als aktive Warnkarte veröffentlichen?"
+                      description="Die bisherige Version bleibt erhalten und kann erneut veröffentlicht werden."
+                      okText="Veröffentlichen"
+                      cancelText="Abbrechen"
+                      onConfirm={() => onPublish(version.id)}
+                    >
+                      <Button
+                        size="small"
+                        type="primary"
+                        danger
+                        disabled={isBusy}
+                      >
+                        Veröffentlichen
+                      </Button>
+                    </Popconfirm>
+                  )}
+                </div>
+              </div>
+            </List.Item>
+          );
+        }}
+      />
+    </Radio.Group>
   );
 }

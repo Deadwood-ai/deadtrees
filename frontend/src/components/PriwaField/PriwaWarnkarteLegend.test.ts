@@ -9,23 +9,12 @@ describe("PriwaWarnkarteLegend", () => {
     const html = renderToStaticMarkup(
       createElement(PriwaWarnkarteLegend, {
         sourceDate: "2024-06-25",
-        isPreviewing: false,
       }),
     );
 
     expect(html).toContain("Warnkarte 25.06.2024");
     expect(html).toContain("Wahrscheinlichkeit");
     expect(html.match(/aria-label="Wahrscheinlichkeit/g)).toHaveLength(10);
-  });
-
-  it("marks an unpublished overlay as a preview", () => {
-    const html = renderToStaticMarkup(
-      createElement(PriwaWarnkarteLegend, {
-        sourceDate: "2024-06-25",
-        isPreviewing: true,
-      }),
-    );
-
-    expect(html).toContain("Vorschau");
+    expect(html).not.toContain("Vorschau");
   });
 });

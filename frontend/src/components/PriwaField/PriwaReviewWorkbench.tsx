@@ -1,6 +1,13 @@
 import { PlusOutlined, TableOutlined } from "@ant-design/icons";
 import { Button, Empty, Segmented, Tag } from "antd";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 
 import UploadButton from "../Upload/UploadButton";
@@ -178,6 +185,10 @@ export default function PriwaReviewWorkbench({
     selectionChanged,
   ]);
 
+  useLayoutEffect(() => {
+    if (detailMode && isTreeEditing) onCloseTree();
+  }, [detailMode, isTreeEditing, onCloseTree]);
+
   const selectedGroupContent = !selectedItem ? (
     <Empty
       className="pt-24"
@@ -202,7 +213,7 @@ export default function PriwaReviewWorkbench({
       ? detailMode.content
       : selectedGroupContent;
   const treeContent =
-    !detailMode && selectedTree ? (
+    selectedTree && (!detailMode || isTreeEditing) ? (
       <PriwaReviewTreeInspector
         point={selectedTree}
         onClose={onCloseTree}
