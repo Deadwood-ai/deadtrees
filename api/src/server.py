@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from shared.__version__ import __version__
-from .routers import process, upload, info, auth, download, dte_stats, prepackaged, search
+from .routers import process, upload, info, auth, download, dte_stats, prepackaged, search, priwa_warnkarte
 
 app = FastAPI(
 	title='Deadwood-AI API',
@@ -59,6 +59,9 @@ app.include_router(search.router)
 
 # add authenticated prepackaged dataset catalog and grant routes
 app.include_router(prepackaged.router)
+
+# add PRIWA Warnkarte validation, import, publication, and safe overlay routes
+app.include_router(priwa_warnkarte.router)
 
 # add the download routes to the app
 # app.include_router(download.download_app)

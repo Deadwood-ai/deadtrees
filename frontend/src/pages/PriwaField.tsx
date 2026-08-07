@@ -4,7 +4,11 @@ import { usePriwaOfflineKaeferbaeume } from "../components/PriwaField/usePriwaOf
 import { usePriwaMosaics } from "../components/PriwaField/usePriwaMosaics";
 import { usePriwaBefallsgruppen } from "../components/PriwaField/usePriwaBefallsgruppen";
 import { usePriwaProjectMemberships } from "../hooks/usePriwaProjectMemberships";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { Alert, Button, Result, Spin } from "antd";
+import PriwaWarnkarteAdminDrawer from "../components/PriwaField/PriwaWarnkarteAdminDrawer";
+import PriwaWarnkarteStatus from "../components/PriwaField/PriwaWarnkarteStatus";
+import { usePriwaWarnkarte } from "../components/PriwaField/usePriwaWarnkarte";
 
 export default function PriwaField() {
   const { isOnline, serviceWorker } = usePriwaOfflineStatus();
@@ -14,6 +18,7 @@ export default function PriwaField() {
     isLoading: isLoadingMemberships,
   } = usePriwaProjectMemberships();
   const activeMembership = memberships[0] ?? null;
+  const isMobile = useIsMobile();
   const {
     points,
     isLoading: isLoadingPoints,
@@ -43,6 +48,11 @@ export default function PriwaField() {
     deleteGroup,
     isSaving: isSavingGroup,
   } = usePriwaBefallsgruppen(activeMembership?.projectId);
+  const canManageWarnkarte = activeMembership?.role === "admin" && !isMobile;
+  const warnkarte = usePriwaWarnkarte(
+    activeMembership?.projectId ?? "",
+    canManageWarnkarte,
+  );
 
   if (!isOnline && isLoadingMemberships) {
     return (
@@ -103,34 +113,62 @@ export default function PriwaField() {
   }
 
   return (
-    <PriwaFieldMap
-      points={points}
-      projectId={activeMembership.projectId}
-      projectName={activeMembership.projectName}
-      isLoadingPoints={isLoadingPoints || isRefetching}
-      isSavingPoint={isSaving}
-      mosaics={mosaics}
-      groups={groups}
-      isLoadingGroups={isLoadingGroups}
-      isSavingGroup={isSavingGroup}
-      groupsErrorMessage={
-        groupsError instanceof Error ? groupsError.message : null
-      }
-      isCogLoading={isLoadingMosaics || isRefetchingMosaics}
-      cogErrorMessage={
-        mosaicsError instanceof Error ? mosaicsError.message : null
-      }
-      errorMessage={pointsError instanceof Error ? pointsError.message : null}
-      onAddPoint={createPoint}
-      onUpdatePoint={updatePoint}
-      onDeletePoint={deletePoint}
-      onSaveGroup={saveGroup}
-      onAssignFlightToGroup={addFlightToGroup}
-      onDeleteGroup={deleteGroup}
-      onSetFlightType={setFlightType}
-      isClassifyingFlight={isClassifyingFlight}
-      syncSummary={syncSummary}
-      onSyncNow={syncNow}
-    />
+    <div className="relative min-h-[100dvh]">
+      <PriwaFieldMap
+        points={points}
+        projectId={activeMembership.projectId}
+        projectName={activeMembership.projectName}
+        warnkarteOverlay={warnkarte.displayedOverlay}
+        isLoadingPoints={isLoadingPoints || isRefetching}
+        isSavingPoint={isSaving}
+        mosaics={mosaics}
+        groups={groups}
+        isLoadingGroups={isLoadingGroups}
+        isSavingGroup={isSavingGroup}
+        groupsErrorMessage={
+          groupsError instanceof Error ? groupsError.message : null
+        }
+        isCogLoading={isLoadingMosaics || isRefetchingMosaics}
+        cogErrorMessage={
+          mosaicsError instanceof Error ? mosaicsError.message : null
+        }
+        errorMessage={pointsError instanceof Error ? pointsError.message : null}
+        onAddPoint={createPoint}
+        onUpdatePoint={updatePoint}
+        onDeletePoint={deletePoint}
+        onSaveGroup={saveGroup}
+        onAssignFlightToGroup={addFlightToGroup}
+        onDeleteGroup={deleteGroup}
+        onSetFlightType={setFlightType}
+        isClassifyingFlight={isClassifyingFlight}
+        syncSummary={syncSummary}
+        onSyncNow={syncNow}
+      />
+      <PriwaWarnkarteStatus
+        sourceDate={warnkarte.displayedOverlay?.source_date ?? null}
+        isPreviewing={warnkarte.isPreviewing}
+      />
+      {canManageWarnkarte && (
+        <PriwaWarnkarteAdminDrawer
+          versions={warnkarte.versions}
+          versionsError={warnkarte.versionsError}
+          isLoadingVersions={warnkarte.isLoadingVersions}
+          previewVersionId={warnkarte.previewOverlay?.version_id ?? null}
+          onClearPreview={warnkarte.clearPreview}
+          onValidate={warnkarte.validateFile}
+          onImport={warnkarte.importFile}
+          onPreview={warnkarte.previewVersion}
+          onPublish={warnkarte.publishVersion}
+        />
+      )}
+      {warnkarte.overlayError && (
+        <Alert
+          className="absolute bottom-4 left-1/2 z-[65] w-[min(32rem,calc(100%-2rem))] -translate-x-1/2 shadow-lg"
+          type="error"
+          showIcon
+          message="Warnkarte konnte nicht geladen werden"
+        />
+      )}
+    </div>
   );
 }

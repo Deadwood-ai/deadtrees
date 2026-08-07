@@ -33,6 +33,10 @@ import {
   createPriwaPreviewLayer,
 } from "./createPriwaPointLayer";
 import { createPriwaBefallsgruppeLayer } from "./createPriwaBefallsgruppeLayer";
+import {
+  createPriwaWarnkarteLayer,
+  setPriwaWarnkarteLayerData,
+} from "./createPriwaWarnkarteLayer";
 import PriwaPointDrawer from "./PriwaPointDrawer";
 import PriwaPointListPanel from "./PriwaPointListPanel";
 import PriwaOfflineStatus from "./PriwaOfflineStatus";
@@ -50,6 +54,7 @@ import { usePriwaReviewController } from "./usePriwaReviewController";
 import { usePriwaReviewMapLayers } from "./usePriwaReviewMapLayers";
 import type { IPriwaMosaic, PriwaFlightType } from "./usePriwaMosaics";
 import type { IPriwaSyncSummary } from "./priwaOfflineSync";
+import type { IPriwaWarnkarteOverlay } from "../../api/priwaWarnkarte";
 import type {
   IPriwaBefallsgruppe,
   IPriwaBefallsgruppeSaveInput,
@@ -68,6 +73,7 @@ interface PriwaFieldMapProps {
   isLoadingPoints?: boolean;
   isSavingPoint?: boolean;
   projectName: string;
+  warnkarteOverlay?: IPriwaWarnkarteOverlay | null;
   mosaics?: IPriwaMosaic[];
   groups?: IPriwaBefallsgruppe[];
   isCogLoading?: boolean;
@@ -100,6 +106,7 @@ export default function PriwaFieldMap({
   isLoadingPoints = false,
   isSavingPoint = false,
   projectName,
+  warnkarteOverlay = null,
   mosaics = [],
   groups = [],
   isCogLoading = false,
@@ -130,6 +137,9 @@ export default function PriwaFieldMap({
   );
   const groupLayerRef = useRef<ReturnType<
     typeof createPriwaBefallsgruppeLayer
+  > | null>(null);
+  const warnkarteLayerRef = useRef<ReturnType<
+    typeof createPriwaWarnkarteLayer
   > | null>(null);
   const previewLayerRef = useRef<ReturnType<
     typeof createPriwaPreviewLayer
@@ -307,6 +317,7 @@ export default function PriwaFieldMap({
     const dopLayer = createLglDop20Layer();
     const offlineAreaLayer = createPriwaOfflineAreaLayer();
     const mosaicFootprintLayer = createPriwaMosaicFootprintLayer();
+    const warnkarteLayer = createPriwaWarnkarteLayer();
     const groupLayer = createPriwaBefallsgruppeLayer();
     const pointLayer = createPriwaPointLayer([]);
     const previewLayer = createPriwaPreviewLayer();
@@ -314,6 +325,7 @@ export default function PriwaFieldMap({
     topographicLayerRef.current = topographicLayer;
     offlineAreaLayerRef.current = offlineAreaLayer;
     mosaicFootprintLayerRef.current = mosaicFootprintLayer;
+    warnkarteLayerRef.current = warnkarteLayer;
     groupLayerRef.current = groupLayer;
     pointLayerRef.current = pointLayer;
     previewLayerRef.current = previewLayer;
@@ -324,6 +336,7 @@ export default function PriwaFieldMap({
         topographicLayer,
         dopLayer,
         offlineAreaLayer,
+        warnkarteLayer,
         mosaicFootprintLayer,
         groupLayer,
         pointLayer,
@@ -419,11 +432,17 @@ export default function PriwaFieldMap({
       aerialLayerRef.current = null;
       topographicLayerRef.current = null;
       mosaicFootprintLayerRef.current = null;
+      warnkarteLayerRef.current = null;
       groupLayerRef.current = null;
       pointLayerRef.current = null;
       previewLayerRef.current = null;
     };
   }, [stopUserLocation, userLocationLayer]);
+
+  useEffect(() => {
+    if (!warnkarteLayerRef.current) return;
+    setPriwaWarnkarteLayerData(warnkarteLayerRef.current, warnkarteOverlay);
+  }, [warnkarteOverlay]);
 
   useEffect(() => {
     aerialLayerRef.current?.setVisible(baseLayer === "aerial");
