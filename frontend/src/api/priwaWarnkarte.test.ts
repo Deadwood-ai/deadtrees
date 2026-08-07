@@ -7,7 +7,7 @@ describe("PRIWA Warnkarte API errors", () => {
     vi.unstubAllGlobals();
   });
 
-  it("explains when a preview points to an API without Warnkarte routes", async () => {
+  it("explains when an environment lacks Warnkarte routes", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -23,7 +23,7 @@ describe("PRIWA Warnkarte API errors", () => {
     await expect(request).rejects.toMatchObject({
       code: "WARNKARTE_API_UNAVAILABLE",
       message:
-        "Die Warnkarten-Funktion ist in dieser Vorschau noch nicht verfügbar. Die Datei wurde nicht validiert.",
+        "Die Warnkarten-Funktion ist in dieser Umgebung noch nicht verfügbar. Die Datei wurde nicht validiert.",
       details: { status: 404 },
     });
   });

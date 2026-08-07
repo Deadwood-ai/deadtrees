@@ -11,6 +11,7 @@ const admin = {
   email: "priwa-warnkarte-admin@example.com",
 };
 const projectId = "00000000-0000-4000-8000-0000000000d4";
+const treeId = "00000000-0000-4000-8000-0000000000d6";
 
 const polygon = {
   type: "Feature" as const,
@@ -79,6 +80,61 @@ async function fulfillSupabaseRequest(route: Route) {
     return;
   }
 
+  if (resource === "priwa_befallsgruppen") {
+    await route.fulfill({
+      contentType: "application/json",
+      json: [
+        {
+          id: "00000000-0000-4000-8000-0000000000d5",
+          project_id: projectId,
+          name: "Befallsgruppe Test",
+          origin: "manual",
+          confidence: null,
+          suggestion_reason: null,
+          algorithm_version: null,
+          created_at: "2024-06-25T12:00:00Z",
+          updated_at: "2024-06-25T12:00:00Z",
+          priwa_befallsgruppe_members: [{ tree_id: treeId, source: "manual" }],
+          priwa_befallsgruppe_flights: [],
+        },
+      ],
+    });
+    return;
+  }
+
+  if (resource === "priwa_kaeferbaeume") {
+    await route.fulfill({
+      contentType: "application/json",
+      json: [
+        {
+          id: treeId,
+          project_id: projectId,
+          geom: { type: "Point", coordinates: [8.15, 48.45] },
+          location_source: "qr_exact",
+          is_exact_location: true,
+          baumnr: "53022",
+          fund: "ja",
+          baumart: "Fichte",
+          bm: "ja",
+          bohrloch: "ja",
+          harz: "nein",
+          gruene_nadeln_am_boden: "nein",
+          nadel: "grün",
+          rinde: "0%",
+          kv: "0%",
+          name: "Sigi Huber",
+          datum: "2024-06-25",
+          kom: null,
+          raw_qr_value: null,
+          created_at: "2024-06-25T12:00:00Z",
+          updated_at: "2024-06-25T12:00:00Z",
+          client_updated_at: "2024-06-25T12:00:00Z",
+        },
+      ],
+    });
+    return;
+  }
+
   await route.fulfill({
     contentType: "application/json",
     headers: { "content-range": "0-0/0" },
@@ -88,7 +144,10 @@ async function fulfillSupabaseRequest(route: Route) {
 
 async function installWarnkarteApi(
   page: Page,
-  { validateDelayMs = 0 }: { validateDelayMs?: number } = {},
+  {
+    validateDelayMs = 0,
+    overlayDelayMs = 0,
+  }: { validateDelayMs?: number; overlayDelayMs?: number } = {},
 ) {
   let published = false;
 
@@ -171,6 +230,9 @@ async function installWarnkarteApi(
   await page.route(
     "**/priwa/warnkarte/versions/version-new/overlay?*",
     async (route) => {
+      if (overlayDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, overlayDelayMs));
+      }
       await route.fulfill({
         contentType: "application/json",
         json: {
@@ -195,7 +257,7 @@ async function installWarnkarteApi(
 }
 
 test.describe("PRIWA Warnkarte local UI", () => {
-  test("desktop admin validates, confirms, previews, and explicitly publishes", async ({
+  test("desktop admin selects, validates, confirms, and explicitly publishes", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -203,13 +265,55 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await installWarnkarteApi(page);
     await page.goto("/priwa-field");
 
-    await expect(page.getByText("Warnkarte vom 25.06.2024")).toBeVisible();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toContainText(
+      "Warnkarte 25.06.2024",
+    );
     const warnkarteControl = page
       .locator(".priwa-map-control-stack")
       .getByRole("button", { name: "Warnkarte verwalten" });
+    const visibilityControl = page
+      .locator(".priwa-map-control-stack")
+      .getByRole("button", { name: "Warnkarte ausblenden" });
+    await expect(visibilityControl).toHaveAttribute("aria-pressed", "true");
+    await visibilityControl.click();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toHaveCount(0);
+    await page.getByRole("button", { name: "Warnkarte einblenden" }).click();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toBeVisible();
+
+    await page.getByTestId("priwa-field-map").click({
+      position: { x: 720, y: 450 },
+    });
+    const probabilityTooltip = page.locator(".priwa-warnkarte-tooltip");
+    await expect(probabilityTooltip).toContainText("Wahrscheinlichkeit: 60 %");
+
     await expect(warnkarteControl).toBeVisible();
     await expect(warnkarteControl).toHaveClass(/ant-btn-circle/);
+    await expect(page.getByTestId("priwa-review-detail-panel")).toContainText(
+      "Befallsgruppe Test",
+    );
+    await page
+      .getByTestId("priwa-review-detail-panel")
+      .getByRole("button", { name: "Baum bearbeiten" })
+      .click();
+    await expect(page.locator("#priwa-review-tree-panel")).toBeVisible();
     await warnkarteControl.click();
+    await expect(page.getByTestId("priwa-warnkarte-admin-panel")).toBeVisible();
+    await expect(page.locator("#priwa-review-tree-panel")).toHaveCount(0);
+    await expect(page.getByText("Aktiv", { exact: true })).toHaveCount(1);
+    await expect(
+      page.getByRole("radio", { name: "Auf Karte sichtbar" }),
+    ).toBeChecked();
+    await page.getByRole("radio", { name: "Auf Karte anzeigen" }).click();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toContainText(
+      "Warnkarte 01.07.2024",
+    );
+    await expect(
+      page.getByRole("radio", { name: "Auf Karte sichtbar" }),
+    ).toHaveCount(1);
+    await page.getByRole("button", { name: "Zu Karte wechseln" }).click();
+    await expect(
+      page.getByRole("button", { name: "Zu Luftbild wechseln" }),
+    ).toBeVisible();
     await page.locator('input[type="file"]').setInputFiles({
       name: "warnkarte_2024-07-01.gpkg",
       mimeType: "application/geopackage+sqlite3",
@@ -222,12 +326,13 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await page.getByRole("checkbox").check();
     await page
       .getByRole("button", {
-        name: "Unveröffentlicht importieren und Vorschau öffnen",
+        name: "Unveröffentlicht importieren und anzeigen",
       })
       .click();
-    await expect(
-      page.getByText(/Vorschau · Warnkarte vom 01.07.2024/),
-    ).toBeVisible();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toContainText(
+      "Warnkarte 01.07.2024",
+    );
+    await expect(probabilityTooltip).toBeHidden();
 
     const newVersion = page.getByText("Warnkarte vom 01.07.2024").last();
     const versionRow = newVersion.locator("xpath=ancestor::li");
@@ -238,9 +343,50 @@ test.describe("PRIWA Warnkarte local UI", () => {
       .click();
     await expect(page.getByText("Warnkarte veröffentlicht.")).toBeVisible();
     await expect(page.getByText(/Vorschau ·/)).toHaveCount(0);
-    await expect(
-      page.getByText("Warnkarte vom 01.07.2024").first(),
-    ).toBeVisible();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toContainText(
+      "Warnkarte 01.07.2024",
+    );
+    await expect(page.getByText("Aktiv", { exact: true })).toHaveCount(1);
+    await page
+      .getByTestId("priwa-warnkarte-admin-panel")
+      .getByRole("button", { name: "Warnkarten-Verwaltung schließen" })
+      .click();
+    await expect(page.getByTestId("priwa-warnkarte-admin-panel")).toHaveCount(
+      0,
+    );
+    await expect(page.getByTestId("priwa-review-detail-panel")).toBeVisible();
+    await expect(page.getByTestId("priwa-review-detail-panel")).toContainText(
+      "Befallsgruppe Test",
+    );
+  });
+
+  test("closing management discards a pending version selection", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await installWarnkarteAdmin(page);
+    await installWarnkarteApi(page, { overlayDelayMs: 500 });
+    await page.goto("/priwa-field");
+
+    await page.getByRole("button", { name: "Warnkarte verwalten" }).click();
+    const overlayResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/versions/version-new/overlay") &&
+        response.status() === 200,
+    );
+    await page.getByRole("radio", { name: "Auf Karte anzeigen" }).click();
+    await page
+      .getByTestId("priwa-warnkarte-admin-panel")
+      .getByRole("button", { name: "Warnkarten-Verwaltung schließen" })
+      .click();
+    await overlayResponse;
+
+    await expect(page.getByTestId("priwa-warnkarte-admin-panel")).toHaveCount(
+      0,
+    );
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toContainText(
+      "Warnkarte 25.06.2024",
+    );
   });
 
   test("desktop admin cannot replace a file while its validation is pending", async ({
@@ -265,7 +411,7 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await expect(fileInput).toBeEnabled();
   });
 
-  test("desktop preview explains when Warnkarte API routes are not deployed", async ({
+  test("desktop environment explains when Warnkarte API routes are not deployed", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -283,7 +429,7 @@ test.describe("PRIWA Warnkarte local UI", () => {
 
     await page.getByRole("button", { name: "Warnkarte verwalten" }).click();
     const explanation =
-      "Die Warnkarten-Funktion ist in dieser Vorschau noch nicht verfügbar. Die Datei wurde nicht validiert.";
+      "Die Warnkarten-Funktion ist in dieser Umgebung noch nicht verfügbar. Die Datei wurde nicht validiert.";
     await expect(page.getByText(explanation)).toHaveCount(1);
 
     await page.locator('input[type="file"]').setInputFiles({
@@ -304,10 +450,17 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await installWarnkarteApi(page);
     await page.goto("/priwa-field");
 
-    await expect(page.getByText("Warnkarte vom 25.06.2024")).toBeVisible();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toContainText(
+      "Warnkarte 25.06.2024",
+    );
     await expect(
       page.getByRole("button", { name: "Warnkarte verwalten" }),
     ).toHaveCount(0);
+    await page.getByRole("button", { name: "Warnkarte ausblenden" }).click();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Warnkarte einblenden" }),
+    ).toBeVisible();
     await expect(page.getByTestId("priwa-field-map")).toBeVisible();
   });
 });

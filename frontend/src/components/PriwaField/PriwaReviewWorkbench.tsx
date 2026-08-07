@@ -1,6 +1,14 @@
 import { PlusOutlined, TableOutlined } from "@ant-design/icons";
 import { Button, Empty, Segmented, Tag } from "antd";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type { ReactNode } from "react";
 
 import UploadButton from "../Upload/UploadButton";
 import PriwaReviewDetailsLayout from "./PriwaReviewDetailsLayout";
@@ -26,6 +34,12 @@ import {
   type PriwaReviewFilter,
 } from "./priwaReviewQueue";
 
+export interface PriwaReviewDetailMode {
+  kind: "warnkarte-management";
+  content: ReactNode;
+  onDismiss: () => void;
+}
+
 interface PriwaReviewWorkbenchProps {
   items: IPriwaReviewItem[];
   points: IPriwaPoint[];
@@ -38,6 +52,7 @@ interface PriwaReviewWorkbenchProps {
   selectedTreeId: string | null;
   isTreeEditing: boolean;
   isHidden?: boolean;
+  detailMode?: PriwaReviewDetailMode;
   onSelect: (item: IPriwaReviewItem) => void;
   onOpenData: () => void;
   onCreateGroup: () => void;
@@ -108,6 +123,7 @@ export default function PriwaReviewWorkbench({
   selectedTreeId,
   isTreeEditing,
   isHidden = false,
+  detailMode,
   onSelect,
   onOpenData,
   onCreateGroup,
@@ -139,16 +155,18 @@ export default function PriwaReviewWorkbench({
 
   const selectItem = useCallback(
     (item: IPriwaReviewItem) => {
+      detailMode?.onDismiss();
       if (shouldClosePriwaReviewTree(item, selectedTreeId)) {
         onCloseTree();
       }
       onSelect(item);
     },
-    [onCloseTree, onSelect, selectedTreeId],
+    [detailMode, onCloseTree, onSelect, selectedTreeId],
   );
 
   useEffect(() => {
     previousSelectedKeyRef.current = selectedKey;
+    if (selectionChanged) detailMode?.onDismiss();
     if (selectionChanged && externallySelectedItem) {
       const matchingFilter = filterForPriwaReviewItem(externallySelectedItem);
       if (matchingFilter !== filter) setFilter(matchingFilter);
@@ -159,6 +177,7 @@ export default function PriwaReviewWorkbench({
     }
   }, [
     externallySelectedItem,
+    detailMode,
     filter,
     selectItem,
     selectedItem,
@@ -166,7 +185,11 @@ export default function PriwaReviewWorkbench({
     selectionChanged,
   ]);
 
-  const groupContent = !selectedItem ? (
+  useLayoutEffect(() => {
+    if (detailMode && isTreeEditing) onCloseTree();
+  }, [detailMode, isTreeEditing, onCloseTree]);
+
+  const selectedGroupContent = !selectedItem ? (
     <Empty
       className="pt-24"
       image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -185,14 +208,19 @@ export default function PriwaReviewWorkbench({
     />
   );
 
-  const treeContent = selectedTree ? (
-    <PriwaReviewTreeInspector
-      point={selectedTree}
-      onClose={onCloseTree}
-      onEdit={detailProps.onEditTree}
-      onFocus={detailProps.onFocusTree}
-    />
-  ) : null;
+  const groupContent =
+    detailMode?.kind === "warnkarte-management"
+      ? detailMode.content
+      : selectedGroupContent;
+  const treeContent =
+    selectedTree && (!detailMode || isTreeEditing) ? (
+      <PriwaReviewTreeInspector
+        point={selectedTree}
+        onClose={onCloseTree}
+        onEdit={detailProps.onEditTree}
+        onFocus={detailProps.onFocusTree}
+      />
+    ) : null;
 
   return (
     <div
@@ -218,7 +246,10 @@ export default function PriwaReviewWorkbench({
               size="small"
               icon={<TableOutlined />}
               aria-label="Punktliste öffnen"
-              onClick={onOpenData}
+              onClick={() => {
+                detailMode?.onDismiss();
+                onOpenData();
+              }}
             >
               Daten
             </Button>
@@ -232,7 +263,7 @@ export default function PriwaReviewWorkbench({
               onCloseTree();
               setFilter(nextFilter);
               const firstItem = filterPriwaReviewItems(items, nextFilter)[0];
-              if (firstItem) onSelect(firstItem);
+              if (firstItem) selectItem(firstItem);
             }}
             options={[
               { label: "Offen", value: "open" },
@@ -267,7 +298,13 @@ export default function PriwaReviewWorkbench({
           )}
         </div>
         <footer className="grid grid-cols-2 gap-2 border-t border-slate-200 p-2.5">
-          <Button icon={<PlusOutlined />} onClick={onCreateGroup}>
+          <Button
+            icon={<PlusOutlined />}
+            onClick={() => {
+              detailMode?.onDismiss();
+              onCreateGroup();
+            }}
+          >
             Neue Gruppe
           </Button>
           <UploadButton label="Befliegung" size="middle" />

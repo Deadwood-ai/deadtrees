@@ -37,6 +37,7 @@ import {
   createPriwaWarnkarteLayer,
   setPriwaWarnkarteLayerData,
 } from "./createPriwaWarnkarteLayer";
+import { attachPriwaWarnkarteInteraction } from "./priwaWarnkarteMapInteraction";
 import PriwaPointDrawer from "./PriwaPointDrawer";
 import PriwaPointListPanel from "./PriwaPointListPanel";
 import PriwaOfflineStatus from "./PriwaOfflineStatus";
@@ -44,7 +45,9 @@ import PriwaBefallsgruppeEditor from "./PriwaBefallsgruppeEditor";
 import PriwaBaseLayerControl from "./PriwaBaseLayerControl";
 import PriwaMobileFieldTools from "./PriwaMobileFieldTools";
 import PriwaOfflineMapControl from "./PriwaOfflineMapControl";
-import PriwaReviewWorkbench from "./PriwaReviewWorkbench";
+import PriwaReviewWorkbench, {
+  type PriwaReviewDetailMode,
+} from "./PriwaReviewWorkbench";
 import {
   getPriwaReviewMapCenter,
   getPriwaReviewTargetPixel,
@@ -74,7 +77,9 @@ interface PriwaFieldMapProps {
   isSavingPoint?: boolean;
   projectName: string;
   warnkarteOverlay?: IPriwaWarnkarteOverlay | null;
+  warnkarteVisible?: boolean;
   additionalMapControl?: ReactNode;
+  reviewDetailMode?: PriwaReviewDetailMode;
   mosaics?: IPriwaMosaic[];
   groups?: IPriwaBefallsgruppe[];
   isCogLoading?: boolean;
@@ -108,7 +113,9 @@ export default function PriwaFieldMap({
   isSavingPoint = false,
   projectName,
   warnkarteOverlay = null,
+  warnkarteVisible = true,
   additionalMapControl,
+  reviewDetailMode,
   mosaics = [],
   groups = [],
   isCogLoading = false,
@@ -363,6 +370,10 @@ export default function PriwaFieldMap({
     });
 
     mapRef.current = map;
+    const detachWarnkarteInteraction = attachPriwaWarnkarteInteraction(
+      map,
+      warnkarteLayer,
+    );
 
     const clickKey = map.on("singleclick", (event) => {
       if (isPlacingPointRef.current) return;
@@ -427,6 +438,7 @@ export default function PriwaFieldMap({
 
     return () => {
       stopUserLocation();
+      detachWarnkarteInteraction();
       unByKey(clickKey);
       map.setTarget(undefined);
       mapRef.current = null;
@@ -445,6 +457,10 @@ export default function PriwaFieldMap({
     if (!warnkarteLayerRef.current) return;
     setPriwaWarnkarteLayerData(warnkarteLayerRef.current, warnkarteOverlay);
   }, [warnkarteOverlay]);
+
+  useEffect(() => {
+    warnkarteLayerRef.current?.setVisible(warnkarteVisible);
+  }, [warnkarteVisible]);
 
   useEffect(() => {
     aerialLayerRef.current?.setVisible(baseLayer === "aerial");
@@ -748,6 +764,11 @@ export default function PriwaFieldMap({
     isDrawerOpen &&
     !!editingPoint &&
     editingPoint.id === reviewPointId;
+  const closeReviewTree = useCallback(() => {
+    setReviewPointId(null);
+    setDrawerOpen(false);
+    setEditingPoint(null);
+  }, []);
 
   return (
     <div
@@ -840,6 +861,7 @@ export default function PriwaFieldMap({
           selectedTreeId={reviewPointId}
           isTreeEditing={isReviewTreeEditing}
           isHidden={isPlacingPoint}
+          detailMode={reviewDetailMode}
           onSelect={selectReviewItem}
           onOpenData={() => {
             setReviewPointId(null);
@@ -853,7 +875,7 @@ export default function PriwaFieldMap({
           onSelectTree={selectReviewPoint}
           onFocusTree={focusSelectedReviewPoint}
           onEditTree={openReviewPointForEditing}
-          onCloseTree={() => setReviewPointId(null)}
+          onCloseTree={closeReviewTree}
           onEditGroup={setGroupEditorDraft}
           onSaveGroup={saveGroup}
           onAssignFlight={assignFlight}

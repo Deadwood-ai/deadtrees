@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import hashlib
+import json
 from pathlib import Path
 import re
 import tempfile
@@ -18,9 +19,9 @@ EXPECTED_EPSG = 32632
 PROBABILITY_STEP = Decimal('0.1')
 PROBABILITY_TOLERANCE = Decimal('0.000001')
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
-MAX_FEATURE_COUNT = 10_000
 MAX_VERTICES_PER_POLYGON = 100_000
 MAX_TOTAL_VERTICES = 1_000_000
+MAX_IMPORT_PAYLOAD_BYTES = 10 * 1024 * 1024
 FILENAME_DATE_PATTERN = re.compile(r'(?P<date>\d{4}-\d{2}-\d{2})\.gpkg$')
 LAYER_DATE_PATTERN = re.compile(r'\d{4}-\d{2}-\d{2}')
 
@@ -269,15 +270,8 @@ def validate_warnkarte_file(file_object: BinaryIO, filename: str | None) -> Vali
 				polygons: list[ValidatedWarnkartePolygon] = []
 				seen_fids: set[int] = set()
 				total_vertices = 0
-				for feature_index, feature in enumerate(collection, start=1):
-					if feature_index > MAX_FEATURE_COUNT:
-						raise WarnkarteValidationError(
-							'TOO_MANY_FEATURES',
-							'Das GeoPackage enthält zu viele Polygone.',
-							details={'max_features': MAX_FEATURE_COUNT},
-							status_code=413,
-						)
-
+				import_payload_bytes = 2  # JSON array brackets
+				for feature in collection:
 					try:
 						fid = int(feature.id)
 					except (TypeError, ValueError) as error:
@@ -329,13 +323,26 @@ def validate_warnkarte_file(file_object: BinaryIO, filename: str | None) -> Vali
 						)
 
 					probability = normalize_probability(feature.properties.get('probability'), fid)
-					polygons.append(
-						ValidatedWarnkartePolygon(
-							fid=fid,
-							probability=probability,
-							wkb_hex=geometry.wkb_hex,
-						)
+					polygon = ValidatedWarnkartePolygon(
+						fid=fid,
+						probability=probability,
+						wkb_hex=geometry.wkb_hex,
 					)
+					import_payload_bytes += len(
+						json.dumps(polygon.as_rpc_payload(), separators=(',', ':')).encode('utf-8')
+					) + (1 if polygons else 0)
+					if import_payload_bytes > MAX_IMPORT_PAYLOAD_BYTES:
+						raise WarnkarteValidationError(
+							'IMPORT_PAYLOAD_TOO_LARGE',
+							'Die normalisierten Polygon-Daten sind insgesamt zu groß.',
+							details={
+								'fid': fid,
+								'max_bytes': MAX_IMPORT_PAYLOAD_BYTES,
+								'detected_at_least_bytes': import_payload_bytes,
+							},
+							status_code=413,
+						)
+					polygons.append(polygon)
 		except WarnkarteValidationError:
 			raise
 		except Exception as error:

@@ -6,16 +6,16 @@ import { Fill, Stroke, Style } from "ol/style";
 import type { IPriwaWarnkarteOverlay } from "../../api/priwaWarnkarte";
 
 export const PRIWA_WARNKARTE_RED_BANDS = [
-  "rgba(254, 226, 226, 0.58)",
-  "rgba(254, 202, 202, 0.60)",
-  "rgba(252, 165, 165, 0.62)",
-  "rgba(248, 113, 113, 0.64)",
-  "rgba(239, 68, 68, 0.66)",
-  "rgba(220, 38, 38, 0.68)",
-  "rgba(185, 28, 28, 0.70)",
-  "rgba(153, 27, 27, 0.72)",
-  "rgba(127, 29, 29, 0.74)",
-  "rgba(69, 10, 10, 0.78)",
+  "rgba(254, 226, 226, 0.68)",
+  "rgba(254, 202, 202, 0.70)",
+  "rgba(252, 165, 165, 0.72)",
+  "rgba(248, 113, 113, 0.74)",
+  "rgba(239, 68, 68, 0.76)",
+  "rgba(220, 38, 38, 0.78)",
+  "rgba(185, 28, 28, 0.80)",
+  "rgba(153, 27, 27, 0.82)",
+  "rgba(127, 29, 29, 0.84)",
+  "rgba(69, 10, 10, 0.86)",
 ] as const;
 
 export const getPriwaWarnkarteBandIndex = (probability: number) => {
@@ -28,8 +28,8 @@ export const getPriwaWarnkarteStyle = (probability: number) => {
   return new Style({
     fill: new Fill({ color: PRIWA_WARNKARTE_RED_BANDS[band] }),
     stroke: new Stroke({
-      color: band >= 7 ? "rgba(69, 10, 10, 0.82)" : "rgba(153, 27, 27, 0.62)",
-      width: 1,
+      color: "rgba(69, 10, 10, 0.18)",
+      width: 0.5,
     }),
   });
 };

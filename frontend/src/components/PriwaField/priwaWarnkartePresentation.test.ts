@@ -21,4 +21,27 @@ describe("PRIWA Warnkarte presentation", () => {
     expect(formatPriwaWarnkarteError(error)).toContain("Erwartet: EPSG:32632");
     expect(formatPriwaWarnkarteError(error)).toContain("Erkannt: EPSG:4326");
   });
+
+  it("shows the detected geometry type from a structured backend error", () => {
+    const error = new PriwaWarnkarteApiError(
+      "INVALID_GEOMETRY_TYPE",
+      "Der Layer darf ausschließlich Polygon-Geometrien enthalten.",
+      { expected: "Polygon", detected: "MultiPolygon" },
+    );
+
+    expect(formatPriwaWarnkarteError(error)).toContain("Erwartet: Polygon");
+    expect(formatPriwaWarnkarteError(error)).toContain("Erkannt: MultiPolygon");
+  });
+
+  it("shows unexpected layer attributes from a structured backend error", () => {
+    const error = new PriwaWarnkarteApiError(
+      "INVALID_COLUMNS",
+      "Der Layer muss genau ein Attribut mit dem Namen probability enthalten.",
+      { expected: ["probability"], detected: ["qc_id", "probability"] },
+    );
+
+    expect(formatPriwaWarnkarteError(error)).toContain(
+      "Erkannt: qc_id, probability",
+    );
+  });
 });
