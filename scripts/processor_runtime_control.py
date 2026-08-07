@@ -23,12 +23,17 @@ from shared.operator_env import load_env_file
 QUEUE_TABLE = 'v2_queue'
 QUEUE_POSITION_TABLE = 'v2_queue_positions'
 DEFAULT_CONTROL_DIR = '.local/processor-control'
+AUTOMATION_DRAIN_REASONS = {'docker-maintenance', 'required processor assets missing'}
 DEFAULT_ACTIVATED_WORKER_ID_FILE = '.local/processor-activated-worker-id'
 DEFAULT_PROCESSOR_USERNAME = 'processor@deadtrees.earth'
 
 
 class AuthenticationExpiredError(RuntimeError):
 	pass
+
+
+def _is_automation_drain_reason(reason: object) -> bool:
+	return isinstance(reason, str) and (reason in AUTOMATION_DRAIN_REASONS or reason.startswith('auto-deploy '))
 
 
 ENV = {
@@ -281,6 +286,11 @@ def cmd_record_worker_id(_: argparse.Namespace) -> int:
 
 
 def cmd_set_drain(args: argparse.Namespace) -> int:
+	if args.preserve_operator_drain:
+		existing_request, _ = _load_drain_state()
+		if existing_request is not None and not _is_automation_drain_reason(existing_request.get('reason')):
+			print(json.dumps({'preserved_drain_request': existing_request}, indent=2))
+			return 3
 	_clear_file(_drain_ack_path())
 	payload = {
 		'request_id': str(uuid.uuid4()),
@@ -458,6 +468,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 	set_drain = subparsers.add_parser('set-drain', help='Request a drain so this worker stops claiming new tasks.')
 	set_drain.add_argument('--reason', required=True, help='Short operator reason for the drain request.')
+	set_drain.add_argument(
+		'--preserve-operator-drain',
+		action='store_true',
+		help='Return 3 without changing a drain that was not created by processor automation.',
+	)
 	set_drain.set_defaults(func=cmd_set_drain)
 
 	clear_drain = subparsers.add_parser('clear-drain', help='Clear the drain request so the worker can resume.')

@@ -97,6 +97,10 @@ class DeployHarness:
 			"if echo \"$@\" | grep -q clear-ack && [ -n \"${PROCESSOR_TEST_ACK_PATH:-}\" ]; then\n"
 			"  rm -f \"$PROCESSOR_TEST_ACK_PATH\"\n"
 			"fi\n"
+			"if echo \"$@\" | grep -q 'set-drain.*--preserve-operator-drain' && "
+			"[ -n \"${PROCESSOR_TEST_OPERATOR_DRAIN:-}\" ]; then\n"
+			"  exit 3\n"
+			"fi\n"
 			"if echo \"$@\" | grep -q activation-ready; then\n"
 			"  exit \"${PROCESSOR_TEST_ACTIVATION_READY:-1}\"\n"
 			"fi\n"
@@ -219,7 +223,9 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			shutil.copytree(harness.worktree / "assets", external_assets)
 			shutil.rmtree(harness.worktree / "assets")
 			harness.env["ASSET_ROOT"] = str(harness.tmp_path)
-			(harness.worktree / ".env").write_text("PROCESSOR_ASSETS_DIR=${ASSET_ROOT}/shared-assets\n")
+			(harness.worktree / ".env").write_text(
+				"ASSET_ROOT=/stale/path\nPROCESSOR_ASSETS_DIR=${ASSET_ROOT}/shared-assets\n"
+			)
 
 			result = harness.run_deploy()
 
@@ -297,6 +303,26 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			self.assertIn("wait-for-idle --allow-unacknowledged-stopped-worker", harness.python_log.read_text())
 			self.assertIn("up -d --force-recreate processor", harness.docker_log.read_text())
 			self.assertIn("clear-drain", harness.python_log.read_text())
+
+	def test_restored_assets_preserve_planned_shutdown(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			self.assertEqual(harness.run_deploy().returncode, 0)
+			harness.env["PROCESSOR_TEST_OPERATOR_DRAIN"] = "1"
+			model = harness.worktree / "assets" / "models" / "segformer_b5_full_epoch_100.safetensors"
+			model.unlink()
+			harness.docker_running.unlink()
+			up_count = harness.docker_log.read_text().count("up -d")
+			clear_count = harness.python_log.read_text().count("clear-drain")
+
+			self.assertNotEqual(harness.run_deploy().returncode, 0)
+			model.write_text("restored\n")
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertEqual(harness.docker_log.read_text().count("up -d"), up_count)
+			self.assertEqual(harness.python_log.read_text().count("clear-drain"), clear_count)
+			self.assertFalse(harness.docker_running.exists())
 
 	def test_target_release_runs_its_activation_logic_before_marking_active(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:

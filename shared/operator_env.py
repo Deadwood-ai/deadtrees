@@ -18,5 +18,5 @@ def load_env_file(path: Path) -> dict[str, str]:
 		value = value.strip()
 		if value and value[0] == value[-1] and value[0] in {'"', "'"}:
 			value = value[1:-1]
-		env[key.strip()] = Template(value).safe_substitute({**os.environ, **env})
+		env[key.strip()] = Template(value).safe_substitute({**env, **os.environ})
 	return env

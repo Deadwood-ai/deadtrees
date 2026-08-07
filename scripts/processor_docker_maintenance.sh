@@ -105,7 +105,14 @@ fi
 require_clean_checkout
 require_activated_checkout
 
-python3 "${STATUS_SCRIPT}" set-drain --reason "docker-maintenance" >> "${LOG_FILE}" 2>&1
+if request_automation_drain "docker-maintenance"; then
+	:
+elif [ "$?" -eq 3 ]; then
+	log "Skipping Docker maintenance because an operator drain is active"
+	exit 0
+else
+	exit 1
+fi
 drain_set=1
 wait_for_drain_with_recovery
 

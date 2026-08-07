@@ -101,7 +101,13 @@ if [ "${DEPLOY_PHASE}" = "activate" ]; then
 	fi
 	if ! python3 "${ASSET_PREFLIGHT_SCRIPT}" >> "${LOG_FILE}" 2>&1; then
 		log "Refusing processor activation because required assets are missing"
-		python3 "${STATUS_SCRIPT}" set-drain --reason "required processor assets missing" >> "${LOG_FILE}" 2>&1
+		if request_automation_drain "required processor assets missing"; then
+			:
+		elif [ "$?" -eq 3 ]; then
+			log "Preserved existing operator drain while refusing activation"
+		else
+			exit 1
+		fi
 		exit 1
 	fi
 	# Continue below with the target release's freshly loaded activation logic.
@@ -133,8 +139,13 @@ else
 	if [ "${local_sha}" = "${remote_sha}" ] && [ "${activated_sha}" = "${remote_sha}" ]; then
 		if ! python3 "${ASSET_PREFLIGHT_SCRIPT}" >> "${LOG_FILE}" 2>&1; then
 			log "Draining active release because required processor assets are missing"
-			python3 "${STATUS_SCRIPT}" set-drain --reason "required processor assets missing" >> "${LOG_FILE}" 2>&1
-			drain_set=1
+			if request_automation_drain "required processor assets missing"; then
+				drain_set=1
+			elif [ "$?" -eq 3 ]; then
+				log "Preserved existing operator drain while required assets are missing"
+			else
+				exit 1
+			fi
 			exit 1
 		fi
 		if python3 "${STATUS_SCRIPT}" activation-ready --release-sha "${remote_sha}" >> "${LOG_FILE}" 2>&1; then
@@ -164,7 +175,14 @@ else
 
 	log "Preparing deploy from ${local_sha} to ${remote_sha}"
 
-	python3 "${STATUS_SCRIPT}" set-drain --reason "auto-deploy ${remote_sha}" >> "${LOG_FILE}" 2>&1
+	if request_automation_drain "auto-deploy ${remote_sha}"; then
+		:
+	elif [ "$?" -eq 3 ]; then
+		log "Skipping deploy because an operator drain is active"
+		exit 0
+	else
+		exit 1
+	fi
 	drain_set=1
 	wait_for_drain_with_recovery
 
