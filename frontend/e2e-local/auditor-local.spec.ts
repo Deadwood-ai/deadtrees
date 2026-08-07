@@ -161,7 +161,11 @@ let savedAoiPayloads: Array<Record<string, unknown>> = [];
 
 const installAuthenticatedUser = async (
   page: Page,
-  options: { canAudit: boolean; auditDatasetRequestFails?: boolean },
+  options: {
+    canAudit: boolean;
+    auditDatasetRequestFails?: boolean;
+    processingOverviewRequestFails?: boolean;
+  },
 ) => {
   await installLocalSession(page, {
     user: auditor,
@@ -212,7 +216,11 @@ const installAuthenticatedUser = async (
 
 const fulfillSupabaseRequest = async (
   route: Route,
-  options: { canAudit: boolean; auditDatasetRequestFails?: boolean },
+  options: {
+    canAudit: boolean;
+    auditDatasetRequestFails?: boolean;
+    processingOverviewRequestFails?: boolean;
+  },
 ) => {
   const request = route.request();
   const url = new URL(request.url());
@@ -296,6 +304,18 @@ const fulfillSupabaseRequest = async (
   }
 
   if (resource === "v2_processing_overview") {
+    if (options.processingOverviewRequestFails) {
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        json: {
+          code: "57014",
+          message: "canceling statement due to statement timeout",
+        },
+      });
+      return;
+    }
+
     await fulfillJson(route, [
       {
         dataset_id: incompleteDataset.id,
@@ -619,6 +639,64 @@ test.describe("auditor local e2e", () => {
     ).toBeVisible();
     await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
     await expect(page.getByText("📋 Pending")).toHaveCount(0);
+  });
+
+  test("processing overview requests only the fields rendered by the audit table", async ({
+    page,
+  }) => {
+    await installAuthenticatedUser(page, { canAudit: true });
+
+    const processingRequest = page.waitForRequest((request) =>
+      new URL(request.url()).pathname.endsWith("/v2_processing_overview"),
+    );
+
+    await page.goto("/dataset-audit?tab=processing");
+    await dismissCookieBanner(page);
+    const request = await processingRequest;
+    const selectedColumns = new URL(request.url()).searchParams
+      .get("select")
+      ?.split(",");
+
+    expect(selectedColumns).toEqual([
+      "dataset_id",
+      "file_name",
+      "processing_status",
+      "current_status",
+      "has_error",
+      "error_message",
+      "hours_in_current_status",
+      "status_last_updated",
+      "user_email",
+      "queue_priority",
+      "queued_at",
+      "last_20_logs",
+    ]);
+    expect(selectedColumns).not.toContain("ortho_metadata");
+    expect(selectedColumns).not.toContain("raw_images_metadata");
+    await expect(page.getByText(incompleteDataset.file_name)).toBeVisible();
+  });
+
+  test("processing overview reports load failures instead of showing no data", async ({
+    page,
+  }) => {
+    await installAuthenticatedUser(page, {
+      canAudit: true,
+      processingOverviewRequestFails: true,
+    });
+
+    await page.goto("/dataset-audit?tab=processing");
+    await dismissCookieBanner(page);
+
+    await expect(
+      page.getByText("Could not load processing data", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "The processing overview could not be loaded. Please try again.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+    await expect(page.getByText("No data", { exact: true })).toHaveCount(0);
   });
 
   test("auditor start action checks the lock before opening detail", async ({

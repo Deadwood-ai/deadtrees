@@ -216,6 +216,7 @@ function DatasetAuditInner() {
 	const {
 		data: processingRows = [],
 		isLoading: isProcessingLoading,
+		isError: isProcessingError,
 		refetch: refetchProcessingRows,
 	} = useProcessingOverview();
 
@@ -1178,8 +1179,16 @@ function DatasetAuditInner() {
 				</div>
 
 				<div className="rounded-2xl border border-gray-200/60 bg-white p-6 shadow-sm">
-					{activeTab === "processing" && (
-						<>
+					{activeTab === "processing" &&
+						(isProcessingError ? (
+							<Result
+								status="error"
+								title="Could not load processing data"
+								subTitle="The processing overview could not be loaded. Please try again."
+								extra={<Button onClick={() => refetchProcessingRows()}>Try again</Button>}
+							/>
+						) : (
+							<>
 					<div className="mb-4 flex flex-wrap items-end gap-3 rounded-md border border-gray-100 bg-gray-50 p-3">
 						<div>
 							<Text type="secondary" className="block mb-1 text-xs">
@@ -1321,8 +1330,8 @@ function DatasetAuditInner() {
 							]}
 						/>
 					</Drawer>
-				</>
-			)}
+							</>
+						))}
 
 			{activeTab !== "processing" && (
 				<>
