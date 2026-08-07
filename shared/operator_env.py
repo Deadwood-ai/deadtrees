@@ -27,7 +27,8 @@ def load_env_file(path: Path) -> dict[str, str]:
 			continue
 		key, value = line.split('=', 1)
 		value = value.strip()
+		single_quoted = bool(value and value[0] == value[-1] == "'")
 		if value and value[0] == value[-1] and value[0] in {'"', "'"}:
 			value = value[1:-1]
-		env[key.strip()] = _expand_references(value, {**env, **os.environ})
+		env[key.strip()] = value if single_quoted else _expand_references(value, {**env, **os.environ})
 	return env

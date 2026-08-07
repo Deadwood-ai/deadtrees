@@ -1,13 +1,19 @@
+import json
 import os
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from shared.asset_manifest import required_processor_asset_directories, required_processor_asset_files
+from shared.asset_manifest import (
+	processor_model_checkpoint_specs,
+	required_processor_asset_directories,
+	required_processor_asset_files,
+)
 
 
 SCRIPT = Path(__file__).parents[1] / "processor_auto_deploy.sh"
@@ -174,7 +180,15 @@ class DeployHarness:
 		for relative in required_processor_asset_files():
 			path = repo / "assets" / relative
 			path.parent.mkdir(parents=True, exist_ok=True)
-			path.write_text("fixture\n")
+			if path.suffix == ".safetensors":
+				minimum_tensors, required_tensors = processor_model_checkpoint_specs()[path.name]
+				names = [*required_tensors, *(f"fixture.{index}" for index in range(minimum_tensors))]
+				header = json.dumps(
+					{name: {"dtype": "F32", "shape": [0], "data_offsets": [0, 0]} for name in names}
+				).encode()
+				path.write_bytes(struct.pack("<Q", len(header)) + header)
+			else:
+				path.write_text("fixture\n")
 		for relative in required_processor_asset_directories():
 			path = repo / "assets" / relative / "0"
 			path.parent.mkdir(parents=True, exist_ok=True)
@@ -270,10 +284,11 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			harness = DeployHarness(Path(tmp_dir))
 			self.assertEqual(harness.run_deploy().returncode, 0)
 			model = harness.worktree / "assets" / "models" / "segformer_b5_full_epoch_100.safetensors"
+			model_bytes = model.read_bytes()
 			model.unlink()
 
 			self.assertNotEqual(harness.run_deploy().returncode, 0)
-			model.write_text("restored\n")
+			model.write_bytes(model_bytes)
 			self.assertEqual(harness.run_deploy("--resume").returncode, 0)
 			harness.env["PROCESSOR_TEST_ASSET_RECOVERY_PENDING"] = "0"
 
@@ -289,10 +304,11 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			harness = DeployHarness(Path(tmp_dir))
 			self.assertEqual(harness.run_deploy().returncode, 0)
 			model = harness.worktree / "assets" / "models" / "segformer_b5_full_epoch_100.safetensors"
+			model_bytes = model.read_bytes()
 			model.unlink()
 
 			self.assertNotEqual(harness.run_deploy().returncode, 0)
-			model.write_text("restored\n")
+			model.write_bytes(model_bytes)
 			harness.docker_running.unlink()
 			self.assertEqual(harness.run_deploy("--resume").returncode, 0)
 			harness.env["PROCESSOR_TEST_ASSET_RECOVERY_PENDING"] = "0"
@@ -310,13 +326,14 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			self.assertEqual(harness.run_deploy().returncode, 0)
 			harness.env["PROCESSOR_TEST_OPERATOR_DRAIN"] = "1"
 			model = harness.worktree / "assets" / "models" / "segformer_b5_full_epoch_100.safetensors"
+			model_bytes = model.read_bytes()
 			model.unlink()
 			harness.docker_running.unlink()
 			up_count = harness.docker_log.read_text().count("up -d")
 			clear_count = harness.python_log.read_text().count("clear-drain")
 
 			self.assertNotEqual(harness.run_deploy().returncode, 0)
-			model.write_text("restored\n")
+			model.write_bytes(model_bytes)
 			result = harness.run_deploy()
 
 			self.assertEqual(result.returncode, 0, result.stderr)

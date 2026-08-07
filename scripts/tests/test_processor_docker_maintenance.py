@@ -1,13 +1,19 @@
+import json
 import os
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from shared.asset_manifest import required_processor_asset_directories, required_processor_asset_files
+from shared.asset_manifest import (
+	processor_model_checkpoint_specs,
+	required_processor_asset_directories,
+	required_processor_asset_files,
+)
 
 
 SCRIPT = Path(__file__).parents[1] / "processor_docker_maintenance.sh"
@@ -116,7 +122,15 @@ class MaintenanceHarness:
 		for relative in required_processor_asset_files():
 			path = self.repo / "assets" / relative
 			path.parent.mkdir(parents=True, exist_ok=True)
-			path.write_text("fixture\n")
+			if path.suffix == ".safetensors":
+				minimum_tensors, required_tensors = processor_model_checkpoint_specs()[path.name]
+				names = [*required_tensors, *(f"fixture.{index}" for index in range(minimum_tensors))]
+				header = json.dumps(
+					{name: {"dtype": "F32", "shape": [0], "data_offsets": [0, 0]} for name in names}
+				).encode()
+				path.write_bytes(struct.pack("<Q", len(header)) + header)
+			else:
+				path.write_text("fixture\n")
 		for relative in required_processor_asset_directories():
 			path = self.repo / "assets" / relative / "0"
 			path.parent.mkdir(parents=True, exist_ok=True)

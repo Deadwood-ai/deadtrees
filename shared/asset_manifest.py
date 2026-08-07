@@ -11,11 +11,17 @@ PHENOLOGY_ASSET_PATH = 'pheno/modispheno_aggregated_normalized_filled.zarr'
 PHENOLOGY_ARRAY_NAMES = ('day', 'nan_mask', 'phenology', 'x', 'y')
 
 
+def processor_model_checkpoint_specs() -> dict[str, tuple[int, tuple[str, ...]]]:
+	return {
+		DEADWOOD_V1_MODEL_CHECKPOINT_NAME: (1000, ('_orig_mod.decoder.blocks.0.conv1.1.num_batches_tracked',)),
+		COMBINED_MODEL_CHECKPOINT_NAME: (600, ('model.decode_head.batch_norm.bias',)),
+		AOI_V1_MODEL_CHECKPOINT_NAME: (200, ('model.decode_head.batch_norm.bias',)),
+	}
+
+
 def required_processor_asset_files() -> tuple[str, ...]:
 	return (
-		f'models/{DEADWOOD_V1_MODEL_CHECKPOINT_NAME}',
-		f'models/{COMBINED_MODEL_CHECKPOINT_NAME}',
-		f'models/{AOI_V1_MODEL_CHECKPOINT_NAME}',
+		*(f'models/{name}' for name in processor_model_checkpoint_specs()),
 		GADM_ASSET_PATH,
 		BIOME_ASSET_PATH,
 		f'{PHENOLOGY_ASSET_PATH}/.zgroup',
