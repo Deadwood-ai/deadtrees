@@ -143,6 +143,10 @@ class ProcessorDockerMaintenanceTest(unittest.TestCase):
 
 			self.assertNotEqual(result.returncode, 0)
 			self.assertIn("set-drain --reason docker-maintenance", harness.python_log.read_text())
+			self.assertIn(
+				"set-drain --reason required processor assets missing --preserve-operator-drain",
+				harness.python_log.read_text(),
+			)
 			docker_log = harness.docker_log.read_text()
 			self.assertNotIn("stop processor", docker_log)
 			self.assertNotIn("up -d processor", docker_log)

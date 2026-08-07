@@ -1,9 +1,11 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from shared.asset_manifest import PHENOLOGY_ASSET_PATH
+from shared.operator_env import load_env_file
 from scripts.processor_asset_preflight import missing_assets
 
 
@@ -27,3 +29,17 @@ class ProcessorAssetPreflightTest(unittest.TestCase):
 
 			self.assertIn(store / '.zmetadata', missing)
 			self.assertIn(store / 'phenology', missing)
+
+	def test_env_loader_preserves_dollar_pairs_and_shell_precedence(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			env_file = Path(tmp_dir) / '.env'
+			env_file.write_text(
+				'ASSET_ROOT=/from-file\n'
+				'PROCESSOR_ASSETS_DIR=${ASSET_ROOT}/assets\n'
+				'PROCESSOR_PASSWORD=prefix$$suffix\n'
+			)
+			with patch.dict(os.environ, {'ASSET_ROOT': '/from-shell'}):
+				env = load_env_file(env_file)
+
+			self.assertEqual(env['PROCESSOR_ASSETS_DIR'], '/from-shell/assets')
+			self.assertEqual(env['PROCESSOR_PASSWORD'], 'prefix$$suffix')

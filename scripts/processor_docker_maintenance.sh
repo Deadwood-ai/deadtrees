@@ -118,6 +118,13 @@ wait_for_drain_with_recovery
 
 if ! python3 "${ASSET_PREFLIGHT_SCRIPT}" >> "${LOG_FILE}" 2>&1; then
 	log "Refusing Docker maintenance restart because required processor assets are missing"
+	if request_automation_drain "required processor assets missing"; then
+		:
+	elif [ "$?" -eq 3 ]; then
+		log "Preserved operator drain while aborting Docker maintenance"
+	else
+		exit 1
+	fi
 	exit 1
 fi
 
