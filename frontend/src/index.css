@@ -426,6 +426,20 @@
   top: calc(env(safe-area-inset-top, 0px) + 5.75rem);
 }
 
+.priwa-warnkarte-tooltip {
+  pointer-events: none;
+  border: 1px solid rgb(226 232 240 / 85%);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 6px 20px rgb(15 23 42 / 18%);
+  color: rgb(15 23 42);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  padding: 6px 9px;
+  white-space: nowrap;
+}
+
 @media (min-width: 768px) {
   .priwa-map-control-stack,
   .priwa-map-status-stack {

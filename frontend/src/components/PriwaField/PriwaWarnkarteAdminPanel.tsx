@@ -1,14 +1,5 @@
-import { WarningOutlined } from "@ant-design/icons";
-import {
-  Alert,
-  App,
-  Button,
-  Divider,
-  Drawer,
-  Spin,
-  Tooltip,
-  Typography,
-} from "antd";
+import { CloseOutlined } from "@ant-design/icons";
+import { Alert, App, Button, Divider, Spin, Typography } from "antd";
 import { useState } from "react";
 
 import type {
@@ -19,11 +10,12 @@ import PriwaWarnkarteUploadPanel from "./PriwaWarnkarteUploadPanel";
 import PriwaWarnkarteVersionList from "./PriwaWarnkarteVersionList";
 import { formatPriwaWarnkarteError } from "./priwaWarnkartePresentation";
 
-interface PriwaWarnkarteAdminDrawerProps {
+interface PriwaWarnkarteAdminPanelProps {
   versions: IPriwaWarnkarteVersion[];
   versionsError: unknown;
   isLoadingVersions: boolean;
   previewVersionId: string | null;
+  onClose: () => void;
   onClearPreview: () => void;
   onValidate: (file: File) => Promise<IPriwaWarnkarteValidationSummary>;
   onImport: (file: File, confirmedDate: string) => Promise<unknown>;
@@ -31,19 +23,19 @@ interface PriwaWarnkarteAdminDrawerProps {
   onPublish: (versionId: string) => Promise<void>;
 }
 
-export default function PriwaWarnkarteAdminDrawer({
+export default function PriwaWarnkarteAdminPanel({
   versions,
   versionsError,
   isLoadingVersions,
   previewVersionId,
+  onClose,
   onClearPreview,
   onValidate,
   onImport,
   onPreview,
   onPublish,
-}: PriwaWarnkarteAdminDrawerProps) {
+}: PriwaWarnkarteAdminPanelProps) {
   const { message } = App.useApp();
-  const [open, setOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [summary, setSummary] =
     useState<IPriwaWarnkarteValidationSummary | null>(null);
@@ -99,62 +91,67 @@ export default function PriwaWarnkarteAdminDrawer({
     });
 
   return (
-    <>
-      <Tooltip title="Warnkarte verwalten" placement="right">
+    <div data-testid="priwa-warnkarte-admin-panel">
+      <header className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <Typography.Title level={4} className="!mb-1">
+            PRIWA Warnkarte verwalten
+          </Typography.Title>
+          <Typography.Text type="secondary" className="text-xs">
+            Die Karte bleibt während der Verwaltung bedienbar.
+          </Typography.Text>
+        </div>
         <Button
-          className="pointer-events-auto shadow-md"
-          shape="circle"
-          size="large"
-          icon={<WarningOutlined />}
-          aria-label="Warnkarte verwalten"
-          onClick={() => setOpen(true)}
+          type="text"
+          icon={<CloseOutlined />}
+          aria-label="Warnkarten-Verwaltung schließen"
+          onClick={onClose}
         />
-      </Tooltip>
-      <Drawer
-        title="PRIWA Warnkarte verwalten"
-        width={620}
-        open={open}
-        onClose={() => setOpen(false)}
-        extra={
-          previewVersionId ? (
-            <Button onClick={onClearPreview}>Vorschau beenden</Button>
-          ) : null
-        }
-      >
-        <Typography.Title level={5}>Neue Version</Typography.Title>
-        <PriwaWarnkarteUploadPanel
-          summary={summary}
-          isConfirmed={isConfirmed}
+      </header>
+
+      {previewVersionId && (
+        <Button className="mb-4" block onClick={onClearPreview}>
+          Vorschau beenden
+        </Button>
+      )}
+
+      <Typography.Title level={5}>Neue Version</Typography.Title>
+      <PriwaWarnkarteUploadPanel
+        summary={summary}
+        isConfirmed={isConfirmed}
+        isBusy={isBusy}
+        errorMessage={errorMessage}
+        onFileChange={selectFile}
+        onConfirmedChange={setConfirmed}
+        onImport={importFile}
+      />
+      <Divider />
+      <Typography.Title level={5}>Importierte Versionen</Typography.Title>
+      <Typography.Paragraph type="secondary" className="!mt-0 text-xs">
+        Es ist immer genau eine Version aktiv. Frühere Versionen bleiben
+        erhalten und können erneut veröffentlicht werden.
+      </Typography.Paragraph>
+      {!!versionsError && (
+        <Alert
+          type="error"
+          showIcon
+          message="Versionen konnten nicht geladen werden"
+          description={formatPriwaWarnkarteError(versionsError)}
+        />
+      )}
+      {isLoadingVersions ? (
+        <div className="flex justify-center p-8">
+          <Spin />
+        </div>
+      ) : (
+        <PriwaWarnkarteVersionList
+          versions={versions}
+          previewVersionId={previewVersionId}
           isBusy={isBusy}
-          errorMessage={errorMessage}
-          onFileChange={selectFile}
-          onConfirmedChange={setConfirmed}
-          onImport={importFile}
+          onPreview={preview}
+          onPublish={publish}
         />
-        <Divider />
-        <Typography.Title level={5}>Importierte Versionen</Typography.Title>
-        {!!versionsError && (
-          <Alert
-            type="error"
-            showIcon
-            message="Versionen konnten nicht geladen werden"
-            description={formatPriwaWarnkarteError(versionsError)}
-          />
-        )}
-        {isLoadingVersions ? (
-          <div className="flex justify-center p-8">
-            <Spin />
-          </div>
-        ) : (
-          <PriwaWarnkarteVersionList
-            versions={versions}
-            previewVersionId={previewVersionId}
-            isBusy={isBusy}
-            onPreview={preview}
-            onPublish={publish}
-          />
-        )}
-      </Drawer>
-    </>
+      )}
+    </div>
   );
 }

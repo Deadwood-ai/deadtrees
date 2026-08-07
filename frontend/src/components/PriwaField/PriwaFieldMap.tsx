@@ -37,6 +37,7 @@ import {
   createPriwaWarnkarteLayer,
   setPriwaWarnkarteLayerData,
 } from "./createPriwaWarnkarteLayer";
+import { attachPriwaWarnkarteInteraction } from "./priwaWarnkarteMapInteraction";
 import PriwaPointDrawer from "./PriwaPointDrawer";
 import PriwaPointListPanel from "./PriwaPointListPanel";
 import PriwaOfflineStatus from "./PriwaOfflineStatus";
@@ -74,7 +75,9 @@ interface PriwaFieldMapProps {
   isSavingPoint?: boolean;
   projectName: string;
   warnkarteOverlay?: IPriwaWarnkarteOverlay | null;
+  warnkarteVisible?: boolean;
   additionalMapControl?: ReactNode;
+  reviewDetailOverlay?: ReactNode;
   mosaics?: IPriwaMosaic[];
   groups?: IPriwaBefallsgruppe[];
   isCogLoading?: boolean;
@@ -108,7 +111,9 @@ export default function PriwaFieldMap({
   isSavingPoint = false,
   projectName,
   warnkarteOverlay = null,
+  warnkarteVisible = true,
   additionalMapControl,
+  reviewDetailOverlay,
   mosaics = [],
   groups = [],
   isCogLoading = false,
@@ -363,6 +368,10 @@ export default function PriwaFieldMap({
     });
 
     mapRef.current = map;
+    const detachWarnkarteInteraction = attachPriwaWarnkarteInteraction(
+      map,
+      warnkarteLayer,
+    );
 
     const clickKey = map.on("singleclick", (event) => {
       if (isPlacingPointRef.current) return;
@@ -427,6 +436,7 @@ export default function PriwaFieldMap({
 
     return () => {
       stopUserLocation();
+      detachWarnkarteInteraction();
       unByKey(clickKey);
       map.setTarget(undefined);
       mapRef.current = null;
@@ -445,6 +455,10 @@ export default function PriwaFieldMap({
     if (!warnkarteLayerRef.current) return;
     setPriwaWarnkarteLayerData(warnkarteLayerRef.current, warnkarteOverlay);
   }, [warnkarteOverlay]);
+
+  useEffect(() => {
+    warnkarteLayerRef.current?.setVisible(warnkarteVisible);
+  }, [warnkarteVisible]);
 
   useEffect(() => {
     aerialLayerRef.current?.setVisible(baseLayer === "aerial");
@@ -840,6 +854,7 @@ export default function PriwaFieldMap({
           selectedTreeId={reviewPointId}
           isTreeEditing={isReviewTreeEditing}
           isHidden={isPlacingPoint}
+          detailOverlay={reviewDetailOverlay}
           onSelect={selectReviewItem}
           onOpenData={() => {
             setReviewPointId(null);

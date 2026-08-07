@@ -1,6 +1,7 @@
 import { PlusOutlined, TableOutlined } from "@ant-design/icons";
 import { Button, Empty, Segmented, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import UploadButton from "../Upload/UploadButton";
 import PriwaReviewDetailsLayout from "./PriwaReviewDetailsLayout";
@@ -38,6 +39,7 @@ interface PriwaReviewWorkbenchProps {
   selectedTreeId: string | null;
   isTreeEditing: boolean;
   isHidden?: boolean;
+  detailOverlay?: ReactNode;
   onSelect: (item: IPriwaReviewItem) => void;
   onOpenData: () => void;
   onCreateGroup: () => void;
@@ -108,6 +110,7 @@ export default function PriwaReviewWorkbench({
   selectedTreeId,
   isTreeEditing,
   isHidden = false,
+  detailOverlay,
   onSelect,
   onOpenData,
   onCreateGroup,
@@ -166,7 +169,7 @@ export default function PriwaReviewWorkbench({
     selectionChanged,
   ]);
 
-  const groupContent = !selectedItem ? (
+  const selectedGroupContent = !selectedItem ? (
     <Empty
       className="pt-24"
       image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -185,14 +188,16 @@ export default function PriwaReviewWorkbench({
     />
   );
 
-  const treeContent = selectedTree ? (
-    <PriwaReviewTreeInspector
-      point={selectedTree}
-      onClose={onCloseTree}
-      onEdit={detailProps.onEditTree}
-      onFocus={detailProps.onFocusTree}
-    />
-  ) : null;
+  const groupContent = detailOverlay ?? selectedGroupContent;
+  const treeContent =
+    !detailOverlay && selectedTree ? (
+      <PriwaReviewTreeInspector
+        point={selectedTree}
+        onClose={onCloseTree}
+        onEdit={detailProps.onEditTree}
+        onFocus={detailProps.onFocusTree}
+      />
+    ) : null;
 
   return (
     <div

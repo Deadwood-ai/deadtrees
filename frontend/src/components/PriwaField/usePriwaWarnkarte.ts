@@ -18,6 +18,7 @@ export function usePriwaWarnkarte(projectId: string, canManage: boolean) {
   const queryClient = useQueryClient();
   const [previewOverlay, setPreviewOverlay] =
     useState<IPriwaWarnkarteOverlay | null>(null);
+  const [isVisible, setVisible] = useState(true);
 
   const activeQuery = useQuery({
     queryKey: ["priwa-warnkarte", projectId, "active"],
@@ -84,12 +85,14 @@ export function usePriwaWarnkarte(projectId: string, canManage: boolean) {
     activeOverlay: activeQuery.data ?? null,
     displayedOverlay: previewOverlay ?? activeQuery.data ?? null,
     isPreviewing: previewOverlay !== null,
+    isVisible,
     overlayError: activeQuery.error,
     previewOverlay,
     versions: versionsQuery.data ?? [],
     versionsError: versionsQuery.error,
     isLoadingVersions: versionsQuery.isLoading,
     clearPreview: () => setPreviewOverlay(null),
+    toggleVisibility: () => setVisible((visible) => !visible),
     importFile,
     previewVersion,
     publishVersion,

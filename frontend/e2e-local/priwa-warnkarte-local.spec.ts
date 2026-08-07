@@ -203,13 +203,37 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await installWarnkarteApi(page);
     await page.goto("/priwa-field");
 
-    await expect(page.getByText("Warnkarte vom 25.06.2024")).toBeVisible();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toContainText(
+      "Warnkarte 25.06.2024",
+    );
     const warnkarteControl = page
       .locator(".priwa-map-control-stack")
       .getByRole("button", { name: "Warnkarte verwalten" });
+    const visibilityControl = page
+      .locator(".priwa-map-control-stack")
+      .getByRole("button", { name: "Warnkarte ausblenden" });
+    await expect(visibilityControl).toHaveAttribute("aria-pressed", "true");
+    await visibilityControl.click();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toHaveCount(0);
+    await page.getByRole("button", { name: "Warnkarte einblenden" }).click();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toBeVisible();
+
+    await page.getByTestId("priwa-field-map").click({
+      position: { x: 720, y: 450 },
+    });
+    await expect(page.getByRole("tooltip")).toContainText(
+      "Wahrscheinlichkeit: 60 %",
+    );
+
     await expect(warnkarteControl).toBeVisible();
     await expect(warnkarteControl).toHaveClass(/ant-btn-circle/);
     await warnkarteControl.click();
+    await expect(page.getByTestId("priwa-warnkarte-admin-panel")).toBeVisible();
+    await expect(page.getByText("Aktiv", { exact: true })).toHaveCount(1);
+    await page.getByRole("button", { name: "Zu Karte wechseln" }).click();
+    await expect(
+      page.getByRole("button", { name: "Zu Luftbild wechseln" }),
+    ).toBeVisible();
     await page.locator('input[type="file"]').setInputFiles({
       name: "warnkarte_2024-07-01.gpkg",
       mimeType: "application/geopackage+sqlite3",
@@ -226,7 +250,7 @@ test.describe("PRIWA Warnkarte local UI", () => {
       })
       .click();
     await expect(
-      page.getByText(/Vorschau · Warnkarte vom 01.07.2024/),
+      page.getByText(/Vorschau · Warnkarte 01.07.2024/),
     ).toBeVisible();
 
     const newVersion = page.getByText("Warnkarte vom 01.07.2024").last();
@@ -238,9 +262,18 @@ test.describe("PRIWA Warnkarte local UI", () => {
       .click();
     await expect(page.getByText("Warnkarte veröffentlicht.")).toBeVisible();
     await expect(page.getByText(/Vorschau ·/)).toHaveCount(0);
-    await expect(
-      page.getByText("Warnkarte vom 01.07.2024").first(),
-    ).toBeVisible();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toContainText(
+      "Warnkarte 01.07.2024",
+    );
+    await expect(page.getByText("Aktiv", { exact: true })).toHaveCount(1);
+    await page
+      .getByTestId("priwa-warnkarte-admin-panel")
+      .getByRole("button", { name: "Warnkarten-Verwaltung schließen" })
+      .click();
+    await expect(page.getByTestId("priwa-warnkarte-admin-panel")).toHaveCount(
+      0,
+    );
+    await expect(page.getByTestId("priwa-review-detail-panel")).toBeVisible();
   });
 
   test("desktop admin cannot replace a file while its validation is pending", async ({
@@ -304,10 +337,17 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await installWarnkarteApi(page);
     await page.goto("/priwa-field");
 
-    await expect(page.getByText("Warnkarte vom 25.06.2024")).toBeVisible();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toContainText(
+      "Warnkarte 25.06.2024",
+    );
     await expect(
       page.getByRole("button", { name: "Warnkarte verwalten" }),
     ).toHaveCount(0);
+    await page.getByRole("button", { name: "Warnkarte ausblenden" }).click();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Warnkarte einblenden" }),
+    ).toBeVisible();
     await expect(page.getByTestId("priwa-field-map")).toBeVisible();
   });
 });

@@ -42,6 +42,10 @@ describe("PRIWA Warnkarte layer", () => {
     expect(getPriwaWarnkarteStyle(1).getFill()?.getColor()).toBe(
       PRIWA_WARNKARTE_RED_BANDS[9],
     );
+    expect(getPriwaWarnkarteStyle(1).getStroke()?.getWidth()).toBe(0.5);
+    expect(getPriwaWarnkarteStyle(1).getStroke()?.getColor()).toBe(
+      "rgba(69, 10, 10, 0.18)",
+    );
   });
 
   it("loads safe GeoJSON into an independent EPSG:3857 vector layer", () => {

@@ -18,7 +18,6 @@ EXPECTED_EPSG = 32632
 PROBABILITY_STEP = Decimal('0.1')
 PROBABILITY_TOLERANCE = Decimal('0.000001')
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
-MAX_FEATURE_COUNT = 10_000
 MAX_VERTICES_PER_POLYGON = 100_000
 MAX_TOTAL_VERTICES = 1_000_000
 FILENAME_DATE_PATTERN = re.compile(r'(?P<date>\d{4}-\d{2}-\d{2})\.gpkg$')
@@ -269,15 +268,7 @@ def validate_warnkarte_file(file_object: BinaryIO, filename: str | None) -> Vali
 				polygons: list[ValidatedWarnkartePolygon] = []
 				seen_fids: set[int] = set()
 				total_vertices = 0
-				for feature_index, feature in enumerate(collection, start=1):
-					if feature_index > MAX_FEATURE_COUNT:
-						raise WarnkarteValidationError(
-							'TOO_MANY_FEATURES',
-							'Das GeoPackage enthält zu viele Polygone.',
-							details={'max_features': MAX_FEATURE_COUNT},
-							status_code=413,
-						)
-
+				for feature in collection:
 					try:
 						fid = int(feature.id)
 					except (TypeError, ValueError) as error:

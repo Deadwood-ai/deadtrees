@@ -106,15 +106,16 @@ def test_rejects_oversized_file_with_structured_413(monkeypatch):
 	assert error.value.details['max_bytes'] == 4
 
 
-def test_rejects_excessive_feature_count_with_structured_413(tmp_path, monkeypatch):
-	path = write_warnkarte(tmp_path / 'warnkarte_2024-06-25.gpkg')
-	monkeypatch.setattr(warnkarte_module, 'MAX_FEATURE_COUNT', 2)
+def test_accepts_more_than_the_previous_polygon_count_limit(tmp_path):
+	feature_count = 10_001
+	path = write_warnkarte(
+		tmp_path / 'warnkarte_2024-06-25.gpkg',
+		probabilities=(0.5,) * feature_count,
+	)
 
-	with pytest.raises(WarnkarteValidationError) as error:
-		validate_path(path)
+	validated = validate_path(path)
 
-	assert error.value.code == 'TOO_MANY_FEATURES'
-	assert error.value.status_code == 413
+	assert validated.feature_count == feature_count
 
 
 def test_rejects_excessive_geometry_complexity_with_structured_413(tmp_path, monkeypatch):

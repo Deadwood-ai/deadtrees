@@ -30,17 +30,19 @@ export default function PriwaWarnkarteVersionList({
   return (
     <List
       dataSource={versions}
-      renderItem={(version) => (
-        <List.Item
-          actions={[
-            <Button
-              key="preview"
-              size="small"
-              disabled={isBusy}
-              onClick={() => onPreview(version.id)}
-            >
-              Vorschau
-            </Button>,
+      renderItem={(version) => {
+        const actions = [
+          <Button
+            key="preview"
+            size="small"
+            disabled={isBusy}
+            onClick={() => onPreview(version.id)}
+          >
+            Vorschau
+          </Button>,
+        ];
+        if (!version.is_current) {
+          actions.push(
             <Popconfirm
               key="publish"
               title="Diese Version als aktive Warnkarte veröffentlichen?"
@@ -50,34 +52,37 @@ export default function PriwaWarnkarteVersionList({
               onConfirm={() => onPublish(version.id)}
             >
               <Button size="small" type="primary" danger disabled={isBusy}>
-                {version.is_current
-                  ? "Erneut veröffentlichen"
-                  : "Veröffentlichen"}
+                Veröffentlichen
               </Button>
             </Popconfirm>,
-          ]}
-        >
-          <List.Item.Meta
-            title={
-              <Space wrap>
-                <span>
-                  Warnkarte vom {formatPriwaWarnkarteDate(version.source_date)}
-                </span>
-                {version.is_current && <Tag color="red">Aktiv</Tag>}
-                {previewVersionId === version.id && (
-                  <Tag color="gold">Vorschau</Tag>
-                )}
-              </Space>
-            }
-            description={
-              <Typography.Text type="secondary">
-                {version.feature_count} Polygone · importiert{" "}
-                {new Date(version.imported_at).toLocaleString("de-DE")}
-              </Typography.Text>
-            }
-          />
-        </List.Item>
-      )}
+          );
+        }
+
+        return (
+          <List.Item actions={actions}>
+            <List.Item.Meta
+              title={
+                <Space wrap>
+                  <span>
+                    Warnkarte vom{" "}
+                    {formatPriwaWarnkarteDate(version.source_date)}
+                  </span>
+                  {version.is_current && <Tag color="red">Aktiv</Tag>}
+                  {previewVersionId === version.id && (
+                    <Tag color="gold">Vorschau</Tag>
+                  )}
+                </Space>
+              }
+              description={
+                <Typography.Text type="secondary">
+                  {version.feature_count} Polygone · importiert{" "}
+                  {new Date(version.imported_at).toLocaleString("de-DE")}
+                </Typography.Text>
+              }
+            />
+          </List.Item>
+        );
+      }}
     />
   );
 }
