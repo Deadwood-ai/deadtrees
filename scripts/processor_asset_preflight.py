@@ -22,6 +22,14 @@ from shared.operator_env import load_env_file
 MAX_SAFETENSORS_HEADER_BYTES = 16 * 1024 * 1024
 
 
+def contained_asset(path: Path, assets_dir: Path) -> bool:
+	try:
+		path.resolve().relative_to(assets_dir.resolve())
+		return True
+	except (OSError, ValueError):
+		return False
+
+
 def valid_geopackage(path: Path, layer: str, required_columns: tuple[str, ...]) -> bool:
 	try:
 		with closing(sqlite3.connect(f'file:{path}?mode=ro', uri=True)) as database:
@@ -43,7 +51,7 @@ def valid_geopackage(path: Path, layer: str, required_columns: tuple[str, ...]) 
 		return False
 
 
-def valid_zarr_store(store: Path) -> bool:
+def valid_zarr_store(store: Path, assets_dir: Path) -> bool:
 	try:
 		for name, (expected_shape, expected_chunks, omitted_chunks) in asset_manifest.PHENOLOGY_ARRAY_SPECS.items():
 			array_dir = store / name
@@ -59,7 +67,7 @@ def valid_zarr_store(store: Path) -> bool:
 				if chunk_key in omitted_chunks:
 					continue
 				chunk = array_dir.joinpath(*map(str, coordinates)) if separator == '/' else array_dir / chunk_key
-				if not chunk.is_file() or chunk.stat().st_size == 0:
+				if not contained_asset(chunk, assets_dir) or not chunk.is_file() or chunk.stat().st_size == 0:
 					return False
 		return True
 	except (OSError, TypeError, ValueError, json.JSONDecodeError):
@@ -117,7 +125,9 @@ def missing_assets(assets_dir: Path) -> list[Path]:
 	missing = [
 		assets_dir / relative
 		for relative in asset_manifest.required_processor_asset_files()
-		if not (assets_dir / relative).is_file() or (assets_dir / relative).stat().st_size == 0
+		if not contained_asset(assets_dir / relative, assets_dir)
+		or not (assets_dir / relative).is_file()
+		or (assets_dir / relative).stat().st_size == 0
 	]
 	missing.extend(
 		assets_dir / 'models' / name
@@ -134,11 +144,12 @@ def missing_assets(assets_dir: Path) -> list[Path]:
 	missing.extend(
 		assets_dir / relative
 		for relative in asset_manifest.required_processor_asset_directories()
-		if not (assets_dir / relative).is_dir()
+		if not contained_asset(assets_dir / relative, assets_dir)
+		or not (assets_dir / relative).is_dir()
 		or not any(path.is_file() and not path.name.startswith('.') for path in (assets_dir / relative).iterdir())
 	)
 	phenology_store = assets_dir / asset_manifest.PHENOLOGY_ASSET_PATH
-	if phenology_store not in missing and not valid_zarr_store(phenology_store):
+	if phenology_store not in missing and not valid_zarr_store(phenology_store, assets_dir):
 		missing.append(phenology_store)
 	return missing
 

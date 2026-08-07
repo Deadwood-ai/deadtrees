@@ -59,6 +59,27 @@ class ProcessorAssetPreflightTest(unittest.TestCase):
 
 			self.assertEqual(assets_dir, (repo_dir / 'assets').resolve())
 
+	def test_compose_substitution_operators(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			env_file = Path(tmp_dir) / '.env'
+			env_file.write_text(
+				'EMPTY=\n'
+				'SET=/configured\n'
+				'DEFAULT_EMPTY=${EMPTY:-/default}\n'
+				'DEFAULT_UNSET=${UNSET-/default}\n'
+				'KEEP_EMPTY=${EMPTY-/default}\n'
+				'ALTERNATE=${SET:+/alternate}\n'
+				'ALTERNATE_EMPTY=${EMPTY+/alternate}\n'
+			)
+			with patch.dict(os.environ, {}, clear=True):
+				env = load_env_file(env_file)
+
+			self.assertEqual(env['DEFAULT_EMPTY'], '/default')
+			self.assertEqual(env['DEFAULT_UNSET'], '/default')
+			self.assertEqual(env['KEEP_EMPTY'], '')
+			self.assertEqual(env['ALTERNATE'], '/alternate')
+			self.assertEqual(env['ALTERNATE_EMPTY'], '/alternate')
+
 	def test_truncated_nonempty_checkpoint_is_missing(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			assets_dir = Path(tmp_dir)
@@ -97,3 +118,18 @@ class ProcessorAssetPreflightTest(unittest.TestCase):
 			missing = missing_assets(assets_dir)
 
 			self.assertIn(store, missing)
+
+	def test_asset_symlink_outside_mounted_root_is_missing(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			root = Path(tmp_dir)
+			assets_dir = root / 'assets'
+			assets_dir.mkdir()
+			external = root / 'external-zgroup'
+			external.write_text('{}')
+			zgroup = assets_dir / PHENOLOGY_ASSET_PATH / '.zgroup'
+			zgroup.parent.mkdir(parents=True)
+			zgroup.symlink_to(external)
+
+			missing = missing_assets(assets_dir)
+
+			self.assertIn(zgroup, missing)

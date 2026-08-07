@@ -5,13 +5,36 @@ import re
 from pathlib import Path
 
 
-ENV_REFERENCE = re.compile(r'(?<!\$)\$(?:\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|(?P<plain>[A-Za-z_][A-Za-z0-9_]*))')
+ENV_REFERENCE = re.compile(
+	r'(?<!\$)\$(?:\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)'
+	r'(?:(?P<operator>:-|-|:\+|\+|:\?|\?)(?P<operand>[^{}]*))?\}|(?P<plain>[A-Za-z_][A-Za-z0-9_]*))'
+)
 
 
 def _expand_references(value: str, variables: dict[str, str]) -> str:
 	def replace(match: re.Match[str]) -> str:
 		name = match.group('braced') or match.group('plain')
-		return variables.get(name, match.group(0))
+		operator = match.group('operator')
+		operand = match.group('operand') or ''
+		is_set = name in variables
+		value = variables.get(name, '')
+		is_nonempty = is_set and value != ''
+
+		if operator is None:
+			return value
+		if operator == ':-':
+			return value if is_nonempty else _expand_references(operand, variables)
+		if operator == '-':
+			return value if is_set else _expand_references(operand, variables)
+		if operator == ':+':
+			return _expand_references(operand, variables) if is_nonempty else ''
+		if operator == '+':
+			return _expand_references(operand, variables) if is_set else ''
+		if operator == ':?' and not is_nonempty:
+			raise ValueError(operand or f'{name} is required')
+		if operator == '?' and not is_set:
+			raise ValueError(operand or f'{name} is required')
+		return value
 
 	return ENV_REFERENCE.sub(replace, value)
 
