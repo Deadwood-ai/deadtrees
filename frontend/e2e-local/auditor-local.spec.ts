@@ -165,6 +165,7 @@ const installAuthenticatedUser = async (
     canAudit: boolean;
     auditDatasetRequestFails?: boolean;
     processingOverviewRequestFails?: boolean;
+    processingOverviewRefetchFails?: boolean;
   },
 ) => {
   await installLocalSession(page, {
@@ -173,8 +174,22 @@ const installAuthenticatedUser = async (
     refreshToken: "local-auditor-e2e-refresh-token",
   });
 
+  let processingOverviewRequestCount = 0;
   await page.route(`${localSupabaseUrl}/rest/v1/**`, async (route) => {
-    await fulfillSupabaseRequest(route, options);
+    const resource = new URL(route.request().url()).pathname
+      .split("/")
+      .filter(Boolean)
+      .at(-1);
+    if (resource === "v2_processing_overview") {
+      processingOverviewRequestCount += 1;
+    }
+    await fulfillSupabaseRequest(route, {
+      ...options,
+      processingOverviewRequestFails:
+        options.processingOverviewRequestFails ||
+        (options.processingOverviewRefetchFails &&
+          processingOverviewRequestCount > 1),
+    });
   });
 
   await page.route("**/cogs/v1/**", async (route) => {
@@ -697,6 +712,29 @@ test.describe("auditor local e2e", () => {
     ).toBeVisible();
     await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
     await expect(page.getByText("No data", { exact: true })).toHaveCount(0);
+  });
+
+  test("processing overview keeps cached rows visible after a failed refresh", async ({
+    page,
+  }) => {
+    await installAuthenticatedUser(page, {
+      canAudit: true,
+      processingOverviewRefetchFails: true,
+    });
+
+    await page.goto("/dataset-audit?tab=processing");
+    await dismissCookieBanner(page);
+    await expect(page.getByText(incompleteDataset.file_name)).toBeVisible();
+
+    await page.getByRole("button", { name: "Refresh" }).click();
+
+    await expect(
+      page.getByText("Processing data may be stale", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText(incompleteDataset.file_name)).toBeVisible();
+    await expect(
+      page.getByText("Could not load processing data", { exact: true }),
+    ).toHaveCount(0);
   });
 
   test("auditor start action checks the lock before opening detail", async ({

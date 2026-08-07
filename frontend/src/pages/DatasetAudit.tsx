@@ -19,6 +19,7 @@ import {
 	Badge,
 	DatePicker,
 	Drawer,
+	Alert,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
@@ -1180,7 +1181,7 @@ function DatasetAuditInner() {
 
 				<div className="rounded-2xl border border-gray-200/60 bg-white p-6 shadow-sm">
 					{activeTab === "processing" &&
-						(isProcessingError ? (
+						(isProcessingError && processingRows.length === 0 ? (
 							<Result
 								status="error"
 								title="Could not load processing data"
@@ -1189,6 +1190,16 @@ function DatasetAuditInner() {
 							/>
 						) : (
 							<>
+					{isProcessingError && (
+						<Alert
+							type="warning"
+							showIcon
+							message="Processing data may be stale"
+							description="The latest refresh failed. Previously loaded processing data remains visible."
+							action={<Button onClick={() => refetchProcessingRows()}>Try again</Button>}
+							className="mb-4"
+						/>
+					)}
 					<div className="mb-4 flex flex-wrap items-end gap-3 rounded-md border border-gray-100 bg-gray-50 p-3">
 						<div>
 							<Text type="secondary" className="block mb-1 text-xs">
