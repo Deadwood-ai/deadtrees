@@ -1,11 +1,25 @@
+import itertools
+import json
+import math
 import os
 import shutil
+import sqlite3
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
+
+from shared.asset_manifest import (
+	GEOPACKAGE_SPECS,
+	PHENOLOGY_ARRAY_SPECS,
+	processor_model_checkpoint_specs,
+	required_processor_asset_directories,
+	required_processor_asset_files,
+)
 
 
 SCRIPT = Path(__file__).parents[1] / "processor_docker_maintenance.sh"
@@ -34,11 +48,15 @@ class MaintenanceHarness:
 		self.repo.mkdir()
 		(self.repo / "scripts").mkdir()
 		(self.repo / "scripts" / "lib").mkdir()
+		(self.repo / "shared").mkdir()
 		(self.repo / "docker-compose.processor.yaml").write_text("services: {}\n")
-		(self.repo / ".gitignore").write_text("/.local\n")
+		(self.repo / ".gitignore").write_text("/.local\n/assets\n__pycache__/\n")
 		shutil.copy2(SCRIPT, self.repo / "scripts" / "processor_docker_maintenance.sh")
 		shutil.copy2(SCRIPT.parent / "lib" / "processor_runtime.sh", self.repo / "scripts" / "lib" / "processor_runtime.sh")
-		(self.repo / "scripts" / "processor_runtime_control.py").write_text("# test stub\n")
+		shutil.copy2(SCRIPT.parent / "processor_runtime_control.py", self.repo / "scripts" / "processor_runtime_control.py")
+		shutil.copy2(SCRIPT.parent / "processor_asset_preflight.py", self.repo / "scripts" / "processor_asset_preflight.py")
+		shutil.copy2(SCRIPT.parents[1] / "shared" / "operator_env.py", self.repo / "shared" / "operator_env.py")
+		shutil.copy2(SCRIPT.parents[1] / "shared" / "asset_manifest.py", self.repo / "shared" / "asset_manifest.py")
 		run("git", "init", "--initial-branch=main", cwd=self.repo)
 		run("git", "config", "user.name", "DeadTrees Tests", cwd=self.repo)
 		run("git", "config", "user.email", "tests@deadtrees.example", cwd=self.repo)
@@ -47,6 +65,7 @@ class MaintenanceHarness:
 		(self.repo / ".local").mkdir()
 		activated_sha = run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
 		(self.repo / ".local" / "processor-activated-sha").write_text(f"{activated_sha}\n")
+		self._write_asset_fixtures()
 
 		self.bin_dir.mkdir()
 		make_executable(self.bin_dir / "flock", "#!/bin/sh\nexit 0\n")
@@ -65,6 +84,7 @@ class MaintenanceHarness:
 		make_executable(
 			self.bin_dir / "python3",
 			f"#!/bin/sh\necho \"$@\" >> {self.python_log}\n"
+			f"if echo \"$@\" | grep -q processor_asset_preflight.py; then exec {sys.executable} \"$@\"; fi\n"
 			"if echo \"$@\" | grep -q clear-ack && [ -n \"${PROCESSOR_TEST_ACK_PATH:-}\" ]; then\n"
 			"  rm -f \"$PROCESSOR_TEST_ACK_PATH\"\n"
 			"fi\n"
@@ -104,6 +124,50 @@ class MaintenanceHarness:
 		self.env["PROCESSOR_STARTUP_TIMEOUT_SECONDS"] = "2"
 		self.env["PROCESSOR_SNAP_CONTROL"] = str(self.bin_dir / "snap-control")
 
+	def _write_asset_fixtures(self) -> None:
+		for relative in required_processor_asset_files():
+			path = self.repo / "assets" / relative
+			path.parent.mkdir(parents=True, exist_ok=True)
+			if path.suffix == ".safetensors":
+				minimum_tensors, required_tensors = processor_model_checkpoint_specs()[path.name]
+				names = [*required_tensors, *(f"fixture.{index}" for index in range(minimum_tensors))]
+				header = json.dumps(
+					{name: {"dtype": "F32", "shape": [0], "data_offsets": [0, 0]} for name in names}
+				).encode()
+				path.write_bytes(struct.pack("<Q", len(header)) + header)
+			elif path.suffix == ".gpkg":
+				layer, required_columns = GEOPACKAGE_SPECS[relative]
+				with closing(sqlite3.connect(path)) as database:
+					with database:
+						database.execute("CREATE TABLE gpkg_contents (table_name TEXT)")
+						database.execute("INSERT INTO gpkg_contents VALUES (?)", (layer,))
+						columns = ", ".join(f'"{column}" TEXT' for column in required_columns)
+						database.execute(f'CREATE TABLE "{layer}" ({columns})')
+			elif path.name == ".zarray":
+				shape, chunks, _ = PHENOLOGY_ARRAY_SPECS[path.parent.name]
+				path.write_text(json.dumps({"shape": shape, "chunks": chunks}))
+			else:
+				path.write_text("fixture\n")
+		consolidated_metadata = {".zgroup": {"zarr_format": 2}, ".zattrs": {}}
+		for name, (shape, _, _) in PHENOLOGY_ARRAY_SPECS.items():
+			array_dir = self.repo / "assets" / "pheno/modispheno_aggregated_normalized_filled.zarr" / name
+			consolidated_metadata[f"{name}/.zarray"] = json.loads((array_dir / ".zarray").read_text())
+			consolidated_metadata[f"{name}/.zattrs"] = {
+				"_ARRAY_DIMENSIONS": [f"dimension_{index}" for index in range(len(shape))]
+			}
+		(self.repo / "assets/pheno/modispheno_aggregated_normalized_filled.zarr/.zmetadata").write_text(
+			json.dumps({"metadata": consolidated_metadata, "zarr_consolidated_format": 1})
+		)
+		for relative in required_processor_asset_directories():
+			array_dir = self.repo / "assets" / relative
+			shape, chunks, omitted_chunks = PHENOLOGY_ARRAY_SPECS[array_dir.name]
+			for coordinates in itertools.product(*(range(math.ceil(size / chunk)) for size, chunk in zip(shape, chunks))):
+				path = array_dir / ".".join(map(str, coordinates))
+				if path.name in omitted_chunks:
+					continue
+				path.parent.mkdir(parents=True, exist_ok=True)
+				path.write_text("fixture\n")
+
 	def run(self, *args: str) -> subprocess.CompletedProcess[str]:
 		return run(
 			"bash",
@@ -116,6 +180,23 @@ class MaintenanceHarness:
 
 
 class ProcessorDockerMaintenanceTest(unittest.TestCase):
+	def test_missing_assets_leave_worker_drained_without_restart(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = MaintenanceHarness(Path(tmp_dir), processor_available=True)
+			(harness.repo / "assets" / "models" / "segformer_b5_full_epoch_100.safetensors").unlink()
+
+			result = harness.run()
+
+			self.assertNotEqual(result.returncode, 0)
+			self.assertIn("set-drain --reason docker-maintenance", harness.python_log.read_text())
+			self.assertIn(
+				"set-drain --reason required processor assets missing --preserve-operator-drain",
+				harness.python_log.read_text(),
+			)
+			docker_log = harness.docker_log.read_text()
+			self.assertNotIn("stop processor", docker_log)
+			self.assertNotIn("up -d processor", docker_log)
+
 	def test_snap_control_limits_root_action_to_validated_docker_operations(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			tmp_path = Path(tmp_dir)

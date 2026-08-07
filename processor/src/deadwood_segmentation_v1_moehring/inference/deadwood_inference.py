@@ -21,8 +21,9 @@ from processor.src.utils.segmentation import (
 	mask_to_polygons_scanline,
 	reproject_polygons,
 )
+from shared.asset_manifest import DEADWOOD_V1_MODEL_CHECKPOINT_NAME
 
-DEADWOOD_MODEL_NAME = 'segformer_b5_full_epoch_100'
+DEADWOOD_MODEL_NAME = DEADWOOD_V1_MODEL_CHECKPOINT_NAME.removesuffix('.safetensors')
 DEADWOOD_PROBABILITY_THRESHOLD = 0.5
 DEADWOOD_MINIMUM_INFERENCE_RESOLUTION = 0.05
 DEADWOOD_BATCH_SIZE = 2

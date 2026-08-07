@@ -1,5 +1,10 @@
 PROCESSOR_DRAIN_WAIT_PID=""
 
+request_automation_drain() {
+	local reason="$1"
+	python3 "${STATUS_SCRIPT}" set-drain --reason "${reason}" --preserve-operator-drain >> "${LOG_FILE}" 2>&1
+}
+
 cleanup_processor_runtime_waiter() {
 	local wait_pid="${PROCESSOR_DRAIN_WAIT_PID:-}"
 	if [ -n "${wait_pid}" ] && kill -0 "${wait_pid}" 2>/dev/null; then

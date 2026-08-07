@@ -34,6 +34,29 @@ def test_ack_release_sha_must_match_when_expected():
 	assert not runtime_control._ack_matches_request(request, ack, 'worker-a', 'release-b')
 
 
+def test_asset_recovery_pending_requires_asset_loss_drain(monkeypatch):
+	request = {'request_id': 'request-a', 'requested_at': 'now', 'reason': 'required processor assets missing'}
+	monkeypatch.setattr(runtime_control, '_load_drain_state', lambda: (request, _matching_ack()))
+	assert runtime_control.cmd_asset_recovery_pending(argparse.Namespace()) == 0
+
+	request['reason'] = 'auto-deploy release-a'
+	assert runtime_control.cmd_asset_recovery_pending(argparse.Namespace()) == 1
+
+
+def test_set_drain_preserves_operator_request(monkeypatch):
+	existing = {'request_id': 'operator-request', 'reason': 'planned-shutdown', 'requested_at': 'now'}
+	monkeypatch.setattr(runtime_control, '_load_drain_state', lambda: (existing, _matching_ack()))
+	monkeypatch.setattr(
+		runtime_control,
+		'_write_json',
+		lambda *args: (_ for _ in ()).throw(AssertionError('operator drain was replaced')),
+	)
+
+	args = argparse.Namespace(reason='required processor assets missing', preserve_operator_drain=True)
+
+	assert runtime_control.cmd_set_drain(args) == 3
+
+
 def test_worker_health_rejects_even_malformed_persisted_marker(monkeypatch, tmp_path):
 	marker = tmp_path / 'loop-unhealthy.json'
 	marker.write_text('interrupted write')

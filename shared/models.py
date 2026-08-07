@@ -7,6 +7,11 @@ from pydantic_partial import PartialModelMixin
 from pydantic_settings import BaseSettings
 from rasterio.coords import BoundingBox
 
+from .asset_manifest import (
+	AOI_V1_MODEL_CHECKPOINT_NAME,
+	COMBINED_MODEL_CHECKPOINT_NAME,
+	DEADWOOD_V1_MODEL_CHECKPOINT_NAME,
+)
 from .settings import settings
 
 
@@ -37,7 +42,6 @@ class LabelDataEnum(str, Enum):
 
 
 COMBINED_MODEL_MODULE = 'deadwood_treecover_combined_v2'
-COMBINED_MODEL_CHECKPOINT_NAME = 'ckpt_weighted_brownweight15_goldentestweight7.safetensors'
 COMBINED_MODEL_CONFIG = {
 	'module': COMBINED_MODEL_MODULE,
 	'checkpoint_name': COMBINED_MODEL_CHECKPOINT_NAME,
@@ -45,7 +49,7 @@ COMBINED_MODEL_CONFIG = {
 
 DEADWOOD_V1_MODEL_CONFIG = {
 	'module': 'deadwood_segmentation_v1_moehring',
-	'checkpoint_name': 'segformer_b5_full_epoch_100.safetensors',
+	'checkpoint_name': DEADWOOD_V1_MODEL_CHECKPOINT_NAME,
 }
 
 TREECOVER_V1_MODEL_CONFIG = {
@@ -57,7 +61,6 @@ TREECOVER_V1_MODEL_CONFIG = {
 # polygon per orthomosaic that an auditor reviews/edits before the dataset is
 # audited. SegFormer-B1, binary inside/outside-AOI classification.
 AOI_V1_MODEL_MODULE = 'aoi_segmentation_v1'
-AOI_V1_MODEL_CHECKPOINT_NAME = 'b1_50epoch_best_macro_f1.safetensors'
 AOI_V1_MODEL_CONFIG = {
 	'module': AOI_V1_MODEL_MODULE,
 	'checkpoint_name': AOI_V1_MODEL_CHECKPOINT_NAME,

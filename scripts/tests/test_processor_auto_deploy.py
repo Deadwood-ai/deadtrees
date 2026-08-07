@@ -1,10 +1,27 @@
+import itertools
+import json
+import math
 import os
 import shutil
+import sqlite3
 import stat
+import struct
 import subprocess
+import sys
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
+
+from shared.asset_manifest import (
+	AOI_V1_MODEL_CHECKPOINT_NAME,
+	GEOPACKAGE_SPECS,
+	PHENOLOGY_ARRAY_SPECS,
+	PHENOLOGY_ASSET_PATH,
+	processor_model_checkpoint_specs,
+	required_processor_asset_directories,
+	required_processor_asset_files,
+)
 
 
 SCRIPT = Path(__file__).parents[1] / "processor_auto_deploy.sh"
@@ -42,6 +59,7 @@ class DeployHarness:
 		self.python_log = tmp_path / "python.log"
 		self.docker_log = tmp_path / "docker.log"
 		self.docker_running = tmp_path / "docker-running"
+		self.asset_mount = tmp_path / "docker-asset-mount"
 		self.inspect_failed_once = tmp_path / "inspect-failed-once"
 		self.build_failed_once = tmp_path / "build-failed-once"
 		self.activation_write_failed_once = tmp_path / "activation-write-failed-once"
@@ -55,12 +73,16 @@ class DeployHarness:
 		git(self.seed, "config", "user.email", "tests@deadtrees.example")
 		(self.seed / "scripts").mkdir()
 		(self.seed / "scripts" / "lib").mkdir()
+		(self.seed / "shared").mkdir()
 		(self.seed / "README.md").write_text("initial\n")
 		(self.seed / "docker-compose.processor.yaml").write_text("services: {}\n")
-		(self.seed / ".gitignore").write_text("/.local\n.env\n")
+		(self.seed / ".gitignore").write_text("/.local\n/assets\n.env\n__pycache__/\n")
 		shutil.copy2(SCRIPT, self.seed / "scripts" / "processor_auto_deploy.sh")
 		shutil.copy2(SCRIPT.parent / "lib" / "processor_runtime.sh", self.seed / "scripts" / "lib" / "processor_runtime.sh")
-		(self.seed / "scripts" / "processor_runtime_control.py").write_text("# test stub\n")
+		shutil.copy2(SCRIPT.parent / "processor_runtime_control.py", self.seed / "scripts" / "processor_runtime_control.py")
+		shutil.copy2(SCRIPT.parent / "processor_asset_preflight.py", self.seed / "scripts" / "processor_asset_preflight.py")
+		shutil.copy2(SCRIPT.parents[1] / "shared" / "operator_env.py", self.seed / "shared" / "operator_env.py")
+		shutil.copy2(SCRIPT.parents[1] / "shared" / "asset_manifest.py", self.seed / "shared" / "asset_manifest.py")
 		git(self.seed, "add", ".")
 		git(self.seed, "commit", "-m", "initial")
 		git(self.seed, "remote", "add", "origin", str(self.origin))
@@ -71,12 +93,15 @@ class DeployHarness:
 		for repo in (self.worktree, self.upstream):
 			git(repo, "config", "user.name", "DeadTrees Tests")
 			git(repo, "config", "user.email", "tests@deadtrees.example")
+			self._write_asset_fixtures(repo)
+		self.asset_mount.write_text(str((self.worktree / "assets").resolve()))
 
 		self.bin_dir.mkdir()
 		make_executable(
 			self.bin_dir / "python3",
 			"#!/bin/sh\n"
 			f"echo \"$@\" >> {self.python_log}\n"
+			f"if echo \"$@\" | grep -q processor_asset_preflight.py; then exec {sys.executable} \"$@\"; fi\n"
 			"if echo \"$@\" | grep -q wait-for-idle; then\n"
 			f"  if ( : <&9 ) 2>/dev/null; then echo \"inherited $*\" >> {self.waiter_fd_log}; else echo \"closed $*\" >> {self.waiter_fd_log}; fi\n"
 			"fi\n"
@@ -88,8 +113,15 @@ class DeployHarness:
 			"if echo \"$@\" | grep -q clear-ack && [ -n \"${PROCESSOR_TEST_ACK_PATH:-}\" ]; then\n"
 			"  rm -f \"$PROCESSOR_TEST_ACK_PATH\"\n"
 			"fi\n"
+			"if echo \"$@\" | grep -q 'set-drain.*--preserve-operator-drain' && "
+			"[ -n \"${PROCESSOR_TEST_OPERATOR_DRAIN:-}\" ]; then\n"
+			"  exit 3\n"
+			"fi\n"
 			"if echo \"$@\" | grep -q activation-ready; then\n"
 			"  exit \"${PROCESSOR_TEST_ACTIVATION_READY:-1}\"\n"
+			"fi\n"
+			"if echo \"$@\" | grep -q asset-recovery-pending; then\n"
+			"  exit \"${PROCESSOR_TEST_ASSET_RECOVERY_PENDING:-1}\"\n"
 			"fi\n"
 			"if echo \"$@\" | grep -q worker-health; then\n"
 			"  if [ -e \"${PROCESSOR_TEST_UNHEALTHY_PATH:-}\" ]; then exit 1; fi\n"
@@ -120,6 +152,10 @@ class DeployHarness:
 			"  exit 0\n"
 			"fi\n"
 			"if [ \"$1\" = inspect ]; then\n"
+			"  if echo \"$*\" | grep -q '\\.Mounts'; then\n"
+			f"    cat {self.asset_mount}\n"
+			"    exit 0\n"
+			"  fi\n"
 			f"  if [ -n \"${{PROCESSOR_TEST_INSPECT_FAIL_ONCE:-}}\" ] && [ ! -e {self.inspect_failed_once} ]; then\n"
 			f"    touch {self.inspect_failed_once}\n"
 			"    exit 1\n"
@@ -132,6 +168,7 @@ class DeployHarness:
 			"fi\n"
 			"if [ \"$1\" = compose ] && echo \"$@\" | grep -q ' up '; then\n"
 			f"  touch {self.docker_running}\n"
+			f"  printf '%s' \"${{PROCESSOR_ASSETS_DIR:-{(self.worktree / 'assets').resolve()}}}\" > {self.asset_mount}\n"
 			"fi\n"
 			"if [ \"$1\" = compose ] && echo \"$@\" | grep -q ' build ' && "
 			f"[ -n \"${{PROCESSOR_TEST_BUILD_FAIL_ONCE:-}}\" ] && [ ! -e {self.build_failed_once} ]; then\n"
@@ -152,6 +189,51 @@ class DeployHarness:
 		self.env["PROCESSOR_READINESS_POLL_SECONDS"] = "0"
 		self.env["PROCESSOR_STARTUP_TIMEOUT_SECONDS"] = "2"
 		self.env["PROCESSOR_TEST_UNHEALTHY_PATH"] = str(self.unhealthy_marker)
+
+	@staticmethod
+	def _write_asset_fixtures(repo: Path) -> None:
+		for relative in required_processor_asset_files():
+			path = repo / "assets" / relative
+			path.parent.mkdir(parents=True, exist_ok=True)
+			if path.suffix == ".safetensors":
+				minimum_tensors, required_tensors = processor_model_checkpoint_specs()[path.name]
+				names = [*required_tensors, *(f"fixture.{index}" for index in range(minimum_tensors))]
+				header = json.dumps(
+					{name: {"dtype": "F32", "shape": [0], "data_offsets": [0, 0]} for name in names}
+				).encode()
+				path.write_bytes(struct.pack("<Q", len(header)) + header)
+			elif path.suffix == ".gpkg":
+				layer, required_columns = GEOPACKAGE_SPECS[relative]
+				with closing(sqlite3.connect(path)) as database:
+					with database:
+						database.execute("CREATE TABLE gpkg_contents (table_name TEXT)")
+						database.execute("INSERT INTO gpkg_contents VALUES (?)", (layer,))
+						columns = ", ".join(f'"{column}" TEXT' for column in required_columns)
+						database.execute(f'CREATE TABLE "{layer}" ({columns})')
+			elif path.name == ".zarray":
+				shape, chunks, _ = PHENOLOGY_ARRAY_SPECS[path.parent.name]
+				path.write_text(json.dumps({"shape": shape, "chunks": chunks}))
+			else:
+				path.write_text("fixture\n")
+		consolidated_metadata = {".zgroup": {"zarr_format": 2}, ".zattrs": {}}
+		for name, (shape, _, _) in PHENOLOGY_ARRAY_SPECS.items():
+			array_dir = repo / "assets" / "pheno/modispheno_aggregated_normalized_filled.zarr" / name
+			consolidated_metadata[f"{name}/.zarray"] = json.loads((array_dir / ".zarray").read_text())
+			consolidated_metadata[f"{name}/.zattrs"] = {
+				"_ARRAY_DIMENSIONS": [f"dimension_{index}" for index in range(len(shape))]
+			}
+		(repo / "assets/pheno/modispheno_aggregated_normalized_filled.zarr/.zmetadata").write_text(
+			json.dumps({"metadata": consolidated_metadata, "zarr_consolidated_format": 1})
+		)
+		for relative in required_processor_asset_directories():
+			array_dir = repo / "assets" / relative
+			shape, chunks, omitted_chunks = PHENOLOGY_ARRAY_SPECS[array_dir.name]
+			for coordinates in itertools.product(*(range(math.ceil(size / chunk)) for size, chunk in zip(shape, chunks))):
+				path = array_dir / ".".join(map(str, coordinates))
+				if path.name in omitted_chunks:
+					continue
+				path.parent.mkdir(parents=True, exist_ok=True)
+				path.write_text("fixture\n")
 
 	def push_change(self, text: str) -> str:
 		(self.upstream / "README.md").write_text(text)
@@ -175,6 +257,168 @@ class DeployHarness:
 
 
 class ProcessorAutoDeployTest(unittest.TestCase):
+	def test_missing_assets_drains_and_pauses_before_docker_activation(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			(harness.worktree / "assets" / "models" / "segformer_b5_full_epoch_100.safetensors").unlink()
+
+			result = harness.run_deploy()
+
+			self.assertNotEqual(result.returncode, 0)
+			self.assertTrue((harness.worktree / ".local" / "processor-deploy-paused").exists())
+			self.assertIn("set-drain --reason required processor assets missing", harness.python_log.read_text())
+			docker_log = harness.docker_log.read_text() if harness.docker_log.exists() else ""
+			self.assertNotIn(" build ", docker_log)
+			self.assertNotIn(" up ", docker_log)
+
+	def test_corrupt_consolidated_zarr_metadata_blocks_activation(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			(harness.worktree / 'assets' / PHENOLOGY_ASSET_PATH / '.zmetadata').write_text('not-json')
+
+			result = harness.run_deploy()
+
+			self.assertNotEqual(result.returncode, 0)
+			self.assertIn("set-drain --reason required processor assets missing", harness.python_log.read_text())
+
+	def test_blacklisted_model_stage_does_not_block_activation(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			(harness.worktree / 'assets/models' / AOI_V1_MODEL_CHECKPOINT_NAME).unlink()
+			harness.env['PROCESSOR_TASK_BLACKLIST'] = 'aoi_v1'
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertIn(" build ", harness.docker_log.read_text())
+
+	def test_external_assets_directory_passes_preflight(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			external_assets = harness.tmp_path / "shared-assets"
+			shutil.copytree(harness.worktree / "assets", external_assets)
+			shutil.rmtree(harness.worktree / "assets")
+			harness.env["ASSET_ROOT"] = str(harness.tmp_path)
+			(harness.worktree / ".env").write_text(
+				"ASSET_ROOT=/stale/path\nPROCESSOR_ASSETS_DIR=${ASSET_ROOT}/shared-assets\n"
+			)
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertIn(" build ", harness.docker_log.read_text())
+
+	def test_external_assets_directory_expands_same_file_variable(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			external_assets = harness.tmp_path / "shared-assets"
+			shutil.copytree(harness.worktree / "assets", external_assets)
+			shutil.rmtree(harness.worktree / "assets")
+			(harness.worktree / ".env").write_text(
+				f"ASSET_ROOT={harness.tmp_path}\nPROCESSOR_ASSETS_DIR=${{ASSET_ROOT}}/shared-assets\n"
+			)
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertIn(" build ", harness.docker_log.read_text())
+
+	def test_no_change_asset_mount_migration_recreates_worker(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			self.assertEqual(harness.run_deploy().returncode, 0)
+			external_assets = harness.tmp_path / 'replacement-assets'
+			shutil.copytree(harness.worktree / 'assets', external_assets)
+			harness.env['PROCESSOR_ASSETS_DIR'] = str(external_assets)
+			before = harness.docker_log.read_text().count('up -d --force-recreate processor')
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertEqual(harness.docker_log.read_text().count('up -d --force-recreate processor'), before + 1)
+			self.assertEqual(harness.asset_mount.read_text(), str(external_assets))
+			self.assertIn('clear-drain', harness.python_log.read_text())
+
+	def test_target_release_can_remove_an_obsolete_asset_requirement(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			(harness.worktree / "assets" / "models" / "segformer_b5_full_epoch_100.safetensors").unlink()
+			target_preflight = harness.upstream / "scripts" / "processor_asset_preflight.py"
+			target_preflight.write_text("raise SystemExit(0)\n")
+			git(harness.upstream, "add", "scripts/processor_asset_preflight.py")
+			git(harness.upstream, "commit", "-m", "remove obsolete asset requirement")
+			git(harness.upstream, "push", "origin", "main")
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertEqual(
+				git(harness.worktree, "rev-parse", "HEAD").stdout.strip(),
+				git(harness.upstream, "rev-parse", "HEAD").stdout.strip(),
+			)
+
+	def test_restored_assets_clear_asset_loss_drain_after_resume(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			self.assertEqual(harness.run_deploy().returncode, 0)
+			model = harness.worktree / "assets" / "models" / "segformer_b5_full_epoch_100.safetensors"
+			model_bytes = model.read_bytes()
+			model.unlink()
+
+			self.assertNotEqual(harness.run_deploy().returncode, 0)
+			model.write_bytes(model_bytes)
+			self.assertEqual(harness.run_deploy("--resume").returncode, 0)
+			harness.env["PROCESSOR_TEST_ASSET_RECOVERY_PENDING"] = "0"
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertIn("asset-recovery-pending", harness.python_log.read_text())
+			self.assertIn("clear-drain", harness.python_log.read_text())
+			self.assertIn("up -d --force-recreate processor", harness.docker_log.read_text())
+
+	def test_restored_assets_recover_when_worker_is_unavailable(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			self.assertEqual(harness.run_deploy().returncode, 0)
+			model = harness.worktree / "assets" / "models" / "segformer_b5_full_epoch_100.safetensors"
+			model_bytes = model.read_bytes()
+			model.unlink()
+
+			self.assertNotEqual(harness.run_deploy().returncode, 0)
+			model.write_bytes(model_bytes)
+			harness.docker_running.unlink()
+			self.assertEqual(harness.run_deploy("--resume").returncode, 0)
+			harness.env["PROCESSOR_TEST_ASSET_RECOVERY_PENDING"] = "0"
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertIn("wait-for-idle --allow-unacknowledged-stopped-worker", harness.python_log.read_text())
+			self.assertIn("up -d --force-recreate processor", harness.docker_log.read_text())
+			self.assertIn("clear-drain", harness.python_log.read_text())
+
+	def test_restored_assets_preserve_planned_shutdown(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			self.assertEqual(harness.run_deploy().returncode, 0)
+			harness.env["PROCESSOR_TEST_OPERATOR_DRAIN"] = "1"
+			model = harness.worktree / "assets" / "models" / "segformer_b5_full_epoch_100.safetensors"
+			model_bytes = model.read_bytes()
+			model.unlink()
+			harness.docker_running.unlink()
+			up_count = harness.docker_log.read_text().count("up -d")
+			clear_count = harness.python_log.read_text().count("clear-drain")
+
+			self.assertNotEqual(harness.run_deploy().returncode, 0)
+			model.write_bytes(model_bytes)
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertEqual(harness.docker_log.read_text().count("up -d"), up_count)
+			self.assertEqual(harness.python_log.read_text().count("clear-drain"), clear_count)
+			self.assertFalse(harness.docker_running.exists())
+
 	def test_target_release_runs_its_activation_logic_before_marking_active(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			harness = DeployHarness(Path(tmp_dir))
@@ -242,7 +486,8 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			result = harness.run_deploy()
 
 			self.assertNotEqual(result.returncode, 0)
-			self.assertFalse(harness.python_log.exists())
+			python_log = harness.python_log.read_text() if harness.python_log.exists() else ""
+			self.assertNotIn("set-drain", python_log)
 			self.assertIn(
 				"Refusing deploy because HEAD contains local commits outside origin/main",
 				(harness.worktree / "auto-deploy.log").read_text(),

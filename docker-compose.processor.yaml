@@ -28,7 +28,7 @@ services:
     volumes:
       - ./processor:/app/processor
       - ./shared:/app/shared
-      - ./assets:/app/assets
+      - ${PROCESSOR_ASSETS_DIR:-./assets}:/app/assets:ro
       # Processor->storage keypair. Override PROCESSOR_SSH_KEY_PATH in .env when
       # the default ~/.ssh lives on a filesystem the Docker daemon (root) cannot
       # read — e.g. an NFS home with root-squash; point it at a local-disk path.

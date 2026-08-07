@@ -25,8 +25,6 @@ from processor.src.utils.segmentation import (
     reproject_polygons,
 )
 
-CHECKPOINT_NAME = 'ckpt_weighted_brownweight15_goldentestweight7.safetensors'
-
 # Class indices as defined in the training config (config/base_segformer.yml)
 CLASS_BACKGROUND = 0
 CLASS_TREECOVER = 1

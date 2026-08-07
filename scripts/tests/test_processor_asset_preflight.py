@@ -1,0 +1,174 @@
+import json
+import os
+import sqlite3
+import tempfile
+import unittest
+from contextlib import closing
+from pathlib import Path
+from unittest.mock import patch
+
+from shared.asset_manifest import GADM_ASSET_PATH, PHENOLOGY_ARRAY_SPECS, PHENOLOGY_ASSET_PATH
+from shared.operator_env import load_env_file
+from scripts.processor_asset_preflight import matching_mount, missing_assets, resolve_assets_dir
+
+
+class ProcessorAssetPreflightTest(unittest.TestCase):
+	def test_preflight_follows_canonical_model_checkpoint(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			assets_dir = Path(tmp_dir)
+			with patch('shared.asset_manifest.DEADWOOD_V1_MODEL_CHECKPOINT_NAME', 'replacement.safetensors'):
+				missing = missing_assets(assets_dir)
+
+			self.assertIn(assets_dir / 'models/replacement.safetensors', missing)
+
+	def test_nonempty_partial_phenology_store_is_missing(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			assets_dir = Path(tmp_dir)
+			store = assets_dir / PHENOLOGY_ASSET_PATH
+			store.mkdir(parents=True)
+			(store / '.fixture').write_text('partial\n')
+
+			missing = missing_assets(assets_dir)
+
+			self.assertIn(store / '.zmetadata', missing)
+			self.assertIn(store / 'phenology', missing)
+
+	def test_env_loader_preserves_dollar_pairs_and_shell_precedence(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			env_file = Path(tmp_dir) / '.env'
+			env_file.write_text(
+				'ASSET_ROOT=/from-file\n'
+				'PROCESSOR_ASSETS_DIR=${ASSET_ROOT}/assets\n'
+				'PROCESSOR_PASSWORD=prefix$$suffix\n'
+				"LITERAL_PATH='$ASSET_ROOT/assets'\n"
+				'ESCAPED_PASSWORD="secret\\tvalue\\\\path\\"quote"\n'
+				'COMMENTED_VALUE=secret # rotated\n'
+			)
+			with patch.dict(os.environ, {'ASSET_ROOT': '/from-shell'}):
+				env = load_env_file(env_file)
+
+			self.assertEqual(env['PROCESSOR_ASSETS_DIR'], '/from-shell/assets')
+			self.assertEqual(env['PROCESSOR_PASSWORD'], 'prefix$$suffix')
+			self.assertEqual(env['LITERAL_PATH'], '$ASSET_ROOT/assets')
+			self.assertEqual(env['ESCAPED_PASSWORD'], 'secret\tvalue\\path"quote')
+			self.assertEqual(env['COMMENTED_VALUE'], 'secret')
+
+	def test_empty_shell_assets_override_uses_compose_default(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			repo_dir = Path(tmp_dir)
+			(repo_dir / '.env').write_text('PROCESSOR_ASSETS_DIR=/external/assets\n')
+
+			with patch.dict(os.environ, {'PROCESSOR_ASSETS_DIR': ''}):
+				assets_dir = resolve_assets_dir(repo_dir)
+
+			self.assertEqual(assets_dir, (repo_dir / 'assets').resolve())
+
+	def test_compose_substitution_operators(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			env_file = Path(tmp_dir) / '.env'
+			env_file.write_text(
+				'EMPTY=\n'
+				'SET=/configured\n'
+				'DEFAULT_EMPTY=${EMPTY:-/default}\n'
+				'DEFAULT_UNSET=${UNSET-/default}\n'
+				'KEEP_EMPTY=${EMPTY-/default}\n'
+				'ALTERNATE=${SET:+/alternate}\n'
+				'ALTERNATE_EMPTY=${EMPTY+/alternate}\n'
+			)
+			with patch.dict(os.environ, {}, clear=True):
+				env = load_env_file(env_file)
+
+			self.assertEqual(env['DEFAULT_EMPTY'], '/default')
+			self.assertEqual(env['DEFAULT_UNSET'], '/default')
+			self.assertEqual(env['KEEP_EMPTY'], '')
+			self.assertEqual(env['ALTERNATE'], '/alternate')
+			self.assertEqual(env['ALTERNATE_EMPTY'], '/alternate')
+
+	def test_truncated_nonempty_checkpoint_is_missing(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			assets_dir = Path(tmp_dir)
+			checkpoint = assets_dir / 'models/segformer_b5_full_epoch_100.safetensors'
+			checkpoint.parent.mkdir(parents=True)
+			checkpoint.write_bytes(b'partial')
+
+			missing = missing_assets(assets_dir)
+
+			self.assertIn(checkpoint, missing)
+
+	def test_truncated_nonempty_geopackage_is_missing(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			assets_dir = Path(tmp_dir)
+			geopackage = assets_dir / GADM_ASSET_PATH
+			geopackage.parent.mkdir(parents=True)
+			geopackage.write_bytes(b'SQLite format 3\x00partial')
+
+			missing = missing_assets(assets_dir)
+
+			self.assertIn(geopackage, missing)
+
+	def test_gadm_without_runtime_admin_columns_is_missing(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			assets_dir = Path(tmp_dir)
+			geopackage = assets_dir / GADM_ASSET_PATH
+			geopackage.parent.mkdir(parents=True)
+			with closing(sqlite3.connect(geopackage)) as database:
+				with database:
+					database.execute('CREATE TABLE gpkg_contents (table_name TEXT)')
+					database.execute("INSERT INTO gpkg_contents VALUES ('gadm_410')")
+					database.execute(
+						'CREATE TABLE gadm_410 (geom TEXT, GID_0 TEXT, NAME_0 TEXT, CONTINENT TEXT)'
+					)
+
+			missing = missing_assets(assets_dir)
+
+			self.assertIn(geopackage, missing)
+
+	def test_zarr_with_only_one_chunk_per_array_is_missing(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			assets_dir = Path(tmp_dir)
+			store = assets_dir / PHENOLOGY_ASSET_PATH
+			store.mkdir(parents=True)
+			(store / '.zgroup').write_text('{}')
+			(store / '.zmetadata').write_text('{}')
+			for name, (shape, chunks, _) in PHENOLOGY_ARRAY_SPECS.items():
+				array_dir = store / name
+				array_dir.mkdir()
+				(array_dir / '.zarray').write_text(json.dumps({'shape': shape, 'chunks': chunks}))
+				(array_dir / '.'.join('0' for _ in shape)).write_text('partial')
+
+			missing = missing_assets(assets_dir)
+
+			self.assertIn(store, missing)
+
+	def test_asset_symlink_outside_mounted_root_is_missing(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			root = Path(tmp_dir)
+			assets_dir = root / 'assets'
+			assets_dir.mkdir()
+			external = root / 'external-zgroup'
+			external.write_text('{}')
+			zgroup = assets_dir / PHENOLOGY_ASSET_PATH / '.zgroup'
+			zgroup.parent.mkdir(parents=True)
+			zgroup.symlink_to(external)
+
+			missing = missing_assets(assets_dir)
+
+			self.assertIn(zgroup, missing)
+
+	def test_equivalent_symlink_mount_matches_resolved_asset_root(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			root = Path(tmp_dir)
+			assets_dir = root / 'assets'
+			assets_dir.mkdir()
+			mounted_assets = root / 'configured-assets'
+			mounted_assets.symlink_to(assets_dir)
+
+			self.assertTrue(matching_mount(assets_dir, mounted_assets))
+
+	def test_blacklisted_model_stage_does_not_require_its_checkpoint(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			assets_dir = Path(tmp_dir)
+
+			missing = missing_assets(assets_dir, {'aoi_v1'})
+
+			self.assertNotIn(assets_dir / 'models/b1_50epoch_best_macro_f1.safetensors', missing)

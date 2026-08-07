@@ -10,6 +10,7 @@ ACTIVATED_SHA_FILE="${REPO_DIR}/.local/processor-activated-sha"
 PAUSE_FILE="${REPO_DIR}/.local/processor-deploy-paused"
 LOG_FILE="${REPO_DIR}/auto-deploy.log"
 STATUS_SCRIPT="${REPO_DIR}/scripts/processor_runtime_control.py"
+ASSET_PREFLIGHT_SCRIPT="${REPO_DIR}/scripts/processor_asset_preflight.py"
 COMPOSE_FILE="${REPO_DIR}/docker-compose.processor.yaml"
 BRANCH="${PROCESSOR_DEPLOY_BRANCH:-main}"
 DRAIN_TIMEOUT_SECONDS="${PROCESSOR_DRAIN_TIMEOUT_SECONDS:-43200}"
@@ -65,6 +66,40 @@ require_clean_checkout() {
 
 source "${SCRIPT_DIR}/lib/processor_runtime.sh"
 
+processor_asset_mount_matches() {
+	local container_id
+	local mounted_assets
+
+	container_id="$(docker compose -f "${COMPOSE_FILE}" ps -q processor 2>/dev/null || true)"
+	if [ -z "${container_id}" ]; then
+		return 1
+	fi
+	mounted_assets="$(
+		docker inspect "${container_id}" \
+			--format '{{range .Mounts}}{{if eq .Destination "/app/assets"}}{{.Source}}{{end}}{{end}}' \
+			2>/dev/null || true
+	)"
+	[ -n "${mounted_assets}" ] && python3 "${ASSET_PREFLIGHT_SCRIPT}" --mount-matches "${mounted_assets}"
+}
+
+recreate_processor_for_assets() {
+	drain_set=1
+	wait_for_drain_with_recovery
+	python3 "${STATUS_SCRIPT}" clear-ack >> "${LOG_FILE}" 2>&1
+	PROCESSOR_RELEASE_SHA="${remote_sha}" \
+		docker compose -f "${COMPOSE_FILE}" up -d --force-recreate processor \
+		>> "${LOG_FILE}" 2>&1
+	python3 "${STATUS_SCRIPT}" wait-for-idle \
+		--expected-release-sha "${remote_sha}" \
+		--timeout-seconds "${STARTUP_TIMEOUT_SECONDS}" \
+		--poll-seconds "${READINESS_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
+	wait_for_processor_running
+	inspect_processor_runtime
+	python3 "${STATUS_SCRIPT}" record-worker-id >> "${LOG_FILE}" 2>&1
+	python3 "${STATUS_SCRIPT}" clear-drain >> "${LOG_FILE}" 2>&1
+	drain_set=0
+}
+
 if [ "${PROCESSOR_RUNTIME_LOCK_HELD:-0}" != "1" ]; then
 	exec 9<>"${LOCK_FILE}"
 	if ! flock -n 9; then
@@ -98,6 +133,17 @@ if [ "${DEPLOY_PHASE}" = "activate" ]; then
 		log "Refusing activation because HEAD ${deployed_sha} does not match target ${remote_sha:-missing}"
 		exit 1
 	fi
+	if ! python3 "${ASSET_PREFLIGHT_SCRIPT}" >> "${LOG_FILE}" 2>&1; then
+		log "Refusing processor activation because required assets are missing"
+		if request_automation_drain "required processor assets missing"; then
+			:
+		elif [ "$?" -eq 3 ]; then
+			log "Preserved existing operator drain while refusing activation"
+		else
+			exit 1
+		fi
+		exit 1
+	fi
 	# Continue below with the target release's freshly loaded activation logic.
 else
 	if [ "${RESUME_DEPLOY}" -eq 1 ]; then
@@ -125,10 +171,34 @@ else
 	activated_sha="$(cat "${ACTIVATED_SHA_FILE}" 2>/dev/null || true)"
 
 	if [ "${local_sha}" = "${remote_sha}" ] && [ "${activated_sha}" = "${remote_sha}" ]; then
-		if python3 "${STATUS_SCRIPT}" activation-ready --release-sha "${remote_sha}" >> "${LOG_FILE}" 2>&1; then
+		if ! python3 "${ASSET_PREFLIGHT_SCRIPT}" >> "${LOG_FILE}" 2>&1; then
+			log "Draining active release because required processor assets are missing"
+			if request_automation_drain "required processor assets missing"; then
+				drain_set=1
+			elif [ "$?" -eq 3 ]; then
+				log "Preserved existing operator drain while required assets are missing"
+			else
+				exit 1
+			fi
+			exit 1
+		fi
+		if ! processor_asset_mount_matches; then
+			log "Recreating processor because the configured asset mount changed"
+			if request_automation_drain "required processor assets missing"; then
+				recreate_processor_for_assets
+				log "Recreated processor with the configured asset mount"
+			elif [ "$?" -eq 3 ]; then
+				log "Preserved existing operator drain while the configured asset mount changed"
+			else
+				exit 1
+			fi
+		elif python3 "${STATUS_SCRIPT}" activation-ready --release-sha "${remote_sha}" >> "${LOG_FILE}" 2>&1; then
 			wait_for_processor_running
 			python3 "${STATUS_SCRIPT}" clear-drain >> "${LOG_FILE}" 2>&1
 			log "Completed interrupted activation for ${remote_sha}"
+		elif python3 "${STATUS_SCRIPT}" asset-recovery-pending >> "${LOG_FILE}" 2>&1; then
+			recreate_processor_for_assets
+			log "Recovered processor after restoring required assets"
 		else
 			log "No changes"
 		fi
@@ -137,7 +207,14 @@ else
 
 	log "Preparing deploy from ${local_sha} to ${remote_sha}"
 
-	python3 "${STATUS_SCRIPT}" set-drain --reason "auto-deploy ${remote_sha}" >> "${LOG_FILE}" 2>&1
+	if request_automation_drain "auto-deploy ${remote_sha}"; then
+		:
+	elif [ "$?" -eq 3 ]; then
+		log "Skipping deploy because an operator drain is active"
+		exit 0
+	else
+		exit 1
+	fi
 	drain_set=1
 	wait_for_drain_with_recovery
 

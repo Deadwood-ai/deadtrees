@@ -1,7 +1,7 @@
 from pathlib import Path
 from shared.logger import logger
 from shared.logging import LogContext, LogCategory
-from shared.models import LabelDataEnum
+from shared.models import DEADWOOD_V1_MODEL_CHECKPOINT_NAME, LabelDataEnum
 from shared.labels import delete_model_prediction_labels
 from shared.db import login
 from shared.settings import settings
@@ -15,7 +15,7 @@ from ..utils.segmentation import polygons_to_multipolygon_geojson, reproject_pol
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 ASSETS_DIR = PROJECT_ROOT / 'assets'
 
-MODEL_PATH = str(ASSETS_DIR / 'models' / 'segformer_b5_full_epoch_100.safetensors')
+MODEL_PATH = str(ASSETS_DIR / 'models' / DEADWOOD_V1_MODEL_CHECKPOINT_NAME)
 MODULE_NAME = 'deadwood_segmentation_v1_moehring'
 CHECKPOINT_NAME = Path(MODEL_PATH).name
 MODEL_CONFIG = {

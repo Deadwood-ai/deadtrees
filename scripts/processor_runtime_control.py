@@ -15,9 +15,15 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from shared.operator_env import load_env_file
+
 QUEUE_TABLE = 'v2_queue'
 QUEUE_POSITION_TABLE = 'v2_queue_positions'
 DEFAULT_CONTROL_DIR = '.local/processor-control'
+AUTOMATION_DRAIN_REASONS = {'docker-maintenance', 'required processor assets missing'}
 DEFAULT_ACTIVATED_WORKER_ID_FILE = '.local/processor-activated-worker-id'
 DEFAULT_PROCESSOR_USERNAME = 'processor@deadtrees.earth'
 
@@ -26,26 +32,12 @@ class AuthenticationExpiredError(RuntimeError):
 	pass
 
 
-def _load_env_file(path: Path) -> dict[str, str]:
-	env: dict[str, str] = {}
-	if not path.exists():
-		return env
-
-	for raw_line in path.read_text().splitlines():
-		line = raw_line.strip()
-		if not line or line.startswith('#') or '=' not in line:
-			continue
-		key, value = line.split('=', 1)
-		value = value.strip()
-		if value and value[0] == value[-1] and value[0] in {'"', "'"}:
-			value = value[1:-1]
-		env[key.strip()] = os.path.expandvars(value)
-	return env
+def _is_automation_drain_reason(reason: object) -> bool:
+	return isinstance(reason, str) and (reason in AUTOMATION_DRAIN_REASONS or reason.startswith('auto-deploy '))
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 ENV = {
-	**_load_env_file(REPO_ROOT / '.env'),
+	**load_env_file(REPO_ROOT / '.env'),
 	**os.environ,
 }
 
@@ -294,6 +286,11 @@ def cmd_record_worker_id(_: argparse.Namespace) -> int:
 
 
 def cmd_set_drain(args: argparse.Namespace) -> int:
+	if args.preserve_operator_drain:
+		existing_request, _ = _load_drain_state()
+		if existing_request is not None and not _is_automation_drain_reason(existing_request.get('reason')):
+			print(json.dumps({'preserved_drain_request': existing_request}, indent=2))
+			return 3
 	_clear_file(_drain_ack_path())
 	payload = {
 		'request_id': str(uuid.uuid4()),
@@ -354,6 +351,14 @@ def cmd_activation_ready(args: argparse.Namespace) -> int:
 	if state['active_for_worker'] or state['active_for_previous_worker'] or state['active_without_owner']:
 		return 1
 	print(json.dumps({'activation_ready': True, 'release_sha': args.release_sha}, indent=2))
+	return 0
+
+
+def cmd_asset_recovery_pending(_: argparse.Namespace) -> int:
+	request, _ = _load_drain_state()
+	if request is None or request.get('reason') != 'required processor assets missing':
+		return 1
+	print(json.dumps({'asset_recovery_pending': True}, indent=2))
 	return 0
 
 
@@ -463,6 +468,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 	set_drain = subparsers.add_parser('set-drain', help='Request a drain so this worker stops claiming new tasks.')
 	set_drain.add_argument('--reason', required=True, help='Short operator reason for the drain request.')
+	set_drain.add_argument(
+		'--preserve-operator-drain',
+		action='store_true',
+		help='Return 3 without changing a drain that was not created by processor automation.',
+	)
 	set_drain.set_defaults(func=cmd_set_drain)
 
 	clear_drain = subparsers.add_parser('clear-drain', help='Clear the drain request so the worker can resume.')
@@ -483,6 +493,12 @@ def build_parser() -> argparse.ArgumentParser:
 	)
 	activation_ready.add_argument('--release-sha', required=True)
 	activation_ready.set_defaults(func=cmd_activation_ready)
+
+	asset_recovery_pending = subparsers.add_parser(
+		'asset-recovery-pending',
+		help='Verify that the current drain was caused by missing processor assets.',
+	)
+	asset_recovery_pending.set_defaults(func=cmd_asset_recovery_pending)
 
 	wait_for_idle = subparsers.add_parser(
 		'wait-for-idle',
