@@ -68,10 +68,8 @@ source "${SCRIPT_DIR}/lib/processor_runtime.sh"
 
 processor_asset_mount_matches() {
 	local container_id
-	local expected_assets
 	local mounted_assets
 
-	expected_assets="$(python3 "${ASSET_PREFLIGHT_SCRIPT}" --print-assets-dir)"
 	container_id="$(docker compose -f "${COMPOSE_FILE}" ps -q processor 2>/dev/null || true)"
 	if [ -z "${container_id}" ]; then
 		return 1
@@ -81,7 +79,7 @@ processor_asset_mount_matches() {
 			--format '{{range .Mounts}}{{if eq .Destination "/app/assets"}}{{.Source}}{{end}}{{end}}' \
 			2>/dev/null || true
 	)"
-	[ -n "${mounted_assets}" ] && [ "${mounted_assets}" = "${expected_assets}" ]
+	[ -n "${mounted_assets}" ] && python3 "${ASSET_PREFLIGHT_SCRIPT}" --mount-matches "${mounted_assets}"
 }
 
 recreate_processor_for_assets() {

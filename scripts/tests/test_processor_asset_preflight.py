@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from shared.asset_manifest import GADM_ASSET_PATH, PHENOLOGY_ARRAY_SPECS, PHENOLOGY_ASSET_PATH
 from shared.operator_env import load_env_file
-from scripts.processor_asset_preflight import missing_assets, resolve_assets_dir
+from scripts.processor_asset_preflight import matching_mount, missing_assets, resolve_assets_dir
 
 
 class ProcessorAssetPreflightTest(unittest.TestCase):
@@ -154,6 +154,16 @@ class ProcessorAssetPreflightTest(unittest.TestCase):
 			missing = missing_assets(assets_dir)
 
 			self.assertIn(zgroup, missing)
+
+	def test_equivalent_symlink_mount_matches_resolved_asset_root(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			root = Path(tmp_dir)
+			assets_dir = root / 'assets'
+			assets_dir.mkdir()
+			mounted_assets = root / 'configured-assets'
+			mounted_assets.symlink_to(assets_dir)
+
+			self.assertTrue(matching_mount(assets_dir, mounted_assets))
 
 	def test_blacklisted_model_stage_does_not_require_its_checkpoint(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:

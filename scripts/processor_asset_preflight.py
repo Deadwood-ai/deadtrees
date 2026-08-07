@@ -135,6 +135,10 @@ def resolve_assets_dir(repo_dir: Path) -> Path:
 	return assets_dir.resolve()
 
 
+def matching_mount(assets_dir: Path, mounted_assets: Path) -> bool:
+	return mounted_assets.resolve() == assets_dir.resolve()
+
+
 def missing_assets(assets_dir: Path, task_blacklist: set[str] | frozenset[str] = frozenset()) -> list[Path]:
 	missing = [
 		assets_dir / relative
@@ -181,8 +185,13 @@ def main() -> int:
 	if sys.argv[1:] == ['--print-assets-dir']:
 		print(assets_dir)
 		return 0
+	if len(sys.argv) == 3 and sys.argv[1] == '--mount-matches':
+		return 0 if matching_mount(assets_dir, Path(sys.argv[2])) else 1
 	if len(sys.argv) > 1:
-		print('Usage: processor_asset_preflight.py [--print-assets-dir]', file=sys.stderr)
+		print(
+			'Usage: processor_asset_preflight.py [--print-assets-dir | --mount-matches PATH]',
+			file=sys.stderr,
+		)
 		return 2
 	env_file = load_env_file(repo_dir / '.env')
 	configured_blacklist = os.environ.get('PROCESSOR_TASK_BLACKLIST', env_file.get('PROCESSOR_TASK_BLACKLIST', ''))
