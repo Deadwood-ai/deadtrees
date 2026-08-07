@@ -66,6 +66,42 @@ require_clean_checkout() {
 
 source "${SCRIPT_DIR}/lib/processor_runtime.sh"
 
+processor_asset_mount_matches() {
+	local container_id
+	local expected_assets
+	local mounted_assets
+
+	expected_assets="$(python3 "${ASSET_PREFLIGHT_SCRIPT}" --print-assets-dir)"
+	container_id="$(docker compose -f "${COMPOSE_FILE}" ps -q processor 2>/dev/null || true)"
+	if [ -z "${container_id}" ]; then
+		return 1
+	fi
+	mounted_assets="$(
+		docker inspect "${container_id}" \
+			--format '{{range .Mounts}}{{if eq .Destination "/app/assets"}}{{.Source}}{{end}}{{end}}' \
+			2>/dev/null || true
+	)"
+	[ -n "${mounted_assets}" ] && [ "${mounted_assets}" = "${expected_assets}" ]
+}
+
+recreate_processor_for_assets() {
+	drain_set=1
+	wait_for_drain_with_recovery
+	python3 "${STATUS_SCRIPT}" clear-ack >> "${LOG_FILE}" 2>&1
+	PROCESSOR_RELEASE_SHA="${remote_sha}" \
+		docker compose -f "${COMPOSE_FILE}" up -d --force-recreate processor \
+		>> "${LOG_FILE}" 2>&1
+	python3 "${STATUS_SCRIPT}" wait-for-idle \
+		--expected-release-sha "${remote_sha}" \
+		--timeout-seconds "${STARTUP_TIMEOUT_SECONDS}" \
+		--poll-seconds "${READINESS_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
+	wait_for_processor_running
+	inspect_processor_runtime
+	python3 "${STATUS_SCRIPT}" record-worker-id >> "${LOG_FILE}" 2>&1
+	python3 "${STATUS_SCRIPT}" clear-drain >> "${LOG_FILE}" 2>&1
+	drain_set=0
+}
+
 if [ "${PROCESSOR_RUNTIME_LOCK_HELD:-0}" != "1" ]; then
 	exec 9<>"${LOCK_FILE}"
 	if ! flock -n 9; then
@@ -148,24 +184,22 @@ else
 			fi
 			exit 1
 		fi
-		if python3 "${STATUS_SCRIPT}" activation-ready --release-sha "${remote_sha}" >> "${LOG_FILE}" 2>&1; then
+		if ! processor_asset_mount_matches; then
+			log "Recreating processor because the configured asset mount changed"
+			if request_automation_drain "required processor assets missing"; then
+				recreate_processor_for_assets
+				log "Recreated processor with the configured asset mount"
+			elif [ "$?" -eq 3 ]; then
+				log "Preserved existing operator drain while the configured asset mount changed"
+			else
+				exit 1
+			fi
+		elif python3 "${STATUS_SCRIPT}" activation-ready --release-sha "${remote_sha}" >> "${LOG_FILE}" 2>&1; then
 			wait_for_processor_running
 			python3 "${STATUS_SCRIPT}" clear-drain >> "${LOG_FILE}" 2>&1
 			log "Completed interrupted activation for ${remote_sha}"
 		elif python3 "${STATUS_SCRIPT}" asset-recovery-pending >> "${LOG_FILE}" 2>&1; then
-			drain_set=1
-			wait_for_drain_with_recovery
-			python3 "${STATUS_SCRIPT}" clear-ack >> "${LOG_FILE}" 2>&1
-			PROCESSOR_RELEASE_SHA="${remote_sha}" docker compose -f "${COMPOSE_FILE}" up -d --force-recreate processor >> "${LOG_FILE}" 2>&1
-			python3 "${STATUS_SCRIPT}" wait-for-idle \
-				--expected-release-sha "${remote_sha}" \
-				--timeout-seconds "${STARTUP_TIMEOUT_SECONDS}" \
-				--poll-seconds "${READINESS_POLL_SECONDS}" >> "${LOG_FILE}" 2>&1
-			wait_for_processor_running
-			inspect_processor_runtime
-			python3 "${STATUS_SCRIPT}" record-worker-id >> "${LOG_FILE}" 2>&1
-			python3 "${STATUS_SCRIPT}" clear-drain >> "${LOG_FILE}" 2>&1
-			drain_set=0
+			recreate_processor_for_assets
 			log "Recovered processor after restoring required assets"
 		else
 			log "No changes"

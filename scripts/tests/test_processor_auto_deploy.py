@@ -59,6 +59,7 @@ class DeployHarness:
 		self.python_log = tmp_path / "python.log"
 		self.docker_log = tmp_path / "docker.log"
 		self.docker_running = tmp_path / "docker-running"
+		self.asset_mount = tmp_path / "docker-asset-mount"
 		self.inspect_failed_once = tmp_path / "inspect-failed-once"
 		self.build_failed_once = tmp_path / "build-failed-once"
 		self.activation_write_failed_once = tmp_path / "activation-write-failed-once"
@@ -93,6 +94,7 @@ class DeployHarness:
 			git(repo, "config", "user.name", "DeadTrees Tests")
 			git(repo, "config", "user.email", "tests@deadtrees.example")
 			self._write_asset_fixtures(repo)
+		self.asset_mount.write_text(str((self.worktree / "assets").resolve()))
 
 		self.bin_dir.mkdir()
 		make_executable(
@@ -150,6 +152,10 @@ class DeployHarness:
 			"  exit 0\n"
 			"fi\n"
 			"if [ \"$1\" = inspect ]; then\n"
+			"  if echo \"$*\" | grep -q '\\.Mounts'; then\n"
+			f"    cat {self.asset_mount}\n"
+			"    exit 0\n"
+			"  fi\n"
 			f"  if [ -n \"${{PROCESSOR_TEST_INSPECT_FAIL_ONCE:-}}\" ] && [ ! -e {self.inspect_failed_once} ]; then\n"
 			f"    touch {self.inspect_failed_once}\n"
 			"    exit 1\n"
@@ -162,6 +168,7 @@ class DeployHarness:
 			"fi\n"
 			"if [ \"$1\" = compose ] && echo \"$@\" | grep -q ' up '; then\n"
 			f"  touch {self.docker_running}\n"
+			f"  printf '%s' \"${{PROCESSOR_ASSETS_DIR:-{(self.worktree / 'assets').resolve()}}}\" > {self.asset_mount}\n"
 			"fi\n"
 			"if [ \"$1\" = compose ] && echo \"$@\" | grep -q ' build ' && "
 			f"[ -n \"${{PROCESSOR_TEST_BUILD_FAIL_ONCE:-}}\" ] && [ ! -e {self.build_failed_once} ]; then\n"
@@ -315,6 +322,22 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 
 			self.assertEqual(result.returncode, 0, result.stderr)
 			self.assertIn(" build ", harness.docker_log.read_text())
+
+	def test_no_change_asset_mount_migration_recreates_worker(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			self.assertEqual(harness.run_deploy().returncode, 0)
+			external_assets = harness.tmp_path / 'replacement-assets'
+			shutil.copytree(harness.worktree / 'assets', external_assets)
+			harness.env['PROCESSOR_ASSETS_DIR'] = str(external_assets)
+			before = harness.docker_log.read_text().count('up -d --force-recreate processor')
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertEqual(harness.docker_log.read_text().count('up -d --force-recreate processor'), before + 1)
+			self.assertEqual(harness.asset_mount.read_text(), str(external_assets))
+			self.assertIn('clear-drain', harness.python_log.read_text())
 
 	def test_target_release_can_remove_an_obsolete_asset_requirement(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:

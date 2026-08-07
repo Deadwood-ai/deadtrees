@@ -178,6 +178,12 @@ def missing_assets(assets_dir: Path, task_blacklist: set[str] | frozenset[str] =
 def main() -> int:
 	repo_dir = REPO_ROOT
 	assets_dir = resolve_assets_dir(repo_dir)
+	if sys.argv[1:] == ['--print-assets-dir']:
+		print(assets_dir)
+		return 0
+	if len(sys.argv) > 1:
+		print('Usage: processor_asset_preflight.py [--print-assets-dir]', file=sys.stderr)
+		return 2
 	env_file = load_env_file(repo_dir / '.env')
 	configured_blacklist = os.environ.get('PROCESSOR_TASK_BLACKLIST', env_file.get('PROCESSOR_TASK_BLACKLIST', ''))
 	task_blacklist = {value.strip() for value in configured_blacklist.split(',') if value.strip()}
