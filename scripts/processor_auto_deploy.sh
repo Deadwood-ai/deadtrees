@@ -10,6 +10,7 @@ ACTIVATED_SHA_FILE="${REPO_DIR}/.local/processor-activated-sha"
 PAUSE_FILE="${REPO_DIR}/.local/processor-deploy-paused"
 LOG_FILE="${REPO_DIR}/auto-deploy.log"
 STATUS_SCRIPT="${REPO_DIR}/scripts/processor_runtime_control.py"
+ASSET_PREFLIGHT_SCRIPT="${REPO_DIR}/scripts/processor_asset_preflight.py"
 COMPOSE_FILE="${REPO_DIR}/docker-compose.processor.yaml"
 BRANCH="${PROCESSOR_DEPLOY_BRANCH:-main}"
 DRAIN_TIMEOUT_SECONDS="${PROCESSOR_DRAIN_TIMEOUT_SECONDS:-43200}"
@@ -89,6 +90,13 @@ on_exit() {
 trap on_exit EXIT
 
 cd "${REPO_DIR}"
+
+if ! python3 "${ASSET_PREFLIGHT_SCRIPT}" >> "${LOG_FILE}" 2>&1; then
+	log "Refusing processor activation because required assets are missing"
+	python3 "${STATUS_SCRIPT}" set-drain --reason "required processor assets missing" >> "${LOG_FILE}" 2>&1
+	drain_set=1
+	exit 1
+fi
 
 if [ "${DEPLOY_PHASE}" = "activate" ]; then
 	remote_sha="${DEPLOY_TARGET_SHA}"

@@ -53,7 +53,7 @@ The production compose file expects these host resources to exist:
 
 - repository checkout mounted into the processor image during local build
 - `./processor` and `./shared`
-- `./assets`
+- `${PROCESSOR_ASSETS_DIR:-./assets}`, mounted read-only at `/app/assets`
 - `/data`
 - gitignored `.local/processor-control`, mounted at `/processor-control`
 - Docker socket for ODM and model helper containers
@@ -70,6 +70,12 @@ bind-mounts that small directory into the worker; processing output does not go
 there. Set `PROCESSOR_CONTROL_DIR` only when the host needs a different source
 path.
 
+When code is deployed from a separate operator checkout, set
+`PROCESSOR_ASSETS_DIR` in `.env` to the existing populated asset directory.
+The guarded auto-deploy runs `scripts/processor_asset_preflight.py` before it
+starts or resumes the worker. A missing model or metadata dataset leaves the
+worker drained and pauses automatic deployment.
+
 ## Bring-Up
 
 From the production checkout on the new worker host:
@@ -80,6 +86,7 @@ git fetch origin main
 git checkout main
 git pull --ff-only origin main
 mkdir -p .local/processor-control
+python3 scripts/processor_asset_preflight.py
 docker compose -f docker-compose.processor.yaml build processor tcd
 docker compose -f docker-compose.processor.yaml up -d processor
 ```

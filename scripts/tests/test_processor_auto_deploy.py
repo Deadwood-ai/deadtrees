@@ -2,6 +2,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -57,10 +58,11 @@ class DeployHarness:
 		(self.seed / "scripts" / "lib").mkdir()
 		(self.seed / "README.md").write_text("initial\n")
 		(self.seed / "docker-compose.processor.yaml").write_text("services: {}\n")
-		(self.seed / ".gitignore").write_text("/.local\n.env\n")
+		(self.seed / ".gitignore").write_text("/.local\n/assets\n.env\n")
 		shutil.copy2(SCRIPT, self.seed / "scripts" / "processor_auto_deploy.sh")
 		shutil.copy2(SCRIPT.parent / "lib" / "processor_runtime.sh", self.seed / "scripts" / "lib" / "processor_runtime.sh")
 		(self.seed / "scripts" / "processor_runtime_control.py").write_text("# test stub\n")
+		shutil.copy2(SCRIPT.parent / "processor_asset_preflight.py", self.seed / "scripts" / "processor_asset_preflight.py")
 		git(self.seed, "add", ".")
 		git(self.seed, "commit", "-m", "initial")
 		git(self.seed, "remote", "add", "origin", str(self.origin))
@@ -71,12 +73,14 @@ class DeployHarness:
 		for repo in (self.worktree, self.upstream):
 			git(repo, "config", "user.name", "DeadTrees Tests")
 			git(repo, "config", "user.email", "tests@deadtrees.example")
+			self._write_asset_fixtures(repo)
 
 		self.bin_dir.mkdir()
 		make_executable(
 			self.bin_dir / "python3",
 			"#!/bin/sh\n"
 			f"echo \"$@\" >> {self.python_log}\n"
+			f"if echo \"$@\" | grep -q processor_asset_preflight.py; then exec {sys.executable} \"$@\"; fi\n"
 			"if echo \"$@\" | grep -q wait-for-idle; then\n"
 			f"  if ( : <&9 ) 2>/dev/null; then echo \"inherited $*\" >> {self.waiter_fd_log}; else echo \"closed $*\" >> {self.waiter_fd_log}; fi\n"
 			"fi\n"
@@ -153,6 +157,20 @@ class DeployHarness:
 		self.env["PROCESSOR_STARTUP_TIMEOUT_SECONDS"] = "2"
 		self.env["PROCESSOR_TEST_UNHEALTHY_PATH"] = str(self.unhealthy_marker)
 
+	@staticmethod
+	def _write_asset_fixtures(repo: Path) -> None:
+		for relative in (
+			"models/segformer_b5_full_epoch_100.safetensors",
+			"models/ckpt_weighted_brownweight15_goldentestweight7.safetensors",
+			"models/b1_50epoch_best_macro_f1.safetensors",
+			"gadm/gadm_410.gpkg",
+			"biom/terres_ecosystems.gpkg",
+			"pheno/modispheno_aggregated_normalized_filled.zarr/.zgroup",
+		):
+			path = repo / "assets" / relative
+			path.parent.mkdir(parents=True, exist_ok=True)
+			path.write_text("fixture\n")
+
 	def push_change(self, text: str) -> str:
 		(self.upstream / "README.md").write_text(text)
 		git(self.upstream, "add", "README.md")
@@ -175,6 +193,33 @@ class DeployHarness:
 
 
 class ProcessorAutoDeployTest(unittest.TestCase):
+	def test_missing_assets_drains_and_pauses_before_docker_activation(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			(harness.worktree / "assets" / "models" / "segformer_b5_full_epoch_100.safetensors").unlink()
+
+			result = harness.run_deploy()
+
+			self.assertNotEqual(result.returncode, 0)
+			self.assertTrue((harness.worktree / ".local" / "processor-deploy-paused").exists())
+			self.assertIn("set-drain --reason required processor assets missing", harness.python_log.read_text())
+			docker_log = harness.docker_log.read_text() if harness.docker_log.exists() else ""
+			self.assertNotIn(" build ", docker_log)
+			self.assertNotIn(" up ", docker_log)
+
+	def test_external_assets_directory_passes_preflight(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			external_assets = harness.tmp_path / "shared-assets"
+			shutil.copytree(harness.worktree / "assets", external_assets)
+			shutil.rmtree(harness.worktree / "assets")
+			(harness.worktree / ".env").write_text(f"PROCESSOR_ASSETS_DIR={external_assets}\n")
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertIn(" build ", harness.docker_log.read_text())
+
 	def test_target_release_runs_its_activation_logic_before_marking_active(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			harness = DeployHarness(Path(tmp_dir))
@@ -242,7 +287,7 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			result = harness.run_deploy()
 
 			self.assertNotEqual(result.returncode, 0)
-			self.assertFalse(harness.python_log.exists())
+			self.assertNotIn("set-drain", harness.python_log.read_text())
 			self.assertIn(
 				"Refusing deploy because HEAD contains local commits outside origin/main",
 				(harness.worktree / "auto-deploy.log").read_text(),
