@@ -1,6 +1,8 @@
 from datetime import date
 from html import escape
 
+from shared.settings import settings
+
 
 ACCOUNT_URL = 'https://deadtrees.earth/profile'
 
@@ -18,11 +20,15 @@ def dataset_failed_email(
 	file_name: str,
 	error_message: str | None = None,
 	*,
-	include_holiday_note: bool = False,
+	today: date | None = None,
 ) -> tuple[str, str, str]:
 	"""Return a user-safe failure email without exposing processor internals."""
 	safe_file_name = escape(file_name)
 	subject = f'Dataset {dataset_id} - Processing Failed'
+	include_holiday_note = processing_failure_holiday_note_is_active(
+		settings.PROCESSING_FAILURE_EMAIL_HOLIDAY_NOTE_UNTIL,
+		today=today,
+	)
 	holiday_note_text = (
 		'\n\nA note on our current availability\n\n'
 		'Most of our team are currently on holiday, so our follow-up may take longer than usual. '

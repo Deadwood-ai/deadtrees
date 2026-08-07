@@ -6,11 +6,7 @@ from typing import Any
 from shared.db import use_service_client
 from shared.models import QueueTask
 from shared.notifications.email import send_email
-from shared.notifications.templates import (
-	dataset_completed_email,
-	dataset_failed_email,
-	processing_failure_holiday_note_is_active,
-)
+from shared.notifications.templates import dataset_completed_email, dataset_failed_email
 from shared.settings import settings
 
 
@@ -172,13 +168,7 @@ def _event_payloads(
 def _render_event(event_type: ProcessingNotificationType, dataset_id: int, file_name: str):
 	if event_type == ProcessingNotificationType.completed:
 		return dataset_completed_email(dataset_id, file_name)
-	return dataset_failed_email(
-		dataset_id,
-		file_name,
-		include_holiday_note=processing_failure_holiday_note_is_active(
-			settings.PROCESSING_FAILURE_EMAIL_HOLIDAY_NOTE_UNTIL
-		),
-	)
+	return dataset_failed_email(dataset_id, file_name)
 
 
 def _claim_event(client, event: dict[str, Any]) -> dict[str, Any] | None:
