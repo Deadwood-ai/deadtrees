@@ -6,17 +6,11 @@ import os
 import sys
 from pathlib import Path
 
-from processor_runtime_control import load_env_file
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
 
-
-REQUIRED_FILES = (
-	'models/segformer_b5_full_epoch_100.safetensors',
-	'models/ckpt_weighted_brownweight15_goldentestweight7.safetensors',
-	'models/b1_50epoch_best_macro_f1.safetensors',
-	'gadm/gadm_410.gpkg',
-	'biom/terres_ecosystems.gpkg',
-)
-REQUIRED_DIRECTORIES = ('pheno/modispheno_aggregated_normalized_filled.zarr',)
+from shared import asset_manifest
+from shared.operator_env import load_env_file
 
 
 def resolve_assets_dir(repo_dir: Path) -> Path:
@@ -30,19 +24,19 @@ def resolve_assets_dir(repo_dir: Path) -> Path:
 def missing_assets(assets_dir: Path) -> list[Path]:
 	missing = [
 		assets_dir / relative
-		for relative in REQUIRED_FILES
+		for relative in asset_manifest.required_processor_asset_files()
 		if not (assets_dir / relative).is_file() or (assets_dir / relative).stat().st_size == 0
 	]
 	missing.extend(
 		assets_dir / relative
-		for relative in REQUIRED_DIRECTORIES
+		for relative in asset_manifest.required_processor_asset_directories()
 		if not (assets_dir / relative).is_dir() or not any((assets_dir / relative).iterdir())
 	)
 	return missing
 
 
 def main() -> int:
-	repo_dir = Path(__file__).resolve().parents[1]
+	repo_dir = REPO_ROOT
 	assets_dir = resolve_assets_dir(repo_dir)
 	missing = missing_assets(assets_dir)
 	if missing:

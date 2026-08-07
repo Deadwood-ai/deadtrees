@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from shared.asset_manifest import required_processor_asset_directories, required_processor_asset_files
+
 
 SCRIPT = Path(__file__).parents[1] / "processor_docker_maintenance.sh"
 SNAP_CONTROL_SCRIPT = Path(__file__).parents[1] / "processor_snap_control.sh"
@@ -34,12 +36,15 @@ class MaintenanceHarness:
 		self.repo.mkdir()
 		(self.repo / "scripts").mkdir()
 		(self.repo / "scripts" / "lib").mkdir()
+		(self.repo / "shared").mkdir()
 		(self.repo / "docker-compose.processor.yaml").write_text("services: {}\n")
 		(self.repo / ".gitignore").write_text("/.local\n/assets\n__pycache__/\n")
 		shutil.copy2(SCRIPT, self.repo / "scripts" / "processor_docker_maintenance.sh")
 		shutil.copy2(SCRIPT.parent / "lib" / "processor_runtime.sh", self.repo / "scripts" / "lib" / "processor_runtime.sh")
 		shutil.copy2(SCRIPT.parent / "processor_runtime_control.py", self.repo / "scripts" / "processor_runtime_control.py")
 		shutil.copy2(SCRIPT.parent / "processor_asset_preflight.py", self.repo / "scripts" / "processor_asset_preflight.py")
+		shutil.copy2(SCRIPT.parents[1] / "shared" / "operator_env.py", self.repo / "shared" / "operator_env.py")
+		shutil.copy2(SCRIPT.parents[1] / "shared" / "asset_manifest.py", self.repo / "shared" / "asset_manifest.py")
 		run("git", "init", "--initial-branch=main", cwd=self.repo)
 		run("git", "config", "user.name", "DeadTrees Tests", cwd=self.repo)
 		run("git", "config", "user.email", "tests@deadtrees.example", cwd=self.repo)
@@ -108,15 +113,12 @@ class MaintenanceHarness:
 		self.env["PROCESSOR_SNAP_CONTROL"] = str(self.bin_dir / "snap-control")
 
 	def _write_asset_fixtures(self) -> None:
-		for relative in (
-			"models/segformer_b5_full_epoch_100.safetensors",
-			"models/ckpt_weighted_brownweight15_goldentestweight7.safetensors",
-			"models/b1_50epoch_best_macro_f1.safetensors",
-			"gadm/gadm_410.gpkg",
-			"biom/terres_ecosystems.gpkg",
-			"pheno/modispheno_aggregated_normalized_filled.zarr/.zgroup",
-		):
+		for relative in required_processor_asset_files():
 			path = self.repo / "assets" / relative
+			path.parent.mkdir(parents=True, exist_ok=True)
+			path.write_text("fixture\n")
+		for relative in required_processor_asset_directories():
+			path = self.repo / "assets" / relative / ".fixture"
 			path.parent.mkdir(parents=True, exist_ok=True)
 			path.write_text("fixture\n")
 

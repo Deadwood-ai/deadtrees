@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from shared.asset_manifest import required_processor_asset_directories, required_processor_asset_files
+
 
 SCRIPT = Path(__file__).parents[1] / "processor_auto_deploy.sh"
 
@@ -56,6 +58,7 @@ class DeployHarness:
 		git(self.seed, "config", "user.email", "tests@deadtrees.example")
 		(self.seed / "scripts").mkdir()
 		(self.seed / "scripts" / "lib").mkdir()
+		(self.seed / "shared").mkdir()
 		(self.seed / "README.md").write_text("initial\n")
 		(self.seed / "docker-compose.processor.yaml").write_text("services: {}\n")
 		(self.seed / ".gitignore").write_text("/.local\n/assets\n.env\n__pycache__/\n")
@@ -63,6 +66,8 @@ class DeployHarness:
 		shutil.copy2(SCRIPT.parent / "lib" / "processor_runtime.sh", self.seed / "scripts" / "lib" / "processor_runtime.sh")
 		shutil.copy2(SCRIPT.parent / "processor_runtime_control.py", self.seed / "scripts" / "processor_runtime_control.py")
 		shutil.copy2(SCRIPT.parent / "processor_asset_preflight.py", self.seed / "scripts" / "processor_asset_preflight.py")
+		shutil.copy2(SCRIPT.parents[1] / "shared" / "operator_env.py", self.seed / "shared" / "operator_env.py")
+		shutil.copy2(SCRIPT.parents[1] / "shared" / "asset_manifest.py", self.seed / "shared" / "asset_manifest.py")
 		git(self.seed, "add", ".")
 		git(self.seed, "commit", "-m", "initial")
 		git(self.seed, "remote", "add", "origin", str(self.origin))
@@ -94,6 +99,9 @@ class DeployHarness:
 			"fi\n"
 			"if echo \"$@\" | grep -q activation-ready; then\n"
 			"  exit \"${PROCESSOR_TEST_ACTIVATION_READY:-1}\"\n"
+			"fi\n"
+			"if echo \"$@\" | grep -q asset-recovery-ready; then\n"
+			"  exit \"${PROCESSOR_TEST_ASSET_RECOVERY_READY:-1}\"\n"
 			"fi\n"
 			"if echo \"$@\" | grep -q worker-health; then\n"
 			"  if [ -e \"${PROCESSOR_TEST_UNHEALTHY_PATH:-}\" ]; then exit 1; fi\n"
@@ -159,15 +167,12 @@ class DeployHarness:
 
 	@staticmethod
 	def _write_asset_fixtures(repo: Path) -> None:
-		for relative in (
-			"models/segformer_b5_full_epoch_100.safetensors",
-			"models/ckpt_weighted_brownweight15_goldentestweight7.safetensors",
-			"models/b1_50epoch_best_macro_f1.safetensors",
-			"gadm/gadm_410.gpkg",
-			"biom/terres_ecosystems.gpkg",
-			"pheno/modispheno_aggregated_normalized_filled.zarr/.zgroup",
-		):
+		for relative in required_processor_asset_files():
 			path = repo / "assets" / relative
+			path.parent.mkdir(parents=True, exist_ok=True)
+			path.write_text("fixture\n")
+		for relative in required_processor_asset_directories():
+			path = repo / "assets" / relative / ".fixture"
 			path.parent.mkdir(parents=True, exist_ok=True)
 			path.write_text("fixture\n")
 
@@ -238,6 +243,24 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 				git(harness.worktree, "rev-parse", "HEAD").stdout.strip(),
 				git(harness.upstream, "rev-parse", "HEAD").stdout.strip(),
 			)
+
+	def test_restored_assets_clear_asset_loss_drain_after_resume(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			self.assertEqual(harness.run_deploy().returncode, 0)
+			model = harness.worktree / "assets" / "models" / "segformer_b5_full_epoch_100.safetensors"
+			model.unlink()
+
+			self.assertNotEqual(harness.run_deploy().returncode, 0)
+			model.write_text("restored\n")
+			self.assertEqual(harness.run_deploy("--resume").returncode, 0)
+			harness.env["PROCESSOR_TEST_ASSET_RECOVERY_READY"] = "0"
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertIn("asset-recovery-ready", harness.python_log.read_text())
+			self.assertIn("clear-drain", harness.python_log.read_text())
 
 	def test_target_release_runs_its_activation_logic_before_marking_active(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:

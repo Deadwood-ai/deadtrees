@@ -34,6 +34,23 @@ def test_ack_release_sha_must_match_when_expected():
 	assert not runtime_control._ack_matches_request(request, ack, 'worker-a', 'release-b')
 
 
+def test_asset_recovery_requires_matching_ack_and_no_active_rows(monkeypatch):
+	request = {'request_id': 'request-a', 'requested_at': 'now', 'reason': 'required processor assets missing'}
+	monkeypatch.setattr(runtime_control, '_worker_id', lambda: 'worker-a')
+	monkeypatch.setattr(runtime_control, '_activated_worker_id', lambda: None)
+	monkeypatch.setattr(runtime_control, '_load_drain_state', lambda: (request, _matching_ack()))
+	monkeypatch.setattr(runtime_control, '_fetch_queue_state', lambda worker_id, **kwargs: _state())
+
+	assert runtime_control.cmd_asset_recovery_ready(argparse.Namespace()) == 0
+
+	monkeypatch.setattr(
+		runtime_control,
+		'_fetch_queue_state',
+		lambda worker_id, **kwargs: _state(active_for_worker=[{'id': 123}]),
+	)
+	assert runtime_control.cmd_asset_recovery_ready(argparse.Namespace()) == 1
+
+
 def test_worker_health_rejects_even_malformed_persisted_marker(monkeypatch, tmp_path):
 	marker = tmp_path / 'loop-unhealthy.json'
 	marker.write_text('interrupted write')

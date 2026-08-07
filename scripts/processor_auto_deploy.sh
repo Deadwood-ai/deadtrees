@@ -137,7 +137,8 @@ else
 			drain_set=1
 			exit 1
 		fi
-		if python3 "${STATUS_SCRIPT}" activation-ready --release-sha "${remote_sha}" >> "${LOG_FILE}" 2>&1; then
+		if python3 "${STATUS_SCRIPT}" activation-ready --release-sha "${remote_sha}" >> "${LOG_FILE}" 2>&1 || \
+			python3 "${STATUS_SCRIPT}" asset-recovery-ready >> "${LOG_FILE}" 2>&1; then
 			wait_for_processor_running
 			python3 "${STATUS_SCRIPT}" clear-drain >> "${LOG_FILE}" 2>&1
 			log "Completed interrupted activation for ${remote_sha}"

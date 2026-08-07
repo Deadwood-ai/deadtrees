@@ -15,6 +15,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from shared.operator_env import load_env_file
+
 QUEUE_TABLE = 'v2_queue'
 QUEUE_POSITION_TABLE = 'v2_queue_positions'
 DEFAULT_CONTROL_DIR = '.local/processor-control'
@@ -26,24 +31,6 @@ class AuthenticationExpiredError(RuntimeError):
 	pass
 
 
-def load_env_file(path: Path) -> dict[str, str]:
-	env: dict[str, str] = {}
-	if not path.exists():
-		return env
-
-	for raw_line in path.read_text().splitlines():
-		line = raw_line.strip()
-		if not line or line.startswith('#') or '=' not in line:
-			continue
-		key, value = line.split('=', 1)
-		value = value.strip()
-		if value and value[0] == value[-1] and value[0] in {'"', "'"}:
-			value = value[1:-1]
-		env[key.strip()] = os.path.expandvars(value)
-	return env
-
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
 ENV = {
 	**load_env_file(REPO_ROOT / '.env'),
 	**os.environ,
@@ -357,6 +344,25 @@ def cmd_activation_ready(args: argparse.Namespace) -> int:
 	return 0
 
 
+def cmd_asset_recovery_ready(_: argparse.Namespace) -> int:
+	worker_id = _worker_id()
+	previous_worker_id = _activated_worker_id()
+	request, ack = _load_drain_state()
+	if request is None or request.get('reason') != 'required processor assets missing':
+		return 1
+	if not _ack_matches_request(request, ack, worker_id):
+		return 1
+	state = _fetch_queue_state(
+		worker_id,
+		previous_worker_id=previous_worker_id,
+		include_waiting_preview=False,
+	)
+	if state['active_for_worker'] or state['active_for_previous_worker'] or state['active_without_owner']:
+		return 1
+	print(json.dumps({'asset_recovery_ready': True}, indent=2))
+	return 0
+
+
 def cmd_wait_for_idle(args: argparse.Namespace) -> int:
 	worker_id = _worker_id()
 	previous_worker_id = _activated_worker_id()
@@ -483,6 +489,12 @@ def build_parser() -> argparse.ArgumentParser:
 	)
 	activation_ready.add_argument('--release-sha', required=True)
 	activation_ready.set_defaults(func=cmd_activation_ready)
+
+	asset_recovery_ready = subparsers.add_parser(
+		'asset-recovery-ready',
+		help='Verify a repaired asset-loss drain is safe to clear.',
+	)
+	asset_recovery_ready.set_defaults(func=cmd_asset_recovery_ready)
 
 	wait_for_idle = subparsers.add_parser(
 		'wait-for-idle',

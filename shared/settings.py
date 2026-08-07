@@ -3,6 +3,8 @@ from dotenv import load_dotenv
 from pathlib import Path
 import os
 
+from .asset_manifest import BIOME_ASSET_PATH, GADM_ASSET_PATH, PHENOLOGY_ASSET_PATH
+
 # load an .env file if it exists
 load_dotenv()
 
@@ -60,10 +62,10 @@ class Settings(BaseSettings):
 	# Base paths and directories
 	BASE_DIR: str = str(BASE)
 	# Default to repo-local assets in dev/test; container deployments can still override via env.
-	GADM_DATA_PATH: str = str(ASSETS_DIR / 'gadm' / 'gadm_410.gpkg')
+	GADM_DATA_PATH: str = str(ASSETS_DIR / GADM_ASSET_PATH)
 	CONCURRENT_TASKS: int = 2
 
-	BIOME_DATA_PATH: str = str(ASSETS_DIR / 'biom' / 'terres_ecosystems.gpkg')
+	BIOME_DATA_PATH: str = str(ASSETS_DIR / BIOME_ASSET_PATH)
 
 	BIOME_DICT: dict[int, str] = {
 		1: 'Tropical and Subtropical Moist Broadleaf Forests',
@@ -82,7 +84,7 @@ class Settings(BaseSettings):
 		14: 'Mangroves',
 	}
 
-	PHENOLOGY_DATA_PATH: str = str(ASSETS_DIR / 'pheno' / 'modispheno_aggregated_normalized_filled.zarr')
+	PHENOLOGY_DATA_PATH: str = str(ASSETS_DIR / PHENOLOGY_ASSET_PATH)
 
 	# DTE maps (deadwood/forest cover COGs)
 	DTE_MAPS_PATH: str = '/data/assets/dte_maps'
