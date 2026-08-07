@@ -58,10 +58,10 @@ class DeployHarness:
 		(self.seed / "scripts" / "lib").mkdir()
 		(self.seed / "README.md").write_text("initial\n")
 		(self.seed / "docker-compose.processor.yaml").write_text("services: {}\n")
-		(self.seed / ".gitignore").write_text("/.local\n/assets\n.env\n")
+		(self.seed / ".gitignore").write_text("/.local\n/assets\n.env\n__pycache__/\n")
 		shutil.copy2(SCRIPT, self.seed / "scripts" / "processor_auto_deploy.sh")
 		shutil.copy2(SCRIPT.parent / "lib" / "processor_runtime.sh", self.seed / "scripts" / "lib" / "processor_runtime.sh")
-		(self.seed / "scripts" / "processor_runtime_control.py").write_text("# test stub\n")
+		shutil.copy2(SCRIPT.parent / "processor_runtime_control.py", self.seed / "scripts" / "processor_runtime_control.py")
 		shutil.copy2(SCRIPT.parent / "processor_asset_preflight.py", self.seed / "scripts" / "processor_asset_preflight.py")
 		git(self.seed, "add", ".")
 		git(self.seed, "commit", "-m", "initial")
@@ -213,12 +213,31 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			external_assets = harness.tmp_path / "shared-assets"
 			shutil.copytree(harness.worktree / "assets", external_assets)
 			shutil.rmtree(harness.worktree / "assets")
-			(harness.worktree / ".env").write_text(f"PROCESSOR_ASSETS_DIR={external_assets}\n")
+			harness.env["ASSET_ROOT"] = str(harness.tmp_path)
+			(harness.worktree / ".env").write_text("PROCESSOR_ASSETS_DIR=${ASSET_ROOT}/shared-assets\n")
 
 			result = harness.run_deploy()
 
 			self.assertEqual(result.returncode, 0, result.stderr)
 			self.assertIn(" build ", harness.docker_log.read_text())
+
+	def test_target_release_can_remove_an_obsolete_asset_requirement(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			(harness.worktree / "assets" / "models" / "segformer_b5_full_epoch_100.safetensors").unlink()
+			target_preflight = harness.upstream / "scripts" / "processor_asset_preflight.py"
+			target_preflight.write_text("raise SystemExit(0)\n")
+			git(harness.upstream, "add", "scripts/processor_asset_preflight.py")
+			git(harness.upstream, "commit", "-m", "remove obsolete asset requirement")
+			git(harness.upstream, "push", "origin", "main")
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertEqual(
+				git(harness.worktree, "rev-parse", "HEAD").stdout.strip(),
+				git(harness.upstream, "rev-parse", "HEAD").stdout.strip(),
+			)
 
 	def test_target_release_runs_its_activation_logic_before_marking_active(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
@@ -287,7 +306,8 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			result = harness.run_deploy()
 
 			self.assertNotEqual(result.returncode, 0)
-			self.assertNotIn("set-drain", harness.python_log.read_text())
+			python_log = harness.python_log.read_text() if harness.python_log.exists() else ""
+			self.assertNotIn("set-drain", python_log)
 			self.assertIn(
 				"Refusing deploy because HEAD contains local commits outside origin/main",
 				(harness.worktree / "auto-deploy.log").read_text(),

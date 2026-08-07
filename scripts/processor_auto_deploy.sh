@@ -91,19 +91,17 @@ trap on_exit EXIT
 
 cd "${REPO_DIR}"
 
-if ! python3 "${ASSET_PREFLIGHT_SCRIPT}" >> "${LOG_FILE}" 2>&1; then
-	log "Refusing processor activation because required assets are missing"
-	python3 "${STATUS_SCRIPT}" set-drain --reason "required processor assets missing" >> "${LOG_FILE}" 2>&1
-	drain_set=1
-	exit 1
-fi
-
 if [ "${DEPLOY_PHASE}" = "activate" ]; then
 	remote_sha="${DEPLOY_TARGET_SHA}"
 	drain_set=1
 	deployed_sha="$(git rev-parse HEAD)"
 	if [ -z "${remote_sha}" ] || [ "${deployed_sha}" != "${remote_sha}" ]; then
 		log "Refusing activation because HEAD ${deployed_sha} does not match target ${remote_sha:-missing}"
+		exit 1
+	fi
+	if ! python3 "${ASSET_PREFLIGHT_SCRIPT}" >> "${LOG_FILE}" 2>&1; then
+		log "Refusing processor activation because required assets are missing"
+		python3 "${STATUS_SCRIPT}" set-drain --reason "required processor assets missing" >> "${LOG_FILE}" 2>&1
 		exit 1
 	fi
 	# Continue below with the target release's freshly loaded activation logic.
@@ -133,6 +131,12 @@ else
 	activated_sha="$(cat "${ACTIVATED_SHA_FILE}" 2>/dev/null || true)"
 
 	if [ "${local_sha}" = "${remote_sha}" ] && [ "${activated_sha}" = "${remote_sha}" ]; then
+		if ! python3 "${ASSET_PREFLIGHT_SCRIPT}" >> "${LOG_FILE}" 2>&1; then
+			log "Draining active release because required processor assets are missing"
+			python3 "${STATUS_SCRIPT}" set-drain --reason "required processor assets missing" >> "${LOG_FILE}" 2>&1
+			drain_set=1
+			exit 1
+		fi
 		if python3 "${STATUS_SCRIPT}" activation-ready --release-sha "${remote_sha}" >> "${LOG_FILE}" 2>&1; then
 			wait_for_processor_running
 			python3 "${STATUS_SCRIPT}" clear-drain >> "${LOG_FILE}" 2>&1

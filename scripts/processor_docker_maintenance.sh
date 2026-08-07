@@ -9,6 +9,7 @@ LOCK_FILE="${LOCK_DIR}/processor-runtime.lock"
 ACTIVATED_SHA_FILE="${REPO_DIR}/.local/processor-activated-sha"
 LOG_FILE="${REPO_DIR}/processor-maintenance.log"
 STATUS_SCRIPT="${REPO_DIR}/scripts/processor_runtime_control.py"
+ASSET_PREFLIGHT_SCRIPT="${REPO_DIR}/scripts/processor_asset_preflight.py"
 COMPOSE_FILE="${REPO_DIR}/docker-compose.processor.yaml"
 HOLD_DURATION="${PROCESSOR_SNAP_HOLD_DURATION:-168h}"
 SNAP_CONTROL="${PROCESSOR_SNAP_CONTROL:-/usr/local/sbin/deadtrees-processor-snap-control}"
@@ -107,6 +108,11 @@ require_activated_checkout
 python3 "${STATUS_SCRIPT}" set-drain --reason "docker-maintenance" >> "${LOG_FILE}" 2>&1
 drain_set=1
 wait_for_drain_with_recovery
+
+if ! python3 "${ASSET_PREFLIGHT_SCRIPT}" >> "${LOG_FILE}" 2>&1; then
+	log "Refusing Docker maintenance restart because required processor assets are missing"
+	exit 1
+fi
 
 docker compose -f "${COMPOSE_FILE}" stop processor >> "${LOG_FILE}" 2>&1
 sudo -n "${SNAP_CONTROL}" refresh >> "${LOG_FILE}" 2>&1

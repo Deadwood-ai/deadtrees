@@ -26,7 +26,7 @@ class AuthenticationExpiredError(RuntimeError):
 	pass
 
 
-def _load_env_file(path: Path) -> dict[str, str]:
+def load_env_file(path: Path) -> dict[str, str]:
 	env: dict[str, str] = {}
 	if not path.exists():
 		return env
@@ -45,7 +45,7 @@ def _load_env_file(path: Path) -> dict[str, str]:
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ENV = {
-	**_load_env_file(REPO_ROOT / '.env'),
+	**load_env_file(REPO_ROOT / '.env'),
 	**os.environ,
 }
 

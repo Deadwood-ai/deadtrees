@@ -35,10 +35,11 @@ class MaintenanceHarness:
 		(self.repo / "scripts").mkdir()
 		(self.repo / "scripts" / "lib").mkdir()
 		(self.repo / "docker-compose.processor.yaml").write_text("services: {}\n")
-		(self.repo / ".gitignore").write_text("/.local\n")
+		(self.repo / ".gitignore").write_text("/.local\n/assets\n__pycache__/\n")
 		shutil.copy2(SCRIPT, self.repo / "scripts" / "processor_docker_maintenance.sh")
 		shutil.copy2(SCRIPT.parent / "lib" / "processor_runtime.sh", self.repo / "scripts" / "lib" / "processor_runtime.sh")
-		(self.repo / "scripts" / "processor_runtime_control.py").write_text("# test stub\n")
+		shutil.copy2(SCRIPT.parent / "processor_runtime_control.py", self.repo / "scripts" / "processor_runtime_control.py")
+		shutil.copy2(SCRIPT.parent / "processor_asset_preflight.py", self.repo / "scripts" / "processor_asset_preflight.py")
 		run("git", "init", "--initial-branch=main", cwd=self.repo)
 		run("git", "config", "user.name", "DeadTrees Tests", cwd=self.repo)
 		run("git", "config", "user.email", "tests@deadtrees.example", cwd=self.repo)
@@ -47,6 +48,7 @@ class MaintenanceHarness:
 		(self.repo / ".local").mkdir()
 		activated_sha = run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
 		(self.repo / ".local" / "processor-activated-sha").write_text(f"{activated_sha}\n")
+		self._write_asset_fixtures()
 
 		self.bin_dir.mkdir()
 		make_executable(self.bin_dir / "flock", "#!/bin/sh\nexit 0\n")
@@ -65,6 +67,7 @@ class MaintenanceHarness:
 		make_executable(
 			self.bin_dir / "python3",
 			f"#!/bin/sh\necho \"$@\" >> {self.python_log}\n"
+			f"if echo \"$@\" | grep -q processor_asset_preflight.py; then exec {sys.executable} \"$@\"; fi\n"
 			"if echo \"$@\" | grep -q clear-ack && [ -n \"${PROCESSOR_TEST_ACK_PATH:-}\" ]; then\n"
 			"  rm -f \"$PROCESSOR_TEST_ACK_PATH\"\n"
 			"fi\n"
@@ -104,6 +107,19 @@ class MaintenanceHarness:
 		self.env["PROCESSOR_STARTUP_TIMEOUT_SECONDS"] = "2"
 		self.env["PROCESSOR_SNAP_CONTROL"] = str(self.bin_dir / "snap-control")
 
+	def _write_asset_fixtures(self) -> None:
+		for relative in (
+			"models/segformer_b5_full_epoch_100.safetensors",
+			"models/ckpt_weighted_brownweight15_goldentestweight7.safetensors",
+			"models/b1_50epoch_best_macro_f1.safetensors",
+			"gadm/gadm_410.gpkg",
+			"biom/terres_ecosystems.gpkg",
+			"pheno/modispheno_aggregated_normalized_filled.zarr/.zgroup",
+		):
+			path = self.repo / "assets" / relative
+			path.parent.mkdir(parents=True, exist_ok=True)
+			path.write_text("fixture\n")
+
 	def run(self, *args: str) -> subprocess.CompletedProcess[str]:
 		return run(
 			"bash",
@@ -116,6 +132,19 @@ class MaintenanceHarness:
 
 
 class ProcessorDockerMaintenanceTest(unittest.TestCase):
+	def test_missing_assets_leave_worker_drained_without_restart(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = MaintenanceHarness(Path(tmp_dir), processor_available=True)
+			(harness.repo / "assets" / "models" / "segformer_b5_full_epoch_100.safetensors").unlink()
+
+			result = harness.run()
+
+			self.assertNotEqual(result.returncode, 0)
+			self.assertIn("set-drain --reason docker-maintenance", harness.python_log.read_text())
+			docker_log = harness.docker_log.read_text()
+			self.assertNotIn("stop processor", docker_log)
+			self.assertNotIn("up -d processor", docker_log)
+
 	def test_snap_control_limits_root_action_to_validated_docker_operations(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			tmp_path = Path(tmp_dir)
