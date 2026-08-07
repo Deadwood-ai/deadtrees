@@ -14,7 +14,10 @@ from shared.operator_env import load_env_file
 
 
 def resolve_assets_dir(repo_dir: Path) -> Path:
-	configured = os.environ.get('PROCESSOR_ASSETS_DIR') or load_env_file(repo_dir / '.env').get('PROCESSOR_ASSETS_DIR')
+	if 'PROCESSOR_ASSETS_DIR' in os.environ:
+		configured = os.environ['PROCESSOR_ASSETS_DIR']
+	else:
+		configured = load_env_file(repo_dir / '.env').get('PROCESSOR_ASSETS_DIR')
 	assets_dir = Path(configured or 'assets').expanduser()
 	if not assets_dir.is_absolute():
 		assets_dir = repo_dir / assets_dir

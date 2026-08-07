@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from shared.asset_manifest import PHENOLOGY_ASSET_PATH
 from shared.operator_env import load_env_file
-from scripts.processor_asset_preflight import missing_assets
+from scripts.processor_asset_preflight import missing_assets, resolve_assets_dir
 
 
 class ProcessorAssetPreflightTest(unittest.TestCase):
@@ -43,3 +43,13 @@ class ProcessorAssetPreflightTest(unittest.TestCase):
 
 			self.assertEqual(env['PROCESSOR_ASSETS_DIR'], '/from-shell/assets')
 			self.assertEqual(env['PROCESSOR_PASSWORD'], 'prefix$$suffix')
+
+	def test_empty_shell_assets_override_uses_compose_default(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			repo_dir = Path(tmp_dir)
+			(repo_dir / '.env').write_text('PROCESSOR_ASSETS_DIR=/external/assets\n')
+
+			with patch.dict(os.environ, {'PROCESSOR_ASSETS_DIR': ''}):
+				assets_dir = resolve_assets_dir(repo_dir)
+
+			self.assertEqual(assets_dir, (repo_dir / 'assets').resolve())
