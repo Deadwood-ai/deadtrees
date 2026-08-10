@@ -20,6 +20,8 @@ interface PriwaWarnkarteAdminPanelProps {
   onImport: (file: File, confirmedDate: string) => Promise<unknown>;
   onShowVersion: (versionId: string) => Promise<void>;
   onPublish: (versionId: string) => Promise<void>;
+  onArchive: (versionId: string) => Promise<void>;
+  onRestore: (versionId: string) => Promise<void>;
 }
 
 export default function PriwaWarnkarteAdminPanel({
@@ -32,6 +34,8 @@ export default function PriwaWarnkarteAdminPanel({
   onImport,
   onShowVersion,
   onPublish,
+  onArchive,
+  onRestore,
 }: PriwaWarnkarteAdminPanelProps) {
   const { message } = App.useApp();
   const [file, setFile] = useState<File | null>(null);
@@ -85,6 +89,18 @@ export default function PriwaWarnkarteAdminPanel({
     void run(async () => {
       await onPublish(versionId);
       message.success("Warnkarte veröffentlicht.");
+    });
+
+  const archive = (versionId: string) =>
+    void run(async () => {
+      await onArchive(versionId);
+      message.success("Warnkartenversion archiviert.");
+    });
+
+  const restore = (versionId: string) =>
+    void run(async () => {
+      await onRestore(versionId);
+      message.success("Warnkartenversion wiederhergestellt.");
     });
 
   return (
@@ -141,6 +157,8 @@ export default function PriwaWarnkarteAdminPanel({
           isBusy={isBusy}
           onShowVersion={showVersion}
           onPublish={publish}
+          onArchive={archive}
+          onRestore={restore}
         />
       )}
     </div>

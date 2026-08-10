@@ -2,11 +2,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef, useState } from "react";
 
 import {
+  archivePriwaWarnkarteVersion,
   fetchActivePriwaWarnkarte,
   fetchPriwaWarnkarteVersionOverlay,
   fetchPriwaWarnkarteVersions,
   importPriwaWarnkarte,
   publishPriwaWarnkarteVersion,
+  restorePriwaWarnkarteVersion,
   validatePriwaWarnkarte,
   type IPriwaWarnkarteOverlay,
 } from "../../api/priwaWarnkarte";
@@ -91,6 +93,27 @@ export function usePriwaWarnkarte(projectId: string, canManage: boolean) {
     }
   };
 
+  const archiveVersion = async (versionId: string) => {
+    const request = ++selectedOverlayRequest.current;
+    await archivePriwaWarnkarteVersion(versionId, requireToken());
+    await queryClient.invalidateQueries({
+      queryKey: ["priwa-warnkarte", projectId, "versions"],
+    });
+    if (
+      request === selectedOverlayRequest.current &&
+      selectedOverlay?.version_id === versionId
+    ) {
+      setSelectedOverlay(null);
+    }
+  };
+
+  const restoreVersion = async (versionId: string) => {
+    await restorePriwaWarnkarteVersion(versionId, requireToken());
+    await queryClient.invalidateQueries({
+      queryKey: ["priwa-warnkarte", projectId, "versions"],
+    });
+  };
+
   const clearSelectedVersion = useCallback(() => {
     selectedOverlayRequest.current += 1;
     setSelectedOverlay(null);
@@ -108,6 +131,8 @@ export function usePriwaWarnkarte(projectId: string, canManage: boolean) {
     clearSelectedVersion,
     toggleVisibility: () => setVisible((visible) => !visible),
     importFile,
+    archiveVersion,
+    restoreVersion,
     showVersion,
     publishVersion,
     validateFile,
