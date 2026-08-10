@@ -37,6 +37,7 @@ export interface IPriwaWarnkarteVersion {
   imported_by: string;
   imported_at: string;
   is_current: boolean;
+  is_archived: boolean;
 }
 
 export interface IPriwaWarnkarteImportResponse {
@@ -178,3 +179,25 @@ export async function publishPriwaWarnkarteVersion(
     response,
   );
 }
+
+async function updatePriwaWarnkarteArchiveState(
+  versionId: string,
+  action: "archive" | "restore",
+  token: string,
+) {
+  const response = await fetch(
+    `${Settings.API_URL}/priwa/warnkarte/versions/${versionId}/${action}`,
+    { method: "POST", headers: authHeaders(token) },
+  );
+  return parseResponse<{ version_id: string; is_archived: boolean }>(response);
+}
+
+export const archivePriwaWarnkarteVersion = (
+  versionId: string,
+  token: string,
+) => updatePriwaWarnkarteArchiveState(versionId, "archive", token);
+
+export const restorePriwaWarnkarteVersion = (
+  versionId: string,
+  token: string,
+) => updatePriwaWarnkarteArchiveState(versionId, "restore", token);

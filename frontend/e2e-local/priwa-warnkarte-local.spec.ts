@@ -150,6 +150,7 @@ async function installWarnkarteApi(
   }: { validateDelayMs?: number; overlayDelayMs?: number } = {},
 ) {
   let published = false;
+  let archived = false;
 
   await page.route("**/priwa/warnkarte/active?*", async (route) => {
     await route.fulfill({
@@ -177,6 +178,7 @@ async function installWarnkarteApi(
           imported_by: admin.id,
           imported_at: "2024-07-01T12:00:00Z",
           is_current: published,
+          is_archived: archived,
         },
         {
           id: "version-old",
@@ -189,6 +191,7 @@ async function installWarnkarteApi(
           imported_by: admin.id,
           imported_at: "2024-06-25T12:00:00Z",
           is_current: !published,
+          is_archived: false,
         },
       ],
     });
@@ -251,6 +254,26 @@ async function installWarnkarteApi(
       await route.fulfill({
         contentType: "application/json",
         json: { publication_id: 2, version_id: "version-new" },
+      });
+    },
+  );
+  await page.route(
+    "**/priwa/warnkarte/versions/version-new/archive",
+    async (route) => {
+      archived = true;
+      await route.fulfill({
+        contentType: "application/json",
+        json: { version_id: "version-new", is_archived: true },
+      });
+    },
+  );
+  await page.route(
+    "**/priwa/warnkarte/versions/version-new/restore",
+    async (route) => {
+      archived = false;
+      await route.fulfill({
+        contentType: "application/json",
+        json: { version_id: "version-new", is_archived: false },
       });
     },
   );
@@ -387,6 +410,57 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await expect(page.getByTestId("priwa-warnkarte-legend")).toContainText(
       "Warnkarte 25.06.2024",
     );
+  });
+
+  test("desktop admin archives and restores an inactive Warnkarte", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await installWarnkarteAdmin(page);
+    await installWarnkarteApi(page);
+    await page.goto("/priwa-field");
+
+    await page.getByRole("button", { name: "Warnkarte verwalten" }).click();
+    await expect(
+      page
+        .getByTestId("priwa-warnkarte-version-version-old")
+        .getByRole("button", { name: "Archivieren" }),
+    ).toHaveCount(0);
+    const version = page.getByTestId("priwa-warnkarte-version-version-new");
+    await version.getByRole("radio", { name: "Auf Karte anzeigen" }).click();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toContainText(
+      "Warnkarte 01.07.2024",
+    );
+
+    await version.getByRole("button", { name: "Archivieren" }).click();
+    await page
+      .getByRole("button", { name: "Archivieren", exact: true })
+      .last()
+      .click();
+
+    await expect(page.getByText("Warnkartenversion archiviert.")).toBeVisible();
+    await expect(
+      page.getByTestId("priwa-warnkarte-version-version-new"),
+    ).toHaveCount(0);
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toContainText(
+      "Warnkarte 25.06.2024",
+    );
+    await page.getByText("Archiviert (1)").click();
+
+    const archivedVersion = page.getByTestId(
+      "priwa-warnkarte-archived-version-new",
+    );
+    await archivedVersion
+      .getByRole("button", { name: "Wiederherstellen" })
+      .click();
+
+    await expect(
+      page.getByText("Warnkartenversion wiederhergestellt."),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("priwa-warnkarte-version-version-new"),
+    ).toBeVisible();
+    await expect(page.getByText("Archiviert (1)")).toHaveCount(0);
   });
 
   test("desktop admin cannot replace a file while its validation is pending", async ({

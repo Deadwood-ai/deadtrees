@@ -44,6 +44,7 @@ def warnkarte_project(test_user, test_user2):
 	finally:
 		with use_service_client() as client:
 			client.table('priwa_warnkarte_publications').delete().eq('project_id', project_id).execute()
+			client.table('priwa_warnkarte_archive_events').delete().eq('project_id', project_id).execute()
 			client.table('priwa_warnkarte_versions').delete().eq('project_id', project_id).execute()
 			client.table('priwa_project_memberships').delete().eq('project_id', project_id).execute()
 			client.table('priwa_projects').delete().eq('id', project_id).execute()
@@ -254,3 +255,101 @@ def test_publication_and_reversion_use_latest_append_only_record(warnkarte_proje
 			.execute()
 		).data
 	assert [row['version_id'] for row in publications] == [old_version_id, new_version_id, old_version_id]
+
+
+def test_archiving_is_reversible_admin_only_and_cannot_hide_current_version(warnkarte_project):
+	admin_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
+	member_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+
+	with use_service_client() as client:
+		current_version_id = import_version(
+			client,
+			warnkarte_project['admin_id'],
+			warnkarte_project['id'],
+			'current-for-archive',
+			'2024-07-01',
+		)
+		older_version_id = import_version(
+			client,
+			warnkarte_project['admin_id'],
+			warnkarte_project['id'],
+			'older-for-archive',
+			'2024-06-25',
+		)
+
+	with use_client(admin_token) as client:
+		client.rpc('priwa_publish_warnkarte', {'p_version_id': current_version_id}).execute()
+		with pytest.raises(Exception, match='current version cannot be archived'):
+			client.rpc('priwa_archive_warnkarte', {'p_version_id': current_version_id}).execute()
+
+	with use_client(member_token) as client:
+		with pytest.raises(Exception, match='admin access is required'):
+			client.rpc('priwa_archive_warnkarte', {'p_version_id': older_version_id}).execute()
+
+	with use_client(admin_token) as client:
+		first_event_id = client.rpc('priwa_archive_warnkarte', {'p_version_id': older_version_id}).execute().data
+		second_event_id = client.rpc('priwa_archive_warnkarte', {'p_version_id': older_version_id}).execute().data
+		assert second_event_id == first_event_id
+
+		archive_state = (
+			client.table('priwa_warnkarte_archive_states')
+			.select('is_archived')
+			.eq('version_id', older_version_id)
+			.single()
+			.execute()
+		).data
+		assert archive_state == {'is_archived': True}
+
+		archived_overlay = (
+			client.rpc(
+				'priwa_warnkarte_version_overlay',
+				{'p_project_id': warnkarte_project['id'], 'p_version_id': older_version_id},
+			)
+			.execute()
+			.data
+		)
+		assert archived_overlay == []
+
+		with pytest.raises(Exception, match='archived version cannot be published'):
+			client.rpc('priwa_publish_warnkarte', {'p_version_id': older_version_id}).execute()
+
+	with use_client(member_token) as client:
+		assert (
+			client.table('priwa_warnkarte_archive_events')
+			.select('*')
+			.eq('project_id', warnkarte_project['id'])
+			.execute()
+			.data
+			== []
+		)
+		assert (
+			client.table('priwa_warnkarte_archive_states')
+			.select('*')
+			.eq('project_id', warnkarte_project['id'])
+			.execute()
+			.data
+			== []
+		)
+
+	with use_client(admin_token) as client:
+		client.rpc('priwa_restore_warnkarte', {'p_version_id': older_version_id}).execute()
+		restored_overlay = (
+			client.rpc(
+				'priwa_warnkarte_version_overlay',
+				{'p_project_id': warnkarte_project['id'], 'p_version_id': older_version_id},
+			)
+			.execute()
+			.data
+		)
+		assert len(restored_overlay[0]['payload']['features']) == 1
+		client.rpc('priwa_publish_warnkarte', {'p_version_id': older_version_id}).execute()
+
+	with use_service_client() as client:
+		events = (
+			client.table('priwa_warnkarte_archive_events')
+			.select('action')
+			.eq('version_id', older_version_id)
+			.order('id')
+			.execute()
+		).data
+	assert [event['action'] for event in events] == ['archive', 'restore']

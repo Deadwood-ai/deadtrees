@@ -40,11 +40,17 @@ class WarnkarteVersion(BaseModel):
 	imported_by: str
 	imported_at: str
 	is_current: bool
+	is_archived: bool
 
 
 class WarnkartePublicationResponse(BaseModel):
 	publication_id: int
 	version_id: str
+
+
+class WarnkarteArchiveStateResponse(BaseModel):
+	version_id: str
+	is_archived: bool
 
 
 def validation_http_error(error: WarnkarteValidationError) -> HTTPException:
@@ -123,6 +129,65 @@ def overlay_from_rpc_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
 		}
 
 	return rows[0]['payload']
+
+
+def run_version_rpc(
+	token: str,
+	rpc_name: str,
+	version_id: str,
+	*,
+	failure_code: str,
+	failure_message: str,
+) -> int:
+	try:
+		with use_client(token) as client:
+			return client.rpc(rpc_name, {'p_version_id': version_id}).execute().data
+	except Exception as error:
+		error_text = str(error)
+		if 'admin access is required' in error_text:
+			raise HTTPException(
+				status_code=status.HTTP_403_FORBIDDEN,
+				detail={
+					'code': 'ADMIN_REQUIRED',
+					'message': 'Nur PRIWA-Admins dürfen Warnkartenversionen verwalten.',
+					'details': {},
+				},
+			) from error
+		if 'Warnkarte version not found' in error_text:
+			raise HTTPException(
+				status_code=status.HTTP_404_NOT_FOUND,
+				detail={
+					'code': 'VERSION_NOT_FOUND',
+					'message': 'Die Warnkartenversion wurde nicht gefunden.',
+					'details': {'version_id': version_id},
+				},
+			) from error
+		if 'Warnkarte current version cannot be archived' in error_text:
+			raise HTTPException(
+				status_code=status.HTTP_409_CONFLICT,
+				detail={
+					'code': 'CURRENT_VERSION_ARCHIVE_FORBIDDEN',
+					'message': 'Die aktuell veröffentlichte Warnkarte kann nicht archiviert werden.',
+					'details': {'version_id': version_id},
+				},
+			) from error
+		if 'Warnkarte archived version cannot be published' in error_text:
+			raise HTTPException(
+				status_code=status.HTTP_409_CONFLICT,
+				detail={
+					'code': 'ARCHIVED_VERSION_PUBLISH_FORBIDDEN',
+					'message': 'Die Warnkartenversion muss vor dem Veröffentlichen wiederhergestellt werden.',
+					'details': {'version_id': version_id},
+				},
+			) from error
+		raise HTTPException(
+			status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+			detail={
+				'code': failure_code,
+				'message': failure_message,
+				'details': {},
+			},
+		) from error
 
 
 @router.post('/validate', response_model=WarnkarteValidationSummary)
@@ -230,8 +295,22 @@ def list_warnkarte_versions(
 			.limit(1)
 			.execute()
 		).data or []
+		archive_states = (
+			client.table('priwa_warnkarte_archive_states')
+			.select('version_id,is_archived')
+			.eq('project_id', project_id)
+			.execute()
+		).data or []
 	current_version_id = publication[0]['version_id'] if publication else None
-	return [{**version, 'is_current': version['id'] == current_version_id} for version in versions]
+	archived_version_ids = {state['version_id'] for state in archive_states if state['is_archived']}
+	return [
+		{
+			**version,
+			'is_current': version['id'] == current_version_id,
+			'is_archived': version['id'] in archived_version_ids,
+		}
+		for version in versions
+	]
 
 
 @router.post('/versions/{version_id}/publish', response_model=WarnkartePublicationResponse)
@@ -240,38 +319,46 @@ def publish_warnkarte_version(
 	token: Annotated[str, Depends(oauth2_scheme)],
 ):
 	require_user(token)
-	try:
-		with use_client(token) as client:
-			publication_id = client.rpc('priwa_publish_warnkarte', {'p_version_id': version_id}).execute().data
-	except Exception as error:
-		error_text = str(error)
-		if 'admin access is required' in error_text:
-			raise HTTPException(
-				status_code=status.HTTP_403_FORBIDDEN,
-				detail={
-					'code': 'ADMIN_REQUIRED',
-					'message': 'Nur PRIWA-Admins dürfen eine Warnkarte veröffentlichen.',
-					'details': {},
-				},
-			) from error
-		if 'Warnkarte version not found' in error_text:
-			raise HTTPException(
-				status_code=status.HTTP_404_NOT_FOUND,
-				detail={
-					'code': 'VERSION_NOT_FOUND',
-					'message': 'Die Warnkartenversion wurde nicht gefunden.',
-					'details': {'version_id': version_id},
-				},
-			) from error
-		raise HTTPException(
-			status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-			detail={
-				'code': 'PUBLISH_FAILED',
-				'message': 'Die Warnkarte konnte nicht veröffentlicht werden.',
-				'details': {},
-			},
-		) from error
+	publication_id = run_version_rpc(
+		token,
+		'priwa_publish_warnkarte',
+		version_id,
+		failure_code='PUBLISH_FAILED',
+		failure_message='Die Warnkarte konnte nicht veröffentlicht werden.',
+	)
 	return {'publication_id': publication_id, 'version_id': version_id}
+
+
+@router.post('/versions/{version_id}/archive', response_model=WarnkarteArchiveStateResponse)
+def archive_warnkarte_version(
+	version_id: str,
+	token: Annotated[str, Depends(oauth2_scheme)],
+):
+	require_user(token)
+	run_version_rpc(
+		token,
+		'priwa_archive_warnkarte',
+		version_id,
+		failure_code='ARCHIVE_FAILED',
+		failure_message='Die Warnkartenversion konnte nicht archiviert werden.',
+	)
+	return {'version_id': version_id, 'is_archived': True}
+
+
+@router.post('/versions/{version_id}/restore', response_model=WarnkarteArchiveStateResponse)
+def restore_warnkarte_version(
+	version_id: str,
+	token: Annotated[str, Depends(oauth2_scheme)],
+):
+	require_user(token)
+	run_version_rpc(
+		token,
+		'priwa_restore_warnkarte',
+		version_id,
+		failure_code='RESTORE_FAILED',
+		failure_message='Die Warnkartenversion konnte nicht wiederhergestellt werden.',
+	)
+	return {'version_id': version_id, 'is_archived': False}
 
 
 @router.get('/active')

@@ -85,6 +85,8 @@ export default function PriwaField() {
                 onImport={warnkarte.importFile}
                 onShowVersion={warnkarte.showVersion}
                 onPublish={warnkarte.publishVersion}
+                onArchive={warnkarte.archiveVersion}
+                onRestore={warnkarte.restoreVersion}
                 onClose={closeWarnkarteAdmin}
               />
             ),
@@ -96,10 +98,12 @@ export default function PriwaField() {
       closeWarnkarteAdmin,
       isWarnkarteAdminOpen,
       warnkarte.importFile,
+      warnkarte.archiveVersion,
       warnkarte.isLoadingVersions,
       warnkarte.selectedOverlay?.version_id,
       warnkarte.showVersion,
       warnkarte.publishVersion,
+      warnkarte.restoreVersion,
       warnkarte.validateFile,
       warnkarte.versions,
       warnkarte.versionsError,

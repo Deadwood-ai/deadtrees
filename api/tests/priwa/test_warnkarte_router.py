@@ -165,21 +165,23 @@ def test_import_uses_service_only_rpc_with_verified_actor(monkeypatch):
 
 
 class FakeRpc:
-	def __init__(self, allowed: bool):
-		self.allowed = allowed
+	def __init__(self, result):
+		self.result = result
 
 	def execute(self):
-		return type('Response', (), {'data': self.allowed})()
+		if isinstance(self.result, Exception):
+			raise self.result
+		return type('Response', (), {'data': self.result})()
 
 
 class FakeClient:
-	def __init__(self, allowed: bool):
-		self.allowed = allowed
+	def __init__(self, result):
+		self.result = result
 		self.calls = []
 
 	def rpc(self, name, payload):
 		self.calls.append((name, payload))
-		return FakeRpc(self.allowed)
+		return FakeRpc(self.result)
 
 
 def test_project_access_uses_database_admin_authorization(monkeypatch):
@@ -197,3 +199,88 @@ def test_project_access_uses_database_admin_authorization(monkeypatch):
 	assert error.value.status_code == 403
 	assert error.value.detail['code'] == 'ADMIN_REQUIRED'
 	assert client.calls == [('priwa_is_project_admin', {'p_project_id': 'project-1'})]
+
+
+@pytest.mark.parametrize(
+	('error_text', 'expected_status', 'expected_code'),
+	[
+		('Warnkarte current version cannot be archived', 409, 'CURRENT_VERSION_ARCHIVE_FORBIDDEN'),
+		('Warnkarte archived version cannot be published', 409, 'ARCHIVED_VERSION_PUBLISH_FORBIDDEN'),
+		('Warnkarte version not found', 404, 'VERSION_NOT_FOUND'),
+		('PRIWA project admin access is required', 403, 'ADMIN_REQUIRED'),
+	],
+)
+def test_version_action_database_errors_are_structured(
+	monkeypatch,
+	error_text,
+	expected_status,
+	expected_code,
+):
+	client = FakeClient(Exception(error_text))
+
+	@contextmanager
+	def use_fake_client(_token):
+		yield client
+
+	monkeypatch.setattr(priwa_warnkarte, 'use_client', use_fake_client)
+
+	with pytest.raises(HTTPException) as error:
+		priwa_warnkarte.run_version_rpc(
+			'token',
+			'priwa_archive_warnkarte',
+			'version-1',
+			failure_code='ARCHIVE_FAILED',
+			failure_message='Archivierung fehlgeschlagen.',
+		)
+
+	assert error.value.status_code == expected_status
+	assert error.value.detail['code'] == expected_code
+	expected_details = {} if expected_code == 'ADMIN_REQUIRED' else {'version_id': 'version-1'}
+	assert error.value.detail['details'] == expected_details
+
+
+def test_archive_and_restore_endpoints_use_authenticated_database_rpcs(monkeypatch):
+	client = FakeClient(42)
+
+	@contextmanager
+	def use_fake_client(_token):
+		yield client
+
+	monkeypatch.setattr(priwa_warnkarte, 'require_user', lambda _token: object())
+	monkeypatch.setattr(priwa_warnkarte, 'use_client', use_fake_client)
+
+	archived = priwa_warnkarte.archive_warnkarte_version('version-1', 'token')
+	restored = priwa_warnkarte.restore_warnkarte_version('version-1', 'token')
+
+	assert archived == {'version_id': 'version-1', 'is_archived': True}
+	assert restored == {'version_id': 'version-1', 'is_archived': False}
+	assert client.calls == [
+		('priwa_archive_warnkarte', {'p_version_id': 'version-1'}),
+		('priwa_restore_warnkarte', {'p_version_id': 'version-1'}),
+	]
+
+
+def test_unknown_archive_database_error_uses_operation_specific_failure(monkeypatch):
+	client = FakeClient(Exception('database unavailable'))
+
+	@contextmanager
+	def use_fake_client(_token):
+		yield client
+
+	monkeypatch.setattr(priwa_warnkarte, 'use_client', use_fake_client)
+
+	with pytest.raises(HTTPException) as error:
+		priwa_warnkarte.run_version_rpc(
+			'token',
+			'priwa_archive_warnkarte',
+			'version-1',
+			failure_code='ARCHIVE_FAILED',
+			failure_message='Archivierung fehlgeschlagen.',
+		)
+
+	assert error.value.status_code == 500
+	assert error.value.detail == {
+		'code': 'ARCHIVE_FAILED',
+		'message': 'Archivierung fehlgeschlagen.',
+		'details': {},
+	}
