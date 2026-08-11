@@ -617,6 +617,7 @@ def test_systemd_units_and_sshd_policy_restrict_reverse_transport():
 	assert 'StreamLocalBindUnlink yes' in sshd_config
 	assert sshd_config.rstrip().endswith('Match all')
 	assert tmpfiles == 'd /run/deadtrees-database-backup 0700 borg borg -\n'
+	assert 'from="BACKUP_HOST_SOURCE_ADDRESS",restrict,command="/home/dendro/.local/bin/deadtrees-db-backup-remote"' in playbook
 	assert 'from="127.0.0.1",restrict,command=' in playbook
 
 

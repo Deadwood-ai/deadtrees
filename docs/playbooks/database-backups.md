@@ -95,23 +95,29 @@ custom Borg RSH connects standard input/output to the private database-host Unix
 socket, which forwards to the protected backup-host Unix socket. No direct Borg
 SSH key is needed on the backup host.
 
-The backup host uses distinct database-host credentials for the two SSH roles:
+The backup host uses distinct database-host credentials for three SSH roles:
 
+- `/home/remote-backup/.ssh/id_ed25519` may invoke only the forced
+  `deadtrees-db-backup-remote` lifecycle helper and must have forwarding
+  disabled;
 - `/home/remote-backup/.ssh/id_ed25519_database_archive` may invoke only the
   forced `deadtrees-db-borg-archive` command and must have forwarding disabled;
 - `/home/remote-backup/.ssh/id_ed25519_database_tunnel` creates the private
   database-host Unix listener and invokes only the forced
   `deadtrees-borg-tunnel-guard hold` command.
 
-Both clients set `IdentitiesOnly=yes` and distinct pinned host-key aliases. The
-database-host `authorized_keys` entries must use `restrict` for the archive key
-and `from="BACKUP_HOST_SOURCE_ADDRESS",restrict,port-forwarding` for the tunnel
-key, with their respective forced commands. The tracked `sshd_config` drop-in
-restricts the `borg` account to remote forwarding, keeps gateway ports disabled,
-and creates stream-local listeners with mode `0600`. The source restriction ties
-the credential to the backup host account that already owns the destination
-repository; the account policy denies local forwards to database-host services.
-The tunnel guard rejects every requested command except its exact hold command.
+The clients use pinned host keys, and the archive and tunnel clients also set
+`IdentitiesOnly=yes` with distinct aliases. The database-host `authorized_keys`
+entry for the lifecycle key must use
+`from="BACKUP_HOST_SOURCE_ADDRESS",restrict,command="/home/dendro/.local/bin/deadtrees-db-backup-remote"`.
+The archive key uses `restrict` with its forced archive command. The tunnel key
+uses `from="BACKUP_HOST_SOURCE_ADDRESS",restrict,port-forwarding` with its forced
+hold command. The tracked `sshd_config` drop-in restricts the `borg` account to
+remote forwarding, keeps gateway ports disabled, and creates stream-local
+listeners with mode `0600`. The source restriction ties the credentials to the
+backup host account that already owns the destination repository; the account
+policy denies local forwards to database-host services. The tunnel guard rejects
+every requested command except its exact hold command.
 
 The source identity at `/home/borg/.config/deadtrees-backup/id_ed25519` must have
 a separate `dendro` authorization using
@@ -155,7 +161,8 @@ sudo -u nobody socat -T1 - UNIX-CONNECT:/run/deadtrees-database-backup/borg.sock
 The second command must fail with permission denied. A local forward such as
 `-L 15432:127.0.0.1:5432` and a stream-local forward such as
 `-L /tmp/test.sock:/run/postgresql/.s.PGSQL.5432` must also be rejected by
-`sshd`.
+`sshd`. Make the same negative `-L` and `-R` checks with the lifecycle key while
+confirming that its `space-status` command still succeeds.
 
 After installing the credential-free unit files, reload systemd and enable the
 socket listener plus the database-host tunnel instance:
