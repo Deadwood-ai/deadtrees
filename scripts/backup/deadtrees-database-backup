@@ -24,10 +24,24 @@ archives_after=""
 new_archives=""
 new_archive_count=0
 archive_status=0
+active_child_pid=""
 export BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes
 
+run_interruptible() {
+	local status
+	"$@" &
+	active_child_pid=$!
+	if wait "$active_child_pid"; then
+		status=0
+	else
+		status=$?
+	fi
+	active_child_pid=""
+	return "$status"
+}
+
 ssh_remote() {
-	"$ssh_bin" \
+	run_interruptible "$ssh_bin" \
 		-i "$identity" \
 		-o BatchMode=yes \
 		-o ConnectTimeout=15 \
@@ -45,6 +59,18 @@ cleanup() {
 	if [[ -n "$archives_after" ]]; then
 		rm -f "$archives_after"
 	fi
+}
+
+handle_signal() {
+	local status="$1"
+	trap - EXIT INT TERM
+	if [[ -n "$active_child_pid" ]]; then
+		kill -TERM "$active_child_pid" >/dev/null 2>&1 || true
+		wait "$active_child_pid" >/dev/null 2>&1 || true
+		active_child_pid=""
+	fi
+	cleanup
+	exit "$status"
 }
 
 list_archives() {
@@ -67,7 +93,7 @@ run_archive_transport() {
 
 ssh_archive() {
 	local mode="$1"
-	"$ssh_bin" \
+	run_interruptible "$ssh_bin" \
 		-i "$archive_identity" \
 		-o BatchMode=yes \
 		-o ConnectTimeout=15 \
@@ -91,7 +117,9 @@ if ! "$flock_bin" -n 9; then
 	exit 75
 fi
 
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'handle_signal 130' INT
+trap 'handle_signal 143' TERM
 
 ssh_archive probe >/dev/null
 ssh_remote cleanup >/dev/null

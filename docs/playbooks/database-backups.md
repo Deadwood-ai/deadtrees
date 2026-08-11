@@ -114,11 +114,12 @@ repository; the account policy denies local forwards to database-host services.
 The tunnel guard rejects every requested command except its exact hold command.
 
 The source identity at `/home/borg/.config/deadtrees-backup/id_ed25519` must have
-a separate `dendro` authorization restricted to `from="127.0.0.1"` and the
-forced `/home/dendro/.local/bin/deadtrees-db-backup-stream` command. That helper
-also validates `SSH_ORIGINAL_COMMAND`; attempts to use the source key for dump,
-cleanup, or status operations fail closed. Keep all private keys and concrete
-public-key lines host-local.
+a separate `dendro` authorization using
+`from="127.0.0.1",restrict,command="/home/dendro/.local/bin/deadtrees-db-backup-stream"`.
+The `restrict` option disables TCP and Unix-socket forwarding for this key. The
+helper also validates `SSH_ORIGINAL_COMMAND`; attempts to use the source key for
+dump, cleanup, or status operations fail closed. Keep all private keys and
+concrete public-key lines host-local.
 
 Install the tmpfiles and SSH policies before starting the tunnel. Replace
 `BACKUP_HOST_SOURCE_ADDRESS` in the tunnel key's host-local `authorized_keys`
@@ -130,7 +131,7 @@ stat -c '%a %U %G %n' /run/deadtrees-database-backup
 sudo sshd -t
 sudo sshd -T \
   -C user=borg,host=data2.deadtrees.earth,addr=BACKUP_HOST_SOURCE_ADDRESS \
-  | grep -E 'allowtcpforwarding|gatewayports|streamlocalbind'
+  | grep -E 'allowtcpforwarding|allowstreamlocalforwarding|gatewayports|streamlocalbind'
 sudo systemctl reload ssh
 sudo -u remote-backup ssh -T \
   -i /home/remote-backup/.ssh/id_ed25519_database_tunnel \
@@ -140,10 +141,11 @@ sudo -u remote-backup ssh -T \
 ```
 
 The runtime directory must be mode `0700`, owner and group `borg`. The effective
-SSH policy must report remote-only forwarding, disabled gateway ports, mask
-`0177`, and stream-local unlink enabled. Stop the foreground verification after
-the listener is established, confirm the socket is mode `0600` and owned by
-`borg`, then confirm an unrelated local UID cannot connect:
+SSH policy must report both TCP and Unix-socket forwarding as remote-only,
+disabled gateway ports, mask `0177`, and stream-local unlink enabled. Stop the
+foreground verification after the listener is established, confirm the socket
+is mode `0600` and owned by `borg`, then confirm an unrelated local UID cannot
+connect:
 
 ```bash
 stat -c '%a %U %G %n' /run/deadtrees-database-backup/borg.sock
@@ -151,7 +153,9 @@ sudo -u nobody socat -T1 - UNIX-CONNECT:/run/deadtrees-database-backup/borg.sock
 ```
 
 The second command must fail with permission denied. A local forward such as
-`-L 15432:127.0.0.1:5432` must also be rejected by `sshd`.
+`-L 15432:127.0.0.1:5432` and a stream-local forward such as
+`-L /tmp/test.sock:/run/postgresql/.s.PGSQL.5432` must also be rejected by
+`sshd`.
 
 After installing the credential-free unit files, reload systemd and enable the
 socket listener plus the database-host tunnel instance:

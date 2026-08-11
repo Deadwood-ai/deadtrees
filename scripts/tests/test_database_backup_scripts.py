@@ -2,6 +2,7 @@ import importlib.util
 import os
 import shlex
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -18,6 +19,7 @@ BACKUP_TMPFILES = ROOT / 'scripts' / 'backup' / 'tmpfiles.d'
 NIGHTLY_BACKUPS = ROOT / 'scripts' / 'backup' / 'deadtrees-nightly-backups'
 OPERATOR_STATUS = ROOT / 'scripts' / 'operator_status.py'
 PLATFORM_STATUS_PLAYBOOK = ROOT / 'docs' / 'playbooks' / 'platform-status-check.md'
+DATABASE_BACKUP_PLAYBOOK = ROOT / 'docs' / 'playbooks' / 'database-backups.md'
 OPERATOR_SPEC = importlib.util.spec_from_file_location('operator_status', OPERATOR_STATUS)
 assert OPERATOR_SPEC is not None and OPERATOR_SPEC.loader is not None
 operator_status = importlib.util.module_from_spec(OPERATOR_SPEC)
@@ -212,6 +214,46 @@ def test_unavailable_borg_endpoint_prevents_database_dump(tmp_path):
 	commands = (tmp_path / 'commands.log').read_text()
 	assert 'ssh:archive-helper probe' in commands
 	assert 'ssh:dump' not in commands
+
+
+def test_term_stops_active_ssh_and_exits_after_cleanup(tmp_path):
+	env = _backup_environment(tmp_path, transport_status=0)
+	ssh = Path(env['DEADTREES_DB_BACKUP_SSH_BIN'])
+	started = tmp_path / 'dump-started'
+	terminated = tmp_path / 'dump-terminated'
+	_write_executable(
+		ssh,
+		"""#!/usr/bin/env bash
+set -eu
+command="${!#}"
+printf 'ssh:%s\n' "$command" >>"$FAKE_COMMAND_LOG"
+case "$command" in
+"$FAKE_ARCHIVE_COMMAND probe"|space-status) exit 0 ;;
+cleanup) touch "$FAKE_CLEANUP_MARKER" ;;
+dump)
+	touch "$FAKE_DUMP_STARTED"
+	trap 'touch "$FAKE_DUMP_TERMINATED"; exit 143' TERM INT
+	while :; do sleep 0.05; done
+	;;
+*) exit 64 ;;
+esac
+""",
+	)
+	env['FAKE_DUMP_STARTED'] = str(started)
+	env['FAKE_DUMP_TERMINATED'] = str(terminated)
+
+	process = subprocess.Popen([DATABASE_BACKUP], env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+	deadline = time.monotonic() + 5
+	while not started.exists() and time.monotonic() < deadline:
+		time.sleep(0.05)
+	assert started.exists()
+	process.terminate()
+	stdout, stderr = process.communicate(timeout=5)
+
+	assert process.returncode == 143, (stdout, stderr)
+	assert terminated.exists()
+	assert (tmp_path / 'cleanup-complete').exists()
+	assert 'ssh:verify' not in (tmp_path / 'commands.log').read_text()
 
 
 def test_archive_connection_uses_dedicated_identity_and_host_alias(tmp_path):
@@ -551,6 +593,7 @@ def test_systemd_units_and_sshd_policy_restrict_reverse_transport():
 	tunnel = (BACKUP_SYSTEMD / 'reverse-tunnel@.service').read_text()
 	sshd_config = BACKUP_SSHD_CONFIG.read_text()
 	tmpfiles = (BACKUP_TMPFILES / 'deadtrees-database-backup.conf').read_text()
+	playbook = DATABASE_BACKUP_PLAYBOOK.read_text()
 
 	assert 'ListenStream=/run/remote-backup/database-borg.sock' in socket
 	assert 'Accept=yes' in socket
@@ -568,11 +611,13 @@ def test_systemd_units_and_sshd_policy_restrict_reverse_transport():
 	assert 'Restart=always' in tunnel
 	assert 'Match User borg' in sshd_config
 	assert 'AllowTcpForwarding remote' in sshd_config
+	assert 'AllowStreamLocalForwarding remote' in sshd_config
 	assert 'GatewayPorts no' in sshd_config
 	assert 'StreamLocalBindMask 0177' in sshd_config
 	assert 'StreamLocalBindUnlink yes' in sshd_config
 	assert sshd_config.rstrip().endswith('Match all')
 	assert tmpfiles == 'd /run/deadtrees-database-backup 0700 borg borg -\n'
+	assert 'from="127.0.0.1",restrict,command=' in playbook
 
 
 def test_nightly_backup_continues_after_stage_failure(tmp_path):
