@@ -5,7 +5,7 @@ umask 077
 
 readonly container="${DEADTREES_DB_CONTAINER:-supabase-db}"
 readonly stage="${DEADTREES_DB_BACKUP_STAGE:-/var/lib/postgresql/data/.deadtrees-logical-backup}"
-readonly socket_path="${DEADTREES_BORG_SOCKET_PATH:-/tmp/database-backup-borg.sock}"
+readonly socket_path="${DEADTREES_BORG_SOCKET_PATH:-/run/deadtrees-database-backup/borg.sock}"
 readonly ss_bin="${DEADTREES_SS_BIN:-ss}"
 readonly socket_test_bin="${DEADTREES_SOCKET_TEST_BIN:-test}"
 readonly docker_bin="${DEADTREES_DOCKER_BIN:-docker}"

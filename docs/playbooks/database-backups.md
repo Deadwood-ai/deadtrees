@@ -82,6 +82,7 @@ The tracked sources map to these production locations:
 | `scripts/backup/systemd/database-backup-borg.socket` | `/etc/systemd/system/database-backup-borg.socket` |
 | `scripts/backup/systemd/database-backup-borg@.service` | `/etc/systemd/system/database-backup-borg@.service` |
 | `scripts/backup/systemd/reverse-tunnel@.service` | `/etc/systemd/system/reverse-tunnel@.service` |
+| `scripts/backup/tmpfiles.d/deadtrees-database-backup.conf` | `/etc/tmpfiles.d/deadtrees-database-backup.conf` on the database host |
 
 Install executable scripts with mode `0755` and configuration with mode `0600`,
 using an atomic replacement and retaining the previous files for rollback. The
@@ -105,6 +106,18 @@ and `restrict,port-forwarding` for the tunnel key, with their respective forced
 commands. The tunnel guard rejects every requested command except its exact
 hold command, so the forwarding credential cannot execute arbitrary commands.
 Keep the two private keys and concrete public-key lines host-local.
+
+On the database host, the tmpfiles configuration provisions
+`/run/deadtrees-database-backup` as `borg:borg` mode `0700`. The reverse socket
+lives inside this directory, preventing other local users from occupying or
+replacing its listener path. Create and verify it before starting the tunnel:
+
+```bash
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/deadtrees-database-backup.conf
+stat -c '%a %U %G %n' /run/deadtrees-database-backup
+```
+
+The expected result is mode `700`, owner `borg`, and group `borg`.
 
 After installing the credential-free unit files, reload systemd and enable the
 socket listener plus the database-host tunnel instance:

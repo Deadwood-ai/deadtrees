@@ -16,7 +16,7 @@ ExecStart=/usr/bin/ssh -T \
   -o StreamLocalBindUnlink=yes \
   -o UserKnownHostsFile=/home/remote-backup/.ssh/known_hosts \
   -o HostKeyAlias=data2-database-tunnel \
-  -R /tmp/database-backup-borg.sock:/run/remote-backup/database-borg.sock \
+  -R /run/deadtrees-database-backup/borg.sock:/run/remote-backup/database-borg.sock \
   borg@%i /home/borg/.local/bin/deadtrees-borg-tunnel-guard hold
 Restart=always
 RestartSec=5s

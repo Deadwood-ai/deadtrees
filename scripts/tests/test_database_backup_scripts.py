@@ -11,8 +11,10 @@ DATABASE_BORG_ARCHIVE = ROOT / 'scripts' / 'backup' / 'deadtrees-db-borg-archive
 DATABASE_BORG_RSH = ROOT / 'scripts' / 'backup' / 'deadtrees-borg-rsh'
 DATABASE_BORG_TUNNEL_GUARD = ROOT / 'scripts' / 'backup' / 'deadtrees-borg-tunnel-guard'
 BACKUP_SYSTEMD = ROOT / 'scripts' / 'backup' / 'systemd'
+BACKUP_TMPFILES = ROOT / 'scripts' / 'backup' / 'tmpfiles.d'
 NIGHTLY_BACKUPS = ROOT / 'scripts' / 'backup' / 'deadtrees-nightly-backups'
 OPERATOR_STATUS = ROOT / 'scripts' / 'operator_status.py'
+PLATFORM_STATUS_PLAYBOOK = ROOT / 'docs' / 'playbooks' / 'platform-status-check.md'
 OPERATOR_SPEC = importlib.util.spec_from_file_location('operator_status', OPERATOR_STATUS)
 assert OPERATOR_SPEC is not None and OPERATOR_SPEC.loader is not None
 operator_status = importlib.util.module_from_spec(OPERATOR_SPEC)
@@ -358,6 +360,14 @@ esac
 	]
 
 
+def test_operator_fallback_documents_completed_archive_filter():
+	playbook = PLATFORM_STATUS_PLAYBOOK.read_text()
+	command = playbook.split('ssh -o BatchMode=yes -o ConnectTimeout=5 remote-backup@dtbackup', 1)[1].split('```', 1)[0]
+
+	assert 'list --last 1' not in command
+	assert '$1 !~ /[.]checkpoint([.][0-9]+)?$/' in command
+
+
 def test_archive_helper_reproduces_reviewed_production_command(tmp_path):
 	command_log = tmp_path / 'archive.log'
 	borg = tmp_path / 'borg'
@@ -481,6 +491,7 @@ def test_systemd_units_provision_reverse_socket_lifecycle():
 	socket = (BACKUP_SYSTEMD / 'database-backup-borg.socket').read_text()
 	server = (BACKUP_SYSTEMD / 'database-backup-borg@.service').read_text()
 	tunnel = (BACKUP_SYSTEMD / 'reverse-tunnel@.service').read_text()
+	tmpfiles = (BACKUP_TMPFILES / 'deadtrees-database-backup.conf').read_text()
 
 	assert 'ListenStream=/run/remote-backup/database-borg.sock' in socket
 	assert 'Accept=yes' in socket
@@ -493,9 +504,10 @@ def test_systemd_units_provision_reverse_socket_lifecycle():
 	assert '-i /home/remote-backup/.ssh/id_ed25519_database_tunnel' in tunnel
 	assert '-o IdentitiesOnly=yes' in tunnel
 	assert '-o HostKeyAlias=data2-database-tunnel' in tunnel
-	assert '-R /tmp/database-backup-borg.sock:/run/remote-backup/database-borg.sock' in tunnel
+	assert '-R /run/deadtrees-database-backup/borg.sock:/run/remote-backup/database-borg.sock' in tunnel
 	assert 'borg@%i /home/borg/.local/bin/deadtrees-borg-tunnel-guard hold' in tunnel
 	assert 'Restart=always' in tunnel
+	assert tmpfiles == 'd /run/deadtrees-database-backup 0700 borg borg -\n'
 
 
 def test_nightly_backup_continues_after_stage_failure(tmp_path):
