@@ -86,10 +86,10 @@ exit "$FAKE_TRANSPORT_STATUS"
 		"""#!/usr/bin/env bash
 set -eu
 printf 'borg:%s\n' "$*" >>"$FAKE_COMMAND_LOG"
-case "$1" in
+	case "$1" in
 	list)
 		if [[ "$*" == *'--short'* ]]; then
-			printf 'postgres-directory.tar\n'
+			printf '%s\n' "$FAKE_ARCHIVE_PAYLOAD"
 		else
 			cat "$FAKE_ARCHIVES"
 		fi
@@ -133,6 +133,7 @@ printf 'borgmatic:%s\n' "$*" >>"$FAKE_COMMAND_LOG"
 		'FAKE_COMMAND_LOG': str(command_log),
 		'FAKE_SSH_ARGS_LOG': str(tmp_path / 'ssh-args.log'),
 		'FAKE_ARCHIVE_COMMAND': 'archive-helper',
+		'FAKE_ARCHIVE_PAYLOAD': 'postgres-directory.tar',
 		'FAKE_CREATE_ARCHIVE': '1' if create_archive else '0',
 		'FAKE_CREATE_ARCHIVE_ON_ATTEMPT': '1',
 		'FAKE_CLEANUP_MARKER': str(tmp_path / 'cleanup-complete'),
@@ -163,6 +164,18 @@ def test_transport_failure_without_archive_fails_closed(tmp_path):
 	assert result.returncode != 0
 	assert 'Expected exactly one completed new Borg archive, found 0' in result.stderr
 	assert 'borgmatic:' not in (tmp_path / 'commands.log').read_text()
+
+
+def test_committed_archive_failure_preserves_dump_stage(tmp_path):
+	env = _backup_environment(tmp_path, transport_status=0)
+	env['FAKE_ARCHIVE_PAYLOAD'] = 'unexpected-payload'
+
+	result = subprocess.run([DATABASE_BACKUP], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode != 0
+	assert 'does not contain postgres-directory.tar' in result.stderr
+	assert 'Preserving the database dump stage for archive recovery.' in result.stderr
+	assert (tmp_path / 'commands.log').read_text().splitlines().count('ssh:cleanup') == 1
 
 
 def test_transport_retries_once_when_first_attempt_commits_no_archive(tmp_path):
@@ -369,12 +382,12 @@ esac
 	assert '/var/lib/postgresql/data/backup-direct' not in commands
 
 
-def test_stream_helper_denies_dump_and_cleanup_commands(tmp_path):
+def test_stream_helper_denies_lifecycle_commands(tmp_path):
 	docker = tmp_path / 'docker'
 	docker_marker = tmp_path / 'docker-ran'
 	_write_executable(docker, '#!/usr/bin/env bash\ntouch "$FAKE_DOCKER_MARKER"\n')
 
-	for command in ('dump', 'cleanup'):
+	for command in ('dump', 'cleanup', 'stream'):
 		env = {
 			**os.environ,
 			'SSH_ORIGINAL_COMMAND': command,
@@ -592,21 +605,25 @@ def test_systemd_units_and_sshd_policy_restrict_reverse_transport():
 	server = (BACKUP_SYSTEMD / 'database-backup-borg@.service').read_text()
 	tunnel = (BACKUP_SYSTEMD / 'reverse-tunnel@.service').read_text()
 	sshd_config = BACKUP_SSHD_CONFIG.read_text()
-	tmpfiles = (BACKUP_TMPFILES / 'deadtrees-database-backup.conf').read_text()
+	database_tmpfiles = (BACKUP_TMPFILES / 'deadtrees-database-backup.conf').read_text()
+	repository_tmpfiles = (BACKUP_TMPFILES / 'deadtrees-database-backup-repository.conf').read_text()
 	playbook = DATABASE_BACKUP_PLAYBOOK.read_text()
 
-	assert 'ListenStream=/run/remote-backup/database-borg.sock' in socket
+	assert 'ListenStream=/run/deadtrees-database-backup-repository/borg.sock' in socket
 	assert 'Accept=yes' in socket
 	assert 'SocketUser=remote-backup' in socket
-	assert 'SocketMode=0600' in socket
+	assert 'SocketGroup=deadtrees-db-tunnel' in socket
+	assert 'SocketMode=0660' in socket
 	assert 'StandardInput=socket' in server
 	assert '--restrict-to-path /mnt/raid/backups/supabase.deadtrees.earth' in server
 	assert '/mnt/raid/backups/data2.deadtrees.earth' not in server
 	assert '/mnt/raid/backups/test' not in server
-	assert '-i /home/remote-backup/.ssh/id_ed25519_database_tunnel' in tunnel
+	assert 'User=deadtrees-db-tunnel' in tunnel
+	assert 'Group=deadtrees-db-tunnel' in tunnel
+	assert '-i /home/deadtrees-db-tunnel/.ssh/id_ed25519' in tunnel
 	assert '-o IdentitiesOnly=yes' in tunnel
 	assert '-o HostKeyAlias=data2-database-tunnel' in tunnel
-	assert '-R /run/deadtrees-database-backup/borg.sock:/run/remote-backup/database-borg.sock' in tunnel
+	assert '-R /run/deadtrees-database-backup/borg.sock:/run/deadtrees-database-backup-repository/borg.sock' in tunnel
 	assert 'borg@%i /home/borg/.local/bin/deadtrees-borg-tunnel-guard hold' in tunnel
 	assert 'Restart=always' in tunnel
 	assert 'Match User borg' in sshd_config
@@ -616,7 +633,10 @@ def test_systemd_units_and_sshd_policy_restrict_reverse_transport():
 	assert 'StreamLocalBindMask 0177' in sshd_config
 	assert 'StreamLocalBindUnlink yes' in sshd_config
 	assert sshd_config.rstrip().endswith('Match all')
-	assert tmpfiles == 'd /run/deadtrees-database-backup 0700 borg borg -\n'
+	assert database_tmpfiles == 'd /run/deadtrees-database-backup 0700 borg borg -\n'
+	assert repository_tmpfiles == (
+		'd /run/deadtrees-database-backup-repository 0750 remote-backup deadtrees-db-tunnel -\n'
+	)
 	assert 'from="BACKUP_HOST_SOURCE_ADDRESS",restrict,command="/home/dendro/.local/bin/deadtrees-db-backup-remote"' in playbook
 	assert 'from="127.0.0.1",restrict,command=' in playbook
 

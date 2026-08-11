@@ -25,6 +25,7 @@ new_archives=""
 new_archive_count=0
 archive_status=0
 active_child_pid=""
+preserve_stage=0
 export BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes
 
 run_interruptible() {
@@ -52,7 +53,11 @@ ssh_remote() {
 }
 
 cleanup() {
-	ssh_remote cleanup >/dev/null 2>&1 || true
+	if [[ "$preserve_stage" -eq 0 ]]; then
+		ssh_remote cleanup >/dev/null 2>&1 || true
+	else
+		printf 'Preserving the database dump stage for archive recovery.\n' >&2
+	fi
 	if [[ -n "$archives_before" ]]; then
 		rm -f "$archives_before"
 	fi
@@ -149,7 +154,9 @@ if [[ "$archive_status" -ne 0 && "$new_archive_count" -eq 0 ]]; then
 	refresh_archive_diff
 fi
 
-ssh_remote cleanup >/dev/null
+if [[ -n "$new_archives" ]]; then
+	preserve_stage=1
+fi
 if [[ "$new_archive_count" -ne 1 ]]; then
 	printf 'Expected exactly one completed new Borg archive, found %s; transport exit status was %s.\n' \
 		"$new_archive_count" "$archive_status" >&2
@@ -183,6 +190,8 @@ printf '%s Applying retention and verifying the new Borg repository.\n' "$(times
 "$borgmatic" --config "$maintenance_config" compact
 "$borgmatic" --config "$maintenance_config" check
 
+preserve_stage=0
+ssh_remote cleanup >/dev/null
 finished_epoch="$(date +%s)"
 printf '%s Backup completed in %s seconds total.\n' \
 	"$(timestamp)" "$((finished_epoch - start_epoch))"
