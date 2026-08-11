@@ -1,0 +1,16 @@
+# Borgmatic maintenance configuration for the direct PostgreSQL backup.
+# Archive creation is performed by deadtrees-database-backup before these
+# retention and integrity operations run.
+source_directories: []
+
+repositories:
+  - path: /mnt/raid/backups/supabase.deadtrees.earth
+    label: database_dump
+
+archive_name_format: 'database-dump-{now}'
+match_archives: '*'
+
+keep_daily: 14
+keep_weekly: 4
+keep_monthly: 6
+keep_yearly: 1

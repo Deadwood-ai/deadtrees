@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+umask 077
+
+readonly container="${DEADTREES_DB_CONTAINER:-supabase-db}"
+readonly stage="${DEADTREES_DB_BACKUP_STAGE:-/var/lib/postgresql/data/.deadtrees-logical-backup}"
+readonly socket_path="${DEADTREES_BORG_SOCKET_PATH:-/tmp/borg.sock}"
+readonly ss_bin="${DEADTREES_SS_BIN:-ss}"
+readonly socket_test_bin="${DEADTREES_SOCKET_TEST_BIN:-test}"
+readonly command="${SSH_ORIGINAL_COMMAND:-}"
+
+case "$command" in
+	dump)
+		docker exec --user postgres "$container" test ! -e "$stage"
+		exec docker exec --user postgres "$container" \
+			pg_dump \
+			--no-password \
+			--clean \
+			--if-exists \
+			--username postgres \
+			--format directory \
+			--compress=0 \
+			--file "$stage" \
+			--jobs=2 \
+			postgres
+		;;
+	stream)
+		docker exec --user postgres "$container" test -f "$stage/toc.dat"
+		docker exec --user postgres "$container" \
+			tar --format=posix -C "$stage" -cf - . \
+			| zstd --threads=0 -3 --stdout
+		;;
+	stream-local)
+		docker exec --user postgres "$container" test -f "$stage/toc.dat"
+		exec docker exec --user postgres "$container" \
+			tar --format=posix -C "$stage" -cf - .
+		;;
+	verify)
+		docker exec --user postgres "$container" test -f "$stage/toc.dat"
+		docker exec --user postgres "$container" pg_restore --list "$stage" >/dev/null
+		printf 'verified\n'
+		;;
+	status)
+		if docker exec --user postgres "$container" test -d "$stage"; then
+			docker exec --user postgres "$container" du -sb "$stage"
+		else
+			printf 'absent\n'
+		fi
+		;;
+	tunnel-status)
+		"$socket_test_bin" -S "$socket_path"
+		"$ss_bin" -xlH | grep -Fq -- "$socket_path"
+		printf 'ready\n'
+		;;
+	cleanup)
+		exec docker exec --user postgres "$container" rm -rf -- "$stage"
+		;;
+	*)
+		printf 'Command denied.\n' >&2
+		exit 64
+		;;
+esac

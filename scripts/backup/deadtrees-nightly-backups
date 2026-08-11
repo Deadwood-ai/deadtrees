@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+
+set -u
+
+umask 077
+
+readonly borgmatic="${DEADTREES_BORGMATIC_BIN:-/home/remote-backup/.local/bin/borgmatic}"
+readonly config_dir="${DEADTREES_BORGMATIC_CONFIG_DIR:-/home/remote-backup/.config/borgmatic}"
+readonly database_backup="${DEADTREES_DATABASE_BACKUP_BIN:-/home/remote-backup/.local/bin/deadtrees-database-backup}"
+readonly lock_file="${DEADTREES_NIGHTLY_LOCK_FILE:-/home/remote-backup/.cache/deadtrees-nightly-backups.lock}"
+readonly flock_bin="${DEADTREES_FLOCK_BIN:-flock}"
+
+timestamp() {
+	date '+%Y-%m-%dT%H:%M:%S%z'
+}
+
+mkdir -p "$(dirname "$lock_file")"
+exec 9>"$lock_file"
+if ! "$flock_bin" -n 9; then
+	printf '%s %s\n' "$(timestamp)" 'Another nightly backup is already running' >&2
+	exit 75
+fi
+
+status=0
+
+run_backup() {
+	local name="$1"
+	shift
+
+	printf '%s Starting %s backup\n' "$(timestamp)" "$name"
+	if "$@"; then
+		printf '%s Completed %s backup\n' "$(timestamp)" "$name"
+	else
+		local result=$?
+		printf '%s %s backup failed with exit status %s\n' "$(timestamp)" "$name" "$result" >&2
+		status=1
+	fi
+}
+
+run_backup globals "$borgmatic" --config "$config_dir/database_dumpall.yaml"
+run_backup database "$database_backup"
+run_backup storage "$borgmatic" --config "$config_dir/storage.yaml"
+
+exit "$status"

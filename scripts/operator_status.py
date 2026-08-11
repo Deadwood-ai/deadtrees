@@ -270,7 +270,7 @@ def backup_command() -> str:
 		"borgmatic=/home/remote-backup/.local/bin/borgmatic; "
 		"config_dir=/home/remote-backup/.config/borgmatic; "
 		"if [ ! -x \"$borgmatic\" ]; then echo \"borgmatic not executable: $borgmatic\" >&2; exit 1; fi; "
-		"for spec in database_dump:database_dump.yaml storage:storage.yaml; do "
+		"for spec in database_dump:database_dump_direct.yaml storage:storage.yaml; do "
 		"name=${spec%%:*}; "
 		"config=$config_dir/${spec#*:}; "
 		"latest=$(\"$borgmatic\" --config \"$config\" list --last 1 "

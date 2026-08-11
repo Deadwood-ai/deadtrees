@@ -72,7 +72,7 @@ full platform check inside that broader operator cadence.
    ```bash
    ssh -o BatchMode=yes -o ConnectTimeout=5 dtbackup 'hostname'
    ssh -o BatchMode=yes -o ConnectTimeout=5 remote-backup@dtbackup \
-     '/home/remote-backup/.local/bin/borgmatic --config /home/remote-backup/.config/borgmatic/database_dump.yaml list --last 1'
+     '/home/remote-backup/.local/bin/borgmatic --config /home/remote-backup/.config/borgmatic/database_dump_direct.yaml list --last 1'
    ```
 
 1. Confirm local access files exist if host or MCP access is needed:
@@ -151,7 +151,8 @@ state that host-level corroboration was unavailable.
 
 Backup freshness is not continuously monitored by a Codex thread. During daily
 or weekly operator checks, combine the live Borg freshness probe with a bounded
-Gmail alert search.
+Gmail alert search. See [`database-backups.md`](database-backups.md) for the
+backup architecture, success contract, validation, and rollback procedures.
 
 Checklist:
 
