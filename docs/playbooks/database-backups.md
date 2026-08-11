@@ -43,6 +43,8 @@ wrapper accepts the database stage only when all of these postconditions hold:
 - the reverse Unix socket exists and has an active listener before the dump;
 - exactly one new `database-dump-*` archive appeared;
 - the new archive contains `postgres-directory.tar`;
+- a failed transport that committed no archive is retried at most once; a
+  committed archive is never retried;
 - if transport teardown returned a non-zero status after the archive committed,
   `borg check --archives-only --verify-data` succeeds for that exact archive;
 - prune, compact, and the configured Borg check all succeed.

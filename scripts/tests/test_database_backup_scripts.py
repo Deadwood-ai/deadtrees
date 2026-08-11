@@ -41,8 +41,17 @@ fi
 if [[ "$command" == cleanup || "$command" == dump || "$command" == verify ]]; then
 	exit 0
 fi
-if [[ "$FAKE_CREATE_ARCHIVE" == 1 ]]; then
+attempt=0
+if [[ -f "$FAKE_ATTEMPTS" ]]; then
+	attempt=$(cat "$FAKE_ATTEMPTS")
+fi
+attempt=$((attempt + 1))
+printf '%s\n' "$attempt" >"$FAKE_ATTEMPTS"
+if [[ "$FAKE_CREATE_ARCHIVE" == 1 && "$attempt" -ge "$FAKE_CREATE_ARCHIVE_ON_ATTEMPT" ]]; then
 	printf 'database-dump-2026-08-11T10:00:00\n' >>"$FAKE_ARCHIVES"
+fi
+if [[ "$attempt" -eq 1 && -n "$FAKE_FIRST_TRANSPORT_STATUS" ]]; then
+	exit "$FAKE_FIRST_TRANSPORT_STATUS"
 fi
 exit "$FAKE_TRANSPORT_STATUS"
 """,
@@ -90,9 +99,13 @@ printf 'borgmatic:%s\n' "$*" >>"$FAKE_COMMAND_LOG"
 		'DEADTREES_DB_BACKUP_ARCHIVE_REMOTE': 'borg@example.test',
 		'DEADTREES_DB_BACKUP_ARCHIVE_COMMAND': 'archive-helper',
 		'DEADTREES_DB_BACKUP_FLOCK_BIN': str(flock),
+		'DEADTREES_DB_BACKUP_RETRY_DELAY': '0',
 		'FAKE_ARCHIVES': str(archives),
+		'FAKE_ATTEMPTS': str(tmp_path / 'attempts'),
 		'FAKE_COMMAND_LOG': str(command_log),
 		'FAKE_CREATE_ARCHIVE': '1' if create_archive else '0',
+		'FAKE_CREATE_ARCHIVE_ON_ATTEMPT': '1',
+		'FAKE_FIRST_TRANSPORT_STATUS': '',
 		'FAKE_TRANSPORT_STATUS': str(transport_status),
 		'FAKE_TUNNEL_STATUS': '0',
 	}
@@ -117,6 +130,18 @@ def test_transport_failure_without_archive_fails_closed(tmp_path):
 	assert result.returncode != 0
 	assert 'Expected exactly one new Borg archive, found 0' in result.stderr
 	assert 'borgmatic:' not in (tmp_path / 'commands.log').read_text()
+
+
+def test_transport_retries_once_when_first_attempt_commits_no_archive(tmp_path):
+	env = _backup_environment(tmp_path, transport_status=0)
+	env['FAKE_CREATE_ARCHIVE_ON_ATTEMPT'] = '2'
+	env['FAKE_FIRST_TRANSPORT_STATUS'] = '2'
+
+	result = subprocess.run([DATABASE_BACKUP], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 0, result.stderr
+	assert (tmp_path / 'attempts').read_text() == '2\n'
+	assert 'retrying once' in result.stderr
 
 
 def test_unavailable_tunnel_prevents_database_dump(tmp_path):

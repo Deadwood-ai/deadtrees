@@ -14,9 +14,13 @@ readonly borg_bin="${DEADTREES_DB_BACKUP_BORG_BIN:-borg}"
 readonly archive_remote="${DEADTREES_DB_BACKUP_ARCHIVE_REMOTE:-borg@data2.deadtrees.earth}"
 readonly archive_command="${DEADTREES_DB_BACKUP_ARCHIVE_COMMAND:-/home/borg/.local/bin/deadtrees-db-borg-archive}"
 readonly flock_bin="${DEADTREES_DB_BACKUP_FLOCK_BIN:-flock}"
+readonly retry_delay="${DEADTREES_DB_BACKUP_RETRY_DELAY:-5}"
 
 archives_before=""
 archives_after=""
+new_archives=""
+new_archive_count=0
+archive_status=0
 export BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes
 
 ssh_remote() {
@@ -42,6 +46,26 @@ cleanup() {
 
 list_archives() {
 	"$borg_bin" list --format '{archive}{NL}' "$repository" | sort
+}
+
+refresh_archive_diff() {
+	list_archives >"$archives_after"
+	new_archives="$(comm -13 "$archives_before" "$archives_after")"
+	new_archive_count="$(printf '%s\n' "$new_archives" | awk 'NF { count += 1 } END { print count + 0 }')"
+}
+
+run_archive_transport() {
+	set +e
+	"$ssh_bin" \
+		-o BatchMode=yes \
+		-o ConnectTimeout=15 \
+		-o ServerAliveInterval=30 \
+		-o ServerAliveCountMax=4 \
+		-o StrictHostKeyChecking=yes \
+		"$archive_remote" \
+		"$archive_command"
+	archive_status=$?
+	set -e
 }
 
 timestamp() {
@@ -72,23 +96,18 @@ archives_before="$(mktemp)"
 archives_after="$(mktemp)"
 list_archives >"$archives_before"
 
-set +e
-"$ssh_bin" \
-	-o BatchMode=yes \
-	-o ConnectTimeout=15 \
-	-o ServerAliveInterval=30 \
-	-o ServerAliveCountMax=4 \
-	-o StrictHostKeyChecking=yes \
-	"$archive_remote" \
-	"$archive_command"
-archive_status=$?
-set -e
+run_archive_transport
+refresh_archive_diff
+if [[ "$archive_status" -ne 0 && "$new_archive_count" -eq 0 ]]; then
+	printf '%s Borg transport exited %s without committing an archive; retrying once.\n' \
+		"$(timestamp)" "$archive_status" >&2
+	sleep "$retry_delay"
+	ssh_remote tunnel-status >/dev/null
+	run_archive_transport
+	refresh_archive_diff
+fi
 
 ssh_remote cleanup >/dev/null
-list_archives >"$archives_after"
-
-new_archives="$(comm -13 "$archives_before" "$archives_after")"
-new_archive_count="$(printf '%s\n' "$new_archives" | awk 'NF { count += 1 } END { print count + 0 }')"
 if [[ "$new_archive_count" -ne 1 ]]; then
 	printf 'Expected exactly one new Borg archive, found %s; transport exit status was %s.\n' \
 		"$new_archive_count" "$archive_status" >&2
