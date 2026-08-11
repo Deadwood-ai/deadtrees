@@ -15,10 +15,15 @@ from shared.hash import get_file_identifier
 from shared.logging import LogContext, LogCategory
 
 
-def process_geotiff(task: QueueTask, temp_dir: Path):
+def _refresh_processor_session(task: QueueTask):
 	token, user = login_verified(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 	if not user:
 		raise AuthenticationError('Invalid processor token', token=token, task_id=task.id)
+	return token, user
+
+
+def process_geotiff(task: QueueTask, temp_dir: Path):
+	token, user = _refresh_processor_session(task)
 
 	# Update initial status
 	update_status(token, dataset_id=task.dataset_id, current_status=StatusEnum.ortho_processing)
@@ -67,6 +72,7 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 			ortho_info = cog_info(str(temp_ortho_path))
 
 			# Update ortho entry with fresh metadata
+			token, user = _refresh_processor_session(task)
 			ortho = upsert_ortho_entry(
 				dataset_id=task.dataset_id,
 				file_path=temp_ortho_path,
@@ -122,6 +128,7 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 			ortho_info = cog_info(str(temp_ortho_path))
 
 			# Create ortho entry
+			token, user = _refresh_processor_session(task)
 			ortho = upsert_ortho_entry(
 				dataset_id=task.dataset_id,
 				file_path=temp_ortho_path,
@@ -140,6 +147,7 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 			temp_ortho_path.unlink()
 
 	except Exception as e:
+		token, _ = _refresh_processor_session(task)
 		update_status(
 			token,
 			dataset_id=task.dataset_id,
@@ -202,6 +210,9 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 		sha256 = get_file_identifier(path_converted)
 		processed_info = cog_info(str(path_converted))
 
+		# Conversion and hashing can outlive a Supabase access token. Refresh
+		# immediately before persisting the processed result.
+		token, user = _refresh_processor_session(task)
 		upsert_processed_ortho_entry(
 			dataset_id=ortho.dataset_id,
 			file_path=path_converted,
@@ -231,6 +242,7 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 
 	except Exception as e:
 		# Update error status
+		token, _ = _refresh_processor_session(task)
 		update_status(token, dataset_id=ortho.dataset_id, has_error=True, error_message=str(e))
 		# Clean up files on error
 		if 'path_original' in locals() and path_original.exists():
@@ -253,9 +265,6 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 			),
 		)
 		raise ProcessingError(str(e), task_type='convert', task_id=task.id, dataset_id=ortho.dataset_id)
-
-	# Update final status
-	update_status(token, dataset_id=ortho.dataset_id, current_status=StatusEnum.idle, is_ortho_done=True)
 
 	logger.info(
 		f'Finished converting dataset {ortho.dataset_id}',

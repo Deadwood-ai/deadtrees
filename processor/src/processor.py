@@ -364,14 +364,14 @@ def process_task(task: QueueTask, token: str):
 				)
 				process_odm(task, settings.processing_path)
 			except Exception as e:
-				error_token = refresh_processor_token(task, token)
+				token = refresh_processor_token(task, token)
 				logger.error(
 					f'ODM processing failed: {str(e)}',
 					LogContext(
 						category=LogCategory.ODM,
 						dataset_id=task.dataset_id,
 						user_id=task.user_id,
-						token=error_token,
+						token=token,
 						extra={'error': str(e)},
 					),
 				)
@@ -389,14 +389,14 @@ def process_task(task: QueueTask, token: str):
 				)
 				process_geotiff(task, settings.processing_path)
 			except Exception as e:
-				error_token = refresh_processor_token(task, token)
+				token = refresh_processor_token(task, token)
 				logger.error(
 					f'GeoTIFF conversion failed: {str(e)}',
 					LogContext(
 						category=LogCategory.ORTHO,
 						dataset_id=task.dataset_id,
 						user_id=task.user_id,
-						token=error_token,
+						token=token,
 						extra={'error': str(e)},
 					),
 				)
@@ -414,11 +414,11 @@ def process_task(task: QueueTask, token: str):
 				)
 				process_metadata(task, settings.processing_path)
 			except Exception as e:
-				error_token = refresh_processor_token(task, token)
+				token = refresh_processor_token(task, token)
 				logger.error(
 					f'Metadata processing failed: {str(e)}',
 					LogContext(
-						category=LogCategory.METADATA, dataset_id=task.dataset_id, user_id=task.user_id, token=error_token
+						category=LogCategory.METADATA, dataset_id=task.dataset_id, user_id=task.user_id, token=token
 					),
 				)
 				raise ProcessingError(str(e), task_type='metadata', task_id=task.id, dataset_id=task.dataset_id)
@@ -433,11 +433,11 @@ def process_task(task: QueueTask, token: str):
 				)
 				process_cog(task, settings.processing_path)
 			except Exception as e:
-				error_token = refresh_processor_token(task, token)
+				token = refresh_processor_token(task, token)
 				logger.error(
 					f'COG processing failed: {str(e)}',
 					LogContext(
-						category=LogCategory.COG, dataset_id=task.dataset_id, user_id=task.user_id, token=error_token
+						category=LogCategory.COG, dataset_id=task.dataset_id, user_id=task.user_id, token=token
 					),
 				)
 				raise ProcessingError(str(e), task_type='cog', task_id=task.id, dataset_id=task.dataset_id)
@@ -454,14 +454,14 @@ def process_task(task: QueueTask, token: str):
 				)
 				process_thumbnail(task, settings.processing_path)
 			except Exception as e:
-				error_token = refresh_processor_token(task, token)
+				token = refresh_processor_token(task, token)
 				logger.error(
 					f'Thumbnail processing failed: {str(e)}',
 					LogContext(
 						category=LogCategory.THUMBNAIL,
 						dataset_id=task.dataset_id,
 						user_id=task.user_id,
-						token=error_token,
+						token=token,
 					),
 				)
 				raise ProcessingError(str(e), task_type='thumbnail', task_id=task.id, dataset_id=task.dataset_id)
@@ -478,14 +478,14 @@ def process_task(task: QueueTask, token: str):
 				)
 				process_deadwood_segmentation(task, token, settings.processing_path)
 			except Exception as e:
-				error_token = refresh_processor_token(task, token)
+				token = refresh_processor_token(task, token)
 				logger.error(
 					f'Deadwood segmentation failed: {str(e)}',
 					LogContext(
 						category=LogCategory.DEADWOOD,
 						dataset_id=task.dataset_id,
 						user_id=task.user_id,
-						token=error_token,
+						token=token,
 					),
 				)
 				raise ProcessingError(
@@ -504,14 +504,14 @@ def process_task(task: QueueTask, token: str):
 				)
 				process_treecover_segmentation(task, token, settings.processing_path)
 			except Exception as e:
-				error_token = refresh_processor_token(task, token)
+				token = refresh_processor_token(task, token)
 				logger.error(
 					f'Tree cover segmentation failed: {str(e)}',
 					LogContext(
 						category=LogCategory.TREECOVER,
 						dataset_id=task.dataset_id,
 						user_id=task.user_id,
-						token=error_token,
+						token=token,
 					),
 				)
 				raise ProcessingError(
@@ -530,14 +530,14 @@ def process_task(task: QueueTask, token: str):
 				)
 				process_deadwood_treecover_combined_v2(task, token, settings.processing_path)
 			except Exception as e:
-				error_token = refresh_processor_token(task, token)
+				token = refresh_processor_token(task, token)
 				logger.error(
 					f'Combined segmentation failed: {str(e)}',
 					LogContext(
 						category=LogCategory.DEADWOOD,
 						dataset_id=task.dataset_id,
 						user_id=task.user_id,
-						token=error_token,
+						token=token,
 					),
 				)
 				raise ProcessingError(
@@ -557,14 +557,14 @@ def process_task(task: QueueTask, token: str):
 				)
 				process_aoi_segmentation(task, token, settings.processing_path)
 			except Exception as e:
-				error_token = refresh_processor_token(task, token)
+				token = refresh_processor_token(task, token)
 				logger.error(
 					f'AOI segmentation failed: {str(e)}',
 					LogContext(
 						category=LogCategory.AOI,
 						dataset_id=task.dataset_id,
 						user_id=task.user_id,
-						token=error_token,
+						token=token,
 					),
 				)
 				raise ProcessingError(str(e), task_type='aoi_segmentation', task_id=task.id, dataset_id=task.dataset_id)
@@ -582,14 +582,14 @@ def process_task(task: QueueTask, token: str):
 				)
 				process_embeddings(task, token, settings.processing_path)
 			except Exception as e:
-				error_token = refresh_processor_token(task, token)
+				token = refresh_processor_token(task, token)
 				logger.error(
 					f'Tile embedding failed: {str(e)}',
 					LogContext(
 						category=LogCategory.EMBEDDINGS,
 						dataset_id=task.dataset_id,
 						user_id=task.user_id,
-						token=error_token,
+						token=token,
 					),
 				)
 				raise ProcessingError(str(e), task_type='embedding_processing', task_id=task.id, dataset_id=task.dataset_id)
