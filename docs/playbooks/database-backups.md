@@ -61,11 +61,17 @@ The tracked sources map to these production locations:
 | `scripts/backup/deadtrees-nightly-backups` | `/home/remote-backup/.local/bin/deadtrees-nightly-backups` |
 | `scripts/backup/deadtrees-database-backup` | `/home/remote-backup/.local/bin/deadtrees-database-backup` |
 | `scripts/backup/deadtrees-db-backup-remote` | `/home/dendro/.local/bin/deadtrees-db-backup-remote` |
+| `scripts/backup/deadtrees-db-borg-archive` | `/home/borg/.local/bin/deadtrees-db-borg-archive` |
+| `scripts/backup/deadtrees-borg-rsh` | `/home/borg/.local/bin/deadtrees-borg-rsh` |
 | `scripts/backup/database_dump_direct.yaml` | `/home/remote-backup/.config/borgmatic/database_dump_direct.yaml` |
 
 Install executable scripts with mode `0755` and configuration with mode `0600`,
 using an atomic replacement and retaining the previous files for rollback. The
 remote helper must remain the forced command for its narrowly scoped SSH key.
+The archive helper expects its source-only SSH identity and pinned host key under
+`/home/borg/.config/deadtrees-backup/`; these credentials remain host-local. Its
+custom Borg RSH connects standard input/output to the reverse Unix socket, so no
+direct Borg SSH key is needed on the backup host.
 
 Only after a full backup and restore-oriented verification pass should the three
 legacy simultaneous cron entries be replaced by one serialized entry:

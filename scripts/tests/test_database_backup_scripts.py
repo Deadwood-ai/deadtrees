@@ -7,6 +7,8 @@ from pathlib import Path
 ROOT = Path(__file__).parents[2]
 DATABASE_BACKUP = ROOT / 'scripts' / 'backup' / 'deadtrees-database-backup'
 DATABASE_BACKUP_REMOTE = ROOT / 'scripts' / 'backup' / 'deadtrees-db-backup-remote'
+DATABASE_BORG_ARCHIVE = ROOT / 'scripts' / 'backup' / 'deadtrees-db-borg-archive'
+DATABASE_BORG_RSH = ROOT / 'scripts' / 'backup' / 'deadtrees-borg-rsh'
 NIGHTLY_BACKUPS = ROOT / 'scripts' / 'backup' / 'deadtrees-nightly-backups'
 OPERATOR_STATUS = ROOT / 'scripts' / 'operator_status.py'
 OPERATOR_SPEC = importlib.util.spec_from_file_location('operator_status', OPERATOR_STATUS)
@@ -200,6 +202,59 @@ def test_operator_status_checks_direct_database_backup():
 
 	assert 'database_dump:database_dump_direct.yaml' in command
 	assert 'database_dump:database_dump.yaml' not in command
+
+
+def test_archive_helper_reproduces_reviewed_production_command(tmp_path):
+	command_log = tmp_path / 'archive.log'
+	borg = tmp_path / 'borg'
+	_write_executable(
+		borg,
+		"""#!/usr/bin/env bash
+set -eu
+printf 'rsh=%s\nargs=%s\n' "$BORG_RSH" "$*" >"$FAKE_COMMAND_LOG"
+""",
+	)
+	env = {
+		**os.environ,
+		'DEADTREES_DB_ARCHIVE_BORG_BIN': str(borg),
+		'DEADTREES_DB_ARCHIVE_SSH_BIN': '/test/ssh',
+		'DEADTREES_DB_ARCHIVE_REPOSITORY': 'remote-backup@test:/repository',
+		'DEADTREES_DB_ARCHIVE_IDENTITY': '/test/identity',
+		'DEADTREES_DB_ARCHIVE_KNOWN_HOSTS': '/test/known_hosts',
+		'DEADTREES_DB_ARCHIVE_SOURCE_REMOTE': 'dendro@test',
+		'DEADTREES_DB_ARCHIVE_BORG_RSH': '/test/borg-rsh',
+		'DEADTREES_DB_ARCHIVE_TIMESTAMP': '2026-08-11T11:19:38',
+		'FAKE_COMMAND_LOG': str(command_log),
+	}
+
+	result = subprocess.run([DATABASE_BORG_ARCHIVE], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 0, result.stderr
+	assert command_log.read_text().strip() == (
+		'rsh=/test/borg-rsh\n'
+		'args=create --content-from-command --stdin-name postgres-directory.tar --compression zstd,3 --stats '
+		'remote-backup@test:/repository::database-dump-2026-08-11T11:19:38 -- '
+		'/test/ssh -i /test/identity -o BatchMode=yes -o ConnectTimeout=15 '
+		'-o ServerAliveInterval=30 -o ServerAliveCountMax=4 -o StrictHostKeyChecking=yes '
+		'-o UserKnownHostsFile=/test/known_hosts -o HostKeyAlias=data2-local dendro@test stream-local'
+	)
+
+
+def test_borg_rsh_connects_standard_io_to_reverse_socket(tmp_path):
+	command_log = tmp_path / 'socat.log'
+	socat = tmp_path / 'socat'
+	_write_executable(socat, '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >"$FAKE_COMMAND_LOG"\n')
+	env = {
+		**os.environ,
+		'DEADTREES_BORG_RSH_SOCAT_BIN': str(socat),
+		'DEADTREES_BORG_RSH_SOCKET_PATH': '/test/borg.sock',
+		'FAKE_COMMAND_LOG': str(command_log),
+	}
+
+	result = subprocess.run([DATABASE_BORG_RSH], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 0, result.stderr
+	assert command_log.read_text() == 'STDIO UNIX-CONNECT:/test/borg.sock\n'
 
 
 def test_nightly_backup_continues_after_stage_failure(tmp_path):
