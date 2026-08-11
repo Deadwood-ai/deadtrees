@@ -28,7 +28,7 @@ The direct database stage is split across two least-privilege entry points:
   dump, verifies the committed Borg archive, and runs retention and integrity
   maintenance;
 - the database-host forced-command helper only accepts the explicit dump,
-  capacity, verify, status, transport, tunnel-status, and cleanup operations.
+  capacity, verify, status, transport, and cleanup operations.
 
 The database is dumped with `pg_dump --format directory --jobs=2 --compress=0`.
 Before creating the stage, the forced-command helper requires available space to
@@ -47,7 +47,6 @@ repository.
 The transport process exiting successfully is not sufficient. The backup-host
 wrapper accepts the database stage only when all of these postconditions hold:
 
-- the reverse Unix socket exists and has an active listener before the dump;
 - a read-only Borg repository handshake succeeds through the full tunnel before
   `pg_dump` starts;
 - exactly one new `database-dump-*` archive appeared;

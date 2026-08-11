@@ -93,7 +93,6 @@ fi
 
 trap cleanup EXIT INT TERM
 
-ssh_remote tunnel-status >/dev/null
 ssh_archive probe >/dev/null
 ssh_remote cleanup >/dev/null
 ssh_remote space-status >/dev/null
@@ -117,7 +116,7 @@ if [[ "$archive_status" -ne 0 && "$new_archive_count" -eq 0 ]]; then
 	printf '%s Borg transport exited %s without committing an archive; retrying once.\n' \
 		"$(timestamp)" "$archive_status" >&2
 	sleep "$retry_delay"
-	ssh_remote tunnel-status >/dev/null
+	ssh_archive probe >/dev/null
 	run_archive_transport
 	refresh_archive_diff
 fi

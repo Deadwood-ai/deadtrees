@@ -42,9 +42,6 @@ set -eu
 command="${!#}"
 printf 'ssh:%s\n' "$command" >>"$FAKE_COMMAND_LOG"
 printf '%s\n' "$*" >>"$FAKE_SSH_ARGS_LOG"
-if [[ "$command" == tunnel-status ]]; then
-	exit "$FAKE_TUNNEL_STATUS"
-fi
 if [[ "$command" == cleanup ]]; then
 	touch "$FAKE_CLEANUP_MARKER"
 	exit 0
@@ -139,7 +136,6 @@ printf 'borgmatic:%s\n' "$*" >>"$FAKE_COMMAND_LOG"
 		'FAKE_FIRST_TRANSPORT_STATUS': '',
 		'FAKE_TRANSPORT_STATUS': str(transport_status),
 		'FAKE_PROBE_STATUS': '0',
-		'FAKE_TUNNEL_STATUS': '0',
 	}
 
 
@@ -203,18 +199,6 @@ def test_checkpoint_without_final_archive_fails_before_maintenance(tmp_path):
 	assert 'borgmatic:' not in (tmp_path / 'commands.log').read_text()
 
 
-def test_unavailable_tunnel_prevents_database_dump(tmp_path):
-	env = _backup_environment(tmp_path, transport_status=0)
-	env['FAKE_TUNNEL_STATUS'] = '1'
-
-	result = subprocess.run([DATABASE_BACKUP], env=env, text=True, capture_output=True, check=False)
-
-	assert result.returncode != 0
-	commands = (tmp_path / 'commands.log').read_text()
-	assert 'ssh:tunnel-status' in commands
-	assert 'ssh:dump' not in commands
-
-
 def test_unavailable_borg_endpoint_prevents_database_dump(tmp_path):
 	env = _backup_environment(tmp_path, transport_status=0)
 	env['FAKE_PROBE_STATUS'] = '1'
@@ -249,45 +233,6 @@ def test_stale_stage_is_cleaned_before_capacity_preflight(tmp_path):
 	assert result.returncode == 0, result.stderr
 	commands = (tmp_path / 'commands.log').read_text().splitlines()
 	assert commands.index('ssh:cleanup') < commands.index('ssh:space-status') < commands.index('ssh:dump')
-
-
-def test_remote_tunnel_status_requires_listening_socket(tmp_path):
-	socket_path = tmp_path / 'borg.sock'
-	ss = tmp_path / 'ss'
-	socket_test = tmp_path / 'socket-test'
-	_write_executable(ss, f'#!/usr/bin/env bash\nprintf "%s\\n" {socket_path}\n')
-	_write_executable(socket_test, '#!/usr/bin/env bash\nexit 0\n')
-	env = {
-		**os.environ,
-		'SSH_ORIGINAL_COMMAND': 'tunnel-status',
-		'DEADTREES_BORG_SOCKET_PATH': str(socket_path),
-		'DEADTREES_SS_BIN': str(ss),
-		'DEADTREES_SOCKET_TEST_BIN': str(socket_test),
-	}
-
-	result = subprocess.run([DATABASE_BACKUP_REMOTE], env=env, text=True, capture_output=True, check=False)
-
-	assert result.returncode == 0, result.stderr
-	assert result.stdout == 'ready\n'
-
-
-def test_remote_tunnel_status_rejects_stale_socket(tmp_path):
-	socket_path = tmp_path / 'borg.sock'
-	ss = tmp_path / 'ss'
-	socket_test = tmp_path / 'socket-test'
-	_write_executable(ss, '#!/usr/bin/env bash\nexit 0\n')
-	_write_executable(socket_test, '#!/usr/bin/env bash\nexit 0\n')
-	env = {
-		**os.environ,
-		'SSH_ORIGINAL_COMMAND': 'tunnel-status',
-		'DEADTREES_BORG_SOCKET_PATH': str(socket_path),
-		'DEADTREES_SS_BIN': str(ss),
-		'DEADTREES_SOCKET_TEST_BIN': str(socket_test),
-	}
-
-	result = subprocess.run([DATABASE_BACKUP_REMOTE], env=env, text=True, capture_output=True, check=False)
-
-	assert result.returncode != 0
 
 
 def test_remote_dump_rejects_low_capacity_before_pg_dump(tmp_path):
