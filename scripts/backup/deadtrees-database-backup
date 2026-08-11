@@ -89,6 +89,14 @@ refresh_archive_diff() {
 		| awk 'NF && $0 !~ /[.]checkpoint([.][0-9]+)?$/ { count += 1 } END { print count + 0 }')"
 }
 
+refresh_archive_diff_after_transport() {
+	preserve_stage=1
+	refresh_archive_diff
+	if [[ -z "$new_archives" ]]; then
+		preserve_stage=0
+	fi
+}
+
 run_archive_transport() {
 	set +e
 	ssh_archive archive
@@ -144,19 +152,16 @@ archives_after="$(mktemp)"
 list_archives >"$archives_before"
 
 run_archive_transport
-refresh_archive_diff
+refresh_archive_diff_after_transport
 if [[ "$archive_status" -ne 0 && "$new_archive_count" -eq 0 ]]; then
 	printf '%s Borg transport exited %s without committing an archive; retrying once.\n' \
 		"$(timestamp)" "$archive_status" >&2
 	sleep "$retry_delay"
 	ssh_archive probe >/dev/null
 	run_archive_transport
-	refresh_archive_diff
+	refresh_archive_diff_after_transport
 fi
 
-if [[ -n "$new_archives" ]]; then
-	preserve_stage=1
-fi
 if [[ "$new_archive_count" -ne 1 ]]; then
 	printf 'Expected exactly one completed new Borg archive, found %s; transport exit status was %s.\n' \
 		"$new_archive_count" "$archive_status" >&2

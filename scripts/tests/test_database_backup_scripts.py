@@ -91,7 +91,16 @@ printf 'borg:%s\n' "$*" >>"$FAKE_COMMAND_LOG"
 		if [[ "$*" == *'--short'* ]]; then
 			printf '%s\n' "$FAKE_ARCHIVE_PAYLOAD"
 		else
+			list_count=0
+			if [[ -f "$FAKE_BORG_LIST_COUNT" ]]; then
+				list_count=$(cat "$FAKE_BORG_LIST_COUNT")
+			fi
+			list_count=$((list_count + 1))
+			printf '%s\n' "$list_count" >"$FAKE_BORG_LIST_COUNT"
 			cat "$FAKE_ARCHIVES"
+			if [[ "$FAKE_BORG_LIST_FAIL_ON_CALL" -eq "$list_count" ]]; then
+				exit 2
+			fi
 		fi
 		;;
 	check)
@@ -134,6 +143,8 @@ printf 'borgmatic:%s\n' "$*" >>"$FAKE_COMMAND_LOG"
 		'FAKE_SSH_ARGS_LOG': str(tmp_path / 'ssh-args.log'),
 		'FAKE_ARCHIVE_COMMAND': 'archive-helper',
 		'FAKE_ARCHIVE_PAYLOAD': 'postgres-directory.tar',
+		'FAKE_BORG_LIST_COUNT': str(tmp_path / 'borg-list-count'),
+		'FAKE_BORG_LIST_FAIL_ON_CALL': '0',
 		'FAKE_CREATE_ARCHIVE': '1' if create_archive else '0',
 		'FAKE_CREATE_ARCHIVE_ON_ATTEMPT': '1',
 		'FAKE_CLEANUP_MARKER': str(tmp_path / 'cleanup-complete'),
@@ -174,6 +185,17 @@ def test_committed_archive_failure_preserves_dump_stage(tmp_path):
 
 	assert result.returncode != 0
 	assert 'does not contain postgres-directory.tar' in result.stderr
+	assert 'Preserving the database dump stage for archive recovery.' in result.stderr
+	assert (tmp_path / 'commands.log').read_text().splitlines().count('ssh:cleanup') == 1
+
+
+def test_committed_archive_with_failed_listing_preserves_dump_stage(tmp_path):
+	env = _backup_environment(tmp_path, transport_status=0)
+	env['FAKE_BORG_LIST_FAIL_ON_CALL'] = '2'
+
+	result = subprocess.run([DATABASE_BACKUP], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 2
 	assert 'Preserving the database dump stage for archive recovery.' in result.stderr
 	assert (tmp_path / 'commands.log').read_text().splitlines().count('ssh:cleanup') == 1
 
