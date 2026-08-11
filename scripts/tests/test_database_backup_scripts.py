@@ -9,6 +9,7 @@ DATABASE_BACKUP = ROOT / 'scripts' / 'backup' / 'deadtrees-database-backup'
 DATABASE_BACKUP_REMOTE = ROOT / 'scripts' / 'backup' / 'deadtrees-db-backup-remote'
 DATABASE_BORG_ARCHIVE = ROOT / 'scripts' / 'backup' / 'deadtrees-db-borg-archive'
 DATABASE_BORG_RSH = ROOT / 'scripts' / 'backup' / 'deadtrees-borg-rsh'
+DATABASE_BORG_TUNNEL_GUARD = ROOT / 'scripts' / 'backup' / 'deadtrees-borg-tunnel-guard'
 BACKUP_SYSTEMD = ROOT / 'scripts' / 'backup' / 'systemd'
 NIGHTLY_BACKUPS = ROOT / 'scripts' / 'backup' / 'deadtrees-nightly-backups'
 OPERATOR_STATUS = ROOT / 'scripts' / 'operator_status.py'
@@ -38,6 +39,7 @@ def _backup_environment(tmp_path: Path, *, transport_status: int, create_archive
 set -eu
 command="${!#}"
 printf 'ssh:%s\n' "$command" >>"$FAKE_COMMAND_LOG"
+printf '%s\n' "$*" >>"$FAKE_SSH_ARGS_LOG"
 if [[ "$command" == tunnel-status ]]; then
 	exit "$FAKE_TUNNEL_STATUS"
 fi
@@ -50,6 +52,9 @@ if [[ "$command" == space-status ]]; then
 		exit 1
 	fi
 	exit 0
+fi
+if [[ "$command" == "$FAKE_ARCHIVE_COMMAND probe" ]]; then
+	exit "$FAKE_PROBE_STATUS"
 fi
 if [[ "$command" == dump || "$command" == verify ]]; then
 	exit 0
@@ -114,11 +119,16 @@ printf 'borgmatic:%s\n' "$*" >>"$FAKE_COMMAND_LOG"
 		'DEADTREES_DB_BACKUP_BORG_BIN': str(borg),
 		'DEADTREES_DB_BACKUP_ARCHIVE_REMOTE': 'borg@example.test',
 		'DEADTREES_DB_BACKUP_ARCHIVE_COMMAND': 'archive-helper',
+		'DEADTREES_DB_BACKUP_ARCHIVE_IDENTITY': str(tmp_path / 'archive-identity'),
+		'DEADTREES_DB_BACKUP_ARCHIVE_KNOWN_HOSTS': str(tmp_path / 'archive-known-hosts'),
+		'DEADTREES_DB_BACKUP_ARCHIVE_HOST_KEY_ALIAS': 'database-archive-test',
 		'DEADTREES_DB_BACKUP_FLOCK_BIN': str(flock),
 		'DEADTREES_DB_BACKUP_RETRY_DELAY': '0',
 		'FAKE_ARCHIVES': str(archives),
 		'FAKE_ATTEMPTS': str(tmp_path / 'attempts'),
 		'FAKE_COMMAND_LOG': str(command_log),
+		'FAKE_SSH_ARGS_LOG': str(tmp_path / 'ssh-args.log'),
+		'FAKE_ARCHIVE_COMMAND': 'archive-helper',
 		'FAKE_CREATE_ARCHIVE': '1' if create_archive else '0',
 		'FAKE_CREATE_ARCHIVE_ON_ATTEMPT': '1',
 		'FAKE_CLEANUP_MARKER': str(tmp_path / 'cleanup-complete'),
@@ -126,6 +136,7 @@ printf 'borgmatic:%s\n' "$*" >>"$FAKE_COMMAND_LOG"
 		'FAKE_FIRST_ARCHIVE_NAME': '',
 		'FAKE_FIRST_TRANSPORT_STATUS': '',
 		'FAKE_TRANSPORT_STATUS': str(transport_status),
+		'FAKE_PROBE_STATUS': '0',
 		'FAKE_TUNNEL_STATUS': '0',
 	}
 
@@ -200,6 +211,31 @@ def test_unavailable_tunnel_prevents_database_dump(tmp_path):
 	commands = (tmp_path / 'commands.log').read_text()
 	assert 'ssh:tunnel-status' in commands
 	assert 'ssh:dump' not in commands
+
+
+def test_unavailable_borg_endpoint_prevents_database_dump(tmp_path):
+	env = _backup_environment(tmp_path, transport_status=0)
+	env['FAKE_PROBE_STATUS'] = '1'
+
+	result = subprocess.run([DATABASE_BACKUP], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode != 0
+	commands = (tmp_path / 'commands.log').read_text()
+	assert 'ssh:archive-helper probe' in commands
+	assert 'ssh:dump' not in commands
+
+
+def test_archive_connection_uses_dedicated_identity_and_host_alias(tmp_path):
+	env = _backup_environment(tmp_path, transport_status=0)
+
+	result = subprocess.run([DATABASE_BACKUP], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 0, result.stderr
+	ssh_args = (tmp_path / 'ssh-args.log').read_text()
+	assert f'-i {tmp_path / "archive-identity"}' in ssh_args
+	assert '-o IdentitiesOnly=yes' in ssh_args
+	assert f'-o UserKnownHostsFile={tmp_path / "archive-known-hosts"}' in ssh_args
+	assert '-o HostKeyAlias=database-archive-test' in ssh_args
 
 
 def test_stale_stage_is_cleaned_before_capacity_preflight(tmp_path):
@@ -342,6 +378,8 @@ printf 'rsh=%s\nargs=%s\n' "$BORG_RSH" "$*" >"$FAKE_COMMAND_LOG"
 		'DEADTREES_DB_ARCHIVE_SOURCE_REMOTE': 'dendro@test',
 		'DEADTREES_DB_ARCHIVE_BORG_RSH': '/test/borg-rsh',
 		'DEADTREES_DB_ARCHIVE_TIMESTAMP': '2026-08-11T11:19:38',
+		'DEADTREES_DB_ARCHIVE_COMMAND_PATH': '/test/deadtrees-db-borg-archive',
+		'SSH_ORIGINAL_COMMAND': '/test/deadtrees-db-borg-archive archive',
 		'FAKE_COMMAND_LOG': str(command_log),
 	}
 
@@ -356,6 +394,38 @@ printf 'rsh=%s\nargs=%s\n' "$BORG_RSH" "$*" >"$FAKE_COMMAND_LOG"
 		'-o ServerAliveInterval=30 -o ServerAliveCountMax=4 -o StrictHostKeyChecking=yes '
 		'-o UserKnownHostsFile=/test/known_hosts -o HostKeyAlias=data2-local dendro@test stream-local'
 	)
+
+
+def test_archive_helper_probes_borg_endpoint_without_creating_archive(tmp_path):
+	command_log = tmp_path / 'archive.log'
+	borg = tmp_path / 'borg'
+	_write_executable(borg, '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >"$FAKE_COMMAND_LOG"\n')
+	env = {
+		**os.environ,
+		'DEADTREES_DB_ARCHIVE_BORG_BIN': str(borg),
+		'DEADTREES_DB_ARCHIVE_REPOSITORY': 'remote-backup@test:/repository',
+		'DEADTREES_DB_ARCHIVE_COMMAND_PATH': '/test/deadtrees-db-borg-archive',
+		'SSH_ORIGINAL_COMMAND': '/test/deadtrees-db-borg-archive probe',
+		'FAKE_COMMAND_LOG': str(command_log),
+	}
+
+	result = subprocess.run([DATABASE_BORG_ARCHIVE], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 0, result.stderr
+	assert command_log.read_text() == 'info remote-backup@test:/repository\n'
+
+
+def test_archive_helper_denies_arbitrary_remote_command(tmp_path):
+	env = {
+		**os.environ,
+		'DEADTREES_DB_ARCHIVE_COMMAND_PATH': '/test/deadtrees-db-borg-archive',
+		'SSH_ORIGINAL_COMMAND': 'uname -a',
+	}
+
+	result = subprocess.run([DATABASE_BORG_ARCHIVE], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 64
+	assert result.stderr == 'Command denied.\n'
 
 
 def test_borg_rsh_connects_standard_io_to_reverse_socket(tmp_path):
@@ -375,18 +445,56 @@ def test_borg_rsh_connects_standard_io_to_reverse_socket(tmp_path):
 	assert command_log.read_text() == 'STDIO UNIX-CONNECT:/test/borg.sock\n'
 
 
+def test_tunnel_guard_holds_only_the_expected_forced_command(tmp_path):
+	command_log = tmp_path / 'hold.log'
+	hold = tmp_path / 'hold'
+	_write_executable(hold, '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >"$FAKE_COMMAND_LOG"\n')
+	env = {
+		**os.environ,
+		'DEADTREES_BORG_TUNNEL_COMMAND_PATH': '/test/deadtrees-borg-tunnel-guard',
+		'DEADTREES_BORG_TUNNEL_HOLD_BIN': str(hold),
+		'DEADTREES_BORG_TUNNEL_HOLD_DURATION': 'forever',
+		'SSH_ORIGINAL_COMMAND': '/test/deadtrees-borg-tunnel-guard hold',
+		'FAKE_COMMAND_LOG': str(command_log),
+	}
+
+	result = subprocess.run([DATABASE_BORG_TUNNEL_GUARD], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 0, result.stderr
+	assert command_log.read_text() == 'forever\n'
+
+
+def test_tunnel_guard_denies_arbitrary_remote_command():
+	env = {
+		**os.environ,
+		'DEADTREES_BORG_TUNNEL_COMMAND_PATH': '/test/deadtrees-borg-tunnel-guard',
+		'SSH_ORIGINAL_COMMAND': 'uname -a',
+	}
+
+	result = subprocess.run([DATABASE_BORG_TUNNEL_GUARD], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 64
+	assert result.stderr == 'Command denied.\n'
+
+
 def test_systemd_units_provision_reverse_socket_lifecycle():
-	socket = (BACKUP_SYSTEMD / 'remote-backup.socket').read_text()
-	server = (BACKUP_SYSTEMD / 'remote-backup@.service').read_text()
+	socket = (BACKUP_SYSTEMD / 'database-backup-borg.socket').read_text()
+	server = (BACKUP_SYSTEMD / 'database-backup-borg@.service').read_text()
 	tunnel = (BACKUP_SYSTEMD / 'reverse-tunnel@.service').read_text()
 
-	assert 'ListenStream=/run/remote-backup/borg.sock' in socket
+	assert 'ListenStream=/run/remote-backup/database-borg.sock' in socket
 	assert 'Accept=yes' in socket
 	assert 'SocketUser=remote-backup' in socket
 	assert 'SocketMode=0600' in socket
 	assert 'StandardInput=socket' in server
 	assert '--restrict-to-path /mnt/raid/backups/supabase.deadtrees.earth' in server
-	assert '-R /tmp/borg.sock:/run/remote-backup/borg.sock' in tunnel
+	assert '/mnt/raid/backups/data2.deadtrees.earth' not in server
+	assert '/mnt/raid/backups/test' not in server
+	assert '-i /home/remote-backup/.ssh/id_ed25519_database_tunnel' in tunnel
+	assert '-o IdentitiesOnly=yes' in tunnel
+	assert '-o HostKeyAlias=data2-database-tunnel' in tunnel
+	assert '-R /tmp/database-backup-borg.sock:/run/remote-backup/database-borg.sock' in tunnel
+	assert 'borg@%i /home/borg/.local/bin/deadtrees-borg-tunnel-guard hold' in tunnel
 	assert 'Restart=always' in tunnel
 
 

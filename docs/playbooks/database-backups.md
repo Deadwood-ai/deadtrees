@@ -34,11 +34,13 @@ The database is dumped with `pg_dump --format directory --jobs=2 --compress=0`.
 Before creating the stage, the forced-command helper requires available space to
 exceed 300% of the current database size plus a 50 GiB write-safety reserve. A
 failed capacity check exits before `pg_dump` writes into the PostgreSQL volume.
-After PostgreSQL connections close, the database host sends a tar stream through
-a reverse Unix socket to the local Borg repository on the backup host. The
-socket is owned by `remote-backup` with mode `0600`, so other local users cannot
-connect to the repository service. No database credentials or Borg keys belong
-in the repository.
+Before the dump starts, the wrapper performs a Borg protocol handshake through
+the complete reverse-tunnel path. After PostgreSQL connections close, the
+database host sends a tar stream through that dedicated reverse Unix socket to
+the local Borg repository on the backup host. The socket is owned by
+`remote-backup` with mode `0600`, and its Borg server is restricted to the
+database repository only. No database credentials or Borg keys belong in the
+repository.
 
 ## Authoritative Success Contract
 
@@ -46,6 +48,8 @@ The transport process exiting successfully is not sufficient. The backup-host
 wrapper accepts the database stage only when all of these postconditions hold:
 
 - the reverse Unix socket exists and has an active listener before the dump;
+- a read-only Borg repository handshake succeeds through the full tunnel before
+  `pg_dump` starts;
 - exactly one new `database-dump-*` archive appeared;
 - Borg `.checkpoint` archives are treated as incomplete and never satisfy the
   completed-archive postcondition;
@@ -73,9 +77,10 @@ The tracked sources map to these production locations:
 | `scripts/backup/deadtrees-db-backup-remote` | `/home/dendro/.local/bin/deadtrees-db-backup-remote` |
 | `scripts/backup/deadtrees-db-borg-archive` | `/home/borg/.local/bin/deadtrees-db-borg-archive` |
 | `scripts/backup/deadtrees-borg-rsh` | `/home/borg/.local/bin/deadtrees-borg-rsh` |
+| `scripts/backup/deadtrees-borg-tunnel-guard` | `/home/borg/.local/bin/deadtrees-borg-tunnel-guard` |
 | `scripts/backup/database_dump_direct.yaml` | `/home/remote-backup/.config/borgmatic/database_dump_direct.yaml` |
-| `scripts/backup/systemd/remote-backup.socket` | `/etc/systemd/system/remote-backup.socket` |
-| `scripts/backup/systemd/remote-backup@.service` | `/etc/systemd/system/remote-backup@.service` |
+| `scripts/backup/systemd/database-backup-borg.socket` | `/etc/systemd/system/database-backup-borg.socket` |
+| `scripts/backup/systemd/database-backup-borg@.service` | `/etc/systemd/system/database-backup-borg@.service` |
 | `scripts/backup/systemd/reverse-tunnel@.service` | `/etc/systemd/system/reverse-tunnel@.service` |
 
 Install executable scripts with mode `0755` and configuration with mode `0600`,
@@ -86,19 +91,35 @@ The archive helper expects its source-only SSH identity and pinned host key unde
 custom Borg RSH connects standard input/output to the reverse Unix socket, so no
 direct Borg SSH key is needed on the backup host.
 
+The backup host uses distinct database-host credentials for the two SSH roles:
+
+- `/home/remote-backup/.ssh/id_ed25519_database_archive` may invoke only the
+  forced `deadtrees-db-borg-archive` command and must have forwarding disabled;
+- `/home/remote-backup/.ssh/id_ed25519_database_tunnel` may forward the dedicated
+  Unix socket and invokes only the forced `deadtrees-borg-tunnel-guard hold`
+  command.
+
+Both clients set `IdentitiesOnly=yes` and distinct pinned host-key aliases. The
+database-host `authorized_keys` entries must use `restrict` for the archive key
+and `restrict,port-forwarding` for the tunnel key, with their respective forced
+commands. The tunnel guard rejects every requested command except its exact
+hold command, so the forwarding credential cannot execute arbitrary commands.
+Keep the two private keys and concrete public-key lines host-local.
+
 After installing the credential-free unit files, reload systemd and enable the
 socket listener plus the database-host tunnel instance:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now remote-backup.socket
+sudo systemctl enable --now database-backup-borg.socket
 sudo systemctl enable --now reverse-tunnel@data2.deadtrees.earth.service
-systemctl is-active remote-backup.socket reverse-tunnel@data2.deadtrees.earth.service
+systemctl is-active database-backup-borg.socket reverse-tunnel@data2.deadtrees.earth.service
 ```
 
-The tunnel unit references the host-local `remote-backup` SSH identity. The
-corresponding database-host `borg` account must permit remote Unix-socket
-forwarding; keys and `authorized_keys` options remain outside the repository.
+The dedicated socket service authorizes only
+`/mnt/raid/backups/supabase.deadtrees.earth`; other Borg repositories must use
+their own listener and authorization boundary. Do not repurpose this database
+tunnel for Storage or test repositories.
 
 Only after a full backup and restore-oriented verification pass should the three
 legacy simultaneous cron entries be replaced by one serialized entry:

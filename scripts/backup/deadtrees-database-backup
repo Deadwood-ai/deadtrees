@@ -13,6 +13,9 @@ readonly ssh_bin="${DEADTREES_DB_BACKUP_SSH_BIN:-ssh}"
 readonly borg_bin="${DEADTREES_DB_BACKUP_BORG_BIN:-borg}"
 readonly archive_remote="${DEADTREES_DB_BACKUP_ARCHIVE_REMOTE:-borg@data2.deadtrees.earth}"
 readonly archive_command="${DEADTREES_DB_BACKUP_ARCHIVE_COMMAND:-/home/borg/.local/bin/deadtrees-db-borg-archive}"
+readonly archive_identity="${DEADTREES_DB_BACKUP_ARCHIVE_IDENTITY:-/home/remote-backup/.ssh/id_ed25519_database_archive}"
+readonly archive_known_hosts="${DEADTREES_DB_BACKUP_ARCHIVE_KNOWN_HOSTS:-/home/remote-backup/.ssh/known_hosts}"
+readonly archive_host_key_alias="${DEADTREES_DB_BACKUP_ARCHIVE_HOST_KEY_ALIAS:-data2-database-archive}"
 readonly flock_bin="${DEADTREES_DB_BACKUP_FLOCK_BIN:-flock}"
 readonly retry_delay="${DEADTREES_DB_BACKUP_RETRY_DELAY:-5}"
 
@@ -57,16 +60,25 @@ refresh_archive_diff() {
 
 run_archive_transport() {
 	set +e
+	ssh_archive archive
+	archive_status=$?
+	set -e
+}
+
+ssh_archive() {
+	local mode="$1"
 	"$ssh_bin" \
+		-i "$archive_identity" \
 		-o BatchMode=yes \
 		-o ConnectTimeout=15 \
+		-o IdentitiesOnly=yes \
 		-o ServerAliveInterval=30 \
 		-o ServerAliveCountMax=4 \
 		-o StrictHostKeyChecking=yes \
+		-o "UserKnownHostsFile=$archive_known_hosts" \
+		-o "HostKeyAlias=$archive_host_key_alias" \
 		"$archive_remote" \
-		"$archive_command"
-	archive_status=$?
-	set -e
+		"$archive_command $mode"
 }
 
 timestamp() {
@@ -82,6 +94,7 @@ fi
 trap cleanup EXIT INT TERM
 
 ssh_remote tunnel-status >/dev/null
+ssh_archive probe >/dev/null
 ssh_remote cleanup >/dev/null
 ssh_remote space-status >/dev/null
 

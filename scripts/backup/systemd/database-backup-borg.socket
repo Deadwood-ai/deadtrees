@@ -1,0 +1,12 @@
+[Unit]
+Description=Database Backup Borg Socket
+PartOf=database-backup-borg@.service
+
+[Socket]
+ListenStream=/run/remote-backup/database-borg.sock
+Accept=yes
+SocketUser=remote-backup
+SocketMode=0600
+
+[Install]
+WantedBy=sockets.target

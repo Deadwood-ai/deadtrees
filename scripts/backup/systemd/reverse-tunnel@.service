@@ -7,13 +7,17 @@ StartLimitBurst=5
 
 [Service]
 User=remote-backup
-ExecStart=/usr/bin/ssh -NT \
+ExecStart=/usr/bin/ssh -T \
+  -i /home/remote-backup/.ssh/id_ed25519_database_tunnel \
   -o ExitOnForwardFailure=yes \
+  -o IdentitiesOnly=yes \
   -o ServerAliveInterval=60 \
   -o ServerAliveCountMax=3 \
   -o StreamLocalBindUnlink=yes \
-  -R /tmp/borg.sock:/run/remote-backup/borg.sock \
-  borg@%i
+  -o UserKnownHostsFile=/home/remote-backup/.ssh/known_hosts \
+  -o HostKeyAlias=data2-database-tunnel \
+  -R /tmp/database-backup-borg.sock:/run/remote-backup/database-borg.sock \
+  borg@%i /home/borg/.local/bin/deadtrees-borg-tunnel-guard hold
 Restart=always
 RestartSec=5s
 
