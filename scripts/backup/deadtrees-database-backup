@@ -89,10 +89,13 @@ refresh_archive_diff() {
 		| awk 'NF && $0 !~ /[.]checkpoint([.][0-9]+)?$/ { count += 1 } END { print count + 0 }')"
 }
 
-refresh_archive_diff_after_transport() {
+run_archive_transport_and_refresh() {
+	ssh_remote preserve >/dev/null
 	preserve_stage=1
+	run_archive_transport
 	refresh_archive_diff
 	if [[ -z "$new_archives" ]]; then
+		ssh_remote release >/dev/null
 		preserve_stage=0
 	fi
 }
@@ -135,7 +138,7 @@ trap 'handle_signal 130' INT
 trap 'handle_signal 143' TERM
 
 ssh_archive probe >/dev/null
-ssh_remote cleanup >/dev/null
+ssh_remote prepare >/dev/null
 ssh_remote space-status >/dev/null
 
 start_epoch="$(date +%s)"
@@ -151,15 +154,13 @@ archives_before="$(mktemp)"
 archives_after="$(mktemp)"
 list_archives >"$archives_before"
 
-run_archive_transport
-refresh_archive_diff_after_transport
+run_archive_transport_and_refresh
 if [[ "$archive_status" -ne 0 && "$new_archive_count" -eq 0 ]]; then
 	printf '%s Borg transport exited %s without committing an archive; retrying once.\n' \
 		"$(timestamp)" "$archive_status" >&2
 	sleep "$retry_delay"
 	ssh_archive probe >/dev/null
-	run_archive_transport
-	refresh_archive_diff_after_transport
+	run_archive_transport_and_refresh
 fi
 
 if [[ "$new_archive_count" -ne 1 ]]; then
@@ -195,6 +196,7 @@ printf '%s Applying retention and verifying the new Borg repository.\n' "$(times
 "$borgmatic" --config "$maintenance_config" compact
 "$borgmatic" --config "$maintenance_config" check
 
+ssh_remote release >/dev/null
 preserve_stage=0
 ssh_remote cleanup >/dev/null
 finished_epoch="$(date +%s)"

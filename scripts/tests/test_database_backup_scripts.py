@@ -47,7 +47,25 @@ set -eu
 command="${!#}"
 printf 'ssh:%s\n' "$command" >>"$FAKE_COMMAND_LOG"
 printf '%s\n' "$*" >>"$FAKE_SSH_ARGS_LOG"
+if [[ "$command" == prepare ]]; then
+	if [[ -f "$FAKE_PRESERVE_MARKER" ]]; then
+		exit 78
+	fi
+	touch "$FAKE_CLEANUP_MARKER"
+	exit 0
+fi
+if [[ "$command" == preserve ]]; then
+	touch "$FAKE_PRESERVE_MARKER"
+	exit 0
+fi
+if [[ "$command" == release ]]; then
+	rm -f "$FAKE_PRESERVE_MARKER"
+	exit 0
+fi
 if [[ "$command" == cleanup ]]; then
+	if [[ -f "$FAKE_PRESERVE_MARKER" ]]; then
+		exit 78
+	fi
 	touch "$FAKE_CLEANUP_MARKER"
 	exit 0
 fi
@@ -148,6 +166,7 @@ printf 'borgmatic:%s\n' "$*" >>"$FAKE_COMMAND_LOG"
 		'FAKE_CREATE_ARCHIVE': '1' if create_archive else '0',
 		'FAKE_CREATE_ARCHIVE_ON_ATTEMPT': '1',
 		'FAKE_CLEANUP_MARKER': str(tmp_path / 'cleanup-complete'),
+		'FAKE_PRESERVE_MARKER': str(tmp_path / 'stage-preserved'),
 		'FAKE_SPACE_REQUIRES_CLEANUP': '0',
 		'FAKE_FIRST_ARCHIVE_NAME': '',
 		'FAKE_FIRST_TRANSPORT_STATUS': '',
@@ -186,7 +205,8 @@ def test_committed_archive_failure_preserves_dump_stage(tmp_path):
 	assert result.returncode != 0
 	assert 'does not contain postgres-directory.tar' in result.stderr
 	assert 'Preserving the database dump stage for archive recovery.' in result.stderr
-	assert (tmp_path / 'commands.log').read_text().splitlines().count('ssh:cleanup') == 1
+	assert (tmp_path / 'commands.log').read_text().splitlines().count('ssh:cleanup') == 0
+	assert (tmp_path / 'stage-preserved').exists()
 
 
 def test_committed_archive_with_failed_listing_preserves_dump_stage(tmp_path):
@@ -197,7 +217,22 @@ def test_committed_archive_with_failed_listing_preserves_dump_stage(tmp_path):
 
 	assert result.returncode == 2
 	assert 'Preserving the database dump stage for archive recovery.' in result.stderr
-	assert (tmp_path / 'commands.log').read_text().splitlines().count('ssh:cleanup') == 1
+	assert (tmp_path / 'commands.log').read_text().splitlines().count('ssh:cleanup') == 0
+	assert (tmp_path / 'stage-preserved').exists()
+
+
+def test_next_run_refuses_to_delete_preserved_recovery_stage(tmp_path):
+	env = _backup_environment(tmp_path, transport_status=0)
+	env['FAKE_ARCHIVE_PAYLOAD'] = 'unexpected-payload'
+
+	first = subprocess.run([DATABASE_BACKUP], env=env, text=True, capture_output=True, check=False)
+	second = subprocess.run([DATABASE_BACKUP], env=env, text=True, capture_output=True, check=False)
+
+	assert first.returncode != 0
+	assert second.returncode == 78
+	commands = (tmp_path / 'commands.log').read_text().splitlines()
+	assert commands.count('ssh:dump') == 1
+	assert (tmp_path / 'stage-preserved').exists()
 
 
 def test_transport_retries_once_when_first_attempt_commits_no_archive(tmp_path):
@@ -264,6 +299,7 @@ command="${!#}"
 printf 'ssh:%s\n' "$command" >>"$FAKE_COMMAND_LOG"
 case "$command" in
 "$FAKE_ARCHIVE_COMMAND probe"|space-status) exit 0 ;;
+prepare) touch "$FAKE_CLEANUP_MARKER" ;;
 cleanup) touch "$FAKE_CLEANUP_MARKER" ;;
 dump)
 	touch "$FAKE_DUMP_STARTED"
@@ -312,7 +348,7 @@ def test_stale_stage_is_cleaned_before_capacity_preflight(tmp_path):
 
 	assert result.returncode == 0, result.stderr
 	commands = (tmp_path / 'commands.log').read_text().splitlines()
-	assert commands.index('ssh:cleanup') < commands.index('ssh:space-status') < commands.index('ssh:dump')
+	assert commands.index('ssh:prepare') < commands.index('ssh:space-status') < commands.index('ssh:dump')
 
 
 def test_remote_dump_rejects_low_capacity_before_pg_dump(tmp_path):
@@ -345,6 +381,50 @@ esac
 	assert result.returncode != 0
 	assert 'Insufficient dump capacity' in result.stderr
 	assert not pg_dump_marker.exists()
+
+
+def test_remote_helper_requires_explicit_release_before_recovery_cleanup(tmp_path):
+	docker = tmp_path / 'docker'
+	preserve_marker = tmp_path / 'preserved'
+	deleted_marker = tmp_path / 'deleted'
+	_write_executable(
+		docker,
+		"""#!/usr/bin/env bash
+set -eu
+case "$*" in
+*" test -f /var/lib/postgresql/data/.deadtrees-logical-backup/toc.dat") exit 0 ;;
+*" touch /var/lib/postgresql/data/.deadtrees-logical-backup/.deadtrees-preserve") touch "$FAKE_PRESERVE_MARKER" ;;
+*" test -f /var/lib/postgresql/data/.deadtrees-logical-backup/.deadtrees-preserve") test -f "$FAKE_PRESERVE_MARKER" ;;
+*" rm -f -- /var/lib/postgresql/data/.deadtrees-logical-backup/.deadtrees-preserve") rm -f "$FAKE_PRESERVE_MARKER" ;;
+*" rm -rf -- /var/lib/postgresql/data/.deadtrees-logical-backup") touch "$FAKE_DELETED_MARKER" ;;
+*) exit 64 ;;
+esac
+""",
+	)
+	base_env = {
+		**os.environ,
+		'DEADTREES_DOCKER_BIN': str(docker),
+		'FAKE_PRESERVE_MARKER': str(preserve_marker),
+		'FAKE_DELETED_MARKER': str(deleted_marker),
+	}
+
+	def run(command: str) -> subprocess.CompletedProcess[str]:
+		return subprocess.run(
+			[DATABASE_BACKUP_REMOTE],
+			env={**base_env, 'SSH_ORIGINAL_COMMAND': command},
+			text=True,
+			capture_output=True,
+			check=False,
+		)
+
+	assert run('preserve').returncode == 0
+	assert run('prepare').returncode == 78
+	assert run('cleanup').returncode == 78
+	assert preserve_marker.exists()
+	assert not deleted_marker.exists()
+	assert run('release').returncode == 0
+	assert run('cleanup').returncode == 0
+	assert deleted_marker.exists()
 
 
 def test_dump_and_stream_helpers_share_default_stage(tmp_path):

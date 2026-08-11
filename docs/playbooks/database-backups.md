@@ -27,8 +27,8 @@ The direct database stage is split across two least-privilege entry points:
 - the backup-host wrapper prepares and verifies the operation, starts the remote
   dump, verifies the committed Borg archive, and runs retention and integrity
   maintenance;
-- the database-host forced-command helper only accepts the explicit dump,
-  capacity, verify, status, and cleanup operations.
+- the database-host forced-command helper only accepts the explicit prepare,
+  dump, capacity, verify, status, preserve, release, and cleanup operations.
 
 The database is dumped with `pg_dump --format directory --jobs=2 --compress=0`.
 Before creating the stage, the forced-command helper requires available space to
@@ -64,11 +64,14 @@ wrapper accepts the database stage only when all of these postconditions hold:
 
 Any missing or ambiguous archive fails closed. A stale database-host stage is
 removed before the free-space preflight so abandoned dump data cannot cause a
-false capacity failure. If no archive is committed, cleanup runs on exit. Once
-an archive or checkpoint appears, the stage remains recoverable until payload,
-data, retention, compact, and repository checks all succeed; a failed validation
-therefore does not force another production dump. Operational freshness checks
-ignore Borg checkpoint archives and report only completed database backups.
+false capacity failure. If no archive is committed, cleanup runs on exit. Before
+archive transport starts, a marker inside the dump stage makes that recovery
+state persistent across wrapper exits and later scheduled runs. The marker is
+released only when a successful repository listing proves that no archive was
+committed, or after payload, data, retention, compact, and repository checks all
+succeed. A failed or inconclusive validation therefore does not force another
+production dump. Operational freshness checks ignore Borg checkpoint archives
+and report only completed database backups.
 
 ## Installation Contract
 
@@ -132,6 +135,13 @@ The `restrict` option disables TCP and Unix-socket forwarding for this key. The
 helper also validates `SSH_ORIGINAL_COMMAND`; attempts to use the source key for
 dump, cleanup, or status operations fail closed. Keep all private keys and
 concrete public-key lines host-local.
+
+The lifecycle helper's `prepare` and `cleanup` operations refuse to delete a
+stage containing `.deadtrees-preserve` and exit `78`. A later scheduled wrapper
+therefore stops before `pg_dump` instead of silently discarding recovery data.
+After an operator has validated or re-archived the retained dump, explicitly run
+`release`, verify the marker is gone with `status`, and only then run `cleanup`.
+Do not release a preserved stage merely to make the next nightly job green.
 
 Create the dedicated backup-host identity, then install both tmpfiles and the
 SSH policy before starting the tunnel. Replace
@@ -227,7 +237,9 @@ through a safe temporary restore path and verify that PostgreSQL has zero dump
 sessions afterward. After a successful run, confirm that both database-host and
 backup-host staging are absent and that retention, compact, and repository checks
 completed. After a failed post-commit validation, confirm instead that the
-database-host dump stage remains available for recovery.
+database-host dump stage reports `preserved`, remains available after a second
+wrapper invocation, and is handled through the explicit recovery procedure
+before normal scheduling resumes.
 
 For routine monitoring, run the backup surface in
 [`platform-status-check.md`](platform-status-check.md). It uses

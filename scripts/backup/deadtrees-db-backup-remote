@@ -9,6 +9,7 @@ readonly docker_bin="${DEADTREES_DOCKER_BIN:-docker}"
 readonly capacity_percent="${DEADTREES_DB_BACKUP_CAPACITY_PERCENT:-300}"
 readonly reserve_bytes="${DEADTREES_DB_BACKUP_RESERVE_BYTES:-53687091200}"
 readonly command="${SSH_ORIGINAL_COMMAND:-}"
+readonly preserve_marker="$stage/.deadtrees-preserve"
 
 assert_dump_capacity() {
 	local database_bytes available_bytes required_bytes
@@ -37,6 +38,13 @@ assert_dump_capacity() {
 }
 
 case "$command" in
+	prepare)
+		if "$docker_bin" exec --user postgres "$container" test -f "$preserve_marker"; then
+			printf 'A recoverable database dump is preserved at %s.\n' "$stage" >&2
+			exit 78
+		fi
+		exec "$docker_bin" exec --user postgres "$container" rm -rf -- "$stage"
+		;;
 	dump)
 		"$docker_bin" exec --user postgres "$container" test ! -e "$stage"
 		assert_dump_capacity >/dev/null
@@ -63,11 +71,25 @@ case "$command" in
 	status)
 		if "$docker_bin" exec --user postgres "$container" test -d "$stage"; then
 			"$docker_bin" exec --user postgres "$container" du -sb "$stage"
+			if "$docker_bin" exec --user postgres "$container" test -f "$preserve_marker"; then
+				printf 'preserved\n'
+			fi
 		else
 			printf 'absent\n'
 		fi
 		;;
+	preserve)
+		"$docker_bin" exec --user postgres "$container" test -f "$stage/toc.dat"
+		exec "$docker_bin" exec --user postgres "$container" touch "$preserve_marker"
+		;;
+	release)
+		exec "$docker_bin" exec --user postgres "$container" rm -f -- "$preserve_marker"
+		;;
 	cleanup)
+		if "$docker_bin" exec --user postgres "$container" test -f "$preserve_marker"; then
+			printf 'Refusing to delete recoverable database dump at %s.\n' "$stage" >&2
+			exit 78
+		fi
 		exec "$docker_bin" exec --user postgres "$container" rm -rf -- "$stage"
 		;;
 	*)
