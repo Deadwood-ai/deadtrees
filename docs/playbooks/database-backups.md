@@ -35,8 +35,10 @@ Before creating the stage, the forced-command helper requires available space to
 exceed 300% of the current database size plus a 50 GiB write-safety reserve. A
 failed capacity check exits before `pg_dump` writes into the PostgreSQL volume.
 After PostgreSQL connections close, the database host sends a tar stream through
-a reverse Unix socket to the local Borg repository on the backup host. No
-database credentials or Borg keys belong in the repository.
+a reverse Unix socket to the local Borg repository on the backup host. The
+socket is owned by `remote-backup` with mode `0600`, so other local users cannot
+connect to the repository service. No database credentials or Borg keys belong
+in the repository.
 
 ## Authoritative Success Contract
 
@@ -55,7 +57,10 @@ wrapper accepts the database stage only when all of these postconditions hold:
 - prune, compact, and the configured Borg check all succeed.
 
 Any missing or ambiguous archive fails closed. Cleanup is attempted when the
-wrapper exits, including on errors.
+wrapper exits, including on errors. A stale database-host stage is removed
+before the free-space preflight so abandoned dump data cannot cause a false
+capacity failure. Operational freshness checks ignore Borg checkpoint archives
+and report only completed database backups.
 
 ## Installation Contract
 

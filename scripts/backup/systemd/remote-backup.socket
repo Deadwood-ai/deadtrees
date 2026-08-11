@@ -6,6 +6,7 @@ PartOf=remote-backup@.service
 ListenStream=/run/remote-backup/borg.sock
 Accept=yes
 SocketUser=remote-backup
+SocketMode=0600
 
 [Install]
 WantedBy=sockets.target

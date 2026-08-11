@@ -41,7 +41,17 @@ printf 'ssh:%s\n' "$command" >>"$FAKE_COMMAND_LOG"
 if [[ "$command" == tunnel-status ]]; then
 	exit "$FAKE_TUNNEL_STATUS"
 fi
-if [[ "$command" == cleanup || "$command" == dump || "$command" == verify || "$command" == space-status ]]; then
+if [[ "$command" == cleanup ]]; then
+	touch "$FAKE_CLEANUP_MARKER"
+	exit 0
+fi
+if [[ "$command" == space-status ]]; then
+	if [[ "$FAKE_SPACE_REQUIRES_CLEANUP" == 1 && ! -f "$FAKE_CLEANUP_MARKER" ]]; then
+		exit 1
+	fi
+	exit 0
+fi
+if [[ "$command" == dump || "$command" == verify ]]; then
 	exit 0
 fi
 attempt=0
@@ -111,6 +121,8 @@ printf 'borgmatic:%s\n' "$*" >>"$FAKE_COMMAND_LOG"
 		'FAKE_COMMAND_LOG': str(command_log),
 		'FAKE_CREATE_ARCHIVE': '1' if create_archive else '0',
 		'FAKE_CREATE_ARCHIVE_ON_ATTEMPT': '1',
+		'FAKE_CLEANUP_MARKER': str(tmp_path / 'cleanup-complete'),
+		'FAKE_SPACE_REQUIRES_CLEANUP': '0',
 		'FAKE_FIRST_ARCHIVE_NAME': '',
 		'FAKE_FIRST_TRANSPORT_STATUS': '',
 		'FAKE_TRANSPORT_STATUS': str(transport_status),
@@ -188,6 +200,17 @@ def test_unavailable_tunnel_prevents_database_dump(tmp_path):
 	commands = (tmp_path / 'commands.log').read_text()
 	assert 'ssh:tunnel-status' in commands
 	assert 'ssh:dump' not in commands
+
+
+def test_stale_stage_is_cleaned_before_capacity_preflight(tmp_path):
+	env = _backup_environment(tmp_path, transport_status=0)
+	env['FAKE_SPACE_REQUIRES_CLEANUP'] = '1'
+
+	result = subprocess.run([DATABASE_BACKUP], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 0, result.stderr
+	commands = (tmp_path / 'commands.log').read_text().splitlines()
+	assert commands.index('ssh:cleanup') < commands.index('ssh:space-status') < commands.index('ssh:dump')
 
 
 def test_remote_tunnel_status_requires_listening_socket(tmp_path):
@@ -268,6 +291,37 @@ def test_operator_status_checks_direct_database_backup():
 	assert 'database_dump:database_dump.yaml' not in command
 
 
+def test_operator_status_ignores_newer_database_checkpoint(tmp_path):
+	borgmatic = tmp_path / 'borgmatic'
+	_write_executable(
+		borgmatic,
+		"""#!/usr/bin/env bash
+set -eu
+case "$*" in
+*database_dump_direct.yaml*)
+	printf '%s\n' \
+		'database-dump-2026-08-11T10:00:00 Tue, 2026-08-11' \
+		'database-dump-2026-08-11T11:00:00.checkpoint Tue, 2026-08-11' \
+		'database-dump-2026-08-11T11:30:00.checkpoint.1 Tue, 2026-08-11'
+	;;
+*storage.yaml*)
+	printf '%s\n' 'storage-2026-08-11T12:00:00 Tue, 2026-08-11'
+	;;
+*) exit 64 ;;
+esac
+""",
+	)
+	command = operator_status.backup_command().replace('/home/remote-backup/.local/bin/borgmatic', str(borgmatic))
+
+	result = subprocess.run(['bash', '-c', command], text=True, capture_output=True, check=False)
+
+	assert result.returncode == 0, result.stderr
+	assert result.stdout.splitlines() == [
+		'archive=database_dump:database-dump-2026-08-11T10:00:00',
+		'archive=storage:storage-2026-08-11T12:00:00',
+	]
+
+
 def test_archive_helper_reproduces_reviewed_production_command(tmp_path):
 	command_log = tmp_path / 'archive.log'
 	borg = tmp_path / 'borg'
@@ -328,6 +382,8 @@ def test_systemd_units_provision_reverse_socket_lifecycle():
 
 	assert 'ListenStream=/run/remote-backup/borg.sock' in socket
 	assert 'Accept=yes' in socket
+	assert 'SocketUser=remote-backup' in socket
+	assert 'SocketMode=0600' in socket
 	assert 'StandardInput=socket' in server
 	assert '--restrict-to-path /mnt/raid/backups/supabase.deadtrees.earth' in server
 	assert '-R /tmp/borg.sock:/run/remote-backup/borg.sock' in tunnel

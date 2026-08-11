@@ -82,8 +82,8 @@ fi
 trap cleanup EXIT INT TERM
 
 ssh_remote tunnel-status >/dev/null
-ssh_remote space-status >/dev/null
 ssh_remote cleanup >/dev/null
+ssh_remote space-status >/dev/null
 
 start_epoch="$(date +%s)"
 printf '%s Starting local PostgreSQL directory dump.\n' "$(timestamp)"
