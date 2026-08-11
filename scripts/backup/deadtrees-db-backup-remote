@@ -61,11 +61,6 @@ case "$command" in
 			tar --format=posix -C "$stage" -cf - . \
 			| zstd --threads=0 -3 --stdout
 		;;
-	stream-local)
-		"$docker_bin" exec --user postgres "$container" test -f "$stage/toc.dat"
-		exec "$docker_bin" exec --user postgres "$container" \
-			tar --format=posix -C "$stage" -cf - .
-		;;
 	verify)
 		"$docker_bin" exec --user postgres "$container" test -f "$stage/toc.dat"
 		"$docker_bin" exec --user postgres "$container" pg_restore --list "$stage" >/dev/null

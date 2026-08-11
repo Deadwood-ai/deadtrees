@@ -9,6 +9,7 @@ readonly repository="${DEADTREES_DB_ARCHIVE_REPOSITORY:-remote-backup@dtbackup-b
 readonly identity="${DEADTREES_DB_ARCHIVE_IDENTITY:-/home/borg/.config/deadtrees-backup/id_ed25519}"
 readonly known_hosts="${DEADTREES_DB_ARCHIVE_KNOWN_HOSTS:-/home/borg/.config/deadtrees-backup/known_hosts}"
 readonly source_remote="${DEADTREES_DB_ARCHIVE_SOURCE_REMOTE:-dendro@127.0.0.1}"
+readonly source_command="${DEADTREES_DB_ARCHIVE_SOURCE_COMMAND:-/home/dendro/.local/bin/deadtrees-db-backup-stream}"
 readonly borg_rsh="${DEADTREES_DB_ARCHIVE_BORG_RSH:-/home/borg/.local/bin/deadtrees-borg-rsh}"
 readonly archive_timestamp="${DEADTREES_DB_ARCHIVE_TIMESTAMP:-$(date '+%Y-%m-%dT%H:%M:%S')}"
 readonly archive="database-dump-$archive_timestamp"
@@ -45,4 +46,4 @@ exec "$borg_bin" create \
 	-o StrictHostKeyChecking=yes \
 	-o "UserKnownHostsFile=$known_hosts" \
 	-o HostKeyAlias=data2-local \
-	"$source_remote" stream-local
+	"$source_remote" "$source_command"

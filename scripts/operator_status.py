@@ -266,7 +266,7 @@ def backup_command() -> str:
 		)
 
 	return (
-		"set -e; "
+		"set -e -o pipefail; "
 		"borgmatic=/home/remote-backup/.local/bin/borgmatic; "
 		"config_dir=/home/remote-backup/.config/borgmatic; "
 		"if [ ! -x \"$borgmatic\" ]; then echo \"borgmatic not executable: $borgmatic\" >&2; exit 1; fi; "
