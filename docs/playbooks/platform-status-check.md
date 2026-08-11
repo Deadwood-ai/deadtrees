@@ -72,7 +72,7 @@ full platform check inside that broader operator cadence.
    ```bash
    ssh -o BatchMode=yes -o ConnectTimeout=5 dtbackup 'hostname'
    ssh -o BatchMode=yes -o ConnectTimeout=5 remote-backup@dtbackup \
-     '/home/remote-backup/.local/bin/borgmatic --config /home/remote-backup/.config/borgmatic/database_dump_direct.yaml list \
+     'set -o pipefail; /home/remote-backup/.local/bin/borgmatic --config /home/remote-backup/.config/borgmatic/database_dump_direct.yaml list \
       | awk '\''/^[[:alnum:]_.-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}T/ && $1 !~ /[.]checkpoint([.][0-9]+)?$/ { latest=$0 } END { print latest }'\'''
    ```
 

@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -13,6 +14,7 @@ DATABASE_BORG_RSH = ROOT / 'scripts' / 'backup' / 'deadtrees-borg-rsh'
 DATABASE_BORG_TUNNEL_GUARD = ROOT / 'scripts' / 'backup' / 'deadtrees-borg-tunnel-guard'
 BACKUP_SYSTEMD = ROOT / 'scripts' / 'backup' / 'systemd'
 BACKUP_SSHD_CONFIG = ROOT / 'scripts' / 'backup' / 'sshd_config.d' / 'deadtrees-borg.conf'
+BACKUP_TMPFILES = ROOT / 'scripts' / 'backup' / 'tmpfiles.d'
 NIGHTLY_BACKUPS = ROOT / 'scripts' / 'backup' / 'deadtrees-nightly-backups'
 OPERATOR_STATUS = ROOT / 'scripts' / 'operator_status.py'
 PLATFORM_STATUS_PLAYBOOK = ROOT / 'docs' / 'playbooks' / 'platform-status-check.md'
@@ -268,28 +270,61 @@ esac
 	assert not pg_dump_marker.exists()
 
 
-def test_stream_helper_exposes_only_the_completed_stage(tmp_path):
+def test_dump_and_stream_helpers_share_default_stage(tmp_path):
 	docker = tmp_path / 'docker'
 	command_log = tmp_path / 'docker.log'
+	stage_marker = tmp_path / 'stage-complete'
 	_write_executable(
 		docker,
-		'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$FAKE_COMMAND_LOG"\n',
+		"""#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$*" >>"$FAKE_COMMAND_LOG"
+case "$*" in
+*" test ! -e /var/lib/postgresql/data/.deadtrees-logical-backup") test ! -f "$FAKE_STAGE_MARKER" ;;
+*" psql "*) printf '100\n' ;;
+*" df -PB1 /var/lib/postgresql/data")
+	printf 'Filesystem 1-blocks Used Available Capacity Mounted on\n/dev/test 1000 100 900 10%% /data\n'
+	;;
+*" pg_dump "*" --file /var/lib/postgresql/data/.deadtrees-logical-backup "*) touch "$FAKE_STAGE_MARKER" ;;
+*" test -f /var/lib/postgresql/data/.deadtrees-logical-backup/toc.dat") test -f "$FAKE_STAGE_MARKER" ;;
+*" tar --format=posix -C /var/lib/postgresql/data/.deadtrees-logical-backup -cf - .") printf 'archive-bytes' ;;
+*) exit 64 ;;
+esac
+""",
 	)
-	env = {
+	base_env = {
 		**os.environ,
-		'SSH_ORIGINAL_COMMAND': '/test/deadtrees-db-backup-stream',
-		'DEADTREES_DB_BACKUP_STREAM_COMMAND_PATH': '/test/deadtrees-db-backup-stream',
 		'DEADTREES_DOCKER_BIN': str(docker),
+		'DEADTREES_DB_BACKUP_CAPACITY_PERCENT': '100',
+		'DEADTREES_DB_BACKUP_RESERVE_BYTES': '0',
 		'FAKE_COMMAND_LOG': str(command_log),
+		'FAKE_STAGE_MARKER': str(stage_marker),
 	}
+	dump_result = subprocess.run(
+		[DATABASE_BACKUP_REMOTE],
+		env={**base_env, 'SSH_ORIGINAL_COMMAND': 'dump'},
+		text=True,
+		capture_output=True,
+		check=False,
+	)
+	stream_result = subprocess.run(
+		[DATABASE_BACKUP_STREAM],
+		env={
+			**base_env,
+			'SSH_ORIGINAL_COMMAND': '/test/deadtrees-db-backup-stream',
+			'DEADTREES_DB_BACKUP_STREAM_COMMAND_PATH': '/test/deadtrees-db-backup-stream',
+		},
+		text=True,
+		capture_output=True,
+		check=False,
+	)
 
-	result = subprocess.run([DATABASE_BACKUP_STREAM], env=env, text=True, capture_output=True, check=False)
-
-	assert result.returncode == 0, result.stderr
-	assert command_log.read_text().splitlines() == [
-		'exec --user postgres supabase-db test -f /var/lib/postgresql/data/backup-direct/toc.dat',
-		'exec --user postgres supabase-db tar --format=posix -C /var/lib/postgresql/data/backup-direct -cf - .',
-	]
+	assert dump_result.returncode == 0, dump_result.stderr
+	assert stream_result.returncode == 0, stream_result.stderr
+	assert stream_result.stdout == 'archive-bytes'
+	commands = command_log.read_text()
+	assert commands.count('/var/lib/postgresql/data/.deadtrees-logical-backup') == 4
+	assert '/var/lib/postgresql/data/backup-direct' not in commands
 
 
 def test_stream_helper_denies_dump_and_cleanup_commands(tmp_path):
@@ -367,12 +402,26 @@ exit 2
 	assert result.stdout == ''
 
 
-def test_operator_fallback_documents_completed_archive_filter():
+def test_operator_fallback_propagates_borgmatic_failure_after_output(tmp_path):
 	playbook = PLATFORM_STATUS_PLAYBOOK.read_text()
-	command = playbook.split('ssh -o BatchMode=yes -o ConnectTimeout=5 remote-backup@dtbackup', 1)[1].split('```', 1)[0]
+	ssh_prefix = 'ssh -o BatchMode=yes -o ConnectTimeout=5 remote-backup@dtbackup'
+	snippet = ssh_prefix + playbook.split(ssh_prefix, 1)[1].split('```', 1)[0]
+	remote_command = shlex.split(snippet)[-1]
+	borgmatic = tmp_path / 'borgmatic'
+	_write_executable(
+		borgmatic,
+		"""#!/usr/bin/env bash
+printf '%s\n' 'database-dump-2026-08-11T10:00:00 Tue, 2026-08-11'
+exit 2
+""",
+	)
+	remote_command = remote_command.replace('/home/remote-backup/.local/bin/borgmatic', str(borgmatic))
 
-	assert 'list --last 1' not in command
-	assert '$1 !~ /[.]checkpoint([.][0-9]+)?$/' in command
+	result = subprocess.run(['bash', '-c', remote_command], text=True, capture_output=True, check=False)
+
+	assert 'list --last 1' not in remote_command
+	assert '$1 !~ /[.]checkpoint([.][0-9]+)?$/' in remote_command
+	assert result.returncode == 2
 
 
 def test_archive_helper_reproduces_reviewed_production_command(tmp_path):
@@ -454,14 +503,14 @@ def test_borg_rsh_connects_standard_io_to_restricted_reverse_listener(tmp_path):
 	env = {
 		**os.environ,
 		'DEADTREES_BORG_RSH_SOCAT_BIN': str(socat),
-		'DEADTREES_BORG_RSH_ENDPOINT': '127.0.0.1:42729',
+		'DEADTREES_BORG_RSH_SOCKET_PATH': '/test/borg.sock',
 		'FAKE_COMMAND_LOG': str(command_log),
 	}
 
 	result = subprocess.run([DATABASE_BORG_RSH], env=env, text=True, capture_output=True, check=False)
 
 	assert result.returncode == 0, result.stderr
-	assert command_log.read_text() == 'STDIO TCP:127.0.0.1:42729\n'
+	assert command_log.read_text() == 'STDIO UNIX-CONNECT:/test/borg.sock\n'
 
 
 def test_tunnel_guard_holds_only_the_expected_forced_command(tmp_path):
@@ -501,6 +550,7 @@ def test_systemd_units_and_sshd_policy_restrict_reverse_transport():
 	server = (BACKUP_SYSTEMD / 'database-backup-borg@.service').read_text()
 	tunnel = (BACKUP_SYSTEMD / 'reverse-tunnel@.service').read_text()
 	sshd_config = BACKUP_SSHD_CONFIG.read_text()
+	tmpfiles = (BACKUP_TMPFILES / 'deadtrees-database-backup.conf').read_text()
 
 	assert 'ListenStream=/run/remote-backup/database-borg.sock' in socket
 	assert 'Accept=yes' in socket
@@ -513,14 +563,16 @@ def test_systemd_units_and_sshd_policy_restrict_reverse_transport():
 	assert '-i /home/remote-backup/.ssh/id_ed25519_database_tunnel' in tunnel
 	assert '-o IdentitiesOnly=yes' in tunnel
 	assert '-o HostKeyAlias=data2-database-tunnel' in tunnel
-	assert '-R 127.0.0.1:42729:/run/remote-backup/database-borg.sock' in tunnel
+	assert '-R /run/deadtrees-database-backup/borg.sock:/run/remote-backup/database-borg.sock' in tunnel
 	assert 'borg@%i /home/borg/.local/bin/deadtrees-borg-tunnel-guard hold' in tunnel
 	assert 'Restart=always' in tunnel
 	assert 'Match User borg' in sshd_config
 	assert 'AllowTcpForwarding remote' in sshd_config
-	assert 'PermitListen 127.0.0.1:42729' in sshd_config
 	assert 'GatewayPorts no' in sshd_config
+	assert 'StreamLocalBindMask 0177' in sshd_config
+	assert 'StreamLocalBindUnlink yes' in sshd_config
 	assert sshd_config.rstrip().endswith('Match all')
+	assert tmpfiles == 'd /run/deadtrees-database-backup 0700 borg borg -\n'
 
 
 def test_nightly_backup_continues_after_stage_failure(tmp_path):

@@ -2,6 +2,6 @@
 set -Eeuo pipefail
 
 readonly socat_bin="${DEADTREES_BORG_RSH_SOCAT_BIN:-/usr/bin/socat}"
-readonly endpoint="${DEADTREES_BORG_RSH_ENDPOINT:-127.0.0.1:42729}"
+readonly socket_path="${DEADTREES_BORG_RSH_SOCKET_PATH:-/run/deadtrees-database-backup/borg.sock}"
 
-exec "$socat_bin" STDIO "TCP:$endpoint"
+exec "$socat_bin" STDIO "UNIX-CONNECT:$socket_path"
