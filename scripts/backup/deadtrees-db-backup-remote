@@ -8,12 +8,42 @@ readonly stage="${DEADTREES_DB_BACKUP_STAGE:-/var/lib/postgresql/data/.deadtrees
 readonly socket_path="${DEADTREES_BORG_SOCKET_PATH:-/tmp/borg.sock}"
 readonly ss_bin="${DEADTREES_SS_BIN:-ss}"
 readonly socket_test_bin="${DEADTREES_SOCKET_TEST_BIN:-test}"
+readonly docker_bin="${DEADTREES_DOCKER_BIN:-docker}"
+readonly capacity_percent="${DEADTREES_DB_BACKUP_CAPACITY_PERCENT:-300}"
+readonly reserve_bytes="${DEADTREES_DB_BACKUP_RESERVE_BYTES:-53687091200}"
 readonly command="${SSH_ORIGINAL_COMMAND:-}"
+
+assert_dump_capacity() {
+	local database_bytes available_bytes required_bytes
+	if [[ ! "$capacity_percent" =~ ^[0-9]+$ || ! "$reserve_bytes" =~ ^[0-9]+$ ]]; then
+		printf 'Dump capacity policy must use numeric values.\n' >&2
+		exit 1
+	fi
+	database_bytes="$("$docker_bin" exec --user postgres "$container" \
+		psql -XAt --username postgres --dbname postgres \
+		--command "select pg_database_size('postgres');")"
+	available_bytes="$("$docker_bin" exec --user postgres "$container" \
+		df -PB1 "$(dirname "$stage")" | awk 'NR == 2 { print $4 }')"
+
+	if [[ ! "$database_bytes" =~ ^[0-9]+$ || ! "$available_bytes" =~ ^[0-9]+$ ]]; then
+		printf 'Could not determine database size and available dump capacity.\n' >&2
+		exit 1
+	fi
+	required_bytes=$((database_bytes * capacity_percent / 100 + reserve_bytes))
+	if [[ "$available_bytes" -lt "$required_bytes" ]]; then
+		printf 'Insufficient dump capacity: required=%s available=%s database=%s.\n' \
+			"$required_bytes" "$available_bytes" "$database_bytes" >&2
+		exit 1
+	fi
+	printf 'capacity-ready required=%s available=%s database=%s\n' \
+		"$required_bytes" "$available_bytes" "$database_bytes"
+}
 
 case "$command" in
 	dump)
-		docker exec --user postgres "$container" test ! -e "$stage"
-		exec docker exec --user postgres "$container" \
+		"$docker_bin" exec --user postgres "$container" test ! -e "$stage"
+		assert_dump_capacity >/dev/null
+		exec "$docker_bin" exec --user postgres "$container" \
 			pg_dump \
 			--no-password \
 			--clean \
@@ -25,25 +55,28 @@ case "$command" in
 			--jobs=2 \
 			postgres
 		;;
+	space-status)
+		assert_dump_capacity
+		;;
 	stream)
-		docker exec --user postgres "$container" test -f "$stage/toc.dat"
-		docker exec --user postgres "$container" \
+		"$docker_bin" exec --user postgres "$container" test -f "$stage/toc.dat"
+		"$docker_bin" exec --user postgres "$container" \
 			tar --format=posix -C "$stage" -cf - . \
 			| zstd --threads=0 -3 --stdout
 		;;
 	stream-local)
-		docker exec --user postgres "$container" test -f "$stage/toc.dat"
-		exec docker exec --user postgres "$container" \
+		"$docker_bin" exec --user postgres "$container" test -f "$stage/toc.dat"
+		exec "$docker_bin" exec --user postgres "$container" \
 			tar --format=posix -C "$stage" -cf - .
 		;;
 	verify)
-		docker exec --user postgres "$container" test -f "$stage/toc.dat"
-		docker exec --user postgres "$container" pg_restore --list "$stage" >/dev/null
+		"$docker_bin" exec --user postgres "$container" test -f "$stage/toc.dat"
+		"$docker_bin" exec --user postgres "$container" pg_restore --list "$stage" >/dev/null
 		printf 'verified\n'
 		;;
 	status)
-		if docker exec --user postgres "$container" test -d "$stage"; then
-			docker exec --user postgres "$container" du -sb "$stage"
+		if "$docker_bin" exec --user postgres "$container" test -d "$stage"; then
+			"$docker_bin" exec --user postgres "$container" du -sb "$stage"
 		else
 			printf 'absent\n'
 		fi
@@ -54,7 +87,7 @@ case "$command" in
 		printf 'ready\n'
 		;;
 	cleanup)
-		exec docker exec --user postgres "$container" rm -rf -- "$stage"
+		exec "$docker_bin" exec --user postgres "$container" rm -rf -- "$stage"
 		;;
 	*)
 		printf 'Command denied.\n' >&2

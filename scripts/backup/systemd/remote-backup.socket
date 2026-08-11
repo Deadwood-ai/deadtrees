@@ -1,0 +1,11 @@
+[Unit]
+Description=Borg Backup Socket
+PartOf=remote-backup@.service
+
+[Socket]
+ListenStream=/run/remote-backup/borg.sock
+Accept=yes
+SocketUser=remote-backup
+
+[Install]
+WantedBy=sockets.target

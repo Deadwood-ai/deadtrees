@@ -1,0 +1,21 @@
+[Unit]
+Description=Reverse SSH tunnel to %i
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+User=remote-backup
+ExecStart=/usr/bin/ssh -NT \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=60 \
+  -o ServerAliveCountMax=3 \
+  -o StreamLocalBindUnlink=yes \
+  -R /tmp/borg.sock:/run/remote-backup/borg.sock \
+  borg@%i
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

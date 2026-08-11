@@ -51,7 +51,8 @@ list_archives() {
 refresh_archive_diff() {
 	list_archives >"$archives_after"
 	new_archives="$(comm -13 "$archives_before" "$archives_after")"
-	new_archive_count="$(printf '%s\n' "$new_archives" | awk 'NF { count += 1 } END { print count + 0 }')"
+	new_archive_count="$(printf '%s\n' "$new_archives" \
+		| awk 'NF && $0 !~ /[.]checkpoint([.][0-9]+)?$/ { count += 1 } END { print count + 0 }')"
 }
 
 run_archive_transport() {
@@ -81,6 +82,7 @@ fi
 trap cleanup EXIT INT TERM
 
 ssh_remote tunnel-status >/dev/null
+ssh_remote space-status >/dev/null
 ssh_remote cleanup >/dev/null
 
 start_epoch="$(date +%s)"
@@ -109,12 +111,12 @@ fi
 
 ssh_remote cleanup >/dev/null
 if [[ "$new_archive_count" -ne 1 ]]; then
-	printf 'Expected exactly one new Borg archive, found %s; transport exit status was %s.\n' \
+	printf 'Expected exactly one completed new Borg archive, found %s; transport exit status was %s.\n' \
 		"$new_archive_count" "$archive_status" >&2
 	exit 1
 fi
 
-new_archive="$new_archives"
+new_archive="$(printf '%s\n' "$new_archives" | awk 'NF && $0 !~ /[.]checkpoint([.][0-9]+)?$/')"
 if [[ "$new_archive" != database-dump-* ]]; then
 	printf 'Unexpected new Borg archive name: %s\n' "$new_archive" >&2
 	exit 1

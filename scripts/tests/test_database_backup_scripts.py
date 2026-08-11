@@ -9,6 +9,7 @@ DATABASE_BACKUP = ROOT / 'scripts' / 'backup' / 'deadtrees-database-backup'
 DATABASE_BACKUP_REMOTE = ROOT / 'scripts' / 'backup' / 'deadtrees-db-backup-remote'
 DATABASE_BORG_ARCHIVE = ROOT / 'scripts' / 'backup' / 'deadtrees-db-borg-archive'
 DATABASE_BORG_RSH = ROOT / 'scripts' / 'backup' / 'deadtrees-borg-rsh'
+BACKUP_SYSTEMD = ROOT / 'scripts' / 'backup' / 'systemd'
 NIGHTLY_BACKUPS = ROOT / 'scripts' / 'backup' / 'deadtrees-nightly-backups'
 OPERATOR_STATUS = ROOT / 'scripts' / 'operator_status.py'
 OPERATOR_SPEC = importlib.util.spec_from_file_location('operator_status', OPERATOR_STATUS)
@@ -40,7 +41,7 @@ printf 'ssh:%s\n' "$command" >>"$FAKE_COMMAND_LOG"
 if [[ "$command" == tunnel-status ]]; then
 	exit "$FAKE_TUNNEL_STATUS"
 fi
-if [[ "$command" == cleanup || "$command" == dump || "$command" == verify ]]; then
+if [[ "$command" == cleanup || "$command" == dump || "$command" == verify || "$command" == space-status ]]; then
 	exit 0
 fi
 attempt=0
@@ -49,6 +50,9 @@ if [[ -f "$FAKE_ATTEMPTS" ]]; then
 fi
 attempt=$((attempt + 1))
 printf '%s\n' "$attempt" >"$FAKE_ATTEMPTS"
+if [[ "$attempt" -eq 1 && -n "$FAKE_FIRST_ARCHIVE_NAME" ]]; then
+	printf '%s\n' "$FAKE_FIRST_ARCHIVE_NAME" >>"$FAKE_ARCHIVES"
+fi
 if [[ "$FAKE_CREATE_ARCHIVE" == 1 && "$attempt" -ge "$FAKE_CREATE_ARCHIVE_ON_ATTEMPT" ]]; then
 	printf 'database-dump-2026-08-11T10:00:00\n' >>"$FAKE_ARCHIVES"
 fi
@@ -107,6 +111,7 @@ printf 'borgmatic:%s\n' "$*" >>"$FAKE_COMMAND_LOG"
 		'FAKE_COMMAND_LOG': str(command_log),
 		'FAKE_CREATE_ARCHIVE': '1' if create_archive else '0',
 		'FAKE_CREATE_ARCHIVE_ON_ATTEMPT': '1',
+		'FAKE_FIRST_ARCHIVE_NAME': '',
 		'FAKE_FIRST_TRANSPORT_STATUS': '',
 		'FAKE_TRANSPORT_STATUS': str(transport_status),
 		'FAKE_TUNNEL_STATUS': '0',
@@ -130,7 +135,7 @@ def test_transport_failure_without_archive_fails_closed(tmp_path):
 	result = subprocess.run([DATABASE_BACKUP], env=env, text=True, capture_output=True, check=False)
 
 	assert result.returncode != 0
-	assert 'Expected exactly one new Borg archive, found 0' in result.stderr
+	assert 'Expected exactly one completed new Borg archive, found 0' in result.stderr
 	assert 'borgmatic:' not in (tmp_path / 'commands.log').read_text()
 
 
@@ -144,6 +149,33 @@ def test_transport_retries_once_when_first_attempt_commits_no_archive(tmp_path):
 	assert result.returncode == 0, result.stderr
 	assert (tmp_path / 'attempts').read_text() == '2\n'
 	assert 'retrying once' in result.stderr
+
+
+def test_checkpoint_archive_is_incomplete_and_requires_final_archive(tmp_path):
+	env = _backup_environment(tmp_path, transport_status=0)
+	env['FAKE_FIRST_ARCHIVE_NAME'] = 'database-dump-2026-08-11T10:00:00.checkpoint'
+	env['FAKE_CREATE_ARCHIVE_ON_ATTEMPT'] = '2'
+	env['FAKE_FIRST_TRANSPORT_STATUS'] = '2'
+
+	result = subprocess.run([DATABASE_BACKUP], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 0, result.stderr
+	assert (tmp_path / 'attempts').read_text() == '2\n'
+	assert 'retrying once' in result.stderr
+	assert 'database-dump-2026-08-11T10:00:00.checkpoint' in (tmp_path / 'archives').read_text()
+	assert (tmp_path / 'commands.log').read_text().count('borgmatic:') == 3
+
+
+def test_checkpoint_without_final_archive_fails_before_maintenance(tmp_path):
+	env = _backup_environment(tmp_path, transport_status=1, create_archive=False)
+	env['FAKE_FIRST_ARCHIVE_NAME'] = 'database-dump-2026-08-11T10:00:00.checkpoint'
+	env['FAKE_FIRST_TRANSPORT_STATUS'] = '2'
+
+	result = subprocess.run([DATABASE_BACKUP], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode != 0
+	assert 'Expected exactly one completed new Borg archive, found 0' in result.stderr
+	assert 'borgmatic:' not in (tmp_path / 'commands.log').read_text()
 
 
 def test_unavailable_tunnel_prevents_database_dump(tmp_path):
@@ -195,6 +227,38 @@ def test_remote_tunnel_status_rejects_stale_socket(tmp_path):
 	result = subprocess.run([DATABASE_BACKUP_REMOTE], env=env, text=True, capture_output=True, check=False)
 
 	assert result.returncode != 0
+
+
+def test_remote_dump_rejects_low_capacity_before_pg_dump(tmp_path):
+	docker = tmp_path / 'docker'
+	pg_dump_marker = tmp_path / 'pg-dump-ran'
+	_write_executable(
+		docker,
+		"""#!/usr/bin/env bash
+set -eu
+case "$*" in
+*" test ! -e "*) exit 0 ;;
+*" psql "*) printf '100\n' ;;
+*" df -PB1 "*) printf 'Filesystem 1-blocks Used Available Capacity Mounted on\n/dev/test 1000 900 100 90%% /data\n' ;;
+*" pg_dump "*) touch "$FAKE_PG_DUMP_MARKER" ;;
+*) exit 64 ;;
+esac
+""",
+	)
+	env = {
+		**os.environ,
+		'SSH_ORIGINAL_COMMAND': 'dump',
+		'DEADTREES_DOCKER_BIN': str(docker),
+		'DEADTREES_DB_BACKUP_CAPACITY_PERCENT': '150',
+		'DEADTREES_DB_BACKUP_RESERVE_BYTES': '0',
+		'FAKE_PG_DUMP_MARKER': str(pg_dump_marker),
+	}
+
+	result = subprocess.run([DATABASE_BACKUP_REMOTE], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode != 0
+	assert 'Insufficient dump capacity' in result.stderr
+	assert not pg_dump_marker.exists()
 
 
 def test_operator_status_checks_direct_database_backup():
@@ -255,6 +319,19 @@ def test_borg_rsh_connects_standard_io_to_reverse_socket(tmp_path):
 
 	assert result.returncode == 0, result.stderr
 	assert command_log.read_text() == 'STDIO UNIX-CONNECT:/test/borg.sock\n'
+
+
+def test_systemd_units_provision_reverse_socket_lifecycle():
+	socket = (BACKUP_SYSTEMD / 'remote-backup.socket').read_text()
+	server = (BACKUP_SYSTEMD / 'remote-backup@.service').read_text()
+	tunnel = (BACKUP_SYSTEMD / 'reverse-tunnel@.service').read_text()
+
+	assert 'ListenStream=/run/remote-backup/borg.sock' in socket
+	assert 'Accept=yes' in socket
+	assert 'StandardInput=socket' in server
+	assert '--restrict-to-path /mnt/raid/backups/supabase.deadtrees.earth' in server
+	assert '-R /tmp/borg.sock:/run/remote-backup/borg.sock' in tunnel
+	assert 'Restart=always' in tunnel
 
 
 def test_nightly_backup_continues_after_stage_failure(tmp_path):
