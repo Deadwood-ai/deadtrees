@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+umask 077
+
+readonly borg_bin="${DEADTREES_DB_ARCHIVE_BORG_BIN:-/usr/bin/borg}"
+readonly ssh_bin="${DEADTREES_DB_ARCHIVE_SSH_BIN:-/usr/bin/ssh}"
+readonly repository="${DEADTREES_DB_ARCHIVE_REPOSITORY:-remote-backup@dtbackup-borg-socket:/mnt/raid/backups/supabase.deadtrees.earth}"
+readonly identity="${DEADTREES_DB_ARCHIVE_IDENTITY:-/home/borg/.config/deadtrees-backup/id_ed25519}"
+readonly known_hosts="${DEADTREES_DB_ARCHIVE_KNOWN_HOSTS:-/home/borg/.config/deadtrees-backup/known_hosts}"
+readonly source_remote="${DEADTREES_DB_ARCHIVE_SOURCE_REMOTE:-dendro@127.0.0.1}"
+readonly source_command="${DEADTREES_DB_ARCHIVE_SOURCE_COMMAND:-/home/dendro/.local/bin/deadtrees-db-backup-stream}"
+readonly borg_rsh="${DEADTREES_DB_ARCHIVE_BORG_RSH:-/home/borg/.local/bin/deadtrees-borg-rsh}"
+readonly archive_timestamp="${DEADTREES_DB_ARCHIVE_TIMESTAMP:-$(date '+%Y-%m-%dT%H:%M:%S')}"
+readonly archive="database-dump-$archive_timestamp"
+readonly command_path="${DEADTREES_DB_ARCHIVE_COMMAND_PATH:-/home/borg/.local/bin/deadtrees-db-borg-archive}"
+readonly requested_command="${SSH_ORIGINAL_COMMAND:-}"
+
+if [[ "$requested_command" == "$command_path probe" ]]; then
+	export BORG_RSH="$borg_rsh"
+	export BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes
+	exec "$borg_bin" info "$repository"
+fi
+
+if [[ "$requested_command" != "$command_path archive" ]]; then
+	printf 'Command denied.\n' >&2
+	exit 64
+fi
+
+printf '%s Creating direct Borg archive %s.\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$archive"
+export BORG_RSH="$borg_rsh"
+export BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes
+exec "$borg_bin" create \
+	--content-from-command \
+	--stdin-name postgres-directory.tar \
+	--compression zstd,3 \
+	--stats \
+	"$repository::$archive" \
+	-- \
+	"$ssh_bin" \
+	-i "$identity" \
+	-o BatchMode=yes \
+	-o ConnectTimeout=15 \
+	-o ServerAliveInterval=30 \
+	-o ServerAliveCountMax=4 \
+	-o StrictHostKeyChecking=yes \
+	-o "UserKnownHostsFile=$known_hosts" \
+	-o HostKeyAlias=data2-local \
+	"$source_remote" "$source_command"

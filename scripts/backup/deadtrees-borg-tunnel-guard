@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly command_path="${DEADTREES_BORG_TUNNEL_COMMAND_PATH:-/home/borg/.local/bin/deadtrees-borg-tunnel-guard}"
+readonly hold_bin="${DEADTREES_BORG_TUNNEL_HOLD_BIN:-/usr/bin/sleep}"
+readonly hold_duration="${DEADTREES_BORG_TUNNEL_HOLD_DURATION:-infinity}"
+
+if [[ "${SSH_ORIGINAL_COMMAND:-}" != "$command_path hold" ]]; then
+	printf 'Command denied.\n' >&2
+	exit 64
+fi
+
+exec "$hold_bin" "$hold_duration"

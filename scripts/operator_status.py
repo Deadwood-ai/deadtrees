@@ -266,16 +266,18 @@ def backup_command() -> str:
 		)
 
 	return (
-		"set -e; "
+		"set -e -o pipefail; "
 		"borgmatic=/home/remote-backup/.local/bin/borgmatic; "
 		"config_dir=/home/remote-backup/.config/borgmatic; "
 		"if [ ! -x \"$borgmatic\" ]; then echo \"borgmatic not executable: $borgmatic\" >&2; exit 1; fi; "
-		"for spec in database_dump:database_dump.yaml storage:storage.yaml; do "
+		"for spec in database_dump:database_dump_direct.yaml storage:storage.yaml; do "
 		"name=${spec%%:*}; "
 		"config=$config_dir/${spec#*:}; "
-		"latest=$(\"$borgmatic\" --config \"$config\" list --last 1 "
-		"| awk '/^[[:alnum:]_.-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}T/ {print $1}' "
-		"| tail -n 1); "
+		"latest=$(\"$borgmatic\" --config \"$config\" list "
+		"| awk -v backup=\"$name\" "
+		"'/^[[:alnum:]_.-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}T/ { "
+		"if (backup != \"database_dump\" || $1 !~ /[.]checkpoint([.][0-9]+)?$/) latest=$1 "
+		"} END { print latest }'); "
 		"test -n \"$latest\"; "
 		"printf 'archive=%s:%s\\n' \"$name\" \"$latest\"; "
 		"done"

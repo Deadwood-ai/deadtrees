@@ -1,0 +1,12 @@
+[Unit]
+Description=Serve Database Backup Borg instance %i
+Requires=database-backup-borg.socket
+After=network-online.target
+
+[Service]
+User=remote-backup
+ExecStart=/usr/bin/borg serve --append-only \
+  --restrict-to-path /mnt/raid/backups/supabase.deadtrees.earth
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
