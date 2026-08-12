@@ -5,7 +5,6 @@ import subprocess
 import time
 from pathlib import Path
 
-
 ROOT = Path(__file__).parents[2]
 DATABASE_BACKUP = ROOT / 'scripts' / 'backup' / 'deadtrees-database-backup'
 DATABASE_BACKUP_REMOTE = ROOT / 'scripts' / 'backup' / 'deadtrees-db-backup-remote'
@@ -13,6 +12,7 @@ DATABASE_BACKUP_STREAM = ROOT / 'scripts' / 'backup' / 'deadtrees-db-backup-stre
 DATABASE_BORG_ARCHIVE = ROOT / 'scripts' / 'backup' / 'deadtrees-db-borg-archive'
 DATABASE_BORG_RSH = ROOT / 'scripts' / 'backup' / 'deadtrees-borg-rsh'
 DATABASE_BORG_TUNNEL_GUARD = ROOT / 'scripts' / 'backup' / 'deadtrees-borg-tunnel-guard'
+DATABASE_TUNNEL_REFRESH = ROOT / 'scripts' / 'backup' / 'deadtrees-refresh-database-tunnel'
 BACKUP_SYSTEMD = ROOT / 'scripts' / 'backup' / 'systemd'
 BACKUP_SSHD_CONFIG = ROOT / 'scripts' / 'backup' / 'sshd_config.d' / 'deadtrees-borg.conf'
 BACKUP_TMPFILES = ROOT / 'scripts' / 'backup' / 'tmpfiles.d'
@@ -702,6 +702,117 @@ def test_tunnel_guard_denies_arbitrary_remote_command():
 	assert result.stderr == 'Command denied.\n'
 
 
+def test_tunnel_refresh_restarts_the_active_service(tmp_path):
+	state = tmp_path / 'state'
+	state.write_text('old')
+	command_log = tmp_path / 'commands.log'
+	systemctl = tmp_path / 'systemctl'
+	kill = tmp_path / 'kill'
+	sleep = tmp_path / 'sleep'
+	_write_executable(
+		systemctl,
+		"""#!/usr/bin/env bash
+set -eu
+if [[ "$1" == show ]]; then
+	if [[ "$*" == *User* ]]; then
+		printf 'remote-backup\n'
+		exit 0
+	fi
+	[[ "$(cat "$FAKE_STATE")" == old ]] && printf '101\n' || printf '202\n'
+	exit 0
+fi
+if [[ "$1" == is-active && "$(cat "$FAKE_STATE")" == new ]]; then
+	exit 0
+fi
+exit 1
+""",
+	)
+	_write_executable(
+		kill,
+		"""#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$*" >>"$FAKE_COMMAND_LOG"
+printf 'new' >"$FAKE_STATE"
+""",
+	)
+	_write_executable(sleep, '#!/usr/bin/env bash\nexit 0\n')
+	env = {
+		**os.environ,
+		'DEADTREES_TUNNEL_REFRESH_SYSTEMCTL_BIN': str(systemctl),
+		'DEADTREES_TUNNEL_REFRESH_KILL_BIN': str(kill),
+		'DEADTREES_TUNNEL_REFRESH_SLEEP_BIN': str(sleep),
+		'DEADTREES_TUNNEL_REFRESH_CURRENT_USER': 'remote-backup',
+		'DEADTREES_TUNNEL_REFRESH_VERBOSE': '1',
+		'FAKE_COMMAND_LOG': str(command_log),
+		'FAKE_STATE': str(state),
+	}
+
+	result = subprocess.run([DATABASE_TUNNEL_REFRESH], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 0, result.stderr
+	assert command_log.read_text() == '-TERM 101\n'
+	assert '101 -> 202' in result.stdout
+
+
+def test_tunnel_refresh_fails_if_service_does_not_restart(tmp_path):
+	command_log = tmp_path / 'commands.log'
+	systemctl = tmp_path / 'systemctl'
+	kill = tmp_path / 'kill'
+	sleep = tmp_path / 'sleep'
+	_write_executable(
+		systemctl,
+		"""#!/usr/bin/env bash
+[[ "$*" == *User* ]] && printf 'remote-backup\n' && exit 0
+[[ "$1" == show ]] && printf '101\n' && exit 0
+exit 1
+""",
+	)
+	_write_executable(kill, '#!/usr/bin/env bash\nprintf \'%s\\n\' "$*" >>"$FAKE_COMMAND_LOG"\n')
+	_write_executable(sleep, '#!/usr/bin/env bash\nexit 0\n')
+	env = {
+		**os.environ,
+		'DEADTREES_TUNNEL_REFRESH_SYSTEMCTL_BIN': str(systemctl),
+		'DEADTREES_TUNNEL_REFRESH_KILL_BIN': str(kill),
+		'DEADTREES_TUNNEL_REFRESH_SLEEP_BIN': str(sleep),
+		'DEADTREES_TUNNEL_REFRESH_CURRENT_USER': 'remote-backup',
+		'DEADTREES_TUNNEL_REFRESH_TIMEOUT_SECONDS': '2',
+		'FAKE_COMMAND_LOG': str(command_log),
+	}
+
+	result = subprocess.run([DATABASE_TUNNEL_REFRESH], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 1
+	assert command_log.read_text() == '-TERM 101\n'
+	assert 'Failed to refresh' in result.stderr
+
+
+def test_tunnel_refresh_refuses_a_service_owned_by_another_user(tmp_path):
+	kill_marker = tmp_path / 'kill-ran'
+	systemctl = tmp_path / 'systemctl'
+	kill = tmp_path / 'kill'
+	_write_executable(
+		systemctl,
+		"""#!/usr/bin/env bash
+[[ "$*" == *User* ]] && printf 'deadtrees-db-tunnel\n' && exit 0
+printf '101\n'
+""",
+	)
+	_write_executable(kill, '#!/usr/bin/env bash\ntouch "$FAKE_KILL_MARKER"\n')
+	env = {
+		**os.environ,
+		'DEADTREES_TUNNEL_REFRESH_SYSTEMCTL_BIN': str(systemctl),
+		'DEADTREES_TUNNEL_REFRESH_KILL_BIN': str(kill),
+		'DEADTREES_TUNNEL_REFRESH_CURRENT_USER': 'remote-backup',
+		'FAKE_KILL_MARKER': str(kill_marker),
+	}
+
+	result = subprocess.run([DATABASE_TUNNEL_REFRESH], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 1
+	assert 'does not match current user' in result.stderr
+	assert not kill_marker.exists()
+
+
 def test_systemd_units_and_sshd_policy_restrict_reverse_transport():
 	socket = (BACKUP_SYSTEMD / 'database-backup-borg.socket').read_text()
 	server = (BACKUP_SYSTEMD / 'database-backup-borg@.service').read_text()
@@ -739,7 +850,10 @@ def test_systemd_units_and_sshd_policy_restrict_reverse_transport():
 	assert repository_tmpfiles == (
 		'd /run/deadtrees-database-backup-repository 0750 remote-backup deadtrees-db-tunnel -\n'
 	)
-	assert 'from="BACKUP_HOST_SOURCE_ADDRESS",restrict,command="/home/dendro/.local/bin/deadtrees-db-backup-remote"' in playbook
+	assert (
+		'from="BACKUP_HOST_SOURCE_ADDRESS",restrict,command="/home/dendro/.local/bin/deadtrees-db-backup-remote"'
+		in playbook
+	)
 	assert 'from="127.0.0.1",restrict,command=' in playbook
 
 
