@@ -237,7 +237,9 @@ stale SSH forwarding session cannot survive into the database stage:
 
 Install the tracked helper as `remote-backup`, preserve the prior crontab under
 `/home/remote-backup/.local/state/borgmatic/`, and keep cron mail enabled. The
-helper terminates only the current main process of
+helper first acquires the same non-blocking lock as `deadtrees-database-backup`;
+if a manual or overlong backup is active, it leaves the tunnel untouched and
+exits non-zero. After acquiring the lock, it terminates only the current main process of
 `reverse-tunnel@data2.deadtrees.earth.service`; the existing `Restart=always`
 policy must replace it with a distinct active PID within 30 seconds. It is silent
 on success and exits non-zero with a diagnostic on failure. After a five-second

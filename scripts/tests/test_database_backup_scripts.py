@@ -710,6 +710,7 @@ def test_tunnel_refresh_restarts_the_active_service(tmp_path):
 	kill = tmp_path / 'kill'
 	sleep = tmp_path / 'sleep'
 	ssh = tmp_path / 'ssh'
+	flock = tmp_path / 'flock'
 	socket_test = tmp_path / 'socket-test'
 	ss = tmp_path / 'ss'
 	_write_executable(
@@ -749,12 +750,15 @@ exec "$FAKE_REMOTE_HELPER"
 	)
 	_write_executable(socket_test, '#!/usr/bin/env bash\nexit 0\n')
 	_write_executable(ss, "#!/usr/bin/env bash\nprintf 'u_str LISTEN /tmp/borg.sock\\n'\n")
+	_write_executable(flock, '#!/usr/bin/env bash\nexit 0\n')
 	env = {
 		**os.environ,
 		'DEADTREES_TUNNEL_REFRESH_SYSTEMCTL_BIN': str(systemctl),
 		'DEADTREES_TUNNEL_REFRESH_KILL_BIN': str(kill),
 		'DEADTREES_TUNNEL_REFRESH_SLEEP_BIN': str(sleep),
 		'DEADTREES_TUNNEL_REFRESH_SSH_BIN': str(ssh),
+		'DEADTREES_TUNNEL_REFRESH_FLOCK_BIN': str(flock),
+		'DEADTREES_TUNNEL_REFRESH_LOCK_FILE': str(tmp_path / 'backup.lock'),
 		'DEADTREES_TUNNEL_REFRESH_CURRENT_USER': 'remote-backup',
 		'DEADTREES_TUNNEL_REFRESH_SETTLE_SECONDS': '1',
 		'DEADTREES_TUNNEL_REFRESH_VERBOSE': '1',
@@ -781,6 +785,7 @@ def test_tunnel_refresh_fails_if_service_does_not_restart(tmp_path):
 	systemctl = tmp_path / 'systemctl'
 	kill = tmp_path / 'kill'
 	sleep = tmp_path / 'sleep'
+	flock = tmp_path / 'flock'
 	_write_executable(
 		systemctl,
 		"""#!/usr/bin/env bash
@@ -791,11 +796,14 @@ exit 1
 	)
 	_write_executable(kill, '#!/usr/bin/env bash\nprintf \'%s\\n\' "$*" >>"$FAKE_COMMAND_LOG"\n')
 	_write_executable(sleep, '#!/usr/bin/env bash\nexit 0\n')
+	_write_executable(flock, '#!/usr/bin/env bash\nexit 0\n')
 	env = {
 		**os.environ,
 		'DEADTREES_TUNNEL_REFRESH_SYSTEMCTL_BIN': str(systemctl),
 		'DEADTREES_TUNNEL_REFRESH_KILL_BIN': str(kill),
 		'DEADTREES_TUNNEL_REFRESH_SLEEP_BIN': str(sleep),
+		'DEADTREES_TUNNEL_REFRESH_FLOCK_BIN': str(flock),
+		'DEADTREES_TUNNEL_REFRESH_LOCK_FILE': str(tmp_path / 'backup.lock'),
 		'DEADTREES_TUNNEL_REFRESH_CURRENT_USER': 'remote-backup',
 		'DEADTREES_TUNNEL_REFRESH_SETTLE_SECONDS': '1',
 		'DEADTREES_TUNNEL_REFRESH_TIMEOUT_SECONDS': '2',
@@ -816,6 +824,7 @@ def test_tunnel_refresh_fails_if_replacement_dies_during_settle(tmp_path):
 	kill = tmp_path / 'kill'
 	sleep = tmp_path / 'sleep'
 	ssh = tmp_path / 'ssh'
+	flock = tmp_path / 'flock'
 	_write_executable(
 		systemctl,
 		"""#!/usr/bin/env bash
@@ -839,6 +848,7 @@ if [[ "$1" == 1 ]]; then printf 'new' >"$FAKE_STATE"; else printf 'failed' >"$FA
 """,
 	)
 	_write_executable(ssh, '#!/usr/bin/env bash\ntouch "$FAKE_SSH_MARKER"\n')
+	_write_executable(flock, '#!/usr/bin/env bash\nexit 0\n')
 	ssh_marker = tmp_path / 'ssh-ran'
 	env = {
 		**os.environ,
@@ -846,6 +856,8 @@ if [[ "$1" == 1 ]]; then printf 'new' >"$FAKE_STATE"; else printf 'failed' >"$FA
 		'DEADTREES_TUNNEL_REFRESH_KILL_BIN': str(kill),
 		'DEADTREES_TUNNEL_REFRESH_SLEEP_BIN': str(sleep),
 		'DEADTREES_TUNNEL_REFRESH_SSH_BIN': str(ssh),
+		'DEADTREES_TUNNEL_REFRESH_FLOCK_BIN': str(flock),
+		'DEADTREES_TUNNEL_REFRESH_LOCK_FILE': str(tmp_path / 'backup.lock'),
 		'DEADTREES_TUNNEL_REFRESH_CURRENT_USER': 'remote-backup',
 		'DEADTREES_TUNNEL_REFRESH_SETTLE_SECONDS': '5',
 		'FAKE_STATE': str(state),
@@ -866,6 +878,7 @@ def test_tunnel_refresh_fails_if_remote_listener_probe_fails(tmp_path):
 	kill = tmp_path / 'kill'
 	sleep = tmp_path / 'sleep'
 	ssh = tmp_path / 'ssh'
+	flock = tmp_path / 'flock'
 	socket_test = tmp_path / 'socket-test'
 	ss = tmp_path / 'ss'
 	_write_executable(
@@ -890,12 +903,15 @@ exec "$FAKE_REMOTE_HELPER"
 	)
 	_write_executable(socket_test, '#!/usr/bin/env bash\nexit 0\n')
 	_write_executable(ss, '#!/usr/bin/env bash\nexit 0\n')
+	_write_executable(flock, '#!/usr/bin/env bash\nexit 0\n')
 	env = {
 		**os.environ,
 		'DEADTREES_TUNNEL_REFRESH_SYSTEMCTL_BIN': str(systemctl),
 		'DEADTREES_TUNNEL_REFRESH_KILL_BIN': str(kill),
 		'DEADTREES_TUNNEL_REFRESH_SLEEP_BIN': str(sleep),
 		'DEADTREES_TUNNEL_REFRESH_SSH_BIN': str(ssh),
+		'DEADTREES_TUNNEL_REFRESH_FLOCK_BIN': str(flock),
+		'DEADTREES_TUNNEL_REFRESH_LOCK_FILE': str(tmp_path / 'backup.lock'),
 		'DEADTREES_TUNNEL_REFRESH_CURRENT_USER': 'remote-backup',
 		'DEADTREES_TUNNEL_REFRESH_SETTLE_SECONDS': '1',
 		'FAKE_STATE': str(state),
@@ -914,6 +930,7 @@ def test_tunnel_refresh_refuses_a_service_owned_by_another_user(tmp_path):
 	kill_marker = tmp_path / 'kill-ran'
 	systemctl = tmp_path / 'systemctl'
 	kill = tmp_path / 'kill'
+	flock = tmp_path / 'flock'
 	_write_executable(
 		systemctl,
 		"""#!/usr/bin/env bash
@@ -922,10 +939,13 @@ printf '101\n'
 """,
 	)
 	_write_executable(kill, '#!/usr/bin/env bash\ntouch "$FAKE_KILL_MARKER"\n')
+	_write_executable(flock, '#!/usr/bin/env bash\nexit 0\n')
 	env = {
 		**os.environ,
 		'DEADTREES_TUNNEL_REFRESH_SYSTEMCTL_BIN': str(systemctl),
 		'DEADTREES_TUNNEL_REFRESH_KILL_BIN': str(kill),
+		'DEADTREES_TUNNEL_REFRESH_FLOCK_BIN': str(flock),
+		'DEADTREES_TUNNEL_REFRESH_LOCK_FILE': str(tmp_path / 'backup.lock'),
 		'DEADTREES_TUNNEL_REFRESH_CURRENT_USER': 'remote-backup',
 		'FAKE_KILL_MARKER': str(kill_marker),
 	}
@@ -934,6 +954,33 @@ printf '101\n'
 
 	assert result.returncode == 1
 	assert 'does not match current user' in result.stderr
+	assert not kill_marker.exists()
+
+
+def test_tunnel_refresh_leaves_tunnel_untouched_when_backup_lock_is_held(tmp_path):
+	flock = tmp_path / 'flock'
+	systemctl = tmp_path / 'systemctl'
+	kill = tmp_path / 'kill'
+	systemctl_marker = tmp_path / 'systemctl-ran'
+	kill_marker = tmp_path / 'kill-ran'
+	_write_executable(flock, '#!/usr/bin/env bash\nexit 1\n')
+	_write_executable(systemctl, '#!/usr/bin/env bash\ntouch "$FAKE_SYSTEMCTL_MARKER"\n')
+	_write_executable(kill, '#!/usr/bin/env bash\ntouch "$FAKE_KILL_MARKER"\n')
+	env = {
+		**os.environ,
+		'DEADTREES_TUNNEL_REFRESH_FLOCK_BIN': str(flock),
+		'DEADTREES_TUNNEL_REFRESH_LOCK_FILE': str(tmp_path / 'backup.lock'),
+		'DEADTREES_TUNNEL_REFRESH_SYSTEMCTL_BIN': str(systemctl),
+		'DEADTREES_TUNNEL_REFRESH_KILL_BIN': str(kill),
+		'FAKE_SYSTEMCTL_MARKER': str(systemctl_marker),
+		'FAKE_KILL_MARKER': str(kill_marker),
+	}
+
+	result = subprocess.run([DATABASE_TUNNEL_REFRESH], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 75
+	assert 'a database backup is active' in result.stderr
+	assert not systemctl_marker.exists()
 	assert not kill_marker.exists()
 
 
