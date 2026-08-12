@@ -4,7 +4,7 @@ import type { IDataset } from "../../types/dataset";
 import { IDataAccess } from "../../types/dataset";
 import type { PhenologyMetadata } from "../../types/phenology";
 import countryList from "../../utils/countryList";
-import { isGeonadirDataset, getTruncatedAuthorDisplay } from "../../utils/datasetUtils";
+import { formatOrthoFileSize, isGeonadirDataset, getTruncatedAuthorDisplay } from "../../utils/datasetUtils";
 import { sanitizeText } from "../../utils/textUtils";
 import PublicationLink from "../PublicationLink";
 import PhenologyBar from "../PhenologyBar/PhenologyBar";
@@ -300,11 +300,7 @@ export default function DatasetInfoSidebar({
           <Tag color="blue" style={{ margin: 0 }}>{dataset.license || "Not specified"}</Tag>
         </InfoRow>
         <InfoRow label="File Size" tooltip="Size of the orthomosaic file.">
-          <Typography.Text>
-            {dataset.ortho_file_size >= 1024
-              ? `${(dataset.ortho_file_size / 1024).toFixed(1)} GB`
-              : `${dataset.ortho_file_size.toFixed(0)} MB`}
-          </Typography.Text>
+          <Typography.Text>{formatOrthoFileSize(dataset.ortho_file_size)}</Typography.Text>
         </InfoRow>
         {showPrivacyIndicator && (
           <InfoRow label="Visibility" tooltip="Whether this dataset is publicly visible or restricted.">

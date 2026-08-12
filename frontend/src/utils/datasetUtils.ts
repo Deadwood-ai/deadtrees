@@ -1,6 +1,14 @@
 import { IDataset } from "../types/dataset";
 import { fixAuthorNamesEncoding } from "./textUtils";
 
+export const formatOrthoFileSize = (sizeMb: number | null): string => {
+  if (sizeMb === null) return "Not available";
+
+  return sizeMb >= 1024
+    ? `${(sizeMb / 1024).toFixed(1)} GB`
+    : `${sizeMb.toFixed(0)} MB`;
+};
+
 /**
  * Checks if a dataset is from GeoNadir provider
  * @param dataset - The dataset to check
