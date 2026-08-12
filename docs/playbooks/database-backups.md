@@ -86,6 +86,7 @@ The tracked sources map to these production locations:
 | `scripts/backup/deadtrees-db-borg-archive` | `/home/borg/.local/bin/deadtrees-db-borg-archive` |
 | `scripts/backup/deadtrees-borg-rsh` | `/home/borg/.local/bin/deadtrees-borg-rsh` |
 | `scripts/backup/deadtrees-borg-tunnel-guard` | `/home/borg/.local/bin/deadtrees-borg-tunnel-guard` |
+| `scripts/backup/deadtrees-refresh-database-tunnel` | `/home/remote-backup/.local/bin/deadtrees-refresh-database-tunnel` |
 | `scripts/backup/database_dump_direct.yaml` | `/home/remote-backup/.config/borgmatic/database_dump_direct.yaml` |
 | `scripts/backup/systemd/database-backup-borg.socket` | `/etc/systemd/system/database-backup-borg.socket` |
 | `scripts/backup/systemd/database-backup-borg@.service` | `/etc/systemd/system/database-backup-borg@.service` |
@@ -219,6 +220,46 @@ legacy simultaneous cron entries be replaced by one serialized entry:
 
 Preserve the old crontab before cutover. Do not remove old repositories during
 this migration.
+
+### Temporary holiday tunnel refresh
+
+The production cutover on 12 August 2026 retained the existing
+`remote-backup`-owned shared reverse socket while the least-privilege transport
+remains uninstalled. That tunnel had previously stayed active at the systemd
+level while its remote socket refused a nightly archive connection. Until
+2 September 2026, refresh the tunnel shortly before the serialized backup so a
+stale SSH forwarding session cannot survive into the database stage:
+
+```cron
+50 1 * * * /home/remote-backup/.local/bin/deadtrees-refresh-database-tunnel
+0 2 * * * /home/remote-backup/.local/bin/deadtrees-nightly-backups
+```
+
+Install the tracked helper as `remote-backup`, preserve the prior crontab under
+`/home/remote-backup/.local/state/borgmatic/`, and keep cron mail enabled. The
+helper first acquires the same non-blocking lock as `deadtrees-database-backup`;
+if a manual or overlong backup is active, it leaves the tunnel untouched and
+exits non-zero. After acquiring the lock, it terminates only the current main process of
+`reverse-tunnel@data2.deadtrees.earth.service`; the existing `Restart=always`
+policy must replace it with a distinct active PID within 30 seconds. It is silent
+on success and exits non-zero with a diagnostic on failure. After a five-second
+settle window, it requires the same process to remain active and invokes the
+database lifecycle key's `tunnel-status` command. That forced command verifies
+the remote Unix socket exists and is an active listener before the refresh can
+succeed. The helper also fails closed unless the service is owned by the invoking
+user, so it cannot be carried into the dedicated `deadtrees-db-tunnel` deployment
+accidentally.
+
+The lifecycle helper keeps `tunnel-status` solely for this temporary guard. Its
+default `/tmp/borg.sock` path matches the retained production listener; tests may
+override the path and command boundaries. Remove the guard before the dedicated
+runtime-directory socket replaces this legacy path.
+
+This is a time-limited reliability guard, not security hardening. It does not
+change the shared socket permissions or replace the dedicated transport design
+documented above. Review and remove the 01:50 cron entry after 2 September 2026,
+then remove the helper after confirming the normal nightly path remains healthy.
+Remove this guard before installing the dedicated tunnel identity and unit.
 
 ## Validation
 
