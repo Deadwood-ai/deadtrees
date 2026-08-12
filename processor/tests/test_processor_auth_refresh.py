@@ -1,9 +1,12 @@
+import zipfile
 from types import SimpleNamespace
 
 import pytest
 
 import processor.src.process_geotiff as geotiff_module
+import processor.src.process_odm as odm_module
 import processor.src.processor as processor_module
+import shared.db as shared_db
 from processor.src.exceptions import ProcessingError
 from shared.models import Ortho, QueueTask, TaskTypeEnum
 from shared.settings import settings
@@ -23,6 +26,20 @@ def _geotiff_task() -> QueueTask:
 		current_position=1,
 		estimated_time=0.0,
 		task_types=[TaskTypeEnum.geotiff],
+	)
+
+
+def _odm_task() -> QueueTask:
+	return QueueTask(
+		id=124,
+		dataset_id=457,
+		user_id='processor-user',
+		priority=4,
+		is_processing=True,
+		claimed_by='worker-a',
+		current_position=1,
+		estimated_time=0.0,
+		task_types=[TaskTypeEnum.odm_processing],
 	)
 
 
@@ -105,6 +122,72 @@ def test_process_geotiff_refreshes_auth_before_post_work_database_writes(monkeyp
 	assert status_updates[0][0] == 'stage-token'
 	assert status_updates[-1][0] == 'processed-write-token'
 	assert status_updates[-1][1]['is_ortho_done'] is True
+
+
+def test_process_odm_refreshes_auth_after_input_transfer_before_metadata_writes(monkeypatch, tmp_path):
+	task = _odm_task()
+	login_tokens = iter(['stage-token', 'post-transfer-token', 'failure-token'])
+	metadata_write_tokens = []
+	status_updates = []
+
+	class _StopAfterMetadata(Exception):
+		pass
+
+	class _Query:
+		def select(self, fields):
+			return self
+
+		def eq(self, field, value):
+			return self
+
+		def execute(self):
+			return SimpleNamespace(data=[{'raw_images_path': '/data/raw_images/457.zip'}])
+
+	class _Client:
+		def table(self, name):
+			assert name == settings.raw_images_table
+			return _Query()
+
+		def __enter__(self):
+			return self
+
+		def __exit__(self, exc_type, exc, tb):
+			return False
+
+	def fake_pull(*, remote_file_path, local_file_path, token, dataset_id):
+		assert remote_file_path == '/data/raw_images/457.zip'
+		assert token == 'stage-token'
+		assert dataset_id == task.dataset_id
+		with zipfile.ZipFile(local_file_path, 'w') as archive:
+			archive.writestr('image.jpg', b'image-data')
+
+	monkeypatch.setattr(shared_db, 'login', lambda username, password: next(login_tokens))
+	monkeypatch.setattr(odm_module, 'use_client', lambda token: _Client())
+	monkeypatch.setattr(odm_module, 'pull_file_from_storage_server', fake_pull)
+	monkeypatch.setattr(
+		odm_module,
+		'_update_raw_images_metadata',
+		lambda dataset_id, rtk_metadata, image_count, total_size_bytes, token: metadata_write_tokens.append(token),
+	)
+	monkeypatch.setattr(
+		odm_module,
+		'_extract_exif_from_images',
+		lambda extraction_dir, token, dataset_id: (_ for _ in ()).throw(_StopAfterMetadata()),
+	)
+	monkeypatch.setattr(
+		odm_module,
+		'update_status',
+		lambda token, **kwargs: status_updates.append((token, kwargs)),
+	)
+	monkeypatch.setattr(odm_module.logger, 'info', lambda *args, **kwargs: None)
+	monkeypatch.setattr(odm_module.logger, 'error', lambda *args, **kwargs: None)
+
+	with pytest.raises(_StopAfterMetadata):
+		odm_module.process_odm(task, tmp_path)
+
+	assert metadata_write_tokens == ['post-transfer-token']
+	assert status_updates[0][0] == 'stage-token'
+	assert status_updates[-1][0] == 'failure-token'
 
 
 def test_process_task_keeps_refreshed_token_for_failure_bookkeeping(monkeypatch):
