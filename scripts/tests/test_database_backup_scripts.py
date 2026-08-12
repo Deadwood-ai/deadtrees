@@ -709,6 +709,7 @@ def test_tunnel_refresh_restarts_the_active_service(tmp_path):
 	systemctl = tmp_path / 'systemctl'
 	kill = tmp_path / 'kill'
 	sleep = tmp_path / 'sleep'
+	ssh = tmp_path / 'ssh'
 	_write_executable(
 		systemctl,
 		"""#!/usr/bin/env bash
@@ -736,12 +737,15 @@ printf 'new' >"$FAKE_STATE"
 """,
 	)
 	_write_executable(sleep, '#!/usr/bin/env bash\nexit 0\n')
+	_write_executable(ssh, '#!/usr/bin/env bash\nprintf \'ssh:%s\\n\' "$*" >>"$FAKE_COMMAND_LOG"\n')
 	env = {
 		**os.environ,
 		'DEADTREES_TUNNEL_REFRESH_SYSTEMCTL_BIN': str(systemctl),
 		'DEADTREES_TUNNEL_REFRESH_KILL_BIN': str(kill),
 		'DEADTREES_TUNNEL_REFRESH_SLEEP_BIN': str(sleep),
+		'DEADTREES_TUNNEL_REFRESH_SSH_BIN': str(ssh),
 		'DEADTREES_TUNNEL_REFRESH_CURRENT_USER': 'remote-backup',
+		'DEADTREES_TUNNEL_REFRESH_SETTLE_SECONDS': '1',
 		'DEADTREES_TUNNEL_REFRESH_VERBOSE': '1',
 		'FAKE_COMMAND_LOG': str(command_log),
 		'FAKE_STATE': str(state),
@@ -750,8 +754,12 @@ printf 'new' >"$FAKE_STATE"
 	result = subprocess.run([DATABASE_TUNNEL_REFRESH], env=env, text=True, capture_output=True, check=False)
 
 	assert result.returncode == 0, result.stderr
-	assert command_log.read_text() == '-TERM 101\n'
+	commands = command_log.read_text().splitlines()
+	assert commands[0] == '-TERM 101'
+	assert commands[1].startswith('ssh:-i /home/remote-backup/.ssh/id_ed25519 ')
+	assert commands[1].endswith('dendro@data2.deadtrees.earth tunnel-status')
 	assert '101 -> 202' in result.stdout
+	assert 'remote socket listener ready' in result.stdout
 
 
 def test_tunnel_refresh_fails_if_service_does_not_restart(tmp_path):
@@ -775,6 +783,7 @@ exit 1
 		'DEADTREES_TUNNEL_REFRESH_KILL_BIN': str(kill),
 		'DEADTREES_TUNNEL_REFRESH_SLEEP_BIN': str(sleep),
 		'DEADTREES_TUNNEL_REFRESH_CURRENT_USER': 'remote-backup',
+		'DEADTREES_TUNNEL_REFRESH_SETTLE_SECONDS': '1',
 		'DEADTREES_TUNNEL_REFRESH_TIMEOUT_SECONDS': '2',
 		'FAKE_COMMAND_LOG': str(command_log),
 	}
@@ -784,6 +793,94 @@ exit 1
 	assert result.returncode == 1
 	assert command_log.read_text() == '-TERM 101\n'
 	assert 'Failed to refresh' in result.stderr
+
+
+def test_tunnel_refresh_fails_if_replacement_dies_during_settle(tmp_path):
+	state = tmp_path / 'state'
+	state.write_text('old')
+	systemctl = tmp_path / 'systemctl'
+	kill = tmp_path / 'kill'
+	sleep = tmp_path / 'sleep'
+	ssh = tmp_path / 'ssh'
+	_write_executable(
+		systemctl,
+		"""#!/usr/bin/env bash
+if [[ "$*" == *User* ]]; then printf 'remote-backup\n'; exit 0; fi
+if [[ "$1" == show ]]; then
+	case "$(cat "$FAKE_STATE")" in
+	old) printf '101\n' ;;
+	new) printf '202\n' ;;
+	failed) printf '0\n' ;;
+	esac
+	exit 0
+fi
+[[ "$(cat "$FAKE_STATE")" != failed ]]
+""",
+	)
+	_write_executable(kill, '#!/usr/bin/env bash\nexit 0\n')
+	_write_executable(
+		sleep,
+		"""#!/usr/bin/env bash
+if [[ "$1" == 1 ]]; then printf 'new' >"$FAKE_STATE"; else printf 'failed' >"$FAKE_STATE"; fi
+""",
+	)
+	_write_executable(ssh, '#!/usr/bin/env bash\ntouch "$FAKE_SSH_MARKER"\n')
+	ssh_marker = tmp_path / 'ssh-ran'
+	env = {
+		**os.environ,
+		'DEADTREES_TUNNEL_REFRESH_SYSTEMCTL_BIN': str(systemctl),
+		'DEADTREES_TUNNEL_REFRESH_KILL_BIN': str(kill),
+		'DEADTREES_TUNNEL_REFRESH_SLEEP_BIN': str(sleep),
+		'DEADTREES_TUNNEL_REFRESH_SSH_BIN': str(ssh),
+		'DEADTREES_TUNNEL_REFRESH_CURRENT_USER': 'remote-backup',
+		'DEADTREES_TUNNEL_REFRESH_SETTLE_SECONDS': '5',
+		'FAKE_STATE': str(state),
+		'FAKE_SSH_MARKER': str(ssh_marker),
+	}
+
+	result = subprocess.run([DATABASE_TUNNEL_REFRESH], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 1
+	assert 'did not remain active' in result.stderr
+	assert not ssh_marker.exists()
+
+
+def test_tunnel_refresh_fails_if_remote_listener_probe_fails(tmp_path):
+	state = tmp_path / 'state'
+	state.write_text('old')
+	systemctl = tmp_path / 'systemctl'
+	kill = tmp_path / 'kill'
+	sleep = tmp_path / 'sleep'
+	ssh = tmp_path / 'ssh'
+	_write_executable(
+		systemctl,
+		"""#!/usr/bin/env bash
+[[ "$*" == *User* ]] && printf 'remote-backup\n' && exit 0
+if [[ "$1" == show ]]; then
+	[[ "$(cat "$FAKE_STATE")" == old ]] && printf '101\n' || printf '202\n'
+	exit 0
+fi
+exit 0
+""",
+	)
+	_write_executable(kill, '#!/usr/bin/env bash\nprintf new >"$FAKE_STATE"\n')
+	_write_executable(sleep, '#!/usr/bin/env bash\nexit 0\n')
+	_write_executable(ssh, '#!/usr/bin/env bash\nexit 23\n')
+	env = {
+		**os.environ,
+		'DEADTREES_TUNNEL_REFRESH_SYSTEMCTL_BIN': str(systemctl),
+		'DEADTREES_TUNNEL_REFRESH_KILL_BIN': str(kill),
+		'DEADTREES_TUNNEL_REFRESH_SLEEP_BIN': str(sleep),
+		'DEADTREES_TUNNEL_REFRESH_SSH_BIN': str(ssh),
+		'DEADTREES_TUNNEL_REFRESH_CURRENT_USER': 'remote-backup',
+		'DEADTREES_TUNNEL_REFRESH_SETTLE_SECONDS': '1',
+		'FAKE_STATE': str(state),
+	}
+
+	result = subprocess.run([DATABASE_TUNNEL_REFRESH], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 1
+	assert 'remote socket listener probe failed' in result.stderr
 
 
 def test_tunnel_refresh_refuses_a_service_owned_by_another_user(tmp_path):

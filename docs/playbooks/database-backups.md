@@ -240,9 +240,13 @@ Install the tracked helper as `remote-backup`, preserve the prior crontab under
 helper terminates only the current main process of
 `reverse-tunnel@data2.deadtrees.earth.service`; the existing `Restart=always`
 policy must replace it with a distinct active PID within 30 seconds. It is silent
-on success and exits non-zero with a diagnostic on failure. It also fails closed
-unless the service is owned by the invoking user, so it cannot be carried into
-the dedicated `deadtrees-db-tunnel` deployment accidentally.
+on success and exits non-zero with a diagnostic on failure. After a five-second
+settle window, it requires the same process to remain active and invokes the
+database lifecycle key's `tunnel-status` command. That forced command verifies
+the remote Unix socket exists and is an active listener before the refresh can
+succeed. The helper also fails closed unless the service is owned by the invoking
+user, so it cannot be carried into the dedicated `deadtrees-db-tunnel` deployment
+accidentally.
 
 This is a time-limited reliability guard, not security hardening. It does not
 change the shared socket permissions or replace the dedicated transport design

@@ -3,13 +3,19 @@ set -Eeuo pipefail
 
 readonly unit="${DEADTREES_TUNNEL_REFRESH_UNIT:-reverse-tunnel@data2.deadtrees.earth.service}"
 readonly timeout_seconds="${DEADTREES_TUNNEL_REFRESH_TIMEOUT_SECONDS:-30}"
+readonly settle_seconds="${DEADTREES_TUNNEL_REFRESH_SETTLE_SECONDS:-5}"
 readonly systemctl_bin="${DEADTREES_TUNNEL_REFRESH_SYSTEMCTL_BIN:-/usr/bin/systemctl}"
 readonly kill_bin="${DEADTREES_TUNNEL_REFRESH_KILL_BIN:-/usr/bin/kill}"
 readonly sleep_bin="${DEADTREES_TUNNEL_REFRESH_SLEEP_BIN:-/usr/bin/sleep}"
+readonly ssh_bin="${DEADTREES_TUNNEL_REFRESH_SSH_BIN:-/usr/bin/ssh}"
 readonly current_user="${DEADTREES_TUNNEL_REFRESH_CURRENT_USER:-$(/usr/bin/id -un)}"
+readonly probe_identity="${DEADTREES_TUNNEL_REFRESH_PROBE_IDENTITY:-/home/remote-backup/.ssh/id_ed25519}"
+readonly probe_remote="${DEADTREES_TUNNEL_REFRESH_PROBE_REMOTE:-dendro@data2.deadtrees.earth}"
+readonly probe_command="${DEADTREES_TUNNEL_REFRESH_PROBE_COMMAND:-tunnel-status}"
 
-if [[ ! "$timeout_seconds" =~ ^[1-9][0-9]*$ ]]; then
-	printf 'Invalid tunnel refresh timeout: %s.\n' "$timeout_seconds" >&2
+if [[ ! "$timeout_seconds" =~ ^[1-9][0-9]*$ || ! "$settle_seconds" =~ ^[1-9][0-9]*$ ]]; then
+	printf 'Invalid tunnel refresh timing: timeout=%s settle=%s.\n' \
+		"$timeout_seconds" "$settle_seconds" >&2
 	exit 64
 fi
 
@@ -28,6 +34,7 @@ fi
 
 "$kill_bin" -TERM "$old_pid"
 
+replacement_pid=''
 for ((second = 1; second <= timeout_seconds; second++)); do
 	"$sleep_bin" 1
 	new_pid="$($systemctl_bin show --property MainPID --value "$unit")"
@@ -35,12 +42,38 @@ for ((second = 1; second <= timeout_seconds; second++)); do
 		&& [[ "$new_pid" =~ ^[0-9]+$ ]] \
 		&& ((new_pid > 1)) \
 		&& [[ "$new_pid" != "$old_pid" ]]; then
-		if [[ "${DEADTREES_TUNNEL_REFRESH_VERBOSE:-0}" == '1' ]]; then
-			printf 'Refreshed %s: %s -> %s.\n' "$unit" "$old_pid" "$new_pid"
-		fi
-		exit 0
+		replacement_pid="$new_pid"
+		break
 	fi
 done
 
-printf 'Failed to refresh %s within %ss.\n' "$unit" "$timeout_seconds" >&2
-exit 1
+if [[ -z "$replacement_pid" ]]; then
+	printf 'Failed to refresh %s within %ss.\n' "$unit" "$timeout_seconds" >&2
+	exit 1
+fi
+
+"$sleep_bin" "$settle_seconds"
+settled_pid="$($systemctl_bin show --property MainPID --value "$unit")"
+if ! "$systemctl_bin" is-active --quiet "$unit" || [[ "$settled_pid" != "$replacement_pid" ]]; then
+	printf 'Replacement process %s for %s did not remain active during the %ss settle window.\n' \
+		"$replacement_pid" "$unit" "$settle_seconds" >&2
+	exit 1
+fi
+
+if ! "$ssh_bin" \
+	-i "$probe_identity" \
+	-o BatchMode=yes \
+	-o ConnectTimeout=15 \
+	-o IdentitiesOnly=yes \
+	-o ServerAliveInterval=30 \
+	-o ServerAliveCountMax=4 \
+	-o StrictHostKeyChecking=yes \
+	"$probe_remote" "$probe_command" >/dev/null; then
+	printf 'Refreshed %s, but the remote socket listener probe failed.\n' "$unit" >&2
+	exit 1
+fi
+
+if [[ "${DEADTREES_TUNNEL_REFRESH_VERBOSE:-0}" == '1' ]]; then
+	printf 'Refreshed %s: %s -> %s; remote socket listener ready.\n' \
+		"$unit" "$old_pid" "$replacement_pid"
+fi
