@@ -248,6 +248,11 @@ succeed. The helper also fails closed unless the service is owned by the invokin
 user, so it cannot be carried into the dedicated `deadtrees-db-tunnel` deployment
 accidentally.
 
+The lifecycle helper keeps `tunnel-status` solely for this temporary guard. Its
+default `/tmp/borg.sock` path matches the retained production listener; tests may
+override the path and command boundaries. Remove the guard before the dedicated
+runtime-directory socket replaces this legacy path.
+
 This is a time-limited reliability guard, not security hardening. It does not
 change the shared socket permissions or replace the dedicated transport design
 documented above. Review and remove the 01:50 cron entry after 2 September 2026,

@@ -710,6 +710,8 @@ def test_tunnel_refresh_restarts_the_active_service(tmp_path):
 	kill = tmp_path / 'kill'
 	sleep = tmp_path / 'sleep'
 	ssh = tmp_path / 'ssh'
+	socket_test = tmp_path / 'socket-test'
+	ss = tmp_path / 'ss'
 	_write_executable(
 		systemctl,
 		"""#!/usr/bin/env bash
@@ -737,7 +739,16 @@ printf 'new' >"$FAKE_STATE"
 """,
 	)
 	_write_executable(sleep, '#!/usr/bin/env bash\nexit 0\n')
-	_write_executable(ssh, '#!/usr/bin/env bash\nprintf \'ssh:%s\\n\' "$*" >>"$FAKE_COMMAND_LOG"\n')
+	_write_executable(
+		ssh,
+		"""#!/usr/bin/env bash
+printf 'ssh:%s\n' "$*" >>"$FAKE_COMMAND_LOG"
+export SSH_ORIGINAL_COMMAND=tunnel-status
+exec "$FAKE_REMOTE_HELPER"
+""",
+	)
+	_write_executable(socket_test, '#!/usr/bin/env bash\nexit 0\n')
+	_write_executable(ss, "#!/usr/bin/env bash\nprintf 'u_str LISTEN /tmp/borg.sock\\n'\n")
 	env = {
 		**os.environ,
 		'DEADTREES_TUNNEL_REFRESH_SYSTEMCTL_BIN': str(systemctl),
@@ -749,6 +760,9 @@ printf 'new' >"$FAKE_STATE"
 		'DEADTREES_TUNNEL_REFRESH_VERBOSE': '1',
 		'FAKE_COMMAND_LOG': str(command_log),
 		'FAKE_STATE': str(state),
+		'FAKE_REMOTE_HELPER': str(DATABASE_BACKUP_REMOTE),
+		'DEADTREES_DB_BACKUP_SOCKET_TEST_BIN': str(socket_test),
+		'DEADTREES_DB_BACKUP_SS_BIN': str(ss),
 	}
 
 	result = subprocess.run([DATABASE_TUNNEL_REFRESH], env=env, text=True, capture_output=True, check=False)
@@ -852,6 +866,8 @@ def test_tunnel_refresh_fails_if_remote_listener_probe_fails(tmp_path):
 	kill = tmp_path / 'kill'
 	sleep = tmp_path / 'sleep'
 	ssh = tmp_path / 'ssh'
+	socket_test = tmp_path / 'socket-test'
+	ss = tmp_path / 'ss'
 	_write_executable(
 		systemctl,
 		"""#!/usr/bin/env bash
@@ -865,7 +881,15 @@ exit 0
 	)
 	_write_executable(kill, '#!/usr/bin/env bash\nprintf new >"$FAKE_STATE"\n')
 	_write_executable(sleep, '#!/usr/bin/env bash\nexit 0\n')
-	_write_executable(ssh, '#!/usr/bin/env bash\nexit 23\n')
+	_write_executable(
+		ssh,
+		"""#!/usr/bin/env bash
+export SSH_ORIGINAL_COMMAND=tunnel-status
+exec "$FAKE_REMOTE_HELPER"
+""",
+	)
+	_write_executable(socket_test, '#!/usr/bin/env bash\nexit 0\n')
+	_write_executable(ss, '#!/usr/bin/env bash\nexit 0\n')
 	env = {
 		**os.environ,
 		'DEADTREES_TUNNEL_REFRESH_SYSTEMCTL_BIN': str(systemctl),
@@ -875,6 +899,9 @@ exit 0
 		'DEADTREES_TUNNEL_REFRESH_CURRENT_USER': 'remote-backup',
 		'DEADTREES_TUNNEL_REFRESH_SETTLE_SECONDS': '1',
 		'FAKE_STATE': str(state),
+		'FAKE_REMOTE_HELPER': str(DATABASE_BACKUP_REMOTE),
+		'DEADTREES_DB_BACKUP_SOCKET_TEST_BIN': str(socket_test),
+		'DEADTREES_DB_BACKUP_SS_BIN': str(ss),
 	}
 
 	result = subprocess.run([DATABASE_TUNNEL_REFRESH], env=env, text=True, capture_output=True, check=False)
