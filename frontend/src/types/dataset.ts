@@ -58,7 +58,7 @@ export interface IDataset {
   citation_doi: string | null;
   archived: boolean;
   ortho_file_name: string | null;
-  ortho_file_size: number;
+  ortho_file_size: number | null;
   bbox: string | null;
   sha256: string;
   current_status: string;
