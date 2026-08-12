@@ -184,6 +184,9 @@ def process_odm(task: QueueTask, temp_dir: Path):
 		)
 
 		rtk_metadata, image_count, total_size_bytes = _analyze_extracted_files(extraction_dir, token, dataset_id)
+		# Input transfer, extraction, and analysis can outlive the Supabase JWT.
+		# Refresh immediately before the first post-work database write.
+		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 		_update_raw_images_metadata(dataset_id, rtk_metadata, image_count, total_size_bytes, token)
 
 		# Step 5: Extract EXIF metadata from images and update database
