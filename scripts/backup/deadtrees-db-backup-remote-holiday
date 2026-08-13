@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+umask 077
+
+readonly container="${DEADTREES_DB_CONTAINER:-supabase-db}"
+readonly stage="${DEADTREES_DB_BACKUP_STAGE:-/var/lib/postgresql/data/.deadtrees-logical-backup}"
+readonly socket_path="${DEADTREES_DB_BACKUP_SOCKET_PATH:-/tmp/borg.sock}"
+readonly socket_test_bin="${DEADTREES_DB_BACKUP_SOCKET_TEST_BIN:-/usr/bin/test}"
+readonly ss_bin="${DEADTREES_DB_BACKUP_SS_BIN:-/usr/bin/ss}"
+readonly docker_bin="${DEADTREES_DOCKER_BIN:-docker}"
+readonly capacity_percent="${DEADTREES_DB_BACKUP_CAPACITY_PERCENT:-300}"
+readonly reserve_bytes="${DEADTREES_DB_BACKUP_RESERVE_BYTES:-53687091200}"
+readonly command="${SSH_ORIGINAL_COMMAND:-}"
+readonly preserve_marker="$stage/.deadtrees-preserve"
+
+assert_dump_capacity() {
+	local database_bytes available_bytes required_bytes
+	if [[ ! "$capacity_percent" =~ ^[0-9]+$ || ! "$reserve_bytes" =~ ^[0-9]+$ ]]; then
+		printf 'Dump capacity policy must use numeric values.\n' >&2
+		exit 1
+	fi
+	database_bytes="$("$docker_bin" exec --user postgres "$container" \
+		psql -XAt --username postgres --dbname postgres \
+		--command "select pg_database_size('postgres');")"
+	available_bytes="$("$docker_bin" exec --user postgres "$container" \
+		df -PB1 "$(dirname "$stage")" | awk 'NR == 2 { print $4 }')"
+	if [[ ! "$database_bytes" =~ ^[0-9]+$ || ! "$available_bytes" =~ ^[0-9]+$ ]]; then
+		printf 'Could not determine database size and available dump capacity.\n' >&2
+		exit 1
+	fi
+	required_bytes=$((database_bytes * capacity_percent / 100 + reserve_bytes))
+	if [[ "$available_bytes" -lt "$required_bytes" ]]; then
+		printf 'Insufficient dump capacity: required=%s available=%s database=%s.\n' \
+			"$required_bytes" "$available_bytes" "$database_bytes" >&2
+		exit 1
+	fi
+	printf 'capacity-ready required=%s available=%s database=%s\n' \
+		"$required_bytes" "$available_bytes" "$database_bytes"
+}
+
+case "$command" in
+	prepare)
+		if "$docker_bin" exec --user postgres "$container" test -f "$preserve_marker"; then
+			printf 'A recoverable database dump is preserved at %s.\n' "$stage" >&2
+			exit 78
+		fi
+		exec "$docker_bin" exec --user postgres "$container" rm -rf -- "$stage"
+		;;
+	dump)
+		"$docker_bin" exec --user postgres "$container" test ! -e "$stage"
+		assert_dump_capacity >/dev/null
+		exec "$docker_bin" exec --user postgres "$container" \
+			pg_dump --no-password --clean --if-exists --username postgres \
+			--format directory --compress=0 --file "$stage" --jobs=2 postgres
+		;;
+	space-status)
+		assert_dump_capacity
+		;;
+	stream-local)
+		"$docker_bin" exec --user postgres "$container" test -f "$stage/toc.dat"
+		exec "$docker_bin" exec --user postgres "$container" \
+			tar --format=posix -C "$stage" -cf - .
+		;;
+	verify)
+		"$docker_bin" exec --user postgres "$container" test -f "$stage/toc.dat"
+		"$docker_bin" exec --user postgres "$container" pg_restore --list "$stage" >/dev/null
+		printf 'verified\n'
+		;;
+	status)
+		if "$docker_bin" exec --user postgres "$container" test -d "$stage"; then
+			"$docker_bin" exec --user postgres "$container" du -sb "$stage"
+			if "$docker_bin" exec --user postgres "$container" test -f "$preserve_marker"; then
+				printf 'preserved\n'
+			fi
+		else
+			printf 'absent\n'
+		fi
+		;;
+	preserve)
+		"$docker_bin" exec --user postgres "$container" test -f "$stage/toc.dat"
+		exec "$docker_bin" exec --user postgres "$container" touch "$preserve_marker"
+		;;
+	release)
+		exec "$docker_bin" exec --user postgres "$container" rm -f -- "$preserve_marker"
+		;;
+	tunnel-status)
+		"$socket_test_bin" -S "$socket_path"
+		"$ss_bin" -xlH | grep -Fq -- "$socket_path"
+		printf 'ready\n'
+		;;
+	cleanup)
+		if "$docker_bin" exec --user postgres "$container" test -f "$preserve_marker"; then
+			printf 'Refusing to delete recoverable database dump at %s.\n' "$stage" >&2
+			exit 78
+		fi
+		exec "$docker_bin" exec --user postgres "$container" rm -rf -- "$stage"
+		;;
+	*)
+		printf 'Command denied.\n' >&2
+		exit 64
+		;;
+esac
