@@ -12,6 +12,7 @@ DATABASE_BACKUP_REMOTE = ROOT / 'scripts' / 'backup' / 'deadtrees-db-backup-remo
 DATABASE_BACKUP_REMOTE_HOLIDAY = ROOT / 'scripts' / 'backup' / 'deadtrees-db-backup-remote-holiday'
 DATABASE_BACKUP_STREAM = ROOT / 'scripts' / 'backup' / 'deadtrees-db-backup-stream'
 DATABASE_BORG_ARCHIVE = ROOT / 'scripts' / 'backup' / 'deadtrees-db-borg-archive'
+DATABASE_BORG_ARCHIVE_HOLIDAY = ROOT / 'scripts' / 'backup' / 'deadtrees-db-borg-archive-holiday'
 DATABASE_BORG_RSH = ROOT / 'scripts' / 'backup' / 'deadtrees-borg-rsh'
 DATABASE_BORG_TUNNEL_GUARD = ROOT / 'scripts' / 'backup' / 'deadtrees-borg-tunnel-guard'
 DATABASE_TUNNEL_REFRESH = ROOT / 'scripts' / 'backup' / 'deadtrees-refresh-database-tunnel'
@@ -847,6 +848,41 @@ def test_holiday_remote_helper_keeps_legacy_stream_local_contract(tmp_path):
 		'exec --user postgres supabase-db test -f /test/stage/toc.dat',
 		'exec --user postgres supabase-db tar --format=posix -C /test/stage -cf - .',
 	]
+
+
+def test_holiday_archive_helper_keeps_legacy_forced_command_and_stream_contract(tmp_path):
+	command_log = tmp_path / 'commands.log'
+	ssh = tmp_path / 'ssh'
+	borg = tmp_path / 'borg'
+	_write_executable(ssh, '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$FAKE_COMMAND_LOG"\n')
+	_write_executable(borg, '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$FAKE_COMMAND_LOG"\n')
+	command_path = '/test/deadtrees-db-borg-archive-holiday'
+	env = {
+		**os.environ,
+		'DEADTREES_DB_ARCHIVE_BORG_BIN': str(borg),
+		'DEADTREES_DB_ARCHIVE_SSH_BIN': str(ssh),
+		'DEADTREES_DB_ARCHIVE_COMMAND_PATH': command_path,
+		'DEADTREES_DB_ARCHIVE_TIMESTAMP': '2026-08-13T02:00:00',
+		'SSH_ORIGINAL_COMMAND': command_path,
+		'FAKE_COMMAND_LOG': str(command_log),
+	}
+
+	result = subprocess.run([DATABASE_BORG_ARCHIVE_HOLIDAY], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 0, result.stderr
+	command = command_log.read_text()
+	assert 'database-dump-2026-08-13T02:00:00' in command
+	assert command.rstrip().endswith('dendro@127.0.0.1 stream-local')
+
+	denied = subprocess.run(
+		[DATABASE_BORG_ARCHIVE_HOLIDAY],
+		env={**env, 'SSH_ORIGINAL_COMMAND': '/test/arbitrary'},
+		text=True,
+		capture_output=True,
+		check=False,
+	)
+	assert denied.returncode == 64
+	assert 'Command denied.' in denied.stderr
 
 
 def test_holiday_remote_helper_requires_release_before_cleanup(tmp_path):
