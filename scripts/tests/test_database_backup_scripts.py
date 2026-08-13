@@ -7,7 +7,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
 DATABASE_BACKUP = ROOT / 'scripts' / 'backup' / 'deadtrees-database-backup'
+DATABASE_BACKUP_HOLIDAY = ROOT / 'scripts' / 'backup' / 'deadtrees-database-backup-holiday'
 DATABASE_BACKUP_REMOTE = ROOT / 'scripts' / 'backup' / 'deadtrees-db-backup-remote'
+DATABASE_BACKUP_REMOTE_HOLIDAY = ROOT / 'scripts' / 'backup' / 'deadtrees-db-backup-remote-holiday'
 DATABASE_BACKUP_STREAM = ROOT / 'scripts' / 'backup' / 'deadtrees-db-backup-stream'
 DATABASE_BORG_ARCHIVE = ROOT / 'scripts' / 'backup' / 'deadtrees-db-borg-archive'
 DATABASE_BORG_RSH = ROOT / 'scripts' / 'backup' / 'deadtrees-borg-rsh'
@@ -778,6 +780,200 @@ exec "$FAKE_REMOTE_HELPER"
 	assert commands[1].endswith('dendro@data2.deadtrees.earth tunnel-status')
 	assert '101 -> 202' in result.stdout
 	assert 'remote socket listener ready' in result.stdout
+
+
+def test_tunnel_refresh_uses_inherited_backup_lock(tmp_path):
+	state = tmp_path / 'state'
+	state.write_text('old')
+	command_log = tmp_path / 'commands.log'
+	systemctl = tmp_path / 'systemctl'
+	kill = tmp_path / 'kill'
+	sleep = tmp_path / 'sleep'
+	ssh = tmp_path / 'ssh'
+	flock = tmp_path / 'flock'
+	_write_executable(
+		systemctl,
+		"""#!/usr/bin/env bash
+[[ "$*" == *User* ]] && printf 'remote-backup\n' && exit 0
+if [[ "$1" == show ]]; then
+	[[ "$(cat "$FAKE_STATE")" == old ]] && printf '101\n' || printf '202\n'
+	exit 0
+fi
+exit 0
+""",
+	)
+	_write_executable(kill, '#!/usr/bin/env bash\nprintf new >"$FAKE_STATE"\n')
+	_write_executable(sleep, '#!/usr/bin/env bash\nexit 0\n')
+	_write_executable(ssh, '#!/usr/bin/env bash\nexit 0\n')
+	_write_executable(flock, '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >"$FAKE_COMMAND_LOG"\n')
+	env = {
+		**os.environ,
+		'DEADTREES_TUNNEL_REFRESH_SYSTEMCTL_BIN': str(systemctl),
+		'DEADTREES_TUNNEL_REFRESH_KILL_BIN': str(kill),
+		'DEADTREES_TUNNEL_REFRESH_SLEEP_BIN': str(sleep),
+		'DEADTREES_TUNNEL_REFRESH_SSH_BIN': str(ssh),
+		'DEADTREES_TUNNEL_REFRESH_FLOCK_BIN': str(flock),
+		'DEADTREES_TUNNEL_REFRESH_LOCK_FILE': str(tmp_path / 'must-not-open.lock'),
+		'DEADTREES_TUNNEL_REFRESH_LOCK_FD': '8',
+		'DEADTREES_TUNNEL_REFRESH_CURRENT_USER': 'remote-backup',
+		'DEADTREES_TUNNEL_REFRESH_SETTLE_SECONDS': '1',
+		'FAKE_COMMAND_LOG': str(command_log),
+		'FAKE_STATE': str(state),
+	}
+
+	result = subprocess.run([DATABASE_TUNNEL_REFRESH], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 0, result.stderr
+	assert command_log.read_text() == '-n 8\n'
+	assert not (tmp_path / 'must-not-open.lock').exists()
+
+
+def test_holiday_remote_helper_keeps_legacy_stream_local_contract(tmp_path):
+	docker = tmp_path / 'docker'
+	command_log = tmp_path / 'commands.log'
+	_write_executable(docker, '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$FAKE_COMMAND_LOG"\n')
+	env = {
+		**os.environ,
+		'DEADTREES_DOCKER_BIN': str(docker),
+		'DEADTREES_DB_BACKUP_STAGE': '/test/stage',
+		'SSH_ORIGINAL_COMMAND': 'stream-local',
+		'FAKE_COMMAND_LOG': str(command_log),
+	}
+
+	result = subprocess.run([DATABASE_BACKUP_REMOTE_HOLIDAY], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 0, result.stderr
+	assert command_log.read_text().splitlines() == [
+		'exec --user postgres supabase-db test -f /test/stage/toc.dat',
+		'exec --user postgres supabase-db tar --format=posix -C /test/stage -cf - .',
+	]
+
+
+def test_holiday_remote_helper_requires_release_before_cleanup(tmp_path):
+	docker = tmp_path / 'docker'
+	preserve_marker = tmp_path / 'preserved'
+	deleted_marker = tmp_path / 'deleted'
+	_write_executable(
+		docker,
+		"""#!/usr/bin/env bash
+set -eu
+case "$*" in
+*" test -f /var/lib/postgresql/data/.deadtrees-logical-backup/toc.dat") exit 0 ;;
+*" touch /var/lib/postgresql/data/.deadtrees-logical-backup/.deadtrees-preserve") touch "$FAKE_PRESERVE_MARKER" ;;
+*" test -f /var/lib/postgresql/data/.deadtrees-logical-backup/.deadtrees-preserve") test -f "$FAKE_PRESERVE_MARKER" ;;
+*" rm -f -- /var/lib/postgresql/data/.deadtrees-logical-backup/.deadtrees-preserve") rm -f "$FAKE_PRESERVE_MARKER" ;;
+*" rm -rf -- /var/lib/postgresql/data/.deadtrees-logical-backup") touch "$FAKE_DELETED_MARKER" ;;
+*) exit 64 ;;
+esac
+""",
+	)
+	base_env = {
+		**os.environ,
+		'DEADTREES_DOCKER_BIN': str(docker),
+		'FAKE_PRESERVE_MARKER': str(preserve_marker),
+		'FAKE_DELETED_MARKER': str(deleted_marker),
+	}
+
+	def run(command: str) -> subprocess.CompletedProcess[str]:
+		return subprocess.run(
+			[DATABASE_BACKUP_REMOTE_HOLIDAY],
+			env={**base_env, 'SSH_ORIGINAL_COMMAND': command},
+			text=True,
+			capture_output=True,
+			check=False,
+		)
+
+	assert run('preserve').returncode == 0
+	assert run('prepare').returncode == 78
+	assert run('cleanup').returncode == 78
+	assert not deleted_marker.exists()
+	assert run('release').returncode == 0
+	assert run('cleanup').returncode == 0
+	assert deleted_marker.exists()
+
+
+def test_holiday_backup_refreshes_tunnel_immediately_before_each_archive_attempt(tmp_path):
+	env = _backup_environment(tmp_path, transport_status=0)
+	env['FAKE_CREATE_ARCHIVE_ON_ATTEMPT'] = '2'
+	env['FAKE_FIRST_TRANSPORT_STATUS'] = '2'
+	refresh = tmp_path / 'refresh'
+	_write_executable(
+		refresh,
+		"""#!/usr/bin/env bash
+printf 'refresh:fd=%s\n' "$DEADTREES_TUNNEL_REFRESH_LOCK_FD" >>"$FAKE_COMMAND_LOG"
+""",
+	)
+	env['DEADTREES_DB_BACKUP_TUNNEL_REFRESH_BIN'] = str(refresh)
+
+	result = subprocess.run([DATABASE_BACKUP_HOLIDAY], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 0, result.stderr
+	commands = (tmp_path / 'commands.log').read_text().splitlines()
+	assert commands.count('refresh:fd=9') == 2
+	assert commands.index('ssh:verify') < commands.index('refresh:fd=9')
+	assert commands.count('ssh:dump') == 1
+	assert (tmp_path / 'attempts').read_text() == '2\n'
+
+
+def test_holiday_backup_retries_transport_three_times_without_redumping(tmp_path):
+	env = _backup_environment(tmp_path, transport_status=2, create_archive=False)
+	refresh = tmp_path / 'refresh'
+	_write_executable(refresh, '#!/usr/bin/env bash\nprintf "refresh\\n" >>"$FAKE_COMMAND_LOG"\n')
+	env['DEADTREES_DB_BACKUP_TUNNEL_REFRESH_BIN'] = str(refresh)
+
+	result = subprocess.run([DATABASE_BACKUP_HOLIDAY], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 1
+	commands = (tmp_path / 'commands.log').read_text().splitlines()
+	assert commands.count('refresh') == 3
+	assert commands.count('ssh:dump') == 1
+	assert (tmp_path / 'attempts').read_text() == '3\n'
+	assert 'attempt 1/3' in result.stderr
+	assert 'attempt 2/3' in result.stderr
+
+
+def test_holiday_backup_retries_tunnel_refresh_without_redumping(tmp_path):
+	env = _backup_environment(tmp_path, transport_status=0)
+	refresh = tmp_path / 'refresh'
+	refresh_attempts = tmp_path / 'refresh-attempts'
+	_write_executable(
+		refresh,
+		"""#!/usr/bin/env bash
+attempt=0
+[[ ! -f "$FAKE_REFRESH_ATTEMPTS" ]] || attempt=$(cat "$FAKE_REFRESH_ATTEMPTS")
+attempt=$((attempt + 1))
+printf '%s\n' "$attempt" >"$FAKE_REFRESH_ATTEMPTS"
+[[ "$attempt" -ge 3 ]]
+""",
+	)
+	env['DEADTREES_DB_BACKUP_TUNNEL_REFRESH_BIN'] = str(refresh)
+	env['FAKE_REFRESH_ATTEMPTS'] = str(refresh_attempts)
+
+	result = subprocess.run([DATABASE_BACKUP_HOLIDAY], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 0, result.stderr
+	assert refresh_attempts.read_text() == '3\n'
+	assert (tmp_path / 'attempts').read_text() == '1\n'
+	assert (tmp_path / 'commands.log').read_text().splitlines().count('ssh:dump') == 1
+
+
+def test_holiday_backup_preserves_stage_after_checkpoint_only_transport(tmp_path):
+	env = _backup_environment(tmp_path, transport_status=2, create_archive=False)
+	env['FAKE_FIRST_ARCHIVE_NAME'] = 'database-dump-2026-08-13T02:00:00.checkpoint'
+	refresh = tmp_path / 'refresh'
+	_write_executable(refresh, '#!/usr/bin/env bash\nexit 0\n')
+	env['DEADTREES_DB_BACKUP_TUNNEL_REFRESH_BIN'] = str(refresh)
+
+	result = subprocess.run([DATABASE_BACKUP_HOLIDAY], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 1
+	assert 'Preserving the database dump stage for archive recovery.' in result.stderr
+	assert (tmp_path / 'stage-preserved').exists()
+	assert (tmp_path / 'attempts').read_text() == '1\n'
+
+
+def test_nightly_uses_the_explicit_holiday_database_backup():
+	assert '/home/remote-backup/.local/bin/deadtrees-database-backup-holiday' in NIGHTLY_BACKUPS.read_text()
 
 
 def test_tunnel_refresh_fails_if_service_does_not_restart(tmp_path):

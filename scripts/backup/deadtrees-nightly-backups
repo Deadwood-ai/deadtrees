@@ -6,7 +6,7 @@ umask 077
 
 readonly borgmatic="${DEADTREES_BORGMATIC_BIN:-/home/remote-backup/.local/bin/borgmatic}"
 readonly config_dir="${DEADTREES_BORGMATIC_CONFIG_DIR:-/home/remote-backup/.config/borgmatic}"
-readonly database_backup="${DEADTREES_DATABASE_BACKUP_BIN:-/home/remote-backup/.local/bin/deadtrees-database-backup}"
+readonly database_backup="${DEADTREES_DATABASE_BACKUP_BIN:-/home/remote-backup/.local/bin/deadtrees-database-backup-holiday}"
 readonly lock_file="${DEADTREES_NIGHTLY_LOCK_FILE:-/home/remote-backup/.cache/deadtrees-nightly-backups.lock}"
 readonly flock_bin="${DEADTREES_FLOCK_BIN:-flock}"
 

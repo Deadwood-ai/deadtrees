@@ -10,6 +10,7 @@ readonly sleep_bin="${DEADTREES_TUNNEL_REFRESH_SLEEP_BIN:-/usr/bin/sleep}"
 readonly ssh_bin="${DEADTREES_TUNNEL_REFRESH_SSH_BIN:-/usr/bin/ssh}"
 readonly flock_bin="${DEADTREES_TUNNEL_REFRESH_FLOCK_BIN:-/usr/bin/flock}"
 readonly lock_file="${DEADTREES_TUNNEL_REFRESH_LOCK_FILE:-/home/remote-backup/.cache/deadtrees-database-backup.lock}"
+readonly inherited_lock_fd="${DEADTREES_TUNNEL_REFRESH_LOCK_FD:-}"
 readonly current_user="${DEADTREES_TUNNEL_REFRESH_CURRENT_USER:-$(/usr/bin/id -un)}"
 readonly probe_identity="${DEADTREES_TUNNEL_REFRESH_PROBE_IDENTITY:-/home/remote-backup/.ssh/id_ed25519}"
 readonly probe_remote="${DEADTREES_TUNNEL_REFRESH_PROBE_REMOTE:-dendro@data2.deadtrees.earth}"
@@ -21,8 +22,18 @@ if [[ ! "$timeout_seconds" =~ ^[1-9][0-9]*$ || ! "$settle_seconds" =~ ^[1-9][0-9
 	exit 64
 fi
 
-exec 9>"$lock_file"
-if ! "$flock_bin" -n 9; then
+if [[ -n "$inherited_lock_fd" ]]; then
+	if [[ ! "$inherited_lock_fd" =~ ^[0-9]+$ ]] || ((inherited_lock_fd < 3)); then
+		printf "Invalid inherited tunnel refresh lock descriptor '%s'.\n" "$inherited_lock_fd" >&2
+		exit 64
+	fi
+	lock_fd="$inherited_lock_fd"
+else
+	mkdir -p "$(dirname "$lock_file")"
+	exec 9>"$lock_file"
+	lock_fd=9
+fi
+if ! "$flock_bin" -n "$lock_fd"; then
 	printf 'Cannot refresh %s: a database backup is active.\n' "$unit" >&2
 	exit 75
 fi

@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+umask 077
+
+readonly identity="${DEADTREES_DB_BACKUP_IDENTITY:-/home/remote-backup/.ssh/id_ed25519}"
+readonly remote="${DEADTREES_DB_BACKUP_REMOTE:-dendro@data2.deadtrees.earth}"
+readonly lock_file="${DEADTREES_DB_BACKUP_LOCK_FILE:-/home/remote-backup/.cache/deadtrees-database-backup.lock}"
+readonly borgmatic="${DEADTREES_DB_BACKUP_BORGMATIC_BIN:-/home/remote-backup/.local/bin/borgmatic}"
+readonly maintenance_config="${DEADTREES_DB_BACKUP_MAINTENANCE_CONFIG:-/home/remote-backup/.config/borgmatic/database_dump_direct.yaml}"
+readonly repository="${DEADTREES_DB_BACKUP_REPOSITORY:-/mnt/raid/backups/supabase.deadtrees.earth}"
+readonly ssh_bin="${DEADTREES_DB_BACKUP_SSH_BIN:-ssh}"
+readonly borg_bin="${DEADTREES_DB_BACKUP_BORG_BIN:-borg}"
+readonly archive_remote="${DEADTREES_DB_BACKUP_ARCHIVE_REMOTE:-borg@data2.deadtrees.earth}"
+readonly archive_command="${DEADTREES_DB_BACKUP_ARCHIVE_COMMAND:-/home/borg/.local/bin/deadtrees-db-borg-archive}"
+readonly tunnel_refresh="${DEADTREES_DB_BACKUP_TUNNEL_REFRESH_BIN:-/home/remote-backup/.local/bin/deadtrees-refresh-database-tunnel}"
+readonly flock_bin="${DEADTREES_DB_BACKUP_FLOCK_BIN:-flock}"
+readonly retry_delay="${DEADTREES_DB_BACKUP_RETRY_DELAY:-5}"
+readonly max_transport_attempts="${DEADTREES_DB_BACKUP_MAX_TRANSPORT_ATTEMPTS:-3}"
+
+archives_before=""
+archives_after=""
+new_archives=""
+new_archive_count=0
+archive_status=0
+active_child_pid=""
+preserve_stage=0
+export BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes
+
+if [[ ! "$max_transport_attempts" =~ ^[1-9][0-9]*$ ]]; then
+	printf "Invalid maximum transport attempts '%s'.\n" "$max_transport_attempts" >&2
+	exit 64
+fi
+
+run_interruptible() {
+	local status
+	"$@" &
+	active_child_pid=$!
+	if wait "$active_child_pid"; then
+		status=0
+	else
+		status=$?
+	fi
+	active_child_pid=""
+	return "$status"
+}
+
+ssh_remote() {
+	run_interruptible "$ssh_bin" \
+		-i "$identity" \
+		-o BatchMode=yes \
+		-o ConnectTimeout=15 \
+		-o IdentitiesOnly=yes \
+		-o ServerAliveInterval=30 \
+		-o ServerAliveCountMax=4 \
+		-o StrictHostKeyChecking=yes \
+		"$remote" "$1"
+}
+
+cleanup() {
+	if [[ "$preserve_stage" -eq 0 ]]; then
+		ssh_remote cleanup >/dev/null 2>&1 || true
+	else
+		printf 'Preserving the database dump stage for archive recovery.\n' >&2
+	fi
+	[[ -z "$archives_before" ]] || rm -f "$archives_before"
+	[[ -z "$archives_after" ]] || rm -f "$archives_after"
+}
+
+handle_signal() {
+	local status="$1"
+	trap - EXIT INT TERM
+	if [[ -n "$active_child_pid" ]]; then
+		kill -TERM "$active_child_pid" >/dev/null 2>&1 || true
+		wait "$active_child_pid" >/dev/null 2>&1 || true
+		active_child_pid=""
+	fi
+	cleanup
+	exit "$status"
+}
+
+list_archives() {
+	"$borg_bin" list --format '{archive}{NL}' "$repository" | sort
+}
+
+refresh_archive_diff() {
+	list_archives >"$archives_after"
+	new_archives="$(comm -13 "$archives_before" "$archives_after")"
+	new_archive_count="$(printf '%s\n' "$new_archives" \
+		| awk 'NF && $0 !~ /[.]checkpoint([.][0-9]+)?$/ { count += 1 } END { print count + 0 }')"
+}
+
+run_archive_transport() {
+	set +e
+	DEADTREES_TUNNEL_REFRESH_LOCK_FD=9 "$tunnel_refresh"
+	archive_status=$?
+	if [[ "$archive_status" -eq 0 ]]; then
+		run_interruptible "$ssh_bin" \
+			-i "$identity" \
+			-o BatchMode=yes \
+			-o ConnectTimeout=15 \
+			-o IdentitiesOnly=yes \
+			-o ServerAliveInterval=30 \
+			-o ServerAliveCountMax=4 \
+			-o StrictHostKeyChecking=yes \
+			"$archive_remote" "$archive_command"
+		archive_status=$?
+	fi
+	set -e
+}
+
+timestamp() {
+	date '+%Y-%m-%dT%H:%M:%S%z'
+}
+
+mkdir -p "$(dirname "$lock_file")"
+exec 9>"$lock_file"
+if ! "$flock_bin" -n 9; then
+	printf 'Another database backup is already running.\n' >&2
+	exit 75
+fi
+
+trap cleanup EXIT
+trap 'handle_signal 130' INT
+trap 'handle_signal 143' TERM
+
+ssh_remote prepare >/dev/null
+ssh_remote space-status >/dev/null
+
+start_epoch="$(date +%s)"
+printf '%s Starting local PostgreSQL directory dump.\n' "$(timestamp)"
+ssh_remote dump
+ssh_remote verify >/dev/null
+dump_finished_epoch="$(date +%s)"
+printf '%s PostgreSQL dump completed in %s seconds; database connections are closed.\n' \
+	"$(timestamp)" "$((dump_finished_epoch - start_epoch))"
+
+printf '%s Starting direct Borg archival from the database host.\n' "$(timestamp)"
+archives_before="$(mktemp)"
+archives_after="$(mktemp)"
+list_archives >"$archives_before"
+ssh_remote preserve >/dev/null
+preserve_stage=1
+
+for ((attempt = 1; attempt <= max_transport_attempts; attempt++)); do
+	run_archive_transport
+	refresh_archive_diff
+	if [[ "$new_archive_count" -gt 0 ]]; then
+		break
+	fi
+	if [[ -n "$new_archives" ]]; then
+		break
+	fi
+	if ((attempt < max_transport_attempts)); then
+		printf '%s Borg transport attempt %s/%s exited %s without committing an archive; retrying.\n' \
+			"$(timestamp)" "$attempt" "$max_transport_attempts" "$archive_status" >&2
+		sleep "$retry_delay"
+	fi
+done
+
+if [[ -z "$new_archives" ]]; then
+	ssh_remote release >/dev/null
+	preserve_stage=0
+fi
+
+if [[ "$new_archive_count" -ne 1 ]]; then
+	printf 'Expected exactly one completed new Borg archive, found %s; transport exit status was %s.\n' \
+		"$new_archive_count" "$archive_status" >&2
+	exit 1
+fi
+
+new_archive="$(printf '%s\n' "$new_archives" | awk 'NF && $0 !~ /[.]checkpoint([.][0-9]+)?$/')"
+if [[ "$new_archive" != database-dump-* ]]; then
+	printf 'Unexpected new Borg archive name: %s\n' "$new_archive" >&2
+	exit 1
+fi
+if ! "$borg_bin" list --short "$repository::$new_archive" | grep -Fxq 'postgres-directory.tar'; then
+	printf 'New Borg archive %s does not contain postgres-directory.tar.\n' "$new_archive" >&2
+	exit 1
+fi
+
+if [[ "$archive_status" -ne 0 ]]; then
+	printf '%s Borg transport exited %s after committing %s; verifying all archive data before continuing.\n' \
+		"$(timestamp)" "$archive_status" "$new_archive" >&2
+	"$borg_bin" check --archives-only --verify-data --glob-archives "$new_archive" "$repository"
+	printf '%s Verified committed archive %s despite the transport teardown error.\n' \
+		"$(timestamp)" "$new_archive"
+fi
+
+printf '%s Applying retention and verifying the new Borg repository.\n' "$(timestamp)"
+"$borgmatic" --config "$maintenance_config" prune
+"$borgmatic" --config "$maintenance_config" compact
+"$borgmatic" --config "$maintenance_config" check
+
+ssh_remote release >/dev/null
+preserve_stage=0
+ssh_remote cleanup >/dev/null
+finished_epoch="$(date +%s)"
+printf '%s Backup completed in %s seconds total.\n' \
+	"$(timestamp)" "$((finished_epoch - start_epoch))"
