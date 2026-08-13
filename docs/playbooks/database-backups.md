@@ -85,9 +85,11 @@ The tracked sources map to these production locations:
 | `scripts/backup/deadtrees-db-backup-remote` | `/home/dendro/.local/bin/deadtrees-db-backup-remote` |
 | `scripts/backup/deadtrees-db-backup-remote-holiday` | `/home/dendro/.local/bin/deadtrees-db-backup-remote-holiday` (temporary legacy transport) |
 | `scripts/backup/deadtrees-db-backup-stream` | `/home/dendro/.local/bin/deadtrees-db-backup-stream` |
+| `scripts/backup/deadtrees-db-backup-stream-holiday` | `/home/dendro/.local/bin/deadtrees-db-backup-stream-holiday` (temporary legacy transport) |
 | `scripts/backup/deadtrees-db-borg-archive` | `/home/borg/.local/bin/deadtrees-db-borg-archive` |
 | `scripts/backup/deadtrees-db-borg-archive-holiday` | `/home/borg/.local/bin/deadtrees-db-borg-archive-holiday` (temporary legacy transport) |
 | `scripts/backup/deadtrees-borg-rsh` | `/home/borg/.local/bin/deadtrees-borg-rsh` |
+| `scripts/backup/deadtrees-borg-rsh-holiday` | `/home/borg/.local/bin/deadtrees-borg-rsh-holiday` (temporary legacy transport) |
 | `scripts/backup/deadtrees-borg-tunnel-guard` | `/home/borg/.local/bin/deadtrees-borg-tunnel-guard` |
 | `scripts/backup/deadtrees-refresh-database-tunnel` | `/home/remote-backup/.local/bin/deadtrees-refresh-database-tunnel` |
 | `scripts/backup/database_dump_direct.yaml` | `/home/remote-backup/.config/borgmatic/database_dump_direct.yaml` |
@@ -248,10 +250,11 @@ before the nightly sequence starts:
 
 Install the tracked helpers as `remote-backup` and `dendro`, preserve prior files,
 the database host's `authorized_keys`, and the crontab under timestamped rollback
-paths. During this temporary period, the lifecycle and archive-source keys on the
-database host must force
-`/home/dendro/.local/bin/deadtrees-db-backup-remote-holiday`; do not install the
-holiday source over the canonical helper path. The backup host's archive key must
+paths. During this temporary period, the database lifecycle key must force
+`/home/dendro/.local/bin/deadtrees-db-backup-remote-holiday`, while the separate
+archive-source key must force
+`/home/dendro/.local/bin/deadtrees-db-backup-stream-holiday`; do not install either
+holiday source over a canonical helper path. The backup host's archive key must
 force `/home/borg/.local/bin/deadtrees-db-borg-archive-holiday`. Keep cron mail enabled. The
 helper first acquires the same non-blocking lock as `deadtrees-database-backup`;
 if a manual or overlong backup is active, it leaves the tunnel untouched and
@@ -275,8 +278,9 @@ dedicated runtime-directory socket replaces this legacy path.
 
 Read-only installation checks must confirm that the nightly wrapper selects the
 holiday database wrapper, both database-host forced-command entries select the
-holiday lifecycle helper, the backup-host archive key selects the holiday archive
-helper, the tunnel service and listener are active, `tunnel-status`
+holiday lifecycle helper, the archive-source key selects the stream-only holiday
+helper, the backup-host archive key selects the holiday archive helper, the archive
+helper selects the holiday Borg RSH, the tunnel service and listener are active, `tunnel-status`
 returns `ready`, and the dump stage is absent. Do not start an extra database dump
 just to check installation; the next scheduled run and the 04:15 holiday monitor
 provide the end-to-end result.

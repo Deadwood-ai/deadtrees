@@ -14,6 +14,8 @@ DATABASE_BACKUP_STREAM = ROOT / 'scripts' / 'backup' / 'deadtrees-db-backup-stre
 DATABASE_BORG_ARCHIVE = ROOT / 'scripts' / 'backup' / 'deadtrees-db-borg-archive'
 DATABASE_BORG_ARCHIVE_HOLIDAY = ROOT / 'scripts' / 'backup' / 'deadtrees-db-borg-archive-holiday'
 DATABASE_BORG_RSH = ROOT / 'scripts' / 'backup' / 'deadtrees-borg-rsh'
+DATABASE_BORG_RSH_HOLIDAY = ROOT / 'scripts' / 'backup' / 'deadtrees-borg-rsh-holiday'
+DATABASE_BACKUP_STREAM_HOLIDAY = ROOT / 'scripts' / 'backup' / 'deadtrees-db-backup-stream-holiday'
 DATABASE_BORG_TUNNEL_GUARD = ROOT / 'scripts' / 'backup' / 'deadtrees-borg-tunnel-guard'
 DATABASE_TUNNEL_REFRESH = ROOT / 'scripts' / 'backup' / 'deadtrees-refresh-database-tunnel'
 BACKUP_SYSTEMD = ROOT / 'scripts' / 'backup' / 'systemd'
@@ -931,7 +933,7 @@ exec "$FAKE_REMOTE_HELPER"
 		'DEADTREES_DB_ARCHIVE_COMMAND_PATH': command_path,
 		'DEADTREES_DOCKER_BIN': str(docker),
 		'SSH_ORIGINAL_COMMAND': f'{command_path} archive',
-		'FAKE_REMOTE_HELPER': str(DATABASE_BACKUP_REMOTE_HOLIDAY),
+		'FAKE_REMOTE_HELPER': str(DATABASE_BACKUP_STREAM_HOLIDAY),
 		'FAKE_DOCKER_LOG': str(docker_log),
 	}
 
@@ -942,6 +944,31 @@ exec "$FAKE_REMOTE_HELPER"
 		'exec --user postgres supabase-db test -f /var/lib/postgresql/data/.deadtrees-logical-backup/toc.dat',
 		'exec --user postgres supabase-db tar --format=posix -C /var/lib/postgresql/data/.deadtrees-logical-backup -cf - .',
 	]
+
+	denied = subprocess.run(
+		[DATABASE_BACKUP_STREAM_HOLIDAY],
+		env={**env, 'SSH_ORIGINAL_COMMAND': 'cleanup'},
+		text=True,
+		capture_output=True,
+		check=False,
+	)
+	assert denied.returncode == 64
+
+
+def test_holiday_borg_rsh_targets_the_retained_socket(tmp_path):
+	socat = tmp_path / 'socat'
+	command_log = tmp_path / 'command.log'
+	_write_executable(socat, '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >"$FAKE_COMMAND_LOG"\n')
+	env = {
+		**os.environ,
+		'DEADTREES_BORG_RSH_SOCAT_BIN': str(socat),
+		'FAKE_COMMAND_LOG': str(command_log),
+	}
+
+	result = subprocess.run([DATABASE_BORG_RSH_HOLIDAY], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 0, result.stderr
+	assert command_log.read_text() == 'STDIO UNIX-CONNECT:/tmp/borg.sock\n'
 
 
 def test_holiday_remote_helper_requires_release_before_cleanup(tmp_path):
@@ -1008,6 +1035,10 @@ printf 'refresh:fd=%s\n' "$DEADTREES_TUNNEL_REFRESH_LOCK_FD" >>"$FAKE_COMMAND_LO
 	assert commands.index('refresh:fd=9') < commands.index('ssh:prepare')
 	assert commands.index('ssh:verify') < commands.index('ssh:archive-helper archive')
 	assert commands.count('ssh:dump') == 1
+	ssh_args = (tmp_path / 'ssh-args.log').read_text()
+	assert f'-i {tmp_path / "archive-identity"}' in ssh_args
+	assert f'-o UserKnownHostsFile={tmp_path / "archive-known-hosts"}' in ssh_args
+	assert '-o HostKeyAlias=database-archive-test' in ssh_args
 	assert (tmp_path / 'attempts').read_text() == '2\n'
 
 

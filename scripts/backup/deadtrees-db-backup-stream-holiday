@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+umask 077
+
+readonly docker_bin="${DEADTREES_DOCKER_BIN:-docker}"
+readonly container="${DEADTREES_DB_CONTAINER:-supabase-db}"
+readonly stage="${DEADTREES_DB_BACKUP_STAGE:-/var/lib/postgresql/data/.deadtrees-logical-backup}"
+readonly command_path="${DEADTREES_DB_BACKUP_STREAM_COMMAND_PATH:-stream-local}"
+
+if [[ "${SSH_ORIGINAL_COMMAND:-}" != "$command_path" ]]; then
+	printf 'Command denied.\n' >&2
+	exit 64
+fi
+
+"$docker_bin" exec --user postgres "$container" test -f "$stage/toc.dat"
+exec "$docker_bin" exec --user postgres "$container" \
+	tar --format=posix -C "$stage" -cf - .
