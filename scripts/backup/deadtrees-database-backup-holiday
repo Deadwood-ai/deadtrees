@@ -90,7 +90,8 @@ refresh_archive_diff() {
 		| awk 'NF && $0 !~ /[.]checkpoint([.][0-9]+)?$/ { count += 1 } END { print count + 0 }')"
 }
 
-run_archive_transport() {
+run_archive_command() {
+	local mode="$1"
 	set +e
 	DEADTREES_TUNNEL_REFRESH_LOCK_FD=9 "$tunnel_refresh"
 	archive_status=$?
@@ -103,10 +104,26 @@ run_archive_transport() {
 			-o ServerAliveInterval=30 \
 			-o ServerAliveCountMax=4 \
 			-o StrictHostKeyChecking=yes \
-			"$archive_remote" "$archive_command"
+			"$archive_remote" "$archive_command $mode"
 		archive_status=$?
 	fi
 	set -e
+}
+
+probe_archive_transport() {
+	for ((attempt = 1; attempt <= max_transport_attempts; attempt++)); do
+		run_archive_command probe
+		if [[ "$archive_status" -eq 0 ]]; then
+			return 0
+		fi
+		if ((attempt < max_transport_attempts)); then
+			printf '%s Borg transport preflight attempt %s/%s exited %s; retrying.\n' \
+				"$(timestamp)" "$attempt" "$max_transport_attempts" "$archive_status" >&2
+			sleep "$retry_delay"
+		fi
+	done
+	printf 'Borg transport preflight failed after %s attempts.\n' "$max_transport_attempts" >&2
+	return 1
 }
 
 timestamp() {
@@ -124,6 +141,7 @@ trap cleanup EXIT
 trap 'handle_signal 130' INT
 trap 'handle_signal 143' TERM
 
+probe_archive_transport
 ssh_remote prepare >/dev/null
 ssh_remote space-status >/dev/null
 
@@ -143,7 +161,7 @@ ssh_remote preserve >/dev/null
 preserve_stage=1
 
 for ((attempt = 1; attempt <= max_transport_attempts; attempt++)); do
-	run_archive_transport
+	run_archive_command archive
 	refresh_archive_diff
 	if [[ "$new_archive_count" -gt 0 ]]; then
 		break

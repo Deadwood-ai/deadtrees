@@ -13,8 +13,15 @@ readonly borg_rsh="${DEADTREES_DB_ARCHIVE_BORG_RSH:-/home/borg/.local/bin/deadtr
 readonly archive_timestamp="${DEADTREES_DB_ARCHIVE_TIMESTAMP:-$(date '+%Y-%m-%dT%H:%M:%S')}"
 readonly archive="database-dump-$archive_timestamp"
 readonly command_path="${DEADTREES_DB_ARCHIVE_COMMAND_PATH:-/home/borg/.local/bin/deadtrees-db-borg-archive-holiday}"
+readonly requested_command="${SSH_ORIGINAL_COMMAND:-}"
 
-if [[ "${SSH_ORIGINAL_COMMAND:-}" != "$command_path" ]]; then
+if [[ "$requested_command" == "$command_path probe" ]]; then
+	export BORG_RSH="$borg_rsh"
+	export BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes
+	exec "$borg_bin" info "$repository"
+fi
+
+if [[ "$requested_command" != "$command_path archive" ]]; then
 	printf 'Command denied.\n' >&2
 	exit 64
 fi

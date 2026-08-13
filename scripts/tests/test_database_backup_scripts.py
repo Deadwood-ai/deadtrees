@@ -863,7 +863,7 @@ def test_holiday_archive_helper_keeps_legacy_forced_command_and_stream_contract(
 		'DEADTREES_DB_ARCHIVE_SSH_BIN': str(ssh),
 		'DEADTREES_DB_ARCHIVE_COMMAND_PATH': command_path,
 		'DEADTREES_DB_ARCHIVE_TIMESTAMP': '2026-08-13T02:00:00',
-		'SSH_ORIGINAL_COMMAND': command_path,
+		'SSH_ORIGINAL_COMMAND': f'{command_path} archive',
 		'FAKE_COMMAND_LOG': str(command_log),
 	}
 
@@ -874,6 +874,18 @@ def test_holiday_archive_helper_keeps_legacy_forced_command_and_stream_contract(
 	assert 'database-dump-2026-08-13T02:00:00' in command
 	assert command.rstrip().endswith('dendro@127.0.0.1 stream-local')
 
+	probe = subprocess.run(
+		[DATABASE_BORG_ARCHIVE_HOLIDAY],
+		env={**env, 'SSH_ORIGINAL_COMMAND': f'{command_path} probe'},
+		text=True,
+		capture_output=True,
+		check=False,
+	)
+	assert probe.returncode == 0, probe.stderr
+	assert (
+		'info remote-backup@dtbackup-borg-socket:/mnt/raid/backups/supabase.deadtrees.earth' in command_log.read_text()
+	)
+
 	denied = subprocess.run(
 		[DATABASE_BORG_ARCHIVE_HOLIDAY],
 		env={**env, 'SSH_ORIGINAL_COMMAND': '/test/arbitrary'},
@@ -883,6 +895,53 @@ def test_holiday_archive_helper_keeps_legacy_forced_command_and_stream_contract(
 	)
 	assert denied.returncode == 64
 	assert 'Command denied.' in denied.stderr
+
+
+def test_holiday_archive_and_remote_helpers_stream_together(tmp_path):
+	borg = tmp_path / 'borg'
+	ssh = tmp_path / 'ssh'
+	docker = tmp_path / 'docker'
+	docker_log = tmp_path / 'docker.log'
+	_write_executable(
+		borg,
+		"""#!/usr/bin/env bash
+set -eu
+while [[ "$1" != -- ]]; do shift; done
+shift
+exec "$@"
+""",
+	)
+	_write_executable(
+		ssh,
+		"""#!/usr/bin/env bash
+set -eu
+export SSH_ORIGINAL_COMMAND="${!#}"
+exec "$FAKE_REMOTE_HELPER"
+""",
+	)
+	_write_executable(
+		docker,
+		'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$FAKE_DOCKER_LOG"\n',
+	)
+	command_path = '/test/deadtrees-db-borg-archive-holiday'
+	env = {
+		**os.environ,
+		'DEADTREES_DB_ARCHIVE_BORG_BIN': str(borg),
+		'DEADTREES_DB_ARCHIVE_SSH_BIN': str(ssh),
+		'DEADTREES_DB_ARCHIVE_COMMAND_PATH': command_path,
+		'DEADTREES_DOCKER_BIN': str(docker),
+		'SSH_ORIGINAL_COMMAND': f'{command_path} archive',
+		'FAKE_REMOTE_HELPER': str(DATABASE_BACKUP_REMOTE_HOLIDAY),
+		'FAKE_DOCKER_LOG': str(docker_log),
+	}
+
+	result = subprocess.run([DATABASE_BORG_ARCHIVE_HOLIDAY], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 0, result.stderr
+	assert docker_log.read_text().splitlines() == [
+		'exec --user postgres supabase-db test -f /var/lib/postgresql/data/.deadtrees-logical-backup/toc.dat',
+		'exec --user postgres supabase-db tar --format=posix -C /var/lib/postgresql/data/.deadtrees-logical-backup -cf - .',
+	]
 
 
 def test_holiday_remote_helper_requires_release_before_cleanup(tmp_path):
@@ -945,8 +1004,9 @@ printf 'refresh:fd=%s\n' "$DEADTREES_TUNNEL_REFRESH_LOCK_FD" >>"$FAKE_COMMAND_LO
 
 	assert result.returncode == 0, result.stderr
 	commands = (tmp_path / 'commands.log').read_text().splitlines()
-	assert commands.count('refresh:fd=9') == 2
-	assert commands.index('ssh:verify') < commands.index('refresh:fd=9')
+	assert commands.count('refresh:fd=9') == 3
+	assert commands.index('refresh:fd=9') < commands.index('ssh:prepare')
+	assert commands.index('ssh:verify') < commands.index('ssh:archive-helper archive')
 	assert commands.count('ssh:dump') == 1
 	assert (tmp_path / 'attempts').read_text() == '2\n'
 
@@ -961,7 +1021,7 @@ def test_holiday_backup_retries_transport_three_times_without_redumping(tmp_path
 
 	assert result.returncode == 1
 	commands = (tmp_path / 'commands.log').read_text().splitlines()
-	assert commands.count('refresh') == 3
+	assert commands.count('refresh') == 4
 	assert commands.count('ssh:dump') == 1
 	assert (tmp_path / 'attempts').read_text() == '3\n'
 	assert 'attempt 1/3' in result.stderr
@@ -988,9 +1048,25 @@ printf '%s\n' "$attempt" >"$FAKE_REFRESH_ATTEMPTS"
 	result = subprocess.run([DATABASE_BACKUP_HOLIDAY], env=env, text=True, capture_output=True, check=False)
 
 	assert result.returncode == 0, result.stderr
-	assert refresh_attempts.read_text() == '3\n'
+	assert refresh_attempts.read_text() == '4\n'
 	assert (tmp_path / 'attempts').read_text() == '1\n'
 	assert (tmp_path / 'commands.log').read_text().splitlines().count('ssh:dump') == 1
+
+
+def test_holiday_backup_failed_preflight_never_dumps(tmp_path):
+	env = _backup_environment(tmp_path, transport_status=0)
+	env['FAKE_PROBE_STATUS'] = '2'
+	refresh = tmp_path / 'refresh'
+	_write_executable(refresh, '#!/usr/bin/env bash\nexit 0\n')
+	env['DEADTREES_DB_BACKUP_TUNNEL_REFRESH_BIN'] = str(refresh)
+
+	result = subprocess.run([DATABASE_BACKUP_HOLIDAY], env=env, text=True, capture_output=True, check=False)
+
+	assert result.returncode == 1
+	assert 'Borg transport preflight failed after 3 attempts.' in result.stderr
+	commands = (tmp_path / 'commands.log').read_text().splitlines()
+	assert commands.count('ssh:archive-helper probe') == 3
+	assert 'ssh:dump' not in commands
 
 
 def test_holiday_backup_preserves_stage_after_checkpoint_only_transport(tmp_path):
