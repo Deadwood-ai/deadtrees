@@ -85,11 +85,8 @@ The tracked sources map to these production locations:
 | `scripts/backup/deadtrees-db-backup-remote` | `/home/dendro/.local/bin/deadtrees-db-backup-remote` |
 | `scripts/backup/deadtrees-db-backup-remote-holiday` | `/home/dendro/.local/bin/deadtrees-db-backup-remote-holiday` (temporary legacy transport) |
 | `scripts/backup/deadtrees-db-backup-stream` | `/home/dendro/.local/bin/deadtrees-db-backup-stream` |
-| `scripts/backup/deadtrees-db-backup-stream-holiday` | `/home/dendro/.local/bin/deadtrees-db-backup-stream-holiday` (temporary legacy transport) |
 | `scripts/backup/deadtrees-db-borg-archive` | `/home/borg/.local/bin/deadtrees-db-borg-archive` |
-| `scripts/backup/deadtrees-db-borg-archive-holiday` | `/home/borg/.local/bin/deadtrees-db-borg-archive-holiday` (temporary legacy transport) |
 | `scripts/backup/deadtrees-borg-rsh` | `/home/borg/.local/bin/deadtrees-borg-rsh` |
-| `scripts/backup/deadtrees-borg-rsh-holiday` | `/home/borg/.local/bin/deadtrees-borg-rsh-holiday` (temporary legacy transport) |
 | `scripts/backup/deadtrees-borg-tunnel-guard` | `/home/borg/.local/bin/deadtrees-borg-tunnel-guard` |
 | `scripts/backup/deadtrees-refresh-database-tunnel` | `/home/remote-backup/.local/bin/deadtrees-refresh-database-tunnel` |
 | `scripts/backup/database_dump_direct.yaml` | `/home/remote-backup/.config/borgmatic/database_dump_direct.yaml` |
@@ -232,8 +229,8 @@ The production cutover on 12 August 2026 retained the existing
 `remote-backup`-owned shared reverse socket while the least-privilege transport
 remains uninstalled. That tunnel had previously stayed active at the systemd
 level while its remote socket refused a nightly archive connection. Until
-2 September 2026, use the explicitly versioned holiday wrapper, lifecycle helper,
-and archive helper. They preserve the legacy `stream-local` forced-command contract without
+2 September 2026, use the explicitly versioned holiday wrapper and lifecycle
+helper. They preserve the proven live `stream-local` forced-command contract without
 weakening or overloading the future dedicated-transport helpers. The holiday
 wrapper refreshes the tunnel while holding the database lock immediately before
 every archive attempt. This is the authoritative readiness check: the subsequent
@@ -250,12 +247,11 @@ before the nightly sequence starts:
 
 Install the tracked helpers as `remote-backup` and `dendro`, preserve prior files,
 the database host's `authorized_keys`, and the crontab under timestamped rollback
-paths. During this temporary period, the database lifecycle key must force
-`/home/dendro/.local/bin/deadtrees-db-backup-remote-holiday`, while the separate
-archive-source key must force
-`/home/dendro/.local/bin/deadtrees-db-backup-stream-holiday`; do not install either
-holiday source over a canonical helper path. The backup host's archive key must
-force `/home/borg/.local/bin/deadtrees-db-borg-archive-holiday`. Keep cron mail enabled. The
+paths. During this temporary period, both existing database-host forced-command
+entries continue to select the holiday lifecycle helper, exactly matching the
+recovered live topology. Do not change SSH identities, keys, host aliases, archive
+helpers, Borg RSH helpers, or socket paths for this time-limited reliability fix.
+Keep cron mail enabled. The
 helper first acquires the same non-blocking lock as `deadtrees-database-backup`;
 if a manual or overlong backup is active, it leaves the tunnel untouched and
 exits non-zero. After acquiring the lock, it terminates only the current main process of
@@ -269,7 +265,7 @@ succeed. The helper also fails closed unless the service is owned by the invokin
 user, so it cannot be carried into the dedicated `deadtrees-db-tunnel` deployment
 accidentally.
 
-The holiday lifecycle and archive helpers own only the currently installed legacy command set,
+The holiday lifecycle helper owns only the currently installed legacy command set,
 including `stream-local` and `tunnel-status`; its default `/tmp/borg.sock` path
 matches the retained production listener. The canonical lifecycle helper remains
 the source for the future dedicated transport. Remove both holiday helpers and
@@ -278,9 +274,7 @@ dedicated runtime-directory socket replaces this legacy path.
 
 Read-only installation checks must confirm that the nightly wrapper selects the
 holiday database wrapper, both database-host forced-command entries select the
-holiday lifecycle helper, the archive-source key selects the stream-only holiday
-helper, the backup-host archive key selects the holiday archive helper, the archive
-helper selects the holiday Borg RSH, the tunnel service and listener are active, `tunnel-status`
+holiday lifecycle helper, the tunnel service and listener are active, `tunnel-status`
 returns `ready`, and the dump stage is absent. Do not start an extra database dump
 just to check installation; the next scheduled run and the 04:15 holiday monitor
 provide the end-to-end result.

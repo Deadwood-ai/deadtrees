@@ -12,10 +12,7 @@ readonly repository="${DEADTREES_DB_BACKUP_REPOSITORY:-/mnt/raid/backups/supabas
 readonly ssh_bin="${DEADTREES_DB_BACKUP_SSH_BIN:-ssh}"
 readonly borg_bin="${DEADTREES_DB_BACKUP_BORG_BIN:-borg}"
 readonly archive_remote="${DEADTREES_DB_BACKUP_ARCHIVE_REMOTE:-borg@data2.deadtrees.earth}"
-readonly archive_command="${DEADTREES_DB_BACKUP_ARCHIVE_COMMAND:-/home/borg/.local/bin/deadtrees-db-borg-archive-holiday}"
-readonly archive_identity="${DEADTREES_DB_BACKUP_ARCHIVE_IDENTITY:-/home/remote-backup/.ssh/id_ed25519_database_archive}"
-readonly archive_known_hosts="${DEADTREES_DB_BACKUP_ARCHIVE_KNOWN_HOSTS:-/home/remote-backup/.ssh/known_hosts}"
-readonly archive_host_key_alias="${DEADTREES_DB_BACKUP_ARCHIVE_HOST_KEY_ALIAS:-data2-database-archive}"
+readonly archive_command="${DEADTREES_DB_BACKUP_ARCHIVE_COMMAND:-/home/borg/.local/bin/deadtrees-db-borg-archive}"
 readonly tunnel_refresh="${DEADTREES_DB_BACKUP_TUNNEL_REFRESH_BIN:-/home/remote-backup/.local/bin/deadtrees-refresh-database-tunnel}"
 readonly flock_bin="${DEADTREES_DB_BACKUP_FLOCK_BIN:-flock}"
 readonly retry_delay="${DEADTREES_DB_BACKUP_RETRY_DELAY:-5}"
@@ -93,42 +90,21 @@ refresh_archive_diff() {
 		| awk 'NF && $0 !~ /[.]checkpoint([.][0-9]+)?$/ { count += 1 } END { print count + 0 }')"
 }
 
-run_archive_command() {
-	local mode="$1"
+run_archive_transport() {
 	set +e
 	DEADTREES_TUNNEL_REFRESH_LOCK_FD=9 "$tunnel_refresh"
 	archive_status=$?
 	if [[ "$archive_status" -eq 0 ]]; then
 		run_interruptible "$ssh_bin" \
-			-i "$archive_identity" \
 			-o BatchMode=yes \
 			-o ConnectTimeout=15 \
-			-o IdentitiesOnly=yes \
 			-o ServerAliveInterval=30 \
 			-o ServerAliveCountMax=4 \
 			-o StrictHostKeyChecking=yes \
-			-o "UserKnownHostsFile=$archive_known_hosts" \
-			-o "HostKeyAlias=$archive_host_key_alias" \
-			"$archive_remote" "$archive_command $mode"
+			"$archive_remote" "$archive_command"
 		archive_status=$?
 	fi
 	set -e
-}
-
-probe_archive_transport() {
-	for ((attempt = 1; attempt <= max_transport_attempts; attempt++)); do
-		run_archive_command probe
-		if [[ "$archive_status" -eq 0 ]]; then
-			return 0
-		fi
-		if ((attempt < max_transport_attempts)); then
-			printf '%s Borg transport preflight attempt %s/%s exited %s; retrying.\n' \
-				"$(timestamp)" "$attempt" "$max_transport_attempts" "$archive_status" >&2
-			sleep "$retry_delay"
-		fi
-	done
-	printf 'Borg transport preflight failed after %s attempts.\n' "$max_transport_attempts" >&2
-	return 1
 }
 
 timestamp() {
@@ -146,7 +122,7 @@ trap cleanup EXIT
 trap 'handle_signal 130' INT
 trap 'handle_signal 143' TERM
 
-probe_archive_transport
+DEADTREES_TUNNEL_REFRESH_LOCK_FD=9 "$tunnel_refresh"
 ssh_remote prepare >/dev/null
 ssh_remote space-status >/dev/null
 
@@ -166,7 +142,7 @@ ssh_remote preserve >/dev/null
 preserve_stage=1
 
 for ((attempt = 1; attempt <= max_transport_attempts; attempt++)); do
-	run_archive_command archive
+	run_archive_transport
 	refresh_archive_diff
 	if [[ "$new_archive_count" -gt 0 ]]; then
 		break
