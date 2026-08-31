@@ -109,6 +109,7 @@ describe("usePriwaSyncQueueRunner", () => {
     expect(mocks.upsertPoint).toHaveBeenCalledWith(
       "project-1",
       point,
+      interruptedMutation.updatedAt,
       expect.any(AbortSignal),
     );
     expect(storedQueue).toEqual([]);
@@ -139,7 +140,12 @@ describe("usePriwaSyncQueueRunner", () => {
       confirmRequestStarted = resolve;
     });
     mocks.upsertPoint.mockImplementation(
-      async (_projectId: string, _point: IPriwaPoint, signal: AbortSignal) => {
+      async (
+        _projectId: string,
+        _point: IPriwaPoint,
+        _clientUpdatedAt: string,
+        signal: AbortSignal,
+      ) => {
         confirmRequestStarted();
         return new Promise<void>((_resolve, reject) => {
           signal.addEventListener("abort", () => reject(signal.reason));

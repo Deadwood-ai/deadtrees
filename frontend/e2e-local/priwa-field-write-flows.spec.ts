@@ -17,6 +17,8 @@ const baumnr = `E2E-${uniqueRunId.slice(-12)}`;
 const updatedBaumnr = `${baumnr}-U`;
 const stalledSyncBaumnr = `${baumnr}-S1`;
 const queuedDuringSyncBaumnr = `${baumnr}-S2`;
+const staleCompletionBaumnr = `${baumnr}-STALE`;
+const newerCompletionBaumnr = `${baumnr}-NEWER`;
 
 let adminClient: SupabaseClient;
 let fieldUserId = "";
@@ -236,6 +238,61 @@ test.describe("PRIWA local field write flows", () => {
     ).toHaveCount(0);
     await secondPage.close();
     await page.unroute(routePattern);
+  });
+
+  test("does not let a stale server completion overwrite a newer mutation", async () => {
+    const pointId = randomUUID();
+    const olderClientTimestamp = "2026-08-31T12:00:00.000Z";
+    const newerClientTimestamp = "2026-08-31T12:01:00.000Z";
+    const baseRow = {
+      id: pointId,
+      project_id: projectId,
+      geom: { type: "Point", coordinates: [8.18, 48.456] },
+      location_source: "map_estimated",
+      baumnr: newerCompletionBaumnr,
+      fund: "ja",
+      baumart: "Fichte",
+      bm: "ja",
+      bohrloch: "ja",
+      harz: "nein",
+      gruene_nadeln_am_boden: "nein",
+      nadel: "grün",
+      rinde: "0%",
+      kv: "0%",
+      name: "PRIWA E2E",
+      datum: "2026-08-31",
+      created_by: fieldUserId,
+      updated_by: fieldUserId,
+      client_updated_at: newerClientTimestamp,
+    };
+
+    const { error: newerWriteError } = await adminClient
+      .from("priwa_kaeferbaeume")
+      .upsert(baseRow, { onConflict: "id" });
+    expect(newerWriteError).toBeNull();
+
+    const { error: staleWriteError } = await adminClient
+      .from("priwa_kaeferbaeume")
+      .upsert(
+        {
+          ...baseRow,
+          baumnr: staleCompletionBaumnr,
+          client_updated_at: olderClientTimestamp,
+        },
+        { onConflict: "id" },
+      );
+    expect(staleWriteError).toBeNull();
+
+    const { data: persistedRow, error: persistedRowError } = await adminClient
+      .from("priwa_kaeferbaeume")
+      .select("baumnr, client_updated_at")
+      .eq("id", pointId)
+      .single();
+    expect(persistedRowError).toBeNull();
+    expect(persistedRow?.baumnr).toBe(newerCompletionBaumnr);
+    expect(new Date(persistedRow!.client_updated_at).toISOString()).toBe(
+      newerClientTimestamp,
+    );
   });
 });
 

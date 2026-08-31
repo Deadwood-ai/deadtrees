@@ -102,7 +102,11 @@ const rowToPoint = (row: IPriwaKaeferbaumRow): IPriwaPoint | null => {
   };
 };
 
-const pointToRow = (projectId: string, point: IPriwaPoint) => ({
+const pointToRow = (
+  projectId: string,
+  point: IPriwaPoint,
+  clientUpdatedAt: string,
+) => ({
   id: point.id,
   project_id: projectId,
   geom: {
@@ -124,7 +128,7 @@ const pointToRow = (projectId: string, point: IPriwaPoint) => ({
   datum: point.datum,
   kom: point.kom.trim() || null,
   raw_qr_value: point.rawQrValue?.trim() || null,
-  client_updated_at: new Date().toISOString(),
+  client_updated_at: clientUpdatedAt,
 });
 
 export const priwaPointsQueryKey = (projectId: string | null | undefined) => [
@@ -152,11 +156,14 @@ export const fetchPriwaKaeferbaeume = async (projectId: string) => {
 export const upsertPriwaKaeferbaum = async (
   projectId: string,
   point: IPriwaPoint,
+  clientUpdatedAt = new Date().toISOString(),
   signal?: AbortSignal,
 ) => {
   const request = supabase
     .from("priwa_kaeferbaeume")
-    .upsert(pointToRow(projectId, point), { onConflict: "id" });
+    .upsert(pointToRow(projectId, point, clientUpdatedAt), {
+      onConflict: "id",
+    });
   const { error } = await (signal ? request.abortSignal(signal) : request);
 
   if (error) throw error;

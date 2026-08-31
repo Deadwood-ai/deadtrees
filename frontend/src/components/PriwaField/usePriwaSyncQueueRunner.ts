@@ -90,7 +90,6 @@ export function usePriwaSyncQueueRunner({
             ...mutation,
             status: "syncing" as const,
             retryCount: mutation.retryCount + 1,
-            updatedAt: new Date().toISOString(),
             lastError: undefined,
           };
           await updateStoredQueue((queue) =>
@@ -115,7 +114,12 @@ export function usePriwaSyncQueueRunner({
             } else if (syncingMutation.point) {
               const point = syncingMutation.point;
               await runPriwaSyncRequest((signal) =>
-                upsertPriwaKaeferbaum(projectId, point, signal),
+                upsertPriwaKaeferbaum(
+                  projectId,
+                  point,
+                  syncingMutation.updatedAt,
+                  signal,
+                ),
               );
               onPointSynced(point);
             }

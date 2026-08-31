@@ -105,8 +105,19 @@ describe("softDeletePriwaKaeferbaum", () => {
     const { upsertPriwaKaeferbaum } = await import("./usePriwaKaeferbaeume");
     const signal = new AbortController().signal;
 
-    await upsertPriwaKaeferbaum("project-1", basePoint, signal);
+    await upsertPriwaKaeferbaum(
+      "project-1",
+      basePoint,
+      "2026-05-20T07:15:00.000Z",
+      signal,
+    );
 
+    expect(supabaseMock.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client_updated_at: "2026-05-20T07:15:00.000Z",
+      }),
+      { onConflict: "id" },
+    );
     expect(supabaseMock.upsertAbortSignal).toHaveBeenCalledWith(signal);
   });
 });
