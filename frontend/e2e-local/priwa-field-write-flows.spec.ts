@@ -17,6 +17,7 @@ const baumnr = `E2E-${uniqueRunId.slice(-12)}`;
 const updatedBaumnr = `${baumnr}-U`;
 const stalledSyncBaumnr = `${baumnr}-S1`;
 const queuedDuringSyncBaumnr = `${baumnr}-S2`;
+const deletedDuringSyncBaumnr = `${baumnr}-S3`;
 const staleCompletionBaumnr = `${baumnr}-STALE`;
 const newerCompletionBaumnr = `${baumnr}-NEWER`;
 
@@ -240,6 +241,41 @@ test.describe("PRIWA local field write flows", () => {
     await page.unroute(routePattern);
   });
 
+  test("retains a delete issued while its create request is stalled", async ({
+    page,
+  }) => {
+    await signInFieldUser(page);
+    await expect(page.getByTestId("priwa-field-map")).toBeVisible();
+
+    let releaseMutation: () => void = () => undefined;
+    const stalledMutation = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+    const routePattern = "**/rest/v1/priwa_kaeferbaeume**";
+    await page.route(routePattern, async (route) => {
+      if (["POST", "PATCH"].includes(route.request().method())) {
+        await stalledMutation;
+      }
+      await route.continue();
+    });
+
+    await createMapEstimatedPoint(page, deletedDuringSyncBaumnr);
+    await expect(
+      page.getByText("Synchronisiert...", { exact: true }),
+    ).toBeVisible();
+    await deleteFirstPoint(page);
+
+    releaseMutation();
+    await waitForPointRow(
+      deletedDuringSyncBaumnr,
+      (row) => row.deleted_at !== null,
+    );
+    await expect(
+      page.getByText(/Synchronisiert\.\.\.|ausstehend|Sync Fehler/i),
+    ).toHaveCount(0);
+    await page.unroute(routePattern);
+  });
+
   test("does not let a stale server completion overwrite a newer mutation", async () => {
     const pointId = randomUUID();
     const olderClientTimestamp = "2026-08-31T12:00:00.000Z";
@@ -296,14 +332,11 @@ test.describe("PRIWA local field write flows", () => {
 
     const { error: nullTimestampError } = await adminClient
       .from("priwa_kaeferbaeume")
-      .upsert(
-        {
-          ...baseRow,
-          baumnr: `${newerCompletionBaumnr}-NULL-BYPASS`,
-          client_updated_at: null,
-        },
-        { onConflict: "id" },
-      );
+      .update({
+        baumnr: `${newerCompletionBaumnr}-NULL-BYPASS`,
+        client_updated_at: null,
+      })
+      .eq("id", pointId);
     expect(nullTimestampError).not.toBeNull();
     const { data: rowAfterNullTimestamp, error: nullTimestampReadError } =
       await adminClient

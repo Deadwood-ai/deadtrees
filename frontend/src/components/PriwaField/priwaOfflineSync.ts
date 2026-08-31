@@ -65,7 +65,12 @@ export const coalescePriwaQueuedMutation = (
     return queue;
   }
 
-  if (existing?.type === "create" && mutation.type === "delete") {
+  if (
+    existing?.type === "create" &&
+    existing.status === "pending" &&
+    existing.retryCount === 0 &&
+    mutation.type === "delete"
+  ) {
     return remaining;
   }
 

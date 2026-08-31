@@ -74,6 +74,28 @@ describe("PRIWA offline sync helpers", () => {
     expect(nextQueue).toEqual([]);
   });
 
+  it("retains a delete when the preceding create may already reach the server", () => {
+    const syncingCreate = {
+      ...mutation("create"),
+      status: "syncing" as const,
+      retryCount: 1,
+    };
+    const queuedDelete = {
+      ...mutation("delete", undefined),
+      updatedAt: "2026-05-19T08:02:00.000Z",
+    };
+
+    expect(
+      coalescePriwaQueuedMutation([syncingCreate], queuedDelete),
+    ).toEqual([
+      expect.objectContaining({
+        type: "delete",
+        status: "pending",
+        updatedAt: queuedDelete.updatedAt,
+      }),
+    ]);
+  });
+
   it("keeps a newer same-point mutation when an older enqueue finishes later", () => {
     const newerMutation = {
       ...mutation("update", { ...basePoint, baumnr: "newer" }),

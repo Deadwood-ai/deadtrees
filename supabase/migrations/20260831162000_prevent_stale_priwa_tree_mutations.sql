@@ -34,8 +34,13 @@ begin
         return OLD;
     end if;
 
-    if NEW.client_updated_at is null
-       or NEW.client_updated_at <= OLD.client_updated_at then
+    if NEW.client_updated_at is null then
+        raise not_null_violation using
+            column = 'client_updated_at',
+            table = 'priwa_kaeferbaeume';
+    end if;
+
+    if NEW.client_updated_at <= OLD.client_updated_at then
         return OLD;
     end if;
 
