@@ -61,6 +61,10 @@ export const coalescePriwaQueuedMutation = (
   const existing = queue.find((item) => item.pointId === mutation.pointId);
   const remaining = queue.filter((item) => item.pointId !== mutation.pointId);
 
+  if (existing && existing.updatedAt > mutation.updatedAt) {
+    return queue;
+  }
+
   if (existing?.type === "create" && mutation.type === "delete") {
     return remaining;
   }

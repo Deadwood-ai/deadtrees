@@ -74,6 +74,21 @@ describe("PRIWA offline sync helpers", () => {
     expect(nextQueue).toEqual([]);
   });
 
+  it("keeps a newer same-point mutation when an older enqueue finishes later", () => {
+    const newerMutation = {
+      ...mutation("update", { ...basePoint, baumnr: "newer" }),
+      updatedAt: "2026-05-19T08:02:00.000Z",
+    };
+    const olderMutation = {
+      ...mutation("delete", undefined),
+      updatedAt: "2026-05-19T08:01:00.000Z",
+    };
+
+    expect(
+      coalescePriwaQueuedMutation([newerMutation], olderMutation),
+    ).toEqual([newerMutation]);
+  });
+
   it("overlays queued updates onto cached points", () => {
     const editedPoint = { ...basePoint, baumnr: "43" };
     const queue = [mutation("update", editedPoint)];

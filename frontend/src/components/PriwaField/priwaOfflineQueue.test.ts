@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { IPriwaQueuedMutation } from "./priwaOfflineStore";
+import { coalescePriwaQueuedMutation } from "./priwaOfflineSync";
 
 const storeMocks = vi.hoisted(() => ({
   loadQueue: vi.fn(),
@@ -107,5 +108,43 @@ describe("updatePriwaSyncQueue", () => {
       "point-1",
       "point-2",
     ]);
+  });
+
+  it("preserves a newer same-point mutation when an older realm stores later", async () => {
+    let storedQueue: IPriwaQueuedMutation[] = [];
+    storeMocks.loadQueue.mockImplementation(async () => [...storedQueue]);
+    storeMocks.saveQueue.mockImplementation(
+      async (
+        _projectId: string,
+        _userId: string,
+        queue: IPriwaQueuedMutation[],
+      ) => {
+        storedQueue = queue;
+      },
+    );
+    const olderMutation = {
+      ...mutation("point-1"),
+      updatedAt: "2026-05-19T08:01:00.000Z",
+    };
+    const newerMutation = {
+      ...mutation("point-1"),
+      updatedAt: "2026-05-19T08:02:00.000Z",
+    };
+    const firstRealm = await import("./priwaOfflineQueue");
+    vi.resetModules();
+    const secondRealm = await import("./priwaOfflineQueue");
+
+    await secondRealm.updatePriwaSyncQueue(
+      "project-1",
+      "user-1",
+      (queue) => coalescePriwaQueuedMutation(queue, newerMutation),
+    );
+    await firstRealm.updatePriwaSyncQueue(
+      "project-1",
+      "user-1",
+      (queue) => coalescePriwaQueuedMutation(queue, olderMutation),
+    );
+
+    expect(storedQueue).toEqual([newerMutation]);
   });
 });
