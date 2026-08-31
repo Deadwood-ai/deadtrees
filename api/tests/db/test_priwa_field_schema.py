@@ -211,13 +211,7 @@ def test_priwa_member_can_create_update_and_soft_delete_kaeferbaum(priwa_project
 	with use_client(member_token) as client:
 		updated = (
 			client.table('priwa_kaeferbaeume')
-			.update(
-				{
-					'baumnr': 'KB-001',
-					'fund': 'kontrolliert',
-					'client_updated_at': datetime.now(timezone.utc).isoformat(),
-				}
-			)
+			.update({'baumnr': 'KB-001', 'fund': 'kontrolliert'})
 			.eq('id', created['id'])
 			.execute()
 		)
@@ -230,10 +224,7 @@ def test_priwa_member_can_create_update_and_soft_delete_kaeferbaum(priwa_project
 		after_delete_attempt = client.table('priwa_kaeferbaeume').select('*').eq('id', created['id']).execute()
 
 		client.table('priwa_kaeferbaeume').update(
-			{
-				'deleted_at': datetime.now(timezone.utc).isoformat(),
-				'client_updated_at': datetime.now(timezone.utc).isoformat(),
-			}
+			{'deleted_at': datetime.now(timezone.utc).isoformat()}
 		).eq('id', created['id']).execute()
 		member_records_after_soft_delete = (
 			client.table('priwa_kaeferbaeume')
@@ -243,14 +234,7 @@ def test_priwa_member_can_create_update_and_soft_delete_kaeferbaum(priwa_project
 		)
 		blocked_update = (
 			client.table('priwa_kaeferbaeume')
-			.update(
-				{
-					'deleted_at': None,
-					'deleted_by': None,
-					'fund': 'should-not-change',
-					'client_updated_at': datetime.now(timezone.utc).isoformat(),
-				}
-			)
+			.update({'fund': 'should-not-change'})
 			.eq('id', created['id'])
 			.execute()
 		)
@@ -259,9 +243,7 @@ def test_priwa_member_can_create_update_and_soft_delete_kaeferbaum(priwa_project
 	assert len(after_delete_attempt.data) == 1
 	assert len(member_records_after_soft_delete.data) == 1
 	assert member_records_after_soft_delete.data[0]['deleted_at'] is not None
-	assert len(blocked_update.data) == 1
-	assert blocked_update.data[0]['deleted_at'] is not None
-	assert blocked_update.data[0]['fund'] == 'kontrolliert'
+	assert blocked_update.data == []
 
 	with use_service_client() as client:
 		soft_deleted = (
@@ -306,7 +288,6 @@ def test_priwa_kaeferbaum_identity_project_and_server_timestamps_are_locked(priw
 					'id': replacement_id,
 					'project_id': replacement_project_id,
 					'fund': 'kontrolliert',
-					'client_updated_at': datetime.now(timezone.utc).isoformat(),
 				}
 			)
 			.eq('id', created['id'])
@@ -873,10 +854,7 @@ def test_priwa_soft_delete_removes_tree_from_befallsgruppe(priwa_project):
 		).execute().data
 
 		client.table('priwa_kaeferbaeume').update(
-			{
-				'deleted_at': datetime.now(timezone.utc).isoformat(),
-				'client_updated_at': datetime.now(timezone.utc).isoformat(),
-			}
+			{'deleted_at': datetime.now(timezone.utc).isoformat()}
 		).eq('id', first_tree['id']).execute()
 		remaining_members = client.table('priwa_befallsgruppe_members').select(
 			'tree_id'
@@ -890,10 +868,7 @@ def test_priwa_soft_delete_removes_tree_from_befallsgruppe(priwa_project):
 
 	with use_client(member_token) as client:
 		client.table('priwa_kaeferbaeume').update(
-			{
-				'deleted_at': datetime.now(timezone.utc).isoformat(),
-				'client_updated_at': datetime.now(timezone.utc).isoformat(),
-			}
+			{'deleted_at': datetime.now(timezone.utc).isoformat()}
 		).eq('id', second_tree['id']).execute()
 		deleted_group = client.table('priwa_befallsgruppen').select('id').eq(
 			'id', group_id

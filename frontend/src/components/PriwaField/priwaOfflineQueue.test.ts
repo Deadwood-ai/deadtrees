@@ -134,15 +134,11 @@ describe("updatePriwaSyncQueue", () => {
     vi.resetModules();
     const secondRealm = await import("./priwaOfflineQueue");
 
-    await secondRealm.updatePriwaSyncQueue(
-      "project-1",
-      "user-1",
-      (queue) => coalescePriwaQueuedMutation(queue, newerMutation),
+    await secondRealm.updatePriwaSyncQueue("project-1", "user-1", (queue) =>
+      coalescePriwaQueuedMutation(queue, newerMutation),
     );
-    await firstRealm.updatePriwaSyncQueue(
-      "project-1",
-      "user-1",
-      (queue) => coalescePriwaQueuedMutation(queue, olderMutation),
+    await firstRealm.updatePriwaSyncQueue("project-1", "user-1", (queue) =>
+      coalescePriwaQueuedMutation(queue, olderMutation),
     );
 
     expect(storedQueue).toEqual([newerMutation]);

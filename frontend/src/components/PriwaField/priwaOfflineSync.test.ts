@@ -85,9 +85,7 @@ describe("PRIWA offline sync helpers", () => {
       updatedAt: "2026-05-19T08:02:00.000Z",
     };
 
-    expect(
-      coalescePriwaQueuedMutation([syncingCreate], queuedDelete),
-    ).toEqual([
+    expect(coalescePriwaQueuedMutation([syncingCreate], queuedDelete)).toEqual([
       expect.objectContaining({
         type: "delete",
         status: "pending",
@@ -106,9 +104,9 @@ describe("PRIWA offline sync helpers", () => {
       updatedAt: "2026-05-19T08:01:00.000Z",
     };
 
-    expect(
-      coalescePriwaQueuedMutation([newerMutation], olderMutation),
-    ).toEqual([newerMutation]);
+    expect(coalescePriwaQueuedMutation([newerMutation], olderMutation)).toEqual(
+      [newerMutation],
+    );
   });
 
   it("overlays queued updates onto cached points", () => {

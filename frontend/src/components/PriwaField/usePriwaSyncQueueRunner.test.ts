@@ -1,7 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { IPriwaQueuedMutation } from "./priwaOfflineStore";
-import { PRIWA_SYNC_REQUEST_TIMEOUT_MS } from "./priwaSyncRequest";
 import type { IPriwaPoint } from "./types";
 
 const mocks = vi.hoisted(() => ({
@@ -75,10 +74,6 @@ describe("usePriwaSyncQueueRunner", () => {
     mocks.upsertPoint.mockResolvedValue(undefined);
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it("retries and drains a syncing mutation left behind by an interruption", async () => {
     let storedQueue = [interruptedMutation];
     mocks.loadQueue.mockImplementation(async () => storedQueue);
@@ -106,12 +101,7 @@ describe("usePriwaSyncQueueRunner", () => {
 
     await runner.syncQueue();
 
-    expect(mocks.upsertPoint).toHaveBeenCalledWith(
-      "project-1",
-      point,
-      interruptedMutation.updatedAt,
-      expect.any(AbortSignal),
-    );
+    expect(mocks.upsertPoint).toHaveBeenCalledWith("project-1", point);
     expect(storedQueue).toEqual([]);
     expect(onQueueDrained).toHaveBeenCalledOnce();
   });
@@ -157,70 +147,6 @@ describe("usePriwaSyncQueueRunner", () => {
     expect(mocks.upsertPoint).not.toHaveBeenCalled();
     expect(storedQueue).toEqual([]);
     expect(onQueueDrained).toHaveBeenCalledOnce();
-  });
-
-  it("marks a stalled request as failed after the sync timeout", async () => {
-    vi.useFakeTimers();
-    let storedQueue: IPriwaQueuedMutation[] = [
-      {
-        ...interruptedMutation,
-        retryCount: 0,
-        status: "pending" as const,
-      },
-    ];
-    mocks.loadQueue.mockImplementation(async () => storedQueue);
-    mocks.saveQueue.mockImplementation(
-      async (
-        _projectId: string,
-        _userId: string,
-        queue: IPriwaQueuedMutation[],
-      ) => {
-        storedQueue = queue;
-      },
-    );
-    let confirmRequestStarted: () => void = () => undefined;
-    const requestStarted = new Promise<void>((resolve) => {
-      confirmRequestStarted = resolve;
-    });
-    mocks.upsertPoint.mockImplementation(
-      async (
-        _projectId: string,
-        _point: IPriwaPoint,
-        _clientUpdatedAt: string,
-        signal: AbortSignal,
-      ) => {
-        confirmRequestStarted();
-        return new Promise<void>((_resolve, reject) => {
-          signal.addEventListener("abort", () => reject(signal.reason));
-        });
-      },
-    );
-    const { usePriwaSyncQueueRunner } =
-      await import("./usePriwaSyncQueueRunner");
-    const runner = usePriwaSyncQueueRunner({
-      projectId: "project-1",
-      userId: "user-1",
-      isOnline: true,
-      onQueueUpdated: vi.fn(),
-      onPointSynced: vi.fn(),
-      onPointDeleted: vi.fn(),
-      onQueueDrained: vi.fn().mockResolvedValue(undefined),
-    });
-
-    const syncResult = runner.syncQueue();
-    await requestStarted;
-    expect(mocks.upsertPoint).toHaveBeenCalledOnce();
-    await vi.advanceTimersByTimeAsync(PRIWA_SYNC_REQUEST_TIMEOUT_MS);
-    await syncResult;
-
-    expect(storedQueue).toEqual([
-      expect.objectContaining({
-        pointId: "point-1",
-        retryCount: 1,
-        status: "failed",
-        lastError: "PRIWA-Synchronisation hat zu lange gedauert.",
-      }),
-    ]);
   });
 
   it("does not overlap a delayed write with a newer write from another runner", async () => {

@@ -7,7 +7,6 @@ import {
 import { updatePriwaSyncQueue } from "./priwaOfflineQueue";
 import { recoverInterruptedPriwaMutations } from "./priwaOfflineSync";
 import { runWithPriwaSyncLock } from "./priwaSyncLock";
-import { runPriwaSyncRequest } from "./priwaSyncRequest";
 import type { IPriwaPoint } from "./types";
 import {
   softDeletePriwaKaeferbaum,
@@ -103,25 +102,15 @@ export function usePriwaSyncQueueRunner({
 
           try {
             if (syncingMutation.type === "delete") {
-              await runPriwaSyncRequest((signal) =>
-                softDeletePriwaKaeferbaum(
-                  syncingMutation.pointId,
-                  userId,
-                  syncingMutation.updatedAt,
-                  signal,
-                ),
+              await softDeletePriwaKaeferbaum(
+                syncingMutation.pointId,
+                userId,
+                syncingMutation.updatedAt,
               );
               onPointDeleted(syncingMutation.pointId);
             } else if (syncingMutation.point) {
               const point = syncingMutation.point;
-              await runPriwaSyncRequest((signal) =>
-                upsertPriwaKaeferbaum(
-                  projectId,
-                  point,
-                  syncingMutation.updatedAt,
-                  signal,
-                ),
-              );
+              await upsertPriwaKaeferbaum(projectId, point);
               onPointSynced(point);
             }
 
