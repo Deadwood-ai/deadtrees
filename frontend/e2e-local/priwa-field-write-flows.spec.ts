@@ -294,6 +294,29 @@ test.describe("PRIWA local field write flows", () => {
       newerClientTimestamp,
     );
 
+    const { error: nullTimestampError } = await adminClient
+      .from("priwa_kaeferbaeume")
+      .upsert(
+        {
+          ...baseRow,
+          baumnr: `${newerCompletionBaumnr}-NULL-BYPASS`,
+          client_updated_at: null,
+        },
+        { onConflict: "id" },
+      );
+    expect(nullTimestampError).not.toBeNull();
+    const { data: rowAfterNullTimestamp, error: nullTimestampReadError } =
+      await adminClient
+        .from("priwa_kaeferbaeume")
+        .select("baumnr, client_updated_at")
+        .eq("id", pointId)
+        .single();
+    expect(nullTimestampReadError).toBeNull();
+    expect(rowAfterNullTimestamp?.baumnr).toBe(newerCompletionBaumnr);
+    expect(
+      new Date(rowAfterNullTimestamp!.client_updated_at).toISOString(),
+    ).toBe(newerClientTimestamp);
+
     const deletedClientTimestamp = "2026-08-31T12:02:00.000Z";
     const resurrectionTimestamp = "2026-08-31T12:03:00.000Z";
     const { error: deleteError } = await adminClient

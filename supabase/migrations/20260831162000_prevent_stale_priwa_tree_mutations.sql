@@ -1,3 +1,13 @@
+update public.priwa_kaeferbaeume
+set client_updated_at = coalesce(client_updated_at, updated_at, created_at, now())
+where client_updated_at is null;
+
+alter table public.priwa_kaeferbaeume
+alter column client_updated_at set default now();
+
+alter table public.priwa_kaeferbaeume
+alter column client_updated_at set not null;
+
 create or replace function public.priwa_set_kaeferbaum_actor_fields()
 returns trigger
 language plpgsql
@@ -24,9 +34,8 @@ begin
         return OLD;
     end if;
 
-    if OLD.client_updated_at is not null
-       and NEW.client_updated_at is not null
-       and NEW.client_updated_at <= OLD.client_updated_at then
+    if NEW.client_updated_at is null
+       or NEW.client_updated_at <= OLD.client_updated_at then
         return OLD;
     end if;
 
