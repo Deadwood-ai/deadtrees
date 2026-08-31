@@ -293,6 +293,46 @@ test.describe("PRIWA local field write flows", () => {
     expect(new Date(persistedRow!.client_updated_at).toISOString()).toBe(
       newerClientTimestamp,
     );
+
+    const deletedClientTimestamp = "2026-08-31T12:02:00.000Z";
+    const resurrectionTimestamp = "2026-08-31T12:03:00.000Z";
+    const { error: deleteError } = await adminClient
+      .from("priwa_kaeferbaeume")
+      .update({
+        deleted_at: deletedClientTimestamp,
+        deleted_by: fieldUserId,
+        client_updated_at: deletedClientTimestamp,
+      })
+      .eq("id", pointId);
+    expect(deleteError).toBeNull();
+
+    const { error: resurrectionError } = await adminClient
+      .from("priwa_kaeferbaeume")
+      .upsert(
+        {
+          ...baseRow,
+          baumnr: `${newerCompletionBaumnr}-RESURRECTED`,
+          deleted_at: null,
+          deleted_by: null,
+          client_updated_at: resurrectionTimestamp,
+        },
+        { onConflict: "id" },
+      );
+    expect(resurrectionError).toBeNull();
+
+    const { data: deletedRow, error: deletedRowError } = await adminClient
+      .from("priwa_kaeferbaeume")
+      .select("baumnr, deleted_at, client_updated_at")
+      .eq("id", pointId)
+      .single();
+    expect(deletedRowError).toBeNull();
+    expect(deletedRow?.baumnr).toBe(newerCompletionBaumnr);
+    expect(new Date(deletedRow!.deleted_at).toISOString()).toBe(
+      deletedClientTimestamp,
+    );
+    expect(new Date(deletedRow!.client_updated_at).toISOString()).toBe(
+      deletedClientTimestamp,
+    );
   });
 });
 

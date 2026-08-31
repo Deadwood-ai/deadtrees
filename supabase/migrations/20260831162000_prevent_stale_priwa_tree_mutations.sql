@@ -20,6 +20,10 @@ begin
         return NEW;
     end if;
 
+    if OLD.deleted_at is not null then
+        return OLD;
+    end if;
+
     if OLD.client_updated_at is not null
        and NEW.client_updated_at is not null
        and NEW.client_updated_at <= OLD.client_updated_at then
