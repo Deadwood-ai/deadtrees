@@ -74,31 +74,32 @@ export function usePriwaSyncQueueRunner({
         let shouldContinue = true;
 
         while (shouldContinue) {
-          const currentQueue = await loadPriwaSyncQueue(projectId, userId);
-          const mutation = currentQueue.find(
-            (item) => item.status !== "syncing",
-          );
-          if (!mutation) {
-            if (currentQueue.length === 0) {
+          const claim: { mutation?: IPriwaQueuedMutation } = {};
+          const claimedQueue = await updateStoredQueue((queue) => {
+            const mutation = queue.find((item) => item.status !== "syncing");
+            if (!mutation) return queue;
+
+            claim.mutation = {
+              ...mutation,
+              status: "syncing" as const,
+              retryCount: mutation.retryCount + 1,
+              lastError: undefined,
+            };
+            return queue.map((item) =>
+              item.id === mutation.id && item.updatedAt === mutation.updatedAt
+                ? claim.mutation!
+                : item,
+            );
+          });
+          const syncingMutation = claim.mutation;
+
+          if (!syncingMutation) {
+            if (claimedQueue.length === 0) {
               await onQueueDrained();
             }
             shouldContinue = false;
             break;
           }
-
-          const syncingMutation = {
-            ...mutation,
-            status: "syncing" as const,
-            retryCount: mutation.retryCount + 1,
-            lastError: undefined,
-          };
-          await updateStoredQueue((queue) =>
-            queue.map((item) =>
-              item.id === mutation.id && item.updatedAt === mutation.updatedAt
-                ? syncingMutation
-                : item,
-            ),
-          );
 
           try {
             if (syncingMutation.type === "delete") {

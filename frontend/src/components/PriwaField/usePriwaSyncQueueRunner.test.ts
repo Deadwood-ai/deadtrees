@@ -116,6 +116,49 @@ describe("usePriwaSyncQueueRunner", () => {
     expect(onQueueDrained).toHaveBeenCalledOnce();
   });
 
+  it("does not send a mutation removed before the atomic queue claim", async () => {
+    let storedQueue: IPriwaQueuedMutation[] = [
+      {
+        ...interruptedMutation,
+        retryCount: 0,
+        status: "pending",
+      },
+    ];
+    let saveCount = 0;
+    mocks.loadQueue.mockImplementation(async () => storedQueue);
+    mocks.saveQueue.mockImplementation(
+      async (
+        _projectId: string,
+        _userId: string,
+        queue: IPriwaQueuedMutation[],
+      ) => {
+        saveCount += 1;
+        storedQueue = queue;
+        if (saveCount === 1) {
+          storedQueue = [];
+        }
+      },
+    );
+    const onQueueDrained = vi.fn().mockResolvedValue(undefined);
+    const { usePriwaSyncQueueRunner } =
+      await import("./usePriwaSyncQueueRunner");
+    const runner = usePriwaSyncQueueRunner({
+      projectId: "project-1",
+      userId: "user-1",
+      isOnline: true,
+      onQueueUpdated: vi.fn(),
+      onPointSynced: vi.fn(),
+      onPointDeleted: vi.fn(),
+      onQueueDrained,
+    });
+
+    await runner.syncQueue();
+
+    expect(mocks.upsertPoint).not.toHaveBeenCalled();
+    expect(storedQueue).toEqual([]);
+    expect(onQueueDrained).toHaveBeenCalledOnce();
+  });
+
   it("marks a stalled request as failed after the sync timeout", async () => {
     vi.useFakeTimers();
     let storedQueue: IPriwaQueuedMutation[] = [
