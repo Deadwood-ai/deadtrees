@@ -1,31 +1,39 @@
 import { DeleteOutlined, DownloadOutlined } from "@ant-design/icons";
-import { Button, Popover, Progress, Typography } from "antd";
+import { Button, Popover, Typography } from "antd";
 
 import type { IPriwaOfflineBasemapArea } from "./priwaOfflineStore";
 import type { usePriwaOfflineBasemap } from "./usePriwaOfflineBasemap";
 
 interface PriwaOfflineMapControlProps {
-  area: IPriwaOfflineBasemapArea | null;
+  areas: IPriwaOfflineBasemapArea[];
   cacheState: ReturnType<typeof usePriwaOfflineBasemap>["cacheState"];
   isSupported: boolean;
-  onCache: () => Promise<void>;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onStartSelection: () => void;
   onClear: () => Promise<void>;
 }
 
 export default function PriwaOfflineMapControl({
-  area,
+  areas,
   cacheState,
   isSupported,
-  onCache,
+  open,
+  onOpenChange,
+  onStartSelection,
   onClear,
 }: PriwaOfflineMapControlProps) {
-  const cachePercent =
-    cacheState.total > 0
-      ? Math.round(
-          ((cacheState.cached + cacheState.failed) / cacheState.total) * 100,
-        )
-      : 0;
-  const title = area ? "Offline-Karten verwalten" : "Offline-Karten speichern";
+  const hasAreas = areas.length > 0;
+  const totalAreaHa = Math.round(
+    areas.reduce((sum, area) => sum + area.areaKm2, 0) * 100,
+  );
+  const totalCachedTiles = areas.reduce(
+    (sum, area) => sum + area.cachedTileCount,
+    0,
+  );
+  const title = hasAreas
+    ? "Offline-Karten verwalten"
+    : "Offline-Karten speichern";
   const icon = cacheState.isCaching ? (
     <DownloadOutlined spin />
   ) : (
@@ -34,6 +42,8 @@ export default function PriwaOfflineMapControl({
 
   return (
     <Popover
+      open={open}
+      onOpenChange={onOpenChange}
       trigger="click"
       placement="rightTop"
       content={
@@ -41,38 +51,36 @@ export default function PriwaOfflineMapControl({
           <div>
             <Typography.Text strong>Offline-Karten</Typography.Text>
             <div className="mt-1 text-xs text-gray-500">
-              Speichert den aktuellen Ausschnitt für die Arbeit im Wald.
+              Wähle einen oder mehrere Bereiche für die Arbeit ohne Empfang.
             </div>
           </div>
-          {area && (
+          {hasAreas && (
             <div className="rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-xs text-emerald-900">
-              {area.cachedTileCount} Kacheln · {area.areaKm2.toFixed(2)} km²
+              {areas.length} {areas.length === 1 ? "Bereich" : "Bereiche"} ·{" "}
+              {totalAreaHa} ha · {totalCachedTiles.toLocaleString("de-DE")}{" "}
+              Kacheln
             </div>
           )}
           <Button
             block
             size="small"
-            type={area ? "default" : "primary"}
+            type={hasAreas ? "default" : "primary"}
             icon={<DownloadOutlined />}
             loading={cacheState.isCaching}
             disabled={!isSupported}
-            onClick={() => void onCache()}
+            onClick={() => {
+              onOpenChange(false);
+              onStartSelection();
+            }}
           >
-            Ausschnitt + Umgebung speichern
+            Neuen Bereich auswählen
           </Button>
-          {cacheState.isCaching && (
-            <Progress
-              percent={cachePercent}
-              size="small"
-              status={cacheState.failed > 0 ? "exception" : "active"}
-            />
-          )}
           {cacheState.errorMessage && (
             <div className="text-xs text-red-600">
               {cacheState.errorMessage}
             </div>
           )}
-          {area && (
+          {hasAreas && (
             <Button
               block
               danger
@@ -81,7 +89,7 @@ export default function PriwaOfflineMapControl({
               disabled={cacheState.isCaching}
               onClick={() => void onClear()}
             >
-              Bereich entfernen
+              Alle Bereiche entfernen
             </Button>
           )}
           {!isSupported && (
@@ -94,11 +102,11 @@ export default function PriwaOfflineMapControl({
     >
       <Button
         className={
-          area
+          hasAreas
             ? "pointer-events-auto border-emerald-600 text-emerald-700 shadow-md"
             : "pointer-events-auto shadow-md"
         }
-        type={area ? "primary" : "default"}
+        type={hasAreas ? "primary" : "default"}
         shape="circle"
         size="large"
         icon={icon}

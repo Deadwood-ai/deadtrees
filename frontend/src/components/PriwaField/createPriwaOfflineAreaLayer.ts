@@ -2,20 +2,16 @@ import Feature from "ol/Feature";
 import VectorLayer from "ol/layer/Vector";
 import Polygon from "ol/geom/Polygon";
 import VectorSource from "ol/source/Vector";
-import { Fill, Stroke, Style } from "ol/style";
+import { Fill, Style } from "ol/style";
 
 export const createPriwaOfflineAreaLayer = () =>
   new VectorLayer({
     source: new VectorSource(),
     zIndex: 30,
+    visible: false,
     style: new Style({
       fill: new Fill({
-        color: "rgba(22, 101, 52, 0.12)",
-      }),
-      stroke: new Stroke({
-        color: "rgba(22, 101, 52, 0.95)",
-        lineDash: [8, 6],
-        width: 3,
+        color: "rgba(5, 150, 105, 0.18)",
       }),
     }),
   });

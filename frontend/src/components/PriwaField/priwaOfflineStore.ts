@@ -89,19 +89,33 @@ export const saveCachedPriwaMemberships = async (
   await priwaOfflineStore.setItem(membershipsKey(userId), memberships);
 };
 
-export const loadPriwaOfflineBasemapArea = async (projectId: string) =>
-  await priwaOfflineStore.getItem<IPriwaOfflineBasemapArea>(
-    basemapAreaKey(projectId),
-  );
+export const loadPriwaOfflineBasemapAreas = async (projectId: string) => {
+  const storedAreas = await priwaOfflineStore.getItem<
+    IPriwaOfflineBasemapArea | IPriwaOfflineBasemapArea[]
+  >(basemapAreaKey(projectId));
 
-export const savePriwaOfflineBasemapArea = async (
+  if (!storedAreas) return [];
+  return Array.isArray(storedAreas) ? storedAreas : [storedAreas];
+};
+
+export const savePriwaOfflineBasemapAreas = async (
+  projectId: string,
+  areas: IPriwaOfflineBasemapArea[],
+) => {
+  await priwaOfflineStore.setItem(basemapAreaKey(projectId), areas);
+};
+
+export const appendPriwaOfflineBasemapArea = async (
   projectId: string,
   area: IPriwaOfflineBasemapArea,
 ) => {
-  await priwaOfflineStore.setItem(basemapAreaKey(projectId), area);
+  const storedAreas = await loadPriwaOfflineBasemapAreas(projectId);
+  const nextAreas = [...storedAreas, area];
+  await savePriwaOfflineBasemapAreas(projectId, nextAreas);
+  return nextAreas;
 };
 
-export const clearPriwaOfflineBasemapArea = async (projectId: string) => {
+export const clearPriwaOfflineBasemapAreas = async (projectId: string) => {
   await priwaOfflineStore.removeItem(basemapAreaKey(projectId));
 };
 
