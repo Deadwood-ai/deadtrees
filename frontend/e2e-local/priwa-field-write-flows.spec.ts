@@ -222,7 +222,7 @@ test.describe("PRIWA local field write flows", () => {
     expect(rowsBeforeReleaseError).toBeNull();
     expect(rowsBeforeRelease).toEqual([]);
 
-    await createMapEstimatedPoint(page, queuedDuringSyncBaumnr);
+    await createMapEstimatedPoint(secondPage, queuedDuringSyncBaumnr);
 
     shouldStallMutation = false;
     releaseMutation();

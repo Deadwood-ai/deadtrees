@@ -23,16 +23,25 @@ const runWithInProcessLock = async <T>(
   }
 };
 
-export const runWithPriwaSyncLock = async <T>(
-  projectId: string,
-  userId: string,
+const runWithPriwaLock = async <T>(
+  lockName: string,
   task: () => Promise<T>,
 ): Promise<T> => {
-  const lockName = `priwa-sync:${projectId}:${userId}`;
-
   if (typeof navigator !== "undefined" && navigator.locks) {
     return navigator.locks.request(lockName, task);
   }
 
   return runWithInProcessLock(lockName, task);
 };
+
+export const runWithPriwaSyncLock = <T>(
+  projectId: string,
+  userId: string,
+  task: () => Promise<T>,
+) => runWithPriwaLock(`priwa-sync:${projectId}:${userId}`, task);
+
+export const runWithPriwaQueueLock = <T>(
+  projectId: string,
+  userId: string,
+  task: () => Promise<T>,
+) => runWithPriwaLock(`priwa-queue:${projectId}:${userId}`, task);
