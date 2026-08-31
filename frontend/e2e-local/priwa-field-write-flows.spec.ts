@@ -207,6 +207,21 @@ test.describe("PRIWA local field write flows", () => {
       page.getByText("Synchronisiert...", { exact: true }),
     ).toBeVisible();
 
+    const secondPage = await page.context().newPage();
+    await secondPage.goto("/priwa-field");
+    await expect(secondPage.getByTestId("priwa-field-map")).toBeVisible();
+    await expect(
+      secondPage.getByText("Synchronisiert...", { exact: true }),
+    ).toBeVisible();
+    const { data: rowsBeforeRelease, error: rowsBeforeReleaseError } =
+      await adminClient
+        .from("priwa_kaeferbaeume")
+        .select("id")
+        .eq("project_id", projectId)
+        .eq("baumnr", stalledSyncBaumnr);
+    expect(rowsBeforeReleaseError).toBeNull();
+    expect(rowsBeforeRelease).toEqual([]);
+
     await createMapEstimatedPoint(page, queuedDuringSyncBaumnr);
 
     shouldStallMutation = false;
@@ -219,6 +234,7 @@ test.describe("PRIWA local field write flows", () => {
     await expect(
       page.getByText(/Synchronisiert\.\.\.|ausstehend|Sync Fehler/i),
     ).toHaveCount(0);
+    await secondPage.close();
     await page.unroute(routePattern);
   });
 });

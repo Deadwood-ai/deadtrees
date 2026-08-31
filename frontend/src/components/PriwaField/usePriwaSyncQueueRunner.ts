@@ -6,6 +6,7 @@ import {
 } from "./priwaOfflineStore";
 import { updatePriwaSyncQueue } from "./priwaOfflineQueue";
 import { recoverInterruptedPriwaMutations } from "./priwaOfflineSync";
+import { runWithPriwaSyncLock } from "./priwaSyncLock";
 import { runPriwaSyncRequest } from "./priwaSyncRequest";
 import type { IPriwaPoint } from "./types";
 import {
@@ -65,81 +66,87 @@ export function usePriwaSyncQueueRunner({
       return;
     }
 
-    syncPromiseRef.current = (async () => {
-      await updateStoredQueue(recoverInterruptedPriwaMutations);
-      let shouldContinue = true;
+    syncPromiseRef.current = runWithPriwaSyncLock(
+      projectId,
+      userId,
+      async () => {
+        await updateStoredQueue(recoverInterruptedPriwaMutations);
+        let shouldContinue = true;
 
-      while (shouldContinue) {
-        const currentQueue = await loadPriwaSyncQueue(projectId, userId);
-        const mutation = currentQueue.find((item) => item.status !== "syncing");
-        if (!mutation) {
-          if (currentQueue.length === 0) {
-            await onQueueDrained();
-          }
-          shouldContinue = false;
-          break;
-        }
-
-        const syncingMutation = {
-          ...mutation,
-          status: "syncing" as const,
-          retryCount: mutation.retryCount + 1,
-          updatedAt: new Date().toISOString(),
-          lastError: undefined,
-        };
-        await updateStoredQueue((queue) =>
-          queue.map((item) =>
-            item.id === mutation.id && item.updatedAt === mutation.updatedAt
-              ? syncingMutation
-              : item,
-          ),
-        );
-
-        try {
-          if (syncingMutation.type === "delete") {
-            await runPriwaSyncRequest((signal) =>
-              softDeletePriwaKaeferbaum(
-                syncingMutation.pointId,
-                userId,
-                syncingMutation.updatedAt,
-                signal,
-              ),
-            );
-            onPointDeleted(syncingMutation.pointId);
-          } else if (syncingMutation.point) {
-            const point = syncingMutation.point;
-            await runPriwaSyncRequest((signal) =>
-              upsertPriwaKaeferbaum(projectId, point, signal),
-            );
-            onPointSynced(point);
-          }
-
-          await updateStoredQueue((queue) =>
-            queue.filter(
-              (item) =>
-                item.id !== syncingMutation.id ||
-                item.updatedAt !== syncingMutation.updatedAt ||
-                item.status !== "syncing",
-            ),
+        while (shouldContinue) {
+          const currentQueue = await loadPriwaSyncQueue(projectId, userId);
+          const mutation = currentQueue.find(
+            (item) => item.status !== "syncing",
           );
-        } catch (error) {
+          if (!mutation) {
+            if (currentQueue.length === 0) {
+              await onQueueDrained();
+            }
+            shouldContinue = false;
+            break;
+          }
+
+          const syncingMutation = {
+            ...mutation,
+            status: "syncing" as const,
+            retryCount: mutation.retryCount + 1,
+            updatedAt: new Date().toISOString(),
+            lastError: undefined,
+          };
           await updateStoredQueue((queue) =>
             queue.map((item) =>
-              item.id === syncingMutation.id &&
-              item.updatedAt === syncingMutation.updatedAt &&
-              item.status === "syncing"
-                ? {
-                    ...syncingMutation,
-                    status: "failed" as const,
-                    lastError: getErrorMessage(error),
-                  }
+              item.id === mutation.id && item.updatedAt === mutation.updatedAt
+                ? syncingMutation
                 : item,
             ),
           );
-          break;
+
+          try {
+            if (syncingMutation.type === "delete") {
+              await runPriwaSyncRequest((signal) =>
+                softDeletePriwaKaeferbaum(
+                  syncingMutation.pointId,
+                  userId,
+                  syncingMutation.updatedAt,
+                  signal,
+                ),
+              );
+              onPointDeleted(syncingMutation.pointId);
+            } else if (syncingMutation.point) {
+              const point = syncingMutation.point;
+              await runPriwaSyncRequest((signal) =>
+                upsertPriwaKaeferbaum(projectId, point, signal),
+              );
+              onPointSynced(point);
+            }
+
+            await updateStoredQueue((queue) =>
+              queue.filter(
+                (item) =>
+                  item.id !== syncingMutation.id ||
+                  item.updatedAt !== syncingMutation.updatedAt ||
+                  item.status !== "syncing",
+              ),
+            );
+          } catch (error) {
+            await updateStoredQueue((queue) =>
+              queue.map((item) =>
+                item.id === syncingMutation.id &&
+                item.updatedAt === syncingMutation.updatedAt &&
+                item.status === "syncing"
+                  ? {
+                      ...syncingMutation,
+                      status: "failed" as const,
+                      lastError: getErrorMessage(error),
+                    }
+                  : item,
+              ),
+            );
+            break;
+          }
         }
-      }
-    })().finally(() => {
+      },
+    ).finally(() => {
       syncPromiseRef.current = null;
     });
 

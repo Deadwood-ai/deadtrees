@@ -173,4 +173,79 @@ describe("usePriwaSyncQueueRunner", () => {
       }),
     ]);
   });
+
+  it("does not overlap a delayed write with a newer write from another runner", async () => {
+    const oldPoint = { ...point, baumnr: "old" };
+    const newerPoint = { ...point, baumnr: "newer" };
+    let storedQueue: IPriwaQueuedMutation[] = [
+      {
+        ...interruptedMutation,
+        point: oldPoint,
+        retryCount: 0,
+        status: "pending",
+      },
+    ];
+    mocks.loadQueue.mockImplementation(async () => storedQueue);
+    mocks.saveQueue.mockImplementation(
+      async (
+        _projectId: string,
+        _userId: string,
+        queue: IPriwaQueuedMutation[],
+      ) => {
+        storedQueue = queue;
+      },
+    );
+    let finishOldWrite: () => void = () => undefined;
+    let confirmOldWriteStarted: () => void = () => undefined;
+    const oldWriteStarted = new Promise<void>((resolve) => {
+      confirmOldWriteStarted = resolve;
+    });
+    mocks.upsertPoint.mockImplementation(
+      async (_projectId: string, nextPoint: IPriwaPoint) => {
+        if (nextPoint.baumnr !== "old") return;
+        confirmOldWriteStarted();
+        await new Promise<void>((resolve) => {
+          finishOldWrite = resolve;
+        });
+      },
+    );
+    const { usePriwaSyncQueueRunner } =
+      await import("./usePriwaSyncQueueRunner");
+    const useRunner = () =>
+      usePriwaSyncQueueRunner({
+        projectId: "project-1",
+        userId: "user-1",
+        isOnline: true,
+        onQueueUpdated: vi.fn(),
+        onPointSynced: vi.fn(),
+        onPointDeleted: vi.fn(),
+        onQueueDrained: vi.fn().mockResolvedValue(undefined),
+      });
+    const firstRunner = useRunner();
+    const secondRunner = useRunner();
+
+    const firstSync = firstRunner.syncQueue();
+    await oldWriteStarted;
+    storedQueue = [
+      {
+        ...interruptedMutation,
+        point: newerPoint,
+        updatedAt: "2026-05-19T08:02:00.000Z",
+        status: "pending",
+      },
+    ];
+    const secondSync = secondRunner.syncQueue();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const writesBeforeOldRequestFinished = mocks.upsertPoint.mock.calls.length;
+
+    finishOldWrite();
+    await Promise.all([firstSync, secondSync]);
+
+    expect(writesBeforeOldRequestFinished).toBe(1);
+    expect(mocks.upsertPoint.mock.calls.map((call) => call[1].baumnr)).toEqual([
+      "old",
+      "newer",
+    ]);
+    expect(storedQueue).toEqual([]);
+  });
 });
