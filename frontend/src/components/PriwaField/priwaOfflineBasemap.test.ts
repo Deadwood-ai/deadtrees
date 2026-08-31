@@ -6,6 +6,7 @@ import {
   clearPriwaBasemapTileCache,
   createPriwaBasemapTileUrl,
   createPriwaTopographicTileUrl,
+  getPriwaBasemapSelectionExtent,
   getPriwaBasemapCacheName,
   validatePriwaBasemapTilePlan,
 } from "./priwaOfflineBasemap";
@@ -45,14 +46,19 @@ describe("PRIWA offline basemap helpers", () => {
     );
   });
 
-  it("plans a buffered current-map cache across a small zoom band", () => {
-    const plan = buildPriwaBasemapTilePlan(
-      [910_000, 6_180_000, 910_500, 6_180_500],
-      18,
-    );
+  it("uses the clear center frame as the selected download extent", () => {
+    expect(getPriwaBasemapSelectionExtent([0, 0, 1_000, 500])).toEqual([
+      80, 40, 920, 460,
+    ]);
+  });
 
-    expect(plan.minZoom).toBe(17);
-    expect(plan.maxZoom).toBe(19);
+  it("plans a 200 hectare field package across every offline zoom level", () => {
+    const plan = buildPriwaBasemapTilePlan([
+      909_000, 6_179_000, 911_132, 6_181_132,
+    ]);
+
+    expect(plan.minZoom).toBe(16);
+    expect(plan.maxZoom).toBe(20);
     expect(plan.tileCount).toBeGreaterThan(0);
     expect(plan.tileCount).toBe(plan.urls.length);
     expect(
@@ -60,9 +66,9 @@ describe("PRIWA offline basemap helpers", () => {
         (url) => new URL(url).hostname === "sgx.geodatenzentrum.de",
       ),
     ).toBe(true);
-    expect(plan.extent3857).toEqual([909_750, 6_179_750, 910_750, 6_180_750]);
-    expect(plan.areaKm2).toBeGreaterThan(0.4);
-    expect(plan.areaKm2).toBeLessThan(0.5);
+    expect(plan.extent3857).toEqual([909_000, 6_179_000, 911_132, 6_181_132]);
+    expect(plan.areaKm2).toBeGreaterThan(1.95);
+    expect(plan.areaKm2).toBeLessThanOrEqual(2);
     expect(() => validatePriwaBasemapTilePlan(plan)).not.toThrow();
   });
 
@@ -71,20 +77,20 @@ describe("PRIWA offline basemap helpers", () => {
     const tileSpan = (halfWorld * 2) / 2 ** 18;
     const minX = -halfWorld + 137_000 * tileSpan;
     const maxY = halfWorld - 90_000 * tileSpan;
-    const plan = buildPriwaBasemapTilePlan(
-      [minX, maxY - tileSpan, minX + tileSpan, maxY],
-      18,
-      { bufferRatio: 0 },
-    );
+    const plan = buildPriwaBasemapTilePlan([
+      minX,
+      maxY - tileSpan,
+      minX + tileSpan,
+      maxY,
+    ]);
 
-    expect(plan.tileCount).toBe(12);
+    expect(plan.tileCount).toBe(30);
   });
 
   it("rejects oversized basemap packages before building tile URLs", () => {
-    const plan = buildPriwaBasemapTilePlan(
-      [900_000, 6_170_000, 905_000, 6_175_000],
-      18,
-    );
+    const plan = buildPriwaBasemapTilePlan([
+      900_000, 6_170_000, 905_000, 6_175_000,
+    ]);
 
     expect(plan.tileCount).toBeGreaterThan(0);
     expect(plan.urls).toEqual([]);
@@ -95,7 +101,8 @@ describe("PRIWA offline basemap helpers", () => {
 
   it("caches successful tiles and reports per-tile failures", async () => {
     const put = vi.fn();
-    const open = vi.fn().mockResolvedValue({ put });
+    const match = vi.fn().mockResolvedValue(undefined);
+    const open = vi.fn().mockResolvedValue({ match, put });
     const opaqueResponse = new Response(null);
     Object.defineProperty(opaqueResponse, "ok", { value: false });
     Object.defineProperty(opaqueResponse, "status", { value: 0 });
@@ -127,6 +134,57 @@ describe("PRIWA offline basemap helpers", () => {
       failed: 1,
       total: 2,
     });
+  });
+
+  it("starts several tile downloads without waiting for the first response", async () => {
+    const put = vi.fn();
+    const match = vi.fn().mockResolvedValue(undefined);
+    const open = vi.fn().mockResolvedValue({ match, put });
+    vi.stubGlobal("caches", { open });
+
+    let releaseFirstRequest: () => void = () => undefined;
+    const firstResponse = new Promise<Response>((resolve) => {
+      releaseFirstRequest = () => resolve(new Response("first"));
+    });
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => firstResponse)
+      .mockResolvedValue(new Response("next"));
+    vi.stubGlobal("fetch", fetchMock);
+    const urls = Array.from({ length: 4 }, (_, index) =>
+      createPriwaBasemapTileUrl({ zoom: 18, row: 1, col: index + 1 }),
+    );
+
+    const cachePromise = cachePriwaBasemapTiles(projectId, urls);
+    await Promise.resolve();
+    await Promise.resolve();
+    const requestsStartedTogether = fetchMock.mock.calls.length;
+    releaseFirstRequest();
+    await cachePromise;
+
+    expect(requestsStartedTogether).toBeGreaterThan(1);
+  });
+
+  it("reuses a tile that a previous area already cached", async () => {
+    const match = vi.fn().mockResolvedValue(new Response("cached"));
+    const put = vi.fn();
+    const open = vi.fn().mockResolvedValue({ match, put });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("caches", { open });
+    vi.stubGlobal("fetch", fetchMock);
+    const url = createPriwaBasemapTileUrl({
+      zoom: 18,
+      row: 90_225,
+      col: 137_017,
+    });
+
+    await expect(cachePriwaBasemapTiles(projectId, [url])).resolves.toEqual({
+      cached: 1,
+      failed: 0,
+    });
+    expect(match).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
   });
 
   it("clears the dedicated basemap cache when available", async () => {

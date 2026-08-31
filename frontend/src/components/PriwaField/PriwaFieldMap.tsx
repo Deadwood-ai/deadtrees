@@ -21,10 +21,7 @@ import { useUserLocationLayer } from "../../hooks/useUserLocationLayer";
 import { createLglDop20Layer } from "./createLglDop20Layer";
 import { PRIWA_COG_MAX_ZOOM } from "./createPriwaCogLayer";
 import { createPriwaTopographicLayer } from "./createPriwaTopographicLayer";
-import {
-  createPriwaOfflineAreaFeature,
-  createPriwaOfflineAreaLayer,
-} from "./createPriwaOfflineAreaLayer";
+import { createPriwaOfflineAreaLayer } from "./createPriwaOfflineAreaLayer";
 import { createPriwaMosaicFootprintLayer } from "./createPriwaMosaicFootprintLayer";
 import {
   createPriwaPointFeature,
@@ -44,6 +41,7 @@ import PriwaOfflineStatus from "./PriwaOfflineStatus";
 import PriwaBefallsgruppeEditor from "./PriwaBefallsgruppeEditor";
 import PriwaBaseLayerControl from "./PriwaBaseLayerControl";
 import PriwaMobileFieldTools from "./PriwaMobileFieldTools";
+import PriwaOfflineAreaSelection from "./PriwaOfflineAreaSelection";
 import PriwaOfflineMapControl from "./PriwaOfflineMapControl";
 import PriwaReviewWorkbench, {
   type PriwaReviewDetailMode,
@@ -53,6 +51,12 @@ import {
   getPriwaReviewTargetPixel,
 } from "./priwaReviewMapFocus";
 import { usePriwaOfflineBasemap } from "./usePriwaOfflineBasemap";
+import { usePriwaOfflineAreaLayer } from "./usePriwaOfflineAreaLayer";
+import {
+  usePriwaOfflineSelectionPlan,
+  type IPriwaOfflineSelectionPlan,
+} from "./usePriwaOfflineSelectionPlan";
+import { usePriwaMapInteractionMode } from "./usePriwaMapInteractionMode";
 import { usePriwaReviewController } from "./usePriwaReviewController";
 import { usePriwaReviewMapLayers } from "./usePriwaReviewMapLayers";
 import type { IPriwaMosaic, PriwaFlightType } from "./usePriwaMosaics";
@@ -138,7 +142,6 @@ export default function PriwaFieldMap({
   const { message } = App.useApp();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
-  const isPlacingPointRef = useRef(false);
   const hasRequestedOrientationFromInteractionRef = useRef(false);
   const hasFittedInitialMobilePointsRef = useRef(false);
   const pointLayerRef = useRef<ReturnType<typeof createPriwaPointLayer> | null>(
@@ -178,7 +181,6 @@ export default function PriwaFieldMap({
     return;
   });
   const [isDrawerOpen, setDrawerOpen] = useState(false);
-  const [isPlacingPoint, setPlacingPoint] = useState(false);
   const [selectedCoordinate, setSelectedCoordinate] =
     useState<IPriwaCoordinate | null>(null);
   const [selectedCoordinateSource, setSelectedCoordinateSource] =
@@ -189,6 +191,9 @@ export default function PriwaFieldMap({
   const [focusedPointId, setFocusedPointId] = useState<string | null>(null);
   const [reviewPointId, setReviewPointId] = useState<string | null>(null);
   const [baseLayer, setBaseLayer] = useState<PriwaBaseLayer>("aerial");
+  const [isOfflineMapControlOpen, setOfflineMapControlOpen] = useState(false);
+  const mapInteraction = usePriwaMapInteractionMode();
+  const { modeRef, setMode } = mapInteraction;
   const isMobile = useIsMobile();
   const userLocation = useUserLocationLayer(mapRef);
   const {
@@ -197,12 +202,21 @@ export default function PriwaFieldMap({
     stop: stopUserLocation,
   } = userLocation;
   const {
-    area: offlineBasemapArea,
+    areas: offlineBasemapAreas,
     cacheState: basemapCacheState,
     cacheCurrentMapArea,
-    clearArea: clearOfflineBasemapArea,
+    clearAreas: clearOfflineBasemapAreas,
     isSupported: isOfflineBasemapSupported,
   } = usePriwaOfflineBasemap(projectId);
+  const offlineSelectionPlan = usePriwaOfflineSelectionPlan(
+    mapRef,
+    mapInteraction.isSelectingOfflineArea,
+  );
+  usePriwaOfflineAreaLayer(
+    offlineAreaLayerRef,
+    offlineBasemapAreas,
+    isOfflineMapControlOpen || mapInteraction.isSelectingOfflineArea,
+  );
 
   const zoomToTrees = useCallback(
     (treeIds: string[]) => {
@@ -311,15 +325,6 @@ export default function PriwaFieldMap({
   }, [openPointForEditing]);
 
   useEffect(() => {
-    isPlacingPointRef.current = isPlacingPoint;
-    document.body.classList.toggle("priwa-placement-mode", isPlacingPoint);
-
-    return () => {
-      document.body.classList.remove("priwa-placement-mode");
-    };
-  }, [isPlacingPoint]);
-
-  useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
     const topographicLayer = createPriwaTopographicLayer();
@@ -373,10 +378,11 @@ export default function PriwaFieldMap({
     const detachWarnkarteInteraction = attachPriwaWarnkarteInteraction(
       map,
       warnkarteLayer,
+      () => modeRef.current === "browse",
     );
 
     const clickKey = map.on("singleclick", (event) => {
-      if (isPlacingPointRef.current) return;
+      if (modeRef.current !== "browse") return;
 
       const pointFeature = map.forEachFeatureAtPixel(
         event.pixel,
@@ -451,7 +457,7 @@ export default function PriwaFieldMap({
       pointLayerRef.current = null;
       previewLayerRef.current = null;
     };
-  }, [stopUserLocation, userLocationLayer]);
+  }, [modeRef, stopUserLocation, userLocationLayer]);
 
   useEffect(() => {
     if (!warnkarteLayerRef.current) return;
@@ -503,18 +509,6 @@ export default function PriwaFieldMap({
     });
     hasFittedInitialMobilePointsRef.current = true;
   }, [isMobile, points]);
-
-  useEffect(() => {
-    const source = offlineAreaLayerRef.current?.getSource();
-    if (!source) return;
-
-    source.clear();
-    if (offlineBasemapArea) {
-      source.addFeature(
-        createPriwaOfflineAreaFeature(offlineBasemapArea.extent3857),
-      );
-    }
-  }, [offlineBasemapArea]);
 
   usePriwaReviewMapLayers({
     mapRef,
@@ -654,13 +648,13 @@ export default function PriwaFieldMap({
   const requestMapPlacement = useCallback(() => {
     setPointListOpen(false);
     setDrawerOpen(false);
-    setPlacingPoint(true);
-  }, []);
+    setMode("place-point");
+  }, [setMode]);
 
   const cancelMapPlacement = useCallback(() => {
-    setPlacingPoint(false);
+    setMode("browse");
     setDrawerOpen(true);
-  }, []);
+  }, [setMode]);
 
   const acceptMapPlacement = useCallback(() => {
     const center = mapRef.current?.getView().getCenter();
@@ -669,9 +663,15 @@ export default function PriwaFieldMap({
     const [lon, lat] = toLonLat(center);
     setSelectedCoordinate({ lat, lon });
     setSelectedCoordinateSource("map");
-    setPlacingPoint(false);
+    setMode("browse");
     setDrawerOpen(true);
-  }, []);
+  }, [setMode]);
+
+  const startOfflineAreaSelection = useCallback(() => {
+    setDrawerOpen(false);
+    setPointListOpen(false);
+    setMode("select-offline-area");
+  }, [setMode]);
 
   const requestDeferredOrientationPermission = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
@@ -737,25 +737,29 @@ export default function PriwaFieldMap({
     [message, onDeletePoint],
   );
 
-  const handleCacheBasemapArea = useCallback(async () => {
-    try {
-      const area = await cacheCurrentMapArea(mapRef.current);
-      message.success(
-        `Basiskarte offline gespeichert (${area.cachedTileCount}/${area.tileCount} Kacheln)`,
-      );
-    } catch (error) {
-      message.error(
-        error instanceof Error
-          ? error.message
-          : "Basiskarte konnte nicht offline gespeichert werden.",
-      );
-    }
-  }, [cacheCurrentMapArea, message]);
+  const handleCacheBasemapArea = useCallback(
+    async (selectionPlan: IPriwaOfflineSelectionPlan) => {
+      try {
+        const area = await cacheCurrentMapArea(selectionPlan);
+        message.success(
+          `Basiskarte offline gespeichert (${area.cachedTileCount}/${area.tileCount} Kacheln)`,
+        );
+        setMode("browse");
+      } catch (error) {
+        message.error(
+          error instanceof Error
+            ? error.message
+            : "Basiskarte konnte nicht offline gespeichert werden.",
+        );
+      }
+    },
+    [cacheCurrentMapArea, message, setMode],
+  );
 
   const handleClearBasemapArea = useCallback(async () => {
-    await clearOfflineBasemapArea();
-    message.success("Offline-Basiskartenbereich entfernt");
-  }, [clearOfflineBasemapArea, message]);
+    await clearOfflineBasemapAreas();
+    message.success("Offline-Basiskartenbereiche entfernt");
+  }, [clearOfflineBasemapAreas, message]);
 
   const dataErrorMessage =
     errorMessage ?? groupsErrorMessage ?? cogErrorMessage;
@@ -778,7 +782,7 @@ export default function PriwaFieldMap({
     >
       <div ref={containerRef} className="absolute inset-0" />
 
-      {!isPlacingPoint && (
+      {mapInteraction.mode === "browse" && (
         <div className="priwa-map-control-stack pointer-events-none absolute left-4 z-[55] flex flex-col gap-2 md:left-[22.5rem]">
           <Tooltip title={locationButtonTitle}>
             <Button
@@ -803,10 +807,12 @@ export default function PriwaFieldMap({
           </Tooltip>
           <PriwaBaseLayerControl value={baseLayer} onChange={setBaseLayer} />
           <PriwaOfflineMapControl
-            area={offlineBasemapArea}
+            areas={offlineBasemapAreas}
             cacheState={basemapCacheState}
             isSupported={isOfflineBasemapSupported}
-            onCache={handleCacheBasemapArea}
+            open={isOfflineMapControlOpen}
+            onOpenChange={setOfflineMapControlOpen}
+            onStartSelection={startOfflineAreaSelection}
             onClear={handleClearBasemapArea}
           />
           {additionalMapControl}
@@ -833,20 +839,24 @@ export default function PriwaFieldMap({
         </div>
       )}
 
-      {isMobile && !isDrawerOpen && !isPointListOpen && !isPlacingPoint && (
-        <FloatButton
-          className="priwa-add-point-fab"
-          shape="circle"
-          icon={<PlusOutlined />}
-          tooltip={{ title: "Punkt aufnehmen", placement: "left" }}
-          onClick={openNewPointDrawer}
-          aria-label="Punkt aufnehmen"
-          style={{
-            right: "max(20px, calc(env(safe-area-inset-right, 0px) + 20px))",
-            bottom: "max(20px, calc(env(safe-area-inset-bottom, 0px) + 20px))",
-          }}
-        />
-      )}
+      {isMobile &&
+        !isDrawerOpen &&
+        !isPointListOpen &&
+        mapInteraction.mode === "browse" && (
+          <FloatButton
+            className="priwa-add-point-fab"
+            shape="circle"
+            icon={<PlusOutlined />}
+            tooltip={{ title: "Punkt aufnehmen", placement: "left" }}
+            onClick={openNewPointDrawer}
+            aria-label="Punkt aufnehmen"
+            style={{
+              right: "max(20px, calc(env(safe-area-inset-right, 0px) + 20px))",
+              bottom:
+                "max(20px, calc(env(safe-area-inset-bottom, 0px) + 20px))",
+            }}
+          />
+        )}
 
       {!isMobile && !isPointListOpen && (
         <PriwaReviewWorkbench
@@ -860,7 +870,7 @@ export default function PriwaFieldMap({
           enabledMosaicIds={enabledMosaicIds}
           selectedTreeId={reviewPointId}
           isTreeEditing={isReviewTreeEditing}
-          isHidden={isPlacingPoint}
+          isHidden={mapInteraction.mode !== "browse"}
           detailMode={reviewDetailMode}
           onSelect={selectReviewItem}
           onOpenData={() => {
@@ -885,7 +895,7 @@ export default function PriwaFieldMap({
         />
       )}
 
-      {isPointListOpen && !isPlacingPoint && (
+      {isPointListOpen && mapInteraction.mode === "browse" && (
         <PriwaPointListPanel
           points={points}
           groups={groups}
@@ -902,7 +912,7 @@ export default function PriwaFieldMap({
         />
       )}
 
-      {isPlacingPoint && (
+      {mapInteraction.isPlacingPoint && (
         <div className="pointer-events-none absolute inset-0 z-[70]">
           <div className="absolute left-1/2 top-1/2 h-12 w-12 -translate-x-1/2 -translate-y-1/2">
             <div className="absolute left-1/2 top-0 h-12 border-l-2 border-white drop-shadow" />
@@ -920,7 +930,16 @@ export default function PriwaFieldMap({
         </div>
       )}
 
-      {!isPlacingPoint && (
+      {mapInteraction.isSelectingOfflineArea && (
+        <PriwaOfflineAreaSelection
+          plan={offlineSelectionPlan}
+          cacheState={basemapCacheState}
+          onCancel={() => setMode("browse")}
+          onConfirm={handleCacheBasemapArea}
+        />
+      )}
+
+      {mapInteraction.mode === "browse" && (
         <div className="priwa-map-status-stack pointer-events-none absolute right-4 z-[55] flex max-w-[calc(100%-5.75rem)] flex-col items-end gap-1.5 md:right-[24.5rem]">
           {locationHintLabel && (
             <div className="rounded-md bg-white/90 px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm backdrop-blur">
@@ -931,7 +950,7 @@ export default function PriwaFieldMap({
         </div>
       )}
 
-      {dataErrorMessage && !isPlacingPoint && (
+      {dataErrorMessage && mapInteraction.mode === "browse" && (
         <Alert
           className="absolute bottom-20 left-4 right-4 z-[55] shadow-lg md:left-auto md:w-96"
           type="error"

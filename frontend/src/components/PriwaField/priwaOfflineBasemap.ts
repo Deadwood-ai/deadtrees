@@ -16,9 +16,10 @@ import {
 export const PRIWA_BASEMAP_CACHE_PREFIX = "deadtrees-priwa-basemap-v1";
 export const PRIWA_BASEMAP_MIN_ZOOM = 16;
 export const PRIWA_BASEMAP_MAX_ZOOM = 20;
-export const PRIWA_BASEMAP_MAX_TILES = 1_200;
+export const PRIWA_BASEMAP_MAX_TILES = 6_000;
 export const PRIWA_BASEMAP_MAX_AREA_KM2 = 2;
-export const PRIWA_BASEMAP_EXTENT_BUFFER_RATIO = 0.5;
+export const PRIWA_BASEMAP_SELECTION_INSET_RATIO = 0.08;
+export const PRIWA_BASEMAP_CACHE_CONCURRENCY = 8;
 
 const WEB_MERCATOR_HALF_WORLD = 20037508.342789244;
 
@@ -53,10 +54,6 @@ interface IPriwaBasemapTileRange {
   maxRow: number;
 }
 
-interface IPriwaBasemapTilePlanOptions {
-  bufferRatio?: number;
-}
-
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 
@@ -71,19 +68,19 @@ const appendWmtsParams = (url: string, params: Record<string, string>) => {
   return `${url.replace(/[?&]$/, "")}${url.includes("?") ? "&" : "?"}${queryString}`;
 };
 
-const expandExtent = (
+export const getPriwaBasemapSelectionExtent = (
   extent3857: [number, number, number, number],
-  bufferRatio: number,
+  insetRatio = PRIWA_BASEMAP_SELECTION_INSET_RATIO,
 ): [number, number, number, number] => {
   const [minX, minY, maxX, maxY] = extent3857;
-  const bufferX = Math.abs(maxX - minX) * bufferRatio;
-  const bufferY = Math.abs(maxY - minY) * bufferRatio;
+  const insetX = Math.abs(maxX - minX) * insetRatio;
+  const insetY = Math.abs(maxY - minY) * insetRatio;
 
   return [
-    clamp(minX - bufferX, -WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD),
-    clamp(minY - bufferY, -WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD),
-    clamp(maxX + bufferX, -WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD),
-    clamp(maxY + bufferY, -WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD),
+    clamp(minX + insetX, -WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD),
+    clamp(minY + insetY, -WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD),
+    clamp(maxX - insetX, -WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD),
+    clamp(maxY - insetY, -WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD),
   ];
 };
 
@@ -168,29 +165,11 @@ export const createPriwaTopographicTileUrl = ({
 }) => `${PRIWA_TOPOGRAPHIC_TILE_URL_PREFIX}/${zoom}/${row}/${col}.png`;
 
 export const buildPriwaBasemapTilePlan = (
-  viewportExtent3857: [number, number, number, number],
-  zoom: number,
-  options: IPriwaBasemapTilePlanOptions = {},
+  selectedExtent3857: [number, number, number, number],
 ): IPriwaBasemapTilePlan => {
-  const extent3857 = expandExtent(
-    viewportExtent3857,
-    options.bufferRatio ?? PRIWA_BASEMAP_EXTENT_BUFFER_RATIO,
-  );
-  const roundedZoom = clamp(
-    Math.round(zoom),
-    PRIWA_BASEMAP_MIN_ZOOM,
-    PRIWA_BASEMAP_MAX_ZOOM,
-  );
-  const minZoom = clamp(
-    roundedZoom - 1,
-    PRIWA_BASEMAP_MIN_ZOOM,
-    PRIWA_BASEMAP_MAX_ZOOM,
-  );
-  const maxZoom = clamp(
-    roundedZoom + 1,
-    PRIWA_BASEMAP_MIN_ZOOM,
-    PRIWA_BASEMAP_MAX_ZOOM,
-  );
+  const extent3857 = selectedExtent3857;
+  const minZoom = PRIWA_BASEMAP_MIN_ZOOM;
+  const maxZoom = PRIWA_BASEMAP_MAX_ZOOM;
   const ranges: Array<{ zoom: number; range: IPriwaBasemapTileRange }> = [];
   let tileCount = 0;
 
@@ -272,30 +251,50 @@ export const cachePriwaBasemapTiles = async (
   );
   let cached = 0;
   let failed = 0;
+  let nextUrlIndex = 0;
 
-  for (const url of urls) {
-    try {
-      const request = new Request(url, {
-        cache: "reload",
-        mode: "no-cors",
-      });
-      const response = await fetch(request);
-      if (!response.ok && response.type !== "opaque") {
-        throw new Error(`Tile request failed with ${response.status}`);
+  const cacheNextTile = async () => {
+    while (nextUrlIndex < urls.length) {
+      const url = urls[nextUrlIndex];
+      nextUrlIndex += 1;
+
+      try {
+        const request = new Request(url, {
+          cache: "reload",
+          mode: "no-cors",
+        });
+        const cachedResponse = await cache.match(request);
+        if (cachedResponse) {
+          cached += 1;
+          onProgress?.({ cached, failed, total: urls.length });
+          continue;
+        }
+
+        const response = await fetch(request);
+        if (!response.ok && response.type !== "opaque") {
+          throw new Error(`Tile request failed with ${response.status}`);
+        }
+
+        await cache.put(request, response.clone());
+        cached += 1;
+      } catch {
+        failed += 1;
       }
 
-      await cache.put(request, response.clone());
-      cached += 1;
-    } catch {
-      failed += 1;
+      onProgress?.({
+        cached,
+        failed,
+        total: urls.length,
+      });
     }
+  };
 
-    onProgress?.({
-      cached,
-      failed,
-      total: urls.length,
-    });
-  }
+  await Promise.all(
+    Array.from(
+      { length: Math.min(PRIWA_BASEMAP_CACHE_CONCURRENCY, urls.length) },
+      () => cacheNextTile(),
+    ),
+  );
 
   if (cached === 0) {
     throw new Error("Keine Basiskarten-Kacheln konnten gespeichert werden.");

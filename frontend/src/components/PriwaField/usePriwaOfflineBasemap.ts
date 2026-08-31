@@ -1,21 +1,20 @@
-import type { Map } from "ol";
 import { toLonLat } from "ol/proj";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
-  clearPriwaOfflineBasemapArea,
-  loadPriwaOfflineBasemapArea,
-  savePriwaOfflineBasemapArea,
+  appendPriwaOfflineBasemapArea,
+  clearPriwaOfflineBasemapAreas,
+  loadPriwaOfflineBasemapAreas,
   type IPriwaOfflineBasemapArea,
 } from "./priwaOfflineStore";
 import {
-  buildPriwaBasemapTilePlan,
   cachePriwaBasemapTiles,
   clearPriwaBasemapTileCache,
   validatePriwaBasemapTilePlan,
 } from "./priwaOfflineBasemap";
+import type { IPriwaOfflineSelectionPlan } from "./usePriwaOfflineSelectionPlan";
 
-interface IPriwaBasemapCacheState {
+export interface IPriwaBasemapCacheState {
   isCaching: boolean;
   cached: number;
   failed: number;
@@ -36,39 +35,29 @@ const getErrorMessage = (error: unknown) =>
     ? error.message
     : "Basiskarte konnte nicht offline gespeichert werden.";
 
-const getMapExtent = (map: Map) => {
-  const size = map.getSize();
-  if (!size) throw new Error("Die Karte ist noch nicht bereit.");
-
-  return map.getView().calculateExtent(size) as [
-    number,
-    number,
-    number,
-    number,
-  ];
-};
-
 export function usePriwaOfflineBasemap(projectId: string | null | undefined) {
-  const [area, setArea] = useState<IPriwaOfflineBasemapArea | null>(null);
+  const [areas, setAreas] = useState<IPriwaOfflineBasemapArea[]>([]);
+  const areasRevisionRef = useRef(0);
   const [cacheState, setCacheState] =
     useState<IPriwaBasemapCacheState>(initialCacheState);
 
   useEffect(() => {
     let isMounted = true;
 
-    const loadArea = async () => {
+    const loadAreas = async () => {
       if (!projectId) {
-        setArea(null);
+        setAreas([]);
         return;
       }
 
-      const storedArea = await loadPriwaOfflineBasemapArea(projectId);
-      if (isMounted) {
-        setArea(storedArea ?? null);
+      const revision = areasRevisionRef.current;
+      const storedAreas = await loadPriwaOfflineBasemapAreas(projectId);
+      if (isMounted && revision === areasRevisionRef.current) {
+        setAreas(storedAreas);
       }
     };
 
-    void loadArea();
+    void loadAreas();
 
     return () => {
       isMounted = false;
@@ -76,25 +65,16 @@ export function usePriwaOfflineBasemap(projectId: string | null | undefined) {
   }, [projectId]);
 
   const cacheCurrentMapArea = useCallback(
-    async (map: Map | null) => {
+    async (plan: IPriwaOfflineSelectionPlan) => {
       if (!projectId) {
         throw new Error("PRIWA Projekt ist noch nicht bereit.");
       }
-      if (!map) {
-        throw new Error("Die Karte ist noch nicht bereit.");
-      }
-
-      const extent3857 = getMapExtent(map);
-      const zoom = map.getView().getZoom() ?? 18;
-      const plan = buildPriwaBasemapTilePlan(extent3857, zoom);
       validatePriwaBasemapTilePlan(plan);
 
-      const center = toLonLat(
-        map.getView().getCenter() ?? [
-          (extent3857[0] + extent3857[2]) / 2,
-          (extent3857[1] + extent3857[3]) / 2,
-        ],
-      ) as [number, number];
+      const center = toLonLat([
+        (plan.extent3857[0] + plan.extent3857[2]) / 2,
+        (plan.extent3857[1] + plan.extent3857[3]) / 2,
+      ]) as [number, number];
       const now = new Date().toISOString();
 
       setCacheState({
@@ -123,10 +103,10 @@ export function usePriwaOfflineBasemap(projectId: string | null | undefined) {
         const nextArea: IPriwaOfflineBasemapArea = {
           id: `${projectId}:${now}`,
           projectId,
-          name: "Ausschnitt + Umgebung",
-          extent3857,
+          name: "Offline-Bereich",
+          extent3857: plan.extent3857,
           centerLonLat: center,
-          zoom,
+          zoom: plan.selectionZoom,
           minZoom: plan.minZoom,
           maxZoom: plan.maxZoom,
           tileCount: plan.tileCount,
@@ -134,12 +114,16 @@ export function usePriwaOfflineBasemap(projectId: string | null | undefined) {
           failedTileCount: result.failed,
           areaKm2: plan.areaKm2,
           status: result.failed > 0 ? "failed" : "ready",
-          createdAt: area?.createdAt ?? now,
+          createdAt: now,
           updatedAt: now,
         };
 
-        await savePriwaOfflineBasemapArea(projectId, nextArea);
-        setArea(nextArea);
+        const nextAreas = await appendPriwaOfflineBasemapArea(
+          projectId,
+          nextArea,
+        );
+        areasRevisionRef.current += 1;
+        setAreas(nextAreas);
         setCacheState({
           isCaching: false,
           cached: result.cached,
@@ -162,23 +146,24 @@ export function usePriwaOfflineBasemap(projectId: string | null | undefined) {
         throw error;
       }
     },
-    [area?.createdAt, projectId],
+    [projectId],
   );
 
-  const clearArea = useCallback(async () => {
+  const clearAreas = useCallback(async () => {
     if (!projectId) return;
 
-    await clearPriwaOfflineBasemapArea(projectId);
+    areasRevisionRef.current += 1;
+    await clearPriwaOfflineBasemapAreas(projectId);
     await clearPriwaBasemapTileCache(projectId);
-    setArea(null);
+    setAreas([]);
     setCacheState(initialCacheState);
   }, [projectId]);
 
   return {
-    area,
+    areas,
     cacheState,
     cacheCurrentMapArea,
-    clearArea,
+    clearAreas,
     isSupported:
       typeof globalThis !== "undefined" &&
       "caches" in globalThis &&

@@ -14,6 +14,7 @@ export const formatPriwaWarnkarteProbability = (probability: unknown) => {
 export const attachPriwaWarnkarteInteraction = (
   map: Map,
   layer: ReturnType<typeof createPriwaWarnkarteLayer>,
+  isInteractionEnabled: () => boolean = () => true,
 ) => {
   const element = document.createElement("div");
   element.className = "priwa-warnkarte-tooltip";
@@ -28,6 +29,10 @@ export const attachPriwaWarnkarteInteraction = (
 
   const hide = () => overlay.setPosition(undefined);
   const clickKey = map.on("singleclick", (event) => {
+    if (!isInteractionEnabled()) {
+      hide();
+      return;
+    }
     const feature = map.forEachFeatureAtPixel(
       event.pixel,
       (candidate) => candidate,

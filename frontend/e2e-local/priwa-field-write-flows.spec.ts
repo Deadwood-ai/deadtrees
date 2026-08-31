@@ -156,6 +156,7 @@ test.describe("PRIWA local field write flows", () => {
     await expect(
       page.getByText(/Synchronisiert\.\.\.|ausstehend|Sync Fehler/i),
     ).toHaveCount(0);
+    await expectOfflineSelectionSuppressesPointInteraction(page);
     await expectResizableDesktopPointTable(page);
 
     await context.setOffline(true);
@@ -329,9 +330,37 @@ async function expectOfflineBasemapControl(page: Page) {
   await page.getByRole("button", { name: "Offline-Karten speichern" }).click();
   await expect(page.getByText("Offline-Karten")).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Ausschnitt + Umgebung speichern" }),
+    page.getByRole("button", { name: "Neuen Bereich auswählen" }),
   ).toBeVisible();
-  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Neuen Bereich auswählen" }).click();
+  await expect(
+    page.locator('[data-priwa-offline-selection-frame="true"]'),
+  ).toBeVisible();
+  await expect(page.getByText("Karte verschieben oder zoomen")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Bereich herunterladen" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Abbrechen" }).click();
+}
+
+async function expectOfflineSelectionSuppressesPointInteraction(page: Page) {
+  await page.getByRole("button", { name: "Offline-Karten speichern" }).click();
+  await page.getByRole("button", { name: "Neuen Bereich auswählen" }).click();
+  const fieldMap = page.getByTestId("priwa-field-map");
+  const mapBounds = await fieldMap.boundingBox();
+  expect(mapBounds).not.toBeNull();
+
+  await page.mouse.click(
+    mapBounds!.x + mapBounds!.width / 2,
+    mapBounds!.y + mapBounds!.height / 2,
+  );
+  await page.waitForTimeout(350);
+
+  await expect(page.getByText("Käferbaum bearbeiten")).toHaveCount(0);
+  await expect(
+    page.locator('[data-priwa-offline-selection-frame="true"]'),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Abbrechen" }).click();
 }
 
 async function expectResizableDesktopPointTable(page: Page) {
