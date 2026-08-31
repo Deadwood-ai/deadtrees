@@ -1,10 +1,12 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef } from "react";
 
 import {
   loadPriwaSyncQueue,
   type IPriwaQueuedMutation,
 } from "./priwaOfflineStore";
 import { updatePriwaSyncQueue } from "./priwaOfflineQueue";
+import { recoverInterruptedPriwaMutations } from "./priwaOfflineSync";
+import { runWithPriwaSyncLock } from "./priwaSyncLock";
 import type { IPriwaPoint } from "./types";
 import {
   softDeletePriwaKaeferbaum,
@@ -12,7 +14,9 @@ import {
 } from "./usePriwaKaeferbaeume";
 
 const getErrorMessage = (error: unknown) =>
-  error instanceof Error ? error.message : "PRIWA Synchronisation fehlgeschlagen.";
+  error instanceof Error
+    ? error.message
+    : "PRIWA Synchronisation fehlgeschlagen.";
 
 const hasQueueWork = (queue: IPriwaQueuedMutation[]) =>
   queue.some((mutation) => mutation.status !== "syncing");
@@ -37,7 +41,6 @@ export function usePriwaSyncQueueRunner({
   onQueueDrained,
 }: IPriwaSyncQueueRunnerOptions) {
   const syncPromiseRef = useRef<Promise<void> | null>(null);
-  const [isSyncingQueue, setSyncingQueue] = useState(false);
 
   const updateStoredQueue = useCallback(
     async (
@@ -62,78 +65,82 @@ export function usePriwaSyncQueueRunner({
       return;
     }
 
-    syncPromiseRef.current = (async () => {
-      setSyncingQueue(true);
-      let shouldContinue = true;
+    syncPromiseRef.current = runWithPriwaSyncLock(
+      projectId,
+      userId,
+      async () => {
+        await updateStoredQueue(recoverInterruptedPriwaMutations);
+        let shouldContinue = true;
 
-      while (shouldContinue) {
-        const currentQueue = await loadPriwaSyncQueue(projectId, userId);
-        const mutation = currentQueue.find(
-          (item) => item.status !== "syncing",
-        );
-        if (!mutation) {
-          if (currentQueue.length === 0) {
-            await onQueueDrained();
-          }
-          shouldContinue = false;
-          break;
-        }
+        while (shouldContinue) {
+          const claim: { mutation?: IPriwaQueuedMutation } = {};
+          const claimedQueue = await updateStoredQueue((queue) => {
+            const mutation = queue.find((item) => item.status !== "syncing");
+            if (!mutation) return queue;
 
-        const syncingMutation = {
-          ...mutation,
-          status: "syncing" as const,
-          retryCount: mutation.retryCount + 1,
-          updatedAt: new Date().toISOString(),
-          lastError: undefined,
-        };
-        await updateStoredQueue((queue) =>
-          queue.map((item) =>
-            item.id === mutation.id && item.updatedAt === mutation.updatedAt
-              ? syncingMutation
-              : item,
-          ),
-        );
-
-        try {
-          if (syncingMutation.type === "delete") {
-            await softDeletePriwaKaeferbaum(
-              syncingMutation.pointId,
-              userId,
-              syncingMutation.updatedAt,
-            );
-            onPointDeleted(syncingMutation.pointId);
-          } else if (syncingMutation.point) {
-            await upsertPriwaKaeferbaum(projectId, syncingMutation.point);
-            onPointSynced(syncingMutation.point);
-          }
-
-          await updateStoredQueue((queue) =>
-            queue.filter(
-              (item) =>
-                item.id !== syncingMutation.id ||
-                item.updatedAt !== syncingMutation.updatedAt ||
-                item.status !== "syncing",
-            ),
-          );
-        } catch (error) {
-          await updateStoredQueue((queue) =>
-            queue.map((item) =>
-              item.id === syncingMutation.id &&
-              item.updatedAt === syncingMutation.updatedAt &&
-              item.status === "syncing"
-                ? {
-                    ...syncingMutation,
-                    status: "failed" as const,
-                    lastError: getErrorMessage(error),
-                  }
+            claim.mutation = {
+              ...mutation,
+              status: "syncing" as const,
+              retryCount: mutation.retryCount + 1,
+              lastError: undefined,
+            };
+            return queue.map((item) =>
+              item.id === mutation.id && item.updatedAt === mutation.updatedAt
+                ? claim.mutation!
                 : item,
-            ),
-          );
-          break;
+            );
+          });
+          const syncingMutation = claim.mutation;
+
+          if (!syncingMutation) {
+            if (claimedQueue.length === 0) {
+              await onQueueDrained();
+            }
+            shouldContinue = false;
+            break;
+          }
+
+          try {
+            if (syncingMutation.type === "delete") {
+              await softDeletePriwaKaeferbaum(
+                syncingMutation.pointId,
+                userId,
+                syncingMutation.updatedAt,
+              );
+              onPointDeleted(syncingMutation.pointId);
+            } else if (syncingMutation.point) {
+              const point = syncingMutation.point;
+              await upsertPriwaKaeferbaum(projectId, point);
+              onPointSynced(point);
+            }
+
+            await updateStoredQueue((queue) =>
+              queue.filter(
+                (item) =>
+                  item.id !== syncingMutation.id ||
+                  item.updatedAt !== syncingMutation.updatedAt ||
+                  item.status !== "syncing",
+              ),
+            );
+          } catch (error) {
+            await updateStoredQueue((queue) =>
+              queue.map((item) =>
+                item.id === syncingMutation.id &&
+                item.updatedAt === syncingMutation.updatedAt &&
+                item.status === "syncing"
+                  ? {
+                      ...syncingMutation,
+                      status: "failed" as const,
+                      lastError: getErrorMessage(error),
+                    }
+                  : item,
+              ),
+            );
+            break;
+          }
         }
-      }
-    })().finally(() => {
-      setSyncingQueue(false);
+      },
+    ).finally(() => {
       syncPromiseRef.current = null;
     });
 
@@ -149,7 +156,6 @@ export function usePriwaSyncQueueRunner({
   ]);
 
   return {
-    isSyncingQueue,
     syncQueue,
     updateStoredQueue,
   };

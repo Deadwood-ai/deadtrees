@@ -5,6 +5,7 @@ import {
   coalescePriwaQueuedMutation,
   getPriwaSyncSummary,
   mergePriwaOfflinePoints,
+  recoverInterruptedPriwaMutations,
 } from "./priwaOfflineSync";
 import type { IPriwaQueuedMutation } from "./priwaOfflineStore";
 
@@ -73,6 +74,41 @@ describe("PRIWA offline sync helpers", () => {
     expect(nextQueue).toEqual([]);
   });
 
+  it("retains a delete when the preceding create may already reach the server", () => {
+    const syncingCreate = {
+      ...mutation("create"),
+      status: "syncing" as const,
+      retryCount: 1,
+    };
+    const queuedDelete = {
+      ...mutation("delete", undefined),
+      updatedAt: "2026-05-19T08:02:00.000Z",
+    };
+
+    expect(coalescePriwaQueuedMutation([syncingCreate], queuedDelete)).toEqual([
+      expect.objectContaining({
+        type: "delete",
+        status: "pending",
+        updatedAt: queuedDelete.updatedAt,
+      }),
+    ]);
+  });
+
+  it("keeps a newer same-point mutation when an older enqueue finishes later", () => {
+    const newerMutation = {
+      ...mutation("update", { ...basePoint, baumnr: "newer" }),
+      updatedAt: "2026-05-19T08:02:00.000Z",
+    };
+    const olderMutation = {
+      ...mutation("delete", undefined),
+      updatedAt: "2026-05-19T08:01:00.000Z",
+    };
+
+    expect(coalescePriwaQueuedMutation([newerMutation], olderMutation)).toEqual(
+      [newerMutation],
+    );
+  });
+
   it("overlays queued updates onto cached points", () => {
     const editedPoint = { ...basePoint, baumnr: "43" };
     const queue = [mutation("update", editedPoint)];
@@ -121,5 +157,28 @@ describe("PRIWA offline sync helpers", () => {
       failed: 1,
       total: 2,
     });
+  });
+
+  it("makes interrupted syncing mutations eligible for retry", () => {
+    const interrupted = {
+      ...mutation("create"),
+      status: "syncing" as const,
+      retryCount: 1,
+    };
+    const failed = {
+      ...mutation("update"),
+      id: "project-1:user-1:point-2",
+      pointId: "point-2",
+      status: "failed" as const,
+      lastError: "Network error",
+    };
+
+    expect(recoverInterruptedPriwaMutations([interrupted, failed])).toEqual([
+      {
+        ...interrupted,
+        status: "pending",
+      },
+      failed,
+    ]);
   });
 });

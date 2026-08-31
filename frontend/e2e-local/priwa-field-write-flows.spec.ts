@@ -15,6 +15,9 @@ const projectSlug = `priwa-e2e-${uniqueRunId}`;
 const projectName = "PRIWA Local E2E";
 const baumnr = `E2E-${uniqueRunId.slice(-12)}`;
 const updatedBaumnr = `${baumnr}-U`;
+const stalledSyncBaumnr = `${baumnr}-S1`;
+const queuedDuringSyncBaumnr = `${baumnr}-S2`;
+const deletedDuringSyncBaumnr = `${baumnr}-S3`;
 
 let adminClient: SupabaseClient;
 let fieldUserId = "";
@@ -176,6 +179,99 @@ test.describe("PRIWA local field write flows", () => {
       return row.deleted_at !== null && row.deleted_by === fieldUserId;
     });
     expect(deletedRow.updated_by).toBe(fieldUserId);
+  });
+
+  test("keeps accepting local captures while a sync request is stalled", async ({
+    page,
+  }) => {
+    await signInFieldUser(page);
+    await expect(page.getByTestId("priwa-field-map")).toBeVisible();
+
+    let releaseMutation: () => void = () => undefined;
+    const stalledMutation = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+    let shouldStallMutation = true;
+    const routePattern = "**/rest/v1/priwa_kaeferbaeume**";
+    await page.route(routePattern, async (route) => {
+      if (
+        shouldStallMutation &&
+        ["POST", "PATCH"].includes(route.request().method())
+      ) {
+        await stalledMutation;
+      }
+      await route.continue();
+    });
+
+    await createMapEstimatedPoint(page, stalledSyncBaumnr);
+    await expect(
+      page.getByText("Synchronisiert...", { exact: true }),
+    ).toBeVisible();
+
+    const secondPage = await page.context().newPage();
+    await secondPage.goto("/priwa-field");
+    await expect(secondPage.getByTestId("priwa-field-map")).toBeVisible();
+    await expect(
+      secondPage.getByText("Synchronisiert...", { exact: true }),
+    ).toBeVisible();
+    const { data: rowsBeforeRelease, error: rowsBeforeReleaseError } =
+      await adminClient
+        .from("priwa_kaeferbaeume")
+        .select("id")
+        .eq("project_id", projectId)
+        .eq("baumnr", stalledSyncBaumnr);
+    expect(rowsBeforeReleaseError).toBeNull();
+    expect(rowsBeforeRelease).toEqual([]);
+
+    await createMapEstimatedPoint(secondPage, queuedDuringSyncBaumnr);
+
+    shouldStallMutation = false;
+    releaseMutation();
+    await waitForPointRow(stalledSyncBaumnr, (row) => row.deleted_at === null);
+    await waitForPointRow(
+      queuedDuringSyncBaumnr,
+      (row) => row.deleted_at === null,
+    );
+    await expect(
+      page.getByText(/Synchronisiert\.\.\.|ausstehend|Sync Fehler/i),
+    ).toHaveCount(0);
+    await secondPage.close();
+    await page.unroute(routePattern);
+  });
+
+  test("retains a delete issued while its create request is stalled", async ({
+    page,
+  }) => {
+    await signInFieldUser(page);
+    await expect(page.getByTestId("priwa-field-map")).toBeVisible();
+
+    let releaseMutation: () => void = () => undefined;
+    const stalledMutation = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+    const routePattern = "**/rest/v1/priwa_kaeferbaeume**";
+    await page.route(routePattern, async (route) => {
+      if (["POST", "PATCH"].includes(route.request().method())) {
+        await stalledMutation;
+      }
+      await route.continue();
+    });
+
+    await createMapEstimatedPoint(page, deletedDuringSyncBaumnr);
+    await expect(
+      page.getByText("Synchronisiert...", { exact: true }),
+    ).toBeVisible();
+    await deleteFirstPoint(page);
+
+    releaseMutation();
+    await waitForPointRow(
+      deletedDuringSyncBaumnr,
+      (row) => row.deleted_at !== null,
+    );
+    await expect(
+      page.getByText(/Synchronisiert\.\.\.|ausstehend|Sync Fehler/i),
+    ).toHaveCount(0);
+    await page.unroute(routePattern);
   });
 });
 

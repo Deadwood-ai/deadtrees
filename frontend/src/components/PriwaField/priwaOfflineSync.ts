@@ -42,6 +42,18 @@ export const getPriwaSyncSummary = (
   };
 };
 
+export const recoverInterruptedPriwaMutations = (
+  queue: IPriwaQueuedMutation[],
+): IPriwaQueuedMutation[] =>
+  queue.map((mutation) =>
+    mutation.status === "syncing"
+      ? {
+          ...mutation,
+          status: "pending" as const,
+        }
+      : mutation,
+  );
+
 export const coalescePriwaQueuedMutation = (
   queue: IPriwaQueuedMutation[],
   mutation: IPriwaQueuedMutation,
@@ -49,7 +61,16 @@ export const coalescePriwaQueuedMutation = (
   const existing = queue.find((item) => item.pointId === mutation.pointId);
   const remaining = queue.filter((item) => item.pointId !== mutation.pointId);
 
-  if (existing?.type === "create" && mutation.type === "delete") {
+  if (existing && existing.updatedAt > mutation.updatedAt) {
+    return queue;
+  }
+
+  if (
+    existing?.type === "create" &&
+    existing.status === "pending" &&
+    existing.retryCount === 0 &&
+    mutation.type === "delete"
+  ) {
     return remaining;
   }
 

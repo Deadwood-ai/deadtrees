@@ -122,7 +122,7 @@ describe("usePriwaOfflineKaeferbaeume", () => {
   });
 
   it("merges cached points with queued local edits", async () => {
-    stateValues = [[basePoint], [queuedUpdate], false, false];
+    stateValues = [[basePoint], [queuedUpdate], false, 0];
     const { usePriwaOfflineKaeferbaeume } =
       await import("./usePriwaOfflineKaeferbaeume");
 
@@ -145,7 +145,7 @@ describe("usePriwaOfflineKaeferbaeume", () => {
   });
 
   it("stores an offline create in the point cache and sync queue", async () => {
-    stateValues = [[], [], false, false];
+    stateValues = [[], [], false, 0];
     const offlineStore = await import("./priwaOfflineStore");
     (offlineStore.loadCachedPriwaPoints as Mock).mockResolvedValue([]);
     (offlineStore.loadPriwaSyncQueue as Mock).mockResolvedValue([]);
@@ -177,7 +177,7 @@ describe("usePriwaOfflineKaeferbaeume", () => {
 
   it("uses the local cache ahead of stale query data when both exist", async () => {
     queryData = [{ ...basePoint, baumnr: "server-stale" }];
-    stateValues = [[{ ...basePoint, baumnr: "cache-fresh" }], [], false, false];
+    stateValues = [[{ ...basePoint, baumnr: "cache-fresh" }], [], false, 0];
     const { usePriwaOfflineKaeferbaeume } =
       await import("./usePriwaOfflineKaeferbaeume");
 
@@ -189,5 +189,17 @@ describe("usePriwaOfflineKaeferbaeume", () => {
         baumnr: "cache-fresh",
       }),
     ]);
+  });
+
+  it("keeps local point actions available while the queue is syncing", async () => {
+    stateValues = [[], [{ ...queuedUpdate, status: "syncing" }], false, 0];
+    const { usePriwaOfflineKaeferbaeume } =
+      await import("./usePriwaOfflineKaeferbaeume");
+
+    const result = usePriwaOfflineKaeferbaeume("project-1");
+
+    expect(result.isSaving).toBe(false);
+    expect(result.isRefetching).toBe(false);
+    expect(result.syncSummary.syncing).toBe(1);
   });
 });

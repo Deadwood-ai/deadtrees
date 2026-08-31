@@ -3,12 +3,11 @@ import {
   savePriwaSyncQueue,
   type IPriwaQueuedMutation,
 } from "./priwaOfflineStore";
+import { runWithPriwaQueueLock } from "./priwaSyncLock";
 
 type PriwaQueueUpdater = (
   queue: IPriwaQueuedMutation[],
 ) => IPriwaQueuedMutation[];
-
-let queueTransaction = Promise.resolve();
 
 export const updatePriwaSyncQueue = async (
   projectId: string,
@@ -16,20 +15,11 @@ export const updatePriwaSyncQueue = async (
   updater: PriwaQueueUpdater,
   onUpdated?: (queue: IPriwaQueuedMutation[]) => void,
 ) => {
-  const transaction = queueTransaction
-    .catch(() => undefined)
-    .then(async () => {
-      const currentQueue = await loadPriwaSyncQueue(projectId, userId);
-      const nextQueue = updater(currentQueue);
-      await savePriwaSyncQueue(projectId, userId, nextQueue);
-      onUpdated?.(nextQueue);
-      return nextQueue;
-    });
-
-  queueTransaction = transaction.then(
-    () => undefined,
-    () => undefined,
-  );
-
-  return transaction;
+  return runWithPriwaQueueLock(projectId, userId, async () => {
+    const currentQueue = await loadPriwaSyncQueue(projectId, userId);
+    const nextQueue = updater(currentQueue);
+    await savePriwaSyncQueue(projectId, userId, nextQueue);
+    onUpdated?.(nextQueue);
+    return nextQueue;
+  });
 };
