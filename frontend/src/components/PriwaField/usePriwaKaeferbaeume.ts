@@ -152,10 +152,12 @@ export const fetchPriwaKaeferbaeume = async (projectId: string) => {
 export const upsertPriwaKaeferbaum = async (
   projectId: string,
   point: IPriwaPoint,
+  signal?: AbortSignal,
 ) => {
-  const { error } = await supabase
+  const request = supabase
     .from("priwa_kaeferbaeume")
     .upsert(pointToRow(projectId, point), { onConflict: "id" });
+  const { error } = await (signal ? request.abortSignal(signal) : request);
 
   if (error) throw error;
 };
@@ -164,8 +166,9 @@ export const softDeletePriwaKaeferbaum = async (
   pointId: string,
   userId: string,
   deletedAt = new Date().toISOString(),
+  signal?: AbortSignal,
 ) => {
-  const { error } = await supabase
+  const request = supabase
     .from("priwa_kaeferbaeume")
     .update({
       deleted_at: deletedAt,
@@ -174,6 +177,7 @@ export const softDeletePriwaKaeferbaum = async (
       client_updated_at: deletedAt,
     })
     .eq("id", pointId);
+  const { error } = await (signal ? request.abortSignal(signal) : request);
 
   if (error) throw error;
 };

@@ -42,6 +42,18 @@ export const getPriwaSyncSummary = (
   };
 };
 
+export const recoverInterruptedPriwaMutations = (
+  queue: IPriwaQueuedMutation[],
+): IPriwaQueuedMutation[] =>
+  queue.map((mutation) =>
+    mutation.status === "syncing"
+      ? {
+          ...mutation,
+          status: "pending" as const,
+        }
+      : mutation,
+  );
+
 export const coalescePriwaQueuedMutation = (
   queue: IPriwaQueuedMutation[],
   mutation: IPriwaQueuedMutation,

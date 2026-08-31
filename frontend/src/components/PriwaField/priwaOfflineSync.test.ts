@@ -5,6 +5,7 @@ import {
   coalescePriwaQueuedMutation,
   getPriwaSyncSummary,
   mergePriwaOfflinePoints,
+  recoverInterruptedPriwaMutations,
 } from "./priwaOfflineSync";
 import type { IPriwaQueuedMutation } from "./priwaOfflineStore";
 
@@ -121,5 +122,28 @@ describe("PRIWA offline sync helpers", () => {
       failed: 1,
       total: 2,
     });
+  });
+
+  it("makes interrupted syncing mutations eligible for retry", () => {
+    const interrupted = {
+      ...mutation("create"),
+      status: "syncing" as const,
+      retryCount: 1,
+    };
+    const failed = {
+      ...mutation("update"),
+      id: "project-1:user-1:point-2",
+      pointId: "point-2",
+      status: "failed" as const,
+      lastError: "Network error",
+    };
+
+    expect(recoverInterruptedPriwaMutations([interrupted, failed])).toEqual([
+      {
+        ...interrupted,
+        status: "pending",
+      },
+      failed,
+    ]);
   });
 });

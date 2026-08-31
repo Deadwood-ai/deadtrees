@@ -1,10 +1,12 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef } from "react";
 
 import {
   loadPriwaSyncQueue,
   type IPriwaQueuedMutation,
 } from "./priwaOfflineStore";
 import { updatePriwaSyncQueue } from "./priwaOfflineQueue";
+import { recoverInterruptedPriwaMutations } from "./priwaOfflineSync";
+import { runPriwaSyncRequest } from "./priwaSyncRequest";
 import type { IPriwaPoint } from "./types";
 import {
   softDeletePriwaKaeferbaum,
@@ -12,7 +14,9 @@ import {
 } from "./usePriwaKaeferbaeume";
 
 const getErrorMessage = (error: unknown) =>
-  error instanceof Error ? error.message : "PRIWA Synchronisation fehlgeschlagen.";
+  error instanceof Error
+    ? error.message
+    : "PRIWA Synchronisation fehlgeschlagen.";
 
 const hasQueueWork = (queue: IPriwaQueuedMutation[]) =>
   queue.some((mutation) => mutation.status !== "syncing");
@@ -37,7 +41,6 @@ export function usePriwaSyncQueueRunner({
   onQueueDrained,
 }: IPriwaSyncQueueRunnerOptions) {
   const syncPromiseRef = useRef<Promise<void> | null>(null);
-  const [isSyncingQueue, setSyncingQueue] = useState(false);
 
   const updateStoredQueue = useCallback(
     async (
@@ -63,14 +66,12 @@ export function usePriwaSyncQueueRunner({
     }
 
     syncPromiseRef.current = (async () => {
-      setSyncingQueue(true);
+      await updateStoredQueue(recoverInterruptedPriwaMutations);
       let shouldContinue = true;
 
       while (shouldContinue) {
         const currentQueue = await loadPriwaSyncQueue(projectId, userId);
-        const mutation = currentQueue.find(
-          (item) => item.status !== "syncing",
-        );
+        const mutation = currentQueue.find((item) => item.status !== "syncing");
         if (!mutation) {
           if (currentQueue.length === 0) {
             await onQueueDrained();
@@ -96,15 +97,21 @@ export function usePriwaSyncQueueRunner({
 
         try {
           if (syncingMutation.type === "delete") {
-            await softDeletePriwaKaeferbaum(
-              syncingMutation.pointId,
-              userId,
-              syncingMutation.updatedAt,
+            await runPriwaSyncRequest((signal) =>
+              softDeletePriwaKaeferbaum(
+                syncingMutation.pointId,
+                userId,
+                syncingMutation.updatedAt,
+                signal,
+              ),
             );
             onPointDeleted(syncingMutation.pointId);
           } else if (syncingMutation.point) {
-            await upsertPriwaKaeferbaum(projectId, syncingMutation.point);
-            onPointSynced(syncingMutation.point);
+            const point = syncingMutation.point;
+            await runPriwaSyncRequest((signal) =>
+              upsertPriwaKaeferbaum(projectId, point, signal),
+            );
+            onPointSynced(point);
           }
 
           await updateStoredQueue((queue) =>
@@ -133,7 +140,6 @@ export function usePriwaSyncQueueRunner({
         }
       }
     })().finally(() => {
-      setSyncingQueue(false);
       syncPromiseRef.current = null;
     });
 
@@ -149,7 +155,6 @@ export function usePriwaSyncQueueRunner({
   ]);
 
   return {
-    isSyncingQueue,
     syncQueue,
     updateStoredQueue,
   };

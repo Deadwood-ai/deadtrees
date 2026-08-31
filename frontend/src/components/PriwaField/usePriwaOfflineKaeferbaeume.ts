@@ -45,6 +45,7 @@ export function usePriwaOfflineKaeferbaeume(
   const [cachedPoints, setCachedPoints] = useState<IPriwaPoint[]>([]);
   const [queue, setQueue] = useState<IPriwaQueuedMutation[]>([]);
   const [isLoadingOfflineState, setLoadingOfflineState] = useState(false);
+  const [localWriteCount, setLocalWriteCount] = useState(0);
 
   const pointsQuery = useQuery({
     queryKey: priwaPointsQueryKey(projectId),
@@ -124,16 +125,15 @@ export function usePriwaOfflineKaeferbaeume(
     ]);
   }, [projectId, queryClient]);
 
-  const { isSyncingQueue, syncQueue, updateStoredQueue } =
-    usePriwaSyncQueueRunner({
-      projectId,
-      userId,
-      isOnline,
-      onQueueUpdated: setQueue,
-      onPointSynced,
-      onPointDeleted,
-      onQueueDrained,
-    });
+  const { syncQueue, updateStoredQueue } = usePriwaSyncQueueRunner({
+    projectId,
+    userId,
+    isOnline,
+    onQueueUpdated: setQueue,
+    onPointSynced,
+    onPointDeleted,
+    onQueueDrained,
+  });
 
   const enqueueMutation = useCallback(
     async (
@@ -145,31 +145,39 @@ export function usePriwaOfflineKaeferbaeume(
         throw new Error("PRIWA project membership is required.");
       }
 
-      const mutation = createPriwaQueuedMutation({
-        projectId,
-        userId,
-        type,
-        point,
-        pointId,
-      });
-      const currentCachedPoints = await loadCachedPriwaPoints(projectId);
+      setLocalWriteCount((count) => count + 1);
+      try {
+        const mutation = createPriwaQueuedMutation({
+          projectId,
+          userId,
+          type,
+          point,
+          pointId,
+        });
+        const currentCachedPoints = await loadCachedPriwaPoints(projectId);
 
-      if (type === "delete") {
-        const nextCachedPoints = removeLocalPoint(currentCachedPoints, pointId);
-        setCachedPoints(nextCachedPoints);
-        await saveCachedPriwaPoints(projectId, nextCachedPoints);
-      } else if (point) {
-        const nextCachedPoints = upsertLocalPoint(currentCachedPoints, point);
-        setCachedPoints(nextCachedPoints);
-        await saveCachedPriwaPoints(projectId, nextCachedPoints);
-      }
+        if (type === "delete") {
+          const nextCachedPoints = removeLocalPoint(
+            currentCachedPoints,
+            pointId,
+          );
+          setCachedPoints(nextCachedPoints);
+          await saveCachedPriwaPoints(projectId, nextCachedPoints);
+        } else if (point) {
+          const nextCachedPoints = upsertLocalPoint(currentCachedPoints, point);
+          setCachedPoints(nextCachedPoints);
+          await saveCachedPriwaPoints(projectId, nextCachedPoints);
+        }
 
-      await updateStoredQueue((currentQueue) =>
-        coalescePriwaQueuedMutation(currentQueue, mutation),
-      );
+        await updateStoredQueue((currentQueue) =>
+          coalescePriwaQueuedMutation(currentQueue, mutation),
+        );
 
-      if (isOnline) {
-        void syncQueue();
+        if (isOnline) {
+          void syncQueue();
+        }
+      } finally {
+        setLocalWriteCount((count) => Math.max(0, count - 1));
       }
     },
     [isOnline, projectId, syncQueue, updateStoredQueue, userId],
@@ -196,14 +204,14 @@ export function usePriwaOfflineKaeferbaeume(
     isLoading:
       isLoadingOfflineState ||
       (pointsQuery.isLoading && !hasCachedPoints && queue.length === 0),
-    isRefetching: pointsQuery.isRefetching || isSyncingQueue,
+    isRefetching: pointsQuery.isRefetching,
     error: hasCachedPoints ? null : pointsQuery.error,
     createPoint: (point: IPriwaPoint) =>
       enqueueMutation("create", point.id, point),
     updatePoint: (point: IPriwaPoint) =>
       enqueueMutation("update", point.id, point),
     deletePoint: (pointId: string) => enqueueMutation("delete", pointId),
-    isSaving: isSyncingQueue,
+    isSaving: localWriteCount > 0,
     syncSummary,
     syncNow: syncQueue,
   };
