@@ -2,6 +2,7 @@ const CACHE_VERSION = "deadtrees-app-shell-v2";
 const APP_SHELL_CACHE = CACHE_VERSION;
 const BASEMAP_CACHE_PREFIX = "deadtrees-priwa-basemap-v1";
 const VIEWED_BASEMAP_CACHE = `${BASEMAP_CACHE_PREFIX}-viewed`;
+const BASEMAP_NETWORK_TIMEOUT_MS = 4_000;
 const LGL_BASEMAP_URL_PREFIX =
   "https://owsproxy.lgl-bw.de/owsproxy/ows/WMTS_LGL-BW_ATKIS_DOP_20_C";
 const TOPOGRAPHIC_TILE_URL_PREFIX =
@@ -38,8 +39,9 @@ self.addEventListener("activate", (event) => {
             .filter((cacheName) => cacheName.startsWith("deadtrees-priwa-"))
             .filter(
               (cacheName) =>
-                cacheName !== APP_SHELL_CACHE &&
-                !cacheName.startsWith(BASEMAP_CACHE_PREFIX),
+                cacheName === VIEWED_BASEMAP_CACHE ||
+                (cacheName !== APP_SHELL_CACHE &&
+                  !cacheName.startsWith(BASEMAP_CACHE_PREFIX)),
             )
             .map((cacheName) => caches.delete(cacheName)),
         ),
@@ -180,16 +182,6 @@ const canonicalizeBasemapRequest = (request) => {
   return request;
 };
 
-const cacheViewedBasemapResponse = async (request, response) => {
-  if (!response || !response.ok || response.type === "opaque") {
-    return response;
-  }
-
-  const cache = await caches.open(VIEWED_BASEMAP_CACHE);
-  await cache.put(request, response.clone()).catch(() => undefined);
-  return response;
-};
-
 const createOfflineTileResponse = () =>
   new Response("", {
     status: 503,
@@ -227,11 +219,6 @@ const matchReplayableBasemapResponse = async (cache, requests) => {
   return null;
 };
 
-const matchViewedBasemapResponse = async (requests) => {
-  const cache = await caches.open(VIEWED_BASEMAP_CACHE);
-  return matchReplayableBasemapResponse(cache, requests);
-};
-
 const matchExplicitBasemapPackage = async (requests) => {
   const cacheNames = await caches.keys();
 
@@ -250,45 +237,56 @@ const matchExplicitBasemapPackage = async (requests) => {
   return null;
 };
 
-const handleBasemapTile = async (event) => {
-  const { request } = event;
+const matchExplicitBasemapResponse = async (requests) => {
+  const response = await matchExplicitBasemapPackage(requests);
+  return response ? makeCachedTileReplayable(response) : null;
+};
+
+const fetchBasemapWithTimeout = async (request) => {
+  const controller = new AbortController();
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      reject(new Error("Basemap tile request timed out"));
+    }, BASEMAP_NETWORK_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([
+      fetch(request, { signal: controller.signal }),
+      timeout,
+    ]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const handleBasemapTile = async (request) => {
   const canonicalRequest = canonicalizeBasemapRequest(request);
+  const cacheRequests = [canonicalRequest, request];
 
   if (self.navigator && self.navigator.onLine === false) {
-    const packagedResponse = await matchExplicitBasemapPackage([
-      canonicalRequest,
-      request,
-    ]);
-    return packagedResponse
-      ? makeCachedTileReplayable(packagedResponse)
-      : createOfflineTileResponse();
+    return (
+      (await matchExplicitBasemapResponse(cacheRequests)) ||
+      createOfflineTileResponse()
+    );
   }
 
-  const cacheRequests = [canonicalRequest, request];
-  const [packagedResponse, viewedResponse] = await Promise.all([
-    matchExplicitBasemapPackage(cacheRequests),
-    matchViewedBasemapResponse(cacheRequests),
-  ]);
-  const cachedResponse = viewedResponse || packagedResponse;
-
-  const networkResponsePromise = fetch(request)
-    .then((response) => cacheViewedBasemapResponse(canonicalRequest, response))
-    .catch(async () => {
-      const packagedResponse = await matchExplicitBasemapPackage([
-        canonicalRequest,
-        request,
-      ]);
-      return packagedResponse
-        ? makeCachedTileReplayable(packagedResponse)
-        : createOfflineTileResponse();
-    });
-
-  if (cachedResponse) {
-    event.waitUntil(networkResponsePromise);
-    return makeCachedTileReplayable(cachedResponse);
+  try {
+    const networkResponse = await fetchBasemapWithTimeout(request);
+    if (networkResponse.ok || networkResponse.type === "opaque") {
+      return networkResponse;
+    }
+    return (
+      (await matchExplicitBasemapResponse(cacheRequests)) || networkResponse
+    );
+  } catch {
+    return (
+      (await matchExplicitBasemapResponse(cacheRequests)) ||
+      createOfflineTileResponse()
+    );
   }
-
-  return networkResponsePromise;
 };
 
 self.addEventListener("fetch", (event) => {
@@ -300,7 +298,7 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (isBasemapTileRequest(requestUrl)) {
-    event.respondWith(handleBasemapTile(event));
+    event.respondWith(handleBasemapTile(request));
     return;
   }
 
