@@ -1,5 +1,5 @@
 import Collection from "ol/Collection";
-import { Attribution, Zoom } from "ol/control";
+import { Attribution, ScaleLine, Zoom } from "ol/control";
 import type Control from "ol/control/Control";
 import LayerGroup from "ol/layer/Group";
 import TileLayer from "ol/layer/Tile";
@@ -56,9 +56,11 @@ export const applyOpenFreeMapLibertyStyle = (target: Parameters<typeof apply>[0]
 export const createStandardMapControls = ({
   includeZoom = true,
   includeAttribution = true,
+  includeScaleLine = false,
 }: {
   includeZoom?: boolean;
   includeAttribution?: boolean;
+  includeScaleLine?: boolean;
 } = {}) => {
   const controls: Control[] = [];
 
@@ -75,6 +77,16 @@ export const createStandardMapControls = ({
       new Attribution({
         className: "dt-map-attribution-control",
         collapsible: false,
+      }),
+    );
+  }
+
+  if (includeScaleLine) {
+    controls.push(
+      new ScaleLine({
+        className: "dt-map-scale-control",
+        minWidth: 80,
+        units: "metric",
       }),
     );
   }

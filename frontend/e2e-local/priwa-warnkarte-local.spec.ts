@@ -293,6 +293,8 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await expect(
       page.getByRole("button", { name: "Warnkarte verwalten" }),
     ).toHaveCount(0);
+    await expect(page.locator(".dt-map-zoom-control")).toBeHidden();
+    await expect(page.locator(".dt-map-scale-control")).toBeVisible();
     await page.waitForTimeout(600);
     await page.getByTestId("priwa-field-map").click({
       position: { x: 384, y: 450 },
@@ -316,6 +318,16 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await installWarnkarteAdmin(page);
     await installWarnkarteApi(page);
     await page.goto("/priwa-field");
+
+    const zoomControl = page.locator(".dt-map-zoom-control");
+    const scaleLine = page.locator(".dt-map-scale-control-inner");
+    await expect(zoomControl).toBeVisible();
+    await expect(zoomControl.getByTitle("Zoom in")).toBeVisible();
+    await expect(zoomControl.getByTitle("Zoom out")).toBeVisible();
+    await expect(scaleLine).not.toBeEmpty();
+    const scaleBeforeZoom = await scaleLine.innerText();
+    await zoomControl.getByTitle("Zoom in").click();
+    await expect.poll(() => scaleLine.innerText()).not.toBe(scaleBeforeZoom);
 
     await page.getByRole("button", { name: "Zur Warnkarte zoomen" }).click();
     await page.waitForTimeout(600);
@@ -592,6 +604,7 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await installWarnkarteAdmin(page);
     await installWarnkarteApi(page);
     await page.goto("/priwa-field");
+    await page.getByRole("button", { name: "Accept" }).click();
 
     await expect(page.getByTestId("priwa-warnkarte-legend")).toContainText(
       "Warnkarte 25.06.2024",
@@ -599,6 +612,8 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await expect(
       page.getByRole("button", { name: "Warnkarte verwalten" }),
     ).toHaveCount(0);
+    await expect(page.locator(".dt-map-zoom-control")).toBeHidden();
+    await expect(page.locator(".dt-map-scale-control")).toBeVisible();
     await page.getByRole("button", { name: "Zur Warnkarte zoomen" }).click();
     await page.waitForTimeout(600);
     await page.getByTestId("priwa-field-map").click({

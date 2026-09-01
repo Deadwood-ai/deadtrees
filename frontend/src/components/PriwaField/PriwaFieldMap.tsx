@@ -377,8 +377,9 @@ export default function PriwaFieldMap({
         altShiftDragRotate: false,
       }),
       controls: createStandardMapControls({
-        includeZoom: false,
+        includeZoom: true,
         includeAttribution: true,
+        includeScaleLine: true,
       }),
     });
 
@@ -798,7 +799,7 @@ export default function PriwaFieldMap({
   return (
     <div
       data-testid="priwa-field-map"
-      className="relative h-full min-h-[100dvh] w-full overflow-hidden bg-neutral-950"
+      className="priwa-field-map relative h-full min-h-[100dvh] w-full overflow-hidden bg-neutral-950"
       onPointerDownCapture={requestDeferredOrientationPermission}
     >
       <div ref={containerRef} className="absolute inset-0" />
