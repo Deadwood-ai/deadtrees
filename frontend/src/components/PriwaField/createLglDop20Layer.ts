@@ -31,6 +31,7 @@ export const createLglDop20Layer = () => {
   return new TileLayer({
     preload: 1,
     source: new WMTS({
+      crossOrigin: "anonymous",
       url: LGL_DOP20_WMTS_URL,
       layer: LGL_DOP20_LAYER,
       matrixSet: LGL_DOP20_MATRIX_SET,

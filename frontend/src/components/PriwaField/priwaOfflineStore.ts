@@ -39,6 +39,7 @@ export interface IPriwaOfflineBasemapArea {
   failedTileCount: number;
   areaKm2: number;
   status: "ready" | "failed";
+  cacheVersion?: number;
   createdAt: string;
   updatedAt: string;
 }

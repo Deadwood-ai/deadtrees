@@ -65,11 +65,14 @@ const handleNavigation = async (request) => {
       (await caches.match(request)) ||
       (await caches.match("/priwa-field")) ||
       (await caches.match("/")) ||
-      new Response("deadtrees.earth is offline and the app shell is unavailable.", {
-        headers: { "Content-Type": "text/plain; charset=utf-8" },
-        status: 503,
-        statusText: "Offline",
-      })
+      new Response(
+        "deadtrees.earth is offline and the app shell is unavailable.",
+        {
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+          status: 503,
+          statusText: "Offline",
+        },
+      )
     );
   }
 };
@@ -178,7 +181,7 @@ const canonicalizeBasemapRequest = (request) => {
 };
 
 const cacheViewedBasemapResponse = async (request, response) => {
-  if (!response || (!response.ok && response.type !== "opaque")) {
+  if (!response || !response.ok || response.type === "opaque") {
     return response;
   }
 
@@ -193,9 +196,41 @@ const createOfflineTileResponse = () =>
     statusText: "Offline",
   });
 
+const makeCachedTileReplayable = async (response) => {
+  if (!response) {
+    return response;
+  }
+
+  return new Response(await response.blob(), {
+    headers: response.headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
+};
+
 const isExplicitBasemapCacheName = (cacheName) =>
   cacheName.startsWith(BASEMAP_CACHE_PREFIX) &&
   cacheName !== VIEWED_BASEMAP_CACHE;
+
+const matchReplayableBasemapResponse = async (cache, requests) => {
+  for (const request of requests) {
+    const response = await cache.match(request, { ignoreVary: true });
+    if (response?.type === "opaque") {
+      await cache.delete(request, { ignoreVary: true });
+      continue;
+    }
+    if (response) {
+      return response;
+    }
+  }
+
+  return null;
+};
+
+const matchViewedBasemapResponse = async (requests) => {
+  const cache = await caches.open(VIEWED_BASEMAP_CACHE);
+  return matchReplayableBasemapResponse(cache, requests);
+};
 
 const matchExplicitBasemapPackage = async (requests) => {
   const cacheNames = await caches.keys();
@@ -206,11 +241,9 @@ const matchExplicitBasemapPackage = async (requests) => {
     }
 
     const cache = await caches.open(cacheName);
-    for (const request of requests) {
-      const response = await cache.match(request, { ignoreVary: true });
-      if (response) {
-        return response;
-      }
+    const response = await matchReplayableBasemapResponse(cache, requests);
+    if (response) {
+      return response;
     }
   }
 
@@ -222,27 +255,37 @@ const handleBasemapTile = async (event) => {
   const canonicalRequest = canonicalizeBasemapRequest(request);
 
   if (self.navigator && self.navigator.onLine === false) {
-    return (
-      (await matchExplicitBasemapPackage([canonicalRequest, request])) ||
-      createOfflineTileResponse()
-    );
+    const packagedResponse = await matchExplicitBasemapPackage([
+      canonicalRequest,
+      request,
+    ]);
+    return packagedResponse
+      ? makeCachedTileReplayable(packagedResponse)
+      : createOfflineTileResponse();
   }
 
-  const cachedResponse =
-    (await caches.match(canonicalRequest, { ignoreVary: true })) ||
-    (await caches.match(request, { ignoreVary: true }));
+  const cacheRequests = [canonicalRequest, request];
+  const [packagedResponse, viewedResponse] = await Promise.all([
+    matchExplicitBasemapPackage(cacheRequests),
+    matchViewedBasemapResponse(cacheRequests),
+  ]);
+  const cachedResponse = viewedResponse || packagedResponse;
 
   const networkResponsePromise = fetch(request)
     .then((response) => cacheViewedBasemapResponse(canonicalRequest, response))
-    .catch(
-      async () =>
-        (await matchExplicitBasemapPackage([canonicalRequest, request])) ||
-        createOfflineTileResponse(),
-    );
+    .catch(async () => {
+      const packagedResponse = await matchExplicitBasemapPackage([
+        canonicalRequest,
+        request,
+      ]);
+      return packagedResponse
+        ? makeCachedTileReplayable(packagedResponse)
+        : createOfflineTileResponse();
+    });
 
   if (cachedResponse) {
     event.waitUntil(networkResponsePromise);
-    return cachedResponse;
+    return makeCachedTileReplayable(cachedResponse);
   }
 
   return networkResponsePromise;

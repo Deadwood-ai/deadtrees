@@ -1,95 +1,88 @@
-import { CloudSyncOutlined, DisconnectOutlined } from "@ant-design/icons";
-import { Button, Popover, Tag, Tooltip, Typography } from "antd";
+import {
+  CheckCircleOutlined,
+  DisconnectOutlined,
+  DownloadOutlined,
+  LoadingOutlined,
+} from "@ant-design/icons";
+import { Tag } from "antd";
 
 import { getPriwaOfflineStatusView } from "./priwaOfflineStatusView";
 import type { IPriwaSyncSummary } from "./priwaOfflineSync";
 import { usePriwaOfflineStatus } from "./usePriwaOfflineStatus";
 
 interface PriwaOfflineStatusProps {
+  active: boolean;
+  coverageRatio: number;
+  hasAreas: boolean;
+  isCacheAuditComplete: boolean;
+  isSupported: boolean;
+  needsRefresh: boolean;
   syncSummary?: IPriwaSyncSummary;
-  onSyncNow?: () => Promise<void>;
+  onToggle: () => void;
 }
 
-const getSyncLabel = (syncSummary?: IPriwaSyncSummary) => {
-  if (!syncSummary || syncSummary.total === 0) return null;
-  if (syncSummary.failed > 0) return `${syncSummary.failed} Sync Fehler`;
-  if (syncSummary.syncing > 0) return "Synchronisiert...";
-  return `${syncSummary.pending} ausstehend`;
+const getSyncLabel = (summary?: IPriwaSyncSummary) => {
+  if (!summary || summary.total === 0) return null;
+  if (summary.failed > 0) return `${summary.failed} Sync-Fehler`;
+  if (summary.syncing > 0) return "Synchronisiert...";
+  return `${summary.pending} ausstehend`;
 };
 
 export default function PriwaOfflineStatus({
+  active,
+  coverageRatio,
+  hasAreas,
+  isCacheAuditComplete,
+  isSupported,
+  needsRefresh,
   syncSummary,
-  onSyncNow,
+  onToggle,
 }: PriwaOfflineStatusProps) {
   const { isOnline, serviceWorker } = usePriwaOfflineStatus();
-  const statusView = getPriwaOfflineStatusView(
-    serviceWorker.status,
+  const statusView = getPriwaOfflineStatusView({
+    serviceWorkerStatus: serviceWorker.status,
     isOnline,
-  );
+    isSupported,
+    isCacheAuditComplete,
+    hasAreas,
+    needsRefresh,
+    coverageRatio,
+  });
   const syncLabel = getSyncLabel(syncSummary);
-  const label = syncLabel ?? statusView?.label;
+  const label = syncLabel
+    ? `${statusView.label} · ${syncLabel}`
+    : statusView.label;
   const color =
     syncSummary && syncSummary.failed > 0
       ? "error"
       : syncSummary && syncSummary.total > 0
         ? "processing"
-        : (statusView?.color ?? "default");
-  const tooltipTitle =
-    serviceWorker.errorMessage ??
-    (syncSummary && syncSummary.total > 0
-      ? `${syncSummary.pending} ausstehend, ${syncSummary.syncing} wird synchronisiert, ${syncSummary.failed} fehlgeschlagen`
-      : statusView?.label);
-  const hasSyncWork = (syncSummary?.total ?? 0) > 0;
-  if (!label || !tooltipTitle) return null;
-
-  const statusTag = (
-    <Tag
-      className="pointer-events-auto m-0 rounded-md border-0 px-2.5 py-1 text-xs font-medium shadow-sm"
-      color={color}
-      icon={isOnline ? <CloudSyncOutlined /> : <DisconnectOutlined />}
-    >
-      {label}
-    </Tag>
+        : statusView.color;
+  const icon = !isOnline ? (
+    <DisconnectOutlined />
+  ) : statusView.color === "processing" ? (
+    <LoadingOutlined spin />
+  ) : statusView.color === "success" ? (
+    <CheckCircleOutlined />
+  ) : (
+    <DownloadOutlined />
   );
 
-  if (!hasSyncWork && !serviceWorker.errorMessage) {
-    return <Tooltip title={tooltipTitle}>{statusTag}</Tooltip>;
-  }
-
   return (
-    <Popover
-      trigger="click"
-      placement="bottomRight"
-      content={
-        <div className="w-60 space-y-3">
-          <div>
-            <Typography.Text strong>Syncstatus</Typography.Text>
-            <div className="mt-1 text-xs text-gray-500">{tooltipTitle}</div>
-          </div>
-          {serviceWorker.errorMessage && (
-            <div className="rounded-md bg-red-50 px-2 py-1.5 text-xs text-red-700">
-              {serviceWorker.errorMessage}
-            </div>
-          )}
-          <Button
-            block
-            size="small"
-            icon={<CloudSyncOutlined spin={!!syncSummary?.syncing} />}
-            disabled={!hasSyncWork || !onSyncNow}
-            onClick={() => void onSyncNow?.()}
-          >
-            Jetzt synchronisieren
-          </Button>
-        </div>
-      }
+    <button
+      type="button"
+      className="pointer-events-auto border-0 bg-transparent p-0"
+      aria-label={`${label}: Offline-Karten ${active ? "schließen" : "öffnen"}`}
+      aria-pressed={active}
+      onClick={onToggle}
     >
-      <button
-        type="button"
-        className="pointer-events-auto border-0 bg-transparent p-0"
-        aria-label="Offline- und Syncstatus anzeigen"
+      <Tag
+        className="m-0 cursor-pointer rounded-md border-0 px-2.5 py-1 text-xs font-medium shadow-sm"
+        color={color}
+        icon={icon}
       >
-        {statusTag}
-      </button>
-    </Popover>
+        {label}
+      </Tag>
+    </button>
   );
 }

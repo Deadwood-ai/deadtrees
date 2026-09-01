@@ -44,7 +44,7 @@ import PriwaBefallsgruppeEditor from "./PriwaBefallsgruppeEditor";
 import PriwaBaseLayerControl from "./PriwaBaseLayerControl";
 import PriwaMobileFieldTools from "./PriwaMobileFieldTools";
 import PriwaOfflineAreaSelection from "./PriwaOfflineAreaSelection";
-import PriwaOfflineMapControl from "./PriwaOfflineMapControl";
+import PriwaOfflineMapPanel from "./PriwaOfflineMapPanel";
 import PriwaReviewWorkbench, {
   type PriwaReviewDetailMode,
 } from "./PriwaReviewWorkbench";
@@ -55,6 +55,10 @@ import {
 } from "./priwaReviewMapFocus";
 import { usePriwaOfflineBasemap } from "./usePriwaOfflineBasemap";
 import { usePriwaOfflineAreaLayer } from "./usePriwaOfflineAreaLayer";
+import {
+  calculatePriwaOfflineCoverageRatio,
+  type PriwaMapExtent,
+} from "./priwaOfflineCoverage";
 import {
   usePriwaOfflineSelectionPlan,
   type IPriwaOfflineSelectionPlan,
@@ -195,6 +199,8 @@ export default function PriwaFieldMap({
   const [reviewPointId, setReviewPointId] = useState<string | null>(null);
   const [baseLayer, setBaseLayer] = useState<PriwaBaseLayer>("aerial");
   const [isOfflineMapModeActive, setOfflineMapModeActive] = useState(false);
+  const [viewportExtent3857, setViewportExtent3857] =
+    useState<PriwaMapExtent | null>(null);
   const mapInteraction = usePriwaMapInteractionMode();
   const { modeRef, setMode } = mapInteraction;
   const isMobile = useIsMobile("lg");
@@ -207,9 +213,13 @@ export default function PriwaFieldMap({
   } = userLocation;
   const {
     areas: offlineBasemapAreas,
+    readyAreas: readyOfflineBasemapAreas,
+    needsRefresh: offlineBasemapNeedsRefresh,
+    isCacheAuditComplete: isOfflineBasemapCacheAuditComplete,
     cacheState: basemapCacheState,
     cacheCurrentMapArea,
     clearAreas: clearOfflineBasemapAreas,
+    refreshAreas: refreshOfflineBasemapAreas,
     isSupported: isOfflineBasemapSupported,
   } = usePriwaOfflineBasemap(projectId);
   const offlineSelectionPlan = usePriwaOfflineSelectionPlan(
@@ -224,6 +234,10 @@ export default function PriwaFieldMap({
     offlineAreaLayerRef,
     offlineBasemapAreas,
     isOfflineMapModeActive || mapInteraction.isSelectingOfflineArea,
+  );
+  const offlineViewportCoverageRatio = calculatePriwaOfflineCoverageRatio(
+    viewportExtent3857,
+    readyOfflineBasemapAreas.map((area) => area.extent3857),
   );
 
   const zoomToTrees = useCallback(
@@ -384,6 +398,16 @@ export default function PriwaFieldMap({
     });
 
     mapRef.current = map;
+    const updateViewportExtent = () => {
+      const size = map.getSize();
+      if (!size) return;
+      setViewportExtent3857(
+        map.getView().calculateExtent(size) as PriwaMapExtent,
+      );
+    };
+    updateViewportExtent();
+    const moveEndKey = map.on("moveend", updateViewportExtent);
+    const sizeChangeKey = map.on("change:size", updateViewportExtent);
     const detachWarnkarteInteraction = attachPriwaWarnkarteInteraction(
       map,
       warnkarteLayer,
@@ -454,7 +478,7 @@ export default function PriwaFieldMap({
     return () => {
       stopUserLocation();
       detachWarnkarteInteraction();
-      unByKey(clickKey);
+      unByKey([clickKey, moveEndKey, sizeChangeKey]);
       map.setTarget(undefined);
       mapRef.current = null;
       offlineAreaLayerRef.current = null;
@@ -783,6 +807,19 @@ export default function PriwaFieldMap({
     message.success("Offline-Basiskartenbereiche entfernt");
   }, [clearOfflineBasemapAreas, message]);
 
+  const handleRefreshBasemapAreas = useCallback(async () => {
+    try {
+      await refreshOfflineBasemapAreas();
+      message.success("Offline-Karten wurden aktualisiert");
+    } catch (error) {
+      message.error(
+        error instanceof Error
+          ? error.message
+          : "Offline-Karten konnten nicht aktualisiert werden.",
+      );
+    }
+  }, [message, refreshOfflineBasemapAreas]);
+
   const dataErrorMessage =
     errorMessage ?? groupsErrorMessage ?? cogErrorMessage;
   const isReviewTreeEditing =
@@ -828,15 +865,6 @@ export default function PriwaFieldMap({
             />
           </Tooltip>
           <PriwaBaseLayerControl value={baseLayer} onChange={setBaseLayer} />
-          <PriwaOfflineMapControl
-            areas={offlineBasemapAreas}
-            cacheState={basemapCacheState}
-            isSupported={isOfflineBasemapSupported}
-            active={isOfflineMapModeActive}
-            onToggle={() => setOfflineMapModeActive((current) => !current)}
-            onStartSelection={startOfflineAreaSelection}
-            onClear={handleClearBasemapArea}
-          />
           {additionalMapControl}
           {!!warnkarteOverlay?.features.length && warnkarteVisible && (
             <PriwaWarnkarteZoomControl onZoom={zoomToWarnkarte} />
@@ -867,6 +895,7 @@ export default function PriwaFieldMap({
       {isMobile &&
         !isDrawerOpen &&
         !isPointListOpen &&
+        !isOfflineMapModeActive &&
         mapInteraction.mode === "browse" && (
           <FloatButton
             className="priwa-add-point-fab"
@@ -964,6 +993,23 @@ export default function PriwaFieldMap({
         />
       )}
 
+      {mapInteraction.mode === "browse" && isOfflineMapModeActive && (
+        <PriwaOfflineMapPanel
+          areas={offlineBasemapAreas}
+          readyAreaCount={readyOfflineBasemapAreas.length}
+          cacheState={basemapCacheState}
+          coverageRatio={offlineViewportCoverageRatio}
+          isSupported={isOfflineBasemapSupported}
+          needsRefresh={offlineBasemapNeedsRefresh}
+          syncSummary={syncSummary}
+          onClose={() => setOfflineMapModeActive(false)}
+          onStartSelection={startOfflineAreaSelection}
+          onClear={handleClearBasemapArea}
+          onRefresh={handleRefreshBasemapAreas}
+          onSyncNow={onSyncNow}
+        />
+      )}
+
       {mapInteraction.mode === "browse" && (
         <div className="priwa-map-status-stack pointer-events-none absolute right-4 z-[55] flex max-w-[calc(100%-5.75rem)] flex-col items-end gap-1.5 min-[992px]:right-[24.5rem]">
           {locationHintLabel && (
@@ -971,7 +1017,16 @@ export default function PriwaFieldMap({
               {locationHintLabel}
             </div>
           )}
-          <PriwaOfflineStatus syncSummary={syncSummary} onSyncNow={onSyncNow} />
+          <PriwaOfflineStatus
+            active={isOfflineMapModeActive}
+            coverageRatio={offlineViewportCoverageRatio}
+            hasAreas={offlineBasemapAreas.length > 0}
+            isCacheAuditComplete={isOfflineBasemapCacheAuditComplete}
+            isSupported={isOfflineBasemapSupported}
+            needsRefresh={offlineBasemapNeedsRefresh}
+            syncSummary={syncSummary}
+            onToggle={() => setOfflineMapModeActive((current) => !current)}
+          />
         </div>
       )}
 
