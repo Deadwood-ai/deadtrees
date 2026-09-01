@@ -69,9 +69,7 @@ describe("PRIWA offline basemap helpers", () => {
         (url) => new URL(url).hostname === "sgx.geodatenzentrum.de",
       ),
     ).toBe(true);
-    expect(plan.extent3857).toEqual([
-      908_694, 6_178_694, 911_306, 6_181_306,
-    ]);
+    expect(plan.extent3857).toEqual([908_694, 6_178_694, 911_306, 6_181_306]);
     expect(plan.areaKm2).toBeGreaterThan(2.95);
     expect(plan.areaKm2).toBeLessThanOrEqual(3);
     expect(() => validatePriwaBasemapTilePlan(plan)).not.toThrow();
@@ -108,18 +106,17 @@ describe("PRIWA offline basemap helpers", () => {
     const put = vi.fn();
     const match = vi.fn().mockResolvedValue(undefined);
     const open = vi.fn().mockResolvedValue({ match, put });
-    const opaqueResponse = new Response(null);
-    Object.defineProperty(opaqueResponse, "ok", { value: false });
-    Object.defineProperty(opaqueResponse, "status", { value: 0 });
-    Object.defineProperty(opaqueResponse, "type", { value: "opaque" });
     vi.stubGlobal("caches", { open });
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce(opaqueResponse)
-        .mockRejectedValueOnce(new Error("offline")),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response("tile", {
+          headers: { "content-type": "image/png" },
+          status: 200,
+        }),
+      )
+      .mockRejectedValueOnce(new Error("offline"));
+    vi.stubGlobal("fetch", fetchMock);
     const progress = vi.fn();
     const urls = [
       createPriwaBasemapTileUrl({ zoom: 18, row: 1, col: 1 }),
@@ -133,7 +130,14 @@ describe("PRIWA offline basemap helpers", () => {
       failed: 1,
     });
     expect(open).toHaveBeenCalledWith(getPriwaBasemapCacheName(projectId));
+    const firstRequest = fetchMock.mock.calls[0][0] as Request;
+    expect(firstRequest.mode).toBe("cors");
+    expect(firstRequest.credentials).toBe("omit");
     expect(put).toHaveBeenCalledTimes(1);
+    const storedResponse = put.mock.calls[0][1] as Response;
+    expect(storedResponse.type).toBe("default");
+    expect(storedResponse.headers.get("content-type")).toBe("image/png");
+    await expect(storedResponse.text()).resolves.toBe("tile");
     expect(progress).toHaveBeenLastCalledWith({
       cached: 1,
       failed: 1,
@@ -190,6 +194,31 @@ describe("PRIWA offline basemap helpers", () => {
     expect(match).toHaveBeenCalledOnce();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(put).not.toHaveBeenCalled();
+  });
+
+  it("replaces legacy opaque tiles with replayable CORS responses", async () => {
+    const opaqueResponse = new Response(null);
+    Object.defineProperty(opaqueResponse, "type", { value: "opaque" });
+    const match = vi.fn().mockResolvedValue(opaqueResponse);
+    const put = vi.fn();
+    const cacheDelete = vi.fn().mockResolvedValue(true);
+    const open = vi.fn().mockResolvedValue({ delete: cacheDelete, match, put });
+    const fetchMock = vi.fn().mockResolvedValue(new Response("updated"));
+    vi.stubGlobal("caches", { open });
+    vi.stubGlobal("fetch", fetchMock);
+    const url = createPriwaBasemapTileUrl({
+      zoom: 18,
+      row: 90_225,
+      col: 137_017,
+    });
+
+    await expect(cachePriwaBasemapTiles(projectId, [url])).resolves.toEqual({
+      cached: 1,
+      failed: 0,
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(cacheDelete).toHaveBeenCalledOnce();
+    expect(put).toHaveBeenCalledOnce();
   });
 
   it("clears the dedicated basemap cache when available", async () => {

@@ -1,37 +1,56 @@
 import type { PriwaServiceWorkerStatus } from "../../pwa/priwaServiceWorker";
+import { PRIWA_OFFLINE_READY_COVERAGE_RATIO } from "./priwaOfflineCoverage";
 
 export interface IPriwaOfflineStatusView {
   label: string;
   color: "default" | "error" | "processing" | "success" | "warning";
 }
 
-export const getPriwaOfflineStatusView = (
-  serviceWorkerStatus: PriwaServiceWorkerStatus,
-  isOnline: boolean,
-): IPriwaOfflineStatusView | null => {
-  if (!isOnline && serviceWorkerStatus === "ready") {
-    return { label: "Offline bereit", color: "success" };
-  }
+interface PriwaOfflineStatusInput {
+  serviceWorkerStatus: PriwaServiceWorkerStatus;
+  isOnline: boolean;
+  isSupported: boolean;
+  isCacheAuditComplete: boolean;
+  hasAreas: boolean;
+  needsRefresh: boolean;
+  coverageRatio: number;
+}
 
-  if (!isOnline) {
-    return { label: "Offline eingeschränkt", color: "warning" };
+export const getPriwaOfflineStatusView = ({
+  serviceWorkerStatus,
+  isOnline,
+  isSupported,
+  isCacheAuditComplete,
+  hasAreas,
+  needsRefresh,
+  coverageRatio,
+}: PriwaOfflineStatusInput): IPriwaOfflineStatusView => {
+  if (!isSupported || serviceWorkerStatus === "unsupported") {
+    return { label: "Offline nicht unterstützt", color: "warning" };
   }
-
-  if (serviceWorkerStatus === "ready") {
-    return { label: "Offline bereit", color: "success" };
-  }
-
-  if (serviceWorkerStatus === "registering") {
-    return { label: "Offline wird vorbereitet", color: "processing" };
-  }
-
   if (serviceWorkerStatus === "error") {
     return { label: "Offline nicht bereit", color: "error" };
   }
-
-  if (serviceWorkerStatus === "unsupported") {
-    return { label: "Offline nicht unterstützt", color: "warning" };
+  if (serviceWorkerStatus === "registering" || !isCacheAuditComplete) {
+    return { label: "Offline wird geprüft", color: "processing" };
   }
-
-  return null;
+  if (coverageRatio >= PRIWA_OFFLINE_READY_COVERAGE_RATIO) {
+    return { label: "Offline bereit", color: "success" };
+  }
+  if (coverageRatio > 0) {
+    return { label: "Teilweise offline", color: "warning" };
+  }
+  if (needsRefresh) {
+    return { label: "Offline-Karte aktualisieren", color: "warning" };
+  }
+  if (hasAreas) {
+    return {
+      label: isOnline ? "Bereich nicht offline" : "Hier nicht offline",
+      color: "default",
+    };
+  }
+  return {
+    label: isOnline ? "Offline-Karte laden" : "Keine Offline-Karte",
+    color: "default",
+  };
 };

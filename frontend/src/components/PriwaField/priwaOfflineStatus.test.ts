@@ -2,49 +2,62 @@ import { describe, expect, it } from "vitest";
 
 import { getPriwaOfflineStatusView } from "./priwaOfflineStatusView";
 
-describe("PRIWA offline status labels", () => {
-  it("shows ready when the app shell service worker is ready", () => {
-    expect(getPriwaOfflineStatusView("ready", true)).toEqual({
-      label: "Offline bereit",
-      color: "success",
-    });
-    expect(getPriwaOfflineStatusView("ready", false)).toEqual({
-      label: "Offline bereit",
-      color: "success",
-    });
+const readyInput = {
+  serviceWorkerStatus: "ready" as const,
+  isOnline: true,
+  isSupported: true,
+  isCacheAuditComplete: true,
+  hasAreas: true,
+  needsRefresh: false,
+};
+
+describe("PRIWA offline map status", () => {
+  it("only shows ready when at least 80 percent of the viewport is cached", () => {
+    expect(
+      getPriwaOfflineStatusView({ ...readyInput, coverageRatio: 0.8 }),
+    ).toEqual({ label: "Offline bereit", color: "success" });
+    expect(
+      getPriwaOfflineStatusView({ ...readyInput, coverageRatio: 0.79 }),
+    ).toEqual({ label: "Teilweise offline", color: "warning" });
   });
 
-  it("shows limited offline state when the browser is offline before readiness", () => {
-    expect(getPriwaOfflineStatusView("registering", false)).toEqual({
-      label: "Offline eingeschränkt",
-      color: "warning",
-    });
+  it("distinguishes saved areas elsewhere from no downloaded maps", () => {
+    expect(
+      getPriwaOfflineStatusView({ ...readyInput, coverageRatio: 0 }),
+    ).toEqual({ label: "Bereich nicht offline", color: "default" });
+    expect(
+      getPriwaOfflineStatusView({
+        ...readyInput,
+        hasAreas: false,
+        coverageRatio: 0,
+      }),
+    ).toEqual({ label: "Offline-Karte laden", color: "default" });
   });
 
-  it("distinguishes registration and unsupported states while online", () => {
-    expect(getPriwaOfflineStatusView("registering", true)).toEqual({
-      label: "Offline wird vorbereitet",
-      color: "processing",
-    });
-    expect(getPriwaOfflineStatusView("unsupported", true)).toEqual({
-      label: "Offline nicht unterstützt",
-      color: "warning",
-    });
+  it("surfaces legacy packages outside covered views and waits for cache audits", () => {
+    expect(
+      getPriwaOfflineStatusView({
+        ...readyInput,
+        needsRefresh: true,
+        coverageRatio: 0,
+      }),
+    ).toEqual({ label: "Offline-Karte aktualisieren", color: "warning" });
+    expect(
+      getPriwaOfflineStatusView({
+        ...readyInput,
+        isCacheAuditComplete: false,
+        coverageRatio: 1,
+      }),
+    ).toEqual({ label: "Offline wird geprüft", color: "processing" });
   });
 
-  it("distinguishes failed registration from offline precedence", () => {
-    expect(getPriwaOfflineStatusView("error", true)).toEqual({
-      label: "Offline nicht bereit",
-      color: "error",
-    });
-    expect(getPriwaOfflineStatusView("error", false)).toEqual({
-      label: "Offline eingeschränkt",
-      color: "warning",
-    });
-  });
-
-  it("hides development-only and unexpected online states", () => {
-    expect(getPriwaOfflineStatusView("disabled", true)).toBeNull();
-    expect(getPriwaOfflineStatusView("unknown" as never, true)).toBeNull();
+  it("reports an unsupported offline runtime", () => {
+    expect(
+      getPriwaOfflineStatusView({
+        ...readyInput,
+        isSupported: false,
+        coverageRatio: 0,
+      }),
+    ).toEqual({ label: "Offline nicht unterstützt", color: "warning" });
   });
 });

@@ -155,7 +155,7 @@ test.describe("PRIWA local field write flows", () => {
     expect(createdRow.name).toBe("Stefan Treyer");
     expect(createdRow.gruene_nadeln_am_boden).toBe("nein");
     await expect(
-      page.getByText(/Synchronisiert\.\.\.|ausstehend|Sync Fehler/i),
+      page.getByText(/Synchronisiert\.\.\.|ausstehend|Sync-?Fehler/i),
     ).toHaveCount(0);
     await expectOfflineSelectionSuppressesPointInteraction(page);
     await expectResizableDesktopPointTable(page);
@@ -168,7 +168,7 @@ test.describe("PRIWA local field write flows", () => {
     await waitForBrowserOnlineState(page, true);
     await waitForPointRow(updatedBaumnr, (row) => row.deleted_at === null);
     await expect(
-      page.getByText(/Synchronisiert\.\.\.|ausstehend|Sync Fehler/i),
+      page.getByText(/Synchronisiert\.\.\.|ausstehend|Sync-?Fehler/i),
     ).toHaveCount(0);
 
     await context.setOffline(true);
@@ -206,16 +206,12 @@ test.describe("PRIWA local field write flows", () => {
     });
 
     await createMapEstimatedPoint(page, stalledSyncBaumnr);
-    await expect(
-      page.getByText("Synchronisiert...", { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByText(/Synchronisiert\.\.\./)).toBeVisible();
 
     const secondPage = await page.context().newPage();
     await secondPage.goto("/priwa-field");
     await expect(secondPage.getByTestId("priwa-field-map")).toBeVisible();
-    await expect(
-      secondPage.getByText("Synchronisiert...", { exact: true }),
-    ).toBeVisible();
+    await expect(secondPage.getByText(/Synchronisiert\.\.\./)).toBeVisible();
     const { data: rowsBeforeRelease, error: rowsBeforeReleaseError } =
       await adminClient
         .from("priwa_kaeferbaeume")
@@ -235,7 +231,7 @@ test.describe("PRIWA local field write flows", () => {
       (row) => row.deleted_at === null,
     );
     await expect(
-      page.getByText(/Synchronisiert\.\.\.|ausstehend|Sync Fehler/i),
+      page.getByText(/Synchronisiert\.\.\.|ausstehend|Sync-?Fehler/i),
     ).toHaveCount(0);
     await secondPage.close();
     await page.unroute(routePattern);
@@ -260,9 +256,7 @@ test.describe("PRIWA local field write flows", () => {
     });
 
     await createMapEstimatedPoint(page, deletedDuringSyncBaumnr);
-    await expect(
-      page.getByText("Synchronisiert...", { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByText(/Synchronisiert\.\.\./)).toBeVisible();
     await deleteFirstPoint(page);
 
     releaseMutation();
@@ -271,7 +265,7 @@ test.describe("PRIWA local field write flows", () => {
       (row) => row.deleted_at !== null,
     );
     await expect(
-      page.getByText(/Synchronisiert\.\.\.|ausstehend|Sync Fehler/i),
+      page.getByText(/Synchronisiert\.\.\.|ausstehend|Sync-?Fehler/i),
     ).toHaveCount(0);
     await page.unroute(routePattern);
   });
@@ -329,7 +323,7 @@ async function expectOfflineBasemapControl(page: Page) {
   await expect(page.locator(".ol-layer").first()).toBeVisible();
 
   const offlineMapButton = page.getByRole("button", {
-    name: "Offline-Karten speichern",
+    name: /Offline-Karte laden/,
   });
   await expect(offlineMapButton).toHaveAttribute("aria-pressed", "false");
   await offlineMapButton.click();
@@ -392,17 +386,19 @@ async function expectPersistedOfflineAreaVisualization(page: Page) {
   await page.reload();
 
   const manageOfflineMapsButton = page.getByRole("button", {
-    name: "Offline-Karten verwalten",
+    name: /Offline-Karte aktualisieren/,
   });
   await expect(manageOfflineMapsButton).toBeVisible();
   const inactiveMapPatch = await captureMapCenterPatch(page);
   await manageOfflineMapsButton.click();
-  await expect(page.getByText("1 Bereich · 100 ha · 1 Kacheln")).toBeVisible();
+  await expect(
+    page.getByText("0 von 1 Bereichen bereit · 100 ha"),
+  ).toBeVisible();
   const activeMapPatch = await captureMapCenterPatch(page);
   expect(activeMapPatch.equals(inactiveMapPatch)).toBe(false);
   await page.getByRole("button", { name: "Alle Bereiche entfernen" }).click();
   const saveOfflineMapsButton = page.getByRole("button", {
-    name: "Offline-Karten speichern",
+    name: /Offline-Karte laden/,
   });
   await expect(saveOfflineMapsButton).toHaveAttribute("aria-pressed", "true");
   await saveOfflineMapsButton.click();
@@ -467,7 +463,7 @@ async function captureMapCenterPatch(page: Page) {
 }
 
 async function expectOfflineSelectionSuppressesPointInteraction(page: Page) {
-  await page.getByRole("button", { name: "Offline-Karten speichern" }).click();
+  await page.getByRole("button", { name: /Offline-Karte laden/ }).click();
   await page.getByRole("button", { name: "Neuen Bereich auswählen" }).click();
   const fieldMap = page.getByTestId("priwa-field-map");
   const mapBounds = await fieldMap.boundingBox();

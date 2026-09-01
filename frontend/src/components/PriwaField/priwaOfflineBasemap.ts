@@ -13,6 +13,7 @@ import {
   PRIWA_TOPOGRAPHIC_TILE_URL_PREFIX,
 } from "./createPriwaTopographicLayer";
 
+export const PRIWA_BASEMAP_CACHE_VERSION = 2;
 export const PRIWA_BASEMAP_CACHE_PREFIX = "deadtrees-priwa-basemap-v1";
 export const PRIWA_BASEMAP_MIN_ZOOM = 16;
 export const PRIWA_BASEMAP_MAX_ZOOM = 20;
@@ -283,21 +284,30 @@ export const cachePriwaBasemapTiles = async (
       try {
         const request = new Request(url, {
           cache: "reload",
-          mode: "no-cors",
+          credentials: "omit",
+          mode: "cors",
         });
         const cachedResponse = await cache.match(request);
-        if (cachedResponse) {
+        if (cachedResponse && cachedResponse.type !== "opaque") {
           cached += 1;
           onProgress?.({ cached, failed, total: urls.length });
           continue;
         }
+        if (cachedResponse?.type === "opaque") {
+          await cache.delete(request);
+        }
 
         const response = await fetch(request);
-        if (!response.ok && response.type !== "opaque") {
+        if (!response.ok || response.type === "opaque") {
           throw new Error(`Tile request failed with ${response.status}`);
         }
 
-        await cache.put(request, response.clone());
+        const replayableResponse = new Response(await response.blob(), {
+          headers: response.headers,
+          status: response.status,
+          statusText: response.statusText,
+        });
+        await cache.put(request, replayableResponse);
         cached += 1;
       } catch {
         failed += 1;
@@ -328,4 +338,14 @@ export const cachePriwaBasemapTiles = async (
 export const clearPriwaBasemapTileCache = async (projectId: string) => {
   if (!("caches" in globalThis)) return;
   await globalThis.caches.delete(getPriwaBasemapCacheName(projectId));
+};
+
+export const loadPriwaBasemapCachedTileUrls = async (projectId: string) => {
+  if (!("caches" in globalThis)) return new Set<string>();
+
+  const cache = await globalThis.caches.open(
+    getPriwaBasemapCacheName(projectId),
+  );
+  const requests = await cache.keys();
+  return new Set(requests.map((request) => request.url));
 };

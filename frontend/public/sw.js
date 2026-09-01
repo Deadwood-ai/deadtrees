@@ -65,11 +65,14 @@ const handleNavigation = async (request) => {
       (await caches.match(request)) ||
       (await caches.match("/priwa-field")) ||
       (await caches.match("/")) ||
-      new Response("deadtrees.earth is offline and the app shell is unavailable.", {
-        headers: { "Content-Type": "text/plain; charset=utf-8" },
-        status: 503,
-        statusText: "Offline",
-      })
+      new Response(
+        "deadtrees.earth is offline and the app shell is unavailable.",
+        {
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+          status: 503,
+          statusText: "Offline",
+        },
+      )
     );
   }
 };
@@ -193,6 +196,18 @@ const createOfflineTileResponse = () =>
     statusText: "Offline",
   });
 
+const makeCachedTileReplayable = async (response) => {
+  if (!response || response.type === "opaque") {
+    return response;
+  }
+
+  return new Response(await response.blob(), {
+    headers: response.headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
+};
+
 const isExplicitBasemapCacheName = (cacheName) =>
   cacheName.startsWith(BASEMAP_CACHE_PREFIX) &&
   cacheName !== VIEWED_BASEMAP_CACHE;
@@ -222,10 +237,13 @@ const handleBasemapTile = async (event) => {
   const canonicalRequest = canonicalizeBasemapRequest(request);
 
   if (self.navigator && self.navigator.onLine === false) {
-    return (
-      (await matchExplicitBasemapPackage([canonicalRequest, request])) ||
-      createOfflineTileResponse()
-    );
+    const packagedResponse = await matchExplicitBasemapPackage([
+      canonicalRequest,
+      request,
+    ]);
+    return packagedResponse
+      ? makeCachedTileReplayable(packagedResponse)
+      : createOfflineTileResponse();
   }
 
   const cachedResponse =
@@ -234,15 +252,19 @@ const handleBasemapTile = async (event) => {
 
   const networkResponsePromise = fetch(request)
     .then((response) => cacheViewedBasemapResponse(canonicalRequest, response))
-    .catch(
-      async () =>
-        (await matchExplicitBasemapPackage([canonicalRequest, request])) ||
-        createOfflineTileResponse(),
-    );
+    .catch(async () => {
+      const packagedResponse = await matchExplicitBasemapPackage([
+        canonicalRequest,
+        request,
+      ]);
+      return packagedResponse
+        ? makeCachedTileReplayable(packagedResponse)
+        : createOfflineTileResponse();
+    });
 
   if (cachedResponse) {
     event.waitUntil(networkResponsePromise);
-    return cachedResponse;
+    return makeCachedTileReplayable(cachedResponse);
   }
 
   return networkResponsePromise;
