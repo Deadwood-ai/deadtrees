@@ -16,9 +16,10 @@ import {
 export const PRIWA_BASEMAP_CACHE_PREFIX = "deadtrees-priwa-basemap-v1";
 export const PRIWA_BASEMAP_MIN_ZOOM = 16;
 export const PRIWA_BASEMAP_MAX_ZOOM = 20;
-export const PRIWA_BASEMAP_MAX_TILES = 6_000;
-export const PRIWA_BASEMAP_MAX_AREA_KM2 = 2;
+export const PRIWA_BASEMAP_MAX_TILES = 9_000;
+export const PRIWA_BASEMAP_MAX_AREA_KM2 = 3;
 export const PRIWA_BASEMAP_SELECTION_INSET_RATIO = 0.08;
+export const PRIWA_BASEMAP_SELECTION_MAX_HEIGHT_RATIO = 0.58;
 export const PRIWA_BASEMAP_CACHE_CONCURRENCY = 8;
 
 const WEB_MERCATOR_HALF_WORLD = 20037508.342789244;
@@ -73,14 +74,35 @@ export const getPriwaBasemapSelectionExtent = (
   insetRatio = PRIWA_BASEMAP_SELECTION_INSET_RATIO,
 ): [number, number, number, number] => {
   const [minX, minY, maxX, maxY] = extent3857;
-  const insetX = Math.abs(maxX - minX) * insetRatio;
-  const insetY = Math.abs(maxY - minY) * insetRatio;
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const sideLength = Math.min(
+    Math.abs(maxX - minX) * (1 - insetRatio * 2),
+    Math.abs(maxY - minY) * PRIWA_BASEMAP_SELECTION_MAX_HEIGHT_RATIO,
+  );
+  const halfSideLength = sideLength / 2;
 
   return [
-    clamp(minX + insetX, -WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD),
-    clamp(minY + insetY, -WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD),
-    clamp(maxX - insetX, -WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD),
-    clamp(maxY - insetY, -WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD),
+    clamp(
+      centerX - halfSideLength,
+      -WEB_MERCATOR_HALF_WORLD,
+      WEB_MERCATOR_HALF_WORLD,
+    ),
+    clamp(
+      centerY - halfSideLength,
+      -WEB_MERCATOR_HALF_WORLD,
+      WEB_MERCATOR_HALF_WORLD,
+    ),
+    clamp(
+      centerX + halfSideLength,
+      -WEB_MERCATOR_HALF_WORLD,
+      WEB_MERCATOR_HALF_WORLD,
+    ),
+    clamp(
+      centerY + halfSideLength,
+      -WEB_MERCATOR_HALF_WORLD,
+      WEB_MERCATOR_HALF_WORLD,
+    ),
   ];
 };
 

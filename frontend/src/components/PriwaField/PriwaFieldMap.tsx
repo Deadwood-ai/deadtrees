@@ -191,7 +191,7 @@ export default function PriwaFieldMap({
   const [focusedPointId, setFocusedPointId] = useState<string | null>(null);
   const [reviewPointId, setReviewPointId] = useState<string | null>(null);
   const [baseLayer, setBaseLayer] = useState<PriwaBaseLayer>("aerial");
-  const [isOfflineMapControlOpen, setOfflineMapControlOpen] = useState(false);
+  const [isOfflineMapModeActive, setOfflineMapModeActive] = useState(false);
   const mapInteraction = usePriwaMapInteractionMode();
   const { modeRef, setMode } = mapInteraction;
   const isMobile = useIsMobile();
@@ -215,7 +215,7 @@ export default function PriwaFieldMap({
   usePriwaOfflineAreaLayer(
     offlineAreaLayerRef,
     offlineBasemapAreas,
-    isOfflineMapControlOpen || mapInteraction.isSelectingOfflineArea,
+    isOfflineMapModeActive || mapInteraction.isSelectingOfflineArea,
   );
 
   const zoomToTrees = useCallback(
@@ -670,6 +670,7 @@ export default function PriwaFieldMap({
   const startOfflineAreaSelection = useCallback(() => {
     setDrawerOpen(false);
     setPointListOpen(false);
+    setOfflineMapModeActive(false);
     setMode("select-offline-area");
   }, [setMode]);
 
@@ -745,6 +746,7 @@ export default function PriwaFieldMap({
           `Basiskarte offline gespeichert (${area.cachedTileCount}/${area.tileCount} Kacheln)`,
         );
         setMode("browse");
+        setOfflineMapModeActive(true);
       } catch (error) {
         message.error(
           error instanceof Error
@@ -810,8 +812,8 @@ export default function PriwaFieldMap({
             areas={offlineBasemapAreas}
             cacheState={basemapCacheState}
             isSupported={isOfflineBasemapSupported}
-            open={isOfflineMapControlOpen}
-            onOpenChange={setOfflineMapControlOpen}
+            active={isOfflineMapModeActive}
+            onToggle={() => setOfflineMapModeActive((current) => !current)}
             onStartSelection={startOfflineAreaSelection}
             onClear={handleClearBasemapArea}
           />

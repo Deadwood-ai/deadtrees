@@ -1,5 +1,5 @@
 import { DeleteOutlined, DownloadOutlined } from "@ant-design/icons";
-import { Button, Popover, Typography } from "antd";
+import { Button, Typography } from "antd";
 
 import type { IPriwaOfflineBasemapArea } from "./priwaOfflineStore";
 import type { usePriwaOfflineBasemap } from "./usePriwaOfflineBasemap";
@@ -8,8 +8,8 @@ interface PriwaOfflineMapControlProps {
   areas: IPriwaOfflineBasemapArea[];
   cacheState: ReturnType<typeof usePriwaOfflineBasemap>["cacheState"];
   isSupported: boolean;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  active: boolean;
+  onToggle: () => void;
   onStartSelection: () => void;
   onClear: () => Promise<void>;
 }
@@ -18,8 +18,8 @@ export default function PriwaOfflineMapControl({
   areas,
   cacheState,
   isSupported,
-  open,
-  onOpenChange,
+  active,
+  onToggle,
   onStartSelection,
   onClear,
 }: PriwaOfflineMapControlProps) {
@@ -41,13 +41,27 @@ export default function PriwaOfflineMapControl({
   );
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={onOpenChange}
-      trigger="click"
-      placement="rightTop"
-      content={
-        <div className="w-64 space-y-3">
+    <div className="pointer-events-auto relative self-start">
+      <Button
+        className={
+          hasAreas && !active
+            ? "border-emerald-600 text-emerald-700 shadow-md"
+            : "shadow-md"
+        }
+        type={active ? "primary" : "default"}
+        shape="circle"
+        size="large"
+        icon={icon}
+        aria-label={title}
+        aria-pressed={active}
+        onClick={onToggle}
+      />
+      {active && (
+        <div
+          className="absolute left-14 top-0 w-64 space-y-3 rounded-md bg-white/95 p-3 shadow-lg backdrop-blur"
+          role="region"
+          aria-label="Offline-Karten"
+        >
           <div>
             <Typography.Text strong>Offline-Karten</Typography.Text>
             <div className="mt-1 text-xs text-gray-500">
@@ -68,10 +82,7 @@ export default function PriwaOfflineMapControl({
             icon={<DownloadOutlined />}
             loading={cacheState.isCaching}
             disabled={!isSupported}
-            onClick={() => {
-              onOpenChange(false);
-              onStartSelection();
-            }}
+            onClick={onStartSelection}
           >
             Neuen Bereich auswählen
           </Button>
@@ -98,20 +109,7 @@ export default function PriwaOfflineMapControl({
             </div>
           )}
         </div>
-      }
-    >
-      <Button
-        className={
-          hasAreas
-            ? "pointer-events-auto border-emerald-600 text-emerald-700 shadow-md"
-            : "pointer-events-auto shadow-md"
-        }
-        type={hasAreas ? "primary" : "default"}
-        shape="circle"
-        size="large"
-        icon={icon}
-        aria-label={title}
-      />
-    </Popover>
+      )}
+    </div>
   );
 }

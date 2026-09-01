@@ -327,8 +327,18 @@ async function expectOfflineBasemapControl(page: Page) {
   ).toBeVisible();
   await expect(page.locator(".ol-layer").first()).toBeVisible();
 
-  await page.getByRole("button", { name: "Offline-Karten speichern" }).click();
+  const offlineMapButton = page.getByRole("button", {
+    name: "Offline-Karten speichern",
+  });
+  await expect(offlineMapButton).toHaveAttribute("aria-pressed", "false");
+  await offlineMapButton.click();
+  await expect(offlineMapButton).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByText("Offline-Karten")).toBeVisible();
+  await offlineMapButton.click();
+  await expect(offlineMapButton).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByText("Offline-Karten")).toBeHidden();
+  await offlineMapButton.click();
+  await expect(offlineMapButton).toHaveAttribute("aria-pressed", "true");
   await expect(
     page.getByRole("button", { name: "Neuen Bereich auswählen" }),
   ).toBeVisible();
@@ -336,6 +346,39 @@ async function expectOfflineBasemapControl(page: Page) {
   await expect(
     page.locator('[data-priwa-offline-selection-frame="true"]'),
   ).toBeVisible();
+  const selectionFrame = page.locator(
+    '[data-priwa-offline-selection-frame="true"]',
+  );
+  await expect
+    .poll(async () => {
+      const box = await selectionFrame.boundingBox();
+      return box ? Math.abs(box.width - box.height) : Number.POSITIVE_INFINITY;
+    })
+    .toBeLessThanOrEqual(1);
+  await expect
+    .poll(async () => {
+      const frameBox = await selectionFrame.boundingBox();
+      const mapBox = await page.getByTestId("priwa-field-map").boundingBox();
+      if (!frameBox || !mapBox) return Number.POSITIVE_INFINITY;
+      return Math.max(
+        Math.abs(
+          frameBox.x + frameBox.width / 2 - (mapBox.x + mapBox.width / 2),
+        ),
+        Math.abs(
+          frameBox.y + frameBox.height / 2 - (mapBox.y + mapBox.height / 2),
+        ),
+      );
+    })
+    .toBeLessThanOrEqual(1);
+  const frameBox = await selectionFrame.boundingBox();
+  const selectionPanelBox = await page
+    .locator('[data-priwa-offline-selection-panel="true"]')
+    .boundingBox();
+  expect(frameBox).not.toBeNull();
+  expect(selectionPanelBox).not.toBeNull();
+  expect(frameBox!.y + frameBox!.height).toBeLessThanOrEqual(
+    selectionPanelBox!.y,
+  );
   await expect(page.getByText("Karte verschieben oder zoomen")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Bereich herunterladen" }),
