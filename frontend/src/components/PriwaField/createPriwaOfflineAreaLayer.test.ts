@@ -7,7 +7,7 @@ import {
 } from "./createPriwaOfflineAreaLayer";
 
 describe("createPriwaOfflineAreaLayer", () => {
-  it("renders each downloaded extent with a subtle fill and no outline", () => {
+  it("renders each downloaded extent with a clearly visible fill and no outline", () => {
     const layer = createPriwaOfflineAreaLayer();
     const source = layer.getSource();
     const style = layer.getStyle();
@@ -20,7 +20,7 @@ describe("createPriwaOfflineAreaLayer", () => {
     expect(source?.getFeatures()).toHaveLength(2);
     expect(style).toBeInstanceOf(Style);
     expect((style as Style).getFill()?.getColor()).toBe(
-      "rgba(5, 150, 105, 0.18)",
+      "rgba(14, 165, 233, 0.34)",
     );
     expect((style as Style).getStroke()).toBeNull();
   });

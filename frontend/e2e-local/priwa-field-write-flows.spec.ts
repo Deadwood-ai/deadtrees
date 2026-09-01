@@ -105,6 +105,7 @@ test.describe("PRIWA local field write flows", () => {
     await expect(
       page.getByRole("navigation", { name: "PRIWA Feldaktionen" }),
     ).toHaveCount(0);
+    await expectPersistedOfflineAreaVisualization(page);
 
     await page.getByRole("button", { name: "Punkt aufnehmen" }).click();
     const captureDrawer = page.locator(
@@ -384,6 +385,85 @@ async function expectOfflineBasemapControl(page: Page) {
     page.getByRole("button", { name: "Bereich herunterladen" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Abbrechen" }).click();
+}
+
+async function expectPersistedOfflineAreaVisualization(page: Page) {
+  await seedDownloadedOfflineArea(page);
+  await page.reload();
+
+  const manageOfflineMapsButton = page.getByRole("button", {
+    name: "Offline-Karten verwalten",
+  });
+  await expect(manageOfflineMapsButton).toBeVisible();
+  const inactiveMapPatch = await captureMapCenterPatch(page);
+  await manageOfflineMapsButton.click();
+  await expect(page.getByText("1 Bereich · 100 ha · 1 Kacheln")).toBeVisible();
+  const activeMapPatch = await captureMapCenterPatch(page);
+  expect(activeMapPatch.equals(inactiveMapPatch)).toBe(false);
+  await page.getByRole("button", { name: "Alle Bereiche entfernen" }).click();
+  const saveOfflineMapsButton = page.getByRole("button", {
+    name: "Offline-Karten speichern",
+  });
+  await expect(saveOfflineMapsButton).toHaveAttribute("aria-pressed", "true");
+  await saveOfflineMapsButton.click();
+  await expect(saveOfflineMapsButton).toHaveAttribute("aria-pressed", "false");
+}
+
+async function seedDownloadedOfflineArea(page: Page) {
+  await page.evaluate(
+    async ({ currentProjectId }) => {
+      const now = new Date().toISOString();
+      const area = {
+        id: `${currentProjectId}:render-proof`,
+        projectId: currentProjectId,
+        name: "Offline-Bereich",
+        extent3857: [-20_037_508, -20_037_508, 20_037_508, 20_037_508],
+        centerLonLat: [8.18, 48.46],
+        zoom: 18,
+        minZoom: 16,
+        maxZoom: 20,
+        tileCount: 1,
+        cachedTileCount: 1,
+        failedTileCount: 0,
+        areaKm2: 1,
+        status: "ready",
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open("deadtrees-priwa-field");
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const database = request.result;
+          const transaction = database.transaction("offline", "readwrite");
+          transaction
+            .objectStore("offline")
+            .put([area], `basemap-area:${currentProjectId}`);
+          transaction.oncomplete = () => {
+            database.close();
+            resolve();
+          };
+          transaction.onerror = () => reject(transaction.error);
+        };
+      });
+    },
+    { currentProjectId: projectId },
+  );
+}
+
+async function captureMapCenterPatch(page: Page) {
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error("PRIWA E2E viewport is unavailable");
+
+  return page.screenshot({
+    clip: {
+      x: viewport.width / 2 - 40,
+      y: viewport.height * 0.7 - 40,
+      width: 80,
+      height: 80,
+    },
+  });
 }
 
 async function expectOfflineSelectionSuppressesPointInteraction(page: Page) {

@@ -11,7 +11,7 @@ export const createPriwaOfflineAreaLayer = () =>
     visible: false,
     style: new Style({
       fill: new Fill({
-        color: "rgba(5, 150, 105, 0.18)",
+        color: "rgba(14, 165, 233, 0.34)",
       }),
     }),
   });
