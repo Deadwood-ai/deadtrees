@@ -165,7 +165,7 @@ export default function PriwaPointListPanel({
       ref={panelRef}
       data-testid="priwa-point-list-panel"
       style={panelStyle}
-      className="pointer-events-auto absolute inset-x-2 bottom-2 z-[58] flex max-h-[64dvh] flex-col overflow-hidden rounded-md bg-white shadow-xl ring-1 ring-slate-900/10 md:bottom-5 md:left-4 md:right-auto md:top-24 md:w-[var(--priwa-point-panel-width)] md:max-w-[calc(100vw-2rem)] md:max-h-[calc(100dvh-8rem)]"
+      className="pointer-events-auto absolute inset-x-2 bottom-2 z-[58] flex max-h-[64dvh] flex-col overflow-hidden rounded-md bg-white shadow-xl ring-1 ring-slate-900/10 min-[992px]:bottom-5 min-[992px]:left-4 min-[992px]:right-auto min-[992px]:top-24 min-[992px]:w-[var(--priwa-point-panel-width)] min-[992px]:max-w-[calc(100vw-2rem)] min-[992px]:max-h-[calc(100dvh-8rem)]"
     >
       <PriwaPointPanelResizeHandle panelRef={panelRef} />
       <header className="flex items-start justify-between gap-3 border-b border-slate-200 px-3 py-2.5">
@@ -218,7 +218,7 @@ export default function PriwaPointListPanel({
         </div>
       </div>
 
-      <div className="grid gap-2 border-b border-slate-200 px-3 py-2 md:grid-cols-3">
+      <div className="grid gap-2 border-b border-slate-200 px-3 py-2 min-[992px]:grid-cols-3">
         <div>
           <div className="mb-1 text-xs font-medium text-slate-500">Ansicht</div>
           <Segmented<PriwaPointView>

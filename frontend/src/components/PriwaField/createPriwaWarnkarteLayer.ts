@@ -63,18 +63,15 @@ export const setPriwaWarnkarteLayerData = (
 export const fitPriwaWarnkarteLayer = (
   map: Map,
   layer: ReturnType<typeof createPriwaWarnkarteLayer>,
-  isMobile: boolean,
+  padding: [number, number, number, number],
 ) => {
   const extent = layer.getSource()?.getExtent();
   const mapSize = map.getSize();
   if (!extent || !mapSize || isEmpty(extent)) return;
 
-  const horizontalPadding = isMobile
-    ? 48
-    : Math.min(360, Math.floor(mapSize[0] * 0.28));
   map.getView().fit(extent, {
     duration: 500,
     maxZoom: 18,
-    padding: [96, horizontalPadding, 120, horizontalPadding],
+    padding,
   });
 };

@@ -25,7 +25,7 @@ export default function PriwaField() {
     isLoading: isLoadingMemberships,
   } = usePriwaProjectMemberships();
   const activeMembership = memberships[0] ?? null;
-  const isMobile = useIsMobile();
+  const isMobile = useIsMobile("lg");
   const {
     points,
     isLoading: isLoadingPoints,

@@ -119,7 +119,7 @@ export default function PriwaPointPanelResizeHandle({
       tabIndex={0}
       title="Tabellenbreite ändern"
       data-testid="priwa-point-list-resize-handle"
-      className="absolute right-0 top-1/2 z-10 hidden h-14 w-6 -translate-y-1/2 cursor-col-resize touch-none items-center justify-center rounded-l-md border border-r-0 border-slate-300 bg-white/95 text-slate-500 shadow-sm outline-none hover:border-emerald-500 hover:text-emerald-700 focus-visible:border-emerald-500 focus-visible:text-emerald-700 md:flex"
+      className="absolute right-0 top-1/2 z-10 hidden h-14 w-6 -translate-y-1/2 cursor-col-resize touch-none items-center justify-center rounded-l-md border border-r-0 border-slate-300 bg-white/95 text-slate-500 shadow-sm outline-none hover:border-emerald-500 hover:text-emerald-700 focus-visible:border-emerald-500 focus-visible:text-emerald-700 min-[992px]:flex"
       onPointerDown={startResize}
       onPointerMove={continueResize}
       onPointerUp={finishResize}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  getPriwaReviewFitPadding,
   getPriwaReviewMapCenter,
   getPriwaReviewTargetPixel,
 } from "./priwaReviewMapFocus";
@@ -37,4 +38,13 @@ describe("PRIWA review map focus", () => {
       expect(focusedPixelX).toBeCloseTo(target.x);
     },
   );
+
+  it("fits overlays into the asymmetric gap between review panels", () => {
+    const map = { left: 0, right: 992, top: 0, bottom: 768 };
+    const detail = { left: 608, right: 976, top: 96, bottom: 748 };
+
+    expect(getPriwaReviewFitPadding(map, queue, detail)).toEqual([
+      96, 400, 120, 368,
+    ]);
+  });
 });

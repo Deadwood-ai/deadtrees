@@ -281,6 +281,46 @@ async function installWarnkarteApi(
 }
 
 test.describe("PRIWA Warnkarte local UI", () => {
+  test("tablet portrait keeps the mobile map surface usable", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 900 });
+    await installWarnkarteAdmin(page);
+    await installWarnkarteApi(page);
+    await page.goto("/priwa-field");
+
+    await expect(page.locator("[data-priwa-review-queue-panel]")).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Warnkarte verwalten" }),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "Zur Warnkarte zoomen" }).click();
+    await page.waitForTimeout(600);
+    await page.getByTestId("priwa-field-map").click({
+      position: { x: 384, y: 450 },
+    });
+    await expect(page.locator(".priwa-warnkarte-tooltip")).toContainText(
+      "Wahrscheinlichkeit: 60 %",
+    );
+  });
+
+  test("desktop boundary fits an off-screen overlay between review panels", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 992, height: 768 });
+    await installWarnkarteAdmin(page);
+    await installWarnkarteApi(page);
+    await page.goto("/priwa-field");
+
+    await page.getByRole("button", { name: "Zur Warnkarte zoomen" }).click();
+    await page.waitForTimeout(600);
+    await page.getByTestId("priwa-field-map").click({
+      position: { x: 480, y: 384 },
+    });
+    await expect(page.locator(".priwa-warnkarte-tooltip")).toContainText(
+      "Wahrscheinlichkeit: 60 %",
+    );
+  });
+
   test("desktop admin selects, validates, confirms, and explicitly publishes", async ({
     page,
   }) => {
