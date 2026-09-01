@@ -20,10 +20,11 @@ const polygon = {
     type: "Polygon" as const,
     coordinates: [
       [
-        [8.1, 48.4],
-        [8.2, 48.4],
-        [8.2, 48.5],
-        [8.1, 48.4],
+        [8.32, 48.54],
+        [8.38, 48.54],
+        [8.38, 48.58],
+        [8.32, 48.58],
+        [8.32, 48.54],
       ],
     ],
   },
@@ -298,11 +299,18 @@ test.describe("PRIWA Warnkarte local UI", () => {
       .locator(".priwa-map-control-stack")
       .getByRole("button", { name: "Warnkarte ausblenden" });
     await expect(visibilityControl).toHaveAttribute("aria-pressed", "true");
+    const zoomToWarnkarte = page.getByRole("button", {
+      name: "Zur Warnkarte zoomen",
+    });
+    await expect(zoomToWarnkarte).toBeVisible();
     await visibilityControl.click();
     await expect(page.getByTestId("priwa-warnkarte-legend")).toHaveCount(0);
+    await expect(zoomToWarnkarte).toHaveCount(0);
     await page.getByRole("button", { name: "Warnkarte einblenden" }).click();
     await expect(page.getByTestId("priwa-warnkarte-legend")).toBeVisible();
 
+    await page.getByRole("button", { name: "Zur Warnkarte zoomen" }).click();
+    await page.waitForTimeout(600);
     await page.getByTestId("priwa-field-map").click({
       position: { x: 720, y: 450 },
     });
@@ -516,10 +524,10 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await expect(page.getByText("Not Found", { exact: true })).toHaveCount(0);
   });
 
-  test("mobile shows the published overlay label without management controls", async ({
+  test("mobile can navigate to an off-screen published overlay", async ({
     page,
   }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
+    await page.setViewportSize({ width: 393, height: 852 });
     await installWarnkarteAdmin(page);
     await installWarnkarteApi(page);
     await page.goto("/priwa-field");
@@ -530,8 +538,19 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await expect(
       page.getByRole("button", { name: "Warnkarte verwalten" }),
     ).toHaveCount(0);
+    await page.getByRole("button", { name: "Zur Warnkarte zoomen" }).click();
+    await page.waitForTimeout(600);
+    await page.getByTestId("priwa-field-map").click({
+      position: { x: 196, y: 426 },
+    });
+    await expect(page.locator(".priwa-warnkarte-tooltip")).toContainText(
+      "Wahrscheinlichkeit: 60 %",
+    );
     await page.getByRole("button", { name: "Warnkarte ausblenden" }).click();
     await expect(page.getByTestId("priwa-warnkarte-legend")).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Zur Warnkarte zoomen" }),
+    ).toHaveCount(0);
     await expect(
       page.getByRole("button", { name: "Warnkarte einblenden" }),
     ).toBeVisible();

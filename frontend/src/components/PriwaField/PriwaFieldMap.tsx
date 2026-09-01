@@ -32,8 +32,10 @@ import {
 import { createPriwaBefallsgruppeLayer } from "./createPriwaBefallsgruppeLayer";
 import {
   createPriwaWarnkarteLayer,
+  fitPriwaWarnkarteLayer,
   setPriwaWarnkarteLayerData,
 } from "./createPriwaWarnkarteLayer";
+import { PriwaWarnkarteZoomControl } from "./PriwaWarnkarteMapControls";
 import { attachPriwaWarnkarteInteraction } from "./priwaWarnkarteMapInteraction";
 import PriwaPointDrawer from "./PriwaPointDrawer";
 import PriwaPointListPanel from "./PriwaPointListPanel";
@@ -545,6 +547,12 @@ export default function PriwaFieldMap({
     });
   }, []);
 
+  const zoomToWarnkarte = useCallback(() => {
+    const map = mapRef.current;
+    const layer = warnkarteLayerRef.current;
+    if (map && layer) fitPriwaWarnkarteLayer(map, layer, isMobile);
+  }, [isMobile]);
+
   const focusPointOnMap = useCallback(
     (point: IPriwaPoint) => {
       selectMatchedMosaicForPoint(point);
@@ -818,6 +826,9 @@ export default function PriwaFieldMap({
             onClear={handleClearBasemapArea}
           />
           {additionalMapControl}
+          {!!warnkarteOverlay?.features.length && warnkarteVisible && (
+            <PriwaWarnkarteZoomControl onZoom={zoomToWarnkarte} />
+          )}
           {isMobile && (
             <PriwaMobileFieldTools
               points={points}

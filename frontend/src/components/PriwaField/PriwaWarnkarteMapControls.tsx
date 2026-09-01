@@ -1,6 +1,7 @@
 import {
   EyeInvisibleOutlined,
   EyeOutlined,
+  FullscreenOutlined,
   WarningOutlined,
 } from "@ant-design/icons";
 import { Button, Tooltip } from "antd";
@@ -31,6 +32,27 @@ export function PriwaWarnkarteVisibilityControl({
         aria-label={label}
         aria-pressed={isVisible}
         onClick={onToggle}
+      />
+    </Tooltip>
+  );
+}
+
+interface PriwaWarnkarteZoomControlProps {
+  onZoom: () => void;
+}
+
+export function PriwaWarnkarteZoomControl({
+  onZoom,
+}: PriwaWarnkarteZoomControlProps) {
+  return (
+    <Tooltip title="Zur Warnkarte zoomen" placement="right">
+      <Button
+        className="pointer-events-auto shadow-md"
+        shape="circle"
+        size="large"
+        icon={<FullscreenOutlined />}
+        aria-label="Zur Warnkarte zoomen"
+        onClick={onZoom}
       />
     </Tooltip>
   );
