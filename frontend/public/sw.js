@@ -181,7 +181,7 @@ const canonicalizeBasemapRequest = (request) => {
 };
 
 const cacheViewedBasemapResponse = async (request, response) => {
-  if (!response || (!response.ok && response.type !== "opaque")) {
+  if (!response || !response.ok || response.type === "opaque") {
     return response;
   }
 
@@ -197,7 +197,7 @@ const createOfflineTileResponse = () =>
   });
 
 const makeCachedTileReplayable = async (response) => {
-  if (!response || response.type === "opaque") {
+  if (!response) {
     return response;
   }
 
@@ -212,6 +212,26 @@ const isExplicitBasemapCacheName = (cacheName) =>
   cacheName.startsWith(BASEMAP_CACHE_PREFIX) &&
   cacheName !== VIEWED_BASEMAP_CACHE;
 
+const matchReplayableBasemapResponse = async (cache, requests) => {
+  for (const request of requests) {
+    const response = await cache.match(request, { ignoreVary: true });
+    if (response?.type === "opaque") {
+      await cache.delete(request, { ignoreVary: true });
+      continue;
+    }
+    if (response) {
+      return response;
+    }
+  }
+
+  return null;
+};
+
+const matchViewedBasemapResponse = async (requests) => {
+  const cache = await caches.open(VIEWED_BASEMAP_CACHE);
+  return matchReplayableBasemapResponse(cache, requests);
+};
+
 const matchExplicitBasemapPackage = async (requests) => {
   const cacheNames = await caches.keys();
 
@@ -221,11 +241,9 @@ const matchExplicitBasemapPackage = async (requests) => {
     }
 
     const cache = await caches.open(cacheName);
-    for (const request of requests) {
-      const response = await cache.match(request, { ignoreVary: true });
-      if (response) {
-        return response;
-      }
+    const response = await matchReplayableBasemapResponse(cache, requests);
+    if (response) {
+      return response;
     }
   }
 
@@ -246,9 +264,12 @@ const handleBasemapTile = async (event) => {
       : createOfflineTileResponse();
   }
 
-  const cachedResponse =
-    (await caches.match(canonicalRequest, { ignoreVary: true })) ||
-    (await caches.match(request, { ignoreVary: true }));
+  const cacheRequests = [canonicalRequest, request];
+  const [packagedResponse, viewedResponse] = await Promise.all([
+    matchExplicitBasemapPackage(cacheRequests),
+    matchViewedBasemapResponse(cacheRequests),
+  ]);
+  const cachedResponse = viewedResponse || packagedResponse;
 
   const networkResponsePromise = fetch(request)
     .then((response) => cacheViewedBasemapResponse(canonicalRequest, response))
