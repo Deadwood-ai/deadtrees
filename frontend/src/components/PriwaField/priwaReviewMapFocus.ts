@@ -63,6 +63,16 @@ export const getPriwaReviewFitPadding = (
   ];
 };
 
+export const getPriwaLeftmostVisibleRect = (
+  ...rects: Array<IPriwaReviewRect | null>
+): IPriwaReviewRect | null =>
+  rects.reduce<IPriwaReviewRect | null>((leftmost, rect) => {
+    if (!rect || rect.right <= rect.left || rect.bottom <= rect.top) {
+      return leftmost;
+    }
+    return !leftmost || rect.left < leftmost.left ? rect : leftmost;
+  }, null);
+
 export const getPriwaMapFitPadding = (
   mapElement: HTMLElement,
   isMobile: boolean,
@@ -75,10 +85,16 @@ export const getPriwaMapFitPadding = (
   const detailRect = document
     .querySelector<HTMLElement>("[data-priwa-review-detail-panel]")
     ?.getBoundingClientRect();
+  const treePanelRect = document
+    .querySelector<HTMLElement>("[data-priwa-review-tree-panel]")
+    ?.getBoundingClientRect();
   return getPriwaReviewFitPadding(
     mapElement.getBoundingClientRect(),
     queueRect ?? null,
-    detailRect ?? null,
+    getPriwaLeftmostVisibleRect(
+      detailRect ?? null,
+      treePanelRect ?? null,
+    ),
   );
 };
 

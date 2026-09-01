@@ -198,6 +198,7 @@ export default function PriwaFieldMap({
   const mapInteraction = usePriwaMapInteractionMode();
   const { modeRef, setMode } = mapInteraction;
   const isMobile = useIsMobile("lg");
+  const isMobileRef = useRef(isMobile);
   const userLocation = useUserLocationLayer(mapRef);
   const {
     layer: userLocationLayer,
@@ -215,6 +216,10 @@ export default function PriwaFieldMap({
     mapRef,
     mapInteraction.isSelectingOfflineArea,
   );
+
+  useEffect(() => {
+    isMobileRef.current = isMobile;
+  }, [isMobile]);
   usePriwaOfflineAreaLayer(
     offlineAreaLayerRef,
     offlineBasemapAreas,
@@ -400,7 +405,7 @@ export default function PriwaFieldMap({
       );
 
       if (pointFeature) {
-        if (window.matchMedia("(max-width: 767px)").matches) {
+        if (isMobileRef.current) {
           openPointForEditingRef.current(pointFeature);
         } else {
           selectReviewItemFromPointRef.current(pointFeature);
