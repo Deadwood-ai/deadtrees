@@ -30,6 +30,8 @@ describe("PriwaOfflineAreaSelection", () => {
     );
 
     expect(html).toContain('data-priwa-offline-selection-frame="true"');
+    expect(html).toContain("aspect-ratio:1");
+    expect(html).toContain("min(84cqw, 58cqh)");
     expect(html).toContain("198 ha");
     expect(html).toContain("5.559 Kacheln");
     expect(html).toContain("Karte verschieben oder zoomen");

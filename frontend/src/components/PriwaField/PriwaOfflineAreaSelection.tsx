@@ -4,6 +4,7 @@ import {
   PRIWA_BASEMAP_MAX_AREA_KM2,
   PRIWA_BASEMAP_MAX_TILES,
   PRIWA_BASEMAP_SELECTION_INSET_RATIO,
+  PRIWA_BASEMAP_SELECTION_MAX_HEIGHT_RATIO,
 } from "./priwaOfflineBasemap";
 import type { IPriwaBasemapCacheState } from "./usePriwaOfflineBasemap";
 import type { IPriwaOfflineSelectionPlan } from "./usePriwaOfflineSelectionPlan";
@@ -15,7 +16,10 @@ interface PriwaOfflineAreaSelectionProps {
   onConfirm: (plan: IPriwaOfflineSelectionPlan) => Promise<void>;
 }
 
-const selectionInset = `${PRIWA_BASEMAP_SELECTION_INSET_RATIO * 100}%`;
+const selectionSize = `${(1 - PRIWA_BASEMAP_SELECTION_INSET_RATIO * 2) * 100}`;
+const selectionMaxHeight = `${Math.round(
+  PRIWA_BASEMAP_SELECTION_MAX_HEIGHT_RATIO * 100,
+)}`;
 
 export default function PriwaOfflineAreaSelection({
   plan,
@@ -36,38 +40,26 @@ export default function PriwaOfflineAreaSelection({
       : 0;
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-[70]">
+    <div
+      className="pointer-events-none absolute inset-0 z-[70] overflow-hidden"
+      style={{ containerType: "size" }}
+    >
       <div
-        className="absolute inset-x-0 top-0 bg-slate-950/45"
-        style={{ height: selectionInset }}
-      />
-      <div
-        className="absolute inset-x-0 bottom-0 bg-slate-950/45"
-        style={{ height: selectionInset }}
-      />
-      <div
-        className="absolute left-0 bg-slate-950/45"
-        style={{
-          bottom: selectionInset,
-          top: selectionInset,
-          width: selectionInset,
-        }}
-      />
-      <div
-        className="absolute right-0 bg-slate-950/45"
-        style={{
-          bottom: selectionInset,
-          top: selectionInset,
-          width: selectionInset,
-        }}
-      />
-      <div
-        className="absolute rounded-md border-2 border-white shadow-[0_0_0_1px_rgba(5,150,105,0.95)]"
+        className="absolute left-1/2 top-1/2 rounded-md border-2 border-white"
         data-priwa-offline-selection-frame="true"
-        style={{ inset: selectionInset }}
+        style={{
+          aspectRatio: 1,
+          boxShadow:
+            "0 0 0 1px rgba(5,150,105,0.95), 0 0 0 100vmax rgba(2,6,23,0.45)",
+          transform: "translate(-50%, -50%)",
+          width: `min(${selectionSize}cqw, ${selectionMaxHeight}cqh)`,
+        }}
       />
 
-      <div className="pointer-events-auto absolute bottom-4 left-4 right-4 rounded-md bg-white/95 p-3 shadow-lg backdrop-blur md:bottom-5 md:left-1/2 md:max-w-lg md:-translate-x-1/2">
+      <div
+        className="pointer-events-auto absolute bottom-4 left-4 right-4 rounded-md bg-white/95 p-3 shadow-lg backdrop-blur md:bottom-5 md:left-1/2 md:max-w-lg md:-translate-x-1/2"
+        data-priwa-offline-selection-panel="true"
+      >
         <div className="text-sm font-medium text-gray-900">
           Karte verschieben oder zoomen
         </div>

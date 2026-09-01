@@ -46,15 +46,18 @@ describe("PRIWA offline basemap helpers", () => {
     );
   });
 
-  it("uses the clear center frame as the selected download extent", () => {
+  it("uses the largest centered square inside the selection inset", () => {
     expect(getPriwaBasemapSelectionExtent([0, 0, 1_000, 500])).toEqual([
-      80, 40, 920, 460,
+      355, 105, 645, 395,
+    ]);
+    expect(getPriwaBasemapSelectionExtent([0, 0, 500, 1_000])).toEqual([
+      40, 290, 460, 710,
     ]);
   });
 
-  it("plans a 200 hectare field package across every offline zoom level", () => {
+  it("plans a 300 hectare field package across every offline zoom level", () => {
     const plan = buildPriwaBasemapTilePlan([
-      909_000, 6_179_000, 911_132, 6_181_132,
+      908_694, 6_178_694, 911_306, 6_181_306,
     ]);
 
     expect(plan.minZoom).toBe(16);
@@ -66,9 +69,11 @@ describe("PRIWA offline basemap helpers", () => {
         (url) => new URL(url).hostname === "sgx.geodatenzentrum.de",
       ),
     ).toBe(true);
-    expect(plan.extent3857).toEqual([909_000, 6_179_000, 911_132, 6_181_132]);
-    expect(plan.areaKm2).toBeGreaterThan(1.95);
-    expect(plan.areaKm2).toBeLessThanOrEqual(2);
+    expect(plan.extent3857).toEqual([
+      908_694, 6_178_694, 911_306, 6_181_306,
+    ]);
+    expect(plan.areaKm2).toBeGreaterThan(2.95);
+    expect(plan.areaKm2).toBeLessThanOrEqual(3);
     expect(() => validatePriwaBasemapTilePlan(plan)).not.toThrow();
   });
 
