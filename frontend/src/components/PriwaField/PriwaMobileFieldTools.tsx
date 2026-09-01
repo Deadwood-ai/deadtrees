@@ -45,7 +45,7 @@ export default function PriwaMobileFieldTools({
     <>
       <Tooltip title="Bäume" placement="right">
         <Button
-          className="pointer-events-auto shadow-md md:hidden"
+          className="pointer-events-auto shadow-md min-[992px]:hidden"
           shape="circle"
           size="large"
           icon={<UnorderedListOutlined />}
@@ -62,7 +62,7 @@ export default function PriwaMobileFieldTools({
         open={isTreeListOpen}
         onClose={() => setTreeListOpen(false)}
         rootClassName="priwa-layer-sheet-root"
-        className="md:hidden"
+        className="min-[992px]:hidden"
         styles={{
           header: { padding: "12px 16px" },
           body: {

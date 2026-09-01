@@ -19,7 +19,7 @@ export default function PriwaWarnkarteLegend({
   return (
     <section
       data-testid="priwa-warnkarte-legend"
-      className="pointer-events-none absolute bottom-20 left-4 z-[55] w-[min(19rem,calc(100%-6rem))] rounded-xl border border-slate-200 bg-white/95 px-3 py-2.5 shadow-lg backdrop-blur md:bottom-5 md:left-1/2 md:w-80 md:-translate-x-1/2"
+      className="pointer-events-none absolute bottom-20 left-4 z-[55] w-[min(19rem,calc(100%-6rem))] rounded-xl border border-slate-200 bg-white/95 px-3 py-2.5 shadow-lg backdrop-blur min-[992px]:bottom-5 min-[992px]:left-1/2 min-[992px]:w-80 min-[992px]:-translate-x-1/2"
       aria-label="Warnkarten-Legende"
     >
       <div className="flex items-baseline justify-between gap-3">

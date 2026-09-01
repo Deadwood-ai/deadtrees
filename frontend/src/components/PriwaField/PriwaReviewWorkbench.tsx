@@ -224,7 +224,7 @@ export default function PriwaReviewWorkbench({
 
   return (
     <div
-      className={`pointer-events-none absolute inset-0 z-[52] hidden md:block ${
+      className={`pointer-events-none absolute inset-0 z-[52] hidden min-[992px]:block ${
         isHidden ? "invisible" : ""
       }`}
     >

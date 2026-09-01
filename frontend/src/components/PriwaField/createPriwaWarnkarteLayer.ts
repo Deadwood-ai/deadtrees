@@ -1,4 +1,6 @@
 import GeoJSON from "ol/format/GeoJSON";
+import type Map from "ol/Map";
+import { isEmpty } from "ol/extent";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import { Fill, Stroke, Style } from "ol/style";
@@ -56,4 +58,20 @@ export const setPriwaWarnkarteLayerData = (
       featureProjection: "EPSG:3857",
     }),
   );
+};
+
+export const fitPriwaWarnkarteLayer = (
+  map: Map,
+  layer: ReturnType<typeof createPriwaWarnkarteLayer>,
+  padding: [number, number, number, number],
+) => {
+  const extent = layer.getSource()?.getExtent();
+  const mapSize = map.getSize();
+  if (!extent || !mapSize || isEmpty(extent)) return;
+
+  map.getView().fit(extent, {
+    duration: 500,
+    maxZoom: 18,
+    padding,
+  });
 };

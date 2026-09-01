@@ -32,8 +32,10 @@ import {
 import { createPriwaBefallsgruppeLayer } from "./createPriwaBefallsgruppeLayer";
 import {
   createPriwaWarnkarteLayer,
+  fitPriwaWarnkarteLayer,
   setPriwaWarnkarteLayerData,
 } from "./createPriwaWarnkarteLayer";
+import { PriwaWarnkarteZoomControl } from "./PriwaWarnkarteMapControls";
 import { attachPriwaWarnkarteInteraction } from "./priwaWarnkarteMapInteraction";
 import PriwaPointDrawer from "./PriwaPointDrawer";
 import PriwaPointListPanel from "./PriwaPointListPanel";
@@ -47,6 +49,7 @@ import PriwaReviewWorkbench, {
   type PriwaReviewDetailMode,
 } from "./PriwaReviewWorkbench";
 import {
+  getPriwaMapFitPadding,
   getPriwaReviewMapCenter,
   getPriwaReviewTargetPixel,
 } from "./priwaReviewMapFocus";
@@ -194,7 +197,8 @@ export default function PriwaFieldMap({
   const [isOfflineMapModeActive, setOfflineMapModeActive] = useState(false);
   const mapInteraction = usePriwaMapInteractionMode();
   const { modeRef, setMode } = mapInteraction;
-  const isMobile = useIsMobile();
+  const isMobile = useIsMobile("lg");
+  const isMobileRef = useRef(isMobile);
   const userLocation = useUserLocationLayer(mapRef);
   const {
     layer: userLocationLayer,
@@ -212,6 +216,10 @@ export default function PriwaFieldMap({
     mapRef,
     mapInteraction.isSelectingOfflineArea,
   );
+
+  useEffect(() => {
+    isMobileRef.current = isMobile;
+  }, [isMobile]);
   usePriwaOfflineAreaLayer(
     offlineAreaLayerRef,
     offlineBasemapAreas,
@@ -397,7 +405,7 @@ export default function PriwaFieldMap({
       );
 
       if (pointFeature) {
-        if (window.matchMedia("(max-width: 767px)").matches) {
+        if (isMobileRef.current) {
           openPointForEditingRef.current(pointFeature);
         } else {
           selectReviewItemFromPointRef.current(pointFeature);
@@ -544,6 +552,17 @@ export default function PriwaFieldMap({
       duration: 500,
     });
   }, []);
+
+  const zoomToWarnkarte = useCallback(() => {
+    const map = mapRef.current;
+    const layer = warnkarteLayerRef.current;
+    if (!map || !layer) return;
+    fitPriwaWarnkarteLayer(
+      map,
+      layer,
+      getPriwaMapFitPadding(map.getTargetElement(), isMobile),
+    );
+  }, [isMobile]);
 
   const focusPointOnMap = useCallback(
     (point: IPriwaPoint) => {
@@ -785,7 +804,7 @@ export default function PriwaFieldMap({
       <div ref={containerRef} className="absolute inset-0" />
 
       {mapInteraction.mode === "browse" && (
-        <div className="priwa-map-control-stack pointer-events-none absolute left-4 z-[55] flex flex-col gap-2 md:left-[22.5rem]">
+        <div className="priwa-map-control-stack pointer-events-none absolute left-4 z-[55] flex flex-col gap-2 min-[992px]:left-[22.5rem]">
           <Tooltip title={locationButtonTitle}>
             <Button
               className={
@@ -818,6 +837,9 @@ export default function PriwaFieldMap({
             onClear={handleClearBasemapArea}
           />
           {additionalMapControl}
+          {!!warnkarteOverlay?.features.length && warnkarteVisible && (
+            <PriwaWarnkarteZoomControl onZoom={zoomToWarnkarte} />
+          )}
           {isMobile && (
             <PriwaMobileFieldTools
               points={points}
@@ -921,7 +943,7 @@ export default function PriwaFieldMap({
             <div className="absolute left-0 top-1/2 w-12 border-t-2 border-white drop-shadow" />
             <div className="absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-emerald-600 bg-white/80" />
           </div>
-          <div className="pointer-events-auto absolute bottom-4 left-4 right-4 flex gap-2 rounded-md bg-white/95 p-2 shadow-lg backdrop-blur md:bottom-5">
+          <div className="pointer-events-auto absolute bottom-4 left-4 right-4 flex gap-2 rounded-md bg-white/95 p-2 shadow-lg backdrop-blur min-[992px]:bottom-5">
             <Button block onClick={cancelMapPlacement}>
               Abbrechen
             </Button>
@@ -942,7 +964,7 @@ export default function PriwaFieldMap({
       )}
 
       {mapInteraction.mode === "browse" && (
-        <div className="priwa-map-status-stack pointer-events-none absolute right-4 z-[55] flex max-w-[calc(100%-5.75rem)] flex-col items-end gap-1.5 md:right-[24.5rem]">
+        <div className="priwa-map-status-stack pointer-events-none absolute right-4 z-[55] flex max-w-[calc(100%-5.75rem)] flex-col items-end gap-1.5 min-[992px]:right-[24.5rem]">
           {locationHintLabel && (
             <div className="rounded-md bg-white/90 px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm backdrop-blur">
               {locationHintLabel}
@@ -954,7 +976,7 @@ export default function PriwaFieldMap({
 
       {dataErrorMessage && mapInteraction.mode === "browse" && (
         <Alert
-          className="absolute bottom-20 left-4 right-4 z-[55] shadow-lg md:left-auto md:w-96"
+          className="absolute bottom-20 left-4 right-4 z-[55] shadow-lg min-[992px]:left-auto min-[992px]:w-96"
           type="error"
           showIcon
           message="PRIWA Daten konnten nicht geladen werden"

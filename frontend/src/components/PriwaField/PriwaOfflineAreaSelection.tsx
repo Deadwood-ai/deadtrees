@@ -57,7 +57,7 @@ export default function PriwaOfflineAreaSelection({
       />
 
       <div
-        className="pointer-events-auto absolute bottom-4 left-4 right-4 rounded-md bg-white/95 p-3 shadow-lg backdrop-blur md:bottom-5 md:left-1/2 md:max-w-lg md:-translate-x-1/2"
+        className="pointer-events-auto absolute bottom-4 left-4 right-4 rounded-md bg-white/95 p-3 shadow-lg backdrop-blur min-[992px]:bottom-5 min-[992px]:left-1/2 min-[992px]:max-w-lg min-[992px]:-translate-x-1/2"
         data-priwa-offline-selection-panel="true"
       >
         <div className="text-sm font-medium text-gray-900">

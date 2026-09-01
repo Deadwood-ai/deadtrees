@@ -1,6 +1,10 @@
 import { Grid } from "antd";
 
-export const useIsMobile = (): boolean => {
+type DesktopBreakpoint = "md" | "lg";
+
+export const useIsMobile = (
+	desktopBreakpoint: DesktopBreakpoint = "md",
+): boolean => {
 	const screens = Grid.useBreakpoint();
-	return !screens.md;
+	return !screens[desktopBreakpoint];
 };
