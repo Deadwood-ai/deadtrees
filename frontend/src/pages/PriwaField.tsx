@@ -7,7 +7,6 @@ import { usePriwaProjectMemberships } from "../hooks/usePriwaProjectMemberships"
 import { useIsMobile } from "../hooks/useIsMobile";
 import { Alert, App, Button, Result, Spin } from "antd";
 import PriwaWarnkarteAdminPanel from "../components/PriwaField/PriwaWarnkarteAdminPanel";
-import PriwaWarnkarteLegend from "../components/PriwaField/PriwaWarnkarteLegend";
 import {
   PriwaWarnkarteAdminControl,
   PriwaWarnkarteVisibilityControl,
@@ -251,11 +250,6 @@ export default function PriwaField() {
         syncSummary={syncSummary}
         onSyncNow={syncNow}
       />
-      {hasWarnkarte && warnkarte.isVisible && (
-        <PriwaWarnkarteLegend
-          sourceDate={warnkarte.displayedOverlay?.source_date ?? null}
-        />
-      )}
     </div>
   );
 }

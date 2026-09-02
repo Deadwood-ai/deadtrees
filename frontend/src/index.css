@@ -425,7 +425,7 @@
 
 .priwa-map-control-stack,
 .priwa-map-status-stack {
-  top: calc(env(safe-area-inset-top, 0px) + 5.75rem);
+  top: calc(env(safe-area-inset-top, 0px) + 5.25rem);
 }
 
 .priwa-warnkarte-tooltip {

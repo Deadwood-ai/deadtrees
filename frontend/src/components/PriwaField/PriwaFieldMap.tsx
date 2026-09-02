@@ -42,11 +42,11 @@ import PriwaPointListPanel from "./PriwaPointListPanel";
 import PriwaOfflineStatus from "./PriwaOfflineStatus";
 import PriwaBefallsgruppeEditor from "./PriwaBefallsgruppeEditor";
 import PriwaBaseLayerControl from "./PriwaBaseLayerControl";
-import PriwaMapLayersSheet from "./PriwaMapLayersSheet";
 import PriwaMobileFieldTools from "./PriwaMobileFieldTools";
 import PriwaMobilePrimaryActions from "./PriwaMobilePrimaryActions";
 import PriwaOfflineAreaSelection from "./PriwaOfflineAreaSelection";
 import PriwaOfflineMapPanel from "./PriwaOfflineMapPanel";
+import PriwaWarnkarteMapUi from "./PriwaWarnkarteMapUi";
 import PriwaReviewWorkbench, {
   type PriwaReviewDetailMode,
 } from "./PriwaReviewWorkbench";
@@ -89,10 +89,10 @@ interface PriwaFieldMapProps {
   isLoadingPoints?: boolean;
   isSavingPoint?: boolean;
   projectName: string;
-  warnkarteOverlay?: IPriwaWarnkarteOverlay | null;
-  warnkarteVisible?: boolean;
-  warnkarteLoading?: boolean;
-  onWarnkarteVisibilityChange?: (visible: boolean) => void;
+  warnkarteOverlay: IPriwaWarnkarteOverlay | null;
+  warnkarteVisible: boolean;
+  warnkarteLoading: boolean;
+  onWarnkarteVisibilityChange: (visible: boolean) => void;
   additionalMapControl?: ReactNode;
   reviewDetailMode?: PriwaReviewDetailMode;
   mosaics?: IPriwaMosaic[];
@@ -129,9 +129,9 @@ export default function PriwaFieldMap({
   isLoadingPoints = false,
   isSavingPoint = false,
   projectName,
-  warnkarteOverlay = null,
-  warnkarteVisible = true,
-  warnkarteLoading = false,
+  warnkarteOverlay,
+  warnkarteVisible,
+  warnkarteLoading,
   onWarnkarteVisibilityChange,
   additionalMapControl,
   reviewDetailMode,
@@ -1052,21 +1052,18 @@ export default function PriwaFieldMap({
         />
       )}
 
-      {mapInteraction.mode === "browse" && isMobile && (
-        <PriwaMapLayersSheet
-          open={isMapLayersOpen}
-          baseLayer={baseLayer}
-          warnkarteAvailable={!!warnkarteOverlay?.features.length}
-          warnkarteLoading={warnkarteLoading}
-          warnkarteVisible={warnkarteVisible}
-          onClose={() => setActiveMapPanel(null)}
-          onBaseLayerChange={setBaseLayer}
-          onWarnkarteVisibilityChange={(visible) =>
-            onWarnkarteVisibilityChange?.(visible)
-          }
-          onZoomToWarnkarte={zoomToWarnkarteFromSheet}
-        />
-      )}
+      <PriwaWarnkarteMapUi
+        isMobile={isMobile}
+        isLayersOpen={mapInteraction.mode === "browse" && isMapLayersOpen}
+        baseLayer={baseLayer}
+        overlay={warnkarteOverlay}
+        isLoading={warnkarteLoading}
+        isVisible={warnkarteVisible}
+        onCloseLayers={() => setActiveMapPanel(null)}
+        onBaseLayerChange={setBaseLayer}
+        onVisibilityChange={onWarnkarteVisibilityChange}
+        onZoom={zoomToWarnkarteFromSheet}
+      />
 
       {mapInteraction.mode === "browse" && (
         <div className="priwa-map-status-stack pointer-events-none absolute right-4 z-[55] flex max-w-[calc(100%-5.75rem)] flex-col items-end gap-1.5 min-[992px]:right-[24.5rem]">

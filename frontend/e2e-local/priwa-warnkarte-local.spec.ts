@@ -310,6 +310,7 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await expect(page.getByText("Käferbaum bearbeiten")).toBeVisible();
     await page.getByRole("button", { name: "Close" }).click();
     await page.getByRole("button", { name: "Kartenebenen öffnen" }).click();
+    await page.getByRole("switch", { name: "Warnkarte einblenden" }).click();
     await page.getByRole("button", { name: "Zur Warnkarte zoomen" }).click();
     await page.waitForTimeout(600);
     await page.getByTestId("priwa-field-map").click({
@@ -338,6 +339,7 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await zoomControl.getByTitle("Zoom in").click();
     await expect.poll(() => scaleLine.innerText()).not.toBe(scaleBeforeZoom);
 
+    await page.getByRole("button", { name: "Warnkarte einblenden" }).click();
     await page.getByRole("button", { name: "Zur Warnkarte zoomen" }).click();
     await page.waitForTimeout(600);
     await page.getByTestId("priwa-field-map").click({
@@ -356,25 +358,24 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await installWarnkarteApi(page);
     await page.goto("/priwa-field");
 
-    await expect(page.getByTestId("priwa-warnkarte-legend")).toContainText(
-      "Warnkarte 25.06.2024",
-    );
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toHaveCount(0);
     const warnkarteControl = page
       .locator(".priwa-map-control-stack")
       .getByRole("button", { name: "Warnkarte verwalten" });
     const visibilityControl = page
       .locator(".priwa-map-control-stack")
-      .getByRole("button", { name: "Warnkarte ausblenden" });
-    await expect(visibilityControl).toHaveAttribute("aria-pressed", "true");
+      .getByRole("button", { name: "Warnkarte einblenden" });
+    await expect(visibilityControl).toHaveAttribute("aria-pressed", "false");
     const zoomToWarnkarte = page.getByRole("button", {
       name: "Zur Warnkarte zoomen",
     });
-    await expect(zoomToWarnkarte).toBeVisible();
-    await visibilityControl.click();
-    await expect(page.getByTestId("priwa-warnkarte-legend")).toHaveCount(0);
     await expect(zoomToWarnkarte).toHaveCount(0);
-    await page.getByRole("button", { name: "Warnkarte einblenden" }).click();
+    await visibilityControl.click();
     await expect(page.getByTestId("priwa-warnkarte-legend")).toBeVisible();
+    await expect(zoomToWarnkarte).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Warnkarten-Legende schließen" }),
+    ).toHaveCount(0);
 
     await page.getByRole("button", { name: "Zur Warnkarte zoomen" }).click();
     await page.waitForTimeout(600);
@@ -497,9 +498,7 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await expect(page.getByTestId("priwa-warnkarte-admin-panel")).toHaveCount(
       0,
     );
-    await expect(page.getByTestId("priwa-warnkarte-legend")).toContainText(
-      "Warnkarte 25.06.2024",
-    );
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toHaveCount(0);
   });
 
   test("desktop admin archives and restores an inactive Warnkarte", async ({
@@ -624,9 +623,7 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await page.goto("/priwa-field");
     await page.getByRole("button", { name: "Accept" }).click();
 
-    await expect(page.getByTestId("priwa-warnkarte-legend")).toContainText(
-      "Warnkarte 25.06.2024",
-    );
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toHaveCount(0);
     await expect(
       page.getByRole("button", { name: "Warnkarte verwalten" }),
     ).toHaveCount(0);
@@ -645,8 +642,25 @@ test.describe("PRIWA Warnkarte local UI", () => {
     const layerSheet = page.getByLabel("Kartenebenen", { exact: true });
     const layerSheetBox = await layerSheet.boundingBox();
     expect(layerSheetBox).not.toBeNull();
-    expect(layerSheetBox!.height / 852).toBeGreaterThan(0.22);
-    expect(layerSheetBox!.height / 852).toBeLessThan(0.36);
+    expect(layerSheetBox!.height / 852).toBeGreaterThan(0.36);
+    expect(layerSheetBox!.height / 852).toBeLessThan(0.4);
+    const warnkarteToggle = page.getByRole("switch", {
+      name: "Warnkarte einblenden",
+    });
+    await expect(warnkarteToggle).toBeVisible();
+    const warnkarteToggleBox = await warnkarteToggle.boundingBox();
+    expect(warnkarteToggleBox).not.toBeNull();
+    expect(warnkarteToggleBox!.y + warnkarteToggleBox!.height).toBeLessThan(
+      layerSheetBox!.y + layerSheetBox!.height,
+    );
+    await expect(
+      page.getByRole("switch", { name: "Warnkarten-Legende anzeigen" }),
+    ).toBeDisabled();
+    await warnkarteToggle.click();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toBeVisible();
+    await expect(
+      page.getByRole("switch", { name: "Warnkarten-Legende anzeigen" }),
+    ).toBeChecked();
     const layerSheetHeaderBox = await layerSheet
       .locator("header")
       .boundingBox();
@@ -674,7 +688,15 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await expect(page.locator(".priwa-warnkarte-tooltip")).toContainText(
       "Wahrscheinlichkeit: 60 %",
     );
+    await page
+      .getByRole("button", { name: "Warnkarten-Legende schließen" })
+      .click();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toHaveCount(0);
     await page.getByRole("button", { name: "Kartenebenen öffnen" }).click();
+    await page
+      .getByRole("switch", { name: "Warnkarten-Legende anzeigen" })
+      .click();
+    await expect(page.getByTestId("priwa-warnkarte-legend")).toBeVisible();
     await page.getByRole("switch", { name: "Warnkarte ausblenden" }).click();
     await expect(page.getByTestId("priwa-warnkarte-legend")).toHaveCount(0);
     await expect(
