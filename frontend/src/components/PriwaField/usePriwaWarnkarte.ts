@@ -34,6 +34,8 @@ export function usePriwaWarnkarte(projectId: string, canManage: boolean) {
     enabled: !!projectId && !!token && canManage,
     queryFn: () => fetchPriwaWarnkarteVersions(projectId, token!),
   });
+  const activeOverlay = activeQuery.data ?? null;
+  const refetchActiveOverlay = activeQuery.refetch;
 
   const requireToken = () => {
     if (!token) throw new Error("Die Anmeldung ist abgelaufen.");
@@ -119,17 +121,30 @@ export function usePriwaWarnkarte(projectId: string, canManage: boolean) {
     setSelectedOverlay(null);
   }, []);
 
+  const activateOverlay = useCallback(async () => {
+    if (selectedOverlay?.features.length || activeOverlay?.features.length) {
+      setVisible(true);
+      return true;
+    }
+
+    const result = await refetchActiveOverlay();
+    const isAvailable = !!result.data?.features.length;
+    setVisible(isAvailable);
+    return isAvailable;
+  }, [activeOverlay, refetchActiveOverlay, selectedOverlay]);
+
   return {
-    activeOverlay: activeQuery.data ?? null,
-    displayedOverlay: selectedOverlay ?? activeQuery.data ?? null,
+    activeOverlay,
+    displayedOverlay: selectedOverlay ?? activeOverlay,
     isVisible,
-    overlayError: activeQuery.error,
+    isLoadingOverlay: activeQuery.isFetching,
     selectedOverlay,
     versions: versionsQuery.data ?? [],
     versionsError: versionsQuery.error,
     isLoadingVersions: versionsQuery.isLoading,
     clearSelectedVersion,
-    toggleVisibility: () => setVisible((visible) => !visible),
+    activateOverlay,
+    setVisibility: setVisible,
     importFile,
     archiveVersion,
     restoreVersion,

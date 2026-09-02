@@ -7,6 +7,7 @@ import {
 } from "@ant-design/icons";
 import { Button, Progress, Typography } from "antd";
 
+import MobileBottomSheet from "../MapControls/mobile/MobileBottomSheet";
 import type { IPriwaSyncSummary } from "./priwaOfflineSync";
 import type { IPriwaOfflineBasemapArea } from "./priwaOfflineStore";
 import type { IPriwaBasemapCacheState } from "./usePriwaOfflineBasemap";
@@ -19,6 +20,7 @@ interface PriwaOfflineMapPanelProps {
   needsRefresh: boolean;
   readyAreaCount: number;
   syncSummary?: IPriwaSyncSummary;
+  isMobile: boolean;
   onClose: () => void;
   onStartSelection: () => void;
   onClear: () => Promise<void>;
@@ -41,6 +43,7 @@ export default function PriwaOfflineMapPanel({
   needsRefresh,
   readyAreaCount,
   syncSummary,
+  isMobile,
   onClose,
   onStartSelection,
   onClear,
@@ -59,31 +62,14 @@ export default function PriwaOfflineMapPanel({
       : 0;
   const syncLabel = getSyncLabel(syncSummary);
 
-  return (
-    <section
-      className="pointer-events-auto absolute bottom-4 left-4 right-4 z-[70] max-h-[55dvh] overflow-y-auto rounded-md bg-white/95 p-3 shadow-lg backdrop-blur min-[992px]:bottom-5 min-[992px]:left-1/2 min-[992px]:max-w-lg min-[992px]:-translate-x-1/2"
-      aria-label="Offline-Karten"
-      data-priwa-offline-map-panel="true"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <Typography.Text strong>Offline-Karten</Typography.Text>
-          <div className="mt-1 text-xs text-gray-600">
-            {Math.round(coverageRatio * 100)} % der aktuellen Kartenansicht sind
-            offline verfügbar.
-          </div>
-        </div>
-        <Button
-          type="text"
-          size="small"
-          icon={<CloseOutlined />}
-          aria-label="Offline-Karten schließen"
-          onClick={onClose}
-        />
+  const content = (
+    <div data-priwa-offline-map-panel="true">
+      <div className="text-xs text-gray-600">
+        {Math.round(coverageRatio * 100)} % der aktuellen Kartenansicht sind
+        offline verfügbar.
       </div>
-
       {hasAreas && (
-        <div className="mt-3 rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-xs text-emerald-900">
+        <div className="mt-2 rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-xs text-emerald-900">
           {readyAreaCount} von {areas.length} Bereichen bereit · {totalAreaHa}{" "}
           ha
         </div>
@@ -164,6 +150,42 @@ export default function PriwaOfflineMapPanel({
           Offline-Karten werden von diesem Browser nicht unterstützt.
         </div>
       )}
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <MobileBottomSheet
+        open
+        title="Offline-Karten"
+        closeLabel="Offline-Karten schließen"
+        onClose={onClose}
+        initialSnap="compact"
+        compactRatio={0.28}
+        expandedRatio={0.7}
+        hideFrom="lg"
+      >
+        {content}
+      </MobileBottomSheet>
+    );
+  }
+
+  return (
+    <section
+      className="pointer-events-auto absolute bottom-4 left-4 right-4 z-[70] max-h-[55dvh] overflow-y-auto rounded-md bg-white/95 p-3 shadow-lg backdrop-blur min-[992px]:bottom-5 min-[992px]:left-1/2 min-[992px]:max-w-lg min-[992px]:-translate-x-1/2"
+      aria-label="Offline-Karten"
+    >
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <Typography.Text strong>Offline-Karten</Typography.Text>
+        <Button
+          type="text"
+          size="small"
+          icon={<CloseOutlined />}
+          aria-label="Offline-Karten schließen"
+          onClick={onClose}
+        />
+      </div>
+      {content}
     </section>
   );
 }

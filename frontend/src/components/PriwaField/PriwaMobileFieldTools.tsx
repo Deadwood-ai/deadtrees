@@ -2,6 +2,7 @@ import { SearchOutlined, UnorderedListOutlined } from "@ant-design/icons";
 import { Button, Drawer, Empty, Input, Tooltip } from "antd";
 import { useMemo, useState } from "react";
 
+import MapLayersIcon from "../MapControls/mobile/MapLayersIcon";
 import { indexPriwaBefallsgruppenByTreeId } from "./priwaBefallsgruppenState";
 import PriwaPointCompactList from "./PriwaPointCompactList";
 import type { IPriwaBefallsgruppe, IPriwaPoint } from "./types";
@@ -9,6 +10,11 @@ import type { IPriwaBefallsgruppe, IPriwaPoint } from "./types";
 interface PriwaMobileFieldToolsProps {
   points: IPriwaPoint[];
   groups: IPriwaBefallsgruppe[];
+  isLayersOpen: boolean;
+  isTreeListOpen: boolean;
+  onOpenLayers: () => void;
+  onOpenTreeList: () => void;
+  onCloseTreeList: () => void;
   onEditPoint: (point: IPriwaPoint) => void;
   onZoomToPoint: (point: IPriwaPoint) => void;
 }
@@ -16,10 +22,14 @@ interface PriwaMobileFieldToolsProps {
 export default function PriwaMobileFieldTools({
   points,
   groups,
+  isLayersOpen,
+  isTreeListOpen,
+  onOpenLayers,
+  onOpenTreeList,
+  onCloseTreeList,
   onEditPoint,
   onZoomToPoint,
 }: PriwaMobileFieldToolsProps) {
-  const [isTreeListOpen, setTreeListOpen] = useState(false);
   const [query, setQuery] = useState("");
   const groupByTreeId = useMemo(
     () => indexPriwaBefallsgruppenByTreeId(groups),
@@ -38,18 +48,30 @@ export default function PriwaMobileFieldTools({
 
   const showPointOnMap = (point: IPriwaPoint) => {
     onZoomToPoint(point);
-    setTreeListOpen(false);
+    onCloseTreeList();
   };
 
   return (
     <>
+      <Tooltip title="Kartenebenen" placement="right">
+        <Button
+          className="pointer-events-auto shadow-md min-[992px]:hidden"
+          type={isLayersOpen ? "primary" : "default"}
+          shape="circle"
+          size="large"
+          icon={<MapLayersIcon />}
+          onClick={onOpenLayers}
+          aria-label="Kartenebenen öffnen"
+          aria-pressed={isLayersOpen}
+        />
+      </Tooltip>
       <Tooltip title="Bäume" placement="right">
         <Button
           className="pointer-events-auto shadow-md min-[992px]:hidden"
           shape="circle"
           size="large"
           icon={<UnorderedListOutlined />}
-          onClick={() => setTreeListOpen(true)}
+          onClick={onOpenTreeList}
           aria-label="Baumliste öffnen"
           aria-pressed={isTreeListOpen}
         />
@@ -60,7 +82,7 @@ export default function PriwaMobileFieldTools({
         placement="bottom"
         height="78dvh"
         open={isTreeListOpen}
-        onClose={() => setTreeListOpen(false)}
+        onClose={onCloseTreeList}
         rootClassName="priwa-layer-sheet-root"
         className="min-[992px]:hidden"
         styles={{

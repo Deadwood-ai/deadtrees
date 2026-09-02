@@ -31,13 +31,19 @@ const polygon = {
 };
 
 async function installWarnkarteAdmin(page: Page) {
-  await installLocalSession(page, {
+  const session = await installLocalSession(page, {
     user: admin,
     supabaseUrl: localSupabaseUrl,
     refreshToken: "priwa-warnkarte-refresh-token",
   });
 
-  await page.route(`${localSupabaseUrl}/rest/v1/**`, fulfillSupabaseRequest);
+  // Keep the mocked journey independent from the worktree's generated
+  // Supabase endpoint. The application and test runner can legitimately read
+  // that endpoint from different env files.
+  await page.route("**/auth/v1/user", (route) =>
+    route.fulfill({ contentType: "application/json", json: session.user }),
+  );
+  await page.route("**/rest/v1/**", fulfillSupabaseRequest);
 }
 
 async function fulfillSupabaseRequest(route: Route) {
@@ -289,7 +295,9 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await installWarnkarteApi(page);
     await page.goto("/priwa-field");
 
-    await expect(page.locator("[data-priwa-review-queue-panel]")).toHaveCount(0);
+    await expect(page.locator("[data-priwa-review-queue-panel]")).toHaveCount(
+      0,
+    );
     await expect(
       page.getByRole("button", { name: "Warnkarte verwalten" }),
     ).toHaveCount(0);
@@ -301,6 +309,7 @@ test.describe("PRIWA Warnkarte local UI", () => {
     });
     await expect(page.getByText("Käferbaum bearbeiten")).toBeVisible();
     await page.getByRole("button", { name: "Close" }).click();
+    await page.getByRole("button", { name: "Kartenebenen öffnen" }).click();
     await page.getByRole("button", { name: "Zur Warnkarte zoomen" }).click();
     await page.waitForTimeout(600);
     await page.getByTestId("priwa-field-map").click({
@@ -580,7 +589,16 @@ test.describe("PRIWA Warnkarte local UI", () => {
       });
     await page.route("**/priwa/warnkarte/versions?*", unavailable);
     await page.route("**/priwa/warnkarte/validate", unavailable);
+    await page.route("**/priwa/warnkarte/active?*", unavailable);
     await page.goto("/priwa-field");
+
+    const loadError = page.getByText("Warnkarte konnte nicht geladen werden", {
+      exact: true,
+    });
+    await expect(loadError).toHaveCount(0);
+    await page.getByRole("button", { name: "Warnkarte einblenden" }).click();
+    await expect(loadError).toBeVisible();
+    await expect(loadError).toBeHidden({ timeout: 5_000 });
 
     await page.getByRole("button", { name: "Warnkarte verwalten" }).click();
     const explanation =
@@ -614,6 +632,40 @@ test.describe("PRIWA Warnkarte local UI", () => {
     ).toHaveCount(0);
     await expect(page.locator(".dt-map-zoom-control")).toBeHidden();
     await expect(page.locator(".dt-map-scale-control")).toBeVisible();
+    await page.getByRole("button", { name: "Kartenebenen öffnen" }).click();
+    await page.getByRole("button", { name: "Baumliste öffnen" }).click();
+    await expect(page.getByLabel("Kartenebenen", { exact: true })).toHaveCount(
+      0,
+    );
+    await expect(
+      page.getByText("Käferbäume (1)", { exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Kartenebenen öffnen" }).click();
+    const layerSheet = page.getByLabel("Kartenebenen", { exact: true });
+    const layerSheetBox = await layerSheet.boundingBox();
+    expect(layerSheetBox).not.toBeNull();
+    expect(layerSheetBox!.height / 852).toBeGreaterThan(0.22);
+    expect(layerSheetBox!.height / 852).toBeLessThan(0.36);
+    const layerSheetHeaderBox = await layerSheet
+      .locator("header")
+      .boundingBox();
+    expect(layerSheetHeaderBox).not.toBeNull();
+    await page.mouse.move(
+      layerSheetHeaderBox!.x + layerSheetHeaderBox!.width / 2,
+      layerSheetHeaderBox!.y + 12,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      layerSheetHeaderBox!.x + layerSheetHeaderBox!.width / 2,
+      layerSheetHeaderBox!.y - 280,
+      { steps: 4 },
+    );
+    await page.mouse.up();
+    await expect(layerSheet).toHaveAttribute(
+      "data-mobile-bottom-sheet-snap",
+      "expanded",
+    );
     await page.getByRole("button", { name: "Zur Warnkarte zoomen" }).click();
     await page.waitForTimeout(600);
     await page.getByTestId("priwa-field-map").click({
@@ -622,14 +674,79 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await expect(page.locator(".priwa-warnkarte-tooltip")).toContainText(
       "Wahrscheinlichkeit: 60 %",
     );
-    await page.getByRole("button", { name: "Warnkarte ausblenden" }).click();
+    await page.getByRole("button", { name: "Kartenebenen öffnen" }).click();
+    await page.getByRole("switch", { name: "Warnkarte ausblenden" }).click();
     await expect(page.getByTestId("priwa-warnkarte-legend")).toHaveCount(0);
     await expect(
       page.getByRole("button", { name: "Zur Warnkarte zoomen" }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: "Warnkarte einblenden" }),
+      page.getByRole("switch", { name: "Warnkarte einblenden" }),
     ).toBeVisible();
     await expect(page.getByTestId("priwa-field-map")).toBeVisible();
+    await page.getByRole("button", { name: "Kartenebenen schließen" }).click();
+    await page.getByRole("button", { name: /Offline-Karten öffnen/ }).click();
+    await expect(
+      page.getByLabel("Offline-Karten", { exact: true }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Neuen Bereich auswählen" }).click();
+    const selectionFrame = page.locator(
+      '[data-priwa-offline-selection-frame="true"]',
+    );
+    const selectionSheet = page.getByLabel("Offline-Bereich auswählen", {
+      exact: true,
+    });
+    const [selectionFrameBox, selectionSheetBox] = await Promise.all([
+      selectionFrame.boundingBox(),
+      selectionSheet.boundingBox(),
+    ]);
+    expect(selectionFrameBox).not.toBeNull();
+    expect(selectionSheetBox).not.toBeNull();
+    expect(
+      Math.abs(selectionFrameBox!.width - selectionFrameBox!.height),
+    ).toBeLessThan(2);
+    expect(selectionFrameBox!.y + selectionFrameBox!.height).toBeLessThan(
+      selectionSheetBox!.y,
+    );
+    const [selectionTitleBox, selectionCloseBox] = await Promise.all([
+      page
+        .getByRole("heading", { name: "Offline-Bereich auswählen" })
+        .boundingBox(),
+      page
+        .getByRole("button", { name: "Bereichsauswahl schließen" })
+        .boundingBox(),
+    ]);
+    expect(selectionTitleBox).not.toBeNull();
+    expect(selectionCloseBox).not.toBeNull();
+    expect(selectionTitleBox!.x).toBeGreaterThanOrEqual(12);
+    expect(selectionCloseBox!.x + selectionCloseBox!.width).toBeLessThanOrEqual(
+      381,
+    );
+  });
+
+  test("mobile only reports an unavailable Warnkarte after activation", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 393, height: 852 });
+    await installWarnkarteAdmin(page);
+    await page.route("**/priwa/warnkarte/active?*", (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        json: { detail: "Offline" },
+      }),
+    );
+    await page.goto("/priwa-field");
+    await page.getByRole("button", { name: "Accept" }).click();
+
+    const errorMessage = page.getByText(
+      "Warnkarte konnte nicht geladen werden",
+      { exact: true },
+    );
+    await expect(errorMessage).toHaveCount(0);
+    await page.getByRole("button", { name: "Kartenebenen öffnen" }).click();
+    await page.getByRole("switch", { name: "Warnkarte einblenden" }).click();
+    await expect(errorMessage).toBeVisible();
+    await expect(errorMessage).toBeHidden({ timeout: 5_000 });
   });
 });

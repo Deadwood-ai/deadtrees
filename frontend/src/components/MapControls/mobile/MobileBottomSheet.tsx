@@ -1,23 +1,20 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { Button } from "antd";
 import { CloseOutlined } from "@ant-design/icons";
 
-type SheetSnap = "compact" | "expanded";
+export type MobileBottomSheetSnap = "compact" | "expanded";
 
 interface MobileBottomSheetProps {
   children: ReactNode;
   open: boolean;
   title: string;
   onClose: () => void;
+  closeLabel?: string;
   compactRatio?: number;
   expandedRatio?: number;
+  initialSnap?: MobileBottomSheetSnap;
+  hideFrom?: "md" | "lg";
 }
 
 const clamp = (value: number, min: number, max: number) =>
@@ -26,18 +23,26 @@ const clamp = (value: number, min: number, max: number) =>
 const getViewportHeight = () =>
   typeof window === "undefined" ? 844 : window.innerHeight;
 const CLOSE_THRESHOLD_PX = 160;
+const MIN_CLOSE_HEIGHT_PX = 96;
 const CLOSE_ANIMATION_MS = 220;
+const hideFromClass = {
+  md: "md:hidden",
+  lg: "min-[992px]:hidden",
+} as const;
 
 const MobileBottomSheet = ({
   children,
   open,
   title,
   onClose,
+  closeLabel = `Close ${title}`,
   compactRatio = 0.52,
   expandedRatio = 0.86,
+  initialSnap = "expanded",
+  hideFrom = "md",
 }: MobileBottomSheetProps) => {
   const [viewportHeight, setViewportHeight] = useState(getViewportHeight);
-  const [snap, setSnap] = useState<SheetSnap>("expanded");
+  const [snap, setSnap] = useState<MobileBottomSheetSnap>(initialSnap);
   const [dragHeight, setDragHeight] = useState<number | null>(null);
   const [isClosing, setIsClosing] = useState(false);
   const dragStartRef = useRef<{
@@ -56,17 +61,21 @@ const MobileBottomSheet = ({
 
   useEffect(() => {
     if (open) {
-      setSnap("expanded");
+      setSnap(initialSnap);
       setDragHeight(null);
       setIsClosing(false);
     }
-  }, [open]);
+  }, [initialSnap, open]);
 
   const compactHeight = useMemo(
     () => Math.round(viewportHeight * compactRatio),
     [compactRatio, viewportHeight],
   );
-  const closeHeight = Math.max(180, compactHeight - CLOSE_THRESHOLD_PX);
+  const closeDragDistance = Math.min(CLOSE_THRESHOLD_PX, compactHeight * 0.4);
+  const closeHeight = Math.max(
+    MIN_CLOSE_HEIGHT_PX,
+    compactHeight - closeDragDistance,
+  );
   const expandedHeight = useMemo(
     () => Math.round(viewportHeight * expandedRatio),
     [expandedRatio, viewportHeight],
@@ -147,7 +156,7 @@ const MobileBottomSheet = ({
 
   return (
     <section
-      className="deadtrees-mobile-control-panel pointer-events-auto fixed inset-x-0 bottom-0 z-[1000] mx-auto flex w-full max-w-[640px] flex-col overflow-hidden rounded-t-[24px] border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 md:hidden"
+      className={`map-mobile-bottom-sheet pointer-events-auto fixed inset-x-0 bottom-0 z-[1000] mx-auto flex w-full max-w-[640px] flex-col overflow-hidden rounded-t-[24px] border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 ${hideFromClass[hideFrom]}`}
       style={{
         height: currentHeight,
         transform: isClosing ? "translateY(110%)" : "translateY(0)",
@@ -157,6 +166,7 @@ const MobileBottomSheet = ({
             : "none",
       }}
       aria-label={title}
+      data-mobile-bottom-sheet-snap={snap}
     >
       <header
         className="touch-none select-none border-b border-slate-100 bg-white px-4 pb-3 pt-2"
@@ -164,15 +174,13 @@ const MobileBottomSheet = ({
       >
         <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-slate-300" />
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="truncate text-base font-semibold text-slate-950">
-              {title}
-            </h2>
-          </div>
+          <h2 className="min-w-0 truncate text-base font-semibold text-slate-950">
+            {title}
+          </h2>
           <Button
             shape="circle"
             icon={<CloseOutlined />}
-            aria-label={`Close ${title}`}
+            aria-label={closeLabel}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation();
@@ -181,7 +189,7 @@ const MobileBottomSheet = ({
           />
         </div>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3">
         {children}
       </div>
     </section>
