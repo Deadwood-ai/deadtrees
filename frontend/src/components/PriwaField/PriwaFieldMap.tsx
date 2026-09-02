@@ -92,7 +92,9 @@ interface PriwaFieldMapProps {
   warnkarteOverlay?: IPriwaWarnkarteOverlay | null;
   warnkarteVisible?: boolean;
   warnkarteLoading?: boolean;
+  warnkarteLegendVisible?: boolean;
   onWarnkarteVisibilityChange?: (visible: boolean) => void;
+  onWarnkarteLegendVisibilityChange?: (visible: boolean) => void;
   additionalMapControl?: ReactNode;
   reviewDetailMode?: PriwaReviewDetailMode;
   mosaics?: IPriwaMosaic[];
@@ -130,9 +132,11 @@ export default function PriwaFieldMap({
   isSavingPoint = false,
   projectName,
   warnkarteOverlay = null,
-  warnkarteVisible = true,
+  warnkarteVisible = false,
   warnkarteLoading = false,
+  warnkarteLegendVisible = true,
   onWarnkarteVisibilityChange,
+  onWarnkarteLegendVisibilityChange,
   additionalMapControl,
   reviewDetailMode,
   mosaics = [],
@@ -1059,10 +1063,14 @@ export default function PriwaFieldMap({
           warnkarteAvailable={!!warnkarteOverlay?.features.length}
           warnkarteLoading={warnkarteLoading}
           warnkarteVisible={warnkarteVisible}
+          legendVisible={warnkarteLegendVisible}
           onClose={() => setActiveMapPanel(null)}
           onBaseLayerChange={setBaseLayer}
           onWarnkarteVisibilityChange={(visible) =>
             onWarnkarteVisibilityChange?.(visible)
+          }
+          onLegendVisibilityChange={(visible) =>
+            onWarnkarteLegendVisibilityChange?.(visible)
           }
           onZoomToWarnkarte={zoomToWarnkarteFromSheet}
         />

@@ -13,9 +13,11 @@ describe("PriwaMapLayersSheet", () => {
         warnkarteAvailable: true,
         warnkarteLoading: false,
         warnkarteVisible: true,
+        legendVisible: true,
         onClose: () => undefined,
         onBaseLayerChange: () => undefined,
         onWarnkarteVisibilityChange: () => undefined,
+        onLegendVisibilityChange: () => undefined,
         onZoomToWarnkarte: () => undefined,
       }),
     );
@@ -25,6 +27,7 @@ describe("PriwaMapLayersSheet", () => {
     expect(html).toContain("Topografische Karte");
     expect(html).toContain("Warnkarte");
     expect(html).toContain('aria-label="Zur Warnkarte zoomen"');
+    expect(html).toContain('aria-label="Warnkarten-Legende anzeigen"');
     expect(html).toContain('aria-label="Kartenebenen schließen"');
   });
 
@@ -36,9 +39,11 @@ describe("PriwaMapLayersSheet", () => {
         warnkarteAvailable: false,
         warnkarteLoading: false,
         warnkarteVisible: true,
+        legendVisible: true,
         onClose: () => undefined,
         onBaseLayerChange: () => undefined,
         onWarnkarteVisibilityChange: () => undefined,
+        onLegendVisibilityChange: () => undefined,
         onZoomToWarnkarte: () => undefined,
       }),
     );

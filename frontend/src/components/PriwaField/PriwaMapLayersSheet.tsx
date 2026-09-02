@@ -1,4 +1,4 @@
-import { Button, Tooltip } from "antd";
+import { Button, Switch, Tooltip } from "antd";
 import { FullscreenOutlined, WarningOutlined } from "@ant-design/icons";
 
 import MobileBottomSheet from "../MapControls/mobile/MobileBottomSheet";
@@ -14,9 +14,11 @@ interface PriwaMapLayersSheetProps {
   warnkarteAvailable: boolean;
   warnkarteLoading: boolean;
   warnkarteVisible: boolean;
+  legendVisible: boolean;
   onClose: () => void;
   onBaseLayerChange: (layer: PriwaBaseLayer) => void;
   onWarnkarteVisibilityChange: (visible: boolean) => void;
+  onLegendVisibilityChange: (visible: boolean) => void;
   onZoomToWarnkarte: () => void;
 }
 
@@ -43,9 +45,11 @@ export default function PriwaMapLayersSheet({
   warnkarteAvailable,
   warnkarteLoading,
   warnkarteVisible,
+  legendVisible,
   onClose,
   onBaseLayerChange,
   onWarnkarteVisibilityChange,
+  onLegendVisibilityChange,
   onZoomToWarnkarte,
 }: PriwaMapLayersSheetProps) {
   const isWarnkarteActive = warnkarteAvailable && warnkarteVisible;
@@ -57,11 +61,11 @@ export default function PriwaMapLayersSheet({
       closeLabel="Kartenebenen schließen"
       onClose={onClose}
       initialSnap="compact"
-      compactRatio={0.28}
+      compactRatio={0.38}
       expandedRatio={0.7}
       hideFrom="lg"
     >
-      <div className="space-y-4">
+      <div className="space-y-3">
         <section>
           <MobileMapSectionHeading>Basiskarte</MobileMapSectionHeading>
           <div className="grid grid-cols-2 gap-2.5">
@@ -110,6 +114,18 @@ export default function PriwaMapLayersSheet({
               ) : null
             }
           />
+          <div className="mt-2 flex min-h-9 items-center justify-between rounded-xl bg-slate-50 px-3 py-1.5">
+            <span className="text-xs font-medium text-slate-700">
+              Legende anzeigen
+            </span>
+            <Switch
+              size="small"
+              checked={isWarnkarteActive && legendVisible}
+              disabled={!isWarnkarteActive}
+              aria-label="Warnkarten-Legende anzeigen"
+              onChange={onLegendVisibilityChange}
+            />
+          </div>
         </section>
       </div>
     </MobileBottomSheet>

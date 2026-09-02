@@ -21,7 +21,7 @@ export function usePriwaWarnkarte(projectId: string, canManage: boolean) {
   const [selectedOverlay, setSelectedOverlay] =
     useState<IPriwaWarnkarteOverlay | null>(null);
   const selectedOverlayRequest = useRef(0);
-  const [isVisible, setVisible] = useState(true);
+  const [isVisible, setVisible] = useState(false);
 
   const activeQuery = useQuery({
     queryKey: ["priwa-warnkarte", projectId, "active"],
@@ -63,6 +63,7 @@ export function usePriwaWarnkarte(projectId: string, canManage: boolean) {
     );
     if (request === selectedOverlayRequest.current) {
       setSelectedOverlay(overlay);
+      setVisible(true);
     }
     return imported;
   };
@@ -76,6 +77,7 @@ export function usePriwaWarnkarte(projectId: string, canManage: boolean) {
     );
     if (request === selectedOverlayRequest.current) {
       setSelectedOverlay(overlay);
+      setVisible(true);
     }
   };
 

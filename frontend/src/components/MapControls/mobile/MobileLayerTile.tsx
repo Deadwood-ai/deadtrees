@@ -23,7 +23,7 @@ const MobileLayerTile = ({
         : "border-slate-200 active:border-slate-300"
     }`}
   >
-    <span className="relative block aspect-[2/1] w-full">
+    <span className="relative block aspect-[5/2] w-full">
       <img
         src={thumb}
         alt=""
