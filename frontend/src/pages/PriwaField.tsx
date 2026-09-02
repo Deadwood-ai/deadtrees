@@ -7,7 +7,6 @@ import { usePriwaProjectMemberships } from "../hooks/usePriwaProjectMemberships"
 import { useIsMobile } from "../hooks/useIsMobile";
 import { Alert, App, Button, Result, Spin } from "antd";
 import PriwaWarnkarteAdminPanel from "../components/PriwaField/PriwaWarnkarteAdminPanel";
-import PriwaWarnkarteLegend from "../components/PriwaField/PriwaWarnkarteLegend";
 import {
   PriwaWarnkarteAdminControl,
   PriwaWarnkarteVisibilityControl,
@@ -19,8 +18,6 @@ import { useCallback, useMemo, useState } from "react";
 export default function PriwaField() {
   const { message } = App.useApp();
   const [isWarnkarteAdminOpen, setWarnkarteAdminOpen] = useState(false);
-  const [isWarnkarteLegendVisibleOnMobile, setWarnkarteLegendVisibleOnMobile] =
-    useState(true);
   const { isOnline, serviceWorker } = usePriwaOfflineStatus();
   const {
     data: memberships = [],
@@ -223,11 +220,9 @@ export default function PriwaField() {
         warnkarteOverlay={warnkarte.displayedOverlay}
         warnkarteVisible={warnkarte.isVisible}
         warnkarteLoading={warnkarte.isLoadingOverlay}
-        warnkarteLegendVisible={isWarnkarteLegendVisibleOnMobile}
         onWarnkarteVisibilityChange={(visible) =>
           void handleWarnkarteVisibilityChange(visible)
         }
-        onWarnkarteLegendVisibilityChange={setWarnkarteLegendVisibleOnMobile}
         additionalMapControl={warnkarteControls}
         reviewDetailMode={warnkarteDetailMode}
         isLoadingPoints={isLoadingPoints || isRefetching}
@@ -255,18 +250,6 @@ export default function PriwaField() {
         syncSummary={syncSummary}
         onSyncNow={syncNow}
       />
-      {hasWarnkarte &&
-        warnkarte.isVisible &&
-        (!isMobile || isWarnkarteLegendVisibleOnMobile) && (
-          <PriwaWarnkarteLegend
-            sourceDate={warnkarte.displayedOverlay?.source_date ?? null}
-            onDismiss={
-              isMobile
-                ? () => setWarnkarteLegendVisibleOnMobile(false)
-                : undefined
-            }
-          />
-        )}
     </div>
   );
 }
