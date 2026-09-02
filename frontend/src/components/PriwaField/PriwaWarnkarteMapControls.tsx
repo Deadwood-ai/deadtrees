@@ -7,19 +7,15 @@ import {
 import { Button, Tooltip } from "antd";
 
 interface PriwaWarnkarteVisibilityControlProps {
-  hasOverlay: boolean;
   isVisible: boolean;
   onToggle: () => void;
 }
 
 export function PriwaWarnkarteVisibilityControl({
-  hasOverlay,
   isVisible,
   onToggle,
 }: PriwaWarnkarteVisibilityControlProps) {
   const label = isVisible ? "Warnkarte ausblenden" : "Warnkarte einblenden";
-
-  if (!hasOverlay) return null;
 
   return (
     <Tooltip title={label} placement="right">

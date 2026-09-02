@@ -5,7 +5,7 @@ import {
   LoginOutlined,
 } from "@ant-design/icons";
 
-import { mobileMapThumbnails } from "./mobileMapThumbnails";
+import { mobileMapThumbnails } from "../../MapControls/mobile/mobileMapThumbnails";
 
 interface MobileAnalysisDrawerProps {
   open: boolean;

@@ -1,4 +1,4 @@
-import { Alert, App, Button, FloatButton, Tooltip } from "antd";
+import { Alert, App, Button, Tooltip } from "antd";
 import {
   AimOutlined,
   EnvironmentOutlined,
@@ -42,7 +42,9 @@ import PriwaPointListPanel from "./PriwaPointListPanel";
 import PriwaOfflineStatus from "./PriwaOfflineStatus";
 import PriwaBefallsgruppeEditor from "./PriwaBefallsgruppeEditor";
 import PriwaBaseLayerControl from "./PriwaBaseLayerControl";
+import PriwaMapLayersSheet from "./PriwaMapLayersSheet";
 import PriwaMobileFieldTools from "./PriwaMobileFieldTools";
+import PriwaMobilePrimaryActions from "./PriwaMobilePrimaryActions";
 import PriwaOfflineAreaSelection from "./PriwaOfflineAreaSelection";
 import PriwaOfflineMapPanel from "./PriwaOfflineMapPanel";
 import PriwaReviewWorkbench, {
@@ -89,6 +91,8 @@ interface PriwaFieldMapProps {
   projectName: string;
   warnkarteOverlay?: IPriwaWarnkarteOverlay | null;
   warnkarteVisible?: boolean;
+  warnkarteLoading?: boolean;
+  onWarnkarteVisibilityChange?: (visible: boolean) => void;
   additionalMapControl?: ReactNode;
   reviewDetailMode?: PriwaReviewDetailMode;
   mosaics?: IPriwaMosaic[];
@@ -117,6 +121,8 @@ interface PriwaFieldMapProps {
   onSyncNow?: () => Promise<void>;
 }
 
+type PriwaMapPanel = "layers" | "offline" | "trees";
+
 export default function PriwaFieldMap({
   points,
   projectId,
@@ -125,6 +131,8 @@ export default function PriwaFieldMap({
   projectName,
   warnkarteOverlay = null,
   warnkarteVisible = true,
+  warnkarteLoading = false,
+  onWarnkarteVisibilityChange,
   additionalMapControl,
   reviewDetailMode,
   mosaics = [],
@@ -198,7 +206,9 @@ export default function PriwaFieldMap({
   const [focusedPointId, setFocusedPointId] = useState<string | null>(null);
   const [reviewPointId, setReviewPointId] = useState<string | null>(null);
   const [baseLayer, setBaseLayer] = useState<PriwaBaseLayer>("aerial");
-  const [isOfflineMapModeActive, setOfflineMapModeActive] = useState(false);
+  const [activeMapPanel, setActiveMapPanel] = useState<PriwaMapPanel | null>(
+    null,
+  );
   const [viewportExtent3857, setViewportExtent3857] =
     useState<PriwaMapExtent | null>(null);
   const mapInteraction = usePriwaMapInteractionMode();
@@ -226,6 +236,9 @@ export default function PriwaFieldMap({
     mapRef,
     mapInteraction.isSelectingOfflineArea,
   );
+  const isOfflineMapModeActive = activeMapPanel === "offline";
+  const isMapLayersOpen = activeMapPanel === "layers";
+  const isTreeListOpen = activeMapPanel === "trees";
 
   useEffect(() => {
     isMobileRef.current = isMobile;
@@ -589,6 +602,11 @@ export default function PriwaFieldMap({
     );
   }, [isMobile]);
 
+  const zoomToWarnkarteFromSheet = useCallback(() => {
+    zoomToWarnkarte();
+    setActiveMapPanel(null);
+  }, [zoomToWarnkarte]);
+
   const focusPointOnMap = useCallback(
     (point: IPriwaPoint) => {
       selectMatchedMosaicForPoint(point);
@@ -714,9 +732,27 @@ export default function PriwaFieldMap({
   const startOfflineAreaSelection = useCallback(() => {
     setDrawerOpen(false);
     setPointListOpen(false);
-    setOfflineMapModeActive(false);
+    setActiveMapPanel("offline");
     setMode("select-offline-area");
   }, [setMode]);
+
+  const cancelOfflineAreaSelection = useCallback(() => {
+    setMode("browse");
+    setActiveMapPanel("offline");
+  }, [setMode]);
+
+  const dismissOfflineAreaSelection = useCallback(() => {
+    setMode("browse");
+    setActiveMapPanel(null);
+  }, [setMode]);
+
+  const toggleOfflineMapPanel = useCallback(() => {
+    setActiveMapPanel((current) => (current === "offline" ? null : "offline"));
+  }, []);
+
+  const toggleMapLayersPanel = useCallback(() => {
+    setActiveMapPanel((current) => (current === "layers" ? null : "layers"));
+  }, []);
 
   const requestDeferredOrientationPermission = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
@@ -790,7 +826,7 @@ export default function PriwaFieldMap({
           `Basiskarte offline gespeichert (${area.cachedTileCount}/${area.tileCount} Kacheln)`,
         );
         setMode("browse");
-        setOfflineMapModeActive(true);
+        setActiveMapPanel("offline");
       } catch (error) {
         message.error(
           error instanceof Error
@@ -841,8 +877,24 @@ export default function PriwaFieldMap({
     >
       <div ref={containerRef} className="absolute inset-0" />
 
-      {mapInteraction.mode === "browse" && (
-        <div className="priwa-map-control-stack pointer-events-none absolute left-4 z-[55] flex flex-col gap-2 min-[992px]:left-[22.5rem]">
+      {mapInteraction.mode === "browse" && isMobile && (
+        <div className="priwa-map-control-stack pointer-events-none absolute left-4 z-[55] flex flex-col gap-2">
+          <PriwaMobileFieldTools
+            points={points}
+            groups={groups}
+            isLayersOpen={isMapLayersOpen}
+            isTreeListOpen={isTreeListOpen}
+            onOpenLayers={toggleMapLayersPanel}
+            onOpenTreeList={() => setActiveMapPanel("trees")}
+            onCloseTreeList={() => setActiveMapPanel(null)}
+            onEditPoint={openPointForEditing}
+            onZoomToPoint={focusPointOnMap}
+          />
+        </div>
+      )}
+
+      {mapInteraction.mode === "browse" && !isMobile && (
+        <div className="priwa-map-control-stack pointer-events-none absolute left-[22.5rem] z-[55] flex flex-col gap-2">
           <Tooltip title={locationButtonTitle}>
             <Button
               className={
@@ -869,15 +921,7 @@ export default function PriwaFieldMap({
           {!!warnkarteOverlay?.features.length && warnkarteVisible && (
             <PriwaWarnkarteZoomControl onZoom={zoomToWarnkarte} />
           )}
-          {isMobile && (
-            <PriwaMobileFieldTools
-              points={points}
-              groups={groups}
-              onEditPoint={openPointForEditing}
-              onZoomToPoint={focusPointOnMap}
-            />
-          )}
-          {!isMobile && !isPointListOpen && !isDrawerOpen && (
+          {!isPointListOpen && !isDrawerOpen && (
             <Tooltip title="Käferbaum aufnehmen">
               <Button
                 className="pointer-events-auto shadow-md"
@@ -892,25 +936,20 @@ export default function PriwaFieldMap({
         </div>
       )}
 
-      {isMobile &&
-        !isDrawerOpen &&
-        !isPointListOpen &&
-        !isOfflineMapModeActive &&
-        mapInteraction.mode === "browse" && (
-          <FloatButton
-            className="priwa-add-point-fab"
-            shape="circle"
-            icon={<PlusOutlined />}
-            tooltip={{ title: "Punkt aufnehmen", placement: "left" }}
-            onClick={openNewPointDrawer}
-            aria-label="Punkt aufnehmen"
-            style={{
-              right: "max(20px, calc(env(safe-area-inset-right, 0px) + 20px))",
-              bottom:
-                "max(20px, calc(env(safe-area-inset-bottom, 0px) + 20px))",
-            }}
-          />
-        )}
+      <PriwaMobilePrimaryActions
+        hidden={
+          !isMobile ||
+          isDrawerOpen ||
+          isPointListOpen ||
+          activeMapPanel !== null ||
+          mapInteraction.mode !== "browse"
+        }
+        isLocating={userLocation.isLocating}
+        locationActive={locationButtonActive}
+        locationLabel={locationButtonTitle}
+        onAddPoint={openNewPointDrawer}
+        onLocate={() => userLocation.locateUser(true)}
+      />
 
       {!isMobile && !isPointListOpen && (
         <PriwaReviewWorkbench
@@ -988,7 +1027,9 @@ export default function PriwaFieldMap({
         <PriwaOfflineAreaSelection
           plan={offlineSelectionPlan}
           cacheState={basemapCacheState}
-          onCancel={() => setMode("browse")}
+          isMobile={isMobile}
+          onCancel={cancelOfflineAreaSelection}
+          onDismiss={dismissOfflineAreaSelection}
           onConfirm={handleCacheBasemapArea}
         />
       )}
@@ -1002,11 +1043,28 @@ export default function PriwaFieldMap({
           isSupported={isOfflineBasemapSupported}
           needsRefresh={offlineBasemapNeedsRefresh}
           syncSummary={syncSummary}
-          onClose={() => setOfflineMapModeActive(false)}
+          isMobile={isMobile}
+          onClose={() => setActiveMapPanel(null)}
           onStartSelection={startOfflineAreaSelection}
           onClear={handleClearBasemapArea}
           onRefresh={handleRefreshBasemapAreas}
           onSyncNow={onSyncNow}
+        />
+      )}
+
+      {mapInteraction.mode === "browse" && isMobile && (
+        <PriwaMapLayersSheet
+          open={isMapLayersOpen}
+          baseLayer={baseLayer}
+          warnkarteAvailable={!!warnkarteOverlay?.features.length}
+          warnkarteLoading={warnkarteLoading}
+          warnkarteVisible={warnkarteVisible}
+          onClose={() => setActiveMapPanel(null)}
+          onBaseLayerChange={setBaseLayer}
+          onWarnkarteVisibilityChange={(visible) =>
+            onWarnkarteVisibilityChange?.(visible)
+          }
+          onZoomToWarnkarte={zoomToWarnkarteFromSheet}
         />
       )}
 
@@ -1025,7 +1083,7 @@ export default function PriwaFieldMap({
             isSupported={isOfflineBasemapSupported}
             needsRefresh={offlineBasemapNeedsRefresh}
             syncSummary={syncSummary}
-            onToggle={() => setOfflineMapModeActive((current) => !current)}
+            onToggle={toggleOfflineMapPanel}
           />
         </div>
       )}

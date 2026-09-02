@@ -22,6 +22,7 @@ describe("PriwaOfflineMapPanel", () => {
         isSupported: true,
         needsRefresh: false,
         readyAreaCount: 0,
+        isMobile: false,
         onClose: () => undefined,
         onStartSelection: () => undefined,
         onClear: async () => undefined,
@@ -62,6 +63,7 @@ describe("PriwaOfflineMapPanel", () => {
         isSupported: true,
         needsRefresh: true,
         readyAreaCount: 0,
+        isMobile: false,
         onClose: () => undefined,
         onStartSelection: () => undefined,
         onClear: async () => undefined,
@@ -71,5 +73,27 @@ describe("PriwaOfflineMapPanel", () => {
 
     expect(html).toContain("auf dem iPhone ohne Netz funktionieren");
     expect(html).toContain("Offline-Karten aktualisieren");
+  });
+
+  it("uses a compact dismissible sheet on mobile", () => {
+    const html = renderToStaticMarkup(
+      createElement(PriwaOfflineMapPanel, {
+        areas: [],
+        cacheState,
+        coverageRatio: 0.5,
+        isSupported: true,
+        needsRefresh: false,
+        readyAreaCount: 0,
+        isMobile: true,
+        onClose: () => undefined,
+        onStartSelection: () => undefined,
+        onClear: async () => undefined,
+        onRefresh: async () => undefined,
+      }),
+    );
+
+    expect(html).toContain('data-mobile-bottom-sheet-snap="compact"');
+    expect(html).toContain('aria-label="Offline-Karten schließen"');
+    expect(html).toContain("50 % der aktuellen Kartenansicht");
   });
 });

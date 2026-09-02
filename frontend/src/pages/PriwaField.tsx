@@ -5,7 +5,7 @@ import { usePriwaMosaics } from "../components/PriwaField/usePriwaMosaics";
 import { usePriwaBefallsgruppen } from "../components/PriwaField/usePriwaBefallsgruppen";
 import { usePriwaProjectMemberships } from "../hooks/usePriwaProjectMemberships";
 import { useIsMobile } from "../hooks/useIsMobile";
-import { Alert, Button, Result, Spin } from "antd";
+import { Alert, App, Button, Result, Spin } from "antd";
 import PriwaWarnkarteAdminPanel from "../components/PriwaField/PriwaWarnkarteAdminPanel";
 import PriwaWarnkarteLegend from "../components/PriwaField/PriwaWarnkarteLegend";
 import {
@@ -17,6 +17,7 @@ import type { PriwaReviewDetailMode } from "../components/PriwaField/PriwaReview
 import { useCallback, useMemo, useState } from "react";
 
 export default function PriwaField() {
+  const { message } = App.useApp();
   const [isWarnkarteAdminOpen, setWarnkarteAdminOpen] = useState(false);
   const { isOnline, serviceWorker } = usePriwaOfflineStatus();
   const {
@@ -60,11 +61,31 @@ export default function PriwaField() {
     activeMembership?.projectId ?? "",
     canManageWarnkarte,
   );
+  const activateWarnkarte = warnkarte.activateOverlay;
+  const setWarnkarteVisibility = warnkarte.setVisibility;
   const { clearSelectedVersion } = warnkarte;
   const closeWarnkarteAdmin = useCallback(() => {
     clearSelectedVersion();
     setWarnkarteAdminOpen(false);
   }, [clearSelectedVersion]);
+  const handleWarnkarteVisibilityChange = useCallback(
+    async (visible: boolean) => {
+      if (!visible) {
+        setWarnkarteVisibility(false);
+        return;
+      }
+
+      const isAvailable = await activateWarnkarte();
+      if (!isAvailable) {
+        message.error({
+          content: "Warnkarte konnte nicht geladen werden",
+          duration: 3,
+          key: "priwa-warnkarte-load-error",
+        });
+      }
+    },
+    [activateWarnkarte, message, setWarnkarteVisibility],
+  );
   const warnkarteDetailMode = useMemo<PriwaReviewDetailMode | undefined>(
     () =>
       canManageWarnkarte && isWarnkarteAdminOpen
@@ -169,12 +190,14 @@ export default function PriwaField() {
   }
 
   const hasWarnkarte = !!warnkarte.displayedOverlay?.features.length;
+  const isWarnkarteActive = hasWarnkarte && warnkarte.isVisible;
   const warnkarteControls = (
     <>
       <PriwaWarnkarteVisibilityControl
-        hasOverlay={hasWarnkarte}
-        isVisible={warnkarte.isVisible}
-        onToggle={warnkarte.toggleVisibility}
+        isVisible={isWarnkarteActive}
+        onToggle={() =>
+          void handleWarnkarteVisibilityChange(!isWarnkarteActive)
+        }
       />
       {canManageWarnkarte && (
         <PriwaWarnkarteAdminControl
@@ -197,6 +220,10 @@ export default function PriwaField() {
         projectName={activeMembership.projectName}
         warnkarteOverlay={warnkarte.displayedOverlay}
         warnkarteVisible={warnkarte.isVisible}
+        warnkarteLoading={warnkarte.isLoadingOverlay}
+        onWarnkarteVisibilityChange={(visible) =>
+          void handleWarnkarteVisibilityChange(visible)
+        }
         additionalMapControl={warnkarteControls}
         reviewDetailMode={warnkarteDetailMode}
         isLoadingPoints={isLoadingPoints || isRefetching}
@@ -227,14 +254,6 @@ export default function PriwaField() {
       {hasWarnkarte && warnkarte.isVisible && (
         <PriwaWarnkarteLegend
           sourceDate={warnkarte.displayedOverlay?.source_date ?? null}
-        />
-      )}
-      {warnkarte.overlayError && (
-        <Alert
-          className="absolute bottom-4 left-1/2 z-[65] w-[min(32rem,calc(100%-2rem))] -translate-x-1/2 shadow-lg"
-          type="error"
-          showIcon
-          message="Warnkarte konnte nicht geladen werden"
         />
       )}
     </div>

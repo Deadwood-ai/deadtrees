@@ -94,20 +94,42 @@ test.describe("PRIWA local field write flows", () => {
     ).toHaveCount(0);
 
     await expect(
-      page.getByRole("button", { name: "Zu Karte wechseln" }),
+      page.getByRole("button", { name: "Kartenebenen öffnen" }),
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Baumliste öffnen" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Punkt aufnehmen" }),
+      page.getByRole("button", { name: "Käferbaum aufnehmen" }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Aktuelle Position aktivieren" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Zu Karte wechseln" }),
+    ).toHaveCount(0);
     await expect(
       page.getByRole("navigation", { name: "PRIWA Feldaktionen" }),
     ).toHaveCount(0);
     await expectPersistedOfflineAreaVisualization(page);
 
-    await page.getByRole("button", { name: "Punkt aufnehmen" }).click();
+    const addPointButton = page.getByRole("button", {
+      name: "Käferbaum aufnehmen",
+    });
+    const locateButton = page.getByRole("button", {
+      name: "Aktuelle Position aktivieren",
+    });
+    const [addPointBox, locateBox] = await Promise.all([
+      addPointButton.boundingBox(),
+      locateButton.boundingBox(),
+    ]);
+    expect(addPointBox).not.toBeNull();
+    expect(locateBox).not.toBeNull();
+    expect(addPointBox!.width).toBe(locateBox!.width);
+    expect(addPointBox!.height).toBe(locateBox!.height);
+    expect(addPointBox!.y).toBeLessThan(locateBox!.y);
+
+    await addPointButton.click();
     const captureDrawer = page.locator(
       ".priwa-point-drawer-root .ant-drawer-content-wrapper",
     );
@@ -379,6 +401,9 @@ async function expectOfflineBasemapControl(page: Page) {
     page.getByRole("button", { name: "Bereich herunterladen" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Abbrechen" }).click();
+  await expect(offlineMapButton).toHaveAttribute("aria-pressed", "true");
+  await offlineMapButton.click();
+  await expect(offlineMapButton).toHaveAttribute("aria-pressed", "false");
 }
 
 async function expectPersistedOfflineAreaVisualization(page: Page) {
@@ -480,6 +505,12 @@ async function expectOfflineSelectionSuppressesPointInteraction(page: Page) {
     page.locator('[data-priwa-offline-selection-frame="true"]'),
   ).toBeVisible();
   await page.getByRole("button", { name: "Abbrechen" }).click();
+  const offlineMapButton = page.getByRole("button", {
+    name: /Offline-Karte laden/,
+  });
+  await expect(offlineMapButton).toHaveAttribute("aria-pressed", "true");
+  await offlineMapButton.click();
+  await expect(offlineMapButton).toHaveAttribute("aria-pressed", "false");
 }
 
 async function expectResizableDesktopPointTable(page: Page) {

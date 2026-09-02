@@ -1,5 +1,5 @@
 import type { WaybackItemWithMetadata } from "../../../hooks/useWaybackItems";
-import MobileBottomSheet from "./MobileBottomSheet";
+import MobileBottomSheet from "../../MapControls/mobile/MobileBottomSheet";
 import MobileTimeCard from "./MobileTimeCard";
 
 interface MobileTimeDrawerProps {

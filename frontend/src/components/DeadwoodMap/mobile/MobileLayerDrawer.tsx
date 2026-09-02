@@ -2,10 +2,11 @@ import { Button, Slider } from "antd";
 import { DownloadOutlined } from "@ant-design/icons";
 
 import { mapColors } from "../../../theme/mapColors";
-import MobileLayerRow from "./MobileLayerRow";
-import MobileLayerTile from "./MobileLayerTile";
-import MobileBottomSheet from "./MobileBottomSheet";
-import { mobileMapThumbnails } from "./mobileMapThumbnails";
+import MobileLayerRow from "../../MapControls/mobile/MobileLayerRow";
+import MobileLayerTile from "../../MapControls/mobile/MobileLayerTile";
+import MobileBottomSheet from "../../MapControls/mobile/MobileBottomSheet";
+import MobileMapSectionHeading from "../../MapControls/mobile/MobileMapSectionHeading";
+import { mobileMapThumbnails } from "../../MapControls/mobile/mobileMapThumbnails";
 
 interface MobileLayerDrawerProps {
   open: boolean;
@@ -37,12 +38,6 @@ const baseMapOptions = [
   },
 ];
 
-const SectionHeading = ({ children }: { children: string }) => (
-  <div className="mb-2.5 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
-    {children}
-  </div>
-);
-
 const MobileLayerDrawer = ({
   open,
   mapStyle,
@@ -62,10 +57,16 @@ const MobileLayerDrawer = ({
   const modelLayersVisible = showForest || showDeadwood;
 
   return (
-    <MobileBottomSheet open={open} onClose={onClose} title="Layers">
+    <MobileBottomSheet
+      open={open}
+      onClose={onClose}
+      title="Layers"
+      initialSnap="compact"
+      compactRatio={0.36}
+    >
       <div className="space-y-5">
         <section>
-          <SectionHeading>Map style</SectionHeading>
+          <MobileMapSectionHeading>Map style</MobileMapSectionHeading>
           <div className="grid grid-cols-2 gap-3">
             {baseMapOptions.map((option) => (
               <MobileLayerTile
@@ -80,7 +81,7 @@ const MobileLayerDrawer = ({
         </section>
 
         <section>
-          <SectionHeading>Map layers</SectionHeading>
+          <MobileMapSectionHeading>Map layers</MobileMapSectionHeading>
           <div className="space-y-2.5">
             <MobileLayerRow
               thumb={mobileMapThumbnails.treeCover}
@@ -134,7 +135,7 @@ const MobileLayerDrawer = ({
         </section>
 
         <section>
-          <SectionHeading>Feedback</SectionHeading>
+          <MobileMapSectionHeading>Feedback</MobileMapSectionHeading>
           <div className="space-y-2.5">
             <MobileLayerRow
               thumb={mobileMapThumbnails.communityPoints}
