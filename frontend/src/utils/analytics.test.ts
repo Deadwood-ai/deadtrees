@@ -24,6 +24,7 @@ let sanitizeAnalyticsUrl: typeof import("./analytics").sanitizeAnalyticsUrl;
 let sanitizeEventProperties: typeof import("./analytics").sanitizeEventProperties;
 let sanitizePostHogCapture: typeof import("./analytics").sanitizePostHogCapture;
 let trackPageView: typeof import("./analytics").trackPageView;
+let documentListeners: Map<string, EventListener[]>;
 
 beforeEach(async () => {
   vi.resetModules();
@@ -39,6 +40,20 @@ beforeEach(async () => {
     };
   })();
   vi.stubGlobal("localStorage", storage);
+  documentListeners = new Map();
+  vi.stubGlobal(
+    "Element",
+    class {
+      classList = { contains: () => false };
+    },
+  );
+  vi.stubGlobal("document", {
+    addEventListener: (type: string, listener: EventListener) => {
+      const listeners = documentListeners.get(type) ?? [];
+      listeners.push(listener);
+      documentListeners.set(type, listeners);
+    },
+  });
   vi.stubGlobal("window", {
     location: {
       href: "https://deadtrees.earth/",
@@ -216,6 +231,81 @@ describe("initializePostHog", () => {
         ui_host: "https://eu.posthog.com",
       }),
     );
+  });
+
+  it("records only bounded OpenLayers canvas frames", () => {
+    initializePostHog("accepted");
+
+    expect(posthogMock.init).toHaveBeenCalledWith(
+      "ph_test_key",
+      expect.objectContaining({
+        session_recording: {
+          captureCanvas: {
+            recordCanvas: true,
+            canvasFps: 1,
+            canvasQuality: "0.3",
+          },
+          canvasCapture: {
+            resolutionScale: 0.5,
+            maskRegionsFn: expect.any(Function),
+          },
+        },
+      }),
+    );
+
+    const config = posthogMock.init.mock.calls[0]?.[1];
+    const scannerCanvas = {
+      closest: () => null,
+    } as unknown as HTMLCanvasElement;
+
+    expect(
+      config?.session_recording.canvasCapture.maskRegionsFn(scannerCanvas),
+    ).toBeNull();
+  });
+
+  it("captures settled and periodic OpenLayers frames without polling", () => {
+    let now = 10_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    initializePostHog("accepted");
+
+    const viewport = new Element();
+    viewport.classList.contains = (className: string) =>
+      className === "ol-viewport";
+    const canvas = {
+      closest: () => viewport,
+    } as unknown as HTMLCanvasElement;
+    const maskRegionsFn =
+      posthogMock.init.mock.calls[0]?.[1].session_recording.canvasCapture
+        .maskRegionsFn;
+    const emit = (type: string, event: Partial<PointerEvent>) => {
+      documentListeners
+        .get(type)
+        ?.forEach((listener) =>
+          listener({ composedPath: () => [viewport], ...event } as Event),
+        );
+    };
+
+    expect(maskRegionsFn(canvas)).toEqual([]);
+    expect(maskRegionsFn(canvas)).toBeNull();
+
+    now += 5_000;
+    expect(maskRegionsFn(canvas)).toEqual([]);
+    expect(maskRegionsFn(canvas)).toBeNull();
+
+    now += 30_000;
+    expect(maskRegionsFn(canvas)).toEqual([]);
+    expect(maskRegionsFn(canvas)).toBeNull();
+
+    emit("pointerdown", { pointerId: 7 });
+    expect(maskRegionsFn(canvas)).toBeNull();
+
+    emit("pointerup", { pointerId: 7 });
+    now += 999;
+    expect(maskRegionsFn(canvas)).toBeNull();
+
+    now += 2;
+    expect(maskRegionsFn(canvas)).toEqual([]);
+    expect(maskRegionsFn(canvas)).toBeNull();
   });
 
   it("falls back to direct EU ingestion when the proxy host is unset", async () => {

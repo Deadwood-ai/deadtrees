@@ -35,6 +35,108 @@ const POSTHOG_API_HOST = resolvePostHogApiHost(
 let hasInitializedPostHog = false;
 let initializedPostHogMode: "limited" | "accepted" | null = null;
 
+const MAP_CANVAS_CAPTURE_RESUME_DELAY_MS = 1_000;
+const MAP_CANVAS_INITIAL_REFRESH_MS = 5_000;
+const MAP_CANVAS_PERIODIC_REFRESH_MS = 30_000;
+const activeMapPointerIds = new Set<number>();
+const mapCanvasCaptureState = new WeakMap<
+  HTMLCanvasElement,
+  { capturedAt: number; captureCount: number; generation: number }
+>();
+let mapCanvasGeneration = 0;
+let mapCanvasCapturePausedUntil = 0;
+let hasInstalledMapCaptureListeners = false;
+
+const eventTargetsOpenLayersMap = (event: Event): boolean =>
+  event
+    .composedPath()
+    .some(
+      (target) =>
+        target instanceof Element && target.classList.contains("ol-viewport"),
+    );
+
+const pauseMapCanvasCapture = (): void => {
+  mapCanvasCapturePausedUntil =
+    Date.now() + MAP_CANVAS_CAPTURE_RESUME_DELAY_MS;
+};
+
+const markMapCanvasChanged = (): void => {
+  mapCanvasGeneration += 1;
+  pauseMapCanvasCapture();
+};
+
+const installMapCaptureListeners = (): void => {
+  if (hasInstalledMapCaptureListeners || typeof document === "undefined") return;
+
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (!eventTargetsOpenLayersMap(event)) return;
+      activeMapPointerIds.add(event.pointerId);
+      markMapCanvasChanged();
+    },
+    true,
+  );
+  const finishPointerInteraction = (event: PointerEvent): void => {
+    if (!activeMapPointerIds.delete(event.pointerId)) return;
+    pauseMapCanvasCapture();
+  };
+  document.addEventListener("pointerup", finishPointerInteraction, true);
+  document.addEventListener("pointercancel", finishPointerInteraction, true);
+  document.addEventListener(
+    "wheel",
+    (event) => {
+      if (eventTargetsOpenLayersMap(event)) markMapCanvasChanged();
+    },
+    { capture: true, passive: true },
+  );
+  hasInstalledMapCaptureListeners = true;
+};
+
+const getCanvasMaskRegions = (canvas: HTMLCanvasElement): [] | null => {
+  const isMapCanvas = canvas.closest(".ol-viewport") !== null;
+  if (!isMapCanvas) return null;
+
+  const now = Date.now();
+  const isMapInteractionActive =
+    activeMapPointerIds.size > 0 || now < mapCanvasCapturePausedUntil;
+  if (isMapInteractionActive) return null;
+
+  const previousCapture = mapCanvasCaptureState.get(canvas);
+  const refreshInterval =
+    previousCapture?.captureCount === 1
+      ? MAP_CANVAS_INITIAL_REFRESH_MS
+      : MAP_CANVAS_PERIODIC_REFRESH_MS;
+  const hasPendingInteractionFrame =
+    previousCapture?.generation !== mapCanvasGeneration;
+  const isPeriodicRefreshDue =
+    previousCapture !== undefined &&
+    now - previousCapture.capturedAt >= refreshInterval;
+
+  if (!hasPendingInteractionFrame && !isPeriodicRefreshDue) {
+    return null;
+  }
+
+  mapCanvasCaptureState.set(canvas, {
+    capturedAt: now,
+    captureCount: (previousCapture?.captureCount ?? 0) + 1,
+    generation: mapCanvasGeneration,
+  });
+  return [];
+};
+
+const MAP_SAFE_SESSION_RECORDING_CONFIG = {
+  captureCanvas: {
+    recordCanvas: true,
+    canvasFps: 1,
+    canvasQuality: "0.3",
+  },
+  canvasCapture: {
+    resolutionScale: 0.5,
+    maskRegionsFn: getCanvasMaskRegions,
+  },
+} as const;
+
 export const COOKIE_CONSENT_VERSION = "1.1";
 export const COOKIE_CONSENT_KEY = "cookieConsent";
 export const COOKIE_CONSENT_VERSION_KEY = "cookieConsentVersion";
@@ -509,10 +611,13 @@ export const initializePostHog = (consent: string | null = null): void => {
     autocapture: mode === "accepted",
     capture_exceptions: mode === "accepted",
     disable_session_recording: mode !== "accepted",
+    session_recording: MAP_SAFE_SESSION_RECORDING_CONFIG,
     capture_pageview: false,
     capture_pageleave: false,
     before_send: sanitizePostHogCapture,
   } as const;
+
+  if (mode === "accepted") installMapCaptureListeners();
 
   // Persisted opt-in/out flags survive reloads, so they are not a safe proxy for whether
   // the current page has actually initialized PostHog after a deploy. We initialize the
