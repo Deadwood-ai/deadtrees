@@ -50,6 +50,7 @@ api_smoke_tests=(
 	api/tests/routers/test_download.py::test_download_status_invalid_dataset_id_returns_400
 	api/tests/routers/test_download.py::TestMultiBundleHelpers
 	api/tests/db/test_auditor_flag_review_contract.py
+	api/tests/db/test_operator_monitoring_access.py
 	api/tests/db/test_dataset_rls_policy.py
 	api/tests/db/test_privileged_users.py
 	api/tests/db/test_dataset_audit.py

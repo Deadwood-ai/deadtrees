@@ -27,6 +27,8 @@ Local source of truth:
 - [`platform-status-check.md`](platform-status-check.md) for DB, API, storage,
   processing, backups, PostHog, and Zulip platform health.
 - [`dataset-debugging.md`](dataset-debugging.md) for dataset-specific failures.
+- [`operator-data-coverage.md`](operator-data-coverage.md) for monitoring grants,
+  FreiDATA scheduler checks, and product workflow activity beyond processing.
 - [`../analytics/deadtrees-data-factory.md`](../analytics/deadtrees-data-factory.md)
   for the product operating model.
 - [`../analytics/aarrr-framework.md`](../analytics/aarrr-framework.md) for the
@@ -227,7 +229,7 @@ Use Gmail search filters such as:
 newer_than:7d -in:spam -in:trash -category:promotions -category:social
 ```
 
-For Zulip, prefer monitored unread checks for hourly deltas. Add a
+For Zulip, prefer monitored unread checks for scheduled deltas. Add a
 recent-history pass after downtime or when project context matters, because
 unread-only checks can miss active project discussion.
 
