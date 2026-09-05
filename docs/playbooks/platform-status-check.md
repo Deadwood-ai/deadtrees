@@ -109,6 +109,13 @@ full platform check inside that broader operator cadence.
 
 ## Database Queries
 
+For every full check, include the product workflows in
+[`operator-data-coverage.md`](operator-data-coverage.md): FreiDATA publication,
+audits/flags, output completeness, archive downloads, notification delivery,
+and field activity. Verify role/column access first; missing permissions are
+coverage gaps, never zero activity. Include publication counts and scheduler
+health in the compact report even when the Zulip publication topic is quiet.
+
 Prefer aggregate counts before row-level inspection:
 
 ```sql
