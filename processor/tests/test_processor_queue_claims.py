@@ -9,6 +9,42 @@ from shared.settings import settings
 pytestmark = pytest.mark.unit
 
 
+def test_ownership_check_recovers_from_transient_connection_failure(monkeypatch):
+	from contextlib import nullcontext
+	from types import SimpleNamespace
+
+	import shared.retry as retry_module
+
+	task = QueueTask(
+		id=123, dataset_id=456, user_id='test-user', task_types=[TaskTypeEnum.embeddings_v1],
+		priority=1, is_processing=True, current_position=1,
+	)
+	attempts = []
+
+	class Query:
+		def table(self, *args):
+			return self
+
+		def select(self, *args):
+			return self
+
+		def eq(self, *args):
+			return self
+
+		def execute(self):
+			return SimpleNamespace(data=[{'id': task.id}])
+
+	def client_factory(token):
+		attempts.append(token)
+		if len(attempts) == 1:
+			raise ConnectionError('connection reset')
+		return nullcontext(Query())
+
+	monkeypatch.setattr(retry_module.time, 'sleep', lambda seconds: None)
+	assert queue_runtime_module.owns_queue_task('token', task, client_factory=client_factory)
+	assert len(attempts) == 2
+
+
 def test_get_worker_id_requires_explicit_id_outside_dev(monkeypatch):
 	monkeypatch.setattr(processor_module.settings, 'PROCESSOR_WORKER_ID', '')
 	monkeypatch.setattr(processor_module.settings, 'DEV_MODE', False)
