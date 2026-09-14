@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from shared.models import QueueTask, TaskTypeEnum
 from shared.settings import settings
 from shared.db import use_client
+from shared.retry import retry_on_transient_error
 from shared.logging import LogCategory, LogContext, UnifiedLogger
 
 logger = UnifiedLogger(__name__)
@@ -162,8 +163,20 @@ def claim_task(token: str, task: QueueTask, worker_id: str, client_factory=None,
 
 def _apply_queue_owner_filter(query, task: QueueTask):
 	if task.claimed_by:
-		return query.eq('claimed_by', task.claimed_by)
+		query = query.eq('claimed_by', task.claimed_by)
+	if task.claimed_at:
+		query = query.eq('claimed_at', task.claimed_at.isoformat())
 	return query
+
+
+@retry_on_transient_error
+def owns_queue_task(token: str, task: QueueTask, client_factory=None) -> bool:
+	"""Whether this attempt still owns the active queue claim."""
+	if client_factory is None:
+		client_factory = use_client
+	with client_factory(token) as client:
+		query = client.table(settings.queue_table).select('id').eq('id', task.id).eq('is_processing', True)
+		return bool(_apply_queue_owner_filter(query, task).execute().data)
 
 
 def delete_queue_task(token: str, task: QueueTask, client_factory=None) -> None:

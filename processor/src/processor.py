@@ -37,6 +37,7 @@ from .utils.queue_runtime import (
 	delete_queue_task,
 	get_active_task,
 	get_next_task,
+	owns_queue_task,
 	release_queue_task,
 )
 from shared.logging import LogContext, LogCategory, UnifiedLogger, SupabaseHandler
@@ -597,6 +598,17 @@ def process_task(task: QueueTask, token: str):
 				raise ProcessingError(str(e), task_type='embedding_processing', task_id=task.id, dataset_id=task.dataset_id)
 
 	except Exception as e:
+		# A reclaimed task belongs to another attempt; do not overwrite its status
+		# or delete its queue row while handling this stale attempt's failure.
+		if task.claimed_at:
+			try:
+				still_owned = owns_queue_task(token, task)
+			except Exception as claim_error:
+				# Preserve the stage error if ownership remains unknown after retries.
+				raise e from claim_error
+			if not still_owned:
+				_set_inflight_task(None)
+				raise
 		# This path owns the failure bookkeeping; clear the in-flight marker now so a
 		# SIGTERM mid-handling cannot re-queue the failed task or clear its error.
 		_set_inflight_task(None)

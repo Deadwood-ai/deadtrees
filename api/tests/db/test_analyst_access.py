@@ -93,7 +93,7 @@ def test_private_archived_ownership_audit_and_notification_reads(db):
 		'SET ROLE service_role',
 		'SET ROLE postgres',
 		'SELECT public.approve_correction(1, null)',
-		"SELECT public.insert_tile_embeddings(1, '[]'::jsonb)",
+		"SELECT public.insert_tile_embeddings(1, now(), 0, '[]'::jsonb)",
 	],
 )
 def test_forbidden_reads_writes_and_escalation(db, query):

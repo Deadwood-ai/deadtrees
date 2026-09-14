@@ -3,9 +3,8 @@ from typing import List
 
 from shared.db import use_client, login, login_verified
 from shared.settings import settings
-from shared.models import StatusEnum, Ortho, QueueTask
+from shared.models import Ortho, QueueTask
 from shared.logger import logger
-from shared.status import update_status
 from shared.logging import LogContext, LogCategory
 from shared.embedding_model import load_openclip, tile_background_sims
 
@@ -14,6 +13,7 @@ from .embedding_search import embed_orthophoto_tiles, PatchEmbedding
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
 
 # Insert tile rows in chunks to keep PostgREST request bodies reasonable.
+# Matches the insert_tile_embeddings RPC's server-side cap; change both together.
 _INSERT_CHUNK_SIZE = 200
 
 
@@ -47,19 +47,14 @@ def _rows_from_embeddings(embeddings: List[PatchEmbedding], bg_sims) -> List[dic
 	return rows
 
 
-def _rpc_scalar_count(data, function_name: str) -> int:
-	"""Normalize Supabase scalar RPC return shapes across client versions."""
-	if isinstance(data, list) and data:
-		data = data[0].get(function_name, 0)
-	return int(data or 0)
-
-
 def process_embeddings(task: QueueTask, token: str, temp_dir: Path):
 	"""Compute per-tile CLIP embeddings for a dataset and store them for search.
 
 	Mirrors the segmentation stages: resolve the ortho, ensure it is available
 	locally, reproject to 10cm, embed each >99% real-data tile with OpenCLIP
 	ViT-H/14, and replace any existing rows in ``v2_tile_embeddings``.
+	Search stays unavailable for this dataset until the claim-checked completion
+	RPC checks the expected row count and recomputes AOI membership.
 	"""
 	import torch
 
@@ -88,15 +83,16 @@ def process_embeddings(task: QueueTask, token: str, temp_dir: Path):
 		)
 		raise DatasetError(f'Error fetching dataset: {e}')
 
-	update_status(token, dataset_id=ortho.dataset_id, current_status=StatusEnum.embedding_processing)
+	claim = {'p_task_id': task.id, 'p_claimed_at': task.claimed_at.isoformat() if task.claimed_at else None}
+	with use_client(token) as client:
+		client.rpc('begin_tile_embeddings', claim).execute()
 	logger.info(
 		'Starting tile embedding',
 		LogContext(category=LogCategory.EMBEDDINGS, dataset_id=task.dataset_id, user_id=user.id, token=token),
 	)
 
 	try:
-		# Inside the try so a storage/download failure goes through the same
-		# has_error + ProcessingError path as the rest of the embedding stage.
+		# The outer processor owns failure bookkeeping for this queue claim.
 		file_path = Path(temp_dir) / ortho.ortho_file_name
 		ensure_local_ortho(
 			local_path=file_path,
@@ -124,9 +120,7 @@ def process_embeddings(task: QueueTask, token: str, temp_dir: Path):
 		# Per-tile cosine sims to the background prompt bank (for score calibration).
 		import numpy as np
 
-		emb_matrix = (
-			np.stack([p.embedding for p in embeddings]) if embeddings else np.zeros((0, 1), dtype=np.float32)
-		)
+		emb_matrix = np.stack([p.embedding for p in embeddings]) if embeddings else np.zeros((0, 1), dtype=np.float32)
 		bg_sims = tile_background_sims(emb_matrix, bundle=bundle) if embeddings else []
 
 		if torch.cuda.is_available():
@@ -135,53 +129,21 @@ def process_embeddings(task: QueueTask, token: str, temp_dir: Path):
 		# Inference + model load can exceed the JWT lifetime; refresh before DB writes.
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 
-		# Replace any previous embeddings for this dataset (idempotent reruns).
-		# Insert the new rows FIRST, then delete the old ones, so the search RPCs —
-		# which read this table live — never observe a partial or empty set: if a
-		# chunk insert fails mid-way we abort with the previous complete set still
-		# intact. The only transient state is old+new rows coexisting, which is
-		# harmless for ranking (max over a dataset's tiles). Rows use a monotonic
-		# identity id, so every freshly inserted row sorts strictly after the
-		# captured old_max_id, letting one delete remove exactly the old set.
-		# Inserts go through the RPC so vector/geometry casting happens server-side.
 		rows = _rows_from_embeddings(embeddings, bg_sims)
 		with use_client(token) as client:
-			existing = (
-				client.table(settings.tile_embeddings_table)
-				.select('id')
-				.eq('dataset_id', ortho.dataset_id)
-				.order('id', desc=True)
-				.limit(1)
-				.execute()
-			)
-			old_max_id = existing.data[0]['id'] if existing.data else None
-
 			for start in range(0, len(rows), _INSERT_CHUNK_SIZE):
 				client.rpc(
 					'insert_tile_embeddings',
-					{'p_dataset_id': ortho.dataset_id, 'p_rows': rows[start : start + _INSERT_CHUNK_SIZE]},
+					{**claim, 'p_offset': start, 'p_rows': rows[start : start + _INSERT_CHUNK_SIZE]},
 				).execute()
-
-			activated = client.rpc(
-				'activate_tile_embeddings',
-				{'p_dataset_id': ortho.dataset_id, 'p_old_max_id': old_max_id, 'p_expected_count': len(rows)},
-			).execute()
-			activated_count = _rpc_scalar_count(activated.data, 'activate_tile_embeddings')
-			if activated_count != len(rows):
-				raise ProcessingError(
-					f'Activated {activated_count} of {len(rows)} tile embedding rows',
-					task_type='embedding_processing',
-					task_id=task.id,
-					dataset_id=ortho.dataset_id,
-				)
+			# The RPC validates the complete count, refreshes AOI membership and sets
+			# the dataset's search-ready flag in the same transaction.
+			client.rpc('complete_tile_embeddings', {**claim, 'p_expected_count': len(rows)}).execute()
 
 		logger.info(
 			f'Stored {len(embeddings)} tile embeddings',
 			LogContext(category=LogCategory.EMBEDDINGS, dataset_id=task.dataset_id, user_id=user.id, token=token),
 		)
-
-		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-		update_status(token, dataset_id=ortho.dataset_id, current_status=StatusEnum.idle, is_embeddings_done=True)
 
 		logger.info(
 			'Tile embedding completed successfully',
@@ -201,6 +163,4 @@ def process_embeddings(task: QueueTask, token: str, temp_dir: Path):
 				extra={'error': str(e)},
 			),
 		)
-		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-		update_status(token, dataset_id=ortho.dataset_id, has_error=True, error_message=str(e))
 		raise ProcessingError(str(e), task_type='embedding_processing', task_id=task.id, dataset_id=ortho.dataset_id)

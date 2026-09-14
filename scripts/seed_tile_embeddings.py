@@ -109,7 +109,7 @@ begin
 	ids = ",".join(str(i) for i in meta)
 	out.append(f"delete from public.v2_tile_embeddings where dataset_id in ({ids});")
 
-	cols = "(dataset_id, geometry, embedding, pixel_x0, pixel_y0, pixel_x1, pixel_y1, nodata_fraction, bg_sims, is_active)"
+	cols = "(dataset_id, geometry, embedding, pixel_x0, pixel_y0, pixel_x1, pixel_y1, nodata_fraction, bg_sims)"
 	for ds_id, recs in tiles.items():
 		for start in range(0, len(recs), args.chunk):
 			chunk = recs[start : start + args.chunk]
@@ -127,10 +127,13 @@ begin
 				values.append(
 					f"({ds_id}, {geom}, '{emb}'::vector(1024), "
 					f"{r['pixel_x0']}, {r['pixel_y0']}, {r['pixel_x1']}, {r['pixel_y1']}, "
-					f"{r['nodata_fraction']}, {bg_literal}, true)"
+					f"{r['nodata_fraction']}, {bg_literal})"
 				)
 			out.append(f"insert into public.v2_tile_embeddings {cols} values\n" + ",\n".join(values) + ";")
 
+	# Search requires AOI membership as well as the dataset completion flag.
+	for ds_id in meta:
+		out.append(f"select public.recompute_tile_aoi_membership({ds_id});")
 	out.append("commit;")
 	args.out.write_text("\n".join(out) + "\n")
 
