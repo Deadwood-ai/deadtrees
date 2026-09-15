@@ -1,8 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import Feature, { type FeatureLike } from "ol/Feature";
+import VectorTile from "ol/VectorTile";
+import TileState from "ol/TileState";
+import LayerGroup from "ol/layer/Group";
+import VectorTileLayer from "ol/layer/VectorTile";
+import VectorTileSource from "ol/source/VectorTile";
+import MVT from "ol/format/MVT";
+import MultiPolygon from "ol/geom/MultiPolygon";
+import { get as getProjection } from "ol/proj";
 import { apply } from "ol-mapbox-style";
 
 import {
   acquireLibertyBasemapGroup,
+  applyOpenFreeMapLibertyStyle,
   createWorldImagerySource,
   ESRI_WORLD_IMAGERY_ATTRIBUTION,
   ESRI_WORLD_IMAGERY_ATTRIBUTION_FULL,
@@ -82,5 +93,94 @@ describe("getCachedWaybackSource", () => {
       getCachedWaybackSource(releaseNum);
     }
     expect(getCachedWaybackSource(1)).not.toBe(first);
+  });
+});
+
+describe("Liberty tile decoding", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps disconnected polygons separate, including holes and style attributes", async () => {
+    // Two squares, one with a hole. Default MVT RenderFeature decoding flattens
+    // all three rings into one Polygon; the basemap loader must retain [2, 1].
+    const bytes = readFileSync(
+      new URL(
+        "../../test/fixtures/mvt/disconnected-polygons.mvt",
+        import.meta.url,
+      ),
+    );
+    vi.stubGlobal(
+      "XMLHttpRequest",
+      class {
+        status = 200;
+        response = Uint8Array.from(bytes).buffer;
+        onload = () => {};
+        open() {}
+        send() {
+          this.onload();
+        }
+      },
+    );
+    const source = new VectorTileSource({ format: new MVT() });
+    const group = new LayerGroup({ layers: [new VectorTileLayer({ source })] });
+    await applyOpenFreeMapLibertyStyle(group);
+
+    const projection = getProjection("EPSG:3857")!;
+    const tile = new VectorTile<FeatureLike>(
+      [0, 0, 0],
+      TileState.IDLE,
+      "/tile.mvt",
+      new MVT<FeatureLike>(),
+      source.getTileLoadFunction(),
+    );
+    tile.extent = [0, 0, 4096, 4096];
+    tile.resolution = 1;
+    tile.projection = projection;
+    tile.load();
+
+    expect(tile.getState()).toBe(TileState.LOADED);
+    const [feature] = tile.getFeatures();
+    expect(feature).toBeInstanceOf(Feature);
+    expect(feature.getId()).toBe(7);
+    expect(feature.get("mvt:layer")).toBe("landcover");
+    expect(feature.get("class")).toBe("wood");
+    const geometry = feature.getGeometry();
+    expect(geometry).toBeInstanceOf(MultiPolygon);
+    if (!(geometry instanceof MultiPolygon))
+      throw new Error("Expected separate polygons");
+    expect(geometry.getCoordinates().map((polygon) => polygon.length)).toEqual([
+      2, 1,
+    ]);
+    expect(geometry.getArea()).toBe(16400);
+  });
+
+  it("marks failed tile requests as errors", async () => {
+    vi.stubGlobal(
+      "XMLHttpRequest",
+      class {
+        onerror = () => {};
+        open() {}
+        send() {
+          this.onerror();
+        }
+      },
+    );
+    const source = new VectorTileSource({ format: new MVT() });
+    const group = new LayerGroup({ layers: [new VectorTileLayer({ source })] });
+    await applyOpenFreeMapLibertyStyle(group);
+    const tile = new VectorTile<FeatureLike>(
+      [0, 0, 0],
+      TileState.IDLE,
+      "/tile.mvt",
+      new MVT<FeatureLike>(),
+      source.getTileLoadFunction(),
+    );
+    tile.extent = [0, 0, 4096, 4096];
+    tile.resolution = 1;
+    tile.projection = getProjection("EPSG:3857")!;
+    tile.load();
+    expect(tile.getState()).toBe(TileState.ERROR);
   });
 });

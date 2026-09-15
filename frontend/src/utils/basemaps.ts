@@ -1,4 +1,10 @@
 import Collection from "ol/Collection";
+import Feature from "ol/Feature";
+import VectorTile from "ol/VectorTile";
+import type Tile from "ol/Tile";
+import MVT from "ol/format/MVT";
+import { loadFeaturesXhr } from "ol/featureloader";
+import VectorTileLayer from "ol/layer/VectorTile";
 import { Attribution, ScaleLine, Zoom } from "ol/control";
 import type Control from "ol/control/Control";
 import LayerGroup from "ol/layer/Group";
@@ -50,8 +56,34 @@ const ensureOpenLayersStrokeOffsetCompatibility = () => {
 
 ensureOpenLayersStrokeOffsetCompatibility();
 
-export const applyOpenFreeMapLibertyStyle = (target: Parameters<typeof apply>[0]) =>
-  apply(target, OPENFREEMAP_LIBERTY_STYLE_URL);
+const libertyTileFormat = new MVT<Feature>({
+  layerName: "mvt:layer",
+  featureClass: Feature,
+});
+
+export const applyOpenFreeMapLibertyStyle = async (target: LayerGroup) => {
+  await apply(target, OPENFREEMAP_LIBERTY_STYLE_URL);
+  target.getLayers().forEach((layer) => {
+    if (!(layer instanceof VectorTileLayer)) return;
+    // RenderFeature flattens disconnected polygons into one canvas path. Dense
+    // tiles then spend seconds in closePath(). Full geometries keep each polygon
+    // separate, without changing source coordinates or the basemap style.
+    layer.getSource()?.setTileLoadFunction((tile: Tile, url: string) => {
+      if (!(tile instanceof VectorTile)) return;
+      tile.setLoader((extent, resolution, projection) => {
+        loadFeaturesXhr(
+          url,
+          libertyTileFormat,
+          extent,
+          resolution,
+          projection,
+          tile.onLoad.bind(tile),
+          tile.onError.bind(tile),
+        );
+      });
+    });
+  });
+};
 
 export const createStandardMapControls = ({
   includeZoom = true,
@@ -98,13 +130,17 @@ const createOpenFreeMapLibertyLayerGroup = () => {
   const libertyLayerGroup = new LayerGroup();
   const streetsFallbackLayer = createOpenStreetMapFallbackLayer();
   const group = new LayerGroup({
-    layers: [libertyLayerGroup, streetsFallbackLayer],
+    layers: [streetsFallbackLayer],
   });
 
-  void applyOpenFreeMapLibertyStyle(libertyLayerGroup).catch((error) => {
-    console.error("Failed to load OpenFreeMap Liberty basemap", error);
-    streetsFallbackLayer.setMinZoom(0);
-  });
+  // Configure decoding before attaching the styled layers, so the first tile
+  // requests use the same loader as subsequent navigation and zooming.
+  void applyOpenFreeMapLibertyStyle(libertyLayerGroup)
+    .then(() => group.getLayers().insertAt(0, libertyLayerGroup))
+    .catch((error) => {
+      console.error("Failed to load OpenFreeMap Liberty basemap", error);
+      streetsFallbackLayer.setMinZoom(0);
+    });
 
   return group;
 };
