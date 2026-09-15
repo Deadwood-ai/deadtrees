@@ -1,4 +1,3 @@
-import "ol/ol.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button, Space, message, Radio } from "antd";
