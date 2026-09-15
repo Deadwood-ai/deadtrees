@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useMemo } from "react";
 import type VectorTileLayer from "ol/layer/VectorTile";
+import "ol/ol.css";
 
 import { IDataset } from "../../types/dataset";
 import { useDatasetLabelTypes } from "../../hooks/useDatasetLabelTypes";

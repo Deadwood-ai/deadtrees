@@ -1,3 +1,4 @@
+import "ol/ol.css";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 // Navigation is handled via onClose prop
 import { message, Button, Spin, Alert } from "antd";

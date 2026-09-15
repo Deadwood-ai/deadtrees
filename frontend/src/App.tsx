@@ -1,36 +1,43 @@
 import { Outlet, Route, Routes, useLocation } from "react-router-dom";
-import { App as AntdApp, ConfigProvider, Layout } from "antd";
-import { useEffect } from "react";
+import { App as AntdApp, ConfigProvider, Layout, Spin } from "antd";
+import { lazy, Suspense, useEffect } from "react";
 import { trackPageView, initializePostHog } from "./utils/analytics";
 import { AOIProvider } from "./contexts/AOIContext";
 import { useDatasetSubscription } from "./hooks/useDatasetSubscription";
 import { AuditNavigationProvider } from "./hooks/useAuditNavigation";
 
 import Navigation from "./components/Navigation";
-import HomePage from "./pages/Home";
-import ProfilePage from "./pages/Profile";
-import Dataset from "./pages/Dataset";
-import DatasetDetails from "./pages/DatasetDetails";
-import DatasetAudit from "./pages/DatasetAudit";
-import DatasetMLTiles from "./pages/DatasetMLTiles";
-import DatasetReferencePatchEditor from "./pages/DatasetReferencePatchEditor";
-import DatasetLabelEditor from "./pages/DatasetLabelEditor";
-import DatasetCorrections from "./pages/DatasetCorrections";
-import Deadtrees from "./pages/Deadtrees";
-import PriwaField from "./pages/PriwaField";
-import Releases from "./pages/Releases";
-import ReleaseDetail from "./pages/ReleaseDetail";
-import SignUp from "./pages/auth/SignUp";
-import SignIn from "./pages/auth/SignIn";
-import Forgotpassword from "./pages/auth/ForgotPassword";
-import ResetPassword from "./pages/auth/ResetPassword";
-import About from "./pages/About";
-import Impressum from "./pages/Impressum";
 import Footer from "./components/Footer";
 import { PublicOnly, RequireAuth } from "./components/AuthGate";
-import Datenschutzerklaerung from "./pages/Datenschutzerklaerung";
-import TermsOfService from "./pages/TermsOfService";
 import { antdTheme } from "./theme/antdTheme";
+
+import DatasetDetails from "./pages/DatasetDetails";
+import RouteErrorBoundary from "./components/RouteErrorBoundary";
+
+// Load route-specific maps, editors, and charts when that route is opened.
+const HomePage = lazy(() => import("./pages/Home"));
+const ProfilePage = lazy(() => import("./pages/Profile"));
+const Dataset = lazy(() => import("./pages/Dataset"));
+const DatasetAudit = lazy(() => import("./pages/DatasetAudit"));
+const DatasetMLTiles = lazy(() => import("./pages/DatasetMLTiles"));
+const DatasetReferencePatchEditor = lazy(
+  () => import("./pages/DatasetReferencePatchEditor"),
+);
+const DatasetLabelEditor = lazy(() => import("./pages/DatasetLabelEditor"));
+const DatasetCorrections = lazy(() => import("./pages/DatasetCorrections"));
+const Deadtrees = lazy(() => import("./pages/Deadtrees"));
+const PriwaField = lazy(() => import("./pages/PriwaField"));
+const Releases = lazy(() => import("./pages/Releases"));
+const ReleaseDetail = lazy(() => import("./pages/ReleaseDetail"));
+const SignUp = lazy(() => import("./pages/auth/SignUp"));
+const SignIn = lazy(() => import("./pages/auth/SignIn"));
+const Forgotpassword = lazy(() => import("./pages/auth/ForgotPassword"));
+const ResetPassword = lazy(() => import("./pages/auth/ResetPassword"));
+const About = lazy(() => import("./pages/About"));
+const Impressum = lazy(() => import("./pages/Impressum"));
+const Datenschutzerklaerung = lazy(() => import("./pages/Datenschutzerklaerung"));
+const TermsOfService = lazy(() => import("./pages/TermsOfService"));
+
 const { Content } = Layout;
 
 function LayoutWrapper() {
@@ -73,7 +80,17 @@ function LayoutWrapper() {
             backgroundColor: "var(--dt-surface-base)",
           }}
         >
-          <Outlet />
+          <RouteErrorBoundary key={location.pathname}>
+            <Suspense
+              fallback={
+                <div className="flex min-h-60 items-center justify-center">
+                  <Spin size="large" />
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
+          </RouteErrorBoundary>
         </Content>
         {!shouldUseFullHeight && <Footer />}
       </Layout>

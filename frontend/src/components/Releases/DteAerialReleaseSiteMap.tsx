@@ -108,6 +108,7 @@ export function DteAerialReleaseSiteMap({
       const featureAtPixel = map.forEachFeatureAtPixel(
         event.pixel,
         (feature) => feature,
+        { layerFilter: (layer) => layer === markerLayer },
       );
       const nextFeature =
         featureAtPixel instanceof Feature ? featureAtPixel : null;
