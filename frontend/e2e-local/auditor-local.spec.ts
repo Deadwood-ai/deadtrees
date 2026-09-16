@@ -525,7 +525,7 @@ test.describe("auditor local e2e", () => {
     // AI search is a core-team-only feature offered to auditors.
     await expect(page.getByTestId("dataset-search-input")).toBeVisible();
     await expect(
-      page.getByTestId("dataset-semantic-search-input"),
+      page.getByRole("button", { name: "Search mode" }),
     ).toBeVisible();
   });
 
@@ -538,7 +538,7 @@ test.describe("auditor local e2e", () => {
     await dismissCookieBanner(page);
 
     await expect(page.getByTestId("dataset-search-input")).toBeVisible();
-    await expect(page.getByTestId("dataset-semantic-search-input")).toHaveCount(
+    await expect(page.getByRole("button", { name: "Search mode" })).toHaveCount(
       0,
     );
   });

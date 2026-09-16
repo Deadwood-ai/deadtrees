@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useCallback } from "react";
-import { Button, Tag, Input, Spin, Tooltip, Checkbox, Drawer } from "antd";
+import { Button, Tag, Spin, Tooltip, Checkbox, Drawer } from "antd";
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
@@ -9,6 +9,8 @@ import {
   UnorderedListOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  LoadingOutlined,
+  ExclamationCircleOutlined,
 } from "@ant-design/icons";
 
 import DataList from "../components/DataList";
@@ -25,7 +27,8 @@ import { useDatasetFilter } from "../hooks/useDatasetFilterProvider";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useDesktopOnlyFeature } from "../hooks/useDesktopOnlyFeature";
 import { useAnalytics } from "../hooks/useAnalytics";
-import { useSemanticSearch } from "../hooks/useSemanticSearch";
+import { useArchiveSearch } from "../hooks/useArchiveSearch";
+import ArchiveSearch from "../components/DatasetMap/ArchiveSearch";
 import { useCanUseAiSearch } from "../hooks/useUserPrivileges";
 
 type FilterTag =
@@ -67,8 +70,6 @@ export default function Dataset() {
     setFilterTag,
     advancedFilters,
     setAdvancedFilters,
-    searchInput,
-    setSearchInput,
     sortDirection,
     setSortDirection,
     filterByViewport,
@@ -91,12 +92,9 @@ export default function Dataset() {
   // Open-vocabulary (CLIP) search is temporarily auditor-only. PostgreSQL
   // enforces the same capability even if callers bypass this UI gate.
   const { canUseAiSearch } = useCanUseAiSearch();
-  const semantic = useSemanticSearch(canUseAiSearch);
-  const [semanticInput, setSemanticInput] = useState("");
-
-  useEffect(() => {
-    setSemanticInput(semantic.query ?? "");
-  }, [semantic.query]);
+  const search = useArchiveSearch(canUseAiSearch);
+  const { semantic } = search;
+  const searchInput = search.text;
 
   // Debounced search handler
   useEffect(() => {
@@ -117,10 +115,6 @@ export default function Dataset() {
       search_length: searchValue.trim().length,
     });
   }, [searchValue, track]);
-
-  const handleSearch = (value: string) => {
-    setSearchInput(value);
-  };
 
   const toggleSort = () => {
     setSortDirection(sortDirection === "asc" ? "desc" : "asc");
@@ -162,6 +156,8 @@ export default function Dataset() {
     });
   };
 
+  const activeTextSearch = search.mode === "text" && searchInput ? searchValue : "";
+
   // Text/semantic search and sorting are applied on top of the already
   // filtered data, so they affect only which datasets are shown — never the
   // timeline.
@@ -170,9 +166,9 @@ export default function Dataset() {
 
     const filtered = filteredData.filter((d) => {
       // If no search value, return true for the base condition
-      if (!searchValue.trim()) return true;
+      if (!activeTextSearch.trim()) return true;
 
-      const searchTerms = searchValue
+      const searchTerms = activeTextSearch
         .toLowerCase()
         .split(/\s+/)
         .filter(Boolean);
@@ -210,7 +206,7 @@ export default function Dataset() {
     return filtered.sort((a, b) => {
       return sortDirection === "asc" ? a.id - b.id : b.id - a.id;
     });
-  }, [filteredData, searchValue, sortDirection, semantic.scores]);
+  }, [filteredData, activeTextSearch, sortDirection, semantic.scores]);
 
   // Reset visibleFeatures when data changes
   useEffect(() => {
@@ -285,63 +281,58 @@ export default function Dataset() {
       </div>
 
       <div className="flex flex-col gap-2 pb-4">
-        {canUseAiSearch && (
-          <div className="flex flex-col gap-1">
-            <Input.Search
-              placeholder="AI search, e.g. 'standing dead trees', 'clearcut'"
-              data-testid="dataset-semantic-search-input"
-              enterButton
-              allowClear
-              loading={semantic.loading}
-              value={semanticInput}
-              onChange={(e) => {
-                setSemanticInput(e.target.value);
-                if (!e.target.value && semantic.query) semantic.clear();
-              }}
-              onSearch={(value) => {
-                if (value.trim()) {
-                  semantic.run(value);
-                  track("dataset_semantic_search_used", {
-                    search_length: value.trim().length,
-                  });
-                } else {
-                  semantic.clear();
-                }
-              }}
-            />
-            {semantic.query && (
-              <div className="flex items-center justify-between px-1 text-xs text-gray-500">
-                <span>
-                  Ranked by “{semantic.query}” · {semantic.scores?.size ?? 0}{" "}
-                  matches
-                </span>
-                <Button
-                  type="link"
-                  size="small"
-                  className="h-auto p-0 text-xs"
-                  onClick={() => semantic.clear()}
-                >
-                  Clear
-                </Button>
-              </div>
-            )}
-            {semantic.error && (
-              <div className="px-1 text-xs text-red-500">{semantic.error}</div>
+        <ArchiveSearch
+          mode={search.mode}
+          canUseAiSearch={canUseAiSearch}
+          value={search.input}
+          loading={semantic.loading}
+          onChange={search.changeInput}
+          onModeChange={search.changeMode}
+          onSubmit={() => {
+            if (search.mode !== "ai" || !search.input.trim()) return;
+            semantic.run(search.input);
+            track("dataset_semantic_search_used", {
+              search_length: search.input.trim().length,
+            });
+          }}
+        />
+        {search.mode === "ai" && (
+          <div
+            className={`flex items-start gap-1.5 px-1 text-xs ${semantic.error ? "text-red-600" : "text-gray-500"}`}
+            role="status"
+          >
+            {semantic.loading ? (
+              <>
+                <LoadingOutlined className="mt-0.5" />
+                <span>Searching imagery…</span>
+              </>
+            ) : semantic.error ? (
+              <>
+                <ExclamationCircleOutlined className="mt-0.5" />
+                <span>{semantic.error}</span>
+              </>
+            ) : semantic.query ? (
+              <span>
+                Ranked by “{semantic.query}” · {semantic.scores?.size ?? 0}{" "}
+                {semantic.scores?.size === 1 ? "match" : "matches"}
+              </span>
+            ) : (
+              <span>Describe what you want to find, then press Enter.</span>
             )}
           </div>
         )}
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Input
-            placeholder="Search by Authors or Location (Region, Province, City)"
-            data-testid="dataset-search-input"
-            onChange={(e) => handleSearch(e.target.value)}
-            className="flex-1"
-            allowClear
-            value={searchInput}
-          />
+        <div className="flex items-center justify-between gap-2">
+          <Checkbox
+            checked={filterByViewport}
+            onChange={(e) => setFilterByViewport(e.target.checked)}
+          >
+            Filter list by map view
+          </Checkbox>
+
           <div className="flex items-center gap-2 sm:pl-2">
             <Tooltip title="Open advanced filtering options">
               <Button
+                aria-label="Advanced filters"
                 icon={<FilterOutlined />}
                 onClick={handleFilterButtonClick}
               />
@@ -362,14 +353,6 @@ export default function Dataset() {
             </Tooltip>
           </div>
         </div>
-        <div className="ml-1 mt-0">
-          <Checkbox
-            checked={filterByViewport}
-            onChange={(e) => setFilterByViewport(e.target.checked)}
-          >
-            Filter list by map view
-          </Checkbox>
-        </div>
       </div>
 
       {displayData ? (
@@ -379,7 +362,7 @@ export default function Dataset() {
           setHoveredItem={setHoveredItem}
           visibleFeatures={visibleFeatures}
           onFilterClick={handleFilterClick}
-          searchValue={searchValue}
+          searchValue={activeTextSearch}
           filterByViewport={filterByViewport}
           scores={semantic.scores}
           semanticQuery={semantic.query}
@@ -479,16 +462,10 @@ export default function Dataset() {
             <Spin size="large" />
             <span>Loading map...</span>
           </div>
-        ) : displayData.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center rounded-lg bg-white">
-            <div className="text-lg font-medium text-gray-500">
-              No results found
-            </div>
-            <div className="text-sm text-gray-400">
-              Try adjusting your filters or search criteria
-            </div>
-          </div>
         ) : (
+          // The map stays mounted through empty results: the list already
+          // explains the empty state, and remounting OpenLayers would drop the
+          // viewport the visitor just set up.
           <DatasetMapOL
             data={displayData}
             hoveredItem={hoveredItem}

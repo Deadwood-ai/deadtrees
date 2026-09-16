@@ -654,6 +654,8 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
       .getByRole("button", { name: "I Understand" })
       .click({ timeout: 5_000 })
       .catch(() => undefined);
+    await page.getByRole("button", { name: "Reject", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Reject", exact: true })).toBeHidden();
 
     await page
       .getByRole("button", {

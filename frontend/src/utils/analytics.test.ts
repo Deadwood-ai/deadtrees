@@ -127,6 +127,10 @@ describe("sanitizeEventProperties", () => {
 });
 
 describe("sanitizeAnalyticsUrl", () => {
+  it("redacts free-text archive and AI searches", () => {
+    expect(sanitizeAnalyticsUrl("/dataset?text=Private+Author&q=private+forest&search=ai"))
+      .toBe("/dataset?text=%5Bredacted%5D&q=%5Bredacted%5D&search=ai");
+  });
   it("strips Supabase recovery tokens from URL fragments", () => {
     expect(
       sanitizeAnalyticsUrl(

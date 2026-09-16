@@ -77,10 +77,10 @@ const normalizeHomeStats = (stats: IHomeStats | null): IHomeStats | null => {
 };
 
 export function useHomeStats() {
-  const { status } = useAuth();
+  const { status, user } = useAuth();
 
   return useQuery({
-    queryKey: ["home-stats"],
+    queryKey: ["home-stats", status, user?.id ?? "anonymous"],
     enabled: status !== "checking",
     queryFn: async () => {
       const { data, error } = await supabase

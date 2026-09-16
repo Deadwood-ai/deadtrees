@@ -476,3 +476,48 @@
     top: 6rem;
   }
 }
+
+/* Map gutters remain visible and interactive; the branded pill owns clicks. */
+.dt-nav-shell[data-map-backdrop] {
+  background: transparent;
+  pointer-events: none;
+}
+
+/* One archive search field; the mode menu and submit button live inside it. */
+.dt-archive-search {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid #d9e2dc;
+  border-radius: 12px;
+  background: white;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.dt-archive-search:focus-within {
+  border-color: #39724b;
+  box-shadow: 0 0 0 3px rgb(57 114 75 / 12%);
+}
+.dt-archive-search-icon {
+  flex-shrink: 0;
+  color: #6b7280;
+  font-size: 14px;
+}
+.dt-archive-search > .ant-input-affix-wrapper {
+  min-width: 0;
+  flex: 1;
+  padding-left: 6px;
+}
+.dt-archive-search > button,
+.dt-archive-search .dt-archive-search-mode {
+  flex-shrink: 0;
+}
+.dt-archive-search .dt-archive-search-mode {
+  color: #4b5563;
+  font-size: 12px;
+  border-radius: 8px;
+  background: #f3f6f4;
+}
+.dt-archive-search .dt-archive-search-mode .anticon-down {
+  font-size: 10px;
+}

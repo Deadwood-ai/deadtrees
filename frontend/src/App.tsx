@@ -125,9 +125,9 @@ function AppWithTracking() {
   }, []);
 
   useEffect(() => {
-    // Track page view on route change
-    trackPageView(location.pathname + location.search);
-  }, [location]);
+    // Search/filter URL edits are state changes within the same page.
+    trackPageView(location.pathname);
+  }, [location.pathname]);
 
   return (
     <>

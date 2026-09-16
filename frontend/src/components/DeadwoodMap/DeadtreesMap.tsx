@@ -1203,18 +1203,28 @@ const DeadtreesMap = () => {
     handleFlagClick();
   }, [handleFlagClick]);
 
-  const locateUser = userLocation.locateUser;
+  const locateUserQuietly = userLocation.locateUser;
+  // Only a tap on a locate control earns an error toast. The passive attempt on
+  // mobile mount stays silent, so a denied permission never covers the header.
+  const [explicitLocateAttempts, setExplicitLocateAttempts] = useState(0);
+  const locateUser = useCallback(
+    (requestOrientationPermission = false) => {
+      setExplicitLocateAttempts((attempts) => attempts + 1);
+      return locateUserQuietly(requestOrientationPermission);
+    },
+    [locateUserQuietly],
+  );
 
   useEffect(() => {
     if (!map || !isMobile) return;
-    locateUser(false);
-  }, [isMobile, map, locateUser]);
+    locateUserQuietly(false);
+  }, [isMobile, map, locateUserQuietly]);
 
   useEffect(() => {
-    if (userLocation.locationError) {
+    if (userLocation.locationError && explicitLocateAttempts > 0) {
       message.warning(userLocation.locationError);
     }
-  }, [userLocation.locationError]);
+  }, [userLocation.locationError, explicitLocateAttempts]);
 
   const requestPublicObservationPlacement = useCallback(() => {
     if (!mapRef.current || !isMobile) return;
@@ -1347,7 +1357,7 @@ const DeadtreesMap = () => {
         data-testid="deadtrees-map"
       >
         {/* Top Left - Location Controls (desktop) */}
-        <div className="absolute left-4 top-24 z-50 hidden md:block">
+        <div className="absolute left-4 top-[calc(5rem+env(safe-area-inset-top,0px))] z-50 hidden md:block lg:top-24">
           <LocationControls
             onPlaceSelect={setBounds}
             variant="floating-card"
@@ -1357,7 +1367,7 @@ const DeadtreesMap = () => {
         </div>
 
         {/* Top Right - Layer Controls (desktop) */}
-        <div className="absolute right-4 top-24 z-50 hidden md:block">
+        <div className="absolute right-4 top-[calc(5rem+env(safe-area-inset-top,0px))] z-50 hidden md:block lg:top-24">
           <LayerControlPanel
             mapStyle={DeadwoodMapStyle}
             onMapStyleChange={handleMapStyleChange}

@@ -51,6 +51,13 @@ export default function Navigation() {
   const nav = useNavigate();
   const location = useLocation();
 
+  // Full-viewport map routes (archive, dataset detail, satellite map): the
+  // header floats over the map and its gutters stay transparent and
+  // click-through. Audit/label/correction tools and content pages stay opaque.
+  const mapBackdrop = /^\/(dataset(\/[^/]+)?|deadtrees)\/?$/.test(
+    location.pathname,
+  );
+
   // Get the base path for matching navigation
   const currentPath = "/" + location.pathname.split("/")[1];
 
@@ -138,6 +145,7 @@ export default function Navigation() {
   return (
     <>
       <div
+        data-map-backdrop={mapBackdrop || undefined}
         className="dt-nav-shell hidden lg:flex justify-center w-full fixed top-0 z-50 pt-4 px-4 pb-2"
       >
         <Header
@@ -157,7 +165,7 @@ export default function Navigation() {
             lineHeight: "64px",
           }}
         >
-          <div className="flex flex-1 items-center justify-center lg:justify-start">
+          <div className="flex shrink-0 items-center">
             <img
               src="/assets/logo.png"
               alt="deadtrees.earth"
@@ -191,6 +199,7 @@ export default function Navigation() {
       </div>
 
       <div
+        data-map-backdrop={mapBackdrop || undefined}
         className="dt-nav-shell dt-mobile-nav-shell lg:hidden fixed top-0 z-50 w-full px-2 pb-2"
       >
         <Header

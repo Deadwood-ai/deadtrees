@@ -30,22 +30,22 @@ interface KompasTracker {
 
 const getGeolocationErrorMessage = (error: GeolocationPositionError) => {
   if (!window.isSecureContext) {
-    return "Standort braucht HTTPS oder localhost. Bitte diese Testversion über eine sichere Adresse öffnen.";
+    return "Location needs a secure (https) connection.";
   }
 
   if (error.code === error.PERMISSION_DENIED) {
-    return "Standort ist blockiert. Bitte Standort für diese Website und Safari/Brave in den System- und Browser-Einstellungen erlauben.";
+    return "Location access is blocked. Allow location for this site in your browser and system settings.";
   }
 
   if (error.code === error.POSITION_UNAVAILABLE) {
-    return "Standort ist gerade nicht verfügbar. Auf macOS hilft oft WLAN aktivieren, weil Safari/Brave Standort über Systemdienste beziehen.";
+    return "Your location is not available right now. Turning on Wi-Fi often helps.";
   }
 
   if (error.code === error.TIMEOUT) {
-    return "Standortabfrage hat zu lange gedauert. Bitte draußen oder mit besserem Empfang erneut versuchen.";
+    return "Finding your location took too long. Try again outdoors or with better reception.";
   }
 
-  return "Standort konnte nicht ermittelt werden.";
+  return "Your location could not be determined.";
 };
 
 const userAccuracyStyle = new Style({
@@ -272,13 +272,13 @@ export const useUserLocationLayer = (mapRef: MutableRefObject<Map | null>) => {
   const locateUser = useCallback(
     async (requestOrientationPermission = false) => {
       if (!navigator.geolocation) {
-        setLocationError("Dieser Browser unterstützt keine Standortabfrage.");
+        setLocationError("This browser does not support location.");
         return;
       }
 
       if (!window.isSecureContext) {
         setLocationError(
-          "Standort braucht HTTPS oder localhost. Bitte diese Testversion über eine sichere Adresse öffnen.",
+          "Location needs a secure (https) connection.",
         );
         return;
       }
@@ -292,7 +292,7 @@ export const useUserLocationLayer = (mapRef: MutableRefObject<Map | null>) => {
         });
         if (permissionStatus?.state === "denied") {
           setLocationError(
-            "Standort ist im Browser blockiert. Bitte Website-Einstellungen für diese Adresse zurücksetzen oder Standort erlauben.",
+            "Location access is blocked in your browser. Allow location for this site and try again.",
           );
           return;
         }

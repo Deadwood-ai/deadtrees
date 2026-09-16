@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Map as OLMap } from "ol";
-import { Input, Tooltip } from "antd";
-import { InfoCircleOutlined } from "@ant-design/icons";
+import { Button, Input, Tooltip } from "antd";
+import {
+  CloseOutlined,
+  EnterOutlined,
+  InfoCircleOutlined,
+  SearchOutlined,
+} from "@ant-design/icons";
 
 import { searchTiles, ITileSearchResult } from "../../api/searchEmbeddings";
 import { useDatasetEmbeddingsAvailability } from "../../hooks/useDatasetEmbeddingsAvailability";
@@ -14,9 +19,41 @@ interface OrthoTileSearchProps {
   initialQuery?: string | null;
 }
 
+// Shared floating-card shell: matches the layer panel and the satellite map's
+// location search so every map overlay reads as one family.
+const CARD_CLASS =
+  "rounded-2xl border border-gray-200/60 bg-white/95 shadow-xl backdrop-blur-sm";
+
+function SearchNotice({
+  children,
+  testId,
+  onDismiss,
+}: {
+  children: string;
+  testId: string;
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      role="status"
+      className={`flex items-center gap-2 py-1.5 pl-3.5 pr-1.5 text-sm text-gray-600 ${CARD_CLASS}`}
+    >
+      <InfoCircleOutlined aria-hidden className="text-gray-400" />
+      <span data-testid={testId}>{children}</span>
+      <Button
+        type="text"
+        size="small"
+        aria-label="Dismiss"
+        icon={<CloseOutlined />}
+        onClick={onDismiss}
+      />
+    </div>
+  );
+}
+
 /**
  * Open-vocabulary search scoped to a single orthophoto. Reuses the same backend
- * as the global dataset search and highlights the best-matching tiles on the
+ * as the global dataset search and highlights the best-matching areas on the
  * dataset map. Highlights are easily cleared (clear button / empty the input).
  */
 export default function OrthoTileSearch({
@@ -27,6 +64,7 @@ export default function OrthoTileSearch({
   const [query, setQuery] = useState(initialQuery ?? "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
   // Fetched results are kept in state (not drawn imperatively) so they can be
   // re-rendered whenever the highlight layer is (re)created — e.g. React
   // StrictMode's dev double-mount, or the map finishing init after a client-side
@@ -83,87 +121,117 @@ export default function OrthoTileSearch({
     }
   }, [map, initialQuery, run, availability]);
 
+  // Do not advertise an action that this image cannot perform. Only a search
+  // explicitly forwarded from the archive earns a short, dismissible explanation.
+  if (availability === "loading") return null;
+  if (noticeDismissed && (unavailable || availabilityError)) return null;
+  if (unavailable && !initialQuery?.trim()) return null;
+  if (unavailable) {
+    return (
+      <SearchNotice
+        testId="ortho-tile-search-unavailable"
+        onDismiss={() => setNoticeDismissed(true)}
+      >
+        AI search is not available for this image.
+      </SearchNotice>
+    );
+  }
+  if (availabilityError) {
+    return (
+      <SearchNotice
+        testId="ortho-tile-search-availability-error"
+        onDismiss={() => setNoticeDismissed(true)}
+      >
+        AI search is temporarily unavailable. Try refreshing the page.
+      </SearchNotice>
+    );
+  }
+
+  const status = error
+    ? { tone: "text-red-600", text: error }
+    : matchCount === null
+      ? null
+      : {
+          tone: "text-gray-600",
+          text:
+            matchCount > 0
+              ? `${matchCount} matching ${matchCount === 1 ? "area" : "areas"} highlighted`
+              : "No strong matches in this image",
+        };
+
   return (
-    <div className="w-72 max-w-[80vw]">
-      <Input.Search
-        placeholder={
-          unavailable
-            ? "AI search not available yet"
-            : availabilityError
-              ? "AI search status unavailable"
-              : "Search this orthophoto…"
-        }
-        enterButton
-        allowClear
-        disabled={availability !== "ready"}
-        loading={loading}
-        value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          if (!e.target.value) clearHighlights();
-        }}
-        onSearch={(value) => run(value)}
-        data-testid="ortho-tile-search-input"
-        suffix={
-          <Tooltip
-            placement="bottomRight"
-            styles={{ root: { maxWidth: 280 } }}
-            title={
-              <div className="text-xs">
-                <p className="mb-1">
-                  Describe what you're looking for in plain language and the
-                  best-matching areas of this orthophoto are highlighted in
-                  magenta.
-                </p>
-                <p className="mb-0.5 font-medium">Try, for example:</p>
-                <p className="mb-0">
-                  fire · fallen trees · road · water · clearing · bare soil ·
-                  buildings
-                </p>
-              </div>
-            }
-          >
-            <InfoCircleOutlined
-              className="text-gray-400 hover:text-gray-600"
-              data-testid="ortho-tile-search-help"
-            />
-          </Tooltip>
-        }
-      />
-      {unavailable && (
-        <div
-          className="mt-1 rounded bg-white/90 px-2 py-0.5 text-xs text-gray-500 shadow"
-          data-testid="ortho-tile-search-unavailable"
+    <div
+      className={`w-[calc(100vw-1rem)] md:w-80 transition-shadow focus-within:border-green-800/50 focus-within:ring-2 focus-within:ring-green-800/10 ${CARD_CLASS}`}
+      data-testid="ortho-tile-search"
+    >
+      <div className="flex items-center gap-1 py-1 pl-3.5 pr-1.5">
+        <SearchOutlined aria-hidden className="shrink-0 text-gray-500" />
+        <Input
+          variant="borderless"
+          className="min-w-0 flex-1"
+          aria-label="Find in this image"
+          placeholder="Find in this image, e.g. fallen trees"
+          allowClear
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            if (!e.target.value) clearHighlights();
+          }}
+          onPressEnter={() => run(query)}
+          data-testid="ortho-tile-search-input"
+        />
+        <Tooltip
+          placement="bottomRight"
+          styles={{ root: { maxWidth: 280 } }}
+          title={
+            <div className="text-xs">
+              <p className="mb-1">
+                Describe what you are looking for in plain language. The
+                best-matching areas of this image are highlighted in magenta.
+              </p>
+              <p className="mb-0.5 font-medium">Try, for example:</p>
+              <p className="mb-0">
+                fire · fallen trees · road · water · clearing · bare soil ·
+                buildings
+              </p>
+            </div>
+          }
         >
-          AI search isn't available for this dataset yet — its embeddings
-          haven't been generated.
-        </div>
-      )}
-      {availabilityError && (
+          <Button
+            type="text"
+            size="small"
+            aria-label="How AI search works"
+            icon={<InfoCircleOutlined className="text-gray-400" />}
+            data-testid="ortho-tile-search-help"
+          />
+        </Tooltip>
+        <Button
+          type="text"
+          size="small"
+          aria-label="Run search"
+          icon={<EnterOutlined />}
+          loading={loading}
+          disabled={!query.trim()}
+          onClick={() => run(query)}
+        />
+      </div>
+      {status && (
         <div
-          className="mt-1 rounded bg-white/90 px-2 py-0.5 text-xs text-red-500 shadow"
-          data-testid="ortho-tile-search-availability-error"
+          role="status"
+          className={`flex items-center justify-between gap-3 border-t border-gray-100 px-3.5 py-1.5 text-xs ${status.tone}`}
         >
-          AI search status couldn't be loaded. Try refreshing the page.
+          <span>{status.text}</span>
+          {matchCount !== null && (
+            <button
+              type="button"
+              className="shrink-0 font-medium text-fuchsia-600 hover:text-fuchsia-800"
+              onClick={clearHighlights}
+            >
+              Clear
+            </button>
+          )}
         </div>
       )}
-      {matchCount !== null && (
-        <div className="mt-1 flex items-center justify-between rounded bg-white/90 px-2 py-0.5 text-xs text-gray-600 shadow">
-          <span>
-            {matchCount > 0
-              ? `${matchCount} matching ${matchCount === 1 ? "tile" : "tiles"} highlighted`
-              : "No strong matches in this orthophoto"}
-          </span>
-          <button
-            type="button"
-            className="font-medium text-fuchsia-600 hover:text-fuchsia-800"
-            onClick={clearHighlights}
-          >
-            Clear
-          </button>
-        </div>
-      )}
-      {error && <div className="mt-1 text-xs text-red-500">{error}</div>}
     </div>
   );
 }

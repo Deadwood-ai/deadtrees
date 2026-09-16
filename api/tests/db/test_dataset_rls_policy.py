@@ -595,3 +595,53 @@ def test_label_rls_policy_follows_dataset_visibility(
 		)
 		visible_label_ids = {row['label_id'] for row in response.data}
 		assert visible_label_ids == {public_forest_cover_label_id, private_forest_cover_label_id}
+
+
+@pytest.mark.parametrize('viewer', ['anonymous', 'owner', 'other', 'privileged'])
+def test_home_stats_follow_archive_visibility(
+	viewer, archive_ready_private_dataset, setup_processor_privileges, test_user2,
+):
+	"""Stats and contributor names must cover exactly the viewer's archive rows."""
+	credentials = {
+		'owner': (settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD),
+		'other': (settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2),
+		'privileged': (settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD),
+	}
+	client_context = use_anon_client() if viewer == 'anonymous' else use_client(
+		login(*credentials[viewer], use_cached_session=False)
+	)
+	with client_context as client:
+		archive = client.table('public_dataset_archive_items').select('id,authors,admin_level_1').execute().data
+		stats = client.table('public_home_stats').select('*').single().execute().data
+		names = sorted({name.strip() for row in archive for name in row['authors'] or [] if name and name.strip()})
+		assert stats['dataset_count'] == len(archive)
+		assert stats['country_count'] == len({row['admin_level_1'] for row in archive})
+		assert stats['contributor_names'] == names
+		assert stats['contributor_count'] == len(names)
+		assert ('Private Archive Test Author' in names) == (viewer in ('owner', 'privileged'))
+
+
+@pytest.mark.parametrize('hidden_state', ['excluded', 'archived', 'not_ready'])
+def test_home_stats_omit_hidden_datasets(archive_ready_private_dataset, test_user, hidden_state):
+	"""Even owners' totals omit excluded, archived and not-ready imagery."""
+	token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
+	with use_client(token) as client:
+		before = client.table('public_home_stats').select('*').single().execute().data
+		assert 'Private Archive Test Author' in before['contributor_names']
+	with use_service_client() as client:
+		if hidden_state == 'excluded':
+			client.table('dataset_audit').insert({
+				'dataset_id': archive_ready_private_dataset,
+				'audited_by': test_user,
+				'final_assessment': 'exclude_completely',
+			}).execute()
+		elif hidden_state == 'archived':
+			client.table(settings.datasets_table).update({'archived': True}).eq('id', archive_ready_private_dataset).execute()
+		else:
+			client.table(settings.statuses_table).update({'is_cog_done': False}).eq('dataset_id', archive_ready_private_dataset).execute()
+	with use_client(token) as client:
+		after = client.table('public_home_stats').select('*').single().execute().data
+		assert after['dataset_count'] == before['dataset_count'] - 1
+		assert 'Private Archive Test Author' not in after['contributor_names']
+		assert after['data_size_tb'] < before['data_size_tb']
+		assert after['area_covered_ha'] < before['area_covered_ha']

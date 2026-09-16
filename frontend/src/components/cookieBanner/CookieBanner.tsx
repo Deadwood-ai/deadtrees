@@ -61,7 +61,7 @@ export function CookieBanner() {
 
   return (
     <Alert
-      className="fixed bottom-2 left-2 right-2 z-50 rounded-2xl p-3 shadow-lg md:bottom-4 md:left-4 md:right-4 md:p-4"
+      className="fixed bottom-2 left-2 right-2 z-[60] rounded-2xl p-3 shadow-lg md:bottom-4 md:left-4 md:right-4 md:p-4"
       type="info"
       showIcon={false}
       banner
