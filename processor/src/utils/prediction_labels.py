@@ -4,8 +4,9 @@ from shared.db import login, use_client
 from shared.labels import create_label_with_geometries, delete_model_prediction_labels
 from shared.logging import LogCategory, LogContext
 from shared.logger import logger
-from shared.models import LabelDataEnum, LabelPayloadData, LabelSourceEnum, LabelTypeEnum
+from shared.models import Label, LabelDataEnum, LabelPayloadData, LabelSourceEnum, LabelTypeEnum
 from shared.settings import settings
+from shared.retry import retry_on_transient_error
 
 
 def replace_model_prediction_label(
@@ -55,23 +56,6 @@ def create_versioned_model_prediction_label(
 	"""
 	token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 
-	with use_client(token) as client:
-		response = (
-			client.table(settings.labels_table)
-			.select('id,model_config,is_active,version')
-			.eq('dataset_id', dataset_id)
-			.eq('label_source', LabelSourceEnum.model_prediction.value)
-			.eq('label_data', label_data.value)
-			.execute()
-		)
-
-	existing_matching = [
-		label for label in (response.data or []) if _model_config_matches(label.get('model_config'), model_config)
-	]
-	active_matching = [label for label in existing_matching if label.get('is_active', True)]
-	previous_active = max(active_matching, key=lambda label: label.get('version') or 1, default=None)
-	next_version = max((label.get('version') or 1 for label in existing_matching), default=0) + 1
-
 	payload = LabelPayloadData(
 		dataset_id=dataset_id,
 		label_source=LabelSourceEnum.model_prediction,
@@ -81,31 +65,18 @@ def create_versioned_model_prediction_label(
 		model_metadata=model_config,
 		geometry=geometry,
 	)
-	label = create_label_with_geometries(payload, user_id, token)
+	label = create_label_with_geometries(payload, user_id, token, is_active=False)
 
-	previous_ids = [existing['id'] for existing in existing_matching if existing['id'] != label.id]
-	with use_client(token) as client:
-		client.table(settings.labels_table).update(
-			{
-				'is_active': True,
-				'version': next_version,
-				'parent_label_id': previous_active['id'] if previous_active else None,
-			}
-		).eq('id', label.id).execute()
+	@retry_on_transient_error
+	def publish() -> Label:
+		with use_client(token) as client:
+			response = client.rpc(
+				'publish_model_prediction_label',
+				{
+					'p_label_id': label.id,
+					'p_expected_geometry_count': len(payload.geometry.coordinates),
+				},
+			).execute()
+		return Label(**response.data)
 
-		if previous_ids:
-			client.table(settings.labels_table).update({'is_active': False}).in_('id', previous_ids).execute()
-
-	if previous_ids:
-		logger.info(
-			f'Deactivated {len(previous_ids)} older prediction labels',
-			LogContext(category=LogCategory.DEADWOOD, dataset_id=dataset_id, user_id=user_id, token=token),
-		)
-
-	return label
-
-
-def _model_config_matches(label_config: dict[str, Any] | None, model_config: dict[str, Any]) -> bool:
-	if not label_config:
-		return False
-	return all(label_config.get(key) == value for key, value in model_config.items())
+	return publish()

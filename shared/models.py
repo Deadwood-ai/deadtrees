@@ -585,38 +585,6 @@ class ModelPreference(BaseModel):
 	model_config = {'populate_by_name': True}
 
 
-class DeadwoodGeometry(BaseModel):
-	"""Label geometry model for v2_deadwood_geometries table"""
-
-	id: Optional[int] = None
-	label_id: int
-	geometry: PolygonModel
-	properties: Optional[Dict[str, Any]] = None
-	created_at: Optional[datetime] = None
-
-	@field_serializer('created_at', mode='plain')
-	def datetime_to_isoformat(field: datetime | None) -> str | None:
-		if field is None:
-			return None
-		return field.isoformat()
-
-
-class ForestCoverGeometry(BaseModel):
-	"""Label geometry model for v2_forest_cover_geometries table"""
-
-	id: Optional[int] = None
-	label_id: int
-	geometry: PolygonModel
-	properties: Optional[Dict[str, Any]] = None
-	created_at: Optional[datetime] = None
-
-	@field_serializer('created_at', mode='plain')
-	def datetime_to_isoformat(field: datetime | None) -> str | None:
-		if field is None:
-			return None
-		return field.isoformat()
-
-
 class MetadataType(str, Enum):
 	GADM = 'gadm'
 	BIOME = 'biome'

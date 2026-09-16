@@ -4,7 +4,6 @@ import pytest
 from shapely.geometry import Polygon
 
 from shared.labels import upload_geometry_chunk
-from shared.models import DeadwoodGeometry
 
 
 class _FakeSelect:
@@ -49,7 +48,7 @@ class _FakeTable:
 	def select(self, *args, **kwargs):
 		return _FakeSelect(self)
 
-	def insert(self, records):
+	def insert(self, records, **kwargs):
 		return _FakeInsert(self, records)
 
 
@@ -79,7 +78,7 @@ class _GatedTable:
 	def select(self, *args, **kwargs):
 		return _FakeSelect(self)
 
-	def insert(self, records):
+	def insert(self, records, **kwargs):
 		return _GatedInsert(self, records)
 
 
@@ -120,7 +119,6 @@ def _upload(client, count=1):
 	upload_geometry_chunk(
 		client,
 		table='v2_deadwood_geometries',
-		GeometryModel=DeadwoodGeometry,
 		label_id=1,
 		geometries=[_polygon() for _ in range(count)],
 		properties=None,

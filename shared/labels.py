@@ -1,5 +1,4 @@
 from typing import List, Dict, Any, Optional
-from datetime import datetime
 
 from shapely.geometry import shape, MultiPolygon, Polygon
 from shapely import wkb
@@ -7,11 +6,8 @@ from shapely import wkb
 from shared.models import (
 	LabelPayloadData,
 	Label,
-	ModelPreference,
 	AOI,
 	aoi_insert_payload,
-	DeadwoodGeometry,
-	ForestCoverGeometry,
 	LabelDataEnum,
 	LabelSourceEnum,
 	DEFAULT_MODEL_PREFERENCES,
@@ -27,13 +23,20 @@ from shared.retry import retry_on_transient_error, is_statement_timeout
 # Insert time scales with both the byte size *and* the number of rows (each row
 # updates the spatial index), so we cap on both. These are first-line limits;
 # ``_insert_records_adaptive`` handles any chunk that still exceeds the budget.
+# A single polygon can exceed the byte target; it stays one feature and uses
+# binary input with no geometry echoed in the response.
 MAX_CHUNK_SIZE = 1024 * 1024 * 2  # 2MB of WKB per chunk
 MAX_CHUNK_GEOMETRIES = 2000  # rows per chunk
 
 
-def create_label_with_geometries(payload: LabelPayloadData, user_id: str, token: str) -> Label:
+def create_label_with_geometries(
+	payload: LabelPayloadData, user_id: str, token: str, *, is_active: bool = True
+) -> Label:
 	"""Creates a label with associated AOI and geometries, handling large geometry uploads
 	through chunking.
+
+	Uploads remain inactive at version 0 until complete. Set ``is_active=False``
+	when the caller will publish the completed label through the versioning RPC.
 	"""
 
 	aoi_id = None
@@ -64,11 +67,7 @@ def create_label_with_geometries(payload: LabelPayloadData, user_id: str, token:
 			# Create new AOI if needed
 			if not aoi_id:
 				try:
-					response = (
-						client.table(settings.aois_table)
-						.insert(aoi_insert_payload(aoi))
-						.execute()
-					)
+					response = client.table(settings.aois_table).insert(aoi_insert_payload(aoi)).execute()
 					aoi_id = response.data[0]['id']
 				except Exception as e:
 					logger.error(f'Error creating AOI: {str(e)}', extra={'token': token, 'user_id': user_id})
@@ -84,9 +83,11 @@ def create_label_with_geometries(payload: LabelPayloadData, user_id: str, token:
 		label_data=payload.label_data,
 		label_quality=payload.label_quality,
 		model_metadata=payload.model_metadata,
+		is_active=False,
+		version=0,
 	)
 
-	# Start transaction for label and geometries
+	# Each PostgREST request commits separately. Keep incomplete uploads inactive.
 	with use_client(token) as client:
 		try:
 			# Insert label
@@ -112,8 +113,6 @@ def create_label_with_geometries(payload: LabelPayloadData, user_id: str, token:
 				else settings.forest_cover_geometries_table
 			)
 
-			GeometryModel = DeadwoodGeometry if payload.label_data == LabelDataEnum.deadwood else ForestCoverGeometry
-
 			# Split geometries into chunks
 			current_chunk_size = 0
 			current_chunk = []
@@ -127,9 +126,7 @@ def create_label_with_geometries(payload: LabelPayloadData, user_id: str, token:
 				exceeds_count = len(current_chunk) >= MAX_CHUNK_GEOMETRIES
 				if current_chunk and (exceeds_size or exceeds_count):
 					# Upload current chunk
-					upload_geometry_chunk(
-						client, geom_table, GeometryModel, label_id, current_chunk, payload.properties, token
-					)
+					upload_geometry_chunk(client, geom_table, label_id, current_chunk, payload.properties, token)
 					current_chunk = []
 					current_chunk_size = 0
 
@@ -138,10 +135,20 @@ def create_label_with_geometries(payload: LabelPayloadData, user_id: str, token:
 
 			# Upload remaining geometries
 			if current_chunk:
-				upload_geometry_chunk(
-					client, geom_table, GeometryModel, label_id, current_chunk, payload.properties, token
-				)
+				upload_geometry_chunk(client, geom_table, label_id, current_chunk, payload.properties, token)
 
+			if is_active:
+
+				@retry_on_transient_error
+				def activate():
+					return (
+						client.table(settings.labels_table)
+						.update({'is_active': True, 'version': 1})
+						.eq('id', label_id)
+						.execute()
+					)
+
+				response = activate()
 			return Label(**response.data[0])
 
 		except Exception as e:
@@ -152,7 +159,6 @@ def create_label_with_geometries(payload: LabelPayloadData, user_id: str, token:
 def upload_geometry_chunk(
 	client,
 	table: str,
-	GeometryModel: type[DeadwoodGeometry] | type[ForestCoverGeometry],
 	label_id: int,
 	geometries: List[Any],
 	properties: Optional[Dict[str, Any]],
@@ -170,8 +176,11 @@ def upload_geometry_chunk(
 		if not isinstance(geom, Polygon):
 			raise ValueError(f'Expected Polygon geometry, received {type(geom)}')
 
-		geometry = GeometryModel(label_id=label_id, geometry=geom.__geo_interface__, properties=properties)
-		geometry_records.append(geometry.model_dump(exclude={'id', 'created_at'}))
+		# PostGIS accepts EWKB directly. Preserve every coordinate and hole in one
+		# feature while avoiding costly nested GeoJSON parsing for huge polygons.
+		geometry_records.append(
+			{'label_id': label_id, 'geometry': wkb.dumps(geom, hex=True, srid=4326), 'properties': properties}
+		)
 
 	try:
 		_insert_records_adaptive(client, table, geometry_records, label_id, token)
@@ -209,30 +218,40 @@ def _insert_records_adaptive(client, table: str, records: List[dict], label_id: 
 def _insert_records_with_retry(client, table: str, records: List[dict], label_id: int) -> None:
 	"""Insert a single batch, retrying only on transient network failures.
 
-	Idempotency: read a baseline row count so that, if a transient failure drops the
-	connection *after* the insert committed, the retry can detect the rows already
-	landed and skip re-inserting (a PostgREST batch insert is atomic, so the count is
-	either the baseline or baseline + len(records)). If we can't read a baseline, fall
-	back to plain retry.
+	One uploader owns each newly created label. Each insert is atomic, so a retry
+	must observe either the baseline count or baseline + batch size. If the count
+	cannot be verified, fail without blindly duplicating a possibly committed batch.
 	"""
 
+	@retry_on_transient_error(is_retryable=is_statement_timeout)
 	def _count_existing() -> int:
-		response = client.table(table).select('id', count='exact').eq('label_id', label_id).execute()
-		return response.count or 0
+		# Retrying this read is safe even when a previous INSERT has an unknown
+		# outcome. Never fall back to an unknown baseline for the subsequent write.
+		response = client.table(table).select('id', count='exact', head=True).eq('label_id', label_id).execute()
+		if response.count is None:
+			raise RuntimeError('Cannot verify geometry upload count')
+		return response.count
 
-	try:
-		count_before = _count_existing()
-	except Exception:
-		count_before = None
+	count_before = None
 
-	def _already_committed() -> bool:
-		if count_before is None:
-			return False
-		return _count_existing() >= count_before + len(records)
-
-	@retry_on_transient_error(verify_succeeded=_already_committed)
+	@retry_on_transient_error
 	def _insert() -> None:
-		client.table(table).insert(records).execute()
+		nonlocal count_before
+		try:
+			count = _count_existing()
+		except Exception as exc:
+			if is_statement_timeout(exc):
+				# Only a cancelled INSERT is safe to split, never a failed count.
+				raise RuntimeError('Cannot verify geometry upload count') from exc
+			raise
+		if count_before is None:
+			count_before = count
+		elif count == count_before + len(records):
+			return
+		elif count != count_before:
+			raise RuntimeError('Geometry upload count changed unexpectedly')
+		# Echoing a huge geometry adds DB serialization work without any useful data.
+		client.table(table).insert(records, returning='minimal').execute()
 
 	_insert()
 

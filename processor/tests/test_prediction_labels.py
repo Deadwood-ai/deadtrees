@@ -8,51 +8,33 @@ from processor.src.utils import prediction_labels
 pytestmark = pytest.mark.unit
 
 
-class FakeLabelsQuery:
-	def __init__(self, client, table_name):
-		self.client = client
-		self.table_name = table_name
-		self.update_payload = None
-		self.eq_filters = []
-		self.in_filter = None
-
-	def select(self, *_args):
-		return self
-
-	def eq(self, column, value):
-		self.eq_filters.append((column, value))
-		return self
-
-	def update(self, payload):
-		self.update_payload = payload
-		return self
-
-	def in_(self, column, values):
-		self.in_filter = (column, values)
-		return self
-
-	def execute(self):
-		if self.update_payload is not None:
-			self.client.updates.append(
-				{
-					'table': self.table_name,
-					'payload': self.update_payload,
-					'eq_filters': self.eq_filters,
-					'in_filter': self.in_filter,
-				}
-			)
-			return SimpleNamespace(data=[])
-
-		return SimpleNamespace(data=self.client.existing_labels)
-
-
 class FakeLabelsClient:
 	def __init__(self, existing_labels):
 		self.existing_labels = existing_labels
 		self.updates = []
+		self.publications = []
+
+	def rpc(self, name, params):
+		self.publications.append((name, params))
+		return SimpleNamespace(
+			execute=lambda: SimpleNamespace(
+				data={
+					'id': 99,
+					'dataset_id': 123,
+					'user_id': 'processor-user',
+					'label_source': 'model_prediction',
+					'label_type': 'semantic_segmentation',
+					'label_data': 'forest_cover',
+					'model_config': self.existing_labels[0]['model_config'],
+					'is_active': True,
+					'version': 3,
+					'parent_label_id': 10,
+				}
+			)
+		)
 
 	def table(self, table_name):
-		return FakeLabelsQuery(self, table_name)
+		raise AssertionError('Versioning must use the atomic publication RPC')
 
 	def __enter__(self):
 		return self
@@ -61,7 +43,7 @@ class FakeLabelsClient:
 		return False
 
 
-def test_create_versioned_model_prediction_label_deactivates_only_matching_model_config(monkeypatch):
+def test_create_versioned_model_prediction_label_delegates_atomic_publication(monkeypatch):
 	model_config = {
 		'module': 'deadwood_treecover_combined_v2',
 		'checkpoint_name': 'combined.safetensors',
@@ -107,11 +89,8 @@ def test_create_versioned_model_prediction_label_deactivates_only_matching_model
 	)
 
 	assert label.id == 99
-	assert fake_client.updates[0]['payload'] == {
-		'is_active': True,
-		'version': 3,
-		'parent_label_id': 10,
-	}
-	assert fake_client.updates[0]['eq_filters'] == [('id', 99)]
-	assert fake_client.updates[1]['payload'] == {'is_active': False}
-	assert fake_client.updates[1]['in_filter'] == ('id', [10, 13])
+	assert label.is_active and label.version == 3 and label.parent_label_id == 10
+	assert fake_client.publications == [
+		('publish_model_prediction_label', {'p_label_id': 99, 'p_expected_geometry_count': 0})
+	]
+	assert fake_client.updates == []
