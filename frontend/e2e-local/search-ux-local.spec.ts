@@ -263,8 +263,14 @@ const installAuditor = async (
   });
 };
 
+const selectAiSearch = async (page: Page) => {
+  await page.getByRole("button", { name: "Search mode" }).click();
+  await page.getByRole("menuitem", { name: "AI search", exact: true }).click();
+};
+
 const runSemanticSearch = async (page: Page, query: string) => {
-  const input = page.getByPlaceholder(/AI search/);
+  await selectAiSearch(page);
+  const input = page.getByRole("textbox", { name: "AI search", exact: true });
   await input.fill(query);
   await input.press("Enter");
   await expect(page.getByText(/Ranked by/)).toBeVisible();
@@ -286,7 +292,7 @@ test.describe("search UX (local)", () => {
     await page.goto("/dataset");
 
     await runSemanticSearch(page, "forest");
-    await expect(page).toHaveURL(/\/dataset\?q=forest$/);
+    await expect(page).toHaveURL(/\/dataset\?search=ai&q=forest$/);
     const items = page.getByTestId("dataset-list-item");
     await expect(items.first()).toBeVisible();
     await expect(
@@ -337,7 +343,7 @@ test.describe("search UX (local)", () => {
       "log",
     ]);
 
-    await page.getByPlaceholder(/AI search/).press("Enter");
+    await page.getByRole("textbox", { name: "AI search", exact: true }).press("Enter");
     await expect.poll(() => loggedQueries.length).toBe(2);
     expect(embedRequests).toHaveLength(2);
     expect(rpcRequests).toHaveLength(2);
@@ -350,7 +356,8 @@ test.describe("search UX (local)", () => {
     failDatasetRanking = true;
     await page.goto("/dataset");
 
-    const input = page.getByPlaceholder(/AI search/);
+    await selectAiSearch(page);
+    const input = page.getByRole("textbox", { name: "AI search", exact: true });
     await input.fill("forest");
     await input.press("Enter");
 
@@ -386,14 +393,15 @@ test.describe("search UX (local)", () => {
     await page
       .getByRole("checkbox", { name: "Filter list by map view" })
       .uncheck();
-    const input = page.getByPlaceholder(/AI search/);
+    await selectAiSearch(page);
+    const input = page.getByRole("textbox", { name: "AI search", exact: true });
     await input.fill("forest");
     await input.press("Enter");
     await expect.poll(() => started).toBe(true);
-    await expect(page).toHaveURL(/\?q=forest$/);
+    await expect(page).toHaveURL(/q=forest$/);
 
     await input.fill("");
-    await expect(page).toHaveURL(/\/dataset$/);
+    await expect(page).toHaveURL(/\/dataset\?search=ai$/);
     releaseSearch();
 
     await expect(page.getByText(/Ranked by/)).toHaveCount(0);
@@ -407,8 +415,9 @@ test.describe("search UX (local)", () => {
   }) => {
     await installAuditor(page, false);
     await page.goto("/dataset?q=forest");
+    await page.getByRole("checkbox", { name: "Filter list by map view" }).uncheck();
 
-    await expect(page.getByTestId("dataset-semantic-search-input")).toHaveCount(
+    await expect(page.getByRole("button", { name: "Search mode" })).toHaveCount(
       0,
     );
     await expect(page.getByTestId("dataset-list-item")).toHaveCount(
@@ -417,6 +426,68 @@ test.describe("search UX (local)", () => {
     expect(embedRequests).toHaveLength(0);
     expect(rpcRequests).toHaveLength(0);
     expect(loggedQueries).toHaveLength(0);
+  });
+
+  test("one search field switches modes without combining filters and restores history", async ({ page }) => {
+    await installAuditor(page);
+    await page.goto("/dataset?text=5002");
+    await page.getByRole("checkbox", { name: "Filter list by map view" }).uncheck();
+    const input = page.getByTestId("dataset-search-input");
+    await expect(input).toHaveCount(1);
+    await expect(page.getByTestId("dataset-list-item")).toHaveCount(1);
+    await runSemanticSearch(page, "forest");
+    await expect(page.getByTestId("dataset-list-item")).toHaveCount(2);
+    await expect(page.getByTestId("dataset-list-item").first()).toContainText("Alphaville");
+    await page.getByRole("button", { name: "Search mode" }).click();
+    await page.getByRole("menuitem", { name: "Author / place", exact: true }).click();
+    await expect(input).toHaveValue("");
+    await expect(page.getByTestId("dataset-list-item")).toHaveCount(2);
+    await page.goBack();
+    await expect(input).toHaveValue("forest");
+    await expect(page.getByText(/Ranked by/)).toBeVisible();
+    await page.goForward();
+    await expect(input).toHaveValue("");
+    await expect(page.getByTestId("dataset-semantic-score")).toHaveCount(0);
+  });
+
+  test("mode switch ignores a late AI response", async ({ page }) => {
+    await installAuditor(page);
+    let release!: () => void;
+    let started = false;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    await page.route(`${localSupabaseUrl}/rest/v1/rpc/search_datasets_by_embedding`, async route => {
+      started = true;
+      await pending;
+      await fulfillJson(route, [{ dataset_id: 5001, similarity: 0.9, tile_count: 3 }]);
+    });
+    await page.goto("/dataset");
+    await page.getByRole("checkbox", { name: "Filter list by map view" }).uncheck();
+    await selectAiSearch(page);
+    await page.getByTestId("dataset-search-input").fill("forest");
+    await page.getByRole("button", { name: "Run AI search" }).click();
+    await expect.poll(() => started).toBe(true);
+    await page.getByRole("button", { name: "Search mode" }).click();
+    await page.getByRole("menuitem", { name: "Author / place", exact: true }).click();
+    await page.getByRole("textbox", { name: "Search authors or places" }).fill("5002");
+    release();
+    await expect(page.getByTestId("dataset-list-item")).toHaveCount(1);
+    await expect(page.getByTestId("dataset-list-item").first()).toContainText("5002");
+    await expect(page.getByTestId("dataset-semantic-score")).toHaveCount(0);
+  });
+
+  test("legacy q links select AI mode and empty results can be cleared", async ({ page }) => {
+    await installAuditor(page);
+    await page.route(`${localSupabaseUrl}/rest/v1/rpc/search_datasets_by_embedding`, route => fulfillJson(route, []));
+    await page.goto("/dataset?q=no-matches");
+    await expect(page.getByRole("textbox", { name: "AI search", exact: true })).toHaveValue("no-matches");
+    await expect(page.getByText(/Ranked by.*0 matches/)).toBeVisible();
+    await expect(page.getByTestId("dataset-empty-results")).toBeVisible();
+    // Empty results never unmount the archive map.
+    await expect(page.locator(".ol-viewport")).toHaveCount(1);
+    await page.getByRole("button", { name: "Clear search" }).click();
+    await expect(page.getByRole("textbox", { name: "AI search", exact: true })).toHaveValue("");
+    await expect(page).not.toHaveURL(/q=/);
+    await expect(page.getByText(/Ranked by/)).toHaveCount(0);
   });
 
   test("result rows open in a new tab on middle-click", async ({
@@ -440,7 +511,7 @@ test.describe("search UX (local)", () => {
     await popup.close();
   });
 
-  test("per-orthophoto AI search is disabled when embeddings are missing", async ({
+  test("per-orthophoto AI search is hidden when embeddings are missing", async ({
     page,
   }) => {
     await installAuditor(page);
@@ -448,10 +519,14 @@ test.describe("search UX (local)", () => {
     // Dataset 5002 has is_embeddings_done = false.
     await page.goto(`/dataset/${datasetWithoutEmbeddings}`);
 
-    await expect(
-      page.getByTestId("ortho-tile-search-unavailable"),
-    ).toBeVisible();
-    await expect(page.getByPlaceholder(/not available/)).toBeDisabled();
+    await expect(page.getByTestId("ortho-tile-search-input")).toHaveCount(0);
+    await expect(page.getByTestId("ortho-tile-search-unavailable")).toHaveCount(0);
+
+    await page.goto(`/dataset/${datasetWithoutEmbeddings}?q=forest`);
+    await expect(page.getByTestId("ortho-tile-search-unavailable")).toHaveText(
+      "AI search is not available for this image.",
+    );
+    await expect(page.getByTestId("ortho-tile-search-input")).toHaveCount(0);
   });
 
   test("per-orthophoto AI search is enabled when embeddings exist", async ({
@@ -462,7 +537,7 @@ test.describe("search UX (local)", () => {
     // Dataset 5001 has is_embeddings_done = true.
     await page.goto(`/dataset/${datasetWithEmbeddings}`);
 
-    await expect(page.getByPlaceholder(/Search this orthophoto/)).toBeEnabled();
+    await expect(page.getByTestId("ortho-tile-search-input")).toBeEnabled();
     await expect(page.getByTestId("ortho-tile-search-unavailable")).toHaveCount(
       0,
     );
@@ -477,6 +552,14 @@ test.describe("search UX (local)", () => {
     await expect(
       page.getByTestId("ortho-tile-search-availability-error"),
     ).toBeVisible();
-    await expect(page.getByPlaceholder(/status unavailable/)).toBeDisabled();
+    await expect(page.getByTestId("ortho-tile-search-input")).toHaveCount(0);
+    await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+    await expect(page.getByTestId("ortho-tile-search-availability-error")).toHaveCount(0);
+    await page.route(`${localSupabaseUrl}/rest/v1/v2_statuses*`, route =>
+      route.fulfill({ json: { is_embeddings_done: true } }),
+    );
+    // React Query refetches stale availability when the browser becomes visible.
+    await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    await expect(page.getByTestId("ortho-tile-search-input")).toBeEnabled();
   });
 });

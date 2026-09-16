@@ -10,8 +10,6 @@ interface DatasetFilterContextType {
   setFilterTag: (filterTag: FilterTag) => void;
   advancedFilters: AdvancedFilters;
   setAdvancedFilters: (filters: AdvancedFilters) => void;
-  searchInput: string;
-  setSearchInput: (search: string) => void;
   sortDirection: "asc" | "desc";
   setSortDirection: (direction: "asc" | "desc") => void;
   filterByViewport: boolean;
@@ -32,8 +30,6 @@ const DatasetFilterContext = createContext<DatasetFilterContextType>({
     dateRange: [2010, new Date().getFullYear()],
   },
   setAdvancedFilters: () => {},
-  searchInput: "",
-  setSearchInput: () => {},
   sortDirection: "desc",
   setSortDirection: () => {},
   filterByViewport: true,
@@ -51,7 +47,6 @@ export const DatasetFilterProvider = (props: { children: React.ReactNode }) => {
     platform: "",
     dateRange: [2010, new Date().getFullYear()],
   });
-  const [searchInput, setSearchInput] = useState("");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [filterByViewport, setFilterByViewport] = useState(true);
 
@@ -64,14 +59,12 @@ export const DatasetFilterProvider = (props: { children: React.ReactNode }) => {
       setFilterTag,
       advancedFilters,
       setAdvancedFilters,
-      searchInput,
-      setSearchInput,
       sortDirection,
       setSortDirection,
       filterByViewport,
       setFilterByViewport,
     }),
-    [filter, filterTag, advancedFilters, searchInput, sortDirection, filterByViewport],
+    [filter, filterTag, advancedFilters, sortDirection, filterByViewport],
   );
 
   return <DatasetFilterContext.Provider value={value}>{props.children}</DatasetFilterContext.Provider>;

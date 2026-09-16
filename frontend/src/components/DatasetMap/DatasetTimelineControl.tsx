@@ -82,11 +82,13 @@ export default function DatasetTimelineControl({
           <RightOutlined />
         </button>
 
-        <Text className="hidden text-xs text-gray-600 md:inline">
+        {/* Totals need horizontal room; at tablet width the archive sidebar
+            already claims most of it, so they only appear from lg upwards. */}
+        <Text className="hidden whitespace-nowrap text-xs text-gray-600 lg:inline">
           {cumulativeCount.toLocaleString()} total
         </Text>
-        <span className="hidden text-gray-300 md:inline">|</span>
-        <Text className="hidden text-xs text-gray-600 md:inline">
+        <span className="hidden text-gray-300 lg:inline">|</span>
+        <Text className="hidden whitespace-nowrap text-xs text-gray-600 lg:inline">
           {addedInQuarter > 0 ? `+${addedInQuarter.toLocaleString()}` : "+0"}
         </Text>
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useMemo } from "react";
 import type VectorTileLayer from "ol/layer/VectorTile";
+import { PictureOutlined } from "@ant-design/icons";
 
 import { IDataset } from "../../types/dataset";
 import { useDatasetLabelTypes } from "../../hooks/useDatasetLabelTypes";
@@ -17,6 +18,26 @@ import {
 	useMapOverlays,
 	useMapInteractions,
 } from "./hooks";
+
+// Plain-language reason for a missing map image, derived from processing state.
+function describeMissingImage(data: IDataset): { title: string; body: string } {
+	if (data.has_error) {
+		return {
+			title: "Image could not be prepared",
+			body: "Processing of this drone image ran into a problem. The dataset details are still available.",
+		};
+	}
+	if (data.is_upload_done && !data.is_cog_done) {
+		return {
+			title: "Image is being prepared",
+			body: "The drone image is still processing. Check back a little later.",
+		};
+	}
+	return {
+		title: "No image to show",
+		body: "This dataset has no viewable drone image.",
+	};
+}
 
 interface BaseMapProps {
 	data: IDataset;
@@ -260,6 +281,20 @@ export default function BaseMap({
 	}, [popoverInfo, onEditDeadwood, onEditForestCover, hidePopover]);
 
 	if (!data) return null;
+	if (!data.cog_path) {
+		const empty = describeMissingImage(data);
+		return (
+			<div className="flex h-full items-center justify-center px-6 pt-24" role="status">
+				<div className="flex max-w-sm flex-col items-center rounded-2xl border border-gray-200/60 bg-white/90 px-8 py-7 text-center shadow-sm backdrop-blur-sm">
+					<span className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-xl text-gray-400">
+						<PictureOutlined />
+					</span>
+					<h2 className="m-0 text-base font-semibold text-gray-800">{empty.title}</h2>
+					<p className="mb-0 mt-2 text-sm leading-relaxed text-gray-500">{empty.body}</p>
+				</div>
+			</div>
+		);
+	}
 
 	return (
 		<div className="h-full w-full">

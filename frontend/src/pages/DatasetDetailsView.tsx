@@ -69,7 +69,7 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
   // Sidebar state
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [labelsOnly, setLabelsOnly] = useState(false);
-  const isMobile = useIsMobile();
+  const isMobile = useIsMobile("lg");
 
   // Mobile drawers state
   const [mobileInfoDrawerOpen, setMobileInfoDrawerOpen] = useState(false);
@@ -242,6 +242,9 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
       label?.label_source === ILabelSource.VISUAL_INTERPRETATION,
   );
   const hasAOI = !!aoiData?.geometry;
+  // Without a viewable image there is no map, so basemap/layer controls and the
+  // in-image search would be dead weight next to the empty state.
+  const hasMapImage = !!dataset.cog_path;
   const SIDEBAR_LEFT_PX = 16;
   const SIDEBAR_WIDTH_PX = 384;
   const SIDEBAR_BUTTON_TOP_PX = 112;
@@ -263,6 +266,11 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
           overlappingDatasets={overlappingDatasets || []}
           isLoadingOverlapping={isLoadingOverlapping}
         />
+      )}
+      {!hasMapImage && canAudit && !isEditing && (
+        <Button className="mt-4" onClick={() => navigate(`/dataset-audit/${dataset.id}`)}>
+          Audit dataset
+        </Button>
       )}
     </div>
   );
@@ -289,7 +297,7 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
     >
       {/* Collapsible Sidebar (Desktop) */}
       <div
-        className={`hidden md:flex absolute left-4 top-24 bottom-6 z-10 flex-col rounded-2xl border border-gray-200/60 bg-white/95 shadow-xl backdrop-blur-sm pointer-events-auto transition-all duration-300 ${
+        className={`hidden lg:flex absolute left-4 top-24 bottom-6 z-10 flex-col rounded-2xl border border-gray-200/60 bg-white/95 shadow-xl backdrop-blur-sm pointer-events-auto transition-all duration-300 ${
           sidebarCollapsed
             ? "w-0 overflow-hidden opacity-0 pointer-events-none -translate-x-full"
             : "w-96 opacity-100 translate-x-0"
@@ -300,7 +308,7 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
       </div>
 
       {/* Mobile Top Controls (Back + Actions) */}
-      <div className="absolute left-2 right-2 top-20 z-50 flex items-center justify-between pointer-events-none md:hidden">
+      <div className="absolute left-2 right-2 top-20 z-50 flex items-center justify-between pointer-events-none lg:hidden">
         {/* Left side: Back Button */}
         <div className="pointer-events-auto">
           {!isEditing && (
@@ -323,20 +331,22 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
           >
             Details
           </Button>
-          <Button
-            icon={<SlidersOutlined />}
-            className="shadow-sm"
-            onClick={() => setMobileControlsDrawerOpen(true)}
-          >
-            Controls
-          </Button>
+          {hasMapImage && (
+            <Button
+              icon={<SlidersOutlined />}
+              className="shadow-sm"
+              onClick={() => setMobileControlsDrawerOpen(true)}
+            >
+              Controls
+            </Button>
+          )}
         </div>
       </div>
 
       {/* Back Button - hidden when editing */}
       {!isEditing && !isMobile && (
         <div
-          className="absolute z-20 transition-all duration-300 hidden md:block"
+          className="absolute z-20 transition-all duration-300 hidden lg:block"
           style={{
             top: `${SIDEBAR_BUTTON_TOP_PX}px`,
             left: sidebarCollapsed
@@ -358,7 +368,7 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
       {/* Sidebar Toggle */}
       {!isMobile && (
         <div
-          className="absolute z-20 transition-all duration-300 hidden md:block"
+          className="absolute z-20 transition-all duration-300 hidden lg:block"
           style={{
             top: `${SIDEBAR_BUTTON_TOP_PX}px`,
             left: sidebarCollapsed
@@ -381,8 +391,8 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
       {/* Map Column */}
       <div className="absolute inset-0 z-0">
         {/* Layer Control Panel - hidden when editing on desktop */}
-        {!isEditing && (
-          <div className="absolute right-4 top-24 z-10 hidden md:block">
+        {!isEditing && hasMapImage && (
+          <div className="absolute right-4 top-24 z-10 hidden lg:block">
             <DatasetLayerControlPanel
               mapStyle={layerControl.mapStyle}
               onMapStyleChange={setMapStyle}
@@ -495,8 +505,8 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
 
         {/* Open-vocabulary tile search is temporarily auditor-only. PostgreSQL
             enforces the same capability even if callers bypass this UI gate. */}
-        {canUseAiSearch && !isEditing && dataset && (
-          <div className="pointer-events-none absolute left-1/2 top-24 z-30 -translate-x-1/2">
+        {canUseAiSearch && !isEditing && hasMapImage && (
+          <div className="pointer-events-none absolute left-1/2 top-[7.5rem] z-30 -translate-x-1/2 lg:top-24">
             <div className="pointer-events-auto">
               <OrthoTileSearch
                 map={mapInstance}
@@ -514,7 +524,7 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
         height="85vh"
         open={mobileInfoDrawerOpen}
         onClose={() => setMobileInfoDrawerOpen(false)}
-        className="md:hidden"
+        className="lg:hidden"
         styles={{
           body: { padding: "0", display: "flex", flexDirection: "column" },
         }}
@@ -529,7 +539,7 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
         height="auto"
         open={mobileControlsDrawerOpen}
         onClose={() => setMobileControlsDrawerOpen(false)}
-        className="md:hidden"
+        className="lg:hidden"
         styles={{ body: { padding: "16px", overflowY: "auto" } }}
       >
         <div className="flex justify-center w-full pb-8">

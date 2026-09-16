@@ -429,6 +429,8 @@ const SENSITIVE_QUERY_PARAMS = new Set([
   "otp",
   "password",
   "refresh_token",
+  "q",
+  "text",
   "secret",
   "session",
   "token",
