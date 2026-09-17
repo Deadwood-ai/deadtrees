@@ -139,6 +139,7 @@ def test_build_odm_command_enables_auto_boundary(monkeypatch):
 
 	assert '--auto-boundary' in command
 	assert '--max-concurrency' in command
+	assert command[command.index('--matcher-neighbors') + 1] == '0'
 	assert resolution == '1.0'
 	assert env_mode == 'Production quality'
 
