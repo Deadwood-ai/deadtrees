@@ -81,9 +81,13 @@ def _build_odm_command() -> tuple[list[str], str, str]:
 	else:
 		# --max-concurrency 2: limits parallel threads to ~2x image_MP GB peak RAM
 		# (default 4 causes OOM on large datasets: 655 images × 12MP × 4 threads ≈ 120GB+)
+		# --matcher-neighbors 0: pair images by triangulation instead of the N nearest GPS
+		# neighbours. With dense along-track capture (e.g. DJI L3 left/right pairs), N nearest
+		# neighbours never reach the adjacent flight line, so strips are not tied together and
+		# the ortho shows ghosted/duplicated features.
 		resolution = '1.0'  # 1cm/pixel for production quality
 		odm_command.extend(
-			['--fast-orthophoto', '--feature-quality', 'high', '--matcher-neighbors', '12', '--max-concurrency', '2']
+			['--fast-orthophoto', '--feature-quality', 'high', '--matcher-neighbors', '0', '--max-concurrency', '2']
 		)
 
 	if settings.ODM_AUTO_BOUNDARY:
