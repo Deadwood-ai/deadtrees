@@ -76,6 +76,21 @@ The guarded auto-deploy runs `scripts/processor_asset_preflight.py` before it
 starts or resumes the worker. A missing model or metadata dataset leaves the
 worker drained and pauses automatic deployment.
 
+### Optional: reserve one GPU via MPS
+
+A host can pin the worker to one GPU and keep other users off it. Hosts that do
+not set `CUDA_MPS_PIPE_DIRECTORY` are unaffected. To opt in:
+
+- on the host, set the card to `EXCLUSIVE_PROCESS` (`nvidia-smi -i <index> -c EXCLUSIVE_PROCESS`)
+  and run an MPS control daemon with `CUDA_VISIBLE_DEVICES=<index>` and
+  `CUDA_MPS_PIPE_DIRECTORY=/var/run/deadtrees-mps`
+- in the host-local, gitignored compose override, set `NVIDIA_VISIBLE_DEVICES=<index>`
+  and `CUDA_MPS_PIPE_DIRECTORY=/var/run/deadtrees-mps` for `processor`, and
+  bind-mount `/var/run/deadtrees-mps` at the same path
+
+The worker forwards both values to the TCD helper container and bind-mounts the
+same host path there, so the path must be identical on host and worker.
+
 ## Bring-Up
 
 From the production checkout on the new worker host:
