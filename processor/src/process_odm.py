@@ -74,7 +74,7 @@ def _filter_images_by_camera_orientation(
 def _select_orientation_eligible_images(
 	image_files: list[Path], max_nadir_deviation_degrees: float
 ) -> tuple[list[Path], list[tuple[Path, float, str]], list[Path], bool]:
-	"""Apply the nadir filter, but never let it reject an entire flight.
+	"""Apply the nadir filter, but never let it reject every image with readable orientation.
 
 	Some cameras leave ``GimbalPitchDegree`` at 0 for nadir shots (seen on DJI
 	FC3682/FC6310/FC7703), which the nadir formula reads as 90 degrees off nadir.
@@ -85,7 +85,10 @@ def _select_orientation_eligible_images(
 	Returns ``(kept, excluded, unknown, fell_back)``.
 	"""
 	kept, excluded, unknown = _filter_images_by_camera_orientation(image_files, max_nadir_deviation_degrees)
-	if not kept and excluded:
+	# `kept` also holds the unknown-orientation images, so judge the flight by whether any
+	# image was positively recognized as nadir, not by whether `kept` is empty.
+	recognized_nadir_count = len(kept) - len(unknown)
+	if excluded and recognized_nadir_count == 0:
 		return list(image_files), [], unknown, True
 	return kept, excluded, unknown, False
 
@@ -693,7 +696,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 
 	if orientation_fallback:
 		logger.warning(
-			'Camera-orientation filter would have excluded every image (camera reports a pitch that reads '
+			'Camera-orientation filter would have excluded every image with readable orientation (camera reports a pitch that reads '
 			f'as non-nadir, e.g. GimbalPitchDegree=0); keeping all {len(valid_image_files)} images instead',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)

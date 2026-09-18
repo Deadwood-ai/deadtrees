@@ -263,6 +263,25 @@ def test_select_orientation_eligible_images_keeps_all_when_filter_would_empty_th
 
 
 @pytest.mark.unit
+def test_select_orientation_eligible_images_falls_back_when_only_unknown_images_survive(tmp_path):
+	"""One image without orientation metadata must not hide a zero-pitch flight from the fallback."""
+	zero_pitch = [
+		_write_image_with_pitch(tmp_path / f'zero-pitch-{index}.jpg', 'GimbalPitchDegree', '+0.00')
+		for index in range(3)
+	]
+	unknown_path = tmp_path / 'unknown.jpg'
+	unknown_path.write_bytes(b'\xff\xd8no pitch metadata\xff\xd9')
+	paths = [*zero_pitch, unknown_path]
+
+	kept, excluded, unknown, fell_back = _select_orientation_eligible_images(paths, max_nadir_deviation_degrees=10.0)
+
+	assert fell_back is True
+	assert kept == paths
+	assert excluded == []
+	assert unknown == [unknown_path]
+
+
+@pytest.mark.unit
 def test_select_orientation_eligible_images_still_drops_obliques_when_nadir_images_exist(tmp_path):
 	"""The fallback must not weaken filtering for flights that do have nadir images."""
 	nadir = _write_image_with_pitch(tmp_path / 'nadir.jpg', 'GimbalPitchDegree', '-90.0')
