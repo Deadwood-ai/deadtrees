@@ -50,6 +50,11 @@ class Settings(BaseSettings):
 	# Containers
 	TCD_CONTAINER_IMAGE: str = 'deadtrees-tcd:latest'
 	TCD_CONTAINER_TIMEOUT_SECONDS: int = 14400
+	# Hosts that reserve a GPU for the processor via an NVIDIA MPS daemon + EXCLUSIVE_PROCESS
+	# compute mode set this to the MPS pipe directory (same path on host and in the worker).
+	# The TCD helper container then gets the same env var and a bind mount of that path.
+	# Empty (the default) leaves the TCD launch unchanged.
+	CUDA_MPS_PIPE_DIRECTORY: str = ''
 
 	# docker.from_env() defaults to a 60s read timeout on the daemon socket, which applies
 	# to control-plane calls (containers.create/start, put_archive, wait). When the host disk

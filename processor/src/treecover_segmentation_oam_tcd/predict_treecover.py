@@ -317,19 +317,34 @@ def _run_tcd_pipeline_container(volume_name: str, dataset_id: int, token: str) -
 			# because that CDI path is broken on the production host (`failed to
 			# fulfil mount request: open /usr/bin/nvidia-cuda-mps-control`). The
 			# legacy runtime+env path is the one proven to work on prod for Deadwood.
+			#
+			# NVIDIA_VISIBLE_DEVICES is forwarded from the worker so a pinned worker's
+			# TCD stage lands on the same GPU. On hosts that reserve that GPU via MPS +
+			# EXCLUSIVE_PROCESS only MPS clients may use the card, so the TCD container
+			# also gets the MPS pipe directory. This launcher talks to the host daemon,
+			# so the bind source is a host path; it is the same path on host, worker
+			# and TCD container.
+			volumes = {volume_name: {'bind': '/tcd_data', 'mode': 'rw'}}
+			environment = {}
+			if use_gpu:
+				environment = {
+					'NVIDIA_VISIBLE_DEVICES': os.environ.get('NVIDIA_VISIBLE_DEVICES', 'all'),
+					'NVIDIA_DRIVER_CAPABILITIES': 'compute,utility',
+				}
+				mps_pipe_dir = settings.CUDA_MPS_PIPE_DIRECTORY
+				if mps_pipe_dir:
+					environment['CUDA_MPS_PIPE_DIRECTORY'] = mps_pipe_dir
+					volumes[mps_pipe_dir] = {'bind': mps_pipe_dir, 'mode': 'rw'}
 			return client.containers.run(
 				image=TCD_CONTAINER_IMAGE,
 				command=['python', '/tcd_data/predict_pipeline.py', input_path, output_path],
 				entrypoint='',
-				volumes={volume_name: {'bind': '/tcd_data', 'mode': 'rw'}},
+				volumes=volumes,
 				remove=False,
 				detach=True,
 				user='root',
 				runtime='nvidia' if use_gpu else None,
-				environment={
-					'NVIDIA_VISIBLE_DEVICES': 'all',
-					'NVIDIA_DRIVER_CAPABILITIES': 'compute,utility',
-				} if use_gpu else {},
+				environment=environment,
 				labels={
 					**resource_labels,
 					'dt_role': 'tcd_pipeline',

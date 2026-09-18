@@ -86,6 +86,9 @@ services:
       # SSH_KEY_PATH: /root/.ssh/processing-to-storage
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      # Only set on hosts that reserve a GPU via MPS + EXCLUSIVE_PROCESS; the socket
+      # directory mount lives in that host's local compose override.
+      CUDA_MPS_PIPE_DIRECTORY: ${CUDA_MPS_PIPE_DIRECTORY:-}
     ports:
       - "5678:5678"
     devices:
