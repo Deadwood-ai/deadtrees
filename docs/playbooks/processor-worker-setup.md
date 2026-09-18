@@ -87,6 +87,10 @@ not set `CUDA_MPS_PIPE_DIRECTORY` are unaffected. To opt in:
 - in the host-local, gitignored compose override, set `NVIDIA_VISIBLE_DEVICES=<index>`
   and `CUDA_MPS_PIPE_DIRECTORY=/var/run/deadtrees-mps` for `processor`, and
   bind-mount `/var/run/deadtrees-mps` at the same path
+- if `<index>` is not `0`, also replace the tracked `/dev/nvidia0` mapping in that
+  override with `devices: !override` listing `/dev/nvidia<index>` plus the shared
+  `nvidiactl`, `nvidia-modeset`, `nvidia-uvm` and `nvidia-uvm-tools` nodes. Compose
+  appends `devices` on merge, so without `!override` the worker still sees GPU 0.
 
 The worker forwards both values to the TCD helper container and bind-mounts the
 same host path there, so the path must be identical on host and worker.
