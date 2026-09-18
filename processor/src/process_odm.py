@@ -71,6 +71,25 @@ def _filter_images_by_camera_orientation(
 	return kept, excluded, unknown
 
 
+def _select_orientation_eligible_images(
+	image_files: list[Path], max_nadir_deviation_degrees: float
+) -> tuple[list[Path], list[tuple[Path, float, str]], list[Path], bool]:
+	"""Apply the nadir filter, but never let it reject an entire flight.
+
+	Some cameras leave ``GimbalPitchDegree`` at 0 for nadir shots (seen on DJI
+	FC3682/FC6310/FC7703), which the nadir formula reads as 90 degrees off nadir.
+	Dropping a whole dataset on metadata alone costs more than the occasional
+	oblique image that slips through, so fall back to the unfiltered set and let
+	the caller report it.
+
+	Returns ``(kept, excluded, unknown, fell_back)``.
+	"""
+	kept, excluded, unknown = _filter_images_by_camera_orientation(image_files, max_nadir_deviation_degrees)
+	if not kept and excluded:
+		return list(image_files), [], unknown, True
+	return kept, excluded, unknown, False
+
+
 def _build_odm_command() -> tuple[list[str], str, str]:
 	"""Build the ODM CLI command for the current environment."""
 	odm_command: list[str] = []
@@ -665,10 +684,19 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 	)
 
-	valid_image_files, orientation_excluded, orientation_unknown = _filter_images_by_camera_orientation(
-		valid_image_files,
-		max_nadir_deviation_degrees=settings.ODM_MAX_NADIR_DEVIATION_DEGREES,
+	valid_image_files, orientation_excluded, orientation_unknown, orientation_fallback = (
+		_select_orientation_eligible_images(
+			valid_image_files,
+			max_nadir_deviation_degrees=settings.ODM_MAX_NADIR_DEVIATION_DEGREES,
+		)
 	)
+
+	if orientation_fallback:
+		logger.warning(
+			'Camera-orientation filter would have excluded every image (camera reports a pitch that reads '
+			f'as non-nadir, e.g. GimbalPitchDegree=0); keeping all {len(valid_image_files)} images instead',
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+		)
 
 	logger.info(
 		f'Camera-orientation filter kept {len(valid_image_files)} images, '
@@ -685,15 +713,12 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			for path, deviation, source_tag in orientation_excluded[:10]
 		)
 		logger.warning(
-			f'Excluded non-nadir ODM images: {excluded_sample}'
-			f'{" ..." if len(orientation_excluded) > 10 else ""}',
+			f'Excluded non-nadir ODM images: {excluded_sample}{" ..." if len(orientation_excluded) > 10 else ""}',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
 	if not valid_image_files:
-		raise Exception(
-			f'No images remain within nadir +/- {settings.ODM_MAX_NADIR_DEVIATION_DEGREES:g} degrees'
-		)
+		raise Exception('No images available for ODM after size and orientation filtering')
 
 	logger.info(
 		f'Preparing to copy {len(valid_image_files)} orientation-eligible images to the shared ODM volume',
