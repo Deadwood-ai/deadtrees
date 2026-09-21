@@ -11,14 +11,14 @@ DeadTrees is a monorepo:
 - `supabase/`: schema and migration history
 - `deadtrees-cli/`: local developer CLI
 
-Production is split across two machines:
+Production is split across separate storage and processing roles:
 
 - storage/API server: host nginx, API container, `/data` file storage
-- processing server: processor, ODM containers, model containers
+- one or more processing hosts: processor, ODM containers, model containers
 
-There is no shared filesystem between production machines. Data moves through the
-storage API and SSH file transfer patterns. Preserve that assumption when changing
-processor or storage code.
+There is no shared filesystem between the storage server and processor hosts, or
+between processor hosts. Data moves through the storage API and SSH file transfer
+patterns. Preserve that assumption when changing processor or storage code.
 
 ## Delivery
 

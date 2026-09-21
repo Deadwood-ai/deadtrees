@@ -28,6 +28,8 @@ DEFAULT_STATE_FILE = ROOT / '.local/operator/operator-state.json'
 DEFAULT_LATEST_FILE = ROOT / '.local/operator/operator-latest.md'
 DEFAULT_BACKUP_MAX_AGE_HOURS = 36
 ARCHIVE_TIMESTAMP_RE = re.compile(r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})')
+PROCESSING_HOST_LABEL_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,31}')
+SSH_TARGET_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:@-]*')
 
 
 def utc_now() -> str:
@@ -188,29 +190,139 @@ from status_summary, log_summary, queue_summary;
 	return payload
 
 
-def ssh_probe(env_name: str, command: str, timeout: int) -> dict[str, Any]:
-	host = os.environ.get(env_name)
+def ssh_target_probe(host_ref: str, host: str | None, command: str, timeout: int) -> dict[str, Any]:
 	if not host:
-		return {'ok': None, 'skipped': f'set {env_name} for host probe'}
+		return {'ok': None, 'skipped': f'set {host_ref} for host probe'}
 
 	result = run_command(
 		['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host, command],
 		timeout=timeout,
 	)
+	lines = [line.strip() for line in result.get('stdout', '').splitlines() if line.strip()]
 	if not result['ok']:
-		return {'ok': False, 'host_env': env_name, 'error': compact_error(result)}
+		return {
+			'ok': False,
+			'host_env': host_ref,
+			'host_ref': host_ref,
+			'returncode': result.get('returncode'),
+			'error': compact_error(result),
+			'lines': lines[:12],
+			'disks': parse_disk_lines(lines),
+		}
 
-	lines = [line.strip() for line in result['stdout'].splitlines() if line.strip()]
 	archives = parse_archive_lines(lines)
 	return {
 		'ok': True,
-		'host_env': env_name,
+		'host_env': host_ref,
+		'host_ref': host_ref,
 		'lines': lines[:12],
 		'disks': parse_disk_lines(lines),
 		'archives': archives,
 		'archive_ages_hours': parse_archive_ages_hours(archives),
 		'duration_ms': result['duration_ms'],
 	}
+
+
+def ssh_probe(env_name: str, command: str, timeout: int) -> dict[str, Any]:
+	return ssh_target_probe(env_name, os.environ.get(env_name), command, timeout)
+
+
+def processing_probe_command() -> str:
+	df_command = (
+		"printf 'host=%s\\n' \"$(hostname)\"; "
+		"df -P / /data 2>/dev/null | awk 'NR>1 {print \"disk=\" $6 \":\" $5}'"
+	)
+	inspect_command = (
+		"docker inspect deadtrees-processor-1 --format "
+		"'processor=state={{.State.Status}} pid={{.State.Pid}} started={{.State.StartedAt}} "
+		"restarts={{.RestartCount}} oom={{.State.OOMKilled}} exit={{.State.ExitCode}} "
+		"image_ref={{.Config.Image}} image_id={{.Image}} memory_bytes={{.HostConfig.Memory}} "
+		"nano_cpus={{.HostConfig.NanoCpus}} cgroup_parent={{.HostConfig.CgroupParent}}'"
+	)
+	return (
+		f'{df_command}; '
+		f'inspect_output=$({inspect_command} 2>&1); inspect_status=$?; '
+		'if [ "$inspect_status" -eq 0 ]; then printf \'%s\\n\' "$inspect_output"; '
+		"elif command -v sg >/dev/null 2>&1 && id -nG \"$(id -un)\" | tr ' ' '\\n' | grep -qx docker; then "
+		f'inspect_output=$(sg docker -c {shlex.quote(inspect_command)} 2>&1); inspect_status=$?; '
+		'if [ "$inspect_status" -eq 0 ]; then printf \'%s\\n\' "$inspect_output"; '
+		'else printf \'%s\\n\' "$inspect_output" >&2; exit 42; fi; '
+		'else printf \'%s\\n\' "$inspect_output" >&2; exit 42; fi'
+	)
+
+
+def parse_processor_lines(lines: list[str]) -> dict[str, Any]:
+	for line in lines:
+		if not line.startswith('processor='):
+			continue
+		fields: dict[str, Any] = {}
+		for item in shlex.split(line.removeprefix('processor=')):
+			key, separator, value = item.partition('=')
+			if separator:
+				fields[key] = value
+		for key in ('pid', 'restarts', 'exit', 'memory_bytes', 'nano_cpus'):
+			try:
+				fields[key] = int(fields[key])
+			except (KeyError, ValueError):
+				pass
+		if 'oom' in fields:
+			fields['oom'] = fields['oom'].lower() == 'true'
+		return fields
+	return {}
+
+
+def processing_host_probe(host_ref: str, host: str | None, timeout: int) -> dict[str, Any]:
+	probe = ssh_target_probe(host_ref, host, processing_probe_command(), timeout)
+	if probe.get('ok') is False and probe.get('returncode') == 42:
+		probe['ok'] = None
+		probe['inspection_gap'] = True
+		probe['skipped'] = probe.pop('error')
+		probe['warning'] = probe['skipped']
+		return probe
+	if probe.get('ok') is not True:
+		return probe
+
+	processor = parse_processor_lines(probe['lines'])
+	probe['processor'] = processor
+	if not processor:
+		probe['ok'] = None
+		probe['inspection_gap'] = True
+		probe['skipped'] = 'processor container inspection returned no state'
+		probe['warning'] = probe['skipped']
+	elif processor.get('state') != 'running':
+		probe['ok'] = False
+		probe['error'] = f"processor container state is {processor.get('state') or 'unknown'}"
+	elif processor.get('pid', 0) <= 0:
+		probe['ok'] = False
+		probe['error'] = f"processor container reported PID {processor.get('pid', 'unknown')}"
+	return probe
+
+
+def additional_processing_hosts() -> tuple[list[tuple[str, str]], list[str]]:
+	raw = os.environ.get('DEADTREES_OPERATOR_PROCESSING_HOSTS', '').strip()
+	if not raw:
+		return [], []
+
+	hosts: list[tuple[str, str]] = []
+	errors: list[str] = []
+	labels: set[str] = set()
+	for index, entry in enumerate(raw.split(','), start=1):
+		label, separator, target = entry.strip().partition('=')
+		if not separator or not label or not target:
+			errors.append(f'entry {index} must use label=ssh-target')
+			continue
+		if not PROCESSING_HOST_LABEL_RE.fullmatch(label):
+			errors.append(f'entry {index} has an invalid label')
+			continue
+		if not SSH_TARGET_RE.fullmatch(target):
+			errors.append(f'entry {index} has an invalid SSH target')
+			continue
+		if label in labels:
+			errors.append(f'entry {index} repeats label {label!r}')
+			continue
+		labels.add(label)
+		hosts.append((label, target))
+	return hosts, errors
 
 
 def parse_disk_lines(lines: list[str]) -> dict[str, int]:
@@ -289,11 +401,31 @@ def host_summaries(timeout: int) -> dict[str, Any]:
 		"printf 'host=%s\\n' \"$(hostname)\"; "
 		"df -P / /data 2>/dev/null | awk 'NR>1 {print \"disk=\" $6 \":\" $5}'"
 	)
-	return {
-		'processing': ssh_probe('DEADTREES_OPERATOR_PROCESSING_HOST', df_command, timeout),
-		'storage': ssh_probe('DEADTREES_OPERATOR_STORAGE_HOST', df_command, timeout),
-		'backups': ssh_probe('DEADTREES_OPERATOR_BACKUP_HOST', backup_command(), timeout),
+	legacy_host = os.environ.get('DEADTREES_OPERATOR_PROCESSING_HOST')
+	hosts = {
+		'processing': processing_host_probe('DEADTREES_OPERATOR_PROCESSING_HOST', legacy_host, timeout),
 	}
+	seen_targets = {legacy_host} if legacy_host else set()
+	additional_hosts, configuration_errors = additional_processing_hosts()
+	if configuration_errors:
+		hosts['processing:configuration'] = {
+			'ok': None,
+			'host_ref': 'DEADTREES_OPERATOR_PROCESSING_HOSTS',
+			'warning': '; '.join(configuration_errors),
+			'skipped': 'invalid additional processing host configuration',
+		}
+	for label, target in additional_hosts:
+		if target in seen_targets:
+			continue
+		hosts[f'processing:{label}'] = processing_host_probe(
+			f'DEADTREES_OPERATOR_PROCESSING_HOSTS[{label}]',
+			target,
+			timeout,
+		)
+		seen_targets.add(target)
+	hosts['storage'] = ssh_probe('DEADTREES_OPERATOR_STORAGE_HOST', df_command, timeout)
+	hosts['backups'] = ssh_probe('DEADTREES_OPERATOR_BACKUP_HOST', backup_command(), timeout)
+	return hosts
 
 
 def connector_placeholders() -> dict[str, Any]:
@@ -343,6 +475,8 @@ def classify(snapshot: dict[str, Any]) -> tuple[str, list[str], list[str]]:
 			risks.append(f"{db['queue_active']} active queue item(s)")
 
 	for key, value in snapshot['platform']['hosts'].items():
+		if value.get('warning'):
+			risks.append(f"{key}: {value['warning']}")
 		if value.get('ok') is False:
 			risks.append(f"{key} host probe failed")
 		elif value.get('ok') is None:
@@ -350,6 +484,8 @@ def classify(snapshot: dict[str, Any]) -> tuple[str, list[str], list[str]]:
 		for path, percent in value.get('disks', {}).items():
 			if percent >= 80:
 				risks.append(f'{key} disk {path} is {percent}% full')
+		if value.get('processor', {}).get('oom') is True:
+			risks.append(f'{key} processor reports an OOM kill')
 		if key == 'backups' and value.get('archive_ages_hours'):
 			max_age_hours = int(os.environ.get('DEADTREES_OPERATOR_BACKUP_MAX_AGE_HOURS', DEFAULT_BACKUP_MAX_AGE_HOURS))
 			for archive_name, age_hours in value['archive_ages_hours'].items():
@@ -383,6 +519,23 @@ def changed_since_last(previous: dict[str, Any] | None, snapshot: dict[str, Any]
 		new_value = nested_get(snapshot, path)
 		if old_value != new_value:
 			changes.append(f'{label}: {old_value} -> {new_value}')
+	old_hosts = old.get('platform', {}).get('hosts', {})
+	for key, value in snapshot['platform']['hosts'].items():
+		if not key.startswith('processing'):
+			continue
+		old_value = old_hosts.get(key, {})
+		old_state = (
+			old_value.get('ok'),
+			old_value.get('processor', {}).get('state'),
+			old_value.get('processor', {}).get('pid'),
+		)
+		new_state = (
+			value.get('ok'),
+			value.get('processor', {}).get('state'),
+			value.get('processor', {}).get('pid'),
+		)
+		if old_state != new_state:
+			changes.append(f'{key} state: {old_state} -> {new_state}')
 	return changes[:8] or ['no tracked changes']
 
 
@@ -424,6 +577,15 @@ def next_checks(snapshot: dict[str, Any]) -> list[str]:
 		checks.append('inspect upstream commits, then pull only if the tree is clean')
 	if snapshot['platform']['database'].get('ok') is None:
 		checks.append('run DB aggregates via docs/playbooks/analyst-database-access.md; existing monitor probes use DEADTREES_OPERATOR_DATABASE_URL')
+	processing_probes = {
+		key: value for key, value in snapshot['platform']['hosts'].items() if key.startswith('processing')
+	}
+	if any(value.get('ok') is False for value in processing_probes.values()):
+		checks.append('inspect failed processing host probes; missing container evidence is a coverage gap')
+	elif any(value.get('inspection_gap') for value in processing_probes.values()):
+		checks.append('restore read-only container inspection coverage for configured processing hosts')
+	elif any(value.get('ok') is None for value in processing_probes.values()):
+		checks.append('configure missing primary or additional processing host probes')
 	if snapshot['platform']['hosts']['backups'].get('ok') is None:
 		checks.append('configure backup host/path or command for freshness probe')
 	checks.append('run PostHog/Linear/Gmail/Zulip connector deltas')
@@ -462,6 +624,27 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
 	)
 	for key, value in snapshot['platform']['hosts'].items():
 		parts: list[str] = []
+		if value.get('processor'):
+			processor = value['processor']
+			parts.append(
+				'processor '
+				+ ' '.join(
+					f'{field}={processor[field]}'
+					for field in (
+						'state',
+						'pid',
+						'restarts',
+						'oom',
+						'exit',
+						'image_ref',
+						'image_id',
+						'memory_bytes',
+						'nano_cpus',
+						'cgroup_parent',
+					)
+					if field in processor
+				)
+			)
 		if value.get('disks'):
 			parts.append('disks ' + ', '.join(f'{path}={percent}%' for path, percent in value['disks'].items()))
 		if value.get('archives'):
@@ -474,6 +657,10 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
 					for name, archive in value['archives'].items()
 				)
 			)
+		if value.get('warning'):
+			parts.append(f"warning {value['warning']}")
+		elif value.get('ok') is False and value.get('error'):
+			parts.append(f"error {value['error']}")
 		summary = '; '.join(parts)
 		if not summary:
 			summary = '; '.join(value.get('lines', [])[:4]) if value.get('lines') else value.get('skipped') or value.get('error')
