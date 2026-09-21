@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { searchDatasets } from "../api/searchEmbeddings";
 import { useAuth } from "./useAuthProvider";
+import { useCanAudit } from "./useUserPrivileges";
 
 /**
  * URL-backed semantic dataset search.
@@ -14,6 +15,7 @@ import { useAuth } from "./useAuthProvider";
  */
 export function useSemanticSearch(enabled: boolean) {
   const { user } = useAuth();
+  const { canAudit } = useCanAudit();
   const [searchParams, setSearchParams] = useSearchParams();
   const urlQuery = searchParams.get("q")?.trim() || null;
   const query = enabled ? urlQuery : null;
@@ -26,7 +28,7 @@ export function useSemanticSearch(enabled: boolean) {
     refetch,
   } = useQuery({
     queryKey: ["semantic-search", actorKey, query],
-    queryFn: query ? () => searchDatasets(query) : skipToken,
+    queryFn: query ? () => searchDatasets(query, canAudit) : skipToken,
     retry: false,
     staleTime: 5 * 60 * 1000,
   });

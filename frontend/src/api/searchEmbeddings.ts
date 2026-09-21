@@ -2,8 +2,8 @@ import { Settings } from "../config";
 import { supabase } from "../hooks/useSupabase";
 
 // Open-vocabulary search is deliberately split across two boundaries:
-// the public, rate-limited API embeds text; the authenticated Supabase RPC
-// ranks only datasets visible to the caller and currently requires can_audit().
+// the public, rate-limited API embeds text; the public Supabase RPC ranks only
+// datasets visible to the caller (anonymous visitors included).
 
 export interface IDatasetSearchResult {
   dataset_id: number;
@@ -38,10 +38,16 @@ export async function embedQuery(query: string): Promise<string> {
 }
 
 /**
- * Best-effort analytics for successful privileged searches. RLS accepts only
- * auditor-owned rows. Logging failures never turn a valid search into an error.
+ * Best-effort analytics for successful auditor searches. Public query text is
+ * never logged: RLS accepts only auditor-owned rows, so other callers skip the
+ * insert. Logging failures never turn a valid search into an error.
  */
-function logSuccessfulSearch(query: string, datasetId: number | null): void {
+function logSuccessfulSearch(
+  query: string,
+  datasetId: number | null,
+  logQuery: boolean,
+): void {
+  if (!logQuery) return;
   void supabase
     .from("v2_search_queries")
     .insert({ query, dataset_id: datasetId })
@@ -50,9 +56,10 @@ function logSuccessfulSearch(query: string, datasetId: number | null): void {
     });
 }
 
-/** Rank datasets visible to the authenticated auditor. */
+/** Rank datasets visible to the caller. `logQuery` must only be set for auditors. */
 export async function searchDatasets(
   query: string,
+  logQuery = false,
   matchCount = 100,
   minSimilarity = 0,
 ): Promise<IDatasetSearchResult[]> {
@@ -63,14 +70,15 @@ export async function searchDatasets(
     min_similarity: minSimilarity,
   });
   if (error) throw new Error(error.message || "Dataset search failed");
-  logSuccessfulSearch(query, null);
+  logSuccessfulSearch(query, null, logQuery);
   return (data ?? []) as IDatasetSearchResult[];
 }
 
-/** Rank visible in-AOI tiles of one dataset for the authenticated auditor. */
+/** Rank visible in-AOI tiles of one dataset. `logQuery` must only be set for auditors. */
 export async function searchTiles(
   query: string,
   datasetId: number,
+  logQuery = false,
   matchCount = 300,
 ): Promise<ITileSearchResult[]> {
   const embedding = await embedQuery(query);
@@ -80,6 +88,6 @@ export async function searchTiles(
     match_count: matchCount,
   });
   if (error) throw new Error(error.message || "Tile search failed");
-  logSuccessfulSearch(query, datasetId);
+  logSuccessfulSearch(query, datasetId, logQuery);
   return (data ?? []) as ITileSearchResult[];
 }

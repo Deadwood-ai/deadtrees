@@ -1,5 +1,5 @@
 import pytest
-from shared.db import use_client, use_service_client, login
+from shared.db import use_anon_client, use_client, use_service_client, login
 from shared.settings import settings
 import uuid
 from shared.testing.fixtures import test_processor_user
@@ -183,7 +183,7 @@ def test_authenticated_user_cannot_promote_themselves(setup_privileged_users, te
 
 
 def test_non_auditor_cannot_write_search_query_log(setup_privileged_users, test_user2):
-	"""Best-effort query analytics remain restricted to auditors."""
+	"""Search is public, but query-text analytics remain restricted to auditors."""
 	user_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
 
 	with use_client(user_token) as client:
@@ -213,50 +213,25 @@ def test_auditor_can_log_and_read_successful_search(setup_privileged_users):
 				client.table('v2_search_queries').delete().eq('id', row_id).execute()
 
 
-def test_search_rpcs_reject_anonymous_and_non_auditor_callers(
-	setup_privileged_users_with_limited_permissions,
-):
-	"""Temporary rollout authorization is enforced by PostgreSQL, not only the UI."""
+def test_search_rpcs_are_public(setup_privileged_users_with_limited_permissions):
+	"""Anonymous visitors, non-auditors and auditors can all call both ranking RPCs."""
 	embedding = '[' + ','.join(['1'] + ['0'] * 1023) + ']'
-
-	with use_client() as client:
-		with pytest.raises(Exception, match='permission denied for function search_datasets_by_embedding'):
-			client.rpc(
-				'search_datasets_by_embedding',
-				{'query_embedding': embedding, 'match_count': 1},
-			).execute()
-
 	non_auditor_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
-	with use_client(non_auditor_token) as client:
-		with pytest.raises(Exception, match='AI search is restricted to auditors'):
-			client.rpc(
+	auditor_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+
+	for token in (None, non_auditor_token, auditor_token):
+		with use_client(token) if token else use_anon_client() as client:
+			datasets = client.rpc(
 				'search_datasets_by_embedding',
 				{'query_embedding': embedding, 'match_count': 1},
 			).execute()
-		with pytest.raises(Exception, match='AI search is restricted to auditors'):
-			client.rpc(
+			tiles = client.rpc(
 				'search_tiles_by_embedding',
 				{'query_embedding': embedding, 'p_dataset_id': 999999999, 'match_count': 1},
 			).execute()
 
-
-def test_search_rpcs_allow_auditors(setup_privileged_users_with_limited_permissions):
-	"""Auditors retain direct-RPC access for both search surfaces."""
-	embedding = '[' + ','.join(['1'] + ['0'] * 1023) + ']'
-	auditor_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
-
-	with use_client(auditor_token) as client:
-		datasets = client.rpc(
-			'search_datasets_by_embedding',
-			{'query_embedding': embedding, 'match_count': 1},
-		).execute()
-		tiles = client.rpc(
-			'search_tiles_by_embedding',
-			{'query_embedding': embedding, 'p_dataset_id': 999999999, 'match_count': 1},
-		).execute()
-
-	assert isinstance(datasets.data, list)
-	assert tiles.data == []
+		assert isinstance(datasets.data, list)
+		assert tiles.data == []
 
 
 def test_new_columns_are_set_correctly(setup_privileged_users):
