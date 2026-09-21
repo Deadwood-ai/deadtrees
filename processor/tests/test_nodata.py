@@ -481,6 +481,28 @@ def test_e2e_plot_on_large_white_canvas_tiles(tmp_path):
 		vrt.close()
 
 
+def test_e2e_plot_on_large_black_canvas_tiles(tmp_path):
+	# Same shape with black padding. Depending on the GDAL version the warp hands
+	# source zeros back as masked 0 or as valid 1; both must end up as nodata.
+	rgb = np.zeros((3, 384, 384), dtype=np.uint8)
+	rgb[:, 160:224, 160:224] = 120
+	path = _write(tmp_path / 'plot_on_black_canvas.tif', rgb)
+	vrt = image_reprojector(path)
+	try:
+		assert read_nodata_mask(vrt, Window(64, 64, 64, 64)).all()
+		assert not read_nodata_mask(vrt, Window(168, 168, 48, 48)).any()
+	finally:
+		vrt.close()
+
+
+def test_read_mask_black_fill_accepts_warp_nudged_ones():
+	# GDAL 3.12 returns valid source zeros as 1 under the forced nodata=0 warp.
+	rgb = np.full((3, 4, 4), 120, np.uint8)
+	rgb[:, :, :2] = 1
+	mask = read_nodata_mask(FakeVRT(rgb, np.zeros((4, 4), bool), NodataPolicy(treat_black_fill=True)))
+	assert mask[:, :2].all() and not mask[:, 2:].any()
+
+
 def test_e2e_clean_imagery_masks_nothing(tmp_path):
 	# Full-frame real imagery (no fill) must not be spuriously masked.
 	rng = np.random.default_rng(0)

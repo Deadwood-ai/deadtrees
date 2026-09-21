@@ -64,6 +64,9 @@ _PADDING_CELL = 32
 # Upper bound on pixels read per strip while building the map (~200 MB of RGB).
 _PADDING_STRIP_PIXELS = 64_000_000
 
+# Highest value still read as solid-black fill; see _solid_fill.
+_BLACK_FILL_MAX = 1
+
 # Bands whose colour interpretation marks them as real imagery — never a mask.
 _COLOR_BANDS = frozenset(
 	{
@@ -211,7 +214,9 @@ def _solid_fill(vrt, window, policy: NodataPolicy) -> np.ndarray:
 	if policy.treat_white_fill:
 		fill |= np.all(rgb == 255, axis=0)
 	if policy.treat_black_fill:
-		fill |= np.all(rgb == 0, axis=0)
+		# <= 1, not == 0: the warp's forced nodata=0 makes newer GDAL (3.12) nudge
+		# valid source zeros to 1 so they do not collide with the nodata value.
+		fill |= np.all(rgb <= _BLACK_FILL_MAX, axis=0)
 	return fill
 
 
