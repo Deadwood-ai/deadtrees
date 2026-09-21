@@ -81,7 +81,11 @@ tracked script contains no credentials:
 
 - `DEADTREES_OPERATOR_DATABASE_URL` for the existing purpose-specific monitor
   `psql` summary; this is separate from the routine analyst connection.
-- `DEADTREES_OPERATOR_PROCESSING_HOST` for processing host disk/heartbeat probes.
+- `DEADTREES_OPERATOR_PROCESSING_HOST` for the existing primary processing host
+  disk/container probe.
+- `DEADTREES_OPERATOR_PROCESSING_HOSTS` for additional labeled processor targets,
+  using comma-separated `label=ssh-target` entries. Keep real aliases in local
+  configuration; repeated targets are probed once.
 - `DEADTREES_OPERATOR_STORAGE_HOST` for storage host disk probes.
 - `DEADTREES_OPERATOR_BACKUP_HOST` plus either `DEADTREES_OPERATOR_BACKUP_PATH`
   or `DEADTREES_OPERATOR_BACKUP_COMMAND` for backup freshness.
@@ -141,7 +145,8 @@ exceptions unless the user asks for detail.
 2. API health: public OpenAPI route or health endpoint.
 3. Database anomaly summary: aggregate dataset/status/queue/log counts.
 4. Worker/server heartbeat: latest processing activity, queue age, disk pressure,
-   and stuck non-idle work.
+   stuck non-idle work, and exact container state/PID on every configured processor
+   host. Missing host evidence remains a coverage gap.
 5. Storage and backup freshness when local host probes are configured.
 6. PostHog: exact counts for verified events in the check window, plus cheap
    frustration indicators such as exceptions, rage clicks, dead clicks, and

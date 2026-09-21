@@ -20,7 +20,7 @@ Check the surfaces relevant to the question:
 - production database through [trusted analyst access](analyst-database-access.md)
 - processing queue, `v2_statuses`, `v2_logs`, and recent failures
 - storage/API server health and public API contract
-- processing server/container heartbeat when host access is needed
+- every configured processing host/container heartbeat when host access is needed
 - frontend smoke behavior when user-visible symptoms are possible
 - PostHog traffic, exceptions, uploads, downloads, and audit events
 - Gmail backup alerts, Zulip reports, and automation summaries when relevant
@@ -109,6 +109,21 @@ full platform check inside that broader operator cadence.
    ssh -o BatchMode=yes -o ConnectTimeout=5 remote-backup@dtbackup 'hostname'
    ```
 
+   Keep actual SSH aliases in local access configuration. The compact status helper
+   preserves the existing primary-host variable and accepts labeled additional
+   processor hosts:
+
+   ```bash
+   DEADTREES_OPERATOR_PROCESSING_HOST=primary-ssh-alias \
+   DEADTREES_OPERATOR_PROCESSING_HOSTS=secondary=secondary-ssh-alias,tertiary=tertiary-ssh-alias \
+     python3 scripts/operator_status.py --write-state --format markdown
+   ```
+
+   Labels identify hosts in the snapshot; SSH targets are local machine aliases or
+   `user@host` targets. Repeating the primary target in the additional list does not
+   probe it twice. A missing or failed host/container probe is a coverage gap, not
+   evidence that the worker is stopped, absent, or healthy.
+
 ## Database Queries
 
 For every full check, include the product workflows in
@@ -147,18 +162,33 @@ Then inspect specific fingerprints only when counts look wrong.
 
 ## Host Checks
 
-Use compact one-shot commands and keep output capped:
+Use compact one-shot commands and keep output capped. Run the exact container-state
+check on every processor host; `docker ps` alone can report a zombie container as
+up:
 
 ```bash
 docker inspect deadtrees-processor-1 \
-  --format 'StartedAt={{.State.StartedAt}} RestartCount={{.RestartCount}} OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}}'
+  --format 'State={{.State.Status}} Pid={{.State.Pid}} StartedAt={{.State.StartedAt}} RestartCount={{.RestartCount}} OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}} Image={{.Image}} Memory={{.HostConfig.Memory}} NanoCPUs={{.HostConfig.NanoCpus}} CgroupParent={{.HostConfig.CgroupParent}}'
 df -h / /data
 tail -n 80 /data/logs/reference_export.log
 tail -n 80 /data/logs/api_container.log
 ```
 
+`scripts/operator_status.py` performs this inspection for the legacy primary target
+and each labeled additional processor target. It first uses direct Docker access,
+then may use `sg docker -c` where the already-authorized host account requires its
+existing Docker group in a fresh subshell. It never changes group membership.
+
+For hosts with local GPU, MPS, cgroup, Compose-override, or manual-deployment
+constraints, follow that host's ignored `docs/ops/*` runbook. Record the intended
+configuration separately from current observations: exact PID/state, running image
+or release evidence, effective CPU/memory cgroup values, GPU allocation/reservation,
+resource pressure, and whether deployment automation safely preserves required
+overrides. Monitoring does not enable schedules, deploy, restart services, pull
+images, or repair mismatches.
+
 If processing-server SSH is blocked, use database logs as primary evidence and
-state that host-level corroboration was unavailable.
+state which processor hosts lacked host-level corroboration.
 
 ## Backup Checks
 
@@ -208,6 +238,8 @@ Include:
 - upload/processing throughput counts
 - failures and stuck queues with dataset IDs where useful
 - API/storage/frontend/PostHog/Zulip/export status as checked
+- per-processor host identity, exact container PID/state, image/release evidence,
+  resource observations, and explicit host-specific coverage gaps
 - backups status, including Borg archive freshness and backup-alert email review
 - skipped or blocked surfaces
 - confidence and one improvement for the next check

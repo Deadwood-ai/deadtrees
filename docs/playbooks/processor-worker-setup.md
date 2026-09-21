@@ -17,6 +17,9 @@ storage server, Docker runtime, and required model/assets volume.
 - The repository checkout is clean and tracks `origin/main`.
 - Required assets and model files are present under the paths mounted by
   `docker-compose.processor.yaml`.
+- Required host-local Compose overrides are documented and included by every
+  deployment path. Keep automatic deployment disabled when the tracked deploy and
+  maintenance scripts cannot preserve a required override.
 - On hosts smaller than the defaults, set `PROCESSOR_CPU_LIMIT` (and optionally
   `PROCESSOR_MEMORY_LIMIT`) in `.env` so the processor container's caps fit the
   machine. `PROCESSOR_CPU_LIMIT` must be `<=` the host's CPU core count, or
@@ -110,9 +113,13 @@ docker compose -f docker-compose.processor.yaml build processor tcd
 docker compose -f docker-compose.processor.yaml up -d processor
 ```
 
-If the host should auto-deploy like the existing production processor, install
-the tracked host scripts rather than a `docker compose up` cron loop. The
-expected entries are documented in `docs/playbooks/create-release.md`.
+If the host should auto-deploy like an existing production processor, first verify
+that the tracked host scripts include every required Compose override and safety
+control. Otherwise keep auto-deploy disabled and record the host as manual-deploy.
+Never install or enable deployment scheduling as part of monitoring. When it is
+safe to automate, install the tracked host scripts rather than a `docker compose
+up` cron loop. The expected entries are documented in
+`docs/playbooks/create-release.md`.
 
 ## Validation
 
@@ -121,9 +128,21 @@ Check the host:
 ```bash
 docker ps --format "{{.Names}}\t{{.Status}}\t{{.Image}}" | grep deadtrees-processor
 docker inspect deadtrees-processor-1 \
-  --format 'StartedAt={{.State.StartedAt}} RestartCount={{.RestartCount}} OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}}'
+  --format 'State={{.State.Status}} Pid={{.State.Pid}} StartedAt={{.State.StartedAt}} RestartCount={{.RestartCount}} OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}} Image={{.Image}} Memory={{.HostConfig.Memory}} NanoCPUs={{.HostConfig.NanoCpus}} CgroupParent={{.HostConfig.CgroupParent}}'
 docker logs --tail 120 deadtrees-processor-1
 ```
+
+Add the host to local operator monitoring without committing its SSH alias:
+
+```bash
+DEADTREES_OPERATOR_PROCESSING_HOSTS=host-label=local-ssh-alias \
+  python3 scripts/operator_status.py --skip-network --format markdown
+```
+
+The legacy primary target remains `DEADTREES_OPERATOR_PROCESSING_HOST`. The
+additional list is for every other processor host. A valid healthy probe requires
+`State=running` and a nonzero PID; record unavailable inspection as unknown rather
+than inferring state from `docker ps`.
 
 Check queue ownership in production Postgres:
 

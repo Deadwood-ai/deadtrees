@@ -26,7 +26,7 @@ separate checks. A reviewed migration alone does not establish live permissions.
 
 | Area | Tables | Signals |
 | --- | --- | --- |
-| Input and processing | `v2_datasets`, `v2_statuses`, `v2_queue`, `v2_logs` | New uploads, completed processing, failures, active workers, waiting age and progress |
+| Input and processing | `v2_datasets`, `v2_statuses`, `v2_queue`, `v2_logs` | New uploads, completed processing, failures, per-host active workers, waiting age and progress |
 | Outputs | `v2_metadata`, `v2_raw_images`, `v2_orthos`, `v2_orthos_processed`, `v2_cogs`, `v2_thumbnails`, `v2_model_preferences` | Missing outputs, size/runtime anomalies, model-preference update freshness |
 | FreiDATA | `data_publication`, `jt_data_publication_datasets` | Requests created/published in 24h and 30d; states; oldest pending; linked dataset counts |
 | Trust | `dataset_audit`, `dataset_flags`, `dataset_flag_status_history`, `reference_datasets`, `reference_patches` | Audits, unresolved flags, review progress and export readiness |
@@ -141,6 +141,29 @@ in this table. A successful query proves database coverage, not scheduler health
 The compact `scripts/operator_status.py` snapshot still covers core processing,
 API and host checks. Run these additional SQL and host checks during the Operator
 Chat pass; a core-script green result alone does not cover these workflows.
+
+## Processor host coverage
+
+Configure every production processor host in the compact snapshot, retaining the
+legacy `DEADTREES_OPERATOR_PROCESSING_HOST` target and adding labeled entries in
+`DEADTREES_OPERATOR_PROCESSING_HOSTS`. Correlate host evidence with queue
+`claimed_by` values; a reachable host or running container alone does not prove it
+has a current claim, and an idle worker is not unhealthy merely because it has no
+claim.
+
+For each host report two columns of evidence:
+
+- intended: stable worker identity, required Compose overrides, deployment mode,
+  GPU allocation/reservation where applicable, and CPU/memory limits;
+- observed: exact container state and nonzero PID, restart/OOM/exit state, running
+  image or release evidence, active worker identity/heartbeat or claim, effective
+  cgroup values, GPU/MPS processes where applicable, and `/` plus `/data` pressure.
+
+Resolve host-specific commands from ignored `docs/ops/*` notes. Failed SSH,
+container inspection, privilege, GPU, or cgroup reads are unknown coverage, not a
+healthy default. Monitoring stays read-only: do not enable auto-deploy, install
+cron, deploy, restart, drain, requeue, cancel, pull images, change grants, or alter
+live resources as part of a status refresh.
 
 ## Other workflow checks
 

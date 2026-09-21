@@ -33,8 +33,11 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install Ruff
-        run: python -m pip install ruff==0.15.12
+      - name: Install Python tooling
+        run: python -m pip install pytest ruff==0.15.12
 
       - name: Run critical Python lint
         run: scripts/lint-python.sh --output-format=github
+
+      - name: Test operator status and backup probes
+        run: python -m pytest -q scripts/tests/test_operator_status.py scripts/tests/test_database_backup_scripts.py
