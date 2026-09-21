@@ -24,6 +24,12 @@ raster edge, i.e. actual footprint padding. Saturated-white content inside the
 footprint (snow, calibration panels, sunlit roofs) is not connected to the
 border and is therefore kept.
 
+Consumers read small windows, but padding connectivity is a property of the
+whole raster: a plot placed on a huge white canvas has tens of thousands of
+blank tiles that touch neither a raster edge nor known nodata. So the fallback
+first builds a coarse, raster-wide padding map (:func:`_padding_map`, one extra
+pass over the source, cached on the VRT) and seeds every window from it.
+
 :func:`image_reprojector` resolves a :class:`NodataPolicy` once and stores it on
 the returned VRT as ``.nodata_policy``. Consumers call
 :func:`read_nodata_mask` instead of ``vrt.read_masks(1)`` to get a boolean tile
@@ -49,6 +55,14 @@ _MIN_NODATA_FRACTION = 0.001
 # Decimated read size for the binary-band probe; keeps the check O(1) on huge
 # rasters while still being representative.
 _SAMPLE = 1024
+
+# Fill fallback: the raster-wide padding map works on cells of this many pixels.
+# A cell counts only when every pixel in it is solid fill (or already nodata), so
+# the map can never flag imagery; windows are read with a one-cell halo so that
+# padding strips narrower than a cell still connect to it.
+_PADDING_CELL = 32
+# Upper bound on pixels read per strip while building the map (~200 MB of RGB).
+_PADDING_STRIP_PIXELS = 64_000_000
 
 # Bands whose colour interpretation marks them as real imagery — never a mask.
 _COLOR_BANDS = frozenset(
@@ -189,6 +203,111 @@ def _connected(fill: np.ndarray, seed: np.ndarray) -> np.ndarray:
 		reach = grown
 
 
+def _solid_fill(vrt, window, policy: NodataPolicy) -> np.ndarray:
+	"""Boolean (H, W): pixels that are exactly solid white / black in all RGB bands."""
+	n = min(3, vrt.count)
+	rgb = vrt.read(indexes=list(range(1, n + 1)), window=window)
+	fill = np.zeros(rgb.shape[1:], dtype=bool)
+	if policy.treat_white_fill:
+		fill |= np.all(rgb == 255, axis=0)
+	if policy.treat_black_fill:
+		fill |= np.all(rgb == 0, axis=0)
+	return fill
+
+
+def _label_connected(solid: np.ndarray, seed: np.ndarray) -> np.ndarray:
+	"""Like :func:`_connected`, but labels components once instead of iterating.
+
+	The padding map of a large ortho has millions of cells and paths thousands of
+	cells long, where fixpoint propagation is too slow. Falls back to it when
+	OpenCV is unavailable (e.g. minimal test environments).
+	"""
+	try:
+		import cv2
+	except ImportError:
+		return _connected(solid, seed)
+	_, labels = cv2.connectedComponents(solid.astype(np.uint8), connectivity=4)
+	seeded = np.unique(labels[seed & solid])
+	return np.isin(labels, seeded[seeded != 0])
+
+
+def _padding_map(vrt, policy: NodataPolicy) -> np.ndarray:
+	"""Coarse raster-wide map of footprint padding, built once and cached on the VRT.
+
+	One boolean per ``_PADDING_CELL`` x ``_PADDING_CELL`` block: True when every
+	pixel of the block is solid fill or already-known nodata AND the block is
+	connected, through such blocks, to a raster edge or to known nodata. Blocks
+	are all-or-nothing, so saturated content is never part of the map unless it
+	is itself a fill-coloured region reaching the footprint border.
+	"""
+	cached = getattr(vrt, '_fill_padding_map', None)
+	if cached is not None:
+		return cached
+
+	from rasterio.windows import Window
+
+	cell = _PADDING_CELL
+	cells_h = -(-vrt.height // cell)
+	cells_w = -(-vrt.width // cell)
+	solid = np.zeros((cells_h, cells_w), dtype=bool)
+	seed = np.zeros((cells_h, cells_w), dtype=bool)
+	seed[0, :] = seed[-1, :] = True
+	seed[:, 0] = seed[:, -1] = True
+
+	strip_cells = max(1, (_PADDING_STRIP_PIXELS // max(vrt.width, 1)) // cell)
+	for cell_row in range(0, cells_h, strip_cells):
+		row_off = cell_row * cell
+		rows = min(strip_cells * cell, vrt.height - row_off)
+		window = Window(0, row_off, vrt.width, rows)
+		known = vrt.read_masks(1, window=window) == 0
+		blank = known | _solid_fill(vrt, window, policy)
+
+		# Pad to whole cells. Beyond the raster is padding by definition.
+		n_cells = -(-rows // cell)
+		pad = ((0, n_cells * cell - rows), (0, cells_w * cell - vrt.width))
+		blank = np.pad(blank, pad, constant_values=True).reshape(n_cells, cell, cells_w, cell)
+		known = np.pad(known, pad, constant_values=False).reshape(n_cells, cell, cells_w, cell)
+		solid[cell_row : cell_row + n_cells] = blank.all(axis=(1, 3))
+		seed[cell_row : cell_row + n_cells] |= known.any(axis=(1, 3))
+
+	padding = _label_connected(solid, seed)
+	try:
+		vrt._fill_padding_map = padding
+	except AttributeError:
+		pass
+	return padding
+
+
+def _fill_padding_mask(vrt, window, policy: NodataPolicy) -> np.ndarray:
+	"""Solid-fill footprint padding within ``window`` (``None`` = whole raster)."""
+	from rasterio.windows import Window
+
+	cell = _PADDING_CELL
+	if window is None:
+		col0, row0, w, h = 0, 0, vrt.width, vrt.height
+	else:
+		col0, row0 = int(window.col_off), int(window.row_off)
+		w, h = int(window.width), int(window.height)
+
+	# One-cell halo, clamped to the raster, so padding thinner than a cell inside
+	# the window still reaches a padding cell of the neighbouring tile.
+	hc0, hr0 = max(0, col0 - cell), max(0, row0 - cell)
+	hc1, hr1 = min(vrt.width, col0 + w + cell), min(vrt.height, row0 + h + cell)
+	if hc1 <= hc0 or hr1 <= hr0:
+		return np.zeros((h, w), dtype=bool)
+	halo = Window(hc0, hr0, hc1 - hc0, hr1 - hr0)
+
+	known = vrt.read_masks(1, window=halo) == 0
+	fill = _solid_fill(vrt, halo, policy)
+	padding = _padding_map(vrt, policy)
+	rows = (hr0 + np.arange(hr1 - hr0)) // cell
+	cols = (hc0 + np.arange(hc1 - hc0)) // cell
+	seed = known | _raster_edge_seed(vrt, halo, fill.shape) | padding[np.ix_(rows, cols)]
+
+	grown = _connected(fill, seed)
+	return grown[row0 - hr0 : row0 - hr0 + h, col0 - hc0 : col0 - hc0 + w]
+
+
 def read_nodata_mask(vrt, window=None) -> np.ndarray:
 	"""Boolean nodata mask (``True`` = nodata) for a window of an image_reprojector VRT.
 
@@ -203,16 +322,9 @@ def read_nodata_mask(vrt, window=None) -> np.ndarray:
 		mask = mask | (vrt.read(policy.mask_band, window=window) == 0)
 
 	if policy.treat_white_fill or policy.treat_black_fill:
-		n = min(3, vrt.count)
-		rgb = vrt.read(indexes=list(range(1, n + 1)), window=window)
-		fill = np.zeros(rgb.shape[1:], dtype=bool)
-		if policy.treat_white_fill:
-			fill |= np.all(rgb == 255, axis=0)
-		if policy.treat_black_fill:
-			fill |= np.all(rgb == 0, axis=0)
 		# Keep only footprint padding: fill connected to known nodata or a raster
-		# edge. Interior saturated content (snow, panels) is preserved.
-		seed = mask | _raster_edge_seed(vrt, window, fill.shape)
-		mask = mask | _connected(fill, seed)
+		# edge, resolved raster-wide. Interior saturated content (snow, panels) is
+		# preserved.
+		mask = mask | _fill_padding_mask(vrt, window, policy)
 
 	return mask

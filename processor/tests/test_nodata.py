@@ -220,6 +220,89 @@ def test_read_mask_flags_edge_connected_white_only():
 
 
 # --------------------------------------------------------------------------- #
+# Raster-wide padding: consumers read small windows of huge padded canvases
+# --------------------------------------------------------------------------- #
+
+
+class WindowedFakeVRT(FakeVRT):
+	"""FakeVRT that honours ``window``, like the tiled consumers rely on."""
+
+	@staticmethod
+	def _crop(arr, window):
+		if window is None:
+			return arr
+		r0, c0 = int(window.row_off), int(window.col_off)
+		return arr[..., r0 : r0 + int(window.height), c0 : c0 + int(window.width)]
+
+	def read_masks(self, band, window=None):
+		return self._crop(super().read_masks(band), window)
+
+	def read(self, indexes=None, window=None):
+		return self._crop(super().read(indexes), window)
+
+
+def _plot_on_white_canvas(size=512, plot=slice(192, 320)):
+	"""A small plot of real imagery in the middle of a large solid-white canvas."""
+	rgb = np.full((3, size, size), 255, np.uint8)
+	rgb[:, plot, plot] = 120
+	return rgb
+
+
+def test_interior_blank_window_far_from_any_edge_is_nodata():
+	# The Plot*.tif failure: a blank tile touching neither a raster edge nor known
+	# nodata was kept with nodata_fraction=0 and embedded as "imagery".
+	rgb = _plot_on_white_canvas()
+	vrt = WindowedFakeVRT(rgb, np.zeros(rgb.shape[1:], bool), NodataPolicy(treat_white_fill=True))
+	assert read_nodata_mask(vrt, Window(64, 64, 64, 64)).all()
+
+
+def test_window_clipping_the_plot_masks_only_the_padding():
+	rgb = _plot_on_white_canvas()
+	vrt = WindowedFakeVRT(rgb, np.zeros(rgb.shape[1:], bool), NodataPolicy(treat_white_fill=True))
+	# Window straddles the plot's top-left corner: rows/cols 160..191 are padding.
+	mask = read_nodata_mask(vrt, Window(160, 160, 64, 64))
+	assert mask[:32, :].all() and mask[:, :32].all()
+	assert not mask[32:, 32:].any()
+
+
+def test_padding_strip_thinner_than_a_cell_is_found_through_the_halo():
+	# Plot starts 8px into the window, so no whole padding cell lies inside it.
+	rgb = np.full((3, 512, 512), 255, np.uint8)
+	rgb[:, 200:400, 200:400] = 120
+	vrt = WindowedFakeVRT(rgb, np.zeros(rgb.shape[1:], bool), NodataPolicy(treat_white_fill=True))
+	mask = read_nodata_mask(vrt, Window(192, 224, 64, 64))
+	assert mask[:, :8].all() and not mask[:, 8:].any()
+
+
+def test_large_saturated_block_inside_the_footprint_is_kept():
+	# Snow / a sunlit roof bigger than a padding cell, fully inside the imagery.
+	rgb = np.full((3, 512, 512), 120, np.uint8)
+	rgb[:, 128:256, 128:256] = 255
+	vrt = WindowedFakeVRT(rgb, np.zeros(rgb.shape[1:], bool), NodataPolicy(treat_white_fill=True))
+	assert not read_nodata_mask(vrt, Window(128, 128, 128, 128)).any()
+	assert not read_nodata_mask(vrt).any()
+
+
+def test_padding_connects_through_known_nodata_not_only_raster_edges():
+	# White fill enclosed by imagery but adjacent to declared nodata is padding.
+	rgb = np.full((3, 256, 256), 120, np.uint8)
+	rgb[:, 64:192, 64:192] = 255
+	declared = np.zeros((256, 256), bool)
+	declared[96:160, 96:160] = True
+	vrt = WindowedFakeVRT(rgb, declared, NodataPolicy(treat_white_fill=True))
+	assert read_nodata_mask(vrt, Window(64, 64, 128, 128)).all()
+
+
+def test_padding_map_is_built_once_per_vrt():
+	rgb = _plot_on_white_canvas()
+	vrt = WindowedFakeVRT(rgb, np.zeros(rgb.shape[1:], bool), NodataPolicy(treat_white_fill=True))
+	read_nodata_mask(vrt, Window(0, 0, 64, 64))
+	first = vrt._fill_padding_map
+	read_nodata_mask(vrt, Window(64, 64, 64, 64))
+	assert vrt._fill_padding_map is first
+
+
+# --------------------------------------------------------------------------- #
 # Connectivity helpers
 # --------------------------------------------------------------------------- #
 
@@ -371,6 +454,29 @@ def test_e2e_untagged_white_fill_keeps_interior_patch(tmp_path):
 		mask = read_nodata_mask(vrt)
 		assert mask[:, left].mean() > 0.9, 'left padding should be nodata'
 		assert not mask[12:20, 22:28].any(), 'interior white block must be kept'
+	finally:
+		vrt.close()
+
+
+def test_e2e_plot_on_large_white_canvas_tiles(tmp_path):
+	# Untagged ortho: a small plot on a big white canvas, read tile by tile the way
+	# the embedding stage does. Blank interior tiles must be fully nodata.
+	rgb = np.full((3, 384, 384), 255, dtype=np.uint8)
+	rgb[:, 160:224, 160:224] = 120
+	rgb[:, 184:200, 184:200] = 255  # saturated patch inside the plot
+	path = _write(tmp_path / 'plot_on_canvas.tif', rgb)
+	vrt = image_reprojector(path)
+	try:
+		fractions = {}
+		for y in range(0, 384, 64):
+			for x in range(0, 384, 64):
+				fractions[(x, y)] = read_nodata_mask(vrt, Window(x, y, 64, 64)).mean()
+		plot_tiles = {xy for xy, f in fractions.items() if f < 0.99}
+		assert plot_tiles, 'the plot itself must survive'
+		assert all(128 <= x <= 192 and 128 <= y <= 192 for x, y in plot_tiles)
+		# (64, 64) touches neither a raster edge nor the plot: the failing case.
+		assert fractions[(64, 64)] == 1.0
+		assert not read_nodata_mask(vrt, Window(184, 184, 16, 16)).any(), 'interior white patch must be kept'
 	finally:
 		vrt.close()
 

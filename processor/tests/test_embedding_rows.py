@@ -11,7 +11,7 @@ import pytest
 
 from processor.src import process_embeddings as pe
 from processor.src.embedding_search import PatchEmbedding
-from processor.src.embedding_search.patch_embedding import NODATA_THRESHOLD
+from processor.src.embedding_search.patch_embedding import NODATA_THRESHOLD, _is_single_colour
 from shared import embedding_model as em
 from shared.embedding_model import BACKGROUND_PROMPTS, EMBEDDING_DIM
 
@@ -20,6 +20,26 @@ pytestmark = pytest.mark.unit
 
 def test_nodata_threshold_requires_over_99pct_data():
 	assert NODATA_THRESHOLD == 0.01
+
+
+def test_single_colour_tiles_are_skipped_whatever_the_nodata_convention():
+	# Blank canvas declared valid by an alpha band, a weird nodata value, ...:
+	# one colour means nothing to search for and one shared embedding.
+	nodata = np.zeros((8, 8), dtype=bool)
+	assert _is_single_colour(np.full((3, 8, 8), 255, np.uint8), nodata)
+	assert _is_single_colour(np.full((3, 8, 8), 0, np.uint8), nodata)
+	grey = np.stack([np.full((8, 8), v, np.uint8) for v in (10, 20, 30)])
+	assert _is_single_colour(grey, nodata)
+
+
+def test_single_colour_ignores_masked_pixels_and_keeps_real_imagery():
+	data = np.full((3, 8, 8), 255, np.uint8)
+	data[:, 0, 0] = 7
+	nodata = np.zeros((8, 8), dtype=bool)
+	assert not _is_single_colour(data, nodata)
+	nodata[0, 0] = True  # the only differing pixel is nodata
+	assert _is_single_colour(data, nodata)
+	assert _is_single_colour(data, np.ones((8, 8), dtype=bool))  # nothing valid at all
 
 
 def test_embedding_to_pgvector_formats_six_decimals():
