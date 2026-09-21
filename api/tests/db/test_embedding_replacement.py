@@ -91,6 +91,15 @@ def search(context, token=None):
 		)
 
 
+def search_anonymous(context):
+	with use_client() as client:
+		return (
+			client.rpc('search_tiles_by_embedding', {'query_embedding': VECTOR, 'p_dataset_id': context['dataset']})
+			.execute()
+			.data
+		)
+
+
 def count(context):
 	return (
 		context['db']
@@ -190,8 +199,8 @@ def test_authorization_visibility_and_aoi(replacement):
 				client.rpc(name, {**r['claim'], **params}).execute()
 		with pytest.raises(APIError):
 			client.table('v2_tile_embeddings').delete().eq('dataset_id', r['dataset']).execute()
-	with pytest.raises(APIError, match='restricted to auditors'):
-		search(r, r['user'])
+	# Search is public, but nothing is published before validated completion.
+	assert search(r, r['user']) == [] and search_anonymous(r) == []
 	rpc(r, 'begin_tile_embeddings')
 	rpc(r, 'insert_tile_embeddings', p_offset=0, p_rows=[tile(), tile(20)])
 	# AOI covers only the first tile. Finish must compute membership after insertion.
@@ -201,8 +210,12 @@ def test_authorization_visibility_and_aoi(replacement):
 	)
 	assert rpc(r, 'complete_tile_embeddings', p_expected_count=2) == 2
 	assert len(search(r)) == 1
+	assert len(search_anonymous(r)) == 1
 	r['db'].execute("UPDATE public.v2_datasets SET data_access='private' WHERE id=%s", (r['dataset'],))
 	assert search(r) == []
+	# Public callers never see private datasets; the owner still does.
+	assert search_anonymous(r) == []
+	assert len(search(r, r['user'])) == 1
 	r['db'].execute('UPDATE public.privileged_users SET can_view_all_private=true WHERE user_id=%s', (r['auditor_id'],))
 	assert len(search(r)) == 1
 	r['db'].execute('UPDATE public.v2_datasets SET archived=true WHERE id=%s', (r['dataset'],))
