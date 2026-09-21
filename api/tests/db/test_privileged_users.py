@@ -1,5 +1,5 @@
 import pytest
-from shared.db import use_client, use_service_client, login
+from shared.db import use_anon_client, use_client, use_service_client, login
 from shared.settings import settings
 import uuid
 from shared.testing.fixtures import test_processor_user
@@ -220,7 +220,7 @@ def test_search_rpcs_are_public(setup_privileged_users_with_limited_permissions)
 	auditor_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
 
 	for token in (None, non_auditor_token, auditor_token):
-		with use_client(token) if token else use_client() as client:
+		with use_client(token) if token else use_anon_client() as client:
 			datasets = client.rpc(
 				'search_datasets_by_embedding',
 				{'query_embedding': embedding, 'match_count': 1},

@@ -8,7 +8,7 @@ import psycopg
 import pytest
 from postgrest.exceptions import APIError
 
-from shared.db import login, use_client
+from shared.db import login, use_anon_client, use_client
 from shared.settings import settings
 
 VECTOR = '[' + ','.join(['0.03125'] * 1024) + ']'
@@ -92,7 +92,7 @@ def search(context, token=None):
 
 
 def search_anonymous(context):
-	with use_client() as client:
+	with use_anon_client() as client:
 		return (
 			client.rpc('search_tiles_by_embedding', {'query_embedding': VECTOR, 'p_dataset_id': context['dataset']})
 			.execute()
