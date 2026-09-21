@@ -66,6 +66,12 @@ _PADDING_STRIP_PIXELS = 64_000_000
 
 # Highest value still read as solid-black fill; see _solid_fill.
 _BLACK_FILL_MAX = 1
+# Lowest value still read as solid-white fill. White canvases are often not
+# exactly 255: mosaics that went through lossy compression carry 250-255 noise
+# (measured on the Plot*.tif orthos, where real imagery has no such pixels). Fill
+# only ever counts when connected to the footprint border, so bright content
+# inside the imagery is unaffected.
+_WHITE_FILL_MIN = 250
 
 # Bands whose colour interpretation marks them as real imagery — never a mask.
 _COLOR_BANDS = frozenset(
@@ -207,12 +213,12 @@ def _connected(fill: np.ndarray, seed: np.ndarray) -> np.ndarray:
 
 
 def _solid_fill(vrt, window, policy: NodataPolicy) -> np.ndarray:
-	"""Boolean (H, W): pixels that are exactly solid white / black in all RGB bands."""
+	"""Boolean (H, W): pixels that are solid white / black in all RGB bands."""
 	n = min(3, vrt.count)
 	rgb = vrt.read(indexes=list(range(1, n + 1)), window=window)
 	fill = np.zeros(rgb.shape[1:], dtype=bool)
 	if policy.treat_white_fill:
-		fill |= np.all(rgb == 255, axis=0)
+		fill |= np.all(rgb >= _WHITE_FILL_MIN, axis=0)
 	if policy.treat_black_fill:
 		# <= 1, not == 0: the warp's forced nodata=0 makes newer GDAL (3.12) nudge
 		# valid source zeros to 1 so they do not collide with the nodata value.

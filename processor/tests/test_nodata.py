@@ -200,6 +200,16 @@ def test_read_mask_white_fill_keeps_partially_bright_pixels():
 	np.testing.assert_array_equal(read_nodata_mask(vrt), np.array([[False]]))
 
 
+def test_read_mask_near_white_noisy_padding_is_fill():
+	# Lossy-compressed canvases are 250..255 noise, not exactly 255.
+	rng = np.random.default_rng(0)
+	rgb = np.full((3, 8, 8), 120, np.uint8)
+	rgb[:, :, :4] = rng.integers(250, 256, size=(3, 8, 4), dtype=np.uint8)
+	rgb[:, 5, 6] = 249  # bright but below the fill range, and interior anyway
+	mask = read_nodata_mask(FakeVRT(rgb, np.zeros((8, 8), bool), NodataPolicy(treat_white_fill=True)))
+	assert mask[:, :4].all() and not mask[:, 4:].any()
+
+
 def test_read_mask_keeps_interior_white_patch():
 	# A saturated-white patch surrounded by real data (window=None → all borders
 	# are raster edges) is NOT connected to any edge, so it must be kept.
