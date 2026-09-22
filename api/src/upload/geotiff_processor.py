@@ -33,6 +33,7 @@ def process_geotiff_upload(dataset: Dataset, upload_target_path: Path, token: st
 		dataset_id=dataset.id,
 		current_status=StatusEnum.idle,
 		is_upload_done=True,
+		uploaded_input_bytes=target_path.stat().st_size,
 		has_error=False,
 	)
 

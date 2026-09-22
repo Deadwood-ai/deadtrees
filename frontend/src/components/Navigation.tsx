@@ -6,7 +6,7 @@ const { Header } = Layout;
 
 import { useAuth } from "../hooks/useAuthProvider";
 import { usePriwaProjectMemberships } from "../hooks/usePriwaProjectMemberships";
-import { useCanAudit } from "../hooks/useUserPrivileges";
+import { useCanAudit, useCanOperate } from "../hooks/useUserPrivileges";
 import { useNavigate } from "react-router-dom";
 import { palette } from "../theme/palette";
 
@@ -43,10 +43,17 @@ const auditNavigation = {
   label: "Audit Datasets",
 };
 
+// Internal operations workspace for users with the operator privilege
+const factoryNavigation = {
+  key: "/factory",
+  label: "Factory",
+};
+
 export default function Navigation() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { session, signOut } = useAuth();
   const { canAudit } = useCanAudit();
+  const { canOperate } = useCanOperate();
   const { data: priwaMemberships = [] } = usePriwaProjectMemberships();
   const nav = useNavigate();
   const location = useLocation();
@@ -75,6 +82,9 @@ export default function Navigation() {
   if (canAudit) {
     // Insert the audit link before the Account link
     navigation.splice(navigation.length - 1, 0, auditNavigation);
+  }
+  if (canOperate) {
+    navigation.splice(navigation.length - 1, 0, factoryNavigation);
   }
 
   const handleSignOut = async () => {

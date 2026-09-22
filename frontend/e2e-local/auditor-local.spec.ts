@@ -163,9 +163,8 @@ const installAuthenticatedUser = async (
   page: Page,
   options: {
     canAudit: boolean;
+    canOperate?: boolean;
     auditDatasetRequestFails?: boolean;
-    processingOverviewRequestFails?: boolean;
-    processingOverviewRefetchFails?: boolean;
   },
 ) => {
   await installLocalSession(page, {
@@ -174,22 +173,8 @@ const installAuthenticatedUser = async (
     refreshToken: "local-auditor-e2e-refresh-token",
   });
 
-  let processingOverviewRequestCount = 0;
   await page.route(`${localSupabaseUrl}/rest/v1/**`, async (route) => {
-    const resource = new URL(route.request().url()).pathname
-      .split("/")
-      .filter(Boolean)
-      .at(-1);
-    if (resource === "v2_processing_overview") {
-      processingOverviewRequestCount += 1;
-    }
-    await fulfillSupabaseRequest(route, {
-      ...options,
-      processingOverviewRequestFails:
-        options.processingOverviewRequestFails ||
-        (options.processingOverviewRefetchFails &&
-          processingOverviewRequestCount > 1),
-    });
+    await fulfillSupabaseRequest(route, options);
   });
 
   await page.route("**/cogs/v1/**", async (route) => {
@@ -233,8 +218,8 @@ const fulfillSupabaseRequest = async (
   route: Route,
   options: {
     canAudit: boolean;
+    canOperate?: boolean;
     auditDatasetRequestFails?: boolean;
-    processingOverviewRequestFails?: boolean;
   },
 ) => {
   const request = route.request();
@@ -257,6 +242,7 @@ const fulfillSupabaseRequest = async (
       can_upload_private: false,
       can_audit: options.canAudit,
       can_view_all_private: false,
+      can_operate: options.canOperate ?? false,
       created_at: "2026-01-01T00:00:00Z",
     });
     return;
@@ -315,47 +301,6 @@ const fulfillSupabaseRequest = async (
 
   if (resource === "reference_datasets") {
     await fulfillJson(route, [{ dataset_id: auditedDataset.id }]);
-    return;
-  }
-
-  if (resource === "v2_processing_overview") {
-    if (options.processingOverviewRequestFails) {
-      await route.fulfill({
-        status: 500,
-        contentType: "application/json",
-        json: {
-          code: "57014",
-          message: "canceling statement due to statement timeout",
-        },
-      });
-      return;
-    }
-
-    await fulfillJson(route, [
-      {
-        dataset_id: incompleteDataset.id,
-        file_name: incompleteDataset.file_name,
-        processing_status: "FAILED",
-        current_status: "cog",
-        has_error: true,
-        error_message: "COG conversion failed in local smoke fixture",
-        hours_in_current_status: 7.25,
-        status_last_updated: "2026-01-05T03:04:05Z",
-        user_email: reporter.email,
-        queue_priority: 4,
-        queued_at: "2026-01-05T01:04:05Z",
-        is_upload_done: true,
-        is_odm_done: true,
-        is_ortho_done: true,
-        is_cog_done: false,
-        is_thumbnail_done: false,
-        is_metadata_done: false,
-        is_deadwood_done: false,
-        is_forest_cover_done: false,
-        is_combined_model_done: false,
-        last_20_logs: "ERROR COG conversion failed\nINFO retry pending",
-      },
-    ]);
     return;
   }
 
@@ -440,6 +385,18 @@ const fulfillSupabaseRequest = async (
 };
 
 const fulfillRpc = async (route: Route, rpcName: string | undefined) => {
+  if (rpcName === "factory_overview") {
+    await fulfillJson(route, {
+      as_of: "2026-01-06T00:00:00Z",
+      since: "2025-12-30T00:00:00Z",
+      counts: {},
+      workers: [],
+      cohorts: [],
+      coverage: [],
+    });
+    return;
+  }
+
   if (rpcName === "get_dataset_audits_with_emails") {
     await fulfillJson(route, audits);
     return;
@@ -543,7 +500,7 @@ test.describe("auditor local e2e", () => {
     );
   });
 
-  test("auditor can triage audit queues and inspect processing logs", async ({
+  test("auditor can triage audit queues without a processing segment", async ({
     page,
   }) => {
     await installAuthenticatedUser(page, { canAudit: true });
@@ -577,26 +534,7 @@ test.describe("auditor local e2e", () => {
       page.getByRole("button", { name: "Generate Patches" }),
     ).toBeVisible();
 
-    await page.getByText("Processing").click();
-    const processingRow = page.locator("tr").filter({
-      hasText: incompleteDataset.file_name,
-    });
-    await expect(processingRow).toBeVisible();
-    await expect(
-      processingRow.getByText("FAILED", { exact: true }),
-    ).toBeVisible();
-    await expect(
-      processingRow.getByText("COG conversion failed in local smoke fixture"),
-    ).toBeVisible();
-
-    await page.getByRole("button", { name: "View Logs" }).click();
-    await expect(
-      page.getByText(`Dataset ${incompleteDataset.id} Logs`),
-    ).toBeVisible();
-    const logsDrawer = page.getByLabel(`Dataset ${incompleteDataset.id} Logs`);
-    await expect(
-      logsDrawer.getByText("COG conversion failed in local smoke fixture"),
-    ).toBeVisible();
+    await expect(page.getByText("⚙️ Processing")).toHaveCount(0);
   });
 
   test("audit queue uses an explicit lightweight dataset projection", async ({
@@ -656,85 +594,33 @@ test.describe("auditor local e2e", () => {
     await expect(page.getByText("📋 Pending")).toHaveCount(0);
   });
 
-  test("processing overview requests only the fields rendered by the audit table", async ({
+  test("old processing deep link redirects operators to the Factory workspace", async ({
     page,
   }) => {
-    await installAuthenticatedUser(page, { canAudit: true });
-
-    const processingRequest = page.waitForRequest((request) =>
-      new URL(request.url()).pathname.endsWith("/v2_processing_overview"),
-    );
+    await installAuthenticatedUser(page, { canAudit: true, canOperate: true });
 
     await page.goto("/dataset-audit?tab=processing");
     await dismissCookieBanner(page);
-    const request = await processingRequest;
-    const selectedColumns = new URL(request.url()).searchParams
-      .get("select")
-      ?.split(",");
 
-    expect(selectedColumns).toEqual([
-      "dataset_id",
-      "file_name",
-      "processing_status",
-      "current_status",
-      "has_error",
-      "error_message",
-      "hours_in_current_status",
-      "status_last_updated",
-      "user_email",
-      "queue_priority",
-      "queued_at",
-      "last_20_logs",
-    ]);
-    expect(selectedColumns).not.toContain("ortho_metadata");
-    expect(selectedColumns).not.toContain("raw_images_metadata");
-    await expect(page.getByText(incompleteDataset.file_name)).toBeVisible();
+    await expect(page).toHaveURL(/\/factory$/);
+    await expect(page.getByTestId("factory-page")).toBeVisible();
   });
 
-  test("processing overview reports load failures instead of showing no data", async ({
+  test("old processing deep link tells auditors without operator access where processing moved", async ({
     page,
   }) => {
-    await installAuthenticatedUser(page, {
-      canAudit: true,
-      processingOverviewRequestFails: true,
-    });
+    await installAuthenticatedUser(page, { canAudit: true, canOperate: false });
 
     await page.goto("/dataset-audit?tab=processing");
     await dismissCookieBanner(page);
 
+    await expect(page.getByTestId("audit-processing-moved")).toBeVisible();
     await expect(
-      page.getByText("Could not load processing data", { exact: true }),
+      page.getByRole("heading", { name: "Dataset Audits" }),
     ).toBeVisible();
-    await expect(
-      page.getByText(
-        "The processing overview could not be loaded. Please try again.",
-      ),
-    ).toBeVisible();
-    await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
-    await expect(page.getByText("No data", { exact: true })).toHaveCount(0);
-  });
-
-  test("processing overview keeps cached rows visible after a failed refresh", async ({
-    page,
-  }) => {
-    await installAuthenticatedUser(page, {
-      canAudit: true,
-      processingOverviewRefetchFails: true,
-    });
-
-    await page.goto("/dataset-audit?tab=processing");
-    await dismissCookieBanner(page);
-    await expect(page.getByText(incompleteDataset.file_name)).toBeVisible();
-
-    await page.getByRole("button", { name: "Refresh" }).click();
-
-    await expect(
-      page.getByText("Processing data may be stale", { exact: true }),
-    ).toBeVisible();
-    await expect(page.getByText(incompleteDataset.file_name)).toBeVisible();
-    await expect(
-      page.getByText("Could not load processing data", { exact: true }),
-    ).toHaveCount(0);
+    await expect(page.getByText("Local Forest")).toBeVisible();
+    await expect(page).toHaveURL(/tab=pending/);
+    await expect(page.getByRole("menuitem", { name: "Factory" })).toHaveCount(0);
   });
 
   test("auditor start action checks the lock before opening detail", async ({

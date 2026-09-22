@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from typing import Optional
+from postgrest.exceptions import APIError
 from .models import StatusEnum
 from .db import use_client
 from .settings import settings
@@ -27,6 +28,7 @@ def update_status(
 	has_error: Optional[bool] = None,
 	error_message: Optional[str] = None,
 	error_stage: Optional[str] = None,
+	uploaded_input_bytes: Optional[int] = None,
 ) -> None:
 	"""Update the status fields of a dataset in the statuses table.
 	Only provided fields will be updated.
@@ -53,6 +55,8 @@ def update_status(
 		update_data = {}
 		if current_status is not None:
 			update_data['current_status'] = current_status
+		if uploaded_input_bytes is not None:
+			update_data['uploaded_input_bytes'] = uploaded_input_bytes
 		if is_upload_done is not None:
 			update_data['is_upload_done'] = is_upload_done
 		if is_ortho_done is not None:
@@ -102,7 +106,19 @@ def update_status(
 						# Update existing status
 						client.table(settings.statuses_table).update(update_data).eq('dataset_id', dataset_id).execute()
 
-			_write_status()
+			try:
+				_write_status()
+			except APIError as error:
+				# API and schema deploy independently. Preserve upload completion if
+				# the optional measurement column has not reached PostgREST yet.
+				if (
+					'uploaded_input_bytes' not in update_data
+					or error.code not in ('PGRST204', '42703')
+					or 'uploaded_input_bytes' not in error.message
+				):
+					raise
+				del update_data['uploaded_input_bytes']
+				_write_status()
 
 	except Exception as e:
 		logger.error(

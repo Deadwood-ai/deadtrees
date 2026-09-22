@@ -9,6 +9,8 @@ export interface UserPrivileges {
   can_upload_private: boolean;
   can_audit: boolean;
   can_view_all_private: boolean;
+  /** Factory workspace access. Read-only operational metadata, enforced server-side. */
+  can_operate?: boolean | null;
   created_at: string;
 }
 
@@ -57,6 +59,14 @@ export function useCanViewAllPrivate() {
   const { data: privileges, isLoading } = useUserPrivileges();
   return {
     canView: privileges?.can_view_all_private || false,
+    isLoading,
+  };
+}
+
+export function useCanOperate() {
+  const { data: privileges, isLoading } = useUserPrivileges();
+  return {
+    canOperate: privileges?.can_operate === true,
     isLoading,
   };
 }

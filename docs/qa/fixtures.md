@@ -75,3 +75,30 @@ publications, downloads, and negative/empty states.
 
 The exact source mapping is written to `.local/qa-packs/realistic/manifest.json`
 when the pack is generated.
+
+## Factory workspace
+
+`scripts/qa/seed.sh qa-factory` adds synthetic operational records in the
+93001–93120 range and `qa-operator-local@example.com` (user ID ending `a004`,
+same local-only password above). This account has `can_operate` without audit
+or blanket private-imagery permissions. The existing auditor has no Factory
+permission. The pack includes an older claimed job, queue rows, failures,
+uncertain status, a failed notification, an open report and a publication.
+Readiness flags in these synthetic rows do not imply real output files exist.
+
+Use `/factory` for the overview, dataset filters, individual investigation,
+activity and cross-page selection. Copy IDs/context prepares a factual handoff;
+it does not execute operations. `api/tests/db/test_factory.py` checks the
+server permission boundary and the complete dataset population.
+
+The Factory seed also creates explicitly synthetic ten-week measurement coverage,
+first-upload/first-result milestones, known and unknown original input sizes,
+ZIP/GeoTIFF workflows, recovered and unresolved failures, and recorded task
+outcomes. It writes historical dates only through the local seed runner; it is
+not a production backfill procedure. These fixtures support weekly/daily charts,
+size/workflow filters, exact event-period drill-downs and unknown/partial periods.
+
+The journey preview adds twelve synthetic contributor identities (addresses under
+`example.invalid`), first owner-result observations and repeat-upload cohorts.
+These exercise elapsed and incomplete windows and consent-observation gaps;
+they do not represent real contributor activation or historical analytics.

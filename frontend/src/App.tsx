@@ -37,6 +37,19 @@ const About = lazy(() => import("./pages/About"));
 const Impressum = lazy(() => import("./pages/Impressum"));
 const Datenschutzerklaerung = lazy(() => import("./pages/Datenschutzerklaerung"));
 const TermsOfService = lazy(() => import("./pages/TermsOfService"));
+const FactoryLayout = lazy(() => import("./components/Factory/FactoryLayout"));
+const FactoryOverview = lazy(
+  () => import("./components/Factory/FactoryOverview"),
+);
+const FactoryDatasets = lazy(
+  () => import("./components/Factory/FactoryDatasets"),
+);
+const FactoryDatasetDetail = lazy(
+  () => import("./components/Factory/FactoryDatasetDetail"),
+);
+const FactoryActivity = lazy(
+  () => import("./components/Factory/FactoryActivity"),
+);
 
 const { Content } = Layout;
 
@@ -157,6 +170,13 @@ function AppWithTracking() {
             path="dataset-audit/:id/ml-tiles"
             element={<DatasetMLTiles />}
           />
+          {/* Internal read-only operations workspace; gated by can_operate */}
+          <Route path="factory" element={<FactoryLayout />}>
+            <Route index element={<FactoryOverview />} />
+            <Route path="datasets" element={<FactoryDatasets />} />
+            <Route path="datasets/:id" element={<FactoryDatasetDetail />} />
+            <Route path="activity" element={<FactoryActivity />} />
+          </Route>
           <Route path="dataset-label/:id" element={<DatasetLabelEditor />} />
           {/* Public labelling / corrections editor */}
           <Route
