@@ -52,6 +52,7 @@ export interface IPriwaPoint extends IPriwaCoordinate {
   datum: string;
   kom: string;
   capturedAt: string;
+  serverUpdatedAt?: string;
   coordinateSource: PriwaCoordinateSource;
   gps: PriwaGpsQuality;
   isEstimatedLocation?: boolean;

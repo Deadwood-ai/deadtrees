@@ -2,8 +2,8 @@
 
 The heavy lifting (ranking datasets/tiles) happens in Postgres via the
 ``search_datasets_by_embedding`` / ``search_tiles_by_embedding`` RPCs, which the
-frontend calls directly through supabase-js. The ranking RPCs temporarily
-require auditor access and retain the caller's auth context for dataset
+frontend calls directly through supabase-js. The ranking RPCs are public
+(anonymous callers included) and retain the caller's auth context for dataset
 visibility. This endpoint only turns free text into the OpenCLIP text embedding
 that those RPCs expect.
 """

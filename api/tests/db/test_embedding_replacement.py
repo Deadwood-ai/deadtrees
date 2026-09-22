@@ -8,7 +8,7 @@ import psycopg
 import pytest
 from postgrest.exceptions import APIError
 
-from shared.db import login, use_client
+from shared.db import login, use_anon_client, use_client
 from shared.settings import settings
 
 VECTOR = '[' + ','.join(['0.03125'] * 1024) + ']'
@@ -89,6 +89,22 @@ def search(context, token=None):
 			.execute()
 			.data
 		)
+
+
+def search_anonymous(context):
+	with use_anon_client() as client:
+		return (
+			client.rpc('search_tiles_by_embedding', {'query_embedding': VECTOR, 'p_dataset_id': context['dataset']})
+			.execute()
+			.data
+		)
+
+
+def ranked(context, token=None):
+	"""Whether the archive-level ranking RPC returns the test dataset for this caller."""
+	with use_client(token) if token else use_anon_client() as client:
+		rows = client.rpc('search_datasets_by_embedding', {'query_embedding': VECTOR, 'min_similarity': 0}).execute().data
+	return context['dataset'] in [row['dataset_id'] for row in rows]
 
 
 def count(context):
@@ -190,8 +206,9 @@ def test_authorization_visibility_and_aoi(replacement):
 				client.rpc(name, {**r['claim'], **params}).execute()
 		with pytest.raises(APIError):
 			client.table('v2_tile_embeddings').delete().eq('dataset_id', r['dataset']).execute()
-	with pytest.raises(APIError, match='restricted to auditors'):
-		search(r, r['user'])
+	# Search is public, but nothing is published before validated completion.
+	assert search(r, r['user']) == [] and search_anonymous(r) == []
+	assert not ranked(r) and not ranked(r, r['user'])
 	rpc(r, 'begin_tile_embeddings')
 	rpc(r, 'insert_tile_embeddings', p_offset=0, p_rows=[tile(), tile(20)])
 	# AOI covers only the first tile. Finish must compute membership after insertion.
@@ -200,13 +217,30 @@ def test_authorization_visibility_and_aoi(replacement):
 		(r['dataset'], r['auditor_id']),
 	)
 	assert rpc(r, 'complete_tile_embeddings', p_expected_count=2) == 2
+	# Both ranking RPCs must agree on visibility: the archive RPC resolves the
+	# caller's datasets set-based, the tile RPC through the per-dataset predicates.
 	assert len(search(r)) == 1
+	assert len(search_anonymous(r)) == 1
+	assert ranked(r) and ranked(r, r['auditor']) and ranked(r, r['user'])
+	# Audit-excluded datasets leave the public surface; the owner still sees them.
+	r['db'].execute(
+		"INSERT INTO public.dataset_audit(dataset_id,final_assessment) VALUES(%s,'exclude_completely')", (r['dataset'],)
+	)
+	assert search_anonymous(r) == [] and search(r) == []
+	assert not ranked(r) and not ranked(r, r['auditor'])
+	assert len(search(r, r['user'])) == 1 and ranked(r, r['user'])
+	r['db'].execute('DELETE FROM public.dataset_audit WHERE dataset_id=%s', (r['dataset'],))
+	assert ranked(r)
 	r['db'].execute("UPDATE public.v2_datasets SET data_access='private' WHERE id=%s", (r['dataset'],))
-	assert search(r) == []
+	assert search(r) == [] and not ranked(r, r['auditor'])
+	# Public callers never see private datasets; the owner still does.
+	assert search_anonymous(r) == [] and not ranked(r)
+	assert len(search(r, r['user'])) == 1 and ranked(r, r['user'])
 	r['db'].execute('UPDATE public.privileged_users SET can_view_all_private=true WHERE user_id=%s', (r['auditor_id'],))
-	assert len(search(r)) == 1
+	assert len(search(r)) == 1 and ranked(r, r['auditor'])
 	r['db'].execute('UPDATE public.v2_datasets SET archived=true WHERE id=%s', (r['dataset'],))
-	assert search(r) == []
+	assert search(r) == [] and not ranked(r, r['auditor'])
+	assert len(search(r, r['user'])) == 1 and ranked(r, r['user'])
 
 
 def test_legacy_worker_cannot_insert_or_publish(replacement):

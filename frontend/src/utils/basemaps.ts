@@ -89,10 +89,12 @@ export const createStandardMapControls = ({
   includeZoom = true,
   includeAttribution = true,
   includeScaleLine = false,
+  collapsibleAttribution = false,
 }: {
   includeZoom?: boolean;
   includeAttribution?: boolean;
   includeScaleLine?: boolean;
+  collapsibleAttribution?: boolean;
 } = {}) => {
   const controls: Control[] = [];
 
@@ -108,7 +110,8 @@ export const createStandardMapControls = ({
     controls.push(
       new Attribution({
         className: "dt-map-attribution-control",
-        collapsible: false,
+        collapsible: collapsibleAttribution,
+        tipLabel: "Kartenquellen",
       }),
     );
   }

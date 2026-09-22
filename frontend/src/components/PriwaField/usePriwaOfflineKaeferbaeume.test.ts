@@ -4,6 +4,8 @@ import type { Mock } from "vitest";
 import type { IPriwaPoint } from "./types";
 import type { IPriwaQueuedMutation } from "./priwaOfflineStore";
 
+vi.mock("./syncPriwaObservation", () => ({ syncPriwaObservation: vi.fn() }));
+
 const setStateSpy = vi.fn();
 const invalidateQueries = vi.fn();
 let stateValues: unknown[] = [];

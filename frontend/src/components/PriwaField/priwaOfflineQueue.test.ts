@@ -141,6 +141,8 @@ describe("updatePriwaSyncQueue", () => {
       coalescePriwaQueuedMutation(queue, olderMutation),
     );
 
-    expect(storedQueue).toEqual([newerMutation]);
+    expect(storedQueue).toEqual([
+      { ...newerMutation, attemptedUpdatedAts: [] },
+    ]);
   });
 });

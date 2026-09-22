@@ -15,23 +15,23 @@ describe("PRIWA offline map status", () => {
   it("only shows ready when at least 80 percent of the viewport is cached", () => {
     expect(
       getPriwaOfflineStatusView({ ...readyInput, coverageRatio: 0.8 }),
-    ).toEqual({ label: "Offline bereit", color: "success" });
+    ).toEqual({ label: "Basiskarte offline bereit", color: "success" });
     expect(
       getPriwaOfflineStatusView({ ...readyInput, coverageRatio: 0.79 }),
-    ).toEqual({ label: "Teilweise offline", color: "warning" });
+    ).toEqual({ label: "Basiskarte teilweise offline", color: "warning" });
   });
 
   it("distinguishes saved areas elsewhere from no downloaded maps", () => {
     expect(
       getPriwaOfflineStatusView({ ...readyInput, coverageRatio: 0 }),
-    ).toEqual({ label: "Bereich nicht offline", color: "default" });
+    ).toEqual({ label: "Basiskarte hier nicht offline", color: "default" });
     expect(
       getPriwaOfflineStatusView({
         ...readyInput,
         hasAreas: false,
         coverageRatio: 0,
       }),
-    ).toEqual({ label: "Offline-Karte laden", color: "default" });
+    ).toEqual({ label: "Basiskarte offline laden", color: "default" });
   });
 
   it("surfaces legacy packages outside covered views and waits for cache audits", () => {
@@ -41,14 +41,14 @@ describe("PRIWA offline map status", () => {
         needsRefresh: true,
         coverageRatio: 0,
       }),
-    ).toEqual({ label: "Offline-Karte aktualisieren", color: "warning" });
+    ).toEqual({ label: "Basiskarte aktualisieren", color: "warning" });
     expect(
       getPriwaOfflineStatusView({
         ...readyInput,
         isCacheAuditComplete: false,
         coverageRatio: 1,
       }),
-    ).toEqual({ label: "Offline wird geprüft", color: "processing" });
+    ).toEqual({ label: "Basiskarte wird geprüft", color: "processing" });
   });
 
   it("reports an unsupported offline runtime", () => {
@@ -58,6 +58,9 @@ describe("PRIWA offline map status", () => {
         isSupported: false,
         coverageRatio: 0,
       }),
-    ).toEqual({ label: "Offline nicht unterstützt", color: "warning" });
+    ).toEqual({
+      label: "Basiskarte offline nicht unterstützt",
+      color: "warning",
+    });
   });
 });

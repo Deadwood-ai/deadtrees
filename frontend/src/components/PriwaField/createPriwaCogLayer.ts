@@ -6,6 +6,7 @@ import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 
 export interface IPriwaCogLayerSource {
   cogUrl: string;
+  offlineFile?: Blob;
 }
 
 export const PRIWA_COG_MAX_ZOOM = 23;
@@ -23,17 +24,19 @@ export const createPriwaCogLayer = (cog: IPriwaCogLayerSource) =>
     source: new GeoTIFF({
       sources: [
         {
-          url: resolvePriwaCogUrl(cog.cogUrl),
+          ...(cog.offlineFile
+            ? { blob: cog.offlineFile }
+            : { url: resolvePriwaCogUrl(cog.cogUrl) }),
           nodata: 0,
           bands: [1, 2, 3],
         },
       ],
       convertToRGB: true,
+      interpolate: false,
       sourceOptions: COG_SOURCE_OPTIONS,
     }),
-    opacity: 0.82,
-    maxZoom: PRIWA_COG_MAX_ZOOM,
+    opacity: 1,
     zIndex: 10,
-    cacheSize: 4096,
+    cacheSize: 128,
     preload: 0,
   });

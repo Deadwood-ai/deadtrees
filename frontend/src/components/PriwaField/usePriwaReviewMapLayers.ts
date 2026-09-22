@@ -98,7 +98,10 @@ export function usePriwaReviewMapLayers({
   selectedGroupId,
 }: UsePriwaReviewMapLayersOptions) {
   const cogLayersRef = useRef<
-    globalThis.Map<string, { cogUrl: string; layer: TileLayerWebGL }>
+    globalThis.Map<
+      string,
+      { cogUrl: string; offlineFile?: Blob; layer: TileLayerWebGL }
+    >
   >(new globalThis.Map());
 
   useEffect(() => {
@@ -142,7 +145,11 @@ export function usePriwaReviewMapLayers({
     enabledMosaics.forEach((mosaic, index) => {
       const current = cogLayersRef.current.get(mosaic.id);
       let layer = current?.layer;
-      if (current && current.cogUrl !== mosaic.cogUrl) {
+      if (
+        current &&
+        (current.cogUrl !== mosaic.cogUrl ||
+          current.offlineFile !== mosaic.offlineFile)
+      ) {
         map.removeLayer(current.layer);
         current.layer.dispose();
         cogLayersRef.current.delete(mosaic.id);
@@ -153,6 +160,7 @@ export function usePriwaReviewMapLayers({
         layer = createPriwaCogLayer(mosaic);
         cogLayersRef.current.set(mosaic.id, {
           cogUrl: mosaic.cogUrl,
+          offlineFile: mosaic.offlineFile,
           layer,
         });
         map.addLayer(layer);

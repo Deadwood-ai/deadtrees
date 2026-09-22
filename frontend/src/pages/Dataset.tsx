@@ -29,7 +29,6 @@ import { useDesktopOnlyFeature } from "../hooks/useDesktopOnlyFeature";
 import { useAnalytics } from "../hooks/useAnalytics";
 import { useArchiveSearch } from "../hooks/useArchiveSearch";
 import ArchiveSearch from "../components/DatasetMap/ArchiveSearch";
-import { useCanUseAiSearch } from "../hooks/useUserPrivileges";
 
 type FilterTag =
   | "platform"
@@ -89,10 +88,9 @@ export default function Dataset() {
   // Incremented on explicit filter actions to trigger map zoom
   const [filterZoomTrigger, setFilterZoomTrigger] = useState(0);
 
-  // Open-vocabulary (CLIP) search is temporarily auditor-only. PostgreSQL
-  // enforces the same capability even if callers bypass this UI gate.
-  const { canUseAiSearch } = useCanUseAiSearch();
-  const search = useArchiveSearch(canUseAiSearch);
+  // Open-vocabulary (CLIP) search is public; the ranking RPC only returns
+  // datasets visible to the caller.
+  const search = useArchiveSearch();
   const { semantic } = search;
   const searchInput = search.text;
 
@@ -283,7 +281,6 @@ export default function Dataset() {
       <div className="flex flex-col gap-2 pb-4">
         <ArchiveSearch
           mode={search.mode}
-          canUseAiSearch={canUseAiSearch}
           value={search.input}
           loading={semantic.loading}
           onChange={search.changeInput}

@@ -6,17 +6,17 @@ export type ArchiveSearchMode = "text" | "ai";
 
 // URL state keeps mode/query together across links and browser history. An old
 // AI request belongs to its own actor/query cache and cannot filter text mode.
-export function useArchiveSearch(canUseAiSearch: boolean) {
+export function useArchiveSearch() {
   const [params, setParams] = useSearchParams();
-  const mode: ArchiveSearchMode = canUseAiSearch &&
-    (params.has("q") || params.get("search") === "ai") ? "ai" : "text";
+  const mode: ArchiveSearchMode =
+    params.has("q") || params.get("search") === "ai" ? "ai" : "text";
   const semantic = useSemanticSearch(mode === "ai");
   const text = mode === "text" ? params.get("text") ?? "" : "";
   const [draft, setDraft] = useState(semantic.query ?? "");
   useEffect(() => setDraft(semantic.query ?? ""), [semantic.query, mode]);
 
   const changeMode = (nextMode: ArchiveSearchMode) => {
-    if (nextMode === mode || (nextMode === "ai" && !canUseAiSearch)) return;
+    if (nextMode === mode) return;
     setDraft("");
     setParams((current) => {
       const next = new URLSearchParams(current);

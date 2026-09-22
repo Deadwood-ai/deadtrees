@@ -22,7 +22,7 @@ import { useAuth } from "../hooks/useAuthProvider";
 import { useCreateFlag } from "../hooks/useDatasetFlags";
 import { useDatasetEditing } from "../hooks/useDatasetEditing";
 import { useDatasetAOI } from "../hooks/useDatasetAudit";
-import { useCanAudit, useCanUseAiSearch } from "../hooks/useUserPrivileges";
+import { useCanAudit } from "../hooks/useUserPrivileges";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAnalytics } from "../hooks/useAnalytics";
 import { hasForestCoverPredictionOutput } from "../utils/predictionAvailability";
@@ -52,7 +52,6 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
   const [mapInstance, setMapInstance] = useState<OLMap | null>(null);
   const { user } = useAuth();
   const { canAudit } = useCanAudit();
-  const { canUseAiSearch } = useCanUseAiSearch();
   const { track } = useAnalytics("dataset_detail");
   const {
     setViewport,
@@ -508,9 +507,7 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
           }
         />
 
-        {/* Open-vocabulary tile search is temporarily auditor-only. PostgreSQL
-            enforces the same capability even if callers bypass this UI gate. */}
-        {canUseAiSearch && !isEditing && hasMapImage && (
+        {!isEditing && hasMapImage && (
           <div className="pointer-events-none absolute left-1/2 top-[7.5rem] z-30 -translate-x-1/2 lg:top-24">
             <div className="pointer-events-auto">
               <OrthoTileSearch

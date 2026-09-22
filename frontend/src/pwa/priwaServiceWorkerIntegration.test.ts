@@ -54,6 +54,7 @@ const createServiceWorkerHarness = ({
   };
   const fetchMock = vi.fn().mockResolvedValue(networkResponse);
   const workerScope = {
+    location: { origin: "https://deadtrees.earth" },
     clients: { claim: vi.fn().mockResolvedValue(undefined) },
     navigator: { onLine: isOnline },
     skipWaiting: vi.fn().mockResolvedValue(undefined),
@@ -78,7 +79,8 @@ const createServiceWorkerHarness = ({
 
   const dispatchBasemapRequest = async () => {
     const fetchListener = listeners.get("fetch");
-    if (!fetchListener) throw new Error("Service worker fetch listener missing");
+    if (!fetchListener)
+      throw new Error("Service worker fetch listener missing");
 
     let responsePromise: Promise<Response> | undefined;
     fetchListener({
@@ -114,7 +116,22 @@ const createServiceWorkerHarness = ({
     await activationPromise;
   };
 
+  const dispatchNavigation = async () => {
+    const request = new Request("https://deadtrees.earth/priwa-field");
+    Object.defineProperty(request, "mode", { value: "navigate" });
+    let result: Promise<Response> | undefined;
+    listeners.get("fetch")!({
+      request,
+      respondWith: (response) => {
+        result = Promise.resolve(response);
+      },
+    });
+    if (!result) throw new Error("Navigation not handled");
+    return result;
+  };
+
   return {
+    dispatchNavigation,
     cache,
     cacheStorage,
     dispatchActivate,
@@ -124,6 +141,28 @@ const createServiceWorkerHarness = ({
 };
 
 describe("PRIWA basemap service worker", () => {
+  it("uses the current app shell on offline launch after an upgrade", async () => {
+    const harness = createServiceWorkerHarness({ isOnline: false });
+    harness.fetchMock.mockRejectedValue(new Error("offline"));
+    harness.cacheStorage.match.mockResolvedValue(new Response("old v2 HTML"));
+    harness.cache.match.mockResolvedValue(new Response("current v3 HTML"));
+    const response = await harness.dispatchNavigation();
+    expect(await response.text()).toBe("current v3 HTML");
+    expect(harness.cacheStorage.open).toHaveBeenCalledWith(
+      "deadtrees-app-shell-v3",
+    );
+    expect(harness.cacheStorage.match).not.toHaveBeenCalled();
+    harness.cacheStorage.keys.mockResolvedValue([
+      "deadtrees-app-shell-v2",
+      "deadtrees-app-shell-v3",
+      EXPLICIT_BASEMAP_CACHE,
+    ]);
+    await harness.dispatchActivate();
+    expect(
+      harness.cacheStorage.delete.mock.calls.map(([name]) => name),
+    ).toEqual(["deadtrees-app-shell-v2"]);
+  });
+
   it("keeps online tile requests out of Cache Storage", async () => {
     const harness = createServiceWorkerHarness();
 

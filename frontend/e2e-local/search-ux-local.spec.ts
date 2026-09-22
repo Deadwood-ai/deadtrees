@@ -114,11 +114,11 @@ const fulfillRpc = async (route: Route, rpcName: string | undefined) => {
     searchEvents.push("dataset-rpc");
     if (failDatasetRanking) {
       await route.fulfill({
-        status: 403,
+        status: 500,
         contentType: "application/json",
         json: {
-          code: "42501",
-          message: "AI search is restricted to auditors",
+          code: "57014",
+          message: "canceling statement due to statement timeout",
         },
       });
       return;
@@ -362,7 +362,7 @@ test.describe("search UX (local)", () => {
     await input.press("Enter");
 
     await expect(
-      page.getByText("AI search is restricted to auditors"),
+      page.getByText("canceling statement due to statement timeout"),
     ).toBeVisible();
     expect(embedRequests).toEqual([{ query: "forest" }]);
     expect(loggedQueries).toHaveLength(0);
@@ -410,21 +410,22 @@ test.describe("search UX (local)", () => {
     );
   });
 
-  test("permission loss cannot leave the archive invisibly filtered", async ({
+  test("non-auditors can run AI search but their queries are never logged", async ({
     page,
   }) => {
     await installAuditor(page, false);
     await page.goto("/dataset?q=forest");
     await page.getByRole("checkbox", { name: "Filter list by map view" }).uncheck();
 
-    await expect(page.getByRole("button", { name: "Search mode" })).toHaveCount(
-      0,
-    );
-    await expect(page.getByTestId("dataset-list-item")).toHaveCount(
-      archiveItems.length,
-    );
-    expect(embedRequests).toHaveLength(0);
-    expect(rpcRequests).toHaveLength(0);
+    await expect(page.getByRole("button", { name: "Search mode" })).toBeVisible();
+    await expect(page.getByText(/Ranked by/)).toBeVisible();
+    await expect(
+      page.getByTestId("dataset-semantic-score").first(),
+    ).toBeVisible();
+    expect(embedRequests).toEqual([{ query: "forest" }]);
+    expect(
+      rpcRequests.filter((r) => r.name === "search_datasets_by_embedding"),
+    ).toHaveLength(1);
     expect(loggedQueries).toHaveLength(0);
   });
 

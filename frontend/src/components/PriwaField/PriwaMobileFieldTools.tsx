@@ -55,7 +55,7 @@ export default function PriwaMobileFieldTools({
     <>
       <Tooltip title="Kartenebenen" placement="right">
         <Button
-          className="pointer-events-auto shadow-md min-[992px]:hidden"
+          className="pointer-events-auto shadow-md"
           type={isLayersOpen ? "primary" : "default"}
           shape="circle"
           size="large"
@@ -67,7 +67,7 @@ export default function PriwaMobileFieldTools({
       </Tooltip>
       <Tooltip title="Bäume" placement="right">
         <Button
-          className="pointer-events-auto shadow-md min-[992px]:hidden"
+          className="pointer-events-auto shadow-md"
           shape="circle"
           size="large"
           icon={<UnorderedListOutlined />}
@@ -84,9 +84,8 @@ export default function PriwaMobileFieldTools({
         open={isTreeListOpen}
         onClose={onCloseTreeList}
         rootClassName="priwa-layer-sheet-root"
-        className="min-[992px]:hidden"
         styles={{
-          header: { padding: "12px 16px" },
+          header: { padding: "8px 12px" },
           body: {
             padding: "0 0 calc(env(safe-area-inset-bottom, 0px) + 16px)",
             overflow: "hidden",
@@ -94,7 +93,7 @@ export default function PriwaMobileFieldTools({
         }}
       >
         <div className="flex h-full min-h-0 flex-col">
-          <div className="border-b border-slate-200 p-3">
+          <div className="border-b border-slate-200 px-3 py-2">
             <Input
               allowClear
               prefix={<SearchOutlined />}
