@@ -87,8 +87,7 @@ export default function PriwaFlightPanel({
           Alle Befliegungen{items.length > 0 ? ` (${items.length})` : ""}
         </MobileMapSectionHeading>
         <p className="-mt-1 mb-2 text-xs text-slate-500">
-          Name antippen für Details und Download. Sichtbarkeit und Zoom separat
-          steuern; die Karte bleibt bedienbar.
+          Name antippen für Details und Download.
         </p>
         <div className="mb-3 flex flex-wrap gap-2">
           <Input

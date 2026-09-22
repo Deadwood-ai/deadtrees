@@ -71,12 +71,12 @@ export default function PriwaOfflineFlightSection({
     <section data-testid="priwa-offline-flights" className="space-y-2">
       <MobileMapSectionHeading>Offline-Befliegungen</MobileMapSectionHeading>
       <p className="-mt-1 text-xs text-slate-500">
-        Speichert die komplette Drohnen-Befliegung (gesamte Flugfläche, volle
-        Auflösung) auf diesem Gerät. Höchstens {PRIWA_OFFLINE_MOSAIC_LIMIT}{" "}
-        Befliegungen, zusammen{" "}
-        {formatPriwaMebibytes(PRIWA_OFFLINE_MOSAIC_BYTES)} und{" "}
-        {formatPriwaAreaKm2(PRIWA_OFFLINE_MOSAIC_AREA_KM2)}. Die Basiskarte wird
-        separat unter „Offline-Karten“ gespeichert.
+        Komplette Befliegungen, volle Auflösung. Max.{" "}
+        {PRIWA_OFFLINE_MOSAIC_LIMIT}
+        {" · "}
+        {formatPriwaMebibytes(PRIWA_OFFLINE_MOSAIC_BYTES)}
+        {" · "}
+        {formatPriwaAreaKm2(PRIWA_OFFLINE_MOSAIC_AREA_KM2)}.
       </p>
 
       {!supported && (
@@ -245,11 +245,11 @@ export default function PriwaOfflineFlightSection({
         <>
           {selectedFlights.length === 0 ? (
             <p className="text-xs text-slate-500">
-              Zuerst eine Befliegung auswählen, um sie offline zu speichern.
+              Zum Speichern eine Befliegung auswählen.
             </p>
           ) : selectable.length === 0 ? (
             <p className="text-xs text-emerald-700">
-              Die ausgewählte Befliegung ist bereits offline gespeichert.
+              Bereits offline gespeichert.
             </p>
           ) : wouldExceedCount ? (
             <p className="text-xs text-amber-700">
@@ -268,12 +268,6 @@ export default function PriwaOfflineFlightSection({
               >
                 Befliegung offline laden
               </Button>
-              <p className="!mt-1 text-xs text-slate-500">
-                {selectable.length === 1
-                  ? `Ausgewählt: ${selectable[0].label}`
-                  : `Ausgewählt: ${selectable.length} Befliegungen`}{" "}
-                – prüft zuerst Dateigröße und Flugfläche.
-              </p>
             </>
           )}
           {!isOnline && selectedFlights.length > 0 && selectable.length > 0 && (

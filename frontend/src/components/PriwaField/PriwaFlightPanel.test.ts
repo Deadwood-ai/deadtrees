@@ -204,12 +204,10 @@ describe("PriwaOfflineFlightSection", () => {
       }),
     );
 
-    expect(html).toContain("gesamte Flugfläche, volle");
+    expect(html).toContain("Komplette Befliegungen, volle Auflösung.");
     expect(html).toContain("500 MiB");
     expect(html).toContain("3,0 km²");
     expect(html).toContain("Befliegung offline laden");
-    expect(html).toContain("Ausgewählt: Hangflug Nord");
-    expect(html).toContain("Offline-Karten");
   });
 
   it("shows the planned size before an explicit download", () => {
@@ -279,7 +277,7 @@ describe("PriwaOfflineFlightSection", () => {
     );
     expect(html).toContain("1 von 2 gespeichert · 312 MiB von 500 MiB");
     expect(html).toContain("bei Speichermangel");
-    expect(html).toContain("bereits offline gespeichert");
+    expect(html).toContain("Bereits offline gespeichert");
   });
 
   it("surfaces failures with a retry", () => {
