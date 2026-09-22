@@ -128,12 +128,13 @@ if ! python3 "${ASSET_PREFLIGHT_SCRIPT}" >> "${LOG_FILE}" 2>&1; then
 	exit 1
 fi
 
-docker compose -f "${COMPOSE_FILE}" stop processor >> "${LOG_FILE}" 2>&1
+log_processor_compose_files
+docker compose "${PROCESSOR_COMPOSE_FILES[@]}" stop processor >> "${LOG_FILE}" 2>&1
 sudo -n "${SNAP_CONTROL}" refresh >> "${LOG_FILE}" 2>&1
 sudo -n "${SNAP_CONTROL}" hold "${HOLD_DURATION}" >> "${LOG_FILE}" 2>&1
 require_clean_checkout
 python3 "${STATUS_SCRIPT}" clear-ack >> "${LOG_FILE}" 2>&1
-PROCESSOR_RELEASE_SHA="${activated_sha}" docker compose -f "${COMPOSE_FILE}" up -d processor >> "${LOG_FILE}" 2>&1
+PROCESSOR_RELEASE_SHA="${activated_sha}" docker compose "${PROCESSOR_COMPOSE_FILES[@]}" up -d processor >> "${LOG_FILE}" 2>&1
 python3 "${STATUS_SCRIPT}" wait-for-idle \
 	--expected-release-sha "${activated_sha}" \
 	--timeout-seconds "${STARTUP_TIMEOUT_SECONDS}" \
