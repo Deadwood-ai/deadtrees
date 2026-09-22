@@ -15,6 +15,7 @@ interface MobileLayerDrawerProps {
   showDeadwood: boolean;
   showPublicContributions: boolean;
   publicContributionsCount: number;
+  showPublicObservationControls: boolean;
   opacity: number;
   onClose: () => void;
   onMapStyleChange: (style: string) => void;
@@ -45,6 +46,7 @@ const MobileLayerDrawer = ({
   showDeadwood,
   showPublicContributions,
   publicContributionsCount,
+  showPublicObservationControls,
   opacity,
   onClose,
   onMapStyleChange,
@@ -134,26 +136,28 @@ const MobileLayerDrawer = ({
           </div>
         </section>
 
-        <section>
-          <MobileMapSectionHeading>Feedback</MobileMapSectionHeading>
-          <div className="space-y-2.5">
-            <MobileLayerRow
-              thumb={mobileMapThumbnails.communityPoints}
-              title="Point observations"
-              checked={showPublicContributions}
-              count={publicContributionsCount}
-              onChange={setShowPublicContributions}
-            />
-            <Button
-              block
-              icon={<DownloadOutlined />}
-              disabled={publicContributionsCount === 0}
-              onClick={onDownloadPublicTreeObservations}
-            >
-              Download CSV
-            </Button>
-          </div>
-        </section>
+        {showPublicObservationControls && (
+          <section>
+            <MobileMapSectionHeading>Feedback</MobileMapSectionHeading>
+            <div className="space-y-2.5">
+              <MobileLayerRow
+                thumb={mobileMapThumbnails.communityPoints}
+                title="Point observations"
+                checked={showPublicContributions}
+                count={publicContributionsCount}
+                onChange={setShowPublicContributions}
+              />
+              <Button
+                block
+                icon={<DownloadOutlined />}
+                disabled={publicContributionsCount === 0}
+                onClick={onDownloadPublicTreeObservations}
+              >
+                Download CSV
+              </Button>
+            </div>
+          </section>
+        )}
       </div>
     </MobileBottomSheet>
   );

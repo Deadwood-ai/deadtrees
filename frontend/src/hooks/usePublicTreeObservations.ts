@@ -82,6 +82,7 @@ export const getPublicTreeClientId = () => {
 };
 
 export const publicTreeObservationsQueryKey = ["public-tree-observations"];
+const NO_PUBLIC_TREE_OBSERVATIONS: PublicTreeObservation[] = [];
 
 export const fetchPublicTreeObservations = async () => {
   const { data, error } = await supabase
@@ -120,17 +121,23 @@ export const insertPublicTreeObservation = async (
   if (error) throw error;
 };
 
-export function usePublicTreeObservations() {
+export function usePublicTreeObservations({ enabled }: { enabled: boolean }) {
   const queryClient = useQueryClient();
 
   const observationsQuery = useQuery({
     queryKey: publicTreeObservationsQueryKey,
     queryFn: fetchPublicTreeObservations,
+    enabled,
     staleTime: 10 * 1000,
   });
 
   const createObservation = useMutation({
-    mutationFn: insertPublicTreeObservation,
+    mutationFn: async (observation: PublicTreeObservationInput) => {
+      if (!enabled) {
+        throw new Error("Point observation controls are unavailable");
+      }
+      return insertPublicTreeObservation(observation);
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({
         queryKey: publicTreeObservationsQueryKey,
@@ -139,7 +146,9 @@ export function usePublicTreeObservations() {
   });
 
   return {
-    observations: observationsQuery.data ?? [],
+    observations: enabled
+      ? observationsQuery.data ?? NO_PUBLIC_TREE_OBSERVATIONS
+      : NO_PUBLIC_TREE_OBSERVATIONS,
     observationsQuery,
     createObservation,
   };

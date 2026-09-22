@@ -31,10 +31,11 @@ interface LayerControlPanelProps {
   setShowForest: (show: boolean) => void;
   showDeadwood: boolean;
   setShowDeadwood: (show: boolean) => void;
-  showPublicContributions?: boolean;
-  setShowPublicContributions?: (show: boolean) => void;
-  publicContributionsCount?: number;
-  onDownloadPublicTreeObservations?: () => void;
+  showPublicObservationControls: boolean;
+  showPublicContributions: boolean;
+  setShowPublicContributions: (show: boolean) => void;
+  publicContributionsCount: number;
+  onDownloadPublicTreeObservations: () => void;
   // Opacity
   opacity: number;
   setOpacity: (value: number) => void;
@@ -73,6 +74,7 @@ const LayerControlPanel = ({
   setShowForest,
   showDeadwood,
   setShowDeadwood,
+  showPublicObservationControls,
   showPublicContributions,
   setShowPublicContributions,
   publicContributionsCount,
@@ -306,43 +308,42 @@ const LayerControlPanel = ({
             <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500">
               Feedback
             </div>
-            {setShowPublicContributions && (
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <Checkbox
-                  checked={showPublicContributions}
-                  onChange={(e) =>
-                    setShowPublicContributions(e.target.checked)
-                  }
-                >
-                  <span className="flex items-center gap-2">
-                    <span
-                      className="h-3 w-3 rounded-full border-2 border-white shadow-sm"
-                      style={{ backgroundColor: "rgba(22, 163, 74, 0.96)" }}
-                    />
-                    <span className="text-xs text-gray-600">
-                      Point observations
-                      {publicContributionsCount !== undefined &&
-                        publicContributionsCount > 0 &&
-                        ` (${publicContributionsCount})`}
+            {showPublicObservationControls && (
+              <>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <Checkbox
+                    checked={showPublicContributions}
+                    onChange={(e) =>
+                      setShowPublicContributions(e.target.checked)
+                    }
+                  >
+                    <span className="flex items-center gap-2">
+                      <span
+                        className="h-3 w-3 rounded-full border-2 border-white shadow-sm"
+                        style={{ backgroundColor: "rgba(22, 163, 74, 0.96)" }}
+                      />
+                      <span className="text-xs text-gray-600">
+                        Point observations
+                        {publicContributionsCount > 0 &&
+                          ` (${publicContributionsCount})`}
+                      </span>
                     </span>
-                  </span>
-                </Checkbox>
-                {onDownloadPublicTreeObservations && (
+                  </Checkbox>
                   <Tooltip title="Download point observations as CSV">
                     <Button
                       size="small"
                       icon={<DownloadOutlined />}
-                      disabled={(publicContributionsCount ?? 0) === 0}
+                      disabled={publicContributionsCount === 0}
                       aria-label="Download point observations as CSV"
                       onClick={onDownloadPublicTreeObservations}
                     />
                   </Tooltip>
-                )}
-              </div>
+                </div>
+                <p className="mb-2 text-xs leading-4 text-gray-500">
+                  Add point observations from the mobile map.
+                </p>
+              </>
             )}
-            <p className="mb-2 text-xs leading-4 text-gray-500">
-              Add point observations from the mobile map.
-            </p>
             <p className="mb-2 text-xs leading-4 text-gray-500">
               Help improve our AI by flagging incorrect predictions
             </p>

@@ -99,6 +99,7 @@ import {
 import { mapColors } from "../../theme/mapColors";
 import { palette } from "../../theme/palette";
 import { downloadPublicTreeObservationsCsv } from "../../utils/publicTreeObservationCsv";
+import { canUseCoreTeamAppFeature } from "../../utils/coreTeamFeatureAccess";
 
 const PREVIEW_WARNING_STORAGE_KEY = "deadtrees-preview-warning-shown";
 const PREVIEW_WARNING_EVENT = "deadtrees:preview-warning-visibility";
@@ -241,7 +242,17 @@ const DeadtreesMap = () => {
     useState(false);
 
   // Auth privilege — needed before polygonAnalysis so effectiveModelVersion is available
-  const { canAudit } = useCanAudit();
+  const { user, status: authStatus } = useAuth();
+  const { canAudit, isLoading: privilegesLoading } = useCanAudit();
+  const canUsePublicTreeObservations = canUseCoreTeamAppFeature({
+    authStatus,
+    canAudit,
+    privilegesLoading,
+  });
+  const showPublicObservationPlacement =
+    canUsePublicTreeObservations && isPlacingPublicObservation;
+  const showPublicObservationDrawer =
+    canUsePublicTreeObservations && publicObservationDrawerOpen;
   // Non-auditors are locked to v1; auditors can freely switch
   const effectiveModelVersion: MapModelVersion = canAudit ? modelVersion : "v1";
 
@@ -252,7 +263,7 @@ const DeadtreesMap = () => {
   const {
     observations: publicTreeObservations,
     createObservation: createPublicTreeObservation,
-  } = usePublicTreeObservations();
+  } = usePublicTreeObservations({ enabled: canUsePublicTreeObservations });
 
   // One parent-owned mode survives desktop/mobile breakpoint changes. In
   // particular, "discovering" remembers a history request until candidates
@@ -347,7 +358,6 @@ const DeadtreesMap = () => {
   );
 
   // Auth and flags hooks
-  const { user } = useAuth();
   const navigate = useNavigate();
   const { data: mapFlags = [] } = useMapFlags();
   const createFlagMutation = useCreateMapFlag();
@@ -734,7 +744,7 @@ const DeadtreesMap = () => {
           selectedYear,
           isDrawingFlag ||
             polygonAnalysis.isDrawing ||
-            isPlacingPublicObservation,
+            showPublicObservationPlacement,
         );
       mapRef.current.on("click", clickHandler);
 
@@ -750,7 +760,7 @@ const DeadtreesMap = () => {
     effectiveModelVersion,
     isDrawingFlag,
     polygonAnalysis.isDrawing,
-    isPlacingPublicObservation,
+    showPublicObservationPlacement,
     handleClick,
   ]);
 
@@ -921,16 +931,21 @@ const DeadtreesMap = () => {
   }, [showDeadwood]);
 
   useEffect(() => {
-    if (!publicTreeObservationLayerRef.current) return;
+    const layer = publicTreeObservationLayerRef.current;
+    if (!layer) return;
+
     syncPublicTreeObservationLayer(
-      publicTreeObservationLayerRef.current,
+      layer,
       publicTreeObservations,
     );
-  }, [publicTreeObservations]);
-
-  useEffect(() => {
-    publicTreeObservationLayerRef.current?.setVisible(showPublicContributions);
-  }, [showPublicContributions]);
+    layer.setVisible(
+      canUsePublicTreeObservations && showPublicContributions,
+    );
+  }, [
+    canUsePublicTreeObservations,
+    publicTreeObservations,
+    showPublicContributions,
+  ]);
 
   // Show preview warning modal on initial load (once per browser session)
   useEffect(() => {
@@ -1324,12 +1339,26 @@ const DeadtreesMap = () => {
     downloadPublicTreeObservationsCsv(publicTreeObservations);
   }, [publicTreeObservations]);
 
+  useEffect(() => {
+    if (
+      !canUsePublicTreeObservations &&
+      (isPlacingPublicObservation || publicObservationDrawerOpen)
+    ) {
+      cancelPublicObservationPlacement();
+    }
+  }, [
+    canUsePublicTreeObservations,
+    cancelPublicObservationPlacement,
+    isPlacingPublicObservation,
+    publicObservationDrawerOpen,
+  ]);
+
   const activeMobileDrawMode = isMobile
     ? isDrawingFlag
       ? "flag"
       : polygonAnalysis.isDrawing
         ? "analysis"
-        : isPlacingPublicObservation
+        : showPublicObservationPlacement
           ? "public-observation"
           : null
     : null;
@@ -1340,9 +1369,11 @@ const DeadtreesMap = () => {
         ? flagCanFinish
         : true;
   const hideMobileFloatingControls =
-    !!activeMobileDrawMode || publicObservationDrawerOpen;
+    !!activeMobileDrawMode || showPublicObservationDrawer;
   const shouldHideYearImagerySelector =
-    isDrawingFlag || polygonAnalysis.isDrawing || isPlacingPublicObservation;
+    isDrawingFlag ||
+    polygonAnalysis.isDrawing ||
+    showPublicObservationPlacement;
 
   return (
     <div className="h-full w-full">
@@ -1375,6 +1406,7 @@ const DeadtreesMap = () => {
             setShowForest={setShowForest}
             showDeadwood={showDeadwood}
             setShowDeadwood={setShowDeadwood}
+            showPublicObservationControls={canUsePublicTreeObservations}
             showPublicContributions={showPublicContributions}
             setShowPublicContributions={setShowPublicContributions}
             publicContributionsCount={publicTreeObservations.length}
@@ -1427,7 +1459,9 @@ const DeadtreesMap = () => {
         />
 
         <MobileAddTreeButton
-          hidden={hideMobileFloatingControls}
+          hidden={
+            hideMobileFloatingControls || !canUsePublicTreeObservations
+          }
           onClick={requestPublicObservationPlacement}
         />
 
@@ -1478,6 +1512,7 @@ const DeadtreesMap = () => {
           showDeadwood={showDeadwood}
           showPublicContributions={showPublicContributions}
           publicContributionsCount={publicTreeObservations.length}
+          showPublicObservationControls={canUsePublicTreeObservations}
           opacity={sliderValue}
           onClose={() => setMobileMapPanel(null)}
           onMapStyleChange={handleMapStyleChange}
@@ -1592,7 +1627,7 @@ const DeadtreesMap = () => {
           </div>
         )}
 
-        {isPlacingPublicObservation && (
+        {showPublicObservationPlacement && (
           <div className="pointer-events-none absolute left-1/2 top-1/2 z-[55] -translate-x-1/2 -translate-y-1/2 md:hidden">
             <div className="relative h-12 w-12">
               <div className="absolute left-1/2 top-0 h-12 w-px -translate-x-1/2 bg-white shadow-[0_0_0_1px_rgba(17,24,39,0.65)]" />
@@ -1612,7 +1647,7 @@ const DeadtreesMap = () => {
           title="Tree observation"
           placement="bottom"
           height="auto"
-          open={publicObservationDrawerOpen}
+          open={showPublicObservationDrawer}
           onClose={cancelPublicObservationPlacement}
           className="md:hidden"
           rootClassName="map-controls-mobile-drawer"

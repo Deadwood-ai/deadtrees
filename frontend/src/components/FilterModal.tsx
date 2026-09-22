@@ -3,6 +3,7 @@ import { Modal, Form, Checkbox, Select, Radio, Slider, Button, Divider } from "a
 import { IBiome } from "../types/dataset";
 import { useData } from "../hooks/useDataProvider";
 import { getBiomeEmoji } from "../utils/biomeDisplay";
+import { matchesSearchText } from "../utils/archiveTextSearch";
 
 interface FilterModalProps {
   isVisible: boolean;
@@ -115,6 +116,9 @@ const FilterModal: React.FC<FilterModalProps> = ({ isVisible, onClose, onApplyFi
             options={authors}
             style={{ width: "100%" }}
             optionFilterProp="label"
+            filterOption={(input, option) =>
+              matchesSearchText(String(option?.label ?? ""), input)
+            }
           />
         </Form.Item>
 

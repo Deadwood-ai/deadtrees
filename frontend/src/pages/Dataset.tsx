@@ -29,6 +29,7 @@ import { useDesktopOnlyFeature } from "../hooks/useDesktopOnlyFeature";
 import { useAnalytics } from "../hooks/useAnalytics";
 import { useArchiveSearch } from "../hooks/useArchiveSearch";
 import ArchiveSearch from "../components/DatasetMap/ArchiveSearch";
+import { matchesDatasetArchiveTextSearch } from "../utils/archiveTextSearch";
 
 type FilterTag =
   | "platform"
@@ -97,7 +98,7 @@ export default function Dataset() {
   // Debounced search handler
   useEffect(() => {
     const timer = setTimeout(() => {
-      setSearchValue(searchInput.toLowerCase());
+      setSearchValue(searchInput);
     }, 300); // 300ms delay
 
     return () => clearTimeout(timer);
@@ -166,29 +167,7 @@ export default function Dataset() {
       // If no search value, return true for the base condition
       if (!activeTextSearch.trim()) return true;
 
-      const searchTerms = activeTextSearch
-        .toLowerCase()
-        .split(/\s+/)
-        .filter(Boolean);
-
-      // Search in authors
-      const authorMatch =
-        d.authors?.some((author) =>
-          searchTerms.every((term) => author.toLowerCase().includes(term)),
-        ) || false;
-
-      // Search in location - now including admin_level_2
-      const locationWords =
-        `${d.admin_level_3 || ""}, ${d.admin_level_2 || ""}, ${d.admin_level_1 || ""}`
-          .toLowerCase()
-          .split(/[\s,]+/)
-          .filter(Boolean);
-
-      const locationMatch = searchTerms.every((term) =>
-        locationWords.some((word) => word.includes(term)),
-      );
-
-      return authorMatch || locationMatch;
+      return matchesDatasetArchiveTextSearch(d, activeTextSearch);
     });
 
     // When a semantic query is active, restrict to matched datasets and order
