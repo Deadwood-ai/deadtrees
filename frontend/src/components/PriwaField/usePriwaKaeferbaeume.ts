@@ -95,6 +95,7 @@ const rowToPoint = (row: IPriwaKaeferbaumRow): IPriwaPoint | null => {
     datum: row.datum,
     kom: row.kom ?? "",
     capturedAt: row.created_at,
+    serverUpdatedAt: row.updated_at,
     coordinateSource,
     gps: coordinateSource === "qr" ? "ja" : "nein",
     isEstimatedLocation: row.location_source !== "qr_exact",
@@ -102,7 +103,7 @@ const rowToPoint = (row: IPriwaKaeferbaumRow): IPriwaPoint | null => {
   };
 };
 
-const pointToRow = (projectId: string, point: IPriwaPoint) => ({
+export const pointToRow = (projectId: string, point: IPriwaPoint) => ({
   id: point.id,
   project_id: projectId,
   geom: {

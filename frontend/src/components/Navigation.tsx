@@ -51,10 +51,10 @@ export default function Navigation() {
   const nav = useNavigate();
   const location = useLocation();
 
-  // Full-viewport map routes (archive, dataset detail, satellite map): the
+  // Full-viewport map routes (archive, dataset detail, satellite, PRIWA): the
   // header floats over the map and its gutters stay transparent and
   // click-through. Audit/label/correction tools and content pages stay opaque.
-  const mapBackdrop = /^\/(dataset(\/[^/]+)?|deadtrees)\/?$/.test(
+  const mapBackdrop = /^\/(dataset(\/[^/]+)?|deadtrees|priwa-field)\/?$/.test(
     location.pathname,
   );
 

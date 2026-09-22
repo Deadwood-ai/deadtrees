@@ -1,0 +1,15 @@
+{
+  "id": "/priwa-field",
+  "name": "PRIWA Feldkarte",
+  "short_name": "PRIWA",
+  "description": "Befliegungen und Käferbäume im Wald, online und offline.",
+  "start_url": "/priwa-field",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f172a",
+  "theme_color": "#1b5e35",
+  "icons": [
+    { "src": "/assets/app-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

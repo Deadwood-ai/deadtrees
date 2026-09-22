@@ -114,7 +114,7 @@ export function usePriwaOfflineKaeferbaeume(
     setCachedPoints((points) => removeLocalPoint(points, pointId));
   }, []);
 
-  const onQueueDrained = useCallback(async () => {
+  const onSyncFinished = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({
         queryKey: priwaPointsQueryKey(projectId),
@@ -132,7 +132,7 @@ export function usePriwaOfflineKaeferbaeume(
     onQueueUpdated: setQueue,
     onPointSynced,
     onPointDeleted,
-    onQueueDrained,
+    onSyncFinished,
   });
 
   const enqueueMutation = useCallback(
@@ -155,6 +155,16 @@ export function usePriwaOfflineKaeferbaeume(
           pointId,
         });
         const currentCachedPoints = await loadCachedPriwaPoints(projectId);
+        mutation.baseUpdatedAt =
+          point?.serverUpdatedAt ??
+          currentCachedPoints.find((candidate) => candidate.id === pointId)
+            ?.serverUpdatedAt;
+
+        // The queue is authoritative: persist it before the optimistic cache so
+        // a crash or quota failure cannot leave an edit visible but unsyncable.
+        await updateStoredQueue((currentQueue) =>
+          coalescePriwaQueuedMutation(currentQueue, mutation),
+        );
 
         if (type === "delete") {
           const nextCachedPoints = removeLocalPoint(
@@ -168,10 +178,6 @@ export function usePriwaOfflineKaeferbaeume(
           setCachedPoints(nextCachedPoints);
           await saveCachedPriwaPoints(projectId, nextCachedPoints);
         }
-
-        await updateStoredQueue((currentQueue) =>
-          coalescePriwaQueuedMutation(currentQueue, mutation),
-        );
 
         if (isOnline) {
           void syncQueue();

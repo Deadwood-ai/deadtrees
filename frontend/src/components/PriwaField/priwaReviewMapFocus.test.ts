@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  getPriwaFieldFitPadding,
   getPriwaLeftmostVisibleRect,
   getPriwaReviewFitPadding,
   getPriwaReviewMapCenter,
@@ -54,8 +55,51 @@ describe("PRIWA review map focus", () => {
     const treeInspector = { left: 688, right: 1040, top: 96, bottom: 880 };
     const hidden = { left: 0, right: 0, top: 0, bottom: 0 };
 
+    expect(getPriwaLeftmostVisibleRect(detail, hidden, treeInspector)).toEqual(
+      treeInspector,
+    );
+  });
+});
+
+describe("PRIWA field fit padding", () => {
+  const map = { left: 0, right: 1024, top: 0, bottom: 768 };
+
+  it("fits above a still-open compact flight sheet", () => {
+    const portrait = { left: 0, right: 820, top: 0, bottom: 1180 };
     expect(
-      getPriwaLeftmostVisibleRect(detail, hidden, treeInspector),
-    ).toEqual(treeInspector);
+      getPriwaFieldFitPadding(portrait, null, {
+        left: 90,
+        right: 730,
+        top: 684,
+        bottom: 1180,
+      }),
+    ).toEqual([96, 48, 512, 48]);
+  });
+
+  it("keeps the footprint clear of the bottom bar without a side panel", () => {
+    expect(getPriwaFieldFitPadding(map, null)).toEqual([96, 48, 120, 48]);
+  });
+
+  it("shifts the footprint right of an open side flight panel and uses the full height", () => {
+    expect(
+      getPriwaFieldFitPadding(map, {
+        left: 16,
+        right: 344,
+        top: 90,
+        bottom: 748,
+      }),
+    ).toEqual([56, 48, 40, 360]);
+  });
+
+  it("keeps a usable strip on short landscape phones", () => {
+    const phone = { left: 0, right: 844, top: 0, bottom: 250 };
+    const [top, , bottom, left] = getPriwaFieldFitPadding(phone, {
+      left: 16,
+      right: 344,
+      top: 90,
+      bottom: 230,
+    });
+    expect(top + bottom).toBe(90);
+    expect(left).toBe(360);
   });
 });

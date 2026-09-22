@@ -35,7 +35,9 @@ const Forgotpassword = lazy(() => import("./pages/auth/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/auth/ResetPassword"));
 const About = lazy(() => import("./pages/About"));
 const Impressum = lazy(() => import("./pages/Impressum"));
-const Datenschutzerklaerung = lazy(() => import("./pages/Datenschutzerklaerung"));
+const Datenschutzerklaerung = lazy(
+  () => import("./pages/Datenschutzerklaerung"),
+);
 const TermsOfService = lazy(() => import("./pages/TermsOfService"));
 
 const { Content } = Layout;
@@ -118,6 +120,10 @@ function RouteScrollRestoration() {
 // Create a separate component for tracking that uses hooks
 function AppWithTracking() {
   const location = useLocation();
+
+  useEffect(() => {
+    window.dispatchEvent(new Event("deadtrees:route-change"));
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     // Initialize PostHog on app load

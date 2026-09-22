@@ -122,7 +122,7 @@ export default function PriwaOfflineAreaSelection({
           initialSnap="compact"
           compactRatio={0.28}
           expandedRatio={0.62}
-          hideFrom="lg"
+          hideFrom="never"
         >
           {content}
         </MobileBottomSheet>

@@ -28,9 +28,8 @@ vi.mock("./priwaOfflineStore", async (importOriginal) => {
   };
 });
 
-vi.mock("./usePriwaKaeferbaeume", () => ({
-  softDeletePriwaKaeferbaum: mocks.softDeletePoint,
-  upsertPriwaKaeferbaum: mocks.upsertPoint,
+vi.mock("./syncPriwaObservation", () => ({
+  syncPriwaObservation: mocks.upsertPoint,
 }));
 
 const point: IPriwaPoint = {
@@ -86,7 +85,7 @@ describe("usePriwaSyncQueueRunner", () => {
         storedQueue = queue;
       },
     );
-    const onQueueDrained = vi.fn().mockResolvedValue(undefined);
+    const onSyncFinished = vi.fn().mockResolvedValue(undefined);
     const { usePriwaSyncQueueRunner } =
       await import("./usePriwaSyncQueueRunner");
     const runner = usePriwaSyncQueueRunner({
@@ -96,14 +95,16 @@ describe("usePriwaSyncQueueRunner", () => {
       onQueueUpdated: vi.fn(),
       onPointSynced: vi.fn(),
       onPointDeleted: vi.fn(),
-      onQueueDrained,
+      onSyncFinished,
     });
 
     await runner.syncQueue();
 
-    expect(mocks.upsertPoint).toHaveBeenCalledWith("project-1", point);
+    expect(mocks.upsertPoint).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "project-1", point }),
+    );
     expect(storedQueue).toEqual([]);
-    expect(onQueueDrained).toHaveBeenCalledOnce();
+    expect(onSyncFinished).toHaveBeenCalledOnce();
   });
 
   it("does not send a mutation removed before the atomic queue claim", async () => {
@@ -129,7 +130,7 @@ describe("usePriwaSyncQueueRunner", () => {
         }
       },
     );
-    const onQueueDrained = vi.fn().mockResolvedValue(undefined);
+    const onSyncFinished = vi.fn().mockResolvedValue(undefined);
     const { usePriwaSyncQueueRunner } =
       await import("./usePriwaSyncQueueRunner");
     const runner = usePriwaSyncQueueRunner({
@@ -139,14 +140,14 @@ describe("usePriwaSyncQueueRunner", () => {
       onQueueUpdated: vi.fn(),
       onPointSynced: vi.fn(),
       onPointDeleted: vi.fn(),
-      onQueueDrained,
+      onSyncFinished,
     });
 
     await runner.syncQueue();
 
     expect(mocks.upsertPoint).not.toHaveBeenCalled();
     expect(storedQueue).toEqual([]);
-    expect(onQueueDrained).toHaveBeenCalledOnce();
+    expect(onSyncFinished).toHaveBeenCalledOnce();
   });
 
   it("does not overlap a delayed write with a newer write from another runner", async () => {
@@ -176,7 +177,8 @@ describe("usePriwaSyncQueueRunner", () => {
       confirmOldWriteStarted = resolve;
     });
     mocks.upsertPoint.mockImplementation(
-      async (_projectId: string, nextPoint: IPriwaPoint) => {
+      async (mutation: IPriwaQueuedMutation) => {
+        const nextPoint = mutation.point!;
         if (nextPoint.baumnr !== "old") return;
         confirmOldWriteStarted();
         await new Promise<void>((resolve) => {
@@ -194,7 +196,7 @@ describe("usePriwaSyncQueueRunner", () => {
         onQueueUpdated: vi.fn(),
         onPointSynced: vi.fn(),
         onPointDeleted: vi.fn(),
-        onQueueDrained: vi.fn().mockResolvedValue(undefined),
+        onSyncFinished: vi.fn().mockResolvedValue(undefined),
       });
     const firstRunner = useRunner();
     const secondRunner = useRunner();
@@ -217,10 +219,63 @@ describe("usePriwaSyncQueueRunner", () => {
     await Promise.all([firstSync, secondSync]);
 
     expect(writesBeforeOldRequestFinished).toBe(1);
-    expect(mocks.upsertPoint.mock.calls.map((call) => call[1].baumnr)).toEqual([
-      "old",
-      "newer",
-    ]);
+    expect(
+      mocks.upsertPoint.mock.calls.map((call) => call[0].point.baumnr),
+    ).toEqual(["old", "newer"]);
     expect(storedQueue).toEqual([]);
+  });
+  it("keeps a failed edit while syncing later independent observations", async () => {
+    const failed = {
+      ...interruptedMutation,
+      type: "update" as const,
+      status: "pending" as const,
+    };
+    const valid = {
+      ...interruptedMutation,
+      id: "p2",
+      pointId: "p2",
+      point: { ...point, id: "p2" },
+      status: "pending" as const,
+    };
+    let storedQueue: IPriwaQueuedMutation[] = [failed, valid];
+    mocks.loadQueue.mockImplementation(async () => storedQueue);
+    mocks.saveQueue.mockImplementation(
+      async (
+        _project: string,
+        _user: string,
+        queue: IPriwaQueuedMutation[],
+      ) => {
+        storedQueue = queue;
+      },
+    );
+    mocks.upsertPoint.mockImplementation(
+      async (mutation: IPriwaQueuedMutation) => {
+        if (mutation.pointId === failed.pointId)
+          throw new Error("Revision conflict");
+        return "2026-05-19T08:05:00.000Z";
+      },
+    );
+    const onSyncFinished = vi.fn().mockResolvedValue(undefined);
+    const { usePriwaSyncQueueRunner } =
+      await import("./usePriwaSyncQueueRunner");
+    const runner = usePriwaSyncQueueRunner({
+      projectId: "project-1",
+      userId: "user-1",
+      isOnline: true,
+      onQueueUpdated: vi.fn(),
+      onPointSynced: vi.fn(),
+      onPointDeleted: vi.fn(),
+      onSyncFinished,
+    });
+    await runner.syncQueue();
+    expect(mocks.upsertPoint).toHaveBeenCalledTimes(2);
+    expect(storedQueue).toEqual([
+      expect.objectContaining({
+        pointId: failed.pointId,
+        status: "failed",
+        lastError: "Revision conflict",
+      }),
+    ]);
+    expect(onSyncFinished).toHaveBeenCalledOnce();
   });
 });

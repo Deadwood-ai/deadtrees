@@ -39,6 +39,48 @@ Supabase.
 9. Verify the point syncs into `priwa_kaeferbaeume`.
 10. Repeat update and soft-delete for the point.
 
+## Tablet flights and installed offline app
+
+Use the isolated frontend build/preview for service-worker and installation
+checks; keep its API, Supabase and storage URLs on the same validated local
+stack. Test portrait and landscape, then repeat the important journeys in an
+installed Android PWA. Browser viewport emulation alone does not establish
+Android acceptance.
+
+1. Open the flight list, select a flight, fit its footprint and inspect individual
+   crowns. Open the flight panel, select a flight without moving the map, and
+   show another flight and verify it replaces the previously visible one. Hiding
+   a flight retains its selection; zoom keeps the panel open and frames the flight above the compact sheet or
+   beside the landscape panel. Check name/date search, distance sorting, and the
+   persistent scroll indicator with a long flight list. Check that the Warnkarte
+   legend, scale and flight bar do not overlap, and the recording-form header
+   clears the status bar in the installed iPad app.
+2. Prepare and download inside the selected-flight card; switching the selected
+   flight must not offer the previous flight's prepared download. Saved flights
+   remain in the separate offline library. The current package limits are 500 MiB
+   and 3 km² combined full footprints. This does not clip a small area out of a
+   larger source file. Basemap areas have their own separate cache status.
+3. Wait for the complete-file ready state, go offline, close/reopen the app and
+   verify the remembered flight is framed. Zoom and pan into native-resolution
+   regions that were never viewed online, including the edges of the flight.
+4. Save an observation offline, restart again, reconnect and verify exactly one
+   database row with the original values. For an existing point, change its
+   server revision before reconnecting: the local edit must remain queued as a
+   conflict, without overwriting the newer server state.
+   Independent observations must still sync past that conflict. Pre-upgrade
+   edits without a saved server revision retain the old overwrite behavior;
+   validate both an update and a deletion from the old queue shape. Also retry
+   a committed deletion, and edit a point again after a committed create/update
+   whose response was lost: neither case may strand the queued change.
+5. Cancel a replacement download after bytes arrive and simulate a failed
+   replacement. Previously completed files must remain usable; partial files
+   must never be offered as ready. Removing flight imagery must preserve queued
+   observations.
+
+Record browser storage-persistence support separately from successful downloads.
+Cold restart, storage pressure, GPS accuracy, thermal behavior and memory on a
+physical field tablet remain device acceptance checks.
+
 ## Expected Observations
 
 - Authenticated field user can access `/priwa-field`.

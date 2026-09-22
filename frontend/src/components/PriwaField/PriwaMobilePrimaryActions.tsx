@@ -29,7 +29,7 @@ export default function PriwaMobilePrimaryActions({
 
   return (
     <div
-      className="pointer-events-none absolute right-4 z-[55] flex flex-col gap-2.5 min-[992px]:hidden"
+      className="pointer-events-none absolute right-4 z-[55] flex flex-col gap-2.5"
       style={{
         bottom: "max(20px, calc(env(safe-area-inset-bottom, 0px) + 20px))",
       }}
