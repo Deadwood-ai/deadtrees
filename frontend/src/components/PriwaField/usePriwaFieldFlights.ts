@@ -4,9 +4,7 @@ import {
   buildPriwaFlightListItems,
   orderPriwaVisibleFlights,
   resolvePriwaFieldFlightRestore,
-  resolvePriwaFieldFlightVisibility,
   shouldDeferPriwaInitialPointsFit,
-  type PriwaFieldFlightIntent,
 } from "./priwaFieldFlights";
 import type { IPriwaOfflineMosaic } from "./priwaOfflineMosaics";
 import type { IPriwaMatchedMosaic } from "./usePriwaMosaicMatches";
@@ -22,6 +20,8 @@ interface UsePriwaFieldFlightsOptions {
   enabledMosaicIds: ReadonlySet<string>;
   selectedMosaicId: string | null;
   showOnlyMosaics: (mosaicIds: string[]) => void;
+  setSelectedMosaicId: (mosaicId: string) => void;
+  setMosaicVisibility: (mosaicId: string, visible: boolean) => void;
   offlineEntries: IPriwaOfflineMosaic[];
   isOnline: boolean;
   isLoading: boolean;
@@ -61,6 +61,8 @@ export function usePriwaFieldFlights({
   enabledMosaicIds,
   selectedMosaicId,
   showOnlyMosaics,
+  setSelectedMosaicId,
+  setMosaicVisibility,
   offlineEntries,
   isOnline,
   isLoading,
@@ -99,7 +101,8 @@ export function usePriwaFieldFlights({
       }),
     [items, visibleMosaicIds],
   );
-  const primaryFlight = visibleFlights[0] ?? null;
+  const selectedItem =
+    items.find((item) => item.mosaic.id === selectedMosaicId) ?? null;
 
   useEffect(() => {
     hasRestoredRef.current = false;
@@ -136,23 +139,15 @@ export function usePriwaFieldFlights({
 
   useEffect(() => {
     if (!enabled || !hasRestoredRef.current) return;
-    persistFlightId(projectId, primaryFlight?.id ?? null);
-  }, [enabled, primaryFlight?.id, projectId]);
-
-  const applyIntent = useCallback(
-    (mosaicId: string, intent: PriwaFieldFlightIntent) => {
-      showOnlyMosaics(
-        resolvePriwaFieldFlightVisibility(visibleMosaicIds, mosaicId, intent),
-      );
-    },
-    [showOnlyMosaics, visibleMosaicIds],
-  );
+    persistFlightId(projectId, selectedMosaicId);
+  }, [enabled, selectedMosaicId, projectId]);
 
   return {
     items,
     visibleMosaicIds,
     visibleFlights,
-    primaryFlight,
+    selectedItem,
+    selectFlight: setSelectedMosaicId,
     isAwaitingRestore:
       enabled &&
       shouldDeferPriwaInitialPointsFit({
@@ -161,16 +156,15 @@ export function usePriwaFieldFlights({
         isLoadingFlights: isLoading,
       }),
     showFlight: useCallback(
-      (mosaicId: string) => applyIntent(mosaicId, "show"),
-      [applyIntent],
-    ),
-    compareFlight: useCallback(
-      (mosaicId: string) => applyIntent(mosaicId, "compare"),
-      [applyIntent],
+      (mosaicId: string) => {
+        setSelectedMosaicId(mosaicId);
+        setMosaicVisibility(mosaicId, true);
+      },
+      [setSelectedMosaicId, setMosaicVisibility],
     ),
     hideFlight: useCallback(
-      (mosaicId: string) => applyIntent(mosaicId, "hide"),
-      [applyIntent],
+      (mosaicId: string) => setMosaicVisibility(mosaicId, false),
+      [setMosaicVisibility],
     ),
     hideAllFlights: useCallback(() => showOnlyMosaics([]), [showOnlyMosaics]),
   };

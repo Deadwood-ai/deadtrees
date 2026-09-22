@@ -4,13 +4,14 @@ import {
   DownloadOutlined,
   LoadingOutlined,
 } from "@ant-design/icons";
-import { Tag } from "antd";
+import { Badge, Button, Tag, Tooltip } from "antd";
 
 import { getPriwaOfflineStatusView } from "./priwaOfflineStatusView";
 import type { IPriwaSyncSummary } from "./priwaOfflineSync";
 import { usePriwaOfflineStatus } from "./usePriwaOfflineStatus";
 
 interface PriwaOfflineStatusProps {
+  presentation: "map-button" | "status";
   active: boolean;
   coverageRatio: number;
   hasAreas: boolean;
@@ -29,6 +30,7 @@ const getSyncLabel = (summary?: IPriwaSyncSummary) => {
 };
 
 export default function PriwaOfflineStatus({
+  presentation,
   active,
   coverageRatio,
   hasAreas,
@@ -67,6 +69,25 @@ export default function PriwaOfflineStatus({
   ) : (
     <DownloadOutlined />
   );
+
+  if (presentation === "map-button") {
+    return (
+      <Tooltip title={label} placement="right">
+        <Badge dot={color !== "default"} status={color} offset={[-3, 3]}>
+          <Button
+            className="pointer-events-auto shadow-md"
+            type={active ? "primary" : "default"}
+            shape="circle"
+            size="large"
+            icon={<DownloadOutlined />}
+            aria-label={`${label}: Offline-Karten ${active ? "schließen" : "öffnen"}`}
+            aria-pressed={active}
+            onClick={onToggle}
+          />
+        </Badge>
+      </Tooltip>
+    );
+  }
 
   return (
     <button

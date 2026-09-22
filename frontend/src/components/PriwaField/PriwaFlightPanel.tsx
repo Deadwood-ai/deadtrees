@@ -1,12 +1,17 @@
 import { CloseOutlined, DisconnectOutlined } from "@ant-design/icons";
-import { Button } from "antd";
-import type { ReactNode } from "react";
+import { Button, Input, Select } from "antd";
+import { useRef, useState, type ReactNode } from "react";
+import MapPanelScrollArea from "../MapControls/mobile/MapPanelScrollArea";
 
 import MobileBottomSheet from "../MapControls/mobile/MobileBottomSheet";
 import MobileMapSectionHeading from "../MapControls/mobile/MobileMapSectionHeading";
 import PriwaFlightDetails from "./PriwaFlightDetails";
 import PriwaFlightList from "./PriwaFlightList";
-import type { IPriwaFlightListItem } from "./priwaFieldFlights";
+import {
+  filterPriwaFlightItems,
+  type PriwaFlightSort,
+  type IPriwaFlightListItem,
+} from "./priwaFieldFlights";
 import type { PriwaFlightPanelPlacement } from "./priwaFieldLayout";
 
 interface PriwaFlightPanelProps {
@@ -18,7 +23,9 @@ interface PriwaFlightPanelProps {
   offlineSection?: ReactNode;
   onClose: () => void;
   onShow: (mosaicId: string) => void;
-  onCompare: (mosaicId: string) => void;
+  onSelect: (mosaicId: string) => void;
+  selectedItem: IPriwaFlightListItem | null;
+  mapCenter: number[] | null;
   onHide: (mosaicId: string) => void;
   onFit: (mosaicId: string) => void;
 }
@@ -28,7 +35,7 @@ const PANEL_TITLE = "Befliegungen";
 /**
  * Field-layout flight chooser: a bottom sheet in portrait, a side panel in
  * landscape. Lists every PRIWA orthomosaic of the project independent of the
- * review groups and lets the forester show one flight (plus one comparison).
+ * review groups, with independent selection, visibility and zoom actions.
  */
 export default function PriwaFlightPanel({
   open,
@@ -39,17 +46,24 @@ export default function PriwaFlightPanel({
   offlineSection,
   onClose,
   onShow,
-  onCompare,
+  onSelect,
+  selectedItem,
+  mapCenter,
   onHide,
   onFit,
 }: PriwaFlightPanelProps) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<PriwaFlightSort>("distance");
   if (!open) return null;
 
-  const primary = items.find((item) => item.isPrimary) ?? null;
-  const compare =
-    items.find((item) => item.isVisible && !item.isPrimary) ?? null;
+  const filteredItems = filterPriwaFlightItems(items, query, sort, mapCenter);
   const content = (
-    <div data-testid="priwa-flight-panel-content" className="space-y-4">
+    <div
+      ref={contentRef}
+      data-testid="priwa-flight-panel-content"
+      className="space-y-4"
+    >
       {!isOnline && (
         <div className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
           <DisconnectOutlined className="mt-0.5 shrink-0" />
@@ -59,32 +73,62 @@ export default function PriwaFlightPanel({
           </span>
         </div>
       )}
-      {primary && (
+      {selectedItem && (
         <PriwaFlightDetails
-          primary={primary}
-          compare={compare}
+          primary={selectedItem}
+          onShow={onShow}
           onFit={onFit}
           onHide={onHide}
         />
       )}
+      {offlineSection}
       <section>
         <MobileMapSectionHeading>
           Alle Befliegungen{items.length > 0 ? ` (${items.length})` : ""}
         </MobileMapSectionHeading>
         <p className="-mt-1 mb-2 text-xs text-slate-500">
-          Antippen zeigt eine Befliegung in voller Auflösung. Über das
-          Vergleichssymbol lässt sich eine zweite dazuschalten.
+          Name antippen für Details und Download. Sichtbarkeit und Zoom separat
+          steuern; die Karte bleibt bedienbar.
         </p>
+        <div className="mb-3 flex flex-wrap gap-2">
+          <Input
+            allowClear
+            aria-label="Befliegungen nach Name oder Datum suchen"
+            placeholder="Name oder Datum suchen"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            className="min-w-40 flex-1"
+          />
+          <Select
+            aria-label="Befliegungen sortieren"
+            value={sort}
+            onChange={setSort}
+            className="min-w-44"
+            options={[
+              { value: "distance", label: "Nähe zur Kartenmitte" },
+              { value: "date", label: "Neueste Aufnahme" },
+              { value: "name", label: "Name A–Z" },
+            ]}
+          />
+        </div>
         <PriwaFlightList
-          items={items}
-          hasPrimary={!!primary}
+          items={filteredItems}
+          selectedId={selectedItem?.mosaic.id ?? null}
+          mapCenter={mapCenter}
+          onSelect={(mosaicId) => {
+            onSelect(mosaicId);
+            contentRef.current
+              ?.closest("[data-map-panel-scroll-viewport]")
+              ?.scrollTo({
+                top: 0,
+              });
+          }}
+          onFit={onFit}
           isLoading={isLoading}
           onShow={onShow}
-          onCompare={onCompare}
           onHide={onHide}
         />
       </section>
-      {offlineSection}
     </div>
   );
 
@@ -99,6 +143,7 @@ export default function PriwaFlightPanel({
         compactRatio={0.42}
         expandedRatio={0.86}
         hideFrom="never"
+        showScrollIndicator
       >
         {content}
       </MobileBottomSheet>
@@ -123,9 +168,9 @@ export default function PriwaFlightPanel({
           onClick={onClose}
         />
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3">
+      <MapPanelScrollArea label="Befliegungen scrollen" className="px-3 py-3">
         {content}
-      </div>
+      </MapPanelScrollArea>
     </aside>
   );
 }

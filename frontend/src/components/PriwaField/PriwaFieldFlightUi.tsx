@@ -14,7 +14,7 @@ interface PriwaFieldFlightUiProps {
   isOnline: boolean;
   onTogglePanel: () => void;
   onClosePanel: () => void;
-  onShow: (mosaicId: string) => void;
+  mapCenter: number[] | null;
   onFit: (mosaicId: string) => void;
 }
 
@@ -31,10 +31,10 @@ export default function PriwaFieldFlightUi({
   isOnline,
   onTogglePanel,
   onClosePanel,
-  onShow,
+  mapCenter,
   onFit,
 }: PriwaFieldFlightUiProps) {
-  const primaryItem = flights.items.find((item) => item.isPrimary) ?? null;
+  const primaryItem = flights.selectedItem;
   const isSidePanelOpen = isPanelOpen && placement === "side";
 
   return (
@@ -47,15 +47,22 @@ export default function PriwaFieldFlightUi({
           }}
         >
           <PriwaFlightBar
-            primary={flights.primaryFlight}
-            visibleCount={flights.visibleFlights.length}
+            primary={primaryItem?.mosaic ?? null}
+            isVisible={!!primaryItem?.isVisible}
+            isAvailable={!!primaryItem?.isAvailable}
+            onToggleVisibility={() => {
+              if (primaryItem)
+                (primaryItem.isVisible
+                  ? flights.hideFlight
+                  : flights.showFlight)(primaryItem.mosaic.id);
+            }}
             flightCount={flights.items.length}
             isLoading={isLoading}
             isOpen={isPanelOpen}
             hasOfflineCopy={!!primaryItem?.offlineEntry?.available}
             onOpen={onTogglePanel}
             onFit={() => {
-              if (flights.primaryFlight) onFit(flights.primaryFlight.id);
+              if (primaryItem) onFit(primaryItem.mosaic.id);
             }}
           />
         </div>
@@ -64,19 +71,21 @@ export default function PriwaFieldFlightUi({
         open={isPanelOpen}
         placement={placement}
         items={flights.items}
+        selectedItem={primaryItem}
+        mapCenter={mapCenter}
+        onSelect={flights.selectFlight}
         isLoading={isLoading}
         isOnline={isOnline}
         offlineSection={
           <PriwaOfflineFlightSection
             offline={offline}
-            visibleFlights={flights.visibleFlights}
+            selectedFlights={primaryItem ? [primaryItem.mosaic] : []}
             isOnline={isOnline}
             onZoomToFlight={onFit}
           />
         }
         onClose={onClosePanel}
-        onShow={onShow}
-        onCompare={flights.compareFlight}
+        onShow={flights.showFlight}
         onHide={flights.hideFlight}
         onFit={onFit}
       />

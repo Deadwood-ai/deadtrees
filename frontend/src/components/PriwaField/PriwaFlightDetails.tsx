@@ -1,4 +1,8 @@
-import { AimOutlined, EyeInvisibleOutlined } from "@ant-design/icons";
+import {
+  AimOutlined,
+  EyeInvisibleOutlined,
+  EyeOutlined,
+} from "@ant-design/icons";
 import { Button } from "antd";
 
 import {
@@ -9,7 +13,7 @@ import { formatPriwaReviewDate } from "./priwaReviewPresentation";
 
 interface PriwaFlightDetailsProps {
   primary: IPriwaFlightListItem;
-  compare: IPriwaFlightListItem | null;
+  onShow: (mosaicId: string) => void;
   onFit: (mosaicId: string) => void;
   onHide: (mosaicId: string) => void;
 }
@@ -17,7 +21,7 @@ interface PriwaFlightDetailsProps {
 /** Details and actions for the orthomosaic currently shown on the field map. */
 export default function PriwaFlightDetails({
   primary,
-  compare,
+  onShow,
   onFit,
   onHide,
 }: PriwaFlightDetailsProps) {
@@ -30,9 +34,9 @@ export default function PriwaFlightDetails({
       className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3"
     >
       <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-800">
-        Angezeigte Befliegung
+        Ausgewählte Befliegung
       </div>
-      <h3 className="mt-1 truncate text-base font-semibold text-slate-950">
+      <h3 className="mt-1 break-words text-base font-semibold text-slate-950">
         {mosaic.label}
       </h3>
       <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs text-slate-600">
@@ -65,32 +69,22 @@ export default function PriwaFlightDetails({
           size="large"
           icon={<AimOutlined />}
           className="flex-1"
+          disabled={!mosaic.bbox}
           onClick={() => onFit(mosaic.id)}
         >
           Auf Befliegung zoomen
         </Button>
         <Button
           size="large"
-          icon={<EyeInvisibleOutlined />}
-          aria-label={`${mosaic.label} ausblenden`}
-          onClick={() => onHide(mosaic.id)}
+          icon={primary.isVisible ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+          aria-label={`${mosaic.label} ${primary.isVisible ? "ausblenden" : "einblenden"}`}
+          aria-pressed={primary.isVisible}
+          disabled={!primary.isVisible && !primary.isAvailable}
+          onClick={() =>
+            primary.isVisible ? onHide(mosaic.id) : onShow(mosaic.id)
+          }
         />
       </div>
-      {compare && (
-        <div className="mt-2 flex items-center justify-between gap-2 rounded-xl bg-white/80 px-3 py-2 text-xs text-slate-700">
-          <span className="min-w-0 truncate">
-            Vergleich: <strong>{compare.mosaic.label}</strong> ·{" "}
-            {formatPriwaReviewDate(compare.mosaic.captureDate)}
-          </span>
-          <Button
-            type="text"
-            size="small"
-            icon={<AimOutlined />}
-            aria-label={`Auf ${compare.mosaic.label} zoomen`}
-            onClick={() => onFit(compare.mosaic.id)}
-          />
-        </div>
-      )}
     </section>
   );
 }

@@ -8,10 +8,7 @@ import { Alert, Button, Progress } from "antd";
 import { useRef } from "react";
 
 import MobileMapSectionHeading from "../MapControls/mobile/MobileMapSectionHeading";
-import {
-  formatPriwaAreaKm2,
-  formatPriwaMebibytes,
-} from "./priwaFieldFlights";
+import { formatPriwaAreaKm2, formatPriwaMebibytes } from "./priwaFieldFlights";
 import {
   PRIWA_OFFLINE_MOSAIC_AREA_KM2,
   PRIWA_OFFLINE_MOSAIC_BYTES,
@@ -23,8 +20,8 @@ import type { PriwaOfflineMosaicsState } from "./usePriwaOfflineMosaics";
 
 interface PriwaOfflineFlightSectionProps {
   offline: PriwaOfflineMosaicsState;
-  /** Flights currently shown on the map, primary first. */
-  visibleFlights: IPriwaMosaic[];
+  /** The selected flight, independent of map visibility. */
+  selectedFlights: IPriwaMosaic[];
   isOnline: boolean;
   onZoomToFlight: (mosaicId: string) => void;
 }
@@ -38,7 +35,7 @@ const sumBy = <T,>(items: T[], pick: (item: T) => number) =>
  */
 export default function PriwaOfflineFlightSection({
   offline,
-  visibleFlights,
+  selectedFlights,
   isOnline,
   onZoomToFlight,
 }: PriwaOfflineFlightSectionProps) {
@@ -48,7 +45,9 @@ export default function PriwaOfflineFlightSection({
   const savedIds = new Set(
     entries.filter((entry) => entry.available).map((entry) => entry.mosaic.id),
   );
-  const selectable = visibleFlights.filter((flight) => !savedIds.has(flight.id));
+  const selectable = selectedFlights.filter(
+    (flight) => !savedIds.has(flight.id),
+  );
   const wouldExceedCount =
     entries.length + selectable.length > PRIWA_OFFLINE_MOSAIC_LIMIT;
   const planBytes = sumBy(plans, (plan) => plan.bytes);
@@ -74,9 +73,10 @@ export default function PriwaOfflineFlightSection({
       <p className="-mt-1 text-xs text-slate-500">
         Speichert die komplette Drohnen-Befliegung (gesamte Flugfläche, volle
         Auflösung) auf diesem Gerät. Höchstens {PRIWA_OFFLINE_MOSAIC_LIMIT}{" "}
-        Befliegungen, zusammen {formatPriwaMebibytes(PRIWA_OFFLINE_MOSAIC_BYTES)}{" "}
-        und {formatPriwaAreaKm2(PRIWA_OFFLINE_MOSAIC_AREA_KM2)}. Die
-        Basiskarte wird separat unter „Offline-Karten“ gespeichert.
+        Befliegungen, zusammen{" "}
+        {formatPriwaMebibytes(PRIWA_OFFLINE_MOSAIC_BYTES)} und{" "}
+        {formatPriwaAreaKm2(PRIWA_OFFLINE_MOSAIC_AREA_KM2)}. Die Basiskarte wird
+        separat unter „Offline-Karten“ gespeichert.
       </p>
 
       {!supported && (
@@ -162,7 +162,9 @@ export default function PriwaOfflineFlightSection({
           <Progress
             percent={
               progress.totalBytes > 0
-                ? Math.round((progress.downloadedBytes / progress.totalBytes) * 100)
+                ? Math.round(
+                    (progress.downloadedBytes / progress.totalBytes) * 100,
+                  )
                 : 0
             }
             size="small"
@@ -227,7 +229,12 @@ export default function PriwaOfflineFlightSection({
             >
               Jetzt herunterladen
             </Button>
-            <Button block type="text" disabled={busy} onClick={offline.clearPlan}>
+            <Button
+              block
+              type="text"
+              disabled={busy}
+              onClick={offline.clearPlan}
+            >
               Verwerfen
             </Button>
           </div>
@@ -236,13 +243,13 @@ export default function PriwaOfflineFlightSection({
 
       {plans.length === 0 && !isDownloading && supported && (
         <>
-          {visibleFlights.length === 0 ? (
+          {selectedFlights.length === 0 ? (
             <p className="text-xs text-slate-500">
-              Zuerst eine Befliegung anzeigen, um sie offline zu speichern.
+              Zuerst eine Befliegung auswählen, um sie offline zu speichern.
             </p>
           ) : selectable.length === 0 ? (
             <p className="text-xs text-emerald-700">
-              Die angezeigte Auswahl ist bereits offline gespeichert.
+              Die ausgewählte Befliegung ist bereits offline gespeichert.
             </p>
           ) : wouldExceedCount ? (
             <p className="text-xs text-amber-700">
@@ -259,17 +266,17 @@ export default function PriwaOfflineFlightSection({
                 disabled={!isOnline}
                 onClick={prepare}
               >
-                Für offline vorbereiten
+                Befliegung offline laden
               </Button>
               <p className="!mt-1 text-xs text-slate-500">
                 {selectable.length === 1
-                  ? `Angezeigt: ${selectable[0].label}`
-                  : `Angezeigt: ${selectable.length} Befliegungen`}{" "}
+                  ? `Ausgewählt: ${selectable[0].label}`
+                  : `Ausgewählt: ${selectable.length} Befliegungen`}{" "}
                 – prüft zuerst Dateigröße und Flugfläche.
               </p>
             </>
           )}
-          {!isOnline && visibleFlights.length > 0 && selectable.length > 0 && (
+          {!isOnline && selectedFlights.length > 0 && selectable.length > 0 && (
             <p className="text-xs text-slate-500">
               Zum Herunterladen wird eine Netzverbindung benötigt.
             </p>

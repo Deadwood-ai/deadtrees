@@ -1,9 +1,9 @@
+import { getDistance } from "ol/sphere";
+import parseBBox from "../../utils/parseBBox";
+import { formatPriwaReviewDate } from "./priwaReviewPresentation";
 import type { IPriwaOfflineMosaic } from "./priwaOfflineMosaics";
 import type { IPriwaMatchedMosaic } from "./usePriwaMosaicMatches";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
-
-/** Tablets render at most this many full-resolution orthomosaics at once. */
-export const PRIWA_FIELD_MAX_VISIBLE_FLIGHTS = 2;
 
 export interface IPriwaFlightListItem {
   mosaic: IPriwaMosaic;
@@ -14,8 +14,6 @@ export interface IPriwaFlightListItem {
   /** Rendering is possible right now: online, or a complete offline copy exists. */
   isAvailable: boolean;
 }
-
-export type PriwaFieldFlightIntent = "show" | "compare" | "hide";
 
 const dateRank = (value: string | null | undefined) => {
   if (!value) return Number.NEGATIVE_INFINITY;
@@ -67,21 +65,46 @@ export const buildPriwaFlightListItems = ({
     });
 };
 
-/**
- * Resolves which flights stay on the map. The result is ordered with the primary
- * flight first and never exceeds the tablet-safe maximum.
- */
-export const resolvePriwaFieldFlightVisibility = (
-  visibleMosaicIds: string[],
-  mosaicId: string,
-  intent: PriwaFieldFlightIntent,
-): string[] => {
-  const others = visibleMosaicIds.filter((id) => id !== mosaicId);
-  if (intent === "hide") return others;
-  if (intent === "show") return [mosaicId];
-  if (visibleMosaicIds.includes(mosaicId)) return others;
-  return [...others.slice(0, PRIWA_FIELD_MAX_VISIBLE_FLIGHTS - 1), mosaicId];
+export type PriwaFlightSort = "distance" | "date" | "name";
+
+export const getPriwaFlightDistance = (
+  mosaic: IPriwaMosaic,
+  center: number[] | null,
+) => {
+  const bounds = mosaic.bbox ? parseBBox(mosaic.bbox) : null;
+  if (!bounds || !center) return Number.POSITIVE_INFINITY;
+  // Distance to the closest point of the footprint: flights under the map center come first.
+  return getDistance(center, [
+    Math.max(bounds[0], Math.min(bounds[2], center[0])),
+    Math.max(bounds[1], Math.min(bounds[3], center[1])),
+  ]);
 };
+
+export const filterPriwaFlightItems = (
+  items: IPriwaFlightListItem[],
+  query: string,
+  sort: PriwaFlightSort,
+  center: number[] | null,
+) =>
+  items
+    .filter(({ mosaic }) =>
+      `${mosaic.label} ${mosaic.captureDate ?? ""} ${formatPriwaReviewDate(mosaic.captureDate)}`
+        .toLocaleLowerCase("de")
+        .includes(query.trim().toLocaleLowerCase("de")),
+    )
+    .sort((a, b) => {
+      if (sort === "name")
+        return a.mosaic.label.localeCompare(b.mosaic.label, "de", {
+          numeric: true,
+        });
+      if (sort === "distance") {
+        const difference =
+          getPriwaFlightDistance(a.mosaic, center) -
+          getPriwaFlightDistance(b.mosaic, center);
+        if (difference && !Number.isNaN(difference)) return difference;
+      }
+      return compareFlightsByDate(a.mosaic, b.mosaic);
+    });
 
 /**
  * Which remembered flight to restore once the project's flights (online or

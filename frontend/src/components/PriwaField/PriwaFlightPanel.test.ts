@@ -73,7 +73,9 @@ const panelProps = {
   isOnline: true,
   onClose: noop,
   onShow: noop,
-  onCompare: noop,
+  onSelect: noop,
+  selectedItem: null,
+  mapCenter: null,
   onHide: noop,
   onFit: noop,
 };
@@ -83,7 +85,9 @@ describe("PriwaFlightBar", () => {
     const html = renderToStaticMarkup(
       createElement(PriwaFlightBar, {
         primary: mosaic("a", "Hangflug Nord"),
-        visibleCount: 2,
+        isVisible: true,
+        isAvailable: true,
+        onToggleVisibility: noop,
         flightCount: 4,
         isLoading: false,
         isOpen: false,
@@ -94,7 +98,9 @@ describe("PriwaFlightBar", () => {
     );
 
     expect(html).toContain("Hangflug Nord");
-    expect(html).toContain("Aufnahme 12.08.2026 · +1 Vergleich · offline gespeichert");
+    expect(html).toContain(
+      "Aufnahme 12.08.2026 · Sichtbar · offline gespeichert",
+    );
     expect(html).toContain('aria-label="Auf Befliegung zoomen"');
   });
 
@@ -102,7 +108,9 @@ describe("PriwaFlightBar", () => {
     const html = renderToStaticMarkup(
       createElement(PriwaFlightBar, {
         primary: null,
-        visibleCount: 0,
+        isVisible: false,
+        isAvailable: false,
+        onToggleVisibility: noop,
         flightCount: 3,
         isLoading: false,
         isOpen: false,
@@ -128,22 +136,25 @@ describe("PriwaFlightPanel", () => {
     item(other, { isAvailable: false }),
   ];
 
-  it("renders a bottom sheet in portrait with details, compare and list", () => {
+  it("renders a bottom sheet with selection, independent visibility and zoom", () => {
     const html = renderToStaticMarkup(
       createElement(PriwaFlightPanel, {
         ...panelProps,
         open: true,
         placement: "sheet",
         items,
+        selectedItem: items[0],
       }),
     );
 
-    expect(html).toContain("data-mobile-bottom-sheet-snap=\"expanded\"");
-    expect(html).toContain("Angezeigte Befliegung");
+    expect(html).toContain('data-mobile-bottom-sheet-snap="expanded"');
+    expect(html).toContain("Ausgewählte Befliegung");
     expect(html).toContain("5 im Umfeld");
-    expect(html).toContain("Vergleich: <strong>Hangflug Süd</strong>");
+    expect(html).not.toContain("Vergleich");
+    expect(html).toContain('aria-label="Auf Hangflug Süd zoomen"');
     expect(html).toContain("Alle Befliegungen (3)");
-    expect(html).toContain('aria-label="Talflug anzeigen" disabled=""');
+    expect(html).toContain('aria-label="Talflug auswählen"');
+    expect(html).toContain('aria-label="Talflug einblenden"');
     expect(html).toContain("nur online");
     expect(html).not.toContain("min-[992px]:hidden");
   });
@@ -156,6 +167,7 @@ describe("PriwaFlightPanel", () => {
         placement: "side",
         isOnline: false,
         items,
+        selectedItem: items[0],
       }),
     );
 
@@ -172,6 +184,7 @@ describe("PriwaFlightPanel", () => {
           open: false,
           placement: "sheet",
           items,
+          selectedItem: items[0],
         }),
       ),
     ).toBe("");
@@ -185,7 +198,7 @@ describe("PriwaOfflineFlightSection", () => {
     const html = renderToStaticMarkup(
       createElement(PriwaOfflineFlightSection, {
         offline: offlineState(),
-        visibleFlights: [flight],
+        selectedFlights: [flight],
         isOnline: true,
         onZoomToFlight: noop,
       }),
@@ -194,8 +207,8 @@ describe("PriwaOfflineFlightSection", () => {
     expect(html).toContain("gesamte Flugfläche, volle");
     expect(html).toContain("500 MiB");
     expect(html).toContain("3,0 km²");
-    expect(html).toContain("Für offline vorbereiten");
-    expect(html).toContain("Angezeigt: Hangflug Nord");
+    expect(html).toContain("Befliegung offline laden");
+    expect(html).toContain("Ausgewählt: Hangflug Nord");
     expect(html).toContain("Offline-Karten");
   });
 
@@ -204,10 +217,16 @@ describe("PriwaOfflineFlightSection", () => {
       createElement(PriwaOfflineFlightSection, {
         offline: offlineState({
           plans: [
-            { mosaic: flight, bytes: 312 * 1024 * 1024, areaKm2: 1.8, etag: null, lastModified: null },
+            {
+              mosaic: flight,
+              bytes: 312 * 1024 * 1024,
+              areaKm2: 1.8,
+              etag: null,
+              lastModified: null,
+            },
           ],
         }),
-        visibleFlights: [flight],
+        selectedFlights: [flight],
         isOnline: true,
         onZoomToFlight: noop,
       }),
@@ -230,7 +249,7 @@ describe("PriwaOfflineFlightSection", () => {
             totalBytes: 400 * 1024 * 1024,
           },
         }),
-        visibleFlights: [flight],
+        selectedFlights: [flight],
         isOnline: true,
         onZoomToFlight: noop,
       }),
@@ -245,15 +264,19 @@ describe("PriwaOfflineFlightSection", () => {
     const html = renderToStaticMarkup(
       createElement(PriwaOfflineFlightSection, {
         offline: offlineState({ entries: [entry(flight)], persistent: false }),
-        visibleFlights: [flight],
+        selectedFlights: [flight],
         isOnline: false,
         onZoomToFlight: noop,
       }),
     );
 
     expect(html).toContain("Gespeichert 10.09.2026 · 312 MiB · 1,8 km²");
-    expect(html).toContain('aria-label="Zur gespeicherten Befliegung Hangflug Nord zoomen"');
-    expect(html).toContain('aria-label="Offline-Befliegung Hangflug Nord entfernen"');
+    expect(html).toContain(
+      'aria-label="Zur gespeicherten Befliegung Hangflug Nord zoomen"',
+    );
+    expect(html).toContain(
+      'aria-label="Offline-Befliegung Hangflug Nord entfernen"',
+    );
     expect(html).toContain("1 von 2 gespeichert · 312 MiB von 500 MiB");
     expect(html).toContain("bei Speichermangel");
     expect(html).toContain("bereits offline gespeichert");
@@ -265,10 +288,16 @@ describe("PriwaOfflineFlightSection", () => {
         offline: offlineState({
           error: "Offline-Download fehlgeschlagen.",
           plans: [
-            { mosaic: flight, bytes: 1024 * 1024, areaKm2: 0.2, etag: null, lastModified: null },
+            {
+              mosaic: flight,
+              bytes: 1024 * 1024,
+              areaKm2: 0.2,
+              etag: null,
+              lastModified: null,
+            },
           ],
         }),
-        visibleFlights: [flight],
+        selectedFlights: [flight],
         isOnline: true,
         onZoomToFlight: noop,
       }),

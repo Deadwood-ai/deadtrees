@@ -6,7 +6,7 @@ import {
   formatPriwaMebibytes,
   orderPriwaVisibleFlights,
   resolvePriwaFieldFlightRestore,
-  resolvePriwaFieldFlightVisibility,
+  filterPriwaFlightItems,
   shouldDeferPriwaInitialPointsFit,
 } from "./priwaFieldFlights";
 import { resolvePriwaFieldLayout } from "./priwaFieldLayout";
@@ -111,33 +111,44 @@ describe("buildPriwaFlightListItems", () => {
   });
 });
 
-describe("resolvePriwaFieldFlightVisibility", () => {
-  it("shows exactly one flight by default", () => {
-    expect(resolvePriwaFieldFlightVisibility(["a", "b"], "c", "show")).toEqual([
-      "c",
-    ]);
+describe("flight list search and sorting", () => {
+  const items = buildPriwaFlightListItems({
+    mosaics: [
+      mosaic("near", "2026-06-01"),
+      mosaic("far", "2026-08-01", { bbox: "BOX(9 49,9.1 49.1)" }),
+      mosaic("unknown", null, { bbox: null }),
+    ],
+    matchedMosaics: [],
+    offlineEntries: [],
+    visibleMosaicIds: [],
+    isOnline: true,
   });
-
-  it("adds a comparison flight behind the primary one and caps at two", () => {
-    expect(resolvePriwaFieldFlightVisibility(["a"], "b", "compare")).toEqual([
-      "a",
-      "b",
-    ]);
+  it("sorts nearby footprints before newer distant flights and unknown bounds", () => {
     expect(
-      resolvePriwaFieldFlightVisibility(["a", "b"], "c", "compare"),
-    ).toEqual(["a", "c"]);
-    expect(resolvePriwaFieldFlightVisibility([], "c", "compare")).toEqual([
-      "c",
-    ]);
+      filterPriwaFlightItems(items, "", "distance", [8.15, 48.45]).map(
+        (item) => item.mosaic.id,
+      ),
+    ).toEqual(["near", "far", "unknown"]);
   });
-
-  it("toggles a compared flight off and hides flights explicitly", () => {
+  it("supports name and date search with explicit date ordering", () => {
     expect(
-      resolvePriwaFieldFlightVisibility(["a", "b"], "b", "compare"),
-    ).toEqual(["a"]);
-    expect(resolvePriwaFieldFlightVisibility(["a", "b"], "a", "hide")).toEqual([
-      "b",
-    ]);
+      filterPriwaFlightItems(items, " NEAR ", "date", null).map(
+        (item) => item.mosaic.id,
+      ),
+    ).toEqual(["near"]);
+    expect(
+      filterPriwaFlightItems(items, "2026-08", "date", null).map(
+        (item) => item.mosaic.id,
+      ),
+    ).toEqual(["far"]);
+    expect(
+      filterPriwaFlightItems(items, "01.08.2026", "date", null).map(
+        (item) => item.mosaic.id,
+      ),
+    ).toEqual(["far"]);
+    expect(filterPriwaFlightItems(items, "", "date", null)[0].mosaic.id).toBe(
+      "far",
+    );
   });
 });
 

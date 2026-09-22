@@ -103,17 +103,16 @@
 
 /* PRIWA field layout (phones, tablets, touch): the map keeps the corners free
    for the flight bar (bottom left) and the primary actions (bottom right). */
-.priwa-field-map[data-priwa-layout="field"] .dt-map-zoom-control {
-  display: none !important;
+.priwa-field-map {
+  --priwa-map-controls-top: calc(env(safe-area-inset-top, 0px) + 5rem);
 }
 
-@media (min-width: 768px) {
-  .priwa-field-map[data-priwa-layout="field"] .dt-map-zoom-control {
-    display: flex !important;
-    bottom: 156px !important;
-    right: 16px !important;
-    left: auto !important;
-  }
+.priwa-field-map[data-priwa-layout="field"] .dt-map-zoom-control {
+  display: flex !important;
+  top: var(--priwa-map-controls-top) !important;
+  bottom: auto !important;
+  right: 16px !important;
+  left: auto !important;
 }
 
 .priwa-field-map[data-priwa-layout="field"] .dt-map-scale-control {
@@ -476,7 +475,11 @@
 .priwa-map-control-stack,
 .priwa-map-status-stack,
 .priwa-flight-side-panel {
-  top: calc(env(safe-area-inset-top, 0px) + 5.25rem);
+  top: var(--priwa-map-controls-top);
+}
+
+.priwa-field-map[data-priwa-layout="field"] .priwa-map-status-stack {
+  right: 4.5rem;
 }
 
 .priwa-warnkarte-tooltip {
@@ -493,10 +496,9 @@
   white-space: nowrap;
 }
 
-@media (min-width: 768px) {
-  .priwa-map-control-stack,
-  .priwa-map-status-stack {
-    top: 6rem;
+@media (min-width: 1024px) {
+  .priwa-field-map {
+    --priwa-map-controls-top: 6rem;
   }
 }
 

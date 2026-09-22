@@ -1,5 +1,7 @@
 import {
   AimOutlined,
+  EyeOutlined,
+  EyeInvisibleOutlined,
   CloudDownloadOutlined,
   LoadingOutlined,
   PictureOutlined,
@@ -12,7 +14,9 @@ import type { IPriwaMosaic } from "./usePriwaMosaics";
 
 interface PriwaFlightBarProps {
   primary: IPriwaMosaic | null;
-  visibleCount: number;
+  isVisible: boolean;
+  isAvailable: boolean;
+  onToggleVisibility: () => void;
   flightCount: number;
   isLoading: boolean;
   isOpen: boolean;
@@ -27,7 +31,9 @@ interface PriwaFlightBarProps {
  */
 export default function PriwaFlightBar({
   primary,
-  visibleCount,
+  isVisible,
+  isAvailable,
+  onToggleVisibility,
   flightCount,
   isLoading,
   isOpen,
@@ -35,11 +41,10 @@ export default function PriwaFlightBar({
   onOpen,
   onFit,
 }: PriwaFlightBarProps) {
-  const compareCount = Math.max(0, visibleCount - 1);
   const subline = primary
     ? [
         `Aufnahme ${formatPriwaReviewDate(primary.captureDate)}`,
-        compareCount > 0 ? `+${compareCount} Vergleich` : null,
+        isVisible ? "Sichtbar" : "Ausgeblendet",
         hasOfflineCopy ? "offline gespeichert" : null,
       ]
         .filter(Boolean)
@@ -98,6 +103,20 @@ export default function PriwaFlightBar({
             onClick={onFit}
           >
             <AimOutlined />
+          </button>
+        </Tooltip>
+      )}
+      {primary && (
+        <Tooltip title={isVisible ? "Ausblenden" : "Einblenden"}>
+          <button
+            type="button"
+            className="flex w-12 shrink-0 items-center justify-center border-0 border-l border-slate-200 bg-transparent text-base text-slate-700 disabled:opacity-40"
+            aria-label={`Ausgewählte Befliegung ${isVisible ? "ausblenden" : "einblenden"}`}
+            aria-pressed={isVisible}
+            disabled={!isVisible && !isAvailable}
+            onClick={onToggleVisibility}
+          >
+            {isVisible ? <EyeInvisibleOutlined /> : <EyeOutlined />}
           </button>
         </Tooltip>
       )}

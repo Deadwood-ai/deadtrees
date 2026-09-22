@@ -339,6 +339,7 @@ export default function PriwaFieldMap({
     enabledMosaics,
     enabledMosaicIds,
     selectedMosaicId,
+    setSelectedMosaicId,
     selectMatchedMosaicForPoint,
     showOnlyMosaics,
     setFlightType,
@@ -589,6 +590,8 @@ export default function PriwaFieldMap({
     enabledMosaicIds,
     selectedMosaicId,
     showOnlyMosaics,
+    setSelectedMosaicId,
+    setMosaicVisibility,
     offlineEntries: offlineMosaics.entries,
     isOnline,
     isLoading: (isOnline && isCogLoading) || offlineMosaics.isLoading,
@@ -623,14 +626,6 @@ export default function PriwaFieldMap({
       if (mosaic) zoomToMosaicFootprint(mosaic);
     },
     [mosaics, zoomToMosaicFootprint],
-  );
-  const showFlightFromPanel = useCallback(
-    (mosaicId: string) => {
-      showFlight(mosaicId);
-      if (flightPanelPlacement === "sheet") setActiveMapPanel(null);
-      fitToFlight(mosaicId);
-    },
-    [fitToFlight, flightPanelPlacement, showFlight],
   );
   const toggleFlightPanel = useCallback(() => {
     setActiveMapPanel((current) => (current === "flights" ? null : "flights"));
@@ -939,6 +934,20 @@ export default function PriwaFieldMap({
     setEditingPoint(null);
   }, []);
 
+  const offlineStatusControl = (
+    <PriwaOfflineStatus
+      presentation={isFieldLayout ? "map-button" : "status"}
+      active={isOfflineMapModeActive}
+      coverageRatio={offlineViewportCoverageRatio}
+      hasAreas={offlineBasemapAreas.length > 0}
+      isCacheAuditComplete={isOfflineBasemapCacheAuditComplete}
+      isSupported={isOfflineBasemapSupported}
+      needsRefresh={offlineBasemapNeedsRefresh}
+      syncSummary={syncSummary}
+      onToggle={toggleOfflineMapPanel}
+    />
+  );
+
   return (
     <div
       data-testid="priwa-field-map"
@@ -968,6 +977,7 @@ export default function PriwaFieldMap({
             onEditPoint={openPointForEditing}
             onZoomToPoint={focusPointOnMap}
           />
+          {offlineStatusControl}
         </div>
       )}
 
@@ -1039,7 +1049,14 @@ export default function PriwaFieldMap({
           isOnline={isOnline}
           onTogglePanel={toggleFlightPanel}
           onClosePanel={() => setActiveMapPanel(null)}
-          onShow={showFlightFromPanel}
+          mapCenter={
+            viewportExtent3857
+              ? toLonLat([
+                  (viewportExtent3857[0] + viewportExtent3857[2]) / 2,
+                  (viewportExtent3857[1] + viewportExtent3857[3]) / 2,
+                ])
+              : null
+          }
           onFit={fitToFlight}
         />
       )}
@@ -1169,16 +1186,7 @@ export default function PriwaFieldMap({
               {locationHintLabel}
             </div>
           )}
-          <PriwaOfflineStatus
-            active={isOfflineMapModeActive}
-            coverageRatio={offlineViewportCoverageRatio}
-            hasAreas={offlineBasemapAreas.length > 0}
-            isCacheAuditComplete={isOfflineBasemapCacheAuditComplete}
-            isSupported={isOfflineBasemapSupported}
-            needsRefresh={offlineBasemapNeedsRefresh}
-            syncSummary={syncSummary}
-            onToggle={toggleOfflineMapPanel}
-          />
+          {!isFieldLayout && offlineStatusControl}
         </div>
       )}
 

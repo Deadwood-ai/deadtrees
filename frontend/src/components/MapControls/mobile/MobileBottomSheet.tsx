@@ -3,6 +3,8 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { Button } from "antd";
 import { CloseOutlined } from "@ant-design/icons";
 
+import MapPanelScrollArea from "./MapPanelScrollArea";
+
 export type MobileBottomSheetSnap = "compact" | "expanded";
 
 interface MobileBottomSheetProps {
@@ -15,6 +17,7 @@ interface MobileBottomSheetProps {
   expandedRatio?: number;
   initialSnap?: MobileBottomSheetSnap;
   /** Tailwind breakpoint above which the sheet is hidden; "never" keeps it on wide field layouts. */
+  showScrollIndicator?: boolean;
   hideFrom?: "md" | "lg" | "never";
 }
 
@@ -42,6 +45,7 @@ const MobileBottomSheet = ({
   expandedRatio = 0.86,
   initialSnap = "expanded",
   hideFrom = "md",
+  showScrollIndicator = false,
 }: MobileBottomSheetProps) => {
   const [viewportHeight, setViewportHeight] = useState(getViewportHeight);
   const [snap, setSnap] = useState<MobileBottomSheetSnap>(initialSnap);
@@ -191,9 +195,18 @@ const MobileBottomSheet = ({
           />
         </div>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3">
-        {children}
-      </div>
+      {showScrollIndicator ? (
+        <MapPanelScrollArea
+          label={`${title} scrollen`}
+          className="px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3"
+        >
+          {children}
+        </MapPanelScrollArea>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3">
+          {children}
+        </div>
+      )}
     </section>
   );
 };

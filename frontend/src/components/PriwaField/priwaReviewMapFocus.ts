@@ -37,8 +37,11 @@ export const getPriwaReviewTargetPixel = (
   queueRect: IPriwaReviewRect | null,
   treePanelRect: IPriwaReviewRect | null,
 ): IPriwaReviewTargetPixel => {
-  const { left: visibleLeft, right: visibleRight } =
-    getVisibleHorizontalBounds(mapRect, queueRect, treePanelRect);
+  const { left: visibleLeft, right: visibleRight } = getVisibleHorizontalBounds(
+    mapRect,
+    queueRect,
+    treePanelRect,
+  );
   const hasVisibleGap = visibleRight > visibleLeft;
   const targetX = hasVisibleGap
     ? (visibleLeft + visibleRight) / 2
@@ -55,11 +58,7 @@ export const getPriwaReviewFitPadding = (
   queueRect: IPriwaReviewRect | null,
   detailRect: IPriwaReviewRect | null,
 ): [number, number, number, number] => {
-  const visible = getVisibleHorizontalBounds(
-    mapRect,
-    queueRect,
-    detailRect,
-  );
+  const visible = getVisibleHorizontalBounds(mapRect, queueRect, detailRect);
   return [
     MAP_TOP_PADDING_PX,
     mapRect.right - visible.right,
@@ -86,6 +85,7 @@ export const getPriwaLeftmostVisibleRect = (
 export const getPriwaFieldFitPadding = (
   mapRect: IPriwaReviewRect,
   flightPanelRect: IPriwaReviewRect | null,
+  flightSheetRect: IPriwaReviewRect | null = null,
 ): [number, number, number, number] => {
   const hasSidePanel =
     !!flightPanelRect && flightPanelRect.right > flightPanelRect.left;
@@ -102,6 +102,12 @@ export const getPriwaFieldFitPadding = (
     const spare = Math.max(0, mapHeight - FIELD_MIN_VISIBLE_HEIGHT_PX);
     top = Math.round(spare * 0.45);
     bottom = spare - top;
+  }
+  if (flightSheetRect) {
+    bottom = Math.min(
+      mapHeight - top - 24,
+      Math.max(bottom, mapRect.bottom - flightSheetRect.top + PANEL_GAP_PX),
+    );
   }
   return [
     top,
@@ -122,6 +128,11 @@ export const getPriwaMapFitPadding = (
     return getPriwaFieldFitPadding(
       mapElement.getBoundingClientRect(),
       flightPanelRect ?? null,
+      document
+        .querySelector<HTMLElement>(
+          '.map-mobile-bottom-sheet[aria-label="Befliegungen"]',
+        )
+        ?.getBoundingClientRect() ?? null,
     );
   }
 
@@ -137,10 +148,7 @@ export const getPriwaMapFitPadding = (
   return getPriwaReviewFitPadding(
     mapElement.getBoundingClientRect(),
     queueRect ?? null,
-    getPriwaLeftmostVisibleRect(
-      detailRect ?? null,
-      treePanelRect ?? null,
-    ),
+    getPriwaLeftmostVisibleRect(detailRect ?? null, treePanelRect ?? null),
   );
 };
 

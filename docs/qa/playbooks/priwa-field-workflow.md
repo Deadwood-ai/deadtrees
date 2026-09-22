@@ -48,7 +48,11 @@ installed Android PWA. Browser viewport emulation alone does not establish
 Android acceptance.
 
 1. Open the flight list, select a flight, fit its footprint and inspect individual
-   crowns. Compare a second flight and verify no more than two are visible.
+   crowns. Open the flight panel, select a flight without moving the map, and
+   independently show/hide several flights. Hiding a flight retains its selection;
+   zoom keeps the panel open and frames the flight above the compact sheet or
+   beside the landscape panel. Check name/date search, distance sorting, and the
+   persistent scroll indicator with a long flight list.
 2. Download one or two complete flights. The current package limits are 500 MiB
    and 3 km² combined full footprints. This does not clip a small area out of a
    larger source file. Basemap areas have their own separate cache status.
