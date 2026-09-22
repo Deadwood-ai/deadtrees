@@ -155,6 +155,16 @@ export function usePriwaOfflineKaeferbaeume(
           pointId,
         });
         const currentCachedPoints = await loadCachedPriwaPoints(projectId);
+        mutation.baseUpdatedAt =
+          point?.serverUpdatedAt ??
+          currentCachedPoints.find((candidate) => candidate.id === pointId)
+            ?.serverUpdatedAt;
+
+        // The queue is authoritative: persist it before the optimistic cache so
+        // a crash or quota failure cannot leave an edit visible but unsyncable.
+        await updateStoredQueue((currentQueue) =>
+          coalescePriwaQueuedMutation(currentQueue, mutation),
+        );
 
         if (type === "delete") {
           const nextCachedPoints = removeLocalPoint(
@@ -168,10 +178,6 @@ export function usePriwaOfflineKaeferbaeume(
           setCachedPoints(nextCachedPoints);
           await saveCachedPriwaPoints(projectId, nextCachedPoints);
         }
-
-        await updateStoredQueue((currentQueue) =>
-          coalescePriwaQueuedMutation(currentQueue, mutation),
-        );
 
         if (isOnline) {
           void syncQueue();

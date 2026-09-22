@@ -63,7 +63,7 @@ export default function PriwaMapLayersSheet({
       initialSnap="compact"
       compactRatio={0.38}
       expandedRatio={0.7}
-      hideFrom="lg"
+      hideFrom="never"
     >
       <div className="space-y-3">
         <section>

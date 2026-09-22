@@ -50,11 +50,16 @@ import PriwaWarnkarteMapUi from "./PriwaWarnkarteMapUi";
 import PriwaReviewWorkbench, {
   type PriwaReviewDetailMode,
 } from "./PriwaReviewWorkbench";
+import PriwaFieldFlightUi from "./PriwaFieldFlightUi";
 import {
   getPriwaMapFitPadding,
   getPriwaReviewMapCenter,
   getPriwaReviewTargetPixel,
 } from "./priwaReviewMapFocus";
+import { usePriwaFieldFlights } from "./usePriwaFieldFlights";
+import { usePriwaFieldLayout } from "./usePriwaFieldLayout";
+import { usePriwaOfflineMosaics } from "./usePriwaOfflineMosaics";
+import { usePriwaOfflineStatus } from "./usePriwaOfflineStatus";
 import { usePriwaOfflineBasemap } from "./usePriwaOfflineBasemap";
 import { usePriwaOfflineAreaLayer } from "./usePriwaOfflineAreaLayer";
 import {
@@ -81,7 +86,6 @@ import type {
 } from "./types";
 
 const FIELD_CENTER: [number, number] = [8.18013, 48.45596];
-const EMPTY_MOSAIC_IDS = new Set<string>();
 
 interface PriwaFieldMapProps {
   points: IPriwaPoint[];
@@ -121,7 +125,7 @@ interface PriwaFieldMapProps {
   onSyncNow?: () => Promise<void>;
 }
 
-type PriwaMapPanel = "layers" | "offline" | "trees";
+type PriwaMapPanel = "layers" | "offline" | "trees" | "flights";
 
 export default function PriwaFieldMap({
   points,
@@ -135,7 +139,7 @@ export default function PriwaFieldMap({
   onWarnkarteVisibilityChange,
   additionalMapControl,
   reviewDetailMode,
-  mosaics = [],
+  mosaics: onlineMosaics = [],
   groups = [],
   isCogLoading = false,
   isLoadingGroups = false,
@@ -192,6 +196,9 @@ export default function PriwaFieldMap({
   const selectReviewItemFromPointRef = useRef<(point: IPriwaPoint) => void>(
     () => undefined,
   );
+  const selectFlightFromMapRef = useRef<(mosaicId: string) => void>(
+    () => undefined,
+  );
   const openPointForEditingRef = useRef<(point: IPriwaPoint) => void>(() => {
     return;
   });
@@ -214,7 +221,11 @@ export default function PriwaFieldMap({
   const mapInteraction = usePriwaMapInteractionMode();
   const { modeRef, setMode } = mapInteraction;
   const isMobile = useIsMobile("lg");
-  const isMobileRef = useRef(isMobile);
+  const { isFieldLayout, flightPanelPlacement } = usePriwaFieldLayout();
+  const isFieldLayoutRef = useRef(isFieldLayout);
+  const { isOnline } = usePriwaOfflineStatus();
+  const offlineMosaics = usePriwaOfflineMosaics(projectId, onlineMosaics);
+  const { mosaics } = offlineMosaics;
   const userLocation = useUserLocationLayer(mapRef);
   const {
     layer: userLocationLayer,
@@ -239,10 +250,13 @@ export default function PriwaFieldMap({
   const isOfflineMapModeActive = activeMapPanel === "offline";
   const isMapLayersOpen = activeMapPanel === "layers";
   const isTreeListOpen = activeMapPanel === "trees";
+  const isFlightPanelOpen = activeMapPanel === "flights";
+  const isFlightSidePanelOpen =
+    isFlightPanelOpen && flightPanelPlacement === "side";
 
   useEffect(() => {
-    isMobileRef.current = isMobile;
-  }, [isMobile]);
+    isFieldLayoutRef.current = isFieldLayout;
+  }, [isFieldLayout]);
   usePriwaOfflineAreaLayer(
     offlineAreaLayerRef,
     offlineBasemapAreas,
@@ -288,13 +302,16 @@ export default function PriwaFieldMap({
         return;
       }
 
-      mapRef.current
-        ?.getView()
-        .fit(transformExtent(bbox, "EPSG:4326", "EPSG:3857"), {
-          duration: 500,
-          maxZoom: 19,
-          padding: [96, 96, 96, 96],
-        });
+      const map = mapRef.current;
+      if (!map) return;
+      map.getView().fit(transformExtent(bbox, "EPSG:4326", "EPSG:3857"), {
+        duration: 500,
+        maxZoom: 19,
+        padding: getPriwaMapFitPadding(
+          map.getTargetElement(),
+          isFieldLayoutRef.current,
+        ),
+      });
     },
     [message],
   );
@@ -304,7 +321,7 @@ export default function PriwaFieldMap({
     points,
     mosaics,
     groups,
-    isMobile,
+    isMobile: isFieldLayout,
     isLoadingPoints,
     isLoadingGroups,
     isCogLoading,
@@ -323,6 +340,7 @@ export default function PriwaFieldMap({
     enabledMosaicIds,
     selectedMosaicId,
     selectMatchedMosaicForPoint,
+    showOnlyMosaics,
     setFlightType,
     reviewItems,
     selectedReviewKey,
@@ -443,7 +461,7 @@ export default function PriwaFieldMap({
       );
 
       if (pointFeature) {
-        if (isMobileRef.current) {
+        if (isFieldLayoutRef.current) {
           openPointForEditingRef.current(pointFeature);
         } else {
           selectReviewItemFromPointRef.current(pointFeature);
@@ -481,7 +499,9 @@ export default function PriwaFieldMap({
       );
 
       if (mosaicId) {
-        if (!window.matchMedia("(max-width: 767px)").matches) {
+        if (isFieldLayoutRef.current) {
+          selectFlightFromMapRef.current(mosaicId);
+        } else {
           selectReviewItemFromMosaicRef.current(mosaicId);
         }
         return;
@@ -535,9 +555,51 @@ export default function PriwaFieldMap({
     );
   }, [points, reviewPointId, selectedTreeIds]);
 
+  // Field layout: no group outlines, but the selected orthomosaics render at full
+  // native resolution just like on the desktop workbench.
+  usePriwaReviewMapLayers({
+    mapRef,
+    groupLayerRef,
+    mosaicFootprintLayerRef,
+    groups: isFieldLayout ? [] : groups,
+    points,
+    matchedMosaics,
+    reviewMosaics,
+    enabledMosaics,
+    enabledMosaicIds,
+    selectedMosaicId,
+    selectedGroupId: isFieldLayout ? null : selectedGroupId,
+  });
+
+  // A remembered flight defines the first view of a field session; the trees
+  // only frame the map when no flight comes back.
+  const fitRestoredFlight = useCallback(
+    (mosaic: IPriwaMosaic) => {
+      hasFittedInitialMobilePointsRef.current = true;
+      zoomToMosaicFootprint(mosaic);
+    },
+    [zoomToMosaicFootprint],
+  );
+  const fieldFlights = usePriwaFieldFlights({
+    projectId,
+    enabled: isFieldLayout,
+    mosaics,
+    matchedMosaics,
+    reviewMosaics,
+    enabledMosaicIds,
+    selectedMosaicId,
+    showOnlyMosaics,
+    offlineEntries: offlineMosaics.entries,
+    isOnline,
+    isLoading: (isOnline && isCogLoading) || offlineMosaics.isLoading,
+    onRestore: fitRestoredFlight,
+  });
+  const { showFlight, isAwaitingRestore } = fieldFlights;
+
   useEffect(() => {
     if (
-      !isMobile ||
+      !isFieldLayout ||
+      isAwaitingRestore ||
       hasFittedInitialMobilePointsRef.current ||
       points.length === 0 ||
       !mapRef.current
@@ -554,21 +616,29 @@ export default function PriwaFieldMap({
       padding: [150, 48, 130, 48],
     });
     hasFittedInitialMobilePointsRef.current = true;
-  }, [isMobile, points]);
+  }, [isAwaitingRestore, isFieldLayout, points]);
+  const fitToFlight = useCallback(
+    (mosaicId: string) => {
+      const mosaic = mosaics.find((candidate) => candidate.id === mosaicId);
+      if (mosaic) zoomToMosaicFootprint(mosaic);
+    },
+    [mosaics, zoomToMosaicFootprint],
+  );
+  const showFlightFromPanel = useCallback(
+    (mosaicId: string) => {
+      showFlight(mosaicId);
+      if (flightPanelPlacement === "sheet") setActiveMapPanel(null);
+      fitToFlight(mosaicId);
+    },
+    [fitToFlight, flightPanelPlacement, showFlight],
+  );
+  const toggleFlightPanel = useCallback(() => {
+    setActiveMapPanel((current) => (current === "flights" ? null : "flights"));
+  }, []);
 
-  usePriwaReviewMapLayers({
-    mapRef,
-    groupLayerRef,
-    mosaicFootprintLayerRef,
-    groups: isMobile ? [] : groups,
-    points,
-    matchedMosaics: isMobile ? [] : matchedMosaics,
-    reviewMosaics: isMobile ? [] : reviewMosaics,
-    enabledMosaics: isMobile ? [] : enabledMosaics,
-    enabledMosaicIds: isMobile ? EMPTY_MOSAIC_IDS : enabledMosaicIds,
-    selectedMosaicId: isMobile ? null : selectedMosaicId,
-    selectedGroupId: isMobile ? null : selectedGroupId,
-  });
+  useEffect(() => {
+    selectFlightFromMapRef.current = showFlight;
+  }, [showFlight]);
 
   const handlePreviewCoordinate = useCallback(
     (coordinate: IPriwaCoordinate | null) => {
@@ -598,9 +668,9 @@ export default function PriwaFieldMap({
     fitPriwaWarnkarteLayer(
       map,
       layer,
-      getPriwaMapFitPadding(map.getTargetElement(), isMobile),
+      getPriwaMapFitPadding(map.getTargetElement(), isFieldLayout),
     );
-  }, [isMobile]);
+  }, [isFieldLayout]);
 
   const zoomToWarnkarteFromSheet = useCallback(() => {
     zoomToWarnkarte();
@@ -859,7 +929,7 @@ export default function PriwaFieldMap({
   const dataErrorMessage =
     errorMessage ?? groupsErrorMessage ?? cogErrorMessage;
   const isReviewTreeEditing =
-    !isMobile &&
+    !isFieldLayout &&
     isDrawerOpen &&
     !!editingPoint &&
     editingPoint.id === reviewPointId;
@@ -872,13 +942,21 @@ export default function PriwaFieldMap({
   return (
     <div
       data-testid="priwa-field-map"
+      data-priwa-layout={isFieldLayout ? "field" : "desktop"}
+      data-priwa-flight-panel-placement={
+        isFlightPanelOpen ? flightPanelPlacement : undefined
+      }
       className="priwa-field-map relative h-full min-h-[100dvh] w-full overflow-hidden bg-neutral-950"
       onPointerDownCapture={requestDeferredOrientationPermission}
     >
       <div ref={containerRef} className="absolute inset-0" />
 
-      {mapInteraction.mode === "browse" && isMobile && (
-        <div className="priwa-map-control-stack pointer-events-none absolute left-4 z-[55] flex flex-col gap-2">
+      {mapInteraction.mode === "browse" && isFieldLayout && (
+        <div
+          className={`priwa-map-control-stack pointer-events-none absolute z-[55] flex flex-col gap-2 transition-[left] ${
+            isFlightSidePanelOpen ? "left-[22.5rem]" : "left-4"
+          }`}
+        >
           <PriwaMobileFieldTools
             points={points}
             groups={groups}
@@ -893,7 +971,7 @@ export default function PriwaFieldMap({
         </div>
       )}
 
-      {mapInteraction.mode === "browse" && !isMobile && (
+      {mapInteraction.mode === "browse" && !isFieldLayout && (
         <div className="priwa-map-control-stack pointer-events-none absolute left-[22.5rem] z-[55] flex flex-col gap-2">
           <Tooltip title={locationButtonTitle}>
             <Button
@@ -938,10 +1016,10 @@ export default function PriwaFieldMap({
 
       <PriwaMobilePrimaryActions
         hidden={
-          !isMobile ||
+          !isFieldLayout ||
           isDrawerOpen ||
           isPointListOpen ||
-          activeMapPanel !== null ||
+          (activeMapPanel !== null && !isFlightSidePanelOpen) ||
           mapInteraction.mode !== "browse"
         }
         isLocating={userLocation.isLocating}
@@ -951,7 +1029,22 @@ export default function PriwaFieldMap({
         onLocate={() => userLocation.locateUser(true)}
       />
 
-      {!isMobile && !isPointListOpen && (
+      {isFieldLayout && mapInteraction.mode === "browse" && (
+        <PriwaFieldFlightUi
+          flights={fieldFlights}
+          offline={offlineMosaics}
+          placement={flightPanelPlacement}
+          isPanelOpen={isFlightPanelOpen}
+          isLoading={isCogLoading}
+          isOnline={isOnline}
+          onTogglePanel={toggleFlightPanel}
+          onClosePanel={() => setActiveMapPanel(null)}
+          onShow={showFlightFromPanel}
+          onFit={fitToFlight}
+        />
+      )}
+
+      {!isFieldLayout && !isPointListOpen && (
         <PriwaReviewWorkbench
           items={reviewItems}
           points={points}
@@ -1027,7 +1120,7 @@ export default function PriwaFieldMap({
         <PriwaOfflineAreaSelection
           plan={offlineSelectionPlan}
           cacheState={basemapCacheState}
-          isMobile={isMobile}
+          isMobile={isFieldLayout}
           onCancel={cancelOfflineAreaSelection}
           onDismiss={dismissOfflineAreaSelection}
           onConfirm={handleCacheBasemapArea}
@@ -1043,7 +1136,7 @@ export default function PriwaFieldMap({
           isSupported={isOfflineBasemapSupported}
           needsRefresh={offlineBasemapNeedsRefresh}
           syncSummary={syncSummary}
-          isMobile={isMobile}
+          isMobile={isFieldLayout}
           onClose={() => setActiveMapPanel(null)}
           onStartSelection={startOfflineAreaSelection}
           onClear={handleClearBasemapArea}
@@ -1053,7 +1146,7 @@ export default function PriwaFieldMap({
       )}
 
       <PriwaWarnkarteMapUi
-        isMobile={isMobile}
+        isMobile={isFieldLayout}
         isLayersOpen={mapInteraction.mode === "browse" && isMapLayersOpen}
         baseLayer={baseLayer}
         overlay={warnkarteOverlay}
@@ -1066,7 +1159,11 @@ export default function PriwaFieldMap({
       />
 
       {mapInteraction.mode === "browse" && (
-        <div className="priwa-map-status-stack pointer-events-none absolute right-4 z-[55] flex max-w-[calc(100%-5.75rem)] flex-col items-end gap-1.5 min-[992px]:right-[24.5rem]">
+        <div
+          className={`priwa-map-status-stack pointer-events-none absolute z-[55] flex max-w-[calc(100%-5.75rem)] flex-col items-end gap-1.5 ${
+            isFieldLayout ? "right-4" : "right-[24.5rem]"
+          }`}
+        >
           {locationHintLabel && (
             <div className="rounded-md bg-white/90 px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm backdrop-blur">
               {locationHintLabel}
@@ -1087,7 +1184,9 @@ export default function PriwaFieldMap({
 
       {dataErrorMessage && mapInteraction.mode === "browse" && (
         <Alert
-          className="absolute bottom-20 left-4 right-4 z-[55] shadow-lg min-[992px]:left-auto min-[992px]:w-96"
+          className={`absolute bottom-20 left-4 right-4 z-[55] shadow-lg ${
+            isFieldLayout ? "" : "left-auto w-96"
+          }`}
           type="error"
           showIcon
           message="PRIWA Daten konnten nicht geladen werden"

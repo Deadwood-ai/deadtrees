@@ -101,24 +101,46 @@
   white-space: nowrap;
 }
 
-@media (max-width: 991px) {
-  .priwa-field-map .dt-map-zoom-control {
-    display: none !important;
+/* PRIWA field layout (phones, tablets, touch): the map keeps the corners free
+   for the flight bar (bottom left) and the primary actions (bottom right). */
+.priwa-field-map[data-priwa-layout="field"] .dt-map-zoom-control {
+  display: none !important;
+}
+
+@media (min-width: 768px) {
+  .priwa-field-map[data-priwa-layout="field"] .dt-map-zoom-control {
+    display: flex !important;
+    bottom: 156px !important;
+    right: 16px !important;
+    left: auto !important;
   }
 }
 
-@media (min-width: 992px) {
-  .priwa-field-map .dt-map-zoom-control {
-    bottom: 92px !important;
-    left: 368px !important;
-    right: auto !important;
-    flex-direction: row;
-  }
+.priwa-field-map[data-priwa-layout="field"] .dt-map-scale-control {
+  bottom: 108px;
+  left: 16px;
+}
 
-  .priwa-field-map .dt-map-scale-control {
-    bottom: 100px;
-    left: 456px;
-  }
+.priwa-field-map[data-priwa-flight-panel-placement="side"] .dt-map-scale-control {
+  bottom: 38px;
+  left: 22.5rem;
+}
+
+.priwa-field-map[data-priwa-flight-panel-placement="side"] .dt-map-attribution-control {
+  left: 22.5rem;
+}
+
+/* PRIWA desktop review workbench: controls sit beside the queue panel. */
+.priwa-field-map[data-priwa-layout="desktop"] .dt-map-zoom-control {
+  bottom: 92px !important;
+  left: 368px !important;
+  right: auto !important;
+  flex-direction: row;
+}
+
+.priwa-field-map[data-priwa-layout="desktop"] .dt-map-scale-control {
+  bottom: 100px;
+  left: 456px;
 }
 
 .dt-map-attribution-control button {
@@ -452,7 +474,8 @@
 }
 
 .priwa-map-control-stack,
-.priwa-map-status-stack {
+.priwa-map-status-stack,
+.priwa-flight-side-panel {
   top: calc(env(safe-area-inset-top, 0px) + 5.25rem);
 }
 

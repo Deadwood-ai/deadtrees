@@ -8,10 +8,7 @@ import { updatePriwaSyncQueue } from "./priwaOfflineQueue";
 import { recoverInterruptedPriwaMutations } from "./priwaOfflineSync";
 import { runWithPriwaSyncLock } from "./priwaSyncLock";
 import type { IPriwaPoint } from "./types";
-import {
-  softDeletePriwaKaeferbaum,
-  upsertPriwaKaeferbaum,
-} from "./usePriwaKaeferbaeume";
+import { syncPriwaObservation } from "./syncPriwaObservation";
 
 const getErrorMessage = (error: unknown) =>
   error instanceof Error
@@ -101,26 +98,37 @@ export function usePriwaSyncQueueRunner({
           }
 
           try {
+            const serverUpdatedAt = await syncPriwaObservation(syncingMutation);
             if (syncingMutation.type === "delete") {
-              await softDeletePriwaKaeferbaum(
-                syncingMutation.pointId,
-                userId,
-                syncingMutation.updatedAt,
-              );
               onPointDeleted(syncingMutation.pointId);
             } else if (syncingMutation.point) {
               const point = syncingMutation.point;
-              await upsertPriwaKaeferbaum(projectId, point);
-              onPointSynced(point);
+              onPointSynced({ ...point, serverUpdatedAt });
             }
 
             await updateStoredQueue((queue) =>
-              queue.filter(
-                (item) =>
-                  item.id !== syncingMutation.id ||
-                  item.updatedAt !== syncingMutation.updatedAt ||
-                  item.status !== "syncing",
-              ),
+              queue
+                .filter(
+                  (item) =>
+                    item.id !== syncingMutation.id ||
+                    item.updatedAt !== syncingMutation.updatedAt ||
+                    item.status !== "syncing",
+                )
+                .map((item) =>
+                  item.pointId === syncingMutation.pointId
+                    ? {
+                        ...item,
+                        baseUpdatedAt: serverUpdatedAt,
+                        type:
+                          item.type === "create"
+                            ? ("update" as const)
+                            : item.type,
+                        point: item.point
+                          ? { ...item.point, serverUpdatedAt }
+                          : undefined,
+                      }
+                    : item,
+                ),
             );
           } catch (error) {
             await updateStoredQueue((queue) =>

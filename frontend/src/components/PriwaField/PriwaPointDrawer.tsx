@@ -361,6 +361,7 @@ export default function PriwaPointDrawer({
         datum: values.datum,
         kom: values.kom?.trim() ?? "",
         capturedAt: editingPoint?.capturedAt ?? new Date().toISOString(),
+        serverUpdatedAt: editingPoint?.serverUpdatedAt,
         coordinateSource: savedCoordinateSource,
         gps: willUseEstimatedGps ? "nein" : "ja",
         isEstimatedLocation: savedCoordinateSource !== "qr",

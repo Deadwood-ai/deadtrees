@@ -23,6 +23,7 @@ export interface IPriwaQueuedMutation {
   retryCount: number;
   status: PriwaQueuedMutationStatus;
   lastError?: string;
+  baseUpdatedAt?: string;
 }
 
 export interface IPriwaOfflineBasemapArea {

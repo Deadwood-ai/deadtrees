@@ -14,7 +14,8 @@ interface MobileBottomSheetProps {
   compactRatio?: number;
   expandedRatio?: number;
   initialSnap?: MobileBottomSheetSnap;
-  hideFrom?: "md" | "lg";
+  /** Tailwind breakpoint above which the sheet is hidden; "never" keeps it on wide field layouts. */
+  hideFrom?: "md" | "lg" | "never";
 }
 
 const clamp = (value: number, min: number, max: number) =>
@@ -28,6 +29,7 @@ const CLOSE_ANIMATION_MS = 220;
 const hideFromClass = {
   md: "md:hidden",
   lg: "min-[992px]:hidden",
+  never: "",
 } as const;
 
 const MobileBottomSheet = ({

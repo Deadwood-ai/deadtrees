@@ -163,7 +163,7 @@ export default function PriwaOfflineMapPanel({
         initialSnap="compact"
         compactRatio={0.28}
         expandedRatio={0.7}
-        hideFrom="lg"
+        hideFrom="never"
       >
         {content}
       </MobileBottomSheet>

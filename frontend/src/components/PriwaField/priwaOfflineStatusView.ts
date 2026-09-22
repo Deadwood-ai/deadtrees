@@ -26,31 +26,33 @@ export const getPriwaOfflineStatusView = ({
   coverageRatio,
 }: PriwaOfflineStatusInput): IPriwaOfflineStatusView => {
   if (!isSupported || serviceWorkerStatus === "unsupported") {
-    return { label: "Offline nicht unterstützt", color: "warning" };
+    return { label: "Basiskarte offline nicht unterstützt", color: "warning" };
   }
   if (serviceWorkerStatus === "error") {
-    return { label: "Offline nicht bereit", color: "error" };
+    return { label: "Basiskarte offline nicht bereit", color: "error" };
   }
   if (serviceWorkerStatus === "registering" || !isCacheAuditComplete) {
-    return { label: "Offline wird geprüft", color: "processing" };
+    return { label: "Basiskarte wird geprüft", color: "processing" };
   }
   if (coverageRatio >= PRIWA_OFFLINE_READY_COVERAGE_RATIO) {
-    return { label: "Offline bereit", color: "success" };
+    return { label: "Basiskarte offline bereit", color: "success" };
   }
   if (coverageRatio > 0) {
-    return { label: "Teilweise offline", color: "warning" };
+    return { label: "Basiskarte teilweise offline", color: "warning" };
   }
   if (needsRefresh) {
-    return { label: "Offline-Karte aktualisieren", color: "warning" };
+    return { label: "Basiskarte aktualisieren", color: "warning" };
   }
   if (hasAreas) {
     return {
-      label: isOnline ? "Bereich nicht offline" : "Hier nicht offline",
+      label: isOnline
+        ? "Basiskarte hier nicht offline"
+        : "Basiskarte hier nicht offline",
       color: "default",
     };
   }
   return {
-    label: isOnline ? "Offline-Karte laden" : "Keine Offline-Karte",
+    label: isOnline ? "Basiskarte offline laden" : "Keine Offline-Basiskarte",
     color: "default",
   };
 };

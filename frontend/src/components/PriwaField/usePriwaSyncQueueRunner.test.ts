@@ -28,9 +28,8 @@ vi.mock("./priwaOfflineStore", async (importOriginal) => {
   };
 });
 
-vi.mock("./usePriwaKaeferbaeume", () => ({
-  softDeletePriwaKaeferbaum: mocks.softDeletePoint,
-  upsertPriwaKaeferbaum: mocks.upsertPoint,
+vi.mock("./syncPriwaObservation", () => ({
+  syncPriwaObservation: mocks.upsertPoint,
 }));
 
 const point: IPriwaPoint = {
@@ -101,7 +100,7 @@ describe("usePriwaSyncQueueRunner", () => {
 
     await runner.syncQueue();
 
-    expect(mocks.upsertPoint).toHaveBeenCalledWith("project-1", point);
+    expect(mocks.upsertPoint).toHaveBeenCalledWith(expect.objectContaining({ projectId: "project-1", point }));
     expect(storedQueue).toEqual([]);
     expect(onQueueDrained).toHaveBeenCalledOnce();
   });
@@ -176,7 +175,8 @@ describe("usePriwaSyncQueueRunner", () => {
       confirmOldWriteStarted = resolve;
     });
     mocks.upsertPoint.mockImplementation(
-      async (_projectId: string, nextPoint: IPriwaPoint) => {
+      async (mutation: IPriwaQueuedMutation) => {
+        const nextPoint = mutation.point!;
         if (nextPoint.baumnr !== "old") return;
         confirmOldWriteStarted();
         await new Promise<void>((resolve) => {
@@ -217,7 +217,7 @@ describe("usePriwaSyncQueueRunner", () => {
     await Promise.all([firstSync, secondSync]);
 
     expect(writesBeforeOldRequestFinished).toBe(1);
-    expect(mocks.upsertPoint.mock.calls.map((call) => call[1].baumnr)).toEqual([
+    expect(mocks.upsertPoint.mock.calls.map((call) => call[0].point.baumnr)).toEqual([
       "old",
       "newer",
     ]);

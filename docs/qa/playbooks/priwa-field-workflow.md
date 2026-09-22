@@ -39,6 +39,35 @@ Supabase.
 9. Verify the point syncs into `priwa_kaeferbaeume`.
 10. Repeat update and soft-delete for the point.
 
+## Tablet flights and installed offline app
+
+Use the isolated frontend build/preview for service-worker and installation
+checks; keep its API, Supabase and storage URLs on the same validated local
+stack. Test portrait and landscape, then repeat the important journeys in an
+installed Android PWA. Browser viewport emulation alone does not establish
+Android acceptance.
+
+1. Open the flight list, select a flight, fit its footprint and inspect individual
+   crowns. Compare a second flight and verify no more than two are visible.
+2. Download one or two complete flights. The current package limits are 500 MiB
+   and 3 km² combined full footprints. This does not clip a small area out of a
+   larger source file. Basemap areas have their own separate cache status.
+3. Wait for the complete-file ready state, go offline, close/reopen the app and
+   verify the remembered flight is framed. Zoom and pan into native-resolution
+   regions that were never viewed online, including the edges of the flight.
+4. Save an observation offline, restart again, reconnect and verify exactly one
+   database row with the original values. For an existing point, change its
+   server revision before reconnecting: the local edit must remain queued as a
+   conflict, without overwriting the newer server state.
+5. Cancel a replacement download after bytes arrive and simulate a failed
+   replacement. Previously completed files must remain usable; partial files
+   must never be offered as ready. Removing flight imagery must preserve queued
+   observations.
+
+Record browser storage-persistence support separately from successful downloads.
+Cold restart, storage pressure, GPS accuracy, thermal behavior and memory on a
+physical field tablet remain device acceptance checks.
+
 ## Expected Observations
 
 - Authenticated field user can access `/priwa-field`.

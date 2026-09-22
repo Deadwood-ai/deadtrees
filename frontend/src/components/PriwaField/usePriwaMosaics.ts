@@ -10,6 +10,7 @@ export interface IPriwaMosaic {
   projectId: string;
   label: string;
   cogUrl: string;
+  offlineFile?: Blob;
   bbox: string | null;
   captureDate: string | null;
   createdAt: string;
