@@ -70,7 +70,7 @@ processor_asset_mount_matches() {
 	local container_id
 	local mounted_assets
 
-	container_id="$(docker compose -f "${COMPOSE_FILE}" ps -q processor 2>/dev/null || true)"
+	container_id="$(docker compose "${PROCESSOR_COMPOSE_FILES[@]}" ps -q processor 2>/dev/null || true)"
 	if [ -z "${container_id}" ]; then
 		return 1
 	fi
@@ -85,9 +85,10 @@ processor_asset_mount_matches() {
 recreate_processor_for_assets() {
 	drain_set=1
 	wait_for_drain_with_recovery
+	log_processor_compose_files
 	python3 "${STATUS_SCRIPT}" clear-ack >> "${LOG_FILE}" 2>&1
 	PROCESSOR_RELEASE_SHA="${remote_sha}" \
-		docker compose -f "${COMPOSE_FILE}" up -d --force-recreate processor \
+		docker compose "${PROCESSOR_COMPOSE_FILES[@]}" up -d --force-recreate processor \
 		>> "${LOG_FILE}" 2>&1
 	python3 "${STATUS_SCRIPT}" wait-for-idle \
 		--expected-release-sha "${remote_sha}" \
@@ -232,9 +233,10 @@ else
 fi
 
 require_clean_checkout
-docker compose -f "${COMPOSE_FILE}" build processor tcd >> "${LOG_FILE}" 2>&1
+log_processor_compose_files
+docker compose "${PROCESSOR_COMPOSE_FILES[@]}" build processor tcd >> "${LOG_FILE}" 2>&1
 python3 "${STATUS_SCRIPT}" clear-ack >> "${LOG_FILE}" 2>&1
-PROCESSOR_RELEASE_SHA="${deployed_sha}" docker compose -f "${COMPOSE_FILE}" up -d --force-recreate processor >> "${LOG_FILE}" 2>&1
+PROCESSOR_RELEASE_SHA="${deployed_sha}" docker compose "${PROCESSOR_COMPOSE_FILES[@]}" up -d --force-recreate processor >> "${LOG_FILE}" 2>&1
 python3 "${STATUS_SCRIPT}" wait-for-idle \
 	--expected-release-sha "${deployed_sha}" \
 	--timeout-seconds "${STARTUP_TIMEOUT_SECONDS}" \

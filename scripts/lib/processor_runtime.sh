@@ -1,5 +1,29 @@
 PROCESSOR_DRAIN_WAIT_PID=""
 
+# Compose files for every processor container operation. A host that has to pin
+# hardware the tracked compose file cannot describe -- deepl1, for example,
+# reserves GPU1 for the worker behind an MPS daemon -- keeps a gitignored
+# override at .local/processor/<short hostname>.yaml. Every deployment path has
+# to merge it: recreating the container from the tracked file alone silently
+# drops the pinning and moves the worker onto a card other users share.
+PROCESSOR_COMPOSE_OVERRIDE="${REPO_DIR}/.local/processor/$(hostname -s).yaml"
+PROCESSOR_COMPOSE_FILES=(-f "${COMPOSE_FILE}")
+if [ -f "${PROCESSOR_COMPOSE_OVERRIDE}" ]; then
+	PROCESSOR_COMPOSE_FILES+=(-f "${PROCESSOR_COMPOSE_OVERRIDE}")
+else
+	PROCESSOR_COMPOSE_OVERRIDE=""
+fi
+
+# Record which compose files a container operation used. Without this a deploy
+# that silently lost a required override leaves no trace to diagnose from.
+log_processor_compose_files() {
+	if [ -n "${PROCESSOR_COMPOSE_OVERRIDE}" ]; then
+		log "Using compose files: ${COMPOSE_FILE} + ${PROCESSOR_COMPOSE_OVERRIDE}"
+	else
+		log "Using compose files: ${COMPOSE_FILE} (no host-local override)"
+	fi
+}
+
 request_automation_drain() {
 	local reason="$1"
 	python3 "${STATUS_SCRIPT}" set-drain --reason "${reason}" --preserve-operator-drain >> "${LOG_FILE}" 2>&1
@@ -31,7 +55,7 @@ processor_availability() {
 		return 2
 	fi
 
-	container_id="$(docker compose -f "${COMPOSE_FILE}" ps -q processor 2>/dev/null || true)"
+	container_id="$(docker compose "${PROCESSOR_COMPOSE_FILES[@]}" ps -q processor 2>/dev/null || true)"
 	inspect_output="$(docker inspect "${container_id}" --format '{{.State.Status}} {{.State.Restarting}}' 2>/dev/null || true)"
 	if [ -n "${inspect_output}" ]; then
 		read -r status restarting <<< "${inspect_output}"
@@ -77,7 +101,7 @@ wait_for_drain_with_recovery() {
 
 	if confirm_processor_unavailable; then
 		log "Processor is unavailable; entering stopped-worker recovery mode"
-		docker compose -f "${COMPOSE_FILE}" stop processor >> "${LOG_FILE}" 2>&1
+		docker compose "${PROCESSOR_COMPOSE_FILES[@]}" stop processor >> "${LOG_FILE}" 2>&1
 		python3 "${STATUS_SCRIPT}" wait-for-idle \
 			--allow-unacknowledged-stopped-worker \
 			--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
@@ -96,7 +120,7 @@ wait_for_drain_with_recovery() {
 			kill "${wait_pid}" 2>/dev/null || true
 			wait "${wait_pid}" 2>/dev/null || true
 			PROCESSOR_DRAIN_WAIT_PID=""
-			docker compose -f "${COMPOSE_FILE}" stop processor >> "${LOG_FILE}" 2>&1
+			docker compose "${PROCESSOR_COMPOSE_FILES[@]}" stop processor >> "${LOG_FILE}" 2>&1
 			python3 "${STATUS_SCRIPT}" wait-for-idle \
 				--allow-unacknowledged-stopped-worker \
 				--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
@@ -127,7 +151,7 @@ wait_for_processor_running() {
 	local container_id=""
 
 	while [ "${SECONDS}" -lt "${deadline}" ]; do
-		container_id="$(docker compose -f "${COMPOSE_FILE}" ps -q processor 2>/dev/null || true)"
+		container_id="$(docker compose "${PROCESSOR_COMPOSE_FILES[@]}" ps -q processor 2>/dev/null || true)"
 		inspect_output="$(docker inspect "${container_id}" --format '{{.State.Status}} {{.State.Restarting}} {{.RestartCount}} {{.State.ExitCode}}' 2>/dev/null || true)"
 		if [ -n "${inspect_output}" ]; then
 			read -r status restarting restart_count exit_code <<< "${inspect_output}"
@@ -158,7 +182,7 @@ wait_for_processor_running() {
 
 inspect_processor_runtime() {
 	local container_id
-	container_id="$(docker compose -f "${COMPOSE_FILE}" ps -q processor)"
+	container_id="$(docker compose "${PROCESSOR_COMPOSE_FILES[@]}" ps -q processor)"
 	if [ -z "${container_id}" ]; then
 		log "Processor readiness passed but Compose returned no processor container ID"
 		return 1

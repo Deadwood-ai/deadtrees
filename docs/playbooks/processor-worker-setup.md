@@ -90,10 +90,17 @@ not set `CUDA_MPS_PIPE_DIRECTORY` are unaffected. To opt in:
 - in the host-local, gitignored compose override, set `NVIDIA_VISIBLE_DEVICES=<index>`
   and `CUDA_MPS_PIPE_DIRECTORY=/var/run/deadtrees-mps` for `processor`, and
   bind-mount `/var/run/deadtrees-mps` at the same path
-- if `<index>` is not `0`, also replace the tracked `/dev/nvidia0` mapping in that
-  override with `devices: !override` listing `/dev/nvidia<index>` plus the shared
-  `nvidiactl`, `nvidia-modeset`, `nvidia-uvm` and `nvidia-uvm-tools` nodes. Compose
-  appends `devices` on merge, so without `!override` the worker still sees GPU 0.
+- if `<index>` is not `0`, also pin the card at the CUDA level in that override
+  with `CUDA_VISIBLE_DEVICES=<GPU UUID>` (take the UUID from `nvidia-smi -L`, never
+  the index: PCI enumeration order is not stable across reboots). The tracked
+  compose maps `/dev/nvidia0` explicitly, and `devices: !override` does not remove
+  it on every Compose release -- on 2.18.1 the tag is silently ignored and the
+  mapping is appended, leaving GPU 0 visible inside the container. The UUID filter
+  holds on every version.
+- name the override `.local/processor/<short hostname>.yaml`. The tracked deploy
+  and maintenance scripts merge exactly that path, so automatic deployment
+  preserves the pinning instead of recreating the container without it. Each
+  deploy records the files it used in `auto-deploy.log` (`Using compose files:`).
 
 The worker forwards both values to the TCD helper container and bind-mounts the
 same host path there, so the path must be identical on host and worker.
@@ -112,6 +119,11 @@ python3 scripts/processor_asset_preflight.py
 docker compose -f docker-compose.processor.yaml build processor tcd
 docker compose -f docker-compose.processor.yaml up -d processor
 ```
+
+On a host that keeps a `.local/processor/<short hostname>.yaml` override, append
+`-f .local/processor/<short hostname>.yaml` to both commands above, exactly as the
+tracked scripts do. Bringing the container up from the tracked file alone drops
+whatever the override pins.
 
 If the host should auto-deploy like an existing production processor, first verify
 that the tracked host scripts include every required Compose override and safety
