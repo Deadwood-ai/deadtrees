@@ -11,6 +11,9 @@ entirely (>99%) real data.
 nodata is detected robustly via the shared :func:`read_nodata_mask` helper,
 which honours a real alpha band, an internal mask, a declared nodata value, a
 mislabeled binary mask band and — as a last resort — solid white/black fill.
+As a backstop independent of how nodata was declared, tiles whose valid pixels
+are one single colour are skipped too: they carry nothing to search for, and
+they all share one embedding that would match every query equally.
 
 Each returned :class:`PatchEmbedding` carries an L2-normalized image embedding
 plus the tile footprint as a WGS84 (EPSG:4326) polygon so the frontend can
@@ -55,6 +58,15 @@ class PatchEmbedding:
 	nodata_fraction: float
 
 
+def _is_single_colour(data: np.ndarray, nodata: np.ndarray) -> bool:
+	"""True when every valid pixel of a (bands, H, W) tile has the same colour."""
+	valid = ~nodata
+	if not valid.any():
+		return True
+	pixels = data[:, valid]
+	return bool((pixels == pixels[:, :1]).all())
+
+
 def _iter_tiles(vrt) -> Iterator[Tuple[Image.Image, PatchEmbedding]]:
 	"""Yield (PIL image, partially-filled PatchEmbedding) for each kept tile."""
 	width, height = vrt.width, vrt.height
@@ -74,6 +86,8 @@ def _iter_tiles(vrt) -> Iterator[Tuple[Image.Image, PatchEmbedding]]:
 				continue
 
 			data = vrt.read(indexes=band_indexes, window=window)
+			if _is_single_colour(data, nodata):
+				continue
 			arr = np.where(nodata, 0, data)
 			arr = np.moveaxis(arr, 0, -1)
 			arr = np.clip(arr, 0, 255).astype(np.uint8)
