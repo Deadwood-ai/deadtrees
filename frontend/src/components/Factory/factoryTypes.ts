@@ -118,6 +118,10 @@ export interface FactoryFilters {
 }
 
 export const FACTORY_METRIC_FILTERS = [
+	"historical_uploaded",
+	"historical_completion",
+	"historical_report",
+	"historical_email",
 	"uploaded",
 	"first_ready",
 	"failures",

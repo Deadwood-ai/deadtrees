@@ -413,3 +413,40 @@ for 15–60 seconds and does not continuously poll; collapsed journey history is
 requested only when opened.
 
 API and database deploy independently. If PostgREST has not loaded the new input-byte column yet, upload completion retries without that optional measurement; the size remains unknown. Other schema and permission failures still propagate. Contributor cohorts display the last 26 UTC calendar weeks. Factory contributor search terms are redacted from analytics URLs.
+
+
+### Retained historical evidence
+
+The historical platform section spans all retained registrations: yearly totals
+for all history and monthly totals for a selected year. It includes archived
+records, and is independent of the prospective outcome workflow/size controls.
+The current-ready total remains an unarchived stock, explicitly labelled.
+
+`factory_history` reads a partial index of documented upload-success log events,
+then selects the earliest valid event per dataset. `extra.file_size` is original
+input bytes; malformed, missing and zero sizes stay unknown. Where the submission
+ledger exists, its upload timestamp and size take precedence. No historical data
+is written into that ledger and no production backfill job is needed.
+
+Run notifications are deduplicated by dataset, task and event before bucketing.
+Completed runs include reruns; completions requesting indexing are a subset.
+Upload-to-first-recorded-completion p50/p90 use only chronological timestamp
+pairs. They can include a later rerun and are not first-result latency. Detail
+pages expose these timestamps and the upload evidence source separately from
+measured first-readiness. Linked period counts open matching distinct datasets;
+run, email-recipient and report totals can exceed those dataset counts.
+
+Original input GiB is grouped by observed upload date, with the number of known
+sizes. Contributor counts come from observed uploads; returning contributors had
+an observed upload before the period, not necessarily their first-ever upload.
+Emails count recipient rows marked sent with a send timestamp. Reports count
+submission records, and publications count published publication records rather
+than their associated datasets. These records do not reconstruct past queue
+sizes, complete failure/recovery episodes, deleted data, or historical owner views.
+
+Periods before the earliest available upload, run, email, report or publication
+evidence display unknown for their respective sources. A zero after that boundary means no retained matching records,
+not proof that collection was continuously enabled. Coverage totals show how
+many retained datasets have upload timestamps, sizes and timing pairs. The
+existing directly measured outcomes remain prospective and retain their stricter
+first-result and failure-recovery semantics.

@@ -68,4 +68,16 @@ select m.dataset_id,d.user_id,m.first_ready_at+interval '2 hours'
 from public.factory_submissions m join public.v2_datasets d on d.id=m.dataset_id
 where m.dataset_id between 93001 and 93120 and m.first_ready_at is not null and m.dataset_id%3<>0
 on conflict(dataset_id) do nothing;
+-- Legacy evidence exercises reconstruction without inventing first-readiness.
+update public.v2_datasets set created_at=now()-interval '1 year'-make_interval(months=>(id-93020)::integer)
+where id between 93020 and 93022;
+delete from public.factory_submissions where dataset_id between 93020 and 93022;
+delete from public.factory_result_views where dataset_id between 93020 and 93022;
+insert into public.v2_logs(dataset_id,created_at,level,category,message,extra)
+select id,created_at+interval '5 minutes','INFO','upload','Upload completed successfully for dataset '||id,
+ jsonb_build_object('file_size',536870912) from public.v2_datasets where id between 93020 and 93022;
+update public.processing_notification_events n set created_at=d.created_at+interval '2 hours'
+from public.v2_datasets d where d.id=n.dataset_id and d.id between 93020 and 93022;
+update public.processing_notification_events set sent_at=created_at+interval '1 minute'
+where dataset_id between 93001 and 93120 and status='sent';
 commit;

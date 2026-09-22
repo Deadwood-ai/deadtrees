@@ -8,7 +8,7 @@ import { formatDuration, formatTaskTypes, isSilentClaim, minutesSince } from "./
 import FactoryAttentionList from "./FactoryAttentionList";
 import FactoryJourneyOutcomes from "./FactoryJourneyOutcomes";
 import FactoryOutcomes from "./FactoryOutcomes";
-import FactoryRecordedHistory from "./FactoryRecordedHistory";
+import FactoryHistory from "./FactoryHistory";
 import FactoryWaitingStrip from "./FactoryWaitingStrip";
 import { EmptyNote, FactoryDenied, FactoryError, Freshness, SectionCard, TimeCell, useNow } from "./FactoryPrimitives";
 import {
@@ -60,6 +60,7 @@ export default function FactoryOverview() {
 	const update = (next: { interval?: FactoryTrendInterval; workflow?: FactoryTrendWorkflow; size?: FactoryTrendSize; bucket?: string | null; history?: boolean }) => {
 		const merged = { interval, workflow, size, bucket: selectedKey, history: historyOpen, ...next };
 		const search = new URLSearchParams();
+		if (params.has("history_year")) search.set("history_year", params.get("history_year")!);
 		if (merged.interval !== "week") search.set("interval", merged.interval);
 		if (merged.workflow !== "all") search.set("workflow", merged.workflow);
 		if (merged.size !== "all") search.set("size", merged.size);
@@ -176,6 +177,8 @@ export default function FactoryOverview() {
 				</Text>
 			</SectionCard>
 
+			<FactoryHistory />
+
 			<div className="rounded-2xl border border-gray-200/60 bg-white px-5 py-4 shadow-sm" data-testid="factory-trend-controls">
 				<div className="flex flex-wrap items-center justify-between gap-3">
 					<div>
@@ -220,10 +223,9 @@ export default function FactoryOverview() {
 					{
 						key: "history",
 						label: <span className="font-semibold text-gray-900">History and outcomes after the result</span>,
-						extra: <span className="text-xs text-gray-500">recorded activity, observed first views, contributor cohorts</span>,
+						extra: <span className="text-xs text-gray-500">observed first views, contributor cohorts</span>,
 						children: (
 							<div className="space-y-6" data-testid="factory-history">
-								{trends.data && <FactoryRecordedHistory trends={trends.data} selectedKey={selectedKey} onSelect={(key) => update({ bucket: key })} />}
 								<FactoryJourneyOutcomes journey={journey.data} isLoading={journey.isLoading || (!journey.data && !journey.error)} error={journey.error} onRetry={() => void journey.refetch()} />
 							</div>
 						),

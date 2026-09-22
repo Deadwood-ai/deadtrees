@@ -1,3 +1,4 @@
+import type { FactoryHistory } from "../components/Factory/factoryHistoryTypes";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { supabase } from "./useSupabase";
 import { useAuth } from "./useAuthProvider";
@@ -286,5 +287,27 @@ export function useFactoryOperations() {
 		queryFn: async () => normalizeOperations(await callFactoryRpc<unknown>("factory_operations", {})),
 		retry: factoryRetry,
 		staleTime: 30 * 1000,
+	});
+}
+
+function normalizeHistory(raw: unknown): FactoryHistory {
+	const record = asRecord(raw);
+	const coverage = asRecord(record.coverage);
+	const counts = ["datasets", "upload_evidence", "upload_sizes", "timing_pairs", "measured_uploads", "ready_now"];
+	// A broken response must be a query error, never fabricated zeros or a render crash.
+	if (!Array.isArray(record.series) || !Array.isArray(record.years) || counts.some((key) => asCount(coverage[key]) === null)) {
+		throw new Error("Historical activity returned an incomplete response.");
+	}
+	return { ...record, series: asArray(record.series), coverage } as unknown as FactoryHistory;
+}
+
+export function useFactoryHistory(year: number | null) {
+	const { enabled } = useFactoryAccess();
+	return useQuery({
+		queryKey: ["factory", "history", year],
+		enabled,
+		queryFn: async () => normalizeHistory(await callFactoryRpc<unknown>("factory_history", { p_year: year })),
+		retry: factoryRetry,
+		staleTime: 60 * 1000,
 	});
 }

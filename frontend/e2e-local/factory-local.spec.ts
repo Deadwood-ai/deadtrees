@@ -314,6 +314,7 @@ const operations = () => ({
 
 type Options = {
   canOperate: boolean;
+  historyMode?: "empty" | "malformed";
   rpcMode?: "ok" | "denied" | "failing";
   trendsMode?: "ok" | "empty" | "refetch-fails";
   journeyMode?: "ok" | "empty";
@@ -378,6 +379,19 @@ const fulfillRpc = async (route: Route, name: string, options: Options) => {
       return;
     }
     await fulfillJson(route, options.operationsMode === "empty" ? { ...operations(), attention_total: 0, attention_contributors: 0, attention: [], waiting: [] } : operations());
+    return;
+  }
+  if (name === "factory_history") {
+    if (options.historyMode === "malformed") { await fulfillJson(route, {}); return; }
+    await fulfillJson(route, {
+      as_of: AS_OF, first_registration: "2010-01-01T00:00:00Z", year: body.p_year,
+      years: [2026, 2010], upload_since: "2010-03-01T00:00:00Z", run_since: "2010-04-01T00:00:00Z",
+      coverage: { datasets: 60, ready_now: 25, upload_evidence: 40, upload_sizes: 39, timing_pairs: 20, measured_uploads: 3 },
+      series: options.historyMode === "empty" ? [] : [{ start: "2010-01-01T00:00:00Z", end: "2011-01-01T00:00:00Z", partial: false,
+        registered: 12, uploaded: 10, completed: 9, failed: 2, indexing: 4, emails: 18, reports: 2,
+        publications: 1, input_gib: 1.5, size_samples: 9, contributors: 3, returning_contributors: 1,
+        p50: 24, p90: 48, timing_samples: 8 }],
+    });
     return;
   }
   if (name === "factory_journey") {
@@ -797,7 +811,7 @@ test.describe("factory local e2e", () => {
     await expect(page.getByTestId("factory-outcomes")).toContainText("No intervals were returned.");
     await expect(page.getByTestId("factory-measured-summary")).toHaveCount(0);
     await page.getByText("History and outcomes after the result").click();
-    await expect(page.getByTestId("factory-recorded-history")).toContainText("No intervals were returned.");
+    await expect(page.getByTestId("factory-historical-activity")).toContainText("Historical evidence has uneven coverage");
   });
 
   test("journey without data says so instead of showing zeros", async ({ page }) => {
@@ -872,3 +886,34 @@ test.describe("factory local e2e", () => {
     await expect(page.getByText("Operator access required")).toBeVisible();
   });
 });
+
+test("historical coverage, year selection and evidence drilldown", async ({ page }) => {
+  await installOperator(page, { canOperate: true });
+  await page.goto("/factory");
+  await dismissCookieBanner(page);
+  const history = page.getByTestId("factory-historical-activity");
+  await expect(history.getByTestId("factory-history-coverage")).toContainText("40 / 60");
+  await expect(history).toContainText("may describe a rerun");
+  await history.getByRole("combobox", { name: "Historical year" }).press("Enter");
+  await page.getByText("2010 · by month", { exact: true }).click();
+  await expect.poll(() => rpcCalls.filter((call) => call.name === "factory_history").at(-1)?.body).toEqual({ p_year: 2010 });
+  await expect(page).toHaveURL(/history_year=2010/);
+  const upload = history.getByTestId("factory-history-table").getByRole("link", { name: "10", exact: true });
+  await expect(upload).toHaveAttribute("href", /metric=historical_uploaded/);
+  await upload.click();
+  await expect(page).toHaveURL(/metric=historical_uploaded/);
+  await expect(page.getByTestId("factory-datasets")).toContainText("uploads with historical evidence");
+  await page.goBack();
+  await expect(page).toHaveURL(/history_year=2010/);
+});
+
+for (const mode of ["empty", "malformed"] as const) {
+  test(`historical response ${mode} stays contained`, async ({ page }) => {
+    await installOperator(page, { canOperate: true, historyMode: mode });
+    await page.goto("/factory");
+    await dismissCookieBanner(page);
+    const history = page.getByTestId("factory-historical-activity");
+    await expect(history).toContainText(mode === "empty" ? "No historical intervals were returned." : "Historical activity returned an incomplete response.");
+    await expect(page.getByTestId("factory-attention")).toBeVisible();
+  });
+}
