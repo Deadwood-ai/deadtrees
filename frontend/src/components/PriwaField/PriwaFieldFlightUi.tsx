@@ -1,6 +1,5 @@
 import PriwaFlightBar from "./PriwaFlightBar";
 import PriwaFlightPanel from "./PriwaFlightPanel";
-import PriwaOfflineFlightSection from "./PriwaOfflineFlightSection";
 import type { PriwaFlightPanelPlacement } from "./priwaFieldLayout";
 import type { PriwaFieldFlightsState } from "./usePriwaFieldFlights";
 import type { PriwaOfflineMosaicsState } from "./usePriwaOfflineMosaics";
@@ -43,7 +42,7 @@ export default function PriwaFieldFlightUi({
         <div
           className="pointer-events-none absolute left-4 z-[55]"
           style={{
-            bottom: "max(44px, calc(env(safe-area-inset-bottom, 0px) + 44px))",
+            bottom: "var(--priwa-flight-bar-bottom)",
           }}
         >
           <PriwaFlightBar
@@ -76,14 +75,7 @@ export default function PriwaFieldFlightUi({
         onSelect={flights.selectFlight}
         isLoading={isLoading}
         isOnline={isOnline}
-        offlineSection={
-          <PriwaOfflineFlightSection
-            offline={offline}
-            selectedFlights={primaryItem ? [primaryItem.mosaic] : []}
-            isOnline={isOnline}
-            onZoomToFlight={onFit}
-          />
-        }
+        offline={offline}
         onClose={onClosePanel}
         onShow={flights.showFlight}
         onHide={flights.hideFlight}

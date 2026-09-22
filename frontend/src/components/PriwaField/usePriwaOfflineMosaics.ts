@@ -31,6 +31,7 @@ export function usePriwaOfflineMosaics(
     null,
   );
   const [error, setError] = useState<string | null>(null);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [persistent, setPersistent] = useState<boolean | null>(null);
   const controller = useRef<AbortController | null>(null);
@@ -57,13 +58,14 @@ export function usePriwaOfflineMosaics(
   useEffect(() => {
     setPlans([]);
     setError(null);
+    setLibraryError(null);
     void refresh().catch((error: unknown) => {
       setStored({
         scope: `${userId}:${projectId}`,
         entries: [],
         files: new Map(),
       });
-      setError(
+      setLibraryError(
         error instanceof Error
           ? error.message
           : "Offline-Dateien konnten nicht gelesen werden.",
@@ -94,16 +96,19 @@ export function usePriwaOfflineMosaics(
     }));
   }, [entries, onlineMosaics, scope, stored]);
 
-  const run = async (operation: (signal: AbortSignal) => Promise<void>) => {
+  const run = async (
+    operation: (signal: AbortSignal) => Promise<void>,
+    onError = setError,
+  ) => {
     if (controller.current) return;
     const abort = new AbortController();
     controller.current = abort;
     setBusy(true);
-    setError(null);
+    onError(null);
     try {
       await operation(abort.signal);
     } catch (error) {
-      setError(
+      onError(
         abort.signal.aborted
           ? "Download abgebrochen. Bereits gespeicherte Befliegungen bleiben erhalten."
           : error instanceof Error
@@ -123,6 +128,7 @@ export function usePriwaOfflineMosaics(
     plans,
     progress,
     error,
+    libraryError,
     busy,
     persistent,
     isLoading:
@@ -155,7 +161,7 @@ export function usePriwaOfflineMosaics(
         if (!userId) return;
         await removePriwaOfflineMosaic(userId, projectId, mosaicId);
         await refresh();
-      }),
+      }, setLibraryError),
     cancel: () => controller.current?.abort(),
     clearPlan: () => setPlans([]),
   };

@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import PriwaFlightDownload from "./PriwaFlightDownload";
 import PriwaFlightBar from "./PriwaFlightBar";
 import PriwaFlightPanel from "./PriwaFlightPanel";
 import PriwaOfflineFlightSection from "./PriwaOfflineFlightSection";
@@ -55,6 +56,7 @@ const offlineState = (
   plans: [],
   progress: null,
   error: null,
+  libraryError: null,
   busy: false,
   isLoading: false,
   persistent: null,
@@ -71,6 +73,7 @@ const noop = () => undefined;
 const panelProps = {
   isLoading: false,
   isOnline: true,
+  offline: offlineState(),
   onClose: noop,
   onShow: noop,
   onSelect: noop,
@@ -132,7 +135,7 @@ describe("PriwaFlightPanel", () => {
   const other = mosaic("c", "Talflug");
   const items = [
     item(primary, { isVisible: true, isPrimary: true, matchedTreeCount: 5 }),
-    item(compare, { isVisible: true }),
+    item(compare),
     item(other, { isAvailable: false }),
   ];
 
@@ -196,23 +199,19 @@ describe("PriwaOfflineFlightSection", () => {
 
   it("explains the full-footprint download and offers to prepare the shown flight", () => {
     const html = renderToStaticMarkup(
-      createElement(PriwaOfflineFlightSection, {
+      createElement(PriwaFlightDownload, {
         offline: offlineState(),
-        selectedFlights: [flight],
+        flight,
         isOnline: true,
-        onZoomToFlight: noop,
       }),
     );
 
-    expect(html).toContain("Komplette Befliegungen, volle Auflösung.");
-    expect(html).toContain("500 MiB");
-    expect(html).toContain("3,0 km²");
     expect(html).toContain("Befliegung offline laden");
   });
 
   it("shows the planned size before an explicit download", () => {
     const html = renderToStaticMarkup(
-      createElement(PriwaOfflineFlightSection, {
+      createElement(PriwaFlightDownload, {
         offline: offlineState({
           plans: [
             {
@@ -224,32 +223,38 @@ describe("PriwaOfflineFlightSection", () => {
             },
           ],
         }),
-        selectedFlights: [flight],
+        flight,
         isOnline: true,
-        onZoomToFlight: noop,
       }),
     );
 
-    expect(html).toContain("Bereit zum Speichern: 312 MiB · 1,8 km²");
-    expect(html).toContain("kein Zuschnitt");
+    expect(html).toContain("312 MiB · 1,8 km² · volle Auflösung");
     expect(html).toContain("Jetzt herunterladen");
     expect(html).toContain("Verwerfen");
   });
 
   it("shows progress with cancellation while downloading", () => {
     const html = renderToStaticMarkup(
-      createElement(PriwaOfflineFlightSection, {
+      createElement(PriwaFlightDownload, {
         offline: offlineState({
           busy: true,
+          plans: [
+            {
+              mosaic: flight,
+              bytes: 400 * 1024 * 1024,
+              areaKm2: 0.2,
+              etag: null,
+              lastModified: null,
+            },
+          ],
           progress: {
             label: "Hangflug Nord",
             downloadedBytes: 100 * 1024 * 1024,
             totalBytes: 400 * 1024 * 1024,
           },
         }),
-        selectedFlights: [flight],
+        flight,
         isOnline: true,
-        onZoomToFlight: noop,
       }),
     );
 
@@ -262,8 +267,6 @@ describe("PriwaOfflineFlightSection", () => {
     const html = renderToStaticMarkup(
       createElement(PriwaOfflineFlightSection, {
         offline: offlineState({ entries: [entry(flight)], persistent: false }),
-        selectedFlights: [flight],
-        isOnline: false,
         onZoomToFlight: noop,
       }),
     );
@@ -277,12 +280,11 @@ describe("PriwaOfflineFlightSection", () => {
     );
     expect(html).toContain("1 von 2 gespeichert · 312 MiB von 500 MiB");
     expect(html).toContain("bei Speichermangel");
-    expect(html).toContain("Bereits offline gespeichert");
   });
 
   it("surfaces failures with a retry", () => {
     const html = renderToStaticMarkup(
-      createElement(PriwaOfflineFlightSection, {
+      createElement(PriwaFlightDownload, {
         offline: offlineState({
           error: "Offline-Download fehlgeschlagen.",
           plans: [
@@ -295,13 +297,33 @@ describe("PriwaOfflineFlightSection", () => {
             },
           ],
         }),
-        selectedFlights: [flight],
+        flight,
         isOnline: true,
-        onZoomToFlight: noop,
       }),
     );
 
     expect(html).toContain("Offline-Download fehlgeschlagen.");
     expect(html).toContain("Erneut versuchen");
+  });
+  it("does not attach another flight's prepared download to the selection", () => {
+    const html = renderToStaticMarkup(
+      createElement(PriwaFlightDownload, {
+        offline: offlineState({
+          plans: [
+            {
+              mosaic: flight,
+              bytes: 1024,
+              areaKm2: 0.2,
+              etag: null,
+              lastModified: null,
+            },
+          ],
+        }),
+        flight: mosaic("b", "Hangflug Süd"),
+        isOnline: true,
+      }),
+    );
+    expect(html).not.toContain("Jetzt herunterladen");
+    expect(html).toContain("Befliegung offline laden");
   });
 });

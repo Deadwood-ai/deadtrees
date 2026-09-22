@@ -156,11 +156,8 @@ export function usePriwaFieldFlights({
         isLoadingFlights: isLoading,
       }),
     showFlight: useCallback(
-      (mosaicId: string) => {
-        setSelectedMosaicId(mosaicId);
-        setMosaicVisibility(mosaicId, true);
-      },
-      [setSelectedMosaicId, setMosaicVisibility],
+      (mosaicId: string) => showOnlyMosaics([mosaicId]),
+      [showOnlyMosaics],
     ),
     hideFlight: useCallback(
       (mosaicId: string) => setMosaicVisibility(mosaicId, false),

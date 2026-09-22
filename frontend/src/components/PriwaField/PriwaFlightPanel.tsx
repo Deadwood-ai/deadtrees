@@ -1,10 +1,13 @@
 import { CloseOutlined, DisconnectOutlined } from "@ant-design/icons";
 import { Button, Input, Select } from "antd";
-import { useRef, useState, type ReactNode } from "react";
+import { useRef, useState } from "react";
 import MapPanelScrollArea from "../MapControls/mobile/MapPanelScrollArea";
 
 import MobileBottomSheet from "../MapControls/mobile/MobileBottomSheet";
 import MobileMapSectionHeading from "../MapControls/mobile/MobileMapSectionHeading";
+import PriwaFlightDownload from "./PriwaFlightDownload";
+import PriwaOfflineFlightSection from "./PriwaOfflineFlightSection";
+import type { PriwaOfflineMosaicsState } from "./usePriwaOfflineMosaics";
 import PriwaFlightDetails from "./PriwaFlightDetails";
 import PriwaFlightList from "./PriwaFlightList";
 import {
@@ -20,7 +23,7 @@ interface PriwaFlightPanelProps {
   items: IPriwaFlightListItem[];
   isLoading: boolean;
   isOnline: boolean;
-  offlineSection?: ReactNode;
+  offline: PriwaOfflineMosaicsState;
   onClose: () => void;
   onShow: (mosaicId: string) => void;
   onSelect: (mosaicId: string) => void;
@@ -43,7 +46,7 @@ export default function PriwaFlightPanel({
   items,
   isLoading,
   isOnline,
-  offlineSection,
+  offline,
   onClose,
   onShow,
   onSelect,
@@ -79,9 +82,15 @@ export default function PriwaFlightPanel({
           onShow={onShow}
           onFit={onFit}
           onHide={onHide}
-        />
+        >
+          <PriwaFlightDownload
+            offline={offline}
+            flight={selectedItem.mosaic}
+            isOnline={isOnline}
+          />
+        </PriwaFlightDetails>
       )}
-      {offlineSection}
+      <PriwaOfflineFlightSection offline={offline} onZoomToFlight={onFit} />
       <section>
         <MobileMapSectionHeading>
           Alle Befliegungen{items.length > 0 ? ` (${items.length})` : ""}

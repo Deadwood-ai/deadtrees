@@ -444,6 +444,11 @@ export default function PriwaPointDrawer({
       className="priwa-point-drawer"
       destroyOnClose={false}
       styles={{
+        header: isEmbedded
+          ? undefined
+          : {
+              paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)",
+            },
         body: {
           overflowX: "hidden",
           overflowY: "auto",

@@ -49,11 +49,15 @@ Android acceptance.
 
 1. Open the flight list, select a flight, fit its footprint and inspect individual
    crowns. Open the flight panel, select a flight without moving the map, and
-   independently show/hide several flights. Hiding a flight retains its selection;
-   zoom keeps the panel open and frames the flight above the compact sheet or
+   show another flight and verify it replaces the previously visible one. Hiding
+   a flight retains its selection; zoom keeps the panel open and frames the flight above the compact sheet or
    beside the landscape panel. Check name/date search, distance sorting, and the
-   persistent scroll indicator with a long flight list.
-2. Download one or two complete flights. The current package limits are 500 MiB
+   persistent scroll indicator with a long flight list. Check that the Warnkarte
+   legend, scale and flight bar do not overlap, and the recording-form header
+   clears the status bar in the installed iPad app.
+2. Prepare and download inside the selected-flight card; switching the selected
+   flight must not offer the previous flight's prepared download. Saved flights
+   remain in the separate offline library. The current package limits are 500 MiB
    and 3 km² combined full footprints. This does not clip a small area out of a
    larger source file. Basemap areas have their own separate cache status.
 3. Wait for the complete-file ready state, go offline, close/reopen the app and
