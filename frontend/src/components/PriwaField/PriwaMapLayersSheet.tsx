@@ -62,6 +62,7 @@ export default function PriwaMapLayersSheet({
       onClose={onClose}
       initialSnap="compact"
       compactRatio={0.38}
+      compactMaxHeight={368}
       expandedRatio={0.7}
       hideFrom="never"
     >
