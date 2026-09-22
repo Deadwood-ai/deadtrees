@@ -122,15 +122,8 @@ function AppWithTracking() {
   const location = useLocation();
 
   useEffect(() => {
-    document
-      .querySelector('link[rel="manifest"]')
-      ?.setAttribute(
-        "href",
-        location.pathname === "/priwa-field"
-          ? "/priwa.webmanifest"
-          : "/manifest.webmanifest",
-      );
-  }, [location.pathname]);
+    window.dispatchEvent(new Event("deadtrees:route-change"));
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     // Initialize PostHog on app load

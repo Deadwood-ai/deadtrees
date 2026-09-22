@@ -3,7 +3,44 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/assets/favicon.png" />
-    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="manifest" />
+    <meta name="apple-mobile-web-app-title" content="deadtrees.earth" />
+    <!-- Select installation metadata before the React bundle or auth redirects run. -->
+    <script id="pwa-install-metadata">
+      (() => {
+        const update = () => {
+          let target = new URL(window.location.href);
+          const authRoutes = [
+            "/sign-in",
+            "/sign-up",
+            "/forgot-password",
+            "/reset-password",
+          ];
+          const returnTo = target.searchParams.get("returnTo");
+          if (authRoutes.includes(target.pathname) && returnTo) {
+            try {
+              const destination = new URL(returnTo, target.origin);
+              if (destination.origin === target.origin) target = destination;
+            } catch {
+              // A malformed return address must not change the app identity.
+            }
+          }
+          const isPriwa = /^\/priwa-field\/?$/.test(target.pathname);
+          document
+            .querySelector('link[rel="manifest"]')
+            .setAttribute(
+              "href",
+              isPriwa ? "/priwa.webmanifest" : "/manifest.webmanifest",
+            );
+          document
+            .querySelector('meta[name="apple-mobile-web-app-title"]')
+            .setAttribute("content", isPriwa ? "PRIWA" : "deadtrees.earth");
+        };
+        update();
+        // React Router announces client-side navigation; this script owns app identity.
+        window.addEventListener("deadtrees:route-change", update);
+      })();
+    </script>
     <link rel="apple-touch-icon" href="/assets/app-icon.png" />
     <link
       rel="stylesheet"
@@ -23,7 +60,6 @@
     <meta name="theme-color" content="#1b5e35" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="deadtrees.earth" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta
       name="description"
