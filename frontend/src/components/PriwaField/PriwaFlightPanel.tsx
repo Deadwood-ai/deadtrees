@@ -1,6 +1,6 @@
 import { CloseOutlined, DisconnectOutlined } from "@ant-design/icons";
 import { Button, Input, Select } from "antd";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import MapPanelScrollArea from "../MapControls/mobile/MapPanelScrollArea";
 
 import MobileBottomSheet from "../MapControls/mobile/MobileBottomSheet";
@@ -34,6 +34,16 @@ interface PriwaFlightPanelProps {
 }
 
 const PANEL_TITLE = "Befliegungen";
+const SORT_OPTIONS: {
+  value: PriwaFlightSort;
+  label: string;
+  /** Shown in the closed select so search and sort share one line. */
+  short: string;
+}[] = [
+  { value: "distance", label: "Nähe zur Kartenmitte", short: "Nähe" },
+  { value: "date", label: "Neueste Aufnahme", short: "Neueste" },
+  { value: "name", label: "Name A–Z", short: "Name" },
+];
 
 /**
  * Field-layout flight chooser: a bottom sheet in portrait, a side panel in
@@ -55,18 +65,29 @@ export default function PriwaFlightPanel({
   onHide,
   onFit,
 }: PriwaFlightPanelProps) {
-  const contentRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<PriwaFlightSort>("distance");
   if (!open) return null;
 
   const filteredItems = filterPriwaFlightItems(items, query, sort, mapCenter);
-  const content = (
-    <div
-      ref={contentRef}
-      data-testid="priwa-flight-panel-content"
-      className="space-y-4"
+  // Pinned above the scrolling list so selecting never moves the list.
+  const selectedFlight = selectedItem && (
+    <PriwaFlightDetails
+      primary={selectedItem}
+      onShow={onShow}
+      onFit={onFit}
+      onHide={onHide}
     >
+      <PriwaFlightDownload
+        key={selectedItem.mosaic.id}
+        offline={offline}
+        flight={selectedItem.mosaic}
+        isOnline={isOnline}
+      />
+    </PriwaFlightDetails>
+  );
+  const content = (
+    <div data-testid="priwa-flight-panel-content" className="space-y-2">
       {!isOnline && (
         <div className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
           <DisconnectOutlined className="mt-0.5 shrink-0" />
@@ -76,61 +97,37 @@ export default function PriwaFlightPanel({
           </span>
         </div>
       )}
-      {selectedItem && (
-        <PriwaFlightDetails
-          primary={selectedItem}
-          onShow={onShow}
-          onFit={onFit}
-          onHide={onHide}
-        >
-          <PriwaFlightDownload
-            offline={offline}
-            flight={selectedItem.mosaic}
-            isOnline={isOnline}
-          />
-        </PriwaFlightDetails>
-      )}
       <PriwaOfflineFlightSection offline={offline} onZoomToFlight={onFit} />
       <section>
         <MobileMapSectionHeading>
           Alle Befliegungen{items.length > 0 ? ` (${items.length})` : ""}
         </MobileMapSectionHeading>
-        <p className="-mt-1 mb-2 text-xs text-slate-500">
-          Name antippen für Details und Download.
-        </p>
-        <div className="mb-3 flex flex-wrap gap-2">
+        <div className="mb-2 flex gap-2">
           <Input
             allowClear
             aria-label="Befliegungen nach Name oder Datum suchen"
-            placeholder="Name oder Datum suchen"
+            placeholder="Name oder Datum"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="min-w-40 flex-1"
+            className="min-w-0 flex-1"
           />
           <Select
             aria-label="Befliegungen sortieren"
             value={sort}
             onChange={setSort}
-            className="min-w-44"
-            options={[
-              { value: "distance", label: "Nähe zur Kartenmitte" },
-              { value: "date", label: "Neueste Aufnahme" },
-              { value: "name", label: "Name A–Z" },
-            ]}
+            className="w-28"
+            popupMatchSelectWidth={false}
+            options={SORT_OPTIONS}
+            labelRender={({ value }) =>
+              SORT_OPTIONS.find((option) => option.value === value)?.short
+            }
           />
         </div>
         <PriwaFlightList
           items={filteredItems}
           selectedId={selectedItem?.mosaic.id ?? null}
           mapCenter={mapCenter}
-          onSelect={(mosaicId) => {
-            onSelect(mosaicId);
-            contentRef.current
-              ?.closest("[data-map-panel-scroll-viewport]")
-              ?.scrollTo({
-                top: 0,
-              });
-          }}
+          onSelect={onSelect}
           onFit={onFit}
           isLoading={isLoading}
           onShow={onShow}
@@ -152,6 +149,7 @@ export default function PriwaFlightPanel({
         expandedRatio={0.86}
         hideFrom="never"
         showScrollIndicator
+        fixedContent={selectedFlight}
       >
         {content}
       </MobileBottomSheet>
@@ -165,18 +163,24 @@ export default function PriwaFlightPanel({
       aria-label={PANEL_TITLE}
       className="priwa-flight-side-panel pointer-events-auto absolute bottom-5 left-4 z-[60] flex w-[20.5rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white/95 shadow-xl backdrop-blur"
     >
-      <header className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-2.5">
-        <h2 className="m-0 text-base font-semibold text-slate-950">
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 py-1.5 pl-4 pr-2">
+        <h2 className="m-0 text-sm font-semibold text-slate-950">
           {PANEL_TITLE}
         </h2>
         <Button
+          type="text"
           shape="circle"
           icon={<CloseOutlined />}
           aria-label="Befliegungen schließen"
           onClick={onClose}
         />
       </header>
-      <MapPanelScrollArea label="Befliegungen scrollen" className="px-3 py-3">
+      {selectedFlight && (
+        <div className="max-h-[45%] shrink-0 overflow-y-auto px-3 pt-2">
+          {selectedFlight}
+        </div>
+      )}
+      <MapPanelScrollArea label="Befliegungen scrollen" className="px-3 py-2">
         {content}
       </MapPanelScrollArea>
     </aside>

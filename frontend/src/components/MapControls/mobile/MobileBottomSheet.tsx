@@ -9,6 +9,8 @@ export type MobileBottomSheetSnap = "compact" | "expanded";
 
 interface MobileBottomSheetProps {
   children: ReactNode;
+  /** Pinned content between the draggable heading and scrolling body. */
+  fixedContent?: ReactNode;
   open: boolean;
   title: string;
   onClose: () => void;
@@ -37,6 +39,7 @@ const hideFromClass = {
 
 const MobileBottomSheet = ({
   children,
+  fixedContent,
   open,
   title,
   onClose,
@@ -175,15 +178,16 @@ const MobileBottomSheet = ({
       data-mobile-bottom-sheet-snap={snap}
     >
       <header
-        className="touch-none select-none border-b border-slate-100 bg-white px-4 pb-3 pt-2"
+        className="shrink-0 touch-none select-none border-b border-slate-100 bg-white px-4 pb-1 pt-1.5"
         onPointerDown={startDrag}
       >
-        <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-slate-300" />
+        <div className="mx-auto mb-0.5 h-1 w-10 rounded-full bg-slate-300" />
         <div className="flex items-center justify-between gap-3">
-          <h2 className="min-w-0 truncate text-base font-semibold text-slate-950">
+          <h2 className="m-0 min-w-0 truncate text-sm font-semibold text-slate-950">
             {title}
           </h2>
           <Button
+            type="text"
             shape="circle"
             icon={<CloseOutlined />}
             aria-label={closeLabel}
@@ -195,10 +199,15 @@ const MobileBottomSheet = ({
           />
         </div>
       </header>
+      {fixedContent && (
+        <div className="max-h-[45%] shrink-0 overflow-y-auto px-3 pt-2">
+          {fixedContent}
+        </div>
+      )}
       {showScrollIndicator ? (
         <MapPanelScrollArea
           label={`${title} scrollen`}
-          className="px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3"
+          className="px-3 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-2"
         >
           {children}
         </MapPanelScrollArea>

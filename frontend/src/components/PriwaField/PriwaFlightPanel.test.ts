@@ -152,7 +152,14 @@ describe("PriwaFlightPanel", () => {
 
     expect(html).toContain('data-mobile-bottom-sheet-snap="expanded"');
     expect(html).toContain("Ausgewählte Befliegung");
+    // The selected flight is pinned above the scrolling list.
+    expect(html.indexOf('data-testid="priwa-flight-details"')).toBeLessThan(
+      html.indexOf("data-map-panel-scroll-viewport"),
+    );
+    expect(html).toContain('aria-label="Befliegung offline laden"');
     expect(html).toContain("5 im Umfeld");
+    expect(html).toContain('data-selected="true"');
+    expect(html).toContain('aria-label="Hangflug Nord auswählen"');
     expect(html).not.toContain("Vergleich");
     expect(html).toContain('aria-label="Auf Hangflug Süd zoomen"');
     expect(html).toContain("Alle Befliegungen (3)");
@@ -260,7 +267,37 @@ describe("PriwaOfflineFlightSection", () => {
 
     expect(html).toContain("Hangflug Nord wird gespeichert");
     expect(html).toContain("100 MiB von 400 MiB");
-    expect(html).toContain("Abbrechen");
+    expect(html).toContain('aria-label="Download abbrechen"');
+  });
+
+  it("only notes another flight's running download", () => {
+    const html = renderToStaticMarkup(
+      createElement(PriwaFlightDownload, {
+        offline: offlineState({
+          busy: true,
+          plans: [
+            {
+              mosaic: flight,
+              bytes: 400 * 1024 * 1024,
+              areaKm2: 0.2,
+              etag: null,
+              lastModified: null,
+            },
+          ],
+          progress: {
+            label: "Hangflug Nord",
+            downloadedBytes: 100 * 1024 * 1024,
+            totalBytes: 400 * 1024 * 1024,
+          },
+        }),
+        flight: mosaic("b", "Hangflug Süd"),
+        isOnline: true,
+      }),
+    );
+
+    expect(html).toContain("Eine andere Befliegung wird gespeichert.");
+    expect(html).not.toContain("wird gespeichert</span>");
+    expect(html).not.toContain('aria-label="Download abbrechen"');
   });
 
   it("lists saved flights with zoom, removal and the eviction notice", () => {

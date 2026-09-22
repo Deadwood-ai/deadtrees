@@ -14,13 +14,20 @@ import { formatPriwaReviewDate } from "./priwaReviewPresentation";
 
 interface PriwaFlightDetailsProps {
   primary: IPriwaFlightListItem;
+  /**
+   * Download slot: a `display: contents` wrapper whose first child is the
+   * action button (third grid column) followed by `col-span-full` status lines.
+   */
   children?: ReactNode;
   onShow: (mosaicId: string) => void;
   onFit: (mosaicId: string) => void;
   onHide: (mosaicId: string) => void;
 }
 
-/** Compact selected flight with secondary metadata available on demand. */
+/**
+ * Pinned card for the selected flight: one action row (zoom, visibility,
+ * download) beside the name, status lines below, metadata on demand.
+ */
 export default function PriwaFlightDetails({
   primary,
   children,
@@ -33,55 +40,57 @@ export default function PriwaFlightDetails({
   return (
     <section
       data-testid="priwa-flight-details"
-      className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-2.5"
+      aria-label="Ausgewählte Befliegung"
+      className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-0.5 gap-y-1 rounded-lg border border-emerald-300 bg-emerald-50 py-1.5 pl-3 pr-1"
     >
-      <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
-            Ausgewählte Befliegung
-          </div>
-          <h3
-            className="my-0.5 line-clamp-2 break-words text-sm font-semibold text-slate-950"
-            title={mosaic.label}
-          >
-            {mosaic.label}
-          </h3>
-          <div className="text-xs text-slate-600">
-            {formatPriwaReviewDate(mosaic.captureDate)} ·{" "}
-            {primary.offlineEntry?.available ? "Offline gespeichert" : "Online"}
-          </div>
+      <div className="min-w-0">
+        <div className="text-[10px] font-semibold uppercase leading-4 tracking-wide text-emerald-700">
+          Ausgewählte Befliegung
         </div>
-        <div className="flex shrink-0 gap-1">
-          <Tooltip title="Auf Befliegung zoomen">
-            <Button
-              size="large"
-              shape="circle"
-              icon={<AimOutlined />}
-              aria-label="Auf Befliegung zoomen"
-              disabled={!mosaic.bbox}
-              onClick={() => onFit(mosaic.id)}
-            />
-          </Tooltip>
-          <Tooltip title={primary.isVisible ? "Ausblenden" : "Einblenden"}>
-            <Button
-              size="large"
-              shape="circle"
-              icon={
-                primary.isVisible ? <EyeInvisibleOutlined /> : <EyeOutlined />
-              }
-              aria-label={`${mosaic.label} ${primary.isVisible ? "ausblenden" : "einblenden"}`}
-              aria-pressed={primary.isVisible}
-              disabled={!primary.isVisible && !primary.isAvailable}
-              onClick={() =>
-                primary.isVisible ? onHide(mosaic.id) : onShow(mosaic.id)
-              }
-            />
-          </Tooltip>
+        <h3
+          className="m-0 truncate text-sm font-semibold leading-5 text-emerald-950"
+          title={mosaic.label}
+        >
+          {mosaic.label}
+        </h3>
+        <div className="truncate text-xs leading-4 text-slate-600">
+          {formatPriwaReviewDate(mosaic.captureDate)}
+          {primary.isVisible ? " · Sichtbar" : ""}
+          {primary.offlineEntry?.available ? " · Offline gespeichert" : ""}
         </div>
       </div>
+      <div className="flex shrink-0 items-center gap-0.5">
+        <Tooltip title="Auf Befliegung zoomen">
+          <Button
+            size="large"
+            type="text"
+            icon={<AimOutlined />}
+            aria-label="Auf Befliegung zoomen"
+            disabled={!mosaic.bbox}
+            onClick={() => onFit(mosaic.id)}
+          />
+        </Tooltip>
+        <Tooltip title={primary.isVisible ? "Ausblenden" : "Einblenden"}>
+          <Button
+            size="large"
+            type={primary.isVisible ? "primary" : "text"}
+            icon={
+              primary.isVisible ? <EyeInvisibleOutlined /> : <EyeOutlined />
+            }
+            aria-label={`${mosaic.label} ${primary.isVisible ? "ausblenden" : "einblenden"}`}
+            aria-pressed={primary.isVisible}
+            disabled={!primary.isVisible && !primary.isAvailable}
+            onClick={() =>
+              primary.isVisible ? onHide(mosaic.id) : onShow(mosaic.id)
+            }
+          />
+        </Tooltip>
+      </div>
       {children}
-      <details className="mt-1 text-xs text-slate-600">
-        <summary className="cursor-pointer py-1">Details</summary>
+      <details className="col-span-full text-xs text-slate-600">
+        <summary className="cursor-pointer select-none py-0.5 text-slate-500">
+          Details
+        </summary>
         <div className="break-words pt-1">{mosaic.label}</div>
         <dl className="mb-0 mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
           <dt>Upload</dt>

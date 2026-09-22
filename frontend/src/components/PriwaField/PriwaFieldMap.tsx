@@ -423,6 +423,7 @@ export default function PriwaFieldMap({
         altShiftDragRotate: false,
       }),
       controls: createStandardMapControls({
+        collapsibleAttribution: true,
         includeZoom: true,
         includeAttribution: true,
         includeScaleLine: true,
