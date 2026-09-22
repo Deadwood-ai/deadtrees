@@ -16,6 +16,7 @@ interface MobileBottomSheetProps {
   onClose: () => void;
   closeLabel?: string;
   compactRatio?: number;
+  compactMaxHeight?: number;
   expandedRatio?: number;
   initialSnap?: MobileBottomSheetSnap;
   /** Tailwind breakpoint above which the sheet is hidden; "never" keeps it on wide field layouts. */
@@ -45,6 +46,7 @@ const MobileBottomSheet = ({
   onClose,
   closeLabel = `Close ${title}`,
   compactRatio = 0.52,
+  compactMaxHeight = Infinity,
   expandedRatio = 0.86,
   initialSnap = "expanded",
   hideFrom = "md",
@@ -77,8 +79,8 @@ const MobileBottomSheet = ({
   }, [initialSnap, open]);
 
   const compactHeight = useMemo(
-    () => Math.round(viewportHeight * compactRatio),
-    [compactRatio, viewportHeight],
+    () => Math.min(compactMaxHeight, Math.round(viewportHeight * compactRatio)),
+    [compactMaxHeight, compactRatio, viewportHeight],
   );
   const closeDragDistance = Math.min(CLOSE_THRESHOLD_PX, compactHeight * 0.4);
   const closeHeight = Math.max(

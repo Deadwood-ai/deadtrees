@@ -162,6 +162,7 @@ export default function PriwaOfflineMapPanel({
         onClose={onClose}
         initialSnap="compact"
         compactRatio={0.28}
+        compactMaxHeight={180}
         expandedRatio={0.7}
         hideFrom="never"
       >

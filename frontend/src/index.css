@@ -171,7 +171,7 @@
   flex-direction: row-reverse;
   align-items: center;
   padding: 0;
-  border-radius: 12px;
+  border-radius: 8px;
   white-space: normal;
 }
 
@@ -212,19 +212,19 @@
 .priwa-field-map .dt-map-attribution-control button:focus {
   display: inline-flex;
   flex-shrink: 0;
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   margin: 0;
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 12px;
+  border-radius: 8px;
   outline: none;
   background: transparent;
   color: #334155;
   cursor: pointer;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 700;
   line-height: 1;
 }
@@ -236,7 +236,7 @@
 
 .priwa-field-map .dt-map-attribution-control:not(.ol-collapsed) button {
   font-family: inherit;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 400;
 }
 
