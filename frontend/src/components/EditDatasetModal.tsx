@@ -6,6 +6,7 @@ import { useUpdateDatasetMetadata, UpdateDatasetMetadataPayload } from "../hooks
 import { useData } from "../hooks/useDataProvider";
 import PickerWithType from "./Upload/PickerWithType";
 import dayjs, { Dayjs } from "dayjs";
+import AdditionalInformationFormItem from "./AdditionalInformationFormItem";
 
 interface Dataset {
   id: number;
@@ -227,12 +228,7 @@ const EditDatasetModal: React.FC<EditDatasetModalProps> = ({ visible, onClose, d
           <Input placeholder="Enter DOI, URL, or publication reference (if applicable)" />
         </Form.Item>
 
-        <Form.Item label="Additional Information" name="additional_information">
-          <Input.TextArea
-            placeholder="Enter project or data information (e.g., project name, data collection context, processing details)"
-            autoSize={{ minRows: 3, maxRows: 6 }}
-          />
-        </Form.Item>
+        <AdditionalInformationFormItem />
 
         <Form.Item>
           <Space>

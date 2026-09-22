@@ -2,6 +2,7 @@ import { Button, Typography } from "antd";
 import { ArrowLeftOutlined, FileTextOutlined } from "@ant-design/icons";
 import { IDataset } from "../../types/dataset";
 import { DatasetAuditUserInfo } from "../../hooks/useDatasetAudit";
+import { sanitizeText } from "../../utils/textUtils";
 
 const { Title, Text } = Typography;
 
@@ -17,6 +18,9 @@ export default function AuditHeader({ dataset, auditData, onCancel }: AuditHeade
 	const location = [dataset.admin_level_3 || dataset.admin_level_2, dataset.admin_level_1]
 		.filter(Boolean)
 		.join(", ");
+	// Uploaders are asked at upload time for the site context auditors need
+	// (season, whether leafless crowns are dead, where mortality is expected).
+	const additionalInformation = sanitizeText(dataset.additional_information).trim();
 
 	return (
 		<div className="flex-shrink-0 border-b border-slate-200 bg-white p-3 shadow-sm">
@@ -35,6 +39,14 @@ export default function AuditHeader({ dataset, auditData, onCancel }: AuditHeade
 					Audit Protocol
 				</a>
 			</div>
+			{additionalInformation && (
+				<Text type="secondary" className="mt-2 block text-xs">
+					<span className="font-medium">Additional information:</span>{" "}
+					<span className="block max-h-24 overflow-y-auto whitespace-pre-wrap break-words text-slate-600">
+						{additionalInformation}
+					</span>
+				</Text>
+			)}
 			{auditData?.uploaded_by_email && (
 				<Text type="secondary" className="mt-1 block text-xs font-medium">
 					Uploaded by: <span className="text-blue-600">{auditData.uploaded_by_email}</span>
