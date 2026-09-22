@@ -150,8 +150,11 @@ export function usePriwaOfflineMosaics(
             ...nextPlans,
           ]);
         } catch (error) {
-          throw new Error(
-            `${error instanceof Error ? error.message : "Speicherlimit erreicht."} Bitte gegebenenfalls eine gespeicherte Befliegung entfernen.`,
+          throw Object.assign(
+            new Error(
+              `${error instanceof Error ? error.message : "Speicherlimit erreicht."} Bitte gegebenenfalls eine gespeicherte Befliegung entfernen.`,
+            ),
+            { cause: error },
           );
         }
         setPlans(nextPlans);
