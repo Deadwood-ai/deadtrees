@@ -34,6 +34,7 @@ import {
   validateZipCompressionMethods,
 } from "../../utils/fileValidation";
 import { isInvalidSessionError } from "../../utils/authSession";
+import AdditionalInformationFormItem from "../AdditionalInformationFormItem";
 
 import { isTokenExpiringSoon } from "../../utils/isTokenExpiringSoon";
 import { clearLocalSupabaseSession, supabase } from "../../hooks/useSupabase";
@@ -503,12 +504,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
               <Input placeholder="Enter DOI, URL, or publication reference (if applicable)" />
             </Form.Item>
 
-            <Form.Item label="Additional Information" name="additional_information">
-              <Input.TextArea
-                placeholder="Enter project or data information (e.g., project name, data collection context, processing details)"
-                autoSize={{ minRows: 2, maxRows: 6 }}
-              />
-            </Form.Item>
+            <AdditionalInformationFormItem />
 
             <Collapse
               ghost
