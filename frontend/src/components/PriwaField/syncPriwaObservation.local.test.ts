@@ -99,17 +99,100 @@ describe.skipIf(process.env.PRIWA_LOCAL_TEST !== "1")(
       });
     });
 
-    it("retains legacy edits with an unknown base revision as conflicts", async () => {
+    it("syncs pre-upgrade updates and deletes using their old overwrite behavior", async () => {
       const creation = createMutation();
       await sync(creation);
-      await expect(
-        sync({
+      const { error } = await client
+        .from("priwa_kaeferbaeume")
+        .update({ kom: "newer server comment" })
+        .eq("id", creation.pointId);
+      expect(error).toBeNull();
+      // Round-trip the old persisted shape: neither revision field is present.
+      const legacy: IPriwaQueuedMutation = JSON.parse(
+        JSON.stringify({
           ...creation,
           type: "update",
-          updatedAt: new Date(Date.now() + 1).toISOString(),
+          point: { ...creation.point!, kom: "old offline edit" },
+          updatedAt: new Date(Date.now() + 10).toISOString(),
         }),
-      ).rejects.toThrow("Konflikt");
+      );
+      expect(legacy.baseUpdatedAt).toBeUndefined();
+      expect(legacy.point?.serverUpdatedAt).toBeUndefined();
+      await sync(legacy);
+      const { data } = await client
+        .from("priwa_kaeferbaeume")
+        .select("kom")
+        .eq("id", creation.pointId)
+        .single();
+      expect(data?.kom).toBe("old offline edit");
+      await sync({
+        ...legacy,
+        type: "delete",
+        point: undefined,
+        updatedAt: new Date(Date.now() + 20).toISOString(),
+      });
+      const remaining = await (
+        await import("./usePriwaKaeferbaeume")
+      ).fetchPriwaKaeferbaeume(projectId);
+      expect(remaining.some((point) => point.id === creation.pointId)).toBe(
+        false,
+      );
     });
+
+    it.each(["create", "update"] as const)(
+      "recovers a lost %s response followed by another local edit",
+      async (type) => {
+        const { coalescePriwaQueuedMutation } =
+          await import("./priwaOfflineSync");
+        const creation = createMutation();
+        const revision = await sync(creation);
+        const attempted =
+          type === "create"
+            ? creation
+            : {
+                ...creation,
+                type: "update" as const,
+                baseUpdatedAt: revision,
+                updatedAt: new Date(Date.now() + 10).toISOString(),
+                point: { ...creation.point!, kom: "first edit" },
+              };
+        if (type === "update") await sync(attempted);
+        // Server committed, but the device only knows it attempted the write.
+        const [next] = coalescePriwaQueuedMutation(
+          [
+            {
+              ...attempted,
+              status: "failed",
+              retryCount: 1,
+              attemptedUpdatedAts: [attempted.updatedAt],
+            },
+          ],
+          {
+            ...attempted,
+            type: "update",
+            status: "pending",
+            retryCount: 0,
+            updatedAt: new Date(Date.now() + 20).toISOString(),
+            point: { ...creation.point!, kom: "second offline edit" },
+          },
+        );
+        await sync(next);
+        const { data } = await client
+          .from("priwa_kaeferbaeume")
+          .select("kom,updated_at")
+          .eq("id", creation.pointId)
+          .single();
+        expect(data?.kom).toBe("second offline edit");
+        const deletion = {
+          ...next,
+          type: "delete" as const,
+          baseUpdatedAt: data?.updated_at,
+          updatedAt: new Date(Date.now() + 30).toISOString(),
+        };
+        await sync(deletion);
+        await expect(sync(deletion)).resolves.toBeDefined();
+      },
+    );
 
     it("does not recreate a missing row from an offline update", async () => {
       const mutation = createMutation();

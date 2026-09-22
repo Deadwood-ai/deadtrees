@@ -24,6 +24,8 @@ export interface IPriwaQueuedMutation {
   status: PriwaQueuedMutationStatus;
   lastError?: string;
   baseUpdatedAt?: string;
+  /** Versions sent before their outcome was acknowledged, including coalesced edits. */
+  attemptedUpdatedAts?: string[];
 }
 
 export interface IPriwaOfflineBasemapArea {

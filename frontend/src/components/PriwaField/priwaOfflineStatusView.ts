@@ -45,9 +45,7 @@ export const getPriwaOfflineStatusView = ({
   }
   if (hasAreas) {
     return {
-      label: isOnline
-        ? "Basiskarte hier nicht offline"
-        : "Basiskarte hier nicht offline",
+      label: "Basiskarte hier nicht offline",
       color: "default",
     };
   }

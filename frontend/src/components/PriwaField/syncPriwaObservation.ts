@@ -27,7 +27,19 @@ export async function syncPriwaObservation(mutation: IPriwaQueuedMutation) {
   )
     return current.updated_at as string;
 
-  if (mutation.type === "create") {
+  // A repeated delete has already achieved its goal when RLS hides the row.
+  if (!current && mutation.type === "delete") return mutation.updatedAt;
+
+  const acknowledgedPrevious =
+    current?.updated_by === mutation.userId &&
+    !!current?.client_updated_at &&
+    (mutation.attemptedUpdatedAts ?? []).some(
+      (timestamp) =>
+        new Date(timestamp).getTime() ===
+        new Date(current.client_updated_at).getTime(),
+    );
+
+  if (mutation.type === "create" && !acknowledgedPrevious) {
     if (current || !mutation.point) throw conflict();
     const { data, error } = await supabase
       .from("priwa_kaeferbaeume")
@@ -41,8 +53,14 @@ export async function syncPriwaObservation(mutation: IPriwaQueuedMutation) {
     return data.updated_at as string;
   }
 
+  // Pre-upgrade queues never stored a server revision. Preserve their previous
+  // overwrite behavior, while still guarding against a write racing this read.
+  // New edits always carry their original revision and retain conflict checks.
   const baseUpdatedAt =
-    mutation.baseUpdatedAt ?? mutation.point?.serverUpdatedAt;
+    (acknowledgedPrevious ? current?.updated_at : undefined) ??
+    mutation.baseUpdatedAt ??
+    mutation.point?.serverUpdatedAt ??
+    current?.updated_at;
   if (!current || !baseUpdatedAt || current.updated_at !== baseUpdatedAt)
     throw conflict();
   const values =

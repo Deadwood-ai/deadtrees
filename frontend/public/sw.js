@@ -38,12 +38,13 @@ self.addEventListener("activate", (event) => {
       .then((cacheNames) =>
         Promise.all(
           cacheNames
-            .filter((cacheName) => cacheName.startsWith("deadtrees-priwa-"))
             .filter(
               (cacheName) =>
-                cacheName === VIEWED_BASEMAP_CACHE ||
-                (cacheName !== APP_SHELL_CACHE &&
-                  !cacheName.startsWith(BASEMAP_CACHE_PREFIX)),
+                (cacheName.startsWith("deadtrees-app-shell-") &&
+                  cacheName !== APP_SHELL_CACHE) ||
+                (cacheName.startsWith("deadtrees-priwa-") &&
+                  (cacheName === VIEWED_BASEMAP_CACHE ||
+                    !cacheName.startsWith(BASEMAP_CACHE_PREFIX))),
             )
             .map((cacheName) => caches.delete(cacheName)),
         ),
@@ -65,10 +66,11 @@ const handleNavigation = async (request) => {
     const response = await fetch(request);
     return cacheSuccessfulResponse(request, response);
   } catch {
+    const cache = await caches.open(APP_SHELL_CACHE);
     return (
-      (await caches.match(request)) ||
-      (await caches.match("/priwa-field")) ||
-      (await caches.match("/")) ||
+      (await cache.match(request)) ||
+      (await cache.match("/priwa-field")) ||
+      (await cache.match("/")) ||
       new Response(
         "deadtrees.earth is offline and the app shell is unavailable.",
         {
@@ -82,7 +84,8 @@ const handleNavigation = async (request) => {
 };
 
 const handleSameOriginAsset = async (request) => {
-  const cachedResponse = await caches.match(request);
+  const cache = await caches.open(APP_SHELL_CACHE);
+  const cachedResponse = await cache.match(request);
   const networkResponsePromise = fetch(request)
     .then((response) => cacheSuccessfulResponse(request, response))
     .catch(

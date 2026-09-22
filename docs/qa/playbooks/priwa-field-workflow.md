@@ -67,6 +67,11 @@ Android acceptance.
    database row with the original values. For an existing point, change its
    server revision before reconnecting: the local edit must remain queued as a
    conflict, without overwriting the newer server state.
+   Independent observations must still sync past that conflict. Pre-upgrade
+   edits without a saved server revision retain the old overwrite behavior;
+   validate both an update and a deletion from the old queue shape. Also retry
+   a committed deletion, and edit a point again after a committed create/update
+   whose response was lost: neither case may strand the queued change.
 5. Cancel a replacement download after bytes arrive and simulate a failed
    replacement. Previously completed files must remain usable; partial files
    must never be offered as ready. Removing flight imagery must preserve queued

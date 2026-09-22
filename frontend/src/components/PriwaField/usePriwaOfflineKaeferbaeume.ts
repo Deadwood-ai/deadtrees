@@ -114,7 +114,7 @@ export function usePriwaOfflineKaeferbaeume(
     setCachedPoints((points) => removeLocalPoint(points, pointId));
   }, []);
 
-  const onQueueDrained = useCallback(async () => {
+  const onSyncFinished = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({
         queryKey: priwaPointsQueryKey(projectId),
@@ -132,7 +132,7 @@ export function usePriwaOfflineKaeferbaeume(
     onQueueUpdated: setQueue,
     onPointSynced,
     onPointDeleted,
-    onQueueDrained,
+    onSyncFinished,
   });
 
   const enqueueMutation = useCallback(

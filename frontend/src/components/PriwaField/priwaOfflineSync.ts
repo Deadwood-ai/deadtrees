@@ -86,6 +86,9 @@ export const coalescePriwaQueuedMutation = (
       ...mutation,
       type,
       baseUpdatedAt: existing?.baseUpdatedAt ?? mutation.baseUpdatedAt,
+      attemptedUpdatedAts:
+        existing?.attemptedUpdatedAts ??
+        (existing && existing.retryCount > 0 ? [existing.updatedAt] : []),
       queuedAt: existing?.queuedAt ?? mutation.queuedAt,
       retryCount: existing?.retryCount ?? 0,
       status: "pending" as const,
