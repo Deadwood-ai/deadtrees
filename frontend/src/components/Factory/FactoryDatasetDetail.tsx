@@ -39,6 +39,11 @@ const STATUS_SCALARS = [
 	"error_message",
 	"updated_at",
 	"created_at",
+	"historical_uploaded_at",
+	"historical_input_bytes",
+	"historical_upload_source",
+	"historical_completed_at",
+	"historical_elapsed_hours",
 	"uploaded_at",
 	"first_ready_at",
 	"input_bytes",
@@ -46,6 +51,11 @@ const STATUS_SCALARS = [
 ];
 const STATUS_LABELS: Record<string, string> = {
 	current_status: "Stage",
+	historical_uploaded_at: "Historical upload evidence (UTC)",
+	historical_input_bytes: "Original input bytes (historical evidence)",
+	historical_upload_source: "Upload evidence source",
+	historical_completed_at: "First recorded completion (may be a rerun)",
+	historical_elapsed_hours: "Upload to recorded completion (hours)",
 	uploaded_at: "Upload completed (measured)",
 	first_ready_at: "First complete result (measured)",
 	input_bytes: "Uploaded input size (measured on server)",

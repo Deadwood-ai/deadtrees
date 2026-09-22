@@ -29,6 +29,10 @@ const NOTIFICATION_LABELS: Record<string, string> = {
 };
 
 const METRIC_LABELS: Record<string, string> = {
+	historical_uploaded: "uploads with historical evidence",
+	historical_completion: "first recorded completions with upload evidence",
+	historical_report: "submitted reports",
+	historical_email: "sent notification recipients",
 	uploaded: "uploads completed",
 	first_ready: "first complete results",
 	failures: "failure episodes",
