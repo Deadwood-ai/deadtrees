@@ -1,23 +1,24 @@
 import { useEffect, useState, useMemo } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { Dayjs } from "dayjs";
 import {
-	Table,
+	Alert,
+	Badge,
 	Button,
-	Result,
-	Spin,
-	Typography,
+	Checkbox,
+	Collapse,
+	DatePicker,
+	Input,
 	message,
+	Result,
+	Segmented,
+	Select,
+	Space,
+	Spin,
+	Table,
 	Tag,
 	Tooltip,
-	Segmented,
-	Input,
-	Space,
-	Checkbox,
-	Select,
-	Collapse,
-	Badge,
-	DatePicker,
+	Typography,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
@@ -27,12 +28,11 @@ import {
 	EditOutlined,
 } from "@ant-design/icons";
 import { useAuth } from "../hooks/useAuthProvider";
-import { useCanAudit } from "../hooks/useUserPrivileges";
+import { useCanAudit, useCanOperate } from "../hooks/useUserPrivileges";
 import { useDatasetById } from "../hooks/useDatasets";
 import { useAuditDatasets } from "../hooks/useAuditDatasets";
 import type { AuditDataset } from "../hooks/useAuditDatasets";
 import DatasetAuditDetail from "../components/DatasetAudit/DatasetAuditDetail";
-import ProcessingAuditTab, { PROCESSING_ACTIVE_STATUSES } from "../components/DatasetAudit/ProcessingAuditTab";
 import { useDatasetAudits, DatasetAuditUserInfo, useDatasetContributors } from "../hooks/useDatasetAudit";
 import { supabase } from "../hooks/useSupabase";
 import { useFlaggedDatasets } from "../hooks/useDatasetFlags";
@@ -41,7 +41,6 @@ import { useAuditNavigation } from "../hooks/useAuditNavigation";
 import { usePendingCorrections } from "../hooks/usePendingCorrections";
 import { palette } from "../theme/palette";
 import { getBiomeEmoji, getBiomeTagColor, truncateBiomeLabel } from "../utils/biomeDisplay";
-import { useProcessingOverview } from "../hooks/useProcessingOverview";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAnalytics } from "../hooks/useAnalytics";
 import { isDatasetReadyForAudit } from "../utils/processingSteps";
@@ -49,7 +48,10 @@ import { isDatasetReadyForAudit } from "../utils/processingSteps";
 const { Title, Text } = Typography;
 
 // Tab structure including edits & flags
-type AuditTab = "pending" | "completed" | "reference" | "edits-flags" | "processing";
+type AuditTab = "pending" | "completed" | "reference" | "edits-flags";
+const AUDIT_TABS: readonly AuditTab[] = ["pending", "completed", "reference", "edits-flags"];
+// The processing view moved to the Factory workspace; the old tab link is still handled.
+const LEGACY_PROCESSING_TAB = "processing";
 
 // Status sub-filter for completed tab
 type CompletedStatusFilter = "all" | "ready" | "fixable" | "excluded" | "needs-review" | "reviewed";
@@ -206,15 +208,12 @@ function DatasetAuditInner() {
 	const { data: referenceDatasetIds = new Set() } = useReferenceDatasetIds();
 	const { data: contributorMap = new Map() } = useDatasetContributors();
 	const { data: correctionsMap = new Map(), isLoading: isCorrectionsLoading } = usePendingCorrections();
-	const {
-		data: processingRows = [],
-		isLoading: isProcessingLoading,
-		isError: isProcessingError,
-		refetch: refetchProcessingRows,
-	} = useProcessingOverview();
+	const { canOperate, isLoading: isOperatePrivilegeLoading } = useCanOperate();
 
 	// Filter states - initialize from URL params
-	const initialTab = (searchParams.get("tab") as AuditTab) || "pending";
+	const requestedTab = searchParams.get("tab");
+	const [legacyProcessingLink] = useState(requestedTab === LEGACY_PROCESSING_TAB);
+	const initialTab: AuditTab = AUDIT_TABS.includes(requestedTab as AuditTab) ? (requestedTab as AuditTab) : "pending";
 	const initialStatus = (searchParams.get("status") as CompletedStatusFilter) || "all";
 	const initialBiome = searchParams.get("biome") || "";
 	const initialCountry = searchParams.get("country") || "";
@@ -236,6 +235,8 @@ function DatasetAuditInner() {
 	const [filtersExpanded, setFiltersExpanded] = useState<boolean>(true);
 	// Update URL when filters change
 	useEffect(() => {
+		// Keep the old processing link intact until we know whether it redirects to the Factory workspace.
+		if (legacyProcessingLink && (isOperatePrivilegeLoading || canOperate)) return;
 		const params = new URLSearchParams();
 		params.set("tab", activeTab);
 		if (statusFilter !== "all") params.set("status", statusFilter);
@@ -246,7 +247,20 @@ function DatasetAuditInner() {
 		if (hasFlagsFilter) params.set("hasFlags", "true");
 		if (idFilter) params.set("id", idFilter);
 		setSearchParams(params, { replace: true });
-	}, [activeTab, statusFilter, biomeFilter, countryFilter, auditorFilter, contributorFilter, hasFlagsFilter, idFilter, setSearchParams]);
+	}, [
+		activeTab,
+		statusFilter,
+		biomeFilter,
+		countryFilter,
+		auditorFilter,
+		contributorFilter,
+		hasFlagsFilter,
+		idFilter,
+		setSearchParams,
+		legacyProcessingLink,
+		isOperatePrivilegeLoading,
+		canOperate,
+	]);
 
 	// Create maps for quick lookup
 	const auditMap = useMemo(() => {
@@ -284,12 +298,6 @@ function DatasetAuditInner() {
 		const contributors = new Set(Array.from(contributorMap.values()).filter(Boolean));
 		return Array.from(contributors).sort() as string[];
 	}, [contributorMap]);
-
-	const processingCount = useMemo(() => {
-		return processingRows.filter((row) =>
-			PROCESSING_ACTIVE_STATUSES.some((status) => status === row.processing_status)
-		).length;
-	}, [processingRows]);
 
 	// Filter datasets based on tab and filters
 	const filteredDatasets = useMemo(() => {
@@ -918,9 +926,23 @@ function DatasetAuditInner() {
 		hasActiveProcessingFilters ||
 		statusFilter !== "all";
 
+	if (legacyProcessingLink && canOperate) {
+		return <Navigate replace to="/factory" />;
+	}
+
 	return (
 		<div className="w-full bg-[#F8FAF9] min-h-[calc(100vh-64px)] pb-24 pt-24 md:pt-28">
 			<div className="mx-auto max-w-[1920px] px-4 md:px-8 xl:px-12">
+				{legacyProcessingLink && !isOperatePrivilegeLoading && !canOperate && (
+					<Alert
+						type="info"
+						showIcon
+						className="mb-6"
+						message="Processing moved to the Factory workspace"
+						description="The processing view now lives in the Factory workspace, which needs operator access. Ask the team if you need it."
+						data-testid="audit-processing-moved"
+					/>
+				)}
 				{/* Header */}
 				<div className="mb-8 flex items-center justify-between">
 					<Title level={2} style={{ margin: 0, fontWeight: 700 }}>
@@ -954,7 +976,6 @@ function DatasetAuditInner() {
 								{ label: `Completed (${completedCount})`, value: "completed" },
 								{ label: `Edits & Flags (${editsFlagsCount})`, value: "edits-flags" },
 								{ label: `Reference (${referenceCount})`, value: "reference" },
-								{ label: `Processing (${processingCount})`, value: "processing" },
 							]}
 						/>
 					) : (
@@ -1002,15 +1023,6 @@ function DatasetAuditInner() {
 								),
 								value: "reference",
 							},
-							{
-								label: (
-									<Space size={6} className="py-1 px-2">
-										<span>⚙️ Processing</span>
-										<Badge count={processingCount} size="small" color={palette.state.warning} showZero overflowCount={BADGE_OVERFLOW_COUNT} />
-									</Space>
-								),
-								value: "processing",
-							},
 							]}
 							size="large"
 						/>
@@ -1018,17 +1030,6 @@ function DatasetAuditInner() {
 				</div>
 
 				<div className="rounded-2xl border border-gray-200/60 bg-white p-6 shadow-sm">
-					{activeTab === "processing" && (
-						<ProcessingAuditTab
-							rows={processingRows}
-							isLoading={isProcessingLoading}
-							isError={isProcessingError}
-							onRefresh={() => void refetchProcessingRows()}
-						/>
-					)}
-
-			{activeTab !== "processing" && (
-				<>
 					{/* Filters Panel */}
 					<Collapse
 						activeKey={filtersExpanded ? ["filters"] : []}
@@ -1234,9 +1235,7 @@ function DatasetAuditInner() {
 						}}
 						scroll={{ x: isMobile ? 860 : 1000 }}
 					/>
-				</>
-			)}
-			</div>
+				</div>
 			</div>
 		</div>
 	);

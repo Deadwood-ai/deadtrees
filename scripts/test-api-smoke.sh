@@ -53,6 +53,11 @@ api_smoke_tests=(
 	api/tests/routers/test_download.py::TestMultiBundleHelpers
 	api/tests/db/test_auditor_flag_review_contract.py
 	api/tests/db/test_operator_monitoring_access.py
+	api/tests/db/test_factory.py
+	api/tests/db/test_factory_measurements.py
+	api/tests/db/test_factory_journey.py
+	api/tests/db/test_factory_operations.py
+	api/tests/db/test_factory_query_plans.py
 	api/tests/db/test_analyst_access.py
 	api/tests/db/test_embedding_replacement.py
 	api/tests/db/test_contributor_status.py

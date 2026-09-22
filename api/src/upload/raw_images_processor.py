@@ -62,6 +62,7 @@ def process_raw_images_upload(dataset: Dataset, upload_target_path: Path, token:
 		dataset_id=dataset.id,
 		current_status=StatusEnum.idle,
 		is_upload_done=True,
+		uploaded_input_bytes=zip_size_bytes,
 		has_error=False,
 	)
 

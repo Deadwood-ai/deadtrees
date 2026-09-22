@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 usage() {
 	cat >&2 <<'USAGE'
-Usage: scripts/qa/seed.sh <qa-base|qa-full|qa-realistic>
+Usage: scripts/qa/seed.sh <qa-base|qa-full|qa-factory|qa-realistic>
 
 Seeds deterministic local-only QA data into the currently selected Supabase DB.
 Source the isolated env first:
@@ -48,6 +48,10 @@ case "$PROFILE" in
 		SEED_FILES=("$REPO_ROOT/supabase/seeds/qa/qa-base.sql")
 		CHECK_FILES=("$REPO_ROOT/scripts/qa/check-fixtures.sql")
 		;;
+	qa-factory)
+		SEED_FILES=("$REPO_ROOT/supabase/seeds/qa/qa-base.sql" "$REPO_ROOT/supabase/seeds/qa/qa-factory.sql")
+		CHECK_FILES=("$REPO_ROOT/scripts/qa/check-fixtures.sql")
+		;;
 	qa-realistic)
 		REALISTIC_SEED_FILE="$REPO_ROOT/.local/qa-packs/realistic/qa-realistic.sql"
 		if [[ ! -f "$REALISTIC_SEED_FILE" ]]; then
@@ -77,7 +81,7 @@ require_local_database_url
 for seed_file in "${SEED_FILES[@]}"; do
 	psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "$seed_file"
 done
-"$REPO_ROOT/scripts/qa/prepare-fixtures.sh" "$PROFILE"
+"$REPO_ROOT/scripts/qa/prepare-fixtures.sh" "${PROFILE/qa-factory/qa-full}"
 for check_file in "${CHECK_FILES[@]}"; do
 	psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "$check_file"
 done

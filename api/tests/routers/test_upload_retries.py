@@ -97,6 +97,7 @@ def test_retries_preserve_bytes_and_replay_final_dataset(upload, auth_token, fil
 		assert after - before == {dataset_id}
 		status = db.table(settings.statuses_table).select('*').eq('dataset_id', dataset_id).single().execute().data
 		assert status['is_upload_done'] is True
+		assert status['uploaded_input_bytes'] == len(content)
 		assert db.table(settings.orthos_table).select('*').eq('dataset_id', dataset_id).execute().data == []
 		if filename.endswith('.zip'):
 			assert len(db.table(settings.raw_images_table).select('*').eq('dataset_id', dataset_id).execute().data) == 1

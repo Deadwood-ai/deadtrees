@@ -149,6 +149,12 @@ describe("sanitizeAnalyticsUrl", () => {
 });
 
 describe("sanitizePostHogCapture", () => {
+  it("redacts contributor searches from Factory autocapture URLs", () => {
+    const event = sanitizePostHogCapture({ event: "$autocapture", properties: {
+      $current_url: "https://deadtrees.earth/factory/datasets?search=contributor%40example.com&page=2",
+    }});
+    expect(event?.properties?.$current_url).toBe("https://deadtrees.earth/factory/datasets?search=%5Bredacted%5D&page=2");
+  });
   it("sanitizes PostHog SDK URL properties before send", () => {
     expect(
       sanitizePostHogCapture({

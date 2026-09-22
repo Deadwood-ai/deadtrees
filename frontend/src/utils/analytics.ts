@@ -470,7 +470,7 @@ export const sanitizeAnalyticsUrl = (url: string): string => {
     parsedUrl.hash = "";
 
     parsedUrl.searchParams.forEach((_value, key) => {
-      if (isSensitiveQueryParam(key)) {
+      if (isSensitiveQueryParam(key) || (parsedUrl.pathname.startsWith("/factory") && key.toLowerCase() === "search")) {
         parsedUrl.searchParams.set(key, "[redacted]");
       }
     });

@@ -202,3 +202,40 @@ def test_unknown_failure_does_not_reuse_an_older_stage(monkeypatch):
 	monkeypatch.setattr('shared.status.use_client', lambda token: _make_recording_client(updates))
 	update_status('token', 123, has_error=True)
 	assert updates[0]['error_stage'] is None
+
+
+@pytest.mark.parametrize('code', ['PGRST204', '42703'])
+def test_upload_completion_survives_measurement_column_rollout(monkeypatch, code):
+	from postgrest.exceptions import APIError
+
+	updates = []
+	attempts = []
+
+	def client(token):
+		attempts.append(token)
+		if len(attempts) == 1:
+			raise APIError({'code': code, 'message': "Could not find the 'uploaded_input_bytes' column", 'details': None, 'hint': None})
+		return _make_recording_client(updates)
+
+	monkeypatch.setattr('shared.status.use_client', client)
+	update_status('token', 123, is_upload_done=True, uploaded_input_bytes=456)
+	assert len(attempts) == 2
+	assert updates[0]['is_upload_done'] is True
+	assert 'uploaded_input_bytes' not in updates[0]
+
+
+@pytest.mark.parametrize('code,message', [
+	('42501', 'permission denied for uploaded_input_bytes'),
+	('PGRST204', "Could not find the 'is_upload_done' column"),
+])
+def test_upload_measurement_does_not_hide_other_schema_or_permission_errors(monkeypatch, code, message):
+	from postgrest.exceptions import APIError
+
+	attempts = []
+	def client(token):
+		attempts.append(token)
+		raise APIError({'code': code, 'message': message, 'details': None, 'hint': None})
+	monkeypatch.setattr('shared.status.use_client', client)
+	with pytest.raises(APIError):
+		update_status('token', 123, is_upload_done=True, uploaded_input_bytes=456)
+	assert len(attempts) == 1

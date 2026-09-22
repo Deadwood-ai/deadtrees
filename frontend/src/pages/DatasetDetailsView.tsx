@@ -26,6 +26,7 @@ import { useCanAudit } from "../hooks/useUserPrivileges";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAnalytics } from "../hooks/useAnalytics";
 import { hasForestCoverPredictionOutput } from "../utils/predictionAvailability";
+import { observeOwnedResult } from "../utils/observeOwnedResult";
 
 import DatasetLayerControlPanel from "../components/DatasetDetailsMap/DatasetLayerControlPanel";
 import EditingSidebar from "../components/DatasetDetailsMap/EditingSidebar";
@@ -197,6 +198,10 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
       });
     }
   }, [dataset, track]);
+
+  useEffect(() => {
+    void observeOwnedResult(dataset, user?.id);
+  }, [dataset, user?.id]);
 
   // Loading state
   if (isLoading) {

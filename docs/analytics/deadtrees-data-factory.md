@@ -78,7 +78,10 @@ This is not one raw count. It should be reported as a small metric stack:
 | Impact | Downloads; release artifact access; publications/DOIs; repeat users; future satellite dataset downloads. | Shows whether the created data is actually used. |
 
 Contributor processing target: results should ideally be available within one
-hour, with two hours as the upper bound for a healthy experience.
+hour, with two hours as an initial healthy-experience reference for typical
+GeoTIFF submissions. Workflow and input size matter; raw-image photogrammetry
+and larger inputs need separately calibrated expectations. These are soft
+operational warnings, never cancellation deadlines.
 
 ## Factory Steps
 
@@ -201,10 +204,13 @@ Each base product action should have at least one durable test or smoke check.
 1. **Weekly headline metric**: use a composite, not a single count. The current
    scorecard should include qualified submissions, successful processing,
    processing lead time, failures/time-to-fix, audited or trusted assets,
-   downloads, publications, validated reference patches, and release usage.
+   downloads, publications, validated reference patches, and release usage. This
+   is the wider product scorecard; the operational Factory overview prioritizes
+   processing throughput, end-to-end waiting and failure recovery.
 2. **Healthy processing lead time**: target one hour from completed upload to
-   processed result. Two hours is the upper bound for a healthy contributor
-   experience.
+   processed result for typical GeoTIFF submissions, with two hours as a soft
+   healthy-experience reference. Calibrate by workflow/size before extending
+   this expectation to raw-image photogrammetry or larger inputs.
 3. **Contributor activation**: processing is completed and the contributor
    views the processed segmentation result for the first time.
 4. **Data-reuser activation**: unresolved. At this stage, contributor outcomes
@@ -222,3 +228,188 @@ Each base product action should have at least one durable test or smoke check.
 8. **Referral loop**: unresolved. Contributor attribution, DOI/citation,
    releases, partner outreach, and newsletter/contact are candidates, but the
    actual loop is not yet clear.
+
+## Operational Factory workspace
+
+The read-only `/factory` workspace separates daily operations from Dataset
+Audit. Access requires the explicit `privileged_users.can_operate` capability;
+existing auditors are not automatically promoted. This capability exposes
+operational metadata across datasets, including owner email and private or
+archived records, through gated RPCs. It does not grant imagery access, audit
+writes or processing controls. Grant it only to trusted internal operators.
+
+The overview puts processing operations first: complete usable results, elapsed
+upload-to-result time, waiting contributors, failure recovery, and successful
+input volume. Daily (28 days) and weekly (12 weeks) event-time charts show
+throughput, not unequal-age upload cohort conversion. Each period links to the
+same server-side event population in the explorer. Current operations remain a
+separate strip; claims and database signals do not establish worker liveness.
+
+### Measurement contract
+
+- `factory_submissions` starts observing registrations after the migration's
+  recorded epoch. A status transition to upload complete records server time and
+  the original file byte count supplied by the upload API. It is after file
+  storage/validation, not the last network byte. No legacy upload times are guessed.
+- First readiness is immutable and follows the established whole-pipeline status
+  contract: upload; ODM for ZIP; ortho, metadata, COG and thumbnail; combined or
+  both legacy predictions; required AOI; idle and no error. It does not prove
+  scientific quality or probe every output URL. Existing imagery authorization
+  remains in force. Later reruns and enrichment never create another first result.
+- Useful input throughput sums original uploaded bytes once at first readiness,
+  displayed as GiB (1,073,741,824 bytes). Missing sizes stay unknown. Existing
+  output sizes in MB and ZIP extracted-image totals are not substitutes.
+- Latency p50/p90 is completed-upload to first readiness, including queueing,
+  processing and recovery. Samples are completed submissions; the waiting count,
+  affected contributors and oldest wait show the unresolved population alongside.
+  Summary values cover all tracked submissions, while charts use event periods.
+- A failure episode opens when an error is persisted, stays open across retry/error
+  clearing, and closes only at full readiness. Internal retries without a persisted
+  error are not fabricated user failures. A later regression can create another
+  episode; charts count episodes, while drill-downs list distinct datasets.
+- The documented 1-hour ideal/2-hour healthy target is a soft operational
+  reference. The initial overdue warning applies only to measured GeoTIFF inputs
+  below 1 GiB; this size cutoff is an explicit initial scope, not a learned duration
+  model. ZIP and larger-input targets need calibration. No warning cancels work.
+- Historical recorded outcomes deduplicate notification recipients by queue task
+  and event type before time filtering. Recording depends on notification settings,
+  so this is recorded activity, not complete execution or submission success.
+  Embedding task mix is descriptive, not a durable rerun/enrichment intent label.
+- Pre-instrumentation measured chart periods are unknown, not zero. Current or
+  partly observed periods are marked partial. History includes archived datasets;
+  hard deletion removes associated measurements. No production backfill is included.
+
+Historical queue wait, execution time and stage efficiency remain unmeasured:
+queue rows are removed and output/runtime records are upserted. Current claim age
+is distinct from upload-to-result lead time. Notification sent state does not prove
+delivery/reading, and download grants do not prove completed transfers. Audit,
+publication and report evidence remains available through investigation/activity.
+
+The explorer filters and paginates the complete dataset collection server-side.
+Operators can investigate status, current queue records, output metadata, recent
+logs, notifications, publications, reports and correction records. Batch
+selection supports copying IDs and timestamped context for an agent task;
+it carries no instruction or authorization to mutate platform state. Future
+operational controls need their own authorization and execution design.
+
+## Connected journey and observed activation
+
+The Factory overview connects current dataset stocks to the contributor journey:
+completed upload, processing, technical result, observed owner visit, repeat
+contribution, and the branch through audit records to publication. AARRR supplies
+the user-outcome lens. Scientific impact is an explicit adaptation of the revenue
+stage; publications, reuse, referrals and financial revenue remain separate facts.
+An audit record is not a quality pass, and published data is not proven reuse.
+
+`factory_journey` provides global weekly flows and first-upload contributor
+cohorts independently of the processing charts' workflow and input-size filters.
+Its current pipeline counts use the same filters as the dataset explorer, exclude
+archived datasets, overlap, and must not be divided into funnel conversion rates.
+Weekly upload and first-result milestones count datasets; publications count
+publication records. History includes archived datasets.
+
+Owner result observations begin prospectively at `activation_started_at`.
+The normal dataset details page calls `factory_record_result_view` only with
+existing optional analytics consent and prediction output flags. The server
+verifies the authenticated owner and complete readiness and records the first
+visit once, with a server timestamp. Operator inspection of somebody else's
+dataset cannot activate that contributor. This is an observed visit to a result
+page, not evidence that map assets loaded or that the contributor understood them.
+The private observation table is accessible only through scoped functions; deletion
+of its dataset or user cascades the observation.
+
+Observed seven-day activation is the first submission's owner visit within seven
+days of that contributor's first completed upload. Its denominator includes only
+elapsed seven-day windows that started after observation became available.
+Missing consent or blocked telemetry makes this a lower bound, never a reliable
+abandonment rate. Thirty-day repeat contribution requires another distinct
+completed upload within thirty days; reruns do not count. Only elapsed thirty-day
+windows enter its denominator. Contributors with known legacy uploaded datasets
+are excluded from first-upload cohorts. Deleted history limits first-ever claims.
+No eligible contributors produces an unavailable rate, not zero percent.
+
+Referral attribution, completed external reuse and revenue are unavailable in this
+read model. Existing analytics event names alone do not establish coverage or a
+verified metric. Local QA seeds deliberately supply synthetic historical owners
+and observations; deployment never reconstructs that history.
+
+## Operator overview and attention order
+
+The overview prioritizes current problems, waiting work and running claims.
+Product-journey and contributor-cohort history are secondary to operational
+investigation. It does not infer a proven system constraint from the largest
+backlog or the oldest timestamp: queue, claim, failure and report clocks differ.
+
+`factory_attention_records` owns the priority reason and its recorded timestamp.
+`factory_operations` and `factory_datasets` share that definition. The explorer
+accepts `sort=attention`; ordinary browsing remains newest first. Priority order:
+confirmed error without an active claim, uncertain status, overdue qualifying
+first-result wait, delivery problem, open report, then silent claim. Within each
+reason, known oldest timestamps sort first, unknown ages last, with dataset ID
+as a stable tie-breaker. Each dataset gets one primary reason while its other
+status, delivery and report facts remain visible.
+
+Failure age comes from an open measured failure episode; legacy error flags do
+not establish a failure start. Uncertain age is the last status update. Overdue
+age starts at measured upload completion and applies only to GeoTIFF inputs
+under 1 GiB exceeding the two-hour end-to-end reference. Delivery age starts at
+the oldest problem notification record, not an inferred failure transition.
+Report age starts at the oldest unresolved report. Silent means no database
+signal for an hour; it neither proves a stuck worker nor outranks known errors.
+
+Waiting summaries use these same unarchived dataset populations as explorer
+filters. They report oldest queue entry, oldest claim, oldest known open failure,
+oldest problematic notification and oldest open report, with explicitly labelled
+clocks. Groups overlap. No worker heartbeat, per-stage residence time, capacity
+or queue-versus-execution history is reconstructed from mutable current state.
+
+## Query cost and scale validation
+
+Factory RPCs remain operator-gated. The performance migration makes private
+filter SQL inlineable, applies metric predicates as set operations, and loads
+rich metadata only for the selected page. Readiness is a pure inline expression;
+adding a function `SET` clause would reintroduce per-row execution. Page hydration
+uses a bounded lateral lookup so the planner cannot expand a 50-row page into a
+full-population metadata join. Dataset pages use custom plans because an ID batch,
+a substring search and a platform-wide attention sort have very different shapes.
+
+Activity counts use narrow source counts. Each indexed source contributes at most
+`offset + limit` candidates before the merged page is sorted. The indexes preserve
+the existing timestamp/kind/text-ID tie ordering. Trend events are reduced to
+buckets once; contributor retention joins uploads by contributor instead of
+rescanning the whole materialized population once per contributor. Interactive
+RPCs disable JIT locally, avoiding compilation pauses when estimated cost rises.
+These settings do not change database-wide configuration or underlying RLS.
+
+Dataset detail histories return the newest 200 records per section, with exact
+`record_totals` and an explicit UI notice for truncated sections. Logs and geometry
+corrections retain their existing 200-record limit and separate total fields.
+Older records remain in the database for agent investigation. No geometry payloads
+or raw imagery are included.
+
+Run `scripts/qa/benchmark-factory.sh 10000` (or `50000`) after bootstrapping the
+isolated stack. The runner accepts only the generated worktree-local DB endpoint,
+adds synthetic users/datasets/logs/notifications in one transaction, gathers plans
+and buffer counts, then rolls back. It is a manual scale check, not a production
+probe or a timing-sensitive CI gate. Inserts can advance sequences and `ANALYZE`
+can change local planner statistics; use only the disposable isolated QA database.
+
+Local PostgreSQL measurements on 2026-09-22 used 10 logs and 2 notification records
+per added dataset. At 10,000 datasets the original default list exceeded 45 seconds;
+attention listing took 10.1 seconds. After query restructuring, measured list and
+attention reads were approximately 35–38 ms, operations 40 ms, ID lookup 10 ms, and
+activity 60 ms. At 50,000 datasets / 500,000 logs / 100,000 notifications, reads in
+the final expanded run were 9–1,623 ms, including offset-9,000 pages, substring search,
+metric filters and contributor cohorts. These are local database execution times,
+not production or network latency guarantees. Permission and semantic tests run
+separately; plan regressions avoid machine-dependent wall-clock assertions.
+
+Exact totals, global aggregates, substring searches and deep offset pagination
+still grow with the relevant population. This is not constant-cost analytics at
+arbitrary scale. Rebenchmark against realistic cardinality/skew and concurrency
+before rollout; use cursor pagination and maintained aggregate tables if measured
+cost exceeds the operational budget as history grows. The browser caches reads
+for 15–60 seconds and does not continuously poll; collapsed journey history is
+requested only when opened.
+
+API and database deploy independently. If PostgREST has not loaded the new input-byte column yet, upload completion retries without that optional measurement; the size remains unknown. Other schema and permission failures still propagate. Contributor cohorts display the last 26 UTC calendar weeks. Factory contributor search terms are redacted from analytics URLs.
