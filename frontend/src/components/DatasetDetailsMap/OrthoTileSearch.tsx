@@ -10,7 +10,6 @@ import {
 
 import { searchTiles, ITileSearchResult } from "../../api/searchEmbeddings";
 import { useDatasetEmbeddingsAvailability } from "../../hooks/useDatasetEmbeddingsAvailability";
-import { useCanAudit } from "../../hooks/useUserPrivileges";
 import { useOrthoTileHighlights } from "./useOrthoTileHighlights";
 
 interface OrthoTileSearchProps {
@@ -75,7 +74,6 @@ export default function OrthoTileSearch({
   const searchRequest = useRef(0);
 
   const { availability } = useDatasetEmbeddingsAvailability(datasetId);
-  const { canAudit } = useCanAudit();
   const unavailable = availability === "unavailable";
   const availabilityError = availability === "error";
   const matchCount = useOrthoTileHighlights(map, tiles);
@@ -100,7 +98,7 @@ export default function OrthoTileSearch({
       setLoading(true);
       setError(null);
       try {
-        const nextTiles = await searchTiles(trimmed, datasetId, canAudit);
+        const nextTiles = await searchTiles(trimmed, datasetId);
         if (searchRequest.current === requestId) setTiles(nextTiles);
       } catch (e) {
         if (searchRequest.current === requestId) {
@@ -110,7 +108,7 @@ export default function OrthoTileSearch({
         if (searchRequest.current === requestId) setLoading(false);
       }
     },
-    [availability, datasetId, clearHighlights, canAudit],
+    [availability, datasetId, clearHighlights],
   );
 
   // Auto-run a query forwarded from the dataset list, once the map is ready.
