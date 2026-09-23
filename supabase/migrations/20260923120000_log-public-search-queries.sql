@@ -26,4 +26,9 @@ alter table "public"."v2_search_queries" alter column "user_id" drop default;
 alter table "public"."v2_search_queries"
   add column "is_anonymous" boolean not null default false;
 
+-- The API writes is_anonymous on its very first insert after deploy, so
+-- PostgREST must see the new column immediately rather than on its next cache
+-- refresh; otherwise every logged query is rejected as an unknown column.
+NOTIFY pgrst, 'reload schema';
+
 COMMIT;
