@@ -4,6 +4,11 @@ import { supabase } from "../hooks/useSupabase";
 // Open-vocabulary search is deliberately split across two boundaries:
 // the public, rate-limited API embeds text; the public Supabase RPC ranks only
 // datasets visible to the caller (anonymous visitors included).
+//
+// Query-text analytics belong to the first boundary: the API logs the query it
+// served with its service role. The browser never writes the log itself, which
+// is what lets public queries be recorded without exposing the table to anyone
+// holding the (public) anon key.
 
 export interface IDatasetSearchResult {
   dataset_id: number;
@@ -18,12 +23,27 @@ export interface ITileSearchResult {
   geometry: GeoJSON.Polygon;
 }
 
-/** Encode a query string into a pgvector literal via the public API. */
-export async function embedQuery(query: string): Promise<string> {
+/**
+ * Encode a query string into a pgvector literal via the public API.
+ *
+ * `datasetId` scopes the query in the API's analytics log; it is null for the
+ * global archive search. The bearer token is sent when the visitor happens to
+ * be signed in, so the log can attribute the query - the endpoint itself is
+ * public and serves anonymous callers the same way.
+ */
+export async function embedQuery(
+  query: string,
+  datasetId: number | null = null,
+): Promise<string> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
   const response = await fetch(`${Settings.API_URL}/search/embed`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
+    headers: {
+      "Content-Type": "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+    body: JSON.stringify({ query, dataset_id: datasetId }),
   });
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as {
@@ -37,29 +57,9 @@ export async function embedQuery(query: string): Promise<string> {
   return data.embedding;
 }
 
-/**
- * Best-effort analytics for successful auditor searches. Public query text is
- * never logged: RLS accepts only auditor-owned rows, so other callers skip the
- * insert. Logging failures never turn a valid search into an error.
- */
-function logSuccessfulSearch(
-  query: string,
-  datasetId: number | null,
-  logQuery: boolean,
-): void {
-  if (!logQuery) return;
-  void supabase
-    .from("v2_search_queries")
-    .insert({ query, dataset_id: datasetId })
-    .then(({ error }) => {
-      if (error) console.debug("search query logging failed", error.message);
-    });
-}
-
-/** Rank datasets visible to the caller. `logQuery` must only be set for auditors. */
+/** Rank datasets visible to the caller. */
 export async function searchDatasets(
   query: string,
-  logQuery = false,
   matchCount = 100,
   minSimilarity = 0,
 ): Promise<IDatasetSearchResult[]> {
@@ -70,24 +70,21 @@ export async function searchDatasets(
     min_similarity: minSimilarity,
   });
   if (error) throw new Error(error.message || "Dataset search failed");
-  logSuccessfulSearch(query, null, logQuery);
   return (data ?? []) as IDatasetSearchResult[];
 }
 
-/** Rank visible in-AOI tiles of one dataset. `logQuery` must only be set for auditors. */
+/** Rank visible in-AOI tiles of one dataset. */
 export async function searchTiles(
   query: string,
   datasetId: number,
-  logQuery = false,
   matchCount = 300,
 ): Promise<ITileSearchResult[]> {
-  const embedding = await embedQuery(query);
+  const embedding = await embedQuery(query, datasetId);
   const { data, error } = await supabase.rpc("search_tiles_by_embedding", {
     query_embedding: embedding,
     p_dataset_id: datasetId,
     match_count: matchCount,
   });
   if (error) throw new Error(error.message || "Tile search failed");
-  logSuccessfulSearch(query, datasetId, logQuery);
   return (data ?? []) as ITileSearchResult[];
 }

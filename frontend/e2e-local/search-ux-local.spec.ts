@@ -208,6 +208,9 @@ const fulfillSupabaseRequest = async (
     return;
   }
 
+  // The browser must never write here: query-text analytics are the API's job
+  // (see 20260923120000_log-public-search-queries.sql). Recorded so the tests
+  // below can assert the write never happens rather than silently passing.
   if (resource === "v2_search_queries") {
     if (method === "POST") {
       const payload = request.postDataJSON();
@@ -318,7 +321,7 @@ test.describe("search UX (local)", () => {
     );
   });
 
-  test("a successful search embeds, ranks, then records analytics", async ({
+  test("a successful search embeds, then ranks, and never writes the query log", async ({
     page,
   }) => {
     await installAuditor(page);
@@ -326,30 +329,23 @@ test.describe("search UX (local)", () => {
 
     await runSemanticSearch(page, "clearcut");
 
-    await expect.poll(() => loggedQueries.length).toBe(1);
-    expect(embedRequests).toEqual([{ query: "clearcut" }]);
+    // The archive search is unscoped, so the API logs it without a dataset.
+    expect(embedRequests).toEqual([{ query: "clearcut", dataset_id: null }]);
     expect(rpcRequests).toHaveLength(1);
     expect(rpcRequests[0]).toMatchObject({
       name: "search_datasets_by_embedding",
       body: { query_embedding: "[1,0,0]" },
     });
-    expect(loggedQueries[0]).toMatchObject({
-      query: "clearcut",
-      dataset_id: null,
-    });
-    expect(searchEvents.slice(0, 3)).toEqual([
-      "embed",
-      "dataset-rpc",
-      "log",
-    ]);
+    expect(searchEvents.slice(0, 2)).toEqual(["embed", "dataset-rpc"]);
+    expect(loggedQueries).toHaveLength(0);
 
     await page.getByRole("textbox", { name: "AI search", exact: true }).press("Enter");
-    await expect.poll(() => loggedQueries.length).toBe(2);
-    expect(embedRequests).toHaveLength(2);
+    await expect.poll(() => embedRequests.length).toBe(2);
     expect(rpcRequests).toHaveLength(2);
+    expect(loggedQueries).toHaveLength(0);
   });
 
-  test("a failed ranking RPC is not recorded as a successful search", async ({
+  test("a failed ranking RPC surfaces its error without writing the query log", async ({
     page,
   }) => {
     await installAuditor(page);
@@ -364,7 +360,7 @@ test.describe("search UX (local)", () => {
     await expect(
       page.getByText("canceling statement due to statement timeout"),
     ).toBeVisible();
-    expect(embedRequests).toEqual([{ query: "forest" }]);
+    expect(embedRequests).toEqual([{ query: "forest", dataset_id: null }]);
     expect(loggedQueries).toHaveLength(0);
   });
 
@@ -410,7 +406,7 @@ test.describe("search UX (local)", () => {
     );
   });
 
-  test("non-auditors can run AI search but their queries are never logged", async ({
+  test("non-auditors can run AI search without the browser writing the query log", async ({
     page,
   }) => {
     await installAuditor(page, false);
@@ -422,7 +418,7 @@ test.describe("search UX (local)", () => {
     await expect(
       page.getByTestId("dataset-semantic-score").first(),
     ).toBeVisible();
-    expect(embedRequests).toEqual([{ query: "forest" }]);
+    expect(embedRequests).toEqual([{ query: "forest", dataset_id: null }]);
     expect(
       rpcRequests.filter((r) => r.name === "search_datasets_by_embedding"),
     ).toHaveLength(1);

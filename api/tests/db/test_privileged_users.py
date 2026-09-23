@@ -182,31 +182,40 @@ def test_authenticated_user_cannot_promote_themselves(setup_privileged_users, te
 		assert response.data == []
 
 
-def test_non_auditor_cannot_write_search_query_log(setup_privileged_users, test_user2):
-	"""Search is public, but query-text analytics remain restricted to auditors."""
-	user_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+@pytest.mark.parametrize(
+	'email_setting, password_setting',
+	[('TEST_USER_EMAIL', 'TEST_USER_PASSWORD'), ('TEST_USER_EMAIL2', 'TEST_USER_PASSWORD2')],
+)
+def test_no_browser_client_can_write_search_query_log(setup_privileged_users, email_setting, password_setting):
+	"""Only the API's service role writes the log - auditors included.
+
+	Search is public, so the browser must have no write path here at all:
+	otherwise the same grant would be reachable with the public anon key.
+	"""
+	user_token = login(getattr(settings, email_setting), getattr(settings, password_setting), use_cached_session=False)
 
 	with use_client(user_token) as client:
-		with pytest.raises(Exception, match='row-level security'):
-			client.table('v2_search_queries').insert(
-				{'query': 'bypass attempt', 'user_id': test_user2}
-			).execute()
+		with pytest.raises(Exception, match='permission denied|row-level security'):
+			client.table('v2_search_queries').insert({'query': 'bypass attempt'}).execute()
 
 
-def test_auditor_can_log_and_read_successful_search(setup_privileged_users):
-	"""The browser may record a successful search attributed to its auditor."""
+def test_service_role_logs_anonymous_search_and_auditors_can_read_it(setup_privileged_users):
+	"""The API records public query text; reads stay restricted to auditors."""
 	row_id = None
 	try:
-		user_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
-		with use_client(user_token) as client:
+		with use_service_client() as client:
 			response = client.table('v2_search_queries').insert(
-				{'query': 'standing dead trees'}
+				{'query': 'standing dead trees', 'user_id': None, 'is_anonymous': True}
 			).execute()
 			row_id = response.data[0]['id']
+
+		auditor_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
+		with use_client(auditor_token) as client:
 			response = client.table('v2_search_queries').select('*').eq('id', row_id).execute()
 			assert len(response.data) == 1
 			assert response.data[0]['query'] == 'standing dead trees'
-			assert response.data[0]['user_id'] == setup_privileged_users['test_user_id']
+			assert response.data[0]['user_id'] is None
+			assert response.data[0]['is_anonymous'] is True
 	finally:
 		if row_id is not None:
 			with use_service_client() as client:
