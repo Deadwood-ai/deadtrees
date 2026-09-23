@@ -300,6 +300,57 @@ def test_download_dataset_blocks_viewonly_full_download(auth_token, viewonly_tes
 	assert 'view-only' in response.json()['detail']
 
 
+def _download_requests(dataset_id):
+	from shared.db import use_service_client
+
+	with use_service_client() as service_client:
+		rows = (
+			service_client.table('dataset_download_requests')
+			.select('kind,user_id,source')
+			.eq('dataset_id', dataset_id)
+			.execute()
+		)
+	return rows.data
+
+
+def test_accepted_download_request_is_recorded_for_reuse_metrics(auth_token, test_dataset_for_download, test_user):
+	"""Accepted bundle and labels requests leave one Factory download row each."""
+	for path, kind in (('dataset.zip', 'dataset'), ('labels.gpkg', 'labels')):
+		response = client.get(
+			f'/api/v1/download/datasets/{test_dataset_for_download}/{path}',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		assert response.status_code == 200
+
+	rows = _download_requests(test_dataset_for_download)
+	assert sorted(row['kind'] for row in rows) == ['dataset', 'labels']
+	assert {row['user_id'] for row in rows} == {str(test_user)}
+	assert {row['source'] for row in rows} == {'api'}
+
+
+def test_rejected_download_request_is_not_recorded(auth_token, viewonly_test_dataset_for_download):
+	response = client.get(
+		f'/api/v1/download/datasets/{viewonly_test_dataset_for_download}/dataset.zip',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	assert response.status_code == 403
+	assert _download_requests(viewonly_test_dataset_for_download) == []
+
+
+def test_download_request_recording_failure_does_not_block_download(auth_token, test_dataset_for_download, monkeypatch):
+	from api.src.routers import download as download_router
+
+	def unavailable():
+		raise ValueError('SUPABASE_SERVICE_ROLE_KEY is required for service-role database access')
+
+	monkeypatch.setattr(download_router, 'use_service_client', unavailable)
+	response = client.get(
+		f'/api/v1/download/datasets/{test_dataset_for_download}/dataset.zip',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	assert response.status_code == 200
+
+
 def test_download_labels_allows_viewonly_dataset(auth_token, test_dataset_with_label):
 	"""View-only datasets should still allow labels/predictions download flow."""
 	dataset_id = test_dataset_with_label

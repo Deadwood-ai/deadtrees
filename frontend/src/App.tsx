@@ -43,6 +43,9 @@ const FactoryLayout = lazy(() => import("./components/Factory/FactoryLayout"));
 const FactoryOverview = lazy(
   () => import("./components/Factory/FactoryOverview"),
 );
+const FactoryOperations = lazy(
+  () => import("./components/Factory/FactoryOperations"),
+);
 const FactoryDatasets = lazy(
   () => import("./components/Factory/FactoryDatasets"),
 );
@@ -179,6 +182,7 @@ function AppWithTracking() {
           {/* Internal read-only operations workspace; gated by can_operate */}
           <Route path="factory" element={<FactoryLayout />}>
             <Route index element={<FactoryOverview />} />
+            <Route path="operations" element={<FactoryOperations />} />
             <Route path="datasets" element={<FactoryDatasets />} />
             <Route path="datasets/:id" element={<FactoryDatasetDetail />} />
             <Route path="activity" element={<FactoryActivity />} />

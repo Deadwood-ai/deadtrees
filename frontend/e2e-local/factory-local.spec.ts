@@ -510,10 +510,10 @@ test.describe("factory local e2e", () => {
     expect(rpcCalls.filter((call) => call.name.startsWith("factory_"))).toHaveLength(0);
   });
 
-  test("operator overview shows freshness, workers and drills into the exact filtered list", async ({ page }) => {
+  test("operations shows freshness, workers and drills into the exact filtered list", async ({ page }) => {
     await installOperator(page, { canOperate: true });
 
-    await page.goto("/factory");
+    await page.goto("/factory/operations");
     await dismissCookieBanner(page);
 
     await expect(page.getByRole("menuitem", { name: "Factory" })).toBeVisible();
@@ -564,7 +564,7 @@ test.describe("factory local e2e", () => {
     await expect(waiting.getByTestId("waiting-delivery")).toContainText("oldest");
     await expect(waiting.getByTestId("waiting-reports")).toHaveAttribute("href", "/factory/datasets?reports=open&sort=attention");
     await expect(page.getByTestId("factory-workers")).toContainText("Running now");
-    await expect(page.getByTestId("factory-overview")).not.toContainText("Acquisition");
+    await expect(page.getByTestId("factory-operations")).not.toContainText("Acquisition");
     await expect(page.getByTestId("factory-history")).toHaveCount(0);
     expect(rpcCalls.filter((call) => call.name === "factory_journey")).toHaveLength(0);
 
@@ -596,8 +596,8 @@ test.describe("factory local e2e", () => {
 
     await page.getByTestId("factory-attention").getByRole("link", { name: "#5059" }).click();
     await expect(page.getByRole("heading", { name: "Dataset #5059" })).toBeVisible();
-    await expect(page.getByTestId("factory-detail-back")).toHaveText("← Back to overview");
-    await expect(page.getByTestId("factory-detail-back")).toHaveAttribute("href", "/factory");
+    await expect(page.getByTestId("factory-detail-back")).toHaveText("← Back to operations");
+    await expect(page.getByTestId("factory-detail-back")).toHaveAttribute("href", "/factory/operations");
     await page.getByTestId("factory-detail-back").click();
     await expect(page.getByTestId("factory-attention")).toBeVisible();
     await expect(page.getByTestId("factory-workers").getByTestId("factory-freshness")).toContainText("2026-01-06 09:00 UTC");
@@ -800,10 +800,10 @@ test.describe("factory local e2e", () => {
     await expect(activityTable.getByText("10.1000/example")).toBeVisible();
   });
 
-  test("overview without measured outcomes says so instead of showing zeros", async ({ page }) => {
+  test("operations without measured outcomes says so instead of showing zeros", async ({ page }) => {
     await installOperator(page, { canOperate: true, trendsMode: "empty" });
 
-    await page.goto("/factory");
+    await page.goto("/factory/operations");
     await dismissCookieBanner(page);
 
     await expect(page.getByTestId("factory-outcomes")).toContainText("Measurement has not started yet");
@@ -817,7 +817,7 @@ test.describe("factory local e2e", () => {
   test("journey without data says so instead of showing zeros", async ({ page }) => {
     await installOperator(page, { canOperate: true, journeyMode: "empty" });
 
-    await page.goto("/factory");
+    await page.goto("/factory/operations");
     await dismissCookieBanner(page);
 
     await page.getByText("History and outcomes after the result").click();
@@ -826,10 +826,10 @@ test.describe("factory local e2e", () => {
     await expect(page.getByTestId("factory-journey-outcomes")).toContainText("from an unknown date");
   });
 
-  test("overview without attention items says so and keeps waiting counts honest", async ({ page }) => {
+  test("operations without attention items says so and keeps waiting counts honest", async ({ page }) => {
     await installOperator(page, { canOperate: true, operationsMode: "empty" });
 
-    await page.goto("/factory");
+    await page.goto("/factory/operations");
     await dismissCookieBanner(page);
 
     await expect(page.getByTestId("factory-attention")).toContainText("Nothing needs attention right now");
@@ -839,10 +839,10 @@ test.describe("factory local e2e", () => {
   test("attention list survives a failed refresh with a stale warning", async ({ page }) => {
     await installOperator(page, { canOperate: true, operationsMode: "refetch-fails" });
 
-    await page.goto("/factory");
+    await page.goto("/factory/operations");
     await dismissCookieBanner(page);
     await expect(page.getByTestId("factory-attention-summary")).toContainText("3 datasets");
-    await page.getByTestId("factory-overview").getByRole("button", { name: "Refresh" }).first().click();
+    await page.getByTestId("factory-operations").getByRole("button", { name: "Refresh" }).first().click();
     await expect(page.getByTestId("factory-operations-stale")).toBeVisible();
     await expect(page.getByTestId("factory-attention-summary")).toContainText("3 datasets");
   });
@@ -850,7 +850,7 @@ test.describe("factory local e2e", () => {
   test("trend charts survive a failed refresh with a stale warning", async ({ page }) => {
     await installOperator(page, { canOperate: true, trendsMode: "refetch-fails" });
 
-    await page.goto("/factory");
+    await page.goto("/factory/operations");
     await dismissCookieBanner(page);
     await expect(page.getByTestId("factory-trend-freshness")).toContainText("2026-01-06 09:00 UTC");
     await expect(page.getByTestId("factory-trend-stale")).toHaveCount(0);
@@ -860,23 +860,26 @@ test.describe("factory local e2e", () => {
     await expect(page.getByTestId("factory-outcomes-results")).toContainText("Tracked uploads");
   });
 
-  test("overview reads well on a phone", async ({ page }) => {
+  test("operations reads well on a phone", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await installOperator(page, { canOperate: true });
 
-    await page.goto("/factory");
+    await page.goto("/factory/operations");
     await dismissCookieBanner(page);
 
     await expect(page.getByTestId("factory-attention")).toBeVisible();
     const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(pageWidth).toBeLessThanOrEqual(390);
-    await page.screenshot({ path: process.env.FACTORY_SHOT_DIR ? `${process.env.FACTORY_SHOT_DIR}/overview-phone.png` : "test-results/overview-phone.png", fullPage: true });
+    await page.screenshot({ path: process.env.FACTORY_SHOT_DIR ? `${process.env.FACTORY_SHOT_DIR}/operations-phone.png` : "test-results/operations-phone.png", fullPage: true });
   });
 
   test("read-model errors show a retry, and permission errors show the denial state", async ({ page }) => {
     await installOperator(page, { canOperate: true, rpcMode: "failing" });
     await page.goto("/factory");
     await dismissCookieBanner(page);
+    await expect(page.getByText("Could not load north-star outcomes")).toBeVisible();
+    await expect(page.getByTestId("factory-attention-line")).toContainText("Could not check what needs attention.");
+    await page.goto("/factory/operations");
     await expect(page.getByText("Could not load the attention list")).toBeVisible();
     await expect(page.getByRole("button", { name: "Try again" }).first()).toBeVisible();
     await expect(page.getByText("Could not load running claims")).toBeVisible();
@@ -889,7 +892,7 @@ test.describe("factory local e2e", () => {
 
 test("historical coverage, year selection and evidence drilldown", async ({ page }) => {
   await installOperator(page, { canOperate: true });
-  await page.goto("/factory");
+  await page.goto("/factory/operations");
   await dismissCookieBanner(page);
   const history = page.getByTestId("factory-historical-activity");
   await expect(history.getByTestId("factory-history-coverage")).toContainText("40 / 60");
@@ -910,7 +913,7 @@ test("historical coverage, year selection and evidence drilldown", async ({ page
 for (const mode of ["empty", "malformed"] as const) {
   test(`historical response ${mode} stays contained`, async ({ page }) => {
     await installOperator(page, { canOperate: true, historyMode: mode });
-    await page.goto("/factory");
+    await page.goto("/factory/operations");
     await dismissCookieBanner(page);
     const history = page.getByTestId("factory-historical-activity");
     await expect(history).toContainText(mode === "empty" ? "No historical intervals were returned." : "Historical activity returned an incomplete response.");

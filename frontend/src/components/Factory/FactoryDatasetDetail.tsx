@@ -176,8 +176,8 @@ export default function FactoryDatasetDetail() {
 	const { id } = useParams();
 	const location = useLocation();
 	const previousList = location.state?.factoryReturnTo;
-	const returnTo = typeof previousList === "string" && /^\/factory(?:\/datasets)?(?:\?|$)/.test(previousList) ? previousList : "/factory/datasets";
-	const returnLabel = /^\/factory(?:\?|$)/.test(returnTo) ? "← Back to overview" : "← Back to datasets";
+	const returnTo = typeof previousList === "string" && /^\/factory(?:\/datasets|\/operations)?(?:\?|$)/.test(previousList) ? previousList : "/factory/datasets";
+	const returnLabel = /^\/factory\/operations(?:\?|$)/.test(returnTo) ? "← Back to operations" : /^\/factory(?:\?|$)/.test(returnTo) ? "← Back to overview" : "← Back to datasets";
 	const datasetId = id && /^\d+$/.test(id) ? Number(id) : null;
 	const query = useFactoryDataset(datasetId);
 	const now = useNow();

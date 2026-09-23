@@ -52,6 +52,10 @@ rollback to probe;
 savepoint probe;
 explain(analyze,buffers,summary) select factory_journey();
 rollback to probe;
+\echo NORTH_STAR
+savepoint probe;
+explain(analyze,buffers,summary) select factory_north_star(false);
+rollback to probe;
 \echo ACTIVITY
 savepoint probe;
 explain(analyze,buffers,summary) select factory_activity('all',50,0);

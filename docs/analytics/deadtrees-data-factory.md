@@ -201,18 +201,19 @@ Each base product action should have at least one durable test or smoke check.
 
 ## Current Decisions
 
-1. **Weekly headline metric**: use a composite, not a single count. The current
-   scorecard should include qualified submissions, successful processing,
-   processing lead time, failures/time-to-fix, audited or trusted assets,
-   downloads, publications, validated reference patches, and release usage. This
-   is the wider product scorecard; the operational Factory overview prioritizes
-   processing throughput, end-to-end waiting and failure recovery.
+1. **Weekly headline metric**: weekly complete results from external
+   contributors, meaning uploads that reached their first complete result that
+   week. It sits on top of a small stack of supporting outcomes (funnel,
+   activation, 7-day reach, upload-to-result time, retention, reuse downloads,
+   reference data). See [North-star overview](#north-star-overview).
 2. **Healthy processing lead time**: target one hour from completed upload to
    processed result for typical GeoTIFF submissions, with two hours as a soft
    healthy-experience reference. Calibrate by workflow/size before extending
    this expectation to raw-image photogrammetry or larger inputs.
-3. **Contributor activation**: processing is completed and the contributor
-   views the processed segmentation result for the first time.
+3. **Contributor activation**: the overview reports signup-to-first-upload
+   within 30 days, which is measurable for every account. The narrower "owner
+   views the processed result" activation is still observed with consent and
+   shown in the Operations journey section.
 4. **Data-reuser activation**: unresolved. At this stage, contributor outcomes
    are more important. Downloads and release usage should still be measured,
    but analytics should separate contributor downloads from non-contributor
@@ -238,7 +239,9 @@ operational metadata across datasets, including owner email and private or
 archived records, through gated RPCs. It does not grant imagery access, audit
 writes or processing controls. Grant it only to trusted internal operators.
 
-The overview puts processing operations first: complete usable results, elapsed
+The Overview answers whether the platform is doing its job (see
+[North-star overview](#north-star-overview)). The Operations tab puts processing
+operations first: complete usable results, elapsed
 upload-to-result time, waiting contributors, failure recovery, and successful
 input volume. Daily (28 days) and weekly (12 weeks) event-time charts show
 throughput, not unequal-age upload cohort conversion. Each period links to the
@@ -333,9 +336,43 @@ read model. Existing analytics event names alone do not establish coverage or a
 verified metric. Local QA seeds deliberately supply synthetic historical owners
 and observations; deployment never reconstructs that history.
 
-## Operator overview and attention order
+## North-star overview
 
-The overview prioritizes current problems, waiting work and running claims.
+`factory_north_star(p_include_team)` feeds the `/factory` Overview. It returns
+13 weekly buckets (the last is running and never drives a headline), 12 monthly
+signup and first-upload cohorts, and a stage breakdown for uploads that missed
+seven days. The Overview compares the latest complete week with the one before
+and colours each change by the metric's good direction.
+
+- **Team**: accounts with `privileged_users.can_audit`. Excluded by default:
+  their signups, uploads, the audits and publications of datasets they own, and
+  their download requests. Auditor-owned datasets are about 70% of all uploads,
+  so the toggle changes the picture substantially.
+- **Complete results**: first readiness per dataset, from `factory_submissions`
+  when measured, otherwise the first `processing_completed` notification after
+  upload. Uploads before notifications were recorded never count, because their
+  first recorded completion can be a rerun.
+- **No result within 7 days**: share of a week's observable uploads without a
+  result seven days later, including late results. The stage breakdown shows
+  the first required stage still incomplete now, in pipeline order.
+- **Upload to result**: median and p90 hours by result week, GeoTIFF and ZIP
+  separately, against the one-hour target and two-hour reference.
+- **Reference data**: audits with final assessment `no_issues` (or legacy
+  `ready`) by audit date. Fixable and excluded datasets do not count.
+- **Downloads**: `dataset_download_requests` rows. The download API records one
+  row per accepted full-dataset, labels or bundle request, using the service
+  role, and never fails the download when recording fails. Earlier rows were
+  backfilled from `v2_logs` rate-limit request logs (from March 2026), without
+  bundles and without view-only full-dataset requests. Reuse means a requester
+  other than the dataset owner.
+- **Activation and retention**: a signup uploads within 30 days; a first-time
+  contributor uploads again on a later day within 90 days. Only elapsed windows
+  enter denominators.
+- **Visitors** stay in PostHog; the funnel links to its web analytics.
+
+## Operations and attention order
+
+The Operations tab prioritizes current problems, waiting work and running claims.
 Product-journey and contributor-cohort history are secondary to operational
 investigation. It does not infer a proven system constraint from the largest
 backlog or the oldest timestamp: queue, claim, failure and report clocks differ.

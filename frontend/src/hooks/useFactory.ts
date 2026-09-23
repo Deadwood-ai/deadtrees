@@ -1,4 +1,5 @@
 import type { FactoryHistory } from "../components/Factory/factoryHistoryTypes";
+import type { FactoryNorthStar } from "../components/Factory/factoryNorthStarMetrics";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { supabase } from "./useSupabase";
 import { useAuth } from "./useAuthProvider";
@@ -309,5 +310,29 @@ export function useFactoryHistory(year: number | null) {
 		queryFn: async () => normalizeHistory(await callFactoryRpc<unknown>("factory_history", { p_year: year })),
 		retry: factoryRetry,
 		staleTime: 60 * 1000,
+	});
+}
+
+function normalizeNorthStar(raw: unknown): FactoryNorthStar {
+	const record = asRecord(raw);
+	// Headline numbers must never be fabricated from a partial response.
+	if (!Array.isArray(record.weekly) || !Array.isArray(record.cohorts) || !Array.isArray(record.stalled) || asString(record.as_of) === null) {
+		throw new Error("North-star outcomes returned an incomplete response.");
+	}
+	return {
+		...(record as unknown as FactoryNorthStar),
+		coverage: asArray<unknown>(record.coverage).filter((item): item is string => typeof item === "string"),
+	};
+}
+
+export function useFactoryNorthStar(includeTeam: boolean) {
+	const { enabled } = useFactoryAccess();
+	return useQuery({
+		queryKey: ["factory", "north-star", includeTeam],
+		enabled,
+		queryFn: async () => normalizeNorthStar(await callFactoryRpc<unknown>("factory_north_star", { p_include_team: includeTeam })),
+		retry: factoryRetry,
+		staleTime: 60 * 1000,
+		placeholderData: keepPreviousData,
 	});
 }

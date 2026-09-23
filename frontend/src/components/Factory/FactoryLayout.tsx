@@ -9,15 +9,17 @@ import { FactoryDenied, ReadOnlyBadge } from "./FactoryPrimitives";
 
 const { Title, Text } = Typography;
 
-type FactorySection = "overview" | "datasets" | "activity";
+type FactorySection = "overview" | "operations" | "datasets" | "activity";
 
 const SECTION_PATHS: Record<FactorySection, string> = {
 	overview: "/factory",
+	operations: "/factory/operations",
 	datasets: "/factory/datasets",
 	activity: "/factory/activity",
 };
 
 function sectionFromPath(pathname: string): FactorySection {
+	if (pathname.startsWith("/factory/operations")) return "operations";
 	if (pathname.startsWith("/factory/datasets")) return "datasets";
 	if (pathname.startsWith("/factory/activity")) return "activity";
 	return "overview";
@@ -55,8 +57,8 @@ function FactoryShell() {
 								<ReadOnlyBadge />
 							</div>
 							<Text type="secondary" className="mt-1 block max-w-2xl">
-								What the platform is doing with contributions right now, and where work waits. Nothing on these
-								pages triggers an action; copy the facts and hand them on.
+								Whether DeadTrees turns contributions into trusted, reused data, and where work waits. Nothing on
+								these pages triggers an action; copy the facts and hand them on.
 							</Text>
 						</div>
 						<Segmented<FactorySection>
@@ -66,6 +68,7 @@ function FactoryShell() {
 							onChange={(value) => navigate(SECTION_PATHS[value])}
 							options={[
 								{ label: "Overview", value: "overview" },
+								{ label: "Operations", value: "operations" },
 								{ label: "Datasets", value: "datasets" },
 								{ label: "Activity", value: "activity" },
 							]}

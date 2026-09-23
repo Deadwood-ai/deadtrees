@@ -30,7 +30,7 @@ from api.src.download.downloads import (
 	create_consolidated_geopackage,
 	generate_bundle_job_id,
 )
-from shared.db import use_client, verify_token
+from shared.db import use_client, use_service_client, verify_token
 from shared.logging import UnifiedLogger, SupabaseHandler, LogCategory, LogContext
 
 # first approach to implement a rate limit
@@ -220,6 +220,17 @@ def validate_user_and_limit(
 	return user
 
 
+def record_download_request(user_id, dataset_ids: List[int], kind: str) -> None:
+	"""Record accepted download requests for Factory reuse metrics. Never blocks the download."""
+	try:
+		with use_service_client() as client:
+			client.table('dataset_download_requests').insert(
+				[{'dataset_id': dataset_id, 'user_id': str(user_id), 'kind': kind} for dataset_id in dataset_ids]
+			).execute()
+	except Exception as e:
+		logger.warning(f'Could not record download request for datasets {dataset_ids}: {e}')
+
+
 # Updated download route with background processing
 @download_app.get('/datasets/{dataset_id}/dataset.zip', response_model=DownloadStatus)
 async def download_dataset(
@@ -234,7 +245,7 @@ async def download_dataset(
 	Prepare dataset bundle in the background and return job status
 	"""
 	dataset_id_int = parse_dataset_id(dataset_id)
-	validate_user_and_limit(
+	user = validate_user_and_limit(
 		token=token,
 		endpoint='datasets/{dataset_id}/dataset.zip',
 		dataset_id=dataset_id_int,
@@ -254,6 +265,7 @@ async def download_dataset(
 
 	if not ortho:
 		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no ortho file.')
+	record_download_request(user.id, [dataset_id_int], 'dataset')
 
 	# Build the file paths
 	download_dir = settings.downloads_path / dataset_id
@@ -542,7 +554,7 @@ async def get_labels(
 	Prepare labels GeoPackage in the background and return job status
 	"""
 	dataset_id_int = parse_dataset_id(dataset_id)
-	validate_user_and_limit(
+	user = validate_user_and_limit(
 		token=token,
 		endpoint='datasets/{dataset_id}/labels.gpkg',
 		dataset_id=dataset_id_int,
@@ -556,6 +568,7 @@ async def get_labels(
 			token=token,
 			allow_viewonly_full_download=True,
 		)
+		record_download_request(user.id, [dataset_id_int], 'labels')
 
 		# Build the file paths
 		download_dir = settings.downloads_path / dataset_id
@@ -815,7 +828,7 @@ async def prepare_multi_bundle(
 	
 	# Generate job ID
 	job_id = generate_bundle_job_id(id_list, include_labels, include_parquet)
-	validate_user_and_limit(
+	user = validate_user_and_limit(
 		token=token,
 		endpoint='bundle.zip',
 		job_id=job_id,
@@ -826,6 +839,7 @@ async def prepare_multi_bundle(
 	download_file = download_dir / f'{job_id}.zip'
 	
 	if download_file.exists() and download_file.stat().st_size > 0:
+		record_download_request(user.id, id_list, 'bundle')
 		return DownloadStatus(
 			status=DownloadStatusEnum.COMPLETED,
 			job_id=job_id,
@@ -845,6 +859,7 @@ async def prepare_multi_bundle(
 		dataset_ids=id_list,
 		token=token,
 	)
+	record_download_request(user.id, id_list, 'bundle')
 	
 	# Start background task
 	background_tasks.add_task(
