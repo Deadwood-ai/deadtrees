@@ -10,6 +10,8 @@ import type { FeatureLike } from "ol/Feature";
 import type { SelectEvent } from "ol/interaction/Select";
 import "ol/ol.css";
 import { fromExtent } from "ol/geom/Polygon.js";
+import { createEmpty, extend, isEmpty, type Extent } from "ol/extent";
+import { transformExtent } from "ol/proj";
 import { useNavigate } from "react-router-dom";
 import { IDataAccess, IDataset, IDatasetArchiveItem } from "../../types/dataset";
 import parseBBox from "../../utils/parseBBox";
@@ -31,6 +33,11 @@ import { palette } from "../../theme/palette";
 import { transitionDatasetFeatureHover } from "./datasetFeatureHover";
 
 export type DatasetMapColorMode = "quality" | "labels" | "year" | "timeline";
+
+/** Pixels of the map covered by floating UI, as [top, right, bottom, left]. */
+export type DatasetMapViewPadding = [number, number, number, number];
+
+const DEFAULT_VIEWPORT = { center: [0, 0], zoom: 2 };
 
 type DatasetVisualSpec = {
   fill: string;
@@ -103,6 +110,15 @@ const getStyleBundle = (spec: DatasetVisualSpec): DatasetStyleBundle => {
 };
 
 type DatasetMapItem = IDataset | IDatasetArchiveItem;
+
+const getDataExtent = (data: DatasetMapItem[]): Extent => {
+  const extent = createEmpty();
+  for (const dataset of data) {
+    const bbox = dataset.bbox ? parseBBox(dataset.bbox) : null;
+    if (bbox) extend(extent, transformExtent(bbox, "EPSG:4326", "EPSG:3857"));
+  }
+  return extent;
+};
 
 const parseYear = (dataset: DatasetMapItem): number | null => {
   const year = Number.parseInt(dataset.aquisition_year, 10);
@@ -279,6 +295,8 @@ const DatasetMapOL = ({
   filterZoomTrigger = 0,
   colorMode = "quality",
   onMapInteracted,
+  viewPadding = [50, 50, 50, 50],
+  frameDataOnOpen = false,
 }: {
   data: DatasetMapItem[];
   hoveredItem: number | null;
@@ -287,6 +305,9 @@ const DatasetMapOL = ({
   filterZoomTrigger?: number;
   colorMode?: DatasetMapColorMode;
   onMapInteracted?: () => void;
+  viewPadding?: DatasetMapViewPadding;
+  /** Zoom out to show every dataset on first visit, instead of the default view. */
+  frameDataOnOpen?: boolean;
 }) => {
   const navigate = useNavigate();
   const mapRef = useRef<MapRef | null>(null);
@@ -308,6 +329,17 @@ const DatasetMapOL = ({
   const navigateRef = useRef(navigate);
   const hasSeenInitialMoveEndRef = useRef(false);
   const hasTrackedInteractionRef = useRef(false);
+  const viewPaddingRef = useRef(viewPadding);
+  viewPaddingRef.current = viewPadding;
+
+  // Frames the given extent in the part of the map not covered by floating UI.
+  const fitToExtent = useCallback((extent: Extent) => {
+    if (!mapRef.current || isEmpty(extent)) return;
+    mapRef.current.getView().fit(extent, {
+      padding: viewPaddingRef.current,
+      maxZoom: 18,
+    });
+  }, []);
 
   useEffect(() => {
     setHoveredItemRef.current = setHoveredItem;
@@ -337,8 +369,10 @@ const DatasetMapOL = ({
     // console.log("initial map useEffect");
     if (!mapRef.current && mapContainer.current) {
       const initialView = new View({
-        center: DatasetViewport.center,
-        zoom: DatasetViewport.zoom,
+        ...(DatasetViewport ?? DEFAULT_VIEWPORT),
+        // Lets the view zoom out past "world fills the width", so the data can
+        // be framed beside the sidebar on narrower screens.
+        showFullExtent: frameDataOnOpen,
       });
 
       const map = new OLMap({
@@ -349,6 +383,9 @@ const DatasetMapOL = ({
         view: initialView,
       });
       mapRef.current = map as MapRef;
+      // First visit: show every dataset instead of a fixed world view that the
+      // sidebar and timeline partly cover. Later visits restore the last viewport.
+      if (!DatasetViewport && frameDataOnOpen) fitToExtent(getDataExtent(data));
 
       // Borrowed from the shared pool; returned (not disposed) in cleanup. The
       // group already contains the OSM fallback layer.
@@ -596,19 +633,12 @@ const DatasetMapOL = ({
         prevZoomTriggerRef.current = filterZoomTrigger;
         if (vectorLayerExtendRef.current && mapRef.current) {
           const source = vectorLayerExtendRef.current.getSource();
-          if (source && source.getFeatures().length > 0) {
-            const extent = source.getExtent();
-            if (extent) {
-              mapRef.current.getView().fit(extent, {
-                padding: [50, 50, 50, 50],
-                maxZoom: 18,
-              });
-            }
-          }
+          const extent = source?.getExtent();
+          if (extent) fitToExtent(extent);
         }
       }
     }
-  }, [data, filterZoomTrigger, colorMode, mapLayersReady]);
+  }, [data, filterZoomTrigger, colorMode, mapLayersReady, fitToExtent]);
 
   // Handle feature highlighting separately. Only the features whose highlight
   // actually changed are restyled — restyling all of them made every hover redraw

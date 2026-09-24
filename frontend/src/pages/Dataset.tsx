@@ -16,6 +16,7 @@ import {
 import DataList from "../components/DataList";
 import DatasetMapOL, {
   type DatasetMapColorMode,
+  type DatasetMapViewPadding,
 } from "../components/DatasetMap/DatasetMap";
 import DatasetTimelineControl from "../components/DatasetMap/DatasetTimelineControl";
 import { useNavigate } from "react-router-dom";
@@ -43,6 +44,10 @@ const SIDEBAR_LEFT_PX = 16;
 const SIDEBAR_WIDTH_PX = 360;
 const SIDEBAR_BUTTON_TOP_PX = 108;
 const FLOAT_BUTTON_SIZE_PX = 36;
+// Map area hidden by the header, sidebar and timeline, so fitted views stay visible.
+const MAP_EDGE_PADDING_PX = 24;
+const MAP_TOP_PADDING_PX = 96;
+const MAP_BOTTOM_PADDING_PX = 72;
 
 export default function Dataset() {
   const navigate = useNavigate();
@@ -209,6 +214,17 @@ export default function Dataset() {
           ? "min(92vw, 720px)"
           : `min(92vw, calc(100vw - ${SIDEBAR_WIDTH_PX + SIDEBAR_LEFT_PX * 2 + 24}px))`,
       };
+  const mapViewPadding = useMemo<DatasetMapViewPadding>(
+    () => [
+      MAP_TOP_PADDING_PX,
+      MAP_EDGE_PADDING_PX,
+      MAP_BOTTOM_PADDING_PX,
+      isMobile || sidebarCollapsed
+        ? MAP_EDGE_PADDING_PX
+        : SIDEBAR_LEFT_PX + SIDEBAR_WIDTH_PX + MAP_EDGE_PADDING_PX,
+    ],
+    [isMobile, sidebarCollapsed],
+  );
   const sidebarContent = (
     <div
       className={`flex h-full flex-col pointer-events-auto ${!isMobile ? "rounded-2xl border border-gray-200/60 bg-white/95 px-4 pb-4 pt-4 shadow-xl backdrop-blur-sm" : "px-4 pt-4 pb-16"}`}
@@ -450,6 +466,10 @@ export default function Dataset() {
             filterZoomTrigger={filterZoomTrigger}
             colorMode={colorMode}
             onMapInteracted={handleMapInteracted}
+            viewPadding={mapViewPadding}
+            // On tall phone screens, framing the whole world leaves empty bands
+            // above and below it, so phones keep the default zoom.
+            frameDataOnOpen={!isMobile}
           />
         )}
       </div>
