@@ -23,7 +23,7 @@ def log_upload(db, row, stamp, size=GIB // 2):
 
 FULL = ['geotiff', 'metadata', 'cog', 'thumbnail', 'deadwood_treecover_combined_v2']
 STAGES = {  # task type -> (pipeline position, success log or None when the stage logs no success)
-	'odm_processing': (1, 'ODM processing completed successfully'),
+	'odm_processing': (1, 'ODM processing completed successfully for dataset {row}'),
 	'geotiff': (2, 'Finished converting dataset {row}'),
 	'metadata': (3, 'Processed metadata successfully'),
 	'cog': (4, None),
@@ -48,7 +48,8 @@ def run(db, row, start, *, tasks=FULL, fail=None, interrupt=False, minutes=30, s
 	if completed:
 		logged.append(f'Recorded 1 processing_completed notification event(s) for task {row}')
 	for index, message in enumerate(logged, start=1):
-		category = 'ortho' if message.startswith('Finished converting') else 'process' if message.startswith('Recorded') else 'stage'
+		category = ('ortho' if message.startswith('Finished converting') else 'process' if message.startswith('Recorded')
+			else 'odm' if message.startswith('ODM processing') else 'stage')
 		log(db, row, start + timedelta(minutes=minutes * index / len(logged)), message, category)
 	end = start + timedelta(minutes=minutes) if logged else start
 	if interrupt:
@@ -168,6 +169,29 @@ def test_terminal_ortho_and_cog_retries_recover_only_with_completion_evidence(db
 	assert failures(db, silent) == [(failed, None, 'processing_log', None, 'rerun')]
 
 
+def test_odm_counts_only_after_outputs_are_stored(db):
+	owner = user(db)
+	row = legacy(db, owner, file_name='odm.zip')
+	uploaded = ago(days=6)
+	log_upload(db, row, uploaded)
+	# The container exits successfully, then extracting or storing its outputs fails.
+	start = uploaded + timedelta(hours=1)
+	log(db, row, start, f'Starting processing for task {row}', extra={'task_types': ['odm_processing'] + FULL})
+	log(db, row, start + timedelta(minutes=30), 'ODM processing completed successfully', 'odm')
+	log(db, row, start + timedelta(minutes=31), 'Processing failed: odm_processing processing failed: storage push failed', level='ERROR')
+	# The remaining stages succeed in a run that does not rerun ODM: ZIP readiness still lacks ODM.
+	run(db, row, uploaded + timedelta(hours=2))
+	assert outcome(db, row)[1] is None
+	assert failures(db, row)[0][1] is None
+	# The dataset-specific message follows is_odm_done and completes the result; the
+	# other stages were already proven, so readiness is reached at that message.
+	retry = uploaded + timedelta(hours=3)
+	run(db, row, retry, tasks=['odm_processing'] + FULL)  # five success logs, ODM first at +6 min
+	stored = retry + timedelta(minutes=6)
+	assert outcome(db, row)[1] == stored
+	assert failures(db, row)[0][1] == stored
+
+
 def test_stage_only_success_does_not_recover_a_dataset_without_a_result(db):
 	owner = user(db)
 	row = legacy(db, owner)
@@ -255,6 +279,34 @@ def test_older_datasets_are_now_observed_and_carried_failures_keep_their_logged_
 	db.execute('UPDATE public.v2_statuses SET has_error=true WHERE dataset_id=%s', (unknown,))
 	db.execute('UPDATE public.factory_failure_episodes SET failed_at=NULL WHERE dataset_id=%s', (unknown,))
 	assert failures(db, unknown) == [(None, None, None, None, 'unknown')]
+
+
+def test_retry_running_at_deployment_stays_one_open_failure(db):
+	operator = user(db, operate=True)
+	row = legacy(db, operator)
+	log_upload(db, row, ago(days=10))
+	failed = run(db, row, ago(days=10) + timedelta(hours=1), fail='geotiff') + timedelta(minutes=1)
+	# Requeued: the error flag is already clear while the retry runs when observation starts.
+	db.execute("UPDATE public.v2_statuses SET has_error=false,current_status='ortho_processing' WHERE dataset_id=%s", (row,))
+	recovered = legacy(db, operator)  # its failure has no log recovery, but it is complete now
+	log_upload(db, recovered, ago(days=10))
+	run(db, recovered, ago(days=10) + timedelta(hours=1), fail='geotiff')
+	db.execute("""UPDATE public.v2_statuses SET current_status='idle',is_upload_done=true,is_ortho_done=true,is_metadata_done=true,
+	is_cog_done=true,is_thumbnail_done=true,is_combined_model_done=true WHERE dataset_id=%s""", (recovered,))
+	db.execute('SELECT public.factory_carry_open_failures()')
+	open_rows = "SELECT count(*) FROM public.factory_failure_episodes WHERE dataset_id=%s AND recovered_at IS NULL AND failed_at IS NULL"
+	assert db.execute(open_rows, (row,)).fetchone()[0] == 1
+	assert db.execute(open_rows, (recovered,)).fetchone()[0] == 0
+	authenticate(db, operator)
+	assert listed(db, ids=[row], metric='unresolved_failure') == 1  # still open while the retry runs
+	db.execute('RESET ROLE')
+	# The retry fails: still one uninterrupted episode, not a second measured one.
+	db.execute("UPDATE public.v2_statuses SET has_error=true,current_status='idle' WHERE dataset_id=%s", (row,))
+	assert failures(db, row) == [(failed, None, 'processing_log', None, 'first_result')]
+	db.execute("""UPDATE public.v2_statuses SET has_error=false,current_status='idle',is_upload_done=true,is_ortho_done=true,
+	is_metadata_done=true,is_cog_done=true,is_thumbnail_done=true,is_combined_model_done=true WHERE dataset_id=%s""", (row,))
+	[(start, complete_again, start_source, recovery_source, phase)] = failures(db, row)
+	assert (start, start_source, recovery_source, phase) == (failed, 'processing_log', 'measured', 'first_result') and complete_again
 
 
 def test_trend_buckets_count_each_dataset_once_with_sources_and_matching_links(db):

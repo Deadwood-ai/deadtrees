@@ -519,8 +519,10 @@ count reports its measured part, and the chart marks where measurement starts.
 - **Stage proofs** (`factory_stage_proofs`): stages run in pipeline order (ODM,
   ortho, metadata, COG, thumbnail, deadwood, tree cover, combined, AOI, indexing)
   and a failing stage ends its run, so a requested stage is proven done at the
-  first success at or past its position in that run. Ortho logs `Finished
-  converting dataset`; COG logs no success and is proven by a later stage or by
+  first success at or past its position in that run. ODM counts only from `ODM
+  processing completed successfully for dataset N`, logged after its outputs are
+  stored and `is_odm_done` is set (the bare message marks container exit, before
+  extraction and upload can fail). Ortho logs `Finished converting dataset`; COG logs no success and is proven by a later stage or by
   the run's `Recorded … processing_completed notification event(s)` record, which
   proves every requested stage (recorded when the run has recipients, since
   August 2026). A retry with neither stays unproven rather than invented. Proofs
@@ -543,7 +545,11 @@ count reports its measured part, and the chart marks where measurement starts.
   no known stage stays open, and further failures before recovery belong to the
   same episode. Charts call the end "complete again". The ledger owns every dataset
   from its observation start; a log episode still open then continues in the
-  ledger's carried row, which supplies the measured recovery. The phase says
+  ledger's carried row, which supplies the measured recovery. The migration
+  carries datasets with the error flag and, because a requeue clears that flag
+  before its retry finishes, also datasets with an open retained failure that are
+  not complete now (`factory_carry_open_failures`); datasets complete now are not
+  carried, even when no log proves when they recovered. The phase says
   whether the contributor was still waiting for a first result or the dataset had
   proven readiness already (reruns, search indexing); without upload evidence or
   proven earlier readiness it stays unknown and is grouped with reruns in charts.

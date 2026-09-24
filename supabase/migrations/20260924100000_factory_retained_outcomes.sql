@@ -36,7 +36,9 @@ create view public.factory_run_log_events with(security_invoker=true) as
     when message like 'Crash detected for dataset %' then public.factory_stage_position(substring(message from 'crashed during ([a-z_]+)'))
     -- A completed run's notification record proves every requested stage.
     when message like 'Recorded % processing_completed notification event(s) for task %' then 11
-    when message='ODM processing completed successfully' then 1
+    -- ODM counts only after its outputs are stored and is_odm_done is set; the bare
+    -- message is logged at container exit, before extraction and upload can fail.
+    when message like 'ODM processing completed successfully for dataset %' then 1
     when message like 'Finished converting dataset %' then 2
     when message='Processed metadata successfully' then 3
     when message='Thumbnail processing completed successfully' then 5
@@ -53,9 +55,10 @@ create view public.factory_run_log_events with(security_invoker=true) as
     or message like 'Crash detected for dataset %' or message like 'Received signal %; gracefully re-queuing in-flight task %'
     or message like 'Recorded % processing_completed notification event(s) for task %'))
    or (category='ortho' and message like 'Finished converting dataset %')
+   or (category='odm' and message like 'ODM processing completed successfully for dataset %')
    or message in ('Combined segmentation completed successfully','Tree cover segmentation completed successfully',
     'Deadwood segmentation completed successfully','AOI segmentation completed successfully','Processed metadata successfully',
-    'Thumbnail processing completed successfully','ODM processing completed successfully','Tile embedding completed successfully'))
+    'Thumbnail processing completed successfully','Tile embedding completed successfully'))
    and created_at<=now()
  )
  select *,count(*) filter(where kind='start') over(partition by dataset_id order by created_at,id) as run from evidence;
@@ -140,16 +143,13 @@ create view public.factory_outcome_evidence with(security_invoker=true) as
  ) r on r.dataset_id=u.dataset_id and u.uploaded_at>=public.factory_run_evidence_since();
 
 -- Observe failures and recoveries for every dataset from now on. Datasets that
--- are already failing get an open episode whose start was not observed.
+-- are already failing get an open episode whose start was not observed (seeded
+-- below, once the failure evidence view exists).
 alter table public.factory_measurement_epoch add column failures_started_at timestamptz not null default clock_timestamp();
 alter table public.factory_failure_episodes drop constraint factory_failure_episodes_dataset_id_fkey,
  add constraint factory_failure_episodes_dataset_id_fkey foreign key(dataset_id) references public.v2_datasets(id) on delete cascade,
  alter column failed_at drop not null, alter column failed_at drop default;
 comment on column public.factory_failure_episodes.failed_at is 'Null when the dataset was already failing when every dataset became observed (factory_measurement_epoch.failures_started_at).';
-insert into public.factory_failure_episodes(dataset_id,failed_at)
-select s.dataset_id,null from public.v2_statuses s where s.has_error
- and not exists(select 1 from public.factory_failure_episodes f where f.dataset_id=s.dataset_id and f.recovered_at is null);
-
 create or replace function public.factory_observe_status() returns trigger
 language plpgsql security definer set search_path='' as $$
 declare d public.v2_datasets; observed_at timestamptz := clock_timestamp();
@@ -257,6 +257,28 @@ create view public.factory_failure_evidence with(security_invoker=true) as
  left join ready r on r.dataset_id=x.dataset_id;
 
 revoke all on public.factory_run_log_events,public.factory_stage_proofs,public.factory_outcome_evidence,public.factory_failure_evidence from public,anon,authenticated;
+
+-- Carry every failure still open when observation begins into the ledger: datasets
+-- with the error flag, and datasets whose retained failure has no recovery evidence
+-- and that are not complete now. A requeue clears the error flag before its retry
+-- finishes, so the flag alone would miss a retry running during deployment; the
+-- open row then keeps it open now and absorbs a failing retry instead of a second
+-- episode. Datasets complete now are not carried: they recovered, even if no log
+-- proves when. Returns the number of rows carried.
+create function public.factory_carry_open_failures() returns integer
+language sql volatile security definer set search_path='' as $$
+ with carried as (
+  insert into public.factory_failure_episodes(dataset_id,failed_at)
+  select s.dataset_id,null from public.v2_statuses s join public.v2_datasets d on d.id=s.dataset_id
+  where (s.has_error or (not public.factory_status_ready(s,d.file_name) and exists(
+    select 1 from public.factory_failure_evidence e where e.dataset_id=s.dataset_id
+     and e.start_source='processing_log' and e.recovered_at is null)))
+   and not exists(select 1 from public.factory_failure_episodes f where f.dataset_id=s.dataset_id and f.recovered_at is null)
+  returning 1
+ ) select count(*)::integer from carried;
+$$;
+revoke all on function public.factory_carry_open_failures() from public,anon,authenticated;
+select public.factory_carry_open_failures();
 
 -- Chart drilldowns list exactly the datasets behind each plotted evidence count.
 create or replace view public.factory_metric_events with(security_invoker=true) as
