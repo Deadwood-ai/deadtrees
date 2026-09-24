@@ -115,3 +115,14 @@ def test_outcome_evidence_evaluates_the_retained_run_boundary_once(db):
 	plan = db.execute('EXPLAIN (FORMAT JSON, VERBOSE) SELECT * FROM public.factory_outcome_evidence').fetchone()[0][0]['Plan']
 	calls = [n for n in walk_plan(plan) if any('factory_run_evidence_since' in str(v) for k, v in n.items() if k != 'Plans')]
 	assert calls and all(n.get('Parent Relationship') == 'InitPlan' for n in calls), calls
+
+
+def test_failure_recovery_reads_the_stage_timeline_in_one_pass(db):
+	# Range joins from failures back to the timeline were planned as nested loops that
+	# rescanned every ready moment per failure and timed out factory_trends in production.
+	plan = db.execute('EXPLAIN (FORMAT JSON) SELECT * FROM public.factory_failure_evidence').fetchone()[0][0]['Plan']
+	scans = [n for n in walk_plan(plan) if n['Node Type'] == 'CTE Scan' and n.get('CTE Name') == 'timeline']
+	assert len(scans) == 2, scans  # first results and the recovery pass
+	for loop in (n for n in walk_plan(plan) if n['Node Type'] == 'Nested Loop'):
+		inner = [c for c in loop['Plans'] if c.get('Parent Relationship') == 'Inner']
+		assert not any(n.get('CTE Name') == 'timeline' for c in inner for n in walk_plan(c)), loop
