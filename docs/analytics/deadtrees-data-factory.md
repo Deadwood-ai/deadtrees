@@ -461,6 +461,18 @@ about 4% of `v2_logs` rows (74,512 of 1.84 million on 2026-09-24) are run eviden
 so the partial index is the expected path, and the equivalent reconstruction ran
 in under 3 s on production without it.
 
+After release, `factory_north_star` exceeded production's 8 s `authenticated`
+statement timeout. The retained-run boundary was a STABLE function call in a
+LEFT JOIN condition, evaluated once per dataset at about 33 ms each against 1.8
+million logs; the synthetic benchmark's small log table hid it. It is now a scalar
+subquery (one InitPlan), guarded by a plan test. Derived views also read the run
+evidence once through `factory_stage_timeline`, and first results aggregate
+uploads with ready moments instead of joining them, which a planner misestimate
+had turned into a nested loop over millions of rows. With 1.8 million noise logs
+added to the 10,000-dataset benchmark, every Factory RPC measured below 1.4 s on a
+loaded host (north star 0.62–0.66 s, trends 0.98–1.33 s, first-result drilldown
+0.41–0.44 s); the same north-star call did not finish within 120 s before.
+
 Exact totals, global aggregates, substring searches and deep offset pagination
 still grow with the relevant population. This is not constant-cost analytics at
 arbitrary scale. Rebenchmark against realistic cardinality/skew and concurrency
@@ -516,7 +528,9 @@ count reports its measured part, and the chart marks where measurement starts.
   retained from 2025-10-31: a `Starting processing for task` log opens a run and
   records its requested task types; stage-success logs, `Processing failed`/`Crash
   detected` logs (with the failed stage) and graceful re-queues follow.
-- **Stage proofs** (`factory_stage_proofs`): stages run in pipeline order (ODM,
+- **Stage timeline** (`factory_stage_timeline`), one pass over the run evidence
+  yielding proofs, resets, area-of-interest requirements, failures and ready
+  moments. Stages run in pipeline order (ODM,
   ortho, metadata, COG, thumbnail, deadwood, tree cover, combined, AOI, indexing)
   and a failing stage ends its run, so a requested stage is proven done at the
   first success at or past its position in that run. ODM counts only from `ODM
@@ -531,7 +545,7 @@ count reports its measured part, and the chart marks where measurement starts.
   runs, like the status flags, until a requeue resets them: requeueing a failed
   dataset clears the done flags of the requested stages, so a run that follows a
   failed run invalidates earlier proofs of its requested stages at its start.
-- **Ready moments** (`factory_ready_moments`): full readiness is checked at every
+- **Ready moments** (timeline rows `ready`): full readiness is checked at every
   proof time against the proofs still valid then; readiness therefore never rests
   on a stage a requeue has reset.
 - **First result** (`factory_outcome_evidence`): for measured submissions the

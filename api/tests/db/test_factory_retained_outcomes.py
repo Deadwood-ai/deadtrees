@@ -406,7 +406,7 @@ def test_detail_shows_first_result_and_failure_evidence(db):
 	assert detail['failures'][0]['phase'] == 'first_result'
 
 
-@pytest.mark.parametrize('relation', ['factory_run_log_events', 'factory_stage_proofs', 'factory_ready_moments', 'factory_outcome_evidence', 'factory_failure_evidence'])
+@pytest.mark.parametrize('relation', ['factory_run_log_events', 'factory_stage_timeline', 'factory_outcome_evidence', 'factory_failure_evidence'])
 def test_evidence_views_are_private(db, relation):
 	authenticate(db, user(db, operate=True))
 	with pytest.raises(psycopg.errors.InsufficientPrivilege):
