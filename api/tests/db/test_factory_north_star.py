@@ -6,7 +6,7 @@ import pytest
 from psycopg import sql
 
 from api.tests.db.test_factory import authenticate, dataset, db, user  # noqa: F401
-from api.tests.db.test_factory_history import completed
+from api.tests.db.test_factory_retained_outcomes import log_upload, run
 
 
 def north_star(db, operator, include_team=False):
@@ -21,7 +21,7 @@ def at(db, bucket_start, offset):
 
 
 def upload(db, owner, uploaded_at, file_name='north-star.tif', **status):
-	"""A legacy-style upload whose evidence is its registration time."""
+	"""A legacy-style upload with retained upload-log evidence at its registration time."""
 	row = dataset(db, owner, file_name=file_name)
 	db.execute('UPDATE public.v2_datasets SET created_at=%s WHERE id=%s', (uploaded_at, row))
 	status = {'is_upload_done': True, **status}
@@ -29,7 +29,13 @@ def upload(db, owner, uploaded_at, file_name='north-star.tif', **status):
 		db.execute(sql.SQL('UPDATE public.v2_statuses SET {}=%s WHERE dataset_id=%s').format(sql.Identifier(key)), (value, row))
 	# Instrumentation may observe the flag change; keep this upload on the evidence path.
 	db.execute('DELETE FROM public.factory_submissions WHERE dataset_id=%s', (row,))
+	log_upload(db, row, uploaded_at)
 	return row
+
+
+def completed(db, row, finished_at):
+	"""A processor run that produced the first predictions, ending at finished_at."""
+	run(db, row, finished_at - timedelta(minutes=30))
 
 
 def week(result, index):
@@ -44,8 +50,8 @@ def delta(before, after, key, index):
 def operator(db):
 	identity = user(db, operate=True)
 	anchor = upload(db, identity, db.execute("SELECT now()-interval '120 days'").fetchone()[0])
-	# Completion recording starts no later than the anchor, so recent uploads are observable.
-	completed(db, anchor, identity, db.execute("SELECT now()-interval '119 days'").fetchone()[0])
+	# Retained processor runs start no later than the anchor, so recent uploads are observable.
+	completed(db, anchor, db.execute("SELECT now()-interval '119 days'").fetchone()[0])
 	return identity
 
 
@@ -68,12 +74,12 @@ def test_results_reach_and_stalled_stage_exclude_the_team_by_default(db, operato
 	start = week(before, -4)['start']
 	contributor, team = user(db), user(db, audit=True)
 	quick = upload(db, contributor, at(db, start, '1 day'))
-	completed(db, quick, contributor, at(db, start, '1 day 5 hours'))
+	completed(db, quick, at(db, start, '1 day 5 hours'))
 	upload(db, contributor, at(db, start, '2 days'), is_ortho_done=True, has_error=True)
 	late = upload(db, contributor, at(db, start, '2 days'), file_name='late.zip')
-	completed(db, late, contributor, at(db, start, '10 days'))
+	completed(db, late, at(db, start, '10 days'))
 	team_row = upload(db, team, at(db, start, '1 day'))
-	completed(db, team_row, team, at(db, start, '1 day 1 hour'))
+	completed(db, team_row, at(db, start, '1 day 1 hour'))
 
 	after = north_star(db, operator)
 	assert delta(before, after, 'uploads', -4) == 3
@@ -91,14 +97,12 @@ def test_results_reach_and_stalled_stage_exclude_the_team_by_default(db, operato
 	assert delta(before_team, with_team, 'results', -4) == 2
 
 
-def test_uploads_before_completion_recording_never_count_as_results(db, operator):
-	run_since = db.execute(
-		"SELECT min(created_at) FROM public.processing_notification_events WHERE event_type='processing_completed'"
-	).fetchone()[0]
+def test_uploads_before_retained_runs_never_count_as_results(db, operator):
 	before = north_star(db, operator)
+	run_since = before['run_since']
 	contributor = user(db)
-	rerun = upload(db, contributor, run_since - timedelta(days=1))
-	completed(db, rerun, contributor, at(db, week(before, -2)['start'], '1 day'))
+	earlier = upload(db, contributor, at(db, run_since, '-1 day'))
+	completed(db, earlier, at(db, week(before, -2)['start'], '1 day'))
 	after = north_star(db, operator)
 	assert delta(before, after, 'results', -2) == 0
 

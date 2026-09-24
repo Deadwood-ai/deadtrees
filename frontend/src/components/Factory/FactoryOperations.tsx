@@ -37,7 +37,7 @@ const SIZE_OPTIONS: { value: FactoryTrendSize; label: string }[] = [
 	{ value: "all", label: "All sizes" },
 	{ value: "small", label: "Under 1 GiB" },
 	{ value: "large", label: "1 GiB and above" },
-	{ value: "unknown", label: "Size not measured" },
+	{ value: "unknown", label: "Size unknown" },
 ];
 
 /**
@@ -184,7 +184,8 @@ export default function FactoryOperations() {
 					<div>
 						<h3 className="m-0 text-base font-semibold text-gray-900">Is it improving?</h3>
 						<Text type="secondary" className="text-xs">
-							Measured upload-to-result outcomes. Workflow and size filter the charts below only; the lists above always show the whole platform.
+							Upload-to-result outcomes, measured directly where possible and reconstructed from retained logs before that. Workflow and size
+							filter the charts below only; the lists above always show the whole platform.
 						</Text>
 					</div>
 					<div className="flex flex-wrap items-center gap-2">
@@ -194,6 +195,7 @@ export default function FactoryOperations() {
 							options={[
 								{ label: "Weeks", value: "week" },
 								{ label: "Days", value: "day" },
+								{ label: "Months", value: "month" },
 							]}
 							aria-label="Trend interval"
 						/>

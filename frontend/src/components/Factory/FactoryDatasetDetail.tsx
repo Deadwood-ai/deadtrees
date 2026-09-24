@@ -42,8 +42,8 @@ const STATUS_SCALARS = [
 	"historical_uploaded_at",
 	"historical_input_bytes",
 	"historical_upload_source",
-	"historical_completed_at",
-	"historical_elapsed_hours",
+	"first_result_at",
+	"first_result_source",
 	"uploaded_at",
 	"first_ready_at",
 	"input_bytes",
@@ -54,8 +54,8 @@ const STATUS_LABELS: Record<string, string> = {
 	historical_uploaded_at: "Historical upload evidence (UTC)",
 	historical_input_bytes: "Original input bytes (historical evidence)",
 	historical_upload_source: "Upload evidence source",
-	historical_completed_at: "First recorded completion (may be a rerun)",
-	historical_elapsed_hours: "Upload to recorded completion (hours)",
+	first_result_at: "First complete result (UTC)",
+	first_result_source: "First result evidence",
 	uploaded_at: "Upload completed (measured)",
 	first_ready_at: "First complete result (measured)",
 	input_bytes: "Uploaded input size (measured on server)",
@@ -243,6 +243,19 @@ export default function FactoryDatasetDetail() {
 						labels={{ claimed_by: "Worker", is_processing: "Claimed" }}
 						emptyText="No queue row now. Queue rows are removed when work finishes, so past attempts are not listed here."
 					/>
+				</SectionCard>
+				<SectionCard title="Failures and recovery" count={detail.failures.length} testId="factory-detail-failures">
+					<FactoryRecordTable
+						records={detail.failures}
+						columns={["failed_at", "recovered_at", "phase", "start_source", "recovery_source"]}
+						labels={{ failed_at: "Failed", recovered_at: "Complete again", start_source: "Start evidence", recovery_source: "End evidence" }}
+						emptyText="No failure is recorded in the ledger or the retained processor logs."
+					/>
+					<Text type="secondary" className="mt-2 block text-xs">
+						Measured episodes come from status changes and end at full readiness; processing-log episodes are reconstructed from retained processor
+						logs and end at a run that produced predictions, or any successful run once the dataset had them. An empty failed time means the
+						dataset was already failing when every dataset became observed.
+					</Text>
 				</SectionCard>
 			</div>
 

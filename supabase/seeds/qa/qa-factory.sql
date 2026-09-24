@@ -48,6 +48,8 @@ select d.id,d.created_at+interval '5 minutes',case when d.id%4=0 then 'odm' else
  case when d.id%17=0 then null when d.id%4=0 then 8589934592 else 536870912 end,
  case when s.is_combined_model_done and not s.has_error then d.created_at+interval '5 minutes'+make_interval(mins=>(30+(93121-d.id)*3)::integer) end
 from public.v2_datasets d join public.v2_statuses s on s.dataset_id=d.id where d.id between 93001 and 93120;
+-- Status inserts above already opened episodes; replace them with the scenario's history.
+delete from public.factory_failure_episodes where dataset_id between 93001 and 93120;
 insert into public.factory_failure_episodes(dataset_id,failed_at,recovered_at)
 select m.dataset_id,m.uploaded_at+interval '20 minutes',m.first_ready_at
 from public.factory_submissions m where m.dataset_id between 93001 and 93120 and (m.dataset_id%9=0 or m.dataset_id in(93003,93120));
@@ -80,4 +82,38 @@ update public.processing_notification_events n set created_at=d.created_at+inter
 from public.v2_datasets d where d.id=n.dataset_id and d.id between 93020 and 93022;
 update public.processing_notification_events set sent_at=created_at+interval '1 minute'
 where dataset_id between 93001 and 93120 and status='sent';
+-- Datasets registered before measurement, described only by retained upload and
+-- processor logs: quick results, queue backlogs, failed first results (some later
+-- recovered, some still failing) and failed-then-recovered reruns.
+delete from public.v2_datasets where id between 93201 and 93300;
+insert into public.v2_datasets (id,user_id,file_name,license,platform,data_access,created_at)
+select i,('00000000-0000-4000-8001-'||lpad((i%12)::text,12,'0'))::uuid,'QA-history-'||i||case when i%4=0 then '.zip' else '.tif' end,
+ 'CC BY','drone','private',date_trunc('week',now())-interval '10 weeks'-make_interval(days=>((93301-i)*3)::int)
+from generate_series(93201,93300) i;
+insert into public.v2_statuses (dataset_id,is_upload_done,is_odm_done,is_ortho_done,is_metadata_done,is_cog_done,is_thumbnail_done,is_combined_model_done,has_error,error_message,current_status)
+select id,true,true,id%9<>0,true,id%9<>0,id%9<>0,id%9<>0,id%9=0,case when id%9=0 then 'Synthetic QA failure: reconstruction stage failed.' end,'idle'
+from public.v2_datasets where id between 93201 and 93300;
+-- These datasets were already failing when every dataset became observed.
+update public.factory_failure_episodes set failed_at=null where dataset_id between 93201 and 93300;
+insert into public.v2_logs(dataset_id,created_at,level,category,message,extra)
+select d.id,d.created_at+interval '5 minutes','INFO','upload','Upload completed successfully for dataset '||d.id,
+ jsonb_build_object('file_size',case when d.id%4=0 then 4294967296+(d.id%3)*1073741824 else 268435456+(d.id%5)*134217728 end)
+from public.v2_datasets d where d.id between 93201 and 93300;
+with runs as (
+ select d.id,r.n,d.created_at+case when d.id%4=0 then make_interval(days=>(1+d.id%12)::int) else make_interval(mins=>(20+(d.id%7)*15)::int) end
+  +make_interval(days=>((r.n-1)*2)::int) as started_at,
+  case when d.id%9=0 then 'failed' when r.n=1 and d.id%7=0 then 'failed' else 'ok' end as outcome
+ from public.v2_datasets d cross join lateral (select generate_series(1,case when d.id%7=0 and d.id%9<>0 then 2 else 1 end) as n) r
+ where d.id between 93201 and 93300
+ union all
+ -- A later search-indexing rerun that fails and then succeeds.
+ select d.id,10+r.n,d.created_at+interval '30 days'+make_interval(days=>r.n::int),case r.n when 1 then 'failed' else 'rerun' end
+ from public.v2_datasets d cross join generate_series(1,2) r(n) where d.id between 93201 and 93300 and d.id%5=0 and d.id%9<>0
+)
+insert into public.v2_logs(dataset_id,created_at,level,category,message)
+select id,started_at,'INFO','process','Starting processing for task '||(id*100+n) from runs
+union all select id,started_at+interval '4 minutes','INFO','metadata','Processed metadata successfully' from runs where outcome<>'rerun'
+union all select id,started_at+make_interval(mins=>(25+(id%4)*10)::int),'INFO','deadwood','Combined segmentation completed successfully' from runs where outcome='ok'
+union all select id,started_at+interval '3 minutes','INFO','embeddings','Tile embedding completed successfully' from runs where outcome='rerun'
+union all select id,started_at+interval '6 minutes','ERROR','process','Processing failed: synthetic QA stage failure' from runs where outcome='failed';
 commit;

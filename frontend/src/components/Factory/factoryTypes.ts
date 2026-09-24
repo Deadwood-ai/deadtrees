@@ -118,13 +118,12 @@ export interface FactoryFilters {
 }
 
 export const FACTORY_METRIC_FILTERS = [
-	"historical_uploaded",
-	"historical_completion",
 	"historical_report",
 	"historical_email",
 	"uploaded",
 	"first_ready",
 	"failures",
+	"first_result_failures",
 	"recovered",
 	"registered",
 	"recorded_completed",
@@ -235,6 +234,8 @@ export interface FactoryDatasetDetail {
 	/** Newest entries only; `correction_total` says how many exist. */
 	corrections: FactoryRecord[];
 	correction_total: number | null;
+	/** Failure episodes from the ledger and reconstructed from processor logs, newest first. */
+	failures: FactoryRecord[];
 }
 
 export interface FactoryActivityItem {
@@ -252,57 +253,60 @@ export interface FactoryActivityPage {
 	items: FactoryActivityItem[];
 }
 
-export const FACTORY_TREND_INTERVALS = ["week", "day"] as const;
+export const FACTORY_TREND_INTERVALS = ["week", "day", "month"] as const;
 export type FactoryTrendInterval = (typeof FACTORY_TREND_INTERVALS)[number];
 
-/** Whole tracked population since measurement started, not only the plotted window. */
+/** Current state of the filtered upload population, independent of the plotted window. */
 export interface FactoryTrendSummary {
-	tracked_submissions: number | null;
-	first_ready: number | null;
+	/** Unarchived uploads without a first complete result that are not complete now. */
 	waiting: number | null;
-	failed: number | null;
+	waiting_failed: number | null;
 	waiting_contributors: number | null;
-	overdue: number | null;
 	oldest_wait_hours: number | null;
-	lead_p50_hours: number | null;
-	lead_p90_hours: number | null;
-	lead_samples: number | null;
-	recovered: number | null;
+	/** Distinct unarchived datasets whose failure episode is still open. */
 	unresolved_failures: number | null;
-	recovery_p50_hours: number | null;
-	recovery_p90_hours: number | null;
-	completed_input_gib: number | null;
-	volume_samples: number | null;
-	missing_volume: number | null;
-	legacy_uploaded: number | null;
+	unresolved_first_result: number | null;
+	oldest_unresolved_hours: number | null;
+	/** Complete now, but no retained evidence of when the first result arrived. */
+	unrecorded_results: number | null;
 }
 
-/** One calendar bucket. Measured fields are null before tracking started; recorded fields are historical. */
+/**
+ * One calendar bucket, by event time. Counts are null before the first retained
+ * evidence; `*_measured` is the directly measured part, the rest is reconstructed
+ * from retained upload and processor logs.
+ */
 export interface FactoryTrendPoint {
 	start: string;
 	end: string;
 	partial: boolean;
-	measured: boolean;
 	uploaded: number | null;
+	uploaded_measured: number | null;
 	first_ready: number | null;
-	completed_input_gib: number | null;
-	volume_samples: number | null;
+	first_ready_measured: number | null;
 	lead_p50_hours: number | null;
 	lead_p90_hours: number | null;
-	lead_samples: number | null;
-	failures: number | null;
+	completed_input_gib: number | null;
+	volume_samples: number | null;
+	failures_first_result: number | null;
+	failures_other: number | null;
+	failures_measured: number | null;
 	recovered: number | null;
+	recovered_measured: number | null;
 	recovery_p50_hours: number | null;
 	recovery_p90_hours: number | null;
-	registered: number | null;
-	recorded_completed: number | null;
-	recorded_failed: number | null;
-	recorded_embedding_completed: number | null;
+	recovery_samples: number | null;
 }
 
 export interface FactoryTrends {
 	as_of: string | null;
+	/** Upload and first-result measurement start (new registrations only). */
 	tracking_since: string | null;
+	/** Failure and recovery measurement start for every dataset. */
+	failures_tracking_since: string | null;
+	/** Earliest retained upload evidence and processor run; earlier periods are unknown. */
+	upload_since: string | null;
+	run_since: string | null;
 	interval: FactoryTrendInterval;
 	workflow: FactoryTrendWorkflow;
 	size: FactoryTrendSize;

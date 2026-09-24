@@ -29,24 +29,23 @@ const NOTIFICATION_LABELS: Record<string, string> = {
 };
 
 const METRIC_LABELS: Record<string, string> = {
-	historical_uploaded: "uploads with historical evidence",
-	historical_completion: "first recorded completions with upload evidence",
 	historical_report: "submitted reports",
 	historical_email: "sent notification recipients",
-	uploaded: "uploads completed",
+	uploaded: "uploads",
 	first_ready: "first complete results",
-	failures: "failure episodes",
-	recovered: "recovered failures",
+	failures: "failure starts",
+	first_result_failures: "failures before a first result",
+	recovered: "failures ended, complete again",
 	registered: "registered datasets",
 	recorded_completed: "recorded completions",
 	recorded_failed: "recorded failures",
 	recorded_embedding_completed: "completions with search indexing",
-	waiting: "still waiting",
+	waiting: "waiting for a first result",
 	failed_submission: "waiting with a failure",
 	overdue: "overdue (soft)",
 	unresolved_failure: "unresolved failures",
 };
-const SIZE_LABELS: Record<string, string> = { small: "under 1 GiB", large: "1 GiB and above", unknown: "not measured" };
+const SIZE_LABELS: Record<string, string> = { small: "under 1 GiB", large: "1 GiB and above", unknown: "unknown" };
 
 const triState = (value: boolean | undefined): "any" | "yes" | "no" => (value === undefined ? "any" : value ? "yes" : "no");
 const fromTriState = (value: "any" | "yes" | "no"): boolean | undefined => (value === "any" ? undefined : value === "yes");

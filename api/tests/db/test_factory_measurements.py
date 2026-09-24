@@ -43,8 +43,12 @@ def test_first_ready_input_once_and_zip_aoi_readiness(db):
 	detail = db.execute('SELECT public.factory_dataset(%s)', (row,)).fetchone()[0]
 	assert detail['status']['input_bytes'] == first[1]
 	assert detail['status']['first_ready_at'] is not None
+	# Charts only count events up to the query time; move this one into the past.
+	db.execute('RESET ROLE')
+	db.execute("UPDATE public.factory_submissions SET uploaded_at=now()-interval '2 hours',first_ready_at=now()-interval '1 hour' WHERE dataset_id=%s", (row,))
+	authenticate(db, owner)
 	result = trends(db, workflow='odm', size='large')
-	assert result['summary']['first_ready'] >= 1
+	assert sum(point['first_ready_measured'] or 0 for point in result['series']) >= 1
 	matched = db.execute("SELECT public.factory_datasets(%s)", ('{"metric":"first_ready","workflow":"odm","size":"large","archived":"all"}',)).fetchone()[0]
 	assert row in [r['dataset_id'] for r in matched['items']]
 
@@ -83,27 +87,24 @@ def test_recipient_dedup_and_matching_bucket_dataset_list(db):
 		VALUES (%s,%s,'processing_completed',%s,'test@example.invalid',ARRAY['geotiff','embeddings_v1'],%s)""", (row+1000000,row,recipient,time))
 	assert db.execute("SELECT count(*) FROM public.factory_metric_events WHERE dataset_id=%s AND metric='recorded_completed'", (row,)).fetchone()[0] == 1
 	authenticate(db, owner)
-	result = trends(db, interval='day')
-	bucket = next(b for b in result['series'] if b['start'][:10] == stamp.date().isoformat())
-	assert bucket['recorded_completed'] >= 1
 	import json
-	filters = dict(metric='recorded_completed',metric_after=bucket['start'],metric_before=bucket['end'],archived='all',ids=[row])
+	filters = dict(metric='recorded_completed',metric_after=stamp.isoformat(),metric_before=(stamp+timedelta(hours=1)).isoformat(),archived='all',ids=[row])
 	assert db.execute('SELECT public.factory_datasets(%s)', (json.dumps(filters),)).fetchone()[0]['total'] == 1
-	filters['metric_after'] = (stamp+timedelta(hours=1)).isoformat()
+	filters['metric_after'] = (stamp+timedelta(minutes=1)).isoformat()
 	assert db.execute('SELECT public.factory_datasets(%s)', (json.dumps(filters),)).fetchone()[0]['total'] == 0
 
 
-def test_unknown_bytes_and_pre_tracking_buckets_remain_unknown(db):
+def test_unknown_bytes_stay_unknown(db):
 	owner = user(db, operate=True)
 	row = upload(db, owner, size=None)
 	ready(db, row)
+	db.execute("UPDATE public.factory_submissions SET uploaded_at=now()-interval '2 hours',first_ready_at=now()-interval '1 hour' WHERE dataset_id=%s", (row,))
 	authenticate(db, owner)
-	result = trends(db, size='unknown')
-	assert result['summary']['missing_volume'] >= 1
-	assert result['summary']['completed_input_gib'] is None
-	old = [b for b in result['series'] if not b['measured']]
-	assert old and all(b['first_ready'] is None and b['uploaded'] is None for b in old)
-	assert result['series'][-1]['partial'] is True
+	import json
+	for size, expected in [('unknown',1),('small',0),('large',0)]:
+		filters = dict(metric='first_ready',size=size,archived='all',ids=[row])
+		assert db.execute('SELECT public.factory_datasets(%s)', (json.dumps(filters),)).fetchone()[0]['total'] == expected
+	assert sum(point['first_ready_measured'] or 0 for point in trends(db, size='unknown')['series']) >= 1
 
 
 def test_local_durations_pending_and_overdue_population(db):
@@ -115,9 +116,10 @@ def test_local_durations_pending_and_overdue_population(db):
 	# Synthetic clock fixtures are DB-admin-only, never exposed to the UI.
 	db.execute("UPDATE public.factory_submissions SET uploaded_at=now()-interval '5 hours' WHERE dataset_id IN (%s,%s,%s)", (completed,pending,large))
 	db.execute("UPDATE public.factory_submissions SET first_ready_at=now()-interval '2 hours' WHERE dataset_id=%s", (completed,))
+	lead = db.execute('SELECT first_result_at-uploaded_at,result_source FROM public.factory_outcome_evidence WHERE dataset_id=%s', (completed,)).fetchone()
+	assert lead == (timedelta(hours=3), 'measured')
 	authenticate(db, owner)
 	result = trends(db, size='small')['summary']
-	assert result['lead_samples'] >= 1 and result['lead_p90_hours'] >= 3
 	assert result['waiting'] >= 1 and result['oldest_wait_hours'] >= 5
 	import json
 	for row, expected in [(pending,1),(large,0)]:
@@ -140,7 +142,7 @@ def test_metrics_permissions_and_no_direct_ledger_writes(db, role):
 			db.execute('SELECT * FROM public.factory_submissions')
 
 
-@pytest.mark.parametrize('kwargs', [dict(interval='month'),dict(workflow='bad'),dict(size='bytes')])
+@pytest.mark.parametrize('kwargs', [dict(interval='year'),dict(workflow='bad'),dict(size='bytes')])
 def test_invalid_trend_filters(db, kwargs):
 	owner=user(db,operate=True)
 	authenticate(db, owner)
