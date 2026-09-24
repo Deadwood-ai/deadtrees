@@ -296,6 +296,7 @@ const DatasetMapOL = ({
   colorMode = "quality",
   onMapInteracted,
   viewPadding = [50, 50, 50, 50],
+  frameDataOnOpen = false,
 }: {
   data: DatasetMapItem[];
   hoveredItem: number | null;
@@ -305,6 +306,8 @@ const DatasetMapOL = ({
   colorMode?: DatasetMapColorMode;
   onMapInteracted?: () => void;
   viewPadding?: DatasetMapViewPadding;
+  /** Zoom out to show every dataset on first visit, instead of the default view. */
+  frameDataOnOpen?: boolean;
 }) => {
   const navigate = useNavigate();
   const mapRef = useRef<MapRef | null>(null);
@@ -369,7 +372,7 @@ const DatasetMapOL = ({
         ...(DatasetViewport ?? DEFAULT_VIEWPORT),
         // Lets the view zoom out past "world fills the width", so the data can
         // be framed beside the sidebar on narrower screens.
-        showFullExtent: true,
+        showFullExtent: frameDataOnOpen,
       });
 
       const map = new OLMap({
@@ -382,7 +385,7 @@ const DatasetMapOL = ({
       mapRef.current = map as MapRef;
       // First visit: show every dataset instead of a fixed world view that the
       // sidebar and timeline partly cover. Later visits restore the last viewport.
-      if (!DatasetViewport) fitToExtent(getDataExtent(data));
+      if (!DatasetViewport && frameDataOnOpen) fitToExtent(getDataExtent(data));
 
       // Borrowed from the shared pool; returned (not disposed) in cleanup. The
       // group already contains the OSM fallback layer.

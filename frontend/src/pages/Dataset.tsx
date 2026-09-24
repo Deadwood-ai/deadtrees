@@ -467,6 +467,9 @@ export default function Dataset() {
             colorMode={colorMode}
             onMapInteracted={handleMapInteracted}
             viewPadding={mapViewPadding}
+            // On tall phone screens, framing the whole world leaves empty bands
+            // above and below it, so phones keep the default zoom.
+            frameDataOnOpen={!isMobile}
           />
         )}
       </div>
