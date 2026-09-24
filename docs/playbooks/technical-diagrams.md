@@ -9,6 +9,20 @@ pipeline visualization, paper figure, or presentation graphic.
 - D2 for polished standalone technical diagrams when D2 is installed locally.
 - Playwright screenshots for browser-backed UI or app-flow diagrams.
 
+## Mermaid Validation
+
+Save the exact diagram source, without its Markdown fence, to a `.mmd` file and
+run:
+
+```bash
+scripts/validate-mermaid.sh diagram.mmd
+```
+
+The script renders the file with a pinned Mermaid CLI through `npx`, so it needs
+Node.js and network access on first use. Fix parse or render failures before
+sharing the source. A successful render proves syntax support in the pinned CLI,
+not that every host (GitHub, Zulip, Linear) renders the diagram identically.
+
 ## D2 Workflow
 
 1. Draft a `.d2` file in an appropriate docs or scratch location.

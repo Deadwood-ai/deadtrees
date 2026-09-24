@@ -81,8 +81,9 @@ when explicitly needed and approved.
 
 ## Database
 
-- For Supabase/database work, use the Supabase skill when available, then apply
-  the DeadTrees-specific rules in this section.
+- This section and `docs/agents/environment-and-access.md` own the DeadTrees
+  database workflow. A Supabase agent skill is optional; use current official
+  documentation for unfamiliar platform behavior.
 - Use [trusted analyst access](../playbooks/analyst-database-access.md) for routine
   production inspection, including its target, identity and read-only preflight.
 - Configured Supabase/Postgres MCP tools remain useful for local inspection;

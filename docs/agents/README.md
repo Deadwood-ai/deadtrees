@@ -21,8 +21,10 @@ use these files directly; editor-specific rule folders are intentionally retired
 11. For `/reflect-and-learn` or end-of-session retrospectives, use
     `docs/playbooks/reflect-and-learn.md`. Use `docs/playbooks/reflect-context.md`
     when the focus is only rules/docs context cleanup.
-12. For release or deploy questions, use `docs/playbooks/create-release.md`,
-    `docs/playbooks/processor-deploy.md`, and local-only `docs/ops/*` files when present.
+12. For release, deploy, or release-announcement questions, use
+    `docs/playbooks/create-release.md`, `docs/playbooks/processor-deploy.md`, and
+    local-only `docs/ops/*` files when present.
+13. For manual QA runs, use `.agents/skills/run-deadtrees-qa/SKILL.md`.
 
 ## Tracked Versus Local
 

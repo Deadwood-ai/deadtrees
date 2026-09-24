@@ -3,14 +3,25 @@
 Codex is the primary coding agent for this repository. Start here, then open
 the linked docs that match the task.
 
-## Source Of Truth
+## Read By Task
 
 - Repo-wide agent guide: `docs/agents/README.md`
-- Core engineering rules: `docs/agents/rules.md`
-- Project structure guidance: `docs/agents/project-structure.md`
-- Environment and access model: `docs/agents/environment-and-access.md`
-- Platform status playbook: `docs/playbooks/platform-status-check.md`
-- Frontend-specific agent rules: `frontend/AGENTS.md`
+- Architecture, database, processing, and delivery rules: `docs/agents/rules.md`
+- Test scope, mocks, CI, and browser validation: `docs/agents/testing-strategy.md`
+- Adding files or moving responsibilities: `docs/agents/project-structure.md`
+- Environment, credentials, and access selection: `docs/agents/environment-and-access.md`
+- Frontend changes: `frontend/AGENTS.md`
+- Platform monitoring: `docs/playbooks/platform-status-check.md`
+- Failed or stuck processing: `docs/playbooks/dataset-debugging.md`
+- Routine production database reads: `docs/playbooks/analyst-database-access.md`
+- Local code review: `docs/agents/local-review-instructions.md`
+- Manual QA (production read-only and isolated local write):
+  `.agents/skills/run-deadtrees-qa/SKILL.md`
+- Releases and team announcements: `docs/playbooks/create-release.md`
+- Diagrams, including Mermaid validation: `docs/playbooks/technical-diagrams.md`
+
+These tracked documents own the team workflow. Personal skills are optional;
+teammates must not need another user's home directory or credentials.
 
 ## Safety
 
@@ -45,6 +56,8 @@ scripts/qa/validate-isolated-env.sh
   default shared Supabase ports for full QA/test work.
 - See `docs/agents/environment-and-access.md` for the routing table, manual
   `source` command, and teardown guidance.
+- Production exploration must not run local-write QA playbooks or create data
+  for later cleanup.
 
 ## Review guidelines
 

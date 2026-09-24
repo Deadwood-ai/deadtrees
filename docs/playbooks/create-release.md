@@ -298,3 +298,15 @@ The workflow will:
   release rather than editing generated notes by hand.
 - Every merge to `main` now creates a release, so release volume will match
   main-branch merge volume.
+
+## Team Announcement
+
+Post a Zulip update only when the user asks for one. Draft the text locally and
+send it only when posting is explicitly authorized, to the approved destination.
+Use stream `project_deadtree.earth` unless the user chooses another; application
+updates normally reuse the topic `Application Updates (changelog)`.
+
+Describe the user-visible change briefly, link the actual live or preview route,
+and name useful feedback or a material limitation. Verify release and deployment
+evidence before calling a change live. Keep secrets, raw logs, and private user
+data out of posts.
