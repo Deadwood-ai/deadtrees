@@ -473,6 +473,18 @@ added to the 10,000-dataset benchmark, every Factory RPC measured below 1.4 s on
 loaded host (north star 0.62–0.66 s, trends 0.98–1.33 s, first-result drilldown
 0.41–0.44 s); the same north-star call did not finish within 120 s before.
 
+`factory_trends` then still timed out: recovery matched each failure to later
+proofs and ready moments through range joins, and the planner, expecting a few
+timeline rows instead of about 10^5, rescanned every ready moment per failure
+(7.6 s for this step alone on production data). Each failure now owns the
+timeline rows up to the next failure in one ordered pass, with no join; a plan
+test forbids rescanning the timeline. On production data (read-only, equivalent
+query) the timeline plus recovery pass takes 1.2 s and yields identical episodes
+for all 1,321 retained failures. At production shape locally (11,000 datasets,
+23,570 runs, 2,129 failures, 1.8 million noise logs, loaded host) trends dropped
+from 13.6–14 s to 2.7–3.1 s; the timeline, computed once per evidence view, is
+most of what remains.
+
 Exact totals, global aggregates, substring searches and deep offset pagination
 still grow with the relevant population. This is not constant-cost analytics at
 arbitrary scale. Rebenchmark against realistic cardinality/skew and concurrency
