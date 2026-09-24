@@ -34,7 +34,10 @@ create view public.factory_run_log_events with(security_invoker=true) as
    -- Success position, or the position of the stage a failure names.
    case when message like 'Processing failed:%' then public.factory_stage_position(substring(message from 'Processing failed: ([a-z_]+)'))
     when message like 'Crash detected for dataset %' then public.factory_stage_position(substring(message from 'crashed during ([a-z_]+)'))
+    -- A completed run's notification record proves every requested stage.
+    when message like 'Recorded % processing_completed notification event(s) for task %' then 11
     when message='ODM processing completed successfully' then 1
+    when message like 'Finished converting dataset %' then 2
     when message='Processed metadata successfully' then 3
     when message='Thumbnail processing completed successfully' then 5
     when message='Deadwood segmentation completed successfully' then 6
@@ -47,7 +50,9 @@ create view public.factory_run_log_events with(security_invoker=true) as
     from jsonb_array_elements_text(case when jsonb_typeof(extra->'task_types')='array' then extra->'task_types' else '[]'::jsonb end) t) end as requested
   from public.v2_logs where dataset_id is not null and (
    (category='process' and (message like 'Starting processing for task %' or message like 'Processing failed:%'
-    or message like 'Crash detected for dataset %' or message like 'Received signal %; gracefully re-queuing in-flight task %'))
+    or message like 'Crash detected for dataset %' or message like 'Received signal %; gracefully re-queuing in-flight task %'
+    or message like 'Recorded % processing_completed notification event(s) for task %'))
+   or (category='ortho' and message like 'Finished converting dataset %')
    or message in ('Combined segmentation completed successfully','Tree cover segmentation completed successfully',
     'Deadwood segmentation completed successfully','AOI segmentation completed successfully','Processed metadata successfully',
     'Thumbnail processing completed successfully','ODM processing completed successfully','Tile embedding completed successfully'))
@@ -58,7 +63,8 @@ create view public.factory_run_log_events with(security_invoker=true) as
 -- When each requested stage was proven done. Stages run in pipeline order and a
 -- failing stage ends its run, so the first success at or past a requested stage
 -- proves it; a later failure in the same run does not undo it. COG has no success
--- log and is proven by the stages after it. A run requesting an area of interest
+-- log and is proven by the stages after it or by the run's completed-notification
+-- record (which proves every requested stage); without either it stays unproven. A run requesting an area of interest
 -- adds a requirement marker (position 9, no proof) from its start.
 create view public.factory_stage_proofs with(security_invoker=true) as
  with events as materialized (
@@ -467,10 +473,12 @@ begin
    and not exists(select 1 from team t where t.user_id=d.user_id)
   group by j.dataset_id
  ), downloads as materialized (
-  select r.requested_at,r.user_id is distinct from d.user_id as reuse
+  -- One entry per accepted request; a bundle is reuse if any dataset is someone else's.
+  select r.request_id,min(r.requested_at) as requested_at,bool_or(r.user_id is distinct from d.user_id) as reuse
   from public.dataset_download_requests r join public.v2_datasets d on d.id=r.dataset_id
   where r.requested_at>=week_start and r.requested_at<=now()
    and not exists(select 1 from team t where t.user_id=r.user_id)
+  group by r.request_id
  ), signups as materialized (
   select u.id as user_id,u.created_at from auth.users u
   where u.created_at<=now() and not exists(select 1 from team t where t.user_id=u.id)

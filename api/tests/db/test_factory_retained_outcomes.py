@@ -24,7 +24,7 @@ def log_upload(db, row, stamp, size=GIB // 2):
 FULL = ['geotiff', 'metadata', 'cog', 'thumbnail', 'deadwood_treecover_combined_v2']
 STAGES = {  # task type -> (pipeline position, success log or None when the stage logs no success)
 	'odm_processing': (1, 'ODM processing completed successfully'),
-	'geotiff': (2, None),
+	'geotiff': (2, 'Finished converting dataset {row}'),
 	'metadata': (3, 'Processed metadata successfully'),
 	'cog': (4, None),
 	'thumbnail': (5, 'Thumbnail processing completed successfully'),
@@ -37,15 +37,19 @@ STAGES = {  # task type -> (pipeline position, success log or None when the stag
 FAILED_STAGE = {'geotiff': 2, 'cog': 4, 'aoi_segmentation': 9, 'deadwood_treecover_combined_segmentation': 8, 'embedding_processing': 10}
 
 
-def run(db, row, start, *, tasks=FULL, fail=None, interrupt=False, minutes=30):
+def run(db, row, start, *, tasks=FULL, fail=None, interrupt=False, minutes=30, stage_logs=True, completed=False):
 	"""One processor run as the processor logs it: the start with its task types, stage
 	successes in pipeline order until `fail` names the failing stage, then the failure.
-	The last success is logged at start+minutes; returns that time (or the start)."""
+	`completed` adds the completed-run notification record that ends a successful run.
+	The last log is at start+minutes; returns that time (or the start)."""
 	log(db, row, start, f'Starting processing for task {row}', extra={'task_types': tasks})
 	limit = FAILED_STAGE[fail] if fail else 99
-	logged = [STAGES[t][1] for t in sorted(tasks, key=lambda t: STAGES[t][0]) if STAGES[t][0] < limit and STAGES[t][1]]
+	logged = [STAGES[t][1].format(row=row) for t in sorted(tasks, key=lambda t: STAGES[t][0]) if stage_logs and STAGES[t][0] < limit and STAGES[t][1]]
+	if completed:
+		logged.append(f'Recorded 1 processing_completed notification event(s) for task {row}')
 	for index, message in enumerate(logged, start=1):
-		log(db, row, start + timedelta(minutes=minutes * index / len(logged)), message, 'stage')
+		category = 'ortho' if message.startswith('Finished converting') else 'process' if message.startswith('Recorded') else 'stage'
+		log(db, row, start + timedelta(minutes=minutes * index / len(logged)), message, category)
 	end = start + timedelta(minutes=minutes) if logged else start
 	if interrupt:
 		log(db, row, end + timedelta(minutes=1), f'Received signal 15; gracefully re-queuing in-flight task {row} for dataset {row} for retry', level='WARNING')
@@ -134,6 +138,34 @@ def test_failure_stays_open_until_a_later_run_proves_the_failed_stage(db):
 	older = legacy(db, owner)
 	run(db, older, ago(days=10), tasks=['geotiff', 'embeddings_v1'], fail='embedding_processing')
 	assert failures(db, older)[0][4] == 'unknown' and outcome(db, older) is None
+
+
+def test_terminal_ortho_and_cog_retries_recover_only_with_completion_evidence(db):
+	owner = user(db)
+	row = legacy(db, owner)
+	uploaded = ago(days=20)
+	log_upload(db, row, uploaded)
+	run(db, row, uploaded + timedelta(hours=1))
+	# A geotiff-only retry ends with the ortho stage's own success log.
+	ortho_failed = run(db, row, uploaded + timedelta(days=1), tasks=['geotiff'], fail='geotiff') + timedelta(minutes=1)
+	ortho_fixed = run(db, row, uploaded + timedelta(days=2), tasks=['geotiff'])
+	# COG logs no success of its own: an ortho success alone does not prove a COG retry.
+	cog_failed = run(db, row, uploaded + timedelta(days=3), tasks=['geotiff', 'cog'], fail='cog') + timedelta(minutes=1)
+	run(db, row, uploaded + timedelta(days=4), tasks=['geotiff', 'cog'])
+	assert failures(db, row) == [
+		(ortho_failed, ortho_fixed, 'processing_log', 'processing_log', 'rerun'),
+		(cog_failed, None, 'processing_log', None, 'rerun'),
+	]
+	# The completed-run notification record proves every requested stage, COG included.
+	cog_fixed = run(db, row, uploaded + timedelta(days=5), tasks=['geotiff', 'cog'], completed=True)
+	assert failures(db, row)[1] == (cog_failed, cog_fixed, 'processing_log', 'processing_log', 'rerun')
+	# Without any retained success evidence the retry stays open instead of being invented.
+	silent = legacy(db, owner)
+	log_upload(db, silent, uploaded)
+	run(db, silent, uploaded + timedelta(hours=1))
+	failed = run(db, silent, uploaded + timedelta(days=1), tasks=['geotiff'], fail='geotiff') + timedelta(minutes=1)
+	run(db, silent, uploaded + timedelta(days=2), tasks=['geotiff'], stage_logs=False)
+	assert failures(db, silent) == [(failed, None, 'processing_log', None, 'rerun')]
 
 
 def test_stage_only_success_does_not_recover_a_dataset_without_a_result(db):

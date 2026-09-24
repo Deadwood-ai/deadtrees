@@ -306,7 +306,7 @@ def _download_requests(dataset_id):
 	with use_service_client() as service_client:
 		rows = (
 			service_client.table('dataset_download_requests')
-			.select('kind,user_id')
+			.select('kind,user_id,request_id')
 			.eq('dataset_id', dataset_id)
 			.execute()
 		)
@@ -2816,3 +2816,33 @@ def test_multi_bundle_download_redirect(auth_token, multi_test_datasets):
 	)
 	assert download_response.status_code == 303
 	assert f'/downloads/v1/bundles/{job_id}.zip' in download_response.headers['location']
+
+
+def test_cached_restricted_bundle_is_authorized_before_it_is_recorded(private_test_dataset_for_download, test_user2):
+	"""A bundle another user already prepared must pass per-dataset access checks first."""
+	job_id = generate_bundle_job_id([private_test_dataset_for_download], False, False)
+	bundle_file = settings.downloads_path / 'bundles' / f'{job_id}.zip'
+	bundle_file.parent.mkdir(parents=True, exist_ok=True)
+	bundle_file.write_bytes(b'cached bundle')
+	try:
+		user2_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+		response = client.get(
+			f'/api/v1/download/bundle.zip?dataset_ids={private_test_dataset_for_download}',
+			headers={'Authorization': f'Bearer {user2_token}'},
+		)
+		assert response.status_code == 404
+		assert _download_requests(private_test_dataset_for_download) == []
+	finally:
+		bundle_file.unlink(missing_ok=True)
+
+
+def test_bundle_is_one_request_with_one_row_per_distinct_dataset(auth_token, multi_test_datasets, test_user):
+	first, second = multi_test_datasets[:2]
+	response = client.get(
+		f'/api/v1/download/bundle.zip?dataset_ids={first},{second},{first}',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	assert response.status_code == 200
+	rows = _download_requests(first) + _download_requests(second)
+	assert len(rows) == 2 and {row['kind'] for row in rows} == {'bundle'}
+	assert len({row['request_id'] for row in rows}) == 1

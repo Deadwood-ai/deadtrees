@@ -9,13 +9,16 @@ create table public.dataset_download_requests (
  dataset_id bigint not null references public.v2_datasets(id) on delete cascade,
  user_id uuid references auth.users(id) on delete set null,
  kind text not null check(kind in ('dataset','labels','bundle')),
- requested_at timestamptz not null default clock_timestamp()
+ requested_at timestamptz not null default clock_timestamp(),
+ -- One accepted request; a bundle has one membership row per distinct dataset.
+ request_id uuid not null default gen_random_uuid(),
+ unique(request_id,dataset_id)
 );
 create index dataset_download_requests_time_idx on public.dataset_download_requests(requested_at);
 create index dataset_download_requests_dataset_idx on public.dataset_download_requests(dataset_id);
 alter table public.dataset_download_requests enable row level security;
 revoke all on public.dataset_download_requests from public,anon,authenticated;
-comment on table public.dataset_download_requests is 'One row per accepted download request (API writes with the service role after access and output checks). Coverage starts at the first recorded row.';
+comment on table public.dataset_download_requests is 'Accepted download requests (API writes with the service role after access and output checks): one row per dataset in a request, sharing request_id, so a bundle is one request. Coverage starts at the first recorded row.';
 -- Older rate-limit logs are written before the access and output checks, so they
 -- cannot prove a request was accepted and are not backfilled.
 
@@ -80,10 +83,12 @@ begin
    and not exists(select 1 from team t where t.user_id=d.user_id)
   group by j.dataset_id
  ), downloads as materialized (
-  select r.requested_at,r.user_id is distinct from d.user_id as reuse
+  -- One entry per accepted request; a bundle is reuse if any dataset is someone else's.
+  select r.request_id,min(r.requested_at) as requested_at,bool_or(r.user_id is distinct from d.user_id) as reuse
   from public.dataset_download_requests r join public.v2_datasets d on d.id=r.dataset_id
   where r.requested_at>=week_start and r.requested_at<=now()
    and not exists(select 1 from team t where t.user_id=r.user_id)
+  group by r.request_id
  ), signups as materialized (
   select u.id as user_id,u.created_at from auth.users u
   where u.created_at<=now() and not exists(select 1 from team t where t.user_id=u.id)

@@ -363,10 +363,12 @@ and colours each change by the metric's good direction.
   separately, against the one-hour target and two-hour reference.
 - **Reference data**: audits with final assessment `no_issues` (or legacy
   `ready`) by audit date. Fixable and excluded datasets do not count.
-- **Downloads**: `dataset_download_requests` rows. The download API records one
-  row per accepted full-dataset, labels or bundle request, using the service
-  role, after the access and output checks, and never fails the download when
-  recording fails. The API and database deploy separately, so coverage starts
+- **Downloads**: accepted requests in `dataset_download_requests`. The download
+  API records each accepted full-dataset, labels or bundle request once, with one
+  row per distinct dataset sharing a `request_id`, using the service role, after
+  the access and output checks (also for a cached bundle another user prepared).
+  Charts count requests, and a bundle is reuse if any of its datasets belongs to
+  someone else. A recording failure never fails the download. The API and database deploy separately, so coverage starts
   with the first recorded request rather than the migration time; earlier weeks
   are unknown and the first week is a lower bound. The rate-limit request logs are not used, because
   they are written before the access and output checks and include rejected
@@ -517,8 +519,12 @@ count reports its measured part, and the chart marks where measurement starts.
 - **Stage proofs** (`factory_stage_proofs`): stages run in pipeline order (ODM,
   ortho, metadata, COG, thumbnail, deadwood, tree cover, combined, AOI, indexing)
   and a failing stage ends its run, so a requested stage is proven done at the
-  first success at or past its position in that run. COG logs no success and is
-  proven by the stages after it. Proofs persist across runs, like the status flags.
+  first success at or past its position in that run. Ortho logs `Finished
+  converting dataset`; COG logs no success and is proven by a later stage or by
+  the run's `Recorded … processing_completed notification event(s)` record, which
+  proves every requested stage (recorded when the run has recipients, since
+  August 2026). A retry with neither stays unproven rather than invented. Proofs
+  persist across runs, like the status flags.
 - **First result** (`factory_outcome_evidence`): for measured submissions the
   measured readiness (still waiting stays waiting); otherwise the first moment
   runs after the first upload log had proven every readiness requirement of

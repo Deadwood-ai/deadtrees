@@ -131,9 +131,16 @@ def test_downloads_split_reuse_and_skip_team_downloaders(db, operator):
 			"INSERT INTO public.dataset_download_requests(dataset_id,user_id,kind,requested_at) VALUES (%s,%s,'dataset',%s)",
 			(row, downloader, stamp),
 		)
+	# One bundle request covering two datasets is one download, reuse if any dataset is someone else's.
+	own = upload(db, reuser, db.execute("SELECT now()-interval '30 days'").fetchone()[0])
+	db.execute(
+		"""INSERT INTO public.dataset_download_requests(dataset_id,user_id,kind,requested_at,request_id)
+		SELECT d,%s,'bundle',%s,'00000000-0000-4000-8000-0000000b0001' FROM unnest(%s::bigint[]) d""",
+		(reuser, stamp, [row, own]),
+	)
 	after = north_star(db, operator)
-	assert delta(before, after, 'downloads', -2) == 3
-	assert delta(before, after, 'reuse_downloads', -2) == 2
+	assert delta(before, after, 'downloads', -2) == 4
+	assert delta(before, after, 'reuse_downloads', -2) == 3
 
 
 def test_download_coverage_starts_with_the_first_recorded_request(db, operator):

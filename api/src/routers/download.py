@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 import time
 import shutil
+import uuid
 import zipfile
 import io
 from datetime import datetime, timedelta, timezone
@@ -221,11 +222,18 @@ def validate_user_and_limit(
 
 
 def record_download_request(user_id, dataset_ids: List[int], kind: str) -> None:
-	"""Record accepted download requests for Factory reuse metrics. Never blocks the download."""
+	"""Record one accepted download request for Factory reuse metrics. Never blocks the download.
+
+	A bundle is one request with one row per distinct dataset, sharing a request ID.
+	"""
+	request_id = str(uuid.uuid4())
 	try:
 		with use_service_client() as client:
 			client.table('dataset_download_requests').insert(
-				[{'dataset_id': dataset_id, 'user_id': str(user_id), 'kind': kind} for dataset_id in dataset_ids]
+				[
+					{'dataset_id': dataset_id, 'user_id': str(user_id), 'kind': kind, 'request_id': request_id}
+					for dataset_id in dict.fromkeys(dataset_ids)
+				]
 			).execute()
 	except Exception as e:
 		logger.warning(f'Could not record download request for datasets {dataset_ids}: {e}')
@@ -834,6 +842,13 @@ async def prepare_multi_bundle(
 		job_id=job_id,
 	)
 	
+	# Enforce per-dataset access and output checks for every request, including a
+	# cached bundle another user prepared, before recording or returning it.
+	datasets_info = await get_datasets_for_bundle(
+		dataset_ids=id_list,
+		token=token,
+	)
+
 	# Check if bundle already exists
 	download_dir = settings.downloads_path / 'bundles'
 	download_file = download_dir / f'{job_id}.zip'
@@ -854,11 +869,6 @@ async def prepare_multi_bundle(
 	if download_file.exists():
 		download_file.unlink()
 	
-	# Fetch all datasets and enforce access policy for bundle creation
-	datasets_info = await get_datasets_for_bundle(
-		dataset_ids=id_list,
-		token=token,
-	)
 	record_download_request(user.id, id_list, 'bundle')
 	
 	# Start background task
