@@ -31,7 +31,7 @@ def history(db, year=2010):
 	return db.execute('SELECT public.factory_history(%s)',(year,)).fetchone()[0]
 
 
-def test_legacy_upload_timing_duplicates_and_drilldown(db):
+def test_legacy_upload_duplicates_and_drilldown(db):
 	owner=user(db,operate=True)
 	row=legacy(db,owner)
 	log_upload(db,row)
@@ -43,26 +43,24 @@ def test_legacy_upload_timing_duplicates_and_drilldown(db):
 	result=history(db)
 	jan=result['series'][0]
 	assert jan['uploaded']==1 and jan['completed']==1 and jan['indexing']==1
-	assert jan['input_gib']==1 and jan['timing_samples']==1
-	assert jan['p50']==24 and jan['p90']==24
-	assert result['series'][1]['completed']==1 and result['series'][1]['timing_samples']==0
-	filters=dict(metric='historical_completion',archived='all',metric_after=jan['start'],metric_before=jan['end'],ids=[row])
+	assert jan['input_gib']==1 and 'p50' not in jan
+	assert result['series'][1]['completed']==1
+	filters=dict(metric='uploaded',archived='all',metric_after=jan['start'],metric_before=jan['end'],ids=[row])
 	assert db.execute('SELECT public.factory_datasets(%s)',(json.dumps(filters),)).fetchone()[0]['total']==1
 	detail=db.execute('SELECT public.factory_dataset(%s)',(row,)).fetchone()[0]
 	assert detail['status']['historical_upload_source']=='upload_log'
-	assert detail['status']['historical_elapsed_hours']==24
+	# A completion notification alone is not a first result; processor run logs are.
+	assert detail['status']['first_result_at'] is None
 	assert detail['status'].get('first_ready_at') is None
 
 
-def test_missing_reversed_and_invalid_evidence_stays_unknown(db):
+def test_missing_and_invalid_evidence_stays_unknown(db):
 	owner=user(db,operate=True)
 	row=legacy(db,owner)
 	log_upload(db,row,size='invalid')
-	completed(db,row,owner,'2010-01-01T12:00:00Z')  # older than upload cannot be timing
 	authenticate(db,owner)
 	jan=history(db)['series'][0]
 	assert jan['uploaded']==1 and jan['input_gib'] is None and jan['size_samples']==0
-	assert jan['timing_samples']==0 and jan['p50'] is None
 
 
 def test_period_before_recording_is_unknown_and_all_history_is_reachable(db):
@@ -98,7 +96,7 @@ def test_factory_history_permission_and_private_sources(db):
 		history(db)
 
 
-@pytest.mark.parametrize('relation',['factory_historical_uploads','factory_historical_runs','factory_historical_timing'])
+@pytest.mark.parametrize('relation',['factory_historical_uploads','factory_historical_runs'])
 def test_history_sources_not_exposed_directly(db,relation):
 	authenticate(db,user(db,operate=True))
 	with pytest.raises(psycopg.errors.InsufficientPrivilege):
@@ -112,16 +110,17 @@ def test_invalid_history_range(db):
 
 
 def test_upload_log_reconstruction_has_a_targeted_index(db):
-	from api.tests.db.test_factory_query_plans import walk_plan
-	# Tiny fixtures can prefer a sequential scan. Force index eligibility, then
-	# check the real view pushes the dataset bound into that index. Scale is
-	# separately measured with normal planner settings by benchmark-factory.sh.
+	from api.tests.db.test_factory_query_plans import assert_logs_read_through, production_shaped_logs
+	# With production-shaped statistics, a per-dataset read must reach upload
+	# evidence through the targeted index bounded by that dataset, never by an
+	# unbounded created_at scan. Scale is measured by benchmark-factory.sh.
+	row=production_shaped_logs(db)
 	db.execute('SET LOCAL enable_seqscan=off')
-	plan=db.execute('EXPLAIN (FORMAT JSON) SELECT * FROM public.factory_historical_uploads WHERE dataset_id=%s', (123,)).fetchone()[0][0]['Plan']
-	assert any(n.get('Index Name')=='factory_upload_success_log_idx' and '123' in n.get('Index Cond','') for n in walk_plan(plan))
+	plan=db.execute('EXPLAIN (FORMAT JSON) SELECT * FROM public.factory_historical_uploads WHERE dataset_id=%s', (row,)).fetchone()[0][0]['Plan']
+	assert_logs_read_through(plan,'factory_upload_success_log_idx',row)
 
 
-@pytest.mark.parametrize('signature', ['factory_history(integer)','factory_dataset(bigint)','factory_trends(text,text,text)'])
+@pytest.mark.parametrize('signature', ['factory_history(integer)','factory_dataset(bigint)','factory_trends(text,text,text)','factory_north_star(boolean)'])
 def test_replaced_dashboard_functions_keep_jit_disabled(db,signature):
 	config=db.execute("SELECT proconfig FROM pg_proc WHERE oid=%s::regprocedure", ('public.'+signature,)).fetchone()[0]
 	assert 'jit=off' in config

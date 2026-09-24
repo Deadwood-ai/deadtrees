@@ -38,6 +38,8 @@ def test_oldest_failures_sort_first_but_unknown_failure_age_is_not_invented(db):
 	for row,days in [(older,5),(newer,1)]:
 		db.execute('UPDATE public.v2_statuses SET has_error=true WHERE dataset_id=%s', (row,))
 		db.execute("UPDATE public.factory_failure_episodes SET failed_at=now()-(%s * interval '1 day') WHERE dataset_id=%s", (days,row))
+	# Already failing when every dataset became observed: the start is not invented.
+	db.execute('UPDATE public.factory_failure_episodes SET failed_at=NULL WHERE dataset_id=%s', (legacy,))
 	authenticate(db, owner)
 	result = page(db,dict(ids=[older,newer,legacy],sort='attention'))['items']
 	assert [r['dataset_id'] for r in result] == [older,newer,legacy]

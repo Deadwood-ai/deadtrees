@@ -1,9 +1,11 @@
 import type { FactoryHistory } from "../components/Factory/factoryHistoryTypes";
+import type { FactoryNorthStar } from "../components/Factory/factoryNorthStarMetrics";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { supabase } from "./useSupabase";
 import { useAuth } from "./useAuthProvider";
 import { useCanOperate } from "./useUserPrivileges";
 import { FACTORY_MAX_RPC_LIMIT, toRpcFilters } from "../components/Factory/factoryFilters";
+import { FACTORY_TREND_INTERVALS } from "../components/Factory/factoryTypes";
 import type {
 	FactoryActivityKind,
 	FactoryActivityPage,
@@ -92,6 +94,7 @@ function normalizeDetail(raw: unknown): FactoryDatasetDetail | null {
 		reports: asArray(record.reports),
 		audits: asArray(record.audits),
 		corrections: asArray(record.corrections),
+		failures: asArray(record.failures),
 		correction_total: typeof record.correction_total === "number" ? record.correction_total : null,
 	};
 }
@@ -105,7 +108,10 @@ function normalizeTrends(
 	return {
 		as_of: asString(record.as_of),
 		tracking_since: asString(record.tracking_since),
-		interval: record.interval === "day" ? "day" : record.interval === "week" ? "week" : requested.interval,
+		failures_tracking_since: asString(record.failures_tracking_since),
+		upload_since: asString(record.upload_since),
+		run_since: asString(record.run_since),
+		interval: (FACTORY_TREND_INTERVALS as readonly unknown[]).includes(record.interval) ? (record.interval as FactoryTrendInterval) : requested.interval,
 		workflow: (asString(record.workflow) as FactoryTrendWorkflow | null) ?? requested.workflow,
 		size: (asString(record.size) as FactoryTrendSize | null) ?? requested.size,
 		summary,
@@ -293,7 +299,7 @@ export function useFactoryOperations() {
 function normalizeHistory(raw: unknown): FactoryHistory {
 	const record = asRecord(raw);
 	const coverage = asRecord(record.coverage);
-	const counts = ["datasets", "upload_evidence", "upload_sizes", "timing_pairs", "measured_uploads", "ready_now"];
+	const counts = ["datasets", "upload_evidence", "upload_sizes", "measured_uploads", "ready_now"];
 	// A broken response must be a query error, never fabricated zeros or a render crash.
 	if (!Array.isArray(record.series) || !Array.isArray(record.years) || counts.some((key) => asCount(coverage[key]) === null)) {
 		throw new Error("Historical activity returned an incomplete response.");
@@ -309,5 +315,29 @@ export function useFactoryHistory(year: number | null) {
 		queryFn: async () => normalizeHistory(await callFactoryRpc<unknown>("factory_history", { p_year: year })),
 		retry: factoryRetry,
 		staleTime: 60 * 1000,
+	});
+}
+
+function normalizeNorthStar(raw: unknown): FactoryNorthStar {
+	const record = asRecord(raw);
+	// Headline numbers must never be fabricated from a partial response.
+	if (!Array.isArray(record.weekly) || !Array.isArray(record.cohorts) || !Array.isArray(record.stalled) || asString(record.as_of) === null) {
+		throw new Error("North-star outcomes returned an incomplete response.");
+	}
+	return {
+		...(record as unknown as FactoryNorthStar),
+		coverage: asArray<unknown>(record.coverage).filter((item): item is string => typeof item === "string"),
+	};
+}
+
+export function useFactoryNorthStar(includeTeam: boolean) {
+	const { enabled } = useFactoryAccess();
+	return useQuery({
+		queryKey: ["factory", "north-star", includeTeam],
+		enabled,
+		queryFn: async () => normalizeNorthStar(await callFactoryRpc<unknown>("factory_north_star", { p_include_team: includeTeam })),
+		retry: factoryRetry,
+		staleTime: 60 * 1000,
+		placeholderData: keepPreviousData,
 	});
 }

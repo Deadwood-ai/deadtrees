@@ -300,6 +300,97 @@ def test_download_dataset_blocks_viewonly_full_download(auth_token, viewonly_tes
 	assert 'view-only' in response.json()['detail']
 
 
+def _download_requests(dataset_id):
+	from shared.db import use_service_client
+
+	with use_service_client() as service_client:
+		rows = (
+			service_client.table('dataset_download_requests')
+			.select('kind,user_id,request_id')
+			.eq('dataset_id', dataset_id)
+			.execute()
+		)
+	return rows.data
+
+
+def test_accepted_download_request_is_recorded_for_reuse_metrics(auth_token, test_dataset_for_download, test_user):
+	"""Accepted bundle and labels requests leave one Factory download row each."""
+	for path, kind in (('dataset.zip', 'dataset'), ('labels.gpkg', 'labels')):
+		response = client.get(
+			f'/api/v1/download/datasets/{test_dataset_for_download}/{path}',
+			headers={'Authorization': f'Bearer {auth_token}'},
+		)
+		assert response.status_code == 200
+
+	rows = _download_requests(test_dataset_for_download)
+	assert sorted(row['kind'] for row in rows) == ['dataset', 'labels']
+	assert {row['user_id'] for row in rows} == {str(test_user)}
+
+
+def test_rejected_download_request_is_not_recorded(auth_token, viewonly_test_dataset_for_download):
+	response = client.get(
+		f'/api/v1/download/datasets/{viewonly_test_dataset_for_download}/dataset.zip',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	assert response.status_code == 403
+	assert _download_requests(viewonly_test_dataset_for_download) == []
+
+
+def _allowed_request_logs(dataset_id):
+	from shared.db import use_service_client
+
+	with use_service_client() as service_client:
+		rows = (
+			service_client.table(settings.logs_table)
+			.select('id')
+			.eq('dataset_id', dataset_id)
+			.eq('category', 'download')
+			.contains('extra', {'event': 'allowed'})
+			.execute()
+		)
+	return rows.data
+
+
+def test_private_request_denied_after_its_rate_limit_log_is_not_recorded(private_test_dataset_for_download, test_user2):
+	"""The rate-limit log is written before access checks, so it never proves an accepted request."""
+	user2_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+	response = client.get(
+		f'/api/v1/download/datasets/{private_test_dataset_for_download}/dataset.zip',
+		headers={'Authorization': f'Bearer {user2_token}'},
+	)
+	assert response.status_code == 404
+	assert _allowed_request_logs(private_test_dataset_for_download)
+	assert _download_requests(private_test_dataset_for_download) == []
+
+
+def test_request_without_ortho_output_is_not_recorded(auth_token, test_dataset_for_download):
+	from shared.db import use_service_client
+
+	with use_service_client() as db_client:
+		db_client.table(settings.orthos_table).delete().eq('dataset_id', test_dataset_for_download).execute()
+	response = client.get(
+		f'/api/v1/download/datasets/{test_dataset_for_download}/dataset.zip',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	assert response.status_code == 404
+	assert _allowed_request_logs(test_dataset_for_download)
+	assert _download_requests(test_dataset_for_download) == []
+
+
+def test_download_request_recording_failure_does_not_block_download(auth_token, test_dataset_for_download, monkeypatch):
+	from api.src.routers import download as download_router
+
+	def unavailable():
+		raise ValueError('SUPABASE_SERVICE_ROLE_KEY is required for service-role database access')
+
+	monkeypatch.setattr(download_router, 'use_service_client', unavailable)
+	response = client.get(
+		f'/api/v1/download/datasets/{test_dataset_for_download}/dataset.zip',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	assert response.status_code == 200
+
+
 def test_download_labels_allows_viewonly_dataset(auth_token, test_dataset_with_label):
 	"""View-only datasets should still allow labels/predictions download flow."""
 	dataset_id = test_dataset_with_label
@@ -2725,3 +2816,33 @@ def test_multi_bundle_download_redirect(auth_token, multi_test_datasets):
 	)
 	assert download_response.status_code == 303
 	assert f'/downloads/v1/bundles/{job_id}.zip' in download_response.headers['location']
+
+
+def test_cached_restricted_bundle_is_authorized_before_it_is_recorded(private_test_dataset_for_download, test_user2):
+	"""A bundle another user already prepared must pass per-dataset access checks first."""
+	job_id = generate_bundle_job_id([private_test_dataset_for_download], False, False)
+	bundle_file = settings.downloads_path / 'bundles' / f'{job_id}.zip'
+	bundle_file.parent.mkdir(parents=True, exist_ok=True)
+	bundle_file.write_bytes(b'cached bundle')
+	try:
+		user2_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+		response = client.get(
+			f'/api/v1/download/bundle.zip?dataset_ids={private_test_dataset_for_download}',
+			headers={'Authorization': f'Bearer {user2_token}'},
+		)
+		assert response.status_code == 404
+		assert _download_requests(private_test_dataset_for_download) == []
+	finally:
+		bundle_file.unlink(missing_ok=True)
+
+
+def test_bundle_is_one_request_with_one_row_per_distinct_dataset(auth_token, multi_test_datasets, test_user):
+	first, second = multi_test_datasets[:2]
+	response = client.get(
+		f'/api/v1/download/bundle.zip?dataset_ids={first},{second},{first}',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	assert response.status_code == 200
+	rows = _download_requests(first) + _download_requests(second)
+	assert len(rows) == 2 and {row['kind'] for row in rows} == {'bundle'}
+	assert len({row['request_id'] for row in rows}) == 1

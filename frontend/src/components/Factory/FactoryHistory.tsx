@@ -5,7 +5,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useFactoryHistory } from "../../hooks/useFactory";
 import { factoryDatasetsPath } from "./factoryFilters";
 import { formatUtc } from "./factoryFormat";
-import { formatCount, formatHours, formatGib, TREND_COLORS } from "./factoryTrends";
+import { formatCount, formatGib, TREND_COLORS } from "./factoryTrends";
 import type { FactoryMetricFilter } from "./factoryTypes";
 import type { FactoryHistoryPoint } from "./factoryHistoryTypes";
 import FactoryTrendChart, { type TrendBucket, type TrendSeries } from "./FactoryTrendChart";
@@ -15,7 +15,6 @@ type HistoricalSeries = Omit<TrendSeries, "key"> & { key: Exclude<keyof FactoryH
 
 const { Text } = Typography;
 const number = (value: number | null) => value === null ? "—" : formatCount(value);
-const duration = (value: number | null) => value === null ? "—" : formatHours(value);
 
 export default function FactoryHistory() {
 	const [params, setParams] = useSearchParams();
@@ -39,7 +38,7 @@ export default function FactoryHistory() {
 	const columns: ColumnsType<FactoryHistoryPoint> = [
 		{ title: "Period (UTC)", key: "period", fixed: "left", render: (_, p) => `${label(p)}${p.partial ? " · partial" : ""}` },
 		{ title: "Registered", key: "registered", render: (_, p) => link(p, "registered", p.registered) },
-		{ title: "Uploads observed", key: "uploaded", render: (_, p) => link(p, "historical_uploaded", p.uploaded) },
+		{ title: "Uploads observed", key: "uploaded", render: (_, p) => link(p, "uploaded", p.uploaded) },
 		{ title: "Contributors", dataIndex: "contributors", render: number },
 		{ title: "Returning contributors¹", dataIndex: "returning_contributors", render: number },
 		{ title: "Completed runs", key: "completed", render: (_, p) => link(p, "recorded_completed", p.completed) },
@@ -50,17 +49,13 @@ export default function FactoryHistory() {
 		{ title: "Publications", dataIndex: "publications", render: number },
 		{ title: "Uploaded GiB", dataIndex: "input_gib", render: (n: number | null) => n === null ? "—" : formatGib(n) },
 		{ title: "Known sizes", dataIndex: "size_samples", render: number },
-		{ title: "Recorded completion p50²", dataIndex: "p50", render: duration },
-		{ title: "p90²", dataIndex: "p90", render: duration },
-		{ title: "Timing samples", key: "timing", render: (_, p) => link(p, "historical_completion", p.timing_samples) },
 	];
-	const chart = (title: string, series: HistoricalSeries[], format = formatCount, timing = false) => {
+	const chart = (title: string, series: HistoricalSeries[], format = formatCount) => {
 		const buckets: TrendBucket[] = (data?.series ?? []).map((p) => ({
 			key: p.start, label: `${label(p)} (UTC)`, shortLabel: label(p), complete: !p.partial,
-			...(timing ? { n: p.timing_samples } : {}),
 			values: Object.fromEntries(series.map((s) => [s.key, p[s.key]])),
 		}));
-		return <div><h4 className="mb-2 font-semibold">{title}</h4><FactoryTrendChart kind={timing ? "points" : "grouped"} ariaLabel={title} buckets={buckets} series={series} format={format} selectedKey={selected} onSelect={setSelected} /></div>;
+		return <div><h4 className="mb-2 font-semibold">{title}</h4><FactoryTrendChart kind="grouped" ariaLabel={title} buckets={buckets} series={series} format={format} selectedKey={selected} onSelect={setSelected} /></div>;
 	};
 	return (
 		<SectionCard title="Historical platform activity" testId="factory-historical-activity">
@@ -73,11 +68,10 @@ export default function FactoryHistory() {
 			{history.isError && <FactoryError error={history.error} onRetry={() => void history.refetch()} title="Historical activity could not be refreshed" />}
 			{history.isLoading && <Skeleton active />}
 			{data && <>
-				<div className="mb-4 grid grid-cols-2 gap-4 lg:grid-cols-4" data-testid="factory-history-coverage">
+				<div className="mb-4 grid grid-cols-2 gap-4 lg:grid-cols-3" data-testid="factory-history-coverage">
 					<div><Text type="secondary">Ready now · unarchived</Text><div className="text-2xl font-semibold"><Link to={factoryDatasetsPath({ ready: true })}>{number(data.coverage.ready_now)}</Link></div></div>
 					<div><Text type="secondary">Retained datasets · includes archived</Text><div className="text-2xl font-semibold">{number(data.coverage.datasets)}</div></div>
 					<div><Text type="secondary">Upload timestamps found</Text><div className="text-2xl font-semibold">{number(data.coverage.upload_evidence)} / {number(data.coverage.datasets)}</div></div>
-					<div><Text type="secondary">Upload + recorded completion pairs</Text><div className="text-2xl font-semibold">{number(data.coverage.timing_pairs)} / {number(data.coverage.upload_evidence)}</div></div>
 				</div>
 				<Alert type="info" showIcon className="mb-4" message="Historical evidence has uneven coverage" description={<>
 					Registrations from {formatUtc(data.first_registration)}. Upload evidence from {formatUtc(data.upload_since)}; recorded run outcomes from {formatUtc(data.run_since)}.
@@ -90,14 +84,11 @@ export default function FactoryHistory() {
 					{chart("Delivery, reports and publications", [{ key: "emails", label: "Email recipients sent", color: TREND_COLORS.input }, { key: "reports", label: "Reports submitted", color: TREND_COLORS.p90 }, { key: "publications", label: "Publications", color: TREND_COLORS.ready }])}
 					{chart("Contributors with observed uploads", [{ key: "contributors", label: "Contributors", color: TREND_COLORS.registered }, { key: "returning_contributors", label: "Returning (subset)", color: TREND_COLORS.ready }])}
 					{chart("Uploaded input volume · known sizes only", [{ key: "input_gib", label: "Uploaded GiB", color: TREND_COLORS.input }], formatGib)}
-					{chart("Recorded completion delay² · not processing latency", [{ key: "p50", label: "p50", color: TREND_COLORS.p50 }, { key: "p90", label: "p90", color: TREND_COLORS.p90 }], formatHours, true)}
 				</div>}
-				<Alert type="warning" showIcon className="mt-4" message="Historical timing is diagnostic, not a processing-speed KPI" description="The first retained completion may be a rerun months after the original result. This delay must not be compared with the directly measured first-result latency below." />
 				<Text className="my-4 block" type="secondary">Select a chart period to narrow the table; select it again to show all periods. Linked counts open the matching distinct datasets. Run, report and email counts can exceed the number of datasets.</Text>
 				<Table data-testid="factory-history-table" size="small" rowKey="start" columns={columns} dataSource={data.series.filter((p) => !selected || p.start === selected)} pagination={false} scroll={{ x: 2300 }} />
 				<Text type="secondary" className="mt-4 block text-xs">¹ Contributors with an observed upload before this period; not proof of their first-ever upload or a retention rate.
-					² Elapsed time from an evidenced upload to the earliest retained completion notification, grouped by completion date. That notification may describe a rerun, so this is not measured first-result latency. Missing or reversed timestamp pairs are excluded.
-					Upload timestamps include {number(data.coverage.measured_uploads)} directly measured and {number(data.coverage.upload_evidence - data.coverage.measured_uploads)} reconstructed from upload logs. Original upload sizes are known for {number(data.coverage.upload_sizes)} datasets. Current output sizes are never substituted. Historical queue sizes, complete failure-recovery episodes and owner visits cannot be recovered from these records.</Text>
+					Upload timestamps include {number(data.coverage.measured_uploads)} directly measured and {number(data.coverage.upload_evidence - data.coverage.measured_uploads)} reconstructed from upload logs. Original upload sizes are known for {number(data.coverage.upload_sizes)} datasets. Current output sizes are never substituted. Historical queue sizes and owner visits cannot be recovered from these records. First results, time to result and failure recovery from the same retained evidence are under “Is it improving?”, with Months for the longer view.</Text>
 			</>}
 		</SectionCard>
 	);

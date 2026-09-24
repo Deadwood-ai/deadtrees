@@ -8,16 +8,18 @@ const utcParts = (iso: string) => {
 	return Number.isNaN(date.getTime()) ? null : { m: date.getUTCMonth(), d: date.getUTCDate(), y: date.getUTCFullYear() };
 };
 
-/** Axis tick: the bucket's start date, "Sep 14". Falls back to the raw start. */
-export function bucketShortLabel(start: string): string {
+/** Axis tick: the bucket's start date, "Sep 14", or "Sep 2026" for months. Falls back to the raw start. */
+export function bucketShortLabel(start: string, bucket: FactoryTrendInterval = "week"): string {
 	const from = utcParts(start);
-	return from ? `${MONTHS[from.m]} ${from.d}` : start;
+	if (!from) return start;
+	return bucket === "month" ? `${MONTHS[from.m]} ${from.y}` : `${MONTHS[from.m]} ${from.d}`;
 }
 
-/** "Sep 14–20" for weeks, "Sep 14" for days; used where there is room. */
+/** "Sep 14–20" for weeks, "Sep 14" for days, "Sep 2026" for months; used where there is room. */
 export function bucketRangeLabel(start: string, end: string, bucket: FactoryTrendInterval): string {
 	const from = utcParts(start);
 	if (!from) return start;
+	if (bucket === "month") return `${MONTHS[from.m]} ${from.y}`;
 	if (bucket === "day") return `${MONTHS[from.m]} ${from.d}`;
 	const to = utcParts(new Date(new Date(end).getTime() - 1).toISOString());
 	if (!to) return `${MONTHS[from.m]} ${from.d}`;
@@ -28,6 +30,7 @@ export function bucketLongLabel(start: string, end: string, bucket: FactoryTrend
 	const from = utcParts(start);
 	if (!from) return start;
 	const range = bucketRangeLabel(start, end, bucket);
+	if (bucket === "month") return `${range} (UTC)`;
 	return bucket === "day" ? `${range} ${from.y} (UTC)` : `Week ${range} ${from.y} (UTC)`;
 }
 
@@ -65,12 +68,12 @@ export function formatCount(value: number): string {
 export function toTrendBuckets(
 	points: FactoryTrendPoint[],
 	interval: FactoryTrendInterval,
-	pick: (point: FactoryTrendPoint) => { n?: number | null; values: Record<string, number | null> }
+	pick: (point: FactoryTrendPoint) => { n?: number | null; note?: string; values: Record<string, number | null> }
 ): TrendBucket[] {
 	return points.map((point) => ({
 		key: point.start,
 		label: bucketLongLabel(point.start, point.end, interval),
-		shortLabel: bucketShortLabel(point.start),
+		shortLabel: bucketShortLabel(point.start, interval),
 		complete: !point.partial,
 		...pick(point),
 	}));
@@ -89,6 +92,17 @@ export const TREND_COLORS = {
 	recordedFailed: "#F0A0A0",
 	recordedEmbedding: "#C8F0D8",
 } as const;
+
+/**
+ * Which evidence a count rests on: measured directly, reconstructed from retained
+ * logs, or both. Empty when nothing happened or the period is unknown.
+ */
+export function evidenceNote(total: number | null, measured: number | null): string {
+	if (!total || measured === null) return "";
+	if (measured === total) return "all measured";
+	if (measured === 0) return "all reconstructed from logs";
+	return `${measured.toLocaleString()} measured, ${(total - measured).toLocaleString()} reconstructed from logs`;
+}
 
 /** "n of N" with a share only when the eligible group is large enough to mean something. */
 export function formatShare(count: number | null, eligible: number | null, minimumForShare = 5): string {

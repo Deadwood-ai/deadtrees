@@ -14,9 +14,6 @@ export interface FactoryHistoryPoint {
 	size_samples: number;
 	contributors: number | null;
 	returning_contributors: number | null;
-	p50: number | null;
-	p90: number | null;
-	timing_samples: number;
 }
 
 export interface FactoryHistory {
@@ -33,7 +30,6 @@ export interface FactoryHistory {
 		datasets: number;
 		upload_evidence: number;
 		upload_sizes: number;
-		timing_pairs: number;
 		measured_uploads: number;
 		ready_now: number;
 	};

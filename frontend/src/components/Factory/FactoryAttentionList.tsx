@@ -65,7 +65,7 @@ export default function FactoryAttentionList({ operations, isLoading, error, onR
 			width: 170,
 			render: (value: number, row) => (
 				<span className="flex flex-col leading-tight">
-					<Link to={`/factory/datasets/${value}`} state={{ factoryReturnTo: "/factory" }} className="font-mono font-medium">
+					<Link to={`/factory/datasets/${value}`} state={{ factoryReturnTo: "/factory/operations" }} className="font-mono font-medium">
 						#{value}
 					</Link>
 					<span className="truncate text-xs text-gray-500" title={row.file_name ?? undefined}>

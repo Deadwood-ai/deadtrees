@@ -208,70 +208,67 @@ const trendPoint = (start: string, end: string, seed: number, extra: Record<stri
   start,
   end,
   partial: false,
-  measured: true,
   uploaded: 10 + seed,
+  uploaded_measured: 4,
   first_ready: 7 + seed,
+  first_ready_measured: 0,
   completed_input_gib: 4.25 + seed,
   volume_samples: 6 + seed,
   lead_p50_hours: 0.75 + seed * 0.1,
   lead_p90_hours: 2.5 + seed * 0.2,
-  lead_samples: 7 + seed,
-  failures: 3,
+  failures_first_result: 2,
+  failures_other: 1,
+  failures_measured: 1,
   recovered: 2,
+  recovered_measured: 2,
   recovery_p50_hours: 1.5,
   recovery_p90_hours: null,
-  registered: 12 + seed,
-  recorded_completed: 9 + seed,
-  recorded_failed: 1,
-  recorded_embedding_completed: 5,
+  recovery_samples: 2,
   ...extra,
 });
 
 const trends = {
   as_of: AS_OF,
   tracking_since: "2025-12-29T00:00:00Z",
+  failures_tracking_since: "2026-01-05T12:00:00Z",
+  upload_since: "2025-12-24T10:00:00Z",
+  run_since: "2025-12-24T11:00:00Z",
   interval: "week",
   workflow: "all",
   size: "all",
   summary: {
-    tracked_submissions: 24,
-    first_ready: 17,
     waiting: 5,
-    failed: 2,
+    waiting_failed: 2,
     waiting_contributors: 3,
-    overdue: 1,
     oldest_wait_hours: 30.5,
-    lead_p50_hours: 0.8,
-    lead_p90_hours: 2.6,
-    lead_samples: 17,
-    recovered: 4,
-    unresolved_failures: 2,
-    recovery_p50_hours: 1.5,
-    recovery_p90_hours: 6,
-    completed_input_gib: 9.5,
-    volume_samples: 15,
-    missing_volume: 2,
-    legacy_uploaded: 40,
+    unresolved_failures: 4,
+    unresolved_first_result: 3,
+    oldest_unresolved_hours: 50,
+    unrecorded_results: 6,
   },
   series: [
-    trendPoint("2025-12-22T00:00:00Z", "2025-12-29T00:00:00Z", 0, {
-      measured: false,
+    trendPoint("2025-12-15T00:00:00Z", "2025-12-22T00:00:00Z", 0, {
       uploaded: null,
+      uploaded_measured: null,
       first_ready: null,
+      first_ready_measured: null,
       completed_input_gib: null,
       volume_samples: null,
       lead_p50_hours: null,
       lead_p90_hours: null,
-      lead_samples: null,
-      failures: null,
+      failures_first_result: null,
+      failures_other: null,
+      failures_measured: null,
       recovered: null,
+      recovered_measured: null,
       recovery_p50_hours: null,
-      recovery_p90_hours: null,
+      recovery_samples: null,
     }),
+    trendPoint("2025-12-22T00:00:00Z", "2025-12-29T00:00:00Z", 0, { partial: true, uploaded_measured: 0, failures_measured: 0, recovered_measured: 0 }),
     trendPoint("2025-12-29T00:00:00Z", "2026-01-05T00:00:00Z", 1),
-    trendPoint("2026-01-05T00:00:00Z", "2026-01-12T00:00:00Z", 2, { partial: true, lead_p90_hours: null, completed_input_gib: null, volume_samples: null }),
+    trendPoint("2026-01-05T00:00:00Z", "2026-01-12T00:00:00Z", 2, { partial: true, lead_p90_hours: null, completed_input_gib: null, volume_samples: 0 }),
   ],
-  coverage: ["Measured outcomes cover uploads completed since measurement started."],
+  coverage: ["Directly measured upload and first-result times start with registrations after measurement began."],
 };
 
 const journey = {
@@ -386,11 +383,10 @@ const fulfillRpc = async (route: Route, name: string, options: Options) => {
     await fulfillJson(route, {
       as_of: AS_OF, first_registration: "2010-01-01T00:00:00Z", year: body.p_year,
       years: [2026, 2010], upload_since: "2010-03-01T00:00:00Z", run_since: "2010-04-01T00:00:00Z",
-      coverage: { datasets: 60, ready_now: 25, upload_evidence: 40, upload_sizes: 39, timing_pairs: 20, measured_uploads: 3 },
+      coverage: { datasets: 60, ready_now: 25, upload_evidence: 40, upload_sizes: 39, measured_uploads: 3 },
       series: options.historyMode === "empty" ? [] : [{ start: "2010-01-01T00:00:00Z", end: "2011-01-01T00:00:00Z", partial: false,
         registered: 12, uploaded: 10, completed: 9, failed: 2, indexing: 4, emails: 18, reports: 2,
-        publications: 1, input_gib: 1.5, size_samples: 9, contributors: 3, returning_contributors: 1,
-        p50: 24, p90: 48, timing_samples: 8 }],
+        publications: 1, input_gib: 1.5, size_samples: 9, contributors: 3, returning_contributors: 1 }],
     });
     return;
   }
@@ -510,10 +506,10 @@ test.describe("factory local e2e", () => {
     expect(rpcCalls.filter((call) => call.name.startsWith("factory_"))).toHaveLength(0);
   });
 
-  test("operator overview shows freshness, workers and drills into the exact filtered list", async ({ page }) => {
+  test("operations shows freshness, workers and drills into the exact filtered list", async ({ page }) => {
     await installOperator(page, { canOperate: true });
 
-    await page.goto("/factory");
+    await page.goto("/factory/operations");
     await dismissCookieBanner(page);
 
     await expect(page.getByRole("menuitem", { name: "Factory" })).toBeVisible();
@@ -525,19 +521,24 @@ test.describe("factory local e2e", () => {
     await expect(page.getByTestId("factory-cohorts")).toHaveCount(0);
 
     const outcomes = page.getByTestId("factory-outcomes-results");
-    await expect(outcomes).toContainText("Measured since 2025-12-29 00:00 UTC");
-    await expect(outcomes).toContainText("40 older uploads predate measurement");
+    await expect(outcomes).toContainText("Measured directly for uploads registered since 2025-12-29 00:00 UTC");
+    await expect(outcomes).toContainText("reconstructed from retained upload logs (from 2025-12-24 10:00 UTC)");
+    await expect(outcomes).toContainText("6 complete uploads have no retained time for their first result");
     const trendsCall = rpcCalls.find((call) => call.name === "factory_trends");
     expect(trendsCall?.body).toEqual({ p_interval: "week", p_workflow: "all", p_size: "all" });
-    const summary = page.getByTestId("factory-measured-summary");
-    await expect(summary).toContainText("Still waiting");
-    await expect(summary.getByRole("link", { name: "5" })).toHaveAttribute("href", "/factory/datasets?archived=all&metric=waiting");
+    const summary = page.getByTestId("factory-outcome-summary");
+    await expect(summary).toContainText("Waiting for a first result");
+    await expect(summary.getByRole("link", { name: "5" })).toHaveAttribute("href", "/factory/datasets?metric=waiting");
     await expect(summary).toContainText("3 pending");
-    await expect(summary.getByRole("link", { name: "2 failed" })).toHaveAttribute("href", "/factory/datasets?archived=all&metric=failed_submission");
+    await expect(summary.getByRole("link", { name: "2 failed" })).toHaveAttribute("href", "/factory/datasets?metric=failed_submission");
     await expect(summary).toContainText("1 d 6 h");
-    await expect(summary.getByRole("link", { name: "1 overdue" })).toHaveAttribute("href", "/factory/datasets?archived=all&metric=overdue");
-    await expect(page.getByTestId("factory-outcomes-timing")).toContainText("All tracked completions: p50 48 min · p90 2 h 36 min · n 17");
-    await expect(page.getByTestId("factory-outcomes-failures")).toContainText("Unresolved now: 2");
+    await expect(summary.getByRole("link", { name: "4" })).toHaveAttribute("href", "/factory/datasets?metric=unresolved_failure");
+    await expect(summary).toContainText("3 never had a result · oldest 2 d 2 h");
+    // Only known periods are summed: 7 + 8 + 9 results from 10 + 11 + 12 uploads.
+    await expect(summary).toContainText("from 33 uploads in the same periods");
+    await expect(outcomes.getByTestId("trend-bucket-2025-12-29T00:00:00Z")).toHaveAttribute("aria-label", /uploads 4 measured, 7 reconstructed from logs; results all reconstructed from logs/);
+    await expect(outcomes.locator("svg").first()).toContainText("measured →");
+    await expect(page.getByTestId("factory-outcomes-failures")).toContainText("Open now: 4, of which 3 never had a result.");
 
     const attention = page.getByTestId("factory-attention");
     await expect(attention.getByTestId("factory-attention-summary")).toContainText("3 datasets across 1 contributor");
@@ -564,7 +565,7 @@ test.describe("factory local e2e", () => {
     await expect(waiting.getByTestId("waiting-delivery")).toContainText("oldest");
     await expect(waiting.getByTestId("waiting-reports")).toHaveAttribute("href", "/factory/datasets?reports=open&sort=attention");
     await expect(page.getByTestId("factory-workers")).toContainText("Running now");
-    await expect(page.getByTestId("factory-overview")).not.toContainText("Acquisition");
+    await expect(page.getByTestId("factory-operations")).not.toContainText("Acquisition");
     await expect(page.getByTestId("factory-history")).toHaveCount(0);
     expect(rpcCalls.filter((call) => call.name === "factory_journey")).toHaveLength(0);
 
@@ -596,37 +597,48 @@ test.describe("factory local e2e", () => {
 
     await page.getByTestId("factory-attention").getByRole("link", { name: "#5059" }).click();
     await expect(page.getByRole("heading", { name: "Dataset #5059" })).toBeVisible();
-    await expect(page.getByTestId("factory-detail-back")).toHaveText("← Back to overview");
-    await expect(page.getByTestId("factory-detail-back")).toHaveAttribute("href", "/factory");
+    await expect(page.getByTestId("factory-detail-back")).toHaveText("← Back to operations");
+    await expect(page.getByTestId("factory-detail-back")).toHaveAttribute("href", "/factory/operations");
     await page.getByTestId("factory-detail-back").click();
     await expect(page.getByTestId("factory-attention")).toBeVisible();
     await expect(page.getByTestId("factory-workers").getByTestId("factory-freshness")).toContainText("2026-01-06 09:00 UTC");
     await expect(page.getByTestId("factory-outcomes-timing")).toContainText("still need calibration");
     await expect(page.getByTestId("factory-outcomes-timing").locator("svg")).not.toContainText("1 h target");
-    await page.getByTestId("factory-outcomes-failures").locator(".ant-segmented-item-label", { hasText: "Recovery time" }).click();
-    await expect(page.getByTestId("factory-outcomes-failures")).toContainText("n recovered episodes");
-    await expect(page.getByTestId("factory-outcomes-failures")).toContainText("Unresolved now: 2");
+    await expect(page.getByTestId("factory-outcomes-failures")).toContainText("A successful retry of other stages never counts.");
+    await page.getByTestId("factory-outcomes-failures").locator(".ant-segmented-item-label", { hasText: "Time to complete again" }).click();
+    await expect(page.getByTestId("factory-outcomes-failures")).toContainText("n episodes whose start is known");
     await page.getByTestId("factory-outcomes-failures").locator(".ant-segmented-item-label", { hasText: "Counts" }).click();
+    await expect(page.getByTestId("factory-outcomes-failures").getByTestId("trend-bucket-2025-12-29T00:00:00Z")).toHaveAttribute(
+      "aria-label",
+      /Failed before a first result 2, Failed rerun or older upload 1, Complete again 2 \(1 measured, 2 reconstructed from logs\)/,
+    );
     await page.screenshot({ path: process.env.FACTORY_SHOT_DIR ? `${process.env.FACTORY_SHOT_DIR}/overview-desktop.png` : "test-results/overview-desktop.png", fullPage: true });
 
     await outcomes.getByTestId("trend-bucket-2025-12-29T00:00:00Z").click();
     await expect(page).toHaveURL(/bucket=2025-12-29T00%3A00%3A00Z/);
     const panel = page.getByTestId("factory-selected-bucket");
     await expect(panel).toContainText("Selected week: 2025-12-29 00:00 UTC to 2026-01-05 00:00 UTC");
-    await expect(panel).toContainText("Uploads completed 11");
-    await expect(panel).toContainText("Upload to result p50 51 min · p90 2 h 42 min · n 8");
+    await expect(panel).toContainText("Uploads 11 (4 measured, 7 reconstructed from logs)");
+    await expect(panel).toContainText("Upload to first result p50 51 min · p90 2 h 42 min");
+    await expect(panel).toContainText("Complete again 2 · p50 1 h 30 min (all measured)");
+    await expect(panel).toContainText("7 of 8 sizes known");
     await expect(panel.getByRole("link", { name: "8", exact: true })).toHaveAttribute(
       "href",
       "/factory/datasets?archived=all&metric=first_ready&metric_after=2025-12-29T00%3A00%3A00Z&metric_before=2026-01-05T00%3A00%3A00Z",
     );
+    await expect(panel.getByRole("link", { name: "2", exact: true }).first()).toHaveAttribute(
+      "href",
+      "/factory/datasets?archived=all&metric=first_result_failures&metric_after=2025-12-29T00%3A00%3A00Z&metric_before=2026-01-05T00%3A00%3A00Z",
+    );
 
-    await outcomes.getByTestId("trend-bucket-2025-12-22T00:00:00Z").click();
-    await expect(page.getByTestId("factory-selected-bucket")).toContainText("before measurement");
     await outcomes.getByTestId("trend-bucket-2026-01-05T00:00:00Z").click();
     await expect(page.getByTestId("factory-selected-bucket")).toContainText("partial period");
-    await outcomes.getByTestId("trend-bucket-2025-12-22T00:00:00Z").click();
-    await expect(page.getByTestId("factory-selected-bucket")).toContainText("Uploads completed unknown");
-    await expect(page.getByTestId("factory-selected-bucket")).toContainText("Registered datasets 12");
+    await outcomes.getByTestId("trend-bucket-2025-12-15T00:00:00Z").click();
+    await expect(page.getByTestId("factory-selected-bucket")).toContainText("Uploads unknown");
+
+    await page.getByTestId("factory-trend-controls").locator(".ant-segmented-item-label", { hasText: "Months" }).click();
+    await expect(page).toHaveURL(/interval=month/);
+    await expect.poll(() => rpcCalls.filter((call) => call.name === "factory_trends").at(-1)?.body).toEqual({ p_interval: "month", p_workflow: "all", p_size: "all" });
 
     await page.getByTestId("factory-trend-controls").locator(".ant-segmented-item-label", { hasText: "Days" }).click();
     await expect(page).toHaveURL(/interval=day/);
@@ -645,12 +657,12 @@ test.describe("factory local e2e", () => {
     await expect(page).not.toHaveURL(/size=small/);
     const sizeCall = rpcCalls.find((call) => call.name === "factory_trends" && call.body.p_size === "small");
     expect(sizeCall?.body).toEqual({ p_interval: "day", p_workflow: "geotiff", p_size: "small" });
-    await page.getByTestId("factory-measured-summary").getByRole("link", { name: "5" }).click();
-    await expect(page).toHaveURL(/\/factory\/datasets\?archived=all&metric=waiting&workflow=geotiff$/);
-    await expect(page.getByTestId("factory-ledger-chips")).toContainText("Ledger: still waiting");
+    await page.getByTestId("factory-outcome-summary").getByRole("link", { name: "5" }).click();
+    await expect(page).toHaveURL(/\/factory\/datasets\?metric=waiting&workflow=geotiff$/);
+    await expect(page.getByTestId("factory-ledger-chips")).toContainText("Ledger: waiting for a first result");
     await expect(page.getByTestId("factory-ledger-chips")).toContainText("Workflow: GeoTIFF uploads");
     const drillCall = rpcCalls.filter((call) => call.name === "factory_datasets").at(-1);
-    expect(drillCall?.body.p_filters).toEqual({ archived: "all", metric: "waiting", workflow: "geotiff" });
+    expect(drillCall?.body.p_filters).toEqual({ metric: "waiting", workflow: "geotiff" });
   });
 
   test("explorer keeps selection across pages and copies a factual snapshot", async ({ page }) => {
@@ -800,16 +812,16 @@ test.describe("factory local e2e", () => {
     await expect(activityTable.getByText("10.1000/example")).toBeVisible();
   });
 
-  test("overview without measured outcomes says so instead of showing zeros", async ({ page }) => {
+  test("operations without measured outcomes says so instead of showing zeros", async ({ page }) => {
     await installOperator(page, { canOperate: true, trendsMode: "empty" });
 
-    await page.goto("/factory");
+    await page.goto("/factory/operations");
     await dismissCookieBanner(page);
 
-    await expect(page.getByTestId("factory-outcomes")).toContainText("Measurement has not started yet");
-    await expect(page.getByTestId("factory-outcomes")).toContainText("The ledger returned no summary.");
-    await expect(page.getByTestId("factory-outcomes")).toContainText("No intervals were returned.");
-    await expect(page.getByTestId("factory-measured-summary")).toHaveCount(0);
+    await expect(page.getByTestId("factory-outcomes")).toContainText("Direct measurement has not started yet");
+    await expect(page.getByTestId("factory-outcomes")).toContainText("No current summary was returned.");
+    await expect(page.getByTestId("factory-outcomes")).toContainText("No periods were returned.");
+    await expect(page.getByTestId("factory-outcome-summary")).toHaveCount(0);
     await page.getByText("History and outcomes after the result").click();
     await expect(page.getByTestId("factory-historical-activity")).toContainText("Historical evidence has uneven coverage");
   });
@@ -817,7 +829,7 @@ test.describe("factory local e2e", () => {
   test("journey without data says so instead of showing zeros", async ({ page }) => {
     await installOperator(page, { canOperate: true, journeyMode: "empty" });
 
-    await page.goto("/factory");
+    await page.goto("/factory/operations");
     await dismissCookieBanner(page);
 
     await page.getByText("History and outcomes after the result").click();
@@ -826,10 +838,10 @@ test.describe("factory local e2e", () => {
     await expect(page.getByTestId("factory-journey-outcomes")).toContainText("from an unknown date");
   });
 
-  test("overview without attention items says so and keeps waiting counts honest", async ({ page }) => {
+  test("operations without attention items says so and keeps waiting counts honest", async ({ page }) => {
     await installOperator(page, { canOperate: true, operationsMode: "empty" });
 
-    await page.goto("/factory");
+    await page.goto("/factory/operations");
     await dismissCookieBanner(page);
 
     await expect(page.getByTestId("factory-attention")).toContainText("Nothing needs attention right now");
@@ -839,10 +851,10 @@ test.describe("factory local e2e", () => {
   test("attention list survives a failed refresh with a stale warning", async ({ page }) => {
     await installOperator(page, { canOperate: true, operationsMode: "refetch-fails" });
 
-    await page.goto("/factory");
+    await page.goto("/factory/operations");
     await dismissCookieBanner(page);
     await expect(page.getByTestId("factory-attention-summary")).toContainText("3 datasets");
-    await page.getByTestId("factory-overview").getByRole("button", { name: "Refresh" }).first().click();
+    await page.getByTestId("factory-operations").getByRole("button", { name: "Refresh" }).first().click();
     await expect(page.getByTestId("factory-operations-stale")).toBeVisible();
     await expect(page.getByTestId("factory-attention-summary")).toContainText("3 datasets");
   });
@@ -850,33 +862,36 @@ test.describe("factory local e2e", () => {
   test("trend charts survive a failed refresh with a stale warning", async ({ page }) => {
     await installOperator(page, { canOperate: true, trendsMode: "refetch-fails" });
 
-    await page.goto("/factory");
+    await page.goto("/factory/operations");
     await dismissCookieBanner(page);
     await expect(page.getByTestId("factory-trend-freshness")).toContainText("2026-01-06 09:00 UTC");
     await expect(page.getByTestId("factory-trend-stale")).toHaveCount(0);
 
     await page.getByTestId("factory-trend-freshness").getByRole("button", { name: "Refresh" }).click();
     await expect(page.getByTestId("factory-trend-stale")).toBeVisible();
-    await expect(page.getByTestId("factory-outcomes-results")).toContainText("Tracked uploads");
+    await expect(page.getByTestId("factory-outcomes-results")).toContainText("Waiting for a first result");
   });
 
-  test("overview reads well on a phone", async ({ page }) => {
+  test("operations reads well on a phone", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await installOperator(page, { canOperate: true });
 
-    await page.goto("/factory");
+    await page.goto("/factory/operations");
     await dismissCookieBanner(page);
 
     await expect(page.getByTestId("factory-attention")).toBeVisible();
     const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(pageWidth).toBeLessThanOrEqual(390);
-    await page.screenshot({ path: process.env.FACTORY_SHOT_DIR ? `${process.env.FACTORY_SHOT_DIR}/overview-phone.png` : "test-results/overview-phone.png", fullPage: true });
+    await page.screenshot({ path: process.env.FACTORY_SHOT_DIR ? `${process.env.FACTORY_SHOT_DIR}/operations-phone.png` : "test-results/operations-phone.png", fullPage: true });
   });
 
   test("read-model errors show a retry, and permission errors show the denial state", async ({ page }) => {
     await installOperator(page, { canOperate: true, rpcMode: "failing" });
     await page.goto("/factory");
     await dismissCookieBanner(page);
+    await expect(page.getByText("Could not load north-star outcomes")).toBeVisible();
+    await expect(page.getByTestId("factory-attention-line")).toContainText("Could not check what needs attention.");
+    await page.goto("/factory/operations");
     await expect(page.getByText("Could not load the attention list")).toBeVisible();
     await expect(page.getByRole("button", { name: "Try again" }).first()).toBeVisible();
     await expect(page.getByText("Could not load running claims")).toBeVisible();
@@ -889,20 +904,20 @@ test.describe("factory local e2e", () => {
 
 test("historical coverage, year selection and evidence drilldown", async ({ page }) => {
   await installOperator(page, { canOperate: true });
-  await page.goto("/factory");
+  await page.goto("/factory/operations");
   await dismissCookieBanner(page);
   const history = page.getByTestId("factory-historical-activity");
   await expect(history.getByTestId("factory-history-coverage")).toContainText("40 / 60");
-  await expect(history).toContainText("may describe a rerun");
+  await expect(history).not.toContainText("Recorded completion delay");
   await history.getByRole("combobox", { name: "Historical year" }).press("Enter");
   await page.getByText("2010 · by month", { exact: true }).click();
   await expect.poll(() => rpcCalls.filter((call) => call.name === "factory_history").at(-1)?.body).toEqual({ p_year: 2010 });
   await expect(page).toHaveURL(/history_year=2010/);
   const upload = history.getByTestId("factory-history-table").getByRole("link", { name: "10", exact: true });
-  await expect(upload).toHaveAttribute("href", /metric=historical_uploaded/);
+  await expect(upload).toHaveAttribute("href", /metric=uploaded/);
   await upload.click();
-  await expect(page).toHaveURL(/metric=historical_uploaded/);
-  await expect(page.getByTestId("factory-datasets")).toContainText("uploads with historical evidence");
+  await expect(page).toHaveURL(/metric=uploaded/);
+  await expect(page.getByTestId("factory-ledger-chips")).toContainText("Ledger: uploads");
   await page.goBack();
   await expect(page).toHaveURL(/history_year=2010/);
 });
@@ -910,7 +925,7 @@ test("historical coverage, year selection and evidence drilldown", async ({ page
 for (const mode of ["empty", "malformed"] as const) {
   test(`historical response ${mode} stays contained`, async ({ page }) => {
     await installOperator(page, { canOperate: true, historyMode: mode });
-    await page.goto("/factory");
+    await page.goto("/factory/operations");
     await dismissCookieBanner(page);
     const history = page.getByTestId("factory-historical-activity");
     await expect(history).toContainText(mode === "empty" ? "No historical intervals were returned." : "Historical activity returned an incomplete response.");

@@ -201,18 +201,19 @@ Each base product action should have at least one durable test or smoke check.
 
 ## Current Decisions
 
-1. **Weekly headline metric**: use a composite, not a single count. The current
-   scorecard should include qualified submissions, successful processing,
-   processing lead time, failures/time-to-fix, audited or trusted assets,
-   downloads, publications, validated reference patches, and release usage. This
-   is the wider product scorecard; the operational Factory overview prioritizes
-   processing throughput, end-to-end waiting and failure recovery.
+1. **Weekly headline metric**: weekly complete results from external
+   contributors, meaning uploads that reached their first complete result that
+   week. It sits on top of a small stack of supporting outcomes (funnel,
+   activation, 7-day reach, upload-to-result time, retention, reuse downloads,
+   reference data). See [North-star overview](#north-star-overview).
 2. **Healthy processing lead time**: target one hour from completed upload to
    processed result for typical GeoTIFF submissions, with two hours as a soft
    healthy-experience reference. Calibrate by workflow/size before extending
    this expectation to raw-image photogrammetry or larger inputs.
-3. **Contributor activation**: processing is completed and the contributor
-   views the processed segmentation result for the first time.
+3. **Contributor activation**: the overview reports signup-to-first-upload
+   within 30 days, which is measurable for every account. The narrower "owner
+   views the processed result" activation is still observed with consent and
+   shown in the Operations journey section.
 4. **Data-reuser activation**: unresolved. At this stage, contributor outcomes
    are more important. Downloads and release usage should still be measured,
    but analytics should separate contributor downloads from non-contributor
@@ -238,10 +239,12 @@ operational metadata across datasets, including owner email and private or
 archived records, through gated RPCs. It does not grant imagery access, audit
 writes or processing controls. Grant it only to trusted internal operators.
 
-The overview puts processing operations first: complete usable results, elapsed
+The Overview answers whether the platform is doing its job (see
+[North-star overview](#north-star-overview)). The Operations tab puts processing
+operations first: complete usable results, elapsed
 upload-to-result time, waiting contributors, failure recovery, and successful
-input volume. Daily (28 days) and weekly (12 weeks) event-time charts show
-throughput, not unequal-age upload cohort conversion. Each period links to the
+input volume. Daily (28 days), weekly (12 weeks) and monthly (12 months)
+event-time charts show throughput, not unequal-age upload cohort conversion. Each period links to the
 same server-side event population in the explorer. Current operations remain a
 separate strip; claims and database signals do not establish worker liveness.
 
@@ -266,7 +269,9 @@ separate strip; claims and database signals do not establish worker liveness.
 - A failure episode opens when an error is persisted, stays open across retry/error
   clearing, and closes only at full readiness. Internal retries without a persisted
   error are not fabricated user failures. A later regression can create another
-  episode; charts count episodes, while drill-downs list distinct datasets.
+  episode; charts count episodes, while drill-downs list distinct datasets. Failures
+  are observed for every dataset from `failures_started_at`; datasets already failing
+  then carry an open episode whose start was not observed (`failed_at` is null).
 - The documented 1-hour ideal/2-hour healthy target is a soft operational
   reference. The initial overdue warning applies only to measured GeoTIFF inputs
   below 1 GiB; this size cutoff is an explicit initial scope, not a learned duration
@@ -275,9 +280,11 @@ separate strip; claims and database signals do not establish worker liveness.
   and event type before time filtering. Recording depends on notification settings,
   so this is recorded activity, not complete execution or submission success.
   Embedding task mix is descriptive, not a durable rerun/enrichment intent label.
-- Pre-instrumentation measured chart periods are unknown, not zero. Current or
-  partly observed periods are marked partial. History includes archived datasets;
-  hard deletion removes associated measurements. No production backfill is included.
+- Outcome charts fill periods before measurement from retained evidence (see
+  [Retained outcome evidence](#retained-outcome-evidence)); periods before that
+  evidence are unknown, not zero. Current or partly covered periods are marked
+  partial. History includes archived datasets; hard deletion removes associated
+  measurements. No production backfill is written.
 
 Historical queue wait, execution time and stage efficiency remain unmeasured:
 queue rows are removed and output/runtime records are upserted. Current claim age
@@ -333,9 +340,47 @@ read model. Existing analytics event names alone do not establish coverage or a
 verified metric. Local QA seeds deliberately supply synthetic historical owners
 and observations; deployment never reconstructs that history.
 
-## Operator overview and attention order
+## North-star overview
 
-The overview prioritizes current problems, waiting work and running claims.
+`factory_north_star(p_include_team)` feeds the `/factory` Overview. It returns
+13 weekly buckets (the last is running and never drives a headline), 12 monthly
+signup and first-upload cohorts, and a stage breakdown for uploads that missed
+seven days. The Overview compares the latest complete week with the one before
+and colours each change by the metric's good direction.
+
+- **Team**: accounts with `privileged_users.can_audit`. Excluded by default:
+  their signups, uploads, the audits and publications of datasets they own, and
+  their download requests. Auditor-owned datasets are about 70% of all uploads,
+  so the toggle changes the picture substantially.
+- **Complete results**: first result per dataset from `factory_outcome_evidence`:
+  measured readiness when measured, otherwise the first moment processor runs after
+  upload had proven every readiness stage (see [Retained outcome evidence](#retained-outcome-evidence)).
+  Uploads before the first retained processor run never count.
+- **No result within 7 days**: share of a week's observable uploads without a
+  result seven days later, including late results. The stage breakdown shows
+  the first required stage still incomplete now, in pipeline order.
+- **Upload to result**: median and p90 hours by result week, GeoTIFF and ZIP
+  separately, against the one-hour target and two-hour reference.
+- **Reference data**: audits with final assessment `no_issues` (or legacy
+  `ready`) by audit date. Fixable and excluded datasets do not count.
+- **Downloads**: accepted requests in `dataset_download_requests`. The download
+  API records each accepted full-dataset, labels or bundle request once, with one
+  row per distinct dataset sharing a `request_id`, using the service role, after
+  the access and output checks (also for a cached bundle another user prepared).
+  Charts count requests, and a bundle is reuse if any of its datasets belongs to
+  someone else. A recording failure never fails the download. The API and database deploy separately, so coverage starts
+  with the first recorded request rather than the migration time; earlier weeks
+  are unknown and the first week is a lower bound. The rate-limit request logs are not used, because
+  they are written before the access and output checks and include rejected
+  requests. Reuse means a requester other than the dataset owner.
+- **Activation and retention**: a signup uploads within 30 days; a first-time
+  contributor uploads again on a later day within 90 days. Only elapsed windows
+  enter denominators.
+- **Visitors** stay in PostHog; the funnel links to its web analytics.
+
+## Operations and attention order
+
+The Operations tab prioritizes current problems, waiting work and running claims.
 Product-journey and contributor-cohort history are secondary to operational
 investigation. It does not infer a proven system constraint from the largest
 backlog or the oldest timestamp: queue, claim, failure and report clocks differ.
@@ -404,6 +449,18 @@ metric filters and contributor cohorts. These are local database execution times
 not production or network latency guarantees. Permission and semantic tests run
 separately; plan regressions avoid machine-dependent wall-clock assertions.
 
+On 2026-09-24 the benchmark gained processor run logs (start with task types,
+stage success, predictions or a named failure) for every dataset and log-only
+evidence for half of them. Stage proofs are the main new cost; trends compute them
+twice (outcomes and failures) and the north star once. After proof-based readiness,
+at 10,000 datasets on a heavily loaded host (load average about 45): trends 0.76 s,
+monthly trends 0.49 s, north star 0.44 s, dataset detail 0.31 s and evidence
+drilldowns 0.23–0.38 s. Readiness is one inlined expression; a non-inlined helper
+cost about 33 µs per row. The benchmark matches 30% of its logs; in production
+about 4% of `v2_logs` rows (74,512 of 1.84 million on 2026-09-24) are run evidence,
+so the partial index is the expected path, and the equivalent reconstruction ran
+in under 3 s on production without it.
+
 Exact totals, global aggregates, substring searches and deep offset pagination
 still grow with the relevant population. This is not constant-cost analytics at
 arbitrary scale. Rebenchmark against realistic cardinality/skew and concurrency
@@ -430,11 +487,10 @@ is written into that ledger and no production backfill job is needed.
 
 Run notifications are deduplicated by dataset, task and event before bucketing.
 Completed runs include reruns; completions requesting indexing are a subset.
-Upload-to-first-recorded-completion p50/p90 use only chronological timestamp
-pairs. They can include a later rerun and are not first-result latency. Detail
-pages expose these timestamps and the upload evidence source separately from
-measured first-readiness. Linked period counts open matching distinct datasets;
-run, email-recipient and report totals can exceed those dataset counts.
+First-result timing is not derived from notifications: the first retained
+notification can be a rerun months later. Time to first result lives with the
+outcome charts. Linked period counts open matching distinct datasets; run,
+email-recipient and report totals can exceed those dataset counts.
 
 Original input GiB is grouped by observed upload date, with the number of known
 sizes. Contributor counts come from observed uploads; returning contributors had
@@ -447,6 +503,79 @@ sizes, complete failure/recovery episodes, deleted data, or historical owner vie
 Periods before the earliest available upload, run, email, report or publication
 evidence display unknown for their respective sources. A zero after that boundary means no retained matching records,
 not proof that collection was continuously enabled. Coverage totals show how
-many retained datasets have upload timestamps, sizes and timing pairs. The
-existing directly measured outcomes remain prospective and retain their stricter
-first-result and failure-recovery semantics.
+many retained datasets have upload timestamps and sizes.
+
+### Retained outcome evidence
+
+The Operations outcome charts (uploads, first complete results, time to first
+result, failures and recovery, input that reached a result) cover days, weeks and
+months from retained evidence. Direct measurement wins wherever it exists; every
+count reports its measured part, and the chart marks where measurement starts.
+
+- **Processor runs** (`factory_run_log_events`) are numbered from processor logs,
+  retained from 2025-10-31: a `Starting processing for task` log opens a run and
+  records its requested task types; stage-success logs, `Processing failed`/`Crash
+  detected` logs (with the failed stage) and graceful re-queues follow.
+- **Stage proofs** (`factory_stage_proofs`): stages run in pipeline order (ODM,
+  ortho, metadata, COG, thumbnail, deadwood, tree cover, combined, AOI, indexing)
+  and a failing stage ends its run, so a requested stage is proven done at the
+  first success at or past its position in that run. ODM counts only from `ODM
+  processing completed successfully for dataset N`, logged after its outputs are
+  stored and `is_odm_done` is set (the bare message marks container exit, before
+  extraction and upload can fail). Ortho logs `Finished converting dataset`; COG logs no success and is proven by a later stage or by
+  the run's `Recorded … processing_completed notification event(s)` record, which
+  proves every requested stage (recorded when the run has recipients, since
+  August 2026, only while processing email notifications are enabled). A retry
+  with neither stays unproven rather than invented; after deployment the measured
+  ledger observes such recoveries from status readiness. Proofs persist across
+  runs, like the status flags, until a requeue resets them: requeueing a failed
+  dataset clears the done flags of the requested stages, so a run that follows a
+  failed run invalidates earlier proofs of its requested stages at its start.
+- **Ready moments** (`factory_ready_moments`): full readiness is checked at every
+  proof time against the proofs still valid then; readiness therefore never rests
+  on a stage a requeue has reset.
+- **First result** (`factory_outcome_evidence`): for measured submissions the
+  measured readiness (still waiting stays waiting); otherwise the first moment
+  runs after the first upload log had proven every readiness requirement, with
+  proofs still valid at that moment, of
+  `factory_status_ready`: ODM for ZIPs, ortho, metadata, COG, thumbnail, deadwood
+  and forest cover (combined, or both legacy models), and the area of interest once
+  a run requested it. Unproven requirements leave the result unknown. Each stage
+  returns the status to idle, so this matches measured readiness; later search
+  indexing is excluded. Uploads before the first retained processor run get no
+  reconstructed result, because an unretained earlier run may have produced it.
+  Reruns never add results. In production (Aug–Sep 2026) the completion
+  notification followed the result by a median of one minute and never preceded it.
+- **Failure episodes** (`factory_failure_evidence`): an episode ends when the
+  dataset is complete again, comparable to the ledger's full readiness: a run
+  started after the failure proved the failed stage again and every readiness
+  requirement is proven. A success of other stages ends nothing, a failure naming
+  no known stage stays open, and further failures before recovery belong to the
+  same episode. Charts call the end "complete again". The ledger owns every dataset
+  from its observation start; a log episode still open then continues in the
+  ledger's carried row, which supplies the measured recovery. The migration
+  carries datasets with the error flag and, because a requeue clears that flag
+  before its retry finishes, also datasets with an open retained failure that are
+  not complete now (`factory_carry_open_failures`); datasets complete now are not
+  carried, even when no log proves when they recovered. The phase says
+  whether the contributor was still waiting for a first result or the dataset had
+  proven readiness already (reruns, search indexing); without upload evidence or
+  proven earlier readiness it stays unknown and is grouped with reruns in charts.
+- **Index**: `factory_run_log_idx` is built `CONCURRENTLY` in its own migration
+  (`20260924090000`) so writes to `v2_logs` continue during the build; the Supabase
+  CLI (2.30 and 2.40 checked) applies a file without an explicit transaction
+  outside a transaction block. A failed build leaves an invalid index to drop
+  before retrying. Its predicate must stay identical to `factory_run_log_events`.
+- **Input size** is the measured upload size or the upload log's `file_size`,
+  counted once at the first result. Explorer workflow/size filters use the same
+  values, so every chart link opens the plotted population with exact period bounds.
+- The summary is the current state of the filtered population: unarchived uploads
+  still waiting for a first result (not complete now), open failures, and complete
+  datasets without a retained first-result time.
+
+Limitations: authenticated users can insert log rows, which the product owner
+accepted for retained evidence; reconstructed values are labelled evidence, not
+protected measurement. Reconstruction depends on processor log messages, so a
+change to those messages needs the view and index updated. Uploads before
+2025-10-31 have no retained upload or run logs, deleted datasets are absent, and
+failures that never logged a failure are only visible through the ledger.

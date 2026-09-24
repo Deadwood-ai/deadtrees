@@ -1,5 +1,6 @@
 """Planner and pagination regressions for Factory reads; no wall-clock assertions."""
 import json
+import re
 
 from api.tests.db.test_factory import authenticate, dataset, db, user  # noqa: F401
 
@@ -8,6 +9,33 @@ def walk_plan(node):
 	yield node
 	for child in node.get('Plans', []):
 		yield from walk_plan(child)
+
+
+def production_shaped_logs(db, datasets=20, noise_per_dataset=1000):
+	"""Give v2_logs production-like statistics inside the rolled-back test transaction.
+
+	Evidence logs are a few percent of rows, spread over many datasets. Without this,
+	statistics left by earlier tests can make a created_at-ordered index look cheaper
+	than a dataset-bounded one. Returns one dataset with upload and run evidence."""
+	owner = user(db)
+	ids = [dataset(db, owner) for _ in range(datasets)]
+	db.execute("""INSERT INTO public.v2_logs(dataset_id,created_at,level,category,message)
+	SELECT d,now()-make_interval(mins=>i),'INFO','noise','synthetic noise '||i
+	FROM unnest(%s::bigint[]) d CROSS JOIN generate_series(1,%s) i""", (ids, noise_per_dataset))
+	db.execute("""INSERT INTO public.v2_logs(dataset_id,created_at,level,category,message,extra)
+	SELECT d,now()-interval '2 days','INFO','upload','Upload completed successfully for dataset '||d,'{"file_size":1}'::jsonb FROM unnest(%s::bigint[]) d
+	UNION ALL SELECT d,now()-interval '1 day','INFO','process','Starting processing for task '||d,'{"task_types":["geotiff"]}'::jsonb FROM unnest(%s::bigint[]) d""", (ids, ids))
+	db.execute('ANALYZE public.v2_logs')
+	return ids[0]
+
+
+def assert_logs_read_through(plan, index, row):
+	"""Every v2_logs access uses `index` with the dataset bound in its index condition."""
+	scans = [n for n in walk_plan(plan) if n.get('Relation Name') == 'v2_logs' or n.get('Index Name') == index]
+	bounded = [n for n in scans if n.get('Index Name') == index and re.search(rf"\bdataset_id = '?{row}\b", n.get('Index Cond', ''))]
+	heaps = [n for n in scans if n.get('Relation Name') == 'v2_logs' and n['Node Type'] not in ('Index Scan', 'Index Only Scan', 'Bitmap Heap Scan')]
+	assert bounded and not heaps, scans
+	assert all(n.get('Index Name') in (None, index) for n in scans), scans
 
 
 def test_filters_inline_instead_of_hydrating_every_dataset(db):

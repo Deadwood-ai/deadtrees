@@ -14,11 +14,19 @@ export interface TrendBucket {
 	complete: boolean;
 	/** Population behind the bucket: a number, null when it should exist but is unknown, undefined when not applicable. */
 	n?: number | null;
+	/** Extra context read with the numbers, such as which evidence they rest on. */
+	note?: string;
 	values: Record<string, number | null>;
 }
 
 export interface ReferenceLine {
 	value: number;
+	label: string;
+}
+
+export interface TrendMarker {
+	/** Bucket whose left edge carries the marker. */
+	key: string;
 	label: string;
 }
 
@@ -32,6 +40,8 @@ type FactoryTrendChartProps = {
 	selectedKey?: string | null;
 	onSelect?: (key: string | null) => void;
 	referenceLines?: ReferenceLine[];
+	/** A dashed vertical line where the evidence changes, for example where direct measurement starts. */
+	marker?: TrendMarker | null;
 	height?: number;
 };
 
@@ -53,7 +63,7 @@ const describeBucket = (bucket: TrendBucket, series: TrendSeries[], format: (val
 			const value = bucket.values[item.key];
 			return `${item.label} ${value === null || value === undefined ? "unknown" : format(value)}`;
 		})
-		.join(", ")}${typeof bucket.n === "number" ? `, n ${bucket.n}` : bucket.n === null ? ", n unknown" : ""}`;
+		.join(", ")}${typeof bucket.n === "number" ? `, n ${bucket.n}` : bucket.n === null ? ", n unknown" : ""}${bucket.note ? ` (${bucket.note})` : ""}`;
 
 /**
  * Compact SVG chart where every bucket is a real button, so selection works with
@@ -68,6 +78,7 @@ export default function FactoryTrendChart({
 	selectedKey = null,
 	onSelect,
 	referenceLines = [],
+	marker = null,
 	height = 220,
 }: FactoryTrendChartProps) {
 	const patternId = useId();
@@ -87,6 +98,7 @@ export default function FactoryTrendChart({
 
 	// Show at most six axis labels; every bucket keeps its full label for tooltips and screen readers.
 	const labelEvery = Math.max(1, Math.ceil(buckets.length / MAX_AXIS_LABELS));
+	const markerIndex = marker ? buckets.findIndex((bucket) => bucket.key === marker.key) : -1;
 	const activate = (key: string) => onSelect?.(selectedKey === key ? null : key);
 	const onKey = (event: KeyboardEvent<SVGGElement>, key: string) => {
 		if (event.key === "Enter" || event.key === " ") {
@@ -120,6 +132,14 @@ export default function FactoryTrendChart({
 						</text>
 					</g>
 				))}
+				{markerIndex >= 0 && marker && (
+					<g aria-hidden>
+						<line x1={PAD.left + slot * markerIndex} x2={PAD.left + slot * markerIndex} y1={PAD.top} y2={PAD.top + innerHeight} stroke="#6B7280" strokeDasharray="3 3" strokeWidth="1" />
+						<text x={PAD.left + slot * markerIndex + 4} y={PAD.top + 10} fontSize="10" fill="#4B5563">
+							{marker.label}
+						</text>
+					</g>
+				)}
 				{kind === "points" &&
 					series.map((item) => {
 						// Join only neighbouring measured buckets, so an unknown interval stays a visible gap.
@@ -219,7 +239,7 @@ export default function FactoryTrendChart({
 					<span className="inline-block h-2.5 w-2.5 rounded-sm bg-[repeating-linear-gradient(45deg,#9CA3AF_0_2px,transparent_2px_5px)]" aria-hidden />
 					partial period
 				</span>
-				<span className="text-gray-400">? = not measured</span>
+				<span className="text-gray-400">? = unknown</span>
 			</figcaption>
 		</figure>
 	);
