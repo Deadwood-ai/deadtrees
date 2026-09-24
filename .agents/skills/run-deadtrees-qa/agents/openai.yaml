@@ -1,0 +1,4 @@
+interface:
+  display_name: "Run DeadTrees QA"
+  short_description: "Run production read-only and isolated local-write DeadTrees QA"
+  default_prompt: "Use $run-deadtrees-qa to run the visible production read-only and isolated local-write QA workflow."

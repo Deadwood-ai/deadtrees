@@ -44,7 +44,10 @@ frontend work.
 Use stable tuple keys:
 
 ```ts
-["datasets"][("datasets", id)][("datasets", id, "labels")];
+const datasetId = 123;
+const allDatasetsKey = ["datasets"];
+const datasetKey = ["datasets", datasetId];
+const datasetLabelsKey = ["datasets", datasetId, "labels"];
 ```
 
 ## OpenLayers

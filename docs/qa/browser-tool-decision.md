@@ -1,6 +1,7 @@
 # Browser Tool Decision
 
-Date: 2026-06-16
+Decision and probe date: 2026-06-16. Runtime availability below is historical;
+discover the active browser API and backends before each run.
 
 ## Decision
 
@@ -34,7 +35,7 @@ The built-in Browser exposes these checks directly through Playwright-style
 locators and console logs. That matches the playbook evidence contract better
 than screen-only control.
 
-## Current Evidence
+## Evidence From The June 2026 Probe
 
 Runner artifact:
 
@@ -72,7 +73,7 @@ Notable finding:
 
 ## Chrome Availability
 
-Chrome is not currently exposed as a controllable browser backend in this
+Chrome was not exposed as a controllable browser backend in that probe
 session. The available browser backend list contained only:
 
 ```text
@@ -86,8 +87,8 @@ and update this decision.
 
 ## Computer Use Assessment
 
-Computer Use is available as a Mac screen-control fallback, but it is not the
-right default for local QA because it operates at the UI/screen level and does
+Computer Use was available as a Mac screen-control fallback in the probe, but it
+is not the right default for local QA because it operates at the UI/screen level and does
 not naturally provide the structured locator, console, and network evidence
 expected by the playbooks.
 
@@ -108,7 +109,7 @@ docs/qa/browser-use-cli-evidence.md
 
 Result:
 
-- Browser Use CLI is available via `uvx --from browser-use`.
+- Browser Use CLI was available via `uvx --from browser-use`.
 - It supports named sessions.
 - It supports indexed file upload.
 - A local upload probe successfully attached
