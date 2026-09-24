@@ -4,27 +4,47 @@
 -- observed for every dataset, not only registrations after instrumentation.
 begin;
 
--- Processor run evidence: a run starts with its start log and ends in a failure,
--- an interruption or stage successes. Processor INFO logs are retained from
--- 2025-10-31; earlier periods stay unknown. Keep in sync with the view below.
-create index factory_run_log_idx on public.v2_logs(dataset_id,created_at,id) where dataset_id is not null and (
- (category='process' and (message like 'Starting processing for task %' or message like 'Processing failed:%'
-  or message like 'Crash detected for dataset %' or message like 'Received signal %; gracefully re-queuing in-flight task %'))
- or message in ('Combined segmentation completed successfully','Tree cover segmentation completed successfully',
-  'Deadwood segmentation completed successfully','AOI segmentation completed successfully','Processed metadata successfully',
-  'Thumbnail processing completed successfully','ODM processing completed successfully','Tile embedding completed successfully'));
+-- Pipeline position of a processor stage, by task type or by the stage name that
+-- failure and crash logs use. Stages run in this order within a run. A pure
+-- expression without a SET clause, so it inlines into the per-row log scans.
+create function public.factory_stage_position(p_stage text) returns integer
+language sql immutable as $$
+ select case p_stage
+  when 'odm_processing' then 1
+  when 'geotiff' then 2 when 'ortho_processing' then 2 when 'geotiff_dependency' then 2
+  when 'metadata' then 3 when 'metadata_processing' then 3
+  when 'cog' then 4 when 'cog_processing' then 4
+  when 'thumbnail' then 5 when 'thumbnail_processing' then 5
+  when 'deadwood' then 6 when 'deadwood_v1' then 6 when 'deadwood_segmentation' then 6
+  when 'treecover' then 7 when 'treecover_v1' then 7 when 'treecover_segmentation' then 7 when 'forest_cover_segmentation' then 7
+  when 'deadwood_treecover_combined_v2' then 8 when 'deadwood_treecover_combined_segmentation' then 8
+  when 'aoi_v1' then 9 when 'aoi_segmentation' then 9
+  when 'embeddings_v1' then 10 when 'embedding_processing' then 10 end;
+$$;
 
-create view public.factory_processing_runs with(security_invoker=true) as
+-- Processor-run log evidence (INFO logs retained from 2025-10-31), numbered into
+-- runs: a start log opens a run and records its requested task types. The
+-- predicate matches factory_run_log_idx (migration 20260924090000).
+create view public.factory_run_log_events with(security_invoker=true) as
  with evidence as (
-  select dataset_id,created_at,id,case
-   when message like 'Starting processing for task %' then 'start'
-   when message like 'Processing failed:%' or message like 'Crash detected for dataset %' then 'failed'
-   when message like 'Received signal %' then 'interrupted'
-   when message='Combined segmentation completed successfully' then 'combined'
-   when message='Deadwood segmentation completed successfully' then 'deadwood'
-   when message='Tree cover segmentation completed successfully' then 'forest_cover'
-   when message='AOI segmentation completed successfully' then 'aoi'
-   else 'stage' end as kind
+  select dataset_id,created_at,id,
+   case when message like 'Starting processing for task %' then 'start'
+    when message like 'Processing failed:%' or message like 'Crash detected for dataset %' then 'failed'
+    when message like 'Received signal %' then 'interrupted' else 'success' end as kind,
+   -- Success position, or the position of the stage a failure names.
+   case when message like 'Processing failed:%' then public.factory_stage_position(substring(message from 'Processing failed: ([a-z_]+)'))
+    when message like 'Crash detected for dataset %' then public.factory_stage_position(substring(message from 'crashed during ([a-z_]+)'))
+    when message='ODM processing completed successfully' then 1
+    when message='Processed metadata successfully' then 3
+    when message='Thumbnail processing completed successfully' then 5
+    when message='Deadwood segmentation completed successfully' then 6
+    when message='Tree cover segmentation completed successfully' then 7
+    when message='Combined segmentation completed successfully' then 8
+    when message='AOI segmentation completed successfully' then 9
+    when message='Tile embedding completed successfully' then 10 end as position,
+   -- Requested stage positions, from the task types a start log records.
+   case when message like 'Starting processing for task %' then array(select public.factory_stage_position(t)
+    from jsonb_array_elements_text(case when jsonb_typeof(extra->'task_types')='array' then extra->'task_types' else '[]'::jsonb end) t) end as requested
   from public.v2_logs where dataset_id is not null and (
    (category='process' and (message like 'Starting processing for task %' or message like 'Processing failed:%'
     or message like 'Crash detected for dataset %' or message like 'Received signal %; gracefully re-queuing in-flight task %'))
@@ -32,25 +52,48 @@ create view public.factory_processing_runs with(security_invoker=true) as
     'Deadwood segmentation completed successfully','AOI segmentation completed successfully','Processed metadata successfully',
     'Thumbnail processing completed successfully','ODM processing completed successfully','Tile embedding completed successfully'))
    and created_at<=now()
- ), numbered as (
-  select *,count(*) filter(where kind='start') over(partition by dataset_id order by created_at,id) as run from evidence
- ), runs as (
-  select dataset_id,run,min(created_at) as started_at,
-   case when bool_or(kind='failed') then 'failed' when bool_or(kind='interrupted') then 'interrupted'
-    when bool_or(kind<>'start') then 'succeeded' else 'unknown' end as outcome,
-   -- Readiness needs deadwood and forest cover: the combined model, or both legacy
-   -- models in the same run. A single legacy model alone is not a complete result.
-   bool_or(kind='combined') or (bool_or(kind='deadwood') and bool_or(kind='forest_cover')) as with_result,
-   min(created_at) filter(where kind='failed') as failed_at,
-   -- Every stage returns the status to idle, so readiness is reached when the last
-   -- prediction or area-of-interest stage finishes, before later search indexing.
-   max(created_at) filter(where kind in('combined','deadwood','forest_cover','aoi')) as predicted_at,
-   max(created_at) filter(where kind not in('start','failed','interrupted')) as finished_at
-  from numbered where run>0 group by dataset_id,run
  )
- select dataset_id,run,started_at,outcome,with_result,failed_at,
-  case when with_result then predicted_at end as result_at,finished_at
- from runs;
+ select *,count(*) filter(where kind='start') over(partition by dataset_id order by created_at,id) as run from evidence;
+
+-- When each requested stage was proven done. Stages run in pipeline order and a
+-- failing stage ends its run, so the first success at or past a requested stage
+-- proves it; a later failure in the same run does not undo it. COG has no success
+-- log and is proven by the stages after it. A run requesting an area of interest
+-- adds a requirement marker (position 9, no proof) from its start.
+create view public.factory_stage_proofs with(security_invoker=true) as
+ with events as materialized (
+  select dataset_id,created_at,kind,position,
+   first_value(requested) over run_order as run_requested,
+   first_value(created_at) over run_order as run_started_at,
+   max(position) filter(where kind='success') over(run_order rows between unbounded preceding and 1 preceding) as reached
+  from public.factory_run_log_events where run>0
+  window run_order as(partition by dataset_id,run order by created_at,id)
+ )
+ select e.dataset_id,e.run_started_at,p.position,e.created_at as proved_at
+ from events e cross join lateral generate_series(coalesce(e.reached,0)+1,e.position) p(position)
+ where e.kind='success' and e.position>coalesce(e.reached,0)
+  and p.position=any(e.run_requested)
+ union all
+ select dataset_id,run_started_at,9,null from events where kind='start' and 9=any(run_requested);
+
+-- First moment of full readiness from stage proofs, as factory_status_ready defines
+-- it: ODM for ZIPs, ortho, metadata, COG, thumbnail, deadwood and forest cover (the
+-- combined model or both legacy models), and the area of interest once required.
+-- Every requirement must be proven; otherwise the time is unknown. Proofs persist,
+-- like the status flags. p_after restricts the answer to that moment or later.
+-- One inlinable expression (no SET clause or subquery), so callers passing plain
+-- columns pay no per-row function call.
+create function public.factory_ready_at(p_zip boolean,p_odm timestamptz,p_ortho timestamptz,p_metadata timestamptz,
+ p_cog timestamptz,p_thumbnail timestamptz,p_deadwood timestamptz,p_forest_cover timestamptz,p_combined timestamptz,
+ p_aoi timestamptz,p_aoi_required_since timestamptz,p_after timestamptz default null)
+returns timestamptz language sql immutable as $$
+ select case
+  when (p_zip and p_odm is null) or p_ortho is null or p_metadata is null or p_cog is null or p_thumbnail is null
+   or (p_combined is null and (p_deadwood is null or p_forest_cover is null)) then null
+  when p_aoi_required_since<=greatest(p_after,case when p_zip then p_odm end,p_ortho,p_metadata,p_cog,p_thumbnail,least(p_combined,case when p_deadwood is not null and p_forest_cover is not null then greatest(p_deadwood,p_forest_cover) end))
+   then case when p_aoi is not null then greatest(greatest(p_after,case when p_zip then p_odm end,p_ortho,p_metadata,p_cog,p_thumbnail,least(p_combined,case when p_deadwood is not null and p_forest_cover is not null then greatest(p_deadwood,p_forest_cover) end)),p_aoi) end
+  else greatest(p_after,case when p_zip then p_odm end,p_ortho,p_metadata,p_cog,p_thumbnail,least(p_combined,case when p_deadwood is not null and p_forest_cover is not null then greatest(p_deadwood,p_forest_cover) end)) end;
+$$;
 
 -- Earliest retained processor run. Uploads before it may already have had results
 -- whose runs were not retained, so their first retained result could be a rerun.
@@ -59,12 +102,14 @@ language sql stable set search_path='' as $$
  select min(created_at) from public.v2_logs
  where dataset_id is not null and category='process' and message like 'Starting processing for task %';
 $$;
-revoke all on function public.factory_run_evidence_since() from public,anon,authenticated;
+revoke all on function public.factory_run_evidence_since(),public.factory_stage_position(text),
+ public.factory_ready_at(boolean,timestamptz,timestamptz,timestamptz,timestamptz,timestamptz,timestamptz,timestamptz,timestamptz,timestamptz,timestamptz,timestamptz)
+ from public,anon,authenticated;
 
 -- One upload and first-result record per dataset with upload evidence. Measured
 -- submissions are authoritative, including while they still wait; otherwise the
--- first result is when the first successful run after upload finished its
--- predictions, for uploads within the retained processor-run evidence.
+-- first result is when runs after the upload had proven full readiness, for
+-- uploads within the retained processor-run evidence. Unprovable stays unknown.
 create view public.factory_outcome_evidence with(security_invoker=true) as
  select u.dataset_id,u.user_id,u.uploaded_at,u.source as upload_source,u.input_bytes,
   case when lower(d.file_name) like '%.zip' then 'odm' else 'geotiff' end as workflow,
@@ -74,9 +119,19 @@ create view public.factory_outcome_evidence with(security_invoker=true) as
  from public.factory_historical_uploads u
  join public.v2_datasets d on d.id=u.dataset_id
  left join public.factory_submissions m on m.dataset_id=u.dataset_id
- left join (select dataset_id,min(result_at) as first_result_at from public.factory_processing_runs
-  where outcome='succeeded' and with_result group by dataset_id) r on r.dataset_id=u.dataset_id and r.first_result_at>=u.uploaded_at
-  and u.uploaded_at>=public.factory_run_evidence_since();
+ left join (
+  select dataset_id,public.factory_ready_at(zip,odm,ortho,metadata,cog,thumbnail,deadwood,forest_cover,combined,aoi,aoi_required_since) as first_result_at
+  from (select p.dataset_id,bool_or(lower(pd.file_name) like '%.zip') as zip,
+   min(p.proved_at) filter(where p.position=1) as odm,min(p.proved_at) filter(where p.position=2) as ortho,
+   min(p.proved_at) filter(where p.position=3) as metadata,min(p.proved_at) filter(where p.position=4) as cog,
+   min(p.proved_at) filter(where p.position=5) as thumbnail,min(p.proved_at) filter(where p.position=6) as deadwood,
+   min(p.proved_at) filter(where p.position=7) as forest_cover,min(p.proved_at) filter(where p.position=8) as combined,
+   min(p.proved_at) filter(where p.position=9) as aoi,min(p.run_started_at) filter(where p.position=9 and p.proved_at is null) as aoi_required_since
+   from public.factory_stage_proofs p
+   join public.factory_historical_uploads pu on pu.dataset_id=p.dataset_id and p.run_started_at>=pu.uploaded_at
+   join public.v2_datasets pd on pd.id=p.dataset_id
+   group by p.dataset_id) a
+ ) r on r.dataset_id=u.dataset_id and u.uploaded_at>=public.factory_run_evidence_since();
 
 -- Observe failures and recoveries for every dataset from now on. Datasets that
 -- are already failing get an open episode whose start was not observed.
@@ -116,65 +171,86 @@ end;
 $$;
 
 -- Failure episodes from every source. The ledger owns a dataset from the moment
--- it is observed; before that, consecutive failed runs are one episode that ends
--- at the next run leaving the dataset complete again, comparable to the ledger's
--- full readiness: a run that produced predictions, or any successful run once the
--- dataset already had them. A stage-only success before a first result ends nothing.
--- An episode still open when observation began continues in the ledger's open row,
--- which then supplies the measured recovery.
+-- it is observed. Before that, failures come from processor logs and an episode
+-- ends only when the evidence shows the dataset complete again, comparable to the
+-- ledger's full readiness: a later run proved the failed stage and every readiness
+-- requirement is proven. A failure naming no known stage stays open. Failures
+-- before that point belong to the same episode. An episode still open when
+-- observation began continues in the ledger's open row, which then supplies the
+-- measured recovery.
 create view public.factory_failure_evidence with(security_invoker=true) as
  with epoch as (select failures_started_at as observed_from from public.factory_measurement_epoch),
- flagged as (
-  select dataset_id,run,outcome,failed_at,
-   -- Complete again: when predictions finished, or the run's end once it already had them.
-   case when with_result then result_at else finished_at end as completed_at,
-   coalesce(bool_or(outcome='succeeded' and with_result) over(partition by dataset_id order by run
-    rows between unbounded preceding and 1 preceding),false) as had_result_before,
-   outcome='succeeded' and with_result as produced_result
-  from public.factory_processing_runs where outcome in('failed','succeeded')
- ), decisive as (
-  select dataset_id,outcome,failed_at,had_result_before,lag(outcome) over w as previous,
-   min(completed_at) filter(where outcome='succeeded') over(w rows between 1 following and unbounded following) as recovered_at
-  from flagged where outcome='failed' or produced_result or had_result_before
-  window w as(partition by dataset_id order by run)
+ proofs as materialized (select * from public.factory_stage_proofs),
+ readiness as (
+  select p.dataset_id,lower(d.file_name) like '%.zip' as zip,
+   min(p.proved_at) filter(where p.position=1) as odm,min(p.proved_at) filter(where p.position=2) as ortho,
+   min(p.proved_at) filter(where p.position=3) as metadata,min(p.proved_at) filter(where p.position=4) as cog,
+   min(p.proved_at) filter(where p.position=5) as thumbnail,min(p.proved_at) filter(where p.position=6) as deadwood,
+   min(p.proved_at) filter(where p.position=7) as forest_cover,min(p.proved_at) filter(where p.position=8) as combined,
+   min(p.proved_at) filter(where p.position=9) as aoi,min(p.run_started_at) filter(where p.position=9 and p.proved_at is null) as aoi_required_since
+  from proofs p join public.v2_datasets d on d.id=p.dataset_id group by p.dataset_id,d.file_name
+ ), ready as (
+  select *,public.factory_ready_at(zip,odm,ortho,metadata,cog,thumbnail,deadwood,forest_cover,combined,aoi,aoi_required_since) as first_ready_at
+  from readiness
+ ), failures as (
+  select dataset_id,id,created_at as failed_at,position as failed_position,
+   lead(created_at) over(partition by dataset_id order by created_at,id) as next_failed_at
+  from public.factory_run_log_events where kind='failed'
+ ), reproofs as (
+  select f.dataset_id,f.id,min(p.proved_at) as reproved_at
+  from failures f join proofs p on p.dataset_id=f.dataset_id and p.position=f.failed_position and p.run_started_at>f.failed_at
+  group by f.dataset_id,f.id
+ ), recovered as (
+  -- Complete again: a run started after the failure proved the failed stage, and
+  -- all readiness requirements hold then, before any further failure.
+  select f.dataset_id,f.id,f.failed_at,
+   case when x.at<f.next_failed_at or f.next_failed_at is null then x.at end as recovered_at
+  from failures f left join ready r on r.dataset_id=f.dataset_id
+  left join reproofs rp on rp.dataset_id=f.dataset_id and rp.id=f.id
+  cross join lateral (select case when rp.reproved_at is not null then public.factory_ready_at(r.zip,r.odm,r.ortho,r.metadata,
+   r.cog,r.thumbnail,r.deadwood,r.forest_cover,r.combined,r.aoi,r.aoi_required_since,rp.reproved_at) end as at) x
+ ), episodes_logged as (
+  select *,count(*) filter(where opens) over(partition by dataset_id order by failed_at,id) as episode
+  from (select *,coalesce(lag(recovered_at) over(partition by dataset_id order by failed_at,id) is not null,true) as opens from recovered) o
  ), logged as (
-  select d.dataset_id,d.failed_at,d.recovered_at,d.had_result_before,
-   row_number() over(partition by d.dataset_id order by d.failed_at desc)=1
-    and (d.recovered_at is null or d.recovered_at>=e.observed_from) as open_when_observed
-  from decisive d cross join epoch e
-  where d.outcome='failed' and d.previous is distinct from 'failed' and d.failed_at<e.observed_from
-   and not exists(select 1 from public.factory_submissions m where m.dataset_id=d.dataset_id)
+  select g.dataset_id,min(g.failed_at) as failed_at,max(g.recovered_at) as recovered_at,
+   row_number() over(partition by g.dataset_id order by min(g.failed_at) desc)=1
+    and (max(g.recovered_at) is null or max(g.recovered_at)>=max(e.observed_from)) as open_when_observed
+  from episodes_logged g cross join epoch e
+  where g.failed_at<e.observed_from
+   and not exists(select 1 from public.factory_submissions m where m.dataset_id=g.dataset_id)
+  group by g.dataset_id,g.episode
  ), carried as (
   select dataset_id,recovered_at from public.factory_failure_episodes where failed_at is null
  ), episodes as (
   select dataset_id,failed_at,recovered_at,'processing_log'::text as start_source,
-   case when recovered_at is not null then 'processing_log' end as recovery_source,had_result_before
+   case when recovered_at is not null then 'processing_log' end as recovery_source
   from logged where not open_when_observed
   union all
   select coalesce(l.dataset_id,c.dataset_id),l.failed_at,
    case when c.dataset_id is null then l.recovered_at else c.recovered_at end,
    case when l.dataset_id is not null then 'processing_log' end,
    case when c.dataset_id is null then case when l.recovered_at is not null then 'processing_log' end
-    when c.recovered_at is not null then 'measured' end,l.had_result_before
+    when c.recovered_at is not null then 'measured' end
   from (select * from logged where open_when_observed) l full join carried c on c.dataset_id=l.dataset_id
   union all
-  select dataset_id,failed_at,recovered_at,'measured',case when recovered_at is not null then 'measured' end,null
+  select dataset_id,failed_at,recovered_at,'measured',case when recovered_at is not null then 'measured' end
   from public.factory_failure_episodes where failed_at is not null
  )
  -- Phase: still waiting for the first complete result, or a rerun of a dataset that
  -- had one. Measured readiness decides for measured submissions, as in the outcome
- -- evidence; otherwise an earlier successful run with predictions does. Without
- -- upload evidence or an earlier result the phase stays unknown.
+ -- evidence; otherwise proven readiness before the failure does. Without upload
+ -- evidence or proven earlier readiness the phase stays unknown.
  select x.dataset_id,x.failed_at,x.recovered_at,x.start_source,x.recovery_source,
   case when x.failed_at is null then 'unknown'
    when m.dataset_id is not null then case when m.first_ready_at<x.failed_at then 'rerun' else 'first_result' end
-   when coalesce(x.had_result_before,exists(select 1 from public.factory_processing_runs r where r.dataset_id=x.dataset_id
-    and r.outcome='succeeded' and r.with_result and r.result_at<x.failed_at)) then 'rerun'
+   when r.first_ready_at<x.failed_at then 'rerun'
    when exists(select 1 from public.factory_historical_uploads u where u.dataset_id=x.dataset_id) then 'first_result'
    else 'unknown' end as phase
- from episodes x left join public.factory_submissions m on m.dataset_id=x.dataset_id;
+ from episodes x left join public.factory_submissions m on m.dataset_id=x.dataset_id
+ left join ready r on r.dataset_id=x.dataset_id;
 
-revoke all on public.factory_processing_runs,public.factory_outcome_evidence,public.factory_failure_evidence from public,anon,authenticated;
+revoke all on public.factory_run_log_events,public.factory_stage_proofs,public.factory_outcome_evidence,public.factory_failure_evidence from public,anon,authenticated;
 
 -- Chart drilldowns list exactly the datasets behind each plotted evidence count.
 create or replace view public.factory_metric_events with(security_invoker=true) as
@@ -328,9 +404,9 @@ begin
   'series',(select jsonb_agg(to_jsonb(series) order by start) from series),
   'coverage',jsonb_build_array(
    'Directly measured upload and first-result times start with registrations after measurement began; failures and recoveries are measured for every dataset from the failure tracking date. Everything earlier is reconstructed from retained upload and processor logs and labelled as such. Logs can be written by authenticated users, so reconstructed values are evidence, not protected measurement.',
-   'A first complete result needs deadwood and forest-cover predictions (and a required area of interest). Reconstructed results are when the first processing run after upload, without a logged failure, finished its deadwood and forest-cover predictions (and area of interest); later search indexing is not part of the result. Uploads before the first retained processing run have no reconstructed result. Each dataset counts once; reruns and repeated notifications never add results.',
+   'A first complete result needs deadwood and forest-cover predictions (and a required area of interest). Reconstructed results are the first moment every readiness stage (ODM for ZIPs, ortho, metadata, COG, thumbnail, both predictions and a required area of interest) was proven by processor runs after upload; later search indexing is not part of the result. Uploads before the first retained processing run have no reconstructed result. Each dataset counts once; reruns and repeated notifications never add results.',
    'Time to first result runs from upload to that first result and includes queueing, every stage and any recovery. Uploads still without a result are shown as waiting, never inside the percentiles.',
-   'A failure episode starts at a failed run (or a persisted error) and ends when the dataset is complete again: full readiness when measured; otherwise a run that produced predictions, or any successful run once the dataset already had them. A successful retry of single stages alone never ends an episode. Consecutive failed retries are one episode. Episodes are split by whether the dataset was still waiting for its first result or had one already (reruns and search indexing). Without upload evidence or an earlier result the phase is unknown and grouped with reruns.',
+   'A failure episode starts at a failed run (or a persisted error) and ends when the dataset is complete again: full readiness when measured; otherwise when a later run proved the failed stage again and every readiness stage is proven. A successful retry of other stages never ends an episode, and failures before that belong to the same episode. Episodes are split by whether the dataset was still waiting for its first result or had one already (reruns and search indexing). Without upload evidence or an earlier result the phase is unknown and grouped with reruns.',
    'Input GiB is the original uploaded size (measured or from the upload log), counted once when the dataset reaches its first result. Unknown sizes are left out and counted separately.',
    'Periods before the earliest retained upload or processor log are unknown, not zero. Deleted datasets and their logs are absent.'
   )) into result;
@@ -346,6 +422,8 @@ begin
  if p_include_team is null then raise exception 'Invalid Factory team filter' using errcode='22023'; end if;
  -- First results are observable from the first retained processor run (or measurement).
  select least(started_at,public.factory_run_evidence_since()) into run_since from public.factory_measurement_epoch;
+ -- The API and database deploy separately, so the first recorded request, not the
+ -- migration time, proves that recording is live; earlier weeks stay unknown.
  select min(requested_at) into download_since from public.dataset_download_requests where requested_at<=now();
  week_start:=date_trunc('week',now())-interval '12 weeks';
  month_start:=date_trunc('month',now())-interval '11 months';
@@ -465,11 +543,11 @@ begin
    from (select step,count(*) as datasets,count(*) filter(where has_error) as with_error from stalled group by step) g),'[]'::jsonb),
   'coverage',jsonb_build_array(
    'Team means accounts with auditor privileges. Excluding the team removes their signups, their uploads and the audits and publications of datasets they own, and their download requests.',
-   'Complete results count each dataset once, at its first complete result: measured readiness where available, otherwise when the first successful processing run after upload finished its predictions, reconstructed from retained processor logs. Uploads before the first retained processing run are never counted, because their first result is unknown.',
+   'Complete results count each dataset once, at its first complete result: measured readiness where available, otherwise the first moment processor runs after upload had proven every readiness stage, reconstructed from retained processor logs. Uploads before the first retained processing run are never counted, because their first result is unknown.',
    'Upload times come from direct measurement or upload logs; older datasets fall back to their registration time.',
    'Never reached within 7 days groups uploads by upload week and includes late results. The stage breakdown shows where those uploads stand now, not where they first failed.',
    'Reference data counts audits whose final assessment is no issues. Fixable and excluded datasets are not counted. Audits count by audit date.',
-   'Downloads are accepted download requests, not completed transfers. Reuse means someone other than the dataset owner. Rows before the API started recording were reconstructed from request logs, which lack multi-dataset bundles.',
+   'Downloads are accepted download requests, not completed transfers. Reuse means someone other than the dataset owner. Coverage starts with the first request the API recorded; earlier weeks are unknown, and that first week is a lower bound. Older request logs were written before access checks and are not used.',
    'Activation and retention use monthly cohorts and only count elapsed windows. A return upload must be on a later day, so one batch is one visit. Deleted datasets and accounts are absent.'
   )) into result;
  return result;

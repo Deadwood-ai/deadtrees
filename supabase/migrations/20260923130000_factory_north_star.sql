@@ -9,28 +9,15 @@ create table public.dataset_download_requests (
  dataset_id bigint not null references public.v2_datasets(id) on delete cascade,
  user_id uuid references auth.users(id) on delete set null,
  kind text not null check(kind in ('dataset','labels','bundle')),
- requested_at timestamptz not null default clock_timestamp(),
- source text not null default 'api' check(source in ('api','request_log'))
+ requested_at timestamptz not null default clock_timestamp()
 );
 create index dataset_download_requests_time_idx on public.dataset_download_requests(requested_at);
 create index dataset_download_requests_dataset_idx on public.dataset_download_requests(dataset_id);
 alter table public.dataset_download_requests enable row level security;
 revoke all on public.dataset_download_requests from public,anon,authenticated;
-comment on table public.dataset_download_requests is 'One row per accepted download request (API writes with the service role). Rows with source request_log were backfilled from v2_logs download request logs.';
-
--- Backfill from the rate-limit request log. That log is written before the
--- view-only check, so full-dataset requests for view-only datasets are skipped.
--- Bundle requests never logged their dataset IDs and cannot be recovered.
-insert into public.dataset_download_requests(dataset_id,user_id,kind,requested_at,source)
-select l.dataset_id,u.id,
- case l.extra->>'endpoint' when 'datasets/{dataset_id}/dataset.zip' then 'dataset' else 'labels' end,
- l.created_at,'request_log'
-from public.v2_logs l
-join public.v2_datasets d on d.id=l.dataset_id
-left join auth.users u on u.id=l.user_id
-where l.category='download' and l.extra->>'event'='allowed'
- and (l.extra->>'endpoint'='datasets/{dataset_id}/labels.gpkg'
-  or (l.extra->>'endpoint'='datasets/{dataset_id}/dataset.zip' and d.data_access<>'viewonly'));
+comment on table public.dataset_download_requests is 'One row per accepted download request (API writes with the service role after access and output checks). Coverage starts at the first recorded row.';
+-- Older rate-limit logs are written before the access and output checks, so they
+-- cannot prove a request was accepted and are not backfilled.
 
 create function public.factory_north_star(p_include_team boolean default false)
 returns jsonb language plpgsql stable security definer set search_path='' set timezone='UTC' set jit=off as $$
@@ -42,6 +29,8 @@ begin
  -- that may have been completed long ago and rerun later, so they never count.
  select min(created_at) into run_since from public.processing_notification_events
   where event_type='processing_completed' and created_at<=now();
+ -- The API and database deploy separately, so the first recorded request, not the
+ -- migration time, proves that recording is live; earlier weeks stay unknown.
  select min(requested_at) into download_since from public.dataset_download_requests where requested_at<=now();
  week_start:=date_trunc('week',now())-interval '12 weeks';
  month_start:=date_trunc('month',now())-interval '11 months';
@@ -171,7 +160,7 @@ begin
    'Upload times come from direct measurement or upload logs; older datasets fall back to their registration time.',
    'Never reached within 7 days groups uploads by upload week and includes late results. The stage breakdown shows where those uploads stand now, not where they first failed.',
    'Reference data counts audits whose final assessment is no issues. Fixable and excluded datasets are not counted. Audits count by audit date.',
-   'Downloads are accepted download requests, not completed transfers. Reuse means someone other than the dataset owner. Rows before the API started recording were reconstructed from request logs, which lack multi-dataset bundles.',
+   'Downloads are accepted download requests, not completed transfers. Reuse means someone other than the dataset owner. Coverage starts with the first request the API recorded; earlier weeks are unknown, and that first week is a lower bound. Older request logs were written before access checks and are not used.',
    'Activation and retention use monthly cohorts and only count elapsed windows. A return upload must be on a later day, so one batch is one visit. Deleted datasets and accounts are absent.'
   )) into result;
  return result;

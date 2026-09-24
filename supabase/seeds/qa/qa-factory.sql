@@ -110,10 +110,17 @@ with runs as (
  select d.id,10+r.n,d.created_at+interval '30 days'+make_interval(days=>r.n::int),case r.n when 1 then 'failed' else 'rerun' end
  from public.v2_datasets d cross join generate_series(1,2) r(n) where d.id between 93201 and 93300 and d.id%5=0 and d.id%9<>0
 )
-insert into public.v2_logs(dataset_id,created_at,level,category,message)
-select id,started_at,'INFO','process','Starting processing for task '||(id*100+n) from runs
-union all select id,started_at+interval '4 minutes','INFO','metadata','Processed metadata successfully' from runs where outcome<>'rerun'
-union all select id,started_at+make_interval(mins=>(25+(id%4)*10)::int),'INFO','deadwood','Combined segmentation completed successfully' from runs where outcome='ok'
-union all select id,started_at+interval '3 minutes','INFO','embeddings','Tile embedding completed successfully' from runs where outcome='rerun'
-union all select id,started_at+interval '6 minutes','ERROR','process','Processing failed: synthetic QA stage failure' from runs where outcome='failed';
+-- Start logs carry the requested task types, as the processor logs them; failures
+-- name their stage. Runs 11 and 12 are search-indexing reruns.
+insert into public.v2_logs(dataset_id,created_at,level,category,message,extra)
+select id,started_at,'INFO','process','Starting processing for task '||(id*100+n),
+ jsonb_build_object('task_types',case when n>10 then '["geotiff","embeddings_v1"]'::jsonb
+  when id%4=0 then '["odm_processing","geotiff","metadata","cog","thumbnail","deadwood_treecover_combined_v2"]'::jsonb
+  else '["geotiff","metadata","cog","thumbnail","deadwood_treecover_combined_v2"]'::jsonb end) from runs
+union all select id,started_at+interval '4 minutes','INFO','metadata','Processed metadata successfully',null from runs where n<10
+union all select id,started_at+make_interval(mins=>(25+(id%4)*10)::int),'INFO','deadwood','Combined segmentation completed successfully',null from runs where outcome='ok'
+union all select id,started_at+interval '3 minutes','INFO','embeddings','Tile embedding completed successfully',null from runs where outcome='rerun'
+union all select id,started_at+interval '6 minutes','ERROR','process',
+ 'Processing failed: '||case when n>10 then 'embedding_processing' else 'deadwood_treecover_combined_segmentation' end||' processing failed: synthetic QA stage failure',null
+from runs where outcome='failed';
 commit;

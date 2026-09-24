@@ -18,9 +18,10 @@ insert into v2_logs(id,dataset_id,created_at,level,category,message,extra) selec
  case when i=4 and d.id%20=0 then 'ERROR' else 'INFO' end,
  case when i=1 then 'upload' when i=3 then 'metadata' when i=4 and d.id%20<>0 then 'deadwood' else 'process' end,
  case when i=1 then 'Upload completed successfully for dataset '||d.id when i=2 then 'Starting processing for task '||d.id
-  when i=3 then 'Processed metadata successfully' when i=4 and d.id%20=0 then 'Processing failed: synthetic benchmark failure'
+  when i=3 then 'Processed metadata successfully' when i=4 and d.id%20=0 then 'Processing failed: deadwood_treecover_combined_segmentation processing failed: synthetic benchmark failure'
   when i=4 then 'Combined segmentation completed successfully' else repeat('synthetic log ',50) end,
- case when i=1 then jsonb_build_object('file_size',536870912) else null end from v2_datasets d cross join generate_series(1,10)i where d.id>800000000;
+ case when i=1 then jsonb_build_object('file_size',536870912)
+  when i=2 then '{"task_types":["geotiff","metadata","cog","thumbnail","deadwood_treecover_combined_v2"]}'::jsonb end from v2_datasets d cross join generate_series(1,10)i where d.id>800000000;
 insert into processing_notification_events(queue_task_id,dataset_id,event_type,recipient_user_id,recipient_email,status,created_at)
 select d.id*10+i,d.id,'processing_completed',d.user_id,'perf@example.invalid','sent',d.created_at+i*interval '1 hour' from v2_datasets d cross join generate_series(1,2)i where d.id>800000000;
 analyze v2_datasets; analyze v2_statuses; analyze factory_submissions; analyze factory_failure_episodes; analyze v2_logs; analyze processing_notification_events; analyze auth.users;

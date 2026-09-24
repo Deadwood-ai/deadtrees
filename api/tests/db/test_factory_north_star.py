@@ -6,7 +6,7 @@ import pytest
 from psycopg import sql
 
 from api.tests.db.test_factory import authenticate, dataset, db, user  # noqa: F401
-from api.tests.db.test_factory_retained_outcomes import log_upload, run
+from api.tests.db.test_factory_retained_outcomes import FULL, log_upload, run
 
 
 def north_star(db, operator, include_team=False):
@@ -34,8 +34,8 @@ def upload(db, owner, uploaded_at, file_name='north-star.tif', **status):
 
 
 def completed(db, row, finished_at):
-	"""A processor run that produced the first predictions, ending at finished_at."""
-	run(db, row, finished_at - timedelta(minutes=30))
+	"""A processor run that proved full readiness (ODM included for ZIPs), ending at finished_at."""
+	run(db, row, finished_at - timedelta(minutes=30), tasks=['odm_processing'] + FULL)
 
 
 def week(result, index):
@@ -135,6 +135,22 @@ def test_downloads_split_reuse_and_skip_team_downloaders(db, operator):
 	assert delta(before, after, 'downloads', -2) == 3
 	assert delta(before, after, 'reuse_downloads', -2) == 2
 
+
+def test_download_coverage_starts_with_the_first_recorded_request(db, operator):
+	db.execute('DELETE FROM public.dataset_download_requests')  # rolled back with the test
+	owner = user(db)
+	row = upload(db, owner, db.execute("SELECT now()-interval '60 days'").fetchone()[0])
+	empty = north_star(db, operator)
+	assert empty['download_since'] is None and all(week['downloads'] is None for week in empty['weekly'])
+	start = week(empty, -4)['start']
+	db.execute(
+		"INSERT INTO public.dataset_download_requests(dataset_id,user_id,kind,requested_at) VALUES (%s,%s,'dataset',%s)",
+		(row, owner, at(db, start, '3 days')),
+	)
+	result = north_star(db, operator)
+	assert week(result, -5)['downloads'] is None  # before the API recorded anything
+	assert week(result, -4)['downloads'] == 1  # first recorded week, a lower bound
+	assert week(result, -3)['downloads'] == 0  # recording is live: a true zero
 
 def test_activation_and_retention_cohorts_count_only_elapsed_windows(db, operator):
 	before = north_star(db, operator)

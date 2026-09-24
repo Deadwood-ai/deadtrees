@@ -306,7 +306,7 @@ def _download_requests(dataset_id):
 	with use_service_client() as service_client:
 		rows = (
 			service_client.table('dataset_download_requests')
-			.select('kind,user_id,source')
+			.select('kind,user_id')
 			.eq('dataset_id', dataset_id)
 			.execute()
 		)
@@ -325,7 +325,6 @@ def test_accepted_download_request_is_recorded_for_reuse_metrics(auth_token, tes
 	rows = _download_requests(test_dataset_for_download)
 	assert sorted(row['kind'] for row in rows) == ['dataset', 'labels']
 	assert {row['user_id'] for row in rows} == {str(test_user)}
-	assert {row['source'] for row in rows} == {'api'}
 
 
 def test_rejected_download_request_is_not_recorded(auth_token, viewonly_test_dataset_for_download):
@@ -335,6 +334,47 @@ def test_rejected_download_request_is_not_recorded(auth_token, viewonly_test_dat
 	)
 	assert response.status_code == 403
 	assert _download_requests(viewonly_test_dataset_for_download) == []
+
+
+def _allowed_request_logs(dataset_id):
+	from shared.db import use_service_client
+
+	with use_service_client() as service_client:
+		rows = (
+			service_client.table(settings.logs_table)
+			.select('id')
+			.eq('dataset_id', dataset_id)
+			.eq('category', 'download')
+			.contains('extra', {'event': 'allowed'})
+			.execute()
+		)
+	return rows.data
+
+
+def test_private_request_denied_after_its_rate_limit_log_is_not_recorded(private_test_dataset_for_download, test_user2):
+	"""The rate-limit log is written before access checks, so it never proves an accepted request."""
+	user2_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+	response = client.get(
+		f'/api/v1/download/datasets/{private_test_dataset_for_download}/dataset.zip',
+		headers={'Authorization': f'Bearer {user2_token}'},
+	)
+	assert response.status_code == 404
+	assert _allowed_request_logs(private_test_dataset_for_download)
+	assert _download_requests(private_test_dataset_for_download) == []
+
+
+def test_request_without_ortho_output_is_not_recorded(auth_token, test_dataset_for_download):
+	from shared.db import use_service_client
+
+	with use_service_client() as db_client:
+		db_client.table(settings.orthos_table).delete().eq('dataset_id', test_dataset_for_download).execute()
+	response = client.get(
+		f'/api/v1/download/datasets/{test_dataset_for_download}/dataset.zip',
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	assert response.status_code == 404
+	assert _allowed_request_logs(test_dataset_for_download)
+	assert _download_requests(test_dataset_for_download) == []
 
 
 def test_download_request_recording_failure_does_not_block_download(auth_token, test_dataset_for_download, monkeypatch):

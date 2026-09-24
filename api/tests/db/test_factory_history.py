@@ -110,13 +110,14 @@ def test_invalid_history_range(db):
 
 
 def test_upload_log_reconstruction_has_a_targeted_index(db):
-	from api.tests.db.test_factory_query_plans import walk_plan
-	# Tiny fixtures can prefer a sequential scan. Force index eligibility, then
-	# check the real view pushes the dataset bound into that index. Scale is
-	# separately measured with normal planner settings by benchmark-factory.sh.
+	from api.tests.db.test_factory_query_plans import assert_logs_read_through, production_shaped_logs
+	# With production-shaped statistics, a per-dataset read must reach upload
+	# evidence through the targeted index bounded by that dataset, never by an
+	# unbounded created_at scan. Scale is measured by benchmark-factory.sh.
+	row=production_shaped_logs(db)
 	db.execute('SET LOCAL enable_seqscan=off')
-	plan=db.execute('EXPLAIN (FORMAT JSON) SELECT * FROM public.factory_historical_uploads WHERE dataset_id=%s', (123,)).fetchone()[0][0]['Plan']
-	assert any(n.get('Index Name')=='factory_upload_success_log_idx' and '123' in n.get('Index Cond','') for n in walk_plan(plan))
+	plan=db.execute('EXPLAIN (FORMAT JSON) SELECT * FROM public.factory_historical_uploads WHERE dataset_id=%s', (row,)).fetchone()[0][0]['Plan']
+	assert_logs_read_through(plan,'factory_upload_success_log_idx',row)
 
 
 @pytest.mark.parametrize('signature', ['factory_history(integer)','factory_dataset(bigint)','factory_trends(text,text,text)','factory_north_star(boolean)'])

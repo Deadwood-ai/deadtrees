@@ -315,7 +315,7 @@ export default function FactoryOutcomes({ trends, isLoading, error, onRetry, sel
 				>
 					<Text type="secondary" className="mb-2 block text-xs">
 						{failureView === "counts"
-							? "Failure episodes by when they started, split by whether the contributor was still waiting for a first result, and episodes that ended because the dataset was complete again. Measured episodes end at full readiness; reconstructed ones at a run that produced predictions, or any successful run once the dataset already had them. A successful retry of single stages alone never counts. Retries of the same broken dataset are one episode."
+							? "Failure episodes by when they started, split by whether the contributor was still waiting for a first result, and episodes that ended because the dataset was complete again. Measured episodes end at full readiness; reconstructed ones when a later run proved the failed stage again and every readiness stage is proven. A successful retry of other stages never counts. Retries of the same broken dataset are one episode."
 							: "Time from the start of a failure until the dataset was complete again, grouped by when that happened, with n episodes whose start is known."}
 					</Text>
 					{failureView === "counts" ? (

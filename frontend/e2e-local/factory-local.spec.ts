@@ -604,7 +604,7 @@ test.describe("factory local e2e", () => {
     await expect(page.getByTestId("factory-workers").getByTestId("factory-freshness")).toContainText("2026-01-06 09:00 UTC");
     await expect(page.getByTestId("factory-outcomes-timing")).toContainText("still need calibration");
     await expect(page.getByTestId("factory-outcomes-timing").locator("svg")).not.toContainText("1 h target");
-    await expect(page.getByTestId("factory-outcomes-failures")).toContainText("A successful retry of single stages alone never counts.");
+    await expect(page.getByTestId("factory-outcomes-failures")).toContainText("A successful retry of other stages never counts.");
     await page.getByTestId("factory-outcomes-failures").locator(".ant-segmented-item-label", { hasText: "Time to complete again" }).click();
     await expect(page.getByTestId("factory-outcomes-failures")).toContainText("n episodes whose start is known");
     await page.getByTestId("factory-outcomes-failures").locator(".ant-segmented-item-label", { hasText: "Counts" }).click();

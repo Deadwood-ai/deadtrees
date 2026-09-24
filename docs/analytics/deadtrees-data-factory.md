@@ -353,8 +353,8 @@ and colours each change by the metric's good direction.
   their download requests. Auditor-owned datasets are about 70% of all uploads,
   so the toggle changes the picture substantially.
 - **Complete results**: first result per dataset from `factory_outcome_evidence`:
-  measured readiness when measured, otherwise when the first successful processor
-  run after upload finished its predictions (see [Retained outcome evidence](#retained-outcome-evidence)).
+  measured readiness when measured, otherwise the first moment processor runs after
+  upload had proven every readiness stage (see [Retained outcome evidence](#retained-outcome-evidence)).
   Uploads before the first retained processor run never count.
 - **No result within 7 days**: share of a week's observable uploads without a
   result seven days later, including late results. The stage breakdown shows
@@ -365,10 +365,12 @@ and colours each change by the metric's good direction.
   `ready`) by audit date. Fixable and excluded datasets do not count.
 - **Downloads**: `dataset_download_requests` rows. The download API records one
   row per accepted full-dataset, labels or bundle request, using the service
-  role, and never fails the download when recording fails. Earlier rows were
-  backfilled from `v2_logs` rate-limit request logs (from March 2026), without
-  bundles and without view-only full-dataset requests. Reuse means a requester
-  other than the dataset owner.
+  role, after the access and output checks, and never fails the download when
+  recording fails. The API and database deploy separately, so coverage starts
+  with the first recorded request rather than the migration time; earlier weeks
+  are unknown and the first week is a lower bound. The rate-limit request logs are not used, because
+  they are written before the access and output checks and include rejected
+  requests. Reuse means a requester other than the dataset owner.
 - **Activation and retention**: a signup uploads within 30 days; a first-time
   contributor uploads again on a later day within 90 days. Only elapsed windows
   enter denominators.
@@ -445,14 +447,17 @@ metric filters and contributor cohorts. These are local database execution times
 not production or network latency guarantees. Permission and semantic tests run
 separately; plan regressions avoid machine-dependent wall-clock assertions.
 
-On 2026-09-24 the benchmark gained processor run logs (start, stage, predictions or
-failure) for every dataset and log-only evidence for half of them. Reconstructing
-runs is the main new cost; trends compute it twice (outcomes and failures) and the
-north star once. At 10,000 datasets trends took about 0.2–0.45 s, monthly trends
-0.17–0.35 s and the north star 0.14–0.3 s on a heavily loaded host (load average
-25–45). At 50,000 trends took 1.8–4.4 s across repeated runs, which varied up to 2×
-between identical runs; the recovery rule itself adds about 50 ms there. The benchmark matches 30% of its logs; in production about
-4% of `v2_logs` rows (74,512 of 1.84 million on 2026-09-24) are run evidence, so the partial index is the expected path.
+On 2026-09-24 the benchmark gained processor run logs (start with task types,
+stage success, predictions or a named failure) for every dataset and log-only
+evidence for half of them. Stage proofs are the main new cost; trends compute them
+twice (outcomes and failures) and the north star once. After proof-based readiness,
+at 10,000 datasets on a heavily loaded host (load average about 45): trends 0.76 s,
+monthly trends 0.49 s, north star 0.44 s, dataset detail 0.31 s and evidence
+drilldowns 0.23–0.38 s. Readiness is one inlined expression; a non-inlined helper
+cost about 33 µs per row. The benchmark matches 30% of its logs; in production
+about 4% of `v2_logs` rows (74,512 of 1.84 million on 2026-09-24) are run evidence,
+so the partial index is the expected path, and the equivalent reconstruction ran
+in under 3 s on production without it.
 
 Exact totals, global aggregates, substring searches and deep offset pagination
 still grow with the relevant population. This is not constant-cost analytics at
@@ -505,32 +510,42 @@ result, failures and recovery, input that reached a result) cover days, weeks an
 months from retained evidence. Direct measurement wins wherever it exists; every
 count reports its measured part, and the chart marks where measurement starts.
 
-- **Processor runs** (`factory_processing_runs`) are reconstructed from processor
-  logs, retained from 2025-10-31: a `Starting processing for task` log opens a run;
-  a `Processing failed`/`Crash detected` log makes it failed, a graceful re-queue
-  makes it interrupted, and stage-success logs make it succeeded. The run produced
-  predictions when combined segmentation, or both legacy deadwood and tree-cover
-  segmentation, succeeded in it. Its result time is the last prediction or
-  area-of-interest success; each stage returns the status to idle, so this matches
-  measured readiness, and later search indexing is excluded.
-  The partial `factory_run_log_idx` must keep the view's message predicate.
+- **Processor runs** (`factory_run_log_events`) are numbered from processor logs,
+  retained from 2025-10-31: a `Starting processing for task` log opens a run and
+  records its requested task types; stage-success logs, `Processing failed`/`Crash
+  detected` logs (with the failed stage) and graceful re-queues follow.
+- **Stage proofs** (`factory_stage_proofs`): stages run in pipeline order (ODM,
+  ortho, metadata, COG, thumbnail, deadwood, tree cover, combined, AOI, indexing)
+  and a failing stage ends its run, so a requested stage is proven done at the
+  first success at or past its position in that run. COG logs no success and is
+  proven by the stages after it. Proofs persist across runs, like the status flags.
 - **First result** (`factory_outcome_evidence`): for measured submissions the
-  measured readiness (still waiting stays waiting); otherwise the result time of
-  the first successful run after the first upload log that produced predictions
-  without logging a failure. Uploads before the first retained processor run get
-  no reconstructed result, because an unretained earlier run may have produced it. Reruns never add results. In production (Aug–Sep 2026) the
-  completion notification followed this log by a median of one minute and never
-  preceded it.
-- **Failure episodes** (`factory_failure_evidence`): consecutive failed runs are
-  one episode that ends when the dataset is complete again, comparable to the
-  ledger's full readiness: a run that produced predictions (at its result time), or
-  any successful run once the dataset already had them (at its end). A stage-only success before a first result
-  ends nothing. Charts call this "complete again" rather than a bare retry success. The ledger owns every dataset from
-  its observation start; a log episode still open then continues in the ledger's
-  carried row, which supplies the measured recovery. The phase says whether the
-  contributor was still waiting for a first result or the dataset already had one
-  (reruns, search indexing). Without upload evidence or an earlier result it stays
-  unknown and is grouped with reruns in charts.
+  measured readiness (still waiting stays waiting); otherwise the first moment
+  runs after the first upload log had proven every readiness requirement of
+  `factory_status_ready`: ODM for ZIPs, ortho, metadata, COG, thumbnail, deadwood
+  and forest cover (combined, or both legacy models), and the area of interest once
+  a run requested it. Unproven requirements leave the result unknown. Each stage
+  returns the status to idle, so this matches measured readiness; later search
+  indexing is excluded. Uploads before the first retained processor run get no
+  reconstructed result, because an unretained earlier run may have produced it.
+  Reruns never add results. In production (Aug–Sep 2026) the completion
+  notification followed the result by a median of one minute and never preceded it.
+- **Failure episodes** (`factory_failure_evidence`): an episode ends when the
+  dataset is complete again, comparable to the ledger's full readiness: a run
+  started after the failure proved the failed stage again and every readiness
+  requirement is proven. A success of other stages ends nothing, a failure naming
+  no known stage stays open, and further failures before recovery belong to the
+  same episode. Charts call the end "complete again". The ledger owns every dataset
+  from its observation start; a log episode still open then continues in the
+  ledger's carried row, which supplies the measured recovery. The phase says
+  whether the contributor was still waiting for a first result or the dataset had
+  proven readiness already (reruns, search indexing); without upload evidence or
+  proven earlier readiness it stays unknown and is grouped with reruns in charts.
+- **Index**: `factory_run_log_idx` is built `CONCURRENTLY` in its own migration
+  (`20260924090000`) so writes to `v2_logs` continue during the build; the Supabase
+  CLI (2.30 and 2.40 checked) applies a file without an explicit transaction
+  outside a transaction block. A failed build leaves an invalid index to drop
+  before retrying. Its predicate must stay identical to `factory_run_log_events`.
 - **Input size** is the measured upload size or the upload log's `file_size`,
   counted once at the first result. Explorer workflow/size filters use the same
   values, so every chart link opens the plotted population with exact period bounds.

@@ -253,7 +253,7 @@ export default function FactoryDatasetDetail() {
 					/>
 					<Text type="secondary" className="mt-2 block text-xs">
 						Measured episodes come from status changes and end at full readiness; processing-log episodes are reconstructed from retained processor
-						logs and end at a run that produced predictions, or any successful run once the dataset had them. An empty failed time means the
+						logs and end when a later run proved the failed stage again and every readiness stage is proven. An empty failed time means the
 						dataset was already failing when every dataset became observed.
 					</Text>
 				</SectionCard>
