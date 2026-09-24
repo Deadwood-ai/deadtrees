@@ -192,6 +192,25 @@ def test_odm_counts_only_after_outputs_are_stored(db):
 	assert failures(db, row)[0][1] == stored
 
 
+def test_requeue_after_failure_invalidates_the_stages_it_reruns(db):
+	owner = user(db)
+	row = legacy(db, owner)
+	uploaded = ago(days=9)
+	log_upload(db, row, uploaded)
+	# Ortho, metadata, COG and thumbnail succeed, then predictions fail.
+	first_failure = run(db, row, uploaded + timedelta(hours=1), fail='deadwood_treecover_combined_segmentation') + timedelta(minutes=1)
+	# The requeue resets COG, thumbnail and predictions; the COG retry fails.
+	run(db, row, uploaded + timedelta(hours=2), tasks=['cog', 'thumbnail', 'deadwood_treecover_combined_v2'], fail='cog')
+	# A later predictions-only run succeeds, but COG and thumbnail are no longer done.
+	run(db, row, uploaded + timedelta(hours=3), tasks=['deadwood_treecover_combined_v2'])
+	assert outcome(db, row)[1] is None
+	assert failures(db, row)[0][1] is None
+	# COG and thumbnail succeed again: readiness holds from then on.
+	ready = run(db, row, uploaded + timedelta(hours=4), tasks=['cog', 'thumbnail'])
+	assert outcome(db, row)[1] == ready
+	assert failures(db, row) == [(first_failure, ready, 'processing_log', 'processing_log', 'first_result')]
+
+
 def test_stage_only_success_does_not_recover_a_dataset_without_a_result(db):
 	owner = user(db)
 	row = legacy(db, owner)
@@ -387,7 +406,7 @@ def test_detail_shows_first_result_and_failure_evidence(db):
 	assert detail['failures'][0]['phase'] == 'first_result'
 
 
-@pytest.mark.parametrize('relation', ['factory_run_log_events', 'factory_stage_proofs', 'factory_outcome_evidence', 'factory_failure_evidence'])
+@pytest.mark.parametrize('relation', ['factory_run_log_events', 'factory_stage_proofs', 'factory_ready_moments', 'factory_outcome_evidence', 'factory_failure_evidence'])
 def test_evidence_views_are_private(db, relation):
 	authenticate(db, user(db, operate=True))
 	with pytest.raises(psycopg.errors.InsufficientPrivilege):

@@ -525,11 +525,19 @@ count reports its measured part, and the chart marks where measurement starts.
   extraction and upload can fail). Ortho logs `Finished converting dataset`; COG logs no success and is proven by a later stage or by
   the run's `Recorded … processing_completed notification event(s)` record, which
   proves every requested stage (recorded when the run has recipients, since
-  August 2026). A retry with neither stays unproven rather than invented. Proofs
-  persist across runs, like the status flags.
+  August 2026, only while processing email notifications are enabled). A retry
+  with neither stays unproven rather than invented; after deployment the measured
+  ledger observes such recoveries from status readiness. Proofs persist across
+  runs, like the status flags, until a requeue resets them: requeueing a failed
+  dataset clears the done flags of the requested stages, so a run that follows a
+  failed run invalidates earlier proofs of its requested stages at its start.
+- **Ready moments** (`factory_ready_moments`): full readiness is checked at every
+  proof time against the proofs still valid then; readiness therefore never rests
+  on a stage a requeue has reset.
 - **First result** (`factory_outcome_evidence`): for measured submissions the
   measured readiness (still waiting stays waiting); otherwise the first moment
-  runs after the first upload log had proven every readiness requirement of
+  runs after the first upload log had proven every readiness requirement, with
+  proofs still valid at that moment, of
   `factory_status_ready`: ODM for ZIPs, ortho, metadata, COG, thumbnail, deadwood
   and forest cover (combined, or both legacy models), and the area of interest once
   a run requested it. Unproven requirements leave the result unknown. Each stage

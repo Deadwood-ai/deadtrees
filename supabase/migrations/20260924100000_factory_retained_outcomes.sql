@@ -63,46 +63,69 @@ create view public.factory_run_log_events with(security_invoker=true) as
  )
  select *,count(*) filter(where kind='start') over(partition by dataset_id order by created_at,id) as run from evidence;
 
--- When each requested stage was proven done. Stages run in pipeline order and a
--- failing stage ends its run, so the first success at or past a requested stage
--- proves it; a later failure in the same run does not undo it. COG has no success
--- log and is proven by the stages after it or by the run's completed-notification
--- record (which proves every requested stage); without either it stays unproven. A run requesting an area of interest
--- adds a requirement marker (position 9, no proof) from its start.
+-- Stage evidence over time. Stages run in pipeline order and a failing stage ends
+-- its run, so the first success at or past a requested stage proves it ('proof');
+-- a later failure in the same run does not undo it. ODM counts only from its final
+-- dataset-specific message; COG has no success log and is proven by a later stage
+-- or the run's completed-notification record. Requeueing a failed dataset resets
+-- the done flags of the requested stages, so a run that follows a failed run
+-- invalidates earlier proofs of its requested stages at its start ('reset'). A run
+-- requesting an area of interest makes it a lasting requirement ('aoi_required').
 create view public.factory_stage_proofs with(security_invoker=true) as
  with events as materialized (
-  select dataset_id,created_at,kind,position,
+  select dataset_id,run,created_at,kind,position,
    first_value(requested) over run_order as run_requested,
    first_value(created_at) over run_order as run_started_at,
-   max(position) filter(where kind='success') over(run_order rows between unbounded preceding and 1 preceding) as reached
+   max(position) filter(where kind='success') over(run_order rows between unbounded preceding and 1 preceding) as reached,
+   bool_or(kind='failed') over(partition by dataset_id,run) as run_failed
   from public.factory_run_log_events where run>0
   window run_order as(partition by dataset_id,run order by created_at,id)
+ ), starts as (
+  select dataset_id,run_started_at,run_requested,
+   coalesce(lag(run_failed) over(partition by dataset_id order by run),false) as after_failure
+  from events where kind='start'
  )
- select e.dataset_id,e.run_started_at,p.position,e.created_at as proved_at
+ select e.dataset_id,e.run_started_at,p.position,e.created_at as at,'proof'::text as event
  from events e cross join lateral generate_series(coalesce(e.reached,0)+1,e.position) p(position)
- where e.kind='success' and e.position>coalesce(e.reached,0)
-  and p.position=any(e.run_requested)
+ where e.kind='success' and e.position>coalesce(e.reached,0) and p.position=any(e.run_requested)
  union all
- select dataset_id,run_started_at,9,null from events where kind='start' and 9=any(run_requested);
+ select dataset_id,run_started_at,p.position,run_started_at,'reset'
+ from starts cross join lateral unnest(run_requested) p(position) where after_failure and p.position is not null
+ union all
+ select dataset_id,run_started_at,9,run_started_at,'aoi_required' from starts where 9=any(run_requested);
 
--- First moment of full readiness from stage proofs, as factory_status_ready defines
--- it: ODM for ZIPs, ortho, metadata, COG, thumbnail, deadwood and forest cover (the
--- combined model or both legacy models), and the area of interest once required.
--- Every requirement must be proven; otherwise the time is unknown. Proofs persist,
--- like the status flags. p_after restricts the answer to that moment or later.
--- One inlinable expression (no SET clause or subquery), so callers passing plain
--- columns pay no per-row function call.
-create function public.factory_ready_at(p_zip boolean,p_odm timestamptz,p_ortho timestamptz,p_metadata timestamptz,
- p_cog timestamptz,p_thumbnail timestamptz,p_deadwood timestamptz,p_forest_cover timestamptz,p_combined timestamptz,
- p_aoi timestamptz,p_aoi_required_since timestamptz,p_after timestamptz default null)
-returns timestamptz language sql immutable as $$
- select case
-  when (p_zip and p_odm is null) or p_ortho is null or p_metadata is null or p_cog is null or p_thumbnail is null
-   or (p_combined is null and (p_deadwood is null or p_forest_cover is null)) then null
-  when p_aoi_required_since<=greatest(p_after,case when p_zip then p_odm end,p_ortho,p_metadata,p_cog,p_thumbnail,least(p_combined,case when p_deadwood is not null and p_forest_cover is not null then greatest(p_deadwood,p_forest_cover) end))
-   then case when p_aoi is not null then greatest(greatest(p_after,case when p_zip then p_odm end,p_ortho,p_metadata,p_cog,p_thumbnail,least(p_combined,case when p_deadwood is not null and p_forest_cover is not null then greatest(p_deadwood,p_forest_cover) end)),p_aoi) end
-  else greatest(p_after,case when p_zip then p_odm end,p_ortho,p_metadata,p_cog,p_thumbnail,least(p_combined,case when p_deadwood is not null and p_forest_cover is not null then greatest(p_deadwood,p_forest_cover) end)) end;
-$$;
+-- Moments at which full readiness held, as factory_status_ready defines it: ODM for
+-- ZIPs, ortho, metadata, COG, thumbnail, deadwood and forest cover (the combined
+-- model or both legacy models), and the area of interest once required. Readiness
+-- can only begin at a proof, so each proof time is checked against the proofs still
+-- valid then (not yet reset). Unproven requirements never yield a moment.
+create view public.factory_ready_moments with(security_invoker=true) as
+ with evidence as materialized (select * from public.factory_stage_proofs),
+ valid as (
+  select dataset_id,position,at as valid_from,valid_to from (
+   select dataset_id,position,event,at,
+    -- A reset happens at its run's start, before that run's own proofs.
+    min(at) filter(where event='reset') over(partition by dataset_id,position order by at,event='proof'
+     rows between 1 following and unbounded following) as valid_to
+   from evidence where event in('proof','reset')) x
+  where event='proof'
+ ), candidates as (
+  select distinct dataset_id,at from evidence where event='proof'
+ ), coverage as (
+  select c.dataset_id,c.at,
+   bool_or(v.position=1) as odm,bool_or(v.position=2) as ortho,bool_or(v.position=3) as metadata,
+   bool_or(v.position=4) as cog,bool_or(v.position=5) as thumbnail,bool_or(v.position=6) as deadwood,
+   bool_or(v.position=7) as forest_cover,bool_or(v.position=8) as combined,bool_or(v.position=9) as aoi
+  from candidates c join valid v on v.dataset_id=c.dataset_id and v.valid_from<=c.at and (v.valid_to is null or c.at<v.valid_to)
+  group by c.dataset_id,c.at
+ ), aoi as (
+  select dataset_id,min(at) as required_since from evidence where event='aoi_required' group by dataset_id
+ )
+ select c.dataset_id,c.at as ready_at
+ from coverage c join public.v2_datasets d on d.id=c.dataset_id left join aoi a on a.dataset_id=c.dataset_id
+ where (lower(d.file_name) not like '%.zip' or c.odm) and c.ortho and c.metadata and c.cog and c.thumbnail
+  and (c.combined or (c.deadwood and c.forest_cover))
+  and (a.required_since is null or a.required_since>c.at or c.aoi);
 
 -- Earliest retained processor run. Uploads before it may already have had results
 -- whose runs were not retained, so their first retained result could be a rerun.
@@ -111,13 +134,11 @@ language sql stable set search_path='' as $$
  select min(created_at) from public.v2_logs
  where dataset_id is not null and category='process' and message like 'Starting processing for task %';
 $$;
-revoke all on function public.factory_run_evidence_since(),public.factory_stage_position(text),
- public.factory_ready_at(boolean,timestamptz,timestamptz,timestamptz,timestamptz,timestamptz,timestamptz,timestamptz,timestamptz,timestamptz,timestamptz,timestamptz)
- from public,anon,authenticated;
+revoke all on function public.factory_run_evidence_since(),public.factory_stage_position(text) from public,anon,authenticated;
 
 -- One upload and first-result record per dataset with upload evidence. Measured
 -- submissions are authoritative, including while they still wait; otherwise the
--- first result is when runs after the upload had proven full readiness, for
+-- first result is the first ready moment after the upload, for
 -- uploads within the retained processor-run evidence. Unprovable stays unknown.
 create view public.factory_outcome_evidence with(security_invoker=true) as
  select u.dataset_id,u.user_id,u.uploaded_at,u.source as upload_source,u.input_bytes,
@@ -129,17 +150,9 @@ create view public.factory_outcome_evidence with(security_invoker=true) as
  join public.v2_datasets d on d.id=u.dataset_id
  left join public.factory_submissions m on m.dataset_id=u.dataset_id
  left join (
-  select dataset_id,public.factory_ready_at(zip,odm,ortho,metadata,cog,thumbnail,deadwood,forest_cover,combined,aoi,aoi_required_since) as first_result_at
-  from (select p.dataset_id,bool_or(lower(pd.file_name) like '%.zip') as zip,
-   min(p.proved_at) filter(where p.position=1) as odm,min(p.proved_at) filter(where p.position=2) as ortho,
-   min(p.proved_at) filter(where p.position=3) as metadata,min(p.proved_at) filter(where p.position=4) as cog,
-   min(p.proved_at) filter(where p.position=5) as thumbnail,min(p.proved_at) filter(where p.position=6) as deadwood,
-   min(p.proved_at) filter(where p.position=7) as forest_cover,min(p.proved_at) filter(where p.position=8) as combined,
-   min(p.proved_at) filter(where p.position=9) as aoi,min(p.run_started_at) filter(where p.position=9 and p.proved_at is null) as aoi_required_since
-   from public.factory_stage_proofs p
-   join public.factory_historical_uploads pu on pu.dataset_id=p.dataset_id and p.run_started_at>=pu.uploaded_at
-   join public.v2_datasets pd on pd.id=p.dataset_id
-   group by p.dataset_id) a
+  select m.dataset_id,min(m.ready_at) as first_result_at
+  from public.factory_ready_moments m join public.factory_historical_uploads pu on pu.dataset_id=m.dataset_id and m.ready_at>=pu.uploaded_at
+  group by m.dataset_id
  ) r on r.dataset_id=u.dataset_id and u.uploaded_at>=public.factory_run_evidence_since();
 
 -- Observe failures and recoveries for every dataset from now on. Datasets that
@@ -186,35 +199,29 @@ $$;
 -- measured recovery.
 create view public.factory_failure_evidence with(security_invoker=true) as
  with epoch as (select failures_started_at as observed_from from public.factory_measurement_epoch),
- proofs as materialized (select * from public.factory_stage_proofs),
- readiness as (
-  select p.dataset_id,lower(d.file_name) like '%.zip' as zip,
-   min(p.proved_at) filter(where p.position=1) as odm,min(p.proved_at) filter(where p.position=2) as ortho,
-   min(p.proved_at) filter(where p.position=3) as metadata,min(p.proved_at) filter(where p.position=4) as cog,
-   min(p.proved_at) filter(where p.position=5) as thumbnail,min(p.proved_at) filter(where p.position=6) as deadwood,
-   min(p.proved_at) filter(where p.position=7) as forest_cover,min(p.proved_at) filter(where p.position=8) as combined,
-   min(p.proved_at) filter(where p.position=9) as aoi,min(p.run_started_at) filter(where p.position=9 and p.proved_at is null) as aoi_required_since
-  from proofs p join public.v2_datasets d on d.id=p.dataset_id group by p.dataset_id,d.file_name
- ), ready as (
-  select *,public.factory_ready_at(zip,odm,ortho,metadata,cog,thumbnail,deadwood,forest_cover,combined,aoi,aoi_required_since) as first_ready_at
-  from readiness
+ moments as materialized (select * from public.factory_ready_moments),
+ ready as (
+  select dataset_id,min(ready_at) as first_ready_at from moments group by dataset_id
  ), failures as (
   select dataset_id,id,created_at as failed_at,position as failed_position,
    lead(created_at) over(partition by dataset_id order by created_at,id) as next_failed_at
   from public.factory_run_log_events where kind='failed'
  ), reproofs as (
-  select f.dataset_id,f.id,min(p.proved_at) as reproved_at
-  from failures f join proofs p on p.dataset_id=f.dataset_id and p.position=f.failed_position and p.run_started_at>f.failed_at
+  select f.dataset_id,f.id,min(p.at) as reproved_at
+  from failures f join public.factory_stage_proofs p on p.dataset_id=f.dataset_id and p.event='proof'
+   and p.position=f.failed_position and p.run_started_at>f.failed_at
   group by f.dataset_id,f.id
+ ), complete_again as (
+  -- A run started after the failure proved the failed stage, and full readiness
+  -- held then or later, before any further failure.
+  select rp.dataset_id,rp.id,min(m.ready_at) as recovered_at
+  from reproofs rp join failures f on f.dataset_id=rp.dataset_id and f.id=rp.id
+  join moments m on m.dataset_id=rp.dataset_id and m.ready_at>=rp.reproved_at
+   and (f.next_failed_at is null or m.ready_at<f.next_failed_at)
+  group by rp.dataset_id,rp.id
  ), recovered as (
-  -- Complete again: a run started after the failure proved the failed stage, and
-  -- all readiness requirements hold then, before any further failure.
-  select f.dataset_id,f.id,f.failed_at,
-   case when x.at<f.next_failed_at or f.next_failed_at is null then x.at end as recovered_at
-  from failures f left join ready r on r.dataset_id=f.dataset_id
-  left join reproofs rp on rp.dataset_id=f.dataset_id and rp.id=f.id
-  cross join lateral (select case when rp.reproved_at is not null then public.factory_ready_at(r.zip,r.odm,r.ortho,r.metadata,
-   r.cog,r.thumbnail,r.deadwood,r.forest_cover,r.combined,r.aoi,r.aoi_required_since,rp.reproved_at) end as at) x
+  select f.dataset_id,f.id,f.failed_at,c.recovered_at
+  from failures f left join complete_again c on c.dataset_id=f.dataset_id and c.id=f.id
  ), episodes_logged as (
   select *,count(*) filter(where opens) over(partition by dataset_id order by failed_at,id) as episode
   from (select *,coalesce(lag(recovered_at) over(partition by dataset_id order by failed_at,id) is not null,true) as opens from recovered) o
@@ -256,7 +263,7 @@ create view public.factory_failure_evidence with(security_invoker=true) as
  from episodes x left join public.factory_submissions m on m.dataset_id=x.dataset_id
  left join ready r on r.dataset_id=x.dataset_id;
 
-revoke all on public.factory_run_log_events,public.factory_stage_proofs,public.factory_outcome_evidence,public.factory_failure_evidence from public,anon,authenticated;
+revoke all on public.factory_run_log_events,public.factory_stage_proofs,public.factory_ready_moments,public.factory_outcome_evidence,public.factory_failure_evidence from public,anon,authenticated;
 
 -- Carry every failure still open when observation begins into the ledger: datasets
 -- with the error flag, and datasets whose retained failure has no recovery evidence
