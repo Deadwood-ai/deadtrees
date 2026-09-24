@@ -107,3 +107,11 @@ def test_large_detail_histories_are_bounded_and_totals_are_explicit(db):
 		assert len(detail[section]) == 200
 		times = [record['created_at'] for record in detail[section]]
 		assert times == sorted(times, reverse=True)
+
+
+def test_outcome_evidence_evaluates_the_retained_run_boundary_once(db):
+	# A bare STABLE call in the join condition ran once per dataset and timed out
+	# factory_north_star at production scale; it must stay a single InitPlan.
+	plan = db.execute('EXPLAIN (FORMAT JSON, VERBOSE) SELECT * FROM public.factory_outcome_evidence').fetchone()[0][0]['Plan']
+	calls = [n for n in walk_plan(plan) if any('factory_run_evidence_since' in str(v) for k, v in n.items() if k != 'Plans')]
+	assert calls and all(n.get('Parent Relationship') == 'InitPlan' for n in calls), calls
