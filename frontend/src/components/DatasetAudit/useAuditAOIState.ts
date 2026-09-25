@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { message } from "antd";
 
 import { useDatasetAOI, useSaveDatasetAOI } from "../../hooks/useDatasetAudit";
+import { isAuditLeaseConflict } from "../../hooks/useAuditLock";
 import type { AOIToolbarState } from "../DatasetDetailsMap/hooks/useAOIEditor";
 import {
 	type AOIGeometry,
@@ -89,7 +90,7 @@ export function useAuditAOIState(datasetId: number) {
 		setIsDirty(hasLoadedSavedAOIRef.current && reconciliation.isDirty);
 	}, [serverGeometry]);
 
-	const handleSave = useCallback(async () => {
+	const handleSave = useCallback(async (leaseId: string) => {
 		const geometry = currentGeometryRef.current;
 		if (!geometry) {
 			message.warning("Draw an AOI before saving it.");
@@ -97,9 +98,8 @@ export function useAuditAOIState(datasetId: number) {
 		}
 		try {
 			const savedAOI = await saveAOI({
-				dataset_id: datasetId,
-				geometry,
-				is_whole_image: false,
+				aoi: { dataset_id: datasetId, geometry, is_whole_image: false },
+				leaseId,
 			});
 			const savedGeometry = savedAOI.geometry as AOIGeometry;
 			savedGeometryRef.current = savedGeometry;
@@ -118,7 +118,11 @@ export function useAuditAOIState(datasetId: number) {
 			);
 		} catch (error) {
 			console.error("Failed to save AOI:", error);
-			message.error("Failed to save AOI");
+			message.error(
+				isAuditLeaseConflict(error)
+					? "Another audit page holds this dataset. The AOI was not saved."
+					: "Failed to save AOI",
+			);
 		}
 	}, [datasetId, saveAOI]);
 

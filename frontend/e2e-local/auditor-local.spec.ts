@@ -157,6 +157,8 @@ const flags = [
 ];
 
 let savedAuditPayloads: Array<Record<string, unknown>> = [];
+let auditLeaseCalls: Array<{ rpc: string; body: Record<string, unknown> }> = [];
+let auditWriteLeaseHeaders: Array<string | undefined> = [];
 let savedAoiPayloads: Array<Record<string, unknown>> = [];
 
 const installAuthenticatedUser = async (
@@ -325,15 +327,6 @@ const fulfillSupabaseRequest = async (
   }
 
   if (resource === "v2_statuses") {
-    if (method === "PATCH") {
-      await fulfillJson(route, {
-        id: completeDataset.id,
-        dataset_id: completeDataset.id,
-        is_in_audit: false,
-      });
-      return;
-    }
-
     await fulfillJson(route, wantsObject ? { is_in_audit: false } : []);
     return;
   }
@@ -370,6 +363,7 @@ const fulfillSupabaseRequest = async (
       const payload = request.postDataJSON() ?? {};
       const rows = Array.isArray(payload) ? payload : [payload];
       savedAuditPayloads.push(...(rows as Array<Record<string, unknown>>));
+      auditWriteLeaseHeaders.push(request.headers()["x-audit-lease"]);
       await fulfillJson(
         route,
         rows.map((row) => ({ ...row, id: 1 })),
@@ -394,6 +388,23 @@ const fulfillRpc = async (route: Route, rpcName: string | undefined) => {
       cohorts: [],
       coverage: [],
     });
+    return;
+  }
+
+  if (
+    rpcName === "claim_dataset_audit_lock" ||
+    rpcName === "release_dataset_audit_lock"
+  ) {
+    auditLeaseCalls.push({
+      rpc: rpcName,
+      body: route.request().postDataJSON() as Record<string, unknown>,
+    });
+    await fulfillJson(
+      route,
+      rpcName === "claim_dataset_audit_lock"
+        ? { acquired: true, expires_at: "2026-01-06T00:10:00Z" }
+        : null,
+    );
     return;
   }
 
@@ -456,6 +467,8 @@ test.describe("auditor local e2e", () => {
   test.beforeEach(() => {
     savedAuditPayloads = [];
     savedAoiPayloads = [];
+    auditLeaseCalls = [];
+    auditWriteLeaseHeaders = [];
   });
 
   test("non-auditor cannot open the audit workspace", async ({ page }) => {
@@ -611,7 +624,7 @@ test.describe("auditor local e2e", () => {
     await expect(page.getByRole("menuitem", { name: "Factory" })).toHaveCount(0);
   });
 
-  test("auditor start action checks the lock before opening detail", async ({
+  test("auditor start action opens detail and claims the audit lease", async ({
     page,
   }) => {
     await installAuthenticatedUser(page, { canAudit: true });
@@ -633,6 +646,25 @@ test.describe("auditor local e2e", () => {
     await expect(
       page.getByRole("button", { name: /^save Save$/i }),
     ).toBeVisible();
+    expect(auditLeaseCalls[0]).toMatchObject({
+      rpc: "claim_dataset_audit_lock",
+      body: { p_dataset_id: completeDataset.id },
+    });
+
+    // Leaving through the queue link releases the same page lease.
+    const leaseId = auditLeaseCalls[0].body.p_lease_id;
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await page.getByRole("button", { name: "Leave Audit" }).click();
+    await expect(page).toHaveURL(/\/dataset-audit(?:\?.*)?$/);
+    await expect
+      .poll(() =>
+        auditLeaseCalls.some(
+          (call) =>
+            call.rpc === "release_dataset_audit_lock" &&
+            call.body.p_lease_id === leaseId,
+        ),
+      )
+      .toBe(true);
   });
 
   test("direct audit detail links retain queue navigation context", async ({
@@ -732,6 +764,10 @@ test.describe("auditor local e2e", () => {
       type: "MultiPolygon",
     });
 
+    // The save is bound to the lease this page claimed.
+    const claimedLease = auditLeaseCalls.find((call) => call.rpc === "claim_dataset_audit_lock")?.body.p_lease_id;
+    expect(claimedLease).toBeTruthy();
+    expect(auditWriteLeaseHeaders[0]).toBe(claimedLease);
     expect(savedAuditPayloads[0]).toMatchObject({
       dataset_id: completeDataset.id,
       is_georeferenced: true,

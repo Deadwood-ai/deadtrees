@@ -7,14 +7,13 @@ import {
 	useDatasetAudit,
 	useSaveDatasetAudit,
 	AuditFormValues,
-	useSetAuditLock,
-	useClearAuditLock,
 	useOrthoMetadata,
 	useMarkAsReviewed,
 } from "../../hooks/useDatasetAudit";
 import { useAuth } from "../../hooks/useAuthProvider";
 import { useDownload } from "../../hooks/useDownloadProvider";
 import { useAuditNavigationGuard } from "../../hooks/useAuditNavigationGuard";
+import { describeAuditLockDenial, isAuditLeaseConflict, useAuditLock } from "../../hooks/useAuditLock";
 import { useAuditNavigation } from "../../hooks/useAuditNavigation";
 import { useDatasetFlags, useUpdateFlagStatus } from "../../hooks/useDatasetFlags";
 import { usePhenologyData } from "../../hooks/usePhenologyData";
@@ -122,7 +121,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		toolbarState: aoiToolbarState,
 		setToolbarState: setAoiToolbarState,
 		handleChange: handleAOIChange,
-		handleSave: handleSaveAOI,
+		handleSave: saveAOIWithLease,
 	} = useAuditAOIState(dataset.id);
 
 	// Data hooks
@@ -137,57 +136,72 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	// Navigation context
 	const { getNextDatasetId, currentIndex, totalCount } = useAuditNavigation();
 
-	// Audit lock mutations
-	const { mutateAsync: setAuditLock } = useSetAuditLock();
-	const { mutateAsync: clearAuditLock } = useClearAuditLock();
+	// Audit lease: claimed, renewed and released with this page
+	const { state: auditLock, continueHere: continueAuditHere } = useAuditLock(dataset.id);
 
 	// Season prompt
 	const { copyPromptWithImage } = useSeasonPrompt();
 
 	// Local state
 	const [isSubmitting, setIsSubmitting] = useState(false);
-	const [auditLockError, setAuditLockError] = useState<string | null>(null);
-	const [isLockingAudit, setIsLockingAudit] = useState(true);
 	const [hasFormChanges, setHasFormChanges] = useState(false);
 	const [navigateToNext, setNavigateToNext] = useState(false);
+
+	// Another auditor holds the dataset (or the claim failed): return to the queue.
+	const auditLockError =
+		auditLock.status === "denied" && !auditLock.heldByYou
+			? describeAuditLockDenial(auditLock)
+			: auditLock.status === "error"
+				? auditLock.message
+				: null;
+	// The auditor's own other page holds it: let them choose where to continue.
+	const auditOpenElsewhereMessage =
+		auditLock.status === "denied" && auditLock.heldByYou ? describeAuditLockDenial(auditLock) : null;
+	const auditLockLostMessage =
+		auditLock.status !== "lost"
+			? null
+			: auditLock.heldByYou
+				? "You continued this audit in another tab or window. Saving here is turned off so that page's work is not overwritten."
+				: `${auditLock.holderEmail ?? "Another auditor"} opened this dataset while this page was inactive. Saving here is turned off so their work is not overwritten.`;
+	const isLockingAudit = auditLock.status === "claiming";
 
 	// Navigation guard
 	const { showExitConfirmation } = useAuditNavigationGuard({
 		isActive: !auditLockError && !isSubmitting,
-		onCleanup: async () => {
-			if (!auditLockError) {
-				await clearAuditLock(dataset.id);
-			}
-		},
-		datasetId: dataset.id,
 		hasFormChanges,
 	});
 
-	// Reset state and set audit lock when dataset changes
+	// Reset form state when dataset changes
 	useEffect(() => {
-		setIsLockingAudit(true);
-		setAuditLockError(null);
 		setHasFormChanges(false);
 		form.resetFields();
+	}, [dataset.id, form]);
 
-		const lockAudit = async () => {
-			try {
-				await setAuditLock(dataset.id);
-				setAuditLockError(null);
-				setIsLockingAudit(false);
-				setHasFormChanges(true);
-			} catch (error) {
-				console.error("Failed to set audit lock:", error);
-				const errorMessage = error instanceof Error ? error.message : "Could not lock dataset for audit";
-				setAuditLockError(errorMessage);
-				setIsLockingAudit(false);
-				message.error(errorMessage);
-				setTimeout(() => navigate("/dataset-audit"), 2000);
-			}
-		};
+	useEffect(() => {
+		if (auditLock.status === "held") {
+			setHasFormChanges(true);
+		}
+	}, [auditLock.status]);
 
-		lockAudit();
-	}, [dataset.id, setAuditLock, navigate, form]);
+	// A dataset held by someone else cannot be audited here; return to the queue.
+	useEffect(() => {
+		if (!auditLockError) return;
+		message.error(auditLockError);
+		const timeout = setTimeout(() => navigate("/dataset-audit"), 2000);
+		return () => clearTimeout(timeout);
+	}, [auditLockError, navigate]);
+
+	// Every audit write carries this page's lease; without it nothing is saved.
+	const requireAuditLease = () => {
+		if (auditLock.status === "held") return auditLock.leaseId;
+		message.error(auditLockLostMessage ?? "This page does not hold the audit lock. Nothing was saved.");
+		return null;
+	};
+
+	const handleSaveAOI = () => {
+		const leaseId = requireAuditLease();
+		if (leaseId) void saveAOIWithLease(leaseId);
+	};
 
 	// Set form values when audit data is loaded
 	useEffect(() => {
@@ -250,6 +264,12 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 			return;
 		}
 
+		const leaseId = requireAuditLease();
+		if (!leaseId) {
+			setNavigateToNext(false);
+			return;
+		}
+
 		try {
 			setIsSubmitting(true);
 
@@ -260,7 +280,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 			};
 
 			const isCompletion = !auditData;
-			await saveAudit(auditPayload);
+			await saveAudit({ values: auditPayload, leaseId });
 			trackAppEvent("audit_completed", {
 				dataset_id: dataset.id,
 				final_assessment: values.final_assessment || "unknown",
@@ -307,7 +327,11 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 			}, 100);
 		} catch (error) {
 			console.error("Error saving audit data:", error);
-			message.error("Failed to save audit data");
+			if (isAuditLeaseConflict(error)) {
+				message.error("Another audit page holds this dataset. Your changes were not saved.");
+			} else {
+				message.error("Failed to save audit data");
+			}
 		} finally {
 			setIsSubmitting(false);
 			setNavigateToNext(false);
@@ -332,9 +356,11 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 			message.warning("Please save AOI edits before marking the audit reviewed.");
 			return;
 		}
+		const leaseId = requireAuditLease();
+		if (!leaseId) return;
 
 		try {
-			await markAsReviewed(dataset.id);
+			await markAsReviewed({ datasetId: dataset.id, leaseId });
 			const nextId = getNextDatasetId(dataset.id);
 			if (nextId) {
 				navigate(`/dataset-audit/${nextId}`);
@@ -344,7 +370,11 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 			}
 		} catch (error) {
 			console.error("Error marking as reviewed:", error);
-			message.error("Failed to mark as reviewed");
+			message.error(
+				isAuditLeaseConflict(error)
+					? "Another audit page holds this dataset. The review was not recorded."
+					: "Failed to mark as reviewed",
+			);
 		}
 	};
 
@@ -372,6 +402,9 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		isReviewed,
 		auditLockError,
 		isLockingAudit,
+		auditLockLostMessage,
+		auditOpenElsewhereMessage,
+		continueAuditHere,
 		navigateToNext,
 
 		// Data

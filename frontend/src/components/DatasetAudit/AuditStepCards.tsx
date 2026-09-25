@@ -80,6 +80,10 @@ export function UserFlagsCard({ flags, isFlagsLoading, isUpdatingFlag, datasetId
 		}
 	};
 
+	// `false` would override a disabled audit form (a page without the audit lease);
+	// `undefined` lets these actions inherit it.
+	const flagActionsDisabled = isUpdatingFlag || undefined;
+
 	const renderFlagActions = (flag: DatasetFlag) => {
 		if (flag.status === "open") {
 			return (
@@ -87,7 +91,7 @@ export function UserFlagsCard({ flags, isFlagsLoading, isUpdatingFlag, datasetId
 					size="small"
 					type="primary"
 					onClick={() => handleStatusChange(flag, "acknowledged", "Issue acknowledged")}
-					disabled={isUpdatingFlag}
+					disabled={flagActionsDisabled}
 				>
 					Acknowledge
 				</Button>
@@ -102,10 +106,10 @@ export function UserFlagsCard({ flags, isFlagsLoading, isUpdatingFlag, datasetId
 						description="Use this when the report has been handled and should leave the audit queue."
 						okText="Mark resolved"
 						cancelText="Cancel"
-						disabled={isUpdatingFlag}
+						disabled={flagActionsDisabled}
 						onConfirm={() => handleStatusChange(flag, "resolved", "Issue resolved")}
 					>
-						<Button size="small" type="default" disabled={isUpdatingFlag}>
+						<Button size="small" type="default" disabled={flagActionsDisabled}>
 							Mark resolved
 						</Button>
 					</Popconfirm>
@@ -113,7 +117,7 @@ export function UserFlagsCard({ flags, isFlagsLoading, isUpdatingFlag, datasetId
 						size="small"
 						type="text"
 						onClick={() => handleStatusChange(flag, "open", "Issue reopened")}
-						disabled={isUpdatingFlag}
+						disabled={flagActionsDisabled}
 					>
 						Reopen
 					</Button>
@@ -127,7 +131,7 @@ export function UserFlagsCard({ flags, isFlagsLoading, isUpdatingFlag, datasetId
 					size="small"
 					type="primary"
 					onClick={() => handleStatusChange(flag, "acknowledged", "Issue moved back to acknowledged")}
-					disabled={isUpdatingFlag}
+					disabled={flagActionsDisabled}
 				>
 					Move to acknowledged
 				</Button>
@@ -135,7 +139,7 @@ export function UserFlagsCard({ flags, isFlagsLoading, isUpdatingFlag, datasetId
 					size="small"
 					type="text"
 					onClick={() => handleStatusChange(flag, "open", "Issue reopened")}
-					disabled={isUpdatingFlag}
+					disabled={flagActionsDisabled}
 				>
 					Reopen
 				</Button>

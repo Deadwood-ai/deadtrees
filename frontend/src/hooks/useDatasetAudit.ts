@@ -3,6 +3,7 @@ import { supabase } from "./useSupabase";
 import { useAuth } from "./useAuthProvider";
 import { useCanAudit } from "./useUserPrivileges";
 import { useMemo } from "react";
+import { withAuditLease } from "./useAuditLock";
 import {
   type ExistingAOI,
   resolveAOIRevisionMetadata,
@@ -204,7 +205,7 @@ export function useSaveDatasetAOI() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (aoiData: AOIData) => {
+    mutationFn: async ({ aoi: aoiData, leaseId }: { aoi: AOIData; leaseId: string }) => {
       if (!user?.id) {
         throw new Error("User must be logged in to save AOI");
       }
@@ -227,16 +228,19 @@ export function useSaveDatasetAOI() {
 
       if (saveTarget.kind === "update") {
         // Authors update their own manual AOI row directly.
-        const { data, error } = await supabase
-          .from("v2_aois")
-          .update({
-            geometry: aoiData.geometry,
-            is_whole_image: aoiData.is_whole_image,
-            ...(aoiData.image_quality !== undefined ? { image_quality: aoiData.image_quality } : {}),
-            ...(aoiData.notes !== undefined ? { notes: aoiData.notes } : {}),
-            updated_at: updatedAt,
-          })
-          .eq("id", saveTarget.id)
+        const { data, error } = await withAuditLease(
+          supabase
+            .from("v2_aois")
+            .update({
+              geometry: aoiData.geometry,
+              is_whole_image: aoiData.is_whole_image,
+              ...(aoiData.image_quality !== undefined ? { image_quality: aoiData.image_quality } : {}),
+              ...(aoiData.notes !== undefined ? { notes: aoiData.notes } : {}),
+              updated_at: updatedAt,
+            })
+            .eq("id", saveTarget.id),
+          leaseId,
+        )
           .select()
           .single();
 
@@ -245,9 +249,8 @@ export function useSaveDatasetAOI() {
       } else {
         // Preserve authorship across auditors by inserting a new manual row.
         // Corrections keep pointing to the original ML prediction.
-        const { data, error } = await supabase
-          .from("v2_aois")
-          .insert({
+        const { data, error } = await withAuditLease(
+          supabase.from("v2_aois").insert({
             dataset_id: aoiData.dataset_id,
             user_id: user.id,
             geometry: aoiData.geometry,
@@ -257,7 +260,9 @@ export function useSaveDatasetAOI() {
             source: saveTarget.source,
             corrected_from_aoi_id: saveTarget.correctedFromAOIId,
             updated_at: updatedAt,
-          })
+          }),
+          leaseId,
+        )
           .select()
           .single();
 
@@ -267,98 +272,9 @@ export function useSaveDatasetAOI() {
 
       return result;
     },
-    onSuccess: (savedAOI, variables) => {
-      queryClient.setQueryData(["dataset-aoi", variables.dataset_id], savedAOI);
-      queryClient.invalidateQueries({ queryKey: ["dataset-aoi", variables.dataset_id] });
-    },
-  });
-}
-
-// Hook to set audit lock with auto-recovery for stale locks
-export function useSetAuditLock() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (datasetId: number) => {
-      // First check if already in audit
-      const { data: statusCheck, error: checkError } = await supabase
-        .from("v2_statuses")
-        .select("is_in_audit, updated_at")
-        .eq("dataset_id", datasetId)
-        .single();
-
-      if (checkError) throw checkError;
-
-      if (statusCheck.is_in_audit) {
-        // Check if the lock is stale (older than 1 hour)
-        const lockTime = new Date(statusCheck.updated_at).getTime();
-        const currentTime = new Date().getTime();
-        const hoursSinceUpdate = (currentTime - lockTime) / (1000 * 60 * 60);
-
-        if (hoursSinceUpdate >= 1) {
-          // Auto-clear stale lock
-          console.debug(
-            `Auto-clearing stale audit lock for dataset ${datasetId} (${hoursSinceUpdate.toFixed(1)} hours old)`,
-          );
-
-          const { error: clearError } = await supabase
-            .from("v2_statuses")
-            .update({
-              is_in_audit: false,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("dataset_id", datasetId);
-
-          if (clearError) {
-            console.error("Failed to clear stale lock:", clearError);
-            throw new Error("Failed to clear stale audit lock");
-          }
-        } else {
-          // Lock is recent, still active
-          const timeRemaining = 60 - Math.floor(hoursSinceUpdate * 60);
-          throw new Error(
-            `Dataset is currently being audited by another user. Lock expires in ~${timeRemaining} minutes.`,
-          );
-        }
-      }
-
-      // Set new audit lock
-      const { error } = await supabase
-        .from("v2_statuses")
-        .update({
-          is_in_audit: true,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("dataset_id", datasetId);
-
-      if (error) throw error;
-      return datasetId;
-    },
-    onSuccess: (datasetId) => {
-      queryClient.invalidateQueries({ queryKey: ["audit-status", datasetId] });
-    },
-  });
-}
-
-// Hook to clear audit lock
-export function useClearAuditLock() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (datasetId: number) => {
-      const { error } = await supabase
-        .from("v2_statuses")
-        .update({
-          is_in_audit: false,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("dataset_id", datasetId);
-
-      if (error) throw error;
-      return datasetId;
-    },
-    onSuccess: (datasetId) => {
-      queryClient.invalidateQueries({ queryKey: ["audit-status", datasetId] });
+    onSuccess: (savedAOI, { aoi }) => {
+      queryClient.setQueryData(["dataset-aoi", aoi.dataset_id], savedAOI);
+      queryClient.invalidateQueries({ queryKey: ["dataset-aoi", aoi.dataset_id] });
     },
   });
 }
@@ -369,7 +285,7 @@ export function useSaveDatasetAudit() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (auditData: AuditFormValues) => {
+    mutationFn: async ({ values: auditData, leaseId }: { values: AuditFormValues; leaseId: string }) => {
       const dataToSave = {
         ...auditData,
         audited_by: user?.id,
@@ -388,10 +304,10 @@ export function useSaveDatasetAudit() {
       let auditResult;
       if (existingAudit) {
         // Update existing audit
-        const { data, error } = await supabase
-          .from("dataset_audit")
-          .update(dataToSave)
-          .eq("dataset_id", auditData.dataset_id)
+        const { data, error } = await withAuditLease(
+          supabase.from("dataset_audit").update(dataToSave).eq("dataset_id", auditData.dataset_id),
+          leaseId,
+        )
           .select()
           .single();
 
@@ -399,34 +315,21 @@ export function useSaveDatasetAudit() {
         auditResult = data;
       } else {
         // Insert new audit
-        const { data, error } = await supabase.from("dataset_audit").insert(dataToSave).select().single();
+        const { data, error } = await withAuditLease(supabase.from("dataset_audit").insert(dataToSave), leaseId)
+          .select()
+          .single();
 
         if (error) throw error;
         auditResult = data;
       }
 
-      // Clear the audit lock (is_audited is now computed from dataset_audit table)
-      const { error: statusError } = await supabase
-        .from("v2_statuses")
-        .update({
-          is_in_audit: false,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("dataset_id", auditData.dataset_id);
-
-      if (statusError) {
-        console.error("Failed to update status:", statusError);
-        throw new Error("Failed to update audit status");
-      }
-
       return auditResult;
     },
-    onSuccess: (_, variables) => {
+    onSuccess: (_, { values }) => {
       // Invalidate relevant queries
       queryClient.invalidateQueries({ queryKey: ["dataset-audits"] });
-      queryClient.invalidateQueries({ queryKey: ["dataset-audit", variables.dataset_id] });
-      queryClient.invalidateQueries({ queryKey: ["dataset-aoi", variables.dataset_id] });
-      queryClient.invalidateQueries({ queryKey: ["audit-status", variables.dataset_id] });
+      queryClient.invalidateQueries({ queryKey: ["dataset-audit", values.dataset_id] });
+      queryClient.invalidateQueries({ queryKey: ["dataset-aoi", values.dataset_id] });
       queryClient.invalidateQueries({ queryKey: ["datasets"] });
     },
   });
@@ -465,21 +368,24 @@ export function useMarkAsReviewed() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (datasetId: number) => {
-      const { data, error } = await supabase
-        .from("dataset_audit")
-        .update({
-          reviewed_at: new Date().toISOString(),
-          reviewed_by: user?.id,
-        })
-        .eq("dataset_id", datasetId)
+    mutationFn: async ({ datasetId, leaseId }: { datasetId: number; leaseId: string }) => {
+      const { data, error } = await withAuditLease(
+        supabase
+          .from("dataset_audit")
+          .update({
+            reviewed_at: new Date().toISOString(),
+            reviewed_by: user?.id,
+          })
+          .eq("dataset_id", datasetId),
+        leaseId,
+      )
         .select()
         .single();
 
       if (error) throw error;
       return data;
     },
-    onSuccess: (_, datasetId) => {
+    onSuccess: (_, { datasetId }) => {
       queryClient.invalidateQueries({ queryKey: ["dataset-audits"] });
       queryClient.invalidateQueries({ queryKey: ["dataset-audit", datasetId] });
     },

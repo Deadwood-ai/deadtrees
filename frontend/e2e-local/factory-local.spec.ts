@@ -146,6 +146,8 @@ const detailFor = (id: number) => {
       is_thumbnail_done: !failed,
       is_deadwood_done: !failed,
       is_forest_cover_done: !failed,
+      // Retired audit flag left stale in production rows; it must not render.
+      is_in_audit: true,
       has_error: failed,
       error_message: failed ? row.error_message : null,
       error_stage: failed ? "cog" : null,
@@ -781,6 +783,7 @@ test.describe("factory local e2e", () => {
     await expect(page.getByRole("heading", { name: "Dataset #5059" })).toBeVisible();
     await expect(page.getByTestId("factory-detail-error")).toContainText("COG conversion failed in local factory fixture");
     await expect(page.getByTestId("factory-detail-status")).toContainText("Map image");
+    await expect(page.getByTestId("factory-detail-status")).not.toContainText(/audit lock|in audit/i);
     await expect(page.getByTestId("factory-detail-queue")).toContainText("No queue row now");
     await expect(page.getByTestId("factory-detail-logs")).toContainText("Showing the newest 2 of 350");
     await expect(page.getByTestId("factory-detail-logs")).toContainText("Stage started");

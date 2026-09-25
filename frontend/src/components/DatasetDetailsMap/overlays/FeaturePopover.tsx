@@ -148,21 +148,23 @@ const FeaturePopover = forwardRef<HTMLDivElement, FeaturePopoverProps>(
 								</div>
 							)}
 
-						{/* Edit Action (for logged-in users) */}
+						{/* Edit Action (for logged-in users when editing is offered) */}
 						{isLoggedIn ? (
-							<Button
-								type="primary"
-								size="small"
-								block
-								icon={<EditOutlined style={{ fontSize: 11 }} />}
-								onClick={() => {
-									onClose();
-									onEdit?.();
-								}}
-								className="text-xs h-8 font-medium"
-							>
-								Edit {info.type}
-							</Button>
+							onEdit && (
+								<Button
+									type="primary"
+									size="small"
+									block
+									icon={<EditOutlined style={{ fontSize: 11 }} />}
+									onClick={() => {
+										onClose();
+										onEdit?.();
+									}}
+									className="text-xs h-8 font-medium"
+								>
+									Edit {info.type}
+								</Button>
+							)
 						) : (
 							<Button
 								type="default"

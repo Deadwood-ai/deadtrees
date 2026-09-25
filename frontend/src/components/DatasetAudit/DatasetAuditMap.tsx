@@ -327,7 +327,7 @@ const DatasetAuditMap = forwardRef<DatasetAuditMapHandle, DatasetAuditMapProps>(
 					isLoggedIn={true}
 					canReviewCorrections={canReviewCorrections}
 					onClose={hidePopover}
-					onEdit={handleEdit}
+					onEdit={onEditDeadwood || onEditForestCover ? handleEdit : undefined}
 					onApproveCorrection={onApproveCorrection}
 					onRevertCorrection={onRevertCorrection}
 				/>
