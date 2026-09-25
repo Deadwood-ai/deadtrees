@@ -23,6 +23,7 @@ import {
 	FinalAssessmentCard,
 } from "./AuditStepCards";
 import AuditAOICard from "./AuditAOICard";
+import { AuditLockBlocked, AuditLockLostNotice, AuditOpenElsewhere } from "./AuditLockNotices";
 import AuditMapWithControls, { AuditMapWithControlsHandle } from "./AuditMapWithControls";
 import { MAP_AUDIT_SIDEBAR_WIDTH_CLASS, MAP_FLOATING_TOP_CLASS } from "../../theme/mapLayout";
 import { resolveDownloadUrl } from "../../utils/downloadUrl";
@@ -80,6 +81,10 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 		isReviewed,
 		auditLockError,
 		isLockingAudit,
+		auditLockLostMessage,
+		auditLeaseId,
+		auditOpenElsewhereMessage,
+		continueAuditHere,
 		navigateToNext,
 		auditData,
 		flags,
@@ -277,15 +282,21 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 		);
 	}
 
-	// Show error state
 	if (auditLockError) {
 		return (
-			<div className="flex h-full w-full items-center justify-center">
-				<div className="text-center">
-					<div className="mb-2 text-red-600">{auditLockError}</div>
-					<div className="text-sm text-gray-500">Redirecting to audit list...</div>
-				</div>
-			</div>
+			<AuditLockBlocked message={auditLockError}>
+				<div className="text-sm text-gray-500">Redirecting to audit list...</div>
+			</AuditLockBlocked>
+		);
+	}
+
+	if (auditOpenElsewhereMessage) {
+		return (
+			<AuditOpenElsewhere
+				message={auditOpenElsewhereMessage}
+				onBack={handleCancel}
+				onContinueHere={continueAuditHere}
+			/>
 		);
 	}
 
@@ -305,7 +316,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 						form={form}
 						layout="vertical"
 						onFinish={handleSubmit}
-						disabled={isLoading}
+						disabled={isLoading || !!auditLockLostMessage}
 						size="small"
 						validateTrigger={["onChange", "onBlur"]}
 					>
@@ -353,24 +364,28 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 
 						{/* Footer Actions */}
 						<div className="sticky bottom-0 z-10 -mx-2 border-t border-slate-200 bg-white p-3">
-							<AuditFooterFormItem
-								hasAOI={hasAOI}
-								isPending={isPending}
-								isReviewed={isReviewed}
-								reviewedByEmail={auditData?.reviewed_by_email}
-								nextDatasetId={nextDatasetId}
-								currentDatasetIndex={currentDatasetIndex}
-								totalCount={totalCount}
-								isSaving={isSaving}
-								navigateToNext={navigateToNext}
-								isMarkingReviewed={isMarkingReviewed}
-								isAOIDirty={isAOIDirty}
-								isSavingAOI={isSavingAOI}
-								onCancel={handleCancel}
-								onSave={() => form.submit()}
-								onSaveAndNext={handleSaveAndNext}
-								onMarkReviewedAndNext={handleMarkReviewedAndNext}
-							/>
+							{auditLockLostMessage ? (
+								<AuditLockLostNotice message={auditLockLostMessage} onBack={handleCancel} />
+							) : (
+								<AuditFooterFormItem
+									hasAOI={hasAOI}
+									isPending={isPending}
+									isReviewed={isReviewed}
+									reviewedByEmail={auditData?.reviewed_by_email}
+									nextDatasetId={nextDatasetId}
+									currentDatasetIndex={currentDatasetIndex}
+									totalCount={totalCount}
+									isSaving={isSaving}
+									navigateToNext={navigateToNext}
+									isMarkingReviewed={isMarkingReviewed}
+									isAOIDirty={isAOIDirty}
+									isSavingAOI={isSavingAOI}
+									onCancel={handleCancel}
+									onSave={() => form.submit()}
+									onSaveAndNext={handleSaveAndNext}
+									onMarkReviewedAndNext={handleMarkReviewedAndNext}
+								/>
+							)}
 						</div>
 					</Form>
 				)}
@@ -398,6 +413,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 						onAOIChange={handleAOIChange}
 						onToolbarStateChange={setAoiToolbarState}
 						onEditingStateChange={handleEditingStateChange}
+						auditLeaseId={auditLeaseId}
 					/>
 				</div>
 			</DatasetDetailsMapProvider>

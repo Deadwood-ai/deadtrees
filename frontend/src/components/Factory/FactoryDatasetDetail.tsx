@@ -29,9 +29,11 @@ const FLAG_LABELS: Record<string, string> = {
 	is_aoi_required: "Area of interest required",
 	is_embeddings_done: "Search indexing",
 	is_audited: "Audited flag",
-	is_in_audit: "Audit lock held",
 };
 
+// is_in_audit is a retired flag that is no longer maintained; audit locks are
+// server-expiring leases outside the processing status row.
+const RETIRED_FLAGS = new Set(["is_in_audit"]);
 const FLAG_ORDER = Object.keys(FLAG_LABELS);
 const STATUS_SCALARS = [
 	"current_status",
@@ -65,7 +67,7 @@ const STATUS_LABELS: Record<string, string> = {
 function StatusFlags({ status }: { status: FactoryRecord }) {
 	const flagKeys = [
 		...FLAG_ORDER.filter((key) => key in status),
-		...Object.keys(status).filter((key) => key.startsWith("is_") && !(key in FLAG_LABELS)),
+		...Object.keys(status).filter((key) => key.startsWith("is_") && !(key in FLAG_LABELS) && !RETIRED_FLAGS.has(key)),
 	];
 	if (Object.keys(status).length === 0) {
 		return <EmptyNote>No processing status row exists for this dataset.</EmptyNote>;

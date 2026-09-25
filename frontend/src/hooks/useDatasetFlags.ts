@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "./useSupabase";
+import { withAuditLease } from "./useAuditLock";
 import { useAuth } from "./useAuthProvider";
 import type { DatasetFlag, FlagStatus } from "../types/flags";
 
@@ -136,12 +137,16 @@ export function useUpdateFlagStatus() {
       dataset_id: number;
       new_status: FlagStatus;
       note?: string | null;
+      auditLeaseId?: string | null;
     }) => {
-      const { error } = await supabase.rpc("update_flag_status", {
-        p_flag_id: payload.flag_id,
-        p_new_status: payload.new_status,
-        p_note: payload.note ?? null,
-      });
+      const { error } = await withAuditLease(
+        supabase.rpc("update_flag_status", {
+          p_flag_id: payload.flag_id,
+          p_new_status: payload.new_status,
+          p_note: payload.note ?? null,
+        }),
+        payload.auditLeaseId,
+      );
       if (error) throw error;
     },
     onSuccess: (_res, variables) => {

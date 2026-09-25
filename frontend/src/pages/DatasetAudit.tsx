@@ -34,7 +34,6 @@ import { useAuditDatasets } from "../hooks/useAuditDatasets";
 import type { AuditDataset } from "../hooks/useAuditDatasets";
 import DatasetAuditDetail from "../components/DatasetAudit/DatasetAuditDetail";
 import { useDatasetAudits, DatasetAuditUserInfo, useDatasetContributors } from "../hooks/useDatasetAudit";
-import { supabase } from "../hooks/useSupabase";
 import { useFlaggedDatasets } from "../hooks/useDatasetFlags";
 import { useReferenceDatasetIds } from "../hooks/useReferencePatches";
 import { useAuditNavigation } from "../hooks/useAuditNavigation";
@@ -489,32 +488,10 @@ function DatasetAuditInner() {
 		}
 	}, [user, isAuthLoading, isAuditPrivilegeLoading, canAudit, navigate]);
 
-	const handleStartAudit = async (datasetId: number) => {
-		try {
-			const { data, error } = await supabase
-				.from("v2_statuses")
-				.select("is_in_audit")
-				.eq("dataset_id", datasetId)
-				.single();
-
-			if (error) {
-				console.error("Error checking audit status:", error);
-				navigate(`/dataset-audit/${datasetId}`);
-				return;
-			}
-
-			if (data.is_in_audit) {
-				message.warning("Dataset is currently being audited by another user");
-				return;
-			}
-
-			track("audit_started", { dataset_id: datasetId });
-			navigate(`/dataset-audit/${datasetId}`);
-		} catch (error) {
-			console.error("Error checking audit status:", error);
-			track("audit_started", { dataset_id: datasetId });
-			navigate(`/dataset-audit/${datasetId}`);
-		}
+	// The detail page claims the audit lease and reports a dataset held by someone else.
+	const handleStartAudit = (datasetId: number) => {
+		track("audit_started", { dataset_id: datasetId });
+		navigate(`/dataset-audit/${datasetId}`);
 	};
 
 	useEffect(() => {

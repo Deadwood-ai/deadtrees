@@ -103,7 +103,7 @@ test.describe("auditor local write flows", () => {
     await expect(page.getByText("Securing audit lock...")).toBeHidden({
       timeout: 20_000,
     });
-    await expectAuditLock(true);
+    await expectAuditLeaseHolder(auditorUser.id);
 
     await expect(page.getByText("User-reported issues")).toBeVisible();
     await expect(page.getByText("Local auditor write issue")).toBeVisible();
@@ -204,6 +204,129 @@ test.describe("auditor local write flows", () => {
     });
 
     await expectAuditSideEffects();
+  });
+
+  test("marking a saved audit reviewed releases the audit lease", async ({ page }) => {
+    await ensureSavedAudit();
+    await installAuditorSession(page);
+    await openAuditDetail(page);
+    await expectAuditLeaseHolder(auditorUser.id);
+
+    await page.getByRole("button", { name: /Mark Reviewed/ }).click();
+    await expect(page).toHaveURL(/\/dataset-audit(?:\?.*)?$/, { timeout: 20_000 });
+
+    await expectAuditLeaseHolder(null);
+    expect(await readSavedAudit()).toMatchObject({
+      notes: "Auditor local write integration completed.",
+      audited_by: auditorUser.id,
+      reviewed_by: auditorUser.id,
+    });
+    expect((await readSavedAudit()).reviewed_at).not.toBeNull();
+  });
+
+  test("a live lease is respected, an abandoned one is reclaimed, and page exit releases it", async ({
+    page,
+  }) => {
+    await ensureSavedAudit();
+    const savedAudit = await readSavedAudit();
+    await installAuditorSession(page);
+
+    // Another auditor is actively auditing: this auditor is sent back to the queue.
+    await setAuditLease(reporterUser.id, 600);
+    await page.goto(`/dataset-audit/${datasetId}`);
+    await dismissCookieBanner(page);
+    await expect(
+      page.getByText(`This dataset is being audited by ${reporterEmail}`).first(),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL(/\/dataset-audit(?:\?.*)?$/, { timeout: 10_000 });
+    await expectAuditLeaseHolder(reporterUser.id);
+
+    // The other auditor's page went away without releasing: the lease is reclaimable.
+    await setAuditLease(reporterUser.id, -1);
+    await seedDeadwoodPrediction();
+    await openAuditDetail(page);
+    await expectAuditLeaseHolder(auditorUser.id);
+    await expect(page.getByRole("button", { name: "Edit deadwood cover" })).toBeVisible({ timeout: 20_000 });
+
+    // This page was inactive past expiry and someone else claimed the dataset.
+    await setAuditLease(reporterUser.id, 600);
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect(page.getByText("Saving is turned off on this page")).toBeVisible();
+    await expect(page.getByRole("button", { name: /^save Save$/i })).toHaveCount(0);
+    // Prediction edits are not offered from a page that lost the lease.
+    await expect(page.getByRole("button", { name: "Edit deadwood cover" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Acknowledge" })).toBeDisabled();
+    await page.getByRole("button", { name: "Back to queue" }).click();
+    await page.getByRole("button", { name: "Leave Audit" }).click();
+    await expect(page).toHaveURL(/\/dataset-audit(?:\?.*)?$/, { timeout: 10_000 });
+    // Leaving must not clear the new holder's lease.
+    await expectAuditLeaseHolder(reporterUser.id);
+
+    // Closing or navigating the tab away releases the lease immediately.
+    await deleteRows("dataset_audit_locks", "dataset_id", datasetId);
+    await openAuditDetail(page);
+    await expectAuditLeaseHolder(auditorUser.id);
+    page.on("dialog", (dialog) => void dialog.accept());
+    await page.goto("about:blank");
+    await expectAuditLeaseHolder(null);
+
+    expect(await readSavedAudit()).toEqual(savedAudit);
+  });
+
+  test("a second tab of the same auditor cannot displace the lease page until they continue there", async ({
+    context,
+    page,
+  }) => {
+    await ensureSavedAudit();
+    const { error: resetError } = await adminClient
+      .from("dataset_audit")
+      .update({ reviewed_at: null, reviewed_by: null })
+      .eq("dataset_id", datasetId);
+    expect(resetError).toBeNull();
+    const { error: flagResetError } = await adminClient
+      .from("dataset_flags")
+      .update({ status: "open" })
+      .eq("id", flagId);
+    expect(flagResetError).toBeNull();
+    await installAuditorSession(page);
+    await openAuditDetail(page);
+    await expectAuditLeaseHolder(auditorUser.id);
+    const firstLease = (await readAuditLease())?.lease_id;
+    // Unsaved AOI work on the first tab.
+    await drawAuditAoi(page);
+    await expect(page.getByText("Unsaved AOI edits")).toBeVisible();
+
+    const secondTab = await context.newPage();
+    await secondTab.goto(`/dataset-audit/${datasetId}`);
+    await expect(
+      secondTab.getByText("You have this dataset open in another tab or window."),
+    ).toBeVisible({ timeout: 20_000 });
+    expect((await readAuditLease())?.lease_id).toBe(firstLease);
+
+    await secondTab.getByRole("button", { name: "Continue here" }).click();
+    await expect(
+      secondTab.getByRole("heading", { name: new RegExp(`Audit: ${datasetId}`) }),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect.poll(async () => (await readAuditLease())?.lease_id).not.toBe(firstLease);
+
+    // Before its next renewal the first tab still believes it holds the lease. Its flag
+    // review is rejected by the server, and the rejection makes it notice the takeover.
+    const staleFlagReview = page.waitForResponse((response) =>
+      response.url().includes("/rpc/update_flag_status"),
+    );
+    await page.getByRole("button", { name: "Acknowledge" }).click();
+    const rejected = await staleFlagReview;
+    expect(rejected.status()).toBeGreaterThanOrEqual(400);
+    expect(rejected.request().headers()["x-audit-lease"]).toBe(firstLease);
+    await expectFlagStatus("open");
+    await expect(page.getByText("You continued this audit in another tab or window.")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Mark Reviewed/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Save AOI/ })).toBeDisabled();
+
+    await secondTab.getByRole("button", { name: /Mark Reviewed/ }).click();
+    await expect(secondTab).toHaveURL(/\/dataset-audit(?:\?.*)?$/, { timeout: 20_000 });
+    expect(await readSavedAudit()).toMatchObject({ reviewed_by: auditorUser.id });
+    await secondTab.close();
   });
 });
 
@@ -333,7 +456,6 @@ async function createAuditableDataset() {
     is_metadata_done: true,
     is_combined_model_done: true,
     has_error: false,
-    is_in_audit: false,
   });
   expect(statusError).toBeNull();
 
@@ -500,18 +622,91 @@ async function addManualCorrectionMetadata() {
   expect(error).toBeNull();
 }
 
-async function expectAuditLock(expected: boolean) {
+async function readAuditLease() {
+  const { data, error } = await adminClient
+    .from("dataset_audit_locks")
+    .select("holder_id,lease_id,expires_at")
+    .eq("dataset_id", datasetId)
+    .maybeSingle();
+  expect(error).toBeNull();
+  return data as { holder_id: string; lease_id: string; expires_at: string } | null;
+}
+
+async function expectAuditLeaseHolder(holderId: string | null) {
   await expect
     .poll(async () => {
-      const { data, error } = await adminClient
-        .from("v2_statuses")
-        .select("is_in_audit")
-        .eq("dataset_id", datasetId)
-        .single();
-      expect(error).toBeNull();
-      return data.is_in_audit;
+      const lease = await readAuditLease();
+      return lease && Date.parse(lease.expires_at) > Date.now() ? lease.holder_id : null;
     })
-    .toBe(expected);
+    .toBe(holderId);
+}
+
+async function setAuditLease(holderId: string, expiresInSeconds: number) {
+  const { error } = await adminClient.from("dataset_audit_locks").upsert({
+    dataset_id: datasetId,
+    holder_id: holderId,
+    lease_id: randomUUID(),
+    expires_at: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
+  });
+  expect(error).toBeNull();
+}
+
+async function openAuditDetail(page: Page) {
+  await page.goto(`/dataset-audit/${datasetId}`);
+  await dismissCookieBanner(page);
+  await expect(
+    page.getByRole("heading", { name: new RegExp(`Audit: ${datasetId}`) }),
+  ).toBeVisible({ timeout: 20_000 });
+}
+
+// The audit map offers prediction edits only when a preferred model prediction exists.
+async function seedDeadwoodPrediction() {
+  const { count, error: countError } = await adminClient
+    .from("v2_labels")
+    .select("id", { count: "exact", head: true })
+    .eq("dataset_id", datasetId)
+    .eq("label_data", "deadwood");
+  expect(countError).toBeNull();
+  if (count) return;
+  const { data: preference, error: preferenceError } = await adminClient
+    .from("v2_model_preferences")
+    .select("model_config")
+    .eq("label_data", "deadwood")
+    .single();
+  expect(preferenceError).toBeNull();
+  const { error } = await adminClient.from("v2_labels").insert({
+    dataset_id: datasetId,
+    user_id: reporterUser.id,
+    label_source: "model_prediction",
+    label_type: "semantic_segmentation",
+    label_data: "deadwood",
+    model_config: preference.model_config,
+  });
+  expect(error).toBeNull();
+}
+
+// Lease scenarios need a saved audit even when run on their own.
+async function ensureSavedAudit() {
+  const { error } = await adminClient.from("dataset_audit").upsert(
+    {
+      dataset_id: datasetId,
+      audited_by: auditorUser.id,
+      final_assessment: "no_issues",
+      notes: "Auditor local write integration completed.",
+    },
+    { onConflict: "dataset_id", ignoreDuplicates: true },
+  );
+  expect(error).toBeNull();
+}
+
+async function readSavedAudit() {
+  const { data, error } = await adminClient
+    .from("dataset_audit")
+    .select("notes,audited_by,reviewed_at,reviewed_by")
+    .eq("dataset_id", datasetId)
+    .single();
+  expect(error).toBeNull();
+  return data;
 }
 
 async function expectFlagStatus(status: string) {
@@ -581,7 +776,7 @@ async function expectAuditSideEffects() {
   });
   expect(aois?.[1].geometry).toMatchObject({ type: "MultiPolygon" });
 
-  await expectAuditLock(false);
+  await expectAuditLeaseHolder(null);
 
   const { data: flag, error: flagError } = await adminClient
     .from("dataset_flags")
@@ -619,8 +814,10 @@ async function cleanupDataset() {
     await deleteRows("dataset_flag_status_history", "flag_id", flagId);
   }
   await deleteRows("dataset_flags", "dataset_id", datasetId);
+  await deleteRows("dataset_audit_locks", "dataset_id", datasetId);
   await deleteRows("dataset_audit", "dataset_id", datasetId);
   await deleteRows("v2_aois", "dataset_id", datasetId);
+  await deleteRows("v2_labels", "dataset_id", datasetId);
   await deleteRows("v2_cogs", "dataset_id", datasetId);
   await deleteRows("v2_thumbnails", "dataset_id", datasetId);
   await deleteRows("v2_orthos", "dataset_id", datasetId);
