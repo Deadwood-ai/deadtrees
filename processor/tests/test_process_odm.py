@@ -23,6 +23,7 @@ from processor.src.process_odm import (
 	_extract_exif_from_images,
 	_build_odm_command,
 	_filter_images_by_camera_orientation,
+	_select_orientation_eligible_images,
 )
 from shared.exif_utils import extract_camera_nadir_deviation_degrees
 from processor.src.utils.ssh import push_file_to_storage_server, check_file_exists_on_storage
@@ -31,6 +32,7 @@ from processor.src.utils.ssh import push_file_to_storage_server, check_file_exis
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _extract_zip_to_tempdir(zip_path: Path) -> tempfile.TemporaryDirectory:
 	"""Extract a ZIP to a fresh temp directory, return the TemporaryDirectory object."""
@@ -74,9 +76,7 @@ def test_analyze_extracted_files_detects_rtk_and_images():
 		pytest.skip('test_minimal_5_images.zip not found; run make download-assets')
 
 	with _extract_zip_to_tempdir(zip_path) as tmpdir:
-		rtk_metadata, image_count, total_size_bytes = _analyze_extracted_files(
-			Path(tmpdir), token='test', dataset_id=0
-		)
+		rtk_metadata, image_count, total_size_bytes = _analyze_extracted_files(Path(tmpdir), token='test', dataset_id=0)
 
 	assert image_count == 5
 	assert total_size_bytes > 0
@@ -93,9 +93,7 @@ def test_analyze_extracted_files_no_rtk():
 		pytest.skip('test_no_rtk_3_images.zip not found; run make download-assets')
 
 	with _extract_zip_to_tempdir(zip_path) as tmpdir:
-		rtk_metadata, image_count, total_size_bytes = _analyze_extracted_files(
-			Path(tmpdir), token='test', dataset_id=0
-		)
+		rtk_metadata, image_count, total_size_bytes = _analyze_extracted_files(Path(tmpdir), token='test', dataset_id=0)
 
 	assert image_count >= 1
 	assert total_size_bytes > 0
@@ -119,12 +117,16 @@ def test_extract_exif_from_real_drone_images():
 	timing_fields = {'DateTime', 'DateTimeOriginal', 'DateTimeDigitized'}
 	exposure_fields = {'ISOSpeedRatings', 'FNumber', 'FocalLength', 'ExposureTime'}
 
-	categories_found = sum([
-		bool(camera_fields & exif_data.keys()),
-		bool(timing_fields & exif_data.keys()),
-		bool(exposure_fields & exif_data.keys()),
-	])
-	assert categories_found >= 2, f'Expected ≥2 EXIF categories, got {categories_found}. Keys: {list(exif_data.keys())[:10]}'
+	categories_found = sum(
+		[
+			bool(camera_fields & exif_data.keys()),
+			bool(timing_fields & exif_data.keys()),
+			bool(exposure_fields & exif_data.keys()),
+		]
+	)
+	assert categories_found >= 2, (
+		f'Expected ≥2 EXIF categories, got {categories_found}. Keys: {list(exif_data.keys())[:10]}'
+	)
 
 
 @pytest.mark.unit
@@ -198,9 +200,7 @@ def test_extract_camera_nadir_deviation_scans_late_dng_xmp(tmp_path):
 	"""Orientation XMP should be found even when a TIFF/DNG container stores it late."""
 	image_path = tmp_path / 'drone.dng'
 	image_path.write_bytes(
-		b'II*\x00'
-		+ b'\x00' * (1024 * 1024)
-		+ b'<drone-parrot:CameraPitchDegree>-85.0</drone-parrot:CameraPitchDegree>'
+		b'II*\x00' + b'\x00' * (1024 * 1024) + b'<drone-parrot:CameraPitchDegree>-85.0</drone-parrot:CameraPitchDegree>'
 	)
 
 	assert extract_camera_nadir_deviation_degrees(image_path) == (5.0, 'CameraPitchDegree', -85.0)
@@ -219,13 +219,7 @@ def test_filter_images_by_camera_orientation_keeps_only_nadir_candidates(tmp_pat
 	paths = []
 	for filename, (tag, pitch) in image_xmp.items():
 		path = tmp_path / filename
-		path.write_bytes(
-			b'\xff\xd8<rdf:Description '
-			+ tag.encode()
-			+ b'="'
-			+ pitch.encode()
-			+ b'" />\xff\xd9'
-		)
+		path.write_bytes(b'\xff\xd8<rdf:Description ' + tag.encode() + b'="' + pitch.encode() + b'" />\xff\xd9')
 		paths.append(path)
 
 	unknown_path = tmp_path / 'unknown.jpg'
@@ -245,6 +239,62 @@ def test_filter_images_by_camera_orientation_keeps_only_nadir_candidates(tmp_pat
 		('oblique.jpg', 45.0, 'Camera:Pitch')
 	]
 	assert unknown == [unknown_path]
+
+
+def _write_image_with_pitch(path: Path, tag: str, pitch: str) -> Path:
+	path.write_bytes(b'\xff\xd8<rdf:Description ' + tag.encode() + b'="' + pitch.encode() + b'" />\xff\xd9')
+	return path
+
+
+@pytest.mark.unit
+def test_select_orientation_eligible_images_keeps_all_when_filter_would_empty_the_set(tmp_path):
+	"""Cameras reporting GimbalPitchDegree=0 for nadir shots must not lose the whole flight."""
+	paths = [
+		_write_image_with_pitch(tmp_path / f'zero-pitch-{index}.jpg', 'GimbalPitchDegree', '+0.00')
+		for index in range(3)
+	]
+
+	kept, excluded, unknown, fell_back = _select_orientation_eligible_images(paths, max_nadir_deviation_degrees=10.0)
+
+	assert fell_back is True
+	assert kept == paths
+	assert excluded == []
+	assert unknown == []
+
+
+@pytest.mark.unit
+def test_select_orientation_eligible_images_falls_back_when_only_unknown_images_survive(tmp_path):
+	"""One image without orientation metadata must not hide a zero-pitch flight from the fallback."""
+	zero_pitch = [
+		_write_image_with_pitch(tmp_path / f'zero-pitch-{index}.jpg', 'GimbalPitchDegree', '+0.00')
+		for index in range(3)
+	]
+	unknown_path = tmp_path / 'unknown.jpg'
+	unknown_path.write_bytes(b'\xff\xd8no pitch metadata\xff\xd9')
+	paths = [*zero_pitch, unknown_path]
+
+	kept, excluded, unknown, fell_back = _select_orientation_eligible_images(paths, max_nadir_deviation_degrees=10.0)
+
+	assert fell_back is True
+	assert kept == paths
+	assert excluded == []
+	assert unknown == [unknown_path]
+
+
+@pytest.mark.unit
+def test_select_orientation_eligible_images_still_drops_obliques_when_nadir_images_exist(tmp_path):
+	"""The fallback must not weaken filtering for flights that do have nadir images."""
+	nadir = _write_image_with_pitch(tmp_path / 'nadir.jpg', 'GimbalPitchDegree', '-90.0')
+	oblique = _write_image_with_pitch(tmp_path / 'oblique.jpg', 'GimbalPitchDegree', '-45.0')
+
+	kept, excluded, unknown, fell_back = _select_orientation_eligible_images(
+		[nadir, oblique], max_nadir_deviation_degrees=10.0
+	)
+
+	assert fell_back is False
+	assert kept == [nadir]
+	assert [path.name for path, _, _ in excluded] == ['oblique.jpg']
+	assert unknown == []
 
 
 @pytest.fixture
