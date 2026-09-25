@@ -82,6 +82,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 		auditLockError,
 		isLockingAudit,
 		auditLockLostMessage,
+		auditLeaseId,
 		auditOpenElsewhereMessage,
 		continueAuditHere,
 		navigateToNext,
@@ -412,7 +413,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 						onAOIChange={handleAOIChange}
 						onToolbarStateChange={setAoiToolbarState}
 						onEditingStateChange={handleEditingStateChange}
-						readOnly={!!auditLockLostMessage}
+						auditLeaseId={auditLeaseId}
 					/>
 				</div>
 			</DatasetDetailsMapProvider>

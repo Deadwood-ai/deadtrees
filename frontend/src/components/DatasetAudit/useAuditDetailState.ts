@@ -127,7 +127,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	// Data hooks
 	const { data: auditData, isLoading: isAuditLoading } = useDatasetAudit(dataset.id);
 	const { data: flags = [], isLoading: isFlagsLoading } = useDatasetFlags(dataset.id);
-	const { mutateAsync: updateFlagStatus, isPending: isUpdatingFlag } = useUpdateFlagStatus();
+	const { mutateAsync: updateFlagStatusWithLease, isPending: isUpdatingFlag } = useUpdateFlagStatus();
 	const { mutateAsync: saveAudit, isPending: isSavingAudit } = useSaveDatasetAudit();
 	const { mutateAsync: markAsReviewed, isPending: isMarkingReviewed } = useMarkAsReviewed();
 	const { data: orthoMetadata, isLoading: isOrthoLoading } = useOrthoMetadata(dataset.id);
@@ -164,6 +164,9 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 				? "You continued this audit in another tab or window. Saving here is turned off so that page's work is not overwritten."
 				: `${auditLock.holderEmail ?? "Another auditor"} opened this dataset while this page was inactive. Saving here is turned off so their work is not overwritten.`;
 	const isLockingAudit = auditLock.status === "claiming";
+	const auditLeaseId = auditLock.status === "held" ? auditLock.leaseId : null;
+	const updateFlagStatus = (payload: Parameters<typeof updateFlagStatusWithLease>[0]) =>
+		updateFlagStatusWithLease({ ...payload, auditLeaseId });
 
 	// Navigation guard
 	const { showExitConfirmation } = useAuditNavigationGuard({
@@ -403,6 +406,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		auditLockError,
 		isLockingAudit,
 		auditLockLostMessage,
+		auditLeaseId,
 		auditOpenElsewhereMessage,
 		continueAuditHere,
 		navigateToNext,

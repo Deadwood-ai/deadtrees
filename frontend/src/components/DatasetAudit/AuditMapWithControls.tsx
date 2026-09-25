@@ -26,8 +26,8 @@ interface AuditMapWithControlsProps {
 	onAOIChange: (geometry: GeoJSON.MultiPolygon | GeoJSON.Polygon | null) => void;
 	onToolbarStateChange: (state: AOIToolbarState) => void;
 	onEditingStateChange?: (isEditing: boolean, layerType: "deadwood" | "forest_cover" | null) => void;
-	/** The page no longer holds the audit lease: offer no prediction edits or correction reviews. */
-	readOnly?: boolean;
+	/** This page's audit lease; null once another page holds it (then nothing here can be changed). */
+	auditLeaseId: string | null;
 }
 
 export interface AuditMapWithControlsHandle {
@@ -56,7 +56,8 @@ export interface AuditMapWithControlsHandle {
  * Uses the dedicated DatasetAuditMap component
  */
 const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWithControlsProps>(
-	({ dataset, onAOIChange, onToolbarStateChange, onEditingStateChange, readOnly = false }, ref) => {
+	({ dataset, onAOIChange, onToolbarStateChange, onEditingStateChange, auditLeaseId }, ref) => {
+		const readOnly = auditLeaseId === null;
 		// Map ref - use the DatasetAuditMapHandle type
 		const mapRef = useRef<DatasetAuditMapHandle>(null);
 
@@ -84,7 +85,7 @@ const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWith
 		const hasForestCover = !!forestCover.data?.id && hasForestCoverPredictionOutput(dataset);
 
 		// Editing hook for polygon corrections
-		const editing = useDatasetEditing({ datasetId: dataset?.id, user });
+		const editing = useDatasetEditing({ datasetId: dataset?.id, user, auditLeaseId });
 		const { isEditing, editingLayerType, editor, ai, refreshKey } = editing;
 
 		// Losing the audit lease ends any prediction edit before it can be saved here.
@@ -133,7 +134,7 @@ const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWith
 		const handleApproveCorrection = async (correctionId: number, geometryId: number) => {
 			try {
 				void geometryId;
-				const result = await approveCorrection(correctionId);
+				const result = await approveCorrection({ correctionId, auditLeaseId });
 				if (result) {
 					trackAppEvent("correction_approved", {
 						dataset_id: dataset.id,
@@ -156,7 +157,7 @@ const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWith
 		const handleRevertCorrection = async (correctionId: number, geometryId: number) => {
 			try {
 				void geometryId;
-				const result = await revertCorrection(correctionId);
+				const result = await revertCorrection({ correctionId, auditLeaseId });
 				if (result) {
 					trackAppEvent("correction_reverted", {
 						dataset_id: dataset.id,

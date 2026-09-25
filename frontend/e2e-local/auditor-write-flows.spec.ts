@@ -283,6 +283,11 @@ test.describe("auditor local write flows", () => {
       .update({ reviewed_at: null, reviewed_by: null })
       .eq("dataset_id", datasetId);
     expect(resetError).toBeNull();
+    const { error: flagResetError } = await adminClient
+      .from("dataset_flags")
+      .update({ status: "open" })
+      .eq("id", flagId);
+    expect(flagResetError).toBeNull();
     await installAuditorSession(page);
     await openAuditDetail(page);
     await expectAuditLeaseHolder(auditorUser.id);
@@ -304,8 +309,16 @@ test.describe("auditor local write flows", () => {
     ).toBeVisible({ timeout: 20_000 });
     await expect.poll(async () => (await readAuditLease())?.lease_id).not.toBe(firstLease);
 
-    // The first tab learns it lost the lease and cannot save anything, AOI included.
-    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    // Before its next renewal the first tab still believes it holds the lease. Its flag
+    // review is rejected by the server, and the rejection makes it notice the takeover.
+    const staleFlagReview = page.waitForResponse((response) =>
+      response.url().includes("/rpc/update_flag_status"),
+    );
+    await page.getByRole("button", { name: "Acknowledge" }).click();
+    const rejected = await staleFlagReview;
+    expect(rejected.status()).toBeGreaterThanOrEqual(400);
+    expect(rejected.request().headers()["x-audit-lease"]).toBe(firstLease);
+    await expectFlagStatus("open");
     await expect(page.getByText("You continued this audit in another tab or window.")).toBeVisible();
     await expect(page.getByRole("button", { name: /Mark Reviewed/ })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /Save AOI/ })).toBeDisabled();

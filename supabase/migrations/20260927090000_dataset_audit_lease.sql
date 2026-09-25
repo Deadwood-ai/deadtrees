@@ -152,6 +152,33 @@ create trigger validate_aoi_audit_lease_delete before delete on public.v2_aois
 for each row when (old.source is distinct from 'ml_prediction')
 execute function public.guard_dataset_audit_lease();
 
+-- Flag reviews and prediction corrections are audit edits too. Guarding the rows
+-- they write covers update_flag_status, save_prediction_corrections,
+-- approve_correction and revert_correction; each rolls back as a whole when
+-- rejected. Reporting a flag (insert) is not an audit edit.
+create trigger validate_flag_audit_lease before update on public.dataset_flags
+for each row execute function public.guard_dataset_audit_lease();
+
+-- save_prediction_corrections takes the dataset id from the caller. A correction
+-- must record its label's dataset, or it could dodge the lease of that dataset.
+create function public.enforce_correction_label_dataset()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+    if new.dataset_id is distinct from (select dataset_id from public.v2_labels where id = new.label_id) then
+        raise exception 'A correction must belong to the dataset of its label'
+            using errcode = '23514';
+    end if;
+    return new;
+end;
+$$;
+revoke all on function public.enforce_correction_label_dataset() from public, anon, authenticated;
+create trigger enforce_correction_label_dataset before insert or update of dataset_id, label_id
+on public.v2_geometry_corrections
+for each row execute function public.enforce_correction_label_dataset();
+-- Sorts after enforce_correction_label_dataset, so it checks the verified dataset.
+create trigger validate_correction_audit_lease before insert or update on public.v2_geometry_corrections
+for each row execute function public.guard_dataset_audit_lease();
+
 -- Contributors see "Review in progress" only while an auditor holds a live lease.
 create or replace view public.v2_full_dataset_view_owner
 with (security_invoker = true, security_barrier = true) as

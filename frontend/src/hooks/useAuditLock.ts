@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { Settings } from "../config";
 import { supabase } from "./useSupabase";
@@ -61,12 +62,15 @@ function releaseLeaseOnPageExit(datasetId: number, leaseId: string, accessToken:
   }).catch(() => undefined);
 }
 
-/** Marks an audit write as coming from the page that holds the lease. */
+/**
+ * Marks a write as coming from the audit page that holds the lease. Writes made
+ * outside an audit page (no lease id) are sent unchanged.
+ */
 export function withAuditLease<Query extends { setHeader(name: string, value: string): Query }>(
   query: Query,
-  leaseId: string,
+  leaseId: string | null | undefined,
 ): Query {
-  return query.setHeader(AUDIT_LEASE_HEADER, leaseId);
+  return leaseId ? query.setHeader(AUDIT_LEASE_HEADER, leaseId) : query;
 }
 
 // The database rejects audit writes while another page holds the dataset's lease.
@@ -85,6 +89,7 @@ export function describeAuditLockDenial(state: Extract<AuditLockState, { status:
 }
 
 export function useAuditLock(datasetId: number) {
+  const queryClient = useQueryClient();
   const [state, setState] = useState<AuditLockState>({ status: "claiming" });
   // Set when the auditor chooses to continue here instead of their other page.
   const [takeOverDatasetId, setTakeOverDatasetId] = useState<number | null>(null);
@@ -160,6 +165,14 @@ export function useAuditLock(datasetId: number) {
       if (held && accessToken) releaseLeaseOnPageExit(datasetId, leaseId, accessToken);
     };
 
+    // A write rejected for the lease means another page took over: find out now
+    // instead of at the next renewal.
+    const unsubscribeMutations = queryClient.getMutationCache().subscribe((event) => {
+      if (event.type === "updated" && event.action.type === "error" && isAuditLeaseConflict(event.action.error)) {
+        void renew();
+      }
+    });
+
     const timer = window.setInterval(() => void renew(), AUDIT_LEASE_RENEW_MS);
     document.addEventListener("visibilitychange", renewWhenVisible);
     window.addEventListener("pageshow", renewAfterRestore);
@@ -169,10 +182,11 @@ export function useAuditLock(datasetId: number) {
     return () => {
       current = false;
       stopRenewing();
+      unsubscribeMutations();
       window.removeEventListener("pagehide", releaseOnPageExit);
       releaseLease(datasetId, leaseId);
     };
-  }, [datasetId, takeOver]);
+  }, [datasetId, takeOver, queryClient]);
 
   const continueHere = useCallback(() => setTakeOverDatasetId(datasetId), [datasetId]);
 

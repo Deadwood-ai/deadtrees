@@ -371,6 +371,93 @@ def test_stale_page_cannot_move_a_leased_audit_to_another_dataset(lease_db):
 	assert db.execute('SELECT dataset_id FROM public.dataset_audit WHERE dataset_id=%s', (unlocked,)).fetchone()[0] == unlocked
 
 
+POLYGON = {'type': 'Polygon', 'coordinates': [[[13.4, 52.5], [13.4, 52.6], [13.5, 52.6], [13.4, 52.5]]]}
+
+
+def create_deadwood_prediction(db, dataset, owner):
+	label = db.execute(
+		"INSERT INTO public.v2_labels(dataset_id,user_id,label_source,label_type,label_data) "
+		"VALUES (%s,%s,'model_prediction','semantic_segmentation','deadwood') RETURNING id",
+		(dataset, owner),
+	).fetchone()[0]
+	db.execute(
+		'INSERT INTO public.v2_deadwood_geometries(label_id,geometry) VALUES (%s,ST_GeomFromGeoJSON(%s))',
+		(label, json.dumps(POLYGON)),
+	)
+	return label
+
+
+def save_correction(db, dataset, label, user):
+	"""Adds one polygon through the real correction RPC (as the dataset map editor does)."""
+	return db.execute(
+		"SELECT success FROM public.save_prediction_corrections(%s,%s,%s,'deadwood',%s,'{}'::bigint[],'{}'::timestamptz[],%s::jsonb)",
+		(dataset, label, user, uuid.uuid4(), json.dumps([{'geometry': POLYGON}])),
+	).fetchone()[0]
+
+
+def test_stale_page_cannot_review_flags_or_corrections_right_after_takeover(lease_db):
+	db = lease_db
+	owner, auditor = create_user(db, False), create_user(db, True)
+	dataset, other_dataset = create_dataset(db, owner), create_dataset(db, owner)
+	label = create_deadwood_prediction(db, dataset, owner)
+	flag = db.execute(
+		"INSERT INTO public.dataset_flags(dataset_id,created_by,is_ortho_mosaic_issue,is_prediction_issue,description,status) "
+		"VALUES (%s,%s,true,false,'blurry','open') RETURNING id",
+		(dataset, owner),
+	).fetchone()[0]
+	old_page, new_page = uuid.uuid4(), uuid.uuid4()
+	act_as(db, auditor)
+	claim(db, dataset, old_page)
+
+	# The owner (not an auditor) can still propose corrections while the dataset is audited.
+	act_as(db, owner)
+	assert save_correction(db, dataset, label, owner) is True
+	as_admin(db)
+	pending = db.execute(
+		"SELECT id FROM public.v2_geometry_corrections WHERE dataset_id=%s AND review_status='pending'", (dataset,)
+	).fetchone()[0]
+
+	# Another tab of the auditor takes over; the old page has not renewed yet.
+	act_as(db, auditor)
+	claim(db, dataset, new_page, take_over=True)
+
+	stale_writes = [
+		("SELECT public.update_flag_status(%s,'acknowledged')", (flag,)),
+		("SELECT public.approve_correction(%s,%s)", (pending, auditor)),
+		("SELECT public.revert_correction(%s,%s)", (pending, auditor)),
+		(
+			"SELECT * FROM public.save_prediction_corrections(%s,%s,%s,'deadwood',%s,'{}'::bigint[],'{}'::timestamptz[],%s::jsonb)",
+			(dataset, label, auditor, uuid.uuid4(), json.dumps([{'geometry': POLYGON}])),
+		),
+	]
+	for lease in (old_page, None):
+		for statement, params in stale_writes:
+			act_as(db, auditor, lease=lease)
+			expect_write_rejected(db, statement, params)
+
+	# Recording the leased label's correction under another dataset id does not dodge the lease.
+	act_as(db, auditor, lease=old_page)
+	db.execute('SAVEPOINT forged_dataset')
+	with pytest.raises(psycopg.errors.CheckViolation):
+		save_correction(db, other_dataset, label, auditor)
+	db.execute('ROLLBACK TO SAVEPOINT forged_dataset')
+
+	as_admin(db)
+	assert db.execute('SELECT status FROM public.dataset_flags WHERE id=%s', (flag,)).fetchone()[0] == 'open'
+	assert db.execute('SELECT review_status FROM public.v2_geometry_corrections WHERE id=%s', (pending,)).fetchone()[0] == 'pending'
+
+	# The page that now holds the lease reviews normally.
+	act_as(db, auditor, lease=new_page)
+	db.execute("SELECT public.update_flag_status(%s,'acknowledged')", (flag,))
+	assert db.execute('SELECT public.approve_correction(%s,%s)', (pending, auditor)).fetchone()[0] is True
+
+	# Once released, the auditor's own edits from the dataset page (no audit page) work again.
+	act_as(db, auditor)
+	release(db, dataset, new_page)
+	act_as(db, auditor)
+	assert save_correction(db, dataset, label, auditor) is True
+
+
 def test_lease_works_for_dataset_ids_beyond_32_bits(lease_db):
 	db = lease_db
 	owner, auditor = create_user(db, False), create_user(db, True)
