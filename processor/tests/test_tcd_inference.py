@@ -84,12 +84,13 @@ def test_interior_window_single_tile_larger_than_raster():
 	assert (rows, cols) == (slice(0, 300), slice(0, 500))
 
 
-def _write_raster(path: Path, data: np.ndarray, res: float = 0.1) -> None:
+def _write_raster(path: Path, data: np.ndarray, res: float = 0.1, **profile) -> None:
 	count, height, width = data.shape
+	profile = {'nodata': 0, **profile}
 	with rasterio.open(
 		path, 'w', driver='GTiff', width=width, height=height, count=count, dtype='uint8',
-		crs='EPSG:3395', transform=from_origin(1000.0, 2000.0, res, res), nodata=0, tiled=True,
-		blockxsize=256, blockysize=256,
+		crs='EPSG:3395', transform=from_origin(1000.0, 2000.0, res, res), tiled=True,
+		blockxsize=256, blockysize=256, **profile,
 	) as dst:
 		dst.write(data)
 
@@ -135,6 +136,25 @@ def test_predict_confidence_map_merges_tiles_like_the_pipeline(tmp_path):
 	assert np.all(values[:, 786:1554] == 11)
 	assert np.all(values[:, 1554:2104] == 0)
 	assert np.all(values[:, 2104:] == 12)
+
+
+def test_predict_confidence_map_carries_the_input_validity_mask(tmp_path):
+	data = np.full((4, 700, 900), 120, dtype=np.uint8)
+	data[3, :, 600:] = 0  # transparent strip that still has RGB content
+	src = tmp_path / 'reprojected.tif'
+	_write_raster(src, data, nodata=None, photometric='RGB', alpha='YES')
+
+	out = tmp_path / 'confidence.tif'
+	predict_confidence_map(src, out, _TileIndexModel())
+
+	with rasterio.open(out) as conf:
+		values = conf.read(1)
+		mask = conf.dataset_mask()
+	assert np.all(values == 10)
+	assert np.all(mask[:, :600] == 255)
+	assert np.all(mask[:, 600:] == 0)
+	# A single file: the mask is internal, not a .msk sidecar.
+	assert sorted(p.name for p in tmp_path.iterdir()) == ['confidence.tif', 'reprojected.tif']
 
 
 def test_predict_confidence_map_batches_without_changing_the_merge(tmp_path):

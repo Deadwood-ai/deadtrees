@@ -233,8 +233,9 @@ def predict_confidence_map(
 ) -> TileResult:
 	"""Write the uint8 tree confidence map for ``input_tif`` to ``output_tif``.
 
-	The output is a single-band raster on the input grid with nodata 0, so skipped
-	tiles and untouched pixels read as masked, like the pipeline's cache VRT.
+	The output is a single-band raster on the input grid with nodata 0 (skipped
+	tiles and untouched pixels, like the pipeline's cache VRT) that carries the
+	input's validity mask, so post-processing drops predictions in transparent areas.
 	"""
 	with rasterio.open(input_tif) as src:
 		if round(TCD_GSD_M / src.res[0], 6) != 1:
@@ -248,12 +249,14 @@ def predict_confidence_map(
 			transform=src.transform, nodata=0, tiled=True, blockxsize=512, blockysize=512, BIGTIFF='IF_SAFER',
 		)
 		processed = 0
-		with rasterio.open(output_tif, 'w', **profile) as dst:
+		with rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True), rasterio.open(output_tif, 'w', **profile) as dst:
 			for batch in _batches(_read_tiles(src, windows), batch_size):
 				confidence = model.predict(np.stack([tile for _, tile in batch]))
 				for (window, _), tile_confidence in zip(batch, confidence):
 					dst_window, rows, cols = interior_window(window, width, height)
 					dst.write(tile_confidence[rows, cols], 1, window=dst_window)
 				processed += len(batch)
+			for _, block in dst.block_windows(1):
+				dst.write_mask(src.dataset_mask(window=block), window=block)
 
 	return TileResult(processed_tiles=processed, skipped_tiles=len(windows) - processed, device=model.device.type)
