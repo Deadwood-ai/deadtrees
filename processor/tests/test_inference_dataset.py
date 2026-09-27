@@ -119,3 +119,44 @@ def test_clip_to_raster_trims_raster_edges_independently():
 
 def test_clip_to_raster_rejects_a_window_off_the_raster():
 	assert clip_to_raster(Window(-40, 0, 32, 32), width=80, height=80) == (None, None, None)
+
+
+def test_readers_share_one_raster_wide_fill_scan(tmp_path, monkeypatch):
+	from processor.src.utils import nodata
+
+	# Metadata-less RGB: white footprint padding around content, no alpha or nodata.
+	rgb = np.full((3, 96, 96), 255, dtype=np.uint8)
+	rgb[:, 20:76, 20:76] = np.random.default_rng(1).integers(0, 200, size=(3, 56, 56), dtype=np.uint8)
+	path = tmp_path / 'blank_canvas.tif'
+	with rasterio.open(
+		path, 'w', driver='GTiff', width=96, height=96, count=3, dtype='uint8',
+		crs='EPSG:32632', transform=from_origin(500000.0, 5000000.0, 0.05, 0.05),
+	) as dst:
+		dst.write(rgb)
+
+	def open_image():
+		src = rasterio.open(path)
+		src.nodata_policy = nodata.NodataPolicy(treat_white_fill=True)
+		return src
+
+	builds = []
+	build_padding_map = nodata._padding_map
+
+	def counting_padding_map(vrt, policy):
+		if getattr(vrt, '_fill_padding_map', None) is None:
+			builds.append(vrt)
+		return build_padding_map(vrt, policy)
+
+	monkeypatch.setattr(nodata, '_padding_map', counting_padding_map)
+
+	def predict_red(threads):
+		out = np.full((96, 96), 7, dtype=np.uint8)
+		dataset = InferenceDataset(open_image, TILE_SIZE, PADDING, skip_nodata_tiles=True, reader_threads=threads)
+		for window, tile in predict_tiles(dataset, lambda images: images[:, 0], torch.device('cpu'), batch_size=2):
+			out[window.toslices()] = tile
+		return out
+
+	parallel = predict_red(3)
+	assert len(builds) == 1
+	np.testing.assert_array_equal(parallel, predict_red(1))
+	assert (parallel[:20] == 0).all()  # white padding is nodata
