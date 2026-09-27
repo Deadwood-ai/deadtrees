@@ -21,18 +21,12 @@ import numpy as np
 import rasterio
 import torch
 import torch.nn.functional as F
-from rasterio.windows import Window as RioWindow
 from safetensors import safe_open
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import unary_union
-from torch.utils.data import DataLoader
-from torchvision.transforms import transforms
-from torchvision.transforms.functional import crop
 from transformers import SegformerConfig, SegformerForSemanticSegmentation
-from tqdm import tqdm
 
-from processor.src.utils.inference_dataset import InferenceDataset
-from processor.src.utils.nodata import read_nodata_mask
+from processor.src.utils.inference_dataset import InferenceDataset, normalize_imagenet, predict_tiles
 from processor.src.utils.segmentation import (
 	filter_polygons_by_area,
 	image_reprojector,
@@ -49,7 +43,6 @@ CLASS_INSIDE_AOI = 1
 TILE_SIZE = 1024
 PADDING = 256
 BATCH_SIZE = 2
-NUM_DATALOADER_WORKERS = 0
 
 # The model expects a fixed 10 cm ground sampling distance, so every ortho is
 # resampled to exactly this resolution (both finer and coarser inputs) when
@@ -69,15 +62,6 @@ CHAIKIN_ITERATIONS = 1
 # the shape within 20 cm while cutting the vertex count by ~1-2 orders of
 # magnitude (lighter storage and map rendering).
 FINAL_SIMPLIFY_TOLERANCE_M = 0.20
-
-
-def _build_transform():
-	return transforms.Compose(
-		[
-			transforms.ToTensor(),
-			transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-		]
-	)
 
 
 def _build_model_config() -> SegformerConfig:
@@ -236,30 +220,6 @@ def cleanup_aoi_polygon(polygons: list[Polygon]) -> list[Polygon]:
 	return [geometry]
 
 
-def _clip_prediction_tile(cropped_window, dataset_width: int, dataset_height: int, tile_height: int, tile_width: int):
-	minx = int(cropped_window['col_off'])
-	maxx = minx + int(cropped_window['width'])
-	miny = int(cropped_window['row_off'])
-	maxy = miny + int(cropped_window['height'])
-
-	diff_minx = max(0, -minx)
-	minx = max(0, minx)
-	diff_miny = max(0, -miny)
-	miny = max(0, miny)
-	diff_maxx = max(0, maxx - dataset_width)
-	maxx = min(maxx, dataset_width)
-	diff_maxy = max(0, maxy - dataset_height)
-	maxy = min(maxy, dataset_height)
-
-	if maxx <= minx or maxy <= miny:
-		return None
-
-	row_stop = tile_height - diff_maxy if diff_maxy else tile_height
-	col_stop = tile_width - diff_maxx if diff_maxx else tile_width
-	out_window = RioWindow(col_off=minx, row_off=miny, width=maxx - minx, height=maxy - miny)
-	return out_window, slice(diff_miny, row_stop), slice(diff_minx, col_stop)
-
-
 class AOIInference:
 	"""Runs the SegFormer-B1 AOI model and returns the cleaned AOI polygon(s)
 	in the CRS of the input orthomosaic."""
@@ -285,6 +245,12 @@ class AOIInference:
 		model.eval()
 		return model
 
+	def predict(self, images: torch.Tensor) -> torch.Tensor:
+		"""(B, 3, H, W) uint8 tiles -> (B, H, W) uint8 inside-AOI mask."""
+		logits = self.model(pixel_values=normalize_imagenet(images, torch.float32)).logits
+		logits = F.interpolate(logits, size=images.shape[-2:], mode='bilinear', align_corners=False)
+		return (logits.argmax(dim=1) == CLASS_INSIDE_AOI).to(torch.uint8)
+
 	def inference(self, input_tif: str) -> list[Polygon]:
 		"""Run inference on a GeoTIFF and return the cleaned AOI polygon(s) in
 		WGS84 (EPSG:4326) lon/lat, ready to store in v2_aois."""
@@ -292,32 +258,21 @@ class AOIInference:
 		# grid. Passing the same value as min and max resolution forces exactly
 		# INFERENCE_RESOLUTION_M whether the input is finer or coarser, and the
 		# metric CRS keeps the polygon cleanup buffers expressed in metres.
-		vrt_src = image_reprojector(
-			input_tif,
-			min_res=INFERENCE_RESOLUTION_M,
-			max_res=INFERENCE_RESOLUTION_M,
-		)
 		dataset = InferenceDataset(
-			image_src=vrt_src,
+			lambda: image_reprojector(
+				input_tif,
+				min_res=INFERENCE_RESOLUTION_M,
+				max_res=INFERENCE_RESOLUTION_M,
+			),
 			tile_size=TILE_SIZE,
 			padding=PADDING,
-			transform=_build_transform(),
 		)
 		vrt_src = dataset.image_src
-
-		loader = DataLoader(
-			dataset,
-			batch_size=BATCH_SIZE,
-			num_workers=NUM_DATALOADER_WORKERS,
-			pin_memory=True,
-			shuffle=False,
-		)
 
 		tmp_mask_path = None
 		try:
 			# Binary mask written tile-by-tile so the full-resolution array never
-			# lives in RAM. Nodata pixels (from the VRT mask band) are forced to
-			# outside-AOI per tile.
+			# lives in RAM. predict_tiles forces nodata pixels to outside-AOI (0).
 			with tempfile.NamedTemporaryFile(suffix='_aoi_mask.tif', delete=False) as f:
 				tmp_mask_path = f.name
 
@@ -331,51 +286,8 @@ class AOIInference:
 				transform=vrt_src.transform,
 			)
 			with rasterio.open(tmp_mask_path, 'w', **tif_kwargs) as dst_mask:
-				for images, cropped_windows in tqdm(loader, desc='aoi inference'):
-					images = images.to(self.device)
-
-					with torch.no_grad():
-						if images.shape[0] < BATCH_SIZE:
-							pad = torch.zeros(
-								(BATCH_SIZE, 3, TILE_SIZE, TILE_SIZE), dtype=images.dtype, device=images.device
-							)
-							pad[: images.shape[0]] = images
-							logits = self.model(pixel_values=pad).logits[: images.shape[0]]
-						else:
-							logits = self.model(pixel_values=images).logits
-
-						logits = F.interpolate(
-							logits, size=(TILE_SIZE, TILE_SIZE), mode='bilinear', align_corners=False
-						)
-						preds = logits.argmax(dim=1, keepdim=True).float()  # (B, 1, H, W)
-
-					for i in range(preds.shape[0]):
-						pred_tile = crop(
-							preds[i].cpu(),
-							top=PADDING,
-							left=PADDING,
-							height=TILE_SIZE - (2 * PADDING),
-							width=TILE_SIZE - (2 * PADDING),
-						)
-
-						clipped = _clip_prediction_tile(
-							{key: cropped_windows[key][i] for key in ('col_off', 'row_off', 'width', 'height')},
-							dataset_width=dataset.width,
-							dataset_height=dataset.height,
-							tile_height=pred_tile.shape[1],
-							tile_width=pred_tile.shape[2],
-						)
-						if clipped is None:
-							continue
-
-						out_window, row_slice, col_slice = clipped
-						pred_tile = pred_tile[:, row_slice, col_slice]
-						mask_arr = (pred_tile[0].numpy() == CLASS_INSIDE_AOI).astype(np.uint8)
-
-						nodata_tile = read_nodata_mask(vrt_src, out_window)
-						mask_arr[nodata_tile] = CLASS_OUTSIDE_AOI
-
-						dst_mask.write(mask_arr, 1, window=out_window)
+				for out_window, mask_arr in predict_tiles(dataset, self.predict, self.device, BATCH_SIZE, 'aoi inference'):
+					dst_mask.write(mask_arr, 1, window=out_window)
 
 			src_crs = vrt_src.crs
 			vrt_src.close()
