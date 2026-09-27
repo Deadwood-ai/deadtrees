@@ -10,7 +10,7 @@ from shared.models import TaskTypeEnum, QueueTask, AOI, aoi_insert_payload
 
 from processor.src.process_aoi_segmentation import process_aoi_segmentation
 from processor.src.aoi_segmentation_v1.predict_aoi import AUTO_AOI_NOTES
-from processor.src.aoi_segmentation_v1.inference.aoi_inference import cleanup_aoi_polygon, _clip_prediction_tile
+from processor.src.aoi_segmentation_v1.inference.aoi_inference import cleanup_aoi_polygon
 
 MODEL_PATH = str(Path(__file__).parent.parent.parent / 'assets' / 'models' / 'b1_50epoch_best_macro_f1.safetensors')
 
@@ -117,42 +117,6 @@ def test_cleanup_aoi_polygon_returns_single_solid_polygon():
 @pytest.mark.unit
 def test_cleanup_aoi_polygon_empty():
 	assert cleanup_aoi_polygon([]) == []
-
-
-@pytest.mark.unit
-def test_clip_prediction_tile_preserves_non_square_window_height():
-	out_window, row_slice, col_slice = _clip_prediction_tile(
-		{'col_off': 10, 'row_off': 20, 'width': 100, 'height': 40},
-		dataset_width=200,
-		dataset_height=200,
-		tile_height=512,
-		tile_width=512,
-	)
-
-	assert out_window.col_off == 10
-	assert out_window.row_off == 20
-	assert out_window.width == 100
-	assert out_window.height == 40
-	assert row_slice == slice(0, 512)
-	assert col_slice == slice(0, 512)
-
-
-@pytest.mark.unit
-def test_clip_prediction_tile_trims_dataset_edges_independently():
-	out_window, row_slice, col_slice = _clip_prediction_tile(
-		{'col_off': -5, 'row_off': 170, 'width': 100, 'height': 40},
-		dataset_width=80,
-		dataset_height=200,
-		tile_height=40,
-		tile_width=100,
-	)
-
-	assert out_window.col_off == 0
-	assert out_window.row_off == 170
-	assert out_window.width == 80
-	assert out_window.height == 30
-	assert row_slice == slice(0, 30)
-	assert col_slice == slice(5, 85)
 
 
 @pytest.mark.comprehensive

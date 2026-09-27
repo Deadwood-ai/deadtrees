@@ -319,6 +319,18 @@ def _fill_padding_mask(vrt, window, policy: NodataPolicy) -> np.ndarray:
 	return grown[row0 - hr0 : row0 - hr0 + h, col0 - hc0 : col0 - hc0 + w]
 
 
+def share_padding_map(from_vrt, to_vrt) -> None:
+	"""Reuse ``from_vrt``'s raster-wide padding map on ``to_vrt``, a handle on the same raster.
+
+	The map is built on ``from_vrt`` if its policy needs one and it is not cached
+	yet, so parallel handles never each rescan the whole raster. Not thread-safe:
+	callers sharing one ``from_vrt`` across threads must serialize calls.
+	"""
+	policy = getattr(from_vrt, 'nodata_policy', None) or NodataPolicy()
+	if policy.treat_white_fill or policy.treat_black_fill:
+		to_vrt._fill_padding_map = _padding_map(from_vrt, policy)
+
+
 def read_nodata_mask(vrt, window=None) -> np.ndarray:
 	"""Boolean nodata mask (``True`` = nodata) for a window of an image_reprojector VRT.
 
