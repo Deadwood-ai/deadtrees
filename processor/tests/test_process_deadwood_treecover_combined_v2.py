@@ -50,11 +50,14 @@ def test_model_loads():
 	model = CombinedInference(model_path=MODEL_PATH)
 	assert model.model is not None
 
-	# Verify output shape with a dummy input
-	dummy = torch.zeros(1, 3, 64, 64).to(model.device)
+	# Verify output shape with a dummy input (fp16 weights on the GPU, fp32 on CPU)
+	dummy = torch.zeros(1, 3, 64, 64, dtype=model.dtype, device=model.device)
 	with torch.no_grad():
 		logits = model.model(pixel_values=dummy).logits
+		classes = model.predict(torch.zeros(1, 3, 64, 64, dtype=torch.uint8, device=model.device))
 	assert logits.shape[1] == 3  # 3 classes: background, treecover, deadwood
+	assert classes.shape == (1, 64, 64)
+	assert classes.dtype == torch.uint8
 
 
 def test_class_map_extraction():
