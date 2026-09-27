@@ -49,7 +49,7 @@ def cleanup_labels(auth_token, treecover_task):
 
 @pytest.mark.comprehensive
 def test_process_treecover_segmentation_success(treecover_task, auth_token):
-	"""Test successful tree cover segmentation processing with TCD container"""
+	"""Test successful tree cover segmentation processing with the in-process TCD model"""
 	process_treecover_segmentation(treecover_task, auth_token, settings.processing_path)
 
 	with use_client(auth_token) as client:
@@ -85,7 +85,7 @@ def test_process_treecover_segmentation_success(treecover_task, auth_token):
 			if properties:
 				assert 'model' in properties
 				assert 'threshold' in properties
-				assert 'container_version' in properties
+				assert 'model_revision' in properties
 
 
 @pytest.mark.comprehensive
@@ -161,33 +161,6 @@ def test_process_treecover_segmentation_replaces_existing_labels(treecover_task,
 
 		# Note: Tree cover detection might not find trees in test images,
 		# so we don't need to assert that geometries exist
-
-
-@pytest.mark.comprehensive
-def test_tcd_container_availability():
-	"""Test that TCD container can be pulled and is available"""
-	import docker
-
-	try:
-		client = docker.from_env()
-		# Check if our local TCD container image exists
-		image = client.images.get(settings.TCD_CONTAINER_IMAGE)
-		assert image is not None
-
-		# Test that we can create a container (but don't run it)
-		container = client.containers.create(
-			image=settings.TCD_CONTAINER_IMAGE,
-			command=['--help'],  # Just test help command
-		)
-		assert container is not None
-
-		# Clean up the test container
-		container.remove()
-
-	except docker.errors.ImageNotFound:
-		pytest.skip(f'Local TCD container {settings.TCD_CONTAINER_IMAGE} not found - run docker build first')
-	except Exception as e:
-		pytest.skip(f'Docker or TCD container not available: {str(e)}')
 
 
 def test_confidence_map_thresholding():

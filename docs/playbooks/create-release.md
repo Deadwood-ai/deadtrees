@@ -126,7 +126,7 @@ tasks and host reboots.
 - creates a drain request so the running worker stops claiming new tasks
 - waits for the current host worker to finish its in-flight task
 - runs `git pull --ff-only origin main` when a new commit is available
-- runs `docker compose -f docker-compose.processor.yaml build processor tcd`
+- runs `docker compose -f docker-compose.processor.yaml build processor`
 - recreates the processor with `docker compose -f docker-compose.processor.yaml up -d --force-recreate processor`
 - clears the drain request after the new container is up
 - writes status to `/home/jj1049/prod/deadtrees/auto-deploy.log`
@@ -147,15 +147,8 @@ hold first, drains the worker, stops the container, runs `snap refresh docker`,
 re-applies the hold, restarts the processor, and logs the outcome to
 `processor-maintenance.log`.
 
-The `tcd` service is a build-only service (gated behind the `build` profile, so
-`docker compose up` never starts it). It exists solely so the deploy rebuilds the
-`deadtrees-tcd:latest` tree-cover inference image — which the processor launches
-ad-hoc through the Docker socket — from version control. Without `tcd` in the
-build command, a Dockerfile change under
-`processor/src/treecover_segmentation_oam_tcd/` (e.g. the torch CUDA build) never
-reaches production and the processor keeps launching a stale image. The TCD image
-build is heavy but layer-cached, so it only does real work when that Dockerfile or
-its base image changes.
+Tree cover (TCD) inference runs inside the processor like the other models; its
+pinned checkpoint is downloaded once into `TCD_MODEL_CACHE_DIR` on `/data`.
 
 By default, the processor derives its worker ID from the host machine-id mounted
 by `docker-compose.processor.yaml`. Set `PROCESSOR_WORKER_ID` explicitly only

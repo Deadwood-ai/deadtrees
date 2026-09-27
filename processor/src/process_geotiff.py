@@ -29,122 +29,68 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 	update_status(token, dataset_id=task.dataset_id, current_status=StatusEnum.ortho_processing)
 
 	try:
-		# Check if ortho entry exists, if not create it
+		# Check if ortho entry exists; either way its metadata is recalculated from the archive file
 		with use_client(token) as client:
 			response = client.table(settings.orthos_table).select('*').eq('dataset_id', task.dataset_id).execute()
 
 		if response.data:
-			# Existing ortho entry found - always recalculate and update metadata
-			ortho_data = response.data[0]
-			ortho = Ortho(**ortho_data)
-
-			logger.info(
-				'Found existing ortho entry, updating with fresh metadata',
-				LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
-			)
-
-			# Pull orthomosaic file to calculate fresh metadata
-			ortho_file_name = f'{task.dataset_id}_ortho.tif'
-			storage_server_ortho_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{ortho_file_name}'
-			temp_ortho_path = temp_dir / ortho_file_name
-
-			try:
-				pull_file_from_storage_server(storage_server_ortho_path, str(temp_ortho_path), token, task.dataset_id)
-			except Exception as e:
-				error_msg = f'Missing orthomosaic file at {storage_server_ortho_path}: {str(e)}'
-				logger.error(
-					error_msg,
-					LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
-				)
-				raise DatasetError(error_msg, dataset_id=task.dataset_id, task_id=task.id)
-
-			# Verify file was successfully pulled
-			if not temp_ortho_path.exists():
-				error_msg = f'Orthomosaic file not found after transfer from {storage_server_ortho_path}'
-				logger.error(
-					error_msg,
-					LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
-				)
-				raise DatasetError(error_msg, dataset_id=task.dataset_id, task_id=task.id)
-
-			# Always recalculate metadata
-			sha256 = get_file_identifier(temp_ortho_path)
-			ortho_info = cog_info(str(temp_ortho_path))
-
-			# Update ortho entry with fresh metadata
-			token, user = _refresh_processor_session(task)
-			ortho = upsert_ortho_entry(
-				dataset_id=task.dataset_id,
-				file_path=temp_ortho_path,
-				version=ortho.version,
-				token=token,
-				sha256=sha256,
-				ortho_info=ortho_info.model_dump(),
-			)
-
-			logger.info(
-				'Updated ortho entry with fresh metadata',
-				LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
-			)
-
-			# Clean up temporary file
-			temp_ortho_path.unlink()
+			version = Ortho(**response.data[0]).version
+			message = 'Found existing ortho entry, updating with fresh metadata'
 		else:
-			# No ortho entry exists, create one by finding orthomosaic file
-			logger.info(
-				'No ortho entry found, creating from orthomosaic file',
+			version = 1
+			message = 'No ortho entry found, creating from orthomosaic file'
+		logger.info(
+			message,
+			LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
+		)
+
+		# Find orthomosaic at archive/{dataset_id}_ortho.tif. It is pulled once: the
+		# metadata below and the standardisation step both read this local copy.
+		ortho_file_name = f'{task.dataset_id}_ortho.tif'
+		storage_server_ortho_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{ortho_file_name}'
+		temp_ortho_path = temp_dir / ortho_file_name
+
+		try:
+			pull_file_from_storage_server(storage_server_ortho_path, str(temp_ortho_path), token, task.dataset_id)
+		except Exception as e:
+			error_msg = f'Missing orthomosaic file at {storage_server_ortho_path}: {str(e)}'
+			logger.error(
+				error_msg,
 				LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
 			)
+			raise DatasetError(error_msg, dataset_id=task.dataset_id, task_id=task.id)
 
-			# Find orthomosaic at archive/{dataset_id}_ortho.tif
-			ortho_file_name = f'{task.dataset_id}_ortho.tif'
-			storage_server_ortho_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{ortho_file_name}'
-			temp_ortho_path = temp_dir / ortho_file_name
-
-			# Pull orthomosaic file to calculate hash and info
-			try:
-				pull_file_from_storage_server(storage_server_ortho_path, str(temp_ortho_path), token, task.dataset_id)
-			except Exception as e:
-				error_msg = f'Missing orthomosaic file at {storage_server_ortho_path}: {str(e)}'
-				logger.error(
-					error_msg,
-					LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
-				)
-				raise DatasetError(error_msg, dataset_id=task.dataset_id, task_id=task.id)
-
-			# Verify file was successfully pulled
-			if not temp_ortho_path.exists():
-				error_msg = f'Orthomosaic file not found after transfer from {storage_server_ortho_path}'
-				logger.error(
-					error_msg,
-					LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
-				)
-				raise DatasetError(error_msg, dataset_id=task.dataset_id, task_id=task.id)
-
-			# Calculate SHA256 hash
-			sha256 = get_file_identifier(temp_ortho_path)
-
-			# Extract ortho info
-			ortho_info = cog_info(str(temp_ortho_path))
-
-			# Create ortho entry
-			token, user = _refresh_processor_session(task)
-			ortho = upsert_ortho_entry(
-				dataset_id=task.dataset_id,
-				file_path=temp_ortho_path,
-				version=1,
-				token=token,
-				sha256=sha256,
-				ortho_info=ortho_info.model_dump(),
-			)
-
-			logger.info(
-				'Created ortho entry for dataset',
+		# Verify file was successfully pulled
+		if not temp_ortho_path.exists():
+			error_msg = f'Orthomosaic file not found after transfer from {storage_server_ortho_path}'
+			logger.error(
+				error_msg,
 				LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
 			)
+			raise DatasetError(error_msg, dataset_id=task.dataset_id, task_id=task.id)
 
-			# Clean up temporary file
-			temp_ortho_path.unlink()
+		# Always recalculate metadata
+		sha256 = get_file_identifier(temp_ortho_path)
+		ortho_info = cog_info(str(temp_ortho_path))
+
+		token, user = _refresh_processor_session(task)
+		ortho = upsert_ortho_entry(
+			dataset_id=task.dataset_id,
+			file_path=temp_ortho_path,
+			version=version,
+			token=token,
+			sha256=sha256,
+			ortho_info=ortho_info.model_dump(),
+		)
+
+		logger.info(
+			'Updated ortho entry with fresh metadata' if response.data else 'Created ortho entry for dataset',
+			LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
+		)
+
+		# The standardised output takes the archive name, so keep the pulled file as the original.
+		path_original = temp_dir / f'original_{ortho.ortho_file_name}'
+		temp_ortho_path.replace(path_original)
 
 	except Exception as e:
 		token, _ = _refresh_processor_session(task)
@@ -159,15 +105,7 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 		)
 
 	try:
-		# Setup paths
-		path_original = temp_dir / f'original_{ortho.ortho_file_name}'
 		path_converted = temp_dir / f'{ortho.ortho_file_name}'
-
-		# Get storage server path
-		storage_server_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{ortho.ortho_file_name}'
-
-		# Pull original file
-		pull_file_from_storage_server(storage_server_path, str(path_original), token, task.dataset_id)
 
 		# Start conversion
 		t1 = time.time()

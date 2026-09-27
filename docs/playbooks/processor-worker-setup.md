@@ -102,9 +102,6 @@ not set `CUDA_MPS_PIPE_DIRECTORY` are unaffected. To opt in:
   preserves the pinning instead of recreating the container without it. Each
   deploy records the files it used in `auto-deploy.log` (`Using compose files:`).
 
-The worker forwards both values to the TCD helper container and bind-mounts the
-same host path there, so the path must be identical on host and worker.
-
 ## Bring-Up
 
 From the production checkout on the new worker host:
@@ -116,7 +113,7 @@ git checkout main
 git pull --ff-only origin main
 mkdir -p .local/processor-control
 python3 scripts/processor_asset_preflight.py
-docker compose -f docker-compose.processor.yaml build processor tcd
+docker compose -f docker-compose.processor.yaml build processor
 docker compose -f docker-compose.processor.yaml up -d processor
 ```
 

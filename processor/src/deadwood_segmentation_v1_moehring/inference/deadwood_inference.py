@@ -81,6 +81,7 @@ class DeadwoodInference:
 			tile_size=1024,
 			padding=256,
 			transform=build_deadwood_transform(),
+			skip_nodata_tiles=True,
 		)
 		vrt_src = dataset.image_src
 

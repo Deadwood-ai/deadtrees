@@ -2,9 +2,11 @@ import numpy as np
 from rasterio import windows
 from torch.utils.data import Dataset
 
+from .nodata import read_nodata_mask
+
 
 class InferenceDataset(Dataset):
-	def __init__(self, image_src, tile_size=512, padding=56, transform=None):
+	def __init__(self, image_src, tile_size=512, padding=56, transform=None, skip_nodata_tiles=False):
 		super().__init__()
 		self.tile_size = tile_size
 		self.padding = padding
@@ -13,6 +15,11 @@ class InferenceDataset(Dataset):
 		self.height = self.image_src.height
 		self.transform = transform
 
+		# With skip_nodata_tiles, tiles whose whole padded input is nodata are dropped:
+		# every caller zeroes the nodata pixels of a tile's (smaller) output window and
+		# starts from an all-zero output, so predicting them only costs GPU time. The
+		# check reads each padded window's mask up front, which only pays off for heavy
+		# models (deadwood/combined ~20-30% faster; the small AOI model got slower).
 		self.cropped_windows = [
 			window
 			for window in get_windows(
@@ -24,7 +31,21 @@ class InferenceDataset(Dataset):
 				tile_height=self.tile_size - (padding * 2),
 				overlap=0,
 			)
+			if not (skip_nodata_tiles and self._is_all_nodata(window))
 		]
+
+	def _inference_window(self, cropped_window):
+		return windows.Window(
+			cropped_window.col_off - self.padding,
+			cropped_window.row_off - self.padding,
+			cropped_window.width + (2 * self.padding),
+			cropped_window.height + (2 * self.padding),
+		)
+
+	def _is_all_nodata(self, cropped_window) -> bool:
+		raster = windows.Window(0, 0, self.width, self.height)
+		on_raster = windows.intersection(self._inference_window(cropped_window), raster)
+		return bool(read_nodata_mask(self.image_src, on_raster).all())
 
 	def __len__(self):
 		return len(self.cropped_windows)
@@ -37,12 +58,7 @@ class InferenceDataset(Dataset):
 			'width': cropped_window.width,
 			'height': cropped_window.height,
 		}
-		inference_window = windows.Window(
-			cropped_window.col_off - self.padding,
-			cropped_window.row_off - self.padding,
-			cropped_window.width + (2 * self.padding),
-			cropped_window.height + (2 * self.padding),
-		)
+		inference_window = self._inference_window(cropped_window)
 		try:
 			image = self.image_src.read((1, 2, 3), window=inference_window)
 		except Exception as e:

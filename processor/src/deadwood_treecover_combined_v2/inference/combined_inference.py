@@ -192,6 +192,7 @@ class CombinedInference:
             tile_size=TILE_SIZE,
             padding=PADDING,
             transform=_build_transform(),
+            skip_nodata_tiles=True,
         )
         vrt_src = dataset.image_src
 
