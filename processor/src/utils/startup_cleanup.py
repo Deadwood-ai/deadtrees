@@ -113,11 +113,11 @@ def cleanup_orphaned_resources(token: str):
 	except Exception as e:
 		logger.error(f'Failed to cleanup zombie containers: {e}', LogContext(category=LogCategory.PROCESS, token=token))
 
-	# 1b. Clean up exited stage containers leaked by crashes (ODM/TCD)
+	# 1b. Clean up exited stage containers leaked by crashes (ODM)
 	# Note: ODM is run with remove=False for better failure forensics. If the processor
 	# crashes mid-flight, exited containers can be left behind.
 	try:
-		roles = ('odm_container', 'tcd_pipeline')
+		roles = ('odm_container',)
 		removed_stage = 0
 		for role in roles:
 			containers = client.containers.list(all=True, filters={'label': f'dt_role={role}'})
@@ -158,7 +158,7 @@ def cleanup_orphaned_resources(token: str):
 	# 2. Clean up orphaned volumes (optional - only if not referenced)
 	try:
 		orphaned_volumes = []
-		for prefix in ('odm_processing_', 'tcd_volume_'):
+		for prefix in ('odm_processing_',):
 			volumes = client.volumes.list(filters={'name': prefix})
 			for volume in volumes:
 				try:

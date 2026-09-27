@@ -37,7 +37,7 @@ compose` commands. The script:
 2. requests a drain;
 3. waits until the host worker has no active claimed queue row;
 4. fast-forwards the checkout to the exact `origin/main` SHA fetched before draining;
-5. rebuilds `processor` and `tcd`;
+5. rebuilds `processor`;
 6. force-recreates the processor container; and
 7. clears the drain request after the new container is running; and
 8. records the successfully activated SHA under `.local/`.

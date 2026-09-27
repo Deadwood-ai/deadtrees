@@ -234,7 +234,7 @@ fi
 
 require_clean_checkout
 log_processor_compose_files
-docker compose "${PROCESSOR_COMPOSE_FILES[@]}" build processor tcd >> "${LOG_FILE}" 2>&1
+docker compose "${PROCESSOR_COMPOSE_FILES[@]}" build processor >> "${LOG_FILE}" 2>&1
 python3 "${STATUS_SCRIPT}" clear-ack >> "${LOG_FILE}" 2>&1
 PROCESSOR_RELEASE_SHA="${deployed_sha}" docker compose "${PROCESSOR_COMPOSE_FILES[@]}" up -d --force-recreate processor >> "${LOG_FILE}" 2>&1
 python3 "${STATUS_SCRIPT}" wait-for-idle \

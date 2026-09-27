@@ -112,7 +112,7 @@ def _handle_graceful_shutdown(signum, frame):
 					token=token,
 				),
 			)
-			# ODM/TCD stages run as detached containers via the host Docker socket
+			# ODM runs as a detached container via the host Docker socket
 			# and outlive this process. Kill them before making the task retryable,
 			# otherwise the next run starts a duplicate while the old one keeps
 			# consuming GPU/CPU.

@@ -1,5 +1,9 @@
 # Tree Cover Segmentation Implementation Specification
 
+> Superseded: tree cover inference no longer runs in a TCD container. The model now
+> runs in-process in `processor/src/treecover_segmentation_oam_tcd/tcd_inference.py`.
+> This document is kept as the history of the container-based design.
+
 ## Overview
 
 This specification details the implementation of tree cover segmentation using a **hybrid approach** that combines the official TCD Docker container with proven custom processing logic. The solution uses the `ghcr.io/restor-foundation/tcd:main` container for ML inference while preserving the working implementation from the treecover-segmentation branch for parameter handling and result processing.

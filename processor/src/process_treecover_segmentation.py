@@ -13,12 +13,11 @@ from .exceptions import AuthenticationError, DatasetError, ProcessingError
 
 
 def process_treecover_segmentation(task: QueueTask, token: str, temp_dir: Path):
-	"""Process tree cover segmentation using hybrid TCD container approach.
+	"""Process tree cover segmentation with the TCD SegFormer model.
 
-	This function implements the hybrid strategy:
 	1. Authentication and ortho file retrieval (following deadwood pattern)
 	2. Preprocessing: Reproject orthomosaic to EPSG:3395, 10cm resolution
-	3. Container execution: Run TCD container via shared volumes
+	3. Inference: Run the TCD model in-process on the reprojected ortho
 	4. Postprocessing: Load confidence map, threshold, convert to polygons
 	5. Storage: Save results to v2_forest_cover_geometries via labels system
 
@@ -89,7 +88,7 @@ def process_treecover_segmentation(task: QueueTask, token: str, temp_dir: Path):
 
 	try:
 		logger.info(
-			'Running tree cover segmentation prediction via TCD container',
+			'Running tree cover segmentation prediction',
 			LogContext(
 				category=LogCategory.TREECOVER,
 				dataset_id=task.dataset_id,
@@ -125,8 +124,8 @@ def process_treecover_segmentation(task: QueueTask, token: str, temp_dir: Path):
 				extra={'error': str(e)},
 			),
 		)
-		# Re-login to avoid using an expired token during error handling. The TCD
-		# container can run for hours, so the token captured at task start is often
+		# Re-login to avoid using an expired token during error handling. Tree cover
+		# inference can run for hours, so the token captured at task start is often
 		# expired by the time we get here; without this the status write itself fails
 		# with 'JWT expired', masking the real error and leaving has_error unset.
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)

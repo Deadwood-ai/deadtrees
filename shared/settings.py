@@ -47,14 +47,9 @@ class Settings(BaseSettings):
 	ENV: str = ENV
 	DEV_MODE: bool = IS_DEVELOPMENT
 
-	# Containers
-	TCD_CONTAINER_IMAGE: str = 'deadtrees-tcd:latest'
-	TCD_CONTAINER_TIMEOUT_SECONDS: int = 14400
-	# Hosts that reserve a GPU for the processor via an NVIDIA MPS daemon + EXCLUSIVE_PROCESS
-	# compute mode set this to the MPS pipe directory (same path on host and in the worker).
-	# The TCD helper container then gets the same env var and a bind mount of that path.
-	# Empty (the default) leaves the TCD launch unchanged.
-	CUDA_MPS_PIPE_DIRECTORY: str = ''
+	# Persistent Hugging Face cache for the pinned TCD tree cover checkpoint, so it is
+	# downloaded once per host rather than on every run. Deployments point this at /data.
+	TCD_MODEL_CACHE_DIR: str = str(ASSETS_DIR / 'tcd_model_cache')
 
 	# docker.from_env() defaults to a 60s read timeout on the daemon socket, which applies
 	# to control-plane calls (containers.create/start, put_archive, wait). When the host disk
