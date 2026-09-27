@@ -162,10 +162,15 @@ class TCDModel:
 		"""Tree confidence for a (N, bands, H, W) uint8 batch as (N, H, W) uint8."""
 		pixels = torch.from_numpy(tiles[:, :3]).to(self.device, dtype=torch.float32)
 		pixels = pixels.sub_(self._mean).div_(self._std)
-		logits = self.model(pixel_values=pixels).logits
-		probabilities = torch.nn.functional.interpolate(
-			logits, size=pixels.shape[-2:], mode='bilinear', align_corners=False
-		).softmax(dim=1)
+		# fp16 on the GPU is ~1.7x faster; against the fp32 container output it keeps ~99%
+		# of confidence values identical, >99.99% within one uint8 step, and the tree mask
+		# at IoU >= 0.9999 on the validation orthos.
+		half = self.device.type == 'cuda'
+		with torch.autocast(device_type=self.device.type, dtype=torch.float16, enabled=half):
+			logits = self.model(pixel_values=pixels).logits
+			probabilities = torch.nn.functional.interpolate(
+				logits, size=pixels.shape[-2:], mode='bilinear', align_corners=False
+			).softmax(dim=1)
 		return (255 * probabilities[:, TCD_TREE_CLASS]).to(torch.uint8).cpu().numpy()
 
 	def close(self) -> None:
