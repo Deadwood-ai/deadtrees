@@ -7,7 +7,7 @@ import safetensors.torch
 import segmentation_models_pytorch as smp
 import torch
 
-from processor.src.utils.inference_dataset import InferenceDataset, normalize_imagenet, predict_tiles
+from processor.src.utils.inference_dataset import MASK_TIFF_LAYOUT, InferenceDataset, normalize_imagenet, predict_tiles
 from processor.src.utils.segmentation import (
 	filter_polygons_by_area,
 	image_reprojector,
@@ -85,6 +85,7 @@ class DeadwoodInference:
 				dtype=np.uint8,
 				crs=vrt_src.crs,
 				transform=vrt_src.transform,
+				**MASK_TIFF_LAYOUT,
 			) as dst:
 				for out_window, mask in predict_tiles(dataset, self.predict, self.device, DEADWOOD_BATCH_SIZE):
 					dst.write(mask, 1, window=out_window)
