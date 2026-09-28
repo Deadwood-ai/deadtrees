@@ -237,13 +237,13 @@ const Hero = () => {
           <div className="mt-8 flex w-full justify-center lg:mt-0 lg:w-[58%] lg:justify-end">
             <div className="relative aspect-video w-full max-w-[1120px] overflow-hidden rounded-2xl bg-gray-100 shadow-2xl ring-1 ring-black/5 transition-all duration-300 hover:-translate-y-2 hover:shadow-[0_30px_60px_-15px_rgba(0,0,0,0.3)]">
               <ReactPlayer
-                url="https://data2.deadtrees.earth/assets/v1/New_Version_deadtrees_video.mp4"
+                url="https://data2.deadtrees.earth/assets/v1/trailer/deadtrees_trailer_2026-09-28.mp4"
                 width="100%"
                 height="100%"
                 controls={true}
                 playsinline
                 loop={true}
-                light="https://data2.deadtrees.earth/assets/v1/image.png"
+                light="https://data2.deadtrees.earth/assets/v1/trailer/deadtrees_trailer_2026-09-28_poster.jpg"
                 config={heroVideoConfig}
               />
             </div>
