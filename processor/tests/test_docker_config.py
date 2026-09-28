@@ -11,6 +11,8 @@ from docker.errors import DockerException, ImageNotFound, APIError
 import subprocess
 import os
 
+from shared.settings import settings
+
 pytestmark = pytest.mark.slow
 
 
@@ -54,7 +56,7 @@ def test_can_pull_odm_image():
 	"""Test that ODM image can be pulled (or is already available)."""
 	try:
 		client = docker.from_env()
-		odm_image = 'opendronemap/odm'
+		odm_image = settings.ODM_IMAGE
 
 		# First try to get the image if it exists
 		try:
@@ -144,7 +146,7 @@ def test_odm_container_execution_capability():
 	"""Test that we can run a simple ODM container command."""
 	try:
 		client = docker.from_env()
-		odm_image = 'opendronemap/odm'
+		odm_image = settings.ODM_IMAGE
 
 		# First ensure ODM image is available
 		try:

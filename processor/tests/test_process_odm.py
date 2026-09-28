@@ -8,6 +8,8 @@ Fast unit tests (no Docker/SSH) cover analysis and EXIF extraction logic.
 The slow integration test (marked @pytest.mark.slow) runs the full ODM pipeline.
 """
 
+import json
+import math
 import os
 import zipfile
 import tempfile
@@ -22,7 +24,11 @@ from processor.src.process_odm import (
 	_analyze_extracted_files,
 	_extract_exif_from_images,
 	_build_odm_command,
-	_filter_images_by_camera_orientation,
+	_filter_reconstruction_by_orientation,
+	_metadata_off_nadir_degrees,
+	_drop_metadata_obliques,
+	RECONSTRUCTION_FILE,
+	OPENSFM_RECONSTRUCT_REPORT,
 )
 from shared.exif_utils import extract_camera_nadir_deviation_degrees
 from processor.src.utils.ssh import push_file_to_storage_server, check_file_exists_on_storage
@@ -31,6 +37,7 @@ from processor.src.utils.ssh import push_file_to_storage_server, check_file_exis
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _extract_zip_to_tempdir(zip_path: Path) -> tempfile.TemporaryDirectory:
 	"""Extract a ZIP to a fresh temp directory, return the TemporaryDirectory object."""
@@ -74,9 +81,7 @@ def test_analyze_extracted_files_detects_rtk_and_images():
 		pytest.skip('test_minimal_5_images.zip not found; run make download-assets')
 
 	with _extract_zip_to_tempdir(zip_path) as tmpdir:
-		rtk_metadata, image_count, total_size_bytes = _analyze_extracted_files(
-			Path(tmpdir), token='test', dataset_id=0
-		)
+		rtk_metadata, image_count, total_size_bytes = _analyze_extracted_files(Path(tmpdir), token='test', dataset_id=0)
 
 	assert image_count == 5
 	assert total_size_bytes > 0
@@ -93,9 +98,7 @@ def test_analyze_extracted_files_no_rtk():
 		pytest.skip('test_no_rtk_3_images.zip not found; run make download-assets')
 
 	with _extract_zip_to_tempdir(zip_path) as tmpdir:
-		rtk_metadata, image_count, total_size_bytes = _analyze_extracted_files(
-			Path(tmpdir), token='test', dataset_id=0
-		)
+		rtk_metadata, image_count, total_size_bytes = _analyze_extracted_files(Path(tmpdir), token='test', dataset_id=0)
 
 	assert image_count >= 1
 	assert total_size_bytes > 0
@@ -119,12 +122,16 @@ def test_extract_exif_from_real_drone_images():
 	timing_fields = {'DateTime', 'DateTimeOriginal', 'DateTimeDigitized'}
 	exposure_fields = {'ISOSpeedRatings', 'FNumber', 'FocalLength', 'ExposureTime'}
 
-	categories_found = sum([
-		bool(camera_fields & exif_data.keys()),
-		bool(timing_fields & exif_data.keys()),
-		bool(exposure_fields & exif_data.keys()),
-	])
-	assert categories_found >= 2, f'Expected ≥2 EXIF categories, got {categories_found}. Keys: {list(exif_data.keys())[:10]}'
+	categories_found = sum(
+		[
+			bool(camera_fields & exif_data.keys()),
+			bool(timing_fields & exif_data.keys()),
+			bool(exposure_fields & exif_data.keys()),
+		]
+	)
+	assert categories_found >= 2, (
+		f'Expected ≥2 EXIF categories, got {categories_found}. Keys: {list(exif_data.keys())[:10]}'
+	)
 
 
 @pytest.mark.unit
@@ -198,53 +205,218 @@ def test_extract_camera_nadir_deviation_scans_late_dng_xmp(tmp_path):
 	"""Orientation XMP should be found even when a TIFF/DNG container stores it late."""
 	image_path = tmp_path / 'drone.dng'
 	image_path.write_bytes(
-		b'II*\x00'
-		+ b'\x00' * (1024 * 1024)
-		+ b'<drone-parrot:CameraPitchDegree>-85.0</drone-parrot:CameraPitchDegree>'
+		b'II*\x00' + b'\x00' * (1024 * 1024) + b'<drone-parrot:CameraPitchDegree>-85.0</drone-parrot:CameraPitchDegree>'
 	)
 
 	assert extract_camera_nadir_deviation_degrees(image_path) == (5.0, 'CameraPitchDegree', -85.0)
 
 
+def _write_image_with_pitch(path: Path, tag: str, pitch: str) -> Path:
+	path.write_bytes(b'\xff\xd8<rdf:Description ' + tag.encode() + b'="' + pitch.encode() + b'" />\xff\xd9')
+	return path
+
+
 @pytest.mark.unit
-def test_filter_images_by_camera_orientation_keeps_only_nadir_candidates(tmp_path):
-	"""The ODM input set should reject oblique images but retain unknown metadata."""
-	image_xmp = {
-		'nadir-negative.jpg': ('GimbalPitchDegree', '-90.0'),
-		'nadir-positive.jpg': ('CameraPitchDegree', '+90.0'),
-		'boundary.jpg': ('Camera:Pitch', '+10.0'),
-		'rounded-boundary.jpg': ('GimbalPitchDegree', '-79.97'),
-		'oblique.jpg': ('Camera:Pitch', '+45.0'),
-	}
-	paths = []
-	for filename, (tag, pitch) in image_xmp.items():
-		path = tmp_path / filename
-		path.write_bytes(
-			b'\xff\xd8<rdf:Description '
-			+ tag.encode()
-			+ b'="'
-			+ pitch.encode()
-			+ b'" />\xff\xd9'
-		)
-		paths.append(path)
-
-	unknown_path = tmp_path / 'unknown.jpg'
-	unknown_path.write_bytes(b'\xff\xd8no pitch metadata\xff\xd9')
-	paths.append(unknown_path)
-
-	kept, excluded, unknown = _filter_images_by_camera_orientation(paths, max_nadir_deviation_degrees=10.0)
-
-	assert {path.name for path in kept} == {
-		'nadir-negative.jpg',
-		'nadir-positive.jpg',
-		'boundary.jpg',
-		'rounded-boundary.jpg',
-		'unknown.jpg',
-	}
-	assert [(path.name, deviation, source) for path, deviation, source in excluded] == [
-		('oblique.jpg', 45.0, 'Camera:Pitch')
+def test_metadata_off_nadir_degrees_treats_zero_pitch_as_unknown(tmp_path):
+	"""GimbalPitchDegree=0 is a placeholder on several DJI cameras (DT-951), not a horizontal camera."""
+	paths = [
+		_write_image_with_pitch(tmp_path / 'zero.jpg', 'GimbalPitchDegree', '+0.00'),
+		_write_image_with_pitch(tmp_path / 'horizon.jpg', 'GimbalPitchDegree', '-9.80'),
+		_write_image_with_pitch(tmp_path / 'nadir.jpg', 'GimbalPitchDegree', '-90.0'),
+		_write_image_with_pitch(tmp_path / 'pix4d-nadir.jpg', 'Camera:Pitch', '0.0'),
 	]
-	assert unknown == [unknown_path]
+	unknown = tmp_path / 'unknown.jpg'
+	unknown.write_bytes(b'\xff\xd8no pitch metadata\xff\xd9')
+
+	angles = _metadata_off_nadir_degrees([*paths, unknown])
+
+	assert angles == {
+		'zero.jpg': None,
+		'horizon.jpg': pytest.approx(80.2),
+		'nadir.jpg': 0.0,
+		'pix4d-nadir.jpg': 0.0,
+		'unknown.jpg': None,
+	}
+
+
+@pytest.mark.unit
+def test_drop_metadata_obliques_trusts_metadata_that_recognizes_nadir_images():
+	paths = [Path(name) for name in ('nadir.jpg', 'nadir2.jpg', 'rounded.jpg', 'oblique.jpg', 'unknown.jpg')]
+	angles = {'nadir.jpg': 0.0, 'nadir2.jpg': 1.0, 'rounded.jpg': 10.03, 'oblique.jpg': 45.0, 'unknown.jpg': None}
+
+	kept, dropped = _drop_metadata_obliques(paths, angles, max_off_nadir=10.0)
+
+	assert [p.name for p in kept] == ['nadir.jpg', 'nadir2.jpg', 'rounded.jpg', 'unknown.jpg']
+	assert [p.name for p in dropped] == ['oblique.jpg']
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+	'angles',
+	[
+		{'a.jpg': 80.2, 'b.jpg': 80.2},  # horizon timelapse: the reconstruction and its fallback decide
+		{'a.jpg': None, 'b.jpg': None},  # placeholder or missing tags
+		{'a.jpg': 25.0, 'b.jpg': None},
+		{'a.jpg': 0.0, 'b.jpg': 25.0},  # a lone take-off frame does not make the tags trustworthy (8625)
+	],
+)
+def test_drop_metadata_obliques_keeps_everything_without_a_recognized_nadir_image(angles):
+	paths = [Path('a.jpg'), Path('b.jpg')]
+
+	kept, dropped = _drop_metadata_obliques(paths, angles, max_off_nadir=10.0)
+
+	assert kept == paths
+	assert dropped == []
+
+
+def _nadir_rotation(off_nadir_degrees: float) -> list[float]:
+	"""Angle-axis rotation about x that tilts a down-looking OpenSfM camera by the given angle."""
+	return [math.radians(180.0 - off_nadir_degrees), 0.0, 0.0]
+
+
+def _area_reconstruction(angles: dict[str, float]) -> list[dict]:
+	shots = {
+		shot_id: {
+			'rotation': _nadir_rotation(angle),
+			'translation': [0.0, 0.0, 0.0],
+			'camera': 'cam',
+			'gps_position': [(index % 3) * 30.0, (index // 3) * 30.0, 100.0],
+		}
+		for index, (shot_id, angle) in enumerate(angles.items())
+	}
+	return [{'cameras': {'cam': {}}, 'shots': shots, 'points': {}}]
+
+
+class _FakeVolume:
+	"""In-memory stand-in for the shared ODM volume helpers."""
+
+	def __init__(self, files: dict[str, bytes]):
+		self.files = dict(files)
+
+	def rewrite(self, volume_name, relative_path, transform, dataset_id):
+		self.files[relative_path] = transform(self.files[relative_path])
+
+	def read(self, volume_name, relative_path, dataset_id):
+		return self.files.get(relative_path)
+
+
+def _report(*partials: list[str]) -> bytes:
+	return json.dumps(
+		{
+			'reconstructions': [
+				{'bootstrap': {'image_pair': p[:2]}, 'grow': {'steps': [{'images': p[2:]}]}} for p in partials
+			]
+		}
+	).encode()
+
+
+@pytest.fixture
+def fake_volume(monkeypatch):
+	import processor.src.process_odm as process_odm_module
+
+	def install(reconstruction: list[dict]) -> _FakeVolume:
+		volume = _FakeVolume(
+			{
+				f'dataset_1/{RECONSTRUCTION_FILE}': json.dumps(reconstruction).encode(),
+			}
+		)
+		monkeypatch.setattr(process_odm_module, 'rewrite_file_on_shared_volume', volume.rewrite)
+		monkeypatch.setattr(process_odm_module, 'read_file_from_shared_volume', volume.read)
+		monkeypatch.setattr(settings, 'ODM_MAX_NADIR_DEVIATION_DEGREES', 10.0)
+		return volume
+
+	return install
+
+
+@pytest.mark.unit
+def test_filter_reconstruction_by_orientation_drops_oblique_shots(fake_volume):
+	volume = fake_volume(_area_reconstruction({'n1': 1.0, 'n2': 3.0, 'n3': 0.5, 'n4': 2.0, 'oblique': 30.0}))
+
+	shots_dropped = _filter_reconstruction_by_orientation('odm_processing_1', 'dataset_1', {}, dataset_id=1, token='t')
+
+	assert shots_dropped is True
+	filtered = json.loads(volume.files[f'dataset_1/{RECONSTRUCTION_FILE}'])
+	assert set(filtered[0]['shots']) == {'n1', 'n2', 'n3', 'n4'}
+
+
+@pytest.mark.unit
+def test_filter_reconstruction_by_orientation_keeps_zero_pitch_style_nadir_flight(fake_volume):
+	"""The metadata-independent filter keeps nadir shots whatever their gimbal tags claim."""
+	original = _area_reconstruction({f's{index}': 2.0 for index in range(6)})
+	volume = fake_volume(original)
+
+	assert _filter_reconstruction_by_orientation('odm_processing_1', 'dataset_1', {}, dataset_id=1, token='t') is False
+
+	assert json.loads(volume.files[f'dataset_1/{RECONSTRUCTION_FILE}']) == original
+
+
+@pytest.mark.unit
+def test_filter_reconstruction_by_orientation_fails_clearly_for_all_oblique_imagery(fake_volume):
+	volume = fake_volume(_area_reconstruction({f's{index}': 35.0 for index in range(6)}))
+
+	with pytest.raises(
+		Exception, match=r'No usable nadir images \(0 found\): 6 reconstructed images look more than 10 degrees'
+	):
+		_filter_reconstruction_by_orientation('odm_processing_1', 'dataset_1', {}, dataset_id=1, token='t')
+
+	# Nothing is rewritten; the exception stops the pipeline before the orthophoto pass.
+	assert json.loads(volume.files[f'dataset_1/{RECONSTRUCTION_FILE}'])[0]['shots'].keys() == {
+		f's{i}' for i in range(6)
+	}
+
+
+@pytest.mark.unit
+def test_filter_reconstruction_by_orientation_fails_when_only_unjudged_fragments_survive(fake_volume):
+	"""A stray 2-image partial must not keep an otherwise oblique capture alive (seen on dataset 9515)."""
+	angles = {f's{index}': 25.0 for index in range(6)}
+	reconstruction = _area_reconstruction({**angles, 'frag_a': 0.0, 'frag_b': 10.0})
+	volume = fake_volume(reconstruction)
+	volume.files[f'dataset_1/{OPENSFM_RECONSTRUCT_REPORT}'] = _report(list(angles), ['frag_a', 'frag_b'])
+
+	with pytest.raises(
+		Exception, match=r'No usable nadir images \(0 found\): 6 reconstructed .* and 2 could not be judged'
+	):
+		_filter_reconstruction_by_orientation('odm_processing_1', 'dataset_1', {}, dataset_id=1, token='t')
+
+
+@pytest.mark.unit
+def test_filter_reconstruction_by_orientation_falls_back_to_metadata_for_a_line_flight(fake_volume):
+	"""A horizon timelapse flown along a line (dataset 9671): no measurable vertical, metadata says 80 deg."""
+	shots = {
+		f'f{index}': {
+			'rotation': _nadir_rotation(2.0),
+			'translation': [0, 0, 0],
+			'gps_position': [index * 10.0, 0.0, 100.0],
+		}
+		for index in range(5)
+	}
+	fake_volume([{'cameras': {}, 'shots': shots, 'points': {}}])
+
+	with pytest.raises(Exception, match='camera metadata marks 5 more as oblique'):
+		_filter_reconstruction_by_orientation(
+			'odm_processing_1', 'dataset_1', {shot_id: 80.2 for shot_id in shots}, dataset_id=1, token='t'
+		)
+
+
+@pytest.mark.unit
+def test_filter_reconstruction_by_orientation_fails_for_a_lone_nadir_frame_among_obliques(fake_volume):
+	"""Dataset 8625: one take-off frame at nadir, 229 frames at 25 deg."""
+	fake_volume(_area_reconstruction({'takeoff': 0.5, **{f's{index}': 25.0 for index in range(8)}}))
+
+	with pytest.raises(Exception, match=r'No usable nadir images \(1 found\)'):
+		_filter_reconstruction_by_orientation('odm_processing_1', 'dataset_1', {}, dataset_id=1, token='t')
+
+
+@pytest.mark.unit
+def test_filter_reconstruction_by_orientation_keeps_everything_when_nothing_can_be_judged(fake_volume):
+	"""Two far-apart 2-image partials (dataset 9543) carry prior-aligned poses; leave them alone."""
+	original = _area_reconstruction({'a1': 0.0, 'a2': 33.4, 'b1': 0.0, 'b2': 0.0})
+	volume = fake_volume(original)
+	volume.files[f'dataset_1/{OPENSFM_RECONSTRUCT_REPORT}'] = _report(['a1', 'a2'], ['b1', 'b2'])
+
+	assert _filter_reconstruction_by_orientation('odm_processing_1', 'dataset_1', {}, dataset_id=1, token='t') is False
+
+	assert json.loads(volume.files[f'dataset_1/{RECONSTRUCTION_FILE}']) == original
 
 
 @pytest.fixture

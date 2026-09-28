@@ -1,3 +1,4 @@
+import json
 import zipfile
 import docker
 import time
@@ -24,6 +25,16 @@ from processor.src.utils.shared_volume import (
 	copy_files_to_shared_volume,
 	copy_results_from_shared_volume,
 	cleanup_volume_and_references,
+	create_file_on_shared_volume,
+	path_exists_on_shared_volume,
+	read_file_from_shared_volume,
+	remove_file_from_shared_volume,
+	rewrite_file_on_shared_volume,
+)
+from processor.src.utils.reconstruction_orientation import (
+	METADATA_TOLERANCE_DEGREES,
+	filter_reconstructions_by_orientation,
+	partials_from_opensfm_report,
 )
 from processor.src.utils.debug_artifacts import (
 	retain_failed_artifacts_enabled_for_dataset,
@@ -35,40 +46,55 @@ from shared.exif_utils import extract_camera_nadir_deviation_degrees, extract_co
 
 # RTK file extensions as specified in requirements
 RTK_EXTENSIONS = {'.RTK', '.MRK', '.RTL', '.RTB', '.RPOS', '.RTS', '.IMU'}
-ORIENTATION_THRESHOLD_TOLERANCE_DEGREES = 0.1
+# ODM's OpenSfM stage stops right after reconstruction when this file exists
+# (stages/run_opensfm.py, meant for split-merge); a later run without it resumes.
+STOP_AFTER_RECONSTRUCTION_FLAG = 'opensfm/split_merge_stop_at_reconstruction.txt'
+RECONSTRUCTION_FILE = 'opensfm/reconstruction.json'
+# Created by the OpenSfM stage only after the stop point, so pass 1 must not produce it.
+UNDISTORTED_DIR = 'opensfm/undistorted'
+# Written by OpenSfM's reconstruct step; lists the images of each partial reconstruction.
+OPENSFM_RECONSTRUCT_REPORT = 'opensfm/reports/reconstruction.json'
+PRUNE_POINTS_SCRIPT = Path(__file__).parent / 'utils' / 'odm_prune_points.py'
+# Several DJI cameras write exactly 0 into these tags for nadir shots (DT-951).
+PLACEHOLDER_ZERO_PITCH_TAGS = {'GimbalPitchDegree', 'CameraPitchDegree'}
+# Fewer nadir images than this among oblique ones cannot make an orthophoto (e.g. one take-off frame).
+MIN_NADIR_IMAGES = 3
 
 
-def _filter_images_by_camera_orientation(
-	image_files: list[Path], max_nadir_deviation_degrees: float
-) -> tuple[list[Path], list[tuple[Path, float, str]], list[Path]]:
-	"""Keep nadir images and images whose camera pitch metadata is unavailable.
+def _metadata_off_nadir_degrees(image_files: list[Path]) -> dict[str, float | None]:
+	"""Off-nadir angle from camera metadata per image name, or None when unknown.
 
-	Camera metadata conventions differ by manufacturer. The shared orientation
-	reader normalizes supported schemas to degrees away from nadir. Unknown
-	metadata remains eligible so unsupported and non-drone imagery is not
-	automatically rejected.
+	An exact 0 gimbal/camera pitch is a placeholder on several cameras, so it counts
+	as unknown rather than horizontal.
 	"""
-	if not 0 <= max_nadir_deviation_degrees <= 90:
-		raise ValueError('Maximum nadir deviation must be between 0 and 90 degrees')
-
-	kept: list[Path] = []
-	excluded: list[tuple[Path, float, str]] = []
-	unknown: list[Path] = []
-
+	angles: dict[str, float | None] = {}
 	for image_file in image_files:
 		orientation = extract_camera_nadir_deviation_degrees(image_file)
-		if orientation is None:
-			kept.append(image_file)
-			unknown.append(image_file)
-			continue
-
-		deviation_from_nadir, source_tag, _ = orientation
-		if deviation_from_nadir <= max_nadir_deviation_degrees + ORIENTATION_THRESHOLD_TOLERANCE_DEGREES:
-			kept.append(image_file)
+		if orientation is None or (orientation[1] in PLACEHOLDER_ZERO_PITCH_TAGS and orientation[2] == 0.0):
+			angles[image_file.name] = None
 		else:
-			excluded.append((image_file, deviation_from_nadir, source_tag))
+			angles[image_file.name] = orientation[0]
+	return angles
 
-	return kept, excluded, unknown
+
+def _drop_metadata_obliques(
+	image_files: list[Path], metadata_off_nadir: dict[str, float | None], max_off_nadir: float
+) -> tuple[list[Path], list[Path]]:
+	"""Drop images whose metadata says oblique, but only where the metadata is evidently usable.
+
+	Metadata is trusted here only if it also recognizes at least MIN_NADIR_IMAGES nadir images; a
+	flight whose tags all read oblique (or unknown) goes to ODM whole and the
+	reconstructed orientation decides. Oblique images that never reconstruct still
+	cost pass-1 time and can derail ODM (dataset 12174 ran out of memory with them).
+	Returns ``(kept, dropped)``.
+	"""
+	limit = max_off_nadir + METADATA_TOLERANCE_DEGREES
+	angles = [metadata_off_nadir.get(image_file.name) for image_file in image_files]
+	if sum(angle is not None and angle <= limit for angle in angles) < MIN_NADIR_IMAGES:
+		return list(image_files), []
+	kept = [image_file for image_file, angle in zip(image_files, angles) if angle is None or angle <= limit]
+	dropped = [image_file for image_file, angle in zip(image_files, angles) if angle is not None and angle > limit]
+	return kept, dropped
 
 
 def _build_odm_command() -> tuple[list[str], str, str]:
@@ -99,6 +125,93 @@ def _build_odm_command() -> tuple[list[str], str, str]:
 
 	env_mode = 'Speed optimized' if settings.DEV_MODE else 'Production quality'
 	return odm_command, resolution, env_mode
+
+
+def _filter_reconstruction_by_orientation(
+	volume_name: str, project_name: str, metadata_off_nadir: dict[str, float | None], dataset_id: int, token: str
+) -> bool:
+	"""Drop reconstructed shots that look too far away from nadir from ``reconstruction.json``.
+
+	Runs between the two ODM passes, so the orthophoto pass only undistorts and
+	textures the remaining shots. The reconstructed orientation decides wherever GPS
+	pins down the vertical; elsewhere camera metadata does. Returns whether any shot
+	was dropped.
+	"""
+	max_off_nadir = settings.ODM_MAX_NADIR_DEVIATION_DEGREES
+	log_context = LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id)
+	raw_report = read_file_from_shared_volume(volume_name, f'{project_name}/{OPENSFM_RECONSTRUCT_REPORT}', dataset_id)
+	partials = partials_from_opensfm_report(json.loads(raw_report)) if raw_report else None
+
+	shots_dropped = False
+
+	def drop_oblique_shots(raw_reconstruction: bytes) -> bytes:
+		nonlocal shots_dropped
+		filtered, result = filter_reconstructions_by_orientation(
+			json.loads(raw_reconstruction), max_off_nadir, partials, metadata_off_nadir
+		)
+		logger.info(
+			f'Reconstructed-orientation filter kept {len(result.kept)} shots within nadir +/- {max_off_nadir:g} degrees '
+			f'and excluded {len(result.excluded)}; of the shots whose vertical could not be measured'
+			+ (f' ({"; ".join(result.unjudged_reasons)})' if result.unjudged_reasons else '')
+			+ f', camera metadata excluded {len(result.excluded_by_metadata)} and {len(result.unjudged)} were kept',
+			log_context,
+		)
+		dropped = result.excluded + result.excluded_by_metadata
+		if dropped:
+			excluded_sample = ', '.join(f'{shot_id} ({angle:.1f} deg)' for shot_id, angle in dropped[:10])
+			logger.warning(
+				f'Excluded oblique shots: {excluded_sample}{" ..." if len(dropped) > 10 else ""}', log_context
+			)
+		# Unjudged shots come from partial reconstructions without a measured up axis. When (almost)
+		# every shot that could be judged is oblique, they are stray fragments of the same oblique
+		# capture; a lone nadir frame (e.g. at take-off, dataset 8625) cannot make an orthophoto either.
+		too_few_nadir = len(result.kept) < MIN_NADIR_IMAGES
+		if (result.excluded and too_few_nadir) or (not result.kept and not result.unjudged):
+			raise Exception(
+				f'No usable nadir images ({len(result.kept)} found): {len(result.excluded)} reconstructed images '
+				f'look more than {max_off_nadir:g} degrees '
+				f'away from nadir, camera metadata marks {len(result.excluded_by_metadata)} more as oblique, and '
+				f'{len(result.unjudged)} could not be judged; oblique imagery cannot produce an orthophoto'
+			)
+		shots_dropped = bool(dropped)
+		return json.dumps(filtered).encode() if shots_dropped else raw_reconstruction
+
+	rewrite_file_on_shared_volume(volume_name, f'{project_name}/{RECONSTRUCTION_FILE}', drop_oblique_shots, dataset_id)
+	return shots_dropped
+
+
+def _prune_unobserved_points(
+	client, volume_name: str, project_name: str, resource_labels: dict, dataset_id: int, token: str
+) -> None:
+	"""Remove sparse points only dropped shots observed, using OpenSfM inside the ODM image.
+
+	OpenSfM's export fails on such points once their observations are gone, and
+	tracks.csv is a binary OpenSfM format, so this runs odm_prune_points.py there.
+	"""
+	container = client.containers.run(
+		image=settings.ODM_IMAGE,
+		# The image's PATH picks the Python that has OpenSfM (ODM 3.6 puts /code/venv/bin first).
+		entrypoint='python3',
+		command=['-c', PRUNE_POINTS_SCRIPT.read_text(), f'/odm_data/{project_name}/opensfm'],
+		volumes={volume_name: {'bind': '/odm_data', 'mode': 'rw'}},
+		mem_limit='100g',
+		memswap_limit='100g',
+		oom_score_adj=500,
+		detach=True,
+		name=f'dt-odm-prune-d{dataset_id}-{int(time.time())}',
+		labels={**resource_labels, 'dt_role': 'odm_prune', 'dt_volume': volume_name},
+	)
+	try:
+		result = container.wait()
+		output = container.logs().decode('utf-8', errors='ignore')
+	finally:
+		container.remove(force=True)
+	if result.get('StatusCode', 1) != 0:
+		raise Exception(f'Pruning sparse points of excluded shots failed: {output[-2000:]}')
+	logger.info(
+		f'Pruned sparse points seen only by excluded shots: {output.strip().splitlines()[-1]}',
+		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+	)
 
 
 def process_odm(task: QueueTask, temp_dir: Path):
@@ -567,6 +680,80 @@ def _update_camera_metadata(dataset_id: int, exif_metadata: dict, token: str):
 			)
 
 
+def _run_odm_pass(
+	client, odm_command: list[str], volume_name: str, resource_labels: dict, dataset_id: int, token: str, pass_name: str
+):
+	"""Run one ODM container over the shared volume and wait for it.
+
+	Returns ``(container, exit_status, stdout_logs)``. The container is left in
+	place (remove=False) so a failure can be inspected and persisted as forensics.
+	"""
+	logger.info(
+		f'Starting ODM {pass_name} pass on shared volume {volume_name}',
+		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+	)
+	odm_container = None
+	stdout_logs = ''
+	exit_status = 1
+	try:
+		# Hard cap ODM container RAM via cgroups so a runaway ODM stage
+		# (texrecon / gdal ortho writeout) cannot exhaust host memory and
+		# take the processor container down with it as OOM collateral.
+		# Host has ~125 GB; processor is capped at 96 GB; leaving ODM
+		# uncapped was causing global OOM events that killed the
+		# processor mid-pipeline (see DT-263 / forensics for 8469, 8473,
+		# 8503). 100 GB is generous for ODM while guaranteeing the
+		# processor can always keep running. oom_score_adj biases the
+		# kernel OOM killer toward the ODM container if memory pressure
+		# still occurs, protecting the processor from collateral kills.
+		odm_container = client.containers.run(
+			image=settings.ODM_IMAGE,
+			command=odm_command,
+			volumes={volume_name: {'bind': '/odm_data', 'mode': 'rw'}},
+			environment={
+				'GDAL_CACHEMAX': '16384',
+			},
+			mem_limit='100g',
+			memswap_limit='100g',
+			oom_score_adj=500,
+			remove=False,
+			detach=True,
+			name=f'dt-odm-pipeline-d{dataset_id}-{pass_name}-{int(time.time())}',
+			labels={
+				**resource_labels,
+				'dt_role': 'odm_container',
+				'dt_volume': volume_name,
+			},
+		)
+
+		result = odm_container.wait()
+		exit_status = result.get('StatusCode', 1) if isinstance(result, dict) else 1
+
+		log_bytes = odm_container.logs()
+		stdout_logs = (
+			log_bytes.decode('utf-8', errors='ignore') if isinstance(log_bytes, (bytes, bytearray)) else str(log_bytes)
+		)
+	except Exception as e:
+		logger.error(
+			f'ODM container execution failed unexpectedly: {e}',
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+		)
+
+		# Best-effort log capture if container exists.
+		if odm_container is not None:
+			try:
+				log_bytes = odm_container.logs()
+				stdout_logs = (
+					log_bytes.decode('utf-8', errors='ignore')
+					if isinstance(log_bytes, (bytes, bytearray))
+					else str(log_bytes)
+				)
+			except Exception:
+				pass
+
+	return odm_container, exit_status, stdout_logs
+
+
 def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_id: int) -> str:
 	"""
 	Execute ODM Docker container using shared named volumes for file sharing.
@@ -665,38 +852,32 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 	)
 
-	valid_image_files, orientation_excluded, orientation_unknown = _filter_images_by_camera_orientation(
-		valid_image_files,
-		max_nadir_deviation_degrees=settings.ODM_MAX_NADIR_DEVIATION_DEGREES,
-	)
-
-	logger.info(
-		f'Camera-orientation filter kept {len(valid_image_files)} images, '
-		f'excluded {len(orientation_excluded)} images outside '
-		f'nadir +/- {settings.ODM_MAX_NADIR_DEVIATION_DEGREES:g} degrees '
-		f'(with {ORIENTATION_THRESHOLD_TOLERANCE_DEGREES:g} degree metadata tolerance), and retained '
-		f'{len(orientation_unknown)} images without supported camera-orientation metadata',
-		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
-	)
-
-	if orientation_excluded:
-		excluded_sample = ', '.join(
-			f'{path.name} ({deviation:g} deg off nadir via {source_tag})'
-			for path, deviation, source_tag in orientation_excluded[:10]
+	if not valid_image_files:
+		raise Exception(
+			f'All {len(image_files)} images are 100 KB or smaller and were skipped as potentially corrupt; '
+			'nothing left for ODM'
 		)
-		logger.warning(
-			f'Excluded non-nadir ODM images: {excluded_sample}'
-			f'{" ..." if len(orientation_excluded) > 10 else ""}',
+
+	# Oblique images are judged by their reconstructed orientation after pass 1
+	# (_filter_reconstruction_by_orientation). Metadata only pre-filters where it is evidently
+	# usable, because vendor tags can be wrong (e.g. GimbalPitchDegree=0 for nadir shots, DT-951).
+	metadata_off_nadir = _metadata_off_nadir_degrees(valid_image_files)
+	valid_image_files, metadata_dropped = _drop_metadata_obliques(
+		valid_image_files, metadata_off_nadir, settings.ODM_MAX_NADIR_DEVIATION_DEGREES
+	)
+	if metadata_dropped:
+		dropped_sample = ', '.join(
+			f'{image_file.name} ({metadata_off_nadir[image_file.name]:.1f} deg)' for image_file in metadata_dropped[:10]
+		)
+		logger.info(
+			f'Camera metadata marks {len(metadata_dropped)} images as more than '
+			f'{settings.ODM_MAX_NADIR_DEVIATION_DEGREES:g} degrees off nadir and also recognizes nadir images; '
+			f'leaving them out of ODM: {dropped_sample}{" ..." if len(metadata_dropped) > 10 else ""}',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
-	if not valid_image_files:
-		raise Exception(
-			f'No images remain within nadir +/- {settings.ODM_MAX_NADIR_DEVIATION_DEGREES:g} degrees'
-		)
-
 	logger.info(
-		f'Preparing to copy {len(valid_image_files)} orientation-eligible images to the shared ODM volume',
+		f'Preparing to copy {len(valid_image_files)} images to the shared ODM volume',
 		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 	)
 
@@ -733,78 +914,34 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
-		# Create ODM container with shared volume (environment-agnostic approach)
-
 		try:
-			logger.info(
-				f'Creating ODM container with shared volume {volume_name}',
-				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+			# Pass 1 stops right after OpenSfM has reconstructed the camera poses, so
+			# oblique shots can be dropped from the reconstruction before anything is
+			# undistorted, meshed or textured. Pass 2 resumes from the edited state.
+			create_file_on_shared_volume(volume_name, f'{project_name}/{STOP_AFTER_RECONSTRUCTION_FLAG}', dataset_id)
+			odm_container, exit_status, stdout_logs = _run_odm_pass(
+				client, odm_command, volume_name, resource_labels, dataset_id, token, pass_name='reconstruction'
 			)
-
-			# Run detached (remove=False) so we can inspect and persist forensics on failure.
-			logger.info(
-				'ODM container started, processing images...',
-				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
-			)
-			stdout_logs = ''
-			exit_status = 1
-			try:
-				# Hard cap ODM container RAM via cgroups so a runaway ODM stage
-				# (texrecon / gdal ortho writeout) cannot exhaust host memory and
-				# take the processor container down with it as OOM collateral.
-				# Host has ~125 GB; processor is capped at 96 GB; leaving ODM
-				# uncapped was causing global OOM events that killed the
-				# processor mid-pipeline (see DT-263 / forensics for 8469, 8473,
-				# 8503). 100 GB is generous for ODM while guaranteeing the
-				# processor can always keep running. oom_score_adj biases the
-				# kernel OOM killer toward the ODM container if memory pressure
-				# still occurs, protecting the processor from collateral kills.
-				odm_container = client.containers.run(
-					image='opendronemap/odm',
-					command=odm_command,
-					volumes={volume_name: {'bind': '/odm_data', 'mode': 'rw'}},
-					environment={
-						'GDAL_CACHEMAX': '16384',
-					},
-					mem_limit='100g',
-					memswap_limit='100g',
-					oom_score_adj=500,
-					remove=False,
-					detach=True,
-					name=f'dt-odm-pipeline-d{dataset_id}-{int(time.time())}',
-					labels={
-						**resource_labels,
-						'dt_role': 'odm_container',
-						'dt_volume': volume_name,
-					},
+			if exit_status == 0:
+				odm_container.remove(force=True)
+				odm_container = None
+				# The stop flag is an ODM implementation detail (split-merge hook in run_opensfm.py).
+				# If a future ODM ignores it, pass 1 runs to the end and filtering would silently do nothing.
+				if path_exists_on_shared_volume(volume_name, f'{project_name}/{UNDISTORTED_DIR}', dataset_id):
+					raise Exception(
+						f'ODM did not stop after reconstruction ({STOP_AFTER_RECONSTRUCTION_FLAG} was ignored); '
+						'the camera-orientation filter cannot run'
+					)
+				if _filter_reconstruction_by_orientation(
+					volume_name, project_name, metadata_off_nadir, dataset_id, token
+				):
+					_prune_unobserved_points(client, volume_name, project_name, resource_labels, dataset_id, token)
+				remove_file_from_shared_volume(
+					volume_name, f'{project_name}/{STOP_AFTER_RECONSTRUCTION_FLAG}', dataset_id
 				)
-
-				result = odm_container.wait()
-				exit_status = result.get('StatusCode', 1) if isinstance(result, dict) else 1
-
-				log_bytes = odm_container.logs()
-				stdout_logs = (
-					log_bytes.decode('utf-8', errors='ignore')
-					if isinstance(log_bytes, (bytes, bytearray))
-					else str(log_bytes)
+				odm_container, exit_status, stdout_logs = _run_odm_pass(
+					client, odm_command, volume_name, resource_labels, dataset_id, token, pass_name='orthophoto'
 				)
-			except Exception as e:
-				logger.error(
-					f'ODM container execution failed unexpectedly: {e}',
-					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
-				)
-
-				# Best-effort log capture if container exists.
-				if odm_container is not None:
-					try:
-						log_bytes = odm_container.logs()
-						stdout_logs = (
-							log_bytes.decode('utf-8', errors='ignore')
-							if isinstance(log_bytes, (bytes, bytearray))
-							else str(log_bytes)
-						)
-					except Exception:
-						pass
 
 			if exit_status == 0:
 				odm_success = True
