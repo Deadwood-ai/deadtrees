@@ -32,6 +32,11 @@ class AuthenticationExpiredError(RuntimeError):
 	pass
 
 
+# wait-for-idle exits with this when its deadline passes. Callers can tell a worker that
+# is simply still busy apart from a real failure (which exits 1 or 2).
+WAIT_TIMEOUT_EXIT_CODE = 4
+
+
 class TransientRequestError(RuntimeError):
 	"""A network or server-side failure (DNS, timeout, 5xx) that says nothing about the release."""
 
@@ -401,7 +406,7 @@ def cmd_wait_for_idle(args: argparse.Namespace) -> int:
 			# runs --resume. Keep the drain, wait, and poll again until the deadline instead.
 			print(json.dumps({'idle': False, 'transient_error': str(exc)}, indent=2), file=sys.stderr)
 			if deadline is not None and time.monotonic() >= deadline:
-				return 1
+				return WAIT_TIMEOUT_EXIT_CODE
 			time.sleep(args.poll_seconds)
 			continue
 		request = state['drain_request']
@@ -466,7 +471,7 @@ def cmd_wait_for_idle(args: argparse.Namespace) -> int:
 		)
 
 		if deadline is not None and time.monotonic() >= deadline:
-			return 1
+			return WAIT_TIMEOUT_EXIT_CODE
 
 		time.sleep(args.poll_seconds)
 

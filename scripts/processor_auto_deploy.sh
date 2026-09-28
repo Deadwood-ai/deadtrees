@@ -15,6 +15,8 @@ COMPOSE_FILE="${REPO_DIR}/docker-compose.processor.yaml"
 BRANCH="${PROCESSOR_DEPLOY_BRANCH:-main}"
 DRAIN_TIMEOUT_SECONDS="${PROCESSOR_DRAIN_TIMEOUT_SECONDS:-43200}"
 DRAIN_POLL_SECONDS="${PROCESSOR_DRAIN_POLL_SECONDS:-15}"
+# Exit code of processor_runtime_control.py wait-for-idle when its deadline passes.
+DRAIN_WAIT_TIMEOUT_RC=4
 STARTUP_TIMEOUT_SECONDS="${PROCESSOR_STARTUP_TIMEOUT_SECONDS:-300}"
 READINESS_POLL_SECONDS="${PROCESSOR_READINESS_POLL_SECONDS:-5}"
 UNAVAILABLE_CONFIRMATIONS="${PROCESSOR_UNAVAILABLE_CONFIRMATIONS:-3}"
@@ -84,7 +86,9 @@ processor_asset_mount_matches() {
 
 recreate_processor_for_assets() {
 	drain_set=1
+	waiting_for_drain=1
 	wait_for_drain_with_recovery
+	waiting_for_drain=0
 	log_processor_compose_files
 	python3 "${STATUS_SCRIPT}" clear-ack >> "${LOG_FILE}" 2>&1
 	PROCESSOR_RELEASE_SHA="${remote_sha}" \
@@ -110,10 +114,18 @@ if [ "${PROCESSOR_RUNTIME_LOCK_HELD:-0}" != "1" ]; then
 fi
 
 drain_set=0
+waiting_for_drain=0
 on_exit() {
 	local rc=$?
 	trap - EXIT
 	cleanup_processor_runtime_waiter
+	if [ "${rc}" -eq "${DRAIN_WAIT_TIMEOUT_RC}" ] && [ "${waiting_for_drain}" -eq 1 ]; then
+		# The worker is still busy, for example with a very large dataset. That says
+		# nothing about the release, so keep the drain and let the next run keep
+		# waiting. Pausing here would leave the worker drained and idle after its task.
+		log "Worker still busy after ${DRAIN_TIMEOUT_SECONDS}s; keeping the drain, the next run keeps waiting"
+		exit 0
+	fi
 	if [ "${rc}" -ne 0 ] && [ "${drain_set}" -eq 1 ]; then
 		printf 'failed_at=%s head=%s target=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
 			"$(git rev-parse HEAD 2>/dev/null || printf unknown)" "${remote_sha:-unknown}" > "${PAUSE_FILE}.tmp"
@@ -217,7 +229,9 @@ else
 		exit 1
 	fi
 	drain_set=1
+	waiting_for_drain=1
 	wait_for_drain_with_recovery
+	waiting_for_drain=0
 
 	git merge --ff-only "${remote_sha}" >> "${LOG_FILE}" 2>&1
 	deployed_sha="$(git rev-parse HEAD)"

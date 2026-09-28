@@ -102,7 +102,7 @@ def test_wait_for_idle_rejects_stopped_worker_recovery_with_active_row(monkeypat
 		allow_unacknowledged_stopped_worker=True,
 	)
 
-	assert runtime_control.cmd_wait_for_idle(args) == 1
+	assert runtime_control.cmd_wait_for_idle(args) == runtime_control.WAIT_TIMEOUT_EXIT_CODE
 
 
 def test_wait_for_idle_rejects_stopped_recovery_with_previous_worker_active_row(monkeypatch):
@@ -127,7 +127,7 @@ def test_wait_for_idle_rejects_stopped_recovery_with_previous_worker_active_row(
 		allow_unacknowledged_stopped_worker=True,
 	)
 
-	assert runtime_control.cmd_wait_for_idle(args) == 1
+	assert runtime_control.cmd_wait_for_idle(args) == runtime_control.WAIT_TIMEOUT_EXIT_CODE
 
 
 def test_record_worker_id_persists_identity_for_next_recovery(monkeypatch, tmp_path):
@@ -262,7 +262,7 @@ def test_wait_for_idle_rejects_acknowledgement_from_previous_worker_id(monkeypat
 	monkeypatch.setattr(runtime_control.time, 'sleep', lambda seconds: None)
 	args = argparse.Namespace(timeout_seconds=1, poll_seconds=0, allow_unacknowledged_stopped_worker=False)
 
-	assert runtime_control.cmd_wait_for_idle(args) == 1
+	assert runtime_control.cmd_wait_for_idle(args) == runtime_control.WAIT_TIMEOUT_EXIT_CODE
 
 
 def test_request_json_treats_dns_failure_as_transient(monkeypatch):
@@ -339,4 +339,4 @@ def test_wait_for_idle_times_out_instead_of_raising_on_persistent_transient_erro
 	monkeypatch.setattr(runtime_control.time, 'sleep', lambda seconds: None)
 	args = argparse.Namespace(timeout_seconds=25, poll_seconds=15, allow_unacknowledged_stopped_worker=False)
 
-	assert runtime_control.cmd_wait_for_idle(args) == 1
+	assert runtime_control.cmd_wait_for_idle(args) == runtime_control.WAIT_TIMEOUT_EXIT_CODE
