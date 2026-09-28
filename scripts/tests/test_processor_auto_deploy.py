@@ -110,6 +110,13 @@ class DeployHarness:
 			f"  touch {self.wait_hook_marker}\n"
 			"  sh \"$PROCESSOR_TEST_WAIT_HOOK\"\n"
 			"fi\n"
+			"if echo \"$@\" | grep -q wait-for-idle; then\n"
+			"  if echo \"$@\" | grep -q expected-release-sha; then\n"
+			"    if [ -n \"${PROCESSOR_TEST_STARTUP_WAIT_RC:-}\" ]; then exit \"$PROCESSOR_TEST_STARTUP_WAIT_RC\"; fi\n"
+			"  elif [ -n \"${PROCESSOR_TEST_DRAIN_WAIT_RC:-}\" ]; then\n"
+			"    exit \"$PROCESSOR_TEST_DRAIN_WAIT_RC\"\n"
+			"  fi\n"
+			"fi\n"
 			"if echo \"$@\" | grep -q clear-ack && [ -n \"${PROCESSOR_TEST_ACK_PATH:-}\" ]; then\n"
 			"  rm -f \"$PROCESSOR_TEST_ACK_PATH\"\n"
 			"fi\n"
@@ -629,6 +636,42 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 				(harness.worktree / ".local" / "processor-activated-sha").read_text().strip(),
 				target_sha,
 			)
+
+	def test_drain_wait_timeout_keeps_waiting_instead_of_pausing(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			initial_sha = git(harness.worktree, "rev-parse", "HEAD").stdout.strip()
+			target_sha = harness.push_change("busy worker\n")
+			harness.env["PROCESSOR_TEST_DRAIN_WAIT_RC"] = "4"
+
+			busy_result = harness.run_deploy()
+
+			self.assertEqual(busy_result.returncode, 0, busy_result.stderr)
+			self.assertFalse((harness.worktree / ".local" / "processor-deploy-paused").exists())
+			self.assertEqual(git(harness.worktree, "rev-parse", "HEAD").stdout.strip(), initial_sha)
+			self.assertNotIn("clear-drain", harness.python_log.read_text())
+			self.assertIn("Worker still busy", (harness.worktree / "auto-deploy.log").read_text())
+
+			del harness.env["PROCESSOR_TEST_DRAIN_WAIT_RC"]
+			idle_result = harness.run_deploy()
+
+			self.assertEqual(idle_result.returncode, 0, idle_result.stderr)
+			self.assertEqual(
+				(harness.worktree / ".local" / "processor-activated-sha").read_text().strip(),
+				target_sha,
+			)
+
+	def test_startup_wait_timeout_of_new_release_still_pauses(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			harness.push_change("never becomes ready\n")
+			harness.env["PROCESSOR_TEST_STARTUP_WAIT_RC"] = "4"
+
+			result = harness.run_deploy()
+
+			self.assertNotEqual(result.returncode, 0)
+			self.assertTrue((harness.worktree / ".local" / "processor-deploy-paused").exists())
+			self.assertFalse((harness.worktree / ".local" / "processor-activated-sha").exists())
 
 	def test_paused_deploy_does_not_apply_new_remote_sha_until_resumed(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:

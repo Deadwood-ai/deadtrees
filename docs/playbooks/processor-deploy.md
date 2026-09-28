@@ -52,10 +52,12 @@ reapply a known-bad release. After fixing or replacing the target release, run
 the drain remains in place. Checkout advancement alone is not deployment
 success, and resetting the bind-mounted checkout is not a safe rollback.
 
-Network failures and 5xx responses while waiting for the drain are not deploy
-failures: `wait-for-idle` logs them and keeps polling until its timeout, with
-the drain still set. Only a failure that outlasts the timeout, or a real
-failure such as a broken build, pauses automatic deploy.
+Waiting for the drain never pauses automatic deploy on its own. Network failures
+and 5xx responses are logged and polled through. When the wait reaches
+`PROCESSOR_DRAIN_TIMEOUT_SECONDS`, `wait-for-idle` exits with code 4 and the
+deploy exits cleanly with the drain still set; the next cron run waits again, so
+the host deploys as soon as a long task finishes. Only real failures, such as a
+broken build or a new release that never becomes ready, pause automatic deploy.
 
 If the existing processor is stopped or crash-looping before it can acknowledge
 the drain, including if it fails after the initial availability check, the deploy

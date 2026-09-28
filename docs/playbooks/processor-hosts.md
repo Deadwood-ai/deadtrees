@@ -16,8 +16,9 @@ minute. There is no push-based deploy: merging to `main` is the deploy.
 
 1. On its next tick each host fetches `origin/main` and sees a new SHA.
 2. It sets a drain. The worker finishes its current task and claims no new one.
-   An ODM task can take hours; the drain waits up to 12 hours
-   (`PROCESSOR_DRAIN_TIMEOUT_SECONDS`).
+   An ODM task or a very large ortho can take many hours, and the deploy waits
+   as long as it takes: after `PROCESSOR_DRAIN_TIMEOUT_SECONDS` (12 hours) a run
+   exits with the drain still set, and the next run keeps waiting.
 3. Once the worker is idle, the script fast-forwards the checkout, rebuilds the
    image, recreates the container, waits for it to report the new release SHA,
    and clears the drain.
@@ -137,7 +138,8 @@ The script logs every decision, so start with `tail -80 auto-deploy.log`.
 | `Refusing deploy from dirty checkout` | Files in the checkout were edited or added. | Remove or move the change. Never commit or patch in a production checkout. |
 | `Refusing deploy because HEAD contains local commits` | The checkout has commits that are not on `main`. | Ask the host owner. |
 | `Skipping deploy check because another processor runtime operation already holds` | A deploy or maintenance run is still going, for example a long drain. | Normal. Wait. |
-| `transient_error` entries during a drain | Network or 5xx failures while polling the queue. | Retried automatically. Investigate only if they last until the drain timeout. |
+| `transient_error` entries during a drain | Network or 5xx failures while polling the queue. | Retried automatically until the drain timeout, then the next run keeps waiting. |
+| `Worker still busy after ...s; keeping the drain` | The worker's current task outlasted one drain wait. | Normal for long tasks; the host deploys once the task finishes. Check progress in `docker logs deadtrees-processor-1` if it looks stuck. |
 | No new lines at all | The trigger is not running. | Check the crontab, or on `helicon` the timer and `processor.paused`. |
 
 `--resume` retries the same target release. If the release itself is broken, fix
