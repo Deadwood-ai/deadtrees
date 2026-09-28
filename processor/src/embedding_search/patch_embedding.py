@@ -35,7 +35,7 @@ from rasterio.windows import Window
 from shared.embedding_model import ModelBundle, encode_images
 
 from ..utils.segmentation import image_reprojector
-from ..utils.nodata import read_nodata_mask
+from ..utils.nodata import prepare_padding_map, read_nodata_mask
 
 # A 512px CLIP patch at 10cm GSD covers 51.2m on the ground. Non-overlapping.
 PATCH_SIZE = 512
@@ -118,6 +118,7 @@ def embed_orthophoto_tiles(
 
 	# Force exactly GSD_M resolution by clamping both the min and max resolution.
 	vrt = image_reprojector(str(tif_path), min_res=GSD_M, max_res=GSD_M)
+	prepare_padding_map(vrt, lambda: image_reprojector(str(tif_path), min_res=GSD_M, max_res=GSD_M))
 
 	results: List[PatchEmbedding] = []
 	images: List[Image.Image] = []

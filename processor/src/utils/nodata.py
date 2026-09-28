@@ -38,8 +38,12 @@ the returned VRT as ``.nodata_policy``. Consumers call
 
 from __future__ import annotations
 
+import os
+import threading
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 import rasterio
@@ -63,6 +67,15 @@ _SAMPLE = 1024
 _PADDING_CELL = 32
 # Upper bound on pixels read per strip while building the map (~200 MB of RGB).
 _PADDING_STRIP_PIXELS = 64_000_000
+# Strips are read on this many threads, each with its own handle, when the caller can
+# open more handles (see prepare_padding_map). A single-threaded scan of a 19 Gpx ortho
+# took ~16 min while the GPU idled.
+PADDING_MAP_WORKERS = 8
+# Maps of recently seen (ortho, output grid) pairs, so stages that reproject the same
+# ortho to the same grid (deadwood and combined) scan it once. ~20 MB per huge ortho.
+_PADDING_MAP_CACHE_SIZE = 4
+_padding_map_cache: OrderedDict = OrderedDict()
+_padding_map_cache_lock = threading.Lock()
 
 # Highest value still read as solid-black fill; see _solid_fill.
 _BLACK_FILL_MAX = 1
@@ -242,7 +255,9 @@ def _label_connected(solid: np.ndarray, seed: np.ndarray) -> np.ndarray:
 	return np.isin(labels, seeded[seeded != 0])
 
 
-def _padding_map(vrt, policy: NodataPolicy) -> np.ndarray:
+def _padding_map(
+	vrt, policy: NodataPolicy, open_handle: Optional[Callable] = None, workers: int = 1
+) -> np.ndarray:
 	"""Coarse raster-wide map of footprint padding, built once and cached on the VRT.
 
 	One boolean per ``_PADDING_CELL`` x ``_PADDING_CELL`` block: True when every
@@ -255,8 +270,60 @@ def _padding_map(vrt, policy: NodataPolicy) -> np.ndarray:
 	if cached is not None:
 		return cached
 
+	key = _padding_map_key(vrt, policy)
+	with _padding_map_cache_lock:
+		padding = _padding_map_cache.get(key) if key is not None else None
+	if padding is None:
+		padding = _build_padding_map(vrt, policy, open_handle, workers)
+		if key is not None:
+			with _padding_map_cache_lock:
+				_padding_map_cache[key] = padding
+				while len(_padding_map_cache) > _PADDING_MAP_CACHE_SIZE:
+					_padding_map_cache.popitem(last=False)
+	try:
+		vrt._fill_padding_map = padding
+	except AttributeError:
+		pass
+	return padding
+
+
+def _padding_map_key(vrt, policy: NodataPolicy):
+	"""Cache key for ``vrt``'s padding map: source file identity plus the output grid.
+
+	None (no caching) unless the source is a file on disk, so in-memory test rasters
+	and rewritten files never share a stale map.
+	"""
+	src = getattr(vrt, 'src_dataset', vrt)
+	path = getattr(src, 'name', None)
+	if not isinstance(path, str) or not os.path.isfile(path):
+		return None
+	stat = os.stat(path)
+	return (
+		os.path.realpath(path), stat.st_size, stat.st_mtime_ns,
+		str(vrt.crs), tuple(vrt.transform), vrt.width, vrt.height, policy,
+	)
+
+
+def _padding_strip(handle, cell_row: int, strip_cells: int, cells_w: int, policy: NodataPolicy):
+	"""(solid, seed) cell rows for one strip of the padding map."""
 	from rasterio.windows import Window
 
+	cell = _PADDING_CELL
+	row_off = cell_row * cell
+	rows = min(strip_cells * cell, handle.height - row_off)
+	window = Window(0, row_off, handle.width, rows)
+	known = handle.read_masks(1, window=window) == 0
+	blank = known | _solid_fill(handle, window, policy)
+
+	# Pad to whole cells. Beyond the raster is padding by definition.
+	n_cells = -(-rows // cell)
+	pad = ((0, n_cells * cell - rows), (0, cells_w * cell - handle.width))
+	blank = np.pad(blank, pad, constant_values=True).reshape(n_cells, cell, cells_w, cell)
+	known = np.pad(known, pad, constant_values=False).reshape(n_cells, cell, cells_w, cell)
+	return blank.all(axis=(1, 3)), known.any(axis=(1, 3))
+
+
+def _build_padding_map(vrt, policy: NodataPolicy, open_handle: Optional[Callable], workers: int) -> np.ndarray:
 	cell = _PADDING_CELL
 	cells_h = -(-vrt.height // cell)
 	cells_w = -(-vrt.width // cell)
@@ -266,27 +333,36 @@ def _padding_map(vrt, policy: NodataPolicy) -> np.ndarray:
 	seed[:, 0] = seed[:, -1] = True
 
 	strip_cells = max(1, (_PADDING_STRIP_PIXELS // max(vrt.width, 1)) // cell)
-	for cell_row in range(0, cells_h, strip_cells):
-		row_off = cell_row * cell
-		rows = min(strip_cells * cell, vrt.height - row_off)
-		window = Window(0, row_off, vrt.width, rows)
-		known = vrt.read_masks(1, window=window) == 0
-		blank = known | _solid_fill(vrt, window, policy)
+	cell_rows = range(0, cells_h, strip_cells)
 
-		# Pad to whole cells. Beyond the raster is padding by definition.
-		n_cells = -(-rows // cell)
-		pad = ((0, n_cells * cell - rows), (0, cells_w * cell - vrt.width))
-		blank = np.pad(blank, pad, constant_values=True).reshape(n_cells, cell, cells_w, cell)
-		known = np.pad(known, pad, constant_values=False).reshape(n_cells, cell, cells_w, cell)
-		solid[cell_row : cell_row + n_cells] = blank.all(axis=(1, 3))
-		seed[cell_row : cell_row + n_cells] |= known.any(axis=(1, 3))
+	if open_handle is None or workers <= 1 or len(cell_rows) <= 1:
+		strips = (_padding_strip(vrt, r, strip_cells, cells_w, policy) for r in cell_rows)
+	else:
+		# GDAL handles cannot be shared across threads: each worker opens its own.
+		local = threading.local()
+		handles = []
+		handles_lock = threading.Lock()
 
-	padding = _label_connected(solid, seed)
-	try:
-		vrt._fill_padding_map = padding
-	except AttributeError:
-		pass
-	return padding
+		def strip(cell_row):
+			if not hasattr(local, 'handle'):
+				local.handle = open_handle()
+				with handles_lock:
+					handles.append(local.handle)
+			return _padding_strip(local.handle, cell_row, strip_cells, cells_w, policy)
+
+		pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix='padding-map')
+		try:
+			strips = list(pool.map(strip, cell_rows))
+		finally:
+			pool.shutdown()
+			for handle in handles:
+				handle.close()
+
+	for cell_row, (strip_solid, strip_seed) in zip(cell_rows, strips):
+		solid[cell_row : cell_row + len(strip_solid)] = strip_solid
+		seed[cell_row : cell_row + len(strip_seed)] |= strip_seed
+
+	return _label_connected(solid, seed)
 
 
 def _fill_padding_mask(vrt, window, policy: NodataPolicy) -> np.ndarray:
@@ -317,6 +393,17 @@ def _fill_padding_mask(vrt, window, policy: NodataPolicy) -> np.ndarray:
 
 	grown = _connected(fill, seed)
 	return grown[row0 - hr0 : row0 - hr0 + h, col0 - hc0 : col0 - hc0 + w]
+
+
+def prepare_padding_map(vrt, open_handle: Callable, workers: int = PADDING_MAP_WORKERS) -> None:
+	"""Build ``vrt``'s raster-wide padding map up front, reading strips on ``workers`` threads.
+
+	``open_handle`` must return a fresh handle on the same raster and grid as ``vrt``
+	(e.g. the factory that opened it). No-op when the nodata policy needs no map.
+	"""
+	policy = getattr(vrt, 'nodata_policy', None) or NodataPolicy()
+	if policy.treat_white_fill or policy.treat_black_fill:
+		_padding_map(vrt, policy, open_handle=open_handle, workers=workers)
 
 
 def share_padding_map(from_vrt, to_vrt) -> None:

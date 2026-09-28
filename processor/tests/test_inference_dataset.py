@@ -142,10 +142,10 @@ def test_readers_share_one_raster_wide_fill_scan(tmp_path, monkeypatch):
 	builds = []
 	build_padding_map = nodata._padding_map
 
-	def counting_padding_map(vrt, policy):
+	def counting_padding_map(vrt, policy, **kwargs):
 		if getattr(vrt, '_fill_padding_map', None) is None:
 			builds.append(vrt)
-		return build_padding_map(vrt, policy)
+		return build_padding_map(vrt, policy, **kwargs)
 
 	monkeypatch.setattr(nodata, '_padding_map', counting_padding_map)
 
