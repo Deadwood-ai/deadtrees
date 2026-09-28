@@ -18,6 +18,7 @@ the linked docs that match the task.
 - Manual QA (production read-only and isolated local write):
   `.agents/skills/run-deadtrees-qa/SKILL.md`
 - Releases and team announcements: `docs/playbooks/create-release.md`
+- Production processor hosts and how each auto-deploys: `docs/playbooks/processor-hosts.md`
 - Diagrams, including Mermaid validation: `docs/playbooks/technical-diagrams.md`
 
 These tracked documents own the team workflow. Personal skills are optional;

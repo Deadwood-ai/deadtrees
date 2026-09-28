@@ -1,7 +1,13 @@
 import argparse
 import importlib.util
+import io
+import itertools
 import json
+import socket
+import urllib.error
 from pathlib import Path
+
+import pytest
 
 
 SCRIPT = Path(__file__).parents[1] / 'processor_runtime_control.py'
@@ -255,5 +261,82 @@ def test_wait_for_idle_rejects_acknowledgement_from_previous_worker_id(monkeypat
 	monkeypatch.setattr(runtime_control.time, 'monotonic', lambda: next(monotonic_values))
 	monkeypatch.setattr(runtime_control.time, 'sleep', lambda seconds: None)
 	args = argparse.Namespace(timeout_seconds=1, poll_seconds=0, allow_unacknowledged_stopped_worker=False)
+
+	assert runtime_control.cmd_wait_for_idle(args) == 1
+
+
+def test_request_json_treats_dns_failure_as_transient(monkeypatch):
+	def fail(request, timeout):
+		raise urllib.error.URLError(socket.gaierror(-2, 'Name or service not known'))
+
+	monkeypatch.setattr(runtime_control.urllib.request, 'urlopen', fail)
+
+	with pytest.raises(runtime_control.TransientRequestError):
+		runtime_control._request_json('GET', 'https://example.invalid/rest/v1/v2_queue', headers={})
+
+
+def test_request_json_treats_server_errors_as_transient_and_client_errors_as_fatal(monkeypatch):
+	def respond_with(code):
+		def fail(request, timeout):
+			raise urllib.error.HTTPError(request.full_url, code, 'error', {}, io.BytesIO(b'detail'))
+
+		return fail
+
+	monkeypatch.setattr(runtime_control.urllib.request, 'urlopen', respond_with(503))
+	with pytest.raises(runtime_control.TransientRequestError):
+		runtime_control._request_json('GET', 'https://example.invalid/rest/v1/v2_queue', headers={})
+
+	monkeypatch.setattr(runtime_control.urllib.request, 'urlopen', respond_with(400))
+	with pytest.raises(SystemExit):
+		runtime_control._request_json('GET', 'https://example.invalid/rest/v1/v2_queue', headers={})
+
+
+def test_wait_for_idle_keeps_polling_through_transient_errors(monkeypatch):
+	# The 2026-09-28 yanlingfreiburg incident: DNS failed while the deploy waited for the drain,
+	# the deploy paused itself, and the worker idled until a manual --resume.
+	monkeypatch.setattr(runtime_control, '_worker_id', lambda: 'worker-a')
+	logins = iter([runtime_control.TransientRequestError('login: dns'), 'token'])
+
+	def login():
+		result = next(logins)
+		if isinstance(result, Exception):
+			raise result
+		return result
+
+	outcomes = iter(
+		[
+			runtime_control.TransientRequestError('poll: dns'),
+			_state(active_for_worker=[{'id': 1}]),
+			{**_state(), 'drain_ack': _matching_ack()},
+		]
+	)
+
+	def fetch_state(worker_id, *, previous_worker_id, token, include_waiting_preview):
+		assert token == 'token'
+		result = next(outcomes)
+		if isinstance(result, Exception):
+			raise result
+		return result
+
+	monkeypatch.setattr(runtime_control, '_login', login)
+	monkeypatch.setattr(runtime_control, '_fetch_queue_state', fetch_state)
+	monkeypatch.setattr(runtime_control.time, 'sleep', lambda seconds: None)
+	args = argparse.Namespace(timeout_seconds=0, poll_seconds=15, allow_unacknowledged_stopped_worker=False)
+
+	assert runtime_control.cmd_wait_for_idle(args) == 0
+
+
+def test_wait_for_idle_times_out_instead_of_raising_on_persistent_transient_errors(monkeypatch):
+	monkeypatch.setattr(runtime_control, '_worker_id', lambda: 'worker-a')
+	monkeypatch.setattr(runtime_control, '_login', lambda: 'token')
+
+	def fetch_state(worker_id, *, previous_worker_id, token, include_waiting_preview):
+		raise runtime_control.TransientRequestError('poll: dns')
+
+	ticks = itertools.count(0, 10)
+	monkeypatch.setattr(runtime_control, '_fetch_queue_state', fetch_state)
+	monkeypatch.setattr(runtime_control.time, 'monotonic', lambda: float(next(ticks)))
+	monkeypatch.setattr(runtime_control.time, 'sleep', lambda seconds: None)
+	args = argparse.Namespace(timeout_seconds=25, poll_seconds=15, allow_unacknowledged_stopped_worker=False)
 
 	assert runtime_control.cmd_wait_for_idle(args) == 1

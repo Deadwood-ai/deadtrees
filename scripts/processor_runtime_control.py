@@ -32,6 +32,10 @@ class AuthenticationExpiredError(RuntimeError):
 	pass
 
 
+class TransientRequestError(RuntimeError):
+	"""A network or server-side failure (DNS, timeout, 5xx) that says nothing about the release."""
+
+
 def _is_automation_drain_reason(reason: object) -> bool:
 	return isinstance(reason, str) and (reason in AUTOMATION_DRAIN_REASONS or reason.startswith('auto-deploy '))
 
@@ -173,7 +177,11 @@ def _request_json(
 		detail = exc.read().decode('utf-8', errors='replace')
 		if exc.code == 401:
 			raise AuthenticationExpiredError(detail) from exc
+		if exc.code >= 500:
+			raise TransientRequestError(f'{method} {url} failed: {exc.code} {detail}') from exc
 		raise SystemExit(f'{method} {url} failed: {exc.code} {detail}') from exc
+	except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+		raise TransientRequestError(f'{method} {url} failed: {exc}') from exc
 
 	return json.loads(body) if body else {}
 
@@ -366,24 +374,36 @@ def cmd_wait_for_idle(args: argparse.Namespace) -> int:
 	worker_id = _worker_id()
 	previous_worker_id = _activated_worker_id()
 	deadline = time.monotonic() + args.timeout_seconds if args.timeout_seconds > 0 else None
-	token = _login()
+	token: str | None = None
 
 	while True:
 		try:
-			state = _fetch_queue_state(
-				worker_id,
-				previous_worker_id=previous_worker_id,
-				token=token,
-				include_waiting_preview=False,
-			)
-		except AuthenticationExpiredError:
-			token = _login()
-			state = _fetch_queue_state(
-				worker_id,
-				previous_worker_id=previous_worker_id,
-				token=token,
-				include_waiting_preview=False,
-			)
+			if token is None:
+				token = _login()
+			try:
+				state = _fetch_queue_state(
+					worker_id,
+					previous_worker_id=previous_worker_id,
+					token=token,
+					include_waiting_preview=False,
+				)
+			except AuthenticationExpiredError:
+				token = _login()
+				state = _fetch_queue_state(
+					worker_id,
+					previous_worker_id=previous_worker_id,
+					token=token,
+					include_waiting_preview=False,
+				)
+		except TransientRequestError as exc:
+			# A DNS or network blip while polling says nothing about the release. Failing here
+			# pauses the auto-deploy with the drain still set, so the worker idles until someone
+			# runs --resume. Keep the drain, wait, and poll again until the deadline instead.
+			print(json.dumps({'idle': False, 'transient_error': str(exc)}, indent=2), file=sys.stderr)
+			if deadline is not None and time.monotonic() >= deadline:
+				return 1
+			time.sleep(args.poll_seconds)
+			continue
 		request = state['drain_request']
 		ack = state['drain_ack']
 

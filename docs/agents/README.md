@@ -23,7 +23,8 @@ use these files directly; editor-specific rule folders are intentionally retired
     when the focus is only rules/docs context cleanup.
 12. For release, deploy, or release-announcement questions, use
     `docs/playbooks/create-release.md`, `docs/playbooks/processor-deploy.md`, and
-    local-only `docs/ops/*` files when present.
+    local-only `docs/ops/*` files when present. For which hosts run a production
+    worker and how each one auto-deploys, use `docs/playbooks/processor-hosts.md`.
 13. For manual QA runs, use `.agents/skills/run-deadtrees-qa/SKILL.md`.
 
 ## Tracked Versus Local
