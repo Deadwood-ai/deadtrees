@@ -28,6 +28,7 @@ from processor.src.utils.nodata import (
 	read_nodata_mask,
 	resolve_nodata_policy,
 )
+from processor.src.utils import nodata as nodata_module
 from processor.src.utils.segmentation import image_reprojector
 
 pytestmark = pytest.mark.unit
@@ -524,3 +525,38 @@ def test_e2e_clean_imagery_masks_nothing(tmp_path):
 		assert read_nodata_mask(vrt)[1:-1, 1:-1].mean() < 0.01
 	finally:
 		vrt.close()
+
+
+def test_padding_map_built_in_parallel_matches_sequential(tmp_path, monkeypatch):
+	path = _write(tmp_path / 'plot.tif', _plot_on_white_canvas())
+	monkeypatch.setattr(nodata_module, '_PADDING_STRIP_PIXELS', 1)  # one cell row per strip
+	open_vrt = lambda: image_reprojector(path)
+	policy = NodataPolicy(treat_white_fill=True, treat_black_fill=True)
+	sequential = nodata_module._build_padding_map(open_vrt(), policy, None, 1)
+	parallel = nodata_module._build_padding_map(open_vrt(), policy, open_vrt, 4)
+	np.testing.assert_array_equal(parallel, sequential)
+	assert sequential.any() and not sequential.all()
+
+
+def test_padding_map_is_reused_for_the_same_ortho_and_grid_only(tmp_path, monkeypatch):
+	path = _write(tmp_path / 'plot.tif', _plot_on_white_canvas())
+	monkeypatch.setattr(nodata_module, '_padding_map_cache', type(nodata_module._padding_map_cache)())
+	builds = []
+	build = nodata_module._build_padding_map
+
+	def counting_build(*args):
+		builds.append(args[0])
+		return build(*args)
+
+	monkeypatch.setattr(nodata_module, '_build_padding_map', counting_build)
+
+	def prepared(**kwargs):
+		vrt = image_reprojector(path, **kwargs)
+		nodata_module.prepare_padding_map(vrt, lambda: image_reprojector(path, **kwargs), workers=2)
+		return vrt
+
+	first, second = prepared(), prepared()
+	assert len(builds) == 1
+	np.testing.assert_array_equal(first._fill_padding_map, second._fill_padding_map)
+	prepared(max_res=0.5)  # another grid on the same ortho needs its own map
+	assert len(builds) == 2

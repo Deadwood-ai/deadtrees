@@ -16,7 +16,7 @@ import torch
 from rasterio import windows
 from tqdm import tqdm
 
-from .nodata import read_nodata_mask, share_padding_map
+from .nodata import prepare_padding_map, read_nodata_mask, share_padding_map
 
 # Warped window reads are the CPU bottleneck (~85 ms per 1024 px tile, not sped up by
 # GDAL_NUM_THREADS) and scale over threads that each own a handle. On dataset 12662
@@ -63,6 +63,8 @@ class InferenceDataset:
 		self.reader_threads = reader_threads
 		self._open_image = open_image
 		self.image_src = open_image()
+		# Metadata-less orthos need a raster-wide fill scan; do it once, on all readers.
+		prepare_padding_map(self.image_src, open_image, reader_threads)
 		self.width = self.image_src.width
 		self.height = self.image_src.height
 
