@@ -10,7 +10,9 @@ import docker
 import tarfile
 import io
 import time
+from contextlib import contextmanager
 from pathlib import Path
+from collections.abc import Callable
 from shared.logger import logger
 from shared.logging import LogContext, LogCategory
 from shared.settings import settings
@@ -277,6 +279,85 @@ def copy_results_from_shared_volume(volume_name: str, output_dir: Path, project_
 					f'Failed to cleanup temporary extraction container: {cleanup_error}',
 					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 				)
+
+
+@contextmanager
+def _volume_file_container(volume_name: str, dataset_id: int, role: str):
+	"""Short-lived Alpine container with the volume mounted at /odm_shared, for small file edits."""
+	client = _docker_client()
+	container = client.containers.create(
+		image='alpine',
+		volumes={volume_name: {'bind': '/odm_shared', 'mode': 'rw'}},
+		command=['tail', '-f', '/dev/null'],
+		name=f'dt-odm-{role}-d{dataset_id}-{int(time.time())}',
+		user='root',
+		auto_remove=True,
+		labels={'dt': 'odm', 'dt_role': f'temp_{role}', 'dt_dataset_id': str(dataset_id), 'dt_volume': volume_name},
+	)
+	try:
+		container.start()
+		yield container
+	finally:
+		try:
+			container.remove(force=True)
+		except Exception:
+			pass
+
+
+def _exec_checked(container, command: list[str]) -> None:
+	result = container.exec_run(command)
+	if result.exit_code != 0:
+		raise Exception(f'{" ".join(command)} failed in volume container: {result.output.decode(errors="ignore")}')
+
+
+def _read_from_container(container, path: str) -> bytes:
+	archive_stream, _ = container.get_archive(path)
+	with tarfile.open(fileobj=io.BytesIO(b''.join(archive_stream))) as tar:
+		return tar.extractfile(tar.getmembers()[0]).read()
+
+
+def path_exists_on_shared_volume(volume_name: str, relative_path: str, dataset_id: int) -> bool:
+	with _volume_file_container(volume_name, dataset_id, 'read') as container:
+		return container.exec_run(['test', '-e', f'/odm_shared/{relative_path}']).exit_code == 0
+
+
+def read_file_from_shared_volume(volume_name: str, relative_path: str, dataset_id: int) -> bytes | None:
+	"""Contents of a (small) file on the volume, or None if it does not exist."""
+	path = f'/odm_shared/{relative_path}'
+	with _volume_file_container(volume_name, dataset_id, 'read') as container:
+		if container.exec_run(['test', '-f', path]).exit_code != 0:
+			return None
+		return _read_from_container(container, path)
+
+
+def create_file_on_shared_volume(volume_name: str, relative_path: str, dataset_id: int) -> None:
+	"""Create an empty file (and its parent directories) on the volume."""
+	path = f'/odm_shared/{relative_path}'
+	with _volume_file_container(volume_name, dataset_id, 'flag') as container:
+		_exec_checked(container, ['sh', '-c', f'mkdir -p "$(dirname "{path}")" && touch "{path}"'])
+
+
+def remove_file_from_shared_volume(volume_name: str, relative_path: str, dataset_id: int) -> None:
+	with _volume_file_container(volume_name, dataset_id, 'flag') as container:
+		_exec_checked(container, ['rm', '-f', f'/odm_shared/{relative_path}'])
+
+
+def rewrite_file_on_shared_volume(
+	volume_name: str, relative_path: str, transform: Callable[[bytes], bytes], dataset_id: int
+) -> None:
+	"""Read a file from the volume, pass its bytes through ``transform`` and replace it atomically."""
+	path = f'/odm_shared/{relative_path}'
+	directory, file_name = path.rsplit('/', 1)
+	with _volume_file_container(volume_name, dataset_id, 'rewrite') as container:
+		updated = transform(_read_from_container(container, path))
+
+		tar_buffer = io.BytesIO()
+		with tarfile.open(mode='w', fileobj=tar_buffer) as tar:
+			tarinfo = tarfile.TarInfo(name=f'{file_name}.tmp')
+			tarinfo.size = len(updated)
+			tar.addfile(tarinfo, io.BytesIO(updated))
+		container.put_archive(directory, tar_buffer.getvalue())
+		_exec_checked(container, ['mv', f'{path}.tmp', path])
 
 
 def _containers_referencing_volume(client: docker.DockerClient, volume_name: str):

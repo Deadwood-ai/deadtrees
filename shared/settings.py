@@ -163,10 +163,12 @@ class Settings(BaseSettings):
 	SSH_PRIVATE_KEY_PATH: str = '/app/ssh_key'
 	SSH_PRIVATE_KEY_PASSPHRASE: str = ''
 	SSH_KNOWN_HOSTS_PATH: str = '~/.ssh/known_hosts'
+	# Pinned so every host runs the same tested ODM release; Docker pulls it on first use.
+	ODM_IMAGE: str = 'opendronemap/odm:3.6.2'
 	ODM_AUTO_BOUNDARY: bool = False
 	ODM_SKY_REMOVAL: bool = False
 	ODM_BG_REMOVAL: bool = False
-	ODM_MAX_NADIR_DEVIATION_DEGREES: float = 10.0
+	ODM_MAX_NADIR_DEVIATION_DEGREES: float = 40.0
 
 	# Linear integration for processing failure notifications
 	LINEAR_ENABLED: bool = False
