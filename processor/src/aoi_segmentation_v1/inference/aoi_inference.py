@@ -26,7 +26,7 @@ from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import unary_union
 from transformers import SegformerConfig, SegformerForSemanticSegmentation
 
-from processor.src.utils.inference_dataset import InferenceDataset, normalize_imagenet, predict_tiles
+from processor.src.utils.inference_dataset import MASK_TIFF_LAYOUT, InferenceDataset, normalize_imagenet, predict_tiles
 from processor.src.utils.segmentation import (
 	filter_polygons_by_area,
 	image_reprojector,
@@ -284,6 +284,7 @@ class AOIInference:
 				dtype=np.uint8,
 				crs=vrt_src.crs,
 				transform=vrt_src.transform,
+				**MASK_TIFF_LAYOUT,
 			)
 			with rasterio.open(tmp_mask_path, 'w', **tif_kwargs) as dst_mask:
 				for out_window, mask_arr in predict_tiles(dataset, self.predict, self.device, BATCH_SIZE, 'aoi inference'):

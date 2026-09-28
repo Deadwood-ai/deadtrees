@@ -19,9 +19,16 @@ from tqdm import tqdm
 from .nodata import read_nodata_mask, share_padding_map
 
 # Warped window reads are the CPU bottleneck (~85 ms per 1024 px tile, not sped up by
-# GDAL_NUM_THREADS) and scale almost linearly over threads that each own a handle:
-# 4 readers bring it to ~36 ms per tile, below the fp16 model time.
-READER_THREADS = 4
+# GDAL_NUM_THREADS) and scale over threads that each own a handle. On dataset 12662
+# (12 cores) 4 / 8 / 12 readers gave 37 / 44 / 47 tiles/s, against ~15-21 tiles/s for
+# the fp16 deadwood model; 8 keeps the GPU fed on heavy tiles and fits every host.
+READER_THREADS = 8
+# Layout of the mask GeoTIFFs that predict_tiles output is written into, tile by tile.
+# Tiles arrive column by column, so in a striped file every 512 px tile dirties 512
+# strips spanning the whole raster width. On large orthos that overflows GDAL's block
+# cache, and the flushing starves the reader threads and the GPU (dataset 12662:
+# ~9 -> ~30 tiles/s with 512 px blocks).
+MASK_TIFF_LAYOUT = dict(tiled=True, blockxsize=512, blockysize=512, BIGTIFF='IF_SAFER')
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
