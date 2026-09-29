@@ -139,6 +139,24 @@ git fetch origin main --prune
 git worktree add <path> -b <branch-name> origin/main
 ```
 
+Claude Code sessions can get the same setup through
+`scripts/claude-worktree.sh`, wired as personal `WorktreeCreate` and
+`WorktreeRemove` hooks in the untracked `.claude/settings.local.json` of the
+primary checkout. It creates detached worktrees from current `origin/main` under
+`~/.claude/worktrees/deadtrees/<name>`, runs the lightweight setup above, and
+only removes clean worktrees whose commits are already on a remote. Name the
+`fix/...` or `feat/...` branch once the task is clear, and run the full
+`setup-worktree.sh` before work that needs Python or frontend dependencies.
+
+```json
+{
+  "hooks": {
+    "WorktreeCreate": [{ "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/claude-worktree.sh\" create", "timeout": 600 }] }],
+    "WorktreeRemove": [{ "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/claude-worktree.sh\" remove", "timeout": 300 }] }]
+  }
+}
+```
+
 ### Isolated Dev/Test Stack
 
 Use the lightweight setup only when the task does not need a running app stack.
