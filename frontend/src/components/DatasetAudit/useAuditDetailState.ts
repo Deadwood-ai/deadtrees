@@ -17,10 +17,15 @@ import { describeAuditLockDenial, isAuditLeaseConflict, useAuditLock } from "../
 import { useAuditNavigation } from "../../hooks/useAuditNavigation";
 import { useDatasetFlags, useUpdateFlagStatus } from "../../hooks/useDatasetFlags";
 import { usePhenologyData } from "../../hooks/usePhenologyData";
+import { useAcquisitionDateEstimate, useAuditSuggestions } from "../../hooks/useAcquisitionDateEstimate";
+import { suggestedAuditValues } from "../../utils/acquisitionDate";
+import type { IAuditSuggestion } from "../../types/acquisitionDate";
 import { useSeasonPrompt } from "../../hooks/useSeasonPrompt";
 import { supabase } from "../../hooks/useSupabase";
 import { trackAppEvent } from "../../utils/analytics";
 import { useAuditAOIState } from "./useAuditAOIState";
+
+const NO_SUGGESTIONS: IAuditSuggestion[] = [];
 
 export interface UseAuditDetailStateProps {
 	dataset: IDataset;
@@ -132,6 +137,10 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	const { mutateAsync: markAsReviewed, isPending: isMarkingReviewed } = useMarkAsReviewed();
 	const { data: orthoMetadata, isLoading: isOrthoLoading } = useOrthoMetadata(dataset.id);
 	const { data: phenologyData, isLoading: isPhenologyLoading } = usePhenologyData(dataset.id);
+	const { data: acquisitionDateEstimate } = useAcquisitionDateEstimate(dataset.id);
+	const { data: auditSuggestionsData, isLoading: isSuggestionsLoading } = useAuditSuggestions(dataset.id);
+	// stable fallback: a fresh [] per render would re-run the prefill effect and reset edits
+	const auditSuggestions = auditSuggestionsData ?? NO_SUGGESTIONS;
 
 	// Navigation context
 	const { getNextDatasetId, currentIndex, totalCount } = useAuditNavigation();
@@ -146,6 +155,8 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [hasFormChanges, setHasFormChanges] = useState(false);
 	const [navigateToNext, setNavigateToNext] = useState(false);
+	// form fields currently holding a machine suggestion rather than a saved value
+	const [prefilledFields, setPrefilledFields] = useState<string[]>([]);
 
 	// Another auditor holds the dataset (or the claim failed): return to the queue.
 	const auditLockError =
@@ -206,15 +217,17 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		if (leaseId) void saveAOIWithLease(leaseId);
 	};
 
-	// Set form values when audit data is loaded
+	// Set form values when audit data is loaded; machine suggestions prefill the
+	// fields the saved audit leaves empty (nothing is saved until the auditor does)
 	useEffect(() => {
-		if (auditData) {
-			const partial: Partial<AuditFormValues> = { ...auditData } as unknown as Partial<AuditFormValues>;
-			const toDelete: (keyof Partial<AuditFormValues>)[] = ["audit_date"];
-			toDelete.forEach((k) => delete (partial as Record<string, unknown>)[k as string]);
-			form.setFieldsValue(partial);
-		}
-	}, [auditData, form]);
+		if (isAuditLoading || isSuggestionsLoading) return;
+		const partial: Partial<AuditFormValues> = { ...(auditData ?? {}) } as unknown as Partial<AuditFormValues>;
+		const toDelete: (keyof Partial<AuditFormValues>)[] = ["audit_date"];
+		toDelete.forEach((k) => delete (partial as Record<string, unknown>)[k as string]);
+		const { values: suggested, fields } = suggestedAuditValues(partial as Record<string, unknown>, auditSuggestions);
+		form.setFieldsValue({ ...partial, ...suggested });
+		setPrefilledFields(fields);
+	}, [auditData, auditSuggestions, isAuditLoading, isSuggestionsLoading, form]);
 
 	// Track form changes
 	useEffect(() => {
@@ -420,6 +433,9 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		isOrthoLoading,
 		phenologyData,
 		isPhenologyLoading,
+		acquisitionDateEstimate,
+		auditSuggestions,
+		prefilledFields,
 
 		// Flags
 		updateFlagStatus,

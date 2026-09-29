@@ -23,6 +23,7 @@ def update_status(
 	is_aoi_done: Optional[bool] = None,
 	is_aoi_required: Optional[bool] = None,
 	is_embeddings_done: Optional[bool] = None,
+	is_doy_estimation_done: Optional[bool] = None,
 	is_metadata_done: Optional[bool] = None,
 	is_odm_done: Optional[bool] = None,
 	has_error: Optional[bool] = None,
@@ -46,6 +47,7 @@ def update_status(
 	    is_combined_model_done (bool, optional): Combined model completion status
 	    is_aoi_done (bool, optional): Automatic AOI segmentation completion status
 	    is_aoi_required (bool, optional): Whether automatic AOI completion is required for this dataset
+	    is_doy_estimation_done (bool, optional): Acquisition-date estimation completion status
 	    is_metadata_done (bool, optional): Metadata processing completion status
 	    is_odm_done (bool, optional): ODM processing completion status
 	    has_error (bool, optional): Error status flag
@@ -77,6 +79,8 @@ def update_status(
 			update_data['is_aoi_required'] = is_aoi_required
 		if is_embeddings_done is not None:
 			update_data['is_embeddings_done'] = is_embeddings_done
+		if is_doy_estimation_done is not None:
+			update_data['is_doy_estimation_done'] = is_doy_estimation_done
 		if is_metadata_done is not None:
 			update_data['is_metadata_done'] = is_metadata_done
 		if is_odm_done is not None:

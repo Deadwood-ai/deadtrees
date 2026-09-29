@@ -100,6 +100,7 @@ class StatusEnum(str, Enum):
 	deadwood_treecover_combined_segmentation = 'deadwood_treecover_combined_segmentation'
 	aoi_segmentation = 'aoi_segmentation'
 	embedding_processing = 'embedding_processing'
+	doy_estimation = 'doy_estimation'
 	audit_in_progress = 'audit_in_progress'
 
 
@@ -137,6 +138,7 @@ class TaskTypeEnum(str, Enum):
 	deadwood_treecover_combined_v2 = 'deadwood_treecover_combined_v2'  # Run combined deadwood+treecover segmentation
 	aoi_v1 = 'aoi_v1'  # Auto-generate the dataset area of interest (AOI) polygon
 	embeddings_v1 = 'embeddings_v1'  # Compute per-tile CLIP embeddings for open-vocab search
+	doy_estimation_v1 = 'doy_estimation_v1'  # Estimate the acquisition date (day-of-year distribution)
 	geotiff = 'geotiff'  # Convert to geotiff
 	metadata = 'metadata'  # Extract metadata
 	odm_processing = 'odm_processing'  # ODM raw image processing
@@ -162,6 +164,7 @@ class TaskTypeEnum(str, Enum):
 			'deadwood_treecover_combined_v2': 'Deadwood+Treecover (v2)',
 			'aoi_v1': 'AOI',
 			'embeddings_v1': 'Embeddings',
+			'doy_estimation_v1': 'Acquisition date',
 			'geotiff': 'GeoTIFF',
 			'metadata': 'Metadata',
 			'odm_processing': 'ODM',
@@ -220,6 +223,7 @@ class Status(BaseModel):
 	is_aoi_done: bool = False
 	is_aoi_required: bool = False
 	is_embeddings_done: bool = False
+	is_doy_estimation_done: bool = False
 	is_metadata_done: bool = False
 	is_odm_done: bool = False
 	has_error: bool = False
@@ -664,6 +668,9 @@ class DatasetAudit(BaseModel):
 	thumbnail_issue_notes: Optional[str] = None
 	audited_by: Optional[str] = None  # UUID as string
 	notes: Optional[str] = None
+	accept_suggested_acquisition_date: Optional[bool] = None
+	original_acquisition_date: Optional[Dict] = None
+	applied_acquisition_date: Optional[Dict] = None
 
 	@field_serializer('audit_date', mode='plain')
 	def datetime_to_isoformat(field: datetime | None) -> str | None:

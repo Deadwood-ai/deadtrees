@@ -32,6 +32,8 @@ _tables = {
 	'queue_positions': 'v2_queue_positions',
 	'model_preferences': 'v2_model_preferences',
 	'tile_embeddings': 'v2_tile_embeddings',
+	'acquisition_date_estimates': 'v2_acquisition_date_estimates',
+	'audit_suggestions': 'dataset_audit_suggestions',
 	'notification_preferences': 'user_notification_preferences',
 	'processing_notification_events': 'processing_notification_events',
 }
@@ -139,6 +141,20 @@ class Settings(BaseSettings):
 	PREPACKAGED_API_READ_S3_ACCESS_KEY: str = ''
 	PREPACKAGED_API_READ_S3_SECRET_KEY: str = ''
 	PREPACKAGED_SIGNED_URL_TTL_SECONDS: int = 86400
+
+	# Sentinel-2 block cubes of the scaled Sentinel pipeline (read-only), used by
+	# the acquisition-date (doy_estimation_v1) stage. Without keys the stage runs
+	# the no-S2 model for every dataset.
+	SENTINEL2_S3_ENDPOINT: str = 'https://s3.bwsfs.uni-freiburg.de/'
+	SENTINEL2_S3_REGION: str = 'fr2-ec82'
+	SENTINEL2_S3_BUCKET: str = 'frct-sentinel2'
+	SENTINEL2_S3_PREFIX: str = 'sentinel-2-cubes'
+	SENTINEL2_S3_ACCESS_KEY_ID: str = ''
+	SENTINEL2_S3_SECRET_ACCESS_KEY: str = ''
+	# Sentinel processing Supabase (separate project; `chunks` = block status).
+	# Optional: without it a block counts as available when its zarr exists on S3.
+	SENTINEL_BLOCKS_SUPABASE_URL: str = ''
+	SENTINEL_BLOCKS_SUPABASE_KEY: str = ''
 
 	# processor settings
 	PROCESSOR_USERNAME: str = 'processor@deadtrees.earth'
@@ -380,6 +396,14 @@ class Settings(BaseSettings):
 	@property
 	def tile_embeddings_table(self) -> str:
 		return self._tables['tile_embeddings']
+
+	@property
+	def acquisition_date_estimates_table(self) -> str:
+		return self._tables['acquisition_date_estimates']
+
+	@property
+	def audit_suggestions_table(self) -> str:
+		return self._tables['audit_suggestions']
 
 	@property
 	def processor_task_blacklist(self) -> list[str]:

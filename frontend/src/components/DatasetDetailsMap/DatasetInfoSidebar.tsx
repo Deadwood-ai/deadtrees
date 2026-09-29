@@ -12,6 +12,8 @@ import DatasetNavigation from "./DatasetNavigation";
 import { palette } from "../../theme/palette";
 import { getBiomeEmoji, getBiomeTagColor, truncateBiomeLabel } from "../../utils/biomeDisplay";
 import { useCanUploadPrivate, useCanViewAllPrivate } from "../../hooks/useUserPrivileges";
+import { useAcquisitionDateEstimate } from "../../hooks/useAcquisitionDateEstimate";
+import { datasetDateSuggestion, describeModelType, formatIsoDate } from "../../utils/acquisitionDate";
 
 interface DatasetInfoSidebarProps {
   dataset: IDataset;
@@ -23,6 +25,28 @@ interface DatasetInfoSidebarProps {
 }
 
 // === Shared Row Components ===
+
+/** The date model's suggestion, shown when the reported date has no month or
+ * disagrees strongly with the imagery (single-season distributions only). */
+const SuggestedDateRow = ({ dataset }: { dataset: IDataset }) => {
+  const { data: estimate } = useAcquisitionDateEstimate(dataset.id);
+  const suggestion = datasetDateSuggestion(estimate, dataset);
+  if (!estimate || !suggestion) return null;
+  const why =
+    suggestion.reason === "mismatch"
+      ? "The imagery does not match the reported date"
+      : "The reported date has no month";
+  return (
+    <InfoRow
+      label="Suggested Date"
+      tooltip={`${why}. Estimated by the date model ${estimate.model_version} from the ${describeModelType(estimate)}; 80% of its probability lies within ${estimate.hdi80_days} days.`}
+    >
+      <Typography.Text>
+        {suggestion.reason === "mismatch" && <WarningOutlined style={{ color: palette.state.warning, marginRight: 4 }} />}~{formatIsoDate(suggestion.date, { day: "numeric", month: "long", year: "numeric" })}
+      </Typography.Text>
+    </InfoRow>
+  );
+};
 
 interface InfoRowProps {
   label: string;
@@ -271,6 +295,8 @@ export default function DatasetInfoSidebar({
             })}
           </Typography.Text>
         </InfoRow>
+
+        <SuggestedDateRow dataset={dataset} />
 
         <InfoRow label="Phenology">
           <div className="w-[180px]">
