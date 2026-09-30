@@ -18,7 +18,7 @@ from shared.logging import LogContext, LogCategory
 def _refresh_processor_session(task: QueueTask):
 	token, user = login_verified(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 	if not user:
-		raise AuthenticationError('Invalid processor token', token=token, task_id=task.id)
+		raise AuthenticationError('Invalid processor token', task_id=task.id)
 	return token, user
 
 

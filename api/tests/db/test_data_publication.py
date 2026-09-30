@@ -1,4 +1,5 @@
 import pytest
+from postgrest.exceptions import APIError
 from shared.db import use_client, use_service_client
 from shared.settings import settings
 from shared.models import LicenseEnum, PlatformEnum, DatasetAccessEnum
@@ -8,7 +9,6 @@ from shared.models import LicenseEnum, PlatformEnum, DatasetAccessEnum
 def test_datasets_for_publication(auth_token, test_user):
 	"""Create multiple test datasets for publication testing"""
 	dataset_ids = []
-	publication_ids = []
 	audit_rows = []
 
 	try:
@@ -130,289 +130,124 @@ def test_datasets_for_publication(auth_token, test_user):
 			yield dataset_ids
 
 	finally:
-		# Improved cleanup to handle foreign key constraints properly
-		with use_client(auth_token) as client:
-			try:
-				# 1. Find all publications that reference these datasets
-				all_pubs_query = f"""
-					SELECT DISTINCT publication_id 
-					FROM jt_data_publication_datasets 
-					WHERE dataset_id IN ({','.join([str(id) for id in dataset_ids])})
-				"""
-				pub_response = client.rpc('exec_sql', {'query': all_pubs_query}).execute()
+		# Deleting a publication cascades to its links. Users cannot delete
+		# publications, so cleanup runs as the service role.
+		with use_service_client() as service_client:
+			links = (
+				service_client.table('jt_data_publication_datasets')
+				.select('publication_id')
+				.in_('dataset_id', dataset_ids)
+				.execute()
+			)
+			for publication_id in {link['publication_id'] for link in links.data}:
+				service_client.table('data_publication').delete().eq('id', publication_id).execute()
+			for dataset_id in dataset_ids:
+				service_client.table('dataset_audit').delete().eq('dataset_id', dataset_id).execute()
+				service_client.table(settings.metadata_table).delete().eq('dataset_id', dataset_id).execute()
+				service_client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
+				service_client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 
-				if pub_response.data:
-					for item in pub_response.data:
-						if item and 'publication_id' in item:
-							pub_id = item['publication_id']
-							publication_ids.append(pub_id)
 
-				# 2. Delete all publications found (cascades to junction tables)
-				for pub_id in publication_ids:
-					client.table('data_publication').delete().eq('id', pub_id).execute()
+def author(test_user, last_name='User'):
+	return {
+		'user': test_user,
+		'organisation': 'Test Institute',
+		'orcid': '0000-0000-0000-0000',
+		'first_name': 'Test',
+		'last_name': last_name,
+		'title': 'Dr.',
+	}
 
-				# 3. Delete datasets
-				with use_service_client() as service_client:
-					for dataset_id in dataset_ids:
-						# Delete all related tables explicitly in proper order
-						service_client.table('dataset_audit').delete().eq('dataset_id', dataset_id).execute()
-						client.table(settings.metadata_table).delete().eq('dataset_id', dataset_id).execute()
-						client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
-						client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 
-				# 4. Clean up logs
-				client.table(settings.logs_table).delete().neq('id', 1).execute()
-
-			except Exception as e:
-				print(f'Cleanup error: {e}')
+def delete_authors(user_info_ids):
+	with use_service_client() as service_client:
+		for user_info_id in user_info_ids:
+			service_client.table('jt_data_publication_user_info').delete().eq('user_info_id', user_info_id).execute()
+			service_client.table('user_info').delete().eq('id', user_info_id).execute()
 
 
 @pytest.fixture(scope='function')
 def test_user_info(auth_token, test_user):
-	"""Create test user info for publication testing"""
-	user_info_id = None
-
+	"""An author record created by the signed-in user, as PublicationModal does."""
+	with use_client(auth_token) as client:
+		user_info_id = client.table('user_info').insert(author(test_user)).execute().data[0]['id']
 	try:
-		with use_client(auth_token) as client:
-			user_info_data = {
-				'user': test_user,
-				'organisation': 'Test Institute',
-				'orcid': '0000-0000-0000-0000',
-				'first_name': 'Test',
-				'last_name': 'User',
-				'title': 'Dr.',
-			}
-			response = client.table('user_info').insert(user_info_data).execute()
-			user_info_id = response.data[0]['id']
-
-			yield user_info_id
-
+		yield user_info_id
 	finally:
-		# Cleanup
-		if user_info_id:
-			with use_client(auth_token) as client:
-				client.table('user_info').delete().eq('id', user_info_id).execute()
+		delete_authors([user_info_id])
 
 
-def test_create_publication(auth_token, test_datasets_for_publication, test_user_info):
-	"""Test creating a new publication with multiple datasets"""
-	publication_id = None
-	publication_datasets = []
-	publication_users = []
-
-	try:
-		with use_client(auth_token) as client:
-			# Create publication
-			publication_data = {
-				'title': 'Test Publication',
-				'description': 'Test Description',
-				'doi': None,  # Initially null, will be updated later
-			}
-			response = client.table('data_publication').insert(publication_data).execute()
-			publication_id = response.data[0]['id']
-
-			# Link datasets to publication (only use first 4 for this test)
-			for dataset_id in test_datasets_for_publication[:4]:
-				link_data = {'publication_id': publication_id, 'dataset_id': dataset_id}
-				client.table('jt_data_publication_datasets').insert(link_data).execute()
-				publication_datasets.append(link_data)
-
-			# Link user info to publication
-			user_link = {'publication_id': publication_id, 'user_info_id': test_user_info}
-			client.table('jt_data_publication_user_info').insert(user_link).execute()
-			publication_users.append(user_link)
-
-			# Verify publication was created correctly
-			pub_response = client.table('data_publication').select('*').eq('id', publication_id).execute()
-			assert len(pub_response.data) == 1
-			publication = pub_response.data[0]
-			assert publication['title'] == 'Test Publication'
-			assert publication['description'] == 'Test Description'
-			assert publication['doi'] is None
-
-			# Verify dataset links
-			dataset_links = (
-				client.table('jt_data_publication_datasets').select('*').eq('publication_id', publication_id).execute()
-			)
-			assert len(dataset_links.data) == 4  # All 4 datasets should be linked
-
-			# Verify user info link
-			user_links = (
-				client.table('jt_data_publication_user_info').select('*').eq('publication_id', publication_id).execute()
-			)
-			assert len(user_links.data) == 1
-
-	finally:
-		# Cleanup
-		if publication_id:
-			with use_client(auth_token) as client:
-				# Delete the publication first which will delete the junction table entries due to CASCADE
-				client.table('data_publication').delete().eq('id', publication_id).execute()
+def create_publication(client, test_user, **fields):
+	publication = {'title': 'Test Publication', 'description': 'Test Description', 'user_id': test_user, **fields}
+	return client.table('data_publication').insert(publication).execute().data[0]['id']
 
 
-def test_update_publication_doi(auth_token, test_datasets_for_publication, test_user_info):
-	"""Test updating a publication with a DOI"""
-	publication_id = None
-	publication_datasets = []
-	publication_users = []
+def test_create_publication(auth_token, test_user, test_datasets_for_publication, test_user_info):
+	"""A user creates a pending publication for their datasets, as PublicationModal does."""
+	with use_client(auth_token) as client:
+		publication_id = create_publication(client, test_user)
+		for dataset_id in test_datasets_for_publication[:4]:
+			client.table('jt_data_publication_datasets').insert(
+				{'publication_id': publication_id, 'dataset_id': dataset_id}
+			).execute()
+		client.table('jt_data_publication_user_info').insert(
+			{'publication_id': publication_id, 'user_info_id': test_user_info}
+		).execute()
 
-	try:
-		with use_client(auth_token) as client:
-			# Create initial publication
-			publication_data = {'title': 'Test Publication', 'doi': None}
-			response = client.table('data_publication').insert(publication_data).execute()
-			publication_id = response.data[0]['id']
-
-			# Link datasets and user info (only use 4 datasets)
-			for dataset_id in test_datasets_for_publication[:4]:
-				link_data = {'publication_id': publication_id, 'dataset_id': dataset_id}
-				client.table('jt_data_publication_datasets').insert(link_data).execute()
-				publication_datasets.append(link_data)
-
-			user_link = {'publication_id': publication_id, 'user_info_id': test_user_info}
-			client.table('jt_data_publication_user_info').insert(user_link).execute()
-			publication_users.append(user_link)
-
-			# Update with DOI
-			test_doi = '10.1234/test.123'
-			client.table('data_publication').update({'doi': test_doi}).eq('id', publication_id).execute()
-
-			# Verify DOI was updated
-			pub_response = client.table('data_publication').select('*').eq('id', publication_id).execute()
-			assert len(pub_response.data) == 1
-			assert pub_response.data[0]['doi'] == test_doi
-
-	finally:
-		# Cleanup
-		if publication_id:
-			with use_client(auth_token) as client:
-				# Delete the publication first which will delete the junction table entries due to CASCADE
-				client.table('data_publication').delete().eq('id', publication_id).execute()
+		publication = client.table('data_publication').select('*').eq('id', publication_id).execute().data
+		assert len(publication) == 1
+		assert publication[0]['title'] == 'Test Publication'
+		assert publication[0]['status'] == 'pending'
+		assert publication[0]['doi'] is None
+		dataset_links = (
+			client.table('jt_data_publication_datasets').select('*').eq('publication_id', publication_id).execute()
+		)
+		assert len(dataset_links.data) == 4
+		user_links = (
+			client.table('jt_data_publication_user_info').select('*').eq('publication_id', publication_id).execute()
+		)
+		assert len(user_links.data) == 1
 
 
-def test_publication_with_multiple_authors(auth_token, test_datasets_for_publication):
-	"""Test creating a publication with multiple authors"""
-	publication_id = None
+def test_doi_is_written_by_the_service_role_only(auth_token, test_user, test_datasets_for_publication):
+	"""DOIs are minted by the FreiDATA sync, never set by the publishing user."""
+	with use_client(auth_token) as client:
+		with pytest.raises(APIError):
+			create_publication(client, test_user, doi='10.1234/forged')
+		publication_id = create_publication(client, test_user)
+		client.table('jt_data_publication_datasets').insert(
+			{'publication_id': publication_id, 'dataset_id': test_datasets_for_publication[0]}
+		).execute()
+		with pytest.raises(APIError):
+			client.table('data_publication').update({'doi': '10.1234/forged'}).eq('id', publication_id).execute()
+
+	with use_service_client() as service_client:
+		service_client.table('data_publication').update({'doi': '10.1234/test.123'}).eq('id', publication_id).execute()
+
+	with use_client(auth_token) as client:
+		publication = client.table('data_publication').select('doi').eq('id', publication_id).execute().data
+		assert publication == [{'doi': '10.1234/test.123'}]
+
+
+def test_publication_with_multiple_authors(auth_token, test_user, test_datasets_for_publication):
 	user_info_ids = []
-	publication_datasets = []
-	publication_users = []
-
 	try:
 		with use_client(auth_token) as client:
-			# Create publication
-			publication_data = {'title': 'Multi-Author Publication', 'description': 'Test Description', 'doi': None}
-			response = client.table('data_publication').insert(publication_data).execute()
-			publication_id = response.data[0]['id']
-
-			# Create multiple authors
-			authors = [
-				{
-					'organisation': 'Institute 1',
-					'orcid': '0000-0000-0000-0001',
-					'first_name': 'Author',
-					'last_name': 'One',
-					'title': 'Dr.',
-				},
-				{
-					'organisation': 'Institute 2',
-					'orcid': '0000-0000-0000-0002',
-					'first_name': 'Author',
-					'last_name': 'Two',
-					'title': 'Prof.',
-				},
-			]
-
-			for author in authors:
-				response = client.table('user_info').insert(author).execute()
-				user_info_ids.append(response.data[0]['id'])
-
-				# Link author to publication
-				user_link = {'publication_id': publication_id, 'user_info_id': response.data[0]['id']}
-				client.table('jt_data_publication_user_info').insert(user_link).execute()
-				publication_users.append(user_link)
-
-			# Link datasets (only use 4 datasets)
+			publication_id = create_publication(client, test_user, title='Multi-Author Publication')
+			for last_name in ('One', 'Two'):
+				user_info_id = client.table('user_info').insert(author(test_user, last_name)).execute().data[0]['id']
+				user_info_ids.append(user_info_id)
+				client.table('jt_data_publication_user_info').insert(
+					{'publication_id': publication_id, 'user_info_id': user_info_id}
+				).execute()
 			for dataset_id in test_datasets_for_publication[:4]:
-				link_data = {'publication_id': publication_id, 'dataset_id': dataset_id}
-				client.table('jt_data_publication_datasets').insert(link_data).execute()
-				publication_datasets.append(link_data)
+				client.table('jt_data_publication_datasets').insert(
+					{'publication_id': publication_id, 'dataset_id': dataset_id}
+				).execute()
 
-			# Verify multiple authors were linked
 			user_links = (
 				client.table('jt_data_publication_user_info').select('*').eq('publication_id', publication_id).execute()
 			)
 			assert len(user_links.data) == 2
-
 	finally:
-		# Cleanup
-		if publication_id:
-			with use_client(auth_token) as client:
-				# Delete the publication first which will delete the junction table entries due to CASCADE
-				client.table('data_publication').delete().eq('id', publication_id).execute()
-
-				# Clean up user info entries
-				for user_info_id in user_info_ids:
-					client.table('user_info').delete().eq('id', user_info_id).execute()
-				# clean up datasets
-				for dataset_id in test_datasets_for_publication[:4]:
-					client.table('v2_datasets').delete().eq('id', dataset_id).execute()
-
-
-def test_basic_publication_operations(auth_token, test_datasets_for_publication, test_user_info):
-	"""Test basic publication operations to verify schema compatibility"""
-	publication_id = None
-
-	try:
-		with use_client(auth_token) as client:
-			# 1. Create publication
-			publication_data = {'title': 'Basic Test Publication', 'doi': None}
-			pub_response = client.table('data_publication').insert(publication_data).execute()
-			assert len(pub_response.data) == 1
-			publication_id = pub_response.data[0]['id']
-
-			# 2. Add one dataset link
-			dataset_id = test_datasets_for_publication[0]
-			link_response = (
-				client.table('jt_data_publication_datasets')
-				.insert({'publication_id': publication_id, 'dataset_id': dataset_id})
-				.execute()
-			)
-			assert len(link_response.data) == 1
-
-			# 3. Add user info link
-			user_link_response = (
-				client.table('jt_data_publication_user_info')
-				.insert({'publication_id': publication_id, 'user_info_id': test_user_info})
-				.execute()
-			)
-			assert len(user_link_response.data) == 1
-
-			# 4. Verify data was created
-			pub_check = client.table('data_publication').select('*').eq('id', publication_id).execute()
-			assert len(pub_check.data) == 1
-
-			dataset_links = (
-				client.table('jt_data_publication_datasets').select('*').eq('publication_id', publication_id).execute()
-			)
-			assert len(dataset_links.data) == 1
-
-			user_links = (
-				client.table('jt_data_publication_user_info').select('*').eq('publication_id', publication_id).execute()
-			)
-			assert len(user_links.data) == 1
-
-	finally:
-		# Enhanced cleanup
-		if publication_id:
-			with use_client(auth_token) as client:
-				try:
-					# First, remove junction table entries explicitly
-					client.table('data_publication').delete().eq('id', publication_id).execute()
-					client.table('jt_data_publication_datasets').delete().eq('publication_id', publication_id).execute()
-					client.table('jt_data_publication_user_info').delete().eq(
-						'publication_id', publication_id
-					).execute()
-
-					# Then delete the publication
-				except Exception as e:
-					print(f'Cleanup error in test_basic_publication_operations: {e}')
+		delete_authors(user_info_ids)

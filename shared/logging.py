@@ -1,9 +1,11 @@
+import json
 import logging
 from typing import Any, Dict, Optional
 from enum import Enum
 from shared.settings import settings
 from shared.__version__ import __version__
 from shared.db import use_client
+from shared.redaction import redact_tokens
 
 
 class LogCategory(Enum):
@@ -51,6 +53,13 @@ class LogContext:
 		self.extra = extra or {}
 
 
+def redact_extra(extra: Any) -> Any:
+	"""Structured log context often carries str(exception); scrub tokens from it too."""
+	if extra is None:
+		return None
+	return json.loads(redact_tokens(json.dumps(extra, default=str)))
+
+
 class SupabaseHandler(logging.Handler):
 	def __init__(self):
 		super().__init__()
@@ -68,14 +77,14 @@ class SupabaseHandler(logging.Handler):
 			log_entry = {
 				'name': record.name,
 				'level': record.levelname,
-				'message': self.format(record),
+				'message': redact_tokens(self.format(record)),
 				'origin': record.filename,
 				'origin_line': record.lineno,
 				'backend_version': __version__,
 				'category': getattr(record, 'category', None),
 				'user_id': getattr(record, 'user_id', None),
 				'dataset_id': getattr(record, 'dataset_id', None),
-				'extra': getattr(record, 'extra', None),
+				'extra': redact_extra(getattr(record, 'extra', None)),
 			}
 
 			# Insert into v2_logs table

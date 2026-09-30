@@ -13,6 +13,7 @@ from shared.settings import settings
 from shared.db import use_client
 from shared.logging import LogContext, LogCategory, UnifiedLogger, SupabaseHandler
 from shared.models import TaskTypeEnum
+from shared.redaction import redact_tokens
 
 # Initialize logger with database persistence
 logger = UnifiedLogger(__name__)
@@ -267,7 +268,7 @@ def build_issue_description(
 	if logs:
 		logs_section = '\n## Recent Logs\n```\n' + '\n'.join(logs) + '\n```'
 
-	return f'''## Processing Failure
+	return redact_tokens(f'''## Processing Failure
 
 {metadata_section}
 
@@ -276,7 +277,7 @@ def build_issue_description(
 {error_message}
 ```
 {logs_section}
-'''
+''')
 
 
 def create_processing_failure_issue(

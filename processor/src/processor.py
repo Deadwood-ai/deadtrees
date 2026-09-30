@@ -164,7 +164,7 @@ def refresh_processor_token(task: QueueTask, fallback_token: str | None = None) 
 	except Exception:
 		if fallback_token is not None:
 			return fallback_token
-		raise AuthenticationError('Invalid processor token', token=fallback_token, task_id=task.id)
+		raise AuthenticationError('Invalid processor token', task_id=task.id)
 
 
 def get_worker_id() -> str:
@@ -327,7 +327,7 @@ def process_task(task: QueueTask, token: str):
 			'Invalid token for processing',
 			LogContext(category=LogCategory.AUTH, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 		)
-		raise AuthenticationError('Invalid token', token=token, task_id=task.id)
+		raise AuthenticationError('Invalid token', task_id=task.id)
 
 	# Log start of processing
 	logger.info(

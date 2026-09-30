@@ -19,7 +19,7 @@ def process_cog(task: QueueTask, temp_dir: Path):
 	# login with the processor
 	token, user = login_verified(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 	if not user:
-		raise AuthenticationError('Invalid processor token', token=token, task_id=task.id)
+		raise AuthenticationError('Invalid processor token', task_id=task.id)
 
 	# Load dataset
 	try:
@@ -93,7 +93,7 @@ def process_cog(task: QueueTask, temp_dir: Path):
 		# Refresh token before database operation
 		token, user = login_verified(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 		if not user:
-			raise AuthenticationError('Token refresh failed', token=token, task_id=task.id)
+			raise AuthenticationError('Token refresh failed', task_id=task.id)
 
 		send_data = {k: v for k, v in cog.model_dump().items() if v is not None}
 

@@ -68,6 +68,7 @@ api_smoke_tests=(
 	api/tests/db/test_dataset_audit.py
 	api/tests/db/test_dataset_edit_history.py
 	api/tests/db/test_data_publication.py
+	api/tests/db/test_correction_and_publication_access.py
 	api/tests/db/test_process_priority.py
 	api/tests/db/test_processor_prediction_rls.py
 	api/tests/db/test_prediction_label_publication.py
