@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
-import type { IAcquisitionDateEstimate } from "../../types/acquisitionDate";
+import type { IDoyDistribution } from "../../types/acquisitionDate";
 import { binToDate, dateToYearFraction, DOY_BINS } from "../../utils/acquisitionDate";
 import { palette } from "../../theme/palette";
 
 interface AcquisitionDateDistributionProps {
-  estimate: IAcquisitionDateEstimate;
-  /** ISO date of the recorded acquisition date, when it has a day */
+  estimate: IDoyDistribution;
+  /** ISO date of the reported acquisition date, when it has a day */
   recordedDate?: string | null;
   height?: number;
 }
@@ -47,7 +47,7 @@ export default function AcquisitionDateDistribution({ estimate, recordedDate, he
   const hdi80 = estimate.hdi["80"] ?? [];
   const markers = [
     { key: "estimate", iso: estimate.predicted_date, color: COLORS.estimate, dash: "4 3", label: "Estimate" },
-    ...(recordedDate ? [{ key: "recorded", iso: recordedDate, color: COLORS.recorded, dash: undefined, label: "Recorded" }] : []),
+    ...(recordedDate ? [{ key: "recorded", iso: recordedDate, color: COLORS.recorded, dash: undefined, label: "Reported" }] : []),
   ];
 
   // labels sit above the plot, anchored away from the nearer edge; when the

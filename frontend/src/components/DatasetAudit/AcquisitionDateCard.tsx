@@ -2,11 +2,18 @@ import { Alert, Card, Form, Input, Radio, Space, Tag, Tooltip, Typography } from
 import { RobotOutlined } from "@ant-design/icons";
 import { createConditionalRule, formatAcquisitionDate } from "./auditConstants";
 import type { IDataset } from "../../types/dataset";
-import type { IAcquisitionDateEstimate, IAuditSuggestion } from "../../types/acquisitionDate";
-import type { AuditFormValues } from "../../hooks/useDatasetAudit";
-
-type SavedDateDecision = Pick<AuditFormValues, "accept_suggested_acquisition_date" | "original_acquisition_date" | "applied_acquisition_date">;
-import { datasetDateSuggestion, describeModelType, formatIsoDate, isEstimateCurrent, joinYearWrap } from "../../utils/acquisitionDate";
+import type { IAcquisitionDateDecision, IAcquisitionDateEstimate, IAuditSuggestion } from "../../types/acquisitionDate";
+import {
+	activeDecision,
+	datasetDateSuggestion,
+	describeDeactivation,
+	describeModelType,
+	formatDateParts,
+	formatIsoDate,
+	isEstimateCurrent,
+	joinYearWrap,
+	modelSuggestedDecision,
+} from "../../utils/acquisitionDate";
 import AcquisitionDateDistribution from "../AcquisitionDate/AcquisitionDateDistribution";
 
 const { Text } = Typography;
@@ -18,8 +25,15 @@ interface AcquisitionDateCardProps {
 	suggestions: IAuditSuggestion[];
 	/** fields the form filled from a suggestion (not from a saved audit) */
 	prefilledFields: string[];
-	auditData: SavedDateDecision | null | undefined;
+	/** the dataset's date decisions, newest first */
+	decisions: IAcquisitionDateDecision[];
 }
+
+const SOURCE_LABEL: Record<IAcquisitionDateDecision["source"], string> = {
+	auditor: "by an auditor",
+	automatic: "automatically by the date model",
+	legacy_audit: "in an audit before the date model",
+};
 
 /** "Suggested" tag while a prefilled field still holds the machine value. */
 function SuggestedTag({ field, suggestions, prefilledFields }: { field: string; suggestions: IAuditSuggestion[]; prefilledFields: string[] }) {
@@ -29,7 +43,7 @@ function SuggestedTag({ field, suggestions, prefilledFields }: { field: string; 
 	const suggestion = suggestions.find((s) => s.field === field);
 	if (!suggestion || !prefilledFields.includes(field) || value !== suggestion.value) return null;
 	return (
-		<Tooltip title={`Prefilled by ${suggestion.source}; saving the audit confirms it`}>
+		<Tooltip title={`Prefilled by ${suggestion.source}; saving the audit records it as your decision`}>
 			<Tag icon={<RobotOutlined />} color="blue" className="ml-2 text-[10px]">
 				suggested
 			</Tag>
@@ -37,59 +51,93 @@ function SuggestedTag({ field, suggestions, prefilledFields }: { field: string; 
 	);
 }
 
-function recordedIsoDate(dataset: IDataset): string | null {
-	if (!dataset.aquisition_year || !dataset.aquisition_month || !dataset.aquisition_day) return null;
+function isoDate(y: number | string | null, m: number | string | null, d: number | string | null): string | null {
+	if (!y || !m || !d) return null;
 	const pad = (v: number | string) => String(v).padStart(2, "0");
-	return `${dataset.aquisition_year}-${pad(dataset.aquisition_month)}-${pad(dataset.aquisition_day)}`;
+	return `${y}-${pad(m)}-${pad(d)}`;
 }
 
-function EstimateSummary({ estimate, dataset }: { estimate: IAcquisitionDateEstimate; dataset: IDataset }) {
-	const ranges = joinYearWrap(estimate.hdi["80"] ?? []).map(([s, e]) => `${formatIsoDate(s, { day: "numeric", month: "short" })} – ${formatIsoDate(e, { day: "numeric", month: "short" })}`);
-	return (
-		<>
-			<div className="mb-1 flex items-center justify-between text-xs">
-				<Text type="secondary">
-					Model estimate: <Text strong>{formatIsoDate(estimate.predicted_date)}</Text>
-				</Text>
-				<Tooltip title={`${estimate.model_version} · ${describeModelType(estimate)}`}>
-					<Tag className="m-0 text-[10px]" color={estimate.model_type === "s2" ? "geekblue" : "default"}>
-						{estimate.model_type === "s2" ? "with Sentinel-2" : "no Sentinel-2"}
-					</Tag>
-				</Tooltip>
-			</div>
-			<AcquisitionDateDistribution estimate={estimate} recordedDate={recordedIsoDate(dataset)} />
+function recordedIsoDate(dataset: IDataset): string | null {
+	return isoDate(dataset.aquisition_year, dataset.aquisition_month ?? null, dataset.aquisition_day ?? null);
+}
+
+/** The date check's state: the active decision, or why the last one was reopened. */
+function DecisionStatus({ decisions }: { decisions: IAcquisitionDateDecision[] }) {
+	const active = activeDecision(decisions);
+	const when = (iso: string) => formatIsoDate(iso.slice(0, 10));
+	if (active) {
+		const verdict =
+			active.suggestion_decision === "accepted" ? "suggested date accepted" : active.date_valid ? "reported date valid" : "reported date invalid";
+		return (
 			<div className="mb-2 text-[11px] text-gray-500">
-				80% likely: {ranges.join(", ")} ({estimate.hdi80_days} days)
-				{estimate.n_modes > 1 && " · several plausible seasons, so distant dates are not flagged"}
+				Decided {SOURCE_LABEL[active.source]} on {when(active.decided_at)}: {verdict}
+				{active.estimate_model_version ? ` (${active.estimate_model_version})` : ""}.
 			</div>
-		</>
+		);
+	}
+	const last = decisions[0];
+	if (!last?.superseded_at) return null;
+	return (
+		<Alert
+			type="info"
+			showIcon
+			className="mb-2 py-1 text-xs"
+			message={`The date check from ${when(last.decided_at)} was reopened on ${when(last.superseded_at)}: ${describeDeactivation(last)}. It is prefilled from the current estimate.`}
+		/>
 	);
 }
 
-export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledFields, auditData }: AcquisitionDateCardProps) {
+export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledFields, decisions }: AcquisitionDateCardProps) {
 	const current = estimate ? isEstimateCurrent(estimate, dataset) : false;
 	const suggestion = datasetDateSuggestion(estimate, dataset);
-	const applied = auditData?.accept_suggested_acquisition_date === true && auditData.original_acquisition_date;
+	const applied = modelSuggestedDecision(decisions, dataset);
+	const ranges = joinYearWrap(estimate?.hdi["80"] ?? [])
+		.map(([s, e]) => `${formatIsoDate(s, { day: "numeric", month: "short" })} – ${formatIsoDate(e, { day: "numeric", month: "short" })}`)
+		.join(", ");
 
 	return (
 		<Card size="small" className="mb-3 shadow-sm">
 			<div className="mb-2 flex items-center">
 				<Text strong className="text-xs">2. Acquisition Date</Text>
 			</div>
-			<div className="mb-2 text-xs">
-				<Text type="secondary">Reported date: </Text>
+			<div className="mb-1 text-xs">
+				<Text type="secondary">{applied ? "Date: " : "Reported date: "}</Text>
 				<Text strong>{formatAcquisitionDate(dataset)}</Text>
 				{applied && (
-					<Text type="secondary"> (was {formatAcquisitionDate({
-						aquisition_year: auditData.original_acquisition_date?.year,
-						aquisition_month: auditData.original_acquisition_date?.month,
-						aquisition_day: auditData.original_acquisition_date?.day,
-					})} before the suggested date was accepted)</Text>
+					<Tag color="gold" className="ml-2 text-[10px]">
+						model-suggested
+					</Tag>
 				)}
 			</div>
+			{applied && (
+				<div className="mb-1 text-[11px] text-gray-500">
+					Reported was {formatDateParts(applied.reported_year, applied.reported_month, applied.reported_day)}.
+				</div>
+			)}
+			<DecisionStatus decisions={decisions} />
 
 			{estimate ? (
-				<EstimateSummary estimate={estimate} dataset={dataset} />
+				<>
+					<div className="mb-1 flex items-center justify-between text-xs">
+						<Text type="secondary">
+							Model estimate: <Text strong>{formatIsoDate(estimate.predicted_date)}</Text>
+						</Text>
+						<Tooltip title={`${estimate.model_version} · ${describeModelType(estimate)}`}>
+							<Tag className="m-0 text-[10px]" color={estimate.model_type === "s2" ? "geekblue" : "default"}>
+								{estimate.model_type === "s2" ? "with Sentinel-2" : "no Sentinel-2"}
+							</Tag>
+						</Tooltip>
+					</div>
+					<AcquisitionDateDistribution
+						estimate={estimate}
+						// after an accepted suggestion, mark the reported date it replaced
+						recordedDate={applied ? isoDate(applied.reported_year, applied.reported_month, applied.reported_day) : recordedIsoDate(dataset)}
+					/>
+					<div className="mb-2 text-[11px] text-gray-500">
+						80% likely: {ranges} ({estimate.hdi80_days} days)
+						{estimate.n_modes > 1 && " · several plausible seasons, so distant dates are not flagged"}
+					</div>
+				</>
 			) : (
 				<div className="mb-2 text-xs text-gray-500">No date estimate yet (processing stage doy_estimation_v1).</div>
 			)}
@@ -102,21 +150,12 @@ export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledF
 					message={`Reported date is ${Math.round(estimate.recorded_offset_days ?? 0)} days from the estimate and outside the model's 99% range.`}
 				/>
 			)}
-			{estimate && !current && !applied && (
-				<div className="mb-2 text-[11px] text-gray-500">
-					The estimate was made for a different reported date; the suggestion is hidden until the stage reruns.
-				</div>
-			)}
 
 			<div className="flex items-center text-xs">
 				<Text type="secondary">Reported date valid?</Text>
 				<SuggestedTag field="has_valid_acquisition_date" suggestions={suggestions} prefilledFields={prefilledFields} />
 			</div>
-			<Form.Item
-				name="has_valid_acquisition_date"
-				className="mb-2"
-				rules={createConditionalRule("Please validate acquisition date")}
-			>
+			<Form.Item name="has_valid_acquisition_date" className="mb-2" rules={createConditionalRule("Please validate acquisition date")}>
 				<Radio.Group>
 					<Space size="large">
 						<Radio value={true}>🟢 Valid</Radio>
@@ -129,16 +168,7 @@ export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledF
 				<div className="mb-2 rounded border border-blue-100 bg-blue-50 px-2 py-1">
 					<div className="flex items-center text-xs">
 						<Text>
-							Suggested date:{" "}
-							<Text strong>
-								{suggestion
-									? formatIsoDate(suggestion.date)
-									: formatAcquisitionDate({
-											aquisition_year: auditData?.applied_acquisition_date?.year,
-											aquisition_month: auditData?.applied_acquisition_date?.month,
-											aquisition_day: auditData?.applied_acquisition_date?.day,
-										})}
-							</Text>
+							Suggested date: <Text strong>{formatIsoDate((suggestion?.date ?? applied?.suggested_date) as string)}</Text>
 							{suggestion && (
 								<Text type="secondary">
 									{" "}

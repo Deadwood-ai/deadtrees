@@ -7,10 +7,12 @@ negative northings), stored as zarr v3 at `<bucket>/<prefix>/<block>.zarr`:
 `sentle(time, band, y, x)` uint16 DN, 0 = nodata (clouds/snow masked), weekly
 composites (timestamps are window centres), x/y the upper-left cell corners.
 
-Block lookup: candidate names for the site's UTM zone and its neighbours
-(the grid assigns zone-edge sites to the neighbouring zone), then
-- with SENTINEL_BLOCKS_SUPABASE_URL/KEY set: the `chunks` table, status done;
-- without: the block's zarr.json on S3 (recorded as block_status "unverified").
+Block lookup needs neither the world-index gpkg nor the Sentinel pipeline's
+database: the block names follow from the coordinates. Candidates are the
+site's UTM zone and its neighbours (the grid assigns zone-edge sites to the
+neighbouring zone); the first one containing the site whose zarr.json exists
+on S3 is used. Replayed over all 10,775 datasets against the pipeline's block
+table, this picks exactly the grid's block for every site in a finished block.
 """
 
 import math
@@ -19,7 +21,6 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 import rasterio
-import requests
 import shapely.geometry
 from pyproj import Transformer
 from rasterio.features import rasterize
@@ -37,7 +38,7 @@ MARGIN_M = 20
 class S2Lookup:
 	"""Why an ortho got (or did not get) an S2 cube; stored in the estimate."""
 
-	status: str  # ok | no_block | block_not_done | outside_archive | no_credentials | error
+	status: str  # ok | no_block | outside_archive | no_credentials | error
 	block: str | None = None
 	block_status: str | None = None
 	cube_start: str | None = None
@@ -76,22 +77,6 @@ def candidate_blocks(lon: float, lat: float) -> list[tuple[str, int]]:
 	return out
 
 
-def _chunk_status(names: list[str]) -> dict[str, str] | None:
-	"""block_name -> status from the Sentinel pipeline's chunks table, or None
-	when the blocks database is not configured."""
-	if not settings.SENTINEL_BLOCKS_SUPABASE_URL or not settings.SENTINEL_BLOCKS_SUPABASE_KEY:
-		return None
-	key = settings.SENTINEL_BLOCKS_SUPABASE_KEY
-	r = requests.get(
-		f'{settings.SENTINEL_BLOCKS_SUPABASE_URL.rstrip("/")}/rest/v1/chunks',
-		params={'select': 'block_name,status', 'block_name': f'in.({",".join(names)})'},
-		headers={'apikey': key, 'Authorization': f'Bearer {key}'},
-		timeout=30,
-	)
-	r.raise_for_status()
-	return {row['block_name']: row['status'] for row in r.json()}
-
-
 def _s3fs():
 	import s3fs
 
@@ -126,11 +111,6 @@ def fetch_cube(aoi_4326: dict | None, bbox_4326: tuple, year: int) -> tuple[S2Cu
 	c = site.centroid
 	candidates = candidate_blocks(c.x, c.y)
 	names = [n for n, _ in candidates]
-	try:
-		statuses = _chunk_status(names)
-	except Exception as e:  # the blocks DB being down must not fail the stage
-		return None, S2Lookup('error', detail={'error': f'chunks lookup: {e}'[:300]})
-
 	fs = _s3fs()
 	for name, epsg in candidates:
 		to_utm = Transformer.from_crs(4326, epsg, always_xy=True).transform
@@ -139,17 +119,18 @@ def fetch_cube(aoi_4326: dict | None, bbox_4326: tuple, year: int) -> tuple[S2Cu
 		block_box = shapely.geometry.box(minx, miny, minx + BLOCK_SIZE_M, miny + BLOCK_SIZE_M)
 		if not block_box.contains(site_utm.centroid):
 			continue
-		if statuses is not None:
-			status = statuses.get(name)
-			if status != 'done':
-				return None, S2Lookup('no_block' if status is None else 'block_not_done', block=name, block_status=status)
-		elif not fs.exists(f'{_block_root(name)}/zarr.json'):
+		try:
+			on_s3 = fs.exists(f'{_block_root(name)}/zarr.json')
+		except Exception as e:  # S3 being unreachable must not fail the stage
+			return None, S2Lookup('error', block=name, detail={'error': repr(e)[:300]})
+		if not on_s3:
+			# the block is not processed yet (or failed) in the Sentinel pipeline
 			return None, S2Lookup('no_block', block=name, block_status='not_on_s3')
 		try:
 			cube, info = _crop(fs, name, epsg, site_utm.intersection(block_box), year, has_aoi=aoi_4326 is not None)
 		except Exception as e:
 			return None, S2Lookup('error', block=name, detail={'error': repr(e)[:300]})
-		info.block_status = 'done' if statuses is not None else 'unverified'
+		info.block_status = 'on_s3'
 		return cube, info
 	return None, S2Lookup('no_block', detail={'candidates': names})
 

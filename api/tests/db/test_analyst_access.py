@@ -129,8 +129,8 @@ def test_role_inventory_reads_and_effective_privileges(db):
 	settings = db.execute("SELECT rolconfig FROM pg_roles WHERE rolname='team_analyst'").fetchone()[0]
 	assert {'default_transaction_read_only=on', 'statement_timeout=30s', 'lock_timeout=3s'} <= set(settings)
 	tables = db.execute("SELECT tablename,cmd FROM pg_policies WHERE policyname='analyst_select'").fetchall()
-	# + v2_acquisition_date_estimates, dataset_audit_suggestions
-	assert len(tables) == 56
+	# + v2_acquisition_date_estimates, dataset_audit_suggestions, acquisition_date_decisions
+	assert len(tables) == 57
 	for table, command in tables:
 		assert command == 'SELECT'
 		for privilege in ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'TRIGGER', 'REFERENCES'):

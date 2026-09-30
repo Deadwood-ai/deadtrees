@@ -151,10 +151,9 @@ class Settings(BaseSettings):
 	SENTINEL2_S3_PREFIX: str = 'sentinel-2-cubes'
 	SENTINEL2_S3_ACCESS_KEY_ID: str = ''
 	SENTINEL2_S3_SECRET_ACCESS_KEY: str = ''
-	# Sentinel processing Supabase (separate project; `chunks` = block status).
-	# Optional: without it a block counts as available when its zarr exists on S3.
-	SENTINEL_BLOCKS_SUPABASE_URL: str = ''
-	SENTINEL_BLOCKS_SUPABASE_KEY: str = ''
+	# Record the prefilled date check as an automatic decision (applying an
+	# accepted suggested date) when no person has decided. Off: auditors decide.
+	DOY_AUTO_DECIDE: bool = False
 
 	# processor settings
 	PROCESSOR_USERNAME: str = 'processor@deadtrees.earth'

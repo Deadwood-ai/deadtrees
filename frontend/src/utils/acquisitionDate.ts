@@ -1,4 +1,9 @@
-import type { IAcquisitionDateEstimate, IAuditSuggestion } from "../types/acquisitionDate";
+import type {
+  IAcquisitionDateDecision,
+  IAcquisitionDateEstimate,
+  IAuditSuggestion,
+  IDoyDistribution,
+} from "../types/acquisitionDate";
 
 export const DOY_BINS = 365;
 
@@ -76,4 +81,62 @@ export function joinYearWrap(ranges: [string, string][]): [string, string][] {
   const last = ranges[ranges.length - 1];
   if (!first[0].endsWith("-01-01") || !last[1].endsWith("-12-31")) return ranges;
   return [[last[0], first[1]], ...ranges.slice(1, -1)];
+}
+
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/** "11 March 2022", "March 2022" or "2022" for a partial date. */
+export function formatDateParts(year: number | null, month: number | null, day: number | null): string {
+  if (!year) return "no date";
+  if (!month) return `${year} (no month)`;
+  return day ? `${day} ${MONTHS[month - 1]} ${year}` : `${MONTHS[month - 1]} ${year}`;
+}
+
+export function activeDecision(decisions: IAcquisitionDateDecision[] | null | undefined) {
+  return decisions?.find((d) => d.superseded_at === null) ?? null;
+}
+
+/** The dataset's date came from an accepted model suggestion (and still stands). */
+export function modelSuggestedDecision(
+  decisions: IAcquisitionDateDecision[] | null | undefined,
+  dataset: DatasetDate,
+): IAcquisitionDateDecision | null {
+  const d = activeDecision(decisions);
+  if (!d || d.suggestion_decision !== "accepted") return null;
+  const same =
+    d.resulting_year === asNumber(dataset.aquisition_year) &&
+    d.resulting_month === asNumber(dataset.aquisition_month) &&
+    d.resulting_day === asNumber(dataset.aquisition_day);
+  return same ? d : null;
+}
+
+/** Why the model doubts a reported date, in words. */
+export function evidenceText(e: {
+  suggestion_reason?: "missing_month" | "mismatch" | null;
+  recorded_offset_days?: number | null;
+  n_modes?: number;
+}): string {
+  if (e.suggestion_reason === "missing_month") return "The reported date has no month.";
+  if (e.suggestion_reason === "mismatch")
+    return `The imagery does not match the reported date: it is ${Math.round(e.recorded_offset_days ?? 0)} days from the estimate and outside the range holding 99% of the model's probability.`;
+  if ((e.n_modes ?? 1) > 1) return "The imagery fits several seasons, so the reported date is not questioned.";
+  return "The reported date is consistent with the imagery.";
+}
+
+/** A decision's evidence as a chartable distribution (legacy audits have none). */
+export function decisionDistribution(d: IAcquisitionDateDecision | null | undefined): IDoyDistribution | null {
+  const e = d?.evidence;
+  if (!e?.probabilities || !e.hdi || !e.predicted_date || !e.flight_year) return null;
+  return { probabilities: e.probabilities, hdi: e.hdi, predicted_date: e.predicted_date, flight_year: e.flight_year };
+}
+
+const DEACTIVATED_REASON: Record<NonNullable<IAcquisitionDateDecision["superseded_reason"]>, string> = {
+  new_decision: "replaced by a newer decision",
+  estimate_contradicts: "a newer estimate of the date model disagrees with it",
+  date_edited: "the date was edited afterwards",
+  cutoff: "all decisions before a cutoff date were reopened",
+};
+
+export function describeDeactivation(d: IAcquisitionDateDecision): string {
+  return d.superseded_reason ? DEACTIVATED_REASON[d.superseded_reason] : "";
 }

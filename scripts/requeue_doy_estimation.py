@@ -4,9 +4,12 @@ Queue the acquisition-date stage (doy_estimation_v1) for datasets that need it.
 
 The stage reads the stored COG, so it runs on its own (no geotiff) and is
 queued at the lowest priority behind real uploads. A rerun replaces the
-estimate and the stage's audit suggestions; saved audits are never changed.
-Audits a new suggestion disagrees with show up in the
-`dataset_audit_suggestion_conflicts` view for re-review.
+estimate and the stage's audit suggestions. A date decision the new estimate
+contradicts is deactivated (kept, with date and reason) and the dataset shows
+up in `acquisition_date_review_queue`; decisions it agrees with stay active.
+To re-check every decision made before a date (e.g. after a model upgrade),
+run `select public.supersede_acquisition_date_decisions_before('<date>')` as
+service role before queueing.
 
 Selection (default --stale): every non-archived dataset with a COG whose
 estimate is missing, from another model version, or assessed against a date
@@ -33,7 +36,7 @@ from requeue_datasets_via_api import REQUIRED_KEYS, _http_json, _load_env_subset
 TASK_TYPE = 'doy_estimation_v1'
 # keep in sync with shared/asset_manifest.py DOY_ESTIMATION_MODEL_DIR_NAME
 MODEL_VERSION = 'doy_estimation_v1'
-RETRYABLE_S2_STATUSES = {'block_not_done', 'no_block', 'outside_archive', 'no_credentials', 'error'}
+RETRYABLE_S2_STATUSES = {'no_block', 'outside_archive', 'no_credentials', 'error'}
 PAGE = 1000
 TOKEN_REFRESH_EVERY = 500  # processor JWTs expire after an hour
 

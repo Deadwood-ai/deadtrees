@@ -17,15 +17,16 @@ import { describeAuditLockDenial, isAuditLeaseConflict, useAuditLock } from "../
 import { useAuditNavigation } from "../../hooks/useAuditNavigation";
 import { useDatasetFlags, useUpdateFlagStatus } from "../../hooks/useDatasetFlags";
 import { usePhenologyData } from "../../hooks/usePhenologyData";
-import { useAcquisitionDateEstimate, useAuditSuggestions } from "../../hooks/useAcquisitionDateEstimate";
+import { useAcquisitionDateDecisions, useAcquisitionDateEstimate, useAuditSuggestions } from "../../hooks/useAcquisitionDateEstimate";
 import { suggestedAuditValues } from "../../utils/acquisitionDate";
-import type { IAuditSuggestion } from "../../types/acquisitionDate";
+import type { IAcquisitionDateDecision, IAuditSuggestion } from "../../types/acquisitionDate";
 import { useSeasonPrompt } from "../../hooks/useSeasonPrompt";
 import { supabase } from "../../hooks/useSupabase";
 import { trackAppEvent } from "../../utils/analytics";
 import { useAuditAOIState } from "./useAuditAOIState";
 
 const NO_SUGGESTIONS: IAuditSuggestion[] = [];
+const NO_DECISIONS: IAcquisitionDateDecision[] = [];
 
 export interface UseAuditDetailStateProps {
 	dataset: IDataset;
@@ -138,6 +139,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	const { data: orthoMetadata, isLoading: isOrthoLoading } = useOrthoMetadata(dataset.id);
 	const { data: phenologyData, isLoading: isPhenologyLoading } = usePhenologyData(dataset.id);
 	const { data: acquisitionDateEstimate } = useAcquisitionDateEstimate(dataset.id);
+	const { data: acquisitionDateDecisions = NO_DECISIONS } = useAcquisitionDateDecisions(dataset.id);
 	const { data: auditSuggestionsData, isLoading: isSuggestionsLoading } = useAuditSuggestions(dataset.id);
 	// stable fallback: a fresh [] per render would re-run the prefill effect and reset edits
 	const auditSuggestions = auditSuggestionsData ?? NO_SUGGESTIONS;
@@ -434,6 +436,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		phenologyData,
 		isPhenologyLoading,
 		acquisitionDateEstimate,
+		acquisitionDateDecisions,
 		auditSuggestions,
 		prefilledFields,
 

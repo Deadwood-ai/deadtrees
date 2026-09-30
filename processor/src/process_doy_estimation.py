@@ -233,3 +233,6 @@ def _store(token: str, dataset_id: int, dataset: Dataset, estimate) -> None:
 			client.table(settings.audit_suggestions_table).delete().eq('dataset_id', dataset_id).eq(
 				'source', DOY_ESTIMATION_TASK_TYPE
 			).in_('field', stale).execute()
+		if settings.DOY_AUTO_DECIDE:
+			# the prefill becomes the decision unless a person already decided
+			client.rpc('record_automatic_acquisition_date_decision', {'p_dataset_id': dataset_id}).execute()

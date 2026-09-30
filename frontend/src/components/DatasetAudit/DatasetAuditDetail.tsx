@@ -94,6 +94,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 		phenologyData,
 		isPhenologyLoading,
 		acquisitionDateEstimate,
+		acquisitionDateDecisions,
 		auditSuggestions,
 		prefilledFields,
 		updateFlagStatus,
@@ -338,7 +339,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 							estimate={acquisitionDateEstimate}
 							suggestions={auditSuggestions}
 							prefilledFields={prefilledFields}
-							auditData={auditData}
+							decisions={acquisitionDateDecisions}
 						/>
 
 						<PhenologyCard

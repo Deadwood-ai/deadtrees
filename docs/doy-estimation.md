@@ -30,29 +30,30 @@ Cross-validated on the database's own dates:
   ViT-B/14 embeddings -> 5-seed ensemble -> calibration. About 10 s per dataset
   on the GPU (a few seconds of S3 reads when S2 is used).
 - S2 problems never fail the stage; they fall back to the no-S2 model and are
-  recorded in `metadata.s2.status` (`ok`, `no_block`, `block_not_done`,
-  `outside_archive`, `no_credentials`, `error`).
+  recorded in `metadata.s2.status` (`ok`, `no_block`, `outside_archive`,
+  `no_credentials`, `error`).
 
 ### Sentinel-2 block cubes
 
 The Sentinel pipeline stores S2 in 30 km UTM blocks,
 `s3://frct-sentinel2/sentinel-2-cubes/block_{epsg}_{minx}_{miny}.zarr` (zarr v3,
 uint16 DN, 0 = nodata, weekly composites; southern blocks use 326xx zones with
-negative northings). The stage computes the candidate block names for the
-site's UTM zone and both neighbours (the grid puts zone-edge sites into the
-neighbouring zone), keeps the block containing the site, checks it is `done`
-in the Sentinel Supabase `chunks` table (or, without that config, that its
-`zarr.json` exists on S3), and reads only the site window of the flight year
-+- 35 days.
+negative northings). The block name follows from the coordinates, so neither the
+world-index gpkg nor the Sentinel pipeline's database is needed: the stage tries
+the site's UTM zone and both neighbours (the grid puts zone-edge sites into the
+neighbouring zone), takes the first block containing the site whose `zarr.json`
+exists on S3, and reads only the site window of the flight year +- 35 days.
+Replayed over all 10,775 datasets against the pipeline's block table, the rule
+picks exactly the grid's block for all 9,924 datasets in a finished block (and
+finds S2 for 16 more in a neighbouring zone's block).
 
 The model was trained on per-dataset cubes. On 29 sites with both, the block
 crop gave the same distributions (median L1 0.027; predicted date shift median
 0 d, p90 3 d, max 11 d; MAE 15.6 vs 15.8 d).
 
 Config (processor env, see `.env.example`): `SENTINEL2_S3_ACCESS_KEY_ID`,
-`SENTINEL2_S3_SECRET_ACCESS_KEY` (read-only keys), optional
-`SENTINEL_BLOCKS_SUPABASE_URL` / `SENTINEL_BLOCKS_SUPABASE_KEY`. Without S3
-keys every dataset gets the no-S2 model.
+`SENTINEL2_S3_SECRET_ACCESS_KEY` (read-only keys). Without them every dataset
+gets the no-S2 model.
 
 ### Model assets
 
@@ -93,24 +94,43 @@ Calibrated on out-of-fold predictions of the deployed recipes
   estimates have MAE 17.7 d (S2, 57 % of S2 datasets) / 20.8 d (no-S2, 22 %),
   80-83 % within 30 days.
 
-## Audit
+## From suggestion to decision
 
-- `dataset_audit_suggestions` (generic, any source): per-field values that the
-  audit page prefills into fields the saved audit leaves empty, tagged
-  "suggested". Nothing is saved until an auditor saves. This stage suggests
+Methods write-up with examples: section 8 of the research report
+(`side_projects/doy_estimation/report.pdf` in the sentinel-mortality repo).
+
+- **Predicted vs suggested date.** Every estimate has a predicted date (the
+  circular median). A suggested date is the same value, but only offered as a
+  replacement for the dataset's date when the month is missing or on a huge
+  mismatch.
+- **Suggestions** (`dataset_audit_suggestions`, generic for any source) prefill
+  empty audit fields, tagged "suggested"; nothing is saved. This stage suggests
   `has_valid_acquisition_date` (false only on a huge mismatch),
-  `accept_suggested_acquisition_date` (the accept recommendation, only when
-  there is a suggestion) and `acquisition_date_notes` (an explanation).
-- `dataset_audit.accept_suggested_acquisition_date = true` makes the suggested
-  date the dataset's acquisition date: a trigger updates `v2_datasets` in the
-  same transaction (behind the audit lease), stores the replaced date in
-  `original_acquisition_date`, and the change lands in
-  `v2_dataset_edit_history` under the auditor. Setting it back restores the
-  original date if the dataset still carries the applied one.
-- The audit card shows the distribution (80 % set shaded, estimate and
-  recorded date marked), the model version and type, the mismatch warning and
-  the suggested date. The dataset page shows the suggested date while the
-  dataset still has the date it was assessed against.
+  `accept_suggested_acquisition_date` (the recommendation, only with a
+  suggestion) and `acquisition_date_notes`.
+- **Decisions** (`acquisition_date_decisions`) are the outcome of the date
+  check: date valid?, suggestion accepted/rejected, reported and resulting
+  date, model version, evidence snapshot (distribution, ranges, offset). Saving
+  the audit records the auditor's decision (trigger). With `DOY_AUTO_DECIDE=true`
+  the processor records the prefill as an automatic decision when no person has
+  decided; an automatic decision never replaces a person's.
+- **Accepting** writes the suggested date to `v2_datasets` as a full day with
+  `aquisition_date_source = 'model_suggestion'` and a pointer to the decision
+  (`aquisition_date_decision_id`); the change is logged in
+  `v2_dataset_edit_history`. The dataset page shows the date as
+  "model-suggested" with the reported date and the evidence.
+- **One active decision per dataset.** Older ones are deactivated, never
+  overwritten, with date and reason: `new_decision` (re-audit),
+  `estimate_contradicts` (a new estimate of the same date disagrees: decided
+  fine but now a huge mismatch; decided wrong and kept but now no problem;
+  month missing and an undecided suggestion), `date_edited` (hand edit),
+  `cutoff` (operator). Deactivation clears the audit's date fields, so the form
+  is prefilled again; `acquisition_date_review_queue` lists datasets without an
+  active decision.
+- **Existing audits** became `legacy_audit` decisions dated by their audit; they
+  stay active unless the first estimate contradicts them.
+- **Downstream readers** of `dataset_audit.has_valid_acquisition_date` see
+  `null` for a reopened check; the active decision is the source of truth.
 
 ## Rerun for all datasets
 
@@ -122,11 +142,10 @@ python3 scripts/requeue_doy_estimation.py --all              # everything with a
 ```
 
 Queued at priority 1 (behind uploads), task `doy_estimation_v1` only. A rerun
-replaces estimates and the stage's suggestions, so unaudited datasets get the
-new prefill automatically. Saved audits are never modified;
-`dataset_audit_suggestion_conflicts` lists audits a newer suggestion disagrees
-with, for re-review.
+replaces estimates and suggestions; decisions it contradicts are reopened, the
+others stay. To re-check every decision made before a date (e.g. after a model
+upgrade), run as service role before queueing:
 
-Towards automated audits: an automatic auditor can save the suggestions as an
-audit (the processor may write `dataset_audit`); the same trigger applies the
-date.
+```sql
+select public.supersede_acquisition_date_decisions_before('2026-10-01');
+```

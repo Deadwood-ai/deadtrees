@@ -3,10 +3,10 @@
 -- Any automated stage can propose a value for a dataset_audit form field
 -- (field = the dataset_audit column / form field name). The audit page fills
 -- empty fields from here and marks them as suggested; nothing becomes an audit
--- until an auditor saves the form. Saved audits are never changed by a
--- suggestion; dataset_audit_suggestion_conflicts lists audits a newer
--- suggestion disagrees with, for re-review. One suggestion per field: a
--- rerun (or another source) replaces it.
+-- until an auditor saves the form. Suggestions never change a saved audit;
+-- the date decision lifecycle (acquisition_date_decisions) decides when a
+-- saved date check is deactivated and needs a new look. One suggestion per
+-- field: a rerun (or another source) replaces it.
 create table if not exists public.dataset_audit_suggestions (
   dataset_id bigint not null references public.v2_datasets (id) on delete cascade,
   field text not null check (field ~ '^[a-z][a-z0-9_]*$'),

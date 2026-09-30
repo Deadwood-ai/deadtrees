@@ -669,8 +669,6 @@ class DatasetAudit(BaseModel):
 	audited_by: Optional[str] = None  # UUID as string
 	notes: Optional[str] = None
 	accept_suggested_acquisition_date: Optional[bool] = None
-	original_acquisition_date: Optional[Dict] = None
-	applied_acquisition_date: Optional[Dict] = None
 
 	@field_serializer('audit_date', mode='plain')
 	def datetime_to_isoformat(field: datetime | None) -> str | None:

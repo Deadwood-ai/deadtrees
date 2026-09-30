@@ -1,4 +1,4 @@
-import { Typography, Tooltip, Tag } from "antd";
+import { Typography, Tooltip, Tag, Popover } from "antd";
 import { EnvironmentOutlined, CheckCircleOutlined, ExclamationCircleOutlined, WarningOutlined, ClockCircleOutlined, LockOutlined, GlobalOutlined, EyeOutlined } from "@ant-design/icons";
 import type { IDataset } from "../../types/dataset";
 import { IDataAccess } from "../../types/dataset";
@@ -12,8 +12,17 @@ import DatasetNavigation from "./DatasetNavigation";
 import { palette } from "../../theme/palette";
 import { getBiomeEmoji, getBiomeTagColor, truncateBiomeLabel } from "../../utils/biomeDisplay";
 import { useCanUploadPrivate, useCanViewAllPrivate } from "../../hooks/useUserPrivileges";
-import { useAcquisitionDateEstimate } from "../../hooks/useAcquisitionDateEstimate";
-import { datasetDateSuggestion, describeModelType, formatIsoDate } from "../../utils/acquisitionDate";
+import { useAcquisitionDateDecisions, useAcquisitionDateEstimate } from "../../hooks/useAcquisitionDateEstimate";
+import {
+  datasetDateSuggestion,
+  decisionDistribution,
+  describeModelType,
+  formatDateParts,
+  formatIsoDate,
+  modelSuggestedDecision,
+} from "../../utils/acquisitionDate";
+import { formatAcquisitionDate } from "../DatasetAudit/auditConstants";
+import AcquisitionDateEvidence from "../AcquisitionDate/AcquisitionDateEvidence";
 
 interface DatasetInfoSidebarProps {
   dataset: IDataset;
@@ -26,25 +35,82 @@ interface DatasetInfoSidebarProps {
 
 // === Shared Row Components ===
 
-/** The date model's suggestion, shown when the reported date has no month or
- * disagrees strongly with the imagery (single-season distributions only). */
-const SuggestedDateRow = ({ dataset }: { dataset: IDataset }) => {
+const pad2 = (v: number) => String(v).padStart(2, "0");
+const isoOf = (y: number | null, m: number | null, d: number | null) => (y && m && d ? `${y}-${pad2(m)}-${pad2(d)}` : null);
+
+/** Acquisition date with its provenance: a date that came from an accepted
+ * model suggestion is marked as such, with the reported date and the evidence;
+ * a pending suggestion (month missing, or imagery contradicting the reported
+ * date) is shown next to the reported date. */
+const AcquisitionDateRows = ({ dataset, dateText }: { dataset: IDataset; dateText: string }) => {
   const { data: estimate } = useAcquisitionDateEstimate(dataset.id);
-  const suggestion = datasetDateSuggestion(estimate, dataset);
-  if (!estimate || !suggestion) return null;
-  const why =
-    suggestion.reason === "mismatch"
-      ? "The imagery does not match the reported date"
-      : "The reported date has no month";
+  const { data: decisions } = useAcquisitionDateDecisions(dataset.id);
+  const applied = modelSuggestedDecision(decisions, dataset);
+  const appliedEvidence = decisionDistribution(applied);
+  const suggestion = applied ? null : datasetDateSuggestion(estimate, dataset);
+  const reportedIso = isoOf(Number(dataset.aquisition_year), Number(dataset.aquisition_month) || null, Number(dataset.aquisition_day) || null);
+
   return (
-    <InfoRow
-      label="Suggested Date"
-      tooltip={`${why}. Estimated by the date model ${estimate.model_version} from the ${describeModelType(estimate)}; 80% of its probability lies within ${estimate.hdi80_days} days.`}
-    >
-      <Typography.Text>
-        {suggestion.reason === "mismatch" && <WarningOutlined style={{ color: palette.state.warning, marginRight: 4 }} />}~{formatIsoDate(suggestion.date, { day: "numeric", month: "long", year: "numeric" })}
-      </Typography.Text>
-    </InfoRow>
+    <>
+      <InfoRow label="Acquisition Date" tooltip={applied ? undefined : "Date when the drone imagery was captured."}>
+        <Typography.Text strong>{dateText}</Typography.Text>
+        {applied && (
+          <Popover
+            trigger="click"
+            title="Date suggested by the date model"
+            content={
+              appliedEvidence ? (
+                <AcquisitionDateEvidence
+                  distribution={appliedEvidence}
+                  reportedLabel={formatDateParts(applied.reported_year, applied.reported_month, applied.reported_day)}
+                  reportedIso={isoOf(applied.reported_year, applied.reported_month, applied.reported_day)}
+                  reason={applied.evidence}
+                  modelLabel={`${applied.estimate_model_version}, accepted ${applied.source === "automatic" ? "automatically" : "in the audit"} on ${formatIsoDate(applied.decided_at.slice(0, 10))}`}
+                />
+              ) : null
+            }
+          >
+            <Tag color="gold" className="cursor-pointer" style={{ marginLeft: 6, marginRight: 0 }}>
+              model-suggested
+            </Tag>
+          </Popover>
+        )}
+      </InfoRow>
+      {applied && (
+        <InfoRow label="Reported Date" tooltip="The date given at upload, replaced by the model's suggestion.">
+          <Typography.Text type="secondary">
+            {formatDateParts(applied.reported_year, applied.reported_month, applied.reported_day)}
+            {" · "}
+            {applied.evidence.suggestion_reason === "missing_month" ? "incomplete" : "contradicted by the imagery"}
+          </Typography.Text>
+        </InfoRow>
+      )}
+      {estimate && suggestion && (
+        <InfoRow label="Suggested Date">
+          <Popover
+            trigger="click"
+            title="Suggestion of the date model"
+            content={
+              <AcquisitionDateEvidence
+                distribution={estimate}
+                reportedLabel={formatAcquisitionDate(dataset)}
+                reportedIso={reportedIso}
+                reason={estimate}
+                modelLabel={`${estimate.model_version}, ${describeModelType(estimate)}; not yet reviewed`}
+              />
+            }
+          >
+            <Typography.Text className="cursor-pointer">
+              {suggestion.reason === "mismatch" && <WarningOutlined style={{ color: palette.state.warning, marginRight: 4 }} />}~
+              {formatIsoDate(suggestion.date, { day: "numeric", month: "long", year: "numeric" })}{" "}
+              <Typography.Text type="secondary" underline>
+                why?
+              </Typography.Text>
+            </Typography.Text>
+          </Popover>
+        </InfoRow>
+      )}
+    </>
   );
 };
 
@@ -282,21 +348,18 @@ export default function DatasetInfoSidebar({
           </Tag>
         </InfoRow>
 
-        <InfoRow label="Acquisition Date" tooltip="Date when the drone imagery was captured.">
-          <Typography.Text strong>
-            {new Date(
-              Number(dataset.aquisition_year),
-              dataset.aquisition_month ? Number(dataset.aquisition_month) - 1 : 0,
-              dataset.aquisition_day ? Number(dataset.aquisition_day) : 1
-            ).toLocaleDateString("en-US", {
-              year: "numeric",
-              ...(dataset.aquisition_month && { month: "long" }),
-              ...(dataset.aquisition_day && { day: "numeric" }),
-            })}
-          </Typography.Text>
-        </InfoRow>
-
-        <SuggestedDateRow dataset={dataset} />
+        <AcquisitionDateRows
+          dataset={dataset}
+          dateText={new Date(
+            Number(dataset.aquisition_year),
+            dataset.aquisition_month ? Number(dataset.aquisition_month) - 1 : 0,
+            dataset.aquisition_day ? Number(dataset.aquisition_day) : 1
+          ).toLocaleDateString("en-US", {
+            year: "numeric",
+            ...(dataset.aquisition_month && { month: "long" }),
+            ...(dataset.aquisition_day && { day: "numeric" }),
+          })}
+        />
 
         <InfoRow label="Phenology">
           <div className="w-[180px]">
