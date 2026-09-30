@@ -96,7 +96,7 @@ const AcquisitionDateRows = ({ dataset, dateText }: { dataset: IDataset; dateTex
                 reportedLabel={formatAcquisitionDate(dataset)}
                 reportedIso={reportedIso}
                 reason={estimate}
-                modelLabel={`${estimate.model_version}, ${describeModelType(estimate)}; not yet reviewed`}
+                modelLabel={`${estimate.model_version}, ${describeModelType(estimate)}`}
               />
             }
           >
