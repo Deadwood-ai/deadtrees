@@ -606,3 +606,58 @@ def test_rerun_multiple_old_queue_items(test_dataset, auth_token, test_user):
 		assert len(response.data) == 1
 		assert response.data[0]['id'] == new_task_id
 		assert response.data[0]['id'] not in task_ids
+
+
+def test_lost_requeue_response_returns_the_task_a_worker_already_claimed(test_dataset, auth_token, monkeypatch):
+	"""A committed requeue whose response is lost must not turn into a 409 once a worker claims it."""
+	from contextlib import contextmanager
+
+	import api.src.routers.process as process_router
+
+	real_use_client = process_router.use_client
+	rpc_calls = []
+
+	class _LostResponse:
+		def __init__(self, request):
+			self._request = request
+
+		def execute(self):
+			rpc_calls.append(1)
+			committed = self._request.execute()
+			with use_service_client() as service:
+				service.table(settings.queue_table).update(
+					{'claimed_by': 'test-worker', 'is_processing': True}
+				).eq('id', committed.data['id']).execute()
+			raise Exception('Server disconnected without sending a response')
+
+	class _LossyClient:
+		def __init__(self, client):
+			self._client = client
+
+		def rpc(self, *args, **kwargs):
+			return _LostResponse(self._client.rpc(*args, **kwargs))
+
+		def __getattr__(self, name):
+			return getattr(self._client, name)
+
+	@contextmanager
+	def lossy_use_client(token):
+		with real_use_client(token) as supabase_client:
+			yield _LossyClient(supabase_client)
+
+	monkeypatch.setattr(process_router, 'use_client', lossy_use_client)
+	monkeypatch.setattr('shared.retry.time.sleep', lambda _delay: None)
+
+	response = client.put(
+		f'/datasets/{test_dataset}/process',
+		json={'task_types': ['geotiff', 'cog']},
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+	assert response.status_code == 200, response.text
+	assert len(rpc_calls) == 1
+	with use_service_client() as service:
+		rows = service.table(settings.queue_table).select('*').eq('dataset_id', test_dataset).execute().data
+	assert len(rows) == 1
+	assert response.json()['id'] == rows[0]['id']
+	assert rows[0]['claimed_by'] == 'test-worker'

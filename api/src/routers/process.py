@@ -89,22 +89,49 @@ def create_processing_task(
 
 	# The RPC authorizes the caller, rejects active processing, replaces waiting
 	# queue rows, resets a failed status and inserts the task in one transaction.
-	# Repeating it is safe: a retry replaces the row an earlier attempt committed.
-	@retry_on_transient_error
-	def _requeue() -> dict:
+	requested_task_types = [task_type.value for task_type in validated_task_types]
+	with use_client(token) as client:
+		earlier = client.table(settings.queue_table).select('id').eq('dataset_id', dataset_id).execute()
+	earlier_ids = {row['id'] for row in earlier.data}
+	committed: dict = {}
+
+	def _find_committed_task() -> bool:
+		"""A lost response may hide a committed requeue that a worker has already
+		claimed; retrying it would then fail with 409, so return that task instead."""
+		with use_client(token) as client:
+			rows = (
+				client.table(settings.queue_table)
+				.select('*')
+				.eq('dataset_id', dataset_id)
+				.eq('user_id', user.id)
+				.execute()
+				.data
+			)
+		for row in rows:
+			if (
+				row['id'] not in earlier_ids
+				and row['task_types'] == requested_task_types
+				and row['priority'] == request.priority
+			):
+				committed['task'] = row
+				return True
+		return False
+
+	@retry_on_transient_error(verify_succeeded=_find_committed_task)
+	def _requeue() -> Optional[dict]:
 		with use_client(token) as client:
 			response = client.rpc(
 				'requeue_dataset_processing',
 				{
 					'p_dataset_id': dataset_id,
-					'p_task_types': [task_type.value for task_type in validated_task_types],
+					'p_task_types': requested_task_types,
 					'p_priority': request.priority,
 				},
 			).execute()
 			return response.data
 
 	try:
-		inserted = _requeue()
+		inserted = _requeue() or committed['task']
 	except APIError as e:
 		status_code = _REQUEUE_ERROR_STATUS.get(e.code)
 		if status_code is None:
