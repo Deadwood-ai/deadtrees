@@ -11,6 +11,7 @@ credentials belong. It intentionally contains no real secrets.
 | Safe playbooks | `docs/playbooks/*.md` | yes | no |
 | Local ops notes | `docs/ops/*`, `.codex/local-access.md` | no | yes |
 | Codex MCP config | `.codex/config.toml` | no | yes |
+| Claude Code personal settings | `.claude/settings.local.json` | no | no |
 | Backend/runtime env | `.env` | no | yes |
 | Backend/runtime example | `.env.example` | yes | no |
 | Frontend local profiles | `frontend/.env.dev.local`, `frontend/.env.prod.local` | no | public client keys only |
@@ -87,7 +88,7 @@ Use:
 Never put service-role keys, SSH credentials, VPN credentials, MCP bearer tokens,
 or private API keys in frontend env files.
 
-## Codex Local Files
+## Agent Local Files
 
 `.codex/config.toml` is for repo-local MCP/server configuration and may contain
 database URLs or bearer tokens. It is ignored and should remain local.
@@ -95,7 +96,10 @@ database URLs or bearer tokens. It is ignored and should remain local.
 `.codex/local-access.md` is for Codex-specific access notes that future local
 Codex sessions can read. It may contain credentials, so it must stay ignored.
 
-When inspecting either file, report only the presence, purpose, and line numbers
+`.claude/settings.local.json` holds personal Claude Code settings and hooks for
+this checkout. It is ignored and must not contain secrets.
+
+When inspecting these files, report only the presence, purpose, and line numbers
 of risks. Do not print credential values.
 
 ## Human Access Notes
@@ -117,7 +121,7 @@ when available:
 - `docs/ops`
 - frontend env profiles
 
-This keeps new Codex worktrees usable without committing secrets. If a copied
+This keeps new agent worktrees usable without committing secrets. If a copied
 local file is stale, update the primary checkout's local-only file rather than
 adding secrets to tracked docs.
 
@@ -137,6 +141,24 @@ the user names another base:
 ```bash
 git fetch origin main --prune
 git worktree add <path> -b <branch-name> origin/main
+```
+
+Claude Code sessions can get the same setup through
+`scripts/claude-worktree.sh`, wired as personal `WorktreeCreate` and
+`WorktreeRemove` hooks in the untracked `.claude/settings.local.json` of the
+primary checkout. It creates detached worktrees from current `origin/main` under
+`~/.claude/worktrees/deadtrees/<name>`, runs the lightweight setup above, and
+only removes clean worktrees whose commits are already on a remote. Name the
+`fix/...` or `feat/...` branch once the task is clear, and run the full
+`setup-worktree.sh` before work that needs Python or frontend dependencies.
+
+```json
+{
+  "hooks": {
+    "WorktreeCreate": [{ "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/claude-worktree.sh\" create", "timeout": 600 }] }],
+    "WorktreeRemove": [{ "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/claude-worktree.sh\" remove", "timeout": 300 }] }]
+  }
+}
 ```
 
 ### Isolated Dev/Test Stack

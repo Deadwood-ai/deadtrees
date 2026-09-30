@@ -1,7 +1,7 @@
 # Local Review Instructions
 
 Use this file when the user asks for a local pre-PR review, mentions
-`@local-review-instructions`, or wants Codex to improve a worktree before opening
+`@local-review-instructions`, or wants an agent to improve a worktree before opening
 a pull request.
 
 ## Intent
@@ -48,7 +48,8 @@ Avoid:
 
 ## How To Run
 
-If using the Codex CLI directly, prefer:
+Any agent can apply these instructions directly to the diff. With the Codex CLI,
+prefer:
 
 ```bash
 codex review --base main - < docs/agents/local-review-instructions.md
@@ -80,7 +81,7 @@ residual risk.
 
 ## Acting On Findings
 
-When the user asks Codex to run the local review and improve the worktree:
+When the user asks an agent to run the local review and improve the worktree:
 
 1. Inspect the repo state first.
 2. Run or perform the review using these instructions.

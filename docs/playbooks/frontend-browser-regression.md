@@ -8,7 +8,7 @@ Answer one question:
 
 > Does this frontend change still work in a real browser against the same backend surfaces users hit in production?
 
-Prefer the Codex in-app browser through Browser Use for visible checks. Use terminal tests for fast coverage, then use the browser for product behavior, map rendering, auth, console, and network symptoms.
+Prefer the agent's built-in browser (Codex in-app browser through Browser Use, or Claude's browser pane) for visible checks. Use terminal tests for fast coverage, then use the browser for product behavior, map rendering, auth, console, and network symptoms.
 
 ## Preflight
 
@@ -52,7 +52,7 @@ If Vite chooses another port, use the URL printed by Vite.
 
 ## Browser Use Script
 
-Use Browser Use with the Codex in-app browser, not an external browser, unless the user asks otherwise.
+Use the agent's built-in browser, not an external browser, unless the user asks otherwise.
 
 1. Open the local URL.
 2. Take a DOM snapshot after each navigation or major UI change.

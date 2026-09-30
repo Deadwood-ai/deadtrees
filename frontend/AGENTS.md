@@ -96,7 +96,7 @@ side-effect coverage for flag acknowledgement, AOI save, audit lock release, or
 `dataset_audit` persistence.
 
 For user-facing UI changes, start the relevant Vite profile and validate with the
-Codex in-app browser or Playwright. Use `docs/playbooks/frontend-browser-regression.md`
+agent's built-in browser (Codex in-app browser or Claude's browser pane) or Playwright. Use `docs/playbooks/frontend-browser-regression.md`
 for production-connected smoke checks.
 
 `npm --prefix frontend run build` and `npm --prefix frontend run lint` are
