@@ -15,15 +15,6 @@ export enum UploadType {
   RAW_IMAGES_ZIP = "raw_images_zip",
 }
 
-export interface ILabelObject {
-  dataset_id: number;
-  user_id: string;
-  file: File;
-  file_alias: string;
-  labels_description: string;
-  file_type: string;
-}
-
 export enum IBiome {
   TropicalMoistForests = "Tropical and Subtropical Moist Broadleaf Forests",
   TropicalDryForests = "Tropical and Subtropical Dry Broadleaf Forests",

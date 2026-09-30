@@ -87,6 +87,8 @@ test.describe("contributor local e2e", () => {
       page.getByTestId("contributor-upload-author-select"),
     ).toBeVisible();
     await expect(page.getByTestId("contributor-upload-submit")).toBeDisabled();
+    // Labels upload was removed: its API route is not mounted, so offering it blocked processing.
+    await expect(modal.getByText("Add Labels / Annotations (Optional)")).toHaveCount(0);
   });
 
   test("ZIP validation explains a broken index before upload and clears after a valid selection", async ({ page }) => {

@@ -9,6 +9,7 @@ on:
       - "shared/**/*.py"
       - "processor/**/*.py"
       - "deadtrees-cli/**/*.py"
+      - "freidata/**/*.py"
       - "scripts/**/*.py"
       - "scripts/**/*.ts"
       - "scripts/lint-ast-grep.sh"

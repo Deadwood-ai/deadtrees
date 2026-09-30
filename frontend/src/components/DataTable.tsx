@@ -33,6 +33,7 @@ import { isGeonadirDataset } from "../utils/datasetUtils";
 import { fixAuthorNamesEncoding, sanitizeText } from "../utils/textUtils";
 import { IDataset } from "../types/dataset";
 import { useQueuePositions } from "../hooks/useQueuePositions";
+import { useDatasetsInPublication } from "../hooks/useDataPublications";
 import { useQueryClient } from "@tanstack/react-query";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useCanUploadPrivate } from "../hooks/useUserPrivileges";
@@ -94,7 +95,7 @@ const DataTable: React.FC<DataTableProps> = ({
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const { data: userData, isLoading: isLoadingData, isError: isDataError } = useUserDatasets();
   const { status, user } = useAuth();
-  const [datasetsInPublication, setDatasetsInPublication] = useState<number[]>([]);
+  const { data: datasetsInPublication = [] } = useDatasetsInPublication(user?.id);
 
   // State for edit modal
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -152,41 +153,6 @@ const DataTable: React.FC<DataTableProps> = ({
       }
     }
   }, [resetSelection, onSelectedRowsChange, onResetSelectionComplete]);
-
-  // Fetch datasets that are in publication process
-  useEffect(() => {
-    const fetchDatasetsInPublication = async () => {
-      if (!user) return;
-
-      try {
-        // Get all publications by this user that don't have a DOI yet
-        const { data: publications } = await supabase.from("data_publication").select("id, doi").eq("user_id", user.id);
-
-        if (!publications || publications.length === 0) return;
-
-        // Filter publications that don't have a DOI yet
-        const pendingPublicationIds = publications.filter((pub) => !pub.doi).map((pub) => pub.id);
-
-        if (pendingPublicationIds.length === 0) return;
-
-        // Get all datasets linked to these pending publications
-        const { data: linkedDatasets } = await supabase
-          .from("jt_data_publication_datasets")
-          .select("dataset_id")
-          .in("publication_id", pendingPublicationIds);
-
-        if (!linkedDatasets) return;
-
-        // Extract the dataset IDs
-        const pendingDatasetIds = linkedDatasets.map((item) => item.dataset_id);
-        setDatasetsInPublication(pendingDatasetIds);
-      } catch (error) {
-        console.error("Error fetching datasets in publication:", error);
-      }
-    };
-
-    fetchDatasetsInPublication();
-  }, [user]);
 
   // Dataset is eligible for publishing when processing artifacts and metadata are ready (predictions not required)
   const isDatasetPublishEligible = (record: Dataset): boolean => {

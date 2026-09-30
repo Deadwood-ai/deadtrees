@@ -544,7 +544,7 @@ Patches are exported to **UTM projection** for ML training:
    - Geometry in EPSG:3857 (Web Mercator, geodesically-corrected)
    - `utm_zone` and `epsg_code` metadata
 
-2. **Export script** (`scripts/export_ml_tiles.py`):
+2. **Export script** (`api/src/export/export_reference_patches.py`):
    - Reads bbox from database
    - Transforms to UTM using stored EPSG code
    - Clips orthophoto to exact patch boundary

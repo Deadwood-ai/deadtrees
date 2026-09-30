@@ -3,7 +3,12 @@ import { Button, Card, Checkbox, Flex, Select, Space, Statistic, Table, Tag, Typ
 import type { ColumnsType } from "antd/es/table";
 import { IDataset } from "../../../types/dataset";
 import { IReferencePatch, PatchResolution, PatchStatus } from "../../../types/referencePatches";
-import { useReferencePatches, useUpdatePatchStatus } from "../../../hooks/useReferencePatches";
+import {
+  ALL_PATCH_LAYERS,
+  patchStatusValidation,
+  useReferencePatches,
+  useSetPatchValidation,
+} from "../../../hooks/useReferencePatches";
 import ReferencePatchMap from "../ReferencePatchMap";
 
 interface Props {
@@ -28,7 +33,7 @@ const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
 
 export default function PatchValidationPhase({ dataset }: Props) {
   const { data: allPatches = [] } = useReferencePatches(dataset.id);
-  const { mutate: updateStatus, isPending: updating } = useUpdatePatchStatus();
+  const { mutate: updateStatus, isPending: updating } = useSetPatchValidation();
 
   const [selectedResolution, setSelectedResolution] = useState<PatchResolution | "all">("all");
   const [selectedStatus, setSelectedStatus] = useState<StatusFilter>("all");
@@ -116,7 +121,7 @@ export default function PatchValidationPhase({ dataset }: Props) {
   ];
 
   const handleStatusChange = (patch: IReferencePatch, status: PatchStatus) => {
-    updateStatus({ patchId: patch.id, status });
+    updateStatus({ patchId: patch.id, layers: ALL_PATCH_LAYERS, validated: patchStatusValidation(status) });
   };
 
   return (

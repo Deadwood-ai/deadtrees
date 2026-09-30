@@ -11,10 +11,13 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
+
+# Receipt and lock directory under settings.base_path.
+UPLOAD_SESSIONS_DIR = '.upload-sessions'
 
 
 class ChunkReceipt(BaseModel):
@@ -107,7 +110,13 @@ class ChunkSession:
 			return self.receipt.response
 		return {'message': f'Chunk {index} of {self.chunks_total} received'}
 
-	def begin_finalization(self):
+	def begin_finalization(self, validate: Callable[[Path], None] | None = None):
+		"""Fence the upload against repeated side effects, after validating its bytes.
+
+		`validate` must be side-effect free. It runs on the assembled file before
+		the fence, so a rejected upload keeps its receipt in `receiving` and every
+		retry reports the same validation error.
+		"""
 		if len(self.receipt.chunks) != self.chunks_total or self.receipt.phase != 'receiving':
 			raise HTTPException(status_code=409, detail='Upload is not ready for finalization')
 		expected_size = sum(part.size for part in self.receipt.chunks)
@@ -118,6 +127,8 @@ class ChunkSession:
 			output.truncate(expected_size)
 			output.flush()
 			os.fsync(output.fileno())
+		if validate is not None:
+			validate(self.target_path)
 		# The DB and filesystem are not one transaction. Persist a fence before
 		# any DB insert so an ambiguous failure never repeats those side effects.
 		self.receipt.phase = 'finalizing'

@@ -216,15 +216,16 @@ test.describe("contributor local write flows", () => {
       contributorAccessToken,
     );
 
-    expect(status.download_path).toBe(
-      `/downloads/v1/${datasetId}/${datasetId}.zip`,
+    // Cached bundles carry a content-version suffix, so a changed dataset gets a new file.
+    expect(status.download_path).toMatch(
+      new RegExp(`^/downloads/v1/${datasetId}/${datasetId}_[0-9a-f]+\\.zip$`),
     );
 
     const downloadFile = path.join(
       localDataRoot,
       "downloads",
       String(datasetId),
-      `${datasetId}.zip`,
+      path.basename(status.download_path!),
     );
     expect(fs.existsSync(downloadFile)).toBe(true);
 

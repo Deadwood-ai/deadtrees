@@ -6,7 +6,6 @@ from shared.status import update_status
 from shared.models import StatusEnum
 from shared.settings import settings
 from shared.db import use_client
-from shared.zip_utils import ensure_supported_zip_compression
 
 
 def process_raw_images_upload(dataset: Dataset, upload_target_path: Path, token: str) -> Dataset:
@@ -24,10 +23,6 @@ def process_raw_images_upload(dataset: Dataset, upload_target_path: Path, token:
 		This function only handles ZIP file storage. All extraction, RTK detection, and
 		technical analysis is deferred to the ODM processing task.
 	"""
-	# Defensive validation in case this function is called outside the
-	# normal upload endpoint flow.
-	ensure_supported_zip_compression(upload_target_path)
-
 	# Move ZIP file to expected location for ODM processor
 	zip_filename = f'{dataset.id}.zip'
 	final_zip_path = settings.raw_images_path / zip_filename
@@ -54,7 +49,7 @@ def process_raw_images_upload(dataset: Dataset, upload_target_path: Path, token:
 
 	# Insert raw_images entry into database
 	with use_client(token) as client:
-		response = client.table(settings.raw_images_table).insert(raw_images_data).execute()
+		client.table(settings.raw_images_table).insert(raw_images_data).execute()
 
 	# Update status to indicate upload completion only
 	update_status(
