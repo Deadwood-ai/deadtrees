@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { expect, test, type Page } from "@playwright/test";
 
+import { acceptCookieConsent } from "./support/localAuth";
+
 const localSupabaseUrl =
   process.env.VITE_SUPABASE_URL ||
   process.env.SUPABASE_URL ||
@@ -603,10 +605,7 @@ async function deleteFirstPoint(page: Page) {
 
 async function signInFieldUser(page: Page) {
   // The cookie banner otherwise covers the mobile map controls.
-  await page.addInitScript(() => {
-    window.localStorage.setItem("cookieConsent", "accepted");
-    window.localStorage.setItem("cookieConsentVersion", "1.1");
-  });
+  await acceptCookieConsent(page);
   await page.goto("/sign-in?returnTo=/priwa-field");
   await page.getByPlaceholder(/email/i).fill(fieldUserEmail);
   await page.getByPlaceholder(/password/i).fill(fieldUserPassword);

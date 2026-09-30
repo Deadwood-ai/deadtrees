@@ -17,23 +17,30 @@ Options:
   --keep-up        Leave the stack running for the agent QA pass; stop it
                    afterwards with scripts/qa/env.sh down
   --run-dir <path> Output directory, default .local/qa-runs/review-<timestamp>
+  --workers <n>    Playwright workers, default 4; the write suites share one
+                   database and Vite server, so more workers add flakes
   -h, --help       Show this help
 
-Each failing test is retried once; a test that passes on retry is reported as
-flaky and does not fail the gate, so list it in the review. Exit status is the
-Playwright suite result. Without --keep-up the stack is
+Each failing test is retried once. A test that passes on retry does not fail
+the gate but is printed as flaky in the summary; report it in the review. Exit
+status is the Playwright suite result. Without --keep-up the stack is
 always stopped, including after a failure.
 USAGE
 }
 
 FOCUS=""
 KEEP_UP=0
+WORKERS=4
 RUN_DIR="$REPO_ROOT/.local/qa-runs/review-$(date -u +%Y%m%dT%H%M%SZ)"
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--focus)
-			FOCUS="${2:-}"
+			FOCUS="${2:?--focus needs a value}"
+			shift 2
+			;;
+		--workers)
+			WORKERS="${2:?--workers needs a value}"
 			shift 2
 			;;
 		--keep-up)
@@ -41,7 +48,7 @@ while [[ $# -gt 0 ]]; do
 			shift
 			;;
 		--run-dir)
-			RUN_DIR="${2:-}"
+			RUN_DIR="${2:?--run-dir needs a value}"
 			shift 2
 			;;
 		-h|--help)
@@ -100,15 +107,14 @@ suite_status=0
 (
 	cd "$REPO_ROOT/frontend"
 	E2E_LOCAL_WRITE=1 E2E_LOCAL_AUDITOR_WRITE=1 E2E_LOCAL_PRIWA_WRITE=1 \
-		PLAYWRIGHT_HTML_OPEN=never \
+		PLAYWRIGHT_HTML_OPEN=never PLAYWRIGHT_HTML_OUTPUT_DIR="$RUN_DIR/playwright-report" \
 		./node_modules/.bin/playwright test --config playwright.local.config.ts \
-		--retries 1 --reporter=line,html --output "$RUN_DIR/playwright-artifacts"
+		--workers "$WORKERS" --retries 1 --reporter=line,html \
+		--output "$RUN_DIR/playwright-artifacts"
 ) >"$RUN_DIR/playwright.log" 2>&1 || suite_status=$?
-if [[ -d "$REPO_ROOT/frontend/playwright-report" ]]; then
-	rm -rf "$RUN_DIR/playwright-report"
-	mv "$REPO_ROOT/frontend/playwright-report" "$RUN_DIR/playwright-report"
-fi
 tail -n 30 "$RUN_DIR/playwright.log"
+# Playwright's final summary lists failed and flaky tests under "N failed"/"N flaky".
+flaky_count="$(sed -n 's/^ *\([0-9][0-9]*\) flaky$/\1/p' "$RUN_DIR/playwright.log" | tail -n 1)"
 
 qa_args=(--no-seed --parallel 1 --agent-browser-surface playwright --run-dir "$RUN_DIR/agent-qa")
 if [[ -n "$FOCUS" ]]; then
@@ -118,7 +124,7 @@ fi
 	|| echo "Agent QA prompt generation failed; see $RUN_DIR/agent-qa.log" >&2
 
 echo
-echo "Playwright suites: $([[ $suite_status -eq 0 ]] && echo pass || echo "fail (exit $suite_status)")"
+echo "Playwright suites: $([[ $suite_status -eq 0 ]] && echo pass || echo "fail (exit $suite_status)"), flaky: ${flaky_count:-0}"
 echo "Log: $RUN_DIR/playwright.log"
 echo "Agent QA prompts: $RUN_DIR/agent-qa"
 exit "$suite_status"

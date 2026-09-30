@@ -57,7 +57,10 @@ scripts/qa/review-regression.sh --keep-up --focus "<what the change adds or chan
 It starts and validates the isolated stack, runs every local Playwright suite
 (read and local-write) headless, and writes agent QA prompts to
 `<run-dir>/agent-qa`. A failing suite blocks the review until it is fixed or
-shown to be unrelated. Then execute the generated prompt with the Playwright
+shown to be unrelated. Report every test the summary lists as flaky. On a busy
+Docker host (the processing server) most flakes carry `net::ERR_NETWORK_CHANGED`
+in their trace: Chromium drops in-flight requests when containers add or remove
+network interfaces. A flake without that error needs a look. Then execute the generated prompt with the Playwright
 surface: the playbooks for the areas the change touches, the whole set for
 cross-cutting changes, and the feature focus for new behavior. A new
 user-facing feature also needs a durable spec in `frontend/e2e-local/`, or its
