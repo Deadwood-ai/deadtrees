@@ -622,14 +622,14 @@ export const satelliteMapRelease: SatelliteMapRelease = {
   typeLabel: "Satellite map",
   status: "available",
   summary:
-    "Year-by-year fractional tree cover and deadwood cover maps at European scale, derived from Sentinel-2 by satellite models trained on the drone and aerial ground truth. Explore them in the interactive map and analyse time series for your own area.",
+    "Annual tree cover and deadwood cover maps for Europe from Sentinel-2, with models trained on drone and aerial ground truth.",
   links: {
     artifact: "/deadtrees",
   },
   map: {
     previewImage: "/assets/releases/sentinel-2-satellite-map.webp",
     previewAlt:
-      "Satellite map of tree cover and deadwood cover over the Harz mountains, Germany",
+      "Sentinel-2 tree cover map of central Europe, from Brittany to southern Poland",
     coverage: "Europe",
     firstYear: 2017,
     lastYear: 2025,
