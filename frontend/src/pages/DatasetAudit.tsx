@@ -29,6 +29,7 @@ import {
 } from "@ant-design/icons";
 import { useAuth } from "../hooks/useAuthProvider";
 import { useAuditReviewQueue } from "../hooks/useAcquisitionDateEstimate";
+import { auditItemLabel } from "../components/DatasetAudit/AuditReviewNotice";
 import { useCanAudit, useCanOperate } from "../hooks/useUserPrivileges";
 import { useDatasetById } from "../hooks/useDatasets";
 import { useAuditDatasets } from "../hooks/useAuditDatasets";
@@ -48,8 +49,15 @@ import { isDatasetReadyForAudit } from "../utils/processingSteps";
 const { Title, Text } = Typography;
 
 // Tab structure including edits & flags
-type AuditTab = "pending" | "completed" | "reference" | "edits-flags";
-const AUDIT_TABS: readonly AuditTab[] = ["pending", "completed", "reference", "edits-flags"];
+type AuditTab = "pending" | "completed" | "reference" | "edits-flags" | "re-review";
+const AUDIT_TABS: readonly AuditTab[] = ["pending", "completed", "reference", "edits-flags", "re-review"];
+
+// why a saved audit item is back for review (audit_review_queue.reason)
+const REVIEW_REASON: Record<string, string> = {
+	estimate_contradicts: "a newer model estimate disagrees",
+	date_edited: "the date was edited",
+	cutoff: "reopened after a model update",
+};
 // The processing view moved to the Factory workspace; the old tab link is still handled.
 const LEGACY_PROCESSING_TAB = "processing";
 
@@ -207,6 +215,11 @@ function DatasetAuditInner() {
 	const { data: flaggedAgg = [], isLoading: isFlaggedLoading } = useFlaggedDatasets();
 	const { data: reviewQueue = [] } = useAuditReviewQueue();
 	const reviewSet = useMemo(() => new Set(reviewQueue.map((r) => r.dataset_id)), [reviewQueue]);
+	const reviewItemsById = useMemo(() => {
+		const map = new Map<number, typeof reviewQueue>();
+		for (const r of reviewQueue) map.set(r.dataset_id, [...(map.get(r.dataset_id) ?? []), r]);
+		return map;
+	}, [reviewQueue]);
 	const { data: referenceDatasetIds = new Set() } = useReferenceDatasetIds();
 	const { data: contributorMap = new Map() } = useDatasetContributors();
 	const { data: correctionsMap = new Map(), isLoading: isCorrectionsLoading } = usePendingCorrections();
@@ -232,7 +245,6 @@ function DatasetAuditInner() {
 	const [auditorFilter, setAuditorFilter] = useState<string>(initialAuditor);
 	const [contributorFilter, setContributorFilter] = useState<string>(initialContributor);
 	const [hasFlagsFilter, setHasFlagsFilter] = useState<boolean>(initialHasFlags);
-	const [needsReviewFilter, setNeedsReviewFilter] = useState<boolean>(searchParams.get("rereview") === "true");
 	const [hasProcessingStates, setHasProcessingStates] = useState<ProcessingStateFilterKey[]>(DEFAULT_PROCESSING_STATE_FILTERS);
 	const [inSeasonOnly, setInSeasonOnly] = useState<boolean>(false);
 	const [filtersExpanded, setFiltersExpanded] = useState<boolean>(true);
@@ -248,7 +260,6 @@ function DatasetAuditInner() {
 		if (auditorFilter) params.set("auditor", auditorFilter);
 		if (contributorFilter) params.set("contributor", contributorFilter);
 		if (hasFlagsFilter) params.set("hasFlags", "true");
-		if (needsReviewFilter) params.set("rereview", "true");
 		if (idFilter) params.set("id", idFilter);
 		setSearchParams(params, { replace: true });
 	}, [
@@ -259,7 +270,6 @@ function DatasetAuditInner() {
 		auditorFilter,
 		contributorFilter,
 		hasFlagsFilter,
-		needsReviewFilter,
 		idFilter,
 		setSearchParams,
 		legacyProcessingLink,
@@ -346,6 +356,9 @@ function DatasetAuditInner() {
 			filtered = filtered.filter((dataset) =>
 				correctionsMap.has(dataset.id) || flaggedSet.has(dataset.id)
 			);
+		} else if (activeTab === "re-review") {
+			// saved audit items that newer machine evidence disagrees with
+			filtered = filtered.filter((dataset) => reviewSet.has(dataset.id));
 		}
 
 		// Apply common filters
@@ -406,9 +419,6 @@ function DatasetAuditInner() {
 			filtered = filtered.filter((d) => flaggedSet.has(d.id));
 		}
 
-		// saved audits that newer machine evidence disagrees with
-		if (needsReviewFilter) filtered = filtered.filter((d) => reviewSet.has(d.id));
-
 		// Completed-only processing state filters (helps find "fixable but missing forest cover", etc.)
 		if (activeTab === "completed" && hasProcessingStates.length > 0) {
 			filtered = filtered.filter((dataset) =>
@@ -432,7 +442,6 @@ function DatasetAuditInner() {
 		auditorFilter,
 		contributorFilter,
 		hasFlagsFilter,
-		needsReviewFilter,
 		reviewSet,
 		hasProcessingStates,
 		inSeasonOnly,
@@ -490,6 +499,11 @@ function DatasetAuditInner() {
 		const flaggedSet = new Set(flaggedAgg.map((f) => f.dataset_id));
 		return datasets.filter((d) => correctionsMap.has(d.id) || flaggedSet.has(d.id)).length;
 	}, [datasets, flaggedAgg, correctionsMap]);
+
+	const reReviewCount = useMemo(
+		() => (datasets ?? []).filter((d) => !d.archived && reviewSet.has(d.id)).length,
+		[datasets, reviewSet],
+	);
 
 	// Check if user has audit privileges
 	useEffect(() => {
@@ -653,6 +667,22 @@ function DatasetAuditInner() {
 			return compareNullableStrings(aNotes, bNotes);
 		},
 		width: 200,
+	};
+
+	const reviewItemsColumn = {
+		title: "Needs re-review",
+		key: "rereview",
+		render: (_: unknown, record: AuditDataset) => (
+			<Space direction="vertical" size={2}>
+				{(reviewItemsById.get(record.id) ?? []).map((r) => (
+					<Text key={r.item} className="text-xs">
+						<b>{auditItemLabel(r.item)}</b>
+						{": "}
+						{REVIEW_REASON[r.reason] ?? (r.reason.startsWith("suggestion_changed:") ? `new suggestion from ${r.reason.split(":")[1]}` : r.reason)}
+					</Text>
+				))}
+			</Space>
+		),
 	};
 
 	const flagsColumn = {
@@ -883,6 +913,9 @@ function DatasetAuditInner() {
 	} else if (activeTab === "edits-flags") {
 		// Edits & Flags: show corrections and flags counts, with review action
 		columns = [...baseColumns, correctionsColumn, flagsColumn, statusColumn, actionsColumn];
+	} else if (activeTab === "re-review") {
+		// Re-review: what newer evidence disagrees with, and who audited it
+		columns = [...baseColumns, reviewItemsColumn, statusColumn, auditorColumn, actionsColumn];
 	} else {
 		// Reference tab
 		columns = [...baseColumns, referencePatchesColumn, actionsColumn];
@@ -896,7 +929,6 @@ function DatasetAuditInner() {
 		setAuditorFilter("");
 		setContributorFilter("");
 		setHasFlagsFilter(false);
-		setNeedsReviewFilter(false);
 		setHasProcessingStates([]);
 		setInSeasonOnly(false);
 		setStatusFilter("all");
@@ -912,7 +944,6 @@ function DatasetAuditInner() {
 		auditorFilter ||
 		contributorFilter ||
 		hasFlagsFilter ||
-		needsReviewFilter ||
 		hasActiveProcessingFilters ||
 		statusFilter !== "all";
 
@@ -966,6 +997,7 @@ function DatasetAuditInner() {
 								{ label: `Completed (${completedCount})`, value: "completed" },
 								{ label: `Edits & Flags (${editsFlagsCount})`, value: "edits-flags" },
 								{ label: `Reference (${referenceCount})`, value: "reference" },
+								{ label: `Re-review (${reReviewCount})`, value: "re-review" },
 							]}
 						/>
 					) : (
@@ -1012,6 +1044,15 @@ function DatasetAuditInner() {
 									</Space>
 								),
 								value: "reference",
+							},
+							{
+								label: (
+									<Space size={6} className="py-1 px-2">
+										<span>🔁 Re-review</span>
+										<Badge count={reReviewCount} size="small" color={palette.state.info} showZero overflowCount={BADGE_OVERFLOW_COUNT} />
+									</Space>
+								),
+								value: "re-review",
 							},
 							]}
 							size="large"
@@ -1192,9 +1233,6 @@ function DatasetAuditInner() {
 													<div className="flex flex-row gap-1">
 														<Checkbox checked={hasFlagsFilter} onChange={(e) => setHasFlagsFilter(e.target.checked)}>
 															Has flags only
-														</Checkbox>
-														<Checkbox checked={needsReviewFilter} onChange={(e) => setNeedsReviewFilter(e.target.checked)}>
-															Needs re-review ({reviewSet.size})
 														</Checkbox>
 													</div>
 
