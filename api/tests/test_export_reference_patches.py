@@ -770,3 +770,22 @@ def test_main_exits_non_zero_when_reference_dataset_fetch_fails(monkeypatch, tmp
 	monkeypatch.setattr(fetch_module, 'use_client', lambda _token: _failing_use_client({}, {'reference_datasets'}))
 
 	assert export_module.main() == 1
+
+
+def test_main_fails_when_vector_freshness_check_errors_and_nothing_else_changed(monkeypatch, tmp_path):
+	patch = make_patch(1, '20_0_0', deadwood_validated=True, reference_deadwood_label_id=7)
+
+	def fail_timestamp_fetch(*_args, **_kwargs):
+		raise RuntimeError('database unavailable')
+
+	monkeypatch.setattr(sys, 'argv', ['export_reference_patches.py', '--output-dir', str(tmp_path)])
+	monkeypatch.setattr(export_module, 'login', lambda _user, _password: 'token')
+	monkeypatch.setattr(export_module, 'fetch_reference_datasets', lambda _token: [10])
+	monkeypatch.setattr(export_module, 'fetch_validated_patches', lambda *_args, **_kwargs: [patch])
+	monkeypatch.setattr(export_module, 'get_vector_export_candidates', lambda patches, **_kwargs: list(patches))
+	monkeypatch.setattr(export_module, 'patch_needs_export', lambda *_args, **_kwargs: False)
+	monkeypatch.setattr(export_module, 'fetch_latest_reference_geometry_created_at', fail_timestamp_fetch)
+	monkeypatch.setattr(export_module, 'cleanup_removed_datasets', lambda *_args, **_kwargs: None)
+	monkeypatch.setattr(export_module, 'cleanup_removed_patch_exports', lambda *_args, **_kwargs: 0)
+
+	assert export_module.main() == 1

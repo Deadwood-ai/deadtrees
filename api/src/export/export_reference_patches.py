@@ -993,6 +993,9 @@ def main():
 		print(f'   Skipped raster (already exist): {raster_skipped_count} patches')
 		print('   Newly exported (vector): 0 geopackages')
 		print(f'   Skipped vector (already exist): {vector_skipped_count} geopackages')
+		if vector_failed_count:
+			print(f'❌ Vector freshness check failed for {vector_failed_count} geopackages')
+			return 1
 		return 0
 
 	print(f'✓ Found {len(patches)} validated patches in database')

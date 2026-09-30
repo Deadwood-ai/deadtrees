@@ -54,12 +54,13 @@ def find_stale_uploads(
 ) -> List[Dict[str, Any]]:
 	"""Uploading publications whose upload started longer ago than max_age.
 
-	Rows from before upload_started_at existed fall back to created_at.
+	upload_started_at marks an upload in progress; a finished draft-only run
+	clears it and stays "uploading" until it is published or reviewed.
 	"""
 	stale = []
 	for row in rows:
-		started = _parse_timestamp(row.get("upload_started_at")) or _parse_timestamp(row.get("created_at"))
-		if started is None or now - started > max_age:
+		started = _parse_timestamp(row.get("upload_started_at"))
+		if started is not None and now - started > max_age:
 			stale.append(row)
 	return stale
 
@@ -68,7 +69,7 @@ def fail_stale_uploads(cfg, db, now: dt.datetime) -> List[int]:
 	"""Mark interrupted uploads as error and notify, so they do not stay stuck."""
 	resp = (
 		db.table("data_publication")
-		.select("id, title, freidata_record_id, upload_started_at, created_at")
+		.select("id, title, freidata_record_id, upload_started_at")
 		.eq("status", "uploading")
 		.execute()
 	)

@@ -359,6 +359,8 @@ def run_publication(cfg: Config, db: Client, folder: Path, publication_id: int) 
 			update_fields["doi"] = doi_identifier
 		update_publication_row(db, publication_id, update_fields)
 	else:
+		# The upload is complete; only a crashed upload keeps upload_started_at.
+		update_publication_row(db, publication_id, {"upload_started_at": None})
 		print("PUBLISH=0 -> done (draft bleibt unveröffentlicht).")
 		print(f"Du kannst den Draft jetzt in der UI prüfen: {draft.get('links', {}).get('self_html')}")
 		print("Zum Publish später: export PUBLISH=1 und Script erneut laufen lassen.")
