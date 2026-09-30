@@ -90,8 +90,13 @@ def create_processing_task(
 	# The RPC authorizes the caller, rejects active processing, replaces waiting
 	# queue rows, resets a failed status and inserts the task in one transaction.
 	requested_task_types = [task_type.value for task_type in validated_task_types]
-	with use_client(token) as client:
-		earlier = client.table(settings.queue_table).select('id').eq('dataset_id', dataset_id).execute()
+	try:
+		with use_client(token) as client:
+			earlier = client.table(settings.queue_table).select('id').eq('dataset_id', dataset_id).execute()
+	except Exception as e:
+		msg = f'Error reading the processing queue: {str(e)}'
+		logger.error(msg, log_context())
+		raise HTTPException(status_code=500, detail=msg)
 	earlier_ids = {row['id'] for row in earlier.data}
 	committed: dict = {}
 

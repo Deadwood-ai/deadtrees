@@ -97,18 +97,20 @@ def process_cog(task: QueueTask, temp_dir: Path):
 
 		send_data = {k: v for k, v in cog.model_dump().items() if v is not None}
 
+		# Read the replaced path once: a retried upsert whose first response was lost
+		# would otherwise read the new path and never delete the old COG.
+		with use_client(token) as client:
+			previous = client.table(settings.cogs_table).select('cog_path').eq('dataset_id', ortho.dataset_id).execute()
+		previous_cog_path = previous.data[0]['cog_path'] if previous.data else None
+
 		# upsert is idempotent (on_conflict='dataset_id'), so retrying a transient
 		# disconnect/SSL-handshake timeout cannot create duplicate rows.
 		@retry_on_transient_error
-		def _save_cog_metadata() -> str | None:
+		def _save_cog_metadata() -> None:
 			with use_client(token) as client:
-				previous = (
-					client.table(settings.cogs_table).select('cog_path').eq('dataset_id', ortho.dataset_id).execute()
-				)
 				client.table(settings.cogs_table).upsert(send_data, on_conflict='dataset_id').execute()
-			return previous.data[0]['cog_path'] if previous.data else None
 
-		previous_cog_path = _save_cog_metadata()
+		_save_cog_metadata()
 
 		# Update final status
 		update_status(token, dataset_id=ortho.dataset_id, current_status=StatusEnum.idle, is_cog_done=True)
