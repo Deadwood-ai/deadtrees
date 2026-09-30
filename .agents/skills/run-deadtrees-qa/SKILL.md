@@ -19,8 +19,11 @@ does not change the current task's model.
 
 Use the built-in Browser for UI actions and keep the journey visible. Discover
 the active browser API from the runtime instead of copying old bootstrap
-snippets. If the required browser control is unavailable, report that journey
-as blocked rather than silently switching tools.
+snippets. Where no built-in Browser exists (for example a Claude thread on the
+processing server), use headless Playwright Chromium from
+`frontend/node_modules/playwright` through `--agent-browser-surface playwright`
+and say so in the report. If no browser surface is available, report that
+journey as blocked rather than silently switching tools.
 
 ## Production lane
 
@@ -42,6 +45,24 @@ evidence focused and exclude secrets and personal data from artifacts.
 Aggregate results with `scripts/qa/report.sh <run-dir>`. Stop the isolated
 services started for this run with `scripts/qa/env.sh down`, including after a
 setup or journey failure, and verify the cleanup.
+
+## Local review lane
+
+Local review of a change that affects the app runs the regression gate:
+
+```bash
+scripts/qa/review-regression.sh --keep-up --focus "<what the change adds or changes>"
+```
+
+It starts and validates the isolated stack, runs every local Playwright suite
+(read and local-write) headless, and writes agent QA prompts to
+`<run-dir>/agent-qa`. A failing suite blocks the review until it is fixed or
+shown to be unrelated. Then execute the generated prompt with the Playwright
+surface: the playbooks for the areas the change touches, the whole set for
+cross-cutting changes, and the feature focus for new behavior. A new
+user-facing feature also needs a durable spec in `frontend/e2e-local/`, or its
+own playbook in `docs/qa/playbooks/`, so later reviews cover it. Finish with
+`scripts/qa/report.sh <run-dir>/agent-qa` and `scripts/qa/env.sh down`.
 
 ## Report
 
