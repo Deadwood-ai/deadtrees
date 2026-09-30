@@ -8,6 +8,7 @@ interface AuditReviewNoticeProps {
 }
 
 const FIELD_LABELS: Record<string, string> = {
+	acquisition_date: "Acquisition date",
 	is_georeferenced: "Georeferencing",
 	has_valid_phenology: "Phenology / season",
 	deadwood_quality: "Deadwood prediction quality",
@@ -16,6 +17,9 @@ const FIELD_LABELS: Record<string, string> = {
 	has_thumbnail_issue: "Thumbnail issues",
 	final_assessment: "Final assessment",
 };
+
+/** Readable name of an audit item (audit_review_queue.item / dataset_audit field). */
+export const auditItemLabel = (item: string) => FIELD_LABELS[item] ?? item.replace(/_/g, " ");
 
 const show = (v: unknown) => (v === true ? "yes" : v === false ? "no" : v === null || v === undefined ? "empty" : String(v));
 
@@ -37,7 +41,7 @@ export function AuditReviewNotice({ items, suggestions, saved }: AuditReviewNoti
 				<ul className="m-0 pl-4">
 					{rows.map(({ item, suggestion }) => (
 						<li key={item.item}>
-							{FIELD_LABELS[item.item] ?? item.item}: saved {show(saved?.[item.item])}, now suggested{" "}
+							{auditItemLabel(item.item)}: saved {show(saved?.[item.item])}, now suggested{" "}
 							<b>{show(suggestion?.value)}</b>
 							{suggestion ? ` (${suggestion.source}, ${suggestion.reason ?? "no reason given"})` : ""}. The form shows the suggestion.
 						</li>
