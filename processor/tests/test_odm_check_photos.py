@@ -103,6 +103,26 @@ def test_blank_maker_note_zeroes_only_the_maker_note_bytes(tmp_path):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('bad_field', ['offset', 'count'])
+def test_blank_maker_note_refuses_to_write_outside_the_exif_data(tmp_path, bad_field):
+	original = _dji_photo_that_crashes_exifread()
+	start, length = odm_check_photos.maker_note_span(original)
+	data = bytearray(original)
+	# The MakerNote entry holds (tag, type, count, offset); rewrite the count or offset field.
+	tiff = original.index(b'Exif\x00\x00') + 6
+	endian = '<' if original[tiff : tiff + 2] == b'II' else '>'
+	entry = original.index(struct.pack(f'{endian}H', 0x927C), tiff + 8)
+	field = entry + (4 if bad_field == 'count' else 8)
+	data[field : field + 4] = struct.pack(f'{endian}I', 0x7FFFFFF0)
+	path = tmp_path / 'malformed.jpg'
+	path.write_bytes(bytes(data))
+
+	with pytest.raises(ValueError, match='outside the EXIF data'):
+		odm_check_photos.blank_maker_note(str(path))
+	assert path.read_bytes() == bytes(data)
+
+
+@pytest.mark.unit
 def test_blank_maker_note_leaves_images_without_maker_note_alone(tmp_path):
 	from PIL import Image
 

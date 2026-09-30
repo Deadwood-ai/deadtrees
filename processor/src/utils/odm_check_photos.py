@@ -27,19 +27,22 @@ import sys
 
 
 def maker_note_span(data: bytes) -> tuple[int, int] | None:
-	"""Return (file offset, length) of the MakerNote value in a JPEG or TIFF, or None if there is none."""
+	"""Return (file offset, length) of the MakerNote value in a JPEG or TIFF, or None if there is none.
+
+	Raises ValueError when the MakerNote entry is not a byte field or points outside the EXIF data.
+	"""
 	if data[:2] == b'\xff\xd8':
 		position = 2
 		while position + 4 <= len(data) and data[position] == 0xFF and data[position + 1] != 0xDA:
 			length = struct.unpack('>H', data[position + 2 : position + 4])[0]
 			if data[position + 1] == 0xE1 and data[position + 4 : position + 10] == b'Exif\x00\x00':
-				tiff = position + 10
+				tiff, segment_end = position + 10, min(position + 2 + length, len(data))
 				break
 			position += 2 + length
 		else:
 			return None
 	elif data[:2] in (b'II', b'MM'):
-		tiff = 0
+		tiff, segment_end = 0, len(data)
 	else:
 		return None
 	endian = '<' if data[tiff : tiff + 2] == b'II' else '>'
@@ -58,9 +61,14 @@ def maker_note_span(data: bytes) -> tuple[int, int] | None:
 	maker_note = find_entry(number(exif_pointer + 8, 4), 0x927C) if exif_pointer is not None else None
 	if maker_note is None:
 		return None
-	length = number(maker_note + 4, 4)  # MakerNote is UNDEFINED: one byte per count
-	value = maker_note + 8 if length <= 4 else number(maker_note + 8, 4)
-	return tiff + value, length
+	if number(maker_note + 2, 2) not in (1, 2, 7):  # BYTE, ASCII, UNDEFINED: one byte per count
+		raise ValueError('MakerNote is not a byte field')
+	length = number(maker_note + 4, 4)
+	start = tiff + (maker_note + 8 if length <= 4 else number(maker_note + 8, 4))
+	# Offsets come from the upload: only ever write inside the EXIF data that holds them.
+	if start < tiff or start + length > segment_end:
+		raise ValueError('MakerNote lies outside the EXIF data')
+	return start, length
 
 
 def blank_maker_note(path: str) -> bool:
