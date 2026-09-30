@@ -518,3 +518,49 @@ def test_background_process_skips_ready_task_when_claim_is_lost(monkeypatch):
 
 	assert claim_calls == [(task.id, 'worker-a')]
 	assert processed_tasks == []
+
+
+class _RecordingQueueQuery:
+	def __init__(self, calls):
+		self.calls = calls
+		self.not_ = self
+
+	def table(self, name):
+		return self
+
+	def select(self, *args):
+		return self
+
+	def overlaps(self, column, values):
+		self.calls.append(('not_overlaps', column, values))
+		return self
+
+	def gte(self, column, value):
+		self.calls.append(('gte', column, value))
+		return self
+
+	def limit(self, n):
+		return self
+
+	def execute(self):
+		from types import SimpleNamespace
+
+		return SimpleNamespace(data=[])
+
+
+def _next_task_filters(monkeypatch, min_priority):
+	from contextlib import nullcontext
+
+	calls = []
+	monkeypatch.setattr(settings, 'PROCESSOR_MIN_PRIORITY', min_priority)
+	monkeypatch.setattr(settings, 'PROCESSOR_TASK_BLACKLIST', '')
+	queue_runtime_module.get_next_task('token', client_factory=lambda token: nullcontext(_RecordingQueueQuery(calls)))
+	return calls
+
+
+def test_get_next_task_claims_every_priority_by_default(monkeypatch):
+	assert _next_task_filters(monkeypatch, 1) == []
+
+
+def test_get_next_task_skips_tasks_below_min_priority(monkeypatch):
+	assert _next_task_filters(monkeypatch, 4) == [('gte', 'priority', 4)]

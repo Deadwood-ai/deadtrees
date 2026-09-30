@@ -30,6 +30,8 @@ def get_next_task(token: str, client_factory=None) -> QueueTask | None:
 		query = client.table(settings.queue_position_table).select('*')
 		if blacklist:
 			query = query.not_.overlaps('task_types', blacklist)
+		if settings.PROCESSOR_MIN_PRIORITY > 1:
+			query = query.gte('priority', settings.PROCESSOR_MIN_PRIORITY)
 		response = query.limit(1).execute()
 	if not response.data:
 		return None
