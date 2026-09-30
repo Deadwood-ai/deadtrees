@@ -83,7 +83,7 @@ def test_database_log_message_is_redacted():
 	inserted = []
 
 	class _Table:
-		def insert(self, entry):
+		def insert(self, entry, returning=None):
 			inserted.append(entry)
 			return self
 
@@ -101,7 +101,7 @@ def test_database_log_message_is_redacted():
 			return False
 
 	handler = shared_logging.SupabaseHandler()
-	handler.use_client = lambda token: _Client()
+	handler.use_client = lambda: _Client()
 	record = logging.LogRecord('processor', logging.ERROR, __file__, 1, f'failed with {TOKEN}', None, None)
 	record.extra = {'error': f'token: {TOKEN}', 'attempt': 2}
 	handler.emit(record)

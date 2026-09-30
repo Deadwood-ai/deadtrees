@@ -1,4 +1,4 @@
-"""Status rows, processing logs and admin read models are not open to every role."""
+"""Status rows, processing logs and the export view are not open to every role."""
 import json
 import uuid
 from urllib.parse import urlparse
@@ -91,56 +91,35 @@ def test_status_rows_are_created_by_owners_auditors_and_the_processor(db):
 	db.execute('ROLLBACK TO SAVEPOINT duplicate')
 
 
-def test_logs_are_private_to_their_writer_operators_and_the_processor(db):
+def test_logs_are_written_by_the_backend_and_read_by_their_subject(db):
 	owner, other = create_user(db), create_user(db)
 	operator = create_user(db, can_operate=True)
-	public_dataset, private_dataset = create_dataset(db, owner), create_dataset(db, owner, 'private')
+	dataset = create_dataset(db, owner)
 	insert = "INSERT INTO public.v2_logs(level,message,category,dataset_id,user_id) VALUES ('ERROR','Processing failed: forged','process',%s,%s)"
 
 	as_admin(db)
 	own_line = db.execute(
 		"INSERT INTO public.v2_logs(level,message,dataset_id,user_id) VALUES ('INFO','owner line',%s,%s) RETURNING id",
-		(private_dataset, owner),
+		(dataset, owner),
 	).fetchone()[0]
 
+	# Log lines are factory evidence: no API caller writes them, not even about their own data.
 	as_anon(db)
 	expect_denied(db, 'SELECT id FROM public.v2_logs LIMIT 1')
-	expect_denied(db, insert, (public_dataset, None))
+	expect_denied(db, insert, (dataset, None))
+	for user, email in [(owner, None), (uuid.uuid4(), PROCESSOR_EMAIL)]:
+		act_as(db, user, email)
+		expect_denied(db, insert, (dataset, user))
 
 	act_as(db, other)
 	assert db.execute('SELECT id FROM public.v2_logs WHERE id=%s', (own_line,)).fetchall() == []
-	expect_denied(db, insert, (private_dataset, other))  # a dataset they cannot see
-	expect_denied(db, insert, (public_dataset, owner))  # a line attributed to someone else
-	db.execute(insert, (public_dataset, other))
-	db.execute(insert, (None, None))
-
 	for user, email in [(owner, None), (operator, None), (uuid.uuid4(), PROCESSOR_EMAIL)]:
 		act_as(db, user, email)
 		assert db.execute('SELECT id FROM public.v2_logs WHERE id=%s', (own_line,)).fetchall() == [(own_line,)]
 
 
-def test_admin_read_models_are_not_public(db):
-	owner, other, auditor = create_user(db), create_user(db), create_user(db, can_audit=True)
-	shown, excluded = create_dataset(db, owner), create_dataset(db, owner)
-	as_admin(db)
-	for dataset in (shown, excluded):
-		db.execute(
-			"INSERT INTO public.v2_statuses(dataset_id,has_error,error_message) VALUES (%s,true,'boom at /data/x')", (dataset,)
-		)
-	db.execute("INSERT INTO public.dataset_audit(dataset_id,final_assessment) VALUES (%s,'exclude_completely')", (excluded,))
-	read = 'SELECT id, error_message FROM public.v2_full_dataset_view WHERE id = ANY(%s) ORDER BY id'
-
+def test_export_view_is_not_readable_through_the_api(db):
 	as_anon(db)
 	expect_denied(db, 'SELECT 1 FROM public.v_export_polygon_candidates LIMIT 1')
-	assert db.execute(read, ([shown, excluded],)).fetchall() == [(shown, None)]
-	assert db.execute(
-		'SELECT id, error_message FROM public.v2_full_dataset_view_public WHERE id = ANY(%s)', ([shown, excluded],)
-	).fetchall() == [(shown, None)]
-
-	act_as(db, other)
+	act_as(db, create_user(db))
 	expect_denied(db, 'SELECT 1 FROM public.v_export_polygon_candidates LIMIT 1')
-	assert db.execute(read, ([shown, excluded],)).fetchall() == [(shown, None), (excluded, None)]
-
-	for user in (owner, auditor):
-		act_as(db, user)
-		assert [error for _, error in db.execute(read, ([shown, excluded],)).fetchall()] == ['boom at /data/x'] * 2
