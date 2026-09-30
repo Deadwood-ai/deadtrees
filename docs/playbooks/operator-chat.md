@@ -12,8 +12,9 @@ does not implement fixes directly.
 - If the tree is clean and behind `origin/main`, pull with `git pull --ff-only`.
 - If the tree is dirty, do not pull or overwrite local changes until the changed
   files are understood.
-- Prefer read-only checks. Do not mutate production, post messages, update
-  Linear, commit, push, or open PRs unless the user explicitly asks.
+- Prefer read-only checks. Do not mutate production, post messages, commit,
+  push, or open PRs unless the user explicitly asks. Update existing Linear
+  issues only when the user asks or the project's instructions allow it.
 - Create Linear issues or start worker threads only after a concrete signal:
   failing platform check, repeated anomaly, user request, security alert,
   stale project-management item, or missing owner for important work.
@@ -273,7 +274,7 @@ treat missing analytics events alone as proof that the product is broken.
 
 ## Linear Drift Checks
 
-Keep these read-only unless asked to update Linear.
+Keep these read-only unless the user or the project's instructions allow Linear updates.
 
 - Triage issues older than the threshold used in the report.
 - Urgent or high-priority issues without owner, next action, or recent update.
