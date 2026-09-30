@@ -267,15 +267,12 @@ const installAuditor = async (
 };
 
 const selectAiSearch = async (page: Page) => {
-  // A menu click during the page's first data refresh can be dropped (about one
-  // run in three on a loaded host), so confirm the mode and retry once.
-  await expect(async () => {
-    await page.getByRole("button", { name: "Search mode" }).click();
-    await page.getByRole("menuitem", { name: "AI search", exact: true }).click();
-    await expect(
-      page.getByRole("textbox", { name: "AI search", exact: true }),
-    ).toBeVisible({ timeout: 2_000 });
-  }).toPass({ timeout: 10_000 });
+  await page.getByRole("button", { name: "Search mode" }).click();
+  await page.getByRole("menuitem", { name: "AI search", exact: true }).click();
+  // One click must switch the mode; a dropped click is a product bug.
+  await expect(
+    page.getByRole("textbox", { name: "AI search", exact: true }),
+  ).toBeVisible();
 };
 
 const runSemanticSearch = async (page: Page, query: string) => {

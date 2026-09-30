@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -575,14 +576,23 @@ async function cleanupDatasets(client: SupabaseClient, datasetIds: number[]) {
 }
 
 // On Linux the API container writes download bundles as root, so the test user
-// cannot always delete them. They live in the ignored per-worktree data root.
+// cannot delete them. A leftover bundle would be served for a reused dataset ID,
+// so remove it through the container that owns it.
 function removeContainerOutput(target: string) {
   try {
     fs.rmSync(target, { force: true, recursive: true });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EACCES") throw error;
-    console.debug(`Left container-owned output in place: ${target}`);
+    const containerPath = path.posix.join("/data", path.relative(localDataRoot, target));
+    execFileSync("docker", [
+      "exec",
+      `${requireEnv("COMPOSE_PROJECT_NAME")}-api-test-1`,
+      "rm",
+      "-rf",
+      containerPath,
+    ]);
   }
+  expect(fs.existsSync(target)).toBe(false);
 }
 
 function delay(ms: number) {
