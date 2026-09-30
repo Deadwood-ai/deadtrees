@@ -196,10 +196,29 @@ def utc_now() -> str:
 	return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
 
 
+# Analyst reads run in one read-only transaction that first proves the target role.
+ANALYST_TRANSACTION_SQL = f"""
+begin read only;
+set local statement_timeout = '30s';
+set local lock_timeout = '3s';
+do $$
+begin
+  if not pg_has_role(current_user, 'analyst', 'MEMBER')
+    or current_setting('transaction_read_only') <> 'on' then
+    raise exception 'scorecard needs a read-only analyst connection';
+  end if;
+end
+$$;
+{SCORECARD_SQL};
+commit;
+"""
+
+
 def run_psql(database_url: str, timeout: int) -> dict[str, Any]:
 	try:
 		completed = subprocess.run(
-			['psql', database_url, '-XAtq', '-v', 'ON_ERROR_STOP=1', '-c', SCORECARD_SQL],
+			['psql', database_url, '-XAtq', '-v', 'ON_ERROR_STOP=1', '-f', '-'],
+			input=ANALYST_TRANSACTION_SQL,
 			cwd=ROOT,
 			text=True,
 			stdout=subprocess.PIPE,
@@ -372,8 +391,8 @@ def main(argv: list[str]) -> int:
 		print(POSTHOG_FRICTION_SQL)
 		return 0
 
-	database_url = os.environ.get('DEADTREES_OPERATOR_DATABASE_URL')
-	payload = {'ok': None, 'skipped': 'set DEADTREES_OPERATOR_DATABASE_URL for backend scorecard'}
+	database_url = os.environ.get('DEADTREES_ANALYST_DATABASE_URL')
+	payload = {'ok': None, 'skipped': 'set DEADTREES_ANALYST_DATABASE_URL for backend scorecard'}
 	if database_url:
 		payload = run_psql(database_url, args.timeout)
 
