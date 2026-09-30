@@ -28,7 +28,12 @@ torchvision==0.21.0
 open-clip-torch>=2.24.0
 opencv-python
 xarray>=2023.1.0
-zarr>=2.13.0
+# zarr 3 reads the Sentinel pipeline's v3 block cubes (doy_estimation_v1)
+zarr>=3
+# S3 access to the Sentinel-2 block cubes; s3fs pins its matching fsspec
+s3fs>=2025.3.0
+# DINOv2 backbone of the acquisition-date model (was only transitive)
+timm>=1.0.24,<2
 # Rasterio 1.5 still triggers NumPy 2.5's deprecated ndarray shape mutation
 # path during normal reads. Keep the service below 2.5 until Rasterio removes it.
 numpy>=2,<2.5

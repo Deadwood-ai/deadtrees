@@ -107,7 +107,7 @@ Common facts:
 Typical order:
 
 ```text
-upload -> odm if raw images -> geotiff -> metadata -> cog -> thumbnail -> deadwood_v1 -> treecover_v1 -> deadwood_treecover_combined_v2
+upload -> odm if raw images -> geotiff -> metadata -> cog -> thumbnail -> deadwood_v1 -> treecover_v1 -> deadwood_treecover_combined_v2 -> aoi_v1 -> embeddings_v1 -> doy_estimation_v1
 ```
 
 Critical behavior:
@@ -119,6 +119,9 @@ Critical behavior:
 - Do not rerun legacy replacement stages such as `deadwood_v1` or `treecover_v1`
   on datasets that may already have audit edits or geometry corrections. Use
   non-replacing combined-model stages where appropriate.
+- `doy_estimation_v1` (acquisition-date model, `docs/doy-estimation.md`) reads the
+  stored COG, so it can be rerun alone; bulk reruns go through
+  `scripts/requeue_doy_estimation.py`.
 - ODM and model stages rely on Docker named volumes to avoid filesystem and UID
   problems across containers.
 

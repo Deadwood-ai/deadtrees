@@ -26,6 +26,7 @@ class LogCategory(Enum):
 	AOI = 'aoi'  # Automatic area-of-interest segmentation
 	FOREST = 'forest'  # Forest cover analysis
 	EMBEDDINGS = 'embeddings'  # Open-vocabulary tile embeddings
+	DOY = 'doy'  # Acquisition-date (day-of-year) estimation
 	METADATA = 'metadata'  # Metadata processing
 
 	# System Operations

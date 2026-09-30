@@ -22,6 +22,9 @@ export interface AuditFormValues {
   is_georeferenced?: boolean;
   has_valid_acquisition_date?: boolean;
   acquisition_date_notes?: string;
+  // saving records a date decision (acquisition_date_decisions); true applies
+  // the model's suggested date to the dataset
+  accept_suggested_acquisition_date?: boolean | null;
   has_valid_phenology?: boolean;
   phenology_notes?: string;
   deadwood_quality?: PredictionQuality;
@@ -90,6 +93,7 @@ export interface DatasetAuditUserInfo {
   reviewed_at: string | null;
   reviewed_by: string | null;
   reviewed_by_email: string | null;
+  accept_suggested_acquisition_date?: boolean | null;
 }
 
 // Auditor-only: get all dataset audits (includes user emails)
@@ -331,6 +335,9 @@ export function useSaveDatasetAudit() {
       queryClient.invalidateQueries({ queryKey: ["dataset-audit", values.dataset_id] });
       queryClient.invalidateQueries({ queryKey: ["dataset-aoi", values.dataset_id] });
       queryClient.invalidateQueries({ queryKey: ["datasets"] });
+      // saving records a date decision and may change the dataset's date
+      queryClient.invalidateQueries({ queryKey: ["acquisition-date-estimate", values.dataset_id] });
+      queryClient.invalidateQueries({ queryKey: ["acquisition-date-decisions", values.dataset_id] });
     },
   });
 }

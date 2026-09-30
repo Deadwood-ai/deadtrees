@@ -28,6 +28,7 @@ import {
 	EditOutlined,
 } from "@ant-design/icons";
 import { useAuth } from "../hooks/useAuthProvider";
+import { useAuditReviewQueue } from "../hooks/useAcquisitionDateEstimate";
 import { useCanAudit, useCanOperate } from "../hooks/useUserPrivileges";
 import { useDatasetById } from "../hooks/useDatasets";
 import { useAuditDatasets } from "../hooks/useAuditDatasets";
@@ -204,6 +205,8 @@ function DatasetAuditInner() {
 	} = useDatasetById(datasetId);
 	const { data: audits, isLoading: isAuditsLoading } = useDatasetAudits();
 	const { data: flaggedAgg = [], isLoading: isFlaggedLoading } = useFlaggedDatasets();
+	const { data: reviewQueue = [] } = useAuditReviewQueue();
+	const reviewSet = useMemo(() => new Set(reviewQueue.map((r) => r.dataset_id)), [reviewQueue]);
 	const { data: referenceDatasetIds = new Set() } = useReferenceDatasetIds();
 	const { data: contributorMap = new Map() } = useDatasetContributors();
 	const { data: correctionsMap = new Map(), isLoading: isCorrectionsLoading } = usePendingCorrections();
@@ -229,6 +232,7 @@ function DatasetAuditInner() {
 	const [auditorFilter, setAuditorFilter] = useState<string>(initialAuditor);
 	const [contributorFilter, setContributorFilter] = useState<string>(initialContributor);
 	const [hasFlagsFilter, setHasFlagsFilter] = useState<boolean>(initialHasFlags);
+	const [needsReviewFilter, setNeedsReviewFilter] = useState<boolean>(searchParams.get("rereview") === "true");
 	const [hasProcessingStates, setHasProcessingStates] = useState<ProcessingStateFilterKey[]>(DEFAULT_PROCESSING_STATE_FILTERS);
 	const [inSeasonOnly, setInSeasonOnly] = useState<boolean>(false);
 	const [filtersExpanded, setFiltersExpanded] = useState<boolean>(true);
@@ -244,6 +248,7 @@ function DatasetAuditInner() {
 		if (auditorFilter) params.set("auditor", auditorFilter);
 		if (contributorFilter) params.set("contributor", contributorFilter);
 		if (hasFlagsFilter) params.set("hasFlags", "true");
+		if (needsReviewFilter) params.set("rereview", "true");
 		if (idFilter) params.set("id", idFilter);
 		setSearchParams(params, { replace: true });
 	}, [
@@ -254,6 +259,7 @@ function DatasetAuditInner() {
 		auditorFilter,
 		contributorFilter,
 		hasFlagsFilter,
+		needsReviewFilter,
 		idFilter,
 		setSearchParams,
 		legacyProcessingLink,
@@ -400,6 +406,9 @@ function DatasetAuditInner() {
 			filtered = filtered.filter((d) => flaggedSet.has(d.id));
 		}
 
+		// saved audits that newer machine evidence disagrees with
+		if (needsReviewFilter) filtered = filtered.filter((d) => reviewSet.has(d.id));
+
 		// Completed-only processing state filters (helps find "fixable but missing forest cover", etc.)
 		if (activeTab === "completed" && hasProcessingStates.length > 0) {
 			filtered = filtered.filter((dataset) =>
@@ -423,6 +432,8 @@ function DatasetAuditInner() {
 		auditorFilter,
 		contributorFilter,
 		hasFlagsFilter,
+		needsReviewFilter,
+		reviewSet,
 		hasProcessingStates,
 		inSeasonOnly,
 		auditMap,
@@ -885,6 +896,7 @@ function DatasetAuditInner() {
 		setAuditorFilter("");
 		setContributorFilter("");
 		setHasFlagsFilter(false);
+		setNeedsReviewFilter(false);
 		setHasProcessingStates([]);
 		setInSeasonOnly(false);
 		setStatusFilter("all");
@@ -900,6 +912,7 @@ function DatasetAuditInner() {
 		auditorFilter ||
 		contributorFilter ||
 		hasFlagsFilter ||
+		needsReviewFilter ||
 		hasActiveProcessingFilters ||
 		statusFilter !== "all";
 
@@ -1179,6 +1192,9 @@ function DatasetAuditInner() {
 													<div className="flex flex-row gap-1">
 														<Checkbox checked={hasFlagsFilter} onChange={(e) => setHasFlagsFilter(e.target.checked)}>
 															Has flags only
+														</Checkbox>
+														<Checkbox checked={needsReviewFilter} onChange={(e) => setNeedsReviewFilter(e.target.checked)}>
+															Needs re-review ({reviewSet.size})
 														</Checkbox>
 													</div>
 

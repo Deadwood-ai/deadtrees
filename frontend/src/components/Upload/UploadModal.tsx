@@ -123,6 +123,8 @@ const GEOTIFF_PROCESSING_STEPS = [
   ...PREDICTION_PROCESSING_STEPS,
   // Open-vocabulary tile embeddings run last (needs the standardized ortho).
   "embeddings_v1",
+  // Acquisition-date estimate + audit prefill (reads the stored COG and AOI).
+  "doy_estimation_v1",
 ];
 
 const RAW_IMAGES_PROCESSING_STEPS = [
