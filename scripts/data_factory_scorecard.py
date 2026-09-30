@@ -127,23 +127,26 @@ with input as (
       from prepackaged_dataset_versions
       where created_at >= now() - interval '30 days'
     ),
+    -- Every grant row is one signed download. Read only the lifecycle columns
+    -- the analyst role can see, never token_hash or extra.
     'prepackaged_signed_downloads_7d', (
       select count(*)
       from prepackaged_dataset_download_grants
       where created_at >= now() - interval '7 days'
-        and extra->>'event' = 'prepackaged_signed_download_created'
     ),
     'prepackaged_signed_download_bytes_7d', (
-      select coalesce(sum((extra->>'size_bytes')::bigint), 0)
-      from prepackaged_dataset_download_grants
-      where created_at >= now() - interval '7 days'
-        and extra->>'event' = 'prepackaged_signed_download_created'
-        and extra->>'size_bytes' ~ '^[0-9]+$'
+      select coalesce(sum(v.size_bytes), 0)
+      from prepackaged_dataset_download_grants g
+      join prepackaged_dataset_versions v on v.id = g.version_id
+      where g.created_at >= now() - interval '7 days'
     ),
     'datasets_with_freidata_doi', (
-      select count(*)
-      from v2_full_dataset_view
-      where nullif(freidata_doi, '') is not null
+      select count(distinct ds.id)
+      from v2_datasets ds
+      join jt_data_publication_datasets jt on jt.dataset_id = ds.id
+      join data_publication dp on dp.id = jt.publication_id
+      where not ds.archived
+        and nullif(dp.doi, '') is not null
     )
   ) as data
 )
