@@ -73,7 +73,10 @@ rename while behavior is unchanged, the test is probably too coupled.
 
 1. Run the narrowest test for the changed behavior.
 2. Run the surface-level suite when the change touches shared contracts.
-3. Add a browser smoke for user-visible frontend changes.
+3. Add a browser smoke for user-visible frontend changes. Before review, run
+   `scripts/qa/review-regression.sh`, which runs every local Playwright suite
+   against the isolated stack (see the local review lane in
+   `.agents/skills/run-deadtrees-qa/SKILL.md`).
 4. Escalate to processing-server validation only for GPU/model/ODM behavior or
    when local non-GPU checks cannot prove the risk.
 

@@ -214,6 +214,7 @@ test.describe("contributor local e2e", () => {
           "treecover_v1",
           "deadwood_treecover_combined_v2",
           "embeddings_v1",
+          "doy_estimation_v1",
         ],
         priority: 4,
       });

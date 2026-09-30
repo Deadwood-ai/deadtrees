@@ -45,3 +45,4 @@ processor/tcd_test_output/
 data/
 assets/
 scratchpad/
+.local/

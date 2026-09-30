@@ -33,7 +33,9 @@ default_slug() {
 	repo="$(basename "$REPO_ROOT")"
 	parent="$(basename "$(dirname "$REPO_ROOT")")"
 	case "$parent" in
-		.|projects|project|src|source|code|repo|repos|repository|repositories|workspace|workspaces)
+		.|projects|project|src|source|code|repo|repos|repository|repositories|workspace|workspaces|worktrees|*-worktrees)
+			# A shared worktree root (.claude/worktrees/<name>) would give every
+			# worktree the same slug, so they would share containers and ports.
 			sanitize_slug "$repo"
 			;;
 		*)
@@ -65,10 +67,22 @@ if [[ -z "$COMMAND" ]]; then
 	exit 1
 fi
 
+# Hosts with a port allocator (the processing server) write this worktree's slug
+# and port band here; the default band can overlap the Linux ephemeral range.
+if [[ -z "${DEADTREES_WORKTREE_SLUG:-}" && -f "$REPO_ROOT/.local/server-env.sh" ]]; then
+	# shellcheck disable=SC1091
+	source "$REPO_ROOT/.local/server-env.sh"
+fi
+
 SLUG="$(sanitize_slug "${DEADTREES_WORKTREE_SLUG:-$(default_slug)}")"
 if [[ -z "$SLUG" ]]; then
 	echo "Could not derive a worktree slug." >&2
 	exit 1
+fi
+# The Supabase CLI truncates project ids ("deadwood-api-<slug>") to 40 characters,
+# which breaks the network name env.sh expects. Keep long slugs unique but short.
+if ((${#SLUG} > 27)); then
+	SLUG="${SLUG:0:20}-$(printf '%s' "$SLUG" | cksum | awk '{printf "%06d", $1 % 1000000}')"
 fi
 
 PORT_BASE="${DEADTREES_PORT_BASE:-$(default_port_base "$SLUG")}"

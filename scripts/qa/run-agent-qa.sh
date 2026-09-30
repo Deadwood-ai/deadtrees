@@ -30,7 +30,7 @@ Options:
   --browser <name>       Restrict to playbooks with browser, chrome, or computer-use
   --mutation-level <lvl> Restrict to read-only or local-write
   --fixture-pack <name>  Restrict to playbooks requiring a fixture pack; may repeat
-  --agent-browser-surface <browser|chrome>
+  --agent-browser-surface <browser|chrome|playwright>
                          Browser automation surface for generated worker prompts
   --agent-model <text>   Agent/model hint to include in worker prompts, default gpt-5.5 low
   --focus <text>         Additional feature-specific QA focus for workers
@@ -116,10 +116,10 @@ if ! [[ "$PARALLEL" =~ ^[1-9][0-9]*$ ]]; then
 	exit 1
 fi
 case "$AGENT_BROWSER_SURFACE" in
-	browser|chrome)
+	browser|chrome|playwright)
 		;;
 	*)
-		echo "--agent-browser-surface must be one of: browser, chrome" >&2
+		echo "--agent-browser-surface must be one of: browser, chrome, playwright" >&2
 		exit 1
 		;;
 esac
@@ -583,6 +583,20 @@ playbook explicitly allows it.
 {common_result_contract}
 """
     else:
+        if agent_browser_surface == "playwright":
+            browser_rules = f"""- Drive headless Chromium with short Node scripts that load `{repo_root}/frontend/node_modules/playwright`; keep each script in your artifact directory so the journey can be replayed.
+- Use a fresh browser context per persona and verify the signed-in identity after each login.
+- Collect `pageerror` and console errors for every route you visit.
+- Take one screenshot per playbook, and one per failure, under your artifact directory; read the screenshots to judge layout, not only locator state.
+"""
+        else:
+            browser_rules = f"""- Use the built-in Browser for ordinary route/locator checks unless a playbook explicitly says otherwise.
+- Do not use Browser Use default Chromium as primary evidence for real-app rendering unless `scripts/qa/browser-use-real-app-probe.sh` classifies it as `pass` for this route.
+- Use Browser Use CLI for per-worker session isolation or file-upload flows only when the selected backend has current DOM and screenshot evidence.
+- To make Browser Use visible for a human observer, run it in headed mode with either `--headed` or `BROWSER_USE_HEADED=1`.
+- Example headed Browser Use probe: `scripts/qa/browser-use-cli-probe.sh {worker_dir.relative_to(repo_root)}/browser-use-probe --exercise-upload --headed`.
+- Example headed worker session: `uvx --from browser-use browser-use --headed --session {worker['id']} open {frontend_url}`.
+"""
         prompt = f"""# {worker['id']} DeadTrees Local QA Prompt
 
 You are a QA subagent executing DeadTrees local agent QA playbooks.
@@ -608,13 +622,7 @@ You are a QA subagent executing DeadTrees local agent QA playbooks.
 
 ## Rules
 
-- Use the built-in Browser for ordinary route/locator checks unless a playbook explicitly says otherwise.
-- Do not use Browser Use default Chromium as primary evidence for real-app rendering unless `scripts/qa/browser-use-real-app-probe.sh` classifies it as `pass` for this route.
-- Use Browser Use CLI for per-worker session isolation or file-upload flows only when the selected backend has current DOM and screenshot evidence.
-- To make Browser Use visible for a human observer, run it in headed mode with either `--headed` or `BROWSER_USE_HEADED=1`.
-- Example headed Browser Use probe: `scripts/qa/browser-use-cli-probe.sh {worker_dir.relative_to(repo_root)}/browser-use-probe --exercise-upload --headed`.
-- Example headed worker session: `uvx --from browser-use browser-use --headed --session {worker['id']} open {frontend_url}`.
-- Use `scripts/qa/playwright-upload-probe.sh` as the deterministic upload fallback.
+{browser_rules}- Use `scripts/qa/playwright-upload-probe.sh` as the deterministic upload fallback.
 - Keep browser/auth state isolated from other workers when the selected tool supports it.
 - Keep output compact and evidence-based.
 - Do not use production URLs, production credentials, or production data.
