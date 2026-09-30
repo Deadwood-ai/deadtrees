@@ -67,6 +67,8 @@ services:
       PROCESSOR_UNHEALTHY_PATH: /processor-control/loop-unhealthy.json
       # Comma-separated task types this worker refuses to run (e.g. odm_processing).
       PROCESSOR_TASK_BLACKLIST: ${PROCESSOR_TASK_BLACKLIST:-}
+      # Lowest queue priority this worker claims (4 reserves it for fresh uploads).
+      PROCESSOR_MIN_PRIORITY: ${PROCESSOR_MIN_PRIORITY:-1}
       SSH_PRIVATE_KEY_PASSPHRASE: ${SSH_PRIVATE_KEY_PASSPHRASE}
       SSH_PRIVATE_KEY_PATH: /root/.ssh/processing-to-storage
       SSH_KNOWN_HOSTS_PATH: /app/processor/config/storage_known_hosts
