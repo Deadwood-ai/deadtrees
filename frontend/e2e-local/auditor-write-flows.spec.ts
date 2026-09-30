@@ -77,6 +77,8 @@ test.describe("auditor local write flows", () => {
     privilegedUserId = await grantAuditPrivilege(auditorUser.id);
     datasetId = await createAuditableDataset();
     machinePredictionAoiId = await createMachinePredictionAoi();
+    // The first scenario opens the deadwood editor, which needs a prediction.
+    await seedDeadwoodPrediction();
     flagId = await createOpenFlag();
   });
 
@@ -159,7 +161,7 @@ test.describe("auditor local write flows", () => {
     await expect(aoiCard.getByText(/AOI defined \(3 polygons\)/)).toBeVisible();
 
     await page.getByRole("button", { name: "Edit deadwood cover" }).click();
-    await expect(page.getByText("Editing deadwood cover")).toBeVisible();
+    await expect(page.getByText("Editing deadwood cover", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
 
     await expect(aoiCard.getByText(/AOI defined \(3 polygons\)/)).toBeVisible();

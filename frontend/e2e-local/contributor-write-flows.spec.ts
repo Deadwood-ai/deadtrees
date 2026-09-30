@@ -453,9 +453,12 @@ async function expectDatasetSideEffects(datasetId: number) {
         "cog",
         "thumbnail",
         "metadata",
+        "aoi_v1",
         "deadwood_v1",
         "treecover_v1",
         "deadwood_treecover_combined_v2",
+        "embeddings_v1",
+        "doy_estimation_v1",
       ],
       priority: 4,
       is_processing: false,
@@ -567,10 +570,18 @@ async function cleanupDatasets(client: SupabaseClient, datasetIds: number[]) {
         force: true,
       },
     );
-    fs.rmSync(path.join(localDataRoot, "downloads", String(datasetId)), {
-      force: true,
-      recursive: true,
-    });
+    removeContainerOutput(path.join(localDataRoot, "downloads", String(datasetId)));
+  }
+}
+
+// On Linux the API container writes download bundles as root, so the test user
+// cannot always delete them. They live in the ignored per-worktree data root.
+function removeContainerOutput(target: string) {
+  try {
+    fs.rmSync(target, { force: true, recursive: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EACCES") throw error;
+    console.debug(`Left container-owned output in place: ${target}`);
   }
 }
 

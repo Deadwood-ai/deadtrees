@@ -345,7 +345,7 @@ async function expectOfflineBasemapControl(page: Page) {
   await expect(page.locator(".ol-layer").first()).toBeVisible();
 
   const offlineMapButton = page.getByRole("button", {
-    name: /Offline-Karte laden/,
+    name: /Basiskarte offline laden/,
   });
   await expect(offlineMapButton).toHaveAttribute("aria-pressed", "false");
   await offlineMapButton.click();
@@ -411,7 +411,7 @@ async function expectPersistedOfflineAreaVisualization(page: Page) {
   await page.reload();
 
   const manageOfflineMapsButton = page.getByRole("button", {
-    name: /Offline-Karte aktualisieren/,
+    name: /Basiskarte aktualisieren/,
   });
   await expect(manageOfflineMapsButton).toBeVisible();
   const inactiveMapPatch = await captureMapCenterPatch(page);
@@ -423,7 +423,7 @@ async function expectPersistedOfflineAreaVisualization(page: Page) {
   expect(activeMapPatch.equals(inactiveMapPatch)).toBe(false);
   await page.getByRole("button", { name: "Alle Bereiche entfernen" }).click();
   const saveOfflineMapsButton = page.getByRole("button", {
-    name: /Offline-Karte laden/,
+    name: /Basiskarte offline laden/,
   });
   await expect(saveOfflineMapsButton).toHaveAttribute("aria-pressed", "true");
   await saveOfflineMapsButton.click();
@@ -488,7 +488,7 @@ async function captureMapCenterPatch(page: Page) {
 }
 
 async function expectOfflineSelectionSuppressesPointInteraction(page: Page) {
-  await page.getByRole("button", { name: /Offline-Karte laden/ }).click();
+  await page.getByRole("button", { name: /Basiskarte offline laden/ }).click();
   await page.getByRole("button", { name: "Neuen Bereich auswählen" }).click();
   const fieldMap = page.getByTestId("priwa-field-map");
   const mapBounds = await fieldMap.boundingBox();
@@ -506,7 +506,7 @@ async function expectOfflineSelectionSuppressesPointInteraction(page: Page) {
   ).toBeVisible();
   await page.getByRole("button", { name: "Abbrechen" }).click();
   const offlineMapButton = page.getByRole("button", {
-    name: /Offline-Karte laden/,
+    name: /Basiskarte offline laden/,
   });
   await expect(offlineMapButton).toHaveAttribute("aria-pressed", "true");
   await offlineMapButton.click();
@@ -602,6 +602,11 @@ async function deleteFirstPoint(page: Page) {
 }
 
 async function signInFieldUser(page: Page) {
+  // The cookie banner otherwise covers the mobile map controls.
+  await page.addInitScript(() => {
+    window.localStorage.setItem("cookieConsent", "accepted");
+    window.localStorage.setItem("cookieConsentVersion", "1.1");
+  });
   await page.goto("/sign-in?returnTo=/priwa-field");
   await page.getByPlaceholder(/email/i).fill(fieldUserEmail);
   await page.getByPlaceholder(/password/i).fill(fieldUserPassword);

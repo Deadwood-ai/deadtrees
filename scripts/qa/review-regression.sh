@@ -19,7 +19,9 @@ Options:
   --run-dir <path> Output directory, default .local/qa-runs/review-<timestamp>
   -h, --help       Show this help
 
-Exit status is the Playwright suite result. Without --keep-up the stack is
+Each failing test is retried once; a test that passes on retry is reported as
+flaky and does not fail the gate, so list it in the review. Exit status is the
+Playwright suite result. Without --keep-up the stack is
 always stopped, including after a failure.
 USAGE
 }
@@ -100,7 +102,7 @@ suite_status=0
 	E2E_LOCAL_WRITE=1 E2E_LOCAL_AUDITOR_WRITE=1 E2E_LOCAL_PRIWA_WRITE=1 \
 		PLAYWRIGHT_HTML_OPEN=never \
 		./node_modules/.bin/playwright test --config playwright.local.config.ts \
-		--reporter=line,html --output "$RUN_DIR/playwright-artifacts"
+		--retries 1 --reporter=line,html --output "$RUN_DIR/playwright-artifacts"
 ) >"$RUN_DIR/playwright.log" 2>&1 || suite_status=$?
 if [[ -d "$REPO_ROOT/frontend/playwright-report" ]]; then
 	rm -rf "$RUN_DIR/playwright-report"

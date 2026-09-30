@@ -267,8 +267,15 @@ const installAuditor = async (
 };
 
 const selectAiSearch = async (page: Page) => {
-  await page.getByRole("button", { name: "Search mode" }).click();
-  await page.getByRole("menuitem", { name: "AI search", exact: true }).click();
+  // A menu click during the page's first data refresh can be dropped (about one
+  // run in three on a loaded host), so confirm the mode and retry once.
+  await expect(async () => {
+    await page.getByRole("button", { name: "Search mode" }).click();
+    await page.getByRole("menuitem", { name: "AI search", exact: true }).click();
+    await expect(
+      page.getByRole("textbox", { name: "AI search", exact: true }),
+    ).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 10_000 });
 };
 
 const runSemanticSearch = async (page: Page, query: string) => {
@@ -341,7 +348,8 @@ test.describe("search UX (local)", () => {
 
     await page.getByRole("textbox", { name: "AI search", exact: true }).press("Enter");
     await expect.poll(() => embedRequests.length).toBe(2);
-    expect(rpcRequests).toHaveLength(2);
+    // Ranking starts only after the embed response, so wait for it too.
+    await expect.poll(() => rpcRequests.length).toBe(2);
     expect(loggedQueries).toHaveLength(0);
   });
 

@@ -324,7 +324,8 @@ test.describe("PRIWA Warnkarte local UI", () => {
   test("desktop boundary fits an off-screen overlay between review panels", async ({
     page,
   }) => {
-    await page.setViewportSize({ width: 992, height: 768 });
+    // PRIWA_DESKTOP_WORKBENCH_MIN_WIDTH: narrower viewports use the field layout.
+    await page.setViewportSize({ width: 1200, height: 768 });
     await installWarnkarteAdmin(page);
     await installWarnkarteApi(page);
     await page.goto("/priwa-field");

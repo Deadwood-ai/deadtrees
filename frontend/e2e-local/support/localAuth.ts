@@ -61,8 +61,12 @@ export async function installLocalSession(
         "sb-127-auth-token",
         JSON.stringify(localSession),
       );
-      if (acceptCookies)
+      // Mirrors COOKIE_CONSENT_KEY/VERSION in src/utils/analytics.ts; without
+      // the current version the banner returns and covers mobile controls.
+      if (acceptCookies) {
         window.localStorage.setItem("cookieConsent", "accepted");
+        window.localStorage.setItem("cookieConsentVersion", "1.1");
+      }
     },
     { localSession: session, acceptCookies: options.acceptCookies },
   );
