@@ -1,5 +1,6 @@
 from typing import Union, Literal, Optional, Generator, Any
 from contextlib import contextmanager
+import hashlib
 import time
 import logging
 
@@ -11,57 +12,44 @@ from shared.settings import settings
 # Create logger instance at module level
 logger = logging.getLogger(__name__)
 
-# Global variable to store the cached session
-cached_session = None
+# Sessions of service accounts (the processor), keyed by credentials. A key that
+# includes the password digest means a wrong password never matches a cached
+# session, and one account can never receive another account's token.
+_cached_sessions: dict[tuple[str, str], Any] = {}
+
+
+def _session_key(user: str, password: str) -> tuple[str, str]:
+	return user, hashlib.sha256(password.encode()).hexdigest()
 
 
 def login(user: str, password: str, use_cached_session: bool = True) -> str:
 	"""
-	Creates a supabase client instance, authorizes the user with login and password,
-	and manages session caching and refreshing.
+	Sign in with email and password and return an access token.
 
-	Args:
-	    user (str): Supabase username as email
-	    password (str): User password for supabase
-
-	Returns:
-	    str: Returns a valid access token
+	With ``use_cached_session`` a still-valid session for the same credentials is
+	reused, so long-running service accounts do not sign in on every call.
+	Requests on behalf of end users must pass ``use_cached_session=False``.
 	"""
-	global cached_session
+	key = _session_key(user, password)
+	threshold = 60 * 20  # renew 20 minutes before expiration
+
+	cached = _cached_sessions.get(key) if use_cached_session else None
+	if cached and cached.session.expires_at > int(time.time()) + threshold:
+		return cached.session.access_token
 
 	client = create_client(
 		settings.SUPABASE_URL,
 		settings.SUPABASE_KEY,
 		options=ClientOptions(auto_refresh_token=False),
 	)
-
-	current_time = int(time.time())
-	threshold = 60 * 20  # 20 minutes before expiration
-
-	if cached_session and use_cached_session:
-		print('found cached session')
-		if cached_session.session.expires_at > (current_time + threshold):
-			print('session is still valid')
-			return cached_session.session.access_token
-		else:
-			print('session is expired, refreshing')
-			try:
-				refreshed_session = client.auth.refresh_session()
-				cached_session = refreshed_session
-				print('session refreshed')
-				return cached_session.session.access_token
-			except Exception:
-				print('session refresh failed, clearing cache')
-				cached_session = None
-
-	# If no valid cached session, perform a new login
 	try:
 		auth_response = client.auth.sign_in_with_password({'email': user, 'password': password})
-		cached_session = auth_response
-		# print('new session created and cached')
-		return cached_session.session.access_token
 	except Exception as e:
+		_cached_sessions.pop(key, None)
 		raise Exception(f'Login failed: {str(e)}')
+	if use_cached_session:
+		_cached_sessions[key] = auth_response
+	return auth_response.session.access_token
 
 
 def login_verified(user: str, password: str) -> tuple[str, Union[Literal[False], Any]]:

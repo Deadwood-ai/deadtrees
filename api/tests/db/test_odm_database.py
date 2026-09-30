@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime
-from shared.db import use_client
+from shared.db import use_client, use_service_client
 from shared.settings import settings
 from shared.models import LicenseEnum, PlatformEnum, DatasetAccessEnum, StatusEnum, TaskTypeEnum
 
@@ -269,8 +269,9 @@ def test_is_odm_done_field_in_statuses(auth_token, test_user):
 				'current_status': StatusEnum.uploading,
 			}
 
-			# Delete first record to avoid unique constraint
-			client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
+			# One status row per dataset; only the service role deletes status rows.
+			with use_service_client() as service_client:
+				service_client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
 
 			response_2 = client.table(settings.statuses_table).insert(status_data_2).execute()
 			status_record_2 = response_2.data[0]

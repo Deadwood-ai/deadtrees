@@ -44,6 +44,7 @@ fi
 api_smoke_tests=(
 	api/tests/routers/test_contributor_contract_smoke.py
 	api/tests/routers/test_upload_retries.py
+	api/tests/routers/test_auth_token.py
 	api/tests/upload/test_chunk_session.py
 	api/tests/routers/test_upload_odm_detection.py
 	api/tests/routers/test_process.py
@@ -69,6 +70,7 @@ api_smoke_tests=(
 	api/tests/db/test_dataset_edit_history.py
 	api/tests/db/test_data_publication.py
 	api/tests/db/test_correction_and_publication_access.py
+	api/tests/db/test_status_log_view_access.py
 	api/tests/db/test_process_priority.py
 	api/tests/db/test_processor_prediction_rls.py
 	api/tests/db/test_prediction_label_publication.py
@@ -77,6 +79,8 @@ api_smoke_tests=(
 	api/tests/db/test_processing_notification_preferences.py
 	api/tests/test_notifications.py
 	api/tests/test_search_embed.py
+	api/tests/test_info.py
+	api/tests/test_request_ip.py
 	api/tests/test_export_reference_patches.py
 	shared/tests
 )

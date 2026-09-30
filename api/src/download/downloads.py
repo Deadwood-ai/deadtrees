@@ -13,7 +13,7 @@ import pandas as pd
 from shared.logging import UnifiedLogger
 from shared.settings import settings
 from shared.db import use_client
-from shared.models import Label, Dataset, LicenseEnum, Ortho, LabelDataEnum, LabelSourceEnum
+from shared.models import Label, Dataset, LicenseEnum, LabelDataEnum, LabelSourceEnum
 from shared.labels import get_model_preferences
 
 TEMPLATE_PATH = Path(__file__).parent / 'templates'
@@ -538,35 +538,6 @@ def get_exportable_dataset_labels(dataset_id: int) -> List[Label]:
 	return filter_exportable_dataset_labels(get_all_dataset_labels(dataset_id), preferences)
 
 
-def create_labels_geopackages(dataset_id: int) -> Dict[str, Path]:
-	"""Create GeoPackage files for all labels of a dataset, grouped by label type"""
-	labels = get_exportable_dataset_labels(dataset_id)
-	if not labels:
-		return {}
-
-	# Group labels by label_data type
-	label_files = {}
-	with tempfile.TemporaryDirectory() as temp_dir:
-		# Create a separate GeoPackage for each label type
-		for label_type in set(label.label_data for label in labels):
-			type_labels = [label for label in labels if label.label_data == label_type]
-
-			# Skip if no labels of this type
-			if not type_labels:
-				continue
-
-			gpkg_path = Path(temp_dir) / f'{label_type.value}_{dataset_id}.gpkg'
-
-			# Process each label into the same GeoPackage but different layers
-			for label in type_labels:
-				label_to_geopackage(str(gpkg_path), label)
-
-			# Store the file path for later use
-			label_files[label_type] = gpkg_path
-
-	return label_files
-
-
 def create_citation_file(dataset: Dataset, filestream=None) -> str:
 	# load the template
 	with open(TEMPLATE_PATH / 'CITATION.cff', 'r') as f:
@@ -598,30 +569,6 @@ def create_citation_file(dataset: Dataset, filestream=None) -> str:
 	yaml.dump(template, filestream)
 
 	return filestream
-
-
-def get_formatted_filename(dataset: Dataset, ortho: Ortho, label_id: int = None) -> str:
-	"""Generate formatted filename with admin levels and date"""
-	# Get admin levels from metadata (default to 'unknown' if not set)
-	admin1 = ortho.admin_level_1 or 'unknown'
-	admin3 = ortho.admin_level_3 or 'unknown'
-
-	# Clean admin names (remove spaces and special chars)
-	admin1 = ''.join(c for c in admin1 if c.isalnum())
-	admin3 = ''.join(c for c in admin3 if c.isalnum())
-
-	# Format date string
-	date_str = f'{dataset.aquisition_year}'
-	if dataset.aquisition_month:
-		date_str += f'{dataset.aquisition_month:02d}'
-	if dataset.aquisition_day:
-		date_str += f'{dataset.aquisition_day:02d}'
-
-	# Build base filename
-	if label_id:
-		return f'labels_{dataset.id}_{admin1}_{admin3}_{label_id}'
-	else:
-		return f'ortho_{dataset.id}_{admin1}_{admin3}_{date_str}'
 
 
 def create_license_file(license_enum: LicenseEnum) -> str:

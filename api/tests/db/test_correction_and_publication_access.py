@@ -296,11 +296,9 @@ ANON_DEFINER_ALLOWLIST = {
 	'can_view_all_private_data',
 	'is_dataset_search_ready',
 	'is_dataset_search_visible',
-	'log_dataset_changes',
 	'recompute_tile_aoi_membership',
 	'search_datasets_by_embedding',
 	'search_tiles_by_embedding',
-	'update_flag_status',
 	'v2_aois_refresh_membership',
 	'validate_aoi_provenance_link',
 }

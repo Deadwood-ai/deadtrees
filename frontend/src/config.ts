@@ -57,7 +57,6 @@ export const Settings = {
   COLLABORATORS_TABLE: "collaborators",
   LABELS_TABLE: "v2_labels",
   NEWSLETTER_TABLE: "newsletter",
-  LOGS_TABLE: "v2_logs",
 };
 
 // console.debug("Settings", Settings);

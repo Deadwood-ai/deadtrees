@@ -20,11 +20,11 @@ from api.src.routers.search import (
 	MAX_QUERY_LENGTH,
 	_check_search_embed_rate_limit,
 	_log_search_query,
-	_trusted_proxy_networks,
 	_search_client_key,
 	_verified_user_id,
 	embed_query,
 )
+from api.src.utils.request_ip import trusted_proxy_networks as _trusted_proxy_networks
 from shared.embedding_model import EMBEDDING_DIM
 
 pytestmark = pytest.mark.unit

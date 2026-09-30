@@ -68,7 +68,6 @@ Expected app/runtime keys include:
 - `NOTIFICATION_SENDER_EMAIL`
 - `NOTIFICATION_SENDER_NAME`
 - `PROCESSING_EMAIL_NOTIFICATIONS_ENABLED`
-- `PROCESSING_FAILURE_EMAIL_HOLIDAY_NOTE_UNTIL`
 
 Do not add VPN passwords, manual SSH passwords, personal tokens, or explanatory
 access notes to root `.env`. Put those in local-only access notes or the user
