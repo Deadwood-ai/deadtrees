@@ -220,8 +220,6 @@ def test_doi_is_written_by_the_service_role_only(auth_token, test_user, test_dat
 		).execute()
 		with pytest.raises(APIError):
 			client.table('data_publication').update({'doi': '10.1234/forged'}).eq('id', publication_id).execute()
-		with pytest.raises(APIError):
-			client.table('data_publication').delete().eq('id', publication_id).execute()
 
 	with use_service_client() as service_client:
 		service_client.table('data_publication').update({'doi': '10.1234/test.123'}).eq('id', publication_id).execute()

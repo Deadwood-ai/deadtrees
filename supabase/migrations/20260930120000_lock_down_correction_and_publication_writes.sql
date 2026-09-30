@@ -46,6 +46,28 @@ begin
 	-- Auditor edits are auto-approved.
 	v_is_auditor := public.can_audit();
 
+	-- Only model predictions the caller can see are correctable (same visibility
+	-- as the v2_labels read policy); owner rights would otherwise be bypassed.
+	if not exists (
+		select 1
+		from v2_labels l
+		join v2_datasets d on d.id = l.dataset_id
+		where l.id = p_label_id
+			and l.label_source = 'model_prediction'
+			and (
+				v_is_auditor
+				or d.user_id = v_uid
+				or public.can_view_all_private_data()
+				or (
+					d.data_access <> 'private'
+					and not d.archived
+					and not internal.is_dataset_excluded_from_public_surface(d.id)
+				)
+			)
+	) then
+		raise exception 'Label % is not a visible model prediction', p_label_id using errcode = '42501';
+	end if;
+
 	if p_layer_type not in ('deadwood', 'forest_cover') then
 		return query select false, 'Invalid layer_type'::text, null::bigint[];
 		return;
@@ -63,7 +85,7 @@ begin
 			execute format('select updated_at from %I where id = $1 and label_id = $2', v_table_name)
 				into v_actual_ts using v_deletion_id, p_label_id;
 
-			if v_actual_ts is null or v_actual_ts != v_expected_ts then
+			if v_actual_ts is null or v_actual_ts is distinct from v_expected_ts then
 				v_conflict_ids := array_append(v_conflict_ids, v_deletion_id);
 				continue;
 			end if;
@@ -489,6 +511,19 @@ with check (
 	and freidata_record_id is null
 	and notified_at is null
 );
+
+-- PublicationModal writes the publication, authors and links in separate
+-- requests. Its owner may remove a publication that is still pending (links
+-- cascade) and their own author records, so a failed submission can be undone.
+grant delete on table public.data_publication, public.user_info to authenticated;
+
+create policy "Owners delete pending publications"
+on public.data_publication for delete to authenticated
+using (user_id = (select auth.uid()) and status = 'pending');
+
+create policy "Users delete their own author records"
+on public.user_info for delete to authenticated
+using ("user" = (select auth.uid()));
 
 create policy "Users create their own author records"
 on public.user_info for insert to authenticated

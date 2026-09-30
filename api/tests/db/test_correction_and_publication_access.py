@@ -67,13 +67,13 @@ def create_dataset(db, owner, data_access='public'):
 	return dataset
 
 
-def create_prediction(db, dataset, owner):
-	"""A deadwood prediction label with one polygon; returns (label, geometry, updated_at)."""
+def create_prediction(db, dataset, owner, label_source='model_prediction'):
+	"""A deadwood label with one polygon; returns (label, geometry, updated_at)."""
 	as_admin(db)
 	label = db.execute(
 		"INSERT INTO public.v2_labels(dataset_id,user_id,label_source,label_type,label_data) "
-		"VALUES (%s,%s,'model_prediction','semantic_segmentation','deadwood') RETURNING id",
-		(dataset, owner),
+		"VALUES (%s,%s,%s,'semantic_segmentation','deadwood') RETURNING id",
+		(dataset, owner, label_source),
 	).fetchone()[0]
 	geometry, updated_at = db.execute(
 		'INSERT INTO public.v2_deadwood_geometries(label_id,geometry) VALUES (%s,ST_GeomFromGeoJSON(%s)) '
@@ -160,6 +160,27 @@ def test_corrections_only_touch_geometries_of_their_label(db):
 	assert geometry_deleted(db, foreign) is False
 
 
+def test_only_visible_model_predictions_are_correctable(db):
+	owner, other = create_user(db), create_user(db)
+	private_dataset, public_dataset = create_dataset(db, owner, data_access='private'), create_dataset(db, owner)
+	private_label, private_geometry, private_ts = create_prediction(db, private_dataset, owner)
+	upload_label, upload_geometry, upload_ts = create_prediction(db, public_dataset, owner, 'visual_interpretation')
+
+	for dataset, label, geometry, updated_at in [
+		(private_dataset, private_label, private_geometry, private_ts),
+		(public_dataset, upload_label, upload_geometry, upload_ts),
+	]:
+		act_as(db, other)
+		expect_denied(db, SAVE, (dataset, label, other, uuid.uuid4(), [geometry], [updated_at], '[]'))
+		assert geometry_deleted(db, geometry) is False
+
+	# The owner still corrects the prediction of their private dataset.
+	act_as(db, owner)
+	assert db.execute(
+		SAVE, (private_dataset, private_label, owner, uuid.uuid4(), [private_geometry], [private_ts], '[]')
+	).fetchone()[0] is True
+
+
 def test_corrections_are_not_inserted_directly(db):
 	owner = create_user(db)
 	dataset = create_dataset(db, owner)
@@ -237,6 +258,9 @@ def test_publication_tables_accept_only_owner_inserts(db):
 	mine = db.execute("INSERT INTO public.data_publication(user_id,title) VALUES (%s,'mine') RETURNING id", (other,)).fetchone()[0]
 	expect_denied(db, 'INSERT INTO public.jt_data_publication_datasets VALUES (%s,%s)', (mine, dataset), rls)
 
+	# Nobody else can remove a publication.
+	assert db.execute('DELETE FROM public.data_publication WHERE id=%s RETURNING id', (published,)).fetchall() == []
+
 	# The owner's PublicationModal flow.
 	act_as(db, owner)
 	publication = db.execute(
@@ -249,6 +273,11 @@ def test_publication_tables_accept_only_owner_inserts(db):
 	).fetchone()[0]
 	db.execute('INSERT INTO public.jt_data_publication_user_info VALUES (%s,%s)', (publication[0], author))
 	db.execute('INSERT INTO public.jt_data_publication_datasets VALUES (%s,%s)', (publication[0], dataset))
+
+	# A failed submission can be undone while pending; a published record cannot be deleted.
+	assert db.execute('DELETE FROM public.data_publication WHERE id=%s RETURNING id', (published,)).fetchall() == []
+	assert db.execute('DELETE FROM public.data_publication WHERE id=%s RETURNING id', (publication[0],)).fetchall() != []
+	assert db.execute('DELETE FROM public.user_info WHERE id=%s RETURNING id', (author,)).fetchall() != []
 
 
 # Definer functions anon may run. Every other SECURITY DEFINER function must
