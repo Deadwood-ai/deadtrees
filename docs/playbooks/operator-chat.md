@@ -46,10 +46,13 @@ this repo at the time this playbook was added:
 
 ### Monitoring Boundary
 
-Agent operator threads are not continuous monitors. Treat this playbook as the
-procedure for a manual refresh, a scheduled wake-up, or an explicitly delegated
-check. Do not assume the main operator thread, a worker thread, or a status-check
-thread is always running in the background.
+An hourly platform monitor (pilot since 2026-09-30) runs `operator_status.py`
+and the data-factory scorecard on the processing server from a clean `origin/main`
+checkout, records new or worse findings in Linear and reports changes to the
+project coordinator. Other agent operator threads are not continuous monitors.
+Treat this playbook as the procedure for a manual refresh, a scheduled wake-up,
+or an explicitly delegated check, and do not assume any other thread is running
+in the background.
 
 For backups, use two independent signals:
 
@@ -79,8 +82,9 @@ probes, optional backup freshness, and writes ignored compact state to:
 Production-only checks are opt-in through local environment variables so the
 tracked script contains no credentials:
 
-- `DEADTREES_OPERATOR_DATABASE_URL` for the existing purpose-specific monitor
-  `psql` summary; this is separate from the routine analyst connection.
+- `DEADTREES_OPERATOR_DATABASE_URL` for the `psql` summary. Use the
+  purpose-specific monitor login, or the analyst URI where no monitor login is
+  provisioned (the hourly platform monitor does this).
 - `DEADTREES_OPERATOR_PROCESSING_HOST` for the existing primary processing host
   disk/container probe.
 - `DEADTREES_OPERATOR_PROCESSING_HOSTS` for additional labeled processor targets,
@@ -111,9 +115,9 @@ JWT-scoped API views):
 python3 scripts/data_factory_scorecard.py --write-state --format markdown
 ```
 
-`operator_status.py` still reads `DEADTREES_OPERATOR_DATABASE_URL`. Preserve
-existing monitor configuration; do not substitute the analyst URI into
-`DEADTREES_OPERATOR_DATABASE_URL`.
+`operator_status.py` still reads `DEADTREES_OPERATOR_DATABASE_URL`. The analyst
+URI may fill that slot too; the hourly platform monitor sets both variables to the
+analyst login from one protected env file. Never print either value.
 
 For routine production SQL, use the verified transaction in
 [trusted analyst access](analyst-database-access.md#routine-production-reads).
