@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 from enum import Enum
 from shared.settings import settings
 from shared.__version__ import __version__
-from shared.db import use_client
+from shared.db import use_service_client
 from shared.redaction import redact_tokens
 
 
@@ -61,19 +61,18 @@ def redact_extra(extra: Any) -> Any:
 
 
 class SupabaseHandler(logging.Handler):
+	"""Writes log records to v2_logs.
+
+	Only backend services write logs, always with the service role: the table is
+	operational evidence, so API clients cannot insert into it.
+	"""
+
 	def __init__(self):
 		super().__init__()
-		self.use_client = use_client
+		self.use_client = use_service_client
 
 	def emit(self, record: logging.LogRecord) -> None:
 		try:
-			token = None
-			if hasattr(record, 'token'):
-				token = record.token
-			elif hasattr(record, 'extra') and isinstance(record.extra, dict):
-				token = record.extra.get('token')
-
-			# Build log entry
 			log_entry = {
 				'name': record.name,
 				'level': record.levelname,
@@ -87,9 +86,8 @@ class SupabaseHandler(logging.Handler):
 				'extra': redact_extra(getattr(record, 'extra', None)),
 			}
 
-			# Insert into v2_logs table
-			with self.use_client(token) as client:
-				client.table(settings.logs_table).insert(log_entry).execute()
+			with self.use_client() as client:
+				client.table(settings.logs_table).insert(log_entry, returning='minimal').execute()
 
 		except Exception as e:
 			# Fallback to print if logging fails

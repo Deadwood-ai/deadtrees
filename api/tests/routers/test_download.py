@@ -10,7 +10,7 @@ import pyogrio
 import time
 import fiona
 import pandas as pd
-from shared.db import use_client
+from shared.db import use_client, use_service_client
 from shared.settings import settings
 from fastapi.testclient import TestClient
 from api.src.server import app
@@ -540,7 +540,8 @@ def test_download_daily_limit_applies_to_dataset_bundle(auth_token, test_dataset
 
 	monkeypatch.setattr(download_router, 'DOWNLOAD_REQUESTS_PER_DAY', 2)
 
-	with use_client(auth_token) as db_client:
+	# Download log lines are written by the API with the service role.
+	with use_service_client() as db_client:
 		# Seed two prior counted requests for this user in the rolling daily window.
 		for i in range(2):
 			db_client.table(settings.logs_table).insert(
@@ -570,7 +571,7 @@ def test_download_daily_limit_does_not_apply_to_status(auth_token, test_dataset_
 
 	monkeypatch.setattr(download_router, 'DOWNLOAD_REQUESTS_PER_DAY', 2)
 
-	with use_client(auth_token) as db_client:
+	with use_service_client() as db_client:
 		# Seed above-threshold counted requests for this user.
 		for i in range(3):
 			db_client.table(settings.logs_table).insert(

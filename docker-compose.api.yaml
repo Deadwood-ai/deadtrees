@@ -34,9 +34,10 @@ services:
       UVICORN_PORT: 40831
       UVICORN_HOST: 0.0.0.0
       # Host nginx reaches the API through Docker's bridge gateway, so only
-      # trusted proxy peers may supply X-Real-IP / X-Forwarded-For for public
-      # endpoint rate limiting. Host nginx applies the primary public edge limit;
-      # this preserves per-client backend buckets across Docker gateway subnets.
+      # trusted proxy peers may supply X-Real-IP for client IP resolution
+      # (search and download rate limits, prepackaged grant audit rows). Host
+      # nginx applies the primary public edge limit; this preserves per-client
+      # backend buckets across Docker gateway subnets.
       SEARCH_RATE_LIMIT_TRUSTED_PROXIES: ${SEARCH_RATE_LIMIT_TRUSTED_PROXIES:-127.0.0.1,::1,172.16.0.0/12}
       # Reference export configuration
       REFERENCE_EXPORT_UUID: ${REFERENCE_EXPORT_UUID}
@@ -69,7 +70,6 @@ services:
       BREVO_API_KEY: ${BREVO_API_KEY:-}
       NOTIFICATION_SENDER_EMAIL: ${NOTIFICATION_SENDER_EMAIL:-notifications@deadtrees.earth}
       NOTIFICATION_SENDER_NAME: ${NOTIFICATION_SENDER_NAME:-DeadTrees}
-      PROCESSING_FAILURE_EMAIL_HOLIDAY_NOTE_UNTIL: ${PROCESSING_FAILURE_EMAIL_HOLIDAY_NOTE_UNTIL:-2026-09-15}
 
     # command: python run.py server --reload=False
 

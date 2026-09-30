@@ -1,6 +1,5 @@
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
-from datetime import date
 from pathlib import Path
 import os
 
@@ -66,7 +65,6 @@ class Settings(BaseSettings):
 	BASE_DIR: str = str(BASE)
 	# Default to repo-local assets in dev/test; container deployments can still override via env.
 	GADM_DATA_PATH: str = str(ASSETS_DIR / GADM_ASSET_PATH)
-	CONCURRENT_TASKS: int = 2
 
 	BIOME_DATA_PATH: str = str(ASSETS_DIR / BIOME_ASSET_PATH)
 
@@ -131,10 +129,6 @@ class Settings(BaseSettings):
 	PREPACKAGED_DOWNLOAD_BASE_URL: str = (
 		'http://localhost:8080/prepackaged/v1' if DEV_MODE else 'https://data2.deadtrees.earth/prepackaged/v1'
 	)
-	# Legacy Nginx-token download settings retained so existing .env files keep loading.
-	PREPACKAGED_GRANTS_PER_USER_PER_DAY: int = 5
-	PREPACKAGED_GRANTS_GLOBAL_PER_DAY: int = 30
-	PREPACKAGED_GRANT_TTL_HOURS: int = 24
 	PREPACKAGED_S3_ENDPOINT_URL: str = ''
 	PREPACKAGED_S3_REGION: str = 'fr1-ec82'
 	PREPACKAGED_S3_BUCKET: str = 'frct-deadtrees-products'
@@ -157,7 +151,9 @@ class Settings(BaseSettings):
 
 	# processor settings
 	PROCESSOR_USERNAME: str = 'processor@deadtrees.earth'
-	PROCESSOR_PASSWORD: str = 'processor'
+	# No default: deployments must set it. The local seed value lives in .env.example
+	# and docker-compose.test.yaml, so production never falls back to a well-known password.
+	PROCESSOR_PASSWORD: str = ''
 	PROCESSOR_WORKER_ID: str = ''
 	# Seconds the continuous processor waits before re-polling the queue when it
 	# is idle or intentionally drained for deployment/maintenance.
@@ -207,7 +203,6 @@ class Settings(BaseSettings):
 	NOTIFICATION_SENDER_EMAIL: str = 'notifications@deadtrees.earth'
 	NOTIFICATION_SENDER_NAME: str = 'DeadTrees'
 	PROCESSING_EMAIL_NOTIFICATIONS_ENABLED: bool = False
-	PROCESSING_FAILURE_EMAIL_HOLIDAY_NOTE_UNTIL: date | None = date(2026, 9, 15)
 
 	# Mailpit (local test email server) - used when ENV=development
 	MAILPIT_SMTP_HOST: str = 'localhost'

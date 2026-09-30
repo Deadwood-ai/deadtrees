@@ -45,6 +45,8 @@ services:
       - STORAGE_SERVER_USERNAME=root
       - STORAGE_SERVER_DATA_PATH=/data
       - PROCESSOR_USERNAME=processor@deadtrees.earth
+      # Local seed password only; shared settings has no default for it.
+      - PROCESSOR_PASSWORD=${PROCESSOR_PASSWORD:-processor}
       - PROCESSOR_WORKER_ID=processor-test
       - SUPABASE_URL=${SUPABASE_URL_DOCKER:-http://host.docker.internal:54321}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0}
@@ -111,6 +113,7 @@ services:
       - NGINX_COG_URL=${NGINX_COG_URL:-http://localhost:8080/cogs/v1}
       - BASE_DIR=/data
       - ENV=development
+      - PROCESSOR_PASSWORD=${PROCESSOR_PASSWORD:-processor}
       # Mailpit for api/tests/test_notifications.py
       - MAILPIT_SMTP_HOST=mailpit
       - MAILPIT_SMTP_PORT=1025

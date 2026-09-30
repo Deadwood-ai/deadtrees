@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from shared.db import use_client, use_service_client, verify_token
 from shared.logging import LogCategory, LogContext, SupabaseHandler, UnifiedLogger
 from shared.settings import settings
+from api.src.utils.request_ip import get_client_ip
 
 
 router = APIRouter(prefix='/prepackaged', tags=['prepackaged'])
@@ -155,17 +156,6 @@ def generate_prepackaged_signed_download_url(
 	return download_url, storage_key
 
 
-def get_request_ip(request: Request) -> Optional[str]:
-	forwarded_for = request.headers.get('x-forwarded-for')
-	if forwarded_for:
-		return forwarded_for.split(',')[0].strip()
-
-	if request.client:
-		return request.client.host
-
-	return None
-
-
 def require_user(token: str):
 	user = verify_token(token)
 	if not user:
@@ -270,7 +260,7 @@ def create_prepackaged_download_grant(
 					'user_id': user.id,
 					'token_hash': hash_download_token(audit_nonce),
 					'expires_at': expires_at.isoformat(),
-					'requested_ip': get_request_ip(request),
+					'requested_ip': get_client_ip(request),
 					'requested_user_agent': request.headers.get('user-agent'),
 					'extra': {
 						'event': 'prepackaged_signed_download_created',

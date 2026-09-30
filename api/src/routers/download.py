@@ -1,33 +1,24 @@
-import asyncio
 from typing import Callable, Optional, List, Annotated
-from enum import Enum, auto
-import tempfile
-from pathlib import Path
-import time
+from enum import Enum
 import shutil
 import uuid
-import zipfile
-import io
 from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response, Query, Depends
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
-import pandas as pd
 
 from shared.__version__ import __version__
-from shared.models import Dataset, Label
+from shared.models import Dataset
 from shared.settings import settings
+from api.src.utils.request_ip import get_client_ip
 from api.src.download.downloads import (
 	bundle_dataset,
 	bundle_multi_dataset,
 	get_bundle_filename,
-	get_all_dataset_labels,
-	label_to_geopackage,
-	create_citation_file,
 	create_consolidated_geopackage,
 	generate_bundle_job_id,
 )
@@ -61,8 +52,8 @@ download_app.add_middleware(
 # add the middleware for rate limiting
 @download_app.middleware('http')
 async def rate_limiting(request: Request, call_next: Callable[[Request], Response]):
-	# get the ip
-	ip = request.client.host
+	# get the ip (behind host nginx, the peer is the proxy; see get_client_ip)
+	ip = get_client_ip(request) or 'unknown'
 
 	# check if the IP is currently downloading
 	if ip in CONNECTED_IPS:
@@ -83,17 +74,6 @@ async def rate_limiting(request: Request, call_next: Callable[[Request], Respons
 
 # add the gzip middleware
 download_app.add_middleware(GZipMiddleware)
-
-
-# add the format model
-class MetadataFormat(str, Enum):
-	json = 'json'
-	csv = 'csv'
-
-
-@download_app.get('/')
-def info():
-	pass
 
 
 # Define models for download status
@@ -503,53 +483,6 @@ def create_labels_geopackage_background(dataset_id: str):
 			if f.exists():
 				f.unlink()
 		error_file.write_text(str(e), encoding='utf-8')
-
-
-# @download_app.get('/datasets/{dataset_id}/ortho.tif')
-# async def download_geotiff(dataset_id: str):
-# 	"""
-# 	Download the original GeoTiff of the dataset with the given ID.
-# 	"""
-# 	# load the dataset
-# 	dataset = Dataset.by_id(dataset_id)
-
-# 	if dataset is None:
-# 		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
-
-# 	# here we can add the monitoring
-# 	# monitoring.download_ortho.inc()
-
-# 	# build the file name
-# 	path = settings.archive_path / dataset.file_name
-
-# 	return FileResponse(path, media_type='image/tiff', filename=dataset.file_name)
-
-
-# @download_app.get('/datasets/{dataset_id}/metadata.{file_format}')
-# async def get_metadata(dataset_id: str, file_format: MetadataFormat, background_tasks: BackgroundTasks):
-# 	"""
-# 	Download the metadata of the dataset with the given ID.
-# 	"""
-# 	# load the metadata
-# 	metadata = Metadata.by_id(dataset_id)
-# 	if metadata is None:
-# 		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no Metadata entry.')
-
-# 	# switch the format
-# 	if file_format == MetadataFormat.json:
-# 		return metadata.model_dump_json()
-# 	elif file_format == MetadataFormat.csv:
-# 		# build a DataFrame
-# 		df = pd.DataFrame.from_records([metadata.model_dump()])
-
-# 		# create a temporary file
-# 		target = tempfile.NamedTemporaryFile(suffix='.csv', delete_on_close=False)
-# 		df.to_csv(target.name, index=False)
-
-# 		# add a background task to remove the file after download
-# 		background_tasks.add_task(lambda: Path(target.name).unlink())
-
-# 		return FileResponse(target.name, media_type='text/csv', filename='metadata.csv')
 
 
 @download_app.get('/datasets/{dataset_id}/labels.gpkg', response_model=DownloadStatus)

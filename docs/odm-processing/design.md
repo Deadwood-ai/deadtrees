@@ -237,7 +237,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 
 def extract_and_store_exif_metadata(extraction_dir: Path, dataset_id: int, token: str):
     """Extract comprehensive EXIF metadata and store in v2_raw_images.camera_metadata"""
-    from api.src.upload.exif_utils import extract_comprehensive_exif
+    from shared.exif_utils import extract_comprehensive_exif
 
     # Find image files
     image_files = list(extraction_dir.glob('*.jpg')) + list(extraction_dir.glob('*.JPG'))

@@ -276,6 +276,7 @@ def test_create_prepackaged_download_grant_returns_signed_url_and_audit_row(monk
 
 	version_client = FakeVersionClient(make_available_version())
 	service_client = FakeServiceClient()
+	# The spoofable X-Forwarded-For hop from an untrusted peer must not become the audited IP.
 	request = SimpleNamespace(
 		headers={'authorization': 'Bearer user-token', 'user-agent': 'pytest', 'x-forwarded-for': '203.0.113.10'},
 		client=SimpleNamespace(host='198.51.100.7'),
@@ -302,7 +303,7 @@ def test_create_prepackaged_download_grant_returns_signed_url_and_audit_row(monk
 	inserted_payload = service_client.inserted_payloads[0]
 	assert inserted_payload['version_id'] == 7
 	assert inserted_payload['user_id'] == 'user-1'
-	assert inserted_payload['requested_ip'] == '203.0.113.10'
+	assert inserted_payload['requested_ip'] == '198.51.100.7'
 	assert inserted_payload['requested_user_agent'] == 'pytest'
 	assert inserted_payload['token_hash'] != 'user-token'
 	assert inserted_payload['extra'] == {
