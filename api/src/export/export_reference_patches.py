@@ -49,7 +49,7 @@ from rasterio.features import rasterize
 from rasterio.transform import from_bounds as transform_from_bounds
 from rasterio.vrt import WarpedVRT
 from tqdm import tqdm
-from shapely.geometry import MultiPolygon, shape, box
+from shapely.geometry import MultiPolygon, shape
 from shapely.ops import transform as shapely_transform
 from pyproj import Transformer
 from PIL import Image
@@ -57,10 +57,17 @@ from PIL import Image
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from shared.db import login, use_client
-from shared.settings import settings
-
-# Default credentials
+from shared.db import login
+from api.src.export.reference_fetch import (
+	fetch_aoi_geometry,
+	fetch_cog_info,
+	fetch_geometries_by_label,
+	fetch_latest_reference_geometry_created_at,
+	fetch_reference_datasets,
+	fetch_validated_patches,
+	fetch_vector_features_by_label,
+	parse_optional_datetime,
+)
 
 
 def get_nginx_cog_url(cog_path: str, base_url: str = 'http://localhost:8080/cogs/v1') -> str:
@@ -69,277 +76,6 @@ def get_nginx_cog_url(cog_path: str, base_url: str = 'http://localhost:8080/cogs
 	Returns HTTP URL that rasterio can read directly (COGs support HTTP range requests).
 	"""
 	return f'{base_url}/{cog_path}'
-
-
-def parse_optional_datetime(value) -> Optional[datetime]:
-	"""Parse string/datetime values to timezone-aware datetime."""
-	if value is None:
-		return None
-
-	if isinstance(value, datetime):
-		if value.tzinfo is None:
-			return value.replace(tzinfo=timezone.utc)
-		return value
-
-	if isinstance(value, str):
-		try:
-			return datetime.fromisoformat(value.replace('Z', '+00:00'))
-		except ValueError:
-			return None
-
-	return None
-
-
-def fetch_reference_datasets(token: str) -> list[int]:
-	"""Fetch all dataset IDs from reference_datasets table."""
-	try:
-		with use_client(token) as client:
-			response = client.from_('reference_datasets').select('dataset_id').execute()
-			return [row['dataset_id'] for row in response.data] if response.data else []
-	except Exception as e:
-		print(f'❌ Error fetching reference datasets: {e}')
-		return []
-
-
-def fetch_validated_patches(
-	token: str,
-	dataset_id: Optional[int] = None,
-	resolution_cm: Optional[int] = None,
-	deadwood_only: bool = False,
-	forest_cover_only: bool = False,
-) -> Optional[list[dict]]:
-	"""Fetch validated patches from reference_patches table.
-
-	By default, fetches patches where EITHER deadwood_validated OR forest_cover_validated is true.
-	Use flags to filter for specific validation types.
-
-	For child patches without direct labels, resolves effective labels by traversing
-	the full parent chain (5cm -> 10cm -> 20cm).
-	"""
-	try:
-		with use_client(token) as client:
-			query = client.from_('reference_patches').select('*')
-
-			# Filter by dataset (either specific ID or reference_datasets list)
-			if dataset_id:
-				query = query.eq('dataset_id', dataset_id)
-			else:
-				# Only fetch from reference datasets
-				ref_dataset_ids = fetch_reference_datasets(token)
-				if not ref_dataset_ids:
-					print('⚠️  No reference datasets found in reference_datasets table')
-					return []
-				query = query.in_('dataset_id', ref_dataset_ids)
-
-			# Filter by resolution
-			if resolution_cm:
-				query = query.eq('resolution_cm', resolution_cm)
-
-			# Filter by validation status
-			if deadwood_only:
-				query = query.eq('deadwood_validated', True)
-			elif forest_cover_only:
-				query = query.eq('forest_cover_validated', True)
-
-			response = query.order('dataset_id').order('resolution_cm').order('patch_index').execute()
-			patches = response.data if response.data else []
-			if not deadwood_only and not forest_cover_only:
-				patches = [
-					p
-					for p in patches
-					if bool(p.get('deadwood_validated')) or bool(p.get('forest_cover_validated'))
-				]
-
-			if not patches:
-				return []
-
-			# Build per-dataset parent maps so each validated patch can resolve effective
-			# label IDs through the full ancestor chain.
-			dataset_ids = sorted(set(p['dataset_id'] for p in patches))
-			dataset_patch_maps: dict[int, dict[int, dict]] = {}
-			for ds_id in dataset_ids:
-				all_patches_response = (
-					client.from_('reference_patches')
-					.select('id, parent_tile_id, reference_deadwood_label_id, reference_forest_cover_label_id, updated_at')
-					.eq('dataset_id', ds_id)
-					.execute()
-				)
-				all_patches = all_patches_response.data if all_patches_response.data else []
-				dataset_patch_maps[ds_id] = {row['id']: row for row in all_patches}
-
-			for patch in patches:
-				dataset_patch_map = dataset_patch_maps.get(patch['dataset_id'], {})
-				patch_updated_at = parse_optional_datetime(patch.get('updated_at'))
-
-				effective_deadwood_label_id = patch.get('reference_deadwood_label_id')
-				effective_forest_label_id = patch.get('reference_forest_cover_label_id')
-				effective_deadwood_updated_at = patch_updated_at if effective_deadwood_label_id else None
-				effective_forest_updated_at = patch_updated_at if effective_forest_label_id else None
-
-				parent_id = patch.get('parent_tile_id')
-				visited_patch_ids = {patch.get('id')}
-
-				while parent_id and (not effective_deadwood_label_id or not effective_forest_label_id):
-					if parent_id in visited_patch_ids:
-						# Guard against unexpected parent cycles.
-						break
-					visited_patch_ids.add(parent_id)
-
-					parent_patch = dataset_patch_map.get(parent_id)
-					if not parent_patch:
-						break
-
-					parent_updated_at = parse_optional_datetime(parent_patch.get('updated_at'))
-					if not effective_deadwood_label_id and parent_patch.get('reference_deadwood_label_id'):
-						effective_deadwood_label_id = parent_patch.get('reference_deadwood_label_id')
-						effective_deadwood_updated_at = parent_updated_at
-
-					if not effective_forest_label_id and parent_patch.get('reference_forest_cover_label_id'):
-						effective_forest_label_id = parent_patch.get('reference_forest_cover_label_id')
-						effective_forest_updated_at = parent_updated_at
-
-					parent_id = parent_patch.get('parent_tile_id')
-
-				# Keep legacy keys for downstream logic compatibility.
-				if not patch.get('reference_deadwood_label_id') and effective_deadwood_label_id:
-					patch['parent_deadwood_label_id'] = effective_deadwood_label_id
-				if not patch.get('reference_forest_cover_label_id') and effective_forest_label_id:
-					patch['parent_forestcover_label_id'] = effective_forest_label_id
-
-				# Add explicit effective labels and a combined source-update timestamp.
-				patch['effective_deadwood_label_id'] = effective_deadwood_label_id
-				patch['effective_forestcover_label_id'] = effective_forest_label_id
-
-				effective_update_candidates = [
-					c
-					for c in [patch_updated_at, effective_deadwood_updated_at, effective_forest_updated_at]
-					if c is not None
-				]
-				if effective_update_candidates:
-					patch['effective_reference_updated_at'] = max(effective_update_candidates)
-
-			return patches
-	except Exception as e:
-		print(f'❌ Error fetching patches: {e}')
-		return None
-
-
-def fetch_cog_info(token: str, dataset_id: int) -> Optional[dict]:
-	"""Fetch COG info for a dataset."""
-	with use_client(token) as client:
-		response = (
-			client.from_(settings.cogs_table)
-			.select('cog_path, cog_info')
-			.eq('dataset_id', dataset_id)
-			.single()
-			.execute()
-		)
-		return response.data if response.data else None
-
-
-def fetch_aoi_geometry(token: str, dataset_id: int) -> Optional[dict]:
-	"""Fetch AOI geometry for a dataset."""
-	try:
-		with use_client(token) as client:
-			response = (
-				client.from_('v2_aois')
-				.select('geometry')
-				.eq('dataset_id', dataset_id)
-				.order('created_at', desc=True)
-				.limit(1)
-				.execute()
-			)
-			if response.data and len(response.data) > 0:
-				return response.data[0]['geometry']
-		return None
-	except Exception as e:
-		print(f'⚠️  Error fetching AOI: {e}')
-		return None
-
-
-def fetch_model_prediction_label_ids(token: str, dataset_id: int) -> dict:
-	"""Fetch ML model prediction label IDs for a dataset.
-
-	Returns:
-		Dict with 'deadwood' and 'forest_cover' label IDs (can be None)
-	"""
-	label_ids = {'deadwood': None, 'forest_cover': None}
-	try:
-		with use_client(token) as client:
-			# Fetch model prediction labels
-			response = (
-				client.from_('v2_labels')
-				.select('id, label_data')
-				.eq('dataset_id', dataset_id)
-				.eq('label_source', 'model_prediction')
-				.execute()
-			)
-
-			if response.data:
-				for label in response.data:
-					if label['label_data'] == 'deadwood':
-						label_ids['deadwood'] = label['id']
-					elif label['label_data'] == 'forest_cover':
-						label_ids['forest_cover'] = label['id']
-
-			return label_ids
-	except Exception as e:
-		print(f'⚠️  Error fetching model prediction labels: {e}')
-		return label_ids
-
-
-def fetch_geometries_by_label(token: str, label_id: int, table_name: str, bbox: tuple, epsg_code: int) -> list:
-	"""Fetch reference geometries for a label that intersect with bbox."""
-	try:
-		minx, miny, maxx, maxy = bbox
-
-		with use_client(token) as client:
-			response = client.from_(table_name).select('geometry').eq('label_id', label_id).execute()
-
-			if not response.data:
-				return []
-
-			# Create transformer for EPSG:4326 -> UTM
-			transformer = Transformer.from_crs('EPSG:4326', f'EPSG:{epsg_code}', always_xy=True)
-
-			# Convert to shapely geometries, reproject, and filter by bbox
-			tile_box = box(minx, miny, maxx, maxy)
-			geometries = []
-
-			for row in response.data:
-				try:
-					geom_4326 = shape(row['geometry'])
-					geom_utm = shapely_transform(transformer.transform, geom_4326)
-					if geom_utm.intersects(tile_box):
-						geometries.append(geom_utm)
-				except Exception:
-					continue
-
-			return geometries
-
-	except Exception as e:
-		print(f'❌ Error fetching geometries by label: {e}')
-		return []
-
-
-def fetch_vector_features_by_label(token: str, patch_id: int, label_id: Optional[int], table_name: str) -> list[dict]:
-	"""Fetch stored reference geometries for a root patch as EPSG:4326 GeoJSON features."""
-	if label_id is None:
-		return []
-
-	try:
-		with use_client(token) as client:
-			response = (
-				client.from_(table_name)
-				.select('geometry, area_m2, properties')
-				.eq('patch_id', patch_id)
-				.eq('label_id', label_id)
-				.execute()
-			)
-			return response.data if response.data else []
-	except Exception as e:
-		print(f'❌ Error fetching vector features for patch {patch_id}: {e}')
-		return []
 
 
 def build_filename_base(patch: dict) -> str:
@@ -490,24 +226,6 @@ def get_vector_export_candidates(patches: list[dict], resolution_cm: Optional[in
 	if resolution_cm in (5, 10):
 		return []
 	return [patch for patch in patches if is_vector_export_eligible_patch(patch)]
-
-
-def fetch_latest_reference_geometry_created_at(token: str, patch_id: int) -> Optional[datetime]:
-	"""Return the latest geometry creation timestamp for a reference patch."""
-	latest_created_at = None
-
-	try:
-		with use_client(token) as client:
-			for table_name in ('reference_patch_deadwood_geometries', 'reference_patch_forest_cover_geometries'):
-				response = client.from_(table_name).select('created_at').eq('patch_id', patch_id).execute()
-				for row in response.data or []:
-					created_at = parse_optional_datetime(row.get('created_at'))
-					if created_at and (latest_created_at is None or created_at > latest_created_at):
-						latest_created_at = created_at
-	except Exception as e:
-		print(f'⚠️  Error fetching latest geometry timestamp for patch {patch_id}: {e}')
-
-	return latest_created_at
 
 
 def vector_export_needs_export(output_dir: Path, filename_base: str, latest_source_updated_at: datetime) -> bool:
@@ -833,33 +551,34 @@ def rasterize_geometries(geometries: list, bbox: tuple, width: int = 1024, heigh
 
 
 def create_aoi_mask(
-	aoi_geojson: dict, bbox: tuple, epsg_code: int, width: int = 1024, height: int = 1024
+	aoi_geojson: Optional[dict], bbox: tuple, epsg_code: int, width: int = 1024, height: int = 1024
 ) -> np.ndarray:
-	"""Create binary mask from AOI geometry."""
-	if not aoi_geojson:
+	"""Create a binary mask from AOI geometry.
+
+	Only a dataset without an AOI yields an all-valid mask. An AOI that cannot be
+	parsed or reprojected raises ValueError, so the patch fails instead of
+	exporting pixels outside the AOI as validated.
+	"""
+	if aoi_geojson is None:
 		return np.ones((height, width), dtype=np.uint8)
 
 	try:
-		aoi_shape = shape(aoi_geojson)
 		transformer = Transformer.from_crs('EPSG:4326', f'EPSG:{epsg_code}', always_xy=True)
-		aoi_shape_utm = shapely_transform(transformer.transform, aoi_shape)
+		aoi_shape_utm = shapely_transform(transformer.transform, shape(aoi_geojson))
+	except Exception as exc:
+		raise ValueError(f'Invalid AOI geometry for EPSG:{epsg_code}') from exc
+	if aoi_shape_utm.is_empty or not np.all(np.isfinite(aoi_shape_utm.bounds)):
+		raise ValueError(f'AOI geometry is empty or cannot be reprojected to EPSG:{epsg_code}')
 
-		minx, miny, maxx, maxy = bbox
-		raster_transform = transform_from_bounds(minx, miny, maxx, maxy, width, height)
-
-		aoi_mask = rasterize(
-			[(aoi_shape_utm, 1)],
-			out_shape=(height, width),
-			transform=raster_transform,
-			fill=0,
-			dtype=np.uint8,
-			all_touched=False,
-		)
-
-		return aoi_mask
-	except Exception as e:
-		print(f'⚠️  Error creating AOI mask: {e}')
-		return np.ones((height, width), dtype=np.uint8)
+	minx, miny, maxx, maxy = bbox
+	return rasterize(
+		[(aoi_shape_utm, 1)],
+		out_shape=(height, width),
+		transform=transform_from_bounds(minx, miny, maxx, maxy, width, height),
+		fill=0,
+		dtype=np.uint8,
+		all_touched=False,
+	)
 
 
 def export_patch(
@@ -1164,7 +883,11 @@ def main():
 
 	# Fetch reference datasets for cleanup
 	print('🔍 Fetching reference datasets...')
-	reference_dataset_ids = fetch_reference_datasets(token)
+	try:
+		reference_dataset_ids = fetch_reference_datasets(token)
+	except Exception as e:
+		print(f'❌ Could not fetch reference datasets: {e}')
+		return 1
 	if not reference_dataset_ids:
 		print('⚠️  No reference datasets found')
 		return 0
@@ -1177,16 +900,10 @@ def main():
 
 	# Fetch patches
 	print('🔍 Fetching validated patches from database...')
-	patches = fetch_validated_patches(
-		token,
-		dataset_id=args.dataset_id,
-		resolution_cm=args.resolution,
-		deadwood_only=False,
-		forest_cover_only=False,
-	)
-
-	if patches is None:
-		print('❌ Could not fetch validated patches; skipping stale export cleanup')
+	try:
+		patches = fetch_validated_patches(token, dataset_id=args.dataset_id, resolution_cm=args.resolution)
+	except Exception as e:
+		print(f'❌ Could not fetch validated patches; skipping stale export cleanup: {e}')
 		return 1
 
 	if not patches:
@@ -1218,6 +935,7 @@ def main():
 	vector_candidates = get_vector_export_candidates(patches, resolution_cm=args.resolution)
 	vector_export_candidates = []
 	vector_skipped_count = 0
+	vector_failed_count = 0
 
 	for patch in patches:
 		dataset_id = patch['dataset_id']
@@ -1250,7 +968,12 @@ def main():
 		patch_updated_at = parse_optional_datetime(patch.get('updated_at'))
 		if patch_updated_at is None:
 			patch_updated_at = datetime.fromtimestamp(0, tz=timezone.utc)
-		geometry_created_at = fetch_latest_reference_geometry_created_at(token, patch['id'])
+		try:
+			geometry_created_at = fetch_latest_reference_geometry_created_at(token, patch['id'])
+		except Exception as e:
+			print(f"❌ Could not fetch geometry timestamps for patch {patch['patch_index']}: {e}")
+			vector_failed_count += 1
+			continue
 		latest_vector_source_updated_at = patch_updated_at
 		if geometry_created_at and geometry_created_at > latest_vector_source_updated_at:
 			latest_vector_source_updated_at = geometry_created_at
@@ -1325,21 +1048,21 @@ def main():
 		# Dataset-specific output directory structure
 		dataset_output_dir = output_base_dir / str(dataset_id)
 
-		# Get COG URL (fetch from DB if not cached)
-		if dataset_id not in cog_cache:
-			cog_data = fetch_cog_info(token, dataset_id)
-			if not cog_data:
-				print(f'\n❌ No COG found for dataset {dataset_id}')
-				failed_count += 1
-				continue
-
-			# Build COG URL (rasterio can read directly via HTTP)
-			cog_url = get_nginx_cog_url(cog_data['cog_path'], args.nginx_url)
-			cog_cache[dataset_id] = (cog_url, cog_data['cog_info'])
-
-		# Get AOI geometry (fetch from DB if not cached)
-		if dataset_id not in aoi_cache:
-			aoi_cache[dataset_id] = fetch_aoi_geometry(token, dataset_id)
+		# Fetch COG URL and AOI once per dataset. A failed read fails only this patch
+		# and is retried for the dataset's next patch.
+		try:
+			if dataset_id not in cog_cache:
+				cog_data = fetch_cog_info(token, dataset_id)
+				if not cog_data:
+					raise ValueError(f'No COG found for dataset {dataset_id}')
+				# Build COG URL (rasterio can read directly via HTTP)
+				cog_cache[dataset_id] = (get_nginx_cog_url(cog_data['cog_path'], args.nginx_url), cog_data['cog_info'])
+			if dataset_id not in aoi_cache:
+				aoi_cache[dataset_id] = fetch_aoi_geometry(token, dataset_id)
+		except Exception as e:
+			print(f"\n❌ Could not prepare patch {patch['patch_index']}: {e}")
+			failed_count += 1
+			continue
 
 		cog_url, cog_info = cog_cache[dataset_id]
 		aoi_geometry = aoi_cache[dataset_id]
@@ -1363,7 +1086,6 @@ def main():
 			failed_count += 1
 
 	vector_success_count = 0
-	vector_failed_count = 0
 	for patch in tqdm(vector_export_candidates, desc='Exporting vector GeoPackages'):
 		dataset_output_dir = output_base_dir / str(patch['dataset_id'])
 		result = export_vector_geopackage(token, patch, dataset_output_dir)

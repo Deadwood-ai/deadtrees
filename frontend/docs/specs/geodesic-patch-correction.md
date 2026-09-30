@@ -119,7 +119,7 @@ Added OpenLayers distance measurement tool to `ReferencePatchMap.tsx`:
 
 ## Export Script Status
 
-The export script (`scripts/export_ml_tiles.py`) **already handles this correctly**:
+The export script (`api/src/export/export_reference_patches.py`) **already handles this correctly**:
 
 1. ✅ Reads bbox from database (now geodesically-correct in Web Mercator)
 2. ✅ Transforms to UTM for export

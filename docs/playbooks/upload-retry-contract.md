@@ -29,6 +29,12 @@ flushed before an atomic receipt replacement. A retry overwrites any bytes beyon
 the last saved receipt, recovering a partial append or an append whose receipt
 was not saved. No second full copy of the upload is retained.
 
+Validation of the assembled bytes that has no side effects (currently the ZIP
+compression check for raw-image uploads) runs before finalization starts. A
+rejected upload returns HTTP 400, its receipt stays `receiving`, and every
+identical retry returns the same HTTP 400. The client must fix the file and
+start again with a new upload ID.
+
 Before database/file finalization, a durable `finalizing` receipt prevents a
 second attempt from repeating side effects. Normal successful finalization saves
 the response before acknowledging the client. The filesystem and database are
@@ -40,10 +46,29 @@ dataset. Automatic reconciliation is outside this contract.
 
 Receipts and lock files are intentionally retained, including after dataset
 deletion. Removing one lets a delayed request reuse the ID; removing a live lock
-file can also break mutual exclusion. There is no automatic retention/cleanup
-job. A future bounded retention policy must specify expiry to clients and reject
-expired IDs before deleting receipts. Include this directory in storage backup
+file can also break mutual exclusion. Include this directory in storage backup
 and recovery planning.
+
+## Expiry of abandoned uploads
+
+An upload expires when neither its `.tmp` file nor its receipt changed for
+7 days (configurable). The retention job
+`api/src/upload/abandoned_uploads.py`, run on the storage/API host by
+`scripts/cron_cleanup_abandoned_uploads_docker.sh`, then deletes the
+`<upload_id>.tmp` bytes. This covers uploads that stopped before their last
+chunk and uploads whose final chunk failed validation. The job:
+
+- deletes only files whose receipt is still `receiving`, or old `.tmp` files
+  with a valid upload-ID name and no receipt;
+- keeps `finalizing` uploads, which need manual inspection, and never deletes
+  receipts or lock files;
+- skips an upload while a request holds its lock.
+
+A retry of an expired upload ID returns HTTP 409 "Upload data is missing;
+restart with a new upload ID". Clients must restart with a new ID. Set the
+expiry with `UPLOAD_TMP_RETENTION_DAYS` (or `--max-age-days`) and preview with
+`DRY_RUN=1` (or `--dry-run`). The cron entry is installed on the host by hand,
+like the other `scripts/cron_*.sh` jobs.
 
 ## Deployment boundary
 
@@ -62,12 +87,13 @@ Bootstrap and validate the isolated environment using
 `docs/agents/environment-and-access.md`, then run:
 
 ```bash
-deadtrees dev test api api/tests/routers/test_upload_retries.py api/tests/upload/test_chunk_session.py
+deadtrees dev test api api/tests/routers/test_upload_retries.py api/tests/upload/
 scripts/test-api-smoke.sh
 ```
 
 The router tests use the real local database and storage for ZIP and GeoTIFF
-uploads. Filesystem tests cover separate-process locking, missing committed
-bytes, uncommitted append recovery, owner conflicts, restart replay, and the
-interrupted-finalization fence. These tests do not identify the cause of any
+uploads, including a rejected ZIP that is retried. Filesystem tests cover
+separate-process locking, missing committed bytes, uncommitted append recovery,
+owner conflicts, restart replay, the interrupted-finalization fence, validation
+before the fence, and expiry of abandoned uploads. These tests do not identify the cause of any
 particular reported production upload failure.

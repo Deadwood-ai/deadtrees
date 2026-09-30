@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TARGETS=(api shared processor deadtrees-cli scripts)
+TARGETS=(api shared processor deadtrees-cli freidata scripts)
 RULES=(E9 F63 F7 F82)
 
 if [[ -n "${PYTHON:-}" ]]; then

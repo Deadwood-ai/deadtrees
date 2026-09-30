@@ -1,6 +1,8 @@
+import re
+from functools import partial
 from typing import Callable, Optional, List, Annotated
 from enum import Enum
-import shutil
+from pathlib import Path
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -13,14 +15,16 @@ from pydantic import BaseModel
 
 from shared.__version__ import __version__
 from shared.models import Dataset
-from shared.settings import settings
 from api.src.utils.request_ip import get_client_ip
-from api.src.download.downloads import (
-	bundle_dataset,
-	bundle_multi_dataset,
-	get_bundle_filename,
-	create_consolidated_geopackage,
+from shared.settings import settings
+from api.src.download.downloads import bundle_dataset, bundle_multi_dataset, create_consolidated_geopackage
+from api.src.download.jobs import JobState, JobStatus, PreparedFileJob
+from api.src.download.keys import (
+	content_version,
 	generate_bundle_job_id,
+	get_bundle_filename,
+	get_labels_filename,
+	labels_content_version,
 )
 from shared.db import use_client, use_service_client, verify_token
 from shared.logging import UnifiedLogger, SupabaseHandler, LogCategory, LogContext
@@ -28,6 +32,7 @@ from shared.logging import UnifiedLogger, SupabaseHandler, LogCategory, LogConte
 # first approach to implement a rate limit
 CONNECTED_IPS = {}
 DOWNLOAD_REQUESTS_PER_DAY = 100
+BUNDLE_JOB_ID = re.compile(r'[0-9a-f]{12,64}')
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token')
 
 # create the router for download
@@ -74,6 +79,11 @@ async def rate_limiting(request: Request, call_next: Callable[[Request], Respons
 
 # add the gzip middleware
 download_app.add_middleware(GZipMiddleware)
+
+
+@download_app.get('/')
+def info():
+	pass
 
 
 # Define models for download status
@@ -219,7 +229,78 @@ def record_download_request(user_id, dataset_ids: List[int], kind: str) -> None:
 		logger.warning(f'Could not record download request for datasets {dataset_ids}: {e}')
 
 
-# Updated download route with background processing
+
+# =============================================================================
+# Prepared-file jobs: every route below is a thin wrapper around PreparedFileJob
+# =============================================================================
+
+
+def _status_response(job: PreparedFileJob, job_id: str, noun: str, status: Optional[JobStatus] = None) -> DownloadStatus:
+	status = status or job.status()
+	if status.state == JobState.COMPLETED:
+		return DownloadStatus(
+			status=DownloadStatusEnum.COMPLETED,
+			job_id=job_id,
+			message=f'{noun} is ready for download',
+			download_path=job.download_path,
+		)
+	if status.state == JobState.PROCESSING:
+		return DownloadStatus(status=DownloadStatusEnum.PROCESSING, job_id=job_id, message=f'{noun} is being prepared')
+	# A missing job was never started, expired, or belongs to content that has since changed.
+	message = status.message or f'{noun} is not being prepared. Please request the download again.'
+	return DownloadStatus(status=DownloadStatusEnum.FAILED, job_id=job_id, message=message)
+
+
+def _start_job(
+	job: PreparedFileJob,
+	background_tasks: BackgroundTasks,
+	build: Callable[[Path], object],
+	job_id: str,
+	noun: str,
+) -> DownloadStatus:
+	"""Return a finished file, join a live build, or claim and schedule a new build."""
+	if job.status().state != JobState.COMPLETED and job.claim():
+		background_tasks.add_task(job.run, build)
+		return _status_response(job, job_id, noun, JobStatus(JobState.PROCESSING))
+	return _status_response(job, job_id, noun)
+
+
+def _redirect_to_file(job: PreparedFileJob, not_found_detail: str) -> RedirectResponse:
+	status = job.status()
+	if status.state == JobState.COMPLETED:
+		return RedirectResponse(url=job.download_path, status_code=303)
+	if status.state == JobState.FAILED:
+		raise HTTPException(status_code=500, detail=status.message)
+	raise HTTPException(status_code=404, detail=not_found_detail)
+
+
+# =============================================================================
+# Single-dataset bundle
+# =============================================================================
+
+
+async def _dataset_bundle_job(
+	dataset_id: int,
+	token: str,
+	include_labels: bool,
+	include_parquet: bool,
+	use_original_filename: bool,
+) -> tuple[PreparedFileJob, Dataset, Optional[dict], Optional[dict]]:
+	"""Check access and name the bundle after its variant and current content."""
+	dataset, ortho = await get_accessible_dataset(
+		dataset_id=dataset_id,
+		token=token,
+		allow_viewonly_full_download=False,
+	)
+	with use_client(token) as client:
+		metadata_response = client.table(settings.metadata_table).select('*').eq('dataset_id', dataset_id).execute()
+	metadata = metadata_response.data[0] if metadata_response.data else None
+
+	version = content_version([(dataset, ortho, metadata)], include_labels)
+	filename = get_bundle_filename(dataset_id, include_labels, include_parquet, use_original_filename, version)
+	return PreparedFileJob(settings.downloads_path / str(dataset_id) / filename), dataset, ortho, metadata
+
+
 @download_app.get('/datasets/{dataset_id}/dataset.zip', response_model=DownloadStatus)
 async def download_dataset(
 	dataset_id: str,
@@ -238,64 +319,27 @@ async def download_dataset(
 		endpoint='datasets/{dataset_id}/dataset.zip',
 		dataset_id=dataset_id_int,
 	)
-	dataset_id = str(dataset_id_int)
-
-	# Check dataset exists and access policy allows full download
-	dataset, ortho = await get_accessible_dataset(
-		dataset_id=dataset_id_int,
-		token=token,
-		allow_viewonly_full_download=False,
+	job, dataset, ortho, metadata = await _dataset_bundle_job(
+		dataset_id_int, token, include_labels, include_parquet, use_original_filename
 	)
-
-	with use_client(token) as client:
-		metadata_response = client.table(settings.metadata_table).select('*').eq('dataset_id', dataset_id_int).execute()
-	metadata = metadata_response.data[0] if metadata_response.data else None
-
 	if not ortho:
-		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no ortho file.')
+		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id_int}> has no ortho file.')
 	record_download_request(user.id, [dataset_id_int], 'dataset')
 
-	# Build the file paths
-	download_dir = settings.downloads_path / dataset_id
-	download_file = download_dir / get_bundle_filename(dataset_id_int, include_labels, include_parquet)
-	error_file = download_file.with_suffix(f'{download_file.suffix}.error')
+	def build(target: Path):
+		archive_file = (settings.archive_path / ortho['ortho_file_name']).resolve()
+		bundle_dataset(
+			str(target),
+			archive_file,
+			dataset=dataset,
+			ortho=ortho,
+			metadata=metadata,
+			include_parquet=include_parquet,
+			include_labels=include_labels,
+			use_original_filename=use_original_filename,
+		)
 
-	# Check if file already exists
-	if download_file.exists():
-		if download_file.stat().st_size > 0:
-			# File already exists, return completed status (not the direct URL)
-			return DownloadStatus(
-				status=DownloadStatusEnum.COMPLETED,
-				job_id=dataset_id,
-				message='Dataset bundle is ready for download',
-				download_path=f'/downloads/v1/{dataset_id}/{download_file.name}',
-			)
-		# Zero-byte file -> remove and rebuild
-		download_file.unlink()
-
-	# Create download directory if it doesn't exist
-	download_dir.mkdir(parents=True, exist_ok=True)
-
-	# Clear stale failure marker from prior failed attempt
-	if error_file.exists():
-		error_file.unlink()
-
-	# Start background task to create the archive
-	background_tasks.add_task(
-		create_dataset_bundle_background,
-		dataset_id=dataset_id,
-		dataset=dataset,
-		ortho=ortho,
-		metadata=metadata,
-		include_labels=include_labels,
-		include_parquet=include_parquet,
-		use_original_filename=use_original_filename,
-	)
-
-	# Return processing status response
-	return DownloadStatus(
-		status=DownloadStatusEnum.PROCESSING, job_id=dataset_id, message='Dataset bundle is being prepared'
-	)
+	return _start_job(job, background_tasks, build, str(dataset_id_int), 'Dataset bundle')
 
 
 @download_app.get('/datasets/{dataset_id}/status', response_model=DownloadStatus)
@@ -303,6 +347,7 @@ async def check_download_status(
 	dataset_id: str,
 	include_labels: bool = Query(True),
 	include_parquet: bool = Query(True),
+	use_original_filename: bool = Query(False),
 	token: Annotated[str, Depends(oauth2_scheme)] = '',
 ):
 	"""Check the status of a dataset bundle job"""
@@ -313,37 +358,8 @@ async def check_download_status(
 		dataset_id=dataset_id_int,
 		count_towards_limit=False,
 	)
-	dataset_id = str(dataset_id_int)
-
-	download_dir = settings.downloads_path / dataset_id
-	download_file = download_dir / get_bundle_filename(dataset_id_int, include_labels, include_parquet)
-	error_file = download_file.with_suffix(f'{download_file.suffix}.error')
-
-	# Check dataset exists and access policy allows full download
-	dataset, ortho = await get_accessible_dataset(
-		dataset_id=dataset_id_int,
-		token=token,
-		allow_viewonly_full_download=False,
-	)
-
-	if error_file.exists():
-		error_message = error_file.read_text(encoding='utf-8').strip()
-		return DownloadStatus(
-			status=DownloadStatusEnum.FAILED,
-			job_id=dataset_id,
-			message=error_message or 'Dataset bundle generation failed',
-		)
-	elif download_file.exists() and download_file.stat().st_size > 0:
-		return DownloadStatus(
-			status=DownloadStatusEnum.COMPLETED,
-			job_id=dataset_id,
-			message='Dataset bundle is ready for download',
-			download_path=f'/downloads/v1/{dataset_id}/{download_file.name}',
-		)
-	else:
-		return DownloadStatus(
-			status=DownloadStatusEnum.PROCESSING, job_id=dataset_id, message='Dataset bundle is being prepared'
-		)
+	job, *_ = await _dataset_bundle_job(dataset_id_int, token, include_labels, include_parquet, use_original_filename)
+	return _status_response(job, str(dataset_id_int), 'Dataset bundle')
 
 
 @download_app.get('/datasets/{dataset_id}/download', response_class=RedirectResponse)
@@ -351,6 +367,7 @@ async def download_dataset_file(
 	dataset_id: str,
 	include_labels: bool = Query(True),
 	include_parquet: bool = Query(True),
+	use_original_filename: bool = Query(False),
 	token: Annotated[str, Depends(oauth2_scheme)] = '',
 ):
 	"""Redirect to the actual download file once it's ready"""
@@ -360,129 +377,19 @@ async def download_dataset_file(
 		endpoint='datasets/{dataset_id}/download',
 		dataset_id=dataset_id_int,
 	)
-	dataset_id = str(dataset_id_int)
-
-	# Check dataset exists and access policy allows full download
-	dataset, ortho = await get_accessible_dataset(
-		dataset_id=dataset_id_int,
-		token=token,
-		allow_viewonly_full_download=False,
-	)
-
-	download_file = settings.downloads_path / dataset_id / get_bundle_filename(dataset_id_int, include_labels, include_parquet)
-	error_file = download_file.with_suffix(f'{download_file.suffix}.error')
-
-	if error_file.exists():
-		error_message = error_file.read_text(encoding='utf-8').strip()
-		raise HTTPException(status_code=500, detail=error_message or 'Dataset bundle generation failed')
-
-	if not download_file.exists() or download_file.stat().st_size == 0:
-		raise HTTPException(status_code=404, detail=f'Download file for dataset <ID={dataset_id}> not found')
-
-	return RedirectResponse(url=f'/downloads/v1/{dataset_id}/{download_file.name}', status_code=303)
+	job, *_ = await _dataset_bundle_job(dataset_id_int, token, include_labels, include_parquet, use_original_filename)
+	return _redirect_to_file(job, f'Download file for dataset <ID={dataset_id_int}> not found')
 
 
-def create_dataset_bundle_background(
-	dataset_id: str,
-	dataset: Dataset,
-	ortho: dict,
-	metadata: Optional[dict] = None,
-	include_labels: bool = True,
-	include_parquet: bool = True,
-	use_original_filename: bool = False,
-):
-	"""Background task to create dataset bundle.
-
-	Writes to a .part temp file first, then atomically renames to the final
-	path.  This prevents the status-polling endpoint from seeing a partially
-	written file and reporting "completed" too early (race condition).
-	"""
-	download_dir = settings.downloads_path / dataset_id
-	download_file = download_dir / get_bundle_filename(int(dataset_id), include_labels, include_parquet)
-	temp_file = download_file.with_suffix('.zip.part')
-	error_file = download_file.with_suffix(f'{download_file.suffix}.error')
-
-	try:
-		# Build the file paths
-		archive_file_name = (settings.archive_path / ortho['ortho_file_name']).resolve()
-
-		# Clear stale state from prior attempts
-		for f in (temp_file, error_file):
-			if f.exists():
-				f.unlink()
-
-		# Write to temp file first
-		bundle_dataset(
-			str(temp_file),
-			archive_file_name,
-			dataset=dataset,
-			ortho=ortho,
-			metadata=metadata,
-			include_parquet=include_parquet,
-			include_labels=include_labels,
-			use_original_filename=use_original_filename,
-		)
-
-		# Atomic rename – status check only sees .zip when fully written
-		temp_file.rename(download_file)
-
-		logger.info(f'Dataset bundle completed for dataset {dataset_id}')
-
-	except Exception as e:
-		logger.error(f'Error in background dataset bundling: {str(e)}', extra={'dataset_id': dataset_id})
-		# Remove failed files if they exist
-		for f in (temp_file, download_file):
-			if f.exists():
-				f.unlink()
-		error_file.write_text(str(e) or 'Dataset bundle generation failed', encoding='utf-8')
+# =============================================================================
+# Labels GeoPackage
+# =============================================================================
 
 
-def create_labels_geopackage_background(dataset_id: str):
-	"""Background task to create labels geopackage"""
-	download_dir = settings.downloads_path / dataset_id
-	labels_file = download_dir / f'{dataset_id}_labels.gpkg'
-	temp_file = download_dir / f'{dataset_id}_labels.gpkg.part'
-	error_file = download_dir / f'{dataset_id}_labels.gpkg.error'
-
-	try:
-		logger.info(f'Starting labels GeoPackage creation for dataset {dataset_id}')
-		download_dir.mkdir(parents=True, exist_ok=True)
-
-		# Clear stale state from prior attempts
-		if temp_file.exists():
-			temp_file.unlink()
-		if error_file.exists():
-			error_file.unlink()
-
-		# Create consolidated geopackage in temp directory
-		temp_gpkg = create_consolidated_geopackage(int(dataset_id))
-
-		# Copy to a temp file inside the target directory, then atomically rename.
-		# This avoids exposing a partially written file in /downloads/v1.
-		shutil.copyfile(str(temp_gpkg), str(temp_file))
-		if temp_file.stat().st_size == 0:
-			raise ValueError(f'Generated GeoPackage is empty for dataset {dataset_id}')
-		temp_file.replace(labels_file)
-
-		# Clean up temp directory
-		shutil.rmtree(temp_gpkg.parent)
-
-		logger.info(f'Labels GeoPackage completed for dataset {dataset_id}')
-
-	except ValueError as e:
-		logger.error(f'No labels found for dataset {dataset_id}: {str(e)}')
-		# Remove failed files and persist error reason for status endpoint
-		for f in (temp_file, labels_file):
-			if f.exists():
-				f.unlink()
-		error_file.write_text(str(e), encoding='utf-8')
-	except Exception as e:
-		logger.error(f'Error in background labels GeoPackage creation: {str(e)}', extra={'dataset_id': dataset_id})
-		# Remove failed files if they exist and persist the error reason for status endpoint
-		for f in (temp_file, labels_file):
-			if f.exists():
-				f.unlink()
-		error_file.write_text(str(e), encoding='utf-8')
+async def _labels_job(dataset_id: int, token: str) -> PreparedFileJob:
+	await get_accessible_dataset(dataset_id=dataset_id, token=token, allow_viewonly_full_download=True)
+	filename = get_labels_filename(dataset_id, labels_content_version(dataset_id))
+	return PreparedFileJob(settings.downloads_path / str(dataset_id) / filename)
 
 
 @download_app.get('/datasets/{dataset_id}/labels.gpkg', response_model=DownloadStatus)
@@ -500,56 +407,10 @@ async def get_labels(
 		endpoint='datasets/{dataset_id}/labels.gpkg',
 		dataset_id=dataset_id_int,
 	)
-	dataset_id = str(dataset_id_int)
-
-	try:
-		# Check dataset exists and access policy allows labels download
-		dataset, ortho = await get_accessible_dataset(
-			dataset_id=dataset_id_int,
-			token=token,
-			allow_viewonly_full_download=True,
-		)
-		record_download_request(user.id, [dataset_id_int], 'labels')
-
-		# Build the file paths
-		download_dir = settings.downloads_path / dataset_id
-		labels_file = download_dir / f'{dataset_id}_labels.gpkg'
-		error_file = download_dir / f'{dataset_id}_labels.gpkg.error'
-
-		# Check if file already exists
-		if labels_file.exists():
-			if labels_file.stat().st_size == 0:
-				labels_file.unlink()
-			else:
-				# File already exists, return completed status
-				return DownloadStatus(
-					status=DownloadStatusEnum.COMPLETED,
-					job_id=f'labels_{dataset_id}',
-					message='Labels GeoPackage is ready for download',
-					download_path=f'/downloads/v1/{dataset_id}/{dataset_id}_labels.gpkg',
-				)
-
-		# Clear stale error marker from prior failed attempt
-		if error_file.exists():
-			error_file.unlink()
-
-		# Create download directory if it doesn't exist
-		download_dir.mkdir(parents=True, exist_ok=True)
-
-		# Start background task to create the geopackage
-		background_tasks.add_task(create_labels_geopackage_background, dataset_id=dataset_id)
-
-		# Return processing status response
-		return DownloadStatus(
-			status=DownloadStatusEnum.PROCESSING,
-			job_id=f'labels_{dataset_id}',
-			message='Labels GeoPackage is being prepared',
-		)
-	except HTTPException:
-		raise
-	except Exception as e:
-		logger.error(f'Error initiating labels download for dataset {dataset_id}: {str(e)}')
-		raise HTTPException(status_code=500, detail=f'Error initiating labels download: {str(e)}')
+	job = await _labels_job(dataset_id_int, token)
+	record_download_request(user.id, [dataset_id_int], 'labels')
+	build = partial(create_consolidated_geopackage, dataset_id_int)
+	return _start_job(job, background_tasks, build, f'labels_{dataset_id_int}', 'Labels GeoPackage')
 
 
 @download_app.get('/datasets/{dataset_id}/labels/status', response_model=DownloadStatus)
@@ -565,40 +426,8 @@ async def check_labels_status(
 		dataset_id=dataset_id_int,
 		count_towards_limit=False,
 	)
-	dataset_id = str(dataset_id_int)
-
-	download_dir = settings.downloads_path / dataset_id
-	labels_file = download_dir / f'{dataset_id}_labels.gpkg'
-	error_file = download_dir / f'{dataset_id}_labels.gpkg.error'
-
-	# Check dataset exists and access policy allows labels download
-	dataset, ortho = await get_accessible_dataset(
-		dataset_id=dataset_id_int,
-		token=token,
-		allow_viewonly_full_download=True,
-	)
-
-	if error_file.exists():
-		error_message = error_file.read_text(encoding='utf-8').strip()
-		return DownloadStatus(
-			status=DownloadStatusEnum.FAILED,
-			job_id=f'labels_{dataset_id}',
-			message=error_message or 'Labels GeoPackage generation failed',
-		)
-
-	if labels_file.exists() and labels_file.stat().st_size > 0:
-		return DownloadStatus(
-			status=DownloadStatusEnum.COMPLETED,
-			job_id=f'labels_{dataset_id}',
-			message='Labels GeoPackage is ready for download',
-			download_path=f'/downloads/v1/{dataset_id}/{dataset_id}_labels.gpkg',
-		)
-	else:
-		return DownloadStatus(
-			status=DownloadStatusEnum.PROCESSING,
-			job_id=f'labels_{dataset_id}',
-			message='Labels GeoPackage is being prepared',
-		)
+	job = await _labels_job(dataset_id_int, token)
+	return _status_response(job, f'labels_{dataset_id_int}', 'Labels GeoPackage')
 
 
 @download_app.get('/datasets/{dataset_id}/labels/download', response_class=RedirectResponse)
@@ -613,26 +442,8 @@ async def download_labels_file(
 		endpoint='datasets/{dataset_id}/labels/download',
 		dataset_id=dataset_id_int,
 	)
-	dataset_id = str(dataset_id_int)
-
-	# Check dataset exists and access policy allows labels download
-	dataset, ortho = await get_accessible_dataset(
-		dataset_id=dataset_id_int,
-		token=token,
-		allow_viewonly_full_download=True,
-	)
-
-	labels_file = settings.downloads_path / dataset_id / f'{dataset_id}_labels.gpkg'
-	error_file = settings.downloads_path / dataset_id / f'{dataset_id}_labels.gpkg.error'
-
-	if error_file.exists():
-		error_message = error_file.read_text(encoding='utf-8').strip()
-		raise HTTPException(status_code=500, detail=error_message or 'Labels GeoPackage generation failed')
-
-	if not labels_file.exists() or labels_file.stat().st_size == 0:
-		raise HTTPException(status_code=404, detail=f'Labels file for dataset <ID={dataset_id}> not found')
-
-	return RedirectResponse(url=f'/downloads/v1/{dataset_id}/{dataset_id}_labels.gpkg', status_code=303)
+	job = await _labels_job(dataset_id_int, token)
+	return _redirect_to_file(job, f'Labels file for dataset <ID={dataset_id_int}> not found')
 
 
 # =============================================================================
@@ -647,42 +458,33 @@ async def get_datasets_for_bundle(
 	"""
 	Fetch dataset, ortho, and metadata for multiple datasets.
 	Enforces private/view-only download policy for the requesting user.
-	
+
 	Returns:
 		List of tuples: (dataset, ortho_dict, metadata_dict, archive_file_path)
 	"""
 	results = []
 	viewonly_dataset_ids: List[int] = []
-	
+
 	with use_client(token) as client:
 		for dataset_id in dataset_ids:
-			# Get dataset
 			dataset_response = client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute()
-			
 			if not dataset_response.data:
 				raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
-			
-			dataset = Dataset(**dataset_response.data[0])
 
+			dataset = Dataset(**dataset_response.data[0])
 			if dataset.data_access.value == 'viewonly':
 				viewonly_dataset_ids.append(dataset_id)
 				continue
-			
-			# Get ortho data
+
 			ortho_response = client.table(settings.orthos_table).select('*').eq('dataset_id', dataset_id).execute()
-			
 			if not ortho_response.data:
 				raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> has no ortho file.')
-			
 			ortho = ortho_response.data[0]
-			
-			# Get metadata
+
 			metadata_response = client.table(settings.metadata_table).select('*').eq('dataset_id', dataset_id).execute()
 			metadata = metadata_response.data[0] if metadata_response.data else None
-			
-			# Build archive file path
+
 			archive_file_path = str((settings.archive_path / ortho['ortho_file_name']).resolve())
-			
 			results.append((dataset, ortho, metadata, archive_file_path))
 
 	if viewonly_dataset_ids:
@@ -695,44 +497,10 @@ async def get_datasets_for_bundle(
 	return results
 
 
-def create_multi_bundle_background(
-	job_id: str,
-	datasets_info: List[tuple],
-	include_labels: bool = False,
-	include_parquet: bool = False,
-	use_original_filename: bool = True,
-):
-	"""Background task to create multi-dataset bundle.
-
-	Writes to a .part temp file first, then atomically renames to the final
-	path.  This prevents the status-polling endpoint from seeing a partially
-	written file and reporting "completed" too early (race condition).
-	"""
-	download_dir = settings.downloads_path / 'bundles'
-	download_file = download_dir / f'{job_id}.zip'
-	temp_file = download_dir / f'{job_id}.zip.part'
-	
-	try:
-		# Write to temp file first
-		bundle_multi_dataset(
-			str(temp_file),
-			datasets_info,
-			include_labels=include_labels,
-			include_parquet=include_parquet,
-			use_original_filename=use_original_filename,
-		)
-
-		# Atomic rename – status check only sees .zip when fully written
-		temp_file.rename(download_file)
-
-		logger.info(f'Multi-dataset bundle completed: {job_id}')
-		
-	except Exception as e:
-		logger.error(f'Error in background multi-dataset bundling: {str(e)}', extra={'job_id': job_id})
-		# Remove failed files if they exist
-		for f in (temp_file, download_file):
-			if f.exists():
-				f.unlink()
+def _bundle_job(job_id: str) -> PreparedFileJob:
+	if not BUNDLE_JOB_ID.fullmatch(job_id):
+		raise HTTPException(status_code=400, detail='Invalid bundle job ID.')
+	return PreparedFileJob(settings.downloads_path / 'bundles' / f'{job_id}.zip')
 
 
 @download_app.get('/bundle.zip', response_model=DownloadStatus)
@@ -746,79 +514,44 @@ async def prepare_multi_bundle(
 ):
 	"""
 	Prepare a multi-dataset bundle in the background and return job status.
-	
+
 	This endpoint creates a single ZIP containing:
 	- All ortho files (with collision handling)
-	- Consolidated METADATA.csv (one row per dataset)
+	- Consolidated METADATA.csv (one row per dataset, including its license)
 	- METADATA.parquet (optional)
 	- Label GeoPackages (optional, always use dataset ID in filename)
-	- LICENSE.txt
+	- LICENSE.txt (every license in the bundle and the datasets it covers)
 	- CITATION.cff
 	"""
-	# Parse and validate dataset IDs
 	try:
 		id_list = [int(x.strip()) for x in dataset_ids.split(',') if x.strip()]
 	except ValueError:
 		raise HTTPException(status_code=400, detail="Invalid dataset_ids format. Use comma-separated integers.")
-	
+	id_list = list(dict.fromkeys(id_list))
+
 	if not id_list:
 		raise HTTPException(status_code=400, detail="At least one dataset ID is required.")
-	
+
 	if len(id_list) > 100:
 		raise HTTPException(status_code=400, detail="Maximum 100 datasets per bundle.")
-	
-	# Generate job ID
-	job_id = generate_bundle_job_id(id_list, include_labels, include_parquet)
-	user = validate_user_and_limit(
-		token=token,
-		endpoint='bundle.zip',
-		job_id=job_id,
-	)
-	
+
+	user = validate_user_and_limit(token=token, endpoint='bundle.zip')
+
 	# Enforce per-dataset access and output checks for every request, including a
 	# cached bundle another user prepared, before recording or returning it.
-	datasets_info = await get_datasets_for_bundle(
-		dataset_ids=id_list,
-		token=token,
-	)
-
-	# Check if bundle already exists
-	download_dir = settings.downloads_path / 'bundles'
-	download_file = download_dir / f'{job_id}.zip'
-	
-	if download_file.exists() and download_file.stat().st_size > 0:
-		record_download_request(user.id, id_list, 'bundle')
-		return DownloadStatus(
-			status=DownloadStatusEnum.COMPLETED,
-			job_id=job_id,
-			message=f'Bundle with {len(id_list)} datasets is ready for download',
-			download_path=f'/downloads/v1/bundles/{job_id}.zip',
-		)
-	
-	# Create download directory if it doesn't exist
-	download_dir.mkdir(parents=True, exist_ok=True)
-	
-	# Remove any existing zero-byte file
-	if download_file.exists():
-		download_file.unlink()
-	
+	datasets_info = await get_datasets_for_bundle(dataset_ids=id_list, token=token)
+	version = content_version([info[:3] for info in datasets_info], include_labels)
+	job_id = generate_bundle_job_id(id_list, include_labels, include_parquet, use_original_filename, version)
 	record_download_request(user.id, id_list, 'bundle')
-	
-	# Start background task
-	background_tasks.add_task(
-		create_multi_bundle_background,
-		job_id=job_id,
+
+	build = partial(
+		bundle_multi_dataset,
 		datasets_info=datasets_info,
 		include_labels=include_labels,
 		include_parquet=include_parquet,
 		use_original_filename=use_original_filename,
 	)
-	
-	return DownloadStatus(
-		status=DownloadStatusEnum.PROCESSING,
-		job_id=job_id,
-		message=f'Bundle with {len(id_list)} datasets is being prepared',
-	)
+	return _start_job(_bundle_job(job_id), background_tasks, build, job_id, f'Bundle with {len(id_list)} datasets')
 
 
 @download_app.get('/bundle/status', response_model=DownloadStatus)
@@ -833,22 +566,7 @@ async def check_bundle_status(
 		job_id=job_id,
 		count_towards_limit=False,
 	)
-
-	download_file = settings.downloads_path / 'bundles' / f'{job_id}.zip'
-	
-	if download_file.exists() and download_file.stat().st_size > 0:
-		return DownloadStatus(
-			status=DownloadStatusEnum.COMPLETED,
-			job_id=job_id,
-			message='Bundle is ready for download',
-			download_path=f'/downloads/v1/bundles/{job_id}.zip',
-		)
-	else:
-		return DownloadStatus(
-			status=DownloadStatusEnum.PROCESSING,
-			job_id=job_id,
-			message='Bundle is being prepared',
-		)
+	return _status_response(_bundle_job(job_id), job_id, 'Bundle')
 
 
 @download_app.get('/bundle/download', response_class=RedirectResponse)
@@ -862,10 +580,4 @@ async def download_bundle_file(
 		endpoint='bundle/download',
 		job_id=job_id,
 	)
-
-	download_file = settings.downloads_path / 'bundles' / f'{job_id}.zip'
-	
-	if not download_file.exists() or download_file.stat().st_size == 0:
-		raise HTTPException(status_code=404, detail=f'Bundle <job_id={job_id}> not found or not ready')
-	
-	return RedirectResponse(url=f'/downloads/v1/bundles/{job_id}.zip', status_code=303)
+	return _redirect_to_file(_bundle_job(job_id), f'Bundle <job_id={job_id}> not found or not ready')

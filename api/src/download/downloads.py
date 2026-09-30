@@ -1,10 +1,9 @@
 import zipfile
 import io
-import hashlib
 import tempfile
 import json
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Set
+from typing import Callable, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import geopandas as gpd
 import yaml
@@ -12,7 +11,7 @@ import pandas as pd
 
 from shared.logging import UnifiedLogger
 from shared.settings import settings
-from shared.db import use_client
+from shared.db import use_service_client
 from shared.models import Label, Dataset, LicenseEnum, LabelDataEnum, LabelSourceEnum
 from shared.labels import get_model_preferences
 
@@ -29,6 +28,29 @@ EXPORTABLE_LABEL_SOURCES = {
 	LabelSourceEnum.model_prediction,
 	LabelSourceEnum.visual_interpretation,
 }
+
+
+# PostgREST caps every response at `max_rows` (1000, supabase/config.toml).
+PAGE_SIZE = 1000
+
+
+def iter_pages(build_query: Callable[[], object], page_size: int = PAGE_SIZE) -> Iterator[List[Dict]]:
+	"""Yield every page of a deterministically ordered PostgREST query.
+
+	`build_query` must return a fresh query with a stable order. Paging stops only at
+	an empty page, so a server cap below `page_size` cannot truncate the result.
+	"""
+	offset = 0
+	while True:
+		page = build_query().range(offset, offset + page_size - 1).execute().data or []
+		if not page:
+			return
+		yield page
+		offset += len(page)
+
+
+def fetch_all_rows(build_query: Callable[[], object], page_size: int = PAGE_SIZE) -> List[Dict]:
+	return [row for page in iter_pages(build_query, page_size) for row in page]
 
 
 # =============================================================================
@@ -203,22 +225,31 @@ def build_single_dataset_metadata_row(
 	return row
 
 
-def generate_bundle_job_id(dataset_ids: List[int], include_labels: bool, include_parquet: bool) -> str:
-	"""
-	Generate a deterministic job ID for a multi-dataset bundle.
-	
-	Args:
-		dataset_ids: List of dataset IDs to bundle
-		include_labels: Whether labels are included
-		include_parquet: Whether parquet is included
-		
-	Returns:
-		A short hash string suitable for use as job_id and filename
-	"""
-	# Sort IDs for deterministic hash
-	sorted_ids = sorted(dataset_ids)
-	key = f"{sorted_ids}-{include_labels}-{include_parquet}"
-	return hashlib.sha256(key.encode()).hexdigest()[:12]
+def _write_metadata_tables(archive: zipfile.ZipFile, df: pd.DataFrame, include_parquet: bool) -> None:
+	archive.writestr('METADATA.csv', df.to_csv(index=False))
+	if include_parquet:
+		archive.writestr('METADATA.parquet', df.to_parquet(index=False))
+
+
+def _write_license_and_citation(archive: zipfile.ZipFile, datasets: List[Dataset]) -> None:
+	archive.writestr('LICENSE.txt', create_license_text(datasets))
+	citation_buffer = io.StringIO()
+	create_citation_file(datasets, citation_buffer)
+	archive.writestr('CITATION.cff', citation_buffer.getvalue())
+
+
+def _write_label_geopackages(archive: zipfile.ZipFile, dataset_id: int) -> None:
+	"""Add one GeoPackage per label type (with the dataset's AOI layer) to the archive."""
+	labels = get_exportable_dataset_labels(dataset_id)
+	with tempfile.TemporaryDirectory() as temp_dir:
+		for label_type in sorted({label.label_data for label in labels}, key=lambda value: value.value):
+			label_file = Path(temp_dir) / f'{label_type.value}_{dataset_id}.gpkg'
+			for label in labels:
+				if label.label_data == label_type:
+					label_to_geopackage(str(label_file), label)
+			export_dataset_aois(dataset_id, str(label_file))
+			archive.write(label_file, arcname=f'labels_{label_type.value}_{dataset_id}.gpkg')
+			logger.info(f'Added {label_type.value} labels to bundle for dataset {dataset_id}')
 
 
 def bundle_multi_dataset(
@@ -230,117 +261,68 @@ def bundle_multi_dataset(
 ) -> str:
 	"""
 	Bundle multiple datasets into a single ZIP archive.
-	
+
 	Args:
 		target_path: Path to write the ZIP file
 		datasets_info: List of tuples (dataset, ortho_dict, metadata_dict, archive_file_path)
 		include_labels: Whether to include label GeoPackages
 		include_parquet: Whether to include METADATA.parquet
 		use_original_filename: If True, use original filenames for orthos; if False, use ortho_{id}.tif
-		
+
 	Returns:
 		Path to the created ZIP file
+
+	Raises:
+		FileNotFoundError: If an ortho file is missing; an incomplete bundle is never produced.
 	"""
 	if not datasets_info:
 		raise ValueError("No datasets provided for bundling")
-	
+
+	missing = [dataset.id for dataset, _, _, file_path in datasets_info if not Path(file_path).exists()]
+	if missing:
+		raise FileNotFoundError(f'Ortho file missing for datasets {missing}')
+
 	# Track used filenames to handle collisions
 	used_names: Set[str] = set()
-	
-	# Build metadata rows for all datasets
 	metadata_rows = []
 	ortho_entries = []  # (archive_name, file_path)
-	
+
 	for dataset, ortho, metadata, archive_file_path in datasets_info:
-		# Get base filename and resolve collisions
-		base_name = get_ortho_base_filename(dataset, use_original_filename)
-		unique_name = get_unique_archive_name(base_name, used_names)
+		unique_name = get_unique_archive_name(get_ortho_base_filename(dataset, use_original_filename), used_names)
 		used_names.add(unique_name)
-		
 		ortho_entries.append((unique_name, archive_file_path))
-		
-		# Build metadata row
+
 		row = build_dataset_metadata_row(dataset, ortho, metadata)
+		row['citation_doi'] = dataset.citation_doi
 		row['bundle_filename'] = unique_name  # Track which file in bundle
 		metadata_rows.append(row)
-	
-	# Get first dataset for license/citation (assume same license for all)
-	first_dataset = datasets_info[0][0]
-	
-	# Create the ZIP archive
+
 	with zipfile.ZipFile(target_path, 'w', zipfile.ZIP_STORED) as archive:
-		# Add all ortho files
 		for archive_name, file_path in ortho_entries:
-			if Path(file_path).exists():
-				archive.write(file_path, arcname=archive_name)
-				logger.info(f"Added {archive_name} to multi-dataset bundle")
-			else:
-				logger.warning(f"Ortho file not found: {file_path}")
-		
-		# Create consolidated metadata DataFrame
-		df = pd.DataFrame(metadata_rows)
-		
-		# Write METADATA.csv
-		with tempfile.NamedTemporaryFile(suffix='.csv', delete=False) as csv_file:
-			df.to_csv(csv_file.name, index=False)
-			archive.write(csv_file.name, arcname='METADATA.csv')
-			Path(csv_file.name).unlink()
-		
-		# Write METADATA.parquet if requested
-		if include_parquet:
-			with tempfile.NamedTemporaryFile(suffix='.parquet', delete=False) as parquet_file:
-				df.to_parquet(parquet_file.name, index=False)
-				archive.write(parquet_file.name, arcname='METADATA.parquet')
-				Path(parquet_file.name).unlink()
-		
-		# Add license file
-		license_content = create_license_file(first_dataset.license)
-		archive.writestr('LICENSE.txt', license_content)
-		
-		# Add citation file
-		citation_buffer = io.StringIO()
-		create_citation_file(first_dataset, citation_buffer)
-		archive.writestr('CITATION.cff', citation_buffer.getvalue())
-		
-		# Add labels if requested
+			archive.write(file_path, arcname=archive_name)
+			logger.info(f"Added {archive_name} to multi-dataset bundle")
+
+		_write_metadata_tables(archive, pd.DataFrame(metadata_rows), include_parquet)
+		_write_license_and_citation(archive, [dataset for dataset, _, _, _ in datasets_info])
+
 		if include_labels:
-			with tempfile.TemporaryDirectory() as temp_dir:
-				for dataset, ortho, metadata, archive_file_path in datasets_info:
-					# Get only dataset-level labels that this export path can serialize.
-					labels = get_exportable_dataset_labels(dataset.id)
-					
-					if not labels:
-						continue
-					
-					# Process each type of label
-					for label_type in set(label.label_data for label in labels):
-						# Create temporary file for this label type
-						label_file = Path(temp_dir) / f'{label_type.value}_{dataset.id}.gpkg'
-						
-						# Filter labels of this type
-						type_labels = [label for label in labels if label.label_data == label_type]
-						
-						# Process each label into the GeoPackage
-						for label in type_labels:
-							label_to_geopackage(str(label_file), label)
-						
-						# Add unified AOI layer to the GeoPackage
-						export_dataset_aois(dataset.id, str(label_file))
-						
-						# Add to archive with ID-based name (always use ID for labels)
-						archive_name = f'labels_{label_type.value}_{dataset.id}.gpkg'
-						if label_file.exists():
-							archive.write(label_file, arcname=archive_name)
-							logger.info(f"Added {archive_name} to multi-dataset bundle")
-	
+			for dataset, _, _, _ in datasets_info:
+				_write_label_geopackages(archive, dataset.id)
+
 	logger.info(f"Created multi-dataset bundle with {len(datasets_info)} datasets at {target_path}")
 	return target_path
 
 
+# Export reads (labels, geometries, AOIs) run with the service client on purpose: the
+# download routes check the requesting user's dataset access first, and background jobs
+# have no user session. A tokenless use_client() would instead depend on which key the
+# environment configures and silently drop labels of private datasets under the anon key.
+
+
 def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 	"""Convert a single label to GeoPackage format"""
-	# Get geometries from the database
-	with use_client() as client:
+	# Get geometries from the database (service client, see note above)
+	with use_service_client() as client:
 		if label.label_data == LabelDataEnum.deadwood:
 			geom_table = settings.deadwood_geometries_table
 		else:
@@ -367,29 +349,21 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 
 		layer_exists = layer_name in existing_layers
 		total_geometries = 0
-		batch_size = 5000  # Balanced DB round-trips and memory pressure
-		offset = 0
 
-		while True:
-			# Fetch geometries in batches and stream-write each chunk to disk
-			geom_response = (
-				client.table(geom_table)
-				.select('*')
-				.eq('label_id', label.id)
-				# Treat NULL as "not deleted" (some tables default to NULL instead of false).
-				.neq('is_deleted', True)
-				.range(offset, offset + batch_size - 1)
-				.execute()
-			)
+		# Stream each page to disk to keep memory bounded.
+		pages = iter_pages(
+			lambda: client.table(geom_table)
+			.select('*')
+			.eq('label_id', label.id)
+			# Treat NULL as "not deleted" (IS NOT TRUE); the column has no NOT NULL constraint.
+			.not_.is_('is_deleted', 'true')
+			.order('id')
+		)
+		for page in pages:
+			total_geometries += len(page)
 
-			if not geom_response.data:
-				break
-
-			total_geometries += len(geom_response.data)
-
-			# Build only this batch's features to keep memory bounded
 			features = []
-			for geom in geom_response.data:
+			for geom in page:
 				geom_properties = geom.get('properties', {}) or {}
 				features.append(
 					{
@@ -426,11 +400,6 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 
 			if total_geometries % 10000 == 0:
 				logger.info(f'Fetched and wrote {total_geometries} geometries for label {label.id}')
-
-			if len(geom_response.data) < batch_size:
-				break
-
-			offset += batch_size
 
 		if total_geometries == 0:
 			raise ValueError(f'No geometries found for label {label.id}')
@@ -472,38 +441,15 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 
 
 def get_all_dataset_labels(dataset_id: int) -> List[Label]:
-	"""Get all labels for a dataset using pagination"""
-	with use_client() as client:
-		all_labels = []
-		batch_size = 300  # Conservative batch size to avoid memory issues
-		offset = 0
+	"""Get all labels for a dataset using pagination (service client, see note above label_to_geopackage)"""
+	with use_service_client() as client:
+		all_labels = fetch_all_rows(
+			lambda: client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).order('id')
+		)
 
-		while True:
-			# Fetch labels in batches
-			label_response = (
-				client.table(settings.labels_table)
-				.select('*')
-				.eq('dataset_id', dataset_id)
-				.range(offset, offset + batch_size - 1)
-				.execute()
-			)
-
-			if not label_response.data:
-				break
-
-			all_labels.extend(label_response.data)
-
-			# If we got fewer than batch_size results, we've reached the end
-			if len(label_response.data) < batch_size:
-				break
-
-			offset += batch_size
-
-		if not all_labels:
-			return []
-
+	if all_labels:
 		logger.info(f'Successfully fetched {len(all_labels)} labels for dataset {dataset_id}')
-		return [Label(**label_data) for label_data in all_labels]
+	return [Label(**label_data) for label_data in all_labels]
 
 
 def filter_exportable_dataset_labels(
@@ -538,30 +484,33 @@ def get_exportable_dataset_labels(dataset_id: int) -> List[Label]:
 	return filter_exportable_dataset_labels(get_all_dataset_labels(dataset_id), preferences)
 
 
-def create_citation_file(dataset: Dataset, filestream=None) -> str:
+def create_citation_file(datasets: Union[Dataset, List[Dataset]], filestream=None) -> str:
+	"""Write CITATION.cff; a multi-dataset bundle cites every dataset's authors, DOI and license."""
+	datasets = [datasets] if isinstance(datasets, Dataset) else datasets
+
 	# load the template
 	with open(TEMPLATE_PATH / 'CITATION.cff', 'r') as f:
 		template = yaml.safe_load(f)
 
-	# fill the template
-	template['title'] = f'Deadwood Training Dataset: {dataset.file_name}'
+	if len(datasets) == 1:
+		template['title'] = f'Deadwood Training Dataset: {datasets[0].file_name}'
+	else:
+		template['title'] = f'Deadwood Training Datasets ({len(datasets)} datasets)'
 
-	# check if the authors can be split into first and last names
-	author_list = []
-	for author in dataset.authors:
-		author_list.append({'name': author})
+	# authors of every dataset (first occurrence wins), then the authors defined in the template
+	authors = dict.fromkeys(author for dataset in datasets for author in (dataset.authors or []))
+	template['authors'] = [*({'name': author} for author in authors), *template['authors']]
 
-	# add all authors defined in the template
-	author_list = [*author_list, *template['authors']]
+	identifiers = [
+		{'type': 'doi', 'value': dataset.citation_doi, 'description': f'The DOI of the original dataset {dataset.id}.'}
+		for dataset in datasets
+		if dataset.citation_doi is not None
+	]
+	if identifiers:
+		template['identifiers'] = identifiers
 
-	# check if there is a DOI
-	if dataset.citation_doi is not None:
-		template['identifiers'] = [
-			{'type': 'doi', 'value': dataset.citation_doi, 'description': 'The DOI of the original dataset.'}
-		]
-
-	# add the license
-	template['license'] = f'{dataset.license.value}-4.0'.upper()
+	licenses = list(dict.fromkeys(f'{dataset.license.value}-4.0'.upper() for dataset in datasets))
+	template['license'] = licenses[0] if len(licenses) == 1 else licenses
 
 	# create a buffer to write to
 	if filestream is None:
@@ -581,20 +530,22 @@ def create_license_file(license_enum: LicenseEnum) -> str:
 		return f.read()
 
 
-def bundle_variant_suffix(include_labels: bool, include_parquet: bool) -> str:
-	parts = []
-	if not include_labels:
-		parts.append('nolabels')
-	if not include_parquet:
-		parts.append('noparquet')
-	return '_'.join(parts)
+def create_license_text(datasets: List[Dataset]) -> str:
+	"""LICENSE.txt content: the license text, or for mixed licenses each text with its datasets."""
+	dataset_ids_by_license: Dict[LicenseEnum, List[int]] = {}
+	for dataset in datasets:
+		dataset_ids_by_license.setdefault(dataset.license, []).append(dataset.id)
 
+	if len(dataset_ids_by_license) == 1:
+		return create_license_file(next(iter(dataset_ids_by_license)))
 
-def get_bundle_filename(dataset_id: int, include_labels: bool, include_parquet: bool) -> str:
-	suffix = bundle_variant_suffix(include_labels, include_parquet)
-	if not suffix:
-		return f'{dataset_id}.zip'
-	return f'{dataset_id}_{suffix}.zip'
+	summary = ['This bundle contains datasets under different licenses.', 'Each dataset is licensed as follows:', '']
+	sections = []
+	for license_enum, dataset_ids in dataset_ids_by_license.items():
+		ids = ', '.join(str(dataset_id) for dataset_id in dataset_ids)
+		summary.append(f'- {license_enum.value}: datasets {ids}')
+		sections.append(f'{"=" * 72}\n{license_enum.value} (datasets {ids})\n{"=" * 72}\n\n{create_license_file(license_enum)}')
+	return '\n'.join(summary) + '\n\n' + '\n\n'.join(sections)
 
 
 def bundle_dataset(
@@ -615,61 +566,16 @@ def bundle_dataset(
 		if stem:
 			base_filename = stem
 
-	# Create the ZIP archive
 	with zipfile.ZipFile(target_path, 'w', zipfile.ZIP_STORED) as archive:
-		# Add the ortho file
 		archive.write(archive_file_path, arcname=f'{base_filename}.tif')
 
 		# Include both dataset columns and extracted v2_metadata fields in the bundle metadata.
 		df = pd.DataFrame([build_single_dataset_metadata_row(dataset, ortho, metadata)])
-
-		# Create temporary files for metadata formats
-		with tempfile.NamedTemporaryFile(suffix='.csv') as csv_file:
-			df.to_csv(csv_file.name, index=False)
-			archive.write(csv_file.name, arcname='METADATA.csv')
-
-		if include_parquet:
-			with tempfile.NamedTemporaryFile(suffix='.parquet') as parquet_file:
-				df.to_parquet(parquet_file.name, index=False)
-				archive.write(parquet_file.name, arcname='METADATA.parquet')
-
-		# Add license file
-		license_content = create_license_file(dataset.license)
-		archive.writestr('LICENSE.txt', license_content)
-
-		# Add citation file
-		citation_buffer = io.StringIO()
-		create_citation_file(dataset, citation_buffer)
-		archive.writestr('CITATION.cff', citation_buffer.getvalue())
+		_write_metadata_tables(archive, df, include_parquet)
+		_write_license_and_citation(archive, [dataset])
 
 		if include_labels:
-			# Get and add all labels
-			with tempfile.TemporaryDirectory() as temp_dir:
-				# Get only dataset-level labels that this export path can serialize.
-				labels = get_exportable_dataset_labels(dataset.id)
-
-				if labels:
-					# Process each type of label
-					for label_type in set(label.label_data for label in labels):
-						# Create temporary file for this label type
-						label_file = Path(temp_dir) / f'{label_type.value}_{dataset.id}.gpkg'
-
-						# Filter labels of this type
-						type_labels = [label for label in labels if label.label_data == label_type]
-
-						# Process each label into the GeoPackage
-						for label in type_labels:
-							label_to_geopackage(str(label_file), label)
-
-						# Add unified AOI layer to the GeoPackage
-						export_dataset_aois(dataset.id, str(label_file))
-
-						# Add to archive with appropriate name
-						archive_name = f'labels_{label_type.value}_{dataset.id}.gpkg'
-						archive.write(label_file, arcname=archive_name)
-
-						# Use logger without context if needed
-						logger.info(f'Added {label_type.value} labels to bundle for dataset {dataset.id}')
+			_write_label_geopackages(archive, dataset.id)
 
 	return target_path
 
@@ -677,33 +583,11 @@ def bundle_dataset(
 def export_dataset_aois(dataset_id: int, gpkg_file: str):
 	"""Export all AOIs for a dataset to 'aoi' layer in geopackage"""
 
-	# Use default client (no user token needed for public datasets)
-	with use_client() as client:
-		# Query all AOIs for dataset using pagination if needed
-		all_aois = []
-		batch_size = 300  # Conservative batch size to avoid memory issues
-		offset = 0
-
-		while True:
-			# Fetch AOIs in batches
-			aoi_response = (
-				client.table(settings.aois_table)
-				.select('*')
-				.eq('dataset_id', dataset_id)
-				.range(offset, offset + batch_size - 1)
-				.execute()
-			)
-
-			if not aoi_response.data:
-				break
-
-			all_aois.extend(aoi_response.data)
-
-			# If we got fewer than batch_size results, we've reached the end
-			if len(aoi_response.data) < batch_size:
-				break
-
-			offset += batch_size
+	# Service client, see note above label_to_geopackage
+	with use_service_client() as client:
+		all_aois = fetch_all_rows(
+			lambda: client.table(settings.aois_table).select('*').eq('dataset_id', dataset_id).order('id')
+		)
 
 		if not all_aois:
 			logger.info(f'No AOIs found for dataset {dataset_id}')
@@ -739,26 +623,25 @@ def export_dataset_aois(dataset_id: int, gpkg_file: str):
 		logger.info(f'Added AOI layer with {len(features)} features to geopackage')
 
 
-def create_consolidated_geopackage(dataset_id: int) -> Path:
-	"""Create single GeoPackage with multiple layers for a dataset
+def create_consolidated_geopackage(dataset_id: int, gpkg_file: Path) -> Path:
+	"""Write a single GeoPackage with one layer per label type/source plus the AOI layer.
 
 	Args:
 		dataset_id: The dataset ID to export
+		gpkg_file: Where to write the GeoPackage (must not exist yet)
 
 	Returns:
-		Path to the created GeoPackage file
+		The GeoPackage path
 
 	Raises:
-		ValueError: If no labels found for dataset
+		ValueError: If no exportable labels exist for the dataset
 	"""
-	# Get all labels for the dataset
 	all_labels = get_all_dataset_labels(dataset_id)
 
 	if not all_labels:
 		raise ValueError(f'No labels found for dataset {dataset_id}')
 
-	preferences = get_model_preferences()
-	filtered_labels = filter_exportable_dataset_labels(all_labels, preferences)
+	filtered_labels = filter_exportable_dataset_labels(all_labels, get_model_preferences())
 
 	if not filtered_labels:
 		raise ValueError(
@@ -767,16 +650,9 @@ def create_consolidated_geopackage(dataset_id: int) -> Path:
 
 	logger.info(f'Processing {len(filtered_labels)} labels for dataset {dataset_id}')
 
-	# Create temporary geopackage file
-	temp_dir = tempfile.mkdtemp()
-	gpkg_file = Path(temp_dir) / f'dataset_{dataset_id}_labels.gpkg'
-
-	# Process each label using existing logic
 	for label in filtered_labels:
-		# No user_token needed for public datasets
 		label_to_geopackage(str(gpkg_file), label)
 
-	# Add unified AOI layer
 	export_dataset_aois(dataset_id, str(gpkg_file))
 
 	logger.info(f'Created consolidated geopackage for dataset {dataset_id} at {gpkg_file}')

@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Modal, Form, Input, Button, Typography, Table, Spin, message, Tag, Row, Col, Space } from "antd";
 import { PlusOutlined, DeleteOutlined, SearchOutlined, ClockCircleOutlined } from "@ant-design/icons";
-import { supabase } from "../hooks/useSupabase";
-import { useAuth } from "../hooks/useAuthProvider";
 import { useAnalytics } from "../hooks/useAnalytics";
+import { useCreateDataPublication } from "../hooks/useDataPublications";
 import { processOrcidInput } from "../utils/orcidUtils";
 import { palette } from "../theme/palette";
 
@@ -37,7 +36,7 @@ interface PublicationModalProps {
 
 const PublicationModal: React.FC<PublicationModalProps> = ({ visible, onCancel, datasets, onSuccess }) => {
   const [form] = Form.useForm();
-  const { user } = useAuth();
+  const { mutateAsync: createPublication } = useCreateDataPublication();
   const [loading, setLoading] = useState(false);
   const [authors, setAuthors] = useState<Author[]>([]);
   const [orcidLoading, setOrcidLoading] = useState(false);
@@ -275,63 +274,18 @@ const PublicationModal: React.FC<PublicationModalProps> = ({ visible, onCancel, 
 
       setLoading(true);
 
-      // Step 1: Create publication record
-      const { data: publicationData, error: publicationError } = await supabase
-        .from("data_publication")
-        .insert({
-          title: values.title,
-          description: values.description,
-          user_id: user?.id,
-        })
-        .select()
-        .single();
-
-      if (publicationError || !publicationData) {
-        throw publicationError || new Error("Failed to create publication");
-      }
-
-      // Step 2: Create author records and link them
-      for (const author of authors) {
-        // Create author record
-        const { data: authorData, error: authorError } = await supabase
-          .from("user_info")
-          .insert({
-            first_name: author.first_name,
-            last_name: author.last_name,
-            organisation: author.organisation,
-            orcid: author.orcid,
-            title: author.title,
-            user: user?.id,
-          })
-          .select()
-          .single();
-
-        if (authorError || !authorData) {
-          throw authorError || new Error("Failed to create author");
-        }
-
-        // Link author to publication
-        const { error: linkError } = await supabase.from("jt_data_publication_user_info").insert({
-          publication_id: publicationData.id,
-          user_info_id: authorData.id,
-        });
-
-        if (linkError) {
-          throw linkError;
-        }
-      }
-
-      // Step 3: Link datasets to publication
-      for (const dataset of datasets) {
-        const { error: datasetLinkError } = await supabase.from("jt_data_publication_datasets").insert({
-          publication_id: publicationData.id,
-          dataset_id: dataset.id,
-        });
-
-        if (datasetLinkError) {
-          throw datasetLinkError;
-        }
-      }
+      await createPublication({
+        title: values.title,
+        description: values.description,
+        authors: authors.map(({ first_name, last_name, organisation, orcid, title }) => ({
+          first_name,
+          last_name,
+          organisation,
+          orcid,
+          title,
+        })),
+        datasetIds: datasets.map((dataset) => dataset.id),
+      });
 
       message.success("Publication submitted successfully");
       track("publish_completed", {

@@ -107,7 +107,10 @@ def run_publication(cfg: Config, db: Client, folder: Path, publication_id: int) 
 		print(f"[INFO] DOI bereits vorhanden für publication_id={publication_id} -> nichts zu tun.")
 		return
 
-	update_publication_row(db, publication_id, {"status": "uploading"})
+	update_publication_row(db, publication_id, {
+		"status": "uploading",
+		"upload_started_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+	})
 
 	print("[1/7] Fetch publication info from DB...")
 	pub = fetch_publication_full_info(db, publication_id)

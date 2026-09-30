@@ -105,3 +105,23 @@ def test_missing_committed_bytes_prevent_finalization(tmp_path):
 		assert session.accept(1, b'last') is None
 		with pytest.raises(HTTPException, match='data is missing'):
 			session.begin_finalization()
+
+
+def test_rejected_validation_leaves_upload_retryable(tmp_path):
+	checked = []
+
+	def reject(path):
+		checked.append(path.read_bytes())
+		raise HTTPException(status_code=400, detail='Unsupported ZIP compression')
+
+	for _ in range(2):
+		with open_session(tmp_path) as session:
+			session.accept(0, b'first')
+			assert session.accept(1, b'last') is None
+			with pytest.raises(HTTPException, match='Unsupported ZIP compression'):
+				session.begin_finalization(validate=reject)
+	assert checked == [b'firstlast', b'firstlast']
+	with open_session(tmp_path) as session:
+		assert session.accept(1, b'last') is None
+		session.begin_finalization(validate=lambda _path: None)
+		session.complete({'id': 123})
