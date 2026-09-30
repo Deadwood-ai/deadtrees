@@ -52,6 +52,16 @@ const { Title, Text } = Typography;
 type AuditTab = "pending" | "completed" | "reference" | "edits-flags" | "re-review";
 const AUDIT_TABS: readonly AuditTab[] = ["pending", "completed", "reference", "edits-flags", "re-review"];
 
+// one line under the tabs saying what each list holds
+const TAB_DESCRIPTIONS: Record<AuditTab, string> = {
+	pending: "Datasets that finished processing and have not been audited yet.",
+	completed: "Datasets with a saved audit. Use the filters to find earlier decisions by status, auditor or outputs.",
+	"edits-flags": "Datasets with suggested corrections to predictions or issue reports from users that still need a decision.",
+	reference: "Datasets selected as reference data. Open one to manage its reference patches.",
+	"re-review":
+		"Audited datasets where newer model results disagree with the saved audit. Open one, check the listed item and save; it then leaves this list.",
+};
+
 // why a saved audit item is back for review (audit_review_queue.reason)
 const REVIEW_REASON: Record<string, string> = {
 	estimate_contradicts: "a newer model estimate disagrees",
@@ -1058,6 +1068,9 @@ function DatasetAuditInner() {
 							size="large"
 						/>
 					)}
+					<Text type="secondary" className="mt-2 block text-sm">
+						{TAB_DESCRIPTIONS[activeTab]}
+					</Text>
 				</div>
 
 				<div className="rounded-2xl border border-gray-200/60 bg-white p-6 shadow-sm">
