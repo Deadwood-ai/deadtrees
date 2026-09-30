@@ -230,6 +230,8 @@ test.describe("auditor local write flows", () => {
     page,
   }) => {
     await ensureSavedAudit();
+    // The first scenario acknowledges the flag; this one checks it stays locked.
+    await reopenFlag();
     const savedAudit = await readSavedAudit();
     await installAuditorSession(page);
 
@@ -285,11 +287,7 @@ test.describe("auditor local write flows", () => {
       .update({ reviewed_at: null, reviewed_by: null })
       .eq("dataset_id", datasetId);
     expect(resetError).toBeNull();
-    const { error: flagResetError } = await adminClient
-      .from("dataset_flags")
-      .update({ status: "open" })
-      .eq("id", flagId);
-    expect(flagResetError).toBeNull();
+    await reopenFlag();
     await installAuditorSession(page);
     await openAuditDetail(page);
     await expectAuditLeaseHolder(auditorUser.id);
@@ -555,6 +553,12 @@ async function drawAuditAoi(page: Page) {
     await aoiCard.getByRole("button", { name: "Add" }).click();
   }
 
+  // Back-to-back edits stack status toasts down into the map centre, where they
+  // swallow the clicks that should add polygon vertices.
+  await expect(page.locator(".ant-message-notice")).toHaveCount(0, {
+    timeout: 10_000,
+  });
+
   const map = page.getByTestId("dataset-audit-map");
   const box = await map.boundingBox();
   if (!box) {
@@ -684,6 +688,14 @@ async function seedDeadwoodPrediction() {
     label_data: "deadwood",
     model_config: preference.model_config,
   });
+  expect(error).toBeNull();
+}
+
+async function reopenFlag() {
+  const { error } = await adminClient
+    .from("dataset_flags")
+    .update({ status: "open" })
+    .eq("id", flagId);
   expect(error).toBeNull();
 }
 
