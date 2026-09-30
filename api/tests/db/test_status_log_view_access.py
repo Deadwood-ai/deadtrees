@@ -103,13 +103,15 @@ def test_logs_are_written_by_the_backend_and_read_by_their_subject(db):
 		(dataset, owner),
 	).fetchone()[0]
 
-	# Log lines are factory evidence: no API caller writes them, not even about their own data.
+	# Log lines are factory evidence: no user writes them, not even about their own data.
 	as_anon(db)
 	expect_denied(db, 'SELECT id FROM public.v2_logs LIMIT 1')
 	expect_denied(db, insert, (dataset, None))
-	for user, email in [(owner, None), (uuid.uuid4(), PROCESSOR_EMAIL)]:
-		act_as(db, user, email)
-		expect_denied(db, insert, (dataset, user))
+	act_as(db, owner)
+	expect_denied(db, insert, (dataset, owner))
+	# Processor hosts still on an older release write with the processor login.
+	act_as(db, uuid.uuid4(), PROCESSOR_EMAIL)
+	db.execute(insert, (dataset, None))
 
 	act_as(db, other)
 	assert db.execute('SELECT id FROM public.v2_logs WHERE id=%s', (own_line,)).fetchall() == []
