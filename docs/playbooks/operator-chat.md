@@ -46,10 +46,9 @@ this repo at the time this playbook was added:
 
 ### Monitoring Boundary
 
-An hourly platform monitor (pilot since 2026-09-30) runs `operator_status.py`
-and the data-factory scorecard on the processing server from a clean `origin/main`
-checkout, records new or worse findings in Linear and reports changes to the
-project coordinator. Other agent operator threads are not continuous monitors.
+An hourly platform monitor (pilot since 2026-09-30) runs the micro-check
+unattended; see [Unattended Hourly Monitor](#unattended-hourly-monitor). Other
+agent operator threads are not continuous monitors.
 Treat this playbook as the procedure for a manual refresh, a scheduled wake-up,
 or an explicitly delegated check, and do not assume any other thread is running
 in the background.
@@ -116,8 +115,7 @@ python3 scripts/data_factory_scorecard.py --write-state --format markdown
 ```
 
 `operator_status.py` still reads `DEADTREES_OPERATOR_DATABASE_URL`. The analyst
-URI may fill that slot too; the hourly platform monitor sets both variables to the
-analyst login from one protected env file. Never print either value.
+URI may fill that slot too, as the hourly monitor does. Never print either value.
 
 For routine production SQL, use the verified transaction in
 [trusted analyst access](analyst-database-access.md#routine-production-reads).
@@ -211,8 +209,7 @@ Each run adds these checks to the micro-check:
 
 Known coverage gaps are listed once and reported only when they change: hosts
 that have not granted status access (the script reports `red` for a failed
-probe, so compute the effective verdict without a known gap), Zulip, and the
-scorecard while it lacks analyst-visible columns.
+probe, so compute the effective verdict without a known gap) and Zulip.
 
 Reporting: file new, worsened, and recovered findings in Linear first (comment
 on an existing issue with the same fingerprint, create one only if none exists,

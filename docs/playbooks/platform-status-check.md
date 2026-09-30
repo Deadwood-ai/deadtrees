@@ -202,7 +202,7 @@ state which processor hosts lacked host-level corroboration.
 ## Backup Checks
 
 The hourly platform monitor probes backup freshness (see
-[Operator Chat](operator-chat.md#monitoring-boundary)). For a manual check,
+[Operator Chat](operator-chat.md#unattended-hourly-monitor)). For a manual check,
 combine the live Borg freshness probe with a bounded Gmail alert search. See [`database-backups.md`](database-backups.md) for the
 backup architecture, success contract, validation, and rollback procedures.
 
