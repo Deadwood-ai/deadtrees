@@ -46,10 +46,12 @@ this repo at the time this playbook was added:
 
 ### Monitoring Boundary
 
-Agent operator threads are not continuous monitors. Treat this playbook as the
-procedure for a manual refresh, a scheduled wake-up, or an explicitly delegated
-check. Do not assume the main operator thread, a worker thread, or a status-check
-thread is always running in the background.
+An hourly platform monitor (pilot since 2026-09-30) runs the micro-check
+unattended; see [Unattended Hourly Monitor](#unattended-hourly-monitor). Other
+agent operator threads are not continuous monitors.
+Treat this playbook as the procedure for a manual refresh, a scheduled wake-up,
+or an explicitly delegated check, and do not assume any other thread is running
+in the background.
 
 For backups, use two independent signals:
 
@@ -79,8 +81,9 @@ probes, optional backup freshness, and writes ignored compact state to:
 Production-only checks are opt-in through local environment variables so the
 tracked script contains no credentials:
 
-- `DEADTREES_OPERATOR_DATABASE_URL` for the existing purpose-specific monitor
-  `psql` summary; this is separate from the routine analyst connection.
+- `DEADTREES_OPERATOR_DATABASE_URL` for the `psql` summary. Use the
+  purpose-specific monitor login, or the analyst URI where no monitor login is
+  provisioned (the hourly platform monitor does this).
 - `DEADTREES_OPERATOR_PROCESSING_HOST` for the existing primary processing host
   disk/container probe.
 - `DEADTREES_OPERATOR_PROCESSING_HOSTS` for additional labeled processor targets,
@@ -102,16 +105,17 @@ Zulip. Keep those checks delta-first and inspect detail only after a concrete
 signal appears.
 
 For product/factory status, run the data-factory scorecard after the platform
-snapshot:
+snapshot. It reads `DEADTREES_ANALYST_DATABASE_URL` and runs its SQL in one
+read-only transaction that first verifies analyst membership and read-only mode,
+so it uses only surfaces analyst access grants (no download-grant `extra`, no
+JWT-scoped API views):
 
 ```bash
 python3 scripts/data_factory_scorecard.py --write-state --format markdown
 ```
 
-Both scripts use `psql` for their optional DB probes. They do not load
-`DEADTREES_ANALYST_DATABASE_URL`, verify analyst identity or start an explicit
-read-only transaction. Preserve existing monitor configuration; do not substitute
-the analyst URI into `DEADTREES_OPERATOR_DATABASE_URL`.
+`operator_status.py` still reads `DEADTREES_OPERATOR_DATABASE_URL`. The analyst
+URI may fill that slot too, as the hourly monitor does. Never print either value.
 
 For routine production SQL, use the verified transaction in
 [trusted analyst access](analyst-database-access.md#routine-production-reads).
@@ -119,11 +123,7 @@ Run the aggregates in [platform status](platform-status-check.md#database-querie
 and [operator data coverage](operator-data-coverage.md#freidata-aggregates)
 inside that transaction.
 
-The full scorecard SQL is not analyst-compatible: it reads download-grant `extra`
-and the JWT-scoped `v2_full_dataset_view`, which analyst access excludes. Existing
-monitor grants do not provide those surfaces either. Keep the scorecard's access
-gap explicit; do not broaden grants or substitute a privileged connection. To
-inspect the current SQL without connecting (not to execute it as an analyst):
+To inspect the scorecard SQL without connecting:
 
 ```bash
 python3 scripts/data_factory_scorecard.py --print-sql
@@ -160,6 +160,63 @@ Do not inspect PostHog recordings in the operator chat by default. The operator
 chat should identify candidate recording IDs or frustration clusters. Start a
 worker thread for recording review only when a concrete frontend pain signal is
 visible.
+
+#### Unattended Hourly Monitor
+
+A dedicated agent session on a processing host may run the micro-check on an
+hourly schedule. Linear is the source of truth for platform state and the
+coordinating operator thread triages what the monitor reports. The monitor
+records findings, it does not fix anything.
+
+Setup rules:
+
+- Run the scripts from a clean, detached worktree of `origin/main` that the run
+  refreshes first (`fetch` plus `checkout --detach origin/main`). Never run them
+  from a developer checkout that may be dirty or behind, because an old
+  `operator_status.py` silently ignores newer host probes.
+- Keep the DB login in a protected local env file (mode 600) outside the repo,
+  holding the analyst role in both `DEADTREES_ANALYST_DATABASE_URL` and
+  `DEADTREES_OPERATOR_DATABASE_URL`. Source it inside the script's own shell.
+  Never print, read back, or copy it into tracked files, and never take
+  credentials from another tool's config. A denied DB or scorecard run is a
+  coverage gap, never "healthy".
+- Read the production checkout, never write to it. State and latest files live
+  under `.local/operator/` of a developer checkout.
+- Session schedules are not durable: they expire after a few days and end with
+  the session, so renew them and have a fallback for a host reboot.
+
+Each run adds these checks to the micro-check:
+
+- `scripts/operator_status.py` with every processor host in
+  `DEADTREES_OPERATOR_PROCESSING_HOSTS`, using its delta against the previous
+  state.
+- `scripts/data_factory_scorecard.py` for the Data Factory KPIs. Report KPI
+  changes to the coordinator only when meaningful: the north star (weekly
+  complete external results) moves, processing p50/p90 crosses the 1h target or
+  the 2h healthy line, or the share of uploads without a result within 7 days
+  rises.
+- Deploy health, read-only, on the production checkout: the tail of
+  `auto-deploy.log`, `git status --porcelain`, HEAD against `origin/main`, the
+  `processor-deploy-paused` marker, and
+  `scripts/processor_runtime_control.py status` for the drain and the active
+  task. Findings are a pause marker, an error or refusal in the log, a dirty
+  checkout, a drain older than about 12 hours, or no progress on the active task
+  for many hours. "Another processor runtime operation already holds
+  processor-runtime.lock" and "Worker still busy ... keeping the drain" are
+  normal while a deploy drains, so note them without filing.
+- Per processor host: container not running, an OOM kill, restarts, or disk
+  above about 85 percent.
+
+Known coverage gaps are listed once and reported only when they change: hosts
+that have not granted status access (the script reports `red` for a failed
+probe, so compute the effective verdict without a known gap) and Zulip.
+
+Reporting: file new, worsened, and recovered findings in Linear first (comment
+on an existing issue with the same fingerprint, create one only if none exists,
+cluster dataset failures under a parent, Urgent only for outages or user-facing
+blockage). Then send one compact message to the coordinator with the verdict,
+each change with its Linear id, and whether the next action is auto-fixable or
+needs a person. Send nothing when nothing changed.
 
 ### Daily Full Check
 

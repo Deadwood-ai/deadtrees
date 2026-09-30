@@ -127,23 +127,26 @@ with input as (
       from prepackaged_dataset_versions
       where created_at >= now() - interval '30 days'
     ),
+    -- Every grant row is one signed download. Read only the lifecycle columns
+    -- the analyst role can see, never token_hash or extra.
     'prepackaged_signed_downloads_7d', (
       select count(*)
       from prepackaged_dataset_download_grants
       where created_at >= now() - interval '7 days'
-        and extra->>'event' = 'prepackaged_signed_download_created'
     ),
     'prepackaged_signed_download_bytes_7d', (
-      select coalesce(sum((extra->>'size_bytes')::bigint), 0)
-      from prepackaged_dataset_download_grants
-      where created_at >= now() - interval '7 days'
-        and extra->>'event' = 'prepackaged_signed_download_created'
-        and extra->>'size_bytes' ~ '^[0-9]+$'
+      select coalesce(sum(v.size_bytes), 0)
+      from prepackaged_dataset_download_grants g
+      join prepackaged_dataset_versions v on v.id = g.version_id
+      where g.created_at >= now() - interval '7 days'
     ),
     'datasets_with_freidata_doi', (
-      select count(*)
-      from v2_full_dataset_view
-      where nullif(freidata_doi, '') is not null
+      select count(distinct ds.id)
+      from v2_datasets ds
+      join jt_data_publication_datasets jt on jt.dataset_id = ds.id
+      join data_publication dp on dp.id = jt.publication_id
+      where not ds.archived
+        and nullif(dp.doi, '') is not null
     )
   ) as data
 )
@@ -193,10 +196,29 @@ def utc_now() -> str:
 	return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
 
 
+# Analyst reads run in one read-only transaction that first proves the target role.
+ANALYST_TRANSACTION_SQL = f"""
+begin read only;
+set local statement_timeout = '30s';
+set local lock_timeout = '3s';
+do $$
+begin
+  if not pg_has_role(current_user, 'analyst', 'MEMBER')
+    or current_setting('transaction_read_only') <> 'on' then
+    raise exception 'scorecard needs a read-only analyst connection';
+  end if;
+end
+$$;
+{SCORECARD_SQL};
+commit;
+"""
+
+
 def run_psql(database_url: str, timeout: int) -> dict[str, Any]:
 	try:
 		completed = subprocess.run(
-			['psql', database_url, '-XAtq', '-v', 'ON_ERROR_STOP=1', '-c', SCORECARD_SQL],
+			['psql', database_url, '-XAtq', '-v', 'ON_ERROR_STOP=1', '-f', '-'],
+			input=ANALYST_TRANSACTION_SQL,
 			cwd=ROOT,
 			text=True,
 			stdout=subprocess.PIPE,
@@ -369,8 +391,8 @@ def main(argv: list[str]) -> int:
 		print(POSTHOG_FRICTION_SQL)
 		return 0
 
-	database_url = os.environ.get('DEADTREES_OPERATOR_DATABASE_URL')
-	payload = {'ok': None, 'skipped': 'set DEADTREES_OPERATOR_DATABASE_URL for backend scorecard'}
+	database_url = os.environ.get('DEADTREES_ANALYST_DATABASE_URL')
+	payload = {'ok': None, 'skipped': 'set DEADTREES_ANALYST_DATABASE_URL for backend scorecard'}
 	if database_url:
 		payload = run_psql(database_url, args.timeout)
 

@@ -44,9 +44,9 @@ full platform check inside that broader operator cadence.
 
    Use this as the first-pass summary, then drill down only into warnings,
    failures, skipped surfaces, or user-visible symptoms. Its optional database
-   probe uses the separate monitor connection described in
-   [Operator Chat](operator-chat.md#manual-status-refresh); it does not load or
-   verify analyst access.
+   probe uses `DEADTREES_OPERATOR_DATABASE_URL` as described in
+   [Operator Chat](operator-chat.md#manual-status-refresh); it does not verify
+   analyst identity.
 
    To include backup freshness when connected to the university network or VPN,
    point the backup probe at the backup user. The script uses the documented
@@ -124,6 +124,15 @@ full platform check inside that broader operator cadence.
    probe it twice. A missing or failed host/container probe is a coverage gap, not
    evidence that the worker is stopped, absent, or healthy.
 
+5. Check deploy health read-only on the production checkout, never writing there:
+   the tail of `auto-deploy.log`, `git status --porcelain` (a dirty checkout makes
+   auto-deploy refuse), HEAD against `origin/main`, the `processor-deploy-paused`
+   marker, and `scripts/processor_runtime_control.py status` for the drain and
+   active task. A lock or "keeping the drain" message is normal while a deploy
+   drains; a refusal, error, pause marker, or a drain older than about 12 hours
+   is a finding. See [operator-chat.md](operator-chat.md#unattended-hourly-monitor)
+   for the scheduled version.
+
 ## Database Queries
 
 For every full check, include the product workflows in
@@ -192,9 +201,9 @@ state which processor hosts lacked host-level corroboration.
 
 ## Backup Checks
 
-Backup freshness is not continuously monitored by an agent thread. During daily
-or weekly operator checks, combine the live Borg freshness probe with a bounded
-Gmail alert search. See [`database-backups.md`](database-backups.md) for the
+The hourly platform monitor probes backup freshness (see
+[Operator Chat](operator-chat.md#unattended-hourly-monitor)). For a manual check,
+combine the live Borg freshness probe with a bounded Gmail alert search. See [`database-backups.md`](database-backups.md) for the
 backup architecture, success contract, validation, and rollback procedures.
 
 Checklist:
