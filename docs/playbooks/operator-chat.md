@@ -46,7 +46,7 @@ this repo at the time this playbook was added:
 
 ### Monitoring Boundary
 
-Codex operator threads are not continuous monitors. Treat this playbook as the
+Agent operator threads are not continuous monitors. Treat this playbook as the
 procedure for a manual refresh, a scheduled wake-up, or an explicitly delegated
 check. Do not assume the main operator thread, a worker thread, or a status-check
 thread is always running in the background.
@@ -58,7 +58,7 @@ For backups, use two independent signals:
   weekly review, or incident follow-up runs.
 
 If backup freshness has not been checked in the current operator window, report it
-as skipped or stale evidence instead of inferring health from a previous Codex
+as skipped or stale evidence instead of inferring health from a previous agent
 thread.
 
 ### Manual Status Refresh

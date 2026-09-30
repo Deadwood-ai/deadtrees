@@ -192,7 +192,7 @@ state which processor hosts lacked host-level corroboration.
 
 ## Backup Checks
 
-Backup freshness is not continuously monitored by a Codex thread. During daily
+Backup freshness is not continuously monitored by an agent thread. During daily
 or weekly operator checks, combine the live Borg freshness probe with a bounded
 Gmail alert search. See [`database-backups.md`](database-backups.md) for the
 backup architecture, success contract, validation, and rollback procedures.

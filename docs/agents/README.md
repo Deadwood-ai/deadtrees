@@ -1,7 +1,8 @@
-# Codex Agent Guide
+# Agent Guide
 
-This directory is the tracked source of truth for agent-facing rules. Codex should
-use these files directly; editor-specific rule folders are intentionally retired.
+This directory is the tracked source of truth for agent-facing rules. Claude Code,
+Codex and other coding agents use these files directly; editor-specific rule
+folders are intentionally retired.
 
 ## How To Navigate
 
@@ -26,6 +27,9 @@ use these files directly; editor-specific rule folders are intentionally retired
     local-only `docs/ops/*` files when present. For which hosts run a production
     worker and how each one auto-deploys, use `docs/playbooks/processor-hosts.md`.
 13. For manual QA runs, use `.agents/skills/run-deadtrees-qa/SKILL.md`.
+    Repository skills live in `.agents/skills/`; `.claude/skills/` links to the
+    same folders so Claude Code discovers them. Add new skills under
+    `.agents/skills/` and link them from `.claude/skills/`.
 
 ## Tracked Versus Local
 
@@ -38,6 +42,7 @@ Local-only files may contain real access details and are ignored:
 - `.env`
 - `.codex/config.toml`
 - `.codex/local-access.md`
+- `.claude/settings.local.json`
 - `docs/ops/*`
 - `frontend/.env.*.local`
 - `.local/`

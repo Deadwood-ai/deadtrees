@@ -1,7 +1,7 @@
 # DeadTrees Agent Instructions
 
-Codex is the primary coding agent for this repository. Start here, then open
-the linked docs that match the task.
+This is the shared entry point for coding agents (Claude Code and Codex both load
+it). Start here, then open the linked docs that match the task.
 
 ## Read By Task
 
@@ -21,8 +21,10 @@ the linked docs that match the task.
 - Production processor hosts and how each auto-deploys: `docs/playbooks/processor-hosts.md`
 - Diagrams, including Mermaid validation: `docs/playbooks/technical-diagrams.md`
 
-These tracked documents own the team workflow. Personal skills are optional;
-teammates must not need another user's home directory or credentials.
+These tracked documents own the team workflow. Repository skills live in
+`.agents/skills/`; `.claude/skills/` links to the same folders so Claude Code
+discovers them too. Personal skills are optional; teammates must not need another
+user's home directory or credentials.
 
 ## Safety
 
@@ -139,6 +141,7 @@ Credentials and machine-specific access notes are intentionally not tracked.
 
 - Human-readable local notes: `docs/ops/local-access.md` if present
 - Codex-local notes and MCP credentials: `.codex/local-access.md` and `.codex/config.toml`
+- Claude Code personal settings and hooks: `.claude/settings.local.json`
 - App/runtime env: `.env`
 - Browser-facing frontend profiles: `frontend/.env.dev.local`, `frontend/.env.prod.local`
 
