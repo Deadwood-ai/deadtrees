@@ -4,6 +4,15 @@ from __future__ import annotations
 DEADWOOD_V1_MODEL_CHECKPOINT_NAME = 'segformer_b5_full_epoch_100.safetensors'
 COMBINED_MODEL_CHECKPOINT_NAME = 'ckpt_weighted_brownweight15_goldentestweight7.safetensors'
 AOI_V1_MODEL_CHECKPOINT_NAME = 'b1_50epoch_best_macro_f1.safetensors'
+# acquisition-date model: two 5-seed ensembles (with / without Sentinel-2),
+# their calibration in manifest.json, and the frozen DINOv2 backbone
+DOY_ESTIMATION_MODEL_DIR_NAME = 'doy_estimation_v1'
+DOY_ESTIMATION_TASK_TYPE = 'doy_estimation_v1'
+DOY_ESTIMATION_MODEL_FILES = (
+	'manifest.json',
+	'dinov2_vitb14_reg4.safetensors',
+	*(f'{kind}_seed{seed}.safetensors' for kind in ('s2', 'nos2') for seed in range(5)),
+)
 
 GADM_ASSET_PATH = 'gadm/gadm_410.gpkg'
 BIOME_ASSET_PATH = 'biom/terres_ecosystems.gpkg'
@@ -51,6 +60,8 @@ def processor_model_checkpoint_specs(
 
 def required_processor_asset_files(task_blacklist: set[str] | frozenset[str] = frozenset()) -> tuple[str, ...]:
 	files = [f'models/{name}' for name in processor_model_checkpoint_specs(task_blacklist)]
+	if DOY_ESTIMATION_TASK_TYPE not in task_blacklist:
+		files.extend(f'models/{DOY_ESTIMATION_MODEL_DIR_NAME}/{name}' for name in DOY_ESTIMATION_MODEL_FILES)
 	if METADATA_TASK_TYPE not in task_blacklist:
 		files.extend(GEOPACKAGE_SPECS)
 		files.extend((f'{PHENOLOGY_ASSET_PATH}/.zgroup', f'{PHENOLOGY_ASSET_PATH}/.zmetadata'))

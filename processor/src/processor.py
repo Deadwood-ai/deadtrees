@@ -23,6 +23,7 @@ from .process_treecover_segmentation import process_treecover_segmentation
 from .process_deadwood_treecover_combined_v2 import process_deadwood_treecover_combined_v2
 from .process_aoi_segmentation import process_aoi_segmentation
 from .process_embeddings import process_embeddings
+from .process_doy_estimation import process_doy_estimation
 from .process_metadata import process_metadata
 from .exceptions import AuthenticationError, ProcessingError
 from .utils.linear_issues import create_processing_failure_issue
@@ -148,6 +149,7 @@ PIPELINE_STAGE_MAP = [
 	),
 	(TaskTypeEnum.aoi_v1, 'is_aoi_done', 'aoi_segmentation'),
 	(TaskTypeEnum.embeddings_v1, 'is_embeddings_done', 'embedding_processing'),
+	(TaskTypeEnum.doy_estimation_v1, 'is_doy_estimation_done', 'doy_estimation'),
 ]
 
 
@@ -596,6 +598,24 @@ def process_task(task: QueueTask, token: str):
 					),
 				)
 				raise ProcessingError(str(e), task_type='embedding_processing', task_id=task.id, dataset_id=task.dataset_id)
+
+		# Estimate the acquisition date. Reads the stored COG (not the transient
+		# standardized ortho), so it can be rerun on its own for every dataset.
+		if TaskTypeEnum.doy_estimation_v1 in task.task_types:
+			try:
+				token = refresh_processor_token(task, token)
+				logger.info(
+					'processing acquisition-date estimation',
+					LogContext(category=LogCategory.DOY, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+				)
+				process_doy_estimation(task, token, settings.processing_path)
+			except Exception as e:
+				token = refresh_processor_token(task, token)
+				logger.error(
+					f'Acquisition-date estimation failed: {str(e)}',
+					LogContext(category=LogCategory.DOY, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+				)
+				raise ProcessingError(str(e), task_type='doy_estimation', task_id=task.id, dataset_id=task.dataset_id)
 
 	except Exception as e:
 		# A reclaimed task belongs to another attempt; do not overwrite its status

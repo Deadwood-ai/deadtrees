@@ -33,6 +33,7 @@ _TASK_TYPE_STATUS_FLAGS = {
 	TaskTypeEnum.deadwood_treecover_combined_v2: ('is_combined_model_done',),
 	TaskTypeEnum.aoi_v1: ('is_aoi_done',),
 	TaskTypeEnum.embeddings_v1: ('is_embeddings_done',),
+	TaskTypeEnum.doy_estimation_v1: ('is_doy_estimation_done',),
 }
 
 

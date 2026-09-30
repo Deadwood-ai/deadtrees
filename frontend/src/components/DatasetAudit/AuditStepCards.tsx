@@ -4,7 +4,7 @@ import {
 	CopyOutlined,
 	DownloadOutlined,
 } from "@ant-design/icons";
-import { createConditionalRule, formatAcquisitionDate } from "./auditConstants";
+import { createConditionalRule } from "./auditConstants";
 import { IDataset } from "../../types/dataset";
 import { OrthoMetadata } from "../../hooks/useDatasetAudit";
 import { DatasetFlag, FlagStatus } from "../../types/flags";
@@ -208,39 +208,7 @@ export function GeoreferencingCard() {
 	);
 }
 
-// === Acquisition Date Card (Step 2) ===
-interface AcquisitionDateCardProps {
-	dataset: IDataset;
-}
-
-export function AcquisitionDateCard({ dataset }: AcquisitionDateCardProps) {
-	return (
-		<Card size="small" className="mb-3 shadow-sm">
-			<div className="mb-2 flex items-center">
-				<Text strong className="text-xs">2. Acquisition Date</Text>
-			</div>
-			<div className="mb-2 text-xs">
-				<Text type="secondary">Reported date: </Text>
-				<Text strong>{formatAcquisitionDate(dataset)}</Text>
-			</div>
-			<Form.Item
-				name="has_valid_acquisition_date"
-				className="mb-2"
-				rules={createConditionalRule("Please validate acquisition date")}
-			>
-				<Radio.Group>
-					<Space size="large">
-						<Radio value={true}>🟢 Valid</Radio>
-						<Radio value={false}>🔴 Invalid</Radio>
-					</Space>
-				</Radio.Group>
-			</Form.Item>
-			<Form.Item name="acquisition_date_notes" className="mb-0">
-				<TextArea rows={2} placeholder="Date notes..." className="text-xs" />
-			</Form.Item>
-		</Card>
-	);
-}
+// Step 2 (acquisition date) lives in AcquisitionDateCard.tsx
 
 // === Phenology Card (Step 3) ===
 interface PhenologyCardProps {
