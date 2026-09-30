@@ -65,9 +65,10 @@ function recordedIsoDate(dataset: IDataset): string | null {
 function DecisionStatus({ decisions }: { decisions: IAcquisitionDateDecision[] }) {
 	const active = activeDecision(decisions);
 	const when = (iso: string) => formatIsoDate(iso.slice(0, 10));
+	const verdictOf = (d: IAcquisitionDateDecision) =>
+		d.suggestion_decision === "accepted" ? "suggested date accepted" : d.date_valid ? "reported date valid" : "reported date invalid";
 	if (active) {
-		const verdict =
-			active.suggestion_decision === "accepted" ? "suggested date accepted" : active.date_valid ? "reported date valid" : "reported date invalid";
+		const verdict = verdictOf(active);
 		return (
 			<div className="mb-2 text-[11px] text-gray-500">
 				Decided {SOURCE_LABEL[active.source]} on {when(active.decided_at)}: {verdict}
@@ -82,7 +83,7 @@ function DecisionStatus({ decisions }: { decisions: IAcquisitionDateDecision[] }
 			type="info"
 			showIcon
 			className="mb-2 py-1 text-xs"
-			message={`The date check from ${when(last.decided_at)} was reopened on ${when(last.superseded_at)}: ${describeDeactivation(last)}. It is prefilled from the current estimate.`}
+			message={`The date check from ${when(last.decided_at)} (${verdictOf(last)}) was reopened on ${when(last.superseded_at)}: ${describeDeactivation(last)}. The saved verdict stays in place until you save; the form shows the current suggestion.`}
 		/>
 	);
 }

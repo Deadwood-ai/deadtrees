@@ -124,13 +124,20 @@ Methods write-up with examples: section 8 of the research report
   `estimate_contradicts` (a new estimate of the same date disagrees: decided
   fine but now a huge mismatch; decided wrong and kept but now no problem;
   month missing and an undecided suggestion), `date_edited` (hand edit),
-  `cutoff` (operator). Deactivation clears the audit's date fields, so the form
-  is prefilled again; `acquisition_date_review_queue` lists datasets without an
-  active decision.
+  `cutoff` (operator). Deactivation changes only the decision: the saved audit
+  (and every export reading it) keeps the last verdict. The audit page sees no
+  active decision, shows the old verdict and why it was reopened, and offers the
+  current suggestion in the date fields; saving records a new decision (also
+  when the verdict is unchanged). `acquisition_date_review_queue` lists datasets
+  without an active decision.
+- **Prefill once per page load.** Suggestions are applied when the audit,
+  suggestions and decisions have loaded; later refetches (e.g. after a rerun)
+  never change what the auditor is editing.
 - **Existing audits** became `legacy_audit` decisions dated by their audit; they
   stay active unless the first estimate contradicts them.
-- **Downstream readers** of `dataset_audit.has_valid_acquisition_date` see
-  `null` for a reopened check; the active decision is the source of truth.
+- **Downstream readers** of `dataset_audit.has_valid_acquisition_date` (e.g. the
+  metadata export and training filters) keep seeing the last saved verdict,
+  also while a check is reopened.
 
 ## Rerun for all datasets
 

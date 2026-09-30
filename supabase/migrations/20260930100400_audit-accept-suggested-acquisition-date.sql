@@ -10,8 +10,10 @@
 --   estimate_contradicts  a new estimate (rerun, new model version) disagrees
 --   date_edited           the dataset's date was edited by hand
 --   cutoff                an operator deactivated all decisions before a date
--- A deactivated decision sends the date step back to review: the audit's date
--- fields are cleared, so the form is prefilled from the current suggestions.
+-- A deactivated decision sends the date step back to review. The saved audit
+-- is left as it was (exports keep reading the last verdict); the audit page
+-- sees that no decision is active and offers the current suggestion over the
+-- saved date fields, and saving records a new decision.
 --
 -- Accepting the suggested date writes it to v2_datasets (full day) and marks
 -- the date as aquisition_date_source = 'model_suggestion' with a pointer to the
@@ -103,7 +105,8 @@ join public.v2_datasets d on d.id = a.dataset_id
 where a.has_valid_acquisition_date is not null
   and not exists (select 1 from public.acquisition_date_decisions x where x.dataset_id = a.dataset_id);
 
--- Deactivate a dataset's active decision and send its date step back to review.
+-- Deactivate a dataset's active decision. Only the decision changes; the
+-- saved audit keeps its values.
 create or replace function public.supersede_acquisition_date_decision(p_dataset_id bigint, p_reason text)
 returns bigint language plpgsql security definer set search_path = '' as $$
 declare
@@ -113,11 +116,6 @@ begin
     set superseded_at = now(), superseded_reason = p_reason
     where dataset_id = p_dataset_id and superseded_at is null
     returning id into v_id;
-    if v_id is not null and p_reason <> 'new_decision' then
-        update public.dataset_audit
-        set has_valid_acquisition_date = null, accept_suggested_acquisition_date = null
-        where dataset_id = p_dataset_id;
-    end if;
     return v_id;
 end;
 $$;
@@ -226,8 +224,8 @@ $$;
 revoke all on function public.record_acquisition_date_decision(bigint, boolean, boolean, text, uuid) from public, anon, authenticated;
 
 -- Saving the audit form records the auditor's date decision (behind the audit
--- lease guard, which sorts first). Cleared fields (a deactivated decision) are
--- not a decision.
+-- lease guard, which sorts first): when the date fields change, or when no
+-- decision is active (a reopened check confirmed with the same verdict).
 create or replace function public.record_audit_date_decision()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin
@@ -236,7 +234,11 @@ begin
     end if;
     if tg_op = 'UPDATE'
         and new.has_valid_acquisition_date is not distinct from old.has_valid_acquisition_date
-        and new.accept_suggested_acquisition_date is not distinct from old.accept_suggested_acquisition_date then
+        and new.accept_suggested_acquisition_date is not distinct from old.accept_suggested_acquisition_date
+        and exists (
+            select 1 from public.acquisition_date_decisions a
+            where a.dataset_id = new.dataset_id and a.superseded_at is null
+        ) then
         return new;
     end if;
     perform public.record_acquisition_date_decision(

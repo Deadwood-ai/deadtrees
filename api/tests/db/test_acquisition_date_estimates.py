@@ -160,12 +160,16 @@ def test_a_contradicting_estimate_reopens_the_date_check(db):
 	assert decisions(db, dataset)[0][4] is None
 	upsert_estimate(db, dataset, mismatch=True, version='doy_estimation_v2')  # disagrees: reopened
 	assert decisions(db, dataset)[0][4] == 'estimate_contradicts'
+	# the saved audit keeps its verdict (exports read it); only the decision is reopened
 	assert db.execute(
-		'SELECT has_valid_acquisition_date,accept_suggested_acquisition_date FROM public.dataset_audit WHERE dataset_id=%s', (dataset,)
-	).fetchone() == (None, None)
+		'SELECT has_valid_acquisition_date FROM public.dataset_audit WHERE dataset_id=%s', (dataset,)
+	).fetchone() == (True,)
 	assert db.execute('SELECT deactivated_reason FROM public.acquisition_date_review_queue WHERE dataset_id=%s', (dataset,)).fetchone() == (
 		'estimate_contradicts',
 	)
+	# confirming the same verdict on the reopened check records a new decision
+	audit(db, auditor, dataset, True)
+	assert [r[4] for r in decisions(db, dataset)] == ['estimate_contradicts', None]
 
 	# found invalid (and kept, no suggestion), but the model sees no problem
 	doubted = create_dataset(db, create_user(db))

@@ -79,6 +79,13 @@ describe("acquisition date estimate helpers", () => {
     ]);
     const { values } = suggestedAuditValues({ has_valid_acquisition_date: true, acquisition_date_notes: "" }, suggestions);
     expect(values).toEqual({ accept_suggested_acquisition_date: true, acquisition_date_notes: "Date model ..." });
+    // a reopened date check offers the suggestion over the previous verdict, but keeps notes
+    const reopened = suggestedAuditValues(
+      { has_valid_acquisition_date: true, accept_suggested_acquisition_date: false, acquisition_date_notes: "mine" },
+      suggestions,
+      ["has_valid_acquisition_date", "accept_suggested_acquisition_date"],
+    );
+    expect(reopened.values).toEqual({ has_valid_acquisition_date: false, accept_suggested_acquisition_date: true });
   });
 
   it("joins a season that runs over New Year", () => {

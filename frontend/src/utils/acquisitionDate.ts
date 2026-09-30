@@ -36,16 +36,21 @@ export function datasetDateSuggestion(
   return { date: estimate.suggested_date, reason: estimate.suggestion_reason };
 }
 
-/** Audit form values proposed by machine suggestions for fields the saved
- * audit leaves empty. Saved (human) values always win. */
+/** The audit fields a date decision is made from. */
+export const DATE_DECISION_FIELDS = ["has_valid_acquisition_date", "accept_suggested_acquisition_date"];
+
+/** Audit form values proposed by machine suggestions: for fields the saved
+ * audit leaves empty, and for `reopen` fields (the date fields of a reopened
+ * date check), where the saved value is only the previous verdict. */
 export function suggestedAuditValues(
   saved: Record<string, unknown> | null | undefined,
   suggestions: IAuditSuggestion[],
+  reopen: string[] = [],
 ): { values: Record<string, unknown>; fields: string[] } {
   const values: Record<string, unknown> = {};
   for (const s of suggestions) {
     const current = saved?.[s.field];
-    if (current === null || current === undefined || current === "") values[s.field] = s.value;
+    if (reopen.includes(s.field) || current === null || current === undefined || current === "") values[s.field] = s.value;
   }
   return { values, fields: Object.keys(values) };
 }
