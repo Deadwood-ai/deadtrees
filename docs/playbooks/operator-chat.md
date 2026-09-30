@@ -161,6 +161,64 @@ chat should identify candidate recording IDs or frustration clusters. Start a
 worker thread for recording review only when a concrete frontend pain signal is
 visible.
 
+#### Unattended Hourly Monitor
+
+A dedicated agent session on a processing host may run the micro-check on an
+hourly schedule. Linear is the source of truth for platform state and the
+coordinating operator thread triages what the monitor reports. The monitor
+records findings, it does not fix anything.
+
+Setup rules:
+
+- Run the scripts from a clean, detached worktree of `origin/main` that the run
+  refreshes first (`fetch` plus `checkout --detach origin/main`). Never run them
+  from a developer checkout that may be dirty or behind, because an old
+  `operator_status.py` silently ignores newer host probes.
+- Keep the DB login in a protected local env file (mode 600) outside the repo,
+  holding the analyst role in both `DEADTREES_ANALYST_DATABASE_URL` and
+  `DEADTREES_OPERATOR_DATABASE_URL`. Source it inside the script's own shell.
+  Never print, read back, or copy it into tracked files, and never take
+  credentials from another tool's config. A denied DB or scorecard run is a
+  coverage gap, never "healthy".
+- Read the production checkout, never write to it. State and latest files live
+  under `.local/operator/` of a developer checkout.
+- Session schedules are not durable: they expire after a few days and end with
+  the session, so renew them and have a fallback for a host reboot.
+
+Each run adds these checks to the micro-check:
+
+- `scripts/operator_status.py` with every processor host in
+  `DEADTREES_OPERATOR_PROCESSING_HOSTS`, using its delta against the previous
+  state.
+- `scripts/data_factory_scorecard.py` for the Data Factory KPIs. Report KPI
+  changes to the coordinator only when meaningful: the north star (weekly
+  complete external results) moves, processing p50/p90 crosses the 1h target or
+  the 2h healthy line, or the share of uploads without a result within 7 days
+  rises.
+- Deploy health, read-only, on the production checkout: the tail of
+  `auto-deploy.log`, `git status --porcelain`, HEAD against `origin/main`, the
+  `processor-deploy-paused` marker, and
+  `scripts/processor_runtime_control.py status` for the drain and the active
+  task. Findings are a pause marker, an error or refusal in the log, a dirty
+  checkout, a drain older than about 12 hours, or no progress on the active task
+  for many hours. "Another processor runtime operation already holds
+  processor-runtime.lock" and "Worker still busy ... keeping the drain" are
+  normal while a deploy drains, so note them without filing.
+- Per processor host: container not running, an OOM kill, restarts, or disk
+  above about 85 percent.
+
+Known coverage gaps are listed once and reported only when they change: hosts
+that have not granted status access (the script reports `red` for a failed
+probe, so compute the effective verdict without a known gap), Zulip, and the
+scorecard while it lacks analyst-visible columns.
+
+Reporting: file new, worsened, and recovered findings in Linear first (comment
+on an existing issue with the same fingerprint, create one only if none exists,
+cluster dataset failures under a parent, Urgent only for outages or user-facing
+blockage). Then send one compact message to the coordinator with the verdict,
+each change with its Linear id, and whether the next action is auto-fixable or
+needs a person. Send nothing when nothing changed.
+
 ### Daily Full Check
 
 Run the normal 24-36 hour platform status playbook from
