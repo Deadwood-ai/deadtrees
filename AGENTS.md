@@ -28,7 +28,8 @@ user's home directory or credentials.
 
 ## Safety
 
-- Do not commit, push, open a PR, or mutate production unless the user explicitly asks.
+- Do not open a PR or mutate production unless the user explicitly asks. Committing
+  and pushing to your own work branch is fine.
 - Do not print or copy credentials into chat, tracked docs, examples, or `frontend/.env*`.
 - Keep large searches, logs, tests, and diagnostics capped and summarized. Prefer targeted
   `rg`, `jq`, `head`, `tail`, and explicit output limits.
