@@ -13,7 +13,9 @@
 -- A deactivated decision sends the date step back to review. The saved audit
 -- is left as it was (exports keep reading the last verdict); the audit page
 -- sees that no decision is active and offers the current suggestion over the
--- saved date fields, and saving records a new decision.
+-- saved date fields, and saving records a new decision. audit_review_queue
+-- lists such datasets (and, generically, any audit item a newer suggestion
+-- disagrees with).
 --
 -- Accepting the suggested date writes it to v2_datasets (full day) and marks
 -- the date as aquisition_date_source = 'model_suggestion' with a pointer to the
@@ -356,31 +358,47 @@ $$;
 revoke all on function public.supersede_acquisition_date_decisions_before(timestamptz) from public, anon, authenticated;
 grant execute on function public.supersede_acquisition_date_decisions_before(timestamptz) to service_role;
 
--- Datasets whose date step needs a (new) decision, with why.
-create or replace view public.acquisition_date_review_queue
+-- Saved audit items that newer machine evidence disagrees with, for any audit
+-- item. One row per dataset and item:
+--   acquisition_date  its date decision was reopened (reason = why)
+--   <audit field>     a suggestion for that field changed after the audit was
+--                     saved and differs from the saved value
+-- Saving the audit (a new decision, a newer audit_date) takes a row off.
+-- `fields` are the audit form fields the page offers the suggestion for.
+create or replace view public.audit_review_queue
 with (security_invoker = true) as
 select
-    e.dataset_id,
-    e.model_version,
-    e.is_mismatch,
-    e.suggested_date,
-    e.suggestion_reason,
-    e.recommend_accept,
-    last.superseded_at as deactivated_at,
-    last.superseded_reason as deactivated_reason
-from public.v2_acquisition_date_estimates e
-left join lateral (
-    select a.superseded_at, a.superseded_reason
-    from public.acquisition_date_decisions a
-    where a.dataset_id = e.dataset_id
-    order by a.decided_at desc
-    limit 1
-) last on true
-where not exists (
-    select 1 from public.acquisition_date_decisions a
-    where a.dataset_id = e.dataset_id and a.superseded_at is null
-);
-grant select on public.acquisition_date_review_queue to authenticated, service_role;
+    d.dataset_id,
+    'acquisition_date'::text as item,
+    array['has_valid_acquisition_date', 'accept_suggested_acquisition_date'] as fields,
+    d.superseded_reason as reason,
+    d.superseded_at as since
+from (
+    select distinct on (x.dataset_id) x.dataset_id, x.superseded_at, x.superseded_reason
+    from public.acquisition_date_decisions x
+    order by x.dataset_id, x.decided_at desc
+) d
+where d.superseded_at is not null
+    and not exists (
+        select 1 from public.acquisition_date_decisions a
+        where a.dataset_id = d.dataset_id and a.superseded_at is null
+    )
+union all
+select
+    s.dataset_id,
+    s.field as item,
+    array[s.field] as fields,
+    'suggestion_changed:' || s.source as reason,
+    s.changed_at as since
+from public.dataset_audit_suggestions s
+join public.dataset_audit a on a.dataset_id = s.dataset_id
+where s.field not like '%notes'
+    -- the date fields follow the decision lifecycle above
+    and s.field <> all (array['has_valid_acquisition_date', 'accept_suggested_acquisition_date'])
+    and jsonb_typeof(to_jsonb(a) -> s.field) is distinct from 'null'
+    and (to_jsonb(a) -> s.field) is distinct from s.value
+    and s.changed_at > a.audit_date;
+grant select on public.audit_review_queue to authenticated, service_role;
 
 -- The audit page loads a saved audit through this RPC; it must return the
 -- accept field, or a saved "keep reported date" would look empty and be

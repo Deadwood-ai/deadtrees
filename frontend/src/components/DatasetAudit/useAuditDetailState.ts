@@ -17,9 +17,14 @@ import { describeAuditLockDenial, isAuditLeaseConflict, useAuditLock } from "../
 import { useAuditNavigation } from "../../hooks/useAuditNavigation";
 import { useDatasetFlags, useUpdateFlagStatus } from "../../hooks/useDatasetFlags";
 import { usePhenologyData } from "../../hooks/usePhenologyData";
-import { useAcquisitionDateDecisions, useAcquisitionDateEstimate, useAuditSuggestions } from "../../hooks/useAcquisitionDateEstimate";
-import { DATE_DECISION_FIELDS, activeDecision, suggestedAuditValues } from "../../utils/acquisitionDate";
-import type { IAcquisitionDateDecision, IAuditSuggestion } from "../../types/acquisitionDate";
+import {
+	useAcquisitionDateDecisions,
+	useAcquisitionDateEstimate,
+	useAuditReviewQueue,
+	useAuditSuggestions,
+} from "../../hooks/useAcquisitionDateEstimate";
+import { suggestedAuditValues } from "../../utils/acquisitionDate";
+import type { IAcquisitionDateDecision, IAuditReviewItem, IAuditSuggestion } from "../../types/acquisitionDate";
 import { useSeasonPrompt } from "../../hooks/useSeasonPrompt";
 import { supabase } from "../../hooks/useSupabase";
 import { trackAppEvent } from "../../utils/analytics";
@@ -27,6 +32,7 @@ import { useAuditAOIState } from "./useAuditAOIState";
 
 const NO_SUGGESTIONS: IAuditSuggestion[] = [];
 const NO_DECISIONS: IAcquisitionDateDecision[] = [];
+const NO_REVIEW_ITEMS: IAuditReviewItem[] = [];
 
 export interface UseAuditDetailStateProps {
 	dataset: IDataset;
@@ -139,9 +145,10 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	const { data: orthoMetadata, isLoading: isOrthoLoading } = useOrthoMetadata(dataset.id);
 	const { data: phenologyData, isLoading: isPhenologyLoading } = usePhenologyData(dataset.id);
 	const { data: acquisitionDateEstimate } = useAcquisitionDateEstimate(dataset.id);
-	const { data: acquisitionDateDecisionsData } = useAcquisitionDateDecisions(dataset.id);
-	const acquisitionDateDecisions = acquisitionDateDecisionsData ?? NO_DECISIONS;
+	const { data: acquisitionDateDecisions = NO_DECISIONS } = useAcquisitionDateDecisions(dataset.id);
 	const { data: auditSuggestionsData } = useAuditSuggestions(dataset.id);
+	const { data: reviewItems } = useAuditReviewQueue(dataset.id);
+	const auditReviewItems = reviewItems ?? NO_REVIEW_ITEMS;
 	// stable fallback: a fresh [] per render would re-run the prefill effect and reset edits
 	const auditSuggestions = auditSuggestionsData ?? NO_SUGGESTIONS;
 
@@ -231,24 +238,23 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	}, [auditData, form]);
 
 	// Machine suggestions prefill the form once per page load, after the saved
-	// audit, the suggestions and the date decisions have all arrived: fields the
-	// saved audit leaves empty, and the date fields of a reopened date check (no
-	// active decision). Later refetches never touch what the auditor is editing;
-	// nothing is saved until the auditor saves.
+	// audit, the suggestions and the re-review items have all arrived: fields
+	// the saved audit leaves empty, and the fields of items listed for re-review
+	// (newer evidence disagrees with the saved value). Later refetches never
+	// touch what the auditor is editing; nothing is saved until the auditor saves.
 	const prefilledForRef = useRef<number | null>(null);
 	useEffect(() => {
 		if (prefilledForRef.current === dataset.id) return;
-		if (auditData === undefined || auditSuggestionsData === undefined || acquisitionDateDecisionsData === undefined) return;
+		if (auditData === undefined || auditSuggestionsData === undefined || reviewItems === undefined) return;
 		prefilledForRef.current = dataset.id;
-		const reopened = acquisitionDateDecisionsData.length > 0 && !activeDecision(acquisitionDateDecisionsData);
 		const { values: suggested, fields } = suggestedAuditValues(
 			auditData as Record<string, unknown> | null,
 			auditSuggestionsData,
-			reopened ? DATE_DECISION_FIELDS : [],
+			reviewItems.flatMap((r) => r.fields),
 		);
 		form.setFieldsValue(suggested);
 		setPrefilledFields(fields);
-	}, [dataset.id, auditData, auditSuggestionsData, acquisitionDateDecisionsData, form]);
+	}, [dataset.id, auditData, auditSuggestionsData, reviewItems, form]);
 
 	// Track form changes
 	useEffect(() => {
@@ -457,6 +463,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		acquisitionDateEstimate,
 		acquisitionDateDecisions,
 		auditSuggestions,
+		auditReviewItems,
 		prefilledFields,
 
 		// Flags

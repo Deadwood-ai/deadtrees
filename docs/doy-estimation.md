@@ -128,8 +128,15 @@ Methods write-up with examples: section 8 of the research report
   (and every export reading it) keeps the last verdict. The audit page sees no
   active decision, shows the old verdict and why it was reopened, and offers the
   current suggestion in the date fields; saving records a new decision (also
-  when the verdict is unchanged). `acquisition_date_review_queue` lists datasets
-  without an active decision.
+  when the verdict is unchanged).
+- **Re-review list for every audit item** (`audit_review_queue`, "Needs
+  re-review" filter in the audit list): a saved audit item is listed when newer
+  machine evidence disagrees with it - a reopened date decision, or, for any
+  other audit field, a suggestion whose value changed after the audit was saved
+  and differs from the saved value (a rerun repeating the same value does not
+  count). The audit page offers the current suggestion for exactly those fields;
+  saving takes the item off. Any future stage that writes suggestions for other
+  audit fields (phenology, prediction quality, ...) gets this for free.
 - **Prefill once per page load.** Suggestions are applied when the audit,
   suggestions and decisions have loaded; later refetches (e.g. after a rerun)
   never change what the auditor is editing.

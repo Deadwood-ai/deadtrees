@@ -164,7 +164,7 @@ def test_a_contradicting_estimate_reopens_the_date_check(db):
 	assert db.execute(
 		'SELECT has_valid_acquisition_date FROM public.dataset_audit WHERE dataset_id=%s', (dataset,)
 	).fetchone() == (True,)
-	assert db.execute('SELECT deactivated_reason FROM public.acquisition_date_review_queue WHERE dataset_id=%s', (dataset,)).fetchone() == (
+	assert db.execute("SELECT reason FROM public.audit_review_queue WHERE dataset_id=%s AND item='acquisition_date'", (dataset,)).fetchone() == (
 		'estimate_contradicts',
 	)
 	# confirming the same verdict on the reopened check records a new decision
@@ -238,3 +238,36 @@ def test_read_access_follows_roles_and_visibility(db):
 	# decisions are written only through the recording functions
 	with pytest.raises(psycopg.errors.InsufficientPrivilege):
 		db.execute("INSERT INTO public.acquisition_date_decisions(dataset_id,source,date_valid) VALUES (%s,'auditor',true)", (public,))
+
+
+def test_review_queue_lists_any_audit_item_newer_evidence_disagrees_with(db):
+	auditor = create_user(db, can_audit=True)
+	dataset = create_dataset(db, create_user(db))
+	act_as(db, auditor)
+	db.execute(
+		"INSERT INTO public.dataset_audit(dataset_id,audited_by,has_valid_phenology,audit_date) VALUES (%s,%s,true,now() - interval '1 day')",
+		(dataset, auditor),
+	)
+	as_admin(db)
+	queue = "SELECT item,fields,reason FROM public.audit_review_queue WHERE dataset_id=%s"
+
+	# a suggestion that agrees with the saved value, or is older than the audit, is not listed
+	db.execute(
+		"INSERT INTO public.dataset_audit_suggestions(dataset_id,field,value,source,changed_at) VALUES (%s,'has_valid_phenology','false','phenology_v1',now() - interval '2 days')",
+		(dataset,),
+	)
+	assert db.execute(queue, (dataset,)).fetchall() == []
+	# a rerun repeating the same value does not make it new
+	db.execute("UPDATE public.dataset_audit_suggestions SET value='false', updated_at=now() WHERE dataset_id=%s", (dataset,))
+	assert db.execute(queue, (dataset,)).fetchall() == []
+	# the value flips and flips back after the audit: newer evidence disagrees
+	db.execute("UPDATE public.dataset_audit_suggestions SET value='true' WHERE dataset_id=%s", (dataset,))
+	db.execute("UPDATE public.dataset_audit_suggestions SET value='false' WHERE dataset_id=%s", (dataset,))
+	assert db.execute(queue, (dataset,)).fetchall() == [('has_valid_phenology', ['has_valid_phenology'], 'suggestion_changed:phenology_v1')]
+
+	# saving the audit again takes it off
+	audit_row = "UPDATE public.dataset_audit SET has_valid_phenology=true, audit_date=now() + interval '1 second' WHERE dataset_id=%s"
+	act_as(db, auditor)
+	db.execute(audit_row, (dataset,))
+	as_admin(db)
+	assert db.execute(queue, (dataset,)).fetchall() == []

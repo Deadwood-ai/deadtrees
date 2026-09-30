@@ -16,8 +16,27 @@ create table if not exists public.dataset_audit_suggestions (
   details jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  -- when the suggested value last changed (a rerun that repeats the same value
+  -- keeps it); a saved audit older than this may need a re-review
+  changed_at timestamptz not null default now(),
   primary key (dataset_id, field)
 );
+
+create or replace function public.track_audit_suggestion_change()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+    if new.value is distinct from old.value then
+        new.changed_at := now();
+    else
+        new.changed_at := old.changed_at;
+    end if;
+    return new;
+end;
+$$;
+drop trigger if exists track_audit_suggestion_change on public.dataset_audit_suggestions;
+create trigger track_audit_suggestion_change
+before update on public.dataset_audit_suggestions
+for each row execute function public.track_audit_suggestion_change();
 
 grant select, insert, update, delete on table public.dataset_audit_suggestions to authenticated;
 grant all on table public.dataset_audit_suggestions to service_role;

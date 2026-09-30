@@ -79,3 +79,14 @@ export interface IAcquisitionDateDecision {
   superseded_at: string | null;
   superseded_reason: "new_decision" | "estimate_contradicts" | "date_edited" | "cutoff" | null;
 }
+
+/** One row of audit_review_queue: a saved audit item newer machine evidence disagrees with. */
+export interface IAuditReviewItem {
+  dataset_id: number;
+  /** "acquisition_date", or the audit field a suggestion disagrees with */
+  item: string;
+  /** audit form fields the page offers the current suggestion for */
+  fields: string[];
+  reason: string;
+  since: string;
+}

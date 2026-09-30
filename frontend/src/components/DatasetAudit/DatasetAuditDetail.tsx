@@ -23,6 +23,7 @@ import {
 } from "./AuditStepCards";
 import AuditAOICard from "./AuditAOICard";
 import { AcquisitionDateCard } from "./AcquisitionDateCard";
+import { AuditReviewNotice } from "./AuditReviewNotice";
 import { AuditLockBlocked, AuditLockLostNotice, AuditOpenElsewhere } from "./AuditLockNotices";
 import AuditMapWithControls, { AuditMapWithControlsHandle } from "./AuditMapWithControls";
 import { MAP_AUDIT_SIDEBAR_WIDTH_CLASS, MAP_FLOATING_TOP_CLASS } from "../../theme/mapLayout";
@@ -96,6 +97,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 		acquisitionDateEstimate,
 		acquisitionDateDecisions,
 		auditSuggestions,
+		auditReviewItems,
 		prefilledFields,
 		updateFlagStatus,
 		isUpdatingFlag,
@@ -324,6 +326,12 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 						size="small"
 						validateTrigger={["onChange", "onBlur"]}
 					>
+						<AuditReviewNotice
+							items={auditReviewItems}
+							suggestions={auditSuggestions}
+							saved={auditData as Record<string, unknown> | null | undefined}
+						/>
+
 						<UserFlagsCard
 							flags={flags}
 							isFlagsLoading={isFlagsLoading}
