@@ -346,6 +346,7 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
 
     const availableRelease = releaseCards
       .filter({ has: page.getByText("Available") })
+      .filter({ has: page.getByRole("button", { name: "Open release" }) })
       .first();
     await expect(availableRelease).toBeVisible();
 
@@ -379,6 +380,19 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
         })
         .first(),
     ).toBeVisible();
+  });
+
+  test("release listing opens the satellite map", async ({ page }) => {
+    await page.goto("/releases");
+
+    const releaseCards = await expectReleasesReady(page);
+    const mapCard = releaseCards
+      .filter({ has: page.getByRole("button", { name: "Open map" }) })
+      .first();
+    await expect(mapCard).toContainText("Sentinel-2");
+    await mapCard.getByRole("button", { name: "Open map" }).click();
+
+    await expect(page).toHaveURL(/\/deadtrees$/);
   });
 
   test("release listing opens the drone mapping guide", async ({ page }) => {

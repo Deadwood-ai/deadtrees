@@ -1,15 +1,21 @@
-import { DatabaseOutlined, ReadOutlined } from "@ant-design/icons";
+import {
+  DatabaseOutlined,
+  GlobalOutlined,
+  ReadOutlined,
+} from "@ant-design/icons";
 import { Alert, Button, Skeleton, Tag } from "antd";
+import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
 import type { IPrepackagedDatasetPackage } from "../api/prepackaged";
 import {
   publicReleases,
   getReleasePreviewTiles,
+  getReleaseHref,
   getReleaseStats,
   type ReleaseStat,
-  type ReleasePreviewTile,
   type GuideRelease,
+  type PublicRelease,
 } from "../data/releases";
 import { ReleasePreviewStrip } from "../components/Releases/ReleasePreviewStrip";
 import { usePrepackagedDatasets } from "../hooks/usePrepackagedDatasets";
@@ -22,22 +28,26 @@ import {
 } from "../utils/prepackagedDatasets";
 
 function ReleaseCard({
-  previewTiles,
+  preview,
   isAvailable,
   typeLabel,
   shortName,
   title,
   summary,
   stats,
+  actionLabel = "Open release",
+  actionIcon = <DatabaseOutlined />,
   onOpen,
 }: {
-  previewTiles: ReleasePreviewTile[];
+  preview: ReactNode;
   isAvailable: boolean;
   typeLabel: string;
   shortName: string;
   title: string;
   summary: string;
   stats: ReleaseStat[];
+  actionLabel?: string;
+  actionIcon?: ReactNode;
   onOpen: () => void;
 }) {
   return (
@@ -45,7 +55,7 @@ function ReleaseCard({
       className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md"
       data-testid="release-card"
     >
-      <ReleasePreviewStrip tiles={previewTiles} />
+      {preview}
 
       <div className="grid gap-8 p-6 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] md:p-10">
         <div>
@@ -66,11 +76,11 @@ function ReleaseCard({
             <Button
               type="primary"
               size="large"
-              icon={<DatabaseOutlined />}
+              icon={actionIcon}
               onClick={onOpen}
               className="min-h-11"
             >
-              Open release
+              {actionLabel}
             </Button>
           </div>
         </div>
@@ -144,6 +154,56 @@ function GuideCard({
   );
 }
 
+function ReleaseScreenshot({ src, alt }: { src: string; alt: string }) {
+  return (
+    <div className="aspect-[2/1] overflow-hidden border-b border-gray-100 bg-gray-100">
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        className="h-full w-full object-cover"
+      />
+    </div>
+  );
+}
+
+function PublicReleaseCard({
+  release,
+  onOpen,
+}: {
+  release: PublicRelease;
+  onOpen: () => void;
+}) {
+  if (release.type === "guide") {
+    return <GuideCard release={release} onOpen={onOpen} />;
+  }
+
+  const isMap = release.type === "map";
+  return (
+    <ReleaseCard
+      preview={
+        isMap ? (
+          <ReleaseScreenshot
+            src={release.map.previewImage}
+            alt={release.map.previewAlt}
+          />
+        ) : (
+          <ReleasePreviewStrip tiles={getReleasePreviewTiles(release)} />
+        )
+      }
+      isAvailable={release.status === "available"}
+      typeLabel={release.typeLabel}
+      shortName={release.shortName}
+      title={release.name}
+      summary={release.summary}
+      stats={getReleaseStats(release)}
+      actionLabel={isMap ? "Open map" : undefined}
+      actionIcon={isMap ? <GlobalOutlined /> : undefined}
+      onOpen={onOpen}
+    />
+  );
+}
+
 function buildPrepackagedStats(pkg: IPrepackagedDatasetPackage): ReleaseStat[] {
   const v = getLatestPrepackagedVersion(pkg);
   if (!v) return [];
@@ -191,27 +251,13 @@ export default function Releases() {
 
       <section className="mx-auto max-w-7xl px-4 py-12 md:px-8 md:py-16">
         <div className="grid gap-6">
-          {publicReleases.map((release) =>
-            release.type === "guide" ? (
-              <GuideCard
-                key={release.slug}
-                release={release}
-                onOpen={() => navigate(`/releases/${release.slug}`)}
-              />
-            ) : (
-              <ReleaseCard
-                key={release.slug}
-                previewTiles={getReleasePreviewTiles(release)}
-                isAvailable={release.status === "available"}
-                typeLabel={release.typeLabel}
-                shortName={release.shortName}
-                title={release.name}
-                summary={release.summary}
-                stats={getReleaseStats(release)}
-                onOpen={() => navigate(`/releases/${release.slug}`)}
-              />
-            ),
-          )}
+          {publicReleases.map((release) => (
+            <PublicReleaseCard
+              key={release.slug}
+              release={release}
+              onOpen={() => navigate(getReleaseHref(release))}
+            />
+          ))}
 
           {isLoading && (
             <Skeleton active paragraph={{ rows: 6 }} className="p-2" />
@@ -232,7 +278,11 @@ export default function Releases() {
             return (
               <ReleaseCard
                 key={pkg.slug}
-                previewTiles={getPrepackagedDatasetPreviewTiles(pkg)}
+                preview={
+                  <ReleasePreviewStrip
+                    tiles={getPrepackagedDatasetPreviewTiles(pkg)}
+                  />
+                }
                 isAvailable={true}
                 typeLabel="Data package"
                 shortName={pkg.slug}

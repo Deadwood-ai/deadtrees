@@ -41,6 +41,7 @@ export type PublicReleaseType =
   | "benchmark-dataset"
   | "dataset"
   | "guide"
+  | "map"
   | "model";
 
 export interface ReleaseStat {
@@ -107,7 +108,21 @@ export interface GuideRelease extends PublicReleaseBase {
   };
 }
 
-export type PublicRelease = DteAerialRelease | GuideRelease;
+export interface SatelliteMapRelease extends PublicReleaseBase {
+  type: "map";
+  map: {
+    previewImage: string;
+    previewAlt: string;
+    coverage: string;
+    firstYear: number;
+    lastYear: number;
+  };
+}
+
+export type PublicRelease =
+  | DteAerialRelease
+  | GuideRelease
+  | SatelliteMapRelease;
 
 const DEFAULT_DTE_AERIAL_PREVIEW_SITE_IDS = [375, 1396, 5584];
 
@@ -544,8 +559,21 @@ export const getReleaseStats = (release: PublicRelease): ReleaseStat[] => {
     ];
   }
 
+  if (release.type === "map") {
+    const { coverage, firstYear, lastYear } = release.map;
+    return [
+      { label: "Years", value: `${firstYear}–${lastYear}` },
+      { label: "Annual maps", value: (lastYear - firstYear + 1).toString() },
+      { label: "Coverage", value: coverage },
+    ];
+  }
+
   return [];
 };
+
+// Map releases open the live product; every other release has a detail page.
+export const getReleaseHref = (release: PublicRelease) =>
+  release.type === "map" ? release.links.artifact : `/releases/${release.slug}`;
 
 export const getPublicReleaseBySlug = (slug: string) =>
   publicReleases.find((release) => release.slug === slug);
@@ -581,6 +609,30 @@ export const droneMappingGuideRelease: GuideRelease = {
     secondaryImage: "/assets/guides/drone-mapping/upload-workflow.png",
     repositoryUrl: "https://github.com/sarahhabershon/deadtrees_mapping_guide",
     steps: 4,
+  },
+};
+
+export const satelliteMapRelease: SatelliteMapRelease = {
+  slug: "sentinel-2-satellite-map",
+  name: "Sentinel-2 tree and deadwood cover maps",
+  shortName: "Sentinel-2",
+  title:
+    "Annual Sentinel-2 maps of fractional tree cover and standing deadwood cover across Europe",
+  type: "map",
+  typeLabel: "Satellite map",
+  status: "available",
+  summary:
+    "Year-by-year fractional tree cover and deadwood cover maps at European scale, derived from Sentinel-2 by satellite models trained on the drone and aerial ground truth. Explore them in the interactive map and analyse time series for your own area.",
+  links: {
+    artifact: "/deadtrees",
+  },
+  map: {
+    previewImage: "/assets/releases/sentinel-2-satellite-map.webp",
+    previewAlt:
+      "Satellite map of tree cover and deadwood cover over the Harz mountains, Germany",
+    coverage: "Europe",
+    firstYear: 2017,
+    lastYear: 2025,
   },
 };
 
@@ -912,6 +964,7 @@ export const dteAerialRelease: DteAerialRelease = {
 };
 
 export const publicReleases: PublicRelease[] = [
+  satelliteMapRelease,
   droneMappingGuideRelease,
   dteAerialRelease,
 ];

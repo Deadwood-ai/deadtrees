@@ -21,5 +21,9 @@ export default function ReleaseDetail() {
     return <DroneMappingGuideRelease release={release} />;
   }
 
+  if (release.type === "map") {
+    return <Navigate to={release.links.artifact} replace />;
+  }
+
   return <Navigate to="/releases" replace />;
 }
