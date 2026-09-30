@@ -56,7 +56,7 @@ def test_use_service_client_requires_service_role_key(monkeypatch):
 class _FakeAuth:
 	"""Stands in for Supabase Auth: one password per account, a new token per sign-in."""
 
-	accounts = {'a@example.com': 'secret-a', 'b@example.com': 'secret-b'}
+	accounts = {'a@example.com': 'secret-a', 'b@example.com': 'secret-b', 'u@example.com': 'päßwörd'}
 	sign_ins = []
 
 	def sign_in_with_password(self, credentials):
@@ -118,3 +118,11 @@ def test_rejected_token_returns_false_and_leaves_the_cache(fake_auth, monkeypatc
 	assert db.verify_token(token) is False
 	assert db._cached_sessions == {}
 	assert db.login('a@example.com', 'secret-a') != token
+
+
+def test_cached_login_accepts_non_ascii_passwords(fake_auth):
+	token = db.login('u@example.com', 'päßwörd')
+
+	assert db.login('u@example.com', 'päßwörd') == token
+	with pytest.raises(Exception, match='Login failed'):
+		db.login('u@example.com', 'passwörd')

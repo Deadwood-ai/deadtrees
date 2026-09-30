@@ -30,7 +30,7 @@ def login(user: str, password: str, use_cached_session: bool = True) -> str:
 
 	if use_cached_session and user in _cached_sessions:
 		cached_password, cached = _cached_sessions[user]
-		if hmac.compare_digest(cached_password, password) and cached.session.expires_at > int(time.time()) + threshold:
+		if hmac.compare_digest(cached_password.encode(), password.encode()) and cached.session.expires_at > int(time.time()) + threshold:
 			return cached.session.access_token
 
 	client = create_client(
