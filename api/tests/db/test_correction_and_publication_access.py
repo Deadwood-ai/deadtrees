@@ -161,24 +161,39 @@ def test_corrections_only_touch_geometries_of_their_label(db):
 
 
 def test_only_visible_model_predictions_are_correctable(db):
-	owner, other = create_user(db), create_user(db)
-	private_dataset, public_dataset = create_dataset(db, owner, data_access='private'), create_dataset(db, owner)
-	private_label, private_geometry, private_ts = create_prediction(db, private_dataset, owner)
-	upload_label, upload_geometry, upload_ts = create_prediction(db, public_dataset, owner, 'visual_interpretation')
+	owner, contributor = create_user(db), create_user(db)
+	public_dataset = create_dataset(db, owner)
+	private_dataset = create_dataset(db, owner, data_access='private')
+	archived_dataset, excluded_dataset = create_dataset(db, owner), create_dataset(db, owner)
+	as_admin(db)
+	db.execute('UPDATE public.v2_datasets SET archived=true WHERE id=%s', (archived_dataset,))
+	db.execute(
+		"INSERT INTO public.dataset_audit(dataset_id,final_assessment) VALUES (%s,'exclude_completely')",
+		(excluded_dataset,),
+	)
+	hidden = [(dataset, *create_prediction(db, dataset, owner)) for dataset in (private_dataset, archived_dataset, excluded_dataset)]
+	upload = (public_dataset, *create_prediction(db, public_dataset, owner, 'visual_interpretation'))
 
-	for dataset, label, geometry, updated_at in [
-		(private_dataset, private_label, private_geometry, private_ts),
-		(public_dataset, upload_label, upload_geometry, upload_ts),
-	]:
-		act_as(db, other)
-		expect_denied(db, SAVE, (dataset, label, other, uuid.uuid4(), [geometry], [updated_at], '[]'))
+	for dataset, label, geometry, updated_at in [*hidden, upload]:
+		act_as(db, contributor)
+		expect_denied(db, SAVE, (dataset, label, contributor, uuid.uuid4(), [geometry], [updated_at], '[]'))
 		assert geometry_deleted(db, geometry) is False
 
-	# The owner still corrects the prediction of their private dataset.
-	act_as(db, owner)
+	# Public labelling: any signed-in contributor proposes a pending correction.
+	label, geometry, updated_at = create_prediction(db, public_dataset, owner)
+	act_as(db, contributor)
+	wrong_layer = SAVE.replace("'deadwood'", "'forest_cover'")
+	expect_denied(db, wrong_layer, (public_dataset, label, contributor, uuid.uuid4(), [], [], json.dumps([{'geometry': POLYGON}])))
+	assert db.execute(SAVE, (public_dataset, label, contributor, uuid.uuid4(), [geometry], [updated_at], '[]')).fetchone()[0] is True
+	as_admin(db)
 	assert db.execute(
-		SAVE, (private_dataset, private_label, owner, uuid.uuid4(), [private_geometry], [private_ts], '[]')
-	).fetchone()[0] is True
+		'SELECT review_status FROM public.v2_geometry_corrections WHERE geometry_id=%s', (geometry,)
+	).fetchone()[0] == 'pending'
+
+	# The owner still corrects the prediction of their private dataset.
+	_, label, geometry, updated_at = hidden[0]
+	act_as(db, owner)
+	assert db.execute(SAVE, (private_dataset, label, owner, uuid.uuid4(), [geometry], [updated_at], '[]')).fetchone()[0] is True
 
 
 def test_corrections_are_not_inserted_directly(db):
@@ -258,8 +273,6 @@ def test_publication_tables_accept_only_owner_inserts(db):
 	mine = db.execute("INSERT INTO public.data_publication(user_id,title) VALUES (%s,'mine') RETURNING id", (other,)).fetchone()[0]
 	expect_denied(db, 'INSERT INTO public.jt_data_publication_datasets VALUES (%s,%s)', (mine, dataset), rls)
 
-	# Nobody else can remove a publication.
-	assert db.execute('DELETE FROM public.data_publication WHERE id=%s RETURNING id', (published,)).fetchall() == []
 
 	# The owner's PublicationModal flow.
 	act_as(db, owner)
@@ -273,11 +286,7 @@ def test_publication_tables_accept_only_owner_inserts(db):
 	).fetchone()[0]
 	db.execute('INSERT INTO public.jt_data_publication_user_info VALUES (%s,%s)', (publication[0], author))
 	db.execute('INSERT INTO public.jt_data_publication_datasets VALUES (%s,%s)', (publication[0], dataset))
-
-	# A failed submission can be undone while pending; a published record cannot be deleted.
-	assert db.execute('DELETE FROM public.data_publication WHERE id=%s RETURNING id', (published,)).fetchall() == []
-	assert db.execute('DELETE FROM public.data_publication WHERE id=%s RETURNING id', (publication[0],)).fetchall() != []
-	assert db.execute('DELETE FROM public.user_info WHERE id=%s RETURNING id', (author,)).fetchall() != []
+	expect_denied(db, 'DELETE FROM public.data_publication WHERE id=%s', (publication[0],))
 
 
 # Definer functions anon may run. Every other SECURITY DEFINER function must

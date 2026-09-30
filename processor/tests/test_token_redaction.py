@@ -102,6 +102,9 @@ def test_database_log_message_is_redacted():
 
 	handler = shared_logging.SupabaseHandler()
 	handler.use_client = lambda token: _Client()
-	handler.emit(logging.LogRecord('processor', logging.ERROR, __file__, 1, f'failed with {TOKEN}', None, None))
+	record = logging.LogRecord('processor', logging.ERROR, __file__, 1, f'failed with {TOKEN}', None, None)
+	record.extra = {'error': f'token: {TOKEN}', 'attempt': 2}
+	handler.emit(record)
 
 	assert inserted[0]['message'] == f'failed with {REDACTED_TOKEN}'
+	assert inserted[0]['extra'] == {'error': f'token: {REDACTED_TOKEN}', 'attempt': 2}
