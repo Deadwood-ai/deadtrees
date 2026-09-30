@@ -14,16 +14,20 @@ from fastapi.testclient import TestClient
 
 from api.src.download import jobs
 from api.src.download.jobs import JobState, PreparedFileJob
-from api.src.download.downloads import create_consolidated_geopackage
-from api.src.download.keys import get_bundle_filename, labels_content_version
+from api.src.download.downloads import create_consolidated_geopackage, read_export_scope
+from api.src.download.keys import get_bundle_filename, labels_content_version, prepared_job
 from api.src.server import app
-from shared.db import use_client
+from shared.db import login, use_client, use_service_client
 from shared.labels import create_label_with_geometries
 from shared.models import LabelDataEnum, LabelPayloadData, LabelSourceEnum, LabelTypeEnum, LicenseEnum
 from shared.settings import settings
 
 # Fixtures shared with the main download tests.
-from api.tests.routers.test_download import multi_test_datasets, private_test_dataset_for_download  # noqa: F401
+from api.tests.routers.test_download import (  # noqa: F401
+	multi_test_datasets,
+	private_test_dataset_for_download,
+	test_dataset_for_download,
+)
 
 client = TestClient(app)
 
@@ -246,12 +250,17 @@ def test_dataset_bundle_key_changes_with_original_filename_and_content(auth_toke
 		shutil.rmtree(settings.downloads_path / str(dataset_id), ignore_errors=True)
 
 
+def _labels_version(dataset_id: int, token: str) -> str:
+	with use_client(token) as db_client:
+		return labels_content_version(read_export_scope(db_client, dataset_id), token)
+
+
 def test_labels_content_version_changes_when_a_geometry_is_edited(auth_token, private_test_dataset_for_download, test_user):
 	dataset_id = private_test_dataset_for_download
-	before = labels_content_version(dataset_id)
+	before = _labels_version(dataset_id, auth_token)
 	label = create_label_with_geometries(_label_payload(dataset_id), test_user, auth_token)
 	try:
-		with_label = labels_content_version(dataset_id)
+		with_label = _labels_version(dataset_id, auth_token)
 		assert with_label != before
 
 		with use_client(auth_token) as db_client:
@@ -262,7 +271,7 @@ def test_labels_content_version_changes_when_a_geometry_is_edited(auth_token, pr
 			db_client.table(settings.deadwood_geometries_table).update({'is_deleted': True}).eq(
 				'id', geometry['id']
 			).execute()
-		assert labels_content_version(dataset_id) != with_label
+		assert _labels_version(dataset_id, auth_token) != with_label
 	finally:
 		_delete_labels(auth_token, dataset_id)
 
@@ -333,7 +342,7 @@ def test_bundle_key_changes_with_original_filename(auth_token, multi_test_datase
 
 
 def test_unknown_bundle_job_reports_failed_not_processing(auth_token):
-	status = _bundle_status('0' * 16, auth_token)
+	status = _bundle_status('0' * 28, auth_token)
 	assert status['status'] == 'failed'
 
 	response = client.get(
@@ -403,8 +412,82 @@ def test_label_export_includes_more_geometries_than_one_postgrest_page(
 	payload = _label_payload(dataset_id, {'type': 'MultiPolygon', 'coordinates': squares})
 	create_label_with_geometries(payload, test_user, auth_token)
 	try:
-		gpkg = create_consolidated_geopackage(dataset_id, tmp_path / 'labels.gpkg')
+		with use_client(auth_token) as db_client:
+			scope = read_export_scope(db_client, dataset_id)
+		gpkg = create_consolidated_geopackage(dataset_id, scope, tmp_path / 'labels.gpkg')
 		with fiona.open(gpkg, layer=f'deadwood_{LabelSourceEnum.visual_interpretation.value}') as features:
 			assert len(features) == 1500
 	finally:
 		_delete_labels(auth_token, dataset_id)
+
+
+def test_a_new_version_replaces_older_versions_of_the_same_variant_only(tmp_path):
+	old = tmp_path / f'12_{"a" * 12}.zip'
+	other_variant = tmp_path / f'12_nolabels_{"a" * 12}.zip'
+	for path in (old, old.with_name(f'{old.name}.error'), other_variant):
+		path.write_bytes(b'old')
+
+	job = prepared_job(tmp_path / f'12_{"b" * 12}.zip')
+	assert job.claim()
+	job.run(lambda target: target.write_bytes(b'new'))
+
+	assert _leftovers(tmp_path) == sorted([job.path.name, other_variant.name])
+
+
+def test_bundle_versions_replace_older_versions_of_the_same_bundle(tmp_path):
+	variant = '0123456789abcdef'
+	older, other_bundle = tmp_path / f'{variant}{"a" * 12}.zip', tmp_path / f'{"f" * 16}{"a" * 12}.zip'
+	for path in (older, other_bundle):
+		path.write_bytes(b'old')
+
+	job = prepared_job(tmp_path / f'{variant}{"b" * 12}.zip')
+	assert job.claim()
+	job.run(lambda target: target.write_bytes(b'new'))
+
+	assert _leftovers(tmp_path) == sorted([job.path.name, other_bundle.name])
+
+
+def _hide_labels_from_non_owners(dataset_id: int, owner: str, rule: str) -> None:
+	with use_service_client() as db_client:
+		if rule == 'archived':
+			db_client.table(settings.datasets_table).update({'archived': True}).eq('id', dataset_id).execute()
+		else:
+			db_client.table('dataset_audit').insert(
+				{'dataset_id': dataset_id, 'audited_by': owner, 'final_assessment': 'exclude_completely'}
+			).execute()
+
+
+@pytest.mark.parametrize('rule', ['archived', 'exclude_completely'])
+def test_downloads_contain_only_labels_the_user_may_read(
+	rule, auth_token, test_dataset_for_download, test_user, test_user2
+):
+	"""Label policies hide these labels from other users; downloads must not bypass them."""
+	dataset_id = test_dataset_for_download
+	create_label_with_geometries(_label_payload(dataset_id), test_user, auth_token)
+	_hide_labels_from_non_owners(dataset_id, test_user, rule)
+	other_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2)
+	labels_url = f'/api/v1/download/datasets/{dataset_id}/labels.gpkg'
+	labels_status_url = f'/api/v1/download/datasets/{dataset_id}/labels/status'
+	try:
+		_prepare(labels_url, auth_token)
+		owner_status = _prepare(labels_status_url, auth_token)
+		assert owner_status['status'] == 'completed', owner_status
+
+		_prepare(labels_url, other_token)
+		other_status = _prepare(labels_status_url, other_token)
+		assert other_status['status'] == 'failed', other_status
+		assert other_status.get('download_path') != owner_status['download_path']
+
+		dataset_url = f'/api/v1/download/datasets/{dataset_id}/dataset.zip'
+		_prepare(dataset_url, other_token)
+		bundle_status = _prepare(f'/api/v1/download/datasets/{dataset_id}/status', other_token)
+		assert bundle_status['status'] == 'completed', bundle_status
+		zip_path = settings.downloads_path / bundle_status['download_path'].removeprefix('/downloads/v1/')
+		with zipfile.ZipFile(zip_path) as archive:
+			assert not [name for name in archive.namelist() if name.startswith('labels_')]
+	finally:
+		with use_service_client() as db_client:
+			db_client.table('dataset_audit').delete().eq('dataset_id', dataset_id).execute()
+			db_client.table(settings.datasets_table).update({'archived': False}).eq('id', dataset_id).execute()
+		_delete_labels(auth_token, dataset_id)
+		shutil.rmtree(settings.downloads_path / str(dataset_id), ignore_errors=True)

@@ -8,6 +8,10 @@ Files next to the final file ``<name>`` in the downloads directory:
 - ``<name>.error``: the failure message of the last build.
 - ``.<name>.*.tmp/``: a private work directory per build; the result is moved into
   place with os.replace, so ``<name>`` is either absent or complete.
+
+File names carry a content version. Once a build is in place, older versions of the
+same file (``supersedes``) are deleted, so each variant keeps one copy on disk.
+Readers that already opened an old file keep reading it.
 """
 
 from __future__ import annotations
@@ -15,15 +19,16 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 import shutil
 import tempfile
 import threading
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Callable, Iterator, Optional
 
 from shared.logging import UnifiedLogger
 from shared.settings import settings
@@ -51,6 +56,8 @@ class JobStatus:
 @dataclass(frozen=True)
 class PreparedFileJob:
 	path: Path
+	# Names of older versions of this file, deleted once this build is in place.
+	supersedes: Optional[re.Pattern] = field(default=None, compare=False)
 
 	@property
 	def error_path(self) -> Path:
@@ -109,6 +116,7 @@ class PreparedFileJob:
 				raise ValueError('The prepared download file is empty')
 			os.replace(target, self.path)
 			logger.info(f'Prepared download file {self.path.name}')
+			self._remove_superseded()
 		except Exception as e:
 			logger.error(f'Preparing download file {self.path.name} failed: {e}')
 			self._write_error(str(e) or 'Download preparation failed')
@@ -118,6 +126,15 @@ class PreparedFileJob:
 			if work_dir is not None:
 				shutil.rmtree(work_dir, ignore_errors=True)
 			self.inflight_path.unlink(missing_ok=True)
+
+	def _remove_superseded(self) -> None:
+		if self.supersedes is None:
+			return
+		for sibling in self.path.parent.iterdir():
+			if sibling.name != self.path.name and self.supersedes.fullmatch(sibling.name):
+				sibling.unlink(missing_ok=True)
+				sibling.with_name(f'{sibling.name}.error').unlink(missing_ok=True)
+				logger.info(f'Removed superseded download file {sibling.name}')
 
 	def _inflight_age(self) -> float | None:
 		try:

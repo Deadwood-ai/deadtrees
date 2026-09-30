@@ -3,7 +3,8 @@ import io
 import tempfile
 import json
 from pathlib import Path
-from typing import Callable, Dict, Iterator, List, Optional, Set, Tuple, Union
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import geopandas as gpd
 import yaml
@@ -12,6 +13,7 @@ import pandas as pd
 from shared.logging import UnifiedLogger
 from shared.settings import settings
 from shared.db import use_service_client
+from shared.pagination import fetch_all_rows, iter_pages
 from shared.models import Label, Dataset, LicenseEnum, LabelDataEnum, LabelSourceEnum
 from shared.labels import get_model_preferences
 
@@ -30,27 +32,24 @@ EXPORTABLE_LABEL_SOURCES = {
 }
 
 
-# PostgREST caps every response at `max_rows` (1000, supabase/config.toml).
-PAGE_SIZE = 1000
+@dataclass(frozen=True)
+class ExportScope:
+	"""The labels and AOIs of one dataset that the requesting user may read.
 
-
-def iter_pages(build_query: Callable[[], object], page_size: int = PAGE_SIZE) -> Iterator[List[Dict]]:
-	"""Yield every page of a deterministically ordered PostgREST query.
-
-	`build_query` must return a fresh query with a stable order. Paging stops only at
-	an empty page, so a server cap below `page_size` cannot truncate the result.
+	Read with the user's token, so the label policies (archived datasets, datasets
+	excluded by their audit) decide what a download contains. The background build
+	has no user session and reads only the geometries of these labels.
 	"""
-	offset = 0
-	while True:
-		page = build_query().range(offset, offset + page_size - 1).execute().data or []
-		if not page:
-			return
-		yield page
-		offset += len(page)
+
+	labels: List[Label]
+	aois: List[Dict]
 
 
-def fetch_all_rows(build_query: Callable[[], object], page_size: int = PAGE_SIZE) -> List[Dict]:
-	return [row for page in iter_pages(build_query, page_size) for row in page]
+def read_export_scope(client, dataset_id: int) -> ExportScope:
+	"""Read the labels and AOIs visible to the client's user."""
+	labels = fetch_all_rows(lambda: client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).order('id'))
+	aois = fetch_all_rows(lambda: client.table(settings.aois_table).select('*').eq('dataset_id', dataset_id).order('id'))
+	return ExportScope(labels=[Label(**label) for label in labels], aois=aois)
 
 
 # =============================================================================
@@ -238,16 +237,16 @@ def _write_license_and_citation(archive: zipfile.ZipFile, datasets: List[Dataset
 	archive.writestr('CITATION.cff', citation_buffer.getvalue())
 
 
-def _write_label_geopackages(archive: zipfile.ZipFile, dataset_id: int) -> None:
+def _write_label_geopackages(archive: zipfile.ZipFile, dataset_id: int, scope: ExportScope) -> None:
 	"""Add one GeoPackage per label type (with the dataset's AOI layer) to the archive."""
-	labels = get_exportable_dataset_labels(dataset_id)
+	labels = get_exportable_labels(scope)
 	with tempfile.TemporaryDirectory() as temp_dir:
 		for label_type in sorted({label.label_data for label in labels}, key=lambda value: value.value):
 			label_file = Path(temp_dir) / f'{label_type.value}_{dataset_id}.gpkg'
 			for label in labels:
 				if label.label_data == label_type:
 					label_to_geopackage(str(label_file), label)
-			export_dataset_aois(dataset_id, str(label_file))
+			export_dataset_aois(scope.aois, str(label_file))
 			archive.write(label_file, arcname=f'labels_{label_type.value}_{dataset_id}.gpkg')
 			logger.info(f'Added {label_type.value} labels to bundle for dataset {dataset_id}')
 
@@ -255,7 +254,7 @@ def _write_label_geopackages(archive: zipfile.ZipFile, dataset_id: int) -> None:
 def bundle_multi_dataset(
 	target_path: str,
 	datasets_info: List[Tuple[Dataset, Dict, Optional[Dict], str]],
-	include_labels: bool = False,
+	label_scopes: Optional[Dict[int, ExportScope]] = None,
 	include_parquet: bool = False,
 	use_original_filename: bool = True,
 ) -> str:
@@ -265,7 +264,7 @@ def bundle_multi_dataset(
 	Args:
 		target_path: Path to write the ZIP file
 		datasets_info: List of tuples (dataset, ortho_dict, metadata_dict, archive_file_path)
-		include_labels: Whether to include label GeoPackages
+		label_scopes: Per dataset ID, the labels and AOIs to include; None bundles no labels
 		include_parquet: Whether to include METADATA.parquet
 		use_original_filename: If True, use original filenames for orthos; if False, use ortho_{id}.tif
 
@@ -305,23 +304,21 @@ def bundle_multi_dataset(
 		_write_metadata_tables(archive, pd.DataFrame(metadata_rows), include_parquet)
 		_write_license_and_citation(archive, [dataset for dataset, _, _, _ in datasets_info])
 
-		if include_labels:
+		if label_scopes is not None:
 			for dataset, _, _, _ in datasets_info:
-				_write_label_geopackages(archive, dataset.id)
+				_write_label_geopackages(archive, dataset.id, label_scopes[dataset.id])
 
 	logger.info(f"Created multi-dataset bundle with {len(datasets_info)} datasets at {target_path}")
 	return target_path
 
 
-# Export reads (labels, geometries, AOIs) run with the service client on purpose: the
-# download routes check the requesting user's dataset access first, and background jobs
-# have no user session. A tokenless use_client() would instead depend on which key the
-# environment configures and silently drop labels of private datasets under the anon key.
+# Geometry reads run with the service client: the background build has no user
+# session, and it only reads geometries of labels in the user's ExportScope.
 
 
 def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 	"""Convert a single label to GeoPackage format"""
-	# Get geometries from the database (service client, see note above)
+	# Geometries of a label from the user's ExportScope (service client, see note above)
 	with use_service_client() as client:
 		if label.label_data == LabelDataEnum.deadwood:
 			geom_table = settings.deadwood_geometries_table
@@ -440,18 +437,6 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 	return label_file
 
 
-def get_all_dataset_labels(dataset_id: int) -> List[Label]:
-	"""Get all labels for a dataset using pagination (service client, see note above label_to_geopackage)"""
-	with use_service_client() as client:
-		all_labels = fetch_all_rows(
-			lambda: client.table(settings.labels_table).select('*').eq('dataset_id', dataset_id).order('id')
-		)
-
-	if all_labels:
-		logger.info(f'Successfully fetched {len(all_labels)} labels for dataset {dataset_id}')
-	return [Label(**label_data) for label_data in all_labels]
-
-
 def filter_exportable_dataset_labels(
 	labels: List[Label], preferences: Dict[LabelDataEnum, Dict]
 ) -> List[Label]:
@@ -478,10 +463,9 @@ def filter_exportable_dataset_labels(
 	return result
 
 
-def get_exportable_dataset_labels(dataset_id: int) -> List[Label]:
-	"""Fetch labels for a dataset and drop unsupported sources and non-preferred model versions."""
-	preferences = get_model_preferences()
-	return filter_exportable_dataset_labels(get_all_dataset_labels(dataset_id), preferences)
+def get_exportable_labels(scope: ExportScope) -> List[Label]:
+	"""Drop unsupported sources and non-preferred model versions from the user's labels."""
+	return filter_exportable_dataset_labels(scope.labels, get_model_preferences())
 
 
 def create_citation_file(datasets: Union[Dataset, List[Dataset]], filestream=None) -> str:
@@ -555,10 +539,10 @@ def bundle_dataset(
 	ortho: Optional[Dict] = None,
 	metadata: Optional[Dict] = None,
 	include_parquet: bool = True,
-	include_labels: bool = True,
+	labels: Optional[ExportScope] = None,
 	use_original_filename: bool = False,
 ):
-	"""Bundle dataset files into a ZIP archive including all labels"""
+	"""Bundle dataset files into a ZIP archive, with the given labels when there are any"""
 	# Generate formatted filename base
 	base_filename = f'ortho_{dataset.id}'
 	if use_original_filename and dataset.file_name:
@@ -574,86 +558,64 @@ def bundle_dataset(
 		_write_metadata_tables(archive, df, include_parquet)
 		_write_license_and_citation(archive, [dataset])
 
-		if include_labels:
-			_write_label_geopackages(archive, dataset.id)
+		if labels is not None:
+			_write_label_geopackages(archive, dataset.id, labels)
 
 	return target_path
 
 
-def export_dataset_aois(dataset_id: int, gpkg_file: str):
-	"""Export all AOIs for a dataset to 'aoi' layer in geopackage"""
+def export_dataset_aois(aois: List[Dict], gpkg_file: str):
+	"""Write the given AOIs to the 'aoi' layer of a GeoPackage"""
+	if not aois:
+		logger.info('No AOIs to export')
+		return
 
-	# Service client, see note above label_to_geopackage
-	with use_service_client() as client:
-		all_aois = fetch_all_rows(
-			lambda: client.table(settings.aois_table).select('*').eq('dataset_id', dataset_id).order('id')
-		)
-
-		if not all_aois:
-			logger.info(f'No AOIs found for dataset {dataset_id}')
-			return  # No AOIs to export
-
-		logger.info(f'Successfully fetched {len(all_aois)} AOIs for dataset {dataset_id}')
-
-		# Create features from AOI data
-		features = []
-		for aoi in all_aois:
-			features.append(
-				{
-					'type': 'Feature',
-					'geometry': aoi['geometry'],
-					'properties': {
-						'dataset_id': aoi['dataset_id'],
-						'image_quality': aoi.get('image_quality'),
-						'notes': aoi.get('notes'),
-						'is_whole_image': aoi.get('is_whole_image'),
-						'aoi_id': aoi['id'],
-						'source': aoi.get('source', 'manual'),
-						'corrected_from_aoi_id': aoi.get('corrected_from_aoi_id'),
-					},
-				}
-			)
-
-		# Create GeoDataFrame from AOI data
-		aoi_gdf = gpd.GeoDataFrame.from_features(features)
-		aoi_gdf.set_crs('EPSG:4326', inplace=True)
-
-		# Write to 'aoi' layer in geopackage
-		aoi_gdf.to_file(gpkg_file, driver='GPKG', layer='aoi')
-		logger.info(f'Added AOI layer with {len(features)} features to geopackage')
+	features = [
+		{
+			'type': 'Feature',
+			'geometry': aoi['geometry'],
+			'properties': {
+				'dataset_id': aoi['dataset_id'],
+				'image_quality': aoi.get('image_quality'),
+				'notes': aoi.get('notes'),
+				'is_whole_image': aoi.get('is_whole_image'),
+				'aoi_id': aoi['id'],
+				'source': aoi.get('source', 'manual'),
+				'corrected_from_aoi_id': aoi.get('corrected_from_aoi_id'),
+			},
+		}
+		for aoi in aois
+	]
+	aoi_gdf = gpd.GeoDataFrame.from_features(features)
+	aoi_gdf.set_crs('EPSG:4326', inplace=True)
+	aoi_gdf.to_file(gpkg_file, driver='GPKG', layer='aoi')
+	logger.info(f'Added AOI layer with {len(features)} features to geopackage')
 
 
-def create_consolidated_geopackage(dataset_id: int, gpkg_file: Path) -> Path:
+def create_consolidated_geopackage(dataset_id: int, scope: ExportScope, gpkg_file: Path) -> Path:
 	"""Write a single GeoPackage with one layer per label type/source plus the AOI layer.
 
 	Args:
 		dataset_id: The dataset ID to export
+		scope: The labels and AOIs the requesting user may read
 		gpkg_file: Where to write the GeoPackage (must not exist yet)
 
-	Returns:
-		The GeoPackage path
-
 	Raises:
-		ValueError: If no exportable labels exist for the dataset
+		ValueError: If the user can read no exportable labels of the dataset
 	"""
-	all_labels = get_all_dataset_labels(dataset_id)
-
-	if not all_labels:
+	if not scope.labels:
 		raise ValueError(f'No labels found for dataset {dataset_id}')
 
-	filtered_labels = filter_exportable_dataset_labels(all_labels, get_model_preferences())
-
+	filtered_labels = get_exportable_labels(scope)
 	if not filtered_labels:
 		raise ValueError(
 			f'No labels with target sources (model_prediction, visual_interpretation) found for dataset {dataset_id}'
 		)
 
 	logger.info(f'Processing {len(filtered_labels)} labels for dataset {dataset_id}')
-
 	for label in filtered_labels:
 		label_to_geopackage(str(gpkg_file), label)
-
-	export_dataset_aois(dataset_id, str(gpkg_file))
+	export_dataset_aois(scope.aois, str(gpkg_file))
 
 	logger.info(f'Created consolidated geopackage for dataset {dataset_id} at {gpkg_file}')
 	return gpkg_file

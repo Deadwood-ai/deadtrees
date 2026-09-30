@@ -17,7 +17,13 @@ from shared.__version__ import __version__
 from shared.models import Dataset
 from api.src.utils.request_ip import get_client_ip
 from shared.settings import settings
-from api.src.download.downloads import bundle_dataset, bundle_multi_dataset, create_consolidated_geopackage
+from api.src.download.downloads import (
+	ExportScope,
+	bundle_dataset,
+	bundle_multi_dataset,
+	create_consolidated_geopackage,
+	read_export_scope,
+)
 from api.src.download.jobs import JobState, JobStatus, PreparedFileJob
 from api.src.download.keys import (
 	content_version,
@@ -25,6 +31,7 @@ from api.src.download.keys import (
 	get_bundle_filename,
 	get_labels_filename,
 	labels_content_version,
+	prepared_job,
 )
 from shared.db import use_client, use_service_client, verify_token
 from shared.logging import UnifiedLogger, SupabaseHandler, LogCategory, LogContext
@@ -32,7 +39,7 @@ from shared.logging import UnifiedLogger, SupabaseHandler, LogCategory, LogConte
 # first approach to implement a rate limit
 CONNECTED_IPS = {}
 DOWNLOAD_REQUESTS_PER_DAY = 100
-BUNDLE_JOB_ID = re.compile(r'[0-9a-f]{12,64}')
+BUNDLE_JOB_ID = re.compile(r'[0-9a-f]{28}')  # 16-hex variant + 12-hex content version
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token')
 
 # create the router for download
@@ -285,8 +292,8 @@ async def _dataset_bundle_job(
 	include_labels: bool,
 	include_parquet: bool,
 	use_original_filename: bool,
-) -> tuple[PreparedFileJob, Dataset, Optional[dict], Optional[dict]]:
-	"""Check access and name the bundle after its variant and current content."""
+) -> tuple[PreparedFileJob, Dataset, Optional[dict], Optional[dict], Optional[ExportScope]]:
+	"""Check access and name the bundle after its variant and the content the user may read."""
 	dataset, ortho = await get_accessible_dataset(
 		dataset_id=dataset_id,
 		token=token,
@@ -294,11 +301,13 @@ async def _dataset_bundle_job(
 	)
 	with use_client(token) as client:
 		metadata_response = client.table(settings.metadata_table).select('*').eq('dataset_id', dataset_id).execute()
+		labels = read_export_scope(client, dataset_id) if include_labels else None
 	metadata = metadata_response.data[0] if metadata_response.data else None
 
-	version = content_version([(dataset, ortho, metadata)], include_labels)
+	version = content_version([(dataset, ortho, metadata, labels)], token)
 	filename = get_bundle_filename(dataset_id, include_labels, include_parquet, use_original_filename, version)
-	return PreparedFileJob(settings.downloads_path / str(dataset_id) / filename), dataset, ortho, metadata
+	job = prepared_job(settings.downloads_path / str(dataset_id) / filename)
+	return job, dataset, ortho, metadata, labels
 
 
 @download_app.get('/datasets/{dataset_id}/dataset.zip', response_model=DownloadStatus)
@@ -319,7 +328,7 @@ async def download_dataset(
 		endpoint='datasets/{dataset_id}/dataset.zip',
 		dataset_id=dataset_id_int,
 	)
-	job, dataset, ortho, metadata = await _dataset_bundle_job(
+	job, dataset, ortho, metadata, labels = await _dataset_bundle_job(
 		dataset_id_int, token, include_labels, include_parquet, use_original_filename
 	)
 	if not ortho:
@@ -335,7 +344,7 @@ async def download_dataset(
 			ortho=ortho,
 			metadata=metadata,
 			include_parquet=include_parquet,
-			include_labels=include_labels,
+			labels=labels,
 			use_original_filename=use_original_filename,
 		)
 
@@ -386,10 +395,12 @@ async def download_dataset_file(
 # =============================================================================
 
 
-async def _labels_job(dataset_id: int, token: str) -> PreparedFileJob:
+async def _labels_job(dataset_id: int, token: str) -> tuple[PreparedFileJob, ExportScope]:
 	await get_accessible_dataset(dataset_id=dataset_id, token=token, allow_viewonly_full_download=True)
-	filename = get_labels_filename(dataset_id, labels_content_version(dataset_id))
-	return PreparedFileJob(settings.downloads_path / str(dataset_id) / filename)
+	with use_client(token) as client:
+		scope = read_export_scope(client, dataset_id)
+	filename = get_labels_filename(dataset_id, labels_content_version(scope, token))
+	return prepared_job(settings.downloads_path / str(dataset_id) / filename), scope
 
 
 @download_app.get('/datasets/{dataset_id}/labels.gpkg', response_model=DownloadStatus)
@@ -407,9 +418,9 @@ async def get_labels(
 		endpoint='datasets/{dataset_id}/labels.gpkg',
 		dataset_id=dataset_id_int,
 	)
-	job = await _labels_job(dataset_id_int, token)
+	job, scope = await _labels_job(dataset_id_int, token)
 	record_download_request(user.id, [dataset_id_int], 'labels')
-	build = partial(create_consolidated_geopackage, dataset_id_int)
+	build = partial(create_consolidated_geopackage, dataset_id_int, scope)
 	return _start_job(job, background_tasks, build, f'labels_{dataset_id_int}', 'Labels GeoPackage')
 
 
@@ -426,7 +437,7 @@ async def check_labels_status(
 		dataset_id=dataset_id_int,
 		count_towards_limit=False,
 	)
-	job = await _labels_job(dataset_id_int, token)
+	job, _ = await _labels_job(dataset_id_int, token)
 	return _status_response(job, f'labels_{dataset_id_int}', 'Labels GeoPackage')
 
 
@@ -442,7 +453,7 @@ async def download_labels_file(
 		endpoint='datasets/{dataset_id}/labels/download',
 		dataset_id=dataset_id_int,
 	)
-	job = await _labels_job(dataset_id_int, token)
+	job, _ = await _labels_job(dataset_id_int, token)
 	return _redirect_to_file(job, f'Labels file for dataset <ID={dataset_id_int}> not found')
 
 
@@ -500,7 +511,7 @@ async def get_datasets_for_bundle(
 def _bundle_job(job_id: str) -> PreparedFileJob:
 	if not BUNDLE_JOB_ID.fullmatch(job_id):
 		raise HTTPException(status_code=400, detail='Invalid bundle job ID.')
-	return PreparedFileJob(settings.downloads_path / 'bundles' / f'{job_id}.zip')
+	return prepared_job(settings.downloads_path / 'bundles' / f'{job_id}.zip')
 
 
 @download_app.get('/bundle.zip', response_model=DownloadStatus)
@@ -540,14 +551,21 @@ async def prepare_multi_bundle(
 	# Enforce per-dataset access and output checks for every request, including a
 	# cached bundle another user prepared, before recording or returning it.
 	datasets_info = await get_datasets_for_bundle(dataset_ids=id_list, token=token)
-	version = content_version([info[:3] for info in datasets_info], include_labels)
+	label_scopes = None
+	if include_labels:
+		with use_client(token) as client:
+			label_scopes = {dataset.id: read_export_scope(client, dataset.id) for dataset, *_ in datasets_info}
+	version = content_version(
+		[(dataset, ortho, metadata, label_scopes[dataset.id] if label_scopes is not None else None) for dataset, ortho, metadata, _ in datasets_info],
+		token,
+	)
 	job_id = generate_bundle_job_id(id_list, include_labels, include_parquet, use_original_filename, version)
 	record_download_request(user.id, id_list, 'bundle')
 
 	build = partial(
 		bundle_multi_dataset,
 		datasets_info=datasets_info,
-		include_labels=include_labels,
+		label_scopes=label_scopes,
 		include_parquet=include_parquet,
 		use_original_filename=use_original_filename,
 	)

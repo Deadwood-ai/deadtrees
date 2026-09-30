@@ -6,17 +6,15 @@ because the exporter would then write an empty mask as human-validated truth.
 """
 
 from datetime import datetime, timezone
-from typing import Callable, Optional
+from typing import Optional
 
 from pyproj import Transformer
 from shapely.geometry import box, shape
 from shapely.ops import transform as shapely_transform
 
 from shared.db import use_client
+from shared.pagination import fetch_all_rows
 from shared.settings import settings
-
-# PostgREST caps every response at `max_rows` (1000, supabase/config.toml).
-PAGE_SIZE = 1000
 
 
 def parse_optional_datetime(value) -> Optional[datetime]:
@@ -36,21 +34,6 @@ def parse_optional_datetime(value) -> Optional[datetime]:
 			return None
 
 	return None
-
-
-def fetch_all_rows(build_query: Callable[[], object], page_size: int = PAGE_SIZE) -> list[dict]:
-	"""Read every row of an ordered PostgREST query, one page at a time.
-
-	`build_query` must return a fresh, deterministically ordered query. Paging
-	stops only at an empty page, so a server cap below `page_size` cannot
-	truncate the result.
-	"""
-	rows: list[dict] = []
-	while True:
-		page = build_query().range(len(rows), len(rows) + page_size - 1).execute().data or []
-		if not page:
-			return rows
-		rows.extend(page)
 
 
 def fetch_reference_datasets(token: str) -> list[int]:

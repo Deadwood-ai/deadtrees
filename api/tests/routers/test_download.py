@@ -35,6 +35,7 @@ from api.src.download.downloads import (
 	get_ortho_base_filename,
 	build_dataset_metadata_row,
 	create_consolidated_geopackage,
+	read_export_scope,
 	filter_exportable_dataset_labels,
 )
 from api.src.download.keys import content_version, generate_bundle_job_id
@@ -1132,7 +1133,9 @@ def test_labels_geopackage_excludes_soft_deleted_geometries(auth_token, test_dat
 			client.table(settings.deadwood_geometries_table).update({'is_deleted': True}).eq('id', geom_ids[0]).execute()
 
 		# Create consolidated GeoPackage and verify only one feature is included
-		gpkg_path = create_consolidated_geopackage(dataset_id, Path(tempfile.mkdtemp()) / 'labels.gpkg')
+		with use_client(auth_token) as db_client:
+			scope = read_export_scope(db_client, dataset_id)
+		gpkg_path = create_consolidated_geopackage(dataset_id, scope, Path(tempfile.mkdtemp()) / 'labels.gpkg')
 		deadwood_layer = f'deadwood_{LabelSourceEnum.visual_interpretation.value}'
 		assert deadwood_layer in fiona.listlayers(gpkg_path)
 
@@ -1339,7 +1342,7 @@ def _fail_labels_export(monkeypatch):
 	"""Inject a failure after the job has started writing its temp file."""
 	from api.src.routers import download as download_router
 
-	def fail(dataset_id, target):
+	def fail(dataset_id, scope, target):
 		Path(target).write_bytes(b'partial geopackage')
 		raise RuntimeError('synthetic labels generation error')
 
@@ -2862,7 +2865,7 @@ def test_cached_restricted_bundle_is_authorized_before_it_is_recorded(private_te
 	with use_client() as db_client:
 		dataset = Dataset(**db_client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute().data[0])
 		ortho = db_client.table(settings.orthos_table).select('*').eq('dataset_id', dataset_id).execute().data[0]
-	version = content_version([(dataset, ortho, None)], include_labels=False)
+	version = content_version([(dataset, ortho, None, None)], token='')
 	job_id = generate_bundle_job_id([dataset_id], False, False, True, version)
 	bundle_file = settings.downloads_path / 'bundles' / f'{job_id}.zip'
 	bundle_file.parent.mkdir(parents=True, exist_ok=True)
