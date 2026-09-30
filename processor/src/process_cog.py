@@ -7,7 +7,7 @@ from shared.settings import settings
 from shared.models import StatusEnum, QueueTask, Cog, Ortho
 from shared.logger import logger
 from .cog.cog import calculate_cog
-from .utils.ssh import push_file_to_storage_server
+from .utils.ssh import delete_superseded_storage_file, push_file_to_storage_server, storage_server_path
 from .utils.local_ortho import ensure_local_ortho
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
 from shared.status import update_status
@@ -67,7 +67,7 @@ def process_cog(task: QueueTask, temp_dir: Path):
 		logger.info(f'COG created for dataset {ortho.dataset_id}: {info}', extra={'token': token})
 
 		# Push generated COG to UUID-prefixed path
-		storage_server_cog_path = f'{settings.STORAGE_SERVER_DATA_PATH}/cogs/{secure_token}/{file_name}'
+		storage_server_cog_path = storage_server_path(settings.COG_DIR, secure_token, file_name)
 		push_file_to_storage_server(str(output_path), storage_server_cog_path, token, task.dataset_id)
 		t2 = time.time()
 
@@ -100,11 +100,15 @@ def process_cog(task: QueueTask, temp_dir: Path):
 		# upsert is idempotent (on_conflict='dataset_id'), so retrying a transient
 		# disconnect/SSL-handshake timeout cannot create duplicate rows.
 		@retry_on_transient_error
-		def _save_cog_metadata() -> None:
+		def _save_cog_metadata() -> str | None:
 			with use_client(token) as client:
+				previous = (
+					client.table(settings.cogs_table).select('cog_path').eq('dataset_id', ortho.dataset_id).execute()
+				)
 				client.table(settings.cogs_table).upsert(send_data, on_conflict='dataset_id').execute()
+			return previous.data[0]['cog_path'] if previous.data else None
 
-		_save_cog_metadata()
+		previous_cog_path = _save_cog_metadata()
 
 		# Update final status
 		update_status(token, dataset_id=ortho.dataset_id, current_status=StatusEnum.idle, is_cog_done=True)
@@ -116,6 +120,9 @@ def process_cog(task: QueueTask, temp_dir: Path):
 			token, dataset_id=ortho.dataset_id, has_error=True, error_message=f'Failed to save COG metadata: {str(e)}'
 		)
 		raise DatasetError(f'Failed to save COG metadata: {str(e)}', dataset_id=ortho.dataset_id, task_id=task.id)
+
+	# Only after the database points at the new COG is the old one unreachable.
+	delete_superseded_storage_file(settings.COG_DIR, previous_cog_path, cog.cog_path, token, ortho.dataset_id)
 
 	logger.info(
 		f'Finished creating new COG for dataset {ortho.dataset_id}.',

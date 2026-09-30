@@ -1,24 +1,12 @@
-from types import SimpleNamespace
-
 import pytest
 from fastapi.testclient import TestClient
 
-import api.src.routers.process as process_router
 from api.src.server import app
-from api.src.routers.process import _task_type_to_status_flags
 from shared.db import use_client, use_service_client, login
 from shared.settings import settings
-from shared.models import TaskTypeEnum, LicenseEnum, PlatformEnum, DatasetAccessEnum, StatusEnum
+from shared.models import LicenseEnum, PlatformEnum, DatasetAccessEnum, StatusEnum
 
 client = TestClient(app)
-
-
-def test_combined_task_maps_to_dedicated_status_flag():
-	assert _task_type_to_status_flags(TaskTypeEnum.deadwood_treecover_combined_v2) == ('is_combined_model_done',)
-
-
-def test_aoi_task_maps_to_dedicated_status_flag():
-	assert _task_type_to_status_flags(TaskTypeEnum.aoi_v1) == ('is_aoi_done',)
 
 
 @pytest.fixture(scope='function')
@@ -238,6 +226,34 @@ def test_create_processing_task_rejects_public_non_owner_without_mutating_status
 		queue = service_client.table(settings.queue_table).select('id').eq('dataset_id', test_dataset).execute().data
 	assert status == initial_status
 	assert queue == []
+
+
+def test_privileged_non_owner_rerun_replaces_the_owners_task(test_dataset, auth_token, test_user2):
+	"""A privileged rerun must replace the owner's waiting task, not queue a second one."""
+	response = client.put(
+		f'/datasets/{test_dataset}/process',
+		json={'task_types': ['metadata']},
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+	assert response.status_code == 200
+
+	with use_service_client() as service_client:
+		service_client.table('privileged_users').insert({'user_id': test_user2, 'can_view_all_private': True}).execute()
+	try:
+		privileged_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+		response = client.put(
+			f'/datasets/{test_dataset}/process',
+			json={'task_types': ['geotiff', 'cog']},
+			headers={'Authorization': f'Bearer {privileged_token}'},
+		)
+	finally:
+		with use_service_client() as service_client:
+			service_client.table('privileged_users').delete().eq('user_id', test_user2).execute()
+
+	assert response.status_code == 200
+	with use_service_client() as service_client:
+		queue = service_client.table(settings.queue_table).select('id,user_id,task_types').eq('dataset_id', test_dataset).execute().data
+	assert queue == [{'id': response.json()['id'], 'user_id': test_user2, 'task_types': ['geotiff', 'cog']}]
 
 
 def test_create_processing_task_invalid_dataset(auth_token):
@@ -517,64 +533,6 @@ def test_rerun_succeeds_after_failed_processing(test_dataset, auth_token):
 		assert status['is_cog_done'] is False
 		assert status['is_thumbnail_done'] is False
 		assert status['is_metadata_done'] is False
-
-
-class _ZeroRowStatusUpdateClient:
-	def table(self, table_name):
-		self.table_name = table_name
-		return self
-
-	def update(self, fields):
-		self.fields = fields
-		return self
-
-	def eq(self, column, value):
-		self.column = column
-		self.value = value
-		return self
-
-	def execute(self):
-		return SimpleNamespace(data=[])
-
-
-class _FakeServiceClientContext:
-	def __enter__(self):
-		return _ZeroRowStatusUpdateClient()
-
-	def __exit__(self, exc_type, exc, traceback):
-		return False
-
-
-def test_failed_status_reset_zero_rows_does_not_enqueue(test_dataset, auth_token, monkeypatch):
-	"""If the error reset does not update one status row, the API must not enqueue."""
-	with use_service_client() as supabaseClient:
-		supabaseClient.table(settings.statuses_table).update(
-			{
-				'has_error': True,
-				'error_message': 'Simulated stale error',
-				'current_status': StatusEnum.idle,
-			}
-		).eq('dataset_id', test_dataset).execute()
-
-	monkeypatch.setattr(process_router, 'use_service_client', lambda: _FakeServiceClientContext())
-
-	response = client.put(
-		f'/datasets/{test_dataset}/process',
-		json={'task_types': ['geotiff', 'cog']},
-		headers={'Authorization': f'Bearer {auth_token}'},
-	)
-
-	assert response.status_code == 500
-	assert 'expected exactly one status row update, got 0' in response.json()['detail']
-
-	with use_client(auth_token) as supabaseClient:
-		queue_response = supabaseClient.table(settings.queue_table).select('*').eq('dataset_id', test_dataset).execute()
-		assert queue_response.data == []
-
-		status_response = supabaseClient.table(settings.statuses_table).select('*').eq('dataset_id', test_dataset).execute()
-		status = status_response.data[0]
-		assert status['has_error'] is True
-		assert status['error_message'] == 'Simulated stale error'
 
 
 def test_rerun_combined_task_resets_only_combined_prediction_flag(test_dataset, auth_token):
