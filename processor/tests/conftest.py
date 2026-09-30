@@ -159,6 +159,15 @@ def test_dataset_for_processing(auth_token, test_file, test_processor_user):
 		shutil.rmtree(settings.processing_path)
 
 
+@pytest.fixture
+def standardized_local_ortho(test_dataset_for_processing, test_file):
+	"""Stand in for the geotiff stage's local output, which single-stage tests skip."""
+	path = Path(settings.processing_path) / f'{test_dataset_for_processing}_ortho.tif'
+	path.parent.mkdir(parents=True, exist_ok=True)
+	shutil.copy(test_file, path)
+	return path
+
+
 # @test_environment_only
 @pytest.fixture(autouse=True)
 def cleanup_storage(request):

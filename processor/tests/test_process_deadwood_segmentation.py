@@ -14,7 +14,7 @@ def test_file():
 
 
 @pytest.fixture
-def deadwood_task(test_dataset_for_processing, test_processor_user):
+def deadwood_task(test_dataset_for_processing, standardized_local_ortho, test_processor_user):
 	"""Create a test task specifically for deadwood segmentation processing"""
 	return QueueTask(
 		id=1,

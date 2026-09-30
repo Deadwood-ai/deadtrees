@@ -10,10 +10,10 @@ from rasterio.windows import Window
 
 from shared.logger import logger
 from shared.settings import settings
-from shared.models import LabelPayloadData, LabelSourceEnum, LabelTypeEnum, LabelDataEnum
-from shared.labels import create_label_with_geometries, delete_model_prediction_labels
+from shared.models import LabelDataEnum, TREECOVER_V1_MODEL_CONFIG
 from shared.logging import LogContext, LogCategory
-from shared.db import login, verify_token
+from shared.db import login
+from ..utils.prediction_labels import replace_model_prediction_label
 from ..utils.segmentation import (
 	mask_to_polygons_scanline,
 	reproject_polygons,
@@ -24,7 +24,7 @@ from processor.src.utils.debug_artifacts import (
 	retain_failed_artifacts_enabled_for_dataset,
 	write_debug_bundle,
 )
-from ..exceptions import ProcessingError, AuthenticationError
+from ..exceptions import ProcessingError
 from .tcd_inference import TCD_MODEL_REPO, TCD_MODEL_REVISION, TCDModel, predict_confidence_map
 
 # Load configuration
@@ -38,8 +38,6 @@ TCD_MODEL = TCD_MODEL_REPO
 TCD_TARGET_RESOLUTION = config['tree_cover_inference_resolution']  # 10cm resolution (forced for all inputs)
 TCD_TARGET_CRS = 'EPSG:3395'  # World Mercator - what the TCD model was trained on
 TCD_OUTPUT_CRS = 'EPSG:4326'  # WGS84 for database storage
-MODULE_NAME = 'treecover_segmentation_oam_tcd'
-CHECKPOINT_NAME = TCD_MODEL
 
 
 
@@ -332,23 +330,26 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 			],
 		}
 
-		# Create label payload
 		# Derive actual output resolution from the confidence map dataset to record in properties
 		with rasterio.open(str(confidence_map_path)) as dataset:
 			out_xres, out_yres = dataset.res
 			actual_resolution_m = float(max(abs(out_xres), abs(out_yres)))
 
-		payload = LabelPayloadData(
+		# Refresh the token after long inference; it is also used for logging below.
+		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
+
+		# Publish atomically; the previous tree cover label stays live until then.
+		logger.info(
+			'Creating label with forest cover geometries',
+			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
+		)
+		label = replace_model_prediction_label(
 			dataset_id=dataset_id,
-			label_source=LabelSourceEnum.model_prediction,
-			label_type=LabelTypeEnum.semantic_segmentation,
+			user_id=user_id,
 			label_data=LabelDataEnum.forest_cover,
-			label_quality=3,
-			model_metadata={
-				'module': MODULE_NAME,
-				'checkpoint_name': CHECKPOINT_NAME,
-			},
 			geometry=treecover_geojson,
+			token=token,
+			model_config=TREECOVER_V1_MODEL_CONFIG,
 			properties={
 				'model': TCD_MODEL,
 				'threshold': TCD_THRESHOLD,
@@ -357,34 +358,6 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 				'model_revision': TCD_MODEL_REVISION,
 			},
 		)
-
-		# Refresh token before database operations to avoid expiry after long inference
-		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-		user = verify_token(token)
-		if not user:
-			logger.error(
-				'Token refresh failed during treecover database operations',
-				LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
-			)
-			raise AuthenticationError('Token refresh failed', dataset_id=dataset_id)
-
-		# Delete existing tree cover prediction labels
-		deleted_count = delete_model_prediction_labels(
-			dataset_id=dataset_id, label_data=LabelDataEnum.forest_cover, token=token
-		)
-		if deleted_count > 0:
-			logger.info(
-				f'Deleted {deleted_count} existing tree cover prediction labels',
-				LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
-			)
-
-		# Create label with geometries
-		logger.info(
-			'Creating label with forest cover geometries',
-			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
-		)
-
-		label = create_label_with_geometries(payload, user_id, token)
 
 		logger.info(
 			f'Successfully created tree cover label {label.id} with {len(polygons)} geometries',

@@ -180,11 +180,15 @@ class TaskTypeEnum(str, Enum):
 			return None
 
 
+# Queue priority runs from 1 (lowest) to 5 (highest); v2_queue_positions orders by priority DESC.
+DEFAULT_QUEUE_PRIORITY = 2
+
+
 class TaskPayload(BaseModel):
 	id: Optional[int] = None
 	dataset_id: int
 	user_id: str
-	priority: int = 2
+	priority: int = DEFAULT_QUEUE_PRIORITY
 	is_processing: bool = False
 	claimed_by: Optional[str] = None
 	claimed_at: Optional[datetime] = None

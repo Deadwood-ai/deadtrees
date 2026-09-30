@@ -14,7 +14,7 @@ def test_file():
 
 
 @pytest.fixture
-def treecover_task(test_dataset_for_processing, test_processor_user):
+def treecover_task(test_dataset_for_processing, standardized_local_ortho, test_processor_user):
 	"""Create a test task specifically for tree cover segmentation processing"""
 	return QueueTask(
 		id=1,
@@ -183,7 +183,7 @@ def test_confidence_map_thresholding():
 
 
 @pytest.mark.comprehensive
-def test_pipeline_integration_deadwood_then_treecover(test_dataset_for_processing, test_processor_user, auth_token):
+def test_pipeline_integration_deadwood_then_treecover(test_dataset_for_processing, standardized_local_ortho, test_processor_user, auth_token):
 	"""Test that deadwood and treecover can run in sequence as intended"""
 	from processor.src.process_deadwood_segmentation import process_deadwood_segmentation
 

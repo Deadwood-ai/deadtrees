@@ -15,6 +15,7 @@ from shared.db import login, use_client
 from shared.testing.safety import ensure_test_environment
 from shared.models import (
 	TaskTypeEnum,
+	DEFAULT_QUEUE_PRIORITY,
 	StatusEnum,
 	DatasetAccessEnum,
 	LicenseEnum,
@@ -335,7 +336,7 @@ class DevCommands:
 		task_types: str = 'geotiff,cog,thumbnail,deadwood_v1,treecover_v1,metadata',
 		include_geotiff: bool = True,
 		run_processor: bool = True,
-		priority: int = 1,
+		priority: int = DEFAULT_QUEUE_PRIORITY,
 	):
 		"""
 		Prepare a local dataset and rerun specific processing steps.
@@ -346,7 +347,7 @@ class DevCommands:
 		    task_types: Comma-separated list of tasks
 		    include_geotiff: Automatically include geotiff if needed
 		    run_processor: Execute processor once in docker after enqueue
-		    priority: Queue priority (1=high)
+		    priority: Queue priority (5=highest, 1=lowest)
 		"""
 		ensure_test_environment()
 

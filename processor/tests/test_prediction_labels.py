@@ -63,7 +63,6 @@ def test_create_versioned_model_prediction_label_delegates_atomic_publication(mo
 
 	monkeypatch.setattr(prediction_labels, 'login', lambda *_args: 'processor-token')
 	monkeypatch.setattr(prediction_labels, 'use_client', lambda *_args, **_kwargs: fake_client)
-	monkeypatch.setattr(prediction_labels.logger, 'info', lambda *_args, **_kwargs: None)
 	monkeypatch.setattr(
 		prediction_labels,
 		'create_label_with_geometries',

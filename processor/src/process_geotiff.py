@@ -7,7 +7,7 @@ from shared.settings import settings
 from shared.models import StatusEnum, Ortho, QueueTask
 from shared.logger import logger
 from shared.ortho import upsert_processed_ortho_entry, upsert_ortho_entry
-from .utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
+from .utils.ssh import pull_file_from_storage_server, storage_server_path
 from .exceptions import AuthenticationError, DatasetError, ProcessingError, ConversionError
 from .geotiff.standardise_geotiff import standardise_geotiff, verify_geotiff
 from rio_cogeo.cogeo import cog_info
@@ -47,7 +47,7 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 		# Find orthomosaic at archive/{dataset_id}_ortho.tif. It is pulled once: the
 		# metadata below and the standardisation step both read this local copy.
 		ortho_file_name = f'{task.dataset_id}_ortho.tif'
-		storage_server_ortho_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{ortho_file_name}'
+		storage_server_ortho_path = storage_server_path(settings.ARCHIVE_DIR, ortho_file_name)
 		temp_ortho_path = temp_dir / ortho_file_name
 
 		try:
@@ -137,12 +137,7 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 		t2 = time.time()
 		ortho_processing_runtime = t2 - t1
 
-		# If verification successful, replace original file on storage server
-		logger.info(
-			'Pushing converted file to storage server',
-			LogContext(category=LogCategory.ORTHO, dataset_id=task.dataset_id, user_id=user.id, token=token),
-		)
-		# push_file_to_storage_server(str(path_converted), storage_server_path, token, task.dataset_id)
+		# The standardized ortho stays local for downstream stages; the archive keeps the upload.
 
 		# Update processed ortho entry with processing information
 		sha256 = get_file_identifier(path_converted)

@@ -14,7 +14,7 @@ MODEL_PATH = str(
 
 
 @pytest.fixture
-def combined_task(test_dataset_for_processing, test_processor_user):
+def combined_task(test_dataset_for_processing, standardized_local_ortho, test_processor_user):
 	return QueueTask(
 		id=1,
 		dataset_id=test_dataset_for_processing,

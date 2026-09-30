@@ -9,7 +9,11 @@ Why this exists:
 Example:
 	python3 scripts/requeue_datasets_via_api.py \\
 		--dataset-ids 8046,8037,6479,6073 \\
+		--task-types geotiff,cog,thumbnail,metadata,deadwood_treecover_combined_v2 \\
 		--priority 5
+
+The legacy deadwood_v1 and treecover_v1 stages replace the current model
+predictions, so they are rejected unless --allow-legacy-replacement is passed.
 """
 
 from __future__ import annotations
@@ -30,16 +34,7 @@ REQUIRED_KEYS = [
 ]
 
 
-DEFAULT_TASK_TYPES = [
-	"odm_processing",
-	"geotiff",
-	"cog",
-	"thumbnail",
-	"metadata",
-	"deadwood_v1",
-	"treecover_v1",
-	"deadwood_treecover_combined_v2",
-]
+LEGACY_REPLACEMENT_TASK_TYPES = frozenset({"deadwood_v1", "treecover_v1"})
 
 
 def _load_env_subset(path: Path, keys: list[str]) -> dict[str, str]:
@@ -94,6 +89,19 @@ def _parse_dataset_ids(raw: str) -> list[int]:
 	return ids
 
 
+def _parse_task_types(raw: str, allow_legacy_replacement: bool) -> list[str]:
+	task_types = [t.strip() for t in raw.split(",") if t.strip()]
+	if not task_types:
+		raise SystemExit("No task types provided")
+	legacy = sorted(LEGACY_REPLACEMENT_TASK_TYPES.intersection(task_types))
+	if legacy and not allow_legacy_replacement:
+		raise SystemExit(
+			f"{', '.join(legacy)} would replace the current model predictions; "
+			"pass --allow-legacy-replacement to run them anyway"
+		)
+	return task_types
+
+
 def main() -> int:
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--env-file", default=".env", help="Path to .env (default: .env)")
@@ -110,10 +118,17 @@ def main() -> int:
 	parser.add_argument("--priority", type=int, default=5, help="5=highest, 1=lowest (default: 5)")
 	parser.add_argument(
 		"--task-types",
-		default=",".join(DEFAULT_TASK_TYPES),
-		help="Comma-separated task types (default: full pipeline)",
+		required=True,
+		help="Comma-separated task types, e.g. geotiff,cog,thumbnail,metadata,deadwood_treecover_combined_v2",
+	)
+	parser.add_argument(
+		"--allow-legacy-replacement",
+		action="store_true",
+		help="Allow deadwood_v1/treecover_v1, which replace the current model predictions",
 	)
 	args = parser.parse_args()
+	task_types = _parse_task_types(args.task_types, args.allow_legacy_replacement)
+	dataset_ids = _parse_dataset_ids(args.dataset_ids)
 
 	env_path = Path(args.env_file)
 	if not env_path.exists():
@@ -143,8 +158,6 @@ def main() -> int:
 
 	token = token_resp["access_token"]
 
-	dataset_ids = _parse_dataset_ids(args.dataset_ids)
-	task_types = [t.strip() for t in str(args.task_types).split(",") if t.strip()]
 	payload = {"task_types": task_types, "priority": int(args.priority)}
 
 	ok = 0

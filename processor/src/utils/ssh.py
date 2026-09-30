@@ -1,7 +1,10 @@
 import os
+import uuid
+from contextlib import contextmanager
+from pathlib import Path, PurePosixPath
+
 import paramiko
-from pathlib import Path
-from datetime import datetime
+
 from shared.logger import logger
 from shared.settings import settings
 from shared.testing.safety import test_environment_only
@@ -32,207 +35,183 @@ def pull_file_from_storage_server(remote_file_path: str, local_file_path: str, t
 		)
 		return
 
+	with _storage_sftp(token, dataset_id) as sftp:
+		logger.info(
+			f'Pulling file from storage server: {remote_file_path} to {local_file_path}',
+			LogContext(
+				category=LogCategory.SSH,
+				token=token,
+				dataset_id=dataset_id,
+				extra={'remote_path': remote_file_path, 'local_path': local_file_path},
+			),
+		)
+
+		# Create the directory for local_file_path if it doesn't exist
+		local_dir = Path(local_file_path).parent
+		local_dir.mkdir(parents=True, exist_ok=True)
+		# A partial download must never look like a complete local file on the next run.
+		temp_local_path = f'{local_file_path}.{uuid.uuid4().hex}.tmp'
+		try:
+			sftp.get(remote_file_path, temp_local_path)
+			os.replace(temp_local_path, local_file_path)
+		finally:
+			if os.path.exists(temp_local_path):
+				os.remove(temp_local_path)
+
+	# Check if the file exists after pulling
+	if os.path.exists(local_file_path):
+		logger.info(
+			'File successfully pulled from storage server',
+			LogContext(
+				category=LogCategory.SSH,
+				token=token,
+				dataset_id=dataset_id,
+				extra={'local_path': local_file_path, 'file_size': Path(local_file_path).stat().st_size},
+			),
+		)
+	else:
+		logger.error(
+			'File not found after pulling from storage server',
+			LogContext(
+				category=LogCategory.SSH,
+				token=token,
+				dataset_id=dataset_id,
+				extra={'remote_path': remote_file_path, 'local_path': local_file_path},
+			),
+		)
+
+
+def storage_server_path(*parts: str) -> str:
+	"""Absolute path on the storage server below ``STORAGE_SERVER_DATA_PATH``."""
+	return '/'.join([settings.STORAGE_SERVER_DATA_PATH, *parts])
+
+
+@contextmanager
+def _storage_sftp(token: str, dataset_id: int | None):
 	with create_verified_ssh_client(settings.SSH_KNOWN_HOSTS_PATH) as ssh:
 		pkey = paramiko.Ed25519Key.from_private_key_file(settings.SSH_PRIVATE_KEY_PATH)
 		logger.info(
 			f'Connecting to storage server: {settings.STORAGE_SERVER_IP} as {settings.STORAGE_SERVER_USERNAME}',
 			LogContext(category=LogCategory.SSH, token=token, dataset_id=dataset_id),
 		)
-		port = 2222 if settings.DEV_MODE else 22
-
 		_connect_with_retry(
 			ssh,
 			hostname=settings.STORAGE_SERVER_IP,
 			username=settings.STORAGE_SERVER_USERNAME,
 			pkey=pkey,
-			port=port,
+			port=2222 if settings.DEV_MODE else 22,
 		)
-
 		with ssh.open_sftp() as sftp:
-			logger.info(
-				f'Pulling file from storage server: {remote_file_path} to {local_file_path}',
-				LogContext(
-					category=LogCategory.SSH,
-					token=token,
-					dataset_id=dataset_id,
-					extra={'remote_path': remote_file_path, 'local_path': local_file_path},
-				),
-			)
-
-			# Create the directory for local_file_path if it doesn't exist
-			local_dir = Path(local_file_path).parent
-			local_dir.mkdir(parents=True, exist_ok=True)
-			sftp.get(remote_file_path, local_file_path)
-
-		# Check if the file exists after pulling
-		if os.path.exists(local_file_path):
-			logger.info(
-				'File successfully pulled from storage server',
-				LogContext(
-					category=LogCategory.SSH,
-					token=token,
-					dataset_id=dataset_id,
-					extra={'local_path': local_file_path, 'file_size': Path(local_file_path).stat().st_size},
-				),
-			)
-		else:
-			logger.error(
-				'File not found after pulling from storage server',
-				LogContext(
-					category=LogCategory.SSH,
-					token=token,
-					dataset_id=dataset_id,
-					extra={'remote_path': remote_file_path, 'local_path': local_file_path},
-				),
-			)
+			yield sftp
 
 
 def push_file_to_storage_server(local_file_path: str, remote_file_path: str, token: str, dataset_id: int):
-	with create_verified_ssh_client(settings.SSH_KNOWN_HOSTS_PATH) as ssh:
-		pkey = paramiko.Ed25519Key.from_private_key_file(settings.SSH_PRIVATE_KEY_PATH)
-		logger.info(
-			f'Connecting to storage server: {settings.STORAGE_SERVER_IP} as {settings.STORAGE_SERVER_USERNAME}',
+	"""Upload to a unique temp name, then atomically rename over the final path.
+
+	Readers see either the previous complete file or the new complete file, never
+	a partial upload.
+	"""
+	with _storage_sftp(token, dataset_id) as sftp:
+		temp_remote_path = f'{remote_file_path}.{uuid.uuid4().hex}.tmp'
+		try:
+			# Create parent directory if it doesn't exist (needed for UUID-prefixed paths)
+			remote_dir = str(PurePosixPath(remote_file_path).parent)
+			try:
+				sftp.stat(remote_dir)
+			except IOError:
+				logger.info(
+					'Creating remote directory',
+					LogContext(
+						category=LogCategory.SSH, token=token, dataset_id=dataset_id, extra={'remote_dir': remote_dir}
+					),
+				)
+				sftp.mkdir(remote_dir)
+
+			sftp.put(local_file_path, temp_remote_path)
+			sftp.posix_rename(temp_remote_path, remote_file_path)
+
+			logger.info(
+				'File successfully pushed to storage server',
+				LogContext(
+					category=LogCategory.SSH,
+					token=token,
+					dataset_id=dataset_id,
+					extra={'remote_path': remote_file_path},
+				),
+			)
+
+		except Exception as e:
+			try:
+				sftp.remove(temp_remote_path)
+			except IOError:
+				pass
+
+			logger.error(
+				'Failed to push file to storage server',
+				LogContext(
+					category=LogCategory.SSH,
+					token=token,
+					dataset_id=dataset_id,
+					extra={
+						'error': str(e),
+						'remote_path': remote_file_path,
+						'local_path': local_file_path,
+					},
+				),
+			)
+			raise
+
+
+def delete_superseded_storage_file(
+	storage_dir: str, previous_path: str | None, current_path: str, token: str, dataset_id: int
+) -> None:
+	"""Best-effort removal of a replaced file once the database points at its successor.
+
+	``previous_path`` and ``current_path`` are relative to ``storage_dir`` (for example
+	``<uuid>/<file>``). Only a plain file name or a single UUID directory holding it
+	is removed; anything else is left alone. Failures are logged, never raised.
+	"""
+	if not previous_path or previous_path == current_path:
+		return
+	parts = PurePosixPath(previous_path).parts
+	if (
+		PurePosixPath(previous_path).is_absolute()
+		or len(parts) not in (1, 2)
+		or any(part in ('', '.', '..') for part in parts)
+		or (len(parts) == 2 and not _is_uuid(parts[0]))
+	):
+		logger.warning(
+			f'Not deleting unexpected superseded storage path {previous_path!r}',
 			LogContext(category=LogCategory.SSH, token=token, dataset_id=dataset_id),
 		)
-		port = 2222 if settings.DEV_MODE else 22
+		return
 
-		_connect_with_retry(
-			ssh,
-			hostname=settings.STORAGE_SERVER_IP,
-			username=settings.STORAGE_SERVER_USERNAME,
-			pkey=pkey,
-			port=port,
+	remote_file_path = storage_server_path(storage_dir, *parts)
+	try:
+		with _storage_sftp(token, dataset_id) as sftp:
+			try:
+				sftp.remove(remote_file_path)
+			except FileNotFoundError:
+				pass
+			if len(parts) == 2:
+				sftp.rmdir(storage_server_path(storage_dir, parts[0]))
+		logger.info(
+			f'Deleted superseded storage file {remote_file_path}',
+			LogContext(category=LogCategory.SSH, token=token, dataset_id=dataset_id),
+		)
+	except Exception as e:
+		logger.warning(
+			f'Could not delete superseded storage file {remote_file_path}: {str(e)}',
+			LogContext(category=LogCategory.SSH, token=token, dataset_id=dataset_id),
 		)
 
-		with ssh.open_sftp() as sftp:
-			temp_remote_path = f'{remote_file_path}.tmp'
 
-			try:
-				# Create parent directory if it doesn't exist (needed for UUID-prefixed paths)
-				remote_dir = str(Path(remote_file_path).parent)
-				try:
-					sftp.stat(remote_dir)
-				except IOError:
-					# Directory doesn't exist, create it
-					logger.info(
-						'Creating remote directory',
-						LogContext(
-							category=LogCategory.SSH,
-							token=token,
-							dataset_id=dataset_id,
-							extra={'remote_dir': remote_dir},
-						),
-					)
-					sftp.mkdir(remote_dir)
-
-				# Check if file exists on remote host
-				try:
-					sftp.stat(remote_file_path)
-					file_exists = True
-				except IOError:
-					file_exists = False
-
-				if file_exists:
-					logger.info(
-						'File exists on remote, using atomic rename approach',
-						LogContext(
-							category=LogCategory.SSH,
-							token=token,
-							dataset_id=dataset_id,
-							extra={'remote_path': remote_file_path},
-						),
-					)
-
-					# Upload to temporary location first
-					logger.info(
-						'Uploading file to temporary location',
-						LogContext(
-							category=LogCategory.SSH,
-							token=token,
-							dataset_id=dataset_id,
-							extra={'temp_path': temp_remote_path},
-						),
-					)
-					sftp.put(local_file_path, temp_remote_path)
-
-					# Move existing file to trash directory with timestamp
-					timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-					trash_filename = f'{Path(remote_file_path).stem}_{timestamp}{Path(remote_file_path).suffix}'
-					trash_path = settings.trash_path / trash_filename
-					sftp.rename(remote_file_path, str(trash_path))
-					logger.info(
-						'Moved existing file to trash',
-						LogContext(
-							category=LogCategory.SSH,
-							token=token,
-							dataset_id=dataset_id,
-							extra={'original_path': remote_file_path, 'trash_path': str(trash_path)},
-						),
-					)
-
-					# Atomic rename from temp to final location
-					logger.info(
-						'Moving file to final location',
-						LogContext(
-							category=LogCategory.SSH,
-							token=token,
-							dataset_id=dataset_id,
-							extra={'from_path': temp_remote_path, 'to_path': remote_file_path},
-						),
-					)
-					sftp.posix_rename(temp_remote_path, remote_file_path)
-				else:
-					logger.info(
-						'File does not exist on remote, uploading directly',
-						LogContext(
-							category=LogCategory.SSH,
-							token=token,
-							dataset_id=dataset_id,
-							extra={'remote_path': remote_file_path},
-						),
-					)
-					sftp.put(local_file_path, remote_file_path)
-
-				logger.info(
-					'File successfully pushed to storage server',
-					LogContext(
-						category=LogCategory.SSH,
-						token=token,
-						dataset_id=dataset_id,
-						extra={'remote_path': remote_file_path},
-					),
-				)
-
-			except Exception as e:
-				# Clean up temp file if it exists
-				try:
-					sftp.remove(temp_remote_path)
-					logger.info(
-						'Cleaned up temporary file after failure',
-						LogContext(
-							category=LogCategory.SSH,
-							token=token,
-							dataset_id=dataset_id,
-							extra={'temp_path': temp_remote_path, 'error': str(e)},
-						),
-					)
-				except IOError:
-					pass
-
-				logger.error(
-					'Failed to push file to storage server',
-					LogContext(
-						category=LogCategory.SSH,
-						token=token,
-						dataset_id=dataset_id,
-						extra={
-							'error': str(e),
-							'remote_path': remote_file_path,
-							'local_path': local_file_path,
-						},
-					),
-				)
-				raise
+def _is_uuid(value: str) -> bool:
+	try:
+		uuid.UUID(value)
+	except ValueError:
+		return False
+	return True
 
 
 @test_environment_only
@@ -275,24 +254,11 @@ def check_file_exists_on_storage(remote_file_path: str, token: str) -> bool:
 	Returns:
 		bool: True if file exists, False otherwise
 	"""
-	with create_verified_ssh_client(settings.SSH_KNOWN_HOSTS_PATH) as ssh:
-		pkey = paramiko.Ed25519Key.from_private_key_file(settings.SSH_PRIVATE_KEY_PATH)
-
-		port = 2222 if settings.DEV_MODE else 22
-
-		_connect_with_retry(
-			ssh,
-			hostname=settings.STORAGE_SERVER_IP,
-			username=settings.STORAGE_SERVER_USERNAME,
-			pkey=pkey,
-			port=port,
-		)
-
-		with ssh.open_sftp() as sftp:
-			try:
-				sftp.stat(remote_file_path)
-				logger.info(f'File exists on storage server: {remote_file_path}', extra={'token': token})
-				return True
-			except IOError:
-				logger.info(f'File not found on storage server: {remote_file_path}', extra={'token': token})
-				return False
+	with _storage_sftp(token, None) as sftp:
+		try:
+			sftp.stat(remote_file_path)
+			logger.info(f'File exists on storage server: {remote_file_path}', extra={'token': token})
+			return True
+		except IOError:
+			logger.info(f'File not found on storage server: {remote_file_path}', extra={'token': token})
+			return False
