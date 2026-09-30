@@ -22,7 +22,7 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 			'Invalid processor token',
 			LogContext(category=LogCategory.AUTH, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 		)
-		raise AuthenticationError('Invalid processor token', token=token, task_id=task.id)
+		raise AuthenticationError('Invalid processor token', task_id=task.id)
 
 	# load the dataset
 	try:
@@ -140,7 +140,7 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 				'Token refresh failed',
 				LogContext(category=LogCategory.AUTH, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 			)
-			raise AuthenticationError('Token refresh failed', token=token, task_id=task.id)
+			raise AuthenticationError('Token refresh failed', task_id=task.id)
 
 		with use_client(token) as client:
 			client.table(settings.thumbnails_table).upsert(

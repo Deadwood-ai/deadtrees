@@ -366,7 +366,7 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 				'Token refresh failed during treecover database operations',
 				LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 			)
-			raise AuthenticationError('Token refresh failed', token=token, dataset_id=dataset_id)
+			raise AuthenticationError('Token refresh failed', dataset_id=dataset_id)
 
 		# Delete existing tree cover prediction labels
 		deleted_count = delete_model_prediction_labels(

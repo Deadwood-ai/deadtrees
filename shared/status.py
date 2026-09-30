@@ -5,6 +5,7 @@ from .models import StatusEnum
 from .db import use_client
 from .settings import settings
 from .logger import logger
+from .redaction import redact_tokens
 from .retry import retry_on_transient_error
 from shared.logging import LogContext, LogCategory
 
@@ -92,7 +93,7 @@ def update_status(
 		elif has_error is True or error_stage is not None:
 			update_data['error_stage'] = error_stage
 		if error_message is not None:
-			update_data['error_message'] = error_message
+			update_data['error_message'] = redact_tokens(error_message)
 
 		if update_data:
 			update_data['updated_at'] = datetime.now(timezone.utc).isoformat()

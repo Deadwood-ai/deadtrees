@@ -11,9 +11,8 @@ class ProcessorError(Exception):
 class AuthenticationError(ProcessorError):
 	"""Raised when authentication/token validation fails"""
 
-	def __init__(self, message: str = 'Authentication failed', token: str | None = None, **kwargs):
-		self.token = token
-		super().__init__(f'{message} (token: {token})', **kwargs)
+	def __init__(self, message: str = 'Authentication failed', **kwargs):
+		super().__init__(message, **kwargs)
 
 
 class DatasetError(ProcessorError):

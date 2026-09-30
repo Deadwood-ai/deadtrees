@@ -31,7 +31,7 @@ def process_metadata(task: QueueTask, temp_dir: Path):
 			'Invalid processor token',
 			LogContext(category=LogCategory.AUTH, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 		)
-		raise AuthenticationError('Invalid processor token', token=token, task_id=task.id)
+		raise AuthenticationError('Invalid processor token', task_id=task.id)
 
 	try:
 		# Get orthophoto

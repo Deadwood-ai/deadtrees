@@ -4,6 +4,7 @@ from enum import Enum
 from shared.settings import settings
 from shared.__version__ import __version__
 from shared.db import use_client
+from shared.redaction import redact_tokens
 
 
 class LogCategory(Enum):
@@ -68,7 +69,7 @@ class SupabaseHandler(logging.Handler):
 			log_entry = {
 				'name': record.name,
 				'level': record.levelname,
-				'message': self.format(record),
+				'message': redact_tokens(self.format(record)),
 				'origin': record.filename,
 				'origin_line': record.lineno,
 				'backend_version': __version__,
