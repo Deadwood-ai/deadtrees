@@ -14,7 +14,7 @@ pytestmark = pytest.mark.unit
 
 @pytest.mark.parametrize('lost_publication_response', [False, True])
 def test_upload_inactive_then_publish(monkeypatch, lost_publication_response):
-	monkeypatch.setattr('shared.db.cached_session', None)
+	monkeypatch.setattr('shared.db._cached_sessions', {})
 	monkeypatch.setattr('shared.retry.time.sleep', lambda _delay: None)
 	requests = []
 	created = None

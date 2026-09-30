@@ -1,6 +1,6 @@
 from typing import Union, Literal, Optional, Generator, Any
 from contextlib import contextmanager
-import hashlib
+import hmac
 import time
 import logging
 
@@ -12,14 +12,10 @@ from shared.settings import settings
 # Create logger instance at module level
 logger = logging.getLogger(__name__)
 
-# Sessions of service accounts (the processor), keyed by credentials. A key that
-# includes the password digest means a wrong password never matches a cached
-# session, and one account can never receive another account's token.
-_cached_sessions: dict[tuple[str, str], Any] = {}
-
-
-def _session_key(user: str, password: str) -> tuple[str, str]:
-	return user, hashlib.sha256(password.encode()).hexdigest()
+# Sessions of service accounts (the processor), by email, together with the
+# password they were created with. A different password never matches, so one
+# account can never receive another account's token or skip the password check.
+_cached_sessions: dict[str, tuple[str, Any]] = {}
 
 
 def login(user: str, password: str, use_cached_session: bool = True) -> str:
@@ -30,12 +26,12 @@ def login(user: str, password: str, use_cached_session: bool = True) -> str:
 	reused, so long-running service accounts do not sign in on every call.
 	Requests on behalf of end users must pass ``use_cached_session=False``.
 	"""
-	key = _session_key(user, password)
 	threshold = 60 * 20  # renew 20 minutes before expiration
 
-	cached = _cached_sessions.get(key) if use_cached_session else None
-	if cached and cached.session.expires_at > int(time.time()) + threshold:
-		return cached.session.access_token
+	if use_cached_session and user in _cached_sessions:
+		cached_password, cached = _cached_sessions[user]
+		if hmac.compare_digest(cached_password, password) and cached.session.expires_at > int(time.time()) + threshold:
+			return cached.session.access_token
 
 	client = create_client(
 		settings.SUPABASE_URL,
@@ -45,10 +41,9 @@ def login(user: str, password: str, use_cached_session: bool = True) -> str:
 	try:
 		auth_response = client.auth.sign_in_with_password({'email': user, 'password': password})
 	except Exception as e:
-		_cached_sessions.pop(key, None)
 		raise Exception(f'Login failed: {str(e)}')
 	if use_cached_session:
-		_cached_sessions[key] = auth_response
+		_cached_sessions[user] = (password, auth_response)
 	return auth_response.session.access_token
 
 
@@ -76,19 +71,15 @@ def verify_token(jwt: str) -> Union[Literal[False], Any]:
 	Returns:
 	    Union[Literal[False], Any]: Returns true if user session is active, false if not
 	"""
-	global cached_session
-
-	# make the authentication
 	try:
 		with use_client(jwt) as client:
 			response = client.auth.get_user(jwt)
 		return response.user
-	except Exception as e:
-		# If verification fails and we have a cached session, clear it
-		# This handles the case where the session was invalidated server-side
-		if cached_session and 'Session from session_id claim in JWT does not exist' in str(e):
-			print('cached session invalidated server-side, clearing cache')
-			cached_session = None
+	except Exception:
+		# A rejected token must not be served from the cache again.
+		for user, (_, cached) in list(_cached_sessions.items()):
+			if cached.session.access_token == jwt:
+				_cached_sessions.pop(user, None)
 		return False
 
 

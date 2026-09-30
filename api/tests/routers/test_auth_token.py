@@ -24,3 +24,12 @@ def test_token_belongs_to_the_submitted_account_and_needs_its_password(test_user
 	assert second.status_code == 200
 	assert verify_token(second.json()['access_token']).id == test_user2
 	assert verify_token(first.json()['access_token']).id == test_user
+
+
+def test_rejected_bearer_token_is_a_401_not_a_server_error():
+	response = client.put(
+		'/datasets/1/process',
+		headers={'Authorization': 'Bearer not-a-valid-token'},
+		json={'task_types': ['cog']},
+	)
+	assert response.status_code == 401

@@ -96,3 +96,25 @@ def test_uncached_login_always_signs_in(fake_auth):
 
 	assert fake_auth.sign_ins == ['a@example.com', 'a@example.com']
 	assert db._cached_sessions == {}
+
+
+def test_rejected_token_returns_false_and_leaves_the_cache(fake_auth, monkeypatch):
+	token = db.login('a@example.com', 'secret-a')
+
+	class _RejectingClient:
+		class auth:
+			@staticmethod
+			def get_user(jwt):
+				raise RuntimeError('Session from session_id claim in JWT does not exist')
+
+		def __enter__(self):
+			return self
+
+		def __exit__(self, *args):
+			return False
+
+	monkeypatch.setattr(db, 'use_client', lambda jwt: _RejectingClient())
+
+	assert db.verify_token(token) is False
+	assert db._cached_sessions == {}
+	assert db.login('a@example.com', 'secret-a') != token
