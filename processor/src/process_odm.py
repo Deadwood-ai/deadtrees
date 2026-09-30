@@ -55,6 +55,7 @@ UNDISTORTED_DIR = 'opensfm/undistorted'
 # Written by OpenSfM's reconstruct step; lists the images of each partial reconstruction.
 OPENSFM_RECONSTRUCT_REPORT = 'opensfm/reports/reconstruction.json'
 PRUNE_POINTS_SCRIPT = Path(__file__).parent / 'utils' / 'odm_prune_points.py'
+CHECK_PHOTOS_SCRIPT = Path(__file__).parent / 'utils' / 'odm_check_photos.py'
 # Several DJI cameras write exactly 0 into these tags for nadir shots (DT-951).
 PLACEHOLDER_ZERO_PITCH_TAGS = {'GimbalPitchDegree', 'CameraPitchDegree'}
 # Fewer nadir images than this among oblique ones cannot make an orthophoto (e.g. one take-off frame).
@@ -180,6 +181,34 @@ def _filter_reconstruction_by_orientation(
 	return shots_dropped
 
 
+def _run_script_in_odm_image(
+	client, script: Path, args: list[str], volume_name: str, resource_labels: dict, dataset_id: int, role: str
+) -> str:
+	"""Run a self-contained script with the ODM image's Python on the shared volume; return its last output line."""
+	container = client.containers.run(
+		image=settings.ODM_IMAGE,
+		# The image's PATH picks the Python that has OpenSfM (ODM 3.6 puts /code/venv/bin first),
+		# and its working directory /code makes the opendm package importable.
+		entrypoint='python3',
+		command=['-c', script.read_text(), *args],
+		volumes={volume_name: {'bind': '/odm_data', 'mode': 'rw'}},
+		mem_limit='100g',
+		memswap_limit='100g',
+		oom_score_adj=500,
+		detach=True,
+		name=f'dt-odm-{role}-d{dataset_id}-{int(time.time())}',
+		labels={**resource_labels, 'dt_role': f'odm_{role}', 'dt_volume': volume_name},
+	)
+	try:
+		result = container.wait()
+		output = container.logs().decode('utf-8', errors='ignore')
+	finally:
+		container.remove(force=True)
+	if result.get('StatusCode', 1) != 0:
+		raise Exception(f'{script.name} failed in the ODM image: {output[-2000:]}')
+	return output.strip().splitlines()[-1]
+
+
 def _prune_unobserved_points(
 	client, volume_name: str, project_name: str, resource_labels: dict, dataset_id: int, token: str
 ) -> None:
@@ -188,30 +217,59 @@ def _prune_unobserved_points(
 	OpenSfM's export fails on such points once their observations are gone, and
 	tracks.csv is a binary OpenSfM format, so this runs odm_prune_points.py there.
 	"""
-	container = client.containers.run(
-		image=settings.ODM_IMAGE,
-		# The image's PATH picks the Python that has OpenSfM (ODM 3.6 puts /code/venv/bin first).
-		entrypoint='python3',
-		command=['-c', PRUNE_POINTS_SCRIPT.read_text(), f'/odm_data/{project_name}/opensfm'],
-		volumes={volume_name: {'bind': '/odm_data', 'mode': 'rw'}},
-		mem_limit='100g',
-		memswap_limit='100g',
-		oom_score_adj=500,
-		detach=True,
-		name=f'dt-odm-prune-d{dataset_id}-{int(time.time())}',
-		labels={**resource_labels, 'dt_role': 'odm_prune', 'dt_volume': volume_name},
+	summary = _run_script_in_odm_image(
+		client,
+		PRUNE_POINTS_SCRIPT,
+		[f'/odm_data/{project_name}/opensfm'],
+		volume_name,
+		resource_labels,
+		dataset_id,
+		'prune',
 	)
-	try:
-		result = container.wait()
-		output = container.logs().decode('utf-8', errors='ignore')
-	finally:
-		container.remove(force=True)
-	if result.get('StatusCode', 1) != 0:
-		raise Exception(f'Pruning sparse points of excluded shots failed: {output[-2000:]}')
 	logger.info(
-		f'Pruned sparse points seen only by excluded shots: {output.strip().splitlines()[-1]}',
+		f'Pruned sparse points seen only by excluded shots: {summary}',
 		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 	)
+
+
+def _check_photos_for_odm(
+	client, volume_name: str, project_name: str, resource_labels: dict, dataset_id: int, token: str
+) -> None:
+	"""Parse every image with ODM's own photo parser before ODM runs, so one unreadable image cannot stop it.
+
+	See odm_check_photos.py: images that crash the parser get their MakerNote blanked
+	(DT-1289, DJI "DJI MakerNotes" placeholder), and images that still crash are left out.
+	"""
+	summary = json.loads(
+		_run_script_in_odm_image(
+			client,
+			CHECK_PHOTOS_SCRIPT,
+			[f'/odm_data/{project_name}/images'],
+			volume_name,
+			resource_labels,
+			dataset_id,
+			'photo_check',
+		)
+	)
+	log_context = LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id)
+	repaired, removed = summary['repaired'], summary['removed']
+	logger.info(
+		f'ODM photo check parsed {summary["checked"]} images: blanked the MakerNote of {len(repaired)} and '
+		f'left out {len(removed)} that ODM cannot parse',
+		log_context,
+	)
+	if repaired:
+		logger.warning(
+			f"Blanked the MakerNote of images that crashed ODM's EXIF parser (GPS, XMP and pixels unchanged): "
+			f'{", ".join(repaired[:10])}{" ..." if len(repaired) > 10 else ""}',
+			log_context,
+		)
+	if removed:
+		removed_sample = '; '.join(f'{entry["image"]} ({entry["error"]})' for entry in removed[:5])
+		logger.warning(
+			f'Left out images that ODM cannot parse: {removed_sample}{" ..." if len(removed) > 5 else ""}',
+			log_context,
+		)
 
 
 def process_odm(task: QueueTask, temp_dir: Path):
@@ -893,8 +951,10 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		# Copy files to shared volume using the current approach
 		copy_files_to_shared_volume(images_dir, valid_image_files, rtk_files, volume_name, dataset_id, token)
 
-		# Environment-aware ODM configuration
 		project_name = f'dataset_{dataset_id}'
+		_check_photos_for_odm(client, volume_name, project_name, resource_labels, dataset_id, token)
+
+		# Environment-aware ODM configuration
 		odm_command, resolution, env_mode = _build_odm_command()
 
 		# Add common parameters
