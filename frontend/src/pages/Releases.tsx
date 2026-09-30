@@ -156,7 +156,7 @@ function GuideCard({
 
 function ReleaseScreenshot({ src, alt }: { src: string; alt: string }) {
   return (
-    <div className="aspect-[2/1] overflow-hidden border-b border-gray-100 bg-gray-100">
+    <div className="aspect-[3/1] overflow-hidden border-b border-gray-100 bg-white sm:aspect-[6/1]">
       <img
         src={src}
         alt={alt}
