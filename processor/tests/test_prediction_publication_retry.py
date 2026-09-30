@@ -88,7 +88,7 @@ def test_upload_inactive_then_publish(monkeypatch, lost_publication_response):
 
 def test_failed_replacement_discards_unpublished_upload(monkeypatch):
 	"""A rejected publication leaves the previous label live and removes the staged upload."""
-	monkeypatch.setattr('shared.db.cached_session', None)
+	monkeypatch.setattr('shared.db._cached_sessions', {})
 	monkeypatch.setattr('shared.retry.time.sleep', lambda _delay: None)
 	requests = []
 
