@@ -272,6 +272,21 @@ def _start_job(
 	return _status_response(job, job_id, noun)
 
 
+# A status poll and the final redirect name the file their download request
+# started. Recomputing the content version there re-read every label on each
+# poll, and an edit made while the file was prepared turned the poll into a
+# failure. Each request remembers its file per user and variant; polls reuse it
+# and recompute only when it is unknown, for example after an API restart.
+_REQUESTED_FILES: dict[tuple, PreparedFileJob] = {}
+_MAX_REQUESTED_FILES = 10_000
+
+
+def _remember_requested_file(key: tuple, job: PreparedFileJob) -> None:
+	if len(_REQUESTED_FILES) >= _MAX_REQUESTED_FILES:
+		_REQUESTED_FILES.clear()
+	_REQUESTED_FILES[key] = job
+
+
 def _redirect_to_file(job: PreparedFileJob, not_found_detail: str) -> RedirectResponse:
 	status = job.status()
 	if status.state == JobState.COMPLETED:
@@ -310,6 +325,22 @@ async def _dataset_bundle_job(
 	return job, dataset, ortho, metadata, labels
 
 
+async def _requested_dataset_bundle_job(
+	user_id,
+	dataset_id: int,
+	token: str,
+	include_labels: bool,
+	include_parquet: bool,
+	use_original_filename: bool,
+) -> PreparedFileJob:
+	job = _REQUESTED_FILES.get((str(user_id), 'dataset', dataset_id, include_labels, include_parquet, use_original_filename))
+	if job is None:
+		job, *_ = await _dataset_bundle_job(dataset_id, token, include_labels, include_parquet, use_original_filename)
+	else:
+		await get_accessible_dataset(dataset_id=dataset_id, token=token, allow_viewonly_full_download=False)
+	return job
+
+
 @download_app.get('/datasets/{dataset_id}/dataset.zip', response_model=DownloadStatus)
 async def download_dataset(
 	dataset_id: str,
@@ -333,6 +364,9 @@ async def download_dataset(
 	)
 	if not ortho:
 		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id_int}> has no ortho file.')
+	_remember_requested_file(
+		(str(user.id), 'dataset', dataset_id_int, include_labels, include_parquet, use_original_filename), job
+	)
 	record_download_request(user.id, [dataset_id_int], 'dataset')
 
 	def build(target: Path):
@@ -361,13 +395,15 @@ async def check_download_status(
 ):
 	"""Check the status of a dataset bundle job"""
 	dataset_id_int = parse_dataset_id(dataset_id)
-	validate_user_and_limit(
+	user = validate_user_and_limit(
 		token=token,
 		endpoint='datasets/{dataset_id}/status',
 		dataset_id=dataset_id_int,
 		count_towards_limit=False,
 	)
-	job, *_ = await _dataset_bundle_job(dataset_id_int, token, include_labels, include_parquet, use_original_filename)
+	job = await _requested_dataset_bundle_job(
+		user.id, dataset_id_int, token, include_labels, include_parquet, use_original_filename
+	)
 	return _status_response(job, str(dataset_id_int), 'Dataset bundle')
 
 
@@ -381,12 +417,14 @@ async def download_dataset_file(
 ):
 	"""Redirect to the actual download file once it's ready"""
 	dataset_id_int = parse_dataset_id(dataset_id)
-	validate_user_and_limit(
+	user = validate_user_and_limit(
 		token=token,
 		endpoint='datasets/{dataset_id}/download',
 		dataset_id=dataset_id_int,
 	)
-	job, *_ = await _dataset_bundle_job(dataset_id_int, token, include_labels, include_parquet, use_original_filename)
+	job = await _requested_dataset_bundle_job(
+		user.id, dataset_id_int, token, include_labels, include_parquet, use_original_filename
+	)
 	return _redirect_to_file(job, f'Download file for dataset <ID={dataset_id_int}> not found')
 
 
@@ -401,6 +439,15 @@ async def _labels_job(dataset_id: int, token: str) -> tuple[PreparedFileJob, Exp
 		scope = read_export_scope(client, dataset_id)
 	filename = get_labels_filename(dataset_id, labels_content_version(scope, token))
 	return prepared_job(settings.downloads_path / str(dataset_id) / filename), scope
+
+
+async def _requested_labels_job(user_id, dataset_id: int, token: str) -> PreparedFileJob:
+	job = _REQUESTED_FILES.get((str(user_id), 'labels', dataset_id))
+	if job is None:
+		job, _ = await _labels_job(dataset_id, token)
+	else:
+		await get_accessible_dataset(dataset_id=dataset_id, token=token, allow_viewonly_full_download=True)
+	return job
 
 
 @download_app.get('/datasets/{dataset_id}/labels.gpkg', response_model=DownloadStatus)
@@ -419,6 +466,7 @@ async def get_labels(
 		dataset_id=dataset_id_int,
 	)
 	job, scope = await _labels_job(dataset_id_int, token)
+	_remember_requested_file((str(user.id), 'labels', dataset_id_int), job)
 	record_download_request(user.id, [dataset_id_int], 'labels')
 	build = partial(create_consolidated_geopackage, dataset_id_int, scope)
 	return _start_job(job, background_tasks, build, f'labels_{dataset_id_int}', 'Labels GeoPackage')
@@ -431,13 +479,13 @@ async def check_labels_status(
 ):
 	"""Check the status of a labels GeoPackage job"""
 	dataset_id_int = parse_dataset_id(dataset_id)
-	validate_user_and_limit(
+	user = validate_user_and_limit(
 		token=token,
 		endpoint='datasets/{dataset_id}/labels/status',
 		dataset_id=dataset_id_int,
 		count_towards_limit=False,
 	)
-	job, _ = await _labels_job(dataset_id_int, token)
+	job = await _requested_labels_job(user.id, dataset_id_int, token)
 	return _status_response(job, f'labels_{dataset_id_int}', 'Labels GeoPackage')
 
 
@@ -448,12 +496,12 @@ async def download_labels_file(
 ):
 	"""Redirect to the actual labels download file once it's ready"""
 	dataset_id_int = parse_dataset_id(dataset_id)
-	validate_user_and_limit(
+	user = validate_user_and_limit(
 		token=token,
 		endpoint='datasets/{dataset_id}/labels/download',
 		dataset_id=dataset_id_int,
 	)
-	job, _ = await _labels_job(dataset_id_int, token)
+	job = await _requested_labels_job(user.id, dataset_id_int, token)
 	return _redirect_to_file(job, f'Labels file for dataset <ID={dataset_id_int}> not found')
 
 
