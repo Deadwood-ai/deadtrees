@@ -473,3 +473,81 @@ def test_failed_v1_replacement_keeps_previous_label(prediction):
 	with pytest.raises(Exception, match='foreign key'):
 		replace(prediction, new.id)
 	assert [row[:3] for row in state(prediction)] == [(old.id, True, 1), (new.id, False, 0)]
+
+
+def _circle(points: int) -> Polygon:
+	import math
+
+	return Polygon(
+		[(7.8 + 0.01 * math.cos(2 * math.pi * i / points), 48 + 0.01 * math.sin(2 * math.pi * i / points)) for i in range(points)]
+	)
+
+
+def test_oversized_polygon_is_stored_whole_through_the_large_geometry_rpc(prediction):
+	"""One polygon above the chunk byte target (here ~2.4 MB WKB) is stored as one complete row."""
+	huge = _circle(150_000)
+	label = stage(prediction, geometry=MultiPolygon([huge]).__geo_interface__)
+	publish(prediction, label.id)
+
+	stored = prediction['db'].execute(
+		'SELECT count(*), max(ST_NPoints(geometry)) FROM public.v2_forest_cover_geometries WHERE label_id=%s',
+		(label.id,),
+	).fetchone()
+	assert stored == (1, 150_001)
+
+
+def _call_large_geometry_rpc(token, label_id, expected=1):
+	with use_client(token) as client:
+		return client.rpc(
+			'insert_large_label_geometry',
+			{
+				'p_label_id': label_id,
+				'p_geometry': box(7.8, 48, 7.801, 48.001).wkb_hex,
+				'p_properties': None,
+				'p_expected_existing_count': expected,
+			},
+		).execute()
+
+
+def _count(context, label_id):
+	return context['db'].execute(
+		'SELECT count(*) FROM public.v2_forest_cover_geometries WHERE label_id=%s', (label_id,)
+	).fetchone()[0]
+
+
+def test_large_geometry_rpc_is_processor_only_even_for_the_label_owner(prediction):
+	from postgrest.exceptions import APIError
+
+	label = stage(prediction)
+	owner = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+	with pytest.raises(APIError) as error:
+		_call_large_geometry_rpc(owner, label.id)
+	assert error.value.code == '42501'
+	assert _count(prediction, label.id) == 1
+
+
+def test_large_geometry_rpc_only_appends_to_staged_labels(prediction):
+	from postgrest.exceptions import APIError
+
+	label = stage(prediction)
+	publish(prediction, label.id)
+	with pytest.raises(APIError) as error:
+		_call_large_geometry_rpc(prediction['processor'], label.id)
+	assert error.value.code == 'P0002'
+
+
+def test_large_geometry_rpc_replay_after_commit_inserts_nothing(prediction):
+	label = stage(prediction)
+	_call_large_geometry_rpc(prediction['processor'], label.id, expected=1)
+	_call_large_geometry_rpc(prediction['processor'], label.id, expected=1)
+	assert _count(prediction, label.id) == 2
+
+
+def test_oversized_contributor_polygon_keeps_the_plain_insert(prediction):
+	"""Contributor labels never use the processor-only RPC."""
+	owner = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+	label_payload = payload(prediction, geometry=MultiPolygon([_circle(150_000)]).__geo_interface__)
+	label_payload.label_source = 'visual_interpretation'
+	label = create_label_with_geometries(label_payload, prediction['owner'], owner)
+
+	assert _count(prediction, label.id) == 1
