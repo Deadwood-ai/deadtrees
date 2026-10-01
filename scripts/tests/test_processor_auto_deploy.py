@@ -203,7 +203,8 @@ class DeployHarness:
 			path = repo / "assets" / relative
 			path.parent.mkdir(parents=True, exist_ok=True)
 			if path.suffix == ".safetensors":
-				minimum_tensors, required_tensors = processor_model_checkpoint_specs()[path.name]
+				# Checkpoints without a tensor spec (the date-estimation ensemble) only need a valid header.
+				minimum_tensors, required_tensors = processor_model_checkpoint_specs().get(path.name, (1, ()))
 				names = [*required_tensors, *(f"fixture.{index}" for index in range(minimum_tensors))]
 				header = json.dumps(
 					{name: {"dtype": "F32", "shape": [0], "data_offsets": [0, 0]} for name in names}
@@ -500,7 +501,7 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 				(harness.worktree / "auto-deploy.log").read_text(),
 			)
 
-	def test_deploys_exact_fetched_sha_when_origin_advances_during_drain(self) -> None:
+	def test_keeps_the_drain_and_rolls_forward_when_origin_advances_during_drain(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			harness = DeployHarness(Path(tmp_dir))
 			selected_sha = harness.push_change("selected deploy\n")
@@ -519,11 +520,16 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			self.assertEqual(git(harness.worktree, "rev-parse", "HEAD").stdout.strip(), selected_sha)
 			later_sha = git(harness.upstream, "rev-parse", "HEAD").stdout.strip()
 			self.assertNotEqual(selected_sha, later_sha)
+			# The worker stays drained instead of claiming work on the outdated release.
+			self.assertNotIn("clear-drain", harness.python_log.read_text())
+			self.assertIn("keeping the drain so the next run rolls forward", (harness.worktree / "auto-deploy.log").read_text())
+			self.assertFalse((harness.worktree / ".local" / "processor-deploy-paused").exists())
 
 			second_result = harness.run_deploy()
 
 			self.assertEqual(second_result.returncode, 0, second_result.stderr)
 			self.assertEqual(git(harness.worktree, "rev-parse", "HEAD").stdout.strip(), later_sha)
+			self.assertIn("clear-drain", harness.python_log.read_text())
 
 	def test_recovery_deploy_stops_unavailable_worker_and_allows_missing_ack(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
