@@ -146,12 +146,8 @@ def main():
                 dataset_id = result['id']
                 print(f"✓ Uploaded: {filename} (ID: {dataset_id})")
                 
-                # Start processing
-                data_commands.process(
-                    dataset_id=dataset_id,
-                    task_types=['geotiff', 'metadata', 'cog', 'thumbnail', 'deadwood_v1', 'treecover_v1'],
-                    priority=2
-                )
+                # Start processing (default: every stage a website upload runs)
+                data_commands.process(dataset_id=dataset_id, priority=2)
                 
                 mark_as_processed(filename)
                 successful += 1

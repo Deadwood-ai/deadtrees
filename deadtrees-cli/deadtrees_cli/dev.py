@@ -325,6 +325,10 @@ class DevCommands:
 			TaskTypeEnum.thumbnail,
 			TaskTypeEnum.deadwood_v1,
 			TaskTypeEnum.treecover_v1,
+			TaskTypeEnum.deadwood_treecover_combined_v2,
+			TaskTypeEnum.aoi_v1,
+			TaskTypeEnum.embeddings_v1,
+			TaskTypeEnum.doy_estimation_v1,
 		]
 		ordered = [task for task in order if task in unique]
 		return ordered

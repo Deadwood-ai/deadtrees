@@ -1,5 +1,5 @@
 from shared.models import TaskTypeEnum
-from shared.processing_tasks import downstream_tasks_missing_geotiff, format_missing_geotiff_error
+from shared.processing_tasks import UPLOAD_TASK_TYPES, downstream_tasks_missing_geotiff, format_missing_geotiff_error
 
 
 def test_downstream_tasks_missing_geotiff_returns_unsafe_tasks_in_request_order():
@@ -28,3 +28,8 @@ def test_format_missing_geotiff_error_names_unsafe_tasks():
 	assert 'require geotiff in the same processing request' in message
 	assert 'thumbnail' in message
 	assert 'treecover_v1' in message
+
+
+def test_upload_task_types_run_the_date_estimate_and_are_accepted_by_the_api():
+	assert TaskTypeEnum.doy_estimation_v1 in UPLOAD_TASK_TYPES
+	assert downstream_tasks_missing_geotiff(list(UPLOAD_TASK_TYPES)) == ()
