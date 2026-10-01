@@ -216,3 +216,27 @@ def test_log_context_with_unstorable_characters_is_made_storable():
 	cleaned = redact_extra({'error': 'bad \udcff name \x00 end'})
 
 	assert cleaned == {'error': 'bad � name � end'}
+
+
+@pytest.mark.unit
+def test_error_raised_while_a_shutdown_unwinds_is_not_recorded_as_a_failure(monkeypatch, quiet_logger):
+	"""A deploy SIGTERM during a storage pull used to fail the dataset: closing the
+	interrupted SFTP session raised "Garbage packet received", which replaced the
+	handler's SystemExit and was recorded as a GeoTIFF failure."""
+	task = _task([TaskTypeEnum.geotiff])
+	recorded = []
+	monkeypatch.setattr(processor_module, 'refresh_processor_token', lambda task, token=None: 'stage-token')
+	monkeypatch.setattr(processor_module, '_record_failure', lambda *args: recorded.append(args))
+
+	def interrupted_pull(*args):
+		processor_module._shutdown_requested = True
+		raise RuntimeError('Garbage packet received')
+
+	monkeypatch.setattr(processor_module, 'process_geotiff', interrupted_pull)
+
+	with pytest.raises(SystemExit) as exc_info:
+		processor_module.process_task(task, 'initial-token')
+
+	assert exc_info.value.code == 0
+	assert recorded == []
+	assert task.id not in processor_module._unrecorded_failures

@@ -91,6 +91,12 @@ def _set_inflight_task(task: QueueTask | None) -> None:
 # container crash, because the process that saw the error is still running.
 _unrecorded_failures: dict[int, tuple[str, str]] = {}
 
+# Set once an orderly shutdown has started. The handler's SystemExit can be
+# replaced by an error raised while a stage unwinds (for example paramiko
+# reporting "Garbage packet received" when an interrupted SFTP transfer is
+# closed). That error is a consequence of the shutdown, not a dataset failure.
+_shutdown_requested = False
+
 
 def _handle_graceful_shutdown(signum, frame):
 	"""Cleanly re-queue the in-flight task on an orderly shutdown (SIGTERM/SIGINT).
@@ -104,6 +110,8 @@ def _handle_graceful_shutdown(signum, frame):
 	path then treats as a genuine, non-retryable failure. Retrying OOM/bug crashes
 	just loops and burns hours of compute, so we deliberately do not.
 	"""
+	global _shutdown_requested
+	_shutdown_requested = True
 	task = _inflight_task
 	if task is not None:
 		try:
@@ -645,6 +653,9 @@ def process_task(task: QueueTask, token: str):
 				raise ProcessingError(str(e), task_type='doy_estimation', task_id=task.id, dataset_id=task.dataset_id)
 
 	except Exception as e:
+		if _shutdown_requested:
+			# The shutdown handler already re-queued this task; finish exiting.
+			raise SystemExit(0) from e
 		# A reclaimed task belongs to another attempt; do not overwrite its status
 		# or delete its queue row while handling this stale attempt's failure.
 		if task.claimed_at:
