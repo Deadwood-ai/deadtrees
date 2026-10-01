@@ -6,6 +6,13 @@ from shared.logger import logger
 from rio_cogeo.cogeo import cog_info, cog_validate
 # from rio_cogeo.profiles import cog_profiles
 
+# GDAL block cache for COG builds, in MB. Peak RSS of gdal_translate -of COG is
+# roughly 1.5x this value plus ~1 GB, so the former 32768 reached 42-51 GB per
+# conversion and got OOM-killed inside the shared processor container. Larger
+# caches did not make conversions faster in profiling (1 GB cache: 106 s,
+# 8 GB: 186 s on a 40k x 40k RGBA ortho), so keep it small.
+COG_GDAL_CACHEMAX_MB = 2048
+
 def _build_cog_translate_command(
 	tiff_file_path: str,
 	cog_target_path: str,
@@ -86,7 +93,7 @@ def _build_cog_translate_command(
 			'ALL_CPUS',
 			'--config',
 			'GDAL_CACHEMAX',
-			'32768',
+			str(COG_GDAL_CACHEMAX_MB),
 			'--config',
 			'GDAL_GTIFF_SRS_SOURCE',
 			'EPSG',
@@ -165,7 +172,7 @@ def _reproject_to_epsg3857(src_path: str, dst_path: str, token: str | None = Non
 		'ALL_CPUS',
 		'--config',
 		'GDAL_CACHEMAX',
-		'32768',
+		str(COG_GDAL_CACHEMAX_MB),
 		src_path,
 		dst_path,
 	]

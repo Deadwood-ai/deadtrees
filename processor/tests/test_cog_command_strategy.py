@@ -323,3 +323,34 @@ def test_calculate_cog_logs_full_error_and_retries_by_reprojecting_to_epsg_3857(
 	assert '-a_srs' not in commands[2]
 	assert any('boom stderr' in message for message in error_messages)
 	assert any('partial stdout' in message for message in error_messages)
+
+
+def _extract_config(command: list[str], key: str) -> str | None:
+	for index, value in enumerate(command[:-2]):
+		if value == '--config' and command[index + 1] == key:
+			return command[index + 2]
+	return None
+
+
+def test_cog_gdal_commands_cap_block_cache_below_container_headroom(monkeypatch):
+	# A 32 GB block cache made each gdal_translate peak at 42-51 GB RSS and get
+	# OOM-killed in the 96 GiB processor container (DT-915). Every GDAL command
+	# of the COG step, including the reprojection fallback, must stay small.
+	_patch_common(monkeypatch, band_count=3)
+	commands: list[list[str]] = []
+
+	def _run_primary_fails(command, check, capture_output, text):
+		commands.append(command)
+		if len(commands) == 1:
+			raise subprocess.CalledProcessError(1, command, output='', stderr='boom')
+		return SimpleNamespace(stdout='ok', stderr='')
+
+	monkeypatch.setattr(cog_module.subprocess, 'run', _run_primary_fails)
+
+	cog_module.calculate_cog('input.tif', 'output.tif')
+
+	assert [command[0] for command in commands] == ['gdal_translate', 'gdalwarp', 'gdal_translate']
+	for command in commands:
+		cache_mb = _extract_config(command, 'GDAL_CACHEMAX')
+		assert cache_mb is not None
+		assert int(cache_mb) <= 4096
