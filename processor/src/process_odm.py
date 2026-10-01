@@ -806,15 +806,25 @@ def _run_odm_pass(
 def _wait_for_container(container, what: str) -> dict:
 	"""Wait for a container to exit, killing it once ODM_RUN_TIMEOUT_SECONDS has passed."""
 	timeout = settings.ODM_RUN_TIMEOUT_SECONDS
+	started = time.monotonic()
 	try:
 		return container.wait(timeout=timeout)
 	except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as wait_error:
-		# docker-py reports an expired wait as a read timeout on the daemon socket.
+		# docker-py reports an expired wait as a read timeout on the daemon socket;
+		# an earlier socket error is a different failure and keeps its own message.
+		if time.monotonic() - started < timeout:
+			raise
+		try:
+			tail = container.logs(tail=40).decode('utf-8', errors='ignore')
+		except Exception:
+			tail = ''
 		try:
 			container.kill()
 		except Exception:
 			pass
-		raise TimeoutError(f'{what} did not finish within {timeout // 3600} h and was stopped') from wait_error
+		raise TimeoutError(
+			f'{what} did not finish within {timeout // 3600} h and was stopped. Last output:\n{tail}'
+		) from wait_error
 
 
 def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_id: int) -> str:

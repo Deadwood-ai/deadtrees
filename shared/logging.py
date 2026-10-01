@@ -58,7 +58,7 @@ def redact_extra(extra: Any) -> Any:
 	if extra is None:
 		return None
 	# JSON escapes NUL as \u0000, which Postgres jsonb rejects.
-	return json.loads(storable_text(json.dumps(extra, default=str)).replace('\\u0000', '\\ufffd'))
+	return json.loads(storable_text(json.dumps(extra, default=str, ensure_ascii=False)).replace('\\u0000', '\\ufffd'))
 
 
 MAX_LOG_MESSAGE_CHARS = 20_000

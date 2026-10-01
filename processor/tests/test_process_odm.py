@@ -587,10 +587,10 @@ def test_complete_odm_processing_with_real_images(odm_task, auth_token, zip_sour
 		]
 
 	if zip_source_type == 'debug':
-		# For real-world debug datasets we allow/expect failure but require error to be recorded
+		# Real-world debug datasets may fail; the stage raises and the orchestrator
+		# (process_task) records the failure, so the stage leaves no error behind.
 		assert ran_ok is False
-		assert final_status['has_error'] is True
-		assert isinstance(final_status.get('error_message'), str) and len(final_status.get('error_message')) > 0
+		assert final_status['has_error'] is False
 	else:
 		# Default minimal dataset must succeed and produce expected updates
 		assert ran_ok is True

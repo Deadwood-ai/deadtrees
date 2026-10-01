@@ -238,14 +238,37 @@ def test_hung_odm_container_is_stopped_with_a_clear_error(monkeypatch):
 	class _Container:
 		def wait(self, timeout):
 			events.append(('wait', timeout))
+			clock[0] += timeout
 			raise requests.exceptions.ReadTimeout('read timed out')
+
+		def logs(self, tail):
+			return b'texturing tile 3/9'
 
 		def kill(self):
 			events.append(('kill',))
 
+	clock = [1000.0]
+	monkeypatch.setattr(odm_module.time, 'monotonic', lambda: clock[0])
 	monkeypatch.setattr(odm_module.settings, 'ODM_RUN_TIMEOUT_SECONDS', 7200)
 
-	with pytest.raises(TimeoutError, match='ODM full pass did not finish within 2 h'):
+	with pytest.raises(TimeoutError, match='(?s)ODM full pass did not finish within 2 h.*texturing tile 3/9'):
 		odm_module._wait_for_container(_Container(), 'ODM full pass')
 
 	assert events == [('wait', 7200), ('kill',)]
+
+
+@pytest.mark.unit
+def test_docker_socket_error_before_the_deadline_is_not_reported_as_a_timeout(monkeypatch):
+	import requests
+
+	from processor.src import process_odm as odm_module
+
+	class _Container:
+		def wait(self, timeout):
+			raise requests.exceptions.ConnectionError('socket closed')
+
+		def kill(self):
+			raise AssertionError('a healthy run must not be killed')
+
+	with pytest.raises(requests.exceptions.ConnectionError, match='socket closed'):
+		odm_module._wait_for_container(_Container(), 'ODM full pass')

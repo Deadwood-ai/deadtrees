@@ -207,3 +207,12 @@ def test_storable_text_keeps_both_ends_of_long_tool_output():
 	assert stored.startswith('START ')
 	assert stored.endswith(' the real cause')
 	assert 'truncated' in stored
+
+
+@pytest.mark.unit
+def test_log_context_with_unstorable_characters_is_made_storable():
+	from shared.logging import redact_extra
+
+	cleaned = redact_extra({'error': 'bad \udcff name \x00 end'})
+
+	assert cleaned == {'error': 'bad � name � end'}
