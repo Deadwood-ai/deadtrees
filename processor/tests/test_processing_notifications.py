@@ -4,6 +4,8 @@ from time import time
 import httpx
 import pytest
 
+from processor.src.exceptions import ProcessingError
+
 import processor.src.processor as processor_module
 import processor.src.utils.queue_runtime as queue_runtime_module
 from processor.src import processing_notifications
@@ -205,7 +207,6 @@ def test_process_task_success_path_with_refresh(monkeypatch):
 		def __exit__(self, exc_type, exc, tb):
 			return False
 
-	monkeypatch.setattr(processor_module, 'verify_token', lambda token: {'id': 'processor-user'})
 	monkeypatch.setattr(processor_module, 'refresh_processor_token', lambda task, token=None: 'refreshed-token')
 	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'final-token')
 	monkeypatch.setattr(queue_runtime_module, 'use_client', lambda token: _FakeClient())
@@ -251,7 +252,6 @@ def test_queue_cleanup_failure_after_success_does_not_emit_failure_notification(
 	def fail_queue_cleanup(token, current_task):
 		raise RuntimeError('queue unavailable')
 
-	monkeypatch.setattr(processor_module, 'verify_token', lambda token: {'id': 'processor-user'})
 	monkeypatch.setattr(processor_module, 'refresh_processor_token', lambda task, token=None: 'refreshed-token')
 	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'final-token')
 	monkeypatch.setattr(processor_module, 'process_metadata', lambda current_task, processing_path: None)
@@ -292,7 +292,6 @@ def test_outbox_persistence_failure_keeps_completed_queue_task(monkeypatch):
 	)
 	deleted = []
 
-	monkeypatch.setattr(processor_module, 'verify_token', lambda token: {'id': 'processor-user'})
 	monkeypatch.setattr(processor_module, 'refresh_processor_token', lambda task, token=None: 'refreshed-token')
 	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'final-token')
 	monkeypatch.setattr(processor_module, 'process_metadata', lambda current_task, processing_path: None)
@@ -329,8 +328,8 @@ def test_outbox_persistence_failure_keeps_failed_queue_task(monkeypatch):
 	deleted = []
 	status_updates = []
 
-	monkeypatch.setattr(processor_module, 'verify_token', lambda token: {'id': 'processor-user'})
 	monkeypatch.setattr(processor_module, 'refresh_processor_token', lambda task, token=None: 'refreshed-token')
+	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'bookkeeping-token')
 	monkeypatch.setattr(processor_module, 'process_metadata', lambda *args: (_ for _ in ()).throw(RuntimeError('failed')))
 	monkeypatch.setattr(processor_module, 'create_processing_failure_issue', lambda **kwargs: None)
 	monkeypatch.setattr(processor_module, 'update_status', lambda *args, **kwargs: status_updates.append(kwargs))
@@ -344,7 +343,8 @@ def test_outbox_persistence_failure_keeps_failed_queue_task(monkeypatch):
 	monkeypatch.setattr(processor_module.logger, 'error', lambda *args, **kwargs: None)
 	monkeypatch.setattr(processor_module.logger, 'warning', lambda *args, **kwargs: None)
 
-	with pytest.raises(RuntimeError, match='outbox unavailable'):
+	# The stage error stays the reported cause; the queue row waits for the outbox.
+	with pytest.raises(ProcessingError, match='metadata processing failed: failed'):
 		process_task(task, 'initial-token')
 
 	assert deleted == []
@@ -356,6 +356,7 @@ def test_outbox_persistence_failure_keeps_failed_queue_task(monkeypatch):
 		'error_stage': 'metadata',
 	}]
 	assert processor_module._inflight_task is None
+	assert processor_module._unrecorded_failures.pop(task.id) == ('metadata', 'metadata processing failed: failed')
 
 
 @pytest.mark.unit
@@ -461,7 +462,6 @@ def test_shutdown_during_completion_notification_does_not_release_task(monkeypat
 	)
 	released = []
 
-	monkeypatch.setattr(processor_module, 'verify_token', lambda token: {'id': 'processor-user'})
 	monkeypatch.setattr(processor_module, 'refresh_processor_token', lambda task, token=None: 'refreshed-token')
 	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'final-token')
 	monkeypatch.setattr(processor_module, 'process_metadata', lambda current_task, processing_path: None)

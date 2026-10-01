@@ -107,8 +107,6 @@ def process_deadwood_treecover_combined_v2(task: QueueTask, token: str, temp_dir
                 extra={'error': str(e)},
             ),
         )
-        token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-        update_status(token, dataset_id=ortho.dataset_id, has_error=True, error_message=str(e))
         raise ProcessingError(
             str(e), task_type='deadwood_treecover_combined_segmentation', task_id=task.id, dataset_id=ortho.dataset_id
         )

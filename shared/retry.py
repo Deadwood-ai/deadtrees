@@ -30,6 +30,9 @@ TRANSIENT_ERROR_PATTERNS = (
 	'write operation',
 	'eof occurred',
 	'name or service not known',
+	# DNS lookups that fail for a few seconds (deepl1, 2026-10-01: "[Errno -3]
+	# Temporary failure in name resolution" on status and label writes).
+	'temporary failure in name resolution',
 	# paramiko SSH connection establishment hiccups (storage server transfers)
 	'protocol banner',
 	'error reading ssh',

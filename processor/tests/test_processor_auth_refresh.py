@@ -126,7 +126,7 @@ def test_process_geotiff_refreshes_auth_before_post_work_database_writes(monkeyp
 
 def test_process_odm_refreshes_auth_after_input_transfer_before_metadata_writes(monkeypatch, tmp_path):
 	task = _odm_task()
-	login_tokens = iter(['stage-token', 'post-transfer-token', 'failure-token'])
+	login_tokens = iter(['stage-token', 'post-transfer-token'])
 	metadata_write_tokens = []
 	status_updates = []
 
@@ -187,16 +187,16 @@ def test_process_odm_refreshes_auth_after_input_transfer_before_metadata_writes(
 
 	assert metadata_write_tokens == ['post-transfer-token']
 	assert status_updates[0][0] == 'stage-token'
-	assert status_updates[-1][0] == 'failure-token'
+	# Failure state belongs to the orchestrator, so the stage writes none.
+	assert not any(fields.get('has_error') for _, fields in status_updates)
 
 
-def test_process_task_keeps_refreshed_token_for_failure_bookkeeping(monkeypatch):
+def test_process_task_signs_in_fresh_for_failure_bookkeeping(monkeypatch):
 	task = _geotiff_task()
 	refresh_tokens = iter(['stage-token', 'failure-token'])
 	status_updates = []
 	deleted_tasks = []
 
-	monkeypatch.setattr(processor_module, 'verify_token', lambda token: SimpleNamespace(id=task.user_id))
 	monkeypatch.setattr(processor_module, 'refresh_processor_token', lambda task, token=None: next(refresh_tokens))
 	monkeypatch.setattr(
 		processor_module,
@@ -210,7 +210,7 @@ def test_process_task_keeps_refreshed_token_for_failure_bookkeeping(monkeypatch)
 	)
 	monkeypatch.setattr(processor_module, 'create_processing_failure_issue', lambda **kwargs: None)
 	monkeypatch.setattr(processor_module, '_notify_processing_result_safely', lambda *args, **kwargs: None)
-	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'delete-token')
+	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'bookkeeping-token')
 	monkeypatch.setattr(
 		processor_module,
 		'delete_queue_task',
@@ -225,9 +225,10 @@ def test_process_task_keeps_refreshed_token_for_failure_bookkeeping(monkeypatch)
 
 	assert len(status_updates) == 1
 	status_token, status_fields = status_updates[0]
-	assert status_token == 'failure-token'
+	assert status_token == 'bookkeeping-token'
 	assert status_fields['dataset_id'] == task.dataset_id
 	assert status_fields['current_status'] == processor_module.StatusEnum.idle
 	assert status_fields['has_error'] is True
 	assert 'stage failed' in status_fields['error_message']
-	assert deleted_tasks == [('delete-token', task.id)]
+	assert status_fields['error_stage'] == 'geotiff'
+	assert deleted_tasks == [('bookkeeping-token', task.id)]

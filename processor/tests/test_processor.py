@@ -238,7 +238,6 @@ def test_process_task_success_path_with_refresh(monkeypatch):
 		def __exit__(self, exc_type, exc, tb):
 			return False
 
-	monkeypatch.setattr(processor_module, 'verify_token', lambda token: {'id': 'processor-user'})
 	monkeypatch.setattr(processor_module, 'refresh_processor_token', lambda task, token=None: 'refreshed-token')
 	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'final-token')
 	monkeypatch.setattr(queue_runtime_module, 'use_client', lambda token: _FakeClient())

@@ -19,6 +19,7 @@ from shared.retry import is_statement_timeout, is_transient_error, retry_on_tran
 		'[Errno 32] Broken pipe',
 		'RemoteProtocolError: server disconnected',
 		'Error reading SSH protocol banner',
+		'[Errno -3] Temporary failure in name resolution',
 	],
 )
 def test_is_transient_error_true_for_network_failures(message):

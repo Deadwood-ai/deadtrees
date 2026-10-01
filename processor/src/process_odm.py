@@ -1,6 +1,7 @@
 import json
 import zipfile
 import docker
+import requests
 import time
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -201,7 +202,7 @@ def _run_script_in_odm_image(
 		labels={**resource_labels, 'dt_role': f'odm_{role}', 'dt_volume': volume_name},
 	)
 	try:
-		result = container.wait()
+		result = _wait_for_container(container, f'ODM {role} step')
 		output = container.logs().decode('utf-8', errors='ignore')
 	finally:
 		container.remove(force=True)
@@ -452,22 +453,10 @@ def process_odm(task: QueueTask, temp_dir: Path):
 			)
 
 	except Exception as e:
-		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 		logger.error(
 			f'ODM processing failed for dataset {dataset_id}: {str(e)}',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
-		# Ensure status reflects the error so the queue can skip this dataset until manual intervention
-		try:
-			update_status(
-				token=token,
-				dataset_id=dataset_id,
-				current_status=StatusEnum.idle,
-				has_error=True,
-				error_message=str(e),
-			)
-		except Exception:
-			pass
 
 		# Cleanup temporary ODM directory on failure unless retention is enabled for this dataset.
 		if 'odm_host_temp_dir' in locals() and odm_host_temp_dir.exists():
@@ -785,13 +774,15 @@ def _run_odm_pass(
 			},
 		)
 
-		result = odm_container.wait()
+		result = _wait_for_container(odm_container, f'ODM {pass_name} pass')
 		exit_status = result.get('StatusCode', 1) if isinstance(result, dict) else 1
 
 		log_bytes = odm_container.logs()
 		stdout_logs = (
 			log_bytes.decode('utf-8', errors='ignore') if isinstance(log_bytes, (bytes, bytearray)) else str(log_bytes)
 		)
+	except TimeoutError:
+		raise
 	except Exception as e:
 		logger.error(
 			f'ODM container execution failed unexpectedly: {e}',
@@ -811,6 +802,30 @@ def _run_odm_pass(
 				pass
 
 	return odm_container, exit_status, stdout_logs
+
+
+def _wait_for_container(container, what: str) -> dict:
+	"""Wait for a container to exit, killing it once ODM_RUN_TIMEOUT_SECONDS has passed."""
+	timeout = settings.ODM_RUN_TIMEOUT_SECONDS
+	started = time.monotonic()
+	try:
+		return container.wait(timeout=timeout)
+	except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as wait_error:
+		# docker-py reports an expired wait as a read timeout on the daemon socket;
+		# an earlier socket error is a different failure and keeps its own message.
+		if time.monotonic() - started < timeout:
+			raise
+		try:
+			tail = container.logs(tail=40).decode('utf-8', errors='ignore')
+		except Exception:
+			tail = ''
+		try:
+			container.kill()
+		except Exception:
+			pass
+		raise TimeoutError(
+			f'{what} did not finish within {timeout // 3600} h and was stopped. Last output:\n{tail}'
+		) from wait_error
 
 
 def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_id: int) -> str:
@@ -1087,11 +1102,6 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			f'Failed to run ODM container: {str(e)}',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
-		# Mark dataset status with error to prevent immediate re-tries
-		try:
-			update_status(token=token, dataset_id=dataset_id, has_error=True, error_message=str(e))
-		except Exception:
-			pass
 		raise
 	finally:
 		# Clean up shared volume unless we intentionally retained failed artifacts.

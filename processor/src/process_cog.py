@@ -2,7 +2,7 @@ from pathlib import Path
 import time
 import uuid
 
-from shared.db import use_client, login, login_verified
+from shared.db import use_client, login_verified
 from shared.settings import settings
 from shared.models import StatusEnum, QueueTask, Cog, Ortho
 from shared.logger import logger
@@ -84,8 +84,6 @@ def process_cog(task: QueueTask, temp_dir: Path):
 		cog = Cog(**meta)
 
 	except Exception as e:
-		# Update status with error
-		update_status(token, dataset_id=ortho.dataset_id, has_error=True, error_message=str(e))
 		raise ProcessingError(str(e), task_type='cog', task_id=task.id, dataset_id=ortho.dataset_id)
 
 	# Save metadata to database
@@ -118,9 +116,6 @@ def process_cog(task: QueueTask, temp_dir: Path):
 	except AuthenticationError:
 		raise
 	except Exception as e:
-		update_status(
-			token, dataset_id=ortho.dataset_id, has_error=True, error_message=f'Failed to save COG metadata: {str(e)}'
-		)
 		raise DatasetError(f'Failed to save COG metadata: {str(e)}', dataset_id=ortho.dataset_id, task_id=task.id)
 
 	# Only after the database points at the new COG is the old one unreachable.

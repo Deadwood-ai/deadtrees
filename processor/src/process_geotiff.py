@@ -93,13 +93,6 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 		temp_ortho_path.replace(path_original)
 
 	except Exception as e:
-		token, _ = _refresh_processor_session(task)
-		update_status(
-			token,
-			dataset_id=task.dataset_id,
-			has_error=True,
-			error_message=f'Failed to fetch or create ortho entry: {str(e)}',
-		)
 		raise DatasetError(
 			f'Failed to fetch or create ortho entry: {str(e)}', dataset_id=task.dataset_id, task_id=task.id
 		)
@@ -174,9 +167,6 @@ def process_geotiff(task: QueueTask, temp_dir: Path):
 		path_original.unlink()
 
 	except Exception as e:
-		# Update error status
-		token, _ = _refresh_processor_session(task)
-		update_status(token, dataset_id=ortho.dataset_id, has_error=True, error_message=str(e))
 		# Clean up files on error
 		if 'path_original' in locals() and path_original.exists():
 			path_original.unlink()

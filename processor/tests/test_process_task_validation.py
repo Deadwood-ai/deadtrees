@@ -92,7 +92,6 @@ def test_process_task_rejects_downstream_without_geotiff(monkeypatch):
 		status_updates.append(kwargs)
 		return SimpleNamespace(data=[])
 
-	monkeypatch.setattr(processor_module, 'verify_token', lambda token: {'id': 'processor-user'})
 	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'delete-token')
 	monkeypatch.setattr(queue_runtime_module, 'use_client', lambda token: _FakeClient())
 	monkeypatch.setattr(processor_module, 'update_status', _record_status_update)

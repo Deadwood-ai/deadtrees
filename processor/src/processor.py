@@ -8,7 +8,7 @@ from processor.src.process_geotiff import process_geotiff
 from processor.src.process_odm import process_odm
 from shared.models import QueueTask, TaskTypeEnum, StatusEnum
 from shared.settings import settings
-from shared.db import use_client, login, login_verified, verify_token
+from shared.db import use_client, login, login_verified
 from shared.status import update_status
 from shared.processing_tasks import downstream_tasks_missing_geotiff, format_missing_geotiff_error
 from .processing_notifications import (
@@ -83,6 +83,13 @@ _inflight_task: QueueTask | None = None
 def _set_inflight_task(task: QueueTask | None) -> None:
 	global _inflight_task
 	_inflight_task = task
+
+
+# Failures this process caught but could not finish recording (for example the
+# database was briefly unreachable). Keyed by queue task id. The stale-row
+# recovery finishes the bookkeeping with the real error instead of reporting a
+# container crash, because the process that saw the error is still running.
+_unrecorded_failures: dict[int, tuple[str, str]] = {}
 
 
 def _handle_graceful_shutdown(signum, frame):
@@ -272,63 +279,83 @@ def is_dataset_uploaded_or_processed(task: QueueTask, token: str) -> tuple:
 
 
 def _fail_crashed_task(token: str, task: QueueTask, status: dict | None) -> None:
-	"""Mark a crashed task's dataset as errored, file a Linear issue, and dequeue it.
+	"""Fail a task whose previous attempt left a stale active row, then dequeue it.
 
-	Used when a previous run died mid-stage without a graceful shutdown (SIGKILL /
-	OOM / hard crash). These failures are deterministic — retrying just loops and
-	wastes hours of compute — so the task is failed for human attention rather than
-	re-queued. Shared by both crash-recovery paths so they stay consistent.
+	If this process saw the attempt fail but could not record it, the remembered
+	error is recorded. Otherwise the previous run died mid-stage without a graceful
+	shutdown (SIGKILL / OOM / hard crash). Those failures are deterministic, so
+	retrying just loops and wastes hours of compute; the task is failed for human
+	attention rather than re-queued.
 	"""
-	if status is not None:
-		crashed_stage = detect_crashed_stage(status, task.task_types)
-		completed = get_completed_stages(status)
-		error_msg = f'Processing container crashed during {crashed_stage}. Completed: {completed}'
+	recorded = _unrecorded_failures.get(task.id)
+	if recorded is not None:
+		stage, error_msg = recorded
+	elif status is not None:
+		stage = detect_crashed_stage(status, task.task_types)
+		error_msg = f'Processing container crashed during {stage}. Completed: {get_completed_stages(status)}'
 	else:
-		crashed_stage = 'unknown'
+		stage = 'unknown'
 		error_msg = 'Processing container crashed before a status row was written'
 
 	logger.warning(
-		f'Crash detected for dataset {task.dataset_id}: {error_msg}',
+		f'{"Recording earlier failure" if recorded else "Crash detected"} for dataset {task.dataset_id}: {error_msg}',
 		LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 	)
+	_finalize_failure(token, task, stage if stage != 'unknown' else None, error_msg)
 
-	# Mark as errored and reset to idle so it is no longer seen as in-progress.
+
+def _remember_failure(task: QueueTask, error: Exception) -> tuple[str, str]:
+	stage = error.task_type if isinstance(error, ProcessingError) else 'processing'
+	_unrecorded_failures[task.id] = (stage, str(error))
+	return _unrecorded_failures[task.id]
+
+
+def _record_failure(task: QueueTask, error: Exception) -> None:
+	"""Record the failure of a task this worker still owns.
+
+	The orchestrator is the only writer of failure state. It signs in fresh because
+	the stage token can expire during a long stage. Until every step has
+	succeeded, the error is kept in ``_unrecorded_failures`` so the next poll
+	reports this error rather than a container crash. That memory is lost if the
+	process exits first, and the row is then reported as a crash.
+	"""
+	stage, message = _remember_failure(task, error)
+	_finalize_failure(login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD), task, stage, message)
+
+
+def _finalize_failure(token: str, task: QueueTask, stage: str | None, message: str) -> None:
+	"""Mark the dataset failed and idle, report it, and dequeue the task; the one failure path."""
 	update_status(
 		token,
 		dataset_id=task.dataset_id,
 		current_status=StatusEnum.idle,
 		has_error=True,
-		error_message=error_msg,
-		error_stage=crashed_stage if crashed_stage != 'unknown' else None,
+		error_message=message,
+		error_stage=stage,
 	)
 
-	# Create Linear issue for visibility
 	try:
 		create_processing_failure_issue(
 			token=token,
 			dataset_id=task.dataset_id,
-			stage=crashed_stage,
-			error_message=error_msg,
+			stage=stage or 'unknown',
+			error_message=message,
 		)
 	except Exception as linear_error:
-		logger.warning(f'Failed to create Linear issue for crash: {linear_error}')
+		logger.warning(f'Failed to create Linear issue: {linear_error}')
 
 	_notify_processing_result_safely(task, ProcessingNotificationType.failed, token)
 
 	# Remove from queue — the dataset must be explicitly re-triggered once fixed.
 	delete_queue_task(token, task)
+	_unrecorded_failures.pop(task.id, None)
+	logger.info(
+		f'Removed failed task {task.id} from queue',
+		LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+	)
 
 
 def process_task(task: QueueTask, token: str):
-	# Verify token
-	user = verify_token(token)
-	if not user:
-		logger.error(
-			'Invalid token for processing',
-			LogContext(category=LogCategory.AUTH, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
-		)
-		raise AuthenticationError('Invalid token', task_id=task.id)
-
 	# Log start of processing
 	logger.info(
 		f'Starting processing for task {task.id}',
@@ -625,6 +652,7 @@ def process_task(task: QueueTask, token: str):
 				still_owned = owns_queue_task(token, task)
 			except Exception as claim_error:
 				# Preserve the stage error if ownership remains unknown after retries.
+				_remember_failure(task, e)
 				raise e from claim_error
 			if not still_owned:
 				_set_inflight_task(None)
@@ -633,43 +661,16 @@ def process_task(task: QueueTask, token: str):
 		# SIGTERM mid-handling cannot re-queue the failed task or clear its error.
 		_set_inflight_task(None)
 
-		logger.error(
+		logger.exception(
 			f'Processing failed: {str(e)}',
 			LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 		)
-		update_status(
-			token,
-			dataset_id=task.dataset_id,
-			current_status=StatusEnum.idle,
-			has_error=True,
-			error_message=str(e),
-			error_stage=e.task_type if isinstance(e, ProcessingError) else 'processing',
-		)
-
 		try:
-			stage = e.task_type if isinstance(e, ProcessingError) else 'processing'
-			create_processing_failure_issue(
-				token=token,
-				dataset_id=task.dataset_id,
-				stage=stage,
-				error_message=str(e),
-			)
-		except Exception as linear_error:
-			logger.warning(f'Failed to create Linear issue: {linear_error}')
-
-		_notify_processing_result_safely(task, ProcessingNotificationType.failed, token)
-
-		try:
-			delete_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-			delete_queue_task(delete_token, task)
-			logger.info(
-				f'Removed failed task {task.id} from queue',
-				LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
-			)
-		except Exception as delete_error:
-			logger.error(
-				f'Failed to remove task {task.id} from queue: {delete_error}',
-				LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+			_record_failure(task, e)
+		except Exception as bookkeeping_error:
+			logger.exception(
+				f'Could not record failure of task {task.id} yet; the next poll retries: {bookkeeping_error}',
+				LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id),
 			)
 		raise
 
@@ -702,8 +703,10 @@ def background_process() -> BackgroundProcessResult:
 	   re-queues the in-flight task for retry instead of leaving it stranded.
 	3. Handles this worker's stale `is_processing=true` queue row left behind by
 	   a previous run. Because graceful stops self-clean via the shutdown handler,
-	   a leftover active row can only mean a hard kill (SIGKILL/OOM) or hard crash:
-	   - If all requested stages are already done, the row is just removed.
+	   a leftover active row means either a failure this process could not record
+	   yet (it is recorded now with its real error) or a hard kill (SIGKILL/OOM)
+	   or hard crash:
+	   - If the status is idle and all requested stages are done, the row is just removed.
 	   - Otherwise it is a genuine, non-retryable crash: the dataset is marked
 	     errored, a Linear issue is filed, and the task is removed from the queue.
 	     OOM/bug crashes are deterministic, so retrying only loops and wastes
@@ -720,7 +723,7 @@ def background_process() -> BackgroundProcessResult:
 
 	token, user = login_verified(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 	if not user:
-		raise Exception(status_code=401, detail='Invalid token after fresh login')
+		raise AuthenticationError('Invalid token after fresh login')
 
 	worker_id = get_worker_id()
 	active_recovery_attempted = False
@@ -759,9 +762,23 @@ def background_process() -> BackgroundProcessResult:
 					logger.warning(f'Keeping failed task {active_task.id} until notification persistence recovers: {notification_error}')
 					continue
 				delete_queue_task(token, active_task)
+				_unrecorded_failures.pop(active_task.id, None)
 				continue
 
-			if status is not None and are_requested_stages_complete(status, active_task.task_types):
+			if active_task.id in _unrecorded_failures:
+				# This process saw the task fail but could not record it; finish that
+				# bookkeeping with the real error rather than reporting a crash.
+				try:
+					_fail_crashed_task(token, active_task, status)
+				except Exception as finalization_error:
+					logger.warning(f'Keeping failed task {active_task.id} until finalization recovers: {finalization_error}')
+				continue
+
+			if (
+				status is not None
+				and status.get('current_status') == StatusEnum.idle.value
+				and are_requested_stages_complete(status, active_task.task_types)
+			):
 				# Crashed only after finishing all requested stages — no fault to
 				# report, just remove the stale queue row.
 				logger.info(

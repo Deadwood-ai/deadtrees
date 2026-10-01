@@ -100,8 +100,13 @@ def _storage_sftp(token: str, dataset_id: int | None):
 			username=settings.STORAGE_SERVER_USERNAME,
 			pkey=pkey,
 			port=2222 if settings.DEV_MODE else 22,
+			timeout=settings.SSH_CONNECT_TIMEOUT_SECONDS,
+			banner_timeout=settings.SSH_CONNECT_TIMEOUT_SECONDS,
+			auth_timeout=settings.SSH_CONNECT_TIMEOUT_SECONDS,
 		)
 		with ssh.open_sftp() as sftp:
+			# A stalled transfer raises instead of holding the worker forever.
+			sftp.get_channel().settimeout(settings.SSH_TRANSFER_STALL_SECONDS)
 			yield sftp
 
 
