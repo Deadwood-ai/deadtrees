@@ -123,7 +123,12 @@ scripts/test-api-smoke.sh
 ```
 
 The same command is used by the path-filtered `api-smoke` GitHub Actions
-workflow. It starts only the backend-lite test surface: local Supabase, the API
+workflow. To save CI minutes, `api-smoke` and `processor-unit` run once
+when a PR opens and again only when someone adds the `full-ci` label (remove
+and re-add it to rerun). Add the label before merge when later pushes touched
+API, shared or processor code; the local review run covers each push.
+
+The suite starts only the backend-lite test surface: local Supabase, the API
 test container, nginx storage, and Mailpit. It intentionally excludes the
 processor, GPU/model inference, ODM, and full pipeline validation.
 

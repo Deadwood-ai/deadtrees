@@ -1,7 +1,11 @@
 name: API Smoke
 
 on:
+  # Heavy suite: run once when a PR opens, and again only when someone adds
+  # the full-ci label (remove and re-add it to rerun after later pushes).
+  # Every push is already covered by the local review run.
   pull_request:
+    types: [opened, reopened, labeled]
     paths:
       - "api/**"
       - "shared/**"
@@ -16,12 +20,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Other labels get their own group, so labeling a PR never cancels a running suite.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'labeled' && github.event.label.name || 'run' }}
   cancel-in-progress: true
 
 jobs:
   api-smoke:
     name: api-smoke
+    if: github.event.action != 'labeled' || github.event.label.name == 'full-ci'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
