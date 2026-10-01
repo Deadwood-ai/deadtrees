@@ -31,6 +31,14 @@ minute. There is no push-based deploy: merging to `main` is the deploy.
 The hosts deploy independently, so for a while after a merge some hosts may
 still be draining on the old release while others already run the new one.
 
+A host can instead run `scripts/processor_handoff_deploy.sh`. There the new
+release starts in a second worker slot and takes the next task at once, while
+the old release finishes its task and is then removed. See
+[Release Handoff](processor-deploy.md#release-handoff-opt-in-per-host). On such a
+host, a second container `deadtrees-b-processor-1` and the file
+`.local/processor-active-slot` are expected. Check the host with
+`./scripts/processor_handoff_deploy.sh --status`.
+
 ## Hosts
 
 SSH aliases are operator-local; the names below are host names. Worker IDs are

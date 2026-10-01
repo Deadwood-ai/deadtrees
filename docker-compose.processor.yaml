@@ -30,8 +30,12 @@ services:
     memswap_limit: ${PROCESSOR_MEMORY_LIMIT:-96G}
     runtime: nvidia
     volumes:
-      - ./processor:/app/processor
-      - ./shared:/app/shared
+      # Code is baked into the image, never bind-mounted: a running container keeps
+      # its release while the checkout moves on, so a release handoff can start the
+      # next release beside a worker that is still finishing a task.
+      # ODM writes its output under /app/processor/temp; keep it on the host, one
+      # directory per worker slot.
+      - ${PROCESSOR_TEMP_DIR:-./processor/temp}:/app/processor/temp
       - ${PROCESSOR_ASSETS_DIR:-./assets}:/app/assets:ro
       # Processor->storage keypair. Override PROCESSOR_SSH_KEY_PATH in .env when
       # the default ~/.ssh lives on a filesystem the Docker daemon (root) cannot
@@ -69,6 +73,9 @@ services:
       PROCESSOR_DRAIN_REQUEST_PATH: /processor-control/drain-request.json
       PROCESSOR_DRAIN_ACK_PATH: /processor-control/drain-ack.json
       PROCESSOR_UNHEALTHY_PATH: /processor-control/loop-unhealthy.json
+      PROCESSOR_CLAIM_LIMITS_PATH: /processor-control/claim-limits.json
+      # Each worker slot cleans its own processing directory before every task.
+      PROCESSING_DIR: ${PROCESSOR_PROCESSING_DIR:-processing_dir}
       # Comma-separated task types this worker refuses to run (e.g. odm_processing).
       PROCESSOR_TASK_BLACKLIST: ${PROCESSOR_TASK_BLACKLIST:-}
       # Lowest queue priority this worker claims (4 reserves it for fresh uploads).

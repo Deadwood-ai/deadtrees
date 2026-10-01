@@ -11,9 +11,10 @@ production hosts and how each one is scheduled, use
 hygiene for an existing processor checkout.
 
 Processor runtime artifacts should live under `/data`, for example
-`/data/processing_dir`, or another non-repo path mounted into the processor
-container. Do not leave ODM or tree-cover temporary output under the checkout,
-especially under `processor/temp/`, before rebuilding the processor image.
+`/data/processing_dir`. The one exception is ODM output: the gitignored
+`processor/temp/` directory is mounted at `/app/processor/temp`, and the Docker
+build context excludes it. The image contains the processor code, so the
+checkout is the build context but is not mounted into the running worker.
 
 ## Current Production Model
 
@@ -76,6 +77,81 @@ The host scripts require repeated stopped-state observations before entering
 recovery; a single failed Docker inspection cannot stop an active worker. During
 long drains the control tool reuses its Supabase session, refreshing only after
 an authentication-expiry response.
+
+## Release Handoff (Opt-In Per Host)
+
+`scripts/processor_handoff_deploy.sh` replaces the drain deploy on a host that
+has room for two workers. It removes the wait for a long running task: the new
+release takes the next task at once, and the old release finishes its own task.
+
+The processor image contains its code, and Compose no longer bind-mounts
+`processor/` or `shared/`. A running container keeps the release it was started
+with while the checkout moves on, so two releases can run side by side.
+
+The host has two worker slots. Each slot has its own resources:
+
+| | slot a | slot b |
+| --- | --- | --- |
+| Compose project | default (`deadtrees-processor-1`) | `<checkout>-b` (`deadtrees-b-processor-1`) |
+| Worker ID | host default | host default + `-b` |
+| Control directory | `.local/processor-control` | `.local/processor-control-b` |
+| Processing directory | `/data/processing_dir` | `/data/processing_dir_b` |
+| ODM temp directory | `processor/temp` | `.local/processor-temp-b` |
+
+`.local/processor-active-slot` names the slot that claims new tasks. A host
+without this file runs only slot a, so drain-deploy hosts work as before.
+
+On each run, the script:
+
+1. removes the other slot if it is drained and its worker holds no task, then
+   gives the active slot the full `PROCESSOR_MEMORY_LIMIT` and clears its claim
+   limits;
+2. if `origin/main` moved and the other slot is free, fast-forwards the
+   checkout, builds the image in the other slot's project and starts that slot
+   drained, capped at `PROCESSOR_HANDOFF_MEMORY_LIMIT`, and with claim limits
+   that skip `PROCESSOR_HANDOFF_TASK_BLACKLIST` (`odm_processing` by default);
+3. waits until the new worker acknowledges the drain with the target release SHA;
+4. drains the active slot, records the new active slot and release, and clears
+   the new slot's drain, so the new release starts claiming;
+5. removes the old slot at once if it was idle. Otherwise a later run removes it.
+
+Only one handoff runs at a time. If another release lands while the old slot is
+still finishing, the release waits until that slot is free, and the active slot
+keeps working meanwhile. If the build or the startup fails before the switch,
+the script removes the new slot. The old worker never stopped claiming. The
+script then pauses automatic deploy with `.local/processor-deploy-paused`. After
+the fix, run `./scripts/processor_handoff_deploy.sh --resume`.
+
+The script refuses to run when:
+
+- `PROCESSOR_HANDOFF_MEMORY_LIMIT` is missing from `.env`;
+- the active worker still bind-mounts its code (deploy once with
+  `processor_auto_deploy.sh` first);
+- the active slot has a drain request.
+
+`processor_auto_deploy.sh` refuses to run on a handoff host. Docker maintenance
+waits until no retired slot remains.
+
+While both slots run, they share the CPU, the GPU and the host memory. The old
+slot's long task is usually ODM, which runs in its own container with a 100 GB
+limit. Size `PROCESSOR_HANDOFF_MEMORY_LIMIT` to what the host has left beside
+that, for example about 24 GB on a 125 GB host. A task that needs more memory
+than the handoff limit fails if it starts during the overlap.
+
+`./scripts/processor_handoff_deploy.sh --status` prints the active slot, the
+activated release, and the container, drain and queue state of each slot.
+
+To enable handoff on a host (a production change that needs approval):
+
+1. Let the drain deploy activate a release that contains this script, so the
+   worker runs without code bind mounts.
+2. Set `PROCESSOR_HANDOFF_MEMORY_LIMIT` in `.env`.
+3. In the crontab, replace `processor_auto_deploy.sh` with
+   `processor_handoff_deploy.sh`.
+
+To return to drain deploy, wait until only one slot runs. If slot b is active,
+hand off back to slot a first. Then delete `.local/processor-active-slot` and
+restore the crontab entry.
 
 ## Docker Maintenance
 

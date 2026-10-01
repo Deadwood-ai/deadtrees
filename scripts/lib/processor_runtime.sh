@@ -14,6 +14,64 @@ else
 	PROCESSOR_COMPOSE_OVERRIDE=""
 fi
 
+# A host runs its worker in slot a, the default Compose project with the
+# default control directory and worker ID, exactly as before slots existed.
+# Release handoff (processor_handoff_deploy.sh) alternates releases between slot
+# a and slot b; slot b gets its own project, control directory, worker ID,
+# processing directory and ODM temp directory, so two releases can share a host.
+PROCESSOR_ACTIVE_SLOT_FILE="${REPO_DIR}/.local/processor-active-slot"
+PROCESSOR_SLOT_A_WORKER_ID_OVERRIDE="${PROCESSOR_WORKER_ID:-}"
+PROCESSOR_COMPOSE_PROJECT=""
+
+processor_active_slot() {
+	local slot
+	slot="$(cat "${PROCESSOR_ACTIVE_SLOT_FILE}" 2>/dev/null || true)"
+	if [ "${slot}" = "b" ]; then
+		printf 'b\n'
+	else
+		printf 'a\n'
+	fi
+}
+
+processor_other_slot() {
+	if [ "$1" = "a" ]; then printf 'b\n'; else printf 'a\n'; fi
+}
+
+# Point every later compose and control-tool call at one worker slot.
+use_processor_slot() {
+	local slot="$1"
+	local base_project
+	PROCESSOR_SLOT="${slot}"
+	if [ "${slot}" = "a" ]; then
+		PROCESSOR_COMPOSE_PROJECT=""
+		unset PROCESSOR_CONTROL_DIR PROCESSOR_ACTIVATED_WORKER_ID_FILE PROCESSOR_PROCESSING_DIR PROCESSOR_TEMP_DIR
+		if [ -n "${PROCESSOR_SLOT_A_WORKER_ID_OVERRIDE}" ]; then
+			export PROCESSOR_WORKER_ID="${PROCESSOR_SLOT_A_WORKER_ID_OVERRIDE}"
+		else
+			unset PROCESSOR_WORKER_ID
+		fi
+		return
+	fi
+	base_project="$(basename "${REPO_DIR}" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')"
+	PROCESSOR_COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-${base_project}}-${slot}"
+	if [ -z "${PROCESSOR_SLOT_B_WORKER_ID:-}" ]; then
+		PROCESSOR_SLOT_B_WORKER_ID="$(use_processor_slot a; python3 "${STATUS_SCRIPT}" worker-id)-${slot}"
+	fi
+	export PROCESSOR_WORKER_ID="${PROCESSOR_SLOT_B_WORKER_ID}"
+	export PROCESSOR_CONTROL_DIR=".local/processor-control-${slot}"
+	export PROCESSOR_ACTIVATED_WORKER_ID_FILE=".local/processor-activated-worker-id-${slot}"
+	export PROCESSOR_PROCESSING_DIR="processing_dir_${slot}"
+	export PROCESSOR_TEMP_DIR="./.local/processor-temp-${slot}"
+}
+
+processor_compose() {
+	if [ -n "${PROCESSOR_COMPOSE_PROJECT}" ]; then
+		docker compose -p "${PROCESSOR_COMPOSE_PROJECT}" "${PROCESSOR_COMPOSE_FILES[@]}" "$@"
+	else
+		docker compose "${PROCESSOR_COMPOSE_FILES[@]}" "$@"
+	fi
+}
+
 # Record which compose files a container operation used. Without this a deploy
 # that silently lost a required override leaves no trace to diagnose from.
 log_processor_compose_files() {
@@ -55,7 +113,7 @@ processor_availability() {
 		return 2
 	fi
 
-	container_id="$(docker compose "${PROCESSOR_COMPOSE_FILES[@]}" ps -q processor 2>/dev/null || true)"
+	container_id="$(processor_compose ps -q processor 2>/dev/null || true)"
 	inspect_output="$(docker inspect "${container_id}" --format '{{.State.Status}} {{.State.Restarting}}' 2>/dev/null || true)"
 	if [ -n "${inspect_output}" ]; then
 		read -r status restarting <<< "${inspect_output}"
@@ -101,7 +159,7 @@ wait_for_drain_with_recovery() {
 
 	if confirm_processor_unavailable; then
 		log "Processor is unavailable; entering stopped-worker recovery mode"
-		docker compose "${PROCESSOR_COMPOSE_FILES[@]}" stop processor >> "${LOG_FILE}" 2>&1
+		processor_compose stop processor >> "${LOG_FILE}" 2>&1
 		python3 "${STATUS_SCRIPT}" wait-for-idle \
 			--allow-unacknowledged-stopped-worker \
 			--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
@@ -120,7 +178,7 @@ wait_for_drain_with_recovery() {
 			kill "${wait_pid}" 2>/dev/null || true
 			wait "${wait_pid}" 2>/dev/null || true
 			PROCESSOR_DRAIN_WAIT_PID=""
-			docker compose "${PROCESSOR_COMPOSE_FILES[@]}" stop processor >> "${LOG_FILE}" 2>&1
+			processor_compose stop processor >> "${LOG_FILE}" 2>&1
 			python3 "${STATUS_SCRIPT}" wait-for-idle \
 				--allow-unacknowledged-stopped-worker \
 				--timeout-seconds "${DRAIN_TIMEOUT_SECONDS}" \
@@ -151,7 +209,7 @@ wait_for_processor_running() {
 	local container_id=""
 
 	while [ "${SECONDS}" -lt "${deadline}" ]; do
-		container_id="$(docker compose "${PROCESSOR_COMPOSE_FILES[@]}" ps -q processor 2>/dev/null || true)"
+		container_id="$(processor_compose ps -q processor 2>/dev/null || true)"
 		inspect_output="$(docker inspect "${container_id}" --format '{{.State.Status}} {{.State.Restarting}} {{.RestartCount}} {{.State.ExitCode}}' 2>/dev/null || true)"
 		if [ -n "${inspect_output}" ]; then
 			read -r status restarting restart_count exit_code <<< "${inspect_output}"
@@ -182,7 +240,7 @@ wait_for_processor_running() {
 
 inspect_processor_runtime() {
 	local container_id
-	container_id="$(docker compose "${PROCESSOR_COMPOSE_FILES[@]}" ps -q processor)"
+	container_id="$(processor_compose ps -q processor)"
 	if [ -z "${container_id}" ]; then
 		log "Processor readiness passed but Compose returned no processor container ID"
 		return 1

@@ -52,6 +52,13 @@ def is_drain_requested() -> bool:
 	return load_drain_request() is not None
 
 
+def load_handoff_task_blacklist() -> list[str]:
+	"""Return task types the host deploy has temporarily excluded for this worker."""
+	limits = _read_json(Path(settings.PROCESSOR_CLAIM_LIMITS_PATH)) or {}
+	blacklist = limits.get('task_blacklist', [])
+	return [value for value in blacklist if isinstance(value, str)] if isinstance(blacklist, list) else []
+
+
 def mark_loop_unhealthy(failure_count: int) -> None:
 	path = unhealthy_path()
 	payload = {

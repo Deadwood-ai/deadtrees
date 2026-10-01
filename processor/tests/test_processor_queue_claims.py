@@ -548,12 +548,13 @@ class _RecordingQueueQuery:
 		return SimpleNamespace(data=[])
 
 
-def _next_task_filters(monkeypatch, min_priority):
+def _next_task_filters(monkeypatch, min_priority, *, blacklist='', claim_limits_path='/nonexistent/claim-limits.json'):
 	from contextlib import nullcontext
 
 	calls = []
 	monkeypatch.setattr(settings, 'PROCESSOR_MIN_PRIORITY', min_priority)
-	monkeypatch.setattr(settings, 'PROCESSOR_TASK_BLACKLIST', '')
+	monkeypatch.setattr(settings, 'PROCESSOR_TASK_BLACKLIST', blacklist)
+	monkeypatch.setattr(settings, 'PROCESSOR_CLAIM_LIMITS_PATH', str(claim_limits_path))
 	queue_runtime_module.get_next_task('token', client_factory=lambda token: nullcontext(_RecordingQueueQuery(calls)))
 	return calls
 
@@ -564,3 +565,19 @@ def test_get_next_task_claims_every_priority_by_default(monkeypatch):
 
 def test_get_next_task_skips_tasks_below_min_priority(monkeypatch):
 	assert _next_task_filters(monkeypatch, 4) == [('gte', 'priority', 4)]
+
+
+def test_get_next_task_adds_handoff_claim_limits_to_the_blacklist(monkeypatch, tmp_path):
+	limits = tmp_path / 'claim-limits.json'
+	limits.write_text('{"task_blacklist": ["odm_processing", "not_a_task"]}')
+
+	calls = _next_task_filters(monkeypatch, 1, blacklist='odm_processing,geotiff', claim_limits_path=limits)
+
+	assert calls == [('not_overlaps', 'task_types', ['odm_processing', 'geotiff'])]
+
+
+def test_get_next_task_ignores_a_malformed_claim_limits_file(monkeypatch, tmp_path):
+	limits = tmp_path / 'claim-limits.json'
+	limits.write_text('{"task_blacklist": "odm_processing"}')
+
+	assert _next_task_filters(monkeypatch, 1, claim_limits_path=limits) == []

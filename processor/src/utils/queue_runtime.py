@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from processor.src.utils.drain_control import load_handoff_task_blacklist
 from shared.models import QueueTask, TaskTypeEnum
 from shared.settings import settings
 from shared.db import use_client
@@ -10,14 +11,19 @@ logger = UnifiedLogger(__name__)
 
 
 def get_task_blacklist() -> list[str]:
-	"""Return the validated set of task types this worker refuses to run."""
+	"""Return the validated set of task types this worker refuses to run.
+
+	Combines the configured PROCESSOR_TASK_BLACKLIST with the temporary limits a
+	release handoff sets while the previous release still runs a task on this host.
+	"""
 	blacklist = []
-	for value in settings.processor_task_blacklist:
+	for value in [*settings.processor_task_blacklist, *load_handoff_task_blacklist()]:
 		task_type = TaskTypeEnum.from_string(value)
 		if task_type is None:
-			logger.warning(f'Ignoring unknown task type in PROCESSOR_TASK_BLACKLIST: {value!r}')
+			logger.warning(f'Ignoring unknown task type in processor task blacklist: {value!r}')
 			continue
-		blacklist.append(task_type.value)
+		if task_type.value not in blacklist:
+			blacklist.append(task_type.value)
 	return blacklist
 
 

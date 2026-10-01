@@ -177,6 +177,9 @@ class Settings(BaseSettings):
 	PROCESSOR_DRAIN_REQUEST_PATH: str = '/data/processor-control/drain-request.json'
 	PROCESSOR_DRAIN_ACK_PATH: str = '/data/processor-control/drain-ack.json'
 	PROCESSOR_UNHEALTHY_PATH: str = '/data/processor-control/loop-unhealthy.json'
+	# Extra claim limits the host deploy sets while a retiring release still runs a
+	# task on the same host, e.g. {"task_blacklist": ["odm_processing"]}.
+	PROCESSOR_CLAIM_LIMITS_PATH: str = '/data/processor-control/claim-limits.json'
 	# Comma-separated task types this worker refuses to run (e.g. 'odm_processing').
 	# A queue entry whose task_types include any blacklisted type is skipped so a
 	# capable worker picks it up instead. See `processor_task_blacklist`.

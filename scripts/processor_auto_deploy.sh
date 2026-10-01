@@ -72,7 +72,7 @@ processor_asset_mount_matches() {
 	local container_id
 	local mounted_assets
 
-	container_id="$(docker compose "${PROCESSOR_COMPOSE_FILES[@]}" ps -q processor 2>/dev/null || true)"
+	container_id="$(processor_compose ps -q processor 2>/dev/null || true)"
 	if [ -z "${container_id}" ]; then
 		return 1
 	fi
@@ -92,7 +92,7 @@ recreate_processor_for_assets() {
 	log_processor_compose_files
 	python3 "${STATUS_SCRIPT}" clear-ack >> "${LOG_FILE}" 2>&1
 	PROCESSOR_RELEASE_SHA="${remote_sha}" \
-		docker compose "${PROCESSOR_COMPOSE_FILES[@]}" up -d --force-recreate processor \
+		processor_compose up -d --force-recreate processor \
 		>> "${LOG_FILE}" 2>&1
 	python3 "${STATUS_SCRIPT}" wait-for-idle \
 		--expected-release-sha "${remote_sha}" \
@@ -137,6 +137,11 @@ on_exit() {
 trap on_exit EXIT
 
 cd "${REPO_DIR}"
+
+if [ -e "${PROCESSOR_ACTIVE_SLOT_FILE}" ]; then
+	log "Refusing drain deploy because this host hands off releases between worker slots; run processor_handoff_deploy.sh"
+	exit 1
+fi
 
 if [ "${DEPLOY_PHASE}" = "activate" ]; then
 	remote_sha="${DEPLOY_TARGET_SHA}"
@@ -248,9 +253,9 @@ fi
 
 require_clean_checkout
 log_processor_compose_files
-docker compose "${PROCESSOR_COMPOSE_FILES[@]}" build processor >> "${LOG_FILE}" 2>&1
+processor_compose build processor >> "${LOG_FILE}" 2>&1
 python3 "${STATUS_SCRIPT}" clear-ack >> "${LOG_FILE}" 2>&1
-PROCESSOR_RELEASE_SHA="${deployed_sha}" docker compose "${PROCESSOR_COMPOSE_FILES[@]}" up -d --force-recreate processor >> "${LOG_FILE}" 2>&1
+PROCESSOR_RELEASE_SHA="${deployed_sha}" processor_compose up -d --force-recreate processor >> "${LOG_FILE}" 2>&1
 python3 "${STATUS_SCRIPT}" wait-for-idle \
 	--expected-release-sha "${deployed_sha}" \
 	--timeout-seconds "${STARTUP_TIMEOUT_SECONDS}" \

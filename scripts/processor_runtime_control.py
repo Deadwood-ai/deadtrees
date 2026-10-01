@@ -93,6 +93,10 @@ def _unhealthy_path() -> Path:
 	return _host_control_path('loop-unhealthy.json')
 
 
+def _claim_limits_path() -> Path:
+	return _host_control_path('claim-limits.json')
+
+
 def _worker_id() -> str:
 	worker_id = ENV.get('PROCESSOR_WORKER_ID', '').strip()
 	if worker_id:
@@ -266,6 +270,7 @@ def _fetch_queue_state(
 		'worker_id': worker_id,
 		'drain_request': request,
 		'drain_ack': ack,
+		'claim_limits': _read_json(_claim_limits_path()),
 		'ack_matches_request': _ack_matches_request(request, ack, worker_id),
 		'active_for_worker': _fetch_queue_rows(token, claimed_by=worker_id),
 		'active_for_previous_worker': (
@@ -288,6 +293,11 @@ def cmd_status(_: argparse.Namespace) -> int:
 			default=str,
 		)
 	)
+	return 0
+
+
+def cmd_worker_id(_: argparse.Namespace) -> int:
+	print(_worker_id())
 	return 0
 
 
@@ -330,6 +340,19 @@ def cmd_clear_drain(_: argparse.Namespace) -> int:
 			indent=2,
 		)
 	)
+	return 0
+
+
+def cmd_set_claim_limits(args: argparse.Namespace) -> int:
+	payload = {'task_blacklist': args.task_blacklist, 'reason': args.reason, 'set_at': _utc_now()}
+	_write_json(_claim_limits_path(), payload)
+	print(json.dumps({'claim_limits': payload, 'path': str(_claim_limits_path())}, indent=2))
+	return 0
+
+
+def cmd_clear_claim_limits(_: argparse.Namespace) -> int:
+	cleared = _clear_file(_claim_limits_path())
+	print(json.dumps({'cleared_claim_limits': cleared, 'path': str(_claim_limits_path())}, indent=2))
 	return 0
 
 
@@ -485,6 +508,9 @@ def build_parser() -> argparse.ArgumentParser:
 	status = subparsers.add_parser('status', help='Print the current worker drain and queue state.')
 	status.set_defaults(func=cmd_status)
 
+	worker_id = subparsers.add_parser('worker-id', help='Print the worker identity this host would use.')
+	worker_id.set_defaults(func=cmd_worker_id)
+
 	record_worker_id = subparsers.add_parser(
 		'record-worker-id',
 		help='Record the worker identity activated by the latest successful deploy.',
@@ -502,6 +528,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 	clear_drain = subparsers.add_parser('clear-drain', help='Clear the drain request so the worker can resume.')
 	clear_drain.set_defaults(func=cmd_clear_drain)
+
+	set_claim_limits = subparsers.add_parser(
+		'set-claim-limits',
+		help='Stop this worker from claiming the given task types until the limits are cleared.',
+	)
+	set_claim_limits.add_argument('--task-blacklist', nargs='+', required=True)
+	set_claim_limits.add_argument('--reason', required=True)
+	set_claim_limits.set_defaults(func=cmd_set_claim_limits)
+
+	clear_claim_limits = subparsers.add_parser('clear-claim-limits', help='Remove temporary claim limits.')
+	clear_claim_limits.set_defaults(func=cmd_clear_claim_limits)
 
 	clear_ack = subparsers.add_parser('clear-ack', help='Clear only the worker drain acknowledgement.')
 	clear_ack.set_defaults(func=cmd_clear_ack)

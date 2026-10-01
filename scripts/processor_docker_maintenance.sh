@@ -105,6 +105,16 @@ fi
 require_clean_checkout
 require_activated_checkout
 
+# On a release-handoff host, maintain the active slot, and only while no
+# retiring slot is still finishing a task: a Docker restart would kill it.
+active_slot="$(processor_active_slot)"
+use_processor_slot "$(processor_other_slot "${active_slot}")"
+if [ -n "$(processor_compose ps -a -q processor 2>/dev/null || true)" ]; then
+	log "Skipping Docker maintenance because slot ${PROCESSOR_SLOT} still runs the previous release"
+	exit 0
+fi
+use_processor_slot "${active_slot}"
+
 if request_automation_drain "docker-maintenance"; then
 	:
 elif [ "$?" -eq 3 ]; then
@@ -129,12 +139,12 @@ if ! python3 "${ASSET_PREFLIGHT_SCRIPT}" >> "${LOG_FILE}" 2>&1; then
 fi
 
 log_processor_compose_files
-docker compose "${PROCESSOR_COMPOSE_FILES[@]}" stop processor >> "${LOG_FILE}" 2>&1
+processor_compose stop processor >> "${LOG_FILE}" 2>&1
 sudo -n "${SNAP_CONTROL}" refresh >> "${LOG_FILE}" 2>&1
 sudo -n "${SNAP_CONTROL}" hold "${HOLD_DURATION}" >> "${LOG_FILE}" 2>&1
 require_clean_checkout
 python3 "${STATUS_SCRIPT}" clear-ack >> "${LOG_FILE}" 2>&1
-PROCESSOR_RELEASE_SHA="${activated_sha}" docker compose "${PROCESSOR_COMPOSE_FILES[@]}" up -d processor >> "${LOG_FILE}" 2>&1
+PROCESSOR_RELEASE_SHA="${activated_sha}" processor_compose up -d processor >> "${LOG_FILE}" 2>&1
 python3 "${STATUS_SCRIPT}" wait-for-idle \
 	--expected-release-sha "${activated_sha}" \
 	--timeout-seconds "${STARTUP_TIMEOUT_SECONDS}" \
