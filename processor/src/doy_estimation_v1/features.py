@@ -125,6 +125,10 @@ def _read(src, bounds, shape, aoi=None):
 	return img, m
 
 
+class OrthoNotSampleable(ValueError):
+	"""The ortho has no 22.4 m patch to sample (too small, or outside its AOI): no estimate is possible."""
+
+
 @dataclass
 class OrthoViews:
 	patches: np.ndarray  # (n, 224, 224, 3) uint8
@@ -147,7 +151,7 @@ def ortho_views(cog_path: str, dataset_id: int, lat: float, aoi_4326: dict | Non
 			L, B, R, T = src.bounds
 			region = (max(ax0, L), max(ay0, B), min(ax1, R), min(ay1, T))
 			if region[2] <= region[0] or region[3] <= region[1]:
-				raise ValueError('AOI does not overlap the ortho')
+				raise OrthoNotSampleable('AOI does not overlap the ortho')
 		else:
 			region = tuple(src.bounds)
 		rx0, ry0, rx1, ry1 = region
@@ -172,7 +176,7 @@ def ortho_views(cog_path: str, dataset_id: int, lat: float, aoi_4326: dict | Non
 			patches = np.stack(imgs)
 			break
 	if patches is None:
-		raise ValueError('no valid 10 cm patch inside the AOI')
+		raise OrthoNotSampleable('no valid 10 cm patch inside the AOI')
 	return OrthoViews(patches=patches, gsd=gsd, region=region, aoi_3857=aoi)
 
 

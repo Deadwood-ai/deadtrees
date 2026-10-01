@@ -198,3 +198,61 @@ def test_model_bundle_loads_and_predicts_a_distribution():
 	p, cal = predict_distribution(bundle.ensembles['nos2'], x, 'Temperate Broadleaf and Mixed Forests', 'cpu')
 	assert p.shape == (365,) and abs(p.sum() - 1) < 1e-9
 	assert cal['biome'] == 'Temperate Broadleaf and Mixed Forests'
+
+
+def _small_cog(path, width_m: float):
+	import rasterio
+	from rasterio.transform import from_origin
+
+	px = 0.03
+	n = int(width_m / px)
+	with rasterio.open(
+		path, 'w', driver='GTiff', height=n, width=n, count=3, dtype='uint8', crs='EPSG:3857',
+		transform=from_origin(900000, 6000000, px, px),
+	) as dst:
+		dst.write(np.full((3, n, n), 120, np.uint8))
+
+
+@pytest.mark.unit
+def test_ortho_smaller_than_a_sample_patch_is_not_sampleable(tmp_path):
+	path = tmp_path / 'small.tif'
+	_small_cog(path, width_m=6.0)
+
+	with pytest.raises(features.OrthoNotSampleable):
+		features.ortho_views(str(path), dataset_id=1, lat=48.0, aoi_4326=None)
+
+
+@pytest.mark.unit
+def test_unsampleable_ortho_is_skipped_and_marked_done(monkeypatch, tmp_path):
+	import sys
+	import types
+	from types import SimpleNamespace
+
+	import processor.src.process_doy_estimation as stage
+
+	def not_sampleable(**kwargs):
+		raise features.OrthoNotSampleable('no valid 10 cm patch inside the AOI')
+
+	fake_torch = types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: False, empty_cache=lambda: None))
+	monkeypatch.setitem(sys.modules, 'torch', fake_torch)
+	monkeypatch.setattr('processor.src.doy_estimation_v1.predict_doy.estimate_acquisition_date', not_sampleable)
+	monkeypatch.setattr(stage, 'login_verified', lambda *args: ('token', SimpleNamespace(id='processor')))
+	monkeypatch.setattr(stage, 'login', lambda *args: 'token')
+	dataset = SimpleNamespace(aquisition_year=2024, aquisition_month=6, aquisition_day=None)
+	ortho = SimpleNamespace(bbox=SimpleNamespace(left=7.8, right=7.81, bottom=48.0, top=48.01))
+	monkeypatch.setattr(stage, '_fetch_inputs', lambda token, dataset_id: (dataset, ortho, None, None, None))
+	monkeypatch.setattr(stage, '_local_cog', lambda *args: tmp_path / 'cog.tif')
+	stored, cleared, statuses = [], [], []
+	monkeypatch.setattr(stage, '_store', lambda *args: stored.append(args))
+	monkeypatch.setattr(stage, '_clear', lambda token, dataset_id: cleared.append(dataset_id))
+	monkeypatch.setattr(stage, 'update_status', lambda token, **fields: statuses.append(fields))
+	for level in ('info', 'warning', 'error'):
+		monkeypatch.setattr(stage.logger, level, lambda *args, **kwargs: None)
+	task = SimpleNamespace(id=9, dataset_id=12326, user_id='requester')
+
+	stage.process_doy_estimation(task, 'token', tmp_path)
+
+	assert stored == []
+	assert cleared == [12326]  # an earlier estimate must not look current
+	assert statuses[-1]['is_doy_estimation_done'] is True
+	assert not any(fields.get('has_error') for fields in statuses)

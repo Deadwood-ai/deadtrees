@@ -33,13 +33,18 @@ def login(user: str, password: str, use_cached_session: bool = True) -> str:
 		if hmac.compare_digest(cached_password.encode(), password.encode()) and cached.session.expires_at > int(time.time()) + threshold:
 			return cached.session.access_token
 
+	# Imported here: shared.retry logs through shared.logging, which imports this module.
+	from shared.retry import retry_on_transient_error
+
 	client = create_client(
 		settings.SUPABASE_URL,
 		settings.SUPABASE_KEY,
 		options=ClientOptions(auto_refresh_token=False),
 	)
+	# A sign-in has no side effect, so a brief network or DNS failure is retried.
+	sign_in = retry_on_transient_error(client.auth.sign_in_with_password)
 	try:
-		auth_response = client.auth.sign_in_with_password({'email': user, 'password': password})
+		auth_response = sign_in({'email': user, 'password': password})
 	except Exception as e:
 		raise Exception(f'Login failed: {str(e)}')
 	if use_cached_session:
