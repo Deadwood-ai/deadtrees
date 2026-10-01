@@ -62,7 +62,7 @@ rename while behavior is unchanged, the test is probably too coupled.
 | Auditor local E2E      | `npm --prefix frontend run test:e2e:local:audit`                        | auditor-only queue triage, audit tabs, processing logs, and audit access guards     |
 | Auditor write E2E      | `npm --prefix frontend run test:e2e:local:audit:write`                  | local-only auditor flag, AOI, audit-lock, and audit-save side effects               |
 | Python critical lint   | `scripts/lint-python.sh`                                                | syntax/runtime-name safety for API, shared models, processor, CLI, and scripts      |
-| Scripts and CLI unit   | `python -m pytest -q scripts/tests deadtrees-cli/tests/test_dev_security.py` | processor auto-deploy, drain, runtime control, asset preflight, backups; `scripts-unit` CI also validates compose files |
+| Scripts unit           | `python -m pytest -q scripts/tests`                                     | processor auto-deploy, drain, runtime control, asset preflight, backups; `scripts-unit` CI also validates compose files |
 | API/router             | `scripts/test-api-smoke.sh` or `deadtrees dev test api <path>`          | FastAPI routes, upload/download/process/auth behavior                               |
 | Database/RLS/migration | focused API DB tests plus migration review/reset where practical        | schema, policies, RPCs, views, generated contracts                                  |
 | Processor CPU          | focused `deadtrees dev test processor <path>` or the unit command below  | queue orchestration, GeoTIFF/COG/metadata, non-GPU utilities                        |

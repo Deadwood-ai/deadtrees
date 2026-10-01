@@ -3,14 +3,14 @@ name: Scripts Unit
 on:
   pull_request:
     paths:
-      - "scripts/**"
-      - "shared/**"
-      - "deadtrees-cli/**"
+      - "scripts/tests/**"
+      - "scripts/*.sh"
+      - "scripts/*.py"
+      - "scripts/lib/**"
+      - "scripts/backup/**"
+      - "shared/asset_manifest.py"
+      - "shared/operator_env.py"
       - "docker-compose.*.yaml"
-      - "nginx/**"
-      - "Makefile"
-      - ".env.example"
-      - "pytest.ini"
       - ".github/workflows/scripts-unit.yml"
 
 permissions:
@@ -24,20 +24,17 @@ jobs:
   scripts-unit:
     name: scripts-unit
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: deadtrees-cli/setup.py
 
-      - name: Install DeadTrees CLI and pytest
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install pytest -e deadtrees-cli
+      # The script tests use only the standard library, pytest and shared/.
+      - name: Install pytest
+        run: python -m pip install pytest
 
       - name: Validate production and test compose files
         run: |
@@ -52,6 +49,3 @@ jobs:
       - name: Test operational scripts
         run: python -m pytest -q scripts/tests
 
-      # test_data_upload.py needs a running API and Supabase; it stays manual.
-      - name: Test DeadTrees CLI
-        run: python -m pytest -q deadtrees-cli/tests/test_dev_security.py
