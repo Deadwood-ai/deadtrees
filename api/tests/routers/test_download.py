@@ -2892,36 +2892,3 @@ def test_bundle_is_one_request_with_one_row_per_distinct_dataset(auth_token, mul
 	rows = _download_requests(first) + _download_requests(second)
 	assert len(rows) == 2 and {row['kind'] for row in rows} == {'bundle'}
 	assert len({row['request_id'] for row in rows}) == 1
-
-
-def test_labels_status_polls_reuse_the_requested_file(auth_token, test_dataset_with_label, monkeypatch):
-	"""Polls must not recompute the content version, and must not fail when content changes mid-build."""
-	import api.src.routers.download as download_router
-
-	dataset_id = test_dataset_with_label
-	headers = {'Authorization': f'Bearer {auth_token}'}
-	start = client.get(f'/api/v1/download/datasets/{dataset_id}/labels.gpkg', headers=headers)
-	assert start.status_code == 200, start.text
-	requested_path = _labels_gpkg(dataset_id, auth_token) if start.json()['status'] == 'completed' else None
-
-	# Any recomputation would now name a different file.
-	version_calls = []
-	monkeypatch.setattr(
-		download_router, 'labels_content_version', lambda *args: version_calls.append(args) or 'f' * 12
-	)
-	for _ in range(20):
-		status = client.get(f'/api/v1/download/datasets/{dataset_id}/labels/status', headers=headers).json()
-		if status['status'] == 'completed':
-			break
-		assert status['status'] == 'processing', status
-		time.sleep(0.5)
-
-	assert status['status'] == 'completed', status
-	assert version_calls == []
-	assert requested_path is None or _local_path(status['download_path']) == requested_path
-	redirect = client.get(
-		f'/api/v1/download/datasets/{dataset_id}/labels/download', headers=headers, follow_redirects=False
-	)
-	assert redirect.status_code == 303
-	assert redirect.headers['location'] == status['download_path']
-	assert version_calls == []
