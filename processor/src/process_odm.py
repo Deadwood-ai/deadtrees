@@ -12,6 +12,7 @@ from shared.settings import settings
 from shared.status import update_status
 from shared.logging import LogContext, LogCategory
 from shared.db import use_client, login
+from shared.upload_validation import RAW_IMAGE_EXTENSIONS
 from shared.zip_utils import (
 	ensure_supported_zip_compression,
 	UnsupportedZipCompressionError,
@@ -865,7 +866,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 	other_files = []
 
 	# Common image extensions (be inclusive, let ODM validate)
-	image_extensions = {'.jpg', '.jpeg', '.png', '.tif', '.tiff', '.dng', '.raw', '.bmp', '.webp'}
+	image_extensions = RAW_IMAGE_EXTENSIONS
 
 	for file_path in all_files:
 		ext = file_path.suffix.lower()

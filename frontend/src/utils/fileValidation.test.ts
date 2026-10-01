@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { inspectGeoTiffAiEligibility, validateGeoTiffAiEligibility } from "./fileValidation";
+import { inspectGeoTiffAiEligibility, validateGeoTiffUpload } from "./fileValidation";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.resolve(__dirname, "../../test/fixtures/geotiff/upload-validation");
@@ -83,15 +83,19 @@ describe("inspectGeoTiffAiEligibility", () => {
   });
 });
 
-describe("validateGeoTiffAiEligibility", () => {
+describe("validateGeoTiffUpload", () => {
+  it("accepts a georeferenced RGB orthomosaic from the real archive", async () => {
+    await expect(validateGeoTiffUpload(await loadFixture("rgb-real-crop.tif"))).resolves.toEqual([]);
+  });
+
   it("raises a user-facing error for unsupported TIFFs", async () => {
-    await expect(validateGeoTiffAiEligibility(await loadFixture("nir-alpha-real-crop.tif"))).rejects.toThrow(
+    await expect(validateGeoTiffUpload(await loadFixture("nir-alpha-real-crop.tif"))).rejects.toThrow(
       /require an RGB orthomosaic/i,
     );
   });
 
   it("raises a user-facing error for invalid TIFFs", async () => {
-    await expect(validateGeoTiffAiEligibility(new Blob(["not-a-tiff"]))).rejects.toThrow(
+    await expect(validateGeoTiffUpload(new Blob(["not-a-tiff"]))).rejects.toThrow(
       /could not inspect this geotiff/i,
     );
   });

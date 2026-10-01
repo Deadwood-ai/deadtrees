@@ -27,8 +27,8 @@ import { useCanUploadPrivate } from "../../hooks/useUserPrivileges";
 import {
   detectUploadType,
   validateFileSize,
-  validateGeoTiffAiEligibility,
-  validateZipCompressionMethods,
+  validateGeoTiffUpload,
+  validateZipUpload,
 } from "../../utils/fileValidation";
 import { isInvalidSessionError } from "../../utils/authSession";
 import AdditionalInformationFormItem from "../AdditionalInformationFormItem";
@@ -135,6 +135,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
   } = useUploadNotification(uploadKey, fileName);
 
   const [uploadValidationError, setUploadValidationError] = useState<string | null>(null);
+  const [uploadValidationWarnings, setUploadValidationWarnings] = useState<string[]>([]);
   const { track } = useAnalytics("profile");
 
   const { canUpload: canUploadPrivate } = useCanUploadPrivate();
@@ -143,18 +144,17 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
     try {
       const uploadType = detectUploadType(file.name);
       validateFileSize(file, uploadType);
-      if (uploadType === UploadType.RAW_IMAGES_ZIP) {
-        await validateZipCompressionMethods(file);
-      } else {
-        await validateGeoTiffAiEligibility(file);
-      }
+      const warnings =
+        uploadType === UploadType.RAW_IMAGES_ZIP ? await validateZipUpload(file) : await validateGeoTiffUpload(file);
 
       setUploadValidationError(null);
+      setUploadValidationWarnings(warnings);
       return beforeUpload(file, []);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "File validation failed. Please choose a different file.";
       setUploadValidationError(errorMessage);
+      setUploadValidationWarnings([]);
       message.error("File could not be added. See the details below the file picker.");
       return Upload.LIST_IGNORE;
     }
@@ -231,7 +231,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
       });
       validateFileSize(uploadFile.originFileObj, uploadType);
       if (uploadType === UploadType.GEOTIFF) {
-        await validateGeoTiffAiEligibility(uploadFile.originFileObj);
+        await validateGeoTiffUpload(uploadFile.originFileObj);
       }
 
       // console.log("values.author", values.author);
@@ -301,6 +301,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
       cancelUpload();
     }
     setUploadValidationError(null);
+    setUploadValidationWarnings([]);
     onClose();
   };
 
@@ -363,6 +364,26 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
                 showIcon
                 message="File could not be added"
                 description={uploadValidationError}
+                className="mb-3"
+              />
+            ) : null}
+            {fileList.length > 0 && uploadValidationWarnings.length > 0 ? (
+              <Alert
+                data-testid="upload-validation-warning"
+                type="warning"
+                showIcon
+                message="This upload may not process"
+                description={
+                  uploadValidationWarnings.length === 1 ? (
+                    uploadValidationWarnings[0]
+                  ) : (
+                    <ul className="mb-0 pl-4">
+                      {uploadValidationWarnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
+                  )
+                }
                 className="mb-3"
               />
             ) : null}
