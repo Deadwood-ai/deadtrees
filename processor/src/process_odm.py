@@ -378,9 +378,12 @@ def process_odm(task: QueueTask, temp_dir: Path):
 			_update_camera_metadata(dataset_id, exif_metadata, token)
 
 		# Step 6: Execute ODM Docker container. ODM runs on a named volume; only its
-		# orthophoto is copied back, into the processing directory on /data (the
-		# checkout and the container layer sit on the hosts' smaller root disks).
-		odm_host_temp_dir = temp_dir / f'odm_temp_{dataset_id}'
+		# orthophoto is copied back to /data (the checkout and the container layer
+		# sit on the hosts' smaller root disks). Output that may be retained after a
+		# failure goes to the scratch dir, because the processing dir is always
+		# removed when the task ends; startup cleanup prunes it after 24 h.
+		output_root = settings.scratch_path if retain_failed_artifacts_enabled_for_dataset(dataset_id) else temp_dir
+		odm_host_temp_dir = output_root / f'odm_temp_{dataset_id}'
 		odm_host_temp_dir.mkdir(parents=True, exist_ok=True)
 
 		logger.info(
