@@ -128,7 +128,6 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 				extra={'error': str(e)},
 			),
 		)
-		update_status(token, dataset_id=ortho.dataset_id, has_error=True, error_message=str(e))
 		raise ProcessingError(str(e), task_type='thumbnail', task_id=task.id, dataset_id=ortho.dataset_id)
 
 	# Save thumbnail metadata to database
@@ -177,7 +176,6 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 				extra={'error': str(e)},
 			),
 		)
-		update_status(token, dataset_id=ortho.dataset_id, has_error=True, error_message=str(e))
 		raise DatasetError(f'Failed to save thumbnail metadata: {str(e)}', dataset_id=ortho.dataset_id, task_id=task.id)
 
 	# Only after the database points at the new thumbnail is the old one unreachable.

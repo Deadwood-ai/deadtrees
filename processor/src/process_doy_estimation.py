@@ -88,8 +88,6 @@ def process_doy_estimation(task: QueueTask, token: str, temp_dir: Path):
 		if torch.cuda.is_available():
 			torch.cuda.empty_cache()
 		logger.error('Acquisition-date estimation failed', ctx({'error': str(e)}))
-		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-		update_status(token, dataset_id=task.dataset_id, has_error=True, error_message=str(e))
 		raise ProcessingError(str(e), task_type='doy_estimation', task_id=task.id, dataset_id=task.dataset_id)
 
 

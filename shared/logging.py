@@ -5,7 +5,7 @@ from enum import Enum
 from shared.settings import settings
 from shared.__version__ import __version__
 from shared.db import use_service_client
-from shared.redaction import redact_tokens
+from shared.redaction import storable_text
 
 
 class LogCategory(Enum):
@@ -57,7 +57,11 @@ def redact_extra(extra: Any) -> Any:
 	"""Structured log context often carries str(exception); scrub tokens from it too."""
 	if extra is None:
 		return None
-	return json.loads(redact_tokens(json.dumps(extra, default=str)))
+	# JSON escapes NUL as \u0000, which Postgres jsonb rejects.
+	return json.loads(storable_text(json.dumps(extra, default=str)).replace('\\u0000', '\\ufffd'))
+
+
+MAX_LOG_MESSAGE_CHARS = 20_000
 
 
 class SupabaseHandler(logging.Handler):
@@ -76,7 +80,7 @@ class SupabaseHandler(logging.Handler):
 			log_entry = {
 				'name': record.name,
 				'level': record.levelname,
-				'message': redact_tokens(self.format(record)),
+				'message': storable_text(self.format(record), MAX_LOG_MESSAGE_CHARS),
 				'origin': record.filename,
 				'origin_line': record.lineno,
 				'backend_version': __version__,

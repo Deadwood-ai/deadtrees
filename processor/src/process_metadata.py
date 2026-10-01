@@ -131,7 +131,6 @@ def process_metadata(task: QueueTask, temp_dir: Path):
 
 		# Refresh token before database operations
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-		update_status(token, task.dataset_id, current_status=StatusEnum.idle, is_metadata_done=True)
 		# Save to database, excluding created_at to use DB default
 		logger.info(
 			'Saving metadata to database',
@@ -148,6 +147,8 @@ def process_metadata(task: QueueTask, temp_dir: Path):
 			client.table(settings.metadata_table).upsert(
 				metadata.model_dump(exclude={'created_at'}), on_conflict='dataset_id'
 			).execute()
+		# The flag follows the data, so a stale-row check never trusts a missing row.
+		update_status(token, task.dataset_id, current_status=StatusEnum.idle, is_metadata_done=True)
 
 		logger.info(
 			'Processed metadata successfully',
@@ -171,5 +172,4 @@ def process_metadata(task: QueueTask, temp_dir: Path):
 				extra={'error': str(e)},
 			),
 		)
-		update_status(token, task.dataset_id, has_error=True, error_message=str(e))
 		raise ProcessingError(str(e), task_type='metadata', task_id=task.id, dataset_id=task.dataset_id)

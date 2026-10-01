@@ -451,22 +451,10 @@ def process_odm(task: QueueTask, temp_dir: Path):
 			)
 
 	except Exception as e:
-		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 		logger.error(
 			f'ODM processing failed for dataset {dataset_id}: {str(e)}',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
-		# Ensure status reflects the error so the queue can skip this dataset until manual intervention
-		try:
-			update_status(
-				token=token,
-				dataset_id=dataset_id,
-				current_status=StatusEnum.idle,
-				has_error=True,
-				error_message=str(e),
-			)
-		except Exception:
-			pass
 
 		# Cleanup temporary ODM directory on failure unless retention is enabled for this dataset.
 		if 'odm_host_temp_dir' in locals() and odm_host_temp_dir.exists():
@@ -1095,11 +1083,6 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			f'Failed to run ODM container: {str(e)}',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
-		# Mark dataset status with error to prevent immediate re-tries
-		try:
-			update_status(token=token, dataset_id=dataset_id, has_error=True, error_message=str(e))
-		except Exception:
-			pass
 		raise
 	finally:
 		# Clean up shared volume unless we intentionally retained failed artifacts.
