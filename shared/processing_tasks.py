@@ -1,6 +1,21 @@
 from shared.models import TaskTypeEnum
 
 
+# Every stage a new GeoTIFF upload runs. Keep in sync with GEOTIFF_PROCESSING_STEPS in
+# frontend/src/components/Upload/UploadModal.tsx.
+UPLOAD_TASK_TYPES = (
+	TaskTypeEnum.geotiff,
+	TaskTypeEnum.cog,
+	TaskTypeEnum.thumbnail,
+	TaskTypeEnum.metadata,
+	TaskTypeEnum.aoi_v1,
+	TaskTypeEnum.deadwood_v1,
+	TaskTypeEnum.treecover_v1,
+	TaskTypeEnum.deadwood_treecover_combined_v2,
+	TaskTypeEnum.embeddings_v1,
+	TaskTypeEnum.doy_estimation_v1,
+)
+
 TASKS_REQUIRING_STANDARDIZED_ORTHO = frozenset(
 	{
 		TaskTypeEnum.cog,

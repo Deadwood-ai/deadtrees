@@ -24,6 +24,7 @@ from shared.models import (
 	AOI,
 )
 from shared.labels import create_label_with_geometries
+from shared.processing_tasks import UPLOAD_TASK_TYPES
 from shared.logger import logger
 
 
@@ -162,14 +163,14 @@ class DataCommands:
 
 		Args:
 			dataset_id: ID of the dataset to process
-			task_types: List of task types to process. Defaults to ['cog', 'thumbnail']
+			task_types: List of task types to process. Defaults to the full upload pipeline
+				(UPLOAD_TASK_TYPES, the same stages a website upload runs)
 			priority: Task priority (5=highest, 1=lowest). Defaults to DEFAULT_QUEUE_PRIORITY (2).
 		"""
 		token = self._ensure_auth()
 
-		# Default task types if none provided
 		if not task_types:
-			task_types = ['cog', 'thumbnail']
+			task_types = [t.value for t in UPLOAD_TASK_TYPES]
 
 		# Validate task types
 		try:
