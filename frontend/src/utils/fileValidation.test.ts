@@ -88,6 +88,18 @@ describe("validateGeoTiffUpload", () => {
     await expect(validateGeoTiffUpload(await loadFixture("rgb-real-crop.tif"))).resolves.toEqual([]);
   });
 
+  it("rejects a past upload that had coordinates but no CRS", async () => {
+    await expect(validateGeoTiffUpload(await loadFixture("no-crs-coordinates-real-crop.tif"))).rejects.toThrow(
+      /coordinates but no coordinate system/,
+    );
+  });
+
+  it("rejects a past upload that had no georeferencing", async () => {
+    await expect(validateGeoTiffUpload(await loadFixture("no-georeference-real-crop.tif"))).rejects.toThrow(
+      /no location information/,
+    );
+  });
+
   it("raises a user-facing error for unsupported TIFFs", async () => {
     await expect(validateGeoTiffUpload(await loadFixture("nir-alpha-real-crop.tif"))).rejects.toThrow(
       /require an RGB orthomosaic/i,

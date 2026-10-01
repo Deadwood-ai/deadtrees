@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { checkGeoTiffGeoreference, checkRawImageNames, isMultispectralBand } from "./uploadRules";
@@ -50,5 +51,25 @@ describe("checkGeoTiffGeoreference", () => {
   it("warns, but does not block, on a custom coordinate system", () => {
     const geoKeys = { GTModelTypeGeoKey: 1, ProjectedCSTypeGeoKey: 32767 };
     expect(checkGeoTiffGeoreference({ geoKeys, hasCoordinates: true }).warnings[0]).toMatch(/custom or local/);
+  });
+});
+
+const realZips: { cases: { case: string; outcome: "reject" | "warn" | "pass"; message: string | null; names: string[] }[] } =
+  JSON.parse(
+    readFileSync(new URL("../../../shared/tests/fixtures/real_upload_zips.json", import.meta.url), "utf8"),
+  );
+
+describe("real past uploads", () => {
+  it.each(realZips.cases.map((c) => [c.case, c] as const))("%s", (_, c) => {
+    if (c.outcome === "reject") {
+      expect(() => checkRawImageNames(c.names)).toThrow(c.message!);
+      return;
+    }
+    const { warnings } = checkRawImageNames(c.names);
+    if (c.outcome === "warn") {
+      expect(warnings.join(" ")).toContain(c.message);
+    } else {
+      expect(warnings).toEqual([]);
+    }
   });
 });

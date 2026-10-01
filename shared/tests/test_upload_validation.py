@@ -1,3 +1,4 @@
+import json
 import zipfile
 from pathlib import Path
 
@@ -98,3 +99,36 @@ def test_rejects_unreadable_geotiff(tmp_path: Path):
 	path.write_bytes(b'not a tiff')
 	with pytest.raises(UnprocessableUploadError, match='could not read this file'):
 		ensure_georeferenced_geotiff(path)
+
+
+_REAL_ZIPS = json.loads((Path(__file__).parent / 'fixtures' / 'real_upload_zips.json').read_text())['cases']
+
+
+@pytest.mark.parametrize('case', _REAL_ZIPS, ids=[case['case'] for case in _REAL_ZIPS])
+def test_real_upload_zips(case):
+	"""Server rules reject exactly the real uploads that could never process."""
+	if case['outcome'] == 'reject':
+		with pytest.raises(UnprocessableUploadError, match=case['message']):
+			check_raw_image_names(case['names'])
+	else:
+		check_raw_image_names(case['names'])
+
+
+_REAL_GEOTIFFS = Path(__file__).parents[2] / 'frontend' / 'test' / 'fixtures' / 'geotiff' / 'upload-validation'
+
+
+@pytest.mark.skipif(not _REAL_GEOTIFFS.exists(), reason='frontend fixtures are not in this image')
+@pytest.mark.parametrize(
+	('name', 'message'),
+	[
+		('rgb-real-crop.tif', None),
+		('no-crs-coordinates-real-crop.tif', 'but no CRS definition'),
+		('no-georeference-real-crop.tif', 'no coordinate reference system'),
+	],
+)
+def test_real_geotiff_crops(name, message):
+	if message is None:
+		ensure_georeferenced_geotiff(_REAL_GEOTIFFS / name)
+	else:
+		with pytest.raises(UnprocessableUploadError, match=message):
+			ensure_georeferenced_geotiff(_REAL_GEOTIFFS / name)

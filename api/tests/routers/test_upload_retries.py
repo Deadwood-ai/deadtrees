@@ -18,8 +18,11 @@ from shared.settings import settings
 
 
 @pytest.fixture
-def upload(auth_token, data_directory):
+def upload(auth_token, data_directory, monkeypatch):
 	upload_id = f'retry-{uuid4()}'
+	# These tests drive the chunk protocol with arbitrary bytes; the GeoTIFF
+	# content check has its own tests in test_upload_odm_detection.py.
+	monkeypatch.setattr('api.src.routers.upload.ensure_georeferenced_geotiff', lambda _path: None)
 
 	def send(index, content, total=3, filename='retry.tif', request_token=auth_token, **metadata):
 		with TestClient(app) as client:
@@ -55,7 +58,8 @@ def test_retries_preserve_bytes_and_replay_final_dataset(upload, auth_token, fil
 	if filename.endswith('.zip'):
 		buffer = BytesIO()
 		with ZipFile(buffer, 'w') as archive:
-			archive.writestr('image.jpg', b'image fixture')
+			archive.writestr('image_1.jpg', b'image fixture')
+			archive.writestr('image_2.jpg', b'image fixture')
 		content = buffer.getvalue()
 	else:
 		with MemoryFile() as image:
