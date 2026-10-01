@@ -3,7 +3,17 @@
 // upload completes; keep the two in step. Warnings are browser-only: they flag
 // uploads that often fail but sometimes succeed, so they never block.
 
-const RAW_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".tif", ".tiff", ".dng", ".raw", ".bmp", ".webp"]);
+const RAW_IMAGE_EXTENSIONS = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".tif",
+  ".tiff",
+  ".dng",
+  ".raw",
+  ".bmp",
+  ".webp",
+]);
 const RAW_CAMERA_EXTENSIONS = new Set([".dng", ".raw"]);
 const TIFF_EXTENSIONS = new Set([".tif", ".tiff"]);
 
@@ -21,7 +31,8 @@ const extension = (name: string) => {
   return dot === -1 ? "" : base.slice(dot).toLowerCase();
 };
 
-export const isMultispectralBand = (name: string) => MULTISPECTRAL_BAND.test(baseName(name));
+export const isMultispectralBand = (name: string) =>
+  MULTISPECTRAL_BAND.test(baseName(name));
 
 const rawImageNames = (entryNames: string[]) =>
   entryNames.filter(
@@ -50,7 +61,13 @@ export const checkRawImageNames = (entryNames: string[]): string[] => {
         "Check that the photos are inside the archive.",
     );
   }
-  if (rgbImages.length === 1) {
+  // A JPG and its DNG twin are one photo; the processor drops the DNG.
+  const photoCount = new Set(
+    rgbImages.map((name) =>
+      name.slice(0, name.length - extension(name).length).toLowerCase(),
+    ),
+  ).size;
+  if (photoCount === 1) {
     throw new Error(
       "This ZIP contains only one image, and an orthomosaic needs many overlapping photos. " +
         "If this image is already an orthomosaic, upload the .tif file directly as a GeoTIFF.",
@@ -58,12 +75,16 @@ export const checkRawImageNames = (entryNames: string[]): string[] => {
   }
 
   const warnings: string[] = [];
-  if (rgbImages.length < RECOMMENDED_MIN_PHOTOS) {
-    const allTiff = rgbImages.every((name) => TIFF_EXTENSIONS.has(extension(name)));
+  if (photoCount < RECOMMENDED_MIN_PHOTOS) {
+    const allTiff = rgbImages.every((name) =>
+      TIFF_EXTENSIONS.has(extension(name)),
+    );
     warnings.push(
-      `This ZIP has only ${rgbImages.length} photos. An orthomosaic usually needs at least ` +
+      `This ZIP has only ${photoCount} photos. An orthomosaic usually needs at least ` +
         `${RECOMMENDED_MIN_PHOTOS} overlapping photos, so processing will probably fail.` +
-        (allTiff ? " If these files are already orthomosaics, upload each .tif directly as a GeoTIFF." : ""),
+        (allTiff
+          ? " If these files are already orthomosaics, upload each .tif directly as a GeoTIFF."
+          : ""),
     );
   }
   if (rgbImages.every((name) => RAW_CAMERA_EXTENSIONS.has(extension(name)))) {
@@ -77,20 +98,24 @@ export const checkRawImageNames = (entryNames: string[]): string[] => {
 
 // GeoTIFF GeoKey values (OGC GeoTIFF 1.1).
 const USER_DEFINED = 32767;
+const NON_CRS_GEOKEYS = new Set(["GTRasterTypeGeoKey", "GTCitationGeoKey"]);
 
 export interface GeoTiffGeoreference {
   geoKeys: Record<string, unknown> | null;
   hasCoordinates: boolean;
 }
 
-// Rejects only a file with no CRS key at all, which the processor always refuses.
+// Rejects only a file with no CRS-related GeoKey at all, which the processor always refuses.
 // The API repeats the authoritative GDAL check when the upload completes.
-export const checkGeoTiffGeoreference = ({ geoKeys, hasCoordinates }: GeoTiffGeoreference): string[] => {
+export const checkGeoTiffGeoreference = ({
+  geoKeys,
+  hasCoordinates,
+}: GeoTiffGeoreference): string[] => {
   const modelType = geoKeys?.GTModelTypeGeoKey;
-  const hasCrs =
-    modelType !== undefined ||
-    geoKeys?.ProjectedCSTypeGeoKey !== undefined ||
-    geoKeys?.GeographicTypeGeoKey !== undefined;
+  // Any GeoKey beyond the raster type and free-text citation may describe a CRS; GDAL decides on upload.
+  const hasCrs = Object.keys(geoKeys ?? {}).some(
+    (key) => !NON_CRS_GEOKEYS.has(key),
+  );
 
   if (!hasCrs && hasCoordinates) {
     throw new Error(
@@ -106,7 +131,10 @@ export const checkGeoTiffGeoreference = ({ geoKeys, hasCoordinates }: GeoTiffGeo
   }
 
   const warnings: string[] = [];
-  if (modelType === USER_DEFINED || geoKeys?.ProjectedCSTypeGeoKey === USER_DEFINED) {
+  if (
+    modelType === USER_DEFINED ||
+    geoKeys?.ProjectedCSTypeGeoKey === USER_DEFINED
+  ) {
     warnings.push(
       "This GeoTIFF uses a custom or local coordinate system. We will check it after upload; " +
         "if processing fails, re-export it with a standard EPSG code.",

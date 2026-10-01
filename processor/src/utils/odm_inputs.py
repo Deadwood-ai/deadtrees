@@ -23,7 +23,12 @@ from pathlib import Path
 
 from PIL import Image
 
-from shared.upload_validation import RAW_CAMERA_EXTENSIONS, TIFF_EXTENSIONS, is_multispectral_band
+from shared.upload_validation import (
+	MULTISPECTRAL_ONLY_MESSAGE,
+	RAW_CAMERA_EXTENSIONS,
+	TIFF_EXTENSIONS,
+	is_multispectral_band,
+)
 
 GPS_IFD = 0x8825
 METRES_PER_DEGREE = 111_320.0
@@ -191,9 +196,7 @@ def select_odm_images(image_files: list[Path], max_extent_km2: float) -> OdmImag
 	selection.kept, bands = drop_multispectral_bands(selection.kept)
 	if bands:
 		if not selection.kept:
-			raise OdmInputError(
-				'The upload contains only multispectral band images; an RGB orthomosaic needs RGB photos'
-			)
+			raise OdmInputError(MULTISPECTRAL_ONLY_MESSAGE)
 		selection.dropped['multispectral band images'] = bands
 
 	positions = {f: p for f in selection.kept if (p := read_gps_position(f)) is not None}

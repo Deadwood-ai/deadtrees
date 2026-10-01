@@ -132,3 +132,31 @@ def test_real_geotiff_crops(name, message):
 	else:
 		with pytest.raises(UnprocessableUploadError, match=message):
 			ensure_georeferenced_geotiff(_REAL_GEOTIFFS / name)
+
+
+def test_rejects_vrt_without_opening_its_sources(tmp_path: Path, monkeypatch):
+	"""A VRT named .tif must not make GDAL read files or URLs named inside it."""
+	source = tmp_path / 'secret.tif'
+	_write_tif(source, crs='EPSG:25832', transform=from_origin(412000, 5320000, 0.05, 0.05))
+	vrt = tmp_path / 'upload.tif'
+	vrt.write_text(
+		'<VRTDataset rasterXSize="4" rasterYSize="4"><VRTRasterBand dataType="Byte" band="1"><SimpleSource>'
+		f'<SourceFilename relativeToVRT="0">{source}</SourceFilename><SourceBand>1</SourceBand>'
+		'</SimpleSource></VRTRasterBand></VRTDataset>'
+	)
+	with pytest.raises(UnprocessableUploadError, match='could not read this file'):
+		ensure_georeferenced_geotiff(vrt)
+
+
+def test_rejects_geotiff_whose_crs_cannot_be_parsed(tmp_path: Path, monkeypatch):
+	def _raise(*_args, **_kwargs):
+		raise rasterio.errors.CRSError('broken CRS')
+
+	monkeypatch.setattr('shared.upload_validation.rasterio.open', _raise)
+	with pytest.raises(UnprocessableUploadError, match='could not read this file'):
+		ensure_georeferenced_geotiff(tmp_path / 'any.tif')
+
+
+def test_counts_a_jpg_and_its_dng_as_one_photo():
+	with pytest.raises(UnprocessableUploadError, match='only one image'):
+		check_raw_image_names(['DJI_0001.JPG', 'DJI_0001.DNG'])
