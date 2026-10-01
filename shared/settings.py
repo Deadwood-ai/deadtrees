@@ -171,6 +171,10 @@ class Settings(BaseSettings):
 	# A queue entry whose task_types include any blacklisted type is skipped so a
 	# capable worker picks it up instead. See `processor_task_blacklist`.
 	PROCESSOR_TASK_BLACKLIST: str = ''
+	# Lowest queue priority this worker claims. The default 1 claims everything.
+	# Set it to 4 on one host to keep that worker free for fresh uploads while a
+	# long lower-priority reprocessing batch occupies the other workers.
+	PROCESSOR_MIN_PRIORITY: int = 1
 	SSH_PRIVATE_KEY_PATH: str = '/app/ssh_key'
 	SSH_PRIVATE_KEY_PASSPHRASE: str = ''
 	SSH_KNOWN_HOSTS_PATH: str = '~/.ssh/known_hosts'

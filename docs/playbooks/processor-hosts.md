@@ -110,6 +110,19 @@ processor gets GPU1.
 - The crontab keeps a commented-out legacy launcher
   (`.local/processor/auto_deploy_processor.sh`). Do not re-enable it.
 
+## Reserving A Host For Fresh Uploads
+
+Frontend uploads enter the queue at priority 4; reprocessing batches use 1–3.
+Priority only decides what an idle worker claims next, so during a long batch
+every worker can be busy for hours while a fresh upload waits.
+
+Setting `PROCESSOR_MIN_PRIORITY=4` in one host's `.env` makes that worker claim
+only priority 4 and above. It sits idle when no upload is waiting, and the batch
+drains on the remaining hosts. The default `1` claims everything. Pick a host
+that does not exclude `odm_processing` through `PROCESSOR_TASK_BLACKLIST`,
+otherwise fresh ZIP uploads still wait. Changing `.env` and recreating the worker
+is a production change; drain first as `processor-deploy.md` describes.
+
 ## Checking All Hosts
 
 All of these are read-only. Run them from the host's checkout.
