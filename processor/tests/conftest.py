@@ -168,6 +168,14 @@ def standardized_local_ortho(test_dataset_for_processing, test_file):
 	return path
 
 
+@pytest.fixture(autouse=True)
+def reset_shutdown_request(monkeypatch):
+	"""A test that runs the shutdown handler must not make later tests exit."""
+	import processor.src.processor as processor_module
+
+	monkeypatch.setattr(processor_module, '_shutdown_requested', False)
+
+
 # @test_environment_only
 @pytest.fixture(autouse=True)
 def cleanup_storage(request):
