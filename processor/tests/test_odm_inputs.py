@@ -6,7 +6,6 @@ import pytest
 from PIL import Image
 
 from processor.src.utils.odm_inputs import (
-	MULTISPECTRAL_REASON,
 	OdmInputError,
 	drop_gps_outliers,
 	drop_multispectral_bands,
@@ -102,6 +101,24 @@ def test_one_broken_fix_is_dropped_even_in_a_small_flight():
 	assert len(kept) == 5
 
 
+def test_failed_fixes_are_dropped_even_beyond_the_outlier_share():
+	positions = {Path(f'{i}.jpg'): p for i, p in enumerate(_grid(8))}
+	positions |= {Path('zero1.jpg'): (0.0, 0.0), Path('zero2.jpg'): (0.0, 0.0)}
+
+	kept, outliers = drop_gps_outliers(positions)
+
+	assert outliers == [Path('zero1.jpg'), Path('zero2.jpg')]
+	assert len(kept) == 8
+
+
+def test_dji_xmp_position_wins_over_exif_like_in_odm(tmp_path):
+	photo = _photo(tmp_path / 'a.jpg', FLIGHT)
+	xmp = b'<x:xmpmeta><rdf:Description drone-dji:Latitude="+0.000000" drone-dji:Longitude="+0.000000"/></x:xmpmeta>'
+	photo.write_bytes(photo.read_bytes() + xmp)
+
+	assert read_gps_position(photo) == (0.0, 0.0)
+
+
 def test_two_sites_are_a_real_spread_not_outliers():
 	positions = {Path(f'a{i}.jpg'): p for i, p in enumerate(_grid(10))}
 	positions |= {Path(f'b{i}.jpg'): (p[0] + 1.0, p[1]) for i, p in enumerate(_grid(10))}
@@ -144,7 +161,14 @@ def test_select_odm_images_records_band_drops_under_the_shared_reason(tmp_path):
 
 	selection = select_odm_images([rgb, band], max_extent_km2=30)
 
-	assert selection.dropped == {MULTISPECTRAL_REASON: [band]}
+	assert selection.dropped == {'multispectral band images': [band]}
+
+
+def test_select_odm_images_rejects_band_only_uploads(tmp_path):
+	bands = [_photo(tmp_path / f'IMG_{i}_GRE.TIF', mode='L') for i in range(3)]
+
+	with pytest.raises(OdmInputError, match='only multispectral band images'):
+		select_odm_images(bands, max_extent_km2=30)
 
 
 def test_band_only_upload_fails_before_any_odm_container(tmp_path, monkeypatch):

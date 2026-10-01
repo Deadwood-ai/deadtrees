@@ -42,7 +42,7 @@ from processor.src.utils.debug_artifacts import (
 	build_container_forensics,
 	write_debug_bundle,
 )
-from processor.src.utils.odm_inputs import MULTISPECTRAL_REASON, OdmInputError, select_odm_images
+from processor.src.utils.odm_inputs import select_odm_images
 from shared.exif_utils import extract_camera_nadir_deviation_degrees, extract_comprehensive_exif
 
 # RTK file extensions as specified in requirements
@@ -882,10 +882,6 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			f'No image files found. Directory contains: {[f.name for f in all_files[:20]]}{"..." if len(all_files) > 20 else ""}',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
-		if selection.dropped.get(MULTISPECTRAL_REASON):
-			raise OdmInputError(
-				'The upload contains only multispectral band images; an RGB orthomosaic needs RGB photos'
-			)
 		raise Exception(f'No supported images found in {images_dir}')
 
 	# Filter out obviously corrupt images by size (but be less restrictive - 100KB minimum)

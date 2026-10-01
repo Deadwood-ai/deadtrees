@@ -16,6 +16,7 @@ The functions here only drop files; they never edit images.
 from __future__ import annotations
 
 import math
+import re
 import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,7 +34,14 @@ OUTLIER_MIN_DISTANCE_M = 1000.0
 # More "outliers" than this share (and more than one) is a multi-site or corridor upload, not a few broken fixes.
 MAX_OUTLIER_SHARE = 0.1
 MIN_IMAGES_FOR_OUTLIER_CHECK = 5
-MULTISPECTRAL_REASON = 'multispectral band images'
+FAILED_FIX = (0.0, 0.0)
+# ODM 3.6 lets DJI XMP drone-dji:Latitude/Longitude override the EXIF GPS (opendm/photo.py).
+# DJI writes its XMP packet near the start of the JPEG.
+_XMP_SCAN_BYTES = 2 * 1024 * 1024
+_XMP_GPS_PATTERN = re.compile(
+	rb'drone-dji:(?P<attr>Latitude|Longitude)\s*=\s*["\']\s*(?P<attr_value>[+-]?[\d.]+)'
+	rb'|<drone-dji:(?P<element>Latitude|Longitude)>\s*(?P<element_value>[+-]?[\d.]+)'
+)
 
 
 class OdmInputError(Exception):
@@ -88,16 +96,39 @@ def _gps_degrees(values) -> float:
 	return degrees + minutes / 60 + seconds / 3600
 
 
-def read_gps_position(image_file: Path) -> tuple[float, float] | None:
-	"""Latitude/longitude from EXIF, or None when absent or unreadable."""
+def _exif_gps(image_file: Path) -> dict[str, float]:
 	try:
 		with Image.open(image_file) as image:
 			gps = image.getexif().get_ifd(GPS_IFD)
-		latitude = _gps_degrees(gps[2]) * (-1 if gps.get(1) == 'S' else 1)
-		longitude = _gps_degrees(gps[4]) * (-1 if gps.get(3) == 'W' else 1)
+		return {
+			'Latitude': _gps_degrees(gps[2]) * (-1 if gps.get(1) == 'S' else 1),
+			'Longitude': _gps_degrees(gps[4]) * (-1 if gps.get(3) == 'W' else 1),
+		}
 	except Exception:
-		return None
-	if not (math.isfinite(latitude) and math.isfinite(longitude)):
+		return {}
+
+
+def _xmp_gps(image_file: Path) -> dict[str, float]:
+	try:
+		with open(image_file, 'rb') as f:
+			head = f.read(_XMP_SCAN_BYTES)
+	except OSError:
+		return {}
+	found = {}
+	for match in _XMP_GPS_PATTERN.finditer(head):
+		name = (match['attr'] or match['element']).decode()
+		try:
+			found.setdefault(name, float(match['attr_value'] or match['element_value']))
+		except ValueError:
+			continue
+	return found
+
+
+def read_gps_position(image_file: Path) -> tuple[float, float] | None:
+	"""The latitude/longitude ODM will use: DJI XMP over EXIF GPS, or None when unknown."""
+	gps = {**_exif_gps(image_file), **_xmp_gps(image_file)}
+	latitude, longitude = gps.get('Latitude'), gps.get('Longitude')
+	if latitude is None or longitude is None or not (math.isfinite(latitude) and math.isfinite(longitude)):
 		return None
 	return latitude, longitude
 
@@ -111,23 +142,25 @@ def _offset_metres(origin: tuple[float, float], position: tuple[float, float]) -
 def drop_gps_outliers(
 	positions: dict[Path, tuple[float, float]],
 ) -> tuple[dict[Path, tuple[float, float]], list[Path]]:
-	"""Drop the few frames whose GPS position lies far away from the rest of the flight.
+	"""Drop frames with a failed 0/0 fix and the few frames lying far from the rest of the flight.
 
-	A 0/0 position is a failed fix and always counts as an outlier. Nothing is dropped when
-	more than one frame and more than MAX_OUTLIER_SHARE of them are outliers: that is a real spread (several
-	sites or a long corridor), which the extent check reports instead.
+	Failed fixes are always dropped while other frames have a real position. Distant frames
+	are kept when more than one frame and more than MAX_OUTLIER_SHARE of them are distant:
+	that is a real spread (several sites or a long corridor), which the extent check reports.
 	"""
-	if len(positions) < MIN_IMAGES_FOR_OUTLIER_CHECK:
-		return positions, []
-	valid = {f: p for f, p in positions.items() if p != (0.0, 0.0)}
+	valid = {f: p for f, p in positions.items() if p != FAILED_FIX}
 	if not valid:
 		return positions, []
-	median = (statistics.median(p[0] for p in valid.values()), statistics.median(p[1] for p in valid.values()))
-	distances = {f: math.hypot(*_offset_metres(median, p)) for f, p in valid.items()}
-	limit = max(OUTLIER_MIN_DISTANCE_M, OUTLIER_SPREAD_FACTOR * statistics.median(distances.values()))
-	outliers = [f for f in positions if f not in valid or distances[f] > limit]
-	if len(outliers) > max(1, MAX_OUTLIER_SHARE * len(positions)):
-		return positions, []
+	failed = [f for f in positions if f not in valid]
+	distant = []
+	if len(valid) >= MIN_IMAGES_FOR_OUTLIER_CHECK:
+		median = (statistics.median(p[0] for p in valid.values()), statistics.median(p[1] for p in valid.values()))
+		distances = {f: math.hypot(*_offset_metres(median, p)) for f, p in valid.items()}
+		limit = max(OUTLIER_MIN_DISTANCE_M, OUTLIER_SPREAD_FACTOR * statistics.median(distances.values()))
+		distant = [f for f in valid if distances[f] > limit]
+		if len(distant) > max(1, MAX_OUTLIER_SHARE * len(valid)):
+			distant = []
+	outliers = failed + distant
 	return {f: p for f, p in positions.items() if f not in outliers}, outliers
 
 
@@ -144,8 +177,9 @@ def gps_extent_km2(positions: list[tuple[float, float]]) -> float:
 def select_odm_images(image_files: list[Path], max_extent_km2: float) -> OdmImageSelection:
 	"""Apply the DNG, multispectral and GPS-outlier rules, then check the mosaic extent.
 
-	Raises OdmInputError when the remaining images span more than ``max_extent_km2``: one ODM
-	run cannot mosaic that area within its memory, so the upload needs to be split.
+	Raises OdmInputError when only multispectral band images remain, or when the remaining
+	images span more than ``max_extent_km2``: one ODM run cannot mosaic that area within its
+	memory, so the upload needs to be split.
 	"""
 	selection = OdmImageSelection(kept=list(image_files))
 
@@ -155,7 +189,11 @@ def select_odm_images(image_files: list[Path], max_extent_km2: float) -> OdmImag
 
 	selection.kept, bands = drop_multispectral_bands(selection.kept)
 	if bands:
-		selection.dropped[MULTISPECTRAL_REASON] = bands
+		if not selection.kept:
+			raise OdmInputError(
+				'The upload contains only multispectral band images; an RGB orthomosaic needs RGB photos'
+			)
+		selection.dropped['multispectral band images'] = bands
 
 	positions = {f: p for f in selection.kept if (p := read_gps_position(f)) is not None}
 	positions, outliers = drop_gps_outliers(positions)
@@ -163,9 +201,8 @@ def select_odm_images(image_files: list[Path], max_extent_km2: float) -> OdmImag
 		selection.dropped['images with a GPS position far from the rest of the flight'] = outliers
 		selection.kept = [f for f in selection.kept if f not in outliers]
 
-	fixes = [p for p in positions.values() if p != (0.0, 0.0)]
-	if fixes:
-		selection.extent_km2 = gps_extent_km2(fixes)
+	if positions:
+		selection.extent_km2 = gps_extent_km2(list(positions.values()))
 		if selection.extent_km2 > max_extent_km2:
 			raise OdmInputError(
 				f'The images span {selection.extent_km2:.0f} km², more than the {max_extent_km2:g} km² one '
