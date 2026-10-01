@@ -8,7 +8,7 @@ on:
       - "supabase/**"
       - "deadtrees-cli/**"
       - "docker-compose.test.yaml"
-      - "nginx/test-conf/**"
+      - "nginx/**"
       - "scripts/test-api-smoke.sh"
       - ".github/workflows/api-smoke.yml"
 
@@ -34,7 +34,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: "pip"
           cache-dependency-path: |
             deadtrees-cli/setup.py

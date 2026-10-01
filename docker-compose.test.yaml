@@ -106,6 +106,7 @@ services:
       - ./shared:/app/shared # dev only, no rebuild needed
       - ./assets:/app/assets
       - ./pytest.ini:/app/pytest.ini:ro
+      - ./nginx:/app/nginx:ro # nginx config contract tests
     environment:
       - PYTHONPATH=/app
       - UVICORN_HOST=0.0.0.0

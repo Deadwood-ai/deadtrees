@@ -62,6 +62,7 @@ rename while behavior is unchanged, the test is probably too coupled.
 | Auditor local E2E      | `npm --prefix frontend run test:e2e:local:audit`                        | auditor-only queue triage, audit tabs, processing logs, and audit access guards     |
 | Auditor write E2E      | `npm --prefix frontend run test:e2e:local:audit:write`                  | local-only auditor flag, AOI, audit-lock, and audit-save side effects               |
 | Python critical lint   | `scripts/lint-python.sh`                                                | syntax/runtime-name safety for API, shared models, processor, CLI, and scripts      |
+| Scripts and CLI unit   | `python -m pytest -q scripts/tests deadtrees-cli/tests/test_dev_security.py` | processor auto-deploy, drain, runtime control, asset preflight, backups; `scripts-unit` CI also validates compose files |
 | API/router             | `scripts/test-api-smoke.sh` or `deadtrees dev test api <path>`          | FastAPI routes, upload/download/process/auth behavior                               |
 | Database/RLS/migration | focused API DB tests plus migration review/reset where practical        | schema, policies, RPCs, views, generated contracts                                  |
 | Processor CPU          | focused `deadtrees dev test processor <path>` or the unit command below  | queue orchestration, GeoTIFF/COG/metadata, non-GPU utilities                        |
@@ -126,27 +127,10 @@ workflow. It starts only the backend-lite test surface: local Supabase, the API
 test container, nginx storage, and Mailpit. It intentionally excludes the
 processor, GPU/model inference, ODM, and full pipeline validation.
 
-The suite covers:
-
-- API settings/import sanity
-- contributor upload and process request contracts
-- upload type detection and unsupported ZIP compression rejection
-- processing task validation, priority, queue ordering, and rerun behavior
-- prepackaged download grant contracts
-- DTE stats route validation with synthetic fixtures
-- focused download route contracts and bundle helper behavior
-- auditor flag review RPC authorization and status history
-- private dataset RLS through tables and dataset views
-- privileged user visibility and privilege functions
-- dataset audit persistence and constraints
-- dataset edit history triggers and authorization
-- data publication tables and basic publication operations
-- ODM database schema, constraints, and completion flags
-- PRIWA membership, write authorization, and protected field contracts
-- notification email rendering and Mailpit delivery
-- search embedding route validation and rate limiting
-- reference patch export selection and cleanup behavior
-- shared model, retry, database-client, status, and ZIP safety utilities
+The suite runs every file under `api/tests` and `shared/tests`, so a new test
+file is covered as soon as it lands. Tests that need large assets, real model
+inference or a long runtime opt out with `@pytest.mark.slow` or
+`@pytest.mark.comprehensive`; `pytest.ini` deselects both markers by default.
 
 Keep this suite backend-lite. Add processor/GPU/ODM checks to the processing
 server validation lane instead of expanding API smoke into full-system testing.

@@ -71,12 +71,14 @@ updates:
       actions-all:
         patterns: ["*"]
 
-  # Python services and developer CLI
+  # Python services, developer CLI, FreiDATA publisher and analyst scripts
   - package-ecosystem: "pip"
     directories:
       - "/api"
       - "/processor"
       - "/deadtrees-cli"
+      - "/freidata"
+      - "/scripts"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 1

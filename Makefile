@@ -47,6 +47,12 @@ BIOME := $(BIOME_DIR)/terres_ecosystems.gpkg
 PHENOLOGY_DATA := $(PHENO_DIR)/modispheno_aggregated_normalized_filled.zarr
 PHENOLOGY_ARCHIVE := $(PHENO_DIR)/modispheno_aggregated_normalized_filled.zarr.tar.gz
 DOY_MODEL := $(MODELS_DIR)/doy_estimation_v1/manifest.json
+DOY_MODEL_ARCHIVE := $(MODELS_DIR)/doy_estimation_v1.tar.gz
+
+# Download URL $(2) to file $(1). An HTTP error fails the target, and an
+# interrupted or empty download never takes the target's name, so a later
+# make run cannot mistake an error page or a partial file for a finished asset.
+download = curl -fL --retry 3 -o $(1).part "$(2)" && test -s $(1).part && mv $(1).part $(1) || { rm -f $(1).part; exit 1; }
 DTE_TEST_FILENAMES := \
 	run_v1004_v1000_crop_half_fold_None_checkpoint_199_deadwood_2020.cog.tif \
 	run_v1004_v1000_crop_half_fold_None_checkpoint_199_deadwood_2022.cog.tif \
@@ -111,59 +117,59 @@ $(TEST_DATA) $(TEST_DATA_SMALL) $(TEST_DATA_REAL_LABELS) $(TEST_RAW_DRONE_ZIP) $
 
 $(TEST_DATA):
 	@echo "Downloading test data..."
-	curl -L -o $@ "$(TEST_DATA_URL)"
+	$(call download,$@,$(TEST_DATA_URL))
 
 $(TEST_DATA_SMALL):
 	@echo "Downloading small test data..."
-	curl -L -o $@ "$(TEST_DATA_SMALL_URL)"
+	$(call download,$@,$(TEST_DATA_SMALL_URL))
 
 $(MODEL):
 	@echo "Downloading model..."
-	curl -L -o $@ "$(MODEL_URL)"
+	$(call download,$@,$(MODEL_URL))
 
 $(COMBINED_MODEL):
 	@echo "Downloading combined deadwood/treecover model..."
-	curl -L -o $@ "$(COMBINED_MODEL_URL)"
+	$(call download,$@,$(COMBINED_MODEL_URL))
 
 $(AOI_MODEL):
 	@echo "Downloading AOI (SegFormer-B1) model..."
-	curl -L -o $@ "$(AOI_MODEL_URL)"
+	$(call download,$@,$(AOI_MODEL_URL))
 
 $(TEST_DATA_REAL_LABELS):
 	@echo "Downloading real labels..."
-	curl -L -o $@ "$(TEST_DATA_REAL_LABELS_URL)"
+	$(call download,$@,$(TEST_DATA_REAL_LABELS_URL))
 
 $(TEST_RAW_DRONE_ZIP):
 	@echo "Downloading upload ZIP test data..."
-	curl -L -o $@ "$(TEST_RAW_DRONE_ZIP_URL)"
+	$(call download,$@,$(TEST_RAW_DRONE_ZIP_URL))
 
 $(TEST_ODM_MINIMAL_ZIP):
 	@echo "Downloading minimal ODM ZIP test data..."
-	curl -L -o $@ "$(TEST_ODM_MINIMAL_ZIP_URL)"
+	$(call download,$@,$(TEST_ODM_MINIMAL_ZIP_URL))
 
 $(WORLDVIEW_FIXTURE):
 	@echo "Downloading WorldView scaling fixture..."
-	curl -L -o $@ "$(WORLDVIEW_FIXTURE_URL)"
+	$(call download,$@,$(WORLDVIEW_FIXTURE_URL))
 
 $(DTE_TEST_DIR)/%.tif:
 	@echo "Downloading DTE test clip $(@F)..."
-	curl -L -o $@ "$(TEST_DATA_BASE_URL)/dte_maps/$(@F)"
+	$(call download,$@,$(TEST_DATA_BASE_URL)/dte_maps/$(@F))
 
 $(GADM):
 	@if [ ! -f $@ ]; then \
 		echo "Downloading GADM data..." && \
-		curl -L -o $@ "$(GADM_URL)"; \
+		$(call download,$@,$(GADM_URL)); \
 	else \
 		echo "GADM data already exists at $(GADM), skipping extraction"; \
 	fi
 
 $(BIOME):
 	@echo "Downloading biome support data..."
-	curl -L -o $@ "$(BIOME_URL)"
+	$(call download,$@,$(BIOME_URL))
 
 $(PHENOLOGY_ARCHIVE):
 	@echo "Downloading phenology support data..."
-	curl -L -o $@ "$(PHENOLOGY_ARCHIVE_URL)"
+	$(call download,$@,$(PHENOLOGY_ARCHIVE_URL))
 
 $(PHENOLOGY_DATA): $(PHENOLOGY_ARCHIVE)
 	@if [ ! -d $@ ]; then \
@@ -176,7 +182,12 @@ $(PHENOLOGY_DATA): $(PHENOLOGY_ARCHIVE)
 $(DOY_MODEL):
 	@mkdir -p $(MODELS_DIR)
 	@echo "Downloading acquisition-date model..."
-	@curl -fL $(DOY_MODEL_ARCHIVE_URL) | tar -xz -C $(MODELS_DIR)
+	@$(call download,$(DOY_MODEL_ARCHIVE),$(DOY_MODEL_ARCHIVE_URL))
+	@rm -rf $(DOY_MODEL_ARCHIVE).extract && mkdir -p $(DOY_MODEL_ARCHIVE).extract
+	@tar -xzf $(DOY_MODEL_ARCHIVE) -C $(DOY_MODEL_ARCHIVE).extract
+	@test -s $(DOY_MODEL_ARCHIVE).extract/doy_estimation_v1/manifest.json
+	@rm -rf $(dir $@) && mv $(DOY_MODEL_ARCHIVE).extract/doy_estimation_v1 $(dir $@)
+	@rm -rf $(DOY_MODEL_ARCHIVE) $(DOY_MODEL_ARCHIVE).extract
 
 clean:
 	rm -rf $(ASSETS_DIR)/*
