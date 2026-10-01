@@ -1,3 +1,4 @@
+import functools
 import json
 import subprocess
 import os
@@ -40,37 +41,48 @@ SERVICE_BUILD_FILES = {
 }
 
 
+def require_sourced_isolated_env():
+	"""Refuse to run a worktree with an isolated stack unless its env is sourced.
+
+	Host-side settings and compose containers must target the same stack; without the
+	sourced env, compose falls back to the shared default project and database.
+	"""
+	for candidate in (os.environ.get('DEADTREES_ISOLATED_ENV_FILE'), ISOLATED_ENV_FILE):
+		if candidate and Path(candidate).is_file():
+			isolated = dotenv_values(candidate)
+			# The repo .env also names the isolated compose project, so compare the database
+			# target too: host-side settings read SUPABASE_URL from the environment.
+			mismatched = [
+				key
+				for key in ('COMPOSE_PROJECT_NAME', 'SUPABASE_URL')
+				if isolated.get(key) and os.environ.get(key) != isolated[key]
+			]
+			if mismatched:
+				raise SystemExit(
+					f'This worktree has an isolated stack ({isolated.get("COMPOSE_PROJECT_NAME")}). '
+					f'Run `set -a; source {candidate}; set +a` before deadtrees dev commands.'
+				)
+			return
+
+
+def _guard_dev_command(method):
+	"""Check the isolated stack only when a dev command runs, so other CLI groups stay usable."""
+
+	@functools.wraps(method)
+	def guarded(*args, **kwargs):
+		require_sourced_isolated_env()
+		return method(*args, **kwargs)
+
+	return guarded
+
+
 class DevCommands:
 	"""Development environment management commands"""
 
 	def __init__(self):
 		self.test_compose_file = 'docker-compose.test.yaml'
-		self._require_sourced_isolated_env()
 		self.compose_env = os.environ.copy()
 		self.compose_env.setdefault('COMPOSE_PROJECT_NAME', DEFAULT_COMPOSE_PROJECT_NAME)
-
-	def _require_sourced_isolated_env(self):
-		"""Refuse to run a worktree with an isolated stack unless its env is sourced.
-
-		Host-side settings and compose containers must target the same stack; without the
-		sourced env, compose falls back to the shared default project and database.
-		"""
-		for candidate in (os.environ.get('DEADTREES_ISOLATED_ENV_FILE'), ISOLATED_ENV_FILE):
-			if candidate and Path(candidate).is_file():
-				isolated = dotenv_values(candidate)
-				# The repo .env also names the isolated compose project, so compare the database
-				# target too: host-side settings read SUPABASE_URL from the environment.
-				mismatched = [
-					key
-					for key in ('COMPOSE_PROJECT_NAME', 'SUPABASE_URL')
-					if isolated.get(key) and os.environ.get(key) != isolated[key]
-				]
-				if mismatched:
-					raise SystemExit(
-						f'This worktree has an isolated stack ({isolated.get("COMPOSE_PROJECT_NAME")}). '
-						f'Run `set -a; source {candidate}; set +a` before deadtrees dev commands.'
-					)
-				return
 
 	def _compose_cmd(self, *args: str) -> List[str]:
 		"""Build a docker compose command for the test environment.
@@ -777,3 +789,8 @@ class DevCommands:
 
 		print('Running CLI tests...')
 		self._run_command(cmd)
+
+
+for _name, _member in list(vars(DevCommands).items()):
+	if not _name.startswith('_') and callable(_member):
+		setattr(DevCommands, _name, _guard_dev_command(_member))

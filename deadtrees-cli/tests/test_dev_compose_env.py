@@ -4,7 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from deadtrees_cli.dev import DevCommands
+from deadtrees_cli.cli import DeadtreesCLI
+from deadtrees_cli.dev import DevCommands, require_sourced_isolated_env
 
 
 class DevComposeEnvTest(unittest.TestCase):
@@ -25,8 +26,10 @@ class DevComposeEnvTest(unittest.TestCase):
 					'SUPABASE_URL': 'http://127.0.0.1:54321',
 				},
 			):
+				# Other command groups stay usable; only running a dev command is refused.
+				commands = DeadtreesCLI().dev
 				with self.assertRaises(SystemExit) as raised:
-					DevCommands()
+					commands.stop()
 
 		self.assertIn('deadtrees-test-dt-abc', str(raised.exception))
 
@@ -42,6 +45,7 @@ class DevComposeEnvTest(unittest.TestCase):
 				},
 			):
 				os.environ.pop('COMPOSE_FILE', None)
+				require_sourced_isolated_env()
 				commands = DevCommands()
 
 		self.assertEqual(commands.compose_env['COMPOSE_PROJECT_NAME'], 'deadtrees-test-dt-abc')
@@ -49,8 +53,6 @@ class DevComposeEnvTest(unittest.TestCase):
 
 	def test_compose_file_override_replaces_default_file(self):
 		with patch.dict(os.environ, {'COMPOSE_FILE': 'docker-compose.test.yaml:docker-compose.test.cpu.yaml'}):
-			os.environ.pop('DEADTREES_ISOLATED_ENV_FILE', None)
-			with patch('deadtrees_cli.dev.ISOLATED_ENV_FILE', Path('/nonexistent/current.env')):
-				commands = DevCommands()
+			commands = DevCommands()
 
 		self.assertEqual(commands._compose_cmd('ps'), ['docker', 'compose', 'ps'])
