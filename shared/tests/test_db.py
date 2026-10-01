@@ -126,3 +126,25 @@ def test_cached_login_accepts_non_ascii_passwords(fake_auth):
 	assert db.login('u@example.com', 'päßwörd') == token
 	with pytest.raises(Exception, match='Login failed'):
 		db.login('u@example.com', 'passwörd')
+
+
+def test_login_retries_a_brief_dns_failure(fake_auth, monkeypatch):
+	monkeypatch.setattr('shared.retry.time.sleep', lambda seconds: None)
+	failures = iter([OSError('[Errno -3] Temporary failure in name resolution')])
+	sign_in = _FakeAuth.sign_in_with_password
+
+	def flaky(self, credentials):
+		for error in failures:
+			raise error
+		return sign_in(self, credentials)
+
+	monkeypatch.setattr(_FakeAuth, 'sign_in_with_password', flaky)
+
+	assert db.login('a@example.com', 'secret-a', use_cached_session=False).startswith('token-a@example.com')
+
+
+def test_login_does_not_retry_rejected_credentials(fake_auth):
+	with pytest.raises(Exception, match='Login failed: Invalid login credentials'):
+		db.login('a@example.com', 'wrong', use_cached_session=False)
+
+	assert fake_auth.sign_ins == ['a@example.com']

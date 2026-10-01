@@ -1,0 +1,51 @@
+name: Scripts Unit
+
+on:
+  pull_request:
+    paths:
+      - "scripts/tests/**"
+      - "scripts/*.sh"
+      - "scripts/*.py"
+      - "scripts/lib/**"
+      - "scripts/backup/**"
+      - "shared/asset_manifest.py"
+      - "shared/operator_env.py"
+      - "docker-compose.*.yaml"
+      - ".github/workflows/scripts-unit.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scripts-unit:
+    name: scripts-unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # The script tests use only the standard library, pytest and shared/.
+      - name: Install pytest
+        run: python -m pip install pytest
+
+      - name: Validate production and test compose files
+        run: |
+          cp .env.example .env
+          for compose_file in docker-compose.api.yaml docker-compose.processor.yaml docker-compose.test.yaml; do
+            echo "Checking ${compose_file}"
+            docker compose -f "${compose_file}" config -q
+          done
+
+      # Processor auto-deploy, drain, runtime control, asset preflight, backup
+      # and operator scripts run unattended on production hosts.
+      - name: Test operational scripts
+        run: python -m pytest -q scripts/tests
+

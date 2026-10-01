@@ -518,3 +518,60 @@ def test_uint16_source_alpha_survives_byte_conversion(tmp_path):
 		assert np.all(alpha[transparent_mask] == 0)
 		assert np.all(alpha[~transparent_mask] == 255)
 		assert alpha[20, 20] == 255
+
+
+@pytest.mark.unit
+def test_bit_depth_conversion_allows_bigtiff_output(tmp_path, monkeypatch):
+	"""Large float orthos convert to >4 GiB byte files, which classic TIFF cannot hold."""
+	from rasterio.transform import from_origin
+
+	input_path = tmp_path / 'float_nan.tif'
+	data = np.full((3, 64, 64), 120.0, dtype='float32')
+	data[:, :8, :8] = np.nan
+	with rasterio.open(
+		input_path,
+		'w',
+		driver='GTiff',
+		width=64,
+		height=64,
+		count=3,
+		dtype='float32',
+		nodata=float('nan'),
+		crs='EPSG:32610',
+		transform=from_origin(660000, 4444000, 0.05, 0.05),
+	) as dst:
+		dst.write(data)
+
+	commands = []
+	real_run = standardise_module.subprocess.run
+
+	def recording_run(cmd, *args, **kwargs):
+		commands.append(cmd)
+		return real_run(cmd, *args, **kwargs)
+
+	monkeypatch.setattr(standardise_module.subprocess, 'run', recording_run)
+	opened_profiles = []
+	real_open = standardise_module.rasterio.open
+
+	def recording_open(path, mode='r', **kwargs):
+		if mode == 'w':
+			opened_profiles.append(kwargs)
+		return real_open(path, mode, **kwargs)
+
+	monkeypatch.setattr(standardise_module.rasterio, 'open', recording_open)
+
+	result_path, _ = _handle_bit_depth_conversion(
+		input_path=str(input_path),
+		output_path=str(tmp_path / 'converted.tif'),
+		src_dtype='float32',
+		has_alpha=False,
+		compression='LZW',
+		token='test-token',
+		dataset_id=5656,
+		user_id='test-user',
+	)
+
+	assert result_path is not None
+	translate = next(cmd for cmd in commands if cmd[0] == 'gdal_translate')
+	assert 'BIGTIFF=IF_SAFER' in translate
+	assert all(profile.get('BIGTIFF') == 'IF_SAFER' for profile in opened_profiles)

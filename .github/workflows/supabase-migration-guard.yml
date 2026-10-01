@@ -33,7 +33,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Test migration guard helper
         run: python -m unittest scripts.tests.test_check_supabase_migration_versions
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/setup-python@v7
         if: ${{ steps.trusted-helper.outputs.available == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install psql
         if: ${{ steps.trusted-helper.outputs.available == 'true' }}

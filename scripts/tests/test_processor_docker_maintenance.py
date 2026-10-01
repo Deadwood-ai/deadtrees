@@ -129,7 +129,8 @@ class MaintenanceHarness:
 			path = self.repo / "assets" / relative
 			path.parent.mkdir(parents=True, exist_ok=True)
 			if path.suffix == ".safetensors":
-				minimum_tensors, required_tensors = processor_model_checkpoint_specs()[path.name]
+				# Checkpoints without a tensor spec (the date-estimation ensemble) only need a valid header.
+				minimum_tensors, required_tensors = processor_model_checkpoint_specs().get(path.name, (1, ()))
 				names = [*required_tensors, *(f"fixture.{index}" for index in range(minimum_tensors))]
 				header = json.dumps(
 					{name: {"dtype": "F32", "shape": [0], "data_offsets": [0, 0]} for name in names}
