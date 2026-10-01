@@ -274,7 +274,7 @@ def _add_alpha_from_source_nodata(
 	with rasterio.open(input_path) as src, rasterio.open(byte_output_path) as byte_src:
 		profile = byte_src.profile.copy()
 		profile.pop('photometric', None)
-		profile.update(count=4, dtype='uint8', nodata=None, compress='DEFLATE', predictor=2)
+		profile.update(count=4, dtype='uint8', nodata=None, compress='DEFLATE', predictor=2, BIGTIFF='IF_SAFER')
 
 		with rasterio.open(alpha_output_path, 'w', **profile) as dst:
 			dst.colorinterp = (
@@ -731,6 +731,8 @@ def _handle_bit_depth_conversion(
 	if compress_arg == 'DEFLATE':
 		translate_cmd.extend(['-co', 'PREDICTOR=2'])  # Only for DEFLATE
 	translate_cmd.extend(['-co', 'TILED=YES'])  # Ensure tiled output
+	# A >4 GiB byte output (large or high-resolution orthos) needs BigTIFF.
+	translate_cmd.extend(['-co', 'BIGTIFF=IF_SAFER'])
 
 	translate_cmd.extend([input_path, temp_output])
 
