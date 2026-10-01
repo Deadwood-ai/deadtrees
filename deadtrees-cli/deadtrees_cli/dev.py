@@ -1,3 +1,4 @@
+import functools
 import json
 import subprocess
 import os
@@ -9,6 +10,7 @@ from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
 
+from dotenv import dotenv_values
 from supabase import create_client
 from shared.settings import settings
 from shared.db import login, use_client
@@ -23,6 +25,7 @@ from shared.models import (
 )
 
 DEFAULT_COMPOSE_PROJECT_NAME = 'deadtrees-test'
+ISOLATED_ENV_FILE = Path('.local/supabase/current.env')
 SERVICE_DEPENDENCIES = {
 	'api-test': ['api-test', 'nginx', 'mailpit'],
 	'processor-test': ['processor-test', 'nginx'],
@@ -38,6 +41,41 @@ SERVICE_BUILD_FILES = {
 }
 
 
+def require_sourced_isolated_env():
+	"""Refuse to run a worktree with an isolated stack unless its env is sourced.
+
+	Host-side settings and compose containers must target the same stack; without the
+	sourced env, compose falls back to the shared default project and database.
+	"""
+	for candidate in (os.environ.get('DEADTREES_ISOLATED_ENV_FILE'), ISOLATED_ENV_FILE):
+		if candidate and Path(candidate).is_file():
+			isolated = dotenv_values(candidate)
+			# The repo .env also names the isolated compose project, so compare the database
+			# target too: host-side settings read SUPABASE_URL from the environment.
+			mismatched = [
+				key
+				for key in ('COMPOSE_PROJECT_NAME', 'SUPABASE_URL')
+				if isolated.get(key) and os.environ.get(key) != isolated[key]
+			]
+			if mismatched:
+				raise SystemExit(
+					f'This worktree has an isolated stack ({isolated.get("COMPOSE_PROJECT_NAME")}). '
+					f'Run `set -a; source {candidate}; set +a` before deadtrees dev commands.'
+				)
+			return
+
+
+def _guard_dev_command(method):
+	"""Check the isolated stack only when a dev command runs, so other CLI groups stay usable."""
+
+	@functools.wraps(method)
+	def guarded(*args, **kwargs):
+		require_sourced_isolated_env()
+		return method(*args, **kwargs)
+
+	return guarded
+
+
 class DevCommands:
 	"""Development environment management commands"""
 
@@ -47,7 +85,12 @@ class DevCommands:
 		self.compose_env.setdefault('COMPOSE_PROJECT_NAME', DEFAULT_COMPOSE_PROJECT_NAME)
 
 	def _compose_cmd(self, *args: str) -> List[str]:
-		"""Build a docker compose command for the test environment."""
+		"""Build a docker compose command for the test environment.
+
+		An explicit COMPOSE_FILE (for example the CPU-only override) replaces the default file.
+		"""
+		if self.compose_env.get('COMPOSE_FILE'):
+			return ['docker', 'compose', *args]
 		return ['docker', 'compose', '-f', self.test_compose_file, *args]
 
 	def _compose_exec_args(self, service: str) -> List[str]:
@@ -462,10 +505,7 @@ class DevCommands:
 			print('▶ Running processor once in docker...')
 			self._run_command(
 				[
-					'docker',
-					'compose',
-					'-f',
-					self.test_compose_file,
+					*self._compose_cmd(),
 					'exec',
 					'processor-test',
 					'python',
@@ -572,10 +612,7 @@ class DevCommands:
 
 		# Build the pytest command with test_path at the end
 		cmd = [
-			'docker',
-			'compose',
-			'-f',
-			self.test_compose_file,
+			*self._compose_cmd(),
 			'exec',
 			service,  # Service name comes here
 			'python',
@@ -614,10 +651,7 @@ class DevCommands:
 		self._ensure_test_service_running(service)
 
 		cmd = [
-			'docker',
-			'compose',
-			'-f',
-			self.test_compose_file,
+			*self._compose_cmd(),
 			*self._compose_exec_args(service),
 			'python',
 			'-m',
@@ -671,10 +705,7 @@ class DevCommands:
 			# Start the processor in continuous mode
 			self._run_command(
 				[
-					'docker',
-					'compose',
-					'-f',
-					self.test_compose_file,
+					*self._compose_cmd(),
 					'exec',
 					'-T',
 					'processor-test',
@@ -758,3 +789,8 @@ class DevCommands:
 
 		print('Running CLI tests...')
 		self._run_command(cmd)
+
+
+for _name, _member in list(vars(DevCommands).items()):
+	if not _name.startswith('_') and callable(_member):
+		setattr(DevCommands, _name, _guard_dev_command(_member))
