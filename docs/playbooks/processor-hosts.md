@@ -127,6 +127,12 @@ A host is current when `HEAD`, `processor-activated-sha` and `origin/main` are
 the same SHA, there is no pause file, and the log's last line is `No changes`.
 On `helicon`, also check that `/opt/deadtrees_prod/processor.paused` is absent.
 
+The API runs on the storage host, not on these processor hosts. To confirm an API
+deploy from the processing server, run `ssh dt-storage-status`. Its key is
+limited to one status script: it prints the deployed API commit, the API container
+state, disk usage and which cleanup crons are installed, and it refuses any other
+command.
+
 ## When A Host Stops Deploying
 
 The script logs every decision, so start with `tail -80 auto-deploy.log`.
