@@ -237,9 +237,9 @@ def test_dataset_bundle_key_changes_with_original_filename_and_content(auth_toke
 				'id', dataset_id
 			).execute()
 
-		# Polls keep pointing at the file that was requested; a new request is not
-		# served from the old cache entry.
-		assert _prepare(status_url, auth_token)['download_path'] == first_path
+		# The edited dataset is not served from the old cache entry.
+		stale_status = _prepare(status_url, auth_token)
+		assert stale_status['status'] == 'failed'
 		assert _prepare(url, auth_token)['status'] in ('processing', 'completed')
 		second_path = _prepare(status_url, auth_token)['download_path']
 		assert second_path != first_path
