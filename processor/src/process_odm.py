@@ -12,6 +12,7 @@ from shared.settings import settings
 from shared.status import update_status
 from shared.logging import LogContext, LogCategory
 from shared.db import use_client, login
+from shared.upload_validation import RAW_IMAGE_EXTENSIONS
 from shared.zip_utils import (
 	ensure_supported_zip_compression,
 	UnsupportedZipCompressionError,
@@ -513,12 +514,11 @@ def _analyze_extracted_files(extraction_dir: Path, token: str, dataset_id: int) 
 			rtk_file_types[extension].append(file_path)
 
 	# Count image files and calculate total size
-	image_extensions = {'.jpg', '.jpeg', '.png', '.tif', '.tiff', '.dng', '.raw'}
 	image_count = 0
 	total_size_bytes = 0
 
 	for file_path in extracted_files:
-		if Path(file_path).suffix.lower() in image_extensions:
+		if Path(file_path).suffix.lower() in RAW_IMAGE_EXTENSIONS:
 			full_path = extraction_dir / file_path
 			if full_path.exists():
 				image_count += 1
@@ -864,12 +864,9 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 	rtk_files = []
 	other_files = []
 
-	# Common image extensions (be inclusive, let ODM validate)
-	image_extensions = {'.jpg', '.jpeg', '.png', '.tif', '.tiff', '.dng', '.raw', '.bmp', '.webp'}
-
 	for file_path in all_files:
 		ext = file_path.suffix.lower()
-		if ext in image_extensions:
+		if ext in RAW_IMAGE_EXTENSIONS:
 			image_files.append(file_path)
 		elif ext.upper() in RTK_EXTENSIONS:
 			rtk_files.append(file_path)

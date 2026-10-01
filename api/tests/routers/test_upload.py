@@ -11,6 +11,9 @@ Key test objectives:
 
 from uuid import uuid4
 
+import numpy as np
+from rasterio.io import MemoryFile
+from rasterio.transform import from_origin
 import pytest
 from pathlib import Path
 import tempfile
@@ -192,9 +195,9 @@ def test_zip_upload_creates_dataset_and_raw_images(temp_test_zip, auth_token, te
 
 				# Verify NO extraction directory exists during upload phase
 				extraction_dir = settings.raw_images_path / str(dataset_id)
-				assert (
-					not extraction_dir.exists()
-				), 'Files should NOT be extracted during upload (deferred to ODM processing)'
+				assert not extraction_dir.exists(), (
+					'Files should NOT be extracted during upload (deferred to ODM processing)'
+				)
 
 				# Verify raw_images database entry created with minimal info
 				with use_client(auth_token) as supabase_client:
@@ -252,16 +255,25 @@ def test_upload_auto_detects_type_when_not_provided(test_file, auth_token):
 		# Note: upload_type not provided - should be auto-detected
 	}
 
-	with open(test_file, 'rb') as f:
-		chunk_data = f.read(1024)  # Small chunk for test
-		files = {'file': (f'{test_file.name}', chunk_data, 'application/octet-stream')}
+	with MemoryFile() as image:
+		with image.open(
+			driver='GTiff',
+			width=2,
+			height=2,
+			count=3,
+			dtype='uint8',
+			crs='EPSG:4326',
+			transform=from_origin(7.8, 48.0, 0.001, 0.001),
+		) as raster:
+			raster.write(np.ones((3, 2, 2), dtype='uint8'))
+		files = {'file': (f'{test_file.name}', image.read(), 'application/octet-stream')}
 
-		response = client.post(
-			'/datasets/chunk', files=files, data=form_data, headers={'Authorization': f'Bearer {auth_token}'}
-		)
+	response = client.post(
+		'/datasets/chunk', files=files, data=form_data, headers={'Authorization': f'Bearer {auth_token}'}
+	)
 
-		# Should succeed - type auto-detected from .tif extension
-		assert response.status_code == 200
+	# Should succeed - type auto-detected from .tif extension
+	assert response.status_code == 200
 
 
 def test_upload_without_auth():
