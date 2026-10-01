@@ -1,3 +1,5 @@
+import os
+import tempfile
 import time
 from processor.src.processor import background_process
 from processor.src.utils.drain_control import (
@@ -11,9 +13,22 @@ from shared.db import login
 from shared.settings import settings
 
 
+def use_data_disk_for_temp_files() -> None:
+	"""Send Python, GDAL and subprocess temp files to /data.
+
+	By default they land in /tmp of the container layer, on the hosts' smaller
+	root disk, which large orthos can fill mid-run.
+	"""
+	scratch = str(settings.scratch_path)
+	os.environ['TMPDIR'] = scratch
+	os.environ['CPL_TMPDIR'] = scratch
+	tempfile.tempdir = scratch
+
+
 def run_continuous():
 	"""Run the processor as a persistent worker until it is stopped."""
 	logger.info('Starting continuous processor...')
+	use_data_disk_for_temp_files()
 
 	# Perform startup cleanup to recover from crashes/restarts
 	try:
