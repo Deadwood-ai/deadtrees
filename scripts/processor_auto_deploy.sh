@@ -264,14 +264,19 @@ mv "${ACTIVATED_SHA_FILE}.tmp" "${ACTIVATED_SHA_FILE}"
 
 # A long drain can outlast several merges. Clearing the drain now would let the
 # worker claim another long task on this already outdated release, so keep the
-# drain and let the next run roll forward while the worker is still idle.
-if git fetch origin "${BRANCH}" >> "${LOG_FILE}" 2>&1; then
-	latest_sha="$(git rev-parse "origin/${BRANCH}")"
-	if [ "${latest_sha}" != "${deployed_sha}" ]; then
-		drain_set=0
-		log "Activated ${deployed_sha}; origin/${BRANCH} advanced to ${latest_sha}, keeping the drain so the next run rolls forward"
-		exit 0
-	fi
+# drain and let the next run roll forward while the worker is still idle. When
+# freshness is unknown (the fetch failed), keep the drain too: the next run
+# either rolls forward or completes this activation and clears it.
+if ! git fetch origin "${BRANCH}" >> "${LOG_FILE}" 2>&1; then
+	drain_set=0
+	log "Activated ${deployed_sha}; could not fetch origin/${BRANCH}, keeping the drain until the next run checks again"
+	exit 0
+fi
+latest_sha="$(git rev-parse "origin/${BRANCH}")"
+if [ "${latest_sha}" != "${deployed_sha}" ]; then
+	drain_set=0
+	log "Activated ${deployed_sha}; origin/${BRANCH} advanced to ${latest_sha}, keeping the drain so the next run rolls forward"
+	exit 0
 fi
 
 python3 "${STATUS_SCRIPT}" clear-drain >> "${LOG_FILE}" 2>&1

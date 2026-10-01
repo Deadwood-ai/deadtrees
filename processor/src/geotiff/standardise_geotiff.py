@@ -3,6 +3,7 @@ import subprocess
 import shutil
 from pathlib import Path
 from shared.utils import get_transformed_bounds
+from shared.upload_validation import missing_crs_message
 from rio_cogeo.cogeo import cog_info
 from shared.settings import settings
 from shared.db import use_client
@@ -444,29 +445,11 @@ def _get_source_properties(input_path: str, token: str, dataset_id: int = None, 
 			properties = {
 				'dtype': src.profile['dtype'],
 				'num_bands': src.count,
-				'crs': src.crs,
 				'nodata': find_nodata_value(src, src.count, token=token, dataset_id=dataset_id, user_id=user_id),
 			}
 
-			if not properties['crs']:
-				# Check if file has transform info but no CRS
-				has_transform = src.transform and src.transform != rasterio.transform.Affine.identity()
-				origin = [src.transform.c, src.transform.f] if src.transform else [0, 0]
-
-				if has_transform and (origin[0] != 0 or origin[1] != 0):
-					# File has coordinates but no CRS definition
-					error_msg = (
-						f'File has coordinates (origin: {origin[0]:.1f}, {origin[1]:.1f}) but no CRS definition. '
-						'The projection system is unknown. Please re-export with embedded CRS or provide a .prj file.'
-					)
-				else:
-					# File has no georeferencing at all
-					error_msg = (
-						'File has no coordinate reference system (CRS) or georeferencing. '
-						'This appears to be a plain image, not a georeferenced orthomosaic. '
-						'Please upload a GeoTIFF with embedded CRS or include a world file (.tfw).'
-					)
-
+			error_msg = missing_crs_message(src)
+			if error_msg:
 				logger.warning(
 					error_msg,
 					LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),

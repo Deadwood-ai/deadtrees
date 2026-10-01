@@ -531,6 +531,31 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			self.assertEqual(git(harness.worktree, "rev-parse", "HEAD").stdout.strip(), later_sha)
 			self.assertIn("clear-drain", harness.python_log.read_text())
 
+	def test_keeps_the_drain_when_freshness_cannot_be_checked_after_activation(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			selected_sha = harness.push_change("selected deploy\n")
+			hidden_origin = harness.tmp_path / "origin-offline.git"
+			hook = harness.tmp_path / "origin-offline.sh"
+			hook.write_text(f"mv {harness.origin} {hidden_origin}\n")
+
+			first_result = harness.run_deploy(wait_hook=hook)
+
+			self.assertEqual(first_result.returncode, 0, first_result.stderr)
+			self.assertEqual(git(harness.worktree, "rev-parse", "HEAD").stdout.strip(), selected_sha)
+			self.assertNotIn("clear-drain", harness.python_log.read_text())
+			self.assertIn("keeping the drain until the next run checks again", (harness.worktree / "auto-deploy.log").read_text())
+			self.assertFalse((harness.worktree / ".local" / "processor-deploy-paused").exists())
+
+			hidden_origin.rename(harness.origin)
+			# The drain still names this release and the idle worker acknowledged it.
+			harness.env["PROCESSOR_TEST_ACTIVATION_READY"] = "0"
+			second_result = harness.run_deploy()
+
+			self.assertEqual(second_result.returncode, 0, second_result.stderr)
+			self.assertIn("clear-drain", harness.python_log.read_text())
+			self.assertIn(f"Completed interrupted activation for {selected_sha}", (harness.worktree / "auto-deploy.log").read_text())
+
 	def test_recovery_deploy_stops_unavailable_worker_and_allows_missing_ack(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			harness = DeployHarness(Path(tmp_dir), processor_available=False)

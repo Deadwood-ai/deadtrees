@@ -114,10 +114,72 @@ test.describe("contributor local e2e", () => {
     await expect(modal.getByTestId("contributor-upload-submit")).toBeDisabled();
     await expect(modal.locator(".ant-upload-list-item")).toHaveCount(0);
 
-    await input.setInputFiles(path.resolve(__dirname, "../test/fixtures/zip/mixed-zip64.zip"));
+    await input.setInputFiles(path.resolve(__dirname, "../test/fixtures/zip/rgb-photos.zip"));
     await expect(error).toHaveCount(0);
-    await expect(modal.locator(".ant-upload-list-item")).toContainText("mixed-zip64.zip");
+    await expect(modal.locator(".ant-upload-list-item")).toContainText("rgb-photos.zip");
     expect(uploadRequests).toBe(0);
+  });
+
+  test("upload pre-checks reject inputs that cannot process and warn on risky ones", async ({ page }) => {
+    await installAuthenticatedContributor(page);
+    let uploadRequests = 0;
+    await page.route(`${localApiUrl}/datasets/chunk`, async (route) => {
+      uploadRequests += 1;
+      await route.abort();
+    });
+    await page.goto("/profile");
+    await page.getByRole("button", { name: "Upload Data" }).click();
+    const modal = page.getByTestId("contributor-upload-modal");
+    const input = page.getByTestId("contributor-upload-dropzone");
+    const error = modal.getByRole("alert").filter({ hasText: "File could not be added" });
+    const warning = modal.getByTestId("upload-validation-warning");
+
+    await input.setInputFiles(path.resolve(__dirname, "../test/fixtures/zip/multispectral-only.zip"));
+    await expect(error).toContainText("only contains multispectral band images");
+    await expect(modal.locator(".ant-upload-list-item")).toHaveCount(0);
+
+    await input.setInputFiles(
+      path.resolve(__dirname, "../test/fixtures/geotiff/upload-validation/no-crs-coordinates-real-crop.tif"),
+    );
+    await expect(error).toContainText("coordinates but no coordinate system");
+    await expect(modal.locator(".ant-upload-list-item")).toHaveCount(0);
+
+    await input.setInputFiles(path.resolve(__dirname, "../test/fixtures/zip/few-dng.zip"));
+    await expect(error).toHaveCount(0);
+    await expect(warning).toContainText("only 3 photos");
+    await expect(warning).toContainText("raw DNG photos");
+    await expect(modal.locator(".ant-upload-list-item")).toContainText("few-dng.zip");
+
+    await input.setInputFiles(rgbGeoTiffFixture);
+    await expect(warning).toHaveCount(0);
+    expect(uploadRequests).toBe(0);
+  });
+
+  test("an upload the API rejects shows the API's reason after the dialog closes", async ({ page }) => {
+    await installAuthenticatedContributor(page);
+    const reason = "File has coordinates (origin: 1.0, 2.0) but no CRS definition.";
+    let processRequests = 0;
+    await page.route(`${localApiUrl}/datasets/chunk`, (route) =>
+      route.fulfill({ status: 400, contentType: "application/json", json: { detail: reason } }),
+    );
+    await page.route(`${localApiUrl}/datasets/*/process`, async (route) => {
+      processRequests += 1;
+      await route.abort();
+    });
+
+    await page.goto("/profile");
+    await page.getByRole("button", { name: "Upload Data" }).click();
+    await page.getByTestId("contributor-upload-dropzone").setInputFiles(rgbGeoTiffFixture);
+    await addUploadAuthor(page, "Local E2E Contributor");
+    const dateInput = page.getByPlaceholder("Select date");
+    await dateInput.fill("2024-05-06");
+    await dateInput.press("Enter");
+    await page.getByRole("checkbox", { name: /I agree to the/i }).check();
+    await page.getByTestId("contributor-upload-submit").click();
+
+    const notice = page.locator(".ant-notification-notice").filter({ hasText: "Upload Failed" });
+    await expect(notice).toContainText(reason);
+    expect(processRequests).toBe(0);
   });
 
   test("GeoTIFF contribution sends upload and processing contracts", async ({

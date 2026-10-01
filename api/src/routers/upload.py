@@ -10,6 +10,7 @@ from shared.db import verify_token
 from shared.settings import settings
 from shared.status import update_status
 from shared.logging import LogCategory, LogContext, UnifiedLogger, SupabaseHandler
+from shared.upload_validation import UnprocessableUploadError, ensure_georeferenced_geotiff, ensure_processable_zip
 from shared.zip_utils import (
 	ensure_supported_zip_compression,
 	UnsupportedZipCompressionError,
@@ -195,8 +196,11 @@ def upload_chunk(
 
 def validate_assembled_upload(upload_type: UploadType, path: Path):
 	"""Reject unusable upload bytes before finalization; must stay side-effect free."""
-	if upload_type == UploadType.RAW_IMAGES_ZIP:
-		try:
+	try:
+		if upload_type == UploadType.RAW_IMAGES_ZIP:
 			ensure_supported_zip_compression(path)
-		except (UnsupportedZipCompressionError, InvalidZipArchiveError) as e:
-			raise HTTPException(status_code=400, detail=str(e))
+			ensure_processable_zip(path)
+		elif upload_type == UploadType.GEOTIFF:
+			ensure_georeferenced_geotiff(path)
+	except (UnsupportedZipCompressionError, InvalidZipArchiveError, UnprocessableUploadError) as e:
+		raise HTTPException(status_code=400, detail=str(e))

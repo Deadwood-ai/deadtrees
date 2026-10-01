@@ -184,7 +184,7 @@ def test_select_odm_images_records_band_drops_under_the_shared_reason(tmp_path):
 def test_select_odm_images_rejects_band_only_uploads(tmp_path):
 	bands = [_photo(tmp_path / f'IMG_{i}_GRE.TIF', mode='L') for i in range(3)]
 
-	with pytest.raises(OdmInputError, match='only multispectral band images'):
+	with pytest.raises(OdmInputError, match='only contains multispectral band images'):
 		select_odm_images(bands, max_extent_km2=30)
 
 
@@ -198,5 +198,5 @@ def test_band_only_upload_fails_before_any_odm_container(tmp_path, monkeypatch):
 	for i in range(3):
 		_photo(tmp_path / f'DJI_20260814112011_000{i}_MS_G.TIF', mode='L')
 
-	with pytest.raises(OdmInputError, match='only multispectral band images'):
+	with pytest.raises(OdmInputError, match='only contains multispectral band images'):
 		process_odm._run_odm_container(tmp_path, tmp_path / 'out', token='test', dataset_id=0)

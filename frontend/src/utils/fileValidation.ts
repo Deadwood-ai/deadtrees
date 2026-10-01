@@ -1,6 +1,7 @@
 import { UploadType } from "../types/dataset";
 import { unzipRaw } from "unzipit";
 import { fromBlob } from "geotiff";
+import { checkGeoTiffGeoreference, checkRawImageNames, type GeoTiffGeoreference } from "./uploadRules";
 
 export const detectUploadType = (fileName: string): UploadType => {
   const ext = fileName.toLowerCase().split(".").pop();
@@ -89,6 +90,7 @@ export interface GeoTiffAiEligibility {
   samplesPerPixel: number;
   photometricInterpretation: number | null;
   colorModel: string;
+  georeference: GeoTiffGeoreference;
 }
 
 export const inspectGeoTiffAiEligibility = async (file: Blob): Promise<GeoTiffAiEligibility> => {
@@ -109,18 +111,25 @@ export const inspectGeoTiffAiEligibility = async (file: Blob): Promise<GeoTiffAi
         hasRgbBandDescriptions
       );
 
+    const { ModelTiepoint, ModelTransformation } = image.fileDirectory;
+
     return {
       supportsAiSegmentation,
       samplesPerPixel,
       photometricInterpretation,
       colorModel: describeColorModel(samplesPerPixel, photometricInterpretation),
+      georeference: {
+        geoKeys: image.getGeoKeys(),
+        hasCoordinates: Boolean(ModelTiepoint || ModelTransformation),
+      },
     };
   } catch {
     throw new Error("We could not inspect this GeoTIFF. Please choose a valid GeoTIFF file.");
   }
 };
 
-export const validateGeoTiffAiEligibility = async (file: Blob): Promise<GeoTiffAiEligibility> => {
+/** Rejects GeoTIFFs we cannot process and returns warnings for risky ones. */
+export const validateGeoTiffUpload = async (file: Blob): Promise<string[]> => {
   const inspection = await inspectGeoTiffAiEligibility(file);
 
   if (!inspection.supportsAiSegmentation) {
@@ -129,13 +138,14 @@ export const validateGeoTiffAiEligibility = async (file: Blob): Promise<GeoTiffA
     );
   }
 
-  return inspection;
+  return checkGeoTiffGeoreference(inspection.georeference);
 };
 
 const ALLOWED_ZIP_METHODS = new Set([0, 8]); // stored, deflate
 const ALLOWED_ZIP_METHODS_TEXT = "stored (method 0), deflate (method 8)";
 
 type ZipEntryWithCompressionMethod = {
+  name: string;
   compressionMethod?: number;
 };
 
@@ -192,7 +202,8 @@ const zipInspectionErrorMessage = (error: unknown): string => {
     "No upload has started. Code: ZIP_INSPECTION_FAILED.";
 };
 
-export const validateZipCompressionMethods = async (file: File): Promise<void> => {
+/** Rejects ZIPs we cannot read or process and returns warnings for risky ones. */
+export const validateZipUpload = async (file: File): Promise<string[]> => {
   let entries: ZipEntryWithCompressionMethod[] = [];
   try {
     const zipInfo = await unzipRaw(file);
@@ -220,4 +231,6 @@ export const validateZipCompressionMethods = async (file: File): Promise<void> =
       `Unsupported ZIP compression method(s): ${formatted}. Please re-compress the ZIP using one of: ${ALLOWED_ZIP_METHODS_TEXT}.`,
     );
   }
+
+  return checkRawImageNames(entries.map((entry) => entry.name));
 };

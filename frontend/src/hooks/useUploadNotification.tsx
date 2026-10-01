@@ -9,6 +9,7 @@ export const useUploadNotification = (uploadKey: string, fileName: string) => {
     status: string,
     percent?: number,
     onCancel?: () => void,
+    reason?: string,
   ) => {
     const config = {
       key: uploadKeyRef.current,
@@ -23,12 +24,14 @@ export const useUploadNotification = (uploadKey: string, fileName: string) => {
       description: (
         <div>
           <div className="mt-2">{percent === 100 ? "Data is imported into the database" : fileName}</div>
+          {reason && <div className="mt-2">{reason}</div>}
           {percent !== undefined && (
             <Progress percent={percent} size="small" status={status === "error" ? "exception" : undefined} />
           )}
         </div>
       ),
-      duration: status === "uploading" ? 0 : status === "success" ? 2 : 4,
+      // Keep a rejection reason open until the contributor dismisses it.
+      duration: status === "uploading" || reason ? 0 : status === "success" ? 2 : 4,
       onClose: status === "uploading" ? onCancel : undefined,
     };
 
@@ -44,7 +47,7 @@ export const useUploadNotification = (uploadKey: string, fileName: string) => {
     updateUploadProgress: (percent: number, onCancel?: () => void) =>
       showNotification("info", "uploading", percent, onCancel),
     showSuccessNotification: () => showNotification("success", "success"),
-    showErrorNotification: () => showNotification("error", "error"),
+    showErrorNotification: (reason?: string) => showNotification("error", "error", undefined, undefined, reason),
     closeNotification,
   };
 };

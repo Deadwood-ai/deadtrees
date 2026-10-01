@@ -1,4 +1,10 @@
+import io
+import zipfile
 from uuid import uuid4
+
+import numpy as np
+from rasterio.io import MemoryFile
+from rasterio.transform import from_origin
 
 import pytest
 from fastapi import HTTPException
@@ -203,3 +209,55 @@ def test_chunk_endpoint_rejects_unsupported_zip_compression(auth_token, monkeypa
 
 	assert response.status_code == 400
 	assert 'Unsupported ZIP compression method(s)' in response.json()['detail']
+
+
+def _final_chunk(auth_token, file_name, payload, upload_type):
+	form_data = {
+		'chunk_index': '0',
+		'chunks_total': '1',
+		'upload_id': f'test-upload-id-unprocessable-{uuid4()}',
+		'license': LicenseEnum.cc_by.value,
+		'platform': PlatformEnum.drone.value,
+		'authors': ['Test Author'],
+		'data_access': DatasetAccessEnum.public.value,
+		'upload_type': upload_type.value,
+	}
+	return client.post(
+		'/datasets/chunk',
+		files={'file': (file_name, payload, 'application/octet-stream')},
+		data=form_data,
+		headers={'Authorization': f'Bearer {auth_token}'},
+	)
+
+
+def test_chunk_endpoint_rejects_multispectral_only_zip(auth_token):
+	"""A ZIP with only multispectral bands fails at upload, not in the processor."""
+	buffer = io.BytesIO()
+	with zipfile.ZipFile(buffer, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+		for band in ('G', 'R', 'RE', 'NIR'):
+			archive.writestr(f'DJI_0001_MS_{band}.TIF', b'band')
+
+	response = _final_chunk(auth_token, 'bands.zip', buffer.getvalue(), UploadType.RAW_IMAGES_ZIP)
+
+	assert response.status_code == 400
+	assert 'only contains multispectral band images' in response.json()['detail']
+
+
+def test_chunk_endpoint_rejects_geotiff_without_crs(auth_token):
+	"""A GeoTIFF the processor would refuse for a missing CRS fails at upload."""
+	with MemoryFile() as memfile:
+		with memfile.open(
+			driver='GTiff',
+			width=4,
+			height=4,
+			count=3,
+			dtype='uint8',
+			transform=from_origin(412000, 5320000, 0.05, 0.05),
+		) as dst:
+			dst.write(np.zeros((3, 4, 4), dtype='uint8'))
+		payload = memfile.read()
+
+	response = _final_chunk(auth_token, 'ortho.tif', payload, UploadType.GEOTIFF)
+
+	assert response.status_code == 400
+	assert 'but no CRS definition' in response.json()['detail']

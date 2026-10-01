@@ -252,6 +252,11 @@ function shouldRetryChunkUpload(error: unknown): boolean {
   return RETRYABLE_STATUS_CODES.has(error.response.status);
 }
 
+/** The API refused the file itself (HTTP 400); the message is its reason for the contributor. */
+export class UploadRejectedError extends Error {
+  name = "UploadRejectedError";
+}
+
 function createChunkUploadError(error: unknown, chunkIndex: number): Error {
   if (axios.isAxiosError(error)) {
     const status = error.response?.status;
@@ -263,6 +268,9 @@ function createChunkUploadError(error: unknown, chunkIndex: number): Error {
       (typeof error.response?.data === "string" ? error.response.data : undefined) ||
       error.message;
 
+    if (status === 400) {
+      return new UploadRejectedError(String(detail));
+    }
     return new Error(`Failed to upload chunk ${chunkIndex} (status ${status ?? "unknown"}): ${String(detail)}`);
   }
 
