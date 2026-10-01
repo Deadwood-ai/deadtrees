@@ -496,14 +496,48 @@ def test_oversized_polygon_is_stored_whole_through_the_large_geometry_rpc(predic
 	assert stored == (1, 150_001)
 
 
-def test_large_geometry_rpc_keeps_the_callers_insert_policy(prediction):
+def _call_large_geometry_rpc(token, label_id, expected=1):
+	with use_client(token) as client:
+		return client.rpc(
+			'insert_large_label_geometry',
+			{
+				'p_label_id': label_id,
+				'p_geometry': box(7.8, 48, 7.801, 48.001).wkb_hex,
+				'p_properties': None,
+				'p_expected_existing_count': expected,
+			},
+		).execute()
+
+
+def _count(context, label_id):
+	return context['db'].execute(
+		'SELECT count(*) FROM public.v2_forest_cover_geometries WHERE label_id=%s', (label_id,)
+	).fetchone()[0]
+
+
+def test_large_geometry_rpc_is_processor_only_even_for_the_label_owner(prediction):
+	from postgrest.exceptions import APIError
+
 	label = stage(prediction)
-	with use_client(prediction['other_user']) as client:
-		with pytest.raises(Exception):
-			client.rpc(
-				'insert_large_label_geometry',
-				{'p_label_id': label.id, 'p_geometry': box(7.8, 48, 7.801, 48.001).wkb_hex, 'p_properties': None},
-			).execute()
-	assert prediction['db'].execute(
-		'SELECT count(*) FROM public.v2_forest_cover_geometries WHERE label_id=%s', (label.id,)
-	).fetchone()[0] == 1
+	owner = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+	with pytest.raises(APIError) as error:
+		_call_large_geometry_rpc(owner, label.id)
+	assert error.value.code == '42501'
+	assert _count(prediction, label.id) == 1
+
+
+def test_large_geometry_rpc_only_appends_to_staged_labels(prediction):
+	from postgrest.exceptions import APIError
+
+	label = stage(prediction)
+	publish(prediction, label.id)
+	with pytest.raises(APIError) as error:
+		_call_large_geometry_rpc(prediction['processor'], label.id)
+	assert error.value.code == 'P0002'
+
+
+def test_large_geometry_rpc_replay_after_commit_inserts_nothing(prediction):
+	label = stage(prediction)
+	_call_large_geometry_rpc(prediction['processor'], label.id, expected=1)
+	_call_large_geometry_rpc(prediction['processor'], label.id, expected=1)
+	assert _count(prediction, label.id) == 2

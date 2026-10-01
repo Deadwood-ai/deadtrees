@@ -236,4 +236,5 @@ def test_single_oversized_geometry_uses_the_large_geometry_rpc(monkeypatch):
 	params = client.rpc_calls[0][1]
 	assert params['p_label_id'] == 7
 	assert params['p_properties'] == {'source': 'model'}
+	assert params['p_expected_existing_count'] == 0
 	assert len(params['p_geometry']) > 2 * labels.MAX_CHUNK_SIZE

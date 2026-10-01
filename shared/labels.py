@@ -275,7 +275,13 @@ def _insert_records_with_retry(client, table: str, records: List[dict], label_id
 			record = records[0]
 			client.rpc(
 				'insert_large_label_geometry',
-				{'p_label_id': label_id, 'p_geometry': record['geometry'], 'p_properties': record['properties']},
+				{
+					'p_label_id': label_id,
+					'p_geometry': record['geometry'],
+					'p_properties': record['properties'],
+					# Lets the database skip a replay whose earlier call already committed.
+					'p_expected_existing_count': count_before,
+				},
 			).execute()
 		else:
 			# Echoing a huge geometry adds DB serialization work without any useful data.
