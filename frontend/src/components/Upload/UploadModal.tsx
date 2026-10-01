@@ -20,7 +20,7 @@ import { ILicense, IPlatform, UploadType } from "../../types/dataset";
 import { useFileUpload } from "../../hooks/useFileUpload";
 import { useUploadNotification } from "../../hooks/useUploadNotification";
 import PickerWithType from "./PickerWithType";
-import uploadOrtho from "../../api/uploadOrtho";
+import uploadOrtho, { UploadRejectedError } from "../../api/uploadOrtho";
 import { useData } from "../../hooks/useDataProvider";
 import addProcess from "../../api/addProcess";
 import { useCanUploadPrivate } from "../../hooks/useUserPrivileges";
@@ -284,7 +284,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
             fileList[0]?.name ? detectUploadType(fileList[0].name) : undefined,
           failure_reason: error instanceof Error ? error.message : "unknown_error",
         });
-        showErrorNotification();
+        showErrorNotification(error instanceof UploadRejectedError ? error.message : undefined);
       }
     } finally {
       setIsUploading(false);
