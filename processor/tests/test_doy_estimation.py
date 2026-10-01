@@ -242,8 +242,9 @@ def test_unsampleable_ortho_is_skipped_and_marked_done(monkeypatch, tmp_path):
 	ortho = SimpleNamespace(bbox=SimpleNamespace(left=7.8, right=7.81, bottom=48.0, top=48.01))
 	monkeypatch.setattr(stage, '_fetch_inputs', lambda token, dataset_id: (dataset, ortho, None, None, None))
 	monkeypatch.setattr(stage, '_local_cog', lambda *args: tmp_path / 'cog.tif')
-	stored, statuses = [], []
+	stored, cleared, statuses = [], [], []
 	monkeypatch.setattr(stage, '_store', lambda *args: stored.append(args))
+	monkeypatch.setattr(stage, '_clear', lambda token, dataset_id: cleared.append(dataset_id))
 	monkeypatch.setattr(stage, 'update_status', lambda token, **fields: statuses.append(fields))
 	for level in ('info', 'warning', 'error'):
 		monkeypatch.setattr(stage.logger, level, lambda *args, **kwargs: None)
@@ -252,5 +253,6 @@ def test_unsampleable_ortho_is_skipped_and_marked_done(monkeypatch, tmp_path):
 	stage.process_doy_estimation(task, 'token', tmp_path)
 
 	assert stored == []
+	assert cleared == [12326]  # an earlier estimate must not look current
 	assert statuses[-1]['is_doy_estimation_done'] is True
 	assert not any(fields.get('has_error') for fields in statuses)

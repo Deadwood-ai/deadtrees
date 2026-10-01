@@ -51,6 +51,7 @@ def process_doy_estimation(task: QueueTask, token: str, temp_dir: Path):
 			# the model dates the flight within a given year; without one there is
 			# nothing to estimate (the upload form requires the year)
 			logger.warning('Dataset has no acquisition year; skipping date estimation', ctx())
+			_clear(token, task.dataset_id)
 		else:
 			cog_path = _local_cog(cog, Path(temp_dir), token, task.dataset_id, ctx())
 			b = ortho.bbox
@@ -71,6 +72,7 @@ def process_doy_estimation(task: QueueTask, token: str, temp_dir: Path):
 				# like a missing year, an ortho the model cannot sample has no estimate;
 				# the optional date estimate must not fail an otherwise processed dataset
 				logger.warning(f'Ortho cannot be sampled ({e}); skipping date estimation', ctx())
+				_clear(login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD), task.dataset_id)
 			else:
 				token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 				_store(token, task.dataset_id, dataset, estimate)
@@ -223,6 +225,15 @@ def suggestion_rows(dataset_id: int, estimate) -> list[dict]:
 			}
 		)
 	return rows
+
+
+def _clear(token: str, dataset_id: int) -> None:
+	"""Remove an earlier estimate and this stage's suggestions when a rerun produces none."""
+	with use_client(token) as client:
+		client.table(settings.audit_suggestions_table).delete().eq('dataset_id', dataset_id).eq(
+			'source', DOY_ESTIMATION_TASK_TYPE
+		).execute()
+		client.table(settings.acquisition_date_estimates_table).delete().eq('dataset_id', dataset_id).execute()
 
 
 def _store(token: str, dataset_id: int, dataset: Dataset, estimate) -> None:
