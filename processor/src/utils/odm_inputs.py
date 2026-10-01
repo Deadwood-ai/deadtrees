@@ -30,7 +30,7 @@ METRES_PER_DEGREE = 111_320.0
 # position than the median frame does, and at least OUTLIER_MIN_DISTANCE_M away.
 OUTLIER_SPREAD_FACTOR = 5.0
 OUTLIER_MIN_DISTANCE_M = 1000.0
-# More "outliers" than this share is a multi-site or corridor upload, not a few broken fixes.
+# More "outliers" than this share (and more than one) is a multi-site or corridor upload, not a few broken fixes.
 MAX_OUTLIER_SHARE = 0.1
 MIN_IMAGES_FOR_OUTLIER_CHECK = 5
 MULTISPECTRAL_REASON = 'multispectral band images'
@@ -114,7 +114,7 @@ def drop_gps_outliers(
 	"""Drop the few frames whose GPS position lies far away from the rest of the flight.
 
 	A 0/0 position is a failed fix and always counts as an outlier. Nothing is dropped when
-	outliers are more than MAX_OUTLIER_SHARE of the frames: that is a real spread (several
+	more than one frame and more than MAX_OUTLIER_SHARE of them are outliers: that is a real spread (several
 	sites or a long corridor), which the extent check reports instead.
 	"""
 	if len(positions) < MIN_IMAGES_FOR_OUTLIER_CHECK:
@@ -126,7 +126,7 @@ def drop_gps_outliers(
 	distances = {f: math.hypot(*_offset_metres(median, p)) for f, p in valid.items()}
 	limit = max(OUTLIER_MIN_DISTANCE_M, OUTLIER_SPREAD_FACTOR * statistics.median(distances.values()))
 	outliers = [f for f in positions if f not in valid or distances[f] > limit]
-	if len(outliers) > MAX_OUTLIER_SHARE * len(positions):
+	if len(outliers) > max(1, MAX_OUTLIER_SHARE * len(positions)):
 		return positions, []
 	return {f: p for f, p in positions.items() if f not in outliers}, outliers
 

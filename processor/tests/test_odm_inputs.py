@@ -92,6 +92,16 @@ def test_failed_fix_and_far_away_frame_are_dropped():
 	assert len(kept) == 20
 
 
+def test_one_broken_fix_is_dropped_even_in_a_small_flight():
+	positions = {Path(f'{i}.jpg'): p for i, p in enumerate(_grid(5))}
+	positions[Path('zero.jpg')] = (0.0, 0.0)
+
+	kept, outliers = drop_gps_outliers(positions)
+
+	assert outliers == [Path('zero.jpg')]
+	assert len(kept) == 5
+
+
 def test_two_sites_are_a_real_spread_not_outliers():
 	positions = {Path(f'a{i}.jpg'): p for i, p in enumerate(_grid(10))}
 	positions |= {Path(f'b{i}.jpg'): (p[0] + 1.0, p[1]) for i, p in enumerate(_grid(10))}
