@@ -58,8 +58,18 @@ class Settings(BaseSettings):
 	# well over 60s just to service a create/start, surfacing as spurious
 	# "UnixHTTPConnectionPool(host='localhost', port=None): Read timed out. (read timeout=60)"
 	# failures in the ODM copy-to-volume step. Give the daemon far more headroom; this is not
-	# a timeout on the ODM run itself (that is bounded separately by container.wait).
+	# a timeout on the ODM run itself (that is bounded by ODM_RUN_TIMEOUT_SECONDS).
 	DOCKER_CLIENT_TIMEOUT_SECONDS: int = 600
+
+	# Upper bound for one ODM container run. Large flights take many hours; a run past
+	# this is hung, and holding the worker longer blocks every other dataset.
+	ODM_RUN_TIMEOUT_SECONDS: int = 48 * 3600
+
+	# Storage-server SSH: connect, banner and auth must answer within this, and a
+	# transfer that moves no bytes for SSH_TRANSFER_STALL_SECONDS is abandoned.
+	# Neither bounds how long a healthy large transfer may take.
+	SSH_CONNECT_TIMEOUT_SECONDS: int = 30
+	SSH_TRANSFER_STALL_SECONDS: int = 600
 
 	# Base paths and directories
 	BASE_DIR: str = str(BASE)

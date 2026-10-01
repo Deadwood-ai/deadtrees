@@ -225,3 +225,27 @@ def test_odm_image_parses_dji_placeholder_photo_after_check():
 	assert checked['latitude'] == pytest.approx(48.61165, abs=1e-5)
 	assert checked['longitude'] == pytest.approx(8.35441, abs=1e-5)
 	assert checked['altitude'] == pytest.approx(767.9)
+
+
+@pytest.mark.unit
+def test_hung_odm_container_is_stopped_with_a_clear_error(monkeypatch):
+	import requests
+
+	from processor.src import process_odm as odm_module
+
+	events = []
+
+	class _Container:
+		def wait(self, timeout):
+			events.append(('wait', timeout))
+			raise requests.exceptions.ReadTimeout('read timed out')
+
+		def kill(self):
+			events.append(('kill',))
+
+	monkeypatch.setattr(odm_module.settings, 'ODM_RUN_TIMEOUT_SECONDS', 7200)
+
+	with pytest.raises(TimeoutError, match='ODM full pass did not finish within 2 h'):
+		odm_module._wait_for_container(_Container(), 'ODM full pass')
+
+	assert events == [('wait', 7200), ('kill',)]

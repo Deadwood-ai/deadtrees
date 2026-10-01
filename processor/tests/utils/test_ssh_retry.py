@@ -51,3 +51,49 @@ def test_connect_does_not_retry_auth_failure():
 		_connect_with_retry(ssh, hostname='host', port=22)
 
 	assert ssh.attempts == 1
+
+
+def test_storage_sftp_bounds_connect_and_stalled_transfers(monkeypatch):
+	from contextlib import contextmanager
+
+	import processor.src.utils.ssh as ssh_module
+	from shared.settings import settings
+
+	connect_kwargs = {}
+	channel_timeouts = []
+
+	class _Channel:
+		def settimeout(self, seconds):
+			channel_timeouts.append(seconds)
+
+	class _Sftp:
+		def get_channel(self):
+			return _Channel()
+
+		def __enter__(self):
+			return self
+
+		def __exit__(self, *exc):
+			return False
+
+	class _Client:
+		def connect(self, **kwargs):
+			connect_kwargs.update(kwargs)
+
+		def open_sftp(self):
+			return _Sftp()
+
+	@contextmanager
+	def fake_client(known_hosts):
+		yield _Client()
+
+	monkeypatch.setattr(ssh_module, 'create_verified_ssh_client', fake_client)
+	monkeypatch.setattr(ssh_module.paramiko.Ed25519Key, 'from_private_key_file', lambda path: 'key')
+	monkeypatch.setattr(ssh_module.logger, 'info', lambda *args, **kwargs: None)
+
+	with ssh_module._storage_sftp('token', 1):
+		pass
+
+	for name in ('timeout', 'banner_timeout', 'auth_timeout'):
+		assert connect_kwargs[name] == settings.SSH_CONNECT_TIMEOUT_SECONDS
+	assert channel_timeouts == [settings.SSH_TRANSFER_STALL_SECONDS]

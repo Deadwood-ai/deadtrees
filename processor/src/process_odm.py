@@ -1,6 +1,7 @@
 import json
 import zipfile
 import docker
+import requests
 import time
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -200,7 +201,7 @@ def _run_script_in_odm_image(
 		labels={**resource_labels, 'dt_role': f'odm_{role}', 'dt_volume': volume_name},
 	)
 	try:
-		result = container.wait()
+		result = _wait_for_container(container, f'ODM {role} step')
 		output = container.logs().decode('utf-8', errors='ignore')
 	finally:
 		container.remove(force=True)
@@ -772,13 +773,15 @@ def _run_odm_pass(
 			},
 		)
 
-		result = odm_container.wait()
+		result = _wait_for_container(odm_container, f'ODM {pass_name} pass')
 		exit_status = result.get('StatusCode', 1) if isinstance(result, dict) else 1
 
 		log_bytes = odm_container.logs()
 		stdout_logs = (
 			log_bytes.decode('utf-8', errors='ignore') if isinstance(log_bytes, (bytes, bytearray)) else str(log_bytes)
 		)
+	except TimeoutError:
+		raise
 	except Exception as e:
 		logger.error(
 			f'ODM container execution failed unexpectedly: {e}',
@@ -798,6 +801,20 @@ def _run_odm_pass(
 				pass
 
 	return odm_container, exit_status, stdout_logs
+
+
+def _wait_for_container(container, what: str) -> dict:
+	"""Wait for a container to exit, killing it once ODM_RUN_TIMEOUT_SECONDS has passed."""
+	timeout = settings.ODM_RUN_TIMEOUT_SECONDS
+	try:
+		return container.wait(timeout=timeout)
+	except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as wait_error:
+		# docker-py reports an expired wait as a read timeout on the daemon socket.
+		try:
+			container.kill()
+		except Exception:
+			pass
+		raise TimeoutError(f'{what} did not finish within {timeout // 3600} h and was stopped') from wait_error
 
 
 def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_id: int) -> str:
