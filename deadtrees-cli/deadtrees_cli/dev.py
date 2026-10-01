@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
 
+from dotenv import dotenv_values
 from supabase import create_client
 from shared.settings import settings
 from shared.db import login, use_client
@@ -44,25 +45,32 @@ class DevCommands:
 
 	def __init__(self):
 		self.test_compose_file = 'docker-compose.test.yaml'
+		self._require_sourced_isolated_env()
 		self.compose_env = os.environ.copy()
-		# A worktree's isolated env names its own compose project and ports; without it,
-		# compose falls back to the shared default project and recreates its containers.
-		self.compose_env.update(self._isolated_env())
 		self.compose_env.setdefault('COMPOSE_PROJECT_NAME', DEFAULT_COMPOSE_PROJECT_NAME)
 
-	def _isolated_env(self) -> dict[str, str]:
-		"""Read the worktree's isolated env file, as scripts/qa/env.sh does."""
-		env_file = Path(os.environ.get('DEADTREES_ISOLATED_ENV_FILE') or ISOLATED_ENV_FILE)
-		if not env_file.is_file():
-			return {}
-		values = {}
-		for line in env_file.read_text().splitlines():
-			line = line.strip()
-			if not line or line.startswith('#') or '=' not in line:
-				continue
-			key, value = line.removeprefix('export ').split('=', 1)
-			values[key.strip()] = value.strip().strip('\'"')
-		return values
+	def _require_sourced_isolated_env(self):
+		"""Refuse to run a worktree with an isolated stack unless its env is sourced.
+
+		Host-side settings and compose containers must target the same stack; without the
+		sourced env, compose falls back to the shared default project and database.
+		"""
+		for candidate in (os.environ.get('DEADTREES_ISOLATED_ENV_FILE'), ISOLATED_ENV_FILE):
+			if candidate and Path(candidate).is_file():
+				isolated = dotenv_values(candidate)
+				# The repo .env also names the isolated compose project, so compare the database
+				# target too: host-side settings read SUPABASE_URL from the environment.
+				mismatched = [
+					key
+					for key in ('COMPOSE_PROJECT_NAME', 'SUPABASE_URL')
+					if isolated.get(key) and os.environ.get(key) != isolated[key]
+				]
+				if mismatched:
+					raise SystemExit(
+						f'This worktree has an isolated stack ({isolated.get("COMPOSE_PROJECT_NAME")}). '
+						f'Run `set -a; source {candidate}; set +a` before deadtrees dev commands.'
+					)
+				return
 
 	def _compose_cmd(self, *args: str) -> List[str]:
 		"""Build a docker compose command for the test environment.

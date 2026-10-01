@@ -204,12 +204,12 @@ EOF
 	# Plain `docker compose` reads the repo .env; point it at this worktree's project and
 	# network so it cannot recreate or join containers of the shared default project.
 	if [[ -f "$REPO_ROOT/.env" ]]; then
-		local key value
-		for key in COMPOSE_PROJECT_NAME COMPOSE_NETWORK_NAME; do
-			value="$(sed -n "s/^$key=//p" "$ENV_FILE")"
-			sed -i "/^$key=/d" "$REPO_ROOT/.env"
-			printf '%s=%s\n' "$key" "$value" >> "$REPO_ROOT/.env"
-		done
+		local tmp_env="$REPO_ROOT/.env.tmp.$$"
+		grep -Ev '^(COMPOSE_PROJECT_NAME|COMPOSE_NETWORK_NAME)=' "$REPO_ROOT/.env" > "$tmp_env" || true
+		grep -E '^(COMPOSE_PROJECT_NAME|COMPOSE_NETWORK_NAME)=' "$ENV_FILE" >> "$tmp_env"
+		# Rewrite in place so the .env keeps its permissions.
+		cat "$tmp_env" > "$REPO_ROOT/.env"
+		rm -f "$tmp_env"
 	fi
 
 	echo "Rendered isolated Supabase config:"

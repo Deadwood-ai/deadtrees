@@ -218,9 +218,12 @@ against the integrated local environment. After finishing, stop the stack with
 
 The isolated stack never uses the shared default compose project
 (`deadtrees-test`). Rendering the stack writes its own `COMPOSE_PROJECT_NAME` and
-`COMPOSE_NETWORK_NAME` into the worktree `.env`, and `deadtrees dev ...` loads
-`.local/supabase/current.env` itself, so plain `docker compose` and the dev CLI
-both stay inside this worktree's project.
+`COMPOSE_NETWORK_NAME` into the worktree `.env`, so plain `docker compose` stays
+inside this worktree's project. `deadtrees dev ...` refuses to run until
+`.local/supabase/current.env` is sourced, so host-side commands and containers
+always target the same stack. The `.env` entries stay after
+`env.sh down`, so a checkout that once rendered a stack keeps using its own
+project name.
 
 On the processing server the NVIDIA runtime cannot start `processor-test` (its
 GPU belongs to production). Run the processor test container CPU-only there with
