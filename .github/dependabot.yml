@@ -7,6 +7,10 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     groups:
+      # Security fixes for transitive packages otherwise arrive as one PR each.
+      npm-security:
+        applies-to: security-updates
+        patterns: ["*"]
       npm-patch:
         update-types: ["patch"]
       npm-minor:
@@ -106,16 +110,18 @@ updates:
       # These packages define the geospatial/model compatibility envelope.
       # Patch releases stay grouped above; feature-line upgrades are explicit
       # maintenance work with processor/API image and checkpoint validation.
+      # NumPy is a range (>=2,<2.5), so Dependabot has no current version to
+      # compare update-types against; hold the feature line by version.
       - dependency-name: "numpy"
-        update-types:
-          - "version-update:semver-minor"
-          - "version-update:semver-major"
+        versions: [">=2.5"]
       - dependency-name: "rasterio"
         update-types:
           - "version-update:semver-minor"
           - "version-update:semver-major"
       # PyTorch and Torchvision are a tested pair. Dependabot groups do not
-      # guarantee that both packages have an update in the same run.
+      # guarantee that both packages have an update in the same run. This
+      # also holds torch security updates: the fixed releases need a new
+      # CUDA wheel index and model validation on the GPU processor.
       - dependency-name: "torch"
       - dependency-name: "torchvision"
       - dependency-name: "open-clip-torch"
