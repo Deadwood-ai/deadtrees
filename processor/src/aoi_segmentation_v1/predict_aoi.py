@@ -58,7 +58,7 @@ def predict_aoi(dataset_id: int, file_path: Path, user_id: str, token: str):
 		model = AOIInference(model_path=MODEL_PATH)
 
 		log('Running AOI inference', file_path=str(file_path))
-		polygons = model.inference(str(file_path))
+		polygons = model.inference(str(file_path), log=log)
 
 		# Inference can run longer than the JWT lifetime (~1h), which would make
 		# the subsequent AOI writes fail with PGRST303 'JWT expired'. Refresh the

@@ -14,15 +14,20 @@ Reuses the existing segmentation infrastructure:
   materialising the full-resolution array.
 """
 
+import math
 import os
 import tempfile
+import time
+from typing import Callable
 
 import numpy as np
 import rasterio
 import torch
 import torch.nn.functional as F
+from rasterio.enums import Resampling
+from rasterio.features import shapes
 from safetensors import safe_open
-from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import MultiPolygon, Polygon, shape
 from shapely.ops import unary_union
 from transformers import SegformerConfig, SegformerForSemanticSegmentation
 
@@ -57,6 +62,13 @@ POLYGON_OPENING_RADIUS_M = 5.0
 NEGATIVE_BUFFER_M = -1.5
 SIMPLIFY_TOLERANCE_M = 5.0
 CHAIKIN_ITERATIONS = 1
+# Polygonizing runs on one CPU thread and its time and memory grow with the mask:
+# a 21 Gpx mask took more than five hours and 80 GB. The cleanup works in metres
+# (5 m opening and simplification), so a larger mask is polygonized from an
+# averaged copy of at most this many pixels (0.5 m cells for a 25 Gpx mask).
+MAX_POLYGONIZE_PIXELS = 1_000_000_000
+# Share of tiles between progress log lines during inference.
+PROGRESS_LOG_FRACTION = 0.1
 # Final vertex-thinning pass. The non-expansive clip below re-introduces
 # near-pixel-density vertices along the boundary; a small simplification keeps
 # the shape within 20 cm while cutting the vertex count by ~1-2 orders of
@@ -220,6 +232,30 @@ def cleanup_aoi_polygon(polygons: list[Polygon]) -> list[Polygon]:
 	return [geometry]
 
 
+def polygonize_inside_aoi(mask_path: str, log: Callable[..., None]) -> list[Polygon]:
+	"""Return inside-AOI polygons, from an averaged mask when it exceeds MAX_POLYGONIZE_PIXELS."""
+	with rasterio.open(mask_path) as ds:
+		factor = math.ceil(math.sqrt(ds.width * ds.height / MAX_POLYGONIZE_PIXELS))
+		if factor <= 1:
+			log('Polygonizing AOI mask', width=ds.width, height=ds.height)
+			return mask_to_polygons_scanline(ds, CLASS_INSIDE_AOI)
+
+		height, width = math.ceil(ds.height / factor), math.ceil(ds.width / factor)
+		log(
+			'Polygonizing reduced AOI mask',
+			width=ds.width,
+			height=ds.height,
+			reduction_factor=factor,
+			cell_size_m=round(abs(ds.transform.a) * ds.width / width, 3),
+		)
+		# Averaging 0/1 cells keeps a cell inside when most of it was inside.
+		reduced = ds.read(1, out_shape=(height, width), resampling=Resampling.average)
+		transform = ds.transform * ds.transform.scale(ds.width / width, ds.height / height)
+
+	inside = reduced == CLASS_INSIDE_AOI
+	return [shape(geom) for geom, _ in shapes(reduced, mask=inside, transform=transform)]
+
+
 class AOIInference:
 	"""Runs the SegFormer-B1 AOI model and returns the cleaned AOI polygon(s)
 	in the CRS of the input orthomosaic."""
@@ -251,9 +287,12 @@ class AOIInference:
 		logits = F.interpolate(logits, size=images.shape[-2:], mode='bilinear', align_corners=False)
 		return (logits.argmax(dim=1) == CLASS_INSIDE_AOI).to(torch.uint8)
 
-	def inference(self, input_tif: str) -> list[Polygon]:
+	def inference(self, input_tif: str, log: Callable[..., None] = lambda message, **extra: None) -> list[Polygon]:
 		"""Run inference on a GeoTIFF and return the cleaned AOI polygon(s) in
-		WGS84 (EPSG:4326) lon/lat, ready to store in v2_aois."""
+		WGS84 (EPSG:4326) lon/lat, ready to store in v2_aois.
+
+		``log(message, **extra)`` receives progress, because the largest orthos
+		run for hours."""
 		# Reproject to a metric (UTM) CRS and resample to the model's fixed 10 cm
 		# grid. Passing the same value as min and max resolution forces exactly
 		# INFERENCE_RESOLUTION_M whether the input is finer or coarser, and the
@@ -286,17 +325,25 @@ class AOIInference:
 				transform=vrt_src.transform,
 				**MASK_TIFF_LAYOUT,
 			)
+			total_tiles = len(dataset)
+			log_every = max(1, math.ceil(total_tiles * PROGRESS_LOG_FRACTION))
+			started = time.monotonic()
+			log('Predicting AOI tiles', tiles=total_tiles, width=dataset.width, height=dataset.height)
 			with rasterio.open(tmp_mask_path, 'w', **tif_kwargs) as dst_mask:
-				for out_window, mask_arr in predict_tiles(dataset, self.predict, self.device, BATCH_SIZE, 'aoi inference'):
+				predicted = predict_tiles(dataset, self.predict, self.device, BATCH_SIZE, 'aoi inference')
+				for done, (out_window, mask_arr) in enumerate(predicted, start=1):
 					dst_mask.write(mask_arr, 1, window=out_window)
+					if done % log_every == 0:
+						log('AOI tile progress', tiles_done=done, tiles=total_tiles, seconds=round(time.monotonic() - started))
 
 			src_crs = vrt_src.crs
 			vrt_src.close()
 
-			# Polygonize the inside-AOI class scanline-by-scanline (no full-res
-			# array), then run the production polygon cleanup in the metric CRS.
-			with rasterio.open(tmp_mask_path) as ds:
-				inside_polys = mask_to_polygons_scanline(ds, CLASS_INSIDE_AOI)
+			# Polygonize the inside-AOI class without a full-res array, then run the
+			# production polygon cleanup in the metric CRS.
+			started = time.monotonic()
+			inside_polys = polygonize_inside_aoi(tmp_mask_path, log)
+			log('AOI mask polygonized', polygons=len(inside_polys), seconds=round(time.monotonic() - started))
 
 			inside_polys = filter_polygons_by_area(inside_polys, MIN_POLYGON_AREA_M2)
 			cleaned = cleanup_aoi_polygon(inside_polys)
