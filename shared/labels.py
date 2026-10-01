@@ -23,8 +23,8 @@ from shared.retry import retry_on_transient_error, is_statement_timeout
 # Insert time scales with both the byte size *and* the number of rows (each row
 # updates the spatial index), so we cap on both. These are first-line limits;
 # ``_insert_records_adaptive`` handles any chunk that still exceeds the budget.
-# A single polygon can exceed the byte target; it stays one feature and uses
-# binary input with no geometry echoed in the response.
+# A single polygon can exceed the byte target; it stays one feature and goes
+# through the insert_large_label_geometry RPC, which has a longer budget.
 MAX_CHUNK_SIZE = 1024 * 1024 * 2  # 2MB of WKB per chunk
 MAX_CHUNK_GEOMETRIES = 2000  # rows per chunk
 
@@ -229,6 +229,11 @@ def _insert_records_adaptive(client, table: str, records: List[dict], label_id: 
 			raise
 
 
+def _is_oversized_geometry(records: List[dict]) -> bool:
+	"""A single geometry larger than a whole chunk (its hex EWKB is twice the WKB size)."""
+	return len(records) == 1 and len(records[0]['geometry']) > 2 * MAX_CHUNK_SIZE
+
+
 def _insert_records_with_retry(client, table: str, records: List[dict], label_id: int) -> None:
 	"""Insert a single batch, retrying only on transient network failures.
 
@@ -264,8 +269,17 @@ def _insert_records_with_retry(client, table: str, records: List[dict], label_id
 			return
 		elif count != count_before:
 			raise RuntimeError('Geometry upload count changed unexpectedly')
-		# Echoing a huge geometry adds DB serialization work without any useful data.
-		client.table(table).insert(records, returning='minimal').execute()
+		if _is_oversized_geometry(records):
+			# One polygon this large can exceed the 8s budget of a plain insert on its
+			# own, and a single row cannot be split further.
+			record = records[0]
+			client.rpc(
+				'insert_large_label_geometry',
+				{'p_label_id': label_id, 'p_geometry': record['geometry'], 'p_properties': record['properties']},
+			).execute()
+		else:
+			# Echoing a huge geometry adds DB serialization work without any useful data.
+			client.table(table).insert(records, returning='minimal').execute()
 
 	_insert()
 

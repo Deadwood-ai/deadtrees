@@ -195,3 +195,45 @@ def test_upload_reraises_when_single_record_still_times_out():
 
 	# Nothing committed, and it did not spin forever: 2 -> 1 (still fails) -> raise.
 	assert client._table.rows == []
+
+
+class _RpcClient:
+	"""Plain inserts time out like a single huge row does; the RPC stores the row."""
+
+	def __init__(self):
+		self.table_rows = []
+		self.rpc_calls = []
+
+	def table(self, name):
+		client = self
+
+		class _Table:
+			def select(self, *args, **kwargs):
+				return _FakeSelect(SimpleNamespace(rows=client.table_rows))
+
+			def insert(self, records, **kwargs):
+				raise AssertionError('an oversized geometry must not use a plain insert')
+
+		return _Table()
+
+	def rpc(self, name, params):
+		self.rpc_calls.append((name, params))
+		self.table_rows.append(params)
+		return SimpleNamespace(execute=lambda: None)
+
+
+def test_single_oversized_geometry_uses_the_large_geometry_rpc(monkeypatch):
+	import shared.labels as labels
+
+	monkeypatch.setattr(labels, 'MAX_CHUNK_SIZE', 1_000)
+	ring = [(i * 1e-6, (i % 2) * 1e-6) for i in range(200)] + [(0.0, 1.0)]
+	huge = Polygon(ring)
+	client = _RpcClient()
+
+	upload_geometry_chunk(client, 'v2_forest_cover_geometries', 7, [huge], {'source': 'model'}, 'token')
+
+	assert [name for name, _ in client.rpc_calls] == ['insert_large_label_geometry']
+	params = client.rpc_calls[0][1]
+	assert params['p_label_id'] == 7
+	assert params['p_properties'] == {'source': 'model'}
+	assert len(params['p_geometry']) > 2 * labels.MAX_CHUNK_SIZE

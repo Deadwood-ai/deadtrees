@@ -473,3 +473,37 @@ def test_failed_v1_replacement_keeps_previous_label(prediction):
 	with pytest.raises(Exception, match='foreign key'):
 		replace(prediction, new.id)
 	assert [row[:3] for row in state(prediction)] == [(old.id, True, 1), (new.id, False, 0)]
+
+
+def _circle(points: int) -> Polygon:
+	import math
+
+	return Polygon(
+		[(7.8 + 0.01 * math.cos(2 * math.pi * i / points), 48 + 0.01 * math.sin(2 * math.pi * i / points)) for i in range(points)]
+	)
+
+
+def test_oversized_polygon_is_stored_whole_through_the_large_geometry_rpc(prediction):
+	"""One polygon above the chunk byte target (here ~2.4 MB WKB) is stored as one complete row."""
+	huge = _circle(150_000)
+	label = stage(prediction, geometry=MultiPolygon([huge]).__geo_interface__)
+	publish(prediction, label.id)
+
+	stored = prediction['db'].execute(
+		'SELECT count(*), max(ST_NPoints(geometry)) FROM public.v2_forest_cover_geometries WHERE label_id=%s',
+		(label.id,),
+	).fetchone()
+	assert stored == (1, 150_001)
+
+
+def test_large_geometry_rpc_keeps_the_callers_insert_policy(prediction):
+	label = stage(prediction)
+	with use_client(prediction['other_user']) as client:
+		with pytest.raises(Exception):
+			client.rpc(
+				'insert_large_label_geometry',
+				{'p_label_id': label.id, 'p_geometry': box(7.8, 48, 7.801, 48.001).wkb_hex, 'p_properties': None},
+			).execute()
+	assert prediction['db'].execute(
+		'SELECT count(*) FROM public.v2_forest_cover_geometries WHERE label_id=%s', (label.id,)
+	).fetchone()[0] == 1
