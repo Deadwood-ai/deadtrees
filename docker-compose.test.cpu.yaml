@@ -1,0 +1,9 @@
+# CPU-only override for processor-test, for hosts where the NVIDIA runtime cannot start
+# test containers (for example the processing server, whose GPU belongs to production).
+# Use: COMPOSE_FILE=docker-compose.test.yaml:docker-compose.test.cpu.yaml
+services:
+  processor-test:
+    runtime: runc
+    gpus: !reset []
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=void

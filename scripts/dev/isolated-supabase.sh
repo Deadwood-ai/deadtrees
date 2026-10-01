@@ -201,6 +201,17 @@ COMPOSE_NETWORK_NAME=deadwood_network_$SLUG
 EOF
 	ln -sfn "$ENV_FILE" "$CURRENT_ENV_FILE"
 
+	# Plain `docker compose` reads the repo .env; point it at this worktree's project and
+	# network so it cannot recreate or join containers of the shared default project.
+	if [[ -f "$REPO_ROOT/.env" ]]; then
+		local key value
+		for key in COMPOSE_PROJECT_NAME COMPOSE_NETWORK_NAME; do
+			value="$(sed -n "s/^$key=//p" "$ENV_FILE")"
+			sed -i "/^$key=/d" "$REPO_ROOT/.env"
+			printf '%s=%s\n' "$key" "$value" >> "$REPO_ROOT/.env"
+		done
+	fi
+
 	echo "Rendered isolated Supabase config:"
 	echo "  workdir: $WORKDIR"
 	echo "  env:     $ENV_FILE"

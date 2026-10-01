@@ -23,6 +23,7 @@ from shared.models import (
 )
 
 DEFAULT_COMPOSE_PROJECT_NAME = 'deadtrees-test'
+ISOLATED_ENV_FILE = Path('.local/supabase/current.env')
 SERVICE_DEPENDENCIES = {
 	'api-test': ['api-test', 'nginx', 'mailpit'],
 	'processor-test': ['processor-test', 'nginx'],
@@ -44,10 +45,32 @@ class DevCommands:
 	def __init__(self):
 		self.test_compose_file = 'docker-compose.test.yaml'
 		self.compose_env = os.environ.copy()
+		# A worktree's isolated env names its own compose project and ports; without it,
+		# compose falls back to the shared default project and recreates its containers.
+		self.compose_env.update(self._isolated_env())
 		self.compose_env.setdefault('COMPOSE_PROJECT_NAME', DEFAULT_COMPOSE_PROJECT_NAME)
 
+	def _isolated_env(self) -> dict[str, str]:
+		"""Read the worktree's isolated env file, as scripts/qa/env.sh does."""
+		env_file = Path(os.environ.get('DEADTREES_ISOLATED_ENV_FILE') or ISOLATED_ENV_FILE)
+		if not env_file.is_file():
+			return {}
+		values = {}
+		for line in env_file.read_text().splitlines():
+			line = line.strip()
+			if not line or line.startswith('#') or '=' not in line:
+				continue
+			key, value = line.removeprefix('export ').split('=', 1)
+			values[key.strip()] = value.strip().strip('\'"')
+		return values
+
 	def _compose_cmd(self, *args: str) -> List[str]:
-		"""Build a docker compose command for the test environment."""
+		"""Build a docker compose command for the test environment.
+
+		An explicit COMPOSE_FILE (for example the CPU-only override) replaces the default file.
+		"""
+		if self.compose_env.get('COMPOSE_FILE'):
+			return ['docker', 'compose', *args]
 		return ['docker', 'compose', '-f', self.test_compose_file, *args]
 
 	def _compose_exec_args(self, service: str) -> List[str]:
@@ -462,10 +485,7 @@ class DevCommands:
 			print('▶ Running processor once in docker...')
 			self._run_command(
 				[
-					'docker',
-					'compose',
-					'-f',
-					self.test_compose_file,
+					*self._compose_cmd(),
 					'exec',
 					'processor-test',
 					'python',
@@ -572,10 +592,7 @@ class DevCommands:
 
 		# Build the pytest command with test_path at the end
 		cmd = [
-			'docker',
-			'compose',
-			'-f',
-			self.test_compose_file,
+			*self._compose_cmd(),
 			'exec',
 			service,  # Service name comes here
 			'python',
@@ -614,10 +631,7 @@ class DevCommands:
 		self._ensure_test_service_running(service)
 
 		cmd = [
-			'docker',
-			'compose',
-			'-f',
-			self.test_compose_file,
+			*self._compose_cmd(),
 			*self._compose_exec_args(service),
 			'python',
 			'-m',
@@ -671,10 +685,7 @@ class DevCommands:
 			# Start the processor in continuous mode
 			self._run_command(
 				[
-					'docker',
-					'compose',
-					'-f',
-					self.test_compose_file,
+					*self._compose_cmd(),
 					'exec',
 					'-T',
 					'processor-test',

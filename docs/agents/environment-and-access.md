@@ -216,6 +216,24 @@ test suite, local QA, browser/app verification, or a fix that should be tested
 against the integrated local environment. After finishing, stop the stack with
 `scripts/qa/env.sh down` unless the user wants to keep it running.
 
+The isolated stack never uses the shared default compose project
+(`deadtrees-test`). Rendering the stack writes its own `COMPOSE_PROJECT_NAME` and
+`COMPOSE_NETWORK_NAME` into the worktree `.env`, and `deadtrees dev ...` loads
+`.local/supabase/current.env` itself, so plain `docker compose` and the dev CLI
+both stay inside this worktree's project.
+
+On the processing server the NVIDIA runtime cannot start `processor-test` (its
+GPU belongs to production). Run the processor test container CPU-only there with
+the tracked override; the dev CLI honours `COMPOSE_FILE` too:
+
+```bash
+export COMPOSE_FILE=docker-compose.test.yaml:docker-compose.test.cpu.yaml
+docker compose up -d processor-test
+```
+
+QA stack services carry CPU and memory limits in `docker-compose.test.yaml`
+because they share the processing server with the production processor.
+
 Codex environment cleanup is wired to `scripts/qa/env.sh cleanup`, which tears
 down an already-rendered QA stack without creating new runtime state. Treat that
 as a last-resort closeout hook; still run `scripts/qa/env.sh down` explicitly
