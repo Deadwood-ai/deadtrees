@@ -89,6 +89,7 @@ def create_label_with_geometries(
 
 	# Each PostgREST request commits separately. Keep incomplete uploads inactive.
 	with use_client(token) as client:
+		label_id = None
 		try:
 			# Insert label
 			response = (
@@ -153,7 +154,20 @@ def create_label_with_geometries(
 
 		except Exception as e:
 			logger.error(f'Error creating label: {str(e)}', extra={'token': token, 'user_id': user_id})
+			if label_id is not None:
+				delete_unpublished_label(client, label_id, token)
 			raise Exception(f'Error creating label: {str(e)}')
+
+
+def delete_unpublished_label(client, label_id: int, token: str) -> None:
+	"""Best-effort removal of an incomplete upload; its geometries cascade.
+
+	Only version 0 is deleted, so a publication whose response was lost is kept.
+	"""
+	try:
+		client.table(settings.labels_table).delete().eq('id', label_id).eq('version', 0).execute()
+	except Exception as e:
+		logger.warning(f'Could not delete unpublished label {label_id}: {str(e)}', extra={'token': token})
 
 
 def upload_geometry_chunk(
@@ -257,25 +271,21 @@ def _insert_records_with_retry(client, table: str, records: List[dict], label_id
 
 
 def delete_model_prediction_labels(
-	dataset_id: int, label_data: LabelDataEnum, token: str, model_config: Optional[Dict[str, Any]] = None
+	dataset_id: int, label_data: LabelDataEnum, token: str, model_config: Dict[str, Any]
 ) -> int:
-	"""Deletes model prediction labels for a dataset with the specified label data type.
+	"""Deletes one model's prediction labels for a dataset and label data type.
 
-	Args:
-		dataset_id: The ID of the dataset to delete labels for
-		label_data: The label data type (e.g., deadwood, forest_cover)
-		token: Authentication token
-		model_config: If provided, delete labels whose model_metadata matches all keys/values.
-			Legacy labels with no model_config are also deleted so reruns replace pre-versioned predictions.
+	Labels whose model_config matches all keys/values of ``model_config`` are deleted,
+	as are legacy labels with no model_config. Other models' labels are never touched.
 
 	Returns:
 		int: Number of labels deleted
 	"""
-	deleted_count = 0
+	if not model_config:
+		raise ValueError('model_config is required to scope prediction deletion to one model')
 
 	with use_client(token) as client:
 		try:
-			# First, get all model prediction labels for this dataset with the specified label data type
 			response = (
 				client.table(settings.labels_table)
 				.select('id,model_config')
@@ -284,45 +294,23 @@ def delete_model_prediction_labels(
 				.eq('label_data', label_data.value)
 				.execute()
 			)
-
-			if model_config:
-				labels_to_delete = [
-					label
-					for label in response.data
-					if label.get('model_config') is None
-					or all(label.get('model_config', {}).get(key) == value for key, value in model_config.items())
-				]
-			else:
-				labels_to_delete = response.data
-
-			if not labels_to_delete:
-				# No existing labels found
+			label_ids = [
+				label['id']
+				for label in response.data
+				if not label.get('model_config')
+				or all(label['model_config'].get(key) == value for key, value in model_config.items())
+			]
+			if not label_ids:
 				return 0
 
-			# Get label IDs to delete
-			label_ids = [label['id'] for label in labels_to_delete]
-			deleted_count = len(label_ids)
-
-			# Determine geometry table based on label_data
-			# geom_table = (
-			# 	settings.deadwood_geometries_table
-			# 	if label_data == LabelDataEnum.deadwood
-			# 	else settings.forest_cover_geometries_table
-			# )
-
-			# Delete all geometries for these labels
-			# Note: This isn't strictly necessary due to ON DELETE CASCADE, but being explicit
-			# for label_id in label_ids:
-			# client.table(geom_table).delete().eq('label_id', label_id).execute()
-
-			# Delete the labels themselves
+			# Geometries cascade with their label.
 			client.table(settings.labels_table).delete().in_('id', label_ids).execute()
 
 			logger.info(
-				f'Deleted {deleted_count} existing model prediction labels for dataset {dataset_id}',
+				f'Deleted {len(label_ids)} existing model prediction labels for dataset {dataset_id}',
 				LogContext(category=LogCategory.LABEL, dataset_id=dataset_id, token=token),
 			)
-			return deleted_count
+			return len(label_ids)
 
 		except Exception as e:
 			logger.error(

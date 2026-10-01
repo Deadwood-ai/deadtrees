@@ -11,7 +11,7 @@ from shapely.geometry import MultiPolygon, Polygon, box
 
 from shared.db import login, use_client
 from shared.labels import create_label_with_geometries
-from shared.models import LabelPayloadData, TREECOVER_V1_MODEL_CONFIG
+from shared.models import COMBINED_MODEL_CONFIG, LabelPayloadData, TREECOVER_V1_MODEL_CONFIG
 from shared.settings import settings
 
 
@@ -57,11 +57,11 @@ def stage(context, **kwargs):
 	)
 
 
-def publish(context, label_id, count=1, token=None):
+def publish(context, label_id, count=1, token=None, rpc='publish_model_prediction_label'):
 	with use_client(token or context['processor']) as client:
 		return (
 			client.rpc(
-				'publish_model_prediction_label',
+				rpc,
 				{
 					'p_label_id': label_id,
 					'p_expected_geometry_count': count,
@@ -127,26 +127,17 @@ def test_failed_upload_never_publishes_partial_label(prediction, monkeypatch):
 	geometry = MultiPolygon([box(7.8 + i * 0.002, 48, 7.801 + i * 0.002, 48.001) for i in range(2)])
 	with pytest.raises(Exception, match='Injected upload interruption'):
 		stage(prediction, geometry=geometry.__geo_interface__, config=TREECOVER_V1_MODEL_CONFIG)
-	rows = state(prediction)
-	assert [row[0] for row in rows if row[1]] == [old.id]
-	assert rows[-1][2] == 0
+	# The previous label stays live and the partial upload is removed with its geometries.
+	assert state(prediction) == [(old.id, True, 1, None)]
 	assert (
 		prediction['db']
 		.execute(
-			'SELECT count(*) FROM public.v2_forest_cover_geometries WHERE label_id=%s',
-			(rows[-1][0],),
+			'SELECT count(*) FROM public.v2_forest_cover_geometries g JOIN public.v2_labels l ON g.label_id=l.id '
+			'WHERE l.dataset_id=%s',
+			(prediction['dataset'],),
 		)
 		.fetchone()[0]
 		== 1
-	)
-	assert (
-		prediction['db']
-		.execute(
-			'SELECT count(*) FROM public.v_export_polygon_candidates WHERE label_id=%s',
-			(rows[-1][0],),
-		)
-		.fetchone()[0]
-		== 0
 	)
 
 
@@ -327,9 +318,10 @@ def test_lost_insert_response_never_duplicates_geometries(prediction, monkeypatc
 			(prediction['dataset'],),
 		)
 		.fetchone()[0]
-		== 2
+		== (0 if unverifiable else 2)
 	)
-	assert state(prediction)[0][1] is (not unverifiable)
+	# An unverifiable upload is discarded rather than left as a partial label.
+	assert [row[1] for row in state(prediction)] == ([] if unverifiable else [True])
 
 
 def test_database_cancelled_batch_splits_without_partial_duplicates(prediction):
@@ -420,3 +412,64 @@ def test_oversized_polygon_roundtrip_preserves_feature_and_holes(prediction, ove
 	assert row[:4] == (1, True, 30000, True)
 	assert row[4] > 0
 	assert publish(prediction, label.id)['is_active']
+
+
+def replace(context, label_id, count=1, token=None):
+	return publish(context, label_id, count, token, rpc='replace_model_prediction_label')
+
+
+def add_correction(context, label_id):
+	db = context['db']
+	geometry_id = db.execute(
+		'SELECT id FROM public.v2_forest_cover_geometries WHERE label_id=%s', (label_id,)
+	).fetchone()[0]
+	db.execute(
+		'INSERT INTO public.v2_geometry_corrections(geometry_id,layer_type,label_id,dataset_id,operation,user_id,session_id) '
+		"VALUES(%s,'forest_cover',%s,%s,'delete',%s,gen_random_uuid())",
+		(geometry_id, label_id, context['dataset'], context['owner']),
+	)
+
+
+def test_v1_replacement_deletes_only_the_same_model(prediction):
+	"""A treecover_v1 rerun replaces its own and legacy labels, never combined-v2 or others."""
+	combined = stage(prediction, config=COMBINED_MODEL_CONFIG)
+	publish(prediction, combined.id)
+	add_correction(prediction, combined.id)
+	other = stage(prediction, config={**CONFIG, 'checkpoint_name': 'other.safetensors'})
+	publish(prediction, other.id)
+	# Legacy unconfigured and previous v1 labels are replaced.
+	create_label_with_geometries(payload(prediction, config=None), prediction['owner'], prediction['processor'])
+	create_label_with_geometries(
+		payload(prediction, config=TREECOVER_V1_MODEL_CONFIG), prediction['owner'], prediction['processor']
+	)
+	deadwood = create_label_with_geometries(
+		payload(prediction, config=TREECOVER_V1_MODEL_CONFIG, layer='deadwood'),
+		prediction['owner'],
+		prediction['processor'],
+	)
+
+	new = stage(prediction, config=TREECOVER_V1_MODEL_CONFIG)
+	result = replace(prediction, new.id)
+
+	assert result['is_active'] and result['version'] == 1 and result['parent_label_id'] is None
+	assert {row[0] for row in state(prediction)} == {combined.id, other.id, new.id, deadwood.id}
+	assert {row[0] for row in state(prediction) if row[1]} == {combined.id, other.id, new.id, deadwood.id}
+	# A retried request whose response was lost returns the same result.
+	assert replace(prediction, new.id) == result
+
+
+def test_failed_v1_replacement_keeps_previous_label(prediction):
+	"""Incomplete uploads and corrected labels roll the whole replacement back."""
+	old = create_label_with_geometries(
+		payload(prediction, config=TREECOVER_V1_MODEL_CONFIG), prediction['owner'], prediction['processor']
+	)
+	new = stage(prediction, config=TREECOVER_V1_MODEL_CONFIG)
+	with pytest.raises(Exception, match='geometry count'):
+		replace(prediction, new.id, count=2)
+	assert [row[:2] for row in state(prediction)] == [(old.id, True), (new.id, False)]
+
+	# Corrections reference the label without cascade: replacing it must not drop audit edits.
+	add_correction(prediction, old.id)
+	with pytest.raises(Exception, match='foreign key'):
+		replace(prediction, new.id)
+	assert [row[:3] for row in state(prediction)] == [(old.id, True, 1), (new.id, False, 0)]

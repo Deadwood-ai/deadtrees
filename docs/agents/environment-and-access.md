@@ -204,6 +204,12 @@ scripts/qa/run-agent-qa.sh --dry-run --parallel 4
 scripts/qa/env.sh down
 ```
 
+The stack's slug comes from `.local/server-env.sh` when a host allocator wrote
+one, otherwise from the worktree path; worktrees under a shared `worktrees` or
+`*-worktrees` folder use their own directory name. A stack started before that
+rule keeps its old names: stop it with
+`DEADTREES_WORKTREE_SLUG=<old-slug> scripts/qa/env.sh down`.
+
 `scripts/qa/env.sh up` starts Docker containers and Vite, so do not run it as a
 default step for every exploratory thread. Run it when the user asks for a full
 test suite, local QA, browser/app verification, or a fix that should be tested

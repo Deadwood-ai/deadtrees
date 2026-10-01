@@ -50,6 +50,9 @@ class Config:
 	download_include_parquet: bool
 	download_use_original_filename: bool
 
+	# A publication still 'uploading' after this long was interrupted.
+	stale_upload_hours: float = 12.0
+
 
 def env_bool(name: str, default: bool = False) -> bool:
 	v = os.getenv(name)
@@ -101,4 +104,5 @@ def load_config() -> Config:
 		download_include_labels=env_bool("DOWNLOAD_INCLUDE_LABELS", True),
 		download_include_parquet=env_bool("DOWNLOAD_INCLUDE_PARQUET", True),
 		download_use_original_filename=env_bool("DOWNLOAD_USE_ORIGINAL_FILENAME", False),
+		stale_upload_hours=float(os.getenv("FREIDATA_STALE_UPLOAD_HOURS", "12")),
 	)

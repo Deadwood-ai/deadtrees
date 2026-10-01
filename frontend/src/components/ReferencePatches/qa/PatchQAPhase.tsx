@@ -6,7 +6,9 @@ import { IReferencePatch, PatchResolution } from "../../../types/referencePatche
 import {
   useGenerateNestedPatches,
   useReferencePatches,
-  useUpdatePatchStatus,
+  useSetPatchValidation,
+  ALL_PATCH_LAYERS,
+  patchStatusValidation,
 } from "../../../hooks/useReferencePatches";
 import ReferencePatchMap from "../ReferencePatchMap";
 
@@ -22,7 +24,7 @@ const QA_RESOLUTIONS: PatchResolution[] = [5];
 export default function PatchQAPhase({ dataset, onUnsavedChanges, onRequestValidation }: Props) {
   const [activeResolution, setActiveResolution] = useState<PatchResolution>(5);
   const { data: patches = [] } = useReferencePatches(dataset.id, activeResolution);
-  const { mutate: updateStatus, isPending: updating } = useUpdatePatchStatus();
+  const { mutate: updateStatus, isPending: updating } = useSetPatchValidation();
   const { mutateAsync: generateChildren, isPending: generatingChildren } = useGenerateNestedPatches();
 
   const sortedPatches = useMemo(
@@ -40,7 +42,7 @@ export default function PatchQAPhase({ dataset, onUnsavedChanges, onRequestValid
   const handleStatusChange = useCallback(
     (status: IReferencePatch["status"]) => {
       if (!currentPatch) return;
-      updateStatus({ patchId: currentPatch.id, status });
+      updateStatus({ patchId: currentPatch.id, layers: ALL_PATCH_LAYERS, validated: patchStatusValidation(status) });
       onUnsavedChanges(true);
       const nextIdx = Math.min(currentIndex + 1, sortedPatches.length - 1);
       setCurrentIndex(nextIdx);

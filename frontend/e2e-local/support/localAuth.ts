@@ -1,5 +1,17 @@
 import type { Page } from "@playwright/test";
 
+// Mirrors COOKIE_CONSENT_KEY/VERSION in src/utils/analytics.ts (that module
+// reads import.meta.env, so Node cannot import it). Without the current version
+// the banner returns and covers mobile controls.
+const COOKIE_CONSENT = { key: "cookieConsent", versionKey: "cookieConsentVersion", version: "1.1" };
+
+export async function acceptCookieConsent(page: Page) {
+  await page.addInitScript((consent) => {
+    window.localStorage.setItem(consent.key, "accepted");
+    window.localStorage.setItem(consent.versionKey, consent.version);
+  }, COOKIE_CONSENT);
+}
+
 export interface LocalAuthUser {
   id: string;
   email: string;
@@ -56,16 +68,15 @@ export async function installLocalSession(
   const session = createLocalSession(options.user, options.refreshToken);
 
   await page.addInitScript(
-    ({ localSession, acceptCookies }) => {
+    ({ localSession }) => {
       window.localStorage.setItem(
         "sb-127-auth-token",
         JSON.stringify(localSession),
       );
-      if (acceptCookies)
-        window.localStorage.setItem("cookieConsent", "accepted");
     },
-    { localSession: session, acceptCookies: options.acceptCookies },
+    { localSession: session },
   );
+  if (options.acceptCookies) await acceptCookieConsent(page);
 
   await page.route(`${options.supabaseUrl}/auth/v1/user`, async (route) => {
     await route.fulfill({

@@ -5,10 +5,11 @@ import { ILabel, ILabelData, ILabelSource } from "../../types/labels";
 import {
   useReferencePatches,
   useCreateReferencePatch,
-  useUpdatePatchStatus,
-  useUpdatePatchLayerValidation,
+  useSetPatchValidation,
   useDeleteReferencePatch,
   useUpdatePatchGeometry,
+  ALL_PATCH_LAYERS,
+  patchStatusValidation,
 } from "../../hooks/useReferencePatches";
 import { useSaveReferenceGeometries } from "../../hooks/useReferenceGeometries";
 import { clipGeometriesInBatches } from "../../hooks/useReferenceGeometriesBatch";
@@ -68,8 +69,7 @@ export default function ReferencePatchEditorView({
   const { data: allPatches = [], refetch: refetchPatches } = useReferencePatches(dataset.id);
   const { data: aoiData } = useDatasetAOI(dataset.id);
   const { mutateAsync: createPatch } = useCreateReferencePatch();
-  const { mutateAsync: updateStatus } = useUpdatePatchStatus();
-  const { mutateAsync: updateLayerValidation } = useUpdatePatchLayerValidation();
+  const { mutateAsync: setPatchValidation } = useSetPatchValidation();
   const { mutateAsync: deletePatch } = useDeleteReferencePatch();
   const { mutateAsync: updatePatchGeometry } = useUpdatePatchGeometry();
   const { mutateAsync: saveGeometries } = useSaveReferenceGeometries();
@@ -673,8 +673,7 @@ export default function ReferencePatchEditorView({
         await generateNestedPatchesRecursive(patchToGenerate);
 
         // Step 3: Mark base patch as validated (both layers)
-        await updateLayerValidation({ patchId: basePatch.id, layer: "deadwood", validated: true });
-        await updateLayerValidation({ patchId: basePatch.id, layer: "forest_cover", validated: true });
+        await setPatchValidation({ patchId: basePatch.id, layers: ALL_PATCH_LAYERS, validated: true });
         onUnsavedChanges(true);
 
         message.success({ content: "Patches generated and reference data created!", key: "generate" });
@@ -705,7 +704,7 @@ export default function ReferencePatchEditorView({
     },
     [
       generateNestedPatchesRecursive,
-      updateLayerValidation,
+      setPatchValidation,
       onUnsavedChanges,
       allPatches,
       getPatchGeometryFromMap,
@@ -826,7 +825,7 @@ export default function ReferencePatchEditorView({
             onResolutionChange={setSelectedResolution}
             onPatchSelect={setSelectedPatchId}
             onStatusUpdate={async (patchId: number, status: "good" | "bad" | "pending") => {
-              await updateStatus({ patchId, status });
+              await setPatchValidation({ patchId, layers: ALL_PATCH_LAYERS, validated: patchStatusValidation(status) });
               onUnsavedChanges(true);
             }}
             onLayerValidation={async (
@@ -834,7 +833,7 @@ export default function ReferencePatchEditorView({
               layer: "deadwood" | "forest_cover",
               validated: boolean | null,
             ) => {
-              await updateLayerValidation({ patchId, layer, validated });
+              await setPatchValidation({ patchId, layers: [layer], validated });
               onUnsavedChanges(true);
             }}
             currentLayer={layerSelection}

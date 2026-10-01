@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-import { installLocalSession } from "./support/localAuth";
+import { acceptCookieConsent, installLocalSession } from "./support/localAuth";
 
 const localSupabaseUrl =
   process.env.VITE_SUPABASE_URL ||
@@ -76,9 +76,8 @@ const fulfillJson = async (route: Route, json: unknown) => {
 };
 
 const installStableUiState = async (page: Page) => {
+  await acceptCookieConsent(page);
   await page.addInitScript(() => {
-    window.localStorage.setItem("cookieConsent", "accepted");
-    window.localStorage.setItem("cookieConsentVersion", "1.1");
     window.sessionStorage.setItem("deadtrees-preview-warning-shown", "true");
   });
 };

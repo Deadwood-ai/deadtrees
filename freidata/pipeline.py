@@ -107,7 +107,10 @@ def run_publication(cfg: Config, db: Client, folder: Path, publication_id: int) 
 		print(f"[INFO] DOI bereits vorhanden für publication_id={publication_id} -> nichts zu tun.")
 		return
 
-	update_publication_row(db, publication_id, {"status": "uploading"})
+	update_publication_row(db, publication_id, {
+		"status": "uploading",
+		"upload_started_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+	})
 
 	print("[1/7] Fetch publication info from DB...")
 	pub = fetch_publication_full_info(db, publication_id)
@@ -356,6 +359,8 @@ def run_publication(cfg: Config, db: Client, folder: Path, publication_id: int) 
 			update_fields["doi"] = doi_identifier
 		update_publication_row(db, publication_id, update_fields)
 	else:
+		# The upload is complete; only a crashed upload keeps upload_started_at.
+		update_publication_row(db, publication_id, {"upload_started_at": None})
 		print("PUBLISH=0 -> done (draft bleibt unveröffentlicht).")
 		print(f"Du kannst den Draft jetzt in der UI prüfen: {draft.get('links', {}).get('self_html')}")
 		print("Zum Publish später: export PUBLISH=1 und Script erneut laufen lassen.")

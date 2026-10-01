@@ -11,7 +11,7 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def thumbnail_task(test_dataset_for_processing, test_processor_user):
+def thumbnail_task(test_dataset_for_processing, standardized_local_ortho, test_processor_user):
 	"""Create a test task specifically for thumbnail processing"""
 	return QueueTask(
 		id=1,

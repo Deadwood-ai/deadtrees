@@ -8,6 +8,7 @@ import geopandas as gpd
 import pytest
 
 from api.src.export import export_reference_patches as export_module
+from api.src.export import reference_fetch as fetch_module
 
 pytestmark = pytest.mark.unit
 
@@ -18,6 +19,7 @@ class FakeQuery:
 		self.filters = []
 		self.order_columns = []
 		self.limit_count = None
+		self.range_bounds = None
 
 	def select(self, *_args, **_kwargs):
 		return self
@@ -38,6 +40,10 @@ class FakeQuery:
 		self.limit_count = count
 		return self
 
+	def range(self, start, end):
+		self.range_bounds = (start, end)
+		return self
+
 	def execute(self):
 		rows = [dict(row) for row in self.rows]
 
@@ -48,8 +54,12 @@ class FakeQuery:
 				rows = [row for row in rows if row.get(column) in value]
 
 		for column, desc in reversed(self.order_columns):
-			rows = sorted(rows, key=lambda row: row.get(column), reverse=desc)
+			if all(row.get(column) is not None for row in rows):
+				rows = sorted(rows, key=lambda row: row.get(column), reverse=desc)
 
+		# PostgREST applies max_rows (1000) to every response, ranged or not.
+		start, end = self.range_bounds or (0, len(rows) - 1)
+		rows = rows[start : min(end + 1, start + 1000)]
 		return SimpleNamespace(data=rows[:self.limit_count] if self.limit_count is not None else rows)
 
 
@@ -106,8 +116,8 @@ def make_patch(
 
 
 def install_fake_db(monkeypatch, tables):
-	monkeypatch.setattr(export_module, 'use_client', lambda _token: FakeUseClient(tables))
-	monkeypatch.setattr(export_module, 'fetch_reference_datasets', lambda _token: [10])
+	monkeypatch.setattr(fetch_module, 'use_client', lambda _token: FakeUseClient(tables))
+	monkeypatch.setattr(fetch_module, 'fetch_reference_datasets', lambda _token: [10])
 
 
 def test_fetch_aoi_geometry_uses_latest_manual_correction(monkeypatch):
@@ -378,7 +388,10 @@ def test_main_skips_stale_cleanup_when_patch_fetch_fails(monkeypatch, tmp_path):
 	monkeypatch.setattr(sys, 'argv', ['export_reference_patches.py', '--output-dir', str(tmp_path), '--dataset-id', '3251'])
 	monkeypatch.setattr(export_module, 'login', lambda _user, _password: 'token')
 	monkeypatch.setattr(export_module, 'fetch_reference_datasets', lambda _token: [3251])
-	monkeypatch.setattr(export_module, 'fetch_validated_patches', lambda *_args, **_kwargs: None)
+	def fail_patch_fetch(*_args, **_kwargs):
+		raise RuntimeError('database unavailable')
+
+	monkeypatch.setattr(export_module, 'fetch_validated_patches', fail_patch_fetch)
 	monkeypatch.setattr(export_module, 'cleanup_removed_datasets', lambda *_args, **_kwargs: None)
 	monkeypatch.setattr(
 		export_module,
@@ -566,3 +579,213 @@ def test_export_vector_geopackage_fails_on_invalid_validated_geometry(monkeypatc
 
 	assert gpkg_path is None
 	assert not (tmp_path / '10' / 'gpkg' / f'{filename_base}.gpkg').exists()
+
+
+UTM_EPSG = 32632
+UTM_BBOX = (500000.0, 5200000.0, 500204.8, 5200204.8)
+
+
+def utm_square_as_wgs84(minx, miny, maxx, maxy):
+	from pyproj import Transformer
+
+	to_wgs84 = Transformer.from_crs(f'EPSG:{UTM_EPSG}', 'EPSG:4326', always_xy=True)
+	ring = [to_wgs84.transform(x, y) for x, y in [(minx, miny), (maxx, miny), (maxx, maxy), (minx, maxy), (minx, miny)]]
+	return {'type': 'Polygon', 'coordinates': [[list(point) for point in ring]]}
+
+
+class FailingClient:
+	def __init__(self, tables, failing_tables):
+		self.client = FakeClient(tables)
+		self.failing_tables = failing_tables
+
+	def from_(self, table_name):
+		if table_name in self.failing_tables:
+			raise RuntimeError(f'database unavailable for {table_name}')
+		return self.client.from_(table_name)
+
+
+def test_fetch_geometries_by_label_reads_every_page_beyond_postgrest_cap(monkeypatch):
+	minx, miny, _, _ = UTM_BBOX
+	rows = [
+		{
+			'id': index,
+			'label_id': 7,
+			'geometry': utm_square_as_wgs84(minx + index % 100, miny + index // 100, minx + index % 100 + 0.5, miny + index // 100 + 0.5),
+		}
+		for index in range(2500)
+	]
+	install_fake_db(monkeypatch, {'reference_patch_deadwood_geometries': rows})
+
+	geometries = export_module.fetch_geometries_by_label(
+		'token', 7, 'reference_patch_deadwood_geometries', UTM_BBOX, UTM_EPSG
+	)
+
+	assert len(geometries) == 2500
+
+
+def test_fetch_geometries_by_label_rejects_unparseable_geometry(monkeypatch):
+	rows = [
+		{'id': 1, 'label_id': 7, 'geometry': utm_square_as_wgs84(*UTM_BBOX)},
+		{'id': 2, 'label_id': 7, 'geometry': {'type': 'Polygon', 'coordinates': [[[7.0, 47.0]]]}},
+	]
+	install_fake_db(monkeypatch, {'reference_patch_deadwood_geometries': rows})
+
+	with pytest.raises(ValueError, match='Invalid geometry 2'):
+		export_module.fetch_geometries_by_label('token', 7, 'reference_patch_deadwood_geometries', UTM_BBOX, UTM_EPSG)
+
+
+def test_fetch_errors_propagate_instead_of_returning_empty_results(monkeypatch):
+	failing_tables = {'reference_patch_deadwood_geometries', 'v2_aois'}
+	monkeypatch.setattr(fetch_module, 'use_client', lambda _token: _failing_use_client({}, failing_tables))
+
+	with pytest.raises(RuntimeError, match='database unavailable'):
+		export_module.fetch_geometries_by_label('token', 7, 'reference_patch_deadwood_geometries', UTM_BBOX, UTM_EPSG)
+	with pytest.raises(RuntimeError, match='database unavailable'):
+		export_module.fetch_vector_features_by_label('token', 1, 7, 'reference_patch_deadwood_geometries')
+	with pytest.raises(RuntimeError, match='database unavailable'):
+		export_module.fetch_aoi_geometry('token', 10)
+
+
+def _failing_use_client(tables, failing_tables):
+	use = FakeUseClient(tables)
+	use.client = FailingClient(tables, failing_tables)
+	return use
+
+
+def test_create_aoi_mask_only_treats_missing_aoi_as_all_valid():
+	assert export_module.create_aoi_mask(None, UTM_BBOX, UTM_EPSG).all()
+
+	minx, miny, maxx, maxy = UTM_BBOX
+	half = export_module.create_aoi_mask(utm_square_as_wgs84(minx, miny, (minx + maxx) / 2, maxy), UTM_BBOX, UTM_EPSG)
+	assert 0.45 < half.mean() < 0.55
+
+
+@pytest.mark.parametrize(
+	'aoi',
+	[
+		{},
+		{'type': 'Polygon', 'coordinates': [[[7.0, 47.0]]]},
+		{'type': 'Polygon', 'coordinates': [[[7.0, 470.0], [7.1, 470.0], [7.1, 470.1], [7.0, 470.0]]]},
+	],
+	ids=['empty-object', 'unparseable', 'not-reprojectable'],
+)
+def test_create_aoi_mask_rejects_invalid_aoi(aoi):
+	with pytest.raises(ValueError, match='AOI'):
+		export_module.create_aoi_mask(aoi, UTM_BBOX, UTM_EPSG)
+
+
+def write_utm_cog(path):
+	import numpy as np
+	import rasterio
+	from rasterio.transform import from_bounds
+
+	with rasterio.open(
+		path,
+		'w',
+		driver='GTiff',
+		width=256,
+		height=256,
+		count=3,
+		dtype='uint8',
+		crs=f'EPSG:{UTM_EPSG}',
+		transform=from_bounds(*UTM_BBOX, 256, 256),
+	) as dst:
+		dst.write(np.full((3, 256, 256), 120, dtype='uint8'))
+
+
+def run_main_with_one_validated_patch(monkeypatch, tmp_path, use_client):
+	cog_dir = tmp_path / 'cogs'
+	cog_dir.mkdir()
+	write_utm_cog(cog_dir / 'ortho.tif')
+	patch = make_patch(
+		1,
+		'20_0_0',
+		deadwood_validated=True,
+		reference_deadwood_label_id=7,
+		geometry=utm_square_as_wgs84(*UTM_BBOX),
+	)
+	patch.update(
+		{
+			'epsg_code': UTM_EPSG,
+			'utm_zone': '32N',
+			'bbox_minx': UTM_BBOX[0],
+			'bbox_miny': UTM_BBOX[1],
+			'bbox_maxx': UTM_BBOX[2],
+			'bbox_maxy': UTM_BBOX[3],
+			'effective_deadwood_label_id': 7,
+		}
+	)
+	output_dir = tmp_path / 'export'
+	monkeypatch.setattr(
+		sys, 'argv', ['export_reference_patches.py', '--output-dir', str(output_dir), '--nginx-url', str(cog_dir)]
+	)
+	monkeypatch.setattr(export_module, 'login', lambda _user, _password: 'token')
+	monkeypatch.setattr(export_module, 'fetch_reference_datasets', lambda _token: [10])
+	monkeypatch.setattr(export_module, 'fetch_validated_patches', lambda *_args, **_kwargs: [patch])
+	monkeypatch.setattr(export_module, 'fetch_cog_info', lambda *_args: {'cog_path': 'ortho.tif', 'cog_info': {}})
+	monkeypatch.setattr(export_module, 'fetch_aoi_geometry', lambda *_args: None)
+	monkeypatch.setattr(fetch_module, 'use_client', use_client)
+	return export_module.main(), output_dir / '10'
+
+
+def test_main_fails_patch_and_run_when_geometry_fetch_errors(monkeypatch, tmp_path):
+	exit_code, dataset_dir = run_main_with_one_validated_patch(
+		monkeypatch,
+		tmp_path,
+		lambda _token: _failing_use_client({}, {'reference_patch_deadwood_geometries'}),
+	)
+
+	assert exit_code == 1
+	assert not (dataset_dir / 'geotiff' / '10_0_0_20cm_deadwood_ref.tif').exists()
+	assert not (dataset_dir / 'metadata' / '10_0_0_20cm.json').exists()
+
+
+def test_main_exports_mask_when_geometry_fetch_succeeds(monkeypatch, tmp_path):
+	import rasterio
+
+	minx, miny, maxx, maxy = UTM_BBOX
+	tables = {
+		'reference_patch_deadwood_geometries': [
+			{
+				'id': 1,
+				'patch_id': 1,
+				'label_id': 7,
+				'geometry': utm_square_as_wgs84(minx, miny, (minx + maxx) / 2, maxy),
+				'created_at': '2026-04-09T10:00:00+00:00',
+			}
+		]
+	}
+	exit_code, dataset_dir = run_main_with_one_validated_patch(
+		monkeypatch, tmp_path, lambda _token: FakeUseClient(tables)
+	)
+
+	assert exit_code == 0
+	with rasterio.open(dataset_dir / 'geotiff' / '10_0_0_20cm_deadwood_ref.tif') as mask:
+		assert 0.45 < (mask.read(1) > 0).mean() < 0.55
+
+
+def test_main_exits_non_zero_when_reference_dataset_fetch_fails(monkeypatch, tmp_path):
+	monkeypatch.setattr(sys, 'argv', ['export_reference_patches.py', '--output-dir', str(tmp_path)])
+	monkeypatch.setattr(export_module, 'login', lambda _user, _password: 'token')
+	monkeypatch.setattr(fetch_module, 'use_client', lambda _token: _failing_use_client({}, {'reference_datasets'}))
+
+	assert export_module.main() == 1
+
+
+def test_main_fails_when_vector_freshness_check_errors_and_nothing_else_changed(monkeypatch, tmp_path):
+	patch = make_patch(1, '20_0_0', deadwood_validated=True, reference_deadwood_label_id=7)
+
+	def fail_timestamp_fetch(*_args, **_kwargs):
+		raise RuntimeError('database unavailable')
+
+	monkeypatch.setattr(sys, 'argv', ['export_reference_patches.py', '--output-dir', str(tmp_path)])
+	monkeypatch.setattr(export_module, 'login', lambda _user, _password: 'token')
+	monkeypatch.setattr(export_module, 'fetch_reference_datasets', lambda _token: [10])
+	monkeypatch.setattr(export_module, 'fetch_validated_patches', lambda *_args, **_kwargs: [patch])
+	monkeypatch.setattr(export_module, 'get_vector_export_candidates', lambda patches, **_kwargs: list(patches))
+	monkeypatch.setattr(export_module, 'patch_needs_export', lambda *_args, **_kwargs: False)
+	monkeypatch.setattr(export_module, 'fetch_latest_reference_geometry_created_at', fail_timestamp_fetch)
+	monkeypatch.setattr(export_module, 'cleanup_removed_datasets', lambda *_args, **_kwargs: None)
+	monkeypatch.setattr(export_module, 'cleanup_removed_patch_exports', lambda *_args, **_kwargs: 0)
+
+	assert export_module.main() == 1

@@ -34,10 +34,11 @@ from api.src.download.downloads import (
 	get_unique_archive_name,
 	get_ortho_base_filename,
 	build_dataset_metadata_row,
-	generate_bundle_job_id,
 	create_consolidated_geopackage,
+	read_export_scope,
 	filter_exportable_dataset_labels,
 )
+from api.src.download.keys import content_version, generate_bundle_job_id
 from shared.labels import create_label_with_geometries
 from shared.testing.fixtures import login
 import json
@@ -85,6 +86,31 @@ def test_filter_exportable_dataset_labels_skips_model_prediction_without_configu
 	result = filter_exportable_dataset_labels([model_label, visual_label], {})
 
 	assert [label.id for label in result] == [visual_label.id]
+
+
+def _local_path(download_path: str) -> Path:
+	return settings.downloads_path / download_path.removeprefix('/downloads/v1/')
+
+
+def _completed_download_path(status_url: str, auth_token: str, **params) -> str:
+	response = client.get(status_url, params=params, headers={'Authorization': f'Bearer {auth_token}'})
+	assert response.status_code == 200, response.text
+	status = response.json()
+	assert status['status'] == 'completed', status
+	return status['download_path']
+
+
+def _dataset_download_path(dataset_id: int, auth_token: str, **params) -> str:
+	return _completed_download_path(f'/api/v1/download/datasets/{dataset_id}/status', auth_token, **params)
+
+
+def _dataset_zip(dataset_id: int, auth_token: str, **params) -> Path:
+	"""The prepared bundle file the status endpoint currently points to."""
+	return _local_path(_dataset_download_path(dataset_id, auth_token, **params))
+
+
+def _labels_gpkg(dataset_id: int, auth_token: str) -> Path:
+	return _local_path(_completed_download_path(f'/api/v1/download/datasets/{dataset_id}/labels/status', auth_token))
 
 
 def _wait_for_download_completed(dataset_id: int, auth_token: str, *, max_attempts: int = 40, sleep_s: float = 0.25):
@@ -495,11 +521,11 @@ def test_download_dataset(auth_token, test_dataset_for_download):
 	assert download_response.status_code == 303
 	assert (
 		download_response.headers['location']
-		== f'/downloads/v1/{test_dataset_for_download}/{test_dataset_for_download}.zip'
+		== _dataset_download_path(test_dataset_for_download, auth_token)
 	)
 
 	# Verify the file exists in downloads directory
-	download_file = settings.downloads_path / str(test_dataset_for_download) / f'{test_dataset_for_download}.zip'
+	download_file = _dataset_zip(test_dataset_for_download, auth_token)
 	assert download_file.exists()
 
 	# Verify ZIP contents
@@ -523,7 +549,7 @@ def test_download_cleanup(auth_token, test_dataset_for_download):
 
 	_wait_for_download_completed(test_dataset_for_download, auth_token)
 
-	download_file = settings.downloads_path / str(test_dataset_for_download) / f'{test_dataset_for_download}.zip'
+	download_file = _dataset_zip(test_dataset_for_download, auth_token)
 	assert download_file.exists()
 
 	# Run cleanup directly
@@ -591,8 +617,9 @@ def test_download_daily_limit_does_not_apply_to_status(auth_token, test_dataset_
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
 
+	# Not rate limited; nothing was requested, so the job is reported as not being prepared.
 	assert response.status_code == 200
-	assert response.json()['status'] in ('processing', 'completed')
+	assert response.json()['status'] == 'failed'
 
 
 @pytest.fixture(scope='function')
@@ -701,7 +728,7 @@ def test_download_dataset_with_labels(auth_token, test_dataset_with_label):
 	assert download_response.status_code == 303
 
 	# Verify the file exists in downloads directory
-	download_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}.zip'
+	download_file = _dataset_zip(dataset_id, auth_token)
 	assert download_file.exists()
 
 	# Verify ZIP contents
@@ -779,7 +806,7 @@ def test_download_dataset_ignores_reference_patch_labels_without_dataset_geometr
 
 		_wait_for_download_completed(dataset_id, auth_token)
 
-		download_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}.zip'
+		download_file = _dataset_zip(dataset_id, auth_token)
 		assert download_file.exists()
 
 		with zipfile.ZipFile(download_file) as zf:
@@ -881,7 +908,7 @@ def test_download_dataset_with_labels_no_aoi(auth_token, test_dataset_with_label
 	assert download_response.status_code == 303
 
 	# Verify the file exists in downloads directory
-	download_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}.zip'
+	download_file = _dataset_zip(dataset_id, auth_token)
 	assert download_file.exists()
 
 	# Verify ZIP contents
@@ -956,7 +983,7 @@ def test_download_labels_with_aoi(auth_token, test_dataset_with_label):
 		pytest.fail('Labels GeoPackage processing did not complete within expected time')
 
 	# Get the labels file directly from downloads directory
-	labels_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}_labels.gpkg'
+	labels_file = _labels_gpkg(dataset_id, auth_token)
 	assert labels_file.exists()
 
 	# Verify contents
@@ -1024,7 +1051,7 @@ def test_download_labels_without_aoi(auth_token, test_dataset_with_label_no_aoi)
 		pytest.fail('Labels GeoPackage processing did not complete within expected time')
 
 	# Get the labels file directly from downloads directory
-	labels_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}_labels.gpkg'
+	labels_file = _labels_gpkg(dataset_id, auth_token)
 	assert labels_file.exists()
 
 	# Verify contents
@@ -1106,7 +1133,9 @@ def test_labels_geopackage_excludes_soft_deleted_geometries(auth_token, test_dat
 			client.table(settings.deadwood_geometries_table).update({'is_deleted': True}).eq('id', geom_ids[0]).execute()
 
 		# Create consolidated GeoPackage and verify only one feature is included
-		gpkg_path = create_consolidated_geopackage(dataset_id)
+		with use_client(auth_token) as db_client:
+			scope = read_export_scope(db_client, dataset_id)
+		gpkg_path = create_consolidated_geopackage(dataset_id, scope, Path(tempfile.mkdtemp()) / 'labels.gpkg')
 		deadwood_layer = f'deadwood_{LabelSourceEnum.visual_interpretation.value}'
 		assert deadwood_layer in fiona.listlayers(gpkg_path)
 
@@ -1222,7 +1251,7 @@ def test_download_consolidated_labels_multiple_types(auth_token, test_dataset_fo
 		pytest.fail('Labels GeoPackage processing did not complete within expected time')
 
 	# Get the labels file directly from downloads directory
-	labels_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}_labels.gpkg'
+	labels_file = _labels_gpkg(dataset_id, auth_token)
 	assert labels_file.exists()
 
 	# Verify contents
@@ -1303,56 +1332,65 @@ def test_download_labels_not_found(auth_token, test_dataset_for_download):
 	else:
 		pytest.fail('Labels GeoPackage processing did not fail within expected time')
 
-	# After waiting, file should still not exist
-	labels_file = settings.downloads_path / str(test_dataset_for_download) / f'{test_dataset_for_download}_labels.gpkg'
-	assert not labels_file.exists(), 'Labels file should not exist for dataset with no labels'
-
-
-def test_check_labels_status_returns_failed_when_error_marker_exists(auth_token, test_dataset_for_download):
-	"""Status endpoint should return failed when error marker file exists"""
+	# After waiting, no labels file and no work directory may remain
 	download_dir = settings.downloads_path / str(test_dataset_for_download)
-	error_file = download_dir / f'{test_dataset_for_download}_labels.gpkg.error'
-	download_dir.mkdir(parents=True, exist_ok=True)
-	error_file.write_text('synthetic labels generation error', encoding='utf-8')
+	assert not list(download_dir.glob('*.gpkg')), 'Labels file should not exist for dataset with no labels'
+	assert not list(download_dir.glob('.*.tmp')), 'Failed jobs must remove their work directory'
+
+
+def _fail_labels_export(monkeypatch):
+	"""Inject a failure after the job has started writing its temp file."""
+	from api.src.routers import download as download_router
+
+	def fail(dataset_id, scope, target):
+		Path(target).write_bytes(b'partial geopackage')
+		raise RuntimeError('synthetic labels generation error')
+
+	monkeypatch.setattr(download_router, 'create_consolidated_geopackage', fail)
+
+
+def test_labels_generation_failure_is_reported_and_cleaned_up(auth_token, test_dataset_for_download, monkeypatch):
+	"""A failing labels job writes an error marker that status and download report, and leaves no temp files."""
+	_fail_labels_export(monkeypatch)
+	dataset_id = test_dataset_for_download
+	download_dir = settings.downloads_path / str(dataset_id)
+	headers = {'Authorization': f'Bearer {auth_token}'}
 
 	try:
-		response = client.get(
-			f'/api/v1/download/datasets/{test_dataset_for_download}/labels/status',
-			headers={'Authorization': f'Bearer {auth_token}'},
-		)
-
+		response = client.get(f'/api/v1/download/datasets/{dataset_id}/labels.gpkg', headers=headers)
 		assert response.status_code == 200
-		data = response.json()
-		assert data['status'] == 'failed'
-		assert 'synthetic labels generation error' in data['message']
-	finally:
-		if error_file.exists():
-			error_file.unlink()
-		if download_dir.exists() and not any(download_dir.iterdir()):
-			download_dir.rmdir()
 
+		status = client.get(f'/api/v1/download/datasets/{dataset_id}/labels/status', headers=headers).json()
+		assert status['status'] == 'failed'
+		assert 'synthetic labels generation error' in status['message']
 
-def test_download_labels_file_returns_500_when_error_marker_exists(auth_token, test_dataset_for_download):
-	"""Download endpoint should return 500 when label generation failed"""
-	download_dir = settings.downloads_path / str(test_dataset_for_download)
-	error_file = download_dir / f'{test_dataset_for_download}_labels.gpkg.error'
-	download_dir.mkdir(parents=True, exist_ok=True)
-	error_file.write_text('synthetic labels generation error', encoding='utf-8')
-
-	try:
-		response = client.get(
-			f'/api/v1/download/datasets/{test_dataset_for_download}/labels/download',
-			headers={'Authorization': f'Bearer {auth_token}'},
-			follow_redirects=False,
+		download = client.get(
+			f'/api/v1/download/datasets/{dataset_id}/labels/download', headers=headers, follow_redirects=False
 		)
+		assert download.status_code == 500
+		assert 'synthetic labels generation error' in download.json()['detail']
 
-		assert response.status_code == 500
-		assert 'synthetic labels generation error' in response.json()['detail']
+		leftovers = sorted(path.name for path in download_dir.iterdir())
+		assert len(leftovers) == 1 and leftovers[0].endswith('.gpkg.error'), leftovers
 	finally:
-		if error_file.exists():
-			error_file.unlink()
-		if download_dir.exists() and not any(download_dir.iterdir()):
-			download_dir.rmdir()
+		shutil.rmtree(download_dir, ignore_errors=True)
+
+
+def test_labels_retry_after_failure_clears_error_marker(auth_token, test_dataset_with_label, monkeypatch):
+	"""Requesting a failed download again restarts the job instead of serving the old error."""
+	dataset_id = test_dataset_with_label
+	headers = {'Authorization': f'Bearer {auth_token}'}
+	with monkeypatch.context() as patch:
+		_fail_labels_export(patch)
+		client.get(f'/api/v1/download/datasets/{dataset_id}/labels.gpkg', headers=headers)
+		status = client.get(f'/api/v1/download/datasets/{dataset_id}/labels/status', headers=headers).json()
+		assert status['status'] == 'failed'
+
+	response = client.get(f'/api/v1/download/datasets/{dataset_id}/labels.gpkg', headers=headers)
+	assert response.status_code == 200
+	labels_file = _labels_gpkg(dataset_id, auth_token)
+	assert labels_file.exists()
+	assert not labels_file.with_name(f'{labels_file.name}.error').exists()
 
 
 def test_download_dataset_async(auth_token, test_dataset_for_download):
@@ -1389,7 +1427,7 @@ def test_download_dataset_async(auth_token, test_dataset_for_download):
 			assert 'download_path' in status_data
 			assert (
 				status_data['download_path']
-				== f'/downloads/v1/{test_dataset_for_download}/{test_dataset_for_download}.zip'
+				== _dataset_download_path(test_dataset_for_download, auth_token)
 			)
 			break
 
@@ -1399,7 +1437,7 @@ def test_download_dataset_async(auth_token, test_dataset_for_download):
 		pytest.fail('Dataset processing did not complete within expected time')
 
 	# Verify the file exists in downloads directory
-	download_file = settings.downloads_path / str(test_dataset_for_download) / f'{test_dataset_for_download}.zip'
+	download_file = _dataset_zip(test_dataset_for_download, auth_token)
 	assert download_file.exists()
 
 	# Test the download redirect endpoint
@@ -1411,7 +1449,7 @@ def test_download_dataset_async(auth_token, test_dataset_for_download):
 	assert download_response.status_code == 303
 	assert (
 		download_response.headers['location']
-		== f'/downloads/v1/{test_dataset_for_download}/{test_dataset_for_download}.zip'
+		== _dataset_download_path(test_dataset_for_download, auth_token)
 	)
 
 	# Verify ZIP contents
@@ -1463,7 +1501,7 @@ def test_single_dataset_bundle_metadata_includes_v2_metadata(auth_token, test_da
 
 		_wait_for_download_completed(test_dataset_for_download, auth_token)
 
-		download_file = settings.downloads_path / str(test_dataset_for_download) / f'{test_dataset_for_download}.zip'
+		download_file = _dataset_zip(test_dataset_for_download, auth_token)
 		assert download_file.exists()
 
 		with zipfile.ZipFile(download_file) as zf, tempfile.TemporaryDirectory() as tmpdir:
@@ -1647,7 +1685,7 @@ def test_download_dataset_with_multiple_labels(auth_token, test_dataset_for_down
 	assert download_response.status_code == 303
 
 	# Verify the file exists
-	download_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}.zip'
+	download_file = _dataset_zip(dataset_id, auth_token)
 	assert download_file.exists()
 
 	# Verify ZIP contents includes both label types
@@ -1789,7 +1827,7 @@ def test_download_datasets_with_different_licenses(auth_token, data_directory, t
 					pytest.fail('Dataset processing did not complete within expected time')
 
 				# Verify the file exists in downloads directory
-				download_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}.zip'
+				download_file = _dataset_zip(dataset_id, auth_token)
 				assert download_file.exists()
 
 				# Extract and verify license information
@@ -2074,7 +2112,7 @@ def test_download_dataset_with_large_complex_geometries(auth_token, test_dataset
 		print('Download completed - checking if large geometries were processed successfully')
 
 		# Verify the file exists
-		download_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}.zip'
+		download_file = _dataset_zip(dataset_id, auth_token)
 		if download_file.exists():
 			file_size = download_file.stat().st_size
 			print(f'Download file size: {file_size / (1024 * 1024):.2f} MB')
@@ -2192,7 +2230,7 @@ def test_download_dataset_with_invalid_geometries(auth_token, test_dataset_with_
 		print('Download completed - checking if files were created with handled invalid geometries')
 
 		# Verify the file exists
-		download_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}.zip'
+		download_file = _dataset_zip(dataset_id, auth_token)
 		if download_file.exists():
 			# Check ZIP contents to see how invalid geometries were handled
 			with zipfile.ZipFile(download_file) as zf:
@@ -2296,7 +2334,7 @@ def test_download_large_dataset_with_pagination(auth_token, test_dataset_with_la
 		pytest.fail(f'Dataset processing did not complete within expected time. Final status: {final_status}')
 
 	# Verify the file exists in downloads directory
-	download_file = settings.downloads_path / str(dataset_id) / f'{dataset_id}.zip'
+	download_file = _dataset_zip(dataset_id, auth_token)
 	assert download_file.exists()
 
 	# Verify ZIP contents
@@ -2439,15 +2477,17 @@ class TestMultiBundleHelpers:
 
 	def test_generate_bundle_job_id_deterministic(self):
 		"""Test that job ID is deterministic for same inputs"""
-		id1 = generate_bundle_job_id([1, 2, 3], True, True)
-		id2 = generate_bundle_job_id([3, 1, 2], True, True)  # Different order
+		id1 = generate_bundle_job_id([1, 2, 3], True, True, True, 'v1')
+		id2 = generate_bundle_job_id([3, 1, 2], True, True, True, 'v1')  # Different order
 		assert id1 == id2  # Should be same (sorted)
 
 	def test_generate_bundle_job_id_different_params(self):
 		"""Test that different params produce different job IDs"""
-		id1 = generate_bundle_job_id([1, 2, 3], True, True)
-		id2 = generate_bundle_job_id([1, 2, 3], False, True)
-		assert id1 != id2
+		base = generate_bundle_job_id([1, 2, 3], True, True, True, 'v1')
+		assert base != generate_bundle_job_id([1, 2, 3], False, True, True, 'v1')
+		assert base != generate_bundle_job_id([1, 2, 3], True, False, True, 'v1')
+		assert base != generate_bundle_job_id([1, 2, 3], True, True, False, 'v1')
+		assert base != generate_bundle_job_id([1, 2, 3], True, True, True, 'v2')
 
 
 @pytest.fixture(scope='function')
@@ -2821,7 +2861,12 @@ def test_multi_bundle_download_redirect(auth_token, multi_test_datasets):
 
 def test_cached_restricted_bundle_is_authorized_before_it_is_recorded(private_test_dataset_for_download, test_user2):
 	"""A bundle another user already prepared must pass per-dataset access checks first."""
-	job_id = generate_bundle_job_id([private_test_dataset_for_download], False, False)
+	dataset_id = private_test_dataset_for_download
+	with use_client() as db_client:
+		dataset = Dataset(**db_client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute().data[0])
+		ortho = db_client.table(settings.orthos_table).select('*').eq('dataset_id', dataset_id).execute().data[0]
+	version = content_version([(dataset, ortho, None, None)], token='')
+	job_id = generate_bundle_job_id([dataset_id], False, False, True, version)
 	bundle_file = settings.downloads_path / 'bundles' / f'{job_id}.zip'
 	bundle_file.parent.mkdir(parents=True, exist_ok=True)
 	bundle_file.write_bytes(b'cached bundle')

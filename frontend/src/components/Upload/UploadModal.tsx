@@ -12,7 +12,6 @@ import {
   Tooltip,
   Checkbox,
   Typography,
-  Collapse,
   message,
 } from "antd";
 import { InfoCircleOutlined, InboxOutlined, LockOutlined } from "@ant-design/icons";
@@ -24,8 +23,6 @@ import PickerWithType from "./PickerWithType";
 import uploadOrtho from "../../api/uploadOrtho";
 import { useData } from "../../hooks/useDataProvider";
 import addProcess from "../../api/addProcess";
-import uploadLabelObject from "../../api/uploadLabelObject";
-import useLabelsFileUpload from "../../hooks/useLabelsFileUpload";
 import { useCanUploadPrivate } from "../../hooks/useUserPrivileges";
 import {
   detectUploadType,
@@ -51,7 +48,6 @@ interface IFormValues {
   author: string[];
   doi: string;
   additional_information: string;
-  labels_description: string;
   is_private: boolean;
 }
 
@@ -78,22 +74,6 @@ interface UploadMetadata {
   additional_information?: string;
   data_access?: string;
   citation_doi?: string;
-}
-
-function createLabelObjectFormData(
-  datasetId: string,
-  userId: string,
-  labelFile: RcFile,
-  labelDescription: string,
-): FormData {
-  const formData = new FormData();
-  formData.append("dataset_id", datasetId);
-  formData.append("user_id", userId);
-  formData.append("file", labelFile);
-  formData.append("file_alias", labelFile.name.split(".")[0]);
-  formData.append("label_description", labelDescription);
-  formData.append("file_type", labelFile.name.split(".")[1]);
-  return formData;
 }
 
 const TermsLink = () => (
@@ -138,7 +118,6 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
   const agreementAccepted = Form.useWatch("agreement", form);
 
   const { fileList, fileName, onFileChange, beforeUpload } = useFileUpload();
-  const { labelsFileList, onLabelsFileChange, beforeLabelsUpload } = useLabelsFileUpload();
 
   const { session } = useAuth();
   const [pickerType, setPickerType] = useState(pickerTypeOptions[0]);
@@ -247,10 +226,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
 
       // Detect file type and validate file size
       const uploadType = detectUploadType(uploadFile.name);
-      const hasLabelsFile = labelsFileList.length > 0;
       track("upload_started", {
         upload_type: uploadType,
-        has_labels_file: hasLabelsFile,
       });
       validateFileSize(uploadFile.originFileObj, uploadType);
       if (uploadType === UploadType.GEOTIFF) {
@@ -283,20 +260,6 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
       // Get valid access token
       const validAccessToken = await getValidAccessToken();
 
-      // Upload labels if present
-      if (labelsFileList.length > 0) {
-          const labelFile = labelsFileList[0]?.originFileObj;
-        if (labelFile) {
-          const labelFormData = createLabelObjectFormData(
-            uploadResponse.id.toString(),
-            session!.user.id,
-            labelFile,
-            values.labels_description,
-          );
-          await uploadLabelObject(labelFormData, validAccessToken);
-        }
-      }
-
       // Process dataset with appropriate steps based on upload type
       const processingSteps =
         uploadType === UploadType.RAW_IMAGES_ZIP
@@ -307,7 +270,6 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
       track("upload_completed", {
         dataset_id: Number(uploadResponse.id),
         upload_type: uploadType,
-        has_labels_file: hasLabelsFile,
       });
 
       showSuccessNotification();
@@ -507,74 +469,6 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
             </Form.Item>
 
             <AdditionalInformationFormItem />
-
-            <Collapse
-              ghost
-              className="mb-4 rounded-xl border border-gray-200 bg-gray-50/50"
-              items={[
-                {
-                  key: "labels",
-                  label: <span className="font-medium text-gray-700">Add Labels / Annotations (Optional)</span>,
-                  children: (
-                    <div className="pt-2">
-                      <Form.Item
-                        label="Labels File"
-                        name="labels_file"
-                        rules={[
-                          {
-                            required: false,
-                            message: "Please upload a labels file in GeoJSON, Shapefile as zip, or GeoPackage format",
-                          },
-                        ]}
-                      >
-                        <Upload.Dragger
-                          fileList={labelsFileList}
-                          onChange={onLabelsFileChange}
-                          beforeUpload={beforeLabelsUpload}
-                          accept=".geojson,.json,.zip,.gpkg"
-                          maxCount={1}
-                          className="w-full"
-                          style={{ backgroundColor: "white" }}
-                        >
-                          <div className="flex">
-                            <p className="ant-upload-drag-icon px-8 text-center">
-                              <InboxOutlined />
-                            </p>
-                            <div className="text-start">
-                              <p className="ant-upload-text mb-0">Click or drag labels file to this area</p>
-                              <p className="ant-upload-hint mb-0 text-xs">
-                                Upload deadwood cover labels as GeoJSON, Shapefile (zip) or GeoPackage
-                              </p>
-                            </div>
-                          </div>
-                        </Upload.Dragger>
-                      </Form.Item>
-                      <Form.Item
-                        label="Labels Description (required when uploading labels)"
-                        name="labels_description"
-                        className="mb-0"
-                        rules={[
-                          () => ({
-                            validator(_, value) {
-                              if (labelsFileList.length > 0 && !value) {
-                                return Promise.reject("Please provide a description for the uploaded labels");
-                              }
-                              return Promise.resolve();
-                            },
-                          }),
-                        ]}
-                      >
-                        <Input.TextArea
-                          autoSize={{ minRows: 3, maxRows: 6 }}
-                          placeholder="Example: Type - Forest Boundaries, Source - XYZ Survey 2023"
-                          variant="outlined"
-                        />
-                      </Form.Item>
-                    </div>
-                  ),
-                },
-              ]}
-            />
 
             {canUploadPrivate && (
               <Form.Item name="is_private" valuePropName="checked">

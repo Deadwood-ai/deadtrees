@@ -12,6 +12,7 @@ from shared.settings import settings
 from shared.models import (
 	Dataset,
 	TaskTypeEnum,
+	DEFAULT_QUEUE_PRIORITY,
 	PlatformEnum,
 	DatasetAccessEnum,
 	Label,
@@ -153,14 +154,16 @@ class DataCommands:
 					logger.error(f'Error uploading chunk {chunk_index}: {e}')
 					raise
 
-	def process(self, dataset_id: int, task_types: Optional[List[str]] = None, priority: Optional[int] = 2):
+	def process(
+		self, dataset_id: int, task_types: Optional[List[str]] = None, priority: int = DEFAULT_QUEUE_PRIORITY
+	):
 		"""
 		Start processing tasks for a dataset
 
 		Args:
 			dataset_id: ID of the dataset to process
 			task_types: List of task types to process. Defaults to ['cog', 'thumbnail']
-			priority: Task priority (1=highest, 5=lowest). Defaults to 2.
+			priority: Task priority (5=highest, 1=lowest). Defaults to DEFAULT_QUEUE_PRIORITY (2).
 		"""
 		token = self._ensure_auth()
 
@@ -176,7 +179,7 @@ class DataCommands:
 
 		# Validate priority
 		if priority < 1 or priority > 5:
-			raise ValueError('Priority must be between 1 (highest) and 5 (lowest)')
+			raise ValueError('Priority must be between 1 (lowest) and 5 (highest)')
 
 		logger.info(
 			f'Starting processing for dataset {dataset_id} with tasks: {validated_task_types}, priority: {priority}'

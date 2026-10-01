@@ -3,7 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from uuid import uuid4
-from zipfile import ZipFile
+from zipfile import ZIP_BZIP2, ZipFile
 
 import pytest
 import httpx
@@ -189,3 +189,25 @@ def test_lost_database_insert_response_does_not_create_another_dataset(upload, a
 		rows = db.table(settings.datasets_table).select('id').eq('file_name', filename).execute().data
 		assert len(rows) == 1
 	assert (settings.archive_path / f'{upload_id}.tmp').read_bytes() == b'upload bytes'
+
+
+def test_rejected_zip_returns_same_validation_error_on_retry(upload, auth_token):
+	send, upload_id = upload
+	buffer = BytesIO()
+	with ZipFile(buffer, 'w', compression=ZIP_BZIP2) as archive:
+		archive.writestr('image.jpg', b'image fixture')
+	content = buffer.getvalue()
+	filename = f'{upload_id}.zip'
+
+	first = send(0, content, total=1, filename=filename)
+	assert first.status_code == 400, first.text
+	assert 'Unsupported ZIP compression method(s)' in first.json()['detail']
+	for _ in range(2):
+		retry = send(0, content, total=1, filename=filename)
+		assert retry.status_code == 400, retry.text
+		assert retry.json()['detail'] == first.json()['detail']
+
+	with use_client(auth_token) as db:
+		assert db.table(settings.datasets_table).select('id').eq('file_name', filename).execute().data == []
+	# The bytes stay under a receiving receipt until the abandoned-upload retention job removes them.
+	assert (settings.raw_images_path / f'{upload_id}.tmp').read_bytes() == content

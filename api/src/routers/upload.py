@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Annotated, Optional, List
 
 import time
@@ -16,7 +17,7 @@ from shared.zip_utils import (
 )
 
 from ..upload.upload import create_dataset_entry
-from ..upload.chunk_session import locked_chunk_session
+from ..upload.chunk_session import UPLOAD_SESSIONS_DIR, locked_chunk_session
 from ..upload.geotiff_processor import process_geotiff_upload
 from ..upload.raw_images_processor import process_raw_images_upload
 from ..utils.file_utils import UploadType, detect_upload_type
@@ -105,7 +106,7 @@ def upload_chunk(
 	# This synchronous route runs in FastAPI's worker pool. The lock remains held
 	# through all disk/DB work, including when the caller disconnects.
 	with locked_chunk_session(
-		settings.base_path / '.upload-sessions',
+		settings.base_path / UPLOAD_SESSIONS_DIR,
 		upload_id,
 		upload_target_path,
 		str(user.id),
@@ -114,22 +115,12 @@ def upload_chunk(
 		response = session.accept(chunk_index, file.file.read())
 		if response is not None:
 			return response
-		session.begin_finalization()
+		session.begin_finalization(validate=lambda path: validate_assembled_upload(upload_type, path))
+		dataset = None
 		try:
 			# Calculate upload runtime
 			t2 = time.time()
 			upload_runtime = t2 - t1
-
-			# Validate ZIP compression methods before creating dataset entries.
-			if upload_type == UploadType.RAW_IMAGES_ZIP:
-				try:
-					ensure_supported_zip_compression(upload_target_path)
-				except UnsupportedZipCompressionError as e:
-					upload_target_path.unlink(missing_ok=True)
-					raise HTTPException(status_code=400, detail=str(e))
-				except InvalidZipArchiveError as e:
-					upload_target_path.unlink(missing_ok=True)
-					raise HTTPException(status_code=400, detail=str(e))
 
 			logger.info(
 				f'Creating dataset entry for {file.filename}',
@@ -177,26 +168,6 @@ def upload_chunk(
 			session.complete(response)
 			return response
 
-		except (UnsupportedZipCompressionError, InvalidZipArchiveError) as e:
-			logger.warning(
-				f'ZIP validation failed: {str(e)}',
-				LogContext(
-					category=LogCategory.UPLOAD,
-					user_id=user.id,
-					dataset_id=dataset.id if 'dataset' in locals() else None,
-					token=token,
-					extra={'upload_id': upload_id, 'file_name': file.filename},
-				),
-			)
-			if 'dataset' in locals():
-				update_status(
-					token=token,
-					dataset_id=dataset.id,
-					current_status=StatusEnum.uploading,
-					has_error=True,
-					error_message=str(e),
-				)
-			raise HTTPException(status_code=400, detail=str(e))
 		except HTTPException:
 			raise
 		except Exception as e:
@@ -205,13 +176,13 @@ def upload_chunk(
 				LogContext(
 					category=LogCategory.UPLOAD,
 					user_id=user.id,
-					dataset_id=dataset.id if 'dataset' in locals() else None,
+					dataset_id=dataset.id if dataset else None,
 					token=token,
 					extra={'upload_id': upload_id, 'file_name': file.filename, 'error': str(e)},
 				),
 			)
 			# Update status to indicate error
-			if 'dataset' in locals():
+			if dataset:
 				update_status(
 					token=token,
 					dataset_id=dataset.id,
@@ -220,3 +191,12 @@ def upload_chunk(
 					error_message=str(e),
 				)
 			raise HTTPException(status_code=500, detail=str(e))
+
+
+def validate_assembled_upload(upload_type: UploadType, path: Path):
+	"""Reject unusable upload bytes before finalization; must stay side-effect free."""
+	if upload_type == UploadType.RAW_IMAGES_ZIP:
+		try:
+			ensure_supported_zip_compression(path)
+		except (UnsupportedZipCompressionError, InvalidZipArchiveError) as e:
+			raise HTTPException(status_code=400, detail=str(e))

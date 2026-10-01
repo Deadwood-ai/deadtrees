@@ -17,8 +17,10 @@ import {
   useReferencePatches,
   useReopenPatchGeneration,
   useSetPatchSessionLock,
+  useSetPatchValidation,
   useUpdatePatchGeometry,
-  useUpdatePatchStatus,
+  ALL_PATCH_LAYERS,
+  patchStatusValidation,
 } from "./useReferencePatches";
 import { IMLTile, mlTileToReferencePatch, referencePatchToMLTile, TileStatus } from "../types/mlTiles";
 
@@ -98,18 +100,23 @@ export function useCreateMLTile() {
 }
 
 export function useUpdateTileStatus() {
-  const mutation = useUpdatePatchStatus();
+  const mutation = useSetPatchValidation();
+  const toValidation = ({ tileId, status }: { tileId: number; status: TileStatus }) => ({
+    patchId: tileId,
+    layers: ALL_PATCH_LAYERS,
+    validated: patchStatusValidation(status),
+  });
 
   return {
     ...mutation,
     mutate: (
       variables: { tileId: number; status: TileStatus },
       options?: Parameters<typeof mutation.mutate>[1],
-    ) => mutation.mutate({ patchId: variables.tileId, status: variables.status }, options),
+    ) => mutation.mutate(toValidation(variables), options),
     mutateAsync: async (
       variables: { tileId: number; status: TileStatus },
       options?: Parameters<typeof mutation.mutateAsync>[1],
-    ) => referencePatchToMLTile(await mutation.mutateAsync({ patchId: variables.tileId, status: variables.status }, options)),
+    ) => referencePatchToMLTile(await mutation.mutateAsync(toValidation(variables), options)),
   };
 }
 

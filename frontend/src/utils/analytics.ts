@@ -220,12 +220,10 @@ export interface AnalyticsEventPropertiesMap {
   };
   upload_started: AnalyticsBaseProperties & {
     upload_type: string;
-    has_labels_file: boolean;
   };
   upload_completed: AnalyticsBaseProperties & {
     dataset_id: number;
     upload_type: string;
-    has_labels_file: boolean;
   };
   upload_failed: AnalyticsBaseProperties & {
     upload_type?: string;
@@ -321,7 +319,6 @@ type EssentialAnalyticsProperty =
   | "faq_item_key"
   | "auth_path"
   | "upload_type"
-  | "has_labels_file"
   | "processing_type"
   | "download_type"
   | "failure_reason"
@@ -353,7 +350,6 @@ const ESSENTIAL_PROPERTY_KEYS: EssentialAnalyticsProperty[] = [
   "faq_item_key",
   "auth_path",
   "upload_type",
-  "has_labels_file",
   "processing_type",
   "download_type",
   "failure_reason",

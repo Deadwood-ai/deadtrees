@@ -16,7 +16,7 @@ MODEL_PATH = str(Path(__file__).parent.parent.parent / 'assets' / 'models' / 'b1
 
 
 @pytest.fixture
-def aoi_task(test_dataset_for_processing, test_processor_user):
+def aoi_task(test_dataset_for_processing, standardized_local_ortho, test_processor_user):
 	return QueueTask(
 		id=1,
 		dataset_id=test_dataset_for_processing,

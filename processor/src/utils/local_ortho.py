@@ -2,9 +2,8 @@ from pathlib import Path
 
 from shared.logger import logger
 from shared.logging import LogContext
-from shared.settings import settings
 
-from .ssh import pull_file_from_storage_server
+from ..exceptions import DatasetError
 
 
 def ensure_local_ortho(
@@ -14,23 +13,17 @@ def ensure_local_ortho(
 	dataset_id: int,
 	log_context: LogContext,
 ) -> Path:
-	"""Prefer a standardized local ortho from the shared processing dir.
+	"""Return the standardized local ortho written by this run's GeoTIFF stage.
 
-	GeoTIFF standardization writes the converted ortho to the pipeline temp dir and
-	keeps it local for downstream stages. If that file is missing (for example when
-	a single stage is rerun independently), fall back to pulling the archive ortho.
+	Standardization keeps the converted ortho local and never pushes it to storage,
+	so downstream stages must run after ``geotiff`` in the same run. The archive
+	ortho is the raw upload and is never used as a substitute.
 	"""
-	if local_path.exists():
-		logger.info(
-			f'Using local standardized ortho at {local_path}',
-			log_context,
+	if not local_path.exists():
+		raise DatasetError(
+			f'Standardized ortho {ortho_file_name} is missing at {local_path}; '
+			'rerun downstream stages together with the geotiff stage',
+			dataset_id=dataset_id,
 		)
-		return local_path
-
-	storage_server_file_path = f'{settings.STORAGE_SERVER_DATA_PATH}/archive/{ortho_file_name}'
-	logger.info(
-		f'Local standardized ortho missing, pulling archive ortho from {storage_server_file_path}',
-		log_context,
-	)
-	pull_file_from_storage_server(storage_server_file_path, str(local_path), token, dataset_id)
+	logger.info(f'Using local standardized ortho at {local_path}', log_context)
 	return local_path

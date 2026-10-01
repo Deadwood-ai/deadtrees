@@ -6,7 +6,10 @@ import httpx
 import pytest
 from shapely.geometry import MultiPolygon, box
 
-from processor.src.utils.prediction_labels import create_versioned_model_prediction_label
+from processor.src.utils.prediction_labels import (
+	create_versioned_model_prediction_label,
+	replace_model_prediction_label,
+)
 from shared.models import LabelDataEnum
 
 pytestmark = pytest.mark.unit
@@ -81,3 +84,62 @@ def test_upload_inactive_then_publish(monkeypatch, lost_publication_response):
 	assert sum(method == 'POST' and path == 'v2_labels' for method, path, _ in requests) == 1
 	assert sum(method == 'POST' and path == 'v2_forest_cover_geometries' for method, path, _ in requests) == 1
 	assert not any(method == 'PATCH' for method, _, _ in requests)
+
+
+def test_failed_replacement_discards_unpublished_upload(monkeypatch):
+	"""A rejected publication leaves the previous label live and removes the staged upload."""
+	monkeypatch.setattr('shared.db._cached_sessions', {})
+	monkeypatch.setattr('shared.retry.time.sleep', lambda _delay: None)
+	requests = []
+
+	def send(client, request, **kwargs):
+		path = request.url.path.rsplit('/', 1)[-1]
+		data = json.loads(request.content) if request.content else None
+		requests.append((request.method, path, str(request.url.params)))
+		if path == 'token':
+			return httpx.Response(
+				200,
+				request=request,
+				json={
+					'access_token': 'unit-token',
+					'refresh_token': 'unit-refresh',
+					'token_type': 'bearer',
+					'expires_in': 3600,
+					'user': {
+						'id': '00000000-0000-0000-0000-000000000001',
+						'aud': 'authenticated',
+						'created_at': '2026-01-01T00:00:00Z',
+						'app_metadata': {},
+						'user_metadata': {},
+					},
+				},
+			)
+		if path == 'v2_labels' and request.method == 'POST':
+			return httpx.Response(201, request=request, json=[{'id': 99, **data}])
+		if path == 'v2_labels' and request.method == 'DELETE':
+			return httpx.Response(204, request=request)
+		if path == 'v2_forest_cover_geometries':
+			if request.method == 'HEAD':
+				return httpx.Response(200, request=request, headers={'Content-Range': '*/0'})
+			return httpx.Response(201, request=request)
+		if path == 'replace_model_prediction_label':
+			return httpx.Response(
+				400, request=request, json={'code': '23503', 'message': 'violates foreign key constraint'}
+			)
+		if path == 'v2_logs':
+			return httpx.Response(201, request=request, json=[])
+		raise AssertionError(f'Unexpected request: {request.method} {path}')
+
+	monkeypatch.setattr(httpx.Client, 'send', send)
+	with pytest.raises(Exception, match='foreign key'):
+		replace_model_prediction_label(
+			123,
+			'00000000-0000-0000-0000-000000000002',
+			LabelDataEnum.forest_cover,
+			MultiPolygon([box(7, 48, 7.001, 48.001)]).__geo_interface__,
+			'expired-token',
+			{'module': 'treecover_segmentation_oam_tcd', 'checkpoint_name': 'restor/tcd-segformer-mit-b5'},
+		)
+	deletes = [params for method, path, params in requests if method == 'DELETE']
+	# Only the unpublished upload is removed, never a label whose publication committed.
+	assert deletes == ['id=eq.99&version=eq.0']

@@ -1,0 +1,4 @@
+# FreiDATA publisher (scripts/freidata_cron.sh runs it from freidata/.venv).
+supabase>=2.31,<3
+httpx>=0.28,<1
+requests>=2.32,<3

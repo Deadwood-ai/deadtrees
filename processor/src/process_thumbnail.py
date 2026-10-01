@@ -7,7 +7,7 @@ from shared.settings import settings
 from shared.models import StatusEnum, Ortho, QueueTask, Thumbnail
 from shared.logger import logger
 from .thumbnail.thumbnail import calculate_thumbnail
-from .utils.ssh import push_file_to_storage_server
+from .utils.ssh import delete_superseded_storage_file, push_file_to_storage_server, storage_server_path
 from .utils.local_ortho import ensure_local_ortho
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
 from shared.status import update_status
@@ -102,7 +102,7 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 		)
 
 		# Push thumbnail to UUID-prefixed path
-		storage_server_thumbnail_path = f'{settings.STORAGE_SERVER_DATA_PATH}/thumbnails/{secure_token}/{thumbnail_file_name}'
+		storage_server_thumbnail_path = storage_server_path(settings.THUMBNAIL_DIR, secure_token, thumbnail_file_name)
 		push_file_to_storage_server(str(output_path), storage_server_thumbnail_path, token, task.dataset_id)
 		t2 = time.time()
 
@@ -143,6 +143,13 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 			raise AuthenticationError('Token refresh failed', task_id=task.id)
 
 		with use_client(token) as client:
+			previous = (
+				client.table(settings.thumbnails_table)
+				.select('thumbnail_path')
+				.eq('dataset_id', ortho.dataset_id)
+				.execute()
+			)
+			previous_thumbnail_path = previous.data[0]['thumbnail_path'] if previous.data else None
 			client.table(settings.thumbnails_table).upsert(
 				thumbnail.model_dump(),
 				on_conflict='dataset_id',
@@ -172,6 +179,11 @@ def process_thumbnail(task: QueueTask, temp_dir: Path):
 		)
 		update_status(token, dataset_id=ortho.dataset_id, has_error=True, error_message=str(e))
 		raise DatasetError(f'Failed to save thumbnail metadata: {str(e)}', dataset_id=ortho.dataset_id, task_id=task.id)
+
+	# Only after the database points at the new thumbnail is the old one unreachable.
+	delete_superseded_storage_file(
+		settings.THUMBNAIL_DIR, previous_thumbnail_path, thumbnail.thumbnail_path, token, ortho.dataset_id
+	)
 
 	# Update final status
 	update_status(token, dataset_id=ortho.dataset_id, current_status=StatusEnum.idle, is_thumbnail_done=True)
