@@ -252,6 +252,13 @@ class Settings(BaseSettings):
 		return path
 
 	@property
+	def scratch_path(self) -> Path:
+		"""Temp files of the processor and its tools, kept off the container layer."""
+		path = self.base_path / 'processor_tmp'
+		path.mkdir(parents=True, exist_ok=True)
+		return path
+
+	@property
 	def processing_path(self) -> Path:
 		path = self.base_path / self.PROCESSING_DIR
 		if not path.exists():

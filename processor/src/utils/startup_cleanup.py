@@ -221,6 +221,8 @@ def cleanup_old_temp_directories(token: str):
 	try:
 		# Check common temp locations
 		temp_patterns = [
+			f'{settings.scratch_path}/*',
+			# Former locations inside the checkout, kept until old leftovers are gone.
 			'/app/processor/temp/odm_temp_*',
 			'/app/processor/temp/treecover_*',
 		]
@@ -243,7 +245,10 @@ def cleanup_old_temp_directories(token: str):
 							f'Removing old temp directory: {temp_dir} (age: {age_hours:.1f}h)',
 							LogContext(category=LogCategory.PROCESS, token=token),
 						)
-						shutil.rmtree(temp_dir)
+						if temp_dir.is_dir():
+							shutil.rmtree(temp_dir)
+						else:
+							temp_dir.unlink()
 						cleaned_count += 1
 				except Exception as e:
 					logger.error(

@@ -167,9 +167,13 @@ def copy_files_to_shared_volume(
 				)
 
 
+ORTHOPHOTO_DIR = 'odm_orthophoto'
+
+
 def copy_results_from_shared_volume(volume_name: str, output_dir: Path, project_name: str, dataset_id: int, token: str):
 	"""
-	Copy ODM results from the shared volume to the output directory using Docker API.
+	Copy the ODM orthophoto directory from the shared volume to
+	output_dir/project_name/odm_orthophoto using the Docker API.
 
 	Args:
 		volume_name: Name of the Docker volume to copy results from
@@ -223,8 +227,11 @@ def copy_results_from_shared_volume(volume_name: str, output_dir: Path, project_
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
-		# Get tar archive of entire project directory from container
-		archive_stream, _ = temp_container.get_archive(f'/odm_shared/{project_name}')
+		# Only the orthophoto is used downstream; the full project (images, point
+		# cloud, mesh) can be tens of GB and would only fill the disk.
+		archive_stream, _ = temp_container.get_archive(f'/odm_shared/{project_name}/{ORTHOPHOTO_DIR}')
+		output_dir = output_dir / project_name
+		output_dir.mkdir(parents=True, exist_ok=True)
 
 		# Extract archive to output directory
 		# FIXED: Wrap generator in file-like object for tarfile streaming

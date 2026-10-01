@@ -377,15 +377,11 @@ def process_odm(task: QueueTask, temp_dir: Path):
 		if exif_metadata:
 			_update_camera_metadata(dataset_id, exif_metadata, token)
 
-		# Step 6: Execute ODM Docker container
-		# For Docker-in-Docker, we need a path that's accessible from the host
-		# Use /app/processor/temp (mounted from host) for ODM, then copy results to /data
-		odm_host_temp_dir = Path('/app/processor') / 'temp' / f'odm_temp_{dataset_id}'
+		# Step 6: Execute ODM Docker container. ODM runs on a named volume; only its
+		# orthophoto is copied back, into the processing directory on /data (the
+		# checkout and the container layer sit on the hosts' smaller root disks).
+		odm_host_temp_dir = temp_dir / f'odm_temp_{dataset_id}'
 		odm_host_temp_dir.mkdir(parents=True, exist_ok=True)
-
-		# Regular temp directory for non-ODM operations (stays in /data)
-		regular_temp_dir = temp_dir / f'odm_temp_{dataset_id}'
-		regular_temp_dir.mkdir(exist_ok=True)
 
 		logger.info(
 			'Starting ODM processing with Docker container',
