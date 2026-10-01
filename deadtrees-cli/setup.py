@@ -9,7 +9,9 @@ sys.path.append(str(root_dir))
 setup(
 	name='deadtrees-cli',
 	version='0.1.0',
-	packages=find_packages() + ['shared'],
+	# shared lives outside this directory; list its subpackages explicitly so a
+	# regular (non-editable) install also ships the modules dev.py imports.
+	packages=find_packages() + ['shared', 'shared.notifications', 'shared.testing'],
 	package_dir={'shared': '../shared'},
 	install_requires=[
 		'fire>=0.5.0',
@@ -19,7 +21,10 @@ setup(
 		'pydantic>=2.0.0',
 		'shapely>=2.0.0',
 		'geopandas>=0.13.0',
-		'rasterio>=1.4.2',
+		# Same compatibility envelope as api/ and processor/requirements.txt:
+		# NumPy 2.5 breaks Rasterio 1.5 reads.
+		'numpy>=2,<2.5',
+		'rasterio>=1.5,<1.6',
 		'pydantic-geojson==0.3.2',
 		'supabase>=1.0.3',
 		'pydantic-partial>=0.3.1',

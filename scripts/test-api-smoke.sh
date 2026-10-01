@@ -41,51 +41,8 @@ fi
 
 "${DEADTREES_CLI[@]}" dev test api api/tests/test_settings.py
 
-api_smoke_tests=(
-	api/tests/routers/test_contributor_contract_smoke.py
-	api/tests/routers/test_upload_retries.py
-	api/tests/routers/test_auth_token.py
-	api/tests/upload/test_chunk_session.py
-	api/tests/routers/test_upload_odm_detection.py
-	api/tests/routers/test_process.py
-	api/tests/routers/test_prepackaged.py
-	api/tests/routers/test_dte_stats.py
-	api/tests/routers/test_download.py::test_download_status_invalid_dataset_id_returns_400
-	api/tests/routers/test_download.py::TestMultiBundleHelpers
-	api/tests/db/test_auditor_flag_review_contract.py
-	api/tests/db/test_operator_monitoring_access.py
-	api/tests/db/test_factory_history.py
-	api/tests/db/test_factory_north_star.py
-	api/tests/db/test_factory.py
-	api/tests/db/test_factory_measurements.py
-	api/tests/db/test_factory_journey.py
-	api/tests/db/test_factory_operations.py
-	api/tests/db/test_factory_query_plans.py
-	api/tests/db/test_analyst_access.py
-	api/tests/db/test_embedding_replacement.py
-	api/tests/db/test_contributor_status.py
-	api/tests/db/test_dataset_rls_policy.py
-	api/tests/db/test_privileged_users.py
-	api/tests/db/test_dataset_audit.py
-	api/tests/db/test_dataset_edit_history.py
-	api/tests/db/test_data_publication.py
-	api/tests/db/test_correction_and_publication_access.py
-	api/tests/db/test_create_data_publication.py
-	api/tests/db/test_reference_patch_validation.py
-	api/tests/db/test_status_log_view_access.py
-	api/tests/db/test_process_priority.py
-	api/tests/db/test_processor_prediction_rls.py
-	api/tests/db/test_prediction_label_publication.py
-	api/tests/db/test_odm_database.py
-	api/tests/db/test_priwa_field_schema.py
-	api/tests/db/test_processing_notification_preferences.py
-	api/tests/test_notifications.py
-	api/tests/test_search_embed.py
-	api/tests/test_info.py
-	api/tests/test_request_ip.py
-	api/tests/test_export_reference_patches.py
-	shared/tests
-)
-
+# Run whole directories so every new test file is covered automatically.
+# Heavy tests opt out with the slow/comprehensive markers (see pytest.ini),
+# not by being left off a list.
 docker compose -f docker-compose.test.yaml exec -T api-test \
-	python -m pytest -v "${api_smoke_tests[@]}"
+	python -m pytest -v api/tests shared/tests

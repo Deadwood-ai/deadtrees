@@ -11,7 +11,6 @@ on:
       - "deadtrees-cli/**/*.py"
       - "freidata/**/*.py"
       - "scripts/**/*.py"
-      - "scripts/**/*.ts"
       - "scripts/lint-ast-grep.sh"
       - "scripts/test-ast-grep-rules.sh"
       - "ast-grep/**"
