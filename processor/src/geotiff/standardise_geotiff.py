@@ -445,7 +445,6 @@ def _get_source_properties(input_path: str, token: str, dataset_id: int = None, 
 			properties = {
 				'dtype': src.profile['dtype'],
 				'num_bands': src.count,
-				'crs': src.crs,
 				'nodata': find_nodata_value(src, src.count, token=token, dataset_id=dataset_id, user_id=user_id),
 			}
 

@@ -23,8 +23,8 @@ from pathlib import Path
 
 from PIL import Image
 
-RAW_EXTENSIONS = {'.dng', '.raw'}
-TIFF_EXTENSIONS = {'.tif', '.tiff'}
+from shared.upload_validation import RAW_CAMERA_EXTENSIONS, TIFF_EXTENSIONS, is_multispectral_band
+
 GPS_IFD = 0x8825
 METRES_PER_DEGREE = 111_320.0
 # A frame is a GPS outlier when it lies this many times further from the flight's median
@@ -60,11 +60,12 @@ class OdmImageSelection:
 
 def drop_paired_raw_images(image_files: list[Path]) -> tuple[list[Path], list[Path]]:
 	"""Drop a DNG/RAW frame when a non-raw image with the same name sits next to it."""
-	rendered = {(f.parent, f.stem.lower()) for f in image_files if f.suffix.lower() not in RAW_EXTENSIONS}
+	rendered = {(f.parent, f.stem.lower()) for f in image_files if f.suffix.lower() not in RAW_CAMERA_EXTENSIONS}
 	kept, dropped = [], []
 	for image_file in image_files:
 		is_paired_raw = (
-			image_file.suffix.lower() in RAW_EXTENSIONS and (image_file.parent, image_file.stem.lower()) in rendered
+			image_file.suffix.lower() in RAW_CAMERA_EXTENSIONS
+			and (image_file.parent, image_file.stem.lower()) in rendered
 		)
 		(dropped if is_paired_raw else kept).append(image_file)
 	return kept, dropped
@@ -79,8 +80,8 @@ def _band_count(image_file: Path) -> int | None:
 
 
 def _is_band_image(image_file: Path) -> bool:
-	"""M3M band files carry ``_MS_`` in the name; other band files (P4 Multispectral, Sequoia) are single-band TIFs."""
-	if '_MS_' in image_file.name.upper():
+	"""Band files are named like M3M ``*_MS_*`` or Sequoia ``*_NIR.TIF``; P4 Multispectral writes single-band TIFs."""
+	if is_multispectral_band(image_file.name):
 		return True
 	return image_file.suffix.lower() in TIFF_EXTENSIONS and _band_count(image_file) == 1
 

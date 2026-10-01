@@ -374,15 +374,11 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
                 showIcon
                 message="This upload may not process"
                 description={
-                  uploadValidationWarnings.length === 1 ? (
-                    uploadValidationWarnings[0]
-                  ) : (
-                    <ul className="mb-0 pl-4">
-                      {uploadValidationWarnings.map((warning) => (
-                        <li key={warning}>{warning}</li>
-                      ))}
-                    </ul>
-                  )
+                  <ul className="mb-0 pl-4">
+                    {uploadValidationWarnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
                 }
                 className="mb-3"
               />

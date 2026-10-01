@@ -138,7 +138,7 @@ export const validateGeoTiffUpload = async (file: Blob): Promise<string[]> => {
     );
   }
 
-  return checkGeoTiffGeoreference(inspection.georeference).warnings;
+  return checkGeoTiffGeoreference(inspection.georeference);
 };
 
 const ALLOWED_ZIP_METHODS = new Set([0, 8]); // stored, deflate
@@ -232,5 +232,5 @@ export const validateZipUpload = async (file: File): Promise<string[]> => {
     );
   }
 
-  return checkRawImageNames(entries.map((entry) => entry.name)).warnings;
+  return checkRawImageNames(entries.map((entry) => entry.name));
 };

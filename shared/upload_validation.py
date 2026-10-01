@@ -12,8 +12,14 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
+import rasterio
+from rasterio.errors import RasterioIOError
+from rasterio.transform import Affine
+
 # Photo formats the ODM run accepts from a raw-image ZIP.
 RAW_IMAGE_EXTENSIONS = frozenset({'.jpg', '.jpeg', '.png', '.tif', '.tiff', '.dng', '.raw', '.bmp', '.webp'})
+RAW_CAMERA_EXTENSIONS = frozenset({'.dng', '.raw'})
+TIFF_EXTENSIONS = frozenset({'.tif', '.tiff'})
 
 # Single-band captures from multispectral cameras: DJI Mavic 3M (`*_MS_G.TIF`)
 # and Parrot Sequoia (`*_GRE.TIF`, `*_NIR.TIF`, `*_RED.TIF`, `*_REG.TIF`).
@@ -73,13 +79,10 @@ def missing_crs_message(src) -> str | None:
 	if src.crs:
 		return None
 
-	import rasterio
-
-	has_transform = src.transform and src.transform != rasterio.transform.Affine.identity()
-	origin = [src.transform.c, src.transform.f] if src.transform else [0, 0]
-	if has_transform and (origin[0] != 0 or origin[1] != 0):
+	transform = src.transform
+	if transform != Affine.identity() and (transform.c or transform.f):
 		return (
-			f'File has coordinates (origin: {origin[0]:.1f}, {origin[1]:.1f}) but no CRS definition. '
+			f'File has coordinates (origin: {transform.c:.1f}, {transform.f:.1f}) but no CRS definition. '
 			'The projection system is unknown. Please re-export the GeoTIFF with its CRS embedded (for example EPSG:25832).'
 		)
 	return (
@@ -91,12 +94,10 @@ def missing_crs_message(src) -> str | None:
 
 def ensure_georeferenced_geotiff(path: Path) -> None:
 	"""Reject a GeoTIFF the processor would refuse for a missing CRS."""
-	import rasterio
-
 	try:
 		with rasterio.open(path) as src:
 			problem = missing_crs_message(src)
-	except rasterio.errors.RasterioIOError as exc:
+	except RasterioIOError as exc:
 		raise UnprocessableUploadError(
 			'We could not read this file as a GeoTIFF. Please upload a valid GeoTIFF.'
 		) from exc

@@ -23,11 +23,11 @@ describe("checkRawImageNames", () => {
   });
 
   it("accepts enough JPGs alongside DNG pairs without warnings", () => {
-    expect(checkRawImageNames([...photos(12), ...photos(12, "DNG")]).warnings).toEqual([]);
+    expect(checkRawImageNames([...photos(12), ...photos(12, "DNG")])).toEqual([]);
   });
 
   it("points a few TIFFs towards the GeoTIFF upload", () => {
-    const [warning] = checkRawImageNames(["ortho_a.tif", "ortho_b.tif"]).warnings;
+    const [warning] = checkRawImageNames(["ortho_a.tif", "ortho_b.tif"]);
     expect(warning).toMatch(/only 2 photos.*upload each \.tif directly/);
   });
 });
@@ -35,7 +35,7 @@ describe("checkRawImageNames", () => {
 describe("checkGeoTiffGeoreference", () => {
   it("accepts an EPSG coordinate system", () => {
     const geoKeys = { GTModelTypeGeoKey: 1, ProjectedCSTypeGeoKey: 25832 };
-    expect(checkGeoTiffGeoreference({ geoKeys, hasCoordinates: true }).warnings).toEqual([]);
+    expect(checkGeoTiffGeoreference({ geoKeys, hasCoordinates: true })).toEqual([]);
   });
 
   it("rejects coordinates without a coordinate system", () => {
@@ -50,7 +50,7 @@ describe("checkGeoTiffGeoreference", () => {
 
   it("warns, but does not block, on a custom coordinate system", () => {
     const geoKeys = { GTModelTypeGeoKey: 1, ProjectedCSTypeGeoKey: 32767 };
-    expect(checkGeoTiffGeoreference({ geoKeys, hasCoordinates: true }).warnings[0]).toMatch(/custom or local/);
+    expect(checkGeoTiffGeoreference({ geoKeys, hasCoordinates: true })[0]).toMatch(/custom or local/);
   });
 });
 
@@ -65,7 +65,7 @@ describe("real past uploads", () => {
       expect(() => checkRawImageNames(c.names)).toThrow(c.message!);
       return;
     }
-    const { warnings } = checkRawImageNames(c.names);
+    const warnings = checkRawImageNames(c.names);
     if (c.outcome === "warn") {
       expect(warnings.join(" ")).toContain(c.message);
     } else {

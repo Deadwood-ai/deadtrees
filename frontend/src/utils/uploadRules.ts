@@ -3,19 +3,15 @@
 // upload completes; keep the two in step. Warnings are browser-only: they flag
 // uploads that often fail but sometimes succeed, so they never block.
 
-export const RAW_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".tif", ".tiff", ".dng", ".raw", ".bmp", ".webp"]);
+const RAW_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".tif", ".tiff", ".dng", ".raw", ".bmp", ".webp"]);
 const RAW_CAMERA_EXTENSIONS = new Set([".dng", ".raw"]);
 const TIFF_EXTENSIONS = new Set([".tif", ".tiff"]);
 
 // Fewer photos than this rarely produce an orthomosaic (12 of 45 past uploads did).
-export const RECOMMENDED_MIN_PHOTOS = 10;
+const RECOMMENDED_MIN_PHOTOS = 10;
 
 // Single-band captures from DJI Mavic 3M (`*_MS_G.TIF`) and Parrot Sequoia (`*_GRE.TIF`).
 const MULTISPECTRAL_BAND = /(_MS_)|(_(GRE|NIR|RED|REG)\.TIFF?$)/i;
-
-export interface UploadCheck {
-  warnings: string[];
-}
 
 const baseName = (name: string) => name.split("/").pop() ?? name;
 
@@ -27,7 +23,7 @@ const extension = (name: string) => {
 
 export const isMultispectralBand = (name: string) => MULTISPECTRAL_BAND.test(baseName(name));
 
-export const rawImageNames = (entryNames: string[]) =>
+const rawImageNames = (entryNames: string[]) =>
   entryNames.filter(
     (name) =>
       !name.endsWith("/") &&
@@ -36,7 +32,8 @@ export const rawImageNames = (entryNames: string[]) =>
       RAW_IMAGE_EXTENSIONS.has(extension(name)),
   );
 
-export const checkRawImageNames = (entryNames: string[]): UploadCheck => {
+/** Throws for a ZIP that cannot process; returns warnings for a risky one. */
+export const checkRawImageNames = (entryNames: string[]): string[] => {
   const images = rawImageNames(entryNames);
   const rgbImages = images.filter((name) => !isMultispectralBand(name));
 
@@ -75,7 +72,7 @@ export const checkRawImageNames = (entryNames: string[]): UploadCheck => {
         "If your camera also saved JPGs, add them to the ZIP.",
     );
   }
-  return { warnings };
+  return warnings;
 };
 
 // GeoTIFF GeoKey values (OGC GeoTIFF 1.1).
@@ -88,7 +85,7 @@ export interface GeoTiffGeoreference {
 
 // Rejects only a file with no CRS key at all, which the processor always refuses.
 // The API repeats the authoritative GDAL check when the upload completes.
-export const checkGeoTiffGeoreference = ({ geoKeys, hasCoordinates }: GeoTiffGeoreference): UploadCheck => {
+export const checkGeoTiffGeoreference = ({ geoKeys, hasCoordinates }: GeoTiffGeoreference): string[] => {
   const modelType = geoKeys?.GTModelTypeGeoKey;
   const hasCrs =
     modelType !== undefined ||
@@ -115,5 +112,5 @@ export const checkGeoTiffGeoreference = ({ geoKeys, hasCoordinates }: GeoTiffGeo
         "if processing fails, re-export it with a standard EPSG code.",
     );
   }
-  return { warnings };
+  return warnings;
 };
