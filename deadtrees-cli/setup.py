@@ -23,7 +23,7 @@ setup(
 		'geopandas>=0.13.0',
 		# Same compatibility envelope as api/ and processor/requirements.txt:
 		# NumPy 2.5 breaks Rasterio 1.5 reads.
-		'numpy>=2,<2.5',
+		'numpy>=2,<2.6',
 		'rasterio>=1.5,<1.6',
 		'pydantic-geojson==0.3.2',
 		'supabase>=1.0.3',
