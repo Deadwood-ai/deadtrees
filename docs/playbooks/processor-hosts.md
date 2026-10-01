@@ -22,8 +22,11 @@ minute. There is no push-based deploy: merging to `main` is the deploy.
 3. Once the worker is idle, the script fast-forwards the checkout, rebuilds the
    image, recreates the container, waits for it to report the new release SHA,
    and clears the drain.
-4. The first task the host claims after that runs on the new release. No task
-   ever starts on old code after the drain is set.
+4. If `origin/main` moved on while the host was draining, the drain stays set
+   and the next run deploys the newer release at once, while the worker is
+   still idle. Otherwise the drain is cleared.
+5. The first task the host claims after that runs on the newest release. No
+   task ever starts on old code after the drain is set.
 
 The hosts deploy independently, so for a while after a merge some hosts may
 still be draining on the old release while others already run the new one.
