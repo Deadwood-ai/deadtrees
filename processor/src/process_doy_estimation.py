@@ -28,6 +28,7 @@ def process_doy_estimation(task: QueueTask, token: str, temp_dir: Path):
 	"""
 	import torch
 
+	from .doy_estimation_v1.features import OrthoNotSampleable
 	from .doy_estimation_v1.predict_doy import estimate_acquisition_date
 
 	token, user = login_verified(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
@@ -53,33 +54,39 @@ def process_doy_estimation(task: QueueTask, token: str, temp_dir: Path):
 		else:
 			cog_path = _local_cog(cog, Path(temp_dir), token, task.dataset_id, ctx())
 			b = ortho.bbox
-			estimate = estimate_acquisition_date(
-				cog_path=str(cog_path),
-				dataset_id=task.dataset_id,
-				lat=(b.bottom + b.top) / 2,
-				lon=(b.left + b.right) / 2,
-				year=dataset.aquisition_year,
-				month=dataset.aquisition_month,
-				day=dataset.aquisition_day,
-				aoi_4326=aoi,
-				bbox_4326=(b.left, b.bottom, b.right, b.top),
-				biome_name=biome_name,
-			)
-			token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-			_store(token, task.dataset_id, dataset, estimate)
-			a = estimate.assessment
-			logger.info(
-				'Acquisition-date estimation completed',
-				ctx(
-					{
-						'model_type': estimate.model_type,
-						's2_status': estimate.s2.status,
-						'predicted_date': a.predicted_date.isoformat(),
-						'is_mismatch': a.is_mismatch,
-						'suggestion_reason': a.suggestion_reason,
-					}
-				),
-			)
+			try:
+				estimate = estimate_acquisition_date(
+					cog_path=str(cog_path),
+					dataset_id=task.dataset_id,
+					lat=(b.bottom + b.top) / 2,
+					lon=(b.left + b.right) / 2,
+					year=dataset.aquisition_year,
+					month=dataset.aquisition_month,
+					day=dataset.aquisition_day,
+					aoi_4326=aoi,
+					bbox_4326=(b.left, b.bottom, b.right, b.top),
+					biome_name=biome_name,
+				)
+			except OrthoNotSampleable as e:
+				# like a missing year, an ortho the model cannot sample has no estimate;
+				# the optional date estimate must not fail an otherwise processed dataset
+				logger.warning(f'Ortho cannot be sampled ({e}); skipping date estimation', ctx())
+			else:
+				token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
+				_store(token, task.dataset_id, dataset, estimate)
+				a = estimate.assessment
+				logger.info(
+					'Acquisition-date estimation completed',
+					ctx(
+						{
+							'model_type': estimate.model_type,
+							's2_status': estimate.s2.status,
+							'predicted_date': a.predicted_date.isoformat(),
+							'is_mismatch': a.is_mismatch,
+							'suggestion_reason': a.suggestion_reason,
+						}
+					),
+				)
 		if torch.cuda.is_available():
 			torch.cuda.empty_cache()
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
