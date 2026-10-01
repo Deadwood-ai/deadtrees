@@ -541,3 +541,13 @@ def test_large_geometry_rpc_replay_after_commit_inserts_nothing(prediction):
 	_call_large_geometry_rpc(prediction['processor'], label.id, expected=1)
 	_call_large_geometry_rpc(prediction['processor'], label.id, expected=1)
 	assert _count(prediction, label.id) == 2
+
+
+def test_oversized_contributor_polygon_keeps_the_plain_insert(prediction):
+	"""Contributor labels never use the processor-only RPC."""
+	owner = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+	label_payload = payload(prediction, geometry=MultiPolygon([_circle(150_000)]).__geo_interface__)
+	label_payload.label_source = 'visual_interpretation'
+	label = create_label_with_geometries(label_payload, prediction['owner'], owner)
+
+	assert _count(prediction, label.id) == 1

@@ -230,7 +230,9 @@ def test_single_oversized_geometry_uses_the_large_geometry_rpc(monkeypatch):
 	huge = Polygon(ring)
 	client = _RpcClient()
 
-	upload_geometry_chunk(client, 'v2_forest_cover_geometries', 7, [huge], {'source': 'model'}, 'token')
+	upload_geometry_chunk(
+		client, 'v2_forest_cover_geometries', 7, [huge], {'source': 'model'}, 'token', large_geometry_rpc=True
+	)
 
 	assert [name for name, _ in client.rpc_calls] == ['insert_large_label_geometry']
 	params = client.rpc_calls[0][1]
@@ -238,3 +240,15 @@ def test_single_oversized_geometry_uses_the_large_geometry_rpc(monkeypatch):
 	assert params['p_properties'] == {'source': 'model'}
 	assert params['p_expected_existing_count'] == 0
 	assert len(params['p_geometry']) > 2 * labels.MAX_CHUNK_SIZE
+
+
+def test_oversized_geometry_without_the_rpc_flag_uses_the_plain_insert(monkeypatch):
+	import shared.labels as labels
+
+	monkeypatch.setattr(labels, 'MAX_CHUNK_SIZE', 1_000)
+	ring = [(i * 1e-6, (i % 2) * 1e-6) for i in range(200)] + [(0.0, 1.0)]
+	client = _FakeClient(['ok'])
+
+	upload_geometry_chunk(client, 'v2_deadwood_geometries', 7, [Polygon(ring)], None, 'token')
+
+	assert client._table.insert_attempts == 1

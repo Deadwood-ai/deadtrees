@@ -114,6 +114,8 @@ def create_label_with_geometries(
 				else settings.forest_cover_geometries_table
 			)
 
+			# Only staged processor predictions may use the longer-budget RPC.
+			large_geometry_rpc = payload.label_source == LabelSourceEnum.model_prediction
 			# Split geometries into chunks
 			current_chunk_size = 0
 			current_chunk = []
@@ -127,7 +129,9 @@ def create_label_with_geometries(
 				exceeds_count = len(current_chunk) >= MAX_CHUNK_GEOMETRIES
 				if current_chunk and (exceeds_size or exceeds_count):
 					# Upload current chunk
-					upload_geometry_chunk(client, geom_table, label_id, current_chunk, payload.properties, token)
+					upload_geometry_chunk(
+						client, geom_table, label_id, current_chunk, payload.properties, token, large_geometry_rpc=large_geometry_rpc
+					)
 					current_chunk = []
 					current_chunk_size = 0
 
@@ -136,7 +140,9 @@ def create_label_with_geometries(
 
 			# Upload remaining geometries
 			if current_chunk:
-				upload_geometry_chunk(client, geom_table, label_id, current_chunk, payload.properties, token)
+				upload_geometry_chunk(
+					client, geom_table, label_id, current_chunk, payload.properties, token, large_geometry_rpc=large_geometry_rpc
+				)
 
 			if is_active:
 
@@ -177,6 +183,8 @@ def upload_geometry_chunk(
 	geometries: List[Any],
 	properties: Optional[Dict[str, Any]],
 	token: str,
+	*,
+	large_geometry_rpc: bool = False,
 ) -> None:
 	"""Uploads a chunk of geometries to the database."""
 
@@ -197,13 +205,15 @@ def upload_geometry_chunk(
 		)
 
 	try:
-		_insert_records_adaptive(client, table, geometry_records, label_id, token)
+		_insert_records_adaptive(client, table, geometry_records, label_id, token, large_geometry_rpc)
 	except Exception as e:
 		logger.error(f'Error uploading geometry chunk: {str(e)}', extra={'token': token})
 		raise Exception(f'Error uploading geometry chunk: {str(e)}')
 
 
-def _insert_records_adaptive(client, table: str, records: List[dict], label_id: int, token: str) -> None:
+def _insert_records_adaptive(
+	client, table: str, records: List[dict], label_id: int, token: str, large_geometry_rpc: bool = False
+) -> None:
 	"""Insert ``records`` as one statement, splitting the batch if the DB cancels it.
 
 	A Postgres ``statement_timeout`` (SQLSTATE 57014) means the batch was too large
@@ -214,7 +224,7 @@ def _insert_records_adaptive(client, table: str, records: List[dict], label_id: 
 	``retry_on_transient_error`` and are not split.
 	"""
 	try:
-		_insert_records_with_retry(client, table, records, label_id)
+		_insert_records_with_retry(client, table, records, label_id, large_geometry_rpc)
 	except Exception as e:
 		if is_statement_timeout(e) and len(records) > 1:
 			mid = len(records) // 2
@@ -223,8 +233,8 @@ def _insert_records_adaptive(client, table: str, records: List[dict], label_id: 
 				f'splitting into {mid} + {len(records) - mid} and retrying',
 				extra={'token': token},
 			)
-			_insert_records_adaptive(client, table, records[:mid], label_id, token)
-			_insert_records_adaptive(client, table, records[mid:], label_id, token)
+			_insert_records_adaptive(client, table, records[:mid], label_id, token, large_geometry_rpc)
+			_insert_records_adaptive(client, table, records[mid:], label_id, token, large_geometry_rpc)
 		else:
 			raise
 
@@ -234,7 +244,9 @@ def _is_oversized_geometry(records: List[dict]) -> bool:
 	return len(records) == 1 and len(records[0]['geometry']) > 2 * MAX_CHUNK_SIZE
 
 
-def _insert_records_with_retry(client, table: str, records: List[dict], label_id: int) -> None:
+def _insert_records_with_retry(
+	client, table: str, records: List[dict], label_id: int, large_geometry_rpc: bool = False
+) -> None:
 	"""Insert a single batch, retrying only on transient network failures.
 
 	One uploader owns each newly created label. Each insert is atomic, so a retry
@@ -269,7 +281,7 @@ def _insert_records_with_retry(client, table: str, records: List[dict], label_id
 			return
 		elif count != count_before:
 			raise RuntimeError('Geometry upload count changed unexpectedly')
-		if _is_oversized_geometry(records):
+		if large_geometry_rpc and _is_oversized_geometry(records):
 			# One polygon this large can exceed the 8s budget of a plain insert on its
 			# own, and a single row cannot be split further.
 			record = records[0]
