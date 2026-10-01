@@ -42,6 +42,7 @@ from processor.src.utils.debug_artifacts import (
 	build_container_forensics,
 	write_debug_bundle,
 )
+from processor.src.utils.odm_inputs import MULTISPECTRAL_REASON, OdmInputError, select_odm_images
 from shared.exif_utils import extract_camera_nadir_deviation_degrees, extract_comprehensive_exif
 
 # RTK file extensions as specified in requirements
@@ -860,24 +861,15 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		else:
 			other_files.append(file_path)
 
-	# Filter out multispectral images (e.g., DJI M3M files like *_MS_*.TIF)
-	# We prefer RGB imagery (e.g., *_D.JPG) for our default ODM run.
-	ms_excluded = []
-	filtered_image_files = []
-	for img in image_files:
-		name_upper = img.name.upper()
-		if '_MS_' in name_upper:
-			ms_excluded.append(img)
-		else:
-			filtered_image_files.append(img)
-
-	if ms_excluded:
+	# Leave out paired DNGs, multispectral bands and GPS outliers; fail early on an oversized extent.
+	selection = select_odm_images(image_files, settings.ODM_MAX_IMAGE_EXTENT_KM2)
+	for reason, dropped in selection.dropped.items():
+		sample = ', '.join(f.name for f in dropped[:5])
 		logger.info(
-			f'Filtered out {len(ms_excluded)} multispectral images (keeping {len(filtered_image_files)} RGB candidates)',
+			f'Left out {len(dropped)} {reason}: {sample}{" ..." if len(dropped) > 5 else ""}',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
-		# Replace the image list with the filtered RGB-only set
-		image_files = filtered_image_files
+	image_files = selection.kept
 
 	logger.info(
 		f'Found {len(image_files)} image files, {len(rtk_files)} RTK files, {len(other_files)} other files in {images_dir}',
@@ -890,6 +882,10 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			f'No image files found. Directory contains: {[f.name for f in all_files[:20]]}{"..." if len(all_files) > 20 else ""}',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
+		if selection.dropped.get(MULTISPECTRAL_REASON):
+			raise OdmInputError(
+				'The upload contains only multispectral band images; an RGB orthomosaic needs RGB photos'
+			)
 		raise Exception(f'No supported images found in {images_dir}')
 
 	# Filter out obviously corrupt images by size (but be less restrictive - 100KB minimum)

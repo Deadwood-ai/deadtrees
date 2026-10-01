@@ -180,6 +180,8 @@ class Settings(BaseSettings):
 	ODM_SKY_REMOVAL: bool = False
 	ODM_BG_REMOVAL: bool = False
 	ODM_MAX_NADIR_DEVIATION_DEGREES: float = 40.0
+	# Largest image-position extent one ODM run may mosaic; successful ODM orthos reach ~20 km² (DT-1312).
+	ODM_MAX_IMAGE_EXTENT_KM2: float = 30.0
 
 	# Linear integration for processing failure notifications
 	LINEAR_ENABLED: bool = False
