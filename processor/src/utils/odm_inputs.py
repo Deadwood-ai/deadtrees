@@ -33,7 +33,9 @@ OUTLIER_SPREAD_FACTOR = 5.0
 OUTLIER_MIN_DISTANCE_M = 1000.0
 # More "outliers" than this share (and more than one) is a multi-site or corridor upload, not a few broken fixes.
 MAX_OUTLIER_SHARE = 0.1
-MIN_IMAGES_FOR_OUTLIER_CHECK = 5
+MIN_IMAGES_FOR_OUTLIER_CHECK = 3
+# Ground an image covers around its camera position; keeps a long thin line of positions from having ~0 area.
+FOOTPRINT_MARGIN_M = 100.0
 FAILED_FIX = (0.0, 0.0)
 # ODM 3.6 lets DJI XMP drone-dji:Latitude/Longitude override the EXIF GPS (opendm/photo.py).
 # DJI writes its XMP packet near the start of the JPEG.
@@ -165,13 +167,11 @@ def drop_gps_outliers(
 
 
 def gps_extent_km2(positions: list[tuple[float, float]]) -> float:
-	"""Area of the bounding box around the image positions, in km²."""
-	if len(positions) < 2:
-		return 0.0
+	"""Area of the bounding box around the image positions plus each image's footprint, in km²."""
 	south_west = (min(p[0] for p in positions), min(p[1] for p in positions))
 	north_east = (max(p[0] for p in positions), max(p[1] for p in positions))
 	east, north = _offset_metres(south_west, north_east)
-	return abs(east * north) / 1e6
+	return (abs(east) + 2 * FOOTPRINT_MARGIN_M) * (abs(north) + 2 * FOOTPRINT_MARGIN_M) / 1e6
 
 
 def select_odm_images(image_files: list[Path], max_extent_km2: float) -> OdmImageSelection:

@@ -129,9 +129,26 @@ def test_two_sites_are_a_real_spread_not_outliers():
 	assert kept == positions
 
 
-def test_gps_extent_km2_of_a_one_km_square():
+def test_gps_extent_km2_adds_the_image_footprint():
 	side = 1000 / 111_320
-	assert gps_extent_km2([FLIGHT, (FLIGHT[0] + side, FLIGHT[1] + side / 0.6691306)]) == pytest.approx(1.0, rel=0.01)
+	square = [FLIGHT, (FLIGHT[0] + side, FLIGHT[1] + side / 0.6691306)]
+	assert gps_extent_km2(square) == pytest.approx(1.2 * 1.2, rel=0.01)
+	assert gps_extent_km2([FLIGHT]) == pytest.approx(0.04, rel=0.01)
+
+
+def test_a_long_straight_line_still_counts_as_a_large_extent():
+	# 300 km north-south with no east-west spread: a bare bounding box would be 0 km².
+	assert gps_extent_km2([FLIGHT, (FLIGHT[0] + 2.7, FLIGHT[1])]) > 30
+
+
+def test_lone_distant_frame_is_dropped_in_a_four_image_set():
+	positions = {Path(f'{i}.jpg'): p for i, p in enumerate(_grid(3))}
+	positions[Path('far.jpg')] = (FLIGHT[0] + 0.5, FLIGHT[1])
+
+	kept, outliers = drop_gps_outliers(positions)
+
+	assert outliers == [Path('far.jpg')]
+	assert len(kept) == 3
 
 
 def test_select_odm_images_keeps_the_usable_flight(tmp_path):
