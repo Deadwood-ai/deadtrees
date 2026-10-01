@@ -77,12 +77,6 @@ rename while behavior is unchanged, the test is probably too coupled.
    `scripts/qa/review-regression.sh`, which runs every local Playwright suite
    against the isolated stack (see the local review lane in
    `.agents/skills/run-deadtrees-qa/SKILL.md`).
-   When a reviewer should try a frontend change against production data before
-   a PR exists, start a branch preview on request only:
-   `gh workflow run frontend-hosting-branch-preview.yml --ref <branch>`. It
-   deploys a 7-day Firebase preview channel with the production backend and sets
-   the link as the `frontend-branch-preview` commit status. It never runs on
-   push, because it uses the production deploy credentials.
 4. Escalate to processing-server validation only for GPU/model/ODM behavior or
    when local non-GPU checks cannot prove the risk.
 
