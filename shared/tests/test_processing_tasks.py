@@ -32,5 +32,4 @@ def test_format_missing_geotiff_error_names_unsafe_tasks():
 
 def test_upload_task_types_run_the_date_estimate_and_are_accepted_by_the_api():
 	assert TaskTypeEnum.doy_estimation_v1 in UPLOAD_TASK_TYPES
-	assert TaskTypeEnum.georef_check_v1 in UPLOAD_TASK_TYPES
 	assert downstream_tasks_missing_geotiff(list(UPLOAD_TASK_TYPES)) == ()

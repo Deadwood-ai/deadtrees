@@ -14,7 +14,6 @@ UPLOAD_TASK_TYPES = (
 	TaskTypeEnum.deadwood_treecover_combined_v2,
 	TaskTypeEnum.embeddings_v1,
 	TaskTypeEnum.doy_estimation_v1,
-	TaskTypeEnum.georef_check_v1,
 )
 
 TASKS_REQUIRING_STANDARDIZED_ORTHO = frozenset(

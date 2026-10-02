@@ -52,6 +52,7 @@ def main():
 		urllib.request.urlretrieve(CHECKPOINT_URL, pt)
 		state = torch.load(pt, map_location='cpu', weights_only=True)
 		save_file({k: v.contiguous() for k, v in state.items()}, out / 'romav2.safetensors')
+		(out / 'romav2.safetensors').chmod(0o644)  # the worker container reads it as another user
 		repo = Path(tmp) / 'dinov3'
 		subprocess.run(['git', 'clone', '--quiet', DINOV3_REPO, str(repo)], check=True)
 		subprocess.run(['git', '-C', str(repo), 'checkout', '--quiet', DINOV3_COMMIT], check=True)
