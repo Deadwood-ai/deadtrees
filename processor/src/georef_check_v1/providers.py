@@ -9,15 +9,17 @@ Official orthophotos get their own group unless Esri World Imagery shows the
 same acquisition there (then they join the `esri` group).
 
 Kinds:
-- xyz: Web-Mercator tiles, `url` with {z}/{x}/{y} ({-y} for TMS row order);
+- xyz: Web-Mercator tiles, `url` with {z}/{x}/{y} ({-y} for TMS row order,
+  {zz} for a zero-padded zoom, {q} for a Bing quadkey);
   WMTS REST/KVP and ArcGIS tile endpoints in GoogleMapsCompatible use this too
 - wms: OGC WMS GetMap for the exact grid extent (EPSG:3857, or EPSG:4326)
 - arcgis_export: ArcGIS MapServer/ImageServer export for the exact grid extent
 
 The entries live in providers.json, one per line. Every keyless entry was
-fetched live at a site inside its coverage before it was added, and only
-services with an open licence for automated use are listed;
-scripts/check_georef_providers.py re-checks them.
+fetched live at a site inside its coverage before it was added;
+scripts/check_georef_providers.py re-checks them. Entries marked `restricted`
+work without sign-up but their terms are unclear or restrict automated use
+(each `licence` says how); they can be switched off as a group.
 """
 
 from __future__ import annotations
@@ -42,9 +44,13 @@ class Provider:
 	wms_layers: str = ''
 	wms_version: str = '1.3.0'
 	wms_crs: str = 'EPSG:3857'
+	tile_crs: str = 'EPSG:3857'  # xyz tile grid; EPSG:3395 for ellipsoidal-Mercator tiles
 	image_format: str = 'image/jpeg'
 	attribution: str = ''
 	licence: str = ''
+	# keyless but with unclear or restrictive terms for automated use; on by
+	# decision (2026-10-02), off with GEOREF_SKIP_RESTRICTED_PROVIDERS
+	restricted: bool = False
 	check_lonlat: tuple[float, float] | None = None  # a covered land site for the live check
 
 	def covers(self, lon: float, lat: float) -> bool:

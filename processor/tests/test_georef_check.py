@@ -325,7 +325,7 @@ def test_provider_registry_is_well_formed():
 		assert p.url.startswith(('https://', 'http://')), p.name
 		assert p.check_lonlat and p.covers(*p.check_lonlat), p.name
 		if p.kind == 'xyz':
-			assert '{z}' in p.url and '{x}' in p.url and ('{y}' in p.url or '{-y}' in p.url), p.name
+			assert '{q}' in p.url or ('{x}' in p.url and ('{y}' in p.url or '{-y}' in p.url)), p.name
 		if p.kind == 'wms':
 			assert p.wms_layers and p.wms_crs in ('EPSG:3857', 'EPSG:900913', 'EPSG:4326'), (
 				p.name
@@ -333,7 +333,7 @@ def test_provider_registry_is_well_formed():
 		if p.key_setting:
 			assert hasattr(settings, p.key_setting), p.name
 		else:
-			assert p.licence, p.name  # keyless services are listed only with a known open licence
+			assert p.licence, p.name  # every keyless service says what its terms are
 
 
 @pytest.mark.unit
@@ -346,3 +346,14 @@ def test_tms_rows_are_flipped_and_keys_stay_out_of_the_viewer():
 	assert all(_viewer(p) is None for p in REGISTRY if p.key_setting)
 	wms = next(p for p in REGISTRY if p.name == 'de-bw-dop20')
 	assert _viewer(wms)['kind'] == 'wms' and _viewer(wms)['layers'] == wms.wms_layers
+
+
+@pytest.mark.unit
+def test_quadkeys_and_ellipsoidal_mercator_rows():
+	from processor.src.georef_check_v1.references import _ellipsoidal_bounds, quadkey
+
+	assert quadkey(3, 5, 3) == '213'  # Bing's documented example
+	# EPSG:3395 northings fall ~35 km short of 3857 ones at 55°N
+	y = 7361866.0  # ~55.0°N in EPSG:3857
+	_, south, _, north = _ellipsoidal_bounds(Grid((4.1e6, y - 100, 4.1e6 + 200, y + 100), 100, 100))
+	assert 30_000 < (y - 100) - south < 40_000 and abs((north - south) - 200) < 1

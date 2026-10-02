@@ -29,13 +29,21 @@ nothing counts as an audit until an auditor saves.
      NOAA, MassGIS, NYS, Ontario, Calgary, Queensland, NSW, ACT, Western
      Australia, GSI (JP), NLSC (TW), Brasília, INEGI (MX), Uruguay, IGN (AR),
      NGI (ZA) and Cape Town
+   - 13 more keyless services marked `restricted`: they need no sign-up, but
+     their terms are unclear or restrict automated use (each entry's
+     `licence` says how). Used by decision of 2026-10-02; set
+     `GEOREF_SKIP_RESTRICTED_PROVIDERS=true` to leave them out. Sweden,
+     Greece, Lithuania, Moldova, Tasmania (non-commercial), Victoria (licence
+     fee), King County, Santa Clara, Quebec, British Columbia (1995–2004),
+     Georgia, Bing aerial and Yandex (EPSG:3395 tiles) worldwide; plus Esri
+     Clarity (in the Esri group) and Portugal 2018, both unrestricted
    - MapTiler, Mapbox, Azure Maps and LINZ (NZ) when their keys are set
      (`MAPTILER_API_KEY`, `MAPBOX_ACCESS_TOKEN`, `AZURE_MAPS_KEY`,
      `LINZ_API_KEY`)
 
    Each provider is its own evidence group unless it serves the same imagery as
-   another (Wayback with Esri). Only services with an open licence for
-   automated use are listed; Google's satellite tiles are refused to EEA
+   another (Wayback and Clarity with Esri). Only services with an open licence for
+   automated use are listed unmarked; Google's satellite tiles are refused to EEA
    accounts (Map Tiles API EEA terms) and its terms forbid analysing the
    imagery, so Google is not used. `scripts/check_georef_providers.py` renders
    every provider at its check site; run it when adding one and now and then,

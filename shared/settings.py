@@ -166,6 +166,9 @@ class Settings(BaseSettings):
 	MAPBOX_ACCESS_TOKEN: str = ''
 	AZURE_MAPS_KEY: str = ''
 	LINZ_API_KEY: str = ''  # New Zealand aerial basemap (free key)
+	# Skip keyless providers whose terms are unclear or restrict automated use
+	# (providers.json `restricted`).
+	GEOREF_SKIP_RESTRICTED_PROVIDERS: bool = False
 
 	# processor settings
 	PROCESSOR_USERNAME: str = 'processor@deadtrees.earth'
