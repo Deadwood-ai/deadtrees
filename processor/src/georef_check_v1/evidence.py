@@ -84,11 +84,6 @@ def offsets_m(a: np.ndarray, b: np.ndarray, grid: Grid) -> np.ndarray:
 	return np.asarray(_GEOD.inv(lon_a, lat_a, lon_b, lat_b)[2])
 
 
-def source_family(provider: str) -> str:
-	"""Evidence group of a reference: same-family imagery is not independent."""
-	return 'esri' if provider.startswith('wayback') or provider == 'esri' else provider
-
-
 @dataclass
 class ReferenceEvidence:
 	provider: str
@@ -137,6 +132,7 @@ def _vote(p90s: list[float], rules: Rules) -> str:
 
 def measure_reference(
 	provider: str,
+	group: str,
 	a: np.ndarray,
 	b: np.ndarray,
 	scores: np.ndarray,
@@ -145,9 +141,10 @@ def measure_reference(
 	grid: Grid,
 	rules: Rules = RULES,
 ) -> ReferenceEvidence:
-	"""Evidence of one reference. `a`/`b` are matched drone/reference pixels,
+	"""Evidence of one reference (`group`: its evidence group, see providers.py).
+	`a`/`b` are matched drone/reference pixels,
 	`footprint` the (N, 2) sampled footprint pixels, `edge` marks its edge band."""
-	e = ReferenceEvidence(provider=provider, group=source_family(provider))
+	e = ReferenceEvidence(provider=provider, group=group)
 	strong = scores >= rules.min_score
 	a, b = a[strong], b[strong]
 	e.matches = int(len(a))

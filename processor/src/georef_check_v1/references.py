@@ -1,9 +1,10 @@
 """Reference imagery for the georeferencing check, on the drone image's grid.
 
-Each provider's XYZ tiles covering the grid's EPSG:3857 bounds are mosaicked at
-the coarsest zoom that still resolves the grid (capped by a tile budget) and
-resampled onto the grid. Esri World Imagery and its dated Wayback captures need
-no key; Google (Map Tiles API), MapTiler and Mapbox are used when a key is set.
+Providers come from the registry in providers.py. XYZ tiles covering the grid's
+EPSG:3857 bounds are mosaicked at the coarsest zoom that still resolves the grid
+(capped by a tile budget) and resampled onto the grid; WMS and ArcGIS export
+services render the grid extent directly. Dated Esri Wayback captures are added
+per site. Keyed providers are used only when their key is set.
 """
 
 from __future__ import annotations
@@ -21,11 +22,11 @@ from PIL import Image
 from shared.settings import settings
 
 from .evidence import Grid
+from .providers import ESRI, REGISTRY, Provider
 
 WORLD = 40075016.68557849
 TILE_BUDGET = 45
 USER_AGENT = 'DeadTrees-georeferencing-check/1.0 (+https://deadtrees.earth)'
-ESRI_TILES = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 WAYBACK_CONFIG = 'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json'
 WAYBACK_TILES = (
 	'https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{release}/{z}/{y}/{x}'
@@ -34,11 +35,12 @@ WAYBACK_TILES = (
 
 @dataclass
 class Reference:
-	provider: str  # esri, wayback-<release>, google, maptiler, mapbox
+	provider: str  # registry name, or wayback-<release>
+	group: str  # evidence group (providers.py)
 	image: np.ndarray  # (H, W, 3) uint8 on the drone grid
-	zoom: int
+	zoom: int | None = None  # XYZ zoom used; None for WMS/ArcGIS exports
 	capture_date: str | None = None  # Wayback: the imagery's acquisition date
-	tile_url: str | None = None  # keyless XYZ template the audit viewer can show
+	viewer: dict | None = None  # keyless service description the audit viewer can show
 
 
 def _session() -> requests.Session:
@@ -151,16 +153,81 @@ def pick_wayback(captures: list[dict], flight: date | None, n: int = 2) -> list[
 	return chosen
 
 
-def _google_session(session: requests.Session) -> str:
-	r = session.post(
-		'https://tile.googleapis.com/v1/createSession',
-		params={'key': settings.GOOGLE_MAP_TILES_API_KEY},
-		json={'mapType': 'satellite', 'language': 'en-US', 'region': 'US'},
-		timeout=30,
-	)
-	if r.status_code != 200:
-		raise RuntimeError(f'Google session HTTP {r.status_code}')
-	return r.json()['session']
+def _render(grid: Grid, provider: Provider, session: requests.Session) -> tuple[np.ndarray, int | None]:
+	"""The provider's imagery on `grid`, and the XYZ zoom used (None for renders)."""
+	key = getattr(settings, provider.key_setting) if provider.key_setting else None
+	params = {provider.key_param: key} if key else None
+	if provider.kind == 'xyz':
+
+		def url_for(z, x, y):
+			return provider.url.replace('{-y}', str(2**z - 1 - y)).format(z=z, x=x, y=y), params
+
+		return mosaic(grid, url_for, provider.max_zoom, session)
+	left, bottom, right, top = grid.bounds
+	if provider.kind == 'wms':
+		crs = 'CRS' if provider.wms_version == '1.3.0' else 'SRS'
+		bbox = f'{left},{bottom},{right},{top}'
+		if provider.wms_crs == 'EPSG:4326':
+			# the grid's lon/lat box; at a few hundred metres the Mercator/lat-lon
+			# difference inside it is far below a pixel, so a resize suffices.
+			# WMS 1.3.0 orders EPSG:4326 as lat,lon
+			lon, lat = grid.lonlat(np.array([[0.0, grid.height - 1.0], [grid.width - 1.0, 0.0]]))
+			w, s, e, n = lon[0], lat[0], lon[1], lat[1]
+			bbox = f'{s},{w},{n},{e}' if provider.wms_version == '1.3.0' else f'{w},{s},{e},{n}'
+		query = {
+			'SERVICE': 'WMS',
+			'REQUEST': 'GetMap',
+			'VERSION': provider.wms_version,
+			'LAYERS': provider.wms_layers,
+			'STYLES': '',
+			crs: provider.wms_crs,
+			'BBOX': bbox,
+			'WIDTH': grid.width,
+			'HEIGHT': grid.height,
+			'FORMAT': provider.image_format,
+		}
+	elif provider.kind == 'arcgis_export':
+		query = {
+			'bbox': f'{left},{bottom},{right},{top}',
+			'bboxSR': 3857,
+			'imageSR': 3857,
+			'size': f'{grid.width},{grid.height}',
+			'format': 'jpg',
+			'f': 'image',
+		}
+	else:
+		raise ValueError(f'unknown provider kind {provider.kind}')
+	r = session.get(provider.url, params={**query, **(params or {})}, timeout=60)
+	if r.status_code != 200 or not r.headers.get('content-type', '').startswith('image/'):
+		# never include the URL: it can carry an API key
+		raise RuntimeError(f'render HTTP {r.status_code} {r.headers.get("content-type", "")}'.strip())
+	image = Image.open(io.BytesIO(r.content)).convert('RGB')
+	if image.size != (grid.width, grid.height):
+		image = image.resize((grid.width, grid.height), Image.Resampling.BICUBIC)
+	return np.asarray(image), None
+
+
+def _viewer(provider: Provider) -> dict | None:
+	"""How the audit viewer can show a keyless provider (keys never reach the browser)."""
+	if provider.key_setting or provider.kind == 'arcgis_export' or provider.wms_crs != 'EPSG:3857':
+		return None
+	if provider.kind == 'xyz':
+		if '{-y}' in provider.url:
+			return None
+		return {'kind': 'xyz', 'url': provider.url, 'max_zoom': provider.max_zoom, 'attribution': provider.attribution}
+	return {
+		'kind': 'wms',
+		'url': provider.url,
+		'layers': provider.wms_layers,
+		'version': provider.wms_version,
+		'format': provider.image_format,
+		'attribution': provider.attribution,
+	}
+
+
+def applicable(lon: float, lat: float) -> list[Provider]:
+	"""Registry providers for a site: covering it, and with their key set."""
+	return [p for p in REGISTRY if p.covers(lon, lat) and (not p.key_setting or getattr(settings, p.key_setting))]
 
 
 def fetch_references(
@@ -170,60 +237,35 @@ def fetch_references(
 	session = _session()
 	refs, errors = [], {}
 
-	def add(provider, url_for, max_zoom=19, capture_date=None, tile_url=None):
+	def add(provider: Provider, capture_date=None):
 		try:
-			image, z = mosaic(grid, url_for, max_zoom, session)
+			image, z = _render(grid, provider, session)
 		except Exception as e:  # one provider failing must not fail the check
-			errors[provider] = type(e).__name__ + (f': {e}' if isinstance(e, RuntimeError) else '')
+			errors[provider.name] = type(e).__name__ + (f': {e}' if isinstance(e, RuntimeError) else '')
 			return
 		if _blank(image):
-			errors[provider] = 'blank imagery'
+			errors[provider.name] = 'blank imagery'
 			return
-		refs.append(Reference(provider, image, z, capture_date, tile_url))
+		refs.append(Reference(provider.name, provider.group, image, z, capture_date, _viewer(provider)))
 
-	add('esri', lambda z, x, y: (ESRI_TILES.format(z=z, x=x, y=y), None), 18, tile_url=ESRI_TILES)
+	providers = applicable(*centre_lonlat)
+	with ThreadPoolExecutor(max_workers=4) as pool:
+		list(pool.map(add, providers))
 	try:
 		zoom = _zoom_and_tiles(grid, 19)[0]
 		for c in pick_wayback(wayback_captures(*centre_lonlat, zoom, session), flight):
-			template = WAYBACK_TILES.replace('{release}', str(c['release']))
 			add(
-				f'wayback-{c["release"]}',
-				lambda z, x, y, t=template: (t.format(z=z, x=x, y=y), None),
-				19,
+				Provider(
+					f'wayback-{c["release"]}',
+					ESRI.group,
+					'xyz',
+					WAYBACK_TILES.replace('{release}', str(c['release'])),
+					attribution=ESRI.attribution,
+				),
 				c['capture_date'],
-				template,
 			)
 	except Exception as e:
 		errors['wayback'] = type(e).__name__
-	if settings.GOOGLE_MAP_TILES_API_KEY:
-		try:
-			token = _google_session(session)
-			add(
-				'google',
-				lambda z, x, y: (
-					f'https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}',
-					{'session': token, 'key': settings.GOOGLE_MAP_TILES_API_KEY},
-				),
-				20,
-			)
-		except Exception as e:
-			errors['google'] = type(e).__name__ + (f': {e}' if isinstance(e, RuntimeError) else '')
-	if settings.MAPTILER_API_KEY:
-		add(
-			'maptiler',
-			lambda z, x, y: (
-				f'https://api.maptiler.com/maps/satellite-v4/256/{z}/{x}/{y}.jpg',
-				{'key': settings.MAPTILER_API_KEY},
-			),
-			20,
-		)
-	if settings.MAPBOX_ACCESS_TOKEN:
-		add(
-			'mapbox',
-			lambda z, x, y: (
-				f'https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}.jpg90',
-				{'access_token': settings.MAPBOX_ACCESS_TOKEN},
-			),
-			20,
-		)
+	order = {p.name: i for i, p in enumerate(providers)}
+	refs.sort(key=lambda r: order.get(r.provider, len(order)))
 	return refs, errors

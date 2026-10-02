@@ -38,7 +38,7 @@ def _footprint():
 @pytest.mark.parametrize('shift_m,vote', [(4.0, 'good'), (30.0, 'poor')])
 def test_reference_measures_the_shift_and_votes_by_the_15m_line(shift_m, vote):
 	footprint, edge = _footprint()
-	e = measure_reference('esri', *_matches(shift_m), footprint, edge, GRID)
+	e = measure_reference('esri', 'esri', *_matches(shift_m), footprint, edge, GRID)
 
 	assert e.qualified and e.decides
 	assert e.p90_m == pytest.approx(shift_m, abs=0.5)
@@ -52,7 +52,7 @@ def test_few_confident_matches_give_no_fit():
 	footprint, edge = _footprint()
 	a, b, scores = _matches(4.0)
 	scores[:] = 0.2  # RoMa is unsure everywhere, as on closed canopy
-	e = measure_reference('esri', a, b, scores, footprint, edge, GRID)
+	e = measure_reference('esri', 'esri', a, b, scores, footprint, edge, GRID)
 
 	assert not e.qualified and e.reason == 'no_fit' and e.matrix is None
 
@@ -62,17 +62,15 @@ def test_matches_clustered_in_one_corner_do_not_qualify():
 	footprint, edge = _footprint()
 	a, b, scores = _matches(4.0)
 	a, b = a * 0.2, b * 0.2  # all within the top-left fifth of the image
-	e = measure_reference('esri', a, b, scores, footprint, edge, GRID)
+	e = measure_reference('esri', 'esri', a, b, scores, footprint, edge, GRID)
 
 	assert not e.qualified and e.reason == 'clustered_matches'
 
 
 def _ref(provider, vote, p90, support=0.95, edge=0.95):
-	from processor.src.georef_check_v1.evidence import source_family
-
 	return ReferenceEvidence(
 		provider,
-		source_family(provider),
+		'esri' if provider.startswith('wayback') or provider == 'esri' else provider,
 		vote=vote,
 		p90_m=p90,
 		support=support,
@@ -117,7 +115,7 @@ def test_low_support_reference_qualifies_but_does_not_decide():
 	a, b, scores = _matches(4.0)
 	keep = (a[:, 0] < GRID.width * 0.45) & (a[:, 1] < GRID.height * 0.55)  # matches in one quarter only
 	scores[~keep] = 0.0
-	e = measure_reference('esri', a, b, scores, footprint, edge, GRID)
+	e = measure_reference('esri', 'esri', a, b, scores, footprint, edge, GRID)
 	assert e.support < 0.30 and not e.decides
 
 
@@ -210,7 +208,7 @@ def _patch_check(monkeypatch, centre_lat, refs, first, retry=None):
 	monkeypatch.setattr(
 		check,
 		'fetch_references',
-		lambda *args: ([Reference(p, image, 18) for p in refs], {} if refs else {'esri': 'ConnectionError'}),
+		lambda *args: ([Reference(p, p, image, 18) for p in refs], {} if refs else {'esri': 'ConnectionError'}),
 	)
 	calls = []
 
@@ -313,3 +311,38 @@ def test_stage_stores_the_check_and_a_matching_audit_suggestion(georef_task, aut
 		assert suggestions == []
 	else:
 		assert [(s['field'], s['value']) for s in suggestions] == [('is_georeferenced', check[0]['decision'] == 'good')]
+
+
+@pytest.mark.unit
+def test_provider_registry_is_well_formed():
+	from shared.settings import settings
+	from processor.src.georef_check_v1.providers import REGISTRY
+
+	names = [p.name for p in REGISTRY]
+	assert len(names) == len(set(names))
+	for p in REGISTRY:
+		assert p.kind in ('xyz', 'wms', 'arcgis_export'), p.name
+		assert p.url.startswith(('https://', 'http://')), p.name
+		assert p.check_lonlat and p.covers(*p.check_lonlat), p.name
+		if p.kind == 'xyz':
+			assert '{z}' in p.url and '{x}' in p.url and ('{y}' in p.url or '{-y}' in p.url), p.name
+		if p.kind == 'wms':
+			assert p.wms_layers and p.wms_crs in ('EPSG:3857', 'EPSG:900913', 'EPSG:4326'), (
+				p.name
+			)  # 900913: legacy name of 3857
+		if p.key_setting:
+			assert hasattr(settings, p.key_setting), p.name
+		else:
+			assert p.licence, p.name  # keyless services are listed only with a known open licence
+
+
+@pytest.mark.unit
+def test_tms_rows_are_flipped_and_keys_stay_out_of_the_viewer():
+	from processor.src.georef_check_v1.providers import REGISTRY
+	from processor.src.georef_check_v1.references import _viewer
+
+	es = next(p for p in REGISTRY if p.name == 'es-pnoa-ma')
+	assert _viewer(es) is None  # TMS row order is not offered to the browser
+	assert all(_viewer(p) is None for p in REGISTRY if p.key_setting)
+	wms = next(p for p in REGISTRY if p.name == 'de-bw-dop20')
+	assert _viewer(wms)['kind'] == 'wms' and _viewer(wms)['layers'] == wms.wms_layers

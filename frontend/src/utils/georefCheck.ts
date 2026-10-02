@@ -16,12 +16,33 @@ const REASONS: Record<string, string> = {
 
 export const describeGeorefReason = (reason: string | null | undefined) => (reason ? (REASONS[reason] ?? reason.replace(/_/g, " ")) : "");
 
+// Readable names for the registry (processor/src/georef_check_v1/providers.json);
+// an unlisted provider shows its id.
+const PROVIDER_NAMES: Record<string, string> = {
+  maptiler: "MapTiler satellite",
+  mapbox: "Mapbox satellite",
+  "azure-maps": "Azure Maps imagery",
+  "nz-linz-aerial": "LINZ aerial (NZ)",
+  "us-naip-plus-usgs": "USGS NAIP Plus (US)",
+  "us-noaa-west-2023": "NOAA coastal imagery (US)",
+  "ch-swissimage": "swisstopo SWISSIMAGE",
+  "at-basemap-ortho": "basemap.at Orthofoto",
+  "fr-ign-bdortho": "IGN BD ORTHO (FR)",
+  "es-pnoa-ma": "PNOA (ES)",
+  "nl-pdok-ortho-hr": "PDOK luchtfoto (NL)",
+  "au-qld-latest": "Queensland imagery",
+  "au-nsw-six": "NSW imagery",
+  "jp-gsi-seamlessphoto": "GSI seamless photo (JP)",
+  "tw-nlsc-photo2": "NLSC ortho (TW)",
+};
+
 /** Human name of a reference provider, with its capture date where known. */
 export function describeReference(check: IGeorefCheck, provider: string): string {
   const captured = check.metadata.references?.[provider]?.capture_date;
   if (provider === "esri") return "Esri World Imagery (current)";
+  if (provider.startsWith("de-")) return `Orthophoto ${provider.slice(3).split("-")[0].toUpperCase()} (DE)`;
   if (provider.startsWith("wayback-")) return `Esri Wayback${captured ? `, captured ${captured}` : ""}`;
-  return { google: "Google satellite", maptiler: "MapTiler satellite", mapbox: "Mapbox satellite" }[provider] ?? provider;
+  return PROVIDER_NAMES[provider] ?? provider;
 }
 
 /** One-line summary for the audit card. */

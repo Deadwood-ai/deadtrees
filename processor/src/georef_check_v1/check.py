@@ -52,7 +52,9 @@ def run_georef_check(cog_path: str, aoi_4326: dict | None, flight: date | None) 
 	lon, lat = float(centre[0][0]), float(centre[1][0])
 	footprint, edge = footprint_samples(source.mask)
 	refs, errors = fetch_references(grid, (lon, lat), flight)
-	evidence = [measure_reference(r.provider, *match(source.image, r.image), footprint, edge, grid) for r in refs]
+	evidence = [
+		measure_reference(r.provider, r.group, *match(source.image, r.image), footprint, edge, grid) for r in refs
+	]
 	assessment = combine(evidence)
 	retried = False
 	if assessment.decision == 'uncertain' and source.used_aoi and refs:
@@ -65,7 +67,7 @@ def run_georef_check(cog_path: str, aoi_4326: dict | None, flight: date | None) 
 			a, b, scores = match(masked, r.image)
 			px = np.clip(np.rint(a).astype(int), 0, [grid.width - 1, grid.height - 1])
 			keep = inside[px[:, 1], px[:, 0]]
-			retry.append(measure_reference(r.provider, a[keep], b[keep], scores[keep], footprint, edge, grid))
+			retry.append(measure_reference(r.provider, r.group, a[keep], b[keep], scores[keep], footprint, edge, grid))
 		retried_assessment = combine(retry)
 		if retried_assessment.decision != 'uncertain':
 			evidence, assessment, retried = retry, retried_assessment, True
@@ -87,7 +89,8 @@ def run_georef_check(cog_path: str, aoi_4326: dict | None, flight: date | None) 
 		'grid_m_per_px': round(grid.metres_per_pixel(), 4),
 		'centre_lonlat': [round(lon, 6), round(lat, 6)],
 		'references': {
-			r.provider: {'zoom': r.zoom, 'capture_date': r.capture_date, 'tile_url': r.tile_url} for r in refs
+			r.provider: {'group': r.group, 'zoom': r.zoom, 'capture_date': r.capture_date, 'viewer': r.viewer}
+			for r in refs
 		},
 	}
 	return GeorefCheck(
