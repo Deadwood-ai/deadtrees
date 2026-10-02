@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useCallback, useState } from "react";
+import { useDatasetFileUrls } from "../../hooks/useDatasetAccess";
+import { useOrthoLayer } from "../../hooks/useOrthoLayer";
+import type { IDatasetFileSource } from "../../utils/datasetFileUrls";
 import { Map, View } from "ol";
 import { defaults as defaultInteractions } from "ol/interaction/defaults";
 import TileLayerWebGL from "ol/layer/WebGLTile";
-import { GeoTIFF } from "ol/source";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import VectorTileLayer from "ol/layer/VectorTile";
@@ -30,8 +32,6 @@ import {
   createAOIVectorLayer,
   createAOIMaskLayer,
 } from "../DatasetDetailsMap/createVectorLayer";
-import { Settings } from "../../config";
-import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import {
   transformPolygonUtmToWebMercator,
   transformPolygonWebMercatorToUtm,
@@ -47,7 +47,8 @@ import { getLayerVisibilityState } from "./utils/layerVisibilityState";
 
 interface Props {
   datasetId: number;
-  cogPath?: string | null;
+  /** Dataset whose orthophoto is shown; private files load from signed addresses. */
+  fileSource?: IDatasetFileSource | null;
   resolution?: PatchResolution;
   patches: IReferencePatch[] | undefined;
   onPatchSelected?: (patch: IReferencePatch | null) => void;
@@ -64,7 +65,7 @@ interface Props {
 
 export default function ReferencePatchMap({
   datasetId,
-  cogPath,
+  fileSource,
   resolution = 20,
   patches,
   onPatchSelected,
@@ -79,6 +80,7 @@ export default function ReferencePatchMap({
   isEditingMode = false,
 }: Props) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const { cogUrl } = useDatasetFileUrls(fileSource);
   const mapRef = useRef<Map | null>(null);
   const patchLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const orthoLayerRef = useRef<TileLayerWebGL | null>(null);
@@ -216,26 +218,6 @@ export default function ReferencePatchMap({
     });
 
     const layers: BaseLayer[] = [basemap];
-    if (cogPath) {
-      const ortho = new TileLayerWebGL({
-        source: new GeoTIFF({
-          sources: [
-            {
-              url: Settings.COG_BASE_URL + cogPath,
-              nodata: 0,
-              bands: [1, 2, 3],
-            },
-          ],
-          convertToRGB: true,
-          sourceOptions: COG_SOURCE_OPTIONS,
-        }),
-        maxZoom: 25, // Allow very high zoom for detailed ortho imagery
-        cacheSize: 1024,
-        preload: 0,
-      });
-      orthoLayerRef.current = ortho;
-      layers.push(ortho);
-    }
 
     // AOI and prediction layers will be added dynamically via separate useEffect
 
@@ -894,21 +876,8 @@ export default function ReferencePatchMap({
     }
   }, [aoiData?.geometry]);
 
-  // Fit view to ortho extent
-  useEffect(() => {
-    if (!mapRef.current || !orthoLayerRef.current) return;
-    const map = mapRef.current;
-    const source = orthoLayerRef.current.getSource();
-    source
-      ?.getView()
-      .then((vo) => {
-        const viewOptions = vo as { extent?: [number, number, number, number] };
-        if (viewOptions?.extent) {
-          map.getView().fit(viewOptions.extent, { padding: [20, 20, 20, 20], maxZoom: 22, duration: 200 });
-        }
-      })
-      .catch(() => {});
-  }, [cogPath]);
+  // Orthophoto layer: built once the (signed) address is known, renewed with it
+  useOrthoLayer(mapRef, orthoLayerRef, cogUrl, { maxZoom: 25, fitMaxZoom: 22 });
 
   // Zoom to specific patch and sync selection when focusPatchId changes
   useEffect(() => {

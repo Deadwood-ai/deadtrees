@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Settings } from "../../config";
 import { supabase } from "../../hooks/useSupabase";
+import { fetchPrivateDatasetFilesBatched } from "../../api/datasetAccess";
 
 export type PriwaFlightType = "umfeldbefliegung" | "not_priwa" | null;
 
@@ -172,11 +173,14 @@ export const fetchPriwaMosaics = async (
     offset += PRIWA_MOSAIC_PAGE_SIZE;
   }
 
+  // The user's own private flights are not served statically; use signed addresses.
+  const privateFiles = await fetchPrivateDatasetFilesBatched(rows.map((row) => Number(row.id)));
+
   return rows.map((row) => ({
     id: row.id,
     projectId: row.project_id,
     label: row.label,
-    cogUrl: row.cog_url,
+    cogUrl: privateFiles[Number(row.id)]?.cog_url ?? row.cog_url,
     bbox: row.bbox,
     captureDate: row.capture_date,
     createdAt: row.created_at,
@@ -193,6 +197,7 @@ export function usePriwaMosaics(projectId: string | null | undefined) {
     enabled: !!projectId,
     queryFn: () => fetchPriwaMosaics(projectId as string),
     staleTime: 5 * 60 * 1000,
+    refetchInterval: 45 * 60 * 1000, // Renew signed imagery URLs before expiry.
     gcTime: 10 * 60 * 1000,
     retry: 1,
   });

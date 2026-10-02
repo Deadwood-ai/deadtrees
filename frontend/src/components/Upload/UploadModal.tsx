@@ -14,16 +14,16 @@ import {
   Typography,
   message,
 } from "antd";
-import { InfoCircleOutlined, InboxOutlined, LockOutlined } from "@ant-design/icons";
+import { InfoCircleOutlined, InboxOutlined } from "@ant-design/icons";
 import { useAuth } from "../../hooks/useAuthProvider";
-import { ILicense, IPlatform, UploadType } from "../../types/dataset";
+import { IDataAccess, ILicense, IPlatform, UploadType } from "../../types/dataset";
 import { useFileUpload } from "../../hooks/useFileUpload";
 import { useUploadNotification } from "../../hooks/useUploadNotification";
 import PickerWithType from "./PickerWithType";
 import uploadOrtho, { UploadRejectedError } from "../../api/uploadOrtho";
 import { useData } from "../../hooks/useDataProvider";
 import addProcess from "../../api/addProcess";
-import { useCanUploadPrivate } from "../../hooks/useUserPrivileges";
+import VisibilityChoice from "../DatasetAccess/VisibilityChoice";
 import {
   detectUploadType,
   validateFileSize,
@@ -48,7 +48,7 @@ interface IFormValues {
   author: string[];
   doi: string;
   additional_information: string;
-  is_private: boolean;
+  data_access: IDataAccess;
 }
 
 interface UploadModalProps {
@@ -138,7 +138,6 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
   const [uploadValidationWarnings, setUploadValidationWarnings] = useState<string[]>([]);
   const { track } = useAnalytics("profile");
 
-  const { canUpload: canUploadPrivate } = useCanUploadPrivate();
 
   const handleBeforeUpload = async (file: RcFile) => {
     try {
@@ -246,7 +245,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
         aquisition_month: values.aquisition_date ? values.aquisition_date.month() + 1 : undefined,
         aquisition_day: values.aquisition_date?.date(),
         additional_information: values.additional_information,
-        data_access: values.is_private ? "private" : "public",
+        data_access: values.data_access,
         citation_doi: values.doi,
       };
       // console.log("metadata", metadata);
@@ -322,7 +321,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
         <Form
           layout="vertical"
           onFinish={onFormFinish}
-          initialValues={{ platform: "drone", agreement: false, is_private: false }}
+          initialValues={{ platform: "drone", agreement: false, data_access: IDataAccess.public }}
           variant="filled"
           form={form}
         >
@@ -487,16 +486,9 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
 
             <AdditionalInformationFormItem />
 
-            {canUploadPrivate && (
-              <Form.Item name="is_private" valuePropName="checked">
-                <Checkbox className="mt-2">
-                  <span className="flex items-center text-sm text-gray-700">
-                    <LockOutlined className="mr-2" />
-                    Upload as private data (only available to you)
-                  </span>
-                </Checkbox>
-              </Form.Item>
-            )}
+            <Form.Item name="data_access" label="Who can see this dataset?" className="mt-2">
+              <VisibilityChoice />
+            </Form.Item>
 
             <Form.Item>
               <div className="space-y-4">

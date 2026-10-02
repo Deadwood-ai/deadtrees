@@ -12,9 +12,9 @@ interface Dataset {
   id: number;
   file_name: string;
   authors?: string[] | null;
-  aquisition_year?: number;
-  aquisition_month?: number;
-  aquisition_day?: number;
+  aquisition_year?: number | string;
+  aquisition_month?: number | string;
+  aquisition_day?: number | string;
   platform?: string;
   citation_doi?: string | null;
   additional_information?: string | null;
@@ -53,17 +53,17 @@ const EditDatasetModal: React.FC<EditDatasetModalProps> = ({ visible, onClose, d
         if (dataset.aquisition_day) {
           initialPickerType = "Year/Month/Day";
           initialDate = dayjs()
-            .year(dataset.aquisition_year)
-            .month((dataset.aquisition_month || 1) - 1)
-            .date(dataset.aquisition_day);
+            .year(Number(dataset.aquisition_year))
+            .month((Number(dataset.aquisition_month) || 1) - 1)
+            .date(Number(dataset.aquisition_day));
         } else if (dataset.aquisition_month) {
           initialPickerType = "Year/Month";
           initialDate = dayjs()
-            .year(dataset.aquisition_year)
-            .month(dataset.aquisition_month - 1);
+            .year(Number(dataset.aquisition_year))
+            .month(Number(dataset.aquisition_month) - 1);
         } else {
           initialPickerType = "Year";
-          initialDate = dayjs().year(dataset.aquisition_year);
+          initialDate = dayjs().year(Number(dataset.aquisition_year));
         }
       }
 

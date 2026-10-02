@@ -123,3 +123,47 @@ def datasets_with_mixed_access(auth_token, test_user, test_processor_user):
 		with use_client(auth_token) as supabase_client:
 			for dataset_id in datasets:
 				supabase_client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
+
+
+ACCESS_TEST_PASSWORD = 'access-test-password-1'
+
+
+def _create_access_account(label: str) -> dict:
+	import uuid
+
+	from shared.db import use_service_client
+
+	email = f'access-{label}-{uuid.uuid4().hex[:10]}@example.com'
+	with use_service_client() as client:
+		user = client.auth.admin.create_user(
+			{'email': email, 'password': ACCESS_TEST_PASSWORD, 'email_confirm': True}
+		).user
+	# Sign in with a separate client: shared.db.login caches one session for every
+	# user, which would replace the session other fixtures rely on.
+	session = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY).auth.sign_in_with_password(
+		{'email': email, 'password': ACCESS_TEST_PASSWORD}
+	)
+	return {'id': user.id, 'email': email, 'token': session.session.access_token}
+
+
+@pytest.fixture(scope='module')
+def access_accounts():
+	"""Registered accounts for dataset-access tests: an owner, grantees and a stranger.
+
+	Datasets, publications and the accounts themselves are removed afterwards.
+	"""
+	from shared.db import use_service_client
+
+	created = {
+		label: _create_access_account(label)
+		for label in ('owner', 'reader', 'downloader', 'editor', 'admin', 'expired', 'stranger')
+	}
+	yield created
+	with use_service_client() as client:
+		for account in created.values():
+			owned = client.table(settings.datasets_table).select('id').eq('user_id', account['id']).execute().data
+			for row in owned:
+				client.table('jt_data_publication_datasets').delete().eq('dataset_id', row['id']).execute()
+				client.table(settings.datasets_table).delete().eq('id', row['id']).execute()
+			client.table('data_publication').delete().eq('user_id', account['id']).execute()
+			client.auth.admin.delete_user(account['id'])

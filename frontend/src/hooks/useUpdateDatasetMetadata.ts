@@ -19,16 +19,14 @@ export function useUpdateDatasetMetadata() {
 
   return useMutation({
     mutationFn: async (payload: UpdateDatasetMetadataPayload) => {
-      const { dataset_id, ...updateData } = payload;
+      const { dataset_id, ...details } = payload;
 
-      // Update the dataset metadata in v2_datasets table
-      // Note: RLS policy handles authorization, so we don't need .eq("user_id", user?.id)
-      const { data, error } = await supabase
-        .from("v2_datasets")
-        .update(updateData)
-        .eq("id", dataset_id)
-        .select()
-        .single();
+      // The database checks that the caller owns the dataset or holds an Editor or
+      // Admin grant, and changes only these descriptive fields.
+      const { data, error } = await supabase.rpc("update_dataset_details", {
+        p_dataset_id: dataset_id,
+        p_details: details,
+      });
 
       if (error) {
         console.error("Update error:", error);
@@ -38,7 +36,9 @@ export function useUpdateDatasetMetadata() {
       //   console.log("Update successful:", data);
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, payload) => {
+      queryClient.invalidateQueries({ queryKey: ["datasets", payload.dataset_id] });
+
       // Invalidate only the user's datasets (not global datasets)
       queryClient.invalidateQueries({
         queryKey: ["userDatasets", user?.id],

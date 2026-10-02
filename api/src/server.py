@@ -1,8 +1,24 @@
+import logging
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from shared.__version__ import __version__
-from .routers import process, upload, info, auth, download, dte_stats, prepackaged, search, priwa_warnkarte
+from .routers import (
+	process,
+	upload,
+	info,
+	auth,
+	download,
+	dte_stats,
+	prepackaged,
+	search,
+	priwa_warnkarte,
+	dataset_access,
+)
+
+from .access.tickets import redact_file_tickets
+
+logging.getLogger('uvicorn.access').addFilter(redact_file_tickets)
 
 app = FastAPI(
 	title='Deadwood-AI API',
@@ -25,8 +41,9 @@ app.add_middleware(
     allow_origin_regex='https://deadwood-d4a4b.*|http://(127\\.0\\.0\\.1|localhost)(:\\d+)?',
 	allow_credentials=True,
 	allow_methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-	allow_headers=['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
-	expose_headers=['Content-Length', 'Content-Range'],
+	# Range lets the map read private COGs in blocks through the API.
+	allow_headers=['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With', 'Range'],
+	expose_headers=['Content-Length', 'Content-Range', 'Accept-Ranges'],
 	max_age=3600,
 )
 
@@ -59,6 +76,9 @@ app.include_router(prepackaged.router)
 
 # add PRIWA Warnkarte validation, import, publication, and safe overlay routes
 app.include_router(priwa_warnkarte.router)
+
+# add private dataset files and visibility changes
+app.include_router(dataset_access.router)
 
 # add the download routes to the app
 # app.include_router(download.download_app)

@@ -127,7 +127,7 @@ export default function PatchQAPhase({ dataset, onUnsavedChanges, onRequestValid
         <div className="relative flex-1">
           <ReferencePatchMap
             datasetId={dataset.id}
-            cogPath={dataset.cog_path}
+            fileSource={dataset}
             resolution={activeResolution}
             patches={sortedPatches}
             focusPatchId={currentPatch?.id}

@@ -75,6 +75,9 @@ RUN pip install --no-cache-dir -r /tmp/requirements-test.txt && \
     rm /tmp/requirements-test.txt
 
 COPY ./api/tests /app/api/tests
+# CPU imagery contract tests use the real processor stages without GPU dependencies.
+COPY ./processor/src /app/processor/src
+COPY ./nginx /app/nginx
 COPY ./shared/testing /app/shared/testing
 COPY ./shared/tests /app/shared/tests
 COPY pytest.ini /app/pytest.ini

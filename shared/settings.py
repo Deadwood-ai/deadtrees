@@ -110,6 +110,10 @@ class Settings(BaseSettings):
 	DOWNLOADS_DIR: str = 'downloads'
 	PROCESSING_DIR: str = 'processing_dir'
 	RAW_IMAGES_DIR: str = 'raw_images'
+	# Signing key for private file paths. When empty, a key is derived from the
+	# service-role key so deployments need no new secret.
+	ASSET_TICKET_SECRET: str = ''
+	ASSET_TICKET_TTL_SECONDS: int = 3600
 
 	# Temporary processing directory
 	# tmp_processing_path: str = str(Path(tempfile.mkdtemp(prefix='processing')))

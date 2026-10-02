@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useDatasetFileUrls } from "../hooks/useDatasetAccess";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button, Space, message, Radio } from "antd";
 import { ArrowLeftOutlined } from "@ant-design/icons";
@@ -7,7 +8,6 @@ import { defaults as defaultInteractions } from "ol/interaction/defaults";
 import View from "ol/View";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { GeoTIFF } from "ol/source";
-import { Settings } from "../config";
 import { useDatasets } from "../hooks/useDatasets";
 import { useDatasetLabelTypes } from "../hooks/useDatasetLabelTypes";
 import usePolygonEditor from "../hooks/usePolygonEditor";
@@ -66,6 +66,7 @@ export default function DatasetLabelEditor() {
     [datasets, id],
   );
 
+  const { cogUrl } = useDatasetFileUrls(dataset);
   const labelTypes = useDatasetLabelTypes({ datasetId: dataset?.id, enabled: !!dataset?.id });
 
   useEffect(() => {
@@ -75,12 +76,12 @@ export default function DatasetLabelEditor() {
     const basemapLayer = acquireLibertyBasemapGroup();
 
     let orthoCogLayer: TileLayerWebGL | undefined;
-    if (dataset?.cog_path) {
+    if (cogUrl) {
       orthoCogLayer = new TileLayerWebGL({
         source: new GeoTIFF({
           sources: [
             {
-              url: Settings.COG_BASE_URL + dataset.cog_path,
+              url: cogUrl,
               nodata: 0,
               bands: [1, 2, 3],
             },
@@ -135,7 +136,7 @@ export default function DatasetLabelEditor() {
       serverLayerRef.current = null;
       baseServerStyleRef.current = null;
     };
-  }, [dataset]);
+  }, [dataset, cogUrl]);
 
   // Swap prediction layer when activeLayer changes
   useEffect(() => {

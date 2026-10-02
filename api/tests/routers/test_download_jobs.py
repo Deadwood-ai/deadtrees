@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.src.download import jobs
-from api.src.download.jobs import JobState, PreparedFileJob
+from api.src.download.jobs import ExportKind, JobState, Manifest, PreparedFileJob
 from api.src.download.downloads import create_consolidated_geopackage, read_export_scope
 from api.src.download.keys import get_bundle_filename, labels_content_version, prepared_job
 from api.src.server import app
@@ -24,12 +24,14 @@ from shared.settings import settings
 
 # Fixtures shared with the main download tests.
 from api.tests.routers.test_download import (  # noqa: F401
+	_local_path,
 	multi_test_datasets,
 	private_test_dataset_for_download,
 	test_dataset_for_download,
 )
 
 client = TestClient(app)
+MANIFEST = Manifest(ExportKind.DATASET, (1,))
 
 POLYGON = {
 	'type': 'MultiPolygon',
@@ -79,7 +81,7 @@ def test_second_prepare_joins_live_build_without_touching_its_temp_file(tmp_path
 			handle.write(b'complete')
 
 	assert job.claim()
-	runner = threading.Thread(target=job.run, args=(slow_build,))
+	runner = threading.Thread(target=job.run, args=(slow_build, MANIFEST))
 	runner.start()
 	assert started.wait(5)
 
@@ -92,7 +94,7 @@ def test_second_prepare_joins_live_build_without_touching_its_temp_file(tmp_path
 	runner.join()
 	assert job.path.read_bytes() == b'first job complete'
 	assert job.status().state == JobState.COMPLETED
-	assert _leftovers(tmp_path) == ['bundle.zip']
+	assert _leftovers(tmp_path) == ['bundle.zip', 'bundle.zip.manifest.json']
 
 
 def test_parallel_runs_of_one_key_each_publish_a_complete_file(tmp_path):
@@ -110,7 +112,7 @@ def test_parallel_runs_of_one_key_each_publish_a_complete_file(tmp_path):
 		return write
 
 	job.claim()
-	runs = [threading.Thread(target=job.run, args=(build(content),)) for content in (b'AAAAaaaa', b'BBBBbbbb')]
+	runs = [threading.Thread(target=job.run, args=(build(content), MANIFEST)) for content in (b'AAAAaaaa', b'BBBBbbbb')]
 	for run in runs:
 		run.start()
 	for run in runs:
@@ -118,7 +120,7 @@ def test_parallel_runs_of_one_key_each_publish_a_complete_file(tmp_path):
 
 	assert job.path.read_bytes() in (b'AAAAaaaa', b'BBBBbbbb')
 	assert not job.error_path.exists()
-	assert _leftovers(tmp_path) == ['bundle.zip']
+	assert _leftovers(tmp_path) == ['bundle.zip', 'bundle.zip.manifest.json']
 
 
 def test_failed_build_writes_error_marker_and_removes_temp_files(tmp_path):
@@ -130,7 +132,7 @@ def test_failed_build_writes_error_marker_and_removes_temp_files(tmp_path):
 		raise RuntimeError('synthetic failure')
 
 	assert job.claim()
-	job.run(failing_build)
+	job.run(failing_build, MANIFEST)
 
 	status = job.status()
 	assert status.state == JobState.FAILED
@@ -141,7 +143,7 @@ def test_failed_build_writes_error_marker_and_removes_temp_files(tmp_path):
 def test_empty_result_is_a_failure(tmp_path):
 	job = PreparedFileJob(tmp_path / 'bundle.zip')
 	assert job.claim()
-	job.run(lambda target: target.touch())
+	job.run(lambda target: target.touch(), MANIFEST)
 	assert job.status().state == JobState.FAILED
 	assert not job.path.exists()
 
@@ -149,12 +151,12 @@ def test_empty_result_is_a_failure(tmp_path):
 def test_retry_after_failure_clears_the_error_marker(tmp_path):
 	job = PreparedFileJob(tmp_path / 'bundle.zip')
 	job.claim()
-	job.run(lambda target: (_ for _ in ()).throw(RuntimeError('first attempt')))
+	job.run(lambda target: (_ for _ in ()).throw(RuntimeError('first attempt')), MANIFEST)
 	assert job.status().state == JobState.FAILED
 
 	assert job.claim()
 	assert not job.error_path.exists()
-	job.run(lambda target: target.write_bytes(b'ok'))
+	job.run(lambda target: target.write_bytes(b'ok'), MANIFEST)
 	assert job.status().state == JobState.COMPLETED
 
 
@@ -169,7 +171,7 @@ def test_stale_inflight_marker_reports_failed_and_can_be_reclaimed(tmp_path):
 	assert status.message == jobs.INTERRUPTED_MESSAGE
 
 	assert job.claim()
-	job.run(lambda target: target.write_bytes(b'rebuilt'))
+	job.run(lambda target: target.write_bytes(b'rebuilt'), MANIFEST)
 	assert job.status().state == JobState.COMPLETED
 
 
@@ -185,7 +187,7 @@ def test_heartbeat_keeps_a_long_build_fresh(tmp_path, monkeypatch):
 		target.write_bytes(b'ok')
 
 	assert job.claim()
-	job.run(slow_build)
+	job.run(slow_build, MANIFEST)
 	assert states == [JobState.PROCESSING]
 	assert job.status().state == JobState.COMPLETED
 
@@ -229,7 +231,7 @@ def test_dataset_bundle_key_changes_with_original_filename_and_content(auth_toke
 		original_path = _prepare(status_url, auth_token, use_original_filename='true')['download_path']
 		assert original['status'] in ('processing', 'completed')
 		assert original_path != first_path
-		with zipfile.ZipFile(settings.downloads_path / original_path.removeprefix('/downloads/v1/')) as archive:
+		with zipfile.ZipFile(_local_path(original_path)) as archive:
 			assert 'test-private-download.tif' in archive.namelist()
 
 		with use_client(auth_token) as db_client:
@@ -243,7 +245,7 @@ def test_dataset_bundle_key_changes_with_original_filename_and_content(auth_toke
 		assert _prepare(url, auth_token)['status'] in ('processing', 'completed')
 		second_path = _prepare(status_url, auth_token)['download_path']
 		assert second_path != first_path
-		with zipfile.ZipFile(settings.downloads_path / second_path.removeprefix('/downloads/v1/')) as archive:
+		with zipfile.ZipFile(_local_path(second_path)) as archive:
 			metadata = archive.read('METADATA.csv').decode()
 		assert 'edited after download' in metadata
 	finally:
@@ -320,7 +322,7 @@ def test_mixed_license_bundle_contains_every_license(auth_token, multi_test_data
 	status = _bundle_status(job_id, auth_token)
 	assert status['status'] == 'completed', status
 
-	with zipfile.ZipFile(settings.downloads_path / status['download_path'].removeprefix('/downloads/v1/')) as archive:
+	with zipfile.ZipFile(_local_path(status['download_path'])) as archive:
 		license_text = archive.read('LICENSE.txt').decode()
 		citation = archive.read('CITATION.cff').decode()
 		with archive.open('METADATA.csv') as csv_file:
@@ -389,7 +391,7 @@ def test_private_dataset_labels_are_exported_when_the_default_key_is_anon(
 		status = _prepare(f'/api/v1/download/datasets/{dataset_id}/labels/status', auth_token)
 		assert status['status'] == 'completed', status
 
-		gpkg = settings.downloads_path / status['download_path'].removeprefix('/downloads/v1/')
+		gpkg = _local_path(status['download_path'])
 		layer = f'deadwood_{LabelSourceEnum.visual_interpretation.value}'
 		assert layer in fiona.listlayers(gpkg)
 		with fiona.open(gpkg, layer=layer) as features:
@@ -424,14 +426,14 @@ def test_label_export_includes_more_geometries_than_one_postgrest_page(
 def test_a_new_version_replaces_older_versions_of_the_same_variant_only(tmp_path):
 	old = tmp_path / f'12_{"a" * 12}.zip'
 	other_variant = tmp_path / f'12_nolabels_{"a" * 12}.zip'
-	for path in (old, old.with_name(f'{old.name}.error'), other_variant):
+	for path in (old, old.with_name(f'{old.name}.error'), old.with_name(f'{old.name}.manifest.json'), other_variant):
 		path.write_bytes(b'old')
 
 	job = prepared_job(tmp_path / f'12_{"b" * 12}.zip')
 	assert job.claim()
-	job.run(lambda target: target.write_bytes(b'new'))
+	job.run(lambda target: target.write_bytes(b'new'), MANIFEST)
 
-	assert _leftovers(tmp_path) == sorted([job.path.name, other_variant.name])
+	assert _leftovers(tmp_path) == sorted([job.path.name, job.manifest_path.name, other_variant.name])
 
 
 def test_bundle_versions_replace_older_versions_of_the_same_bundle(tmp_path):
@@ -442,9 +444,9 @@ def test_bundle_versions_replace_older_versions_of_the_same_bundle(tmp_path):
 
 	job = prepared_job(tmp_path / f'{variant}{"b" * 12}.zip')
 	assert job.claim()
-	job.run(lambda target: target.write_bytes(b'new'))
+	job.run(lambda target: target.write_bytes(b'new'), MANIFEST)
 
-	assert _leftovers(tmp_path) == sorted([job.path.name, other_bundle.name])
+	assert _leftovers(tmp_path) == sorted([job.path.name, job.manifest_path.name, other_bundle.name])
 
 
 def _hide_labels_from_non_owners(dataset_id: int, owner: str, rule: str) -> None:
@@ -476,13 +478,13 @@ def test_downloads_contain_only_labels_the_user_may_read(
 		_prepare(labels_url, other_token)
 		other_status = _prepare(labels_status_url, other_token)
 		assert other_status['status'] == 'failed', other_status
-		assert other_status.get('download_path') != owner_status['download_path']
+		assert not other_status.get('download_path')
 
 		dataset_url = f'/api/v1/download/datasets/{dataset_id}/dataset.zip'
 		_prepare(dataset_url, other_token)
 		bundle_status = _prepare(f'/api/v1/download/datasets/{dataset_id}/status', other_token)
 		assert bundle_status['status'] == 'completed', bundle_status
-		zip_path = settings.downloads_path / bundle_status['download_path'].removeprefix('/downloads/v1/')
+		zip_path = _local_path(bundle_status['download_path'])
 		with zipfile.ZipFile(zip_path) as archive:
 			assert not [name for name in archive.namelist() if name.startswith('labels_')]
 	finally:

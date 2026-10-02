@@ -6,6 +6,7 @@ import { IDataset } from "../../types/dataset";
 import { useDatasetLabelTypes } from "../../hooks/useDatasetLabelTypes";
 import { useDatasetDetailsMap } from "../../hooks/useDatasetDetailsMapProvider";
 import { useDatasetAOI } from "../../hooks/useDatasetAudit";
+import { useDatasetFileUrls } from "../../hooks/useDatasetAccess";
 import { hasForestCoverPredictionOutput } from "../../utils/predictionAvailability";
 import { FeatureTooltip, FeaturePopover, ClickedPolygonInfo } from "../DatasetDetailsMap/overlays";
 import {
@@ -111,6 +112,7 @@ const DatasetAuditMap = forwardRef<DatasetAuditMapHandle, DatasetAuditMapProps>(
 	});
 
 	// Fetch AOI data
+	const fileUrls = useDatasetFileUrls(data);
 	const { data: aoiData, isLoading: isAOILoading } = useDatasetAOI(data?.id);
 	const aoiGeometry = aoiData?.geometry;
 
@@ -132,7 +134,7 @@ const DatasetAuditMap = forwardRef<DatasetAuditMapHandle, DatasetAuditMapProps>(
 		orthoLayer,
 	} = useMapCore({
 		containerRef: mapContainerRef,
-		cogPath: data?.cog_path,
+		cogUrl: fileUrls.cogUrl,
 		initialViewport: viewport,
 		onViewportChange: setViewport,
 		onMapReady,

@@ -11,10 +11,15 @@ function isOdmWorkflow(dataset: DatasetProgress): boolean {
   return dataset.file_name?.toLowerCase().endsWith(".zip") || false;
 }
 
-export function canDownloadCompleteDataset(dataset: DatasetDownloadStatus): boolean {
+/**
+ * Whether the complete bundle (orthophoto included) can be offered. The server decides
+ * full-resolution access (public, owner or download grant); without that answer, view-only
+ * datasets are treated as not downloadable.
+ */
+export function canDownloadCompleteDataset(dataset: DatasetDownloadStatus, fullResolutionAllowed?: boolean): boolean {
   const odmComplete = !isOdmWorkflow(dataset) || dataset.is_odm_done;
   return !!(
-    dataset.data_access !== IDataAccess.viewonly &&
+    (fullResolutionAllowed ?? dataset.data_access === IDataAccess.public) &&
     !dataset.has_error &&
     FULL_DOWNLOAD_ALLOWED_STATUSES.has(dataset.current_status) &&
     dataset.is_upload_done &&

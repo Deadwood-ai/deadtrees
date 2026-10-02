@@ -745,7 +745,7 @@ export default function ReferencePatchEditorView({
       <div className="absolute inset-0 z-0">
         <ReferencePatchMap
           datasetId={dataset.id}
-          cogPath={dataset.cog_path}
+          fileSource={dataset}
           resolution={selectedResolution}
           patches={patchesForResolution}
           onPatchSelected={handlePatchSelected}

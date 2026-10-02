@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { useDatasetFileUrls } from "../../hooks/useDatasetAccess";
 // Navigation is handled via onClose prop
 import { message, Button, Spin, Alert } from "antd";
 import { ArrowLeftOutlined } from "@ant-design/icons";
@@ -11,7 +12,6 @@ import GeoJSON from "ol/format/GeoJSON";
 import type BaseLayer from "ol/layer/Base";
 
 import { IDataset } from "../../types/dataset";
-import { Settings } from "../../config";
 import { EditorToolbar, LayerRadioButtons, type LayerSelection } from "../PolygonEditor";
 import usePolygonEditor from "../../hooks/usePolygonEditor";
 import useAISegmentation from "../../hooks/useAISegmentation";
@@ -37,6 +37,7 @@ interface Props {
 }
 
 export default function CorrectionEditorView({ dataset, initialLayerType, onClose }: Props) {
+  const { cogUrl } = useDatasetFileUrls(dataset);
   const { user } = useAuth();
   const { viewport } = useDatasetDetailsMap();
   const mapRef = useRef<OLMap | null>(null);
@@ -90,13 +91,13 @@ export default function CorrectionEditorView({ dataset, initialLayerType, onClos
 
   // Initialize map
   useEffect(() => {
-    if (!mapContainerRef.current || mapRef.current || !dataset.cog_path) return;
+    if (!mapContainerRef.current || mapRef.current || !cogUrl) return;
 
     const orthoCogLayer = new TileLayerWebGL({
       source: new GeoTIFF({
         sources: [
           {
-            url: Settings.COG_BASE_URL + dataset.cog_path,
+            url: cogUrl,
             nodata: 0,
             bands: [1, 2, 3],
           },
@@ -197,7 +198,7 @@ export default function CorrectionEditorView({ dataset, initialLayerType, onClos
     };
     // OpenLayers map setup is intentionally owned by dataset/layer identity; viewport changes are persisted by the map.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataset.cog_path, hasDisplayableForestCover, deadwood.data?.id, forestCover.data?.id]);
+  }, [cogUrl, hasDisplayableForestCover, deadwood.data?.id, forestCover.data?.id]);
 
   // Start editing
   const handleStartEditing = useCallback(async () => {

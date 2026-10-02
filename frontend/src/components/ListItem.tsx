@@ -1,8 +1,8 @@
 import { memo } from "react";
+import { useDatasetFileUrls } from "../hooks/useDatasetAccess";
 import { Button, Tag, Tooltip } from "antd";
 import { useNavigate } from "react-router-dom";
 import { IDataAccess, IDataset, IDatasetArchiveItem } from "../types/dataset";
-import { Settings } from "../config";
 import countryList from "../utils/countryList";
 import { useDatasetDetailsMap } from "../hooks/useDatasetDetailsMapProvider";
 import {
@@ -106,6 +106,7 @@ const ListItem = ({
   const biomeColor = getBiomeTagColor(biomeName);
   const biomeIcon = getBiomeEmoji(biomeName);
   const isPrivate = item.data_access === IDataAccess.private;
+  const { thumbnailUrl } = useDatasetFileUrls(item);
 
   return (
     <div
@@ -128,11 +129,7 @@ const ListItem = ({
       />
       <div className="relative h-16 w-16 min-h-16 min-w-16 shrink-0 overflow-hidden rounded-lg">
         <img
-          src={
-            item.thumbnail_path
-              ? Settings.THUMBNAIL_URL + item.thumbnail_path
-              : "/assets/tree-icon.png"
-          }
+          src={thumbnailUrl ?? "/assets/tree-icon.png"}
           className="m-0 h-full w-full scale-150 object-cover transition-transform hover:z-10"
           loading="lazy"
         />

@@ -24,7 +24,8 @@ from api.src.download.downloads import (
 	create_consolidated_geopackage,
 	read_export_scope,
 )
-from api.src.download.jobs import JobState, JobStatus, PreparedFileJob
+from api.src.download.delivery import export_url
+from api.src.download.jobs import ExportKind, JobState, JobStatus, Manifest, PreparedFileJob
 from api.src.download.keys import (
 	content_version,
 	generate_bundle_job_id,
@@ -118,34 +119,34 @@ def parse_dataset_id(dataset_id: str) -> int:
 		raise HTTPException(status_code=400, detail=f'Invalid dataset ID: {dataset_id}')
 
 
-def enforce_dataset_download_access(
-	dataset: Dataset,
-	allow_viewonly_full_download: bool,
-):
-	"""Enforce dataset-level access policy for download endpoints."""
-	if not allow_viewonly_full_download and dataset.data_access.value == 'viewonly':
-		raise HTTPException(
-			status_code=403,
-			detail='This dataset is view-only. Please download predictions (GPKG) instead.',
-		)
+DOWNLOAD_DENIED = {
+	ExportKind.DATASET: 'Downloading the orthophoto needs download access to this dataset.',
+	ExportKind.LABELS: 'Downloading predictions needs download access to this dataset.',
+}
+
+
+def require_dataset_download(client, dataset: Dataset, kind: ExportKind) -> None:
+	"""The caller may download this dataset as this export kind (see can_download_dataset)."""
+	if not client.rpc('can_download_dataset', {'p_dataset_id': dataset.id, 'p_kind': kind.value}).execute().data:
+		raise HTTPException(status_code=403, detail=DOWNLOAD_DENIED[kind])
 
 
 async def get_accessible_dataset(
 	dataset_id: int,
 	token: str,
-	allow_viewonly_full_download: bool = True,
+	kind: ExportKind,
 ) -> tuple[Dataset, dict]:
-	"""Get dataset and ortho data if the requesting user is allowed to access it."""
+	"""Get dataset and ortho data if the requesting user may download them as this export kind.
+
+	A dataset the user cannot view is reported as not found, like a missing one.
+	"""
 	with use_client(token) as client:
 		dataset_response = client.table(settings.datasets_table).select('*').eq('id', dataset_id).execute()
 		if not dataset_response.data:
 			raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
 
 		dataset = Dataset(**dataset_response.data[0])
-		enforce_dataset_download_access(
-			dataset=dataset,
-			allow_viewonly_full_download=allow_viewonly_full_download,
-		)
+		require_dataset_download(client, dataset, kind)
 
 		ortho_response = client.table(settings.orthos_table).select('*').eq('dataset_id', dataset_id).execute()
 		ortho = ortho_response.data[0] if ortho_response.data else None
@@ -242,14 +243,16 @@ def record_download_request(user_id, dataset_ids: List[int], kind: str) -> None:
 # =============================================================================
 
 
-def _status_response(job: PreparedFileJob, job_id: str, noun: str, status: Optional[JobStatus] = None) -> DownloadStatus:
+def _status_response(
+	job: PreparedFileJob, job_id: str, noun: str, user_id: str, status: Optional[JobStatus] = None
+) -> DownloadStatus:
 	status = status or job.status()
 	if status.state == JobState.COMPLETED:
 		return DownloadStatus(
 			status=DownloadStatusEnum.COMPLETED,
 			job_id=job_id,
 			message=f'{noun} is ready for download',
-			download_path=job.download_path,
+			download_path=export_url(job, user_id),
 		)
 	if status.state == JobState.PROCESSING:
 		return DownloadStatus(status=DownloadStatusEnum.PROCESSING, job_id=job_id, message=f'{noun} is being prepared')
@@ -262,20 +265,22 @@ def _start_job(
 	job: PreparedFileJob,
 	background_tasks: BackgroundTasks,
 	build: Callable[[Path], object],
+	manifest: Manifest,
 	job_id: str,
 	noun: str,
+	user_id: str,
 ) -> DownloadStatus:
 	"""Return a finished file, join a live build, or claim and schedule a new build."""
 	if job.status().state != JobState.COMPLETED and job.claim():
-		background_tasks.add_task(job.run, build)
-		return _status_response(job, job_id, noun, JobStatus(JobState.PROCESSING))
-	return _status_response(job, job_id, noun)
+		background_tasks.add_task(job.run, build, manifest)
+		return _status_response(job, job_id, noun, user_id, JobStatus(JobState.PROCESSING))
+	return _status_response(job, job_id, noun, user_id)
 
 
-def _redirect_to_file(job: PreparedFileJob, not_found_detail: str) -> RedirectResponse:
+def _redirect_to_file(job: PreparedFileJob, user_id: str, not_found_detail: str) -> RedirectResponse:
 	status = job.status()
 	if status.state == JobState.COMPLETED:
-		return RedirectResponse(url=job.download_path, status_code=303)
+		return RedirectResponse(url=export_url(job, user_id), status_code=303)
 	if status.state == JobState.FAILED:
 		raise HTTPException(status_code=500, detail=status.message)
 	raise HTTPException(status_code=404, detail=not_found_detail)
@@ -294,11 +299,7 @@ async def _dataset_bundle_job(
 	use_original_filename: bool,
 ) -> tuple[PreparedFileJob, Dataset, Optional[dict], Optional[dict], Optional[ExportScope]]:
 	"""Check access and name the bundle after its variant and the content the user may read."""
-	dataset, ortho = await get_accessible_dataset(
-		dataset_id=dataset_id,
-		token=token,
-		allow_viewonly_full_download=False,
-	)
+	dataset, ortho = await get_accessible_dataset(dataset_id=dataset_id, token=token, kind=ExportKind.DATASET)
 	with use_client(token) as client:
 		metadata_response = client.table(settings.metadata_table).select('*').eq('dataset_id', dataset_id).execute()
 		labels = read_export_scope(client, dataset_id) if include_labels else None
@@ -348,7 +349,8 @@ async def download_dataset(
 			use_original_filename=use_original_filename,
 		)
 
-	return _start_job(job, background_tasks, build, str(dataset_id_int), 'Dataset bundle')
+	manifest = Manifest(ExportKind.DATASET, (dataset_id_int,))
+	return _start_job(job, background_tasks, build, manifest, str(dataset_id_int), 'Dataset bundle', user.id)
 
 
 @download_app.get('/datasets/{dataset_id}/status', response_model=DownloadStatus)
@@ -361,14 +363,14 @@ async def check_download_status(
 ):
 	"""Check the status of a dataset bundle job"""
 	dataset_id_int = parse_dataset_id(dataset_id)
-	validate_user_and_limit(
+	user = validate_user_and_limit(
 		token=token,
 		endpoint='datasets/{dataset_id}/status',
 		dataset_id=dataset_id_int,
 		count_towards_limit=False,
 	)
 	job, *_ = await _dataset_bundle_job(dataset_id_int, token, include_labels, include_parquet, use_original_filename)
-	return _status_response(job, str(dataset_id_int), 'Dataset bundle')
+	return _status_response(job, str(dataset_id_int), 'Dataset bundle', user.id)
 
 
 @download_app.get('/datasets/{dataset_id}/download', response_class=RedirectResponse)
@@ -381,13 +383,13 @@ async def download_dataset_file(
 ):
 	"""Redirect to the actual download file once it's ready"""
 	dataset_id_int = parse_dataset_id(dataset_id)
-	validate_user_and_limit(
+	user = validate_user_and_limit(
 		token=token,
 		endpoint='datasets/{dataset_id}/download',
 		dataset_id=dataset_id_int,
 	)
 	job, *_ = await _dataset_bundle_job(dataset_id_int, token, include_labels, include_parquet, use_original_filename)
-	return _redirect_to_file(job, f'Download file for dataset <ID={dataset_id_int}> not found')
+	return _redirect_to_file(job, user.id, f'Download file for dataset <ID={dataset_id_int}> not found')
 
 
 # =============================================================================
@@ -396,7 +398,7 @@ async def download_dataset_file(
 
 
 async def _labels_job(dataset_id: int, token: str) -> tuple[PreparedFileJob, ExportScope]:
-	await get_accessible_dataset(dataset_id=dataset_id, token=token, allow_viewonly_full_download=True)
+	await get_accessible_dataset(dataset_id=dataset_id, token=token, kind=ExportKind.LABELS)
 	with use_client(token) as client:
 		scope = read_export_scope(client, dataset_id)
 	filename = get_labels_filename(dataset_id, labels_content_version(scope, token))
@@ -421,7 +423,8 @@ async def get_labels(
 	job, scope = await _labels_job(dataset_id_int, token)
 	record_download_request(user.id, [dataset_id_int], 'labels')
 	build = partial(create_consolidated_geopackage, dataset_id_int, scope)
-	return _start_job(job, background_tasks, build, f'labels_{dataset_id_int}', 'Labels GeoPackage')
+	manifest = Manifest(ExportKind.LABELS, (dataset_id_int,))
+	return _start_job(job, background_tasks, build, manifest, f'labels_{dataset_id_int}', 'Labels GeoPackage', user.id)
 
 
 @download_app.get('/datasets/{dataset_id}/labels/status', response_model=DownloadStatus)
@@ -431,14 +434,14 @@ async def check_labels_status(
 ):
 	"""Check the status of a labels GeoPackage job"""
 	dataset_id_int = parse_dataset_id(dataset_id)
-	validate_user_and_limit(
+	user = validate_user_and_limit(
 		token=token,
 		endpoint='datasets/{dataset_id}/labels/status',
 		dataset_id=dataset_id_int,
 		count_towards_limit=False,
 	)
 	job, _ = await _labels_job(dataset_id_int, token)
-	return _status_response(job, f'labels_{dataset_id_int}', 'Labels GeoPackage')
+	return _status_response(job, f'labels_{dataset_id_int}', 'Labels GeoPackage', user.id)
 
 
 @download_app.get('/datasets/{dataset_id}/labels/download', response_class=RedirectResponse)
@@ -448,13 +451,13 @@ async def download_labels_file(
 ):
 	"""Redirect to the actual labels download file once it's ready"""
 	dataset_id_int = parse_dataset_id(dataset_id)
-	validate_user_and_limit(
+	user = validate_user_and_limit(
 		token=token,
 		endpoint='datasets/{dataset_id}/labels/download',
 		dataset_id=dataset_id_int,
 	)
 	job, _ = await _labels_job(dataset_id_int, token)
-	return _redirect_to_file(job, f'Labels file for dataset <ID={dataset_id_int}> not found')
+	return _redirect_to_file(job, user.id, f'Labels file for dataset <ID={dataset_id_int}> not found')
 
 
 # =============================================================================
@@ -468,13 +471,12 @@ async def get_datasets_for_bundle(
 ) -> List[tuple]:
 	"""
 	Fetch dataset, ortho, and metadata for multiple datasets.
-	Enforces private/view-only download policy for the requesting user.
+	Requires orthophoto download permission for every dataset.
 
 	Returns:
 		List of tuples: (dataset, ortho_dict, metadata_dict, archive_file_path)
 	"""
 	results = []
-	viewonly_dataset_ids: List[int] = []
 
 	with use_client(token) as client:
 		for dataset_id in dataset_ids:
@@ -483,9 +485,7 @@ async def get_datasets_for_bundle(
 				raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id}> not found.')
 
 			dataset = Dataset(**dataset_response.data[0])
-			if dataset.data_access.value == 'viewonly':
-				viewonly_dataset_ids.append(dataset_id)
-				continue
+			require_dataset_download(client, dataset, ExportKind.DATASET)
 
 			ortho_response = client.table(settings.orthos_table).select('*').eq('dataset_id', dataset_id).execute()
 			if not ortho_response.data:
@@ -497,13 +497,6 @@ async def get_datasets_for_bundle(
 
 			archive_file_path = str((settings.archive_path / ortho['ortho_file_name']).resolve())
 			results.append((dataset, ortho, metadata, archive_file_path))
-
-	if viewonly_dataset_ids:
-		blocked_ids = ', '.join(str(x) for x in sorted(viewonly_dataset_ids))
-		raise HTTPException(
-			status_code=403,
-			detail=f'Bundle contains view-only datasets that cannot include orthophoto downloads: [{blocked_ids}]',
-		)
 
 	return results
 
@@ -569,7 +562,10 @@ async def prepare_multi_bundle(
 		include_parquet=include_parquet,
 		use_original_filename=use_original_filename,
 	)
-	return _start_job(_bundle_job(job_id), background_tasks, build, job_id, f'Bundle with {len(id_list)} datasets')
+	manifest = Manifest(ExportKind.DATASET, tuple(id_list))
+	return _start_job(
+		_bundle_job(job_id), background_tasks, build, manifest, job_id, f'Bundle with {len(id_list)} datasets', user.id
+	)
 
 
 @download_app.get('/bundle/status', response_model=DownloadStatus)
@@ -578,13 +574,13 @@ async def check_bundle_status(
 	token: Annotated[str, Depends(oauth2_scheme)] = '',
 ):
 	"""Check the status of a multi-dataset bundle job"""
-	validate_user_and_limit(
+	user = validate_user_and_limit(
 		token=token,
 		endpoint='bundle/status',
 		job_id=job_id,
 		count_towards_limit=False,
 	)
-	return _status_response(_bundle_job(job_id), job_id, 'Bundle')
+	return _status_response(_bundle_job(job_id), job_id, 'Bundle', user.id)
 
 
 @download_app.get('/bundle/download', response_class=RedirectResponse)
@@ -593,9 +589,9 @@ async def download_bundle_file(
 	token: Annotated[str, Depends(oauth2_scheme)] = '',
 ):
 	"""Redirect to the actual bundle download file once it's ready"""
-	validate_user_and_limit(
+	user = validate_user_and_limit(
 		token=token,
 		endpoint='bundle/download',
 		job_id=job_id,
 	)
-	return _redirect_to_file(_bundle_job(job_id), f'Bundle <job_id={job_id}> not found or not ready')
+	return _redirect_to_file(_bundle_job(job_id), user.id, f'Bundle <job_id={job_id}> not found or not ready')

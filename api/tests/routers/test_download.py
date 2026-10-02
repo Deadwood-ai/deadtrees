@@ -89,7 +89,9 @@ def test_filter_exportable_dataset_labels_skips_model_prediction_without_configu
 
 
 def _local_path(download_path: str) -> Path:
-	return settings.downloads_path / download_path.removeprefix('/downloads/v1/')
+	"""The prepared file behind a signed export link (/api/v1/exports/<ticket>/<path>)."""
+	relative = download_path.split('/exports/', 1)[1].split('/', 1)[1]
+	return settings.downloads_path / relative
 
 
 def _completed_download_path(status_url: str, auth_token: str, **params) -> str:
@@ -315,15 +317,24 @@ def test_download_status_invalid_dataset_id_returns_400(auth_token):
 	assert 'Invalid dataset ID' in response.json()['detail']
 
 
-def test_download_dataset_blocks_viewonly_full_download(auth_token, viewonly_test_dataset_for_download):
-	"""View-only datasets should block full orthophoto bundle download."""
+def test_download_dataset_blocks_viewonly_full_download(viewonly_test_dataset_for_download, test_user2):
+	"""Other users cannot download a view-only dataset's orthophoto bundle."""
+	user2_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+	response = client.get(
+		f'/api/v1/download/datasets/{viewonly_test_dataset_for_download}/dataset.zip',
+		headers={'Authorization': f'Bearer {user2_token}'},
+	)
+
+	assert response.status_code == 403
+	assert 'download access' in response.json()['detail']
+
+
+def test_owner_downloads_own_viewonly_orthophoto(auth_token, viewonly_test_dataset_for_download):
 	response = client.get(
 		f'/api/v1/download/datasets/{viewonly_test_dataset_for_download}/dataset.zip',
 		headers={'Authorization': f'Bearer {auth_token}'},
 	)
-
-	assert response.status_code == 403
-	assert 'view-only' in response.json()['detail']
+	assert response.status_code == 200
 
 
 def _download_requests(dataset_id):
@@ -353,10 +364,11 @@ def test_accepted_download_request_is_recorded_for_reuse_metrics(auth_token, tes
 	assert {row['user_id'] for row in rows} == {str(test_user)}
 
 
-def test_rejected_download_request_is_not_recorded(auth_token, viewonly_test_dataset_for_download):
+def test_rejected_download_request_is_not_recorded(viewonly_test_dataset_for_download, test_user2):
+	user2_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
 	response = client.get(
 		f'/api/v1/download/datasets/{viewonly_test_dataset_for_download}/dataset.zip',
-		headers={'Authorization': f'Bearer {auth_token}'},
+		headers={'Authorization': f'Bearer {user2_token}'},
 	)
 	assert response.status_code == 403
 	assert _download_requests(viewonly_test_dataset_for_download) == []
@@ -421,9 +433,9 @@ def test_download_labels_allows_viewonly_dataset(auth_token, test_dataset_with_l
 	"""View-only datasets should still allow labels/predictions download flow."""
 	dataset_id = test_dataset_with_label
 	with use_client(auth_token) as db_client:
-		db_client.table(settings.datasets_table).update(
-			{'data_access': DatasetAccessEnum.viewonly.value}
-		).eq('id', dataset_id).execute()
+		db_client.rpc(
+			'set_dataset_visibility', {'p_dataset_id': dataset_id, 'p_data_access': DatasetAccessEnum.viewonly.value}
+		).execute()
 
 	response = client.get(
 		f'/api/v1/download/datasets/{dataset_id}/labels.gpkg',
@@ -520,8 +532,8 @@ def test_download_dataset(auth_token, test_dataset_for_download):
 	)
 	assert download_response.status_code == 303
 	assert (
-		download_response.headers['location']
-		== _dataset_download_path(test_dataset_for_download, auth_token)
+		_local_path(download_response.headers['location'])
+		== _local_path(_dataset_download_path(test_dataset_for_download, auth_token))
 	)
 
 	# Verify the file exists in downloads directory
@@ -1425,9 +1437,8 @@ def test_download_dataset_async(auth_token, test_dataset_for_download):
 		if status_data['status'] == 'completed':
 			# Verify download path is present
 			assert 'download_path' in status_data
-			assert (
-				status_data['download_path']
-				== _dataset_download_path(test_dataset_for_download, auth_token)
+			assert _local_path(status_data['download_path']) == _local_path(
+				_dataset_download_path(test_dataset_for_download, auth_token)
 			)
 			break
 
@@ -1448,8 +1459,8 @@ def test_download_dataset_async(auth_token, test_dataset_for_download):
 	)
 	assert download_response.status_code == 303
 	assert (
-		download_response.headers['location']
-		== _dataset_download_path(test_dataset_for_download, auth_token)
+		_local_path(download_response.headers['location'])
+		== _local_path(_dataset_download_path(test_dataset_for_download, auth_token))
 	)
 
 	# Verify ZIP contents
@@ -2612,7 +2623,7 @@ def test_multi_bundle_single_dataset(auth_token, multi_test_datasets):
 
 	# Verify download path
 	assert 'download_path' in status_data
-	assert f'/downloads/v1/bundles/{job_id}.zip' in status_data['download_path']
+	assert _local_path(status_data['download_path']) == settings.downloads_path / 'bundles' / f'{job_id}.zip'
 
 	# Verify file exists
 	bundle_file = settings.downloads_path / 'bundles' / f'{job_id}.zip'
@@ -2780,24 +2791,25 @@ def test_multi_bundle_caching(auth_token, multi_test_datasets):
 	assert status2 == 'completed'
 
 
-def test_multi_bundle_blocks_viewonly_dataset(auth_token, multi_test_datasets):
-	"""Bundles should be blocked when any selected dataset is view-only."""
+def test_multi_bundle_blocks_viewonly_dataset(auth_token, multi_test_datasets, test_user2):
+	"""Other users' bundles are blocked when any selected dataset is view-only."""
 	viewonly_dataset_id = multi_test_datasets[0]
 	dataset_ids = ','.join(str(d) for d in multi_test_datasets)
 
 	with use_client(auth_token) as db_client:
-		db_client.table(settings.datasets_table).update(
-			{'data_access': DatasetAccessEnum.viewonly.value}
-		).eq('id', viewonly_dataset_id).execute()
+		db_client.rpc(
+			'set_dataset_visibility',
+			{'p_dataset_id': viewonly_dataset_id, 'p_data_access': DatasetAccessEnum.viewonly.value},
+		).execute()
 
+	user2_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
 	response = client.get(
 		f'/api/v1/download/bundle.zip?dataset_ids={dataset_ids}',
-		headers={'Authorization': f'Bearer {auth_token}'},
+		headers={'Authorization': f'Bearer {user2_token}'},
 	)
 
 	assert response.status_code == 403
-	assert 'view-only datasets' in response.json()['detail']
-	assert str(viewonly_dataset_id) in response.json()['detail']
+	assert 'download access' in response.json()['detail']
 
 
 def test_multi_bundle_invalid_dataset_id(auth_token):
@@ -2856,7 +2868,7 @@ def test_multi_bundle_download_redirect(auth_token, multi_test_datasets):
 		follow_redirects=False,
 	)
 	assert download_response.status_code == 303
-	assert f'/downloads/v1/bundles/{job_id}.zip' in download_response.headers['location']
+	assert _local_path(download_response.headers['location']) == settings.downloads_path / 'bundles' / f'{job_id}.zip'
 
 
 def test_cached_restricted_bundle_is_authorized_before_it_is_recorded(private_test_dataset_for_download, test_user2):

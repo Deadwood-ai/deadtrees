@@ -171,7 +171,7 @@ export default function PatchValidationPhase({ dataset }: Props) {
         <div className="relative flex-1">
           <ReferencePatchMap
             datasetId={dataset.id}
-            cogPath={dataset.cog_path}
+            fileSource={dataset}
             patches={filteredPatches}
             onPatchSelected={setSelectedPatch}
             focusPatchId={selectedPatch?.id}

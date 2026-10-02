@@ -10,6 +10,7 @@ import type { DatasetFlag } from "../types/flags";
 import { FileOutlined } from "@ant-design/icons";
 import PublicationModal from "../components/PublicationModal";
 import PublicationsTable from "../components/PublicationsTable";
+import SharedWithMeTable from "../components/DatasetAccess/SharedWithMeTable";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAnalytics } from "../hooks/useAnalytics";
 import ProcessingEmailPreference from "../components/ProcessingEmailPreference";
@@ -36,6 +37,7 @@ interface DatasetType {
 
 enum ActiveTab {
   MyDatasets = "My Datasets",
+  SharedWithMe = "Shared with me",
   Publications = "Published Datasets",
   MyIssues = "My Issues",
 }
@@ -181,7 +183,7 @@ export default function ProfilePage() {
             <div className="mb-6 flex flex-col gap-3 md:flex-row md:justify-between md:items-center">
               <div className="w-full md:w-auto overflow-x-auto">
                 <Segmented
-                  options={["My Datasets", "Published Datasets", "My Issues"]}
+                  options={Object.values(ActiveTab)}
                   size={isMobile ? "middle" : "large"}
                   value={activeTab}
                   onChange={(value) => {
@@ -212,6 +214,8 @@ export default function ProfilePage() {
                   resetSelection={resetSelectionFlag}
                   onResetSelectionComplete={handleResetComplete}
                 />
+              ) : activeTab === ActiveTab.SharedWithMe ? (
+                <SharedWithMeTable />
               ) : activeTab === ActiveTab.Publications ? (
                 <PublicationsTable />
               ) : (

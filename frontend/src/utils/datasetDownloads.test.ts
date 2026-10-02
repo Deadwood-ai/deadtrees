@@ -41,4 +41,9 @@ describe("canDownloadCompleteDataset", () => {
   it("blocks view-only datasets from full archive downloads", () => {
     expect(canDownloadCompleteDataset({ ...completeDataset, data_access: IDataAccess.viewonly })).toBe(false);
   });
+
+  it("follows the server's full-resolution decision for shared datasets", () => {
+    expect(canDownloadCompleteDataset({ ...completeDataset, data_access: IDataAccess.private }, false)).toBe(false);
+    expect(canDownloadCompleteDataset({ ...completeDataset, data_access: IDataAccess.viewonly }, true)).toBe(true);
+  });
 });
