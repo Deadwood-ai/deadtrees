@@ -72,6 +72,10 @@ nothing counts as an audit until an auditor saves.
 
 ## Operations
 
+- Rollout: new uploads queue the stage only once every processor host runs it
+  (`UPLOAD_TASK_TYPES` and the upload modal's step list). Stage the model asset
+  on each host before the release that adds the stage reaches it.
+
 - Bulk (re)runs: `scripts/requeue_georef_check.py`. Use `--audited` for the
   backfill against existing audits. It selects datasets without a check or with
   other rules or another matcher.
