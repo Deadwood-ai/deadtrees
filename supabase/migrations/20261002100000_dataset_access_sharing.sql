@@ -608,21 +608,38 @@ grant execute on function public.update_dataset_details(bigint, jsonb) to authen
 create index if not exists v2_cogs_cog_path_idx on public.v2_cogs (cog_path);
 create index if not exists v2_thumbnails_thumbnail_path_idx on public.v2_thumbnails (thumbnail_path);
 
+-- File rows decide what static URLs may serve, so only the processor (and the
+-- service role) may register them. Any signed-in user could insert them before,
+-- which would let someone attach a private dataset's file path to their own
+-- public dataset.
+alter policy "Enable insert for authenticated users only" on public.v2_cogs
+with check ((select auth.jwt() ->> 'email') = 'processor@deadtrees.earth');
+alter policy "Enable insert for authenticated users only" on public.v2_cogs
+rename to "Processor registers COG files";
+alter policy "Enable insert for authenticated users only" on public.v2_thumbnails
+with check ((select auth.jwt() ->> 'email') = 'processor@deadtrees.earth');
+alter policy "Enable insert for authenticated users only" on public.v2_thumbnails
+rename to "Processor registers thumbnail files";
+
+-- A path is served only when every row naming it belongs to a public or view-only
+-- dataset, so a duplicated path can never unlock a private dataset's file.
 create function public.is_public_dataset_file(p_kind text, p_path text)
 returns boolean
 language sql stable security definer set search_path = ''
 as $$
-	select exists (
-		select 1
-		from public.v2_datasets dataset
-		where dataset.data_access in ('public', 'viewonly')
-			and dataset.id in (
-				select cog.dataset_id from public.v2_cogs cog where p_kind = 'cog' and cog.cog_path = p_path
-				union all
-				select thumbnail.dataset_id from public.v2_thumbnails thumbnail
-				where p_kind = 'thumbnail' and thumbnail.thumbnail_path = p_path
-			)
-	);
+	with owners as (
+		select cog.dataset_id from public.v2_cogs cog where p_kind = 'cog' and cog.cog_path = p_path
+		union all
+		select thumbnail.dataset_id from public.v2_thumbnails thumbnail
+		where p_kind = 'thumbnail' and thumbnail.thumbnail_path = p_path
+	)
+	select exists (select 1 from owners)
+		and not exists (
+			select 1
+			from owners
+			left join public.v2_datasets dataset on dataset.id = owners.dataset_id
+			where dataset.data_access is null or dataset.data_access not in ('public', 'viewonly')
+		);
 $$;
 
 revoke all on function public.is_public_dataset_file(text, text) from public, anon, authenticated;

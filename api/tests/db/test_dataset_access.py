@@ -511,6 +511,43 @@ def test_static_file_urls_serve_only_current_files_of_visible_datasets(make_data
 			client.rpc('is_public_dataset_file', {'p_kind': 'cog', 'p_path': paths[public_id]}).execute()
 
 
+def test_users_cannot_register_another_datasets_file_path(access_accounts, make_dataset):
+	"""Copying a private file path onto one's own public dataset must not unlock the file."""
+	private_id = make_dataset('private', 'access-path-private')
+	with use_service_client() as client:
+		private_path = (
+			client.table(settings.cogs_table).select('cog_path').eq('dataset_id', private_id).single().execute().data['cog_path']
+		)
+		attacker_dataset = (
+			client.table(settings.datasets_table)
+			.insert(
+				{
+					'user_id': access_accounts['stranger']['id'],
+					'file_name': 'access-path-attacker.tif',
+					'license': 'CC BY',
+					'platform': 'drone',
+					'authors': ['Attacker'],
+					'data_access': 'public',
+					'aquisition_year': 2025,
+				}
+			)
+			.execute()
+			.data[0]['id']
+		)
+	try:
+		row = {'dataset_id': attacker_dataset, 'cog_file_name': 'x.tif', 'cog_path': private_path, 'cog_file_size': 1, 'version': 1}
+		with use_client(access_accounts['stranger']['token']) as client:
+			with pytest.raises(APIError):
+				client.table(settings.cogs_table).insert(row).execute()
+		# Even a duplicated row (written by a trusted actor) cannot unlock the private file.
+		with use_service_client() as client:
+			client.table(settings.cogs_table).insert(row).execute()
+			assert client.rpc('is_public_dataset_file', {'p_kind': 'cog', 'p_path': private_path}).execute().data is False
+	finally:
+		with use_service_client() as client:
+			client.table(settings.datasets_table).delete().eq('id', attacker_dataset).execute()
+
+
 def test_visibility_changes_require_the_audited_function(access_accounts, private_dataset):
 	"""Direct row updates cannot bypass the audited visibility function."""
 	with use_client(access_accounts['owner']['token']) as client:

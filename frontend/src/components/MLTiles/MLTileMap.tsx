@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useCallback, useState } from "react";
 import { useDatasetFileUrls } from "../../hooks/useDatasetAccess";
+import { useOrthoLayer } from "../../hooks/useOrthoLayer";
 import type { IDatasetFileSource } from "../../utils/datasetFileUrls";
 import { Map, View } from "ol";
 import { defaults as defaultInteractions } from "ol/interaction/defaults";
 import TileLayerWebGL from "ol/layer/WebGLTile";
-import { GeoTIFF } from "ol/source";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import VectorTileLayer from "ol/layer/VectorTile";
@@ -29,7 +29,6 @@ import {
   createAOIMaskLayer,
 } from "../DatasetDetailsMap/createVectorLayer";
 import { acquireLibertyBasemapGroup, releaseLibertyBasemapGroup } from "../../utils/basemaps";
-import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import { palette } from "../../theme/palette";
 import { polygonToBBox } from "../../utils/utm";
 
@@ -199,26 +198,6 @@ export default function MLTileMap({
     });
 
     const layers: BaseLayer[] = [basemap];
-    if (cogUrl) {
-      const ortho = new TileLayerWebGL({
-        source: new GeoTIFF({
-          sources: [
-            {
-              url: cogUrl,
-              nodata: 0,
-              bands: [1, 2, 3],
-            },
-          ],
-          convertToRGB: true,
-          sourceOptions: COG_SOURCE_OPTIONS,
-        }),
-        maxZoom: 23,
-        cacheSize: 1024,
-        preload: 0,
-      });
-      orthoLayerRef.current = ortho;
-      layers.push(ortho);
-    }
 
     // AOI and prediction layers will be added dynamically via separate useEffect
 
@@ -533,21 +512,8 @@ export default function MLTileMap({
     }
   }, [aoiData?.geometry, showAOI]);
 
-  // Fit view to ortho extent
-  useEffect(() => {
-    if (!mapRef.current || !orthoLayerRef.current) return;
-    const map = mapRef.current;
-    const source = orthoLayerRef.current.getSource();
-    source
-      ?.getView()
-      .then((vo) => {
-        const viewOptions = vo as { extent?: [number, number, number, number] };
-        if (viewOptions?.extent) {
-          map.getView().fit(viewOptions.extent, { padding: [20, 20, 20, 20], maxZoom: 19, duration: 200 });
-        }
-      })
-      .catch(() => {});
-  }, [cogUrl]);
+  // Orthophoto layer: built once the (signed) address is known, renewed with it
+  useOrthoLayer(mapRef, orthoLayerRef, cogUrl, { maxZoom: 23, fitMaxZoom: 19 });
 
   // Zoom to specific tile and sync selection when focusTileId changes
   useEffect(() => {

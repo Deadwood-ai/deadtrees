@@ -174,7 +174,8 @@ test.describe("private dataset sharing (local write)", () => {
     await row.getByRole("button", { name: /Actions/ }).click();
     await page.getByRole("menuitem", { name: /Share/ }).click();
     const dialog = page.getByRole("dialog", { name: /Share/ });
-    await dialog.getByRole("combobox", { name: `Access for ${accounts.colleague.email}` }).click({ force: true });
+    const roleSelect = page.getByRole("combobox", { name: `Access for ${accounts.colleague.email}` });
+    await dialog.locator(".ant-select", { has: roleSelect }).click();
     await page.getByRole("option", { name: "Editor" }).click();
     await expect(page.getByText(`Access updated for ${accounts.colleague.email}`)).toBeVisible();
     await expect(dialog.getByRole("checkbox", { name: "Can download", exact: true })).toHaveCount(0);
