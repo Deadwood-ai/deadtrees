@@ -27,7 +27,6 @@ import TileLayer from "ol/layer/Tile";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import { XYZ } from "ol/source";
-import { GeoTIFF } from "ol/source";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import View from "ol/View";
 import Feature from "ol/Feature";
@@ -44,7 +43,10 @@ import {
   getForestCOGUrl,
   type MapModelVersion,
 } from "../../utils/getDeadwoodCOGUrl";
-import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
+import {
+  getCachedCoverCogSource,
+  MAP_MAX_TILES_LOADING,
+} from "../../utils/cogSource";
 import {
   acquireLibertyBasemapGroup,
   releaseLibertyBasemapGroup,
@@ -116,70 +118,6 @@ interface PublicTreeObservationFormValues {
   treeTypeText?: string;
   comment?: string;
 }
-
-// Helper to create GeoTIFF source for deadwood
-const createDeadwoodSource = (year: string, version: MapModelVersion) => {
-  return new GeoTIFF({
-    sources: [
-      { url: getDeadwoodCOGUrl(year, version), bands: [1], min: 0, max: 255 },
-    ],
-    normalize: true,
-    interpolate: false,
-    sourceOptions: COG_SOURCE_OPTIONS,
-  });
-};
-
-// Helper to create GeoTIFF source for forest
-const createForestSource = (year: string, version: MapModelVersion) => {
-  return new GeoTIFF({
-    sources: [
-      { url: getForestCOGUrl(year, version), bands: [1], min: 0, max: 255 },
-    ],
-    normalize: true,
-    interpolate: false,
-    sourceOptions: COG_SOURCE_OPTIONS,
-  });
-};
-
-// Source caches - keyed by `${version}-${year}` to persist across renders
-const deadwoodSourceCache: Record<string, GeoTIFF> = {};
-const forestSourceCache: Record<string, GeoTIFF> = {};
-
-// Get or create cached deadwood source
-const getCachedDeadwoodSource = (
-  year: string,
-  version: MapModelVersion,
-): GeoTIFF => {
-  const key = `${version}-${year}`;
-  if (!deadwoodSourceCache[key]) {
-    console.debug(
-      `[Cache] Creating new deadwood source for ${version}/${year}`,
-    );
-    deadwoodSourceCache[key] = createDeadwoodSource(year, version);
-  } else {
-    console.debug(
-      `[Cache] Reusing cached deadwood source for ${version}/${year}`,
-    );
-  }
-  return deadwoodSourceCache[key];
-};
-
-// Get or create cached forest source
-const getCachedForestSource = (
-  year: string,
-  version: MapModelVersion,
-): GeoTIFF => {
-  const key = `${version}-${year}`;
-  if (!forestSourceCache[key]) {
-    console.debug(`[Cache] Creating new forest source for ${version}/${year}`);
-    forestSourceCache[key] = createForestSource(year, version);
-  } else {
-    console.debug(
-      `[Cache] Reusing cached forest source for ${version}/${year}`,
-    );
-  }
-  return forestSourceCache[key];
-};
 
 const DeadtreesMap = () => {
   const [map, setMap] = useState<Map | null>(null);
@@ -496,7 +434,9 @@ const DeadtreesMap = () => {
       // Create only 2 layers - one for forest, one for deadwood (for current year)
       // Forest layer: Light green → Dark green gradient based on cover intensity
       const forestLayer = new TileLayerWebGL({
-        source: getCachedForestSource(selectedYear, effectiveModelVersion),
+        source: getCachedCoverCogSource(
+          getForestCOGUrl(selectedYear, effectiveModelVersion),
+        ),
         className: "forest-layer",
         style: {
           color: [
@@ -526,7 +466,9 @@ const DeadtreesMap = () => {
       // Deadwood layer: selective yellow spectrum with enhanced visibility for high values
       // Low values are more transparent, high values are more visible
       const deadwoodLayer = new TileLayerWebGL({
-        source: getCachedDeadwoodSource(selectedYear, effectiveModelVersion),
+        source: getCachedCoverCogSource(
+          getDeadwoodCOGUrl(selectedYear, effectiveModelVersion),
+        ),
         className: "deadwood-layer",
         visible: true, // Both layers visible by default
         style: {
@@ -592,6 +534,7 @@ const DeadtreesMap = () => {
           userLocation.layer,
         ],
         view: initialView,
+        maxTilesLoading: MAP_MAX_TILES_LOADING,
         overlays: [],
         interactions: defaultInteractions({
           doubleClickZoom: false,
@@ -676,6 +619,16 @@ const DeadtreesMap = () => {
         currentMap?.removeLayer(libertyBasemapLayerRef.current);
         releaseLibertyBasemapGroup(libertyBasemapLayerRef.current);
         libertyBasemapLayerRef.current = null;
+      }
+
+      // The cover layers each hold a WebGL context. Dispose them, or every
+      // visit to this page leaks two until the browser starts dropping contexts.
+      // Their sources stay in the shared cache for the next visit.
+      for (const layerRef of [forestLayerRef, deadwoodLayerRef]) {
+        if (!layerRef.current) continue;
+        currentMap?.removeLayer(layerRef.current);
+        layerRef.current.dispose();
+        layerRef.current = null;
       }
 
       mapRef.current?.setTarget(undefined);
@@ -769,10 +722,14 @@ const DeadtreesMap = () => {
     if (forestLayerRef.current && deadwoodLayerRef.current) {
       // Use cached sources - instant if already loaded
       forestLayerRef.current.setSource(
-        getCachedForestSource(selectedYear, effectiveModelVersion),
+        getCachedCoverCogSource(
+          getForestCOGUrl(selectedYear, effectiveModelVersion),
+        ),
       );
       deadwoodLayerRef.current.setSource(
-        getCachedDeadwoodSource(selectedYear, effectiveModelVersion),
+        getCachedCoverCogSource(
+          getDeadwoodCOGUrl(selectedYear, effectiveModelVersion),
+        ),
       );
       // Maintain visibility state after source update
       forestLayerRef.current.setVisible(showForest);
