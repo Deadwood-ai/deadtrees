@@ -6,6 +6,7 @@ import { IDataset } from "../../types/dataset";
 import { useDatasetLabelTypes } from "../../hooks/useDatasetLabelTypes";
 import { useDatasetDetailsMap } from "../../hooks/useDatasetDetailsMapProvider";
 import { useDatasetAOI } from "../../hooks/useDatasetAudit";
+import { useDatasetFileUrls } from "../../hooks/useDatasetAccess";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { hasForestCoverPredictionOutput } from "../../utils/predictionAvailability";
 import { FeatureTooltip, FeaturePopover, ClickedPolygonInfo } from "./overlays";
@@ -120,6 +121,8 @@ export default function BaseMap({
 		enabled: !!data?.id,
 	});
 
+	const fileUrls = useDatasetFileUrls(data);
+
 	// Fetch AOI data
 	const { data: aoiData, isLoading: isAOILoading } = useDatasetAOI(data?.id);
 	const aoiGeometry = useMemo(() => aoiData?.geometry, [aoiData?.geometry]);
@@ -130,8 +133,8 @@ export default function BaseMap({
 		orthoLayer,
 	} = useMapCore({
 		containerRef: mapContainerRef,
-		cogPath: data?.cog_path,
-		thumbnailPath: data?.thumbnail_path,
+		cogUrl: fileUrls.cogUrl,
+		thumbnailUrl: fileUrls.thumbnailUrl,
 		// When arriving from the dataset list, ignore the persisted viewport and let
 		// the map fit the new orthophoto's extent. useMapCore reads initialViewport
 		// once at init, so the previous (stale) viewport would otherwise leave the

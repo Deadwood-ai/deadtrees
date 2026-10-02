@@ -328,7 +328,7 @@ export default function MLTileUnifiedView({ dataset, onUnsavedChanges, isComplet
         <div className="relative flex-1">
           <MLTileMap
             datasetId={dataset.id}
-            cogPath={dataset.cog_path}
+            fileSource={dataset}
             resolution={selectedResolution}
             tiles={tilesForResolution}
             onTileSelected={handleTileSelected}

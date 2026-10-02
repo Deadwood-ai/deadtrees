@@ -5,7 +5,10 @@ import { useAuth } from "./useAuthProvider";
 export interface UserPrivileges {
   id: number;
   user_id: string;
+  /** Legacy flag; every signed-in user can upload private datasets. */
   can_upload_private: boolean;
+  /** Platform override to manage any dataset's sharing. */
+  can_manage_access?: boolean | null;
   can_audit: boolean;
   can_view_all_private: boolean;
   /** Factory workspace access. Read-only operational metadata, enforced server-side. */
@@ -34,14 +37,6 @@ export function useCanAudit() {
   const { data: privileges, isLoading } = useUserPrivileges();
   return {
     canAudit: privileges?.can_audit || false,
-    isLoading,
-  };
-}
-
-export function useCanUploadPrivate() {
-  const { data: privileges, isLoading } = useUserPrivileges();
-  return {
-    canUpload: privileges?.can_upload_private || false,
     isLoading,
   };
 }

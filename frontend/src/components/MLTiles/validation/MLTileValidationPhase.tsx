@@ -166,7 +166,7 @@ export default function MLTileValidationPhase({ dataset }: Props) {
         <div className="flex-1">
           <MLTileMap
             datasetId={dataset.id}
-            cogPath={dataset.cog_path}
+            fileSource={dataset}
             tiles={filteredTiles}
             onTileSelected={setSelectedTile}
             focusTileId={selectedTile?.id}

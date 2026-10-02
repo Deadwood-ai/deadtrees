@@ -8,6 +8,10 @@ Files next to the final file ``<name>`` in the downloads directory:
 - ``<name>.error``: the failure message of the last build.
 - ``.<name>.*.tmp/``: a private work directory per build; the result is moved into
   place with os.replace, so ``<name>`` is either absent or complete.
+- ``<name>.manifest.json``: written after the file is in place. It names the export
+  kind and every dataset in the file, and is bound to the file's identity, so a file
+  without a matching manifest (unfinished, replaced or from before manifests) is
+  never delivered. Delivery checks the requester against every listed dataset.
 
 File names carry a content version. Once a build is in place, older versions of the
 same file (``supersedes``) are deleted, so each variant keeps one copy on disk.
@@ -31,13 +35,23 @@ from pathlib import Path
 from typing import Callable, Iterator, Optional
 
 from shared.logging import UnifiedLogger
-from shared.settings import settings
 
 logger = UnifiedLogger(__name__)
 
 HEARTBEAT_SECONDS = 30
 STALE_AFTER_SECONDS = 300
 INTERRUPTED_MESSAGE = 'Download preparation was interrupted. Please request the download again.'
+
+
+class ExportKind(str, Enum):
+	DATASET = 'dataset'  # orthophotos, alone or in a multi-dataset bundle
+	LABELS = 'labels'  # prediction and label GeoPackages
+
+
+@dataclass(frozen=True)
+class Manifest:
+	kind: ExportKind
+	dataset_ids: tuple[int, ...]
 
 
 class JobState(str, Enum):
@@ -68,11 +82,26 @@ class PreparedFileJob:
 		return self.path.with_name(f'{self.path.name}.inflight')
 
 	@property
-	def download_path(self) -> str:
-		return f'/downloads/v1/{self.path.relative_to(settings.downloads_path).as_posix()}'
+	def manifest_path(self) -> Path:
+		return self.path.with_name(f'{self.path.name}.manifest.json')
+
+	def manifest(self) -> Optional[Manifest]:
+		"""What the finished file contains, or None when it is missing, incomplete or unverified."""
+		try:
+			payload = json.loads(self.manifest_path.read_text(encoding='utf-8'))
+			ids = tuple(payload['dataset_ids'])
+			valid = (
+				payload['version'] == 1
+				and payload['file'] == _identity(self.path)
+				and 0 < len(ids) <= 100
+				and all(type(value) is int and value > 0 for value in ids)
+			)
+			return Manifest(ExportKind(payload['kind']), ids) if valid else None
+		except (OSError, ValueError, KeyError, TypeError):
+			return None
 
 	def status(self) -> JobStatus:
-		if _non_empty(self.path):
+		if self.manifest() is not None:
 			return JobStatus(JobState.COMPLETED)
 		age = self._inflight_age()
 		if age is not None:
@@ -89,7 +118,7 @@ class PreparedFileJob:
 		"""Become the only builder of this file. False when a live build already owns it."""
 		self.path.parent.mkdir(parents=True, exist_ok=True)
 		with _directory_lock(self.path.parent):
-			if _non_empty(self.path):
+			if self.manifest() is not None:
 				return False
 			age = self._inflight_age()
 			if age is not None and age <= STALE_AFTER_SECONDS:
@@ -99,10 +128,11 @@ class PreparedFileJob:
 			with os.fdopen(fd, 'w') as marker:
 				json.dump({'pid': os.getpid(), 'started_at': time.time()}, marker)
 			self.error_path.unlink(missing_ok=True)
-			self.path.unlink(missing_ok=True)  # an empty leftover never counts as complete
+			self.path.unlink(missing_ok=True)  # a leftover without a manifest never counts as complete
+			self.manifest_path.unlink(missing_ok=True)
 		return True
 
-	def run(self, build: Callable[[Path], object]) -> None:
+	def run(self, build: Callable[[Path], object], manifest: Manifest) -> None:
 		"""Build the file after a successful claim(). Never raises; failures go to the error marker."""
 		stop = threading.Event()
 		heartbeat = threading.Thread(target=self._heartbeat, args=(stop,), daemon=True)
@@ -115,6 +145,7 @@ class PreparedFileJob:
 			if not _non_empty(target):
 				raise ValueError('The prepared download file is empty')
 			os.replace(target, self.path)
+			self._write_manifest(manifest)
 			logger.info(f'Prepared download file {self.path.name}')
 			self._remove_superseded()
 		except Exception as e:
@@ -134,6 +165,7 @@ class PreparedFileJob:
 			if sibling.name != self.path.name and self.supersedes.fullmatch(sibling.name):
 				sibling.unlink(missing_ok=True)
 				sibling.with_name(f'{sibling.name}.error').unlink(missing_ok=True)
+				sibling.with_name(f'{sibling.name}.manifest.json').unlink(missing_ok=True)
 				logger.info(f'Removed superseded download file {sibling.name}')
 
 	def _inflight_age(self) -> float | None:
@@ -149,11 +181,28 @@ class PreparedFileJob:
 			except FileNotFoundError:
 				return
 
+	def _write_manifest(self, manifest: Manifest) -> None:
+		payload = {
+			'version': 1,
+			'kind': manifest.kind.value,
+			'dataset_ids': sorted(set(manifest.dataset_ids)),
+			'file': _identity(self.path),
+		}
+		fd, temp_name = tempfile.mkstemp(prefix=f'.{self.manifest_path.name}.', dir=self.path.parent)
+		with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+			json.dump(payload, handle)
+		os.replace(temp_name, self.manifest_path)
+
 	def _write_error(self, message: str) -> None:
 		fd, temp_name = tempfile.mkstemp(prefix=f'.{self.error_path.name}.', dir=self.path.parent)
 		with os.fdopen(fd, 'w', encoding='utf-8') as handle:
 			handle.write(message)
 		os.replace(temp_name, self.error_path)
+
+
+def _identity(path: Path) -> list[int]:
+	stat = path.stat()
+	return [stat.st_ino, stat.st_size, stat.st_mtime_ns]
 
 
 def _non_empty(path: Path) -> bool:

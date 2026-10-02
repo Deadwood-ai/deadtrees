@@ -117,7 +117,7 @@ export default function MLTileQAPhase({ dataset, onUnsavedChanges, onRequestVali
         <div className="flex-1">
           <MLTileMap
             datasetId={dataset.id}
-            cogPath={dataset.cog_path}
+            fileSource={dataset}
             resolution={activeResolution}
             tiles={sortedTiles}
             focusTileId={currentTile?.id}

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useCallback, useState } from "react";
+import { useDatasetFileUrls } from "../../hooks/useDatasetAccess";
+import type { IDatasetFileSource } from "../../utils/datasetFileUrls";
 import { Map, View } from "ol";
 import { defaults as defaultInteractions } from "ol/interaction/defaults";
 import TileLayerWebGL from "ol/layer/WebGLTile";
@@ -30,7 +32,6 @@ import {
   createAOIVectorLayer,
   createAOIMaskLayer,
 } from "../DatasetDetailsMap/createVectorLayer";
-import { Settings } from "../../config";
 import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import {
   transformPolygonUtmToWebMercator,
@@ -47,7 +48,8 @@ import { getLayerVisibilityState } from "./utils/layerVisibilityState";
 
 interface Props {
   datasetId: number;
-  cogPath?: string | null;
+  /** Dataset whose orthophoto is shown; private files load from signed addresses. */
+  fileSource?: IDatasetFileSource | null;
   resolution?: PatchResolution;
   patches: IReferencePatch[] | undefined;
   onPatchSelected?: (patch: IReferencePatch | null) => void;
@@ -64,7 +66,7 @@ interface Props {
 
 export default function ReferencePatchMap({
   datasetId,
-  cogPath,
+  fileSource,
   resolution = 20,
   patches,
   onPatchSelected,
@@ -79,6 +81,7 @@ export default function ReferencePatchMap({
   isEditingMode = false,
 }: Props) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const { cogUrl } = useDatasetFileUrls(fileSource);
   const mapRef = useRef<Map | null>(null);
   const patchLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const orthoLayerRef = useRef<TileLayerWebGL | null>(null);
@@ -216,12 +219,12 @@ export default function ReferencePatchMap({
     });
 
     const layers: BaseLayer[] = [basemap];
-    if (cogPath) {
+    if (cogUrl) {
       const ortho = new TileLayerWebGL({
         source: new GeoTIFF({
           sources: [
             {
-              url: Settings.COG_BASE_URL + cogPath,
+              url: cogUrl,
               nodata: 0,
               bands: [1, 2, 3],
             },
@@ -908,7 +911,7 @@ export default function ReferencePatchMap({
         }
       })
       .catch(() => {});
-  }, [cogPath]);
+  }, [cogUrl]);
 
   // Zoom to specific patch and sync selection when focusPatchId changes
   useEffect(() => {

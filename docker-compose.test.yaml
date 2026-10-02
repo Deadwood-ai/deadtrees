@@ -103,6 +103,8 @@ services:
     volumes:
       - ${LOCAL_DATA_ROOT:-./data}:/data:rw
       - ./api:/app/api # dev only, no rebuild needed
+      - ./processor/src:/app/processor/src:ro # CPU imagery contract tests
+      - ./nginx:/app/nginx:ro # storage configuration tests
       - ./shared:/app/shared # dev only, no rebuild needed
       - ./assets:/app/assets
       - ./pytest.ini:/app/pytest.ini:ro

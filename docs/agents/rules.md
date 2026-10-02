@@ -101,6 +101,30 @@ Common facts:
 - File sizes in `v2_orthos` are stored in MB, not bytes.
 - Processor auth often needs dual handling for `processor@deadtrees.earth` and normal users.
 - `privileged_users` is the privileges table, not `v2_users`.
+- Dataset visibility (`public` / `viewonly` / `private`) and named-user grants
+  (`dataset_access_grants`: reader with optional download, editor, admin) are
+  decided in the database. Row policies use the set-based helpers
+  `internal.granted_dataset_ids()` and `internal.hidden_private_dataset_ids()`;
+  per-dataset capabilities (download by export kind, edit details, manage
+  access) come from `internal.dataset_capabilities()`. New policies, views and
+  functions reuse these instead of copying visibility predicates.
+- View-only keeps its meaning: anyone can view it and signed-in users can
+  download its predictions; only the owner, read-all operators and download
+  grants get the orthophoto. Visibility changes go through
+  `set_dataset_visibility` (owner only, locked and recorded); a trigger rejects
+  direct `data_access` updates by app roles. Grantees edit details only through
+  `update_dataset_details`.
+- COGs and thumbnails keep one storage path for every visibility. Static
+  `/cogs/v1` and `/thumbnails/v1` URLs pass an nginx `auth_request` (cached for
+  60 s) that allows only the current file of a public or view-only dataset;
+  private files are served on short-lived signed API links through the internal
+  `/_protected_data/` location (X-Accel-Redirect).
+- Prepared downloads carry a manifest (export kind, dataset IDs, file identity)
+  written by `PreparedFileJob`. Delivery is a signed `/api/v1/exports/...` link
+  that rechecks download permission for every listed dataset on each request;
+  `/downloads/v1` is closed. Files without a matching manifest are rebuilt.
+- Production nginx is the host config, not `nginx/api-conf`; follow
+  `docs/playbooks/dataset-access-rollout.md` before changing either.
 
 ## Processing Pipeline
 

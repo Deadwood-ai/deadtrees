@@ -223,3 +223,6 @@ auto-deploy.log
 
 # Claude Code personal settings
 .claude/settings.local.json
+# Local browser evidence can contain signed URLs and test sessions.
+/frontend/test-results/
+/frontend/playwright-report/

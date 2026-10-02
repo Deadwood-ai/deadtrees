@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useCallback, useState } from "react";
+import { useDatasetFileUrls } from "../../hooks/useDatasetAccess";
+import type { IDatasetFileSource } from "../../utils/datasetFileUrls";
 import { Map, View } from "ol";
 import { defaults as defaultInteractions } from "ol/interaction/defaults";
 import TileLayerWebGL from "ol/layer/WebGLTile";
@@ -26,7 +28,6 @@ import {
   createAOIVectorLayer,
   createAOIMaskLayer,
 } from "../DatasetDetailsMap/createVectorLayer";
-import { Settings } from "../../config";
 import { acquireLibertyBasemapGroup, releaseLibertyBasemapGroup } from "../../utils/basemaps";
 import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import { palette } from "../../theme/palette";
@@ -34,7 +35,8 @@ import { polygonToBBox } from "../../utils/utm";
 
 interface Props {
   datasetId: number;
-  cogPath?: string | null;
+  /** Dataset whose orthophoto is shown; private files load from signed addresses. */
+  fileSource?: IDatasetFileSource | null;
   resolution?: TileResolution;
   tiles: IMLTile[] | undefined;
   onTileSelected?: (tile: IMLTile | null) => void;
@@ -56,7 +58,7 @@ const TARGET_TILE_SIZE_M: Record<TileResolution, number> = {
 
 export default function MLTileMap({
   datasetId,
-  cogPath,
+  fileSource,
   resolution = 20,
   tiles,
   onTileSelected,
@@ -66,6 +68,7 @@ export default function MLTileMap({
   onGetLayerToggles,
 }: Props) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const { cogUrl } = useDatasetFileUrls(fileSource);
   const mapRef = useRef<Map | null>(null);
 
   // Layer visibility state
@@ -196,12 +199,12 @@ export default function MLTileMap({
     });
 
     const layers: BaseLayer[] = [basemap];
-    if (cogPath) {
+    if (cogUrl) {
       const ortho = new TileLayerWebGL({
         source: new GeoTIFF({
           sources: [
             {
-              url: Settings.COG_BASE_URL + cogPath,
+              url: cogUrl,
               nodata: 0,
               bands: [1, 2, 3],
             },
@@ -544,7 +547,7 @@ export default function MLTileMap({
         }
       })
       .catch(() => {});
-  }, [cogPath]);
+  }, [cogUrl]);
 
   // Zoom to specific tile and sync selection when focusTileId changes
   useEffect(() => {

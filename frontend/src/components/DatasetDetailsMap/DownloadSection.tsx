@@ -9,6 +9,7 @@ import DesktopOnlyFeatureNotice from "../DesktopOnlyFeatureNotice";
 import { useDesktopOnlyFeature } from "../../hooks/useDesktopOnlyFeature";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import { canDownloadCompleteDataset } from "../../utils/datasetDownloads";
+import { useMyDatasetAccess } from "../../hooks/useDatasetAccess";
 
 interface DownloadSectionProps {
   dataset: IDataset;
@@ -42,13 +43,15 @@ export default function DownloadSection({
   const { session } = useAuth();
   const { isMobile } = useDesktopOnlyFeature();
   const { track } = useAnalytics("dataset_detail");
-  const isViewOnlyDataset = dataset.data_access === "viewonly";
-  const completeDatasetAvailable = canDownloadCompleteDataset(dataset);
-  const forcedLabelsOnly =
-    hasExportableLabels && (isViewOnlyDataset || !completeDatasetAvailable);
+  const { data: myAccess } = useMyDatasetAccess(dataset.id);
+  // The server decides: orthophotos need public visibility, ownership or a download
+  // grant; predictions are also open on view-only datasets.
+  const orthophotoAllowed = myAccess?.can_download ?? dataset.data_access === "public";
+  const predictionsAllowed = myAccess?.can_download_labels ?? dataset.data_access !== "private";
+  const completeDatasetAvailable = canDownloadCompleteDataset(dataset, orthophotoAllowed);
+  const forcedLabelsOnly = predictionsAllowed && hasExportableLabels && !completeDatasetAvailable;
   const effectiveLabelsOnly = labelsOnly || forcedLabelsOnly;
-  const shouldUseLabelsDownload =
-    hasExportableLabels && effectiveLabelsOnly;
+  const shouldUseLabelsDownload = predictionsAllowed && hasExportableLabels && effectiveLabelsOnly;
   const hasAvailableDownload = completeDatasetAvailable || shouldUseLabelsDownload;
 
   const getAuthHeaders = async (): Promise<Record<string, string>> => {
@@ -205,7 +208,9 @@ export default function DownloadSection({
       });
   };
 
-  const tooltipTitle = isDownloading
+  const tooltipTitle = !predictionsAllowed
+    ? "Ask the owner for download permission."
+    : isDownloading
     ? currentDownloadId === dataset.id.toString()
       ? "This dataset is currently being prepared for download..."
       : "Another download is in progress. Only one download can be active at a time."
@@ -235,9 +240,11 @@ export default function DownloadSection({
           {isDownloading && currentDownloadId !== dataset.id.toString() && (
             <div className="mb-2 text-center text-sm text-orange-500">Another download is in progress</div>
           )}
-          {isViewOnlyDataset && (
+          {!orthophotoAllowed && (
             <div className="rounded-md bg-amber-50 px-3 py-2 text-center text-xs text-amber-700">
-              View-only dataset: orthophoto download is restricted. Predictions (GPKG) are available.
+              {predictionsAllowed
+                ? "Orthophoto download is restricted. Predictions (GPKG) are available."
+                : "Your access includes online viewing. Ask the owner for permission to download files or predictions."}
             </div>
           )}
           <Tooltip title={tooltipTitle}>
@@ -261,7 +268,7 @@ export default function DownloadSection({
             <Tooltip title="Only download the vector data containing tree mortality predictions, without the orthophoto">
               <Checkbox
                 checked={effectiveLabelsOnly}
-                disabled={isViewOnlyDataset || !completeDatasetAvailable}
+                disabled={!completeDatasetAvailable}
                 onChange={(e) => setLabelsOnly(e.target.checked)}
                 className="mt-2 flex justify-center text-gray-600"
               >

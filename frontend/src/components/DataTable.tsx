@@ -15,6 +15,7 @@ import {
   DeleteOutlined,
   EyeOutlined,
   LockOutlined,
+  ShareAltOutlined,
 } from "@ant-design/icons";
 import { supabase } from "../hooks/useSupabase";
 import { useAuth } from "../hooks/useAuthProvider";
@@ -31,12 +32,13 @@ import {
 } from "./DatasetStatus/status";
 import { isGeonadirDataset } from "../utils/datasetUtils";
 import { fixAuthorNamesEncoding, sanitizeText } from "../utils/textUtils";
-import { IDataset } from "../types/dataset";
+import { IDataAccess, IDataset } from "../types/dataset";
 import { useQueuePositions } from "../hooks/useQueuePositions";
 import { useDatasetsInPublication } from "../hooks/useDataPublications";
 import { useQueryClient } from "@tanstack/react-query";
 import { useIsMobile } from "../hooks/useIsMobile";
-import { useCanUploadPrivate } from "../hooks/useUserPrivileges";
+import ChangeVisibilityModal from "./DatasetAccess/ChangeVisibilityModal";
+import ShareDatasetModal from "./DatasetAccess/ShareDatasetModal";
 import { openDatasetDetail } from "../utils/datasetDetailNavigation";
 
 interface Dataset extends ContributorDataset {
@@ -109,7 +111,8 @@ const DataTable: React.FC<DataTableProps> = ({
   const nav = useNavigate();
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
-  const { canUpload: canUploadPrivate } = useCanUploadPrivate();
+  const [visibilityDataset, setVisibilityDataset] = useState<Dataset | null>(null);
+  const [shareDataset, setShareDataset] = useState<Dataset | null>(null);
 
   // Sort datasets by ID descending (newest first) for initial render
   const sortedUserData = useMemo(
@@ -233,43 +236,6 @@ const DataTable: React.FC<DataTableProps> = ({
     setDatasetToArchive(null);
   };
 
-  const handleUpdateVisibility = async (record: Dataset, dataAccess: "public" | "private") => {
-    try {
-      const { error } = await supabase
-        .from("v2_datasets")
-        .update({ data_access: dataAccess })
-        .eq("id", record.id);
-
-      if (error) throw error;
-
-      message.success(`Dataset is now ${dataAccess}`);
-      await queryClient.invalidateQueries({ queryKey: ["userDatasets"] });
-      await queryClient.invalidateQueries({ queryKey: ["public-datasets"] });
-    } catch (error) {
-      console.error(`Error updating dataset visibility to ${dataAccess}:`, error);
-      message.error(`Failed to make dataset ${dataAccess}`);
-    }
-  };
-
-  const handleMakePublic = async (record: Dataset) => {
-    Modal.confirm({
-      title: "Make dataset public?",
-      content: "This dataset will become visible on the public platform once it meets the normal display requirements.",
-      okText: "Make Public",
-      onOk: () => handleUpdateVisibility(record, "public"),
-    });
-  };
-
-  const handleMakePrivate = async (record: Dataset) => {
-    Modal.confirm({
-      title: "Make dataset private?",
-      content: "This dataset will no longer be publicly visible and will remain available only to you.",
-      okText: "Make Private",
-      okButtonProps: { danger: true },
-      onOk: () => handleUpdateVisibility(record, "private"),
-    });
-  };
-
   const getActionMenuItems = (record: Dataset): MenuProps["items"] => {
     const canView = canOpenOwnerMap(record);
     const canPublish = isDatasetPublishEligible(record);
@@ -291,26 +257,21 @@ const DataTable: React.FC<DataTableProps> = ({
         onClick: () => handleAddToSelection(record),
       };
 
-    // Visibility actions:
-    // - all owners keep the existing "Make Public" action for private datasets
-    // - only privileged users get "Make Private" for public datasets
-    const isPrivate = record.data_access === "private";
-    const isPublic = record.data_access === "public";
-    const visibilityAction = isPrivate
-      ? {
+    // Every owner chooses Public / View only / Private and shares with named people.
+    const accessActions = [
+      {
         key: "visibility",
-        label: "Make Public",
-        icon: <EyeOutlined />,
-        onClick: () => handleMakePublic(record),
-      }
-      : canUploadPrivate && isPublic
-        ? {
-          key: "visibility",
-          label: "Make Private",
-          icon: <LockOutlined />,
-          onClick: () => handleMakePrivate(record),
-        }
-      : null;
+        label: "Change Visibility",
+        icon: record.data_access === "private" ? <LockOutlined /> : <EyeOutlined />,
+        onClick: () => setVisibilityDataset(record),
+      },
+      {
+        key: "share",
+        label: "Share",
+        icon: <ShareAltOutlined />,
+        onClick: () => setShareDataset(record),
+      },
+    ];
 
     // Archive action
     const archiveAction = {
@@ -335,8 +296,7 @@ const DataTable: React.FC<DataTableProps> = ({
         icon: <EditOutlined />,
         onClick: () => handleEditDataset(record),
       },
-      // Only show "Make Public" for private datasets
-      ...(visibilityAction ? [visibilityAction] : []),
+      ...accessActions,
       // Only show publish/remove action if not already published
       ...(!isPublished ? [publishAction] : []),
       { type: "divider" as const },
@@ -457,6 +417,7 @@ const DataTable: React.FC<DataTableProps> = ({
       width: 85,
       filters: [
         { text: "Public", value: "public" },
+        { text: "View Only", value: "viewonly" },
         { text: "Private", value: "private" },
       ],
       onFilter: (value: unknown, record: Dataset) => record.data_access === value,
@@ -637,6 +598,17 @@ const DataTable: React.FC<DataTableProps> = ({
           }}
         />
       </div>}
+
+      <ChangeVisibilityModal
+        datasetId={visibilityDataset?.id ?? null}
+        current={(visibilityDataset?.data_access as IDataAccess | undefined) ?? null}
+        onClose={() => setVisibilityDataset(null)}
+      />
+      <ShareDatasetModal
+        datasetId={shareDataset?.id ?? null}
+        datasetName={shareDataset?.file_name}
+        onClose={() => setShareDataset(null)}
+      />
 
       {selectedDatasetForEdit && (
         <EditDatasetModal visible={editModalVisible} onClose={handleCloseEditModal} dataset={selectedDatasetForEdit} />

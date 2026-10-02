@@ -7,7 +7,6 @@ import { GeoTIFF } from "ol/source";
 import StaticImageSource from "ol/source/ImageStatic";
 import type { Layer } from "ol/layer";
 
-import { Settings } from "../../../config";
 import { createStandardMapControls } from "../../../utils/basemaps";
 import { COG_SOURCE_OPTIONS } from "../../../utils/cogSourceOptions";
 import { createMapInteractions } from "../../../utils/mapInteractions";
@@ -22,9 +21,10 @@ export interface UseMapCoreOptions {
 	/** Container ref for the map */
 	containerRef: React.RefObject<HTMLDivElement | null>;
 	/** COG path (relative to base URL) */
-	cogPath: string | null | undefined;
+	/** Resolved COG address (static, or signed for private datasets). */
+	cogUrl: string | null | undefined;
 	/** Thumbnail path used as a static no-WebGL fallback */
-	thumbnailPath?: string | null;
+	thumbnailUrl?: string | null;
 	/** Initial viewport state */
 	initialViewport?: Viewport;
 	/** Callback when viewport changes */
@@ -113,8 +113,8 @@ const browserSupportsWebGL = () => {
  */
 export function useMapCore({
 	containerRef,
-	cogPath,
-	thumbnailPath,
+	cogUrl,
+	thumbnailUrl,
 	initialViewport,
 	onViewportChange,
 	onMapReady,
@@ -135,7 +135,7 @@ export function useMapCore({
 	const onMapReadyRef = useRef(onMapReady);
 	const onOrthoLayerReadyRef = useRef(onOrthoLayerReady);
 	const onFirstInteractionRef = useRef(onFirstInteraction);
-	const thumbnailPathRef = useRef(thumbnailPath);
+	const thumbnailUrlRef = useRef(thumbnailUrl);
 	// Read via ref so a post-init change (isMobile flips false on first render)
 	// configures interactions without rebuilding the whole map.
 	const disableRotationRef = useRef(disableRotation);
@@ -148,7 +148,7 @@ export function useMapCore({
 		onMapReadyRef.current = onMapReady;
 		onOrthoLayerReadyRef.current = onOrthoLayerReady;
 		onFirstInteractionRef.current = onFirstInteraction;
-		thumbnailPathRef.current = thumbnailPath;
+		thumbnailUrlRef.current = thumbnailUrl;
 		disableRotationRef.current = disableRotation;
 	});
 
@@ -190,14 +190,14 @@ export function useMapCore({
 	// Main map initialization
 	useEffect(() => {
 		// Skip if already initialized, not ready, or missing required data
-		if (mapRef.current || !mapEnabled || !cogPath || !containerRef.current) {
+		if (mapRef.current || !mapEnabled || !cogUrl || !containerRef.current) {
 			return;
 		}
 
 		let isDisposed = false;
 		const orthoCogSource = new GeoTIFF({
 			sources: [{
-				url: Settings.COG_BASE_URL + cogPath,
+				url: cogUrl,
 				nodata: 0,
 				bands: [1, 2, 3],
 			}],
@@ -239,12 +239,12 @@ export function useMapCore({
 				constrainOnlyCenter: true,
 			});
 
-			const fallbackThumbnailPath = thumbnailPathRef.current;
+			const fallbackThumbnailUrl = thumbnailUrlRef.current;
 			const fallbackOrthoLayer =
-				!supportsWebGL && fallbackThumbnailPath
+				!supportsWebGL && fallbackThumbnailUrl
 					? new ImageLayer({
 							source: new StaticImageSource({
-								url: Settings.THUMBNAIL_URL + fallbackThumbnailPath,
+								url: fallbackThumbnailUrl,
 								imageExtent: cogExtent as [number, number, number, number],
 								projection: "EPSG:3857",
 								crossOrigin: "anonymous",
@@ -330,10 +330,10 @@ export function useMapCore({
 			};
 	// Note: callbacks/disableRotation are accessed via refs to avoid triggering
 	// re-runs. mapEnabled is latched (only ever false->true). The map therefore
-	// rebuilds only when the dataset (cogPath) or container changes — not on the
+	// rebuilds only when the dataset (cogUrl) or container changes — not on the
 	// transient isReady / isMobile flips that previously leaked WebGL contexts.
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [mapEnabled, cogPath, containerRef]);
+	}, [mapEnabled, cogUrl, containerRef]);
 
 	return {
 		mapRef,

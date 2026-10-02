@@ -22,6 +22,8 @@ vi.mock("../../hooks/useSupabase", () => ({
   supabase: {
     from: supabaseMock.from,
     rpc: supabaseMock.rpc,
+    // Signed-out: no private flights, so mosaics keep their static COG URLs.
+    auth: { getSession: () => Promise.resolve({ data: { session: null } }) },
   },
 }));
 
