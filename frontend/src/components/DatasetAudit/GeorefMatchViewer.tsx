@@ -8,16 +8,15 @@ import TileLayer from "ol/layer/Tile";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import VectorLayer from "ol/layer/Vector";
 import { fromLonLat } from "ol/proj";
-import { GeoTIFF, XYZ } from "ol/source";
+import { GeoTIFF, TileWMS, XYZ } from "ol/source";
 import VectorSource from "ol/source/Vector";
 import { Circle, Fill, Stroke, Style } from "ol/style";
 import { getDistance } from "ol/sphere";
 
 import { Settings } from "../../config";
-import { ESRI_WORLD_IMAGERY_ATTRIBUTION } from "../../utils/basemaps";
 import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
 import { describeGeorefReason, describeReference, offsetColor, orderedReferences } from "../../utils/georefCheck";
-import type { IGeorefCheck, IGeorefReferenceEvidence } from "../../types/georefCheck";
+import type { IGeorefCheck, IGeorefReferenceEvidence, IGeorefReferenceViewer } from "../../types/georefCheck";
 
 const { Text } = Typography;
 
@@ -26,6 +25,20 @@ interface GeorefMatchViewerProps {
 	onClose: () => void;
 	check: IGeorefCheck;
 	cogPath: string;
+}
+
+/** The tile source the viewer shows for a keyless reference (WMS as 256 px tiles). */
+function referenceSource(viewer: IGeorefReferenceViewer): XYZ | TileWMS {
+	if (viewer.kind === "xyz") {
+		// TMS row order ({-y}) is not offered to the viewer
+		return new XYZ({ url: viewer.url, maxZoom: viewer.max_zoom, crossOrigin: "anonymous", attributions: viewer.attribution });
+	}
+	return new TileWMS({
+		url: viewer.url,
+		params: { LAYERS: viewer.layers, VERSION: viewer.version, FORMAT: viewer.format, TILED: true },
+		crossOrigin: "anonymous",
+		attributions: viewer.attribution,
+	});
 }
 
 function matchFeatures(reference: IGeorefReferenceEvidence | undefined): Feature[] {
@@ -49,22 +62,20 @@ export default function GeorefMatchViewer({ open, onClose, check, cogPath }: Geo
 	// a callback ref: the modal mounts its body after `open` turns true
 	const [container, setContainer] = useState<HTMLDivElement | null>(null);
 	const mapRef = useRef<Map | null>(null);
-	const referenceLayer = useRef<TileLayer<XYZ> | null>(null);
+	const referenceLayer = useRef<TileLayer<XYZ | TileWMS> | null>(null);
 	const droneLayer = useRef<TileLayerWebGL | null>(null);
 	const matchSource = useRef<VectorSource | null>(null);
 	const extentRef = useRef<number[] | null>(null);
 	const references = useMemo(() => orderedReferences(check), [check]);
-	const viewable = references.filter((r) => check.metadata.references?.[r.provider]?.tile_url);
+	const viewable = references.filter((r) => check.metadata.references?.[r.provider]?.viewer);
 	const [provider, setProvider] = useState<string | undefined>(viewable[0]?.provider);
 	const [opacity, setOpacity] = useState(60);
 
 	const showReference = useCallback(
 		(name: string | undefined) => {
-			const url = name ? check.metadata.references?.[name]?.tile_url : null;
+			const viewer = name ? check.metadata.references?.[name]?.viewer : null;
 			const previous = referenceLayer.current?.getSource();
-			referenceLayer.current?.setSource(
-				url ? new XYZ({ url, maxZoom: 19, crossOrigin: "anonymous", attributions: ESRI_WORLD_IMAGERY_ATTRIBUTION }) : null,
-			);
+			referenceLayer.current?.setSource(viewer ? referenceSource(viewer) : null);
 			previous?.dispose();
 			matchSource.current?.clear();
 			matchSource.current?.addFeatures(matchFeatures(references.find((r) => r.provider === name)));
@@ -79,7 +90,7 @@ export default function GeorefMatchViewer({ open, onClose, check, cogPath }: Geo
 			convertToRGB: true,
 			sourceOptions: COG_SOURCE_OPTIONS,
 		});
-		const reference = new TileLayer<XYZ>({ preload: 0 });
+		const reference = new TileLayer<XYZ | TileWMS>({ preload: 0 });
 		const drone = new TileLayerWebGL({ source: cog, opacity: opacity / 100, preload: 0 });
 		const matches = new VectorSource();
 		const matchLayer = new VectorLayer({ source: matches });
@@ -181,7 +192,7 @@ export default function GeorefMatchViewer({ open, onClose, check, cogPath }: Geo
 				rowKey="provider"
 				dataSource={references}
 				columns={columns}
-				onRow={(r) => ({ onClick: () => check.metadata.references?.[r.provider]?.tile_url && setProvider(r.provider) })}
+				onRow={(r) => ({ onClick: () => check.metadata.references?.[r.provider]?.viewer && setProvider(r.provider) })}
 			/>
 			{Object.keys(check.reference_errors).length > 0 && (
 				<Text type="secondary" className="mt-2 block text-xs">

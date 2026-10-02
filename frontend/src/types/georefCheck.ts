@@ -17,7 +17,7 @@ export interface IGeorefCheck {
   reference_errors: Record<string, string>;
   metadata: {
     seconds?: number;
-    references?: Record<string, { zoom: number; capture_date: string | null; tile_url: string | null }>;
+    references?: Record<string, IGeorefReferenceInfo>;
     [key: string]: unknown;
   };
   updated_at: string;
@@ -42,3 +42,15 @@ export interface IGeorefReferenceEvidence {
   /** inlier pairs [lon_drone, lat_drone, lon_reference, lat_reference] */
   sample_pairs: [number, number, number, number][];
 }
+
+/** How the check fetched a reference, and how the viewer can show it (keyless only). */
+export interface IGeorefReferenceInfo {
+  group: string;
+  zoom: number | null;
+  capture_date: string | null;
+  viewer: IGeorefReferenceViewer | null;
+}
+
+export type IGeorefReferenceViewer =
+  | { kind: "xyz"; url: string; max_zoom: number; attribution: string }
+  | { kind: "wms"; url: string; layers: string; version: string; format: string; attribution: string };

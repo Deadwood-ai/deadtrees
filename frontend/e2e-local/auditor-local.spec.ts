@@ -171,16 +171,16 @@ const georefCheck = {
   used_aoi: true,
   reference_evidence: [
     { provider: "esri", group: "esri", matches: 2400, inliers: 2300, inlier_fraction: 0.95, cells: 16, support: 0.97, edge_support: 0.9, p50_m: 21.9, p90_m: 22.7, holdout_p90_m: [22.1, 23.0], vote: "poor", qualified: true, decides: true, reason: null, sample_pairs: [[8.0, 48.0, 8.0003, 48.0], [8.001, 48.001, 8.0013, 48.001]] },
-    { provider: "google", group: "google", matches: 1800, inliers: 1600, inlier_fraction: 0.9, cells: 15, support: 0.95, edge_support: 0.88, p50_m: 21.5, p90_m: 22.4, holdout_p90_m: [22.0, 22.9], vote: "poor", qualified: true, decides: true, reason: null, sample_pairs: [] },
+    { provider: "de-bw-dop20", group: "de-bw-dop20", matches: 1800, inliers: 1600, inlier_fraction: 0.9, cells: 15, support: 0.95, edge_support: 0.88, p50_m: 21.5, p90_m: 22.4, holdout_p90_m: [22.0, 22.9], vote: "poor", qualified: true, decides: true, reason: null, sample_pairs: [] },
     { provider: "wayback-12457", group: "esri", matches: 4, inliers: 0, inlier_fraction: 0, cells: 0, support: 0, edge_support: 0, p50_m: null, p90_m: null, holdout_p90_m: [], vote: null, qualified: false, decides: false, reason: "no_fit", sample_pairs: [] },
   ],
   reference_errors: { maptiler: "blank imagery" },
   metadata: {
     seconds: 9.4,
     references: {
-      esri: { zoom: 18, capture_date: null, tile_url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" },
-      google: { zoom: 20, capture_date: null, tile_url: null },
-      "wayback-12457": { zoom: 18, capture_date: "2019-06-02", tile_url: "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/12457/{z}/{y}/{x}" },
+      esri: { group: "esri", zoom: 18, capture_date: null, viewer: { kind: "xyz", url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", max_zoom: 18, attribution: "Esri" } },
+      "de-bw-dop20": { group: "de-bw-dop20", zoom: null, capture_date: null, viewer: { kind: "wms", url: "https://owsproxy.lgl-bw.de/owsproxy/ows/WMS_LGL-BW_ATKIS_DOP_20_C", layers: "IMAGES_DOP_20_RGB", version: "1.3.0", format: "image/jpeg", attribution: "LGL BW" } },
+      "wayback-12457": { group: "esri", zoom: 18, capture_date: "2019-06-02", viewer: { kind: "xyz", url: "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/12457/{z}/{y}/{x}", max_zoom: 19, attribution: "Esri" } },
     },
   },
   updated_at: "2026-10-02T06:00:00Z",
@@ -370,7 +370,7 @@ const fulfillSupabaseRequest = async (
         value: false,
         source: "georef_check_v1",
         reason: "strong",
-        details: { p90_m: 22.6, evidence_groups: 2, references: ["esri", "google"] },
+        details: { p90_m: 22.6, evidence_groups: 2, references: ["esri", "de-bw-dop20"] },
         updated_at: "2026-10-02T06:00:00Z",
       },
     ]);
@@ -723,7 +723,7 @@ test.describe("auditor local e2e", () => {
   }) => {
     await installAuthenticatedUser(page, { canAudit: true });
     // keep the reference basemap offline: an empty tile for every request
-    await page.route(/arcgisonline\.com|wayback\.maptiles\.arcgis\.com/, (route) => route.fulfill({ status: 204 }));
+    await page.route(/arcgisonline\.com|wayback\.maptiles\.arcgis\.com|lgl-bw\.de/, (route) => route.fulfill({ status: 204 }));
 
     await page.goto(`/dataset-audit/${completeDataset.id}`);
     await dismissCookieBanner(page);

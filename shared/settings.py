@@ -161,10 +161,11 @@ class Settings(BaseSettings):
 	DOY_AUTO_DECIDE: bool = False
 
 	# Optional satellite references of the georeferencing check (georef_check_v1)
-	# besides keyless Esri World Imagery and its dated Wayback captures.
-	GOOGLE_MAP_TILES_API_KEY: str = ''
+	# besides the keyless ones in processor/src/georef_check_v1/providers.py.
 	MAPTILER_API_KEY: str = ''
 	MAPBOX_ACCESS_TOKEN: str = ''
+	AZURE_MAPS_KEY: str = ''
+	LINZ_API_KEY: str = ''  # New Zealand aerial basemap (free key)
 
 	# processor settings
 	PROCESSOR_USERNAME: str = 'processor@deadtrees.earth'

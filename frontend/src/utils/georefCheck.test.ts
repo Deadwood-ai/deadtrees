@@ -35,7 +35,7 @@ const check = (overrides: Partial<IGeorefCheck>): IGeorefCheck => ({
   used_aoi: true,
   reference_evidence: [ref("google", true, 900), ref("esri", true, 2400), ref("maptiler", false, 3)],
   reference_errors: {},
-  metadata: { references: { "wayback-123": { zoom: 19, capture_date: "2021-06-10", tile_url: "https://x/{z}/{y}/{x}" } } },
+  metadata: { references: { "wayback-123": { group: "esri", zoom: 19, capture_date: "2021-06-10", viewer: { kind: "xyz", url: "https://x/{z}/{y}/{x}", max_zoom: 19, attribution: "Esri" } } } },
   updated_at: "2026-10-02T00:00:00Z",
   ...overrides,
 });

@@ -15,13 +15,31 @@ nothing counts as an audit until an auditor saves.
    retry hides everything outside the AOI from the matcher; it counts only if
    it decides. Tuned on 100 audited datasets: masking every first pass lost 6
    decisions, and the retry added 2 without new wrong calls.
-2. **References.** Tiles covering the same extent are mosaicked onto the same
-   grid:
-   - Esri World Imagery (current)
+2. **References.** Every provider in the registry
+   (`processor/src/georef_check_v1/providers.json`) whose coverage contains the
+   site is rendered onto the same grid, as XYZ/WMTS tiles or a single WMS or
+   ArcGIS export of the extent:
+   - Esri World Imagery (current), worldwide
    - up to two older dated Esri Wayback captures: the one closest to the
      flight date, then the oldest (the newest is what World Imagery shows)
-   - Google (Map Tiles API), MapTiler and Mapbox satellite when their keys are
-     set
+   - 56 keyless official or open services in 26 countries: every German
+     state's DOP, SWISSIMAGE, basemap.at, IGN, PNOA, PDOK, ČÚZK, Geoportal PL,
+     Flanders, Wallonia, Luxembourg, Estonia, Slovakia, Slovenia, Croatia,
+     Portugal, five Italian regions plus the national 2012 ortho, USGS NAIP,
+     NOAA, MassGIS, NYS, Ontario, Calgary, Queensland, NSW, ACT, Western
+     Australia, GSI (JP), NLSC (TW), Brasília, INEGI (MX), Uruguay, IGN (AR),
+     NGI (ZA) and Cape Town
+   - MapTiler, Mapbox, Azure Maps and LINZ (NZ) when their keys are set
+     (`MAPTILER_API_KEY`, `MAPBOX_ACCESS_TOKEN`, `AZURE_MAPS_KEY`,
+     `LINZ_API_KEY`)
+
+   Each provider is its own evidence group unless it serves the same imagery as
+   another (Wayback with Esri). Only services with an open licence for
+   automated use are listed; Google's satellite tiles are refused to EEA
+   accounts (Map Tiles API EEA terms) and its terms forbid analysing the
+   imagery, so Google is not used. `scripts/check_georef_providers.py` renders
+   every provider at its check site; run it when adding one and now and then,
+   because public services move (several URLs carry a year).
 3. **Matching.** RoMa v2 (vendored in `processor/src/georef_check_v1/romav2`)
    matches the drone image with each reference.
 4. **Evidence per reference.** A similarity transform is fitted with RANSAC to
@@ -72,6 +90,8 @@ nothing counts as an audit until an auditor saves.
 
 ## Operations
 
+- Provider check: `python3 scripts/check_georef_providers.py` (all keyless
+  providers render real imagery as of 2026-10-02).
 - Rollout: new uploads queue the stage only once every processor host runs it
   (`UPLOAD_TASK_TYPES` and the upload modal's step list). Stage the model asset
   on each host before the release that adds the stage reaches it.
