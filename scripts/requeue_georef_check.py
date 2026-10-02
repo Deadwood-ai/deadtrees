@@ -76,10 +76,15 @@ def main() -> int:
 	if args.dataset_ids:
 		todo = [(i, 'requested') for i in _parse_dataset_ids(args.dataset_ids)]
 	else:
-		with_cog = {r['dataset_id'] for r in _select_all(supabase_url, headers, 'v2_statuses', 'dataset_id', {'is_cog_done': 'is.true'})}
+		with_cog = {
+			r['dataset_id']
+			for r in _select_all(supabase_url, headers, 'v2_statuses', 'dataset_id', {'is_cog_done': 'is.true'})
+		}
 		datasets = _select_all(supabase_url, headers, 'v2_datasets', 'id', {'archived': 'is.false'})
 		audited = (
-			{r['dataset_id'] for r in _select_all(supabase_url, headers, 'dataset_audit', 'dataset_id')} if args.audited else None
+			{r['dataset_id'] for r in _select_all(supabase_url, headers, 'dataset_audit', 'dataset_id')}
+			if args.audited
+			else None
 		)
 		checks = {
 			r['dataset_id']: r

@@ -9,14 +9,17 @@ nothing counts as an audit until an auditor saves.
 ## What runs
 
 1. **Drone image.** The stored COG is read through its overviews onto an
-   EPSG:3857 grid of at most 1,400 px per side. Only valid data inside the
-   dataset's AOI is used (the auditor's AOI first, else the predicted one), so
-   artifacts outside the AOI are not matched.
+   EPSG:3857 grid of at most 1,400 px per side. Offsets are measured only on
+   valid data inside the dataset's AOI (the auditor's AOI first, else the
+   predicted one). When the first matching pass leaves the call uncertain, one
+   retry hides everything outside the AOI from the matcher; it counts only if
+   it decides. Tuned on 100 audited datasets: masking every first pass lost 6
+   decisions, and the retry added 2 without new wrong calls.
 2. **References.** Tiles covering the same extent are mosaicked onto the same
    grid:
    - Esri World Imagery (current)
-   - up to two dated Esri Wayback captures: the one closest to the flight date
-     and the newest
+   - up to two older dated Esri Wayback captures: the one closest to the
+     flight date, then the oldest (the newest is what World Imagery shows)
    - Google (Map Tiles API), MapTiler and Mapbox satellite when their keys are
      set
 3. **Matching.** RoMa v2 (vendored in `processor/src/georef_check_v1/romav2`)
