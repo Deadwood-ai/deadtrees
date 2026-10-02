@@ -190,3 +190,126 @@ def test_check_row_keeps_versions_evidence_and_provider_errors():
 	assert row['reference_evidence'][0]['provider'] == 'esri'
 	assert row['reference_errors'] == {'google': 'RuntimeError: Google session HTTP 403'}
 	assert row['metadata']['seconds'] == 9.5
+
+
+def _patch_check(monkeypatch, centre_lat, refs, first, retry=None):
+	"""Run check.run_georef_check on a synthetic source with fixed matcher output:
+	`first` for the unmasked pass, `retry` for the AOI-masked one."""
+	import processor.src.georef_check_v1.check as check
+	from processor.src.georef_check_v1.references import Reference
+	from processor.src.georef_check_v1.source import Source
+
+	half = 70.0
+	y = 6378137 * np.log(np.tan(np.pi / 4 + np.radians(centre_lat) / 2))
+	grid = Grid((870000.0 - half, y - 50, 870000.0 + half, y + 50), 1400, 1000)
+	mask = np.zeros((grid.height, grid.width), bool)
+	mask[50:-50, 50:-50] = True
+	image = np.full((grid.height, grid.width, 3), 90, np.uint8)
+	source = Source(grid, image, mask, 0.05, used_aoi=True)
+	monkeypatch.setattr(check, 'read_source', lambda *args: source)
+	monkeypatch.setattr(
+		check,
+		'fetch_references',
+		lambda *args: ([Reference(p, image, 18) for p in refs], {} if refs else {'esri': 'ConnectionError'}),
+	)
+	calls = []
+
+	def fake_match(drone, reference):
+		masked = bool((drone[~mask] == 127).all()) and len(calls) >= len(refs)
+		calls.append(masked)
+		return (retry if masked else first)(grid)
+
+	monkeypatch.setattr(check, 'match', fake_match)
+	return check, calls
+
+
+def _shifted(shift_m, confident=True):
+	def make(grid):
+		rng = np.random.default_rng(0)
+		a = np.column_stack((rng.uniform(0, grid.width, 3000), rng.uniform(0, grid.height, 3000)))
+		return a, a + np.array([shift_m / grid.metres_per_pixel(), 0.0]), np.full(3000, 0.9 if confident else 0.1)
+
+	return make
+
+
+@pytest.mark.unit
+def test_an_uncertain_first_pass_is_retried_inside_the_aoi_and_kept_only_if_it_decides(monkeypatch):
+	check, calls = _patch_check(monkeypatch, 48.0, ['esri'], first=_shifted(4.0, confident=False), retry=_shifted(4.0))
+	result = check.run_georef_check('cog.tif', {'type': 'Polygon'}, None)
+	assert calls == [False, True]
+	assert (result.decision, result.details['aoi_masked_retry']) == ('good', True)
+
+	check, calls = _patch_check(
+		monkeypatch, 48.0, ['esri'], first=_shifted(4.0, confident=False), retry=_shifted(4.0, confident=False)
+	)
+	result = check.run_georef_check('cog.tif', {'type': 'Polygon'}, None)
+	assert (result.decision, result.details['aoi_masked_retry']) == ('uncertain', False)
+
+
+@pytest.mark.unit
+def test_lost_coordinates_need_fetched_references_that_match_nothing_on_the_null_line(monkeypatch):
+	nothing = _shifted(0.0, confident=False)
+	check, _ = _patch_check(monkeypatch, 0.0, ['esri'], first=nothing, retry=nothing)
+	assert (check.run_georef_check('cog.tif', None, None).assessment.evidence_level) == 'gross'
+	# a provider outage on the equator is not evidence of lost coordinates
+	check, _ = _patch_check(monkeypatch, 0.0, [], first=nothing, retry=nothing)
+	assert check.run_georef_check('cog.tif', None, None).decision == 'uncertain'
+	# nor is unmatched imagery a few kilometres from the equator (closed tropical canopy)
+	check, _ = _patch_check(monkeypatch, 0.03, ['esri'], first=nothing, retry=nothing)
+	assert check.run_georef_check('cog.tif', None, None).decision == 'uncertain'
+
+
+@pytest.fixture
+def georef_task(test_dataset_for_processing, standardized_local_ortho, test_processor_user):
+	from shared.models import QueueTask, TaskTypeEnum
+
+	return QueueTask(
+		id=1,
+		dataset_id=test_dataset_for_processing,
+		user_id=test_processor_user,
+		task_types=[TaskTypeEnum.cog, TaskTypeEnum.georef_check_v1],
+		priority=1,
+		is_processing=False,
+		current_position=1,
+		estimated_time=0.0,
+	)
+
+
+@pytest.mark.comprehensive
+def test_stage_stores_the_check_and_a_matching_audit_suggestion(georef_task, auth_token):
+	"""Full stage on the test ortho with real reference tiles (network) and the
+	matcher asset: a check row, the done flag, and a suggestion only for a call."""
+	from shared.db import use_client
+	from shared.settings import settings
+
+	from processor.src.process_cog import process_cog
+	from processor.src.process_georef_check import process_georef_check
+
+	process_cog(georef_task, settings.processing_path)
+	process_georef_check(georef_task, auth_token, settings.processing_path)
+
+	with use_client(auth_token) as client:
+		check = (
+			client.table(settings.georef_checks_table)
+			.select('*')
+			.eq('dataset_id', georef_task.dataset_id)
+			.execute()
+			.data
+		)
+		status = (
+			client.table(settings.statuses_table).select('*').eq('dataset_id', georef_task.dataset_id).execute().data
+		)
+		suggestions = (
+			client.table(settings.audit_suggestions_table)
+			.select('*')
+			.eq('dataset_id', georef_task.dataset_id)
+			.eq('source', 'georef_check_v1')
+			.execute()
+			.data
+		)
+	assert status[0]['is_georef_check_done'] is True
+	assert len(check) == 1 and check[0]['reference_evidence'], check
+	if check[0]['decision'] == 'uncertain':
+		assert suggestions == []
+	else:
+		assert [(s['field'], s['value']) for s in suggestions] == [('is_georeferenced', check[0]['decision'] == 'good')]
