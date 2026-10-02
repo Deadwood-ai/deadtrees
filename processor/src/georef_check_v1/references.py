@@ -49,8 +49,23 @@ def _session() -> requests.Session:
 	return s
 
 
-def _zoom_and_tiles(grid: Grid, max_zoom: int):
+def _ellipsoidal_bounds(grid: Grid) -> tuple[float, float, float, float]:
+	"""The grid's bounds in EPSG:3395 (ellipsoidal Mercator), whose tiles differ
+	from Web Mercator only in y. Within a footprint the y mapping is linear far
+	below a pixel, so the tile extent can be resampled like a 3857 one."""
+	e = 0.0818191908426  # WGS84 eccentricity
 	left, bottom, right, top = grid.bounds
+
+	def y3395(y3857: float) -> float:
+		lat = math.atan(math.sinh(y3857 / 6378137.0))
+		s = e * math.sin(lat)
+		return 6378137.0 * math.log(math.tan(math.pi / 4 + lat / 2) * ((1 - s) / (1 + s)) ** (e / 2))
+
+	return left, y3395(bottom), right, y3395(top)
+
+
+def _zoom_and_tiles(grid: Grid, max_zoom: int, bounds: tuple[float, float, float, float] | None = None):
+	left, bottom, right, top = bounds or grid.bounds
 	half = WORLD / 2
 	z = max(0, min(max_zoom, math.floor(math.log2(WORLD / (256 * grid.res)))))
 	while True:
@@ -62,11 +77,14 @@ def _zoom_and_tiles(grid: Grid, max_zoom: int):
 		z -= 1
 
 
-def mosaic(grid: Grid, url_for, max_zoom: int = 19, session: requests.Session | None = None):
+def mosaic(
+	grid: Grid, url_for, max_zoom: int = 19, session: requests.Session | None = None, tile_crs: str = 'EPSG:3857'
+):
 	"""Fetch the tiles covering `grid` (url_for(z, x, y) -> (url, params)) and
 	resample them onto it. Returns (image, zoom); raises on any failed tile."""
 	session = session or _session()
-	z, step, x0, x1, y0, y1 = _zoom_and_tiles(grid, max_zoom)
+	bounds = _ellipsoidal_bounds(grid) if tile_crs == 'EPSG:3395' else grid.bounds
+	z, step, x0, x1, y0, y1 = _zoom_and_tiles(grid, max_zoom, bounds)
 
 	def fetch(xy):
 		x, y = xy
@@ -81,7 +99,7 @@ def mosaic(grid: Grid, url_for, max_zoom: int = 19, session: requests.Session | 
 	with ThreadPoolExecutor(max_workers=4) as pool:
 		for x, y, tile in pool.map(fetch, [(x, y) for y in range(y0, y1 + 1) for x in range(x0, x1 + 1)]):
 			canvas.paste(tile, ((x - x0) * 256, (y - y0) * 256))
-	left, bottom, right, top = grid.bounds
+	left, bottom, right, top = bounds
 	half = WORLD / 2
 	box = (
 		(left + half) / step * 256 - x0 * 256,
@@ -91,6 +109,11 @@ def mosaic(grid: Grid, url_for, max_zoom: int = 19, session: requests.Session | 
 	)
 	image = canvas.transform((grid.width, grid.height), Image.Transform.EXTENT, box, Image.Resampling.BICUBIC)
 	return np.asarray(image), z
+
+
+def quadkey(x: int, y: int, z: int) -> str:
+	"""Bing-style tile key."""
+	return ''.join(str(((x >> i) & 1) | (((y >> i) & 1) << 1)) for i in range(z - 1, -1, -1))
 
 
 def _blank(image: np.ndarray) -> bool:
@@ -160,9 +183,10 @@ def _render(grid: Grid, provider: Provider, session: requests.Session) -> tuple[
 	if provider.kind == 'xyz':
 
 		def url_for(z, x, y):
-			return provider.url.replace('{-y}', str(2**z - 1 - y)).format(z=z, x=x, y=y), params
+			url = provider.url.replace('{-y}', str(2**z - 1 - y)).replace('{zz}', f'{z:02d}')
+			return url.replace('{q}', quadkey(x, y, z)).format(z=z, x=x, y=y), params
 
-		return mosaic(grid, url_for, provider.max_zoom, session)
+		return mosaic(grid, url_for, provider.max_zoom, session, provider.tile_crs)
 	left, bottom, right, top = grid.bounds
 	if provider.kind == 'wms':
 		crs = 'CRS' if provider.wms_version == '1.3.0' else 'SRS'
@@ -212,7 +236,7 @@ def _viewer(provider: Provider) -> dict | None:
 	if provider.key_setting or provider.kind == 'arcgis_export' or provider.wms_crs != 'EPSG:3857':
 		return None
 	if provider.kind == 'xyz':
-		if '{-y}' in provider.url:
+		if any(t in provider.url for t in ('{-y}', '{zz}', '{q}')) or provider.tile_crs != 'EPSG:3857':
 			return None
 		return {'kind': 'xyz', 'url': provider.url, 'max_zoom': provider.max_zoom, 'attribution': provider.attribution}
 	return {
@@ -226,8 +250,15 @@ def _viewer(provider: Provider) -> dict | None:
 
 
 def applicable(lon: float, lat: float) -> list[Provider]:
-	"""Registry providers for a site: covering it, and with their key set."""
-	return [p for p in REGISTRY if p.covers(lon, lat) and (not p.key_setting or getattr(settings, p.key_setting))]
+	"""Registry providers for a site: covering it, with their key set, and not
+	switched off as restricted (GEOREF_SKIP_RESTRICTED_PROVIDERS)."""
+	return [
+		p
+		for p in REGISTRY
+		if p.covers(lon, lat)
+		and (not p.key_setting or getattr(settings, p.key_setting))
+		and not (p.restricted and settings.GEOREF_SKIP_RESTRICTED_PROVIDERS)
+	]
 
 
 def fetch_references(
