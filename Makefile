@@ -31,6 +31,8 @@ BIOME_URL := $(ASSETS_BASE_URL)/biom/terres_ecosystems.gpkg
 PHENOLOGY_ARCHIVE_URL := $(ASSETS_BASE_URL)/pheno/modispheno_aggregated_normalized_filled.zarr.tar.gz
 # acquisition-date model (scripts/package_doy_estimation_model.py): manifest, 10 seed files, DINOv2 backbone
 DOY_MODEL_ARCHIVE_URL := $(ASSETS_BASE_URL)/models/doy_estimation_v1.tar.gz
+# georeferencing-check matcher (scripts/package_georef_check_model.py): RoMa v2 safetensors + DINOv3 hub code
+GEOREF_MODEL_ARCHIVE_URL := $(ASSETS_BASE_URL)/models/georef_check_v1.tar.gz
 
 # Target files
 TEST_DATA := $(TEST_DATA_DIR)/test-data.tif
@@ -48,6 +50,8 @@ PHENOLOGY_DATA := $(PHENO_DIR)/modispheno_aggregated_normalized_filled.zarr
 PHENOLOGY_ARCHIVE := $(PHENO_DIR)/modispheno_aggregated_normalized_filled.zarr.tar.gz
 DOY_MODEL := $(MODELS_DIR)/doy_estimation_v1/manifest.json
 DOY_MODEL_ARCHIVE := $(MODELS_DIR)/doy_estimation_v1.tar.gz
+GEOREF_MODEL := $(MODELS_DIR)/georef_check_v1/manifest.json
+GEOREF_MODEL_ARCHIVE := $(MODELS_DIR)/georef_check_v1.tar.gz
 
 # Download URL $(2) to file $(1). An HTTP error fails the target, and an
 # interrupted or empty download never takes the target's name, so a later
@@ -87,10 +91,11 @@ create-dirs:
 	@mkdir -p data/trash
 
 download-assets: create-dirs $(TEST_DATA) $(TEST_DATA_SMALL) $(MODEL) $(COMBINED_MODEL) $(AOI_MODEL) $(GADM) $(TEST_DATA_REAL_LABELS) $(TEST_RAW_DRONE_ZIP) $(TEST_ODM_MINIMAL_ZIP) $(DTE_TEST_FILES)
-download-processor-assets: create-dirs $(BIOME) $(PHENOLOGY_DATA) $(WORLDVIEW_FIXTURE) $(DOY_MODEL)
+download-processor-assets: create-dirs $(BIOME) $(PHENOLOGY_DATA) $(WORLDVIEW_FIXTURE) $(DOY_MODEL) $(GEOREF_MODEL)
 download-combined-model: $(COMBINED_MODEL)
 download-aoi-model: $(AOI_MODEL)
 download-doy-model: $(DOY_MODEL)
+download-georef-model: $(GEOREF_MODEL)
 
 setup-local-test-ssh:
 	@mkdir -p $(LOCAL_TEST_SSH_DIR)
@@ -188,6 +193,16 @@ $(DOY_MODEL):
 	@test -s $(DOY_MODEL_ARCHIVE).extract/doy_estimation_v1/manifest.json
 	@rm -rf $(dir $@) && mv $(DOY_MODEL_ARCHIVE).extract/doy_estimation_v1 $(dir $@)
 	@rm -rf $(DOY_MODEL_ARCHIVE) $(DOY_MODEL_ARCHIVE).extract
+
+$(GEOREF_MODEL):
+	@mkdir -p $(MODELS_DIR)
+	@echo "Downloading georeferencing-check matcher..."
+	@$(call download,$(GEOREF_MODEL_ARCHIVE),$(GEOREF_MODEL_ARCHIVE_URL))
+	@rm -rf $(GEOREF_MODEL_ARCHIVE).extract && mkdir -p $(GEOREF_MODEL_ARCHIVE).extract
+	@tar -xzf $(GEOREF_MODEL_ARCHIVE) -C $(GEOREF_MODEL_ARCHIVE).extract
+	@test -s $(GEOREF_MODEL_ARCHIVE).extract/georef_check_v1/manifest.json
+	@rm -rf $(dir $@) && mv $(GEOREF_MODEL_ARCHIVE).extract/georef_check_v1 $(dir $@)
+	@rm -rf $(GEOREF_MODEL_ARCHIVE) $(GEOREF_MODEL_ARCHIVE).extract
 
 clean:
 	rm -rf $(ASSETS_DIR)/*
