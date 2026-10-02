@@ -92,6 +92,10 @@ services:
       SENTINEL2_S3_ACCESS_KEY_ID: ${SENTINEL2_S3_ACCESS_KEY_ID:-}
       SENTINEL2_S3_SECRET_ACCESS_KEY: ${SENTINEL2_S3_SECRET_ACCESS_KEY:-}
       DOY_AUTO_DECIDE: ${DOY_AUTO_DECIDE:-false}
+      # Georeferencing check: optional keyed satellite references
+      GOOGLE_MAP_TILES_API_KEY: ${GOOGLE_MAP_TILES_API_KEY:-}
+      MAPTILER_API_KEY: ${MAPTILER_API_KEY:-}
+      MAPBOX_ACCESS_TOKEN: ${MAPBOX_ACCESS_TOKEN:-}
       NOTIFICATION_SENDER_EMAIL: ${NOTIFICATION_SENDER_EMAIL:-notifications@deadtrees.earth}
       NOTIFICATION_SENDER_NAME: ${NOTIFICATION_SENDER_NAME:-DeadTrees}
       # SSH_KEY_PATH: /root/.ssh/processing-to-storage

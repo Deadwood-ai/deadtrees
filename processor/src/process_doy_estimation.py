@@ -10,11 +10,11 @@ from shared.settings import settings
 from shared.status import update_status
 
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
-from .utils.ssh import pull_file_from_storage_server
+from .utils.stored_inputs import local_cog as _local_cog
+from .utils.stored_inputs import select_aoi
 
 # the audit form fields this stage prefills (dataset_audit_suggestions.field)
 SUGGESTED_FIELDS = ('has_valid_acquisition_date', 'accept_suggested_acquisition_date', 'acquisition_date_notes')
-AOI_SOURCE_PREFERENCE = {'manual_correction': 0, 'manual': 1, 'ml_prediction': 2}
 
 
 def process_doy_estimation(task: QueueTask, token: str, temp_dir: Path):
@@ -119,29 +119,6 @@ def _fetch_inputs(token: str, dataset_id: int):
 		raise ValueError('dataset has no bbox')
 	biome = ((meta[0].get('metadata') or {}).get('biome') or {}) if meta else {}
 	return dataset, ortho, Cog(**cogs[0]), select_aoi(aois), biome.get('biome_name')
-
-
-def select_aoi(aois: list[dict]) -> dict | None:
-	"""The AOI the model samples patches from: an auditor's AOI before the
-	predicted one, newest first; whole-image AOIs mean "no AOI"."""
-	usable = [a for a in aois if a.get('geometry') and not a.get('is_whole_image')]
-	if not usable:
-		return None
-	usable.sort(key=lambda a: a.get('created_at') or '', reverse=True)
-	usable.sort(key=lambda a: AOI_SOURCE_PREFERENCE.get(a.get('source'), 3))
-	return usable[0]['geometry']
-
-
-def _local_cog(cog: Cog, temp_dir: Path, token: str, dataset_id: int, ctx: LogContext) -> Path:
-	"""The COG written by this run's cog stage, else the stored one."""
-	local = temp_dir / cog.cog_file_name
-	if local.exists():
-		return local
-	temp_dir.mkdir(parents=True, exist_ok=True)
-	remote = f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.COG_DIR}/{cog.cog_path}'
-	logger.info(f'Pulling COG from {remote}', ctx)
-	pull_file_from_storage_server(remote, str(local), token, dataset_id)
-	return local
 
 
 def estimate_row(dataset_id: int, dataset: Dataset, estimate) -> dict:

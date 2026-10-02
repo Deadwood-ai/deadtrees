@@ -107,7 +107,7 @@ Common facts:
 Typical order:
 
 ```text
-upload -> odm if raw images -> geotiff -> metadata -> cog -> thumbnail -> deadwood_v1 -> treecover_v1 -> deadwood_treecover_combined_v2 -> aoi_v1 -> embeddings_v1 -> doy_estimation_v1
+upload -> odm if raw images -> geotiff -> metadata -> cog -> thumbnail -> deadwood_v1 -> treecover_v1 -> deadwood_treecover_combined_v2 -> aoi_v1 -> embeddings_v1 -> doy_estimation_v1 -> georef_check_v1
 ```
 
 Critical behavior:
@@ -122,6 +122,9 @@ Critical behavior:
 - `doy_estimation_v1` (acquisition-date model, `docs/doy-estimation.md`) reads the
   stored COG, so it can be rerun alone; bulk reruns go through
   `scripts/requeue_doy_estimation.py`.
+- `georef_check_v1` (georeferencing check, `docs/georef-check.md`) also reads the
+  stored COG and AOI and can be rerun alone; bulk reruns go through
+  `scripts/requeue_georef_check.py`.
 - ODM and model stages rely on Docker named volumes to avoid filesystem and UID
   problems across containers.
 

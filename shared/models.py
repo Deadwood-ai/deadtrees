@@ -101,6 +101,7 @@ class StatusEnum(str, Enum):
 	aoi_segmentation = 'aoi_segmentation'
 	embedding_processing = 'embedding_processing'
 	doy_estimation = 'doy_estimation'
+	georef_check = 'georef_check'
 	audit_in_progress = 'audit_in_progress'
 
 
@@ -139,6 +140,7 @@ class TaskTypeEnum(str, Enum):
 	aoi_v1 = 'aoi_v1'  # Auto-generate the dataset area of interest (AOI) polygon
 	embeddings_v1 = 'embeddings_v1'  # Compute per-tile CLIP embeddings for open-vocab search
 	doy_estimation_v1 = 'doy_estimation_v1'  # Estimate the acquisition date (day-of-year distribution)
+	georef_check_v1 = 'georef_check_v1'  # Measure the georeferencing offset against satellite imagery
 	geotiff = 'geotiff'  # Convert to geotiff
 	metadata = 'metadata'  # Extract metadata
 	odm_processing = 'odm_processing'  # ODM raw image processing
@@ -165,6 +167,7 @@ class TaskTypeEnum(str, Enum):
 			'aoi_v1': 'AOI',
 			'embeddings_v1': 'Embeddings',
 			'doy_estimation_v1': 'Acquisition date',
+			'georef_check_v1': 'Georeferencing check',
 			'geotiff': 'GeoTIFF',
 			'metadata': 'Metadata',
 			'odm_processing': 'ODM',
@@ -228,6 +231,7 @@ class Status(BaseModel):
 	is_aoi_required: bool = False
 	is_embeddings_done: bool = False
 	is_doy_estimation_done: bool = False
+	is_georef_check_done: bool = False
 	is_metadata_done: bool = False
 	is_odm_done: bool = False
 	has_error: bool = False
