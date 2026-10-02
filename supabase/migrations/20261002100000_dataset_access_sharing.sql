@@ -498,7 +498,7 @@ grant execute on function public.revoke_dataset_access(bigint, uuid) to authenti
 grant execute on function public.list_datasets_shared_with_me() to authenticated;
 
 -- ---------------------------------------------------------------------------
--- Visibility changes (owner or the platform access override) and detail edits
+-- Visibility changes (owner only) and detail edits
 -- ---------------------------------------------------------------------------
 
 -- Files never move: every file request is checked against the visibility at that moment.
@@ -515,7 +515,7 @@ begin
 		or not exists (select 1 from internal.dataset_capabilities(p_dataset_id, v_actor)) then
 		raise exception 'Dataset not found' using errcode = 'P0002';
 	end if;
-	if v_dataset.user_id <> v_actor and not internal.user_privilege(v_actor, 'manage_access') then
+	if v_dataset.user_id <> v_actor then
 		raise exception 'Only the dataset owner can change its visibility' using errcode = '42501';
 	end if;
 	if p_data_access is null then

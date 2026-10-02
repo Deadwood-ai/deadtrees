@@ -681,3 +681,27 @@ def test_revoked_admin_cannot_finish_a_waiting_grant(access_accounts, private_da
 			.execute()
 			.data
 		)
+
+
+def test_access_support_override_cannot_publish_someone_elses_dataset(access_accounts, private_dataset):
+	"""can_manage_access manages grants on any dataset, but visibility stays with the owner."""
+	support = access_accounts['stranger']
+	with use_service_client() as client:
+		client.table('privileged_users').upsert(
+			{'user_id': support['id'], 'can_manage_access': True, 'can_view_all_private': True}, on_conflict='user_id'
+		).execute()
+	try:
+		with use_client(support['token']) as client:
+			assert _access(client, private_dataset)['can_manage_access'] is True
+			with pytest.raises(APIError):
+				client.rpc('set_dataset_visibility', {'p_dataset_id': private_dataset, 'p_data_access': 'public'}).execute()
+		with use_client(access_accounts['owner']['token']) as client:
+			assert (
+				client.rpc('set_dataset_visibility', {'p_dataset_id': private_dataset, 'p_data_access': 'public'})
+				.execute()
+				.data
+				== 'private'
+			)
+	finally:
+		with use_service_client() as client:
+			client.table('privileged_users').delete().eq('user_id', support['id']).execute()
