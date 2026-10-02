@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Segmented, Slider, Table, Tag, Typography } from "antd";
 import { Map, View } from "ol";
 import Feature from "ol/Feature";
@@ -49,14 +49,28 @@ export default function GeorefMatchViewer({ open, onClose, check, cogPath }: Geo
 	// a callback ref: the modal mounts its body after `open` turns true
 	const [container, setContainer] = useState<HTMLDivElement | null>(null);
 	const mapRef = useRef<Map | null>(null);
-	const referenceLayer = useRef(new TileLayer({ preload: 0 }));
+	const referenceLayer = useRef<TileLayer<XYZ> | null>(null);
 	const droneLayer = useRef<TileLayerWebGL | null>(null);
-	const matchSource = useRef(new VectorSource());
+	const matchSource = useRef<VectorSource | null>(null);
 	const extentRef = useRef<number[] | null>(null);
 	const references = useMemo(() => orderedReferences(check), [check]);
 	const viewable = references.filter((r) => check.metadata.references?.[r.provider]?.tile_url);
 	const [provider, setProvider] = useState<string | undefined>(viewable[0]?.provider);
 	const [opacity, setOpacity] = useState(60);
+
+	const showReference = useCallback(
+		(name: string | undefined) => {
+			const url = name ? check.metadata.references?.[name]?.tile_url : null;
+			const previous = referenceLayer.current?.getSource();
+			referenceLayer.current?.setSource(
+				url ? new XYZ({ url, maxZoom: 19, crossOrigin: "anonymous", attributions: ESRI_WORLD_IMAGERY_ATTRIBUTION }) : null,
+			);
+			previous?.dispose();
+			matchSource.current?.clear();
+			matchSource.current?.addFeatures(matchFeatures(references.find((r) => r.provider === name)));
+		},
+		[check, references],
+	);
 
 	useEffect(() => {
 		if (!open || !container) return;
@@ -65,35 +79,44 @@ export default function GeorefMatchViewer({ open, onClose, check, cogPath }: Geo
 			convertToRGB: true,
 			sourceOptions: COG_SOURCE_OPTIONS,
 		});
-		droneLayer.current = new TileLayerWebGL({ source: cog, opacity: opacity / 100, preload: 0 });
+		const reference = new TileLayer<XYZ>({ preload: 0 });
+		const drone = new TileLayerWebGL({ source: cog, opacity: opacity / 100, preload: 0 });
+		const matches = new VectorSource();
+		const matchLayer = new VectorLayer({ source: matches });
+		referenceLayer.current = reference;
+		droneLayer.current = drone;
+		matchSource.current = matches;
 		const map = new Map({
 			target: container,
-			layers: [referenceLayer.current, droneLayer.current, new VectorLayer({ source: matchSource.current })],
+			layers: [reference, drone, matchLayer],
 			view: new View({ projection: "EPSG:3857", maxZoom: 23 }),
 		});
 		mapRef.current = map;
+		showReference(provider);
 		cog.getView().then((options) => {
-			if (!options?.extent) return;
+			if (!options?.extent || mapRef.current !== map) return;
 			extentRef.current = options.extent as number[];
 			map.updateSize();
 			map.getView().fit(extentRef.current, { padding: [30, 30, 30, 30] });
 		});
 		return () => {
+			// WebGL contexts are limited per page: release every layer, source and the map
+			for (const layer of [reference, drone, matchLayer]) {
+				map.removeLayer(layer);
+				layer.getSource()?.dispose();
+				layer.dispose();
+			}
 			map.setTarget(undefined);
-			mapRef.current = null;
+			map.dispose();
+			mapRef.current = referenceLayer.current = droneLayer.current = matchSource.current = null;
 		};
-		// the map is built once per opening; layer changes go through the effects below
+		// the map is built once per opening; reference and opacity changes go through the effects below
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [open, container, cogPath]);
 
 	useEffect(() => {
-		const url = provider ? check.metadata.references?.[provider]?.tile_url : null;
-		referenceLayer.current.setSource(
-			url ? new XYZ({ url, maxZoom: 19, crossOrigin: "anonymous", attributions: ESRI_WORLD_IMAGERY_ATTRIBUTION }) : null,
-		);
-		matchSource.current.clear();
-		matchSource.current.addFeatures(matchFeatures(references.find((r) => r.provider === provider)));
-	}, [provider, check, references]);
+		showReference(provider);
+	}, [provider, showReference]);
 
 	useEffect(() => {
 		droneLayer.current?.setOpacity(opacity / 100);

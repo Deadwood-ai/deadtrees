@@ -14,7 +14,9 @@ from .references import fetch_references
 from .source import aoi_only, read_source
 
 MODEL_VERSION = 'romav2.0.1'
-NULL_LINE_DEG = 0.005  # a footprint centred this close to the equator or prime meridian
+# a footprint centred this close (~110 m) to the equator or prime meridian has
+# lost a coordinate; a real site so close that also matches nothing is rare
+NULL_LINE_DEG = 0.001
 
 
 @dataclass
@@ -70,12 +72,12 @@ def run_georef_check(cog_path: str, aoi_4326: dict | None, flight: date | None) 
 	for e in evidence:
 		e.sample_pairs = _to_lonlat(e.sample_pairs, grid)
 	gross = None
-	if assessment.decision == 'uncertain' and not any(e.matrix for e in evidence):
-		if abs(lat) < NULL_LINE_DEG or abs(lon) < NULL_LINE_DEG:
-			# nothing matches and the image sits on the equator or the prime
-			# meridian: its coordinates were lost (e.g. a zero latitude)
-			gross = 'on_null_line'
-			assessment = Assessment('poor', 'gross', gross, None, 0, 0.0, 0.0)
+	# references were fetched (no outage), nothing matches at all, and the image
+	# sits on the equator or the prime meridian: its coordinates were lost
+	on_null_line = abs(lat) < NULL_LINE_DEG or abs(lon) < NULL_LINE_DEG
+	if assessment.decision == 'uncertain' and refs and not any(e.matrix for e in evidence) and on_null_line:
+		gross = 'on_null_line'
+		assessment = Assessment('poor', 'gross', gross, None, 0, 0.0, 0.0)
 	details = {
 		'rules_version': RULES_VERSION,
 		'rules': asdict(RULES),

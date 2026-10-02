@@ -26,10 +26,18 @@ import sys
 import time
 from pathlib import Path
 
-from requeue_datasets_via_api import REQUIRED_KEYS, _http_json, _load_env_subset, _parse_dataset_ids
-from requeue_doy_estimation import TOKEN_REFRESH_EVERY, _login, _select_all
+from requeue_datasets_via_api import (
+	REQUIRED_KEYS,
+	_http_json,
+	_load_env_subset,
+	_login,
+	_parse_dataset_ids,
+	_select_all,
+)
+
 
 TASK_TYPE = 'georef_check_v1'
+TOKEN_REFRESH_EVERY = 500  # processor JWTs expire after an hour
 # keep in sync with processor/src/georef_check_v1 (evidence.RULES_VERSION, check.MODEL_VERSION)
 RULES_VERSION = 'georef-rules-v1'
 MODEL_VERSION = 'romav2.0.1'

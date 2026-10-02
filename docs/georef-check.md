@@ -43,8 +43,9 @@ nothing counts as an audit until an auditor saves.
    - at least 80% of the AOI is supported, and of its edges for a Good call
    - every p90 is at least 3 m away from 15 m
 
-   Otherwise it is `qualified`. When nothing matches and the footprint sits on
-   the equator or the prime meridian, the coordinates were lost: Poor (`gross`).
+   Otherwise it is `qualified`. When references were fetched, nothing matches
+   at all, and the footprint centre lies within ~110 m of the equator or the
+   prime meridian, a coordinate was lost: Poor (`gross`).
 
 ## What it stores
 

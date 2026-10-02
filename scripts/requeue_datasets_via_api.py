@@ -22,6 +22,7 @@ import argparse
 import json
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -72,6 +73,41 @@ def _http_json(method: str, url: str, headers: dict[str, str], body: dict | None
 		except Exception:
 			parsed = text
 		return e.code, parsed
+
+
+# shared by the stage backfill scripts (requeue_doy_estimation.py, requeue_georef_check.py)
+PAGE = 1000
+
+
+def _login(env: dict, supabase_url: str) -> str | None:
+	code, resp = _http_json(
+		'POST',
+		f'{supabase_url}/auth/v1/token?grant_type=password',
+		headers={'apikey': env['SUPABASE_KEY'], 'Accept': 'application/json'},
+		body={'email': env['PROCESSOR_USERNAME'], 'password': env['PROCESSOR_PASSWORD']},
+	)
+	if code != 200 or 'access_token' not in (resp or {}):
+		print(f'token request failed (HTTP {code})', file=sys.stderr)
+		return None
+	return resp['access_token']
+
+
+def _select_all(supabase_url: str, headers: dict, table: str, select: str, filters: dict | None = None) -> list[dict]:
+	rows, offset = [], 0
+	while True:
+		query = urllib.parse.urlencode({'select': select, **(filters or {}), 'order': 'dataset_id.asc' if table != 'v2_datasets' else 'id.asc'})
+		code, resp = _http_json(
+			'GET',
+			f'{supabase_url}/rest/v1/{table}?{query}',
+			headers={**headers, 'Range-Unit': 'items', 'Range': f'{offset}-{offset + PAGE - 1}'},
+			body=None,
+		)
+		if code not in (200, 206):
+			raise SystemExit(f'{table} query failed (HTTP {code}): {resp}')
+		rows.extend(resp)
+		if len(resp) < PAGE:
+			return rows
+		offset += PAGE
 
 
 def _parse_dataset_ids(raw: str) -> list[int]:
