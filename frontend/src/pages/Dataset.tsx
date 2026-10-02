@@ -30,7 +30,7 @@ import { useDesktopOnlyFeature } from "../hooks/useDesktopOnlyFeature";
 import { useAnalytics } from "../hooks/useAnalytics";
 import { useArchiveSearch } from "../hooks/useArchiveSearch";
 import ArchiveSearch from "../components/DatasetMap/ArchiveSearch";
-import { matchesDatasetArchiveTextSearch } from "../utils/archiveTextSearch";
+import { createDatasetArchiveTextMatcher } from "../utils/archiveTextSearch";
 
 type FilterTag =
   | "platform"
@@ -83,7 +83,6 @@ export default function Dataset() {
 
   const [hoveredItem, setHoveredItem] = useState<number | null>(null);
   const [visibleFeatures, setVisibleFeatures] = useState<string[]>([]);
-  const [searchValue, setSearchValue] = useState("");
   const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
   const [isMobileListOpen, setIsMobileListOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -98,27 +97,20 @@ export default function Dataset() {
   // datasets visible to the caller.
   const search = useArchiveSearch();
   const { semantic } = search;
-  const searchInput = search.text;
-
-  // Debounced search handler
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearchValue(searchInput);
-    }, 300); // 300ms delay
-
-    return () => clearTimeout(timer);
-  }, [searchInput]);
+  // The committed text query: it trails the search field by a short debounce,
+  // so the list and map are not re-filtered on every keystroke.
+  const activeTextSearch = search.text;
 
   useEffect(() => {
     track("dataset_archive_viewed", {});
   }, [track]);
 
   useEffect(() => {
-    if (!searchValue.trim()) return;
+    if (!activeTextSearch.trim()) return;
     track("dataset_search_used", {
-      search_length: searchValue.trim().length,
+      search_length: activeTextSearch.trim().length,
     });
-  }, [searchValue, track]);
+  }, [activeTextSearch, track]);
 
   const toggleSort = () => {
     setSortDirection(sortDirection === "asc" ? "desc" : "asc");
@@ -160,20 +152,15 @@ export default function Dataset() {
     });
   };
 
-  const activeTextSearch = search.mode === "text" && searchInput ? searchValue : "";
-
   // Text/semantic search and sorting are applied on top of the already
   // filtered data, so they affect only which datasets are shown — never the
   // timeline.
   const displayData = useMemo(() => {
     if (!filteredData) return null;
 
-    const filtered = filteredData.filter((d) => {
-      // If no search value, return true for the base condition
-      if (!activeTextSearch.trim()) return true;
-
-      return matchesDatasetArchiveTextSearch(d, activeTextSearch);
-    });
+    const filtered = filteredData.filter(
+      createDatasetArchiveTextMatcher(activeTextSearch),
+    );
 
     // When a semantic query is active, restrict to matched datasets and order
     // by relevance score (most relevant first), overriding the id/date sort.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createDatasetArchiveTextMatcher,
   matchesDatasetArchiveTextSearch,
   matchesSearchText,
   normalizeSearchText,
@@ -34,5 +35,18 @@ describe("archive text search", () => {
     const displayName = "José García";
     expect(normalizeSearchText(displayName)).toBe("jose garcia");
     expect(displayName).toBe("José García");
+  });
+
+  it("reuses one matcher across datasets and queries without changing results", () => {
+    const other = { ...dataset, authors: ["Different Author"], admin_level_3: "Freiburg im Breisgau" };
+    for (const query of ["garcia", "sierra andalucia", "primary garcia", "freiburg breisgau", " ", "nowhere"]) {
+      const matches = createDatasetArchiveTextMatcher(query);
+      for (const item of [dataset, other]) {
+        expect(matches(item)).toBe(matchesDatasetArchiveTextSearch(item, query));
+      }
+    }
+    expect(createDatasetArchiveTextMatcher("primary garcia")(dataset)).toBe(false);
+    expect(createDatasetArchiveTextMatcher("sierra andalucia")(dataset)).toBe(true);
+    expect(createDatasetArchiveTextMatcher("freiburg")(dataset)).toBe(false);
   });
 });
