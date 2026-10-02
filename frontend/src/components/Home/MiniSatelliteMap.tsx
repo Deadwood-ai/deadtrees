@@ -3,11 +3,10 @@ import { Segmented, Select } from "antd";
 import "ol/ol.css";
 import { Map, View } from "ol";
 import TileLayer from "ol/layer/Tile";
-import { GeoTIFF } from "ol/source";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { fromLonLat } from "ol/proj";
 
-import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
+import { getCachedCoverCogSource } from "../../utils/cogSource";
 import { getDeadwoodCOGUrl, getForestCOGUrl } from "../../utils/getDeadwoodCOGUrl";
 import {
   createStandardMapControls,
@@ -23,14 +22,6 @@ const LOCATIONS = [
 
 const YEARS = ["2018", "2020", "2022", "2024"];
 const DEFAULT_YEAR = "2024";
-
-const createRasterSource = (url: string) =>
-  new GeoTIFF({
-    sources: [{ url, bands: [1], min: 0, max: 255 }],
-    normalize: true,
-    interpolate: false,
-    sourceOptions: COG_SOURCE_OPTIONS,
-  });
 
 const MiniSatelliteMap = () => {
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -61,7 +52,7 @@ const MiniSatelliteMap = () => {
       });
 
       const forestLayer = new TileLayerWebGL({
-        source: createRasterSource(getForestCOGUrl(DEFAULT_YEAR)),
+        source: getCachedCoverCogSource(getForestCOGUrl(DEFAULT_YEAR)),
         style: {
           color: [
             "interpolate",
@@ -76,7 +67,7 @@ const MiniSatelliteMap = () => {
       });
 
       const deadwoodLayer = new TileLayerWebGL({
-        source: createRasterSource(getDeadwoodCOGUrl(DEFAULT_YEAR)),
+        source: getCachedCoverCogSource(getDeadwoodCOGUrl(DEFAULT_YEAR)),
         style: {
           color: [
             "interpolate",
@@ -105,6 +96,11 @@ const MiniSatelliteMap = () => {
       mapRef.current = newMap;
 
     return () => {
+      // Each cover layer holds a WebGL context; their sources stay cached.
+      for (const layerRef of [forestLayerRef, deadwoodLayerRef]) {
+        layerRef.current?.dispose();
+        layerRef.current = null;
+      }
       if (mapRef.current) {
         mapRef.current.setTarget(undefined);
         mapRef.current = null;
@@ -127,8 +123,8 @@ const MiniSatelliteMap = () => {
   // Update sources when year changes
   useEffect(() => {
     if (forestLayerRef.current && deadwoodLayerRef.current) {
-      forestLayerRef.current.setSource(createRasterSource(getForestCOGUrl(activeYear)));
-      deadwoodLayerRef.current.setSource(createRasterSource(getDeadwoodCOGUrl(activeYear)));
+      forestLayerRef.current.setSource(getCachedCoverCogSource(getForestCOGUrl(activeYear)));
+      deadwoodLayerRef.current.setSource(getCachedCoverCogSource(getDeadwoodCOGUrl(activeYear)));
     }
   }, [activeYear]);
 

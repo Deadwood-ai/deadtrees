@@ -7,7 +7,6 @@ import Map from "ol/Map";
 import { defaults as defaultInteractions } from "ol/interaction/defaults";
 import View from "ol/View";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
-import { GeoTIFF } from "ol/source";
 import { useDatasets } from "../hooks/useDatasets";
 import { useDatasetLabelTypes } from "../hooks/useDatasetLabelTypes";
 import usePolygonEditor from "../hooks/usePolygonEditor";
@@ -24,7 +23,7 @@ import type { StyleFunction as OLStyleFunction } from "ol/style/Style";
 import type { IDataset } from "../types/dataset";
 import type MapBrowserEvent from "ol/MapBrowserEvent";
 import { acquireLibertyBasemapGroup, releaseLibertyBasemapGroup } from "../utils/basemaps";
-import { COG_SOURCE_OPTIONS } from "../utils/cogSourceOptions";
+import { createOrthoCogSource, MAP_MAX_TILES_LOADING } from "../utils/cogSource";
 import { palette } from "../theme/palette";
 
 type StyleFn = (f: Feature<Geometry>) => Style | null | undefined;
@@ -78,17 +77,7 @@ export default function DatasetLabelEditor() {
     let orthoCogLayer: TileLayerWebGL | undefined;
     if (cogUrl) {
       orthoCogLayer = new TileLayerWebGL({
-        source: new GeoTIFF({
-          sources: [
-            {
-              url: cogUrl,
-              nodata: 0,
-              bands: [1, 2, 3],
-            },
-          ],
-          convertToRGB: true,
-          sourceOptions: COG_SOURCE_OPTIONS,
-        }),
+        source: createOrthoCogSource(cogUrl),
         maxZoom: 23,
         cacheSize: 4096,
         preload: 0,
@@ -104,6 +93,7 @@ export default function DatasetLabelEditor() {
 
     const map = new Map({
       target: mapContainerRef.current,
+      maxTilesLoading: MAP_MAX_TILES_LOADING,
       layers: orthoCogLayer ? [basemapLayer, orthoCogLayer] : [basemapLayer],
       view,
       controls: [],

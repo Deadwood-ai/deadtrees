@@ -2,7 +2,7 @@ import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { GeoTIFF } from "ol/source";
 
 import { Settings } from "../../config";
-import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
+import { COG_SOURCE_OPTIONS, remoteCogSource } from "../../utils/cogSource";
 
 export interface IPriwaCogLayerSource {
   cogUrl: string;
@@ -26,7 +26,7 @@ export const createPriwaCogLayer = (cog: IPriwaCogLayerSource) =>
         {
           ...(cog.offlineFile
             ? { blob: cog.offlineFile }
-            : { url: resolvePriwaCogUrl(cog.cogUrl) }),
+            : remoteCogSource(resolvePriwaCogUrl(cog.cogUrl))),
           nodata: 0,
           bands: [1, 2, 3],
         },

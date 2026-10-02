@@ -1,8 +1,7 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
 import type { Map } from "ol";
 import TileLayerWebGL from "ol/layer/WebGLTile";
-import GeoTIFF from "ol/source/GeoTIFF";
-import { COG_SOURCE_OPTIONS } from "../utils/cogSourceOptions";
+import { createOrthoCogSource } from "../utils/cogSource";
 
 interface OrthoLayerOptions {
   /** Highest zoom the imagery layer renders. */
@@ -36,11 +35,7 @@ export function useOrthoLayer(
     if (!cogUrl) return;
 
     const ortho = new TileLayerWebGL({
-      source: new GeoTIFF({
-        sources: [{ url: cogUrl, nodata: 0, bands: [1, 2, 3] }],
-        convertToRGB: true,
-        sourceOptions: COG_SOURCE_OPTIONS,
-      }),
+      source: createOrthoCogSource(cogUrl),
       maxZoom,
       cacheSize: 1024,
       preload: 0,

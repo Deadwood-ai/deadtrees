@@ -3,12 +3,11 @@ import { Map, View, Overlay } from "ol";
 import type BaseLayer from "ol/layer/Base";
 import ImageLayer from "ol/layer/Image";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
-import { GeoTIFF } from "ol/source";
 import StaticImageSource from "ol/source/ImageStatic";
 import type { Layer } from "ol/layer";
 
 import { createStandardMapControls } from "../../../utils/basemaps";
-import { COG_SOURCE_OPTIONS } from "../../../utils/cogSourceOptions";
+import { createOrthoCogSource, MAP_MAX_TILES_LOADING } from "../../../utils/cogSource";
 import { createMapInteractions } from "../../../utils/mapInteractions";
 
 export interface Viewport {
@@ -195,15 +194,7 @@ export function useMapCore({
 		}
 
 		let isDisposed = false;
-		const orthoCogSource = new GeoTIFF({
-			sources: [{
-				url: cogUrl,
-				nodata: 0,
-				bands: [1, 2, 3],
-			}],
-			convertToRGB: true,
-			sourceOptions: COG_SOURCE_OPTIONS,
-		});
+		const orthoCogSource = createOrthoCogSource(cogUrl);
 
 		// The orthophoto COG uses OpenLayers' WebGL tile renderer. Some embedded
 		// browsers disable WebGL; in that case keep the map usable with a static
@@ -260,6 +251,7 @@ export function useMapCore({
 					target: containerRef.current,
 					layers: displayOrthoLayer ? [displayOrthoLayer] : [],
 					view: mapView,
+					maxTilesLoading: MAP_MAX_TILES_LOADING,
 					controls: createStandardMapControls(),
 					interactions: createMapInteractions({
 						doubleClickZoom: false,

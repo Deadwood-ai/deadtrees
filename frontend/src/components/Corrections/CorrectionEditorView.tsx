@@ -5,7 +5,6 @@ import { message, Button, Spin, Alert } from "antd";
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import { Map as OLMap, View } from "ol";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
-import { GeoTIFF } from "ol/source";
 import Feature from "ol/Feature";
 import type { Geometry } from "ol/geom";
 import GeoJSON from "ol/format/GeoJSON";
@@ -27,7 +26,7 @@ import { createDeadwoodVectorLayer, createForestCoverVectorLayer } from "../Data
 import { useDatasetLabelTypes } from "../../hooks/useDatasetLabelTypes";
 import { useDatasetDetailsMap } from "../../hooks/useDatasetDetailsMapProvider";
 import { acquireLibertyBasemapGroup, releaseLibertyBasemapGroup, createStandardMapControls } from "../../utils/basemaps";
-import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
+import { createOrthoCogSource, MAP_MAX_TILES_LOADING } from "../../utils/cogSource";
 import { hasForestCoverPredictionOutput } from "../../utils/predictionAvailability";
 
 interface Props {
@@ -94,17 +93,7 @@ export default function CorrectionEditorView({ dataset, initialLayerType, onClos
     if (!mapContainerRef.current || mapRef.current || !cogUrl) return;
 
     const orthoCogLayer = new TileLayerWebGL({
-      source: new GeoTIFF({
-        sources: [
-          {
-            url: cogUrl,
-            nodata: 0,
-            bands: [1, 2, 3],
-          },
-        ],
-        convertToRGB: true,
-        sourceOptions: COG_SOURCE_OPTIONS,
-      }),
+      source: createOrthoCogSource(cogUrl),
       maxZoom: 23,
       cacheSize: 4096,
       preload: 0,
@@ -152,6 +141,7 @@ export default function CorrectionEditorView({ dataset, initialLayerType, onClos
         if (deadwoodVectorLayer) layers.push(deadwoodVectorLayer);
 
         const newMap = new OLMap({
+          maxTilesLoading: MAP_MAX_TILES_LOADING,
           target: mapContainerRef.current,
           layers,
           view: mapView,
