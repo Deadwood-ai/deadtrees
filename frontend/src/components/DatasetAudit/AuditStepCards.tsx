@@ -185,29 +185,7 @@ export function UserFlagsCard({ flags, isFlagsLoading, isUpdatingFlag, datasetId
 	);
 }
 
-// === Georeferencing Card (Step 1) ===
-export function GeoreferencingCard() {
-	return (
-		<Card size="small" className="mb-3 shadow-sm">
-			<div className="mb-2 flex items-center">
-				<Text strong className="text-xs">1. Georeferencing Accuracy</Text>
-			</div>
-			<Form.Item
-				name="is_georeferenced"
-				className="mb-0"
-				rules={createConditionalRule("Please assess georeferencing")}
-			>
-				<Radio.Group>
-					<Space size="large">
-						<Radio value={true}>🟢 Good (&lt;15m)</Radio>
-						<Radio value={false}>🔴 Poor (&gt;15m)</Radio>
-					</Space>
-				</Radio.Group>
-			</Form.Item>
-		</Card>
-	);
-}
-
+// Step 1 (georeferencing) lives in GeoreferencingCard.tsx
 // Step 2 (acquisition date) lives in AcquisitionDateCard.tsx
 
 // === Phenology Card (Step 3) ===

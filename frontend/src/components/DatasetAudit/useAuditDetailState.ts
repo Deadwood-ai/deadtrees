@@ -20,6 +20,7 @@ import { usePhenologyData } from "../../hooks/usePhenologyData";
 import {
 	useAcquisitionDateDecisions,
 	useAcquisitionDateEstimate,
+	useGeorefCheck,
 	useAuditReviewQueue,
 	useAuditSuggestions,
 } from "../../hooks/useAcquisitionDateEstimate";
@@ -145,6 +146,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	const { data: orthoMetadata, isLoading: isOrthoLoading } = useOrthoMetadata(dataset.id);
 	const { data: phenologyData, isLoading: isPhenologyLoading } = usePhenologyData(dataset.id);
 	const { data: acquisitionDateEstimate } = useAcquisitionDateEstimate(dataset.id);
+	const { data: georefCheck } = useGeorefCheck(dataset.id);
 	const { data: acquisitionDateDecisions = NO_DECISIONS } = useAcquisitionDateDecisions(dataset.id);
 	const { data: auditSuggestionsData } = useAuditSuggestions(dataset.id);
 	const { data: reviewItems } = useAuditReviewQueue(dataset.id);
@@ -461,6 +463,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		phenologyData,
 		isPhenologyLoading,
 		acquisitionDateEstimate,
+		georefCheck,
 		acquisitionDateDecisions,
 		auditSuggestions,
 		auditReviewItems,

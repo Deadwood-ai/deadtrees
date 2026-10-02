@@ -36,7 +36,7 @@ const SOURCE_LABEL: Record<IAcquisitionDateDecision["source"], string> = {
 };
 
 /** "Suggested" tag while a prefilled field still holds the machine value. */
-function SuggestedTag({ field, suggestions, prefilledFields }: { field: string; suggestions: IAuditSuggestion[]; prefilledFields: string[] }) {
+export function SuggestedTag({ field, suggestions, prefilledFields }: { field: string; suggestions: IAuditSuggestion[]; prefilledFields: string[] }) {
 	const form = Form.useFormInstance();
 	// preserve: read the store even before the field's Form.Item registers
 	const value = Form.useWatch(field, { form, preserve: true });

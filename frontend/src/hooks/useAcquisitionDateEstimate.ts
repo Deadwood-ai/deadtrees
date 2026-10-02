@@ -3,6 +3,7 @@ import { supabase } from "./useSupabase";
 import { useAuth } from "./useAuthProvider";
 import { useCanAudit } from "./useUserPrivileges";
 import type { IAcquisitionDateDecision, IAcquisitionDateEstimate, IAuditReviewItem, IAuditSuggestion } from "../types/acquisitionDate";
+import type { IGeorefCheck } from "../types/georefCheck";
 
 /** The dataset's acquisition-date estimate (null until the stage has run). */
 export function useAcquisitionDateEstimate(datasetId: number | undefined) {
@@ -72,5 +73,19 @@ export function useAuditReviewQueue(datasetId?: number) {
       return (data as IAuditReviewItem[]) ?? [];
     },
     enabled: !!user?.id && canAudit,
+  });
+}
+
+/** The dataset's georeferencing check (null until the stage has run). */
+export function useGeorefCheck(datasetId: number | undefined) {
+  return useQuery({
+    queryKey: ["georef-check", datasetId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("v2_georef_checks").select("*").eq("dataset_id", datasetId!).maybeSingle();
+      if (error) throw error;
+      return (data as IGeorefCheck | null) ?? null;
+    },
+    enabled: !!datasetId,
+    staleTime: 5 * 60 * 1000,
   });
 }
