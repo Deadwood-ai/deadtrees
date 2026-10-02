@@ -36,7 +36,9 @@ def process_georef_check(task: QueueTask, token: str, temp_dir: Path):
 		raise AuthenticationError('Invalid token')
 
 	def ctx(extra=None):
-		return LogContext(category=LogCategory.GEOREF, dataset_id=task.dataset_id, user_id=user.id, token=token, extra=extra)
+		return LogContext(
+			category=LogCategory.GEOREF, dataset_id=task.dataset_id, user_id=user.id, token=token, extra=extra
+		)
 
 	try:
 		dataset, cog, aoi = _fetch_inputs(token, task.dataset_id)
@@ -80,7 +82,11 @@ def flight_date(dataset: Dataset) -> date | None:
 	the Wayback capture closest in time."""
 	if not dataset.aquisition_year:
 		return None
-	return date(dataset.aquisition_year, dataset.aquisition_month or 7, dataset.aquisition_day or (15 if dataset.aquisition_month else 1))
+	return date(
+		dataset.aquisition_year,
+		dataset.aquisition_month or 7,
+		dataset.aquisition_day or (15 if dataset.aquisition_month else 1),
+	)
 
 
 def _fetch_inputs(token: str, dataset_id: int):
@@ -145,7 +151,9 @@ def suggestion_row(dataset_id: int, check) -> dict | None:
 def _store(token: str, dataset_id: int, check) -> None:
 	suggestion = suggestion_row(dataset_id, check)
 	with use_client(token) as client:
-		client.table(settings.georef_checks_table).upsert(check_row(dataset_id, check), on_conflict='dataset_id').execute()
+		client.table(settings.georef_checks_table).upsert(
+			check_row(dataset_id, check), on_conflict='dataset_id'
+		).execute()
 		if suggestion:
 			client.table(settings.audit_suggestions_table).upsert(suggestion, on_conflict='dataset_id,field').execute()
 		else:

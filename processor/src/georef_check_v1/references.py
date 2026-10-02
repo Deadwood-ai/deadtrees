@@ -27,8 +27,9 @@ TILE_BUDGET = 45
 USER_AGENT = 'DeadTrees-georeferencing-check/1.0 (+https://deadtrees.earth)'
 ESRI_TILES = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 WAYBACK_CONFIG = 'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json'
-WAYBACK_TILEMAP = 'https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tilemap'
-WAYBACK_TILES = 'https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{release}/{z}/{y}/{x}'
+WAYBACK_TILES = (
+	'https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{release}/{z}/{y}/{x}'
+)
 
 
 @dataclass
@@ -94,39 +95,28 @@ def _blank(image: np.ndarray) -> bool:
 	return float(np.max(image.reshape(-1, 3).std(axis=0))) < 2
 
 
-def _tile_xy(lon: float, lat: float, z: int) -> tuple[int, int]:
-	y = (1 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2 * 2**z
-	return int((lon + 180) / 360 * 2**z), int(y)
+def wayback_captures(lon: float, lat: float, zoom: int, session: requests.Session) -> list[dict]:
+	"""The capture date at the point in the last Wayback release of every year.
 
-
-def wayback_captures(lon: float, lat: float, zoom: int, session: requests.Session, limit: int = 30) -> list[dict]:
-	"""Distinct Wayback releases with imagery at the point, newest first, each
-	with the imagery's capture date from the release's metadata layer."""
+	Walking every release through the tilemap service took ~100 s per dataset on
+	the slow archive host; one metadata query per year, in parallel, takes a few
+	seconds and still finds each distinct capture."""
 	catalog = session.get(WAYBACK_CONFIG, timeout=30).json()
-	releases = sorted(
-		({'release': int(k), **v} for k, v in catalog.items()),
-		key=lambda r: r['itemTitle'].split('Wayback ')[-1].rstrip(')'),
-		reverse=True,
-	)
-	index = {r['release']: i for i, r in enumerate(releases)}
-	x, y = _tile_xy(lon, lat, 12)
-	captures, release = [], releases[0]['release']
-	while release is not None and len(captures) < limit:
-		tilemap = session.get(f'{WAYBACK_TILEMAP}/{release}/12/{y}/{x}', timeout=30).json()
-		if not (tilemap.get('data') or [0])[0]:
-			break
-		selected = (tilemap.get('select') or [None])[0]
-		actual = int(selected) if selected else release
-		if actual not in index:
-			break
-		item = releases[index[actual]]
+	yearly: dict[str, dict] = {}
+	for release, item in catalog.items():
+		released = item['itemTitle'].split('Wayback ')[-1].rstrip(')')
+		if released >= yearly.get(released[:4], {}).get('released', ''):
+			yearly[released[:4]] = {'release': int(release), 'released': released, 'metadata': item['metadataLayerUrl']}
+	point = f'{{"spatialReference":{{"wkid":4326}},"x":{lon},"y":{lat}}}'
+
+	def capture(item):
 		meta = session.get(
-			item['metadataLayerUrl'] + f'/{23 - zoom}/query',
+			item['metadata'] + f'/{23 - zoom}/query',
 			params={
 				'f': 'json',
 				'where': '1=1',
 				'outFields': 'SRC_DATE2',
-				'geometry': f'{{"spatialReference":{{"wkid":4326}},"x":{lon},"y":{lat}}}',
+				'geometry': point,
 				'geometryType': 'esriGeometryPoint',
 				'spatialRel': 'esriSpatialRelIntersects',
 				'returnGeometry': 'false',
@@ -135,25 +125,25 @@ def wayback_captures(lon: float, lat: float, zoom: int, session: requests.Sessio
 		).json()
 		ms = ((meta.get('features') or [{}])[0].get('attributes') or {}).get('SRC_DATE2')
 		captured = datetime.fromtimestamp(ms / 1000, timezone.utc).date().isoformat() if ms else None
-		captures.append({'release': actual, 'capture_date': captured})
-		nxt = index[actual] + 1
-		release = releases[nxt]['release'] if nxt < len(releases) else None
+		return {'release': item['release'], 'capture_date': captured}
+
+	with ThreadPoolExecutor(max_workers=6) as pool:
+		captures = list(pool.map(capture, sorted(yearly.values(), key=lambda i: i['released'], reverse=True)))
 	return captures
 
 
 def pick_wayback(captures: list[dict], flight: date | None, n: int = 2) -> list[dict]:
-	"""The capture closest to the flight date plus the newest other dated capture."""
+	"""Older dated captures than the current imagery (which Esri World Imagery
+	already shows): the one closest to the flight date, then the oldest."""
 	dated = {}
 	for c in captures:
 		if c['capture_date'] and c['capture_date'] not in dated:
 			dated[c['capture_date']] = c
-	if not dated:
-		return []
-	ordered = sorted(dated.values(), key=lambda c: c['capture_date'], reverse=True)
+	older = sorted(dated.values(), key=lambda c: c['capture_date'])[:-1]
 	chosen = []
-	if flight:
-		chosen.append(min(ordered, key=lambda c: abs((date.fromisoformat(c['capture_date']) - flight).days)))
-	for c in ordered:
+	if flight and older:
+		chosen.append(min(older, key=lambda c: abs((date.fromisoformat(c['capture_date']) - flight).days)))
+	for c in older:
 		if len(chosen) >= n:
 			break
 		if c not in chosen:
@@ -173,7 +163,9 @@ def _google_session(session: requests.Session) -> str:
 	return r.json()['session']
 
 
-def fetch_references(grid: Grid, centre_lonlat: tuple[float, float], flight: date | None) -> tuple[list[Reference], dict]:
+def fetch_references(
+	grid: Grid, centre_lonlat: tuple[float, float], flight: date | None
+) -> tuple[list[Reference], dict]:
 	"""All available references, plus {provider: error} for the ones that failed."""
 	session = _session()
 	refs, errors = [], {}

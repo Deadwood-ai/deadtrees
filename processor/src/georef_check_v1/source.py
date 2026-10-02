@@ -23,8 +23,8 @@ NEUTRAL = 127  # fill outside the usable area, so the matcher ignores it
 @dataclass
 class Source:
 	grid: Grid
-	image: np.ndarray  # (H, W, 3) uint8, NEUTRAL outside `mask`
-	mask: np.ndarray  # (H, W) bool: valid data inside the AOI
+	image: np.ndarray  # (H, W, 3) uint8, NEUTRAL where the COG has no data
+	mask: np.ndarray  # (H, W) bool: valid data inside the AOI, where offsets are measured
 	native_m_per_px: float
 	used_aoi: bool
 
@@ -52,16 +52,50 @@ def read_source(cog_path: str, aoi_4326: dict | None, grid_pixels: int = GRID_PI
 			raise ValueError('georeferencing check needs an 8-bit RGB COG')
 		out = np.zeros((3, h, w), np.uint8)
 		mask = np.zeros((h, w), np.uint8)
-		reproject(rgb, out, src_transform=source_transform, src_crs=src.crs, dst_transform=target, dst_crs='EPSG:3857', resampling=Resampling.bilinear)
-		reproject(valid, mask, src_transform=source_transform, src_crs=src.crs, dst_transform=target, dst_crs='EPSG:3857', resampling=Resampling.nearest)
+		reproject(
+			rgb,
+			out,
+			src_transform=source_transform,
+			src_crs=src.crs,
+			dst_transform=target,
+			dst_crs='EPSG:3857',
+			resampling=Resampling.bilinear,
+		)
+		reproject(
+			valid,
+			mask,
+			src_transform=source_transform,
+			src_crs=src.crs,
+			dst_transform=target,
+			dst_crs='EPSG:3857',
+			resampling=Resampling.nearest,
+		)
 		native = width_m / src.width
 	usable = cv2.erode((mask > 0).astype(np.uint8), np.ones((MASK_EROSION_PX, MASK_EROSION_PX), np.uint8)) > 0
 	used_aoi = False
 	if aoi_4326 is not None:
-		aoi = rasterize([transform_geom('EPSG:4326', 'EPSG:3857', aoi_4326)], out_shape=(h, w), transform=target, fill=0, default_value=1, dtype=np.uint8) > 0
+		aoi = (
+			rasterize(
+				[transform_geom('EPSG:4326', 'EPSG:3857', aoi_4326)],
+				out_shape=(h, w),
+				transform=target,
+				fill=0,
+				default_value=1,
+				dtype=np.uint8,
+			)
+			> 0
+		)
 		if (usable & aoi).any():
 			usable &= aoi
 			used_aoi = True
 	image = out.transpose(1, 2, 0).copy()
-	image[~usable] = NEUTRAL
+	image[mask == 0] = NEUTRAL
 	return Source(grid, image, usable, native * grid.metres_per_pixel() / grid.res, used_aoi)
+
+
+def aoi_only(source: Source) -> np.ndarray:
+	"""The drone image with everything outside the measured area neutral: the
+	retry for uncertain checks, so artifacts outside the AOI cannot dominate."""
+	image = source.image.copy()
+	image[~source.mask] = NEUTRAL
+	return image

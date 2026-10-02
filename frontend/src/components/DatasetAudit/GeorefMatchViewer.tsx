@@ -46,18 +46,20 @@ function matchFeatures(reference: IGeorefReferenceEvidence | undefined): Feature
  * slider and the matched points (dot = drone position, line = where the
  * reference shows the same spot; colour by offset). */
 export default function GeorefMatchViewer({ open, onClose, check, cogPath }: GeorefMatchViewerProps) {
-	const containerRef = useRef<HTMLDivElement | null>(null);
+	// a callback ref: the modal mounts its body after `open` turns true
+	const [container, setContainer] = useState<HTMLDivElement | null>(null);
 	const mapRef = useRef<Map | null>(null);
 	const referenceLayer = useRef(new TileLayer({ preload: 0 }));
 	const droneLayer = useRef<TileLayerWebGL | null>(null);
 	const matchSource = useRef(new VectorSource());
+	const extentRef = useRef<number[] | null>(null);
 	const references = useMemo(() => orderedReferences(check), [check]);
 	const viewable = references.filter((r) => check.metadata.references?.[r.provider]?.tile_url);
 	const [provider, setProvider] = useState<string | undefined>(viewable[0]?.provider);
 	const [opacity, setOpacity] = useState(60);
 
 	useEffect(() => {
-		if (!open || mapRef.current || !containerRef.current) return;
+		if (!open || !container) return;
 		const cog = new GeoTIFF({
 			sources: [{ url: Settings.COG_BASE_URL + cogPath, nodata: 0, bands: [1, 2, 3] }],
 			convertToRGB: true,
@@ -65,13 +67,16 @@ export default function GeorefMatchViewer({ open, onClose, check, cogPath }: Geo
 		});
 		droneLayer.current = new TileLayerWebGL({ source: cog, opacity: opacity / 100, preload: 0 });
 		const map = new Map({
-			target: containerRef.current,
+			target: container,
 			layers: [referenceLayer.current, droneLayer.current, new VectorLayer({ source: matchSource.current })],
 			view: new View({ projection: "EPSG:3857", maxZoom: 23 }),
 		});
 		mapRef.current = map;
 		cog.getView().then((options) => {
-			if (options?.extent) map.getView().fit(options.extent as number[], { padding: [30, 30, 30, 30] });
+			if (!options?.extent) return;
+			extentRef.current = options.extent as number[];
+			map.updateSize();
+			map.getView().fit(extentRef.current, { padding: [30, 30, 30, 30] });
 		});
 		return () => {
 			map.setTarget(undefined);
@@ -79,7 +84,7 @@ export default function GeorefMatchViewer({ open, onClose, check, cogPath }: Geo
 		};
 		// the map is built once per opening; layer changes go through the effects below
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [open, cogPath]);
+	}, [open, container, cogPath]);
 
 	useEffect(() => {
 		const url = provider ? check.metadata.references?.[provider]?.tile_url : null;
@@ -111,7 +116,21 @@ export default function GeorefMatchViewer({ open, onClose, check, cogPath }: Geo
 	];
 
 	return (
-		<Modal open={open} onCancel={onClose} footer={null} width={960} title="Georeferencing check: matching" destroyOnClose>
+		<Modal
+			open={open}
+			onCancel={onClose}
+			footer={null}
+			width={960}
+			title="Georeferencing check: matching"
+			destroyOnHidden
+			afterOpenChange={(visible) => {
+				// the map is created while the modal animates in; size it once it is laid out
+				const map = mapRef.current;
+				if (!visible || !map) return;
+				map.updateSize();
+				if (extentRef.current) map.getView().fit(extentRef.current, { padding: [30, 30, 30, 30] });
+			}}
+		>
 			<div className="mb-2 flex flex-wrap items-center gap-4">
 				{viewable.length > 0 ? (
 					<Segmented
@@ -128,7 +147,7 @@ export default function GeorefMatchViewer({ open, onClose, check, cogPath }: Geo
 					<Slider className="flex-1" min={0} max={100} value={opacity} onChange={setOpacity} />
 				</div>
 			</div>
-			<div ref={containerRef} className="h-[460px] w-full rounded border border-gray-200" />
+			<div ref={setContainer} className="h-[460px] w-full rounded border border-gray-200" />
 			<Text type="secondary" className="mt-1 block text-xs">
 				Dots mark matched spots in the drone image; each line runs to the same spot in the reference. Green under 7.5 m, amber under 15 m, red over 15 m.
 			</Text>

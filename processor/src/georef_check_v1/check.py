@@ -11,7 +11,7 @@ import numpy as np
 from .evidence import RULES, RULES_VERSION, Assessment, ReferenceEvidence, combine, footprint_samples, measure_reference
 from .matcher import match
 from .references import fetch_references
-from .source import read_source
+from .source import aoi_only, read_source
 
 MODEL_VERSION = 'romav2.0.1'
 NULL_LINE_DEG = 0.005  # a footprint centred this close to the equator or prime meridian
@@ -50,13 +50,25 @@ def run_georef_check(cog_path: str, aoi_4326: dict | None, flight: date | None) 
 	lon, lat = float(centre[0][0]), float(centre[1][0])
 	footprint, edge = footprint_samples(source.mask)
 	refs, errors = fetch_references(grid, (lon, lat), flight)
-	evidence = []
-	for ref in refs:
-		a, b, scores = match(source.image, ref.image)
-		e = measure_reference(ref.provider, a, b, scores, footprint, edge, grid)
-		e.sample_pairs = _to_lonlat(e.sample_pairs, grid)
-		evidence.append(e)
+	evidence = [measure_reference(r.provider, *match(source.image, r.image), footprint, edge, grid) for r in refs]
 	assessment = combine(evidence)
+	retried = False
+	if assessment.decision == 'uncertain' and source.used_aoi and refs:
+		# one retry with only the AOI visible to the matcher; it counts only if it
+		# decides (tuned on 100 audited datasets: +2 decisions, no new wrong calls)
+		masked = aoi_only(source)
+		inside = source.mask
+		retry = []
+		for r in refs:
+			a, b, scores = match(masked, r.image)
+			px = np.clip(np.rint(a).astype(int), 0, [grid.width - 1, grid.height - 1])
+			keep = inside[px[:, 1], px[:, 0]]
+			retry.append(measure_reference(r.provider, a[keep], b[keep], scores[keep], footprint, edge, grid))
+		retried_assessment = combine(retry)
+		if retried_assessment.decision != 'uncertain':
+			evidence, assessment, retried = retry, retried_assessment, True
+	for e in evidence:
+		e.sample_pairs = _to_lonlat(e.sample_pairs, grid)
 	gross = None
 	if assessment.decision == 'uncertain' and not any(e.matrix for e in evidence):
 		if abs(lat) < NULL_LINE_DEG or abs(lon) < NULL_LINE_DEG:
@@ -69,9 +81,12 @@ def run_georef_check(cog_path: str, aoi_4326: dict | None, flight: date | None) 
 		'rules': asdict(RULES),
 		'model_version': MODEL_VERSION,
 		'native_m_per_px': round(source.native_m_per_px, 4),
+		'aoi_masked_retry': retried,
 		'grid_m_per_px': round(grid.metres_per_pixel(), 4),
 		'centre_lonlat': [round(lon, 6), round(lat, 6)],
-		'references': {r.provider: {'zoom': r.zoom, 'capture_date': r.capture_date, 'tile_url': r.tile_url} for r in refs},
+		'references': {
+			r.provider: {'zoom': r.zoom, 'capture_date': r.capture_date, 'tile_url': r.tile_url} for r in refs
+		},
 	}
 	return GeorefCheck(
 		assessment=assessment,

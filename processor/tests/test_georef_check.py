@@ -5,7 +5,14 @@ import numpy as np
 import pytest
 
 from processor.src.georef_check_v1.check import GeorefCheck
-from processor.src.georef_check_v1.evidence import Assessment, Grid, ReferenceEvidence, combine, footprint_samples, measure_reference
+from processor.src.georef_check_v1.evidence import (
+	Assessment,
+	Grid,
+	ReferenceEvidence,
+	combine,
+	footprint_samples,
+	measure_reference,
+)
 from processor.src.georef_check_v1.references import pick_wayback
 from processor.src.process_georef_check import check_row, flight_date, suggestion_row
 
@@ -63,7 +70,16 @@ def test_matches_clustered_in_one_corner_do_not_qualify():
 def _ref(provider, vote, p90, support=0.95, edge=0.95):
 	from processor.src.georef_check_v1.evidence import source_family
 
-	return ReferenceEvidence(provider, source_family(provider), vote=vote, p90_m=p90, support=support, edge_support=edge, qualified=True, decides=True)
+	return ReferenceEvidence(
+		provider,
+		source_family(provider),
+		vote=vote,
+		p90_m=p90,
+		support=support,
+		edge_support=edge,
+		qualified=True,
+		decides=True,
+	)
 
 
 @pytest.mark.unit
@@ -76,13 +92,20 @@ def test_independent_agreeing_references_are_strong_and_a_wayback_capture_is_not
 @pytest.mark.unit
 def test_near_threshold_or_narrow_support_is_qualified_not_strong():
 	assert combine([_ref('esri', 'good', 13.0), _ref('google', 'good', 4.0)]).evidence_level == 'qualified'
-	assert combine([_ref('esri', 'good', 3.0, edge=0.4), _ref('google', 'good', 4.0, edge=0.4)]).evidence_level == 'qualified'
+	assert (
+		combine([_ref('esri', 'good', 3.0, edge=0.4), _ref('google', 'good', 4.0, edge=0.4)]).evidence_level
+		== 'qualified'
+	)
 
 
 @pytest.mark.unit
 def test_disagreeing_or_unstable_references_leave_the_call_uncertain():
 	conflict = combine([_ref('esri', 'good', 3.0), _ref('google', 'poor', 22.0)])
-	assert (conflict.decision, conflict.evidence_level, conflict.reason) == ('uncertain', 'conflict', 'references_disagree')
+	assert (conflict.decision, conflict.evidence_level, conflict.reason) == (
+		'uncertain',
+		'conflict',
+		'references_disagree',
+	)
 	unstable = combine([_ref('esri', 'unstable', 14.5)])
 	assert (unstable.decision, unstable.reason) == ('uncertain', 'unstable_near_threshold')
 	assert combine([]).evidence_level == 'insufficient'
@@ -99,7 +122,7 @@ def test_low_support_reference_qualifies_but_does_not_decide():
 
 
 @pytest.mark.unit
-def test_wayback_prefers_the_capture_closest_to_the_flight_plus_the_newest():
+def test_wayback_skips_the_current_imagery_and_prefers_the_capture_closest_to_the_flight():
 	captures = [
 		{'release': 9, 'capture_date': '2024-05-01'},
 		{'release': 8, 'capture_date': '2021-06-10'},
@@ -107,17 +130,24 @@ def test_wayback_prefers_the_capture_closest_to_the_flight_plus_the_newest():
 		{'release': 6, 'capture_date': '2018-07-01'},
 		{'release': 5, 'capture_date': None},
 	]
-	picked = pick_wayback(captures, date(2021, 7, 1))
-	assert [c['release'] for c in picked] == [8, 9]
-	assert [c['release'] for c in pick_wayback(captures, None)] == [9, 8]
+	# release 9 is what Esri World Imagery shows today
+	assert [c['release'] for c in pick_wayback(captures, date(2021, 7, 1))] == [8, 6]
+	assert [c['release'] for c in pick_wayback(captures, None)] == [6, 8]
+	assert pick_wayback([{'release': 9, 'capture_date': '2024-05-01'}], None) == []
 	assert pick_wayback([{'release': 1, 'capture_date': None}], None) == []
 
 
 @pytest.mark.unit
 def test_flight_date_falls_back_to_mid_month_or_july():
-	assert flight_date(SimpleNamespace(aquisition_year=2023, aquisition_month=5, aquisition_day=20)) == date(2023, 5, 20)
-	assert flight_date(SimpleNamespace(aquisition_year=2023, aquisition_month=5, aquisition_day=None)) == date(2023, 5, 15)
-	assert flight_date(SimpleNamespace(aquisition_year=2023, aquisition_month=None, aquisition_day=None)) == date(2023, 7, 1)
+	assert flight_date(SimpleNamespace(aquisition_year=2023, aquisition_month=5, aquisition_day=20)) == date(
+		2023, 5, 20
+	)
+	assert flight_date(SimpleNamespace(aquisition_year=2023, aquisition_month=5, aquisition_day=None)) == date(
+		2023, 5, 15
+	)
+	assert flight_date(SimpleNamespace(aquisition_year=2023, aquisition_month=None, aquisition_day=None)) == date(
+		2023, 7, 1
+	)
 	assert flight_date(SimpleNamespace(aquisition_year=None, aquisition_month=None, aquisition_day=None)) is None
 
 
@@ -137,7 +167,12 @@ def _check(decision, level, p90=3.0):
 @pytest.mark.unit
 def test_good_or_poor_becomes_the_is_georeferenced_suggestion_and_uncertain_none():
 	good = suggestion_row(7, _check('good', 'strong'))
-	assert (good['field'], good['value'], good['reason'], good['source']) == ('is_georeferenced', True, 'strong', 'georef_check_v1')
+	assert (good['field'], good['value'], good['reason'], good['source']) == (
+		'is_georeferenced',
+		True,
+		'strong',
+		'georef_check_v1',
+	)
 	assert good['details']['references'] == ['esri']
 	assert suggestion_row(7, _check('poor', 'qualified', 22.0))['value'] is False
 	assert suggestion_row(7, _check('uncertain', 'insufficient')) is None
@@ -146,7 +181,12 @@ def test_good_or_poor_becomes_the_is_georeferenced_suggestion_and_uncertain_none
 @pytest.mark.unit
 def test_check_row_keeps_versions_evidence_and_provider_errors():
 	row = check_row(7, _check('poor', 'qualified', 22.0))
-	assert (row['decision'], row['evidence_level'], row['p90_m'], row['rules_version']) == ('poor', 'qualified', 22.0, 'georef-rules-v1')
+	assert (row['decision'], row['evidence_level'], row['p90_m'], row['rules_version']) == (
+		'poor',
+		'qualified',
+		22.0,
+		'georef-rules-v1',
+	)
 	assert row['reference_evidence'][0]['provider'] == 'esri'
 	assert row['reference_errors'] == {'google': 'RuntimeError: Google session HTTP 403'}
 	assert row['metadata']['seconds'] == 9.5

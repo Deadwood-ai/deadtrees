@@ -156,6 +156,36 @@ const flags = [
   },
 ];
 
+// The georeferencing check measured a 22.6 m offset on two independent references.
+const georefCheck = {
+  dataset_id: completeDataset.id,
+  model_version: "romav2.0.1",
+  rules_version: "georef-rules-v1",
+  decision: "poor",
+  evidence_level: "strong",
+  reason: "references_agree",
+  p90_m: 22.6,
+  evidence_groups: 2,
+  support: 0.97,
+  edge_support: 0.9,
+  used_aoi: true,
+  reference_evidence: [
+    { provider: "esri", group: "esri", matches: 2400, inliers: 2300, inlier_fraction: 0.95, cells: 16, support: 0.97, edge_support: 0.9, p50_m: 21.9, p90_m: 22.7, holdout_p90_m: [22.1, 23.0], vote: "poor", qualified: true, decides: true, reason: null, sample_pairs: [[8.0, 48.0, 8.0003, 48.0], [8.001, 48.001, 8.0013, 48.001]] },
+    { provider: "google", group: "google", matches: 1800, inliers: 1600, inlier_fraction: 0.9, cells: 15, support: 0.95, edge_support: 0.88, p50_m: 21.5, p90_m: 22.4, holdout_p90_m: [22.0, 22.9], vote: "poor", qualified: true, decides: true, reason: null, sample_pairs: [] },
+    { provider: "wayback-12457", group: "esri", matches: 4, inliers: 0, inlier_fraction: 0, cells: 0, support: 0, edge_support: 0, p50_m: null, p90_m: null, holdout_p90_m: [], vote: null, qualified: false, decides: false, reason: "no_fit", sample_pairs: [] },
+  ],
+  reference_errors: { maptiler: "blank imagery" },
+  metadata: {
+    seconds: 9.4,
+    references: {
+      esri: { zoom: 18, capture_date: null, tile_url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" },
+      google: { zoom: 20, capture_date: null, tile_url: null },
+      "wayback-12457": { zoom: 18, capture_date: "2019-06-02", tile_url: "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/12457/{z}/{y}/{x}" },
+    },
+  },
+  updated_at: "2026-10-02T06:00:00Z",
+};
+
 let savedAuditPayloads: Array<Record<string, unknown>> = [];
 let auditLeaseCalls: Array<{ rpc: string; body: Record<string, unknown> }> = [];
 let auditWriteLeaseHeaders: Array<string | undefined> = [];
@@ -323,6 +353,27 @@ const fulfillSupabaseRequest = async (
 
   if (resource === "v2_metadata") {
     await fulfillJson(route, []);
+    return;
+  }
+
+  if (resource === "v2_georef_checks") {
+    const forDataset = url.searchParams.get("dataset_id") === `eq.${completeDataset.id}`;
+    await fulfillJson(route, wantsObject ? (forDataset ? georefCheck : null) : forDataset ? [georefCheck] : []);
+    return;
+  }
+
+  if (resource === "dataset_audit_suggestions") {
+    await fulfillJson(route, [
+      {
+        dataset_id: completeDataset.id,
+        field: "is_georeferenced",
+        value: false,
+        source: "georef_check_v1",
+        reason: "strong",
+        details: { p90_m: 22.6, evidence_groups: 2, references: ["esri", "google"] },
+        updated_at: "2026-10-02T06:00:00Z",
+      },
+    ]);
     return;
   }
 
@@ -665,6 +716,35 @@ test.describe("auditor local e2e", () => {
         ),
       )
       .toBe(true);
+  });
+
+  test("auditor sees the measured georeferencing offset, its prefill and the matching viewer", async ({
+    page,
+  }) => {
+    await installAuthenticatedUser(page, { canAudit: true });
+    // keep the reference basemap offline: an empty tile for every request
+    await page.route(/arcgisonline\.com|wayback\.maptiles\.arcgis\.com/, (route) => route.fulfill({ status: 204 }));
+
+    await page.goto(`/dataset-audit/${completeDataset.id}`);
+    await dismissCookieBanner(page);
+
+    const georef = card(page, "1. Georeferencing Accuracy");
+    await expect(georef.getByText("Poor: offset 22.6 m (90% of the area) on 2 references, strong evidence.")).toBeVisible({
+      timeout: 20_000,
+    });
+    // the unsaved audit is prefilled with the suggestion and marked as such
+    await expect(georef.getByRole("radio", { name: /Poor/ })).toBeChecked();
+    await expect(georef.getByText("suggested")).toBeVisible();
+
+    await georef.getByRole("button", { name: /Show matching/ }).click();
+    const viewer = page.getByRole("dialog", { name: "Georeferencing check: matching" });
+    await expect(viewer).toBeVisible();
+    await expect(viewer.getByText("Esri World Imagery (current)").first()).toBeVisible();
+    await expect(viewer.getByText("Esri Wayback, captured 2019-06-02").first()).toBeVisible();
+    await expect(viewer.getByRole("cell", { name: "22.7 m" })).toBeVisible();
+    await expect(viewer.getByText("no confident matches (uniform canopy, season or blank imagery)")).toBeVisible();
+    await expect(viewer.getByText("Unavailable: maptiler (blank imagery)")).toBeVisible();
+    await expect(viewer.getByRole("slider")).toBeVisible();
   });
 
   test("direct audit detail links retain queue navigation context", async ({
