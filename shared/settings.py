@@ -33,6 +33,7 @@ _tables = {
 	'tile_embeddings': 'v2_tile_embeddings',
 	'acquisition_date_estimates': 'v2_acquisition_date_estimates',
 	'audit_suggestions': 'dataset_audit_suggestions',
+	'georef_checks': 'v2_georef_checks',
 	'notification_preferences': 'user_notification_preferences',
 	'processing_notification_events': 'processing_notification_events',
 }
@@ -162,6 +163,12 @@ class Settings(BaseSettings):
 	# Record the prefilled date check as an automatic decision (applying an
 	# accepted suggested date) when no person has decided. Off: auditors decide.
 	DOY_AUTO_DECIDE: bool = False
+
+	# Optional satellite references of the georeferencing check (georef_check_v1)
+	# besides keyless Esri World Imagery and its dated Wayback captures.
+	GOOGLE_MAP_TILES_API_KEY: str = ''
+	MAPTILER_API_KEY: str = ''
+	MAPBOX_ACCESS_TOKEN: str = ''
 
 	# processor settings
 	PROCESSOR_USERNAME: str = 'processor@deadtrees.earth'
@@ -425,6 +432,10 @@ class Settings(BaseSettings):
 	@property
 	def audit_suggestions_table(self) -> str:
 		return self._tables['audit_suggestions']
+
+	@property
+	def georef_checks_table(self) -> str:
+		return self._tables['georef_checks']
 
 	@property
 	def processor_task_blacklist(self) -> list[str]:

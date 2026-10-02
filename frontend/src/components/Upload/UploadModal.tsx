@@ -105,6 +105,8 @@ const GEOTIFF_PROCESSING_STEPS = [
   "embeddings_v1",
   // Acquisition-date estimate + audit prefill (reads the stored COG and AOI).
   "doy_estimation_v1",
+  // Georeferencing offset against satellite imagery + audit prefill (stored COG and AOI).
+  "georef_check_v1",
 ];
 
 const RAW_IMAGES_PROCESSING_STEPS = [

@@ -34,6 +34,11 @@ zarr>=3
 s3fs>=2025.3.0
 # DINOv2 backbone of the acquisition-date model (was only transitive)
 timm>=1.0.24,<2
+# georeferencing check (georef_check_v1): the vendored RoMa v2 matcher, offsets
+# and support geometry (pyproj and scipy were only transitive)
+einops>=0.8
+pyproj>=3.6
+scipy>=1.11
 # Rasterio 1.5 still triggers NumPy 2.5's deprecated ndarray shape mutation
 # path during normal reads. Keep the service below 2.5 until Rasterio removes it.
 numpy>=2,<2.5
