@@ -8,13 +8,13 @@ import TileLayer from "ol/layer/Tile";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import VectorLayer from "ol/layer/Vector";
 import { fromLonLat } from "ol/proj";
-import { GeoTIFF, TileWMS, XYZ } from "ol/source";
+import { TileWMS, XYZ } from "ol/source";
 import VectorSource from "ol/source/Vector";
 import { Circle, Fill, Stroke, Style } from "ol/style";
 import { getDistance } from "ol/sphere";
 
 import { Settings } from "../../config";
-import { COG_SOURCE_OPTIONS } from "../../utils/cogSourceOptions";
+import { createOrthoCogSource } from "../../utils/cogSource";
 import { describeGeorefReason, describeReference, offsetColor, orderedReferences } from "../../utils/georefCheck";
 import type { IGeorefCheck, IGeorefReferenceEvidence, IGeorefReferenceViewer } from "../../types/georefCheck";
 
@@ -85,11 +85,7 @@ export default function GeorefMatchViewer({ open, onClose, check, cogPath }: Geo
 
 	useEffect(() => {
 		if (!open || !container) return;
-		const cog = new GeoTIFF({
-			sources: [{ url: Settings.COG_BASE_URL + cogPath, nodata: 0, bands: [1, 2, 3] }],
-			convertToRGB: true,
-			sourceOptions: COG_SOURCE_OPTIONS,
-		});
+		const cog = createOrthoCogSource(Settings.COG_BASE_URL + cogPath);
 		const reference = new TileLayer<XYZ | TileWMS>({ preload: 0 });
 		const drone = new TileLayerWebGL({ source: cog, opacity: opacity / 100, preload: 0 });
 		const matches = new VectorSource();
