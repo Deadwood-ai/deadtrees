@@ -143,7 +143,7 @@ export default function ShareDatasetModal({ datasetId, datasetName, onClose }: S
         Anyone who can view a dataset can save the imagery shown in their browser. Download access adds the orthophoto and prediction files.
       </Typography.Paragraph>
       <Form form={form} layout="vertical" initialValues={{ role: "reader", canDownload: false }} onFinish={handleShare} data-testid="share-dataset-form">
-        <Form.Item name="email" label="Email" rules={[{ required: true, type: "email", message: "Enter their account email" }]}>
+        <Form.Item name="email" label="Email" validateTrigger="onBlur" rules={[{ required: true, type: "email", message: "Enter their account email" }]}>
           <ShareEmailInput datasetId={datasetId ?? 0} sharedEmails={sharedEmails} />
         </Form.Item>
         <div className="flex flex-col gap-x-3 sm:flex-row">

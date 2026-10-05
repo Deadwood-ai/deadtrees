@@ -31,10 +31,11 @@ export default function ShareEmailInput({ datasetId, sharedEmails, id, value, on
   const options = searching
     ? (search.data ?? []).map((email) => ({
         value: email,
+        title: email,
         label: (
           <span className="flex justify-between gap-2">
-            <span className="break-all">{email}</span>
-            {sharedEmails.has(email.toLowerCase()) && <span className="text-gray-400">Has access</span>}
+            <span className="min-w-0 truncate">{email}</span>
+            {sharedEmails.has(email.toLowerCase()) && <span className="shrink-0 text-gray-400">Has access</span>}
           </span>
         ),
       }))
@@ -47,7 +48,7 @@ export default function ShareEmailInput({ datasetId, sharedEmails, id, value, on
       onChange={onChange}
       options={options}
       placeholder="colleague@example.org"
-      notFoundContent={searching && search.isError ? search.error.message : undefined}
+      notFoundContent={searching && !search.isFetching ? (search.isError ? search.error.message : "No account matches") : undefined}
     />
   );
 }
