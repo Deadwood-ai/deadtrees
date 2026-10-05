@@ -33,6 +33,7 @@ _tables = {
 	'tile_embeddings': 'v2_tile_embeddings',
 	'acquisition_date_estimates': 'v2_acquisition_date_estimates',
 	'audit_suggestions': 'dataset_audit_suggestions',
+	'georef_checks': 'v2_georef_checks',
 	'notification_preferences': 'user_notification_preferences',
 	'processing_notification_events': 'processing_notification_events',
 }
@@ -162,6 +163,16 @@ class Settings(BaseSettings):
 	# Record the prefilled date check as an automatic decision (applying an
 	# accepted suggested date) when no person has decided. Off: auditors decide.
 	DOY_AUTO_DECIDE: bool = False
+
+	# Optional satellite references of the georeferencing check (georef_check_v1)
+	# besides the keyless ones in processor/src/georef_check_v1/providers.py.
+	MAPTILER_API_KEY: str = ''
+	MAPBOX_ACCESS_TOKEN: str = ''
+	AZURE_MAPS_KEY: str = ''
+	LINZ_API_KEY: str = ''  # New Zealand aerial basemap (free key)
+	# Skip keyless providers whose terms are unclear or restrict automated use
+	# (providers.json `restricted`).
+	GEOREF_SKIP_RESTRICTED_PROVIDERS: bool = False
 
 	# processor settings
 	PROCESSOR_USERNAME: str = 'processor@deadtrees.earth'
@@ -425,6 +436,10 @@ class Settings(BaseSettings):
 	@property
 	def audit_suggestions_table(self) -> str:
 		return self._tables['audit_suggestions']
+
+	@property
+	def georef_checks_table(self) -> str:
+		return self._tables['georef_checks']
 
 	@property
 	def processor_task_blacklist(self) -> list[str]:

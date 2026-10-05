@@ -13,6 +13,11 @@ DOY_ESTIMATION_MODEL_FILES = (
 	'dinov2_vitb14_reg4.safetensors',
 	*(f'{kind}_seed{seed}.safetensors' for kind in ('s2', 'nos2') for seed in range(5)),
 )
+# georeferencing check: the RoMa v2 matcher checkpoint and a local copy of the
+# DINOv3 hub repository its backbone code is loaded from
+GEOREF_CHECK_MODEL_DIR_NAME = 'georef_check_v1'
+GEOREF_CHECK_TASK_TYPE = 'georef_check_v1'
+GEOREF_CHECK_MODEL_FILES = ('manifest.json', 'romav2.safetensors', 'dinov3/hubconf.py')
 
 GADM_ASSET_PATH = 'gadm/gadm_410.gpkg'
 BIOME_ASSET_PATH = 'biom/terres_ecosystems.gpkg'
@@ -62,6 +67,8 @@ def required_processor_asset_files(task_blacklist: set[str] | frozenset[str] = f
 	files = [f'models/{name}' for name in processor_model_checkpoint_specs(task_blacklist)]
 	if DOY_ESTIMATION_TASK_TYPE not in task_blacklist:
 		files.extend(f'models/{DOY_ESTIMATION_MODEL_DIR_NAME}/{name}' for name in DOY_ESTIMATION_MODEL_FILES)
+	if GEOREF_CHECK_TASK_TYPE not in task_blacklist:
+		files.extend(f'models/{GEOREF_CHECK_MODEL_DIR_NAME}/{name}' for name in GEOREF_CHECK_MODEL_FILES)
 	if METADATA_TASK_TYPE not in task_blacklist:
 		files.extend(GEOPACKAGE_SPECS)
 		files.extend((f'{PHENOLOGY_ASSET_PATH}/.zgroup', f'{PHENOLOGY_ASSET_PATH}/.zmetadata'))

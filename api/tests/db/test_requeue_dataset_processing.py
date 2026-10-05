@@ -22,6 +22,7 @@ ALL_DONE_FLAGS = (
 	'is_aoi_done',
 	'is_embeddings_done',
 	'is_doy_estimation_done',
+	'is_georef_check_done',
 )
 
 

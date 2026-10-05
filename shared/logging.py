@@ -29,6 +29,7 @@ class LogCategory(Enum):
 	FOREST = 'forest'  # Forest cover analysis
 	EMBEDDINGS = 'embeddings'  # Open-vocabulary tile embeddings
 	DOY = 'doy'  # Acquisition-date (day-of-year) estimation
+	GEOREF = 'georef'  # Georeferencing check against satellite references
 	METADATA = 'metadata'  # Metadata processing
 
 	# System Operations

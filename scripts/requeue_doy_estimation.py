@@ -28,48 +28,15 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-import urllib.parse
 from pathlib import Path
 
-from requeue_datasets_via_api import REQUIRED_KEYS, _http_json, _load_env_subset, _parse_dataset_ids
+from requeue_datasets_via_api import REQUIRED_KEYS, _http_json, _load_env_subset, _login, _parse_dataset_ids, _select_all
 
 TASK_TYPE = 'doy_estimation_v1'
 # keep in sync with shared/asset_manifest.py DOY_ESTIMATION_MODEL_DIR_NAME
 MODEL_VERSION = 'doy_estimation_v1'
 RETRYABLE_S2_STATUSES = {'no_block', 'outside_archive', 'no_credentials', 'error'}
-PAGE = 1000
 TOKEN_REFRESH_EVERY = 500  # processor JWTs expire after an hour
-
-
-def _login(env: dict, supabase_url: str) -> str | None:
-	code, resp = _http_json(
-		'POST',
-		f'{supabase_url}/auth/v1/token?grant_type=password',
-		headers={'apikey': env['SUPABASE_KEY'], 'Accept': 'application/json'},
-		body={'email': env['PROCESSOR_USERNAME'], 'password': env['PROCESSOR_PASSWORD']},
-	)
-	if code != 200 or 'access_token' not in (resp or {}):
-		print(f'token request failed (HTTP {code})', file=sys.stderr)
-		return None
-	return resp['access_token']
-
-
-def _select_all(supabase_url: str, headers: dict, table: str, select: str, filters: dict | None = None) -> list[dict]:
-	rows, offset = [], 0
-	while True:
-		query = urllib.parse.urlencode({'select': select, **(filters or {}), 'order': 'dataset_id.asc' if table != 'v2_datasets' else 'id.asc'})
-		code, resp = _http_json(
-			'GET',
-			f'{supabase_url}/rest/v1/{table}?{query}',
-			headers={**headers, 'Range-Unit': 'items', 'Range': f'{offset}-{offset + PAGE - 1}'},
-			body=None,
-		)
-		if code not in (200, 206):
-			raise SystemExit(f'{table} query failed (HTTP {code}): {resp}')
-		rows.extend(resp)
-		if len(resp) < PAGE:
-			return rows
-		offset += PAGE
 
 
 def needs_estimate(dataset: dict, estimate: dict | None, model_version: str, retry_s2: bool) -> str | None:

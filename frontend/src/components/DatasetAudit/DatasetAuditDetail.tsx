@@ -15,7 +15,6 @@ import AuditHeader from "./AuditHeader";
 import { AuditFooterFormItem } from "./AuditFooter";
 import {
 	UserFlagsCard,
-	GeoreferencingCard,
 	PhenologyCard,
 	PredictionQualityCard,
 	COGQualityCard,
@@ -24,6 +23,7 @@ import {
 } from "./AuditStepCards";
 import AuditAOICard from "./AuditAOICard";
 import { AcquisitionDateCard } from "./AcquisitionDateCard";
+import { GeoreferencingCard } from "./GeoreferencingCard";
 import { AuditReviewNotice } from "./AuditReviewNotice";
 import { AuditLockBlocked, AuditLockLostNotice, AuditOpenElsewhere } from "./AuditLockNotices";
 import AuditMapWithControls, { AuditMapWithControlsHandle } from "./AuditMapWithControls";
@@ -96,6 +96,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 		phenologyData,
 		isPhenologyLoading,
 		acquisitionDateEstimate,
+		georefCheck,
 		acquisitionDateDecisions,
 		auditSuggestions,
 		auditReviewItems,
@@ -341,7 +342,12 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 							onUpdateFlag={updateFlagStatus}
 						/>
 
-						<GeoreferencingCard />
+						<GeoreferencingCard
+							check={georefCheck}
+							cogPath={dataset.cog_path}
+							suggestions={auditSuggestions}
+							prefilledFields={prefilledFields}
+						/>
 
 						<AcquisitionDateCard
 							dataset={dataset}

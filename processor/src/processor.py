@@ -24,6 +24,7 @@ from .process_deadwood_treecover_combined_v2 import process_deadwood_treecover_c
 from .process_aoi_segmentation import process_aoi_segmentation
 from .process_embeddings import process_embeddings
 from .process_doy_estimation import process_doy_estimation
+from .process_georef_check import process_georef_check
 from .process_metadata import process_metadata
 from .exceptions import AuthenticationError, ProcessingError
 from .utils.linear_issues import create_processing_failure_issue
@@ -165,6 +166,7 @@ PIPELINE_STAGE_MAP = [
 	(TaskTypeEnum.aoi_v1, 'is_aoi_done', 'aoi_segmentation'),
 	(TaskTypeEnum.embeddings_v1, 'is_embeddings_done', 'embedding_processing'),
 	(TaskTypeEnum.doy_estimation_v1, 'is_doy_estimation_done', 'doy_estimation'),
+	(TaskTypeEnum.georef_check_v1, 'is_georef_check_done', 'georef_check'),
 ]
 
 
@@ -651,6 +653,24 @@ def process_task(task: QueueTask, token: str):
 					LogContext(category=LogCategory.DOY, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
 				)
 				raise ProcessingError(str(e), task_type='doy_estimation', task_id=task.id, dataset_id=task.dataset_id)
+
+		# Measure the georeferencing offset against satellite imagery. Reads the
+		# stored COG and the AOI, so it can be rerun on its own for every dataset.
+		if TaskTypeEnum.georef_check_v1 in task.task_types:
+			try:
+				token = refresh_processor_token(task, token)
+				logger.info(
+					'processing georeferencing check',
+					LogContext(category=LogCategory.GEOREF, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+				)
+				process_georef_check(task, token, settings.processing_path)
+			except Exception as e:
+				token = refresh_processor_token(task, token)
+				logger.error(
+					f'Georeferencing check failed: {str(e)}',
+					LogContext(category=LogCategory.GEOREF, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+				)
+				raise ProcessingError(str(e), task_type='georef_check', task_id=task.id, dataset_id=task.dataset_id)
 
 	except Exception as e:
 		if _shutdown_requested:
