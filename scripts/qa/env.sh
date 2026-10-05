@@ -25,8 +25,9 @@ Commands:
   up      Start isolated Supabase, app services, and Vite.
   status  Check Supabase/Auth, API, Mailpit, and frontend readiness.
   reset   Reseed qa-full and refresh fixture assets.
-  down    Stop Vite, app services, and isolated Supabase.
-  cleanup Stop an already-rendered QA stack without creating new runtime state.
+  down    Stop Vite, app services, and isolated Supabase; reclaim root-owned files.
+  cleanup Stop an already-rendered QA stack without creating new runtime state;
+          reclaim root-owned files.
 USAGE
 }
 
@@ -224,6 +225,26 @@ connect_mailpit_to_supabase_network() {
 	return 1
 }
 
+reclaim_container_files() {
+	# QA containers run as root and leave root-owned files in bind-mounted folders
+	# (__pycache__, data, processor temp). Hand them back so the worktree can be deleted.
+	local uid gid
+	local -a paths=()
+	uid="$(id -u)"
+	gid="$(id -g)"
+	while IFS= read -r -d '' path; do
+		paths+=("/w/${path#"$REPO_ROOT"/}")
+	done < <(find "$REPO_ROOT" -xdev \( -name node_modules -o -name .git \) -prune -o ! -user "$uid" -print0 -prune 2>/dev/null)
+	if [[ ${#paths[@]} -eq 0 ]]; then
+		return 0
+	fi
+	if docker run --rm -v "$REPO_ROOT:/w" busybox:1.36 chown -R "$uid:$gid" "${paths[@]}"; then
+		echo "Reclaimed ${#paths[@]} root-owned paths written by QA containers"
+	else
+		echo "Could not reclaim root-owned paths; deleting this worktree may need sudo." >&2
+	fi
+}
+
 render() {
 	source_isolated_env
 	write_summary
@@ -272,6 +293,7 @@ down() {
 	"$REPO_ROOT/venv/bin/deadtrees" dev stop || true
 	export DEADTREES_WORKTREE_SLUG="${DEADTREES_WORKTREE_SLUG:-$DEADTREES_ISOLATED_SLUG}"
 	"$REPO_ROOT/scripts/dev/isolated-supabase.sh" stop || true
+	reclaim_container_files
 }
 
 cleanup() {
@@ -287,6 +309,7 @@ cleanup() {
 	fi
 	export DEADTREES_WORKTREE_SLUG="${DEADTREES_WORKTREE_SLUG:-$DEADTREES_ISOLATED_SLUG}"
 	"$REPO_ROOT/scripts/dev/isolated-supabase.sh" stop || true
+	reclaim_container_files
 }
 
 COMMAND="${1:-}"

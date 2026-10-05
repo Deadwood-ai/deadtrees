@@ -214,7 +214,10 @@ rule keeps its old names: stop it with
 default step for every exploratory thread. Run it when the user asks for a full
 test suite, local QA, browser/app verification, or a fix that should be tested
 against the integrated local environment. After finishing, stop the stack with
-`scripts/qa/env.sh down` unless the user wants to keep it running.
+`scripts/qa/env.sh down` unless the user wants to keep it running. `down` and
+`cleanup` also hand back files the root-run containers wrote into the worktree
+(`__pycache__`, data, processor temp), so the worktree can be removed without
+sudo.
 
 The isolated stack never uses the shared default compose project
 (`deadtrees-test`). Rendering the stack writes its own `COMPOSE_PROJECT_NAME` and
