@@ -19,25 +19,29 @@ from api.tests.db.test_acquisition_date_estimates import (  # noqa: F401
 QUEUE = 'SELECT item,fields,reason FROM public.audit_review_queue WHERE dataset_id=%s'
 
 
+def check_json(dataset, decision, level, p90=None):
+	return {
+		'dataset_id': dataset,
+		'model_version': 'romav2.0.1',
+		'rules_version': 'georef-rules-v1',
+		'decision': decision,
+		'evidence_level': level,
+		'reason': 'references_agree',
+		'p90_m': p90,
+		'reference_evidence': [],
+	}
+
+
 def write_check(db, dataset, decision, level, p90=None):
 	"""Store a check and its suggestion the way the processor stage does."""
 	act_as(db, processor_user(db), PROCESSOR_EMAIL)
-	db.execute(
-		'INSERT INTO public.v2_georef_checks(dataset_id,model_version,rules_version,decision,evidence_level,reason,p90_m,reference_evidence) '
-		"VALUES (%s,'romav2.0.1','georef-rules-v1',%s,%s,'references_agree',%s,'[]') "
-		'ON CONFLICT (dataset_id) DO UPDATE SET decision=excluded.decision,evidence_level=excluded.evidence_level,p90_m=excluded.p90_m',
-		(dataset, decision, level, p90),
+	suggestion = (
+		None if decision == 'uncertain' else {'value': decision == 'good', 'reason': level, 'details': {'p90_m': p90}}
 	)
-	if decision == 'uncertain':
-		db.execute(
-			"DELETE FROM public.dataset_audit_suggestions WHERE dataset_id=%s AND source='georef_check_v1'", (dataset,)
-		)
-	else:
-		db.execute(
-			"INSERT INTO public.dataset_audit_suggestions(dataset_id,field,value,source,reason,details) VALUES (%s,'is_georeferenced',%s,'georef_check_v1',%s,%s) "
-			'ON CONFLICT (dataset_id,field) DO UPDATE SET value=excluded.value,reason=excluded.reason,details=excluded.details',
-			(dataset, json.dumps(decision == 'good'), level, json.dumps({'p90_m': p90})),
-		)
+	db.execute(
+		'SELECT public.store_georef_check(%s::jsonb, %s::jsonb)',
+		(json.dumps(check_json(dataset, decision, level, p90)), json.dumps(suggestion)),
+	)
 	as_admin(db)
 
 
@@ -110,3 +114,35 @@ def test_uncertain_decisions_carry_an_uncertain_evidence_level(db):
 	dataset = create_dataset(db, create_user(db))
 	with pytest.raises(psycopg.errors.CheckViolation):
 		write_check(db, dataset, 'uncertain', 'strong')
+
+
+def test_a_failed_store_changes_neither_the_check_nor_the_suggestion(db):
+	dataset = create_dataset(db, create_user(db))
+	write_check(db, dataset, 'poor', 'strong', 22.6)
+	act_as(db, processor_user(db), PROCESSOR_EMAIL)
+	db.execute('SAVEPOINT broken')
+	with pytest.raises(psycopg.errors.CheckViolation):
+		# an invalid check aborts the whole call, so the suggestion cannot be dropped alone
+		db.execute(
+			'SELECT public.store_georef_check(%s::jsonb, NULL)',
+			(json.dumps(check_json(dataset, 'uncertain', 'strong')),),
+		)
+	db.execute('ROLLBACK TO SAVEPOINT broken')
+	as_admin(db)
+	assert db.execute('SELECT decision FROM public.v2_georef_checks WHERE dataset_id=%s', (dataset,)).fetchone() == (
+		'poor',
+	)
+	assert db.execute(
+		"SELECT value FROM public.dataset_audit_suggestions WHERE dataset_id=%s AND field='is_georeferenced'",
+		(dataset,),
+	).fetchone() == (False,)
+
+
+def test_only_the_processor_stores_checks(db):
+	dataset = create_dataset(db, create_user(db))
+	act_as(db, create_user(db, can_audit=True))
+	with pytest.raises(psycopg.errors.InsufficientPrivilege):
+		db.execute(
+			'SELECT public.store_georef_check(%s::jsonb, NULL)',
+			(json.dumps(check_json(dataset, 'good', 'strong', 2.0)),),
+		)

@@ -149,15 +149,9 @@ def suggestion_row(dataset_id: int, check) -> dict | None:
 
 
 def _store(token: str, dataset_id: int, check) -> None:
-	suggestion = suggestion_row(dataset_id, check)
+	"""Check row and audit suggestion in one transaction (store_georef_check)."""
 	with use_client(token) as client:
-		client.table(settings.georef_checks_table).upsert(
-			check_row(dataset_id, check), on_conflict='dataset_id'
+		client.rpc(
+			'store_georef_check',
+			{'p_check': check_row(dataset_id, check), 'p_suggestion': suggestion_row(dataset_id, check)},
 		).execute()
-		if suggestion:
-			client.table(settings.audit_suggestions_table).upsert(suggestion, on_conflict='dataset_id,field').execute()
-		else:
-			# an uncertain rerun must not leave an older Good/Poor suggestion behind
-			client.table(settings.audit_suggestions_table).delete().eq('dataset_id', dataset_id).eq(
-				'source', GEOREF_CHECK_TASK_TYPE
-			).execute()

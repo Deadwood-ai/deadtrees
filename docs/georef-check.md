@@ -75,6 +75,8 @@ nothing counts as an audit until an auditor saves.
 
 ## What it stores
 
+The stage writes both through `store_georef_check`, in one transaction.
+
 - `v2_georef_checks`, one row per dataset, replaced on rerun:
   - the decision and evidence level, with the median p90
   - for each reference: inliers, coverage, p90 and holdout p90s, its vote, and

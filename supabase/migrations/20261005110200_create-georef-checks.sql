@@ -99,3 +99,59 @@ language sql immutable as $$
   when 'doy_estimation_v1' then 11 when 'doy_estimation' then 11
   when 'georef_check_v1' then 12 when 'georef_check' then 12 end;
 $$;
+
+-- The processor stores a check and its audit suggestion in one transaction, so
+-- a failure can never leave a new check next to a stale, possibly opposite
+-- suggestion. p_suggestion null removes the stage's earlier suggestion (an
+-- uncertain call suggests nothing).
+create or replace function public.store_georef_check(p_check jsonb, p_suggestion jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+    v_dataset bigint := (p_check ->> 'dataset_id')::bigint;
+begin
+    if (auth.jwt() ->> 'email') is distinct from 'processor@deadtrees.earth' then
+        raise exception 'Only the processor stores georeferencing checks' using errcode = '42501';
+    end if;
+    insert into public.v2_georef_checks
+    -- the column defaults for keys the caller leaves out (populate_record would null them)
+    select * from jsonb_populate_record(
+        null::public.v2_georef_checks,
+        '{"evidence_groups": 0, "support": 0, "edge_support": 0, "used_aoi": false, "reference_evidence": [], "reference_errors": {}, "metadata": {}}'::jsonb
+            || p_check || jsonb_build_object('created_at', now(), 'updated_at', now()))
+    on conflict (dataset_id) do update set
+        model_version = excluded.model_version,
+        rules_version = excluded.rules_version,
+        decision = excluded.decision,
+        evidence_level = excluded.evidence_level,
+        reason = excluded.reason,
+        p90_m = excluded.p90_m,
+        evidence_groups = excluded.evidence_groups,
+        support = excluded.support,
+        edge_support = excluded.edge_support,
+        used_aoi = excluded.used_aoi,
+        reference_evidence = excluded.reference_evidence,
+        reference_errors = excluded.reference_errors,
+        metadata = excluded.metadata,
+        updated_at = excluded.updated_at;
+    if p_suggestion is null or jsonb_typeof(p_suggestion) = 'null' then
+        delete from public.dataset_audit_suggestions
+        where dataset_id = v_dataset and source = 'georef_check_v1';
+    else
+        insert into public.dataset_audit_suggestions (dataset_id, field, value, source, reason, details, updated_at)
+        values (v_dataset, 'is_georeferenced', p_suggestion -> 'value', 'georef_check_v1', p_suggestion ->> 'reason',
+                coalesce(p_suggestion -> 'details', '{}'::jsonb), now())
+        on conflict (dataset_id, field) do update set
+            value = excluded.value,
+            source = excluded.source,
+            reason = excluded.reason,
+            details = excluded.details,
+            updated_at = excluded.updated_at;
+    end if;
+end;
+$$;
+revoke all on function public.store_georef_check(jsonb, jsonb) from public, anon;
+grant execute on function public.store_georef_check(jsonb, jsonb) to authenticated, service_role;
