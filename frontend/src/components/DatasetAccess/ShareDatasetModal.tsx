@@ -1,10 +1,11 @@
-import { useState } from "react";
-import { Button, Checkbox, DatePicker, Form, Input, List, Modal, Select, Tag, Typography, message } from "antd";
+import { useMemo, useState } from "react";
+import { Button, Checkbox, DatePicker, Form, List, Modal, Select, Tag, Typography, message } from "antd";
 import { DeleteOutlined } from "@ant-design/icons";
 import type { Dayjs } from "dayjs";
 import type { DatasetAccessRole, IDatasetAccessEntry } from "../../api/datasetAccess";
 import { useChangeDatasetAccess, useDatasetAccessRoster } from "../../hooks/useDatasetAccess";
 import { ROLE_OPTIONS, roleAlwaysDownloads, roleLabel } from "./accessCopy";
+import ShareEmailInput from "./ShareEmailInput";
 
 interface ShareDatasetModalProps {
   datasetId: number | null;
@@ -90,6 +91,10 @@ export default function ShareDatasetModal({ datasetId, datasetName, onClose }: S
   const open = datasetId !== null;
   const roster = useDatasetAccessRoster(datasetId ?? 0, open);
   const { grant, revoke } = useChangeDatasetAccess(datasetId ?? 0);
+  const sharedEmails = useMemo(
+    () => new Set((roster.data ?? []).map((entry) => entry.email.toLowerCase())),
+    [roster.data],
+  );
 
   const handleShare = async (values: IShareForm) => {
     try {
@@ -135,14 +140,14 @@ export default function ShareDatasetModal({ datasetId, datasetName, onClose }: S
   return (
     <Modal title={datasetName ? `Share ${datasetName}` : "Share dataset"} open={open} onCancel={onClose} footer={null} destroyOnHidden>
       <Typography.Paragraph type="secondary" className="mb-4">
-        People need a DeadTrees account. They can then open this dataset from their profile under “Shared with me”.
+        People need a DeadTrees account; type part of their email to find it. They can then open this dataset from their profile under “Shared with me”.
       </Typography.Paragraph>
       <Typography.Paragraph type="secondary" className="text-xs">
         Anyone who can view a dataset can save the imagery shown in their browser. Download access adds the orthophoto and prediction files.
       </Typography.Paragraph>
       <Form form={form} layout="vertical" initialValues={{ role: "reader", canDownload: false }} onFinish={handleShare} data-testid="share-dataset-form">
-        <Form.Item name="email" label="Email" rules={[{ required: true, type: "email", message: "Enter their account email" }]}>
-          <Input placeholder="colleague@example.org" autoComplete="off" />
+        <Form.Item name="email" label="Email" validateTrigger="onBlur" rules={[{ required: true, type: "email", message: "Enter their account email" }]}>
+          <ShareEmailInput datasetId={datasetId ?? 0} sharedEmails={sharedEmails} />
         </Form.Item>
         <div className="flex flex-col gap-x-3 sm:flex-row">
           <Form.Item name="role" label="Access" className="sm:flex-1">

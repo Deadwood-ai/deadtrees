@@ -10,6 +10,7 @@ import { expect, test, type Page } from "@playwright/test";
  * Local-only write suite for private dataset sharing: an owner shares a private
  * orthophoto with a named colleague, the colleague views it online through signed
  * file addresses, a stranger sees nothing, and revocation takes effect at once.
+ * The owner finds the colleague by typing part of their email.
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -109,7 +110,29 @@ test.describe("private dataset sharing (local write)", () => {
     await page.getByRole("menuitem", { name: /Share/ }).click();
 
     const dialog = page.getByRole("dialog", { name: /Share/ });
-    await dialog.getByLabel("Email").fill(accounts.colleague.email);
+    // Part of the address is enough: the dialog suggests matching accounts.
+    await dialog.getByLabel("Email").pressSequentially(`colleague-${runId.slice(0, 6)}`);
+    // Ant Design's visible suggestion rows; its role="option" nodes are hidden a11y copies.
+    const suggestions = page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
+    const suggestion = suggestions.filter({ hasText: accounts.colleague.email });
+    await expect(suggestion).toBeVisible();
+    await expect(suggestions.filter({ hasText: accounts.owner.email })).toHaveCount(0);
+    await page.screenshot({ path: test.info().outputPath("0-owner-email-suggestion.png") });
+    // A new query hides the previous one's suggestions while its own (held back) search runs.
+    const email = dialog.getByLabel("Email");
+    await page.route("**/rpc/search_dataset_share_accounts", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await route.continue();
+    });
+    await email.fill("");
+    await email.pressSequentially(`stranger-${runId.slice(0, 6)}`);
+    await expect(suggestion).toBeHidden({ timeout: 1500 });
+    await expect(suggestions.filter({ hasText: accounts.stranger.email })).toBeVisible();
+    await page.unroute("**/rpc/search_dataset_share_accounts");
+    await email.fill("");
+    await email.pressSequentially(`colleague-${runId.slice(0, 6)}`);
+    await suggestion.click();
+    await expect(dialog.getByLabel("Email")).toHaveValue(accounts.colleague.email);
     await dialog.getByRole("button", { name: "Share", exact: true }).click();
     await expect(dialog.getByText(accounts.colleague.email)).toBeVisible();
     await expect(dialog.getByText("Owner", { exact: true })).toBeVisible();

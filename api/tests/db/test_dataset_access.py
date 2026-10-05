@@ -8,7 +8,9 @@ security is exercised exactly as the app sees it.
 
 from datetime import datetime, timedelta, timezone
 import uuid
+from urllib.parse import urlparse
 
+import psycopg
 import pytest
 from postgrest.exceptions import APIError
 
@@ -705,3 +707,66 @@ def test_access_support_override_cannot_publish_someone_elses_dataset(access_acc
 	finally:
 		with use_service_client() as client:
 			client.table('privileged_users').delete().eq('user_id', support['id']).execute()
+
+
+def _search_accounts(token: str, dataset_id: int, query: str) -> list[str]:
+	with use_client(token) as client:
+		rows = client.rpc('search_dataset_share_accounts', {'p_dataset_id': dataset_id, 'p_query': query}).execute().data
+	return [row['email'] for row in rows]
+
+
+def _email_tag(account: dict) -> str:
+	"""The random part of a test account's email, unique to that account."""
+	return account['email'].split('-')[2].split('@')[0]
+
+
+def test_access_managers_find_accounts_by_part_of_their_email(access_accounts, private_dataset):
+	owner, reader, admin = access_accounts['owner'], access_accounts['reader'], access_accounts['admin']
+	_grant(owner['token'], private_dataset, admin['email'], 'admin')
+
+	assert _search_accounts(owner['token'], private_dataset, _email_tag(reader).upper()) == [reader['email']]
+	assert _search_accounts(admin['token'], private_dataset, _email_tag(reader)) == [reader['email']]
+	assert _search_accounts(owner['token'], private_dataset, _email_tag(reader)[:2]) == []
+	# Neither the caller nor the owner can be given access, so neither is suggested.
+	assert _search_accounts(owner['token'], private_dataset, _email_tag(owner)) == []
+	assert _search_accounts(admin['token'], private_dataset, _email_tag(owner)) == []
+	assert _search_accounts(admin['token'], private_dataset, _email_tag(admin)) == []
+	assert len(_search_accounts(owner['token'], private_dataset, 'access-')) <= 20
+
+
+@pytest.mark.parametrize('actor', ['stranger', 'reader', 'editor'])
+def test_only_access_managers_can_search_accounts(access_accounts, private_dataset, actor):
+	"""Everyone else gets the same error as for a dataset that does not exist."""
+	_grant_everyone(access_accounts, private_dataset)
+	token = access_accounts[actor]['token']
+	errors = []
+	for dataset_id in (private_dataset, private_dataset + 1_000_000):
+		with pytest.raises(APIError) as error:
+			_search_accounts(token, dataset_id, _email_tag(access_accounts['owner']))
+		errors.append((error.value.code, error.value.message))
+	assert errors[0] == errors[1] == ('P0002', 'Dataset not found')
+	with use_anon_client() as client, pytest.raises(APIError):
+		client.rpc('search_dataset_share_accounts', {'p_dataset_id': private_dataset, 'p_query': 'access'}).execute()
+
+
+def test_account_search_is_rate_limited_per_user(access_accounts, private_dataset):
+	assert urlparse(settings.SUPABASE_DB_URL).hostname in {'localhost', '127.0.0.1', 'host.docker.internal'}, (
+		'Local database required'
+	)
+	owner = access_accounts['owner']
+	query = _email_tag(access_accounts['reader'])
+	# The usage table is not exposed through the API, so the test moves its counter directly.
+	with psycopg.connect(settings.SUPABASE_DB_URL, user='supabase_admin', autocommit=True) as database:
+		try:
+			_search_accounts(owner['token'], private_dataset, query)
+			database.execute('update internal.account_search_usage set search_count = 60 where user_id = %s', (owner['id'],))
+			with pytest.raises(APIError) as error:
+				_search_accounts(owner['token'], private_dataset, query)
+			assert error.value.hint == 'rate_limited'
+			database.execute(
+				"update internal.account_search_usage set window_started_at = now() - interval '61 seconds' where user_id = %s",
+				(owner['id'],),
+			)
+			assert _search_accounts(owner['token'], private_dataset, query) == [access_accounts['reader']['email']]
+		finally:
+			database.execute('delete from internal.account_search_usage where user_id = %s', (owner['id'],))

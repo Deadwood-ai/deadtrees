@@ -85,6 +85,13 @@ export async function revokeDatasetAccess(datasetId: number, userId: string): Pr
   if (error) throw new Error(describeAccessError(error));
 }
 
+/** Registered account emails containing the query, for people who manage the dataset's access. */
+export async function searchShareAccounts(datasetId: number, query: string): Promise<string[]> {
+  const { data, error } = await supabase.rpc("search_dataset_share_accounts", { p_dataset_id: datasetId, p_query: query });
+  if (error) throw new Error(describeAccessError(error));
+  return ((data as { email: string }[] | null) ?? []).map((row) => row.email);
+}
+
 export async function fetchDatasetsSharedWithMe(): Promise<ISharedDataset[]> {
   const { data, error } = await supabase.rpc("list_datasets_shared_with_me");
   if (error) throw error;
