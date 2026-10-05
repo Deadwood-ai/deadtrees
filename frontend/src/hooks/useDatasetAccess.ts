@@ -1,11 +1,12 @@
 import { useCallback, useMemo } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchDatasetAccessRoster,
   fetchDatasetsSharedWithMe,
   fetchMyDatasetAccess,
   fetchPrivateDatasetFilesBatched,
   revokeDatasetAccess,
+  searchShareAccounts,
   setDatasetAccess,
   updateDatasetVisibility,
   type DatasetAccessRole,
@@ -36,6 +37,22 @@ export function useDatasetAccessRoster(datasetId: number, enabled: boolean) {
     queryKey: rosterKey(datasetId, user?.id),
     queryFn: () => fetchDatasetAccessRoster(datasetId),
     enabled: enabled && !!user?.id,
+  });
+}
+
+/** Matches only start at the length the database searches from. */
+export const SHARE_ACCOUNT_SEARCH_MIN_LENGTH = 3;
+
+export function useShareAccountSearch(datasetId: number, query: string) {
+  const { user } = useAuth();
+  const trimmed = query.trim().toLowerCase();
+  return useQuery({
+    queryKey: ["datasets", datasetId, "share-accounts", trimmed, user?.id],
+    queryFn: () => searchShareAccounts(datasetId, trimmed),
+    enabled: !!user?.id && trimmed.length >= SHARE_ACCOUNT_SEARCH_MIN_LENGTH,
+    staleTime: 60 * 1000,
+    placeholderData: keepPreviousData,
+    retry: false,
   });
 }
 
