@@ -349,6 +349,34 @@ def test_tms_rows_are_flipped_and_keys_stay_out_of_the_viewer():
 
 
 @pytest.mark.unit
+def test_missing_tiles_retry_up_to_two_zooms_lower():
+	import io
+
+	from PIL import Image
+
+	from processor.src.georef_check_v1.references import MissingTile, mosaic
+
+	png = io.BytesIO()
+	Image.new('RGB', (256, 256), (90, 120, 60)).save(png, format='PNG')
+	asked = []
+
+	class Session:
+		def __init__(self, top):
+			self.top = top
+
+		def get(self, url, params=None, timeout=None):
+			z = int(url)
+			asked.append(z)
+			return SimpleNamespace(status_code=200 if z <= self.top else 404, content=png.getvalue())
+
+	grid = Grid((870000.0, 6100000.0, 870140.0, 6100100.0), 140, 100)  # 1 m pixels: z17
+	image, z = mosaic(grid, lambda z, x, y: (str(z), None), 19, Session(top=16))
+	assert z == 16 and image.shape == (100, 140, 3) and sorted(set(asked), reverse=True) == [17, 16]
+	with pytest.raises(MissingTile):
+		mosaic(grid, lambda z, x, y: (str(z), None), 19, Session(top=14))
+
+
+@pytest.mark.unit
 def test_quadkeys_and_ellipsoidal_mercator_rows():
 	from processor.src.georef_check_v1.references import _ellipsoidal_bounds, quadkey
 

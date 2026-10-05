@@ -41,6 +41,10 @@ nothing counts as an audit until an auditor saves.
      (`MAPTILER_API_KEY`, `MAPBOX_ACCESS_TOKEN`, `AZURE_MAPS_KEY`,
      `LINZ_API_KEY`)
 
+   A provider with no tiles at the chosen zoom (HTTP 404, common above z18
+   outside cities for Yandex and Esri Clarity) is rendered up to two zoom
+   levels lower.
+
    Each provider is its own evidence group unless it serves the same imagery as
    another (Wayback and Clarity with Esri). Only services with an open licence for
    automated use are listed unmarked; Google's satellite tiles are refused to EEA

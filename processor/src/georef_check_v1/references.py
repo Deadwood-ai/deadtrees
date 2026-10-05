@@ -26,6 +26,9 @@ from .providers import ESRI, REGISTRY, Provider
 
 WORLD = 40075016.68557849
 TILE_BUDGET = 45
+# Yandex, Esri Clarity and others have no tiles above z18 in many rural areas
+# and answer 404; the mosaic then retries this many zoom levels lower
+MISSING_TILE_FALLBACK = 2
 USER_AGENT = 'DeadTrees-georeferencing-check/1.0 (+https://deadtrees.earth)'
 WAYBACK_CONFIG = 'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json'
 WAYBACK_TILES = (
@@ -77,21 +80,40 @@ def _zoom_and_tiles(grid: Grid, max_zoom: int, bounds: tuple[float, float, float
 		z -= 1
 
 
+class MissingTile(RuntimeError):
+	"""The provider has no tile here at this zoom (HTTP 404)."""
+
+
 def mosaic(
 	grid: Grid, url_for, max_zoom: int = 19, session: requests.Session | None = None, tile_crs: str = 'EPSG:3857'
 ):
 	"""Fetch the tiles covering `grid` (url_for(z, x, y) -> (url, params)) and
-	resample them onto it. Returns (image, zoom); raises on any failed tile."""
+	resample them onto it. Returns (image, zoom); raises on any failed tile.
+	Missing tiles retry the whole mosaic up to MISSING_TILE_FALLBACK zooms lower."""
 	session = session or _session()
 	bounds = _ellipsoidal_bounds(grid) if tile_crs == 'EPSG:3395' else grid.bounds
+	zoom = _zoom_and_tiles(grid, max_zoom, bounds)[0]
+	lowest = max(zoom - MISSING_TILE_FALLBACK, 0)
+	while True:
+		try:
+			return _mosaic_at(grid, url_for, zoom, session, bounds)
+		except MissingTile:
+			if zoom == lowest:
+				raise
+			zoom -= 1
+
+
+def _mosaic_at(grid: Grid, url_for, max_zoom: int, session: requests.Session, bounds):
 	z, step, x0, x1, y0, y1 = _zoom_and_tiles(grid, max_zoom, bounds)
 
 	def fetch(xy):
 		x, y = xy
 		url, params = url_for(z, x, y)
 		r = session.get(url, params=params, timeout=40)
+		# never include the URL: it can carry an API key
+		if r.status_code == 404:
+			raise MissingTile('tile HTTP 404')
 		if r.status_code != 200:
-			# never include the URL: it can carry an API key
 			raise RuntimeError(f'tile HTTP {r.status_code}')
 		return x, y, Image.open(io.BytesIO(r.content)).convert('RGB').resize((256, 256))
 
