@@ -16,25 +16,37 @@ interface ShareEmailInputProps {
 }
 
 /** Email field that suggests registered accounts once part of an address is typed. */
-export default function ShareEmailInput({ datasetId, sharedEmails, id, value, onChange }: ShareEmailInputProps) {
+export default function ShareEmailInput({
+  datasetId,
+  sharedEmails,
+  id,
+  value,
+  onChange,
+}: ShareEmailInputProps) {
   const query = useDebouncedValue(value ?? "", SEARCH_DELAY_MS);
   const { search, searching } = useShareAccountSearch(datasetId, query);
-  // Earlier results stay as placeholder data, so hide them once the query is too short.
+  // Earlier results stay as placeholder data while the next search runs, so show only
+  // those that still match what is typed now: an old suggestion is never a wrong pick.
+  const typed = (value ?? "").trim().toLowerCase();
   const options = useMemo(
     () =>
       searching
-        ? (search.data ?? []).map((email) => ({
-            value: email,
-            title: email,
-            label: (
-              <span className="flex justify-between gap-2">
-                <span className="min-w-0 truncate">{email}</span>
-                {sharedEmails.has(email.toLowerCase()) && <span className="shrink-0 text-gray-400">Has access</span>}
-              </span>
-            ),
-          }))
+        ? (search.data ?? [])
+            .filter((email) => email.toLowerCase().includes(typed))
+            .map((email) => ({
+              value: email,
+              title: email,
+              label: (
+                <span className="flex justify-between gap-2">
+                  <span className="min-w-0 truncate">{email}</span>
+                  {sharedEmails.has(email.toLowerCase()) && (
+                    <span className="shrink-0 text-gray-400">Has access</span>
+                  )}
+                </span>
+              ),
+            }))
         : [],
-    [searching, search.data, sharedEmails],
+    [searching, search.data, sharedEmails, typed],
   );
 
   return (
@@ -44,7 +56,14 @@ export default function ShareEmailInput({ datasetId, sharedEmails, id, value, on
       onChange={onChange}
       options={options}
       placeholder="colleague@example.org"
-      notFoundContent={searching && !search.isFetching ? (search.isError ? search.error.message : "No account matches") : undefined}
+      notFoundContent={
+        // Only once typing has paused and its search has finished.
+        searching && !search.isFetching && query.trim().toLowerCase() === typed
+          ? search.isError
+            ? search.error.message
+            : "No account matches"
+          : undefined
+      }
     />
   );
 }

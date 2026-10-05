@@ -113,11 +113,24 @@ test.describe("private dataset sharing (local write)", () => {
     // Part of the address is enough: the dialog suggests matching accounts.
     await dialog.getByLabel("Email").pressSequentially(`colleague-${runId.slice(0, 6)}`);
     // Ant Design's visible suggestion rows; its role="option" nodes are hidden a11y copies.
-    const suggestions = page.locator(".ant-select-item-option");
+    const suggestions = page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
     const suggestion = suggestions.filter({ hasText: accounts.colleague.email });
     await expect(suggestion).toBeVisible();
     await expect(suggestions.filter({ hasText: accounts.owner.email })).toHaveCount(0);
     await page.screenshot({ path: test.info().outputPath("0-owner-email-suggestion.png") });
+    // A new query hides the previous one's suggestions while its own (held back) search runs.
+    const email = dialog.getByLabel("Email");
+    await page.route("**/rpc/search_dataset_share_accounts", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await route.continue();
+    });
+    await email.fill("");
+    await email.pressSequentially(`stranger-${runId.slice(0, 6)}`);
+    await expect(suggestion).toBeHidden({ timeout: 1500 });
+    await expect(suggestions.filter({ hasText: accounts.stranger.email })).toBeVisible();
+    await page.unroute("**/rpc/search_dataset_share_accounts");
+    await email.fill("");
+    await email.pressSequentially(`colleague-${runId.slice(0, 6)}`);
     await suggestion.click();
     await expect(dialog.getByLabel("Email")).toHaveValue(accounts.colleague.email);
     await dialog.getByRole("button", { name: "Share", exact: true }).click();
