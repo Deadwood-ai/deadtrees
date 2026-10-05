@@ -40,20 +40,23 @@ export function useDatasetAccessRoster(datasetId: number, enabled: boolean) {
   });
 }
 
-/** Matches only start at the length the database searches from. */
-export const SHARE_ACCOUNT_SEARCH_MIN_LENGTH = 3;
+// The database returns no matches for shorter queries.
+const SHARE_ACCOUNT_SEARCH_MIN_LENGTH = 3;
 
+/** Account emails matching a typed query; `searching` is false while the query is too short. */
 export function useShareAccountSearch(datasetId: number, query: string) {
   const { user } = useAuth();
   const trimmed = query.trim().toLowerCase();
-  return useQuery({
+  const searching = !!user?.id && trimmed.length >= SHARE_ACCOUNT_SEARCH_MIN_LENGTH;
+  const search = useQuery({
     queryKey: ["datasets", datasetId, "share-accounts", trimmed, user?.id],
     queryFn: () => searchShareAccounts(datasetId, trimmed),
-    enabled: !!user?.id && trimmed.length >= SHARE_ACCOUNT_SEARCH_MIN_LENGTH,
+    enabled: searching,
     staleTime: 60 * 1000,
     placeholderData: keepPreviousData,
     retry: false,
   });
+  return { search, searching };
 }
 
 export function useSharedWithMe() {

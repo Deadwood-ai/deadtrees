@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button, Checkbox, DatePicker, Form, List, Modal, Select, Tag, Typography, message } from "antd";
 import { DeleteOutlined } from "@ant-design/icons";
 import type { Dayjs } from "dayjs";
@@ -91,7 +91,10 @@ export default function ShareDatasetModal({ datasetId, datasetName, onClose }: S
   const open = datasetId !== null;
   const roster = useDatasetAccessRoster(datasetId ?? 0, open);
   const { grant, revoke } = useChangeDatasetAccess(datasetId ?? 0);
-  const sharedEmails = new Set((roster.data ?? []).map((entry) => entry.email.toLowerCase()));
+  const sharedEmails = useMemo(
+    () => new Set((roster.data ?? []).map((entry) => entry.email.toLowerCase())),
+    [roster.data],
+  );
 
   const handleShare = async (values: IShareForm) => {
     try {

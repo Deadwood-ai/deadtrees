@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import { AutoComplete } from "antd";
-import { SHARE_ACCOUNT_SEARCH_MIN_LENGTH, useShareAccountSearch } from "../../hooks/useDatasetAccess";
+import { useShareAccountSearch } from "../../hooks/useDatasetAccess";
+import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 
 // Wait for a pause in typing before searching, so each keystroke is not a request.
 const SEARCH_DELAY_MS = 250;
@@ -14,32 +15,27 @@ interface ShareEmailInputProps {
   onChange?: (value: string) => void;
 }
 
-function useDebouncedValue(value: string, delayMs: number) {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(value), delayMs);
-    return () => window.clearTimeout(timer);
-  }, [value, delayMs]);
-  return debounced;
-}
-
 /** Email field that suggests registered accounts once part of an address is typed. */
 export default function ShareEmailInput({ datasetId, sharedEmails, id, value, onChange }: ShareEmailInputProps) {
-  const query = useDebouncedValue((value ?? "").trim(), SEARCH_DELAY_MS);
-  const searching = query.length >= SHARE_ACCOUNT_SEARCH_MIN_LENGTH;
-  const search = useShareAccountSearch(datasetId, searching ? query : "");
-  const options = searching
-    ? (search.data ?? []).map((email) => ({
-        value: email,
-        title: email,
-        label: (
-          <span className="flex justify-between gap-2">
-            <span className="min-w-0 truncate">{email}</span>
-            {sharedEmails.has(email.toLowerCase()) && <span className="shrink-0 text-gray-400">Has access</span>}
-          </span>
-        ),
-      }))
-    : [];
+  const query = useDebouncedValue(value ?? "", SEARCH_DELAY_MS);
+  const { search, searching } = useShareAccountSearch(datasetId, query);
+  // Earlier results stay as placeholder data, so hide them once the query is too short.
+  const options = useMemo(
+    () =>
+      searching
+        ? (search.data ?? []).map((email) => ({
+            value: email,
+            title: email,
+            label: (
+              <span className="flex justify-between gap-2">
+                <span className="min-w-0 truncate">{email}</span>
+                {sharedEmails.has(email.toLowerCase()) && <span className="shrink-0 text-gray-400">Has access</span>}
+              </span>
+            ),
+          }))
+        : [],
+    [searching, search.data, sharedEmails],
+  );
 
   return (
     <AutoComplete

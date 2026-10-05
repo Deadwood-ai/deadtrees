@@ -107,8 +107,6 @@ export function describeAccessError(error: { message?: string; hint?: string | n
       return "This person owns the dataset and already has full access.";
     case "self":
       return "You cannot change your own access.";
-    case "rate_limited":
-      return "Too many searches. Please wait a minute.";
     default:
       return error.message || "Access could not be changed. Please try again.";
   }

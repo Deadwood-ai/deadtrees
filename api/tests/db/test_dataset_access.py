@@ -8,6 +8,7 @@ security is exercised exactly as the app sees it.
 
 from datetime import datetime, timedelta, timezone
 import uuid
+from urllib.parse import urlparse
 
 import psycopg
 import pytest
@@ -748,29 +749,24 @@ def test_only_access_managers_can_search_accounts(access_accounts, private_datas
 		client.rpc('search_dataset_share_accounts', {'p_dataset_id': private_dataset, 'p_query': 'access'}).execute()
 
 
-def _database():
-	"""The usage table is not exposed through the API, so tests reach it directly."""
-	return psycopg.connect(settings.SUPABASE_DB_URL, user='supabase_admin', autocommit=True)
-
-
 def test_account_search_is_rate_limited_per_user(access_accounts, private_dataset):
+	assert urlparse(settings.SUPABASE_DB_URL).hostname in {'localhost', '127.0.0.1', 'host.docker.internal'}, (
+		'Local database required'
+	)
 	owner = access_accounts['owner']
 	query = _email_tag(access_accounts['reader'])
-	try:
-		_search_accounts(owner['token'], private_dataset, query)
-		with _database() as connection:
-			connection.execute(
-				'update internal.account_search_usage set search_count = 60 where user_id = %s', (owner['id'],)
-			)
-		with pytest.raises(APIError) as error:
+	# The usage table is not exposed through the API, so the test moves its counter directly.
+	with psycopg.connect(settings.SUPABASE_DB_URL, user='supabase_admin', autocommit=True) as database:
+		try:
 			_search_accounts(owner['token'], private_dataset, query)
-		assert error.value.hint == 'rate_limited'
-		with _database() as connection:
-			connection.execute(
+			database.execute('update internal.account_search_usage set search_count = 60 where user_id = %s', (owner['id'],))
+			with pytest.raises(APIError) as error:
+				_search_accounts(owner['token'], private_dataset, query)
+			assert error.value.hint == 'rate_limited'
+			database.execute(
 				"update internal.account_search_usage set window_started_at = now() - interval '61 seconds' where user_id = %s",
 				(owner['id'],),
 			)
-		assert _search_accounts(owner['token'], private_dataset, query) == [access_accounts['reader']['email']]
-	finally:
-		with _database() as connection:
-			connection.execute('delete from internal.account_search_usage where user_id = %s', (owner['id'],))
+			assert _search_accounts(owner['token'], private_dataset, query) == [access_accounts['reader']['email']]
+		finally:
+			database.execute('delete from internal.account_search_usage where user_id = %s', (owner['id'],))

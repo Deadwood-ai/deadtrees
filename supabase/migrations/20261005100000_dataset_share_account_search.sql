@@ -5,6 +5,9 @@
 -- directory for dataset admins; three characters, twenty results and sixty searches
 -- a minute per user keep it from being a bulk export.
 
+-- The foreign key briefly locks auth.users; fail fast instead of queueing sign-ups.
+set local lock_timeout = '5s';
+
 create schema if not exists internal;
 
 create table internal.account_search_usage (
