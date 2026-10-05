@@ -12,6 +12,14 @@ TEST_POINTS = [
 	((2.0, 25.0), ('Deserts and Xeric Shrublands', 13)),
 	# Invalid point (middle of ocean)
 	((0.0, 0.0), (None, None)),
+	# Palmyra Atoll: the coarse ecoregion polygon lies about 35 km away
+	((-162.09, 5.882), ('Tropical and Subtropical Moist Broadleaf Forests', 1)),
+	# Palm Islands, Queensland: about 17 km from the mainland polygon
+	((146.49, -18.61), ('Tropical and Subtropical Moist Broadleaf Forests', 1)),
+	# Lake Erie shore, inside a WWF lake polygon (code 98)
+	((-81.568, 41.585), ('Temperate Broadleaf and Mixed Forests', 4)),
+	# Atlantic near 0N 7.5W, far from any land
+	((-7.488, -0.001), (None, None)),
 ]
 
 
