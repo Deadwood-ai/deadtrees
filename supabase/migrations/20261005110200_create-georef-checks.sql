@@ -15,6 +15,8 @@
 -- A good/poor call also becomes the is_georeferenced audit suggestion
 -- (dataset_audit_suggestions), so a disagreeing saved audit shows up in
 -- audit_review_queue. See processor/src/georef_check_v1 and docs/georef-check.md.
+set local lock_timeout = '5s';
+
 create table if not exists public.v2_georef_checks (
   dataset_id bigint primary key references public.v2_datasets (id) on delete cascade,
   model_version text not null,

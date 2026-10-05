@@ -1,6 +1,7 @@
 -- Let requeue_dataset_processing accept the georeferencing check stage
 -- (georef_check_v1) and reset its done flag on a failed dataset's rerun.
 -- Unchanged otherwise from 20260930160200_requeue_dataset_processing_rpc.sql.
+set local lock_timeout = '5s';
 
 create or replace function public.requeue_dataset_processing(
 	p_dataset_id bigint,
