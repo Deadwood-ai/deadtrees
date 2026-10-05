@@ -30,9 +30,16 @@ def match(source: np.ndarray, reference: np.ndarray, samples: int = SAMPLES):
 
 	model = load_matcher()
 	torch.manual_seed(0)
-	with torch.inference_mode():
-		warp = model.match(Image.fromarray(source), Image.fromarray(reference))
-		matches, confidence, _, _ = model.sample(warp, samples)
-		h, w = source.shape[:2]
-		a, b = model.to_pixel_coordinates(matches, h, w, h, w)
+	# RoMa refuses anything but 'highest'; other stages in the same worker (the
+	# AOI model) set 'high' process-wide, so set it here and restore it after
+	previous = torch.get_float32_matmul_precision()
+	torch.set_float32_matmul_precision('highest')
+	try:
+		with torch.inference_mode():
+			warp = model.match(Image.fromarray(source), Image.fromarray(reference))
+			matches, confidence, _, _ = model.sample(warp, samples)
+			h, w = source.shape[:2]
+			a, b = model.to_pixel_coordinates(matches, h, w, h, w)
+	finally:
+		torch.set_float32_matmul_precision(previous)
 	return a.cpu().numpy(), b.cpu().numpy(), confidence.cpu().numpy().reshape(-1)

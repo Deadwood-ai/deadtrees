@@ -357,3 +357,32 @@ def test_quadkeys_and_ellipsoidal_mercator_rows():
 	y = 7361866.0  # ~55.0°N in EPSG:3857
 	_, south, _, north = _ellipsoidal_bounds(Grid((4.1e6, y - 100, 4.1e6 + 200, y + 100), 100, 100))
 	assert 30_000 < (y - 100) - south < 40_000 and abs((north - south) - 200) < 1
+
+
+@pytest.mark.unit
+def test_matching_runs_at_highest_precision_and_restores_the_workers_setting(monkeypatch):
+	"""The AOI stage leaves float32 matmul precision at 'high'; RoMa needs 'highest'."""
+	import torch
+
+	import processor.src.georef_check_v1.matcher as matcher
+
+	seen = []
+
+	class FakeRoma:
+		def match(self, a, b):
+			seen.append(torch.get_float32_matmul_precision())
+			return None
+
+		def sample(self, warp, n):
+			return torch.zeros((1, 4)), torch.ones(1), None, None
+
+		def to_pixel_coordinates(self, matches, *size):
+			return torch.zeros((1, 2)), torch.zeros((1, 2))
+
+	monkeypatch.setattr(matcher, 'load_matcher', lambda: FakeRoma())
+	torch.set_float32_matmul_precision('high')
+	try:
+		matcher.match(np.zeros((8, 8, 3), np.uint8), np.zeros((8, 8, 3), np.uint8))
+		assert seen == ['highest'] and torch.get_float32_matmul_precision() == 'high'
+	finally:
+		torch.set_float32_matmul_precision('highest')
