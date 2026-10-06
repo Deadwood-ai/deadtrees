@@ -91,3 +91,52 @@ def dataset_completed_email(dataset_id: int, file_name: str) -> tuple[str, str, 
 	</div>
 	"""
 	return subject, text_body, html_body
+
+
+def duplicates_archived_email(datasets: list[dict]) -> tuple[str, str, str]:
+	"""Tell an owner which of their datasets were archived as copies of an existing upload.
+
+	Each entry has `id`, `file_name` and `kept_dataset_id`, which is None when
+	the owner may not see the dataset that was kept.
+	"""
+	subject = 'Duplicate datasets archived on deadtrees.earth'
+	intro = (
+		'We now detect files that were uploaded to deadtrees.earth more than once. '
+		'The datasets below are copies of a file that is already on the platform, so we archived them. '
+		'Nothing was deleted, and one dataset per file stays available.'
+	)
+	outro = 'If one of these should not have been archived, contact info@deadtrees.earth and we will restore it.'
+
+	text_lines, html_rows = [], []
+	for dataset in datasets:
+		kept_dataset_id = dataset['kept_dataset_id']
+		if kept_dataset_id is None:
+			kept_text = kept_html = 'another upload of the same file'
+		else:
+			kept_url = f'https://deadtrees.earth/dataset/{kept_dataset_id}'
+			kept_text = f'dataset {kept_dataset_id} ({kept_url})'
+			kept_html = f'<a href="{kept_url}">dataset {kept_dataset_id}</a>'
+		text_lines.append(f'- Dataset {dataset["id"]} ({dataset["file_name"]}): kept is {kept_text}')
+		html_rows.append(f'<li>Dataset {dataset["id"]} ({escape(dataset["file_name"])}): kept is {kept_html}</li>')
+
+	text_body = f'{intro}\n\n' + '\n'.join(text_lines) + f'\n\n{outro}\n\nManage processing emails: {ACCOUNT_URL}'
+	html_body = f"""
+	<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+		<div style="background: #1a1a2e; padding: 20px; border-radius: 8px 8px 0 0;">
+			<h1 style="color: #ffffff; margin: 0; font-size: 20px;">Duplicate datasets archived</h1>
+		</div>
+		<div style="background: #f8f9fa; padding: 20px; border: 1px solid #dee2e6; border-top: none; border-radius: 0 0 8px 8px;">
+			<p style="color: #333; margin-top: 0;">{intro}</p>
+			<ul style="color: #333;">{''.join(html_rows)}</ul>
+			<p style="color: #666; font-size: 13px;">
+				If one of these should not have been archived, contact
+				<a href="mailto:info@deadtrees.earth" style="color: #2980b9;">info@deadtrees.earth</a>
+				and we will restore it.
+			</p>
+		</div>
+		<p style="color: #999; font-size: 11px; text-align: center; margin-top: 16px;">
+			DeadTrees &mdash; <a href="{ACCOUNT_URL}" style="color: #777;">Manage processing emails</a>
+		</p>
+	</div>
+	"""
+	return subject, text_body, html_body

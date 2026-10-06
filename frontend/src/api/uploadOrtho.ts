@@ -252,7 +252,7 @@ function shouldRetryChunkUpload(error: unknown): boolean {
   return RETRYABLE_STATUS_CODES.has(error.response.status);
 }
 
-/** The API refused the file itself (HTTP 400); the message is its reason for the contributor. */
+/** The API refused the file itself (HTTP 400, or 409 for a duplicate); the message is its reason for the contributor. */
 export class UploadRejectedError extends Error {
   name = "UploadRejectedError";
 }
@@ -270,6 +270,9 @@ function createChunkUploadError(error: unknown, chunkIndex: number): Error {
 
     if (status === 400) {
       return new UploadRejectedError(String(detail));
+    }
+    if (status === 409 && typeof detail === "object" && (detail as { code?: unknown }).code === "DUPLICATE_UPLOAD") {
+      return new UploadRejectedError(String((detail as { message?: unknown }).message));
     }
     return new Error(`Failed to upload chunk ${chunkIndex} (status ${status ?? "unknown"}): ${String(detail)}`);
   }

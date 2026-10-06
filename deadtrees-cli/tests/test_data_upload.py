@@ -11,6 +11,7 @@ from shared.testing.fixtures import (
 	test_processor_user,
 )
 from deadtrees_cli.data import DataCommands
+from shared.upload_duplicates import DuplicateUploadError
 import geopandas as gpd
 from shapely.geometry import Polygon, MultiPolygon
 from shared.models import LabelSourceEnum, LabelTypeEnum, LabelDataEnum
@@ -292,3 +293,23 @@ def test_upload_label_with_polygon_holes(data_commands, test_dataset_for_upload)
 		assert (30.0, 30.0) in first_interior_hole
 		assert (32.0, 32.0) in second_interior_hole
 		assert (37.0, 37.0) in second_interior_hole
+
+
+def test_upload_of_a_file_already_on_the_platform_sends_nothing(data_commands, test_file, monkeypatch):
+	"""The duplicate is reported before any chunk is uploaded."""
+	first = data_commands.upload(file_path=str(test_file), authors=['Test Author'])
+	token = data_commands._ensure_auth()
+	try:
+		monkeypatch.setattr(
+			data_commands, '_chunked_upload', lambda **_kwargs: pytest.fail('uploaded a duplicate file')
+		)
+
+		with pytest.raises(DuplicateUploadError) as error:
+			data_commands.upload(file_path=str(test_file), authors=['Test Author'])
+
+		assert error.value.detail['existing_dataset_id'] == first['id']
+		assert f'dataset {first["id"]}' in str(error.value)
+	finally:
+		with use_client(token) as client:
+			client.table(settings.statuses_table).delete().eq('dataset_id', first['id']).execute()
+			client.table(settings.datasets_table).delete().eq('id', first['id']).execute()

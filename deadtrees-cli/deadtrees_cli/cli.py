@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
+import sys
+
 import fire
 from typing import Optional, List
+
+from shared.upload_duplicates import DuplicateUploadError
 
 from .dev import DevCommands
 from .data import DataCommands
@@ -26,7 +30,10 @@ Example usage:
 """
 
 def main():
-    fire.Fire(DeadtreesCLI)
+    try:
+        fire.Fire(DeadtreesCLI)
+    except DuplicateUploadError as error:
+        sys.exit(str(error))
 
 if __name__ == "__main__":
     main() 

@@ -21,6 +21,7 @@ def create_dataset_entry(
 	additional_information: Optional[str],
 	data_access: DatasetAccessEnum,
 	citation_doi: Optional[str],
+	upload_fingerprint: str,
 	token: str,
 ) -> Dataset:
 	"""Create a new dataset entry in the database"""
@@ -37,6 +38,7 @@ def create_dataset_entry(
 		'additional_information': additional_information,
 		'data_access': data_access,
 		'citation_doi': citation_doi,
+		'upload_fingerprint': upload_fingerprint,
 	}
 
 	dataset = Dataset(**data)

@@ -120,6 +120,43 @@ test.describe("contributor local e2e", () => {
     expect(uploadRequests).toBe(0);
   });
 
+  test("a file that is already on the platform is refused before upload", async ({ page }) => {
+    await installAuthenticatedContributor(page);
+    let uploadRequests = 0;
+    await page.route(`${localApiUrl}/datasets/chunk`, async (route) => {
+      uploadRequests += 1;
+      await route.abort();
+    });
+    let existingDatasetId: number | null = 4242;
+    const fingerprints: string[] = [];
+    await page.route(`${localSupabaseUrl}/rest/v1/rpc/find_duplicate_upload`, async (route) => {
+      fingerprints.push(route.request().postDataJSON().p_fingerprint);
+      await route.fulfill({ json: [{ dataset_id: existingDatasetId, is_own: existingDatasetId !== null }] });
+    });
+    await page.goto("/profile");
+    await page.getByRole("button", { name: "Upload Data" }).click();
+    const modal = page.getByTestId("contributor-upload-modal");
+    const input = page.getByTestId("contributor-upload-dropzone");
+    const notice = modal.getByTestId("upload-duplicate-notice");
+
+    await input.setInputFiles(rgbGeoTiffFixture);
+    await expect(notice).toContainText("already on deadtrees.earth as dataset 4242");
+    await expect(notice.getByRole("link", { name: "dataset 4242" })).toHaveAttribute("href", "/dataset/4242");
+    await expect(notice).toContainText("we will rerun it");
+    await expect(notice).toContainText("info@deadtrees.earth");
+    await expect(modal.locator(".ant-upload-list-item")).toHaveCount(0);
+    await expect(modal.getByTestId("contributor-upload-submit")).toBeDisabled();
+    expect(fingerprints[0]).toMatch(/^[0-9a-f]{64}$/);
+
+    // A dataset the contributor may not see blocks too, without being named.
+    existingDatasetId = null;
+    await input.setInputFiles(rgbGeoTiffFixture);
+    await expect(notice).toContainText("This file has already been uploaded to deadtrees.earth.");
+    await expect(notice.getByRole("link", { name: /dataset/ })).toHaveCount(0);
+    await expect(modal.locator(".ant-upload-list-item")).toHaveCount(0);
+    expect(uploadRequests).toBe(0);
+  });
+
   test("upload pre-checks reject inputs that cannot process and warn on risky ones", async ({ page }) => {
     await installAuthenticatedContributor(page);
     let uploadRequests = 0;

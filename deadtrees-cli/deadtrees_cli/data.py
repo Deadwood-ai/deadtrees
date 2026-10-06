@@ -25,7 +25,17 @@ from shared.models import (
 )
 from shared.labels import create_label_with_geometries
 from shared.processing_tasks import UPLOAD_TASK_TYPES
+from shared.upload_duplicates import DUPLICATE_UPLOAD_CODE, DuplicateUploadError, reject_duplicate_upload
 from shared.logger import logger
+
+
+def _raise_for_duplicate_upload(response: httpx.Response) -> None:
+	"""The API also rejects duplicates at finalisation, e.g. when another upload finished meanwhile."""
+	if response.status_code != 409:
+		return
+	detail = response.json().get('detail')
+	if isinstance(detail, dict) and detail.get('code') == DUPLICATE_UPLOAD_CODE:
+		raise DuplicateUploadError(detail.get('existing_dataset_id'))
 
 
 class DataCommands:
@@ -59,9 +69,14 @@ class DataCommands:
 		additional_information: Optional[str] = None,
 		citation_doi: Optional[str] = None,
 	):
-		"""Upload a dataset to the API"""
+		"""Upload a dataset to the API
+
+		Raises DuplicateUploadError, before any bytes are sent, when the file is
+		already on the platform.
+		"""
 		token = self._ensure_auth()
 		file_path = Path(file_path)
+		reject_duplicate_upload(file_path, token)
 
 		# Validate and convert enums
 		try:
@@ -143,6 +158,7 @@ class DataCommands:
 						data=form_data,
 						headers={'Authorization': f'Bearer {token}'},
 					)
+					_raise_for_duplicate_upload(response)
 					response.raise_for_status()
 					progress.update(len(chunk_data))
 
