@@ -25,6 +25,7 @@ _tables = {
 	'forest_cover_geometries': 'v2_forest_cover_geometries',
 	'label_objects': 'v1_label_objects',
 	'logs': 'v2_logs',
+	'processor_heartbeats': 'processor_heartbeats',
 	'raw_images': 'v2_raw_images',
 	'statuses': 'v2_statuses',
 	'queue': 'v2_queue',
@@ -392,6 +393,10 @@ class Settings(BaseSettings):
 	@property
 	def logs_table(self) -> str:
 		return self._tables['logs']
+
+	@property
+	def processor_heartbeats_table(self) -> str:
+		return self._tables['processor_heartbeats']
 
 	@property
 	def label_objects_table(self) -> str:

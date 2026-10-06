@@ -3,7 +3,7 @@
 -- how many tasks it started, finished and failed in the last 24 hours.
 -- Per-host history comes from processor log rows tagged with extra.worker_id and
 -- extra.event (task_started, task_completed, task_failed). GPU, disk and memory
--- live only on the hosts; a heartbeat table can join this function later.
+-- live only on the hosts; processor_heartbeats can carry them later.
 begin;
 set local lock_timeout = '5s';
 
@@ -23,6 +23,24 @@ alter table public.processor_hosts enable row level security;
 revoke all on public.processor_hosts from public,anon,authenticated;
 grant select on public.processor_hosts to analyst;
 create policy analyst_select on public.processor_hosts for select to analyst using (true);
+
+-- Each processor upserts its row about once a minute while it polls, so an
+-- idle host is told apart from an offline one.
+create table public.processor_heartbeats (
+  worker_id text primary key,
+  seen_at timestamptz not null,
+  backend_version text
+);
+comment on table public.processor_heartbeats is 'Latest poll of each processor worker; written by the processor about once a minute.';
+alter table public.processor_heartbeats enable row level security;
+revoke all on public.processor_heartbeats from public,anon,authenticated;
+grant select,insert,update on public.processor_heartbeats to authenticated;
+create policy "Processor writes its heartbeat" on public.processor_heartbeats
+  for all to authenticated
+  using ((auth.jwt() ->> 'email'::text) = 'processor@deadtrees.earth'::text)
+  with check ((auth.jwt() ->> 'email'::text) = 'processor@deadtrees.earth'::text);
+grant select on public.processor_heartbeats to analyst;
+create policy analyst_select on public.processor_heartbeats for select to analyst using (true);
 
 create function public.factory_processors() returns jsonb
 language plpgsql stable security definer set search_path='' set jit=off as $$
@@ -52,9 +70,11 @@ begin
   group by worker_id
  ), rows as (
   select w.worker_id,coalesce(h.name,w.worker_id) as name,c.claims,c.last_signal_at as claim_signal_at,
-   a.last_log_at,a.started_24h,a.completed_24h,a.failed_24h,a.last_failure
-  from (select worker_id from public.processor_hosts union select worker_id from claims union select worker_id from activity) w
+   b.seen_at as heartbeat_at,b.backend_version,a.last_log_at,a.started_24h,a.completed_24h,a.failed_24h,a.last_failure
+  from (select worker_id from public.processor_hosts union select worker_id from claims union select worker_id from activity
+   union select worker_id from public.processor_heartbeats where seen_at>now()-interval '7 days') w
   left join public.processor_hosts h on h.worker_id=w.worker_id
+  left join public.processor_heartbeats b on b.worker_id=w.worker_id
   left join claims c on c.worker_id=w.worker_id
   left join activity a on a.worker_id=w.worker_id
  )
@@ -63,15 +83,16 @@ begin
    'worker_id',worker_id,'name',name,
    'state',case when claims is not null and claim_signal_at>=now()-interval '1 hour' then 'working'
     when claims is not null then 'silent'
-    when last_log_at is not null then 'idle'
+    when heartbeat_at>=now()-interval '10 minutes' then 'idle'
     else 'unknown' end,
-   'claims',coalesce(claims,'[]'::jsonb),'last_signal_at',coalesce(claim_signal_at,last_log_at),
+   'claims',coalesce(claims,'[]'::jsonb),'last_signal_at',coalesce(claim_signal_at,greatest(heartbeat_at,last_log_at)),
+   'heartbeat_at',heartbeat_at,'backend_version',backend_version,
    'started_24h',coalesce(started_24h,0),'completed_24h',coalesce(completed_24h,0),'failed_24h',coalesce(failed_24h,0),
    'last_failure',last_failure)
    order by name) from rows),'[]'::jsonb),
   'coverage',jsonb_build_array(
    'Working means a held claim with a database signal in the last hour; silent means a held claim without one. A long stage can look silent; it does not prove a stuck worker.',
-   'Idle means no claim but a log line from this host in the last 24 hours. Unknown means neither: the host may be offline, or it runs a release from before hosts tagged their logs.',
+   'Idle means no claim and a heartbeat in the last 10 minutes; processors send one about once a minute while they poll. Unknown means neither: the host is offline, stuck outside a task, or runs a release from before heartbeats.',
    'Started, finished and failed counts and the last failure cover the last 24 hours of processor log rows tagged with the host; a log row that failed to write is missing from them. A crash found when a task is claimed counts against the host that found it, which may not be the host that crashed. GPU, disk and memory state live on the hosts and are not shown.'
   )) into result;
  return result;

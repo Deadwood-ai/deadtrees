@@ -46,6 +46,8 @@ def test_states_and_daily_counts_per_worker(db):
 	log(db, failed, 'test-server', 'task_started', hours_ago=6)
 	log(db, failed, 'test-server', 'task_failed', hours_ago=5, stage='cog_processing')
 	log(db, failed, 'test-server', 'task_failed', hours_ago=30, stage='odm_processing')
+	db.execute("INSERT INTO public.processor_heartbeats(worker_id,seen_at,backend_version) VALUES('test-server',now()-interval '1 minute','9.9.9')")
+	db.execute("INSERT INTO public.processor_heartbeats(worker_id,seen_at) VALUES('test-offline',now()-interval '1 hour')")
 	authenticate(db, operator)
 
 	rows = processors(db)
@@ -54,7 +56,8 @@ def test_states_and_daily_counts_per_worker(db):
 	assert (busy_worker['name'], busy_worker['state'], busy_worker['started_24h']) == ('test-busy', 'working', 1)
 	assert [c['dataset_id'] for c in busy_worker['claims']] == [busy]
 	server = rows['test-server']
-	assert server['state'] == 'idle'
+	assert (server['state'], server['backend_version']) == ('idle', '9.9.9')
+	assert rows['test-offline']['state'] == 'unknown'
 	assert (server['started_24h'], server['completed_24h'], server['failed_24h']) == (2, 1, 1)
 	assert server['last_failure']['dataset_id'] == failed
 	assert server['last_failure']['stage'] == 'cog_processing'
@@ -72,6 +75,12 @@ def test_silent_claims_and_unnamed_workers(db):
 
 	new = processors(db)['host-new123']
 	assert (new['name'], new['state']) == ('host-new123', 'silent')
+
+
+def test_only_the_processor_account_writes_heartbeats(db):
+	authenticate(db, user(db, operate=True))
+	with pytest.raises(psycopg.errors.InsufficientPrivilege), db.transaction():
+		db.execute("INSERT INTO public.processor_heartbeats(worker_id,seen_at) VALUES('forged',now())")
 
 
 def test_processors_require_operator(db):

@@ -166,8 +166,10 @@ export interface FactoryProcessor {
 	name: string;
 	state: FactoryProcessorState;
 	claims: FactoryProcessorClaim[];
-	/** Newest signal of a held claim, else the host's newest log line in the last 24 hours. */
+	/** Newest signal of a held claim, else the newer of the heartbeat and the last log line. */
 	last_signal_at: string | null;
+	/** Release the host reported with its latest heartbeat. */
+	backend_version: string | null;
 	started_24h: number | null;
 	completed_24h: number | null;
 	failed_24h: number | null;

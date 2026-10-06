@@ -10,8 +10,8 @@ import type { FactoryProcessor, FactoryProcessorState, FactoryProcessors as Fact
 const STATE_TAGS: Record<FactoryProcessorState, { tone: FactoryTone; label: string; help: string }> = {
 	working: { tone: "processing", label: "Working", help: "Holds a claim with a database signal in the last hour." },
 	silent: { tone: "warning", label: "Silent", help: "Holds a claim without a database signal for over an hour. A long stage looks the same." },
-	idle: { tone: "muted", label: "Idle", help: "No claim, but it wrote a log line in the last 24 hours." },
-	unknown: { tone: "warning", label: "Unknown", help: "No claim and no log line in the last 24 hours: offline, or running a release from before hosts tagged their logs." },
+	idle: { tone: "muted", label: "Idle", help: "No claim, and a heartbeat in the last 10 minutes." },
+	unknown: { tone: "warning", label: "Unknown", help: "No claim and no heartbeat in the last 10 minutes: offline, stuck outside a task, or running a release from before heartbeats." },
 };
 
 function ProcessorState({ state }: { state: FactoryProcessorState }) {
@@ -72,6 +72,7 @@ export default function FactoryProcessors({ data, isFetching, isError, error, on
 				<span className="flex flex-col leading-tight">
 					<span className="font-medium text-gray-900">{row.name}</span>
 					{row.name !== row.worker_id && <span className="font-mono text-[11px] text-gray-400">{row.worker_id}</span>}
+					{row.backend_version && <span className="text-[11px] text-gray-400">release {row.backend_version}</span>}
 				</span>
 			),
 		},
@@ -81,7 +82,7 @@ export default function FactoryProcessors({ data, isFetching, isError, error, on
 			title: "Last signal",
 			key: "signal",
 			width: 140,
-			render: (_, row) => <TimeCell iso={row.last_signal_at} now={now} emptyReason="No claim and no host-tagged log line in the last 24 hours." />,
+			render: (_, row) => <TimeCell iso={row.last_signal_at} now={now} emptyReason="No claim, heartbeat or host-tagged log line is recorded." />,
 		},
 		{
 			title: "Last 24 h",

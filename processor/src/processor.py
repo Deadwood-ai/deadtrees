@@ -1,6 +1,8 @@
 import shutil
 import signal
 import sys
+import time
+from datetime import datetime, timezone
 import docker
 import socket
 from pathlib import Path
@@ -8,6 +10,7 @@ from processor.src.process_geotiff import process_geotiff
 from processor.src.process_odm import process_odm
 from shared.models import QueueTask, TaskTypeEnum, StatusEnum
 from shared.settings import settings
+from shared.__version__ import __version__
 from shared.db import use_client, login, login_verified
 from shared.status import update_status
 from shared.processing_tasks import downstream_tasks_missing_geotiff, format_missing_geotiff_error
@@ -153,6 +156,27 @@ def _handle_graceful_shutdown(signum, frame):
 TASK_STARTED_EVENT = 'task_started'
 TASK_COMPLETED_EVENT = 'task_completed'
 TASK_FAILED_EVENT = 'task_failed'
+
+
+HEARTBEAT_INTERVAL_SECONDS = 60
+_last_heartbeat_at = 0.0
+
+
+def _record_heartbeat(token: str, worker_id: str) -> None:
+	"""Tell the Factory this host is alive, at most once a minute; never blocks processing."""
+	global _last_heartbeat_at
+	now = time.monotonic()
+	if now - _last_heartbeat_at < HEARTBEAT_INTERVAL_SECONDS:
+		return
+	try:
+		with use_client(token) as client:
+			client.table(settings.processor_heartbeats_table).upsert(
+				{'worker_id': worker_id, 'seen_at': datetime.now(timezone.utc).isoformat(), 'backend_version': __version__},
+				on_conflict='worker_id',
+			).execute()
+		_last_heartbeat_at = now
+	except Exception as e:
+		logger.warning(f'Could not record processor heartbeat: {e}')
 
 
 def _log_task_event(task: QueueTask, event: str, message: str, **extra) -> None:
@@ -774,6 +798,7 @@ def background_process() -> BackgroundProcessResult:
 
 	worker_id = get_worker_id()
 	set_process_log_fields(worker_id=worker_id)
+	_record_heartbeat(token, worker_id)
 	active_recovery_attempted = False
 
 	while True:

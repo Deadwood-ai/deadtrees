@@ -184,6 +184,14 @@ def reset_process_log_fields(monkeypatch):
 	monkeypatch.setattr(shared_logging, '_process_log_fields', {})
 
 
+@pytest.fixture(autouse=True)
+def skip_processor_heartbeat(monkeypatch):
+	"""background_process tests must not write heartbeats; heartbeat tests reset the clock."""
+	import processor.src.processor as processor_module
+
+	monkeypatch.setattr(processor_module, '_last_heartbeat_at', float('inf'))
+
+
 # @test_environment_only
 @pytest.fixture(autouse=True)
 def cleanup_storage(request):
