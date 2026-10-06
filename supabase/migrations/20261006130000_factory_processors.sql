@@ -24,6 +24,44 @@ revoke all on public.processor_hosts from public,anon,authenticated;
 grant select on public.processor_hosts to analyst;
 create policy analyst_select on public.processor_hosts for select to analyst using (true);
 
+-- v2_processor_claims (20261006100000) reads host names from processor_hosts
+-- instead of its own list, so a new host is added in one place.
+CREATE OR REPLACE VIEW public.v2_processor_claims
+WITH (security_invoker = true) AS
+SELECT
+    coalesce(host.name, q.claimed_by) AS processor,
+    q.dataset_id,
+    d.file_name AS dataset,
+    s.current_status AS stage,
+    s.has_error,
+    date_trunc('second', now() - q.claimed_at) AS running_for,
+    q.claimed_at,
+    date_trunc('second', q.claimed_at - q.created_at) AS waited_in_queue,
+    q.created_at AS queued_at,
+    q.priority,
+    q.task_types,
+    round(s.uploaded_input_bytes / 1048576.0) AS input_size_mb,
+    last_log.created_at AS last_log_at,
+    last_log.message AS last_log,
+    last_log.backend_version,
+    q.claimed_by AS worker_id,
+    q.id AS queue_id,
+    q.user_id
+FROM public.v2_queue q
+LEFT JOIN public.processor_hosts AS host ON host.worker_id = q.claimed_by
+LEFT JOIN public.v2_datasets d ON d.id = q.dataset_id
+LEFT JOIN public.v2_statuses s ON s.dataset_id = q.dataset_id
+LEFT JOIN LATERAL (
+    SELECT l.created_at, left(l.message, 300) AS message, l.backend_version
+    FROM public.v2_logs l
+    WHERE l.dataset_id = q.dataset_id
+      AND l.created_at >= q.claimed_at
+    ORDER BY l.created_at DESC
+    LIMIT 1
+) AS last_log ON true
+WHERE q.claimed_by IS NOT NULL
+ORDER BY q.claimed_at;
+
 -- Each processor upserts its row about once a minute while it polls, so an
 -- idle host is told apart from an offline one.
 create table public.processor_heartbeats (
