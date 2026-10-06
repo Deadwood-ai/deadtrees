@@ -35,6 +35,15 @@ rejected upload returns HTTP 400, its receipt stays `receiving`, and every
 identical retry returns the same HTTP 400. The client must fix the file and
 start again with a new upload ID.
 
+The same step rejects a file that is already on the platform: any non-archived
+dataset with the same fingerprint (`shared/hash.py`), whoever owns it. The
+response is HTTP 409 with `detail.code == "DUPLICATE_UPLOAD"`, a `message` for
+the contributor and `existing_dataset_id`, which is null when the caller may
+not see that dataset. Other 409s of this contract carry a string `detail`, so
+clients key on the code. Browser and CLI ask the database function
+`find_duplicate_upload` with the same fingerprint before sending any bytes;
+this step is the enforcement.
+
 Before database/file finalization, a durable `finalizing` receipt prevents a
 second attempt from repeating side effects. Normal successful finalization saves
 the response before acknowledging the client. The filesystem and database are

@@ -23,6 +23,7 @@ import PickerWithType from "./PickerWithType";
 import uploadOrtho, { UploadRejectedError } from "../../api/uploadOrtho";
 import { useData } from "../../hooks/useDataProvider";
 import addProcess from "../../api/addProcess";
+import { findDuplicateUpload } from "../../api/duplicateUpload";
 import VisibilityChoice from "../DatasetAccess/VisibilityChoice";
 import {
   detectUploadType,
@@ -112,6 +113,24 @@ const RAW_IMAGES_PROCESSING_STEPS = [
   ...GEOTIFF_PROCESSING_STEPS,
 ];
 
+const DuplicateUploadNotice = ({ datasetId }: { datasetId: number | null }) => (
+  <span data-testid="upload-duplicate-notice">
+    {datasetId === null ? (
+      "This file has already been uploaded to deadtrees.earth."
+    ) : (
+      <>
+        This file is already on deadtrees.earth as{" "}
+        <Link to={`/dataset/${datasetId}`} target="_blank" rel="noopener noreferrer">
+          dataset {datasetId}
+        </Link>
+        .
+      </>
+    )}{" "}
+    If that dataset failed processing, contact <a href="mailto:info@deadtrees.earth">info@deadtrees.earth</a> and we
+    will rerun it. If you believe this is a different file, contact us as well.
+  </span>
+);
+
 const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey }) => {
   const pickerTypeOptions = ["Year/Month/Day", "Year/Month", "Year"];
   const [form] = Form.useForm();
@@ -134,7 +153,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
     closeNotification,
   } = useUploadNotification(uploadKey, fileName);
 
-  const [uploadValidationError, setUploadValidationError] = useState<string | null>(null);
+  const [uploadValidationError, setUploadValidationError] = useState<React.ReactNode>(null);
   const [uploadValidationWarnings, setUploadValidationWarnings] = useState<string[]>([]);
   const { track } = useAnalytics("profile");
 
@@ -145,6 +164,14 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
       validateFileSize(file, uploadType);
       const warnings =
         uploadType === UploadType.RAW_IMAGES_ZIP ? await validateZipUpload(file) : await validateGeoTiffUpload(file);
+
+      const duplicate = await findDuplicateUpload(file);
+      if (duplicate) {
+        setUploadValidationError(<DuplicateUploadNotice datasetId={duplicate.datasetId} />);
+        setUploadValidationWarnings([]);
+        message.error("File could not be added. See the details below the file picker.");
+        return Upload.LIST_IGNORE;
+      }
 
       setUploadValidationError(null);
       setUploadValidationWarnings(warnings);

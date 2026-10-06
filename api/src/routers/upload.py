@@ -7,9 +7,11 @@ from fastapi.security import OAuth2PasswordBearer
 
 from shared.models import StatusEnum, LicenseEnum, PlatformEnum, DatasetAccessEnum
 from shared.db import verify_token
+from shared.hash import get_file_identifier
 from shared.settings import settings
 from shared.status import update_status
 from shared.logging import LogCategory, LogContext, UnifiedLogger, SupabaseHandler
+from shared.upload_duplicates import DuplicateUploadError, reject_duplicate_upload
 from shared.upload_validation import UnprocessableUploadError, ensure_georeferenced_geotiff, ensure_processable_zip
 from shared.zip_utils import (
 	ensure_supported_zip_compression,
@@ -116,7 +118,7 @@ def upload_chunk(
 		response = session.accept(chunk_index, file.file.read())
 		if response is not None:
 			return response
-		session.begin_finalization(validate=lambda path: validate_assembled_upload(upload_type, path))
+		session.begin_finalization(validate=lambda path: validate_assembled_upload(upload_type, path, token))
 		dataset = None
 		try:
 			# Calculate upload runtime
@@ -134,7 +136,12 @@ def upload_chunk(
 			)
 
 			# Create dataset entry
-			dataset = create_dataset_entry(user_id=user.id, token=token, **metadata)
+			dataset = create_dataset_entry(
+				user_id=user.id,
+				token=token,
+				upload_fingerprint=get_file_identifier(upload_target_path),
+				**metadata,
+			)
 
 			# Route to simplified processing based on upload type
 			if upload_type == UploadType.GEOTIFF:
@@ -194,8 +201,8 @@ def upload_chunk(
 			raise HTTPException(status_code=500, detail=str(e))
 
 
-def validate_assembled_upload(upload_type: UploadType, path: Path):
-	"""Reject unusable upload bytes before finalization; must stay side-effect free."""
+def validate_assembled_upload(upload_type: UploadType, path: Path, token: str):
+	"""Reject unusable or already uploaded bytes before finalization; must stay side-effect free."""
 	try:
 		if upload_type == UploadType.RAW_IMAGES_ZIP:
 			ensure_supported_zip_compression(path)
@@ -204,3 +211,7 @@ def validate_assembled_upload(upload_type: UploadType, path: Path):
 			ensure_georeferenced_geotiff(path)
 	except (UnsupportedZipCompressionError, InvalidZipArchiveError, UnprocessableUploadError) as e:
 		raise HTTPException(status_code=400, detail=str(e))
+	try:
+		reject_duplicate_upload(path, token)
+	except DuplicateUploadError as e:
+		raise HTTPException(status_code=409, detail=e.detail)
