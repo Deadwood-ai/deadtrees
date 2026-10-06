@@ -56,6 +56,38 @@ def test_find_open_cluster_issue_requires_exact_fingerprint_line_on_open_issue(m
 	assert linear_issues.find_open_cluster_issue('processor/failure/cog_processing')['identifier'] == 'DT-3'
 
 
+def test_find_open_cluster_issue_converges_on_the_oldest_duplicate(monkeypatch):
+	monkeypatch.setattr(linear_issues.settings, 'LINEAR_API_KEY', 'test-key')
+	line = 'fingerprint: processor/failure/cog_processing'
+	payload = _search_payload(
+		{'id': 'new', 'identifier': 'DT-9', 'description': line, 'createdAt': '2026-10-06T10:00:01Z', 'state': {'type': 'triage'}},
+		{'id': 'old', 'identifier': 'DT-8', 'description': line, 'createdAt': '2026-10-06T10:00:00Z', 'state': {'type': 'triage'}},
+	)
+	monkeypatch.setattr(linear_issues.requests, 'post', lambda *args, **kwargs: MockResponse(200, payload))
+
+	assert linear_issues.find_open_cluster_issue('processor/failure/cog_processing')['identifier'] == 'DT-8'
+
+
+def test_first_comment_on_a_new_cluster_issue_is_retried(monkeypatch, linear_enabled):
+	monkeypatch.setattr(linear_issues.time, 'sleep', lambda seconds: None)
+	comment_attempts = []
+
+	def mock_post(*args, json, **kwargs):
+		if 'searchIssues' in json['query']:
+			return MockResponse(200, _search_payload())
+		if 'issueCreate' in json['query']:
+			return MockResponse(200, {'data': {'issueCreate': {'success': True, 'issue': {'id': 'new', 'identifier': 'DT-9'}}}})
+		comment_attempts.append(json)
+		if len(comment_attempts) == 1:
+			return MockResponse(502, {})
+		return MockResponse(200, {'data': {'commentCreate': {'success': True}}})
+
+	monkeypatch.setattr(linear_issues.requests, 'post', mock_post)
+
+	assert linear_issues.report_processing_failure('token', 42, 'cog', 'boom') == 'DT-9'
+	assert len(comment_attempts) == 2
+
+
 def test_report_comments_on_existing_cluster_issue(monkeypatch, linear_enabled):
 	calls = []
 
@@ -95,6 +127,7 @@ def test_report_opens_medium_triage_cluster_issue_when_none_is_open(monkeypatch,
 
 
 def test_report_never_raises_when_linear_fails(monkeypatch, linear_enabled):
+	monkeypatch.setattr(linear_issues.time, 'sleep', lambda seconds: None)
 	monkeypatch.setattr(linear_issues.requests, 'post', lambda *args, **kwargs: MockResponse(500, {}))
 	assert linear_issues.report_processing_failure('token', 42, 'cog', 'boom') is None
 

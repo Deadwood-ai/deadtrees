@@ -7,6 +7,7 @@ recent logs.
 """
 
 import re
+import time
 import requests
 from typing import Optional
 from supabase import create_client
@@ -27,6 +28,8 @@ LINEAR_BUG_LABEL_ID = '3cd77898-47b3-488e-8509-e51da0cba52f'
 LINEAR_TRIAGE_STATE_ID = 'b4b9bac3-5698-4f17-b7f5-52818b031af1'
 LINEAR_PRIORITY_MEDIUM = 3
 CLOSED_STATE_TYPES = {'completed', 'canceled'}
+COMMENT_ATTEMPTS = 3
+COMMENT_RETRY_SECONDS = 2
 
 # Failure stages arrive under several names (ProcessingError task types, queue task
 # types, crash-detection stage names). Each maps to the crash-detection name in
@@ -219,11 +222,15 @@ def _linear_request(query: str, variables: dict, timeout: int = 15) -> dict:
 
 
 def find_open_cluster_issue(fingerprint: str) -> Optional[dict]:
-	"""Return the open issue whose description carries exactly this fingerprint line."""
+	"""Return the oldest open issue whose description carries exactly this fingerprint line.
+
+	Two hosts failing in the same stage at once can both open a cluster issue;
+	picking the oldest makes every later report converge on one of them.
+	"""
 	query = '''
 	query SearchIssues($term: String!) {
 		searchIssues(term: $term, first: 25) {
-			nodes { id identifier description state { type } }
+			nodes { id identifier description createdAt state { type } }
 		}
 	}
 	'''
@@ -231,12 +238,12 @@ def find_open_cluster_issue(fingerprint: str) -> Optional[dict]:
 	pattern = re.escape(fingerprint).replace('_', r'\\?_')
 	line = re.compile(rf'^fingerprint:\s*{pattern}\s*$', re.MULTILINE)
 	nodes = _linear_request(query, {'term': fingerprint}, timeout=10).get('searchIssues', {}).get('nodes', [])
-	for issue in nodes:
-		if (issue.get('state') or {}).get('type') in CLOSED_STATE_TYPES:
-			continue
-		if line.search(issue.get('description') or ''):
-			return issue
-	return None
+	matches = [
+		issue
+		for issue in nodes
+		if (issue.get('state') or {}).get('type') not in CLOSED_STATE_TYPES and line.search(issue.get('description') or '')
+	]
+	return min(matches, key=lambda issue: issue.get('createdAt') or '', default=None)
 
 
 def create_cluster_issue(stage: str) -> dict:
@@ -272,15 +279,24 @@ def create_cluster_issue(stage: str) -> dict:
 	return result['issue']
 
 
-def comment_on_issue(issue_id: str, body: str) -> None:
+def comment_on_issue(issue_id: str, body: str, attempts: int = COMMENT_ATTEMPTS) -> None:
+	"""Post a comment, retrying transient failures so a fresh cluster issue is not left empty."""
 	mutation = '''
 	mutation CreateComment($input: CommentCreateInput!) {
 		commentCreate(input: $input) { success }
 	}
 	'''
-	data = _linear_request(mutation, {'input': {'issueId': issue_id, 'body': body}})
-	if not (data.get('commentCreate') or {}).get('success'):
-		raise RuntimeError('Linear did not create the comment')
+	for attempt in range(1, attempts + 1):
+		try:
+			data = _linear_request(mutation, {'input': {'issueId': issue_id, 'body': body}})
+			if (data.get('commentCreate') or {}).get('success'):
+				return
+			error: Exception = RuntimeError('Linear did not create the comment')
+		except Exception as e:
+			error = e
+		if attempt == attempts:
+			raise error
+		time.sleep(COMMENT_RETRY_SECONDS * attempt)
 
 
 def build_issue_description(
