@@ -1,8 +1,9 @@
 """
-Linear issue creation for processing failures.
+Linear reporting for processing failures.
 
-Creates issues in Linear when dataset processing fails, with full context
-including dataset info, error message, user email, and recent logs.
+Each failure becomes a comment on one open cluster issue per pipeline stage,
+with full context including dataset info, error message, user email, and
+recent logs.
 """
 
 import re
@@ -24,7 +25,33 @@ logger.add_supabase_handler(SupabaseHandler())
 LINEAR_API_URL = 'https://api.linear.app/graphql'
 LINEAR_BUG_LABEL_ID = '3cd77898-47b3-488e-8509-e51da0cba52f'
 LINEAR_TRIAGE_STATE_ID = 'b4b9bac3-5698-4f17-b7f5-52818b031af1'
-LINEAR_PRIORITY_HIGH = 1
+LINEAR_PRIORITY_MEDIUM = 3
+CLOSED_STATE_TYPES = {'completed', 'canceled'}
+
+# Failure stages arrive under several names (ProcessingError task types, queue task
+# types, crash-detection stage names). Each maps to the crash-detection name in
+# processor.PIPELINE_STAGE_MAP, so one stage has one fingerprint. The Factory read
+# model (factory_failure_stage in SQL) applies the same mapping.
+STAGE_KEY_ALIASES = {
+	'odm': 'odm_processing',
+	'geotiff': 'ortho_processing',
+	'geotiff_dependency': 'ortho_processing',
+	'convert': 'ortho_processing',
+	'metadata': 'metadata_processing',
+	'cog': 'cog_processing',
+	'thumbnail': 'thumbnail_processing',
+	'deadwood': 'deadwood_segmentation',
+	'deadwood_v1': 'deadwood_segmentation',
+	'treecover': 'forest_cover_segmentation',
+	'treecover_v1': 'forest_cover_segmentation',
+	'treecover_segmentation': 'forest_cover_segmentation',
+	'deadwood_treecover_combined_v2': 'deadwood_treecover_combined_segmentation',
+	'aoi_v1': 'aoi_segmentation',
+	'embeddings_v1': 'embedding_processing',
+	'doy_estimation_v1': 'doy_estimation',
+	'georef_check_v1': 'georef_check',
+	'processing': 'unknown',
+}
 
 
 def get_stage_display_name(stage: str) -> str:
@@ -37,7 +64,17 @@ def get_stage_display_name(stage: str) -> str:
 		'deadwood_segmentation': 'Deadwood',
 		'treecover_segmentation': 'Tree Cover',
 		'deadwood_treecover_combined_segmentation': 'Combined Deadwood+Treecover',
+		'forest_cover_segmentation': 'Tree Cover',
+		'ortho_processing': 'GeoTIFF',
+		'metadata_processing': 'Metadata',
+		'cog_processing': 'COG',
+		'thumbnail_processing': 'Thumbnail',
+		'aoi_segmentation': 'AOI',
+		'embedding_processing': 'Embeddings',
+		'doy_estimation': 'Acquisition date',
+		'georef_check': 'Georeferencing check',
 		'processing': 'Processing',
+		'unknown': 'Unknown stage',
 	}
 	return legacy_mapping.get(stage, stage)
 
@@ -155,56 +192,92 @@ def get_recent_error_logs(token: str, dataset_id: int, limit: int = 10) -> list[
 		return []
 
 
-def check_existing_issue(dataset_id: int) -> bool:
-	"""Check if a Linear issue already exists for this dataset."""
-	if not settings.LINEAR_API_KEY:
-		return False
+def stage_key(stage: str | None) -> str:
+	"""The one canonical name of a failure stage (see STAGE_KEY_ALIASES)."""
+	key = (stage or '').strip()
+	return STAGE_KEY_ALIASES.get(key, key) or 'unknown'
 
+
+def failure_fingerprint(stage: str | None) -> str:
+	"""The fingerprint naming the Linear cluster issue for failures in one pipeline stage."""
+	return f'processor/failure/{stage_key(stage)}'
+
+
+def _linear_request(query: str, variables: dict, timeout: int = 15) -> dict:
+	response = requests.post(
+		LINEAR_API_URL,
+		headers={'Authorization': settings.LINEAR_API_KEY, 'Content-Type': 'application/json'},
+		json={'query': query, 'variables': variables},
+		timeout=timeout,
+	)
+	if response.status_code != 200:
+		raise RuntimeError(f'Linear API request failed with status {response.status_code}: {response.text}')
+	data = response.json()
+	if data.get('errors'):
+		raise RuntimeError(f'Linear API returned errors: {data["errors"]}')
+	return data.get('data') or {}
+
+
+def find_open_cluster_issue(fingerprint: str) -> Optional[dict]:
+	"""Return the open issue whose description carries exactly this fingerprint line."""
 	query = '''
 	query SearchIssues($term: String!) {
 		searchIssues(term: $term, first: 25) {
-			nodes {
-				id
-				identifier
-				title
-				description
-			}
+			nodes { id identifier description state { type } }
 		}
 	}
 	'''
+	line = re.compile(rf'^fingerprint:\s*{re.escape(fingerprint)}\s*$', re.MULTILINE)
+	nodes = _linear_request(query, {'term': fingerprint}, timeout=10).get('searchIssues', {}).get('nodes', [])
+	for issue in nodes:
+		if (issue.get('state') or {}).get('type') in CLOSED_STATE_TYPES:
+			continue
+		if line.search(issue.get('description') or ''):
+			return issue
+	return None
 
-	query_text = f'Dataset ID: {dataset_id}'
-	exact_dataset_id_pattern = re.compile(rf'Dataset ID:\s*{dataset_id}\b')
 
-	try:
-		response = requests.post(
-			LINEAR_API_URL,
-			headers={
-				'Authorization': settings.LINEAR_API_KEY,
-				'Content-Type': 'application/json',
-			},
-			json={
-				'query': query,
-				'variables': {'term': query_text},
-			},
-			timeout=10,
-		)
+def create_cluster_issue(fingerprint: str, stage: str) -> dict:
+	"""Open the cluster issue that collects every failure in one stage."""
+	mutation = '''
+	mutation CreateIssue($input: IssueCreateInput!) {
+		issueCreate(input: $input) { success issue { id identifier url } }
+	}
+	'''
+	description = (
+		f'Cluster issue for processing failures in the {get_stage_display_name(stage)} stage. '
+		'The processor comments each new failure here. Group known causes as child issues.\n\n'
+		'The Factory attention list links here by this fingerprint.\n\n'
+		f'fingerprint: {fingerprint}'
+	)
+	data = _linear_request(
+		mutation,
+		{
+			'input': {
+				'teamId': settings.LINEAR_TEAM_ID,
+				'title': f'Processing failures: {get_stage_display_name(stage)}',
+				'description': description,
+				'priority': LINEAR_PRIORITY_MEDIUM,
+				'stateId': LINEAR_TRIAGE_STATE_ID,
+				'labelIds': [LINEAR_BUG_LABEL_ID],
+			}
+		},
+	)
+	result = data.get('issueCreate') or {}
+	if not result.get('success'):
+		raise RuntimeError('Linear did not create the cluster issue')
+	return result['issue']
 
-		if response.status_code == 200:
-			data = response.json()
-			nodes = data.get('data', {}).get('searchIssues', {}).get('nodes', [])
-			for issue in nodes:
-				title = issue.get('title') or ''
-				description = issue.get('description') or ''
-				search_text = f'{title}\n{description}'
-				if exact_dataset_id_pattern.search(search_text):
-					logger.info(f'Found existing Linear issue for dataset {dataset_id}: {issue.get("identifier")}')
-					return True
 
-		return False
-	except Exception as e:
-		logger.warning(f'Failed to check for existing Linear issue: {e}')
-		return False
+def comment_on_issue(issue_id: str, body: str) -> None:
+	mutation = '''
+	mutation CreateComment($input: CommentCreateInput!) {
+		commentCreate(input: $input) { success }
+	}
+	'''
+	data = _linear_request(mutation, {'input': {'issueId': issue_id, 'body': body}})
+	if not (data.get('commentCreate') or {}).get('success'):
+		raise RuntimeError('Linear did not create the comment')
 
 
 def build_issue_description(
@@ -280,133 +353,49 @@ def build_issue_description(
 ''')
 
 
-def create_processing_failure_issue(
+def report_processing_failure(
 	token: str,
 	dataset_id: int,
 	stage: str,
 	error_message: str,
 ) -> Optional[str]:
 	"""
-	Create a Linear issue for a processing failure.
+	Record a processing failure on the open Linear cluster issue for its stage.
 
-	Args:
-		token: Supabase auth token for database queries
-		dataset_id: The dataset that failed
-		stage: The processing stage that failed (e.g., 'cog', 'odm_processing')
-		error_message: The error message
+	One issue collects every failure in a stage, found by its fingerprint line, and
+	each failure is a comment on it. A new cluster issue is opened at Medium priority
+	in Triage only when no open one exists. Never raises: Linear must not block
+	processing.
 
-	Returns:
-		The Linear issue identifier (e.g., 'DT-123') if created, None otherwise
+	Returns the cluster issue identifier (e.g., 'DT-123'), or None when nothing was posted.
 	"""
-	# Check if Linear integration is enabled
 	if not settings.LINEAR_ENABLED:
-		logger.debug('Linear integration disabled, skipping issue creation')
+		logger.debug('Linear integration disabled, skipping failure report')
 		return None
 
 	if not settings.LINEAR_API_KEY:
-		logger.warning('LINEAR_API_KEY not set, skipping issue creation')
+		logger.warning('LINEAR_API_KEY not set, skipping failure report')
 		return None
 
+	fingerprint = failure_fingerprint(stage)
 	try:
-		# Log the attempt
-		logger.info(
-			f'Attempting to create Linear issue for dataset {dataset_id} (stage: {stage})',
-			LogContext(category=LogCategory.STATUS, dataset_id=dataset_id, token=token),
-		)
-
-		# Check for existing issue (duplicate detection by dataset_id)
-		if check_existing_issue(dataset_id):
-			logger.info(
-				f'Skipping issue creation - issue already exists for dataset {dataset_id}',
-				LogContext(category=LogCategory.STATUS, dataset_id=dataset_id, token=token),
-			)
-			return None
-
-		# Get dataset context (includes file info, user, ortho metadata)
-		context = get_dataset_context(token, dataset_id)
-		file_name = context.get('file_name', f'Dataset {dataset_id}')
-
-		# Get recent error logs
-		logs = get_recent_error_logs(token, dataset_id)
-
-		# Build issue title and description
-		stage_display = get_stage_display_name(stage)
-		title = f'[Processing Failure] {file_name} - {stage_display} failed (Dataset ID: {dataset_id})'
-		description = build_issue_description(
+		issue = find_open_cluster_issue(fingerprint) or create_cluster_issue(fingerprint, stage_key(stage))
+		body = build_issue_description(
 			dataset_id=dataset_id,
 			stage=stage,
 			error_message=error_message,
-			context=context,
-			logs=logs,
+			context=get_dataset_context(token, dataset_id),
+			logs=get_recent_error_logs(token, dataset_id),
 		)
-
-		# Create issue via Linear GraphQL API
-		mutation = '''
-		mutation CreateIssue($input: IssueCreateInput!) {
-			issueCreate(input: $input) {
-				success
-				issue {
-					id
-					identifier
-					url
-				}
-			}
-		}
-		'''
-
-		response = requests.post(
-			LINEAR_API_URL,
-			headers={
-				'Authorization': settings.LINEAR_API_KEY,
-				'Content-Type': 'application/json',
-			},
-			json={
-				'query': mutation,
-				'variables': {
-					'input': {
-						'teamId': settings.LINEAR_TEAM_ID,
-						'title': title,
-						'description': description,
-						'priority': LINEAR_PRIORITY_HIGH,
-						'stateId': LINEAR_TRIAGE_STATE_ID,
-						'labelIds': [LINEAR_BUG_LABEL_ID],
-					}
-				},
-			},
-			timeout=15,
+		comment_on_issue(issue['id'], body)
+		logger.info(
+			f'Reported dataset {dataset_id} failure on Linear {issue.get("identifier")} ({fingerprint})',
+			LogContext(category=LogCategory.STATUS, dataset_id=dataset_id, token=token),
 		)
-
-		if response.status_code == 200:
-			data = response.json()
-			issue_data = data.get('data', {}).get('issueCreate', {})
-
-			if issue_data.get('success'):
-				issue = issue_data.get('issue', {})
-				identifier = issue.get('identifier', 'Unknown')
-				url = issue.get('url', '')
-				logger.info(
-					f'Created Linear issue {identifier} for dataset {dataset_id}: {url}',
-					LogContext(category=LogCategory.STATUS, dataset_id=dataset_id, token=token),
-				)
-				return identifier
-			else:
-				errors = data.get('errors', [])
-				logger.error(
-					f'Linear issue creation failed: {errors}',
-					LogContext(category=LogCategory.STATUS, dataset_id=dataset_id, token=token),
-				)
-				return None
-		else:
-			logger.error(
-				f'Linear API request failed with status {response.status_code}: {response.text}',
-				LogContext(category=LogCategory.STATUS, dataset_id=dataset_id, token=token),
-			)
-			return None
-
+		return issue.get('identifier')
 	except Exception as e:
-		# Fail gracefully - never block processing
 		logger.error(
-			f'Failed to create Linear issue for dataset {dataset_id}: {e}',
+			f'Failed to report dataset {dataset_id} failure to Linear: {e}',
 			LogContext(category=LogCategory.STATUS, dataset_id=dataset_id, token=token),
 		)
 		return None

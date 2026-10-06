@@ -20,7 +20,7 @@ def test_overview_and_explorer_share_attention_order_and_waiting_totals(db):
 	operations = db.execute('SELECT public.factory_operations()').fetchone()[0]
 	explorer = page(db, dict(attention=True,sort='attention'))
 	assert operations['attention_total'] == explorer['total']
-	assert [r['dataset_id'] for r in operations['attention']] == [r['dataset_id'] for r in explorer['items'][:10]]
+	assert sum(g['count'] for g in operations['attention_groups']) == explorer['total']
 	items = page(db, dict(ids=[failed,uncertain],sort='attention'))['items']
 	assert [r['dataset_id'] for r in items] == [failed,uncertain]
 	assert items[0]['attention_reason'] == 'failed'
@@ -62,6 +62,52 @@ def test_overdue_uses_end_to_end_qualified_upload_and_silence_is_last(db):
 	result=page(db,dict(ids=[overdue,large,zip_row,silent],attention=True,sort='attention'))['items']
 	assert [r['dataset_id'] for r in result] == [overdue,silent]
 	assert [r['attention_reason'] for r in result] == ['overdue','silent']
+
+
+def test_team_uploads_wait_instead_of_becoming_overdue(db):
+	operator = user(db, operate=True)
+	team = user(db, audit=True)
+	external = upload(db, operator, size=100)
+	backfill = upload(db, team, size=100)
+	for row in [external, backfill]:
+		db.execute("UPDATE public.factory_submissions SET uploaded_at=now()-interval '3 hours' WHERE dataset_id=%s", (row,))
+		db.execute('INSERT INTO public.v2_queue(dataset_id,user_id) VALUES(%s,%s)', (row, operator))
+	authenticate(db, operator)
+	result = page(db, dict(ids=[external, backfill], attention=True))['items']
+	assert [r['dataset_id'] for r in result] == [external]
+	operations = db.execute('SELECT public.factory_operations()').fetchone()[0]
+	assert operations['team_waiting'] >= 1
+	assert backfill not in [i for g in operations['attention_groups'] for i in g['dataset_ids']]
+
+
+def test_failures_group_by_stage_and_error_class(db):
+	owner = user(db, operate=True)
+	rows = {
+		'odm_a': (None, 'ODM processing failed with exit code 1. stdout: tail A'),
+		'odm_b': (None, 'odm_processing processing failed: ODM processing failed with exit code 1. stdout: tail B'),
+		'cog': ('cog', 'cog processing failed: out of memory'),
+		'legacy': (None, 'geotiff processing failed: convert processing failed: File has no coordinate system'),
+	}
+	ids = {}
+	for key, (stage, message) in rows.items():
+		ids[key] = upload(db, owner)
+		db.execute(
+			'UPDATE public.v2_statuses SET has_error=true,error_stage=%s,error_message=%s WHERE dataset_id=%s',
+			(stage, message, ids[key]),
+		)
+	authenticate(db, owner)
+	ours = set(ids.values())
+	groups = {
+		(g['stage'], g['kind']): set(g['dataset_ids']) & ours
+		for g in db.execute('SELECT public.factory_operations()').fetchone()[0]['attention_groups']
+		if g['reason'] == 'failed'
+	}
+	groups = {key: members for key, members in groups.items() if members}
+	assert groups == {
+		('odm_processing', 'ODM processing failed with exit code 1'): {ids['odm_a'], ids['odm_b']},
+		('cog_processing', 'out of memory'): {ids['cog']},
+		('ortho_processing', 'File has no coordinate system'): {ids['legacy']},
+	}
 
 
 def test_operations_and_private_attention_view_require_operator(db):

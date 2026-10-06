@@ -3,9 +3,9 @@ import type { ColumnsType } from "antd/es/table";
 import { Link } from "react-router-dom";
 import { stageLabel } from "../DatasetStatus/status";
 import { factoryDatasetsPath } from "./factoryFilters";
-import { ATTENTION_DESCRIPTIONS, ATTENTION_SINCE_LABELS, attentionLabel, attentionTone, truncate, type FactoryTone } from "./factoryFormat";
-import { EmptyNote, FactoryError, FactoryStateTag, SectionCard, TimeCell, Unknown } from "./FactoryPrimitives";
-import type { FactoryOperations, FactoryRow } from "./factoryTypes";
+import { ATTENTION_DESCRIPTIONS, ATTENTION_SINCE_LABELS, attentionLabel, attentionTone, linearFailureSearchUrl, stateLabel, type FactoryTone } from "./factoryFormat";
+import { EmptyNote, FactoryError, SectionCard, TimeCell } from "./FactoryPrimitives";
+import type { FactoryAttentionGroup, FactoryOperations, FactoryRow } from "./factoryTypes";
 
 const { Text } = Typography;
 
@@ -47,81 +47,96 @@ type FactoryAttentionListProps = {
 	now: number;
 };
 
-/** The ranked answer to "what needs care": the server orders by reason severity, then oldest known time. */
+const groupKey = (group: FactoryAttentionGroup) => `${group.reason}|${group.stage ?? ""}|${group.kind ?? ""}`;
+
+function causeLabel(group: FactoryAttentionGroup): string {
+	if (!group.stage) return ATTENTION_DESCRIPTIONS[group.reason] ?? attentionLabel(group.reason);
+	const stage = stageLabel(group.stage) ?? group.stage;
+	return `${stage.charAt(0).toUpperCase()}${stage.slice(1)}`;
+}
+
+function GroupDatasets({ group, now }: { group: FactoryAttentionGroup; now: number }) {
+	return (
+		<ul className="m-0 list-none space-y-1 p-0" data-testid="attention-group-samples">
+			{group.samples.map((sample) => (
+				<li key={sample.dataset_id} className="flex flex-wrap items-baseline gap-x-3 text-xs">
+					<Link to={`/factory/datasets/${sample.dataset_id}`} state={{ factoryReturnTo: "/factory/operations" }} className="font-mono font-medium">
+						#{sample.dataset_id}
+					</Link>
+					<span className="max-w-[28rem] truncate text-gray-600" title={sample.file_name ?? undefined}>
+						{sample.file_name || "no file name"}
+					</span>
+					<span className="text-gray-500">{stateLabel(sample.state)}</span>
+					<TimeCell iso={sample.attention_since} now={now} emptyReason="No timestamp is tracked for this reason." />
+				</li>
+			))}
+			{group.count > group.samples.length && (
+				<li className="text-xs text-gray-500">
+					and {group.count - group.samples.length} more.{" "}
+					<Link to={factoryDatasetsPath({ ids: group.dataset_ids, sort: "attention" })}>Open the group in the explorer →</Link>
+				</li>
+			)}
+		</ul>
+	);
+}
+
+/**
+ * What needs a person, grouped by reason and, for failures, by stage and error
+ * class, so one fix or one Linear issue covers a whole row. Team backfill that
+ * is only waiting is counted separately, not listed.
+ */
 export default function FactoryAttentionList({ operations, isLoading, error, onRetry, now }: FactoryAttentionListProps) {
 	const allPath = factoryDatasetsPath({ attention: true, sort: "attention" });
-	const columns: ColumnsType<FactoryRow> = [
+	const columns: ColumnsType<FactoryAttentionGroup> = [
+		{ title: "Reason", key: "reason", width: 140, render: (_, group) => <AttentionReasonTag reason={group.reason} /> },
 		{
-			title: "#",
-			dataIndex: "attention_rank",
-			key: "rank",
-			width: 44,
-			render: (_value, _row, index) => <span className="text-xs text-gray-400">{index + 1}</span>,
-		},
-		{
-			title: "Dataset",
-			dataIndex: "dataset_id",
-			key: "dataset_id",
-			width: 170,
-			render: (value: number, row) => (
+			title: "Cause",
+			key: "cause",
+			render: (_, group) => (
 				<span className="flex flex-col leading-tight">
-					<Link to={`/factory/datasets/${value}`} state={{ factoryReturnTo: "/factory/operations" }} className="font-mono font-medium">
-						#{value}
-					</Link>
-					<span className="truncate text-xs text-gray-500" title={row.file_name ?? undefined}>
-						{row.file_name || "no file name"}
+					<span className="font-medium text-gray-800" data-testid="attention-group-cause">
+						{causeLabel(group)}
 					</span>
-				</span>
-			),
-		},
-		{ title: "Reason", key: "reason", width: 140, render: (_, row) => <AttentionReasonTag reason={row.attention_reason} /> },
-		{ title: "Since", key: "since", width: 150, render: (_, row) => <AttentionSince row={row} now={now} /> },
-		{
-			title: "Contributor",
-			key: "contributor",
-			width: 200,
-			ellipsis: true,
-			responsive: ["md"],
-			render: (_, row) => row.user_email || (row.user_id ? <span className="font-mono text-xs">{row.user_id}</span> : <Unknown />),
-		},
-		{
-			title: "State · stage",
-			key: "state",
-			width: 220,
-			render: (_, row) => (
-				<span className="flex flex-wrap items-center gap-1">
-					<FactoryStateTag state={row.state} />
-					{row.stage && (
-						<Tooltip title={row.stage}>
-							<span className="text-xs text-gray-600">{stageLabel(row.stage) ?? row.stage}</span>
+					{group.kind && (
+						<Tooltip title={group.kind}>
+							<span className="max-w-[30rem] truncate text-xs text-red-700">{group.kind}</span>
 						</Tooltip>
 					)}
 				</span>
 			),
 		},
 		{
-			title: "Worker · last DB signal",
-			key: "worker",
-			width: 200,
-			responsive: ["lg"],
-			render: (_, row) => (
+			title: "Datasets",
+			key: "count",
+			width: 110,
+			align: "right",
+			render: (_, group) => (
+				<Link to={factoryDatasetsPath({ ids: group.dataset_ids, sort: "attention" })} className="font-mono font-medium" data-testid="attention-group-count">
+					{group.count.toLocaleString()}
+				</Link>
+			),
+		},
+		{ title: "Contributors", key: "contributors", width: 110, align: "right", responsive: ["md"], render: (_, group) => group.contributors ?? "—" },
+		{
+			title: "Oldest",
+			key: "oldest",
+			width: 150,
+			render: (_, group) => (
 				<span className="flex flex-col leading-tight">
-					<span className="font-mono text-xs">{row.worker_id || <span className="font-sans text-gray-400">no claim</span>}</span>
-					<TimeCell iso={row.last_signal_at} now={now} emptyReason="No status update, log line or claim time is recorded." />
+					<TimeCell iso={group.oldest_since} now={now} emptyReason="No timestamp is tracked for this reason; the duration is not known." />
+					<span className="text-[11px] text-gray-400">{ATTENTION_SINCE_LABELS[group.reason]}</span>
 				</span>
 			),
 		},
 		{
-			title: "Error",
-			key: "error",
-			width: 260,
-			ellipsis: true,
-			responsive: ["xl"],
-			render: (_, row) =>
-				row.has_error ? (
-					<Tooltip title={row.error_message || "error flag set without a message"}>
-						<span className="block truncate text-xs text-red-700">{truncate(row.error_message || "error flag set without a message", 70)}</span>
-					</Tooltip>
+			title: "Linear",
+			key: "linear",
+			width: 110,
+			render: (_, group) =>
+				group.stage ? (
+					<a href={linearFailureSearchUrl(group.stage)} target="_blank" rel="noreferrer" className="text-xs" data-testid="attention-group-linear">
+						Stage issue ↗
+					</a>
 				) : (
 					<span className="text-gray-300">—</span>
 				),
@@ -130,6 +145,7 @@ export default function FactoryAttentionList({ operations, isLoading, error, onR
 
 	const count = operations?.attention_total;
 	const contributors = operations?.attention_contributors;
+	const teamWaiting = operations?.team_waiting;
 
 	return (
 		<SectionCard
@@ -147,16 +163,33 @@ export default function FactoryAttentionList({ operations, isLoading, error, onR
 				<FactoryError error={error} onRetry={onRetry} title="Could not load the attention list" />
 			) : isLoading || !operations ? (
 				<Skeleton active paragraph={{ rows: 4 }} />
-			) : operations.attention.length === 0 ? (
-				<EmptyNote>Nothing needs attention right now by these reasons. Waiting work and running claims are listed below.</EmptyNote>
 			) : (
 				<>
 					<Text type="secondary" className="mb-2 block text-xs" data-testid="factory-attention-summary">
 						{typeof count === "number" ? `${count.toLocaleString()} dataset${count === 1 ? "" : "s"}` : "Unknown total"}
-						{contributors !== null && contributors !== undefined && ` across ${contributors} contributor${contributors === 1 ? "" : "s"}`}. Ranked by reason,
-						then by the oldest known time. Showing the top {operations.attention.length}.
+						{contributors !== null && contributors !== undefined && ` across ${contributors} contributor${contributors === 1 ? "" : "s"}`}, in{" "}
+						{operations.attention_groups.length} group{operations.attention_groups.length === 1 ? "" : "s"}. Failures are grouped by stage and error; each stage has
+						one Linear issue.
+						{typeof teamWaiting === "number" && teamWaiting > 0 && (
+							<span data-testid="factory-attention-team-waiting">
+								{" "}
+								{teamWaiting.toLocaleString()} team upload{teamWaiting === 1 ? " is" : "s are"} waiting in the queue and not counted here.
+							</span>
+						)}
 					</Text>
-					<Table size="small" pagination={false} dataSource={operations.attention} columns={columns} rowKey="dataset_id" scroll={{ x: 1180 }} />
+					{operations.attention_groups.length === 0 ? (
+						<EmptyNote>Nothing needs attention right now by these reasons. Waiting work and running claims are listed below.</EmptyNote>
+					) : (
+						<Table
+							size="small"
+							pagination={false}
+							dataSource={operations.attention_groups}
+							columns={columns}
+							rowKey={groupKey}
+							expandable={{ expandedRowRender: (group) => <GroupDatasets group={group} now={now} /> }}
+							scroll={{ x: 900 }}
+						/>
+					)}
 				</>
 			)}
 		</SectionCard>

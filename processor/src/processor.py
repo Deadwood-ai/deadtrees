@@ -27,7 +27,7 @@ from .process_doy_estimation import process_doy_estimation
 from .process_georef_check import process_georef_check
 from .process_metadata import process_metadata
 from .exceptions import AuthenticationError, ProcessingError
-from .utils.linear_issues import create_processing_failure_issue
+from .utils.linear_issues import report_processing_failure
 from .utils.drain_control import (
 	BackgroundProcessResult,
 	acknowledge_drain_request,
@@ -345,7 +345,7 @@ def _finalize_failure(token: str, task: QueueTask, stage: str | None, message: s
 	)
 
 	try:
-		create_processing_failure_issue(
+		report_processing_failure(
 			token=token,
 			dataset_id=task.dataset_id,
 			stage=stage or 'unknown',

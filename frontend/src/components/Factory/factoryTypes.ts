@@ -369,11 +369,37 @@ export interface FactoryWaitingRow {
 	filters: Record<string, unknown> | null;
 }
 
+/** A few datasets shown inside an attention group. */
+export interface FactoryAttentionSample {
+	dataset_id: number;
+	file_name: string | null;
+	state: FactoryState | string | null;
+	attention_since: string | null;
+}
+
+/** Datasets that need attention for one reason and, for failures, one stage and error class. */
+export interface FactoryAttentionGroup {
+	reason: FactoryAttentionReason | string;
+	rank: number | null;
+	/** Canonical failure stage; also names the Linear cluster issue (processor/failure/<stage>). */
+	stage: string | null;
+	/** Short error class with numbers masked. */
+	kind: string | null;
+	count: number;
+	contributors: number | null;
+	oldest_since: string | null;
+	/** Up to 200 dataset ids, oldest first, for opening the group in the explorer. */
+	dataset_ids: number[];
+	samples: FactoryAttentionSample[];
+}
+
 export interface FactoryOperations {
 	as_of: string | null;
 	attention_total: number | null;
 	attention_contributors: number | null;
-	attention: FactoryRow[];
+	attention_groups: FactoryAttentionGroup[];
+	/** Team uploads still queued or running: waiting work, never counted as attention. */
+	team_waiting: number | null;
 	waiting: FactoryWaitingRow[];
 	coverage: string[];
 }

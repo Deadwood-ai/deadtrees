@@ -125,7 +125,7 @@ export const ATTENTION_LABELS: Record<string, string> = {
 export const ATTENTION_DESCRIPTIONS: Record<string, string> = {
 	failed: "A confirmed error with no active claim.",
 	uncertain: "Status is not idle, but no queue row exists.",
-	overdue: "Upload-to-result wait exceeds the documented bound for a tracked GeoTIFF under 1 GiB.",
+	overdue: "An external contributor's GeoTIFF under 1 GiB has waited longer than two hours for its first result.",
 	delivery: "A notification failed or is overdue.",
 	report: "A contributor report is still open.",
 	silent: "Claimed, but no database signal for over an hour. A long stage looks the same; this is not proof it is stuck.",
@@ -140,6 +140,13 @@ export const ATTENTION_SINCE_LABELS: Record<string, string> = {
 	report: "reported",
 	silent: "last DB signal",
 };
+
+const LINEAR_SEARCH_URL = "https://linear.app/geosense-ufr/search?q=";
+
+/** The Linear search for the cluster issue the processor files for failures in this stage. */
+export function linearFailureSearchUrl(stage: string): string {
+	return `${LINEAR_SEARCH_URL}${encodeURIComponent(`processor/failure/${stage}`)}`;
+}
 
 export function attentionLabel(reason: string | null | undefined): string {
 	if (!reason) return UNKNOWN_LABEL;

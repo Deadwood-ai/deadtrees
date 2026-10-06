@@ -43,6 +43,8 @@ const stages: Record<string, string> = {
   deadwood_treecover_combined_v2: "combined AI analysis",
   aoi_segmentation: "area selection",
   embedding_processing: "search indexing",
+  doy_estimation: "acquisition date estimation",
+  georef_check: "georeferencing check",
 };
 
 export function stageLabel(stage: string | null | undefined): string | undefined {

@@ -208,7 +208,7 @@ def test_process_task_signs_in_fresh_for_failure_bookkeeping(monkeypatch):
 		'update_status',
 		lambda token, **kwargs: status_updates.append((token, kwargs)),
 	)
-	monkeypatch.setattr(processor_module, 'create_processing_failure_issue', lambda **kwargs: None)
+	monkeypatch.setattr(processor_module, 'report_processing_failure', lambda **kwargs: None)
 	monkeypatch.setattr(processor_module, '_notify_processing_result_safely', lambda *args, **kwargs: None)
 	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'bookkeeping-token')
 	monkeypatch.setattr(
