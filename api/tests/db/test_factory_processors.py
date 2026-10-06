@@ -24,31 +24,40 @@ def processors(db):
 	return {p['worker_id']: p for p in result['processors']}
 
 
-def test_known_hosts_get_names_states_and_daily_counts(db):
+def test_known_hosts_are_named(db):
+	authenticate(db, user(db, operate=True))
+	names = {worker: row['name'] for worker, row in processors(db).items()}
+	assert names['host-f9760a054cb8'] == 'processing-server'
+	assert names['host-bb400fd18e59'] == 'helicon'
+	assert names['host-56916e6e7ab8'] == 'deepl1'
+
+
+def test_states_and_daily_counts_per_worker(db):
+	# Unregistered worker IDs keep the counts independent of other local activity.
 	operator = user(db, operate=True)
 	busy, done, failed = dataset(db, operator), dataset(db, operator), dataset(db, operator)
 	db.execute(
-		"INSERT INTO public.v2_queue(dataset_id,user_id,is_processing,claimed_by,claimed_at) VALUES(%s,%s,true,'host-bb400fd18e59',now())",
+		"INSERT INTO public.v2_queue(dataset_id,user_id,is_processing,claimed_by,claimed_at) VALUES(%s,%s,true,'test-busy',now())",
 		(busy, operator),
 	)
-	log(db, busy, 'host-bb400fd18e59', 'task_started')
-	log(db, done, 'host-f9760a054cb8', 'task_started', hours_ago=3)
-	log(db, done, 'host-f9760a054cb8', 'task_completed', hours_ago=2)
-	log(db, failed, 'host-f9760a054cb8', 'task_started', hours_ago=30)
-	log(db, failed, 'host-f9760a054cb8', 'task_failed', hours_ago=29, stage='cog_processing')
+	log(db, busy, 'test-busy', 'task_started')
+	log(db, done, 'test-server', 'task_started', hours_ago=3)
+	log(db, done, 'test-server', 'task_completed', hours_ago=2)
+	log(db, failed, 'test-server', 'task_started', hours_ago=6)
+	log(db, failed, 'test-server', 'task_failed', hours_ago=5, stage='cog_processing')
+	log(db, failed, 'test-server', 'task_failed', hours_ago=30, stage='odm_processing')
 	authenticate(db, operator)
 
 	rows = processors(db)
 
-	helicon = rows['host-bb400fd18e59']
-	assert (helicon['name'], helicon['state'], helicon['started_24h']) == ('helicon', 'working', 1)
-	assert [c['dataset_id'] for c in helicon['claims']] == [busy]
-	server = rows['host-f9760a054cb8']
-	assert (server['name'], server['state']) == ('processing-server', 'idle')
-	assert (server['started_24h'], server['completed_24h'], server['failed_24h']) == (1, 1, 0)
+	busy_worker = rows['test-busy']
+	assert (busy_worker['name'], busy_worker['state'], busy_worker['started_24h']) == ('test-busy', 'working', 1)
+	assert [c['dataset_id'] for c in busy_worker['claims']] == [busy]
+	server = rows['test-server']
+	assert server['state'] == 'idle'
+	assert (server['started_24h'], server['completed_24h'], server['failed_24h']) == (2, 1, 1)
 	assert server['last_failure']['dataset_id'] == failed
 	assert server['last_failure']['stage'] == 'cog_processing'
-	assert rows['host-56916e6e7ab8']['name'] == 'deepl1'
 
 
 def test_silent_claims_and_unnamed_workers(db):

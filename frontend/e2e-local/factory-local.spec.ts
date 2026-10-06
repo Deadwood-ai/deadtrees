@@ -295,16 +295,16 @@ const processors = {
   as_of: AS_OF,
   processors: [
     {
-      worker_id: "host-56916e6e7ab8", name: "deepl1", state: "unknown", claims: [], last_log_at: null,
+      worker_id: "host-56916e6e7ab8", name: "deepl1", state: "unknown", claims: [], last_signal_at: null,
       started_24h: 0, completed_24h: 0, failed_24h: 0, last_failure: { dataset_id: 5059, at: "2026-01-05T08:00:00Z", stage: "cog_processing" },
     },
     {
-      worker_id: "host-bb400fd18e59", name: "helicon", state: "working", last_log_at: "2026-01-06T07:20:00Z",
+      worker_id: "host-bb400fd18e59", name: "helicon", state: "working", last_signal_at: "2026-01-06T07:20:00Z",
       claims: [{ dataset_id: 5060, file_name: "flight.zip", stage: "odm_processing", task_types: ["odm_processing", "geotiff", "cog"], claimed_at: "2026-01-06T07:15:00Z", last_signal_at: "2026-01-06T07:20:00Z" }],
       started_24h: 4, completed_24h: 3, failed_24h: 0, last_failure: null,
     },
     {
-      worker_id: "host-f9760a054cb8", name: "processing-server", state: "idle", claims: [], last_log_at: "2026-01-06T06:00:00Z",
+      worker_id: "host-f9760a054cb8", name: "processing-server", state: "idle", claims: [], last_signal_at: "2026-01-06T06:00:00Z",
       started_24h: 9, completed_24h: 8, failed_24h: 1, last_failure: null,
     },
   ],

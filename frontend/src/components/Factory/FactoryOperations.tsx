@@ -106,27 +106,24 @@ export default function FactoryOperations() {
 				error={processors.error}
 				onRetry={() => void processors.refetch()}
 				now={now}
+				footer={
+					<Text type="secondary" className="mt-3 block text-xs" data-testid="factory-processors-notes">
+						{data && (
+							<>
+								Uncertain (status not idle, no queue row): <Link to={factoryDatasetsPath({ state: "uncertain", sort: "attention" })}>{counts?.uncertain ?? "unknown"}</Link>. Publications not yet
+								published: {counts?.publication_pending ?? "unknown"} (
+								{PUBLICATION_BACKLOG_STATES.map((state, index) => (
+									<span key={state}>
+										{index > 0 && ", "}
+										<Link to={factoryDatasetsPath({ publication: state })}>{state.replace("_", " ")}</Link>
+									</span>
+								))}
+								).
+							</>
+						)}
+					</Text>
+				}
 			/>
-			<div className="-mt-3 px-1" data-testid="factory-workers-notes">
-				<Text type="secondary" className="block text-xs">
-					A claim is a database row held by a worker. The last signal is the newest status update, log line or claim time; it does not prove live
-					progress.
-					{data && (
-						<>
-							{" "}
-							Uncertain (status not idle, no queue row): <Link to={factoryDatasetsPath({ state: "uncertain", sort: "attention" })}>{counts?.uncertain ?? "unknown"}</Link>. Publications not yet
-							published: {counts?.publication_pending ?? "unknown"} (
-							{PUBLICATION_BACKLOG_STATES.map((state, index) => (
-								<span key={state}>
-									{index > 0 && ", "}
-									<Link to={factoryDatasetsPath({ publication: state })}>{state.replace("_", " ")}</Link>
-								</span>
-							))}
-							).
-						</>
-					)}
-				</Text>
-			</div>
 
 			<FactoryHistory />
 

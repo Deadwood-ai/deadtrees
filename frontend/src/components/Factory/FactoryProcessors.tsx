@@ -2,22 +2,23 @@ import { Alert, Skeleton, Table, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { Link } from "react-router-dom";
 import { stageLabel } from "../DatasetStatus/status";
-import { formatDuration, formatTaskTypes, minutesSince } from "./factoryFormat";
-import { EmptyNote, FactoryError, Freshness, SectionCard, TimeCell } from "./FactoryPrimitives";
-import type { FactoryProcessor, FactoryProcessors as FactoryProcessorsData } from "./factoryTypes";
+import type { ReactNode } from "react";
+import { formatDuration, formatTaskTypes, minutesSince, type FactoryTone } from "./factoryFormat";
+import { EmptyNote, FactoryError, Freshness, SectionCard, TimeCell, TONE_COLORS } from "./FactoryPrimitives";
+import type { FactoryProcessor, FactoryProcessorState, FactoryProcessors as FactoryProcessorsData } from "./factoryTypes";
 
-const STATE_TAGS: Record<string, { color: string; label: string; help: string }> = {
-	working: { color: "processing", label: "Working", help: "Holds a claim with a database signal in the last hour." },
-	silent: { color: "gold", label: "Silent", help: "Holds a claim without a database signal for over an hour. A long stage looks the same." },
-	idle: { color: "default", label: "Idle", help: "No claim, but it wrote a log line in the last 24 hours." },
-	unknown: { color: "red", label: "Unknown", help: "No claim and no log line in the last 24 hours: offline, or running a release from before hosts tagged their logs." },
+const STATE_TAGS: Record<FactoryProcessorState, { tone: FactoryTone; label: string; help: string }> = {
+	working: { tone: "processing", label: "Working", help: "Holds a claim with a database signal in the last hour." },
+	silent: { tone: "warning", label: "Silent", help: "Holds a claim without a database signal for over an hour. A long stage looks the same." },
+	idle: { tone: "muted", label: "Idle", help: "No claim, but it wrote a log line in the last 24 hours." },
+	unknown: { tone: "warning", label: "Unknown", help: "No claim and no log line in the last 24 hours: offline, or running a release from before hosts tagged their logs." },
 };
 
-function ProcessorState({ state }: { state: string }) {
-	const tag = STATE_TAGS[state] ?? { color: "default", label: state, help: "" };
+function ProcessorState({ state }: { state: FactoryProcessorState }) {
+	const tag = STATE_TAGS[state];
 	return (
 		<Tooltip title={tag.help}>
-			<Tag color={tag.color} className="m-0" data-testid="processor-state">
+			<Tag color={TONE_COLORS[tag.tone]} className="m-0" data-testid="processor-state">
 				{tag.label}
 			</Tag>
 		</Tooltip>
@@ -56,10 +57,12 @@ type FactoryProcessorsProps = {
 	error: unknown;
 	onRetry: () => void;
 	now: number;
+	/** Notes shown under the table. */
+	footer?: ReactNode;
 };
 
 /** One row per processor host: what it holds now and what it did in the last 24 hours. */
-export default function FactoryProcessors({ data, isFetching, isError, error, onRetry, now }: FactoryProcessorsProps) {
+export default function FactoryProcessors({ data, isFetching, isError, error, onRetry, now, footer }: FactoryProcessorsProps) {
 	const columns: ColumnsType<FactoryProcessor> = [
 		{
 			title: "Processor",
@@ -78,7 +81,7 @@ export default function FactoryProcessors({ data, isFetching, isError, error, on
 			title: "Last signal",
 			key: "signal",
 			width: 140,
-			render: (_, row) => <TimeCell iso={row.claims.at(-1)?.last_signal_at ?? row.last_log_at} now={now} emptyReason="No claim and no host-tagged log line in the last 7 days." />,
+			render: (_, row) => <TimeCell iso={row.last_signal_at} now={now} emptyReason="No claim and no host-tagged log line in the last 24 hours." />,
 		},
 		{
 			title: "Last 24 h",
@@ -92,7 +95,7 @@ export default function FactoryProcessors({ data, isFetching, isError, error, on
 			),
 		},
 		{
-			title: "Last failure",
+			title: "Last failure (24 h)",
 			key: "failure",
 			width: 170,
 			responsive: ["md"],
@@ -131,6 +134,7 @@ export default function FactoryProcessors({ data, isFetching, isError, error, on
 			) : (
 				<Table size="small" pagination={false} dataSource={data.processors} columns={columns} rowKey="worker_id" scroll={{ x: 860 }} />
 			)}
+			{footer}
 		</SectionCard>
 	);
 }

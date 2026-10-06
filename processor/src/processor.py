@@ -148,14 +148,21 @@ def _handle_graceful_shutdown(signum, frame):
 			logger.error(f'Failed to gracefully re-queue task {task.id} during shutdown: {e}')
 	sys.exit(0)
 
-# Maps each task type to its corresponding is_*_done flag and human-readable stage name.
-# Used by crash detection to determine exactly which stage a previous run crashed during.
 # Task lifecycle events in v2_logs.extra.event, read per worker_id by the
 # Factory processors panel (factory_processors).
 TASK_STARTED_EVENT = 'task_started'
 TASK_COMPLETED_EVENT = 'task_completed'
 TASK_FAILED_EVENT = 'task_failed'
 
+
+def _log_task_event(task: QueueTask, event: str, message: str, **extra) -> None:
+	logger.info(
+		message,
+		LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, extra={'event': event, **extra}),
+	)
+
+# Maps each task type to its corresponding is_*_done flag and human-readable stage name.
+# Used by crash detection to determine exactly which stage a previous run crashed during.
 PIPELINE_STAGE_MAP = [
 	(TaskTypeEnum.odm_processing, 'is_odm_done', 'odm_processing'),
 	(TaskTypeEnum.geotiff, 'is_ortho_done', 'ortho_processing'),
@@ -341,15 +348,6 @@ def _record_failure(task: QueueTask, error: Exception) -> None:
 
 def _finalize_failure(token: str, task: QueueTask, stage: str | None, message: str) -> None:
 	"""Mark the dataset failed and idle, report it, and dequeue the task; the one failure path."""
-	logger.info(
-		f'Failed queued task {task.id} during {stage or "an unknown stage"}',
-		LogContext(
-			category=LogCategory.PROCESS,
-			dataset_id=task.dataset_id,
-			user_id=task.user_id,
-			extra={'event': TASK_FAILED_EVENT, 'stage': stage},
-		),
-	)
 	update_status(
 		token,
 		dataset_id=task.dataset_id,
@@ -358,6 +356,8 @@ def _finalize_failure(token: str, task: QueueTask, stage: str | None, message: s
 		error_message=message,
 		error_stage=stage,
 	)
+	# Logged once the error is recorded: a retry after a failed update must not count it twice.
+	_log_task_event(task, TASK_FAILED_EVENT, f'Failed queued task {task.id} during {stage or "an unknown stage"}', stage=stage)
 
 	try:
 		report_processing_failure(
@@ -727,15 +727,7 @@ def process_task(task: QueueTask, token: str):
 		_set_inflight_task(None)
 		_notify_processing_result_safely(task, ProcessingNotificationType.completed, token)
 		delete_queue_task(token, task)
-		logger.info(
-			f'Finished processing queued task {task.id}',
-			LogContext(
-				category=LogCategory.PROCESS,
-				dataset_id=task.dataset_id,
-				user_id=task.user_id,
-				extra={'event': TASK_COMPLETED_EVENT},
-			),
-		)
+		_log_task_event(task, TASK_COMPLETED_EVENT, f'Finished processing queued task {task.id}')
 
 	finally:
 		_set_inflight_task(None)
@@ -949,16 +941,7 @@ def background_process() -> BackgroundProcessResult:
 				continue  # check next task in queue
 
 		# Normal processing - found a healthy, ready task
-		logger.info(
-			f'Start processing queued task: {task}.',
-			LogContext(
-				category=LogCategory.PROCESS,
-				dataset_id=task.dataset_id,
-				user_id=task.user_id,
-				token=token,
-				extra={'event': TASK_STARTED_EVENT},
-			),
-		)
+		_log_task_event(task, TASK_STARTED_EVENT, f'Start processing queued task: {task}.')
 		try:
 			process_task(task, token=token)
 		except Exception:

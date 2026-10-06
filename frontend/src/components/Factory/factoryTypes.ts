@@ -147,8 +147,7 @@ export interface FactoryOverviewCounts {
 	publication_pending: number | null;
 }
 
-export const FACTORY_PROCESSOR_STATES = ["working", "silent", "idle", "unknown"] as const;
-export type FactoryProcessorState = (typeof FACTORY_PROCESSOR_STATES)[number];
+export type FactoryProcessorState = "working" | "silent" | "idle" | "unknown";
 
 /** A queue row a processor holds right now. */
 export interface FactoryProcessorClaim {
@@ -165,9 +164,10 @@ export interface FactoryProcessor {
 	worker_id: string;
 	/** Readable host name, or the raw worker ID for an unknown host. */
 	name: string;
-	state: FactoryProcessorState | string;
+	state: FactoryProcessorState;
 	claims: FactoryProcessorClaim[];
-	last_log_at: string | null;
+	/** Newest signal of a held claim, else the host's newest log line in the last 24 hours. */
+	last_signal_at: string | null;
 	started_24h: number | null;
 	completed_24h: number | null;
 	failed_24h: number | null;
