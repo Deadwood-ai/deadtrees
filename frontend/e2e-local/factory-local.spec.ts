@@ -300,7 +300,17 @@ const operations = () => ({
   as_of: AS_OF,
   attention_total: attentionRows().length,
   attention_contributors: 1,
-  attention: attentionRows().slice(0, 10),
+  attention_groups: attentionRows().map((row) => ({
+    reason: row.attention_reason,
+    stage: row.attention_reason === "failed" ? "cog_processing" : null,
+    kind: row.attention_reason === "failed" ? "out of memory" : null,
+    count: 1,
+    contributors: 1,
+    oldest_since: row.attention_since ?? null,
+    dataset_ids: [row.dataset_id],
+    samples: [{ dataset_id: row.dataset_id, file_name: row.file_name, state: row.state, attention_since: row.attention_since ?? null }],
+  })),
+  team_waiting: 2,
   waiting: [
     { key: "queued", count: 1, oldest_at: "2026-01-06T06:00:00Z", age_label: "Oldest queue entry", filters: { state: "queued" } },
     { key: "processing", count: 1, oldest_at: "2026-01-06T07:15:00Z", age_label: "Oldest claim start", filters: { state: "claimed" } },
@@ -377,7 +387,7 @@ const fulfillRpc = async (route: Route, name: string, options: Options) => {
       await fulfillJson(route, { code: "57014", message: "canceling statement due to statement timeout", details: null, hint: null }, 500);
       return;
     }
-    await fulfillJson(route, options.operationsMode === "empty" ? { ...operations(), attention_total: 0, attention_contributors: 0, attention: [], waiting: [] } : operations());
+    await fulfillJson(route, options.operationsMode === "empty" ? { ...operations(), attention_total: 0, attention_contributors: 0, attention_groups: [], team_waiting: 0, waiting: [] } : operations());
     return;
   }
   if (name === "factory_history") {
@@ -543,17 +553,23 @@ test.describe("factory local e2e", () => {
     await expect(page.getByTestId("factory-outcomes-failures")).toContainText("Open now: 4, of which 3 never had a result.");
 
     const attention = page.getByTestId("factory-attention");
-    await expect(attention.getByTestId("factory-attention-summary")).toContainText("3 datasets across 1 contributor");
+    await expect(attention.getByTestId("factory-attention-summary")).toContainText("3 datasets across 1 contributor, in 3 groups");
+    await expect(attention.getByTestId("factory-attention-team-waiting")).toContainText("2 team uploads are waiting in the queue and not counted here.");
     await expect(attention.getByTestId("factory-attention-all")).toHaveAttribute("href", "/factory/datasets?attention=true&sort=attention");
     const attentionRowsOnPage = attention.locator("tr.ant-table-row");
     await expect(attentionRowsOnPage).toHaveCount(3);
-    await expect(attentionRowsOnPage.nth(2).locator("td").first()).toHaveText("3");
-    await expect(attentionRowsOnPage.nth(0)).toContainText("#5059");
     await expect(attentionRowsOnPage.nth(0).getByTestId("attention-reason")).toHaveText("Failed");
-    await expect(attentionRowsOnPage.nth(0)).toContainText("unknown");
+    await expect(attentionRowsOnPage.nth(0).getByTestId("attention-group-cause")).toHaveText("Map image preparation");
+    await expect(attentionRowsOnPage.nth(0)).toContainText("out of memory");
     await expect(attentionRowsOnPage.nth(0)).toContainText("failed since");
-    await expect(attentionRowsOnPage.nth(1)).toContainText("#5056");
+    await expect(attentionRowsOnPage.nth(0).getByTestId("attention-group-count")).toHaveAttribute("href", "/factory/datasets?ids=5059&sort=attention");
+    await expect(attentionRowsOnPage.nth(0).getByTestId("attention-group-linear")).toHaveAttribute(
+      "href",
+      "https://linear.app/geosense-ufr/search?q=processor%2Ffailure%2Fcog_processing",
+    );
+    await expect(attentionRowsOnPage.nth(1).getByTestId("attention-reason")).toHaveText("Uncertain");
     await expect(attentionRowsOnPage.nth(1)).toContainText("status updated");
+    await expect(attentionRowsOnPage.nth(1).getByTestId("attention-group-linear")).toHaveCount(0);
     await expect(attentionRowsOnPage.nth(2).getByTestId("attention-reason")).toHaveText("Silent claim");
     expect(await attention.evaluate((node) => node.getBoundingClientRect().top)).toBeLessThan(
       await page.getByTestId("factory-waiting").evaluate((node) => node.getBoundingClientRect().top),
@@ -597,6 +613,7 @@ test.describe("factory local e2e", () => {
     await page.goBack();
     await expect(page.getByTestId("factory-attention")).toBeVisible();
 
+    await page.getByTestId("factory-attention").locator("tr.ant-table-row").first().locator(".ant-table-row-expand-icon").click();
     await page.getByTestId("factory-attention").getByRole("link", { name: "#5059" }).click();
     await expect(page.getByRole("heading", { name: "Dataset #5059" })).toBeVisible();
     await expect(page.getByTestId("factory-detail-back")).toHaveText("← Back to operations");

@@ -217,8 +217,9 @@ test.describe("contributor local write flows", () => {
     );
 
     // Cached bundles carry a content-version suffix, so a changed dataset gets a new file.
+    // The upload is private, so the bundle is delivered through a signed export ticket.
     expect(status.download_path).toMatch(
-      new RegExp(`^/downloads/v1/${datasetId}/${datasetId}_[0-9a-f]+\\.zip$`),
+      new RegExp(`^/api/v1/exports/[^/]+/${datasetId}/${datasetId}_[0-9a-f]+\\.zip$`),
     );
 
     const downloadFile = path.join(

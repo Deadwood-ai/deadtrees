@@ -80,7 +80,7 @@ def _run_stale_recovery(monkeypatch, task, status_row):
 	monkeypatch.setattr(
 		processor_module, 'update_status', lambda token, **fields: (failures if fields.get('has_error') else completed).append(fields)
 	)
-	monkeypatch.setattr(processor_module, 'create_processing_failure_issue', lambda **kwargs: None)
+	monkeypatch.setattr(processor_module, 'report_processing_failure', lambda **kwargs: None)
 	monkeypatch.setattr(processor_module, '_notify_processing_result_safely', lambda *args: None)
 	monkeypatch.setattr(processor_module, 'delete_queue_task', lambda token, current: None)
 	assert processor_module.background_process() is BackgroundProcessResult.IDLE
@@ -123,7 +123,7 @@ def test_recorded_failure_whose_dequeue_failed_is_finished_without_a_second_issu
 	task = _task()
 	processor_module._unrecorded_failures[task.id] = ('cog', 'cog processing failed: boom')
 	issues = []
-	monkeypatch.setattr(processor_module, 'create_processing_failure_issue', lambda **kwargs: issues.append(kwargs))
+	monkeypatch.setattr(processor_module, 'report_processing_failure', lambda **kwargs: issues.append(kwargs))
 
 	failures, _ = _run_stale_recovery(monkeypatch, task, {'current_status': 'idle', 'has_error': True})
 

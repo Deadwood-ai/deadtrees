@@ -394,6 +394,15 @@ reason, known oldest timestamps sort first, unknown ages last, with dataset ID
 as a stable tie-breaker. Each dataset gets one primary reason while its other
 status, delivery and report facts remain visible.
 
+The Operations list shows attention as groups, not single datasets: one row per
+reason and, for failures, per canonical stage and error class
+(`factory_failure_stage`, `factory_failure_kind`). Each failure stage has one
+Linear cluster issue with the fingerprint `processor/failure/<stage>`; the
+processor comments every new failure there instead of opening a ticket per
+dataset, and the row links to it. Overdue counts only external contributors.
+Team uploads (accounts with audit rights) are reprocessing or backfill work, so
+they are reported as a separate waiting count and never as overdue.
+
 Failure age comes from an open measured failure episode; legacy error flags do
 not establish a failure start. Uncertain age is the last status update. Overdue
 age starts at measured upload completion and applies only to GeoTIFF inputs

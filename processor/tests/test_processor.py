@@ -726,7 +726,7 @@ def test_background_process_fails_crashed_dataset(crashed_dataset_task, auth_tok
 	linear_calls = []
 	notification_calls = []
 	monkeypatch.setattr(
-		processor_module, 'create_processing_failure_issue',
+		processor_module, 'report_processing_failure',
 		lambda **kwargs: linear_calls.append(kwargs),
 	)
 	monkeypatch.setattr(
@@ -821,7 +821,7 @@ def test_background_process_fails_stale_task_without_stage_update(
 	"""A stale active task whose requested stages are not complete is a hard-kill
 	crash (no graceful shutdown cleaned it up), so it is failed and dequeued."""
 	monkeypatch.setattr(processor_module, '_kill_dangling_dataset_resources', lambda dataset_id: None)
-	monkeypatch.setattr(processor_module, 'create_processing_failure_issue', lambda **kwargs: None)
+	monkeypatch.setattr(processor_module, 'report_processing_failure', lambda **kwargs: None)
 
 	dataset_id = stale_active_task_without_stage_update['dataset_id']
 
@@ -939,7 +939,7 @@ def test_kill_dangling_resources_called_on_stale_task_recovery(crashed_dataset_t
 	a stale active task is found, so orphaned containers and volumes are cleaned up."""
 	killed_ids = []
 	monkeypatch.setattr(processor_module, '_kill_dangling_dataset_resources', lambda dataset_id: killed_ids.append(dataset_id))
-	monkeypatch.setattr(processor_module, 'create_processing_failure_issue', lambda **kwargs: None)
+	monkeypatch.setattr(processor_module, 'report_processing_failure', lambda **kwargs: None)
 
 	background_process()
 

@@ -139,7 +139,8 @@ function normalizeOperations(raw: unknown): FactoryOperations {
 		as_of: asString(record.as_of),
 		attention_total: asCount(record.attention_total),
 		attention_contributors: asCount(record.attention_contributors),
-		attention: asArray(record.attention),
+		attention_groups: asArray(record.attention_groups),
+		team_waiting: asCount(record.team_waiting),
 		waiting: asArray(record.waiting),
 		coverage: asArray<unknown>(record.coverage).filter((item): item is string => typeof item === "string"),
 	};

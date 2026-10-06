@@ -267,7 +267,7 @@ def test_queue_cleanup_failure_after_success_does_not_emit_failure_notification(
 	)
 	monkeypatch.setattr(
 		processor_module,
-		'create_processing_failure_issue',
+		'report_processing_failure',
 		lambda **kwargs: linear_calls.append(kwargs),
 	)
 
@@ -331,7 +331,7 @@ def test_outbox_persistence_failure_keeps_failed_queue_task(monkeypatch):
 	monkeypatch.setattr(processor_module, 'refresh_processor_token', lambda task, token=None: 'refreshed-token')
 	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'bookkeeping-token')
 	monkeypatch.setattr(processor_module, 'process_metadata', lambda *args: (_ for _ in ()).throw(RuntimeError('failed')))
-	monkeypatch.setattr(processor_module, 'create_processing_failure_issue', lambda **kwargs: None)
+	monkeypatch.setattr(processor_module, 'report_processing_failure', lambda **kwargs: None)
 	monkeypatch.setattr(processor_module, 'update_status', lambda *args, **kwargs: status_updates.append(kwargs))
 	monkeypatch.setattr(
 		processor_module,

@@ -69,7 +69,7 @@ const installNorthStar = async (page: Page, options: { malformed?: boolean } = {
       return;
     }
     if (segments.at(-1) === "factory_operations") {
-      await fulfillJson(route, { as_of: AS_OF, attention_total: 3, attention_contributors: 1, attention: [], waiting: [], coverage: [] });
+      await fulfillJson(route, { as_of: AS_OF, attention_total: 3, attention_contributors: 1, attention_groups: [], team_waiting: 0, waiting: [], coverage: [] });
       return;
     }
     if (segments.at(-1) === "privileged_users") {

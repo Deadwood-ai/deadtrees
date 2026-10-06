@@ -11,6 +11,7 @@ Usage:
     docker compose exec api python /app/api/src/automation/daily_summary.py
 """
 
+import re
 import httpx
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
@@ -328,8 +329,9 @@ def fetch_upload_details(client: Client, period_start: datetime) -> tuple[dict, 
 def fetch_linear_issue(dataset_id: int, period_start: datetime, period_end: datetime) -> Optional[dict]:
 	"""Fetch Linear issue info for a dataset failure.
 	
-	Validates that the returned issue actually references the dataset ID
-	in its title or description to avoid fuzzy search false positives.
+	The processor reports each failure as a comment on its stage's cluster issue
+	(older failures have their own issue), so the dataset ID is matched exactly in
+	the title, description or comments to avoid fuzzy search false positives.
 	Only links issues updated in the current summary period.
 	"""
 	if not settings.LINEAR_ENABLED or not settings.LINEAR_API_KEY:
@@ -337,20 +339,21 @@ def fetch_linear_issue(dataset_id: int, period_start: datetime, period_end: date
 
 	query = '''
 	query SearchIssues($term: String!) {
-		searchIssues(term: $term, first: 5) {
+		searchIssues(term: $term, first: 5, includeComments: true) {
 			nodes {
 				identifier
 				url
 				title
 				description
 				updatedAt
+				comments(last: 100) { nodes { body } }
 			}
 		}
 	}
 	'''
 
 	query_text = f'Dataset ID: {dataset_id}'
-	dataset_id_str = str(dataset_id)
+	dataset_id_pattern = re.compile(rf'Dataset ID:\**\s*{dataset_id}\b')
 
 	try:
 		with httpx.Client(timeout=10) as client:
@@ -372,11 +375,12 @@ def fetch_linear_issue(dataset_id: int, period_start: datetime, period_end: date
 				for issue in nodes:
 					title = issue.get('title', '') or ''
 					description = issue.get('description', '') or ''
-					searchable = f"{title} {description}"
+					comments = ((issue.get('comments') or {}).get('nodes')) or []
+					searchable = '\n'.join([title, description, *((c.get('body') or '') for c in comments)])
 					updated_at = issue.get('updatedAt', '') or ''
 					updated_date = updated_at[:10] if len(updated_at) >= 10 else ''
 					is_in_period = period_start.date().isoformat() <= updated_date <= period_end.date().isoformat()
-					if dataset_id_str in searchable and is_in_period:
+					if dataset_id_pattern.search(searchable) and is_in_period:
 						return {
 							'identifier': issue.get('identifier'),
 							'url': issue.get('url'),
