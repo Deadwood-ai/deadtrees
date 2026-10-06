@@ -56,7 +56,7 @@ const observerOptions: Array<{ label: string; value: PriwaObserverName }> = [
 
 const fundOptions: Array<{ label: string; value: PriwaFund }> = [
   { label: "Ja", value: "ja" },
-  { label: "Ja, kein Buchdrucker", value: "ja_kein_buchdrucker" },
+  { label: "Ja, nicht nur Buchdrucker", value: "ja_kein_buchdrucker" },
   { label: "Nein", value: "nein" },
   { label: "Unsicher", value: "unsicher" },
 ];

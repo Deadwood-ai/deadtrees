@@ -45,7 +45,7 @@ describe("PRIWA point QA helpers", () => {
   it("formats list labels from point state", () => {
     expect(getPriwaPointSourceLabel(basePoint)).toBe("QR");
     expect(getPriwaFundLabel({ ...basePoint, fund: "ja_kein_buchdrucker" }))
-      .toBe("Ja, kein Buchdrucker");
+      .toBe("Ja, nicht nur Buchdrucker");
     expect(getPriwaPointTitle({ ...basePoint, baumnr: "" })).toBe(
       "Ohne Baumnr · 2026-05-19",
     );

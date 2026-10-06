@@ -7,7 +7,7 @@ export const getPriwaPointSourceLabel = (point: IPriwaPoint) => {
 };
 
 export const getPriwaFundLabel = (point: IPriwaPoint) => {
-  if (point.fund === "ja_kein_buchdrucker") return "Ja, kein Buchdrucker";
+  if (point.fund === "ja_kein_buchdrucker") return "Ja, nicht nur Buchdrucker";
   if (point.fund === "ja") return "Ja";
   if (point.fund === "nein") return "Nein";
   return "Unsicher";
