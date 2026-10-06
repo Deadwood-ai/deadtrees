@@ -291,6 +291,26 @@ const journey = {
   coverage: ["Observed first views are consented owner visits only."],
 };
 
+const processors = {
+  as_of: AS_OF,
+  processors: [
+    {
+      worker_id: "host-56916e6e7ab8", name: "deepl1", state: "unknown", claims: [], last_signal_at: null,
+      started_24h: 0, completed_24h: 0, failed_24h: 0, last_failure: { dataset_id: 5059, at: "2026-01-05T08:00:00Z", stage: "cog_processing" },
+    },
+    {
+      worker_id: "host-bb400fd18e59", name: "helicon", state: "working", last_signal_at: "2026-01-06T07:20:00Z",
+      claims: [{ dataset_id: 5060, file_name: "flight.zip", stage: "odm_processing", task_types: ["odm_processing", "geotiff", "cog"], claimed_at: "2026-01-06T07:15:00Z", last_signal_at: "2026-01-06T07:20:00Z" }],
+      started_24h: 4, completed_24h: 3, failed_24h: 0, last_failure: null,
+    },
+    {
+      worker_id: "host-f9760a054cb8", name: "processing-server", state: "idle", claims: [], last_signal_at: "2026-01-06T06:00:00Z",
+      started_24h: 9, completed_24h: 8, failed_24h: 1, last_failure: null,
+    },
+  ],
+  coverage: ["GPU, disk and memory state live on the hosts and are not shown."],
+};
+
 const attentionRows = () =>
   rows
     .filter((row) => typeof row.attention_rank === "number")
@@ -379,6 +399,10 @@ const fulfillRpc = async (route: Route, name: string, options: Options) => {
 
   if (name === "factory_overview") {
     await fulfillJson(route, overview);
+    return;
+  }
+  if (name === "factory_processors") {
+    await fulfillJson(route, processors);
     return;
   }
   if (name === "factory_operations") {
@@ -526,9 +550,16 @@ test.describe("factory local e2e", () => {
 
     await expect(page.getByRole("menuitem", { name: "Factory" })).toBeVisible();
     await expect(page.getByTestId("factory-freshness").first()).toContainText("2026-01-06 09:00 UTC");
-    const workers = page.getByTestId("factory-workers");
-    await expect(workers.getByText("helicon")).toBeVisible();
-    await expect(workers.getByRole("link", { name: "#5060" })).toBeVisible();
+    const processorRows = page.getByTestId("factory-processors").locator("tr.ant-table-row");
+    await expect(processorRows).toHaveCount(3);
+    await expect(processorRows.nth(1)).toContainText("helicon");
+    await expect(processorRows.nth(1).getByTestId("processor-state")).toHaveText("Working");
+    await expect(processorRows.nth(1).getByRole("link", { name: "#5060" })).toBeVisible();
+    await expect(processorRows.nth(1)).toContainText("orthomosaic generation");
+    await expect(processorRows.nth(2).getByTestId("processor-state")).toHaveText("Idle");
+    await expect(processorRows.nth(2).getByTestId("processor-day")).toHaveText("9 started · 8 finished · 1 failed");
+    await expect(processorRows.nth(0).getByTestId("processor-state")).toHaveText("Unknown");
+    await expect(processorRows.nth(0).getByRole("link", { name: "#5059" })).toBeVisible();
     await expect(page.getByTestId("tile-failed")).toHaveCount(0);
     await expect(page.getByTestId("factory-cohorts")).toHaveCount(0);
 
@@ -582,7 +613,7 @@ test.describe("factory local e2e", () => {
     await expect(waiting.getByTestId("waiting-failed")).toContainText("unknown");
     await expect(waiting.getByTestId("waiting-delivery")).toContainText("oldest");
     await expect(waiting.getByTestId("waiting-reports")).toHaveAttribute("href", "/factory/datasets?reports=open&sort=attention");
-    await expect(page.getByTestId("factory-workers")).toContainText("Running now");
+    await expect(page.getByTestId("factory-processors")).toContainText("Processors");
     await expect(page.getByTestId("factory-operations")).not.toContainText("Acquisition");
     await expect(page.getByTestId("factory-history")).toHaveCount(0);
     expect(rpcCalls.filter((call) => call.name === "factory_journey")).toHaveLength(0);
@@ -620,7 +651,7 @@ test.describe("factory local e2e", () => {
     await expect(page.getByTestId("factory-detail-back")).toHaveAttribute("href", "/factory/operations");
     await page.getByTestId("factory-detail-back").click();
     await expect(page.getByTestId("factory-attention")).toBeVisible();
-    await expect(page.getByTestId("factory-workers").getByTestId("factory-freshness")).toContainText("2026-01-06 09:00 UTC");
+    await expect(page.getByTestId("factory-processors").getByTestId("factory-freshness")).toContainText("2026-01-06 09:00 UTC");
     await expect(page.getByTestId("factory-outcomes-timing")).toContainText("still need calibration");
     await expect(page.getByTestId("factory-outcomes-timing").locator("svg")).not.toContainText("1 h target");
     await expect(page.getByTestId("factory-outcomes-failures")).toContainText("A successful retry of other stages never counts.");
@@ -914,7 +945,7 @@ test.describe("factory local e2e", () => {
     await page.goto("/factory/operations");
     await expect(page.getByText("Could not load the attention list")).toBeVisible();
     await expect(page.getByRole("button", { name: "Try again" }).first()).toBeVisible();
-    await expect(page.getByText("Could not load running claims")).toBeVisible();
+    await expect(page.getByText("Could not load processors")).toBeVisible();
 
     await installOperator(page, { canOperate: true, rpcMode: "denied" });
     await page.goto("/factory/datasets");

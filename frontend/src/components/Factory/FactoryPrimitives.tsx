@@ -25,7 +25,7 @@ export function useNow(intervalMs = 30_000): number {
 	return now;
 }
 
-const TONE_COLORS: Record<FactoryTone, string | undefined> = {
+export const TONE_COLORS: Record<FactoryTone, string | undefined> = {
 	processing: "processing",
 	warning: "gold",
 	error: "red",

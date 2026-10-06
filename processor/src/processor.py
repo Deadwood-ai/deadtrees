@@ -1,6 +1,8 @@
 import shutil
 import signal
 import sys
+import time
+from datetime import datetime, timezone
 import docker
 import socket
 from pathlib import Path
@@ -8,6 +10,7 @@ from processor.src.process_geotiff import process_geotiff
 from processor.src.process_odm import process_odm
 from shared.models import QueueTask, TaskTypeEnum, StatusEnum
 from shared.settings import settings
+from shared.__version__ import __version__
 from shared.db import use_client, login, login_verified
 from shared.status import update_status
 from shared.processing_tasks import downstream_tasks_missing_geotiff, format_missing_geotiff_error
@@ -42,7 +45,7 @@ from .utils.queue_runtime import (
 	owns_queue_task,
 	release_queue_task,
 )
-from shared.logging import LogContext, LogCategory, UnifiedLogger, SupabaseHandler
+from shared.logging import LogContext, LogCategory, UnifiedLogger, SupabaseHandler, set_process_log_fields
 
 # Initialize logger with proper cleanup
 logger = UnifiedLogger(__name__)
@@ -147,6 +150,40 @@ def _handle_graceful_shutdown(signum, frame):
 			# task is then left as a stale active row and treated as a crash next run.
 			logger.error(f'Failed to gracefully re-queue task {task.id} during shutdown: {e}')
 	sys.exit(0)
+
+# Task lifecycle events in v2_logs.extra.event, read per worker_id by the
+# Factory processors panel (factory_processors).
+TASK_STARTED_EVENT = 'task_started'
+TASK_COMPLETED_EVENT = 'task_completed'
+TASK_FAILED_EVENT = 'task_failed'
+
+
+HEARTBEAT_INTERVAL_SECONDS = 60
+_last_heartbeat_at = 0.0
+
+
+def _record_heartbeat(token: str, worker_id: str) -> None:
+	"""Tell the Factory this host is alive, at most once a minute; never blocks processing."""
+	global _last_heartbeat_at
+	now = time.monotonic()
+	if now - _last_heartbeat_at < HEARTBEAT_INTERVAL_SECONDS:
+		return
+	try:
+		with use_client(token) as client:
+			client.table(settings.processor_heartbeats_table).upsert(
+				{'worker_id': worker_id, 'seen_at': datetime.now(timezone.utc).isoformat(), 'backend_version': __version__},
+				on_conflict='worker_id',
+			).execute()
+		_last_heartbeat_at = now
+	except Exception as e:
+		logger.warning(f'Could not record processor heartbeat: {e}')
+
+
+def _log_task_event(task: QueueTask, event: str, message: str, **extra) -> None:
+	logger.info(
+		message,
+		LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, extra={'event': event, **extra}),
+	)
 
 # Maps each task type to its corresponding is_*_done flag and human-readable stage name.
 # Used by crash detection to determine exactly which stage a previous run crashed during.
@@ -343,6 +380,8 @@ def _finalize_failure(token: str, task: QueueTask, stage: str | None, message: s
 		error_message=message,
 		error_stage=stage,
 	)
+	# Logged once the error is recorded: a retry after a failed update must not count it twice.
+	_log_task_event(task, TASK_FAILED_EVENT, f'Failed queued task {task.id} during {stage or "an unknown stage"}', stage=stage)
 
 	try:
 		report_processing_failure(
@@ -712,6 +751,7 @@ def process_task(task: QueueTask, token: str):
 		_set_inflight_task(None)
 		_notify_processing_result_safely(task, ProcessingNotificationType.completed, token)
 		delete_queue_task(token, task)
+		_log_task_event(task, TASK_COMPLETED_EVENT, f'Finished processing queued task {task.id}')
 
 	finally:
 		_set_inflight_task(None)
@@ -757,6 +797,8 @@ def background_process() -> BackgroundProcessResult:
 		raise AuthenticationError('Invalid token after fresh login')
 
 	worker_id = get_worker_id()
+	set_process_log_fields(worker_id=worker_id)
+	_record_heartbeat(token, worker_id)
 	active_recovery_attempted = False
 
 	while True:
@@ -924,12 +966,7 @@ def background_process() -> BackgroundProcessResult:
 				continue  # check next task in queue
 
 		# Normal processing - found a healthy, ready task
-		logger.info(
-			f'Start processing queued task: {task}.',
-			LogContext(
-				category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token
-			),
-		)
+		_log_task_event(task, TASK_STARTED_EVENT, f'Start processing queued task: {task}.')
 		try:
 			process_task(task, token=token)
 		except Exception:

@@ -1,16 +1,15 @@
 import { useState } from "react";
-import { Alert, Collapse, Segmented, Select, Skeleton, Table, Tag, Tooltip, Typography } from "antd";
-import type { ColumnsType } from "antd/es/table";
+import { Alert, Collapse, Segmented, Select, Typography } from "antd";
 import { Link, useSearchParams } from "react-router-dom";
-import { isFactoryPermissionError, useFactoryJourney, useFactoryOperations, useFactoryOverview, useFactoryTrends } from "../../hooks/useFactory";
+import { isFactoryPermissionError, useFactoryJourney, useFactoryOperations, useFactoryOverview, useFactoryProcessors, useFactoryTrends } from "../../hooks/useFactory";
 import { factoryDatasetsPath } from "./factoryFilters";
-import { formatDuration, formatTaskTypes, isSilentClaim, minutesSince } from "./factoryFormat";
 import FactoryAttentionList from "./FactoryAttentionList";
 import FactoryJourneyOutcomes from "./FactoryJourneyOutcomes";
 import FactoryOutcomes from "./FactoryOutcomes";
+import FactoryProcessors from "./FactoryProcessors";
 import FactoryHistory from "./FactoryHistory";
 import FactoryWaitingStrip from "./FactoryWaitingStrip";
-import { EmptyNote, FactoryDenied, FactoryError, Freshness, SectionCard, TimeCell, useNow } from "./FactoryPrimitives";
+import { EmptyNote, FactoryDenied, Freshness, useNow } from "./FactoryPrimitives";
 import {
 	FACTORY_TREND_INTERVALS,
 	FACTORY_TREND_SIZES,
@@ -18,7 +17,6 @@ import {
 	type FactoryTrendInterval,
 	type FactoryTrendSize,
 	type FactoryTrendWorkflow,
-	type FactoryWorker,
 } from "./factoryTypes";
 
 const { Text } = Typography;
@@ -53,6 +51,7 @@ export default function FactoryOperations() {
 	const [historyOpen, setHistoryOpen] = useState(params.get("history") === "open");
 	const operations = useFactoryOperations();
 	const overview = useFactoryOverview(7);
+	const processors = useFactoryProcessors();
 	const trends = useFactoryTrends(interval, workflow, size);
 	const journey = useFactoryJourney(historyOpen);
 	const now = useNow();
@@ -75,45 +74,6 @@ export default function FactoryOperations() {
 	if (isFactoryPermissionError(operations.error)) {
 		return <FactoryDenied />;
 	}
-
-	const workerColumns: ColumnsType<FactoryWorker> = [
-		{ title: "Worker", dataIndex: "worker_id", key: "worker_id", render: (value: string | null) => <span className="font-mono text-xs">{value || "unknown"}</span> },
-		{
-			title: "Dataset",
-			dataIndex: "dataset_id",
-			key: "dataset_id",
-			render: (value: number | null) =>
-				value ? (
-					<Link to={`/factory/datasets/${value}`} state={{ factoryReturnTo: "/factory/operations" }} className="font-mono">
-						#{value}
-					</Link>
-				) : (
-					"—"
-				),
-		},
-		{ title: "Tasks", dataIndex: "task_types", key: "task_types", render: (value: string[] | null) => <span className="text-xs">{formatTaskTypes(value)}</span> },
-		{ title: "Claimed", dataIndex: "claimed_at", key: "claimed_at", render: (value: string | null) => <TimeCell iso={value} now={now} /> },
-		{
-			title: "Last DB signal",
-			dataIndex: "last_signal_at",
-			key: "last_signal_at",
-			render: (value: string | null) => {
-				const minutes = minutesSince(value, now);
-				return (
-					<span className="flex flex-wrap items-center gap-2">
-						<TimeCell iso={value} now={now} emptyReason="No status update, log line or claim time is recorded." />
-						{isSilentClaim(value, now) && minutes !== null && (
-							<Tooltip title="No status update, log line or claim change for over an hour. A long stage looks the same; this is not proof it is stuck.">
-								<Tag color="gold" className="m-0">
-									silent for {formatDuration(minutes)}
-								</Tag>
-							</Tooltip>
-						)}
-					</span>
-				);
-			},
-		},
-	];
 
 	return (
 		<div className="space-y-6" data-testid="factory-operations">
@@ -139,43 +99,31 @@ export default function FactoryOperations() {
 
 			<FactoryWaitingStrip operations={operations.data} isLoading={operations.isLoading} error={operations.error} onRetry={() => void operations.refetch()} now={now} />
 
-			<SectionCard
-				title="Running now"
-				count={data?.workers.length}
-				testId="factory-workers"
-				extra={<Freshness asOf={data?.as_of} isFetching={overview.isFetching} onRefresh={() => void overview.refetch()} now={now} />}
-			>
-				{overview.isError && data && (
-					<Alert type="warning" showIcon className="mb-3" message="Running claims may be stale" description="The latest refresh failed. Previously loaded claims remain visible." data-testid="factory-workers-stale" />
-				)}
-				{overview.isError && !data ? (
-					<FactoryError error={overview.error} onRetry={() => void overview.refetch()} title="Could not load running claims" />
-				) : !data ? (
-					<Skeleton active paragraph={{ rows: 2 }} />
-				) : data.workers.length === 0 ? (
-					<EmptyNote>No queue row is claimed right now.</EmptyNote>
-				) : (
-					<Table size="small" pagination={false} dataSource={data.workers} columns={workerColumns} rowKey={(row, index) => `${row.worker_id}-${row.dataset_id}-${index}`} scroll={{ x: 640 }} />
-				)}
-				<Text type="secondary" className="mt-3 block text-xs">
-					A claim is a database row held by a worker. The last signal is the newest status update, log line or claim time; it does not prove live
-					progress.
-					{data && (
-						<>
-							{" "}
-							Uncertain (status not idle, no queue row): <Link to={factoryDatasetsPath({ state: "uncertain", sort: "attention" })}>{counts?.uncertain ?? "unknown"}</Link>. Publications not yet
-							published: {counts?.publication_pending ?? "unknown"} (
-							{PUBLICATION_BACKLOG_STATES.map((state, index) => (
-								<span key={state}>
-									{index > 0 && ", "}
-									<Link to={factoryDatasetsPath({ publication: state })}>{state.replace("_", " ")}</Link>
-								</span>
-							))}
-							).
-						</>
-					)}
-				</Text>
-			</SectionCard>
+			<FactoryProcessors
+				data={processors.data}
+				isFetching={processors.isFetching}
+				isError={processors.isError}
+				error={processors.error}
+				onRetry={() => void processors.refetch()}
+				now={now}
+				footer={
+					<Text type="secondary" className="mt-3 block text-xs" data-testid="factory-processors-notes">
+						{data && (
+							<>
+								Uncertain (status not idle, no queue row): <Link to={factoryDatasetsPath({ state: "uncertain", sort: "attention" })}>{counts?.uncertain ?? "unknown"}</Link>. Publications not yet
+								published: {counts?.publication_pending ?? "unknown"} (
+								{PUBLICATION_BACKLOG_STATES.map((state, index) => (
+									<span key={state}>
+										{index > 0 && ", "}
+										<Link to={factoryDatasetsPath({ publication: state })}>{state.replace("_", " ")}</Link>
+									</span>
+								))}
+								).
+							</>
+						)}
+					</Text>
+				}
+			/>
 
 			<FactoryHistory />
 
@@ -246,7 +194,7 @@ export default function FactoryOperations() {
 								{(() => {
 									const trendLines = trends.data?.coverage ?? [];
 									const retained = data?.coverage ?? [];
-									const lines = Array.from(new Set([...(operations.data?.coverage ?? []), ...trendLines, ...(journey.data?.coverage ?? []), ...retained]));
+									const lines = Array.from(new Set([...(operations.data?.coverage ?? []), ...(processors.data?.coverage ?? []), ...trendLines, ...(journey.data?.coverage ?? []), ...retained]));
 									return lines.length === 0 ? (
 										<EmptyNote>No coverage notes were reported.</EmptyNote>
 									) : (

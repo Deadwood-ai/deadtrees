@@ -147,19 +147,45 @@ export interface FactoryOverviewCounts {
 	publication_pending: number | null;
 }
 
-export interface FactoryWorker {
-	worker_id: string | null;
-	dataset_id: number | null;
-	claimed_at: string | null;
+export type FactoryProcessorState = "working" | "silent" | "idle" | "unknown";
+
+/** A queue row a processor holds right now. */
+export interface FactoryProcessorClaim {
+	dataset_id: number;
+	file_name: string | null;
+	stage: string | null;
 	task_types: string[] | null;
+	claimed_at: string | null;
 	last_signal_at: string | null;
+}
+
+/** One processor host, read from claims and host-tagged processor logs. */
+export interface FactoryProcessor {
+	worker_id: string;
+	/** Readable host name, or the raw worker ID for an unknown host. */
+	name: string;
+	state: FactoryProcessorState;
+	claims: FactoryProcessorClaim[];
+	/** Newest signal of a held claim, else the newer of the heartbeat and the last log line. */
+	last_signal_at: string | null;
+	/** Release the host reported with its latest heartbeat. */
+	backend_version: string | null;
+	started_24h: number | null;
+	completed_24h: number | null;
+	failed_24h: number | null;
+	last_failure: { dataset_id: number; at: string | null; stage: string | null } | null;
+}
+
+export interface FactoryProcessors {
+	as_of: string | null;
+	processors: FactoryProcessor[];
+	coverage: string[];
 }
 
 export interface FactoryOverview {
 	as_of: string | null;
 	since: string | null;
 	counts: FactoryOverviewCounts;
-	workers: FactoryWorker[];
 	coverage: string[];
 }
 

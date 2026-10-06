@@ -15,6 +15,7 @@ import type {
 	FactoryJourney,
 	FactoryOperations,
 	FactoryOverview,
+	FactoryProcessors,
 	FactoryRecord,
 	FactoryRow,
 	FactoryTrendInterval,
@@ -49,6 +50,7 @@ const asRecord = (value: unknown): FactoryRecord =>
 	value && typeof value === "object" && !Array.isArray(value) ? (value as FactoryRecord) : {};
 const asString = (value: unknown): string | null => (typeof value === "string" ? value : null);
 const asCount = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
+const asStringArray = (value: unknown): string[] => asArray<unknown>(value).filter((item): item is string => typeof item === "string");
 
 function normalizeOverview(raw: unknown): FactoryOverview {
 	const record = asRecord(raw);
@@ -56,8 +58,7 @@ function normalizeOverview(raw: unknown): FactoryOverview {
 		as_of: asString(record.as_of),
 		since: asString(record.since),
 		counts: asRecord(record.counts) as unknown as FactoryOverview["counts"],
-		workers: asArray(record.workers),
-		coverage: asArray<unknown>(record.coverage).filter((item): item is string => typeof item === "string"),
+		coverage: asStringArray(record.coverage),
 	};
 }
 
@@ -116,7 +117,7 @@ function normalizeTrends(
 		size: (asString(record.size) as FactoryTrendSize | null) ?? requested.size,
 		summary,
 		series: asArray(record.series),
-		coverage: asArray<unknown>(record.coverage).filter((item): item is string => typeof item === "string"),
+		coverage: asStringArray(record.coverage),
 	};
 }
 
@@ -129,7 +130,7 @@ function normalizeJourney(raw: unknown): FactoryJourney {
 		pipeline: record.pipeline && typeof record.pipeline === "object" ? (asRecord(record.pipeline) as unknown as FactoryJourney["pipeline"]) : null,
 		weekly: asArray(record.weekly),
 		cohorts: asArray(record.cohorts),
-		coverage: asArray<unknown>(record.coverage).filter((item): item is string => typeof item === "string"),
+		coverage: asStringArray(record.coverage),
 	};
 }
 
@@ -142,7 +143,7 @@ function normalizeOperations(raw: unknown): FactoryOperations {
 		attention_groups: asArray(record.attention_groups),
 		team_waiting: asCount(record.team_waiting),
 		waiting: asArray(record.waiting),
-		coverage: asArray<unknown>(record.coverage).filter((item): item is string => typeof item === "string"),
+		coverage: asStringArray(record.coverage),
 	};
 }
 
@@ -297,6 +298,32 @@ export function useFactoryOperations() {
 	});
 }
 
+function normalizeProcessors(raw: unknown): FactoryProcessors {
+	const record = asRecord(raw);
+	return {
+		as_of: asString(record.as_of),
+		processors: asArray<FactoryRecord>(record.processors).map((row) => ({
+			...(row as unknown as FactoryProcessors["processors"][number]),
+			claims: asArray(row.claims),
+			started_24h: asCount(row.started_24h),
+			completed_24h: asCount(row.completed_24h),
+			failed_24h: asCount(row.failed_24h),
+		})),
+		coverage: asStringArray(record.coverage),
+	};
+}
+
+export function useFactoryProcessors() {
+	const { enabled } = useFactoryAccess();
+	return useQuery({
+		queryKey: ["factory", "processors"],
+		enabled,
+		queryFn: async () => normalizeProcessors(await callFactoryRpc<unknown>("factory_processors", {})),
+		retry: factoryRetry,
+		staleTime: 30 * 1000,
+	});
+}
+
 function normalizeHistory(raw: unknown): FactoryHistory {
 	const record = asRecord(raw);
 	const coverage = asRecord(record.coverage);
@@ -327,7 +354,7 @@ function normalizeNorthStar(raw: unknown): FactoryNorthStar {
 	}
 	return {
 		...(record as unknown as FactoryNorthStar),
-		coverage: asArray<unknown>(record.coverage).filter((item): item is string => typeof item === "string"),
+		coverage: asStringArray(record.coverage),
 	};
 }
 
