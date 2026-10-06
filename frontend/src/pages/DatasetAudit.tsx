@@ -201,7 +201,7 @@ function DatasetAuditInner() {
 	const { id } = useParams();
 	const navigate = useNavigate();
 	const [searchParams, setSearchParams] = useSearchParams();
-	const { setFilteredDatasetIds } = useAuditNavigation();
+	const { setFilteredDatasetIds, setListPath } = useAuditNavigation();
 	const { track } = useAnalytics("audit");
 
 	// ALL HOOKS MUST BE CALLED FIRST
@@ -262,6 +262,8 @@ function DatasetAuditInner() {
 	useEffect(() => {
 		// Keep the old processing link intact until we know whether it redirects to the Factory workspace.
 		if (legacyProcessingLink && (isOperatePrivilegeLoading || canOperate)) return;
+		// the detail page shares this component; the list keeps its own URL
+		if (id) return;
 		const params = new URLSearchParams();
 		params.set("tab", activeTab);
 		if (statusFilter !== "all") params.set("status", statusFilter);
@@ -272,6 +274,7 @@ function DatasetAuditInner() {
 		if (hasFlagsFilter) params.set("hasFlags", "true");
 		if (idFilter) params.set("id", idFilter);
 		setSearchParams(params, { replace: true });
+		setListPath(`/dataset-audit?${params}`);
 	}, [
 		activeTab,
 		statusFilter,
@@ -282,6 +285,8 @@ function DatasetAuditInner() {
 		hasFlagsFilter,
 		idFilter,
 		setSearchParams,
+		setListPath,
+		id,
 		legacyProcessingLink,
 		isOperatePrivilegeLoading,
 		canOperate,

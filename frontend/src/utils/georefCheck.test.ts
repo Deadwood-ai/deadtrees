@@ -44,7 +44,8 @@ describe("georeferencing check display", () => {
   it("summarizes a decided check with the measured offset and evidence strength", () => {
     expect(summarizeGeorefCheck(check({}))).toEqual({
       tone: "success",
-      text: "Good: offset 2.7 m (90% of the area) on 2 references, strong evidence.",
+      verdict: "Good, 2.7 m off",
+      detail: "Strong evidence: 90% of the area is within this offset of Esri World Imagery (current), google.",
     });
     expect(summarizeGeorefCheck(check({ decision: "poor", evidence_level: "qualified", p90_m: 22.6 })).tone).toBe("error");
   });
@@ -52,7 +53,8 @@ describe("georeferencing check display", () => {
   it("asks for a look by eye when the check is uncertain, naming why", () => {
     const summary = summarizeGeorefCheck(check({ decision: "uncertain", evidence_level: "insufficient", reason: "no_qualified_reference", p90_m: null }));
     expect(summary.tone).toBe("warning");
-    expect(summary.text).toContain("no reference image matched reliably");
+    expect(summary.verdict).toBe("Uncertain");
+    expect(summary.detail).toContain("No reference image matched reliably");
   });
 
   it("lists deciding references first, then by matches", () => {

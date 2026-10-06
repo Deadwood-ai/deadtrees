@@ -15,10 +15,12 @@ import {
 import { useAuth } from "../hooks/useAuthProvider";
 import MLTileUnifiedView from "../components/MLTiles/MLTileUnifiedView";
 import { palette } from "../theme/palette";
+import { useAuditNavigation } from "../hooks/useAuditNavigation";
 
 export default function DatasetMLTiles() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { listPath } = useAuditNavigation();
   const { user } = useAuth();
   const datasetId = id ? parseInt(id, 10) : undefined;
   const { data: dataset } = useDatasetById(datasetId);
@@ -70,7 +72,7 @@ export default function DatasetMLTiles() {
     // If another user holds the lock, navigate away
     if (sessionLock.is_locked && sessionLock.locked_by && sessionLock.locked_by !== user.id) {
       message.error("Another user is currently editing tiles for this dataset");
-      navigate("/dataset-audit");
+      navigate(listPath);
       return;
     }
 
@@ -83,10 +85,10 @@ export default function DatasetMLTiles() {
         .catch((err) => {
           console.error("Failed to acquire lock:", err);
           message.error("Could not start tile generation session");
-          navigate("/dataset-audit");
+          navigate(listPath);
         });
     }
-  }, [dataset?.id, user?.id, sessionLock, setLock, navigate]);
+  }, [dataset?.id, user?.id, sessionLock, setLock, navigate, listPath]);
 
   // Clear lock on unmount
   useEffect(() => {
@@ -174,7 +176,7 @@ export default function DatasetMLTiles() {
           });
 
           // Navigate back to dataset list
-          navigate("/dataset-audit");
+          navigate(listPath);
         } catch (error) {
           console.error("Failed to complete tile generation:", error);
           message.error({

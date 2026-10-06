@@ -155,7 +155,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	const auditSuggestions = auditSuggestionsData ?? NO_SUGGESTIONS;
 
 	// Navigation context
-	const { getNextDatasetId, currentIndex, totalCount } = useAuditNavigation();
+	const { getNextDatasetId, currentIndex, totalCount, listPath } = useAuditNavigation();
 
 	// Audit lease: claimed, renewed and released with this page
 	const { state: auditLock, continueHere: continueAuditHere } = useAuditLock(dataset.id);
@@ -213,9 +213,9 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	useEffect(() => {
 		if (!auditLockError) return;
 		message.error(auditLockError);
-		const timeout = setTimeout(() => navigate("/dataset-audit"), 2000);
+		const timeout = setTimeout(() => navigate(listPath), 2000);
 		return () => clearTimeout(timeout);
-	}, [auditLockError, navigate]);
+	}, [auditLockError, navigate, listPath]);
 
 	// Every audit write carries this page's lease; without it nothing is saved.
 	const requireAuditLease = () => {
@@ -363,10 +363,10 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 						navigate(`/dataset-audit/${nextId}`);
 					} else {
 						message.info("All datasets in filter completed");
-						navigate("/dataset-audit");
+						navigate(listPath);
 					}
 				} else {
-					navigate("/dataset-audit");
+					navigate(listPath);
 				}
 				setNavigateToNext(false);
 			}, 100);
@@ -389,7 +389,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	};
 
 	const handleCancel = () => {
-		showExitConfirmation(() => navigate("/dataset-audit"));
+		showExitConfirmation(() => navigate(listPath));
 	};
 
 	const handleMarkReviewedAndNext = async () => {
@@ -411,7 +411,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 				navigate(`/dataset-audit/${nextId}`);
 			} else {
 				message.success("Review complete - returning to list");
-				navigate("/dataset-audit");
+				navigate(listPath);
 			}
 		} catch (error) {
 			console.error("Error marking as reviewed:", error);

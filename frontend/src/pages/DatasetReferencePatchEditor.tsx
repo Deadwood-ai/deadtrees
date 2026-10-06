@@ -17,10 +17,12 @@ import { useAnalytics } from "../hooks/useAnalytics";
 import ReferencePatchEditorView from "../components/ReferencePatches/ReferencePatchEditorView";
 import { palette } from "../theme/palette";
 import { MAP_FLOATING_TOP_CLASS } from "../theme/mapLayout";
+import { useAuditNavigation } from "../hooks/useAuditNavigation";
 
 export default function DatasetReferencePatchEditor() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { listPath } = useAuditNavigation();
   const { user } = useAuth();
   const { track } = useAnalytics("editor");
   const datasetId = id ? parseInt(id, 10) : undefined;
@@ -76,7 +78,7 @@ export default function DatasetReferencePatchEditor() {
     // If another user holds the lock, navigate away
     if (sessionLock.is_locked && sessionLock.locked_by && sessionLock.locked_by !== user.id) {
       message.error("Another user is currently editing patches for this dataset");
-      navigate("/dataset-audit");
+      navigate(listPath);
       return;
     }
 
@@ -89,10 +91,10 @@ export default function DatasetReferencePatchEditor() {
         .catch((err) => {
           console.error("Failed to acquire lock:", err);
           message.error("Could not start patch generation session");
-          navigate("/dataset-audit");
+          navigate(listPath);
         });
     }
-  }, [dataset?.id, user?.id, sessionLock, setLock, navigate]);
+  }, [dataset?.id, user?.id, sessionLock, setLock, navigate, listPath]);
 
   // Clear lock on unmount
   useEffect(() => {
@@ -179,7 +181,7 @@ export default function DatasetReferencePatchEditor() {
           });
 
           // Navigate back to dataset list
-          navigate("/dataset-audit");
+          navigate(listPath);
         } catch (error) {
           console.error("Failed to complete patch generation:", error);
           message.error({

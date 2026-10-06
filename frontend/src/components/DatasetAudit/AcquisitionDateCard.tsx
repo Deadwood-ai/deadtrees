@@ -2,7 +2,7 @@ import { Alert, Card, Form, Input, Radio, Space, Tag, Tooltip, Typography } from
 import { RobotOutlined } from "@ant-design/icons";
 import { createConditionalRule, formatAcquisitionDate } from "./auditConstants";
 import type { IDataset } from "../../types/dataset";
-import type { IAcquisitionDateDecision, IAcquisitionDateEstimate, IAuditSuggestion } from "../../types/acquisitionDate";
+import type { IAcquisitionDateDecision, IAcquisitionDateEstimate, IAuditReviewItem, IAuditSuggestion } from "../../types/acquisitionDate";
 import {
 	activeDecision,
 	datasetDateSuggestion,
@@ -15,6 +15,7 @@ import {
 	modelSuggestedDecision,
 } from "../../utils/acquisitionDate";
 import AcquisitionDateDistribution from "../AcquisitionDate/AcquisitionDateDistribution";
+import { ReviewTag } from "./AuditReviewNotice";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -27,6 +28,7 @@ interface AcquisitionDateCardProps {
 	prefilledFields: string[];
 	/** the dataset's date decisions, newest first */
 	decisions: IAcquisitionDateDecision[];
+	reviewItems: IAuditReviewItem[];
 }
 
 const SOURCE_LABEL: Record<IAcquisitionDateDecision["source"], string> = {
@@ -79,16 +81,14 @@ function DecisionStatus({ decisions }: { decisions: IAcquisitionDateDecision[] }
 	const last = decisions[0];
 	if (!last?.superseded_at) return null;
 	return (
-		<Alert
-			type="info"
-			showIcon
-			className="mb-2 py-1 text-xs"
-			message={`The date check from ${when(last.decided_at)} (${verdictOf(last)}) was reopened on ${when(last.superseded_at)}: ${describeDeactivation(last)}. The saved verdict stays in place until you save; the form shows the current suggestion.`}
-		/>
+		<div className="mb-2 text-[11px] text-orange-700">
+			Saved check from {when(last.decided_at)}: <b>{verdictOf(last)}</b>. Reopened on {when(last.superseded_at)}: {describeDeactivation(last)}. The
+			form shows the current suggestion.
+		</div>
 	);
 }
 
-export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledFields, decisions }: AcquisitionDateCardProps) {
+export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledFields, decisions, reviewItems }: AcquisitionDateCardProps) {
 	const current = estimate ? isEstimateCurrent(estimate, dataset) : false;
 	const suggestion = datasetDateSuggestion(estimate, dataset);
 	const applied = modelSuggestedDecision(decisions, dataset);
@@ -100,6 +100,7 @@ export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledF
 		<Card size="small" className="mb-3 shadow-sm">
 			<div className="mb-2 flex items-center">
 				<Text strong className="text-xs">2. Acquisition Date</Text>
+				<ReviewTag item="acquisition_date" items={reviewItems} />
 			</div>
 			<div className="mb-1 text-xs">
 				<Text type="secondary">{applied ? "Date: " : "Reported date: "}</Text>

@@ -197,6 +197,8 @@ const installAuthenticatedUser = async (
     canAudit: boolean;
     canOperate?: boolean;
     auditDatasetRequestFails?: boolean;
+    /** a saved Good audit that the georeferencing check now disagrees with */
+    reReview?: boolean;
   },
 ) => {
   await installLocalSession(page, {
@@ -252,6 +254,8 @@ const fulfillSupabaseRequest = async (
     canAudit: boolean;
     canOperate?: boolean;
     auditDatasetRequestFails?: boolean;
+    /** a saved Good audit that the georeferencing check now disagrees with */
+    reReview?: boolean;
   },
 ) => {
   const request = route.request();
@@ -261,6 +265,11 @@ const fulfillSupabaseRequest = async (
   const method = request.method();
   const wantsObject =
     request.headers()["accept"]?.includes("vnd.pgrst.object") ?? false;
+
+  if (segments.at(-2) === "rpc" && resource === "get_dataset_audit_with_emails" && options.reReview) {
+    await fulfillJson(route, [{ dataset_id: completeDataset.id, is_georeferenced: true, audit_date: "2026-03-01T10:00:00Z" }]);
+    return;
+  }
 
   if (segments.at(-2) === "rpc") {
     await fulfillRpc(route, resource);
@@ -423,6 +432,19 @@ const fulfillSupabaseRequest = async (
     }
 
     await fulfillJson(route, []);
+    return;
+  }
+
+  if (resource === "audit_review_queue" && options.reReview) {
+    await fulfillJson(route, [
+      {
+        dataset_id: completeDataset.id,
+        item: "is_georeferenced",
+        fields: ["is_georeferenced"],
+        reason: "suggestion_changed:georef_check_v1",
+        since: "2026-10-02T06:00:00Z",
+      },
+    ]);
     return;
   }
 
@@ -680,7 +702,8 @@ test.describe("auditor local e2e", () => {
   }) => {
     await installAuthenticatedUser(page, { canAudit: true });
 
-    await page.goto("/dataset-audit");
+    // a filtered list: leaving the audit returns to it
+    await page.goto(`/dataset-audit?tab=pending&id=${completeDataset.id}`);
     await dismissCookieBanner(page);
     await page.getByRole("button", { name: "Start Audit" }).click();
 
@@ -706,7 +729,7 @@ test.describe("auditor local e2e", () => {
     const leaseId = auditLeaseCalls[0].body.p_lease_id;
     await page.getByRole("button", { name: "Cancel" }).click();
     await page.getByRole("button", { name: "Leave Audit" }).click();
-    await expect(page).toHaveURL(/\/dataset-audit(?:\?.*)?$/);
+    await expect(page).toHaveURL(new RegExp(`/dataset-audit\\?tab=pending&id=${completeDataset.id}$`));
     await expect
       .poll(() =>
         auditLeaseCalls.some(
@@ -729,9 +752,8 @@ test.describe("auditor local e2e", () => {
     await dismissCookieBanner(page);
 
     const georef = card(page, "1. Georeferencing Accuracy");
-    await expect(georef.getByText("Poor: offset 22.6 m (90% of the area) on 2 references, strong evidence.")).toBeVisible({
-      timeout: 20_000,
-    });
+    await expect(georef.getByText("Poor, 22.6 m off")).toBeVisible({ timeout: 20_000 });
+    await expect(georef.getByText(/^Strong evidence: 90% of the area is within this offset of Esri World Imagery \(current\)/)).toBeVisible();
     // the unsaved audit is prefilled with the suggestion and marked as such
     await expect(georef.getByRole("radio", { name: /Poor/ })).toBeChecked();
     await expect(georef.getByText("suggested")).toBeVisible();
@@ -745,6 +767,20 @@ test.describe("auditor local e2e", () => {
     await expect(viewer.getByText("no confident matches (uniform canopy, season or blank imagery)")).toBeVisible();
     await expect(viewer.getByText("Unavailable: maptiler (blank imagery)")).toBeVisible();
     await expect(viewer.getByRole("slider")).toBeVisible();
+  });
+
+  test("a saved audit the georeferencing check disagrees with is marked for re-review", async ({ page }) => {
+    await installAuthenticatedUser(page, { canAudit: true, reReview: true });
+    await page.route(/arcgisonline\.com|wayback\.maptiles\.arcgis\.com|lgl-bw\.de/, (route) => route.fulfill({ status: 204 }));
+
+    await page.goto(`/dataset-audit/${completeDataset.id}`);
+    await dismissCookieBanner(page);
+
+    await expect(page.getByText("Re-review Georeferencing:")).toBeVisible({ timeout: 20_000 });
+    const georef = card(page, "1. Georeferencing Accuracy");
+    await expect(georef.getByText("re-review")).toBeVisible();
+    await expect(georef.getByText(/Saved audit: Good\. Now suggested: Poor/)).toBeVisible();
+    await expect(georef.getByRole("radio", { name: /Poor/ })).toBeChecked();
   });
 
   test("direct audit detail links retain queue navigation context", async ({
