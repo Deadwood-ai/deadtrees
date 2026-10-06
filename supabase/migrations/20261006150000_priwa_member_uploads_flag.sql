@@ -1,6 +1,10 @@
 -- Project members such as core-team reviewers must not turn every upload they
 -- ever made into a PRIWA review item. Members contribute flights unless this
 -- flag is switched off for them.
+
+-- Fail fast instead of queueing PRIWA reads behind the table lock.
+set local lock_timeout = '5s';
+
 alter table "public"."priwa_project_memberships"
     add column "contributes_flights" boolean not null default true;
 
