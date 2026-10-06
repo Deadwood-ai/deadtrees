@@ -493,6 +493,37 @@ def test_priwa_member_can_classify_a_project_flight(priwa_project, priwa_flight_
 	assert reset_classifications.data == []
 
 
+def test_priwa_member_without_flight_contribution_adds_no_flights(priwa_project, priwa_flight_dataset):
+	"""Uploads of members whose flight contribution is off are not PRIWA flight candidates."""
+	member_token = login(settings.TEST_USER_EMAIL, settings.TEST_USER_PASSWORD, use_cached_session=False)
+
+	with use_service_client() as client:
+		client.table('priwa_project_memberships').update({'contributes_flights': False}).eq(
+			'project_id', priwa_project['id']
+		).eq('user_id', priwa_project['member_id']).execute()
+
+	with use_client(member_token) as client:
+		flights = client.rpc(
+			'priwa_project_latest_flight_mosaics',
+			{
+				'p_project_id': priwa_project['id'],
+				'p_limit': 100,
+				'p_offset': 0,
+			},
+		).execute()
+		with pytest.raises(Exception):
+			client.rpc(
+				'priwa_set_project_flight_type',
+				{
+					'p_project_id': priwa_project['id'],
+					'p_dataset_id': priwa_flight_dataset,
+					'p_flight_type': 'umfeldbefliegung',
+				},
+			).execute()
+
+	assert str(priwa_flight_dataset) not in [flight['id'] for flight in flights.data]
+
+
 def test_priwa_group_assignment_confirms_flight_and_prevents_exclusion(
 	priwa_project, priwa_flight_dataset
 ):

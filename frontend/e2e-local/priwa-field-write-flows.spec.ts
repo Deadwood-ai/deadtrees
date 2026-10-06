@@ -140,6 +140,18 @@ test.describe("PRIWA local field write flows", () => {
       `${page.viewportSize()!.height}px`,
     );
     await expect(page.getByLabel("Bohrmehl")).toBeVisible();
+    const fieldLabels = await captureDrawer
+      .locator(".ant-form-item-label label")
+      .allTextContents();
+    expect(fieldLabels.indexOf("Fund")).toBe(
+      fieldLabels.indexOf("Rindenverlust") + 1,
+    );
+    await page.getByLabel("Fund").focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(
+      page.getByTitle("Ja, nicht nur Buchdrucker", { exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
     const comment = page.getByLabel("Kommentar");
     await expect(comment).toBeVisible();
     await comment.fill("Bleibt beim Drehen erhalten");

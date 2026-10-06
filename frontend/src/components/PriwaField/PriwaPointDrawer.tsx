@@ -56,7 +56,7 @@ const observerOptions: Array<{ label: string; value: PriwaObserverName }> = [
 
 const fundOptions: Array<{ label: string; value: PriwaFund }> = [
   { label: "Ja", value: "ja" },
-  { label: "Ja, kein Buchdrucker", value: "ja_kein_buchdrucker" },
+  { label: "Ja, nicht nur Buchdrucker", value: "ja_kein_buchdrucker" },
   { label: "Nein", value: "nein" },
   { label: "Unsicher", value: "unsicher" },
 ];
@@ -645,9 +645,6 @@ export default function PriwaPointDrawer({
                     >
                       <Input maxLength={20} placeholder="optional" />
                     </Form.Item>
-                    <Form.Item label="Fund" name="fund">
-                      <Select options={fundOptions} />
-                    </Form.Item>
                     <Form.Item label="Baumart" name="baumart">
                       <Select options={baumartOptions} />
                     </Form.Item>
@@ -690,6 +687,10 @@ export default function PriwaPointDrawer({
                     </Form.Item>
                     <Form.Item label="Rindenverlust" name="rinde">
                       <Select options={percentOptions} />
+                    </Form.Item>
+                    {/* Last, so the finding is recorded after the symptoms (ForstBW training, Sep 2026). */}
+                    <Form.Item label="Fund" name="fund">
+                      <Select options={fundOptions} />
                     </Form.Item>
                   </div>
                 ),

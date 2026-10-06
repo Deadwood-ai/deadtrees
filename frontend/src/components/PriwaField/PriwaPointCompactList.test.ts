@@ -48,7 +48,7 @@ describe("PriwaPointCompactList", () => {
     expect(html).toContain("GPS");
     expect(html).toContain("Ja · Fichte · andere · 10.09.2026");
     expect(html).toContain('aria-label="Exakt"');
-    expect(html).toContain("Ja, kein Buchdrucker");
+    expect(html).toContain("Ja, nicht nur Buchdrucker");
     expect(html).toContain("Lokal");
     expect(html).toContain("Gruppe Nord");
     expect(html).toContain('aria-label="Punkt bearbeiten"');
