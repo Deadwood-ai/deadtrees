@@ -80,6 +80,19 @@ def test_same_file_is_rejected_and_names_the_existing_dataset(upload, extension)
 	assert _dataset_ids(filename) == [dataset_id]
 
 
+def test_explicit_override_uploads_a_duplicate_as_a_new_dataset(upload):
+	filename = f'{uuid4()}.tif'
+	content = _unique_file(filename)
+	first = upload(content, filename=filename).json()
+
+	forced = upload(content, filename=filename, allow_duplicate='true')
+
+	assert forced.status_code == 200, forced.text
+	assert forced.json()['id'] != first['id']
+	assert forced.json()['upload_fingerprint'] == first['upload_fingerprint']
+	assert sorted(_dataset_ids(filename)) == sorted([first['id'], forced.json()['id']])
+
+
 def test_upload_stores_the_fingerprint_of_the_uploaded_file(upload, tmp_path):
 	filename = f'{uuid4()}.tif'
 	content = _unique_file(filename)

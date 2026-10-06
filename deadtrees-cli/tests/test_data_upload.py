@@ -313,3 +313,20 @@ def test_upload_of_a_file_already_on_the_platform_sends_nothing(data_commands, t
 		with use_client(token) as client:
 			client.table(settings.statuses_table).delete().eq('dataset_id', first['id']).execute()
 			client.table(settings.datasets_table).delete().eq('id', first['id']).execute()
+
+
+def test_allow_duplicate_uploads_a_second_copy(data_commands, test_file):
+	"""The explicit override passes both the pre-check and the API's finalisation check."""
+	first = data_commands.upload(file_path=str(test_file), authors=['Test Author'])
+	token = data_commands._ensure_auth()
+	second = None
+	try:
+		second = data_commands.upload(file_path=str(test_file), authors=['Test Author'], allow_duplicate=True)
+
+		assert second['id'] != first['id']
+	finally:
+		with use_client(token) as client:
+			for dataset in (first, second):
+				if dataset:
+					client.table(settings.statuses_table).delete().eq('dataset_id', dataset['id']).execute()
+					client.table(settings.datasets_table).delete().eq('id', dataset['id']).execute()

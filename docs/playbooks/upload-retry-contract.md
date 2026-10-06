@@ -42,7 +42,11 @@ the contributor and `existing_dataset_id`, which is null when the caller may
 not see that dataset. Other 409s of this contract carry a string `detail`, so
 clients key on the code. Browser and CLI ask the database function
 `find_duplicate_upload` with the same fingerprint before sending any bytes;
-this step is the enforcement.
+this step is the enforcement. A client that deliberately wants a second copy
+sends the form field `allow_duplicate=true` with every chunk (it is part of the
+upload contract); the step then accepts the file as a new dataset. Clients keep
+it off by default and set it only on an explicit user choice such as the CLI's
+`--allow-duplicates`.
 
 Before database/file finalization, a durable `finalizing` receipt prevents a
 second attempt from repeating side effects. Normal successful finalization saves
