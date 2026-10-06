@@ -1,6 +1,7 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { IGeorefCheck, IGeorefReferenceEvidence } from "../types/georefCheck";
-import { describeReference, offsetColor, orderedReferences, summarizeGeorefCheck } from "./georefCheck";
+import { PROVIDER_NAMES, describeReference, offsetColor, orderedReferences, summarizeGeorefCheck } from "./georefCheck";
 
 const ref = (provider: string, decides: boolean, inliers: number): IGeorefReferenceEvidence => ({
   provider,
@@ -64,6 +65,13 @@ describe("georeferencing check display", () => {
   it("names Wayback references by their capture date", () => {
     expect(describeReference(check({}), "wayback-123")).toBe("Esri Wayback, captured 2021-06-10");
     expect(describeReference(check({}), "esri")).toBe("Esri World Imagery (current)");
+  });
+
+  it("has a readable name for every provider in the processor registry", () => {
+    const registry = JSON.parse(readFileSync(new URL("../../../processor/src/georef_check_v1/providers.json", import.meta.url), "utf8")) as { name: string }[];
+    const unnamed = registry.map((p) => p.name).filter((name) => name !== "esri" && !PROVIDER_NAMES[name]);
+    expect(unnamed).toEqual([]);
+    expect(describeReference(check({}), "se-lm-minkarta")).toBe("Lantmäteriet orthophoto (SE)");
   });
 
   it("colours matches by the 15 m audit line", () => {
