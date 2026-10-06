@@ -64,6 +64,25 @@ def redact_extra(extra: Any) -> Any:
 
 MAX_LOG_MESSAGE_CHARS = 20_000
 
+# Fields every v2_logs row from this process carries in `extra`, such as the
+# processor's worker_id, so per-host activity can be read from the logs.
+_process_log_fields: Dict[str, Any] = {}
+
+
+def set_process_log_fields(**fields: Any) -> None:
+	"""Tag every later log row written by this process with these extra fields."""
+	_process_log_fields.update(fields)
+
+
+def _with_process_fields(extra: Any) -> Any:
+	if not _process_log_fields:
+		return extra
+	if extra is None:
+		return dict(_process_log_fields)
+	if isinstance(extra, dict):
+		return {**_process_log_fields, **extra}
+	return extra
+
 
 class SupabaseHandler(logging.Handler):
 	"""Writes log records to v2_logs.
@@ -88,7 +107,7 @@ class SupabaseHandler(logging.Handler):
 				'category': getattr(record, 'category', None),
 				'user_id': getattr(record, 'user_id', None),
 				'dataset_id': getattr(record, 'dataset_id', None),
-				'extra': redact_extra(getattr(record, 'extra', None)),
+				'extra': redact_extra(_with_process_fields(getattr(record, 'extra', None))),
 			}
 
 			with self.use_client() as client:

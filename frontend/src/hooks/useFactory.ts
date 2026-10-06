@@ -15,6 +15,7 @@ import type {
 	FactoryJourney,
 	FactoryOperations,
 	FactoryOverview,
+	FactoryProcessors,
 	FactoryRecord,
 	FactoryRow,
 	FactoryTrendInterval,
@@ -56,7 +57,6 @@ function normalizeOverview(raw: unknown): FactoryOverview {
 		as_of: asString(record.as_of),
 		since: asString(record.since),
 		counts: asRecord(record.counts) as unknown as FactoryOverview["counts"],
-		workers: asArray(record.workers),
 		coverage: asArray<unknown>(record.coverage).filter((item): item is string => typeof item === "string"),
 	};
 }
@@ -292,6 +292,29 @@ export function useFactoryOperations() {
 		queryKey: ["factory", "operations"],
 		enabled,
 		queryFn: async () => normalizeOperations(await callFactoryRpc<unknown>("factory_operations", {})),
+		retry: factoryRetry,
+		staleTime: 30 * 1000,
+	});
+}
+
+function normalizeProcessors(raw: unknown): FactoryProcessors {
+	const record = asRecord(raw);
+	return {
+		as_of: asString(record.as_of),
+		processors: asArray<FactoryRecord>(record.processors).map((row) => ({
+			...(row as unknown as FactoryProcessors["processors"][number]),
+			claims: asArray(row.claims),
+		})),
+		coverage: asArray<unknown>(record.coverage).filter((item): item is string => typeof item === "string"),
+	};
+}
+
+export function useFactoryProcessors() {
+	const { enabled } = useFactoryAccess();
+	return useQuery({
+		queryKey: ["factory", "processors"],
+		enabled,
+		queryFn: async () => normalizeProcessors(await callFactoryRpc<unknown>("factory_processors", {})),
 		retry: factoryRetry,
 		staleTime: 30 * 1000,
 	});

@@ -176,6 +176,14 @@ def reset_shutdown_request(monkeypatch):
 	monkeypatch.setattr(processor_module, '_shutdown_requested', False)
 
 
+@pytest.fixture(autouse=True)
+def reset_process_log_fields(monkeypatch):
+	"""A test that runs background_process must not tag later tests' log rows."""
+	import shared.logging as shared_logging
+
+	monkeypatch.setattr(shared_logging, '_process_log_fields', {})
+
+
 # @test_environment_only
 @pytest.fixture(autouse=True)
 def cleanup_storage(request):
