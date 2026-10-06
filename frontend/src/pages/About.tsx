@@ -457,8 +457,8 @@ abstract = {Excessive tree mortality is a global concern and remains poorly unde
               />
             </a>
             <p className="m-0 text-base text-gray-600">
-              deadtrees.earth is listed in re3data.org, the Registry of
-              Research Data Repositories.
+              deadtrees.earth is listed in re3data.org, the Registry of Research
+              Data Repositories.
             </p>
           </div>
 
