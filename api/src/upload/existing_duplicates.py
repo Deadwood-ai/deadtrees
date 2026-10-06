@@ -4,12 +4,16 @@ New uploads of a file that is already on the platform are rejected (see
 shared/upload_duplicates.py). This tool handles what was uploaded before. It
 never changes the database: it prints SQL for an operator to review and run.
 
-Run inside the API container on the storage server, which has both the files
-and database access:
+It runs inside the API container on the storage server, which has both the
+files and database access. From the checkout on that host:
 
-	python /app/api/src/upload/existing_duplicates.py backfill-zips > backfill.sql
-	python /app/api/src/upload/existing_duplicates.py plan --out plan.json > archive.sql
-	python /app/api/src/upload/existing_duplicates.py notify --plan plan.json [--send]
+	scripts/existing_duplicates_docker.sh backfill-zips
+	scripts/existing_duplicates_docker.sh plan
+	scripts/existing_duplicates_docker.sh notify [--send]
+
+Each step prints its SQL and keeps its files in <data>/.duplicate-cleanup/
+(backfill.sql, archive.sql, plan.json), which is /data/.duplicate-cleanup/ on
+the host.
 
 backfill-zips  fingerprints raw-image ZIPs uploaded before fingerprints were
                stored, so they block re-uploads and take part in `plan`.
@@ -39,6 +43,8 @@ from shared.notifications.templates import duplicates_archived_email
 from shared.settings import settings
 
 PAGE_SIZE = 1000
+# Outside the nginx static aliases, like the upload session directory.
+WORK_DIR = '.duplicate-cleanup'
 ZIP_NAME = re.compile(r'^(\d+)\.zip$')
 
 
@@ -216,47 +222,56 @@ def _load_candidates(client) -> list[DuplicateCandidate]:
 	return candidates
 
 
-def backfill_zips() -> int:
+def _write_and_print(path: Path, content: str) -> None:
+	path.parent.mkdir(parents=True, exist_ok=True)
+	path.write_text(content)
+	print(content, end='')
+	print(f'Saved as {path}', file=sys.stderr)
+
+
+def backfill_zips(work_dir: Path) -> int:
 	with use_service_client() as client:
 		zip_uploads = {
 			row['dataset_id'] for row in _select_all(client, settings.raw_images_table, 'dataset_id', 'dataset_id')
 		}
 	on_disk = set()
-	print('begin;')
+	statements = ['begin;']
 	for zip_path in sorted(settings.raw_images_path.glob('*.zip')):
 		match = ZIP_NAME.match(zip_path.name)
 		if not match or int(match.group(1)) not in zip_uploads:
 			continue
 		dataset_id = int(match.group(1))
 		on_disk.add(dataset_id)
-		print(
+		statements.append(
 			f"update public.v2_datasets set upload_fingerprint = '{get_file_identifier(zip_path)}' "
 			f'where id = {dataset_id} and upload_fingerprint is null;'
 		)
-	print(f'-- {len(on_disk)} ZIP uploads fingerprinted. Check, then run: commit;')
+	statements.append(f'-- {len(on_disk)} ZIP uploads fingerprinted. Check, then run: commit;')
+	_write_and_print(work_dir / 'backfill.sql', '\n'.join(statements) + '\n')
 	missing = sorted(zip_uploads - on_disk)
 	print(f'{len(missing)} ZIP uploads have no file on disk and stay without a fingerprint: {missing}', file=sys.stderr)
 	return 0
 
 
-def plan(out: Path) -> int:
+def plan(work_dir: Path) -> int:
 	with use_service_client() as client:
 		candidates = _load_candidates(client)
 	groups = plan_duplicate_groups(candidates, sha256_of_file)
-	out.write_text(json.dumps({'groups': groups}, indent='\t'))
-	print(archive_sql(groups), end='')
+	_write_and_print(work_dir / 'archive.sql', archive_sql(groups))
+	plan_path = work_dir / 'plan.json'
+	plan_path.write_text(json.dumps({'groups': groups}, indent='\t'))
 	to_archive = sum(len(group['archive']) for group in groups if not group['review'])
 	print(
 		f'{len(groups)} groups: {to_archive} datasets to archive, '
 		f'{sum(1 for group in groups if group["review"])} groups need a manual decision, '
-		f'{sum(len(group["unconfirmed"]) for group in groups)} copies not confirmed as identical. Details: {out}',
+		f'{sum(len(group["unconfirmed"]) for group in groups)} copies not confirmed as identical. Details: {plan_path}',
 		file=sys.stderr,
 	)
 	return 0
 
 
-def notify(plan_path: Path, send: bool) -> int:
-	groups = json.loads(plan_path.read_text())['groups']
+def notify(work_dir: Path, send: bool) -> int:
+	groups = json.loads((work_dir / 'plan.json').read_text())['groups']
 	planned_ids = [copy['id'] for group in groups for copy in group['archive']]
 	with use_service_client() as client:
 		archived_ids = {
@@ -306,18 +321,17 @@ def main(argv: list[str] | None = None) -> int:
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	commands = parser.add_subparsers(dest='command', required=True)
 	commands.add_parser('backfill-zips')
-	plan_parser = commands.add_parser('plan')
-	plan_parser.add_argument('--out', type=Path, required=True, help='Where to write the plan (JSON)')
+	commands.add_parser('plan')
 	notify_parser = commands.add_parser('notify')
-	notify_parser.add_argument('--plan', type=Path, required=True, help='The plan the archive SQL came from')
 	notify_parser.add_argument('--send', action='store_true', help='Send the e-mails instead of listing them')
 	args = parser.parse_args(argv)
 
+	work_dir = settings.base_path / WORK_DIR
 	if args.command == 'backfill-zips':
-		return backfill_zips()
+		return backfill_zips(work_dir)
 	if args.command == 'plan':
-		return plan(args.out)
-	return notify(args.plan, args.send)
+		return plan(work_dir)
+	return notify(work_dir, args.send)
 
 
 if __name__ == '__main__':
