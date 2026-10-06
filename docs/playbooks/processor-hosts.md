@@ -35,6 +35,8 @@ still be draining on the old release while others already run the new one.
 
 SSH aliases are operator-local; the names below are host names. Worker IDs are
 what appears in `v2_queue.claimed_by` and in the processor logs.
+The `v2_processor_claims` view maps these worker IDs to the host names below;
+when you add a host, add its worker ID to that view in a new migration too.
 
 | | `processing-server` | `helicon` | `deepl1` |
 | --- | --- | --- | --- |
