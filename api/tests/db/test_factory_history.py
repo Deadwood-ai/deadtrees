@@ -120,7 +120,7 @@ def test_upload_log_reconstruction_has_a_targeted_index(db):
 	assert_logs_read_through(plan,'factory_upload_success_log_idx',row)
 
 
-@pytest.mark.parametrize('signature', ['factory_history(integer)','factory_dataset(bigint)','factory_trends(text,text,text)','factory_north_star(boolean)'])
+@pytest.mark.parametrize('signature', ['factory_history(integer)','factory_dataset(bigint)','factory_trends(text,text,text)','factory_north_star(boolean)','factory_operations()'])
 def test_replaced_dashboard_functions_keep_jit_disabled(db,signature):
 	config=db.execute("SELECT proconfig FROM pg_proc WHERE oid=%s::regprocedure", ('public.'+signature,)).fetchone()[0]
 	assert 'jit=off' in config

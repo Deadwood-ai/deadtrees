@@ -70,7 +70,7 @@ cross join lateral(select case
  when r.state='claimed' and r.last_signal_at<now()-interval '1 hour' then 'silent'
  end as value) reason;
 
-create or replace function public.factory_operations() returns jsonb language plpgsql stable security definer set search_path='' as $$
+create or replace function public.factory_operations() returns jsonb language plpgsql stable security definer set search_path='' set jit=off as $$
 declare result jsonb;
 begin
  if not public.can_operate() then raise exception 'Factory operator permission required' using errcode='42501'; end if;
