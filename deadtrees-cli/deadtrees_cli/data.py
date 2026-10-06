@@ -68,15 +68,18 @@ class DataCommands:
 		aquisition_day: Optional[int] = None,
 		additional_information: Optional[str] = None,
 		citation_doi: Optional[str] = None,
+		allow_duplicate: bool = False,
 	):
 		"""Upload a dataset to the API
 
 		Raises DuplicateUploadError, before any bytes are sent, when the file is
-		already on the platform.
+		already on the platform, unless allow_duplicate explicitly uploads it as a
+		new dataset anyway.
 		"""
 		token = self._ensure_auth()
 		file_path = Path(file_path)
-		reject_duplicate_upload(file_path, token)
+		if not allow_duplicate:
+			reject_duplicate_upload(file_path, token)
 
 		# Validate and convert enums
 		try:
@@ -100,6 +103,7 @@ class DataCommands:
 			aquisition_day=aquisition_day,
 			additional_information=additional_information,
 			citation_doi=citation_doi,
+			allow_duplicate=allow_duplicate,
 		)
 
 		return dataset
@@ -148,6 +152,8 @@ class DataCommands:
 				for field in optional_fields:
 					if field in metadata and metadata[field] is not None:
 						form_data[field] = str(metadata[field])
+				if metadata.get('allow_duplicate'):
+					form_data['allow_duplicate'] = 'true'
 
 				files = {'file': (file_path.name, chunk_data, 'application/octet-stream')}
 

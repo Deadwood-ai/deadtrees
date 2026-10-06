@@ -56,6 +56,8 @@ def upload_chunk(
 	data_access: Annotated[DatasetAccessEnum, Form()] = DatasetAccessEnum.public,
 	citation_doi: Annotated[Optional[str], Form()] = None,
 	upload_type: Annotated[Optional[UploadType], Form()] = None,
+	# Opt-in override: accept a file that is already on the platform as a new dataset.
+	allow_duplicate: Annotated[bool, Form()] = False,
 ):
 	"""Handle chunked upload of files (GeoTIFF or ZIP) with auto-detection and simplified processing"""
 	user = verify_token(token)
@@ -113,12 +115,20 @@ def upload_chunk(
 		upload_id,
 		upload_target_path,
 		str(user.id),
-		{'chunks_total': chunks_total, 'upload_type': upload_type.value, **metadata},
+		# The override joins the contract only when set, so uploads in flight across a deploy keep their hash.
+		{
+			'chunks_total': chunks_total,
+			'upload_type': upload_type.value,
+			**({'allow_duplicate': True} if allow_duplicate else {}),
+			**metadata,
+		},
 	) as session:
 		response = session.accept(chunk_index, file.file.read())
 		if response is not None:
 			return response
-		session.begin_finalization(validate=lambda path: validate_assembled_upload(upload_type, path, token))
+		session.begin_finalization(
+			validate=lambda path: validate_assembled_upload(upload_type, path, token, allow_duplicate)
+		)
 		dataset = None
 		try:
 			# Calculate upload runtime
@@ -201,8 +211,11 @@ def upload_chunk(
 			raise HTTPException(status_code=500, detail=str(e))
 
 
-def validate_assembled_upload(upload_type: UploadType, path: Path, token: str):
-	"""Reject unusable or already uploaded bytes before finalization; must stay side-effect free."""
+def validate_assembled_upload(upload_type: UploadType, path: Path, token: str, allow_duplicate: bool = False):
+	"""Reject unusable or already uploaded bytes before finalization; must stay side-effect free.
+
+	`allow_duplicate` is the caller's explicit override for a file that is already on the platform.
+	"""
 	try:
 		if upload_type == UploadType.RAW_IMAGES_ZIP:
 			ensure_supported_zip_compression(path)
@@ -211,6 +224,8 @@ def validate_assembled_upload(upload_type: UploadType, path: Path, token: str):
 			ensure_georeferenced_geotiff(path)
 	except (UnsupportedZipCompressionError, InvalidZipArchiveError, UnprocessableUploadError) as e:
 		raise HTTPException(status_code=400, detail=str(e))
+	if allow_duplicate:
+		return
 	try:
 		reject_duplicate_upload(path, token)
 	except DuplicateUploadError as e:
