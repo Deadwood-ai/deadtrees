@@ -45,23 +45,34 @@ export function describeReference(check: IGeorefCheck, provider: string): string
   return PROVIDER_NAMES[provider] ?? provider;
 }
 
-/** One-line summary for the audit card. */
-export function summarizeGeorefCheck(check: IGeorefCheck): { tone: "success" | "error" | "warning"; text: string } {
+export interface GeorefSummary {
+  tone: "success" | "error" | "warning";
+  /** the call, e.g. "Poor, 19.8 m off" */
+  verdict: string;
+  /** what it rests on, or why it is uncertain */
+  detail: string;
+}
+
+/** The check's call and what it rests on, for the audit card. */
+export function summarizeGeorefCheck(check: IGeorefCheck): GeorefSummary {
   if (check.decision === "uncertain") {
-    return { tone: "warning", text: `Uncertain: ${describeGeorefReason(check.reason)}. Please check by eye.` };
+    return { tone: "warning", verdict: "Uncertain", detail: `${capitalize(describeGeorefReason(check.reason))}. Please check by eye.` };
   }
   if (check.evidence_level === "gross") {
-    return { tone: "error", text: `Poor: ${describeGeorefReason(check.reason)}.` };
+    return { tone: "error", verdict: "Poor", detail: `${capitalize(describeGeorefReason(check.reason))}.` };
   }
-  const deciding = check.reference_evidence.filter((r) => r.decides);
-  const offset = check.p90_m === null ? "" : `${check.p90_m.toFixed(1)} m`;
-  const refs = `${deciding.length} reference${deciding.length === 1 ? "" : "s"}`;
-  const strength = check.evidence_level === "strong" ? "strong evidence" : "moderate evidence";
+  const deciding = orderedReferences(check).filter((r) => r.decides);
+  const names = deciding.slice(0, 2).map((r) => describeReference(check, r.provider));
+  const more = deciding.length > 2 ? ` and ${deciding.length - 2} more` : "";
+  const strength = check.evidence_level === "strong" ? "Strong" : "Moderate";
   return {
     tone: check.decision === "good" ? "success" : "error",
-    text: `${check.decision === "good" ? "Good" : "Poor"}: offset ${offset} (90% of the area) on ${refs}, ${strength}.`,
+    verdict: `${check.decision === "good" ? "Good" : "Poor"}${check.p90_m === null ? "" : `, ${check.p90_m.toFixed(1)} m off`}`,
+    detail: `${strength} evidence: 90% of the area is within this offset of ${names.join(", ")}${more}.`,
   };
 }
+
+const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 /** References worth showing first: deciding ones, then by inliers. */
 export function orderedReferences(check: IGeorefCheck): IGeorefReferenceEvidence[] {

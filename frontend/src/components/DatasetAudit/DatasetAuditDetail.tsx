@@ -328,11 +328,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 						size="small"
 						validateTrigger={["onChange", "onBlur"]}
 					>
-						<AuditReviewNotice
-							items={auditReviewItems}
-							suggestions={auditSuggestions}
-							saved={auditData as Record<string, unknown> | null | undefined}
-						/>
+						<AuditReviewNotice items={auditReviewItems} />
 
 						<UserFlagsCard
 							flags={flags}
@@ -347,6 +343,8 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 							cogPath={dataset.cog_path}
 							suggestions={auditSuggestions}
 							prefilledFields={prefilledFields}
+							reviewItems={auditReviewItems}
+							saved={auditData as Record<string, unknown> | null | undefined}
 						/>
 
 						<AcquisitionDateCard
@@ -355,6 +353,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 							suggestions={auditSuggestions}
 							prefilledFields={prefilledFields}
 							decisions={acquisitionDateDecisions}
+							reviewItems={auditReviewItems}
 						/>
 
 						<PhenologyCard
