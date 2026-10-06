@@ -1,5 +1,7 @@
 # DeadTrees: An Open Platform for Automated Deadwood and Forest Cover Mapping from Aerial Imagery
 
+<a href="https://www.re3data.org/repository/r3d100014703"><img src="frontend/public/assets/re3data-badge.svg" alt="deadtrees.earth in re3data.org" width="210"></a>
+
 ## Overview
 
 DeadTrees is an end-to-end, open-source platform for processing, analyzing, and visualizing high-resolution aerial orthophotos with a focus on deadwood detection and forest cover mapping. The system accepts two types of input data: pre-processed GeoTIFF orthomosaics and raw drone image collections (ZIP archives). Through an automated processing pipeline, each dataset is standardized, enriched with geospatial metadata, and analyzed using deep learning models for semantic segmentation of deadwood and tree cover.
