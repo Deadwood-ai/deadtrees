@@ -5,6 +5,7 @@
 -- Each failure group carries the stage key the processor uses for its Linear
 -- cluster issue (fingerprint processor/failure/<stage>).
 begin;
+set local lock_timeout = '5s';
 
 -- One canonical name per failure stage. Mirrors STAGE_KEY_ALIASES in
 -- processor/src/utils/linear_issues.py; legacy rows without error_stage fall
@@ -48,9 +49,9 @@ select r.*,reason.value as attention_reason,
  case reason.value when 'failed' then 1 when 'uncertain' then 2 when 'overdue' then 3
  when 'delivery' then 4 when 'report' then 5 when 'silent' then 6 end as attention_rank,
  failure.since as failure_since,delivery.since as delivery_since,report.since as report_since,
- case when r.has_error then public.factory_failure_stage(s.error_stage,r.error_message) end as failure_stage,
- case when r.has_error then public.factory_failure_kind(r.error_message) end as failure_kind,
- team.value as team_upload
+ case when reason.value='failed' then public.factory_failure_stage(s.error_stage,r.error_message) end as failure_stage,
+ case when reason.value='failed' then public.factory_failure_kind(r.error_message) end as failure_kind,
+ team.user_id is not null as team_upload
 from public.factory_dataset_records r
 left join public.v2_statuses s on s.dataset_id=r.dataset_id
 left join public.factory_submissions m on m.dataset_id=r.dataset_id
@@ -58,12 +59,12 @@ left join (select dataset_id,failed_at as since from public.factory_failure_epis
 left join (select dataset_id,min(created_at) as since from public.processing_notification_events
  where status='failed' or (status in ('pending','sending') and next_attempt_at<now()) group by dataset_id) delivery on delivery.dataset_id=r.dataset_id
 left join (select dataset_id,min(created_at) as since from public.dataset_flags where status<>'resolved' group by dataset_id) report on report.dataset_id=r.dataset_id
-cross join lateral(select exists(select 1 from public.privileged_users p where p.user_id=r.user_id and p.can_audit) as value) team
+left join (select user_id from public.privileged_users where can_audit) team on team.user_id=r.user_id
 cross join lateral(select case
  when r.has_error and r.state<>'claimed' then 'failed'
  when r.state='uncertain' then 'uncertain'
  when m.first_ready_at is null and m.workflow='geotiff' and m.input_bytes<1073741824 and m.uploaded_at<now()-interval '2 hours'
-  and not team.value then 'overdue'
+  and team.user_id is null then 'overdue'
  when r.notification_problem then 'delivery'
  when r.open_reports>0 then 'report'
  when r.state='claimed' and r.last_signal_at<now()-interval '1 hour' then 'silent'
@@ -76,13 +77,14 @@ begin
  with population as materialized(select dataset_id,user_id,file_name,attention_reason,attention_rank,attention_since,state,is_ready,team_upload,
  queued_at,claimed_at,has_error,failure_since,notification_problem,delivery_since,open_reports,report_since,failure_stage,failure_kind
  from public.factory_attention_records where not archived),
- attention as(select * from population where attention_reason is not null),
+ attention as(select *,row_number() over(partition by attention_reason,failure_stage,failure_kind
+  order by attention_since nulls last,dataset_id desc) as position from population where attention_reason is not null),
  groups as(
  select attention_reason as reason,min(attention_rank) as rank,failure_stage as stage,failure_kind as kind,count(*) as count,
   count(distinct user_id) as contributors,min(attention_since) as oldest_since,
-  (array_agg(dataset_id order by attention_since nulls last,dataset_id desc))[1:200] as dataset_ids,
-  jsonb_path_query_array(jsonb_agg(jsonb_build_object('dataset_id',dataset_id,'file_name',file_name,'state',state,'attention_since',attention_since)
-   order by attention_since nulls last,dataset_id desc),'$[0 to 4]') as samples
+  coalesce(array_agg(dataset_id order by position) filter(where position<=200),'{}') as dataset_ids,
+  coalesce(jsonb_agg(jsonb_build_object('dataset_id',dataset_id,'file_name',file_name,'state',state,'attention_since',attention_since)
+   order by position) filter(where position<=5),'[]') as samples
  from attention group by attention_reason,failure_stage,failure_kind
  ),
  waiting as(
@@ -93,7 +95,7 @@ begin
  union all select 5,'reports',count(*),min(report_since),'Oldest open report','{"reports":"open"}'::jsonb from population where open_reports>0
  ) select jsonb_build_object('as_of',now(),'attention_total',(select count(*) from attention),
  'attention_contributors',(select count(distinct user_id) from attention),
- 'attention_groups',coalesce((select jsonb_agg(to_jsonb(groups) order by rank,count desc,stage nulls last,kind nulls last) from groups),'[]'::jsonb),
+ 'attention_groups',coalesce((select jsonb_agg(to_jsonb(groups)-'rank' order by rank,count desc,stage nulls last,kind nulls last) from groups),'[]'::jsonb),
  'team_waiting',(select count(*) from population where team_upload and state in('queued','claimed') and not is_ready),
  'waiting',(select jsonb_agg(to_jsonb(waiting)-'position' order by position) from waiting),
  'coverage',jsonb_build_array(

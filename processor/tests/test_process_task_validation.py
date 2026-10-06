@@ -95,7 +95,7 @@ def test_process_task_rejects_downstream_without_geotiff(monkeypatch):
 	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'delete-token')
 	monkeypatch.setattr(queue_runtime_module, 'use_client', lambda token: _FakeClient())
 	monkeypatch.setattr(processor_module, 'update_status', _record_status_update)
-	monkeypatch.setattr(processor_module, 'create_processing_failure_issue', lambda **kwargs: None)
+	monkeypatch.setattr(processor_module, 'report_processing_failure', lambda **kwargs: None)
 	monkeypatch.setattr(processor_module, '_notify_processing_result_safely', lambda *args: None)
 	monkeypatch.setattr(processor_module.logger, 'info', lambda *args, **kwargs: None)
 	monkeypatch.setattr(processor_module.logger, 'error', lambda *args, **kwargs: None)

@@ -380,7 +380,6 @@ export interface FactoryAttentionSample {
 /** Datasets that need attention for one reason and, for failures, one stage and error class. */
 export interface FactoryAttentionGroup {
 	reason: FactoryAttentionReason | string;
-	rank: number | null;
 	/** Canonical failure stage; also names the Linear cluster issue (processor/failure/<stage>). */
 	stage: string | null;
 	/** Short error class with numbers masked. */

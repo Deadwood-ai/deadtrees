@@ -302,7 +302,6 @@ const operations = () => ({
   attention_contributors: 1,
   attention_groups: attentionRows().map((row) => ({
     reason: row.attention_reason,
-    rank: row.attention_rank,
     stage: row.attention_reason === "failed" ? "cog_processing" : null,
     kind: row.attention_reason === "failed" ? "out of memory" : null,
     count: 1,

@@ -227,7 +227,9 @@ def find_open_cluster_issue(fingerprint: str) -> Optional[dict]:
 		}
 	}
 	'''
-	line = re.compile(rf'^fingerprint:\s*{re.escape(fingerprint)}\s*$', re.MULTILINE)
+	# Linear's editor re-serializes edited descriptions and escapes underscores.
+	pattern = re.escape(fingerprint).replace('_', r'\\?_')
+	line = re.compile(rf'^fingerprint:\s*{pattern}\s*$', re.MULTILINE)
 	nodes = _linear_request(query, {'term': fingerprint}, timeout=10).get('searchIssues', {}).get('nodes', [])
 	for issue in nodes:
 		if (issue.get('state') or {}).get('type') in CLOSED_STATE_TYPES:
@@ -237,8 +239,9 @@ def find_open_cluster_issue(fingerprint: str) -> Optional[dict]:
 	return None
 
 
-def create_cluster_issue(fingerprint: str, stage: str) -> dict:
-	"""Open the cluster issue that collects every failure in one stage."""
+def create_cluster_issue(stage: str) -> dict:
+	"""Open the cluster issue that collects every failure in one canonical stage."""
+	fingerprint = failure_fingerprint(stage)
 	mutation = '''
 	mutation CreateIssue($input: IssueCreateInput!) {
 		issueCreate(input: $input) { success issue { id identifier url } }
@@ -379,7 +382,7 @@ def report_processing_failure(
 
 	fingerprint = failure_fingerprint(stage)
 	try:
-		issue = find_open_cluster_issue(fingerprint) or create_cluster_issue(fingerprint, stage_key(stage))
+		issue = find_open_cluster_issue(fingerprint) or create_cluster_issue(stage_key(stage))
 		body = build_issue_description(
 			dataset_id=dataset_id,
 			stage=stage,

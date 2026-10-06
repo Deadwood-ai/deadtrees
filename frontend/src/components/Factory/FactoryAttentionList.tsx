@@ -49,6 +49,10 @@ type FactoryAttentionListProps = {
 
 const groupKey = (group: FactoryAttentionGroup) => `${group.reason}|${group.stage ?? ""}|${group.kind ?? ""}`;
 
+/** The server returns at most 200 ids per group, oldest first. */
+const isTruncated = (group: FactoryAttentionGroup) => group.dataset_ids.length < group.count;
+const groupPath = (group: FactoryAttentionGroup) => factoryDatasetsPath({ ids: group.dataset_ids, sort: "attention" });
+
 function causeLabel(group: FactoryAttentionGroup): string {
 	if (!group.stage) return ATTENTION_DESCRIPTIONS[group.reason] ?? attentionLabel(group.reason);
 	const stage = stageLabel(group.stage) ?? group.stage;
@@ -73,7 +77,7 @@ function GroupDatasets({ group, now }: { group: FactoryAttentionGroup; now: numb
 			{group.count > group.samples.length && (
 				<li className="text-xs text-gray-500">
 					and {group.count - group.samples.length} more.{" "}
-					<Link to={factoryDatasetsPath({ ids: group.dataset_ids, sort: "attention" })}>Open the group in the explorer →</Link>
+					<Link to={groupPath(group)}>{isTruncated(group) ? `Open the oldest ${group.dataset_ids.length} in the explorer →` : "Open the group in the explorer →"}</Link>
 				</li>
 			)}
 		</ul>
@@ -111,7 +115,12 @@ export default function FactoryAttentionList({ operations, isLoading, error, onR
 			width: 110,
 			align: "right",
 			render: (_, group) => (
-				<Link to={factoryDatasetsPath({ ids: group.dataset_ids, sort: "attention" })} className="font-mono font-medium" data-testid="attention-group-count">
+				<Link
+					to={groupPath(group)}
+					title={isTruncated(group) ? `Opens the oldest ${group.dataset_ids.length} of ${group.count}` : undefined}
+					className="font-mono font-medium"
+					data-testid="attention-group-count"
+				>
 					{group.count.toLocaleString()}
 				</Link>
 			),
@@ -121,12 +130,7 @@ export default function FactoryAttentionList({ operations, isLoading, error, onR
 			title: "Oldest",
 			key: "oldest",
 			width: 150,
-			render: (_, group) => (
-				<span className="flex flex-col leading-tight">
-					<TimeCell iso={group.oldest_since} now={now} emptyReason="No timestamp is tracked for this reason; the duration is not known." />
-					<span className="text-[11px] text-gray-400">{ATTENTION_SINCE_LABELS[group.reason]}</span>
-				</span>
-			),
+			render: (_, group) => <AttentionSince row={{ attention_reason: group.reason, attention_since: group.oldest_since }} now={now} />,
 		},
 		{
 			title: "Linear",
