@@ -11,7 +11,8 @@ An account that exists but was never confirmed may carry a password chosen by
 someone else who registered the address first. Its password is therefore replaced
 with a random one and the owner of the inbox chooses their own through a recovery
 link, so nobody but the inbox owner can sign in once the address is confirmed.
-That same path makes a retry safe when the confirmation email could not be sent.
+A new account whose confirmation email could not be sent is deleted again, so
+retrying is an ordinary sign-up with the password the person chose.
 """
 
 import logging
@@ -95,5 +96,9 @@ def create_account(email: str, password: str, redirect_to: Optional[str]) -> Non
 					raise SignupRejected(error.message) from error
 				raise
 			subject, text_body, html_body = confirm_signup_email(link.properties.action_link)
-	if not send_email(email, subject, html_body, text_body=text_body).get('success'):
-		raise SignupEmailFailed
+		if send_email(email, subject, html_body, text_body=text_body).get('success'):
+			return
+		if not existing:
+			# Undo the new account so a retry is an ordinary sign-up with the chosen password.
+			client.auth.admin.delete_user(link.user.id)
+	raise SignupEmailFailed

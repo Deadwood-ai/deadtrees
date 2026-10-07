@@ -129,8 +129,9 @@ def test_undelivered_confirmation_email_is_reported_and_retry_recovers(new_email
 	deliver = signup_module.send_email
 	monkeypatch.setattr(signup_module, 'send_email', lambda *args, **kwargs: {'success': False, 'error': 'down'})
 	assert _signup(new_email).status_code == 503
+	assert _account(new_email) is None, 'a new account without its confirmation email is undone'
 	monkeypatch.setattr(signup_module, 'send_email', deliver)
 	purge_messages()
 	assert _signup(new_email).status_code == 200
 	message = assert_email_received('Confirm your DeadTrees account', new_email)
-	assert 'type=recovery' in get_message_by_id(message['ID'])['Text']
+	assert 'type=signup' in get_message_by_id(message['ID'])['Text'], 'the retry is an ordinary sign-up'
