@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../../hooks/useAuthProvider";
 import { supabase } from "../../hooks/useSupabase";
 import { trackAppEvent } from "../../utils/analytics";
+import AuthCard from "./AuthCard";
 
 type ResetPasswordFormValues = {
   confirmPassword: string;
@@ -151,103 +152,97 @@ const ResetPassword = () => {
   const hasRecoverySession = status === "authenticated";
 
   return (
-    <div className="m-auto flex h-full max-w-7xl items-center justify-center">
-      <div className="w-96 rounded-md bg-white p-8">
-        <h1 className="mb-8 text-3xl font-semibold text-gray-600">
-          Choose your password
-        </h1>
-        {status === "checking" ? (
-          <div className="flex items-center justify-center gap-3 py-8 text-gray-600">
-            <Spin />
-            <span>Checking reset link...</span>
-          </div>
-        ) : null}
-        {status === "anonymous" ? (
-          <Alert
-            className="mb-4"
-            showIcon
-            type="warning"
-            message="Reset link expired"
-            description={
-              <span>
-                Request a new password reset email, then open the latest link
-                from your inbox.{" "}
-                <Link to="/forgot-password" className="text-blue-500 underline">
-                  Send a new reset link
-                </Link>
-              </span>
-            }
-          />
-        ) : null}
-        {errorMessage ? (
-          <Alert
-            className="mb-4"
-            showIcon
-            type="error"
-            message={errorMessage}
-          />
-        ) : null}
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={onFormSubmit}
-          disabled={!hasRecoverySession || isSubmitting}
+    <AuthCard title="Choose your password">
+      {status === "checking" ? (
+        <div className="flex items-center justify-center gap-3 py-8 text-gray-600">
+          <Spin />
+          <span>Checking reset link...</span>
+        </div>
+      ) : null}
+      {status === "anonymous" ? (
+        <Alert
+          className="mb-4"
+          showIcon
+          type="warning"
+          message="Reset link expired"
+          description={
+            <span>
+              Request a new password reset email, then open the latest link from
+              your inbox.{" "}
+              <Link
+                to="/forgot-password"
+                className="font-medium text-[#1B5E35] underline hover:text-emerald-800"
+              >
+                Send a new reset link
+              </Link>
+            </span>
+          }
+        />
+      ) : null}
+      {errorMessage ? (
+        <Alert className="mb-4" showIcon type="error" message={errorMessage} />
+      ) : null}
+      <Form
+        form={form}
+        layout="vertical"
+        onFinish={onFormSubmit}
+        disabled={!hasRecoverySession || isSubmitting}
+        requiredMark={false}
+      >
+        <Form.Item
+          label="New Password"
+          name="password"
+          rules={[
+            { required: true, message: "Please enter a new password." },
+            {
+              min: MIN_PASSWORD_LENGTH,
+              message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
+            },
+          ]}
         >
-          <Form.Item
-            label="New Password"
-            name="password"
-            rules={[
-              { required: true, message: "Please enter a new password." },
-              {
-                min: MIN_PASSWORD_LENGTH,
-                message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
-              },
-            ]}
-          >
-            <Input.Password
-              className="w-full p-2"
-              placeholder="New Password"
-              autoComplete="new-password"
-            />
-          </Form.Item>
-          <Form.Item
-            label="Confirm New Password"
-            name="confirmPassword"
-            dependencies={["password"]}
-            rules={[
-              { required: true, message: "Please confirm your new password." },
-              ({ getFieldValue }) => ({
-                validator(_, value) {
-                  if (!value || getFieldValue("password") === value) {
-                    return Promise.resolve();
-                  }
+          <Input.Password
+            size="large"
+            placeholder="New Password"
+            autoComplete="new-password"
+          />
+        </Form.Item>
+        <Form.Item
+          label="Confirm New Password"
+          name="confirmPassword"
+          dependencies={["password"]}
+          rules={[
+            { required: true, message: "Please confirm your new password." },
+            ({ getFieldValue }) => ({
+              validator(_, value) {
+                if (!value || getFieldValue("password") === value) {
+                  return Promise.resolve();
+                }
 
-                  return Promise.reject(new Error("Passwords do not match."));
-                },
-              }),
-            ]}
+                return Promise.reject(new Error("Passwords do not match."));
+              },
+            }),
+          ]}
+        >
+          <Input.Password
+            size="large"
+            placeholder="Confirm New Password"
+            autoComplete="new-password"
+          />
+        </Form.Item>
+        <Form.Item>
+          <Button
+            className="w-full"
+            disabled={!hasRecoverySession}
+            loading={isSubmitting}
+            size="large"
+            type="primary"
+            htmlType="submit"
           >
-            <Input.Password
-              className="w-full p-2"
-              placeholder="Confirm New Password"
-              autoComplete="new-password"
-            />
-          </Form.Item>
-          <Form.Item>
-            <Button
-              className="w-full"
-              disabled={!hasRecoverySession}
-              loading={isSubmitting}
-              size="large"
-              type="primary"
-              htmlType="submit"
-            >
-              Save password
-            </Button>
-          </Form.Item>
-        </Form>
-      </div>
-    </div>
+            Save password
+          </Button>
+        </Form.Item>
+      </Form>
+    </AuthCard>
   );
 };
 
