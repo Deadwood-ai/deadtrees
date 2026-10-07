@@ -129,3 +129,20 @@ def test_public_flights_carry_no_project_role(access_accounts, project, private_
 	member = _sees(access_accounts['reader'], project, private_flight)
 	assert member['mosaic'] and member['dataset']
 	assert member['access']['role'] is None
+
+
+def test_uploaders_in_several_projects_share_with_none(access_accounts, project, private_flight):
+	other_project = str(uuid.uuid4())
+	with use_service_client() as client:
+		client.table('priwa_projects').insert(
+			{'id': other_project, 'slug': f'test-priwa-{other_project}', 'name': 'Other PRIWA Project'}
+		).execute()
+		client.table('priwa_project_memberships').insert(
+			{'project_id': other_project, 'user_id': access_accounts['owner']['id'], 'role': 'field_user'}
+		).execute()
+	try:
+		assert _sees(access_accounts['reader'], project, private_flight)['dataset'] is False
+	finally:
+		with use_service_client() as client:
+			client.table('priwa_project_memberships').delete().eq('project_id', other_project).execute()
+			client.table('priwa_projects').delete().eq('id', other_project).execute()

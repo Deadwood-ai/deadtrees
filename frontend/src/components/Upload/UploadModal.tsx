@@ -139,7 +139,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
   const dataAccess = Form.useWatch("data_access", form);
   const platform = Form.useWatch("platform", form);
   const { data: priwaMemberships = [] } = usePriwaProjectMemberships();
-  const priwaProject = priwaMemberships.find((membership) => membership.contributesFlights);
+  // Caches written before the flag was read lack it; the database default is to contribute.
+  const priwaProject = priwaMemberships.find((membership) => membership.contributesFlights !== false);
 
   // PRIWA partners' flights stay inside their project unless they choose otherwise.
   useEffect(() => {

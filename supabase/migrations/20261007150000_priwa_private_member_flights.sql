@@ -25,7 +25,15 @@ as $$
 	where p_user_id is not null
 		and dataset.data_access = 'private'
 		and dataset.platform = 'drone'
-		and not dataset.archived;
+		and not dataset.archived
+		-- Uploads carry no project, so an uploader contributing to several
+		-- projects shares with none of them rather than with all.
+		and not exists (
+			select 1 from public.priwa_project_memberships other
+			where other.user_id = uploader.user_id
+				and other.contributes_flights
+				and other.project_id <> uploader.project_id
+		);
 $$;
 
 revoke all on function internal.priwa_shared_dataset_ids(uuid) from public, anon, authenticated;
