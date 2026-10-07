@@ -125,20 +125,22 @@ export function useDatasetThumbnailUrl(dataset: IDatasetFileSource | null | unde
 
 /**
  * COG and thumbnail addresses for one dataset's map. When the database does not
- * list the COG path to this caller, it is fetched from the capped API once per session.
+ * list the COG path to this caller, it is fetched from the capped API once per session;
+ * cogError explains why it could not be, for example the daily limit.
  */
 export function useDatasetFileUrls(dataset: IDatasetFileSource | null | undefined) {
   const datasets = useMemo(() => (dataset ? [dataset] : []), [dataset]);
   const resolve = useDatasetFileUrlResolver(datasets);
   const { user } = useAuth();
   const needsPath = !!dataset && !isPrivateDataset(dataset) && !dataset.cog_path;
-  const { data: fetchedPath } = useQuery({
+  const { data: fetchedPath, error: cogPathError } = useQuery({
     queryKey: ["datasets", dataset?.id, "cog-path", user?.id],
     queryFn: () => fetchPublicCogPath(dataset!.id),
     enabled: needsPath,
     staleTime: Infinity,
     retry: false,
   });
-  if (!dataset) return { cogUrl: null, thumbnailUrl: null };
-  return resolve(needsPath && fetchedPath ? { ...dataset, cog_path: fetchedPath } : dataset);
+  const cogError = needsPath && cogPathError ? cogPathError.message : null;
+  if (!dataset) return { cogUrl: null, thumbnailUrl: null, cogError: null };
+  return { ...resolve(needsPath && fetchedPath ? { ...dataset, cog_path: fetchedPath } : dataset), cogError };
 }
