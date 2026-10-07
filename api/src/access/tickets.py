@@ -44,6 +44,11 @@ def _signature(encoded: str) -> str:
 	return hmac.new(_signing_key(), encoded.encode(), hashlib.sha256).hexdigest()
 
 
+def keyed_digest(value: str) -> str:
+	"""A stable digest of a value (such as a client IP) that cannot be reversed without the key."""
+	return hmac.new(_signing_key(), f'digest:{value}'.encode(), hashlib.sha256).hexdigest()
+
+
 def sign_ticket(user_id: str, resource: str) -> tuple[str, int]:
 	"""Sign a ticket for one resource, e.g. ``cog:42``. Returns the path segment and its expiry."""
 	expires_at = int(time.time()) + settings.ASSET_TICKET_TTL_SECONDS

@@ -14,6 +14,13 @@ export interface IDatasetFileUrls {
   thumbnailUrl: string | null;
 }
 
+/**
+ * Whether the dataset has a map image. The COG path itself is only listed to owners,
+ * staff and PRIWA members; everyone else fetches it from the API when the map opens.
+ */
+export const hasMapImage = (dataset: { cog_path?: string | null; is_cog_done?: boolean | null }): boolean =>
+  !!(dataset.cog_path || dataset.is_cog_done);
+
 /** Private datasets are never served statically; they need signed API addresses. */
 export const isPrivateDataset = (dataset: Pick<IDatasetFileSource, "data_access">): boolean =>
   dataset.data_access === IDataAccess.private;

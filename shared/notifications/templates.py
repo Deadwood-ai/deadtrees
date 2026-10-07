@@ -140,3 +140,32 @@ def duplicates_archived_email(datasets: list[dict]) -> tuple[str, str, str]:
 	</div>
 	"""
 	return subject, text_body, html_body
+
+
+def confirm_signup_email(confirm_url: str) -> tuple[str, str, str]:
+	"""Return the sign-up confirmation email with the one-time link Supabase generated."""
+	safe_url = escape(confirm_url, quote=True)
+	subject = 'Confirm your DeadTrees account'
+	text_body = (
+		'Welcome to DeadTrees.\n\n'
+		f'Confirm your email address to finish creating your account:\n{confirm_url}\n\n'
+		'If you did not sign up, you can ignore this email.'
+	)
+	html_body = f"""
+	<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+		<div style="background: #1a1a2e; padding: 20px; border-radius: 8px 8px 0 0;">
+			<h1 style="color: #27ae60; margin: 0; font-size: 20px;">Confirm your account</h1>
+		</div>
+		<div style="background: #f8f9fa; padding: 20px; border: 1px solid #dee2e6; border-top: none; border-radius: 0 0 8px 8px;">
+			<p style="color: #333; margin-top: 0;">Welcome to DeadTrees. Confirm your email address to finish creating your account.</p>
+			<div style="text-align: center; margin: 24px 0;">
+				<a href="{safe_url}"
+				   style="background: #27ae60; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+					Confirm email
+				</a>
+			</div>
+			<p style="color: #666; font-size: 13px;">If you did not sign up, you can ignore this email.</p>
+		</div>
+	</div>
+	"""
+	return subject, text_body, html_body

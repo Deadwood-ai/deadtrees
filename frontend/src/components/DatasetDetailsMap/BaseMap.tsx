@@ -7,6 +7,7 @@ import { useDatasetLabelTypes } from "../../hooks/useDatasetLabelTypes";
 import { useDatasetDetailsMap } from "../../hooks/useDatasetDetailsMapProvider";
 import { useDatasetAOI } from "../../hooks/useDatasetAudit";
 import { useDatasetFileUrls } from "../../hooks/useDatasetAccess";
+import { hasMapImage } from "../../utils/datasetFileUrls";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { hasForestCoverPredictionOutput } from "../../utils/predictionAvailability";
 import { FeatureTooltip, FeaturePopover, ClickedPolygonInfo } from "./overlays";
@@ -284,7 +285,7 @@ export default function BaseMap({
 	}, [popoverInfo, onEditDeadwood, onEditForestCover, hidePopover]);
 
 	if (!data) return null;
-	if (!data.cog_path) {
+	if (!hasMapImage(data)) {
 		const empty = describeMissingImage(data);
 		return (
 			<div className="flex h-full items-center justify-center px-6 pt-24" role="status">

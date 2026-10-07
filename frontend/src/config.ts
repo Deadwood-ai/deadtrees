@@ -35,6 +35,10 @@ const SUPABASE_SENTINEL_ANON_KEY = import.meta.env.VITE_SUPABASE_SENTINEL_PROCES
 const SAM_API_URL =
   (import.meta.env.VITE_SAM_API_URL as string | undefined) || "https://geosense--sam-api-fastapi-app.modal.run";
 
+// Cloudflare Turnstile site key for the sign-up captcha; development uses Cloudflare's always-pass test key.
+const TURNSTILE_SITE_KEY =
+  (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined) || (DEV ? "1x00000000000000000000AA" : "");
+
 export const Settings = {
   API_URL: DEV ? API_URL_DEV : API_URL_PROD,
   COG_BASE_URL: DEV ? COG_BASE_URL_DEV : COG_BASE_URL_PROD,
@@ -46,6 +50,7 @@ export const Settings = {
   API_URL_UPLOAD_ENDPOINT: DEV ? API_URL_UPLOAD_ENDPOINT_DEV : API_URL_UPLOAD_ENDPOINT_PROD,
   DEV: DEV,
   SAM_API_URL,
+  TURNSTILE_SITE_KEY,
 
   DATA_TABLE_FULL: "v2_full_dataset_view", // For admin/audit use (includes excluded datasets)
   DATA_TABLE_OWNER: "v2_full_dataset_view_owner",

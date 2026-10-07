@@ -39,6 +39,12 @@ Mailpit, including seeded login and password-reset shell behavior.
 7. Submit a reset request for the seeded contributor.
 8. Open local Mailpit and verify a reset email was captured.
 9. Do not change the shared seeded password unless the run owns an isolated DB.
+10. Clear the session, navigate to `/sign-up` and register a fresh
+    `@example.com` address. The captcha uses Cloudflare's always-pass test key
+    locally, so the Sign up button enables without a challenge.
+11. Verify the page says "Check your inbox", open the "Confirm your DeadTrees
+    account" email in Mailpit and follow its link.
+12. Verify the link lands on `/profile` signed in as the new address.
 
 ## Expected Observations
 
@@ -46,12 +52,15 @@ Mailpit, including seeded login and password-reset shell behavior.
 - Seeded contributor can sign in.
 - Authenticated-only `/profile` route is accessible after sign-in.
 - Password-reset email appears in local Mailpit, not external email.
+- Sign-up posts to the local API `/auth/signup`, never directly to Supabase
+  `/auth/v1/signup`, and the confirmation email appears in Mailpit.
 
 ## Failure Signals
 
 - Sign-in calls default `54321` while isolated env uses another port.
 - Sign-in succeeds but profile remains unauthenticated.
 - Reset email is not captured in Mailpit.
+- The Sign up button stays disabled because the captcha never loads.
 - Any real external email service is contacted.
 
 ## Evidence To Capture

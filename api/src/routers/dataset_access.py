@@ -1,14 +1,15 @@
 """Dataset file delivery and visibility changes.
 
 Image files keep one storage location whatever the dataset's visibility. Public and
-view-only files are served by nginx after a cached authorization subrequest; private
-files and every prepared export are served on short-lived signed links that are
-checked against the user's current access on each request.
+view-only files are served by nginx after a cached authorization subrequest; their
+COG paths are handed out one dataset at a time under a daily cap. Private files and
+every prepared export are served on short-lived signed links that are checked
+against the user's current access on each request.
 """
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, Field
 
@@ -16,6 +17,7 @@ from shared.db import use_client, use_service_client, verify_token
 from shared.models import DatasetAccessEnum
 from shared.settings import settings
 
+from ..access.cog_paths import claim_cog_path, requester_key
 from ..access.dataset_access import user_can_view_dataset
 from ..access.dataset_files import FILE_COLUMNS, find_dataset_file, inside, stored_file_path
 from ..access.delivery import protected_file_response
@@ -23,9 +25,11 @@ from ..access.tickets import read_ticket, sign_ticket
 from ..access.visibility import change_dataset_visibility
 from ..download.delivery import require_export_access
 from ..download.jobs import PreparedFileJob
+from ..utils.request_ip import get_client_ip
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token')
+optional_oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token', auto_error=False)
 
 FileKind = Literal['cog', 'thumbnail']
 
@@ -96,6 +100,37 @@ def serve_private_dataset_file(dataset_id: int, kind: FileKind, ticket: str):
 	if not path:
 		raise HTTPException(status_code=404, detail='Not found')
 	return protected_file_response(path)
+
+
+class CogPathResponse(BaseModel):
+	cog_path: str
+
+
+@router.get('/datasets/{dataset_id}/files/cog', response_model=CogPathResponse)
+def get_public_cog_path(
+	dataset_id: int,
+	request: Request,
+	token: Annotated[Optional[str], Depends(optional_oauth2_scheme)] = None,
+):
+	"""The static COG path of one public or view-only dataset, for opening its map.
+
+	Paths are capped per account or client IP (see access.cog_paths). Private
+	datasets use signed tickets instead and are reported as not found here.
+	"""
+	user = require_user(token) if token else None
+	requester = requester_key(user.id if user else None, get_client_ip(request))
+	with use_service_client() as client:
+		relative_path = stored_file_path(client, 'cog', dataset_id)
+		if not relative_path or not client.rpc(
+			'is_public_dataset_file', {'p_kind': 'cog', 'p_path': relative_path}
+		).execute().data:
+			raise HTTPException(status_code=404, detail='Not found')
+		if not claim_cog_path(client, requester, dataset_id):
+			raise HTTPException(
+				status_code=429,
+				detail='You opened many dataset maps today. Please try again tomorrow or contact us for bulk access.',
+			)
+	return CogPathResponse(cog_path=relative_path)
 
 
 STATIC_FILE_PREFIXES = {'cogs': 'cog', 'thumbnails': 'thumbnail'}

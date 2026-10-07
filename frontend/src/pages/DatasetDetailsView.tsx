@@ -34,6 +34,7 @@ import DatasetInfoSidebar from "../components/DatasetDetailsMap/DatasetInfoSideb
 import DownloadSection from "../components/DatasetDetailsMap/DownloadSection";
 import ReportIssueModal from "../components/DatasetDetailsMap/ReportIssueModal";
 import OrthoTileSearch from "../components/DatasetDetailsMap/OrthoTileSearch";
+import { hasMapImage } from "../utils/datasetFileUrls";
 import { EditorToolbar } from "../components/PolygonEditor";
 
 import DatasetDetailsMap from "../components/DatasetDetailsMap/DatasetDetailsMap";
@@ -248,7 +249,7 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
   const hasAOI = !!aoiData?.geometry;
   // Without a viewable image there is no map, so basemap/layer controls and the
   // in-image search would be dead weight next to the empty state.
-  const hasMapImage = !!dataset.cog_path;
+  const showMapImage = hasMapImage(dataset);
   const SIDEBAR_LEFT_PX = 16;
   const SIDEBAR_WIDTH_PX = 384;
   const SIDEBAR_BUTTON_TOP_PX = 112;
@@ -271,7 +272,7 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
           isLoadingOverlapping={isLoadingOverlapping}
         />
       )}
-      {!hasMapImage && canAudit && !isEditing && (
+      {!showMapImage && canAudit && !isEditing && (
         <Button className="mt-4" onClick={() => navigate(`/dataset-audit/${dataset.id}`)}>
           Audit dataset
         </Button>
@@ -335,7 +336,7 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
           >
             Details
           </Button>
-          {hasMapImage && (
+          {showMapImage && (
             <Button
               icon={<SlidersOutlined />}
               className="shadow-sm"
@@ -395,7 +396,7 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
       {/* Map Column */}
       <div className="absolute inset-0 z-0">
         {/* Layer Control Panel - hidden when editing on desktop */}
-        {!isEditing && hasMapImage && (
+        {!isEditing && showMapImage && (
           <div className="absolute right-4 top-24 z-10 hidden lg:block">
             <DatasetLayerControlPanel
               mapStyle={layerControl.mapStyle}
@@ -507,7 +508,7 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
           }
         />
 
-        {!isEditing && hasMapImage && (
+        {!isEditing && showMapImage && (
           <div className="pointer-events-none absolute left-1/2 top-[7.5rem] z-30 -translate-x-1/2 lg:top-24">
             <div className="pointer-events-auto">
               <OrthoTileSearch

@@ -167,6 +167,22 @@ export async function fetchPrivateDatasetFiles(datasetIds: number[]): Promise<Re
   return files;
 }
 
+/**
+ * The static COG path of a public or view-only dataset whose path the database
+ * does not list to this caller. The API caps distinct datasets per account or
+ * network per day; null when the dataset has no servable COG.
+ */
+export async function fetchPublicCogPath(datasetId: number): Promise<string | null> {
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  const response = await fetch(`${Settings.API_URL}/datasets/${datasetId}/files/cog`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(await readError(response));
+  return ((await response.json()) as { cog_path: string }).cog_path;
+}
+
 let pendingFileIds = new Set<number>();
 let pendingFileRequest: Promise<Record<number, IPrivateDatasetFiles>> | null = null;
 

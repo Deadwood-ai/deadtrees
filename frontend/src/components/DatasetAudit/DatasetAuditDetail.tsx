@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from "react";
-import { useDatasetFileUrls } from "../../hooks/useDatasetAccess";
+import { useDatasetThumbnailUrl } from "../../hooks/useDatasetAccess";
 import { Form, message, Button, Drawer } from "antd";
 import { IDataset } from "../../types/dataset";
 import { DatasetDetailsMapProvider } from "../../hooks/useDatasetDetailsMapProvider";
@@ -122,7 +122,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 	} = useAuditDetailState({ dataset });
 
 	// Generate thumbnail URL
-	const { thumbnailUrl } = useDatasetFileUrls(dataset);
+	const thumbnailUrl = useDatasetThumbnailUrl(dataset);
 
 	// Handle season prompt copy
 	const handleCopySeasonPrompt = () => {

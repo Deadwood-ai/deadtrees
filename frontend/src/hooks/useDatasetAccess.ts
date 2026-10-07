@@ -5,6 +5,7 @@ import {
   fetchDatasetsSharedWithMe,
   fetchMyDatasetAccess,
   fetchPrivateDatasetFilesBatched,
+  fetchPublicCogPath,
   revokeDatasetAccess,
   searchShareAccounts,
   setDatasetAccess,
@@ -115,8 +116,29 @@ export function useDatasetFileUrlResolver(datasets: IDatasetFileSource[]) {
   );
 }
 
+/** Thumbnail address only; lists use this so they never spend the COG path allowance. */
+export function useDatasetThumbnailUrl(dataset: IDatasetFileSource | null | undefined): string | null {
+  const datasets = useMemo(() => (dataset ? [dataset] : []), [dataset]);
+  const resolve = useDatasetFileUrlResolver(datasets);
+  return dataset ? resolve(dataset).thumbnailUrl : null;
+}
+
+/**
+ * COG and thumbnail addresses for one dataset's map. When the database does not
+ * list the COG path to this caller, it is fetched from the capped API once per session.
+ */
 export function useDatasetFileUrls(dataset: IDatasetFileSource | null | undefined) {
   const datasets = useMemo(() => (dataset ? [dataset] : []), [dataset]);
   const resolve = useDatasetFileUrlResolver(datasets);
-  return dataset ? resolve(dataset) : { cogUrl: null, thumbnailUrl: null };
+  const { user } = useAuth();
+  const needsPath = !!dataset && !isPrivateDataset(dataset) && !dataset.cog_path;
+  const { data: fetchedPath } = useQuery({
+    queryKey: ["datasets", dataset?.id, "cog-path", user?.id],
+    queryFn: () => fetchPublicCogPath(dataset!.id),
+    enabled: needsPath,
+    staleTime: Infinity,
+    retry: false,
+  });
+  if (!dataset) return { cogUrl: null, thumbnailUrl: null };
+  return resolve(needsPath && fetchedPath ? { ...dataset, cog_path: fetchedPath } : dataset);
 }
