@@ -40,6 +40,10 @@ class SignupRejected(Exception):
 	"""A sign-up the caller can fix, such as a weak password."""
 
 
+class CaptchaUnavailable(Exception):
+	"""Cloudflare could not be asked whether the captcha token is valid."""
+
+
 class SignupEmailFailed(Exception):
 	"""The confirmation email was not accepted for delivery; signing up again retries it."""
 
@@ -54,11 +58,18 @@ def captcha_passes(token: str, client_ip: Optional[str]) -> bool:
 	secret = _captcha_secret()
 	if not secret:
 		raise RuntimeError('TURNSTILE_SECRET_KEY is not configured')
+	if secret == TURNSTILE_TEST_SECRET:
+		# Cloudflare's test secret accepts every token; skip the network so local stacks
+		# and CI do not depend on reaching Cloudflare.
+		return True
 	payload = {'secret': secret, 'response': token}
 	if client_ip:
 		payload['remoteip'] = client_ip
-	response = requests.post(TURNSTILE_VERIFY_URL, data=payload, timeout=10)
-	response.raise_for_status()
+	try:
+		response = requests.post(TURNSTILE_VERIFY_URL, data=payload, timeout=10)
+		response.raise_for_status()
+	except requests.RequestException as error:
+		raise CaptchaUnavailable from error
 	return response.json().get('success') is True
 
 
@@ -100,9 +111,10 @@ def create_account(email: str, password: str, redirect_to: Optional[str]) -> Non
 			return
 		if not existing:
 			# Undo the new account so a retry is an ordinary sign-up with the chosen password.
+			# The database only deletes it while it is still unconfirmed and unused; otherwise a
+			# retry restarts it through the recovery path.
 			try:
-				client.auth.admin.delete_user(link.user.id)
+				client.rpc('discard_unconfirmed_signup', {'p_user_id': link.user.id}).execute()
 			except Exception:
-				# The account stays unconfirmed; a retry restarts it through the recovery path.
 				logger.exception('Could not undo a new account after its confirmation email failed')
 	raise SignupEmailFailed

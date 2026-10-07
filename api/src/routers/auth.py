@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from shared.db import login as supabase_login
 
-from ..access.signup import SignupEmailFailed, SignupRejected, captcha_passes, create_account
+from ..access.signup import CaptchaUnavailable, SignupEmailFailed, SignupRejected, captcha_passes, create_account
 from ..utils.request_ip import get_client_ip
 from ..utils.sliding_window import SlidingWindowLimiter
 
@@ -56,7 +56,11 @@ def signup(payload: SignupRequest, request: Request):
 	"""
 	client_ip = get_client_ip(request)
 	_signup_limiter.check(client_ip or 'unknown')
-	if not captcha_passes(payload.captcha_token, client_ip):
+	try:
+		passed = captcha_passes(payload.captcha_token, client_ip)
+	except CaptchaUnavailable:
+		raise HTTPException(status_code=503, detail='The captcha check is unavailable. Please try again in a minute.')
+	if not passed:
 		raise HTTPException(status_code=400, detail='The captcha check failed. Please try again.')
 	try:
 		create_account(payload.email, payload.password, payload.redirect_to)
