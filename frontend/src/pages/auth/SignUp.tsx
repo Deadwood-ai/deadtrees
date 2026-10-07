@@ -1,4 +1,4 @@
-import { Alert, Button, Form, Input } from "antd";
+import { Alert, Button, Checkbox, Form, Input } from "antd";
 import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useAnalytics } from "../../hooks/useAnalytics";
@@ -8,7 +8,7 @@ import { Settings } from "../../config";
 
 const MIN_PASSWORD_LENGTH = 6;
 
-type SignUpFormValues = { email: string; password: string };
+type SignUpFormValues = { email: string; password: string; agreement: boolean };
 
 const SignUp = () => {
   const [searchParams] = useSearchParams();
@@ -72,6 +72,28 @@ const SignUp = () => {
                 ]}
               >
                 <Input.Password className="p-2" placeholder="Your password" autoComplete="new-password" />
+              </Form.Item>
+              <Form.Item
+                name="agreement"
+                valuePropName="checked"
+                rules={[
+                  {
+                    validator: (_, value) =>
+                      value ? Promise.resolve() : Promise.reject("Please accept the terms of service and privacy policy."),
+                  },
+                ]}
+              >
+                <Checkbox data-testid="sign-up-agreement">
+                  I agree to the{" "}
+                  <Link to="/terms-of-service" target="_blank">
+                    terms of service
+                  </Link>{" "}
+                  and{" "}
+                  <Link to="/datenschutzerklaerung" target="_blank">
+                    privacy policy
+                  </Link>
+                  .
+                </Checkbox>
               </Form.Item>
               <Form.Item>
                 {Settings.TURNSTILE_SITE_KEY ? (

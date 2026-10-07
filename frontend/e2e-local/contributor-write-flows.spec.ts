@@ -93,6 +93,7 @@ test.describe("contributor local write flows", () => {
 
     await page.getByPlaceholder(/email/i).fill(contributorEmail);
     await page.getByPlaceholder(/password/i).fill(initialPassword);
+    await page.getByRole("checkbox", { name: /I agree to the/i }).check();
     // Cloudflare's test site key passes the captcha without a challenge.
     const signUpButton = page.getByRole("button", { name: /sign up/i });
     await expect(signUpButton).toBeEnabled({ timeout: 20_000 });

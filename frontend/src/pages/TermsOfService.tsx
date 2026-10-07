@@ -18,6 +18,7 @@ export default function TermsOfService() {
         Zurück
       </Button>
       <Title level={1}>Nutzungsbedingungen (Terms of Service)</Title>
+      <Paragraph type="secondary">Stand / Last updated: 7. Oktober 2026 / 7 October 2026</Paragraph>
 
       {/* German Terms of Service */}
       <Title level={2}>Deutsch</Title>
@@ -47,27 +48,42 @@ export default function TermsOfService() {
             Datensatz für die Forschung zum Thema Totholz zu schaffen.
           </Paragraph>
           <Paragraph>
+            Der Betreiber nutzt die Daten der Plattform für die Forschung zu Waldgesundheit und Baumsterblichkeit. Dazu
+            gehört die Entwicklung von Modellen des maschinellen Lernens und von Karten, die die Ergebnisse aus Drohnen-
+            und Luftbildern auf größere Gebiete übertragen, zum Beispiel mithilfe von Satellitendaten.
+          </Paragraph>
+          <Paragraph>
             Die Plattform wird kontinuierlich weiterentwickelt. Sollten durch Wartungsarbeiten Einschränkungen
-            entstehen, wird dies rechtzeitig kommuniziert.
+            entstehen, wird dies nach Möglichkeit rechtzeitig kommuniziert.
           </Paragraph>
         </section>
 
         <section>
-          <Title level={3}>3. Registrierung und Nutzerkonto</Title>
+          <Title level={3}>3. Registrierung, Nutzerkonto und faire Nutzung</Title>
           <Paragraph>
-            Für den Zugang zu bestimmten Funktionen (z. B. das Hochladen von Orthophotos oder Labels) ist eine
-            Registrierung erforderlich. Nutzer müssen eine gültige E-Mail-Adresse angeben und ein sicheres Passwort
-            wählen. Die Zugangsdaten sind vertraulich zu behandeln und dürfen nicht an Dritte weitergegeben werden.
+            Für den Zugang zu bestimmten Funktionen (z. B. das Hoch- und Herunterladen von Daten) ist eine Registrierung
+            erforderlich. Nutzer müssen eine gültige E-Mail-Adresse angeben und ein sicheres Passwort wählen. Die
+            Zugangsdaten sind vertraulich zu behandeln und dürfen nicht an Dritte weitergegeben werden.
+          </Paragraph>
+          <Paragraph>
+            Um die Plattform zu schützen und für alle verfügbar zu halten, kann der Betreiber automatisierte oder
+            massenhafte Nutzung begrenzen und Schutzmaßnahmen gegen Bots einsetzen. Das Umgehen solcher Begrenzungen,
+            etwa durch automatisiertes Abgreifen von Daten oder durch mehrere Nutzerkonten, ist nicht gestattet.
+            Forschende, die größere Datenmengen benötigen, können sich an den Betreiber wenden.
           </Paragraph>
           <Paragraph>
             Der Betreiber behält sich das Recht vor, Nutzerkonten jederzeit zu sperren oder zu löschen, insbesondere bei
-            Verstößen gegen diese Nutzungsbedingungen oder bei Missbrauch der Plattform. Nach Löschung des Nutzerkontos
-            können hochgeladene Daten nach Absprache anonymisiert weiterverwendet werden.
+            Verstößen gegen diese Nutzungsbedingungen oder bei Missbrauch der Plattform.
+          </Paragraph>
+          <Paragraph>
+            Nutzer können die Löschung ihres Nutzerkontos und ihrer Datensätze beim Betreiber beantragen. Bereits
+            entstandene Forschungsergebnisse, Modelle und Produkte sowie Kopien, die Dritte unter einer offenen Lizenz
+            erhalten haben, bleiben davon unberührt.
           </Paragraph>
         </section>
 
         <section>
-          <Title level={3}>4. Nutzerbeiträge</Title>
+          <Title level={3}>4. Nutzerbeiträge und Lizenzen</Title>
           <Paragraph>
             Nutzer können Orthophotos, Labels oder andere Inhalte (nachfolgend „Nutzerbeiträge") hochladen. Dabei
             erklären sie, dass sie über alle erforderlichen Rechte an diesen Beiträgen verfügen und dass durch die
@@ -80,15 +96,45 @@ export default function TermsOfService() {
             Der Betreiber übernimmt keine Haftung für datenschutzwidrige Inhalte.
           </Paragraph>
           <Paragraph>
-            Alle hochgeladenen Inhalte – einschließlich sämtlicher Metadaten – werden unter der Creative-Commons-Lizenz
-            CC BY 4.0 zur Verfügung gestellt. Nutzer behalten die Eigentumsrechte an ihren Daten, lizenzieren diese aber
-            an die Plattform und alle weiteren Nutzer unter CC BY 4.0. Die vorherige Nutzung durch andere bleibt auch
-            nach einer Löschung erhalten.
+            Nutzer behalten die Rechte an ihren Daten. Öffentliche Nutzerbeiträge („Öffentlich") werden einschließlich
+            ihrer Metadaten allen unter der Creative-Commons-Lizenz CC BY 4.0 zur Verfügung gestellt. Bei Nutzerbeiträgen
+            mit der Sichtbarkeit „Nur ansehen" werden die daraus abgeleiteten Vorhersagen unter CC BY 4.0
+            bereitgestellt, während das Orthophoto nur dem Nutzer und den von ihm berechtigten Personen zur Verfügung
+            steht. Private Nutzerbeiträge („Privat") werden anderen Nutzern nicht lizenziert. Wird ein Datensatz
+            später öffentlich gemacht, gilt ab diesem Zeitpunkt CC BY 4.0. Bereits erteilte CC-BY-Lizenzen bleiben auch
+            nach einer Änderung oder Löschung bestehen. Die Rechte des Betreibers nach Abschnitt 5 gelten für alle
+            Nutzerbeiträge.
           </Paragraph>
         </section>
 
         <section>
-          <Title level={3}>5. Verhaltensregeln und Pflichten der Nutzer</Title>
+          <Title level={3}>5. Nutzung der Uploads für Forschung und Modelltraining</Title>
+          <Paragraph>
+            Jeder Upload wird unabhängig von seiner Sichtbarkeit („Öffentlich", „Nur ansehen" oder „Privat") von der
+            Plattform verarbeitet und vom Betreiber für die Forschung genutzt. Dazu gehört insbesondere das Trainieren
+            und Verbessern seiner Modelle sowie der daraus abgeleiteten Karten und Produkte. Nutzer räumen dem Betreiber
+            hierfür ein nicht ausschließliches, weltweites, unentgeltliches und zeitlich unbefristetes Recht ein, ihre
+            Uploads zu diesen Zwecken zu nutzen und die Ergebnisse zu veröffentlichen.
+          </Paragraph>
+          <Paragraph>
+            Die Sichtbarkeit legt fest, wer die Daten auf der Plattform sehen und herunterladen kann. Sie schließt einen
+            Upload nicht von dieser Nutzung für die Forschung aus. Orthophotos, die Nutzer nicht öffentlich gemacht
+            haben, veröffentlicht der Betreiber nicht.
+          </Paragraph>
+        </section>
+
+        <section>
+          <Title level={3}>6. Nennung der Beitragenden</Title>
+          <Paragraph>
+            Beitragende werden für ihre Daten genannt. Jeder Datensatz zeigt die beim Hochladen angegebenen Autorinnen
+            und Autoren, und Downloads enthalten Zitierhinweise. Veröffentlicht der Betreiber Modelle, Karten oder
+            andere Produkte, die auf beigetragenen Daten aufbauen, würdigt er die Beitragenden, zum Beispiel in der
+            zugehörigen Dokumentation oder Publikation.
+          </Paragraph>
+        </section>
+
+        <section>
+          <Title level={3}>7. Verhaltensregeln und Pflichten der Nutzer</Title>
           <Paragraph>
             Nutzer verpflichten sich, die Plattform im Einklang mit geltendem Recht sowie den vorliegenden
             Nutzungsbedingungen zu verwenden. Insbesondere ist es untersagt:
@@ -100,23 +146,11 @@ export default function TermsOfService() {
             </li>
             <li>Unwahre oder irreführende Informationen bereitzustellen.</li>
             <li>Malware, Spam oder rechtswidrige Inhalte zu verbreiten.</li>
+            <li>Unautorisierten Zugriff auf die Backendsysteme der Plattform zu versuchen.</li>
             <li>
-              Die Plattform oder deren Daten zu manipulieren, reverse-engineeren oder unautorisierten Zugriff auf die
-              Backendsysteme zu versuchen.
+              Beleidigende, diskriminierende oder extremistische Inhalte zu verbreiten oder andere Nutzer zu belästigen,
+              zu bedrohen oder einzuschüchtern.
             </li>
-            <li>
-              Andere Nutzer zu belästigen, zu bedrohen oder in anderer Weise unangemessenes Verhalten an den Tag zu
-              legen.
-            </li>
-          </ul>
-          <Paragraph>
-            <strong>Verhaltenskodex:</strong>
-          </Paragraph>
-          <ul>
-            <li>Nutzer sollen höflich und respektvoll miteinander umgehen.</li>
-            <li>Beleidigende, diskriminierende oder extremistische Inhalte sind untersagt.</li>
-            <li>Streitigkeiten sollen sachlich und konstruktiv geklärt werden.</li>
-            <li>Belästigungen oder Einschüchterungen anderer Nutzer sind nicht erlaubt.</li>
           </ul>
           <Paragraph>
             Der Betreiber behält sich vor, Inhalte oder Nutzerkonten zu sperren oder zu entfernen, wenn gegen diese
@@ -125,7 +159,7 @@ export default function TermsOfService() {
         </section>
 
         <section>
-          <Title level={3}>6. Haftungsfreistellung und Verantwortlichkeit (Indemnifizierung)</Title>
+          <Title level={3}>8. Haftungsfreistellung und Verantwortlichkeit (Indemnifizierung)</Title>
           <Paragraph>
             Nutzer sind allein für die von ihnen hochgeladenen Inhalte verantwortlich und tragen die rechtliche
             Verantwortung für etwaige Verstöße gegen Urheberrechte, Datenschutzbestimmungen oder sonstige gesetzliche
@@ -141,7 +175,7 @@ export default function TermsOfService() {
         </section>
 
         <section>
-          <Title level={3}>7. Haftungsausschluss</Title>
+          <Title level={3}>9. Haftungsausschluss</Title>
           <Paragraph>
             Die Plattform wird „as is" und „as available" bereitgestellt. Der Betreiber ist bemüht, die Plattform stets
             aktuell und fehlerfrei zu halten, übernimmt jedoch keine Gewährleistung dafür. Die Nutzung erfolgt auf
@@ -154,20 +188,17 @@ export default function TermsOfService() {
         </section>
 
         <section>
-          <Title level={3}>8. Geistiges Eigentum und Lizenzen</Title>
+          <Title level={3}>10. Geistiges Eigentum und Lizenzen</Title>
           <Paragraph>
-            Alle auf der Plattform bereitgestellten Inhalte (Orthophotos, Labels, Metadaten, Dokumentationen)
-            unterliegen den jeweiligen Lizenzen, insbesondere CC BY 4.0. Nutzer müssen sicherstellen, dass sie die
-            Lizenzbedingungen einhalten.
-          </Paragraph>
-          <Paragraph>
-            Jegliche aus den bereitgestellten Daten abgeleiteten Werke (z. B. Modelle, Analysen oder Visualisierungen)
-            unterliegen ebenfalls der CC BY 4.0-Lizenz, sofern nicht ausdrücklich anders geregelt.
+            Daten auf der Plattform werden unter der beim jeweiligen Datensatz angegebenen Lizenz bereitgestellt, in der
+            Regel CC BY 4.0. Nutzer müssen die Lizenzbedingungen, insbesondere die Namensnennung, einhalten. Für
+            Modelle, Vorhersagen und Satellitenprodukte, die der Betreiber veröffentlicht, gilt die jeweils mit der
+            Veröffentlichung angegebene Lizenz.
           </Paragraph>
         </section>
 
         <section>
-          <Title level={3}>9. Datenschutz</Title>
+          <Title level={3}>11. Datenschutz</Title>
           <Paragraph>
             Informationen zur Verarbeitung personenbezogener Daten finden Sie in unserer{" "}
             <a href="/datenschutzerklaerung" target="_blank" rel="noopener noreferrer">
@@ -178,7 +209,7 @@ export default function TermsOfService() {
         </section>
 
         <section>
-          <Title level={3}>10. Änderungen der Nutzungsbedingungen</Title>
+          <Title level={3}>12. Änderungen der Nutzungsbedingungen</Title>
           <Paragraph>
             Der Betreiber behält sich das Recht vor, diese Nutzungsbedingungen jederzeit anzupassen. Änderungen werden
             auf der Plattform veröffentlicht und Nutzer ggf. per E-Mail informiert. Die aktuelle Version ist jederzeit
@@ -188,7 +219,7 @@ export default function TermsOfService() {
         </section>
 
         <section>
-          <Title level={3}>11. Anwendbares Recht und Gerichtsstand</Title>
+          <Title level={3}>13. Anwendbares Recht und Gerichtsstand</Title>
           <Paragraph>
             Es gilt das Recht der Bundesrepublik Deutschland, auch für Nutzer außerhalb Deutschlands. Gerichtsstand für
             Streitigkeiten ist, soweit zulässig, Freiburg im Breisgau.
@@ -196,7 +227,7 @@ export default function TermsOfService() {
         </section>
 
         <section>
-          <Title level={3}>12. Verfahren bei Rechtsverletzungen (Notice-and-Takedown)</Title>
+          <Title level={3}>14. Verfahren bei Rechtsverletzungen (Notice-and-Takedown)</Title>
           <Paragraph>
             Sollten Nutzer oder Dritte der Ansicht sein, dass Inhalte auf der Plattform Rechtsverletzungen darstellen
             (z. B. Urheberrechtsverletzungen, unzulässige personenbezogene Daten o. Ä.), können sie dies dem Betreiber
@@ -236,27 +267,41 @@ export default function TermsOfService() {
             general public, aiming to provide a valuable dataset for deadwood research.
           </Paragraph>
           <Paragraph>
+            The Operator uses the data on the Platform for research on forest health and tree mortality. This includes
+            developing machine-learning models and maps that extend the results from drone and aerial imagery to larger
+            areas, for example with satellite data.
+          </Paragraph>
+          <Paragraph>
             The Platform is continuously developed. If maintenance work causes restrictions, this will be communicated
             in advance whenever possible.
           </Paragraph>
         </section>
 
         <section>
-          <Title level={3}>3. Registration and User Account</Title>
+          <Title level={3}>3. Registration, User Account and Fair Use</Title>
           <Paragraph>
-            Access to certain features (e.g., uploading orthophotos or labels) requires registration. Users must provide
+            Access to certain features (e.g., uploading and downloading data) requires registration. Users must provide
             a valid email address and choose a secure password. Login credentials must be kept confidential and not
             shared with third parties.
           </Paragraph>
           <Paragraph>
+            To protect the Platform and keep it available for everyone, the Operator may limit automated or bulk use and
+            use protection against bots. Circumventing such limits, for example by scraping data or by using several
+            accounts, is not allowed. Researchers who need larger amounts of data can contact the Operator.
+          </Paragraph>
+          <Paragraph>
             The Operator reserves the right to suspend or delete user accounts at any time, particularly in cases of
-            violations of these Terms of Service or misuse of the Platform. After account deletion, uploaded data may be
-            anonymized and used further upon agreement.
+            violations of these Terms of Service or misuse of the Platform.
+          </Paragraph>
+          <Paragraph>
+            Users can ask the Operator to delete their account and their datasets. Research results, models and
+            products that were already created, and copies that others obtained under an open license, are not
+            affected.
           </Paragraph>
         </section>
 
         <section>
-          <Title level={3}>4. User Contributions</Title>
+          <Title level={3}>4. User Contributions and Licenses</Title>
           <Paragraph>
             Users can upload orthophotos, labels, or other content (hereinafter referred to as "User Contributions"). By
             doing so, they affirm that they have all necessary rights to these contributions and that no third-party
@@ -269,14 +314,41 @@ export default function TermsOfService() {
             content that violates data protection laws.
           </Paragraph>
           <Paragraph>
-            All uploaded content, including associated metadata, is made available under the Creative Commons License CC
-            BY 4.0. Users retain ownership of their data but license it to the Platform and all other users under CC BY
-            4.0. Prior use of the data by others remains valid even after deletion.
+            Users retain the rights to their data. Public User Contributions, including their metadata, are made
+            available to everyone under the Creative Commons License CC BY 4.0. For "View only" User Contributions, the
+            predictions derived from them are made available under CC BY 4.0, while the orthophoto is available only to
+            the user and the people they allow. Private User Contributions are not licensed to other users. If a
+            dataset is made public later, CC BY 4.0 applies from then on. CC BY licenses already granted remain valid
+            after a change or deletion. The Operator's rights under Section 5 apply to all User Contributions.
           </Paragraph>
         </section>
 
         <section>
-          <Title level={3}>5. User Conduct and Obligations</Title>
+          <Title level={3}>5. Use of Uploads for Research and Model Training</Title>
+          <Paragraph>
+            Every upload, whatever its visibility (Public, View only or Private), is processed by the Platform and used
+            by the Operator for research. This includes training and improving its models and the maps and products
+            derived from them. Users grant the Operator a non-exclusive, worldwide, royalty-free and permanent right to
+            use their uploads for these purposes and to publish the results.
+          </Paragraph>
+          <Paragraph>
+            Visibility decides who can see and download the data on the Platform. It does not exclude an upload from
+            this research use. The Operator does not publish orthophotos that users have not made public.
+          </Paragraph>
+        </section>
+
+        <section>
+          <Title level={3}>6. Credit for Contributors</Title>
+          <Paragraph>
+            Contributors are credited for their data. Each dataset shows the authors given at upload, and downloads
+            include citation information. When the Operator publishes models, maps or other products that build on
+            contributed data, it acknowledges the contributors, for example in the accompanying documentation or
+            publication.
+          </Paragraph>
+        </section>
+
+        <section>
+          <Title level={3}>7. User Conduct and Obligations</Title>
           <Paragraph>
             Users agree to use the Platform in compliance with applicable laws and these Terms of Service. In
             particular, it is prohibited to:
@@ -285,17 +357,8 @@ export default function TermsOfService() {
             <li>Upload content that infringes copyrights, personal rights, or other third-party rights.</li>
             <li>Provide false or misleading information.</li>
             <li>Distribute malware, spam, or illegal content.</li>
-            <li>Manipulate, reverse-engineer, or attempt unauthorized access to backend systems of the Platform.</li>
-            <li>Harass, threaten, or otherwise engage in inappropriate behavior towards other users.</li>
-          </ul>
-          <Paragraph>
-            <strong>Code of Conduct:</strong>
-          </Paragraph>
-          <ul>
-            <li>Users should interact respectfully and courteously.</li>
-            <li>Offensive, discriminatory, or extremist content is prohibited.</li>
-            <li>Disputes should be resolved objectively and constructively.</li>
-            <li>Harassment or intimidation of other users is not allowed.</li>
+            <li>Attempt unauthorized access to the backend systems of the Platform.</li>
+            <li>Post offensive, discriminatory or extremist content, or harass, threaten or intimidate other users.</li>
           </ul>
           <Paragraph>
             The Operator reserves the right to suspend or remove content or user accounts in case of violations of these
@@ -304,7 +367,7 @@ export default function TermsOfService() {
         </section>
 
         <section>
-          <Title level={3}>6. Indemnification and Responsibility</Title>
+          <Title level={3}>8. Indemnification and Responsibility</Title>
           <Paragraph>
             Users are solely responsible for the content they upload and bear legal responsibility for any violations of
             copyright, data protection laws, or other legal provisions.
@@ -318,7 +381,7 @@ export default function TermsOfService() {
         </section>
 
         <section>
-          <Title level={3}>7. Disclaimer of Liability</Title>
+          <Title level={3}>9. Disclaimer of Liability</Title>
           <Paragraph>
             The Platform is provided "as is" and "as available." The Operator strives to keep the Platform up-to-date
             and error-free but makes no warranties in this regard. Use is at the user's own risk.
@@ -330,19 +393,16 @@ export default function TermsOfService() {
         </section>
 
         <section>
-          <Title level={3}>8. Intellectual Property and Licenses</Title>
+          <Title level={3}>10. Intellectual Property and Licenses</Title>
           <Paragraph>
-            All content provided on the Platform (orthophotos, labels, metadata, documentation) is subject to the
-            applicable licenses, particularly CC BY 4.0. Users must ensure compliance with the licensing terms.
-          </Paragraph>
-          <Paragraph>
-            Any derived works based on the provided data (e.g., models, analyses, or visualizations) are also subject to
-            the CC BY 4.0 license unless explicitly stated otherwise.
+            Data on the Platform is provided under the license shown on each dataset, normally CC BY 4.0. Users must
+            comply with the license terms, in particular attribution. Models, predictions and satellite products
+            published by the Operator carry the license stated with each release.
           </Paragraph>
         </section>
 
         <section>
-          <Title level={3}>9. Data Protection</Title>
+          <Title level={3}>11. Data Protection</Title>
           <Paragraph>
             Information on the processing of personal data can be found in our{" "}
             <a href="/datenschutzerklaerung" target="_blank" rel="noopener noreferrer">
@@ -353,7 +413,7 @@ export default function TermsOfService() {
         </section>
 
         <section>
-          <Title level={3}>10. Amendments to the Terms of Service</Title>
+          <Title level={3}>12. Amendments to the Terms of Service</Title>
           <Paragraph>
             The Operator reserves the right to modify these Terms of Service at any time. Changes will be published on
             the Platform, and users may be notified via email. The current version is always accessible. By continuing
@@ -362,7 +422,7 @@ export default function TermsOfService() {
         </section>
 
         <section>
-          <Title level={3}>11. Applicable Law and Jurisdiction</Title>
+          <Title level={3}>13. Applicable Law and Jurisdiction</Title>
           <Paragraph>
             The laws of the Federal Republic of Germany shall apply, including for users outside Germany. The place of
             jurisdiction for disputes, where permissible, is Freiburg im Breisgau.
@@ -370,7 +430,7 @@ export default function TermsOfService() {
         </section>
 
         <section>
-          <Title level={3}>12. Procedure for Legal Violations (Notice-and-Takedown)</Title>
+          <Title level={3}>14. Procedure for Legal Violations (Notice-and-Takedown)</Title>
           <Paragraph>
             If users or third parties believe that content on the Platform constitutes a legal violation (e.g.,
             copyright infringement, unauthorized personal data, etc.), they may report this to the Operator via email or

@@ -27,6 +27,10 @@ export const VISIBILITY_OPTIONS: IVisibilityOption[] = [
   },
 ];
 
+/** Shown under the choice: visibility controls access on the platform, not research use (Terms of Service §5). */
+export const VISIBILITY_TRAINING_NOTE =
+  "Whichever you choose, your upload helps train the DeadTrees models. Visibility decides who can see and download it here.";
+
 export const visibilityLabel = (value: IDataAccess | string | null | undefined) =>
   VISIBILITY_OPTIONS.find((option) => option.value === value)?.label ?? "Public";
 
