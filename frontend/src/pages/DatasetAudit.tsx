@@ -563,7 +563,8 @@ function DatasetAuditInner() {
 	// Detail view
 	if (id) {
 		if (isDetailDatasetLoading) return <StatusPageLoading label="Loading dataset…" />;
-		if (isDetailDatasetError) {
+		// A failed background refetch must not unmount an audit in progress.
+		if (isDetailDatasetError && !detailDataset) {
 			return (
 				<StatusPage
 					kind="offline"

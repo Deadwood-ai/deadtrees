@@ -548,7 +548,7 @@ abstract = {Excessive tree mortality is a global concern and remains poorly unde
           <div className="space-y-4">
             {isLoadingPublications ? (
               <TableSkeleton rows={4} label="Loading publications" />
-            ) : publicationsFailed ? (
+            ) : publicationsFailed && !publications?.length ? (
               <div className="rounded-xl border border-gray-200 bg-white p-6 text-gray-500">
                 The publication list couldn’t load right now. Try again later.
               </div>
@@ -623,7 +623,7 @@ abstract = {Excessive tree mortality is a global concern and remains poorly unde
                   <div className="py-4">
                     <TableSkeleton rows={3} label="Loading conference contributions" />
                   </div>
-                ) : presentationsFailed ? (
+                ) : presentationsFailed && !presentations?.length ? (
                   <div className="py-4 text-gray-500">
                     The conference list couldn’t load right now. Try again later.
                   </div>
@@ -684,7 +684,7 @@ abstract = {Excessive tree mortality is a global concern and remains poorly unde
                   <div className="py-4">
                     <TableSkeleton rows={3} label="Loading conference contributions" />
                   </div>
-                ) : presentationsFailed ? (
+                ) : presentationsFailed && !presentations?.length ? (
                   <div className="py-4 text-gray-500">
                     The conference list couldn’t load right now. Try again later.
                   </div>

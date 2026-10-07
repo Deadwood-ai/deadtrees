@@ -585,7 +585,7 @@ const DataTable: React.FC<DataTableProps> = ({
           onViewMap={viewMap}
         />
       )}
-      {isDataError ? (
+      {isDataError && !userData ? (
         <SectionLoadError title="Your datasets couldn’t load" onRetry={() => void retryUserData()} testId="my-datasets-error" />
       ) : isLoadingData ? (
         <TableSkeleton label="Loading your datasets" />

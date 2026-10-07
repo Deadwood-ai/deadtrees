@@ -48,7 +48,8 @@ export default function DatasetCorrections() {
 
   if (isLoading) return <StatusPageLoading label="Loading dataset…" />;
 
-  if (error) {
+  // A failed background refetch must not unmount the editor and its drafts.
+  if (error && !dataset) {
     return (
       <StatusPage
         kind="offline"

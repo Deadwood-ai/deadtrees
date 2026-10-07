@@ -71,7 +71,7 @@ const PublicationsTable: React.FC<PublicationsTableProps> = ({ onChooseDatasets 
 
   if (loading) return <TableSkeleton rows={3} label="Loading your publications" />;
 
-  if (isError) {
+  if (isError && publications.length === 0) {
     return <SectionLoadError title="Your publications couldn’t load" onRetry={() => void refetch()} />;
   }
 

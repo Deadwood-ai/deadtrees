@@ -113,7 +113,8 @@ const AnimatedStat = ({
 const Hero = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { data: stats, isError: statsFailed } = useHomeStats();
+  const { data: stats, isError } = useHomeStats();
+  const statsFailed = isError && !stats;
   const { isMobile, runDesktopOnlyAction } = useDesktopOnlyFeature();
   const { track } = useAnalytics("home");
 

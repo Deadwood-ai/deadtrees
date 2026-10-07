@@ -13,7 +13,7 @@ export default function MyIssuesTable() {
   const isMobile = useIsMobile();
   const { data: flags = [], isLoading, isError, refetch } = useMyFlags();
 
-  if (isError) {
+  if (isError && flags.length === 0) {
     return <SectionLoadError title="Your reported issues couldn’t load" onRetry={() => void refetch()} />;
   }
   if (isLoading) return <TableSkeleton rows={3} label="Loading your reported issues" />;

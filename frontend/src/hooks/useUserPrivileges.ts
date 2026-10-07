@@ -39,7 +39,8 @@ export function useCanAudit() {
   return {
     canAudit: privileges?.can_audit || false,
     isLoading,
-    isError,
+    // Only a first load that failed; a failed background refetch keeps the answer.
+    isError: isError && privileges === undefined,
     refetch,
   };
 }
@@ -57,7 +58,7 @@ export function useCanOperate() {
   return {
     canOperate: privileges?.can_operate === true,
     isLoading,
-    isError,
+    isError: isError && privileges === undefined,
     refetch,
   };
 }

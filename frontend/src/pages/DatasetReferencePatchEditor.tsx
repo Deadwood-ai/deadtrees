@@ -216,7 +216,8 @@ export default function DatasetReferencePatchEditor() {
 
   // The dataset query waits for the session check; until then it is not "not found".
   if (authStatus === "checking" || isDatasetLoading) return <StatusPageLoading label="Loading dataset…" />;
-  if (isDatasetError) {
+  // A failed background refetch must not unmount the editor and its drafts.
+  if (isDatasetError && !dataset) {
     return (
       <StatusPage
         kind="offline"

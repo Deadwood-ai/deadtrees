@@ -11,7 +11,7 @@ import { roleLabel, visibilityLabel } from "./accessCopy";
 export default function SharedWithMeTable() {
   const { data = [], isLoading, isError, refetch } = useSharedWithMe();
 
-  if (isError) {
+  if (isError && data.length === 0) {
     return <SectionLoadError title="Datasets shared with you couldn’t load" onRetry={() => void refetch()} />;
   }
   if (isLoading) return <TableSkeleton rows={3} label="Loading datasets shared with you" />;
