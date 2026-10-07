@@ -93,7 +93,9 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          <ProcessingEmailPreference userId={user?.id} />
+          <div className="mb-4 rounded-lg border border-gray-200 bg-white px-4 py-3">
+            <ProcessingEmailPreference userId={user?.id} />
+          </div>
 
           <section aria-label="My datasets">
             <h2 className="mb-1 text-lg font-semibold">My datasets</h2>
@@ -110,9 +112,9 @@ export default function ProfilePage() {
   return (
     <div className="w-full bg-[#F8FAF9] min-h-[calc(100vh-64px)] pb-24 pt-24 md:pt-28">
       <div className="mx-auto max-w-[1920px] px-4 md:px-8 xl:px-12">
-        <div className="flex items-center gap-6 pb-8">
+        <div className="flex flex-wrap items-center gap-6 pb-8">
           <AccountAvatar email={user?.email ?? ""} size={72} />
-          <div className="flex min-w-0 flex-col">
+          <div className="flex min-w-0 flex-1 flex-col">
             <Typography.Title level={2} style={{ margin: 0, fontWeight: 700 }}>
               My Account
             </Typography.Title>
@@ -120,9 +122,9 @@ export default function ProfilePage() {
               {user?.email}
             </Typography.Text>
           </div>
+          <ProcessingEmailPreference userId={user?.id} />
         </div>
         <AccountJourney steps={journey} failed={datasets.isError} />
-        <ProcessingEmailPreference userId={user?.id} />
         <div className="w-full">
           <div className="mb-6 flex flex-col gap-3 md:flex-row md:justify-between md:items-center">
             <div className="w-full md:w-auto overflow-x-auto">
