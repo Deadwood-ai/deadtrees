@@ -9,6 +9,8 @@ export interface IPriwaCachedProjectMembership {
   projectName: string;
   projectSlug: string;
   role: "field_user" | "coordinator" | "admin";
+  /** Absent in caches written before the flag was read. */
+  contributesFlights?: boolean;
 }
 
 export interface IPriwaQueuedMutation {

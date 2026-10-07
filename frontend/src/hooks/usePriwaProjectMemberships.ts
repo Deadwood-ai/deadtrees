@@ -12,11 +12,14 @@ export interface IPriwaProjectMembership {
   projectName: string;
   projectSlug: string;
   role: "field_user" | "coordinator" | "admin";
+  /** Whether this member's drone uploads are PRIWA flights. */
+  contributesFlights: boolean;
 }
 
 interface IPriwaMembershipRow {
   project_id: string;
   role: IPriwaProjectMembership["role"];
+  contributes_flights: boolean;
   priwa_projects:
     | {
         id: string;
@@ -54,7 +57,7 @@ export function usePriwaProjectMemberships() {
       try {
         const { data, error } = await supabase
           .from("priwa_project_memberships")
-          .select("project_id, role, priwa_projects(id, slug, name)")
+          .select("project_id, role, contributes_flights, priwa_projects(id, slug, name)")
           .order("created_at", { ascending: true });
 
         if (error) throw error;
@@ -69,6 +72,7 @@ export function usePriwaProjectMemberships() {
               projectName: project.name,
               projectSlug: project.slug,
               role: membership.role,
+              contributesFlights: membership.contributes_flights,
             } satisfies IPriwaProjectMembership;
           })
           .filter((membership): membership is IPriwaProjectMembership => membership !== null);
