@@ -35,7 +35,7 @@ type StyleFn = (f: Feature<Geometry>) => Style | null | undefined;
 export default function DatasetLabelEditor() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { data: datasets } = useDatasets();
+  const { data: datasets, isError: datasetsFailed, refetch: retryDatasets } = useDatasets();
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
@@ -323,6 +323,16 @@ export default function DatasetLabelEditor() {
     };
   }, [activeLayer, dataset, hiddenIds, editor, ai.isProcessing, ai.isActive, hoveredServerId]);
 
+  if (!datasets && datasetsFailed) {
+    return (
+      <StatusPage
+        kind="offline"
+        title="This dataset couldn’t load"
+        description="DeadTrees didn’t respond. Check your connection and try again in a moment."
+        actions={<Button type="primary" onClick={() => void retryDatasets()}>Try again</Button>}
+      />
+    );
+  }
   if (!datasets) return <StatusPageLoading label="Loading dataset…" />;
   if (!dataset) {
     return (

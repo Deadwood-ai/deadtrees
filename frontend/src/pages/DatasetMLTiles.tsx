@@ -22,7 +22,7 @@ export default function DatasetMLTiles() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { listPath } = useAuditNavigation();
-  const { user } = useAuth();
+  const { user, status: authStatus } = useAuth();
   const datasetId = id ? parseInt(id, 10) : undefined;
   const { data: dataset, isLoading: isDatasetLoading, isError: isDatasetError, refetch: retryDataset } = useDatasetById(datasetId);
 
@@ -209,7 +209,8 @@ export default function DatasetMLTiles() {
     }
   };
 
-  if (isDatasetLoading) return <StatusPageLoading label="Loading dataset…" />;
+  // The dataset query waits for the session check; until then it is not "not found".
+  if (authStatus === "checking" || isDatasetLoading) return <StatusPageLoading label="Loading dataset…" />;
   if (isDatasetError) {
     return (
       <StatusPage

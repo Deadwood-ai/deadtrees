@@ -163,7 +163,7 @@ const getBiomeBadge = (biomeName: string | null) => {
 
 export default function DatasetAudit() {
 	const navigate = useNavigate();
-	const { user } = useAuth();
+	const { user, status: authStatus } = useAuth();
 	const {
 		canAudit,
 		isLoading: isAuditPrivilegeLoading,
@@ -171,7 +171,8 @@ export default function DatasetAudit() {
 		refetch: retryAuditPrivilege,
 	} = useCanAudit();
 
-	if (isAuditPrivilegeLoading) return <StatusPageLoading label="Checking access…" />;
+	// Privileges are only fetched once the session check knows the user.
+	if (authStatus === "checking" || isAuditPrivilegeLoading) return <StatusPageLoading label="Checking access…" />;
 
 	if (isAuditPrivilegeError) {
 		return (

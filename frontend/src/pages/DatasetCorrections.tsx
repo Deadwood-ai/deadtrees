@@ -31,7 +31,7 @@ export default function DatasetCorrections() {
   if (authLoading) return <StatusPageLoading label="Loading…" />;
 
   if (!user) {
-    const returnTo = `/dataset-corrections/${id ?? ""}${searchParams.size ? `?${searchParams}` : ""}`;
+    const returnTo = `/dataset-corrections/${id ?? ""}${searchParams.toString() ? `?${searchParams}` : ""}`;
     return (
       <StatusPage
         kind="locked"
