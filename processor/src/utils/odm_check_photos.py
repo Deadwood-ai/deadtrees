@@ -12,6 +12,13 @@ MakerNote bytes set to zero in place and is parsed again; GPS, XMP, and pixels
 stay byte-identical. An image that still fails is removed, because ODM would
 stop on it.
 
+OpenSfM later decodes the pixels of every image for feature detection, and one
+image that LibRaw or OpenCV cannot decode aborts the whole run (DT-913: broken
+DNGs raise LibRawIOError or LibRawFileUnsupportedError, truncated JPEGs "Unable
+to load image"). Each image is therefore decoded once with OpenSfM's own reader,
+in a child process because LibRaw can abort the interpreter, and removed when
+that fails.
+
 The processor passes the source of this file to ``python3 -c`` in an ODM
 container (see ``process_odm._check_photos_for_odm``); it must stay
 self-contained and depend only on the standard library plus the ``opendm``
@@ -23,7 +30,15 @@ Usage: python3 -c "<this file>" <images directory>
 import json
 import os
 import struct
+import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
+
+
+# Same call OpenSfM's feature detection makes; the child process isolates LibRaw aborts.
+DECODE_SCRIPT = 'import sys; from opensfm import io; io.imread(sys.argv[1], anydepth=True)'
+DECODE_TIMEOUT_SECONDS = 300
+DECODE_WORKERS = min(8, os.cpu_count() or 1)
 
 
 def maker_note_span(data: bytes) -> tuple[int, int] | None:
@@ -99,10 +114,28 @@ def parse_error(path: str) -> str | None:
 	return None
 
 
+def decode_error(path: str) -> str | None:
+	"""Return why OpenSfM cannot decode this image's pixels, or None when it can."""
+	try:
+		result = subprocess.run(
+			[sys.executable, '-c', DECODE_SCRIPT, path],
+			capture_output=True,
+			text=True,
+			timeout=DECODE_TIMEOUT_SECONDS,
+		)
+	except subprocess.TimeoutExpired:
+		return f'decoding took longer than {DECODE_TIMEOUT_SECONDS} s'
+	if result.returncode == 0:
+		return None
+	lines = result.stderr.strip().splitlines()
+	return lines[-1] if lines else f'decoder exited with code {result.returncode}'
+
+
 def check_photos(images_dir: str) -> dict:
 	from opendm import context
 
 	checked = 0
+	names = []
 	repaired = []
 	removed = []
 	for name in sorted(os.listdir(images_dir)):
@@ -112,6 +145,7 @@ def check_photos(images_dir: str) -> dict:
 		if not os.path.isfile(path) or ext.lower() not in context.supported_extensions or stem.endswith('_mask'):
 			continue
 		checked += 1
+		names.append(name)
 		error = parse_error(path)
 		if error is None:
 			continue
@@ -126,6 +160,13 @@ def check_photos(images_dir: str) -> dict:
 			error = f'{error}; blanking the MakerNote failed: {type(repair_error).__name__}: {repair_error}'
 		os.remove(path)
 		removed.append({'image': name, 'error': error[:300]})
+	parsed = sorted(name for name in names if os.path.exists(os.path.join(images_dir, name)))
+	with ThreadPoolExecutor(DECODE_WORKERS) as pool:
+		errors = pool.map(decode_error, [os.path.join(images_dir, name) for name in parsed])
+		for name, error in zip(parsed, errors):
+			if error is not None:
+				os.remove(os.path.join(images_dir, name))
+				removed.append({'image': name, 'error': error[:300]})
 	return {'checked': checked, 'repaired': repaired, 'removed': removed}
 
 

@@ -45,6 +45,11 @@ def fake_odm(monkeypatch):
 
 	monkeypatch.setattr(odm_check_photos, 'blank_maker_note', blank_maker_note)
 
+	def decode_error(path):
+		return 'OSError: Unable to load image' if open(path, 'rb').read().startswith(b'undecodable') else None
+
+	monkeypatch.setattr(odm_check_photos, 'decode_error', decode_error)
+
 
 @pytest.mark.unit
 def test_check_photos_repairs_or_removes_only_images_odm_cannot_parse(tmp_path, fake_odm):
@@ -68,6 +73,30 @@ def test_check_photos_repairs_or_removes_only_images_odm_cannot_parse(tmp_path, 
 	assert sorted(path.name for path in tmp_path.iterdir()) == sorted(set(files) - {'broken.jpg'})
 	assert (tmp_path / 'ok.JPG').read_bytes() == b'fine'
 	assert (tmp_path / 'dji_placeholder.JPG').read_bytes() == b'fine '
+
+
+@pytest.mark.unit
+def test_check_photos_removes_images_opensfm_cannot_decode(tmp_path, fake_odm):
+	(tmp_path / 'ok.jpg').write_bytes(b'fine')
+	(tmp_path / 'truncated.jpg').write_bytes(b'undecodable')
+	(tmp_path / 'broken.jpg').write_bytes(b'broken')
+
+	summary = odm_check_photos.check_photos(str(tmp_path))
+
+	assert summary['checked'] == 3
+	assert [entry['image'] for entry in summary['removed']] == ['broken.jpg', 'truncated.jpg']
+	assert summary['removed'][1]['error'] == 'OSError: Unable to load image'
+	assert [path.name for path in tmp_path.iterdir()] == ['ok.jpg']
+
+
+@pytest.mark.unit
+def test_decode_error_reports_the_decoders_last_line_and_survives_aborts(monkeypatch, tmp_path):
+	monkeypatch.setattr(odm_check_photos, 'DECODE_SCRIPT', 'import sys; sys.exit(sys.argv[1])')
+	assert odm_check_photos.decode_error('OSError: Unable to load image') == 'OSError: Unable to load image'
+	monkeypatch.setattr(odm_check_photos, 'DECODE_SCRIPT', 'import os; os.abort()')
+	assert odm_check_photos.decode_error(str(tmp_path / 'a.dng')) == 'decoder exited with code -6'
+	monkeypatch.setattr(odm_check_photos, 'DECODE_SCRIPT', 'pass')
+	assert odm_check_photos.decode_error(str(tmp_path / 'a.jpg')) is None
 
 
 @pytest.mark.unit
@@ -195,6 +224,7 @@ def test_odm_image_parses_dji_placeholder_photo_after_check():
 		for name, content in {
 			'images/DJI_0001_D.JPG': _dji_photo_that_crashes_exifread(),
 			'raw/DJI_0001_D.JPG': _dji_photo_that_crashes_exifread(),
+			'images/DJI_0002_D.JPG': _dji_photo_that_crashes_exifread()[:-400],  # pixels cut off (DT-913)
 			'check.py': open(odm_check_photos.__file__, 'rb').read(),
 			'parse.py': _PARSE_IN_ODM.encode(),
 		}.items():
@@ -220,7 +250,9 @@ def test_odm_image_parses_dji_placeholder_photo_after_check():
 	lines = [line for line in output.decode().splitlines() if line.startswith('{')]
 	assert exit_code == 0, output.decode()[-2000:]
 	summary, raw, checked = (json.loads(line) for line in lines[-3:])
-	assert summary == {'checked': 1, 'repaired': ['DJI_0001_D.JPG'], 'removed': []}
+	assert summary['checked'] == 2
+	assert summary['repaired'][0] == 'DJI_0001_D.JPG'
+	assert [entry['image'] for entry in summary['removed']] == ['DJI_0002_D.JPG']
 	assert raw == {'error': 'IndexError'}
 	assert checked['latitude'] == pytest.approx(48.61165, abs=1e-5)
 	assert checked['longitude'] == pytest.approx(8.35441, abs=1e-5)
