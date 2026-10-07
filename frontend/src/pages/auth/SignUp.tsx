@@ -5,10 +5,17 @@ import { useAnalytics } from "../../hooks/useAnalytics";
 import { signUp } from "../../api/signup";
 import Turnstile from "../../components/Turnstile";
 import { Settings } from "../../config";
+import AuthCard, {
+  AuthLink,
+  MIN_PASSWORD_LENGTH,
+  returnQuery,
+} from "./AuthCard";
 
-const MIN_PASSWORD_LENGTH = 6;
-
-type SignUpFormValues = { email: string; password: string; agreement: boolean };
+type SignUpFormValues = {
+  email: string;
+  password: string;
+  agreement: boolean;
+};
 
 const SignUp = () => {
   const [searchParams] = useSearchParams();
@@ -31,10 +38,19 @@ const SignUp = () => {
     setError(null);
     setSubmitting(true);
     try {
-      await signUp({ email, password, captchaToken, redirectTo: window.origin + returnTo });
+      await signUp({
+        email,
+        password,
+        captchaToken,
+        redirectTo: window.origin + returnTo,
+      });
       setSentTo(email);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Sign-up failed. Please try again.");
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Sign-up failed. Please try again.",
+      );
       setCaptchaReset((value) => value + 1);
     } finally {
       setSubmitting(false);
@@ -42,79 +58,130 @@ const SignUp = () => {
   };
 
   return (
-    <div className="m-auto flex h-full max-w-7xl items-center justify-center">
-      <div className="w-96 rounded-md p-8">
-        <h1 className="mb-8 text-3xl font-semibold text-gray-600">Sign Up</h1>
-        {sentTo ? (
-          <Alert
-            showIcon
-            type="success"
-            message="Check your inbox"
-            description={`We sent a confirmation link to ${sentTo}. Open it to finish creating your account.`}
-          />
-        ) : (
-          <>
-            {error ? <Alert className="mb-4" showIcon type="error" message={error} /> : null}
-            <Form layout="vertical" onFinish={onFinish} disabled={submitting} requiredMark={false}>
-              <Form.Item
-                label="Email address"
-                name="email"
-                rules={[{ required: true, type: "email", message: "Please enter a valid email address." }]}
-              >
-                <Input className="p-2" placeholder="Your email address" autoComplete="email" inputMode="email" />
-              </Form.Item>
-              <Form.Item
-                label="Create a password"
-                name="password"
-                rules={[
-                  { required: true, message: "Please choose a password." },
-                  { min: MIN_PASSWORD_LENGTH, message: `Use at least ${MIN_PASSWORD_LENGTH} characters.` },
-                ]}
-              >
-                <Input.Password className="p-2" placeholder="Your password" autoComplete="new-password" />
-              </Form.Item>
-              <Form.Item
-                name="agreement"
-                valuePropName="checked"
-                rules={[
-                  {
-                    validator: (_, value) =>
-                      value ? Promise.resolve() : Promise.reject("Please accept the terms of service and privacy policy."),
-                  },
-                ]}
-              >
-                <Checkbox data-testid="sign-up-agreement">
-                  I agree to the{" "}
-                  <Link to="/terms-of-service" target="_blank">
-                    terms of service
-                  </Link>{" "}
-                  and{" "}
-                  <Link to="/datenschutzerklaerung" target="_blank">
-                    privacy policy
-                  </Link>
-                  .
-                </Checkbox>
-              </Form.Item>
-              <Form.Item>
-                {Settings.TURNSTILE_SITE_KEY ? (
-                  <Turnstile siteKey={Settings.TURNSTILE_SITE_KEY} onToken={setCaptchaToken} resetKey={captchaReset} />
-                ) : (
-                  <Alert showIcon type="warning" message="Sign-up is not available right now." />
-                )}
-              </Form.Item>
-              <Button type="primary" htmlType="submit" block size="large" loading={submitting} disabled={!captchaToken}>
-                Sign up
-              </Button>
-            </Form>
-          </>
-        )}
-        <div className="pt-4 text-center">
-          <Link className="block pb-2 text-blue-500" to={`/sign-in${returnTo !== "/profile" ? `?returnTo=${returnTo}` : ""}`}>
+    <AuthCard
+      title="Sign Up"
+      subtitle={
+        sentTo
+          ? undefined
+          : "Create a free account to upload drone imagery and download data."
+      }
+      footer={
+        <div>
+          <AuthLink to={`/sign-in${returnQuery(returnTo)}`}>
             Already have an account?
-          </Link>
+          </AuthLink>
         </div>
-      </div>
-    </div>
+      }
+    >
+      {sentTo ? (
+        <Alert
+          showIcon
+          type="success"
+          message="Check your inbox"
+          description={`We sent a confirmation link to ${sentTo}. Open it to finish creating your account.`}
+        />
+      ) : (
+        <>
+          {error ? (
+            <Alert className="mb-4" showIcon type="error" message={error} />
+          ) : null}
+          <Form
+            layout="vertical"
+            onFinish={onFinish}
+            disabled={submitting}
+            requiredMark={false}
+          >
+            <Form.Item
+              label="Email address"
+              name="email"
+              rules={[
+                {
+                  required: true,
+                  type: "email",
+                  message: "Please enter a valid email address.",
+                },
+              ]}
+            >
+              <Input
+                size="large"
+                placeholder="Your email address"
+                autoComplete="email"
+                inputMode="email"
+              />
+            </Form.Item>
+            <Form.Item
+              label="Create a password"
+              name="password"
+              extra={`At least ${MIN_PASSWORD_LENGTH} characters.`}
+              rules={[
+                { required: true, message: "Please choose a password." },
+                {
+                  min: MIN_PASSWORD_LENGTH,
+                  message: `Use at least ${MIN_PASSWORD_LENGTH} characters.`,
+                },
+              ]}
+            >
+              <Input.Password
+                size="large"
+                placeholder="Your password"
+                autoComplete="new-password"
+              />
+            </Form.Item>
+            <Form.Item
+              name="agreement"
+              valuePropName="checked"
+              rules={[
+                {
+                  validator: (_, value) =>
+                    value
+                      ? Promise.resolve()
+                      : Promise.reject(
+                          "Please accept the terms of service and privacy policy.",
+                        ),
+                },
+              ]}
+            >
+              <Checkbox data-testid="sign-up-agreement">
+                I agree to the{" "}
+                <Link to="/terms-of-service" target="_blank">
+                  terms of service
+                </Link>{" "}
+                and{" "}
+                <Link to="/datenschutzerklaerung" target="_blank">
+                  privacy policy
+                </Link>
+                .
+              </Checkbox>
+            </Form.Item>
+            <Form.Item>
+              {Settings.TURNSTILE_SITE_KEY ? (
+                <Turnstile
+                  siteKey={Settings.TURNSTILE_SITE_KEY}
+                  onToken={setCaptchaToken}
+                  resetKey={captchaReset}
+                />
+              ) : (
+                <Alert
+                  showIcon
+                  type="warning"
+                  message="Sign-up is not available right now."
+                />
+              )}
+            </Form.Item>
+            <Button
+              type="primary"
+              htmlType="submit"
+              block
+              size="large"
+              loading={submitting}
+              disabled={!captchaToken}
+            >
+              Sign up
+            </Button>
+          </Form>
+        </>
+      )}
+    </AuthCard>
   );
 };
 
