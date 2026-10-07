@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Host wrapper for scripts/agent_session.py: injects the agent account from a
+# host-local mode-600 env file so the calling agent never reads the secret.
+# The default file is the agents login the requeue scripts already use.
+# Install: ln -s <checkout>/scripts/dev/dt-agent-session ~/.local/bin/dt-agent-session
+set -euo pipefail
+
+env_file="${DEADTREES_AGENT_ENV_FILE:-$HOME/.config/deadtrees/requeue.env}"
+repo="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
+
+fail() {
+	printf '{"ok": false, "error": "%s"}\n' "$1"
+	exit 3
+}
+
+[[ -f "$env_file" ]] || fail "missing credentials file $env_file"
+[[ "$(stat -c %a "$env_file")" == 600 ]] || fail "credentials file $env_file must be mode 600"
+
+# Only the file decides where the credentials go; ignore anything inherited.
+unset DEADTREES_AGENT_EMAIL DEADTREES_AGENT_PASSWORD DEADTREES_AGENT_SUPABASE_URL \
+	DEADTREES_AGENT_SUPABASE_ANON_KEY PROCESSOR_USERNAME PROCESSOR_PASSWORD SUPABASE_URL SUPABASE_KEY
+set -a
+# shellcheck disable=SC1090
+source "$env_file"
+set +a
+# Accept the requeue file's names for the same account.
+export DEADTREES_AGENT_EMAIL="${DEADTREES_AGENT_EMAIL:-${PROCESSOR_USERNAME:-}}"
+export DEADTREES_AGENT_PASSWORD="${DEADTREES_AGENT_PASSWORD:-${PROCESSOR_PASSWORD:-}}"
+export DEADTREES_AGENT_SUPABASE_URL="${DEADTREES_AGENT_SUPABASE_URL:-${SUPABASE_URL:-}}"
+export DEADTREES_AGENT_SUPABASE_ANON_KEY="${DEADTREES_AGENT_SUPABASE_ANON_KEY:-${SUPABASE_KEY:-}}"
+exec python3 "$repo/scripts/agent_session.py" "$@"

@@ -17,6 +17,7 @@ it). Start here, then open the linked docs that match the task.
 - Local code review: `docs/agents/local-review-instructions.md`
 - Manual QA (production read-only and isolated local write):
   `.agents/skills/run-deadtrees-qa/SKILL.md`
+- Signed-in checks as the agent account (`dt-agent-session`): `docs/playbooks/agent-login.md`
 - Releases and team announcements: `docs/playbooks/create-release.md`
 - Production processor hosts and how each auto-deploys: `docs/playbooks/processor-hosts.md`
 - Diagrams, including Mermaid validation: `docs/playbooks/technical-diagrams.md`
