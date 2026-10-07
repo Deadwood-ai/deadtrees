@@ -442,6 +442,26 @@ abstract = {Excessive tree mortality is a global concern and remains poorly unde
             DOI badge and link).
           </p>
 
+          <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
+            <a
+              href="https://www.re3data.org/repository/r3d100014703"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0"
+            >
+              <img
+                src="/assets/re3data-badge.svg"
+                alt="deadtrees.earth in re3data.org, the Registry of Research Data Repositories"
+                width={210}
+                height={70}
+              />
+            </a>
+            <p className="m-0 text-base text-gray-600">
+              deadtrees.earth is listed in re3data.org, the Registry of Research
+              Data Repositories.
+            </p>
+          </div>
+
           <Tabs
             defaultActiveKey="database"
             type="card"
