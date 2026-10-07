@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from shared.db import login as supabase_login
 
-from ..access.signup import SignupRejected, captcha_passes, create_account
+from ..access.signup import SignupEmailFailed, SignupRejected, captcha_passes, create_account
 from ..utils.request_ip import get_client_ip
 from ..utils.sliding_window import SlidingWindowLimiter
 
@@ -62,4 +62,8 @@ def signup(payload: SignupRequest, request: Request):
 		create_account(payload.email, payload.password, payload.redirect_to)
 	except SignupRejected as error:
 		raise HTTPException(status_code=400, detail=str(error))
+	except SignupEmailFailed:
+		raise HTTPException(
+			status_code=503, detail='We could not send the confirmation email. Please try again in a few minutes.'
+		)
 	return SignupResponse(message='Check your inbox for a link to confirm your email address.')

@@ -123,3 +123,13 @@ def test_unconfirmed_email_cannot_keep_a_password_someone_else_chose(new_email, 
 
 def _signup_message() -> dict:
 	return {'message': 'Check your inbox for a link to confirm your email address.'}
+
+
+def test_undelivered_confirmation_email_is_reported_and_retry_recovers(new_email, captcha, monkeypatch):
+	deliver = signup_module.send_email
+	monkeypatch.setattr(signup_module, 'send_email', lambda *args, **kwargs: {'success': False, 'error': 'down'})
+	assert _signup(new_email).status_code == 503
+	monkeypatch.setattr(signup_module, 'send_email', deliver)
+	purge_messages()
+	assert _signup(new_email).status_code == 200
+	assert_email_received('Finish creating your DeadTrees account', new_email)

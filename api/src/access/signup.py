@@ -11,6 +11,7 @@ An account that exists but was never confirmed may carry a password chosen by
 someone else who registered the address first. Its password is therefore replaced
 with a random one and the owner of the inbox chooses their own through a recovery
 link, so nobody but the inbox owner can sign in once the address is confirmed.
+That same path makes a retry safe when the confirmation email could not be sent.
 """
 
 import logging
@@ -36,6 +37,10 @@ EXISTING_ACCOUNT_CODES = {'email_exists', 'user_already_exists'}
 
 class SignupRejected(Exception):
 	"""A sign-up the caller can fix, such as a weak password."""
+
+
+class SignupEmailFailed(Exception):
+	"""The confirmation email was not accepted for delivery; signing up again retries it."""
 
 
 def _captcha_secret() -> Optional[str]:
@@ -90,4 +95,5 @@ def create_account(email: str, password: str, redirect_to: Optional[str]) -> Non
 					raise SignupRejected(error.message) from error
 				raise
 			subject, text_body, html_body = confirm_signup_email(link.properties.action_link)
-	send_email(email, subject, html_body, text_body=text_body)
+	if not send_email(email, subject, html_body, text_body=text_body).get('success'):
+		raise SignupEmailFailed
