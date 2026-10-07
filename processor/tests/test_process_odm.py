@@ -632,3 +632,28 @@ def test_complete_odm_processing_with_real_images(odm_task, auth_token, zip_sour
 			assert isinstance(has_rtk_data, bool)
 			assert isinstance(rtk_file_count, int)
 			assert has_rtk_data is True and rtk_file_count > 0 and raw_image_count == 5
+
+
+@pytest.mark.unit
+def test_orthophoto_pass_gets_a_coarser_resolution_when_the_raster_would_not_fit(fake_volume, monkeypatch):
+	from processor.src.process_odm import _with_budgeted_ortho_resolution
+
+	fake_volume([{'points': {'a': {'coordinates': [0, 0, 0]}, 'b': {'coordinates': [2000, 3000, 0]}}}])
+	monkeypatch.setattr(settings, 'ODM_MAX_ORTHO_PIXELS', 7e9)
+	command = ['--fast-orthophoto', '--orthophoto-resolution', '1.0', '--project-path', '/odm_data', 'dataset_1']
+
+	budgeted = _with_budgeted_ortho_resolution(command, 'odm_processing_1', 'dataset_1', dataset_id=1, token='t')
+
+	assert budgeted == ['--fast-orthophoto', '--orthophoto-resolution', '3', '--project-path', '/odm_data', 'dataset_1']
+	assert command[2] == '1.0'
+
+
+@pytest.mark.unit
+def test_orthophoto_pass_keeps_the_resolution_when_the_raster_fits(fake_volume, monkeypatch):
+	from processor.src.process_odm import _with_budgeted_ortho_resolution
+
+	fake_volume([{'points': {'a': {'coordinates': [0, 0, 0]}, 'b': {'coordinates': [500, 500, 0]}}}])
+	monkeypatch.setattr(settings, 'ODM_MAX_ORTHO_PIXELS', 7e9)
+	command = ['--orthophoto-resolution', '1.0', 'dataset_1']
+
+	assert _with_budgeted_ortho_resolution(command, 'odm_processing_1', 'dataset_1', dataset_id=1, token='t') is command
