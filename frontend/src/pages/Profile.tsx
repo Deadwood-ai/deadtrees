@@ -7,7 +7,8 @@ import { useNavigate, Link } from "react-router-dom";
 // import { useUserDatasets } from "../hooks/useDatasets";
 import { useMyFlags } from "../hooks/useDatasetFlags";
 import type { DatasetFlag } from "../types/flags";
-import { FileOutlined } from "@ant-design/icons";
+import { FileOutlined, FlagOutlined } from "@ant-design/icons";
+import EmptyStatePanel from "../components/EmptyStatePanel";
 import PublicationModal from "../components/PublicationModal";
 import PublicationsTable from "../components/PublicationsTable";
 import SharedWithMeTable from "../components/DatasetAccess/SharedWithMeTable";
@@ -59,7 +60,7 @@ export default function ProfilePage() {
   const { track } = useAnalytics("profile");
 
   // const { data: userData } = useUserDatasets();
-  const { data: myFlags = [] } = useMyFlags();
+  const { data: myFlags = [], isLoading: isLoadingFlags } = useMyFlags();
 
   const [activeTab, setActiveTab] = useState<ActiveTab>(ActiveTab.MyDatasets);
   const [selectedDatasets, setSelectedDatasets] = useState<DatasetType[]>([]);
@@ -217,16 +218,16 @@ export default function ProfilePage() {
               ) : activeTab === ActiveTab.SharedWithMe ? (
                 <SharedWithMeTable />
               ) : activeTab === ActiveTab.Publications ? (
-                <PublicationsTable />
+                <PublicationsTable onChooseDatasets={() => setActiveTab(ActiveTab.MyDatasets)} />
               ) : (
                 <div>
-                  {myFlags.length === 0 ? (
-                    <div className="my-12 flex flex-col items-center justify-center text-center">
-                      <Typography.Title level={4} className="mb-2">No issues yet</Typography.Title>
-                      <Typography.Text type="secondary" className="text-base">
-                        Report an issue from any dataset’s details page to see it here.
-                      </Typography.Text>
-                    </div>
+                  {!isLoadingFlags && myFlags.length === 0 ? (
+                    <EmptyStatePanel
+                      testId="my-issues-empty"
+                      icon={<FlagOutlined />}
+                      title="Help us fix flawed results"
+                      description="Spotted a problem in an orthomosaic or a prediction? Report it from the dataset's page. Your reports and their status appear here."
+                    />
                   ) : (
                     <>
                       <div className="mb-6">
@@ -238,6 +239,7 @@ export default function ProfilePage() {
                       <div className="overflow-hidden rounded-xl border border-gray-100">
                         <Table
                           rowKey="id"
+                          loading={isLoadingFlags}
                           dataSource={myFlags}
                           columns={[
                           {

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Table, Tag, Typography, Button, Tooltip, Spin, Empty } from "antd";
+import { Table, Tag, Typography, Button, Tooltip, Spin } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { supabase } from "../hooks/useSupabase";
 import { useAuth } from "../hooks/useAuthProvider";
-import { ClockCircleOutlined } from "@ant-design/icons";
+import { ClockCircleOutlined, FileDoneOutlined } from "@ant-design/icons";
 import { useIsMobile } from "../hooks/useIsMobile";
+import EmptyStatePanel from "./EmptyStatePanel";
 
 interface Publication {
   id: number;
@@ -15,7 +16,12 @@ interface Publication {
   datasets: number;
 }
 
-const PublicationsTable: React.FC = () => {
+interface PublicationsTableProps {
+  /** Opens the dataset list, where datasets are selected for publishing. */
+  onChooseDatasets: () => void;
+}
+
+const PublicationsTable: React.FC<PublicationsTableProps> = ({ onChooseDatasets }) => {
   const { user } = useAuth();
   const isMobile = useIsMobile();
   const [loading, setLoading] = useState(true);
@@ -122,19 +128,12 @@ const PublicationsTable: React.FC = () => {
 
   if (publications.length === 0) {
     return (
-      <Empty
-        className="mt-8"
-        description={
-          <div className="flex flex-col items-center justify-center ">
-            <Typography.Title color="gray" level={4}>
-              No publications yet
-            </Typography.Title>
-            <Typography.Paragraph>
-              Go to the "My Datasets" tab to select and publish your datasets via FreiDATA.
-            </Typography.Paragraph>
-          </div>
-        }
-        image={Empty.PRESENTED_IMAGE_SIMPLE}
+      <EmptyStatePanel
+        testId="publications-empty"
+        icon={<FileDoneOutlined />}
+        title="Get a citable DOI for your data"
+        description="Select processed datasets in My Datasets and publish them through FreiDATA. Each publication gets one DOI that others can cite."
+        action={<Button onClick={onChooseDatasets}>Choose datasets to publish</Button>}
       />
     );
   }

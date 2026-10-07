@@ -1,7 +1,9 @@
-import { Table, Tag, Typography } from "antd";
+import { Table, Tag } from "antd";
+import { TeamOutlined } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 import type { ISharedDataset } from "../../api/datasetAccess";
 import { useSharedWithMe } from "../../hooks/useDatasetAccess";
+import EmptyStatePanel from "../EmptyStatePanel";
 import { roleLabel, visibilityLabel } from "./accessCopy";
 
 /** Datasets other people shared with the signed-in user. */
@@ -10,14 +12,12 @@ export default function SharedWithMeTable() {
 
   if (!isLoading && data.length === 0) {
     return (
-      <div className="my-12 flex flex-col items-center justify-center text-center" data-testid="shared-with-me-empty">
-        <Typography.Title level={4} className="mb-2">
-          Nothing shared with you yet
-        </Typography.Title>
-        <Typography.Text type="secondary" className="text-base">
-          When someone shares a dataset with your account, it appears here.
-        </Typography.Text>
-      </div>
+      <EmptyStatePanel
+        testId="shared-with-me-empty"
+        icon={<TeamOutlined />}
+        title="Nothing shared with you yet"
+        description="When someone shares a dataset with your account, it appears here with the access they gave you."
+      />
     );
   }
 

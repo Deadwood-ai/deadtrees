@@ -22,6 +22,7 @@ import { useAuth } from "../hooks/useAuthProvider";
 import EditDatasetModal from "./EditDatasetModal";
 import StatusCell from "./DatasetStatus/StatusCell";
 import StatusDrawer from "./DatasetStatus/StatusDrawer";
+import MyDatasetsEmpty from "./DatasetStatus/MyDatasetsEmpty";
 import MobileDatasets from "./DatasetStatus/MobileDatasets";
 import { useStatusSelection } from "./DatasetStatus/useStatusSelection";
 import {
@@ -584,7 +585,7 @@ const DataTable: React.FC<DataTableProps> = ({
           onViewMap={viewMap}
         />
       )}
-      {isMobile ? <MobileDatasets datasets={sortedUserData} loading={isLoadingData} queueFor={queueFor} onDetails={openDetails} onViewMap={viewMap} /> : <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+      {isMobile ? <MobileDatasets datasets={sortedUserData} loading={isLoadingData} queueFor={queueFor} onDetails={openDetails} onViewMap={viewMap} /> : !isLoadingData && !isDataError && sortedUserData.length === 0 ? <MyDatasetsEmpty /> : <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
         <Table
           rowKey={"id"}
           dataSource={sortedUserData}

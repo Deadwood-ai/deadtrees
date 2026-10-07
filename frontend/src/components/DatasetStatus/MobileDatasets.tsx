@@ -1,5 +1,6 @@
-import { Button, Empty, Spin } from "antd";
+import { Button, Spin } from "antd";
 import { EnvironmentOutlined } from "@ant-design/icons";
+import MyDatasetsEmpty from "./MyDatasetsEmpty";
 import StatusCell from "./StatusCell";
 import {
   canOpenOwnerMap,
@@ -26,7 +27,7 @@ interface MobileDatasetsProps {
  */
 export default function MobileDatasets({ datasets, loading, queueFor, onDetails, onViewMap }: MobileDatasetsProps) {
   if (loading) return <Spin aria-label="Loading datasets" />;
-  if (!datasets.length) return <Empty description="No datasets yet" />;
+  if (!datasets.length) return <MyDatasetsEmpty isMobile />;
   return (
     <ul
       className="m-0 list-none divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white p-0"
