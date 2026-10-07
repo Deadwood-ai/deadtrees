@@ -120,3 +120,12 @@ def test_members_cannot_add_themselves_to_a_project(access_accounts, project):
 			client.table('priwa_project_memberships').insert(
 				{'project_id': project, 'user_id': access_accounts['stranger']['id'], 'role': 'field_user'}
 			).execute()
+
+
+def test_public_flights_carry_no_project_role(access_accounts, project, private_flight):
+	with use_service_client() as client:
+		client.table(settings.datasets_table).update({'data_access': 'public'}).eq('id', private_flight).execute()
+
+	member = _sees(access_accounts['reader'], project, private_flight)
+	assert member['mosaic'] and member['dataset']
+	assert member['access']['role'] is None

@@ -23,6 +23,7 @@ as $$
 		on reader.project_id = uploader.project_id
 		and reader.user_id = p_user_id
 	where p_user_id is not null
+		and dataset.data_access = 'private'
 		and dataset.platform = 'drone'
 		and not dataset.archived;
 $$;
