@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Host wrapper for scripts/agent_session.py: injects the agent account from a
+# host-local mode-600 env file so the calling agent never reads the secret.
+# Install: ln -s <checkout>/scripts/dev/dt-agent-session ~/.local/bin/dt-agent-session
+set -euo pipefail
+
+env_file="${DEADTREES_AGENT_ENV_FILE:-$HOME/.config/deadtrees/agent-login.env}"
+repo="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
+
+fail() {
+	printf '{"ok": false, "error": "%s"}\n' "$1"
+	exit 3
+}
+
+[[ -f "$env_file" ]] || fail "missing credentials file $env_file"
+[[ "$(stat -c %a "$env_file")" == 600 ]] || fail "credentials file $env_file must be mode 600"
+
+set -a
+# shellcheck disable=SC1090
+source "$env_file"
+set +a
+exec python3 "$repo/scripts/agent_session.py" "$@"
