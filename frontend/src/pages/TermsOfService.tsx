@@ -97,10 +97,10 @@ export default function TermsOfService() {
           </Paragraph>
           <Paragraph>
             Nutzer behalten die Rechte an ihren Daten. Öffentliche Nutzerbeiträge („Öffentlich") werden einschließlich
-            ihrer Metadaten allen unter der Creative-Commons-Lizenz CC BY 4.0 zur Verfügung gestellt. Bei Nutzerbeiträgen
-            mit der Sichtbarkeit „Nur ansehen" werden die daraus abgeleiteten Vorhersagen unter CC BY 4.0
-            bereitgestellt, während das Orthophoto nur dem Nutzer und den von ihm berechtigten Personen zur Verfügung
-            steht. Private Nutzerbeiträge („Privat") werden anderen Nutzern nicht lizenziert. Wird ein Datensatz
+            ihrer Metadaten allen unter der Creative-Commons-Lizenz CC BY 4.0 zur Verfügung gestellt. Nutzerbeiträge mit
+            der Sichtbarkeit „Nur ansehen" können alle online ansehen, und die daraus abgeleiteten Vorhersagen werden
+            unter CC BY 4.0 bereitgestellt; das Orthophoto herunterladen können nur der Nutzer und die von ihm
+            berechtigten Personen. Private Nutzerbeiträge („Privat") werden anderen Nutzern nicht lizenziert. Wird ein Datensatz
             später öffentlich gemacht, gilt ab diesem Zeitpunkt CC BY 4.0. Bereits erteilte CC-BY-Lizenzen bleiben auch
             nach einer Änderung oder Löschung bestehen. Die Rechte des Betreibers nach Abschnitt 5 gelten für alle
             Nutzerbeiträge.
@@ -118,8 +118,8 @@ export default function TermsOfService() {
           </Paragraph>
           <Paragraph>
             Die Sichtbarkeit legt fest, wer die Daten auf der Plattform sehen und herunterladen kann. Sie schließt einen
-            Upload nicht von dieser Nutzung für die Forschung aus. Orthophotos, die Nutzer nicht öffentlich gemacht
-            haben, veröffentlicht der Betreiber nicht.
+            Upload nicht von dieser Nutzung für die Forschung aus. Der Betreiber stellt Orthophotos nicht über das
+            hinaus zum Herunterladen bereit, was die gewählte Sichtbarkeit erlaubt.
           </Paragraph>
         </section>
 
@@ -315,9 +315,9 @@ export default function TermsOfService() {
           </Paragraph>
           <Paragraph>
             Users retain the rights to their data. Public User Contributions, including their metadata, are made
-            available to everyone under the Creative Commons License CC BY 4.0. For "View only" User Contributions, the
-            predictions derived from them are made available under CC BY 4.0, while the orthophoto is available only to
-            the user and the people they allow. Private User Contributions are not licensed to other users. If a
+            available to everyone under the Creative Commons License CC BY 4.0. Anyone can view "View only" User Contributions
+            online, and the predictions derived from them are made available under CC BY 4.0, while only the user and
+            the people they allow can download the orthophoto. Private User Contributions are not licensed to other users. If a
             dataset is made public later, CC BY 4.0 applies from then on. CC BY licenses already granted remain valid
             after a change or deletion. The Operator's rights under Section 5 apply to all User Contributions.
           </Paragraph>
@@ -333,7 +333,8 @@ export default function TermsOfService() {
           </Paragraph>
           <Paragraph>
             Visibility decides who can see and download the data on the Platform. It does not exclude an upload from
-            this research use. The Operator does not publish orthophotos that users have not made public.
+            this research use. The Operator does not make orthophotos available for download beyond what the chosen
+            visibility allows.
           </Paragraph>
         </section>
 
