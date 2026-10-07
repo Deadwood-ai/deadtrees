@@ -585,7 +585,7 @@ const DataTable: React.FC<DataTableProps> = ({
           onViewMap={viewMap}
         />
       )}
-      {isMobile ? <MobileDatasets datasets={sortedUserData} loading={isLoadingData} queueFor={queueFor} onDetails={openDetails} onViewMap={viewMap} /> : !isLoadingData && !isDataError && sortedUserData.length === 0 ? <MyDatasetsEmpty /> : <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+      {isMobile ? isDataError ? null : <MobileDatasets datasets={sortedUserData} loading={isLoadingData} queueFor={queueFor} onDetails={openDetails} onViewMap={viewMap} /> : !isLoadingData && !isDataError && sortedUserData.length === 0 ? <MyDatasetsEmpty /> : <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
         <Table
           rowKey={"id"}
           dataSource={sortedUserData}

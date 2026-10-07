@@ -54,7 +54,7 @@ export default function MyIssuesTable() {
             responsive: ["sm"],
             render: (_: unknown, f: DatasetFlag) => (
               <Tooltip title={f.description}>
-                <span className="text-gray-600">{(f.description || "").slice(0, 120) + (f.description.length > 120 ? "…" : "")}</span>
+                <span className="text-gray-600">{(f.description ?? "").slice(0, 120) + ((f.description ?? "").length > 120 ? "…" : "")}</span>
               </Tooltip>
             ),
           },
