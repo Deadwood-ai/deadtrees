@@ -109,7 +109,7 @@ def test_unconfirmed_email_cannot_keep_a_password_someone_else_chose(new_email, 
 	)
 	assert victim.status_code == 200 and victim.json() == _signup_message()
 
-	message = assert_email_received('Finish creating your DeadTrees account', new_email)
+	message = assert_email_received('Confirm your DeadTrees account', new_email)
 	body = get_message_by_id(message['ID'])['Text']
 	assert 'type=recovery' in body
 	assert signup_module._set_password_url('https://deadtrees.earth/profile?x=1') == 'https://deadtrees.earth/reset-password'
@@ -132,4 +132,5 @@ def test_undelivered_confirmation_email_is_reported_and_retry_recovers(new_email
 	monkeypatch.setattr(signup_module, 'send_email', deliver)
 	purge_messages()
 	assert _signup(new_email).status_code == 200
-	assert_email_received('Finish creating your DeadTrees account', new_email)
+	message = assert_email_received('Confirm your DeadTrees account', new_email)
+	assert 'type=recovery' in get_message_by_id(message['ID'])['Text']
