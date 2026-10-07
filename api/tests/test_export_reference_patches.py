@@ -789,3 +789,34 @@ def test_main_fails_when_vector_freshness_check_errors_and_nothing_else_changed(
 	monkeypatch.setattr(export_module, 'cleanup_removed_patch_exports', lambda *_args, **_kwargs: 0)
 
 	assert export_module.main() == 1
+
+
+def test_fetch_reference_datasets_keeps_only_public_datasets(monkeypatch):
+	tables = {
+		'reference_datasets': [{'dataset_id': 10}, {'dataset_id': 11}, {'dataset_id': 12}],
+		'v2_datasets': [
+			{'id': 10, 'data_access': 'public'},
+			{'id': 11, 'data_access': 'viewonly'},
+			{'id': 12, 'data_access': 'private'},
+		],
+	}
+	monkeypatch.setattr(fetch_module, 'use_client', lambda _token: FakeUseClient(tables))
+
+	assert fetch_module.fetch_reference_datasets('token') == [10]
+
+
+def test_fetch_validated_patches_skips_a_requested_non_public_dataset(monkeypatch):
+	tables = {'reference_patches': [make_patch(1, 0, dataset_id=11, deadwood_validated=True)]}
+	install_fake_db(monkeypatch, tables)
+
+	assert fetch_module.fetch_validated_patches('token', dataset_id=11) == []
+
+
+def test_cleanup_removed_datasets_removes_a_dataset_that_is_no_longer_public(tmp_path):
+	(tmp_path / '10' / 'png').mkdir(parents=True)
+	(tmp_path / '11' / 'png').mkdir(parents=True)
+
+	export_module.cleanup_removed_datasets(tmp_path, [10])
+
+	assert (tmp_path / '10').exists()
+	assert not (tmp_path / '11').exists()

@@ -37,10 +37,25 @@ def parse_optional_datetime(value) -> Optional[datetime]:
 
 
 def fetch_reference_datasets(token: str) -> list[int]:
-	"""Fetch all dataset IDs from the reference_datasets table."""
+	"""Fetch the IDs of public datasets in the reference_datasets table.
+
+	The export directory is served without authentication, so view-only and private
+	datasets must never be written to it (their orthophotos are not downloadable by
+	everyone). Leaving them out here also makes the export remove their old folders.
+	"""
 	with use_client(token) as client:
 		rows = fetch_all_rows(lambda: client.from_('reference_datasets').select('dataset_id').order('dataset_id'))
-	return [row['dataset_id'] for row in rows]
+		reference_ids = [row['dataset_id'] for row in rows]
+		if not reference_ids:
+			return []
+		public_rows = fetch_all_rows(
+			lambda: client.from_('v2_datasets')
+			.select('id')
+			.in_('id', reference_ids)
+			.eq('data_access', 'public')
+			.order('id')
+		)
+	return [row['id'] for row in public_rows]
 
 
 def fetch_validated_patches(
@@ -58,12 +73,11 @@ def fetch_validated_patches(
 	For child patches without direct labels, resolves effective labels by traversing
 	the full parent chain (5cm -> 10cm -> 20cm).
 	"""
+	dataset_ids = fetch_reference_datasets(token)
 	if dataset_id:
-		dataset_ids = [dataset_id]
-	else:
-		dataset_ids = fetch_reference_datasets(token)
-		if not dataset_ids:
-			return []
+		dataset_ids = [dataset_id] if dataset_id in dataset_ids else []
+	if not dataset_ids:
+		return []
 
 	with use_client(token) as client:
 
