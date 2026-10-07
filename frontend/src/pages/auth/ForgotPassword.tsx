@@ -36,15 +36,26 @@ const ForgotPassword = () => {
           : "Enter your email address and we'll send you a link to choose a new password."
       }
       footer={
-        <div>
-          Remembered it?{" "}
-          <Link
-            to="/sign-in"
-            className="font-medium text-[#1B5E35] underline hover:text-emerald-800"
-          >
-            Sign in
-          </Link>
-        </div>
+        <>
+          <div>
+            Remembered it?{" "}
+            <Link
+              to="/sign-in"
+              className="font-medium text-[#1B5E35] underline hover:text-emerald-800"
+            >
+              Sign in
+            </Link>
+          </div>
+          <div>
+            Not registered yet?{" "}
+            <Link
+              to="/sign-up"
+              className="font-medium text-[#1B5E35] underline hover:text-emerald-800"
+            >
+              Create an account
+            </Link>
+          </div>
+        </>
       }
     >
       {sentTo ? (

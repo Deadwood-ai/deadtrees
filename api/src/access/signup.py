@@ -100,5 +100,9 @@ def create_account(email: str, password: str, redirect_to: Optional[str]) -> Non
 			return
 		if not existing:
 			# Undo the new account so a retry is an ordinary sign-up with the chosen password.
-			client.auth.admin.delete_user(link.user.id)
+			try:
+				client.auth.admin.delete_user(link.user.id)
+			except Exception:
+				# The account stays unconfirmed; a retry restarts it through the recovery path.
+				logger.exception('Could not undo a new account after its confirmation email failed')
 	raise SignupEmailFailed
