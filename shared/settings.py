@@ -216,10 +216,6 @@ class Settings(BaseSettings):
 	ODM_MAX_NADIR_DEVIATION_DEGREES: float = 40.0
 	# Largest image-position extent one ODM run may mosaic; successful ODM orthos reach ~20 km² (DT-1312).
 	ODM_MAX_IMAGE_EXTENT_KM2: float = 30.0
-	# Largest orthophoto raster ODM may render; ODM holds ~8 bytes per pixel in memory and the
-	# largest successful ODM ortho is 8.25 Gpx (9510), while 9654 (5.4 km² at fine GSD) ran out at 100 GB (DT-915).
-	# Kept just above that so every mission that has rendered before keeps its resolution.
-	ODM_MAX_ORTHO_PIXELS: float = 8.5e9
 
 	# Linear integration for processing failure notifications
 	LINEAR_ENABLED: bool = False
