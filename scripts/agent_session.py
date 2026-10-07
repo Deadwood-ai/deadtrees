@@ -41,6 +41,7 @@ from datetime import datetime, timezone
 DEFAULT_API_URL = 'https://data2.deadtrees.earth/api/v1'
 
 EXIT_OK, EXIT_FAILED, EXIT_USAGE, EXIT_AUTH, EXIT_NETWORK = 0, 1, 2, 3, 7
+LOOPBACK_HOSTS = frozenset({'localhost', '127.0.0.1', '::1'})
 
 SECRET_KEY = re.compile(r'token|secret|password|signature|ticket|authorization|apikey|cookie', re.I)
 SECRET_VALUE = re.compile(r'/exports/|[?&](token|sig|signature|x-amz-[a-z-]+)=|^ey[A-Za-z0-9_-]{20,}\.', re.I)
@@ -125,6 +126,15 @@ class Session:
 		return http(method, self.api_url + '/' + path.lstrip('/'), self.auth, **kwargs)
 
 
+def _check_api_destination(api_url: str, auth_url: str) -> None:
+	"""The token may only go to production or, with a local Auth server, to a local API."""
+	api, auth = urllib.parse.urlsplit(api_url), urllib.parse.urlsplit(auth_url)
+	production = api.scheme == 'https' and api.hostname == urllib.parse.urlsplit(DEFAULT_API_URL).hostname
+	local = api.hostname in LOOPBACK_HOSTS and auth.hostname in LOOPBACK_HOSTS
+	if not (production or local):
+		raise CheckError(EXIT_USAGE, 'API URL must be production, or local with a local Auth server', host=api.hostname)
+
+
 def _required_env(*names: str) -> list[str]:
 	missing = [name for name in names if not os.environ.get(name)]
 	if missing:
@@ -141,6 +151,7 @@ def signed_in(api_url: str):
 		'DEADTREES_AGENT_SUPABASE_URL',
 		'DEADTREES_AGENT_SUPABASE_ANON_KEY',
 	)
+	_check_api_destination(api_url, auth_url)
 	auth_url = auth_url.rstrip('/') + '/auth/v1'
 	response = http(
 		'POST',

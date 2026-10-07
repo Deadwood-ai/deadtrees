@@ -169,3 +169,18 @@ def test_network_failure_has_its_own_exit_code(capsys, monkeypatch, platform):
 
 	assert code == 7
 	assert out['error'] == 'network error: URLError'
+
+
+def test_untrusted_api_url_gets_no_sign_in(platform, capsys):
+	code, out = run(capsys, '--api-url', 'https://attacker.example/api/v1', 'whoami')
+
+	assert code == 2
+	assert out['host'] == 'attacker.example'
+	assert 'signed_out' not in out
+
+
+def test_local_api_needs_local_auth(platform, capsys, monkeypatch):
+	monkeypatch.setenv('DEADTREES_AGENT_SUPABASE_URL', 'https://auth.example')
+	code, _ = run(capsys, 'whoami')
+
+	assert code == 2
