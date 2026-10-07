@@ -12,6 +12,8 @@ import {
   type Page,
 } from "@playwright/test";
 
+import { acceptCookieConsent } from "./support/localAuth";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../..");
 const localDataRoot = process.env.LOCAL_DATA_ROOT || path.join(repoRoot, "data");
@@ -89,6 +91,9 @@ test.describe("contributor local write flows", () => {
   });
 
   test("signup creates a local authenticated contributor", async ({ page }) => {
+    // The consent banner is fixed to the bottom of the viewport and, since the
+    // sign-up form gained the terms checkbox, covers the Sign up button.
+    await acceptCookieConsent(page);
     await page.goto("/sign-up");
 
     await page.getByPlaceholder(/email/i).fill(contributorEmail);
