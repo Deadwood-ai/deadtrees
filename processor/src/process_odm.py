@@ -238,10 +238,11 @@ def _prune_unobserved_points(
 def _check_photos_for_odm(
 	client, volume_name: str, project_name: str, resource_labels: dict, dataset_id: int, token: str
 ) -> None:
-	"""Parse every image with ODM's own photo parser before ODM runs, so one unreadable image cannot stop it.
+	"""Parse and decode every image the way ODM does before ODM runs, so one unreadable image cannot stop it.
 
 	See odm_check_photos.py: images that crash the parser get their MakerNote blanked
-	(DT-1289, DJI "DJI MakerNotes" placeholder), and images that still crash are left out.
+	(DT-1289, DJI "DJI MakerNotes" placeholder), and images that still crash or whose
+	pixels OpenSfM cannot decode (DT-913) are left out.
 	"""
 	summary = json.loads(
 		_run_script_in_odm_image(
@@ -257,8 +258,8 @@ def _check_photos_for_odm(
 	log_context = LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id)
 	repaired, removed = summary['repaired'], summary['removed']
 	logger.info(
-		f'ODM photo check parsed {summary["checked"]} images: blanked the MakerNote of {len(repaired)} and '
-		f'left out {len(removed)} that ODM cannot parse',
+		f'ODM photo check read {summary["checked"]} images: blanked the MakerNote of {len(repaired)} and '
+		f'left out {len(removed)} that ODM cannot read',
 		log_context,
 	)
 	if repaired:
@@ -270,7 +271,7 @@ def _check_photos_for_odm(
 	if removed:
 		removed_sample = '; '.join(f'{entry["image"]} ({entry["error"]})' for entry in removed[:5])
 		logger.warning(
-			f'Left out images that ODM cannot parse: {removed_sample}{" ..." if len(removed) > 5 else ""}',
+			f'Left out images that ODM cannot read: {removed_sample}{" ..." if len(removed) > 5 else ""}',
 			log_context,
 		)
 
