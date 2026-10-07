@@ -41,8 +41,11 @@ export default function AuthCard({
   footer,
 }: AuthCardProps) {
   return (
-    <div className="flex min-h-full w-full items-start justify-center px-4 pb-12 pt-28 md:items-center md:pt-24">
-      <div className="w-full max-w-sm">
+    // The page scrolls inside the full-height layout, and the bottom padding
+    // grows by the consent banner's height so the form's button never sits
+    // underneath it.
+    <div className="flex h-full min-h-full w-full items-start justify-center overflow-y-auto px-4 pb-[calc(3rem+var(--dt-consent-inset,0px))] pt-28 md:pt-24">
+      <div className="w-full max-w-sm md:my-auto">
         <div className="rounded-2xl border border-gray-200/70 bg-white p-6 shadow-sm sm:p-8">
           <h1 className="m-0 text-2xl font-semibold text-gray-800">{title}</h1>
           {subtitle ? (

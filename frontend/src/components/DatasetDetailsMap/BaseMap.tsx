@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useMemo } from "react";
 import type VectorTileLayer from "ol/layer/VectorTile";
+import { Button } from "antd";
 import { PictureOutlined } from "@ant-design/icons";
 
 import { IDataset } from "../../types/dataset";
@@ -132,6 +133,7 @@ export default function BaseMap({
 	const {
 		mapRef,
 		orthoLayer,
+		imageryFailed,
 	} = useMapCore({
 		containerRef: mapContainerRef,
 		cogUrl: fileUrls.cogUrl,
@@ -310,6 +312,7 @@ export default function BaseMap({
 				data-testid="dataset-detail-map"
 				data-rr-ignore
 			>
+				{imageryFailed && <ImageryFailedNotice />}
 				{/* Tooltip overlay */}
 				<FeatureTooltip
 					ref={tooltipRef}
@@ -330,6 +333,26 @@ export default function BaseMap({
 					onApproveCorrection={onApproveCorrection}
 					onRevertCorrection={onRevertCorrection}
 				/>
+			</div>
+		</div>
+	);
+}
+
+// Floats over the map; sidebars, labels and downloads stay usable.
+function ImageryFailedNotice() {
+	return (
+		<div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-6" role="alert">
+			<div className="pointer-events-auto flex max-w-sm flex-col items-center rounded-2xl border border-gray-200/60 bg-white/95 px-8 py-7 text-center shadow-sm backdrop-blur-sm">
+				<span className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-xl text-red-500">
+					<PictureOutlined />
+				</span>
+				<h2 className="m-0 text-base font-semibold text-gray-800">The drone imagery couldn’t load</h2>
+				<p className="mb-0 mt-2 text-sm leading-relaxed text-gray-500">
+					The imagery service didn’t respond. The dataset details are still available. Reload to try again.
+				</p>
+				<Button className="mt-4" type="primary" onClick={() => window.location.reload()}>
+					Reload page
+				</Button>
 			</div>
 		</div>
 	);
