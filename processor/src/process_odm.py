@@ -45,6 +45,7 @@ from processor.src.utils.debug_artifacts import (
 	write_debug_bundle,
 )
 from processor.src.utils.odm_inputs import select_odm_images
+from processor.src.utils.ortho_resolution import budgeted_resolution_cm, sparse_point_extent_m
 from shared.exif_utils import extract_camera_nadir_deviation_degrees, extract_comprehensive_exif
 
 # RTK file extensions as specified in requirements
@@ -182,6 +183,32 @@ def _filter_reconstruction_by_orientation(
 
 	rewrite_file_on_shared_volume(volume_name, f'{project_name}/{RECONSTRUCTION_FILE}', drop_oblique_shots, dataset_id)
 	return shots_dropped
+
+
+def _with_budgeted_ortho_resolution(
+	odm_command: list[str], volume_name: str, project_name: str, dataset_id: int, token: str
+) -> list[str]:
+	"""Return ``odm_command`` with a resolution whose orthophoto fits ``ODM_MAX_ORTHO_PIXELS``.
+
+	Runs between the two ODM passes, when the sparse reconstruction already shows the
+	mission's extent. Missions that fit at the requested resolution are left unchanged.
+	"""
+	raw_reconstruction = read_file_from_shared_volume(volume_name, f'{project_name}/{RECONSTRUCTION_FILE}', dataset_id)
+	extent_m = sparse_point_extent_m(json.loads(raw_reconstruction)) if raw_reconstruction else None
+	if extent_m is None:
+		return odm_command
+	index = odm_command.index('--orthophoto-resolution') + 1
+	requested_cm = float(odm_command[index])
+	resolution_cm = budgeted_resolution_cm(requested_cm, extent_m, settings.ODM_MAX_ORTHO_PIXELS)
+	if resolution_cm == requested_cm:
+		return odm_command
+	logger.warning(
+		f'Reconstruction spans {extent_m[0]:.0f} x {extent_m[1]:.0f} m; rendering the orthophoto at '
+		f'{resolution_cm:g} cm/pixel instead of {requested_cm:g} so it stays within '
+		f'{settings.ODM_MAX_ORTHO_PIXELS / 1e9:g} Gpx',
+		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+	)
+	return [*odm_command[:index], f'{resolution_cm:g}', *odm_command[index + 1 :]]
 
 
 def _run_script_in_odm_image(
@@ -1003,6 +1030,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 				remove_file_from_shared_volume(
 					volume_name, f'{project_name}/{STOP_AFTER_RECONSTRUCTION_FLAG}', dataset_id
 				)
+				odm_command = _with_budgeted_ortho_resolution(odm_command, volume_name, project_name, dataset_id, token)
 				odm_container, exit_status, stdout_logs = _run_odm_pass(
 					client, odm_command, volume_name, resource_labels, dataset_id, token, pass_name='orthophoto'
 				)
