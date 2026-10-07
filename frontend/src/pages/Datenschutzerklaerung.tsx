@@ -18,6 +18,7 @@ export default function Datenschutzerklaerung() {
         Zurück
       </Button>
       <Title level={1}>Datenschutzerklärung</Title>
+      <Paragraph type="secondary">Stand / Last updated: 7. Oktober 2026 / 7 October 2026</Paragraph>
       <div className="space-y-8">
         <Title level={2}>Deutsch</Title>
         <section>
@@ -83,6 +84,17 @@ export default function Datenschutzerklaerung() {
         </section>
 
         <section>
+          <Title level={3}>Schutz vor Missbrauch und Nutzungsbegrenzungen</Title>
+          <Paragraph>
+            Um die Plattform vor automatisierter und massenhafter Nutzung zu schützen, begrenzen wir bestimmte Anfragen
+            pro Nutzerkonto bzw. pro Netzwerk. Dazu speichern wir für Besucher ohne Nutzerkonto einen nicht
+            umkehrbaren, mit einem geheimen Schlüssel gebildeten Hashwert der IP-Adresse; diese Einträge werden nur für einen Tag berücksichtigt und danach im laufenden Betrieb automatisch gelöscht.
+            Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse am Schutz und an der Verfügbarkeit
+            der Plattform).
+          </Paragraph>
+        </section>
+
+        <section>
           <Title level={3}>Cookies</Title>
           <Paragraph>
             Wir setzen Cookies ein, sobald Sie ein Nutzerkonto erstellen und sich anmelden. Diese Cookies dienen dazu,
@@ -105,11 +117,12 @@ export default function Datenschutzerklaerung() {
           <Paragraph>
             Nutzer können Bilder oder Geodaten zur Erforschung globaler Baumsterblichkeitsdynamiken beitragen. Bitte
             vermeiden Sie das Hochladen personenbezogener Daten. Falls solche Daten dennoch enthalten sind, werden sie
-            auf Basis Ihrer Einwilligung (Art. 6 Abs. 1 lit. a DSGVO) verarbeitet. Mit dem Hochladen der Daten stimmen
-            Sie zu, dass diese unter der von Ihnen gewählten CC-Lizenz öffentlich genutzt werden dürfen. Unzulässige
-            Inhalte können gelöscht werden. Nutzer können die Löschung ihrer Inhalte jederzeit beantragen, indem sie
-            eine E-Mail an den oben genannten Verantwortlichen senden. Die Metadaten werden für die Verarbeitung
-            benötigt.
+            auf Basis Ihrer Einwilligung (Art. 6 Abs. 1 lit. a DSGVO) verarbeitet. Hochgeladene
+            Daten einschließlich ihrer Metadaten (z. B. in Bilddateien enthaltene Aufnahmeinformationen) werden für die
+            Verarbeitung und für die Forschung gespeichert, auch zum Trainieren von Modellen; Einzelheiten regeln die
+            Nutzungsbedingungen. Wer die Daten auf der Plattform sehen und herunterladen kann, hängt von der gewählten
+            Sichtbarkeit ab. Unzulässige Inhalte können gelöscht werden. Nutzer können die Löschung ihrer Inhalte
+            jederzeit beantragen, indem sie eine E-Mail an den oben genannten Verantwortlichen senden.
           </Paragraph>
           <Paragraph>
             Sollten auf hochgeladenen Bildern oder Geodaten identifizierbare Personen sichtbar sein oder Ortsangaben
@@ -141,13 +154,17 @@ export default function Datenschutzerklaerung() {
           <Paragraph>
             Hetzner Online GmbH (Hosting Provider)
             <br />
-            Google Ireland Ltd. (Firebase)
+            Google Ireland Ltd. (Firebase Hosting)
             <br />
-            Supabase Inc. (Supabase Auth)
+            Supabase Inc. (Datenbank und Anmeldung / database and sign-in)
             <br />
             PostHog Inc. (PostHog Analytics)
             <br />
-            Microsoft Corporation (Bing Maps)
+            Sendinblue GmbH (Brevo, E-Mail-Versand / email delivery)
+            <br />
+            Cloudflare Inc. (Turnstile)
+            <br />
+            Kartenanbieter / map providers (Esri, MapTiler, OpenStreetMap-basierte Dienste / OpenStreetMap-based services)
           </Paragraph>
           <Paragraph>
             Dienste von Drittanbietern werden im Rahmen der datenschutzrechtlichen Vorgaben genutzt. Es kann zu einer
@@ -176,24 +193,17 @@ export default function Datenschutzerklaerung() {
             Datenspeicherung: Serverlogs werden für 7–14 Tage gespeichert.
           </Paragraph>
 
-          <Title level={4}>Google Ireland Ltd</Title>
+          <Title level={4}>Google Ireland Ltd.</Title>
           <Paragraph>
-            Zweck: Infrastruktur und Hosting für den Anwendungs-Backend.
+            Zweck: Auslieferung (Hosting) der Web-Anwendung.
             <br />
             Datenverarbeitung:
             <br />
-            - Technische Nutzungsdaten (z. B. Server-Logs)
+            - Technische Zugriffsdaten (z. B. IP-Adressen, Zeitstempel, Browserinformationen)
             <br />
-            - IP-Adressen
+            Datenstandort: Hauptsächlich EU-Server, mögliche Übermittlung außerhalb der EU.
             <br />
-            - Geräte- und Browserinformationen
-            <br />
-            Datenstandort: Hauptsächlich EU-Server, mögliche Transfers außerhalb der EU.
-            <br />
-            Datenhandling: IP-Adressen werden zur Sicherheit verarbeitet und soweit möglich anonymisiert.
-            <br />
-            Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse an sicherer und stabiler
-            App-Bereitstellung).
+            Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse an einer sicheren und stabilen Bereitstellung der Website).
             <br />
             Datenspeicherung: Gemäß den Standardrichtlinien von Firebase.
           </Paragraph>
@@ -222,43 +232,52 @@ export default function Datenschutzerklaerung() {
 
           <Title level={4}>PostHog Inc.</Title>
           <Paragraph>
-            Zweck: Analyseplattform zur Nutzungsverfolgung und Verbesserung der Benutzererfahrung.
+            Zweck: Analyse der Nutzung zur Verbesserung der Plattform.
             <br />
             Datenverarbeitung:
             <br />
-            - Nutzungsdaten (Klickpfade, Seitenaufrufe, Feature-Nutzung)
+            - Ohne Einwilligung: nur grundlegende, nicht dauerhaft gespeicherte Nutzungsdaten (z. B. Seitenaufrufe) ohne Analyse-Cookies.
             <br />
-            - Geräte- und Browserinformationen
-            <br />
-            - Anonymisierte IP-Adressen (gekürzt vor Verarbeitung)
+            - Mit Einwilligung über das Cookie-Banner: Nutzungsdaten (Klickpfade, Seitenaufrufe, Funktionsnutzung), Geräte- und Browserinformationen sowie Sitzungsaufzeichnungen. Bei angemeldeten Nutzern werden diese Daten dem Nutzerkonto zugeordnet, einschließlich E-Mail-Adresse und Name.
             <br />
             Datenstandort: Server innerhalb der EU.
             <br />
-            Datenhandling: Alle Daten werden pseudonymisiert; es werden keine persönlichen Benutzerkennungen
-            gespeichert.
+            Rechtsgrundlage: Art. 6 Abs. 1 lit. a DSGVO (Einwilligung) für die Analyse mit Cookies; im Übrigen Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse am Betrieb und an der Verbesserung der Plattform).
             <br />
-            Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse an der App-Optimierung).
-            <br />
-            Datenspeicherung: Daten werden für 30 Tage gespeichert.
+            Widerruf: Sie können Ihre Einwilligung jederzeit über die Cookie-Einstellungen widerrufen.
           </Paragraph>
 
-          <Title level={4}>Microsoft Corporation</Title>
+          <Title level={4}>Sendinblue GmbH (Brevo)</Title>
           <Paragraph>
-            Zweck: Bereitstellung von Kartendiensten in der Anwendung.
+            Zweck: Versand von E-Mails der Plattform (z. B. Bestätigung des Nutzerkontos, Benachrichtigungen zu Datensätzen).
             <br />
-            Datenverarbeitung:
+            Datenverarbeitung: E-Mail-Adresse und Inhalt der Nachricht.
             <br />
-            - IP-Adressen
+            Datenstandort: Server in der EU.
             <br />
-            - Geografische Standortdaten (bei Interaktion mit Karten)
+            Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO (Bereitstellung des Nutzerkontos und der Plattform).
+          </Paragraph>
+
+          <Title level={4}>Cloudflare Inc. (Turnstile)</Title>
+          <Paragraph>
+            Zweck: Schutz der Registrierung vor automatisierten Anmeldungen (Bots).
             <br />
-            - Nutzungsverhalten von Kartenfunktionen
+            Datenverarbeitung: IP-Adresse sowie Geräte- und Browserinformationen während der Prüfung.
             <br />
-            Datenstandort: Mögliche Verarbeitung auf Servern in den USA.
+            Datenstandort: Mögliche Verarbeitung außerhalb der EU, insbesondere in den USA.
             <br />
-            Datenhandling: Verarbeitung erfolgt nur zur Kartenanzeige gemäß den Microsoft-Datenschutzstandards.
+            Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse am Schutz der Plattform vor Missbrauch).
+          </Paragraph>
+
+          <Title level={4}>Kartenanbieter</Title>
+          <Paragraph>
+            Zweck: Anzeige von Hintergrundkarten und Luftbildern (Esri, MapTiler und OpenStreetMap-basierte Dienste).
             <br />
-            Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (verbesserte Funktionalität durch Kartenintegration).
+            Datenverarbeitung: IP-Adresse und angefragte Kartenausschnitte, die Ihr Browser direkt beim jeweiligen Anbieter abruft.
+            <br />
+            Datenstandort: Je nach Anbieter mögliche Verarbeitung außerhalb der EU.
+            <br />
+            Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse an der Kartendarstellung).
           </Paragraph>
         </section>
 
@@ -365,6 +384,16 @@ export default function Datenschutzerklaerung() {
         </section>
 
         <section>
+          <Title level={3}>Protection Against Abuse and Usage Limits</Title>
+          <Paragraph>
+            To protect the Platform against automated and bulk use, we limit certain requests per user account or per
+            network. For visitors without an account, we store a non-reversible, keyed hash of the IP address for this
+            purpose; these entries only count for one day and are then deleted automatically as the Platform runs. The legal basis is Art. 6(1)(f) GDPR (legitimate
+            interest in protecting the Platform and keeping it available).
+          </Paragraph>
+        </section>
+
+        <section>
           <Title level={3}>Cookies</Title>
           <Paragraph>
             We use cookies when you create a user account and log in. These cookies help maintain your session and
@@ -385,9 +414,11 @@ export default function Datenschutzerklaerung() {
           <Paragraph>
             Users can contribute images or geodata for the study of global tree mortality dynamics. Please avoid
             uploading personal data. If such data is included, it will be processed based on your consent (Art. 6(1)(a)
-            GDPR). By uploading data, you agree that they may be publicly used under the selected CC license.
-            Unauthorized content may be deleted. Users may request the deletion of their content at any time by sending
-            an email to the responsible contact mentioned above. Metadata is required for processing.
+            GDPR). Uploaded data, including its metadata (e.g. capture
+            information contained in image files), is stored for processing and research, including model training; the
+            Terms of Service set out the details. Who can see and download the data on the Platform depends on the
+            visibility you choose. Unauthorized content may be deleted. Users may request the deletion of their content
+            at any time by sending an email to the responsible contact mentioned above.
           </Paragraph>
           <Paragraph>
             If uploaded images or geodata contain identifiable individuals or location information that allows
@@ -406,13 +437,17 @@ export default function Datenschutzerklaerung() {
           <Paragraph>
             Hetzner Online GmbH (Hosting Provider)
             <br />
-            Google Ireland Ltd. (Firebase)
+            Google Ireland Ltd. (Firebase Hosting)
             <br />
-            Supabase Inc. (Supabase Auth)
+            Supabase Inc. (Datenbank und Anmeldung / database and sign-in)
             <br />
             PostHog Inc. (PostHog Analytics)
             <br />
-            Microsoft Corporation (Bing Maps)
+            Sendinblue GmbH (Brevo, E-Mail-Versand / email delivery)
+            <br />
+            Cloudflare Inc. (Turnstile)
+            <br />
+            Kartenanbieter / map providers (Esri, MapTiler, OpenStreetMap-basierte Dienste / OpenStreetMap-based services)
           </Paragraph>
           <Paragraph>
             Third-party services are used in compliance with data protection regulations. Data processing outside the EU
@@ -443,21 +478,15 @@ export default function Datenschutzerklaerung() {
 
           <Title level={4}>Google Ireland Ltd.</Title>
           <Paragraph>
-            Purpose: Infrastructure and hosting for application backend.
+            Purpose: Delivery (hosting) of the web application.
             <br />
             Data Processing:
             <br />
-            - Technical usage data (z. B. server logs)
+            - Technical access data (e.g. IP addresses, timestamps, browser information)
             <br />
-            - IP-Adressen
+            Data Location: Primarily EU servers, possible transfers outside the EU.
             <br />
-            - Geräte- und Browserinformationen
-            <br />
-            Data Location: Primarily EU-Server, mögliche Transfers außerhalb der EU.
-            <br />
-            Data Handling: IP-Adressen werden zur Sicherheit verarbeitet und soweit möglich anonymisiert.
-            <br />
-            Legal Basis: Art. 6(1)(f) GDPR (berechtigtes Interesse an sicherer und stabiler App-Bereitstellung).
+            Legal Basis: Art. 6(1)(f) GDPR (legitimate interest in a secure and stable provision of the website).
             <br />
             Data Retention: Per Firebase's standard policies.
           </Paragraph>
@@ -470,60 +499,67 @@ export default function Datenschutzerklaerung() {
             <br />
             - Email addresses (for authentication)
             <br />
-            - Metadaten zu Datensätzen und deren Bearbeitungsstatus
+            - Metadata about datasets and their processing status
             <br />
             - Logs of user interactions (e.g., uploads, file management actions)
             <br />
             Data Location: EU-based servers.
             <br />
-            Data Handling: Authentifizierungsdaten werden sicher gespeichert, Metadaten enthalten Nutzer-IDs und
-            JSONB-Datenspeicherung.
+            Data Handling: Authentication data is stored securely; metadata contains user IDs.
             <br />
-            Legal Basis: Art. 6(1)(b) GDPR (Erfüllung vertraglicher Pflichten).
+            Legal Basis: Art. 6(1)(b) GDPR (performance of a contract).
             <br />
             Data Retention: Stored for the duration of account existence or until user-initiated deletion.
           </Paragraph>
 
           <Title level={4}>PostHog Inc.</Title>
           <Paragraph>
-            Purpose: Analytics platform for tracking user behavior and improving user experience.
+            Purpose: Analysis of usage to improve the Platform.
             <br />
             Data Processing:
             <br />
-            - Usage data (click paths, page views, feature usage)
+            - Without consent: only basic, non-persistent usage data (e.g. page views) without analytics cookies.
             <br />
-            - Geräte- und Browserinformationen
-            <br />
-            - Anonymisierte IP-Adressen (gekürzt vor Verarbeitung)
+            - With consent via the cookie banner: usage data (click paths, page views, feature usage), device and browser information, and session recordings. For signed-in users, this data is linked to the user account, including email address and name.
             <br />
             Data Location: Servers located within the EU.
             <br />
-            Data Handling: All data is pseudonymized; no personal user identifiers are stored beyond anonymized IP
-            addresses.
+            Legal Basis: Art. 6(1)(a) GDPR (consent) for analytics with cookies; otherwise Art. 6(1)(f) GDPR (legitimate interest in operating and improving the Platform).
             <br />
-            Legal Basis: Art. 6(1)(f) GDPR (legitimate interest in optimizing the app).
-            <br />
-            Data Retention: Data retained for 30 days.
+            Withdrawal: You can withdraw your consent at any time in the cookie settings.
           </Paragraph>
 
-          <Title level={4}>Microsoft Corporation</Title>
+          <Title level={4}>Sendinblue GmbH (Brevo)</Title>
           <Paragraph>
-            Purpose: Provides map visualization services within the application.
+            Purpose: Sending the Platform's emails (e.g. account confirmation, notifications about datasets).
             <br />
-            Data Processing:
+            Data Processing: Email address and message content.
             <br />
-            - IP-Adressen
+            Data Location: Servers in the EU.
             <br />
-            - Geographical location data (when interacting with maps)
+            Legal Basis: Art. 6(1)(b) GDPR (provision of the user account and the Platform).
+          </Paragraph>
+
+          <Title level={4}>Cloudflare Inc. (Turnstile)</Title>
+          <Paragraph>
+            Purpose: Protecting sign-up against automated registrations (bots).
             <br />
-            - Usage patterns of map features
+            Data Processing: IP address and device and browser information during the check.
             <br />
-            Data Location: Mögliche Verarbeitung auf Servern in den USA.
+            Data Location: Possible processing outside the EU, in particular in the USA.
             <br />
-            Data Handling: Data is used only for rendering maps and is processed in accordance with Microsoft's privacy
-            standards.
+            Legal Basis: Art. 6(1)(f) GDPR (legitimate interest in protecting the Platform against abuse).
+          </Paragraph>
+
+          <Title level={4}>Map Providers</Title>
+          <Paragraph>
+            Purpose: Displaying base maps and aerial imagery (Esri, MapTiler and OpenStreetMap-based services).
             <br />
-            Legal Basis: Art. 6(1)(f) GDPR (enhancing functionality through map integration).
+            Data Processing: IP address and requested map tiles, which your browser fetches directly from the provider.
+            <br />
+            Data Location: Depending on the provider, possible processing outside the EU.
+            <br />
+            Legal Basis: Art. 6(1)(f) GDPR (legitimate interest in displaying maps).
           </Paragraph>
         </section>
 

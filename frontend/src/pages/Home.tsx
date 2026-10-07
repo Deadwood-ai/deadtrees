@@ -82,10 +82,10 @@ const FAQ = () => {
           <div>
             <p className="text-md">
               The data is processed to detect tree cover and deadwood cover to
-              train our machine learning models. By default, all uploaded data
-              is made publicly available under the Creative Commons Attribution
-              (CC BY) license, though you can request private usage for model
-              training only if needed.
+              train our machine learning models. Public data is shared under the
+              Creative Commons Attribution (CC BY 4.0) license. You can also keep
+              a dataset view-only or private; it still helps train our models,
+              and you are credited as its author.
             </p>
           </div>
         ),

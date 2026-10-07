@@ -534,8 +534,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
                 >
                   <Checkbox className="mt-1 leading-relaxed">
                     <span className="text-sm text-gray-700">
-                      I agree to the <TermsLink /> and <PrivacyLink />. I confirm that I have the rights to share this
-                      data and agree to make it available under the CC BY license.
+                      I agree to the <TermsLink /> and <PrivacyLink /> and confirm that I have the rights to share this
+                      data. Public data is shared under CC BY 4.0.
                       <span className="ml-1 font-medium text-red-600">(required)</span>
                     </span>
                   </Checkbox>
