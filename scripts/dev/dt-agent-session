@@ -16,6 +16,9 @@ fail() {
 [[ -f "$env_file" ]] || fail "missing credentials file $env_file"
 [[ "$(stat -c %a "$env_file")" == 600 ]] || fail "credentials file $env_file must be mode 600"
 
+# Only the file decides where the credentials go; ignore anything inherited.
+unset DEADTREES_AGENT_EMAIL DEADTREES_AGENT_PASSWORD DEADTREES_AGENT_SUPABASE_URL \
+	DEADTREES_AGENT_SUPABASE_ANON_KEY PROCESSOR_USERNAME PROCESSOR_PASSWORD SUPABASE_URL SUPABASE_KEY
 set -a
 # shellcheck disable=SC1090
 source "$env_file"

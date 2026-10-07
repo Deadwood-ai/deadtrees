@@ -1,6 +1,8 @@
 import base64
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -184,3 +186,24 @@ def test_local_api_needs_local_auth(platform, capsys, monkeypatch):
 	code, _ = run(capsys, 'whoami')
 
 	assert code == 2
+
+
+def test_wrapper_ignores_inherited_auth_destination(platform, tmp_path):
+	env_file = tmp_path / 'requeue.env'
+	env_file.write_text(
+		f'PROCESSOR_USERNAME=agent-check@example.org\nPROCESSOR_PASSWORD={PASSWORD}\n'
+		f'SUPABASE_URL={platform}\nSUPABASE_KEY=anon-key\n'
+	)
+	env_file.chmod(0o600)
+	env = {
+		**os.environ,
+		'DEADTREES_AGENT_ENV_FILE': str(env_file),
+		'DEADTREES_AGENT_SUPABASE_URL': 'http://127.0.0.1:9',
+		'DEADTREES_AGENT_PASSWORD': 'inherited',
+	}
+	result = subprocess.run(
+		[ROOT / 'scripts' / 'dev' / 'dt-agent-session', 'whoami'], env=env, capture_output=True, text=True
+	)
+
+	assert result.returncode == 0, result.stdout
+	assert json.loads(result.stdout)['signed_out'] is True
