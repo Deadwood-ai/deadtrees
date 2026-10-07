@@ -12,6 +12,7 @@ from shared.logger import logger
 from shared.models import Ortho
 from shared.logging import LogContext, LogCategory
 from processor.src.exceptions import ConversionError
+from processor.src.geotiff.byte_scaling import compute_byte_scaling
 import rasterio
 import rasterio.enums
 import numpy as np
@@ -546,76 +547,41 @@ def _handle_bit_depth_conversion(
 		if source_has_alpha and explicit_nodata is None:
 			detected_nodata = None
 
-		# Calculate scaling parameters by reading from center of image
-		logger.info(
-			'Calculating per-band scaling parameters from center region',
-			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
-		)
-
-		# Sample from center quarter of the image to avoid edge nodata
-		center_x = src.width // 4
-		center_y = src.height // 4
-		center_width = src.width // 2
-		center_height = src.height // 2
-
-		sample_window = rasterio.windows.Window(center_x, center_y, center_width, center_height)
-		sample_data = src.read(window=sample_window)
-		sample_alpha_mask = None
-		if source_has_alpha:
-			sample_alpha_mask = sample_data[source_alpha_band_index - 1] > 0
-
-		# Calculate min/max per band for RGB only (first 3 bands)
+		# Only process RGB bands (1-3) - extra bands (multispectral, undefined) are not needed
+		# and can cause issues (e.g., constant-value bands cause GDAL scaling divide-by-zero)
 		data_band_count = src.count - 1 if source_has_alpha else src.count
-		bands_to_analyze = min(data_band_count, 3)  # Only analyze RGB/display bands
-		band_ranges = []
+		bands_to_process = min(data_band_count, 3)
+		excluded_values = []
+		if explicit_nodata is not None and not np.isnan(explicit_nodata):
+			excluded_values.append(float(explicit_nodata))
+		if detected_nodata is not None and detected_nodata != 'nan':
+			try:
+				excluded_values.append(float(detected_nodata))
+			except (ValueError, TypeError):
+				pass  # detected_nodata is not numeric
+		scaling = compute_byte_scaling(src, bands_to_process, source_alpha_band_index, tuple(excluded_values))
 
-		for band_idx in range(bands_to_analyze):
-			band_data = sample_data[band_idx]
-
-			# Remove NaN values and any detected nodata for proper min/max calculation
-			valid_mask = ~np.isnan(band_data)
-			if sample_alpha_mask is not None:
-				valid_mask = valid_mask & sample_alpha_mask
-
-			# Exclude explicit nodata values from scaling calculation
-			if explicit_nodata is not None and not np.isnan(explicit_nodata):
-				valid_mask = valid_mask & (band_data != explicit_nodata)
-
-			# Exclude detected nodata values (if numeric)
-			if detected_nodata is not None and detected_nodata != 'nan':
-				try:
-					detected_numeric = float(detected_nodata)
-					valid_mask = valid_mask & (band_data != detected_numeric)
-				except (ValueError, TypeError):
-					pass  # detected_nodata is not numeric
-
-			valid_band_data = band_data[valid_mask]
-
-			if len(valid_band_data) > 0:
-				# Use percentile-based scaling to avoid outlier-skewed contrast stretch.
-				# Raw min/max causes most pixel data to be compressed into a tiny dark range
-				# when a few extreme outlier pixels define the scaling bounds (e.g., WorldView uint16).
-				band_min = float(np.percentile(valid_band_data, 2))
-				band_max = float(np.percentile(valid_band_data, 98))
-			else:
-				# Fallback if no valid data found for this band
-				band_min, band_max = 0.0, 255.0
-				logger.warning(
-					f'No valid data found for band {band_idx + 1}, using default range',
-					LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
-				)
-
-			band_ranges.append((band_min, band_max))
+		for band_idx, (band_min, band_max) in enumerate(scaling.band_ranges, start=1):
 			logger.info(
-				f'Band {band_idx + 1} range: {band_min:.3f} - {band_max:.3f}',
+				f'Band {band_idx} range: {band_min:.3f} - {band_max:.3f}',
 				LogContext(
 					category=LogCategory.ORTHO,
 					dataset_id=dataset_id,
 					user_id=user_id,
 					token=token,
-					extra={'band': band_idx + 1, 'band_min': band_min, 'band_max': band_max},
+					extra={'band': band_idx, 'band_min': band_min, 'band_max': band_max},
 				),
 			)
+		logger.info(
+			f'Display exponent {scaling.exponent:.3f} (median stretched brightness: {scaling.median_brightness})',
+			LogContext(
+				category=LogCategory.ORTHO,
+				dataset_id=dataset_id,
+				user_id=user_id,
+				token=token,
+				extra={'exponent': scaling.exponent, 'median_brightness': scaling.median_brightness},
+			),
+		)
 
 		# Log nodata detection results
 		logger.info(
@@ -630,9 +596,6 @@ def _handle_bit_depth_conversion(
 		)
 
 	# Build translate command - PRESERVE original nodata values
-	# Only process RGB bands (1-3) - extra bands (multispectral, undefined) are not needed
-	# and can cause issues (e.g., constant-value bands cause GDAL scaling divide-by-zero)
-	bands_to_process = min(data_band_count, 3)  # Only RGB/display bands
 	if compress_arg == 'JPEG' and bands_to_process < 3:
 		logger.info(
 			'Converting JPEG compression to DEFLATE for low-band byte conversion',
@@ -712,19 +675,12 @@ def _handle_bit_depth_conversion(
 			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
 		)
 
-	# Add per-band scaling for RGB bands only
-	# GDAL supports -scale_X for band-specific scaling
-	for band_idx, (band_min, band_max) in enumerate(band_ranges[:bands_to_process], start=1):
-		# Handle edge case where band has constant value (min == max)
-		if band_min == band_max:
-			logger.warning(
-				f'Band {band_idx} has constant value ({band_min}), using fallback scaling',
-				LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
-			)
-			# Use full range scaling as fallback
-			translate_cmd.extend([f'-scale_{band_idx}', '0', '65535', '0', '255'])
-		else:
-			translate_cmd.extend([f'-scale_{band_idx}', str(band_min), str(band_max), '0', '255'])
+	for band_idx in scaling.constant_bands:
+		logger.warning(
+			f'Band {band_idx} has a constant value, using fallback scaling',
+			LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token),
+		)
+	translate_cmd.extend(scaling.translate_args())
 
 	# Add compression - preserve original compression format if specified
 	translate_cmd.extend(['-co', f'COMPRESS={compress_arg}'])
@@ -747,7 +703,7 @@ def _handle_bit_depth_conversion(
 				extra={
 					'command': ' '.join(translate_cmd),
 					'final_nodata': final_nodata_value,
-					'num_bands': len(band_ranges),
+					'num_bands': len(scaling.band_ranges),
 				},
 			),
 		)
