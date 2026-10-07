@@ -6,27 +6,20 @@ as a dedicated agent account, runs one narrow check, signs out and prints JSON.
 The agent never reads the password: a host wrapper injects it from a host-local
 file. 3DTrees uses the same interface (3DT-2311), so commands carry over.
 
-## Account policy
+## Account and credentials
 
-- One ordinary account, for example `agent-check@deadtrees.earth`. No
-  `privileged_users` row: no operate, audit, private-view or private-upload
-  rights, and no exemption from the daily download allowance.
-- Auth `app_metadata.internal_test = true`, which marks it as a test account
-  the same way 3DTrees does.
-- Not shared with operator scripts. `scripts/requeue_datasets_via_api.py` and
-  similar tools keep their own processor credentials.
-- Only humans create the account, set its password or rotate it.
+The agent account is `agent@user.com`, the same "agents" login that
+`scripts/requeue_datasets_via_api.py` uses. Only humans create it, set its
+password or rotate it.
 
-## Credentials on a host
-
-The wrapper reads `~/.config/deadtrees/agent-login.env` (override with
-`DEADTREES_AGENT_ENV_FILE`) and refuses to run unless the file is mode 600.
-
-| Variable | Meaning |
-| --- | --- |
-| `DEADTREES_AGENT_EMAIL`, `DEADTREES_AGENT_PASSWORD` | the agent account |
-| `DEADTREES_AGENT_SUPABASE_URL`, `DEADTREES_AGENT_SUPABASE_ANON_KEY` | the public Auth endpoint and key the web app uses |
-| `DEADTREES_AGENT_API_URL` | optional; defaults to production `https://data2.deadtrees.earth/api/v1` |
+The wrapper reads `~/.config/deadtrees/requeue.env` (override with
+`DEADTREES_AGENT_ENV_FILE`) and refuses to run unless the file is mode 600. It
+accepts either the requeue names (`PROCESSOR_USERNAME`, `PROCESSOR_PASSWORD`,
+`SUPABASE_URL`, `SUPABASE_KEY`) or the shared agent names
+(`DEADTREES_AGENT_EMAIL`, `DEADTREES_AGENT_PASSWORD`,
+`DEADTREES_AGENT_SUPABASE_URL`, `DEADTREES_AGENT_SUPABASE_ANON_KEY`).
+`DEADTREES_AGENT_API_URL` is optional and defaults to production
+`https://data2.deadtrees.earth/api/v1`.
 
 Install the wrapper once per host from an up-to-date checkout:
 
@@ -62,10 +55,9 @@ sign-in failed, 7 network.
 
 ## Production use
 
-Production checks stay read-only in intent: sign in, read a status, or request
-one small public dataset. A download request is counted against the account's
-daily allowance and logged like any user download. Never use the agent account
-to upload, edit, audit or share.
+The account has operator rights, so the helper only reads: sign in, one GET,
+or one download request for a small public dataset. A download request is
+logged like any user download. The helper has no write actions; do not add any.
 
 ## Local stack
 
