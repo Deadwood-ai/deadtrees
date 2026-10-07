@@ -199,6 +199,26 @@ images, or repair mismatches.
 If processing-server SSH is blocked, use database logs as primary evidence and
 state which processor hosts lacked host-level corroboration.
 
+### Storage And API Host
+
+`data2.deadtrees.earth` and `supabase.deadtrees.earth` are one host. It runs the
+API container and the self-hosted Supabase stack, not a processor. From the
+processing server these read-only routes work:
+
+| Route | Gives | Does not give |
+| --- | --- | --- |
+| `ssh dt-storage-status` | Disk usage, deployed API commit, API container state (start time, restarts, OOM), image build time, which cleanup crons are installed | Anything else: the key is bound to one forced status script |
+| `curl -fsS https://data2.deadtrees.earth/api/v1/openapi.json \| jq -c .info` | API name and version | The deployed commit |
+| `GET https://supabase.deadtrees.earth/auth/v1/settings` with the public anon key from the live frontend bundle | Effective GoTrue settings: `disable_signup`, `mailer_autoconfirm`, enabled providers. `/auth/v1/health` gives the GoTrue version | Env names, SMTP settings, logs |
+| Analyst database login | `public` tables | The `auth` schema (permission denied), so no sign-up counts or auth audit log |
+
+Not reachable from the processing server: the Supabase compose folder and its
+env, API container logs and Brevo errors, nginx logs and config, the container
+list and backups on that host. No other processing-server key has a verified
+shell login there (the `dendro` login with the legacy storage key is refused).
+These need a session on the operator's Mac, which logs in as `dendro`; keep such
+a pass read-only and list env key names, never values.
+
 ## Backup Checks
 
 The hourly platform monitor probes backup freshness (see

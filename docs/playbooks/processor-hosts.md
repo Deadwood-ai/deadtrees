@@ -151,7 +151,8 @@ The API runs on the storage host, not on these processor hosts. To confirm an AP
 deploy from the processing server, run `ssh dt-storage-status`. Its key is
 limited to one status script: it prints the deployed API commit, the API container
 state, disk usage and which cleanup crons are installed, and it refuses any other
-command.
+command. The other read-only routes to that host, and what none of them reach,
+are in [`platform-status-check.md`](platform-status-check.md#storage-and-api-host).
 
 ## When A Host Stops Deploying
 
