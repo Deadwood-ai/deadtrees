@@ -109,7 +109,7 @@ def test_unconfirmed_email_cannot_keep_a_password_someone_else_chose(new_email, 
 	)
 	assert victim.status_code == 200 and victim.json() == _signup_message()
 
-	message = assert_email_received('Finish creating your DeadTrees account', new_email)
+	message = assert_email_received('Confirm your DeadTrees account', new_email)
 	body = get_message_by_id(message['ID'])['Text']
 	assert 'type=recovery' in body
 	assert signup_module._set_password_url('https://deadtrees.earth/profile?x=1') == 'https://deadtrees.earth/reset-password'
@@ -129,7 +129,43 @@ def test_undelivered_confirmation_email_is_reported_and_retry_recovers(new_email
 	deliver = signup_module.send_email
 	monkeypatch.setattr(signup_module, 'send_email', lambda *args, **kwargs: {'success': False, 'error': 'down'})
 	assert _signup(new_email).status_code == 503
+	assert _account(new_email) is None, 'a new account without its confirmation email is undone'
 	monkeypatch.setattr(signup_module, 'send_email', deliver)
 	purge_messages()
 	assert _signup(new_email).status_code == 200
-	assert_email_received('Finish creating your DeadTrees account', new_email)
+	message = assert_email_received('Confirm your DeadTrees account', new_email)
+	assert 'type=signup' in get_message_by_id(message['ID'])['Text'], 'the retry is an ordinary sign-up'
+
+
+def test_failed_email_never_deletes_an_account_confirmed_meanwhile(new_email, captcha, monkeypatch):
+	def confirm_then_fail(*args, **kwargs):
+		# Another request's link was used while this one's email was still being sent.
+		with use_service_client() as db:
+			db.auth.admin.update_user_by_id(_account(new_email).id, {'email_confirm': True})
+		return {'success': False, 'error': 'timeout'}
+
+	monkeypatch.setattr(signup_module, 'send_email', confirm_then_fail)
+	assert _signup(new_email).status_code == 503
+	account = _account(new_email)
+	assert account is not None and account.email_confirmed_at is not None
+
+
+def test_cloudflare_test_secret_needs_no_network(monkeypatch):
+	def no_network(*args, **kwargs):
+		raise AssertionError('the test secret must not call Cloudflare')
+
+	monkeypatch.setattr(signup_module.requests, 'post', no_network)
+	monkeypatch.setattr(settings, 'TURNSTILE_SECRET_KEY', signup_module.TURNSTILE_TEST_SECRET)
+	assert signup_module.captcha_passes('any-token', None) is True
+
+
+def test_unreachable_captcha_service_is_a_retriable_error(new_email, monkeypatch):
+	import requests
+
+	def down(*args, **kwargs):
+		raise requests.ConnectionError('down')
+
+	monkeypatch.setattr(settings, 'TURNSTILE_SECRET_KEY', 'real-secret')
+	monkeypatch.setattr(signup_module.requests, 'post', down)
+	assert _signup(new_email).status_code == 503
+	assert _account(new_email) is None

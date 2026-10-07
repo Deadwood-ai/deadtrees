@@ -1,7 +1,9 @@
 from html import escape
 
 
-ACCOUNT_URL = 'https://deadtrees.earth/profile'
+SITE_URL = 'https://deadtrees.earth'
+ACCOUNT_URL = f'{SITE_URL}/profile'
+LOGO_URL = f'{SITE_URL}/assets/logo.png'
 
 
 def dataset_failed_email(
@@ -54,7 +56,7 @@ def dataset_failed_email(
 def dataset_completed_email(dataset_id: int, file_name: str) -> tuple[str, str, str]:
 	"""Return a completion email linking to the canonical dataset route."""
 	safe_file_name = escape(file_name)
-	dataset_url = f'https://deadtrees.earth/dataset/{dataset_id}'
+	dataset_url = f'{SITE_URL}/dataset/{dataset_id}'
 	subject = f'Dataset {dataset_id} - Processing Complete'
 	text_body = (
 		f'Processing completed for dataset {dataset_id} ({file_name}).\n\n'
@@ -142,63 +144,59 @@ def duplicates_archived_email(datasets: list[dict]) -> tuple[str, str, str]:
 	return subject, text_body, html_body
 
 
-def confirm_signup_email(confirm_url: str) -> tuple[str, str, str]:
-	"""Return the sign-up confirmation email with the one-time link Supabase generated."""
-	safe_url = escape(confirm_url, quote=True)
-	subject = 'Confirm your DeadTrees account'
-	text_body = (
-		'Welcome to DeadTrees.\n\n'
-		f'Confirm your email address to finish creating your account:\n{confirm_url}\n\n'
-		'If you did not sign up, you can ignore this email.'
-	)
-	html_body = f"""
-	<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-		<div style="background: #1a1a2e; padding: 20px; border-radius: 8px 8px 0 0;">
-			<h1 style="color: #27ae60; margin: 0; font-size: 20px;">Confirm your account</h1>
-		</div>
-		<div style="background: #f8f9fa; padding: 20px; border: 1px solid #dee2e6; border-top: none; border-radius: 0 0 8px 8px;">
-			<p style="color: #333; margin-top: 0;">Welcome to DeadTrees. Confirm your email address to finish creating your account.</p>
-			<div style="text-align: center; margin: 24px 0;">
-				<a href="{safe_url}"
-				   style="background: #27ae60; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
-					Confirm email
+def _account_email(heading: str, intro: str, button: str, url: str) -> str:
+	"""Branded HTML for account emails: logo, one message, one button and the plain link."""
+	safe_url = escape(url, quote=True)
+	return f"""
+	<div style="background: #f4f6f5; padding: 32px 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+		<div style="max-width: 480px; margin: 0 auto;">
+			<div style="text-align: center; margin-bottom: 20px;">
+				<a href="{SITE_URL}" style="text-decoration: none;">
+					<img src="{LOGO_URL}" alt="deadtrees.earth" width="180" height="36" style="border: 0; display: inline-block;">
 				</a>
 			</div>
-			<p style="color: #666; font-size: 13px;">If you did not sign up, you can ignore this email.</p>
+			<div style="background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 32px 28px;">
+				<h1 style="margin: 0 0 12px; font-size: 22px; font-weight: 600; color: #111827;">{escape(heading)}</h1>
+				<p style="margin: 0 0 24px; font-size: 15px; line-height: 1.6; color: #374151;">{escape(intro)}</p>
+				<div style="text-align: center; margin: 0 0 24px;">
+					<a href="{safe_url}" style="display: inline-block; background: #1B5E35; color: #ffffff; padding: 12px 28px; border-radius: 8px; font-size: 15px; font-weight: 600; text-decoration: none;">{escape(button)}</a>
+				</div>
+				<p style="margin: 0 0 6px; font-size: 13px; color: #6b7280;">If the button does not work, copy this link into your browser:</p>
+				<p style="margin: 0; font-size: 12px; line-height: 1.5; word-break: break-all;"><a href="{safe_url}" style="color: #1B5E35;">{safe_url}</a></p>
+			</div>
+			<p style="margin: 20px 0 0; text-align: center; font-size: 12px; line-height: 1.5; color: #9ca3af;">
+				You received this email because someone signed up at deadtrees.earth with this address.<br>
+				If that was not you, you can ignore it.
+			</p>
 		</div>
 	</div>
 	"""
-	return subject, text_body, html_body
+
+
+def _account_text(intro: str, url: str) -> str:
+	return f'{intro}\n\n{url}\n\nIf you did not sign up at deadtrees.earth, you can ignore this email.'
+
+
+def confirm_signup_email(confirm_url: str) -> tuple[str, str, str]:
+	"""Return the sign-up confirmation email with the one-time link Supabase generated."""
+	intro = 'Welcome to DeadTrees. Confirm your email address to finish creating your account.'
+	return (
+		'Confirm your DeadTrees account',
+		_account_text(intro, confirm_url),
+		_account_email('Confirm your email address', intro, 'Confirm email address', confirm_url),
+	)
 
 
 def finish_signup_email(set_password_url: str) -> tuple[str, str, str]:
-	"""Return the email for a sign-up of an address whose account was never confirmed.
+	"""Return the confirmation email for an address whose account exists but was never confirmed.
 
 	Its earlier password may have been chosen by someone else, so the owner of the
-	inbox chooses a new one through this link.
+	inbox chooses the password through this link. To the reader it is simply the
+	confirmation step, so it reads like the normal sign-up email.
 	"""
-	safe_url = escape(set_password_url, quote=True)
-	subject = 'Finish creating your DeadTrees account'
-	text_body = (
-		'Someone, probably you, started creating a DeadTrees account with this email address before.\n\n'
-		f'Open this link to confirm your email and choose your password:\n{set_password_url}\n\n'
-		'If you did not sign up, you can ignore this email.'
+	intro = 'Welcome to DeadTrees. Confirm your email address and choose your password to finish creating your account.'
+	return (
+		'Confirm your DeadTrees account',
+		_account_text(intro, set_password_url),
+		_account_email('Confirm your email address', intro, 'Confirm and choose password', set_password_url),
 	)
-	html_body = f"""
-	<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-		<div style="background: #1a1a2e; padding: 20px; border-radius: 8px 8px 0 0;">
-			<h1 style="color: #27ae60; margin: 0; font-size: 20px;">Finish creating your account</h1>
-		</div>
-		<div style="background: #f8f9fa; padding: 20px; border: 1px solid #dee2e6; border-top: none; border-radius: 0 0 8px 8px;">
-			<p style="color: #333; margin-top: 0;">Someone, probably you, started creating a DeadTrees account with this email address before. Confirm your email and choose your password to finish.</p>
-			<div style="text-align: center; margin: 24px 0;">
-				<a href="{safe_url}"
-				   style="background: #27ae60; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
-					Choose password
-				</a>
-			</div>
-			<p style="color: #666; font-size: 13px;">If you did not sign up, you can ignore this email.</p>
-		</div>
-	</div>
-	"""
-	return subject, text_body, html_body

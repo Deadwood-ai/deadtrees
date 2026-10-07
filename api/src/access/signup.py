@@ -11,7 +11,8 @@ An account that exists but was never confirmed may carry a password chosen by
 someone else who registered the address first. Its password is therefore replaced
 with a random one and the owner of the inbox chooses their own through a recovery
 link, so nobody but the inbox owner can sign in once the address is confirmed.
-That same path makes a retry safe when the confirmation email could not be sent.
+A new account whose confirmation email could not be sent is deleted again, so
+retrying is an ordinary sign-up with the password the person chose.
 """
 
 import logging
@@ -39,6 +40,10 @@ class SignupRejected(Exception):
 	"""A sign-up the caller can fix, such as a weak password."""
 
 
+class CaptchaUnavailable(Exception):
+	"""Cloudflare could not be asked whether the captcha token is valid."""
+
+
 class SignupEmailFailed(Exception):
 	"""The confirmation email was not accepted for delivery; signing up again retries it."""
 
@@ -53,11 +58,18 @@ def captcha_passes(token: str, client_ip: Optional[str]) -> bool:
 	secret = _captcha_secret()
 	if not secret:
 		raise RuntimeError('TURNSTILE_SECRET_KEY is not configured')
+	if secret == TURNSTILE_TEST_SECRET:
+		# Cloudflare's test secret accepts every token; skip the network so local stacks
+		# and CI do not depend on reaching Cloudflare.
+		return True
 	payload = {'secret': secret, 'response': token}
 	if client_ip:
 		payload['remoteip'] = client_ip
-	response = requests.post(TURNSTILE_VERIFY_URL, data=payload, timeout=10)
-	response.raise_for_status()
+	try:
+		response = requests.post(TURNSTILE_VERIFY_URL, data=payload, timeout=10)
+		response.raise_for_status()
+	except requests.RequestException as error:
+		raise CaptchaUnavailable from error
 	return response.json().get('success') is True
 
 
@@ -95,5 +107,14 @@ def create_account(email: str, password: str, redirect_to: Optional[str]) -> Non
 					raise SignupRejected(error.message) from error
 				raise
 			subject, text_body, html_body = confirm_signup_email(link.properties.action_link)
-	if not send_email(email, subject, html_body, text_body=text_body).get('success'):
-		raise SignupEmailFailed
+		if send_email(email, subject, html_body, text_body=text_body).get('success'):
+			return
+		if not existing:
+			# Undo the new account so a retry is an ordinary sign-up with the chosen password.
+			# The database only deletes it while it is still unconfirmed and unused; otherwise a
+			# retry restarts it through the recovery path.
+			try:
+				client.rpc('discard_unconfirmed_signup', {'p_user_id': link.user.id}).execute()
+			except Exception:
+				logger.exception('Could not undo a new account after its confirmation email failed')
+	raise SignupEmailFailed

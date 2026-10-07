@@ -1,97 +1,112 @@
-import { Alert } from "antd";
-import { SignIn as SignInAuthUI } from "@supabase/auth-ui-react";
-import { ThemeSupa } from "@supabase/auth-ui-shared";
-import { useEffect, useRef } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Alert, Button, Form, Input } from "antd";
+import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { supabase } from "../../hooks/useSupabase";
-import { palette } from "../../theme/palette";
+import AuthCard, { AuthLink, returnQuery } from "./AuthCard";
+
+type SignInFormValues = { email: string; password: string };
+
+function describeSignInError(message: string): string {
+  if (/invalid login credentials/i.test(message))
+    return "Email or password is not correct.";
+  if (/email not confirmed/i.test(message))
+    return "Please confirm your email address first. Check your inbox for the link.";
+  return message || "Signing in failed. Please try again.";
+}
 
 const SignIn = () => {
   const [searchParams] = useSearchParams();
-  const authUiWrapperRef = useRef<HTMLDivElement>(null);
   const returnTo = searchParams.get("returnTo") || "/profile";
   const sessionExpired = searchParams.get("reason") === "session_expired";
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const updateAutocompleteAttributes = () => {
-      const wrapper = authUiWrapperRef.current;
-      if (!wrapper) return;
-
-      const emailInput = wrapper.querySelector<HTMLInputElement>(
-        'input[type="email"], input[name="email"]',
-      );
-      emailInput?.setAttribute("autocomplete", "email");
-      emailInput?.setAttribute("inputmode", "email");
-
-      const passwordInput =
-        wrapper.querySelector<HTMLInputElement>('input[type="password"]');
-      passwordInput?.setAttribute("autocomplete", "current-password");
-    };
-
-    updateAutocompleteAttributes();
-    const observer = new MutationObserver(updateAutocompleteAttributes);
-    if (authUiWrapperRef.current) {
-      observer.observe(authUiWrapperRef.current, {
-        childList: true,
-        subtree: true,
-      });
-    }
-
-    return () => observer.disconnect();
-  }, []);
+  // Signing in is enough: PublicOnly sends a signed-in visitor on to returnTo.
+  const onFinish = async ({ email, password }: SignInFormValues) => {
+    setError(null);
+    setSubmitting(true);
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+    setSubmitting(false);
+    if (signInError) setError(describeSignInError(signInError.message));
+  };
 
   return (
-    <div className="m-auto flex h-full  max-w-7xl items-center justify-center">
-      <div className="w-96 rounded-md p-8">
-        <h1 className="mb-8 text-3xl font-semibold text-gray-600">Sign In</h1>
-        {sessionExpired ? (
-          <Alert
-            type="warning"
-            showIcon
-            className="mb-4"
-            message="Your session expired. Please sign in again."
+    <AuthCard
+      title="Sign In"
+      footer={
+        <>
+          <div>
+            Not registered yet?{" "}
+            <AuthLink to={`/sign-up${returnQuery(returnTo)}`}>
+              Create an account
+            </AuthLink>
+          </div>
+          <div>
+            <AuthLink to="/forgot-password">Forgot your password?</AuthLink>
+          </div>
+        </>
+      }
+    >
+      {sessionExpired ? (
+        <Alert
+          type="warning"
+          showIcon
+          className="mb-4"
+          message="Your session expired. Please sign in again."
+        />
+      ) : null}
+      {error ? (
+        <Alert type="error" showIcon className="mb-4" message={error} />
+      ) : null}
+      <Form
+        layout="vertical"
+        onFinish={onFinish}
+        disabled={submitting}
+        requiredMark={false}
+      >
+        <Form.Item
+          label="Email address"
+          name="email"
+          rules={[
+            {
+              required: true,
+              type: "email",
+              message: "Please enter your email address.",
+            },
+          ]}
+        >
+          <Input
+            size="large"
+            placeholder="Your email address"
+            autoComplete="email"
+            inputMode="email"
           />
-        ) : null}
-        <div ref={authUiWrapperRef}>
-          <SignInAuthUI
-            supabaseClient={supabase}
-            providers={[]}
-            appearance={{
-              theme: ThemeSupa,
-              variables: {
-                default: {
-                  colors: {
-                    brand: palette.primary[500],
-                    brandAccent: palette.primary[600],
-                    defaultButtonBackground: palette.primary[500],
-                    defaultButtonBackgroundHover: palette.primary[600],
-                  },
-                  fontSizes: {
-                    baseBodySize: "16px",
-                    baseInputSize: "16px",
-                    baseLabelSize: "16px",
-                    baseButtonSize: "16px",
-                  },
-                },
-              },
-            }}
-            redirectTo={window.origin + returnTo}
+        </Form.Item>
+        <Form.Item
+          label="Password"
+          name="password"
+          rules={[{ required: true, message: "Please enter your password." }]}
+        >
+          <Input.Password
+            size="large"
+            placeholder="Your password"
+            autoComplete="current-password"
           />
-        </div>
-        <div className="pt-4 text-center">
-          Not registered yet?{" "}
-          <Link to={`/sign-up${returnTo !== "/profile" ? `?returnTo=${returnTo}` : ""}`} className="text-blue-500 underline">
-            Create an account
-          </Link>
-        </div>
-        <div className="pt-4 text-center">
-          Forgott password?{" "}
-          <Link to="/forgot-password" className="text-blue-500 underline">
-            Reset Password
-          </Link>
-        </div>
-      </div>
-    </div>
+        </Form.Item>
+        <Button
+          type="primary"
+          htmlType="submit"
+          block
+          size="large"
+          loading={submitting}
+        >
+          Sign in
+        </Button>
+      </Form>
+    </AuthCard>
   );
 };
 

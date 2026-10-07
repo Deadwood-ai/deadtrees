@@ -132,12 +132,12 @@ test.describe("contributor local write flows", () => {
     await page.goto(recoveryLink);
     await expect(page).toHaveURL(/\/reset-password/, { timeout: 20_000 });
     await expect(
-      page.getByRole("heading", { name: "Reset Password" }),
+      page.getByRole("heading", { name: "Choose your password" }),
     ).toBeVisible();
 
     await page.getByLabel(/^New Password$/i).fill(resetPassword);
     await page.getByLabel(/^Confirm New Password$/i).fill(resetPassword);
-    await page.getByRole("button", { name: /^Reset Password$/i }).click();
+    await page.getByRole("button", { name: /^Save password$/i }).click();
 
     await expect(page).toHaveURL(/\/profile$/, { timeout: 20_000 });
     await expect(page.getByText(contributorEmail)).toBeVisible();
