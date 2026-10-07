@@ -46,6 +46,42 @@ export function useDatasetsInPublication(userId: string | undefined) {
   });
 }
 
+export interface IMyPublication {
+  id: number;
+  doi: string | null;
+  title: string;
+  description: string;
+  created_at: string;
+  datasets: number;
+}
+
+// The user's publication requests, newest first, each with its dataset count.
+export function useMyPublications(userId: string | undefined) {
+  return useQuery({
+    queryKey: [...dataPublicationsKey, "mine", userId],
+    enabled: !!userId,
+    queryFn: async (): Promise<IMyPublication[]> => {
+      const { data: publications, error } = await supabase
+        .from("data_publication")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+
+      return Promise.all(
+        (publications ?? []).map(async (publication) => {
+          const { count, error: countError } = await supabase
+            .from("jt_data_publication_datasets")
+            .select("*", { count: "exact", head: true })
+            .eq("publication_id", publication.id);
+          if (countError) throw countError;
+          return { ...publication, datasets: count ?? 0 };
+        }),
+      );
+    },
+  });
+}
+
 // Creates the publication, its authors and dataset links in one transaction.
 export async function createDataPublication({
   title,

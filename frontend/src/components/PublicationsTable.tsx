@@ -1,20 +1,11 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { Table, Tag, Typography, Button, Tooltip, Spin } from "antd";
+import React from "react";
+import { Table, Tag, Typography, Button, Tooltip, Spin, Alert } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { supabase } from "../hooks/useSupabase";
 import { useAuth } from "../hooks/useAuthProvider";
 import { ClockCircleOutlined, FileDoneOutlined } from "@ant-design/icons";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { useMyPublications, type IMyPublication } from "../hooks/useDataPublications";
 import EmptyStatePanel from "./EmptyStatePanel";
-
-interface Publication {
-  id: number;
-  doi: string | null;
-  title: string;
-  description: string;
-  created_at: string;
-  datasets: number;
-}
 
 interface PublicationsTableProps {
   /** Opens the dataset list, where datasets are selected for publishing. */
@@ -24,54 +15,9 @@ interface PublicationsTableProps {
 const PublicationsTable: React.FC<PublicationsTableProps> = ({ onChooseDatasets }) => {
   const { user } = useAuth();
   const isMobile = useIsMobile();
-  const [loading, setLoading] = useState(true);
-  const [publications, setPublications] = useState<Publication[]>([]);
+  const { data: publications = [], isLoading: loading, isError } = useMyPublications(user?.id);
 
-  const fetchPublications = useCallback(async () => {
-    if (!user) return;
-
-    try {
-      setLoading(true);
-
-      // Fetch user's publications
-      const { data: publicationsData, error } = await supabase
-        .from("data_publication")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-
-      // For each publication, count the datasets
-      const publicationsWithCount = await Promise.all(
-        (publicationsData || []).map(async (pub) => {
-          const { count, error: countError } = await supabase
-            .from("jt_data_publication_datasets")
-            .select("*", { count: "exact", head: true })
-            .eq("publication_id", pub.id);
-
-          if (countError) throw countError;
-
-          return {
-            ...pub,
-            datasets: count || 0,
-          };
-        }),
-      );
-
-      setPublications(publicationsWithCount);
-    } catch (error) {
-      console.error("Error fetching publications:", error);
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
-
-  useEffect(() => {
-    fetchPublications();
-  }, [fetchPublications]);
-
-  const columns: ColumnsType<Publication> = [
+  const columns: ColumnsType<IMyPublication> = [
     {
       title: "Title",
       dataIndex: "title",
@@ -124,6 +70,10 @@ const PublicationsTable: React.FC<PublicationsTableProps> = ({ onChooseDatasets 
 
   if (loading) {
     return <Spin size="large" />;
+  }
+
+  if (isError) {
+    return <Alert type="error" message="Your publications could not be loaded. Please refresh to try again." />;
   }
 
   if (publications.length === 0) {
