@@ -1,11 +1,12 @@
 import { Suspense } from "react";
-import { Segmented, Spin, Typography } from "antd";
+import { Button, Segmented, Spin, Typography } from "antd";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { RequireAuth } from "../AuthGate";
 import { useCanOperate } from "../../hooks/useUserPrivileges";
 import { FactorySelectionProvider } from "./FactorySelectionContext";
 import FactorySelectionTray from "./FactorySelectionTray";
-import { FactoryDenied, ReadOnlyBadge } from "./FactoryPrimitives";
+import { ReadOnlyBadge } from "./FactoryPrimitives";
+import StatusPage, { StatusPageLoading } from "../StatusPage";
 
 const { Title, Text } = Typography;
 
@@ -26,20 +27,40 @@ function sectionFromPath(pathname: string): FactorySection {
 }
 
 function FactoryShell() {
-	const { canOperate, isLoading } = useCanOperate();
+	const { canOperate, isLoading, isError, refetch } = useCanOperate();
 	const location = useLocation();
 	const navigate = useNavigate();
 
-	if (isLoading) {
+	if (isLoading) return <StatusPageLoading label="Checking access…" />;
+
+	if (isError) {
 		return (
-			<div className="flex min-h-[60vh] items-center justify-center">
-				<Spin size="large" />
-			</div>
+			<StatusPage
+				kind="offline"
+				title="The Factory couldn’t load"
+				description="DeadTrees didn’t respond while checking your access. Check your connection and try again in a moment."
+				actions={
+					<Button type="primary" onClick={() => void refetch()}>
+						Try again
+					</Button>
+				}
+			/>
 		);
 	}
 
 	if (!canOperate) {
-		return <FactoryDenied />;
+		return (
+			<StatusPage
+				kind="locked"
+				title="Operator access required"
+				description="The Factory workspace is limited to DeadTrees operators. Ask the team if you need it."
+				actions={
+					<Button type="primary" onClick={() => navigate("/")}>
+						Go to home
+					</Button>
+				}
+			/>
+		);
 	}
 
 	const section = sectionFromPath(location.pathname);

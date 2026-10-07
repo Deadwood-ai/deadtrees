@@ -1,6 +1,6 @@
 import { memo, useMemo, useState } from "react";
 import ListItem from "./ListItem";
-import { Button } from "antd";
+import { Button, Skeleton } from "antd";
 import { IDataset, IDatasetArchiveItem } from "../types/dataset";
 
 type ListDataset = IDataset | IDatasetArchiveItem;
@@ -54,7 +54,7 @@ function DataList({
   return (
     <div className="flex-1 space-y-1.5 overflow-y-auto pr-1 md:space-y-2">
       {!visibleData ? (
-        <div>Loading...</div>
+        <Skeleton active avatar={{ shape: "square", size: 48 }} paragraph={{ rows: 1 }} />
       ) : visibleData.length === 0 ? (
         <div
           className="flex h-full flex-col items-center justify-center"

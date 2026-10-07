@@ -96,7 +96,14 @@ const AnimatedStat = ({
         className="min-w-[3ch] text-xl font-bold tabular-nums text-[#FFB31C]"
         data-testid={`home-stat-${label.toLowerCase()}-value`}
       >
-        {displayValue === null ? "..." : displayValue.toLocaleString()}
+        {displayValue === null ? (
+          <span
+            className="inline-block h-5 w-10 animate-pulse rounded bg-amber-100 align-middle motion-reduce:animate-none"
+            aria-label="Loading"
+          />
+        ) : (
+          displayValue.toLocaleString()
+        )}
       </span>
       <span className="text-sm font-medium text-gray-500">{label}</span>
     </div>
@@ -106,7 +113,8 @@ const AnimatedStat = ({
 const Hero = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { data: stats } = useHomeStats();
+  const { data: stats, isError } = useHomeStats();
+  const statsFailed = isError && !stats;
   const { isMobile, runDesktopOnlyAction } = useDesktopOnlyFeature();
   const { track } = useAnalytics("home");
 
@@ -217,20 +225,23 @@ const Hero = () => {
               </Button>
             )}
 
-            <div className="mt-8 flex flex-wrap items-center justify-center gap-6 md:justify-start">
-              <AnimatedStat
-                value={stats?.dataset_count ?? null}
-                label="Datasets"
-              />
-              <AnimatedStat
-                value={stats?.country_count ?? null}
-                label="Countries"
-              />
-              <AnimatedStat
-                value={stats?.contributor_count ?? null}
-                label="Contributors"
-              />
-            </div>
+            {/* Without numbers the row would only show placeholders, so it is left out. */}
+            {!statsFailed && (
+              <div className="mt-8 flex flex-wrap items-center justify-center gap-6 md:justify-start">
+                <AnimatedStat
+                  value={stats?.dataset_count ?? null}
+                  label="Datasets"
+                />
+                <AnimatedStat
+                  value={stats?.country_count ?? null}
+                  label="Countries"
+                />
+                <AnimatedStat
+                  value={stats?.contributor_count ?? null}
+                  label="Contributors"
+                />
+              </div>
+            )}
           </div>
 
           {/* Right column — visual */}

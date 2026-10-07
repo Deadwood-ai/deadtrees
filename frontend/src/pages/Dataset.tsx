@@ -1,5 +1,5 @@
-import { useMemo, useState, useEffect, useCallback } from "react";
-import { Button, Tag, Spin, Tooltip, Checkbox, Drawer } from "antd";
+import { useMemo, useState, useEffect, useCallback, type ReactNode } from "react";
+import { Button, Tag, Spin, Tooltip, Checkbox, Drawer, Skeleton } from "antd";
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
@@ -51,7 +51,11 @@ const MAP_BOTTOM_PADDING_PX = 72;
 
 export default function Dataset() {
   const navigate = useNavigate();
-  const { data: allData } = usePublicDatasetArchiveItems();
+  const {
+    data: allData,
+    isError: archiveFailed,
+    refetch: retryArchive,
+  } = usePublicDatasetArchiveItems();
 
   // The "DB as of" timeline axis is derived from the full, unfiltered dataset so
   // that no filter (tag, advanced, or text search) ever changes the available
@@ -347,10 +351,11 @@ export default function Dataset() {
           semanticQuery={semantic.query}
         />
       ) : (
-        <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500">
-          <Spin size="large" />
-          <span>Loading data...</span>
-        </div>
+        <ArchivePlaceholder
+          failed={archiveFailed}
+          onRetry={() => void retryArchive()}
+          loading={<ArchiveListSkeleton />}
+        />
       )}
     </div>
   );
@@ -437,10 +442,19 @@ export default function Dataset() {
           )}
         </div>
         {!displayData ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500">
-            <Spin size="large" />
-            <span>Loading map...</span>
-          </div>
+          // On desktop the list beside the map already explains a failure.
+          <ArchivePlaceholder
+            failed={archiveFailed && isMobile}
+            onRetry={() => void retryArchive()}
+            loading={
+              archiveFailed ? null : (
+                <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500">
+                  <Spin size="large" />
+                  <span>Loading map...</span>
+                </div>
+              )
+            }
+          />
         ) : (
           // The map stays mounted through empty results: the list already
           // explains the empty state, and remounting OpenLayers would drop the
@@ -471,6 +485,52 @@ export default function Dataset() {
         onApplyFilters={handleApplyFilters}
         currentFilters={advancedFilters}
       />
+    </div>
+  );
+}
+
+// Until the archive arrives, list and map show a wait or a failure.
+function ArchivePlaceholder({
+  failed,
+  onRetry,
+  loading,
+}: {
+  failed: boolean;
+  onRetry: () => void;
+  loading: ReactNode;
+}) {
+  if (!failed) return <>{loading}</>;
+  return (
+    <div
+      className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-gray-600"
+      role="alert"
+    >
+      <span className="font-medium text-gray-800">
+        The drone archive couldn’t load
+      </span>
+      <span className="text-sm">
+        DeadTrees didn’t respond. Check your connection and try again.
+      </span>
+      <Button type="primary" onClick={onRetry}>
+        Try again
+      </Button>
+    </div>
+  );
+}
+
+// Placeholder rows shaped like archive entries: thumbnail, title, details.
+function ArchiveListSkeleton() {
+  return (
+    <div className="flex flex-col gap-4 px-1 pt-2" role="status" aria-label="Loading datasets">
+      {Array.from({ length: 6 }, (_, index) => (
+        <Skeleton
+          key={index}
+          active
+          avatar={{ shape: "square", size: 48 }}
+          title={{ width: "70%" }}
+          paragraph={{ rows: 1, width: "45%" }}
+        />
+      ))}
     </div>
   );
 }

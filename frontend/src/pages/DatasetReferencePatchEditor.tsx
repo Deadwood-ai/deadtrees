@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Button, message, Modal, Progress } from "antd";
 import { ArrowLeftOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { useDatasetById } from "../hooks/useDatasets";
+import StatusPage, { StatusPageLoading } from "../components/StatusPage";
 import {
   usePatchSessionLock,
   useSetPatchSessionLock,
@@ -23,10 +24,10 @@ export default function DatasetReferencePatchEditor() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { listPath } = useAuditNavigation();
-  const { user } = useAuth();
+  const { user, status: authStatus } = useAuth();
   const { track } = useAnalytics("editor");
   const datasetId = id ? parseInt(id, 10) : undefined;
-  const { data: dataset } = useDatasetById(datasetId);
+  const { data: dataset, isLoading: isDatasetLoading, isError: isDatasetError, refetch: retryDataset } = useDatasetById(datasetId);
 
   const { data: sessionLock } = usePatchSessionLock(dataset?.id);
   const { mutateAsync: setLock } = useSetPatchSessionLock();
@@ -213,8 +214,28 @@ export default function DatasetReferencePatchEditor() {
     }
   };
 
+  // The dataset query waits for the session check; until then it is not "not found".
+  if (authStatus === "checking" || isDatasetLoading) return <StatusPageLoading label="Loading dataset…" />;
+  // A failed background refetch must not unmount the editor and its drafts.
+  if (isDatasetError && !dataset) {
+    return (
+      <StatusPage
+        kind="offline"
+        title="This dataset couldn’t load"
+        description="DeadTrees didn’t respond. Check your connection and try again in a moment."
+        actions={<Button type="primary" onClick={() => void retryDataset()}>Try again</Button>}
+      />
+    );
+  }
   if (!dataset) {
-    return <div className="p-6">Loading dataset...</div>;
+    return (
+      <StatusPage
+        kind="not-found"
+        title="Dataset not found"
+        description="It doesn’t exist, or it is private and not shared with your account."
+        actions={<Button onClick={() => navigate("/dataset-audit")}>Back to the audit queue</Button>}
+      />
+    );
   }
 
   return (

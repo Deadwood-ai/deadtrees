@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Alert, Button, Space, Typography } from "antd";
 import { useLocation } from "react-router-dom";
 import { initializePostHog, isConsentNeeded, saveConsent } from "../../utils/analytics";
@@ -11,6 +11,7 @@ export function CookieBanner() {
   const [isVisible, setIsVisible] = useState(false);
   const [isSuppressed, setIsSuppressed] = useState(false);
   const location = useLocation();
+  const bannerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const shouldSuppressForPreview =
@@ -57,11 +58,31 @@ export function CookieBanner() {
     setIsVisible(false);
   };
 
-  if (!isVisible || isSuppressed) return null;
+  const isShown = isVisible && !isSuppressed;
+
+  // The banner floats over the bottom of the page. Publish its height so pages
+  // whose last control would sit underneath (the auth forms) can make room.
+  useEffect(() => {
+    const banner = bannerRef.current;
+    const root = document.documentElement;
+    if (!isShown || !banner) return;
+    const publish = () =>
+      root.style.setProperty("--dt-consent-inset", `${Math.ceil(banner.getBoundingClientRect().height) + 16}px`);
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(banner);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--dt-consent-inset");
+    };
+  }, [isShown]);
+
+  if (!isShown) return null;
 
   return (
+    <div ref={bannerRef} className="fixed bottom-2 left-2 right-2 z-[60] md:bottom-4 md:left-4 md:right-4">
     <Alert
-      className="fixed bottom-2 left-2 right-2 z-[60] rounded-2xl p-3 shadow-lg md:bottom-4 md:left-4 md:right-4 md:p-4"
+      className="rounded-2xl p-3 shadow-lg md:p-4"
       type="info"
       showIcon={false}
       banner
@@ -87,5 +108,6 @@ export function CookieBanner() {
         </div>
       }
     />
+    </div>
   );
 }

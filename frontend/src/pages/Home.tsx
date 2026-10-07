@@ -60,12 +60,12 @@ const FAQ = () => {
               and
               <a href="https://hydrocode.de/home"> hydrocode. </a>
             </p>
-            <p className="text-md font-semibold">Data contributors:</p>
-            <p className="text-md">
-              {contributorNames.length > 0
-                ? contributorNames.join(", ")
-                : "Loading contributors..."}
-            </p>
+            {contributorNames.length > 0 && (
+              <>
+                <p className="text-md font-semibold">Data contributors:</p>
+                <p className="text-md">{contributorNames.join(", ")}</p>
+              </>
+            )}
           </div>
         ),
         style: FAQ_ITEM_STYLE,

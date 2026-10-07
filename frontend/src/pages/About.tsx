@@ -1,4 +1,5 @@
-import { Button, Collapse, Tooltip, message, Input, Tabs, Tag } from "antd";
+import { Button, Collapse, Tooltip, message, Input, Tabs, Tag, Skeleton } from "antd";
+import { TableSkeleton } from "../components/SectionStates";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeftOutlined,
@@ -98,10 +99,16 @@ export default function About() {
   ];
 
   const navigate = useNavigate();
-  const { data: publications, isLoading: isLoadingPublications } =
-    usePublications();
-  const { data: presentations, isLoading: isLoadingPresentations } =
-    usePresentations();
+  const {
+    data: publications,
+    isLoading: isLoadingPublications,
+    isError: publicationsFailed,
+  } = usePublications();
+  const {
+    data: presentations,
+    isLoading: isLoadingPresentations,
+    isError: presentationsFailed,
+  } = usePresentations();
   const { authors } = useData();
   const contributorNames = useMemo(
     () =>
@@ -370,9 +377,11 @@ abstract = {Excessive tree mortality is a global concern and remains poorly unde
                   ),
                   children: (
                     <div className="text-left text-sm leading-relaxed text-gray-600">
-                      {contributorNames.length > 0
-                        ? contributorNames.join(", ")
-                        : "Loading contributors..."}
+                      {contributorNames.length > 0 ? (
+                        contributorNames.join(", ")
+                      ) : (
+                        <Skeleton active title={false} paragraph={{ rows: 2 }} />
+                      )}
                     </div>
                   ),
                   style: {
@@ -538,7 +547,11 @@ abstract = {Excessive tree mortality is a global concern and remains poorly unde
 
           <div className="space-y-4">
             {isLoadingPublications ? (
-              <div className="text-gray-500">Loading...</div>
+              <TableSkeleton rows={4} label="Loading publications" />
+            ) : publicationsFailed && !publications?.length ? (
+              <div className="rounded-xl border border-gray-200 bg-white p-6 text-gray-500">
+                The publication list couldn’t load right now. Try again later.
+              </div>
             ) : publications && publications.length > 0 ? (
               publications.map((pub, index) => (
                 <a
@@ -607,7 +620,13 @@ abstract = {Excessive tree mortality is a global concern and remains poorly unde
                 key: "upcoming",
                 label: "Upcoming",
                 children: isLoadingPresentations ? (
-                  <div className="text-gray-500 py-4">Loading...</div>
+                  <div className="py-4">
+                    <TableSkeleton rows={3} label="Loading conference contributions" />
+                  </div>
+                ) : presentationsFailed && !presentations?.length ? (
+                  <div className="py-4 text-gray-500">
+                    The conference list couldn’t load right now. Try again later.
+                  </div>
                 ) : contributions.upcoming.length > 0 ? (
                   <div className="space-y-4 py-4">
                     {contributions.upcoming.map((contribution, index) => (
@@ -662,7 +681,13 @@ abstract = {Excessive tree mortality is a global concern and remains poorly unde
                 key: "past",
                 label: "Past",
                 children: isLoadingPresentations ? (
-                  <div className="text-gray-500 py-4">Loading...</div>
+                  <div className="py-4">
+                    <TableSkeleton rows={3} label="Loading conference contributions" />
+                  </div>
+                ) : presentationsFailed && !presentations?.length ? (
+                  <div className="py-4 text-gray-500">
+                    The conference list couldn’t load right now. Try again later.
+                  </div>
                 ) : contributions.past.length > 0 ? (
                   <div className="space-y-4 py-4">
                     {contributions.past.map((contribution, index) => (

@@ -10,6 +10,10 @@ import { createStandardMapControls } from "../../../utils/basemaps";
 import { createOrthoCogSource, MAP_MAX_TILES_LOADING } from "../../../utils/cogSource";
 import { createMapInteractions } from "../../../utils/mapInteractions";
 
+// Tiles already retry transient failures (see fetchCogRange); a few in a row
+// that still fail mean the imagery service is down, not one unlucky request.
+const IMAGERY_FAILED_TILE_LIMIT = 3;
+
 export interface Viewport {
 	center: number[];
 	zoom: number;
@@ -49,6 +53,8 @@ export interface UseMapCoreReturn {
 	mapRef: React.MutableRefObject<Map | null>;
 	/** Whether map is initialized */
 	isMapReady: boolean;
+	/** Whether the drone imagery failed to load */
+	imageryFailed: boolean;
 	/** Ortho COG layer */
 	orthoLayer: BaseLayer | null;
 	/** GeoTIFF extent (for fit view) */
@@ -128,6 +134,9 @@ export function useMapCore({
 	const orthoLayerRef = useRef<BaseLayer | null>(null);
 	const [isMapReady, setIsMapReady] = useState(false);
 	const [extent, setExtent] = useState<number[] | null>(null);
+	// Set when the imagery header can't be read or tiles keep failing after
+	// their retries, so the page can say so instead of showing an empty map.
+	const [imageryFailed, setImageryFailed] = useState(false);
 
 	// Store callbacks in refs to avoid triggering useEffect re-runs
 	const onViewportChangeRef = useRef(onViewportChange);
@@ -195,6 +204,23 @@ export function useMapCore({
 
 		let isDisposed = false;
 		const orthoCogSource = createOrthoCogSource(cogUrl);
+		setImageryFailed(false);
+		let failedTiles = 0;
+		// A header that can't be read puts the source in its error state; the
+		// view promise then never settles.
+		orthoCogSource.on("change", () => {
+			if (orthoCogSource.getState() === "error" && !isDisposed) setImageryFailed(true);
+		});
+		// Count failures in a row: a tile that loads means the service is back,
+		// so isolated failures while panning don't leave the notice up.
+		orthoCogSource.on("tileloaderror", () => {
+			failedTiles += 1;
+			if (failedTiles >= IMAGERY_FAILED_TILE_LIMIT && !isDisposed) setImageryFailed(true);
+		});
+		orthoCogSource.on("tileloadend", () => {
+			failedTiles = 0;
+			if (!isDisposed && orthoCogSource.getState() !== "error") setImageryFailed(false);
+		});
 
 		// The orthophoto COG uses OpenLayers' WebGL tile renderer. Some embedded
 		// browsers disable WebGL; in that case keep the map usable with a static
@@ -291,6 +317,7 @@ export function useMapCore({
 			}
 		}).catch((err) => {
 			console.error("Failed to get GeoTIFF view:", err);
+			if (!isDisposed) setImageryFailed(true);
 		});
 
 			// Cleanup
@@ -330,6 +357,7 @@ export function useMapCore({
 	return {
 		mapRef,
 		isMapReady,
+		imageryFailed,
 		orthoLayer: orthoLayerRef.current,
 		extent,
 		addLayer,

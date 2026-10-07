@@ -77,14 +77,14 @@ export default function DownloadSection({
       data = await response.json();
     } catch {
       if (!response.ok) {
-        throw new Error(`Request failed (${response.status})`);
+        throw new Error(downloadServiceUnavailable(response.status));
       }
       throw new Error("Invalid API response");
     }
 
     if (!response.ok) {
       const parsed = (data && typeof data === "object" ? data : {}) as DownloadApiResponse;
-      const detail = parsed.detail || parsed.message || `Request failed (${response.status})`;
+      const detail = parsed.detail || parsed.message || downloadServiceUnavailable(response.status);
       throw new Error(detail);
     }
 
@@ -190,7 +190,7 @@ export default function DownloadSection({
                 download_type: downloadType,
                 failure_reason: error.message,
               });
-              message.error({ content: `Error checking download status: ${error.message}`, duration: 5 });
+              message.error({ content: `The download stopped. ${error.message}`, duration: 8 });
             });
         };
 
@@ -204,7 +204,7 @@ export default function DownloadSection({
           download_type: downloadType,
           failure_reason: error.message,
         });
-        message.error({ content: `Error initiating download: ${error.message}`, duration: 5 });
+        message.error({ content: `The download couldn’t start. ${error.message}`, duration: 8 });
       });
   };
 
@@ -280,4 +280,9 @@ export default function DownloadSection({
       </div>
     </div>
   );
+}
+
+// Gateways answer outages with HTML, so there is no server detail to show.
+function downloadServiceUnavailable(status: number) {
+  return `The download service isn’t responding right now (error ${status}). Please try again in a few minutes.`;
 }

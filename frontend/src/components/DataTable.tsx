@@ -24,6 +24,7 @@ import StatusCell from "./DatasetStatus/StatusCell";
 import StatusDrawer from "./DatasetStatus/StatusDrawer";
 import MyDatasetsEmpty from "./DatasetStatus/MyDatasetsEmpty";
 import MobileDatasets from "./DatasetStatus/MobileDatasets";
+import { SectionLoadError, TableSkeleton } from "./SectionStates";
 import { useStatusSelection } from "./DatasetStatus/useStatusSelection";
 import {
   canOpenOwnerMap,
@@ -96,7 +97,7 @@ const DataTable: React.FC<DataTableProps> = ({
   onResetSelectionComplete,
 }) => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
-  const { data: userData, isLoading: isLoadingData, isError: isDataError } = useUserDatasets();
+  const { data: userData, isLoading: isLoadingData, isError: isDataError, refetch: retryUserData } = useUserDatasets();
   const { status, user } = useAuth();
   const { data: datasetsInPublication = [] } = useDatasetsInPublication(user?.id);
 
@@ -574,7 +575,6 @@ const DataTable: React.FC<DataTableProps> = ({
 
   return (
     <>
-      {isDataError && <Alert className="mb-4" type="error" message="Your datasets could not be loaded. Please refresh to try again." />}
       {(selection.isError || selection.isMissing) && <Alert className="mb-4" type="warning" message={selection.isError ? "Dataset status could not be loaded. Please refresh to try again." : "This dataset is not available in your account."} closable onClose={() => selection.select()} />}
       {selection.dataset && (
         <StatusDrawer
@@ -585,14 +585,17 @@ const DataTable: React.FC<DataTableProps> = ({
           onViewMap={viewMap}
         />
       )}
-      {isMobile ? isDataError ? null : <MobileDatasets datasets={sortedUserData} loading={isLoadingData} queueFor={queueFor} onDetails={openDetails} onViewMap={viewMap} /> : !isLoadingData && !isDataError && sortedUserData.length === 0 ? <MyDatasetsEmpty /> : <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+      {isDataError && !userData ? (
+        <SectionLoadError title="Your datasets couldn’t load" onRetry={() => void retryUserData()} testId="my-datasets-error" />
+      ) : isLoadingData ? (
+        <TableSkeleton label="Loading your datasets" />
+      ) : isMobile ? <MobileDatasets datasets={sortedUserData} queueFor={queueFor} onDetails={openDetails} onViewMap={viewMap} /> : sortedUserData.length === 0 ? <MyDatasetsEmpty /> : <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
         <Table
           rowKey={"id"}
           dataSource={sortedUserData}
           columns={columns}
           scroll={{ x: "max-content" }}
           pagination={{ pageSize: 50 }}
-          loading={isLoadingData}
           rowClassName={(record) => {
             const isSelected = selectedRowKeys.includes(record.id);
             return isSelected ? "bg-blue-50 hover:bg-blue-100" : "";

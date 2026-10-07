@@ -13,6 +13,7 @@ import { antdTheme } from "./theme/antdTheme";
 
 import DatasetDetails from "./pages/DatasetDetails";
 import RouteErrorBoundary from "./components/RouteErrorBoundary";
+import NotFound from "./pages/NotFound";
 
 // Load route-specific maps, editors, and charts when that route is opened.
 const HomePage = lazy(() => import("./pages/Home"));
@@ -229,6 +230,7 @@ function AppWithTracking() {
           />
           <Route path="forgot-password" element={<Forgotpassword />} />
           <Route path="reset-password" element={<ResetPassword />} />
+          <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>
     </>

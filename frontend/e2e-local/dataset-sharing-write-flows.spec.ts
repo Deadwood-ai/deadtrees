@@ -175,7 +175,8 @@ test.describe("private dataset sharing (local write)", () => {
   test("a stranger and an anonymous visitor see no more than for a missing dataset", async ({ page }) => {
     const readNotFoundPage = async (id: number) => {
       await page.goto(`/dataset/${id}`);
-      await expect(page.getByText("Dataset not found.")).toBeVisible();
+      // Signed out, a private dataset and a missing one read the same.
+      await expect(page.getByText("This dataset isn’t available")).toBeVisible();
       return (await page.locator("#root").innerText()).replaceAll(String(id), "ID");
     };
     const hiddenText = await readNotFoundPage(datasetId);
@@ -184,7 +185,7 @@ test.describe("private dataset sharing (local write)", () => {
 
     await signIn(page, "stranger");
     await page.goto(`/dataset/${datasetId}`);
-    await expect(page.getByText("Dataset not found.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Dataset not found" })).toBeVisible();
     await expect(page.getByText(`sharing-${runId}.tif`)).toHaveCount(0);
     await page.screenshot({ path: test.info().outputPath("4-stranger-no-access.png") });
     expect((await fetch(`${localApiUrl.replace(/\/api\/v1$/, "")}/cogs/v1/${cogRelativePath}`)).status).toBe(403);

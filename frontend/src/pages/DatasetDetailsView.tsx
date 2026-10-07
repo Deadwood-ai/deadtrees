@@ -1,4 +1,4 @@
-import { Button, Spin, message, Drawer } from "antd";
+import { Button, message, Drawer } from "antd";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { Map as OLMap } from "ol";
 import {
@@ -40,11 +40,12 @@ import { EditorToolbar } from "../components/PolygonEditor";
 import DatasetDetailsMap from "../components/DatasetDetailsMap/DatasetDetailsMap";
 
 interface DatasetDetailsViewProps {
-  dataset: IDataset | null | undefined;
-  isLoading: boolean;
+  dataset: IDataset;
 }
 
-export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetailsViewProps) {
+// DatasetDetails owns loading, not-found and error states; this view only
+// renders a dataset that loaded.
+export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   // Open-vocabulary query forwarded from the dataset list (highlights tiles).
@@ -203,32 +204,6 @@ export default function DatasetDetailsView({ dataset, isLoading }: DatasetDetail
   useEffect(() => {
     void observeOwnedResult(dataset, user?.id);
   }, [dataset, user?.id]);
-
-  // Loading state
-  if (isLoading) {
-    return (
-      <div
-        className="flex h-full w-full items-center justify-center"
-        style={{ minHeight: "60vh" }}
-      >
-        <Spin size="large" />
-      </div>
-    );
-  }
-
-  if (!dataset) {
-    return (
-      <div
-        className="flex h-full w-full items-center justify-center px-4"
-        style={{ minHeight: "60vh" }}
-      >
-        <div className="text-center text-slate-600">
-          <p className="mb-3 text-base font-medium">Dataset not found.</p>
-          <Button onClick={() => navigate("/dataset")}>Back to datasets</Button>
-        </div>
-      </div>
-    );
-  }
 
   const {
     isEditing,
