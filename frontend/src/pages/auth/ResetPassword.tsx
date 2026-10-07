@@ -1,18 +1,16 @@
 import { Alert, Button, Form, Input, message, Spin } from "antd";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 
 import { useAuth } from "../../hooks/useAuthProvider";
 import { supabase } from "../../hooks/useSupabase";
 import { trackAppEvent } from "../../utils/analytics";
-import AuthCard from "./AuthCard";
+import AuthCard, { AuthLink, MIN_PASSWORD_LENGTH } from "./AuthCard";
 
 type ResetPasswordFormValues = {
   confirmPassword: string;
   password: string;
 };
-
-const MIN_PASSWORD_LENGTH = 6;
 
 function getPasswordResetErrorMessage(error: unknown) {
   if (!error || typeof error !== "object" || !("message" in error)) {
@@ -169,12 +167,7 @@ const ResetPassword = () => {
             <span>
               Request a new password reset email, then open the latest link from
               your inbox.{" "}
-              <Link
-                to="/forgot-password"
-                className="font-medium text-[#1B5E35] underline hover:text-emerald-800"
-              >
-                Send a new reset link
-              </Link>
+              <AuthLink to="/forgot-password">Send a new reset link</AuthLink>
             </span>
           }
         />

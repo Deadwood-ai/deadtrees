@@ -1,8 +1,8 @@
 import { Alert, Button, Form, Input } from "antd";
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { supabase } from "../../hooks/useSupabase";
-import AuthCard from "./AuthCard";
+import AuthCard, { AuthLink, returnQuery } from "./AuthCard";
 
 type SignInFormValues = { email: string; password: string };
 
@@ -20,8 +20,6 @@ const SignIn = () => {
   const sessionExpired = searchParams.get("reason") === "session_expired";
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const returnQuery =
-    returnTo !== "/profile" ? `?returnTo=${encodeURIComponent(returnTo)}` : "";
 
   // Signing in is enough: PublicOnly sends a signed-in visitor on to returnTo.
   const onFinish = async ({ email, password }: SignInFormValues) => {
@@ -42,20 +40,12 @@ const SignIn = () => {
         <>
           <div>
             Not registered yet?{" "}
-            <Link
-              to={`/sign-up${returnQuery}`}
-              className="font-medium text-[#1B5E35] underline hover:text-emerald-800"
-            >
+            <AuthLink to={`/sign-up${returnQuery(returnTo)}`}>
               Create an account
-            </Link>
+            </AuthLink>
           </div>
           <div>
-            <Link
-              to="/forgot-password"
-              className="font-medium text-[#1B5E35] underline hover:text-emerald-800"
-            >
-              Forgot your password?
-            </Link>
+            <AuthLink to="/forgot-password">Forgot your password?</AuthLink>
           </div>
         </>
       }

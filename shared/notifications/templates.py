@@ -1,7 +1,9 @@
 from html import escape
 
 
-ACCOUNT_URL = 'https://deadtrees.earth/profile'
+SITE_URL = 'https://deadtrees.earth'
+ACCOUNT_URL = f'{SITE_URL}/profile'
+LOGO_URL = f'{SITE_URL}/assets/logo.png'
 
 
 def dataset_failed_email(
@@ -54,7 +56,7 @@ def dataset_failed_email(
 def dataset_completed_email(dataset_id: int, file_name: str) -> tuple[str, str, str]:
 	"""Return a completion email linking to the canonical dataset route."""
 	safe_file_name = escape(file_name)
-	dataset_url = f'https://deadtrees.earth/dataset/{dataset_id}'
+	dataset_url = f'{SITE_URL}/dataset/{dataset_id}'
 	subject = f'Dataset {dataset_id} - Processing Complete'
 	text_body = (
 		f'Processing completed for dataset {dataset_id} ({file_name}).\n\n'
@@ -140,10 +142,6 @@ def duplicates_archived_email(datasets: list[dict]) -> tuple[str, str, str]:
 	</div>
 	"""
 	return subject, text_body, html_body
-
-
-SITE_URL = 'https://deadtrees.earth'
-LOGO_URL = f'{SITE_URL}/assets/logo.png'
 
 
 def _account_email(heading: str, intro: str, button: str, url: str) -> str:

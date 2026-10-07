@@ -1,4 +1,29 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
+
+export const MIN_PASSWORD_LENGTH = 6;
+
+/** Query string that carries a non-default return path between the auth pages. */
+export const returnQuery = (returnTo: string) =>
+  returnTo !== "/profile" ? `?returnTo=${encodeURIComponent(returnTo)}` : "";
+
+/** A link in the auth pages' brand green. */
+export function AuthLink({
+  to,
+  children,
+}: {
+  to: string;
+  children: ReactNode;
+}) {
+  return (
+    <Link
+      to={to}
+      className="font-medium text-[#1B5E35] underline hover:text-emerald-800"
+    >
+      {children}
+    </Link>
+  );
+}
 
 interface AuthCardProps {
   title: string;

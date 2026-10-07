@@ -1,13 +1,15 @@
 import { Alert, Button, Form, Input } from "antd";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import { signUp } from "../../api/signup";
 import Turnstile from "../../components/Turnstile";
 import { Settings } from "../../config";
-import AuthCard from "./AuthCard";
-
-const MIN_PASSWORD_LENGTH = 6;
+import AuthCard, {
+  AuthLink,
+  MIN_PASSWORD_LENGTH,
+  returnQuery,
+} from "./AuthCard";
 
 type SignUpFormValues = { email: string; password: string };
 
@@ -51,9 +53,6 @@ const SignUp = () => {
     }
   };
 
-  const returnQuery =
-    returnTo !== "/profile" ? `?returnTo=${encodeURIComponent(returnTo)}` : "";
-
   return (
     <AuthCard
       title="Sign Up"
@@ -64,12 +63,9 @@ const SignUp = () => {
       }
       footer={
         <div>
-          <Link
-            to={`/sign-in${returnQuery}`}
-            className="font-medium text-[#1B5E35] underline hover:text-emerald-800"
-          >
+          <AuthLink to={`/sign-in${returnQuery(returnTo)}`}>
             Already have an account?
-          </Link>
+          </AuthLink>
         </div>
       }
     >

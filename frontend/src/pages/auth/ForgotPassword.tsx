@@ -1,8 +1,7 @@
 import { Alert, Button, Form, Input } from "antd";
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { supabase } from "../../hooks/useSupabase";
-import AuthCard from "./AuthCard";
+import AuthCard, { AuthLink } from "./AuthCard";
 
 const ForgotPassword = () => {
   const [submitting, setSubmitting] = useState(false);
@@ -38,22 +37,11 @@ const ForgotPassword = () => {
       footer={
         <>
           <div>
-            Remembered it?{" "}
-            <Link
-              to="/sign-in"
-              className="font-medium text-[#1B5E35] underline hover:text-emerald-800"
-            >
-              Sign in
-            </Link>
+            Remembered it? <AuthLink to="/sign-in">Sign in</AuthLink>
           </div>
           <div>
             Not registered yet?{" "}
-            <Link
-              to="/sign-up"
-              className="font-medium text-[#1B5E35] underline hover:text-emerald-800"
-            >
-              Create an account
-            </Link>
+            <AuthLink to="/sign-up">Create an account</AuthLink>
           </div>
         </>
       }
