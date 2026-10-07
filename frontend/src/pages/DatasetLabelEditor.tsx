@@ -8,6 +8,7 @@ import { defaults as defaultInteractions } from "ol/interaction/defaults";
 import View from "ol/View";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { useDatasets } from "../hooks/useDatasets";
+import StatusPage, { StatusPageLoading } from "../components/StatusPage";
 import { useDatasetLabelTypes } from "../hooks/useDatasetLabelTypes";
 import usePolygonEditor from "../hooks/usePolygonEditor";
 import useAISegmentation from "../hooks/useAISegmentation";
@@ -322,8 +323,16 @@ export default function DatasetLabelEditor() {
     };
   }, [activeLayer, dataset, hiddenIds, editor, ai.isProcessing, ai.isActive, hoveredServerId]);
 
+  if (!datasets) return <StatusPageLoading label="Loading dataset…" />;
   if (!dataset) {
-    return <div className="p-4">Loading dataset...</div>;
+    return (
+      <StatusPage
+        kind="not-found"
+        title="Dataset not found"
+        description="It doesn’t exist, or it is private and not shared with your account."
+        actions={<Button onClick={() => navigate("/dataset")}>Browse the drone archive</Button>}
+      />
+    );
   }
 
   return (

@@ -1,33 +1,65 @@
 import { Component, type ReactNode } from "react";
-import { Button, Result } from "antd";
+import { Button } from "antd";
+import { Link } from "react-router-dom";
 
-// A route chunk can disappear during deployment or fail on a weak connection.
-// Keep navigation available and let the user reload the current app version.
+import StatusPage from "./StatusPage";
+import { isStaleBuildError, reloadForNewBuild } from "../utils/staleBuild";
+
+// A route chunk disappears when a new version is deployed, and a page can also
+// crash on its own. Either way keep navigation available: stale chunks reload
+// into the new version once, everything else gets a reload and a way home.
 export default class RouteErrorBoundary extends Component<
   { children: ReactNode },
-  { failed: boolean }
+  { error: unknown; reloading: boolean }
 > {
-  state = { failed: false };
+  state = { error: null as unknown, reloading: false };
 
-  static getDerivedStateFromError() {
-    return { failed: true };
+  static getDerivedStateFromError(error: unknown) {
+    return { error };
+  }
+
+  componentDidCatch(error: unknown) {
+    if (isStaleBuildError(error) && reloadForNewBuild()) {
+      this.setState({ reloading: true });
+      return;
+    }
+    console.error("Route failed to render", error);
   }
 
   render() {
-    if (this.state.failed) {
+    const { error, reloading } = this.state;
+    if (!error) return this.props.children;
+    if (reloading) return null;
+
+    const actions = (
+      <>
+        <Button type="primary" onClick={() => window.location.reload()}>
+          Reload page
+        </Button>
+        <Link to="/">
+          <Button>Go to home</Button>
+        </Link>
+      </>
+    );
+
+    if (isStaleBuildError(error)) {
       return (
-        <Result
-          status="warning"
-          title="This page couldn’t load"
-          subTitle="Check your connection and reload to try again."
-          extra={
-            <Button type="primary" onClick={() => window.location.reload()}>
-              Reload page
-            </Button>
-          }
+        <StatusPage
+          kind="updated"
+          title="DeadTrees was just updated"
+          description="This page belongs to the previous version. Reload to open the new one. If it still doesn’t load, check your connection."
+          actions={actions}
         />
       );
     }
-    return this.props.children;
+
+    return (
+      <StatusPage
+        kind="error"
+        title="Something went wrong on this page"
+        description="Reloading usually fixes it. If it keeps happening, tell us at info@deadtrees.earth with the link to this page."
+        actions={actions}
+      />
+    );
   }
 }

@@ -1,8 +1,9 @@
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { Spin, Result, Button } from "antd";
+import { Button } from "antd";
 import { CorrectionEditorView } from "../components/Corrections";
 import { useDatasetById } from "../hooks/useDatasets";
 import { useAuth } from "../hooks/useAuthProvider";
+import StatusPage, { StatusPageLoading } from "../components/StatusPage";
 
 /**
  * Page wrapper for the CorrectionEditorView
@@ -27,51 +28,44 @@ export default function DatasetCorrections() {
     }
   };
 
-  // Check authentication
-  if (authLoading) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500">
-        <Spin size="large" />
-        <span>Loading...</span>
-      </div>
-    );
-  }
+  if (authLoading) return <StatusPageLoading label="Loading…" />;
 
   if (!user) {
+    const returnTo = `/dataset-corrections/${id ?? ""}${searchParams.size ? `?${searchParams}` : ""}`;
     return (
-      <Result
-        status="403"
-        title="Login Required"
-        subTitle="You need to be logged in to improve predictions."
-        extra={
-          <Button type="primary" onClick={() => navigate("/sign-in")}>
-            Sign In
+      <StatusPage
+        kind="locked"
+        title="Sign in to improve predictions"
+        description="Corrections are saved to your account, so you need to be signed in to edit."
+        actions={
+          <Button type="primary" onClick={() => navigate(`/sign-in?returnTo=${encodeURIComponent(returnTo)}`)}>
+            Sign in
           </Button>
         }
       />
     );
   }
 
-  if (isLoading) {
+  if (isLoading) return <StatusPageLoading label="Loading dataset…" />;
+
+  if (error) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500">
-        <Spin size="large" />
-        <span>Loading dataset...</span>
-      </div>
+      <StatusPage
+        kind="offline"
+        title="This dataset couldn’t load"
+        description="DeadTrees didn’t respond. Check your connection and try again in a moment."
+        actions={<Button type="primary" onClick={() => window.location.reload()}>Reload page</Button>}
+      />
     );
   }
 
-  if (error || !dataset) {
+  if (!dataset) {
     return (
-      <Result
-        status="404"
-        title="Dataset Not Found"
-        subTitle="The dataset you're looking for doesn't exist."
-        extra={
-          <Button type="primary" onClick={() => navigate("/dataset")}>
-            Back to Datasets
-          </Button>
-        }
+      <StatusPage
+        kind="not-found"
+        title="Dataset not found"
+        description="It doesn’t exist, or it is private and not shared with your account."
+        actions={<Button onClick={() => navigate("/dataset")}>Browse the drone archive</Button>}
       />
     );
   }

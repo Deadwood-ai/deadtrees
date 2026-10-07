@@ -100,9 +100,10 @@ export function useDatasetById(datasetId: number | undefined) {
     enabled: !!datasetId && status !== "checking",
     queryFn: async () => {
       if (!datasetId) return null;
-      const { data, error } = await supabase.from(Settings.DATA_TABLE_FULL).select("*").eq("id", datasetId).single();
+      // A missing or inaccessible row is "not found", not a failure to retry.
+      const { data, error } = await supabase.from(Settings.DATA_TABLE_FULL).select("*").eq("id", datasetId).maybeSingle();
       if (error) throw error;
-      return data as IDataset;
+      return (data as IDataset | null) ?? null;
     },
   });
 }

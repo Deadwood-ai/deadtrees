@@ -51,7 +51,11 @@ const MAP_BOTTOM_PADDING_PX = 72;
 
 export default function Dataset() {
   const navigate = useNavigate();
-  const { data: allData } = usePublicDatasetArchiveItems();
+  const {
+    data: allData,
+    isError: archiveFailed,
+    refetch: retryArchive,
+  } = usePublicDatasetArchiveItems();
 
   // The "DB as of" timeline axis is derived from the full, unfiltered dataset so
   // that no filter (tag, advanced, or text search) ever changes the available
@@ -347,10 +351,11 @@ export default function Dataset() {
           semanticQuery={semantic.query}
         />
       ) : (
-        <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500">
-          <Spin size="large" />
-          <span>Loading data...</span>
-        </div>
+        <ArchivePlaceholder
+          failed={archiveFailed}
+          onRetry={() => void retryArchive()}
+          loadingLabel="Loading data..."
+        />
       )}
     </div>
   );
@@ -437,10 +442,11 @@ export default function Dataset() {
           )}
         </div>
         {!displayData ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500">
-            <Spin size="large" />
-            <span>Loading map...</span>
-          </div>
+          <ArchivePlaceholder
+            failed={archiveFailed}
+            onRetry={() => void retryArchive()}
+            loadingLabel="Loading map..."
+          />
         ) : (
           // The map stays mounted through empty results: the list already
           // explains the empty state, and remounting OpenLayers would drop the
@@ -471,6 +477,42 @@ export default function Dataset() {
         onApplyFilters={handleApplyFilters}
         currentFilters={advancedFilters}
       />
+    </div>
+  );
+}
+
+// Until the archive arrives, list and map show the same wait or failure.
+function ArchivePlaceholder({
+  failed,
+  onRetry,
+  loadingLabel,
+}: {
+  failed: boolean;
+  onRetry: () => void;
+  loadingLabel: string;
+}) {
+  if (!failed) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500">
+        <Spin size="large" />
+        <span>{loadingLabel}</span>
+      </div>
+    );
+  }
+  return (
+    <div
+      className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-gray-600"
+      role="alert"
+    >
+      <span className="font-medium text-gray-800">
+        The drone archive couldn’t load
+      </span>
+      <span className="text-sm">
+        DeadTrees didn’t respond. Check your connection and try again.
+      </span>
+      <Button type="primary" onClick={onRetry}>
+        Try again
+      </Button>
     </div>
   );
 }

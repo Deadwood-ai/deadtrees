@@ -14,10 +14,17 @@ import { applyCanvasOptimization } from "./utils/canvasOptimization";
 import { applyThemeCssVariables } from "./theme/cssVariables";
 import { BrowserRouter } from "react-router-dom";
 import { registerPriwaServiceWorker } from "./pwa/priwaServiceWorker";
+import { reloadForNewBuild } from "./utils/staleBuild";
 
 applyThemeCssVariables();
 applyCanvasOptimization();
 registerPriwaServiceWorker();
+
+// Vite fires this when a lazy chunk of the previous deploy is gone. Reload into
+// the new build once; if that already happened, the route error page takes over.
+window.addEventListener("vite:preloadError", (event) => {
+  if (reloadForNewBuild()) event.preventDefault();
+});
 
 const queryClient = new QueryClient();
 

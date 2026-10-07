@@ -10,7 +10,6 @@ import {
 	DatePicker,
 	Input,
 	message,
-	Result,
 	Segmented,
 	Select,
 	Space,
@@ -35,6 +34,7 @@ import { useDatasetById } from "../hooks/useDatasets";
 import { useAuditDatasets } from "../hooks/useAuditDatasets";
 import type { AuditDataset } from "../hooks/useAuditDatasets";
 import DatasetAuditDetail from "../components/DatasetAudit/DatasetAuditDetail";
+import StatusPage, { StatusPageLoading } from "../components/StatusPage";
 import { useDatasetAudits, DatasetAuditUserInfo, useDatasetContributors } from "../hooks/useDatasetAudit";
 import { useFlaggedDatasets } from "../hooks/useDatasetFlags";
 import { useReferenceDatasetIds } from "../hooks/useReferencePatches";
@@ -177,18 +177,18 @@ export default function DatasetAudit() {
 
 	if (!user || !canAudit) {
 		return (
-			<Result
-				status="403"
-				title="Forbidden"
-				subTitle="Auditor access is required to view this page."
-				extra={[
-					<Button key="home" onClick={() => navigate("/")} type="primary">
-						Home
-					</Button>,
-					<Button key="datasets" onClick={() => navigate("/dataset")}>
-						Datasets
-					</Button>,
-				]}
+			<StatusPage
+				kind="locked"
+				title="Auditor access needed"
+				description="The audit workspace is for the DeadTrees audit team. Ask the team if you should have access."
+				actions={
+					<>
+						<Button type="primary" onClick={() => navigate("/dataset")}>
+							Browse the drone archive
+						</Button>
+						<Button onClick={() => navigate("/")}>Go to home</Button>
+					</>
+				}
 			/>
 		);
 	}
@@ -543,33 +543,42 @@ function DatasetAuditInner() {
 
 	// Loading state
 	if (isAuthLoading || isAuditPrivilegeLoading) {
-		return <div className="p-6">Loading...</div>;
+		return <StatusPageLoading label="Loading…" />;
 	}
 
 	// Detail view
 	if (id) {
-		if (isDetailDatasetLoading) return <div>Loading dataset...</div>;
+		if (isDetailDatasetLoading) return <StatusPageLoading label="Loading dataset…" />;
 		if (isDetailDatasetError) {
 			return (
-				<Result
-					status="error"
-					title="Could not load dataset"
-					subTitle="The dataset could not be loaded. Please try again."
-					extra={<Button onClick={() => refetchDetailDataset()}>Try again</Button>}
+				<StatusPage
+					kind="offline"
+					title="This dataset couldn’t load"
+					description="DeadTrees didn’t respond. Check your connection and try again in a moment."
+					actions={<Button type="primary" onClick={() => refetchDetailDataset()}>Try again</Button>}
 				/>
 			);
 		}
-		if (!detailDataset) return <div>Dataset not found</div>;
+		if (!detailDataset) {
+			return (
+				<StatusPage
+					kind="not-found"
+					title="Dataset not found"
+					description={`There is no dataset ${id} to audit.`}
+					actions={<Button onClick={() => navigate("/dataset-audit")}>Back to the audit queue</Button>}
+				/>
+			);
+		}
 		return <DatasetAuditDetail dataset={detailDataset} />;
 	}
 
 	if (isDatasetError) {
 		return (
-			<Result
-				status="error"
-				title="Could not load audit datasets"
-				subTitle="The audit queue could not be loaded. Please try again."
-				extra={<Button onClick={() => refetchDatasets()}>Try again</Button>}
+			<StatusPage
+				kind="offline"
+				title="The audit queue couldn’t load"
+				description="DeadTrees didn’t respond. Check your connection and try again in a moment."
+				actions={<Button type="primary" onClick={() => refetchDatasets()}>Try again</Button>}
 			/>
 		);
 	}
