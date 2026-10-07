@@ -15,9 +15,10 @@ def test_extent_pools_partial_reconstructions():
 	assert sparse_point_extent_m([_points((0, 0), (100, 10)), _points((-50, 40))]) == (150, 40)
 
 
-def test_extent_ignores_a_few_stray_points():
+def test_extent_covers_a_small_peripheral_cluster():
+	# ODM renders every retained point, so a few distant points must widen the budgeted extent.
 	grid = [(x, y) for x in range(100) for y in range(10)]
-	assert sparse_point_extent_m([_points(*grid, (50_000, 0), (0, -50_000))]) == (99, 9)
+	assert sparse_point_extent_m([_points(*grid, (2000, 0), (0, 3000))]) == (2000, 3000)
 
 
 def test_extent_needs_points():
