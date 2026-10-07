@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   Button,
   Form,
@@ -16,6 +16,7 @@ import {
 } from "antd";
 import { InfoCircleOutlined, InboxOutlined } from "@ant-design/icons";
 import { useAuth } from "../../hooks/useAuthProvider";
+import { usePriwaProjectMemberships } from "../../hooks/usePriwaProjectMemberships";
 import { IDataAccess, ILicense, IPlatform, UploadType } from "../../types/dataset";
 import { useFileUpload } from "../../hooks/useFileUpload";
 import { useUploadNotification } from "../../hooks/useUploadNotification";
@@ -135,6 +136,18 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
   const pickerTypeOptions = ["Year/Month/Day", "Year/Month", "Year"];
   const [form] = Form.useForm();
   const agreementAccepted = Form.useWatch("agreement", form);
+  const dataAccess = Form.useWatch("data_access", form);
+  const platform = Form.useWatch("platform", form);
+  const { data: priwaMemberships = [] } = usePriwaProjectMemberships();
+  // Caches written before the flag was read lack it; the database default is to contribute.
+  const priwaProject = priwaMemberships.find((membership) => membership.contributesFlights !== false);
+
+  // PRIWA partners' flights stay inside their project unless they choose otherwise.
+  useEffect(() => {
+    if (priwaProject && !form.isFieldTouched("data_access")) {
+      form.setFieldValue("data_access", IDataAccess.private);
+    }
+  }, [priwaProject, form]);
 
   const { fileList, fileName, onFileChange, beforeUpload } = useFileUpload();
 
@@ -516,6 +529,15 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
             <Form.Item name="data_access" label="Who can see this dataset?" className="mt-2">
               <VisibilityChoice />
             </Form.Item>
+            {priwaProject && platform === "drone" && dataAccess === IDataAccess.private && (
+              <Alert
+                type="info"
+                showIcon
+                className="-mt-2 mb-4"
+                data-testid="upload-priwa-private-notice"
+                message="Your PRIWA project colleagues can still view this flight in the PRIWA app."
+              />
+            )}
 
             <Form.Item>
               <div className="space-y-4">
