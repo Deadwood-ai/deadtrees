@@ -37,7 +37,7 @@ function FactoryShell() {
 		return (
 			<StatusPage
 				kind="locked"
-				title="Operator access needed"
+				title="Operator access required"
 				description="The Factory workspace is limited to DeadTrees operators. Ask the team if you need it."
 				actions={
 					<Button type="primary" onClick={() => navigate("/")}>

@@ -550,10 +550,8 @@ test.describe("auditor local e2e", () => {
     await page.goto("/dataset-audit");
     await dismissCookieBanner(page);
 
-    await expect(page.getByText("Forbidden")).toBeVisible();
-    await expect(
-      page.getByText("Auditor access is required to view this page."),
-    ).toBeVisible();
+    await expect(page.getByTestId("status-page-locked")).toBeVisible();
+    await expect(page.getByText("Auditor access needed")).toBeVisible();
   });
 
   for (const canAudit of [true, false]) {
@@ -659,10 +657,10 @@ test.describe("auditor local e2e", () => {
     await dismissCookieBanner(page);
 
     await expect(
-      page.getByText("Could not load audit datasets", { exact: true }),
+      page.getByText("The audit queue couldn’t load", { exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByText("The audit queue could not be loaded. Please try again."),
+      page.getByText("DeadTrees didn’t respond. Check your connection and try again in a moment."),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
     await expect(page.getByText("📋 Pending")).toHaveCount(0);
