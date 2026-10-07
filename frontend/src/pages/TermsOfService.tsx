@@ -97,12 +97,13 @@ export default function TermsOfService() {
           </Paragraph>
           <Paragraph>
             Nutzer behalten die Rechte an ihren Daten. Öffentliche Nutzerbeiträge („Öffentlich") werden einschließlich
-            ihrer Metadaten allen unter der Creative-Commons-Lizenz CC BY 4.0 zur Verfügung gestellt. Nutzerbeiträge mit
+            ihrer Metadaten allen unter der beim Datensatz angegebenen Lizenz zur Verfügung gestellt, standardmäßig
+            unter der Creative-Commons-Lizenz CC BY 4.0. Nutzerbeiträge mit
             der Sichtbarkeit „Nur ansehen" können alle online ansehen, und die daraus abgeleiteten Vorhersagen werden
-            unter CC BY 4.0 bereitgestellt; das Orthophoto herunterladen können nur der Nutzer und die von ihm
+            unter derselben Lizenz bereitgestellt; das Orthophoto herunterladen können nur der Nutzer und die von ihm
             berechtigten Personen. Private Nutzerbeiträge („Privat") werden anderen Nutzern nicht lizenziert. Wird ein Datensatz
-            später öffentlich gemacht, gilt ab diesem Zeitpunkt CC BY 4.0. Bereits erteilte CC-BY-Lizenzen bleiben auch
-            nach einer Änderung oder Löschung bestehen. Die Rechte des Betreibers nach Abschnitt 5 gelten für alle
+            später öffentlich gemacht, gilt ab diesem Zeitpunkt seine Lizenz. Bereits erteilte offene Lizenzen bleiben
+            auch nach einer Änderung oder Löschung bestehen. Die Rechte des Betreibers nach Abschnitt 5 gelten für alle
             Nutzerbeiträge.
           </Paragraph>
         </section>
@@ -315,10 +316,11 @@ export default function TermsOfService() {
           </Paragraph>
           <Paragraph>
             Users retain the rights to their data. Public User Contributions, including their metadata, are made
-            available to everyone under the Creative Commons License CC BY 4.0. Anyone can view "View only" User Contributions
-            online, and the predictions derived from them are made available under CC BY 4.0, while only the user and
+            available to everyone under the license shown on the dataset, by default the Creative Commons License CC BY
+            4.0. Anyone can view "View only" User Contributions
+            online, and the predictions derived from them are made available under the same license, while only the user and
             the people they allow can download the orthophoto. Private User Contributions are not licensed to other users. If a
-            dataset is made public later, CC BY 4.0 applies from then on. CC BY licenses already granted remain valid
+            dataset is made public later, its license applies from then on. Open licenses already granted remain valid
             after a change or deletion. The Operator's rights under Section 5 apply to all User Contributions.
           </Paragraph>
         </section>

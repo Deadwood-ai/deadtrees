@@ -88,7 +88,7 @@ export default function Datenschutzerklaerung() {
           <Paragraph>
             Um die Plattform vor automatisierter und massenhafter Nutzung zu schützen, begrenzen wir bestimmte Anfragen
             pro Nutzerkonto bzw. pro Netzwerk. Dazu speichern wir für Besucher ohne Nutzerkonto einen nicht
-            umkehrbaren, mit einem geheimen Schlüssel gebildeten Hashwert der IP-Adresse; diese Einträge werden nach etwa 24 Stunden gelöscht.
+            umkehrbaren, mit einem geheimen Schlüssel gebildeten Hashwert der IP-Adresse; diese Einträge werden nur für einen Tag berücksichtigt und danach im laufenden Betrieb automatisch gelöscht.
             Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse am Schutz und an der Verfügbarkeit
             der Plattform).
           </Paragraph>
@@ -388,7 +388,7 @@ export default function Datenschutzerklaerung() {
           <Paragraph>
             To protect the Platform against automated and bulk use, we limit certain requests per user account or per
             network. For visitors without an account, we store a non-reversible, keyed hash of the IP address for this
-            purpose; these entries are deleted after about 24 hours. The legal basis is Art. 6(1)(f) GDPR (legitimate
+            purpose; these entries only count for one day and are then deleted automatically as the Platform runs. The legal basis is Art. 6(1)(f) GDPR (legitimate
             interest in protecting the Platform and keeping it available).
           </Paragraph>
         </section>
