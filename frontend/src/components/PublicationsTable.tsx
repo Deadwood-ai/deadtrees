@@ -1,11 +1,12 @@
 import React from "react";
-import { Table, Tag, Typography, Button, Tooltip, Spin, Alert } from "antd";
+import { Table, Tag, Typography, Button, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useAuth } from "../hooks/useAuthProvider";
 import { ClockCircleOutlined, FileDoneOutlined } from "@ant-design/icons";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useMyPublications, type IMyPublication } from "../hooks/useDataPublications";
 import EmptyStatePanel from "./EmptyStatePanel";
+import { SectionLoadError, TableSkeleton } from "./SectionStates";
 
 interface PublicationsTableProps {
   /** Opens the dataset list, where datasets are selected for publishing. */
@@ -15,7 +16,7 @@ interface PublicationsTableProps {
 const PublicationsTable: React.FC<PublicationsTableProps> = ({ onChooseDatasets }) => {
   const { user } = useAuth();
   const isMobile = useIsMobile();
-  const { data: publications = [], isLoading: loading, isError } = useMyPublications(user?.id);
+  const { data: publications = [], isLoading: loading, isError, refetch } = useMyPublications(user?.id);
 
   const columns: ColumnsType<IMyPublication> = [
     {
@@ -68,12 +69,10 @@ const PublicationsTable: React.FC<PublicationsTableProps> = ({ onChooseDatasets 
     },
   ];
 
-  if (loading) {
-    return <Spin size="large" />;
-  }
+  if (loading) return <TableSkeleton rows={3} label="Loading your publications" />;
 
   if (isError) {
-    return <Alert type="error" message="Your publications could not be loaded. Please refresh to try again." />;
+    return <SectionLoadError title="Your publications couldn’t load" onRetry={() => void refetch()} />;
   }
 
   if (publications.length === 0) {

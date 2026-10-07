@@ -5,14 +5,20 @@ import { useMyFlags } from "../../hooks/useDatasetFlags";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import type { DatasetFlag } from "../../types/flags";
 import EmptyStatePanel from "../EmptyStatePanel";
+import { SectionLoadError, TableSkeleton } from "../SectionStates";
 
 /** Issues the signed-in user reported on datasets. */
 export default function MyIssuesTable() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const { data: flags = [], isLoading } = useMyFlags();
+  const { data: flags = [], isLoading, isError, refetch } = useMyFlags();
 
-  if (!isLoading && flags.length === 0) {
+  if (isError) {
+    return <SectionLoadError title="Your reported issues couldn’t load" onRetry={() => void refetch()} />;
+  }
+  if (isLoading) return <TableSkeleton rows={3} label="Loading your reported issues" />;
+
+  if (flags.length === 0) {
     return (
       <EmptyStatePanel
         testId="my-issues-empty"
@@ -34,7 +40,6 @@ export default function MyIssuesTable() {
       <div className="overflow-hidden rounded-xl border border-gray-100">
         <Table
           rowKey="id"
-          loading={isLoading}
           dataSource={flags}
           columns={[
           {

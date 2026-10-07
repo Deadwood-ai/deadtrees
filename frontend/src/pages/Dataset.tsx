@@ -1,5 +1,5 @@
-import { useMemo, useState, useEffect, useCallback } from "react";
-import { Button, Tag, Spin, Tooltip, Checkbox, Drawer } from "antd";
+import { useMemo, useState, useEffect, useCallback, type ReactNode } from "react";
+import { Button, Tag, Spin, Tooltip, Checkbox, Drawer, Skeleton } from "antd";
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
@@ -354,7 +354,7 @@ export default function Dataset() {
         <ArchivePlaceholder
           failed={archiveFailed}
           onRetry={() => void retryArchive()}
-          loadingLabel="Loading data..."
+          loading={<ArchiveListSkeleton />}
         />
       )}
     </div>
@@ -442,10 +442,18 @@ export default function Dataset() {
           )}
         </div>
         {!displayData ? (
+          // On desktop the list beside the map already explains a failure.
           <ArchivePlaceholder
-            failed={archiveFailed}
+            failed={archiveFailed && isMobile}
             onRetry={() => void retryArchive()}
-            loadingLabel="Loading map..."
+            loading={
+              archiveFailed ? null : (
+                <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500">
+                  <Spin size="large" />
+                  <span>Loading map...</span>
+                </div>
+              )
+            }
           />
         ) : (
           // The map stays mounted through empty results: the list already
@@ -481,24 +489,17 @@ export default function Dataset() {
   );
 }
 
-// Until the archive arrives, list and map show the same wait or failure.
+// Until the archive arrives, list and map show a wait or a failure.
 function ArchivePlaceholder({
   failed,
   onRetry,
-  loadingLabel,
+  loading,
 }: {
   failed: boolean;
   onRetry: () => void;
-  loadingLabel: string;
+  loading: ReactNode;
 }) {
-  if (!failed) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500">
-        <Spin size="large" />
-        <span>{loadingLabel}</span>
-      </div>
-    );
-  }
+  if (!failed) return <>{loading}</>;
   return (
     <div
       className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-gray-600"
@@ -513,6 +514,23 @@ function ArchivePlaceholder({
       <Button type="primary" onClick={onRetry}>
         Try again
       </Button>
+    </div>
+  );
+}
+
+// Placeholder rows shaped like archive entries: thumbnail, title, details.
+function ArchiveListSkeleton() {
+  return (
+    <div className="flex flex-col gap-4 px-1 pt-2" role="status" aria-label="Loading datasets">
+      {Array.from({ length: 6 }, (_, index) => (
+        <Skeleton
+          key={index}
+          active
+          avatar={{ shape: "square", size: 48 }}
+          title={{ width: "70%" }}
+          paragraph={{ rows: 1, width: "45%" }}
+        />
+      ))}
     </div>
   );
 }

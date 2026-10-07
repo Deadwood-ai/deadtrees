@@ -1,4 +1,4 @@
-import { Button, Spin } from "antd";
+import { Button } from "antd";
 import { EnvironmentOutlined } from "@ant-design/icons";
 import MyDatasetsEmpty from "./MyDatasetsEmpty";
 import StatusCell from "./StatusCell";
@@ -13,7 +13,6 @@ import {
 
 interface MobileDatasetsProps {
   datasets: ContributorDataset[];
-  loading: boolean;
   queueFor: (id: number) => QueueState;
   onDetails: (id: number, trigger: HTMLElement) => void;
   onViewMap: (id: number) => void;
@@ -25,8 +24,7 @@ interface MobileDatasetsProps {
  * desktop-only. Rows themselves are not clickable, so the two buttons are the
  * only interactive elements and keep full-size touch targets.
  */
-export default function MobileDatasets({ datasets, loading, queueFor, onDetails, onViewMap }: MobileDatasetsProps) {
-  if (loading) return <Spin aria-label="Loading datasets" />;
+export default function MobileDatasets({ datasets, queueFor, onDetails, onViewMap }: MobileDatasetsProps) {
   if (!datasets.length) return <MyDatasetsEmpty isMobile />;
   return (
     <ul

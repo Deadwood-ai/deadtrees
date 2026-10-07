@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { acceptCookieConsent } from "./support/localAuth";
+import { acceptCookieConsent, installLocalSession } from "./support/localAuth";
 
 // Full-page states share one card that must sit below the floating header.
 async function expectCardClearOfHeader(page: Page, kind: string) {
@@ -56,4 +56,17 @@ test("a route chunk missing after a deploy reloads once, then explains the updat
   expect(loads).toBe(2);
   await expectCardClearOfHeader(page, "updated");
   await expect(page.getByRole("button", { name: "Reload page" })).toBeVisible();
+});
+
+test("an outage on My Account shows one retry instead of an empty table", async ({ page }) => {
+  await installLocalSession(page, {
+    user: { id: "00000000-0000-4000-8000-00000000a001", email: "qa-contributor-local@example.com" },
+    supabaseUrl: process.env.VITE_SUPABASE_URL || "http://127.0.0.1:54321",
+    refreshToken: "local-e2e-refresh",
+  });
+  await page.route("**/rest/v1/**", (route) => route.abort("connectionrefused"));
+  await page.goto("/profile");
+  await expect(page.getByTestId("my-datasets-error")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(1);
+  await expect(page.getByText("No data")).toHaveCount(0);
 });

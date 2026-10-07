@@ -13,7 +13,6 @@ import {
 	Segmented,
 	Select,
 	Space,
-	Spin,
 	Table,
 	Tag,
 	Tooltip,
@@ -165,13 +164,27 @@ const getBiomeBadge = (biomeName: string | null) => {
 export default function DatasetAudit() {
 	const navigate = useNavigate();
 	const { user } = useAuth();
-	const { canAudit, isLoading: isAuditPrivilegeLoading } = useCanAudit();
+	const {
+		canAudit,
+		isLoading: isAuditPrivilegeLoading,
+		isError: isAuditPrivilegeError,
+		refetch: retryAuditPrivilege,
+	} = useCanAudit();
 
-	if (isAuditPrivilegeLoading) {
+	if (isAuditPrivilegeLoading) return <StatusPageLoading label="Checking access…" />;
+
+	if (isAuditPrivilegeError) {
 		return (
-			<div className="flex h-full w-full items-center justify-center" style={{ minHeight: "60vh" }}>
-				<Spin size="large" />
-			</div>
+			<StatusPage
+				kind="offline"
+				title="The audit workspace couldn’t load"
+				description="DeadTrees didn’t respond while checking your access. Check your connection and try again in a moment."
+				actions={
+					<Button type="primary" onClick={() => void retryAuditPrivilege()}>
+						Try again
+					</Button>
+				}
+			/>
 		);
 	}
 

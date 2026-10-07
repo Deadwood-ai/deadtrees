@@ -4,13 +4,19 @@ import { Link } from "react-router-dom";
 import type { ISharedDataset } from "../../api/datasetAccess";
 import { useSharedWithMe } from "../../hooks/useDatasetAccess";
 import EmptyStatePanel from "../EmptyStatePanel";
+import { SectionLoadError, TableSkeleton } from "../SectionStates";
 import { roleLabel, visibilityLabel } from "./accessCopy";
 
 /** Datasets other people shared with the signed-in user. */
 export default function SharedWithMeTable() {
-  const { data = [], isLoading } = useSharedWithMe();
+  const { data = [], isLoading, isError, refetch } = useSharedWithMe();
 
-  if (!isLoading && data.length === 0) {
+  if (isError) {
+    return <SectionLoadError title="Datasets shared with you couldn’t load" onRetry={() => void refetch()} />;
+  }
+  if (isLoading) return <TableSkeleton rows={3} label="Loading datasets shared with you" />;
+
+  if (data.length === 0) {
     return (
       <EmptyStatePanel
         testId="shared-with-me-empty"
@@ -24,7 +30,6 @@ export default function SharedWithMeTable() {
   return (
     <Table<ISharedDataset>
       data-testid="shared-with-me-table"
-      loading={isLoading}
       dataSource={data}
       rowKey="dataset_id"
       pagination={{ pageSize: 20, hideOnSinglePage: true }}

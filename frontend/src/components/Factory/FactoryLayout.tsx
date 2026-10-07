@@ -27,11 +27,26 @@ function sectionFromPath(pathname: string): FactorySection {
 }
 
 function FactoryShell() {
-	const { canOperate, isLoading } = useCanOperate();
+	const { canOperate, isLoading, isError, refetch } = useCanOperate();
 	const location = useLocation();
 	const navigate = useNavigate();
 
 	if (isLoading) return <StatusPageLoading label="Checking access…" />;
+
+	if (isError) {
+		return (
+			<StatusPage
+				kind="offline"
+				title="The Factory couldn’t load"
+				description="DeadTrees didn’t respond while checking your access. Check your connection and try again in a moment."
+				actions={
+					<Button type="primary" onClick={() => void refetch()}>
+						Try again
+					</Button>
+				}
+			/>
+		);
+	}
 
 	if (!canOperate) {
 		return (

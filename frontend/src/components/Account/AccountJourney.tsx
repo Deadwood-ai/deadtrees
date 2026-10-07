@@ -1,3 +1,4 @@
+import { Skeleton } from "antd";
 import type { JourneyStep } from "./accountJourney";
 import UploadRequirements from "./UploadRequirements";
 
@@ -8,12 +9,14 @@ interface AccountJourneyProps {
 
 /** The contributor's numbers as upload, process, publish; a short how-to for accounts without datasets. */
 export default function AccountJourney({ steps, failed }: AccountJourneyProps) {
+  // The dataset list below explains the failure and offers a retry.
+  if (failed) return null;
   return (
     <section aria-label="Your data on DeadTrees" className="mb-6 rounded-2xl border border-slate-200 bg-white">
       {steps === null ? (
-        <p className="m-0 px-6 py-6 text-sm text-slate-500" role="status">
-          {failed ? "Your numbers could not be loaded right now. Reload the page to try again." : "Loading your numbers…"}
-        </p>
+        <div className="px-6 py-6" role="status" aria-label="Loading your numbers">
+          <Skeleton active title={false} paragraph={{ rows: 2, width: ["40%", "70%"] }} />
+        </div>
       ) : steps[0].value === 0 ? (
         <GettingStarted />
       ) : (

@@ -33,11 +33,14 @@ export function useUserPrivileges() {
   });
 }
 
+// isError lets gated pages tell "the check failed" apart from "no access".
 export function useCanAudit() {
-  const { data: privileges, isLoading } = useUserPrivileges();
+  const { data: privileges, isLoading, isError, refetch } = useUserPrivileges();
   return {
     canAudit: privileges?.can_audit || false,
     isLoading,
+    isError,
+    refetch,
   };
 }
 
@@ -50,9 +53,11 @@ export function useCanViewAllPrivate() {
 }
 
 export function useCanOperate() {
-  const { data: privileges, isLoading } = useUserPrivileges();
+  const { data: privileges, isLoading, isError, refetch } = useUserPrivileges();
   return {
     canOperate: privileges?.can_operate === true,
     isLoading,
+    isError,
+    refetch,
   };
 }
