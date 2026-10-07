@@ -96,3 +96,30 @@ def test_captcha_secret_is_required_outside_development(monkeypatch):
 	monkeypatch.setattr(settings, 'DEV_MODE', False)
 	with pytest.raises(RuntimeError):
 		signup_module.captcha_passes('token', None)
+
+
+def test_unconfirmed_email_cannot_keep_a_password_someone_else_chose(new_email, captcha):
+	from supabase import create_client
+
+	assert _signup(new_email).status_code == 200  # an attacker registers the victim's address
+	purge_messages()
+	victim = client.post(
+		'/api/v1/auth/signup',
+		json={'email': new_email, 'password': 'victim-password-2', 'captcha_token': 'token', 'redirect_to': 'http://localhost/x'},
+	)
+	assert victim.status_code == 200 and victim.json() == _signup_message()
+
+	message = assert_email_received('Finish creating your DeadTrees account', new_email)
+	body = get_message_by_id(message['ID'])['Text']
+	assert 'type=recovery' in body
+	assert signup_module._set_password_url('https://deadtrees.earth/profile?x=1') == 'https://deadtrees.earth/reset-password'
+	with use_service_client() as db:
+		db.auth.admin.update_user_by_id(_account(new_email).id, {'email_confirm': True})
+	auth = create_client(settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY).auth
+	for password in (PASSWORD, 'victim-password-2'):
+		with pytest.raises(Exception):
+			auth.sign_in_with_password({'email': new_email, 'password': password})
+
+
+def _signup_message() -> dict:
+	return {'message': 'Check your inbox for a link to confirm your email address.'}

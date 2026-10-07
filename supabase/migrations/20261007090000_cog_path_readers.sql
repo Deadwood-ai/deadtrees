@@ -1,8 +1,9 @@
 -- A COG path names the static /cogs/v1 URL of a dataset's full-resolution
 -- orthophoto. When every visitor could list all paths, one request plus a loop
 -- fetched the whole public archive. Only callers who need paths in bulk keep
--- reading COG rows directly: the processor, auditors and staff who may view all
--- private data, PRIWA project members, and owners or grantees of a dataset.
+-- reading COG rows directly: the processor, auditors, operators, staff who may view
+-- all private data and PRIWA project members (each still limited to the private
+-- datasets they may see), plus owners and grantees of a dataset.
 -- Everyone else asks the API for one dataset's path at a time
 -- (GET /datasets/{id}/files/cog), which caps distinct datasets per account or IP.
 -- Views join v2_cogs as the caller, so their cog columns read null for others.
@@ -12,24 +13,20 @@ begin;
 -- Locks are taken in one order: v2_cogs (policy), then v2_queue_positions (view).
 set local lock_timeout = '5s';
 
-create function internal.can_read_all_cog_paths()
+-- Callers who may list COG paths in bulk. Their private-dataset visibility is
+-- unchanged: hidden_private_dataset_ids() still applies to them in the policy.
+create function internal.is_bulk_cog_reader()
 returns boolean
 language sql stable security definer set search_path = ''
 as $$
 	select coalesce((select auth.jwt() ->> 'email') = 'processor@deadtrees.earth', false)
 		or public.can_audit()
 		or public.can_view_all_private_data()
-		or public.can_operate();
-$$;
-
-create function internal.is_priwa_member()
-returns boolean
-language sql stable security definer set search_path = ''
-as $$
-	select exists (
-		select 1 from public.priwa_project_memberships membership
-		where membership.user_id = (select auth.uid())
-	);
+		or public.can_operate()
+		or exists (
+			select 1 from public.priwa_project_memberships membership
+			where membership.user_id = (select auth.uid())
+		);
 $$;
 
 create function internal.own_or_granted_dataset_ids()
@@ -42,11 +39,9 @@ as $$
 	select internal.granted_dataset_ids();
 $$;
 
-revoke all on function internal.can_read_all_cog_paths() from public, anon, authenticated;
-revoke all on function internal.is_priwa_member() from public, anon, authenticated;
+revoke all on function internal.is_bulk_cog_reader() from public, anon, authenticated;
 revoke all on function internal.own_or_granted_dataset_ids() from public, anon, authenticated;
-grant execute on function internal.can_read_all_cog_paths() to anon, authenticated, service_role;
-grant execute on function internal.is_priwa_member() to anon, authenticated, service_role;
+grant execute on function internal.is_bulk_cog_reader() to anon, authenticated, service_role;
 grant execute on function internal.own_or_granted_dataset_ids() to anon, authenticated, service_role;
 
 drop policy "Enable read access for all users" on public.v2_cogs;
@@ -54,10 +49,9 @@ drop policy "Enable read access for all users" on public.v2_cogs;
 create policy "Bulk COG path readers" on public.v2_cogs
 as permissive for select to public
 using (
-	(select internal.can_read_all_cog_paths())
-	or dataset_id in (select internal.own_or_granted_dataset_ids())
+	dataset_id in (select internal.own_or_granted_dataset_ids())
 	or (
-		(select internal.is_priwa_member())
+		(select internal.is_bulk_cog_reader())
 		and dataset_id not in (select internal.hidden_private_dataset_ids())
 	)
 );
@@ -180,5 +174,20 @@ $$;
 
 revoke all on function public.claim_public_cog_path(bigint, text, integer) from public, anon, authenticated;
 grant execute on function public.claim_public_cog_path(bigint, text, integer) to service_role;
+
+-- Sign-up asks whether an email already has an account and whether it was
+-- confirmed, without giving the API's database roles access to auth.users.
+create function public.signup_account_state(p_email text)
+returns table (user_id uuid, confirmed boolean)
+language sql stable security definer set search_path = ''
+as $$
+	select account.id, account.email_confirmed_at is not null
+	from auth.users account
+	where lower(account.email) = lower(p_email)
+	limit 1;
+$$;
+
+revoke all on function public.signup_account_state(text) from public, anon, authenticated;
+grant execute on function public.signup_account_state(text) to service_role;
 
 commit;

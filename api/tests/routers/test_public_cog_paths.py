@@ -83,23 +83,32 @@ def test_public_cog_paths_are_not_listed_to_visitors_or_strangers(access_account
 def test_staff_and_priwa_members_still_list_paths(access_accounts, datasets):
 	public_id, public_path = datasets['public']
 	private_id, _ = datasets['private']
-	auditor, member = access_accounts['admin'], access_accounts['editor']
+	auditor, member, operator = access_accounts['admin'], access_accounts['editor'], access_accounts['reader']
 	project_id = str(uuid.uuid4())
 	with use_service_client() as db:
-		db.table('privileged_users').insert({'user_id': auditor['id'], 'can_audit': True}).execute()
+		db.table('privileged_users').insert(
+			[
+				{'user_id': auditor['id'], 'can_audit': True, 'can_operate': False},
+				{'user_id': operator['id'], 'can_audit': False, 'can_operate': True},
+			]
+		).execute()
 		db.table('priwa_projects').insert({'id': project_id, 'slug': f'cog-{project_id}', 'name': 'Cog paths'}).execute()
 		db.table('priwa_project_memberships').insert(
 			{'project_id': project_id, 'user_id': member['id'], 'role': 'field_user'}
 		).execute()
 	try:
-		assert _listed_path(auditor['token'], public_id) == public_path
 		assert _listed_path(member['token'], public_id) == public_path
 		with use_client(member['token']) as db:
 			private_rows = db.table(settings.cogs_table).select('cog_path').eq('dataset_id', private_id).execute().data
 		assert private_rows == [], 'PRIWA members must not see private datasets of others'
+		for account in (auditor, operator):
+			assert _listed_path(account['token'], public_id) == public_path
+			with use_client(account['token']) as db:
+				rows = db.table(settings.cogs_table).select('cog_path').eq('dataset_id', private_id).execute().data
+			assert rows == [], 'auditors and operators keep their private-dataset visibility'
 	finally:
 		with use_service_client() as db:
-			db.table('privileged_users').delete().eq('user_id', auditor['id']).execute()
+			db.table('privileged_users').delete().in_('user_id', [auditor['id'], operator['id']]).execute()
 			db.table('priwa_project_memberships').delete().eq('project_id', project_id).execute()
 			db.table('priwa_projects').delete().eq('id', project_id).execute()
 
