@@ -888,15 +888,15 @@ def main():
 	except Exception as e:
 		print(f'❌ Could not fetch reference datasets: {e}')
 		return 1
+	# Remove datasets that are no longer public reference datasets, even when none remain
+	print('🗑️  Checking for removed datasets...')
+	cleanup_removed_datasets(output_base_dir, reference_dataset_ids)
+
 	if not reference_dataset_ids:
-		print('⚠️  No reference datasets found')
+		print('⚠️  No public reference datasets found')
 		return 0
 
 	print(f'✓ Found {len(reference_dataset_ids)} reference dataset(s)\n')
-
-	# Cleanup datasets that are no longer in reference_datasets
-	print('🗑️  Checking for removed datasets...')
-	cleanup_removed_datasets(output_base_dir, reference_dataset_ids)
 
 	# Fetch patches
 	print('🔍 Fetching validated patches from database...')

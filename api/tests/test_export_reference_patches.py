@@ -820,3 +820,13 @@ def test_cleanup_removed_datasets_removes_a_dataset_that_is_no_longer_public(tmp
 
 	assert (tmp_path / '10').exists()
 	assert not (tmp_path / '11').exists()
+
+
+def test_main_removes_existing_exports_when_no_public_reference_datasets_remain(monkeypatch, tmp_path):
+	(tmp_path / '11' / 'png').mkdir(parents=True)
+	monkeypatch.setattr(sys, 'argv', ['export_reference_patches.py', '--output-dir', str(tmp_path)])
+	monkeypatch.setattr(export_module, 'login', lambda _user, _password: 'token')
+	monkeypatch.setattr(export_module, 'fetch_reference_datasets', lambda _token: [])
+
+	assert export_module.main() == 0
+	assert not (tmp_path / '11').exists()
