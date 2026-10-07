@@ -44,11 +44,11 @@ def _guard_model(monkeypatch):
 @pytest.fixture(autouse=True)
 def _reset_rate_limit():
 	trusted_proxies = search_module.settings.SEARCH_RATE_LIMIT_TRUSTED_PROXIES
-	search_module._search_embed_requests.clear()
+	search_module._search_embed_limiter.clear()
 	_trusted_proxy_networks.cache_clear()
 	yield
 	search_module.settings.SEARCH_RATE_LIMIT_TRUSTED_PROXIES = trusted_proxies
-	search_module._search_embed_requests.clear()
+	search_module._search_embed_limiter.clear()
 	_trusted_proxy_networks.cache_clear()
 
 
@@ -206,8 +206,8 @@ def test_search_rate_limit_blocks_same_client_before_model(monkeypatch):
 		calls += 1
 		return [0.0]
 
-	monkeypatch.setattr(search_module, 'SEARCH_EMBED_RATE_LIMIT', 2)
-	monkeypatch.setattr(search_module, 'SEARCH_EMBED_RATE_WINDOW_SECONDS', 60)
+	monkeypatch.setattr(search_module._search_embed_limiter, 'limit', 2)
+	monkeypatch.setattr(search_module._search_embed_limiter, 'window_seconds', 60)
 	monkeypatch.setattr(search_module, 'embed_text', _stub)
 
 	request = _request(host='203.0.113.5')
@@ -223,8 +223,8 @@ def test_search_rate_limit_blocks_same_client_before_model(monkeypatch):
 
 
 def test_search_rate_limit_sliding_window_expires_old_entries(monkeypatch):
-	monkeypatch.setattr(search_module, 'SEARCH_EMBED_RATE_LIMIT', 2)
-	monkeypatch.setattr(search_module, 'SEARCH_EMBED_RATE_WINDOW_SECONDS', 60)
+	monkeypatch.setattr(search_module._search_embed_limiter, 'limit', 2)
+	monkeypatch.setattr(search_module._search_embed_limiter, 'window_seconds', 60)
 
 	_check_search_embed_rate_limit('198.51.100.10', now=0)
 	_check_search_embed_rate_limit('198.51.100.10', now=1)
@@ -275,7 +275,7 @@ def test_rejected_query_is_never_logged(query):
 
 def test_rate_limited_query_is_never_logged(monkeypatch):
 	_stub_embedding(monkeypatch, [0.0])
-	monkeypatch.setattr(search_module, 'SEARCH_EMBED_RATE_LIMIT', 1)
+	monkeypatch.setattr(search_module._search_embed_limiter, 'limit', 1)
 	request = _request(host='203.0.113.9')
 	embed_query(EmbedRequest(query='oak'), request=request, background_tasks=BackgroundTasks())
 

@@ -5,6 +5,7 @@ import {
   fetchDatasetsSharedWithMe,
   fetchMyDatasetAccess,
   fetchPrivateDatasetFilesBatched,
+  fetchPublicCogPath,
   revokeDatasetAccess,
   searchShareAccounts,
   setDatasetAccess,
@@ -115,8 +116,32 @@ export function useDatasetFileUrlResolver(datasets: IDatasetFileSource[]) {
   );
 }
 
+/** Thumbnail address only; lists use this so they never spend the COG path allowance. */
+export function useDatasetThumbnailUrl(dataset: IDatasetFileSource | null | undefined): string | null {
+  const datasets = useMemo(() => (dataset ? [dataset] : []), [dataset]);
+  const resolve = useDatasetFileUrlResolver(datasets);
+  return dataset ? resolve(dataset).thumbnailUrl : null;
+}
+
+/**
+ * COG and thumbnail addresses for one dataset's map. When the database does not
+ * list the COG path to this caller, it is fetched from the capped API once per session;
+ * cogError explains why it could not be, for example the daily limit.
+ */
 export function useDatasetFileUrls(dataset: IDatasetFileSource | null | undefined) {
   const datasets = useMemo(() => (dataset ? [dataset] : []), [dataset]);
   const resolve = useDatasetFileUrlResolver(datasets);
-  return dataset ? resolve(dataset) : { cogUrl: null, thumbnailUrl: null };
+  // Skip datasets whose COG is known to be unfinished; a finished COG changes the key, so it is fetched then.
+  const needsPath = !!dataset && !isPrivateDataset(dataset) && !dataset.cog_path && dataset.is_cog_done !== false;
+  const { data: fetchedPath, error: cogPathError } = useQuery({
+    // The path is the same for everyone, so signing in or out does not refetch it.
+    queryKey: ["datasets", dataset?.id, "cog-path", dataset?.is_cog_done ?? null],
+    queryFn: () => fetchPublicCogPath(dataset!.id),
+    enabled: needsPath,
+    staleTime: Infinity,
+    retry: false,
+  });
+  const cogError = needsPath && cogPathError ? cogPathError.message : null;
+  if (!dataset) return { cogUrl: null, thumbnailUrl: null, cogError: null };
+  return { ...resolve(needsPath && fetchedPath ? { ...dataset, cog_path: fetchedPath } : dataset), cogError };
 }

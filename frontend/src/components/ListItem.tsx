@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { useDatasetFileUrls } from "../hooks/useDatasetAccess";
+import { useDatasetThumbnailUrl } from "../hooks/useDatasetAccess";
 import { Button, Tag, Tooltip } from "antd";
 import { useNavigate } from "react-router-dom";
 import { IDataAccess, IDataset, IDatasetArchiveItem } from "../types/dataset";
@@ -106,7 +106,7 @@ const ListItem = ({
   const biomeColor = getBiomeTagColor(biomeName);
   const biomeIcon = getBiomeEmoji(biomeName);
   const isPrivate = item.data_access === IDataAccess.private;
-  const { thumbnailUrl } = useDatasetFileUrls(item);
+  const thumbnailUrl = useDatasetThumbnailUrl(item);
 
   return (
     <div

@@ -116,6 +116,10 @@ class Settings(BaseSettings):
 	# service-role key so deployments need no new secret.
 	ASSET_TICKET_SECRET: str = ''
 	ASSET_TICKET_TTL_SECONDS: int = 3600
+	# Distinct datasets per account or client IP whose COG path the API hands out per day.
+	COG_PATHS_PER_DAY: int = 300
+	# Cloudflare Turnstile secret for the sign-up captcha (development uses Cloudflare's test secret).
+	TURNSTILE_SECRET_KEY: str = ''
 
 	# Temporary processing directory
 	# tmp_processing_path: str = str(Path(tempfile.mkdtemp(prefix='processing')))

@@ -93,9 +93,18 @@ test.describe("contributor local write flows", () => {
 
     await page.getByPlaceholder(/email/i).fill(contributorEmail);
     await page.getByPlaceholder(/password/i).fill(initialPassword);
-    await page.getByRole("button", { name: /sign up/i }).click();
+    // Cloudflare's test site key passes the captcha without a challenge.
+    const signUpButton = page.getByRole("button", { name: /sign up/i });
+    await expect(signUpButton).toBeEnabled({ timeout: 20_000 });
+    await signUpButton.click();
+    await expect(page.getByText("Check your inbox")).toBeVisible();
 
-    await expect(page).toHaveURL(/\/profile$/, { timeout: 20_000 });
+    const confirmationLink = await waitForAuthEmailLink(contributorEmail, /confirm your deadtrees account/i);
+    expect(confirmationLink).toContain("type=signup");
+    await page.goto(confirmationLink);
+
+    // Supabase leaves an empty fragment after consuming the confirmation tokens.
+    await expect(page).toHaveURL(/\/profile#?$/, { timeout: 20_000 });
     await expect(
       page.getByRole("heading", { name: "My Account" }),
     ).toBeVisible();
@@ -116,7 +125,7 @@ test.describe("contributor local write flows", () => {
     await page.getByPlaceholder(/email/i).fill(contributorEmail);
     await page.getByRole("button", { name: /reset|send/i }).click();
 
-    const recoveryLink = await waitForRecoveryLink(contributorEmail);
+    const recoveryLink = await waitForAuthEmailLink(contributorEmail, /reset|recover|password/i);
     expect(recoveryLink).toContain("/auth/v1/verify");
     expect(recoveryLink).toContain("type=recovery");
 
@@ -353,7 +362,7 @@ async function deleteAuthUsersByEmail(client: SupabaseClient, email: string) {
   }
 }
 
-async function waitForRecoveryLink(email: string) {
+async function waitForAuthEmailLink(email: string, subject: RegExp) {
   const deadline = Date.now() + 15_000;
 
   while (Date.now() < deadline) {
@@ -362,7 +371,7 @@ async function waitForRecoveryLink(email: string) {
     const message = (summaries.messages as MailpitMessageSummary[]).find(
       (candidate) =>
         candidate.To?.some((recipient) => recipient.Address === email) &&
-        /reset|recover|password/i.test(candidate.Subject ?? ""),
+        subject.test(candidate.Subject ?? ""),
     );
 
     if (message) {
