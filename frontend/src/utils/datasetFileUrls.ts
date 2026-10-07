@@ -7,6 +7,7 @@ export interface IDatasetFileSource {
   data_access?: IDataAccess | string | null;
   cog_path?: string | null;
   thumbnail_path?: string | null;
+  is_cog_done?: boolean | null;
 }
 
 export interface IDatasetFileUrls {

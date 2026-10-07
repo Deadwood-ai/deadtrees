@@ -119,7 +119,7 @@ async function accessToken(): Promise<string> {
   return token;
 }
 
-async function readError(response: Response): Promise<string> {
+export async function readError(response: Response): Promise<string> {
   try {
     const body = await response.json();
     return typeof body?.detail === "string" ? body.detail : "Something went wrong. Please try again.";

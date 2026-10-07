@@ -131,10 +131,11 @@ export function useDatasetThumbnailUrl(dataset: IDatasetFileSource | null | unde
 export function useDatasetFileUrls(dataset: IDatasetFileSource | null | undefined) {
   const datasets = useMemo(() => (dataset ? [dataset] : []), [dataset]);
   const resolve = useDatasetFileUrlResolver(datasets);
-  const { user } = useAuth();
-  const needsPath = !!dataset && !isPrivateDataset(dataset) && !dataset.cog_path;
+  // Skip datasets whose COG is known to be unfinished; a finished COG changes the key, so it is fetched then.
+  const needsPath = !!dataset && !isPrivateDataset(dataset) && !dataset.cog_path && dataset.is_cog_done !== false;
   const { data: fetchedPath, error: cogPathError } = useQuery({
-    queryKey: ["datasets", dataset?.id, "cog-path", user?.id],
+    // The path is the same for everyone, so signing in or out does not refetch it.
+    queryKey: ["datasets", dataset?.id, "cog-path", dataset?.is_cog_done ?? null],
     queryFn: () => fetchPublicCogPath(dataset!.id),
     enabled: needsPath,
     staleTime: Infinity,

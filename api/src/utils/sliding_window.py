@@ -25,6 +25,7 @@ class SlidingWindowLimiter:
 		now = monotonic() if now is None else now
 		window_start = now - self.window_seconds
 		with self._lock:
+			self._prune(window_start)
 			requests = self._requests[key]
 			while requests and requests[0] <= window_start:
 				requests.popleft()
@@ -32,6 +33,12 @@ class SlidingWindowLimiter:
 				retry_after = max(1, int(self.window_seconds - (now - requests[0])))
 				raise HTTPException(status_code=429, detail=self.detail, headers={'Retry-After': str(retry_after)})
 			requests.append(now)
+
+	def _prune(self, window_start: float) -> None:
+		"""Forget clients whose requests have all left the window, so memory stays bounded."""
+		stale = [key for key, times in self._requests.items() if not times or times[-1] <= window_start]
+		for key in stale:
+			del self._requests[key]
 
 	def clear(self) -> None:
 		with self._lock:

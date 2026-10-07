@@ -1,4 +1,5 @@
 import { Settings } from "../config";
+import { readError } from "./datasetAccess";
 
 export interface SignupInput {
   email: string;
@@ -22,10 +23,6 @@ export async function signUp(input: SignupInput): Promise<string> {
       redirect_to: input.redirectTo,
     }),
   });
-  const body = await response.json().catch(() => null);
-  if (!response.ok) {
-    const detail = body?.detail;
-    throw new Error(typeof detail === "string" ? detail : "Sign-up failed. Please check your details and try again.");
-  }
-  return body.message as string;
+  if (!response.ok) throw new Error(await readError(response));
+  return ((await response.json()) as { message: string }).message;
 }

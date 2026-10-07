@@ -163,3 +163,14 @@ def test_queue_estimates_still_average_every_cog(access_accounts, datasets):
 		with use_service_client() as db:
 			db.table(settings.queue_table).delete().eq('id', queued['id']).execute()
 			db.table(settings.datasets_table).delete().eq('id', stranger_dataset).execute()
+
+
+def test_parallel_requests_cannot_exceed_the_cap(access_accounts, monkeypatch):
+	from concurrent.futures import ThreadPoolExecutor
+
+	ids = [_create_dataset(access_accounts['owner']['id'], 'public')[0] for _ in range(6)]
+	monkeypatch.setattr(settings, 'COG_PATHS_PER_DAY', 2)
+	headers = _bearer(access_accounts['stranger'])
+	with ThreadPoolExecutor(max_workers=6) as pool:
+		statuses = list(pool.map(lambda i: client.get(f'/api/v1/datasets/{i}/files/cog', headers=headers).status_code, ids))
+	assert sorted(statuses) == [200, 200, 429, 429, 429, 429]

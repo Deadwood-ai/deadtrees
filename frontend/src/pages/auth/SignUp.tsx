@@ -55,9 +55,6 @@ const SignUp = () => {
         ) : (
           <>
             {error ? <Alert className="mb-4" showIcon type="error" message={error} /> : null}
-            {!Settings.TURNSTILE_SITE_KEY ? (
-              <Alert className="mb-4" showIcon type="warning" message="Sign-up is not available right now." />
-            ) : null}
             <Form layout="vertical" onFinish={onFinish} disabled={submitting} requiredMark={false}>
               <Form.Item
                 label="Email address"
@@ -76,11 +73,13 @@ const SignUp = () => {
               >
                 <Input.Password className="p-2" placeholder="Your password" autoComplete="new-password" />
               </Form.Item>
-              {Settings.TURNSTILE_SITE_KEY ? (
-                <Form.Item>
+              <Form.Item>
+                {Settings.TURNSTILE_SITE_KEY ? (
                   <Turnstile siteKey={Settings.TURNSTILE_SITE_KEY} onToken={setCaptchaToken} resetKey={captchaReset} />
-                </Form.Item>
-              ) : null}
+                ) : (
+                  <Alert showIcon type="warning" message="Sign-up is not available right now." />
+                )}
+              </Form.Item>
               <Button type="primary" htmlType="submit" block size="large" loading={submitting} disabled={!captchaToken}>
                 Sign up
               </Button>

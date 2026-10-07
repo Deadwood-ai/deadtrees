@@ -28,14 +28,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix='/search', tags=['search'])
 
 MAX_QUERY_LENGTH = 300
-SEARCH_EMBED_RATE_LIMIT = 30
-SEARCH_EMBED_RATE_WINDOW_SECONDS = 60
-
-_search_embed_limiter = SlidingWindowLimiter(
-	SEARCH_EMBED_RATE_LIMIT,
-	SEARCH_EMBED_RATE_WINDOW_SECONDS,
-	'Search rate limit exceeded. Please try again shortly.',
-)
+_search_embed_limiter = SlidingWindowLimiter(30, 60, 'Search rate limit exceeded. Please try again shortly.')
 
 
 class EmbedRequest(BaseModel):

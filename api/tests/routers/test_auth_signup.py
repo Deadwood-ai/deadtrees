@@ -22,10 +22,7 @@ def new_email():
 	purge_messages()
 	auth_router._signup_limiter.clear()
 	yield email
-	with use_service_client() as db:
-		for user in db.auth.admin.list_users(per_page=1000):
-			if user.email == email:
-				db.auth.admin.delete_user(user.id)
+	_delete_accounts(lambda address: address == email or address.endswith(f'-{email}'))
 
 
 @pytest.fixture
@@ -45,6 +42,13 @@ def _signup(email: str, captcha_token: str = 'token'):
 		'/api/v1/auth/signup',
 		json={'email': email, 'password': PASSWORD, 'captcha_token': captcha_token, 'redirect_to': 'http://localhost/'},
 	)
+
+
+def _delete_accounts(matches) -> None:
+	with use_service_client() as db:
+		for user in db.auth.admin.list_users(per_page=1000):
+			if user.email and matches(user.email):
+				db.auth.admin.delete_user(user.id)
 
 
 def _account(email: str):
@@ -85,10 +89,6 @@ def test_signups_are_limited_per_network(new_email, captcha):
 	for _ in range(auth_router.SIGNUPS_PER_IP_PER_HOUR):
 		assert _signup(f'limit-{uuid.uuid4().hex[:8]}-{new_email}').status_code in (200, 400)
 	assert _signup(new_email).status_code == 429
-	with use_service_client() as db:
-		for user in db.auth.admin.list_users(per_page=1000):
-			if user.email and user.email.startswith('limit-') and user.email.endswith(new_email):
-				db.auth.admin.delete_user(user.id)
 
 
 def test_captcha_secret_is_required_outside_development(monkeypatch):

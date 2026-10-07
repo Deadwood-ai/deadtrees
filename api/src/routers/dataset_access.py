@@ -17,7 +17,7 @@ from shared.db import use_client, use_service_client, verify_token
 from shared.models import DatasetAccessEnum
 from shared.settings import settings
 
-from ..access.cog_paths import claim_cog_path, requester_key
+from ..access.cog_paths import CogPathLimitReached, claim_cog_path, requester_key
 from ..access.dataset_access import user_can_view_dataset
 from ..access.dataset_files import FILE_COLUMNS, find_dataset_file, inside, stored_file_path
 from ..access.delivery import protected_file_response
@@ -119,17 +119,16 @@ def get_public_cog_path(
 	"""
 	user = require_user(token) if token else None
 	requester = requester_key(user.id if user else None, get_client_ip(request))
-	with use_service_client() as client:
-		relative_path = stored_file_path(client, 'cog', dataset_id)
-		if not relative_path or not client.rpc(
-			'is_public_dataset_file', {'p_kind': 'cog', 'p_path': relative_path}
-		).execute().data:
-			raise HTTPException(status_code=404, detail='Not found')
-		if not claim_cog_path(client, requester, dataset_id):
-			raise HTTPException(
-				status_code=429,
-				detail='You opened many dataset maps today. Please try again tomorrow or contact us for bulk access.',
-			)
+	try:
+		with use_service_client() as client:
+			relative_path = claim_cog_path(client, requester, dataset_id)
+	except CogPathLimitReached:
+		raise HTTPException(
+			status_code=429,
+			detail='You opened many dataset maps today. Please try again tomorrow or contact us for bulk access.',
+		)
+	if not relative_path:
+		raise HTTPException(status_code=404, detail='Not found')
 	return CogPathResponse(cog_path=relative_path)
 
 
