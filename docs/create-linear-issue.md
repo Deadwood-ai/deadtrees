@@ -111,9 +111,13 @@ Before creating a new issue, always check for existing similar issues:
 
 4. **Status Guidelines:**
    - **New agent-created issues:** Start in `Triage` for human review.
-   - **Updated issues:** Do not move status unless the user explicitly asks or the
+   - **Work you start:** Claim the issue as described in the
+     [Linear claim rule](agents/rules.md#linear): `In Progress`, the
+     responsible person as assignee, and a comment saying who works on it and where.
+   - **Other updates:** Do not move status unless the user explicitly asks or the
      current task is specifically Linear triage.
-   - **Assignment:** Leave `Triage` and `Backlog` items unassigned unless the user says otherwise.
+   - **Assignment:** Leave `Triage` and `Backlog` items unassigned unless the user
+     says otherwise or you are claiming the issue to work on it.
 
 5. **Label Assignment:**
    - **Always assign appropriate labels** when creating issues

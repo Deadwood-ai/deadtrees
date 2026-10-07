@@ -173,9 +173,29 @@ Known production gotchas:
 
 ## Linear
 
-- Search before creating issues.
-- Agent-created Linear issues start in `Triage` and stay unassigned unless the user
-  explicitly decides otherwise.
+Linear's `deadtrees` team is the shared record of who is working on what. People
+and agents follow the same claim rule, so nobody duplicates or collides with work
+already underway.
+
+- **Issue first.** Before starting a change, search the team and reuse the
+  matching issue, or create one. Use one issue per change.
+- **Respect claims.** An issue that is `In Progress` or `In Review` with an
+  assignee is taken. Comment on it or ask its assignee; do not start parallel
+  work.
+- **Claim.** When you start, set the issue to `In Progress`, assign the
+  responsible person (for agent work, the person who asked for it), and add a
+  one-line comment saying who is doing it and where. Examples: "Claude thread
+  *Linear usage check* on processing-server" or "Clemens via Codex".
+- **Link.** Name the branch `<type>/<topic>-dt-NNN` (never `claude/` or
+  `codex/`) and end the PR title with `(DT-NNN)`. In the PR body, use
+  `Fixes DT-NNN` only when merging completes the issue; otherwise use
+  `Related to DT-NNN`.
+- **Release.** When work pauses or stops, move the issue back to `Todo` or
+  `Backlog` with a one-line note on what remains. An `In Progress` issue with no
+  activity for 7 days counts as abandoned in drift checks.
+- **Intake is separate.** New findings from monitors, bots and agent checks start
+  in `Triage`, unassigned. Agents do not move other people's issues out of
+  `Triage` unless the user asks or the task is Linear triage.
 - Use labels such as `Bug`, `Feature`, `Improvement`, `Needs RCA`,
   `Needs User Notification`, `frontend`, `processing`, `treecover`, `upload`,
   `metadata`, and `odm` when they match.

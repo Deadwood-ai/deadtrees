@@ -128,6 +128,9 @@ scripts/qa/validate-isolated-env.sh
 
 - Before creating a worktree/branch for implementation, QA, or broad tests,
   fetch `origin` and base it on current `origin/main` unless told otherwise.
+- Start every change from a claimed Linear issue and name the branch
+  `<type>/<topic>-dt-NNN`; end the PR title with `(DT-NNN)`. The claim rule is in
+  [`docs/agents/rules.md`](docs/agents/rules.md#linear).
 - Do not create draft PRs for this workspace. Open normal PRs when asked.
 - PR titles must pass `.github/workflows/pr-title-check.yml`.
 - Use Conventional Commit format: `type(scope): short summary`.

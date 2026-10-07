@@ -280,7 +280,9 @@ Keep these read-only unless the user or the project's instructions allow Linear 
 - Urgent or high-priority issues without owner, next action, or recent update.
 - Repeated bot fingerprints without a consolidated RCA or owner.
 - `Todo` or `Backlog` buckets that are too large or stale to guide work.
-- `In Progress` issues without recent activity.
+- `In Progress` issues with no activity for 7 days, or without an assignee
+  (see the [claim rule](../agents/rules.md#linear)).
+- `In Review` issues without an open PR.
 - Merged PRs whose linked issues are not `Done`.
 - Issues no longer aligned with the current data-factory bottleneck.
 
