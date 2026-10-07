@@ -41,8 +41,8 @@ with input as (
       where is_upload_done
         and is_cog_done
         and is_thumbnail_done
-        and is_deadwood_done
-        and is_forest_cover_done
+        -- The combined v2 model sets only its own flag (DT-1354).
+        and (is_combined_model_done or (is_deadwood_done and is_forest_cover_done))
     ),
     'has_error_now', count(*) filter (where has_error),
     'statuses_error_24h', count(*) filter (where updated_at >= now() - interval '24 hours' and has_error),
