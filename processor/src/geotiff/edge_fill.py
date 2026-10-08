@@ -9,8 +9,9 @@ Detection is cheap: on a decimated read, look at the valid pixels that touch the
 image edge or an already transparent area. If enough of them are near black or
 near white, GDAL ``nearblack`` scans in from the edges at full resolution and
 writes an alpha band. Interior dark or bright content is not touched because
-the scan stops at the first non-collar pixels. An existing alpha band is kept:
-the result is transparent where either mask says so.
+the scan stops at the first non-collar pixels. Existing transparency (alpha,
+nodata or an internal mask) is kept: the result is transparent where either
+says so.
 """
 
 from pathlib import Path
@@ -61,8 +62,7 @@ def mask_edge_fill(path: str) -> bool:
 	command.extend(['-o', masked, path])
 	try:
 		subprocess.run(command, check=True, capture_output=True, text=True)
-		if existing_alpha:
-			_keep_existing_transparency(path, masked)
+		_keep_existing_transparency(path, masked)
 		Path(masked).replace(path)
 	finally:
 		Path(masked).unlink(missing_ok=True)
@@ -82,7 +82,8 @@ def _interior(valid: np.ndarray) -> np.ndarray:
 
 
 def _keep_existing_transparency(source_path: str, masked_path: str) -> None:
+	"""nearblack drops nodata and masks; keep every pixel the source already hid (alpha, nodata or mask)."""
 	with rasterio.open(source_path) as source, rasterio.open(masked_path, 'r+') as masked:
 		for _, window in masked.block_windows(4):
-			alpha = np.minimum(masked.read(4, window=window), source.read(4, window=window))
+			alpha = np.minimum(masked.read(4, window=window), source.dataset_mask(window=window))
 			masked.write(alpha, 4, window=window)

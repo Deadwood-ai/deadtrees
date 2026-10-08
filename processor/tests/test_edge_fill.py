@@ -27,24 +27,30 @@ def _footprint(margin=0):
 	return (np.abs(x - SIZE / 2) + np.abs(y - SIZE / 2)) < SIZE * 0.4 - margin
 
 
-def _write(path, data, alpha=None, compress='DEFLATE'):
+def _write(path, data, alpha=None, compress='DEFLATE', nodata=None, mask=None):
 	count = data.shape[0] + (1 if alpha is not None else 0)
-	with rasterio.open(
-		path,
-		'w',
-		driver='GTiff',
-		width=SIZE,
-		height=SIZE,
-		count=count,
-		dtype='uint8',
-		crs='EPSG:32633',
-		transform=from_origin(400000.0, 6400000.0, 0.05, 0.05),
-		tiled=True,
-		blockxsize=128,
-		blockysize=128,
-		compress=compress,
-	) as dst:
+	with (
+		rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True),
+		rasterio.open(
+			path,
+			'w',
+			driver='GTiff',
+			width=SIZE,
+			height=SIZE,
+			count=count,
+			dtype='uint8',
+			crs='EPSG:32633',
+			transform=from_origin(400000.0, 6400000.0, 0.05, 0.05),
+			tiled=True,
+			blockxsize=128,
+			blockysize=128,
+			compress=compress,
+			nodata=nodata,
+		) as dst,
+	):
 		dst.write(data, [1, 2, 3])
+		if mask is not None:
+			dst.write_mask(mask.astype('uint8') * 255)
 		if alpha is not None:
 			dst.write(alpha, 4)
 			dst.colorinterp = (ColorInterp.red, ColorInterp.green, ColorInterp.blue, ColorInterp.alpha)
@@ -59,10 +65,10 @@ def _forest(seed=2344):
 	return data
 
 
-def _standardise(tmp_path, data, alpha=None):
+def _standardise(tmp_path, data, alpha=None, **write_options):
 	source = tmp_path / 'source.tif'
 	output = tmp_path / 'standardised.tif'
-	_write(source, data, alpha)
+	_write(source, data, alpha, **write_options)
 	assert standardise_geotiff(str(source), str(output), token='test-token', dataset_id=2344)
 	with rasterio.open(output) as dst:
 		alpha_out = dst.read(dst.count) if dst.colorinterp[-1] == ColorInterp.alpha else None
@@ -135,3 +141,32 @@ def test_dark_interior_content_is_not_detected_as_collar(tmp_path):
 
 	with rasterio.open(path) as src:
 		assert not has_edge_fill(src)
+
+
+@pytest.mark.unit
+def test_declared_nodata_hole_stays_transparent(tmp_path):
+	footprint = _footprint()
+	data = _forest()
+	data[:, ~footprint] = 255  # white collar the nodata value does not describe
+	data[:, 120:136, 120:136] = 0  # interior hole declared through nodata=0
+
+	count, alpha = _standardise(tmp_path, data, nodata=0)
+
+	assert count == 4
+	assert np.all(alpha[120:136, 120:136] == 0)
+	assert np.mean(alpha[~footprint] == 0) > 0.99
+
+
+@pytest.mark.unit
+def test_internal_mask_hole_stays_transparent(tmp_path):
+	footprint = _footprint()
+	data = _forest()
+	data[:, ~footprint] = 255
+	mask = np.ones((SIZE, SIZE), dtype=bool)
+	mask[120:136, 120:136] = False  # hidden by the internal mask, content underneath
+
+	count, alpha = _standardise(tmp_path, data, mask=mask)
+
+	assert count == 4
+	assert np.all(alpha[120:136, 120:136] == 0)
+	assert np.mean(alpha[~footprint] == 0) > 0.99
