@@ -248,6 +248,24 @@ test.describe("private dataset sharing (local write)", () => {
     // nginx caches the earlier refusal for up to a minute; a fresh URL shows the new answer.
     expect((await fetch(`${localApiUrl.replace(/\/api\/v1$/, "")}/cogs/v1/${cogRelativePath}?viewonly`)).status).toBe(200);
   });
+
+  test("owner is told that existing exports keep a dataset whose visibility goes down", async ({ page }) => {
+    await signIn(page, "owner");
+    await page.goto("/profile");
+    const row = page.locator("tr", { hasText: `sharing-${runId}.tif` });
+    await row.getByRole("button", { name: /Actions/ }).click();
+    await page.getByRole("menuitem", { name: /Change Visibility/ }).click();
+    const dialog = page.getByRole("dialog", { name: /Who can see this dataset/ });
+    const notice = dialog.getByTestId("visibility-reduction-notice");
+    await dialog.getByText("Public", { exact: true }).click();
+    await expect(notice).toHaveCount(0);
+    await dialog.getByText("Private", { exact: true }).click();
+    await expect(notice).toContainText("published data packages and releases, which keep it");
+    await page.screenshot({ path: test.info().outputPath("6-owner-visibility-reduction-notice.png") });
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    const saved = await adminClient.from("v2_datasets").select("data_access").eq("id", datasetId).single();
+    expect(saved.data?.data_access).toBe("viewonly");
+  });
 });
 
 function requireEnv(name: string) {
