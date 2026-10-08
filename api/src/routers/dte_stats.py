@@ -52,6 +52,9 @@ COG_PATTERN = re.compile(
 COG_PATTERN_V2 = re.compile(
 	r"run_v2004_seasonal_filter_fold_None_epoch_3_(deadwood|forest)_(\d{4})\.cog\.tif"
 )
+COG_PATTERN_V5 = re.compile(
+	r"run_v5001_v5000_no_early_stop_fold_None_checkpoint_19_(deadwood|forest)_(\d{4})\.cog\.tif"
+)
 
 
 # --- Request / Response Models ---
@@ -68,9 +71,9 @@ class PolygonStatsRequest(BaseModel):
 			}
 		}
 	)
-	model_version: Literal["v1", "v2"] = Field(
+	model_version: Literal["v1", "v2", "v5"] = Field(
 		default="v1",
-		description="Model version to use for statistics ('v1' or 'v2')",
+		description="Model version to use for statistics ('v1', 'v2' or 'v5')",
 	)
 
 
@@ -307,6 +310,9 @@ def get_polygon_stats(request: PolygonStatsRequest):
 	if request.model_version == "v2":
 		maps_dir = settings.dte_maps_v2_path
 		cog_map = discover_available_cogs(maps_dir, COG_PATTERN_V2)
+	elif request.model_version == "v5":
+		maps_dir = settings.dte_maps_v5_path
+		cog_map = discover_available_cogs(maps_dir, COG_PATTERN_V5)
 	else:
 		maps_dir = settings.dte_maps_path
 		cog_map = discover_available_cogs(maps_dir, COG_PATTERN)

@@ -20,7 +20,7 @@ import { mapColors } from "../../theme/mapColors";
 import { palette } from "../../theme/palette";
 import MapLegend from "./MapLegend";
 import { standingDeadwoodLayerExplanation } from "../../utils/standingDeadwoodInfo";
-import type { MapModelVersion } from "../../utils/getDeadwoodCOGUrl";
+import { MAP_MODEL_VERSIONS, type MapModelVersion } from "../../utils/getDeadwoodCOGUrl";
 
 interface LayerControlPanelProps {
   // Basemap
@@ -93,7 +93,7 @@ const LayerControlPanel = ({
   flagsCount,
   clickedValues = null,
   variant = "floating-card",
-  modelVersion = "v2",
+  modelVersion = "v5",
   onModelVersionChange,
 }: LayerControlPanelProps) => {
   const [showAttributions, setShowAttributions] = useState(false);
@@ -187,10 +187,7 @@ const LayerControlPanel = ({
             block
             value={modelVersion}
             onChange={(value) => onModelVersionChange(value as MapModelVersion)}
-            options={[
-              { value: "v1", label: "v1" },
-              { value: "v2", label: "v2" },
-            ]}
+            options={MAP_MODEL_VERSIONS}
           />
         </>
       )}
