@@ -34,6 +34,19 @@ export const VISIBILITY_TRAINING_NOTE =
 export const visibilityLabel = (value: IDataAccess | string | null | undefined) =>
   VISIBILITY_OPTIONS.find((option) => option.value === value)?.label ?? "Public";
 
+/** Lowering visibility changes access on the platform only; exports made earlier keep the dataset (Terms of Service §4). */
+const EXISTING_EXPORTS_NOTE =
+  "This dataset may already be part of published data packages and releases, which keep it. Copies people already downloaded stay under the licence they were given.";
+
+/** What an owner should know before saving a lower visibility, or null when access is not reduced. */
+export function visibilityReductionNotice(current: IDataAccess | null, next: IDataAccess | undefined): string | null {
+  const rank = (value: IDataAccess | null | undefined) => VISIBILITY_OPTIONS.findIndex((option) => option.value === value);
+  if (!current || !next || rank(next) <= rank(current)) return null;
+  return next === IDataAccess.private
+    ? `People you shared the dataset with keep their access; everyone else loses it here. ${EXISTING_EXPORTS_NOTE}`
+    : `Only you and people you allow can download the orthophoto from now on. ${EXISTING_EXPORTS_NOTE}`;
+}
+
 export interface IRoleOption {
   value: DatasetAccessRole;
   label: string;

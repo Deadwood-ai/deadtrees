@@ -18,7 +18,7 @@ export default function TermsOfService() {
         Zurück
       </Button>
       <Title level={1}>Nutzungsbedingungen (Terms of Service)</Title>
-      <Paragraph type="secondary">Stand / Last updated: 7. Oktober 2026 / 7 October 2026</Paragraph>
+      <Paragraph type="secondary">Stand / Last updated: 8. Oktober 2026 / 8 October 2026</Paragraph>
 
       {/* German Terms of Service */}
       <Title level={2}>Deutsch</Title>
@@ -103,7 +103,8 @@ export default function TermsOfService() {
             unter derselben Lizenz bereitgestellt; das Orthophoto herunterladen können nur der Nutzer und die von ihm
             berechtigten Personen. Private Nutzerbeiträge („Privat") werden anderen Nutzern nicht lizenziert. Wird ein Datensatz
             später öffentlich gemacht, gilt ab diesem Zeitpunkt seine Lizenz. Bereits erteilte offene Lizenzen bleiben
-            auch nach einer Änderung oder Löschung bestehen. Die Rechte des Betreibers nach Abschnitt 5 gelten für alle
+            auch nach einer Änderung oder Löschung bestehen. Datenpakete und Releases, die vor einer solchen Änderung
+            veröffentlicht wurden, enthalten den Datensatz weiterhin. Die Rechte des Betreibers nach Abschnitt 5 gelten für alle
             Nutzerbeiträge.
           </Paragraph>
         </section>
@@ -119,8 +120,9 @@ export default function TermsOfService() {
           </Paragraph>
           <Paragraph>
             Die Sichtbarkeit legt fest, wer die Daten auf der Plattform sehen und herunterladen kann. Sie schließt einen
-            Upload nicht von dieser Nutzung für die Forschung aus. Der Betreiber stellt Orthophotos nicht über das
-            hinaus zum Herunterladen bereit, was die gewählte Sichtbarkeit erlaubt.
+            Upload nicht von dieser Nutzung für die Forschung aus. Abgesehen von Datenpaketen und Releases, die vor
+            einer Änderung der Sichtbarkeit veröffentlicht wurden (Abschnitt 4), stellt der Betreiber Orthophotos nicht
+            über das hinaus zum Herunterladen bereit, was die gewählte Sichtbarkeit erlaubt.
           </Paragraph>
         </section>
 
@@ -321,7 +323,8 @@ export default function TermsOfService() {
             online, and the predictions derived from them are made available under the same license, while only the user and
             the people they allow can download the orthophoto. Private User Contributions are not licensed to other users. If a
             dataset is made public later, its license applies from then on. Open licenses already granted remain valid
-            after a change or deletion. The Operator's rights under Section 5 apply to all User Contributions.
+            after a change or deletion. Data packages and releases published before such a change keep the dataset.
+            The Operator's rights under Section 5 apply to all User Contributions.
           </Paragraph>
         </section>
 
@@ -335,8 +338,8 @@ export default function TermsOfService() {
           </Paragraph>
           <Paragraph>
             Visibility decides who can see and download the data on the Platform. It does not exclude an upload from
-            this research use. The Operator does not make orthophotos available for download beyond what the chosen
-            visibility allows.
+            this research use. Apart from data packages and releases published before a change of visibility (Section
+            4), the Operator does not make orthophotos available for download beyond what the chosen visibility allows.
           </Paragraph>
         </section>
 

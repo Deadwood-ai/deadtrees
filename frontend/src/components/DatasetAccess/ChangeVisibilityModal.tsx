@@ -3,7 +3,7 @@ import { Alert, Modal, message } from "antd";
 import { IDataAccess } from "../../types/dataset";
 import { useUpdateDatasetVisibility } from "../../hooks/useDatasetAccess";
 import VisibilityChoice from "./VisibilityChoice";
-import { visibilityLabel } from "./accessCopy";
+import { visibilityLabel, visibilityReductionNotice } from "./accessCopy";
 
 interface ChangeVisibilityModalProps {
   datasetId: number | null;
@@ -15,6 +15,7 @@ interface ChangeVisibilityModalProps {
 export default function ChangeVisibilityModal({ datasetId, current, onClose }: ChangeVisibilityModalProps) {
   const [value, setValue] = useState<IDataAccess | undefined>(current ?? undefined);
   const update = useUpdateDatasetVisibility();
+  const reductionNotice = visibilityReductionNotice(current, value);
 
   useEffect(() => setValue(current ?? undefined), [current, datasetId]);
 
@@ -42,12 +43,8 @@ export default function ChangeVisibilityModal({ datasetId, current, onClose }: C
     >
       <div className="flex flex-col gap-4 py-2">
         <VisibilityChoice value={value} onChange={setValue} />
-        {value === IDataAccess.private && current !== IDataAccess.private && (
-          <Alert
-            type="info"
-            showIcon
-            message="People you shared the dataset with keep their access. New requests from everyone else are blocked. Previously saved copies and published releases cannot be recalled."
-          />
+        {reductionNotice && (
+          <Alert type="warning" showIcon message={reductionNotice} data-testid="visibility-reduction-notice" />
         )}
       </div>
     </Modal>
