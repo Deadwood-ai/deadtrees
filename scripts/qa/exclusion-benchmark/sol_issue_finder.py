@@ -26,18 +26,41 @@ TAGS = {
                      'missing_or_partial_layer', 'coverage_processing'),
 }
 AREAS = ('lt5', '5to20', '20to50', 'gt50')
-PROMPT_VERSION = 'issue-finder-v1'
-
-SYSTEM = f'''You are the DeadTrees dataset screening system. For ONE drone or aerial
-orthophoto you decide, separately for the DEADWOOD and the FOREST_COVER prediction
-layers, whether the layer must be EXCLUDED from a satellite upscaling training set.
-
-Decision rule: exclude a layer when roughly more than 20% of the dataset area has
+RULES = {
+    # v1 scored poorly: sparse deadwood can never reach 20% of the whole area, so Sol kept
+    # layers whose few predictions were mostly wrong.
+    'issue-finder-v1': '''Decision rule: exclude a layer when roughly more than 20% of the dataset area has
 unacceptable predictions for that layer. Keep it when errors are minor, local or
 cover less than about 20% of the area. Use unsure only when the imagery cannot
 support either decision. Missing a clearly bad layer is the costliest error;
 excluding a usable layer is the second costliest.
+''',
+    'issue-finder-v2': '''Decision rule: judge each layer relative to its OWN target class, not the whole
+image area. Exclude the deadwood layer when roughly more than 20% of the predicted
+deadwood is wrong (marks something that is not dead wood), or roughly more than 20%
+of the visible dead trees and dead crown area is missed. Deadwood is often sparse:
+a handful of wrong polygons is enough to exclude when they are a large share of what
+was predicted. Exclude the forest layer when roughly more than 20% of the predicted
+forest is not tree canopy, or roughly more than 20% of the visible tree canopy is
+missed. Keep a layer when its errors are a small share of its target class. A
+near-empty deadwood layer is correct when no dead trees are visible. Use unsure
+only when the imagery cannot support either decision. Missing a clearly bad layer is
+the costliest error; excluding a usable layer is the second costliest.
+In RESULT, unacceptable_area is the share of the target class (predicted plus
+missed) that is wrong, not the share of the image.
+''',
+}
 
+
+def system_prompt(version):
+    return SYSTEM_TEMPLATE.replace('<<RULE>>', RULES[version])
+
+
+SYSTEM_TEMPLATE = f'''You are the DeadTrees dataset screening system. For ONE drone or aerial
+orthophoto you decide, separately for the DEADWOOD and the FOREST_COVER prediction
+layers, whether the layer must be EXCLUDED from a satellite upscaling training set.
+
+<<RULE>>
 Semantics. Forest cover includes all tree canopy, live AND standing dead trees.
 Deadwood marks dead trees and clearly dead crown parts or branches; it is a subset
 of forest, so the two masks can overlap. Typical deadwood failures: missed dead or
@@ -135,7 +158,7 @@ class NoTools:
     tool = {'name': 'none'}
 
 
-def run_one(root, run, dataset):
+def run_one(root, run, dataset, version):
     out = run / 'datasets' / str(dataset['dataset_id'])
     if (out / 'result.json').exists():
         return json.loads((out / 'result.json').read_text())
@@ -144,12 +167,12 @@ def run_one(root, run, dataset):
     prompt, images = packet(root, dataset, evidence)
     started = datetime.now(timezone.utc).isoformat()
     try:
-        text, receipt = invoke(prompt, images, out, MODEL, EFFORT, NoTools(), system=SYSTEM)
+        text, receipt = invoke(prompt, images, out, MODEL, EFFORT, NoTools(), system=system_prompt(version))
         result = {'status': 'completed', 'answer': validate(text)}
     except Exception as e:
         result = {'status': 'failed', 'error': f'{type(e).__name__}: {str(e)[:300]}'}
         receipt = {}
-    result |= {'dataset_id': dataset['dataset_id'], 'model': MODEL, 'effort': EFFORT, 'prompt_version': PROMPT_VERSION,
+    result |= {'dataset_id': dataset['dataset_id'], 'model': MODEL, 'effort': EFFORT, 'prompt_version': version,
                'started_at': started, 'elapsed_seconds': receipt.get('elapsed_seconds'), 'usage': receipt.get('usage'),
                'image_sha256': {n: hashlib.sha256(d).hexdigest() for n, d in images}}
     (out / ('result.json' if result['status'] == 'completed' else 'failure.json')).write_text(json.dumps(result, indent=2))
@@ -161,15 +184,20 @@ if __name__ == '__main__':
     p.add_argument('--root', type=Path, required=True)
     p.add_argument('--run', type=Path, required=True, help='fresh run directory, never reused across prompt versions')
     p.add_argument('--workers', type=int, default=4)
+    p.add_argument('--prompt', choices=sorted(RULES), default='issue-finder-v2')
     p.add_argument('--only', type=int, nargs='*')
+    p.add_argument('--split', choices=('all', 'development', 'validation'), default='all')
     p.add_argument('--dry-run', action='store_true', help='write the first packet images locally, call nothing')
     a = p.parse_args()
     datasets = [d for d in json.loads((a.root / 'selection.json').read_text())['datasets']
                 if (a.root / 'datasets' / str(d['dataset_id']) / 'evidence.json').exists()]
     if a.only:
         datasets = [d for d in datasets if d['dataset_id'] in a.only]
+    if a.split != 'all':
+        ids = set(json.loads((a.root / 'splits.json').read_text())[a.split])
+        datasets = [d for d in datasets if d['dataset_id'] in ids]
     a.run.mkdir(parents=True, exist_ok=True)
-    (a.run / 'system-prompt.txt').write_text(SYSTEM)
+    (a.run / 'system-prompt.txt').write_text(system_prompt(a.prompt))
     if a.dry_run:
         prompt, images = packet(a.root, datasets[0], json.loads(
             (a.root / 'datasets' / str(datasets[0]['dataset_id']) / 'evidence.json').read_text()))
@@ -181,7 +209,7 @@ if __name__ == '__main__':
                'megabytes': round(sum(len(d) for _, d in images) / 1e6, 1)})
         raise SystemExit
     with ThreadPoolExecutor(max_workers=a.workers) as pool:
-        futures = {pool.submit(run_one, a.root, a.run, d): d['dataset_id'] for d in datasets}
+        futures = {pool.submit(run_one, a.root, a.run, d, a.prompt): d['dataset_id'] for d in datasets}
         for future in as_completed(futures):
             r = future.result()
             print({'dataset': futures[future], 'status': r['status'], 'elapsed': r.get('elapsed_seconds'),
