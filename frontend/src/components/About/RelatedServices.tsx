@@ -25,6 +25,14 @@ const relatedServices: IRelatedService[] = [
     logoAlt: "University of Freiburg, operator of FreiDATA",
   },
   {
+    name: "Galaxy Europe",
+    description:
+      "The Freiburg-run open platform for accessible, reproducible data analysis.",
+    url: "https://usegalaxy.eu/",
+    logo: "/assets/logos/galaxy-europe.svg",
+    logoAlt: "Galaxy Europe",
+  },
+  {
     name: "Future Forests",
     description:
       "The University of Freiburg Cluster of Excellence on adapting forests to global change.",
@@ -46,7 +54,7 @@ export default function RelatedServices() {
       >
         Related services, initiatives and infrastructure
       </h2>
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {relatedServices.map((service) => (
           <a
             key={service.name}
