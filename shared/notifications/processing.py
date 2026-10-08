@@ -42,6 +42,15 @@ SENDING_STALE_AFTER = timedelta(minutes=10)
 DELIVERY_RETRY_DELAYS = (timedelta(minutes=5), timedelta(minutes=30))
 
 
+def processing_email_config_problem() -> str | None:
+	"""Why this worker would send no processing result emails, or None when it will."""
+	if not settings.PROCESSING_EMAIL_NOTIFICATIONS_ENABLED:
+		return 'PROCESSING_EMAIL_NOTIFICATIONS_ENABLED is off'
+	if not settings.DEV_MODE and not settings.BREVO_API_KEY:
+		return 'BREVO_API_KEY is not configured'
+	return None
+
+
 def _next_attempt_at(delivery_attempts: int) -> str | None:
 	if delivery_attempts >= MAX_DELIVERY_ATTEMPTS:
 		return None

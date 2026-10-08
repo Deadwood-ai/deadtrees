@@ -32,6 +32,7 @@ def _patch_startup(monkeypatch, *, exception_messages=None):
 	monkeypatch.setattr(continuous_processor_module, 'cleanup_old_temp_directories', lambda token: None)
 	monkeypatch.setattr(continuous_processor_module.logger, 'info', lambda *args, **kwargs: None)
 	monkeypatch.setattr(continuous_processor_module.logger, 'error', lambda *args, **kwargs: None)
+	monkeypatch.setattr(continuous_processor_module.logger, 'warning', lambda *args, **kwargs: None)
 	monkeypatch.setattr(continuous_processor_module, 'mark_loop_unhealthy', lambda failure_count: None)
 	if exception_messages is None:
 		monkeypatch.setattr(continuous_processor_module.logger, 'exception', lambda *args, **kwargs: None)
@@ -155,3 +156,34 @@ def test_run_continuous_exits_after_bounded_loop_errors(monkeypatch):
 
 	assert exception_messages == ['Error in processor loop', 'Error in processor loop']
 	assert unhealthy_counts == [2]
+
+
+@pytest.mark.parametrize(
+	('problem', 'expected_warnings'),
+	[
+		(
+			'BREVO_API_KEY is not configured',
+			['Processing result emails will not be sent from this worker: BREVO_API_KEY is not configured'],
+		),
+		(None, []),
+	],
+)
+def test_run_continuous_warns_when_result_emails_cannot_be_sent(monkeypatch, problem, expected_warnings):
+	_patch_startup(monkeypatch)
+	warnings = []
+	monkeypatch.setattr(
+		continuous_processor_module.logger, 'warning', lambda message, *args, **kwargs: warnings.append(message)
+	)
+	monkeypatch.setattr(continuous_processor_module, 'processing_email_config_problem', lambda: problem)
+	monkeypatch.setattr(continuous_processor_module, 'is_drain_requested', lambda: False)
+
+	def stop():
+		raise StopLoop
+
+	monkeypatch.setattr(continuous_processor_module, 'background_process', stop)
+	monkeypatch.setattr(continuous_processor_module.settings, 'PROCESSOR_LOOP_FAILURE_LIMIT', 1)
+
+	with pytest.raises(StopLoop):
+		continuous_processor_module.run_continuous()
+
+	assert warnings == expected_warnings

@@ -470,3 +470,22 @@ def test_failure_email_links_to_status_without_unsupported_retry_or_diagnostics(
 		assert 'retry processing from your account' not in body
 		assert 'secret internal path' not in body
 	assert '&lt;forest&gt;.tif' in html
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+	('enabled', 'dev_mode', 'api_key', 'expected'),
+	[
+		(False, False, 'key', 'PROCESSING_EMAIL_NOTIFICATIONS_ENABLED is off'),
+		(True, False, '', 'BREVO_API_KEY is not configured'),
+		(True, False, 'key', None),
+		(True, True, '', None),
+	],
+)
+def test_processing_email_config_problem_names_what_blocks_delivery(monkeypatch, enabled, dev_mode, api_key, expected):
+	settings = processing_notifications.settings
+	monkeypatch.setattr(settings, 'PROCESSING_EMAIL_NOTIFICATIONS_ENABLED', enabled)
+	monkeypatch.setattr(settings, 'DEV_MODE', dev_mode)
+	monkeypatch.setattr(settings, 'BREVO_API_KEY', api_key)
+
+	assert processing_notifications.processing_email_config_problem() == expected

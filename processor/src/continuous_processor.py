@@ -10,6 +10,7 @@ from processor.src.utils.drain_control import (
 from processor.src.utils.startup_cleanup import cleanup_orphaned_resources, cleanup_old_temp_directories
 from shared.logger import logger
 from shared.db import login
+from shared.notifications.processing import processing_email_config_problem
 from shared.settings import settings
 
 
@@ -29,6 +30,8 @@ def run_continuous():
 	"""Run the processor as a persistent worker until it is stopped."""
 	logger.info('Starting continuous processor...')
 	use_data_disk_for_temp_files()
+	if email_problem := processing_email_config_problem():
+		logger.warning(f'Processing result emails will not be sent from this worker: {email_problem}')
 
 	# Perform startup cleanup to recover from crashes/restarts
 	try:
