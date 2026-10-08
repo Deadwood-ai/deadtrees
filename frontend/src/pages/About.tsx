@@ -14,6 +14,7 @@ import { usePresentations } from "../hooks/usePresentations";
 import { usePublications } from "../hooks/usePublications";
 import { ReactNode, useMemo } from "react";
 import LogoBannerBand from "../components/Home/LogoBanner";
+import RelatedServices from "../components/About/RelatedServices";
 import { useData } from "../hooks/useDataProvider";
 import ReactPlayer from "../components/ReactPlayerCompat";
 
@@ -440,6 +441,8 @@ abstract = {Excessive tree mortality is a global concern and remains poorly unde
           </p>
         </div>
 
+        <RelatedServices />
+
         {/* How to cite */}
         <div className="mx-auto mb-24 max-w-4xl">
           <h2 className="mb-4 text-3xl font-bold tracking-tight text-gray-900">
@@ -450,26 +453,6 @@ abstract = {Excessive tree mortality is a global concern and remains poorly unde
             by its DOI. You can find the DOI on the dataset page (look for the
             DOI badge and link).
           </p>
-
-          <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
-            <a
-              href="https://www.re3data.org/repository/r3d100014703"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0"
-            >
-              <img
-                src="/assets/re3data-badge.svg"
-                alt="deadtrees.earth in re3data.org, the Registry of Research Data Repositories"
-                width={210}
-                height={70}
-              />
-            </a>
-            <p className="m-0 text-base text-gray-600">
-              deadtrees.earth is listed in re3data.org, the Registry of Research
-              Data Repositories.
-            </p>
-          </div>
 
           <Tabs
             defaultActiveKey="database"
