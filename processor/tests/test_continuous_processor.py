@@ -2,6 +2,7 @@ import pytest
 
 import processor.src.continuous_processor as continuous_processor_module
 import processor.src.utils.drain_control as drain_control_module
+import shared.logging as shared_logging
 from processor.src.utils.drain_control import BackgroundProcessResult
 
 pytestmark = pytest.mark.unit
@@ -28,6 +29,7 @@ def test_loop_unhealthy_marker_persists_release_and_clears(monkeypatch, tmp_path
 
 def _patch_startup(monkeypatch, *, exception_messages=None):
 	monkeypatch.setattr(continuous_processor_module, 'login', lambda username, password: 'token')
+	monkeypatch.setattr(continuous_processor_module, 'get_worker_id', lambda: 'host-test')
 	monkeypatch.setattr(continuous_processor_module, 'cleanup_orphaned_resources', lambda token: None)
 	monkeypatch.setattr(continuous_processor_module, 'cleanup_old_temp_directories', lambda token: None)
 	monkeypatch.setattr(continuous_processor_module.logger, 'info', lambda *args, **kwargs: None)
@@ -163,7 +165,12 @@ def test_run_continuous_exits_after_bounded_loop_errors(monkeypatch):
 	[
 		(
 			'BREVO_API_KEY is not configured',
-			['Processing result emails will not be sent from this worker: BREVO_API_KEY is not configured'],
+			[
+				(
+					'Processing result emails will not be sent from this worker: BREVO_API_KEY is not configured',
+					{'worker_id': 'host-test'},
+				)
+			],
 		),
 		(None, []),
 	],
@@ -172,7 +179,9 @@ def test_run_continuous_warns_when_result_emails_cannot_be_sent(monkeypatch, pro
 	_patch_startup(monkeypatch)
 	warnings = []
 	monkeypatch.setattr(
-		continuous_processor_module.logger, 'warning', lambda message, *args, **kwargs: warnings.append(message)
+		continuous_processor_module.logger,
+		'warning',
+		lambda message, *args, **kwargs: warnings.append((message, dict(shared_logging._process_log_fields))),
 	)
 	monkeypatch.setattr(continuous_processor_module, 'processing_email_config_problem', lambda: problem)
 	monkeypatch.setattr(continuous_processor_module, 'is_drain_requested', lambda: False)
