@@ -128,6 +128,43 @@ def test_processing_probe_command_uses_exact_state_and_group_fallback():
 	assert 'inspect_output=' in command
 	assert 'processor container inspection unavailable' not in command
 	assert 'exit 42' in command
+	assert 'com.docker.compose.project.working_dir' in command
+	assert '.local/processor-activated-sha' in command
+	assert 'release=activated=' in command
+
+
+def test_processing_host_probe_reports_activated_release(monkeypatch):
+	monkeypatch.setattr(
+		operator_status,
+		'run_command',
+		lambda *args, **kwargs: {
+			'ok': True,
+			'stdout': (
+				'host=worker-a\ndisk=/:50%\n'
+				'processor=state=running pid=42 started=now restarts=0 oom=false exit=0 checkout=/srv/deadtrees\n'
+				'release=activated=0ac2529abcde head=0ac2529abcde'
+			),
+			'duration_ms': 4,
+		},
+	)
+
+	probe = operator_status.processing_host_probe('test-host', 'worker-a', timeout=10)
+
+	assert probe['ok'] is True
+	assert probe['release'] == {'activated': '0ac2529abcde', 'head': '0ac2529abcde'}
+	snapshot = {
+		'checked_at': '2026-10-08T09:00:00Z',
+		'verdict': 'green',
+		'window_hours': 24,
+		'repo': {'branch': 'main', 'head': 'abc123', 'dirty_count': 0},
+		'platform': {'api': {'ok': True, 'version': '1'}, 'database': {'ok': True}, 'hosts': {'processing:test': probe}},
+		'connectors': {},
+		'changed_since_last': [],
+		'top_risks': [],
+		'skipped_surfaces': [],
+		'next_checks': [],
+	}
+	assert 'release activated=0ac2529abcde head=0ac2529abcde' in operator_status.render_markdown(snapshot)
 
 
 def test_next_checks_calls_out_a_missing_primary_probe():

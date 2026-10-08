@@ -237,7 +237,15 @@ def processing_probe_command() -> str:
 		"'processor=state={{.State.Status}} pid={{.State.Pid}} started={{.State.StartedAt}} "
 		"restarts={{.RestartCount}} oom={{.State.OOMKilled}} exit={{.State.ExitCode}} "
 		"image_ref={{.Config.Image}} image_id={{.Image}} memory_bytes={{.HostConfig.Memory}} "
-		"nano_cpus={{.HostConfig.NanoCpus}} cgroup_parent={{.HostConfig.CgroupParent}}'"
+		"nano_cpus={{.HostConfig.NanoCpus}} cgroup_parent={{.HostConfig.CgroupParent}} "
+		"checkout={{index .Config.Labels \"com.docker.compose.project.working_dir\"}}'"
+	)
+	# The deploy script records the release it activated in the processor checkout.
+	release_command = (
+		"checkout=$(printf '%s\\n' \"$inspect_output\" | sed -n 's/.* checkout=\\([^ ]*\\).*/\\1/p'); "
+		'if [ -n "$checkout" ]; then printf \'release=activated=%s head=%s\\n\' '
+		'"$(cut -c1-12 "$checkout/.local/processor-activated-sha" 2>/dev/null || echo unknown)" '
+		'"$(git -C "$checkout" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"; fi'
 	)
 	return (
 		f'{df_command}; '
@@ -247,19 +255,27 @@ def processing_probe_command() -> str:
 		f'inspect_output=$(sg docker -c {shlex.quote(inspect_command)} 2>&1); inspect_status=$?; '
 		'if [ "$inspect_status" -eq 0 ]; then printf \'%s\\n\' "$inspect_output"; '
 		'else printf \'%s\\n\' "$inspect_output" >&2; exit 42; fi; '
-		'else printf \'%s\\n\' "$inspect_output" >&2; exit 42; fi'
+		'else printf \'%s\\n\' "$inspect_output" >&2; exit 42; fi; '
+		f'{release_command}'
 	)
 
 
-def parse_processor_lines(lines: list[str]) -> dict[str, Any]:
+def parse_prefixed_fields(lines: list[str], prefix: str) -> dict[str, Any]:
+	"""Return the key=value fields of the first `<prefix>=` line."""
 	for line in lines:
-		if not line.startswith('processor='):
-			continue
-		fields: dict[str, Any] = {}
-		for item in shlex.split(line.removeprefix('processor=')):
-			key, separator, value = item.partition('=')
-			if separator:
-				fields[key] = value
+		if line.startswith(f'{prefix}='):
+			fields: dict[str, Any] = {}
+			for item in shlex.split(line.removeprefix(f'{prefix}=')):
+				key, separator, value = item.partition('=')
+				if separator:
+					fields[key] = value
+			return fields
+	return {}
+
+
+def parse_processor_lines(lines: list[str]) -> dict[str, Any]:
+	fields = parse_prefixed_fields(lines, 'processor')
+	if fields:
 		for key in ('pid', 'restarts', 'exit', 'memory_bytes', 'nano_cpus'):
 			try:
 				fields[key] = int(fields[key])
@@ -284,6 +300,7 @@ def processing_host_probe(host_ref: str, host: str | None, timeout: int) -> dict
 
 	processor = parse_processor_lines(probe['lines'])
 	probe['processor'] = processor
+	probe['release'] = parse_prefixed_fields(probe['lines'], 'release')
 	if not processor:
 		probe['ok'] = None
 		probe['inspection_gap'] = True
@@ -645,6 +662,8 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
 					if field in processor
 				)
 			)
+		if value.get('release'):
+			parts.append('release ' + ' '.join(f'{field}={sha}' for field, sha in value['release'].items()))
 		if value.get('disks'):
 			parts.append('disks ' + ', '.join(f'{path}={percent}%' for path, percent in value['disks'].items()))
 		if value.get('archives'):
