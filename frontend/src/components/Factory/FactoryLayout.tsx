@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { Button, Segmented, Typography } from "antd";
+import { Button, Segmented, Spin, Typography } from "antd";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { RequireAuth } from "../AuthGate";
 import { useCanOperate } from "../../hooks/useUserPrivileges";
@@ -67,7 +67,7 @@ function FactoryShell() {
 
 	return (
 		<FactorySelectionProvider>
-			<div className="w-full bg-[#F8FAF9] min-h-[calc(100vh-64px)] pb-32 pt-24 md:pt-28" data-testid="factory-page">
+			<div className="w-full bg-[#F8FAF9] min-h-[100dvh] pb-32 pt-24 md:pt-28" data-testid="factory-page">
 				<div className="mx-auto max-w-[1920px] px-4 md:px-8 xl:px-12">
 					<header className="mb-6 flex flex-wrap items-start justify-between gap-4">
 						<div>
@@ -95,8 +95,14 @@ function FactoryShell() {
 							]}
 						/>
 					</header>
+					{/* The shell fills the screen and keeps the footer below the fold, so a
+					    section loader stays bounded under the header. */}
 					<Suspense
-						fallback={<StatusPageLoading label="Loading…" />}
+						fallback={
+							<div className="flex min-h-60 items-center justify-center">
+								<Spin size="large" />
+							</div>
+						}
 					>
 						<Outlet />
 					</Suspense>

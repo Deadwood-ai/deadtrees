@@ -79,7 +79,7 @@ export default function ProfilePage() {
 
   if (isMobile) {
     return (
-      <div className="min-h-[calc(100vh-64px)] w-full bg-[#F8FAF9] pb-16 pt-24">
+      <div className="min-h-[100dvh] w-full bg-[#F8FAF9] pb-16 pt-24">
         <div className="mx-auto max-w-3xl px-4">
           <div className="mb-3 flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
             <AccountAvatar email={user?.email ?? ""} size={44} />
@@ -110,7 +110,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="w-full bg-[#F8FAF9] min-h-[calc(100vh-64px)] pb-24 pt-24 md:pt-28">
+    <div className="w-full bg-[#F8FAF9] min-h-[100dvh] pb-24 pt-24 md:pt-28">
       <div className="mx-auto max-w-[1920px] px-4 md:px-8 xl:px-12">
         <div className="flex flex-wrap items-center gap-6 pb-8">
           <AccountAvatar email={user?.email ?? ""} size={72} />
