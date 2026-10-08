@@ -123,10 +123,17 @@ Before it starts or resumes the worker, every host runs
 `scripts/processor_asset_preflight.py` against its own asset directory
 (`PROCESSOR_ASSETS_DIR`, default `./assets`). The hosts share no filesystem. A
 merge that requires a new or changed model or metadata file therefore leaves each
-host that lacks the file drained, with automatic deployment paused. Stage the file
-on all three hosts before the PR merges, check each host with the preflight, and
-say so in the PR. Staging an asset on a production host is a production change,
-so it needs the user's go-ahead like any other.
+host that lacks the file drained, with automatic deployment paused.
+
+- Give a new or changed file a new path. Never overwrite a file the current
+  release reads: the asset directory is mounted into the running workers, so an
+  in-place change reaches production before the code that expects it.
+- Stage the new path on all three hosts before the PR merges and say so in the
+  PR. The manifest and code switch to it only when each host deploys.
+- After each host deploys, check its preflight and its first finished task.
+
+Staging an asset on a production host is a production change, so it needs the
+user's go-ahead like any other.
 
 ## Reserving A Host For Fresh Uploads
 
