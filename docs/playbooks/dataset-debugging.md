@@ -27,12 +27,20 @@ select
 	s.is_cog_done,
 	s.is_thumbnail_done,
 	s.is_metadata_done,
+	s.is_combined_model_done,
+	s.is_aoi_done,
+	s.is_doy_estimation_done,
+	s.is_georef_check_done,
 	s.is_deadwood_done,
 	s.is_forest_cover_done
 from v2_datasets d
 left join v2_statuses s on s.dataset_id = d.id
 where d.id = :dataset_id;
 ```
+
+`is_deadwood_done` and `is_forest_cover_done` belong to the legacy model stages.
+Datasets processed by the combined v2 stage set only `is_combined_model_done`, so
+`false` in the legacy flags is not a missing prediction.
 
 ## Logs
 

@@ -49,7 +49,7 @@ Use the project CLI for normal validation; reserve `deadtrees dev debug ...` for
 sessions where a debugger client will attach.
 
 ```bash
-source venv/bin/activate
+source venv/bin/activate   # this checkout's venv; in a worktree, also source .local/supabase/current.env
 deadtrees dev test api
 deadtrees dev test processor
 scripts/lint-python.sh
@@ -90,6 +90,10 @@ when explicitly needed and approved.
   verify their target before use. They are not the routine production SQL route.
 - Treat production writes as explicit-approval operations.
 - Migrations use the direct database port; application traffic uses the pooler port.
+- Name a new migration `<UTC now as YYYYMMDDHHMMSS>_<topic>.sql`, later than every
+  file in `supabase/migrations` on current `origin/main`. If a newer migration lands
+  on `main` before yours merges, rename yours: the Supabase Migration Guard rejects
+  any version at or below the latest one production has applied.
 - Drop dependent views before altering referenced columns, then recreate the views.
 - Test risky updates in a transaction first and inspect affected counts before commit.
 - Review generated migrations for destructive statements, dependency order, RLS
@@ -187,9 +191,9 @@ already underway.
   one-line comment saying who is doing it and where. Examples: "Claude thread
   *Linear usage check* on processing-server" or "Clemens via Codex".
 - **Link.** Name the branch `<type>/<topic>-dt-NNN` (never `claude/` or
-  `codex/`) and end the PR title with `(DT-NNN)`. In the PR body, use
-  `Fixes DT-NNN` only when merging completes the issue; otherwise use
-  `Related to DT-NNN`.
+  `codex/`, even when a session suggests such a branch name) and end the PR
+  title with `(DT-NNN)`. In the PR body, use `Fixes DT-NNN` only when merging
+  completes the issue; otherwise use `Related to DT-NNN`.
 - **Release.** When work pauses or stops, move the issue back to `Todo` or
   `Backlog` with a one-line note on what remains. An `In Progress` issue with no
   activity for 7 days counts as abandoned in drift checks.

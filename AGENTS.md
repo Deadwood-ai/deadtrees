@@ -56,6 +56,10 @@ scripts/qa/env.sh reset
 scripts/qa/validate-isolated-env.sh
 ```
 
+- In a worktree, run the CLI from the worktree's own venv (`setup-worktree.sh`
+  creates it) after `set -a; source .local/supabase/current.env; set +a`. The
+  `deadtrees` command from another checkout's venv runs that checkout's code
+  and, without the sourced env, starts the shared `deadtrees-test` stack.
 - Use the generated `.local/supabase/current.env` endpoints for frontend, API,
   Supabase, Mailpit, Docker Compose, Playwright, and QA agents. Do not use the
   default shared Supabase ports for full QA/test work.
