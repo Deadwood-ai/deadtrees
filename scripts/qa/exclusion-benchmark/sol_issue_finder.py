@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import time
 
 from PIL import Image
 
@@ -80,6 +81,19 @@ You have a zoom tool with a budget of {budget} calls for this dataset. Use it to
 at native detail where the provided views are too coarse: confirm suspected false
 deadwood, and check unmasked pale or brown crowns for missed dead trees. Spread calls
 over different parts of the area, then decide.'''
+# v5 = v4 plus the auditors' working conventions, read from v3/v4 disagreements: they do
+# not fail forest for missing burnt or dead trees, and count whole dead trees and clearly
+# dead crowns, not scattered dead twigs or leafless shrubs.
+RULES['issue-finder-v5'] = RULES['issue-finder-v4'] + '''Auditor conventions that override the semantics below when you grade:
+- Forest: auditors judge the live tree canopy. Missing burnt or standing dead trees in
+  the forest layer is NOT a reason for Bad on its own (the deadwood layer covers them).
+  Bad forest means large live stands missed, shrubs, crops or ground marked as forest,
+  a missing or cut-off layer, or block-shaped processing gaps over a large part of the area.
+- Deadwood: count standing dead trees and clearly dead or burnt crowns. Do not count
+  scattered dead twigs, bare branches inside living crowns, fallen logs, or leafless
+  shrubs as missed deadwood. A deadwood layer that finds most obvious dead crowns is OK
+  even if it misses small or ambiguous ones.
+'''
 EXAMPLE_CAPTION = {'great': 'Great', 'sentinel_ok': 'OK', 'bad': 'Bad'}
 
 
@@ -233,11 +247,21 @@ def run_one(root, run, dataset, version, examples=(), zoom=0):
     started = datetime.now(timezone.utc).isoformat()
     tool = NoTools()
     system = system_prompt(version)
+    capacity_retries = []
     try:
         if zoom:
             tool = Zoom(root, dataset, out / 'zoom', budget=zoom)
             system += ZOOM_NOTE.format(budget=zoom)
-        text, receipt = invoke(prompt, images, out, MODEL, EFFORT, tool, system=system)
+        # Capacity errors happen before any judgment; retry those only, with backoff.
+        for attempt in range(1, 5):
+            try:
+                text, receipt = invoke(prompt, images, out, MODEL, EFFORT, tool, system=system)
+                break
+            except ValueError as e:
+                if 'serverOverloaded' not in str(e) and 'at capacity' not in str(e) or attempt == 4:
+                    raise
+                capacity_retries.append({'attempt': attempt, 'at': datetime.now(timezone.utc).isoformat()})
+                time.sleep(60 * attempt)
         result = {'status': 'completed', 'answer': validate(text)}
     except Exception as e:
         result = {'status': 'failed', 'error': f'{type(e).__name__}: {str(e)[:300]}'}
@@ -246,6 +270,7 @@ def run_one(root, run, dataset, version, examples=(), zoom=0):
         if zoom and isinstance(tool, Zoom):
             tool.close()
     result['zoom_calls'] = getattr(tool, 'calls', [])
+    result['capacity_retries'] = capacity_retries
     result |= {'dataset_id': dataset['dataset_id'], 'model': MODEL, 'effort': EFFORT, 'prompt_version': version,
                'started_at': started, 'elapsed_seconds': receipt.get('elapsed_seconds'), 'usage': receipt.get('usage'),
                'image_sha256': {n: hashlib.sha256(d).hexdigest() for n, d in images}}
