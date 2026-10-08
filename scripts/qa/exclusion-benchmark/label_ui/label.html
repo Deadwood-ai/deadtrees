@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exclusion benchmark labels</title>
+<link rel="stylesheet" href="/label.css">
+</head>
+<body>
+<header>
+  <button id="prev" title="Previous dataset (p)">←</button>
+  <span id="position"></span>
+  <button id="next" title="Next dataset (n)">→</button>
+  <span id="meta"></span>
+  <a id="site" target="_blank" rel="noopener noreferrer">Open on deadtrees.earth</a>
+  <span id="progress"></span>
+  <select id="filter">
+    <option value="all">All datasets</option>
+    <option value="todo">Not finished</option>
+    <option value="done">Finished</option>
+  </select>
+</header>
+<main>
+  <section id="viewer">
+    <div id="stage"><div id="layers"></div></div>
+    <div id="controls">
+      <label><input type="checkbox" id="show-deadwood" checked> Deadwood <kbd>d</kbd></label>
+      <label><input type="checkbox" id="show-forest_cover"> Forest <kbd>f</kbd></label>
+      <label><input type="checkbox" id="outline"> Outline only <kbd>o</kbd></label>
+      <label>Opacity <input type="range" id="opacity" min="0" max="100" value="55"></label>
+      <button id="fit" title="Fit (0)">Fit</button>
+      <span id="view-info"></span>
+    </div>
+    <div id="thumbs"></div>
+  </section>
+  <aside id="form">
+    <p class="hint">Exclude a layer when roughly more than 20% of the dataset area has unacceptable predictions. Unsure is fine.</p>
+    <div class="layer" data-layer="deadwood">
+      <h2>Deadwood <small>keys 1 / 2 / 3</small></h2>
+      <div class="verdicts"></div>
+      <div class="areas"></div>
+      <div class="tags"></div>
+    </div>
+    <div class="layer" data-layer="forest_cover">
+      <h2>Forest cover <small>keys 4 / 5 / 6</small></h2>
+      <div class="verdicts"></div>
+      <div class="areas"></div>
+      <div class="tags"></div>
+    </div>
+    <div class="layer" data-layer="imagery">
+      <h2>Imagery issues</h2>
+      <div class="tags"></div>
+    </div>
+    <textarea id="note" rows="4" placeholder="Optional note"></textarea>
+    <p id="status" role="status"></p>
+  </aside>
+</main>
+<script src="/label.js"></script>
+</body>
+</html>
