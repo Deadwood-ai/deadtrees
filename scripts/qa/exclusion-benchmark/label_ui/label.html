@@ -11,10 +11,12 @@
   <button id="prev" title="Previous dataset (p)">←</button>
   <span id="position"></span>
   <button id="next" title="Next dataset (n)">→</button>
+  <span id="check"></span>
   <span id="meta"></span>
   <a id="site" target="_blank" rel="noopener noreferrer">Open on deadtrees.earth</a>
   <span id="progress"></span>
   <select id="filter">
+    <option value="adjudicate">To adjudicate</option>
     <option value="all">All datasets</option>
     <option value="todo">Not finished</option>
     <option value="done">Finished</option>
@@ -35,7 +37,7 @@
   </section>
   <aside id="form">
     <details id="audit" open><summary>Original audit</summary><dl id="audit-body"></dl></details>
-    <details id="sol"><summary>Sol (best run)</summary><dl id="sol-body"></dl></details>
+    <details id="sol" open><summary>Sol (best run)</summary><dl id="sol-body"></dl></details>
     <p class="hint">Exclude a layer when roughly more than 20% of the dataset area has unacceptable predictions. Unsure is fine.</p>
     <div class="layer" data-layer="deadwood">
       <h2>Deadwood <small>keys 1 / 2 / 3</small></h2>

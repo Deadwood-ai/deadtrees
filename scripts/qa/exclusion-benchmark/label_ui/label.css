@@ -51,3 +51,6 @@ textarea { width: 100%; background: #20262c; color: var(--text); border: 1px sol
 .grade-great { color: var(--keep); font-weight: 600; }
 .grade-sentinel_ok { color: var(--unsure); font-weight: 600; }
 .grade-ok { color: var(--unsure); font-weight: 600; }
+#check { background: var(--unsure); color: #111; border-radius: 4px; padding: 2px 8px; font-weight: 600; }
+#check:empty { display: none; }
+.layer.check h2::after { content: ' ← check'; color: var(--unsure); font-size: 13px; }

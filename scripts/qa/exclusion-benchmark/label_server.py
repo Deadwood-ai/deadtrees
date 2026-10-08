@@ -118,7 +118,12 @@ class Benchmark:
                                         for l in LAYERS}})
             files.update(f"datasets/{d['dataset_id']}/{name}" for name in evidence['files'])
         # Stable shuffled order so roles and audit grades cannot be read from the sequence.
-        datasets.sort(key=lambda d: hash_order(d['dataset_id']))
+        queue_path = self.root / 'adjudication.json'
+        queue = json.loads(queue_path.read_text())['datasets'] if queue_path.exists() else {}
+        for d in datasets:
+            d['adjudicate'] = queue.get(str(d['dataset_id']), [])
+        # Adjudication first, then a stable shuffled order.
+        datasets.sort(key=lambda d: (not d['adjudicate'], hash_order(d['dataset_id'])))
         self.datasets, self.files = datasets, files
 
 

@@ -14,6 +14,7 @@ const current = () => state.datasets[state.index];
 
 function visible() {
   const f = $('#filter').value;
+  if (f === 'adjudicate') return state.datasets.filter((d) => d.adjudicate.length);
   return state.datasets.filter((d) => f === 'all' || (f === 'done') === finished(d.dataset_id));
 }
 
@@ -105,8 +106,11 @@ function renderHeader() {
   $('#position').textContent = `${list.indexOf(d) + 1} / ${list.length}`;
   $('#meta').textContent = `Dataset ${d.dataset_id} · ${d.platform} · ${d.country || '?'} · ${d.biome || '?'} · ${d.acquisition.filter(Boolean).join('-')} · ${d.aoi_area_ha.toFixed(1)} ha · native ${(d.native_mpp * 100).toFixed(1)} cm`;
   $('#site').href = `https://deadtrees.earth/dataset/${d.dataset_id}`;
-  const done = state.datasets.filter((x) => finished(x.dataset_id)).length;
-  $('#progress').textContent = `${done} of ${state.datasets.length} finished`;
+  $('#check').textContent = d.adjudicate.length ? `Check ${d.adjudicate.map((l) => (l === 'deadwood' ? 'deadwood' : 'forest')).join(' + ')}` : '';
+  for (const layer of LAYERS) document.querySelector(`.layer[data-layer=${layer}]`).classList.toggle('check', d.adjudicate.includes(layer));
+  const queue = state.datasets.filter((x) => x.adjudicate.length);
+  const checked = queue.filter((x) => x.adjudicate.every((l) => label(x.dataset_id).layers[l].verdict)).length;
+  $('#progress').textContent = `${checked} of ${queue.length} adjudicated`;
   history.replaceState(null, '', `?dataset=${d.dataset_id}`);
 }
 
@@ -211,6 +215,7 @@ document.addEventListener('keydown', (e) => {
 
 fetch('/api/datasets').then((r) => r.json()).then((data) => {
   state.datasets = data.datasets; state.labels = data.labels; state.tags = data.tags;
+  if (state.datasets.some((d) => d.adjudicate.length)) $('#filter').value = 'adjudicate';
   const wanted = Number(new URLSearchParams(location.search).get('dataset'));
   state.index = Math.max(0, state.datasets.findIndex((d) => d.dataset_id === wanted));
   if (state.datasets.length) render(); else $('#meta').textContent = 'No rendered datasets yet';

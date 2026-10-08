@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
-from score_benchmark import LAYERS, truth
+from score_benchmark import LAYERS, adjudicated, truth
 
 TARGET_RECALL, TARGET_FALSE = 0.9, 0.2
 
@@ -16,13 +16,13 @@ TARGET_RECALL, TARGET_FALSE = 0.9, 0.2
 def load(root, run, split):
     selection = {d['dataset_id']: d for d in json.loads((root / 'selection.json').read_text())['datasets']}
     ids = json.loads((root / 'splits.json').read_text())[split] if split != 'all' else list(selection)
-    rows = []
+    rows, overrides = [], adjudicated(root)
     for i in ids:
         path = run / 'datasets' / str(i) / 'result.json'
         if not path.exists():
             continue
         answer = json.loads(path.read_text())['answer']
-        t = truth(selection[i])
+        t = truth(selection[i], overrides)
         for layer in LAYERS:
             a = answer['layers'][layer]
             rows.append({'dataset_id': i, 'layer': layer, 'bad': t[layer]['exclude'], 'decision': a['decision'],

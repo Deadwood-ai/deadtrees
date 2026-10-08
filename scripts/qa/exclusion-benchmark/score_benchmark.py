@@ -33,14 +33,33 @@ OVERRIDES = {
 }
 
 
-def truth(dataset):
+def adjudicated(root):
+    """Janusch's adjudications (8 Oct) override the audit for the layers he checked."""
+    import sqlite3
+    path = Path(root) / 'labels.sqlite3'
+    queue_path = Path(root) / 'adjudication.json'
+    if not path.exists() or not queue_path.exists():
+        return {}
+    queue = json.loads(queue_path.read_text())['datasets']
+    out = {}
+    for dataset_id, payload in sqlite3.connect(path).execute('SELECT dataset_id, payload FROM labels'):
+        for layer, item in json.loads(payload)['layers'].items():
+            if layer in queue.get(str(dataset_id), []) and item['verdict'] in ('keep', 'exclude'):
+                out[(dataset_id, layer)] = item['verdict'] == 'exclude'
+    return out
+
+
+def truth(dataset, overrides=None):
     out = {}
     for layer in LAYERS:
         bad = dataset[layer + '_quality'] == 'bad'
         modes = OVERRIDES.get((dataset['dataset_id'], layer))
         if modes is None and bad:
             modes = sorted({NOTE_TO_MODE[layer][t] for t in dataset['tags'].get(layer, []) if t in NOTE_TO_MODE[layer]})
-        out[layer] = {'exclude': bad, 'modes': (modes or ['unspecified']) if bad else [],
+        source = 'audit'
+        if overrides and (dataset['dataset_id'], layer) in overrides:
+            bad, source = overrides[(dataset['dataset_id'], layer)], 'adjudicated'
+        out[layer] = {'source': source, 'exclude': bad, 'modes': (modes or ['unspecified']) if bad else [],
                       'grade': dataset[layer + '_quality'], 'note': dataset[layer + '_notes']}
     return out
 
@@ -51,16 +70,17 @@ def score(root, run, split='all'):
         ids = set(json.loads((root / 'splits.json').read_text())[split])
         selection = [d for d in selection if d['dataset_id'] in ids]
     rows, missing = [], []
+    overrides = adjudicated(root)
     for d in selection:
         path = run / 'datasets' / str(d['dataset_id']) / 'result.json'
         if not path.exists():
             missing.append(d['dataset_id'])
             continue
         answer = json.loads(path.read_text())['answer']
-        t = truth(d)
+        t = truth(d, overrides)
         for layer in LAYERS:
             a = answer['layers'][layer]
-            rows.append({'dataset_id': d['dataset_id'], 'layer': layer, 'role': d['role'],
+            rows.append({'truth_source': t[layer]['source'], 'dataset_id': d['dataset_id'], 'layer': layer, 'role': d['role'],
                          'audit': t[layer]['grade'], 'truth': 'exclude' if t[layer]['exclude'] else 'keep',
                          'modes': ','.join(t[layer]['modes']), 'sol': a['decision'], 'sol_area': a['unacceptable_area'],
                          'sol_modes': ','.join(sorted({i['mode'] for i in a['issues'] if i['severity'] == 'major'})),
