@@ -5,12 +5,14 @@ prediction layer when roughly more than 20% of the dataset area has unacceptable
 predictions, keep it otherwise. Exclusion recall matters most. Offline and
 read-only: no production writes, no inference in these scripts.
 
-## Why hand labels
+## Truth
 
-Historical audit grades are candidate labels, not truth. Auditors differ widely
-(one rated about 20% of datasets bad for deadwood, others about 3%). The blind
-hand labels are the benchmark truth; their agreement with the old grade measures
-how far the remaining audits can be trusted.
+Audit grades are the truth (Bad = exclude, Great/OK = keep), with failure modes read
+from the auditors' notes (`score_benchmark.py`). Auditors differ widely (Bad rates from
+0–2% to 29% per auditor), so datasets where Sol and the audit keep disagreeing go into
+`adjudication.json`. Janusch's verdicts on the labeling page override the audit for
+those layers. Target (8 Oct): catch at least 90% of Bad layers and wrongly exclude at
+most 20% of good ones, on datasets not used for tuning.
 
 ## Steps
 
