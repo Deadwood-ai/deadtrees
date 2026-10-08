@@ -252,13 +252,14 @@ def run_one(root, run, dataset, version, examples=(), zoom=0):
         if zoom:
             tool = Zoom(root, dataset, out / 'zoom', budget=zoom)
             system += ZOOM_NOTE.format(budget=zoom)
-        # Capacity errors happen before any judgment; retry those only, with backoff.
+        # Capacity and stream errors happen before any judgment; retry those only, with backoff.
         for attempt in range(1, 5):
             try:
                 text, receipt = invoke(prompt, images, out, MODEL, EFFORT, tool, system=system)
                 break
             except ValueError as e:
-                if 'serverOverloaded' not in str(e) and 'at capacity' not in str(e) or attempt == 4:
+                transient = ('serverOverloaded', 'at capacity', 'stream disconnected', 'responseStreamDisconnected')
+                if not any(t in str(e) for t in transient) or attempt == 4:
                     raise
                 capacity_retries.append({'attempt': attempt, 'at': datetime.now(timezone.utc).isoformat()})
                 time.sleep(60 * attempt)

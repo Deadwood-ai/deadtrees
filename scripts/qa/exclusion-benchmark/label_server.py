@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 UI = Path(__file__).parent / 'label_ui'
+SOL_RUN = 'sol-issue-finder-v6-zoom'  # model judgement shown next to the audit
 LAYERS = ('deadwood', 'forest_cover')
 VERDICTS = ('keep', 'exclude', 'unsure')
 AREAS = ('lt5', '5to20', '20to50', 'gt50')
@@ -101,6 +102,8 @@ class Benchmark:
             if not evidence_path.exists():
                 continue
             evidence = json.loads(evidence_path.read_text())
+            sol_path = self.root / 'runs' / SOL_RUN / 'datasets' / str(d['dataset_id']) / 'result.json'
+            sol = json.loads(sol_path.read_text())['answer'] if sol_path.exists() else None
             # Blind: only imagery facts and the evidence views reach the page.
             datasets.append({k: evidence[k] for k in ('dataset_id', 'native_mpp', 'aoi_area_ha', 'views', 'cog')}
                                  | {'platform': d['platform'], 'biome': d['biome'], 'country': d['country'],
@@ -109,7 +112,10 @@ class Benchmark:
                                     'audit': {k: d.get(k) for k in (
                                         'deadwood_quality', 'deadwood_notes', 'forest_cover_quality',
                                         'forest_cover_notes', 'final_assessment', 'has_valid_phenology',
-                                        'audit_date', 'auditor', 'role', 'tags')}})
+                                        'audit_date', 'auditor', 'role', 'tags')},
+                                    'sol': sol and {l: {k: sol['layers'][l].get(k) for k in (
+                                        'auditor_grade', 'commission_pct', 'omission_pct', 'reason')}
+                                        for l in LAYERS}})
             files.update(f"datasets/{d['dataset_id']}/{name}" for name in evidence['files'])
         # Stable shuffled order so roles and audit grades cannot be read from the sequence.
         datasets.sort(key=lambda d: hash_order(d['dataset_id']))

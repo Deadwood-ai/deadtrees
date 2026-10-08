@@ -130,7 +130,20 @@ function renderAudit() {
     return [dt, dd];
   }));
 }
-function render() { renderHeader(); renderThumbs(); renderViewer(); renderForm(); renderAudit(); }
+function renderSol() {
+  const s = current().sol;
+  $('#sol').hidden = !s;
+  if (!s) return;
+  $('#sol-body').replaceChildren(...[['Deadwood', s.deadwood], ['Forest', s.forest_cover]].flatMap(([k, v]) => {
+    const dt = document.createElement('dt'); dt.textContent = k;
+    const dd = document.createElement('dd');
+    const g = document.createElement('span'); g.textContent = (v.auditor_grade || '?').replace(/^./, (c) => c.toUpperCase());
+    g.className = `grade-${v.auditor_grade}`;
+    dd.append(g, ` — wrong ${v.commission_pct}%, missed ${v.omission_pct}%. ${v.reason}`);
+    return [dt, dd];
+  }));
+}
+function render() { renderHeader(); renderThumbs(); renderViewer(); renderForm(); renderAudit(); renderSol(); }
 
 function update(change) {
   const id = current().dataset_id;
