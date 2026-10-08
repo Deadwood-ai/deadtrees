@@ -38,10 +38,16 @@ export const visibilityLabel = (value: IDataAccess | string | null | undefined) 
 const EXISTING_EXPORTS_NOTE =
   "This dataset may already be part of published data packages and releases, which keep it. Copies people already downloaded stay under the licence they were given.";
 
+/** How restricted each visibility is; a higher rank means fewer people have access. */
+const VISIBILITY_RANK: Record<IDataAccess, number> = {
+  [IDataAccess.public]: 0,
+  [IDataAccess.viewonly]: 1,
+  [IDataAccess.private]: 2,
+};
+
 /** What an owner should know before saving a lower visibility, or null when access is not reduced. */
 export function visibilityReductionNotice(current: IDataAccess | null, next: IDataAccess | undefined): string | null {
-  const rank = (value: IDataAccess | null | undefined) => VISIBILITY_OPTIONS.findIndex((option) => option.value === value);
-  if (!current || !next || rank(next) <= rank(current)) return null;
+  if (!current || !next || VISIBILITY_RANK[next] <= VISIBILITY_RANK[current]) return null;
   return next === IDataAccess.private
     ? `People you shared the dataset with keep their access; everyone else loses it here. ${EXISTING_EXPORTS_NOTE}`
     : `Only you and people you allow can download the orthophoto from now on. ${EXISTING_EXPORTS_NOTE}`;
