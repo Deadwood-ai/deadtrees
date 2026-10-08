@@ -1,5 +1,5 @@
 import { Outlet, Route, Routes, useLocation } from "react-router-dom";
-import { App as AntdApp, ConfigProvider, Layout, Spin } from "antd";
+import { App as AntdApp, ConfigProvider, Layout } from "antd";
 import { lazy, Suspense, useEffect } from "react";
 import { trackPageView, initializePostHog } from "./utils/analytics";
 import { AOIProvider } from "./contexts/AOIContext";
@@ -13,6 +13,7 @@ import { antdTheme } from "./theme/antdTheme";
 
 import DatasetDetails from "./pages/DatasetDetails";
 import RouteErrorBoundary from "./components/RouteErrorBoundary";
+import { StatusPageLoading } from "./components/StatusPage";
 import NotFound from "./pages/NotFound";
 
 // Load route-specific maps, editors, and charts when that route is opened.
@@ -100,13 +101,7 @@ function LayoutWrapper() {
           }}
         >
           <RouteErrorBoundary key={location.pathname}>
-            <Suspense
-              fallback={
-                <div className="flex min-h-60 items-center justify-center">
-                  <Spin size="large" />
-                </div>
-              }
-            >
+            <Suspense fallback={<StatusPageLoading label="Loading…" />}>
               <Outlet />
             </Suspense>
           </RouteErrorBoundary>

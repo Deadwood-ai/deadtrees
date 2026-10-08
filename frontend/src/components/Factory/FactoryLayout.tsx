@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { Button, Segmented, Spin, Typography } from "antd";
+import { Button, Segmented, Typography } from "antd";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { RequireAuth } from "../AuthGate";
 import { useCanOperate } from "../../hooks/useUserPrivileges";
@@ -96,11 +96,7 @@ function FactoryShell() {
 						/>
 					</header>
 					<Suspense
-						fallback={
-							<div className="flex min-h-60 items-center justify-center">
-								<Spin size="large" />
-							</div>
-						}
+						fallback={<StatusPageLoading label="Loading…" />}
 					>
 						<Outlet />
 					</Suspense>
