@@ -13,6 +13,7 @@ from shared.models import Ortho
 from shared.logging import LogContext, LogCategory
 from processor.src.exceptions import ConversionError
 from processor.src.geotiff.byte_scaling import compute_byte_scaling
+from processor.src.geotiff.edge_fill import mask_edge_fill
 import rasterio
 import rasterio.enums
 import numpy as np
@@ -314,6 +315,18 @@ def _add_alpha_from_source_nodata(
 	return alpha_output_path
 
 
+def _mask_edge_fill(output_path: str, token: str, dataset_id: int = None, user_id: str = None) -> bool:
+	"""Make an undeclared black or white fill collar transparent; keep the file as is if that fails."""
+	context = LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token)
+	try:
+		if mask_edge_fill(output_path):
+			logger.info('Masked black or white edge fill collar', context)
+			return True
+	except Exception as e:
+		logger.warning(f'Could not mask edge fill collar, keeping it visible: {e}', context)
+	return False
+
+
 def standardise_geotiff(
 	input_path: str, output_path: str, token: str = None, dataset_id: int = None, user_id: str = None
 ) -> bool:
@@ -352,6 +365,7 @@ def standardise_geotiff(
 			)
 			# Just copy the file to preserve original compression
 			shutil.copy2(input_path, output_path)
+			_mask_edge_fill(output_path, token, dataset_id, user_id)
 			return verify_geotiff(output_path, token, dataset_id, user_id)
 
 		logger.info(
@@ -410,6 +424,8 @@ def standardise_geotiff(
 		if processed_input != input_path:
 			Path(processed_input).unlink()
 
+		if success and _mask_edge_fill(output_path, token, dataset_id, user_id):
+			success = verify_geotiff(output_path, token, dataset_id, user_id)
 		return success
 
 	except ConversionError:
