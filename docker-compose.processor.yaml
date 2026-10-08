@@ -50,6 +50,9 @@ services:
       - ${PROCESSOR_CONTROL_DIR:-./.local/processor-control}:/processor-control
     environment:
       BASE_DIR: /data
+      # Fewer glibc arenas so the many native threads don't strand freed memory
+      # that the ODM sibling container needs (DT-1376).
+      MALLOC_ARENA_MAX: "4"
       # Persist the OpenCLIP weights on the /data mount (shared with the API) so
       # the ~3.9GB download happens once, not on every cron-recreated container.
       OPENCLIP_CACHE_DIR: /data/assets/openclip_cache
