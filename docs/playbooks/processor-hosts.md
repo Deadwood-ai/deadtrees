@@ -117,6 +117,17 @@ processor gets GPU1.
 - The crontab keeps a commented-out legacy launcher
   (`.local/processor/auto_deploy_processor.sh`). Do not re-enable it.
 
+## PRs That Add Or Change A Required Asset
+
+Before it starts or resumes the worker, every host runs
+`scripts/processor_asset_preflight.py` against its own asset directory
+(`PROCESSOR_ASSETS_DIR`, default `./assets`). The hosts share no filesystem. A
+merge that requires a new or changed model or metadata file therefore leaves each
+host that lacks the file drained, with automatic deployment paused. Stage the file
+on all three hosts before the PR merges, check each host with the preflight, and
+say so in the PR. Staging an asset on a production host is a production change,
+so it needs the user's go-ahead like any other.
+
 ## Reserving A Host For Fresh Uploads
 
 Frontend uploads enter the queue at priority 4; reprocessing batches use 1–3.
