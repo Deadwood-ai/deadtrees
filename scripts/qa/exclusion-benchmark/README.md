@@ -14,6 +14,11 @@ how far the remaining audits can be trusted.
 
 ## Steps
 
+The processing server also runs production ODM. Run every step below under a memory
+cap, for example `systemd-run --user --scope -p MemoryMax=6G -- <command>`, and keep
+workers low. An uncapped render of a very large COG once used 31 GB and caused a
+production run to be OOM-killed.
+
 ```sh
 # Analyst credential only in the consuming process (docs/playbooks/analyst-database-access.md)
 PY=<venv with psycopg, numpy, rasterio, shapely, pyproj, Pillow>
