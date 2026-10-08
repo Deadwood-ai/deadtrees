@@ -1,6 +1,6 @@
-"""Privately host the blind dataset-level labeling page with a durable SQLite store.
+"""Privately host the dataset-level labeling page with a durable SQLite store.
 
-Binds 127.0.0.1 only. The page never receives audit grades, auditor IDs or selection roles.
+Binds 127.0.0.1 only. The original audit is shown next to each dataset (pseudonymous auditor).
 """
 import argparse
 from datetime import datetime, timezone
@@ -104,7 +104,12 @@ class Benchmark:
             # Blind: only imagery facts and the evidence views reach the page.
             datasets.append({k: evidence[k] for k in ('dataset_id', 'native_mpp', 'aoi_area_ha', 'views', 'cog')}
                                  | {'platform': d['platform'], 'biome': d['biome'], 'country': d['country'],
-                                    'acquisition': [d['aquisition_year'], d['aquisition_month']]})
+                                    'acquisition': [d['aquisition_year'], d['aquisition_month']],
+                                    # Shown on request (8 Oct): labels are no longer blind to the old audit.
+                                    'audit': {k: d.get(k) for k in (
+                                        'deadwood_quality', 'deadwood_notes', 'forest_cover_quality',
+                                        'forest_cover_notes', 'final_assessment', 'has_valid_phenology',
+                                        'audit_date', 'auditor', 'role', 'tags')}})
             files.update(f"datasets/{d['dataset_id']}/{name}" for name in evidence['files'])
         # Stable shuffled order so roles and audit grades cannot be read from the sequence.
         datasets.sort(key=lambda d: hash_order(d['dataset_id']))

@@ -68,10 +68,18 @@ def fetch(dataset):
             active = db.execute('SELECT 1 FROM v2_labels WHERE id = %s AND is_active', (label_id,)).fetchone()
             if not active:
                 raise ValueError(f'{layer} prediction changed since selection')
-            rows = db.execute(f'SELECT ST_AsGeoJSON(geometry)::jsonb AS g FROM {TABLES[layer]} '
-                              'WHERE label_id = %s AND NOT is_deleted LIMIT %s', (label_id, MAX_FEATURES + 1)).fetchall()
-            if len(rows) > MAX_FEATURES:
-                raise ValueError(f'{layer} exceeds {MAX_FEATURES} polygons')
+            # Keyset pages keep each statement under the analyst statement timeout.
+            rows, last = [], 0
+            while True:
+                page = db.execute(f'SELECT id, ST_AsGeoJSON(geometry)::jsonb AS g FROM {TABLES[layer]} '
+                                  'WHERE label_id = %s AND NOT is_deleted AND id > %s ORDER BY id LIMIT 2000',
+                                  (label_id, last)).fetchall()
+                rows += page
+                if len(page) < 2000:
+                    break
+                last = page[-1]['id']
+                if len(rows) > MAX_FEATURES:
+                    raise ValueError(f'{layer} exceeds {MAX_FEATURES} polygons')
             geometries[layer] = [r['g'] for r in rows]
     return cog, aoi, geometries
 
@@ -79,10 +87,9 @@ def fetch(dataset):
 def read(src, window, limit, resampling=Resampling.bilinear):
     factor = min(1, limit / max(window.width, window.height))
     w, h = max(1, round(window.width * factor)), max(1, round(window.height * factor))
-    rgb = src.read([1, 2, 3], window=window, out_shape=(3, h, w), resampling=resampling,
-                   boundless=True, fill_value=0).transpose(1, 2, 0)
-    valid = src.dataset_mask(window=window, out_shape=(h, w), resampling=Resampling.nearest,
-                             boundless=True) > 0
+    # Windows are clamped to the raster; boundless reads would bypass the COG overviews.
+    rgb = src.read([1, 2, 3], window=window, out_shape=(3, h, w), resampling=resampling).transpose(1, 2, 0)
+    valid = src.dataset_mask(window=window, out_shape=(h, w), resampling=Resampling.nearest) > 0
     affine = window_transform(window, src.transform) * rasterio.Affine.scale(window.width / w, window.height / h)
     return rgb, valid & rgb.any(axis=2), affine
 

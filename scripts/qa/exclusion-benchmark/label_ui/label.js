@@ -110,7 +110,27 @@ function renderHeader() {
   history.replaceState(null, '', `?dataset=${d.dataset_id}`);
 }
 
-function render() { renderHeader(); renderThumbs(); renderViewer(); renderForm(); }
+const GRADE = { great: 'Great', sentinel_ok: 'OK', bad: 'Bad' };
+const ROLE = { audited_bad: 'Audited bad', hard_negative: 'Good, looks like a bad one', diverse_keep: 'Good, diverse scene' };
+function renderAudit() {
+  const a = current().audit || {};
+  const rows = [
+    ['Deadwood', GRADE[a.deadwood_quality] || '—', `grade-${a.deadwood_quality}`, a.deadwood_notes],
+    ['Forest', GRADE[a.forest_cover_quality] || '—', `grade-${a.forest_cover_quality}`, a.forest_cover_notes],
+    ['Overall', (a.final_assessment || '—').replace(/_/g, ' ')],
+    ['In season', a.has_valid_phenology === false ? 'no' : a.has_valid_phenology ? 'yes' : '—'],
+    ['Audited', `${(a.audit_date || '').slice(0, 10)} by ${a.auditor || '?'}`],
+    ['Why picked', [ROLE[a.role], ...Object.entries(a.tags || {}).map(([l, t]) => `${l === 'deadwood' ? 'DW' : 'FC'}: ${t.join(', ').replace(/_/g, ' ')}`)].filter(Boolean).join(' · ')],
+  ];
+  $('#audit-body').replaceChildren(...rows.flatMap(([k, v, cls, note]) => {
+    const dt = document.createElement('dt'); dt.textContent = k;
+    const dd = document.createElement('dd');
+    const strong = document.createElement('span'); strong.textContent = v; if (cls) strong.className = cls;
+    dd.append(strong); if (note) dd.append(` — ${note}`);
+    return [dt, dd];
+  }));
+}
+function render() { renderHeader(); renderThumbs(); renderViewer(); renderForm(); renderAudit(); }
 
 function update(change) {
   const id = current().dataset_id;

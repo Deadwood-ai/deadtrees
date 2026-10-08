@@ -42,3 +42,11 @@ kbd { font-size: 11px; color: var(--muted); }
 textarea { width: 100%; background: #20262c; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px; font: inherit; }
 #status { color: var(--muted); min-height: 1.4em; }
 #status.error { color: var(--exclude); }
+#audit { border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; margin-bottom: 10px; }
+#audit summary { cursor: pointer; font-weight: 600; }
+#audit dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 6px 0 0; }
+#audit dt { color: var(--muted); }
+#audit dd { margin: 0; }
+.grade-bad { color: var(--exclude); font-weight: 600; }
+.grade-great { color: var(--keep); font-weight: 600; }
+.grade-sentinel_ok { color: var(--unsure); font-weight: 600; }
