@@ -1,10 +1,11 @@
 """Which copy of a duplicated file stays, which are archived, and who is told what."""
 
-from pathlib import Path
+from uuid import UUID
 
 from api.src.upload.existing_duplicates import (
 	DuplicateCandidate,
 	archive_sql,
+	notification_idempotency_key,
 	owner_summaries,
 	plan_duplicate_groups,
 	sha256_of_file,
@@ -147,3 +148,15 @@ def test_archive_email_lists_datasets_without_revealing_a_hidden_keeper():
 	assert 'Dataset 3 (c.tif): kept is another upload of the same file' in text_body
 	assert 'a&lt;b&gt;.tif' in html_body
 	assert 'info@deadtrees.earth' in text_body
+
+
+def test_notification_key_is_a_stable_uuid_per_owner_and_datasets():
+	"""Brevo rejects other formats; the same summary must map to the same key so a resend is dropped."""
+	datasets = [{'id': 2}, {'id': 3}]
+
+	key = notification_idempotency_key('alice', datasets)
+
+	assert str(UUID(key)) == key
+	assert key == notification_idempotency_key('alice', datasets)
+	assert key != notification_idempotency_key('bob', datasets)
+	assert key != notification_idempotency_key('alice', [{'id': 2}])

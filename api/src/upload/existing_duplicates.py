@@ -34,6 +34,7 @@ import json
 from pathlib import Path
 import re
 import sys
+import uuid
 from typing import Callable, Iterable, Optional
 
 from shared.db import use_service_client
@@ -153,6 +154,16 @@ def owner_summaries(groups: list[dict], archived_ids: set[int]) -> dict[str, lis
 				}
 			)
 	return dict(summaries)
+
+
+def notification_idempotency_key(user_id: str, datasets: list[dict]) -> str:
+	"""Stable per owner and set of archived datasets, so a repeated send is dropped.
+
+	A UUID, like the event IDs of processing e-mails: Brevo answered HTTP 400
+	to a 64-character hash in this header.
+	"""
+	dataset_ids = ','.join(str(dataset['id']) for dataset in datasets)
+	return str(uuid.uuid5(uuid.NAMESPACE_URL, f'deadtrees:duplicates-archived:{user_id}:{dataset_ids}'))
 
 
 def _select_all(client, table: str, columns: str, order: str) -> list[dict]:
@@ -304,13 +315,12 @@ def notify(work_dir: Path, send: bool) -> int:
 				continue
 			email = client.auth.admin.get_user_by_id(user_id).user.email
 			subject, text_body, html_body = duplicates_archived_email(datasets)
-			dataset_ids = ','.join(str(dataset['id']) for dataset in datasets)
 			result = send_email(
 				email,
 				subject,
 				html_body,
 				text_body=text_body,
-				idempotency_key=hashlib.sha256(f'duplicates-archived:{user_id}:{dataset_ids}'.encode()).hexdigest(),
+				idempotency_key=notification_idempotency_key(user_id, datasets),
 			)
 			failures += not result['success']
 			print(f'{user_id}: {len(datasets)} archived datasets, {"sent" if result["success"] else "FAILED"}')
