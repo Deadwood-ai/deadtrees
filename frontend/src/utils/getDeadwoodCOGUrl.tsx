@@ -1,27 +1,26 @@
-export type MapModelVersion = "v1" | "v2";
+const ASSETS_BASE_URL = "https://data2.deadtrees.earth/assets/v1/";
 
-const V1_BASE_URL = "https://data2.deadtrees.earth/assets/v1/dte_maps/";
-const V2_BASE_URL = "https://data2.deadtrees.earth/assets/v1/dte_maps_v2/";
+// Directory and filename prefix (up to the layer name) of each model version's COGs
+const MODEL_VERSION_COGS = {
+  v1: "dte_maps/run_v1004_v1000_crop_half_fold_None_checkpoint_199_",
+  v5: "dte_maps_v5/run_v5001_v5000_no_early_stop_fold_None_checkpoint_19_",
+} as const;
 
-const V1_DEADWOOD_PREFIX = "run_v1004_v1000_crop_half_fold_None_checkpoint_199_deadwood_";
-const V1_FOREST_PREFIX = "run_v1004_v1000_crop_half_fold_None_checkpoint_199_forest_";
-const V2_DEADWOOD_PREFIX = "run_v2004_seasonal_filter_fold_None_epoch_3_deadwood_";
-const V2_FOREST_PREFIX = "run_v2004_seasonal_filter_fold_None_epoch_3_forest_";
+export type MapModelVersion = keyof typeof MODEL_VERSION_COGS;
+
+export const MAP_MODEL_VERSIONS = Object.keys(MODEL_VERSION_COGS) as MapModelVersion[];
+
+const getCOGUrl = (layer: "deadwood" | "forest", year: string, version: MapModelVersion) =>
+  `${ASSETS_BASE_URL}${MODEL_VERSION_COGS[version]}${layer}_${year}.cog.tif`;
 
 export const getDeadwoodCOGUrl = (year: string | null, version: MapModelVersion = "v1") => {
   if (!year || year.trim() === "") throw new Error("Invalid year for Deadwood COG URL");
-  if (version === "v2") {
-    return `${V2_BASE_URL}${V2_DEADWOOD_PREFIX}${year}.cog.tif`;
-  }
-  return `${V1_BASE_URL}${V1_DEADWOOD_PREFIX}${year}.cog.tif`;
+  return getCOGUrl("deadwood", year, version);
 };
 
 export const getForestCOGUrl = (year: string | null, version: MapModelVersion = "v1") => {
   if (!year || year.trim() === "") throw new Error("Invalid year for Forest COG URL");
-  if (version === "v2") {
-    return `${V2_BASE_URL}${V2_FOREST_PREFIX}${year}.cog.tif`;
-  }
-  return `${V1_BASE_URL}${V1_FOREST_PREFIX}${year}.cog.tif`;
+  return getCOGUrl("forest", year, version);
 };
 
 // Default export for backwards compatibility

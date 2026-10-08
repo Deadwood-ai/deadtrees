@@ -122,7 +122,7 @@ interface PublicTreeObservationFormValues {
 const DeadtreesMap = () => {
   const [map, setMap] = useState<Map | null>(null);
   const [selectedYear, setSelectedYear] = useState<string>("2025");
-  const [modelVersion, setModelVersion] = useState<MapModelVersion>("v2");
+  const [modelVersion, setModelVersion] = useState<MapModelVersion>("v5");
   const [bounds, setBounds] = useState<number[]>([]);
   const [sliderValue, setSliderValue] = useState<number>(1);
   const mapContainer = useRef<HTMLDivElement | null>(null);
