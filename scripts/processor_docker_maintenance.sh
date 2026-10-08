@@ -75,6 +75,18 @@ require_activated_checkout() {
 
 source "${SCRIPT_DIR}/lib/processor_runtime.sh"
 
+cd "${REPO_DIR}"
+
+# Renew the hold before taking the runtime lock: auto-deploy holds the lock for
+# the whole of a long drain, and a skipped renewal lets Snap restart Docker
+# under a running task (DT-1366). The hold touches no container or checkout.
+sudo -n "${SNAP_CONTROL}" hold "${HOLD_DURATION}" >> "${LOG_FILE}" 2>&1
+log "Renewed Docker snap hold for ${HOLD_DURATION}"
+
+if [ "${RENEW_HOLD_ONLY}" -eq 1 ]; then
+	exit 0
+fi
+
 exec 9<>"${LOCK_FILE}"
 if ! flock -n 9; then
 	log "Skipping Docker maintenance because another processor runtime operation already holds ${LOCK_FILE}"
@@ -92,15 +104,6 @@ on_exit() {
 	exit "${rc}"
 }
 trap on_exit EXIT
-
-cd "${REPO_DIR}"
-
-sudo -n "${SNAP_CONTROL}" hold "${HOLD_DURATION}" >> "${LOG_FILE}" 2>&1
-log "Renewed Docker snap hold for ${HOLD_DURATION}"
-
-if [ "${RENEW_HOLD_ONLY}" -eq 1 ]; then
-	exit 0
-fi
 
 require_clean_checkout
 require_activated_checkout

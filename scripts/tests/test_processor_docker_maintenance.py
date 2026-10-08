@@ -271,6 +271,27 @@ class ProcessorDockerMaintenanceTest(unittest.TestCase):
 			self.assertEqual(result.returncode, 0, result.stderr)
 			self.assertIn(f"-n {harness.bin_dir / 'snap-control'} hold 168h", harness.sudo_log.read_text())
 
+	def test_renew_hold_only_runs_while_another_operation_holds_the_lock(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = MaintenanceHarness(Path(tmp_dir), processor_available=True)
+			make_executable(harness.bin_dir / "flock", "#!/bin/sh\nexit 1\n")
+
+			result = harness.run("--renew-hold-only")
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertEqual(harness.snap_log.read_text().splitlines(), ["hold 168h"])
+
+	def test_full_maintenance_renews_hold_but_skips_while_the_lock_is_held(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = MaintenanceHarness(Path(tmp_dir), processor_available=True)
+			make_executable(harness.bin_dir / "flock", "#!/bin/sh\nexit 1\n")
+
+			result = harness.run()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertEqual(harness.snap_log.read_text().splitlines(), ["hold 168h"])
+			self.assertFalse(harness.docker_log.exists())
+
 	def test_hold_renewal_creates_runtime_lock(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
 			harness = MaintenanceHarness(Path(tmp_dir), processor_available=True)
