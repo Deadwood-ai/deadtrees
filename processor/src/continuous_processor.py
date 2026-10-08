@@ -1,7 +1,7 @@
 import os
 import tempfile
 import time
-from processor.src.processor import background_process
+from processor.src.processor import background_process, get_worker_id
 from processor.src.utils.drain_control import (
 	BackgroundProcessResult,
 	is_drain_requested,
@@ -9,7 +9,9 @@ from processor.src.utils.drain_control import (
 )
 from processor.src.utils.startup_cleanup import cleanup_orphaned_resources, cleanup_old_temp_directories
 from shared.logger import logger
+from shared.logging import set_process_log_fields
 from shared.db import login
+from shared.notifications.processing import processing_email_config_problem
 from shared.settings import settings
 
 
@@ -29,6 +31,10 @@ def run_continuous():
 	"""Run the processor as a persistent worker until it is stopped."""
 	logger.info('Starting continuous processor...')
 	use_data_disk_for_temp_files()
+	# Tag startup log rows with this host so a config warning names the worker it came from.
+	set_process_log_fields(worker_id=get_worker_id())
+	if email_problem := processing_email_config_problem():
+		logger.warning(f'Processing result emails will not be sent from this worker: {email_problem}')
 
 	# Perform startup cleanup to recover from crashes/restarts
 	try:
