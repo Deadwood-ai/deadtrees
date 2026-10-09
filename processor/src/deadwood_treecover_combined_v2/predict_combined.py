@@ -33,7 +33,7 @@ def predict_combined(dataset_id: int, file_path: Path, user_id: str, token: str)
         model = CombinedInference(model_path=MODEL_PATH)
 
         log('Running combined inference', file_path=str(file_path))
-        deadwood_polygons, treecover_polygons = model.inference(str(file_path))
+        deadwood_polygons, treecover_polygons = model.inference(str(file_path), progress=log)
 
         # Inference can run longer than the JWT lifetime (~1h), which would make the
         # subsequent label delete/write fail with PGRST303 'JWT expired'. Refresh the

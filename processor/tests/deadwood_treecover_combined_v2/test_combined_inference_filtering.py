@@ -82,3 +82,31 @@ def test_simplify_and_smooth_returns_polygons():
 
 	assert result
 	assert all(g.geom_type == 'Polygon' and not g.is_empty for g in result)
+
+
+def test_polygons_from_mask_reports_each_step(monkeypatch, tmp_path):
+	"""Long post-processing on dense forest reports its progress (DT-1379)."""
+	import numpy as np
+	import rasterio
+	from rasterio.transform import from_origin
+
+	mask = np.zeros((40, 40), dtype=np.uint8)
+	mask[5:35, 5:35] = 1
+	mask[15:20, 15:20] = 0  # one hole
+	path = tmp_path / 'mask.tif'
+	with rasterio.open(
+		path, 'w', driver='GTiff', height=40, width=40, count=1, dtype='uint8',
+		crs='EPSG:32634', transform=from_origin(500000, 5000000, 1, 1),
+	) as dst:
+		dst.write(mask, 1)
+	monkeypatch.setattr(combined_inference, 'reproject_polygons', lambda polygons, src, dst: polygons)
+	messages = []
+
+	inference = CombinedInference.__new__(CombinedInference)
+	polygons = inference._polygons_from_mask(
+		str(path), 1, 'treecover', CRS.from_epsg(32634), CRS.from_epsg(4326), messages.append
+	)
+
+	assert len(polygons) == 1
+	assert messages[0].startswith('Polygonized treecover: 1 polygons, up to 1 holes in one')
+	assert messages[1].startswith('Simplified treecover to 1 polygons')
