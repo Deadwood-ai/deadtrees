@@ -632,3 +632,69 @@ def test_complete_odm_processing_with_real_images(odm_task, auth_token, zip_sour
 			assert isinstance(has_rtk_data, bool)
 			assert isinstance(rtk_file_count, int)
 			assert has_rtk_data is True and rtk_file_count > 0 and raw_image_count == 5
+
+
+@pytest.mark.unit
+def test_orthophoto_pass_gets_a_coarser_resolution_when_the_raster_would_not_fit(fake_volume, monkeypatch):
+	from processor.src.process_odm import _with_budgeted_ortho_resolution
+
+	down = [3.141592653589793, 0.0, 0.0]
+	fake_volume(
+		[
+			{
+				'cameras': {'c': {'width': 5000, 'height': 3750, 'focal_x': 0.75}},
+				'shots': {
+					'a': {'camera': 'c', 'rotation': down, 'translation': [0, 0, 60]},
+					'b': {'camera': 'c', 'rotation': down, 'translation': [-2000, 3000, 60]},
+				},
+				'points': {'p': {'coordinates': [0, 0, 0]}},
+			}
+		]
+	)
+	monkeypatch.setattr(settings, 'ODM_MAX_ORTHO_PIXELS', 8.5e9)
+	command = ['--fast-orthophoto', '--orthophoto-resolution', '1.0', '--project-path', '/odm_data', 'dataset_1']
+
+	budgeted, note = _with_budgeted_ortho_resolution(command, 'odm_processing_1', 'dataset_1', dataset_id=1, token='t')
+
+	assert budgeted[2] == '2.8'
+	assert budgeted[:2] + budgeted[3:] == command[:2] + command[3:]
+	assert note.startswith('Orthophoto generated at 2.8 cm instead of the native ~1.6 cm')
+	assert command[2] == '1.0'
+
+
+@pytest.mark.unit
+def test_orthophoto_pass_keeps_the_resolution_when_the_raster_fits(fake_volume, monkeypatch):
+	from processor.src.process_odm import _with_budgeted_ortho_resolution
+
+	down = [3.141592653589793, 0.0, 0.0]
+	fake_volume(
+		[
+			{
+				'cameras': {'c': {'width': 5000, 'height': 3750, 'focal_x': 0.75}},
+				'shots': {
+					'a': {'camera': 'c', 'rotation': down, 'translation': [0, 0, 60]},
+					'b': {'camera': 'c', 'rotation': down, 'translation': [-500, 500, 60]},
+				},
+				'points': {'p': {'coordinates': [0, 0, 0]}},
+			}
+		]
+	)
+	monkeypatch.setattr(settings, 'ODM_MAX_ORTHO_PIXELS', 8.5e9)
+	command = ['--orthophoto-resolution', '1.0', 'dataset_1']
+
+	assert _with_budgeted_ortho_resolution(command, 'odm_processing_1', 'dataset_1', dataset_id=1, token='t') == (
+		command,
+		None,
+	)
+
+
+@pytest.mark.unit
+def test_a_failed_reduced_resolution_note_does_not_fail_the_odm_run(monkeypatch):
+	import processor.src.process_odm as process_odm_module
+
+	def broken(*args):
+		raise RuntimeError('database unavailable')
+
+	monkeypatch.setattr(process_odm_module, '_write_dataset_note', broken)
+
+	process_odm_module._append_dataset_note(1, 'note', 't')

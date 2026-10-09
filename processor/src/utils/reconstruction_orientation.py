@@ -42,18 +42,26 @@ MAX_PLAUSIBLE_OFF_NADIR_DEGREES = 90.0
 METADATA_TOLERANCE_DEGREES = 0.1
 
 
-def off_nadir_degrees(rotation: Any) -> float:
-	"""Angle between a shot's optical axis and straight down, from an angle-axis rotation."""
+def rotation_matrix(rotation: Any) -> np.ndarray:
+	"""World-to-camera rotation matrix from an OpenSfM angle-axis vector."""
 	rotation_vector = np.asarray(rotation, dtype=float)
 	angle = float(np.linalg.norm(rotation_vector))
 	if angle < 1e-12:
-		rotation_matrix = np.eye(3)
-	else:
-		axis = rotation_vector / angle
-		skew = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
-		rotation_matrix = np.eye(3) + np.sin(angle) * skew + (1 - np.cos(angle)) * skew @ skew
+		return np.eye(3)
+	axis = rotation_vector / angle
+	skew = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+	return np.eye(3) + np.sin(angle) * skew + (1 - np.cos(angle)) * skew @ skew
+
+
+def camera_center(shot: dict) -> np.ndarray:
+	"""Camera position in the topocentric frame: -R^T t."""
+	return -rotation_matrix(shot['rotation']).T @ np.asarray(shot['translation'], dtype=float)
+
+
+def off_nadir_degrees(rotation: Any) -> float:
+	"""Angle between a shot's optical axis and straight down, from an angle-axis rotation."""
 	# World-to-camera rotation: its third row is the optical axis in world coordinates.
-	optical_axis_up_component = rotation_matrix[2, 2]
+	optical_axis_up_component = rotation_matrix(rotation)[2, 2]
 	return float(np.degrees(np.arccos(np.clip(-optical_axis_up_component, -1.0, 1.0))))
 
 

@@ -45,6 +45,7 @@ from processor.src.utils.debug_artifacts import (
 	write_debug_bundle,
 )
 from processor.src.utils.odm_inputs import select_odm_images
+from processor.src.utils.ortho_resolution import budgeted_resolution_cm, mission_extent, reduced_resolution_note
 from shared.exif_utils import extract_camera_nadir_deviation_degrees, extract_comprehensive_exif
 
 # RTK file extensions as specified in requirements
@@ -182,6 +183,57 @@ def _filter_reconstruction_by_orientation(
 
 	rewrite_file_on_shared_volume(volume_name, f'{project_name}/{RECONSTRUCTION_FILE}', drop_oblique_shots, dataset_id)
 	return shots_dropped
+
+
+def _with_budgeted_ortho_resolution(
+	odm_command: list[str], volume_name: str, project_name: str, dataset_id: int, token: str
+) -> tuple[list[str], str | None]:
+	"""Return ``odm_command`` with a resolution whose orthophoto fits ``ODM_MAX_ORTHO_PIXELS``.
+
+	Runs between the two ODM passes, when the reconstruction already shows the mission's
+	extent. Missions that fit are left unchanged; otherwise also returns the note for the
+	dataset's additional information.
+	"""
+	raw_reconstruction = read_file_from_shared_volume(volume_name, f'{project_name}/{RECONSTRUCTION_FILE}', dataset_id)
+	extent = mission_extent(json.loads(raw_reconstruction)) if raw_reconstruction else None
+	if extent is None:
+		return odm_command, None
+	index = odm_command.index('--orthophoto-resolution') + 1
+	requested_cm = float(odm_command[index])
+	resolution_cm = budgeted_resolution_cm(requested_cm, extent, settings.ODM_MAX_ORTHO_PIXELS)
+	if resolution_cm == requested_cm:
+		return odm_command, None
+	logger.warning(
+		f'Mission spans {extent.width_m:.0f} x {extent.height_m:.0f} m at ~{extent.gsd_cm:.1f} cm GSD; rendering the '
+		f'orthophoto at {resolution_cm:g} cm/pixel so it stays within {settings.ODM_MAX_ORTHO_PIXELS / 1e9:g} Gpx',
+		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+	)
+	command = [*odm_command[:index], f'{resolution_cm:g}', *odm_command[index + 1 :]]
+	return command, reduced_resolution_note(resolution_cm, extent)
+
+
+def _append_dataset_note(dataset_id: int, note: str, token: str) -> None:
+	"""Add ``note`` to the dataset's additional information, keeping what the contributor wrote.
+
+	Runs once the ortho is published; a failure is logged and never fails the finished ODM run.
+	"""
+	try:
+		_write_dataset_note(dataset_id, note, token)
+	except Exception as error:
+		logger.warning(
+			f'Could not add the reduced-resolution note to the dataset: {error}',
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+		)
+
+
+def _write_dataset_note(dataset_id: int, note: str, token: str) -> None:
+	with use_client(token) as client:
+		row = client.table(settings.datasets_table).select('additional_information').eq('id', dataset_id).execute()
+		existing = (row.data[0].get('additional_information') or '').strip() if row.data else ''
+		if note in existing:
+			return
+		combined = f'{existing}\n\n{note}' if existing else note
+		client.table(settings.datasets_table).update({'additional_information': combined}).eq('id', dataset_id).execute()
 
 
 def _run_script_in_odm_image(
@@ -392,7 +444,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
-		token = _run_odm_container(
+		token, reduced_resolution = _run_odm_container(
 			images_dir=extraction_dir,
 			output_dir=odm_host_temp_dir,
 			token=token,
@@ -437,6 +489,8 @@ def process_odm(task: QueueTask, temp_dir: Path):
 		# Re-login to ensure we have a fresh token (ODM processing may take >1hr for large datasets)
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 		update_status(dataset_id=dataset_id, is_odm_done=True, current_status=StatusEnum.idle, token=token)
+		if reduced_resolution:
+			_append_dataset_note(dataset_id, reduced_resolution, token)
 
 		logger.info(
 			f'ODM processing completed successfully for dataset {dataset_id}',
@@ -828,7 +882,8 @@ def _wait_for_container(container, what: str) -> dict:
 		) from wait_error
 
 
-def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_id: int) -> str:
+def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_id: int) -> tuple[str, str | None]:
+	"""Run ODM; return a fresh token and, when the pixel cap lowered the resolution, the dataset note."""
 	"""
 	Execute ODM Docker container using shared named volumes for file sharing.
 	This approach eliminates host path complexity and works identically in test and production.
@@ -846,6 +901,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 	retain_on_failure = retain_failed_artifacts_enabled_for_dataset(dataset_id)
 	resource_labels = dt_resource_labels(dataset_id=dataset_id, stage='odm', keep_eligible=retain_on_failure)
 	odm_success = False
+	reduced_resolution = None
 	odm_container = None
 
 	logger.info(
@@ -1003,6 +1059,9 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 				remove_file_from_shared_volume(
 					volume_name, f'{project_name}/{STOP_AFTER_RECONSTRUCTION_FLAG}', dataset_id
 				)
+				odm_command, reduced_resolution = _with_budgeted_ortho_resolution(
+					odm_command, volume_name, project_name, dataset_id, token
+				)
 				odm_container, exit_status, stdout_logs = _run_odm_pass(
 					client, odm_command, volume_name, resource_labels, dataset_id, token, pass_name='orthophoto'
 				)
@@ -1032,7 +1091,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 
 				# Copy results from shared volume to output directory
 				copy_results_from_shared_volume(volume_name, output_dir, project_name, dataset_id, token)
-				return token
+				return token, reduced_resolution
 			else:
 				# ODM failed - log detailed error information
 				logger.error(
