@@ -1,5 +1,7 @@
 import os
 import tempfile
+import time
+from typing import Callable
 from pathlib import Path
 
 import numpy as np
@@ -176,9 +178,13 @@ class CombinedInference:
         logits = F.interpolate(logits.float(), size=images.shape[-2:], mode='bilinear', align_corners=False)
         return logits.argmax(dim=1).to(torch.uint8)
 
-    def inference(self, input_tif: str) -> tuple[list, list]:
+    def inference(self, input_tif: str, progress: Callable[[str], None] = print) -> tuple[list, list]:
         """Run inference on a GeoTIFF and return (deadwood_polygons, treecover_polygons)
-        in the CRS of the input file."""
+        in the CRS of the input file.
+
+        ``progress`` receives one line per post-processing step. On dense forest the
+        polygon steps can take hours on one core (DT-1379), so they report their timing.
+        """
         dataset = InferenceDataset(
             lambda: image_reprojector(input_tif, min_res=MINIMUM_INFERENCE_RESOLUTION),
             tile_size=TILE_SIZE,
@@ -226,22 +232,29 @@ class CombinedInference:
             # so no full-res array is materialised. Deadwood is a subset of treecover;
             # the treecover file stores 1 wherever class != background so they merge
             # naturally without a union step.
-            with rasterio.open(tmp_class_path) as ds:
-                deadwood_polys = mask_to_polygons_scanline(ds, CLASS_DEADWOOD)
-
-            deadwood_polygons = self._filter_polygons(deadwood_polys, src_crs, orig_crs)
-
-            with rasterio.open(tmp_treecover_path) as ds:
-                treecover_polys = mask_to_polygons_scanline(ds, 1)
-
-            treecover_polygons = self._filter_polygons(treecover_polys, src_crs, orig_crs)
-
+            progress('Combined inference finished; polygonizing deadwood')
+            deadwood_polygons = self._polygons_from_mask(tmp_class_path, CLASS_DEADWOOD, 'deadwood', src_crs, orig_crs, progress)
+            treecover_polygons = self._polygons_from_mask(tmp_treecover_path, 1, 'treecover', src_crs, orig_crs, progress)
             return deadwood_polygons, treecover_polygons
 
         finally:
             for p in (tmp_class_path, tmp_treecover_path):
                 if p and os.path.exists(p):
                     os.unlink(p)
+
+    def _polygons_from_mask(self, mask_path, class_value, name, inference_crs, orig_crs, progress):
+        started = time.monotonic()
+        with rasterio.open(mask_path) as ds:
+            polygons = mask_to_polygons_scanline(ds, class_value)
+        largest = max((len(p.interiors) for p in polygons), default=0)
+        progress(
+            f'Polygonized {name}: {len(polygons)} polygons, up to {largest} holes in one, '
+            f'in {time.monotonic() - started:.0f} s; simplifying'
+        )
+        started = time.monotonic()
+        polygons = self._filter_polygons(polygons, inference_crs, orig_crs)
+        progress(f'Simplified {name} to {len(polygons)} polygons in {time.monotonic() - started:.0f} s')
+        return polygons
 
     def _filter_polygons(self, polygons, inference_crs, orig_crs):
         polygons = filter_polygons_by_area(polygons, MINIMUM_POLYGON_AREA)
