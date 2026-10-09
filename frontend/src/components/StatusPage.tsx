@@ -32,7 +32,7 @@ const KIND_ICON: Record<StatusPageKind, { icon: ReactNode; tone: string }> = {
 // and fill the viewport; the footer then stays at the bottom instead of
 // floating halfway up the screen.
 const SHELL =
-  "flex min-h-[calc(100dvh-3rem)] w-full items-center justify-center bg-[var(--dt-surface-base)] px-4 pb-12 pt-28";
+  "flex w-full items-center justify-center bg-[var(--dt-surface-base)] px-4 pb-12 pt-28";
 
 interface StatusPageProps {
   kind: StatusPageKind;
@@ -51,7 +51,10 @@ export default function StatusPage({
 }: StatusPageProps) {
   const { icon, tone } = KIND_ICON[kind];
   return (
-    <div className={SHELL} data-testid={`status-page-${kind}`}>
+    <div
+      className={`${SHELL} min-h-[calc(100dvh-3rem)]`}
+      data-testid={`status-page-${kind}`}
+    >
       <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white px-6 py-8 text-center shadow-sm sm:px-10">
         <div
           className={`mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full text-2xl ${tone}`}
@@ -74,8 +77,10 @@ export default function StatusPage({
 
 const SLOW_AFTER_MS = 8000;
 
-// While DeadTrees is down, requests retry for a while before they fail; say so
-// instead of spinning silently.
+// Stands in for a page that has not arrived yet (its code, the session or its
+// data), so it fills the whole screen and the footer stays below the fold
+// until the page replaces it. While DeadTrees is down, requests retry for a
+// while before they fail; say so instead of spinning silently.
 export function StatusPageLoading({ label }: { label: string }) {
   const [slow, setSlow] = useState(false);
   useEffect(() => {
@@ -84,7 +89,10 @@ export function StatusPageLoading({ label }: { label: string }) {
   }, []);
 
   return (
-    <div className={`${SHELL} flex-col gap-3 text-slate-500`} role="status">
+    <div
+      className={`${SHELL} min-h-[100dvh] flex-col gap-3 text-slate-500`}
+      role="status"
+    >
       <Spin size="large" />
       <span>{label}</span>
       {slow && (

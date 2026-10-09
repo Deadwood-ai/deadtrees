@@ -70,3 +70,20 @@ test("an outage on My Account shows one retry instead of an empty table", async 
   await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(1);
   await expect(page.getByText("No data")).toHaveCount(0);
 });
+
+test("while a page's code loads, the footer stays below the screen", async ({ page }) => {
+  // Hold the Home page module so the route loading state stays on screen.
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(/\/src\/pages\/Home\.tsx|\/assets\/Home-.*\.js/, async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.goto("/");
+  await expect(page.getByRole("status").filter({ hasText: "Loading…" })).toBeVisible();
+  const footer = await page.locator("footer").boundingBox();
+  expect(footer!.y).toBeGreaterThanOrEqual(page.viewportSize()!.height);
+
+  release();
+  await expect(page.getByTestId("home-page")).toBeVisible();
+});
