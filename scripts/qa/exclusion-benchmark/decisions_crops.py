@@ -64,6 +64,14 @@ PREDICATES = {
         'fc_om_add': 'Comparing Image 1 and Image 3, a careful annotator would need to ADD substantial gold for tree canopy.',
         'fc_co_remove': 'Comparing Image 1 and Image 3, a careful annotator would need to REMOVE substantial gold because it is not on tree canopy.',
     },
+    # v4: deadwood omission only, phrased around outlines and crown counts.
+    'v4': {
+        'dw_om_several_outside': 'Several standing dead or leafless tree crowns in Image 1 lie completely outside any blue outline in Image 2.',
+        'dw_om_majority_outside': 'Most of the standing dead or leafless tree crowns in Image 1 lie completely outside the blue outlines in Image 2.',
+        'dw_om_partial': 'Blue outlines cover only part of dead crowns, leaving large dead parts of those same crowns unmarked.',
+        'dw_om_grey_unmarked': 'Grey, white or brown leafless branches of standing trees are visible in Image 1 without blue in Image 2 over a large part of the tile.',
+        'dw_present_any': 'Image 1 shows several standing dead or leafless tree crowns.',
+    },
     # Perception check: can it even see the overlays? Truth is the rendered mask itself.
     'perception': {
         'any_blue': 'Image 2 contains blue overlay polygons anywhere.',

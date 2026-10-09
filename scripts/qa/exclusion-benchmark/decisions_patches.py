@@ -29,6 +29,9 @@ CHECKS = {  # predicate -> (layer, measured error)
     'dw_co_remove': ('deadwood', 'commission'), 'dw_co_most_wrong': ('deadwood', 'commission'),
     'dw_co_lying': ('deadwood', 'commission'),
     'fc_om_add': ('forest_cover', 'omission'), 'fc_co_remove': ('forest_cover', 'commission'),
+    'dw_om_several_outside': ('deadwood', 'omission'), 'dw_om_majority_outside': ('deadwood', 'omission'),
+    'dw_om_partial': ('deadwood', 'omission'), 'dw_om_grey_unmarked': ('deadwood', 'omission'),
+    'dw_present_any': ('deadwood', 'omission'),
 }
 
 
