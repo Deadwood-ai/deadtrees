@@ -112,6 +112,12 @@ cast by the trunk and crown); a lying trunk is a long thin line on the ground. I
 burned areas, check that missed "dead trees" are actually standing before calling
 omission.
 '''
+# v8 = v5 plus the reviewer's corrections as images (FB*), built by feedback_examples.py.
+RULES['issue-finder-v8-feedback'] = RULES['issue-finder-v5'] + '''After the audited examples you also see REVIEWER CORRECTIONS (FB1, FB2, ...): native crops
+(raw | deadwood | forest) from other datasets where an earlier screening was wrong, each
+with the reviewer's note. Do not repeat these mistakes. They are other places: never
+cite them as evidence for the target.
+'''
 EXAMPLE_CAPTION = {'great': 'Great', 'sentinel_ok': 'OK', 'bad': 'Bad'}
 
 
@@ -254,7 +260,7 @@ class NoTools:
     tool = {'name': 'none'}
 
 
-def run_one(root, run, dataset, version, examples=(), zoom=0):
+def run_one(root, run, dataset, version, examples=(), zoom=0, feedback=None):
     out = run / 'datasets' / str(dataset['dataset_id'])
     if (out / 'result.json').exists():
         return json.loads((out / 'result.json').read_text())
@@ -265,6 +271,11 @@ def run_one(root, run, dataset, version, examples=(), zoom=0):
         ex_images, captions = example_images(root, examples, dataset['dataset_id'])
         prompt = 'Audited examples from other datasets:\n' + '\n'.join(captions) + '\n\n' + prompt
         images = ex_images + images
+    if feedback:
+        fb = [f for f in feedback['items'] if f['dataset_id'] != dataset['dataset_id']]
+        prompt = ('Reviewer corrections from other datasets:\n' + '\n'.join(f"{f['name']}: {f['caption']}" for f in fb)
+                  + '\n\n' + prompt)
+        images = [(f['name'], (feedback['dir'] / f['file']).read_bytes()) for f in fb] + images
     started = datetime.now(timezone.utc).isoformat()
     tool = NoTools()
     system = system_prompt(version)
@@ -307,6 +318,7 @@ if __name__ == '__main__':
     p.add_argument('--workers', type=int, default=4)
     p.add_argument('--prompt', choices=sorted(RULES), default='issue-finder-v2')
     p.add_argument('--zoom', type=int, default=0, help='zoom tool budget per dataset (0 = no tool)')
+    p.add_argument('--feedback-examples', type=Path, help='folder from feedback_examples.py')
     p.add_argument('--examples', type=int, nargs='*', default=[], help='development dataset IDs used as examples')
     p.add_argument('--only', type=int, nargs='*')
     p.add_argument('--split', choices=('all', 'development', 'validation'), default='all')
@@ -346,9 +358,14 @@ if __name__ == '__main__':
     datasets = [d for d in datasets if d['dataset_id'] in eligible]
     examples = [all_datasets[i] for i in a.examples if i in eligible]
     (a.run / 'config.json').write_text(json.dumps({'prompt': a.prompt, 'examples': [e['dataset_id'] for e in examples],
-                                                   'zoom': a.zoom}))
+                                                   'zoom': a.zoom, 'feedback_examples': str(a.feedback_examples)}))
+    feedback = None
+    if a.feedback_examples:
+        items = json.loads((a.feedback_examples / 'manifest.json').read_text())
+        feedback = {'dir': a.feedback_examples, 'items': [f for f in items if f['dataset_id'] in eligible]}
     with ThreadPoolExecutor(max_workers=a.workers) as pool:
-        futures = {pool.submit(run_one, a.root, a.run, d, a.prompt, examples, a.zoom): d['dataset_id'] for d in datasets}
+        futures = {pool.submit(run_one, a.root, a.run, d, a.prompt, examples, a.zoom, feedback): d['dataset_id']
+                   for d in datasets}
         for future in as_completed(futures):
             r = future.result()
             print({'dataset': futures[future], 'status': r['status'], 'elapsed': r.get('elapsed_seconds'),
