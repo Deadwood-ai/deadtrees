@@ -101,6 +101,16 @@ of that view (panel sizes are in the metadata; x right, y down). Box the cleares
 examples, at most 4 regions per issue. Zoom images cannot be boxed; box the region in
 the view you zoomed from.
 '''
+# v7 (9 Oct, Janusch): deadwood means STANDING dead trees only. Sol kept counting fallen
+# trunks, logs and burnt debris on the ground as missed deadwood in burned areas.
+RULES['issue-finder-v7-standing'] = RULES['issue-finder-v5-boxes'] + '''Standing trees only. Deadwood and forest are about STANDING trees. Fallen or lying
+trunks, logs on the ground, stumps, charred ground debris and burnt shrub skeletons
+are NOT deadwood and NOT forest: leaving them unmasked is correct, and masking them is
+a commission error. A standing dead tree shows an upright crown (often with a shadow
+cast by the trunk and crown); a lying trunk is a long thin line on the ground. In
+burned areas, check that missed "dead trees" are actually standing before calling
+omission.
+'''
 EXAMPLE_CAPTION = {'great': 'Great', 'sentinel_ok': 'OK', 'bad': 'Bad'}
 
 
@@ -249,7 +259,7 @@ def run_one(root, run, dataset, version, examples=(), zoom=0):
         return json.loads((out / 'result.json').read_text())
     out.mkdir(parents=True, exist_ok=True)
     evidence = json.loads((root / 'datasets' / str(dataset['dataset_id']) / 'evidence.json').read_text())
-    prompt, images = packet(root, dataset, evidence, with_sizes=version.endswith('-boxes'))
+    prompt, images = packet(root, dataset, evidence, with_sizes='boxes' in version or 'v7' in version)
     if examples:
         ex_images, captions = example_images(root, examples, dataset['dataset_id'])
         prompt = 'Audited examples from other datasets:\n' + '\n'.join(captions) + '\n\n' + prompt

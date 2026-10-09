@@ -15,7 +15,7 @@ from urllib.parse import unquote, urlsplit
 
 UI = Path(__file__).parent / 'label_ui'
 # Model judgement shown next to the audit: the boxed rerun where it exists, else the best run.
-SOL_RUNS = ('sol-issue-finder-v6-boxes', 'sol-issue-finder-v6-zoom')
+SOL_RUNS = ('sol-issue-finder-v7-standing', 'sol-issue-finder-v6-boxes', 'sol-issue-finder-v6-zoom')
 LAYERS = ('deadwood', 'forest_cover')
 VERDICTS = ('keep', 'exclude', 'unsure')
 AREAS = ('lt5', '5to20', '20to50', 'gt50')

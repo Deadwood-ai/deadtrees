@@ -187,7 +187,7 @@ function renderSol() {
   const s = current().sol;
   $('#sol').hidden = !s;
   if (!s) return;
-  $('#sol-run').textContent = s.run.endsWith('boxes') ? 'boxed rerun' : 'best run';
+  $('#sol-run').textContent = s.run.replace('sol-issue-finder-', '');
   $('#sol-body').replaceChildren(...[['Deadwood', 'deadwood'], ['Forest', 'forest_cover']].flatMap(([k, layer]) => {
     const v = s[layer];
     const dt = document.createElement('dt'); dt.textContent = k;
