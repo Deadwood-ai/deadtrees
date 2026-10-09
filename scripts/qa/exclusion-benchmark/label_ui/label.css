@@ -54,3 +54,14 @@ textarea { width: 100%; background: #20262c; color: var(--text); border: 1px sol
 #check { background: var(--unsure); color: #111; border-radius: 4px; padding: 2px 8px; font-weight: 600; }
 #check:empty { display: none; }
 .layer.check h2::after { content: ' ← check'; color: var(--unsure); font-size: 13px; }
+.mark { position: absolute; border: 3px solid #ff4d4d; box-sizing: border-box; pointer-events: none; }
+.mark.minor { border-style: dashed; border-color: #ffb84d; }
+.mark.zoom { border: 2px dashed #ffffff; }
+.mark.highlight { border-width: 6px; box-shadow: 0 0 0 4px rgba(255, 77, 77, .35); }
+.mark span { position: absolute; left: 0; top: -22px; background: rgba(0, 0, 0, .75); color: #fff; font-size: 14px; padding: 1px 5px; white-space: nowrap; }
+.thumb.flagged { color: #ff8a8a; }
+.thumb.zoomthumb img { object-fit: contain; background: #000; }
+ul.issues { margin: 4px 0 6px; padding-left: 16px; }
+ul.issues li { margin-bottom: 4px; }
+ul.issues li.minor { color: var(--muted); }
+button.goto { padding: 0 6px; margin-left: 4px; font-size: 12px; }

@@ -29,6 +29,7 @@
       <label><input type="checkbox" id="show-deadwood" checked> Deadwood <kbd>d</kbd></label>
       <label><input type="checkbox" id="show-forest_cover"> Forest <kbd>f</kbd></label>
       <label><input type="checkbox" id="outline"> Outline only <kbd>o</kbd></label>
+      <label><input type="checkbox" id="show-marks" checked> Sol boxes <kbd>b</kbd></label>
       <label>Opacity <input type="range" id="opacity" min="0" max="100" value="55"></label>
       <button id="fit" title="Fit (0)">Fit</button>
       <span id="view-info"></span>
@@ -37,7 +38,7 @@
   </section>
   <aside id="form">
     <details id="audit" open><summary>Original audit</summary><dl id="audit-body"></dl></details>
-    <details id="sol" open><summary>Sol (best run)</summary><dl id="sol-body"></dl></details>
+    <details id="sol" open><summary>Sol (<span id="sol-run">best run</span>)</summary><dl id="sol-body"></dl></details>
     <p class="hint">Exclude a layer when roughly more than 20% of the dataset area has unacceptable predictions. Unsure is fine.</p>
     <div class="layer" data-layer="deadwood">
       <h2>Deadwood <small>keys 1 / 2 / 3</small></h2>

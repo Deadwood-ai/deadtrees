@@ -28,13 +28,44 @@ function move(step) {
   render();
 }
 
-function src(d, view, suffix) { return `/files/datasets/${d.dataset_id}/${view.name}-${suffix}`; }
+function src(d, view, suffix) { return view.file ? `/files/${view.file}` : `/files/datasets/${d.dataset_id}/${view.name}-${suffix}`; }
+const viewId = (v) => (v.name === 'overview' ? 'O' : v.name.toUpperCase());
+const normView = (id) => String(id || '').toUpperCase().split('-')[0].replace(/^O.*/, 'O');
+function views(d) {
+  return [...d.views, ...((d.sol && d.sol.zooms) || []).map((z) => ({ name: z.name, file: z.file, zoom: z }))];
+}
+function marks(d, view) {
+  // Sol's issue boxes and zoom footprints that fall on this view, in its pixels.
+  const out = [];
+  if (!d.sol || view.file) return out;
+  for (const layer of LAYERS) {
+    (d.sol[layer].issues || []).forEach((issue, i) => {
+      for (const r of issue.regions || []) {
+        if (normView(r.view) === viewId(view) && Array.isArray(r.box) && r.box.length === 4) {
+          out.push({ box: r.box, label: `${layer === 'deadwood' ? 'DW' : 'FC'} ${issue.mode.replace(/_/g, ' ')}`,
+            key: `${layer}:${i}`, cls: `mark ${layer} ${issue.severity}` });
+        }
+      }
+    });
+  }
+  for (const z of d.sol.zooms || []) {
+    if (normView(z.view) === viewId(view)) out.push({ box: z.rect, label: z.name, key: z.name, cls: 'mark zoom' });
+  }
+  return out;
+}
 
 function renderViewer() {
   const d = current();
-  const view = d.views[state.view];
+  const view = views(d)[state.view];
   const box = $('#layers');
   box.replaceChildren();
+  if (view.file) {
+    const img = new Image(); img.src = src(d, view); img.className = 'raw';
+    img.onload = () => { view.size = [img.naturalWidth, img.naturalHeight]; img.width = view.size[0]; img.height = view.size[1]; fit(); };
+    box.append(img);
+    $('#view-info').textContent = `${view.name}: Sol zoom on ${view.zoom.view} · ${view.zoom.cm_per_px} cm/px · raw | deadwood | forest · "${view.zoom.purpose}"`;
+    return;
+  }
   const add = (url, cls) => { const img = new Image(); img.src = url; img.className = cls; img.width = view.size[0]; img.height = view.size[1]; box.append(img); return img; };
   add(src(d, view, 'raw.jpg'), 'raw');
   const mode = $('#outline').checked ? 'outline' : 'fill';
@@ -43,13 +74,24 @@ function renderViewer() {
     img.hidden = !$(`#show-${layer}`).checked;
     img.style.opacity = mode === 'fill' ? $('#opacity').value / 100 : 1;
   }
+  for (const m of marks(d, view)) {
+    const el = document.createElement('div');
+    el.className = m.cls + (state.highlight && state.highlight === m.key ? ' highlight' : '');
+    const [x0, y0, x1, y1] = m.box;
+    Object.assign(el.style, { left: `${Math.min(x0, x1)}px`, top: `${Math.min(y0, y1)}px`,
+      width: `${Math.abs(x1 - x0)}px`, height: `${Math.abs(y1 - y0)}px` });
+    const tag = document.createElement('span'); tag.textContent = m.label; el.append(tag);
+    el.hidden = !$('#show-marks').checked;
+    box.append(el);
+  }
   const pf = view.predicted_fraction;
   $('#view-info').textContent = `${view.name} · ${(view.mpp * 100).toFixed(1)} cm/px · predicted deadwood ${(pf.deadwood * 100).toFixed(1)}% · forest ${(pf.forest_cover * 100).toFixed(0)}%`;
   fit();
 }
 
 function fit() {
-  const view = current().views[state.view];
+  const view = views(current())[state.view];
+  if (!view.size) return;
   const stage = $('#stage').getBoundingClientRect();
   const s = Math.min(stage.width / view.size[0], stage.height / view.size[1]);
   state.zoom = { s, x: (stage.width - view.size[0] * s) / 2, y: (stage.height - view.size[1] * s) / 2 };
@@ -60,13 +102,14 @@ function applyZoom() { const z = state.zoom; $('#layers').style.transform = `tra
 function renderThumbs() {
   const d = current();
   const strip = $('#thumbs');
-  strip.replaceChildren(...d.views.map((v, i) => {
+  strip.replaceChildren(...views(d).map((v, i) => {
     const el = document.createElement('div');
-    el.className = 'thumb' + (i === state.view ? ' active' : '');
+    const n = marks(d, v).filter((m) => !m.cls.includes('zoom')).length;
+    el.className = 'thumb' + (i === state.view ? ' active' : '') + (v.file ? ' zoomthumb' : '') + (n ? ' flagged' : '');
     const img = new Image(); img.src = src(d, v, 'raw.jpg'); img.loading = 'lazy';
-    const name = v.name === 'overview' ? 'overview' : v.name.startsWith('g') ? `grid ${v.name.slice(1)}` : `detail ${v.name.slice(1)}`;
-    el.append(img, `${name} · ${(v.mpp * 100).toFixed(0)} cm`);
-    el.onclick = () => { state.view = i; render(); };
+    const name = v.file ? `Sol ${v.name} (${v.zoom.view})` : v.name === 'overview' ? 'overview' : v.name.startsWith('g') ? `grid ${v.name.slice(1)}` : `detail ${v.name.slice(1)}`;
+    el.append(img, v.file ? name : `${name} · ${(v.mpp * 100).toFixed(0)} cm${n ? ` · ${n}⚑` : ''}`);
+    el.onclick = () => { state.view = i; state.highlight = null; render(); };
     return el;
   }));
 }
@@ -134,16 +177,38 @@ function renderAudit() {
     return [dt, dd];
   }));
 }
+function jump(viewName, key) {
+  const d = current();
+  const i = views(d).findIndex((v) => (v.file ? v.name : viewId(v)) === normView(viewName) || v.name === viewName);
+  if (i < 0) return;
+  state.view = i; state.highlight = key; render();
+}
 function renderSol() {
   const s = current().sol;
   $('#sol').hidden = !s;
   if (!s) return;
-  $('#sol-body').replaceChildren(...[['Deadwood', s.deadwood], ['Forest', s.forest_cover]].flatMap(([k, v]) => {
+  $('#sol-run').textContent = s.run.endsWith('boxes') ? 'boxed rerun' : 'best run';
+  $('#sol-body').replaceChildren(...[['Deadwood', 'deadwood'], ['Forest', 'forest_cover']].flatMap(([k, layer]) => {
+    const v = s[layer];
     const dt = document.createElement('dt'); dt.textContent = k;
     const dd = document.createElement('dd');
     const g = document.createElement('span'); g.textContent = (v.auditor_grade || '?').replace(/^./, (c) => c.toUpperCase());
     g.className = `grade-${v.auditor_grade}`;
     dd.append(g, ` — wrong ${v.commission_pct}%, missed ${v.omission_pct}%. ${v.reason}`);
+    const list = document.createElement('ul'); list.className = 'issues';
+    (v.issues || []).forEach((issue, i) => {
+      const li = document.createElement('li');
+      li.className = issue.severity;
+      li.append(`${issue.mode.replace(/_/g, ' ')} (${issue.severity}): ${issue.evidence} `);
+      const targets = (issue.regions || []).length ? [...new Set(issue.regions.map((r) => normView(r.view)))] : (issue.views || []).map(normView);
+      for (const t of [...new Set(targets)]) {
+        const b = document.createElement('button'); b.className = 'goto'; b.textContent = t;
+        b.onclick = () => jump(t, `${layer}:${i}`);
+        li.append(b);
+      }
+      list.append(li);
+    });
+    dd.append(list);
     return [dt, dd];
   }));
 }
@@ -193,7 +258,7 @@ stage.addEventListener('pointerdown', (e) => {
 });
 stage.addEventListener('dblclick', fit);
 
-for (const id of ['show-deadwood', 'show-forest_cover', 'outline']) $(`#${id}`).addEventListener('change', renderViewer);
+for (const id of ['show-deadwood', 'show-forest_cover', 'outline', 'show-marks']) $(`#${id}`).addEventListener('change', renderViewer);
 $('#opacity').addEventListener('input', () => document.querySelectorAll('.overlay').forEach((i) => { if (!$('#outline').checked) i.style.opacity = $('#opacity').value / 100; }));
 $('#fit').onclick = fit;
 $('#prev').onclick = () => move(-1);
@@ -205,8 +270,9 @@ document.addEventListener('keydown', (e) => {
   const key = e.key;
   const toggle = (id) => { $(id).checked = !$(id).checked; renderViewer(); };
   if (key === 'n') move(1); else if (key === 'p') move(-1);
-  else if (key === 'ArrowRight') { state.view = (state.view + 1) % current().views.length; render(); }
-  else if (key === 'ArrowLeft') { state.view = (state.view - 1 + current().views.length) % current().views.length; render(); }
+  else if (key === 'ArrowRight') { state.view = (state.view + 1) % views(current()).length; state.highlight = null; render(); }
+  else if (key === 'ArrowLeft') { state.view = (state.view - 1 + views(current()).length) % views(current()).length; state.highlight = null; render(); }
+  else if (key === 'b') { $('#show-marks').checked = !$('#show-marks').checked; renderViewer(); }
   else if (key === 'd') toggle('#show-deadwood'); else if (key === 'f') toggle('#show-forest_cover');
   else if (key === 'o') toggle('#outline'); else if (key === '0') fit();
   else if ('123'.includes(key)) update((x) => { x.layers.deadwood.verdict = VERDICTS[+key - 1]; });

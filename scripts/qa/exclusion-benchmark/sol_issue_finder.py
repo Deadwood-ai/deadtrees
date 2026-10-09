@@ -94,6 +94,13 @@ RULES['issue-finder-v5'] = RULES['issue-finder-v4'] + '''Auditor conventions tha
   shrubs as missed deadwood. A deadwood layer that finds most obvious dead crowns is OK
   even if it misses small or ambiguous ones.
 '''
+# Same judgement as v5, plus a located box for every issue so a person can find it.
+RULES['issue-finder-v5-boxes'] = RULES['issue-finder-v5'] + '''Locate every issue. Give each issue "regions": a list of {"view":"G5","box":[x0,y0,x1,y1]}
+naming a delivered view (O, G1..G9, N1..N4) and a rectangle in the pixels of ONE panel
+of that view (panel sizes are in the metadata; x right, y down). Box the clearest
+examples, at most 4 regions per issue. Zoom images cannot be boxed; box the region in
+the view you zoomed from.
+'''
 EXAMPLE_CAPTION = {'great': 'Great', 'sentinel_ok': 'OK', 'bad': 'Bad'}
 
 
@@ -165,7 +172,7 @@ def jpeg(image):
     return stream.getvalue()
 
 
-def packet(root, dataset, evidence):
+def packet(root, dataset, evidence, with_sizes=False):
     directory = root / 'datasets' / str(dataset['dataset_id'])
     layer_files = lambda name, layer: (directory / f'{name}-{layer}-fill.png', directory / f'{name}-{layer}-outline.png')
     images = []
@@ -180,6 +187,9 @@ def packet(root, dataset, evidence):
             images.append((view['name'].upper(), jpeg(side_by_side([raw.convert('RGB'), *overlays]))))
     views = [{'id': v['name'].upper() if v['name'] != 'overview' else 'O-*', 'ground_cm_per_px': round(v['mpp'] * 100, 1),
               'share_inside_area': round(v['support_fraction'], 2)} for v in evidence['views']]
+    if with_sizes:
+        for entry, v in zip(views, evidence['views']):
+            entry['panel_px'] = v['size']
     meta = {'area_ha': round(evidence['aoi_area_ha'], 1), 'native_cm_per_px': round(evidence['native_mpp'] * 100, 1),
             'platform': dataset['platform'], 'country': dataset['country'], 'biome': dataset['biome'],
             'acquisition_year_month': [dataset['aquisition_year'], dataset['aquisition_month']], 'views': views}
@@ -239,7 +249,7 @@ def run_one(root, run, dataset, version, examples=(), zoom=0):
         return json.loads((out / 'result.json').read_text())
     out.mkdir(parents=True, exist_ok=True)
     evidence = json.loads((root / 'datasets' / str(dataset['dataset_id']) / 'evidence.json').read_text())
-    prompt, images = packet(root, dataset, evidence)
+    prompt, images = packet(root, dataset, evidence, with_sizes=version.endswith('-boxes'))
     if examples:
         ex_images, captions = example_images(root, examples, dataset['dataset_id'])
         prompt = 'Audited examples from other datasets:\n' + '\n'.join(captions) + '\n\n' + prompt
