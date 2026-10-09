@@ -121,7 +121,7 @@ def make_handler(root, crops, store):
             value = json.loads(self.rfile.read(min(int(self.headers.get('Content-Length', 0)), 8000)))
             crop_id = value.get('crop_id')
             answers = value.get('answers', {})
-            if crop_id not in ids or not set(answers) <= set(QUESTIONS) or not all(v in (True, False, None) for v in answers.values()):
+            if crop_id not in ids or not set(answers) <= set(QUESTIONS) or not all(v in (True, False, None, 'unsure') for v in answers.values()):
                 return self.send(400, 'application/json', b'{"error":"invalid"}')
             at = store.save(crop_id, {'answers': answers, 'note': str(value.get('note', ''))[:500]})
             self.send(200, 'application/json', json.dumps({'saved': at}).encode())

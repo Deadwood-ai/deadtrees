@@ -50,7 +50,7 @@ if __name__ == '__main__':
         out = {}
         for q in PREDICATES[a.predicates]:
             pairs = [(model[c['id']].get(q), labels[c['id']]['answers'][q]) for c in batch
-                     if c['id'] in labels and labels[c['id']]['answers'].get(q) is not None and model[c['id']].get(q) is not None]
+                     if c['id'] in labels and labels[c['id']]['answers'].get(q) in (True, False) and model[c['id']].get(q) is not None]
             if not pairs:
                 continue
             x = np.array([p for p, _ in pairs]); y = np.array([t for _, t in pairs])
