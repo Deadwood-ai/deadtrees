@@ -15,6 +15,7 @@ import time
 
 from PIL import Image
 
+from analyst import analyst
 from model_transport import invoke
 from zoom_tool import Zoom
 
@@ -334,8 +335,18 @@ if __name__ == '__main__':
     development = set(json.loads((a.root / 'splits.json').read_text())['development'])
     if not set(a.examples) <= development:
         raise SystemExit('Examples must come from the development split')
-    examples = [all_datasets[i] for i in a.examples]
-    (a.run / 'config.json').write_text(json.dumps({'prompt': a.prompt, 'examples': a.examples, 'zoom': a.zoom}))
+    # Only datasets that are still public and unarchived may be sent, as targets or examples.
+    with analyst() as db:
+        eligible = {r['id'] for r in db.execute(
+            "SELECT id FROM v2_datasets WHERE id = ANY(%s) AND data_access = 'public' AND NOT archived",
+            (list(all_datasets),)).fetchall()}
+    dropped = sorted(set(a.examples) - eligible) + sorted(d['dataset_id'] for d in datasets if d['dataset_id'] not in eligible)
+    if dropped:
+        print({'skipped_not_public_or_archived': dropped}, flush=True)
+    datasets = [d for d in datasets if d['dataset_id'] in eligible]
+    examples = [all_datasets[i] for i in a.examples if i in eligible]
+    (a.run / 'config.json').write_text(json.dumps({'prompt': a.prompt, 'examples': [e['dataset_id'] for e in examples],
+                                                   'zoom': a.zoom}))
     with ThreadPoolExecutor(max_workers=a.workers) as pool:
         futures = {pool.submit(run_one, a.root, a.run, d, a.prompt, examples, a.zoom): d['dataset_id'] for d in datasets}
         for future in as_completed(futures):
