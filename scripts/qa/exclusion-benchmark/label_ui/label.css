@@ -65,3 +65,5 @@ ul.issues { margin: 4px 0 6px; padding-left: 16px; }
 ul.issues li { margin-bottom: 4px; }
 ul.issues li.minor { color: var(--muted); }
 button.goto { padding: 0 6px; margin-left: 4px; font-size: 12px; }
+.feedback { display: inline-flex; gap: 4px; margin-left: 6px; }
+.chip.small { padding: 0 7px; font-size: 12px; }

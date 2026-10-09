@@ -200,6 +200,15 @@ function renderSol() {
       const li = document.createElement('li');
       li.className = issue.severity;
       li.append(`${issue.mode.replace(/_/g, ' ')} (${issue.severity}): ${issue.evidence} `);
+      const fkey = `${s.run}:${layer}:${i}`;
+      const given = (label(current().dataset_id).issue_feedback || {})[fkey];
+      const fb = document.createElement('span'); fb.className = 'feedback';
+      for (const [value, text] of [['real_major', 'real, major'], ['real_minor', 'real, minor'], ['wrong', 'wrong']]) {
+        const c = document.createElement('span'); c.className = 'chip small' + (given === value ? ' on' : ''); c.textContent = text;
+        c.onclick = () => update((x) => { x.issue_feedback = Object.assign({}, x.issue_feedback); if (x.issue_feedback[fkey] === value) delete x.issue_feedback[fkey]; else x.issue_feedback[fkey] = value; });
+        fb.append(c);
+      }
+      li.append(fb);
       const targets = (issue.regions || []).length ? [...new Set(issue.regions.map((r) => normView(r.view)))] : (issue.views || []).map(normView);
       for (const t of [...new Set(targets)]) {
         const b = document.createElement('button'); b.className = 'goto'; b.textContent = t;
@@ -219,7 +228,7 @@ function update(change) {
   const next = structuredClone(label(id));
   change(next);
   state.labels[id] = next;
-  renderForm(); renderHeader();
+  renderForm(); renderHeader(); renderSol();
   save(id);
 }
 

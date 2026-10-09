@@ -19,6 +19,7 @@ SOL_RUNS = ('sol-issue-finder-v7-standing', 'sol-issue-finder-v6-boxes', 'sol-is
 LAYERS = ('deadwood', 'forest_cover')
 VERDICTS = ('keep', 'exclude', 'unsure')
 AREAS = ('lt5', '5to20', '20to50', 'gt50')
+ISSUE_FEEDBACK = ('real_major', 'real_minor', 'wrong')
 TAGS = {
     'deadwood': ('omission', 'partial_crowns', 'commission_ground', 'commission_vegetation',
                  'commission_snow_water', 'shadow', 'phenology', 'coverage_processing'),
@@ -47,6 +48,13 @@ def validate(value):
     if not set(value.get('imagery_tags', [])) <= set(TAGS['imagery']):
         raise ValueError('Invalid imagery tag')
     out['imagery_tags'] = sorted(set(value.get('imagery_tags', [])))
+    # Per-issue feedback on Sol's findings, keyed "run:layer:index".
+    feedback = value.get('issue_feedback', {})
+    if not isinstance(feedback, dict) or len(feedback) > 60 or any(
+            not re.fullmatch(r'sol-issue-finder-[\w-]+:(deadwood|forest_cover):\d{1,2}', k)
+            or v not in ISSUE_FEEDBACK for k, v in feedback.items()):
+        raise ValueError('Invalid issue feedback')
+    out['issue_feedback'] = feedback
     return out
 
 
@@ -191,7 +199,7 @@ def make_handler(bench):
                 return self.send_error(404)
             try:
                 length = int(self.headers.get('Content-Length', '0'))
-                if not 0 < length <= 8000:
+                if not 0 < length <= 16000:
                     raise ValueError('Invalid body size')
                 label = validate(json.loads(self.rfile.read(length)))
                 if label['dataset_id'] not in {d['dataset_id'] for d in bench.datasets}:
