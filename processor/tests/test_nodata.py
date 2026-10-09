@@ -15,7 +15,6 @@ import numpy as np
 import pytest
 import rasterio
 import rasterio.enums as CI
-from rasterio.errors import NodataShadowWarning
 from rasterio.transform import from_origin
 
 from rasterio.windows import Window
@@ -158,6 +157,7 @@ class FakeVRT:
 		self._extra = None if extra_band is None else np.asarray(extra_band, dtype=np.uint8).reshape(self._rgb.shape[1:])
 		self.count = self._rgb.shape[0] + (0 if self._extra is None else 1)
 		self.height, self.width = self._rgb.shape[1:]
+		self.colorinterp = None
 		self.nodata_policy = policy
 
 	def read_masks(self, band, window=None):
@@ -408,8 +408,54 @@ def test_e2e_alpha_band(tmp_path):
 	path = _write(tmp_path / 'alpha.tif', np.concatenate([rgb, alpha]), alpha=True)
 	vrt = image_reprojector(path)
 	try:
-		with pytest.warns(NodataShadowWarning):
-			_assert_left_nodata_right_data(read_nodata_mask(vrt), left, right)
+		_assert_left_nodata_right_data(read_nodata_mask(vrt), left, right)
+	finally:
+		vrt.close()
+
+
+@pytest.mark.parametrize('convention', ['internal_mask', 'nodata'])
+def test_e2e_extra_band_ortho_keeps_its_mask(tmp_path, convention):
+	# RGB+NIR: the warp's added alpha is the 5th band, which GDAL does not use as
+	# the mask of band 1, so read_nodata_mask must read it explicitly.
+	rgb, left, right = _split_data()
+	data = np.concatenate([rgb, np.full((1, 32, 32), 90, np.uint8)])
+	data[:, :, left] = 0
+	valid = np.full((32, 32), 255, np.uint8)
+	valid[:, left] = 0
+	if convention == 'internal_mask':
+		path = _write(tmp_path / 'rgbn_mask.tif', data, mask=valid)
+	else:
+		path = _write(tmp_path / 'rgbn_nodata.tif', data, nodata=0)
+	with rasterio.open(path, 'r+') as ds:  # GTiff tags a 4th Byte band as alpha by default
+		ds.colorinterp = [CI.ColorInterp.red, CI.ColorInterp.green, CI.ColorInterp.blue, CI.ColorInterp.undefined]
+	vrt = image_reprojector(path)
+	try:
+		assert vrt.count == 5
+		_assert_left_nodata_right_data(read_nodata_mask(vrt), left, right)
+	finally:
+		vrt.close()
+
+
+@pytest.mark.parametrize('convention', ['alpha', 'internal_mask'])
+def test_e2e_dark_valid_pixels_are_kept(tmp_path, convention):
+	# Regression for DT-1374 (dataset 14750): shaded spruce had red == 0 or was
+	# black in all bands. The old forced nodata=0 warp hid those valid pixels.
+	rgb, left, right = _split_data()
+	rgb[:, :, left] = 0  # declared nodata half
+	rgb[0, 4:28, 20:24] = 0  # valid pixels with red == 0
+	rgb[:, 4:28, 26:30] = 0  # valid pixels black in every band
+	valid = np.full((32, 32), 255, np.uint8)
+	valid[:, left] = 0
+	if convention == 'alpha':
+		path = _write(tmp_path / 'dark_alpha.tif', np.concatenate([rgb, valid[None]]), alpha=True)
+	else:
+		path = _write(tmp_path / 'dark_mask.tif', rgb, mask=valid)
+	vrt = image_reprojector(path)
+	try:
+		mask = read_nodata_mask(vrt)
+		_assert_left_nodata_right_data(mask, left, right)
+		assert not mask[4:28, 20:24].any(), 'red == 0 pixels must stay valid'
+		assert not mask[4:28, 26:30].any(), 'black content must stay valid'
 	finally:
 		vrt.close()
 
@@ -507,7 +553,7 @@ def test_e2e_plot_on_large_black_canvas_tiles(tmp_path):
 
 
 def test_read_mask_black_fill_accepts_warp_nudged_ones():
-	# GDAL 3.12 returns valid source zeros as 1 under the forced nodata=0 warp.
+	# Lossy black fill is often 1 rather than exactly 0.
 	rgb = np.full((3, 4, 4), 120, np.uint8)
 	rgb[:, :, :2] = 1
 	mask = read_nodata_mask(FakeVRT(rgb, np.zeros((4, 4), bool), NodataPolicy(treat_black_fill=True)))

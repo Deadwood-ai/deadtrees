@@ -10,10 +10,11 @@ Orthos in the archive use every nodata convention imaginable:
 * nothing at all, with the footprint simply padded in solid white or black.
 
 Every stage that reprojects an ortho (embeddings + all segmentation inferences)
-goes through :func:`image_reprojector`, which builds a ``WarpedVRT`` with a
-forced ``nodata=0``. That warp already makes ``vrt.read_masks(1)`` reflect a
-real alpha band, an internal mask, a declared nodata value AND the triangular
-warp border (all verified). So the only things GDAL cannot infer on its own —
+goes through :func:`image_reprojector`, which builds a ``WarpedVRT`` carrying an
+alpha band (the source's own, or one the warp adds). That makes
+``vrt.read_masks(1)`` reflect a real alpha band, an internal mask, a declared
+nodata value AND the triangular warp border, without hiding valid zero-valued
+pixels (all verified). So the only things GDAL cannot infer on its own —
 and therefore the only things this module adds — are a *mislabeled* binary mask
 band and, when the source carries no masking metadata whatsoever, a solid
 white/black fill fallback.
@@ -111,7 +112,7 @@ class NodataPolicy:
 	treat_black_fill: bool = False
 
 
-def _has_alpha_band(src) -> bool:
+def has_alpha_band(src) -> bool:
 	ci = src.colorinterp
 	return src.count >= 2 and bool(ci) and ci[-1] == rasterio.enums.ColorInterp.alpha
 
@@ -161,11 +162,11 @@ def resolve_nodata_policy(src) -> NodataPolicy:
 	"""Resolve, once per source, how to detect nodata beyond ``read_masks``.
 
 	Priority: a real alpha band / internal mask / declared nodata value are all
-	already reflected by ``read_masks`` on the forced-``nodata=0`` warp, so trust
+	already reflected by ``read_masks`` on the alpha-carrying warp, so trust
 	it and add nothing. Otherwise try to recover a mislabeled binary mask band;
 	failing that, fall back to solid white/black fill detection.
 	"""
-	if _has_alpha_band(src) or _has_internal_mask(src) or src.nodata is not None:
+	if has_alpha_band(src) or _has_internal_mask(src) or src.nodata is not None:
 		return NodataPolicy()
 
 	mask_band = _detect_mask_band(src)
@@ -233,8 +234,7 @@ def _solid_fill(vrt, window, policy: NodataPolicy) -> np.ndarray:
 	if policy.treat_white_fill:
 		fill |= np.all(rgb >= _WHITE_FILL_MIN, axis=0)
 	if policy.treat_black_fill:
-		# <= 1, not == 0: the warp's forced nodata=0 makes newer GDAL (3.12) nudge
-		# valid source zeros to 1 so they do not collide with the nodata value.
+		# <= 1, not == 0: lossy black fill is often 1 rather than exactly 0.
 		fill |= np.all(rgb <= _BLACK_FILL_MAX, axis=0)
 	return fill
 
@@ -312,7 +312,7 @@ def _padding_strip(handle, cell_row: int, strip_cells: int, cells_w: int, policy
 	row_off = cell_row * cell
 	rows = min(strip_cells * cell, handle.height - row_off)
 	window = Window(0, row_off, handle.width, rows)
-	known = handle.read_masks(1, window=window) == 0
+	known = _warp_nodata(handle, window)
 	blank = known | _solid_fill(handle, window, policy)
 
 	# Pad to whole cells. Beyond the raster is padding by definition.
@@ -384,7 +384,7 @@ def _fill_padding_mask(vrt, window, policy: NodataPolicy) -> np.ndarray:
 		return np.zeros((h, w), dtype=bool)
 	halo = Window(hc0, hr0, hc1 - hc0, hr1 - hr0)
 
-	known = vrt.read_masks(1, window=halo) == 0
+	known = _warp_nodata(vrt, halo)
 	fill = _solid_fill(vrt, halo, policy)
 	padding = _padding_map(vrt, policy)
 	rows = (hr0 + np.arange(hr1 - hr0)) // cell
@@ -418,6 +418,18 @@ def share_padding_map(from_vrt, to_vrt) -> None:
 		to_vrt._fill_padding_map = _padding_map(from_vrt, policy)
 
 
+def _warp_nodata(vrt, window) -> np.ndarray:
+	"""Boolean nodata from the warp itself: its mask plus its alpha band.
+
+	GDAL only treats the alpha band as the mask of 2- and 4-band rasters, so an
+	RGB+NIR source with the added alpha (5 bands) needs the alpha read explicitly.
+	"""
+	mask = vrt.read_masks(1, window=window) == 0
+	if has_alpha_band(vrt):
+		mask |= vrt.read(vrt.count, window=window) == 0
+	return mask
+
+
 def read_nodata_mask(vrt, window=None) -> np.ndarray:
 	"""Boolean nodata mask (``True`` = nodata) for a window of an image_reprojector VRT.
 
@@ -426,7 +438,7 @@ def read_nodata_mask(vrt, window=None) -> np.ndarray:
 	"""
 	policy = getattr(vrt, 'nodata_policy', None) or NodataPolicy()
 
-	mask = vrt.read_masks(1, window=window) == 0
+	mask = _warp_nodata(vrt, window)
 
 	if policy.mask_band is not None and policy.mask_band <= vrt.count:
 		mask = mask | (vrt.read(policy.mask_band, window=window) == 0)

@@ -3,6 +3,7 @@ import json
 import geopandas as gpd
 import numpy as np
 import rasterio
+import rasterio.enums
 import rasterio.warp
 import shapely
 from rasterio.vrt import WarpedVRT
@@ -10,7 +11,7 @@ from shapely.affinity import affine_transform
 from shapely.geometry import Polygon
 
 from .crs import get_utm_string_from_latlon
-from .nodata import resolve_nodata_policy
+from .nodata import has_alpha_band, resolve_nodata_policy
 
 
 def merge_polygons(contours, hierarchy):
@@ -114,6 +115,10 @@ def image_reprojector(input_tif, min_res=0, max_res=1e9):
 			resolution=target_res,
 		)
 
+	# Transparency travels as an alpha band: the source's own, or one GDAL adds
+	# from the source mask, nodata value and the warp border. A forced nodata
+	# value would also hide every valid pixel whose first band equals it, such as
+	# the darkest shadows of a stretched ortho (DT-1374).
 	vrt = WarpedVRT(
 		dataset,
 		crs=utm_crs,
@@ -121,12 +126,17 @@ def image_reprojector(input_tif, min_res=0, max_res=1e9):
 		width=width,
 		height=height,
 		dtype='uint8',
-		nodata=0,
+		add_alpha=not has_alpha_band(dataset),
 	)
 	# Resolve nodata handling once from the source and stash it on the VRT so
 	# every consumer gets a correct mask via read_nodata_mask() — see nodata.py.
 	vrt.nodata_policy = resolve_nodata_policy(dataset)
 	return vrt
+
+
+def image_band_indexes(vrt) -> list[int]:
+	"""Up to three image bands of an image_reprojector VRT, leaving out its alpha band."""
+	return [i for i, ci in enumerate(vrt.colorinterp, start=1) if ci != rasterio.enums.ColorInterp.alpha][:3]
 
 
 def reproject_polygons(polygons, src_crs, dst_crs):
