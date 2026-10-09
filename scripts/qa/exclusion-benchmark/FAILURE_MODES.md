@@ -21,8 +21,8 @@ that only move a few square metres (loose outlines, one missed sapling) are not 
 | 4 | **Lying wood marked dead** | Deadwood | Blue on fallen trunks, logs, debris (common in burned and storm sites) | 10 / 3, and your box verdicts | Overestimates standing mortality |
 | 5 | **Trees missed** | Forest | Tree canopy or whole stands without gold | 108 / 38 | Underestimates forest, distorts the denominator for deadwood share |
 | 6 | **Non-trees marked as forest** | Forest | Gold on shrubs, crops, grass, ground or roofs, including filled gaps between crowns | 110 / 36 (shrubs/crops 66, gaps 40) | Overestimates forest |
-| 8 | **Dead trees left out of forest** | Forest | Standing dead trees (often blue) with no gold, so forest has holes where dead trees stand | 28 / 7 (forest notes on dead or brown trees) | Underestimates forest exactly where mortality is, which biases the deadwood share |
 | 7 | **Processing artifacts** | Both | Straight tile seams, rectangular holes or blocks, missing or cut-off layer, stripes | 213 / 77 (forest 152, deadwood 61) | Blocks of zero or full cover, large bias |
+| 8 | **Dead trees left out of forest** | Forest | Standing dead trees (often blue) with no gold, so forest has holes where dead trees stand | 28 / 7 (forest notes on dead or brown trees) | Underestimates forest exactly where mortality is, which biases the deadwood share |
 
 Season and phenology (leaf-off, autumn colours) are **not** a prediction failure mode here:
 they are a separate audit step (has_valid_phenology), decided before prediction quality.
