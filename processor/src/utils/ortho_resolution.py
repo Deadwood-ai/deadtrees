@@ -73,16 +73,23 @@ def mission_extent(reconstructions: list[dict]) -> MissionExtent | None:
 
 
 def budgeted_resolution_cm(requested_cm: float, extent: MissionExtent, max_pixels: float) -> float:
-	"""The resolution to request: ``requested_cm`` unless the raster at the mission's GSD would exceed ``max_pixels``."""
+	"""The resolution to request: ``requested_cm``, or the finest resolution whose raster fits ``max_pixels``.
+
+	ODM renders at the coarser of this request and its own GSD estimate (which it shrinks by
+	10%, opendm/gsd.py ``cap_resolution``), so a mission whose GSD is already coarser still
+	renders exactly as before; only its request changes.
+	"""
 	finest_cm = math.sqrt(extent.width_m * extent.height_m / max_pixels) * 100
-	if finest_cm <= max(requested_cm, extent.gsd_cm):
+	if finest_cm <= requested_cm:
 		return requested_cm
 	# Round up to the next millimetre so the logged value is readable and still within budget.
 	return math.ceil(finest_cm * 10) / 10
 
 
-def reduced_resolution_note(resolution_cm: float, extent: MissionExtent) -> str:
-	"""Text for the dataset's additional information when the cap lowered the resolution."""
+def reduced_resolution_note(resolution_cm: float, extent: MissionExtent) -> str | None:
+	"""Text for the dataset's additional information, or None when the cap is not coarser than native GSD."""
+	if resolution_cm <= extent.gsd_cm:
+		return None
 	return (
 		f'Orthophoto generated at {resolution_cm:g} cm instead of the native ~{extent.gsd_cm:.1f} cm '
 		f'because of its size ({extent.width_m / 1000:.1f} x {extent.height_m / 1000:.1f} km).'

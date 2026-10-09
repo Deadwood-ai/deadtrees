@@ -53,12 +53,19 @@ def test_extent_needs_cameras_and_points():
 
 
 def test_missions_within_budget_keep_the_requested_resolution():
-	assert budgeted_resolution_cm(1.0, MissionExtent(1000, 1000, 1.5), 8.5e9) == 1.0
+	assert budgeted_resolution_cm(1.0, MissionExtent(900, 900, 1.5), 8.5e9) == 1.0
 
 
-def test_coarse_gsd_that_already_fits_is_left_to_odm():
-	# 20 km² at 5 cm GSD is 8 Gpx: ODM renders at GSD, nothing to change.
-	assert budgeted_resolution_cm(1.0, MissionExtent(4000, 5000, 5.0), 8.5e9) == 1.0
+def test_near_budget_missions_are_capped_even_when_their_gsd_looks_coarse_enough():
+	# ODM renders 10% finer than its GSD estimate: at 4.5 cm this 20 km² mission would be 9.9 Gpx.
+	extent = MissionExtent(4000, 5000, 5.0)
+
+	resolution = budgeted_resolution_cm(1.0, extent, 8.5e9)
+
+	assert resolution == 4.9
+	assert 4000 * 5000 / (resolution / 100) ** 2 <= 8.5e9
+	# Not coarser than the native GSD, so the dataset gets no reduced-resolution note.
+	assert reduced_resolution_note(resolution, extent) is None
 
 
 def test_large_missions_get_the_finest_resolution_that_fits():
