@@ -67,3 +67,16 @@ ul.issues li.minor { color: var(--muted); }
 button.goto { padding: 0 6px; margin-left: 4px; font-size: 12px; }
 .feedback { display: inline-flex; gap: 4px; margin-left: 6px; }
 .chip.small { padding: 0 7px; font-size: 12px; }
+.mark.issue { pointer-events: auto; cursor: pointer; }
+.mark.user { border: 3px solid #3ddc84; pointer-events: auto; cursor: pointer; }
+.mark.user.drafting { border-style: dashed; pointer-events: none; }
+.mark.fb-right { border-color: #3ddc84; }
+.mark.fb-wrong { border-color: #8a8f96; border-style: dotted; }
+#popover { position: absolute; z-index: 5; width: 290px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .5); cursor: default; }
+#popover[hidden] { display: none; }
+#popover .title { font-weight: 600; }
+#popover .sol-only, #popover .user-only, #popover .actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+#popover input, #popover select { background: #20262c; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; }
+.hint-inline { color: var(--muted); font-size: 12px; }
+#popover [hidden] { display: none !important; }

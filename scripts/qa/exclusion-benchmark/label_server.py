@@ -20,6 +20,7 @@ LAYERS = ('deadwood', 'forest_cover')
 VERDICTS = ('keep', 'exclude', 'unsure')
 AREAS = ('lt5', '5to20', '20to50', 'gt50')
 ISSUE_FEEDBACK = ('real_major', 'real_minor', 'wrong')
+USER_BOX_KINDS = ('missed_by_sol', 'real_error', 'correct_prediction', 'not_a_tree', 'note')
 TAGS = {
     'deadwood': ('omission', 'partial_crowns', 'commission_ground', 'commission_vegetation',
                  'commission_snow_water', 'shadow', 'phenology', 'coverage_processing'),
@@ -55,6 +56,26 @@ def validate(value):
             or v not in ISSUE_FEEDBACK for k, v in feedback.items()):
         raise ValueError('Invalid issue feedback')
     out['issue_feedback'] = feedback
+    # Verdicts on individual Sol boxes, keyed "run:layer:issue:region".
+    boxes = value.get('box_feedback', {})
+    if not isinstance(boxes, dict) or len(boxes) > 200 or any(
+            not re.fullmatch(r'sol-issue-finder-[\w-]+:(deadwood|forest_cover):\d{1,2}:\d{1,2}', k)
+            or not isinstance(v, dict) or v.get('verdict') not in ('right', 'wrong', None)
+            for k, v in boxes.items()):
+        raise ValueError('Invalid box feedback')
+    out['box_feedback'] = {k: {'verdict': v.get('verdict'), 'note': str(v.get('note', ''))[:300]} for k, v in boxes.items()}
+    # Boxes drawn by the reviewer on a view, in that view's pixels.
+    drawn = value.get('user_boxes', [])
+    if not isinstance(drawn, list) or len(drawn) > 50:
+        raise ValueError('Invalid drawn boxes')
+    out['user_boxes'] = []
+    for b in drawn:
+        box = [int(v) for v in b.get('box', [])]
+        if (len(box) != 4 or not re.fullmatch(r'(O|G[1-9]|N[1-4])', str(b.get('view', '')))
+                or b.get('layer') not in LAYERS or b.get('kind') not in USER_BOX_KINDS):
+            raise ValueError('Invalid drawn box')
+        out['user_boxes'].append({'id': str(b.get('id', ''))[:20], 'view': b['view'], 'box': box,
+                                  'layer': b['layer'], 'kind': b['kind'], 'note': str(b.get('note', ''))[:300]})
     return out
 
 
@@ -199,7 +220,7 @@ def make_handler(bench):
                 return self.send_error(404)
             try:
                 length = int(self.headers.get('Content-Length', '0'))
-                if not 0 < length <= 16000:
+                if not 0 < length <= 64000:
                     raise ValueError('Invalid body size')
                 label = validate(json.loads(self.rfile.read(length)))
                 if label['dataset_id'] not in {d['dataset_id'] for d in bench.datasets}:

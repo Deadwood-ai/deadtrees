@@ -37,18 +37,26 @@ function views(d) {
 function marks(d, view) {
   // Sol's issue boxes and zoom footprints that fall on this view, in its pixels.
   const out = [];
-  if (!d.sol || view.file) return out;
-  for (const layer of LAYERS) {
+  if (view.file) return out;
+  for (const layer of d.sol ? LAYERS : []) {
     (d.sol[layer].issues || []).forEach((issue, i) => {
       for (const r of issue.regions || []) {
         if (normView(r.view) === viewId(view) && Array.isArray(r.box) && r.box.length === 4) {
-          out.push({ box: r.box, label: `${layer === 'deadwood' ? 'DW' : 'FC'} ${issue.mode.replace(/_/g, ' ')}`,
-            key: `${layer}:${i}`, cls: `mark ${layer} ${issue.severity}` });
+          const fkey = `${d.sol.run}:${layer}:${i}:${issue.regions.indexOf(r)}`;
+          const fb = (label(d.dataset_id).box_feedback || {})[fkey];
+          out.push({ box: r.box, label: `${layer === 'deadwood' ? 'DW' : 'FC'} ${issue.mode.replace(/_/g, ' ')}${fb && fb.verdict ? (fb.verdict === 'right' ? ' ✓' : ' ✗') : ''}`,
+            key: `${layer}:${i}`, fkey, cls: `mark issue ${layer} ${issue.severity}${fb && fb.verdict ? ` fb-${fb.verdict}` : ''}` });
         }
       }
     });
   }
-  for (const z of d.sol.zooms || []) {
+  for (const u of label(d.dataset_id).user_boxes || []) {
+    if (u.view === viewId(view)) {
+      out.push({ box: u.box, label: `you · ${u.layer === 'deadwood' ? 'DW' : 'FC'} ${u.kind.replace(/_/g, ' ')}${u.note ? `: ${u.note}` : ''}`,
+        key: u.id, user: u, cls: 'mark user' });
+    }
+  }
+  for (const z of (d.sol && d.sol.zooms) || []) {
     if (normView(z.view) === viewId(view)) out.push({ box: z.rect, label: z.name, key: z.name, cls: 'mark zoom' });
   }
   return out;
@@ -82,6 +90,10 @@ function renderViewer() {
       width: `${Math.abs(x1 - x0)}px`, height: `${Math.abs(y1 - y0)}px` });
     const tag = document.createElement('span'); tag.textContent = m.label; el.append(tag);
     el.hidden = !$('#show-marks').checked;
+    if (m.fkey || m.user) {
+      el.addEventListener('pointerdown', (e) => e.stopPropagation());
+      el.addEventListener('click', (e) => { e.stopPropagation(); openPopover(e, m); });
+    }
     box.append(el);
   }
   const pf = view.predicted_fraction;
@@ -258,7 +270,82 @@ stage.addEventListener('wheel', (e) => {
   const k = Math.exp(-e.deltaY * 0.0015); const px = e.clientX - r.left, py = e.clientY - r.top;
   z.x = px - (px - z.x) * k; z.y = py - (py - z.y) * k; z.s *= k; applyZoom();
 }, { passive: false });
+function closePopover() { $('#popover').hidden = true; }
+$('#popover').addEventListener('pointerdown', (e) => e.stopPropagation());
+$('#popover').addEventListener('wheel', (e) => e.stopPropagation());
+function openPopover(e, m) {
+  // m.fkey: Sol box verdict; m.user: edit a drawn box; m.draft: new drawn box.
+  const pop = $('#popover');
+  const d = current();
+  const l = label(d.dataset_id);
+  const isSol = Boolean(m.fkey);
+  const existing = isSol ? (l.box_feedback || {})[m.fkey] || {} : m.user || m.draft;
+  pop.querySelector('.title').textContent = isSol ? m.label.replace(/ [✓✗]$/, '') : m.user ? 'Your box' : 'New box';
+  pop.querySelector('.sol-only').hidden = !isSol;
+  pop.querySelector('.user-only').hidden = isSol;
+  pop.querySelector('.delete').hidden = !m.user;
+  pop.querySelector('[name=note]').value = existing.note || '';
+  if (!isSol) {
+    pop.querySelector('[name=layer]').value = existing.layer || 'deadwood';
+    pop.querySelector('[name=kind]').value = existing.kind || 'missed_by_sol';
+  }
+  pop.querySelectorAll('.sol-only .chip').forEach((c) => c.classList.toggle('on', existing.verdict === c.dataset.value));
+  const save = (verdict) => {
+    const note = pop.querySelector('[name=note]').value.trim();
+    update((x) => {
+      if (isSol) {
+        x.box_feedback = Object.assign({}, x.box_feedback);
+        if (verdict === null) delete x.box_feedback[m.fkey]; else x.box_feedback[m.fkey] = { verdict, note };
+      } else {
+        const entry = { id: (m.user || m.draft).id, view: (m.user || m.draft).view, box: (m.user || m.draft).box,
+          layer: pop.querySelector('[name=layer]').value, kind: pop.querySelector('[name=kind]').value, note };
+        x.user_boxes = (x.user_boxes || []).filter((u) => u.id !== entry.id);
+        if (verdict !== 'delete') x.user_boxes.push(entry);
+      }
+    });
+    closePopover(); renderViewer(); renderThumbs();
+  };
+  pop.querySelectorAll('.sol-only .chip').forEach((c) => { c.onclick = () => save(c.dataset.value); });
+  pop.querySelector('.clear').onclick = () => save(null);
+  pop.querySelector('.save').onclick = () => save(isSol ? existing.verdict || null : 'keep');
+  pop.querySelector('.delete').onclick = () => save('delete');
+  pop.querySelector('.cancel').onclick = closePopover;
+  const r = $('#stage').getBoundingClientRect();
+  pop.style.left = `${Math.min(e.clientX - r.left + 8, r.width - 300)}px`;
+  pop.style.top = `${Math.min(e.clientY - r.top + 8, r.height - 230)}px`;
+  pop.hidden = false;
+  pop.querySelector('[name=note]').focus();
+}
+function toImage(e) {
+  const r = $('#stage').getBoundingClientRect(); const z = state.zoom;
+  return [Math.round((e.clientX - r.left - z.x) / z.s), Math.round((e.clientY - r.top - z.y) / z.s)];
+}
 stage.addEventListener('pointerdown', (e) => {
+  closePopover();
+  const view = views(current())[state.view];
+  if (e.shiftKey && !view.file) {
+    // Shift-drag draws a reviewer box in this view's pixels.
+    const a = toImage(e);
+    const draft = document.createElement('div'); draft.className = 'mark user drafting'; $('#layers').append(draft);
+    stage.setPointerCapture(e.pointerId);
+    const drawMove = (m) => {
+      const b = toImage(m);
+      Object.assign(draft.style, { left: `${Math.min(a[0], b[0])}px`, top: `${Math.min(a[1], b[1])}px`,
+        width: `${Math.abs(b[0] - a[0])}px`, height: `${Math.abs(b[1] - a[1])}px` });
+    };
+    const drawEnd = (m) => {
+      stage.removeEventListener('pointermove', drawMove);
+      const b = toImage(m);
+      draft.remove();
+      if (Math.abs(b[0] - a[0]) < 6 || Math.abs(b[1] - a[1]) < 6) return;
+      const clamp = (v, max) => Math.max(0, Math.min(max, v));
+      const box = [clamp(Math.min(a[0], b[0]), view.size[0]), clamp(Math.min(a[1], b[1]), view.size[1]),
+        clamp(Math.max(a[0], b[0]), view.size[0]), clamp(Math.max(a[1], b[1]), view.size[1])];
+      openPopover(m, { draft: { id: `u${Date.now().toString(36)}`, view: viewId(view), box } });
+    };
+    stage.addEventListener('pointermove', drawMove); stage.addEventListener('pointerup', drawEnd, { once: true });
+    return;
+  }
   const start = { x: e.clientX, y: e.clientY, zx: state.zoom.x, zy: state.zoom.y };
   stage.classList.add('dragging'); stage.setPointerCapture(e.pointerId);
   const moveDrag = (m) => { state.zoom.x = start.zx + m.clientX - start.x; state.zoom.y = start.zy + m.clientY - start.y; applyZoom(); };
@@ -275,7 +362,10 @@ $('#next').onclick = () => move(1);
 $('#filter').onchange = () => { if (!visible().includes(current())) move(0); else renderHeader(); };
 window.addEventListener('resize', fit);
 document.addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'TEXTAREA') { if (e.key === 'Escape') e.target.blur(); return; }
+  if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') {
+    if (e.key === 'Escape') { e.target.blur(); closePopover(); }
+    return;
+  }
   const key = e.key;
   const toggle = (id) => { $(id).checked = !$(id).checked; renderViewer(); };
   if (key === 'n') move(1); else if (key === 'p') move(-1);
