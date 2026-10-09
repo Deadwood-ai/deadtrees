@@ -157,6 +157,7 @@ class FakeVRT:
 		self._extra = None if extra_band is None else np.asarray(extra_band, dtype=np.uint8).reshape(self._rgb.shape[1:])
 		self.count = self._rgb.shape[0] + (0 if self._extra is None else 1)
 		self.height, self.width = self._rgb.shape[1:]
+		self.colorinterp = None
 		self.nodata_policy = policy
 
 	def read_masks(self, band, window=None):
@@ -407,6 +408,29 @@ def test_e2e_alpha_band(tmp_path):
 	path = _write(tmp_path / 'alpha.tif', np.concatenate([rgb, alpha]), alpha=True)
 	vrt = image_reprojector(path)
 	try:
+		_assert_left_nodata_right_data(read_nodata_mask(vrt), left, right)
+	finally:
+		vrt.close()
+
+
+@pytest.mark.parametrize('convention', ['internal_mask', 'nodata'])
+def test_e2e_extra_band_ortho_keeps_its_mask(tmp_path, convention):
+	# RGB+NIR: the warp's added alpha is the 5th band, which GDAL does not use as
+	# the mask of band 1, so read_nodata_mask must read it explicitly.
+	rgb, left, right = _split_data()
+	data = np.concatenate([rgb, np.full((1, 32, 32), 90, np.uint8)])
+	data[:, :, left] = 0
+	valid = np.full((32, 32), 255, np.uint8)
+	valid[:, left] = 0
+	if convention == 'internal_mask':
+		path = _write(tmp_path / 'rgbn_mask.tif', data, mask=valid)
+	else:
+		path = _write(tmp_path / 'rgbn_nodata.tif', data, nodata=0)
+	with rasterio.open(path, 'r+') as ds:  # GTiff tags a 4th Byte band as alpha by default
+		ds.colorinterp = [CI.ColorInterp.red, CI.ColorInterp.green, CI.ColorInterp.blue, CI.ColorInterp.undefined]
+	vrt = image_reprojector(path)
+	try:
+		assert vrt.count == 5
 		_assert_left_nodata_right_data(read_nodata_mask(vrt), left, right)
 	finally:
 		vrt.close()

@@ -312,7 +312,7 @@ def _padding_strip(handle, cell_row: int, strip_cells: int, cells_w: int, policy
 	row_off = cell_row * cell
 	rows = min(strip_cells * cell, handle.height - row_off)
 	window = Window(0, row_off, handle.width, rows)
-	known = handle.read_masks(1, window=window) == 0
+	known = _warp_nodata(handle, window)
 	blank = known | _solid_fill(handle, window, policy)
 
 	# Pad to whole cells. Beyond the raster is padding by definition.
@@ -384,7 +384,7 @@ def _fill_padding_mask(vrt, window, policy: NodataPolicy) -> np.ndarray:
 		return np.zeros((h, w), dtype=bool)
 	halo = Window(hc0, hr0, hc1 - hc0, hr1 - hr0)
 
-	known = vrt.read_masks(1, window=halo) == 0
+	known = _warp_nodata(vrt, halo)
 	fill = _solid_fill(vrt, halo, policy)
 	padding = _padding_map(vrt, policy)
 	rows = (hr0 + np.arange(hr1 - hr0)) // cell
@@ -418,6 +418,18 @@ def share_padding_map(from_vrt, to_vrt) -> None:
 		to_vrt._fill_padding_map = _padding_map(from_vrt, policy)
 
 
+def _warp_nodata(vrt, window) -> np.ndarray:
+	"""Boolean nodata from the warp itself: its mask plus its alpha band.
+
+	GDAL only treats the alpha band as the mask of 2- and 4-band rasters, so an
+	RGB+NIR source with the added alpha (5 bands) needs the alpha read explicitly.
+	"""
+	mask = vrt.read_masks(1, window=window) == 0
+	if has_alpha_band(vrt):
+		mask |= vrt.read(vrt.count, window=window) == 0
+	return mask
+
+
 def read_nodata_mask(vrt, window=None) -> np.ndarray:
 	"""Boolean nodata mask (``True`` = nodata) for a window of an image_reprojector VRT.
 
@@ -426,7 +438,7 @@ def read_nodata_mask(vrt, window=None) -> np.ndarray:
 	"""
 	policy = getattr(vrt, 'nodata_policy', None) or NodataPolicy()
 
-	mask = vrt.read_masks(1, window=window) == 0
+	mask = _warp_nodata(vrt, window)
 
 	if policy.mask_band is not None and policy.mask_band <= vrt.count:
 		mask = mask | (vrt.read(policy.mask_band, window=window) == 0)
