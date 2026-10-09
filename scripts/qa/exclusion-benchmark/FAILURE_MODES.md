@@ -36,7 +36,7 @@ only match one written rule.
 
 1. **Dead trees in the forest layer**: is a standing dead tree "forest"? (28 audit notes
    say forest misses dead trees; v5 told Sol not to count it.)
-2. **Lying wood**: never deadwood? (your verdicts: yes, never.)
+2. **Lying wood**: DECIDED (Janusch, 9 Oct): lying trunks, logs and debris are never deadwood.
 3. **Partial crowns**: when does a partly dead crown count as missed deadwood?
 4. **Shrubs vs trees**: is there a size or height cut (e.g. 1 m, 3 m) for forest?
 5. **How big is "substantial"**: proposal below (more than about 20% of the crop's own class
