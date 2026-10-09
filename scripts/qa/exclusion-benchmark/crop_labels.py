@@ -16,7 +16,7 @@ import threading
 from decisions_crops import PREDICATES
 from score_benchmark import truth
 
-QUESTIONS = PREDICATES['icl']
+QUESTIONS = PREDICATES['icl']  # overridden by --questions
 UI = Path(__file__).parent / 'label_ui' / 'crops.html'
 MODEL_RUN = 'decisions-crop-test-tuned1-strict'
 
@@ -114,7 +114,7 @@ def make_handler(root, crops, store):
                     if f.exists():
                         model[c['id']] = json.loads(f.read_text())['answers']
                 return self.send(200, 'application/json', json.dumps(
-                    {'crops': crops, 'questions': QUESTIONS, 'model_questions': PREDICATES['tuned1'],
+                    {'crops': crops, 'questions': QUESTIONS, 'model_questions': QUESTIONS if MODEL_RUN.endswith('gold7') else PREDICATES['tuned1'],
                      'model': model, 'labels': store.all()}).encode())
             name = path.removeprefix('/files/')
             if path.startswith('/files/') and name in files:
@@ -142,14 +142,21 @@ if __name__ == '__main__':
     p.add_argument('--port', type=int, default=8772)
     p.add_argument('--count', type=int, default=20)
     p.add_argument('--add-patches', type=int, nargs='*', help='append reference patches as extra test crops')
+    p.add_argument('--crops-file', default='crop-test.json')
+    p.add_argument('--db', default='crop-labels.sqlite3')
+    p.add_argument('--questions', default='icl')
+    p.add_argument('--model-run', default=None, help='run folder whose answers are shown next to the buttons')
     a = p.parse_args()
-    crop_file = a.root / 'crop-test.json'
+    QUESTIONS = PREDICATES[a.questions]
+    if a.model_run is not None:
+        MODEL_RUN = a.model_run
+    crop_file = a.root / a.crops_file
     if not crop_file.exists():
         crop_file.write_text(json.dumps(pick(a.root, a.count), indent=1))
     if a.add_patches:
         add_patches(a.root, a.add_patches)
     crops = json.loads(crop_file.read_text())
     crops.sort(key=lambda c: c.get('batch', 1))
-    server = ThreadingHTTPServer(('127.0.0.1', a.port), make_handler(a.root, crops, Store(a.root / 'crop-labels.sqlite3')))
+    server = ThreadingHTTPServer(('127.0.0.1', a.port), make_handler(a.root, crops, Store(a.root / a.db)))
     print(f'Crop labeling: http://127.0.0.1:{a.port}/ ({len(crops)} crops)', flush=True)
     server.serve_forever()

@@ -48,7 +48,7 @@ textarea { width: 100%; background: #20262c; color: var(--text); border: 1px sol
     <div class="panel"><span class="cap">Forest (gold)</span><div class="inner"></div></div>
   </section>
   <aside>
-    <p class="hint">Image 1 = Raw, Image 2 = Deadwood (blue), Image 3 = Forest (gold). Answer each question for this crop only. Yes = the problem is there. Keys: 1–8 cycle yes / no / ? (don't know) / blank, u marks the whole crop as unclear, n / p next and previous, wheel and drag zoom all panels together, double-click resets.</p>
+    <p class="hint">Image 1 = Raw, Image 2 = Deadwood (blue), Image 3 = Forest (gold). Answer each question for this crop only. Yes = the problem is there (for the first question: Yes = the crop can be judged). Count a problem only when it is substantial: roughly 20% or more of that layer in the crop, or 5% or more of the crop area. Lying wood is never deadwood. Keys: 1–8 cycle yes / no / ? (don't know) / blank, u marks the whole crop as unclear, n / p next and previous, wheel and drag zoom all panels together, double-click resets.</p>
     <button id="unclear" title="Mark every question as don't know (u)">Can't tell what this shows (u)</button>
     <div id="questions"></div>
     <textarea id="note" rows="3" placeholder="Optional note"></textarea>
@@ -107,7 +107,7 @@ function renderQuestions() {
 function render() {
   const c = cur();
   $('#pos').textContent = `${st.i + 1} / ${st.crops.length}`;
-  $('#meta').textContent = `Dataset ${c.dataset_id} · ${c.view.toUpperCase()} · ${(c.mpp * 100).toFixed(1)} cm/px${c.batch === 2 ? ' · simpler set' : c.batch === 3 ? ' · new (model run once, untuned)' : ''}`;
+  $('#meta').textContent = `Dataset ${c.dataset_id} · ${c.view.toUpperCase()} · ${(c.mpp * 100).toFixed(1)} cm/px${c.batch === 2 ? ' · simpler set' : c.batch === 3 ? ' · new (model run once, untuned)' : ''}${c.split ? ` · ${c.source}` : ''}`;
   $('#progress').textContent = `${st.crops.filter(done).length} of ${st.crops.length} done`;
   history.replaceState(null, '', `?crop=${c.id}`);
   renderPanels(); renderQuestions();

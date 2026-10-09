@@ -101,6 +101,18 @@ PREDICATES = {
         'fc_co_nontree_any': 'Some gold areas cover things that are not tree canopy.',
         'fc_co_blocky': 'Gold forms large smooth blobs or blocks that do not follow individual tree crowns.',
     },
+    # gold7: the seven failure modes of FAILURE_MODES.md plus an assessability gate. The same
+    # wording is shown to the human labeler, so answers compare one to one.
+    'gold7': {
+        'm0_assessable': 'This crop can be judged: the image is sharp enough and the trees or ground are clearly visible.',
+        'm1_dead_missed': 'Dead trees missed: clearly visible standing dead or dying trees (grey, white, burnt or brown), or large dead parts of crowns, have no blue.',
+        'm2_dw_on_live_vegetation': 'Live vegetation marked dead: blue covers living trees, shrubs, grass or crops with green or coloured foliage.',
+        'm3_dw_on_non_vegetation': 'Non-vegetation marked dead: blue covers ground, rock, roads, roofs, water, snow or deep shadow.',
+        'm4_dw_on_lying_wood': 'Lying wood marked dead: blue covers lying trunks, logs or debris on the ground.',
+        'm5_fc_trees_missed': 'Trees missed: clearly visible tree canopy has no gold.',
+        'm6_fc_on_non_trees': 'Non-trees marked as forest: gold covers shrubs, crops, grass, bare ground or roofs, or fills open gaps between crowns.',
+        'm7_artifact': 'Processing artifact: straight tile seams, rectangular holes or blocks, or a layer that is cut off or missing.',
+    },
     # Perception check: can it even see the overlays? Truth is the rendered mask itself.
     'perception': {
         'any_blue': 'Image 2 contains blue overlay polygons anywhere.',
