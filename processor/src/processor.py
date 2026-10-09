@@ -31,6 +31,7 @@ from .process_georef_check import process_georef_check
 from .process_metadata import process_metadata
 from .exceptions import AuthenticationError, ProcessingError
 from .utils.linear_issues import report_processing_failure
+from .utils.memory_release import release_process_memory
 from .utils.drain_control import (
 	BackgroundProcessResult,
 	acknowledge_drain_request,
@@ -423,6 +424,12 @@ def process_task(task: QueueTask, token: str):
 	# remove processing path if it exists
 	if Path(settings.processing_path).exists():
 		shutil.rmtree(settings.processing_path, ignore_errors=True)
+	rss_before, rss_after = release_process_memory()
+	if rss_before is not None:
+		logger.info(
+			f'Processor memory before task: {rss_before:.1f} GB resident, {rss_after:.1f} GB after release',
+			LogContext(category=LogCategory.PROCESS, dataset_id=task.dataset_id, user_id=task.user_id, token=token),
+		)
 
 	try:
 		downstream_without_geotiff = downstream_tasks_missing_geotiff(task.task_types)
