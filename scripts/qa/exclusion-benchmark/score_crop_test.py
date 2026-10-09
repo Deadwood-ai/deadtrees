@@ -12,7 +12,7 @@ import sqlite3
 import numpy as np
 from sklearn.metrics import roc_auc_score
 
-from decisions_crops import PREDICATES, body, load_images, post, read_key
+from decisions_crops import CONTEXTS, PREDICATES, body, load_images, post, read_key
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
@@ -20,6 +20,7 @@ if __name__ == '__main__':
     p.add_argument('--run', type=Path, required=True)
     p.add_argument('--key-file', type=Path, required=True)
     p.add_argument('--predicates', default='icl')
+    p.add_argument('--context', choices=sorted(CONTEXTS), default='default')
     a = p.parse_args()
     crops = json.loads((a.root / 'crop-test.json').read_text())
     labels = {r[0]: json.loads(r[1]) for r in sqlite3.connect(a.root / 'crop-labels.sqlite3').execute(
@@ -38,7 +39,7 @@ if __name__ == '__main__':
             evidence = json.loads((a.root / 'datasets' / str(c['dataset_id']) / 'evidence.json').read_text())
             view = next(v for v in evidence['views'] if v['name'] == c['view'])
             imgs = load_images(a.root, c['dataset_id'], view)
-        raw = post(body(imgs, view, PREDICATES[a.predicates]), key, 100)
+        raw = post(body(imgs, view, PREDICATES[a.predicates], CONTEXTS[a.context]), key, 100)
         r = {'crop': c['id'], 'answers': {x['name']: x.get('probability') for x in raw.get('answers', [])
                                           if x.get('type') == 'predicate'}}
         out.write_text(json.dumps(r))
