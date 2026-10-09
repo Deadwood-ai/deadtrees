@@ -82,6 +82,13 @@ function renderViewer() {
     img.hidden = !$(`#show-${layer}`).checked;
     img.style.opacity = mode === 'fill' ? $('#opacity').value / 100 : 1;
   }
+  for (const layer of LAYERS) {
+    const name = `${view.name}-${layer}-seams.png`;
+    if ((d.seams || []).includes(name)) {
+      const img = add(`/files/lint/${d.dataset_id}/${name}`, 'overlay seams');
+      img.hidden = !$('#show-seams').checked || !$(`#show-${layer}`).checked;
+    }
+  }
   for (const m of marks(d, view)) {
     const el = document.createElement('div');
     el.className = m.cls + (state.highlight && state.highlight === m.key ? ' highlight' : '');
@@ -179,6 +186,7 @@ function renderAudit() {
     ['Overall', (a.final_assessment || '—').replace(/_/g, ' ')],
     ['In season', a.has_valid_phenology === false ? 'no' : a.has_valid_phenology ? 'yes' : '—'],
     ['Audited', `${(a.audit_date || '').slice(0, 10)} by ${a.auditor || '?'}`],
+    ['Tile seams', current().lint ? `forest ${current().lint.forest_cover.straight_m} m (${current().lint.forest_cover.runs}), deadwood ${current().lint.deadwood.straight_m} m` : '—'],
     ['Why picked', [ROLE[a.role], ...Object.entries(a.tags || {}).map(([l, t]) => `${l === 'deadwood' ? 'DW' : 'FC'}: ${t.join(', ').replace(/_/g, ' ')}`)].filter(Boolean).join(' · ')],
   ];
   $('#audit-body').replaceChildren(...rows.flatMap(([k, v, cls, note]) => {
@@ -354,8 +362,8 @@ stage.addEventListener('pointerdown', (e) => {
 });
 stage.addEventListener('dblclick', fit);
 
-for (const id of ['show-deadwood', 'show-forest_cover', 'outline', 'show-marks']) $(`#${id}`).addEventListener('change', renderViewer);
-$('#opacity').addEventListener('input', () => document.querySelectorAll('.overlay').forEach((i) => { if (!$('#outline').checked) i.style.opacity = $('#opacity').value / 100; }));
+for (const id of ['show-deadwood', 'show-forest_cover', 'outline', 'show-marks', 'show-seams']) $(`#${id}`).addEventListener('change', renderViewer);
+$('#opacity').addEventListener('input', () => document.querySelectorAll('.overlay:not(.seams)').forEach((i) => { if (!$('#outline').checked) i.style.opacity = $('#opacity').value / 100; }));
 $('#fit').onclick = fit;
 $('#prev').onclick = () => move(-1);
 $('#next').onclick = () => move(1);
@@ -372,6 +380,7 @@ document.addEventListener('keydown', (e) => {
   else if (key === 'ArrowRight') { state.view = (state.view + 1) % views(current()).length; state.highlight = null; render(); }
   else if (key === 'ArrowLeft') { state.view = (state.view - 1 + views(current()).length) % views(current()).length; state.highlight = null; render(); }
   else if (key === 'b') { $('#show-marks').checked = !$('#show-marks').checked; renderViewer(); }
+  else if (key === 's') { $('#show-seams').checked = !$('#show-seams').checked; renderViewer(); }
   else if (key === 'd') toggle('#show-deadwood'); else if (key === 'f') toggle('#show-forest_cover');
   else if (key === 'o') toggle('#outline'); else if (key === '0') fit();
   else if ('123'.includes(key)) update((x) => { x.layers.deadwood.verdict = VERDICTS[+key - 1]; });

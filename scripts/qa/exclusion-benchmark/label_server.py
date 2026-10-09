@@ -127,6 +127,9 @@ class Benchmark:
         """Re-read evidence so datasets rendered after startup appear on reload."""
         selection = json.loads((self.root / 'selection.json').read_text())
         datasets, files = [], set()
+        lint_path = self.root / 'lint-tiles.json'
+        lint = ({e['dataset_id']: {l: {k: e['layers'][l][k] for k in ('straight_m', 'runs')} for l in LAYERS}
+                 for e in json.loads(lint_path.read_text())} if lint_path.exists() else {})
         for d in selection['datasets']:
             evidence_path = self.root / 'datasets' / str(d['dataset_id']) / 'evidence.json'
             if not evidence_path.exists():
@@ -158,6 +161,11 @@ class Benchmark:
                                         'auditor_grade', 'commission_pct', 'omission_pct', 'reason', 'issues')}
                                         for l in LAYERS}, run=sol['run'], zooms=zooms)})
             files.update(f"datasets/{d['dataset_id']}/{name}" for name in evidence['files'])
+            seam_dir = self.root / 'lint' / str(d['dataset_id'])
+            seams = sorted(p.name for p in seam_dir.glob('*-seams.png')) if seam_dir.exists() else []
+            files.update(f"lint/{d['dataset_id']}/{name}" for name in seams)
+            datasets[-1]['seams'] = seams
+            datasets[-1]['lint'] = lint.get(d['dataset_id'])
         # Stable shuffled order so roles and audit grades cannot be read from the sequence.
         queue_path = self.root / 'adjudication.json'
         queue = json.loads(queue_path.read_text())['datasets'] if queue_path.exists() else {}
