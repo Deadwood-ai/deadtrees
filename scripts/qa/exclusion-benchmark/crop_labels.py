@@ -18,6 +18,7 @@ from score_benchmark import truth
 
 QUESTIONS = PREDICATES['icl']
 UI = Path(__file__).parent / 'label_ui' / 'crops.html'
+MODEL_RUN = 'decisions-crop-test-tuned1-strict'
 
 
 def pick(root, count):
@@ -106,8 +107,15 @@ def make_handler(root, crops, store):
             if path == '/':
                 return self.send(200, 'text/html; charset=utf-8', UI.read_bytes())
             if path == '/api/crops':
+                # Model answers (tuned questions, strict context) shown next to the reviewer's buttons.
+                model = {}
+                for c in crops:
+                    f = root / 'runs' / MODEL_RUN / f"{c['id']}.json"
+                    if f.exists():
+                        model[c['id']] = json.loads(f.read_text())['answers']
                 return self.send(200, 'application/json', json.dumps(
-                    {'crops': crops, 'questions': QUESTIONS, 'labels': store.all()}).encode())
+                    {'crops': crops, 'questions': QUESTIONS, 'model_questions': PREDICATES['tuned1'],
+                     'model': model, 'labels': store.all()}).encode())
             name = path.removeprefix('/files/')
             if path.startswith('/files/') and name in files:
                 kind = 'image/jpeg' if name.endswith('.jpg') else 'image/png'
