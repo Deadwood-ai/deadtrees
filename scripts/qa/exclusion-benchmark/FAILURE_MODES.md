@@ -11,7 +11,7 @@ matters when it shifts cover fractions across many 10 m cells, not when a bounda
 little loose. So every mode below is judged by **how much area it affects**, and modes
 that only move a few square metres (loose outlines, one missed sapling) are not failures.
 
-## The eight modes (merged from the overlapping lists so far)
+## The seven modes (merged from the overlapping lists so far)
 
 | # | Mode | Layer | What it looks like | Audit notes (all / graded Bad) | Satellite impact |
 |---|---|---|---|---|---|
@@ -22,7 +22,9 @@ that only move a few square metres (loose outlines, one missed sapling) are not 
 | 5 | **Trees missed** | Forest | Tree canopy or whole stands without gold | 108 / 38 | Underestimates forest, distorts the denominator for deadwood share |
 | 6 | **Non-trees marked as forest** | Forest | Gold on shrubs, crops, grass, ground or roofs, including filled gaps between crowns | 110 / 36 (shrubs/crops 66, gaps 40) | Overestimates forest |
 | 7 | **Processing artifacts** | Both | Straight tile seams, rectangular holes or blocks, missing or cut-off layer, stripes | 213 / 77 (forest 152, deadwood 61) | Blocks of zero or full cover, large bias |
-| 8 | **Season / phenology** | Deadwood (scene) | Leaf-off or autumn colours making live trees look dead, so blue spreads widely | 13 / 9, plus 900 audits flagged out of season | Systematic overestimate across the scene |
+
+Season and phenology (leaf-off, autumn colours) are **not** a prediction failure mode here:
+they are a separate audit step (has_valid_phenology), decided before prediction quality.
 
 Not a prediction failure, but an exclusion reason: **image not assessable** (blur,
 stitching ghosts, not RGB, nodata, too coarse). It is handled as "unsure", see below.
@@ -54,13 +56,13 @@ only match one written rule.
   area, plus extra crops where predicted deadwood is highest and where there is canopy but
   no prediction, so omissions get looked at too. Cost about $0.008 per dataset with
   Decisions.
-- **One overview per dataset** for scene-level modes (7 processing artifacts, 8 season),
-  together with the deterministic seam linter.
+- **One overview per dataset** for mode 7 (processing artifacts), together with the
+  deterministic seam linter.
 
 ## Uncertain cases
 
-- **Per crop, a gate question first**: "Is this crop assessable (sharp, in season, trees
-  visible, not mostly shadow or nodata)?" Unassessable crops are dropped from aggregation,
+- **Per crop, a gate question first**: "Is this crop assessable (sharp, trees visible, not
+  mostly shadow or nodata)?" Unassessable crops are dropped from aggregation,
   not counted as OK or bad.
 - **Per mode, three outcomes**: yes (above 0.7), no (below 0.3), unsure in between. Unsure
   answers don't count toward exclusion.
