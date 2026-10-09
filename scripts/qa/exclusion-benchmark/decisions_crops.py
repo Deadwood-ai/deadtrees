@@ -112,6 +112,8 @@ PREDICATES = {
         'm5_fc_trees_missed': 'Trees missed: clearly visible tree canopy has no gold.',
         'm6_fc_on_non_trees': 'Non-trees marked as forest: gold covers shrubs, crops, grass, bare ground or roofs, or fills open gaps between crowns.',
         'm7_artifact': 'Processing artifact: straight tile seams, rectangular holes or blocks, or a layer that is cut off or missing.',
+        # Added 9 Oct (Janusch): standing dead trees belong to forest cover too.
+        'm8_dead_not_forest': 'Dead trees left out of forest: standing dead trees (often marked blue) have no gold, so the forest layer has holes where dead trees stand.',
     },
     # Perception check: can it even see the overlays? Truth is the rendered mask itself.
     'perception': {

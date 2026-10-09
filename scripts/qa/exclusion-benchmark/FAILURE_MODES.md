@@ -11,7 +11,7 @@ matters when it shifts cover fractions across many 10 m cells, not when a bounda
 little loose. So every mode below is judged by **how much area it affects**, and modes
 that only move a few square metres (loose outlines, one missed sapling) are not failures.
 
-## The seven modes (merged from the overlapping lists so far)
+## The eight modes (merged from the overlapping lists so far)
 
 | # | Mode | Layer | What it looks like | Audit notes (all / graded Bad) | Satellite impact |
 |---|---|---|---|---|---|
@@ -21,6 +21,7 @@ that only move a few square metres (loose outlines, one missed sapling) are not 
 | 4 | **Lying wood marked dead** | Deadwood | Blue on fallen trunks, logs, debris (common in burned and storm sites) | 10 / 3, and your box verdicts | Overestimates standing mortality |
 | 5 | **Trees missed** | Forest | Tree canopy or whole stands without gold | 108 / 38 | Underestimates forest, distorts the denominator for deadwood share |
 | 6 | **Non-trees marked as forest** | Forest | Gold on shrubs, crops, grass, ground or roofs, including filled gaps between crowns | 110 / 36 (shrubs/crops 66, gaps 40) | Overestimates forest |
+| 8 | **Dead trees left out of forest** | Forest | Standing dead trees (often blue) with no gold, so forest has holes where dead trees stand | 28 / 7 (forest notes on dead or brown trees) | Underestimates forest exactly where mortality is, which biases the deadwood share |
 | 7 | **Processing artifacts** | Both | Straight tile seams, rectangular holes or blocks, missing or cut-off layer, stripes | 213 / 77 (forest 152, deadwood 61) | Blocks of zero or full cover, large bias |
 
 Season and phenology (leaf-off, autumn colours) are **not** a prediction failure mode here:
@@ -34,7 +35,7 @@ stitching ghosts, not RGB, nodata, too coarse). It is handled as "unsure", see b
 These are where auditors, reference editors and you currently disagree. The model can
 only match one written rule.
 
-1. **Dead trees in the forest layer**: is a standing dead tree "forest"? (28 audit notes
+1. **Dead trees in the forest layer**: DECIDED (Janusch, 9 Oct): standing dead trees are forest; leaving them out is failure mode 8.
    say forest misses dead trees; v5 told Sol not to count it.)
 2. **Lying wood**: DECIDED (Janusch, 9 Oct): lying trunks, logs and debris are never deadwood.
 3. **Partial crowns**: when does a partly dead crown count as missed deadwood?
