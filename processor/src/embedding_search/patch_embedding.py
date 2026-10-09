@@ -34,7 +34,7 @@ from rasterio.windows import Window
 
 from shared.embedding_model import ModelBundle, encode_images
 
-from ..utils.segmentation import image_reprojector
+from ..utils.segmentation import image_band_indexes, image_reprojector
 from ..utils.nodata import prepare_padding_map, read_nodata_mask
 
 # A 512px CLIP patch at 10cm GSD covers 51.2m on the ground. Non-overlapping.
@@ -70,7 +70,7 @@ def _is_single_colour(data: np.ndarray, nodata: np.ndarray) -> bool:
 def _iter_tiles(vrt) -> Iterator[Tuple[Image.Image, PatchEmbedding]]:
 	"""Yield (PIL image, partially-filled PatchEmbedding) for each kept tile."""
 	width, height = vrt.width, vrt.height
-	band_indexes = [1, 2, 3] if vrt.count >= 3 else list(range(1, vrt.count + 1))
+	band_indexes = image_band_indexes(vrt)
 
 	for y in range(0, height, PATCH_STRIDE):
 		win_h = min(PATCH_SIZE, height - y)
