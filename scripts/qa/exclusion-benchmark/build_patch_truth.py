@@ -91,6 +91,8 @@ def build(patch, output):
             pred, ref = masks
             rgba(pred, COLORS[layer], False).save(directory / f'{layer}-fill.png')
             rgba(pred, COLORS[layer], True).save(directory / f'{layer}-outline.png')
+            rgba(ref, (40, 220, 90), False).save(directory / f'{layer}-reference-fill.png')
+            rgba(ref, (40, 220, 90), True).save(directory / f'{layer}-reference-outline.png')
             truth['layers'][layer] = {'pred_px': int(pred.sum()), 'ref_px': int(ref.sum()),
                                       'commission': float((pred & ~ref).sum() / max(1, pred.sum())),
                                       'omission': float((ref & ~pred).sum() / max(1, ref.sum()))}
@@ -103,6 +105,7 @@ if __name__ == '__main__':
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--per-dataset', type=int, default=8)
     p.add_argument('--workers', type=int, default=4)
+    p.add_argument('--only', type=int, nargs='*', help='patch IDs to (re)build')
     a = p.parse_args()
     with analyst() as db:
         rows = db.execute(PATCHES_SQL).fetchall()
@@ -113,6 +116,8 @@ if __name__ == '__main__':
             base = parents[base]
         r['base_id'] = base
     patches = sample(rows, a.per_dataset)
+    if a.only:
+        patches = [r for r in patches if r['id'] in a.only]
     print({'validated_public_5cm': len(rows), 'sampled': len(patches), 'datasets': len({r['dataset_id'] for r in patches})})
     done = failed = 0
     with ThreadPoolExecutor(a.workers) as pool:

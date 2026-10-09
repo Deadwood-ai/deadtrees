@@ -72,6 +72,17 @@ PREDICATES = {
         'dw_om_grey_unmarked': 'Grey, white or brown leafless branches of standing trees are visible in Image 1 without blue in Image 2 over a large part of the tile.',
         'dw_present_any': 'Image 1 shows several standing dead or leafless tree crowns.',
     },
+    # icl: the best v3/v4 wordings, re-asked with labelled example tiles in the request.
+    'icl': {
+        'dw_co_remove': 'Comparing Image 1 and Image 2, a careful annotator would need to REMOVE substantial blue because it is not on standing dead trees.',
+        'dw_co_most_wrong': 'More than half of the blue area in this tile covers things that are not standing dead trees.',
+        'dw_co_lying': 'Some blue covers lying trunks, logs or debris on the ground.',
+        'dw_om_blue_smaller': 'The blue area in Image 2 is clearly smaller than the area of standing dead or leafless crowns visible in Image 1.',
+        'dw_om_grey_unmarked': 'Grey, white or brown leafless branches of standing trees are visible in Image 1 without blue in Image 2 over a large part of the tile.',
+        'dw_om_partial': 'Blue outlines cover only part of dead crowns, leaving large dead parts of those same crowns unmarked.',
+        'fc_om_add': 'Comparing Image 1 and Image 3, a careful annotator would need to ADD substantial gold for tree canopy.',
+        'fc_co_remove': 'Comparing Image 1 and Image 3, a careful annotator would need to REMOVE substantial gold because it is not on tree canopy.',
+    },
     # Perception check: can it even see the overlays? Truth is the rendered mask itself.
     'perception': {
         'any_blue': 'Image 2 contains blue overlay polygons anywhere.',

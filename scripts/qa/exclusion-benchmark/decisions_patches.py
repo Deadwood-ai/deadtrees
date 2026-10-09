@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image
 from sklearn.metrics import roc_auc_score
 
-from decisions_crops import PREDICATES, body, post, read_key
+from decisions_crops import PREDICATES, body, image_url, post, read_key
 from sol_issue_finder import composite
 
 CHECKS = {  # predicate -> (layer, measured error)
@@ -41,6 +41,39 @@ def images(directory):
                     for l in ('deadwood', 'forest_cover')]
 
 
+EXAMPLES = [  # (patch, layer, caption) from datasets that are then excluded from scoring
+    (1171, 'deadwood', 'EXAMPLE: almost all blue here is wrong; the human correction (green) has no deadwood.'),
+    (3339, 'deadwood', 'EXAMPLE: most blue here is wrong; compare with the human correction in green.'),
+    (3255, 'deadwood', 'EXAMPLE: many standing dead crowns are missing from the blue; the human correction in green adds them.'),
+    (3313, 'deadwood', 'EXAMPLE: substantial dead crown area is missing from the blue; green shows the human correction.'),
+    (1552, 'deadwood', 'EXAMPLE: a good deadwood prediction; blue and the human correction (green) agree.'),
+    (2677, 'deadwood', 'EXAMPLE: a good deadwood prediction; blue and the human correction (green) agree.'),
+    (3338, 'forest_cover', 'EXAMPLE: substantial tree canopy is missing from the gold; green shows the human correction.'),
+    (1673, 'forest_cover', 'EXAMPLE: some gold covers non-tree areas; green shows the human correction.'),
+]
+
+
+def example_parts(truth_dir):
+    from sol_issue_finder import side_by_side
+    parts = [{'type': 'input_text', 'text': 'Labelled examples from OTHER places. Each shows raw RGB | the prediction | '
+                                            'the human-corrected reference in green. Use them to calibrate; answer only '
+                                            'about the final target tile.'}]
+    for patch, layer, caption in EXAMPLES:
+        d = truth_dir / str(patch)
+        raw = Image.open(d / 'raw.jpg')
+        pred = composite(raw, (d / f'{layer}-fill.png', d / f'{layer}-outline.png'))
+        ref = composite(raw, (d / f'{layer}-reference-fill.png', d / f'{layer}-reference-outline.png'))
+        parts += [{'type': 'input_text', 'text': caption},
+                  {'type': 'input_image', 'image_url': image_url(side_by_side([raw.convert('RGB'), pred, ref]), 1536),
+                   'detail': 'original'}]
+    parts.append({'type': 'input_text', 'text': 'TARGET TILE follows.'})
+    return parts
+
+
+def example_datasets(truth_dir):
+    return {json.loads((truth_dir / str(p) / 'truth.json').read_text())['dataset_id'] for p, _, _ in EXAMPLES}
+
+
 def score(rows, min_px=50):
     out = {}
     for pred, (layer, kind) in CHECKS.items():
@@ -65,17 +98,26 @@ if __name__ == '__main__':
     p.add_argument('--key-file', type=Path, required=True)
     p.add_argument('--predicates', default='v1')
     p.add_argument('--cap', type=int, default=400)
+    p.add_argument('--examples', action='store_true', help='prepend the labelled example tiles')
+    p.add_argument('--example-ids', type=int, nargs='*', help='use only these example patches')
     a = p.parse_args()
     key = read_key(a.key_file)
     a.run.mkdir(parents=True, exist_ok=True)
     patches = sorted(d for d in a.truth.iterdir() if (d / 'truth.json').exists())
+    held = example_datasets(a.truth)
+    patches = [d for d in patches if json.loads((d / 'truth.json').read_text())['dataset_id'] not in held]
+    if a.example_ids:
+        EXAMPLES[:] = [e for e in EXAMPLES if e[0] in a.example_ids]
+    prefix = example_parts(a.truth) if a.examples else []
 
     def one(directory):
         out = a.run / f'{directory.name}.json'
         if out.exists():
             return json.loads(out.read_text())
         truth = json.loads((directory / 'truth.json').read_text())
-        raw = post(body(images(directory), {'mpp': truth['mpp']}, PREDICATES[a.predicates]), key, a.cap)
+        payload = body(images(directory), {'mpp': truth['mpp']}, PREDICATES[a.predicates])
+        payload['input'][0]['content'] = payload['input'][0]['content'][:1] + prefix + payload['input'][0]['content'][1:]
+        raw = post(payload, key, a.cap)
         r = {'patch_id': truth['patch_id'], 'truth': truth,
              'answers': {x['name']: x.get('probability') for x in raw.get('answers', []) if x.get('type') == 'predicate'}}
         out.write_text(json.dumps(r))
