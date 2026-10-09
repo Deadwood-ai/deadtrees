@@ -51,8 +51,9 @@ def mission_extent(reconstructions: list[dict]) -> MissionExtent | None:
 			if not focal or not size:
 				continue
 			center = camera_center(shot)
-			height = center[2] - ground_z
-			if height <= 0:
+			# Absolute: a reconstruction aligned without a measured vertical can come out upside down.
+			height = abs(center[2] - ground_z)
+			if height == 0:
 				continue
 			centers.append(center)
 			heights.append(height)
@@ -65,9 +66,9 @@ def mission_extent(reconstructions: list[dict]) -> MissionExtent | None:
 	xs = [center[0] for center in centers]
 	ys = [center[1] for center in centers]
 	return MissionExtent(
-		width_m=max(xs) - min(xs) + 2 * margin,
-		height_m=max(ys) - min(ys) + 2 * margin,
-		gsd_cm=statistics.median(gsd_cm),
+		width_m=float(max(xs) - min(xs) + 2 * margin),
+		height_m=float(max(ys) - min(ys) + 2 * margin),
+		gsd_cm=float(statistics.median(gsd_cm)),
 	)
 
 
