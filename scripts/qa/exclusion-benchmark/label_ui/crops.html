@@ -56,7 +56,7 @@ const cur = () => st.crops[st.i];
 const lab = () => st.labels[cur().id] || { answers: {}, note: '' };
 const done = (c) => { const l = st.labels[c.id]; return l && keys().every((k) => l.answers[k] === true || l.answers[k] === false); };
 
-function src(c, s) { return `/files/datasets/${c.dataset_id}/${c.view}-${s}`; }
+function src(c, s) { return `/files/${c.prefix || `datasets/${c.dataset_id}/${c.view}-`}${s}`; }
 function renderPanels() {
   const c = cur();
   const sets = [['raw.jpg'], ['raw.jpg', 'deadwood-fill.png', 'deadwood-outline.png'], ['raw.jpg', 'forest_cover-fill.png', 'forest_cover-outline.png']];
@@ -91,7 +91,7 @@ function renderQuestions() {
 function render() {
   const c = cur();
   $('#pos').textContent = `${st.i + 1} / ${st.crops.length}`;
-  $('#meta').textContent = `Dataset ${c.dataset_id} · ${c.view.toUpperCase()} · ${(c.mpp * 100).toFixed(1)} cm/px`;
+  $('#meta').textContent = `Dataset ${c.dataset_id} · ${c.view.toUpperCase()} · ${(c.mpp * 100).toFixed(1)} cm/px${c.batch === 2 ? ' · simpler set' : ''}`;
   $('#progress').textContent = `${st.crops.filter(done).length} of ${st.crops.length} done`;
   history.replaceState(null, '', `?crop=${c.id}`);
   renderPanels(); renderQuestions();
@@ -130,7 +130,8 @@ window.addEventListener('resize', fit);
 fetch('/api/crops').then((r) => r.json()).then((d) => {
   st.crops = d.crops; st.questions = d.questions; st.labels = d.labels;
   const want = new URLSearchParams(location.search).get('crop');
-  st.i = Math.max(0, st.crops.findIndex((c) => c.id === want)); render();
+  const firstOpen = st.crops.findIndex((c) => !done(c) && !(st.labels[c.id] && st.labels[c.id].note));
+  st.i = want ? Math.max(0, st.crops.findIndex((c) => c.id === want)) : Math.max(0, firstOpen); render();
 });
 </script>
 </body>

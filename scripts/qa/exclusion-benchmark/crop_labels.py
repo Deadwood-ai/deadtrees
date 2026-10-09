@@ -44,6 +44,22 @@ def pick(root, count):
     return sorted(crops, key=lambda c: order(c['id']))
 
 
+def prefix(c):
+    """Benchmark views live in datasets/<id>/<view>-*; reference patches in patch-truth/<patch>/*."""
+    return c.get('prefix') or f"datasets/{c['dataset_id']}/{c['view']}-"
+
+
+def add_patches(root, patch_ids):
+    crops = json.loads((root / 'crop-test.json').read_text())
+    known = {c['id'] for c in crops}
+    for pid in patch_ids:
+        t = json.loads((root / 'patch-truth' / str(pid) / 'truth.json').read_text())
+        if f'patch-{pid}' not in known:
+            crops.append({'id': f'patch-{pid}', 'dataset_id': t['dataset_id'], 'view': 'patch', 'mpp': t['mpp'],
+                          'prefix': f'patch-truth/{pid}/', 'batch': 2})
+    (root / 'crop-test.json').write_text(json.dumps(crops, indent=1))
+
+
 class Store:
     def __init__(self, path):
         self.db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
@@ -64,7 +80,7 @@ class Store:
 
 def make_handler(root, crops, store):
     ids = {c['id'] for c in crops}
-    files = {f"datasets/{c['dataset_id']}/{c['view']}-{s}" for c in crops
+    files = {prefix(c) + s for c in crops
              for s in ('raw.jpg', 'deadwood-fill.png', 'deadwood-outline.png', 'forest_cover-fill.png', 'forest_cover-outline.png')}
 
     class Handler(BaseHTTPRequestHandler):
@@ -117,11 +133,15 @@ if __name__ == '__main__':
     p.add_argument('--root', type=Path, required=True)
     p.add_argument('--port', type=int, default=8772)
     p.add_argument('--count', type=int, default=20)
+    p.add_argument('--add-patches', type=int, nargs='*', help='append reference patches as extra test crops')
     a = p.parse_args()
     crop_file = a.root / 'crop-test.json'
     if not crop_file.exists():
         crop_file.write_text(json.dumps(pick(a.root, a.count), indent=1))
+    if a.add_patches:
+        add_patches(a.root, a.add_patches)
     crops = json.loads(crop_file.read_text())
+    crops.sort(key=lambda c: c.get('batch', 1))
     server = ThreadingHTTPServer(('127.0.0.1', a.port), make_handler(a.root, crops, Store(a.root / 'crop-labels.sqlite3')))
     print(f'Crop labeling: http://127.0.0.1:{a.port}/ ({len(crops)} crops)', flush=True)
     server.serve_forever()
