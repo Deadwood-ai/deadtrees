@@ -9,7 +9,7 @@ ODM never renders finer than the mission's GSD. This module only raises the requ
 resolution when the mission's extent at its GSD would exceed the budget, so missions that
 fit keep exactly their current output.
 
-The extent comes from the reconstructed camera positions plus half an image footprint,
+The extent comes from the reconstructed camera positions and each image's ground footprint,
 not from the sparse points: a few mis-triangulated points can lie hundreds of km away
 (9654: 352 × 862 km against ODM's 1.7 × 3.2 km model), while cameras stay where the
 drone flew.
@@ -21,7 +21,7 @@ import math
 import statistics
 from dataclasses import dataclass
 
-from processor.src.utils.reconstruction_orientation import camera_center
+from processor.src.utils.reconstruction_orientation import camera_center, off_nadir_degrees
 
 
 @dataclass(frozen=True)
@@ -31,11 +31,19 @@ class MissionExtent:
 	gsd_cm: float
 
 
+# Never project a footprint edge further out than this angle from straight down.
+MAX_EDGE_ANGLE_DEGREES = 80.0
+
+
 def mission_extent(reconstructions: list[dict]) -> MissionExtent | None:
-	"""Ground extent and GSD of an OpenSfM ``reconstruction.json`` (all partials share one frame)."""
-	centers = []
-	heights = []
-	half_fov_tan = 0.0
+	"""Ground extent and GSD of an OpenSfM ``reconstruction.json`` (all partials share one frame).
+
+	Each shot covers the ground around its camera up to the far image corner: height times the
+	tangent of its off-nadir angle plus half the diagonal field of view. Kept shots can be
+	tilted up to ODM_MAX_NADIR_DEVIATION_DEGREES, so this bounds every retained footprint.
+	"""
+	min_x = min_y = math.inf
+	max_x = max_y = -math.inf
 	gsd_cm = []
 	for reconstruction in reconstructions:
 		shots = reconstruction.get('shots', {})
@@ -47,27 +55,29 @@ def mission_extent(reconstructions: list[dict]) -> MissionExtent | None:
 		for shot in shots.values():
 			camera = cameras.get(shot.get('camera'), {})
 			focal = camera.get('focal_x', camera.get('focal'))
-			size = max(camera.get('width', 0), camera.get('height', 0))
-			if not focal or not size:
+			width, height_px = camera.get('width', 0), camera.get('height', 0)
+			if not focal or not width or not height_px:
 				continue
 			center = camera_center(shot)
 			# Absolute: a reconstruction aligned without a measured vertical can come out upside down.
 			height = abs(center[2] - ground_z)
 			if height == 0:
 				continue
-			centers.append(center)
-			heights.append(height)
 			# OpenSfM focal lengths are normalised by the larger image side.
-			half_fov_tan = max(half_fov_tan, 0.5 / focal)
+			size = max(width, height_px)
+			half_diagonal = math.atan(math.hypot(width, height_px) / size / 2 / focal)
+			tilt = off_nadir_degrees(shot['rotation'])
+			tilt = min(tilt, 180.0 - tilt)  # an upside-down reconstruction reports nadir shots as 180 degrees
+			edge_angle = min(math.radians(tilt) + half_diagonal, math.radians(MAX_EDGE_ANGLE_DEGREES))
+			reach = height * math.tan(edge_angle)
+			min_x, max_x = min(min_x, center[0] - reach), max(max_x, center[0] + reach)
+			min_y, max_y = min(min_y, center[1] - reach), max(max_y, center[1] + reach)
 			gsd_cm.append(height / (focal * size) * 100)
-	if len(centers) < 2:
+	if len(gsd_cm) < 2:
 		return None
-	margin = statistics.median(heights) * half_fov_tan
-	xs = [center[0] for center in centers]
-	ys = [center[1] for center in centers]
 	return MissionExtent(
-		width_m=float(max(xs) - min(xs) + 2 * margin),
-		height_m=float(max(ys) - min(ys) + 2 * margin),
+		width_m=float(max_x - min_x),
+		height_m=float(max_y - min_y),
 		gsd_cm=float(statistics.median(gsd_cm)),
 	)
 

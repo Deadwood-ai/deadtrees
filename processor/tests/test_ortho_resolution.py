@@ -28,16 +28,25 @@ def _reconstruction(shots: list[dict], points: list[tuple[float, float, float]],
 	}
 
 
-def test_extent_is_camera_spread_plus_one_footprint():
+def test_extent_is_camera_spread_plus_the_far_image_corner():
 	recon = _reconstruction([_shot(0, 0, 100), _shot(1000, 2000, 100)], [(0, 0, 0), (500, 500, 0)])
 
 	extent = mission_extent([recon])
 
-	# Half footprint = height * 0.5 / focal = 100 * 0.5 / 0.75.
-	assert extent.width_m == pytest.approx(1000 + 2 * 66.667, abs=0.01)
-	assert extent.height_m == pytest.approx(2000 + 2 * 66.667, abs=0.01)
+	# Half diagonal = hypot(5000, 3750) / 5000 / 2 / focal = 0.8333, times 100 m height.
+	assert extent.width_m == pytest.approx(1000 + 2 * 83.333, abs=0.01)
+	assert extent.height_m == pytest.approx(2000 + 2 * 83.333, abs=0.01)
 	# GSD = height / (focal * image size) = 100 / 3750 m.
 	assert extent.gsd_cm == pytest.approx(2.667, abs=0.001)
+
+
+def test_tilted_edge_shot_widens_the_extent():
+	tilted = _shot(1000, 0, 100)
+	tilted['rotation'] = [3.141592653589793 - 0.6981317, 0.0, 0.0]  # 40 degrees off nadir
+	nadir = _reconstruction([_shot(0, 0, 100), _shot(1000, 0, 100)], [(0, 0, 0)])
+	with_tilt = _reconstruction([_shot(0, 0, 100), tilted], [(0, 0, 0)])
+
+	assert mission_extent([with_tilt]).height_m > 3 * mission_extent([nadir]).height_m
 
 
 def test_far_outlier_points_do_not_inflate_the_extent():

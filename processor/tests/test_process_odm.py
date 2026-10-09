@@ -686,3 +686,15 @@ def test_orthophoto_pass_keeps_the_resolution_when_the_raster_fits(fake_volume, 
 		command,
 		None,
 	)
+
+
+@pytest.mark.unit
+def test_a_failed_reduced_resolution_note_does_not_fail_the_odm_run(monkeypatch):
+	import processor.src.process_odm as process_odm_module
+
+	def broken(*args):
+		raise RuntimeError('database unavailable')
+
+	monkeypatch.setattr(process_odm_module, '_write_dataset_note', broken)
+
+	process_odm_module._append_dataset_note(1, 'note', 't')

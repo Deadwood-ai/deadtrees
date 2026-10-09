@@ -213,7 +213,20 @@ def _with_budgeted_ortho_resolution(
 
 
 def _append_dataset_note(dataset_id: int, note: str, token: str) -> None:
-	"""Add ``note`` to the dataset's additional information, keeping what the contributor wrote."""
+	"""Add ``note`` to the dataset's additional information, keeping what the contributor wrote.
+
+	Runs once the ortho is published; a failure is logged and never fails the finished ODM run.
+	"""
+	try:
+		_write_dataset_note(dataset_id, note, token)
+	except Exception as error:
+		logger.warning(
+			f'Could not add the reduced-resolution note to the dataset: {error}',
+			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+		)
+
+
+def _write_dataset_note(dataset_id: int, note: str, token: str) -> None:
 	with use_client(token) as client:
 		row = client.table(settings.datasets_table).select('additional_information').eq('id', dataset_id).execute()
 		existing = (row.data[0].get('additional_information') or '').strip() if row.data else ''
@@ -431,7 +444,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
-		token = _run_odm_container(
+		token, reduced_resolution = _run_odm_container(
 			images_dir=extraction_dir,
 			output_dir=odm_host_temp_dir,
 			token=token,
@@ -476,6 +489,8 @@ def process_odm(task: QueueTask, temp_dir: Path):
 		# Re-login to ensure we have a fresh token (ODM processing may take >1hr for large datasets)
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 		update_status(dataset_id=dataset_id, is_odm_done=True, current_status=StatusEnum.idle, token=token)
+		if reduced_resolution:
+			_append_dataset_note(dataset_id, reduced_resolution, token)
 
 		logger.info(
 			f'ODM processing completed successfully for dataset {dataset_id}',
@@ -867,7 +882,8 @@ def _wait_for_container(container, what: str) -> dict:
 		) from wait_error
 
 
-def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_id: int) -> str:
+def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_id: int) -> tuple[str, str | None]:
+	"""Run ODM; return a fresh token and, when the pixel cap lowered the resolution, the dataset note."""
 	"""
 	Execute ODM Docker container using shared named volumes for file sharing.
 	This approach eliminates host path complexity and works identically in test and production.
@@ -1075,9 +1091,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 
 				# Copy results from shared volume to output directory
 				copy_results_from_shared_volume(volume_name, output_dir, project_name, dataset_id, token)
-				if reduced_resolution:
-					_append_dataset_note(dataset_id, reduced_resolution, token)
-				return token
+				return token, reduced_resolution
 			else:
 				# ODM failed - log detailed error information
 				logger.error(
