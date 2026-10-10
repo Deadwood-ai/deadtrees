@@ -405,9 +405,15 @@ def _finalize_failure(token: str, task: QueueTask, stage: str | None, message: s
 	)
 
 
-def _clear_directory(path: Path) -> None:
-	"""Remove everything inside ``path``; this worker runs one task at a time, so nothing in it is in use."""
+def _clear_scratch(path: Path) -> None:
+	"""Remove leftover temp files in ``path``; this worker runs one task at a time, so none is in use.
+
+	ODM output directories (``odm_temp_*``) are kept: process_odm removes them itself unless
+	DT_RETAIN_FAILED_ARTIFACTS keeps them for debugging, and the startup cleanup expires them.
+	"""
 	for entry in Path(path).iterdir():
+		if entry.name.startswith('odm_temp_'):
+			continue
 		if entry.is_dir() and not entry.is_symlink():
 			shutil.rmtree(entry, ignore_errors=True)
 		else:
@@ -435,7 +441,7 @@ def process_task(task: QueueTask, token: str):
 		shutil.rmtree(settings.processing_path, ignore_errors=True)
 	# Tools write their temp files to the scratch dir; a failed task can leave tens of GB
 	# there (13362: a 27 GB GDAL warp file), and on a tmpfs /data that is RAM (DT-1381).
-	_clear_directory(settings.scratch_path)
+	_clear_scratch(settings.scratch_path)
 	rss_before, rss_after = release_process_memory()
 	if rss_before is not None:
 		logger.info(
