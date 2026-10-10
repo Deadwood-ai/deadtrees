@@ -84,19 +84,21 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 		)
 
 		# Reproject the image to EPSG:3395. Warping in parallel gives the same pixels
-		# as a single thread (each output chunk is computed independently).
+		# as a single thread (each output chunk is computed independently). All bands go
+		# in one pass: writing a compressed pixel-interleaved file band by band rewrites
+		# every tile once per band and left a 32 GB temp file for an 11 GB ortho (DT-1381).
+		bands = list(range(1, src.count + 1))
 		with rasterio.open(output_path, 'w', **profile) as dst:
-			for i in range(1, src.count + 1):
-				rasterio.warp.reproject(
-					source=rasterio.band(src, i),
-					destination=rasterio.band(dst, i),
-					src_transform=src.transform,
-					src_crs=src.crs,
-					dst_transform=target_transform,
-					dst_crs=TCD_TARGET_CRS,
-					resampling=rasterio.warp.Resampling.bilinear,
-					num_threads=os.cpu_count() or 1,
-				)
+			rasterio.warp.reproject(
+				source=rasterio.band(src, bands),
+				destination=rasterio.band(dst, bands),
+				src_transform=src.transform,
+				src_crs=src.crs,
+				dst_transform=target_transform,
+				dst_crs=TCD_TARGET_CRS,
+				resampling=rasterio.warp.Resampling.bilinear,
+				num_threads=os.cpu_count() or 1,
+			)
 
 	return output_path
 
