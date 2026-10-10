@@ -405,6 +405,15 @@ def _finalize_failure(token: str, task: QueueTask, stage: str | None, message: s
 	)
 
 
+def _clear_directory(path: Path) -> None:
+	"""Remove everything inside ``path``; this worker runs one task at a time, so nothing in it is in use."""
+	for entry in Path(path).iterdir():
+		if entry.is_dir() and not entry.is_symlink():
+			shutil.rmtree(entry, ignore_errors=True)
+		else:
+			entry.unlink(missing_ok=True)
+
+
 def process_task(task: QueueTask, token: str):
 	# Log start of processing
 	logger.info(
@@ -424,6 +433,9 @@ def process_task(task: QueueTask, token: str):
 	# remove processing path if it exists
 	if Path(settings.processing_path).exists():
 		shutil.rmtree(settings.processing_path, ignore_errors=True)
+	# Tools write their temp files to the scratch dir; a failed task can leave tens of GB
+	# there (13362: a 27 GB GDAL warp file), and on a tmpfs /data that is RAM (DT-1381).
+	_clear_directory(settings.scratch_path)
 	rss_before, rss_after = release_process_memory()
 	if rss_before is not None:
 		logger.info(

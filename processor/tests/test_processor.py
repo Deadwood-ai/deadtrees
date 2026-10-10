@@ -989,3 +989,18 @@ def test_graceful_shutdown_requeues_inflight_task(crashed_dataset_task, auth_tok
 		assert status['current_status'] == 'idle', 'Status should be reset to idle'
 		assert status['error_message'] is None
 		assert status['error_stage'] is None
+
+
+@pytest.mark.unit
+def test_clear_directory_removes_leftover_temp_files(tmp_path):
+	"""A failed task can leave tens of GB in the scratch dir (DT-1381); the next task clears it."""
+	from processor.src.processor import _clear_directory
+
+	(tmp_path / '13362_cog_133_1.warped.tif.tmp').write_bytes(b'x' * 10)
+	(tmp_path / 'treecover_13362_abc').mkdir()
+	(tmp_path / 'treecover_13362_abc' / 'confidence_map.tif').write_bytes(b'x')
+
+	_clear_directory(tmp_path)
+
+	assert tmp_path.exists()
+	assert list(tmp_path.iterdir()) == []
