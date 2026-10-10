@@ -192,3 +192,21 @@ def test_nearblack_runs_with_a_block_cache_large_enough_for_a_tile_row(tmp_path,
 	_standardise(tmp_path, data)
 
 	assert calls and calls[0]['GDAL_CACHEMAX'] == str(edge_fill.NEARBLACK_GDAL_CACHEMAX_MB)
+
+
+@pytest.mark.unit
+def test_collar_masking_reports_the_duration_of_each_step(tmp_path):
+	"""Collar masking can take hours on large orthos, so each step reports its time (DT-1380)."""
+	from processor.src.geotiff.edge_fill import mask_edge_fill
+
+	data = _forest()
+	data[:, ~_footprint()] = 0
+	path = tmp_path / 'ortho.tif'
+	_write(path, data)
+	messages = []
+
+	assert mask_edge_fill(str(path), progress=messages.append)
+
+	assert messages[0].startswith('Edge fill detection took') and messages[0].endswith('collar found')
+	assert messages[1].startswith('nearblack took')
+	assert messages[2].startswith('Transparency merge took')
