@@ -16,6 +16,7 @@ says so.
 
 from pathlib import Path
 import math
+import os
 import subprocess
 
 import numpy as np
@@ -26,6 +27,9 @@ SAMPLE_MAX_SIDE = 1024
 NEAR = 8
 MIN_FRONTIER_FILL_SHARE = 0.25
 FILL_COLOURS = ('0,0,0', '255,255,255')
+# nearblack reads scanlines from tiled sources; with too small a block cache it decodes
+# every tile row once per scanline and a 10 GB ortho takes hours instead of minutes (DT-1380).
+NEARBLACK_GDAL_CACHEMAX_MB = 2048
 
 
 def has_edge_fill(src: rasterio.DatasetReader) -> bool:
@@ -61,7 +65,13 @@ def mask_edge_fill(path: str) -> bool:
 		command.extend(['-co', option])
 	command.extend(['-o', masked, path])
 	try:
-		subprocess.run(command, check=True, capture_output=True, text=True)
+		subprocess.run(
+			command,
+			check=True,
+			capture_output=True,
+			text=True,
+			env={**os.environ, 'GDAL_CACHEMAX': str(NEARBLACK_GDAL_CACHEMAX_MB)},
+		)
 		_keep_existing_transparency(path, masked)
 		Path(masked).replace(path)
 	finally:

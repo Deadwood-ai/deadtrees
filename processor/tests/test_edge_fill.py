@@ -170,3 +170,25 @@ def test_internal_mask_hole_stays_transparent(tmp_path):
 	assert count == 4
 	assert np.all(alpha[120:136, 120:136] == 0)
 	assert np.mean(alpha[~footprint] == 0) > 0.99
+
+
+@pytest.mark.unit
+def test_nearblack_runs_with_a_block_cache_large_enough_for_a_tile_row(tmp_path, monkeypatch):
+	"""With GDAL's default cache on a small host, nearblack took hours on a 10 GB ortho (DT-1380)."""
+	from processor.src.geotiff import edge_fill
+
+	calls = []
+	real_run = edge_fill.subprocess.run
+
+	def recording_run(command, **kwargs):
+		calls.append(kwargs.get('env', {}))
+		return real_run(command, **kwargs)
+
+	monkeypatch.setenv('GDAL_CACHEMAX', '16')
+	monkeypatch.setattr(edge_fill.subprocess, 'run', recording_run)
+	data = _forest()
+	data[:, ~_footprint()] = 0
+
+	_standardise(tmp_path, data)
+
+	assert calls and calls[0]['GDAL_CACHEMAX'] == str(edge_fill.NEARBLACK_GDAL_CACHEMAX_MB)
