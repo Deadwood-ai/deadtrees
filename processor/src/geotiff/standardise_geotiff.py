@@ -319,7 +319,7 @@ def _mask_edge_fill(output_path: str, token: str, dataset_id: int = None, user_i
 	"""Make an undeclared black or white fill collar transparent; keep the file as is if that fails."""
 	context = LogContext(category=LogCategory.ORTHO, dataset_id=dataset_id, user_id=user_id, token=token)
 	try:
-		if mask_edge_fill(output_path):
+		if mask_edge_fill(output_path, progress=lambda message: logger.info(message, context)):
 			logger.info('Masked black or white edge fill collar', context)
 			return True
 	except Exception as e:

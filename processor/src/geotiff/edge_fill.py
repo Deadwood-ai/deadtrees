@@ -18,6 +18,8 @@ from pathlib import Path
 import math
 import os
 import subprocess
+import time
+from typing import Callable
 
 import numpy as np
 import rasterio
@@ -48,10 +50,16 @@ def has_edge_fill(src: rasterio.DatasetReader) -> bool:
 	return float(near_fill[frontier].mean()) >= MIN_FRONTIER_FILL_SHARE
 
 
-def mask_edge_fill(path: str) -> bool:
-	"""Rewrite ``path`` with its edge fill collar transparent. Returns True when it changed the file."""
+def mask_edge_fill(path: str, progress: Callable[[str], None] = print) -> bool:
+	"""Rewrite ``path`` with its edge fill collar transparent. Returns True when it changed the file.
+
+	``progress`` receives the duration of each step; on large orthos they can take hours.
+	"""
+	started = time.monotonic()
 	with rasterio.open(path) as src:
-		if not has_edge_fill(src):
+		found = has_edge_fill(src)
+		progress(f'Edge fill detection took {time.monotonic() - started:.0f} s: {"collar found" if found else "no collar"}')
+		if not found:
 			return False
 		existing_alpha = src.count if src.colorinterp[-1] == ColorInterp.alpha else None
 		if src.count != (4 if existing_alpha else 3):
@@ -65,6 +73,7 @@ def mask_edge_fill(path: str) -> bool:
 		command.extend(['-co', option])
 	command.extend(['-o', masked, path])
 	try:
+		started = time.monotonic()
 		subprocess.run(
 			command,
 			check=True,
@@ -72,7 +81,10 @@ def mask_edge_fill(path: str) -> bool:
 			text=True,
 			env={**os.environ, 'GDAL_CACHEMAX': str(NEARBLACK_GDAL_CACHEMAX_MB)},
 		)
+		progress(f'nearblack took {time.monotonic() - started:.0f} s; merging existing transparency')
+		started = time.monotonic()
 		_keep_existing_transparency(path, masked)
+		progress(f'Transparency merge took {time.monotonic() - started:.0f} s')
 		Path(masked).replace(path)
 	finally:
 		Path(masked).unlink(missing_ok=True)
