@@ -6,6 +6,9 @@ including zombie extract containers and stuck queue items. This is critical for
 recovering from processor crashes or restarts.
 """
 
+import shutil
+from pathlib import Path
+
 import docker
 import time
 from datetime import datetime, timezone
@@ -262,3 +265,18 @@ def cleanup_old_temp_directories(token: str):
 			)
 	except Exception as e:
 		logger.error(f'Failed to cleanup temp directories: {e}', LogContext(category=LogCategory.PROCESS, token=token))
+
+
+def clear_scratch(path: Path) -> None:
+	"""Remove leftover temp files in ``path``; this worker runs one task at a time, so none is in use.
+
+	ODM output directories (``odm_temp_*``) are kept: process_odm removes them itself unless
+	DT_RETAIN_FAILED_ARTIFACTS keeps them for debugging, and the startup cleanup expires them.
+	"""
+	for entry in Path(path).iterdir():
+		if entry.name.startswith('odm_temp_'):
+			continue
+		if entry.is_dir() and not entry.is_symlink():
+			shutil.rmtree(entry, ignore_errors=True)
+		else:
+			entry.unlink(missing_ok=True)
