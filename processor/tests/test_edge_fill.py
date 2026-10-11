@@ -71,8 +71,8 @@ def _standardise(tmp_path, data, alpha=None, **write_options):
 	_write(source, data, alpha, **write_options)
 	assert standardise_geotiff(str(source), str(output), token='test-token', dataset_id=2344)
 	with rasterio.open(output) as dst:
-		alpha_out = dst.read(dst.count) if dst.colorinterp[-1] == ColorInterp.alpha else None
-		return dst.count, alpha_out
+		# Transparency as every reader sees it: alpha band, nodata or internal mask.
+		return dst.count, dst.dataset_mask()
 
 
 @pytest.mark.unit
@@ -84,7 +84,7 @@ def test_standardised_copy_masks_black_or_white_collar(tmp_path, fill):
 
 	count, alpha = _standardise(tmp_path, data)
 
-	assert count == 4
+	assert count == 3  # pixels untouched, collar in an internal mask (DT-1380)
 	assert np.all(alpha[~footprint] == 0)
 	assert np.all(alpha[_footprint(margin=4)] == 255)
 
@@ -98,7 +98,7 @@ def test_lossy_collar_noise_is_still_masked(tmp_path):
 
 	count, alpha = _standardise(tmp_path, data)
 
-	assert count == 4
+	assert count == 3
 	assert np.mean(alpha[~footprint] == 0) > 0.99
 
 
@@ -110,7 +110,7 @@ def test_image_without_collar_is_left_alone(tmp_path):
 	count, alpha = _standardise(tmp_path, data)
 
 	assert count == 3
-	assert alpha is None
+	assert np.all(alpha == 255)
 
 
 @pytest.mark.unit
@@ -173,28 +173,6 @@ def test_internal_mask_hole_stays_transparent(tmp_path):
 
 
 @pytest.mark.unit
-def test_nearblack_runs_with_a_block_cache_large_enough_for_a_tile_row(tmp_path, monkeypatch):
-	"""With GDAL's default cache on a small host, nearblack took hours on a 10 GB ortho (DT-1380)."""
-	from processor.src.geotiff import edge_fill
-
-	calls = []
-	real_run = edge_fill.subprocess.run
-
-	def recording_run(command, **kwargs):
-		calls.append(kwargs.get('env', {}))
-		return real_run(command, **kwargs)
-
-	monkeypatch.setenv('GDAL_CACHEMAX', '16')
-	monkeypatch.setattr(edge_fill.subprocess, 'run', recording_run)
-	data = _forest()
-	data[:, ~_footprint()] = 0
-
-	_standardise(tmp_path, data)
-
-	assert calls and calls[0]['GDAL_CACHEMAX'] == str(edge_fill.NEARBLACK_GDAL_CACHEMAX_MB)
-
-
-@pytest.mark.unit
 def test_collar_masking_reports_the_duration_of_each_step(tmp_path):
 	"""Collar masking can take hours on large orthos, so each step reports its time (DT-1380)."""
 	from processor.src.geotiff.edge_fill import mask_edge_fill
@@ -208,5 +186,90 @@ def test_collar_masking_reports_the_duration_of_each_step(tmp_path):
 	assert mask_edge_fill(str(path), progress=messages.append)
 
 	assert messages[0].startswith('Edge fill detection took') and messages[0].endswith('collar found')
-	assert messages[1].startswith('nearblack took')
-	assert messages[2].startswith('Transparency merge took')
+	assert messages[1].startswith('Collar mask written in place in')
+
+
+@pytest.mark.unit
+def test_rgb_collar_is_masked_in_place_without_rewriting_pixels(tmp_path):
+	"""nearblack turned a 5 GB JPEG ortho into a 25 GB DEFLATE copy (DT-1380); the mask is added instead."""
+	from processor.src.geotiff.edge_fill import mask_edge_fill
+
+	footprint = _footprint()
+	data = _forest()
+	data[:, ~footprint] = 0
+	path = tmp_path / 'ortho.tif'
+	_write(path, data, compress='JPEG')
+	with rasterio.open(path) as src:
+		pixels_before = src.read()
+
+	assert mask_edge_fill(str(path), progress=lambda message: None)
+
+	with rasterio.open(path) as dst:
+		assert dst.count == 3
+		assert dst.compression.name == 'jpeg'
+		assert np.array_equal(dst.read(), pixels_before)
+		mask = dst.dataset_mask()
+	# JPEG ringing lifts collar pixels next to the footprint above NEAR, which also stops nearblack.
+	assert np.mean(mask[~footprint] == 0) > 0.98
+	assert np.all(mask[_footprint(margin=4)] == 255)
+
+
+@pytest.mark.unit
+def test_dark_content_reached_through_a_gap_in_the_collar_is_kept(tmp_path):
+	"""The scan stops at two non-fill pixels in a row, so a dark interior feature next to the edge stays."""
+	from processor.src.geotiff.edge_fill import mask_edge_fill
+
+	data = _forest()
+	data[:, :, :10] = 0  # collar strip on the left edge
+	data[:, 100:140, 10:60] = 0  # dark feature touching the collar
+	data[:, 100:140, 12:14] = 90  # ...behind two content pixels
+	path = tmp_path / 'ortho.tif'
+	_write(path, data)
+
+	assert mask_edge_fill(str(path), progress=lambda message: None)
+
+	with rasterio.open(path) as dst:
+		mask = dst.dataset_mask()
+	assert np.all(mask[:, :10] == 0)
+	assert np.all(mask[100:140, 14:60] == 255)
+
+
+@pytest.mark.unit
+def test_collar_of_a_cog_upload_is_masked(tmp_path):
+	"""GDAL only opens a COG for update with IGNORE_COG_LAYOUT_BREAK; without it the collar stayed visible."""
+	from rasterio.shutil import copy as raster_copy
+
+	from processor.src.geotiff.edge_fill import mask_edge_fill
+
+	footprint = _footprint()
+	data = _forest()
+	data[:, ~footprint] = 0
+	tiff = tmp_path / 'ortho.tif'
+	_write(tiff, data)
+	cog = tmp_path / 'ortho_cog.tif'
+	raster_copy(str(tiff), str(cog), driver='COG', compress='DEFLATE')
+
+	assert mask_edge_fill(str(cog), progress=lambda message: None)
+
+	with rasterio.open(cog) as dst:
+		mask = dst.dataset_mask()
+	assert np.all(mask[~footprint] == 0)
+	assert np.all(mask[_footprint(margin=4)] == 255)
+
+
+@pytest.mark.unit
+def test_a_mask_write_failure_fails_standardisation_instead_of_hiding_content(tmp_path, monkeypatch):
+	"""Unwritten mask strips read as transparent, so a failed write must not pass silently."""
+	from processor.src.geotiff import edge_fill
+
+	def fail(*args, **kwargs):
+		raise OSError('No space left on device')
+
+	monkeypatch.setattr(rasterio.io.DatasetWriter, 'write_mask', fail)
+	data = _forest()
+	data[:, ~_footprint()] = 0
+	path = tmp_path / 'ortho.tif'
+	_write(path, data)
+
+	with pytest.raises(edge_fill.PartialCollarMaskError):
+		edge_fill.mask_edge_fill(str(path), progress=lambda message: None)
