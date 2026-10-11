@@ -14,11 +14,11 @@ Interior dark or bright content is not touched because the scan stops at the fir
 non-collar pixels. Existing transparency (alpha, nodata or an internal mask) is
 kept: the result is transparent where either says so.
 
-RGB orthos without any transparency yet get the collar as an internal mask written
-into the file in place, so the pixels are never recompressed: ``nearblack`` rewrote
-a 5 GB JPEG ortho as a 25 GB DEFLATE RGBA copy and took 30-80 minutes (DT-1380).
-Orthos that already carry an alpha band, nodata or a mask still go through
-``nearblack``, which merges the collar with that transparency.
+RGB orthos get the collar as an internal mask written into the file in place,
+merged with any nodata value or mask they already have, so the pixels are never
+recompressed: ``nearblack`` rewrote a 5 GB JPEG ortho as a 25 GB DEFLATE RGBA copy
+and took 30-80 minutes (DT-1380). Orthos with an alpha band still go through
+``nearblack``, which merges the collar into that band.
 """
 
 from pathlib import Path
@@ -76,7 +76,9 @@ def mask_edge_fill(path: str, progress: Callable[[str], None] = print) -> bool:
 		if src.count != (4 if existing_alpha else 3):
 			return False
 		# With no alpha, nodata or mask yet, the collar can go into a new internal mask.
-		in_place = src.count == 3 and all(flags == [MaskFlags.all_valid] for flags in src.mask_flag_enums)
+		# RGB orthos get the collar written into their own internal mask, merged with any nodata
+		# value or mask they already have; only an alpha band needs the nearblack rewrite.
+		in_place = src.count == 3 and not any(MaskFlags.alpha in flags for flags in src.mask_flag_enums)
 
 	if in_place:
 		started = time.monotonic()
@@ -206,14 +208,24 @@ def _write_collar_mask(path: str) -> None:
 				stop = _stop_index(non_fill[:, ::-1], axis=1)
 				right[top : top + count] = width - np.where(stop >= 0, stop, width)
 
+			# Existing transparency: an internal mask is read strip by strip just before that strip
+			# is overwritten; a nodata value is applied from the pixels, because once the new mask
+			# exists GDAL no longer derives the mask from nodata.
+			had_mask = any(MaskFlags.per_dataset in flags for flags in dataset.mask_flag_enums)
+			nodata = dataset.nodata
 			writing = True
 			columns = np.arange(width)[None, :]
 			for top in range(0, height, rows):
 				count = min(rows, height - top)
+				window = Window(0, top, width, count)
 				row_index = np.arange(top, top + count)[:, None]
 				collar = (columns < left[top : top + count, None]) | (columns >= right[top : top + count, None])
 				collar |= (row_index < from_top[None, :]) | (row_index >= from_bottom[None, :])
-				dataset.write_mask(np.where(collar, 0, 255).astype(np.uint8), window=Window(0, top, width, count))
+				if had_mask:
+					collar |= dataset.read_masks(1, window=window) == 0
+				if nodata is not None:
+					collar |= (dataset.read([1, 2, 3], window=window) == nodata).all(axis=0)
+				dataset.write_mask(np.where(collar, 0, 255).astype(np.uint8), window=window)
 	except Exception as error:
 		if writing:
 			raise PartialCollarMaskError(f'Collar mask only partly written: {error}') from error
