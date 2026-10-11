@@ -110,3 +110,34 @@ def test_polygons_from_mask_reports_each_step(monkeypatch, tmp_path):
 	assert len(polygons) == 1
 	assert messages[0].startswith('Polygonized treecover: 1 polygons, up to 1 holes in one')
 	assert messages[1].startswith('Simplified treecover to 1 polygons')
+
+
+def _forest_with_holes(count):
+	side = int(count**0.5) + 1
+	holes = []
+	for i in range(side):
+		for j in range(side):
+			if len(holes) == count:
+				break
+			x, y = i * 0.7, j * 0.7
+			# Staircase holes whose smoothed outlines overlap their diagonal neighbours.
+			holes.append([(x + 0.1, y + 0.1), (x + 0.4, y + 0.1), (x + 0.4, y + 0.25), (x + 0.5, y + 0.25), (x + 0.5, y + 0.5), (x + 0.1, y + 0.5)])
+	return Polygon([(0, 0), (side * 0.7, 0), (side * 0.7, side * 0.7), (0, side * 0.7)], holes)
+
+
+def test_many_hole_repair_matches_buffer0():
+	"""Ring-by-ring repair of a forest polygon with many holes gives buffer(0)'s area (DT-1379)."""
+	polygon = _forest_with_holes(combined_inference.RINGWISE_REPAIR_MIN_HOLES + 500)
+	shell = _chaikin_coords(polygon.exterior)
+	holes = [_chaikin_coords(ring) for ring in polygon.interiors]
+	assert not Polygon(shell, holes).is_valid
+
+	repaired = combined_inference._repaired(shell, holes)
+
+	expected = Polygon(shell, holes).buffer(0)
+	assert repaired.is_valid
+	assert repaired.symmetric_difference(expected).area < 1e-9 * expected.area
+
+
+def _chaikin_coords(ring):
+	return combined_inference._chaikin_ring(ring.coords, combined_inference.CHAIKIN_ITERATIONS)
