@@ -253,3 +253,27 @@ def test_confidence_map_is_compressed_and_matches_an_uncompressed_write(tmp_path
 		ref.write_mask(mask)
 	# Each data block is compressed once (the mask adds a little): rewrites made it 2.75x larger.
 	assert out.stat().st_size < 1.2 * reference.stat().st_size + 65536
+
+
+def test_strip_buffer_stays_small_across_a_nodata_gap(tmp_path, monkeypatch):
+	"""Skipped empty tiles must not make the merge buffer span the gap (DT-1381)."""
+	data = np.full((3, 6000, 1200), 120, dtype=np.uint8)
+	data[:, 900:5100, :] = 0  # a tall nodata gap: those tiles are skipped
+	src = tmp_path / 'reprojected.tif'
+	_write_raster(src, data)
+	heights = []
+	original = tcd_inference._StripWriter._extend
+
+	def recording_extend(self, count):
+		original(self, count)
+		heights.append(len(self.rows))
+
+	monkeypatch.setattr(tcd_inference._StripWriter, '_extend', recording_extend)
+	out = tmp_path / 'confidence.tif'
+	result = predict_confidence_map(src, out, _TileIndexModel(), batch_size=1)
+
+	assert result.skipped_tiles > 0
+	assert max(heights) <= tcd_inference.TCD_TILE_SIZE + tcd_inference.CONFIDENCE_BLOCK
+	with rasterio.open(out) as conf:
+		values = conf.read(1)
+	assert np.all(values[:700] > 0) and np.all(values[5300:] > 0)

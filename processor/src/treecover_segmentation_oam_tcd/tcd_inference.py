@@ -153,10 +153,15 @@ class _StripWriter:
 
 	def _flush_above(self, row: int) -> None:
 		final = (row - self.top) // CONFIDENCE_BLOCK * CONFIDENCE_BLOCK
-		if final > 0:
-			# Rows no tile reached (skipped empty tiles) stay nodata; write whole block rows.
-			self._extend(final)
-			self._write(final)
+		if final <= 0:
+			return
+		# Write the buffered rows as whole block rows; rows below them that no tile reached
+		# (skipped empty tiles) are left unwritten, so GDAL fills them with nodata at close
+		# and the buffer never grows across a nodata gap.
+		buffered = min(final, -(-len(self.rows) // CONFIDENCE_BLOCK) * CONFIDENCE_BLOCK)
+		self._extend(buffered)
+		self._write(buffered)
+		self.top += final - buffered
 
 	def _write(self, count: int) -> None:
 		if count <= 0:
