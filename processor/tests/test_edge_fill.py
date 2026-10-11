@@ -152,7 +152,7 @@ def test_declared_nodata_hole_stays_transparent(tmp_path):
 
 	count, alpha = _standardise(tmp_path, data, nodata=0)
 
-	assert count == 4
+	assert count == 3  # collar merged into the internal mask in place (DT-1380)
 	assert np.all(alpha[120:136, 120:136] == 0)
 	assert np.mean(alpha[~footprint] == 0) > 0.99
 
@@ -167,7 +167,7 @@ def test_internal_mask_hole_stays_transparent(tmp_path):
 
 	count, alpha = _standardise(tmp_path, data, mask=mask)
 
-	assert count == 4
+	assert count == 3  # collar merged into the internal mask in place (DT-1380)
 	assert np.all(alpha[120:136, 120:136] == 0)
 	assert np.mean(alpha[~footprint] == 0) > 0.99
 
@@ -273,3 +273,85 @@ def test_a_mask_write_failure_fails_standardisation_instead_of_hiding_content(tm
 
 	with pytest.raises(edge_fill.PartialCollarMaskError):
 		edge_fill.mask_edge_fill(str(path), progress=lambda message: None)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('declared', ['nodata', 'mask'])
+def test_jpeg_ortho_with_nodata_and_mask_is_masked_in_place(tmp_path, declared):
+	"""13377: a 3-band JPEG with nodata 0 and an internal mask took the 52-minute nearblack path."""
+	from processor.src.geotiff.edge_fill import mask_edge_fill
+
+	footprint = _footprint()
+	data = _forest()
+	data[:, ~footprint] = 255  # white collar that neither nodata nor the mask describe
+	data[:, 120:136, 120:136] = 0  # interior hole declared through nodata / the mask
+	mask = np.ones((SIZE, SIZE), dtype=bool)
+	mask[120:136, 120:136] = False
+	path = tmp_path / 'ortho.tif'
+	_write(path, data, compress='DEFLATE', nodata=0 if declared == 'nodata' else None, mask=mask if declared == 'mask' else None)
+
+	assert mask_edge_fill(str(path), progress=lambda message: None)
+
+	with rasterio.open(path) as dst:
+		assert dst.count == 3
+		result = dst.dataset_mask()
+	assert np.all(result[120:136, 120:136] == 0)
+	assert np.mean(result[~footprint] == 0) > 0.99
+	assert np.all(result[_footprint(margin=4) & ~_hole()] == 255)
+
+
+def _hole():
+	hole = np.zeros((SIZE, SIZE), dtype=bool)
+	hole[120:136, 120:136] = True
+	return hole
+
+
+@pytest.mark.unit
+def test_explicit_mask_keeps_valid_black_pixels_despite_nodata(tmp_path):
+	"""With both a mask and nodata=0, GDAL follows the mask: black pixels it marks valid stay visible."""
+	from processor.src.geotiff.edge_fill import mask_edge_fill
+
+	footprint = _footprint()
+	data = _forest()
+	data[:, ~footprint] = 255
+	data[:, 60:70, 120:136] = 0  # valid black content (mask says valid)
+	data[:, 120:136, 120:136] = 0  # masked hole
+	mask = np.ones((SIZE, SIZE), dtype=bool)
+	mask[120:136, 120:136] = False
+	path = tmp_path / 'ortho.tif'
+	_write(path, data, nodata=0, mask=mask)
+
+	assert mask_edge_fill(str(path), progress=lambda message: None)
+
+	with rasterio.open(path) as dst:
+		result = dst.dataset_mask()
+	assert np.all(result[60:70, 120:136] == 255)
+	assert np.all(result[120:136, 120:136] == 0)
+	assert np.mean(result[~footprint] == 0) > 0.99
+
+
+@pytest.mark.unit
+def test_overviews_get_the_new_collar_mask(tmp_path):
+	"""COG uploads carry overviews; stale mask overviews would show the collar again at low zoom."""
+	from rasterio.enums import Resampling as R
+
+	from processor.src.geotiff.edge_fill import mask_edge_fill
+
+	footprint = _footprint()
+	data = _forest()
+	data[:, ~footprint] = 0
+	mask = np.ones((SIZE, SIZE), dtype=bool)
+	mask[120:136, 120:136] = False
+	path = tmp_path / 'ortho.tif'
+	_write(path, data, mask=mask)
+	with rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True), rasterio.open(path, 'r+') as dst:
+		dst.build_overviews([2, 4], R.average)
+
+	assert mask_edge_fill(str(path), progress=lambda message: None)
+
+	with rasterio.open(path) as dst:
+		reduced = dst.dataset_mask(out_shape=(SIZE // 4, SIZE // 4))
+	outside = ~_footprint(margin=-8)[::4, ::4]
+	inside = _footprint(margin=8)[::4, ::4] & ~_hole()[::4, ::4]
+	assert np.mean(reduced[outside] == 0) > 0.95
+	assert np.all(reduced[inside] == 255)
