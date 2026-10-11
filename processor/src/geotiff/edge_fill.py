@@ -172,31 +172,49 @@ def _column_depths(dataset, rows: int, bottom_up: bool) -> np.ndarray:
 	return depth
 
 
+class PartialCollarMaskError(RuntimeError):
+	"""Writing the in-place collar mask failed part way; the ortho would hide valid content."""
+
+
 def _write_collar_mask(path: str) -> None:
 	"""Trace the collar in from all four edges and store it as a new internal mask of ``path``.
 
 	A scan stops at the first run of NON_FILL_RUN non-fill pixels; everything before it is
-	collar. Only the per-row and per-column scan depths are kept in memory.
+	collar. Only the per-row and per-column scan depths are kept in memory. A failure after
+	the first mask strip is written raises PartialCollarMaskError: unwritten strips read as
+	transparent, so the file must not be used as is.
 	"""
-	with rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True), rasterio.open(path, 'r+') as dataset:
-		width, height = dataset.width, dataset.height
-		rows = dataset.block_shapes[0][0]
-		from_top = _column_depths(dataset, rows, bottom_up=False)
-		from_bottom = height - _column_depths(dataset, rows, bottom_up=True)
-		left = np.empty(height, dtype=np.int64)
-		right = np.empty(height, dtype=np.int64)
-		for top in range(0, height, rows):
-			count = min(rows, height - top)
-			non_fill = ~_fill_pixels(dataset.read([1, 2, 3], window=Window(0, top, width, count)))
-			stop = _stop_index(non_fill, axis=1)
-			left[top : top + count] = np.where(stop >= 0, stop, width)
-			stop = _stop_index(non_fill[:, ::-1], axis=1)
-			right[top : top + count] = width - np.where(stop >= 0, stop, width)
+	writing = False
+	try:
+		# The file is the processor's own copy, so a COG upload may lose its COG layout here;
+		# the COG step rebuilds one. Without this option GDAL refuses to open a COG for update.
+		with (
+			rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True),
+			rasterio.open(path, 'r+', IGNORE_COG_LAYOUT_BREAK='YES') as dataset,
+		):
+			width, height = dataset.width, dataset.height
+			rows = dataset.block_shapes[0][0]
+			from_top = _column_depths(dataset, rows, bottom_up=False)
+			from_bottom = height - _column_depths(dataset, rows, bottom_up=True)
+			left = np.empty(height, dtype=np.int64)
+			right = np.empty(height, dtype=np.int64)
+			for top in range(0, height, rows):
+				count = min(rows, height - top)
+				non_fill = ~_fill_pixels(dataset.read([1, 2, 3], window=Window(0, top, width, count)))
+				stop = _stop_index(non_fill, axis=1)
+				left[top : top + count] = np.where(stop >= 0, stop, width)
+				stop = _stop_index(non_fill[:, ::-1], axis=1)
+				right[top : top + count] = width - np.where(stop >= 0, stop, width)
 
-		columns = np.arange(width)[None, :]
-		for top in range(0, height, rows):
-			count = min(rows, height - top)
-			row_index = np.arange(top, top + count)[:, None]
-			collar = (columns < left[top : top + count, None]) | (columns >= right[top : top + count, None])
-			collar |= (row_index < from_top[None, :]) | (row_index >= from_bottom[None, :])
-			dataset.write_mask(np.where(collar, 0, 255).astype(np.uint8), window=Window(0, top, width, count))
+			writing = True
+			columns = np.arange(width)[None, :]
+			for top in range(0, height, rows):
+				count = min(rows, height - top)
+				row_index = np.arange(top, top + count)[:, None]
+				collar = (columns < left[top : top + count, None]) | (columns >= right[top : top + count, None])
+				collar |= (row_index < from_top[None, :]) | (row_index >= from_bottom[None, :])
+				dataset.write_mask(np.where(collar, 0, 255).astype(np.uint8), window=Window(0, top, width, count))
+	except Exception as error:
+		if writing:
+			raise PartialCollarMaskError(f'Collar mask only partly written: {error}') from error
+		raise

@@ -13,7 +13,7 @@ from shared.models import Ortho
 from shared.logging import LogContext, LogCategory
 from processor.src.exceptions import ConversionError
 from processor.src.geotiff.byte_scaling import compute_byte_scaling
-from processor.src.geotiff.edge_fill import mask_edge_fill
+from processor.src.geotiff.edge_fill import PartialCollarMaskError, mask_edge_fill
 import rasterio
 import rasterio.enums
 import numpy as np
@@ -322,6 +322,8 @@ def _mask_edge_fill(output_path: str, token: str, dataset_id: int = None, user_i
 		if mask_edge_fill(output_path, progress=lambda message: logger.info(message, context)):
 			logger.info('Masked black or white edge fill collar', context)
 			return True
+	except PartialCollarMaskError:
+		raise
 	except Exception as e:
 		logger.warning(f'Could not mask edge fill collar, keeping it visible: {e}', context)
 	return False

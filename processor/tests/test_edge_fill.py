@@ -232,3 +232,44 @@ def test_dark_content_reached_through_a_gap_in_the_collar_is_kept(tmp_path):
 		mask = dst.dataset_mask()
 	assert np.all(mask[:, :10] == 0)
 	assert np.all(mask[100:140, 14:60] == 255)
+
+
+@pytest.mark.unit
+def test_collar_of_a_cog_upload_is_masked(tmp_path):
+	"""GDAL only opens a COG for update with IGNORE_COG_LAYOUT_BREAK; without it the collar stayed visible."""
+	from rasterio.shutil import copy as raster_copy
+
+	from processor.src.geotiff.edge_fill import mask_edge_fill
+
+	footprint = _footprint()
+	data = _forest()
+	data[:, ~footprint] = 0
+	tiff = tmp_path / 'ortho.tif'
+	_write(tiff, data)
+	cog = tmp_path / 'ortho_cog.tif'
+	raster_copy(str(tiff), str(cog), driver='COG', compress='DEFLATE')
+
+	assert mask_edge_fill(str(cog), progress=lambda message: None)
+
+	with rasterio.open(cog) as dst:
+		mask = dst.dataset_mask()
+	assert np.all(mask[~footprint] == 0)
+	assert np.all(mask[_footprint(margin=4)] == 255)
+
+
+@pytest.mark.unit
+def test_a_mask_write_failure_fails_standardisation_instead_of_hiding_content(tmp_path, monkeypatch):
+	"""Unwritten mask strips read as transparent, so a failed write must not pass silently."""
+	from processor.src.geotiff import edge_fill
+
+	def fail(*args, **kwargs):
+		raise OSError('No space left on device')
+
+	monkeypatch.setattr(rasterio.io.DatasetWriter, 'write_mask', fail)
+	data = _forest()
+	data[:, ~_footprint()] = 0
+	path = tmp_path / 'ortho.tif'
+	_write(path, data)
+
+	with pytest.raises(edge_fill.PartialCollarMaskError):
+		edge_fill.mask_edge_fill(str(path), progress=lambda message: None)
