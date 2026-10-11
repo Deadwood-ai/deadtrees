@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
+import shapely
 import torch
 import torch.nn.functional as F
 from safetensors import safe_open
@@ -74,12 +75,30 @@ def _chaikin_ring(coords, iterations):
     return pts
 
 
+# Above this many holes, an invalid polygon is repaired ring by ring instead of with one
+# buffer(0): GEOS's buffer(0) grows much faster than linearly with the hole count, and a
+# forest polygon with ~1M holes kept the combined step busy for hours (DT-1379).
+RINGWISE_REPAIR_MIN_HOLES = 1000
+
+
+def _repaired(shell, holes):
+    """A valid polygon for ``shell`` with ``holes``; the same area as ``Polygon(shell, holes).buffer(0)``."""
+    polygon = Polygon(shell, holes)
+    if polygon.is_valid:
+        return polygon
+    if len(holes) < RINGWISE_REPAIR_MIN_HOLES:
+        return polygon.buffer(0)
+    # Shell minus the union of the holes, each ring repaired on its own. Overlapping or
+    # touching holes (smoothing makes diagonal neighbours overlap) merge in the union.
+    hole_union = shapely.union_all([Polygon(hole).buffer(0) for hole in holes])
+    return Polygon(shell).buffer(0).difference(hole_union)
+
+
 def _chaikin_polygon(polygon, iterations):
     """Apply Chaikin smoothing to a polygon's exterior and interior rings."""
     ext = _chaikin_ring(polygon.exterior.coords, iterations)
     holes = [_chaikin_ring(r.coords, iterations) for r in polygon.interiors if len(r.coords) >= 4]
-    smoothed = Polygon(ext, holes)
-    return smoothed if smoothed.is_valid else smoothed.buffer(0)
+    return _repaired(ext, holes)
 
 
 def _vw_simplify_polygon(polygon, area_threshold):
@@ -95,8 +114,7 @@ def _vw_simplify_polygon(polygon, area_threshold):
         # Keep the original ring if VW collapses it below a triangle, so a valid hole
         # (it already passed the area filter) is never silently filled in.
         holes.append(hole if len(hole) >= 4 else coords)
-    simplified = Polygon(ext, holes)
-    return simplified if simplified.is_valid else simplified.buffer(0)
+    return _repaired(ext, holes)
 
 
 def _simplify_and_smooth(polygon):
