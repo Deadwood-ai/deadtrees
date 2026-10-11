@@ -223,9 +223,15 @@ def _write_collar_mask(path: str) -> None:
 				collar |= (row_index < from_top[None, :]) | (row_index >= from_bottom[None, :])
 				if had_mask:
 					collar |= dataset.read_masks(1, window=window) == 0
-				if nodata is not None:
+				elif nodata is not None:  # an explicit mask overrides nodata, as in GDAL
 					collar |= (dataset.read([1, 2, 3], window=window) == nodata).all(axis=0)
 				dataset.write_mask(np.where(collar, 0, 255).astype(np.uint8), window=window)
+
+			# Existing overviews (COG uploads) would keep the old transparency at low zoom, and the
+			# COG step reuses them, so rebuild them together with their masks.
+			factors = dataset.overviews(1)
+			if factors:
+				dataset.build_overviews(factors, Resampling.average)
 	except Exception as error:
 		if writing:
 			raise PartialCollarMaskError(f'Collar mask only partly written: {error}') from error

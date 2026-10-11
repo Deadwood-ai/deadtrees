@@ -304,3 +304,54 @@ def _hole():
 	hole = np.zeros((SIZE, SIZE), dtype=bool)
 	hole[120:136, 120:136] = True
 	return hole
+
+
+@pytest.mark.unit
+def test_explicit_mask_keeps_valid_black_pixels_despite_nodata(tmp_path):
+	"""With both a mask and nodata=0, GDAL follows the mask: black pixels it marks valid stay visible."""
+	from processor.src.geotiff.edge_fill import mask_edge_fill
+
+	footprint = _footprint()
+	data = _forest()
+	data[:, ~footprint] = 255
+	data[:, 60:70, 120:136] = 0  # valid black content (mask says valid)
+	data[:, 120:136, 120:136] = 0  # masked hole
+	mask = np.ones((SIZE, SIZE), dtype=bool)
+	mask[120:136, 120:136] = False
+	path = tmp_path / 'ortho.tif'
+	_write(path, data, nodata=0, mask=mask)
+
+	assert mask_edge_fill(str(path), progress=lambda message: None)
+
+	with rasterio.open(path) as dst:
+		result = dst.dataset_mask()
+	assert np.all(result[60:70, 120:136] == 255)
+	assert np.all(result[120:136, 120:136] == 0)
+	assert np.mean(result[~footprint] == 0) > 0.99
+
+
+@pytest.mark.unit
+def test_overviews_get_the_new_collar_mask(tmp_path):
+	"""COG uploads carry overviews; stale mask overviews would show the collar again at low zoom."""
+	from rasterio.enums import Resampling as R
+
+	from processor.src.geotiff.edge_fill import mask_edge_fill
+
+	footprint = _footprint()
+	data = _forest()
+	data[:, ~footprint] = 0
+	mask = np.ones((SIZE, SIZE), dtype=bool)
+	mask[120:136, 120:136] = False
+	path = tmp_path / 'ortho.tif'
+	_write(path, data, mask=mask)
+	with rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True), rasterio.open(path, 'r+') as dst:
+		dst.build_overviews([2, 4], R.average)
+
+	assert mask_edge_fill(str(path), progress=lambda message: None)
+
+	with rasterio.open(path) as dst:
+		reduced = dst.dataset_mask(out_shape=(SIZE // 4, SIZE // 4))
+	outside = ~_footprint(margin=-8)[::4, ::4]
+	inside = _footprint(margin=8)[::4, ::4] & ~_hole()[::4, ::4]
+	assert np.mean(reduced[outside] == 0) > 0.95
+	assert np.all(reduced[inside] == 255)
