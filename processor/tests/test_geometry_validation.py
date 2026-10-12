@@ -295,19 +295,30 @@ class TestRealWorldPatterns:
 		assert result.is_valid
 
 	def test_complex_multipart_after_buffer(self):
-		"""
-		Some invalid polygons split into MultiPolygon after buffer(0)
-		We should take the largest component
-		"""
-		# Bowtie that will split into two polygons
-		bowtie = Polygon([(0, 0), (10, 10), (10, 0), (0, 10), (0, 0)])
+		"""An invalid polygon that buffer(0) splits keeps every part, so no area is dropped."""
+		# Two squares whose ring touches itself at one corner: buffer(0) returns both squares.
+		touching = Polygon([(0, 0), (2, 0), (2, 2), (4, 2), (4, 4), (2, 4), (2, 2), (0, 2)])
 
-		result = validate_and_fix_polygon(bowtie)
+		result = validate_and_fix_polygon(touching)
 
-		# Result should be largest component (single Polygon)
-		if result is not None:
-			assert isinstance(result, Polygon)
-			assert result.is_valid
+		assert isinstance(result, MultiPolygon)
+		assert len(result.geoms) == 2
+		assert result.area == pytest.approx(8.0)
+
+		polygons, stats = validate_and_fix_polygons([touching])
+		assert len(polygons) == 2
+		assert all(isinstance(p, Polygon) for p in polygons)
+		assert stats['fixed'] == 1
+
+	def test_split_parts_below_min_area_are_dropped(self):
+		"""The area threshold applies to each part of a split polygon."""
+		# A large square and a small one whose ring touches it at one corner.
+		polygon = Polygon([(0, 0), (10, 0), (10, 10), (10.5, 10), (10.5, 10.5), (10, 10.5), (10, 10), (0, 10)])
+
+		result = validate_and_fix_polygon(polygon, min_area=1.0)
+
+		assert isinstance(result, Polygon)
+		assert result.area == pytest.approx(100.0)
 
 	def test_real_world_batch_scenario(self):
 		"""

@@ -35,7 +35,7 @@ def repair_polygon(polygon: Polygon):
 	return Polygon(polygon.exterior).buffer(0).difference(hole_union)
 
 
-def validate_and_fix_polygon(polygon: Polygon, min_area: float = 0.0) -> Polygon | None:
+def validate_and_fix_polygon(polygon: Polygon, min_area: float = 0.0) -> Polygon | MultiPolygon | None:
 	"""
 	Validate and fix a single polygon geometry.
 
@@ -44,7 +44,8 @@ def validate_and_fix_polygon(polygon: Polygon, min_area: float = 0.0) -> Polygon
 		min_area: Minimum area threshold (in CRS units). Polygons smaller than this are discarded.
 
 	Returns:
-		Fixed valid polygon, or None if polygon cannot be fixed or is too small
+		Fixed valid polygon (a MultiPolygon when the repair split it), or None if polygon
+		cannot be fixed or is too small
 	"""
 	if polygon is None or polygon.is_empty:
 		return None
@@ -64,18 +65,12 @@ def validate_and_fix_polygon(polygon: Polygon, min_area: float = 0.0) -> Polygon
 		if fixed.is_empty or not isinstance(fixed, (Polygon, MultiPolygon)):
 			return None
 
-		# If the repair created a MultiPolygon, take largest part
-		if isinstance(fixed, MultiPolygon):
-			# Sort by area and take the largest polygon
-			parts = sorted(fixed.geoms, key=lambda p: p.area, reverse=True)
-			if parts:
-				fixed = parts[0]
-			else:
-				return None
-
-		# Check area after fixing
-		if min_area > 0 and fixed.area < min_area:
+		# A repair can split one polygon into several parts (a bowtie, or holes that cut the
+		# shell); keep every part that meets the area threshold, not only the largest.
+		parts = [part for part in getattr(fixed, 'geoms', [fixed]) if not (min_area > 0 and part.area < min_area)]
+		if not parts:
 			return None
+		fixed = parts[0] if len(parts) == 1 else MultiPolygon(parts)
 
 		return fixed
 
@@ -144,7 +139,7 @@ def validate_and_fix_polygons(
 				),
 			)
 
-		valid_polygons.append(fixed_poly)
+		valid_polygons.extend(getattr(fixed_poly, 'geoms', [fixed_poly]))
 
 	# Log summary
 	if stats['fixed'] > 0 or stats['invalid'] > 0:
