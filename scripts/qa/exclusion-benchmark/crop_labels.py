@@ -19,6 +19,7 @@ from score_benchmark import truth
 QUESTIONS = PREDICATES['icl']  # overridden by --questions
 UI = Path(__file__).parent / 'label_ui' / 'crops.html'
 MODEL_RUN = 'decisions-crop-test-tuned1-strict'
+SIZES = ('<10', '10-20', '20-50', '>50')  # rough error size per yes answer, in % of the layer
 
 
 def pick(root, count):
@@ -129,9 +130,11 @@ def make_handler(root, crops, store):
             value = json.loads(self.rfile.read(min(int(self.headers.get('Content-Length', 0)), 8000)))
             crop_id = value.get('crop_id')
             answers = value.get('answers', {})
-            if crop_id not in ids or not set(answers) <= set(QUESTIONS) or not all(v in (True, False, None, 'unsure') for v in answers.values()):
+            sizes = value.get('sizes', {})
+            if (crop_id not in ids or not set(answers) <= set(QUESTIONS) or not all(v in (True, False, None, 'unsure') for v in answers.values())
+                    or not isinstance(sizes, dict) or not set(sizes) <= set(QUESTIONS) or not all(v in SIZES for v in sizes.values())):
                 return self.send(400, 'application/json', b'{"error":"invalid"}')
-            at = store.save(crop_id, {'answers': answers, 'note': str(value.get('note', ''))[:500]})
+            at = store.save(crop_id, {'answers': answers, 'sizes': sizes, 'note': str(value.get('note', ''))[:500]})
             self.send(200, 'application/json', json.dumps({'saved': at}).encode())
     return Handler
 
