@@ -34,6 +34,11 @@ def test_is_transient_error_true_for_network_failures(message):
 		KeyError('dataset_id'),
 		Exception('Invalid token'),
 		Exception('duplicate key value violates unique constraint'),
+		# postgrest-py uses the same message for any unparsable response, such as a 414 or an
+		# error body it cannot read; only the empty 500 is a gateway hiccup.
+		Exception("{'message': 'JSON could not be generated', 'code': 414, 'hint': 'Refer to full message for details', 'details': \"b'URI Too Long'\"}"),
+		Exception("{'message': 'JSON could not be generated', 'code': 500, 'hint': 'Refer to full message for details', 'details': \"b'<html>error</html>'\"}"),
+		Exception("{'message': 'JSON could not be generated', 'code': 400, 'hint': 'Refer to full message for details', 'details': \"b''\"}"),
 	],
 )
 def test_is_transient_error_false_for_deterministic_errors(exc):
