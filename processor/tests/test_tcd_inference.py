@@ -225,3 +225,55 @@ def test_resolve_model_dir_downloads_pinned_revision_once(tmp_path, monkeypatch)
 	assert first == second == tmp_path / 'cache' / 'snapshot'
 	# First call misses the cache and downloads; the second is served locally.
 	assert calls == [True, False, True]
+
+
+def test_confidence_map_is_compressed_and_matches_an_uncompressed_write(tmp_path):
+	"""Compressing the map (DT-1381) must not change a single prediction or bloat the file."""
+	rng = np.random.default_rng(3)
+	data = rng.integers(30, 200, size=(3, 2600, 3100), dtype=np.uint8)
+	src = tmp_path / 'reprojected.tif'
+	_write_raster(src, data)
+
+	class _NoisyModel(_TileIndexModel):
+		def predict(self, tiles):
+			out = super().predict(tiles)
+			return (out + rng.integers(0, 3, out.shape, dtype=np.uint8)).astype(np.uint8)
+
+	out = tmp_path / 'confidence.tif'
+	predict_confidence_map(src, out, _NoisyModel(), batch_size=1)
+
+	with rasterio.open(out) as conf:
+		assert conf.compression.name == 'deflate'
+		values = conf.read(1)
+		mask = conf.dataset_mask()
+		profile = conf.profile
+	reference = tmp_path / 'reference.tif'
+	with rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True), rasterio.open(reference, 'w', **profile, zlevel=1) as ref:
+		ref.write(values, 1)
+		ref.write_mask(mask)
+	# Each data block is compressed once (the mask adds a little): rewrites made it 2.75x larger.
+	assert out.stat().st_size < 1.2 * reference.stat().st_size + 65536
+
+
+def test_strip_buffer_stays_small_across_a_nodata_gap(tmp_path, monkeypatch):
+	"""Skipped empty tiles must not make the merge buffer span the gap (DT-1381)."""
+	data = np.full((3, 6000, 1200), 120, dtype=np.uint8)
+	data[:, 900:5100, :] = 0  # a tall nodata gap: those tiles are skipped
+	src = tmp_path / 'reprojected.tif'
+	_write_raster(src, data)
+	heights = []
+	original = tcd_inference._StripWriter._extend
+
+	def recording_extend(self, count):
+		original(self, count)
+		heights.append(len(self.rows))
+
+	monkeypatch.setattr(tcd_inference._StripWriter, '_extend', recording_extend)
+	out = tmp_path / 'confidence.tif'
+	result = predict_confidence_map(src, out, _TileIndexModel(), batch_size=1)
+
+	assert result.skipped_tiles > 0
+	assert max(heights) <= tcd_inference.TCD_TILE_SIZE + tcd_inference.CONFIDENCE_BLOCK
+	with rasterio.open(out) as conf:
+		values = conf.read(1)
+	assert np.all(values[:700] > 0) and np.all(values[5300:] > 0)

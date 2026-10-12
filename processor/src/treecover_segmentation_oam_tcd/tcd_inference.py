@@ -59,6 +59,7 @@ TCD_TREE_CLASS = 1
 TCD_BATCH_SIZE = 2
 # Tiles read ahead of the GPU on a background thread.
 TCD_PREFETCH_TILES = 4
+CONFIDENCE_BLOCK = 512
 
 # transformers-5 SegformerImageProcessor: do_rescale + do_normalize are fused into
 # one normalize() whose mean/std are scaled by 1 / rescale_factor in float32.
@@ -122,6 +123,52 @@ def interior_window(window: Window, width: int, height: int) -> tuple[Window, sl
 	rows = slice(dst_row - row_off, dst_row_end - row_off)
 	cols = slice(dst_col - col_off, dst_col_end - col_off)
 	return Window(dst_col, dst_row, dst_col_end - dst_col, dst_row_end - dst_row), rows, cols
+
+
+class _StripWriter:
+	"""Merges overlapping tile predictions in memory and writes each row of blocks once.
+
+	Tiles arrive row by row, so once a tile starts at row ``r`` no later tile writes above
+	``r`` and every full block row above it is final.
+	"""
+
+	def __init__(self, dst):
+		self.dst = dst
+		self.top = 0
+		self.rows = np.zeros((0, dst.width), dtype=np.uint8)
+
+	def write(self, window: Window, values: np.ndarray) -> None:
+		row, col = int(window.row_off), int(window.col_off)
+		self._flush_above(row)
+		bottom = row + values.shape[0] - self.top
+		self._extend(bottom)
+		self.rows[row - self.top : bottom, col : col + values.shape[1]] = values
+
+	def _extend(self, count: int) -> None:
+		if count > len(self.rows):
+			self.rows = np.vstack([self.rows, np.zeros((count - len(self.rows), self.dst.width), dtype=np.uint8)])
+
+	def flush(self) -> None:
+		self._write(len(self.rows))
+
+	def _flush_above(self, row: int) -> None:
+		final = (row - self.top) // CONFIDENCE_BLOCK * CONFIDENCE_BLOCK
+		if final <= 0:
+			return
+		# Write the buffered rows as whole block rows; rows below them that no tile reached
+		# (skipped empty tiles) are left unwritten, so GDAL fills them with nodata at close
+		# and the buffer never grows across a nodata gap.
+		buffered = min(final, -(-len(self.rows) // CONFIDENCE_BLOCK) * CONFIDENCE_BLOCK)
+		self._extend(buffered)
+		self._write(buffered)
+		self.top += final - buffered
+
+	def _write(self, count: int) -> None:
+		if count <= 0:
+			return
+		self.dst.write(self.rows[:count], 1, window=Window(0, self.top, self.dst.width, count))
+		self.rows = self.rows[count:]
+		self.top += count
 
 
 def resolve_model_dir() -> Path:
@@ -243,19 +290,25 @@ def predict_confidence_map(
 
 		width, height = src.width, src.height
 		windows = tile_windows(width, height)
-		# Uncompressed so overlapping tile writes stay cheap; the file only lives for the stage.
+		# Compressed: uncompressed, the map is one byte per pixel of a grid that EPSG:3395 inflates
+		# at high latitude (13380: about 47 GB) and it filled /data (DT-1381). Overlapping tiles
+		# are merged in a strip buffer and each finished row of blocks is written once, so no
+		# compressed block is rewritten.
 		profile = dict(
 			driver='GTiff', width=width, height=height, count=1, dtype='uint8', crs=src.crs,
-			transform=src.transform, nodata=0, tiled=True, blockxsize=512, blockysize=512, BIGTIFF='IF_SAFER',
+			transform=src.transform, nodata=0, tiled=True, blockxsize=CONFIDENCE_BLOCK,
+			blockysize=CONFIDENCE_BLOCK, BIGTIFF='IF_SAFER', compress='deflate', predictor=2, zlevel=1,
 		)
 		processed = 0
 		with rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True), rasterio.open(output_tif, 'w', **profile) as dst:
+			strip = _StripWriter(dst)
 			for batch in _batches(_read_tiles(src, windows), batch_size):
 				confidence = model.predict(np.stack([tile for _, tile in batch]))
 				for (window, _), tile_confidence in zip(batch, confidence):
 					dst_window, rows, cols = interior_window(window, width, height)
-					dst.write(tile_confidence[rows, cols], 1, window=dst_window)
+					strip.write(dst_window, tile_confidence[rows, cols])
 				processed += len(batch)
+			strip.flush()
 			for _, block in dst.block_windows(1):
 				dst.write_mask(src.dataset_mask(window=block), window=block)
 
