@@ -16,6 +16,7 @@ from processor.src.utils.geometry_validation import (
 	validate_and_fix_polygon,
 	validate_and_fix_polygons,
 	filter_degenerate_geometries,
+	RINGWISE_REPAIR_MIN_HOLES,
 )
 
 pytestmark = pytest.mark.unit
@@ -392,3 +393,19 @@ class TestEdgeCases:
 		assert result is not None
 		assert result.is_valid
 		assert len(list(result.interiors)) == 2
+
+
+	def test_many_hole_repair_matches_buffer0(self):
+		"""An invalid forest polygon with many holes is repaired ring by ring to buffer(0)'s result (DT-1379)."""
+		holes = [[(x + 0.1, y + 0.1), (x + 0.5, y + 0.1), (x + 0.5, y + 0.5), (x + 0.1, y + 0.5)] for x in range(40) for y in range(40)]
+		assert len(holes) >= RINGWISE_REPAIR_MIN_HOLES
+		# Reprojection can make neighbouring holes overlap; one crossing hole invalidates the polygon.
+		holes.append([(0.3, 0.3), (1.3, 0.3), (1.3, 1.3), (0.3, 1.3)])
+		polygon = Polygon([(0, 0), (40, 0), (40, 40), (0, 40)], holes)
+		assert not polygon.is_valid
+
+		result = validate_and_fix_polygon(polygon)
+
+		expected = polygon.buffer(0)
+		assert result.is_valid
+		assert result.symmetric_difference(expected).area < 1e-9 * expected.area

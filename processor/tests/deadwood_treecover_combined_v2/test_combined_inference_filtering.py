@@ -11,6 +11,7 @@ pytestmark = pytest.mark.unit
 
 from processor.src.deadwood_treecover_combined_v2.inference import combined_inference
 from processor.src.deadwood_treecover_combined_v2.inference.combined_inference import CombinedInference
+from processor.src.utils.geometry_validation import RINGWISE_REPAIR_MIN_HOLES, repair_polygon
 
 
 def _num_points(polygon):
@@ -127,12 +128,12 @@ def _forest_with_holes(count):
 
 def test_many_hole_repair_matches_buffer0():
 	"""Ring-by-ring repair of a forest polygon with many holes gives buffer(0)'s area (DT-1379)."""
-	polygon = _forest_with_holes(combined_inference.RINGWISE_REPAIR_MIN_HOLES + 500)
+	polygon = _forest_with_holes(RINGWISE_REPAIR_MIN_HOLES + 500)
 	shell = _chaikin_coords(polygon.exterior)
 	holes = [_chaikin_coords(ring) for ring in polygon.interiors]
 	assert not Polygon(shell, holes).is_valid
 
-	repaired = combined_inference._repaired(shell, holes)
+	repaired = repair_polygon(Polygon(shell, holes))
 
 	expected = Polygon(shell, holes).buffer(0)
 	assert repaired.is_valid
