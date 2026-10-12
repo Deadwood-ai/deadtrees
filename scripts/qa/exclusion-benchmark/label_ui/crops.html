@@ -54,6 +54,7 @@ kbd { background: #2a3138; border: 1px solid var(--line); border-radius: 4px; pa
   <button id="nextOpen" title="Next crop without a full answer (Tab)">Next open <kbd>Tab</kbd></button>
   <span id="meta" class="muted"></span>
   <label class="muted"><input type="checkbox" id="showModel"> model answers</label>
+  <label class="muted" title="Step only through yes answers that have no size yet"><input type="checkbox" id="sizePass"> size pass</label>
   <span id="progress" class="muted" style="margin-left:auto"></span>
 </header>
 <main>
@@ -72,7 +73,7 @@ kbd { background: #2a3138; border: 1px solid var(--line); border-radius: 4px; pa
     <p class="muted" style="margin:0"><kbd>1</kbd> yes · <kbd>2</kbd> no · <kbd>3</kbd> don't know · after yes, size <kbd>1</kbd>–<kbd>4</kbd> (<kbd>Esc</kbd> skip) · <kbd>Space</kbd> nothing wrong · <kbd>Enter</kbd> rest no · <kbd>c</kbd> can't tell</p>
     <details><summary>Rules and keys</summary>
       <p>Answer yes for any clear error, then give its rough size: <kbd>1</kbd> under 10%, <kbd>2</kbd> 10–20%, <kbd>3</kbd> 20–50%, <kbd>4</kbd> over 50%. Size is a share of the layer: for "missed" rows, of what should be marked (e.g. how much of the dead trees has no blue); for "wrong" rows, of what is marked (e.g. how much of the blue is wrong); for artifacts, of the crop. Lying wood is never deadwood. Hover a question for its full wording.</p>
-      <p>Work top to bottom on the highlighted row: <kbd>1</kbd> yes, <kbd>2</kbd> no, <kbd>3</kbd> don't know (y / n / ? also work); it moves down and after the last row goes to the next crop. <kbd>↑</kbd>/<kbd>↓</kbd> or a click pick a row. <kbd>Space</kbd> nothing wrong, next. <kbd>Enter</kbd> remaining = no, next. <kbd>c</kbd> can't tell. <kbd>Tab</kbd> next open crop, <kbd>←</kbd>/<kbd>→</kbd> previous/next. Wheel and drag zoom, double-click resets.</p>
+      <p>Work top to bottom on the highlighted row: <kbd>1</kbd> yes, <kbd>2</kbd> no, <kbd>3</kbd> don't know (y / n / ? also work); it moves down and after the last row goes to the next crop. <kbd>↑</kbd>/<kbd>↓</kbd> or a click pick a row. <kbd>Space</kbd> nothing wrong, next. <kbd>Enter</kbd> remaining = no, next. <kbd>c</kbd> can't tell. Tick "size pass" to step only through yes answers that still need a size. <kbd>Tab</kbd> next open crop, <kbd>←</kbd>/<kbd>→</kbd> previous/next. Wheel and drag zoom, double-click resets.</p>
     </details>
   </aside>
 </main>
@@ -100,6 +101,7 @@ const keys = () => Object.keys(st.questions);
 const cur = () => st.crops[st.i];
 const lab = (c = cur()) => ({ answers: {}, sizes: {}, note: '', ...(st.labels[c.id] || {}) });
 const val = (v) => (v === true ? 'yes' : v === false ? 'no' : v === 'unsure' ? 'unsure' : null);
+const unsized = (c) => { const l = lab(c); return keys().filter((k) => k !== GATE && l.answers[k] === true && !l.sizes[k]); };
 const done = (c) => { const a = lab(c).answers; return keys().every((k) => val(a[k]) !== null) || a[GATE] === false; };
 const src = (c, s) => `/files/${c.prefix || `datasets/${c.dataset_id}/${c.view}-`}${s}`;
 
@@ -155,9 +157,10 @@ function render() {
   const c = cur();
   const a = lab(c).answers;
   st.cursor = Math.max(0, keys().findIndex((k) => val(a[k]) === null)); st.sizing = null;
+  if (st.sizePass && unsized(c).length) { st.sizing = unsized(c)[0]; st.cursor = keys().indexOf(st.sizing); }
   $('#pos').textContent = `${st.i + 1} / ${st.crops.length}`;
   $('#meta').textContent = `Dataset ${c.dataset_id} · ${(c.mpp * 100).toFixed(1)} cm/px${c.source ? ` · ${c.source}` : ''}`;
-  $('#progress').textContent = `${st.crops.filter(done).length} of ${st.crops.length} done`;
+  progress();
   history.replaceState(null, '', `?crop=${c.id}`);
   renderPanels(); renderQuestions();
 }
@@ -166,7 +169,11 @@ async function save(c = cur()) {
   const r = await fetch('/api/label', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ crop_id: c.id, answers: l.answers, sizes: l.sizes, note: l.note }) });
   $('#status').textContent = r.ok ? `Saved ${new Date().toLocaleTimeString()}` : 'Save failed; your answer is kept in this page';
-  $('#progress').textContent = `${st.crops.filter(done).length} of ${st.crops.length} done`;
+  progress();
+}
+function progress() {
+  const left = st.crops.reduce((n, c) => n + unsized(c).length, 0);
+  $('#progress').textContent = `${st.crops.filter(done).length} of ${st.crops.length} done · ${left} yes without size`;
 }
 function update(change, advance) {
   const c = cur(); const l = structuredClone(lab(c)); change(l.answers);
@@ -184,6 +191,10 @@ const nothing = () => update((a) => { keys().forEach((k) => { a[k] = k === GATE 
 const finish = () => update((a) => rest(a, true), true);
 const unclear = () => update((a) => { keys().forEach((k) => { a[k] = k === GATE ? false : 'unsure'; }); }, true);
 function nextOpen() {
+  if (st.sizePass) {
+    for (let d = 1; d <= st.crops.length; d++) { const j = (st.i + d) % st.crops.length; if (unsized(st.crops[j]).length) { st.i = j; return render(); } }
+    $('#status').textContent = 'Every yes has a size.'; st.sizePass = false; $('#sizePass').checked = false;
+  }
   for (let d = 1; d <= st.crops.length; d++) { const j = (st.i + d) % st.crops.length; if (!done(st.crops[j])) { st.i = j; return render(); } }
   $('#status').textContent = 'All crops answered.'; render();
 }
@@ -193,9 +204,15 @@ $('#note').addEventListener('input', () => { clearTimeout(noteTimer); noteTimer 
 $('#prev').onclick = () => move(-1); $('#next').onclick = () => move(1); $('#nextOpen').onclick = nextOpen;
 $('#nothing').onclick = nothing; $('#done').onclick = finish; $('#unclear').onclick = unclear;
 $('#showModel').onchange = renderQuestions;
+$('#sizePass').onchange = () => { st.sizePass = $('#sizePass').checked; $('#sizePass').blur(); if (st.sizePass && !unsized(cur()).length) nextOpen(); else render(); };
 function down() {
-  // Move to the next row; after the last one go to the next open crop.
+  // Move to the next row; after the last one go to the next open crop. The size pass jumps to the next unsized yes.
   st.sizing = null;
+  if (st.sizePass) {
+    const rest = unsized(cur()).filter((k) => keys().indexOf(k) > st.cursor);
+    if (!rest.length) return nextOpen();
+    st.sizing = rest[0]; st.cursor = keys().indexOf(rest[0]); return renderQuestions();
+  }
   if (st.cursor >= keys().length - 1) return nextOpen();
   st.cursor += 1; renderQuestions();
 }
