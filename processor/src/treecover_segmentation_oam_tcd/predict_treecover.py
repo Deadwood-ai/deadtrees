@@ -36,6 +36,7 @@ with open(CONFIG_PATH, 'r') as f:
 TCD_THRESHOLD = config['tree_cover_threshold']
 TCD_MODEL = TCD_MODEL_REPO
 TCD_TARGET_RESOLUTION = config['tree_cover_inference_resolution']  # 10cm resolution (forced for all inputs)
+LOSSY_CODECS = {'jpeg', 'webp', 'lerc'}
 TCD_TARGET_CRS = 'EPSG:3395'  # World Mercator - what the TCD model was trained on
 TCD_OUTPUT_CRS = 'EPSG:4326'  # WGS84 for database storage
 
@@ -82,6 +83,11 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 				'BIGTIFF': 'YES',
 			}
 		)
+		# The copy is up to ~5x the ortho's pixels at high latitude. Lossy sources keep their
+		# codec; lossless ones get a horizontal predictor, which makes the upsampled copy about
+		# 40% smaller with identical pixels (13390: a 34 GB ZSTD temp file, DT-1381).
+		if str(profile.get('compress', '')).lower() not in LOSSY_CODECS:
+			profile.update(compress='zstd', predictor=2)
 
 		# Reproject the image to EPSG:3395. Warping in parallel gives the same pixels
 		# as a single thread (each output chunk is computed independently). All bands go

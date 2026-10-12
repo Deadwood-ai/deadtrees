@@ -10,13 +10,13 @@ from processor.src.treecover_segmentation_oam_tcd import predict_treecover
 pytestmark = pytest.mark.unit
 
 
-def _ortho(path, size=1024):
+def _ortho(path, size=1024, compress='deflate'):
 	rng = np.random.default_rng(0)
 	data = rng.integers(30, 220, (4, size, size)).astype(np.uint8)
 	data[3] = 255
 	with rasterio.open(
 		path, 'w', driver='GTiff', width=size, height=size, count=4, dtype='uint8', tiled=True,
-		blockxsize=256, blockysize=256, compress='deflate', crs='EPSG:32738',
+		blockxsize=256, blockysize=256, compress=compress, crs='EPSG:32738',
 		transform=from_origin(400000, 8700000, 0.1, 0.1),
 	) as dst:
 		dst.write(data)
@@ -43,3 +43,26 @@ def test_reprojection_matches_band_by_band_and_stays_compact(tmp_path):
 			assert np.array_equal(dst.read(band), expected)
 	# Rewriting compressed tiles once per band made the copy grow well past the source.
 	assert output.stat().st_size < 1.5 * source.stat().st_size
+
+
+def test_lossless_copy_uses_a_predictor(tmp_path):
+	source = tmp_path / 'ortho.tif'
+	_ortho(source, size=512, compress='zstd')
+	output = tmp_path / 'reprojected.tif'
+
+	predict_treecover._reproject_orthomosaic_for_tcd(str(source), str(output))
+
+	with rasterio.open(output) as dst:
+		assert dst.profile['compress'] == 'zstd'
+		assert dst.tags(ns='IMAGE_STRUCTURE').get('PREDICTOR') == '2'
+
+
+def test_lossy_copy_keeps_its_codec(tmp_path):
+	source = tmp_path / 'ortho.tif'
+	_ortho(source, size=512, compress='jpeg')
+	output = tmp_path / 'reprojected.tif'
+
+	predict_treecover._reproject_orthomosaic_for_tcd(str(source), str(output))
+
+	with rasterio.open(output) as dst:
+		assert dst.profile['compress'] == 'jpeg'
