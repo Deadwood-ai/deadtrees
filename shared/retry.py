@@ -66,6 +66,17 @@ def is_statement_timeout(exc: BaseException) -> bool:
 	return any(pattern in message for pattern in STATEMENT_TIMEOUT_PATTERNS)
 
 
+def is_empty_gateway_500(exc: BaseException) -> bool:
+	"""True for postgrest-py's error when the API gateway answered with an empty-bodied 500.
+
+	postgrest-py reports any response it cannot parse as "JSON could not be generated",
+	including deterministic ones such as a 414, so only the empty 500 counts as transient
+	(13398's label upload, DT-1384).
+	"""
+	message = str(exc).lower()
+	return 'json could not be generated' in message and "'code': 500" in message and "b''" in message
+
+
 def is_transient_error(exc: BaseException) -> bool:
 	"""Heuristic for whether an exception looks like a transient network failure.
 
@@ -81,7 +92,7 @@ def is_transient_error(exc: BaseException) -> bool:
 	if is_statement_timeout(exc):
 		return False
 	message = str(exc).lower()
-	return any(pattern in message for pattern in TRANSIENT_ERROR_PATTERNS)
+	return is_empty_gateway_500(exc) or any(pattern in message for pattern in TRANSIENT_ERROR_PATTERNS)
 
 
 def retry_on_transient_error(
