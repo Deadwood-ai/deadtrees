@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 
 import rasterio
 
@@ -82,8 +83,10 @@ def _save_label(polygons, label_data, src_crs, dataset_id, user_id, token, model
         logger.warning(f'No {label_type} polygons detected', log_ctx)
         return
 
+    started = time.monotonic()
     polygons = reproject_polygons(polygons, src_crs, 'EPSG:4326')
     polygons, _ = validate_and_fix_polygons(polygons, min_area=0.0, dataset_id=dataset_id, label_type=label_type)
+    logger.info(f'Validated {label_type}: {len(polygons)} polygons in {time.monotonic() - started:.0f} s', log_ctx)
 
     if len(polygons) == 0:
         logger.warning(f'No valid {label_type} polygons after geometry validation', log_ctx)

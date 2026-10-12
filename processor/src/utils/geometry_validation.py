@@ -10,10 +10,29 @@ Geometries can become invalid due to:
 These utilities should be called AFTER all reprojections but BEFORE saving to database.
 """
 
+import shapely
 from shapely.geometry import Polygon, MultiPolygon
 from shapely.validation import explain_validity
 from shared.logger import logger
 from shared.logging import LogContext, LogCategory
+
+
+# Above this many holes, an invalid polygon is repaired ring by ring instead of with one
+# buffer(0): GEOS's buffer(0) grows much faster than linearly with the hole count, and a
+# forest polygon with ~1M holes kept the combined step busy for hours (DT-1379).
+RINGWISE_REPAIR_MIN_HOLES = 1000
+
+
+def repair_polygon(polygon: Polygon):
+	"""A valid geometry for ``polygon``; the same area as ``polygon.buffer(0)``, which it falls back to."""
+	if polygon.is_valid:
+		return polygon
+	if len(polygon.interiors) < RINGWISE_REPAIR_MIN_HOLES:
+		return polygon.buffer(0)
+	# Shell minus the union of the holes, each ring repaired on its own. Overlapping or
+	# touching holes (smoothing makes diagonal neighbours overlap) merge in the union.
+	hole_union = shapely.union_all([Polygon(hole).buffer(0) for hole in polygon.interiors])
+	return Polygon(polygon.exterior).buffer(0).difference(hole_union)
 
 
 def validate_and_fix_polygon(polygon: Polygon, min_area: float = 0.0) -> Polygon | None:
@@ -39,14 +58,13 @@ def validate_and_fix_polygon(polygon: Polygon, min_area: float = 0.0) -> Polygon
 
 	# Try to fix invalid geometry
 	try:
-		# Method 1: buffer(0) - Classic fix for most topology issues
-		fixed = polygon.buffer(0)
+		fixed = repair_polygon(polygon)
 
-		# If buffer(0) returns empty or wrong type, discard
+		# If the repair returns empty or wrong type, discard
 		if fixed.is_empty or not isinstance(fixed, (Polygon, MultiPolygon)):
 			return None
 
-		# If buffer(0) created MultiPolygon, take largest part
+		# If the repair created a MultiPolygon, take largest part
 		if isinstance(fixed, MultiPolygon):
 			# Sort by area and take the largest polygon
 			parts = sorted(fixed.geoms, key=lambda p: p.area, reverse=True)
