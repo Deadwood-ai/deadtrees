@@ -45,9 +45,10 @@ def test_reprojection_matches_band_by_band_and_stays_compact(tmp_path):
 	assert output.stat().st_size < 1.5 * source.stat().st_size
 
 
-def test_lossless_copy_uses_a_predictor(tmp_path):
+@pytest.mark.parametrize('compress', ['zstd', 'deflate', 'lzw', None])
+def test_lossless_copy_uses_a_predictor(tmp_path, compress):
 	source = tmp_path / 'ortho.tif'
-	_ortho(source, size=512, compress='zstd')
+	_ortho(source, size=512, compress=compress)
 	output = tmp_path / 'reprojected.tif'
 
 	predict_treecover._reproject_orthomosaic_for_tcd(str(source), str(output))
@@ -57,12 +58,13 @@ def test_lossless_copy_uses_a_predictor(tmp_path):
 		assert dst.tags(ns='IMAGE_STRUCTURE').get('PREDICTOR') == '2'
 
 
-def test_lossy_copy_keeps_its_codec(tmp_path):
+@pytest.mark.parametrize('compress', ['jpeg', 'webp', 'lerc_zstd'])
+def test_lossy_copy_keeps_its_codec(tmp_path, compress):
 	source = tmp_path / 'ortho.tif'
-	_ortho(source, size=512, compress='jpeg')
+	_ortho(source, size=512, compress=compress)
 	output = tmp_path / 'reprojected.tif'
 
 	predict_treecover._reproject_orthomosaic_for_tcd(str(source), str(output))
 
 	with rasterio.open(output) as dst:
-		assert dst.profile['compress'] == 'jpeg'
+		assert dst.profile['compress'] == compress
