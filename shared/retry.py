@@ -33,6 +33,9 @@ TRANSIENT_ERROR_PATTERNS = (
 	# DNS lookups that fail for a few seconds (deepl1, 2026-10-01: "[Errno -3]
 	# Temporary failure in name resolution" on status and label writes).
 	'temporary failure in name resolution',
+	# postgrest-py's message for a 5xx whose body is not JSON: the API gateway answered
+	# with an empty 500 instead of a PostgREST error (13398's label upload, DT-1384).
+	'json could not be generated',
 	# paramiko SSH connection establishment hiccups (storage server transfers)
 	'protocol banner',
 	'error reading ssh',

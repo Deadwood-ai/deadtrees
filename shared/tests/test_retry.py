@@ -20,6 +20,7 @@ from shared.retry import is_statement_timeout, is_transient_error, retry_on_tran
 		'RemoteProtocolError: server disconnected',
 		'Error reading SSH protocol banner',
 		'[Errno -3] Temporary failure in name resolution',
+		"{'message': 'JSON could not be generated', 'code': 500, 'hint': 'Refer to full message for details', 'details': \"b''\"}",
 	],
 )
 def test_is_transient_error_true_for_network_failures(message):
