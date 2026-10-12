@@ -13,11 +13,13 @@ from pathlib import Path
 import sqlite3
 
 import numpy as np
+from PIL import Image
 from sklearn.metrics import roc_auc_score
 
 from analyst import analyst
 from decisions_crops import CONTEXTS, PREDICATES, body, post, read_key
 from decisions_patches import images
+from sol_issue_finder import composite
 
 CUTS = (0.5, 0.7, 0.9)
 
@@ -34,6 +36,15 @@ def neutral_context(dataset_ids):
     return {r['id']: (f"Context: biome {r['biome'] or 'unknown'}; "
                       f"{'southern' if (r['lat'] or 0) < 0 else 'northern'} hemisphere; "
                       f"acquired in {months[r['month'] - 1] if r['month'] else 'an unknown month'}.") for r in rows}
+
+
+def crop_images(root, c):
+    """Raw RGB plus the deadwood and forest overlays for one gold crop."""
+    if c['prefix'].endswith('/'):
+        return images(root / c['prefix'])
+    raw = Image.open(root / (c['prefix'] + 'raw.jpg'))
+    return [raw] + [composite(raw, (root / (c['prefix'] + f'{l}-fill.png'), root / (c['prefix'] + f'{l}-outline.png')))
+                    for l in ('deadwood', 'forest_cover')]
 
 
 def score(crops, labels, model, questions):
@@ -77,20 +88,11 @@ if __name__ == '__main__':
         if out.exists():
             return json.loads(out.read_text())
         context = CONTEXTS[a.context] + ('\n' + extra[c['dataset_id']] if c['dataset_id'] in extra else '')
-        raw = post(body(_images(a.root, c), {'mpp': c['mpp']}, questions, context), key, 400)
+        raw = post(body(crop_images(a.root, c), {'mpp': c['mpp']}, questions, context), key, 400)
         r = {'crop': c['id'], 'answers': {x['name']: x.get('probability') for x in raw.get('answers', [])
                                           if x.get('type') == 'predicate'}}
         out.write_text(json.dumps(r))
         return r
-
-    def _images(root, c):
-        if c['prefix'].endswith('/'):
-            return images(root / c['prefix'])
-        from PIL import Image
-        from sol_issue_finder import composite
-        raw = Image.open(root / (c['prefix'] + 'raw.jpg'))
-        return [raw] + [composite(raw, (root / (c['prefix'] + f'{l}-fill.png'), root / (c['prefix'] + f'{l}-outline.png')))
-                        for l in ('deadwood', 'forest_cover')]
 
     with ThreadPoolExecutor(8) as pool:
         model = {r['crop']: r['answers'] for r in pool.map(one, crops)}
