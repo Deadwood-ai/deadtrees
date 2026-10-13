@@ -65,9 +65,13 @@ INBOX_TAGS = ('[linear]', '[gmail]', '[zulip]', '[posthog]')
 EMPTY_ITEM_RE = re.compile(r'[\s`*:.\-]*((none|nothing|n/a)\b.*|no\s.*)?', re.IGNORECASE)
 EMAIL_RE = re.compile(r"[^\s@<>()\[\]\"'`,;:]+@([^\s@<>()\[\]\"'`,;:]+)")
 VERSION_RE = re.compile(r'\d+(?:\.\d+)*[.,]?')
+# Strict shapes: these values come from frontend telemetry via the model.
 POSTHOG_LINE_RE = re.compile(
-	r'\[posthog\] id=(\S+) occurrences=(\d+) users=(\d+) first_seen=(\S+) name=(.*)'
+	r'\[posthog\] id=([0-9a-f-]{8,64}) occurrences=(\d+) users=(\d+) first_seen=(\d{4}-\d\d-\d\dT[\d:.]+Z?) name=(.*)'
 )
+FILED_RE = re.compile(r'\[filed\] (dt-status/\S+)=(DT-\d+)')
+ISSUE_ID_RE = re.compile(r'"(?:identifier|id)"\s*:\s*"(DT-\d+)"')
+LINEAR_TEAM = 'deadtrees'
 # A low-effort call sometimes stops after one turn without a tool, at times
 # after writing made-up tool calls as text. Retries cover it; the last two
 # attempts escalate (3DTrees measurements, 2026-10-07 and 2026-10-08).
@@ -196,8 +200,9 @@ def posthog_delta(items: list[dict[str, Any]], seen: dict[str, int]) -> tuple[di
 	updated = dict(seen)
 	for item in items:
 		previous = seen.get(item['id'])
+		# The error name is telemetry text, so it stays out of the filing call.
 		summary = (
-			f"PostHog error {item['name']} ({item['occurrences']} in the last hour, {item['users']} users,"
+			f"PostHog frontend error {item['id']} ({item['occurrences']} in the last hour, {item['users']} users,"
 			f" first seen {item['first_seen']}): {POSTHOG_URL.format(item['id'])}"
 		)
 		finding = findings_module.finding('yellow', 'posthog', f"error:{item['id']}", summary)
@@ -335,15 +340,86 @@ def ask_model(
 	result = next((event for event in reversed(events) if event.get('type') == 'result'), None)
 	if result is None:
 		raise RuntimeError(f'claude -p failed ({completed.returncode}): {completed.stderr.strip()[-160:]}')
-	result['tools_called'] = sorted({
-		str(block.get('name', '')).rsplit('__', 1)[-1]
-		for event in events if event.get('type') == 'assistant'
-		for block in (event.get('message') or {}).get('content') or []
-		if isinstance(block, dict) and block.get('type') == 'tool_use'
-	})
+	result['tool_calls'] = tool_calls(events)
+	# Only calls that returned without an error count as made.
+	result['tools_called'] = sorted({call['name'] for call in result['tool_calls'] if call['ok']})
 	if result.get('is_error') or result.get('subtype') != 'success':
 		raise RuntimeError(f"claude -p ended with {result.get('subtype')}: {clip(result.get('result'))}")
 	return result
+
+
+def blocks(event: dict[str, Any]) -> list[dict[str, Any]]:
+	content = (event.get('message') or {}).get('content')
+	return [block for block in content if isinstance(block, dict)] if isinstance(content, list) else []
+
+
+def tool_calls(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+	"""Each tool call of the session with its input and whether its result
+	came back without an error."""
+	calls: dict[str, dict[str, Any]] = {}
+	for event in events:
+		for block in blocks(event):
+			if event.get('type') == 'assistant' and block.get('type') == 'tool_use':
+				calls[str(block.get('id'))] = {
+					'name': str(block.get('name', '')).rsplit('__', 1)[-1],
+					'input': block.get('input') if isinstance(block.get('input'), dict) else {},
+					'ok': False,
+					'output': '',
+				}
+			elif event.get('type') == 'user' and block.get('type') == 'tool_result' and str(block.get('tool_use_id')) in calls:
+				content = block.get('content')
+				text = content if isinstance(content, str) else ' '.join(
+					str(part.get('text', '')) for part in content or [] if isinstance(part, dict)
+				)
+				calls[str(block['tool_use_id'])].update(ok=not block.get('is_error'), output=text[:4000])
+	return list(calls.values())
+
+
+def created_issue(call: dict[str, Any]) -> str | None:
+	if call['name'] != 'save_issue' or not call['ok']:
+		return None
+	match = ISSUE_ID_RE.search(call['output'])
+	return match.group(1) if match else None
+
+
+def check_writes(
+	calls: list[dict[str, Any]], delta: dict[str, Any], known: dict[str, str], filed: dict[str, str]
+) -> str | None:
+	"""Why the session's own Linear writes do not back the receipt, or None.
+
+	The filing call may only create issues in the team and comment on issues
+	of this delta; each filed fingerprint needs a successful write of its own."""
+	created: set[str] = set()
+	commented: set[str] = set()
+	targets = set(known.values())
+	for call in calls:
+		if call['name'] not in FILING_WRITES:
+			continue
+		args = call['input']
+		if call['name'] == 'save_issue':
+			if args.get('id') or str(args.get('team', '')).lower() != LINEAR_TEAM:
+				return f'unexpected save_issue {json.dumps(args)[:120]}'
+			issue = created_issue(call)
+			if issue:
+				created.add(issue)
+		else:
+			issue = str(args.get('issueId', ''))
+			if args.get('id') or not issue or issue not in targets | created:
+				return f'unexpected save_comment on {issue or "?"}'
+			if call['ok']:
+				commented.add(issue)
+	for key in ('new', 'changed', 'cleared'):
+		for item in delta.get(key, []):
+			fingerprint = item['fingerprint']
+			issue = known.get(fingerprint)
+			if key == 'cleared' and not issue:
+				continue
+			if issue:
+				if issue not in commented or filed.get(fingerprint, issue) != issue:
+					return f'no successful comment on {issue} for {fingerprint}'
+			elif filed.get(fingerprint) not in created:
+				return f'no created issue for {fingerprint}'
+	return None
 
 
 def call_cost(result: dict[str, Any]) -> float:
@@ -419,14 +495,20 @@ def file_findings(
 	lines = [line.strip().strip('`') for line in str(result.get('result')).splitlines()]
 	if int(result.get('num_turns') or 0) < MIN_FILING_TURNS or not FILING_WRITES & set(result.get('tools_called') or ()):
 		return False, 'the model did not make its Linear calls', {}, cost
-	filed = dict(
-		match.groups() for line in lines if (match := re.fullmatch(r'\[filed\] (dt-status/\S+)=([A-Z0-9]+-\d+)', line))
-	)
+	filed = dict(match.groups() for line in lines if (match := FILED_RE.fullmatch(line)))
 	final = next((line for line in reversed(lines) if line.startswith('[filed]')), 'no [filed] line')
-	missing = sorted(expected - set(filed))
+	missing = sorted(expected - set(filed) - {key for key in expected if key in known})
 	if final == '[filed] ok' and missing:
 		final = f"no issue reported for {', '.join(missing)[:120]}"
-	return final == '[filed] ok', final, filed, cost
+	# The receipt is the model's word; only its own successful writes count.
+	problem = check_writes(result.get('tool_calls') or [], delta, known, filed)
+	if final == '[filed] ok' and problem:
+		final = problem
+	# Issues the session really created are remembered even when the receipt
+	# fails, so a retry comments on them instead of creating duplicates.
+	really_created = {created_issue(call) for call in result.get('tool_calls') or []} - {None}
+	created = {fingerprint: issue for fingerprint, issue in filed.items() if fingerprint not in known and issue in really_created}
+	return final == '[filed] ok', final, created, cost
 
 
 # --- Tick ---------------------------------------------------------------------
@@ -535,9 +617,9 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 	except (RuntimeError, ValueError, subprocess.TimeoutExpired):
 		scorecard = {}
 	facts = host_facts.collect(now)
-	current, gaps = findings_module.build_findings(snapshot, facts, now)
+	current, gaps, unobserved = findings_module.build_findings(snapshot, facts, now)
 	baseline = load_json(args.state_dir / BASELINE)
-	delta, next_baseline = findings_module.diff_findings(baseline, current)
+	delta, next_baseline = findings_module.diff_findings(baseline, current, unobserved)
 	known: dict[str, str] = dict(state.get('issues') or {})
 	cost = 0.0
 
