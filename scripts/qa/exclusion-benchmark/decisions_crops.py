@@ -132,6 +132,16 @@ PREDICATES = {
         'm7_fc_artifact': 'Processing artifact in the forest layer: straight tile seams, rectangular holes or blocks, or the gold cut off or missing.',
         'v_forest': 'Major forest error: all forest errors in this crop together would noticeably bias the forest cover of the satellite product, so this forest prediction should be excluded here.',
     },
+    # major1 (13 Oct): several wordings of the per-layer "major" verdict, to find one Decisions
+    # can answer; scored against the reviewer's v_deadwood / v_forest.
+    'major1': {
+        'dw_major_bias': 'The deadwood prediction (blue) is wrong enough to noticeably change the deadwood cover estimate for this whole 51 m crop: large dead crowns without blue, or large blue areas on things that are not standing dead trees.',
+        'dw_major_fifth': 'More than about a fifth of the standing dead tree area has no blue, or more than about a fifth of the blue lies on things that are not standing dead trees.',
+        'dw_major_reviewer': 'A careful reviewer would reject the deadwood prediction for this crop because of clear, large errors, not just small misses or loose outlines.',
+        'fc_major_bias': 'The forest prediction (gold) is wrong enough to noticeably change the forest cover estimate for this whole 51 m crop: large tree canopy areas without gold, or large gold areas on things that are not tree canopy.',
+        'fc_major_fifth': 'More than about a fifth of the tree canopy area has no gold, or more than about a fifth of the gold lies on things that are not tree canopy.',
+        'fc_major_reviewer': 'A careful reviewer would reject the forest prediction for this crop because of clear, large errors, not just small misses or loose outlines.',
+    },
     # Perception check: can it even see the overlays? Truth is the rendered mask itself.
     'perception': {
         'any_blue': 'Image 2 contains blue overlay polygons anywhere.',

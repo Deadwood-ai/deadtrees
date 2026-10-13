@@ -78,7 +78,7 @@ if __name__ == '__main__':
     p.add_argument('--key-file', type=Path, required=True)
     p.add_argument('--context', choices=sorted(CONTEXTS), default='strict')
     p.add_argument('--with-location', action='store_true', help='add neutral biome/month/hemisphere context')
-    p.add_argument('--questions', default='gold9', choices=('gold7', 'gold9'))
+    p.add_argument('--questions', default='gold9', choices=sorted(PREDICATES))
     a = p.parse_args()
     crops = json.loads((a.root / 'gold-test.json').read_text())
     labels = {r[0]: truth(json.loads(r[1])['answers']) for r in sqlite3.connect(a.root / 'gold-labels.sqlite3').execute(

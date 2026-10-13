@@ -1,4 +1,7 @@
-"""Sol gives the per-layer verdict (OK / minor / major) on the gold crops, as the reviewer does.
+"""A model gives the per-layer verdict (OK / minor / major) on the gold crops, as the reviewer does.
+
+Backends: Sol through the Codex app-server transport (default, effort selectable) or Luna
+through the OpenAI Responses API, so cost and accuracy can be compared on the same prompt.
 
 Same images and rules as sol_sizes.py. Per layer Sol names the errors it sees, gives the
 verdict for the satellite product and a 0-100 likelihood that the layer has a major error
@@ -13,11 +16,15 @@ from pathlib import Path
 import re
 import sqlite3
 import time
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 import numpy as np
 from sklearn.metrics import roc_auc_score
 
 from analyst import analyst
+from decisions_crops import image_url
+from decisions_runner import read_key
 from magnitude_llm import jpeg
 from model_transport import invoke
 from score_gold import crop_images
@@ -47,13 +54,50 @@ Return only JSON: {"assessable": true|false,
  "deadwood": {"errors": ["..."], "verdict": "ok|minor|major", "major_likelihood": n},
  "forest": {"errors": ["..."], "verdict": "ok|minor|major", "major_likelihood": n}}'''
 
+# v2 (13 Oct): v1 called many crops major that the reviewer saw as OK. Anchor the verdict to
+# area and base rate, and ask for the wrong area as a continuous number for ranking.
+PROMPT_V2 = PROMPT.replace("""Count overlapping errors once. Also give major_likelihood, 0 to 100, that the layer has a major error.""",
+"""Count overlapping errors once and estimate wrong_area_pct: the area where this layer is wrong
+(missed plus wrongly marked), as a percentage of the whole crop.
+Calibration: most predictions are acceptable; in a typical set only about 1 crop in 10 has a major
+error in a layer. Small misses, loose outlines, a few missed or extra crowns, and anything you are
+unsure about are OK or minor, never major. Major means the wrong area is obvious at a glance and
+large compared with what the layer should cover, roughly a fifth of it or more.
+Also give major_likelihood, 0 to 100, that the layer has a major error.""").replace(
+    '"verdict": "ok|minor|major", "major_likelihood": n}', '"wrong_area_pct": n, "verdict": "ok|minor|major", "major_likelihood": n}')
+PROMPTS = {'v1': PROMPT, 'v2': PROMPT_V2}
 
-def ask(root, crop, out):
+
+
+def luna(prompt, images, key, effort):
+    content = [{'type': 'input_text', 'text': prompt}] + [
+        {'type': 'input_image', 'image_url': image_url(im), 'detail': 'original'} for im in images]
+    payload = {'model': 'gpt-6-luna', 'input': [{'role': 'user', 'content': content}], 'reasoning': {'effort': effort}}
+    request = Request('https://api.openai.com/v1/responses', data=json.dumps(payload).encode(), method='POST',
+                      headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key})
+    try:
+        with urlopen(request, timeout=300) as response:
+            raw = json.loads(response.read(2_000_001))
+    except HTTPError as e:
+        # Same wording as the app-server transport so the retry below treats it alike.
+        raise ValueError(('at capacity ' if e.code in (429, 500, 502, 503, 504) else '') + f'HTTP {e.code}') from None
+    text = ''.join(c.get('text', '') for item in raw.get('output', []) if item.get('type') == 'message'
+                   for c in item.get('content', []))
+    return text, {'usage': raw.get('usage')}
+
+
+def ask(root, crop, out, backend='sol', effort='high', key=None, prompt=PROMPT):
     out.mkdir(parents=True, exist_ok=True)
-    named = [(str(i + 1), jpeg(im)) for i, im in enumerate(crop_images(root, crop))]
+    images = crop_images(root, crop)
     for attempt in range(1, 5):
         try:
-            text, receipt = invoke(PROMPT, named, out, 'gpt-6.1-sol', 'high', NoTools())
+            started = time.monotonic()
+            if backend == 'sol':
+                text, receipt = invoke(prompt, [(str(i + 1), jpeg(im)) for i, im in enumerate(images)], out,
+                                       'gpt-6.1-sol', effort, NoTools())
+            else:
+                text, receipt = luna(prompt, images, key, effort)
+            receipt['seconds'] = round(time.monotonic() - started, 1)
             values = json.loads(re.search(r'\{.*\}', text, re.S).group(0))
             result = {'assessable': bool(values.get('assessable', True))}
             for layer in LAYERS:
@@ -61,12 +105,13 @@ def ask(root, crop, out):
                 if v['verdict'] not in VERDICTS:
                     raise ValueError('bad verdict')
                 result[layer] = {'verdict': v['verdict'], 'major_likelihood': float(v['major_likelihood']),
+                                 'wrong_area_pct': float(v['wrong_area_pct']) if 'wrong_area_pct' in v else None,
                                  'errors': [str(e)[:200] for e in v.get('errors', [])][:10]}
-            return result, receipt.get('usage')
+            return result, {'usage': receipt.get('usage'), 'seconds': receipt['seconds']}
         except ValueError as e:
             if not any(t in str(e) for t in ('serverOverloaded', 'at capacity', 'stream disconnected')) or attempt == 4:
                 raise
-            time.sleep(60 * attempt)
+            time.sleep((60 if backend == 'sol' else 10) * attempt)
 
 
 def score(crops, labels, sol):
@@ -79,7 +124,7 @@ def score(crops, labels, sol):
             continue
         y = np.array([t == 'major' for _, t in rows]); x = np.array([s['major_likelihood'] for s, _ in rows])
         entry = {'n': len(rows), 'major': int(y.sum()),
-                 'confusion': dict(Counter(f"you {t} / sol {s['verdict']}" for s, t in rows))}
+                 'confusion': dict(Counter(f"you {t} / model {s['verdict']}" for s, t in rows))}
         if 0 < y.sum() < len(y):
             entry['auc_major'] = round(float(roc_auc_score(y, x)), 2)
         out[layer] = entry
@@ -92,7 +137,12 @@ if __name__ == '__main__':
     p.add_argument('--run', type=Path, required=True)
     p.add_argument('--limit', type=int)
     p.add_argument('--workers', type=int, default=4)
+    p.add_argument('--backend', choices=('sol', 'luna'), default='sol')
+    p.add_argument('--effort', default='high')
+    p.add_argument('--prompt', choices=sorted(PROMPTS), default='v1')
+    p.add_argument('--key-file', type=Path, help='OpenAI key file, Luna only')
     a = p.parse_args()
+    key = read_key(a.key_file) if a.backend == 'luna' else None
     crops = json.loads((a.root / 'gold-test.json').read_text())
     labels = {r[0]: json.loads(r[1]) for r in sqlite3.connect(a.root / 'gold-labels.sqlite3').execute(
         'SELECT crop_id, payload FROM labels')}
@@ -108,7 +158,7 @@ if __name__ == '__main__':
         if path.exists():
             return json.loads(path.read_text())
         try:
-            result, usage = ask(a.root, c, a.run / 'trials' / c['id'])
+            result, usage = ask(a.root, c, a.run / 'trials' / c['id'], a.backend, a.effort, key, PROMPTS[a.prompt])
         except Exception as e:
             print(c['id'], type(e).__name__, str(e)[:200], flush=True)
             return None
