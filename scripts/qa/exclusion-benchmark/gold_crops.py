@@ -41,15 +41,16 @@ SELECT d.id AS dataset_id, d.platform::text AS platform, c.cog_path,
   m.metadata->'biome'->>'biome_name' AS biome, m.metadata->'gadm'->>'admin_level_1' AS country,
   ST_X(ST_Centroid(ao.g)) AS lon, ST_Y(ST_Centroid(ao.g)) AS lat, ST_AsGeoJSON(ao.g)::jsonb AS aoi,
   dw.id AS deadwood_label_id, fc.id AS forest_cover_label_id
-FROM dataset_audit a JOIN v2_datasets d ON d.id = a.dataset_id JOIN v2_cogs c ON c.dataset_id = d.id
+FROM v2_datasets d LEFT JOIN dataset_audit a ON a.dataset_id = d.id JOIN v2_cogs c ON c.dataset_id = d.id
 JOIN pref dw ON dw.dataset_id = d.id AND dw.layer = 'deadwood'
 JOIN pref fc ON fc.dataset_id = d.id AND fc.layer = 'forest_cover'
 LEFT JOIN v2_metadata m ON m.dataset_id = d.id
 LEFT JOIN LATERAL (SELECT ST_GeomFromGeoJSON(COALESCE(geometry->'geometry', geometry)) AS g FROM v2_aois
                    WHERE dataset_id = d.id ORDER BY created_at DESC, id DESC LIMIT 1) ao ON true
-WHERE d.data_access = 'public' AND NOT d.archived AND a.audited_by IS NOT NULL AND a.has_valid_phenology IS TRUE
-  AND a.deadwood_quality IS NOT NULL AND a.forest_cover_quality IS NOT NULL AND ao.g IS NOT NULL
+WHERE d.data_access = 'public' AND NOT d.archived AND ao.g IS NOT NULL
 """
+AUDITED = (" AND a.audited_by IS NOT NULL AND a.has_valid_phenology IS TRUE"
+           " AND a.deadwood_quality IS NOT NULL AND a.forest_cover_quality IS NOT NULL")
 
 
 def select(rows, exclude, count):
@@ -70,8 +71,8 @@ def select(rows, exclude, count):
     return chosen
 
 
-def build(row, strategy, output, rng):
-    directory = output / str(row['dataset_id'])
+def build(row, strategy, output, rng, name=None):
+    directory = output / (name or str(row['dataset_id']))
     if (directory / 'truth.json').exists():
         return json.loads((directory / 'truth.json').read_text())
     url = COG_ROOT + quote(row['cog_path'], safe='/')
@@ -147,18 +148,34 @@ if __name__ == '__main__':
     p.add_argument('--root', type=Path, required=True, help='benchmark root (to exclude its datasets)')
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--count', type=int, default=120)
+    p.add_argument('--datasets', type=int, nargs='*', help='instead of the diverse pick: crops from these datasets')
+    p.add_argument('--per-dataset', type=int, default=10)
     a = p.parse_args()
+    strategies = ('deadwood', 'forest_cover', 'random', 'deadwood', 'forest_cover', 'deadwood', 'random', 'forest_cover', 'deadwood', 'random')
+    if a.datasets:
+        # Named cases (e.g. a dataset someone reported): several crops each, audited or not.
+        with analyst() as db:
+            rows = db.execute(POOL_SQL + ' AND d.id = ANY(%s)', (a.datasets,)).fetchall()
+        built = []
+        for row in rows:
+            for n in range(a.per_dataset):
+                rng = np.random.default_rng([row['dataset_id'], n])
+                try:
+                    built.append(build(row, strategies[n % len(strategies)], a.output, rng, f"{row['dataset_id']}-{n + 1}"))
+                except Exception as e:
+                    print({'dataset': row['dataset_id'], 'crop': n + 1, 'error': f'{type(e).__name__}: {str(e)[:120]}'}, flush=True)
+        print({'built': len(built)})
+        raise SystemExit
     exclude = {d['dataset_id'] for d in json.loads((a.root / 'selection.json').read_text())['datasets']}
     exclude |= {c['dataset_id'] for c in json.loads((a.root / 'crop-test.json').read_text())}
     features = {r['dataset_id']: r['embedding'] for r in json.loads((a.root / 'audit-features.json').read_text())}
     with analyst() as db:
-        rows = db.execute(POOL_SQL).fetchall()
+        rows = db.execute(POOL_SQL + AUDITED).fetchall()
     for r in rows:
         e = features.get(r['dataset_id'])
         r['embedding'] = (np.array(e) / np.linalg.norm(e)) if e else None
     chosen = select(rows, exclude, a.count)
     print({'pool': len(rows), 'chosen': len(chosen), 'bad': sum(r['dq'] == 'bad' or r['fq'] == 'bad' for r in chosen)}, flush=True)
-    strategies = ('deadwood', 'forest_cover', 'random', 'deadwood', 'forest_cover', 'deadwood', 'random', 'forest_cover', 'deadwood', 'random')
     built = []
     for n, row in enumerate(chosen):
         rng = np.random.default_rng(row['dataset_id'])
