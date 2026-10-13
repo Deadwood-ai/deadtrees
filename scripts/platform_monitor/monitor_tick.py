@@ -378,48 +378,58 @@ def created_issue(call: dict[str, Any]) -> str | None:
 	return match.group(1) if match else None
 
 
-def check_writes(
-	calls: list[dict[str, Any]], delta: dict[str, Any], known: dict[str, str], filed: dict[str, str]
-) -> str | None:
-	"""Why the session's own Linear writes do not back the receipt, or None.
+def flat(text: object) -> str:
+	return ' '.join(str(text).split())
 
-	The filing call may only create issues in the team and comment on issues
-	of this delta; each filed fingerprint needs a successful write of its own."""
-	created: set[str] = set()
-	commented: set[str] = set()
-	targets = set(known.values())
+
+def check_writes(
+	calls: list[dict[str, Any]], comments: list[dict[str, Any]], creates: list[dict[str, Any]], filed: dict[str, str]
+) -> tuple[str | None, dict[str, str], set[str]]:
+	"""Why the session's own Linear writes do not carry out the filing plan,
+	or None, plus the issues it really created (fingerprint → issue) and the
+	fingerprints whose write succeeded.
+
+	Every write must match a planned entry field by field (whitespace aside),
+	each entry needs exactly one successful write, and the receipt must name
+	the issue that write used."""
+	planned_comments = {(entry['issue'], flat(entry['body'])): entry['fingerprint'] for entry in comments}
+	planned_creates = {flat(entry['title']): entry for entry in creates}
+	done: set[str] = set()
+	created: dict[str, str] = {}
 	for call in calls:
 		if call['name'] not in FILING_WRITES:
 			continue
 		args = call['input']
-		if call['name'] == 'save_issue':
-			if args.get('id') or str(args.get('team', '')).lower() != LINEAR_TEAM:
-				return f'unexpected save_issue {json.dumps(args)[:120]}'
-			issue = created_issue(call)
-			if issue:
-				created.add(issue)
+		if call['name'] == 'save_comment':
+			key = (str(args.get('issueId', '')), flat(args.get('body', '')))
+			fingerprint = planned_comments.get(key)
+			if args.get('id') or args.get('parentId') or not fingerprint:
+				return f'unplanned save_comment on {key[0] or "?"}', created, done
 		else:
-			issue = str(args.get('issueId', ''))
-			if args.get('id') or not issue or issue not in targets | created:
-				return f'unexpected save_comment on {issue or "?"}'
-			if call['ok']:
-				commented.add(issue)
-	for key in ('new', 'changed', 'cleared'):
-		for item in delta.get(key, []):
-			fingerprint = item['fingerprint']
-			issue = known.get(fingerprint)
-			if key == 'cleared' and not issue:
-				continue
-			if issue:
-				if issue not in commented or filed.get(fingerprint, issue) != issue:
-					return f'no successful comment on {issue} for {fingerprint}'
-			elif filed.get(fingerprint) not in created:
-				return f'no created issue for {fingerprint}'
-	expected = [filed.get(item['fingerprint']) for key in ('new', 'changed') for item in delta.get(key, []) if item['fingerprint'] not in known]
-	extra = created - set(expected)
-	if extra or len(expected) != len(set(expected)):
-		return f"unexpected created issue {', '.join(sorted(extra)) or 'shared by two fingerprints'}"
-	return None
+			plan = planned_creates.get(flat(args.get('title', '')))
+			fingerprint = plan['fingerprint'] if plan else None
+			if (
+				not plan or args.get('id') or args.get('assignee')
+				or str(args.get('team', '')).lower() != LINEAR_TEAM
+				or str(args.get('state', 'Triage')).lower() != 'triage'
+				or str(args.get('priority')) != str(plan['priority'])
+				or flat(args.get('description', '')) != flat(plan['description'])
+			):
+				return f"unplanned save_issue {flat(args.get('title', ''))[:80]}", created, done
+			if created_issue(call):
+				created.setdefault(fingerprint, created_issue(call))
+		if call['ok']:
+			if fingerprint in done:
+				return f'duplicate write for {fingerprint}', created, done
+			done.add(fingerprint)
+	for entry in comments:
+		if entry['fingerprint'] not in done or filed.get(entry['fingerprint'], entry['issue']) != entry['issue']:
+			return f"no successful comment on {entry['issue']} for {entry['fingerprint']}", created, done
+	for entry in creates:
+		issue = created.get(entry['fingerprint'])
+		if not issue or filed.get(entry['fingerprint']) != issue:
+			return f"no created issue for {entry['fingerprint']}", created, done
+	return None, created, done
 
 
 def call_cost(result: dict[str, Any]) -> float:
@@ -524,14 +534,15 @@ def filing_plan(
 
 def file_findings(
 	delta: dict[str, Any], known: dict[str, str], now: datetime, args: argparse.Namespace, workdir: Path
-) -> tuple[bool, str, dict[str, str], float]:
-	"""File the delta; returns success, detail, fingerprint → issue updates and cost."""
+) -> tuple[bool, str, dict[str, str], set[str], float]:
+	"""File the delta; returns success, detail, fingerprint → issue updates,
+	the fingerprints whose write is proven, and cost."""
 	# Every new or changed finding needs an issue; a cleared one needs a
 	# comment only when it has an issue.
 	expected = {item['fingerprint'] for key in ('new', 'changed') for item in delta.get(key, [])}
 	expected |= {item['fingerprint'] for item in delta.get('cleared', []) if item['fingerprint'] in known}
 	if not expected:
-		return True, '', {}, 0.0
+		return True, '', {}, set(), 0.0
 	comments, creates = filing_plan(delta, known, now)
 	prompt = render(
 		'monitor_filing_prompt.md',
@@ -543,7 +554,7 @@ def file_findings(
 		try:
 			result = ask_model(prompt, FILING_TOOLS, args, workdir, effort=effort)
 		except (RuntimeError, subprocess.TimeoutExpired) as exc:
-			return False, str(exc), {}, cost
+			return False, str(exc), {}, set(), cost
 		cost += call_cost(result)
 		write_best_effort(args.state_dir / 'monitor-filing-raw.txt', f"turns={result.get('num_turns')}\n{result.get('result')}\n")
 		# Only an early stop without any tool call is retried: nothing reached
@@ -552,21 +563,19 @@ def file_findings(
 			break
 	lines = [line.strip().strip('`') for line in str(result.get('result')).splitlines()]
 	if int(result.get('num_turns') or 0) < MIN_FILING_TURNS or not FILING_WRITES & set(result.get('tools_called') or ()):
-		return False, 'the model did not make its Linear calls', {}, cost
+		return False, 'the model did not make its Linear calls', {}, set(), cost
 	filed = dict(match.groups() for line in lines if (match := FILED_RE.fullmatch(line)))
 	final = next((line for line in reversed(lines) if line.startswith('[filed]')), 'no [filed] line')
 	missing = sorted(expected - set(filed) - {key for key in expected if key in known})
 	if final == '[filed] ok' and missing:
 		final = f"no issue reported for {', '.join(missing)[:120]}"
 	# The receipt is the model's word; only its own successful writes count.
-	problem = check_writes(result.get('tool_calls') or [], delta, known, filed)
+	# Issues it really created are remembered even when the receipt fails, so
+	# a retry comments on them instead of creating duplicates.
+	problem, created, done = check_writes(result.get('tool_calls') or [], comments, creates, filed)
 	if final == '[filed] ok' and problem:
 		final = problem
-	# Issues the session really created are remembered even when the receipt
-	# fails, so a retry comments on them instead of creating duplicates.
-	really_created = {created_issue(call) for call in result.get('tool_calls') or []} - {None}
-	created = {fingerprint: issue for fingerprint, issue in filed.items() if fingerprint not in known and issue in really_created}
-	return final == '[filed] ok', final, created, cost
+	return final == '[filed] ok', final, created, done, cost
 
 
 # --- Tick ---------------------------------------------------------------------
@@ -702,15 +711,24 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 
 	digest: list[str] = []
 	if not args.dry_run:
-		filed_ok, detail, filed, filing_cost = (True, '', {}, 0.0)
+		filed_ok, detail, filed, done, filing_cost = (True, '', {}, set(), 0.0)
 		if filing:
-			filed_ok, detail, filed, filing_cost = file_findings(filing, known, now, args, workdir)
+			filed_ok, detail, filed, done, filing_cost = file_findings(filing, known, now, args, workdir)
 		cost += filing_cost
 		known.update(filed)
 		if filed_ok:
 			baseline = next_baseline
 			seen_posthog = next_posthog
 		else:
+			# Writes that did succeed are not repeated next tick; only the rest
+			# of the delta is held back for a retry.
+			comments, creates = filing_plan(filing, known, now)
+			held = {entry['fingerprint'] for entry in comments + creates} - done
+			baseline = findings_module.hold_back(baseline, next_baseline, held)
+			seen_posthog = {
+				**seen_posthog,
+				**{issue: count for issue, count in next_posthog.items() if f'dt-status/posthog/error:{issue}' not in held},
+			}
 			# Keep the old baseline so the next tick files this delta again.
 			digest.append(f'- [gap] linear filing failed, will retry: {clip(detail)}')
 	if not args.dry_run and shadow_due(args, now):
