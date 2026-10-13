@@ -46,7 +46,6 @@ import host_facts  # noqa: E402
 DEFAULT_STATE_DIR = Path.home() / '.local/state/deadtrees-monitor'
 DEFAULT_ZULIPRC = Path.home() / '.config/deadtrees/zuliprc'
 DEFAULT_ZULIP_STREAM = 'project_deadtree.earth'
-BASELINE = 'monitor-findings.json'
 TICK_STATE = 'monitor.json'
 TICK_LOG = 'ticks.jsonl'
 SHADOW_LOG = 'shadow.jsonl'
@@ -102,9 +101,6 @@ INBOX_TOOLS = (
 FILING_TOOLS = ('mcp__claude_ai_Linear__save_issue', 'mcp__claude_ai_Linear__save_comment')
 # What the filing call sees of a finding.
 FILING_KEYS = ('severity', 'fingerprint', 'summary', 'previous_severity')
-# Haiku 5.5 sometimes skipped a read and still reported clean (dry runs,
-# 2026-10-13), so these calls must appear in the session's own tool calls.
-INBOX_READS = {'list_issues', 'search_threads'}
 FILING_WRITES = {'save_issue', 'save_comment'}
 # Denied outright on top of dontAsk: the monitor never sends, drafts, labels
 # or deletes mail, and never opens a mail body.
@@ -419,6 +415,10 @@ def check_writes(
 					return f'no successful comment on {issue} for {fingerprint}'
 			elif filed.get(fingerprint) not in created:
 				return f'no created issue for {fingerprint}'
+	expected = [filed.get(item['fingerprint']) for key in ('new', 'changed') for item in delta.get(key, []) if item['fingerprint'] not in known]
+	extra = created - set(expected)
+	if extra or len(expected) != len(set(expected)):
+		return f"unexpected created issue {', '.join(sorted(extra)) or 'shared by two fingerprints'}"
 	return None
 
 
@@ -436,7 +436,37 @@ def call_cost(result: dict[str, Any]) -> float:
 	return cost
 
 
-def inbox_lines(result: dict[str, Any]) -> tuple[list[str], str, bool, bool]:
+def same_time(value: object, since: datetime) -> bool:
+	try:
+		return datetime.fromisoformat(str(value).replace('Z', '+00:00')) == since
+	except ValueError:
+		return False
+
+
+def proven_reads(calls: list[dict[str, Any]], since: datetime) -> set[str]:
+	"""The sources the session really read for this window, judged by its
+	own successful calls and their arguments. Haiku 5.5 sometimes skipped a
+	read and still reported clean (dry runs, 2026-10-13)."""
+	proven = set()
+	switched = False
+	for call in calls:
+		if not call['ok']:
+			continue
+		args = call['input']
+		if call['name'] == 'list_issues' and str(args.get('team', '')).lower() == LINEAR_TEAM and same_time(args.get('updatedAt'), since):
+			proven.add('linear')
+		elif call['name'] == 'search_threads' and f'after:{int(since.timestamp())}' in str(args.get('query', '')):
+			proven.add('gmail')
+		elif call['name'] == 'exec':
+			command = str(args.get('command', ''))
+			if 'switch-project' in command and POSTHOG_PROJECT in command:
+				switched = True
+			elif switched and 'query-error-tracking-issues-list' in command and f'/project/{POSTHOG_PROJECT}/' in call['output']:
+				proven.add('posthog')
+	return proven
+
+
+def inbox_lines(result: dict[str, Any], since: datetime) -> tuple[list[str], str, bool, bool]:
 	"""Tagged inbox items, the `[checked]` evidence, whether every source was
 	read and whether PostHog was read in project 13440. Model prose never
 	reaches the digest."""
@@ -449,15 +479,15 @@ def inbox_lines(result: dict[str, Any]) -> tuple[list[str], str, bool, bool]:
 	receipt = re.fullmatch(
 		r'\[checked\] linear=(\d+|fail)\b.* gmail=(\d+|fail)\b.* posthog=(\d+|fail)\b(?:.* project=(\S+))?.*', checked
 	)
-	called = set(result.get('tools_called') or ())
+	proven = proven_reads(result.get('tool_calls') or [], since)
 	if not receipt or int(result.get('num_turns') or 0) < MIN_INBOX_TURNS:
 		return ['- [gap] inbox: the model did not confirm its reads'], 'inbox unchecked', False, False
 	linear, gmail, posthog, project = receipt.groups()
-	if 'fail' not in (linear, gmail) and not INBOX_READS <= called:
+	if 'fail' not in (linear, gmail) and not {'linear', 'gmail'} <= proven:
 		# Without its reads the model can only have invented items, so none
 		# are kept; the held window re-reads them next time.
 		return ['- [gap] inbox: the model did not make its Linear and Gmail reads'], 'inbox unchecked', False, False
-	posthog_ok = posthog != 'fail' and 'exec' in called and project == POSTHOG_PROJECT
+	posthog_ok = posthog != 'fail' and 'posthog' in proven and project == POSTHOG_PROJECT
 	gaps = [f'- [gap] inbox: {source} read failed' for source, value in (('linear', linear), ('gmail', gmail)) if value == 'fail']
 	if not posthog_ok:
 		gaps.append(f"- [gap] posthog: not read in project {POSTHOG_PROJECT} (reported {posthog}, project {project or '?'})")
@@ -587,14 +617,14 @@ def keep_digest(state_dir: Path, now: datetime, text: str) -> None:
 		pass  # like write_best_effort: never abort a tick over this copy
 
 
-def read_inbox(prompt: str, args: argparse.Namespace, workdir: Path) -> tuple[list[str], str, bool, bool, float]:
+def read_inbox(prompt: str, since: datetime, args: argparse.Namespace, workdir: Path) -> tuple[list[str], str, bool, bool, float]:
 	items: list[str] = []
 	checked, inbox_ok, posthog_ok, cost = 'inbox unchecked', False, False, 0.0
 	for effort in ATTEMPT_EFFORTS:
 		try:
 			result = ask_model(prompt, INBOX_TOOLS, args, workdir, effort=effort)
 			write_best_effort(args.state_dir / 'monitor-last-raw.txt', str(result.get('result') or ''))
-			found, checked, inbox_ok, posthog_ok = inbox_lines(result)
+			found, checked, inbox_ok, posthog_ok = inbox_lines(result, since)
 			cost += call_cost(result)
 		except (RuntimeError, subprocess.TimeoutExpired) as exc:
 			# A CLI or model-service failure is not the early-stop case.
@@ -618,7 +648,9 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 		scorecard = {}
 	facts = host_facts.collect(now)
 	current, gaps, unobserved = findings_module.build_findings(snapshot, facts, now)
-	baseline = load_json(args.state_dir / BASELINE)
+	# Baseline, issue map and PostHog cursor live in one state file, written
+	# once at the end, so a tick that dies halfway leaves them consistent.
+	baseline = state.get('baseline') or {}
 	delta, next_baseline = findings_module.diff_findings(baseline, current, unobserved)
 	known: dict[str, str] = dict(state.get('issues') or {})
 	cost = 0.0
@@ -629,7 +661,7 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 		{'tools': ','.join(INBOX_TOOLS), 'since': iso(since), 'since_epoch': str(int(since.timestamp())), 'now': iso(now)},
 		{'zulip': zulip},
 	)
-	items, checked, inbox_ok, posthog_ok, inbox_cost = read_inbox(prompt, args, workdir)
+	items, checked, inbox_ok, posthog_ok, inbox_cost = read_inbox(prompt, since, args, workdir)
 	cost += inbox_cost
 	seen_posthog: dict[str, int] = dict(state.get('posthog_seen') or {})
 	posthog, next_posthog = posthog_delta(posthog_items(items), seen_posthog) if posthog_ok else ({}, seen_posthog)
@@ -648,13 +680,13 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 		cost += filing_cost
 		known.update(filed)
 		if filed_ok:
-			write_atomic(args.state_dir / BASELINE, json.dumps(next_baseline, indent=1) + '\n')
+			baseline = next_baseline
 			seen_posthog = next_posthog
 		else:
 			# Keep the old baseline so the next tick files this delta again.
 			digest.append(f'- [gap] linear filing failed, will retry: {clip(detail)}')
 	if not args.dry_run and shadow_due(args, now):
-		cost += run_shadow(prompt, args, workdir, now, {'items': items, 'checked': checked, 'ok': inbox_ok})
+		cost += run_shadow(prompt, since, args, workdir, now, {'items': items, 'checked': checked, 'ok': inbox_ok})
 
 	digest = platform_lines(filing, known) + [f'- [gap] {gap}' for gap in gaps] + digest + items
 	if not zulip_ok:
@@ -687,6 +719,7 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 		'last_tick_at': iso(now),
 		# The inbox window only moves past what every source read.
 		'inbox_since': iso(now) if inbox_ok and zulip_ok else iso(since),
+		'baseline': baseline,
 		'issues': known,
 		'posthog_seen': seen_posthog,
 		'gaps': quiet_gaps,
@@ -708,7 +741,7 @@ def shadow_due(args: argparse.Namespace, now: datetime) -> bool:
 	return now < until and now.minute < 15
 
 
-def run_shadow(prompt: str, args: argparse.Namespace, workdir: Path, now: datetime, primary: dict[str, Any]) -> float:
+def run_shadow(prompt: str, since: datetime, args: argparse.Namespace, workdir: Path, now: datetime, primary: dict[str, Any]) -> float:
 	"""One read-only inbox call on the shadow model, logged next to the
 	primary result. It never changes the digest, the window or the outcome."""
 	entry: dict[str, Any] = {'at': iso(now), 'model': args.model, **primary, 'shadow_model': args.shadow_model}
@@ -716,7 +749,7 @@ def run_shadow(prompt: str, args: argparse.Namespace, workdir: Path, now: dateti
 	try:
 		result = ask_model(prompt, INBOX_TOOLS, args, workdir, model=args.shadow_model)
 		cost = call_cost(result)
-		items, checked, ok, posthog_ok = inbox_lines(result)
+		items, checked, ok, posthog_ok = inbox_lines(result, since)
 		entry.update(shadow_items=items, shadow_checked=checked, shadow_ok=ok, shadow_posthog_ok=posthog_ok, shadow_cost=round(cost, 4))
 	except (RuntimeError, subprocess.TimeoutExpired) as exc:
 		entry['shadow_error'] = clip(exc)

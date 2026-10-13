@@ -232,32 +232,51 @@ def test_drain_age_from_the_runtime_status():
 # --- Model receipts ---------------------------------------------------------------
 
 
-def result(text, tools=('list_issues', 'search_threads', 'exec'), turns=5):
-	return {'result': text, 'tools_called': sorted(tools), 'num_turns': turns}
+SINCE = datetime(2026, 10, 13, 11, 45, tzinfo=timezone.utc)
+READS = {
+	'list_issues': {'name': 'list_issues', 'input': {'team': 'deadtrees', 'updatedAt': '2026-10-13T11:45:00Z'}, 'ok': True, 'output': '[]'},
+	'search_threads': {'name': 'search_threads', 'input': {'query': f'in:inbox after:{int(SINCE.timestamp())}'}, 'ok': True, 'output': '[]'},
+	'switch': {'name': 'exec', 'input': {'command': 'call switch-project {"projectId": 13440}'}, 'ok': True, 'output': 'deadtrees.earth'},
+	'posthog': {
+		'name': 'exec', 'input': {'command': 'call query-error-tracking-issues-list {}'}, 'ok': True,
+		'output': '_posthogUrl: "https://eu.posthog.com/project/13440/error_tracking"',
+	},
+}
+
+
+def result(text, reads=tuple(READS), turns=5, **changed):
+	calls = [{**READS[name], **changed.get(name, {})} for name in reads]
+	return {'result': text, 'tool_calls': calls, 'num_turns': turns}
 
 
 def test_inbox_receipt_needs_proven_reads():
 	text = '[linear] [DT-1](https://linear.app/x/DT-1): asks you\n[checked] linear=3 gmail=0 posthog=0 project=13440'
-	items, checked, ok, posthog_ok = monitor_tick.inbox_lines(result(text))
+	items, checked, ok, posthog_ok = monitor_tick.inbox_lines(result(text), SINCE)
 	assert (items, checked, ok, posthog_ok) == (
 		['- [linear] [DT-1](https://linear.app/x/DT-1): asks you'], 'linear=3 gmail=0 posthog=0 project=13440', True, True
 	)
 	# A receipt without the session's own reads keeps no items.
-	items, checked, ok, _ = monitor_tick.inbox_lines(result(text, tools=('list_issues',)))
+	items, checked, ok, _ = monitor_tick.inbox_lines(result(text, reads=('list_issues', 'switch', 'posthog')), SINCE)
 	assert (checked, ok) == ('inbox unchecked', False) and items[0].startswith('- [gap]')
-	items, checked, ok, _ = monitor_tick.inbox_lines(result('[gmail] none', turns=1))
+	# A read of the wrong team or window proves nothing either.
+	wrong = {'list_issues': {'input': {'team': 'deadtrees', 'updatedAt': '2026-10-12T00:00:00Z'}}}
+	assert monitor_tick.inbox_lines(result(text, **wrong), SINCE)[1] == 'inbox unchecked'
+	# PostHog counts only after the switch and with a 13440 result.
+	items, _, ok, posthog_ok = monitor_tick.inbox_lines(result(text, reads=('list_issues', 'search_threads', 'posthog')), SINCE)
+	assert ok and not posthog_ok
+	items, checked, ok, _ = monitor_tick.inbox_lines(result('[gmail] none', turns=1), SINCE)
 	assert (checked, ok) == ('inbox unchecked', False)
 
 
 def test_posthog_in_another_project_is_a_gap_and_its_items_are_dropped():
 	text = '[posthog] id=0a1b2c3d occurrences=3 users=1 first_seen=2026-10-13T11:00:00Z name=TypeError\n[checked] linear=1 gmail=1 posthog=1 project=298921'
-	items, _, ok, posthog_ok = monitor_tick.inbox_lines(result(text))
+	items, _, ok, posthog_ok = monitor_tick.inbox_lines(result(text), SINCE)
 	assert ok and not posthog_ok
 	assert items == ['- [gap] posthog: not read in project 13440 (reported 1, project 298921)']
 
 
 def test_placeholder_items_are_not_items():
-	items, _, ok, _ = monitor_tick.inbox_lines(result('[gmail] none\n[zulip] nothing new\n[checked] linear=0 gmail=0 posthog=0 project=13440'))
+	items, _, ok, _ = monitor_tick.inbox_lines(result('[gmail] none\n[zulip] nothing new\n[checked] linear=0 gmail=0 posthog=0 project=13440'), SINCE)
 	assert ok and items == []
 
 
@@ -351,6 +370,12 @@ def test_filing_is_proven_by_the_sessions_own_successful_writes(tmp_path, monkey
 	assert not ok and detail == 'no successful comment on DT-2 for dt-status/api/b'
 
 
+def test_an_extra_created_issue_fails_the_filing(tmp_path, monkeypatch):
+	filing(monkeypatch, '[filed] dt-status/api/a=DT-9\n[filed] ok', [create('DT-9'), create('DT-10')])
+	ok, detail, filed, _ = monitor_tick.file_findings({'new': [red('a')]}, {}, NOON, argparse.Namespace(state_dir=tmp_path), tmp_path)
+	assert not ok and detail == 'unexpected created issue DT-10' and filed == {'dt-status/api/a': 'DT-9'}
+
+
 @pytest.mark.parametrize('call, problem', [
 	(comment('DT-1310'), 'unexpected save_comment on DT-1310'),
 	(create('DT-9', id='DT-1'), 'unexpected save_issue'),
@@ -379,8 +404,12 @@ def run_tick(tmp_path, monkeypatch, filing_ok=True, posthog_line=''):
 	monkeypatch.setattr(monitor_tick.host_facts, 'collect', lambda now: {'deploy': {}, 'gpu': {'ok': True}, 'workers': [], 'prod_oom_kills': []})
 	monkeypatch.setattr(monitor_tick.findings_module, 'build_findings', lambda *args: ([red('a')], [], []))
 	inbox = {
-		'result': f'{posthog_line}\n[checked] linear=0 gmail=0 posthog=1 project=13440', 'num_turns': 5,
-		'tools_called': ['exec', 'list_issues', 'search_threads'], 'modelUsage': {},
+		'result': f'{posthog_line}\n[checked] linear=0 gmail=0 posthog=1 project=13440', 'num_turns': 5, 'modelUsage': {},
+		'tool_calls': [
+			{**READS['list_issues'], 'input': {'team': 'deadtrees', 'updatedAt': '2026-10-13T11:25:00Z'}},
+			{**READS['search_threads'], 'input': {'query': f"after:{int(datetime(2026, 10, 13, 11, 25, tzinfo=timezone.utc).timestamp())}"}},
+			READS['switch'], READS['posthog'],
+		],
 	}
 	monkeypatch.setattr(monitor_tick, 'ask_model', lambda *args, **kwargs: inbox)
 	filed = {}
@@ -402,14 +431,14 @@ def test_tick_files_the_delta_and_advances_the_baseline(tmp_path, monkeypatch):
 	assert state['issues'] == {'dt-status/api/a': 'DT-7'}
 	assert state['posthog_seen'] == {'0a1b2c3d': 2}
 	assert state['inbox_since'] == '2026-10-13T12:00:00Z'
-	assert 'dt-status/api/a' in json.loads((tmp_path / 'monitor-findings.json').read_text())['active']
+	assert 'dt-status/api/a' in state['baseline']['active']
 	digest = (tmp_path / 'digest-latest.md').read_text()
 	assert 'new red: a failed [DT-7]' in digest
 
 
 def test_failed_filing_keeps_the_baseline_for_a_retry(tmp_path, monkeypatch):
 	_, state = run_tick(tmp_path, monkeypatch, filing_ok=False)
-	assert not (tmp_path / 'monitor-findings.json').exists()
+	assert state['baseline'] == {}
 	assert state['posthog_seen'] == {}
 	assert 'linear filing failed, will retry' in (tmp_path / 'digest-latest.md').read_text()
 
