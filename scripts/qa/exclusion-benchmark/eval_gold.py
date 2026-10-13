@@ -57,6 +57,8 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--root', type=Path, required=True)
     p.add_argument('--verdict-runs', nargs='*', default=['sol-verdicts-v1', 'sol-verdicts-medium', 'luna-verdicts-medium'])
+    p.add_argument('--ensembles', nargs='*', default=[], help='runs to average by rank, joined with +')
+    p.add_argument('--no-cascades', action='store_true')
     a = p.parse_args()
     runs = a.root / 'runs'
     crops = {c['id']: c for c in json.loads((a.root / 'gold-test.json').read_text())}
@@ -84,12 +86,19 @@ if __name__ == '__main__':
         sig['sol sizes summed'] = np.array([sum(sizes[c].get(k, 0) for k in SIZE_MODES[layer]) if c in sizes else 0 for c in ids])
         for name, v in verdicts.items():
             sig[name] = np.array([v[c][layer]['major_likelihood'] for c in ids])
+        for name, v in verdicts.items():
+            if any(v[c][layer].get('wrong_area_pct') is not None for c in ids):
+                sig[name + ' wrong area %'] = np.array([v[c][layer].get('wrong_area_pct') or 0 for c in ids])
+        for combo in a.ensembles:
+            sig['ensemble ' + combo] = np.mean([rank(sig[n]) for n in combo.split('+')], axis=0)
         if 'sol-verdicts-v1' in verdicts:
             sig['sol high verdict + sol sizes'] = rank(sig['sol-verdicts-v1']) + rank(sig['sol sizes summed'])
         print(f'\n== {layer}: {len(ids)} crops, {y.sum()} major ({(y & hold).sum()} in holdout)')
         for name, s in sig.items():
             print(f'  {name:34s} AUC {roc_auc_score(y, s):.2f}  holdout {roc_auc_score(y[hold], s[hold]):.2f}  '
                   f'catch all -> {flags_at_full_recall(y, s):3d}/{(~y).sum()} others flagged')
+        if a.no_cascades:
+            continue
         # Cascades: keep the top share by a cheap signal, rank the kept crops by an expensive one.
         for cheap in ('dec: major wordings mean', 'dec: learned mix (LOO)', 'dec: error modes summed'):
             for costly in [n for n in verdicts] + ['sol high verdict + sol sizes']:
@@ -102,3 +111,10 @@ if __name__ == '__main__':
                     print(f'  cascade {cheap} top {share:.0%} -> {costly}: {passed}/{y.sum()} major kept, '
                           f'AUC {roc_auc_score(y, final):.2f}, catch kept -> '
                           f'{int(((final >= final[y & keep].min()) & ~y).sum()) if passed else "-"} flagged')
+    print('\n== cost per crop (median)')
+    for name in verdicts:
+        usage = [json.loads(f.read_text()).get('usage') or {} for f in (runs / name).glob('*.json') if f.name != 'scores.json']
+        sec = [u.get('seconds') for u in usage if isinstance(u, dict) and u.get('seconds')]
+        tok = [(u.get('usage') or u).get('total_tokens') or ((u.get('usage') or u).get('total') or {}).get('totalTokens') for u in usage]
+        tok = [t for t in tok if t]
+        print(f"  {name:26s} tokens {int(np.median(tok)) if tok else '-'}  seconds {np.median(sec) if sec else '-'}")
