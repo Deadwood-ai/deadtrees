@@ -1,6 +1,6 @@
 """Benchmark Decisions on the gold crop set against the reviewer's labels.
 
-For every labeled crop, ask the gold7 questions (one request per crop, cached per run)
+For every labeled crop, ask the gold questions (gold9 by default) (one request per crop, cached per run)
 and report per failure mode: reviewer yes/no counts, how many yes cases the model catches
 and how many false alarms it raises at several certainty cut-offs, and the AUC. "?" and
 blank answers are left out. Results are given for the tune split, the held-out split and
@@ -47,6 +47,11 @@ def crop_images(root, c):
                     for l in ('deadwood', 'forest_cover')]
 
 
+def truth(answers):
+    """Per-layer verdicts (v_*) count as yes when major; OK and minor are no."""
+    return {k: (v == 'major' if k.startswith('v_') and v in ('ok', 'minor', 'major') else v) for k, v in answers.items()}
+
+
 def score(crops, labels, model, questions):
     out = {}
     for q in questions:
@@ -73,12 +78,13 @@ if __name__ == '__main__':
     p.add_argument('--key-file', type=Path, required=True)
     p.add_argument('--context', choices=sorted(CONTEXTS), default='strict')
     p.add_argument('--with-location', action='store_true', help='add neutral biome/month/hemisphere context')
+    p.add_argument('--questions', default='gold9', choices=('gold7', 'gold9'))
     a = p.parse_args()
     crops = json.loads((a.root / 'gold-test.json').read_text())
-    labels = {r[0]: json.loads(r[1])['answers'] for r in sqlite3.connect(a.root / 'gold-labels.sqlite3').execute(
+    labels = {r[0]: truth(json.loads(r[1])['answers']) for r in sqlite3.connect(a.root / 'gold-labels.sqlite3').execute(
         'SELECT crop_id, payload FROM labels')}
     crops = [c for c in crops if c['id'] in labels]
-    questions = PREDICATES['gold7']
+    questions = PREDICATES[a.questions]
     extra = neutral_context({c['dataset_id'] for c in crops}) if a.with_location else {}
     key = read_key(a.key_file)
     a.run.mkdir(parents=True, exist_ok=True)
