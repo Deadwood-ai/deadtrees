@@ -46,13 +46,15 @@ aside > #questions { grid-column: 1; grid-row: 1 / span 9; display: flex; flex-d
 .q.verdict { border-top: 1px solid var(--line); border-radius: 0 0 6px 6px; }
 .m { font-size: 11px; padding: 2px 4px; border-radius: 5px; min-width: 42px; text-align: center; color: var(--muted); }
 .m.flag { background: #6b2b26; color: #fff; }
-.with-models .q { grid-template-columns: 18px 200px 1fr auto 380px; }
-.with-models .m { text-align: left; justify-self: start; }
-.models { display: flex; gap: 4px; flex-wrap: wrap; font-size: 11px; }
-.models span { border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; white-space: nowrap; color: var(--muted); cursor: help; }
-.models span.major { border-color: var(--yes); color: #ff9b92; }
-.models span.minor { border-color: var(--unsure); color: #e8c46a; }
-.models span.ok { border-color: var(--no); color: #7fd6a2; }
+.with-models .q { grid-template-columns: 18px 200px 1fr auto auto; }
+.with-models .m { display: grid; grid-auto-flow: column; grid-auto-columns: 46px; gap: 2px; padding: 0; min-width: 0; }
+.m .c { text-align: center; border-radius: 4px; font-size: 11px; padding: 1px 0; color: var(--muted); cursor: help; }
+.m .c.hi { background: #6b2b26; color: #fff; }
+.m .c.major { background: #6b2b26; color: #fff; }
+.m .c.minor { background: #5a4716; color: #f3dc9a; }
+.m .c.ok { background: #1f4a31; color: #b9ecc9; }
+.m .c.head { color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; cursor: default; }
+.mhead { display: flex; justify-content: flex-end; padding: 0 6px; }
 details summary { cursor: pointer; color: var(--muted); }
 details p { color: var(--muted); margin: 6px 0; }
 textarea { width: 100%; background: #20262c; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px; font: inherit; }
@@ -171,27 +173,45 @@ function row(k, n) {
     b.onclick = () => set(k, val(a[k]) === v ? null : value);
     btns.append(b);
   }
-  const m = document.createElement('span'); m.className = 'm'; m.title = 'Decisions: probability of yes';
-  const p = ((st.model || {})[cur().id] || {})[k];
-  if (p !== undefined && p !== null && !isVerdict(k) && $('#showModel').checked) { m.textContent = `${Math.round(p * 100)}%`; if (p >= 0.7 && k !== GATE) m.classList.add('flag'); }
-  const vs = (st.verdicts || {})[cur().id];
-  if (isVerdict(k) && vs && $('#showModel').checked) {
-    // Model column on verdict rows: each run's verdict and major likelihood; hover shows the errors it named.
-    const layer = layerOf(k).name; m.className = 'models'; m.title = '';
-    for (const [label, v] of Object.entries(vs)) {
-      const l = v[layer]; if (!l) continue;
-      const chip = document.createElement('span'); chip.className = l.verdict;
-      chip.textContent = `${label} ${l.verdict} ${Math.round(l.major_likelihood)}`;
-      chip.title = `${label}: ${l.verdict}, ${Math.round(l.major_likelihood)}% likely major\n` + ((l.errors || []).join('\n') || 'no errors named');
-      m.append(chip);
-    }
-  }
+  const m = document.createElement('span'); m.className = 'm';
+  if ($('#showModel').checked) m.append(...modelCells(k));
   r.append(num, text, full, btns, m);
   return r;
 }
+// Model columns: Decisions (probability of yes), Sol sizes (% of the layer), then one column per verdict run.
+function modelColumns() {
+  const id = cur().id; const vs = (st.verdicts || {})[id] || {};
+  return [{ key: 'dec', label: 'Dec', title: 'Decisions: probability of yes per question' },
+          { key: 'size', label: 'Sol %', title: 'Sol sizes: affected share of the layer (per error type)' },
+          ...Object.keys(st.verdictLabels || vs).map((l) => ({ key: 'v:' + l, label: l, title: l + ': layer verdict and % likely major' }))];
+}
+function modelCells(k) {
+  const id = cur().id;
+  return modelColumns().map((col) => {
+    const c = document.createElement('span'); c.className = 'c'; c.textContent = '–';
+    if (col.key === 'dec') {
+      const p = ((st.model || {})[id] || {})[k];
+      if (p !== undefined && p !== null) { c.textContent = Math.round(p * 100); c.title = `Decisions: ${Math.round(p * 100)}% yes`; if (p >= 0.7 && k !== GATE) c.classList.add('hi'); }
+    } else if (col.key === 'size') {
+      const v = ((st.sizes || {})[id] || {})[k];
+      if (v !== undefined && v !== null) { c.textContent = `${Math.round(v)}%`; c.title = `Sol: ${Math.round(v)}% of the layer affected`; if (v >= 20) c.classList.add('hi'); }
+    } else if (isVerdict(k)) {
+      const l = (((st.verdicts || {})[id] || {})[col.key.slice(2)] || {})[layerOf(k).name];
+      if (l) { c.textContent = Math.round(l.major_likelihood); c.classList.add(l.verdict);
+        c.title = `${col.label}: ${l.verdict}, ${Math.round(l.major_likelihood)}% likely major\n` + ((l.errors || []).join('\n') || 'no errors named'); }
+    }
+    return c;
+  });
+}
+function modelHeader() {
+  const row = document.createElement('div'); row.className = 'q';
+  const m = document.createElement('span'); m.className = 'm';
+  m.append(...modelColumns().map((col) => { const c = document.createElement('span'); c.className = 'c head'; c.textContent = col.label; c.title = col.title; return c; }));
+  row.append(...[0, 1, 2, 3].map(() => document.createElement('span')), m); return row;
+}
 function renderQuestions() {
   const ks = keys(); const active = layerOf(ks[st.cursor]);
-  const parts = [row(GATE, ks.indexOf(GATE))];
+  const parts = $('#showModel').checked ? [modelHeader(), row(GATE, ks.indexOf(GATE))] : [row(GATE, ks.indexOf(GATE))];
   for (const l of LAYERS) {
     const block = document.createElement('div'); block.className = 'block' + (active === l ? ' active' : ''); block.dataset.layer = l.name;
     const h = document.createElement('h3'); h.textContent = l.title; block.append(h);
@@ -316,7 +336,8 @@ document.querySelectorAll('.panel').forEach((pnl) => {
 });
 window.addEventListener('resize', fit);
 fetch('/api/crops').then((r) => r.json()).then((d) => {
-  st.crops = d.crops; st.questions = d.questions; st.labels = d.labels; st.model = d.model || {}; st.verdicts = d.verdicts || {};
+  st.crops = d.crops; st.questions = d.questions; st.labels = d.labels; st.model = d.model || {}; st.verdicts = d.verdicts || {}; st.sizes = d.sizes || {};
+  st.verdictLabels = Object.fromEntries(Object.values(st.verdicts).flatMap((v) => Object.keys(v)).map((l) => [l, true]));
   // Off by default so labeling stays blind; the choice is remembered in this browser.
   try { $('#showModel').checked = localStorage.getItem('showModel') === '1'; } catch (e) { /* storage blocked */ }
   const want = new URLSearchParams(location.search).get('crop');

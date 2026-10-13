@@ -20,6 +20,7 @@ QUESTIONS = PREDICATES['icl']  # overridden by --questions
 UI = Path(__file__).parent / 'label_ui' / 'crops.html'
 MODEL_RUN = 'decisions-crop-test-tuned1-strict'
 VERDICT_RUNS = {}  # label -> run folder with per-layer verdicts (sol_verdicts.py), shown on the verdict rows
+SIZE_RUN = None  # run folder with Sol's per-mode sizes (sol_sizes.py), shown on the error rows
 SIZES = ('<10', '10-20', '20-50', '>50')  # rough error size per yes answer, in % of the layer (gold7)
 ANSWERS = (True, False, None, 'unsure')
 VERDICTS = ('ok', 'minor', 'major', None)  # per-layer verdict questions (v_*), gold9
@@ -113,8 +114,13 @@ def make_handler(root, crops, store):
             if path == '/api/crops':
                 # Model answers shown next to the reviewer's buttons: Decisions probabilities per
                 # question, and each verdict run's per-layer verdict, likelihood and named errors.
-                model, verdicts = {}, {}
+                model, verdicts, sizes = {}, {}, {}
                 for c in crops:
+                    f = root / 'runs' / SIZE_RUN / f"{c['id']}.json" if SIZE_RUN else None
+                    if f and f.exists():
+                        s = json.loads(f.read_text())['estimate']
+                        # sol_sizes asked one artifact question for both layers.
+                        sizes[c['id']] = {**s, 'm7_dw_artifact': s.get('m7_artifact'), 'm7_fc_artifact': s.get('m7_artifact')}
                     f = root / 'runs' / MODEL_RUN / f"{c['id']}.json"
                     if f.exists():
                         model[c['id']] = json.loads(f.read_text())['answers']
@@ -123,7 +129,7 @@ def make_handler(root, crops, store):
                         if f.exists():
                             verdicts.setdefault(c['id'], {})[label] = json.loads(f.read_text())['result']
                 return self.send(200, 'application/json', json.dumps(
-                    {'crops': crops, 'questions': QUESTIONS, 'model': model, 'verdicts': verdicts,
+                    {'crops': crops, 'questions': QUESTIONS, 'model': model, 'verdicts': verdicts, 'sizes': sizes,
                      'labels': store.all()}).encode())
             name = path.removeprefix('/files/')
             if path.startswith('/files/') and name in files:
@@ -163,7 +169,9 @@ if __name__ == '__main__':
     p.add_argument('--questions', default='icl')
     p.add_argument('--model-run', default=None, help='Decisions run folder whose answers are shown next to the buttons')
     p.add_argument('--verdict-runs', nargs='*', default=[], help='label=run folder pairs with per-layer verdicts')
+    p.add_argument('--size-run', default=None, help='run folder with per-mode sizes')
     a = p.parse_args()
+    SIZE_RUN = a.size_run
     VERDICT_RUNS.update(v.split('=', 1) for v in a.verdict_runs)
     QUESTIONS = PREDICATES[a.questions]
     if a.model_run is not None:
