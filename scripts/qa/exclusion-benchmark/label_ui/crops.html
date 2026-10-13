@@ -16,10 +16,9 @@ button.big { padding: 10px; font-weight: 600; width: 100%; }
 button.ok { background: var(--no); border-color: var(--no); }
 main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 #panels { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px; min-height: 0; }
-.panel { position: relative; overflow: hidden; background: #000; cursor: grab; border: 3px solid transparent; transition: opacity .15s; }
+.panel { position: relative; overflow: hidden; background: #000; cursor: grab; border: 4px solid transparent; }
 .panel.active[data-layer=deadwood] { border-color: var(--blue); }
 .panel.active[data-layer=forest] { border-color: var(--gold); }
-.panel.dim { opacity: .35; }
 .panel .cap { position: absolute; left: 6px; top: 4px; z-index: 2; background: rgba(0,0,0,.7); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
 .panel .inner { position: absolute; transform-origin: 0 0; }
 .panel img { position: absolute; left: 0; top: 0; user-select: none; -webkit-user-drag: none; }
@@ -161,7 +160,6 @@ function renderQuestions() {
   $('#questions').replaceChildren(...parts);
   document.querySelectorAll('.panel').forEach((p) => {
     p.classList.toggle('active', !!active && p.dataset.layer === active.name);
-    p.classList.toggle('dim', !!active && p.dataset.layer !== 'raw' && p.dataset.layer !== active.name);
   });
   if (document.activeElement !== $('#note')) $('#note').value = lab().note || '';
 }
