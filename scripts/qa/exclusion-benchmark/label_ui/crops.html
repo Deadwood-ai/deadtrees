@@ -112,7 +112,7 @@ function renderPanels() {
   const sets = [['raw.jpg'], ['raw.jpg', 'deadwood-fill.png', 'deadwood-outline.png'], ['raw.jpg', 'forest_cover-fill.png', 'forest_cover-outline.png']];
   document.querySelectorAll('.panel .inner').forEach((inner, k) => {
     inner.replaceChildren(...sets[k].map((s, j) => { const img = new Image(); img.src = src(c, s); if (j === 1) img.style.opacity = 0.35;
-      if (k === 0 && j === 0) img.onload = () => { st.size = [img.naturalWidth, img.naturalHeight]; fit(); }; return img; }));
+      if (k === 0 && j === 0) img.onload = () => { st.size = [img.naturalWidth, img.naturalHeight]; fit(); meta(); }; return img; }));
   });
   // Preload the next crop so switching is instant.
   const n = st.crops[(st.i + 1) % st.crops.length];
@@ -168,10 +168,15 @@ function render() {
   const a = lab(c).answers;
   st.cursor = Math.max(0, keys().findIndex((k) => val(a[k]) === null));
   $('#pos').textContent = `${st.i + 1} / ${st.crops.length}`;
-  $('#meta').textContent = `Dataset ${c.dataset_id} · ${(c.mpp * 100).toFixed(1)} cm/px${c.source ? ` · ${c.source}` : ''}`;
+  meta();
   $('#site').href = `https://deadtrees.earth/dataset/${c.dataset_id}`;
   history.replaceState(null, '', `?crop=${c.id}`);
   progress(); renderPanels(); renderQuestions();
+}
+function meta() {
+  // Crop footprint on the ground: the gold crops are a fixed 51.2 m square (5 x 5 Sentinel-2 pixels).
+  const c = cur(); const w = st.size[0] * c.mpp, h = st.size[1] * c.mpp;
+  $('#meta').textContent = `Dataset ${c.dataset_id} · crop ${w.toFixed(0)} × ${h.toFixed(0)} m (${(w * h / 1e4).toFixed(2)} ha) · ${(c.mpp * 100).toFixed(1)} cm/px${c.source ? ` · ${c.source}` : ''}`;
 }
 function progress() {
   $('#progress').textContent = `${st.crops.filter(done).length} of ${st.crops.length} done`;
