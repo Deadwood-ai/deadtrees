@@ -47,13 +47,15 @@ aside > #questions { grid-column: 1; grid-row: 1 / span 9; display: flex; flex-d
 .m { font-size: 11px; padding: 2px 4px; border-radius: 5px; min-width: 42px; text-align: center; color: var(--muted); }
 .m.flag { background: #6b2b26; color: #fff; }
 .with-models .q { grid-template-columns: 18px 200px 1fr auto auto; }
-.with-models .m { display: grid; grid-auto-flow: column; grid-auto-columns: 46px; gap: 2px; padding: 0; min-width: 0; }
-.m .c { text-align: center; border-radius: 4px; font-size: 11px; padding: 1px 0; color: var(--muted); cursor: help; }
-.m .c.hi { background: #6b2b26; color: #fff; }
-.m .c.major { background: #6b2b26; color: #fff; }
-.m .c.minor { background: #5a4716; color: #f3dc9a; }
-.m .c.ok { background: #1f4a31; color: #b9ecc9; }
-.m .c.head { color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; cursor: default; }
+.with-models .m { display: grid; grid-auto-flow: column; grid-auto-columns: 64px; gap: 3px; padding: 0; min-width: 0; }
+.m .c { text-align: center; border-radius: 4px; font-size: 12px; padding: 1px 0; color: var(--muted); cursor: help; border: 1px solid transparent; white-space: nowrap; }
+.m .c small { font-size: 10px; opacity: .7; }
+.m .c.agree { border-color: var(--no); color: var(--text); }
+.m .c.fp { border: 2px solid var(--yes); color: #ffb3ac; }
+.m .c.fn { border: 2px solid var(--unsure); color: #f3dc9a; }
+.m .c.open { border-color: var(--line); color: var(--text); }
+.m .c.head { color: var(--text); font-weight: 600; overflow: hidden; cursor: default; line-height: 1.15; }
+.m .c.head small { font-weight: 400; }
 .mhead { display: flex; justify-content: flex-end; padding: 0 6px; }
 details summary { cursor: pointer; color: var(--muted); }
 details p { color: var(--muted); margin: 6px 0; }
@@ -69,6 +71,7 @@ kbd { background: #2a3138; border: 1px solid var(--line); border-radius: 4px; pa
   <a id="site" target="_blank" rel="noopener" title="Open this dataset on deadtrees.earth">Open dataset ↗</a>
   <span id="meta" class="muted"></span>
   <label class="muted"><input type="checkbox" id="showModel"> model answers</label>
+  <label class="muted" title="Show every model variant, not only the candidates"><input type="checkbox" id="allModels"> all variants</label>
   <select id="filter" title="Which crops ←/→ step through">
     <option value="all">all crops</option>
     <option value="you">you: major</option>
@@ -90,6 +93,7 @@ kbd { background: #2a3138; border: 1px solid var(--line); border-radius: 4px; pa
     <button id="unclear" title="Can't judge this crop; then next open crop">Can't tell what this shows <kbd>c</kbd></button>
     <textarea id="note" rows="2" placeholder="Optional note"></textarea>
     <p id="status"></p>
+    <p class="muted" style="margin:0">Model borders: <span style="color:#7fd6a2">green</span> agrees with you · <span style="color:#ff9b92">red</span> model flags, you didn't · <span style="color:#e8c46a">amber</span> you flag, model missed. Small number = model's own score.</p>
     <p class="muted" style="margin:0"><kbd>1</kbd> yes · <kbd>2</kbd> no · <kbd>3</kbd> don't know · verdict <kbd>2</kbd> minor · <kbd>3</kbd> major (OK is automatic without a flagged error) · <kbd>Space</kbd> this layer fine · <kbd>Enter</kbd> rest no · <kbd>c</kbd> can't tell</p>
     <details><summary>Rules and keys</summary>
       <p>Each layer has its own block: tag every error you see (yes for any clear error, however small), then give the verdict for the satellite product. <b>OK</b> is set automatically when no error is flagged in the layer; a layer with a flagged error is minor or major. <b>Minor, keep</b>: errors exist but would not noticeably change the satellite cover here. <b>Major, exclude</b>: all errors in this layer together would noticeably bias the satellite cover here. Lying wood is never deadwood; standing dead trees are forest.</p>
@@ -178,32 +182,65 @@ function row(k, n) {
   r.append(num, text, full, btns, m);
   return r;
 }
-// Model columns: Decisions (probability of yes), Sol sizes (% of the layer), then one column per verdict run.
+// Model columns. Each cell is the model's call (error yes/no, or the layer verdict), with
+// its own score small; the border says whether it agrees with the reviewer.
+const CANDIDATES = ['Dec', 'Luna M', 'Haiku', 'Sol M', 'L+H'];
+const CUT = { prob: 50, size: 20 };
 function modelColumns() {
-  const id = cur().id; const vs = (st.verdicts || {})[id] || {};
-  return [{ key: 'dec', label: 'Dec', title: 'Decisions: probability of yes per question' },
-          { key: 'size', label: 'Sol %', title: 'Sol sizes: affected share of the layer (per error type)' },
-          ...Object.keys(st.verdictLabels || vs).map((l) => ({ key: 'v:' + l, label: l, title: l + ': layer verdict and % likely major' }))];
+  const runs = Object.keys(st.verdictLabels || {});
+  const all = [{ key: 'dec', label: 'Dec', title: 'Decisions API: probability of yes' },
+               { key: 'size', label: 'Sol %', title: 'Sol sizes: affected share of the layer; yes from 20%' },
+               ...runs.map((l) => ({ key: 'v:' + l, label: l, title: l + ': layer verdict, per-mode likelihood where asked' })),
+               { key: 'ens', label: 'L+H', title: 'Luna M and Haiku averaged' }];
+  return $('#allModels').checked ? all : all.filter((c) => CANDIDATES.includes(c.label));
+}
+function runLayer(label, k) { return (((st.verdicts || {})[cur().id] || {})[label] || {})[layerOf(k).name]; }
+function call(col, k) {
+  // Returns {flag, text, score, detail} or null when this model has no answer for the row.
+  const id = cur().id;
+  if (col.key === 'dec') {
+    const p = ((st.model || {})[id] || {})[k]; if (p === undefined || p === null) return null;
+    const flag = p * 100 >= CUT.prob;
+    return { flag, text: isVerdict(k) ? (flag ? 'major' : 'keep') : (flag ? 'yes' : 'no'), score: Math.round(p * 100), detail: `${Math.round(p * 100)}% yes` };
+  }
+  if (col.key === 'size') {
+    if (isVerdict(k)) return null;
+    const v = ((st.sizes || {})[id] || {})[k]; if (v === undefined || v === null) return null;
+    return { flag: v >= CUT.size, text: v >= CUT.size ? 'yes' : 'no', score: `${Math.round(v)}%`, detail: `${Math.round(v)}% of the layer affected` };
+  }
+  const score = (label) => { const l = runLayer(label, k); if (!l) return null;
+    return isVerdict(k) ? { v: l.major_likelihood, word: l.verdict, errors: l.errors } : ((l.modes || {})[k] !== undefined ? { v: l.modes[k] } : null); };
+  let s;
+  if (col.key === 'ens') {
+    const a = score('Luna M'), b = score('Haiku'); if (!a || !b) return null;
+    s = { v: (a.v + b.v) / 2 }; s.word = isVerdict(k) ? (s.v >= CUT.prob ? 'major' : 'keep') : null;
+  } else s = score(col.key.slice(2));
+  if (!s) return null;
+  const flag = isVerdict(k) ? (s.word ? s.word === 'major' : s.v >= CUT.prob) : s.v >= CUT.prob;
+  return { flag, text: isVerdict(k) ? (s.word || (flag ? 'major' : 'keep')) : (flag ? 'yes' : 'no'), score: Math.round(s.v),
+           detail: (isVerdict(k) ? `${Math.round(s.v)}% likely major` : `${Math.round(s.v)}% likely`) + (s.errors ? '\n' + (s.errors.join('\n') || 'no errors named') : '') };
+}
+function yours(k) {
+  // The reviewer's flag for this row: error yes / layer major; null when unanswered or unsure.
+  const a = lab().answers[k];
+  if (isVerdict(k)) return ['ok', 'minor', 'major'].includes(a) ? a === 'major' : null;
+  return a === true ? true : a === false ? false : null;
+}
+function agreement(col, k) {
+  const m = call(col, k); const y = yours(k);
+  if (!m) return { m, cls: 'none' };
+  if (y === null) return { m, cls: 'open' };
+  return { m, cls: m.flag === y ? 'agree' : m.flag ? 'fp' : 'fn' };
 }
 function modelCells(k) {
-  const id = cur().id;
   return modelColumns().map((col) => {
     const c = document.createElement('span'); c.className = 'c'; c.textContent = '–';
-    if (col.key === 'dec') {
-      const p = ((st.model || {})[id] || {})[k];
-      if (p !== undefined && p !== null) { c.textContent = Math.round(p * 100); c.title = `Decisions: ${Math.round(p * 100)}% yes`; if (p >= 0.7 && k !== GATE) c.classList.add('hi'); }
-    } else if (col.key === 'size') {
-      const v = ((st.sizes || {})[id] || {})[k];
-      if (v !== undefined && v !== null) { c.textContent = `${Math.round(v)}%`; c.title = `Sol: ${Math.round(v)}% of the layer affected`; if (v >= 20) c.classList.add('hi'); }
-    } else if (!isVerdict(k) && k !== GATE) {
-      // Per-mode likelihoods exist only for verdict runs made with the v3 prompt.
-      const l = (((st.verdicts || {})[id] || {})[col.key.slice(2)] || {})[layerOf(k).name];
-      const v = ((l || {}).modes || {})[k];
-      if (v !== undefined) { c.textContent = Math.round(v); c.title = `${col.label}: ${Math.round(v)}% likely`; if (v >= 70) c.classList.add('hi'); }
-    } else if (isVerdict(k)) {
-      const l = (((st.verdicts || {})[id] || {})[col.key.slice(2)] || {})[layerOf(k).name];
-      if (l) { c.textContent = Math.round(l.major_likelihood); c.classList.add(l.verdict);
-        c.title = `${col.label}: ${l.verdict}, ${Math.round(l.major_likelihood)}% likely major\n` + ((l.errors || []).join('\n') || 'no errors named'); }
+    if (k === GATE) { c.textContent = ''; return c; }
+    const { m, cls } = agreement(col, k);
+    c.classList.add(cls);
+    if (m) {
+      c.innerHTML = `${m.text} <small>${m.score}</small>`;
+      c.title = `${col.label}: ${m.detail}` + ({ agree: '\nagrees with you', fp: '\nflags it, you did not', fn: '\nyou flag it, model missed it' }[cls] || '');
     }
     return c;
   });
@@ -211,7 +248,13 @@ function modelCells(k) {
 function modelHeader() {
   const row = document.createElement('div'); row.className = 'q';
   const m = document.createElement('span'); m.className = 'm';
-  m.append(...modelColumns().map((col) => { const c = document.createElement('span'); c.className = 'c head'; c.textContent = col.label; c.title = col.title; return c; }));
+  const rows = keys().filter((k) => k !== GATE);
+  m.append(...modelColumns().map((col) => {
+    const res = rows.map((k) => agreement(col, k)).filter((r) => r.cls === 'agree' || r.cls === 'fp' || r.cls === 'fn');
+    const c = document.createElement('span'); c.className = 'c head'; c.title = col.title;
+    c.innerHTML = `${col.label}<br><small>${res.length ? `${res.filter((r) => r.cls === 'agree').length}/${res.length}` : '–'}</small>`;
+    return c;
+  }));
   row.append(...[0, 1, 2, 3].map(() => document.createElement('span')), m); return row;
 }
 function renderQuestions() {
@@ -300,6 +343,7 @@ let noteTimer;
 $('#note').addEventListener('input', () => { clearTimeout(noteTimer); noteTimer = setTimeout(() => { const l = structuredClone(lab()); l.note = $('#note').value; st.labels[cur().id] = l; save(); }, 500); });
 $('#prev').onclick = () => move(-1); $('#next').onclick = () => move(1); $('#nextOpen').onclick = nextOpen;
 $('#nothing').onclick = nothing; $('#done').onclick = finish; $('#unclear').onclick = unclear;
+$('#allModels').onchange = () => { $('#allModels').blur(); renderQuestions(); };
 $('#filter').onchange = () => { $('#filter').blur(); if (!(FILTERS[$('#filter').value])(cur())) move(1); else render(); };
 $('#showModel').onchange = () => { try { localStorage.setItem('showModel', $('#showModel').checked ? '1' : '0'); } catch (e) { /* storage blocked */ }
   $('#showModel').blur(); renderQuestions(); };
