@@ -46,8 +46,10 @@ aside > #questions { grid-column: 1; grid-row: 1 / span 9; display: flex; flex-d
 .q.verdict { border-top: 1px solid var(--line); border-radius: 0 0 6px 6px; }
 .m { font-size: 11px; padding: 2px 4px; border-radius: 5px; min-width: 42px; text-align: center; color: var(--muted); }
 .m.flag { background: #6b2b26; color: #fff; }
-.models { grid-column: 2 / -1; display: flex; gap: 6px; flex-wrap: wrap; font-size: 12px; }
-.models span { border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; color: var(--muted); cursor: help; }
+.with-models .q { grid-template-columns: 18px 200px 1fr auto 380px; }
+.with-models .m { text-align: left; justify-self: start; }
+.models { display: flex; gap: 4px; flex-wrap: wrap; font-size: 11px; }
+.models span { border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; white-space: nowrap; color: var(--muted); cursor: help; }
 .models span.major { border-color: var(--yes); color: #ff9b92; }
 .models span.minor { border-color: var(--unsure); color: #e8c46a; }
 .models span.ok { border-color: var(--no); color: #7fd6a2; }
@@ -172,20 +174,19 @@ function row(k, n) {
   const m = document.createElement('span'); m.className = 'm'; m.title = 'Decisions: probability of yes';
   const p = ((st.model || {})[cur().id] || {})[k];
   if (p !== undefined && p !== null && !isVerdict(k) && $('#showModel').checked) { m.textContent = `${Math.round(p * 100)}%`; if (p >= 0.7 && k !== GATE) m.classList.add('flag'); }
-  r.append(num, text, full, btns, m);
   const vs = (st.verdicts || {})[cur().id];
   if (isVerdict(k) && vs && $('#showModel').checked) {
-    // Each model's verdict for this layer; hover shows the errors it named.
-    const layer = layerOf(k).name; const box = document.createElement('div'); box.className = 'models';
+    // Model column on verdict rows: each run's verdict and major likelihood; hover shows the errors it named.
+    const layer = layerOf(k).name; m.className = 'models'; m.title = '';
     for (const [label, v] of Object.entries(vs)) {
       const l = v[layer]; if (!l) continue;
       const chip = document.createElement('span'); chip.className = l.verdict;
-      chip.textContent = `${label}: ${l.verdict} ${Math.round(l.major_likelihood)}`;
-      chip.title = `${Math.round(l.major_likelihood)}% likely major\n` + ((l.errors || []).join('\n') || 'no errors named');
-      box.append(chip);
+      chip.textContent = `${label} ${l.verdict} ${Math.round(l.major_likelihood)}`;
+      chip.title = `${label}: ${l.verdict}, ${Math.round(l.major_likelihood)}% likely major\n` + ((l.errors || []).join('\n') || 'no errors named');
+      m.append(chip);
     }
-    r.append(box);
   }
+  r.append(num, text, full, btns, m);
   return r;
 }
 function renderQuestions() {
@@ -198,6 +199,7 @@ function renderQuestions() {
     parts.push(block);
   }
   $('#questions').replaceChildren(...parts);
+  $('#questions').classList.toggle('with-models', $('#showModel').checked);
   document.querySelectorAll('.panel').forEach((p) => {
     p.classList.toggle('active', !!active && p.dataset.layer === active.name);
   });
