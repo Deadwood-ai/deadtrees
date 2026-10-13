@@ -26,7 +26,7 @@ import numpy as np
 from sklearn.metrics import roc_auc_score
 
 from analyst import analyst
-from decisions_crops import image_url
+from decisions_crops import PREDICATES, image_url
 from decisions_runner import read_key
 from magnitude_llm import jpeg
 from model_transport import invoke
@@ -68,7 +68,15 @@ unsure about are OK or minor, never major. Major means the wrong area is obvious
 large compared with what the layer should cover, roughly a fifth of it or more.
 Also give major_likelihood, 0 to 100, that the layer has a major error.""").replace(
     '"verdict": "ok|minor|major", "major_likelihood": n}', '"wrong_area_pct": n, "verdict": "ok|minor|major", "major_likelihood": n}')
-PROMPTS = {'v1': PROMPT, 'v2': PROMPT_V2}
+# v3 (13 Oct): v1 plus a 0-100 likelihood per failure mode (the labeling page's questions), so
+# each model can be compared with the reviewer mode by mode, not only on the layer verdict.
+MODES = {'deadwood': ['m1_dead_missed', 'm2_dw_on_live_vegetation', 'm3_dw_on_non_vegetation', 'm4_dw_on_lying_wood', 'm7_dw_artifact'],
+         'forest': ['m5_fc_trees_missed', 'm6_fc_on_non_trees', 'm8_dead_not_forest', 'm7_fc_artifact']}
+PROMPT_V3 = PROMPT.replace('Count overlapping errors once.', 'Count overlapping errors once.\nFor each error type below, give modes: the likelihood, 0 to 100, that this error is clearly present in the layer:\n'
+                           + '\n'.join(f'- {k}: {PREDICATES["gold9"][k]}' for layer in MODES.values() for k in layer)).replace(
+    '"deadwood": {"errors": ["..."],', '"deadwood": {"errors": ["..."], "modes": {' + ', '.join(f'"{k}": n' for k in MODES['deadwood']) + '},').replace(
+    '"forest": {"errors": ["..."],', '"forest": {"errors": ["..."], "modes": {' + ', '.join(f'"{k}": n' for k in MODES['forest']) + '},')
+PROMPTS = {'v1': PROMPT, 'v2': PROMPT_V2, 'v3': PROMPT_V3}
 
 
 
@@ -132,6 +140,7 @@ def ask(root, crop, out, backend='sol', effort='high', key=None, prompt=PROMPT):
                     raise ValueError('bad verdict')
                 result[layer] = {'verdict': v['verdict'], 'major_likelihood': float(v['major_likelihood']),
                                  'wrong_area_pct': float(v['wrong_area_pct']) if 'wrong_area_pct' in v else None,
+                                 'modes': {k: float(x) for k, x in (v.get('modes') or {}).items() if k in MODES[layer]},
                                  'errors': [str(e)[:200] for e in v.get('errors', [])][:10]}
             return result, {'usage': receipt.get('usage'), 'seconds': receipt['seconds']}
         except ValueError as e:

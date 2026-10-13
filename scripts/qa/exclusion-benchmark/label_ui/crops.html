@@ -195,6 +195,11 @@ function modelCells(k) {
     } else if (col.key === 'size') {
       const v = ((st.sizes || {})[id] || {})[k];
       if (v !== undefined && v !== null) { c.textContent = `${Math.round(v)}%`; c.title = `Sol: ${Math.round(v)}% of the layer affected`; if (v >= 20) c.classList.add('hi'); }
+    } else if (!isVerdict(k) && k !== GATE) {
+      // Per-mode likelihoods exist only for verdict runs made with the v3 prompt.
+      const l = (((st.verdicts || {})[id] || {})[col.key.slice(2)] || {})[layerOf(k).name];
+      const v = ((l || {}).modes || {})[k];
+      if (v !== undefined) { c.textContent = Math.round(v); c.title = `${col.label}: ${Math.round(v)}% likely`; if (v >= 70) c.classList.add('hi'); }
     } else if (isVerdict(k)) {
       const l = (((st.verdicts || {})[id] || {})[col.key.slice(2)] || {})[layerOf(k).name];
       if (l) { c.textContent = Math.round(l.major_likelihood); c.classList.add(l.verdict);
