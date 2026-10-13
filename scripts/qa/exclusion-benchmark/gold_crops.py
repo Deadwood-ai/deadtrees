@@ -71,6 +71,32 @@ def select(rows, exclude, count):
     return chosen
 
 
+QUOTAS = {'deadwood bad': 3, 'forest bad': 2, 'ok': 2, 'great': 3}  # audit mix for --sample
+
+
+def stratum(r):
+    if r['dq'] == 'bad':
+        return 'deadwood bad'
+    if r['fq'] == 'bad':
+        return 'forest bad'
+    return 'great' if r['dq'] == 'great' and r['fq'] == 'great' else 'ok'
+
+
+def stratified(rows, exclude, quotas):
+    """Datasets per audit stratum, each pick as far as possible (embedding, >10 km) from the rest."""
+    pool = [r for r in rows if r['dataset_id'] not in exclude and r['embedding'] is not None]
+    chosen = []
+    for name, count in quotas.items():
+        group = [r for r in pool if stratum(r) == name]
+        for _ in range(count):
+            cands = [r for r in group if r not in chosen and all(km(r, s) > 10 for s in chosen)]
+            if not cands:
+                break
+            chosen.append(max(cands, key=lambda r: (1 - max((float(r['embedding'] @ s['embedding']) for s in chosen), default=0),
+                                                     hashlib.sha256(str(r['dataset_id']).encode()).hexdigest())))
+    return chosen
+
+
 def build(row, strategy, output, rng, name=None):
     directory = output / (name or str(row['dataset_id']))
     if (directory / 'truth.json').exists():
@@ -150,8 +176,21 @@ if __name__ == '__main__':
     p.add_argument('--count', type=int, default=120)
     p.add_argument('--datasets', type=int, nargs='*', help='instead of the diverse pick: crops from these datasets')
     p.add_argument('--per-dataset', type=int, default=10)
+    p.add_argument('--sample', action='store_true', help='pick datasets by audit stratum (QUOTAS), new to every crop set')
     a = p.parse_args()
     strategies = ('deadwood', 'forest_cover', 'random', 'deadwood', 'forest_cover', 'deadwood', 'random', 'forest_cover', 'deadwood', 'random')
+    if a.sample:
+        exclude = {d['dataset_id'] for d in json.loads((a.root / 'selection.json').read_text())['datasets']}
+        exclude |= {c['dataset_id'] for f in ('crop-test.json', 'gold-test.json') for c in json.loads((a.root / f).read_text())}
+        features = {r['dataset_id']: r['embedding'] for r in json.loads((a.root / 'audit-features.json').read_text())}
+        with analyst() as db:
+            rows = db.execute(POOL_SQL + AUDITED).fetchall()
+        for r in rows:
+            e = features.get(r['dataset_id'])
+            r['embedding'] = (np.array(e) / np.linalg.norm(e)) if e else None
+        picked = stratified(rows, exclude, QUOTAS)
+        print([(r['dataset_id'], stratum(r), r['biome'], r['country']) for r in picked], flush=True)
+        a.datasets = [r['dataset_id'] for r in picked]
     if a.datasets:
         # Named cases (e.g. a dataset someone reported): several crops each, audited or not.
         with analyst() as db:
