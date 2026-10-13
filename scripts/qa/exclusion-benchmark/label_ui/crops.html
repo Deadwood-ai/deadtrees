@@ -87,17 +87,17 @@ kbd { background: #2a3138; border: 1px solid var(--line); border-radius: 4px; pa
     <div class="panel" data-layer="forest"><span class="cap">Forest (gold)</span><div class="inner"></div></div>
   </section>
   <aside>
-    <button class="big ok" id="nothing" title="Judgeable, both layers fine; then next open crop">✓ Whole crop fine → next</button>
+    <button class="big ok" id="nothing" title="Judgeable, both layers fine; then next open crop">✓ Whole crop fine → next <kbd>Shift</kbd>+<kbd>Space</kbd></button>
     <div id="questions"></div>
     <button class="big" id="done" title="Unanswered problems count as No; then next open crop">Save, rest = No → next <kbd>Enter</kbd></button>
     <button id="unclear" title="Can't judge this crop; then next open crop">Can't tell what this shows <kbd>c</kbd></button>
     <textarea id="note" rows="2" placeholder="Optional note"></textarea>
     <p id="status"></p>
     <p class="muted" style="margin:0">Model borders: <span style="color:#7fd6a2">green</span> agrees with you · <span style="color:#ff9b92">red</span> model flags, you didn't · <span style="color:#e8c46a">amber</span> you flag, model missed. Small number = model's own score.</p>
-    <p class="muted" style="margin:0"><kbd>1</kbd> yes · <kbd>2</kbd> no · <kbd>3</kbd> don't know · verdict <kbd>2</kbd> minor · <kbd>3</kbd> major (OK is automatic without a flagged error) · <kbd>Space</kbd> this layer fine · <kbd>Enter</kbd> rest no · <kbd>c</kbd> can't tell</p>
+    <p class="muted" style="margin:0"><kbd>1</kbd> yes · <kbd>2</kbd> no · <kbd>3</kbd> don't know · verdict <kbd>1</kbd> minor · <kbd>2</kbd> major (OK is automatic without a flagged error) · <kbd>Space</kbd> this layer fine · <kbd>Enter</kbd> rest no · <kbd>c</kbd> can't tell</p>
     <details><summary>Rules and keys</summary>
       <p>Each layer has its own block: tag every error you see (yes for any clear error, however small), then give the verdict for the satellite product. <b>OK</b> is set automatically when no error is flagged in the layer; a layer with a flagged error is minor or major. <b>Minor, keep</b>: errors exist but would not noticeably change the satellite cover here. <b>Major, exclude</b>: all errors in this layer together would noticeably bias the satellite cover here. Lying wood is never deadwood; standing dead trees are forest.</p>
-      <p>Work top to bottom: <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> answer the highlighted row and move down; after the last row it goes to the next crop. <kbd>Space</kbd> marks the current layer fine (all no, verdict OK) and jumps to the next block. <kbd>↑</kbd>/<kbd>↓</kbd> or a click pick a row. <kbd>Enter</kbd> remaining questions = no (a layer without any yes also gets OK), next. <kbd>c</kbd> can't tell. <kbd>Tab</kbd> next open crop, <kbd>←</kbd>/<kbd>→</kbd> previous/next. Wheel and drag zoom, double-click resets.</p>
+      <p>Work top to bottom: <kbd>1</kbd> yes, <kbd>2</kbd> no, <kbd>3</kbd> don't know answer the highlighted row and move down; on a verdict row <kbd>1</kbd> minor, <kbd>2</kbd> major; after the last row it goes to the next crop. <kbd>Space</kbd> marks the current layer fine (all no, verdict OK) and jumps to the next block. <kbd>↑</kbd>/<kbd>↓</kbd> or a click pick a row. <kbd>Enter</kbd> remaining questions = no (a layer without any yes also gets OK), next. <kbd>c</kbd> can't tell. <kbd>Tab</kbd> next open crop, <kbd>←</kbd>/<kbd>→</kbd> previous/next. Wheel and drag zoom, double-click resets.</p>
     </details>
   </aside>
 </main>
@@ -167,8 +167,9 @@ function row(k, n) {
   full.textContent = st.questions[k];
   const btns = document.createElement('span'); btns.className = 'btns';
   const isFlagged = isVerdict(k) && flagged(a, layerOf(k));
-  const options = isVerdict(k) ? [['ok', 'OK', 'ok'], ['minor', 'Minor, keep', 'minor'], ['major', 'Major, exclude', 'major']].filter(([v]) => !(isFlagged && v === 'ok'))
-    : [['yes', 'Yes', true], ['unsure', '?', 'unsure'], ['no', 'No', false]];
+  // Button labels carry their key, in key order.
+  const options = !isVerdict(k) ? [['yes', '1 Yes', true], ['no', '2 No', false], ['unsure', '3 ?', 'unsure']]
+    : isFlagged ? [['minor', '1 Minor, keep', 'minor'], ['major', '2 Major, exclude', 'major']] : [['ok', 'OK', 'ok']];
   if (isVerdict(k)) full.textContent = isFlagged ? 'Errors flagged: minor (keep) or major (exclude) for the satellite product?'
     : a[k] && a[k] !== 'ok' ? 'No error flagged but not OK: tag the error above, or it becomes OK.' : 'OK automatically when no error is flagged.';
   for (const [v, label, value] of options) {
@@ -351,10 +352,14 @@ function answer(j) {
   // Answer the row under the cursor with option j (0, 1, 2), then go to the next open row
   // (answered rows are skipped); when the crop is complete, go to the next open crop.
   const ks = keys(); const k = ks[st.cursor];
-  const v = isVerdict(k) ? ['ok', 'minor', 'major'][j] : [true, false, 'unsure'][j];
+  // Verdict rows: 1 minor, 2 major when the layer has a flagged error; otherwise the verdict is OK.
+  const v = !isVerdict(k) ? [true, false, 'unsure'][j] : flagged(lab().answers, layerOf(k)) ? ['minor', 'major'][j] : 'ok';
+  if (v === undefined) { $('#status').textContent = 'Verdict: 1 minor (keep) or 2 major (exclude).'; return; }
   if (k === GATE && v === false) return unclear();
-  if (v === 'ok' && flagged(lab().answers, layerOf(k))) { $('#status').textContent = 'A layer with a flagged error is minor or major, not OK.'; return; }
+  const wasDone = done(cur());
   update((a) => { a[k] = v; });
+  // Correcting a finished crop stays on it and moves down one row; finishing a crop moves on.
+  if (wasDone) { st.cursor = Math.min(ks.length - 1, st.cursor + 1); return renderQuestions(); }
   if (done(cur())) return nextOpen();
   const a = lab().answers; const open = (x) => val(a[x]) === null;
   const after = ks.findIndex((x, n) => n > st.cursor && open(x));
@@ -368,6 +373,7 @@ document.addEventListener('keydown', (e) => {
   else if (key === '3' || key === '?' || key === '/' || key === 'u') answer(2);
   else if (e.key === 'ArrowDown') { e.preventDefault(); st.cursor = Math.min(keys().length - 1, st.cursor + 1); renderQuestions(); }
   else if (e.key === 'ArrowUp') { e.preventDefault(); st.cursor = Math.max(0, st.cursor - 1); renderQuestions(); }
+  else if (e.key === ' ' && e.shiftKey) { e.preventDefault(); nothing(); }
   else if (e.key === ' ') { e.preventDefault(); layerFine(); }
   else if (e.key === 'Enter') { e.preventDefault(); finish(); }
   else if (e.key === 'Tab') { e.preventDefault(); nextOpen(); }
