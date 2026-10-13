@@ -396,6 +396,9 @@ def check_writes(
 	planned_creates = {flat(entry['title']): entry for entry in creates}
 	done: set[str] = set()
 	created: dict[str, str] = {}
+	# Every call is inspected even after a bad one, so later good writes are
+	# still credited and never repeated; the first problem is reported.
+	problems: list[str] = []
 	for call in calls:
 		if call['name'] not in FILING_WRITES:
 			continue
@@ -404,7 +407,8 @@ def check_writes(
 			key = (str(args.get('issueId', '')), flat(args.get('body', '')))
 			fingerprint = planned_comments.get(key)
 			if args.get('id') or args.get('parentId') or not fingerprint:
-				return f'unplanned save_comment on {key[0] or "?"}', created, done
+				problems.append(f'unplanned save_comment on {key[0] or "?"}')
+				continue
 		else:
 			plan = planned_creates.get(flat(args.get('title', '')))
 			fingerprint = plan['fingerprint'] if plan else None
@@ -415,21 +419,26 @@ def check_writes(
 				or str(args.get('priority')) != str(plan['priority'])
 				or flat(args.get('description', '')) != flat(plan['description'])
 			):
-				return f"unplanned save_issue {flat(args.get('title', ''))[:80]}", created, done
+				problems.append(f"unplanned save_issue {flat(args.get('title', ''))[:80]}")
+				continue
 			if created_issue(call):
 				created.setdefault(fingerprint, created_issue(call))
 		if call['ok']:
 			if fingerprint in done:
-				return f'duplicate write for {fingerprint}', created, done
+				problems.append(f'duplicate write for {fingerprint}')
 			done.add(fingerprint)
 	for entry in comments:
+		if problems:
+			break
 		if entry['fingerprint'] not in done or filed.get(entry['fingerprint'], entry['issue']) != entry['issue']:
 			return f"no successful comment on {entry['issue']} for {entry['fingerprint']}", created, done
 	for entry in creates:
+		if problems:
+			break
 		issue = created.get(entry['fingerprint'])
 		if not issue or filed.get(entry['fingerprint']) != issue:
 			return f"no created issue for {entry['fingerprint']}", created, done
-	return None, created, done
+	return (problems[0] if problems else None), created, done
 
 
 def call_cost(result: dict[str, Any]) -> float:

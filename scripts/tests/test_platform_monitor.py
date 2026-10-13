@@ -497,3 +497,12 @@ def test_a_held_back_finding_is_reported_again_on_the_next_run():
 	delta, after = findings.diff_findings(active, [])
 	delta, _ = findings.diff_findings(findings.hold_back(active, after, {'dt-status/api/b'}), [])
 	assert keys(delta['cleared']) == {'dt-status/api/b'}
+
+
+def test_a_bad_write_does_not_hide_later_good_ones(tmp_path, monkeypatch):
+	calls = [comment('b', 'DT-1310'), create('a', 'DT-9')]
+	filing(monkeypatch, '[filed] dt-status/api/a=DT-9\n[filed] ok', calls)
+	ok, detail, filed, done, _ = file(tmp_path, {'new': [red('a')]})
+	assert not ok and detail == 'unplanned save_comment on DT-1310'
+	# The issue it did create is remembered, so no retry creates it again.
+	assert filed == {'dt-status/api/a': 'DT-9'} and done == {'dt-status/api/a'}
