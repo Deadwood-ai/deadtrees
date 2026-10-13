@@ -278,3 +278,21 @@ def diff_findings(
 		{key: items for key, items in delta.items() if items},
 		{'active': active, 'pending': next_pending, 'quiet': next_quiet},
 	)
+
+
+def hold_back(old: dict[str, Any], new: dict[str, Any], held: set[str]) -> dict[str, Any]:
+	"""The next baseline when the writes for `held` fingerprints failed: those
+	keep their old state, so the next run reports them again at once."""
+	active = dict(new.get('active') or {})
+	pending = dict(new.get('pending') or {})
+	quiet = dict(new.get('quiet') or {})
+	old_active = old.get('active') or {}
+	for key in held:
+		if key in old_active:
+			active[key] = old_active[key]
+			if old_active[key].get('confirm'):
+				quiet[key] = CONFIRM_RUNS - 1
+		elif key in active:
+			if active.pop(key).get('confirm'):
+				pending[key] = CONFIRM_RUNS - 1
+	return {'active': active, 'pending': pending, 'quiet': quiet}

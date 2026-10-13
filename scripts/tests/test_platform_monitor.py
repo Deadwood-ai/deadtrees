@@ -333,12 +333,22 @@ def test_ask_model_without_a_result_event_fails(tmp_path):
 		monitor_tick.ask_model('prompt', ('a',), fake_claude(tmp_path, []), tmp_path)
 
 
-def create(issue, team='deadtrees', ok=True, **extra):
-	return {'name': 'save_issue', 'input': {'team': team, **extra}, 'ok': ok, 'output': f'{{"id":"{issue}","title":"x"}}'}
+def planned(key, issue=None, cleared=False):
+	delta = {'cleared' if cleared else 'new': [red(key)]}
+	comments, creates = monitor_tick.filing_plan(delta, {red(key)['fingerprint']: issue} if issue else {}, NOON)
+	return (comments or creates)[0]
 
 
-def comment(issue, ok=True, **extra):
-	return {'name': 'save_comment', 'input': {'issueId': issue, 'body': 'x', **extra}, 'ok': ok, 'output': '{}'}
+def create(key, issue, ok=True, **override):
+	plan = planned(key)
+	args = {'team': 'deadtrees', 'state': 'Triage', 'title': plan['title'], 'priority': plan['priority'], 'description': plan['description']}
+	return {'name': 'save_issue', 'input': {**args, **override}, 'ok': ok, 'output': f'{{"id":"{issue}","title":"x"}}'}
+
+
+def comment(key, issue, ok=True, cleared=False, **override):
+	# The model may reflow whitespace; the words must stay the same.
+	body = planned(key, issue, cleared)['body'].replace('\n\n', '\n')
+	return {'name': 'save_comment', 'input': {'issueId': issue, 'body': body, **override}, 'ok': ok, 'output': '{}'}
 
 
 def filing(monkeypatch, text, calls):
@@ -349,10 +359,13 @@ def filing(monkeypatch, text, calls):
 	monkeypatch.setattr(monitor_tick, 'ask_model', lambda *args, **kwargs: answer)
 
 
+def file(tmp_path, delta, known=None):
+	return monitor_tick.file_findings(delta, known or {}, NOON, argparse.Namespace(state_dir=tmp_path), tmp_path)
+
+
 def test_filing_fails_when_a_fingerprint_got_no_issue(tmp_path, monkeypatch):
-	filing(monkeypatch, '[filed] dt-status/api/a=DT-9\n[filed] ok', [create('DT-9')])
-	args = argparse.Namespace(state_dir=tmp_path)
-	ok, detail, filed, _ = monitor_tick.file_findings({'new': [red('a'), red('b')]}, {}, NOON, args, tmp_path)
+	filing(monkeypatch, '[filed] dt-status/api/a=DT-9\n[filed] ok', [create('a', 'DT-9')])
+	ok, detail, filed, _, _ = file(tmp_path, {'new': [red('a'), red('b')]})
 	# The issue it really created is kept, so the retry comments on it.
 	assert not ok and 'dt-status/api/b' in detail and filed == {'dt-status/api/a': 'DT-9'}
 
@@ -361,38 +374,39 @@ def test_filing_is_proven_by_the_sessions_own_successful_writes(tmp_path, monkey
 	delta = {'new': [red('a'), red('b')], 'cleared': [red('c')]}
 	known = {'dt-status/api/b': 'DT-2', 'dt-status/api/c': 'DT-3'}
 	text = '[filed] dt-status/api/a=DT-9\n[filed] dt-status/api/b=DT-2\n[filed] dt-status/api/c=DT-3\n[filed] ok'
-	args = argparse.Namespace(state_dir=tmp_path)
-	filing(monkeypatch, text, [create('DT-9'), comment('DT-2'), comment('DT-3')])
-	assert monitor_tick.file_findings(delta, known, NOON, args, tmp_path)[:3] == (True, '[filed] ok', {'dt-status/api/a': 'DT-9'})
+	filing(monkeypatch, text, [create('a', 'DT-9'), comment('b', 'DT-2'), comment('c', 'DT-3', cleared=True)])
+	assert file(tmp_path, delta, known)[:4] == (True, '[filed] ok', {'dt-status/api/a': 'DT-9'}, {'dt-status/api/a', 'dt-status/api/b', 'dt-status/api/c'})
 	# A comment whose result was an error proves nothing.
-	filing(monkeypatch, text, [create('DT-9'), comment('DT-2', ok=False), comment('DT-3')])
-	ok, detail, _, _ = monitor_tick.file_findings(delta, known, NOON, args, tmp_path)
+	filing(monkeypatch, text, [create('a', 'DT-9'), comment('b', 'DT-2', ok=False), comment('c', 'DT-3', cleared=True)])
+	ok, detail, _, _, _ = file(tmp_path, delta, known)
 	assert not ok and detail == 'no successful comment on DT-2 for dt-status/api/b'
 
 
 def test_an_extra_created_issue_fails_the_filing(tmp_path, monkeypatch):
-	filing(monkeypatch, '[filed] dt-status/api/a=DT-9\n[filed] ok', [create('DT-9'), create('DT-10')])
-	ok, detail, filed, _ = monitor_tick.file_findings({'new': [red('a')]}, {}, NOON, argparse.Namespace(state_dir=tmp_path), tmp_path)
-	assert not ok and detail == 'unexpected created issue DT-10' and filed == {'dt-status/api/a': 'DT-9'}
+	filing(monkeypatch, '[filed] dt-status/api/a=DT-9\n[filed] ok', [create('a', 'DT-9'), create('a', 'DT-10')])
+	ok, detail, filed, _, _ = file(tmp_path, {'new': [red('a')]})
+	assert not ok and detail == 'duplicate write for dt-status/api/a' and filed == {'dt-status/api/a': 'DT-9'}
 
 
 @pytest.mark.parametrize('call, problem', [
-	(comment('DT-1310'), 'unexpected save_comment on DT-1310'),
-	(create('DT-9', id='DT-1'), 'unexpected save_issue'),
-	(create('DT-9', team='3Dtrees'), 'unexpected save_issue'),
-	(comment('DT-2', id='comment-1'), 'unexpected save_comment on DT-2'),
+	(comment('b', 'DT-1310'), 'unplanned save_comment on DT-1310'),
+	(comment('b', 'DT-2', body='[monitor] all fine'), 'unplanned save_comment on DT-2'),
+	(comment('b', 'DT-2', id='comment-1'), 'unplanned save_comment on DT-2'),
+	(create('b', 'DT-9', id='DT-1'), 'unplanned save_issue'),
+	(create('b', 'DT-9', team='3Dtrees'), 'unplanned save_issue'),
+	(create('b', 'DT-9', priority=1), 'unplanned save_issue'),
+	(create('b', 'DT-9', assignee='me'), 'unplanned save_issue'),
+	(create('b', 'DT-9', description='something else'), 'unplanned save_issue'),
 ])
-def test_writes_outside_the_delta_fail_the_filing(tmp_path, monkeypatch, call, problem):
-	filing(monkeypatch, '[filed] dt-status/api/b=DT-2\n[filed] ok', [comment('DT-2'), call])
-	ok, detail, _, _ = monitor_tick.file_findings(
-		{'new': [red('b')]}, {'dt-status/api/b': 'DT-2'}, NOON, argparse.Namespace(state_dir=tmp_path), tmp_path
-	)
+def test_writes_outside_the_plan_fail_the_filing(tmp_path, monkeypatch, call, problem):
+	filing(monkeypatch, '[filed] dt-status/api/b=DT-2\n[filed] ok', [comment('b', 'DT-2'), call])
+	ok, detail, _, _, _ = file(tmp_path, {'new': [red('b')]}, {'dt-status/api/b': 'DT-2'})
 	assert not ok and detail.startswith(problem)
 
 
 def test_filing_without_a_linear_write_never_counts(tmp_path, monkeypatch):
-	filing(monkeypatch, '[filed] dt-status/api/a=DT-9\n[filed] ok', [create('DT-9', ok=False)])
-	ok, detail, _, _ = monitor_tick.file_findings({'new': [red('a')]}, {}, NOON, argparse.Namespace(state_dir=tmp_path), tmp_path)
+	filing(monkeypatch, '[filed] dt-status/api/a=DT-9\n[filed] ok', [create('a', 'DT-9', ok=False)])
+	ok, detail, _, _, _ = file(tmp_path, {'new': [red('a')]})
 	assert not ok and detail == 'the model did not make its Linear calls'
 
 
@@ -416,7 +430,7 @@ def run_tick(tmp_path, monkeypatch, filing_ok=True, posthog_line=''):
 
 	def file_findings(delta, known, now, args, workdir):
 		filed['delta'] = delta
-		return filing_ok, '[filed] ok' if filing_ok else 'boom', {'dt-status/api/a': 'DT-7'} if filing_ok else {}, 0.0
+		return filing_ok, '[filed] ok' if filing_ok else 'boom', {'dt-status/api/a': 'DT-7'} if filing_ok else {}, set(), 0.0
 
 	monkeypatch.setattr(monitor_tick, 'file_findings', file_findings)
 	args = monitor_tick.parse_args(['--state-dir', str(tmp_path), '--zuliprc', str(tmp_path / 'missing')])
@@ -438,7 +452,7 @@ def test_tick_files_the_delta_and_advances_the_baseline(tmp_path, monkeypatch):
 
 def test_failed_filing_keeps_the_baseline_for_a_retry(tmp_path, monkeypatch):
 	_, state = run_tick(tmp_path, monkeypatch, filing_ok=False)
-	assert state['baseline'] == {}
+	assert state['baseline']['active'] == {}
 	assert state['posthog_seen'] == {}
 	assert 'linear filing failed, will retry' in (tmp_path / 'digest-latest.md').read_text()
 
@@ -466,3 +480,29 @@ def test_the_filing_plan_fixes_every_write():
 	assert comments[2]['body'].startswith('[monitor] 2026-10-13T12:00:00Z: Cleared at 2026-10-13T12:00:00Z.')
 	# A cleared finding without an issue needs no write.
 	assert [(c['fingerprint'], c['priority'], c['title']) for c in creates] == [('dt-status/api/a', 2, '🤖 a failed')]
+
+
+def test_a_held_back_finding_is_reported_again_on_the_next_run():
+	flaky = findings.finding('yellow', 'deepl1', 'probe', 'deepl1 probe failed', confirm=True)
+	_, baseline = findings.diff_findings({}, [flaky])
+	delta, after = findings.diff_findings(baseline, [flaky, red('a')])
+	assert keys(delta['new']) == {flaky['fingerprint'], 'dt-status/api/a'}
+	# Only the deepl1 write failed: api/a is filed, deepl1 comes back at once.
+	held = findings.hold_back(baseline, after, {flaky['fingerprint']})
+	assert set(held['active']) == {'dt-status/api/a'}
+	delta, _ = findings.diff_findings(held, [flaky, red('a')])
+	assert keys(delta['new']) == {flaky['fingerprint']}
+	# A held-back clearance is reported again too.
+	_, active = findings.diff_findings({}, [red('b')])
+	delta, after = findings.diff_findings(active, [])
+	delta, _ = findings.diff_findings(findings.hold_back(active, after, {'dt-status/api/b'}), [])
+	assert keys(delta['cleared']) == {'dt-status/api/b'}
+
+
+def test_a_bad_write_does_not_hide_later_good_ones(tmp_path, monkeypatch):
+	calls = [comment('b', 'DT-1310'), create('a', 'DT-9')]
+	filing(monkeypatch, '[filed] dt-status/api/a=DT-9\n[filed] ok', calls)
+	ok, detail, filed, done, _ = file(tmp_path, {'new': [red('a')]})
+	assert not ok and detail == 'unplanned save_comment on DT-1310'
+	# The issue it did create is remembered, so no retry creates it again.
+	assert filed == {'dt-status/api/a': 'DT-9'} and done == {'dt-status/api/a'}
