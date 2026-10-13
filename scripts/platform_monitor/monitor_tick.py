@@ -495,6 +495,33 @@ def inbox_lines(result: dict[str, Any], since: datetime) -> tuple[list[str], str
 	return items + gaps, checked.removeprefix('[checked] '), 'fail' not in (linear, gmail), posthog_ok
 
 
+def filing_plan(
+	delta: dict[str, Any], known: dict[str, str], now: datetime
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+	"""The exact Linear writes for this delta: a comment where a fingerprint
+	already has an issue, a new Triage issue otherwise. The model only carries
+	them out; given a map to look up, Haiku 5.5 created a duplicate (2026-10-13)."""
+	comments, creates = [], []
+	for key in ('new', 'changed', 'cleared'):
+		for item in delta.get(key, []):
+			fingerprint, issue = item['fingerprint'], known.get(item['fingerprint'])
+			if key == 'cleared':
+				text = f'Cleared at {iso(now)}.'
+			else:
+				change = f" ({item['previous_severity']} → {item['severity']})" if item.get('previous_severity') else ''
+				text = f"{item['severity']}{change}: {item['summary']}"
+			if issue:
+				comments.append({'fingerprint': fingerprint, 'issue': issue, 'body': f'[monitor] {iso(now)}: {text}\n\nfingerprint: {fingerprint}'})
+			elif key != 'cleared':
+				creates.append({
+					'fingerprint': fingerprint,
+					'title': f"🤖 {item['summary']}"[:200],
+					'priority': 2 if item['severity'] == 'red' else 3,
+					'description': f"fingerprint: {fingerprint}\nseverity: {item['severity']}\nevidence time: {iso(now)}\n\n{item['summary']}",
+				})
+	return comments, creates
+
+
 def file_findings(
 	delta: dict[str, Any], known: dict[str, str], now: datetime, args: argparse.Namespace, workdir: Path
 ) -> tuple[bool, str, dict[str, str], float]:
@@ -505,10 +532,11 @@ def file_findings(
 	expected |= {item['fingerprint'] for item in delta.get('cleared', []) if item['fingerprint'] in known}
 	if not expected:
 		return True, '', {}, 0.0
+	comments, creates = filing_plan(delta, known, now)
 	prompt = render(
 		'monitor_filing_prompt.md',
-		{'tools': ','.join(FILING_TOOLS), 'now': iso(now), 'known_issues': json.dumps(known, indent=1)},
-		{'platform_delta': json.dumps(delta, indent=1)},
+		{'tools': ','.join(FILING_TOOLS)},
+		{'comments': json.dumps(comments, indent=1), 'creates': json.dumps(creates, indent=1)},
 	)
 	cost = 0.0
 	for attempt, effort in enumerate(ATTEMPT_EFFORTS):
