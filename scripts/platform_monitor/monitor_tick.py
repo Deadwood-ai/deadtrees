@@ -556,7 +556,11 @@ def file_findings(
 		except (RuntimeError, subprocess.TimeoutExpired) as exc:
 			return False, str(exc), {}, set(), cost
 		cost += call_cost(result)
-		write_best_effort(args.state_dir / 'monitor-filing-raw.txt', f"turns={result.get('num_turns')}\n{result.get('result')}\n")
+		writes = [{key: call[key] for key in ('name', 'input', 'ok')} for call in result['tool_calls'] if call['name'] in FILING_WRITES]
+		write_best_effort(
+			args.state_dir / 'monitor-filing-raw.txt',
+			f"turns={result.get('num_turns')}\n{result.get('result')}\n\nwrites:\n{json.dumps(writes, indent=1)}\n",
+		)
 		# Only an early stop without any tool call is retried: nothing reached
 		# Linear then. A call that wrote something is never repeated.
 		if int(result.get('num_turns') or 0) > 1 or attempt == len(ATTEMPT_EFFORTS) - 1:
