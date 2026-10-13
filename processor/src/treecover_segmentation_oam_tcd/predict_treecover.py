@@ -38,7 +38,6 @@ TCD_MODEL = TCD_MODEL_REPO
 TCD_TARGET_RESOLUTION = config['tree_cover_inference_resolution']  # 10cm resolution (forced for all inputs)
 # Uncompressed or lossless sources; any other codec (JPEG, WebP, JPEG 2000, JPEG XL, LERC...) is kept.
 LOSSLESS_CODECS = {'', 'none', 'deflate', 'lzw', 'zstd', 'packbits', 'lzma'}
-TCD_TARGET_CRS = 'EPSG:3395'  # World Mercator - what the TCD model was trained on
 TCD_OUTPUT_CRS = 'EPSG:4326'  # WGS84 for database storage
 
 
@@ -46,13 +45,38 @@ TCD_OUTPUT_CRS = 'EPSG:4326'  # WGS84 for database storage
 MINIMUM_POLYGON_AREA = config['minimum_polygon_area']
 
 
-def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
-	"""
-	Reproject orthomosaic to EPSG:3395 (World Mercator) with forced 10cm resolution for TCD.
+def _tcd_grid(src) -> str:
+	"""The local UTM zone of ``src``: there 0.1 m pixels are 10 cm on the ground at any latitude.
 
-	The TCD model was trained on EPSG:3395 at 10cm resolution. This function ensures
-	all inputs are standardized to match the training conditions, regardless of the
-	original CRS or resolution of the input orthomosaic.
+	TCD used to run on a fixed 0.1 unit grid in EPSG:3395, whose units shrink with latitude
+	(4.4 cm at 64°N, about 5x the pixels; DT-1382).
+	"""
+	lon, lat = src.lnglat()
+	return get_utm_string_from_latlon(lat, lon)
+
+
+def _on_tcd_grid(src) -> bool:
+	"""True when ``src`` is already north-up at 0.1 m in its local UTM zone, so no copy is needed."""
+	transform = src.transform
+	return (
+		src.crs is not None
+		and src.crs == rasterio.crs.CRS.from_string(_tcd_grid(src))
+		and transform.b == 0
+		and transform.d == 0
+		and all(round(abs(res) / TCD_TARGET_RESOLUTION, 6) == 1 for res in src.res)
+	)
+
+
+def _tcd_input(input_tif: str, output_path: str) -> str:
+	"""The ortho on the TCD grid: ``input_tif`` itself when it already is, else a copy at ``output_path``."""
+	with rasterio.open(input_tif) as src:
+		if _on_tcd_grid(src):
+			return input_tif
+	return _reproject_orthomosaic_for_tcd(input_tif, output_path)
+
+
+def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
+	"""Reproject the orthomosaic to its local UTM zone at 0.1 m for TCD.
 
 	Args:
 		input_tif (str): Path to input orthomosaic
@@ -62,21 +86,21 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 		str: Path to reprojected file
 	"""
 	with rasterio.open(input_tif) as src:
-		# Calculate transform for EPSG:3395 at forced 10cm resolution
+		target_crs = _tcd_grid(src)
 		target_transform, target_width, target_height = rasterio.warp.calculate_default_transform(
 			src.crs,
-			TCD_TARGET_CRS,
+			target_crs,
 			src.width,
 			src.height,
 			*src.bounds,
-			resolution=TCD_TARGET_RESOLUTION,  # Force 10cm regardless of input resolution
+			resolution=TCD_TARGET_RESOLUTION,
 		)
 
 		# Create output profile
 		profile = src.profile.copy()
 		profile.update(
 			{
-				'crs': TCD_TARGET_CRS,
+				'crs': target_crs,
 				'transform': target_transform,
 				'width': target_width,
 				'height': target_height,
@@ -84,13 +108,13 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 				'BIGTIFF': 'YES',
 			}
 		)
-		# The copy is up to ~5x the ortho's pixels at high latitude. Lossless sources get a
-		# horizontal predictor, which makes the upsampled copy about 40% smaller with identical
-		# pixels (13390: a 34 GB ZSTD temp file, DT-1381); lossy ones keep their codec.
+		# Lossless sources get a horizontal predictor, which makes an upsampled copy about 40%
+		# smaller with identical pixels (13390: a 34 GB ZSTD temp file, DT-1381); lossy ones
+		# keep their codec.
 		if str(profile.get('compress') or '').lower() in LOSSLESS_CODECS:
 			profile.update(compress='zstd', predictor=2)
 
-		# Reproject the image to EPSG:3395. Warping in parallel gives the same pixels
+		# Reproject the image to the TCD grid. Warping in parallel gives the same pixels
 		# as a single thread (each output chunk is computed independently). All bands go
 		# in one pass: writing a compressed pixel-interleaved file band by band rewrites
 		# every tile once per band and left a 32 GB temp file for an 11 GB ortho (DT-1381).
@@ -102,7 +126,7 @@ def _reproject_orthomosaic_for_tcd(input_tif: str, output_path: str) -> str:
 				src_transform=src.transform,
 				src_crs=src.crs,
 				dst_transform=target_transform,
-				dst_crs=TCD_TARGET_CRS,
+				dst_crs=target_crs,
 				resampling=rasterio.warp.Resampling.bilinear,
 				num_threads=os.cpu_count() or 1,
 			)
@@ -114,7 +138,7 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 	"""
 	Tree cover prediction with the TCD SegFormer model, run in-process.
 
-	1. Preprocess: Reproject orthomosaic to EPSG:3395 at 10cm (TCD requires metric CRS, not degrees)
+	1. Preprocess: Bring the orthomosaic to 0.1 m in its local UTM zone (a copy only when it is not already)
 	2. Inference: Tile the reprojected ortho and write the tree confidence map (see tcd_inference)
 	3. Postprocess: Load confidence map, apply nodata mask, threshold, filter polygons
 	4. Storage: Convert to EPSG:4326 and save to v2_forest_cover_geometries via labels system
@@ -134,14 +158,15 @@ def predict_treecover(dataset_id: int, file_path: Path, user_id: str, token: str
 		temp_dir = tempfile.mkdtemp(prefix=f'treecover_{dataset_id}_')
 		temp_dir_path = Path(temp_dir)
 
-		# Step 1: Preprocess - reproject orthomosaic to EPSG:3395 for TCD
-		# This is necessary because TCD expects metric CRS, not geographic (degrees)
+		# Step 1: Preprocess - TCD runs on 0.1 m ground pixels in the ortho's local UTM zone
 		reprojected_temp_path = temp_dir_path / 'reprojected_orthomosaic.tif'
+		started = time.time()
+		reprojected_path = Path(_tcd_input(str(file_path), str(reprojected_temp_path)))
 		logger.info(
-			f'Reprojecting orthomosaic to EPSG:3395 for TCD: {file_path} -> {reprojected_temp_path}',
+			f'TCD input: {"reprojected copy" if reprojected_path == reprojected_temp_path else "ortho already on the grid"} '
+			f'in {time.time() - started:.0f} s',
 			LogContext(category=LogCategory.TREECOVER, token=token, dataset_id=dataset_id),
 		)
-		reprojected_path = Path(_reproject_orthomosaic_for_tcd(str(file_path), str(reprojected_temp_path)))
 
 		# Step 2: Inference - write the uint8 tree confidence map on the reprojected grid
 		confidence_map_path = temp_dir_path / 'confidence_map.tif'

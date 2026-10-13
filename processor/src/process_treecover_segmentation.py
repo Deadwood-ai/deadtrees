@@ -16,7 +16,7 @@ def process_treecover_segmentation(task: QueueTask, token: str, temp_dir: Path):
 	"""Process tree cover segmentation with the TCD SegFormer model.
 
 	1. Authentication and ortho file retrieval (following deadwood pattern)
-	2. Preprocessing: Reproject orthomosaic to EPSG:3395, 10cm resolution
+	2. Preprocessing: Bring the orthomosaic to 0.1 m in its local UTM zone
 	3. Inference: Run the TCD model in-process on the reprojected ortho
 	4. Postprocessing: Load confidence map, threshold, convert to polygons
 	5. Storage: Save results to v2_forest_cover_geometries via labels system

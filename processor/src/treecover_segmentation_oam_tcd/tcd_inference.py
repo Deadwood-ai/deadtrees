@@ -20,7 +20,7 @@ The port keeps the parts of the pipeline that shape the confidence map:
   tile) and later tiles overwrite earlier ones, row by row.
 
 The input must already be at the model's 0.1 m GSD (``predict_treecover``
-reprojects to EPSG:3395 at exactly that resolution), so the pipeline's
+brings it to 0.1 m in its local UTM zone), so the pipeline's
 blur-and-resize branch for other resolutions is not needed.
 """
 
@@ -290,8 +290,8 @@ def predict_confidence_map(
 
 		width, height = src.width, src.height
 		windows = tile_windows(width, height)
-		# Compressed: uncompressed, the map is one byte per pixel of a grid that EPSG:3395 inflates
-		# at high latitude (13380: about 47 GB) and it filled /data (DT-1381). Overlapping tiles
+		# Compressed: uncompressed, the map is one byte per pixel; on the former EPSG:3395 grid it
+		# reached about 47 GB at high latitude (13380) and it filled /data (DT-1381). Overlapping tiles
 		# are merged in a strip buffer and each finished row of blocks is written once, so no
 		# compressed block is rewritten.
 		profile = dict(
