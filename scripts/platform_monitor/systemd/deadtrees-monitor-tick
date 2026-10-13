@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# One DeadTrees monitor tick. Install as ~/.local/bin/deadtrees-monitor-tick on
+# the processing server; see docs/playbooks/operator-chat.md
+# ("Unattended 15-Minute Monitor").
+set -euo pipefail
+
+MON="${DEADTREES_MONITOR_CHECKOUT:-$HOME/dev/deadtrees-monitor}"
+PYTHON="${DEADTREES_MONITOR_PYTHON:-$HOME/dev/deadtrees/venv/bin/python}"
+
+mkdir -p "$HOME/.cache"
+exec 9>"$HOME/.cache/deadtrees-monitor.lock"
+flock -n 9 || { echo "another monitor tick is running; exiting"; exit 0; }
+
+# Always the current origin/main: an old checkout silently skips newer checks.
+git -C "$MON" fetch -q origin main
+git -C "$MON" checkout -q --detach origin/main
+
+# monitor.env holds the analyst DB login (mode 600); monitor-tick.env the
+# non-secret SSH aliases and the shadow settings.
+set -a
+# shellcheck disable=SC1091
+. "$HOME/.config/deadtrees/monitor.env"
+# shellcheck disable=SC1091
+. "$HOME/.config/deadtrees/monitor-tick.env"
+set +a
+export PYTHONDONTWRITEBYTECODE=1
+
+exec "$PYTHON" "$MON/scripts/platform_monitor/monitor_tick.py" \
+	--operator-dir "$HOME/dev/deadtrees/.local/operator" "$@"

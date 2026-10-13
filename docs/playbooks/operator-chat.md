@@ -47,8 +47,8 @@ this repo at the time this playbook was added:
 
 ### Monitoring Boundary
 
-An hourly platform monitor (pilot since 2026-09-30) runs the micro-check
-unattended; see [Unattended Hourly Monitor](#unattended-hourly-monitor). Other
+A 15-minute platform monitor runs the micro-check unattended; see
+[Unattended 15-Minute Monitor](#unattended-15-minute-monitor). Other
 agent operator threads are not continuous monitors.
 Treat this playbook as the procedure for a manual refresh, a scheduled wake-up,
 or an explicitly delegated check, and do not assume any other thread is running
@@ -84,7 +84,7 @@ tracked script contains no credentials:
 
 - `DEADTREES_OPERATOR_DATABASE_URL` for the `psql` summary. Use the
   purpose-specific monitor login, or the analyst URI where no monitor login is
-  provisioned (the hourly platform monitor does this).
+  provisioned (the 15-minute platform monitor does this).
 - `DEADTREES_OPERATOR_PROCESSING_HOST` for the existing primary processing host
   disk/container probe.
 - `DEADTREES_OPERATOR_PROCESSING_HOSTS` for additional labeled processor targets,
@@ -162,62 +162,63 @@ chat should identify candidate recording IDs or frustration clusters. Start a
 worker thread for recording review only when a concrete frontend pain signal is
 visible.
 
-#### Unattended Hourly Monitor
+#### Unattended 15-Minute Monitor
 
-A dedicated agent session on a processing host may run the micro-check on an
-hourly schedule. Linear is the source of truth for platform state and the
-coordinating operator thread triages what the monitor reports. The monitor
-records findings, it does not fix anything.
+A systemd user timer on the processing server runs
+`scripts/platform_monitor/monitor_tick.py` every 15 minutes (`:07`, `:22`,
+`:37`, `:52`). Linear is the source of truth for platform state. The monitor
+records findings; it never fixes anything. The unit templates and the host
+wrapper are in `scripts/platform_monitor/systemd/`.
+
+Each tick:
+
+1. Collects read-only facts at no token cost: `scripts/operator_status.py`
+   (API, database, every processor host in `DEADTREES_OPERATOR_PROCESSING_HOSTS`,
+   storage, backups), `scripts/data_factory_scorecard.py`, and
+   `scripts/platform_monitor/host_facts.py` (production deploy health, kernel OOM
+   kills in the prod processor's cgroup, the local GPU, worker liveness from the
+   queue, the public frontend).
+2. Turns them into fingerprinted findings (`dt-status/<surface>/<key>`) in
+   `scripts/platform_monitor/findings.py`, which owns the rules: container not
+   running, restarts, OOM, disks above 85 percent (helicon `/` above 97 percent
+   is red; storage `/` counts only above 90 percent between 23:30Z and 06:00Z),
+   stale backups, deploy pause, refusal, dirty checkout or a drain older than 12
+   hours, a silent worker, a failed GPU check and frontend errors. A failed probe
+   or frontend error counts only on two runs in a row and clears after two quiet
+   runs. A check that cannot run is a coverage gap, never green.
+3. Runs a read-only model call (`claude-haiku-5-5`) for what needs Janusch in
+   Linear, Gmail and Zulip (Zulip is read by the script) and for new PostHog
+   frontend errors in project 13440, which it selects first because the
+   connector's active project is shared. Its window advances only when every
+   source was read.
+4. Files the delta (new, changed, cleared) and new or spiking PostHog errors in
+   Linear with a second model call: one 🤖 Triage issue per fingerprint, then
+   comments on it. The baseline advances only after filing succeeded, so a
+   failed tick retries.
+5. Writes the digest to `~/.local/state/deadtrees-monitor/digest-latest.md`
+   (two days under `digests/`) and one line per tick to `ticks.jsonl`.
+
+A model result counts only when the session's own tool calls prove the reads
+or writes; a call that stops early is retried up to four times (efforts low,
+low, high, high). The tick runs `claude -p` with `MCP_CONNECTION_NONBLOCKING=false`
+so the claude.ai connectors are loaded first, parses stdout only, and prices
+Haiku 5.5 from its list price because Claude Code overstates it.
 
 Setup rules:
 
-- Run the scripts from a clean, detached worktree of `origin/main` that the run
-  refreshes first (`fetch` plus `checkout --detach origin/main`). Never run them
-  from a developer checkout that may be dirty or behind, because an old
-  `operator_status.py` silently ignores newer host probes.
+- The wrapper runs the scripts from a clean, detached worktree of `origin/main`
+  that each tick refreshes first. Never run them from a developer checkout that
+  may be dirty or behind.
 - Keep the DB login in a protected local env file (mode 600) outside the repo,
   holding the analyst role in both `DEADTREES_ANALYST_DATABASE_URL` and
-  `DEADTREES_OPERATOR_DATABASE_URL`. Source it inside the script's own shell.
-  Never print, read back, or copy it into tracked files, and never take
-  credentials from another tool's config. A denied DB or scorecard run is a
-  coverage gap, never "healthy".
-- Read the production checkout, never write to it. State and latest files live
-  under `.local/operator/` of a developer checkout.
-- Session schedules are not durable: they expire after a few days and end with
-  the session, so renew them and have a fallback for a host reboot.
-
-Each run adds these checks to the micro-check:
-
-- `scripts/operator_status.py` with every processor host in
-  `DEADTREES_OPERATOR_PROCESSING_HOSTS`, using its delta against the previous
-  state.
-- `scripts/data_factory_scorecard.py` for the Data Factory KPIs. Report KPI
-  changes to the coordinator only when meaningful: the north star (weekly
-  complete external results) moves, processing p50/p90 crosses the 1h target or
-  the 2h healthy line, or the share of uploads without a result within 7 days
-  rises.
-- Deploy health, read-only, on the production checkout: the tail of
-  `auto-deploy.log`, `git status --porcelain`, HEAD against `origin/main`, the
-  `processor-deploy-paused` marker, and
-  `scripts/processor_runtime_control.py status` for the drain and the active
-  task. Findings are a pause marker, an error or refusal in the log, a dirty
-  checkout, a drain older than about 12 hours, or no progress on the active task
-  for many hours. "Another processor runtime operation already holds
-  processor-runtime.lock" and "Worker still busy ... keeping the drain" are
-  normal while a deploy drains, so note them without filing.
-- Per processor host: container not running, an OOM kill, restarts, or disk
-  above about 85 percent.
-
-Known coverage gaps are listed once and reported only when they change: hosts
-that have not granted status access (the script reports `red` for a failed
-probe, so compute the effective verdict without a known gap) and Zulip.
-
-Reporting: file new, worsened, and recovered findings in Linear first (comment
-on an existing issue with the same fingerprint, create one only if none exists,
-cluster dataset failures under a parent, Urgent only for outages or user-facing
-blockage). Then send one compact message to the coordinator with the verdict,
-each change with its Linear id, and whether the next action is auto-fixable or
-needs a person. Send nothing when nothing changed.
+  `DEADTREES_OPERATOR_DATABASE_URL`. Non-secret settings (SSH aliases, the
+  shadow model) go in a second local env file. Never print or copy the login.
+- Read the production checkout, never write to it.
+- For a comparison, `DEADTREES_MONITOR_SHADOW_MODEL` and
+  `DEADTREES_MONITOR_SHADOW_UNTIL` rerun the inbox call read-only on a second
+  model in the first tick of each hour and log both results to `shadow.jsonl`.
+- `monitor_tick.py --dry-run` makes only the read-only call and writes no state
+  and no Linear change.
 
 ### Daily Full Check
 

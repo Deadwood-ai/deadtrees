@@ -130,7 +130,7 @@ full platform check inside that broader operator cadence.
    marker, and `scripts/processor_runtime_control.py status` for the drain and
    active task. A lock or "keeping the drain" message is normal while a deploy
    drains; a refusal, error, pause marker, or a drain older than about 12 hours
-   is a finding. See [operator-chat.md](operator-chat.md#unattended-hourly-monitor)
+   is a finding. See [operator-chat.md](operator-chat.md#unattended-15-minute-monitor)
    for the scheduled version.
 
 ## Database Queries
@@ -221,8 +221,8 @@ a pass read-only and list env key names, never values.
 
 ## Backup Checks
 
-The hourly platform monitor probes backup freshness (see
-[Operator Chat](operator-chat.md#unattended-hourly-monitor)). For a manual check,
+The 15-minute platform monitor probes backup freshness (see
+[Operator Chat](operator-chat.md#unattended-15-minute-monitor)). For a manual check,
 combine the live Borg freshness probe with a bounded Gmail alert search. See [`database-backups.md`](database-backups.md) for the
 backup architecture, success contract, validation, and rollback procedures.
 
