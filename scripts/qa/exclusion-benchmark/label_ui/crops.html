@@ -45,6 +45,11 @@ aside > #questions { grid-column: 1; grid-row: 1 / span 9; display: flex; flex-d
 .q.verdict { border-top: 1px solid var(--line); border-radius: 0 0 6px 6px; }
 .m { font-size: 11px; padding: 2px 4px; border-radius: 5px; min-width: 42px; text-align: center; color: var(--muted); }
 .m.flag { background: #6b2b26; color: #fff; }
+.models { grid-column: 2 / -1; display: flex; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+.models span { border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; color: var(--muted); cursor: help; }
+.models span.major { border-color: var(--yes); color: #ff9b92; }
+.models span.minor { border-color: var(--unsure); color: #e8c46a; }
+.models span.ok { border-color: var(--no); color: #7fd6a2; }
 details summary { cursor: pointer; color: var(--muted); }
 details p { color: var(--muted); margin: 6px 0; }
 textarea { width: 100%; background: #20262c; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px; font: inherit; }
@@ -97,7 +102,7 @@ const LAYERS = [
 ];
 const isVerdict = (k) => k.startsWith('v_');
 const layerOf = (k) => LAYERS.find((l) => l.keys.includes(k));
-const st = { crops: [], questions: {}, labels: {}, model: {}, cursor: 0, i: 0, z: { s: 1, x: 0, y: 0 }, size: [1024, 1024] };
+const st = { crops: [], questions: {}, labels: {}, model: {}, verdicts: {}, cursor: 0, i: 0, z: { s: 1, x: 0, y: 0 }, size: [1024, 1024] };
 // Rows in display order: the gate, then each layer block.
 const keys = () => [GATE, ...LAYERS.flatMap((l) => l.keys)].filter((k) => k in st.questions);
 const cur = () => st.crops[st.i];
@@ -157,10 +162,23 @@ function row(k, n) {
     b.onclick = () => set(k, val(a[k]) === v ? null : value);
     btns.append(b);
   }
-  const m = document.createElement('span'); m.className = 'm';
+  const m = document.createElement('span'); m.className = 'm'; m.title = 'Decisions: probability of yes';
   const p = ((st.model || {})[cur().id] || {})[k];
-  if (p !== undefined && p !== null && $('#showModel').checked) { m.textContent = `${Math.round(p * 100)}%`; if (p >= 0.7 && k !== GATE) m.classList.add('flag'); }
-  r.append(num, text, full, btns, m); return r;
+  if (p !== undefined && p !== null && !isVerdict(k) && $('#showModel').checked) { m.textContent = `${Math.round(p * 100)}%`; if (p >= 0.7 && k !== GATE) m.classList.add('flag'); }
+  r.append(num, text, full, btns, m);
+  const vs = (st.verdicts || {})[cur().id];
+  if (isVerdict(k) && vs && $('#showModel').checked) {
+    // Each model's verdict for this layer; hover shows the errors it named.
+    const layer = layerOf(k).name; const box = document.createElement('div'); box.className = 'models';
+    for (const [label, v] of Object.entries(vs)) {
+      const l = v[layer]; if (!l) continue;
+      const chip = document.createElement('span'); chip.className = l.verdict;
+      chip.textContent = `${label}: ${l.verdict} · ${Math.round(l.major_likelihood)}% major`;
+      chip.title = (l.errors || []).join('\n') || 'no errors named'; box.append(chip);
+    }
+    r.append(box);
+  }
+  return r;
 }
 function renderQuestions() {
   const ks = keys(); const active = layerOf(ks[st.cursor]);
@@ -235,7 +253,8 @@ let noteTimer;
 $('#note').addEventListener('input', () => { clearTimeout(noteTimer); noteTimer = setTimeout(() => { const l = structuredClone(lab()); l.note = $('#note').value; st.labels[cur().id] = l; save(); }, 500); });
 $('#prev').onclick = () => move(-1); $('#next').onclick = () => move(1); $('#nextOpen').onclick = nextOpen;
 $('#nothing').onclick = nothing; $('#done').onclick = finish; $('#unclear').onclick = unclear;
-$('#showModel').onchange = renderQuestions;
+$('#showModel').onchange = () => { try { localStorage.setItem('showModel', $('#showModel').checked ? '1' : '0'); } catch (e) { /* storage blocked */ }
+  $('#showModel').blur(); renderQuestions(); };
 function answer(j) {
   // Answer the row under the cursor with option j (0, 1, 2), then go to the next open row
   // (answered rows are skipped); when the crop is complete, go to the next open crop.
@@ -274,8 +293,9 @@ document.querySelectorAll('.panel').forEach((pnl) => {
 });
 window.addEventListener('resize', fit);
 fetch('/api/crops').then((r) => r.json()).then((d) => {
-  st.crops = d.crops; st.questions = d.questions; st.labels = d.labels; st.model = d.model || {};
-  $('#showModel').checked = Object.keys(st.model).length > 0;
+  st.crops = d.crops; st.questions = d.questions; st.labels = d.labels; st.model = d.model || {}; st.verdicts = d.verdicts || {};
+  // Off by default so labeling stays blind; the choice is remembered in this browser.
+  try { $('#showModel').checked = localStorage.getItem('showModel') === '1'; } catch (e) { /* storage blocked */ }
   const want = new URLSearchParams(location.search).get('crop');
   const open = st.crops.findIndex((c) => !done(c));
   st.i = want ? Math.max(0, st.crops.findIndex((c) => c.id === want)) : Math.max(0, open);

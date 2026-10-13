@@ -19,6 +19,7 @@ from score_benchmark import truth
 QUESTIONS = PREDICATES['icl']  # overridden by --questions
 UI = Path(__file__).parent / 'label_ui' / 'crops.html'
 MODEL_RUN = 'decisions-crop-test-tuned1-strict'
+VERDICT_RUNS = {}  # label -> run folder with per-layer verdicts (sol_verdicts.py), shown on the verdict rows
 SIZES = ('<10', '10-20', '20-50', '>50')  # rough error size per yes answer, in % of the layer (gold7)
 ANSWERS = (True, False, None, 'unsure')
 VERDICTS = ('ok', 'minor', 'major', None)  # per-layer verdict questions (v_*), gold9
@@ -110,15 +111,20 @@ def make_handler(root, crops, store):
             if path == '/':
                 return self.send(200, 'text/html; charset=utf-8', UI.read_bytes())
             if path == '/api/crops':
-                # Model answers (tuned questions, strict context) shown next to the reviewer's buttons.
-                model = {}
+                # Model answers shown next to the reviewer's buttons: Decisions probabilities per
+                # question, and each verdict run's per-layer verdict, likelihood and named errors.
+                model, verdicts = {}, {}
                 for c in crops:
                     f = root / 'runs' / MODEL_RUN / f"{c['id']}.json"
                     if f.exists():
                         model[c['id']] = json.loads(f.read_text())['answers']
+                    for label, run in VERDICT_RUNS.items():
+                        f = root / 'runs' / run / f"{c['id']}.json"
+                        if f.exists():
+                            verdicts.setdefault(c['id'], {})[label] = json.loads(f.read_text())['result']
                 return self.send(200, 'application/json', json.dumps(
-                    {'crops': crops, 'questions': QUESTIONS, 'model_questions': QUESTIONS if MODEL_RUN.endswith('gold7') else PREDICATES['tuned1'],
-                     'model': model, 'labels': store.all()}).encode())
+                    {'crops': crops, 'questions': QUESTIONS, 'model': model, 'verdicts': verdicts,
+                     'labels': store.all()}).encode())
             name = path.removeprefix('/files/')
             if path.startswith('/files/') and name in files:
                 kind = 'image/jpeg' if name.endswith('.jpg') else 'image/png'
@@ -155,8 +161,10 @@ if __name__ == '__main__':
     p.add_argument('--crops-file', default='crop-test.json')
     p.add_argument('--db', default='crop-labels.sqlite3')
     p.add_argument('--questions', default='icl')
-    p.add_argument('--model-run', default=None, help='run folder whose answers are shown next to the buttons')
+    p.add_argument('--model-run', default=None, help='Decisions run folder whose answers are shown next to the buttons')
+    p.add_argument('--verdict-runs', nargs='*', default=[], help='label=run folder pairs with per-layer verdicts')
     a = p.parse_args()
+    VERDICT_RUNS.update(v.split('=', 1) for v in a.verdict_runs)
     QUESTIONS = PREDICATES[a.questions]
     if a.model_run is not None:
         MODEL_RUN = a.model_run
