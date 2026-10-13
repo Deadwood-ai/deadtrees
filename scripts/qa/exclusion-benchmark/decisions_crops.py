@@ -115,6 +115,23 @@ PREDICATES = {
         # Added 9 Oct (Janusch): standing dead trees belong to forest cover too.
         'm8_dead_not_forest': 'Dead trees left out of forest: standing dead trees (often marked blue) have no gold, so the forest layer has holes where dead trees stand.',
     },
+    # gold9 (13 Oct, Janusch): one block per layer, the artifact split per layer, and a
+    # per-layer verdict question. The labeler answers the verdicts with ok / minor / major;
+    # for the models they are yes/no "major" questions.
+    'gold9': {
+        'm0_assessable': 'This crop can be judged: the image is sharp enough and the trees or ground are clearly visible.',
+        'm1_dead_missed': 'Dead trees missed: clearly visible standing dead or dying trees (grey, white, burnt or brown), or large dead parts of crowns, have no blue.',
+        'm2_dw_on_live_vegetation': 'Live vegetation marked dead: blue covers living trees, shrubs, grass or crops with green or coloured foliage.',
+        'm3_dw_on_non_vegetation': 'Non-vegetation marked dead: blue covers ground, rock, roads, roofs, water, snow or deep shadow.',
+        'm4_dw_on_lying_wood': 'Lying wood marked dead: blue covers lying trunks, logs or debris on the ground.',
+        'm7_dw_artifact': 'Processing artifact in the deadwood layer: straight tile seams, rectangular holes or blocks, or the blue cut off or missing.',
+        'v_deadwood': 'Major deadwood error: all deadwood errors in this crop together would noticeably bias the deadwood cover of the satellite product, so this deadwood prediction should be excluded here.',
+        'm5_fc_trees_missed': 'Trees missed: clearly visible tree canopy has no gold.',
+        'm6_fc_on_non_trees': 'Non-trees marked as forest: gold covers shrubs, crops, grass, bare ground or roofs, or fills open gaps between crowns.',
+        'm8_dead_not_forest': 'Dead trees left out of forest: standing dead trees (often marked blue) have no gold, so the forest layer has holes where dead trees stand.',
+        'm7_fc_artifact': 'Processing artifact in the forest layer: straight tile seams, rectangular holes or blocks, or the gold cut off or missing.',
+        'v_forest': 'Major forest error: all forest errors in this crop together would noticeably bias the forest cover of the satellite product, so this forest prediction should be excluded here.',
+    },
     # Perception check: can it even see the overlays? Truth is the rendered mask itself.
     'perception': {
         'any_blue': 'Image 2 contains blue overlay polygons anywhere.',

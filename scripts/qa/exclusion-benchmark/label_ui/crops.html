@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Crop labels</title>
 <style>
-:root { --bg: #111417; --panel: #1b2025; --line: #2e353c; --text: #e6e9ec; --muted: #9aa4ad; --yes: #d0473c; --no: #2f9e5b; --unsure: #c99a2e; --accent: #4b8fe0; }
+:root { --bg: #111417; --panel: #1b2025; --line: #2e353c; --text: #e6e9ec; --muted: #9aa4ad; --yes: #d0473c; --no: #2f9e5b; --unsure: #c99a2e; --accent: #4b8fe0; --blue: #4b8fe0; --gold: #d4b13a; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.35 system-ui, sans-serif; height: 100vh; display: flex; flex-direction: column; }
 header { display: flex; gap: 10px; align-items: center; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
@@ -15,30 +15,34 @@ button.big { padding: 10px; font-weight: 600; width: 100%; }
 button.ok { background: var(--no); border-color: var(--no); }
 main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 #panels { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px; min-height: 0; }
-.panel { position: relative; overflow: hidden; background: #000; cursor: grab; }
+.panel { position: relative; overflow: hidden; background: #000; cursor: grab; border: 3px solid transparent; transition: opacity .15s; }
+.panel.active[data-layer=deadwood] { border-color: var(--blue); }
+.panel.active[data-layer=forest] { border-color: var(--gold); }
+.panel.dim { opacity: .35; }
 .panel .cap { position: absolute; left: 6px; top: 4px; z-index: 2; background: rgba(0,0,0,.7); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
 .panel .inner { position: absolute; transform-origin: 0 0; }
 .panel img { position: absolute; left: 0; top: 0; user-select: none; -webkit-user-drag: none; }
-aside { flex: 0 0 auto; max-height: 42vh; overflow-y: auto; padding: 6px 10px; background: var(--panel); border-top: 1px solid var(--line); display: grid; grid-template-columns: 1fr 260px; gap: 4px 14px; }
+aside { flex: 0 0 auto; max-height: 48vh; overflow-y: auto; padding: 6px 10px; background: var(--panel); border-top: 1px solid var(--line); display: grid; grid-template-columns: 1fr 260px; gap: 4px 14px; }
 aside > * { grid-column: 2; }
-aside > #questions { grid-column: 1; grid-row: 1 / span 9; }
-.q { display: grid; grid-template-columns: 18px 200px 1fr auto 260px 46px; gap: 8px; align-items: center; padding: 3px 6px; border-radius: 6px; }
+aside > #questions { grid-column: 1; grid-row: 1 / span 9; display: flex; flex-direction: column; gap: 4px; }
+.block { border: 1px solid var(--line); border-radius: 8px; padding: 2px 0; }
+.block.active[data-layer=deadwood] { border-color: var(--blue); }
+.block.active[data-layer=forest] { border-color: var(--gold); }
+.block h3 { margin: 2px 8px; font-size: 12px; letter-spacing: .06em; color: var(--muted); }
+.block.active h3 { color: var(--text); }
+.q { display: grid; grid-template-columns: 18px 200px 1fr auto 46px; gap: 8px; align-items: center; padding: 3px 6px; border-radius: 6px; }
 .q.cursor { background: #263240; outline: 1px solid var(--accent); }
-.q.sizing { outline: 2px solid var(--unsure); }
-.sz { display: flex; gap: 3px; }
-.sz span { border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; cursor: pointer; user-select: none; font-size: 12px; color: var(--muted); white-space: nowrap; }
-.sz span.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-.q.sizing .sz span { color: var(--text); border-color: var(--unsure); }
 .q .full { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .q .n { color: var(--muted); font-size: 12px; }
 .q .lab { font-weight: 600; }
 .q .btns { display: flex; gap: 3px; }
-.q .btns span { border: 1px solid var(--line); border-radius: 5px; padding: 2px 8px; cursor: pointer; user-select: none; font-size: 13px; }
-.q .btns span.on[data-v=yes] { background: var(--yes); border-color: var(--yes); }
-.q .btns span.on[data-v=no] { background: var(--no); border-color: var(--no); }
-.q .btns span.on[data-v=unsure] { background: var(--unsure); border-color: var(--unsure); }
+.q .btns span { border: 1px solid var(--line); border-radius: 5px; padding: 2px 8px; cursor: pointer; user-select: none; font-size: 13px; white-space: nowrap; }
+.q .btns span.on[data-v=yes], .q .btns span.on[data-v=major] { background: var(--yes); border-color: var(--yes); }
+.q .btns span.on[data-v=no], .q .btns span.on[data-v=ok] { background: var(--no); border-color: var(--no); }
+.q .btns span.on[data-v=unsure], .q .btns span.on[data-v=minor] { background: var(--unsure); border-color: var(--unsure); }
 .q.gate .btns span.on[data-v=yes] { background: var(--no); border-color: var(--no); }
 .q.gate .btns span.on[data-v=no] { background: var(--yes); border-color: var(--yes); }
+.q.verdict { border-top: 1px solid var(--line); border-radius: 0 0 6px 6px; }
 .m { font-size: 11px; padding: 2px 4px; border-radius: 5px; min-width: 42px; text-align: center; color: var(--muted); }
 .m.flag { background: #6b2b26; color: #fff; }
 details summary { cursor: pointer; color: var(--muted); }
@@ -54,55 +58,52 @@ kbd { background: #2a3138; border: 1px solid var(--line); border-radius: 4px; pa
   <button id="nextOpen" title="Next crop without a full answer (Tab)">Next open <kbd>Tab</kbd></button>
   <span id="meta" class="muted"></span>
   <label class="muted"><input type="checkbox" id="showModel"> model answers</label>
-  <label class="muted" title="Step only through yes answers that have no size yet"><input type="checkbox" id="sizePass"> size pass</label>
   <span id="progress" class="muted" style="margin-left:auto"></span>
 </header>
 <main>
   <section id="panels">
-    <div class="panel"><span class="cap">Raw</span><div class="inner"></div></div>
-    <div class="panel"><span class="cap">Deadwood (blue)</span><div class="inner"></div></div>
-    <div class="panel"><span class="cap">Forest (gold)</span><div class="inner"></div></div>
+    <div class="panel" data-layer="raw"><span class="cap">Raw</span><div class="inner"></div></div>
+    <div class="panel" data-layer="deadwood"><span class="cap">Deadwood (blue)</span><div class="inner"></div></div>
+    <div class="panel" data-layer="forest"><span class="cap">Forest (gold)</span><div class="inner"></div></div>
   </section>
   <aside>
-    <button class="big ok" id="nothing" title="Judgeable, no substantial problem; then next open crop">✓ Nothing wrong → next <kbd>Space</kbd></button>
+    <button class="big ok" id="nothing" title="Judgeable, both layers fine; then next open crop">✓ Whole crop fine → next</button>
     <div id="questions"></div>
     <button class="big" id="done" title="Unanswered problems count as No; then next open crop">Save, rest = No → next <kbd>Enter</kbd></button>
     <button id="unclear" title="Can't judge this crop; then next open crop">Can't tell what this shows <kbd>c</kbd></button>
     <textarea id="note" rows="2" placeholder="Optional note"></textarea>
     <p id="status"></p>
-    <p class="muted" style="margin:0"><kbd>1</kbd> yes · <kbd>2</kbd> no · <kbd>3</kbd> don't know · after yes, size <kbd>1</kbd>–<kbd>4</kbd> (<kbd>Esc</kbd> skip) · <kbd>Space</kbd> nothing wrong · <kbd>Enter</kbd> rest no · <kbd>c</kbd> can't tell</p>
+    <p class="muted" style="margin:0"><kbd>1</kbd> yes · <kbd>2</kbd> no · <kbd>3</kbd> don't know · verdict <kbd>1</kbd> OK · <kbd>2</kbd> minor · <kbd>3</kbd> major · <kbd>Space</kbd> this layer fine · <kbd>Enter</kbd> rest no · <kbd>c</kbd> can't tell</p>
     <details><summary>Rules and keys</summary>
-      <p>Answer yes for any clear error, then give its rough size: <kbd>1</kbd> under 10%, <kbd>2</kbd> 10–20%, <kbd>3</kbd> 20–50%, <kbd>4</kbd> over 50%. Size is a share of the layer: for "missed" rows, of what should be marked (e.g. how much of the dead trees has no blue); for "wrong" rows, of what is marked (e.g. how much of the blue is wrong); for artifacts, of the crop. Lying wood is never deadwood. Hover a question for its full wording.</p>
-      <p>Work top to bottom on the highlighted row: <kbd>1</kbd> yes, <kbd>2</kbd> no, <kbd>3</kbd> don't know (y / n / ? also work); it moves down and after the last row goes to the next crop. <kbd>↑</kbd>/<kbd>↓</kbd> or a click pick a row. <kbd>Space</kbd> nothing wrong, next. <kbd>Enter</kbd> remaining = no, next. <kbd>c</kbd> can't tell. Tick "size pass" to step only through yes answers that still need a size. <kbd>Tab</kbd> next open crop, <kbd>←</kbd>/<kbd>→</kbd> previous/next. Wheel and drag zoom, double-click resets.</p>
+      <p>Each layer has its own block: tag every error you see (yes for any clear error, however small), then give the verdict for the satellite product. <b>OK</b>: no relevant error. <b>Minor, keep</b>: errors exist but would not noticeably change the satellite cover here. <b>Major, exclude</b>: all errors in this layer together would noticeably bias the satellite cover here. Lying wood is never deadwood; standing dead trees are forest.</p>
+      <p>Work top to bottom: <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> answer the highlighted row and move down; after the last row it goes to the next crop. <kbd>Space</kbd> marks the current layer fine (all no, verdict OK) and jumps to the next block. <kbd>↑</kbd>/<kbd>↓</kbd> or a click pick a row. <kbd>Enter</kbd> remaining questions = no (a layer without any yes also gets OK), next. <kbd>c</kbd> can't tell. <kbd>Tab</kbd> next open crop, <kbd>←</kbd>/<kbd>→</kbd> previous/next. Wheel and drag zoom, double-click resets.</p>
     </details>
   </aside>
 </main>
 <script>
 const $ = (s) => document.querySelector(s);
 const SHORT = {
-  m0_assessable: 'Crop can be judged', m1_dead_missed: 'Dead trees missed', m2_dw_on_live_vegetation: 'Blue on live vegetation',
-  m3_dw_on_non_vegetation: 'Blue on ground / water / roofs', m4_dw_on_lying_wood: 'Blue on lying wood',
-  m5_fc_trees_missed: 'Trees missed (no gold)', m6_fc_on_non_trees: 'Gold on non-trees', m7_artifact: 'Tile / processing artifact', m8_dead_not_forest: 'Dead trees not in forest',
-  dw_co_remove: 'Would remove blue', dw_co_most_wrong: 'Most blue wrong', dw_co_lying: 'Blue on lying wood',
-  dw_om_blue_smaller: 'Blue smaller than dead crowns', dw_om_grey_unmarked: 'Grey dead unmarked', dw_om_partial: 'Partial crowns',
-  fc_om_add: 'Would add gold', fc_co_remove: 'Would remove gold',
+  m0_assessable: 'Crop can be judged',
+  m1_dead_missed: 'Dead trees missed', m2_dw_on_live_vegetation: 'Blue on live vegetation', m3_dw_on_non_vegetation: 'Blue on ground / water / roofs',
+  m4_dw_on_lying_wood: 'Blue on lying wood', m7_dw_artifact: 'Artifact in deadwood', v_deadwood: 'Deadwood verdict',
+  m5_fc_trees_missed: 'Trees missed (no gold)', m6_fc_on_non_trees: 'Gold on non-trees', m8_dead_not_forest: 'Dead trees not in forest',
+  m7_fc_artifact: 'Artifact in forest', v_forest: 'Forest verdict',
 };
+const VERDICT_TEXT = 'For the satellite product: OK, minor errors (keep), or major errors (exclude)?';
 const GATE = 'm0_assessable';
-const SIZES = ['<10', '10-20', '20-50', '>50'];
-const SIZE_LABEL = { '<10': '<10%', '10-20': '10–20', '20-50': '20–50', '>50': '>50%' };
-const SIZE_OF = {
-  m1_dead_missed: 'share of the dead trees without blue', m2_dw_on_live_vegetation: 'share of the blue that is on live vegetation',
-  m3_dw_on_non_vegetation: 'share of the blue that is on ground, water or roofs', m4_dw_on_lying_wood: 'share of the blue that is on lying wood',
-  m5_fc_trees_missed: 'share of the tree canopy without gold', m6_fc_on_non_trees: 'share of the gold that is on non-trees',
-  m7_artifact: 'share of the crop affected', m8_dead_not_forest: 'share of the dead trees without gold',
-};
-const st = { crops: [], questions: {}, labels: {}, model: {}, cursor: 0, sizing: null, i: 0, z: { s: 1, x: 0, y: 0 }, size: [1024, 1024] };
-const keys = () => Object.keys(st.questions);
+const LAYERS = [
+  { name: 'deadwood', title: 'DEADWOOD (blue)', keys: ['m1_dead_missed', 'm2_dw_on_live_vegetation', 'm3_dw_on_non_vegetation', 'm4_dw_on_lying_wood', 'm7_dw_artifact', 'v_deadwood'] },
+  { name: 'forest', title: 'FOREST (gold)', keys: ['m5_fc_trees_missed', 'm6_fc_on_non_trees', 'm8_dead_not_forest', 'm7_fc_artifact', 'v_forest'] },
+];
+const isVerdict = (k) => k.startsWith('v_');
+const layerOf = (k) => LAYERS.find((l) => l.keys.includes(k));
+const st = { crops: [], questions: {}, labels: {}, model: {}, cursor: 0, i: 0, z: { s: 1, x: 0, y: 0 }, size: [1024, 1024] };
+// Rows in display order: the gate, then each layer block.
+const keys = () => [GATE, ...LAYERS.flatMap((l) => l.keys)].filter((k) => k in st.questions);
 const cur = () => st.crops[st.i];
 const lab = (c = cur()) => ({ answers: {}, sizes: {}, note: '', ...(st.labels[c.id] || {}) });
-const val = (v) => (v === true ? 'yes' : v === false ? 'no' : v === 'unsure' ? 'unsure' : null);
-const unsized = (c) => { const l = lab(c); return keys().filter((k) => k !== GATE && l.answers[k] === true && !l.sizes[k]); };
-const done = (c) => { const a = lab(c).answers; return keys().every((k) => val(a[k]) !== null) || a[GATE] === false; };
+const val = (v) => (v === true ? 'yes' : v === false ? 'no' : v === 'unsure' ? 'unsure' : ['ok', 'minor', 'major'].includes(v) ? v : null);
+const done = (c) => { const a = lab(c).answers; return a[GATE] === false || keys().every((k) => val(a[k]) !== null); };
 const src = (c, s) => `/files/${c.prefix || `datasets/${c.dataset_id}/${c.view}-`}${s}`;
 
 function renderPanels() {
@@ -123,46 +124,56 @@ function fit() {
 }
 function apply() { document.querySelectorAll('.panel .inner').forEach((el) => { el.style.transform = `translate(${st.z.x}px,${st.z.y}px) scale(${st.z.s})`; }); }
 
-function renderQuestions() {
+function row(k, n) {
   const a = lab().answers;
-  $('#questions').replaceChildren(...keys().map((k, n) => {
-    const row = document.createElement('div'); row.className = 'q' + (k === GATE ? ' gate' : '') + (n === st.cursor ? ' cursor' : '') + (k === st.sizing ? ' sizing' : '');
-    row.onclick = (e) => { if (!e.target.closest('.btns')) { st.cursor = n; renderQuestions(); } };
-    const num = document.createElement('span'); num.className = 'n'; num.textContent = n + 1;
-    const text = document.createElement('span'); text.className = 'lab'; text.textContent = SHORT[k] || `Q${n + 1}`;
-    const full = document.createElement('span'); full.className = 'full'; full.title = st.questions[k];
-    full.textContent = k === st.sizing ? `Size: ${SIZE_OF[k] || 'share of the layer'}?` : st.questions[k];
-    if (k === st.sizing) full.style.color = 'var(--text)';
-    const btns = document.createElement('span'); btns.className = 'btns';
-    for (const v of ['yes', 'unsure', 'no']) {
-      const b = document.createElement('span'); b.dataset.v = v; b.textContent = { yes: 'Yes', no: 'No', unsure: '?' }[v];
-      if (val(a[k]) === v) b.classList.add('on');
-      b.onclick = () => set(k, val(a[k]) === v ? null : { yes: true, no: false, unsure: 'unsure' }[v]);
-      btns.append(b);
-    }
-    const sz = document.createElement('span'); sz.className = 'sz';
-    if (k !== GATE && a[k] === true) {
-      sz.title = SIZE_OF[k] || 'share of the layer';
-      SIZES.forEach((v, j) => { const b = document.createElement('span'); b.textContent = k === st.sizing ? `${j + 1} ${SIZE_LABEL[v]}` : SIZE_LABEL[v];
-        if (lab().sizes[k] === v) b.classList.add('on'); b.onclick = () => setSize(k, lab().sizes[k] === v ? null : v); sz.append(b); });
-    }
-    const m = document.createElement('span'); m.className = 'm';
-    const p = ((st.model || {})[cur().id] || {})[k];
-    if (p !== undefined && p !== null && $('#showModel').checked) { m.textContent = `${Math.round(p * 100)}%`; if (p >= 0.7 && k !== GATE) m.classList.add('flag'); }
-    row.append(num, text, full, btns, sz, m); return row;
-  }));
+  const r = document.createElement('div');
+  r.className = 'q' + (k === GATE ? ' gate' : '') + (isVerdict(k) ? ' verdict' : '') + (n === st.cursor ? ' cursor' : '');
+  r.onclick = (e) => { if (!e.target.closest('.btns')) { st.cursor = n; renderQuestions(); } };
+  const num = document.createElement('span'); num.className = 'n'; num.textContent = n + 1;
+  const text = document.createElement('span'); text.className = 'lab'; text.textContent = SHORT[k] || k;
+  const full = document.createElement('span'); full.className = 'full'; full.title = st.questions[k];
+  full.textContent = isVerdict(k) ? VERDICT_TEXT : st.questions[k];
+  const btns = document.createElement('span'); btns.className = 'btns';
+  const options = isVerdict(k) ? [['ok', 'OK', 'ok'], ['minor', 'Minor, keep', 'minor'], ['major', 'Major, exclude', 'major']]
+    : [['yes', 'Yes', true], ['unsure', '?', 'unsure'], ['no', 'No', false]];
+  for (const [v, label, value] of options) {
+    const b = document.createElement('span'); b.dataset.v = v; b.textContent = label;
+    if (val(a[k]) === v) b.classList.add('on');
+    b.onclick = () => set(k, val(a[k]) === v ? null : value);
+    btns.append(b);
+  }
+  const m = document.createElement('span'); m.className = 'm';
+  const p = ((st.model || {})[cur().id] || {})[k];
+  if (p !== undefined && p !== null && $('#showModel').checked) { m.textContent = `${Math.round(p * 100)}%`; if (p >= 0.7 && k !== GATE) m.classList.add('flag'); }
+  r.append(num, text, full, btns, m); return r;
+}
+function renderQuestions() {
+  const ks = keys(); const active = layerOf(ks[st.cursor]);
+  const parts = [row(GATE, ks.indexOf(GATE))];
+  for (const l of LAYERS) {
+    const block = document.createElement('div'); block.className = 'block' + (active === l ? ' active' : ''); block.dataset.layer = l.name;
+    const h = document.createElement('h3'); h.textContent = l.title; block.append(h);
+    l.keys.filter((k) => k in st.questions).forEach((k) => block.append(row(k, ks.indexOf(k))));
+    parts.push(block);
+  }
+  $('#questions').replaceChildren(...parts);
+  document.querySelectorAll('.panel').forEach((p) => {
+    p.classList.toggle('active', !!active && p.dataset.layer === active.name);
+    p.classList.toggle('dim', !!active && p.dataset.layer !== 'raw' && p.dataset.layer !== active.name);
+  });
   if (document.activeElement !== $('#note')) $('#note').value = lab().note || '';
 }
 function render() {
   const c = cur();
   const a = lab(c).answers;
-  st.cursor = Math.max(0, keys().findIndex((k) => val(a[k]) === null)); st.sizing = null;
-  if (st.sizePass && unsized(c).length) { st.sizing = unsized(c)[0]; st.cursor = keys().indexOf(st.sizing); }
+  st.cursor = Math.max(0, keys().findIndex((k) => val(a[k]) === null));
   $('#pos').textContent = `${st.i + 1} / ${st.crops.length}`;
   $('#meta').textContent = `Dataset ${c.dataset_id} · ${(c.mpp * 100).toFixed(1)} cm/px${c.source ? ` · ${c.source}` : ''}`;
-  progress();
   history.replaceState(null, '', `?crop=${c.id}`);
-  renderPanels(); renderQuestions();
+  progress(); renderPanels(); renderQuestions();
+}
+function progress() {
+  $('#progress').textContent = `${st.crops.filter(done).length} of ${st.crops.length} done`;
 }
 async function save(c = cur()) {
   const l = lab(c);
@@ -171,30 +182,31 @@ async function save(c = cur()) {
   $('#status').textContent = r.ok ? `Saved ${new Date().toLocaleTimeString()}` : 'Save failed; your answer is kept in this page';
   progress();
 }
-function progress() {
-  const left = st.crops.reduce((n, c) => n + unsized(c).length, 0);
-  $('#progress').textContent = `${st.crops.filter(done).length} of ${st.crops.length} done · ${left} yes without size`;
-}
 function update(change, advance) {
-  const c = cur(); const l = structuredClone(lab(c)); change(l.answers);
-  Object.keys(l.sizes).forEach((k) => { if (l.answers[k] !== true) delete l.sizes[k]; }); st.labels[c.id] = l;
+  const c = cur(); const l = structuredClone(lab(c)); change(l.answers); st.labels[c.id] = l;
   save(c);
   if (advance) nextOpen(); else renderQuestions();
 }
 const set = (k, v) => update((a) => { if (v === null) delete a[k]; else a[k] = v; });
-function setSize(k, v) {
-  const c = cur(); const l = structuredClone(lab(c)); if (v === null) delete l.sizes[k]; else l.sizes[k] = v; st.labels[c.id] = l;
-  save(c); renderQuestions();
+// A layer without any yes is OK unless a verdict was already given.
+const layerRest = (a, l) => { l.keys.forEach((k) => { if (a[k] === undefined && !isVerdict(k)) a[k] = false; });
+  const v = l.keys.find(isVerdict); if (a[v] === undefined && !l.keys.some((k) => a[k] === true)) a[v] = 'ok'; };
+const nothing = () => update((a) => { a[GATE] = true; LAYERS.forEach((l) => l.keys.forEach((k) => { a[k] = isVerdict(k) ? 'ok' : false; })); }, true);
+function finish() {
+  // Remaining questions = no; a layer with a yes still needs its verdict, so stay on it.
+  update((a) => { if (a[GATE] === undefined) a[GATE] = true; LAYERS.forEach((l) => layerRest(a, l)); });
+  if (done(cur())) return nextOpen();
+  st.cursor = keys().findIndex((x) => val(lab().answers[x]) === null); renderQuestions();
 }
-const rest = (a, gate) => { if (GATE in st.questions && a[GATE] === undefined) a[GATE] = gate; keys().forEach((k) => { if (a[k] === undefined) a[k] = false; }); };
-const nothing = () => update((a) => { keys().forEach((k) => { a[k] = k === GATE ? true : false; }); }, true);
-const finish = () => update((a) => rest(a, true), true);
-const unclear = () => update((a) => { keys().forEach((k) => { a[k] = k === GATE ? false : 'unsure'; }); }, true);
+const unclear = () => update((a) => { keys().forEach((k) => { if (isVerdict(k)) delete a[k]; else a[k] = k === GATE ? false : 'unsure'; }); }, true);
+function layerFine() {
+  // Mark the layer under the cursor fine (all no, verdict OK) and jump to the next block or crop.
+  const ks = keys(); const l = layerOf(ks[st.cursor]) || LAYERS[0];
+  update((a) => { if (a[GATE] === undefined) a[GATE] = true; l.keys.forEach((k) => { a[k] = isVerdict(k) ? 'ok' : false; }); });
+  const next = LAYERS[LAYERS.indexOf(l) + 1];
+  if (next) { st.cursor = ks.indexOf(next.keys[0]); renderQuestions(); } else nextOpen();
+}
 function nextOpen() {
-  if (st.sizePass) {
-    for (let d = 1; d <= st.crops.length; d++) { const j = (st.i + d) % st.crops.length; if (unsized(st.crops[j]).length) { st.i = j; return render(); } }
-    $('#status').textContent = 'Every yes has a size.'; st.sizePass = false; $('#sizePass').checked = false;
-  }
   for (let d = 1; d <= st.crops.length; d++) { const j = (st.i + d) % st.crops.length; if (!done(st.crops[j])) { st.i = j; return render(); } }
   $('#status').textContent = 'All crops answered.'; render();
 }
@@ -204,42 +216,27 @@ $('#note').addEventListener('input', () => { clearTimeout(noteTimer); noteTimer 
 $('#prev').onclick = () => move(-1); $('#next').onclick = () => move(1); $('#nextOpen').onclick = nextOpen;
 $('#nothing').onclick = nothing; $('#done').onclick = finish; $('#unclear').onclick = unclear;
 $('#showModel').onchange = renderQuestions;
-$('#sizePass').onchange = () => { st.sizePass = $('#sizePass').checked; $('#sizePass').blur(); if (st.sizePass && !unsized(cur()).length) nextOpen(); else render(); };
-function down() {
-  // Move to the next row; after the last one go to the next open crop. The size pass jumps to the next unsized yes.
-  st.sizing = null;
-  if (st.sizePass) {
-    const rest = unsized(cur()).filter((k) => keys().indexOf(k) > st.cursor);
-    if (!rest.length) return nextOpen();
-    st.sizing = rest[0]; st.cursor = keys().indexOf(rest[0]); return renderQuestions();
-  }
-  if (st.cursor >= keys().length - 1) return nextOpen();
-  st.cursor += 1; renderQuestions();
-}
-function answer(v) {
-  // Answer the question under the cursor. A yes on a problem row asks for its size first.
-  const k = keys()[st.cursor];
+function answer(j) {
+  // Answer the row under the cursor with option j (0, 1, 2), then go to the next open row
+  // (answered rows are skipped); when the crop is complete, go to the next open crop.
+  const ks = keys(); const k = ks[st.cursor];
+  const v = isVerdict(k) ? ['ok', 'minor', 'major'][j] : [true, false, 'unsure'][j];
   if (k === GATE && v === false) return unclear();
   update((a) => { a[k] = v; });
-  if (v === true && k !== GATE) { st.sizing = k; renderQuestions(); } else down();
+  if (done(cur())) return nextOpen();
+  const a = lab().answers; const open = (x) => val(a[x]) === null;
+  const after = ks.findIndex((x, n) => n > st.cursor && open(x));
+  st.cursor = after >= 0 ? after : ks.findIndex(open); renderQuestions();
 }
-function size(j) { setSize(st.sizing, SIZES[j]); down(); }
 document.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'TEXTAREA') { if (e.key === 'Escape') e.target.blur(); return; }
   const key = e.key.toLowerCase();
-  if (st.sizing) {
-    if (['1', '2', '3', '4'].includes(key)) return size(Number(key) - 1);
-    if (e.key === 'Escape' || e.key === 'Backspace') { e.preventDefault(); return down(); }
-    // Letter answers skip the size and answer the next row, never the yes row itself.
-    if (['y', 'j', 'n', 'k', '?', '/', 'u'].includes(key)) { if (st.cursor >= keys().length - 1) return down(); st.cursor += 1; }
-    st.sizing = null; renderQuestions();
-  }
-  if (key === '1' || key === 'y' || key === 'j') answer(true);
-  else if (key === '2' || key === 'n' || key === 'k') answer(false);
-  else if (key === '3' || key === '?' || key === '/' || key === 'u') answer('unsure');
+  if (key === '1' || key === 'y' || key === 'j') answer(0);
+  else if (key === '2' || key === 'n' || key === 'k') answer(1);
+  else if (key === '3' || key === '?' || key === '/' || key === 'u') answer(2);
   else if (e.key === 'ArrowDown') { e.preventDefault(); st.cursor = Math.min(keys().length - 1, st.cursor + 1); renderQuestions(); }
   else if (e.key === 'ArrowUp') { e.preventDefault(); st.cursor = Math.max(0, st.cursor - 1); renderQuestions(); }
-  else if (e.key === ' ') { e.preventDefault(); nothing(); }
+  else if (e.key === ' ') { e.preventDefault(); layerFine(); }
   else if (e.key === 'Enter') { e.preventDefault(); finish(); }
   else if (e.key === 'Tab') { e.preventDefault(); nextOpen(); }
   else if (key === 'c') unclear();

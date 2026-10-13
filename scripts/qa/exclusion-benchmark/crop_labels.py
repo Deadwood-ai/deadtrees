@@ -19,7 +19,9 @@ from score_benchmark import truth
 QUESTIONS = PREDICATES['icl']  # overridden by --questions
 UI = Path(__file__).parent / 'label_ui' / 'crops.html'
 MODEL_RUN = 'decisions-crop-test-tuned1-strict'
-SIZES = ('<10', '10-20', '20-50', '>50')  # rough error size per yes answer, in % of the layer
+SIZES = ('<10', '10-20', '20-50', '>50')  # rough error size per yes answer, in % of the layer (gold7)
+ANSWERS = (True, False, None, 'unsure')
+VERDICTS = ('ok', 'minor', 'major', None)  # per-layer verdict questions (v_*), gold9
 
 
 def pick(root, count):
@@ -131,10 +133,15 @@ def make_handler(root, crops, store):
             crop_id = value.get('crop_id')
             answers = value.get('answers', {})
             sizes = value.get('sizes', {})
-            if (crop_id not in ids or not set(answers) <= set(QUESTIONS) or not all(v in (True, False, None, 'unsure') for v in answers.values())
+            if (crop_id not in ids or not isinstance(answers, dict) or not set(answers) <= set(QUESTIONS)
+                    or not all(v in (VERDICTS if k.startswith('v_') else ANSWERS) for k, v in answers.items())
                     or not isinstance(sizes, dict) or not set(sizes) <= set(QUESTIONS) or not all(v in SIZES for v in sizes.values())):
                 return self.send(400, 'application/json', b'{"error":"invalid"}')
-            at = store.save(crop_id, {'answers': answers, 'sizes': sizes, 'note': str(value.get('note', ''))[:500]})
+            payload = {'answers': answers, 'sizes': sizes, 'note': str(value.get('note', ''))[:500]}
+            legacy = store.all().get(crop_id, {}).get('legacy')
+            if legacy:  # answers from an earlier question set, kept for reference
+                payload['legacy'] = legacy
+            at = store.save(crop_id, payload)
             self.send(200, 'application/json', json.dumps({'saved': at}).encode())
     return Handler
 
