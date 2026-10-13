@@ -25,7 +25,8 @@ Call `search_threads` with the query
 Report only work messages from a person that need his answer or action: user
 reports, failed processing, backup alerts, dataset contributors and
 collaborator questions about DeadTrees. Leave out everything else, including
-private mail, newsletters, calendar updates and anything that needs no action;
+private mail, newsletters, calendar updates, anything about 3Dtrees (its own
+monitor covers it) and anything that needs no action;
 do not mention what you left out. Name the sender by display name (never an
 email address) and the topic in a few words; never quote message content,
 addresses or attachments.

@@ -449,3 +449,20 @@ def test_shadow_runs_in_the_first_tick_of_each_hour_until_its_end():
 	assert not monitor_tick.shadow_due(args, NOON.replace(minute=15))
 	assert not monitor_tick.shadow_due(args, NOON.replace(day=21))
 	assert not monitor_tick.shadow_due(argparse.Namespace(shadow_model='x', shadow_until='soon'), NOON)
+
+
+def test_the_filing_plan_fixes_every_write():
+	delta = {
+		'new': [red('a'), red('b')],
+		'changed': [{**findings.finding('yellow', 'api', 'c', 'c degraded'), 'previous_severity': 'red'}],
+		'cleared': [red('d'), red('e')],
+	}
+	known = {'dt-status/api/b': 'DT-2', 'dt-status/api/c': 'DT-3', 'dt-status/api/d': 'DT-4'}
+	comments, creates = monitor_tick.filing_plan(delta, known, NOON)
+	assert [(c['fingerprint'], c['issue']) for c in comments] == [
+		('dt-status/api/b', 'DT-2'), ('dt-status/api/c', 'DT-3'), ('dt-status/api/d', 'DT-4'),
+	]
+	assert comments[1]['body'].startswith('[monitor] 2026-10-13T12:00:00Z: yellow (red → yellow): c degraded')
+	assert comments[2]['body'].startswith('[monitor] 2026-10-13T12:00:00Z: Cleared at 2026-10-13T12:00:00Z.')
+	# A cleared finding without an issue needs no write.
+	assert [(c['fingerprint'], c['priority'], c['title']) for c in creates] == [('dt-status/api/a', 2, '🤖 a failed')]
