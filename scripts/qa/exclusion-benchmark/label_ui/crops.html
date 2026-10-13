@@ -74,9 +74,9 @@ kbd { background: #2a3138; border: 1px solid var(--line); border-radius: 4px; pa
     <button id="unclear" title="Can't judge this crop; then next open crop">Can't tell what this shows <kbd>c</kbd></button>
     <textarea id="note" rows="2" placeholder="Optional note"></textarea>
     <p id="status"></p>
-    <p class="muted" style="margin:0"><kbd>1</kbd> yes · <kbd>2</kbd> no · <kbd>3</kbd> don't know · verdict <kbd>1</kbd> OK · <kbd>2</kbd> minor · <kbd>3</kbd> major · <kbd>Space</kbd> this layer fine · <kbd>Enter</kbd> rest no · <kbd>c</kbd> can't tell</p>
+    <p class="muted" style="margin:0"><kbd>1</kbd> yes · <kbd>2</kbd> no · <kbd>3</kbd> don't know · verdict <kbd>2</kbd> minor · <kbd>3</kbd> major (OK is automatic without a flagged error) · <kbd>Space</kbd> this layer fine · <kbd>Enter</kbd> rest no · <kbd>c</kbd> can't tell</p>
     <details><summary>Rules and keys</summary>
-      <p>Each layer has its own block: tag every error you see (yes for any clear error, however small), then give the verdict for the satellite product. <b>OK</b>: no relevant error. <b>Minor, keep</b>: errors exist but would not noticeably change the satellite cover here. <b>Major, exclude</b>: all errors in this layer together would noticeably bias the satellite cover here. Lying wood is never deadwood; standing dead trees are forest.</p>
+      <p>Each layer has its own block: tag every error you see (yes for any clear error, however small), then give the verdict for the satellite product. <b>OK</b> is set automatically when no error is flagged in the layer; a layer with a flagged error is minor or major. <b>Minor, keep</b>: errors exist but would not noticeably change the satellite cover here. <b>Major, exclude</b>: all errors in this layer together would noticeably bias the satellite cover here. Lying wood is never deadwood; standing dead trees are forest.</p>
       <p>Work top to bottom: <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> answer the highlighted row and move down; after the last row it goes to the next crop. <kbd>Space</kbd> marks the current layer fine (all no, verdict OK) and jumps to the next block. <kbd>↑</kbd>/<kbd>↓</kbd> or a click pick a row. <kbd>Enter</kbd> remaining questions = no (a layer without any yes also gets OK), next. <kbd>c</kbd> can't tell. <kbd>Tab</kbd> next open crop, <kbd>←</kbd>/<kbd>→</kbd> previous/next. Wheel and drag zoom, double-click resets.</p>
     </details>
   </aside>
@@ -90,7 +90,6 @@ const SHORT = {
   m5_fc_trees_missed: 'Trees missed (no gold)', m6_fc_on_non_trees: 'Gold on non-trees', m8_dead_not_forest: 'Dead trees not in forest',
   m7_fc_artifact: 'Artifact in forest', v_forest: 'Forest verdict',
 };
-const VERDICT_TEXT = 'For the satellite product: OK, minor errors (keep), or major errors (exclude)?';
 const GATE = 'm0_assessable';
 const LAYERS = [
   { name: 'deadwood', title: 'DEADWOOD (blue)', keys: ['m1_dead_missed', 'm2_dw_on_live_vegetation', 'm3_dw_on_non_vegetation', 'm4_dw_on_lying_wood', 'm7_dw_artifact', 'v_deadwood'] },
@@ -104,7 +103,19 @@ const keys = () => [GATE, ...LAYERS.flatMap((l) => l.keys)].filter((k) => k in s
 const cur = () => st.crops[st.i];
 const lab = (c = cur()) => ({ answers: {}, sizes: {}, note: '', ...(st.labels[c.id] || {}) });
 const val = (v) => (v === true ? 'yes' : v === false ? 'no' : v === 'unsure' ? 'unsure' : ['ok', 'minor', 'major'].includes(v) ? v : null);
-const done = (c) => { const a = lab(c).answers; return a[GATE] === false || keys().every((k) => val(a[k]) !== null); };
+const modesOf = (l) => l.keys.filter((k) => !isVerdict(k));
+const verdictOf = (l) => l.keys.find(isVerdict);
+const flagged = (a, l) => modesOf(l).some((k) => a[k] === true);
+// A layer with any flagged error must be minor or major; a layer without one is OK.
+const consistent = (a) => LAYERS.every((l) => a[verdictOf(l)] === undefined || (flagged(a, l) ? a[verdictOf(l)] !== 'ok' : a[verdictOf(l)] === 'ok'));
+const done = (c) => { const a = lab(c).answers; return a[GATE] === false || (keys().every((k) => val(a[k]) !== null) && consistent(a)); };
+function normalize(a) {
+  for (const l of LAYERS) {
+    const v = verdictOf(l);
+    if (flagged(a, l)) { if (a[v] === 'ok') delete a[v]; }
+    else if (modesOf(l).every((k) => val(a[k]) !== null)) a[v] = 'ok';
+  }
+}
 const src = (c, s) => `/files/${c.prefix || `datasets/${c.dataset_id}/${c.view}-`}${s}`;
 
 function renderPanels() {
@@ -133,10 +144,13 @@ function row(k, n) {
   const num = document.createElement('span'); num.className = 'n'; num.textContent = n + 1;
   const text = document.createElement('span'); text.className = 'lab'; text.textContent = SHORT[k] || k;
   const full = document.createElement('span'); full.className = 'full'; full.title = st.questions[k];
-  full.textContent = isVerdict(k) ? VERDICT_TEXT : st.questions[k];
+  full.textContent = st.questions[k];
   const btns = document.createElement('span'); btns.className = 'btns';
-  const options = isVerdict(k) ? [['ok', 'OK', 'ok'], ['minor', 'Minor, keep', 'minor'], ['major', 'Major, exclude', 'major']]
+  const isFlagged = isVerdict(k) && flagged(a, layerOf(k));
+  const options = isVerdict(k) ? [['ok', 'OK', 'ok'], ['minor', 'Minor, keep', 'minor'], ['major', 'Major, exclude', 'major']].filter(([v]) => !(isFlagged && v === 'ok'))
     : [['yes', 'Yes', true], ['unsure', '?', 'unsure'], ['no', 'No', false]];
+  if (isVerdict(k)) full.textContent = isFlagged ? 'Errors flagged: minor (keep) or major (exclude) for the satellite product?'
+    : a[k] && a[k] !== 'ok' ? 'No error flagged but not OK: tag the error above, or it becomes OK.' : 'OK automatically when no error is flagged.';
   for (const [v, label, value] of options) {
     const b = document.createElement('span'); b.dataset.v = v; b.textContent = label;
     if (val(a[k]) === v) b.classList.add('on');
@@ -189,7 +203,7 @@ async function save(c = cur()) {
   progress();
 }
 function update(change, advance) {
-  const c = cur(); const l = structuredClone(lab(c)); change(l.answers); st.labels[c.id] = l;
+  const c = cur(); const l = structuredClone(lab(c)); change(l.answers); normalize(l.answers); st.labels[c.id] = l;
   save(c);
   if (advance) nextOpen(); else renderQuestions();
 }
@@ -228,6 +242,7 @@ function answer(j) {
   const ks = keys(); const k = ks[st.cursor];
   const v = isVerdict(k) ? ['ok', 'minor', 'major'][j] : [true, false, 'unsure'][j];
   if (k === GATE && v === false) return unclear();
+  if (v === 'ok' && flagged(lab().answers, layerOf(k))) { $('#status').textContent = 'A layer with a flagged error is minor or major, not OK.'; return; }
   update((a) => { a[k] = v; });
   if (done(cur())) return nextOpen();
   const a = lab().answers; const open = (x) => val(a[x]) === null;
