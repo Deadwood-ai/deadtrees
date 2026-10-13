@@ -8,6 +8,7 @@
 :root { --bg: #111417; --panel: #1b2025; --line: #2e353c; --text: #e6e9ec; --muted: #9aa4ad; --yes: #d0473c; --no: #2f9e5b; --unsure: #c99a2e; --accent: #4b8fe0; --blue: #4b8fe0; --gold: #d4b13a; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.35 system-ui, sans-serif; height: 100vh; display: flex; flex-direction: column; }
+header a { color: var(--accent); }
 header { display: flex; gap: 10px; align-items: center; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .muted { color: var(--muted); }
 button { background: #252b31; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; }
@@ -56,6 +57,7 @@ kbd { background: #2a3138; border: 1px solid var(--line); border-radius: 4px; pa
 <header>
   <button id="prev">←</button><span id="pos"></span><button id="next">→</button>
   <button id="nextOpen" title="Next crop without a full answer (Tab)">Next open <kbd>Tab</kbd></button>
+  <a id="site" target="_blank" rel="noopener" title="Open this dataset on deadtrees.earth">Open dataset ↗</a>
   <span id="meta" class="muted"></span>
   <label class="muted"><input type="checkbox" id="showModel"> model answers</label>
   <span id="progress" class="muted" style="margin-left:auto"></span>
@@ -169,6 +171,7 @@ function render() {
   st.cursor = Math.max(0, keys().findIndex((k) => val(a[k]) === null));
   $('#pos').textContent = `${st.i + 1} / ${st.crops.length}`;
   $('#meta').textContent = `Dataset ${c.dataset_id} · ${(c.mpp * 100).toFixed(1)} cm/px${c.source ? ` · ${c.source}` : ''}`;
+  $('#site').href = `https://deadtrees.earth/dataset/${c.dataset_id}`;
   history.replaceState(null, '', `?crop=${c.id}`);
   progress(); renderPanels(); renderQuestions();
 }
