@@ -8,6 +8,7 @@ on:
       - "scripts/*.py"
       - "scripts/lib/**"
       - "scripts/backup/**"
+      - "scripts/platform_monitor/**"
       - "shared/asset_manifest.py"
       - "shared/operator_env.py"
       - "docker-compose.*.yaml"

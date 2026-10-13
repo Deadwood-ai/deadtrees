@@ -1,0 +1,13 @@
+# 15-minute DeadTrees monitor tick. Install as a systemd user unit on the
+# processing server; see docs/playbooks/operator-chat.md.
+[Unit]
+Description=DeadTrees monitor tick (platform findings to Linear, inbox digest)
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/deadtrees-monitor-tick
+TimeoutStartSec=14min
+MemoryMax=2G
+Nice=10

@@ -1,0 +1,9 @@
+[Unit]
+Description=Run the DeadTrees monitor every 15 minutes
+
+[Timer]
+OnCalendar=*:07,22,37,52
+Persistent=true
+
+[Install]
+WantedBy=timers.target
