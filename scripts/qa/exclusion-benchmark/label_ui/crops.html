@@ -9,6 +9,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.35 system-ui, sans-serif; height: 100vh; display: flex; flex-direction: column; }
 header a { color: var(--accent); }
+header select { background: #252b31; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font: inherit; }
 header { display: flex; gap: 10px; align-items: center; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .muted { color: var(--muted); }
 button { background: #252b31; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; }
@@ -64,6 +65,12 @@ kbd { background: #2a3138; border: 1px solid var(--line); border-radius: 4px; pa
   <a id="site" target="_blank" rel="noopener" title="Open this dataset on deadtrees.earth">Open dataset ↗</a>
   <span id="meta" class="muted"></span>
   <label class="muted"><input type="checkbox" id="showModel"> model answers</label>
+  <select id="filter" title="Which crops ←/→ step through">
+    <option value="all">all crops</option>
+    <option value="you">you: major</option>
+    <option value="any">most models: major</option>
+    <option value="disagree">you and most models disagree on major</option>
+  </select>
   <span id="progress" class="muted" style="margin-left:auto"></span>
 </header>
 <main>
@@ -173,8 +180,9 @@ function row(k, n) {
     for (const [label, v] of Object.entries(vs)) {
       const l = v[layer]; if (!l) continue;
       const chip = document.createElement('span'); chip.className = l.verdict;
-      chip.textContent = `${label}: ${l.verdict} · ${Math.round(l.major_likelihood)}% major`;
-      chip.title = (l.errors || []).join('\n') || 'no errors named'; box.append(chip);
+      chip.textContent = `${label}: ${l.verdict} ${Math.round(l.major_likelihood)}`;
+      chip.title = `${Math.round(l.major_likelihood)}% likely major\n` + ((l.errors || []).join('\n') || 'no errors named');
+      box.append(chip);
     }
     r.append(box);
   }
@@ -199,7 +207,8 @@ function render() {
   const c = cur();
   const a = lab(c).answers;
   st.cursor = Math.max(0, keys().findIndex((k) => val(a[k]) === null));
-  $('#pos').textContent = `${st.i + 1} / ${st.crops.length}`;
+  const keep = FILTERS[$('#filter').value] || FILTERS.all; const shown = st.crops.filter(keep);
+  $('#pos').textContent = $('#filter').value === 'all' ? `${st.i + 1} / ${st.crops.length}` : `${shown.indexOf(c) + 1} / ${shown.length} (crop ${st.i + 1})`;
   meta();
   $('#site').href = `https://deadtrees.earth/dataset/${c.dataset_id}`;
   history.replaceState(null, '', `?crop=${c.id}`);
@@ -248,11 +257,23 @@ function nextOpen() {
   for (let d = 1; d <= st.crops.length; d++) { const j = (st.i + d) % st.crops.length; if (!done(st.crops[j])) { st.i = j; return render(); } }
   $('#status').textContent = 'All crops answered.'; render();
 }
-const move = (d) => { st.i = (st.i + d + st.crops.length) % st.crops.length; render(); };
+// Major calls per crop: by the reviewer (either layer) and by most model runs.
+const youMajor = (c) => LAYERS.some((l) => lab(c).answers[verdictOf(l)] === 'major');
+// Models vote per layer; a layer is model-major when more than half the runs call it major.
+const modelMajor = (c) => { const runs = Object.values((st.verdicts || {})[c.id] || {});
+  return LAYERS.some((l) => runs.filter((v) => (v[l.name] || {}).verdict === 'major').length > runs.length / 2); };
+const FILTERS = { all: () => true, you: youMajor, any: modelMajor, disagree: (c) => youMajor(c) !== modelMajor(c) };
+function move(d) {
+  // Step to the previous/next crop that passes the header filter.
+  const keep = FILTERS[$('#filter').value] || FILTERS.all;
+  for (let n = 1; n <= st.crops.length; n++) { const j = (st.i + d * n + st.crops.length * n) % st.crops.length; if (keep(st.crops[j])) { st.i = j; return render(); } }
+  $('#status').textContent = 'No crop matches this filter.';
+}
 let noteTimer;
 $('#note').addEventListener('input', () => { clearTimeout(noteTimer); noteTimer = setTimeout(() => { const l = structuredClone(lab()); l.note = $('#note').value; st.labels[cur().id] = l; save(); }, 500); });
 $('#prev').onclick = () => move(-1); $('#next').onclick = () => move(1); $('#nextOpen').onclick = nextOpen;
 $('#nothing').onclick = nothing; $('#done').onclick = finish; $('#unclear').onclick = unclear;
+$('#filter').onchange = () => { $('#filter').blur(); if (!(FILTERS[$('#filter').value])(cur())) move(1); else render(); };
 $('#showModel').onchange = () => { try { localStorage.setItem('showModel', $('#showModel').checked ? '1' : '0'); } catch (e) { /* storage blocked */ }
   $('#showModel').blur(); renderQuestions(); };
 function answer(j) {
