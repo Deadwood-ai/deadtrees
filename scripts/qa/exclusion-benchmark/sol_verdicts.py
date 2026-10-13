@@ -1,7 +1,9 @@
 """A model gives the per-layer verdict (OK / minor / major) on the gold crops, as the reviewer does.
 
-Backends: Sol through the Codex app-server transport (default, effort selectable) or Luna
-through the OpenAI Responses API, so cost and accuracy can be compared on the same prompt.
+Backends: Sol through the Codex app-server transport (default, effort selectable), Luna
+through the OpenAI Responses API, or Claude Haiku through a minimal headless Claude Code run
+(no settings, no MCP, only the Read tool for the three images), so cost and accuracy can be
+compared on the same prompt.
 
 Same images and rules as sol_sizes.py. Per layer Sol names the errors it sees, gives the
 verdict for the satellite product and a 0-100 likelihood that the layer has a major error
@@ -15,6 +17,7 @@ import json
 from pathlib import Path
 import re
 import sqlite3
+import subprocess
 import time
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -86,6 +89,27 @@ def luna(prompt, images, key, effort):
     return text, {'usage': raw.get('usage')}
 
 
+def haiku(prompt, images, out, model='claude-haiku-5-5'):
+    for i, im in enumerate(images):
+        im.convert('RGB').save(out / f'image{i + 1}.jpg', quality=90)
+    command = ['claude', '-p', '--model', model, '--output-format', 'json', '--tools', 'Read', '--allowedTools', 'Read',
+               '--setting-sources', '', '--strict-mcp-config',
+               '--system-prompt', 'You assess aerial image predictions. Use the Read tool only to view the three image '
+                                  'files named in the request, then answer with the requested JSON only.',
+               'Read image1.jpg, image2.jpg and image3.jpg in this folder; they are Image 1, Image 2 and Image 3.\n\n' + prompt]
+    # stdout only: Claude Code warns about newer model names on stderr.
+    done = subprocess.run(command, cwd=out, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=600)
+    if done.returncode:
+        raise ValueError(('at capacity ' if 'overloaded' in done.stdout.lower() else '') + done.stdout[-300:])
+    result = json.loads(done.stdout)
+    if result.get('is_error'):
+        raise ValueError('at capacity ' + str(result.get('result'))[:300])
+    usage = (result.get('modelUsage') or {}).get(model, {})
+    return result['result'], {'usage': {'total_tokens': usage.get('inputTokens', 0) + usage.get('cacheReadInputTokens', 0)
+                                        + usage.get('cacheCreationInputTokens', 0) + usage.get('outputTokens', 0),
+                                        'output_tokens': usage.get('outputTokens'), 'turns': result.get('num_turns')}}
+
+
 def ask(root, crop, out, backend='sol', effort='high', key=None, prompt=PROMPT):
     out.mkdir(parents=True, exist_ok=True)
     images = crop_images(root, crop)
@@ -95,6 +119,8 @@ def ask(root, crop, out, backend='sol', effort='high', key=None, prompt=PROMPT):
             if backend == 'sol':
                 text, receipt = invoke(prompt, [(str(i + 1), jpeg(im)) for i, im in enumerate(images)], out,
                                        'gpt-6.1-sol', effort, NoTools())
+            elif backend == 'haiku':
+                text, receipt = haiku(prompt, images, out)
             else:
                 text, receipt = luna(prompt, images, key, effort)
             receipt['seconds'] = round(time.monotonic() - started, 1)
@@ -137,7 +163,7 @@ if __name__ == '__main__':
     p.add_argument('--run', type=Path, required=True)
     p.add_argument('--limit', type=int)
     p.add_argument('--workers', type=int, default=4)
-    p.add_argument('--backend', choices=('sol', 'luna'), default='sol')
+    p.add_argument('--backend', choices=('sol', 'luna', 'haiku'), default='sol')
     p.add_argument('--effort', default='high')
     p.add_argument('--prompt', choices=sorted(PROMPTS), default='v1')
     p.add_argument('--key-file', type=Path, help='OpenAI key file, Luna only')
