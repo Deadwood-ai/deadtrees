@@ -7,7 +7,8 @@ export interface DteAerialSite {
   license: string;
   citationUrl: string | null;
   // View-only datasets: the reference export does not serve their patches
-  // (DT-1349), so the gallery links to the source instead of previews.
+  // (DT-1349), so the site ships small view-only previews of the published
+  // benchmark crops instead.
   viewOnly?: true;
   thumbnailPath: string;
   exportSeed: string;
@@ -136,6 +137,8 @@ const DEFAULT_DTE_AERIAL_PREVIEW_SITE_IDS = [375, 1396, 5584];
 
 export const DTE_AERIAL_EXPORT_BASE_URL =
   "https://data2.deadtrees.earth/reference/69e57f93-d003-4b64-9108-fe3dfa654918";
+
+const DTE_AERIAL_VIEW_ONLY_PREVIEW_BASE_URL = "/assets/releases/dte-aerial-bench";
 
 export const getCoarseBiomeGroup = (biome: string) => {
   const normalized = biome.toLowerCase();
@@ -466,13 +469,16 @@ export const getDteAerialPatchImages = (
   patchIndex = 0,
 ): DteAerialPatchImageSet => {
   const base = makeDteAerialPatchBase(dataset, resolutionCm, patchIndex);
-  const folder = `${DTE_AERIAL_EXPORT_BASE_URL}/${dataset.id}/png`;
+  const folder = dataset.viewOnly
+    ? `${DTE_AERIAL_VIEW_ONLY_PREVIEW_BASE_URL}/${dataset.id}`
+    : `${DTE_AERIAL_EXPORT_BASE_URL}/${dataset.id}/png`;
+  const rgbExtension = dataset.viewOnly ? "webp" : "png";
 
   return {
     resolutionCm,
     patchIndex,
     label: `Patch ${patchIndex + 1}`,
-    rgb: withDteAerialAssetVersion(`${folder}/${base}.png`, dataset),
+    rgb: withDteAerialAssetVersion(`${folder}/${base}.${rgbExtension}`, dataset),
     treeCoverMask: withDteAerialAssetVersion(
       `${folder}/${base}_forestcover_ref.png`,
       dataset,

@@ -65,10 +65,18 @@ describe("DTE-aerial-bench publication", () => {
     );
   });
 
-  it("withholds patch previews only for the view-only GeoNadir sites", () => {
-    const viewOnlyIds = dteAerialRelease.dteAerial.sites
-      .filter((site) => site.viewOnly)
-      .map((site) => site.id);
-    expect(viewOnlyIds).toEqual([4181, 4182, 4471]);
+  it("serves bundled previews for the view-only GeoNadir sites only", () => {
+    const viewOnlySites = dteAerialRelease.dteAerial.sites.filter(
+      (site) => site.viewOnly,
+    );
+    expect(viewOnlySites.map((site) => site.id)).toEqual([4181, 4182, 4471]);
+
+    const patch = getDteAerialPatchImages(viewOnlySites[0], 10, 2);
+    expect(patch.rgb).toMatch(
+      /^\/assets\/releases\/dte-aerial-bench\/4181\/4181_1768225381580_2_10cm\.webp\?v=/,
+    );
+    expect(patch.treeCoverMask).toMatch(
+      /^\/assets\/releases\/dte-aerial-bench\/4181\/4181_1768225381580_2_10cm_forestcover_ref\.png\?v=/,
+    );
   });
 });
