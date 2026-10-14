@@ -35,6 +35,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -43,6 +44,11 @@ sys.path.insert(0, str(HERE))
 import findings as findings_module  # noqa: E402
 import host_facts  # noqa: E402
 
+# Janusch's working hours (2026-10-14): ticks every 15 minutes, of which every
+# second one also runs the inbox, PostHog and the scorecard; outside them the
+# timer fires every two hours and each tick runs everything.
+WORK_TZ = ZoneInfo('Europe/Berlin')
+WORK_HOURS = range(6, 18)
 DEFAULT_STATE_DIR = Path.home() / '.local/state/deadtrees-monitor'
 DEFAULT_ZULIPRC = Path.home() / '.config/deadtrees/zuliprc'
 DEFAULT_ZULIP_STREAM = 'project_deadtree.earth'
@@ -686,16 +692,28 @@ def read_inbox(prompt: str, since: datetime, args: argparse.Namespace, workdir: 
 	return items, checked, inbox_ok, posthog_ok, cost
 
 
+def full_tick_due(now: datetime) -> bool:
+	"""Whether this tick also runs the inbox, PostHog and the scorecard. In
+	working hours only the :00-:14 and :30-:44 quarters do; the others check
+	the platform (processors, workers, disks, API, storage) and cost no tokens
+	unless something needs filing."""
+	local = now.astimezone(WORK_TZ)
+	return local.hour not in WORK_HOURS or local.minute % 30 < 15
+
+
 def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 	tick_file = args.state_dir / TICK_STATE
 	state = load_json(tick_file)
 	since = parse_since(state.get('inbox_since'), now)
+	full = args.mode == 'full' or (args.mode == 'auto' and full_tick_due(now))
 	operator_dir = None if args.dry_run else args.operator_dir
 	snapshot = run_script('operator_status.py', state_args(operator_dir, 'state.json', 'latest.md'))
-	try:
-		scorecard = run_script('data_factory_scorecard.py', state_args(operator_dir, 'scorecard-state.json', 'scorecard-latest.md'))
-	except (RuntimeError, ValueError, subprocess.TimeoutExpired):
-		scorecard = {}
+	scorecard = {}
+	if full:
+		try:
+			scorecard = run_script('data_factory_scorecard.py', state_args(operator_dir, 'scorecard-state.json', 'scorecard-latest.md'))
+		except (RuntimeError, ValueError, subprocess.TimeoutExpired):
+			pass
 	facts = host_facts.collect(now)
 	current, gaps, unobserved = findings_module.build_findings(snapshot, facts, now)
 	# Baseline, issue map and PostHog cursor live in one state file, written
@@ -705,14 +723,17 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 	known: dict[str, str] = dict(state.get('issues') or {})
 	cost = 0.0
 
-	zulip, zulip_state, zulip_ok = zulip_section(args.zuliprc, since, args.zulip_stream)
-	prompt = render(
-		'monitor_inbox_prompt.md',
-		{'tools': ','.join(INBOX_TOOLS), 'since': iso(since), 'since_epoch': str(int(since.timestamp())), 'now': iso(now)},
-		{'zulip': zulip},
-	)
-	items, checked, inbox_ok, posthog_ok, inbox_cost = read_inbox(prompt, since, args, workdir)
-	cost += inbox_cost
+	items: list[str] = []
+	checked, inbox_ok, posthog_ok, zulip_state, zulip_ok = 'inbox not due', False, False, '', True
+	if full:
+		zulip, zulip_state, zulip_ok = zulip_section(args.zuliprc, since, args.zulip_stream)
+		prompt = render(
+			'monitor_inbox_prompt.md',
+			{'tools': ','.join(INBOX_TOOLS), 'since': iso(since), 'since_epoch': str(int(since.timestamp())), 'now': iso(now)},
+			{'zulip': zulip},
+		)
+		items, checked, inbox_ok, posthog_ok, inbox_cost = read_inbox(prompt, since, args, workdir)
+		cost += inbox_cost
 	seen_posthog: dict[str, int] = dict(state.get('posthog_seen') or {})
 	posthog, next_posthog = posthog_delta(posthog_items(items), seen_posthog) if posthog_ok else ({}, seen_posthog)
 	items = [item for item in items if not item.startswith('- [posthog]')]
@@ -744,7 +765,8 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 			}
 			# Keep the old baseline so the next tick files this delta again.
 			digest.append(f'- [gap] linear filing failed, will retry: {clip(detail)}')
-	if not args.dry_run and shadow_due(args, now):
+	# The shadow compares inbox reads, so it runs only with one.
+	if full and not args.dry_run and shadow_due(args, now):
 		cost += run_shadow(prompt, since, args, workdir, now, {'items': items, 'checked': checked, 'ok': inbox_ok})
 
 	digest = platform_lines(filing, known) + [f'- [gap] {gap}' for gap in gaps] + digest + items
@@ -759,7 +781,7 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 
 	header = (
 		f'DeadTrees monitor {iso(now)} · platform `{findings_module.verdict(current)}`'
-		f' · {factory_line(scorecard)} · {checked} {zulip_state}'
+		f" · {factory_line(scorecard) if full else 'platform-only tick'} · {checked} {zulip_state}".rstrip()
 	)
 	header, body = redact(header), redact('\n'.join(digest) or 'no changes')
 	write_atomic(args.state_dir / ('digest-dry-run.md' if args.dry_run else 'digest-latest.md'), f'{header}\n\n{body}\n')
@@ -771,13 +793,14 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 	if digest:
 		keep_digest(args.state_dir, now, f'{header}\n\n{body}\n')
 	append_best_effort(args.state_dir / TICK_LOG, {
-		'at': iso(now), 'model': args.model, 'verdict': findings_module.verdict(current), 'checked': checked,
+		'at': iso(now), 'mode': 'full' if full else 'platform', 'model': args.model,
+		'verdict': findings_module.verdict(current), 'checked': checked,
 		'inbox_ok': inbox_ok, 'posthog_ok': posthog_ok, 'filed': sorted(filing), 'cost_usd': round(cost, 4),
 	})
 	write_atomic(tick_file, json.dumps({
 		'last_tick_at': iso(now),
 		# The inbox window only moves past what every source read.
-		'inbox_since': iso(now) if inbox_ok and zulip_ok else iso(since),
+		'inbox_since': iso(now) if full and inbox_ok and zulip_ok else iso(since),
 		'baseline': baseline,
 		'issues': known,
 		'posthog_seen': seen_posthog,
@@ -824,6 +847,8 @@ def parse_since(value: Any, now: datetime) -> datetime:
 def parse_args(argv: list[str]) -> argparse.Namespace:
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument('--dry-run', action='store_true')
+	# auto: the working-hours schedule; full or platform force one kind of tick.
+	parser.add_argument('--mode', choices=('auto', 'full', 'platform'), default='auto')
 	parser.add_argument('--state-dir', type=Path, default=DEFAULT_STATE_DIR)
 	# Where `operator_status.py` and the scorecard keep their latest state for
 	# manual /status reads; unset writes none.

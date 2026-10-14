@@ -165,14 +165,18 @@ visible.
 #### Unattended 15-Minute Monitor
 
 A systemd user timer on the processing server runs
-`scripts/platform_monitor/monitor_tick.py` every 15 minutes (`:07`, `:22`,
-`:37`, `:52`). Linear is the source of truth for platform state. The monitor
-records findings; it never fixes anything. The unit templates and the host
+`scripts/platform_monitor/monitor_tick.py` on a Europe/Berlin schedule. In
+working hours (06:00-18:00) it fires every 15 minutes (`:07`, `:22`, `:37`,
+`:52`): every tick checks the platform, and the `:07` and `:37` ticks also run
+the inbox call and the scorecard. Outside working hours it fires every two
+hours at `:07` and runs everything. Linear is the source of truth for platform
+state. The monitor records findings; it never fixes anything. The unit templates and the host
 wrapper are in `scripts/platform_monitor/systemd/`.
 
 Each tick:
 
-1. Collects read-only facts at no token cost: `scripts/operator_status.py`
+1. Collects read-only facts at no token cost (the scorecard only on ticks that
+   also run the inbox): `scripts/operator_status.py`
    (API, database, every processor host in `DEADTREES_OPERATOR_PROCESSING_HOSTS`,
    storage, backups), `scripts/data_factory_scorecard.py`, and
    `scripts/platform_monitor/host_facts.py` (production deploy health, kernel OOM
@@ -186,9 +190,9 @@ Each tick:
    hours, a silent worker, a failed GPU check and frontend errors. A failed probe
    or frontend error counts only on two runs in a row and clears after two quiet
    runs. A check that cannot run is a coverage gap, never green.
-3. Runs a read-only model call (`claude-haiku-5-5`) for what needs Janusch in
-   Linear, Gmail and Zulip (Zulip is read by the script) and for new PostHog
-   frontend errors in project 13440, which it selects first because the
+3. On inbox ticks, runs a read-only model call (`claude-haiku-5-5`) for what
+   needs Janusch in Linear, Gmail and Zulip (Zulip is read by the script) and
+   for new PostHog frontend errors in project 13440, which it selects first because the
    connector's active project is shared. Its window advances only when every
    source was read.
 4. Files the delta (new, changed, cleared) and new or spiking PostHog errors in
