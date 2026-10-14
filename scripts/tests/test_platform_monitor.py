@@ -413,9 +413,9 @@ def test_filing_without_a_linear_write_never_counts(tmp_path, monkeypatch):
 # --- Tick -------------------------------------------------------------------------
 
 
-def run_tick(tmp_path, monkeypatch, filing_ok=True, posthog_line=''):
+def run_tick(tmp_path, monkeypatch, filing_ok=True, posthog_line='', now=NOON, calls=None):
 	monkeypatch.setattr(monitor_tick, 'run_script', lambda name, extra: snapshot(api={}) | {'ok': True} if 'scorecard' in name else snapshot())
-	monkeypatch.setattr(monitor_tick.host_facts, 'collect', lambda now: {'deploy': {}, 'gpu': {'ok': True}, 'workers': [], 'prod_oom_kills': []})
+	monkeypatch.setattr(monitor_tick.host_facts, 'collect', lambda now, last_tick: {'deploy': {}, 'gpu': {'ok': True}, 'workers': [], 'prod_oom_kills': []})
 	monkeypatch.setattr(monitor_tick.findings_module, 'build_findings', lambda *args: ([red('a')], [], []))
 	inbox = {
 		'result': f'{posthog_line}\n[checked] linear=0 gmail=0 posthog=1 project=13440', 'num_turns': 5, 'modelUsage': {},
@@ -425,7 +425,8 @@ def run_tick(tmp_path, monkeypatch, filing_ok=True, posthog_line=''):
 			READS['switch'], READS['posthog'],
 		],
 	}
-	monkeypatch.setattr(monitor_tick, 'ask_model', lambda *args, **kwargs: inbox)
+	calls = [] if calls is None else calls
+	monkeypatch.setattr(monitor_tick, 'ask_model', lambda *args, **kwargs: calls.append(1) or inbox)
 	filed = {}
 
 	def file_findings(delta, known, now, args, workdir):
@@ -434,7 +435,7 @@ def run_tick(tmp_path, monkeypatch, filing_ok=True, posthog_line=''):
 
 	monkeypatch.setattr(monitor_tick, 'file_findings', file_findings)
 	args = monitor_tick.parse_args(['--state-dir', str(tmp_path), '--zuliprc', str(tmp_path / 'missing')])
-	assert monitor_tick.tick(args, NOON, tmp_path) == 0
+	assert monitor_tick.tick(args, now, tmp_path) == 0
 	return filed.get('delta'), json.loads((tmp_path / 'monitor.json').read_text())
 
 
@@ -506,3 +507,42 @@ def test_a_bad_write_does_not_hide_later_good_ones(tmp_path, monkeypatch):
 	assert not ok and detail == 'unplanned save_comment on DT-1310'
 	# The issue it did create is remembered, so no retry creates it again.
 	assert filed == {'dt-status/api/a': 'DT-9'} and done == {'dt-status/api/a'}
+
+
+
+@pytest.mark.parametrize('utc, full', [
+	('2026-10-14T05:07:00', True),   # 07:07 summer time in Berlin: inbox quarter
+	('2026-10-14T05:22:00', False),  # 07:22: platform only
+	('2026-10-14T15:52:00', False),  # 17:52: still working hours
+	('2026-10-14T16:07:00', True),   # 18:07: every tick runs everything
+	('2026-10-14T03:59:00', True),   # 05:59: before working hours
+	('2026-10-14T04:22:00', False),  # 06:22 summer time: working hours
+	('2026-10-26T04:22:00', True),   # the same UTC time is 05:22 in winter: off hours
+])
+def test_working_hours_schedule_follows_berlin_time(utc, full):
+	assert monitor_tick.full_tick_due(datetime.fromisoformat(utc).replace(tzinfo=timezone.utc)) is full
+
+
+def test_a_platform_tick_files_without_reading_the_inbox(tmp_path, monkeypatch):
+	calls = []
+	platform_tick = datetime(2026, 10, 14, 5, 22, tzinfo=timezone.utc)
+	(tmp_path / 'monitor.json').write_text(json.dumps({'inbox_since': '2026-10-14T05:07:00Z'}))
+	delta, state = run_tick(tmp_path, monkeypatch, now=platform_tick, calls=calls)
+	assert calls == [] and [item['fingerprint'] for item in delta['new']] == ['dt-status/api/a']
+	# The inbox window waits for the next inbox tick.
+	assert state['inbox_since'] == '2026-10-14T05:07:00Z'
+	assert 'platform-only tick' in (tmp_path / 'digest-latest.md').read_text()
+
+
+def test_oom_kills_are_read_since_the_previous_tick():
+	night = datetime(2026, 10, 14, 0, 7, tzinfo=timezone.utc)
+	last = datetime(2026, 10, 13, 22, 7, tzinfo=timezone.utc)
+	assert host_facts.oom_since(night, last) == datetime(2026, 10, 13, 22, 2, tzinfo=timezone.utc)
+	# A first run or a long outage reads at most six hours back.
+	assert host_facts.oom_since(night, None) == datetime(2026, 10, 14, 0, 2, tzinfo=timezone.utc)
+	assert host_facts.oom_since(night, datetime(2026, 10, 1, tzinfo=timezone.utc)) == datetime(2026, 10, 13, 18, 7, tzinfo=timezone.utc)
+
+
+def test_the_inbox_prompt_reads_posthog_since_the_last_read():
+	prompt = monitor_tick.render('monitor_inbox_prompt.md', {'since': '2026-10-13T22:07:00Z', 'since_epoch': '1', 'now': 'x', 'tools': 't'}, {'zulip': ''})
+	assert '"date_from":"2026-10-13T22:07:00Z"' in prompt and '-1h' not in prompt

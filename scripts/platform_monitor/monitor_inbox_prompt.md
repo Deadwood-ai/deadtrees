@@ -36,10 +36,10 @@ addresses or attachments.
 The PostHog connector's active project is shared with other work. Call
 `exec` with `call switch-project {"projectId": 13440}` and check that the reply
 names "deadtrees.earth". Then call `exec` with
-`call query-error-tracking-issues-list {"dateRange":{"date_from":"-1h"},"orderBy":"last_seen","orderDirection":"DESC","status":"active","limit":30}`
+`call query-error-tracking-issues-list {"dateRange":{"date_from":"{since}"},"orderBy":"last_seen","orderDirection":"DESC","status":"active","limit":30}`
 and check that its `_posthogUrl` contains `/project/13440/`. Run no other
-PostHog command. For each returned issue whose `last_seen` is within the last
-60 minutes, print one `[posthog]` line (see Output).
+PostHog command. For each returned issue whose `last_seen` is at or after
+{since}, print one `[posthog]` line (see Output).
 
 ## 4. Zulip
 

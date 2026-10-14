@@ -1,8 +1,12 @@
 [Unit]
-Description=Run the DeadTrees monitor every 15 minutes
+Description=Run the DeadTrees monitor (every 15 minutes in working hours, every 2 hours otherwise)
 
 [Timer]
-OnCalendar=*:07,22,37,52
+# Working hours 06:00-18:00 Europe/Berlin: every 15 minutes; the tick itself
+# runs the inbox only every second time. Outside them: every 2 hours.
+# Berlin time, so the schedule follows daylight saving.
+OnCalendar=*-*-* 06..17:07,22,37,52:00 Europe/Berlin
+OnCalendar=*-*-* 00,02,04,18,20,22:07:00 Europe/Berlin
 Persistent=true
 
 [Install]
