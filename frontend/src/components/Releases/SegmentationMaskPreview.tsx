@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { composeMaskDataUrl } from "./maskRendering";
+import { useNearViewport } from "./useNearViewport";
 
 interface SegmentationMaskPreviewProps {
   forestCoverSrc: string;
@@ -21,33 +22,9 @@ export function SegmentationMaskPreview({
   size = 256,
   className = "",
 }: SegmentationMaskPreviewProps) {
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const [shouldRender, setShouldRender] = useState(false);
+  const { ref: wrapperRef, isNear: shouldRender } =
+    useNearViewport<HTMLDivElement>();
   const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
-
-    if (!("IntersectionObserver" in window)) {
-      setShouldRender(true);
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setShouldRender(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "180px" },
-    );
-
-    observer.observe(wrapper);
-
-    return () => observer.disconnect();
-  }, []);
 
   useEffect(() => {
     if (!shouldRender) return;

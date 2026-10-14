@@ -19,6 +19,7 @@ import {
 } from "../../data/releases";
 import { SegmentationMaskPreview } from "./SegmentationMaskPreview";
 import { MASK_COLORS } from "./maskRendering";
+import { useNearViewport } from "./useNearViewport";
 
 type SortKey = "dataset" | "biome" | "west-east" | "north-south";
 type GalleryResolutionFilter = "all" | "20" | "10" | "5";
@@ -151,14 +152,16 @@ const sortSites = (sites: DteAerialSite[], sortKey: SortKey) => {
 };
 
 function ImageTile({ src, alt }: { src: string; alt: string }) {
+  const { ref, isNear } = useNearViewport<HTMLDivElement>();
+
   return (
-    <div className="aspect-square overflow-hidden rounded-md bg-gray-100">
-      <img
-        src={src}
-        alt={alt}
-        loading="lazy"
-        className="h-full w-full object-cover"
-      />
+    <div
+      ref={ref}
+      className="aspect-square overflow-hidden rounded-md bg-gray-100"
+    >
+      {isNear && (
+        <img src={src} alt={alt} className="h-full w-full object-cover" />
+      )}
     </div>
   );
 }
@@ -637,9 +640,9 @@ export function DteAerialReleaseGallery({
         </h2>
         <p className="mt-3 max-w-3xl text-base leading-7 text-gray-600">
           {benchmark.benchmarkSites} sites · {benchmark.benchmarkPatches}{" "}
-          patches across {benchmark.resolutionsCm.join(", ")} cm resolutions. Use the
-          controls in each dataset row to switch resolution, or change the
-          dataset order below.
+          patches across {benchmark.resolutionsCm.join(", ")} cm resolutions.
+          Use the controls in each dataset row to switch resolution, or change
+          the dataset order below.
         </p>
 
         <div className="mt-6 mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">

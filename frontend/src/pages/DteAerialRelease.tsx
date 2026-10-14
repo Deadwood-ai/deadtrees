@@ -1,9 +1,10 @@
 import {
   ArrowLeftOutlined,
   DownloadOutlined,
+  FileTextOutlined,
   GlobalOutlined,
 } from "@ant-design/icons";
-import { Button, Tag } from "antd";
+import { Button, Tag, Typography } from "antd";
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -73,14 +74,25 @@ export default function DteAerialRelease({ release }: DteAerialReleaseProps) {
                 type="primary"
                 size="large"
                 icon={<DownloadOutlined />}
-                disabled
+                href={release.links.artifact}
+                target="_blank"
+                rel="noreferrer"
+                className="min-h-11"
+                data-testid="release-download-link"
+              >
+                Download on Hugging Face
+              </Button>
+              <Button
+                size="large"
+                icon={<FileTextOutlined />}
+                href={release.paper.url}
+                target="_blank"
+                rel="noreferrer"
                 className="min-h-11"
               >
-                View downloads
+                Read the paper
               </Button>
-              <Tag className="m-0" color="warning">
-                Coming soon
-              </Tag>
+              <Tag className="m-0">CC BY 4.0</Tag>
             </div>
           </div>
 
@@ -138,6 +150,35 @@ export default function DteAerialRelease({ release }: DteAerialReleaseProps) {
               ))}
             </div>
           </div>
+        </div>
+      </section>
+
+      <section
+        className="mx-auto max-w-7xl px-4 pb-12 md:px-8"
+        data-testid="release-citation"
+      >
+        <div className="rounded-lg border border-gray-200 bg-white p-5 md:p-6">
+          <h2 className="m-0 text-xl font-semibold text-gray-950">
+            How to cite
+          </h2>
+          <p className="mb-0 mt-2 text-sm leading-6 text-gray-600">
+            If you use DTE-aerial-bench or DTE-aerial-train, please cite the
+            paper:
+          </p>
+          <p className="mb-0 mt-3 text-sm leading-6 text-gray-800">
+            {release.paper.citation}
+          </p>
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              BibTeX
+            </span>
+            <Typography.Text copyable={{ text: release.paper.bibtex }}>
+              Copy
+            </Typography.Text>
+          </div>
+          <pre className="mt-2 overflow-x-auto rounded-md bg-gray-50 p-4 text-xs leading-5 text-gray-800">
+            {release.paper.bibtex}
+          </pre>
         </div>
       </section>
 

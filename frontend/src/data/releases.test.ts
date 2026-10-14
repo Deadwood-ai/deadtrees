@@ -56,3 +56,27 @@ describe("Sentinel-2 satellite map release", () => {
     ]);
   });
 });
+
+describe("DTE-aerial-bench publication", () => {
+  it("is available with a real download link instead of a placeholder", () => {
+    expect(dteAerialRelease.status).toBe("available");
+    expect(dteAerialRelease.links.artifact).toBe(
+      "https://huggingface.co/datasets/ayushi3536/deadtree.earth-aerial-bench",
+    );
+  });
+
+  it("serves bundled previews for the view-only GeoNadir sites only", () => {
+    const viewOnlySites = dteAerialRelease.dteAerial.sites.filter(
+      (site) => site.viewOnly,
+    );
+    expect(viewOnlySites.map((site) => site.id)).toEqual([4181, 4182, 4471]);
+
+    const patch = getDteAerialPatchImages(viewOnlySites[0], 10, 2);
+    expect(patch.rgb).toMatch(
+      /^\/assets\/releases\/dte-aerial-bench\/4181\/4181_1768225381580_2_10cm\.webp\?v=/,
+    );
+    expect(patch.treeCoverMask).toMatch(
+      /^\/assets\/releases\/dte-aerial-bench\/4181\/4181_1768225381580_2_10cm_forestcover_ref\.png\?v=/,
+    );
+  });
+});

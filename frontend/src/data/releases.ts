@@ -6,6 +6,10 @@ export interface DteAerialSite {
   biome: string;
   license: string;
   citationUrl: string | null;
+  // View-only datasets: the reference export does not serve their patches
+  // (DT-1349), so the site ships small view-only previews of the published
+  // benchmark crops instead.
+  viewOnly?: true;
   thumbnailPath: string;
   exportSeed: string;
   assetVersion?: string;
@@ -88,6 +92,11 @@ export interface PublicReleaseBase {
 
 export interface DteAerialRelease extends PublicReleaseBase {
   type: "benchmark-dataset";
+  paper: {
+    url: string;
+    citation: string;
+    bibtex: string;
+  };
   dteAerial: {
     benchmarkSites: number;
     benchmarkPatches: number;
@@ -128,6 +137,8 @@ const DEFAULT_DTE_AERIAL_PREVIEW_SITE_IDS = [375, 1396, 5584];
 
 export const DTE_AERIAL_EXPORT_BASE_URL =
   "https://data2.deadtrees.earth/reference/69e57f93-d003-4b64-9108-fe3dfa654918";
+
+const DTE_AERIAL_VIEW_ONLY_PREVIEW_BASE_URL = "/assets/releases/dte-aerial-bench";
 
 export const getCoarseBiomeGroup = (biome: string) => {
   const normalized = biome.toLowerCase();
@@ -458,13 +469,16 @@ export const getDteAerialPatchImages = (
   patchIndex = 0,
 ): DteAerialPatchImageSet => {
   const base = makeDteAerialPatchBase(dataset, resolutionCm, patchIndex);
-  const folder = `${DTE_AERIAL_EXPORT_BASE_URL}/${dataset.id}/png`;
+  const folder = dataset.viewOnly
+    ? `${DTE_AERIAL_VIEW_ONLY_PREVIEW_BASE_URL}/${dataset.id}`
+    : `${DTE_AERIAL_EXPORT_BASE_URL}/${dataset.id}/png`;
+  const rgbExtension = dataset.viewOnly ? "webp" : "png";
 
   return {
     resolutionCm,
     patchIndex,
     label: `Patch ${patchIndex + 1}`,
-    rgb: withDteAerialAssetVersion(`${folder}/${base}.png`, dataset),
+    rgb: withDteAerialAssetVersion(`${folder}/${base}.${rgbExtension}`, dataset),
     treeCoverMask: withDteAerialAssetVersion(
       `${folder}/${base}_forestcover_ref.png`,
       dataset,
@@ -644,7 +658,7 @@ export const dteAerialRelease: DteAerialRelease = {
     "DTE-aerial-bench: A multi-resolution manually labelled aerial benchmark for tree cover and mortality segmentation",
   type: "benchmark-dataset",
   typeLabel: "Benchmark dataset",
-  status: "coming-soon",
+  status: "available",
   summary:
     "A curated aerial benchmark for tree cover and mortality segmentation, built from high-resolution drone and aircraft orthophotos with expert masks.",
   prepackagedPackageSlugs: [
@@ -653,7 +667,22 @@ export const dteAerialRelease: DteAerialRelease = {
     "image-tiles-1024-global-aerial-sampled-20-random",
   ],
   links: {
-    artifact: "#dataset-download-placeholder",
+    artifact:
+      "https://huggingface.co/datasets/ayushi3536/deadtree.earth-aerial-bench",
+  },
+  paper: {
+    url: "https://doi.org/10.48550/arXiv.2605.19605",
+    citation:
+      "Sharma, A., Mosig, C., Drees, L., Soltani, S., Vajna-Jehle, J., Sheppard, A., Ahmadi, B., Schmid, J., Neumeier, P., Jacobs, N., Wegner, J. D., & Kattenborn, T. (2026). deadtrees.earth-aerial: A Multi-Resolution Aerial Image Dataset for Tree Cover and Mortality Detection. arXiv:2605.19605. https://doi.org/10.48550/arXiv.2605.19605",
+    bibtex: `@misc{sharma2026deadtreesearthaerialmultiresolutionaerialimage,
+  title={deadtrees.earth-aerial: A Multi-Resolution Aerial Image Dataset for Tree Cover and Mortality Detection},
+  author={Ayushi Sharma and Clemens Mosig and Lukas Drees and Salim Soltani and Janusch Vajna-Jehle and Aaron Sheppard and Belqis Ahmadi and Jonathan Schmid and Paul Neumeier and Nathan Jacobs and Jan Dirk Wegner and Teja Kattenborn},
+  year={2026},
+  eprint={2605.19605},
+  archivePrefix={arXiv},
+  primaryClass={cs.CV},
+  url={https://arxiv.org/abs/2605.19605},
+}`,
   },
   dteAerial: {
     benchmarkSites: 25,
@@ -832,6 +861,7 @@ export const dteAerialRelease: DteAerialRelease = {
         biome: "Temperate Broadleaf and Mixed Forests",
         license: "CC BY",
         citationUrl: "https://data.geonadir.com/image-collection-details/674",
+        viewOnly: true,
         thumbnailPath:
           "f499c10d-66d5-4be5-8294-78c0c18c6f39/4181_thumbnail.jpg",
         exportSeed: "1768225381580",
@@ -844,6 +874,7 @@ export const dteAerialRelease: DteAerialRelease = {
         biome: "Temperate Broadleaf and Mixed Forests",
         license: "CC BY",
         citationUrl: "https://data.geonadir.com/image-collection-details/679",
+        viewOnly: true,
         thumbnailPath:
           "a19c6e39-ed10-4dd7-af91-25f63f5d9da1/4182_thumbnail.jpg",
         exportSeed: "1764090893821",
@@ -856,6 +887,7 @@ export const dteAerialRelease: DteAerialRelease = {
         biome: "Temperate Broadleaf and Mixed Forests",
         license: "CC BY",
         citationUrl: "https://data.geonadir.com/image-collection-details/3066",
+        viewOnly: true,
         thumbnailPath:
           "1b0d5cff-a5fa-4a97-9af0-e6baeddd4b99/4471_thumbnail.jpg",
         exportSeed: "1768211503784",
