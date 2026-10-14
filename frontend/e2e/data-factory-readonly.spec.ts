@@ -344,8 +344,11 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
       }
     }
 
+    // The package journey below needs a data package; editorial releases
+    // such as the benchmark open their own detail pages.
     const availableRelease = releaseCards
       .filter({ has: page.getByText("Available") })
+      .filter({ has: page.getByText("Data package", { exact: true }) })
       .filter({ has: page.getByRole("button", { name: "Open release" }) })
       .first();
     await expect(availableRelease).toBeVisible();
