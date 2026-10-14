@@ -7,11 +7,6 @@ import {
 import { Alert, Button } from "antd";
 import MobileMapSectionHeading from "../MapControls/mobile/MobileMapSectionHeading";
 import { formatPriwaAreaKm2, formatPriwaMebibytes } from "./priwaFieldFlights";
-import {
-  PRIWA_OFFLINE_MOSAIC_AREA_KM2,
-  PRIWA_OFFLINE_MOSAIC_BYTES,
-  PRIWA_OFFLINE_MOSAIC_LIMIT,
-} from "./priwaOfflineMosaicPlan";
 import { formatPriwaReviewDate } from "./priwaReviewPresentation";
 import type { PriwaOfflineMosaicsState } from "./usePriwaOfflineMosaics";
 
@@ -83,11 +78,8 @@ export default function PriwaOfflineFlightSection({
             </div>
           ))}
           <div className="text-xs text-slate-500">
-            {entries.length} von {PRIWA_OFFLINE_MOSAIC_LIMIT} gespeichert ·{" "}
-            {formatPriwaMebibytes(savedBytes)} von{" "}
-            {formatPriwaMebibytes(PRIWA_OFFLINE_MOSAIC_BYTES)} ·{" "}
-            {formatPriwaAreaKm2(savedArea)} von{" "}
-            {formatPriwaAreaKm2(PRIWA_OFFLINE_MOSAIC_AREA_KM2)}
+            {entries.length} gespeichert · {formatPriwaMebibytes(savedBytes)}{" "}
+            · {formatPriwaAreaKm2(savedArea)}
           </div>
           {persistent === false && (
             <div className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">

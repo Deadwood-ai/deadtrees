@@ -315,7 +315,7 @@ describe("PriwaOfflineFlightSection", () => {
     expect(html).toContain(
       'aria-label="Offline-Befliegung Hangflug Nord entfernen"',
     );
-    expect(html).toContain("1 von 2 gespeichert · 312 MiB von 500 MiB");
+    expect(html).toContain("1 gespeichert · 312 MiB · 1,8 km²");
     expect(html).toContain("bei Speichermangel");
   });
 

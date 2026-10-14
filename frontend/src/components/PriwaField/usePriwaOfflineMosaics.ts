@@ -11,7 +11,6 @@ import {
 } from "./priwaOfflineMosaics";
 import {
   planPriwaOfflineMosaics,
-  validatePriwaMosaicPackage,
   type IPriwaOfflineMosaicPlan,
 } from "./priwaOfflineMosaicPlan";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
@@ -142,21 +141,6 @@ export function usePriwaOfflineMosaics(
       run(async (signal) => {
         setPlans([]);
         const nextPlans = await planPriwaOfflineMosaics(selection, signal);
-        try {
-          validatePriwaMosaicPackage([
-            ...entries.filter(
-              (entry) => !selection.some((item) => item.id === entry.mosaic.id),
-            ),
-            ...nextPlans,
-          ]);
-        } catch (error) {
-          throw Object.assign(
-            new Error(
-              `${error instanceof Error ? error.message : "Speicherlimit erreicht."} Bitte gegebenenfalls eine gespeicherte Befliegung entfernen.`,
-            ),
-            { cause: error },
-          );
-        }
         setPlans(nextPlans);
       }),
     download: () =>

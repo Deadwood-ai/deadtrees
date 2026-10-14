@@ -3,7 +3,6 @@ import { Alert, Button, Progress, Tooltip } from "antd";
 import { useRef } from "react";
 
 import { formatPriwaAreaKm2, formatPriwaMebibytes } from "./priwaFieldFlights";
-import { PRIWA_OFFLINE_MOSAIC_LIMIT } from "./priwaOfflineMosaicPlan";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
 import type { PriwaOfflineMosaicsState } from "./usePriwaOfflineMosaics";
 
@@ -32,9 +31,6 @@ export default function PriwaFlightDownload({
   const saved = entries.some(
     (entry) => entry.mosaic.id === flight.id && entry.available,
   );
-  const wouldExceedCount =
-    !entries.some((entry) => entry.mosaic.id === flight.id) &&
-    entries.length >= PRIWA_OFFLINE_MOSAIC_LIMIT;
   const isDownloading = !!plan && !!progress;
   const isOwnRequest = requestedId.current === flight.id;
   const isOtherFlightBusy = busy && !plan && plans.length > 0;
@@ -86,7 +82,7 @@ export default function PriwaFlightDownload({
         type="text"
         icon={<CloudDownloadOutlined />}
         aria-label="Befliegung offline laden"
-        disabled={!isOnline || busy || wouldExceedCount}
+        disabled={!isOnline || busy}
         loading={busy && isOwnRequest}
         onClick={prepare}
       />
@@ -152,11 +148,6 @@ export default function PriwaFlightDownload({
             </Tooltip>
           </span>
         </div>
-      ) : wouldExceedCount ? (
-        <p className="col-span-full mb-0 text-xs text-amber-700">
-          Bitte zuerst eine gespeicherte Befliegung entfernen (höchstens{" "}
-          {PRIWA_OFFLINE_MOSAIC_LIMIT}).
-        </p>
       ) : isOtherFlightBusy ? (
         <p className="col-span-full mb-0 text-xs text-slate-500">
           Eine andere Befliegung wird gespeichert.

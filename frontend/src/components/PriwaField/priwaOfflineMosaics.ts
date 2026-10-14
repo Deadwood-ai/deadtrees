@@ -183,7 +183,6 @@ export async function downloadPriwaOfflineMosaics(
       const retained = oldEntries.filter(
         (entry) => !plans.some(({ mosaic }) => mosaic.id === entry.mosaic.id),
       );
-      validatePriwaMosaicPackage([...retained, ...plans]);
       const totalBytes = plans.reduce((sum, plan) => sum + plan.bytes, 0);
       const estimate = await navigator.storage.estimate();
       if (
