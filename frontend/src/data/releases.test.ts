@@ -56,3 +56,19 @@ describe("Sentinel-2 satellite map release", () => {
     ]);
   });
 });
+
+describe("DTE-aerial-bench publication", () => {
+  it("is available with a real download link instead of a placeholder", () => {
+    expect(dteAerialRelease.status).toBe("available");
+    expect(dteAerialRelease.links.artifact).toBe(
+      "https://huggingface.co/datasets/ayushi3536/deadtree.earth-aerial-bench",
+    );
+  });
+
+  it("withholds patch previews only for the view-only GeoNadir sites", () => {
+    const viewOnlyIds = dteAerialRelease.dteAerial.sites
+      .filter((site) => site.viewOnly)
+      .map((site) => site.id);
+    expect(viewOnlyIds).toEqual([4181, 4182, 4471]);
+  });
+});

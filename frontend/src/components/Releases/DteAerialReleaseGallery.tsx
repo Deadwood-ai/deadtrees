@@ -19,6 +19,7 @@ import {
 } from "../../data/releases";
 import { SegmentationMaskPreview } from "./SegmentationMaskPreview";
 import { MASK_COLORS } from "./maskRendering";
+import { useNearViewport } from "./useNearViewport";
 
 type SortKey = "dataset" | "biome" | "west-east" | "north-south";
 type GalleryResolutionFilter = "all" | "20" | "10" | "5";
@@ -151,14 +152,13 @@ const sortSites = (sites: DteAerialSite[], sortKey: SortKey) => {
 };
 
 function ImageTile({ src, alt }: { src: string; alt: string }) {
+  const { ref, isNear } = useNearViewport<HTMLDivElement>();
+
   return (
-    <div className="aspect-square overflow-hidden rounded-md bg-gray-100">
-      <img
-        src={src}
-        alt={alt}
-        loading="lazy"
-        className="h-full w-full object-cover"
-      />
+    <div ref={ref} className="aspect-square overflow-hidden rounded-md bg-gray-100">
+      {isNear && (
+        <img src={src} alt={alt} className="h-full w-full object-cover" />
+      )}
     </div>
   );
 }
@@ -485,6 +485,30 @@ function DatasetAdminCell({
   );
 }
 
+function ViewOnlyPatchNotice({ site }: { site: DteAerialSite }) {
+  return (
+    <div
+      data-testid="benchmark-view-only-notice"
+      className="flex w-[380px] shrink-0 flex-col justify-center rounded-lg border border-dashed border-gray-300 bg-white/70 p-5 text-sm leading-6 text-gray-600"
+    >
+      <p className="m-0">
+        This dataset is view-only on deadtrees.earth, so its patches are not
+        previewed here. They are part of the benchmark download.
+      </p>
+      {site.citationUrl && (
+        <a
+          className="mt-2 font-medium text-[#1B5E35]"
+          href={site.citationUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          View the source imagery
+        </a>
+      )}
+    </div>
+  );
+}
+
 function DatasetPatchRow({
   site,
   resolutionFilter,
@@ -527,38 +551,44 @@ function DatasetPatchRow({
         onResolutionChange={onResolutionChange}
       />
       <div className="relative flex gap-3 bg-[#eef3f0] p-4 transition-colors duration-150 group-hover/row:bg-[#e6ece8]">
-        <Tooltip title="Previous patches" mouseEnterDelay={0.3}>
-          <div className="pointer-events-none sticky left-[216px] z-20 flex w-0 shrink-0 items-center">
-            <Button
-              shape="circle"
-              size="large"
-              icon={<LeftOutlined />}
-              aria-label="Scroll gallery one patch left"
-              className="pointer-events-auto border-gray-200 bg-white/95 text-gray-700 opacity-85 shadow-sm transition group-hover/row:opacity-100 hover:border-[#1B5E35]/60 hover:text-[#1B5E35]"
-              onClick={() => onScrollGallery(-1)}
-            />
-          </div>
-        </Tooltip>
-        <Tooltip title="Next patches" mouseEnterDelay={0.3}>
-          <div className="pointer-events-none sticky left-[calc(100vw-104px)] z-20 flex w-0 shrink-0 items-center">
-            <Button
-              shape="circle"
-              size="large"
-              icon={<RightOutlined />}
-              aria-label="Scroll gallery one patch right"
-              className="pointer-events-auto border-gray-200 bg-white/95 text-gray-700 opacity-85 shadow-sm transition group-hover/row:opacity-100 hover:border-[#1B5E35]/60 hover:text-[#1B5E35]"
-              onClick={() => onScrollGallery(1)}
-            />
-          </div>
-        </Tooltip>
-        {patches.map((patch) => (
-          <PatchCard
-            key={`${site.id}-${patch.resolutionCm}-${patch.patchIndex}`}
-            site={site}
-            patch={patch}
-            onSelect={onSelectPatch}
-          />
-        ))}
+        {site.viewOnly ? (
+          <ViewOnlyPatchNotice site={site} />
+        ) : (
+          <>
+            <Tooltip title="Previous patches" mouseEnterDelay={0.3}>
+              <div className="pointer-events-none sticky left-[216px] z-20 flex w-0 shrink-0 items-center">
+                <Button
+                  shape="circle"
+                  size="large"
+                  icon={<LeftOutlined />}
+                  aria-label="Scroll gallery one patch left"
+                  className="pointer-events-auto border-gray-200 bg-white/95 text-gray-700 opacity-85 shadow-sm transition group-hover/row:opacity-100 hover:border-[#1B5E35]/60 hover:text-[#1B5E35]"
+                  onClick={() => onScrollGallery(-1)}
+                />
+              </div>
+            </Tooltip>
+            <Tooltip title="Next patches" mouseEnterDelay={0.3}>
+              <div className="pointer-events-none sticky left-[calc(100vw-104px)] z-20 flex w-0 shrink-0 items-center">
+                <Button
+                  shape="circle"
+                  size="large"
+                  icon={<RightOutlined />}
+                  aria-label="Scroll gallery one patch right"
+                  className="pointer-events-auto border-gray-200 bg-white/95 text-gray-700 opacity-85 shadow-sm transition group-hover/row:opacity-100 hover:border-[#1B5E35]/60 hover:text-[#1B5E35]"
+                  onClick={() => onScrollGallery(1)}
+                />
+              </div>
+            </Tooltip>
+            {patches.map((patch) => (
+              <PatchCard
+                key={`${site.id}-${patch.resolutionCm}-${patch.patchIndex}`}
+                site={site}
+                patch={patch}
+                onSelect={onSelectPatch}
+              />
+            ))}
+          </>
+        )}
       </div>
     </div>
   );
