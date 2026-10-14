@@ -15,7 +15,7 @@ import re
 import subprocess
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,8 +30,10 @@ WORKER_NAMES = {
 	'host-56916e6e7ab8': 'deepl1',
 }
 SILENT_HOURS = 3
-# A tick runs every 15 minutes; a little overlap so no kill falls between two.
-OOM_WINDOW = '-20min'
+# Kills since the previous tick (2 hours apart at night) plus some overlap, so
+# none falls between two ticks; capped for a first run or a long outage.
+OOM_OVERLAP = timedelta(minutes=5)
+OOM_MAX_WINDOW = timedelta(hours=6)
 # Normal while a deploy drains (docs/playbooks/operator-chat.md).
 DEPLOY_NORMAL_RE = re.compile(r'already holds processor-runtime\.lock|keeping the drain', re.IGNORECASE)
 DEPLOY_ERROR_RE = re.compile(r'refus|error|fatal|traceback', re.IGNORECASE)
@@ -113,11 +115,17 @@ def parse_oom_kills(journal: str, prod_id: str) -> list[str]:
 	return kills
 
 
-def prod_oom_kills() -> list[str] | None:
+def oom_since(now: datetime, last_tick: datetime | None) -> datetime:
+	start = (last_tick or now) - OOM_OVERLAP
+	return max(start, now - OOM_MAX_WINDOW)
+
+
+def prod_oom_kills(since: datetime) -> list[str] | None:
 	prod_id = prod_cgroup_id()
 	if not prod_id:
 		return None
-	code, out = run(['journalctl', '-k', '--since', OOM_WINDOW, '-o', 'short-iso', '--no-pager'])
+	start = since.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+	code, out = run(['journalctl', '-k', '--since', start, '-o', 'short-iso', '--no-pager'])
 	return parse_oom_kills(out, prod_id) if code == 0 else None
 
 
@@ -168,13 +176,13 @@ def http_status(url: str, timeout: int = 15) -> int | str:
 		return type(exc).__name__
 
 
-def collect(now: datetime | None = None) -> dict[str, Any]:
+def collect(now: datetime | None = None, last_tick: datetime | None = None) -> dict[str, Any]:
 	now = now or datetime.now(timezone.utc)
 	worker_rows, worker_error = workers()
 	return {
 		'origin_main': origin_main(),
 		'deploy': deploy_health(now),
-		'prod_oom_kills': prod_oom_kills(),
+		'prod_oom_kills': prod_oom_kills(oom_since(now, last_tick)),
 		'gpu': gpu(),
 		'workers': worker_rows,
 		'workers_error': worker_error,

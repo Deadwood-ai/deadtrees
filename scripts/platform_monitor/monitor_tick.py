@@ -204,7 +204,7 @@ def posthog_delta(items: list[dict[str, Any]], seen: dict[str, int]) -> tuple[di
 		previous = seen.get(item['id'])
 		# The error name is telemetry text, so it stays out of the filing call.
 		summary = (
-			f"PostHog frontend error {item['id']} ({item['occurrences']} in the last hour, {item['users']} users,"
+			f"PostHog frontend error {item['id']} ({item['occurrences']} since the last check, {item['users']} users,"
 			f" first seen {item['first_seen']}): {POSTHOG_URL.format(item['id'])}"
 		)
 		finding = findings_module.finding('yellow', 'posthog', f"error:{item['id']}", summary)
@@ -714,7 +714,8 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 			scorecard = run_script('data_factory_scorecard.py', state_args(operator_dir, 'scorecard-state.json', 'scorecard-latest.md'))
 		except (RuntimeError, ValueError, subprocess.TimeoutExpired):
 			pass
-	facts = host_facts.collect(now)
+	last_tick = state.get('last_tick_at')
+	facts = host_facts.collect(now, datetime.fromisoformat(last_tick.replace('Z', '+00:00')) if isinstance(last_tick, str) else None)
 	current, gaps, unobserved = findings_module.build_findings(snapshot, facts, now)
 	# Baseline, issue map and PostHog cursor live in one state file, written
 	# once at the end, so a tick that dies halfway leaves them consistent.
