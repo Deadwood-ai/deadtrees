@@ -5,7 +5,7 @@ import parseBBox from "../../utils/parseBBox";
 import { resolvePriwaCogUrl } from "./createPriwaCogLayer";
 import type { IPriwaMosaic } from "./usePriwaMosaics";
 
-export const PRIWA_OFFLINE_MOSAIC_LIMIT = 2;
+// Per flight; how many flights fit is left to the device's free storage.
 export const PRIWA_OFFLINE_MOSAIC_BYTES = 500 * 1024 * 1024;
 export const PRIWA_OFFLINE_MOSAIC_AREA_KM2 = 3;
 
@@ -51,32 +51,23 @@ export function priwaMosaicAreaKm2(mosaic: IPriwaMosaic) {
 export function validatePriwaMosaicPackage(plans: IPriwaOfflineMosaicPlan[]) {
   if (
     !plans.length ||
-    plans.length > PRIWA_OFFLINE_MOSAIC_LIMIT ||
     new Set(plans.map(({ mosaic }) => mosaic.id)).size !== plans.length
   ) {
-    throw new Error(
-      "Bitte eine oder zwei unterschiedliche Befliegungen auswählen.",
-    );
+    throw new Error("Bitte unterschiedliche Befliegungen auswählen.");
   }
   if (plans.some(({ bytes }) => !Number.isSafeInteger(bytes) || bytes <= 0)) {
     throw new Error(
       "Die vollständige Dateigröße konnte nicht ermittelt werden.",
     );
   }
-  if (
-    plans.reduce((sum, plan) => sum + plan.bytes, 0) >
-    PRIWA_OFFLINE_MOSAIC_BYTES
-  ) {
+  if (plans.some(({ bytes }) => bytes > PRIWA_OFFLINE_MOSAIC_BYTES)) {
     throw new Error(
-      "Die Auswahl überschreitet 500 MiB. Bitte eine kleinere Befliegung auswählen.",
+      "Die Befliegung überschreitet 500 MiB und kann nicht offline gespeichert werden.",
     );
   }
-  if (
-    plans.reduce((sum, plan) => sum + plan.areaKm2, 0) >
-    PRIWA_OFFLINE_MOSAIC_AREA_KM2
-  ) {
+  if (plans.some(({ areaKm2 }) => areaKm2 > PRIWA_OFFLINE_MOSAIC_AREA_KM2)) {
     throw new Error(
-      "Die vollständigen Befliegungen überschreiten 3 km². Bitte eine kleinere Befliegung auswählen.",
+      "Die Befliegung überschreitet 3 km² und kann nicht offline gespeichert werden.",
     );
   }
 }

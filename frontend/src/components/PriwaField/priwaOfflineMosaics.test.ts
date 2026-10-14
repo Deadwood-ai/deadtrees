@@ -28,10 +28,15 @@ const plan: IPriwaOfflineMosaicPlan = {
 };
 
 describe("complete native-resolution offline packages", () => {
-  it("bounds count, complete footprint and bytes independently", () => {
+  it("bounds each flight's footprint and bytes, not how many are saved", () => {
     expect(plan.areaKm2).toBeGreaterThan(0.8);
     expect(plan.areaKm2).toBeLessThan(0.9);
     expect(() => validatePriwaMosaicPackage([plan])).not.toThrow();
+    const others = [1, 2, 3, 4].map((n) => ({
+      ...plan,
+      mosaic: { ...mosaic, id: `other-${n}` },
+    }));
+    expect(() => validatePriwaMosaicPackage([plan, ...others])).not.toThrow();
     expect(() => validatePriwaMosaicPackage([plan, plan])).toThrow(
       /unterschiedliche/,
     );
