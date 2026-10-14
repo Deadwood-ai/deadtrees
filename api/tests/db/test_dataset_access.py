@@ -171,6 +171,12 @@ def _visible_surfaces(client, dataset_id: int) -> dict[str, bool]:
 	]:
 		key = 'id' if table in (settings.datasets_table, 'v2_full_dataset_view') else 'dataset_id'
 		surfaces[name] = bool(client.table(table).select(key).eq(key, dataset_id).execute().data)
+	with use_service_client() as service:
+		labels = service.table(settings.labels_table).select('id').eq('dataset_id', dataset_id).execute().data
+	label_ids = [row['id'] for row in labels]
+	surfaces['deadwood_geometry'] = bool(
+		client.table(settings.deadwood_geometries_table).select('id').in_('label_id', label_ids).execute().data
+	)
 	try:
 		surfaces['my_access'] = _access(client, dataset_id) is not None
 	except APIError:  # not granted to anonymous visitors
