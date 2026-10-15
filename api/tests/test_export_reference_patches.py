@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -6,8 +7,10 @@ from types import SimpleNamespace
 import fiona
 import geopandas as gpd
 import pytest
+from PIL import Image
 
 from api.src.export import export_reference_patches as export_module
+from api.src.export import reference_previews as preview_module
 from api.src.export import reference_fetch as fetch_module
 
 pytestmark = pytest.mark.unit
@@ -299,6 +302,7 @@ def test_cleanup_removed_patch_exports_removes_stale_replaced_patch_files(tmp_pa
 		(dataset_dir / 'png' / f'{filename_base}.png').write_text('rgb')
 		(dataset_dir / 'png' / f'{filename_base}_deadwood_ref.png').write_text('deadwood')
 		(dataset_dir / 'png' / f'{filename_base}_forestcover_ref.png').write_text('forest')
+		(dataset_dir / 'png' / f'{filename_base}_preview.webp').write_text('preview')
 		(dataset_dir / 'metadata' / f'{filename_base}.json').write_text('{}')
 
 	for filename_base in [current_bases[0], stale_bases[0]]:
@@ -313,10 +317,11 @@ def test_cleanup_removed_patch_exports_removes_stale_replaced_patch_files(tmp_pa
 		reference_dataset_ids=[3251],
 	)
 
-	assert removed_count == 16
+	assert removed_count == 18
 	for filename_base in current_bases:
 		assert (dataset_dir / 'geotiff' / f'{filename_base}.tif').exists()
 		assert (dataset_dir / 'png' / f'{filename_base}.png').exists()
+		assert (dataset_dir / 'png' / f'{filename_base}_preview.webp').exists()
 		assert (dataset_dir / 'metadata' / f'{filename_base}.json').exists()
 	assert (dataset_dir / 'gpkg' / f'{current_bases[0]}.gpkg').exists()
 	assert (dataset_dir / 'metadata' / f'{current_bases[0]}_vector.json').exists()
@@ -325,6 +330,7 @@ def test_cleanup_removed_patch_exports_removes_stale_replaced_patch_files(tmp_pa
 	for filename_base in stale_bases:
 		assert not (dataset_dir / 'geotiff' / f'{filename_base}.tif').exists()
 		assert not (dataset_dir / 'png' / f'{filename_base}.png').exists()
+		assert not (dataset_dir / 'png' / f'{filename_base}_preview.webp').exists()
 		assert not (dataset_dir / 'metadata' / f'{filename_base}.json').exists()
 	assert not (dataset_dir / 'gpkg' / f'{stale_bases[0]}.gpkg').exists()
 	assert not (dataset_dir / 'metadata' / f'{stale_bases[0]}_vector.json').exists()
@@ -762,6 +768,8 @@ def test_main_exports_mask_when_geometry_fetch_succeeds(monkeypatch, tmp_path):
 	assert exit_code == 0
 	with rasterio.open(dataset_dir / 'geotiff' / '10_0_0_20cm_deadwood_ref.tif') as mask:
 		assert 0.45 < (mask.read(1) > 0).mean() < 0.55
+	with Image.open(dataset_dir / 'png' / '10_0_0_20cm_preview.webp') as preview:
+		assert (preview.format, preview.size) == ('WEBP', (512, 512))
 
 
 def test_main_exits_non_zero_when_reference_dataset_fetch_fails(monkeypatch, tmp_path):
@@ -830,3 +838,24 @@ def test_main_removes_existing_exports_when_no_public_reference_datasets_remain(
 
 	assert export_module.main() == 0
 	assert not (tmp_path / '11').exists()
+
+
+def test_backfill_previews_writes_missing_and_outdated_previews_only(tmp_path):
+	png_dir = tmp_path / '375' / 'png'
+	png_dir.mkdir(parents=True)
+	for base in ('375_0_0_5cm', '375_0_1_5cm', '375_0_2_5cm'):
+		Image.new('RGB', (1024, 1024), (40, 120, 40)).save(png_dir / f'{base}.png')
+	Image.new('L', (1024, 1024), 255).save(png_dir / '375_0_0_5cm_deadwood_ref.png')
+
+	current = preview_module.write_preview(png_dir / '375_0_1_5cm.png')
+	outdated = preview_module.write_preview(png_dir / '375_0_2_5cm.png')
+	png_mtime = (png_dir / '375_0_2_5cm.png').stat().st_mtime
+	os.utime(outdated, (png_mtime - 60, png_mtime - 60))
+	current_mtime = current.stat().st_mtime_ns
+
+	assert preview_module.backfill_previews(tmp_path, [375, 400]) == 2
+	assert (png_dir / '375_0_0_5cm_preview.webp').exists()
+	assert not (png_dir / '375_0_0_5cm_deadwood_ref_preview.webp').exists()
+	assert current.stat().st_mtime_ns == current_mtime
+	assert outdated.stat().st_mtime >= png_mtime
+	assert preview_module.backfill_previews(tmp_path, [375]) == 0
