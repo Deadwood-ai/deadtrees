@@ -69,3 +69,16 @@ def test_polygon_kept_when_net_area_above_threshold():
 
 	assert len(result) == 1
 	assert result[0].area == 36
+
+
+def test_kept_polygons_stay_in_input_order():
+	polygons = [Polygon(_square(10, (20 * i, 0))) for i in range(5)]
+	polygons[2] = Polygon(_square(1, (40, 0)))  # below the threshold
+
+	result = filter_polygons_by_area(polygons, min_area=5)
+
+	assert [p.bounds[0] for p in result] == [0, 20, 60, 80]
+
+
+def test_no_polygons_give_no_polygons():
+	assert filter_polygons_by_area([], min_area=5) == []

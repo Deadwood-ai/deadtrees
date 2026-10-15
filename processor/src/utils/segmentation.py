@@ -43,18 +43,35 @@ def mask_to_polygons_scanline(dataset, class_value):
 	"""Polygonize pixels matching class_value without loading the full raster.
 
 	Uses rasterio.features.shapes with a Band reference so GDAL reads
-	scanline-by-scanline rather than materialising the full array.
-	Returns polygons in the dataset CRS.
+	scanline-by-scanline rather than materialising the full array. The band is
+	also its own mask, so the background (0) is never traced: in a dense forest
+	mask its holes are as many polygons as the trees. Returns polygons in the
+	dataset CRS.
 	"""
 	from rasterio.features import shapes
-	from shapely.geometry import shape as shapely_shape
 
+	if class_value == 0:
+		raise ValueError('class 0 is the background and is never polygonized')
 	band = rasterio.Band(dataset, 1, dataset.dtypes[0], dataset.shape)
-	return [
-		shapely_shape(geom)
-		for geom, val in shapes(band, transform=dataset.transform)
-		if int(val) == class_value
-	]
+	return _polygons_from_rings(
+		geom['coordinates'] for geom, val in shapes(band, mask=band, transform=dataset.transform) if int(val) == class_value
+	)
+
+
+def _polygons_from_rings(polygon_rings) -> list[Polygon]:
+	"""Polygons from GeoJSON-style ring lists (shell first), built in one vectorized call."""
+	coords, ring_lengths, rings_per_polygon = [], [], []
+	for rings in polygon_rings:
+		rings_per_polygon.append(len(rings))
+		for ring in rings:
+			ring_lengths.append(len(ring))
+			coords.extend(ring)
+	if not rings_per_polygon:
+		return []
+	linear_rings = shapely.linearrings(
+		np.asarray(coords, dtype=np.float64), indices=np.repeat(np.arange(len(ring_lengths)), ring_lengths)
+	)
+	return list(shapely.polygons(linear_rings, indices=np.repeat(np.arange(len(rings_per_polygon)), rings_per_polygon)))
 
 
 def mask_to_polygons(mask, dataset_reader):
@@ -149,13 +166,16 @@ def reproject_polygons(polygons, src_crs, dst_crs):
 
 def filter_polygons_by_area(polygons, min_area):
 	"""Filter polygons and interior rings below the minimum area."""
+	polygons = np.asarray(polygons, dtype=object)
+	rings, owner = shapely.get_rings(polygons, return_index=True)
 	filtered = []
-	for polygon in polygons:
-		exterior = polygon.exterior
-		filtered_holes = [hole for hole in polygon.interiors if Polygon(hole).area >= min_area]
-		filtered_polygon = Polygon(exterior, filtered_holes)
-		if filtered_polygon.area >= min_area:
-			filtered.append(filtered_polygon)
+	if len(rings):
+		# Every polygon's shell comes first; its holes are kept when they are large enough.
+		shell = np.r_[True, owner[1:] != owner[:-1]]
+		keep = shell | (shapely.area(shapely.polygons(rings)) >= min_area)
+		_, kept_owner = np.unique(owner[keep], return_inverse=True)
+		rebuilt = shapely.polygons(rings[keep], indices=kept_owner)
+		filtered = list(rebuilt[shapely.area(rebuilt) >= min_area])
 
 	print(f'Filtered {len(polygons) - len(filtered)} polygons by minimum area of {min_area}m2.')
 	return filtered

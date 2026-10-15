@@ -6,6 +6,8 @@ from PIL import Image
 from shared.logger import logger
 from shared.logging import LogContext, LogCategory
 
+from ..utils.decimated_read import read_decimated
+
 
 def _to_uint8_rgb(rgb_array: np.ndarray, valid_mask: np.ndarray | None = None) -> np.ndarray:
 	if rgb_array.dtype == np.uint8:
@@ -67,7 +69,14 @@ def calculate_thumbnail(
 			out_height = int(src.height * scale_factor)
 
 			# Read all bands including alpha
-			data = src.read(out_shape=(src.count, out_height, out_width), resampling=Resampling.nearest)
+			data = read_decimated(
+				tiff_file_path,
+				out_height,
+				out_width,
+				lambda part, window, shape: part.read(
+					window=window, out_shape=(part.count, *shape), resampling=Resampling.nearest
+				),
+			)
 
 			# Create RGB array
 			rgb_array = data[:3]  # First 3 bands are RGB
@@ -76,7 +85,14 @@ def calculate_thumbnail(
 			if src.count == 4:
 				alpha = data[3]
 			else:
-				alpha = src.read_masks(1, out_shape=(out_height, out_width), resampling=Resampling.nearest)
+				alpha = read_decimated(
+					tiff_file_path,
+					out_height,
+					out_width,
+					lambda part, window, shape: part.read_masks(
+						1, window=window, out_shape=shape, resampling=Resampling.nearest
+					),
+				)
 
 			rgb_array = _to_uint8_rgb(rgb_array, valid_mask=alpha > 0)
 

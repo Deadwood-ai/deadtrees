@@ -33,6 +33,8 @@ import rasterio
 from rasterio.enums import ColorInterp, MaskFlags, Resampling
 from rasterio.windows import Window
 
+from ..utils.decimated_read import read_decimated
+
 SAMPLE_MAX_SIDE = 1024
 NEAR = 8
 MIN_FRONTIER_FILL_SHARE = 0.25
@@ -51,8 +53,26 @@ def has_edge_fill(src: rasterio.DatasetReader) -> bool:
 		return False
 	scale = max(1, math.ceil(max(src.width, src.height) / SAMPLE_MAX_SIDE))
 	shape = (max(1, src.height // scale), max(1, src.width // scale))
-	rgb = src.read([1, 2, 3], out_shape=(3, *shape), resampling=Resampling.nearest)
-	valid = src.dataset_mask(out_shape=shape, resampling=Resampling.nearest) > 0
+	# An alpha band is the dataset mask: read it with the colours instead of decoding the raster twice.
+	alpha = src.count if src.colorinterp[-1] == ColorInterp.alpha and MaskFlags.alpha in src.mask_flag_enums[0] else None
+	indexes = [1, 2, 3] + ([alpha] if alpha else [])
+	data = read_decimated(
+		src.name,
+		*shape,
+		lambda part, window, out: part.read(indexes, window=window, out_shape=(len(indexes), *out), resampling=Resampling.nearest),
+	)
+	rgb = data[:3]
+	if alpha:
+		valid = data[3] > 0
+	else:
+		valid = (
+			read_decimated(
+				src.name,
+				*shape,
+				lambda part, window, out: part.dataset_mask(window=window, out_shape=out, resampling=Resampling.nearest),
+			)
+			> 0
+		)
 
 	frontier = valid & ~_interior(valid)
 	if not frontier.any():
@@ -137,41 +157,59 @@ def _fill_pixels(rgb: np.ndarray) -> np.ndarray:
 	return (rgb <= NEAR).all(axis=0) | (rgb >= 255 - NEAR).all(axis=0)
 
 
-def _stop_index(non_fill: np.ndarray, axis: int) -> np.ndarray:
-	"""Along ``axis``, the start of the first run of NON_FILL_RUN non-fill pixels, or -1 if there is none."""
-	counts = np.cumsum(non_fill, axis=axis, dtype=np.int32)
-	counts = np.concatenate([np.zeros_like(counts.take([0], axis=axis)), counts], axis=axis)
-	length = non_fill.shape[axis]
-	if length < NON_FILL_RUN:
-		return np.full(non_fill.shape[1 - axis], -1)
-	runs = counts.take(range(NON_FILL_RUN, length + 1), axis=axis) - counts.take(range(0, length - NON_FILL_RUN + 1), axis=axis)
-	full = runs == NON_FILL_RUN
-	return np.where(full.any(axis=axis), full.argmax(axis=axis), -1)
+def _run_starts(non_fill: np.ndarray, axis: int) -> np.ndarray:
+	"""Along ``axis``, True where a run of NON_FILL_RUN non-fill pixels starts."""
+	length = non_fill.shape[axis] - NON_FILL_RUN + 1
+	if length < 1:
+		shape = list(non_fill.shape)
+		shape[axis] = 0
+		return np.zeros(shape, dtype=bool)
+	starts = non_fill.take(range(0, length), axis=axis)
+	for offset in range(1, NON_FILL_RUN):
+		starts &= non_fill.take(range(offset, offset + length), axis=axis)
+	return starts
 
 
-def _column_depths(dataset, rows: int, bottom_up: bool) -> np.ndarray:
-	"""Per column, how many rows a scan from the top (or bottom) edge covers before it stops."""
+def _first_and_last(starts: np.ndarray, axis: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+	"""Along ``axis``: whether any run starts, the first start and the last start."""
+	found = starts.any(axis=axis)
+	if starts.shape[axis] == 0:
+		none = np.zeros(found.shape, dtype=np.int64)
+		return found, none, none
+	first = starts.argmax(axis=axis)
+	last = starts.shape[axis] - 1 - np.flip(starts, axis=axis).argmax(axis=axis)
+	return found, first, last
+
+
+def _collar_extents(dataset, rows: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+	"""Per row the first and the end column, per column the first and the end row, that are not collar.
+
+	A scan from an edge stops at the first run of NON_FILL_RUN non-fill pixels; the scan from
+	the opposite edge stops at the last such run. One pass over the RGB bands yields all four.
+	"""
 	width, height = dataset.width, dataset.height
-	depth = np.full(width, height, dtype=np.int64)
-	open_columns = np.ones(width, dtype=bool)
+	left = np.empty(height, dtype=np.int64)
+	right = np.empty(height, dtype=np.int64)
+	top_depth = np.full(width, height, dtype=np.int64)
+	bottom_end = np.zeros(width, dtype=np.int64)
 	carry = np.zeros((0, width), dtype=bool)
-	scanned = 0
-	tops = range(0, height, rows)
-	for top in reversed(tops) if bottom_up else tops:
+	for top in range(0, height, rows):
 		count = min(rows, height - top)
 		non_fill = ~_fill_pixels(dataset.read([1, 2, 3], window=Window(0, top, width, count)))
-		if bottom_up:
-			non_fill = non_fill[::-1]
-		block = np.concatenate([carry, non_fill])
-		stop = _stop_index(block, axis=0)
-		stopped = open_columns & (stop >= 0)
-		depth[stopped] = scanned - len(carry) + stop[stopped]
-		open_columns &= ~stopped
-		if not open_columns.any():
-			break
-		carry = block[-(NON_FILL_RUN - 1):] if NON_FILL_RUN > 1 else carry
-		scanned += count
-	return depth
+
+		found, first, last = _first_and_last(_run_starts(non_fill, axis=1), axis=1)
+		left[top : top + count] = np.where(found, first, width)
+		right[top : top + count] = np.where(found, last + NON_FILL_RUN, 0)
+
+		# Runs may straddle strips, so the last NON_FILL_RUN - 1 rows are carried over.
+		block = np.concatenate([carry, non_fill]) if len(carry) else non_fill
+		found, first, last = _first_and_last(_run_starts(block, axis=0), axis=0)
+		offset = top - len(carry)
+		opened = found & (top_depth == height)
+		top_depth[opened] = offset + first[opened]
+		bottom_end[found] = offset + last[found] + NON_FILL_RUN
+		carry = block[len(block) - (NON_FILL_RUN - 1) :]
+	return left, right, top_depth, bottom_end
 
 
 class PartialCollarMaskError(RuntimeError):
@@ -191,22 +229,12 @@ def _write_collar_mask(path: str) -> None:
 		# The file is the processor's own copy, so a COG upload may lose its COG layout here;
 		# the COG step rebuilds one. Without this option GDAL refuses to open a COG for update.
 		with (
-			rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True),
+			rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True, GDAL_NUM_THREADS='ALL_CPUS'),
 			rasterio.open(path, 'r+', IGNORE_COG_LAYOUT_BREAK='YES') as dataset,
 		):
 			width, height = dataset.width, dataset.height
 			rows = dataset.block_shapes[0][0]
-			from_top = _column_depths(dataset, rows, bottom_up=False)
-			from_bottom = height - _column_depths(dataset, rows, bottom_up=True)
-			left = np.empty(height, dtype=np.int64)
-			right = np.empty(height, dtype=np.int64)
-			for top in range(0, height, rows):
-				count = min(rows, height - top)
-				non_fill = ~_fill_pixels(dataset.read([1, 2, 3], window=Window(0, top, width, count)))
-				stop = _stop_index(non_fill, axis=1)
-				left[top : top + count] = np.where(stop >= 0, stop, width)
-				stop = _stop_index(non_fill[:, ::-1], axis=1)
-				right[top : top + count] = width - np.where(stop >= 0, stop, width)
+			left, right, from_top, from_bottom = _collar_extents(dataset, rows)
 
 			# Existing transparency: an internal mask is read strip by strip just before that strip
 			# is overwritten; a nodata value is applied from the pixels, because once the new mask
@@ -219,13 +247,15 @@ def _write_collar_mask(path: str) -> None:
 				count = min(rows, height - top)
 				window = Window(0, top, width, count)
 				row_index = np.arange(top, top + count)[:, None]
-				collar = (columns < left[top : top + count, None]) | (columns >= right[top : top + count, None])
-				collar |= (row_index < from_top[None, :]) | (row_index >= from_bottom[None, :])
+				keep = columns >= left[top : top + count, None]
+				keep &= columns < right[top : top + count, None]
+				keep &= row_index >= from_top[None, :]
+				keep &= row_index < from_bottom[None, :]
 				if had_mask:
-					collar |= dataset.read_masks(1, window=window) == 0
+					keep &= dataset.read_masks(1, window=window) != 0
 				elif nodata is not None:  # an explicit mask overrides nodata, as in GDAL
-					collar |= (dataset.read([1, 2, 3], window=window) == nodata).all(axis=0)
-				dataset.write_mask(np.where(collar, 0, 255).astype(np.uint8), window=window)
+					keep &= (dataset.read([1, 2, 3], window=window) != nodata).any(axis=0)
+				dataset.write_mask(keep.view(np.uint8) * np.uint8(255), window=window)
 
 			# Existing overviews (COG uploads) would keep the old transparency at low zoom, and the
 			# COG step reuses them, so rebuild them together with their masks.
