@@ -10,14 +10,12 @@ import { DatasetFilterProvider } from "./hooks/useDatasetFilterProvider";
 import DownloadProvider from "./hooks/useDownloadProvider";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { CookieBanner } from "./components/cookieBanner/CookieBanner";
-import { applyCanvasOptimization } from "./utils/canvasOptimization";
 import { applyThemeCssVariables } from "./theme/cssVariables";
 import { BrowserRouter } from "react-router-dom";
 import { registerPriwaServiceWorker } from "./pwa/priwaServiceWorker";
 import { reloadForNewBuild } from "./utils/staleBuild";
 
 applyThemeCssVariables();
-applyCanvasOptimization();
 registerPriwaServiceWorker();
 
 // Vite fires this when a lazy chunk of the previous deploy is gone. Reload into

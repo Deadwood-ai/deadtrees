@@ -109,52 +109,43 @@ const createVectorLayer = (config: VectorLayerConfig) => {
     transition: 0, // Disable transition for instant rendering
   });
 
-  // Create style function for correction-aware styling
+  // A tile can hold thousands of polygons and is restyled on every redraw, so
+  // the few distinct styles are built once per layer and reused.
+  const hiddenStyle = new Style({}); // Empty style = invisible
+  const pendingDeleteStyle = new Style({
+    fill: new Fill({ color: "rgba(239, 68, 68, 0.3)" }), // Light red fill
+    stroke: new Stroke({
+      color: palette.state.error,
+      width: 2,
+      lineDash: [6, 4], // Dashed line to indicate pending deletion
+    }),
+  });
+  const outlineStyle = (strokeColor: string, strokeWidth: number) =>
+    new Style({
+      fill: new Fill({ color: config.style.fillColor }),
+      stroke: new Stroke({ color: strokeColor, width: strokeWidth }),
+    });
+  // Corrections keep the original fill and only change the border.
+  const defaultStyle = outlineStyle(config.style.strokeColor, config.style.strokeWidth);
+  const pendingStyle = outlineStyle(palette.primary[500], 2); // subtle blue border
+  const approvedStyle = outlineStyle(palette.forest[600], 2); // subtle green border
+
+  // Correction status is only present in the corrections-aware MVT.
   const getFeatureStyle = (feature: FeatureLike) => {
-    // Get correction status from feature properties (only available with corrections-aware MVT)
     const correctionStatus = feature.get("correction_status") as string | undefined;
     const correctionOperation = feature.get("correction_operation") as string | undefined;
     const isDeleted = feature.get("is_deleted") as boolean | undefined;
 
-    // Handle deleted polygons
     if (isDeleted) {
-      // Show pending delete corrections with special styling for auditors
-      if (config.showCorrectionStyling && correctionStatus === "pending" && correctionOperation === "delete") {
-        return new Style({
-          fill: new Fill({ color: "rgba(239, 68, 68, 0.3)" }), // Light red fill
-          stroke: new Stroke({ 
-            color: palette.state.error,
-            width: 2,
-            lineDash: [6, 4], // Dashed line to indicate pending deletion
-          }),
-        });
-      }
-      // Hide deleted polygons from regular users
-      return new Style({}); // Empty style = invisible
+      // Auditors see pending deletions; everyone else does not see deleted polygons.
+      return config.showCorrectionStyling && correctionStatus === "pending" && correctionOperation === "delete"
+        ? pendingDeleteStyle
+        : hiddenStyle;
     }
-
-    // Default style values - keep original fill, only change border for corrections
-    const fillColor = config.style.fillColor;
-    let strokeColor = config.style.strokeColor;
-    let strokeWidth = config.style.strokeWidth;
-
-    if (config.showCorrectionStyling && correctionStatus) {
-      if (correctionStatus === "pending") {
-        // Pending correction - keep original fill, subtle blue border
-        strokeColor = palette.primary[500];
-        strokeWidth = 2;
-      } else if (correctionStatus === "approved") {
-        // Approved correction - keep original fill, subtle green border
-        strokeColor = palette.forest[600];
-        strokeWidth = 2;
-      }
-      // 'none' or 'rejected' use default style (original predictions)
-    }
-
-    return new Style({
-      fill: new Fill({ color: fillColor }),
-      stroke: new Stroke({ color: strokeColor, width: strokeWidth }),
-    });
+    if (config.showCorrectionStyling && correctionStatus === "pending") return pendingStyle;
+    if (config.showCorrectionStyling && correctionStatus === "approved") return approvedStyle;
+    // 'none' or 'rejected' use default style (original predictions)
+    return defaultStyle;
   };
 
   const vectorLayer = new VectorTileLayer({
@@ -162,7 +153,7 @@ const createVectorLayer = (config: VectorLayerConfig) => {
     style: getFeatureStyle,
     maxZoom: 23,
     className: config.className,
-    renderMode: "hybrid", // Use hybrid mode for better performance (GPU acceleration)
+    renderMode: "hybrid", // Polygons are drawn into tile images once, not on every frame
     renderBuffer: 64, // Reduced from 256 for faster rendering
     declutter: false,
     updateWhileAnimating: true, // Enable smooth updates during animation

@@ -119,9 +119,13 @@ export function useMapOverlays({
 	}, [enabled]);
 
 	// Show tooltip
+	// Hover reports the same content on every move over a polygon; keep the
+	// previous object then, so only the overlay moves and React does not rerender.
 	const showTooltip = useCallback((content: TooltipContent, coordinate: Coordinate) => {
 		if (!enabled) return;
-		setTooltipContent(content);
+		setTooltipContent((current) =>
+			current && current.type === content.type && current.status === content.status ? current : content,
+		);
 		tooltipOverlayRef.current?.setPosition(coordinate);
 	}, [enabled]);
 
