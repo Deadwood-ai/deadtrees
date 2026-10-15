@@ -698,3 +698,34 @@ def test_a_failed_reduced_resolution_note_does_not_fail_the_odm_run(monkeypatch)
 	monkeypatch.setattr(process_odm_module, '_write_dataset_note', broken)
 
 	process_odm_module._append_dataset_note(1, 'note', 't')
+
+
+TEXRECON_SEAM_LEVELING_CRASH = (
+	'Segmentation fault\n'
+	'/code/SuperBuild/install/bin/texrecon(_ZN3tex20global_seam_levelingERK8UniGraphSt10shared_ptrIKN3mve12'
+	'TriangleMeshEE+0x1e35)[0x646972a30f35]\n'
+)
+
+
+@pytest.mark.unit
+def test_a_texrecon_crash_in_global_seam_leveling_redoes_texturing_without_it():
+	from processor.src.process_odm import _seam_leveling_retry_command
+
+	command = ['--fast-orthophoto', '--project-path', '/odm_data', 'dataset_1']
+
+	retry = _seam_leveling_retry_command(
+		command, 'texturing_skip_global_seam_leveling: False\n' + TEXRECON_SEAM_LEVELING_CRASH
+	)
+
+	assert retry == ['--rerun-from', 'mvs_texturing', '--texturing-skip-global-seam-leveling', *command]
+
+
+@pytest.mark.unit
+def test_other_odm_failures_and_a_second_crash_are_not_retried():
+	from processor.src.process_odm import _seam_leveling_retry_command
+
+	command = ['--fast-orthophoto', 'dataset_1']
+	retried = ['--rerun-from', 'mvs_texturing', '--texturing-skip-global-seam-leveling', *command]
+
+	assert _seam_leveling_retry_command(command, 'texturing_skip_global_seam_leveling: False\nKilled') is None
+	assert _seam_leveling_retry_command(retried, TEXRECON_SEAM_LEVELING_CRASH) is None
