@@ -41,7 +41,7 @@ export function getPrepackagedDatasetPreviewTiles(
       return {
         kind: "image" as const,
         key: `${datasetPackage.slug}-${site.id}-rgb`,
-        src: previewPatch.rgb,
+        src: previewPatch.rgbPreview,
         alt: `Aerial image tile preview from dataset ${site.id}`,
       };
     });

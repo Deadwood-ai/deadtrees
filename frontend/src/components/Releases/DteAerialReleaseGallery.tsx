@@ -195,7 +195,7 @@ function PatchCard({
           RGB
         </div>
         <ImageTile
-          src={patch.rgb}
+          src={patch.rgbPreview}
           alt={`Dataset ${site.id} ${patch.label} RGB patch at ${patch.resolutionCm} cm`}
         />
       </div>

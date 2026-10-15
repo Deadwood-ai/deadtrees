@@ -75,8 +75,18 @@ describe("DTE-aerial-bench publication", () => {
     expect(patch.rgb).toMatch(
       /^\/assets\/releases\/dte-aerial-bench\/4181\/4181_1768225381580_2_10cm\.webp\?v=/,
     );
+    expect(patch.rgbPreview).toBe(patch.rgb);
     expect(patch.treeCoverMask).toMatch(
       /^\/assets\/releases\/dte-aerial-bench\/4181\/4181_1768225381580_2_10cm_forestcover_ref\.png\?v=/,
     );
+  });
+});
+
+describe("DTE-aerial-bench gallery previews", () => {
+  it("uses the exported WebP preview for cards and the full PNG for zoom", () => {
+    const site = dteAerialRelease.dteAerial.sites.find((s) => s.id === 375)!;
+    const patch = getDteAerialPatchImages(site, 5, 3);
+    expect(patch.rgb).toContain("/375/png/375_0_3_5cm.png?v=");
+    expect(patch.rgbPreview).toContain("/375/png/375_0_3_5cm_preview.webp?v=");
   });
 });
