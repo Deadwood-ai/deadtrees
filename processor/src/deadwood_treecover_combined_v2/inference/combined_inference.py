@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
+import shapely
 import torch
 import torch.nn.functional as F
 from safetensors import safe_open
@@ -18,6 +19,7 @@ from processor.src.utils.inference_dataset import MASK_TIFF_LAYOUT, InferenceDat
 from processor.src.utils.segmentation import (
     filter_polygons_by_area,
     image_reprojector,
+    mask_to_polygons_in_blocks,
     mask_to_polygons_scanline,
     reproject_polygons,
 )
@@ -44,6 +46,16 @@ PADDING = 256
 #   2. One Chaikin corner-cutting smoothing pass.
 VW_AREA_THRESHOLD = 0.0625  # m² — Visvalingam-Whyatt effective-area threshold
 CHAIKIN_ITERATIONS = 1      # corner-cutting smoothing passes after VW
+# Chaikin cuts each corner a quarter of the way along its segments. Splitting longer
+# segments first keeps every boundary within 25 cm of the simplified one.
+MAX_SMOOTHING_SEGMENT = 1.0  # m
+
+# Treecover is polygonized in fixed blocks so no single forest polygon spans a whole
+# tile: one polygon with 87k holes and 5M vertices kept post-processing busy for hours
+# and is too heavy for the database and map (DT-1379). Each block is read with a
+# margin, simplified, then clipped to the block, so neighbours meet without gaps.
+TREECOVER_BLOCK_SIZE = 4096  # pixels; about 200 m at the 5 cm inference resolution
+TREECOVER_BLOCK_PADDING = 128  # pixels; well beyond how far VW and Chaikin move a boundary
 
 
 def _explode_polygons(geom):
@@ -109,6 +121,7 @@ def _simplify_and_smooth(polygon):
         simplified = _vw_simplify_polygon(polygon, VW_AREA_THRESHOLD)
         if simplified is None or simplified.is_empty:
             return [polygon]
+        simplified = shapely.segmentize(simplified, MAX_SMOOTHING_SEGMENT)
         smoothed = []
         for part in _explode_polygons(simplified):
             smoothed.extend(_explode_polygons(_chaikin_polygon(part, CHAIKIN_ITERATIONS)))
@@ -233,7 +246,7 @@ class CombinedInference:
             # naturally without a union step.
             progress('Combined inference finished; polygonizing deadwood')
             deadwood_polygons = self._polygons_from_mask(tmp_class_path, CLASS_DEADWOOD, 'deadwood', src_crs, orig_crs, progress)
-            treecover_polygons = self._polygons_from_mask(tmp_treecover_path, 1, 'treecover', src_crs, orig_crs, progress)
+            treecover_polygons = self._treecover_polygons_in_blocks(tmp_treecover_path, src_crs, orig_crs, progress)
             return deadwood_polygons, treecover_polygons
 
         finally:
@@ -255,7 +268,27 @@ class CombinedInference:
         progress(f'Simplified {name} to {len(polygons)} polygons in {time.monotonic() - started:.0f} s')
         return polygons
 
+    def _treecover_polygons_in_blocks(self, mask_path, inference_crs, orig_crs, progress):
+        started = time.monotonic()
+        polygons = []
+        with rasterio.open(mask_path) as ds:
+            for core_bounds, block_polygons in mask_to_polygons_in_blocks(
+                ds, 1, TREECOVER_BLOCK_SIZE, TREECOVER_BLOCK_PADDING
+            ):
+                for polygon in self._simplify_polygons(block_polygons):
+                    for part in _explode_polygons(shapely.clip_by_rect(polygon, *core_bounds)):
+                        polygons.extend(_explode_polygons(repair_polygon(part)))
+        largest = max((len(p.interiors) for p in polygons), default=0)
+        progress(
+            f'Polygonized and simplified treecover in {TREECOVER_BLOCK_SIZE} px blocks: {len(polygons)} polygons, '
+            f'up to {largest} holes in one, in {time.monotonic() - started:.0f} s'
+        )
+        return reproject_polygons(polygons, inference_crs, orig_crs)
+
     def _filter_polygons(self, polygons, inference_crs, orig_crs):
+        return reproject_polygons(self._simplify_polygons(polygons), inference_crs, orig_crs)
+
+    def _simplify_polygons(self, polygons):
         polygons = filter_polygons_by_area(polygons, MINIMUM_POLYGON_AREA)
         # Simplify + smooth while still in the metric inference CRS so the VW area
         # threshold is in m². Each input polygon yields one or more output polygons;
@@ -268,5 +301,4 @@ class CombinedInference:
         # not slip past the pre-simplification filter.
         simplified = filter_polygons_by_area(simplified, MINIMUM_POLYGON_AREA)
         print(f'Simplified {len(polygons)} polygons (VW {VW_AREA_THRESHOLD}m² + Chaikin x{CHAIKIN_ITERATIONS}).')
-        polygons = reproject_polygons(simplified, inference_crs, orig_crs)
-        return polygons
+        return simplified

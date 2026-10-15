@@ -57,6 +57,37 @@ def mask_to_polygons_scanline(dataset, class_value):
 	]
 
 
+def mask_to_polygons_in_blocks(dataset, class_value, block_size, padding):
+	"""Polygonize pixels matching class_value one block at a time.
+
+	Yields ``(core_bounds, polygons)`` per ``block_size`` pixel block. The polygons
+	cover the block plus ``padding`` pixels on each side, so a caller can simplify
+	them and clip to ``core_bounds`` (minx, miny, maxx, maxy in the dataset CRS)
+	without block-edge artefacts. Neighbouring cores share their edges exactly.
+	"""
+	from rasterio.features import shapes
+	from rasterio.windows import Window
+	from rasterio.windows import bounds as window_bounds
+	from shapely.geometry import shape as shapely_shape
+
+	for row in range(0, dataset.height, block_size):
+		for col in range(0, dataset.width, block_size):
+			core = Window(col, row, min(block_size, dataset.width - col), min(block_size, dataset.height - row))
+			row_off, col_off = max(row - padding, 0), max(col - padding, 0)
+			padded = Window(
+				col_off,
+				row_off,
+				min(col + core.width + padding, dataset.width) - col_off,
+				min(row + core.height + padding, dataset.height) - row_off,
+			)
+			block = dataset.read(1, window=padded)
+			matches = block == class_value
+			if not matches.any():
+				continue
+			geometries = shapes(block, mask=matches, transform=dataset.window_transform(padded))
+			yield window_bounds(core, dataset.transform), [shapely_shape(geom) for geom, _ in geometries]
+
+
 def mask_to_polygons(mask, dataset_reader):
 	"""Convert a binary mask into polygons in the dataset CRS."""
 	import cv2

@@ -142,3 +142,82 @@ def test_many_hole_repair_matches_buffer0():
 
 def _chaikin_coords(ring):
 	return combined_inference._chaikin_ring(ring.coords, combined_inference.CHAIKIN_ITERATIONS)
+
+
+def _write_mask(path, mask, pixel_size=0.05):
+	import rasterio
+	from rasterio.transform import from_origin
+
+	with rasterio.open(
+		path, 'w', driver='GTiff', height=mask.shape[0], width=mask.shape[1], count=1, dtype='uint8',
+		crs='EPSG:32634', transform=from_origin(500000, 5000000, pixel_size, pixel_size),
+	) as dst:
+		dst.write(mask, 1)
+
+
+def _dense_forest_mask():
+	"""A 600 x 600 px forest at 5 cm with clearings that cross the block lines."""
+	import numpy as np
+
+	rng = np.random.default_rng(1379)
+	mask = np.ones((600, 600), dtype=np.uint8)
+	mask[:40, :] = 0  # open land along one edge
+	for row, col, radius in zip(rng.integers(0, 600, 120), rng.integers(0, 600, 120), rng.integers(3, 25, 120)):
+		rows, cols = np.ogrid[:600, :600]
+		mask[(rows - row) ** 2 + (cols - col) ** 2 <= radius**2] = 0
+	return mask
+
+
+def test_treecover_in_blocks_keeps_the_area_and_no_polygon_spans_blocks(monkeypatch, tmp_path):
+	"""Block-wise treecover covers the same ground as the whole-mask result, without
+	gaps or overlaps along the block lines, and every polygon stays in its block (DT-1379)."""
+	import shapely
+
+	path = tmp_path / 'treecover.tif'
+	_write_mask(path, _dense_forest_mask())
+	monkeypatch.setattr(combined_inference, 'reproject_polygons', lambda polygons, src, dst: polygons)
+	monkeypatch.setattr(combined_inference, 'TREECOVER_BLOCK_SIZE', 128)
+	monkeypatch.setattr(combined_inference, 'TREECOVER_BLOCK_PADDING', 32)
+	inference = CombinedInference.__new__(CombinedInference)
+	crs = CRS.from_epsg(32634)
+	messages = []
+
+	whole = shapely.union_all(inference._polygons_from_mask(str(path), 1, 'treecover', crs, crs, lambda _: None))
+	blocks = inference._treecover_polygons_in_blocks(str(path), crs, crs, messages.append)
+
+	def block_of(x, y):
+		return int((x - 500000) // (128 * 0.05)), int((5000000 - y) // (128 * 0.05))
+
+	assert all(p.is_valid for p in blocks)
+	assert all(block_of(p.bounds[0] + 1e-6, p.bounds[3] - 1e-6) == block_of(p.bounds[2] - 1e-6, p.bounds[1] + 1e-6) for p in blocks)
+	union = shapely.union_all(blocks)
+	assert abs(sum(p.area for p in blocks) - union.area) < 1e-6 * union.area  # no overlaps
+	# VW and Chaikin vary a little with where a ring starts and ends, so the two results
+	# differ by well under 1 %, spread over the tile rather than along the block lines.
+	assert union.symmetric_difference(whole).area < 1e-2 * whole.area
+	assert messages[0].startswith('Polygonized and simplified treecover in 128 px blocks')
+
+
+def test_block_polygonization_tiles_the_mask_exactly(tmp_path):
+	"""Clipped to their cores, the block polygons rebuild the mask pixel for pixel."""
+	import numpy as np
+	import rasterio
+	import shapely
+
+	from processor.src.utils.segmentation import mask_to_polygons_in_blocks
+
+	path = tmp_path / 'mask.tif'
+	mask = _dense_forest_mask()[:250, :190]
+	_write_mask(path, mask, pixel_size=1)
+
+	with rasterio.open(path) as ds:
+		blocks = list(mask_to_polygons_in_blocks(ds, 1, 64, 8))
+	pieces = [shapely.clip_by_rect(p, *core) for core, polygons in blocks for p in polygons]
+
+	assert {core for core, _ in blocks} <= {
+		(500000 + c, 5000000 - min(r + 64, 250), 500000 + min(c + 64, 190), 5000000 - r)
+		for r in range(0, 250, 64)
+		for c in range(0, 190, 64)
+	}
+	assert shapely.union_all(pieces).area == pytest.approx(float(mask.sum()))
+	assert sum(p.area for p in pieces) == pytest.approx(float(mask.sum()))
