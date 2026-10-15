@@ -30,14 +30,17 @@ The direct database stage is split across two least-privilege entry points:
 - the database-host forced-command helper only accepts the explicit prepare,
   dump, capacity, verify, status, preserve, release, and cleanup operations.
 
-The database is dumped with `pg_dump --format directory --jobs=2 --compress=0`
-into `/var/lib/postgresql/backup-stage/logical` inside `supabase-db`. That path
-is a bind mount of `/data/database-backup-stage` on the database host, so the
-stage uses the large `/data` volume instead of the root disk that also holds
-the PostgreSQL data directory. Before creating the stage, the forced-command
-helper requires available space on the stage filesystem to exceed 300% of the
-current database size plus a 50 GiB write-safety reserve. A failed capacity
-check exits before `pg_dump` writes anything.
+The database is dumped with `pg_dump --format custom --compress=0`, run through
+`docker exec` in the unchanged `supabase-db` container. The dump streams to the
+helper's standard output, which writes it on the database host to
+`/data/database-backup-stage/postgres.dump`. The stage therefore uses the large
+`/data` volume, not the root disk that also holds the PostgreSQL data directory,
+and the database container needs no extra mount or restart. A dump is renamed
+from `postgres.dump.partial` only after `pg_dump` succeeds. Before creating the
+stage, the helper requires available space on `/data` to exceed 300% of the
+current database size plus a 50 GiB write-safety reserve; a failed capacity
+check exits before `pg_dump` starts. The Storage repository must exclude
+`/data/database-backup-stage` (see the installation contract).
 Before the dump starts, the wrapper performs a Borg protocol handshake through
 the complete reverse-tunnel path. After PostgreSQL connections close, the
 database host sends a tar stream through a private `borg`-owned Unix socket to
@@ -101,38 +104,10 @@ The tracked sources map to these production locations:
 | `scripts/backup/tmpfiles.d/deadtrees-database-backup.conf` | `/etc/tmpfiles.d/deadtrees-database-backup.conf` on the database host |
 | `scripts/backup/tmpfiles.d/deadtrees-database-backup-repository.conf` | `/etc/tmpfiles.d/deadtrees-database-backup-repository.conf` on the backup host |
 
-### Dump stage on `/data`
-
-The Supabase compose file on the database host is not tracked here. Before
-installing helpers that use the `/data` stage, prepare it once:
-
-1. Create `/data/database-backup-stage` owned by the container's `postgres`
-   user with mode `0700`. Docker runs with user-namespace remapping, so create
-   it through a container rather than chowning on the host:
-
-   ```bash
-   docker run --rm -v /data:/d supabase/postgres:15.8.1.085 \
-     sh -c 'mkdir -m 0700 /d/database-backup-stage && chown postgres:postgres /d/database-backup-stage'
-   ```
-
-2. Add this line to the `db` service's `volumes` in
-   `/apps/supabase.deadtrees.earth/docker-compose.yml`, keeping a dated copy of
-   the file:
-
-   ```yaml
-   - /data/database-backup-stage:/var/lib/postgresql/backup-stage:Z
-   ```
-
-3. Recreate only the database container (`docker compose up -d db`). This
-   restarts PostgreSQL, so schedule it outside processing peaks and confirm the
-   API and processors reconnect.
-4. Exclude the stage from the Storage repository by adding
-   `/data/database-backup-stage` to `exclude_patterns` in
-   `/home/remote-backup/.config/borgmatic/storage.yaml` on the backup host.
-   Otherwise the nightly Storage backup also archives each full dump.
-5. Confirm `space-status` reports the `/data` capacity, then install the
-   updated helpers. The old stage under the PostgreSQL data directory can be
-   removed once it reports `absent` or after a preserved dump was re-archived.
+Before installing helpers that stage on `/data`, add `/data/database-backup-stage`
+to `exclude_patterns` in `/home/remote-backup/.config/borgmatic/storage.yaml` on
+the backup host, so a preserved recovery dump is not also archived as Storage
+data. The helpers create and remove the stage directory themselves as `dendro`.
 
 Install executable scripts with mode `0755` and configuration with mode `0600`,
 using an atomic replacement and retaining the previous files for rollback. The
@@ -334,7 +309,9 @@ borg check --archives-only --verify-data --glob-archives ARCHIVE \
   /mnt/raid/backups/supabase.deadtrees.earth
 ```
 
-The archive listing must contain `postgres-directory.tar`. List the tar contents
+The archive listing must contain `postgres-directory.tar`. Despite its historical
+name, the tar holds one custom-format `postgres.dump`; restore it with
+`pg_restore` (optionally with `--jobs`). List the tar contents
 through a safe temporary restore path and verify that PostgreSQL has zero dump
 sessions afterward. After a successful run, confirm that both database-host and
 backup-host staging are absent and that retention, compact, and repository checks

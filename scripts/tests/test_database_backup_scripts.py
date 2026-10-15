@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import re
 import shlex
 import subprocess
 import time
@@ -26,6 +27,9 @@ OPERATOR_SPEC = importlib.util.spec_from_file_location('operator_status', OPERAT
 assert OPERATOR_SPEC is not None and OPERATOR_SPEC.loader is not None
 operator_status = importlib.util.module_from_spec(OPERATOR_SPEC)
 OPERATOR_SPEC.loader.exec_module(operator_status)
+
+
+GNU_DU = subprocess.run(['du', '-sb', '.'], capture_output=True, check=False).returncode == 0
 
 
 def _write_executable(path: Path, content: str) -> None:
@@ -355,24 +359,30 @@ def test_stale_stage_is_cleaned_before_capacity_preflight(tmp_path):
 
 def test_remote_dump_rejects_low_capacity_before_pg_dump(tmp_path):
 	docker = tmp_path / 'docker'
+	df = tmp_path / 'df'
+	stage = tmp_path / 'stage'
 	pg_dump_marker = tmp_path / 'pg-dump-ran'
 	_write_executable(
 		docker,
 		"""#!/usr/bin/env bash
 set -eu
 case "$*" in
-*" test ! -e "*) exit 0 ;;
-*" psql "*) printf '100\n' ;;
-*" df -PB1 "*) printf 'Filesystem 1-blocks Used Available Capacity Mounted on\n/dev/test 1000 900 100 90%% /data\n' ;;
+*" psql "*) printf '100\\n' ;;
 *" pg_dump "*) touch "$FAKE_PG_DUMP_MARKER" ;;
 *) exit 64 ;;
 esac
 """,
 	)
+	_write_executable(
+		df,
+		"#!/usr/bin/env bash\nprintf 'Filesystem 1-blocks Used Available Capacity Mounted on\\n/dev/test 1000 900 100 90%% /data\\n'\n",
+	)
 	env = {
 		**os.environ,
 		'SSH_ORIGINAL_COMMAND': 'dump',
 		'DEADTREES_DOCKER_BIN': str(docker),
+		'DEADTREES_DB_BACKUP_DF_BIN': str(df),
+		'DEADTREES_DB_BACKUP_STAGE': str(stage),
 		'DEADTREES_DB_BACKUP_CAPACITY_PERCENT': '150',
 		'DEADTREES_DB_BACKUP_RESERVE_BYTES': '0',
 		'FAKE_PG_DUMP_MARKER': str(pg_dump_marker),
@@ -383,32 +393,14 @@ esac
 	assert result.returncode != 0
 	assert 'Insufficient dump capacity' in result.stderr
 	assert not pg_dump_marker.exists()
+	assert not stage.exists()
 
 
 def test_remote_helper_requires_explicit_release_before_recovery_cleanup(tmp_path):
-	docker = tmp_path / 'docker'
-	preserve_marker = tmp_path / 'preserved'
-	deleted_marker = tmp_path / 'deleted'
-	_write_executable(
-		docker,
-		"""#!/usr/bin/env bash
-set -eu
-case "$*" in
-*" test -f /var/lib/postgresql/backup-stage/logical/toc.dat") exit 0 ;;
-*" touch /var/lib/postgresql/backup-stage/logical/.deadtrees-preserve") touch "$FAKE_PRESERVE_MARKER" ;;
-*" test -f /var/lib/postgresql/backup-stage/logical/.deadtrees-preserve") test -f "$FAKE_PRESERVE_MARKER" ;;
-*" rm -f -- /var/lib/postgresql/backup-stage/logical/.deadtrees-preserve") rm -f "$FAKE_PRESERVE_MARKER" ;;
-*" rm -rf -- /var/lib/postgresql/backup-stage/logical") touch "$FAKE_DELETED_MARKER" ;;
-*) exit 64 ;;
-esac
-""",
-	)
-	base_env = {
-		**os.environ,
-		'DEADTREES_DOCKER_BIN': str(docker),
-		'FAKE_PRESERVE_MARKER': str(preserve_marker),
-		'FAKE_DELETED_MARKER': str(deleted_marker),
-	}
+	stage = tmp_path / 'stage'
+	stage.mkdir()
+	(stage / 'postgres.dump').write_bytes(b'dump-bytes')
+	base_env = {**os.environ, 'DEADTREES_DB_BACKUP_STAGE': str(stage)}
 
 	def run(command: str) -> subprocess.CompletedProcess[str]:
 		return subprocess.run(
@@ -420,70 +412,106 @@ esac
 		)
 
 	assert run('preserve').returncode == 0
+	if GNU_DU:
+		assert run('status').stdout.endswith('preserved\n')
 	assert run('prepare').returncode == 78
 	assert run('cleanup').returncode == 78
-	assert preserve_marker.exists()
-	assert not deleted_marker.exists()
+	assert (stage / 'postgres.dump').exists()
 	assert run('release').returncode == 0
 	assert run('cleanup').returncode == 0
-	assert deleted_marker.exists()
+	assert not stage.exists()
+	assert run('status').stdout == 'absent\n'
 
 
-def test_dump_and_stream_helpers_share_default_stage(tmp_path):
+def _dump_environment(tmp_path: Path, stage: Path, *, pg_dump_status: int = 0) -> dict[str, str]:
 	docker = tmp_path / 'docker'
-	command_log = tmp_path / 'docker.log'
-	stage_marker = tmp_path / 'stage-complete'
+	df = tmp_path / 'df'
 	_write_executable(
 		docker,
 		"""#!/usr/bin/env bash
 set -eu
-printf '%s\n' "$*" >>"$FAKE_COMMAND_LOG"
+printf '%s\\n' "$*" >>"$FAKE_COMMAND_LOG"
 case "$*" in
-*" test ! -e /var/lib/postgresql/backup-stage/logical") test ! -f "$FAKE_STAGE_MARKER" ;;
-*" psql "*) printf '100\n' ;;
-*" df -PB1 /var/lib/postgresql/backup-stage")
-	printf 'Filesystem 1-blocks Used Available Capacity Mounted on\n/dev/test 1000 100 900 10%% /data\n'
+*" psql "*) printf '100\\n' ;;
+"exec --user postgres supabase-db pg_dump "*" --format custom --compress=0 postgres")
+	printf 'dump-bytes'
+	exit "$FAKE_PG_DUMP_STATUS"
 	;;
-*" pg_dump "*" --file /var/lib/postgresql/backup-stage/logical "*) touch "$FAKE_STAGE_MARKER" ;;
-*" test -f /var/lib/postgresql/backup-stage/logical/toc.dat") test -f "$FAKE_STAGE_MARKER" ;;
-*" tar --format=posix -C /var/lib/postgresql/backup-stage/logical -cf - .") printf 'archive-bytes' ;;
+"exec -i --user postgres supabase-db pg_restore --list") test "$(cat)" = 'dump-bytes' ;;
 *) exit 64 ;;
 esac
 """,
 	)
-	base_env = {
+	_write_executable(
+		df,
+		"#!/usr/bin/env bash\nprintf 'Filesystem 1-blocks Used Available Capacity Mounted on\\n/dev/test 1000 100 900 10%% /data\\n'\n",
+	)
+	return {
 		**os.environ,
 		'DEADTREES_DOCKER_BIN': str(docker),
+		'DEADTREES_DB_BACKUP_DF_BIN': str(df),
+		'DEADTREES_DB_BACKUP_STAGE': str(stage),
 		'DEADTREES_DB_BACKUP_CAPACITY_PERCENT': '100',
 		'DEADTREES_DB_BACKUP_RESERVE_BYTES': '0',
-		'FAKE_COMMAND_LOG': str(command_log),
-		'FAKE_STAGE_MARKER': str(stage_marker),
+		'FAKE_COMMAND_LOG': str(tmp_path / 'docker.log'),
+		'FAKE_PG_DUMP_STATUS': str(pg_dump_status),
 	}
-	dump_result = subprocess.run(
-		[DATABASE_BACKUP_REMOTE],
-		env={**base_env, 'SSH_ORIGINAL_COMMAND': 'dump'},
-		text=True,
-		capture_output=True,
-		check=False,
-	)
-	stream_result = subprocess.run(
+
+
+def test_dump_streams_into_the_host_stage_and_verifies_it(tmp_path):
+	stage = tmp_path / 'stage'
+	env = _dump_environment(tmp_path, stage)
+
+	def run(helper: Path, command: str) -> subprocess.CompletedProcess[bytes]:
+		return subprocess.run([helper], env={**env, 'SSH_ORIGINAL_COMMAND': command}, capture_output=True, check=False)
+
+	dump = run(DATABASE_BACKUP_REMOTE, 'dump')
+	assert dump.returncode == 0, dump.stderr
+	assert (stage / 'postgres.dump').read_bytes() == b'dump-bytes'
+	assert oct(stage.stat().st_mode & 0o777) == '0o700'
+	assert not (stage / 'postgres.dump.partial').exists()
+
+	verify = run(DATABASE_BACKUP_REMOTE, 'verify')
+	assert verify.returncode == 0, verify.stderr
+	assert verify.stdout == b'verified\n'
+
+	stream = subprocess.run(
 		[DATABASE_BACKUP_STREAM],
 		env={
-			**base_env,
+			**env,
 			'SSH_ORIGINAL_COMMAND': '/test/deadtrees-db-backup-stream',
 			'DEADTREES_DB_BACKUP_STREAM_COMMAND_PATH': '/test/deadtrees-db-backup-stream',
 		},
-		text=True,
 		capture_output=True,
 		check=False,
 	)
+	assert stream.returncode == 0, stream.stderr
+	members = subprocess.run(['tar', '-tf', '-'], input=stream.stdout, capture_output=True, check=True).stdout.decode()
+	assert './postgres.dump' in members.splitlines()
 
-	assert dump_result.returncode == 0, dump_result.stderr
-	assert stream_result.returncode == 0, stream_result.stderr
-	assert stream_result.stdout == 'archive-bytes'
-	commands = command_log.read_text()
-	assert commands.count('/var/lib/postgresql/backup-stage/logical') == 4
-	assert '/var/lib/postgresql/data/backup-direct' not in commands
+
+def test_failed_pg_dump_leaves_no_verifiable_dump(tmp_path):
+	stage = tmp_path / 'stage'
+	env = _dump_environment(tmp_path, stage, pg_dump_status=1)
+
+	result = subprocess.run(
+		[DATABASE_BACKUP_REMOTE], env={**env, 'SSH_ORIGINAL_COMMAND': 'dump'}, capture_output=True, check=False
+	)
+
+	assert result.returncode != 0
+	assert not (stage / 'postgres.dump').exists()
+	verify = subprocess.run(
+		[DATABASE_BACKUP_REMOTE], env={**env, 'SSH_ORIGINAL_COMMAND': 'verify'}, capture_output=True, check=False
+	)
+	assert verify.returncode != 0
+
+
+def test_stage_helpers_share_the_data_stage_default():
+	defaults = {
+		helper.name: re.search(r'DEADTREES_DB_BACKUP_STAGE:-([^}]+)\}', helper.read_text()).group(1)
+		for helper in (DATABASE_BACKUP_REMOTE, DATABASE_BACKUP_REMOTE_HOLIDAY, DATABASE_BACKUP_STREAM)
+	}
+	assert set(defaults.values()) == {'/data/database-backup-stage'}, defaults
 
 
 def test_stream_helper_denies_lifecycle_commands(tmp_path):
@@ -829,50 +857,33 @@ exit 0
 
 
 def test_holiday_remote_helper_keeps_legacy_stream_local_contract(tmp_path):
+	stage = tmp_path / 'stage'
+	stage.mkdir()
+	(stage / 'postgres.dump').write_bytes(b'dump-bytes')
 	docker = tmp_path / 'docker'
-	command_log = tmp_path / 'commands.log'
-	_write_executable(docker, '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$FAKE_COMMAND_LOG"\n')
+	docker_marker = tmp_path / 'docker-ran'
+	_write_executable(docker, '#!/usr/bin/env bash\ntouch "$FAKE_DOCKER_MARKER"\n')
 	env = {
 		**os.environ,
 		'DEADTREES_DOCKER_BIN': str(docker),
-		'DEADTREES_DB_BACKUP_STAGE': '/test/stage',
+		'DEADTREES_DB_BACKUP_STAGE': str(stage),
 		'SSH_ORIGINAL_COMMAND': 'stream-local',
-		'FAKE_COMMAND_LOG': str(command_log),
+		'FAKE_DOCKER_MARKER': str(docker_marker),
 	}
 
-	result = subprocess.run([DATABASE_BACKUP_REMOTE_HOLIDAY], env=env, text=True, capture_output=True, check=False)
+	result = subprocess.run([DATABASE_BACKUP_REMOTE_HOLIDAY], env=env, capture_output=True, check=False)
 
 	assert result.returncode == 0, result.stderr
-	assert command_log.read_text().splitlines() == [
-		'exec --user postgres supabase-db test -f /test/stage/toc.dat',
-		'exec --user postgres supabase-db tar --format=posix -C /test/stage -cf - .',
-	]
+	members = subprocess.run(['tar', '-tf', '-'], input=result.stdout, capture_output=True, check=True).stdout.decode()
+	assert './postgres.dump' in members.splitlines()
+	assert not docker_marker.exists()
 
 
 def test_holiday_remote_helper_requires_release_before_cleanup(tmp_path):
-	docker = tmp_path / 'docker'
-	preserve_marker = tmp_path / 'preserved'
-	deleted_marker = tmp_path / 'deleted'
-	_write_executable(
-		docker,
-		"""#!/usr/bin/env bash
-set -eu
-case "$*" in
-*" test -f /var/lib/postgresql/backup-stage/logical/toc.dat") exit 0 ;;
-*" touch /var/lib/postgresql/backup-stage/logical/.deadtrees-preserve") touch "$FAKE_PRESERVE_MARKER" ;;
-*" test -f /var/lib/postgresql/backup-stage/logical/.deadtrees-preserve") test -f "$FAKE_PRESERVE_MARKER" ;;
-*" rm -f -- /var/lib/postgresql/backup-stage/logical/.deadtrees-preserve") rm -f "$FAKE_PRESERVE_MARKER" ;;
-*" rm -rf -- /var/lib/postgresql/backup-stage/logical") touch "$FAKE_DELETED_MARKER" ;;
-*) exit 64 ;;
-esac
-""",
-	)
-	base_env = {
-		**os.environ,
-		'DEADTREES_DOCKER_BIN': str(docker),
-		'FAKE_PRESERVE_MARKER': str(preserve_marker),
-		'FAKE_DELETED_MARKER': str(deleted_marker),
-	}
+	stage = tmp_path / 'stage'
+	stage.mkdir()
+	(stage / 'postgres.dump').write_bytes(b'dump-bytes')
+	base_env = {**os.environ, 'DEADTREES_DB_BACKUP_STAGE': str(stage)}
 
 	def run(command: str) -> subprocess.CompletedProcess[str]:
 		return subprocess.run(
@@ -884,12 +895,15 @@ esac
 		)
 
 	assert run('preserve').returncode == 0
+	if GNU_DU:
+		assert run('status').stdout.endswith('preserved\n')
 	assert run('prepare').returncode == 78
 	assert run('cleanup').returncode == 78
-	assert not deleted_marker.exists()
+	assert (stage / 'postgres.dump').exists()
 	assert run('release').returncode == 0
 	assert run('cleanup').returncode == 0
-	assert deleted_marker.exists()
+	assert not stage.exists()
+	assert run('status').stdout == 'absent\n'
 
 
 def test_holiday_backup_refreshes_tunnel_immediately_before_each_archive_attempt(tmp_path):
