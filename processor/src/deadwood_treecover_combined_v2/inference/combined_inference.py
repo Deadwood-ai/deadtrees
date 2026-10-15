@@ -56,6 +56,10 @@ MAX_SMOOTHING_SEGMENT = 1.0  # m
 # margin, simplified, then clipped to the block, so neighbours meet without gaps.
 TREECOVER_BLOCK_SIZE = 4096  # pixels; about 200 m at the 5 cm inference resolution
 TREECOVER_BLOCK_PADDING = 128  # pixels; well beyond how far VW and Chaikin move a boundary
+# The area filter sees each polygon within its padded block. Anything reaching the block
+# crosses the 128 px margin, so it covers at least 128 px and passes the 0.1 m² filter at
+# any resolution from 5 cm up. Clipping may leave smaller pieces along the block lines;
+# they are parts of larger polygons and are kept, so no forest goes missing at a seam.
 
 
 def _explode_polygons(geom):
