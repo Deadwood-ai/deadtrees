@@ -47,7 +47,8 @@ this repo at the time this playbook was added:
 
 ### Monitoring Boundary
 
-A 15-minute platform monitor runs the micro-check unattended; see
+A platform monitor runs the micro-check unattended, every 15 minutes in
+working hours and every two hours otherwise; see
 [Unattended 15-Minute Monitor](#unattended-15-minute-monitor). Other
 agent operator threads are not continuous monitors.
 Treat this playbook as the procedure for a manual refresh, a scheduled wake-up,
@@ -116,7 +117,7 @@ python3 scripts/data_factory_scorecard.py --write-state --format markdown
 ```
 
 `operator_status.py` still reads `DEADTREES_OPERATOR_DATABASE_URL`. The analyst
-URI may fill that slot too, as the hourly monitor does. Never print either value.
+URI may fill that slot too, as the platform monitor does. Never print either value.
 
 For routine production SQL, use the verified transaction in
 [trusted analyst access](analyst-database-access.md#routine-production-reads).
@@ -137,7 +138,7 @@ Print the compact PostHog SQL templates with:
 python3 scripts/data_factory_scorecard.py --posthog-sql
 ```
 
-### Hourly Micro-Check
+### Manual Micro-Check
 
 Use this for cheap, token-efficient monitoring. Report only deltas and
 exceptions unless the user asks for detail.
@@ -187,14 +188,14 @@ Each tick:
    running, restarts, OOM, disks above 85 percent (helicon `/` above 97 percent
    is red; storage `/` counts only above 90 percent between 23:30Z and 06:00Z),
    stale backups, deploy pause, refusal, dirty checkout or a drain older than 12
-   hours, a silent worker, a failed GPU check and frontend errors. A failed probe
+   hours, a worker silent for over 3 hours, a failed GPU check and frontend errors. A failed probe
    or frontend error counts only on two runs in a row and clears after two quiet
    runs. A check that cannot run is a coverage gap, never green.
 3. On inbox ticks, runs a read-only model call (`claude-haiku-5-5`) for what
    needs Janusch in Linear, Gmail and Zulip (Zulip is read by the script) and
    for new PostHog frontend errors in project 13440, which it selects first because the
-   connector's active project is shared. Its window advances only when every
-   source was read.
+   connector's active project is shared. Its window advances only when Linear,
+   Gmail and Zulip were all read; PostHog errors are tracked separately by ID.
 4. Files the delta (new, changed, cleared) and new or spiking PostHog errors in
    Linear with a second model call: one 🤖 Triage issue per fingerprint, then
    comments on it. The baseline advances only after filing succeeded, so a
@@ -203,8 +204,8 @@ Each tick:
    (two days under `digests/`) and one line per tick to `ticks.jsonl`.
 
 A model result counts only when the session's own tool calls prove the reads
-or writes; a call that stops early is retried up to four times (efforts low,
-low, high, high). The tick runs `claude -p` with `MCP_CONNECTION_NONBLOCKING=false`
+or writes; a call that stops early gets up to four attempts in total (efforts
+low, low, high, high). The tick runs `claude -p` with `MCP_CONNECTION_NONBLOCKING=false`
 so the claude.ai connectors are loaded first, parses stdout only, and prices
 Haiku 5.5 from its list price because Claude Code overstates it.
 
