@@ -9,7 +9,7 @@ import threading
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Callable, Iterator
+from typing import Callable, Iterable, Iterator
 
 import numpy as np
 import torch
@@ -91,37 +91,8 @@ class InferenceDataset:
 		them only costs GPU time. Order is kept so overlapping edge tiles are written in
 		the same order on every run.
 		"""
-		local = threading.local()
-		handles = []
-		handles_lock = threading.Lock()
-
-		def read(cropped_window):
-			if not hasattr(local, 'src'):
-				local.src = self._open_image()
-				with handles_lock:
-					handles.append(local.src)
-					# Metadata-less orthos need a raster-wide fill scan; do it once.
-					share_padding_map(self.image_src, local.src)
-			return self._read_tile(local.src, cropped_window)
-
-		pending = deque()
-		try:
-			with ThreadPoolExecutor(max_workers=self.reader_threads, thread_name_prefix='tile-reader') as pool:
-				try:
-					for cropped_window in self.cropped_windows:
-						pending.append(pool.submit(read, cropped_window))
-						if len(pending) >= 2 * self.reader_threads:
-							if (tile := pending.popleft().result()) is not None:
-								yield tile
-					while pending:
-						if (tile := pending.popleft().result()) is not None:
-							yield tile
-				finally:
-					for future in pending:
-						future.cancel()
-		finally:
-			for src in handles:
-				src.close()
+		tiles = read_ahead(self._open_image, self.image_src, self.cropped_windows, self._read_tile, self.reader_threads)
+		yield from (tile for tile in tiles if tile is not None)
 
 	def _read_tile(self, src, cropped_window) -> Tile | None:
 		inference_window = self._inference_window(cropped_window)
@@ -162,6 +133,46 @@ class InferenceDataset:
 			cropped_window.width + (2 * self.padding),
 			cropped_window.height + (2 * self.padding),
 		)
+
+
+def read_ahead(
+	open_image: Callable, image_src, items: Iterable, read: Callable, reader_threads: int = READER_THREADS
+) -> Iterator:
+	"""Yield ``read(handle, item)`` for each item, in order, computed on background threads.
+
+	Each thread reads from its own ``open_image()`` handle (GDAL handles cannot be shared
+	across threads) and up to ``2 * reader_threads`` items are read ahead. ``image_src``
+	is a handle on the same raster whose padding map the threads reuse.
+	"""
+	local = threading.local()
+	handles = []
+	handles_lock = threading.Lock()
+
+	def read_item(item):
+		if not hasattr(local, 'src'):
+			local.src = open_image()
+			with handles_lock:
+				handles.append(local.src)
+				# Metadata-less orthos need a raster-wide fill scan; do it once.
+				share_padding_map(image_src, local.src)
+		return read(local.src, item)
+
+	pending = deque()
+	try:
+		with ThreadPoolExecutor(max_workers=reader_threads, thread_name_prefix='tile-reader') as pool:
+			try:
+				for item in items:
+					pending.append(pool.submit(read_item, item))
+					if len(pending) >= 2 * reader_threads:
+						yield pending.popleft().result()
+				while pending:
+					yield pending.popleft().result()
+			finally:
+				for future in pending:
+					future.cancel()
+	finally:
+		for src in handles:
+			src.close()
 
 
 def predict_tiles(

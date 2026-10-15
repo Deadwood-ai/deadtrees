@@ -11,7 +11,7 @@ import rasterio
 from rasterio.enums import ColorInterp
 from rasterio.transform import from_origin
 
-from processor.src.geotiff.edge_fill import has_edge_fill
+from processor.src.geotiff.edge_fill import NON_FILL_RUN, _collar_extents, _fill_pixels, has_edge_fill
 from processor.src.geotiff.standardise_geotiff import standardise_geotiff
 
 SIZE = 256
@@ -355,3 +355,34 @@ def test_overviews_get_the_new_collar_mask(tmp_path):
 	inside = _footprint(margin=8)[::4, ::4] & ~_hole()[::4, ::4]
 	assert np.mean(reduced[outside] == 0) > 0.95
 	assert np.all(reduced[inside] == 255)
+
+
+def _scan_depth(line: np.ndarray) -> int:
+	"""Pixels a scan along ``line`` covers before NON_FILL_RUN consecutive non-fill pixels."""
+	for start in range(len(line) - NON_FILL_RUN + 1):
+		if line[start : start + NON_FILL_RUN].all():
+			return start
+	return len(line)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('seed', range(6))
+@pytest.mark.parametrize('rows', [1, 3, 64])
+def test_one_pass_collar_scan_matches_scanning_every_line_from_both_ends(tmp_path, seed, rows):
+	rng = np.random.default_rng(seed)
+	height, width = rng.integers(1, 40, size=2)
+	data = rng.integers(20, 230, size=(3, height, width), dtype=np.uint8)
+	fill = rng.random((height, width)) < rng.uniform(0.2, 0.9)
+	data[:, fill] = rng.choice([0, 3, 252, 255])
+	path = tmp_path / 'collar.tif'
+	with rasterio.open(path, 'w', driver='GTiff', width=width, height=height, count=3, dtype='uint8') as dst:
+		dst.write(data)
+	non_fill = ~_fill_pixels(data)
+
+	with rasterio.open(path) as src:
+		left, right, top, bottom = _collar_extents(src, rows)
+
+	assert left.tolist() == [_scan_depth(row) for row in non_fill]
+	assert right.tolist() == [width - _scan_depth(row[::-1]) for row in non_fill]
+	assert top.tolist() == [_scan_depth(column) for column in non_fill.T]
+	assert bottom.tolist() == [height - _scan_depth(column[::-1]) for column in non_fill.T]

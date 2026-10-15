@@ -377,6 +377,41 @@ def test_missing_tiles_retry_up_to_two_zooms_lower():
 
 
 @pytest.mark.unit
+def test_wayback_lookup_runs_beside_the_providers_and_keeps_the_reference_order(monkeypatch):
+	import threading
+
+	from processor.src.georef_check_v1 import references
+	from processor.src.georef_check_v1.providers import Provider
+
+	looked_up = threading.Event()
+	providers = [Provider(f'p{i}', f'g{i}', 'xyz', f'https://tiles.example/{i}/{{z}}/{{x}}/{{y}}') for i in range(3)]
+	captures = [
+		{'release': 1, 'capture_date': '2015-06-01'},
+		{'release': 2, 'capture_date': '2019-06-01'},
+		{'release': 3, 'capture_date': '2023-06-01'},
+	]
+
+	def render(grid, provider, session):
+		# The slow Wayback lookup must not wait for the provider tiles.
+		if not provider.name.startswith('wayback') and not looked_up.wait(timeout=10):
+			raise RuntimeError('wayback lookup did not run beside the providers')
+		return np.random.default_rng(len(provider.name)).integers(0, 255, (4, 4, 3), dtype=np.uint8), 17
+
+	def wayback_captures(lon, lat, zoom, session):
+		looked_up.set()
+		return captures
+
+	monkeypatch.setattr(references, 'applicable', lambda lon, lat: providers)
+	monkeypatch.setattr(references, '_render', render)
+	monkeypatch.setattr(references, 'wayback_captures', wayback_captures)
+
+	refs, errors = references.fetch_references(GRID, (7.85, 47.99), date(2018, 7, 1))
+
+	assert errors == {}
+	assert [r.provider for r in refs] == ['p0', 'p1', 'p2', 'wayback-2', 'wayback-1']
+
+
+@pytest.mark.unit
 def test_quadkeys_and_ellipsoidal_mercator_rows():
 	from processor.src.georef_check_v1.references import _ellipsoidal_bounds, quadkey
 

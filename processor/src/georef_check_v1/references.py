@@ -301,24 +301,30 @@ def fetch_references(
 			return
 		refs.append(Reference(provider.name, provider.group, image, z, capture_date, _viewer(provider)))
 
+	def add_wayback():
+		try:
+			zoom = _zoom_and_tiles(grid, 19)[0]
+			for c in pick_wayback(wayback_captures(*centre_lonlat, zoom, session), flight):
+				add(
+					Provider(
+						f'wayback-{c["release"]}',
+						ESRI.group,
+						'xyz',
+						WAYBACK_TILES.replace('{release}', str(c['release'])),
+						attribution=ESRI.attribution,
+					),
+					c['capture_date'],
+				)
+		except Exception as e:
+			errors['wayback'] = type(e).__name__
+
 	providers = applicable(*centre_lonlat)
-	with ThreadPoolExecutor(max_workers=4) as pool:
+	# The Wayback lookup waits seconds per query on its archive host; it runs beside the
+	# other providers, adding its captures one after the other so their order is kept.
+	with ThreadPoolExecutor(max_workers=1) as wayback, ThreadPoolExecutor(max_workers=4) as pool:
+		wayback_done = wayback.submit(add_wayback)
 		list(pool.map(add, providers))
-	try:
-		zoom = _zoom_and_tiles(grid, 19)[0]
-		for c in pick_wayback(wayback_captures(*centre_lonlat, zoom, session), flight):
-			add(
-				Provider(
-					f'wayback-{c["release"]}',
-					ESRI.group,
-					'xyz',
-					WAYBACK_TILES.replace('{release}', str(c['release'])),
-					attribution=ESRI.attribution,
-				),
-				c['capture_date'],
-			)
-	except Exception as e:
-		errors['wayback'] = type(e).__name__
+		wayback_done.result()
 	order = {p.name: i for i, p in enumerate(providers)}
 	refs.sort(key=lambda r: order.get(r.provider, len(order)))
 	return refs, errors

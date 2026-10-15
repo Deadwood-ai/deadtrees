@@ -35,6 +35,7 @@ from rasterio.windows import Window
 from shared.embedding_model import ModelBundle, encode_images
 
 from ..utils.segmentation import image_band_indexes, image_reprojector
+from ..utils.inference_dataset import READER_THREADS, read_ahead
 from ..utils.nodata import prepare_padding_map, read_nodata_mask
 
 # A 512px CLIP patch at 10cm GSD covers 51.2m on the ground. Non-overlapping.
@@ -67,43 +68,56 @@ def _is_single_colour(data: np.ndarray, nodata: np.ndarray) -> bool:
 	return bool((pixels == pixels[:, :1]).all())
 
 
-def _iter_tiles(vrt) -> Iterator[Tuple[Image.Image, PatchEmbedding]]:
-	"""Yield (PIL image, partially-filled PatchEmbedding) for each kept tile."""
-	width, height = vrt.width, vrt.height
-	band_indexes = image_band_indexes(vrt)
+def _read_tile(vrt, window: Window) -> Tuple[Image.Image, PatchEmbedding] | None:
+	"""The PIL image and partially-filled PatchEmbedding of one tile, or None if it is skipped."""
+	# Fraction of pixels that are nodata (alpha / mask / declared nodata /
+	# mislabeled mask band / solid fill), resolved once by image_reprojector.
+	nodata = read_nodata_mask(vrt, window)
+	nodata_fraction = float(np.mean(nodata))
+	if nodata_fraction > NODATA_THRESHOLD:
+		return None
 
-	for y in range(0, height, PATCH_STRIDE):
-		win_h = min(PATCH_SIZE, height - y)
-		for x in range(0, width, PATCH_STRIDE):
-			win_w = min(PATCH_SIZE, width - x)
-			window = Window(x, y, win_w, win_h)
+	data = vrt.read(indexes=image_band_indexes(vrt), window=window)
+	if _is_single_colour(data, nodata):
+		return None
+	arr = np.where(nodata, 0, data)
+	arr = np.moveaxis(arr, 0, -1)
+	arr = np.clip(arr, 0, 255).astype(np.uint8)
+	if arr.shape[2] == 1:
+		arr = np.repeat(arr, 3, axis=2)
+	img = Image.fromarray(arr)
 
-			# Fraction of pixels that are nodata (alpha / mask / declared nodata /
-			# mislabeled mask band / solid fill), resolved once by image_reprojector.
-			nodata = read_nodata_mask(vrt, window)
-			nodata_fraction = float(np.mean(nodata))
-			if nodata_fraction > NODATA_THRESHOLD:
-				continue
+	left, bottom, right, top = vrt.window_bounds(window)
+	geo_bbox = transform_bounds(vrt.crs, 'EPSG:4326', left, bottom, right, top)
+	x, y = int(window.col_off), int(window.row_off)
 
-			data = vrt.read(indexes=band_indexes, window=window)
-			if _is_single_colour(data, nodata):
-				continue
-			arr = np.where(nodata, 0, data)
-			arr = np.moveaxis(arr, 0, -1)
-			arr = np.clip(arr, 0, 255).astype(np.uint8)
-			if arr.shape[2] == 1:
-				arr = np.repeat(arr, 3, axis=2)
-			img = Image.fromarray(arr)
+	return img, PatchEmbedding(
+		geo_bbox_4326=geo_bbox,
+		pixel_bbox=(x, y, x + int(window.width), y + int(window.height)),
+		embedding=np.empty(0),
+		nodata_fraction=nodata_fraction,
+	)
 
-			left, bottom, right, top = vrt.window_bounds(window)
-			geo_bbox = transform_bounds(vrt.crs, 'EPSG:4326', left, bottom, right, top)
 
-			yield img, PatchEmbedding(
-				geo_bbox_4326=geo_bbox,
-				pixel_bbox=(int(x), int(y), int(x + win_w), int(y + win_h)),
-				embedding=np.empty(0),
-				nodata_fraction=nodata_fraction,
-			)
+def _iter_tiles(open_vrt, reader_threads: int = READER_THREADS) -> Iterator[Tuple[Image.Image, PatchEmbedding]]:
+	"""Yield (PIL image, partially-filled PatchEmbedding) for each kept tile, in raster order.
+
+	Warped window reads are most of the stage's time next to a GPU, so tiles are read on
+	background threads while the model embeds the previous batch.
+	"""
+	vrt = open_vrt()
+	try:
+		prepare_padding_map(vrt, open_vrt)
+		windows = [
+			Window(x, y, min(PATCH_SIZE, vrt.width - x), min(PATCH_SIZE, vrt.height - y))
+			for y in range(0, vrt.height, PATCH_STRIDE)
+			for x in range(0, vrt.width, PATCH_STRIDE)
+		]
+		for tile in read_ahead(open_vrt, vrt, windows, _read_tile, reader_threads):
+			if tile is not None:
+				yield tile
+	finally:
+		vrt.close()
 
 
 def embed_orthophoto_tiles(
@@ -117,8 +131,8 @@ def embed_orthophoto_tiles(
 		raise FileNotFoundError(f'Orthophoto not found: {tif_path}')
 
 	# Force exactly GSD_M resolution by clamping both the min and max resolution.
-	vrt = image_reprojector(str(tif_path), min_res=GSD_M, max_res=GSD_M)
-	prepare_padding_map(vrt, lambda: image_reprojector(str(tif_path), min_res=GSD_M, max_res=GSD_M))
+	def open_vrt():
+		return image_reprojector(str(tif_path), min_res=GSD_M, max_res=GSD_M)
 
 	results: List[PatchEmbedding] = []
 	images: List[Image.Image] = []
@@ -134,14 +148,11 @@ def embed_orthophoto_tiles(
 		images.clear()
 		metas.clear()
 
-	try:
-		for img, meta in _iter_tiles(vrt):
-			images.append(img)
-			metas.append(meta)
-			if len(images) >= batch_size:
-				flush()
-		flush()
-	finally:
-		vrt.close()
+	for img, meta in _iter_tiles(open_vrt):
+		images.append(img)
+		metas.append(meta)
+		if len(images) >= batch_size:
+			flush()
+	flush()
 
 	return results
