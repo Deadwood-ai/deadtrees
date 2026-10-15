@@ -104,8 +104,9 @@ export function useVectorLayers({
 		return true;
 	})();
 
-	// Set hovered label ID (triggers style update)
+	// Set hovered label ID (triggers style update when it changes)
 	const setHoveredLabelId = useCallback((id: number | null) => {
+		if (hoveredLabelIdRef.current === id) return;
 		hoveredLabelIdRef.current = id;
 		// Force style update on selection layer
 		if (selectionLayerRef.current) {

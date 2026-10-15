@@ -2,6 +2,7 @@ import { useEffect, useCallback, useRef } from "react";
 import type { Map as OLMap, MapBrowserEvent } from "ol";
 import type VectorTileLayer from "ol/layer/VectorTile";
 import type { Coordinate } from "ol/coordinate";
+import type { Pixel } from "ol/pixel";
 
 export interface HoverInfo {
 	featureId: number;
@@ -63,8 +64,29 @@ export function useMapInteractions({
 	const isOverFeatureRef = useRef(false);
 	const handlersAttachedRef = useRef(false);
 
-	// Hover handler
-	const handlePointerMove = useCallback((event: MapBrowserEvent) => {
+	// The topmost label polygon under a pixel, deadwood first. This replays the
+	// rendered tile instructions at that pixel; layer.getFeatures(pixel) would
+	// first draw a hit-detection image of every polygon in view.
+	const featureAtPixel = useCallback((pixel: Pixel) => {
+		if (!map) return null;
+		const layers: [VectorTileLayer | null, "deadwood" | "forest_cover"][] = [
+			[deadwoodLayer, "deadwood"],
+			[forestCoverLayer, "forest_cover"],
+		];
+		for (const [layer, layerType] of layers) {
+			if (!layer?.getVisible()) continue;
+			const feature = map.forEachFeatureAtPixel(pixel, (hit) => hit, { layerFilter: (l) => l === layer });
+			if (feature) return { feature, layerType };
+		}
+		return null;
+	}, [map, deadwoodLayer, forestCoverLayer]);
+
+	// Hover handler. Hit-testing is synchronous main-thread work, so it runs at
+	// most once per animation frame and never while the map is being dragged.
+	const hoverFrameRef = useRef<number | null>(null);
+	const pendingHoverRef = useRef<MapBrowserEvent | null>(null);
+
+	const detectHover = useCallback((event: MapBrowserEvent) => {
 		if (!enabled || !map) {
 			// Reset cursor when disabled
 			const targetElement = map?.getTargetElement();
@@ -82,42 +104,36 @@ export function useMapInteractions({
 			return;
 		}
 
-		const pixel = map.getEventPixel(event.originalEvent);
-		let hitLayer: VectorTileLayer | null = null;
-		let layerType = "";
-
-		// Check deadwood layer first (higher priority)
-		if (deadwoodLayer?.getVisible() && map.hasFeatureAtPixel(pixel, { layerFilter: (l) => l === deadwoodLayer })) {
-			hitLayer = deadwoodLayer;
-			layerType = "Deadwood cover";
-		} else if (forestCoverLayer?.getVisible() && map.hasFeatureAtPixel(pixel, { layerFilter: (l) => l === forestCoverLayer })) {
-			hitLayer = forestCoverLayer;
-			layerType = "Tree cover";
-		}
+		const hit = featureAtPixel(map.getEventPixel(event.originalEvent));
 
 		// Update cursor
 		const targetElement = map.getTargetElement();
-		if (targetElement) targetElement.style.cursor = hitLayer ? "pointer" : "";
-		isOverFeatureRef.current = !!hitLayer;
+		if (targetElement) targetElement.style.cursor = hit ? "pointer" : "";
+		isOverFeatureRef.current = !!hit;
 
-		if (hitLayer) {
-			hitLayer.getFeatures(pixel).then((features) => {
-				if (features.length > 0) {
-					const feature = features[0];
-					onHover?.({
-						featureId: feature.get("id"),
-						layerType,
-						status: feature.get("correction_status") || "original",
+		onHover?.(
+			hit
+				? {
+						featureId: hit.feature.get("id"),
+						layerType: hit.layerType === "deadwood" ? "Deadwood cover" : "Tree cover",
+						status: hit.feature.get("correction_status") || "original",
 						coordinate: event.coordinate,
-					});
-				} else {
-					onHover?.(null);
-				}
-			});
-		} else {
-			onHover?.(null);
-		}
-	}, [enabled, map, deadwoodLayer, forestCoverLayer, minZoom, onHover]);
+					}
+				: null,
+		);
+	}, [enabled, map, minZoom, onHover, featureAtPixel]);
+
+	const handlePointerMove = useCallback((event: MapBrowserEvent) => {
+		if (event.dragging) return;
+		pendingHoverRef.current = event;
+		if (hoverFrameRef.current !== null) return;
+		hoverFrameRef.current = requestAnimationFrame(() => {
+			hoverFrameRef.current = null;
+			const latest = pendingHoverRef.current;
+			pendingHoverRef.current = null;
+			if (latest) detectHover(latest);
+		});
+	}, [detectHover]);
 
 	// Click handler
 	const handleClick = useCallback((event: MapBrowserEvent) => {
@@ -132,42 +148,22 @@ export function useMapInteractions({
 			return;
 		}
 
-		const pixel = map.getEventPixel(event.originalEvent);
-		let hitLayer: VectorTileLayer | null = null;
-		let layerType: "deadwood" | "forest_cover" = "deadwood";
-		let displayType = "";
-
-		if (deadwoodLayer?.getVisible() && map.hasFeatureAtPixel(pixel, { layerFilter: (l) => l === deadwoodLayer })) {
-			hitLayer = deadwoodLayer;
-			layerType = "deadwood";
-			displayType = "Deadwood cover";
-		} else if (forestCoverLayer?.getVisible() && map.hasFeatureAtPixel(pixel, { layerFilter: (l) => l === forestCoverLayer })) {
-			hitLayer = forestCoverLayer;
-			layerType = "forest_cover";
-			displayType = "Tree cover";
-		}
-
-		if (hitLayer) {
-			hitLayer.getFeatures(pixel).then((features) => {
-				if (features.length > 0) {
-					const feature = features[0];
-					onClick?.({
-						featureId: feature.get("id") ? Number(feature.get("id")) : 0,
-						layerType,
-						displayType,
-						status: feature.get("correction_status") || "original",
-						correctionId: feature.get("correction_id") ? Number(feature.get("correction_id")) : undefined,
-						correctionOperation: feature.get("correction_operation") || undefined,
-						coordinate: event.coordinate,
-					});
-				} else {
-					onClick?.(null);
-				}
-			});
-		} else {
+		const hit = featureAtPixel(map.getEventPixel(event.originalEvent));
+		if (!hit) {
 			onClick?.(null);
+			return;
 		}
-	}, [enabled, map, deadwoodLayer, forestCoverLayer, minZoom, onClick]);
+		const { feature, layerType } = hit;
+		onClick?.({
+			featureId: feature.get("id") ? Number(feature.get("id")) : 0,
+			layerType,
+			displayType: layerType === "deadwood" ? "Deadwood cover" : "Tree cover",
+			status: feature.get("correction_status") || "original",
+			correctionId: feature.get("correction_id") ? Number(feature.get("correction_id")) : undefined,
+			correctionOperation: feature.get("correction_operation") || undefined,
+			coordinate: event.coordinate,
+		});
+	}, [enabled, map, minZoom, onClick, featureAtPixel]);
 
 	// Attach/detach event handlers
 	useEffect(() => {
@@ -181,6 +177,9 @@ export function useMapInteractions({
 		return () => {
 			map.un("pointermove", handlePointerMove);
 			map.un("click", handleClick);
+			if (hoverFrameRef.current !== null) cancelAnimationFrame(hoverFrameRef.current);
+			hoverFrameRef.current = null;
+			pendingHoverRef.current = null;
 			handlersAttachedRef.current = false;
 		};
 	}, [map, deadwoodLayer, forestCoverLayer, handlePointerMove, handleClick]);
