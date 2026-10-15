@@ -279,8 +279,11 @@ class CombinedInference:
             for core_bounds, block_polygons in mask_to_polygons_in_blocks(
                 ds, 1, TREECOVER_BLOCK_SIZE, TREECOVER_BLOCK_PADDING
             ):
+                # A full intersection, not clip_by_rect: GEOS's rectangle clipping can build
+                # a three-point ring where a boundary runs along the block edge (13412).
+                block = shapely.box(*core_bounds)
                 for polygon in self._simplify_polygons(block_polygons):
-                    for part in _explode_polygons(shapely.clip_by_rect(polygon, *core_bounds)):
+                    for part in _explode_polygons(polygon.intersection(block)):
                         polygons.extend(_explode_polygons(repair_polygon(part)))
         largest = max((len(p.interiors) for p in polygons), default=0)
         progress(
