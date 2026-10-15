@@ -111,6 +111,36 @@ should have at least one durable test or smoke check:
 
 ## Local Contributor Smoke
 
+Keep authenticated contributor journeys out of the production-read Playwright
+suite. Use the local contributor smoke when a frontend change touches upload,
+auth restoration, upload metadata, or process enqueue behavior:
+
+```bash
+npm --prefix frontend run test:e2e:local
+deadtrees dev test api api/tests/routers/test_contributor_contract_smoke.py
+```
+
+The browser smoke uses local/development frontend settings and mocked local
+service responses to prove the UI contract without mutating production. The API
+contract smoke runs against the repo test stack and proves the same upload and
+processing payloads are accepted by FastAPI and persisted to the expected local
+test tables/storage paths.
+
+Use the local write-flow suite when auth, upload start, download start, or
+local storage side effects are part of the risk:
+
+```bash
+scripts/qa/env.sh up
+set -a; source .local/supabase/current.env; set +a
+npm --prefix frontend run test:e2e:local:write
+```
+
+This suite is intentionally opt-in and local-only. It signs up a unique local
+contributor, requests a password reset through local Supabase Auth, verifies the
+reset email through Supabase Mailpit, uploads a small GeoTIFF through the real
+local API, asserts dataset/status/ortho/queue rows and archive storage, starts a
+download request, and asserts the local download bundle plus download audit log.
+
 ## API Smoke
 
 Use the API smoke suite when a change touches FastAPI routes, shared database
@@ -118,7 +148,8 @@ models/helpers, Supabase migrations, RLS policies, RPC contracts, or local
 storage/download behavior:
 
 ```bash
-supabase start
+scripts/qa/env.sh up
+set -a; source .local/supabase/current.env; set +a
 scripts/test-api-smoke.sh
 ```
 
@@ -178,36 +209,6 @@ manual maintenance work. GDAL base images receive automated patch or digest
 refreshes only because feature-line changes can also change the bundled
 Ubuntu/Python runtime and available PyTorch wheels.
 
-Keep authenticated contributor journeys out of the production-read Playwright
-suite. Use the local contributor smoke when a frontend change touches upload,
-auth restoration, upload metadata, or process enqueue behavior:
-
-```bash
-npm --prefix frontend run test:e2e:local
-deadtrees dev test api api/tests/routers/test_contributor_contract_smoke.py
-```
-
-The browser smoke uses local/development frontend settings and mocked local
-service responses to prove the UI contract without mutating production. The API
-contract smoke runs against the repo test stack and proves the same upload and
-processing payloads are accepted by FastAPI and persisted to the expected local
-test tables/storage paths.
-
-Use the local write-flow suite when auth, upload start, download start, or
-local storage side effects are part of the risk:
-
-```bash
-supabase start
-deadtrees dev start
-npm --prefix frontend run test:e2e:local:write
-```
-
-This suite is intentionally opt-in and local-only. It signs up a unique local
-contributor, requests a password reset through local Supabase Auth, verifies the
-reset email through Supabase Mailpit, uploads a small GeoTIFF through the real
-local API, asserts dataset/status/ortho/queue rows and archive storage, starts a
-download request, and asserts the local download bundle plus download audit log.
-
 ## Local Auditor Smoke
 
 Use the local auditor smoke when a frontend change touches audit access,
@@ -231,8 +232,8 @@ Use the local auditor write-flow suite when the frontend change touches real
 auditor write behavior:
 
 ```bash
-supabase start
-deadtrees dev start --services api-test,nginx
+scripts/qa/env.sh up
+set -a; source .local/supabase/current.env; set +a
 npm --prefix frontend run test:e2e:local:audit:write
 ```
 

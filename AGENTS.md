@@ -138,9 +138,10 @@ scripts/qa/validate-isolated-env.sh
   [`docs/agents/rules.md`](docs/agents/rules.md#linear).
 - Do not create draft PRs for this workspace. Open normal PRs when asked.
 - PR titles must pass `.github/workflows/pr-title-check.yml`.
-- Use Conventional Commit format: `type(scope): short summary`.
+- Use Conventional Commit format: `type(scope): short summary`, with the summary
+  in the imperative.
 - Allowed types: `feat`, `fix`, `docs`, `chore`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`.
-- Good example: `fix(frontend): align tree and deadwood cover labels`.
+- Good example: `fix(frontend): align tree and deadwood cover labels (DT-123)`.
 - Use [`.github/pull_request_template.md`](.github/pull_request_template.md) for PR descriptions and keep the body synchronized with the final diff and validation evidence.
 - Add the applicable release-grouping labels from [`.github/release.yml`](.github/release.yml).
 

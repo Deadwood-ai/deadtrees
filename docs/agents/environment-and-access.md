@@ -150,7 +150,7 @@ Claude Code sessions can get the same setup through
 primary checkout. It creates detached worktrees from current `origin/main` under
 `~/.claude/worktrees/deadtrees/<name>`, runs the lightweight setup above, and
 only removes clean worktrees whose commits are already on a remote. Name the
-`fix/...` or `feat/...` branch once the task is clear, and run the full
+`<type>/<topic>-dt-NNN` branch once the task is clear, and run the full
 `setup-worktree.sh` before work that needs Python or frontend dependencies.
 
 ```json

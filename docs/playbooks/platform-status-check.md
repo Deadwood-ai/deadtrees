@@ -221,7 +221,8 @@ a pass read-only and list env key names, never values.
 
 ## Backup Checks
 
-The 15-minute platform monitor probes backup freshness (see
+The platform monitor (every 15 minutes in working hours, every two hours
+otherwise) probes backup freshness (see
 [Operator Chat](operator-chat.md#unattended-15-minute-monitor)). For a manual check,
 combine the live Borg freshness probe with a bounded Gmail alert search. See [`database-backups.md`](database-backups.md) for the
 backup architecture, success contract, validation, and rollback procedures.

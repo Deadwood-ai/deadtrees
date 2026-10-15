@@ -95,6 +95,11 @@ Supabase/API/nginx stack is running and the change needs real auditor write
 side-effect coverage for flag acknowledgement, AOI save, audit lock release, or
 `dataset_audit` persistence.
 
+Use `npm --prefix frontend run test:e2e:local:sharing:write` for named dataset
+sharing and access changes, and `npm --prefix frontend run test:e2e:local:priwa:write`
+for PRIWA field-app write flows. Both need the isolated local stack and mutate
+only local state.
+
 For user-facing UI changes, start the relevant Vite profile and validate with the
 agent's built-in browser (Codex in-app browser or Claude's browser pane) or Playwright. Use `docs/playbooks/frontend-browser-regression.md`
 for production-connected smoke checks.
