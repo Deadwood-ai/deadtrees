@@ -62,6 +62,12 @@ const createVectorLayer = (config: VectorLayerConfig) => {
 
         if (error) throw error;
 
+        // A tile with no polygons in it comes back as an empty string.
+        if (data === "") {
+          vectorTile.setFeatures([]);
+          return;
+        }
+
         if (data) {
           // console.log(`[Tile Success] z=${z}, x=${x}, y=${y}, fetch=${fetchTime.toFixed(0)}ms`);
           // const decodeStart = performance.now();
@@ -94,7 +100,10 @@ const createVectorLayer = (config: VectorLayerConfig) => {
       }
     },
     url: `${config.className}/{z}/{x}/{y}`,
-    maxZoom: 22,
+    // Deeper zooms reuse the z19 tiles. Their 4096-unit grid is 1.9 cm, finer
+    // than the 5 cm prediction raster and about one screen pixel at maximum
+    // zoom, so the polygons look the same and zooming in fetches nothing new.
+    maxZoom: 19,
     tileSize: 512,
     cacheSize: 2048, // Increased cache for better performance
     transition: 0, // Disable transition for instant rendering
@@ -159,7 +168,9 @@ const createVectorLayer = (config: VectorLayerConfig) => {
     updateWhileAnimating: true, // Enable smooth updates during animation
     updateWhileInteracting: true, // Enable smooth updates during panning/zooming
     useInterimTilesOnError: true,
-    preload: 1, // Preload 1 level of adjacent tiles for smoother experience
+    // No lower-zoom preload: those tiles hold the most polygons, are the slowest
+    // to build, and while they load they hold slots of the map's shared tile
+    // budget that the drone imagery then waits for.
   });
 
   return vectorLayer;
