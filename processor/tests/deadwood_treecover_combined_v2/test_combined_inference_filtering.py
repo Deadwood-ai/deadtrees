@@ -221,3 +221,42 @@ def test_block_polygonization_tiles_the_mask_exactly(tmp_path):
 	}
 	assert shapely.union_all(pieces).area == pytest.approx(float(mask.sum()))
 	assert sum(p.area for p in pieces) == pytest.approx(float(mask.sum()))
+
+
+# A smoothed forest patch from 13352 whose corner touches a block edge in one vertex.
+# GEOS's clip_by_rect raises "Invalid number of points in LinearRing found 3" on it,
+# which failed 13412's combined run (DT-1379).
+EDGE_TOUCHING_PATCH = (
+	'POLYGON ((317664.5318724416 8733705.79540955, 317664.3568724416 8733705.595409552, '
+	'317664.18187244155 8733705.395409552, 317664.0068724416 8733705.195409551, '
+	'317663.7568724416 8733705.057909552, 317663.43187244155 8733704.98290955, '
+	'317663.31937244156 8733704.807909552, 317663.4193724416 8733704.53290955, '
+	'317663.5568724416 8733704.382909551, 317663.7318724416 8733704.357909553, '
+	'317663.9006224416 8733704.451659553, 317664.0631224416 8733704.664159551, '
+	'317664.22562244156 8733704.87665955, 317664.3881224416 8733705.089159552, '
+	'317664.5568724416 8733705.195409551, 317664.7318724416 8733705.195409551, '
+	'317664.8818724416 8733705.307909552, 317665.0068724416 8733705.53290955, '
+	'317664.95687244163 8733705.70790955, 317664.7318724416 8733705.83290955, '
+	'317664.5318724416 8733705.79540955))'
+)
+EDGE_TOUCHING_BLOCK = (317513.3193724416, 8733662.14540955, 317663.3193724416, 8733812.14540955)
+
+
+def test_a_patch_touching_the_block_edge_in_one_vertex_is_clipped_without_error(monkeypatch, tmp_path):
+	import numpy as np
+	import shapely
+
+	monkeypatch.setattr(combined_inference, 'reproject_polygons', lambda polygons, src, dst: polygons)
+	monkeypatch.setattr(
+		combined_inference,
+		'mask_to_polygons_in_blocks',
+		lambda ds, value, size, padding: [(EDGE_TOUCHING_BLOCK, [shapely.from_wkt(EDGE_TOUCHING_PATCH)])],
+	)
+	monkeypatch.setattr(CombinedInference, '_simplify_polygons', lambda self, polygons: polygons)
+	path = tmp_path / 'mask.tif'
+	_write_mask(path, np.ones((2, 2), dtype=np.uint8))
+
+	inference = CombinedInference.__new__(CombinedInference)
+	crs = CRS.from_epsg(32738)
+
+	assert inference._treecover_polygons_in_blocks(str(path), crs, crs, lambda _: None) == []
