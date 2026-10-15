@@ -15,6 +15,9 @@
 
 begin;
 
+-- Only function definitions change; no table is locked.
+set local lock_timeout = '5s';
+
 create or replace function internal.deadwood_tile_mvt(
 	z integer, x integer, y integer, filter_label_id bigint, resolution integer, filter_correction_status text
 )
