@@ -9,7 +9,9 @@
 -- The geometry of a tile depends only on its label, so each tile function now
 -- asks the caller's own v2_labels rule once, then reads the tile through an
 -- internal function that runs without row policies and can use the spatial
--- index. The internal schema is not exposed by the API. Tile contents and the
+-- index. The bbox is transformed to the column's fixed SRID 4326 once per tile;
+-- the old per-row ST_SRID(g.geometry) form also kept the index out of reach.
+-- The internal schema is not exposed by the API. Tile contents and the
 -- function signatures are unchanged; the geometry policies still govern direct
 -- table reads.
 
@@ -60,8 +62,8 @@ as $$
 		where
 			g.label_id = filter_label_id
 			and g.area_m2 >= s.min_area
-			and g.geometry operator(public.&&) public.st_transform(b.bbox_3857, public.st_srid(g.geometry))
-			and public.st_intersects(g.geometry, public.st_transform(b.bbox_3857, public.st_srid(g.geometry)))
+			and g.geometry operator(public.&&) public.st_transform(b.bbox_3857, 4326)
+			and public.st_intersects(g.geometry, public.st_transform(b.bbox_3857, 4326))
 			and (
 				case filter_correction_status
 					when 'all' then true
@@ -117,8 +119,8 @@ as $$
 		where
 			g.label_id = filter_label_id
 			and g.area_m2 >= s.min_area
-			and g.geometry operator(public.&&) public.st_transform(b.bbox_3857, public.st_srid(g.geometry))
-			and public.st_intersects(g.geometry, public.st_transform(b.bbox_3857, public.st_srid(g.geometry)))
+			and g.geometry operator(public.&&) public.st_transform(b.bbox_3857, 4326)
+			and public.st_intersects(g.geometry, public.st_transform(b.bbox_3857, 4326))
 			and (
 				case filter_correction_status
 					when 'all' then true
