@@ -71,12 +71,11 @@ def test_processor_state_restarts_and_disks():
 	assert current[0]['severity'] == 'red'
 
 
-def test_storage_root_counts_only_above_90_percent_during_the_backup_window():
+def test_storage_root_counts_at_the_normal_threshold_day_and_night():
 	storage = {'ok': True, 'disks': {'/': 88, '/data': 86}}
 	night, _, _ = findings.build_findings(snapshot(storage=storage), {}, NIGHT)
 	day, _, _ = findings.build_findings(snapshot(storage=storage), {}, NOON)
-	assert keys(night) == {'dt-status/storage/disk:/data'}
-	assert keys(day) == {'dt-status/storage/disk:/', 'dt-status/storage/disk:/data'}
+	assert keys(night) == keys(day) == {'dt-status/storage/disk:/', 'dt-status/storage/disk:/data'}
 
 
 def test_storage_status_lines():

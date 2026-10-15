@@ -30,10 +30,18 @@ The direct database stage is split across two least-privilege entry points:
 - the database-host forced-command helper only accepts the explicit prepare,
   dump, capacity, verify, status, preserve, release, and cleanup operations.
 
-The database is dumped with `pg_dump --format directory --jobs=2 --compress=0`.
-Before creating the stage, the forced-command helper requires available space to
-exceed 300% of the current database size plus a 50 GiB write-safety reserve. A
-failed capacity check exits before `pg_dump` writes into the PostgreSQL volume.
+The database is dumped with `pg_dump --format custom --compress=0`, run through
+`docker exec` in the unchanged `supabase-db` container. The helper compresses
+the stream with `zstd` on the database host into
+`/home/dendro/.deadtrees-db-backup-stage/postgres.dump.zst` (mode `0700`, on the
+root disk but outside every application-container mount). The file is renamed
+from `.partial` only after `pg_dump` and `zstd` both succeed, and `verify` runs
+`zstd -t` before listing the archive with `pg_restore`. The transport
+decompresses the file while streaming, so Borg chunks the uncompressed dump and
+keeps deduplicating unchanged data. Before creating the stage, the helper
+requires available space to exceed 50% of the current database size plus a
+50 GiB write-safety reserve; a failed capacity check exits before `pg_dump`
+starts.
 Before the dump starts, the wrapper performs a Borg protocol handshake through
 the complete reverse-tunnel path. After PostgreSQL connections close, the
 database host sends a tar stream through a private `borg`-owned Unix socket to
@@ -96,6 +104,9 @@ The tracked sources map to these production locations:
 | `scripts/backup/sshd_config.d/deadtrees-borg.conf` | `/etc/ssh/sshd_config.d/deadtrees-borg.conf` on the database host |
 | `scripts/backup/tmpfiles.d/deadtrees-database-backup.conf` | `/etc/tmpfiles.d/deadtrees-database-backup.conf` on the database host |
 | `scripts/backup/tmpfiles.d/deadtrees-database-backup-repository.conf` | `/etc/tmpfiles.d/deadtrees-database-backup-repository.conf` on the backup host |
+
+The helpers create and remove the stage directory themselves as `dendro` and
+need `zstd` on the database host.
 
 Install executable scripts with mode `0755` and configuration with mode `0600`,
 using an atomic replacement and retaining the previous files for rollback. The
@@ -297,8 +308,10 @@ borg check --archives-only --verify-data --glob-archives ARCHIVE \
   /mnt/raid/backups/supabase.deadtrees.earth
 ```
 
-The archive listing must contain `postgres-directory.tar`. List the tar contents
-through a safe temporary restore path and verify that PostgreSQL has zero dump
+The archive listing must contain `postgres-directory.tar`. Despite its historical
+name, it holds one uncompressed custom-format dump, not a tar; extract it and
+restore it with `pg_restore`. Because the dump is written to a pipe, plan for a
+sequential restore. Inspect it through a safe temporary restore path and verify that PostgreSQL has zero dump
 sessions afterward. After a successful run, confirm that both database-host and
 backup-host staging are absent and that retention, compact, and repository checks
 completed. After a failed post-commit validation, confirm instead that the
