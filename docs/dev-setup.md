@@ -146,6 +146,11 @@ This downloads:
 - `assets/pheno/modispheno_aggregated_normalized_filled.zarr`
 - `assets/test_data/worldview_uint16_crop.tif`
 
+The acquisition-date model is not public. With storage-server SSH access,
+`make download-doy-model` copies it; without it the model test is skipped and
+the local acquisition-date stage fails (see
+[`doy-estimation.md`](doy-estimation.md#model-assets)).
+
 ### 7. Start the local development stack
 
 ```bash
