@@ -32,6 +32,14 @@ OPERATOR_SPEC.loader.exec_module(operator_status)
 GNU_DU = subprocess.run(['du', '-sb', '.'], capture_output=True, check=False).returncode == 0
 
 
+def _zstd(data: bytes) -> bytes:
+	return subprocess.run(['zstd', '-q', '-c'], input=data, capture_output=True, check=True).stdout
+
+
+def _unzstd(data: bytes) -> bytes:
+	return subprocess.run(['zstd', '-q', '-dc'], input=data, capture_output=True, check=True).stdout
+
+
 def _write_executable(path: Path, content: str) -> None:
 	path.write_text(content)
 	path.chmod(0o700)
@@ -399,7 +407,7 @@ esac
 def test_remote_helper_requires_explicit_release_before_recovery_cleanup(tmp_path):
 	stage = tmp_path / 'stage'
 	stage.mkdir()
-	(stage / 'postgres.dump').write_bytes(b'dump-bytes')
+	(stage / 'postgres.dump.zst').write_bytes(_zstd(b'dump-bytes'))
 	base_env = {**os.environ, 'DEADTREES_DB_BACKUP_STAGE': str(stage)}
 
 	def run(command: str) -> subprocess.CompletedProcess[str]:
@@ -416,7 +424,7 @@ def test_remote_helper_requires_explicit_release_before_recovery_cleanup(tmp_pat
 		assert run('status').stdout.endswith('preserved\n')
 	assert run('prepare').returncode == 78
 	assert run('cleanup').returncode == 78
-	assert (stage / 'postgres.dump').exists()
+	assert (stage / 'postgres.dump.zst').exists()
 	assert run('release').returncode == 0
 	assert run('cleanup').returncode == 0
 	assert not stage.exists()
@@ -458,36 +466,48 @@ esac
 	}
 
 
-def test_dump_streams_into_the_host_stage_and_verifies_it(tmp_path):
+def test_dump_compresses_into_the_stage_and_streams_it_uncompressed(tmp_path):
 	stage = tmp_path / 'stage'
 	env = _dump_environment(tmp_path, stage)
 
-	def run(helper: Path, command: str) -> subprocess.CompletedProcess[bytes]:
-		return subprocess.run([helper], env={**env, 'SSH_ORIGINAL_COMMAND': command}, capture_output=True, check=False)
+	def run(helper: Path, command: str, **extra: str) -> subprocess.CompletedProcess[bytes]:
+		return subprocess.run(
+			[helper], env={**env, 'SSH_ORIGINAL_COMMAND': command, **extra}, capture_output=True, check=False
+		)
 
 	dump = run(DATABASE_BACKUP_REMOTE, 'dump')
 	assert dump.returncode == 0, dump.stderr
-	assert (stage / 'postgres.dump').read_bytes() == b'dump-bytes'
+	staged = stage / 'postgres.dump.zst'
+	assert _unzstd(staged.read_bytes()) == b'dump-bytes'
 	assert oct(stage.stat().st_mode & 0o777) == '0o700'
-	assert not (stage / 'postgres.dump.partial').exists()
+	assert not (stage / 'postgres.dump.zst.partial').exists()
 
 	verify = run(DATABASE_BACKUP_REMOTE, 'verify')
 	assert verify.returncode == 0, verify.stderr
 	assert verify.stdout == b'verified\n'
 
-	stream = subprocess.run(
-		[DATABASE_BACKUP_STREAM],
-		env={
-			**env,
-			'SSH_ORIGINAL_COMMAND': '/test/deadtrees-db-backup-stream',
-			'DEADTREES_DB_BACKUP_STREAM_COMMAND_PATH': '/test/deadtrees-db-backup-stream',
-		},
-		capture_output=True,
-		check=False,
+	# Borg must receive the uncompressed dump so unchanged data deduplicates.
+	stream = run(
+		DATABASE_BACKUP_STREAM,
+		'/test/deadtrees-db-backup-stream',
+		DEADTREES_DB_BACKUP_STREAM_COMMAND_PATH='/test/deadtrees-db-backup-stream',
 	)
 	assert stream.returncode == 0, stream.stderr
-	members = subprocess.run(['tar', '-tf', '-'], input=stream.stdout, capture_output=True, check=True).stdout.decode()
-	assert './postgres.dump' in members.splitlines()
+	assert stream.stdout == b'dump-bytes'
+
+
+def test_verify_rejects_a_corrupt_compressed_dump(tmp_path):
+	stage = tmp_path / 'stage'
+	stage.mkdir()
+	(stage / 'postgres.dump.zst').write_bytes(_zstd(b'dump-bytes')[:-4])
+	env = _dump_environment(tmp_path, stage)
+
+	result = subprocess.run(
+		[DATABASE_BACKUP_REMOTE], env={**env, 'SSH_ORIGINAL_COMMAND': 'verify'}, capture_output=True, check=False
+	)
+
+	assert result.returncode != 0
+	assert result.stdout == b''
 
 
 def test_failed_pg_dump_leaves_no_verifiable_dump(tmp_path):
@@ -499,19 +519,19 @@ def test_failed_pg_dump_leaves_no_verifiable_dump(tmp_path):
 	)
 
 	assert result.returncode != 0
-	assert not (stage / 'postgres.dump').exists()
+	assert not (stage / 'postgres.dump.zst').exists()
 	verify = subprocess.run(
 		[DATABASE_BACKUP_REMOTE], env={**env, 'SSH_ORIGINAL_COMMAND': 'verify'}, capture_output=True, check=False
 	)
 	assert verify.returncode != 0
 
 
-def test_stage_helpers_share_the_data_stage_default():
+def test_stage_helpers_share_the_default_stage():
 	defaults = {
 		helper.name: re.search(r'DEADTREES_DB_BACKUP_STAGE:-([^}]+)\}', helper.read_text()).group(1)
 		for helper in (DATABASE_BACKUP_REMOTE, DATABASE_BACKUP_REMOTE_HOLIDAY, DATABASE_BACKUP_STREAM)
 	}
-	assert set(defaults.values()) == {'/data/database-backup-stage'}, defaults
+	assert set(defaults.values()) == {'/home/dendro/.deadtrees-db-backup-stage'}, defaults
 
 
 def test_stream_helper_denies_lifecycle_commands(tmp_path):
@@ -859,7 +879,7 @@ exit 0
 def test_holiday_remote_helper_keeps_legacy_stream_local_contract(tmp_path):
 	stage = tmp_path / 'stage'
 	stage.mkdir()
-	(stage / 'postgres.dump').write_bytes(b'dump-bytes')
+	(stage / 'postgres.dump.zst').write_bytes(_zstd(b'dump-bytes'))
 	docker = tmp_path / 'docker'
 	docker_marker = tmp_path / 'docker-ran'
 	_write_executable(docker, '#!/usr/bin/env bash\ntouch "$FAKE_DOCKER_MARKER"\n')
@@ -874,15 +894,14 @@ def test_holiday_remote_helper_keeps_legacy_stream_local_contract(tmp_path):
 	result = subprocess.run([DATABASE_BACKUP_REMOTE_HOLIDAY], env=env, capture_output=True, check=False)
 
 	assert result.returncode == 0, result.stderr
-	members = subprocess.run(['tar', '-tf', '-'], input=result.stdout, capture_output=True, check=True).stdout.decode()
-	assert './postgres.dump' in members.splitlines()
+	assert result.stdout == b'dump-bytes'
 	assert not docker_marker.exists()
 
 
 def test_holiday_remote_helper_requires_release_before_cleanup(tmp_path):
 	stage = tmp_path / 'stage'
 	stage.mkdir()
-	(stage / 'postgres.dump').write_bytes(b'dump-bytes')
+	(stage / 'postgres.dump.zst').write_bytes(_zstd(b'dump-bytes'))
 	base_env = {**os.environ, 'DEADTREES_DB_BACKUP_STAGE': str(stage)}
 
 	def run(command: str) -> subprocess.CompletedProcess[str]:
@@ -899,7 +918,7 @@ def test_holiday_remote_helper_requires_release_before_cleanup(tmp_path):
 		assert run('status').stdout.endswith('preserved\n')
 	assert run('prepare').returncode == 78
 	assert run('cleanup').returncode == 78
-	assert (stage / 'postgres.dump').exists()
+	assert (stage / 'postgres.dump.zst').exists()
 	assert run('release').returncode == 0
 	assert run('cleanup').returncode == 0
 	assert not stage.exists()
