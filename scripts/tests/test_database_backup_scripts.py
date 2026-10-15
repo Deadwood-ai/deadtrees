@@ -394,11 +394,11 @@ def test_remote_helper_requires_explicit_release_before_recovery_cleanup(tmp_pat
 		"""#!/usr/bin/env bash
 set -eu
 case "$*" in
-*" test -f /var/lib/postgresql/data/.deadtrees-logical-backup/toc.dat") exit 0 ;;
-*" touch /var/lib/postgresql/data/.deadtrees-logical-backup/.deadtrees-preserve") touch "$FAKE_PRESERVE_MARKER" ;;
-*" test -f /var/lib/postgresql/data/.deadtrees-logical-backup/.deadtrees-preserve") test -f "$FAKE_PRESERVE_MARKER" ;;
-*" rm -f -- /var/lib/postgresql/data/.deadtrees-logical-backup/.deadtrees-preserve") rm -f "$FAKE_PRESERVE_MARKER" ;;
-*" rm -rf -- /var/lib/postgresql/data/.deadtrees-logical-backup") touch "$FAKE_DELETED_MARKER" ;;
+*" test -f /var/lib/postgresql/backup-stage/logical/toc.dat") exit 0 ;;
+*" touch /var/lib/postgresql/backup-stage/logical/.deadtrees-preserve") touch "$FAKE_PRESERVE_MARKER" ;;
+*" test -f /var/lib/postgresql/backup-stage/logical/.deadtrees-preserve") test -f "$FAKE_PRESERVE_MARKER" ;;
+*" rm -f -- /var/lib/postgresql/backup-stage/logical/.deadtrees-preserve") rm -f "$FAKE_PRESERVE_MARKER" ;;
+*" rm -rf -- /var/lib/postgresql/backup-stage/logical") touch "$FAKE_DELETED_MARKER" ;;
 *) exit 64 ;;
 esac
 """,
@@ -439,14 +439,14 @@ def test_dump_and_stream_helpers_share_default_stage(tmp_path):
 set -eu
 printf '%s\n' "$*" >>"$FAKE_COMMAND_LOG"
 case "$*" in
-*" test ! -e /var/lib/postgresql/data/.deadtrees-logical-backup") test ! -f "$FAKE_STAGE_MARKER" ;;
+*" test ! -e /var/lib/postgresql/backup-stage/logical") test ! -f "$FAKE_STAGE_MARKER" ;;
 *" psql "*) printf '100\n' ;;
-*" df -PB1 /var/lib/postgresql/data")
+*" df -PB1 /var/lib/postgresql/backup-stage")
 	printf 'Filesystem 1-blocks Used Available Capacity Mounted on\n/dev/test 1000 100 900 10%% /data\n'
 	;;
-*" pg_dump "*" --file /var/lib/postgresql/data/.deadtrees-logical-backup "*) touch "$FAKE_STAGE_MARKER" ;;
-*" test -f /var/lib/postgresql/data/.deadtrees-logical-backup/toc.dat") test -f "$FAKE_STAGE_MARKER" ;;
-*" tar --format=posix -C /var/lib/postgresql/data/.deadtrees-logical-backup -cf - .") printf 'archive-bytes' ;;
+*" pg_dump "*" --file /var/lib/postgresql/backup-stage/logical "*) touch "$FAKE_STAGE_MARKER" ;;
+*" test -f /var/lib/postgresql/backup-stage/logical/toc.dat") test -f "$FAKE_STAGE_MARKER" ;;
+*" tar --format=posix -C /var/lib/postgresql/backup-stage/logical -cf - .") printf 'archive-bytes' ;;
 *) exit 64 ;;
 esac
 """,
@@ -482,7 +482,7 @@ esac
 	assert stream_result.returncode == 0, stream_result.stderr
 	assert stream_result.stdout == 'archive-bytes'
 	commands = command_log.read_text()
-	assert commands.count('/var/lib/postgresql/data/.deadtrees-logical-backup') == 4
+	assert commands.count('/var/lib/postgresql/backup-stage/logical') == 4
 	assert '/var/lib/postgresql/data/backup-direct' not in commands
 
 
@@ -858,11 +858,11 @@ def test_holiday_remote_helper_requires_release_before_cleanup(tmp_path):
 		"""#!/usr/bin/env bash
 set -eu
 case "$*" in
-*" test -f /var/lib/postgresql/data/.deadtrees-logical-backup/toc.dat") exit 0 ;;
-*" touch /var/lib/postgresql/data/.deadtrees-logical-backup/.deadtrees-preserve") touch "$FAKE_PRESERVE_MARKER" ;;
-*" test -f /var/lib/postgresql/data/.deadtrees-logical-backup/.deadtrees-preserve") test -f "$FAKE_PRESERVE_MARKER" ;;
-*" rm -f -- /var/lib/postgresql/data/.deadtrees-logical-backup/.deadtrees-preserve") rm -f "$FAKE_PRESERVE_MARKER" ;;
-*" rm -rf -- /var/lib/postgresql/data/.deadtrees-logical-backup") touch "$FAKE_DELETED_MARKER" ;;
+*" test -f /var/lib/postgresql/backup-stage/logical/toc.dat") exit 0 ;;
+*" touch /var/lib/postgresql/backup-stage/logical/.deadtrees-preserve") touch "$FAKE_PRESERVE_MARKER" ;;
+*" test -f /var/lib/postgresql/backup-stage/logical/.deadtrees-preserve") test -f "$FAKE_PRESERVE_MARKER" ;;
+*" rm -f -- /var/lib/postgresql/backup-stage/logical/.deadtrees-preserve") rm -f "$FAKE_PRESERVE_MARKER" ;;
+*" rm -rf -- /var/lib/postgresql/backup-stage/logical") touch "$FAKE_DELETED_MARKER" ;;
 *) exit 64 ;;
 esac
 """,
