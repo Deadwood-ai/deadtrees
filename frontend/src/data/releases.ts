@@ -36,7 +36,9 @@ export interface DteAerialPatchImageSet {
   resolutionCm: DteAerialPatchResolution;
   patchIndex: number;
   label: string;
+  // Full 1024 px image for the zoom view; rgbPreview is a 512 px WebP for cards.
   rgb: string;
+  rgbPreview: string;
   treeCoverMask: string;
   mortalityMask: string;
 }
@@ -138,7 +140,8 @@ const DEFAULT_DTE_AERIAL_PREVIEW_SITE_IDS = [375, 1396, 5584];
 export const DTE_AERIAL_EXPORT_BASE_URL =
   "https://data2.deadtrees.earth/reference/69e57f93-d003-4b64-9108-fe3dfa654918";
 
-const DTE_AERIAL_VIEW_ONLY_PREVIEW_BASE_URL = "/assets/releases/dte-aerial-bench";
+const DTE_AERIAL_VIEW_ONLY_PREVIEW_BASE_URL =
+  "/assets/releases/dte-aerial-bench";
 
 export const getCoarseBiomeGroup = (biome: string) => {
   const normalized = biome.toLowerCase();
@@ -472,13 +475,20 @@ export const getDteAerialPatchImages = (
   const folder = dataset.viewOnly
     ? `${DTE_AERIAL_VIEW_ONLY_PREVIEW_BASE_URL}/${dataset.id}`
     : `${DTE_AERIAL_EXPORT_BASE_URL}/${dataset.id}/png`;
-  const rgbExtension = dataset.viewOnly ? "webp" : "png";
+  const rgbFile = dataset.viewOnly ? `${base}.webp` : `${base}.png`;
+  const rgbPreviewFile = dataset.viewOnly
+    ? `${base}.webp`
+    : `${base}_preview.webp`;
 
   return {
     resolutionCm,
     patchIndex,
     label: `Patch ${patchIndex + 1}`,
-    rgb: withDteAerialAssetVersion(`${folder}/${base}.${rgbExtension}`, dataset),
+    rgb: withDteAerialAssetVersion(`${folder}/${rgbFile}`, dataset),
+    rgbPreview: withDteAerialAssetVersion(
+      `${folder}/${rgbPreviewFile}`,
+      dataset,
+    ),
     treeCoverMask: withDteAerialAssetVersion(
       `${folder}/${base}_forestcover_ref.png`,
       dataset,
@@ -531,7 +541,7 @@ export const getReleasePreviewTiles = (
           {
             kind: "image" as const,
             key: `${site.id}-rgb`,
-            src: previewPatch.rgb,
+            src: previewPatch.rgbPreview,
             alt: `RGB preview from ${release.name} site ${site.id}`,
           },
           {
