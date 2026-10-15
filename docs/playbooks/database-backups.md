@@ -311,7 +311,8 @@ borg check --archives-only --verify-data --glob-archives ARCHIVE \
 
 The archive listing must contain `postgres-directory.tar`. Despite its historical
 name, the tar holds one custom-format `postgres.dump`; restore it with
-`pg_restore` (optionally with `--jobs`). List the tar contents
+`pg_restore`. Because the dump is written to a pipe, plan for a sequential
+restore. List the tar contents
 through a safe temporary restore path and verify that PostgreSQL has zero dump
 sessions afterward. After a successful run, confirm that both database-host and
 backup-host staging are absent and that retention, compact, and repository checks
