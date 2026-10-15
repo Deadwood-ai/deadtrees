@@ -19,9 +19,6 @@ from fnmatch import fnmatch
 from typing import Any
 
 DISK_WATCH_PCT = 85
-# The nightly DB backup's pg_dump keeps about 210 GB on the storage host's `/`
-# between 23:30Z and 06:00Z, so `/` only counts above 90% then.
-STORAGE_NIGHT_DISK_PCT = 90
 # janusch's rule (2026-10-02): helicon `/` above 97% is urgent.
 HELICON_URGENT_DISK_PCT = 97
 BACKUP_MAX_AGE_HOURS = 36
@@ -54,20 +51,12 @@ def host_label(key: str) -> str:
 	return 'processing-server' if key == 'processing' else key.removeprefix('processing:')
 
 
-def storage_night(now: datetime) -> bool:
-	minutes = now.hour * 60 + now.minute
-	return minutes >= 23 * 60 + 30 or minutes < 6 * 60
-
-
-def disk_findings(label: str, disks: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
+def disk_findings(label: str, disks: dict[str, Any]) -> list[dict[str, Any]]:
 	found = []
 	for mount, pct in sorted(disks.items()):
 		pct = int(pct)
 		if label == 'helicon' and mount == '/' and pct > HELICON_URGENT_DISK_PCT:
 			found.append(finding('red', label, f'disk:{mount}', f'helicon `/` is {pct}% full (urgent above {HELICON_URGENT_DISK_PCT}%: stop the processor and requeue its task)'))
-		elif label == 'storage' and mount == '/' and storage_night(now):
-			if pct > STORAGE_NIGHT_DISK_PCT:
-				found.append(finding('yellow', label, f'disk:{mount}', f'storage `/` is {pct}% full during the backup window'))
 		elif pct >= DISK_WATCH_PCT:
 			found.append(finding('yellow', label, f'disk:{mount}', f'{label} `{mount}` is {pct}% full'))
 	return found
@@ -149,7 +138,7 @@ def platform_findings(
 			found.append(finding('yellow', label, 'probe', f'{label} status probe failed: {host.get("error") or "no output"}', confirm=True))
 			unobserved += host_patterns(label)
 			continue
-		found += disk_findings(label, host.get('disks') or {}, now)
+		found += disk_findings(label, host.get('disks') or {})
 		if key.startswith('processing'):
 			found += processor_findings(label, host)
 		elif key == 'storage':
