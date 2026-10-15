@@ -21,6 +21,8 @@ POLYGON = {
 	'type': 'Polygon',
 	'coordinates': [[[7.85, 47.99], [7.85, 48.0], [7.86, 48.0], [7.86, 47.99], [7.85, 47.99]]],
 }
+# The z14 map tile that contains POLYGON.
+TILE = {'z': 14, 'x': 8549, 'y': 5695}
 
 
 def _insert_dataset(owner_id: str, data_access: str, file_stem: str) -> int:
@@ -85,24 +87,28 @@ def _insert_dataset(owner_id: str, data_access: str, file_stem: str) -> int:
 		client.table(settings.statuses_table).insert(
 			{'dataset_id': dataset_id, 'is_upload_done': True, 'is_ortho_done': True, 'is_cog_done': True}
 		).execute()
-		label_id = (
-			client.table(settings.labels_table)
-			.insert(
-				{
-					'dataset_id': dataset_id,
-					'user_id': owner_id,
-					'label_source': 'model_prediction',
-					'label_type': 'semantic_segmentation',
-					'label_data': 'deadwood',
-					'label_quality': 1,
-				}
+		for label_data, table in [
+			('deadwood', settings.deadwood_geometries_table),
+			('forest_cover', settings.forest_cover_geometries_table),
+		]:
+			label_id = (
+				client.table(settings.labels_table)
+				.insert(
+					{
+						'dataset_id': dataset_id,
+						'user_id': owner_id,
+						'label_source': 'model_prediction',
+						'label_type': 'semantic_segmentation',
+						'label_data': label_data,
+						'label_quality': 1,
+					}
+				)
+				.execute()
+				.data[0]['id']
 			)
-			.execute()
-			.data[0]['id']
-		)
-		client.table(settings.deadwood_geometries_table).insert(
-			{'label_id': label_id, 'geometry': POLYGON, 'properties': {'fixture': file_stem}}
-		).execute()
+			client.table(table).insert(
+				{'label_id': label_id, 'geometry': POLYGON, 'properties': {'fixture': file_stem}}
+			).execute()
 	return dataset_id
 
 
@@ -177,6 +183,11 @@ def _visible_surfaces(client, dataset_id: int) -> dict[str, bool]:
 	surfaces['deadwood_geometry'] = bool(
 		client.table(settings.deadwood_geometries_table).select('id').in_('label_id', label_ids).execute().data
 	)
+	for layer in ('deadwood', 'forest_cover'):
+		surfaces[f'{layer}_tile'] = any(
+			client.rpc(f'get_{layer}_tiles_with_corrections', {**TILE, 'filter_label_id': label_id}).execute().data
+			for label_id in label_ids
+		)
 	try:
 		surfaces['my_access'] = _access(client, dataset_id) is not None
 	except APIError:  # not granted to anonymous visitors
@@ -220,6 +231,28 @@ def test_private_dataset_surfaces_follow_one_rule(access_accounts, private_datas
 	with context as client:
 		surfaces = _visible_surfaces(client, private_dataset)
 	assert surfaces == {name: expected_visible for name in surfaces}, surfaces
+
+
+@pytest.mark.parametrize('data_access', ['public', 'viewonly', 'private'])
+@pytest.mark.parametrize('state', ['active', 'archived', 'excluded'])
+@pytest.mark.parametrize('actor', ['anonymous', 'stranger', 'owner', 'reader'])
+def test_map_tiles_follow_label_visibility(access_accounts, make_dataset, data_access, state, actor):
+	"""Tiles read geometry without row policies, so they must show exactly the labels the caller sees."""
+	dataset_id = make_dataset(data_access, f'access-tiles-{data_access}-{state}')
+	_grant(access_accounts['owner']['token'], dataset_id, access_accounts['reader']['email'], 'reader')
+	with psycopg.connect(settings.SUPABASE_DB_URL, autocommit=True) as db:
+		if state == 'archived':
+			db.execute('UPDATE public.v2_datasets SET archived = true WHERE id = %s', (dataset_id,))
+		if state == 'excluded':
+			db.execute(
+				"INSERT INTO public.dataset_audit (dataset_id, final_assessment) VALUES (%s, 'exclude_completely')",
+				(dataset_id,),
+			)
+	context = use_anon_client() if actor == 'anonymous' else use_client(access_accounts[actor]['token'])
+	with context as client:
+		surfaces = _visible_surfaces(client, dataset_id)
+	assert surfaces['deadwood_tile'] == surfaces['forest_cover_tile'] == surfaces['label'], surfaces
+	assert surfaces['deadwood_tile'] == surfaces['deadwood_geometry'], surfaces
 
 
 @pytest.mark.parametrize(
