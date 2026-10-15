@@ -68,6 +68,7 @@ from api.src.export.reference_fetch import (
 	fetch_vector_features_by_label,
 	parse_optional_datetime,
 )
+from api.src.export.reference_previews import PREVIEW_SUFFIX, backfill_previews, write_preview
 
 
 def get_nginx_cog_url(cog_path: str, base_url: str = 'http://localhost:8080/cogs/v1') -> str:
@@ -98,7 +99,7 @@ def get_export_base_resolution(filename_base: str) -> Optional[int]:
 def get_raster_filename_base(path: Path) -> str:
 	"""Return the patch filename base for raster image/mask files."""
 	base = path.stem
-	for suffix in ('_deadwood_ref', '_forestcover_ref'):
+	for suffix in ('_deadwood_ref', '_forestcover_ref', PREVIEW_SUFFIX):
 		if base.endswith(suffix):
 			return base[: -len(suffix)]
 	return base
@@ -160,7 +161,7 @@ def cleanup_removed_patch_exports(
 			if not subdir.exists():
 				continue
 			for path in subdir.iterdir():
-				if not path.is_file() or path.suffix.lower() not in {'.tif', '.png'}:
+				if not path.is_file() or path.suffix.lower() not in {'.tif', '.png', '.webp'}:
 					continue
 				filename_base = get_raster_filename_base(path)
 				if should_cleanup_export_base(filename_base, dataset_raster_bases, resolution_cm):
@@ -757,6 +758,7 @@ def export_patch(
 			rgb_hwc = np.moveaxis(rgb_data, 0, -1)
 			img = Image.fromarray(rgb_hwc)
 			img.save(png_path, optimize=True)
+			write_preview(png_path)
 
 			# Save deadwood reference mask PNG (always export if label exists, even if empty)
 			if has_deadwood_ref_label:
@@ -927,6 +929,8 @@ def main():
 		dataset_id=args.dataset_id,
 		resolution_cm=args.resolution,
 	)
+
+	backfill_previews(output_base_dir, reference_dataset_ids)
 
 	# Pre-filter patches that actually need export. This keeps no-change cron runs
 	# compact and avoids printing the full dataset breakdown every time.
