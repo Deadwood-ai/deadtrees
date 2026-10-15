@@ -58,6 +58,13 @@ RECONSTRUCTION_FILE = 'opensfm/reconstruction.json'
 UNDISTORTED_DIR = 'opensfm/undistorted'
 # Written by OpenSfM's reconstruct step; lists the images of each partial reconstruction.
 OPENSFM_RECONSTRUCT_REPORT = 'opensfm/reports/reconstruction.json'
+# texrecon can segfault in global seam leveling on some meshes (dataset 14780, DT-1404). Its
+# backtrace names the mangled tex::global_seam_leveling; the plain option name appears in every run.
+SEAM_LEVELING_CRASH_FRAME = '_ZN3tex20global_seam_leveling'
+SKIP_SEAM_LEVELING_FLAG = '--texturing-skip-global-seam-leveling'
+SKIP_SEAM_LEVELING_NOTE = (
+	'Orthophoto textured without global color balancing between images, because ODM crashed while balancing them.'
+)
 PRUNE_POINTS_SCRIPT = Path(__file__).parent / 'utils' / 'odm_prune_points.py'
 CHECK_PHOTOS_SCRIPT = Path(__file__).parent / 'utils' / 'odm_check_photos.py'
 # Several DJI cameras write exactly 0 into these tags for nadir shots (DT-951).
@@ -212,6 +219,13 @@ def _with_budgeted_ortho_resolution(
 	return command, reduced_resolution_note(resolution_cm, extent)
 
 
+def _seam_leveling_retry_command(odm_command: list[str], stdout_logs: str) -> list[str] | None:
+	"""Command that redoes texturing without global seam leveling after texrecon crashed there, else None."""
+	if SKIP_SEAM_LEVELING_FLAG in odm_command or SEAM_LEVELING_CRASH_FRAME not in stdout_logs:
+		return None
+	return ['--rerun-from', 'mvs_texturing', SKIP_SEAM_LEVELING_FLAG, *odm_command]
+
+
 def _append_dataset_note(dataset_id: int, note: str, token: str) -> None:
 	"""Add ``note`` to the dataset's additional information, keeping what the contributor wrote.
 
@@ -221,7 +235,7 @@ def _append_dataset_note(dataset_id: int, note: str, token: str) -> None:
 		_write_dataset_note(dataset_id, note, token)
 	except Exception as error:
 		logger.warning(
-			f'Could not add the reduced-resolution note to the dataset: {error}',
+			f'Could not add a note to the dataset: {error}',
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
@@ -444,7 +458,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 			LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 		)
 
-		token, reduced_resolution = _run_odm_container(
+		token, notes = _run_odm_container(
 			images_dir=extraction_dir,
 			output_dir=odm_host_temp_dir,
 			token=token,
@@ -489,8 +503,8 @@ def process_odm(task: QueueTask, temp_dir: Path):
 		# Re-login to ensure we have a fresh token (ODM processing may take >1hr for large datasets)
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
 		update_status(dataset_id=dataset_id, is_odm_done=True, current_status=StatusEnum.idle, token=token)
-		if reduced_resolution:
-			_append_dataset_note(dataset_id, reduced_resolution, token)
+		for note in notes:
+			_append_dataset_note(dataset_id, note, token)
 
 		logger.info(
 			f'ODM processing completed successfully for dataset {dataset_id}',
@@ -882,8 +896,8 @@ def _wait_for_container(container, what: str) -> dict:
 		) from wait_error
 
 
-def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_id: int) -> tuple[str, str | None]:
-	"""Run ODM; return a fresh token and, when the pixel cap lowered the resolution, the dataset note."""
+def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_id: int) -> tuple[str, list[str]]:
+	"""Run ODM; return a fresh token and the notes to add to the dataset (lower resolution, no seam leveling)."""
 	"""
 	Execute ODM Docker container using shared named volumes for file sharing.
 	This approach eliminates host path complexity and works identically in test and production.
@@ -901,7 +915,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 	retain_on_failure = retain_failed_artifacts_enabled_for_dataset(dataset_id)
 	resource_labels = dt_resource_labels(dataset_id=dataset_id, stage='odm', keep_eligible=retain_on_failure)
 	odm_success = False
-	reduced_resolution = None
+	notes: list[str] = []
 	odm_container = None
 
 	logger.info(
@@ -1062,9 +1076,23 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 				odm_command, reduced_resolution = _with_budgeted_ortho_resolution(
 					odm_command, volume_name, project_name, dataset_id, token
 				)
+				if reduced_resolution:
+					notes.append(reduced_resolution)
 				odm_container, exit_status, stdout_logs = _run_odm_pass(
 					client, odm_command, volume_name, resource_labels, dataset_id, token, pass_name='orthophoto'
 				)
+				retry_command = _seam_leveling_retry_command(odm_command, stdout_logs) if exit_status else None
+				if retry_command:
+					logger.warning(
+						'texrecon crashed in global seam leveling; redoing texturing once without it',
+						LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+					)
+					odm_container.remove(force=True)
+					odm_command = retry_command
+					odm_container, exit_status, stdout_logs = _run_odm_pass(
+						client, odm_command, volume_name, resource_labels, dataset_id, token, pass_name='texturing'
+					)
+					notes.append(SKIP_SEAM_LEVELING_NOTE)
 
 			if exit_status == 0:
 				odm_success = True
@@ -1091,7 +1119,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 
 				# Copy results from shared volume to output directory
 				copy_results_from_shared_volume(volume_name, output_dir, project_name, dataset_id, token)
-				return token, reduced_resolution
+				return token, notes
 			else:
 				# ODM failed - log detailed error information
 				logger.error(
