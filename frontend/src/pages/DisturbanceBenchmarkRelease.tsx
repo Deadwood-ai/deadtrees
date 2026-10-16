@@ -5,11 +5,7 @@ import BenchmarkSitePicker from "../components/DisturbanceBenchmark/BenchmarkSit
 import BenchmarkSpatialGrid from "../components/DisturbanceBenchmark/BenchmarkSpatialGrid";
 import BenchmarkTemporalPanel from "../components/DisturbanceBenchmark/BenchmarkTemporalPanel";
 import BenchmarkMethods from "../components/DisturbanceBenchmark/BenchmarkMethods";
-import BenchmarkFeedback from "../components/DisturbanceBenchmark/BenchmarkFeedback";
-import {
-  benchmarkAsset,
-  BENCHMARK_DATA_ROOT,
-} from "../components/DisturbanceBenchmark/benchmarkData";
+import { useBenchmarkAsset } from "../components/DisturbanceBenchmark/BenchmarkAccess";
 import type {
   IBenchmarkCatalog,
   IBenchmarkSite,
@@ -23,11 +19,12 @@ async function loadBenchmark<T>(url: string, signal: AbortSignal): Promise<T> {
 }
 export default function DisturbanceBenchmarkRelease() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const benchmarkAsset = useBenchmarkAsset();
   const catalog = useQuery({
     queryKey: ["disturbance-benchmark", "catalog"],
     queryFn: ({ signal }) =>
       loadBenchmark<IBenchmarkCatalog>(
-        `${BENCHMARK_DATA_ROOT}/catalog.json`,
+        benchmarkAsset("catalog.json"),
         signal,
       ),
     staleTime: 300000,
@@ -151,10 +148,6 @@ export default function DisturbanceBenchmarkRelease() {
                 <BenchmarkMethods
                   site={detail.data}
                   products={catalog.data?.products || []}
-                />
-                <BenchmarkFeedback
-                  key={`feedback-${detail.data.id}`}
-                  site={detail.data}
                 />
               </>
             )}

@@ -71,7 +71,9 @@ def read_ticket(value: str, resource: str) -> Optional[Ticket]:
 	return ticket
 
 
-_TICKET_PATH = re.compile(r'(/(?:datasets/\d+/files/(?:cog|thumbnail)|exports)/)[^/?\s]+')
+_TICKET_PATH = re.compile(
+	r'(/(?:datasets/\d+/files/(?:cog|thumbnail)|exports|disturbance-benchmark/files)/)[^/?\s]+'
+)
 
 
 def redact_file_tickets(record) -> bool:

@@ -3,9 +3,9 @@ import { Modal } from "antd";
 import BenchmarkProductHeading from "./BenchmarkProductHeading";
 import BenchmarkScores from "./BenchmarkScores";
 import BenchmarkLayerControl from "./BenchmarkLayerControl";
+import { useBenchmarkAsset } from "./BenchmarkAccess";
 import {
   availablePredictions,
-  benchmarkAsset,
   benchmarkDate,
 } from "./benchmarkData";
 import type {
@@ -29,6 +29,7 @@ interface SpatialFrame {
   selectedLayer?: number;
 }
 function SpatialImage({ frame }: { frame: SpatialFrame }) {
+  const benchmarkAsset = useBenchmarkAsset();
   return (
     <>
       <img

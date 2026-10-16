@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { benchmarkAsset } from "./benchmarkData";
+import { useBenchmarkAsset } from "./BenchmarkAccess";
 import ReferencePolygonOverlay from "./ReferencePolygonOverlay";
 import type { IReferencePolygons } from "./types";
 
@@ -20,6 +20,7 @@ export default function BenchmarkComparisonViewport({
   view,
   onPan,
 }: BenchmarkComparisonViewportProps) {
+  const benchmarkAsset = useBenchmarkAsset();
   const drag = useRef<{ x: number; y: number } | null>(null);
   const endDrag = () => {
     drag.current = null;

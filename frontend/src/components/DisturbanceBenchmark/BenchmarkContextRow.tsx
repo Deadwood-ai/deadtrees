@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { benchmarkAsset, benchmarkDate, benchmarkTime } from "./benchmarkData";
+import { useBenchmarkAsset } from "./BenchmarkAccess";
+import { benchmarkDate, benchmarkTime } from "./benchmarkData";
 import BenchmarkContextGallery from "./BenchmarkContextGallery";
 import ReferencePolygonOverlay from "./ReferencePolygonOverlay";
 import type { ContextSource, IBenchmarkSite } from "./types";
@@ -22,6 +23,7 @@ export default function BenchmarkContextRow({
   reference,
   onStart,
 }: BenchmarkContextRowProps) {
+  const benchmarkAsset = useBenchmarkAsset();
   const [active, setActive] = useState<number | null>(null);
   const frames = site.contexts[source] || [];
   const visible = frames.slice(start, start + 3);

@@ -47,6 +47,7 @@ def test_images_and_exports_need_authorization(config):
 		pytest.skip('nginx config not mounted')
 	text = config.read_text()
 	assert 'internal;' in _location(text, '^~ /_protected_data/')
+	assert 'internal;' in _location(text, '^~ /_protected_cacheable/')
 	for prefix in ('/cogs/v1/', '/thumbnails/v1/'):
 		body = _location(text, prefix)
 		assert 'auth_request /_authorize_public_file;' in body

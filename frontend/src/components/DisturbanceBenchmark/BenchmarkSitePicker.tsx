@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { benchmarkAsset, filterBenchmarkSites } from "./benchmarkData";
+import { useBenchmarkAsset } from "./BenchmarkAccess";
+import { filterBenchmarkSites } from "./benchmarkData";
 import type { IBenchmarkSiteSummary } from "./types";
 
 interface BenchmarkSitePickerProps {
@@ -12,6 +13,7 @@ export default function BenchmarkSitePicker({
   selected,
   onSelect,
 }: BenchmarkSitePickerProps) {
+  const benchmarkAsset = useBenchmarkAsset();
   const [region, setRegion] = useState("global");
   const visible = useMemo(
     () => filterBenchmarkSites(sites, region),

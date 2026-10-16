@@ -5,7 +5,6 @@ import type {
   IBenchmarkSiteSummary,
 } from "./types";
 
-export const BENCHMARK_DATA_ROOT = "/disturbance-benchmark/data";
 export function contextAttribution(
   frame: IBenchmarkFrame,
   source: string,
@@ -20,11 +19,6 @@ export function contextAttribution(
           ? "Imagery © 2026 Esri and its licensors. All rights reserved"
           : undefined)
   );
-}
-export function benchmarkAsset(path: string): string {
-  return path.startsWith("/data/")
-    ? `${BENCHMARK_DATA_ROOT}${path.slice(5)}`
-    : path;
 }
 export function benchmarkDate(value: string): string {
   const monthOnly = /^\d{4}-\d{2}$/.test(value);
