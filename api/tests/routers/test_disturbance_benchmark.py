@@ -1,4 +1,5 @@
 import shutil
+import uuid
 
 import pytest
 import requests
@@ -27,13 +28,20 @@ def _set_core_team(account: dict, member: bool) -> None:
 
 @pytest.fixture
 def benchmark_export():
+	"""Test files in their own folder of the served export, and one file beside the export."""
 	root = settings.base_path / settings.DISTURBANCE_BENCHMARK_DIR
-	(root / 'Fire_Peru_2024').mkdir(parents=True, exist_ok=True)
-	(root / 'catalog.json').write_bytes(CATALOG)
-	(root / 'Fire_Peru_2024' / 'drone.webp').write_bytes(IMAGE)
-	(settings.base_path / 'releases' / 'outside.json').write_bytes(b'{}')
-	yield root
-	shutil.rmtree(settings.base_path / 'releases', ignore_errors=True)
+	created_root = not root.exists()
+	folder = f'test-{uuid.uuid4().hex[:8]}'
+	(root / folder / 'Fire_Peru_2024').mkdir(parents=True)
+	(root / folder / 'catalog.json').write_bytes(CATALOG)
+	(root / folder / 'Fire_Peru_2024' / 'drone.webp').write_bytes(IMAGE)
+	outside = root.parent / f'{folder}.json'
+	outside.write_bytes(b'{}')
+	yield {'folder': folder, 'outside': outside.name}
+	shutil.rmtree(root / folder, ignore_errors=True)
+	outside.unlink(missing_ok=True)
+	if created_root:
+		shutil.rmtree(root, ignore_errors=True)
 
 
 @pytest.fixture
@@ -60,15 +68,16 @@ def test_access_is_limited_to_the_core_team(access_accounts, core_member):
 def test_signed_files_are_cacheable_and_follow_membership(benchmark_export, core_member):
 	files_url = _files_url(core_member)
 
-	catalog = requests.get(f'http://nginx/api/v1{files_url}/catalog.json', timeout=10)
+	folder = benchmark_export['folder']
+	catalog = requests.get(f'http://nginx/api/v1{files_url}/{folder}/catalog.json', timeout=10)
 	assert catalog.status_code == 200 and catalog.content == CATALOG
-	image = requests.get(f'http://nginx/api/v1{files_url}/Fire_Peru_2024/drone.webp', timeout=10)
+	image = requests.get(f'http://nginx/api/v1{files_url}/{folder}/Fire_Peru_2024/drone.webp', timeout=10)
 	assert image.status_code == 200 and image.content == IMAGE
 	assert image.headers['cache-control'] == 'private, max-age=3600'
 	assert image.headers['access-control-allow-origin'] == '*'
 
 	_set_core_team(core_member, False)
-	assert client.get(f'/api/v1{files_url}/catalog.json').status_code == 404
+	assert client.get(f'/api/v1{files_url}/{folder}/catalog.json').status_code == 404
 
 
 @pytest.mark.parametrize('case', ['tampered', 'expired', 'other_resource', 'escape', 'directory', 'missing'])
@@ -78,18 +87,18 @@ def test_invalid_requests_look_like_missing_files(benchmark_export, core_member,
 	ticket, _ = sign_ticket(core_member['id'], 'cog:1' if case == 'other_resource' else 'disturbance-benchmark')
 	if case == 'tampered':
 		ticket = ticket[:-1] + ('0' if ticket[-1] != '0' else '1')
-	relative = {'escape': '%2E%2E%2Foutside.json', 'directory': 'Fire_Peru_2024', 'missing': 'nope.json'}.get(
-		case, 'catalog.json'
-	)
+	folder = benchmark_export['folder']
+	relative = {
+		'escape': f'%2E%2E%2F{benchmark_export["outside"]}',
+		'directory': f'{folder}/Fire_Peru_2024',
+		'missing': f'{folder}/nope.json',
+	}.get(case, f'{folder}/catalog.json')
 	response = client.get(f'/api/v1/disturbance-benchmark/files/{ticket}/{relative}')
 	assert response.status_code == 404
 	assert response.json() == {'detail': 'Not found'}
 
 
 def test_benchmark_files_are_never_statically_reachable(benchmark_export):
-	for path in [
-		'/_protected_cacheable/releases/disturbance-benchmark/current/catalog.json',
-		'/_protected_data/releases/disturbance-benchmark/current/catalog.json',
-		'/assets/v1/../releases/disturbance-benchmark/current/catalog.json',
-	]:
+	relative = f"{settings.DISTURBANCE_BENCHMARK_DIR}/{benchmark_export['folder']}/catalog.json"
+	for path in [f'/_protected_cacheable/{relative}', f'/_protected_data/{relative}', f'/assets/v1/../{relative}']:
 		assert requests.get('http://nginx' + path, timeout=10).status_code in (403, 404), path
