@@ -15,18 +15,14 @@ export default function ReleaseDetail() {
   const { slug } = useParams();
   const release = slug ? getPublicReleaseBySlug(slug) : undefined;
 
-  // Deployment switch only: the serving proxy must authorize the page AND assets.
-  // Keep this internal release out of the public releases catalogue.
+  // Internal, core-team-only release: kept out of the public releases catalogue.
   if (slug === "disturbance-benchmark") {
-    return import.meta.env.VITE_ENABLE_INTERNAL_DISTURBANCE_BENCHMARK ===
-      "true" ? (
+    return (
       <BenchmarkAccess>
-        <Suspense fallback={<p role="status">Loading benchmark…</p>}>
+        <Suspense fallback={null}>
           <DisturbanceBenchmarkRelease />
         </Suspense>
       </BenchmarkAccess>
-    ) : (
-      <Navigate to="/releases" replace />
     );
   }
 
