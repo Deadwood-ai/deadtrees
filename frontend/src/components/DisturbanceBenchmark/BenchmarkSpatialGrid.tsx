@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
-import { Modal } from "antd";
+import { Alert, Modal } from "antd";
 import BenchmarkProductHeading from "./BenchmarkProductHeading";
 import BenchmarkScores from "./BenchmarkScores";
 import BenchmarkLayerControl from "./BenchmarkLayerControl";
 import { useBenchmarkAsset } from "./BenchmarkAccess";
+import { BenchmarkPager, BenchmarkZoomControl } from "./BenchmarkControls";
 import { availablePredictions, benchmarkDate } from "./benchmarkData";
 import type {
   IBenchmarkProduct,
@@ -115,29 +116,26 @@ export default function BenchmarkSpatialGrid({
               )}
           </div>
         </div>
-        <div className="db-zoom-controls" aria-label="Image tile size">
-          <button
-            aria-label="Decrease image tile size"
-            disabled={zoom <= 1}
-            onClick={() => setZoom((v) => Math.max(1, v - 0.5))}
-          >
-            −
-          </button>
-          <span>{zoom.toFixed(1)}×</span>
-          <button
-            aria-label="Increase image tile size"
-            disabled={zoom >= 3}
-            onClick={() => setZoom((v) => Math.min(3, v + 0.5))}
-          >
-            +
-          </button>
-          <button onClick={() => setZoom(1)}>Reset</button>
-        </div>
+        <BenchmarkZoomControl
+          value={zoom}
+          min={1}
+          max={3}
+          label="Image tile size"
+          onChange={setZoom}
+        />
       </div>
       {site.dataWarnings?.map((warning) => (
-        <p className="db-data-warning" key={warning}>
-          <strong>Data review:</strong> {warning}
-        </p>
+        <Alert
+          className="mb-3"
+          key={warning}
+          type="warning"
+          showIcon
+          message={
+            <>
+              <strong>Data review:</strong> {warning}
+            </>
+          }
+        />
       ))}
       <div
         className="db-spatial-grid"
@@ -224,18 +222,14 @@ export default function BenchmarkSpatialGrid({
             }}
           >
             <div className="db-gallery-controls">
-              <button
-                onClick={() => move(-1)}
-                aria-label="Previous gallery image"
-              >
-                ← Previous
-              </button>
-              <span>
-                {active + 1} / {frames.length}
-              </span>
-              <button onClick={() => move(1)} aria-label="Next gallery image">
-                Next →
-              </button>
+              <BenchmarkPager
+                position={`${active + 1} / ${frames.length}`}
+                label="gallery image"
+                canPrevious
+                canNext
+                onPrevious={() => move(-1)}
+                onNext={() => move(1)}
+              />
             </div>
             <div
               ref={galleryImage}

@@ -1,3 +1,4 @@
+import { Select } from "antd";
 import type { IBenchmarkEvaluation } from "./types";
 
 export default function BenchmarkLayerControl({
@@ -13,17 +14,17 @@ export default function BenchmarkLayerControl({
   if (!layer) return null;
   return (
     <div className="db-raw-layer-control">
-      <select
+      <Select
+        size="small"
+        className="w-full"
         aria-label="Supplied satellite layer"
         value={selected}
-        onChange={(event) => onSelect(Number(event.target.value))}
-      >
-        {layers.map((item, index) => (
-          <option key={item.image} value={index}>
-            {item.label}
-          </option>
-        ))}
-      </select>
+        onChange={onSelect}
+        options={layers.map((item, index) => ({
+          value: index,
+          label: item.label,
+        }))}
+      />
       <div className="db-raw-legend">
         <span>
           {layer.minimum.toLocaleString("en-GB", { maximumFractionDigits: 2 })}
