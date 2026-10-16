@@ -226,6 +226,3 @@ auto-deploy.log
 # Local browser evidence can contain signed URLs and test sessions.
 /frontend/test-results/
 /frontend/playwright-report/
-
-# Benchmark web data is delivered separately on NAS, never in Git.
-/frontend/public/disturbance-benchmark/data/
