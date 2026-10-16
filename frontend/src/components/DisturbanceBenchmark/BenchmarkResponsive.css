@@ -1,30 +1,7 @@
-@media (min-width: 1600px) {
-  .db-preview-image {
-    height: 262px;
-  }
-  .db-world-map {
-    height: 375px;
-  }
-  .db-hero h1 {
-    font-size: 49px;
-  }
-}
 @media (max-width: 1200px) {
-  .db-page-inner {
-    padding: 0 32px;
-  }
-  .db-hero {
-    gap: 30px;
-  }
-  .db-world-map {
-    height: 320px;
-  }
   .db-explorer {
     grid-template-columns: 220px minmax(0, 1fr);
     gap: 20px;
-  }
-  .db-preview-image {
-    height: 207px;
   }
   .db-site-card > img {
     width: 37px;
@@ -34,10 +11,10 @@
     gap: 8px;
   }
   .db-site-card strong {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-site-card small {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-selected-heading h2 {
     font-size: 23px;
@@ -54,36 +31,18 @@
     gap: 7px;
   }
   .db-context-frames figcaption > strong {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-context-frames figcaption > span {
-    font-size: 11px;
+    font-size: 13px;
   }
 }
 @media (max-width: 1000px) {
-  .db-page {
-    padding-top: 6rem;
-  }
-  .db-hero h1 {
-    font-size: 38px;
-  }
-  .db-hero-copy > p {
-    font-size: 12px;
-  }
-  .db-world-map {
-    height: 292px;
-  }
-  .db-hero {
-    grid-template-columns: 1fr 1.2fr;
-    gap: 25px;
-    margin-bottom: 32px;
-  }
   .db-explorer {
     grid-template-columns: 195px minmax(0, 1fr);
     gap: 17px;
   }
   .db-spatial-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
   }
   .db-selected-heading {
@@ -98,9 +57,6 @@
   }
   .db-zoom-controls button {
     height: 27px;
-  }
-  .db-preview-image {
-    height: 230px;
   }
   .db-site-card {
     padding: 8px 4px;
@@ -121,7 +77,7 @@
     margin-top: 4px;
   }
   .db-region-tabs button {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-temporal-grid {
     grid-template-columns: 1fr;
@@ -134,23 +90,23 @@
   }
 
   .db-context-frames figcaption > span {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-context-frames figcaption > strong {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-signal-panel {
     padding: 20px;
   }
   .db-chart-readout {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-chart-note,
   .db-context-note {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-chart-legend {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-context-panel {
     padding: 20px;
@@ -159,50 +115,10 @@
     max-width: 660px;
   }
   .db-methods {
-    font-size: 11px;
+    font-size: 13px;
   }
 }
 @media (max-width: 700px) {
-  .db-page-inner {
-    padding: 0 20px;
-  }
-  .db-page {
-    padding-top: 5.9rem;
-  }
-  .db-hero {
-    grid-template-columns: 1fr;
-    gap: 24px;
-    margin-top: 18px;
-  }
-  .db-hero-copy {
-    padding: 0;
-  }
-  .db-hero h1 {
-    font-size: 37px;
-    margin: 12px 0 17px;
-  }
-  .db-hero-copy > p {
-    font-size: 13px;
-    max-width: 500px;
-  }
-  .db-preview-label {
-    margin-top: 17px;
-  }
-  .db-explore-link {
-    margin-top: 14px;
-  }
-  .db-world-map {
-    height: 257px;
-  }
-  .db-explorer-heading {
-    padding: 17px 0;
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 7px;
-  }
-  .db-explorer-heading p {
-    font-size: 11px;
-  }
   .db-explorer {
     grid-template-columns: 1fr;
     gap: 21px;
@@ -221,7 +137,7 @@
     margin: 0 0 12px;
   }
   .db-region-tabs button {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-site-list {
     display: grid;
@@ -238,34 +154,27 @@
     height: 39px;
   }
   .db-site-card strong {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-site-card small {
-    font-size: 11px;
-  }
-  .db-filter-note {
-    font-size: 11px;
-    padding-top: 7px;
+    font-size: 13px;
   }
   .db-spatial-grid {
     gap: 10px;
-  }
-  .db-preview-image {
-    height: 222px;
   }
   .db-preview-heading {
     padding: 12px 10px;
     height: 60px;
   }
   .db-preview-heading h3 {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-preview-heading > span {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-preview-card > p {
     padding: 10px;
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-selected-heading {
     align-items: flex-start;
@@ -284,7 +193,7 @@
     font-size: 24px;
   }
   .db-section-heading p {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-signal-panel,
   .db-context-panel {
@@ -292,41 +201,41 @@
   }
   .db-chart-controls > label:first-child,
   .db-context-controls > label {
-    font-size: 11px;
+    font-size: 13px;
     gap: 8px;
   }
   .db-checkbox {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-page select {
-    font-size: 11px;
+    font-size: 13px;
     padding: 6px;
   }
   .db-chart-legend {
-    font-size: 11px;
+    font-size: 13px;
     gap: 8px 11px;
   }
   .db-chart-readout {
-    font-size: 11px;
+    font-size: 13px;
     min-height: 39px;
     gap: 5px;
   }
   .db-chart-note,
   .db-context-note {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-context-frames {
     gap: 10px;
   }
 
   .db-context-frames figcaption > strong {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-context-frames figcaption > span {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-methods summary {
-    font-size: 11px;
+    font-size: 13px;
     padding: 13px 15px;
   }
   .db-methods > div {
@@ -339,37 +248,22 @@
   .db-methods p,
   .db-methods dd,
   .db-methods li {
-    font-size: 11px;
+    font-size: 13px;
   }
 }
 @media (max-width: 420px) {
-  .db-page-inner {
-    padding: 0 15px;
-  }
-  .db-hero h1 {
-    font-size: 34px;
-  }
-  .db-world-map {
-    height: 230px;
-  }
-  .db-hero-copy > p {
-    font-size: 12px;
-  }
-  .db-preview-image {
-    height: 195px;
-  }
   .db-preview-heading h3 {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-site-card strong {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-site-card > img {
     width: 31px;
     height: 35px;
   }
   .db-site-card small {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-selected-heading h2 {
     font-size: 23px;
@@ -384,10 +278,10 @@
     gap: 7px;
   }
   .db-context-frames figcaption > span {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-context-frames figcaption > strong {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-chart-controls > label:first-child {
     gap: 5px;
@@ -416,11 +310,11 @@
 .db-context-controls h3 {
   font-size: 17px;
   font-weight: 550;
-  color: #375c42;
+  color: #1b5e35;
 }
 .db-context-controls p {
-  font-size: 12px;
-  color: #647568;
+  font-size: 14px;
+  color: #6b7280;
   margin-top: 4px;
 }
 .db-context-panel .db-context-frames figcaption {
@@ -431,7 +325,7 @@
   font-size: 14px;
 }
 .db-context-panel .db-context-frames figcaption span {
-  font-size: 12px;
+  font-size: 14px;
 }
 .db-context-stack > .db-context-note {
   margin-top: 0 !important;
@@ -439,14 +333,11 @@
   padding: 0;
 }
 .db-signal-chart .db-date-lane-label {
-  font-size: 11px;
-}
-.db-world-map .dt-map-attribution-control {
-  font-size: 10px;
+  font-size: 13px;
 }
 .db-context-stack .db-frame-navigation span {
   width: 85px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .db-context-stack .db-frame-navigation button {
   width: 34px;
@@ -463,20 +354,20 @@
     gap: 10px;
   }
   .db-context-panel .db-context-frames figcaption strong {
-    font-size: 12px;
+    font-size: 14px;
   }
   .db-context-panel .db-context-frames figcaption span {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-context-controls h3 {
     font-size: 15px;
   }
   .db-context-controls p {
-    font-size: 11px;
+    font-size: 13px;
   }
   .db-context-stack .db-frame-navigation span {
     width: 70px;
-    font-size: 11px;
+    font-size: 13px;
   }
 }
 
@@ -513,65 +404,14 @@
   font-weight: 400;
   letter-spacing: normal;
 }
-.db-explorer-heading.db-section-heading {
-  margin-bottom: 0;
-}
-.db-submission-link,
-.db-project-credit a {
-  color: #375c42;
+.db-submission-link {
+  color: #1b5e35;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
 .db-submission-link {
-  font-size: 12px;
+  font-size: 14px;
   white-space: nowrap;
-}
-.db-hero-copy > .db-project-credit {
-  font-size: 13px;
-  margin-top: 14px;
-}
-.db-feedback {
-  margin-top: 22px;
-  border-top: 1px solid var(--db-border);
-  padding: 20px 0;
-}
-.db-feedback summary {
-  cursor: pointer;
-  color: #375c42;
-  font-weight: 550;
-}
-.db-feedback p {
-  margin: 12px 0;
-  font-size: 13px;
-}
-.db-feedback label,
-.db-feedback small {
-  display: block;
-  font-size: 12px;
-  color: #647568;
-}
-.db-feedback textarea {
-  display: block;
-  width: 100%;
-  max-width: 720px;
-  border: 1px solid var(--db-border);
-  border-radius: 6px;
-  padding: 12px;
-  margin: 8px 0 12px;
-  resize: vertical;
-}
-.db-feedback-email {
-  display: inline-block;
-  background: #375c42;
-  color: white;
-  border-radius: 5px;
-  padding: 9px 14px;
-  font-size: 13px;
-  margin-bottom: 10px;
-}
-.db-feedback-email[aria-disabled="true"] {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 .db-section-heading p {
   max-width: 900px;
@@ -599,20 +439,13 @@
   text-align: left;
 }
 .db-product-info > span {
-  color: #647568;
-  font-size: 12px;
+  color: #6b7280;
+  font-size: 14px;
 }
 .db-product-info:focus-visible {
-  outline: 2px solid #375c42;
+  outline: 2px solid #1b5e35;
   outline-offset: 4px;
   border-radius: 2px;
-}
-.db-preview-heading .db-product-full-name {
-  display: block;
-  font-size: 11px;
-  line-height: 1.4;
-  color: #526257;
-  margin: 5px 0;
 }
 .db-product-popover {
   max-width: 290px;
@@ -622,7 +455,7 @@
   margin-bottom: 10px;
 }
 .db-product-popover a {
-  color: #375c42;
+  color: #1b5e35;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -639,7 +472,6 @@
 .db-preview-image {
   display: block;
   width: 100%;
-  height: auto;
   padding: 0;
   cursor: zoom-in;
 }
@@ -676,15 +508,15 @@
   margin: 12px 0;
 }
 .db-gallery-controls button {
-  border: 1px solid #cbd6cb;
+  border: 1px solid #e5e7eb;
   border-radius: 5px;
   padding: 6px 12px;
-  color: #375c42;
+  color: #1b5e35;
 }
 .db-gallery > p {
   text-align: center;
-  color: #647568;
-  font-size: 12px;
+  color: #6b7280;
+  font-size: 14px;
   margin-top: 12px;
 }
 
@@ -694,24 +526,21 @@
   padding: 12px 13px;
   gap: 4px;
 }
-.db-preview-heading .db-product-full-name {
-  margin: 0;
-}
 .db-product-scores {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 18px;
   padding: 9px 13px;
-  border-top: 1px solid #edf1e8;
-  color: #647568;
-  font-size: 11px;
+  border-top: 1px solid #f3f4f6;
+  color: #6b7280;
+  font-size: 13px;
 }
 .db-product-scores span {
   display: inline-flex;
   gap: 5px;
 }
 .db-product-scores strong {
-  color: #34473b;
+  color: #1f2937;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -723,9 +552,6 @@
 .db-product-inline-heading h3 {
   display: inline;
   margin-right: 6px;
-}
-.db-preview-heading .db-product-inline-heading .db-product-full-name {
-  display: inline;
 }
 .db-preview-heading:has(> h3) {
   display: block;
@@ -778,7 +604,7 @@
   padding: 17px;
 }
 .db-temporal-grid > .db-context-stack {
-  background: #fbfcf8;
+  background: #f9fafb;
   border: 1px solid var(--db-border);
   border-radius: 9px;
   padding: 17px;
@@ -789,7 +615,7 @@
   line-height: 24px;
   font-size: 16px;
   font-weight: 550;
-  color: #375c42;
+  color: #1b5e35;
 }
 .db-context-stack > .db-context-panel {
   border: 0;
@@ -804,28 +630,21 @@
 .db-context-stack > .db-context-note {
   margin: 0;
 }
-.db-feedback .db-feedback-email {
-  color: #fff;
-}
-.db-feedback .db-feedback-email:hover {
-  color: #fff;
-  background: #294831;
-}
 .db-time-range-title {
   margin: 0 0 12px;
   line-height: 24px;
   font-size: 16px;
   font-weight: 550;
-  color: #375c42;
+  color: #1b5e35;
 }
 .db-selected-heading .db-source-status {
   display: inline-block;
   margin-left: 12px;
   padding: 2px 7px;
-  border: 1px solid #d6ddd1;
+  border: 1px solid #e5e7eb;
   border-radius: 4px;
-  color: #59614f;
-  font-size: 11px;
+  color: #4b5563;
+  font-size: 13px;
 }
 
 .db-context-panel .db-context-enlarge {
@@ -837,12 +656,12 @@
 .db-imagery-credit {
   display: block;
   margin: 5px 0 0;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.5;
-  color: #526257;
+  color: #4b5563;
 }
 .db-context-enlarge:focus-visible {
-  outline: 2px solid #375c42;
+  outline: 2px solid #1b5e35;
   outline-offset: 3px;
 }
 .db-context-gallery-toolbar {
@@ -872,13 +691,13 @@
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 8px;
-  color: #375c42;
+  color: #1b5e35;
 }
 .db-context-comparison-viewport {
   overflow: hidden;
   position: relative;
-  background: #f5f7f3;
-  border: 1px solid #dde6d7;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
   touch-action: none;
   user-select: none;
 }
@@ -894,8 +713,8 @@
 }
 .db-context-gallery-hint {
   margin-top: 12px;
-  font-size: 12px;
-  color: #647568;
+  font-size: 14px;
+  color: #6b7280;
 }
 .db-context-gallery button:disabled {
   opacity: 0.4;
@@ -906,12 +725,35 @@
     gap: 8px;
   }
   .db-context-comparison figcaption {
-    font-size: 12px;
+    font-size: 14px;
   }
 }
 
-.db-raw-layer-control { padding: 8px 12px; min-width: 0; }
-.db-raw-layer-control select { width: 100%; max-width: 100%; font-size: 11px; border: 1px solid #dce3dd; padding: 5px; background: white; }
-.db-raw-layer-control small { font-size: 10px; color: #607367; }
-.db-raw-legend { display: flex; gap: 6px; align-items: center; font-size: 10px; margin-top: 6px; }
-.db-raw-gradient { flex: 1; height: 6px; background: linear-gradient(to right, rgb(70,95,150), rgb(225,132,47)); }
+.db-raw-layer-control {
+  padding: 8px 12px;
+  min-width: 0;
+}
+.db-raw-layer-control select {
+  width: 100%;
+  max-width: 100%;
+  font-size: 13px;
+  border: 1px solid #e5e7eb;
+  padding: 5px;
+  background: white;
+}
+.db-raw-layer-control small {
+  font-size: 12px;
+  color: #4b5563;
+}
+.db-raw-legend {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  margin-top: 6px;
+}
+.db-raw-gradient {
+  flex: 1;
+  height: 6px;
+  background: linear-gradient(to right, rgb(70, 95, 150), rgb(225, 132, 47));
+}

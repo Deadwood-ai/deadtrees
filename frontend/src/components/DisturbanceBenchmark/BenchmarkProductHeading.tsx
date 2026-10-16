@@ -1,3 +1,4 @@
+import { InfoCircleOutlined } from "@ant-design/icons";
 import { Popover } from "antd";
 import { PRODUCT_REFERENCES } from "./productReferences";
 import type { IBenchmarkProduct } from "./types";
@@ -30,7 +31,7 @@ export default function BenchmarkProductHeading({
           >
             <i style={{ background: product.color }} aria-hidden="true" />
             {product.name}
-            <span aria-hidden="true">ⓘ</span>
+            <InfoCircleOutlined aria-hidden="true" />
           </button>
         </Popover>
       </h3>

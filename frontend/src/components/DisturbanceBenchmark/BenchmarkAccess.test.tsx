@@ -59,21 +59,30 @@ function renderGate() {
 
 describe("Disturbance benchmark core-team gate", () => {
   it.each([
-    ["anonymous visitors", () => {
-      auth.session = null;
-      auth.status = "anonymous";
-    }],
-    ["signed-in users outside the core team", () => {
-      privileges.canAudit = false;
-    }],
-  ])("sends %s to the public releases without asking the server", async (_, arrange) => {
-    arrange();
-    const fetcher = vi.fn();
-    vi.stubGlobal("fetch", fetcher);
-    renderGate();
-    await screen.findByText("Public releases");
-    expect(fetcher).not.toHaveBeenCalled();
-  });
+    [
+      "anonymous visitors",
+      () => {
+        auth.session = null;
+        auth.status = "anonymous";
+      },
+    ],
+    [
+      "signed-in users outside the core team",
+      () => {
+        privileges.canAudit = false;
+      },
+    ],
+  ])(
+    "sends %s to the public releases without asking the server",
+    async (_, arrange) => {
+      arrange();
+      const fetcher = vi.fn();
+      vi.stubGlobal("fetch", fetcher);
+      renderGate();
+      await screen.findByText("Public releases");
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
 
   it("serves the export from the signed storage link", async () => {
     const fetcher = vi.fn().mockResolvedValue(
