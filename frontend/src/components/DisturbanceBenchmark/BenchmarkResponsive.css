@@ -52,12 +52,6 @@
   .db-selected-heading h2 {
     font-size: 23px;
   }
-  .db-zoom-controls {
-    height: 29px;
-  }
-  .db-zoom-controls button {
-    height: 27px;
-  }
   .db-site-card {
     padding: 8px 4px;
     gap: 7px;
@@ -75,9 +69,6 @@
   .db-picker-heading > span {
     display: block;
     margin-top: 4px;
-  }
-  .db-region-tabs button {
-    font-size: 13px;
   }
   .db-temporal-grid {
     grid-template-columns: 1fr;
@@ -132,13 +123,6 @@
   .db-picker-heading > span {
     margin: 0;
   }
-  .db-region-tabs {
-    max-width: 290px;
-    margin: 0 0 12px;
-  }
-  .db-region-tabs button {
-    font-size: 13px;
-  }
   .db-site-list {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -182,9 +166,6 @@
   .db-selected-heading h2 {
     font-size: 25px;
   }
-  .db-zoom-controls {
-    margin-left: auto;
-  }
   .db-temporal {
     margin-top: 30px;
     padding-top: 23px;
@@ -203,13 +184,6 @@
   .db-context-controls > label {
     font-size: 13px;
     gap: 8px;
-  }
-  .db-checkbox {
-    font-size: 13px;
-  }
-  .db-page select {
-    font-size: 13px;
-    padding: 6px;
   }
   .db-chart-legend {
     font-size: 13px;
@@ -233,13 +207,6 @@
   }
   .db-context-frames figcaption > span {
     font-size: 13px;
-  }
-  .db-methods summary {
-    font-size: 13px;
-    padding: 13px 15px;
-  }
-  .db-methods > div {
-    padding: 0 16px 18px;
   }
   .db-methods dl {
     grid-template-columns: 1fr;
@@ -270,9 +237,6 @@
   }
   .db-context-controls {
     flex-wrap: wrap;
-  }
-  .db-frame-navigation {
-    margin-left: auto;
   }
   .db-context-frames {
     gap: 7px;
@@ -335,15 +299,6 @@
 .db-signal-chart .db-date-lane-label {
   font-size: 13px;
 }
-.db-context-stack .db-frame-navigation span {
-  width: 85px;
-  font-size: 14px;
-}
-.db-context-stack .db-frame-navigation button {
-  width: 34px;
-  height: 34px;
-  font-size: 15px;
-}
 @media (max-width: 700px) {
   .db-context-stack-heading {
     align-items: flex-start;
@@ -363,10 +318,6 @@
     font-size: 15px;
   }
   .db-context-controls p {
-    font-size: 13px;
-  }
-  .db-context-stack .db-frame-navigation span {
-    width: 70px;
     font-size: 13px;
   }
 }

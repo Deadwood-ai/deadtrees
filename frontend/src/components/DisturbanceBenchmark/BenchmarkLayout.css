@@ -9,23 +9,21 @@
 .db-page * {
   box-sizing: border-box;
 }
-.db-page button,
-.db-page input,
-.db-page select {
+.db-page button:not(.ant-btn) {
   font: inherit;
 }
-.db-page button {
+.db-page button:not(.ant-btn) {
   cursor: pointer;
   color: inherit;
 }
-.db-page button:disabled {
+.db-page button:not(.ant-btn):disabled {
   cursor: default;
   opacity: 0.35;
 }
 .db-page a {
   color: var(--db-green);
 }
-.db-page :is(button, a, input, select, summary):focus-visible {
+.db-page :is(button:not(.ant-btn), a):focus-visible {
   outline: 3px solid #88b5e0;
   outline-offset: 3px;
 }
@@ -58,28 +56,6 @@
 .db-picker-heading > span {
   font-size: 13px;
   color: #6b7280;
-}
-.db-region-tabs {
-  display: flex;
-  gap: 3px;
-  padding: 3px;
-  background: #f3f4f6;
-  border-radius: 6px;
-  margin: 0 4px 11px;
-}
-.db-region-tabs button {
-  flex: 1;
-  background: none;
-  border: 0;
-  border-radius: 4px;
-  padding: 6px 4px;
-  color: #6b7280;
-  font-size: 13px;
-}
-.db-region-tabs button[aria-pressed="true"] {
-  background: white;
-  color: var(--db-green);
-  box-shadow: 0 1px 3px #213b2910;
 }
 .db-site-list {
   max-height: 630px;
@@ -159,35 +135,6 @@
 .db-selected-heading p > span {
   padding: 0 7px;
 }
-.db-zoom-controls {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  overflow: hidden;
-  flex-shrink: 0;
-  height: 31px;
-}
-.db-zoom-controls button {
-  border: 0;
-  background: white;
-  min-width: 26px;
-  height: 29px;
-  font-size: 15px;
-  color: #1b5e35;
-}
-.db-zoom-controls > span {
-  font-size: 13px;
-  width: 29px;
-  text-align: center;
-  color: #6b7280;
-}
-.db-zoom-controls button:last-child {
-  border-left: 1px solid #e5e7eb;
-  font-size: 13px;
-  padding: 0 9px;
-}
 .db-spatial-grid {
   /* --db-tile-zoom comes from the tile-size control. */
   --db-tile: calc(210px * var(--db-tile-zoom, 1));
@@ -255,16 +202,6 @@
   padding: 11px 13px;
   color: #6b7280;
 }
-
-.db-data-warning {
-  margin: 0 0 18px;
-  padding: 10px 14px;
-  border-left: 3px solid #a78b56;
-  background: #faf7ef;
-  color: #645334;
-  font-size: 13px;
-  line-height: 1.6;
-}
 .db-section-heading {
   margin-bottom: 24px;
 }
@@ -310,28 +247,6 @@
   gap: 10px;
   font-size: 13px;
   color: #6b7280;
-}
-.db-page select {
-  border: 1px solid #e5e7eb;
-  background: white;
-  color: #1b5e35;
-  border-radius: 5px;
-  padding: 6px 8px;
-  font-size: 13px;
-}
-.db-checkbox {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 13px;
-  color: #6b7280;
-  cursor: pointer;
-}
-.db-checkbox input {
-  width: 12px;
-  height: 12px;
-  margin: 0;
-  accent-color: var(--db-green);
 }
 .db-chart-container {
   margin: 14px auto 0;
@@ -412,27 +327,6 @@
   line-height: 1.85;
   margin-top: 13px !important;
 }
-.db-frame-navigation {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-.db-frame-navigation button {
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-radius: 5px;
-  width: 27px;
-  height: 29px;
-  color: #1b5e35;
-  font-size: 14px;
-}
-.db-frame-navigation > span {
-  font-size: 13px;
-  width: 60px;
-  text-align: center;
-  color: #6b7280;
-}
 .db-context-frames {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -492,35 +386,8 @@
   color: #6b7280;
 }
 .db-methods {
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  margin-top: 30px;
+  background: #fff;
   font-size: 13px;
-}
-.db-methods summary {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 15px;
-  padding: 15px 18px;
-  cursor: pointer;
-  color: #6b7280;
-  list-style: none;
-}
-.db-methods summary::-webkit-details-marker {
-  display: none;
-}
-.db-methods summary > span {
-  color: #6b7280;
-  font-size: 17px;
-}
-.db-methods[open] summary > span {
-  transform: rotate(45deg);
-}
-.db-methods > div {
-  padding: 5px 21px 22px;
-  max-width: 1000px;
 }
 .db-methods h3 {
   font-size: 14px;

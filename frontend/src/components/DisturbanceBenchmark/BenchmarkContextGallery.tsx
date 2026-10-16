@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
-import { Modal } from "antd";
+import { Checkbox, Modal } from "antd";
 import { benchmarkDate, contextAttribution } from "./benchmarkData";
 import BenchmarkComparisonViewport from "./BenchmarkComparisonViewport";
+import { BenchmarkPager, BenchmarkZoomControl } from "./BenchmarkControls";
 import type { ContextSource, IBenchmarkFrame, IBenchmarkSite } from "./types";
 
 interface BenchmarkContextGalleryProps {
@@ -108,53 +109,29 @@ export default function BenchmarkContextGallery({
         }}
       >
         <div className="db-context-gallery-toolbar">
-          <div className="db-gallery-controls">
-            <button
-              disabled={index === 0}
-              onClick={() => move(-1)}
-              aria-label="Previous context image"
-            >
-              ← Previous
-            </button>
-            <span>
-              {index + 1} / {frames.length}
-            </span>
-            <button
-              disabled={index === frames.length - 1}
-              onClick={() => move(1)}
-              aria-label="Next context image"
-            >
-              Next →
-            </button>
-          </div>
-          <div className="db-zoom-controls" aria-label="Linked image zoom">
-            <button
-              disabled={view.zoom <= 1}
-              onClick={() => zoomTo(view.zoom - 0.5)}
-              aria-label="Zoom out both images"
-            >
-              −
-            </button>
-            <span>{view.zoom.toFixed(1)}×</span>
-            <button
-              disabled={view.zoom >= 4}
-              onClick={() => zoomTo(view.zoom + 0.5)}
-              aria-label="Zoom in both images"
-            >
-              +
-            </button>
-            <button onClick={() => setView({ zoom: 1, x: 0, y: 0 })}>
-              Reset
-            </button>
-          </div>
-          <label className="db-checkbox">
-            <input
-              type="checkbox"
-              checked={reference}
-              onChange={(event) => setReference(event.target.checked)}
-            />
+          <BenchmarkPager
+            position={`${index + 1} / ${frames.length}`}
+            label="context image"
+            canPrevious={index > 0}
+            canNext={index < frames.length - 1}
+            onPrevious={() => move(-1)}
+            onNext={() => move(1)}
+          />
+          <BenchmarkZoomControl
+            value={view.zoom}
+            min={1}
+            max={4}
+            label="Linked image zoom"
+            onChange={(zoom) =>
+              zoom === 1 ? setView({ zoom: 1, x: 0, y: 0 }) : zoomTo(zoom)
+            }
+          />
+          <Checkbox
+            checked={reference}
+            onChange={(event) => setReference(event.target.checked)}
+          >
             Reference polygons
-          </label>
+          </Checkbox>
         </div>
         <div
           className="db-context-comparison"

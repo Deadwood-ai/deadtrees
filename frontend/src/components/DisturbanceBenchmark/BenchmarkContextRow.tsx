@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useBenchmarkAsset } from "./BenchmarkAccess";
 import { benchmarkDate, benchmarkTime } from "./benchmarkData";
 import BenchmarkContextGallery from "./BenchmarkContextGallery";
+import { BenchmarkPager } from "./BenchmarkControls";
 import ReferencePolygonOverlay from "./ReferencePolygonOverlay";
 import type { ContextSource, IBenchmarkSite } from "./types";
 interface BenchmarkContextRowProps {
@@ -48,27 +49,16 @@ export default function BenchmarkContextRow({
               : "Supplied dated RGB imagery"}
           </p>
         </div>
-        <div className="db-frame-navigation">
-          <button
-            aria-label={`Previous ${SOURCE_LABELS[source]} image window`}
-            disabled={start === 0}
-            onClick={() => onStart(Math.max(0, start - 1))}
-          >
-            ←
-          </button>
-          <span>
-            {start + 1}–{Math.min(start + 3, frames.length)} / {frames.length}
-          </span>
-          <button
-            aria-label={`Next ${SOURCE_LABELS[source]} image window`}
-            disabled={start + 3 >= frames.length}
-            onClick={() =>
-              onStart(Math.min(Math.max(0, frames.length - 3), start + 1))
-            }
-          >
-            →
-          </button>
-        </div>
+        <BenchmarkPager
+          position={`${start + 1}–${Math.min(start + 3, frames.length)} / ${frames.length}`}
+          label={`${SOURCE_LABELS[source]} image window`}
+          canPrevious={start > 0}
+          canNext={start + 3 < frames.length}
+          onPrevious={() => onStart(Math.max(0, start - 1))}
+          onNext={() =>
+            onStart(Math.min(Math.max(0, frames.length - 3), start + 1))
+          }
+        />
       </div>
       <div className="db-context-frames">
         {visible.map((frame, offset) => (

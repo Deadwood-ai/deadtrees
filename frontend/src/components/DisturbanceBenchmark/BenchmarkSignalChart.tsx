@@ -3,6 +3,7 @@ import { createSignalChartModel, type SignalPoint } from "./signalChartModel";
 import BenchmarkChartAxes from "./BenchmarkChartAxes";
 import BenchmarkImageDateLanes from "./BenchmarkImageDateLanes";
 import { useMemo, useState } from "react";
+import { Checkbox, Select } from "antd";
 import { benchmarkDate, benchmarkTime } from "./benchmarkData";
 import type {
   BenchmarkIndex,
@@ -69,27 +70,25 @@ export default function BenchmarkSignalChart({
         {fullRecord ? "Full record" : "Disturbance window"}
       </h3>
       <div className="db-chart-controls">
-        <label>
+        <label className="flex items-center gap-2">
           Sentinel-2 index
-          <select
+          <Select
+            size="small"
+            className="min-w-24"
             value={index}
-            onChange={(event) => setIndex(event.target.value as BenchmarkIndex)}
-          >
-            {Object.entries(INDEX_LABELS).map(([key, label]) => (
-              <option key={key} value={key}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="db-checkbox">
-          <input
-            type="checkbox"
-            checked={!fullRecord}
-            onChange={(event) => setFullRecord(!event.target.checked)}
+            onChange={(value: BenchmarkIndex) => setIndex(value)}
+            options={Object.entries(INDEX_LABELS).map(([value, label]) => ({
+              value,
+              label,
+            }))}
           />
-          Zoom to disturbance window
         </label>
+        <Checkbox
+          checked={!fullRecord}
+          onChange={(event) => setFullRecord(!event.target.checked)}
+        >
+          Zoom to disturbance window
+        </Checkbox>
       </div>
       <div className="db-chart-container">
         <svg

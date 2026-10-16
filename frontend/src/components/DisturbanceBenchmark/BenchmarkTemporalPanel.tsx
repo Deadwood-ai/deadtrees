@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Checkbox, Segmented } from "antd";
 import { contextAttribution, initialFrameStart } from "./benchmarkData";
 import BenchmarkSignalChart from "./BenchmarkSignalChart";
 import BenchmarkContextRow from "./BenchmarkContextRow";
@@ -60,37 +61,35 @@ export default function BenchmarkTemporalPanel({
         <div className="db-context-stack">
           <h3 className="db-base-imagery-title">Base imagery</h3>
           <div className="db-context-stack-heading">
-            <div className="db-region-tabs" aria-label="Imagery source">
-              {available.map((value) => (
-                <button
-                  key={value}
-                  aria-pressed={source === value}
-                  onClick={() => setSource(value)}
-                >
-                  {value === "planet"
+            <Segmented
+              size="small"
+              aria-label="Imagery source"
+              value={source}
+              onChange={(value) => setSource(value as ContextSource)}
+              options={available.map((value) => ({
+                value,
+                label:
+                  value === "planet"
                     ? "Planet"
                     : value === "google"
                       ? "Google"
-                      : "Esri"}
-                </button>
-              ))}
-            </div>
-            <label className="db-checkbox">
-              <input
-                type="checkbox"
-                checked={reference}
-                disabled={
-                  !site.referencePolygons &&
-                  !available.some((source) =>
-                    site.contexts[source]?.some(
-                      (frame) => frame.referencePolygons,
-                    ),
-                  )
-                }
-                onChange={(event) => setReference(event.target.checked)}
-              />
+                      : "Esri",
+              }))}
+            />
+            <Checkbox
+              checked={reference}
+              disabled={
+                !site.referencePolygons &&
+                !available.some((source) =>
+                  site.contexts[source]?.some(
+                    (frame) => frame.referencePolygons,
+                  ),
+                )
+              }
+              onChange={(event) => setReference(event.target.checked)}
+            >
               Show drone reference polygons
-            </label>
+            </Checkbox>
           </div>
           {available
             .filter((value) => value === source)

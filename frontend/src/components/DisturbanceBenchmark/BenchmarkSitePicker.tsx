@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Segmented } from "antd";
 import { useBenchmarkAsset } from "./BenchmarkAccess";
 import { filterBenchmarkSites } from "./benchmarkData";
 import type { IBenchmarkSiteSummary } from "./types";
@@ -25,17 +26,19 @@ export default function BenchmarkSitePicker({
         <h2>Reference sites</h2>
         <span>N = {visible.length}</span>
       </div>
-      <div className="db-region-tabs" aria-label="Filter sites by geography">
-        {["global", "europe", "tropical"].map((value) => (
-          <button
-            key={value}
-            aria-pressed={region === value}
-            onClick={() => setRegion(value)}
-          >
-            {value[0].toUpperCase() + value.slice(1)}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        block
+        size="small"
+        className="mb-3"
+        aria-label="Filter sites by geography"
+        value={region}
+        onChange={(value) => setRegion(value as string)}
+        options={[
+          { value: "global", label: "Global" },
+          { value: "europe", label: "Europe" },
+          { value: "tropical", label: "Tropical" },
+        ]}
+      />
       <div className="db-site-list">
         {visible.map((site) => (
           <button
