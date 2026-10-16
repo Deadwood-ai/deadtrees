@@ -47,7 +47,10 @@ export default function BenchmarkAccess({
     refetchInterval: (query) => {
       const expiresAt = query.state.data?.expires_at;
       return expiresAt
-        ? Math.max(60_000, expiresAt * 1000 - Date.now() - REFRESH_BEFORE_EXPIRY_MS)
+        ? Math.max(
+            60_000,
+            expiresAt * 1000 - Date.now() - REFRESH_BEFORE_EXPIRY_MS,
+          )
         : false;
     },
     queryFn: async ({ signal }): Promise<BenchmarkFilesGrant> => {
@@ -64,7 +67,11 @@ export default function BenchmarkAccess({
     },
   });
 
-  if (status === "checking" || privilegesLoading || (isCoreTeam && grant.isPending))
+  if (
+    status === "checking" ||
+    privilegesLoading ||
+    (isCoreTeam && grant.isPending)
+  )
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <Spin />

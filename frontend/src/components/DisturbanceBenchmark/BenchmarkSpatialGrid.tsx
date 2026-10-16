@@ -4,10 +4,7 @@ import BenchmarkProductHeading from "./BenchmarkProductHeading";
 import BenchmarkScores from "./BenchmarkScores";
 import BenchmarkLayerControl from "./BenchmarkLayerControl";
 import { useBenchmarkAsset } from "./BenchmarkAccess";
-import {
-  availablePredictions,
-  benchmarkDate,
-} from "./benchmarkData";
+import { availablePredictions, benchmarkDate } from "./benchmarkData";
 import type {
   IBenchmarkProduct,
   IBenchmarkSite,
@@ -144,9 +141,7 @@ export default function BenchmarkSpatialGrid({
       ))}
       <div
         className="db-spatial-grid"
-        style={{
-          gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${210 * zoom}px), 1fr))`,
-        }}
+        style={{ "--db-tile-zoom": zoom } as React.CSSProperties}
       >
         {frames.map((frame, index) => (
           <article className="db-preview-card" key={frame.title}>
