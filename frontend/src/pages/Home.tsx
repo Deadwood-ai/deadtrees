@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 
 import Hero from "../components/Home/Hero";
 import HowItWorks from "../components/Home/HowItWorks";
+import TrustedBy from "../components/Home/TrustedBy";
 import ReleasesSection from "../components/Home/Releases";
 import PlatformFeatures from "../components/Home/PlatformFeatures";
 import GetInContact from "../components/Home/GetInContact";
@@ -262,6 +263,7 @@ export default function HomePage() {
     <div className="w-full bg-white" data-testid="home-page">
       <Hero />
       <HowItWorks />
+      <TrustedBy />
       <ReleasesSection />
       <PlatformFeatures />
       <GetInContact />
