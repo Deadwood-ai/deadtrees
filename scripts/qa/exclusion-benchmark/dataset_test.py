@@ -21,18 +21,23 @@ CUTS = {'deadwood': 52, 'forest': 69}  # calibrated on the gold crops, 13 Oct
 TARGET_RECALL, TARGET_FALSE = 0.9, 0.2
 
 
-def prepare(root):
+def prepare(root, folder, out, prefix):
+    """List the cut crops of one sampling method; a sampler's picks.json adds each crop's area weight."""
     splits = json.loads((root / 'splits.json').read_text())
     split_of = {i: name for name in ('development', 'validation') for i in splits[name]}
+    picks = json.loads((root / folder / 'picks.json').read_text()) if (root / folder / 'picks.json').exists() else {}
     crops = []
-    for d in sorted((root / 'bench-crops').iterdir()):
+    for d in sorted((root / folder).iterdir()):
         if not (d / 'truth.json').exists():
             continue
         t = json.loads((d / 'truth.json').read_text())
-        crops.append({'id': f'bench-{d.name}', 'dataset_id': t['dataset_id'], 'view': t['strategy'], 'mpp': t['mpp'],
-                      'prefix': f'bench-crops/{d.name}/', 'source': 'benchmark dataset',
-                      'split': split_of.get(t['dataset_id'], 'other'), 'predicted_fraction': t['predicted_fraction']})
-    (root / 'bench-test.json').write_text(json.dumps(crops, indent=1))
+        dataset, n = d.name.rsplit('-', 1)
+        picked = picks.get(dataset, {}).get('crops', [])
+        crops.append({'id': f'{prefix}-{d.name}', 'dataset_id': t['dataset_id'], 'view': t['strategy'], 'mpp': t['mpp'],
+                      'prefix': f'{folder}/{d.name}/', 'source': 'benchmark dataset',
+                      'split': split_of.get(t['dataset_id'], 'other'), 'predicted_fraction': t['predicted_fraction'],
+                      'weight': picked[int(n) - 1]['weight'] if len(picked) >= int(n) else None})
+    (root / out).write_text(json.dumps(crops, indent=1))
     print(f'{len(crops)} crops from {len({c["dataset_id"] for c in crops})} datasets')
 
 
@@ -52,11 +57,14 @@ if __name__ == '__main__':
     p.add_argument('--root', type=Path, required=True)
     p.add_argument('--prepare', action='store_true')
     p.add_argument('--runs', nargs=2, default=['luna-bench-v4', 'haiku-bench-v4'])
+    p.add_argument('--crops-dir', default='bench-crops', help='bench-crops (fixed 10) or sampled-crops (crop_sampler.py)')
+    p.add_argument('--crops-file', default='bench-test.json')
+    p.add_argument('--id-prefix', default='bench')
     a = p.parse_args()
     if a.prepare:
-        prepare(a.root)
+        prepare(a.root, a.crops_dir, a.crops_file, a.id_prefix)
         raise SystemExit
-    crops = json.loads((a.root / 'bench-test.json').read_text())
+    crops = json.loads((a.root / a.crops_file).read_text())
     selection = {d['dataset_id']: d for d in json.loads((a.root / 'selection.json').read_text())['datasets']}
     overrides = adjudicated(a.root)
     runs = [load(a.root / 'runs' / r) for r in a.runs]
@@ -69,13 +77,15 @@ if __name__ == '__main__':
         for layer, vlayer in LAYERS.items():
             lik = np.array([np.mean([r[c['id']][vlayer]['major_likelihood'] for r in runs]) for c in mine])
             area = np.array([c['predicted_fraction'][layer] for c in mine])
+            weight = np.array([c.get('weight') or 1 / len(mine) for c in mine]); weight /= weight.sum()
             major = lik >= CUTS[vlayer]
             rows.append({'dataset_id': dataset_id, 'layer': layer, 'split': mine[0]['split'], 'bad': t[layer]['exclude'],
-                         'grade': t[layer]['grade'], 'n': len(mine), 'major': int(major.sum()), 'share': float(major.mean()),
+                         'grade': t[layer]['grade'], 'n': len(mine), 'major': int(major.sum()), 'share': float((major * weight).sum()),
                          'area_share': float((major * area).sum() / area.sum()) if area.sum() > 0 else 0.0,
                          'mean': float(lik.mean())})
-    (a.root / 'runs' / 'dataset-test.json').write_text(json.dumps(rows, indent=1))
-    rules = {f'>= {k} of 10 major': (lambda k: lambda r: r['major'] >= k)(k) for k in (1, 2, 3, 4)}
+    (a.root / 'runs' / f'dataset-test-{a.id_prefix}.json').write_text(json.dumps(rows, indent=1))
+    rules = {f'>= {k} major crops': (lambda k: lambda r: r['major'] >= k)(k) for k in (1, 2, 3, 4)}
+    rules |= {f'weighted share >= {s:.0%}': (lambda s: lambda r: r['share'] >= s)(s) for s in (0.1, 0.2, 0.3)}
     rules |= {f'area share >= {s:.0%}': (lambda s: lambda r: r['area_share'] >= s)(s) for s in (0.1, 0.2, 0.3)}
     rules |= {f'mean likelihood >= {m}': (lambda m: lambda r: r['mean'] >= m)(m) for m in (30, 40, 50)}
     for layer in LAYERS:

@@ -3,7 +3,7 @@
 Candidates are the dataset's stored CLIP tiles (v2_tile_embeddings, about 52 m, the crop size)
 that have image data. Tiles are grouped by appearance (k-means on their embeddings, a stand-in
 for land cover); each group gets crops in proportion to its area, at least one. Tiles with
-no trees predicted and no deadwood ("no signal") are skipped, except a small reserve that
+no tree or deadwood prediction touching them ("no signal") are skipped, except a small reserve that
 keeps missed trees in view. Every crop carries a weight = the area share it stands for, so
 the dataset share of major crops stays unbiased. Count: 1 crop per 2 ha, 10 to 40.
 Writes <output>/picks.json and cuts the crops with gold_crops.build. Read-only analyst SQL.
@@ -35,16 +35,17 @@ def candidates(db, row):
     if not tiles:
         return []
     ids = [t['id'] for t in tiles]
-    fractions = {}
+    # Presence, not area: a tile has signal when any prediction touches it. EXISTS on the
+    # spatial index stays fast on datasets with 100k+ polygons, where area sums time out.
+    present = {}
     for layer, table in (('deadwood', 'v2_deadwood_geometries'), ('forest_cover', 'v2_forest_cover_geometries')):
         for r in db.execute(
-                f"SELECT t.id, COALESCE(SUM(ST_Area(ST_Intersection(ST_MakeValid(g.geometry), t.geometry)::geography)), 0) "
-                f"/ ST_Area(t.geometry::geography) AS f FROM v2_tile_embeddings t LEFT JOIN {table} g "
-                f"ON g.label_id = %s AND NOT g.is_deleted AND ST_Intersects(g.geometry, t.geometry) "
-                f"WHERE t.id = ANY(%s) GROUP BY t.id, t.geometry", (row[f'{layer}_label_id'], ids)).fetchall():
-            fractions.setdefault(r['id'], {})[layer] = float(r['f'])
+                f"SELECT t.id, EXISTS (SELECT 1 FROM {table} g WHERE g.label_id = %s AND NOT g.is_deleted "
+                f"AND ST_Intersects(g.geometry, t.geometry)) AS hit FROM v2_tile_embeddings t WHERE t.id = ANY(%s)",
+                (row[f'{layer}_label_id'], ids)).fetchall():
+            present.setdefault(r['id'], {})[layer] = bool(r['hit'])
     return [{'tile_id': t['id'], 'lon': t['lon'], 'lat': t['lat'], 'embedding': json.loads(t['e']),
-             **fractions.get(t['id'], {'deadwood': 0.0, 'forest_cover': 0.0})} for t in tiles]
+             **present.get(t['id'], {'deadwood': False, 'forest_cover': False})} for t in tiles]
 
 
 def pick(tiles, n, seed):
@@ -53,7 +54,7 @@ def pick(tiles, n, seed):
     X = np.array([t['embedding'] for t in tiles]); X /= np.linalg.norm(X, axis=1, keepdims=True)
     k = int(min(6, max(1, len(tiles) // 5)))
     groups = KMeans(n_clusters=k, n_init=10, random_state=seed).fit_predict(X) if k > 1 else np.zeros(len(tiles), int)
-    signal = np.array([t['forest_cover'] >= 0.01 or t['deadwood'] > 0 for t in tiles])
+    signal = np.array([t['forest_cover'] or t['deadwood'] for t in tiles])
     n = min(n, len(tiles))
     reserve = min(int((~signal).sum()), max(1, round(NO_SIGNAL_SHARE * n))) if (~signal).any() else 0
     chosen = []
