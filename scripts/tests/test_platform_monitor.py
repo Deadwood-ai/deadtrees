@@ -548,3 +548,18 @@ def test_oom_kills_are_read_since_the_previous_tick():
 def test_the_inbox_prompt_reads_posthog_since_the_last_read():
 	prompt = monitor_tick.render('monitor_inbox_prompt.md', {'since': '2026-10-13T22:07:00Z', 'since_epoch': '1', 'now': 'x', 'tools': 't'}, {'zulip': ''})
 	assert '"date_from":"2026-10-13T22:07:00Z"' in prompt and '-1h' not in prompt
+
+
+def test_a_failed_note_keeps_the_filing_state(tmp_path, monkeypatch):
+	def no_outbox(*args):
+		raise OSError('read-only')
+	monkeypatch.setattr(monitor_tick, 'post_outbox', no_outbox)
+	monkeypatch.setattr(monitor_tick, 'run_script', lambda name, extra: snapshot())
+	monkeypatch.setattr(monitor_tick.host_facts, 'collect', lambda now, last_tick: {})
+	monkeypatch.setattr(monitor_tick.findings_module, 'build_findings', lambda *args: ([red('a')], [], []))
+	monkeypatch.setattr(monitor_tick, 'read_inbox', lambda *args: ([], 'linear=0 gmail=0 posthog=0 project=13440', True, True, 0.0))
+	monkeypatch.setattr(monitor_tick, 'file_findings', lambda *args: (True, '[filed] ok', {'dt-status/api/a': 'DT-7'}, {'dt-status/api/a'}, 0.0))
+	args = monitor_tick.parse_args(['--state-dir', str(tmp_path), '--zuliprc', str(tmp_path / 'missing')])
+	assert monitor_tick.tick(args, NOON, tmp_path) == 1
+	state = json.loads((tmp_path / 'monitor.json').read_text())
+	assert state['issues'] == {'dt-status/api/a': 'DT-7'} and 'dt-status/api/a' in state['baseline']['active']

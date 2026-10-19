@@ -781,7 +781,6 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 
 	if digest:
 		keep_digest(args.state_dir, now, f'{header}\n\n{body}\n')
-		post_outbox(args.state_dir, now, f'{header}\n\n{body}\n')
 	append_best_effort(args.state_dir / TICK_LOG, {
 		'at': iso(now), 'model': args.model, 'outbox': bool(digest),
 		'verdict': findings_module.verdict(current), 'checked': checked,
@@ -797,6 +796,14 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 		'gaps': quiet_gaps,
 		'cost_usd': round(cost, 4),
 	}, indent=2) + '\n')
+	# Only after the state is saved: a failed note must never make the next
+	# tick repeat Linear writes that already happened.
+	if digest:
+		try:
+			post_outbox(args.state_dir, now, f'{header}\n\n{body}\n')
+		except OSError as exc:
+			print(f'outbox note not written: {type(exc).__name__}', file=sys.stderr)
+			return 1
 	return 0
 
 
