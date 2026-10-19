@@ -35,7 +35,6 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -44,16 +43,14 @@ sys.path.insert(0, str(HERE))
 import findings as findings_module  # noqa: E402
 import host_facts  # noqa: E402
 
-# Janusch's working hours (2026-10-14): ticks every 15 minutes, of which every
-# second one also runs the inbox, PostHog and the scorecard; outside them the
-# timer fires every two hours and each tick runs everything.
-WORK_TZ = ZoneInfo('Europe/Berlin')
-WORK_HOURS = range(6, 18)
 DEFAULT_STATE_DIR = Path.home() / '.local/state/deadtrees-monitor'
 DEFAULT_ZULIPRC = Path.home() / '.config/deadtrees/zuliprc'
 DEFAULT_ZULIP_STREAM = 'project_deadtree.earth'
 TICK_STATE = 'monitor.json'
 TICK_LOG = 'ticks.jsonl'
+# A relay session forwards each note here to the project coordinator and
+# deletes it; the tick writes one only when something changed or failed.
+OUTBOX = 'outbox'
 SHADOW_LOG = 'shadow.jsonl'
 DIGESTS = 'digests'
 DIGEST_RETENTION = timedelta(days=2)
@@ -692,28 +689,23 @@ def read_inbox(prompt: str, since: datetime, args: argparse.Namespace, workdir: 
 	return items, checked, inbox_ok, posthog_ok, cost
 
 
-def full_tick_due(now: datetime) -> bool:
-	"""Whether this tick also runs the inbox, PostHog and the scorecard. In
-	working hours only the :00-:14 and :30-:44 quarters do; the others check
-	the platform (processors, workers, disks, API, storage) and cost no tokens
-	unless something needs filing."""
-	local = now.astimezone(WORK_TZ)
-	return local.hour not in WORK_HOURS or local.minute % 30 < 15
+def post_outbox(state_dir: Path, now: datetime, text: str) -> None:
+	# The relay forwards and removes `*.md`; it ignores `*.tmp`.
+	outbox = state_dir / OUTBOX
+	outbox.mkdir(exist_ok=True)
+	write_atomic(outbox / f"{now.strftime('%Y%m%dT%H%M%SZ')}.md", text)
 
 
 def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 	tick_file = args.state_dir / TICK_STATE
 	state = load_json(tick_file)
 	since = parse_since(state.get('inbox_since'), now)
-	full = args.mode == 'full' or (args.mode == 'auto' and full_tick_due(now))
 	operator_dir = None if args.dry_run else args.operator_dir
 	snapshot = run_script('operator_status.py', state_args(operator_dir, 'state.json', 'latest.md'))
-	scorecard = {}
-	if full:
-		try:
-			scorecard = run_script('data_factory_scorecard.py', state_args(operator_dir, 'scorecard-state.json', 'scorecard-latest.md'))
-		except (RuntimeError, ValueError, subprocess.TimeoutExpired):
-			pass
+	try:
+		scorecard = run_script('data_factory_scorecard.py', state_args(operator_dir, 'scorecard-state.json', 'scorecard-latest.md'))
+	except (RuntimeError, ValueError, subprocess.TimeoutExpired):
+		scorecard = {}
 	last_tick = state.get('last_tick_at')
 	facts = host_facts.collect(now, datetime.fromisoformat(last_tick.replace('Z', '+00:00')) if isinstance(last_tick, str) else None)
 	current, gaps, unobserved = findings_module.build_findings(snapshot, facts, now)
@@ -724,17 +716,14 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 	known: dict[str, str] = dict(state.get('issues') or {})
 	cost = 0.0
 
-	items: list[str] = []
-	checked, inbox_ok, posthog_ok, zulip_state, zulip_ok = 'inbox not due', False, False, '', True
-	if full:
-		zulip, zulip_state, zulip_ok = zulip_section(args.zuliprc, since, args.zulip_stream)
-		prompt = render(
-			'monitor_inbox_prompt.md',
-			{'tools': ','.join(INBOX_TOOLS), 'since': iso(since), 'since_epoch': str(int(since.timestamp())), 'now': iso(now)},
-			{'zulip': zulip},
-		)
-		items, checked, inbox_ok, posthog_ok, inbox_cost = read_inbox(prompt, since, args, workdir)
-		cost += inbox_cost
+	zulip, zulip_state, zulip_ok = zulip_section(args.zuliprc, since, args.zulip_stream)
+	prompt = render(
+		'monitor_inbox_prompt.md',
+		{'tools': ','.join(INBOX_TOOLS), 'since': iso(since), 'since_epoch': str(int(since.timestamp())), 'now': iso(now)},
+		{'zulip': zulip},
+	)
+	items, checked, inbox_ok, posthog_ok, inbox_cost = read_inbox(prompt, since, args, workdir)
+	cost += inbox_cost
 	seen_posthog: dict[str, int] = dict(state.get('posthog_seen') or {})
 	posthog, next_posthog = posthog_delta(posthog_items(items), seen_posthog) if posthog_ok else ({}, seen_posthog)
 	items = [item for item in items if not item.startswith('- [posthog]')]
@@ -766,8 +755,7 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 			}
 			# Keep the old baseline so the next tick files this delta again.
 			digest.append(f'- [gap] linear filing failed, will retry: {clip(detail)}')
-	# The shadow compares inbox reads, so it runs only with one.
-	if full and not args.dry_run and shadow_due(args, now):
+	if not args.dry_run and shadow_due(args, now):
 		cost += run_shadow(prompt, since, args, workdir, now, {'items': items, 'checked': checked, 'ok': inbox_ok})
 
 	digest = platform_lines(filing, known) + [f'- [gap] {gap}' for gap in gaps] + digest + items
@@ -782,7 +770,7 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 
 	header = (
 		f'DeadTrees monitor {iso(now)} · platform `{findings_module.verdict(current)}`'
-		f" · {factory_line(scorecard) if full else 'platform-only tick'} · {checked} {zulip_state}".rstrip()
+		f' · {factory_line(scorecard)} · {checked} {zulip_state}'
 	)
 	header, body = redact(header), redact('\n'.join(digest) or 'no changes')
 	write_atomic(args.state_dir / ('digest-dry-run.md' if args.dry_run else 'digest-latest.md'), f'{header}\n\n{body}\n')
@@ -794,20 +782,28 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 	if digest:
 		keep_digest(args.state_dir, now, f'{header}\n\n{body}\n')
 	append_best_effort(args.state_dir / TICK_LOG, {
-		'at': iso(now), 'mode': 'full' if full else 'platform', 'model': args.model,
+		'at': iso(now), 'model': args.model, 'outbox': bool(digest),
 		'verdict': findings_module.verdict(current), 'checked': checked,
 		'inbox_ok': inbox_ok, 'posthog_ok': posthog_ok, 'filed': sorted(filing), 'cost_usd': round(cost, 4),
 	})
 	write_atomic(tick_file, json.dumps({
 		'last_tick_at': iso(now),
 		# The inbox window only moves past what every source read.
-		'inbox_since': iso(now) if full and inbox_ok and zulip_ok else iso(since),
+		'inbox_since': iso(now) if inbox_ok and zulip_ok else iso(since),
 		'baseline': baseline,
 		'issues': known,
 		'posthog_seen': seen_posthog,
 		'gaps': quiet_gaps,
 		'cost_usd': round(cost, 4),
 	}, indent=2) + '\n')
+	# Only after the state is saved: a failed note must never make the next
+	# tick repeat Linear writes that already happened.
+	if digest:
+		try:
+			post_outbox(args.state_dir, now, f'{header}\n\n{body}\n')
+		except OSError as exc:
+			print(f'outbox note not written: {type(exc).__name__}', file=sys.stderr)
+			return 1
 	return 0
 
 
@@ -848,8 +844,6 @@ def parse_since(value: Any, now: datetime) -> datetime:
 def parse_args(argv: list[str]) -> argparse.Namespace:
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument('--dry-run', action='store_true')
-	# auto: the working-hours schedule; full or platform force one kind of tick.
-	parser.add_argument('--mode', choices=('auto', 'full', 'platform'), default='auto')
 	parser.add_argument('--state-dir', type=Path, default=DEFAULT_STATE_DIR)
 	# Where `operator_status.py` and the scorecard keep their latest state for
 	# manual /status reads; unset writes none.
@@ -881,6 +875,10 @@ def main(argv: list[str]) -> int:
 			print(text, file=sys.stderr)
 			if not args.dry_run:
 				write_best_effort(args.state_dir / 'digest-latest.md', text)
+				try:
+					post_outbox(args.state_dir, now, text)
+				except OSError:
+					pass
 			return 1
 
 

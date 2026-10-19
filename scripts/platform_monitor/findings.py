@@ -58,7 +58,8 @@ def disk_findings(label: str, disks: dict[str, Any]) -> list[dict[str, Any]]:
 		if label == 'helicon' and mount == '/' and pct > HELICON_URGENT_DISK_PCT:
 			found.append(finding('red', label, f'disk:{mount}', f'helicon `/` is {pct}% full (urgent above {HELICON_URGENT_DISK_PCT}%: stop the processor and requeue its task)'))
 		elif pct >= DISK_WATCH_PCT:
-			found.append(finding('yellow', label, f'disk:{mount}', f'{label} `{mount}` is {pct}% full'))
+			# Disks hovering at the line flapped every few runs (deepl1 at 85%).
+			found.append(finding('yellow', label, f'disk:{mount}', f'{label} `{mount}` is {pct}% full', confirm=True))
 	return found
 
 

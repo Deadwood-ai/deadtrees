@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One DeadTrees monitor tick. Install as ~/.local/bin/deadtrees-monitor-tick on
 # the processing server; see docs/playbooks/operator-chat.md
-# ("Unattended 15-Minute Monitor").
+# ("Unattended Platform Monitor").
 set -euo pipefail
 
 MON="${DEADTREES_MONITOR_CHECKOUT:-$HOME/dev/deadtrees-monitor}"
