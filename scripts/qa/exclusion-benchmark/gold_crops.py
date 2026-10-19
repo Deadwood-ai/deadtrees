@@ -97,7 +97,7 @@ def stratified(rows, exclude, quotas):
     return chosen
 
 
-def build(row, strategy, output, rng, name=None):
+def build(row, strategy, output, rng, name=None, center=None):
     directory = output / (name or str(row['dataset_id']))
     if (directory / 'truth.json').exists():
         return json.loads((directory / 'truth.json').read_text())
@@ -122,7 +122,14 @@ def build(row, strategy, output, rng, name=None):
 
         w = None
         with analyst() as db:
-            if strategy in ('deadwood', 'forest_cover'):
+            if center is not None:
+                # A crop placed by a sampler (crop_sampler.py): use that spot as given.
+                x, y = transform_geom(4326, src.crs, {'type': 'Point', 'coordinates': list(center)})['coordinates']
+                col, r_ = inv * (x, y)
+                w = inside(col, r_)
+                if w is None:
+                    raise ValueError('Picked crop not fully inside the AOI')
+            elif strategy in ('deadwood', 'forest_cover'):
                 # Centre on a predicted polygon so there is something to judge nearby.
                 centres = db.execute(f"SELECT ST_X(c) AS x, ST_Y(c) AS y FROM (SELECT ST_PointOnSurface(geometry) AS c "
                                      f"FROM {TABLES[strategy]} WHERE label_id = %s AND NOT is_deleted "
