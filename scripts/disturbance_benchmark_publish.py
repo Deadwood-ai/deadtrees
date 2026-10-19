@@ -213,7 +213,7 @@ def publish(run: Path, dry_run: bool = False) -> None:
 	link = [f'--link-dest=../{previous}'] if previous and previous != run.name else []
 	# Compare by content, not time: each build writes new mtimes, and --link-dest only
 	# links files whose compared attributes match.
-	result = rsync('-rlp', '--checksum', *link, f'{out}/', f'{REMOTE}{run.name}/', dry_run=dry_run)
+	result = rsync('-rlp', '--checksum', '--mkpath', *link, f'{out}/', f'{REMOTE}{run.name}/', dry_run=dry_run)
 	if dry_run:
 		print(result.stdout[-2000:])
 	switch(run.name, dry_run=dry_run)

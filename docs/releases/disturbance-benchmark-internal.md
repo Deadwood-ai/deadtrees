@@ -41,6 +41,20 @@ relative to `BASE_DIR`) names the served folder. The viewer requests
 `catalog.json` and the `/data/<site>/...` paths written in it, relative to that
 folder.
 
+### Production nginx
+
+Production nginx is the host config on data2
+(`/apps/deadtrees/nginx/conf/storage-server.conf`), not this repository, so it
+changes by hand like the [dataset access rollout](../playbooks/dataset-access-rollout.md):
+keep a copy, edit, `nginx -t`, `systemctl reload nginx`. Copy from
+`nginx/api-conf/storage-server.conf`:
+
+1. Add `disturbance-benchmark/files/` to the ticket regex location
+   `^/api/v1/(datasets/[0-9]+/files/|exports/|disturbance-benchmark/files/)`, so
+   signed links stay out of the access log.
+2. Add the internal `location ^~ /_protected_cacheable/` block (private one-hour
+   caching, gzipped JSON). Without it every benchmark file returns 404.
+
 ## Publishing a new run
 
 Claudia's conversion runs land on the lab NAS, which the processing server mounts
