@@ -509,28 +509,31 @@ def test_a_bad_write_does_not_hide_later_good_ones(tmp_path, monkeypatch):
 
 
 
-@pytest.mark.parametrize('utc, full', [
-	('2026-10-14T05:07:00', True),   # 07:07 summer time in Berlin: inbox quarter
-	('2026-10-14T05:22:00', False),  # 07:22: platform only
-	('2026-10-14T15:52:00', False),  # 17:52: still working hours
-	('2026-10-14T16:07:00', True),   # 18:07: every tick runs everything
-	('2026-10-14T03:59:00', True),   # 05:59: before working hours
-	('2026-10-14T04:22:00', False),  # 06:22 summer time: working hours
-	('2026-10-26T04:22:00', True),   # the same UTC time is 05:22 in winter: off hours
-])
-def test_working_hours_schedule_follows_berlin_time(utc, full):
-	assert monitor_tick.full_tick_due(datetime.fromisoformat(utc).replace(tzinfo=timezone.utc)) is full
+def test_a_tick_with_changes_leaves_a_note_for_the_relay(tmp_path, monkeypatch):
+	run_tick(tmp_path, monkeypatch)
+	notes = list((tmp_path / 'outbox').glob('*.md'))
+	assert len(notes) == 1 and 'new red: a failed' in notes[0].read_text()
 
 
-def test_a_platform_tick_files_without_reading_the_inbox(tmp_path, monkeypatch):
-	calls = []
-	platform_tick = datetime(2026, 10, 14, 5, 22, tzinfo=timezone.utc)
-	(tmp_path / 'monitor.json').write_text(json.dumps({'inbox_since': '2026-10-14T05:07:00Z'}))
-	delta, state = run_tick(tmp_path, monkeypatch, now=platform_tick, calls=calls)
-	assert calls == [] and [item['fingerprint'] for item in delta['new']] == ['dt-status/api/a']
-	# The inbox window waits for the next inbox tick.
-	assert state['inbox_since'] == '2026-10-14T05:07:00Z'
-	assert 'platform-only tick' in (tmp_path / 'digest-latest.md').read_text()
+def test_a_quiet_tick_leaves_no_note(tmp_path, monkeypatch):
+	run_tick(tmp_path, monkeypatch)
+	(tmp_path / 'outbox' / '20261013T120000Z.md').unlink()
+	# The same finding again, with a clean inbox, is no change: no note.
+	clean = ([], 'linear=0 gmail=0 posthog=0 project=13440', True, True, 0.0)
+	monkeypatch.setattr(monitor_tick, 'read_inbox', lambda *args: clean)
+	monkeypatch.setattr(monitor_tick.findings_module, 'build_findings', lambda *args: ([red('a')], [], []))
+	args = monitor_tick.parse_args(['--state-dir', str(tmp_path), '--zuliprc', str(tmp_path / 'missing')])
+	assert monitor_tick.tick(args, NOON.replace(minute=30), tmp_path) == 0
+	assert list((tmp_path / 'outbox').glob('*.md')) == []
+
+
+def test_a_failed_tick_leaves_a_note(tmp_path, monkeypatch):
+	def boom(*args):
+		raise RuntimeError('operator_status.py exited 1')
+	monkeypatch.setattr(monitor_tick, 'run_script', boom)
+	monkeypatch.setattr(monitor_tick, 'utc_now', lambda: NOON)
+	assert monitor_tick.main(['--state-dir', str(tmp_path)]) == 1
+	assert 'tick failed: RuntimeError' in (tmp_path / 'outbox' / '20261013T120000Z.md').read_text()
 
 
 def test_oom_kills_are_read_since_the_previous_tick():

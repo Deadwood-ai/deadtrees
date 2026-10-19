@@ -47,9 +47,9 @@ this repo at the time this playbook was added:
 
 ### Monitoring Boundary
 
-A platform monitor runs the micro-check unattended, every 15 minutes in
+A platform monitor runs the micro-check unattended, every 30 minutes in
 working hours and every two hours otherwise; see
-[Unattended 15-Minute Monitor](#unattended-15-minute-monitor). Other
+[Unattended Platform Monitor](#unattended-platform-monitor). Other
 agent operator threads are not continuous monitors.
 Treat this playbook as the procedure for a manual refresh, a scheduled wake-up,
 or an explicitly delegated check, and do not assume any other thread is running
@@ -85,7 +85,7 @@ tracked script contains no credentials:
 
 - `DEADTREES_OPERATOR_DATABASE_URL` for the `psql` summary. Use the
   purpose-specific monitor login, or the analyst URI where no monitor login is
-  provisioned (the 15-minute platform monitor does this).
+  provisioned (the platform monitor does this).
 - `DEADTREES_OPERATOR_PROCESSING_HOST` for the existing primary processing host
   disk/container probe.
 - `DEADTREES_OPERATOR_PROCESSING_HOSTS` for additional labeled processor targets,
@@ -163,21 +163,19 @@ chat should identify candidate recording IDs or frustration clusters. Start a
 worker thread for recording review only when a concrete frontend pain signal is
 visible.
 
-#### Unattended 15-Minute Monitor
+#### Unattended Platform Monitor
 
 A systemd user timer on the processing server runs
-`scripts/platform_monitor/monitor_tick.py` on a Europe/Berlin schedule. In
-working hours (06:00-18:00) it fires every 15 minutes (`:07`, `:22`, `:37`,
-`:52`): every tick checks the platform, and the `:07` and `:37` ticks also run
-the inbox call and the scorecard. Outside working hours it fires every two
-hours at `:07` and runs everything. Linear is the source of truth for platform
-state. The monitor records findings; it never fixes anything. The unit templates and the host
-wrapper are in `scripts/platform_monitor/systemd/`.
+`scripts/platform_monitor/monitor_tick.py` on a Europe/Berlin schedule: every
+30 minutes in working hours (06:00-18:00, at `:07` and `:37`) and every two
+hours at `:07` otherwise. Linear is the source of truth for platform state. The
+monitor records findings and tells the coordinator about changes; it never
+fixes anything. The unit templates and the host wrapper are in
+`scripts/platform_monitor/systemd/`.
 
 Each tick:
 
-1. Collects read-only facts at no token cost (the scorecard only on ticks that
-   also run the inbox): `scripts/operator_status.py`
+1. Collects read-only facts at no token cost: `scripts/operator_status.py`
    (API, database, every processor host in `DEADTREES_OPERATOR_PROCESSING_HOSTS`,
    storage, backups), `scripts/data_factory_scorecard.py`, and
    `scripts/platform_monitor/host_facts.py` (production deploy health, kernel OOM
@@ -188,10 +186,10 @@ Each tick:
    running, restarts, OOM, disks above 85 percent (helicon `/` above 97 percent
    is red; storage `/` counts only above 90 percent between 23:30Z and 06:00Z),
    stale backups, deploy pause, refusal, dirty checkout or a drain older than 12
-   hours, a worker silent for over 3 hours, a failed GPU check and frontend errors. A failed probe
-   or frontend error counts only on two runs in a row and clears after two quiet
-   runs. A check that cannot run is a coverage gap, never green.
-3. On inbox ticks, runs a read-only model call (`claude-haiku-5-5`) for what
+   hours, a worker silent for over 3 hours, a failed GPU check and frontend
+   errors. A failed probe, a frontend error or a disk over the line counts only
+   on two runs in a row and clears after two quiet runs. A check that cannot run is a coverage gap, never green.
+3. Runs a read-only model call (`claude-haiku-5-5`) for what
    needs Janusch in Linear, Gmail and Zulip (Zulip is read by the script) and
    for new PostHog frontend errors in project 13440, which it selects first because the
    connector's active project is shared. Its window advances only when Linear,
@@ -201,7 +199,17 @@ Each tick:
    comments on it. The baseline advances only after filing succeeded, so a
    failed tick retries.
 5. Writes the digest to `~/.local/state/deadtrees-monitor/digest-latest.md`
-   (two days under `digests/`) and one line per tick to `ticks.jsonl`.
+   (two days under `digests/`) and one line per tick to `ticks.jsonl`. When
+   something changed or failed (a filed or cleared finding, an inbox item for
+   Janusch, a new coverage gap, a failed tick), it also writes the digest as a
+   note to `outbox/`.
+
+A relay session in the Deadtrees project, running on the processing server,
+waits for notes in `~/.local/state/deadtrees-monitor/outbox/` (for example a
+background shell loop that ends when a `*.md` file appears, re-armed every two
+hours). It forwards each note, oldest first, with `send_message` to `@parent`,
+which always reaches the current coordinator, then deletes it. A quiet tick
+writes no note, so the relay wakes only for changes.
 
 A model result counts only when the session's own tool calls prove the reads
 or writes; a call that stops early gets up to four attempts in total (efforts
