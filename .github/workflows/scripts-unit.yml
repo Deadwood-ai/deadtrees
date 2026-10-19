@@ -33,9 +33,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      # The script tests use only the standard library, pytest and shared/.
+      # The script tests use the standard library, pytest, shared/ and Pillow
+      # (disturbance benchmark publishing).
       - name: Install pytest
-        run: python -m pip install pytest
+        run: python -m pip install pytest pillow
 
       - name: Validate production and test compose files
         run: |

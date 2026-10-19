@@ -28,41 +28,84 @@ redistributed. A public launch needs a separate imagery-rights review.
 
 ## Data on the storage server
 
-The export lives outside every static nginx location:
+Each published run is a folder next to a `current` symlink, outside every static
+nginx location:
 
 ```text
-/data/releases/disturbance-benchmark/<run-id>/   one folder per export
-/data/releases/disturbance-benchmark/current     symlink to the active folder
+/data/releases/disturbance-benchmark/<run-id>/   one folder per published run
+/data/releases/disturbance-benchmark/current     symlink to the active run
 ```
 
 `DISTURBANCE_BENCHMARK_DIR` (default `releases/disturbance-benchmark/current`,
 relative to `BASE_DIR`) names the served folder. The viewer requests
 `catalog.json` and the `/data/<site>/...` paths written in it, relative to that
-folder; keep the export's names and structure unchanged.
+folder.
 
-The source export is on the Freiburg NAS (only `export/` is web payload; the
-reports beside it stay internal):
+## Publishing a new run
+
+Claudia's conversion runs land on the lab NAS, which the processing server mounts
+read-only at `/mnt/gsdata` (Kerberos keytab, renewed by the `nas-kinit` user
+timer):
 
 ```text
-\\unfnrd02.public.ads.uni-freiburg.de\unfnrd02\projects\deadtrees\disturbances\11-Webviewer_visuals\runs\pylos-2026-10-15\export
+/mnt/gsdata/projects/deadtrees/disturbances/11-Webviewer_visuals/runs/<run-id>/export
 ```
 
-Run `pylos-2026-10-15`: 114 sites, 16,253 files, about 940 MB, zero missing
-references (`handoff-audit.json`). Conversion code:
-https://github.com/Deadwood-ai/disturbance_benchmark_visuals.
+Conversion code: https://github.com/Deadwood-ai/disturbance_benchmark_visuals.
+`scripts/disturbance_benchmark_publish.py` turns a run into the web build and
+publishes it. Run it on the processing server with a Python that has Pillow:
 
-### Installing or replacing an export
+```bash
+python3 -m venv ~/.local/share/deadtrees/benchmark-venv
+~/.local/share/deadtrees/benchmark-venv/bin/pip install pillow
+```
 
-Uploading to the storage server is a production write and needs explicit approval.
+```bash
+PY=~/.local/share/deadtrees/benchmark-venv/bin/python
+$PY scripts/disturbance_benchmark_publish.py build            # newest clean run
+$PY scripts/disturbance_benchmark_publish.py publish --dry-run
+$PY scripts/disturbance_benchmark_publish.py publish          # production write
+$PY scripts/disturbance_benchmark_publish.py switch <run-id>  # rollback
+$PY scripts/disturbance_benchmark_publish.py status
+```
 
-1. Copy the export into a new run folder next to `current`, e.g.
-   `/data/releases/disturbance-benchmark/pylos-2026-10-15/`.
-2. Check the file count and size against `handoff-audit.json`.
-3. Point `current` at the new folder (`ln -sfn <run-id> current`). Keep the
-   previous folder until the new one is checked, for rollback.
-4. As a core-team user, open the page and check site switching, overlays, galleries,
-   all three context sources and the time series. As a non-core user, check that
-   the page redirects and that a copied file link returns 404.
+- **build** picks the newest run whose `handoff-audit.json` lists no missing
+  references (or the run folder given), converts JPEGs to WebP (quality 80) and
+  PNG masks to lossless WebP, writes a 640 px `.preview.webp` for images over
+  100 KB (drone, Google, Esri) and adds it as `preview` / `dronePreview` in the
+  JSON, rounds reference-polygon display coordinates to 5 decimals, rewrites the
+  paths and fails if any referenced file is missing. Builds go to
+  `~/data/disturbance-benchmark/builds/<run-id>`. Run `pylos-2026-10-15`:
+  929 MB to 504 MB, about two minutes on 16 cores.
+- **publish** uploads the build next to the earlier runs. Files identical to the
+  current run are hard-linked, so a new run only costs its changed files. It then
+  switches `current` and prints the rollback command. Old runs are not deleted.
+- Publishing is a production write: run it only with approval for that run, then
+  check the page as a core-team user (site switching, overlays, galleries, all
+  context sources, time series).
+
+### One-time upload access
+
+The script uploads through the SSH alias `dt-release-publisher`. Its key can only
+run `rrsync` rooted at `/data/releases/disturbance-benchmark` on data2, so it cannot
+read or change anything else. On data2, as the storage user:
+
+```bash
+mkdir -p /data/releases/disturbance-benchmark
+echo 'command="/usr/bin/rrsync /data/releases/disturbance-benchmark",restrict <public key>' >> ~/.ssh/authorized_keys
+```
+
+On the processing server, the key is `~/.ssh/deadtrees-release-publisher` and
+`~/.ssh/config` has:
+
+```text
+Host dt-release-publisher
+    HostName data2.deadtrees.earth
+    User <storage user>
+    IdentityFile ~/.ssh/deadtrees-release-publisher
+    IdentitiesOnly yes
+    BatchMode yes
+```
 
 ## Data limitations to keep visible
 
@@ -72,6 +115,6 @@ Uploading to the storage server is a production write and needs explicit approva
   y). DTE uses `dt_fc_dw_comb_by`. The frontend does not rethreshold anything.
 - Precision, recall and F1 are NA. Flight IDs and dates follow Claudia's site sheet;
   keep source warnings such as the Brazil3 flight/prediction mismatch.
-- Binary masks stay lossless PNG. JPEGs are display imagery. Planet GCC is an RGB
+- Binary masks stay lossless (PNG in the export, lossless WebP on the web). RGB images are display imagery. Planet GCC is an RGB
   greenness proxy, not NDVI. Smoothing is display only.
 - Keep the Planet, Google and Esri credits and the dataset licence links.
