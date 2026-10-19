@@ -206,6 +206,25 @@ already underway.
 - Include dataset IDs, user-visible symptoms, investigation evidence, and links to
   PRs or Zulip threads when available.
 
+## Agent Feedback
+
+Friction in the agent system itself is tracked in the Linear project
+[Agent feedback](https://linear.app/geosense-ufr/project/agent-feedback-f636b56df324),
+shared with 3DTrees. Local notes do not replace it.
+
+- **When.** File an issue whenever you hit friction that cost time or needed the
+  user: a wrong or contradictory instruction, a missing permission or connector,
+  a tool or MCP failure, an unreachable host or device, a lost relay, a question
+  the user had to answer twice. Product bugs and incidents go to normal `Triage`
+  instead.
+- **Search first.** If the friction is already filed, comment with the new
+  occurrence (date, where, one line).
+- **File.** Team `deadtrees`, state `Triage`, unassigned, label `agent-feedback`,
+  project *Agent feedback*. Body: what you were doing, what went wrong (with
+  non-secret evidence), what it cost, and a suggested fix if you have one.
+- **Tell your coordinator** in one line with the issue link (Projects threads:
+  `send_message` to `@parent`). Filing does not authorize the fix.
+
 ## GitHub
 
 - PR titles must be Conventional Commit style and pass the title check.
