@@ -128,8 +128,11 @@ describe("sanitizeEventProperties", () => {
 
 describe("sanitizeAnalyticsUrl", () => {
   it("redacts free-text archive and AI searches", () => {
-    expect(sanitizeAnalyticsUrl("/dataset?text=Private+Author&q=private+forest&search=ai"))
-      .toBe("/dataset?text=%5Bredacted%5D&q=%5Bredacted%5D&search=ai");
+    expect(
+      sanitizeAnalyticsUrl(
+        "/dataset?text=Private+Author&q=private+forest&search=ai",
+      ),
+    ).toBe("/dataset?text=%5Bredacted%5D&q=%5Bredacted%5D&search=ai");
   });
   it("strips Supabase recovery tokens from URL fragments", () => {
     expect(
@@ -150,10 +153,16 @@ describe("sanitizeAnalyticsUrl", () => {
 
 describe("sanitizePostHogCapture", () => {
   it("redacts contributor searches from Factory autocapture URLs", () => {
-    const event = sanitizePostHogCapture({ event: "$autocapture", properties: {
-      $current_url: "https://deadtrees.earth/factory/datasets?search=contributor%40example.com&page=2",
-    }});
-    expect(event?.properties?.$current_url).toBe("https://deadtrees.earth/factory/datasets?search=%5Bredacted%5D&page=2");
+    const event = sanitizePostHogCapture({
+      event: "$autocapture",
+      properties: {
+        $current_url:
+          "https://deadtrees.earth/factory/datasets?search=contributor%40example.com&page=2",
+      },
+    });
+    expect(event?.properties?.$current_url).toBe(
+      "https://deadtrees.earth/factory/datasets?search=%5Bredacted%5D&page=2",
+    );
   });
   it("sanitizes PostHog SDK URL properties before send", () => {
     expect(
@@ -250,6 +259,7 @@ describe("initializePostHog", () => {
       "ph_test_key",
       expect.objectContaining({
         session_recording: {
+          maskCapturedNetworkRequestFn: expect.any(Function),
           captureCanvas: {
             recordCanvas: true,
             canvasFps: 1,
@@ -457,5 +467,28 @@ describe("trackPageView", () => {
     expect(posthogMock.capture).toHaveBeenCalledWith("$pageview", {
       url_path: "/reset-password",
     });
+  });
+});
+
+describe("session recording network capture", () => {
+  it("redacts signed file tickets from recorded request URLs", () => {
+    initializePostHog("accepted");
+    const config = posthogMock.init.mock.calls[0][1];
+    const mask = config.session_recording.maskCapturedNetworkRequestFn;
+    const api = "https://data2.deadtrees.earth/api/v1";
+    expect(
+      mask({
+        name: `${api}/disturbance-benchmark/files/abc.sig/Site/drone.webp`,
+      }).name,
+    ).toBe(`${api}/disturbance-benchmark/files/[redacted]/Site/drone.webp`);
+    expect(mask({ name: `${api}/datasets/12/files/cog/abc.sig` }).name).toBe(
+      `${api}/datasets/12/files/cog/[redacted]`,
+    );
+    expect(mask({ name: `${api}/exports/abc.sig?x=1` }).name).toBe(
+      `${api}/exports/[redacted]?x=1`,
+    );
+    expect(mask({ name: `${api}/datasets/12` }).name).toBe(
+      `${api}/datasets/12`,
+    );
   });
 });

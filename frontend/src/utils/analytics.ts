@@ -2,14 +2,11 @@ import { User } from "@supabase/supabase-js";
 import posthog from "posthog-js";
 
 const POSTHOG_PROJECT_KEY = import.meta.env.VITE_POSTHOG_PROJECT_KEY as
-  | string
-  | undefined;
+  string | undefined;
 export const POSTHOG_DIRECT_EU_API_HOST = "https://eu.i.posthog.com";
 export const POSTHOG_UI_HOST = "https://eu.posthog.com";
 
-export const resolvePostHogApiHost = (
-  configuredHost?: string,
-): string => {
+export const resolvePostHogApiHost = (configuredHost?: string): string => {
   const candidate = configuredHost?.trim();
   if (!candidate) return POSTHOG_DIRECT_EU_API_HOST;
 
@@ -56,8 +53,7 @@ const eventTargetsOpenLayersMap = (event: Event): boolean =>
     );
 
 const pauseMapCanvasCapture = (): void => {
-  mapCanvasCapturePausedUntil =
-    Date.now() + MAP_CANVAS_CAPTURE_RESUME_DELAY_MS;
+  mapCanvasCapturePausedUntil = Date.now() + MAP_CANVAS_CAPTURE_RESUME_DELAY_MS;
 };
 
 const markMapCanvasChanged = (): void => {
@@ -66,7 +62,8 @@ const markMapCanvasChanged = (): void => {
 };
 
 const installMapCaptureListeners = (): void => {
-  if (hasInstalledMapCaptureListeners || typeof document === "undefined") return;
+  if (hasInstalledMapCaptureListeners || typeof document === "undefined")
+    return;
 
   document.addEventListener(
     "pointerdown",
@@ -125,7 +122,21 @@ const getCanvasMaskRegions = (canvas: HTMLCanvasElement): [] | null => {
   return [];
 };
 
+// Signed file links (private dataset files, prepared exports, benchmark files)
+// carry a bearer ticket in the path; keep it out of recorded network requests.
+const SIGNED_FILE_TICKET =
+  /(\/(?:datasets\/\d+\/files\/(?:cog|thumbnail)|exports|disturbance-benchmark\/files)\/)[^/?#\s]+/g;
+
+export const redactSignedFileUrl = (url: string): string =>
+  url.replace(SIGNED_FILE_TICKET, "$1[redacted]");
+
 const MAP_SAFE_SESSION_RECORDING_CONFIG = {
+  maskCapturedNetworkRequestFn: <T extends { name: string }>(
+    request: T,
+  ): T => ({
+    ...request,
+    name: redactSignedFileUrl(request.name),
+  }),
   captureCanvas: {
     recordCanvas: true,
     canvasFps: 1,
@@ -466,7 +477,11 @@ export const sanitizeAnalyticsUrl = (url: string): string => {
     parsedUrl.hash = "";
 
     parsedUrl.searchParams.forEach((_value, key) => {
-      if (isSensitiveQueryParam(key) || (parsedUrl.pathname.startsWith("/factory") && key.toLowerCase() === "search")) {
+      if (
+        isSensitiveQueryParam(key) ||
+        (parsedUrl.pathname.startsWith("/factory") &&
+          key.toLowerCase() === "search")
+      ) {
         parsedUrl.searchParams.set(key, "[redacted]");
       }
     });

@@ -113,9 +113,12 @@ class Settings(BaseSettings):
 	DOWNLOADS_DIR: str = 'downloads'
 	PROCESSING_DIR: str = 'processing_dir'
 	RAW_IMAGES_DIR: str = 'raw_images'
+	# Current internal disturbance benchmark export, served only to the core team.
+	DISTURBANCE_BENCHMARK_DIR: str = 'releases/disturbance-benchmark/current'
 	# Signing key for private file paths. When empty, a key is derived from the
 	# service-role key so deployments need no new secret.
 	ASSET_TICKET_SECRET: str = ''
+	# nginx /_protected_cacheable/ lets browsers keep files for 3600 s; keep it within this.
 	ASSET_TICKET_TTL_SECONDS: int = 3600
 	# Distinct datasets per account or client IP whose COG path the API hands out per day.
 	COG_PATHS_PER_DAY: int = 300
