@@ -101,7 +101,7 @@ $PY scripts/disturbance_benchmark_publish.py status
 
 ### Upload access
 
-The script uploads with rsync over SSH as `root@data2.deadtrees.earth` using the
+The script uploads with rsync over SSH as `dendro@data2.deadtrees.earth` (owner of `/data`) using the
 processing server's existing storage key, `~/.ssh/processing-to-storage` (the one
 the processors upload with). `BENCHMARK_REMOTE` and `BENCHMARK_SSH_KEY` override
 the destination and key.

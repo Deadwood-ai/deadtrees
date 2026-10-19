@@ -39,7 +39,7 @@ RUNS_ROOT = Path(
 BUILDS_ROOT = Path(os.environ.get('BENCHMARK_BUILDS_ROOT', '~/data/disturbance-benchmark/builds')).expanduser()
 # The release folder on the storage server, reached with the processing server's
 # existing storage key (the one the processors upload with).
-REMOTE = os.environ.get('BENCHMARK_REMOTE', 'root@data2.deadtrees.earth:/data/releases/disturbance-benchmark/')
+REMOTE = os.environ.get('BENCHMARK_REMOTE', 'dendro@data2.deadtrees.earth:/data/releases/disturbance-benchmark/')
 SSH_KEY = Path(os.environ.get('BENCHMARK_SSH_KEY', '~/.ssh/processing-to-storage')).expanduser()
 
 JPEG_QUALITY = 80
