@@ -21,6 +21,7 @@ it). Start here, then open the linked docs that match the task.
 - Releases and team announcements: `docs/playbooks/create-release.md`
 - Production processor hosts and how each auto-deploys: `docs/playbooks/processor-hosts.md`
 - Diagrams, including Mermaid validation: `docs/playbooks/technical-diagrams.md`
+- Reporting friction in the agent workflow: `docs/agents/rules.md#agent-feedback`
 
 These tracked documents own the team workflow. Repository skills live in
 `.agents/skills/`; `.claude/skills/` links to the same folders so Claude Code
