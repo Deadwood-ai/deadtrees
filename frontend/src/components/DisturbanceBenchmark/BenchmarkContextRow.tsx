@@ -70,7 +70,7 @@ export default function BenchmarkContextRow({
               style={{ aspectRatio: `${site.width} / ${site.height}` }}
             >
               <img
-                src={benchmarkAsset(frame.image)}
+                src={benchmarkAsset(frame.preview || frame.image)}
                 alt={`${SOURCE_LABELS[source]} RGB imagery, ${benchmarkDate(frame.date)}`}
                 loading="lazy"
               />

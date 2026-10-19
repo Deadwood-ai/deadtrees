@@ -20,21 +20,30 @@ interface SpatialFrame {
   title: string;
   subtitle?: string;
   image: string;
+  preview?: string;
+  /** Drone RGB under a prediction overlay. */
   background?: string;
+  backgroundPreview?: string;
   product?: IBenchmarkProduct;
   counts?: IBenchmarkEvaluation["counts"];
   layers?: IBenchmarkEvaluation["layers"];
   selectedLayer?: number;
 }
-function SpatialImage({ frame }: { frame: SpatialFrame }) {
+/** Tiles load the small previews; the enlarged gallery view loads full images. */
+function SpatialImage({
+  frame,
+  full = false,
+}: {
+  frame: SpatialFrame;
+  full?: boolean;
+}) {
   const benchmarkAsset = useBenchmarkAsset();
+  const base = frame.background
+    ? (!full && frame.backgroundPreview) || frame.background
+    : (!full && frame.preview) || frame.image;
   return (
     <>
-      <img
-        src={benchmarkAsset(frame.background || frame.image)}
-        alt={frame.title}
-        loading="lazy"
-      />
+      <img src={benchmarkAsset(base)} alt={frame.title} loading="lazy" />
       {frame.background && (
         <img
           className="db-prediction-overlay"
@@ -57,7 +66,12 @@ export default function BenchmarkSpatialGrid({
     {},
   );
   const frames: SpatialFrame[] = [
-    { title: "Drone RGB", subtitle: "RGB orthomosaic", image: site.drone },
+    {
+      title: "Drone RGB",
+      subtitle: "RGB orthomosaic",
+      image: site.drone,
+      preview: site.dronePreview,
+    },
     {
       title: "Drone reference",
       subtitle: "Binary disturbance map: tree-cover loss and standing deadwood",
@@ -72,6 +86,7 @@ export default function BenchmarkSpatialGrid({
         evaluation.layers?.[selectedLayers[product.id] || 0]?.image ||
         evaluation.prediction!,
       background: site.drone,
+      backgroundPreview: site.dronePreview,
       counts: evaluation.counts,
       layers: evaluation.layers,
       selectedLayer: selectedLayers[product.id] || 0,
@@ -241,7 +256,7 @@ export default function BenchmarkSpatialGrid({
               tabIndex={0}
               aria-label="Image gallery. Use left and right arrow keys to browse."
             >
-              <SpatialImage frame={frames[active]} />
+              <SpatialImage frame={frames[active]} full />
             </div>
             <p>
               {site.width} × {site.height} pixel preview · Use ← → to browse

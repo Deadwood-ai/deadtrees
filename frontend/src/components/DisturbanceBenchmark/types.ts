@@ -59,6 +59,8 @@ export interface IBenchmarkFrame {
   attribution?: string;
   date: string;
   image: string;
+  /** Smaller copy for tiles and strips, written by the publish script for heavy images. */
+  preview?: string;
   source: string;
   gcc?: number | null;
   referencePolygons?: IReferencePolygons;
@@ -75,6 +77,7 @@ export interface IReferencePolygons {
 export interface IBenchmarkSite extends IBenchmarkSiteSummary {
   dataWarnings?: string[];
   drone: string;
+  dronePreview?: string;
   reference: string;
   referenceBinary?: string;
   referencePolygons?: IReferencePolygons;
