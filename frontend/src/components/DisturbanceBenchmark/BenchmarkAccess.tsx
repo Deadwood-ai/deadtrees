@@ -1,16 +1,11 @@
 import { createContext, useContext } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Result, Spin } from "antd";
+import { Button } from "antd";
 import { Navigate } from "react-router-dom";
-import { Settings } from "../../config";
+import { fetchBenchmarkFiles } from "../../api/disturbanceBenchmark";
 import { useAuth } from "../../hooks/useAuthProvider";
 import { useCanAudit } from "../../hooks/useUserPrivileges";
-import { canUseCoreTeamAppFeature } from "../../utils/coreTeamFeatureAccess";
-
-interface BenchmarkFilesGrant {
-  files_url: string;
-  expires_at: number;
-}
+import StatusPage, { StatusPageLoading } from "../StatusPage";
 
 const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000;
 const BenchmarkFilesContext = createContext<string | null>(null);
@@ -23,29 +18,41 @@ export function useBenchmarkAsset(): (path: string) => string {
   return (path) => `${filesBase}/${path.replace(/^\/(data\/)?/, "")}`;
 }
 
+function RetryPage({ onRetry }: { onRetry: () => void }) {
+  return (
+    <StatusPage
+      kind="offline"
+      title="The benchmark couldn’t load"
+      description="DeadTrees didn’t respond while checking your access. Check your connection and try again in a moment."
+      actions={
+        <Button type="primary" onClick={onRetry}>
+          Try again
+        </Button>
+      }
+    />
+  );
+}
+
 /**
- * Core-team gate for the internal benchmark. The API checks the same privilege
- * again for every file, so this only decides what the visitor sees.
+ * Core-team gate for the internal benchmark, inside RequireAuth. Everyone else is
+ * sent to the public releases, so the page stays unlisted. The API checks the
+ * same privilege again for every file; this only decides what the visitor sees.
  */
 export default function BenchmarkAccess({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { session, status } = useAuth();
-  const { canAudit, isLoading: privilegesLoading } = useCanAudit();
-  const isCoreTeam = canUseCoreTeamAppFeature({
-    authStatus: status,
-    canAudit,
-    privilegesLoading,
-  });
-  const grant = useQuery<BenchmarkFilesGrant>({
-    queryKey: ["disturbance-benchmark-files", session?.user.id],
-    enabled: isCoreTeam,
+  const { user } = useAuth();
+  const privileges = useCanAudit();
+  const grant = useQuery({
+    queryKey: ["disturbance-benchmark-files", user?.id],
+    queryFn: fetchBenchmarkFiles,
+    enabled: privileges.canAudit,
     retry: false,
     staleTime: Infinity,
     refetchInterval: (query) => {
-      const expiresAt = query.state.data?.expires_at;
+      const expiresAt = query.state.data?.expiresAt;
       return expiresAt
         ? Math.max(
             60_000,
@@ -53,45 +60,17 @@ export default function BenchmarkAccess({
           )
         : false;
     },
-    queryFn: async ({ signal }): Promise<BenchmarkFilesGrant> => {
-      const response = await fetch(
-        `${Settings.API_URL}/disturbance-benchmark/access`,
-        {
-          method: "POST",
-          signal,
-          headers: { Authorization: `Bearer ${session!.access_token}` },
-        },
-      );
-      if (!response.ok) throw new Error("Access could not be confirmed.");
-      return response.json();
-    },
   });
 
-  if (
-    status === "checking" ||
-    privilegesLoading ||
-    (isCoreTeam && grant.isPending)
-  )
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <Spin />
-      </div>
-    );
-  if (!isCoreTeam) return <Navigate to="/releases" replace />;
-  if (grant.isError)
-    return (
-      <Result
-        className="py-32"
-        status="warning"
-        title="The benchmark could not be opened"
-        subTitle="The storage server did not confirm access. Try again in a moment."
-        extra={<Button onClick={() => void grant.refetch()}>Try again</Button>}
-      />
-    );
+  if (privileges.isLoading || (privileges.canAudit && grant.isPending))
+    return <StatusPageLoading label="Checking access…" />;
+  if (privileges.isError)
+    return <RetryPage onRetry={() => void privileges.refetch()} />;
+  if (!privileges.canAudit) return <Navigate to="/releases" replace />;
+  // A failed refresh keeps the previous link, which stays valid for a few minutes.
+  if (!grant.data) return <RetryPage onRetry={() => void grant.refetch()} />;
   return (
-    <BenchmarkFilesContext.Provider
-      value={`${Settings.API_URL}${grant.data!.files_url}`}
-    >
+    <BenchmarkFilesContext.Provider value={grant.data.filesUrl}>
       {children}
     </BenchmarkFilesContext.Provider>
   );

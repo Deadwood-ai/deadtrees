@@ -20,7 +20,7 @@ redistributed. A public launch needs a separate imagery-rights review.
   (`/disturbance-benchmark/files/<ticket>`) to `can_audit` users only (401 without
   a session, 403 outside the core team). The page refreshes it before it expires.
 - `GET /api/v1/disturbance-benchmark/files/<ticket>/<path>` rechecks the ticket and
-  `can_audit` for every file and hands it to nginx (`X-Accel-Redirect` to
+  `can_audit` for every file (the privilege is cached for 30 seconds per user) and hands it to nginx (`X-Accel-Redirect` to
   `/_protected_cacheable/`). Every failure is the same 404. Browsers may keep a file
   for the life of its link (`Cache-Control: private, max-age=3600`), so a user
   removed from the core team can still see already-loaded images for up to an hour.

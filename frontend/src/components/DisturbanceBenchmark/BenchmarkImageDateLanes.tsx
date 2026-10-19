@@ -1,3 +1,4 @@
+import { CONTEXT_SOURCE_LABELS, CONTEXT_SOURCES } from "./benchmarkData";
 import type { SignalChartModel } from "./signalChartModel";
 import type { ContextSource, IBenchmarkFrame, IBenchmarkSite } from "./types";
 interface BenchmarkImageDateLanesProps {
@@ -5,11 +6,6 @@ interface BenchmarkImageDateLanesProps {
   site: IBenchmarkSite;
   windows: Partial<Record<ContextSource, IBenchmarkFrame[]>>;
 }
-const LABELS: Record<ContextSource, string> = {
-  planet: "Planet",
-  google: "Google",
-  esri: "Esri",
-};
 const COLORS: Record<ContextSource, string> = {
   planet: "var(--db-planet-color)",
   google: "#697786",
@@ -20,7 +16,7 @@ export default function BenchmarkImageDateLanes({
   site,
   windows,
 }: BenchmarkImageDateLanesProps) {
-  const sources = (["planet", "google", "esri"] as ContextSource[]).filter(
+  const sources = CONTEXT_SOURCES.filter(
     (source) => windows[source] !== undefined,
   );
   return (
@@ -36,7 +32,7 @@ export default function BenchmarkImageDateLanes({
               textAnchor="end"
               className="db-date-lane-label"
             >
-              {LABELS[source]}
+              {CONTEXT_SOURCE_LABELS[source]}
             </text>
             <line x1="56" x2="716" y1={y} y2={y} stroke="#e4e9df" />
             {(site.contexts[source] || [])
@@ -53,7 +49,8 @@ export default function BenchmarkImageDateLanes({
                     fill={COLORS[source]}
                   >
                     <title>
-                      {LABELS[source]} displayed frame · {frame.date}
+                      {CONTEXT_SOURCE_LABELS[source]} displayed frame ·{" "}
+                      {frame.date}
                     </title>
                   </rect>
                 ) : (
@@ -66,7 +63,8 @@ export default function BenchmarkImageDateLanes({
                     opacity="0.35"
                   >
                     <title>
-                      {LABELS[source]} available image · {frame.date}
+                      {CONTEXT_SOURCE_LABELS[source]} available image ·{" "}
+                      {frame.date}
                     </title>
                   </circle>
                 ),

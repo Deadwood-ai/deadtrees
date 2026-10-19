@@ -76,13 +76,12 @@ def convert_image(job: tuple[Path, Path, str]) -> Converted:
 			# Masks stay exact: lossless WebP keeps every pixel and the alpha channel.
 			image.save(out_root / target, 'WEBP', lossless=True, method=6)
 		else:
-			rgb = image.convert('RGB')
+			rgb = image if image.mode == 'RGB' else image.convert('RGB')
 			rgb.save(out_root / target, 'WEBP', quality=JPEG_QUALITY, method=6)
 			if (out_root / target).stat().st_size > PREVIEW_MIN_BYTES and max(rgb.size) > PREVIEW_MAX_SIDE:
 				preview = webp_name(relative, '.preview')
-				small = rgb.copy()
-				small.thumbnail((PREVIEW_MAX_SIDE, PREVIEW_MAX_SIDE))
-				small.save(out_root / preview, 'WEBP', quality=JPEG_QUALITY, method=6)
+				rgb.thumbnail((PREVIEW_MAX_SIDE, PREVIEW_MAX_SIDE))  # full size is already saved
+				rgb.save(out_root / preview, 'WEBP', quality=JPEG_QUALITY, method=6)
 	bytes_out = (out_root / target).stat().st_size
 	return Converted(relative, target, preview, source.stat().st_size, bytes_out)
 

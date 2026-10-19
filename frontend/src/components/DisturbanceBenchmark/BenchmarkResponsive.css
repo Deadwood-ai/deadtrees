@@ -153,13 +153,6 @@
   .db-preview-heading h3 {
     font-size: 13px;
   }
-  .db-preview-heading > span {
-    font-size: 13px;
-  }
-  .db-preview-card > p {
-    padding: 10px;
-    font-size: 13px;
-  }
   .db-selected-heading {
     align-items: flex-start;
   }
@@ -180,8 +173,7 @@
   .db-context-panel {
     padding: 15px;
   }
-  .db-chart-controls > label:first-child,
-  .db-context-controls > label {
+  .db-chart-controls > label:first-child {
     font-size: 13px;
     gap: 8px;
   }
@@ -262,19 +254,10 @@
   align-items: center;
   gap: 16px;
 }
-.db-context-stack-heading h3 {
-  font-size: 18px;
-  font-weight: 550;
-}
 .db-context-panel .db-context-frames {
   max-width: none;
   width: 100%;
   gap: 22px;
-}
-.db-context-controls h3 {
-  font-size: 17px;
-  font-weight: 550;
-  color: #1b5e35;
 }
 .db-context-controls p {
   font-size: 14px;
@@ -313,9 +296,6 @@
   }
   .db-context-panel .db-context-frames figcaption span {
     font-size: 13px;
-  }
-  .db-context-controls h3 {
-    font-size: 15px;
   }
   .db-context-controls p {
     font-size: 13px;
@@ -356,7 +336,7 @@
   letter-spacing: normal;
 }
 .db-submission-link {
-  color: #1b5e35;
+  color: var(--dt-primary);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -394,7 +374,7 @@
   font-size: 14px;
 }
 .db-product-info:focus-visible {
-  outline: 2px solid #1b5e35;
+  outline: 2px solid var(--dt-primary);
   outline-offset: 4px;
   border-radius: 2px;
 }
@@ -406,7 +386,7 @@
   margin-bottom: 10px;
 }
 .db-product-popover a {
-  color: #1b5e35;
+  color: var(--dt-primary);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -462,7 +442,7 @@
   border: 1px solid #e5e7eb;
   border-radius: 5px;
   padding: 6px 12px;
-  color: #1b5e35;
+  color: var(--dt-primary);
 }
 .db-gallery > p {
   text-align: center;
@@ -511,9 +491,6 @@
 .db-preview-heading > h3 {
   display: inline;
   margin-right: 6px;
-}
-.db-preview-heading > span {
-  display: inline;
 }
 .db-product-scores {
   gap: 6px 12px;
@@ -566,7 +543,7 @@
   line-height: 24px;
   font-size: 16px;
   font-weight: 550;
-  color: #1b5e35;
+  color: var(--dt-primary);
 }
 .db-context-stack > .db-context-panel {
   border: 0;
@@ -586,7 +563,7 @@
   line-height: 24px;
   font-size: 16px;
   font-weight: 550;
-  color: #1b5e35;
+  color: var(--dt-primary);
 }
 .db-selected-heading .db-source-status {
   display: inline-block;
@@ -612,7 +589,7 @@
   color: #4b5563;
 }
 .db-context-enlarge:focus-visible {
-  outline: 2px solid #1b5e35;
+  outline: 2px solid var(--dt-primary);
   outline-offset: 3px;
 }
 .db-context-gallery-toolbar {
@@ -642,7 +619,7 @@
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 8px;
-  color: #1b5e35;
+  color: var(--dt-primary);
 }
 .db-context-comparison-viewport {
   overflow: hidden;

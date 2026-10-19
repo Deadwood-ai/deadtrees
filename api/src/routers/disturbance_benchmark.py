@@ -12,31 +12,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 
-from shared.db import use_service_client, verify_token
 from shared.settings import settings
 
 from ..access.dataset_files import inside
 from ..access.delivery import protected_file_response
+from ..access.privileges import user_is_core_team
 from ..access.tickets import read_ticket, sign_ticket
+from .dataset_access import require_user
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token')
 
 TICKET_RESOURCE = 'disturbance-benchmark'
-
-
-def user_is_core_team(user_id: str) -> bool:
-	with use_service_client() as client:
-		rows = (
-			client.table('privileged_users')
-			.select('user_id')
-			.eq('user_id', user_id)
-			.eq('can_audit', True)
-			.limit(1)
-			.execute()
-			.data
-		)
-	return bool(rows)
 
 
 class BenchmarkAccess(BaseModel):
@@ -47,9 +34,7 @@ class BenchmarkAccess(BaseModel):
 @router.post('/disturbance-benchmark/access', response_model=BenchmarkAccess)
 def issue_benchmark_access(token: Annotated[str, Depends(oauth2_scheme)]):
 	"""A signed link prefix for the benchmark files, for core-team users only."""
-	user = verify_token(token) if token else None
-	if not user:
-		raise HTTPException(status_code=401, detail='Sign in to continue')
+	user = require_user(token)
 	if not user_is_core_team(user.id):
 		raise HTTPException(status_code=403, detail='The benchmark is limited to the core team')
 	ticket, expires_at = sign_ticket(user.id, TICKET_RESOURCE)

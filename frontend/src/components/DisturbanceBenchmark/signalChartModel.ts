@@ -4,40 +4,6 @@ export interface SignalPoint {
   date: string;
   value: number | null;
 }
-export function lineSegments(
-  points: SignalPoint[],
-  x: (date: string) => number,
-  y: (value: number) => number,
-  maxGapDays?: number,
-): string[] {
-  const lines: string[] = [];
-  let segment: string[] = [];
-  let previousTime: number | null = null;
-  points.forEach((point) => {
-    if (point.value == null || !Number.isFinite(point.value)) {
-      // Sentinel can bridge short gaps between valid observations without
-      // filling in missing values. Planet retains explicit missing composites.
-      if (maxGapDays !== undefined) return;
-      if (segment.length) lines.push(segment.join(" "));
-      segment = [];
-    } else {
-      const time = benchmarkTime(point.date);
-      if (
-        maxGapDays !== undefined &&
-        previousTime !== null &&
-        time - previousTime > maxGapDays * 86400000
-      ) {
-        if (segment.length) lines.push(segment.join(" "));
-        segment = [];
-      }
-      segment.push(`${x(point.date)},${y(point.value)}`);
-      previousTime = time;
-    }
-  });
-  if (segment.length) lines.push(segment.join(" "));
-  return lines;
-}
-
 export function createSignalChartModel(
   site: IBenchmarkSite,
   frames: IBenchmarkFrame[],

@@ -5,28 +5,25 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import BenchmarkAccess, { useBenchmarkAsset } from "./BenchmarkAccess";
 
-const auth = vi.hoisted(() => ({
-  session: { user: { id: "core-user" }, access_token: "session-token" } as {
-    user: { id: string };
-    access_token: string;
-  } | null,
-  status: "authenticated" as "checking" | "authenticated" | "anonymous",
+const privileges = vi.hoisted(() => ({
+  canAudit: true,
+  isLoading: false,
+  isError: false,
+  refetch: () => Promise.resolve(),
 }));
-const privileges = vi.hoisted(() => ({ canAudit: true, isLoading: false }));
-vi.mock("../../hooks/useAuthProvider", () => ({ useAuth: () => auth }));
+const files = vi.hoisted(() => ({ fetchBenchmarkFiles: vi.fn() }));
+vi.mock("../../hooks/useAuthProvider", () => ({
+  useAuth: () => ({ user: { id: "core-user" } }),
+}));
 vi.mock("../../hooks/useUserPrivileges", () => ({
   useCanAudit: () => privileges,
 }));
-vi.mock("../../config", () => ({
-  Settings: { API_URL: "https://storage.test/api/v1" },
-}));
+vi.mock("../../api/disturbanceBenchmark", () => files);
 
 afterEach(() => {
   cleanup();
-  vi.unstubAllGlobals();
-  auth.session = { user: { id: "core-user" }, access_token: "session-token" };
-  auth.status = "authenticated";
-  privileges.canAudit = true;
+  files.fetchBenchmarkFiles.mockReset();
+  Object.assign(privileges, { canAudit: true, isError: false });
 });
 
 function Viewer() {
@@ -58,59 +55,36 @@ function renderGate() {
 }
 
 describe("Disturbance benchmark core-team gate", () => {
-  it.each([
-    [
-      "anonymous visitors",
-      () => {
-        auth.session = null;
-        auth.status = "anonymous";
-      },
-    ],
-    [
-      "signed-in users outside the core team",
-      () => {
-        privileges.canAudit = false;
-      },
-    ],
-  ])(
-    "sends %s to the public releases without asking the server",
-    async (_, arrange) => {
-      arrange();
-      const fetcher = vi.fn();
-      vi.stubGlobal("fetch", fetcher);
-      renderGate();
-      await screen.findByText("Public releases");
-      expect(fetcher).not.toHaveBeenCalled();
-    },
-  );
+  it("sends users outside the core team to the public releases without asking for links", async () => {
+    privileges.canAudit = false;
+    renderGate();
+    await screen.findByText("Public releases");
+    expect(files.fetchBenchmarkFiles).not.toHaveBeenCalled();
+  });
+
+  it("offers a retry when the privilege check fails, instead of redirecting", async () => {
+    Object.assign(privileges, { canAudit: false, isError: true });
+    renderGate();
+    await screen.findByText("The benchmark couldn’t load");
+    expect(screen.queryByText("Public releases")).toBeNull();
+  });
 
   it("serves the export from the signed storage link", async () => {
-    const fetcher = vi.fn().mockResolvedValue(
-      Response.json({
-        files_url: "/disturbance-benchmark/files/abc.sig",
-        expires_at: Date.now() / 1000 + 3600,
-      }),
-    );
-    vi.stubGlobal("fetch", fetcher);
+    files.fetchBenchmarkFiles.mockResolvedValue({
+      filesUrl:
+        "https://storage.test/api/v1/disturbance-benchmark/files/abc.sig",
+      expiresAt: Date.now() / 1000 + 3600,
+    });
     renderGate();
     await screen.findByText(
       "https://storage.test/api/v1/disturbance-benchmark/files/abc.sig/Fire_Peru_2024/site.json",
     );
-    expect(fetcher.mock.calls[0][0]).toBe(
-      "https://storage.test/api/v1/disturbance-benchmark/access",
-    );
-    expect(fetcher.mock.calls[0][1].headers).toEqual({
-      Authorization: "Bearer session-token",
-    });
   });
 
-  it("shows a retry instead of the viewer when the server refuses", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(new Response("Denied", { status: 403 })),
-    );
+  it("shows a retry instead of the viewer when the server refuses the links", async () => {
+    files.fetchBenchmarkFiles.mockRejectedValue(new Error("Denied"));
     renderGate();
-    await screen.findByText("The benchmark could not be opened");
+    await screen.findByText("The benchmark couldn’t load");
     expect(screen.queryByText(/site\.json/)).toBeNull();
   });
 });

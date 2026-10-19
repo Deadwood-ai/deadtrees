@@ -4,7 +4,7 @@ import BenchmarkChartAxes from "./BenchmarkChartAxes";
 import BenchmarkImageDateLanes from "./BenchmarkImageDateLanes";
 import { useMemo, useState } from "react";
 import { Checkbox, Select } from "antd";
-import { benchmarkDate, benchmarkTime } from "./benchmarkData";
+import { benchmarkDate, benchmarkTime, CONTEXT_SOURCES } from "./benchmarkData";
 import type {
   BenchmarkIndex,
   ContextSource,
@@ -50,7 +50,7 @@ export default function BenchmarkSignalChart({
   );
   const { minimum, maximum, visibleSentinel, visiblePlanet } = model;
   const outside = frames.filter((frame) => !model.inWindow(frame.date)).length;
-  const sources = (["planet", "google", "esri"] as ContextSource[]).filter(
+  const sources = CONTEXT_SOURCES.filter(
     (source) => windows[source] !== undefined,
   );
   const nearest = (points: SignalPoint[]) =>

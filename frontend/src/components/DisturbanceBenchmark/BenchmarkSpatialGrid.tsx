@@ -75,9 +75,7 @@ export default function BenchmarkSpatialGrid({
     {
       title: "Drone reference",
       subtitle: "Binary disturbance map: tree-cover loss and standing deadwood",
-      image:
-        site.referenceBinary ||
-        site.reference.replace("reference.png", "reference-binary.png"),
+      image: site.referenceBinary || site.reference,
     },
     ...availablePredictions(site, products).map(({ product, evaluation }) => ({
       title: product.name,

@@ -1,10 +1,17 @@
 import type {
+  ContextSource,
   IBenchmarkFrame,
   IBenchmarkProduct,
   IBenchmarkSite,
   IBenchmarkSiteSummary,
 } from "./types";
 
+export const CONTEXT_SOURCES: ContextSource[] = ["planet", "google", "esri"];
+export const CONTEXT_SOURCE_LABELS: Record<ContextSource, string> = {
+  planet: "Planet",
+  google: "Google",
+  esri: "Esri",
+};
 export function contextAttribution(
   frame: IBenchmarkFrame,
   source: string,

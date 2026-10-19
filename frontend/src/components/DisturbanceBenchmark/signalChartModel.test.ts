@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSignalChartModel, lineSegments } from "./signalChartModel";
+import { createSignalChartModel } from "./signalChartModel";
 import { benchmarkTime } from "./benchmarkData";
 import type { IBenchmarkSite } from "./types";
 
@@ -64,21 +64,5 @@ describe("combined imagery time window", () => {
     expect(chart.minimum).toBe(benchmarkTime("2015-07-01"));
     expect(chart.maximum).toBe(benchmarkTime("2026-07-13"));
     expect(chart.inWindow("2026-07-13")).toBe(true);
-  });
-});
-
-describe("observation connections", () => {
-  const points = [
-    { date: "2023-01-01", value: 1 },
-    { date: "2023-01-10", value: null },
-    { date: "2023-01-22", value: 2 },
-    { date: "2023-02-13", value: 3 },
-  ];
-  const x = (date: string) => Number(date.slice(-2));
-  it("bridges at most 21 days between valid Sentinel samples without filling missing values", () => {
-    expect(lineSegments(points, x, (v) => v, 21)).toEqual(["1,1 22,2", "13,3"]);
-  });
-  it("retains explicit missing-composite breaks for Planet", () => {
-    expect(lineSegments(points, x, (v) => v)).toEqual(["1,1", "22,2 13,3"]);
   });
 });

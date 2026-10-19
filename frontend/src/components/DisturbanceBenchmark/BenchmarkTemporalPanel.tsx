@@ -1,6 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Checkbox, Segmented } from "antd";
-import { contextAttribution, initialFrameStart } from "./benchmarkData";
+import {
+  CONTEXT_SOURCE_LABELS,
+  CONTEXT_SOURCES,
+  contextAttribution,
+  initialFrameStart,
+} from "./benchmarkData";
 import BenchmarkSignalChart from "./BenchmarkSignalChart";
 import BenchmarkContextRow from "./BenchmarkContextRow";
 import type { ContextSource, IBenchmarkSite } from "./types";
@@ -11,30 +16,28 @@ interface BenchmarkTemporalPanelProps {
 export default function BenchmarkTemporalPanel({
   site,
 }: BenchmarkTemporalPanelProps) {
-  const available = (["planet", "google", "esri"] as ContextSource[]).filter(
+  const available = CONTEXT_SOURCES.filter(
     (source) => site.contexts[source]?.length,
   );
   const [source, setSource] = useState<ContextSource>(available[0] || "planet");
-  const [starts, setStarts] = useState<Record<ContextSource, number>>(() => ({
-    planet: initialFrameStart(
-      site.contexts.planet || [],
-      site.droneDate || `${site.year}-07-01`,
-    ),
-    google: initialFrameStart(
-      site.contexts.google || [],
-      site.droneDate || `${site.year}-07-01`,
-    ),
-    esri: initialFrameStart(
-      site.contexts.esri || [],
-      site.droneDate || `${site.year}-07-01`,
-    ),
-  }));
+  const [starts, setStarts] = useState(() => {
+    const anchor = site.droneDate || `${site.year}-07-01`;
+    return Object.fromEntries(
+      CONTEXT_SOURCES.map((source) => [
+        source,
+        initialFrameStart(site.contexts[source] || [], anchor),
+      ]),
+    ) as Record<ContextSource, number>;
+  });
   const [reference, setReference] = useState(true);
-  const windows = Object.fromEntries(
-    [source].map((source) => [
-      source,
-      (site.contexts[source] || []).slice(starts[source], starts[source] + 3),
-    ]),
+  // Stable between renders so the chart's smoothing is not recomputed on
+  // unrelated state changes (e.g. the reference-polygon toggle).
+  const start = starts[source];
+  const windows = useMemo(
+    () => ({
+      [source]: (site.contexts[source] || []).slice(start, start + 3),
+    }),
+    [site, source, start],
   );
   const credits = [
     ...new Set(
@@ -68,12 +71,7 @@ export default function BenchmarkTemporalPanel({
               onChange={(value) => setSource(value as ContextSource)}
               options={available.map((value) => ({
                 value,
-                label:
-                  value === "planet"
-                    ? "Planet"
-                    : value === "google"
-                      ? "Google"
-                      : "Esri",
+                label: CONTEXT_SOURCE_LABELS[value],
               }))}
             />
             <Checkbox

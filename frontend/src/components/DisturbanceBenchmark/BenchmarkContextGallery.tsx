@@ -44,7 +44,6 @@ export default function BenchmarkContextGallery({
   const images = [
     {
       title: "Drone RGB",
-      date: site.droneDate,
       displayDate: site.droneDate
         ? benchmarkDate(site.droneDate)
         : "Acquisition date NA",
@@ -54,7 +53,6 @@ export default function BenchmarkContextGallery({
     },
     {
       title: label,
-      date: frame.date,
       displayDate:
         frame.displayDate ||
         (frame.date ? benchmarkDate(frame.date) : "Date NA"),
@@ -122,9 +120,7 @@ export default function BenchmarkContextGallery({
             min={1}
             max={4}
             label="Linked image zoom"
-            onChange={(zoom) =>
-              zoom === 1 ? setView({ zoom: 1, x: 0, y: 0 }) : zoomTo(zoom)
-            }
+            onChange={zoomTo}
           />
           <Checkbox
             checked={reference}

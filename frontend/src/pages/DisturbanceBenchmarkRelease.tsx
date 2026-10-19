@@ -1,6 +1,7 @@
 import { ArrowLeftOutlined, LockOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Skeleton, Tag } from "antd";
+import { Button, Skeleton, Tag } from "antd";
+import { SectionLoadError } from "../components/SectionStates";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import BenchmarkWorldMap from "../components/DisturbanceBenchmark/BenchmarkWorldMap";
 import BenchmarkSitePicker from "../components/DisturbanceBenchmark/BenchmarkSitePicker";
@@ -20,18 +21,6 @@ async function loadBenchmark<T>(url: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(url, { signal });
   if (!response.ok) throw new Error("The benchmark data could not be loaded.");
   return response.json() as Promise<T>;
-}
-
-function LoadError({ title, onRetry }: { title: string; onRetry: () => void }) {
-  return (
-    <Alert
-      type="warning"
-      showIcon
-      message={title}
-      description="The storage server did not return the benchmark files."
-      action={<Button onClick={onRetry}>Try again</Button>}
-    />
-  );
 }
 
 export default function DisturbanceBenchmarkRelease() {
@@ -149,7 +138,7 @@ export default function DisturbanceBenchmarkRelease() {
 
       <div className="db-page mx-auto max-w-7xl space-y-12 px-4 py-10 md:px-8 md:py-14">
         {catalog.isError ? (
-          <LoadError
+          <SectionLoadError
             title="Benchmark data unavailable"
             onRetry={() => void catalog.refetch()}
           />
@@ -172,7 +161,7 @@ export default function DisturbanceBenchmarkRelease() {
                   onSelect={selectSite}
                 />
                 {detail.isError ? (
-                  <LoadError
+                  <SectionLoadError
                     title="Site data unavailable"
                     onRetry={() => void detail.refetch()}
                   />

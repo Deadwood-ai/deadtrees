@@ -5,6 +5,7 @@ import pytest
 import requests
 from fastapi.testclient import TestClient
 
+from api.src.access import privileges
 from api.src.access.tickets import sign_ticket
 from api.src.server import app
 from shared.db import use_service_client
@@ -20,6 +21,7 @@ def _bearer(account: dict) -> dict:
 
 
 def _set_core_team(account: dict, member: bool) -> None:
+	privileges._core_team.clear()
 	with use_service_client() as db:
 		db.table('privileged_users').delete().eq('user_id', account['id']).execute()
 		if member:

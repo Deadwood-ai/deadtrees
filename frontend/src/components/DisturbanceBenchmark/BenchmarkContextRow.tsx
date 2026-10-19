@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { useBenchmarkAsset } from "./BenchmarkAccess";
-import { benchmarkDate, benchmarkTime } from "./benchmarkData";
+import {
+  benchmarkDate,
+  benchmarkTime,
+  CONTEXT_SOURCE_LABELS,
+} from "./benchmarkData";
 import BenchmarkContextGallery from "./BenchmarkContextGallery";
 import { BenchmarkPager } from "./BenchmarkControls";
 import ReferencePolygonOverlay from "./ReferencePolygonOverlay";
@@ -12,11 +16,6 @@ interface BenchmarkContextRowProps {
   reference: boolean;
   onStart: (start: number) => void;
 }
-const SOURCE_LABELS: Record<ContextSource, string> = {
-  planet: "Planet",
-  google: "Google",
-  esri: "Esri",
-};
 export default function BenchmarkContextRow({
   site,
   source,
@@ -39,7 +38,7 @@ export default function BenchmarkContextRow({
   return (
     <section
       className="db-context-panel"
-      aria-label={`${SOURCE_LABELS[source]} dated image sequence`}
+      aria-label={`${CONTEXT_SOURCE_LABELS[source]} dated image sequence`}
     >
       <div className="db-context-controls">
         <div>
@@ -51,7 +50,7 @@ export default function BenchmarkContextRow({
         </div>
         <BenchmarkPager
           position={`${start + 1}–${Math.min(start + 3, frames.length)} / ${frames.length}`}
-          label={`${SOURCE_LABELS[source]} image window`}
+          label={`${CONTEXT_SOURCE_LABELS[source]} image window`}
           canPrevious={start > 0}
           canNext={start + 3 < frames.length}
           onPrevious={() => onStart(Math.max(0, start - 1))}
@@ -66,12 +65,12 @@ export default function BenchmarkContextRow({
             <button
               className="db-context-frame-image db-context-enlarge"
               onClick={() => setActive(start + offset)}
-              aria-label={`Compare ${SOURCE_LABELS[source]} imagery from ${benchmarkDate(frame.date)} with drone imagery`}
+              aria-label={`Compare ${CONTEXT_SOURCE_LABELS[source]} imagery from ${benchmarkDate(frame.date)} with drone imagery`}
               style={{ aspectRatio: `${site.width} / ${site.height}` }}
             >
               <img
                 src={benchmarkAsset(frame.preview || frame.image)}
-                alt={`${SOURCE_LABELS[source]} RGB imagery, ${benchmarkDate(frame.date)}`}
+                alt={`${CONTEXT_SOURCE_LABELS[source]} RGB imagery, ${benchmarkDate(frame.date)}`}
                 loading="lazy"
               />
               {reference && (
@@ -106,7 +105,7 @@ export default function BenchmarkContextRow({
         <BenchmarkContextGallery
           site={site}
           frames={frames}
-          label={SOURCE_LABELS[source]}
+          label={CONTEXT_SOURCE_LABELS[source]}
           source={source}
           initialIndex={active}
           initialReference={reference}

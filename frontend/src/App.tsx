@@ -9,6 +9,7 @@ import { AuditNavigationProvider } from "./hooks/useAuditNavigation";
 import Navigation from "./components/Navigation";
 import Footer from "./components/Footer";
 import { PublicOnly, RequireAuth } from "./components/AuthGate";
+import BenchmarkAccess from "./components/DisturbanceBenchmark/BenchmarkAccess";
 import { antdTheme } from "./theme/antdTheme";
 
 import DatasetDetails from "./pages/DatasetDetails";
@@ -31,6 +32,9 @@ const Deadtrees = lazy(() => import("./pages/Deadtrees"));
 const PriwaField = lazy(() => import("./pages/PriwaField"));
 const Releases = lazy(() => import("./pages/Releases"));
 const ReleaseDetail = lazy(() => import("./pages/ReleaseDetail"));
+const DisturbanceBenchmarkRelease = lazy(
+  () => import("./pages/DisturbanceBenchmarkRelease"),
+);
 const SignUp = lazy(() => import("./pages/auth/SignUp"));
 const SignIn = lazy(() => import("./pages/auth/SignIn"));
 const Forgotpassword = lazy(() => import("./pages/auth/ForgotPassword"));
@@ -199,6 +203,17 @@ function AppWithTracking() {
             }
           />
           <Route path="releases" element={<Releases />} />
+          {/* Internal, core-team-only release: kept out of the public catalogue. */}
+          <Route
+            path="releases/disturbance-benchmark"
+            element={
+              <RequireAuth>
+                <BenchmarkAccess>
+                  <DisturbanceBenchmarkRelease />
+                </BenchmarkAccess>
+              </RequireAuth>
+            }
+          />
           <Route path="releases/:slug" element={<ReleaseDetail />} />
           <Route path="about" element={<About />} />
           <Route path="impressum" element={<Impressum />} />
