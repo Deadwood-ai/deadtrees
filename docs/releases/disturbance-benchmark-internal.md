@@ -77,35 +77,20 @@ $PY scripts/disturbance_benchmark_publish.py status
   paths and fails if any referenced file is missing. Builds go to
   `~/data/disturbance-benchmark/builds/<run-id>`. Run `pylos-2026-10-15`:
   929 MB to 504 MB, about two minutes on 16 cores.
-- **publish** uploads the build next to the earlier runs. Files identical to the
+- **publish** uploads the build to `/data/releases/disturbance-benchmark/<run-id>`
+  next to the earlier runs. Files identical to the
   current run are hard-linked, so a new run only costs its changed files. It then
   switches `current` and prints the rollback command. Old runs are not deleted.
 - Publishing is a production write: run it only with approval for that run, then
   check the page as a core-team user (site switching, overlays, galleries, all
   context sources, time series).
 
-### One-time upload access
+### Upload access
 
-The script uploads through the SSH alias `dt-release-publisher`. Its key can only
-run `rrsync` rooted at `/data/releases/disturbance-benchmark` on data2, so it cannot
-read or change anything else. On data2, as the storage user:
-
-```bash
-mkdir -p /data/releases/disturbance-benchmark
-echo 'command="/usr/bin/rrsync /data/releases/disturbance-benchmark",restrict <public key>' >> ~/.ssh/authorized_keys
-```
-
-On the processing server, the key is `~/.ssh/deadtrees-release-publisher` and
-`~/.ssh/config` has:
-
-```text
-Host dt-release-publisher
-    HostName data2.deadtrees.earth
-    User <storage user>
-    IdentityFile ~/.ssh/deadtrees-release-publisher
-    IdentitiesOnly yes
-    BatchMode yes
-```
+The script uploads with rsync over SSH as `root@data2.deadtrees.earth` using the
+processing server's existing storage key, `~/.ssh/processing-to-storage` (the one
+the processors upload with). `BENCHMARK_REMOTE` and `BENCHMARK_SSH_KEY` override
+the destination and key.
 
 ## Data limitations to keep visible
 

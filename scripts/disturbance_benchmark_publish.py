@@ -14,7 +14,7 @@ earlier ones (unchanged files are hard-linked to the current version) and then
     disturbance_benchmark_publish.py status
 
 Without RUN_DIR the newest run with a clean handoff audit is used. Needs Pillow
-with WebP support and an SSH alias for the restricted release upload key; see
+with WebP support and the processing server's storage key; see
 docs/releases/disturbance-benchmark-internal.md.
 """
 
@@ -37,8 +37,10 @@ RUNS_ROOT = Path(
 	)
 )
 BUILDS_ROOT = Path(os.environ.get('BENCHMARK_BUILDS_ROOT', '~/data/disturbance-benchmark/builds')).expanduser()
-# rsync destination whose SSH key is restricted to /data/releases/disturbance-benchmark on data2.
-REMOTE = os.environ.get('BENCHMARK_REMOTE', 'dt-release-publisher:')
+# The release folder on the storage server, reached with the processing server's
+# existing storage key (the one the processors upload with).
+REMOTE = os.environ.get('BENCHMARK_REMOTE', 'root@data2.deadtrees.earth:/data/releases/disturbance-benchmark/')
+SSH_KEY = Path(os.environ.get('BENCHMARK_SSH_KEY', '~/.ssh/processing-to-storage')).expanduser()
 
 JPEG_QUALITY = 80
 PREVIEW_MAX_SIDE = 640
@@ -182,7 +184,8 @@ def build(run: Path, builds_root: Path | None = None, workers: int = 16) -> Path
 
 
 def rsync(*args: str, dry_run: bool = False) -> subprocess.CompletedProcess:
-	command = ['rsync', *(['--dry-run', '--itemize-changes'] if dry_run else []), *args]
+	ssh = ['--rsh', f'ssh -i {SSH_KEY} -o IdentitiesOnly=yes -o BatchMode=yes'] if ':' in REMOTE else []
+	command = ['rsync', *ssh, *(['--dry-run', '--itemize-changes'] if dry_run else []), *args]
 	return subprocess.run(command, check=True, text=True, capture_output=True)
 
 
