@@ -96,7 +96,7 @@ kbd { background: #2a3138; border: 1px solid var(--line); border-radius: 4px; pa
     <p class="muted" style="margin:0">Model borders: <span style="color:#7fd6a2">green</span> agrees with you · <span style="color:#ff9b92">red</span> model flags, you didn't · <span style="color:#e8c46a">amber</span> you flag, model missed. Small number = model's own score.</p>
     <p class="muted" style="margin:0"><kbd>1</kbd> yes · <kbd>2</kbd> no · <kbd>3</kbd> don't know · verdict <kbd>1</kbd> minor · <kbd>2</kbd> major (OK is automatic without a flagged error) · <kbd>Space</kbd> this layer fine · <kbd>Enter</kbd> rest no · <kbd>c</kbd> can't tell</p>
     <details><summary>Rules and keys</summary>
-      <p>Each layer has its own block: tag every error you see (yes for any clear error, however small), then give the verdict for the satellite product. <b>OK</b> is set automatically when no error is flagged in the layer; a layer with a flagged error is minor or major. <b>Minor, keep</b>: errors exist but would not noticeably change the satellite cover here. <b>Major, exclude</b>: all errors in this layer together would noticeably bias the satellite cover here. Lying wood is never deadwood; standing dead trees are forest.</p>
+      <p>Each layer has its own block: tag every error you see (yes for any clear error, however small), then give the verdict for the satellite product. <b>OK</b> is set automatically when no error is flagged in the layer; a layer with a flagged error is minor or major. <b>Minor, keep</b>: errors exist but would not noticeably change the satellite cover here. <b>Major, exclude</b>: all errors in this layer together would noticeably bias the satellite cover here. Lying wood is never deadwood; whether standing dead trees are in the forest layer is not judged.</p>
       <p>Work top to bottom: <kbd>1</kbd> yes, <kbd>2</kbd> no, <kbd>3</kbd> don't know answer the highlighted row and move down; on a verdict row <kbd>1</kbd> minor, <kbd>2</kbd> major; after the last row it goes to the next crop. <kbd>Space</kbd> marks the current layer fine (all no, verdict OK) and jumps to the next block. <kbd>↑</kbd>/<kbd>↓</kbd> or a click pick a row. <kbd>Enter</kbd> remaining questions = no (a layer without any yes also gets OK), next. <kbd>c</kbd> can't tell. <kbd>Tab</kbd> next open crop, <kbd>←</kbd>/<kbd>→</kbd> previous/next. Wheel and drag zoom, double-click resets.</p>
     </details>
   </aside>
@@ -113,7 +113,7 @@ const SHORT = {
 const GATE = 'm0_assessable';
 const LAYERS = [
   { name: 'deadwood', title: 'DEADWOOD (blue)', keys: ['m1_dead_missed', 'm2_dw_on_live_vegetation', 'm3_dw_on_non_vegetation', 'm4_dw_on_lying_wood', 'm7_dw_artifact', 'v_deadwood'] },
-  { name: 'forest', title: 'FOREST (gold)', keys: ['m5_fc_trees_missed', 'm6_fc_on_non_trees', 'm8_dead_not_forest', 'm7_fc_artifact', 'v_forest'] },
+  { name: 'forest', title: 'FOREST (gold)', keys: ['m5_fc_trees_missed', 'm6_fc_on_non_trees', 'm7_fc_artifact', 'v_forest'] },
 ];
 const isVerdict = (k) => k.startsWith('v_');
 const layerOf = (k) => LAYERS.find((l) => l.keys.includes(k));
@@ -296,7 +296,7 @@ function progress() {
 async function save(c = cur()) {
   const l = lab(c);
   const r = await fetch('/api/label', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ crop_id: c.id, answers: l.answers, sizes: l.sizes, note: l.note }) });
+    body: JSON.stringify({ crop_id: c.id, answers: Object.fromEntries(Object.entries(l.answers).filter(([k]) => k in st.questions)), sizes: l.sizes, note: l.note }) });
   $('#status').textContent = r.ok ? `Saved ${new Date().toLocaleTimeString()}` : 'Save failed; your answer is kept in this page';
   progress();
 }

@@ -70,13 +70,24 @@ Also give major_likelihood, 0 to 100, that the layer has a major error.""").repl
     '"verdict": "ok|minor|major", "major_likelihood": n}', '"wrong_area_pct": n, "verdict": "ok|minor|major", "major_likelihood": n}')
 # v3 (13 Oct): v1 plus a 0-100 likelihood per failure mode (the labeling page's questions), so
 # each model can be compared with the reviewer mode by mode, not only on the layer verdict.
-MODES = {'deadwood': ['m1_dead_missed', 'm2_dw_on_live_vegetation', 'm3_dw_on_non_vegetation', 'm4_dw_on_lying_wood', 'm7_dw_artifact'],
-         'forest': ['m5_fc_trees_missed', 'm6_fc_on_non_trees', 'm8_dead_not_forest', 'm7_fc_artifact']}
-PROMPT_V3 = PROMPT.replace('Count overlapping errors once.', 'Count overlapping errors once.\nFor each error type below, give modes: the likelihood, 0 to 100, that this error is clearly present in the layer:\n'
-                           + '\n'.join(f'- {k}: {PREDICATES["gold9"][k]}' for layer in MODES.values() for k in layer)).replace(
-    '"deadwood": {"errors": ["..."],', '"deadwood": {"errors": ["..."], "modes": {' + ', '.join(f'"{k}": n' for k in MODES['deadwood']) + '},').replace(
-    '"forest": {"errors": ["..."],', '"forest": {"errors": ["..."], "modes": {' + ', '.join(f'"{k}": n' for k in MODES['forest']) + '},')
-PROMPTS = {'v1': PROMPT, 'v2': PROMPT_V2, 'v3': PROMPT_V3}
+MODES_V3 = {'deadwood': ['m1_dead_missed', 'm2_dw_on_live_vegetation', 'm3_dw_on_non_vegetation', 'm4_dw_on_lying_wood', 'm7_dw_artifact'],
+            'forest': ['m5_fc_trees_missed', 'm6_fc_on_non_trees', 'm8_dead_not_forest', 'm7_fc_artifact']}
+
+
+def with_modes(prompt, modes, questions):
+    return prompt.replace('Count overlapping errors once.', 'Count overlapping errors once.\nFor each error type below, give modes: the likelihood, 0 to 100, that this error is clearly present in the layer:\n'
+                          + '\n'.join(f'- {k}: {questions[k]}' for layer in modes.values() for k in layer)).replace(
+        '"deadwood": {"errors": ["..."],', '"deadwood": {"errors": ["..."], "modes": {' + ', '.join(f'"{k}": n' for k in modes['deadwood']) + '},').replace(
+        '"forest": {"errors": ["..."],', '"forest": {"errors": ["..."], "modes": {' + ', '.join(f'"{k}": n' for k in modes['forest']) + '},')
+
+
+PROMPT_V3 = with_modes(PROMPT, MODES_V3, PREDICATES['gold9'])
+# v4 (19 Oct, team meeting): "dead trees left out of forest" is no longer a failure mode, so the
+# forest rule no longer asks for standing dead trees in the gold.
+MODES = {'deadwood': MODES_V3['deadwood'], 'forest': [k for k in MODES_V3['forest'] if k != 'm8_dead_not_forest']}
+PROMPT_V4 = with_modes(PROMPT.replace('Forest means\nall tree canopy, including standing dead trees;', 'Forest means\nall tree canopy (whether standing dead trees are included is not judged);'),
+                       MODES, PREDICATES['gold10'])
+PROMPTS = {'v1': PROMPT, 'v2': PROMPT_V2, 'v3': PROMPT_V3, 'v4': PROMPT_V4}
 
 
 
@@ -140,7 +151,7 @@ def ask(root, crop, out, backend='sol', effort='high', key=None, prompt=PROMPT):
                     raise ValueError('bad verdict')
                 result[layer] = {'verdict': v['verdict'], 'major_likelihood': float(v['major_likelihood']),
                                  'wrong_area_pct': float(v['wrong_area_pct']) if 'wrong_area_pct' in v else None,
-                                 'modes': {k: float(x) for k, x in (v.get('modes') or {}).items() if k in MODES[layer]},
+                                 'modes': {k: float(x) for k, x in (v.get('modes') or {}).items() if k in MODES_V3[layer]},
                                  'errors': [str(e)[:200] for e in v.get('errors', [])][:10]}
             return result, {'usage': receipt.get('usage'), 'seconds': receipt['seconds']}
         except ValueError as e:
@@ -175,10 +186,11 @@ if __name__ == '__main__':
     p.add_argument('--backend', choices=('sol', 'luna', 'haiku'), default='sol')
     p.add_argument('--effort', default='high')
     p.add_argument('--prompt', choices=sorted(PROMPTS), default='v1')
+    p.add_argument('--crops-file', default='gold-test.json')
     p.add_argument('--key-file', type=Path, help='OpenAI key file, Luna only')
     a = p.parse_args()
     key = read_key(a.key_file) if a.backend == 'luna' else None
-    crops = json.loads((a.root / 'gold-test.json').read_text())
+    crops = json.loads((a.root / a.crops_file).read_text())
     labels = {r[0]: json.loads(r[1]) for r in sqlite3.connect(a.root / 'gold-labels.sqlite3').execute(
         'SELECT crop_id, payload FROM labels')}
     # Only datasets that are still public and unarchived may be sent.

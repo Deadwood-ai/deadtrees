@@ -145,13 +145,18 @@ def make_handler(root, crops, store):
             crop_id = value.get('crop_id')
             answers = value.get('answers', {})
             sizes = value.get('sizes', {})
+            stored = store.all().get(crop_id, {})
+            # Answers to questions no longer asked (e.g. m8, dropped 19 Oct) move to legacy, never lost.
+            dropped = {k: v for k, v in {**stored.get('answers', {}), **answers}.items() if k not in QUESTIONS}
+            answers = {k: v for k, v in answers.items() if k in QUESTIONS}
+            sizes = {k: v for k, v in sizes.items() if k in QUESTIONS}
             if (crop_id not in ids or not isinstance(answers, dict) or not set(answers) <= set(QUESTIONS)
                     or not all(v in (VERDICTS if k.startswith('v_') else ANSWERS) for k, v in answers.items())
                     or not isinstance(sizes, dict) or not set(sizes) <= set(QUESTIONS) or not all(v in SIZES for v in sizes.values())):
                 return self.send(400, 'application/json', b'{"error":"invalid"}')
             payload = {'answers': answers, 'sizes': sizes, 'note': str(value.get('note', ''))[:500]}
-            legacy = store.all().get(crop_id, {}).get('legacy')
-            if legacy:  # answers from an earlier question set, kept for reference
+            legacy = {**stored.get('legacy', {}), **({'answers': {**stored.get('legacy', {}).get('answers', {}), **dropped}} if dropped else {})}
+            if legacy:  # answers from earlier question sets, kept for reference
                 payload['legacy'] = legacy
             at = store.save(crop_id, payload)
             self.send(200, 'application/json', json.dumps({'saved': at}).encode())

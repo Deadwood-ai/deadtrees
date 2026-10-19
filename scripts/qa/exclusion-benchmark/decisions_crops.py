@@ -132,6 +132,7 @@ PREDICATES = {
         'm7_fc_artifact': 'Processing artifact in the forest layer: straight tile seams, rectangular holes or blocks, or the gold cut off or missing.',
         'v_forest': 'Major forest error: all forest errors in this crop together would noticeably bias the forest cover of the satellite product, so this forest prediction should be excluded here.',
     },
+    # gold10 is defined below PREDICATES: gold9 without m8 (dropped at the 19 Oct team meeting).
     # major1 (13 Oct): several wordings of the per-layer "major" verdict, to find one Decisions
     # can answer; scored against the reviewer's v_deadwood / v_forest.
     'major1': {
@@ -149,6 +150,8 @@ PREDICATES = {
         'any_standing_dead': 'Image 1 shows at least one standing dead or leafless tree.',
     },
 }
+PREDICATES['gold10'] = {k: v for k, v in PREDICATES['gold9'].items() if k != 'm8_dead_not_forest'}
+PREDICATES['gold10']['v_forest'] = PREDICATES['gold9']['v_forest']
 # Strict context for tuning against the reviewer's crop labels (9 Oct): he sees few errors.
 STRICT_CONTEXT = '''Aerial drone image tile. Image 1 is raw RGB, Image 2 the DEADWOOD prediction in blue, Image 3 the
 FOREST prediction in gold. Darkened areas are outside the area of interest; ignore them.
