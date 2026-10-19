@@ -61,9 +61,11 @@ export default function DisturbanceBenchmarkRelease() {
     { label: "Products", value: products.length },
   ];
 
+  // ph-no-capture: session replay records image URLs, which carry signed
+  // benchmark links; the page and its modals are left out of recordings.
   return (
     <main
-      className="min-h-screen bg-[#f8faf9] pt-24 md:pt-32"
+      className="ph-no-capture min-h-screen bg-[#f8faf9] pt-24 md:pt-32"
       data-testid="release-detail-page"
     >
       <section className="border-b border-gray-200/80 bg-white">

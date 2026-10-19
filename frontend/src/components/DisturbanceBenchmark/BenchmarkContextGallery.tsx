@@ -64,6 +64,7 @@ export default function BenchmarkContextGallery({
 
   return (
     <Modal
+      rootClassName="ph-no-capture"
       open
       onCancel={onClose}
       footer={null}

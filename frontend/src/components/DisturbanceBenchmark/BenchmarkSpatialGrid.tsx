@@ -210,6 +210,7 @@ export default function BenchmarkSpatialGrid({
         ))}
       </div>
       <Modal
+        rootClassName="ph-no-capture"
         open={active !== null}
         onCancel={() => setActive(null)}
         footer={null}
