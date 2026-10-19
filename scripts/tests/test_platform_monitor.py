@@ -141,6 +141,49 @@ def test_backup_age_deploy_workers_gpu_oom_and_frontend():
 	assert findings.verdict(current) == 'red'
 
 
+def test_a_silent_worker_with_its_odm_container_running_is_yellow_not_red():
+	facts = {'workers': [
+		{'name': 'processing-server', 'task_id': 1, 'dataset_id': 14940, 'last_log_age_h': 3.2, 'silent': True, 'odm_running': True},
+		{'name': 'helicon', 'task_id': 2, 'dataset_id': 15, 'last_log_age_h': 3.4, 'silent': True, 'odm_running': None},
+	]}
+	current, _, _ = findings.build_findings(snapshot(), facts, NOON)
+	by_key = {item['fingerprint']: item for item in current}
+	alive = by_key['dt-status/processing-server/worker-silent']
+	assert alive['severity'] == 'yellow' and 'ODM still running' in alive['summary']
+	assert by_key['dt-status/helicon/worker-silent']['severity'] == 'red'
+
+
+def test_odm_container_names_give_their_dataset():
+	names = 'dt-odm-pipeline-d14970-orthophoto-1792395338\ndt-odm-split-d15-1792395338\ndeadtrees-processor-1\n'
+	assert host_facts.parse_odm_datasets(names) == {14970, 15}
+
+
+def test_a_host_trailing_main_beyond_a_drain_is_yellow():
+	history = [('c' * 40, datetime(2026, 10, 13, 11, 0, tzinfo=timezone.utc)),
+		('b' * 40, datetime(2026, 10, 12, 20, 0, tzinfo=timezone.utc)),
+		('a' * 40, datetime(2026, 10, 11, 9, 0, tzinfo=timezone.utc))]
+	hosts = {
+		'processing': running(),
+		'processing:helicon': running(),
+		'processing:deepl1': running(),
+	}
+	hosts['processing']['release'] = {'activated': 'c' * 12}
+	hosts['processing:helicon']['release'] = {'activated': 'a' * 12}
+	hosts['processing:deepl1']['release'] = {'activated': 'unknown'}
+	current, _, _ = findings.build_findings(snapshot(**hosts), {'main_history': history}, NOON)
+	trailing = {item['fingerprint']: item['summary'] for item in current if item['fingerprint'].endswith('/release')}
+	# helicon has missed b since 20:00 yesterday (16 h); the others are current or unknown.
+	assert trailing == {'dt-status/helicon/release': 'helicon runs aaaaaaa, 2 commit(s) behind main ccccccc for 16 h'}
+
+	hosts['processing:helicon']['release'] = {'activated': 'b' * 12}
+	current, _, _ = findings.build_findings(snapshot(**hosts), {'main_history': history}, NOON)
+	assert not [item for item in current if item['fingerprint'].endswith('/release')]
+
+	hosts['processing:helicon']['release'] = {'activated': 'f' * 12}
+	current, _, _ = findings.build_findings(snapshot(**hosts), {'main_history': history}, NOON)
+	assert 'older than the last 3 main commits' in {item['fingerprint']: item['summary'] for item in current}['dt-status/helicon/release']
+
+
 def test_unchecked_local_surfaces_are_gaps_never_green():
 	_, gaps, unobserved = findings.build_findings(snapshot(), {'workers_error': 'OperationalError'}, NOON)
 	assert gaps == [

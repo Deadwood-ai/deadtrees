@@ -184,10 +184,11 @@ Each tick:
 2. Turns them into fingerprinted findings (`dt-status/<surface>/<key>`) in
    `scripts/platform_monitor/findings.py`, which owns the rules: container not
    running, restarts, OOM, disks above 85 percent (helicon `/` above 97 percent
-   is red; storage `/` counts only above 90 percent between 23:30Z and 06:00Z),
-   stale backups, deploy pause, refusal, dirty checkout or a drain older than 12
-   hours, a worker silent for over 3 hours, a failed GPU check and frontend
-   errors. A failed probe, a frontend error or a disk over the line counts only
+   is red), stale backups, deploy pause, refusal, dirty checkout or a drain
+   older than 12 hours, a processor that has trailed main for more than 12
+   hours, a worker silent for over 3 hours (yellow instead of red while the
+   processing server's ODM container for that dataset still runs), a failed GPU
+   check and frontend errors. A failed probe, a frontend error or a disk over the line counts only
    on two runs in a row and clears after two quiet runs. A check that cannot run is a coverage gap, never green.
 3. Runs a read-only model call (`claude-haiku-5-5`) for what
    needs Janusch in Linear, Gmail and Zulip (Zulip is read by the script) and

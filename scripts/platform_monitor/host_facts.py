@@ -3,7 +3,8 @@
 `operator_status.py` covers the API, database and the hosts it reaches over
 SSH. This adds what only the processing server can see: production deploy
 health, kernel OOM kills in the prod processor's cgroup, the local GPU, worker
-liveness from the queue, the public frontend and origin/main. Nothing here
+liveness from the queue, running ODM containers, the public frontend, origin/main
+and recent main history from the monitor's own checkout. Nothing here
 writes anywhere, and the production checkout is only read.
 """
 
@@ -19,6 +20,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+# The wrapper refreshes this checkout to origin/main before each tick.
+MONITOR_CHECKOUT = Path(__file__).resolve().parents[2]
+MAIN_HISTORY_COMMITS = 100
+ODM_NAME_RE = re.compile(r'^dt-odm-.*-d(\d+)-')
 PROD_CHECKOUT = Path(os.environ.get('DEADTREES_MONITOR_PROD_CHECKOUT', str(Path.home() / 'prod/deadtrees')))
 PROCESSOR_CONTAINER = os.environ.get('DEADTREES_MONITOR_PROCESSOR_CONTAINER', 'deadtrees-processor-1')
 FRONTEND_URLS = ('https://deadtrees.earth/', 'https://deadtrees.earth/datasets')
@@ -29,6 +34,7 @@ WORKER_NAMES = {
 	'host-bb400fd18e59': 'helicon',
 	'host-56916e6e7ab8': 'deepl1',
 }
+LOCAL_WORKER = 'processing-server'
 SILENT_HOURS = 3
 # Kills since the previous tick (2 hours apart at night) plus some overlap, so
 # none falls between two ticks; capped for a first run or a long outage.
@@ -57,6 +63,24 @@ def run(args: list[str], timeout: int = 30, cwd: Path | None = None) -> tuple[in
 def origin_main() -> str | None:
 	code, out = run(['git', 'ls-remote', REPO_URL, 'refs/heads/main'])
 	return out.split()[0] if code == 0 and out else None
+
+
+def main_history() -> list[tuple[str, datetime]] | None:
+	"""Recent main commits, newest first, with the time each landed."""
+	code, out = run(['git', 'log', f'-{MAIN_HISTORY_COMMITS}', '--format=%H %cI', 'HEAD'], cwd=MONITOR_CHECKOUT)
+	if code != 0 or not out:
+		return None
+	return [(sha, datetime.fromisoformat(stamp)) for sha, stamp in (line.split() for line in out.splitlines())]
+
+
+def parse_odm_datasets(names: str) -> set[int]:
+	return {int(match.group(1)) for name in names.splitlines() if (match := ODM_NAME_RE.match(name))}
+
+
+def running_odm_datasets() -> set[int] | None:
+	"""Datasets with an ODM container running on this host."""
+	code, out = run(['docker', 'ps', '--filter', 'name=dt-odm-', '--format', '{{.Names}}'])
+	return parse_odm_datasets(out) if code == 0 else None
 
 
 def parse_drain_age(status: dict[str, Any], now: datetime) -> float | None:
@@ -154,6 +178,8 @@ def workers() -> tuple[list[dict[str, Any]] | None, str | None]:
 			rows = db.execute(LIVENESS_SQL).fetchall()
 	except Exception as exc:  # noqa: BLE001 - any DB failure is a coverage gap
 		return None, type(exc).__name__
+	# Only this host's ODM containers are visible; elsewhere it stays unknown.
+	local_odm = running_odm_datasets() if any(WORKER_NAMES.get(row[0]) == LOCAL_WORKER for row in rows) else None
 	return [
 		{
 			'name': WORKER_NAMES.get(host, host),
@@ -161,6 +187,7 @@ def workers() -> tuple[list[dict[str, Any]] | None, str | None]:
 			'dataset_id': dataset,
 			'last_log_age_h': None if age is None else float(age),
 			'silent': age is not None and float(age) > SILENT_HOURS,
+			'odm_running': dataset in local_odm if local_odm is not None and WORKER_NAMES.get(host) == LOCAL_WORKER else None,
 		}
 		for host, task, dataset, age in rows
 	], None
@@ -181,6 +208,7 @@ def collect(now: datetime | None = None, last_tick: datetime | None = None) -> d
 	worker_rows, worker_error = workers()
 	return {
 		'origin_main': origin_main(),
+		'main_history': main_history(),
 		'deploy': deploy_health(now),
 		'prod_oom_kills': prod_oom_kills(oom_since(now, last_tick)),
 		'gpu': gpu(),

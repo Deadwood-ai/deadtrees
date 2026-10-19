@@ -23,11 +23,14 @@ DISK_WATCH_PCT = 85
 HELICON_URGENT_DISK_PCT = 97
 BACKUP_MAX_AGE_HOURS = 36
 DRAIN_MAX_AGE_HOURS = 12
+# A processor only activates a release once its running task ends, so a host
+# may trail main for as long as a drain may last before it counts.
+RELEASE_LAG_HOURS = DRAIN_MAX_AGE_HOURS
 # Flaky surfaces (SSH banner timeouts, one slow page) count only after this
 # many runs in a row, and clear only after as many quiet runs.
 CONFIRM_RUNS = 2
 # Findings that come from a host's own status probe; unobserved while it fails.
-HOST_KEYS = ('disk:*', 'processor', 'restarts', 'oom-killed', 'api-*', 'cron:*', 'age:*')
+HOST_KEYS = ('disk:*', 'processor', 'restarts', 'oom-killed', 'release', 'api-*', 'cron:*', 'age:*')
 
 
 # Summaries reach a model with Linear write tools, and parts of them (log
@@ -79,6 +82,27 @@ def processor_findings(label: str, host: dict[str, Any]) -> list[dict[str, Any]]
 	return found
 
 
+def release_findings(label: str, host: dict[str, Any], main_history: list[tuple[str, datetime]] | None, now: datetime) -> list[dict[str, Any]]:
+	"""A host whose activated release has trailed main for longer than a drain may take."""
+	activated = (host.get('release') or {}).get('activated') or ''
+	if not main_history or len(activated) < 7 or activated == 'unknown':
+		return []
+	shas = [sha for sha, _ in main_history]
+	position = next((i for i, sha in enumerate(shas) if sha.startswith(activated)), None)
+	if position == 0:
+		return []
+	if position is None:
+		behind = f'older than the last {len(shas)} main commits'
+		missing_since = main_history[-1][1]
+	else:
+		behind = f'{position} commit(s) behind main'
+		missing_since = main_history[position - 1][1]
+	lag = (now - missing_since).total_seconds() / 3600
+	if lag <= RELEASE_LAG_HOURS:
+		return []
+	return [finding('yellow', label, 'release', f'{label} runs {activated[:7]}, {behind} {shas[0][:7]} for {lag:.0f} h')]
+
+
 def storage_findings(host: dict[str, Any], origin_main: str | None) -> list[dict[str, Any]]:
 	found = []
 	for line in host.get('lines') or []:
@@ -110,7 +134,7 @@ def host_patterns(label: str) -> list[str]:
 
 
 def platform_findings(
-	snapshot: dict[str, Any], now: datetime, origin_main: str | None
+	snapshot: dict[str, Any], now: datetime, origin_main: str | None, main_history: list[tuple[str, datetime]] | None = None
 ) -> tuple[list[dict[str, Any]], list[str], list[str]]:
 	found: list[dict[str, Any]] = []
 	gaps: list[str] = []
@@ -141,7 +165,7 @@ def platform_findings(
 			continue
 		found += disk_findings(label, host.get('disks') or {})
 		if key.startswith('processing'):
-			found += processor_findings(label, host)
+			found += processor_findings(label, host) + release_findings(label, host, main_history, now)
 		elif key == 'storage':
 			found += storage_findings(host, origin_main)
 		elif key == 'backups':
@@ -189,9 +213,13 @@ def local_findings(facts: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
 		unobserved.append('dt-status/*/worker-silent')
 	for worker in workers or []:
 		if worker.get('silent'):
+			# ODM writes no log lines while it reconstructs; a running ODM
+			# container for the task's dataset is alive, not hung (DT-1377).
+			alive = worker.get('odm_running') is True
 			found.append(finding(
-				'red', worker['name'], 'worker-silent',
-				f'{worker["name"]} worker silent {worker["last_log_age_h"]} h on dataset {worker["dataset_id"]} (task {worker["task_id"]})',
+				'yellow' if alive else 'red', worker['name'], 'worker-silent',
+				f'{worker["name"]} worker silent {worker["last_log_age_h"]} h on dataset {worker["dataset_id"]} (task {worker["task_id"]})'
+				+ (', ODM still running' if alive else ''),
 			))
 
 	if not facts.get('frontend'):
@@ -206,7 +234,7 @@ def build_findings(
 	snapshot: dict[str, Any], facts: dict[str, Any], now: datetime
 ) -> tuple[list[dict[str, Any]], list[str], list[str]]:
 	"""Findings, coverage gaps and the fingerprint patterns not observed."""
-	found, gaps, unobserved = platform_findings(snapshot, now, facts.get('origin_main'))
+	found, gaps, unobserved = platform_findings(snapshot, now, facts.get('origin_main'), facts.get('main_history'))
 	deploy, deploy_gaps, deploy_unobserved = deploy_findings(facts.get('deploy') or {})
 	local, local_gaps, local_unobserved = local_findings(facts)
 	unique = {item['fingerprint']: item for item in found + deploy + local}
