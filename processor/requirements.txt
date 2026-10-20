@@ -6,7 +6,7 @@ python-multipart
 supabase
 gotrue
 prometheus-client
-rasterio==1.5.1
+rasterio==1.5.2
 rio-cogeo
 fire
 pillow>=10.0.0
