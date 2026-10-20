@@ -259,3 +259,21 @@ def test_render_markdown_keeps_failure_cause_with_partial_disk_evidence():
 
 	assert 'disks /=91%' in markdown
 	assert 'error ssh connection refused' in markdown
+
+
+def test_database_summary_disables_gss_encryption_for_the_pooler(monkeypatch):
+	monkeypatch.setenv('DEADTREES_OPERATOR_DATABASE_URL', 'postgresql://analyst@pooler:6543/postgres')
+	monkeypatch.setenv('PGGSSENCMODE', 'prefer')
+	calls: list[dict] = []
+
+	def fake_run_command(args, timeout=10, cwd=operator_status.ROOT, env=None):
+		calls.append({'args': args, 'env': env})
+		return {'ok': True, 'stdout': '{"queue_active": 0}'}
+
+	monkeypatch.setattr(operator_status, 'run_command', fake_run_command)
+
+	summary = operator_status.database_summary(window_hours=24, timeout=5)
+
+	assert summary['ok'] is True
+	assert calls[0]['args'][0] == 'psql'
+	assert calls[0]['env']['PGGSSENCMODE'] == 'disable'

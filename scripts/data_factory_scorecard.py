@@ -220,6 +220,9 @@ def run_psql(database_url: str, timeout: int) -> dict[str, Any]:
 			['psql', database_url, '-XAtq', '-v', 'ON_ERROR_STOP=1', '-f', '-'],
 			input=ANALYST_TRANSACTION_SQL,
 			cwd=ROOT,
+			# The Supabase pooler drops a GSS encryption request instead of
+			# declining it, which psql sends first whenever a Kerberos ticket exists.
+			env={**os.environ, 'PGGSSENCMODE': 'disable'},
 			text=True,
 			stdout=subprocess.PIPE,
 			stderr=subprocess.PIPE,
