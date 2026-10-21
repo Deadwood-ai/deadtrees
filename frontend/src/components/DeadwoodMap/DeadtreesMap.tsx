@@ -98,6 +98,7 @@ import {
   createPublicTreeObservationLayer,
   syncPublicTreeObservationLayer,
 } from "./createPublicTreeObservationLayer";
+import { renderFlagHoverContent } from "./flagHoverContent";
 import { mapColors } from "../../theme/mapColors";
 import { palette } from "../../theme/palette";
 import { downloadPublicTreeObservationsCsv } from "../../utils/publicTreeObservationCsv";
@@ -812,12 +813,7 @@ const DeadtreesMap = () => {
             const year = feature.get("year");
             const popupElement = flagHoverOverlayRef.current.getElement();
             if (popupElement) {
-              popupElement.innerHTML = `
-              <div style="font-family: system-ui, sans-serif;">
-                <div style="font-weight: 600; color: ${mapColors.flag.stroke}; margin-bottom: 4px;">Flag #${flagId}${year ? ` · ${year}` : ""}</div>
-                <div style="color: ${palette.neutral[800]}; line-height: 1.4;">${description}</div>
-              </div>
-            `;
+              renderFlagHoverContent(popupElement, { flagId, year, description });
             }
             flagHoverOverlayRef.current.setPosition(evt.coordinate);
           } else {
