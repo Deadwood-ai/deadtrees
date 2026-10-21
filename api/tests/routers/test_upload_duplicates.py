@@ -133,7 +133,8 @@ def test_file_matching_a_processed_orthomosaic_is_rejected(upload, auth_token, t
 	filename = f'{uuid4()}.tif'
 	content = _unique_file(filename)
 	(tmp_path / filename).write_bytes(content)
-	with use_client(auth_token) as db:
+	# The processor's own ODM result: set up with the service role, as the processor writes ortho rows.
+	with use_service_client() as db:
 		dataset_id = (
 			db.table(settings.datasets_table)
 			.insert(

@@ -342,6 +342,17 @@ def _check_photos_for_odm(
 		)
 
 
+def require_own_raw_images_zip(remote_zip_path: str, dataset_id: int) -> None:
+	"""The upload stores a dataset's images as <raw images folder>/<dataset id>.zip.
+
+	The path comes from a row the uploader writes, so never pull another dataset's
+	zip or any other file from the storage server through it (DT-1429).
+	"""
+	path = Path(remote_zip_path)
+	if path.name != f'{dataset_id}.zip' or path.parent.name != settings.RAW_IMAGES_DIR or '..' in path.parts:
+		raise ValueError(f'Raw images path of dataset {dataset_id} is not its own upload: {remote_zip_path}')
+
+
 def process_odm(task: QueueTask, temp_dir: Path):
 	"""
 	Process ODM (OpenDroneMap) task for raw drone images.
@@ -385,6 +396,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 				raise Exception(f'No raw_images entry found for dataset {dataset_id}')
 
 			remote_zip_path = response.data[0]['raw_images_path']
+			require_own_raw_images_zip(remote_zip_path, dataset_id)
 			logger.info(
 				f'Found raw_images_path in database: {remote_zip_path}',
 				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),

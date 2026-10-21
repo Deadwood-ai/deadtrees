@@ -36,7 +36,7 @@ def test_v2_raw_images_table_constraints(auth_token, test_user):
 				'dataset_id': dataset_id,
 				'raw_image_count': 15,
 				'raw_image_size_mb': 250,
-				'raw_images_path': f'raw_images/{dataset_id}/images/',
+				'raw_images_path': f'/data/raw_images/{dataset_id}.zip',
 				'has_rtk_data': False,
 				'rtk_file_count': 0,
 			}
@@ -49,7 +49,7 @@ def test_v2_raw_images_table_constraints(auth_token, test_user):
 			assert raw_images_record['dataset_id'] == dataset_id
 			assert raw_images_record['raw_image_count'] == 15
 			assert raw_images_record['raw_image_size_mb'] == 250
-			assert raw_images_record['raw_images_path'] == f'raw_images/{dataset_id}/images/'
+			assert raw_images_record['raw_images_path'] == f'/data/raw_images/{dataset_id}.zip'
 			assert raw_images_record['has_rtk_data'] is False
 			assert raw_images_record['rtk_file_count'] == 0
 			assert raw_images_record['version'] == 1  # Default value
@@ -94,7 +94,7 @@ def test_v2_raw_images_with_rtk_data(auth_token, test_user):
 				'dataset_id': dataset_id,
 				'raw_image_count': 30,
 				'raw_image_size_mb': 500,
-				'raw_images_path': f'raw_images/{dataset_id}/images/',
+				'raw_images_path': f'/data/raw_images/{dataset_id}.zip',
 				'camera_metadata': camera_metadata,
 				'has_rtk_data': True,
 				'rtk_precision_cm': 2.5,
@@ -129,7 +129,7 @@ def test_v2_raw_images_foreign_key_constraint(auth_token):
 			'dataset_id': 999999,  # Non-existent dataset ID
 			'raw_image_count': 10,
 			'raw_image_size_mb': 100,
-			'raw_images_path': 'raw_images/999999/images/',
+			'raw_images_path': '/data/raw_images/999999.zip',
 		}
 
 		# This should fail due to foreign key constraint
@@ -160,7 +160,7 @@ def test_v2_raw_images_cascade_delete(auth_token, test_user):
 				'dataset_id': dataset_id,
 				'raw_image_count': 5,
 				'raw_image_size_mb': 50,
-				'raw_images_path': f'raw_images/{dataset_id}/images/',
+				'raw_images_path': f'/data/raw_images/{dataset_id}.zip',
 			}
 			client.table('v2_raw_images').insert(raw_images_data).execute()
 
