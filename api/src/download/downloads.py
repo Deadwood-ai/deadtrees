@@ -403,9 +403,15 @@ def label_to_geopackage(label_file, label: Label) -> io.BytesIO:
 
 		logger.info(f'Successfully fetched and wrote {total_geometries} geometries for label {label.id}')
 
-		# Get AOI data only if aoi_id exists
+		# Get AOI data only if aoi_id exists, and only from the label's own dataset
 		if label.aoi_id is not None:
-			aoi_response = client.table(settings.aois_table).select('*').eq('id', label.aoi_id).execute()
+			aoi_response = (
+				client.table(settings.aois_table)
+				.select('*')
+				.eq('id', label.aoi_id)
+				.eq('dataset_id', label.dataset_id)
+				.execute()
+			)
 			if aoi_response.data:
 				aoi = aoi_response.data[0]
 				aoi_gdf = gpd.GeoDataFrame.from_features(
