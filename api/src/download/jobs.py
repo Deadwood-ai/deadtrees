@@ -41,6 +41,9 @@ logger = UnifiedLogger(__name__)
 HEARTBEAT_SECONDS = 30
 STALE_AFTER_SECONDS = 300
 INTERRUPTED_MESSAGE = 'Download preparation was interrupted. Please request the download again.'
+# Raise to stop serving every file prepared before a change to what exports may contain.
+# 2: label exports include only AOIs of the label's own dataset (DT-1431).
+MANIFEST_VERSION = 2
 
 
 class ExportKind(str, Enum):
@@ -91,7 +94,7 @@ class PreparedFileJob:
 			payload = json.loads(self.manifest_path.read_text(encoding='utf-8'))
 			ids = tuple(payload['dataset_ids'])
 			valid = (
-				payload['version'] == 1
+				payload['version'] == MANIFEST_VERSION
 				and payload['file'] == _identity(self.path)
 				and 0 < len(ids) <= 100
 				and all(type(value) is int and value > 0 for value in ids)
@@ -183,7 +186,7 @@ class PreparedFileJob:
 
 	def _write_manifest(self, manifest: Manifest) -> None:
 		payload = {
-			'version': 1,
+			'version': MANIFEST_VERSION,
 			'kind': manifest.kind.value,
 			'dataset_ids': sorted(set(manifest.dataset_ids)),
 			'file': _identity(self.path),
