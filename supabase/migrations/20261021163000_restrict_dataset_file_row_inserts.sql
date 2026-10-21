@@ -17,6 +17,32 @@ begin;
 
 set local lock_timeout = '5s';
 
+-- Rows created before this change are not covered by the new policies. Stop here if
+-- any ortho file name is a path or belongs to more than one dataset, so such rows are
+-- reviewed before the API and the processor keep trusting them.
+do $$
+begin
+	if exists (
+		select 1 from (
+			select ortho_file_name, dataset_id from public.v2_orthos
+			union all
+			select ortho_file_name, dataset_id from public.v2_orthos_processed
+		) o
+		where o.ortho_file_name like '%/%' or position('..' in o.ortho_file_name) > 0
+	) or exists (
+		select 1 from (
+			select ortho_file_name, dataset_id from public.v2_orthos
+			union all
+			select ortho_file_name, dataset_id from public.v2_orthos_processed
+		) o
+		group by o.ortho_file_name
+		having count(distinct o.dataset_id) > 1
+	) then
+		raise exception 'DT-1429: ortho file names must be plain and unique per dataset; review the rows from the DT-1429 audit query first';
+	end if;
+end
+$$;
+
 drop policy if exists "Enable insert for authenticated users only" on public.v2_datasets;
 create policy "Users create their own datasets"
 on public.v2_datasets for insert to authenticated

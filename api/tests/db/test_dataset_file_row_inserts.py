@@ -2,6 +2,7 @@
 
 import json
 import uuid
+from pathlib import Path
 from urllib.parse import urlparse
 
 import psycopg
@@ -127,3 +128,40 @@ def test_owners_register_only_their_own_raw_images_zip(db):
 
 	act_as(db, uuid.uuid4(), PROCESSOR_EMAIL)
 	db.execute(INSERT_RAW_IMAGES, (other_dataset, f'/data/raw_images/{other_dataset}.zip'))
+
+
+MIGRATION = (
+	Path(__file__).resolve().parents[3] / 'supabase/migrations/20261021163000_restrict_dataset_file_row_inserts.sql'
+)
+
+
+def run_migration_guard(db):
+	"""Run the migration's leading guard block on the current rows."""
+	sql = MIGRATION.read_text()
+	guard = sql[sql.index('do $$') : sql.index('$$;') + 3]
+	db.execute('SAVEPOINT guard')
+	try:
+		db.execute(guard)
+	finally:
+		db.execute('ROLLBACK TO SAVEPOINT guard')
+
+
+@pytest.mark.parametrize(
+	('table', 'insert'),
+	[('v2_orthos', INSERT_ORTHO), ('v2_orthos_processed', INSERT_PROCESSED_ORTHO)],
+)
+def test_migration_stops_on_rows_planted_before_it(db, table, insert):
+	owner, other = create_user(db), create_user(db)
+	own_dataset, other_dataset = create_dataset(db, owner), create_dataset(db, other)
+	as_admin(db)
+	db.execute(insert, (other_dataset, f'{other_dataset}_ortho.tif'))
+	db.execute('SAVEPOINT clean')
+
+	db.execute(insert, (own_dataset, f'{other_dataset}_ortho.tif'))
+	with pytest.raises(psycopg.errors.RaiseException, match='DT-1429'):
+		run_migration_guard(db)
+	db.execute('ROLLBACK TO SAVEPOINT clean')
+
+	db.execute(insert, (own_dataset, '../secrets.env'))
+	with pytest.raises(psycopg.errors.RaiseException, match='DT-1429'):
+		run_migration_guard(db)
