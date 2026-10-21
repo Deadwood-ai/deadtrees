@@ -31,6 +31,7 @@ import "./tooltip.css";
 import { useDatasetDetailsMap } from "../../hooks/useDatasetDetailsMapProvider";
 import { palette } from "../../theme/palette";
 import { transitionDatasetFeatureHover } from "./datasetFeatureHover";
+import { renderDatasetTooltipContent } from "./datasetTooltipContent";
 
 export type DatasetMapColorMode = "quality" | "labels" | "year" | "timeline";
 
@@ -476,15 +477,13 @@ const DatasetMapOL = ({
           }
           tooltip.setPosition(evt.coordinate);
 
-          const tooltipContent = `
-            <div class="tooltip-content">
-              <div>${hoveredFeature.get("title")} (${hoveredFeature.get("date")})</div>
-            </div>
-          `;
-
           const tooltipElement = tooltip.getElement();
           if (tooltipElement) {
-            tooltipElement.innerHTML = tooltipContent;
+            renderDatasetTooltipContent(
+              tooltipElement,
+              hoveredFeature.get("title"),
+              hoveredFeature.get("date"),
+            );
             tooltipElement.classList.remove("hidden");
           }
         } else {
