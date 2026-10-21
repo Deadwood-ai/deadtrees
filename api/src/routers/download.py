@@ -24,6 +24,7 @@ from api.src.download.downloads import (
 	create_consolidated_geopackage,
 	read_export_scope,
 )
+from api.src.access.dataset_files import inside
 from api.src.download.delivery import export_url
 from api.src.download.jobs import ExportKind, JobState, JobStatus, Manifest, PreparedFileJob
 from api.src.download.keys import (
@@ -151,6 +152,14 @@ async def get_accessible_dataset(
 		ortho_response = client.table(settings.orthos_table).select('*').eq('dataset_id', dataset_id).execute()
 		ortho = ortho_response.data[0] if ortho_response.data else None
 		return dataset, ortho
+
+
+def archive_file_for(ortho: dict) -> Path:
+	"""The ortho's original file. A stored file name that leads out of the archive folder is refused."""
+	path = inside(settings.archive_path, ortho['ortho_file_name'])
+	if path is None:
+		raise HTTPException(status_code=404, detail=f'Dataset <ID={ortho["dataset_id"]}> has no ortho file.')
+	return path
 
 
 def validate_user_and_limit(
@@ -334,10 +343,10 @@ async def download_dataset(
 	)
 	if not ortho:
 		raise HTTPException(status_code=404, detail=f'Dataset <ID={dataset_id_int}> has no ortho file.')
+	archive_file = archive_file_for(ortho)
 	record_download_request(user.id, [dataset_id_int], 'dataset')
 
 	def build(target: Path):
-		archive_file = (settings.archive_path / ortho['ortho_file_name']).resolve()
 		bundle_dataset(
 			str(target),
 			archive_file,
@@ -495,7 +504,7 @@ async def get_datasets_for_bundle(
 			metadata_response = client.table(settings.metadata_table).select('*').eq('dataset_id', dataset_id).execute()
 			metadata = metadata_response.data[0] if metadata_response.data else None
 
-			archive_file_path = str((settings.archive_path / ortho['ortho_file_name']).resolve())
+			archive_file_path = str(archive_file_for(ortho))
 			results.append((dataset, ortho, metadata, archive_file_path))
 
 	return results

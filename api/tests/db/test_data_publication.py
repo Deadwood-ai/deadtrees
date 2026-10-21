@@ -54,7 +54,8 @@ def test_datasets_for_publication(auth_token, test_user):
 					'version': 1,
 					'processing_runtime': 0.5,
 				}
-				client.table(settings.metadata_table).insert(metadata_data).execute()
+				with use_service_client() as service_client:
+					service_client.table(settings.metadata_table).insert(metadata_data).execute()
 
 				# Create status entry for each dataset
 				if i % 2 == 0:

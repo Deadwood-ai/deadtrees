@@ -1,5 +1,5 @@
 import pytest
-from shared.db import use_client, login
+from shared.db import use_client, use_service_client, login
 from shared.settings import settings
 from shared.models import LicenseEnum, PlatformEnum, DatasetAccessEnum
 from shared.testing.fixtures import (
@@ -52,8 +52,8 @@ def test_dataset_for_other_user(auth_token, test_user2):
 	dataset_id = None
 
 	try:
-		with use_client(auth_token) as client:
-			# Create dataset owned by test_user2
+		with use_service_client() as client:
+			# Users can only create their own datasets, so set up test_user2's dataset with the service role
 			dataset_data = {
 				'file_name': 'test-other-user-dataset.tif',
 				'user_id': test_user2,
@@ -73,7 +73,7 @@ def test_dataset_for_other_user(auth_token, test_user2):
 	finally:
 		# Cleanup
 		if dataset_id:
-			with use_client(auth_token) as client:
+			with use_service_client() as client:
 				client.table('v2_dataset_edit_history').delete().eq('dataset_id', dataset_id).execute()
 				client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()
 

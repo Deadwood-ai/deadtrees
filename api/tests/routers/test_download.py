@@ -183,7 +183,9 @@ def test_dataset_for_download(auth_token, data_directory, test_file, test_user):
 			'ortho_file_size': max(1, int((archive_path.stat().st_size / 1024 / 1024))),  # in MB
 			'ortho_upload_runtime': 0.1,
 		}
-		client.table(settings.orthos_table).insert(ortho_data).execute()
+		# Ortho rows are written by the processor only.
+		with use_service_client() as service_client:
+			service_client.table(settings.orthos_table).insert(ortho_data).execute()
 
 		# Create status entry
 		status_data = {
@@ -236,7 +238,9 @@ def private_test_dataset_for_download(auth_token, data_directory, test_file, tes
 			'ortho_file_size': max(1, int((archive_path.stat().st_size / 1024 / 1024))),
 			'ortho_upload_runtime': 0.1,
 		}
-		client.table(settings.orthos_table).insert(ortho_data).execute()
+		# Ortho rows are written by the processor only.
+		with use_service_client() as service_client:
+			service_client.table(settings.orthos_table).insert(ortho_data).execute()
 
 		status_data = {
 			'dataset_id': dataset_id,
@@ -286,7 +290,9 @@ def viewonly_test_dataset_for_download(auth_token, data_directory, test_file, te
 			'ortho_file_size': max(1, int((archive_path.stat().st_size / 1024 / 1024))),
 			'ortho_upload_runtime': 0.1,
 		}
-		client.table(settings.orthos_table).insert(ortho_data).execute()
+		# Ortho rows are written by the processor only.
+		with use_service_client() as service_client:
+			service_client.table(settings.orthos_table).insert(ortho_data).execute()
 
 		status_data = {
 			'dataset_id': dataset_id,
@@ -1500,7 +1506,7 @@ def test_single_dataset_bundle_metadata_includes_v2_metadata(auth_token, test_da
 		},
 	}
 
-	with use_client(auth_token) as db_client:
+	with use_service_client() as db_client:
 		db_client.table(settings.metadata_table).insert(metadata_data).execute()
 
 	try:
@@ -1803,7 +1809,8 @@ def test_download_datasets_with_different_licenses(auth_token, data_directory, t
 					'ortho_file_size': max(1, int((archive_path.stat().st_size / 1024 / 1024))),  # in MB
 					'ortho_upload_runtime': 0.1,
 				}
-				supabase_client.table(settings.orthos_table).insert(ortho_data).execute()
+				with use_service_client() as service_client:
+					service_client.table(settings.orthos_table).insert(ortho_data).execute()
 
 				# Create status entry
 				status_data = {
@@ -2540,7 +2547,8 @@ def multi_test_datasets(auth_token, data_directory, test_file, test_user):
 					'ortho_upload_runtime': 0.1,
 					'bbox': 'BOX(8.0 48.0, 9.0 49.0)',
 				}
-				supabase_client.table(settings.orthos_table).insert(ortho_data).execute()
+				with use_service_client() as service_client:
+					service_client.table(settings.orthos_table).insert(ortho_data).execute()
 
 				# Create status entry
 				status_data = {
@@ -2563,7 +2571,8 @@ def multi_test_datasets(auth_token, data_directory, test_file, test_user):
 						}
 					},
 				}
-				supabase_client.table(settings.metadata_table).insert(metadata_data).execute()
+				with use_service_client() as service_client:
+					service_client.table(settings.metadata_table).insert(metadata_data).execute()
 
 		yield created_datasets
 
