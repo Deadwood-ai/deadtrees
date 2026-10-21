@@ -108,7 +108,7 @@ export function useLoadGeometriesForEditing(labelId: number | undefined, layerTy
           geoJson.readGeometry(row.geometry, {
             dataProjection: "EPSG:4326",
             featureProjection: "EPSG:3857",
-          })
+          })!
         );
         // Store DB metadata on feature for save operation
         feature.set("geometry_id", row.id);

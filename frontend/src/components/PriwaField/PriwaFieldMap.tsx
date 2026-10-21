@@ -308,7 +308,7 @@ export default function PriwaFieldMap({
         duration: 500,
         maxZoom: 19,
         padding: getPriwaMapFitPadding(
-          map.getTargetElement(),
+          map.getTargetElement()!,
           isFieldLayoutRef.current,
         ),
       });
@@ -664,7 +664,7 @@ export default function PriwaFieldMap({
     fitPriwaWarnkarteLayer(
       map,
       layer,
-      getPriwaMapFitPadding(map.getTargetElement(), isFieldLayout),
+      getPriwaMapFitPadding(map.getTargetElement()!, isFieldLayout),
     );
   }, [isFieldLayout]);
 
@@ -691,7 +691,7 @@ export default function PriwaFieldMap({
 
         const zoom = 20;
         const resolution = view.getResolutionForZoom(zoom);
-        const mapRect = map.getTargetElement().getBoundingClientRect();
+        const mapRect = map.getTargetElement()!.getBoundingClientRect();
         const queueRect = document
           .querySelector<HTMLElement>("[data-priwa-review-queue-panel]")
           ?.getBoundingClientRect();

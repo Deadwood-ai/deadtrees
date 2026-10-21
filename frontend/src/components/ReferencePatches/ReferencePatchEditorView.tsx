@@ -91,7 +91,7 @@ export default function ReferencePatchEditorView({
       const aoiGeometry = geoJson.readGeometry(aoiData.geometry, {
         dataProjection: "EPSG:4326",
         featureProjection: "EPSG:3857",
-      });
+      })!;
       const aoiGeoJSON = geoJson.writeGeometryObject(aoiGeometry) as GeoJSON.Polygon | GeoJSON.MultiPolygon;
       const turfGeom =
         aoiGeoJSON.type === "Polygon"
@@ -337,7 +337,7 @@ export default function ReferencePatchEditorView({
               geoJson.readGeometry(g.geometry, {
                 dataProjection: "EPSG:4326", // Database stores in WGS84
                 featureProjection: "EPSG:3857", // Map uses Web Mercator
-              }),
+              })!,
             );
             feature.set("label_data", layerType);
             feature.set("patch_id", basePatch.id);

@@ -46,7 +46,7 @@ export default function MLTileUnifiedView({ dataset, onUnsavedChanges, isComplet
       const aoiGeometry = geoJson.readGeometry(aoiData.geometry, {
         dataProjection: "EPSG:4326",
         featureProjection: "EPSG:3857",
-      });
+      })!;
       const aoiGeoJSON = geoJson.writeGeometryObject(aoiGeometry) as GeoJSON.Polygon | GeoJSON.MultiPolygon;
       const turfGeom =
         aoiGeoJSON.type === "Polygon"

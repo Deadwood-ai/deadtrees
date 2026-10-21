@@ -573,7 +573,7 @@ export default function MLTileMap({
       const geometry = geoJsonFormatter.readGeometry(tile.geometry, {
         dataProjection: "EPSG:3857",
         featureProjection: "EPSG:3857",
-      });
+      })!;
       const extent = geometry.getExtent();
       const view = mapRef.current.getView();
 
