@@ -75,7 +75,7 @@ const createVectorLayer = (config: VectorLayerConfig) => {
           const format = vectorTile.getFormat();
 
           const features = format.readFeatures(uint8Array, {
-            extent: vectorTile.extent,
+            extent: vectorTile.extent!,
             featureProjection: "EPSG:3857",
           });
 

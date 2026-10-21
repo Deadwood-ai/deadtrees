@@ -77,7 +77,7 @@ export const applyOpenFreeMapLibertyStyle = async (target: LayerGroup) => {
           extent,
           resolution,
           projection,
-          tile.onLoad.bind(tile),
+          (features, dataProjection) => tile.onLoad(features, dataProjection!),
           tile.onError.bind(tile),
         );
       });

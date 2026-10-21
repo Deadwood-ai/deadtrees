@@ -141,7 +141,7 @@ describe("Liberty tile decoding", () => {
     tile.load();
 
     expect(tile.getState()).toBe(TileState.LOADED);
-    const [feature] = tile.getFeatures();
+    const [feature] = tile.getFeatures()!;
     expect(feature).toBeInstanceOf(Feature);
     expect(feature.getId()).toBe(7);
     expect(feature.get("mvt:layer")).toBe("landcover");

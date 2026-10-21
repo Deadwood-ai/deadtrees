@@ -753,7 +753,7 @@ export default function ReferencePatchMap({
 
           deadwoodGeoms.forEach((g, idx) => {
             try {
-              const feature = new Feature(geoJsonFormatter.readGeometry(g.geometry));
+              const feature = new Feature(geoJsonFormatter.readGeometry(g.geometry)!);
               source.addFeature(feature);
             } catch (e) {
               console.error(`Failed to parse deadwood geometry ${idx}:`, e, g.geometry);
@@ -806,7 +806,7 @@ export default function ReferencePatchMap({
 
           forestCoverGeoms.forEach((g, idx) => {
             try {
-              const feature = new Feature(geoJsonFormatter.readGeometry(g.geometry));
+              const feature = new Feature(geoJsonFormatter.readGeometry(g.geometry)!);
               source.addFeature(feature);
             } catch (e) {
               console.error(`Failed to parse forest cover geometry ${idx}:`, e, g.geometry);
@@ -940,7 +940,7 @@ export default function ReferencePatchMap({
       const geometry = geoJsonFormatter.readGeometry(webMercatorGeometry, {
         dataProjection: "EPSG:3857",
         featureProjection: "EPSG:3857",
-      });
+      })!;
       const extent = geometry.getExtent();
       const view = mapRef.current.getView();
 

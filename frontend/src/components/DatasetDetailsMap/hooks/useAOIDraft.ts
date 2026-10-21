@@ -68,7 +68,7 @@ export function useAOIDraft({ getSource, onChange }: UseAOIDraftOptions) {
 			const projectedGeometry = format.readGeometry(nextGeometry, {
 				dataProjection: "EPSG:4326",
 				featureProjection: "EPSG:3857",
-			});
+			})!;
 			source.addFeatures(
 				polygonParts(projectedGeometry).map((polygon) => new Feature<Geometry>(polygon.clone())),
 			);

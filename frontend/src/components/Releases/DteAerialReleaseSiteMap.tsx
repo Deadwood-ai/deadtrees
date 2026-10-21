@@ -118,7 +118,7 @@ export function DteAerialReleaseSiteMap({
       }
 
       hoveredFeature = nextFeature;
-      map.getTargetElement().style.cursor = nextFeature ? "pointer" : "";
+      map.getTargetElement()!.style.cursor = nextFeature ? "pointer" : "";
 
       if (!nextFeature) {
         tooltipOverlay.setPosition(undefined);

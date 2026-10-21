@@ -205,7 +205,7 @@ export default function usePolygonEditor({ mapRef }: UsePolygonEditorParams): Us
       const geometry = geoJsonFormatter.readGeometry(featureData.geometry, {
         dataProjection: "EPSG:3857",
         featureProjection: "EPSG:3857",
-      });
+      })!;
       const feature = new Feature(geometry);
       feature.set("label_data", featureData.properties.label_data);
       feature.set("patch_id", featureData.properties.patch_id);
@@ -263,7 +263,7 @@ export default function usePolygonEditor({ mapRef }: UsePolygonEditorParams): Us
     select.on("select", (evt) => {
       const clickedFeature = evt.selected.length > 0 ? evt.selected[0] : null;
       const wasSelected = evt.deselected.length > 0 ? evt.deselected[0] : null;
-      const shiftKey = evt.mapBrowserEvent.originalEvent.shiftKey;
+      const shiftKey = evt.mapBrowserEvent!.originalEvent.shiftKey;
       const currentSelection = selectedCollection.getArray();
 
       console.debug("[Selection] Click event:", {
