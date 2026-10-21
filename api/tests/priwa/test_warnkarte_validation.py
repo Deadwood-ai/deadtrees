@@ -237,6 +237,31 @@ def test_rejects_invalid_polygon_geometry(tmp_path):
 	assert error.value.code == 'INVALID_GEOMETRY'
 
 
+@pytest.mark.parametrize(
+	'content',
+	[
+		b'<OGRVRTDataSource><OGRVRTLayer name="x"><SrcDataSource>/vsicurl/http://127.0.0.1:9/x.geojson</SrcDataSource></OGRVRTLayer></OGRVRTDataSource>',
+		b'{"type": "FeatureCollection", "features": []}',
+		b'SQLite format 3\x00' + bytes(80),
+	],
+	ids=['vrt', 'geojson', 'plain-sqlite'],
+)
+def test_rejects_other_formats_before_gdal_opens_them(content, monkeypatch):
+	opened = []
+
+	def record_listlayers(path, *_args, **_kwargs):
+		opened.append(path)
+		raise ValueError('not opened')
+
+	monkeypatch.setattr(warnkarte_module.fiona, 'listlayers', record_listlayers)
+
+	with pytest.raises(WarnkarteValidationError) as error:
+		validate_warnkarte_file(BytesIO(content), 'warnkarte_2024-06-25.gpkg')
+
+	assert error.value.code == 'INVALID_GEOPACKAGE'
+	assert opened == [], 'GDAL must not open a file without a GeoPackage header'
+
+
 def test_representative_supplier_geopackage_when_available():
 	path = Path('.local/fixtures/warning_polygons_newSKs_trainAll_2024-06-25.gpkg')
 	if not path.exists():

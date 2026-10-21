@@ -189,6 +189,17 @@ def copy_and_hash(
 	return digest.hexdigest()
 
 
+# SQLite file header, then the GeoPackage application_id at byte 68 (GP10/GP11 are pre-1.2 files)
+SQLITE_HEADER = b'SQLite format 3\x00'
+GEOPACKAGE_APPLICATION_IDS = {b'GPKG', b'GP10', b'GP11'}
+
+
+def has_geopackage_header(path: Path) -> bool:
+	with path.open('rb') as source:
+		header = source.read(72)
+	return header.startswith(SQLITE_HEADER) and header[68:72] in GEOPACKAGE_APPLICATION_IDS
+
+
 def count_polygon_vertices(geometry) -> int:
 	return len(geometry.exterior.coords) + sum(len(interior.coords) for interior in geometry.interiors)
 
@@ -210,6 +221,13 @@ def validate_warnkarte_file(file_object: BinaryIO, filename: str | None) -> Vali
 				max_bytes=MAX_FILE_SIZE_BYTES,
 			)
 
+		# Only hand real GeoPackages to GDAL; other formats it can open may read remote URLs
+		if not has_geopackage_header(temporary_path):
+			raise WarnkarteValidationError(
+				'INVALID_GEOPACKAGE',
+				'Die Datei ist kein lesbares GeoPackage.',
+			)
+
 		try:
 			layers = fiona.listlayers(temporary_path)
 		except Exception as error:
@@ -227,7 +245,7 @@ def validate_warnkarte_file(file_object: BinaryIO, filename: str | None) -> Vali
 
 		layer_name = layers[0]
 		try:
-			with fiona.open(temporary_path, layer=layer_name) as collection:
+			with fiona.open(temporary_path, layer=layer_name, enabled_drivers=['GPKG']) as collection:
 				if collection.driver != 'GPKG':
 					raise WarnkarteValidationError(
 						'INVALID_GEOPACKAGE',
