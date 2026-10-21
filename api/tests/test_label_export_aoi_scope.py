@@ -3,10 +3,13 @@
 from contextlib import contextmanager
 from types import SimpleNamespace
 
+import json
+
 import fiona
 import geopandas as gpd
 
 from api.src.download import downloads
+from api.src.download.jobs import ExportKind, JobState, Manifest, PreparedFileJob
 from shared.models import Label, LabelDataEnum, LabelSourceEnum, LabelTypeEnum
 from shared.settings import settings
 
@@ -102,3 +105,16 @@ def test_export_skips_an_aoi_of_another_dataset(tmp_path, monkeypatch):
 
 	assert 'aoi_deadwood' not in fiona.listlayers(label_file)
 	assert len(gpd.read_file(label_file, layer='deadwood_visual_interpretation')) == 1
+
+
+def test_files_prepared_before_the_fix_are_no_longer_served(tmp_path):
+	job = PreparedFileJob(tmp_path / 'labels.gpkg')
+	assert job.claim()
+	job.run(lambda target: target.write_bytes(b'gpkg'), Manifest(ExportKind.LABELS, (1,)))
+	assert job.status().state == JobState.COMPLETED
+
+	payload = json.loads(job.manifest_path.read_text())
+	payload['version'] = 1
+	job.manifest_path.write_text(json.dumps(payload))
+
+	assert job.status().state != JobState.COMPLETED
