@@ -17,9 +17,9 @@ begin;
 
 set local lock_timeout = '5s';
 
--- Rows created before this change are not covered by the new policies. Stop here if
--- any ortho file name is a path or belongs to more than one dataset, so such rows are
--- reviewed before the API and the processor keep trusting them.
+-- Rows created before this change are not covered by the new policies. Every writer
+-- names the ortho <dataset id>_ortho.tif, so stop here if any row names another file,
+-- and review those rows before the API and the processor keep trusting them.
 do $$
 begin
 	if exists (
@@ -28,17 +28,9 @@ begin
 			union all
 			select ortho_file_name, dataset_id from public.v2_orthos_processed
 		) o
-		where o.ortho_file_name like '%/%' or position('..' in o.ortho_file_name) > 0
-	) or exists (
-		select 1 from (
-			select ortho_file_name, dataset_id from public.v2_orthos
-			union all
-			select ortho_file_name, dataset_id from public.v2_orthos_processed
-		) o
-		group by o.ortho_file_name
-		having count(distinct o.dataset_id) > 1
+		where o.ortho_file_name is distinct from o.dataset_id::text || '_ortho.tif'
 	) then
-		raise exception 'DT-1429: ortho file names must be plain and unique per dataset; review the rows from the DT-1429 audit query first';
+		raise exception 'DT-1429: ortho file names must be <dataset id>_ortho.tif; review the rows from the DT-1429 audit query first';
 	end if;
 end
 $$;
@@ -47,6 +39,32 @@ drop policy if exists "Enable insert for authenticated users only" on public.v2_
 create policy "Users create their own datasets"
 on public.v2_datasets for insert to authenticated
 with check (user_id = (select auth.uid()));
+
+-- Files stay on disk when a dataset row is deleted, and they are found by dataset id.
+-- So users never choose or change a dataset id: their inserts always get a new one.
+create or replace function public.v2_datasets_keep_ids()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+	if tg_op = 'INSERT' then
+		if current_user = 'authenticated' then
+			new.id := nextval(pg_get_serial_sequence('public.v2_datasets', 'id'));
+		end if;
+	elsif new.id is distinct from old.id then
+		raise exception 'Dataset ids cannot change';
+	end if;
+	return new;
+end;
+$$;
+
+revoke execute on function public.v2_datasets_keep_ids() from public, anon, authenticated;
+
+drop trigger if exists v2_datasets_keep_ids on public.v2_datasets;
+create trigger v2_datasets_keep_ids
+before insert or update of id on public.v2_datasets
+for each row execute function public.v2_datasets_keep_ids();
 
 drop policy if exists "Enable insert for authenticated users only" on public.v2_raw_images;
 create policy "Owners and the processor create raw image rows"

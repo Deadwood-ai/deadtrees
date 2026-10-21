@@ -150,18 +150,39 @@ def run_migration_guard(db):
 	('table', 'insert'),
 	[('v2_orthos', INSERT_ORTHO), ('v2_orthos_processed', INSERT_PROCESSED_ORTHO)],
 )
-def test_migration_stops_on_rows_planted_before_it(db, table, insert):
+@pytest.mark.parametrize('planted_name', ['{other}_ortho.tif', '../secrets.env', 'renamed.tif'])
+def test_migration_stops_on_rows_planted_before_it(db, table, insert, planted_name):
 	owner, other = create_user(db), create_user(db)
 	own_dataset, other_dataset = create_dataset(db, owner), create_dataset(db, other)
 	as_admin(db)
-	db.execute(insert, (other_dataset, f'{other_dataset}_ortho.tif'))
-	db.execute('SAVEPOINT clean')
+	# The other dataset has no ortho row yet, so the planted name is not shared.
+	db.execute(insert, (own_dataset, planted_name.format(other=other_dataset)))
 
-	db.execute(insert, (own_dataset, f'{other_dataset}_ortho.tif'))
 	with pytest.raises(psycopg.errors.RaiseException, match='DT-1429'):
 		run_migration_guard(db)
-	db.execute('ROLLBACK TO SAVEPOINT clean')
 
-	db.execute(insert, (own_dataset, '../secrets.env'))
-	with pytest.raises(psycopg.errors.RaiseException, match='DT-1429'):
-		run_migration_guard(db)
+
+def test_users_never_choose_or_change_a_dataset_id(db):
+	owner = create_user(db)
+	free_id = db.execute('SELECT max(id) + 1000 FROM public.v2_datasets').fetchone()[0] or 1000
+	existing = create_dataset(db, owner)
+
+	act_as(db, owner)
+	new_id = db.execute(
+		'INSERT INTO public.v2_datasets(id,user_id,file_name,license,platform,data_access) '
+		"VALUES (%s,%s,'mine.tif','CC BY','drone','public') RETURNING id",
+		(free_id, owner),
+	).fetchone()[0]
+	assert new_id != free_id
+
+	db.execute('SAVEPOINT change_id')
+	with pytest.raises(psycopg.errors.RaiseException, match='Dataset ids cannot change'):
+		db.execute('UPDATE public.v2_datasets SET id = %s WHERE id = %s', (free_id, existing))
+	db.execute('ROLLBACK TO SAVEPOINT change_id')
+
+	as_admin(db)
+	assert db.execute(
+		'INSERT INTO public.v2_datasets(id,user_id,file_name,license,platform,data_access) '
+		"VALUES (%s,%s,'admin.tif','CC BY','drone','public') RETURNING id",
+		(free_id, owner),
+	).fetchone()[0] == free_id
