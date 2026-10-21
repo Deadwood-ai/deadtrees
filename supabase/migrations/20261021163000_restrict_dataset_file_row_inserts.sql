@@ -19,7 +19,10 @@ set local lock_timeout = '5s';
 
 -- Rows created before this change are not covered by the new policies. Every writer
 -- names the ortho <dataset id>_ortho.tif, so stop here if any row names another file,
--- and review those rows before the API and the processor keep trusting them.
+-- and review those rows before the API and the processor keep trusting them. The lock
+-- waits for writes still in progress and holds new ones until this migration commits.
+lock table public.v2_orthos, public.v2_orthos_processed in share row exclusive mode;
+
 do $$
 begin
 	if exists (
