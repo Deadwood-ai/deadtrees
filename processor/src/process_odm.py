@@ -1,4 +1,5 @@
 import json
+import posixpath
 import zipfile
 import docker
 import requests
@@ -22,6 +23,7 @@ from processor.src.utils.ssh import (
 	pull_file_from_storage_server,
 	push_file_to_storage_server,
 	check_file_exists_on_storage,
+	storage_server_path,
 )
 from processor.src.utils.shared_volume import (
 	copy_files_to_shared_volume,
@@ -342,15 +344,16 @@ def _check_photos_for_odm(
 		)
 
 
-def require_own_raw_images_zip(remote_zip_path: str, dataset_id: int) -> None:
+def require_own_raw_images_zip(remote_zip_path: str, dataset_id: int) -> str:
 	"""The upload stores a dataset's images as <raw images folder>/<dataset id>.zip.
 
-	The path comes from a row the uploader writes, so never pull another dataset's
-	zip or any other file from the storage server through it (DT-1429).
+	The path comes from a row the uploader writes, so pull only that exact file below
+	the configured storage root, never another dataset's zip or any other file (DT-1429).
 	"""
-	path = Path(remote_zip_path)
-	if path.name != f'{dataset_id}.zip' or path.parent.name != settings.RAW_IMAGES_DIR or '..' in path.parts:
+	own_zip = storage_server_path(settings.RAW_IMAGES_DIR, f'{dataset_id}.zip')
+	if posixpath.normpath(remote_zip_path) != posixpath.normpath(own_zip) or '..' in remote_zip_path:
 		raise ValueError(f'Raw images path of dataset {dataset_id} is not its own upload: {remote_zip_path}')
+	return own_zip
 
 
 def process_odm(task: QueueTask, temp_dir: Path):
@@ -395,8 +398,7 @@ def process_odm(task: QueueTask, temp_dir: Path):
 			if not response.data:
 				raise Exception(f'No raw_images entry found for dataset {dataset_id}')
 
-			remote_zip_path = response.data[0]['raw_images_path']
-			require_own_raw_images_zip(remote_zip_path, dataset_id)
+			remote_zip_path = require_own_raw_images_zip(response.data[0]['raw_images_path'], dataset_id)
 			logger.info(
 				f'Found raw_images_path in database: {remote_zip_path}',
 				LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
