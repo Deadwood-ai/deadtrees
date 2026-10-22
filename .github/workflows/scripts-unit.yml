@@ -6,6 +6,7 @@ on:
       - "scripts/tests/**"
       - "scripts/*.sh"
       - "scripts/*.py"
+      - "scripts/security_stack.toml"
       - "scripts/lib/**"
       - "scripts/backup/**"
       - "scripts/platform_monitor/**"
