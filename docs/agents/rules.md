@@ -25,6 +25,8 @@ patterns. Preserve that assumption when changing processor or storage code.
 - Work locally or in a dev checkout first.
 - Open a normal PR when asked. Do not create draft PRs in this workspace.
 - Production deployment is merge-driven from `main`.
+- Do not merge while the latest `main` run of the migrate
+  (`supabase-migrate-on-merge.yml`) or deploy job is red; fix or rerun it first.
 - Do not add PR-time workflows that mutate production services or the production DB.
 - Do not edit `/home/jj1049/prod/deadtrees` directly unless the user explicitly asks
   for a manual production operation.

@@ -158,7 +158,10 @@ Only requeue after approval.
   standardized local ortho.
 - Avoid legacy replacement stages (`deadwood_v1`, `treecover_v1`) on datasets
   that may have audit edits or geometry corrections.
-- Prefer API-based requeue with a processor token over direct production SQL.
+- Prefer API-based requeue with a processor token over direct production SQL:
+  `scripts/requeue_datasets_via_api.py --env-file ~/.config/deadtrees/requeue.env`.
+  Always pass `--env-file`: the default `.env` is a checkout's own file, which
+  agents must not use. Never print or copy `requeue.env`.
 - Record exactly which dataset IDs and task types were changed.
 
 ## Report Shape

@@ -239,9 +239,10 @@ this migration.
 The production cutover on 12 August 2026 retained the existing
 `remote-backup`-owned shared reverse socket while the least-privilege transport
 remains uninstalled. That tunnel had previously stayed active at the systemd
-level while its remote socket refused a nightly archive connection. Until
-2 September 2026, use the explicitly versioned holiday wrapper and lifecycle
-helper. They preserve the proven live `stream-local` forced-command contract without
+level while its remote socket refused a nightly archive connection. The
+explicitly versioned holiday wrapper and lifecycle helper were meant to end on
+2 September 2026 but are still the nightly default; DT-1402 tracks retiring
+them. Until then, use them. They preserve the proven live `stream-local` forced-command contract without
 weakening or overloading the future dedicated-transport helpers. The holiday
 wrapper refreshes the tunnel while holding the database lock immediately before
 every archive attempt. This is the authoritative readiness check: the subsequent
@@ -292,7 +293,7 @@ provide the end-to-end result.
 
 This is a time-limited reliability guard, not security hardening. It does not
 change the shared socket permissions or replace the dedicated transport design
-documented above. Review and remove the 01:50 cron entry after 2 September 2026,
+documented above. Review and remove the 01:50 cron entry when DT-1402 retires the holiday path,
 then remove the helper after confirming the normal nightly path remains healthy.
 Remove this guard before installing the dedicated tunnel identity and unit.
 
