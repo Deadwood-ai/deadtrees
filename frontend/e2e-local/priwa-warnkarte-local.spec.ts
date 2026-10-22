@@ -35,6 +35,7 @@ async function installWarnkarteAdmin(page: Page) {
     user: admin,
     supabaseUrl: localSupabaseUrl,
     refreshToken: "priwa-warnkarte-refresh-token",
+    acceptCookies: true,
   });
 
   // Keep the mocked journey independent from the worktree's generated
@@ -622,7 +623,6 @@ test.describe("PRIWA Warnkarte local UI", () => {
     await installWarnkarteAdmin(page);
     await installWarnkarteApi(page);
     await page.goto("/priwa-field");
-    await page.getByRole("button", { name: "Accept" }).click();
 
     await expect(page.getByTestId("priwa-warnkarte-legend")).toHaveCount(0);
     await expect(
@@ -760,7 +760,6 @@ test.describe("PRIWA Warnkarte local UI", () => {
       }),
     );
     await page.goto("/priwa-field");
-    await page.getByRole("button", { name: "Accept" }).click();
 
     const errorMessage = page.getByText(
       "Warnkarte konnte nicht geladen werden",
