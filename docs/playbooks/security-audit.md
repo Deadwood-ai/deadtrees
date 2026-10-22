@@ -17,7 +17,7 @@ The workflow runs:
 - **npm audit** on `frontend/package-lock.json`.
 - **zizmor** on `.github/workflows`. These findings are listed only and never turn the run red.
 - **Trivy** on the pinned GDAL base image (OS packages, high and critical). This is skipped on PRs.
-- **CISA KEV:** the catalog of known exploited vulnerabilities is cross-checked against every finding above. In scheduled runs it is also checked against `[[stack]]` in `scripts/security_stack.toml`, which covers the software the scans can't see (kernel, nginx, Kong, Postgres, Docker and so on).
+- **CISA KEV:** the catalog of known exploited vulnerabilities is cross-checked against the Python and image findings. npm audit only gives GHSA ids, so npm findings can't be matched. In scheduled runs it is also checked against `[[stack]]` in `scripts/security_stack.toml`, which covers the software the scans can't see (kernel, nginx, Kong, Postgres, Docker and so on).
 
 `scripts/security_audit.py` turns the scanner JSON into the run summary.
 
@@ -25,11 +25,11 @@ The workflow runs:
 
 A run is red when something needs a decision:
 
-- a finding is on the CISA KEV list, even if it is accepted
+- a Python or image finding is on the CISA KEV list, even if it is accepted
 - a Python advisory is not accepted in `scripts/security_stack.toml`
 - an npm high or critical advisory is not accepted
-- an accepted risk is past its `review_by` date
-- in scheduled runs: a KEV entry for our stack was added in the last 7 days (each such entry stays red for 7 days)
+- an accepted risk is past its `review_by` date (its findings count as new again)
+- in scheduled runs: a KEV entry for our stack was added in the last 7 days (each such entry stays red for 7 days, unless its CVE is added to an `[[accepted]]` entry's `ids` once it has been checked)
 
 A scan that failed or is missing makes the run fail as `INCOMPLETE`. Unknown is not a pass.
 
@@ -42,7 +42,7 @@ Accepting a risk is a security decision, so Janusch decides it. Add an `[[accept
 - `reason`
 - a Linear `issue`
 - a `review_by` date
-- either `ids` (advisory, CVE or GHSA ids) or `version` (every advisory for that exact package version, for held packages like torch)
+- either `ids` (advisory, CVE or GHSA ids; the only option for npm) or `package` and `version` (every advisory for that version of a held package, with `4.*` matching any 4.x)
 
 ## Claude routine
 

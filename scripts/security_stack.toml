@@ -8,9 +8,11 @@
 #
 # [[accepted]] lists findings we decided to live with. Each needs a reason, a
 # Linear issue and a review date; after `review_by` the finding is red again.
-# Use `ids` (advisory, CVE or GHSA ids) for single advisories, or `version` to
-# accept every advisory for that exact package version (held packages).
-# A finding that is also on the CISA KEV list is always red.
+# Use `ids` (advisory, CVE or GHSA ids) for single advisories, or `package` and
+# `version` to accept every advisory for that version of a held Python or image
+# package (`4.*` matches any 4.x). npm findings can only be accepted by `ids`.
+# A CVE in `ids` also acknowledges a [[stack]] KEV hit once it was checked.
+# A Python or image finding that is also on the CISA KEV list is always red.
 
 [[stack]]
 name = 'Linux kernel (Ubuntu 24.04)'
@@ -86,7 +88,7 @@ review_by = '2027-01-31'
 
 [[accepted]]
 package = 'transformers'
-version = '4.57.6'
+version = '4.*'
 reason = 'Held below 5: transformers 5 renames SegFormer state-dict keys and breaks the AOI and combined-model checkpoints. We load only our own checkpoints.'
 issue = 'DT-859'
 review_by = '2027-01-31'

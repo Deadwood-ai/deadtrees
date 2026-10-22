@@ -169,6 +169,34 @@ class ClassifyTest(unittest.TestCase):
 		self.assertEqual(finding.ids, {'PYSEC-5', 'CVE-A', 'GHSA-B'})
 		self.assertEqual(finding.fix, '2.7.0')
 
+	def test_expired_acceptance_makes_its_findings_red_again(self):
+		config = {**CONFIG, 'accepted': [{**CONFIG['accepted'][0], 'review_by': '2026-10-01'}]}
+
+		report = classify(security_audit.parse_pip_audit(pip_result('torch', '2.6.0', 'PYSEC-6'), 'api'), config=config)
+
+		self.assertEqual([f.advisory for f in report.findings if f.red], ['PYSEC-6'])
+
+	def test_wildcard_version_accepts_the_held_major(self):
+		config = {**CONFIG, 'accepted': [{**CONFIG['accepted'][0], 'package': 'transformers', 'version': '4.*'}]}
+		findings = security_audit.parse_pip_audit(pip_result('transformers', '4.58.1', 'PYSEC-7'), 'processor')
+		findings += security_audit.parse_pip_audit(pip_result('transformers', '5.0.0', 'PYSEC-8'), 'api')
+
+		report = classify(findings, config=config)
+
+		self.assertEqual([f.advisory for f in report.findings if f.red], ['PYSEC-8'])
+
+	def test_acknowledged_stack_hit_is_not_reported(self):
+		config = {**CONFIG, 'accepted': [{**CONFIG['accepted'][1], 'ids': ['CVE-NEW']}]}
+
+		report = classify([], kev(kev_entry('CVE-NEW', '2026-10-20')), config=config, stack_watch=True)
+
+		self.assertEqual(report.stack_hits, [])
+
+	def test_stack_window_covers_exactly_the_last_seven_days(self):
+		data = kev(kev_entry('CVE-DAY7', '2026-10-16'), kev_entry('CVE-DAY8', '2026-10-15'))
+
+		self.assertEqual([hit['cveID'] for hit in classify([], data, stack_watch=True).stack_hits], ['CVE-DAY7'])
+
 
 class ZizmorTest(unittest.TestCase):
 	def test_primary_location_gives_file_and_line(self):
@@ -261,7 +289,19 @@ class MainTest(unittest.TestCase):
 
 
 class StackConfigTest(unittest.TestCase):
+	def test_invalid_entries_are_reported(self):
+		errors = security_audit.validate_config(
+			{'stack': [{'name': 'x', 'kev': '('}], 'accepted': [{'package': 'torch', 'reason': 'r', 'issue': 'DT-1'}]}
+		)
+
+		self.assertEqual(len(errors), 4, errors)
+
 	def test_repo_config_is_valid(self):
+		self.assertEqual(
+			security_audit.validate_config(tomllib.loads((REPO_ROOT / 'scripts/security_stack.toml').read_text())), []
+		)
+
+	def test_repo_config_has_stack_entries(self):
 		config = tomllib.loads((REPO_ROOT / 'scripts/security_stack.toml').read_text())
 
 		self.assertTrue(config['stack'])

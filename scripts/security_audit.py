@@ -7,12 +7,14 @@ with the CISA Known Exploited Vulnerabilities feed and
 scripts/security_stack.toml, prints a Markdown report and exits 1 when
 something needs a decision:
 
-- any scanned finding (Python, npm or base image) that is on the KEV list
+- a Python or base-image finding that is on the KEV list (npm audit only
+  gives GHSA ids, so npm findings can't be matched)
 - a Python advisory that is not accepted in security_stack.toml
 - an npm high or critical advisory that is not accepted
 - an accepted finding whose review date has passed
 - with --stack-watch: a KEV entry added in the last --kev-window-days days
-  that matches a [[stack]] entry (software the scans cannot see)
+  that matches a [[stack]] entry (software the scans cannot see), unless its
+  CVE is listed in an [[accepted]] entry's ids
 
 Workflow findings (zizmor) and image findings without a KEV match are listed
 but never turn the run red. Standard library only.
@@ -115,7 +117,8 @@ def parse_npm_audit(data: dict, target: str) -> list[Finding]:
 			findings[key] = Finding(
 				source='npm',
 				package=key[0],
-				version=via.get('range', ''),
+				# npm audit has no installed version; this is the affected range.
+				version=f'affected {via.get("range", "?")}',
 				advisory=advisory,
 				severity=via.get('severity', 'unknown'),
 				fix=fix_text,
@@ -174,21 +177,52 @@ def accepted_entry(finding: Finding, accepted: list[dict]) -> dict | None:
 		if (
 			entry.get('version')
 			and entry.get('package', '').lower() == finding.package.lower()
-			and entry['version'] == finding.version
+			and version_matches(entry['version'], finding.version)
 		):
 			return entry
 	return None
 
 
+def version_matches(pattern: str, version: str) -> bool:
+	"""Exact version, or a prefix ending in '*' (for example '4.*' for a package held below 5)."""
+	if pattern.endswith('*'):
+		return version.startswith(pattern[:-1])
+	return pattern == version
+
+
+def validate_config(config: dict) -> list[str]:
+	errors = []
+	for item in config.get('stack', []):
+		if not item.get('name') or not item.get('kev'):
+			errors.append(f'[[stack]] entry needs name and kev: {item}')
+			continue
+		try:
+			re.compile(item['kev'])
+		except re.error as exc:
+			errors.append(f'[[stack]] {item["name"]}: bad kev pattern ({exc})')
+	for entry in config.get('accepted', []):
+		label = entry.get('package') or entry.get('ids')
+		if not (entry.get('reason') and entry.get('issue') and entry.get('review_by')):
+			errors.append(f'[[accepted]] {label}: needs reason, issue and review_by')
+		if not (entry.get('ids') or (entry.get('package') and entry.get('version'))):
+			errors.append(f'[[accepted]] {label}: needs ids, or package and version')
+		try:
+			dt.date.fromisoformat(str(entry.get('review_by')))
+		except ValueError:
+			errors.append(f'[[accepted]] {label}: review_by must be a YYYY-MM-DD date')
+	return errors
+
+
 def classify(report: Report, kev: dict | None, config: dict, today: dt.date, stack_watch: bool, window_days: int):
 	kev_entries = (kev or {}).get('vulnerabilities', [])
 	kev_ids = {entry['cveID'] for entry in kev_entries}
-	accepted = config.get('accepted', [])
-
-	for entry in accepted:
-		review_by = dt.date.fromisoformat(str(entry['review_by']))
-		if review_by < today:
+	accepted = []
+	for entry in config.get('accepted', []):
+		if dt.date.fromisoformat(str(entry['review_by'])) < today:
 			report.expired.append(entry)
+		else:
+			accepted.append(entry)
+	acknowledged_ids = {advisory for entry in accepted for advisory in entry.get('ids', [])}
 
 	for finding in report.findings:
 		if finding.ids & kev_ids:
@@ -206,10 +240,9 @@ def classify(report: Report, kev: dict | None, config: dict, today: dt.date, sta
 			finding.reasons.append(f'npm {finding.severity}')
 
 	if stack_watch:
-		since = today - dt.timedelta(days=window_days)
+		cutoff = today - dt.timedelta(days=window_days)
 		for entry in kev_entries:
-			added = dt.date.fromisoformat(entry['dateAdded'])
-			if added < since:
+			if dt.date.fromisoformat(entry['dateAdded']) <= cutoff or entry['cveID'] in acknowledged_ids:
 				continue
 			label = f'{entry["vendorProject"]} {entry["product"]}'
 			for item in config.get('stack', []):
@@ -364,6 +397,10 @@ def main(argv: list[str] | None = None) -> int:
 	args = parser.parse_args(argv)
 
 	config = tomllib.loads(args.config.read_text(encoding='utf-8'))
+	errors = validate_config(config)
+	if errors:
+		print(f'Invalid {args.config}:', *errors, sep='\n- ', file=sys.stderr)
+		return 2
 	kev = load_json(args.kev) if args.kev and args.kev.exists() else None
 	report = build_report(args.results, set(args.skip))
 	if kev is None:
