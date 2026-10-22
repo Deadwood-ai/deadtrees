@@ -95,6 +95,18 @@ full style gate. It checks `E9,F63,F7,F82` across Python surfaces so CI catches
 syntax errors, invalid control-flow patterns, and undefined names without first
 requiring cleanup of the wider existing Ruff debt.
 
+In a Claude Code cloud session, run `scripts/setup-cloud.sh session` once before
+the QA gate or API tests: it starts Docker and fills in missing dependencies.
+The cloud environment's Setup script runs `scripts/setup-cloud.sh` to install
+the tools ahead of time. Cloud VMs differ from the hosts in three ways, which
+these scripts handle when `CLAUDE_CODE_REMOTE=true`: public.ecr.aws and Docker
+Hub rate-limit the shared egress (Supabase images come from ghcr.io, Docker
+uses the mirror.gcr.io mirror), the kernel has no IPv6
+(Realtime schema init is skipped, test nginx listens on IPv4 only), and egress
+TLS is intercepted (the `api-test` build trusts the VM's proxy CA through a
+generated compose override in `.local/cloud`). The first gate run in a session
+pulls and builds images, which takes about 6 extra minutes.
+
 ## Data Factory Coverage
 
 Each base product action from `docs/analytics/deadtrees-data-factory.md`

@@ -162,6 +162,12 @@ admin_email = "qa-local@deadtrees.local"
 sender_name = "DeadTrees Local QA"
 EOF
 
+	if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]]; then
+		# Claude cloud VM kernels have no IPv6 and Realtime only listens on inet6.
+		# The light stack excludes Realtime anyway, so skip its schema init too.
+		sed -i '/^\[realtime\]/,/^enabled/s/^enabled = true/enabled = false/' "$SUPABASE_DIR/config.toml"
+	fi
+
 	cat > "$ENV_FILE" <<EOF
 DEADTREES_ISOLATED_ENV_FILE=$ENV_FILE
 DEADTREES_ISOLATED_SLUG=$SLUG
@@ -199,6 +205,9 @@ NGINX_COG_URL=http://localhost:$PORT_NGINX_HTTP/cogs/v1
 COMPOSE_PROJECT_NAME=deadtrees-test-$SLUG
 COMPOSE_NETWORK_NAME=deadwood_network_$SLUG
 EOF
+	if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]]; then
+		printf 'COMPOSE_FILE=%s\n' "$("$REPO_ROOT/scripts/setup-cloud.sh" compose-override)" >> "$ENV_FILE"
+	fi
 	ln -sfn "$ENV_FILE" "$CURRENT_ENV_FILE"
 
 	# Plain `docker compose` reads the repo .env; point it at this worktree's project and
@@ -225,6 +234,11 @@ case "$COMMAND" in
 		;;
 	start)
 		render
+		if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]]; then
+			# Claude cloud VMs share egress: public.ecr.aws answers "Data limit
+			# exceeded" and Docker Hub 429, so pull Supabase images from ghcr.io.
+			export SUPABASE_INTERNAL_IMAGE_REGISTRY="${SUPABASE_INTERNAL_IMAGE_REGISTRY:-ghcr.io}"
+		fi
 		supabase start --workdir "$WORKDIR" -x "$EXCLUDE"
 		;;
 	stop)
