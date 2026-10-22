@@ -1,0 +1,99 @@
+# Inputs for scripts/security_audit.py (.github/workflows/security-audit.yml).
+#
+# [[stack]] lists software we run that the dependency and image scans cannot
+# see (servers, databases, proxies). A CISA Known Exploited Vulnerabilities
+# entry whose "vendorProject product" matches `kev` and that was added in the
+# last few days turns the daily run red. Keep `runs` and `version` current when
+# a host is patched; they are only shown in the report.
+#
+# [[accepted]] lists findings we decided to live with. Each needs a reason, a
+# Linear issue and a review date; after `review_by` the finding is red again.
+# Use `ids` (advisory, CVE or GHSA ids) for single advisories, or `version` to
+# accept every advisory for that exact package version (held packages).
+# A finding that is also on the CISA KEV list is always red.
+
+[[stack]]
+name = 'Linux kernel (Ubuntu 24.04)'
+runs = 'all hosts'
+version = '6.8.0-86 on processing server (2026-10-22)'
+kev = '^Linux Kernel$'
+
+[[stack]]
+name = 'Ubuntu base packages'
+runs = 'all hosts and the GDAL base image'
+kev = '^(OpenSSL|OpenBSD OpenSSH|OpenSSH|Sudo|Red Hat Polkit|GNU|Git Git|Haxx curl|curl|systemd)'
+
+[[stack]]
+name = 'nginx'
+runs = 'storage/API server'
+version = '1.24.0-2ubuntu7.18'
+kev = 'nginx'
+
+[[stack]]
+name = 'Kong (Supabase gateway)'
+runs = 'storage/API server'
+version = '2.8.1 (EOL)'
+kev = '\bKong\b'
+
+[[stack]]
+name = 'Supabase services'
+runs = 'storage/API server'
+kev = 'Supabase|PostgREST|GoTrue'
+
+[[stack]]
+name = 'PostgreSQL'
+runs = 'storage/API server'
+version = '15.8'
+kev = 'PostgreSQL'
+
+[[stack]]
+name = 'Docker, containerd, runc'
+runs = 'all hosts'
+kev = 'Docker|Moby|containerd|runc'
+
+[[stack]]
+name = 'Starlette, FastAPI, Uvicorn'
+runs = 'API container'
+kev = 'Starlette|FastAPI|Uvicorn'
+
+[[stack]]
+name = 'GDAL'
+runs = 'API and processor images'
+version = '3.10.3'
+kev = 'GDAL|OSGeo'
+
+[[stack]]
+name = 'Python and PyTorch'
+runs = 'API and processor images'
+kev = 'Python Software Foundation|CPython|PyTorch'
+
+[[stack]]
+name = 'Node.js, Vite, React'
+runs = 'frontend build'
+kev = 'Node\.?js|\bVite|\bReact\b'
+
+[[stack]]
+name = 'GitHub Actions'
+runs = 'CI'
+kev = 'GitHub Action'
+
+[[accepted]]
+package = 'torch'
+version = '2.6.0'
+reason = 'Held pair with torchvision 0.21; the fixed releases need a new CUDA wheel index and model validation on the GPU processor. Production loads safetensors or our own weights.'
+issue = 'DT-859'
+review_by = '2027-01-31'
+
+[[accepted]]
+package = 'transformers'
+version = '4.57.6'
+reason = 'Held below 5: transformers 5 renames SegFormer state-dict keys and breaks the AOI and combined-model checkpoints. We load only our own checkpoints.'
+issue = 'DT-859'
+review_by = '2027-01-31'
+
+[[accepted]]
+package = 'tailwindcss'
+ids = ['GHSA-vfj7-8cjw-p6xm', 'GHSA-rj75-hqrm-r3gf']
+reason = 'Build-time only (braces and postcss-selector-parser under Tailwind 3); fixed by the Tailwind 4 migration.'
+issue = 'DT-1433'
+review_by = '2027-01-31'

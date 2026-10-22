@@ -1,0 +1,109 @@
+name: Security Audit
+
+# Daily dependency, base-image and workflow audit plus a check of the CISA
+# Known Exploited Vulnerabilities list against scripts/security_stack.toml.
+# Red means a finding needs a decision; see docs/playbooks/security-audit.md.
+
+on:
+  schedule:
+    # 03:17 UTC = 05:17 Berlin in summer, 04:17 in winter.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "api/requirements.txt"
+      - "processor/requirements.txt"
+      - "freidata/requirements.txt"
+      - "scripts/requirements-analyst.txt"
+      - "deadtrees-cli/setup.py"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "scripts/security_audit.py"
+      - "scripts/security_stack.toml"
+      - ".github/workflows/security-audit.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  RESULTS: ${{ github.workspace }}/.security-audit
+  # Pinned by digest; 0.75.0 was released 2026-10-01.
+  TRIVY_IMAGE: aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
+  KEV_URL: https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json
+
+jobs:
+  security-audit:
+    name: security-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install audit tools
+        run: python -m pip install pip-audit==2.10.1 zizmor==1.30.1 uv==0.12.23
+
+      # Most Python requirements are unpinned, so resolve each file the way a
+      # rebuild today would (Python 3.12 on linux x86_64, as in the GDAL image)
+      # and audit that exact set.
+      - name: Audit Python dependencies
+        run: |
+          mkdir -p "$RESULTS"
+          audit() {
+            local name="$1" source="$2"
+            if uv pip compile --quiet --python-version 3.12 --python-platform x86_64-manylinux_2_28 \
+              "$source" -o "$RUNNER_TEMP/$name.txt"; then
+              pip-audit -r "$RUNNER_TEMP/$name.txt" --no-deps --disable-pip --progress-spinner off \
+                --format json -o "$RESULTS/pip-$name.json" || true
+            fi
+            if ! python -c 'import json, sys; json.load(open(sys.argv[1]))' "$RESULTS/pip-$name.json" 2>/dev/null; then
+              rm -f "$RESULTS/pip-$name.json"
+              echo "python $name" >> "$RESULTS/missing.txt"
+            fi
+          }
+          audit api api/requirements.txt
+          audit processor processor/requirements.txt
+          audit freidata freidata/requirements.txt
+          audit scripts scripts/requirements-analyst.txt
+          audit cli deadtrees-cli/setup.py
+
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm audit --package-lock-only --json > "$RESULTS/npm-frontend.json" || true
+
+      - name: Audit workflows
+        run: zizmor --offline --format json .github/workflows > "$RESULTS/zizmor.json" || true
+
+      # The base image only changes through Dependabot, so PRs skip this pull.
+      - name: Scan GDAL base image
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          image="$(grep -m1 -oP '^FROM \K\S+' api/Dockerfile)"
+          echo "Scanning $image"
+          docker run --rm -v "$RESULTS:/out" "$TRIVY_IMAGE" image --quiet --scanners vuln \
+            --severity HIGH,CRITICAL --format json --output /out/trivy-base-image.json "$image" \
+            || echo image >> "$RESULTS/missing.txt"
+
+      - name: Download CISA KEV catalog
+        run: curl -fsSL --retry 3 -o "$RUNNER_TEMP/kev.json" "$KEV_URL" || true
+
+      - name: Summarize
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          args=(--kev "$RUNNER_TEMP/kev.json" --summary "$GITHUB_STEP_SUMMARY" --json "$RESULTS/red.json")
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            args+=(--skip image)
+          else
+            args+=(--stack-watch)
+          fi
+          python scripts/security_audit.py "$RESULTS" "${args[@]}"
