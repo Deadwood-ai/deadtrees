@@ -156,7 +156,7 @@ configure_docker_mirror() {
     return 0
   fi
   as_root mkdir -p /etc/docker
-  python3 - "$config" <<'PY' | as_root tee "$config.tmp" >/dev/null
+  python3 - "$config" <<'PY' | as_root tee "$config.tmp" >/dev/null || true
 import json
 import sys
 from pathlib import Path
@@ -166,8 +166,17 @@ config = json.loads(path.read_text()) if path.exists() else {}
 config["registry-mirrors"] = ["https://mirror.gcr.io"]
 print(json.dumps(config, indent=2))
 PY
+  if [[ ! -s "$config.tmp" ]]; then
+    as_root rm -f "$config.tmp"
+    log "Could not write $config; Docker Hub pulls may hit 429"
+    return 1
+  fi
   as_root mv "$config.tmp" "$config"
   log "Configured Docker registry mirror mirror.gcr.io"
+  # A running dockerd reloads registry-mirrors on SIGHUP.
+  if docker_ready; then
+    as_root pkill -HUP -x dockerd || true
+  fi
 }
 
 docker_ready() {
