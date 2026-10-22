@@ -1,4 +1,4 @@
-# 15-minute DeadTrees monitor tick. Install as a systemd user unit on the
+# DeadTrees monitor tick, started by deadtrees-monitor.timer. Install as a systemd user unit on the
 # processing server; see docs/playbooks/operator-chat.md.
 [Unit]
 Description=DeadTrees monitor tick (platform findings to Linear, inbox digest)

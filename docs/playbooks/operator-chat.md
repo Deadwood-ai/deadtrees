@@ -173,6 +173,13 @@ monitor records findings and tells the coordinator about changes; it never
 fixes anything. The unit templates and the host wrapper are in
 `scripts/platform_monitor/systemd/`.
 
+The wrapper runs the monitor from a detached `~/dev/deadtrees-monitor` clone at
+`origin/main` with the Python of `~/dev/deadtrees/venv`
+(`DEADTREES_MONITOR_CHECKOUT` and `DEADTREES_MONITOR_PYTHON` override both). It
+writes the status snapshot to `~/dev/deadtrees/.local/operator/state.json` and
+`latest.md` (the scorecard to `scorecard-state.json` and `scorecard-latest.md`),
+not to the `operator-*` defaults of a manual run.
+
 Each tick:
 
 1. Collects read-only facts at no token cost: `scripts/operator_status.py`
