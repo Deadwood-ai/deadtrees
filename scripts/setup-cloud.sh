@@ -251,7 +251,12 @@ session() {
     || run_step apt install_apt_packages || true
   command -v supabase >/dev/null 2>&1 || run_step supabase install_supabase_cli || true
   [[ -x "$REPO_ROOT/venv/bin/deadtrees" ]] || run_step python install_python_env || true
-  [[ -d "$REPO_ROOT/frontend/node_modules" ]] || run_step frontend install_frontend || true
+  if [[ -d "$REPO_ROOT/frontend/node_modules" ]]; then
+    # A no-op when the pinned Chromium is present; retries a failed download.
+    run_step playwright install_playwright_browser || true
+  else
+    run_step frontend install_frontend || true
+  fi
   log "Ready. QA gate: scripts/qa/review-regression.sh"
 }
 
