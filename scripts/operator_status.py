@@ -36,12 +36,15 @@ def utc_now() -> str:
 	return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
 
 
-def run_command(args: list[str], timeout: int = 10, cwd: Path = ROOT) -> dict[str, Any]:
+def run_command(
+	args: list[str], timeout: int = 10, cwd: Path = ROOT, env: dict[str, str] | None = None
+) -> dict[str, Any]:
 	start = time.monotonic()
 	try:
 		completed = subprocess.run(
 			args,
 			cwd=cwd,
+			env=env,
 			text=True,
 			stdout=subprocess.PIPE,
 			stderr=subprocess.PIPE,
@@ -176,6 +179,9 @@ from status_summary, log_summary, queue_summary;
 	result = run_command(
 		['psql', database_url, '-XAtq', '-v', 'ON_ERROR_STOP=1', '-c', sql],
 		timeout=timeout,
+		# The Supabase pooler drops a GSS encryption request instead of
+		# declining it, which psql sends first whenever a Kerberos ticket exists.
+		env={**os.environ, 'PGGSSENCMODE': 'disable'},
 	)
 	if not result['ok']:
 		return {'ok': False, 'error': compact_error(result)}
