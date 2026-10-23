@@ -57,6 +57,8 @@ class DOYModel(nn.Module):
 		keep = torch.ones(static_dim)
 		if cfg.get('noyear'):
 			keep[YEAR_COL] = 0
+		# site facts the model was trained without (v2: S2 / match availability)
+		keep[cfg.get('static_masked', [])] = 0
 		self.register_buffer('static_keep', keep, persistent=False)
 		self.trunk = nn.Sequential(nn.Linear(D + 64, 256), nn.GELU(), nn.Dropout(0.1), nn.Linear(256, 256), nn.GELU())
 		ang = 2 * np.pi * (np.arange(NBINS) + 0.5) / NBINS
