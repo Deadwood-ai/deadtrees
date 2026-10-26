@@ -337,6 +337,23 @@ def test_posthog_issues_are_filed_once_and_again_only_on_a_spike():
 	assert delta['changed'][0]['summary'].startswith('spiking: ')
 
 
+def test_posthog_errors_of_a_tick_become_one_finding_of_the_week():
+	line = '- [posthog] id={} occurrences=2 users=1 first_seen=2026-10-13T11:00:00Z name=x'
+	items = monitor_tick.posthog_items([line.format('0a1b2c3d'), line.format('4e5f6a7b')])
+	delta, _ = monitor_tick.posthog_delta(items, {})
+	weekly = monitor_tick.posthog_weekly(delta, NOON)
+	assert [item['fingerprint'] for item in weekly['new']] == ['dt-status/posthog/week:2026-W42']
+	summary = weekly['new'][0]['summary']
+	assert summary.startswith('PostHog frontend errors in 2026-W42 (https://eu.posthog.com/project/13440/error_tracking/)')
+	assert summary.endswith('2 new or spiking since the last check: 0a1b2c3d, 4e5f6a7b')
+	assert monitor_tick.posthog_weekly({}, NOON) == {}
+	# A later tick of the same week comments on that week's issue; a new week opens a new one.
+	comments, creates = monitor_tick.filing_plan(weekly, {'dt-status/posthog/week:2026-W42': 'DT-5'}, NOON)
+	assert [c['issue'] for c in comments] == ['DT-5'] and creates == []
+	next_week = monitor_tick.posthog_weekly(delta, NOON.replace(day=20))
+	assert next_week['new'][0]['fingerprint'] == 'dt-status/posthog/week:2026-W43'
+
+
 def test_haiku_cost_uses_the_list_price():
 	usage = {'claude-haiku-5-5': {'costBasis': 'unknown', 'costUSD': 0.5, 'cacheReadInputTokens': 1_000_000, 'outputTokens': 1_000_000}}
 	assert monitor_tick.call_cost({'modelUsage': usage}) == pytest.approx(0.51)
@@ -484,7 +501,7 @@ def run_tick(tmp_path, monkeypatch, filing_ok=True, posthog_line='', now=NOON, c
 def test_tick_files_the_delta_and_advances_the_baseline(tmp_path, monkeypatch):
 	posthog = '[posthog] id=0a1b2c3d occurrences=2 users=1 first_seen=2026-10-13T11:00:00Z name=TypeError'
 	delta, state = run_tick(tmp_path, monkeypatch, posthog_line=posthog)
-	assert [item['fingerprint'] for item in delta['new']] == ['dt-status/api/a', 'dt-status/posthog/error:0a1b2c3d']
+	assert [item['fingerprint'] for item in delta['new']] == ['dt-status/api/a', 'dt-status/posthog/week:2026-W42']
 	assert state['issues'] == {'dt-status/api/a': 'DT-7'}
 	assert state['posthog_seen'] == {'0a1b2c3d': 2}
 	assert state['inbox_since'] == '2026-10-13T12:00:00Z'

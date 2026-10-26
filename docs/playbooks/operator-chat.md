@@ -204,7 +204,7 @@ Each tick:
    Gmail and Zulip were all read; PostHog errors are tracked separately by ID.
 4. Files the delta (new, changed, cleared) and new or spiking PostHog errors in
    Linear with a second model call: one 🤖 Triage issue per fingerprint, then
-   comments on it. The baseline advances only after filing succeeded, so a
+   comments on it. PostHog errors share one issue per ISO week. The baseline advances only after filing succeeded, so a
    failed tick retries.
 5. Writes the digest to `~/.local/state/deadtrees-monitor/digest-latest.md`
    (two days under `digests/`) and one line per tick to `ticks.jsonl`. When
