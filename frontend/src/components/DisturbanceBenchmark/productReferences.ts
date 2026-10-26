@@ -18,7 +18,7 @@ export const PRODUCT_REFERENCES: Record<
   dte: {
     fullName: "deadtrees.earth satellite product",
     description:
-      "Combines tree-cover loss and standing deadwood in the supplied binary b+y classification (dt_fc_dw_comb_by).",
+      "Combines tree-cover loss and standing deadwood in the supplied binary b+y classification.",
     url: "https://deadtrees.earth/releases/sentinel-2-satellite-map",
   },
   echosat: {

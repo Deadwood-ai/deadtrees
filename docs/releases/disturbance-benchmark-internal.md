@@ -108,6 +108,12 @@ the destination and key.
 
 ## Data limitations to keep visible
 
+For the v7 replacement payload, settings, metrics and ingestion commands, use
+[the v7 handoff](disturbance-benchmark-v7.md). The following counts and NA-score
+notes describe the original `pylos-2026-10-15` snapshot only; the active run is
+identified by its catalogue and site provenance.
+
+
 - 233 saved b+y overlays across 41 sites; 73 sites have no saved prediction. Keep
   those sites and their warnings; never show missing products or scores as zero.
 - Predictions are the saved `*_by_pred_res.tif` (preceding year b or flight year
