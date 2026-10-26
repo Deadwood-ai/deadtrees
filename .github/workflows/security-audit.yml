@@ -6,8 +6,9 @@ name: Security Audit
 
 on:
   schedule:
-    # 03:17 UTC = 05:17 Berlin in summer, 04:17 in winter.
-    - cron: "17 3 * * *"
+    # 23:17 UTC. GitHub starts scheduled runs here up to ~5 h late, so this
+    # keeps the result ready for the 07:22 Berlin Claude check.
+    - cron: "17 23 * * *"
   workflow_dispatch:
   pull_request:
     paths:

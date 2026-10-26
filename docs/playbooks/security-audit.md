@@ -8,8 +8,8 @@ Continuous security checks for this repository (DT-1442). Server patching is a s
 |---|---|---|
 | CodeQL, secret scanning with push protection, Dependabot alerts and security updates | GitHub repository settings | every PR, push and weekly |
 | Dependabot version updates | `.github/dependabot.yml` | weekly |
-| `security-audit` workflow | `.github/workflows/security-audit.yml` | daily 03:17 UTC, PRs that change dependency files, by hand |
-| Claude cloud routine | scheduled Claude session | weekdays 07:30 Berlin, full pass on Tuesdays |
+| `security-audit` workflow | `.github/workflows/security-audit.yml` | daily 23:17 UTC (GitHub often starts it hours late), PRs that change dependency files, by hand |
+| Claude cloud routine | scheduled Claude session | weekdays 07:22 Berlin, full pass on Tuesdays |
 
 The workflow runs:
 
