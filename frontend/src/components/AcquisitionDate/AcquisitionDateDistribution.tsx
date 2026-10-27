@@ -57,7 +57,7 @@ export default function AcquisitionDateDistribution({ estimate, recordedDate, he
     .sort((a, b) => a.x - b.x)
     .map((m, i, all) => {
       const close = all.length > 1 && Math.abs(all[1].x - all[0].x) < 60;
-      const anchor = m.x > W - 40 ? "end" : m.x < 40 ? "start" : "middle";
+      const anchor: "start" | "middle" | "end" = m.x > W - 40 ? "end" : m.x < 40 ? "start" : "middle";
       return {
         ...m,
         anchor,
