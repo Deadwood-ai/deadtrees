@@ -136,22 +136,26 @@ export default function BenchmarkMethods({
                     <dd>
                       {PRODUCT_REFERENCES[product.id]?.description ||
                         product.definition}
+                      {PRODUCT_REFERENCES[product.id] && (
+                        <p>{product.definition}</p>
+                      )}
                     </dd>
                   </div>
                 ))}
               </dl>
               <p>
-                Drone imagery, reference polygons and temporal context come from
-                Results_plots_v10. Satellite overlays use the saved binary
-                predictions in 6-Validation/tmp_residuals_0.25_all_NO_mask_v5.
-                Only the combined preceding-year and flight-year products
-                (*_by_pred_res.tif) are shown: disturbance in b OR y. The
-                following year (a), including bya products, is excluded. DTE
-                uses dt_fc_dw_comb_by, combining tree-cover loss and standing
-                deadwood as supplied in the saved evaluation; no threshold is
-                reapplied to the continuous v10 change bands. Precision, recall
-                and F1 remain NA. Missing products are not interpreted as zero
-                disturbance.
+                Drone imagery and temporal context come from the imagery version
+                recorded below. Satellite overlays use the supplied binary
+                classifications for the preceding year OR flight year (b+y);
+                following-year products are excluded. Product settings are
+                recorded in the product definitions. Scores use the
+                original evaluation grids, before display resampling or clipping.
+                Missing coverage remains unavailable. Precision and recall are
+                undefined when their denominators are zero; F1 is
+                2TP / (2TP + FP + FN), including zero when there are missed
+                reference positives and no detections. Display reference polygons
+                can differ from the product-specific raster references used for
+                evaluation. Consult the export audit for count verification.
               </p>
               <h3>Temporal evidence</h3>
               <p>

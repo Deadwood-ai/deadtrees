@@ -163,6 +163,8 @@ celerybeat.pid
 .env.export
 .playwright-cli/
 /.local
+# Private benchmark payloads belong on the NAS/protected storage, never in Git.
+/frontend/public/disturbance-benchmark/
 .local/ssh/
 .codex/private/
 .venv
