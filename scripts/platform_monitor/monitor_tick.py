@@ -213,6 +213,28 @@ def posthog_delta(items: list[dict[str, Any]], seen: dict[str, int]) -> tuple[di
 	return {key: value for key, value in delta.items() if value}, updated
 
 
+def posthog_week(now: datetime) -> str:
+	year, week, _ = now.isocalendar()
+	return f'week:{year}-W{week:02d}'
+
+
+def posthog_weekly(delta: dict[str, list[Any]], now: datetime) -> dict[str, list[Any]]:
+	"""All new and spiking PostHog errors of a tick as one finding of the
+	ISO week, so Linear gets one issue per week and a comment per later tick
+	instead of one issue per error id (DT-1467)."""
+	errors = delta.get('new', []) + delta.get('changed', [])
+	if not errors:
+		return {}
+	ids = [item['fingerprint'].rsplit(':', 1)[-1] for item in errors]
+	week = posthog_week(now)
+	# The link comes first: the summary is cut at 240 characters.
+	summary = (
+		f"PostHog frontend errors in {week.removeprefix('week:')} ({POSTHOG_URL.format('')}):"
+		f" {len(ids)} new or spiking since the last check: {', '.join(ids)}"
+	)
+	return {'new': [findings_module.finding('yellow', 'posthog', week, summary)]}
+
+
 # --- Zulip --------------------------------------------------------------------
 
 
@@ -726,6 +748,7 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 	cost += inbox_cost
 	seen_posthog: dict[str, int] = dict(state.get('posthog_seen') or {})
 	posthog, next_posthog = posthog_delta(posthog_items(items), seen_posthog) if posthog_ok else ({}, seen_posthog)
+	posthog = posthog_weekly(posthog, now)
 	items = [item for item in items if not item.startswith('- [posthog]')]
 	filing = {
 		key: [{field: item[field] for field in FILING_KEYS if item.get(field)} for item in delta.get(key, []) + posthog.get(key, [])]
@@ -749,10 +772,8 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 			comments, creates = filing_plan(filing, known, now)
 			held = {entry['fingerprint'] for entry in comments + creates} - done
 			baseline = findings_module.hold_back(baseline, next_baseline, held)
-			seen_posthog = {
-				**seen_posthog,
-				**{issue: count for issue, count in next_posthog.items() if f'dt-status/posthog/error:{issue}' not in held},
-			}
+			if f'dt-status/posthog/{posthog_week(now)}' not in held:
+				seen_posthog = next_posthog
 			# Keep the old baseline so the next tick files this delta again.
 			digest.append(f'- [gap] linear filing failed, will retry: {clip(detail)}')
 	if not args.dry_run and shadow_due(args, now):
