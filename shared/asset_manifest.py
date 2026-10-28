@@ -5,8 +5,10 @@ DEADWOOD_V1_MODEL_CHECKPOINT_NAME = 'segformer_b5_full_epoch_100.safetensors'
 COMBINED_MODEL_CHECKPOINT_NAME = 'ckpt_weighted_brownweight15_goldentestweight7.safetensors'
 AOI_V1_MODEL_CHECKPOINT_NAME = 'b1_50epoch_best_macro_f1.safetensors'
 # acquisition-date model: two 5-seed ensembles (with / without Sentinel-2),
-# their calibration in manifest.json, and the frozen DINOv2 backbone
-DOY_ESTIMATION_MODEL_DIR_NAME = 'doy_estimation_v1'
+# their calibration in manifest.json, and the frozen DINOv2 backbone. The
+# directory name is the model version stored with every estimate; v2 is not
+# public (see docs/doy-estimation.md#model-assets)
+DOY_ESTIMATION_MODEL_DIR_NAME = 'doy_estimation_v2'
 DOY_ESTIMATION_TASK_TYPE = 'doy_estimation_v1'
 DOY_ESTIMATION_MODEL_FILES = (
 	'manifest.json',
