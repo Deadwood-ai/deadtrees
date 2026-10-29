@@ -57,6 +57,8 @@ def test_heartbeat_writes_every_minute_until_stopped(monkeypatch):
 	heartbeat_module.run_heartbeat('host-abc', stop)
 
 	assert [row['worker_id'] for _, row, _ in rows] == ['host-abc'] * 3
+	# continuous_seen_at equal to seen_at tells release_stale_queue_claim this worker beats mid-task.
+	assert all(row['continuous_seen_at'] == row['seen_at'] for _, row, _ in rows)
 	assert rows[0][0] == 'processor_heartbeats' and rows[0][2] == 'worker_id'
 	assert stop.waits == [heartbeat_module.HEARTBEAT_INTERVAL_SECONDS] * 3
 

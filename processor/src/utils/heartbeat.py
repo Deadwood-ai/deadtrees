@@ -2,6 +2,8 @@
 
 release_stale_queue_claim (DT-1471) frees a claim only when its worker's heartbeat
 is stale, so the heartbeat must keep ticking through long ODM and model stages.
+continuous_seen_at marks a heartbeat from this thread; older processors leave
+it unset, and their claims are never released.
 It runs in a daemon thread and never blocks processing; login() reuses the
 cached processor session until it is close to expiry.
 """
@@ -20,9 +22,10 @@ HEARTBEAT_INTERVAL_SECONDS = 60
 
 
 def record_heartbeat(token: str, worker_id: str) -> None:
+	seen_at = datetime.now(timezone.utc).isoformat()
 	with use_client(token) as client:
 		client.table(settings.processor_heartbeats_table).upsert(
-			{'worker_id': worker_id, 'seen_at': datetime.now(timezone.utc).isoformat(), 'backend_version': __version__},
+			{'worker_id': worker_id, 'seen_at': seen_at, 'continuous_seen_at': seen_at, 'backend_version': __version__},
 			on_conflict='worker_id',
 		).execute()
 

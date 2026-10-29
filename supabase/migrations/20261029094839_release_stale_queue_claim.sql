@@ -2,11 +2,19 @@
 -- A worker that dies without its shutdown handler (host offline, hard kill)
 -- keeps its v2_queue claim, and requeue_dataset_processing refuses claimed rows.
 -- This frees the claim and resets the status in one transaction, only when the
--- claiming worker has been silent for 15 minutes. The processor writes a
--- heartbeat every minute, also while it runs a task, so silence means the
--- worker is gone. The task keeps its task types and priority and is picked up
--- again by the next free worker.
+-- claiming worker has been silent for 15 minutes. The task keeps its task
+-- types and priority and is picked up again by the next free worker.
+--
+-- Older processors write seen_at only between tasks, so a busy one looks
+-- silent. Processors that beat every minute, also mid-task, write the same
+-- time to continuous_seen_at. A claim is released only when the worker's last
+-- heartbeat came from such a processor (both columns equal); a worker on an
+-- older release, or rolled back to one, is never released.
 set local lock_timeout = '5s';
+
+alter table public.processor_heartbeats add column continuous_seen_at timestamptz;
+comment on column public.processor_heartbeats.continuous_seen_at is
+	'Set to seen_at by processors that send heartbeats while they process (DT-1471); release_stale_queue_claim requires it.';
 
 create or replace function public.release_stale_queue_claim(p_dataset_id bigint)
 returns public.v2_queue
@@ -21,6 +29,7 @@ declare
 	v_task public.v2_queue;
 	v_worker text;
 	v_seen_at timestamptz;
+	v_continuous_seen_at timestamptz;
 	v_claims integer;
 begin
 	if v_uid is null then
@@ -43,10 +52,16 @@ begin
 
 	v_worker := v_task.claimed_by;
 
-	select seen_at into v_seen_at from public.processor_heartbeats where worker_id = v_worker;
-	if v_task.claimed_at > now() - v_silent_for or coalesce(v_seen_at, '-infinity') > now() - v_silent_for then
+	select seen_at, continuous_seen_at into v_seen_at, v_continuous_seen_at
+	from public.processor_heartbeats where worker_id = v_worker;
+	if v_seen_at is null or v_continuous_seen_at is distinct from v_seen_at then
+		raise exception 'Worker % does not send heartbeats while processing, so its silence proves nothing; check the host before changing the claim.',
+			v_worker
+			using errcode = '55006';
+	end if;
+	if v_task.claimed_at > now() - v_silent_for or v_seen_at > now() - v_silent_for then
 		raise exception 'Worker % last sent a heartbeat at %; a claim is released only after % of silence.',
-			v_worker, coalesce(v_seen_at::text, 'never'), v_silent_for
+			v_worker, v_seen_at, v_silent_for
 			using errcode = '55006';
 	end if;
 
@@ -63,7 +78,7 @@ begin
 	insert into public.v2_logs (level, message, origin, user_id, dataset_id, category, extra)
 	values (
 		'WARNING',
-		format('Released queue task %s from silent worker %s (last heartbeat %s)', v_task.id, v_worker, coalesce(v_seen_at::text, 'never')),
+		format('Released queue task %s from silent worker %s (last heartbeat %s)', v_task.id, v_worker, v_seen_at),
 		'release_stale_queue_claim',
 		v_uid,
 		p_dataset_id,

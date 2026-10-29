@@ -45,7 +45,9 @@ def as_admin(db):
 	db.execute("SELECT set_config('request.jwt.claims','{\"role\":\"service_role\"}',true)")
 
 
-def claimed_dataset(db, owner, claimed_minutes_ago=60, heartbeat_minutes_ago=30, status='odm_processing', has_error=False):
+def claimed_dataset(
+	db, owner, claimed_minutes_ago=60, heartbeat_minutes_ago=30, continuous=True, status='odm_processing', has_error=False
+):
 	as_admin(db)
 	dataset = db.execute(
 		"INSERT INTO public.v2_datasets(user_id,file_name,license,platform,data_access) VALUES (%s,'claim.tif','CC BY','drone','public') RETURNING id",
@@ -64,6 +66,10 @@ def claimed_dataset(db, owner, claimed_minutes_ago=60, heartbeat_minutes_ago=30,
 			'INSERT INTO public.processor_heartbeats(worker_id,seen_at) VALUES (%s,now() - make_interval(mins => %s)) '
 			'ON CONFLICT (worker_id) DO UPDATE SET seen_at = excluded.seen_at',
 			(WORKER, heartbeat_minutes_ago),
+		)
+		db.execute(
+			'UPDATE public.processor_heartbeats SET continuous_seen_at = CASE WHEN %s THEN seen_at END WHERE worker_id=%s',
+			(continuous, WORKER),
 		)
 	return dataset, queue_id
 
@@ -122,16 +128,41 @@ def test_processor_account_may_release(db):
 	assert queue_state(db, dataset) == (False, None)
 
 
-def test_worker_that_never_sent_a_heartbeat_counts_as_silent(db):
+def test_worker_without_a_heartbeat_row_is_refused(db):
 	owner, operator = create_user(db), create_user(db, can_view_all_private=True)
 	as_admin(db)
 	db.execute('DELETE FROM public.processor_heartbeats WHERE worker_id=%s', (WORKER,))
 	dataset, _ = claimed_dataset(db, owner, heartbeat_minutes_ago=None)
 
 	act_as(db, operator)
-	release(db, dataset)
+	expect_refused(db, '55006', dataset)
 
-	assert queue_state(db, dataset) == (False, None)
+	assert queue_state(db, dataset) == (True, WORKER)
+
+
+def test_worker_on_an_older_release_is_never_released(db):
+	# Older processors write seen_at only between tasks, so a busy one looks silent.
+	owner, operator = create_user(db), create_user(db, can_view_all_private=True)
+	dataset, _ = claimed_dataset(db, owner, continuous=False)
+
+	act_as(db, operator)
+	error = expect_refused(db, '55006', dataset)
+
+	assert 'does not send heartbeats while processing' in str(error)
+	assert queue_state(db, dataset) == (True, WORKER)
+
+
+def test_worker_rolled_back_to_an_older_release_is_never_released(db):
+	owner, operator = create_user(db), create_user(db, can_view_all_private=True)
+	dataset, _ = claimed_dataset(db, owner)
+	as_admin(db)
+	# The old release updates seen_at only, leaving an older continuous_seen_at behind.
+	db.execute("UPDATE public.processor_heartbeats SET seen_at = seen_at + interval '1 minute' WHERE worker_id=%s", (WORKER,))
+
+	act_as(db, operator)
+	expect_refused(db, '55006', dataset)
+
+	assert queue_state(db, dataset) == (True, WORKER)
 
 
 @pytest.mark.parametrize(
