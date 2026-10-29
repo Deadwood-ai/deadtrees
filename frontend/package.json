@@ -53,7 +53,7 @@
     "react-router-dom": "^7.18.2",
     "react-slick": "^0.31.0",
     "react-viewport-list": "^7.1.2",
-    "react-virtualized": "^9.22.6",
+    "react-virtualized": "^10.0.0",
     "sort-by": "^1.2.0",
     "unzipit": "^1.4.3",
     "utf8": "^3.0.0"
