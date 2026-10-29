@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Select, Skeleton, Table, Typography } from "antd";
+import { Alert, Select, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { Link, useSearchParams } from "react-router-dom";
 import { useFactoryHistory } from "../../hooks/useFactory";
@@ -9,7 +9,8 @@ import { formatCount, formatGib, TREND_COLORS } from "./factoryTrends";
 import type { FactoryMetricFilter } from "./factoryTypes";
 import type { FactoryHistoryPoint } from "./factoryHistoryTypes";
 import FactoryTrendChart, { type TrendBucket, type TrendSeries } from "./FactoryTrendChart";
-import { EmptyNote, FactoryError, Freshness, SectionCard, useNow } from "./FactoryPrimitives";
+import { FactoryError, Freshness, SectionCard, useNow } from "./FactoryPrimitives";
+import { InlineEmpty, SectionSkeleton } from "../SectionStates";
 
 type HistoricalSeries = Omit<TrendSeries, "key"> & { key: Exclude<keyof FactoryHistoryPoint, "start" | "end" | "partial"> };
 
@@ -65,8 +66,8 @@ export default function FactoryHistory() {
 				]} onChange={(value) => { setYear(value === "all" ? null : Number(value)); setSelected(null); }} />
 				<Freshness asOf={data?.as_of} isFetching={history.isFetching} onRefresh={() => void history.refetch()} now={now} />
 			</div>
-			{history.isError && <FactoryError error={history.error} onRetry={() => void history.refetch()} title="Historical activity could not be refreshed" />}
-			{history.isLoading && <Skeleton active />}
+			{history.isError && <FactoryError error={history.error} onRetry={() => void history.refetch()} title="Historical activity couldn’t load" />}
+			{history.isLoading && <SectionSkeleton label="Loading historical activity" />}
 			{data && <>
 				<div className="mb-4 grid grid-cols-2 gap-4 lg:grid-cols-3" data-testid="factory-history-coverage">
 					<div><Text type="secondary">Ready now · unarchived</Text><div className="text-2xl font-semibold"><Link to={factoryDatasetsPath({ ready: true })}>{number(data.coverage.ready_now)}</Link></div></div>
@@ -78,7 +79,7 @@ export default function FactoryHistory() {
 					Email evidence from {formatUtc(data.email_since)}, reports from {formatUtc(data.report_since)}, publications from {formatUtc(data.publication_since)}. Earlier unsupported periods stay unknown. Counts after those dates show retained records, not guaranteed complete coverage. Deleted records are absent.
 					All history is global; workflow and size controls for directly measured outcomes do not filter this section.
 				</>} />
-				{data.series.length === 0 ? <EmptyNote>No historical intervals were returned.</EmptyNote> : <div className="grid gap-6 lg:grid-cols-2">
+				{data.series.length === 0 ? <InlineEmpty>No historical intervals were returned.</InlineEmpty> : <div className="grid gap-6 lg:grid-cols-2">
 					{chart("Registrations and observed uploads", [{ key: "registered", label: "Registrations", color: TREND_COLORS.registered }, { key: "uploaded", label: "Uploads observed", color: TREND_COLORS.uploaded }])}
 					{chart("Recorded processing runs · includes reruns", [{ key: "completed", label: "Completed", color: TREND_COLORS.recordedCompleted }, { key: "indexing", label: "Completed with indexing (subset)", color: TREND_COLORS.recordedEmbedding }, { key: "failed", label: "Failed", color: TREND_COLORS.recordedFailed }])}
 					{chart("Delivery, reports and publications", [{ key: "emails", label: "Email recipients sent", color: TREND_COLORS.input }, { key: "reports", label: "Reports submitted", color: TREND_COLORS.p90 }, { key: "publications", label: "Publications", color: TREND_COLORS.ready }])}

@@ -4,7 +4,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useFactoryActivity } from "../../hooks/useFactory";
 import { FACTORY_PAGE_SIZE, parsePage } from "./factoryFilters";
 import { formatUtc } from "./factoryFormat";
-import { EmptyNote, FactoryError, Freshness, TimeCell, useNow } from "./FactoryPrimitives";
+import { FactoryError, Freshness, TimeCell, useNow } from "./FactoryPrimitives";
+import { InlineEmpty } from "../SectionStates";
 import { FACTORY_ACTIVITY_KINDS, type FactoryActivityItem, type FactoryActivityKind } from "./factoryTypes";
 
 const { Text } = Typography;
@@ -105,7 +106,7 @@ export default function FactoryActivity() {
 	];
 
 	if (query.isError && !query.data) {
-		return <FactoryError error={query.error} onRetry={() => void query.refetch()} title="Could not load activity" />;
+		return <FactoryError error={query.error} onRetry={() => void query.refetch()} title="Activity couldn’t load" />;
 	}
 
 	return (
@@ -129,7 +130,7 @@ export default function FactoryActivity() {
 					and publication rows show the current state, not when it changed.
 				</Text>
 				{query.data && query.data.items.length === 0 ? (
-					<EmptyNote>No {kind === "all" ? "activity" : KIND_LABELS[kind].toLowerCase()} records were returned.</EmptyNote>
+					<InlineEmpty>No {kind === "all" ? "activity" : KIND_LABELS[kind].toLowerCase()} records were returned.</InlineEmpty>
 				) : (
 					<Table
 						size="small"

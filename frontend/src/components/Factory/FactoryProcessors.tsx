@@ -1,10 +1,11 @@
-import { Alert, Skeleton, Table, Tag, Tooltip } from "antd";
+import { Alert, Table, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { Link } from "react-router-dom";
 import { stageLabel } from "../DatasetStatus/status";
 import type { ReactNode } from "react";
 import { formatDuration, formatTaskTypes, minutesSince, type FactoryTone } from "./factoryFormat";
-import { EmptyNote, FactoryError, Freshness, SectionCard, TimeCell, TONE_COLORS } from "./FactoryPrimitives";
+import { FactoryError, Freshness, SectionCard, TimeCell, TONE_COLORS } from "./FactoryPrimitives";
+import { InlineEmpty, SectionSkeleton } from "../SectionStates";
 import type { FactoryProcessor, FactoryProcessorState, FactoryProcessors as FactoryProcessorsData } from "./factoryTypes";
 
 const STATE_TAGS: Record<FactoryProcessorState, { tone: FactoryTone; label: string; help: string }> = {
@@ -127,11 +128,11 @@ export default function FactoryProcessors({ data, isFetching, isError, error, on
 				<Alert type="warning" showIcon className="mb-3" message="Processor data may be stale" description="The latest refresh failed. Previously loaded rows remain visible." data-testid="factory-processors-stale" />
 			)}
 			{isError && !data ? (
-				<FactoryError error={error} onRetry={onRetry} title="Could not load processors" />
+				<FactoryError error={error} onRetry={onRetry} title="Processors couldn’t load" />
 			) : !data ? (
-				<Skeleton active paragraph={{ rows: 3 }} />
+				<SectionSkeleton rows={3} label="Loading processors" />
 			) : data.processors.length === 0 ? (
-				<EmptyNote>No processor host is known.</EmptyNote>
+				<InlineEmpty>No processor host is known.</InlineEmpty>
 			) : (
 				<Table size="small" pagination={false} dataSource={data.processors} columns={columns} rowKey="worker_id" scroll={{ x: 860 }} />
 			)}

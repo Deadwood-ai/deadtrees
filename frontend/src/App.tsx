@@ -14,7 +14,7 @@ import { antdTheme } from "./theme/antdTheme";
 
 import DatasetDetails from "./pages/DatasetDetails";
 import RouteErrorBoundary from "./components/RouteErrorBoundary";
-import { StatusPageLoading } from "./components/StatusPage";
+import { PageSkeleton } from "./components/PageSkeletons";
 import NotFound from "./pages/NotFound";
 
 // Load route-specific maps, editors, and charts when that route is opened.
@@ -105,7 +105,7 @@ function LayoutWrapper() {
           }}
         >
           <RouteErrorBoundary key={location.pathname}>
-            <Suspense fallback={<StatusPageLoading label="Loading…" />}>
+            <Suspense fallback={<PageSkeleton label="Loading page" />}>
               <Outlet />
             </Suspense>
           </RouteErrorBoundary>

@@ -11,6 +11,7 @@ import {
   patchStatusValidation,
 } from "../../../hooks/useReferencePatches";
 import ReferencePatchMap from "../ReferencePatchMap";
+import { InlineEmpty } from "../../SectionStates";
 
 interface Props {
   dataset: IDataset;
@@ -181,7 +182,7 @@ export default function PatchQAPhase({ dataset, onUnsavedChanges, onRequestValid
                 </Button>
               </Space>
             ) : (
-              <Typography.Text type="secondary">No patches at this resolution.</Typography.Text>
+              <InlineEmpty>No patches at this resolution.</InlineEmpty>
             )}
           </Card>
 

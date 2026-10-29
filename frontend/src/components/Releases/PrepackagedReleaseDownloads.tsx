@@ -1,5 +1,5 @@
 import { DatabaseOutlined } from "@ant-design/icons";
-import { Alert, Skeleton, Tag } from "antd";
+import { Alert, Tag } from "antd";
 
 import { usePrepackagedDatasets } from "../../hooks/usePrepackagedDatasets";
 import {
@@ -9,6 +9,8 @@ import {
   prepackagedKindLabel,
 } from "../../utils/prepackagedDatasets";
 import { PrepackagedDownloadButton } from "./PrepackagedDownloadButton";
+import EmptyStatePanel from "../EmptyStatePanel";
+import { SectionLoadError, SectionSkeleton } from "../SectionStates";
 
 interface PrepackagedReleaseDownloadsProps {
   packageSlugs: string[];
@@ -19,19 +21,17 @@ export function PrepackagedReleaseDownloads({
   packageSlugs,
   returnTo,
 }: PrepackagedReleaseDownloadsProps) {
-  const { data, isLoading, error } = usePrepackagedDatasets();
+  const { data, isLoading, error, refetch } = usePrepackagedDatasets();
 
   if (isLoading) {
-    return <Skeleton active paragraph={{ rows: 5 }} />;
+    return <SectionSkeleton rows={5} label="Loading downloads" />;
   }
 
   if (error) {
     return (
-      <Alert
-        type="error"
-        showIcon
-        message="Could not load dataset packages"
-        description={error instanceof Error ? error.message : undefined}
+      <SectionLoadError
+        title="The downloads couldn’t load"
+        onRetry={() => void refetch()}
       />
     );
   }
@@ -52,10 +52,10 @@ export function PrepackagedReleaseDownloads({
 
   if (!packages.length) {
     return (
-      <Alert
-        type={missingPackageSlugs.length > 0 ? "warning" : "info"}
-        showIcon
-        message="Dataset package is not available yet"
+      <EmptyStatePanel
+        testId="release-downloads-empty"
+        icon={<DatabaseOutlined />}
+        title="Downloads are not published yet"
         description={
           missingPackageSlugs.length > 0
             ? missingPackageDescription

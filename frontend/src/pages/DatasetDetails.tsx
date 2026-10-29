@@ -4,7 +4,8 @@ import { Link, useParams } from "react-router-dom";
 
 import { usePublicDatasetById } from "../hooks/useDatasets";
 import { useAuth } from "../hooks/useAuthProvider";
-import StatusPage, { StatusPageLoading } from "../components/StatusPage";
+import StatusPage from "../components/StatusPage";
+import { MapPageSkeleton } from "../components/PageSkeletons";
 
 const DatasetDetailsView = lazy(() => import("./DatasetDetailsView"));
 
@@ -21,7 +22,7 @@ export default function DatasetDetails() {
   const { status } = useAuth();
   const datasetId = id && /^\d+$/.test(id) ? Number(id) : undefined;
   const { data, isLoading, isError, refetch } = usePublicDatasetById(datasetId);
-  const loading = <StatusPageLoading label="Loading dataset…" />;
+  const loading = <MapPageSkeleton label="Loading dataset" />;
 
   if (datasetId === undefined) {
     return (

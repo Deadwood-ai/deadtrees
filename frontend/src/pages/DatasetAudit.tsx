@@ -33,7 +33,8 @@ import { useDatasetById } from "../hooks/useDatasets";
 import { useAuditDatasets } from "../hooks/useAuditDatasets";
 import type { AuditDataset } from "../hooks/useAuditDatasets";
 import DatasetAuditDetail from "../components/DatasetAudit/DatasetAuditDetail";
-import StatusPage, { StatusPageLoading } from "../components/StatusPage";
+import StatusPage from "../components/StatusPage";
+import { MapPageSkeleton, PageSkeleton } from "../components/PageSkeletons";
 import { useDatasetAudits, DatasetAuditUserInfo, useDatasetContributors } from "../hooks/useDatasetAudit";
 import { useFlaggedDatasets } from "../hooks/useDatasetFlags";
 import { useReferenceDatasetIds } from "../hooks/useReferencePatches";
@@ -161,8 +162,14 @@ const getBiomeBadge = (biomeName: string | null) => {
 	);
 };
 
+// An audit opens on a map; the audit list is a table page.
+function AuditLoading({ id }: { id?: string }) {
+	return id ? <MapPageSkeleton label="Loading dataset" /> : <PageSkeleton label="Loading audits" />;
+}
+
 export default function DatasetAudit() {
 	const navigate = useNavigate();
+	const { id } = useParams();
 	const { user, status: authStatus } = useAuth();
 	const {
 		canAudit,
@@ -172,7 +179,7 @@ export default function DatasetAudit() {
 	} = useCanAudit();
 
 	// Privileges are only fetched once the session check knows the user.
-	if (authStatus === "checking" || isAuditPrivilegeLoading) return <StatusPageLoading label="Checking access…" />;
+	if (authStatus === "checking" || isAuditPrivilegeLoading) return <AuditLoading id={id} />;
 
 	if (isAuditPrivilegeError) {
 		return (
@@ -557,12 +564,12 @@ function DatasetAuditInner() {
 
 	// Loading state
 	if (isAuthLoading || isAuditPrivilegeLoading) {
-		return <StatusPageLoading label="Loading…" />;
+		return <AuditLoading id={id} />;
 	}
 
 	// Detail view
 	if (id) {
-		if (isDetailDatasetLoading) return <StatusPageLoading label="Loading dataset…" />;
+		if (isDetailDatasetLoading) return <MapPageSkeleton label="Loading dataset" />;
 		// A failed background refetch must not unmount an audit in progress.
 		if (isDetailDatasetError && !detailDataset) {
 			return (

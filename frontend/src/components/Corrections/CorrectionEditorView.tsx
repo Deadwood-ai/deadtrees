@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useDatasetFileUrls } from "../../hooks/useDatasetAccess";
 // Navigation is handled via onClose prop
-import { message, Button, Spin, Alert } from "antd";
+import { message, Button, Alert } from "antd";
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import { Map as OLMap, View } from "ol";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
@@ -28,6 +28,7 @@ import { useDatasetDetailsMap } from "../../hooks/useDatasetDetailsMapProvider";
 import { acquireLibertyBasemapGroup, releaseLibertyBasemapGroup, createStandardMapControls } from "../../utils/basemaps";
 import { createOrthoCogSource, MAP_MAX_TILES_LOADING } from "../../utils/cogSource";
 import { hasForestCoverPredictionOutput } from "../../utils/predictionAvailability";
+import { MapSkeleton } from "../PageSkeletons";
 
 interface Props {
   dataset: IDataset;
@@ -512,12 +513,7 @@ export default function CorrectionEditorView({ dataset, initialLayerType, onClos
 
       {/* Map Area */}
       <div className="relative flex-1">
-        {isLoading && (
-          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-white/50 text-gray-500">
-            <Spin size="large" />
-            <span>Loading...</span>
-          </div>
-        )}
+        {isLoading && <MapSkeleton label="Loading predictions" className="!absolute inset-0 z-50" />}
 
         <div ref={mapContainerRef} className="h-full w-full" />
 

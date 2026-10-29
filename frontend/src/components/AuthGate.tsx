@@ -2,14 +2,14 @@ import { ReactNode } from "react";
 import { Navigate, useLocation, useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../hooks/useAuthProvider";
-import { StatusPageLoading } from "./StatusPage";
+import { PageSkeleton } from "./PageSkeletons";
 
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { recoveryReason, status } = useAuth();
   const location = useLocation();
 
   if (status === "checking") {
-    return <StatusPageLoading label="Checking session…" />;
+    return <PageSkeleton label="Checking your session" />;
   }
 
   if (status !== "authenticated") {
@@ -36,7 +36,7 @@ export function PublicOnly({ children }: { children: ReactNode }) {
   const returnTo = searchParams.get("returnTo") || "/profile";
 
   if (status === "checking") {
-    return <StatusPageLoading label="Checking session…" />;
+    return <PageSkeleton label="Checking your session" />;
   }
 
   if (status === "authenticated") {

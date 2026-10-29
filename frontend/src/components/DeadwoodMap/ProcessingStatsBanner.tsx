@@ -1,26 +1,28 @@
-import { Spin, Tooltip } from "antd";
+import { Tooltip } from "antd";
 import { CheckCircleOutlined, SyncOutlined, ClockCircleOutlined } from "@ant-design/icons";
 import { useProcessingStats, isSentinelConfigured } from "../../hooks/useProcessingStats";
+import { InlineSkeleton } from "../SectionStates";
 
 const ProcessingStatsBanner = () => {
-  const { data: stats, isLoading, isFetching } = useProcessingStats();
+  const { data: stats, isLoading } = useProcessingStats();
 
   // Don't render if sentinel processing is not configured
   if (!isSentinelConfigured) {
     return null;
   }
 
-  if (isLoading || isFetching) {
+  // A background refresh keeps the last numbers on screen.
+  if (isLoading) {
     return (
-      <div className="flex items-center gap-2 rounded-lg bg-white/95 px-3 py-1.5 backdrop-blur-sm">
-        <Spin size="small" />
-        <span className="text-xs text-gray-500">Loading stats...</span>
+      <div className="rounded-lg bg-white/95 px-3 py-1.5 backdrop-blur-sm">
+        <InlineSkeleton label="Loading processing stats" className="h-4 w-40" />
       </div>
     );
   }
 
+  // The banner is a side note on the map, so without numbers it stays away.
   if (!stats) {
-    return null; // Silently fail - don't show anything if stats unavailable
+    return null;
   }
 
   const isActive = stats.inProgress > 0;

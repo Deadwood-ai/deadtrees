@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useCallback, type ReactNode } from "react";
-import { Button, Tag, Spin, Tooltip, Checkbox, Drawer, Skeleton } from "antd";
+import { Button, Tag, Tooltip, Checkbox, Drawer } from "antd";
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
@@ -14,6 +14,8 @@ import {
 } from "@ant-design/icons";
 
 import DataList from "../components/DataList";
+import { ListSkeleton, SectionLoadError } from "../components/SectionStates";
+import { MapSkeleton } from "../components/PageSkeletons";
 import DatasetMapOL, {
   type DatasetMapColorMode,
   type DatasetMapViewPadding,
@@ -354,7 +356,7 @@ export default function Dataset() {
         <ArchivePlaceholder
           failed={archiveFailed}
           onRetry={() => void retryArchive()}
-          loading={<ArchiveListSkeleton />}
+          loading={<ListSkeleton label="Loading datasets" />}
         />
       )}
     </div>
@@ -446,14 +448,7 @@ export default function Dataset() {
           <ArchivePlaceholder
             failed={archiveFailed && isMobile}
             onRetry={() => void retryArchive()}
-            loading={
-              archiveFailed ? null : (
-                <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500">
-                  <Spin size="large" />
-                  <span>Loading map...</span>
-                </div>
-              )
-            }
+            loading={archiveFailed ? null : <MapSkeleton label="Loading map" />}
           />
         ) : (
           // The map stays mounted through empty results: the list already
@@ -501,36 +496,8 @@ function ArchivePlaceholder({
 }) {
   if (!failed) return <>{loading}</>;
   return (
-    <div
-      className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-gray-600"
-      role="alert"
-    >
-      <span className="font-medium text-gray-800">
-        The drone archive couldn’t load
-      </span>
-      <span className="text-sm">
-        DeadTrees didn’t respond. Check your connection and try again.
-      </span>
-      <Button type="primary" onClick={onRetry}>
-        Try again
-      </Button>
-    </div>
-  );
-}
-
-// Placeholder rows shaped like archive entries: thumbnail, title, details.
-function ArchiveListSkeleton() {
-  return (
-    <div className="flex flex-col gap-4 px-1 pt-2" role="status" aria-label="Loading datasets">
-      {Array.from({ length: 6 }, (_, index) => (
-        <Skeleton
-          key={index}
-          active
-          avatar={{ shape: "square", size: 48 }}
-          title={{ width: "70%" }}
-          paragraph={{ rows: 1, width: "45%" }}
-        />
-      ))}
+    <div className="flex h-full flex-col justify-center p-4" role="alert">
+      <SectionLoadError title="The drone archive couldn’t load" onRetry={onRetry} />
     </div>
   );
 }

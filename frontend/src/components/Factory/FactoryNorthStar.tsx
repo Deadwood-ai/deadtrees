@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
-import { Alert, Collapse, Skeleton, Switch, Tooltip, Typography } from "antd";
+import { Alert, Collapse, Switch, Tooltip, Typography } from "antd";
 import { ArrowDownOutlined, ArrowUpOutlined, ExportOutlined, InfoCircleOutlined, MinusOutlined } from "@ant-design/icons";
 import { Link, useSearchParams } from "react-router-dom";
 import { isFactoryPermissionError, useFactoryNorthStar } from "../../hooks/useFactory";
 import { POSTHOG_UI_HOST } from "../../utils/analytics";
 import FactoryTrendChart, { type TrendBucket, type TrendSeries } from "./FactoryTrendChart";
 import { FactoryDenied, FactoryError, Freshness, SectionCard, useNow } from "./FactoryPrimitives";
+import { SectionSkeleton } from "../SectionStates";
 import { bucketLongLabel, bucketRangeLabel, bucketShortLabel, formatCount, formatHours, TREND_COLORS } from "./factoryTrends";
 import {
 	STEP_LABELS,
@@ -409,9 +410,9 @@ export default function FactoryNorthStar() {
 				<Alert type="warning" showIcon message="North-star outcomes may be stale" description="The latest refresh failed. Previously loaded numbers remain visible." />
 			)}
 			{northStar.isError && !data ? (
-				<FactoryError error={northStar.error} onRetry={() => void northStar.refetch()} title="Could not load north-star outcomes" />
+				<FactoryError error={northStar.error} onRetry={() => void northStar.refetch()} title="North-star outcomes couldn’t load" />
 			) : !data ? (
-				<Skeleton active paragraph={{ rows: 6 }} />
+				<SectionSkeleton rows={6} label="Loading north-star outcomes" />
 			) : (
 				<>
 					<div className="grid gap-4 lg:grid-cols-3">

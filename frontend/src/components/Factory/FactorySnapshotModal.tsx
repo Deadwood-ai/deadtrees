@@ -1,11 +1,12 @@
 import { useMemo } from "react";
-import { App as AntdApp, Alert, Button, Input, Modal, Skeleton, Typography } from "antd";
+import { App as AntdApp, Alert, Button, Input, Modal, Typography } from "antd";
 import { CopyOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import { fetchFactoryRowsByIds } from "../../hooks/useFactory";
 import { buildSnapshotText } from "./factoryFormat";
 import { useCopyToClipboard } from "./FactorySelectionContext";
 import { FactoryError } from "./FactoryPrimitives";
+import { SectionSkeleton } from "../SectionStates";
 import type { FactoryFilters } from "./factoryTypes";
 
 const { Text } = Typography;
@@ -85,7 +86,7 @@ export default function FactorySnapshotModal({ open, ids, filters, onClose }: Fa
 				message="Facts only"
 				description="The text records what the database shows right now, including gaps. It contains no request, so pasting it into a task implies no action."
 			/>
-			{snapshot.isLoading && <Skeleton active paragraph={{ rows: 6 }} />}
+			{snapshot.isLoading && <SectionSkeleton rows={6} label="Loading snapshot" />}
 			{snapshot.isError && <FactoryError error={snapshot.error} onRetry={() => void snapshot.refetch()} />}
 			{snapshot.data && (
 				<>

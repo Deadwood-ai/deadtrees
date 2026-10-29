@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Alert, Button, Descriptions, Skeleton, Space, Table, Tag, Tooltip, Typography } from "antd";
+import { Alert, Button, Descriptions, Space, Table, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { CheckCircleFilled, FileTextOutlined, MinusCircleOutlined } from "@ant-design/icons";
+import { CheckCircleFilled, FileTextOutlined, MinusCircleOutlined, SearchOutlined } from "@ant-design/icons";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { useFactoryDataset } from "../../hooks/useFactory";
 import { useCanAudit } from "../../hooks/useUserPrivileges";
@@ -10,7 +10,9 @@ import { contributorLabel, formatTaskTypes, formatUtc, intentLabel, notification
 import FactoryRecordTable, { formatRecordValue, humanizeKey } from "./FactoryRecordTable";
 import { useFactorySelection } from "./FactorySelectionContext";
 import FactorySnapshotModal from "./FactorySnapshotModal";
-import { EmptyNote, FactoryError, FactoryStateTag, Freshness, SectionCard, TimeCell, Unknown, useNow } from "./FactoryPrimitives";
+import { FactoryError, FactoryStateTag, Freshness, SectionCard, TimeCell, Unknown, useNow } from "./FactoryPrimitives";
+import { InlineEmpty, SectionSkeleton } from "../SectionStates";
+import EmptyStatePanel from "../EmptyStatePanel";
 import type { FactoryDatasetDetail as FactoryDatasetDetailData, FactoryLog, FactoryNotification, FactoryRecord } from "./factoryTypes";
 
 const { Title, Text } = Typography;
@@ -70,7 +72,7 @@ function StatusFlags({ status }: { status: FactoryRecord }) {
 		...Object.keys(status).filter((key) => key.startsWith("is_") && !(key in FLAG_LABELS) && !RETIRED_FLAGS.has(key)),
 	];
 	if (Object.keys(status).length === 0) {
-		return <EmptyNote>No processing status row exists for this dataset.</EmptyNote>;
+		return <InlineEmpty>No processing status row exists for this dataset.</InlineEmpty>;
 	}
 	return (
 		<div className="space-y-4">
@@ -174,6 +176,21 @@ function DetailHeader({ detail, now }: { detail: FactoryDatasetDetailData; now: 
 	);
 }
 
+function DatasetMissing({ title, description, returnTo, returnLabel }: { title: string; description: string; returnTo: string; returnLabel: string }) {
+	return (
+		<EmptyStatePanel
+			icon={<SearchOutlined />}
+			title={title}
+			description={description}
+			action={
+				<Link to={returnTo}>
+					<Button>{returnLabel}</Button>
+				</Link>
+			}
+		/>
+	);
+}
+
 export default function FactoryDatasetDetail() {
 	const { id } = useParams();
 	const location = useLocation();
@@ -185,17 +202,17 @@ export default function FactoryDatasetDetail() {
 	const now = useNow();
 
 	if (datasetId === null) {
-		return <FactoryError error={new Error("The dataset ID in the address is not a number.")} title="Invalid dataset link" />;
+		return <DatasetMissing title="Invalid dataset link" description="The dataset ID in the address is not a number." returnTo={returnTo} returnLabel={returnLabel} />;
 	}
 	if (query.isError) {
-		return <FactoryError error={query.error} onRetry={() => void query.refetch()} title={`Could not load dataset #${datasetId}`} />;
+		return <FactoryError error={query.error} onRetry={() => void query.refetch()} title={`Dataset #${datasetId} couldn’t load`} />;
 	}
 	if (query.isLoading || query.data === undefined) {
-		return <Skeleton active paragraph={{ rows: 8 }} />;
+		return <SectionSkeleton rows={8} label="Loading dataset" />;
 	}
 	const detail = query.data;
 	if (detail === null) {
-		return <FactoryError error={new Error("The read model returned no dataset for this ID. It may not exist or may have been deleted.")} title={`Dataset #${datasetId} not found`} />;
+		return <DatasetMissing title={`Dataset #${datasetId} not found`} description="The read model returned no dataset for this ID. It may not exist or may have been deleted." returnTo={returnTo} returnLabel={returnLabel} />;
 	}
 
 	const logColumns: ColumnsType<FactoryLog> = [
@@ -268,7 +285,7 @@ export default function FactoryDatasetDetail() {
 
 			<SectionCard title="Logs" count={logTotal ?? logsShown} testId="factory-detail-logs" extra={logTotal !== null && logTotal > logsShown ? <Text type="secondary" className="text-xs">Showing the newest {logsShown} of {logTotal.toLocaleString()}</Text> : undefined}>
 				{detail.logs.length === 0 ? (
-					<EmptyNote>No log entries are recorded for this dataset.</EmptyNote>
+					<InlineEmpty>No log entries are recorded for this dataset.</InlineEmpty>
 				) : (
 					<Table size="small" dataSource={detail.logs} columns={logColumns} rowKey="id" pagination={{ pageSize: 25, size: "small", showSizeChanger: false }} scroll={{ x: 760 }} />
 				)}
@@ -301,7 +318,7 @@ export default function FactoryDatasetDetail() {
 			<div className="grid gap-6 xl:grid-cols-2">
 				<SectionCard title="Delivery" count={detail.record_totals.notifications ?? detail.notifications.length} testId="factory-detail-notifications">
 					{detail.notifications.length === 0 ? (
-						<EmptyNote>No delivery record. Notifications exist only for results recorded since the email feature launched, and only when it was enabled.</EmptyNote>
+						<InlineEmpty>No delivery record. Notifications exist only for results recorded since the email feature launched, and only when it was enabled.</InlineEmpty>
 					) : (
 						<Table size="small" dataSource={detail.notifications} columns={notificationColumns} rowKey="id" pagination={false} scroll={{ x: 900 }} />
 					)}

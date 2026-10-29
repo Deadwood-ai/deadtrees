@@ -1756,6 +1756,7 @@ const DeadtreesMap = () => {
         data={polygonAnalysis.stats.data}
         loading={polygonAnalysis.stats.loading}
         error={polygonAnalysis.stats.error}
+        onRetry={polygonAnalysis.stats.retry}
       />
     </div>
   );

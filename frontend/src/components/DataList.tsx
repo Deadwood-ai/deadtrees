@@ -1,6 +1,8 @@
 import { memo, useMemo, useState } from "react";
 import ListItem from "./ListItem";
-import { Button, Skeleton } from "antd";
+import { Button } from "antd";
+import { SearchOutlined } from "@ant-design/icons";
+import EmptyStatePanel from "./EmptyStatePanel";
 import { IDataset, IDatasetArchiveItem } from "../types/dataset";
 
 type ListDataset = IDataset | IDatasetArchiveItem;
@@ -53,16 +55,13 @@ function DataList({
 
   return (
     <div className="flex-1 space-y-1.5 overflow-y-auto pr-1 md:space-y-2">
-      {!visibleData ? (
-        <Skeleton active avatar={{ shape: "square", size: 48 }} paragraph={{ rows: 1 }} />
-      ) : visibleData.length === 0 ? (
-        <div
-          className="flex h-full flex-col items-center justify-center"
-          data-testid="dataset-empty-results"
-        >
-          <div className="text-lg font-medium text-gray-500">No results found</div>
-          <div className="text-sm text-gray-400">Try adjusting your filters or search criteria</div>
-        </div>
+      {visibleData.length === 0 ? (
+        <EmptyStatePanel
+          testId="dataset-empty-results"
+          icon={<SearchOutlined />}
+          title="No drone images match"
+          description="Zoom out, move the map or clear a filter to see more."
+        />
       ) : (
         <>
           {visibleData

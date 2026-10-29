@@ -102,7 +102,7 @@ test.describe("auditor local write flows", () => {
     await expect(
       page.getByRole("heading", { name: new RegExp(`Audit: ${datasetId}`) }),
     ).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText("Securing audit lock...")).toBeHidden({
+    await expect(page.getByRole("status", { name: "Securing the audit lock" })).toBeHidden({
       timeout: 20_000,
     });
     await expectAuditLeaseHolder(auditorUser.id);

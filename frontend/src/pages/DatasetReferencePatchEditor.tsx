@@ -3,7 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Button, message, Modal, Progress } from "antd";
 import { ArrowLeftOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { useDatasetById } from "../hooks/useDatasets";
-import StatusPage, { StatusPageLoading } from "../components/StatusPage";
+import StatusPage from "../components/StatusPage";
+import { MapPageSkeleton } from "../components/PageSkeletons";
 import {
   usePatchSessionLock,
   useSetPatchSessionLock,
@@ -215,7 +216,7 @@ export default function DatasetReferencePatchEditor() {
   };
 
   // The dataset query waits for the session check; until then it is not "not found".
-  if (authStatus === "checking" || isDatasetLoading) return <StatusPageLoading label="Loading dataset…" />;
+  if (authStatus === "checking" || isDatasetLoading) return <MapPageSkeleton label="Loading dataset" />;
   // A failed background refetch must not unmount the editor and its drafts.
   if (isDatasetError && !dataset) {
     return (

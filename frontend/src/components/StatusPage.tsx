@@ -1,5 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { Spin } from "antd";
+import type { ReactNode } from "react";
 import {
   CloudSyncOutlined,
   DisconnectOutlined,
@@ -43,6 +42,7 @@ interface StatusPageProps {
 
 // One shape for every full-page state that is not the page itself:
 // not found, no access, failed to load, offline and "a new version is out".
+// Pages on their way use PageSkeleton or MapPageSkeleton instead.
 export default function StatusPage({
   kind,
   title,
@@ -71,36 +71,6 @@ export default function StatusPage({
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-const SLOW_AFTER_MS = 8000;
-
-// Stands in for a page that has not arrived yet (its code, the session or its
-// data), so it fills the whole screen and the footer stays below the fold
-// until the page replaces it. While DeadTrees is down, requests retry for a
-// while before they fail; say so instead of spinning silently.
-export function StatusPageLoading({ label }: { label: string }) {
-  const [slow, setSlow] = useState(false);
-  useEffect(() => {
-    const timer = window.setTimeout(() => setSlow(true), SLOW_AFTER_MS);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  return (
-    <div
-      className={`${SHELL} min-h-[100dvh] flex-col gap-3 text-slate-500`}
-      role="status"
-    >
-      <Spin size="large" />
-      <span>{label}</span>
-      {slow && (
-        <span className="max-w-xs text-center text-sm">
-          This is taking longer than usual. DeadTrees may be busy; we keep
-          trying.
-        </span>
-      )}
     </div>
   );
 }

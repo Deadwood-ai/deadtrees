@@ -39,6 +39,22 @@ frontend work.
 - Treat large React components, duplicated data-fetching logic, unstable query keys, missing cleanup of OpenLayers resources, and hidden side effects as review issues when they create concrete regression risk.
 - Do not flag subjective UI style preferences unless they affect accessibility, data integrity, security, testability, or a documented product requirement.
 
+## Loading, Empty And Error States
+
+Use the shared kit instead of spinners, "Loading…" strings or antd `Empty`,
+`Result` and error `Alert`s:
+
+- Whole page: `PageSkeleton` or `MapPageSkeleton` (`components/PageSkeletons.tsx`)
+  while it loads; `StatusPage` for not found, no access, offline or failed.
+- Section (table, list, card, chart, modal body): `SectionSkeleton`,
+  `TableSkeleton`, `ListSkeleton` or `MapSkeleton`; `EmptyStatePanel` when
+  empty; `SectionLoadError` ("X couldn’t load" plus "Try again") when it fails.
+- Inline value or small panel: `InlineSkeleton`, `InlineEmpty`,
+  `InlineLoadError` (`components/SectionStates.tsx`).
+- Label loading states with `aria-label`, never visible text. Spinners only on
+  a button or map control the user just pressed. Toasts only for failed
+  actions, never for failed loads.
+
 ## Query Keys
 
 Use stable tuple keys:

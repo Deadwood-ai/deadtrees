@@ -3,7 +3,8 @@ import { Button } from "antd";
 import { CorrectionEditorView } from "../components/Corrections";
 import { useDatasetById } from "../hooks/useDatasets";
 import { useAuth } from "../hooks/useAuthProvider";
-import StatusPage, { StatusPageLoading } from "../components/StatusPage";
+import StatusPage from "../components/StatusPage";
+import { MapPageSkeleton } from "../components/PageSkeletons";
 
 /**
  * Page wrapper for the CorrectionEditorView
@@ -28,7 +29,7 @@ export default function DatasetCorrections() {
     }
   };
 
-  if (authLoading) return <StatusPageLoading label="Loading…" />;
+  if (authLoading) return <MapPageSkeleton label="Loading dataset" />;
 
   if (!user) {
     const returnTo = `/dataset-corrections/${id ?? ""}${searchParams.toString() ? `?${searchParams}` : ""}`;
@@ -46,7 +47,7 @@ export default function DatasetCorrections() {
     );
   }
 
-  if (isLoading) return <StatusPageLoading label="Loading dataset…" />;
+  if (isLoading) return <MapPageSkeleton label="Loading dataset" />;
 
   // A failed background refetch must not unmount the editor and its drafts.
   if (error && !dataset) {
