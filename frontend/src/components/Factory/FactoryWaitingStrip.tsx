@@ -1,8 +1,9 @@
-import { Skeleton, Tooltip, Typography } from "antd";
+import { Tooltip, Typography } from "antd";
 import { Link } from "react-router-dom";
 import { factoryDatasetsPath, filtersFromRecord } from "./factoryFilters";
 import { formatRelative, formatUtc, minutesSince } from "./factoryFormat";
-import { EmptyNote, FactoryError, SectionCard, Unknown } from "./FactoryPrimitives";
+import { FactoryError, SectionCard, Unknown } from "./FactoryPrimitives";
+import { InlineEmpty, SectionSkeleton } from "../SectionStates";
 import type { FactoryOperations, FactoryWaitingRow } from "./factoryTypes";
 
 const { Text } = Typography;
@@ -84,11 +85,11 @@ export default function FactoryWaitingStrip({ operations, isLoading, error, onRe
 	return (
 		<SectionCard title="Waiting" testId="factory-waiting">
 			{error && !operations ? (
-				<FactoryError error={error} onRetry={onRetry} title="Could not load waiting counts" />
+				<FactoryError error={error} onRetry={onRetry} title="Waiting counts couldn’t load" />
 			) : isLoading || !operations ? (
-				<Skeleton active paragraph={{ rows: 2 }} />
+				<SectionSkeleton rows={2} label="Loading waiting counts" />
 			) : rows.length === 0 ? (
-				<EmptyNote>The read model returned no waiting groups.</EmptyNote>
+				<InlineEmpty>The read model returned no waiting groups.</InlineEmpty>
 			) : (
 				<div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">{rows.map(renderRow)}</div>
 			)}

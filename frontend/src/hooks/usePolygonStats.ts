@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import axios from "axios";
 import { Settings } from "../config";
 
@@ -28,8 +28,10 @@ export function usePolygonStats() {
   const [data, setData] = useState<PolygonStatsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const lastRequest = useRef<{ polygon: GeoJSON.Polygon; modelVersion?: string } | null>(null);
 
   const fetchStats = async (polygon: GeoJSON.Polygon, modelVersion?: string) => {
+    lastRequest.current = { polygon, modelVersion };
     setLoading(true);
     setError(null);
     setData(null);
@@ -57,11 +59,16 @@ export function usePolygonStats() {
     }
   };
 
+  const retry = () => {
+    if (lastRequest.current) void fetchStats(lastRequest.current.polygon, lastRequest.current.modelVersion);
+  };
+
   const reset = () => {
+    lastRequest.current = null;
     setData(null);
     setError(null);
     setLoading(false);
   };
 
-  return { data, loading, error, fetchStats, reset };
+  return { data, loading, error, fetchStats, retry, reset };
 }

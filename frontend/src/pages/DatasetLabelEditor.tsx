@@ -8,7 +8,8 @@ import { defaults as defaultInteractions } from "ol/interaction/defaults";
 import View from "ol/View";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { useDatasets } from "../hooks/useDatasets";
-import StatusPage, { StatusPageLoading } from "../components/StatusPage";
+import StatusPage from "../components/StatusPage";
+import { MapPageSkeleton } from "../components/PageSkeletons";
 import { useDatasetLabelTypes } from "../hooks/useDatasetLabelTypes";
 import usePolygonEditor from "../hooks/usePolygonEditor";
 import useAISegmentation from "../hooks/useAISegmentation";
@@ -333,7 +334,7 @@ export default function DatasetLabelEditor() {
       />
     );
   }
-  if (!datasets) return <StatusPageLoading label="Loading dataset…" />;
+  if (!datasets) return <MapPageSkeleton label="Loading dataset" />;
   if (!dataset) {
     return (
       <StatusPage

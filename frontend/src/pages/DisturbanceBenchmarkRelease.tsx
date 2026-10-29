@@ -1,7 +1,8 @@
 import { ArrowLeftOutlined, LockOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Skeleton, Tag } from "antd";
-import { SectionLoadError } from "../components/SectionStates";
+import { Button, Tag } from "antd";
+import { SectionLoadError, SectionSkeleton } from "../components/SectionStates";
+import { MapSkeleton } from "../components/PageSkeletons";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import BenchmarkWorldMap from "../components/DisturbanceBenchmark/BenchmarkWorldMap";
 import BenchmarkSitePicker from "../components/DisturbanceBenchmark/BenchmarkSitePicker";
@@ -130,10 +131,16 @@ export default function DisturbanceBenchmarkRelease() {
               selected={selected?.id || ""}
               onSelect={selectSite}
             />
-          ) : (
+          ) : catalog.isError ? (
+            // The retry sits with the explanation below the hero.
             <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-gray-200 bg-gray-50 text-sm text-gray-500">
-              {catalog.isError ? "Site map unavailable" : "Loading sites…"}
+              The site map couldn’t load.
             </div>
+          ) : (
+            <MapSkeleton
+              label="Loading sites"
+              className="min-h-[320px] rounded-2xl border border-gray-200"
+            />
           )}
         </div>
       </section>
@@ -141,7 +148,7 @@ export default function DisturbanceBenchmarkRelease() {
       <div className="db-page mx-auto max-w-7xl space-y-12 px-4 py-10 md:px-8 md:py-14">
         {catalog.isError ? (
           <SectionLoadError
-            title="Benchmark data unavailable"
+            title="The benchmark data couldn’t load"
             onRetry={() => void catalog.refetch()}
           />
         ) : (
@@ -164,7 +171,7 @@ export default function DisturbanceBenchmarkRelease() {
                 />
                 {detail.isError ? (
                   <SectionLoadError
-                    title="Site data unavailable"
+                    title="This site’s data couldn’t load"
                     onRetry={() => void detail.refetch()}
                   />
                 ) : detail.data ? (
@@ -174,7 +181,7 @@ export default function DisturbanceBenchmarkRelease() {
                     products={products}
                   />
                 ) : (
-                  <Skeleton active paragraph={{ rows: 8 }} />
+                  <SectionSkeleton rows={8} label="Loading site data" />
                 )}
               </div>
             </section>

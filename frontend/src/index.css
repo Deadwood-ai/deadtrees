@@ -639,3 +639,10 @@
 .dt-archive-search .dt-archive-search-mode .anticon-down {
   font-size: 10px;
 }
+
+/* Skeletons stop shimmering for visitors who ask for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .ant-skeleton.ant-skeleton-active * {
+    animation: none !important;
+  }
+}

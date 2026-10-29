@@ -9,7 +9,8 @@ import FactoryOutcomes from "./FactoryOutcomes";
 import FactoryProcessors from "./FactoryProcessors";
 import FactoryHistory from "./FactoryHistory";
 import FactoryWaitingStrip from "./FactoryWaitingStrip";
-import { EmptyNote, FactoryDenied, Freshness, useNow } from "./FactoryPrimitives";
+import { FactoryDenied, Freshness, useNow } from "./FactoryPrimitives";
+import { InlineEmpty } from "../SectionStates";
 import {
 	FACTORY_TREND_INTERVALS,
 	FACTORY_TREND_SIZES,
@@ -196,7 +197,7 @@ export default function FactoryOperations() {
 									const retained = data?.coverage ?? [];
 									const lines = Array.from(new Set([...(operations.data?.coverage ?? []), ...(processors.data?.coverage ?? []), ...trendLines, ...(journey.data?.coverage ?? []), ...retained]));
 									return lines.length === 0 ? (
-										<EmptyNote>No coverage notes were reported.</EmptyNote>
+										<InlineEmpty>No coverage notes were reported.</InlineEmpty>
 									) : (
 										<ul className="m-0 list-disc space-y-1 pl-5 text-sm text-gray-600">
 											{lines.map((line) => (

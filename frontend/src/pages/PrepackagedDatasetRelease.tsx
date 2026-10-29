@@ -5,13 +5,16 @@ import {
   ExportOutlined,
   FileOutlined,
   LinkOutlined,
+  SearchOutlined,
 } from "@ant-design/icons";
-import { Alert, Button, Empty, Skeleton } from "antd";
+import { Button } from "antd";
 import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { PrepackagedDownloadButton } from "../components/Releases/PrepackagedDownloadButton";
 import { ReleasePreviewStrip } from "../components/Releases/ReleasePreviewStrip";
+import EmptyStatePanel from "../components/EmptyStatePanel";
+import { SectionLoadError, SectionSkeleton } from "../components/SectionStates";
 import { usePrepackagedDatasets } from "../hooks/usePrepackagedDatasets";
 import { getPrepackagedDatasetPreviewTiles } from "../utils/prepackagedDatasetPreviews";
 import {
@@ -39,7 +42,7 @@ function getSafeHttpUrl(url: string | null) {
 export default function PrepackagedDatasetRelease() {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const { data, isLoading, error } = usePrepackagedDatasets();
+  const { data, isLoading, error, refetch } = usePrepackagedDatasets();
   const returnTo = `/releases/${slug ?? ""}`;
 
   const datasetPackage = useMemo(
@@ -109,24 +112,31 @@ export default function PrepackagedDatasetRelease() {
 
         {isLoading && (
           <div className="mx-auto max-w-7xl px-4 pb-16 pt-8 md:px-8">
-            <Skeleton active paragraph={{ rows: 8 }} />
+            <SectionSkeleton rows={8} label="Loading release" />
           </div>
         )}
 
         {error && (
           <div className="mx-auto max-w-7xl px-4 pb-16 pt-8 md:px-8">
-            <Alert
-              type="error"
-              showIcon
-              message="Could not load release"
-              description={error instanceof Error ? error.message : undefined}
+            <SectionLoadError
+              title="This release couldn’t load"
+              onRetry={() => void refetch()}
             />
           </div>
         )}
 
         {!isLoading && !error && !datasetPackage && (
           <div className="mx-auto max-w-7xl px-4 pb-16 pt-8 md:px-8">
-            <Empty description="This release was not found." />
+            <EmptyStatePanel
+              icon={<SearchOutlined />}
+              title="This release was not found"
+              description="Check the address or pick a release from the list."
+              action={
+                <Button type="primary" onClick={() => navigate("/releases")}>
+                  All releases
+                </Button>
+              }
+            />
           </div>
         )}
 

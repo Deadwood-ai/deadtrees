@@ -940,12 +940,12 @@ test.describe("factory local e2e", () => {
     await installOperator(page, { canOperate: true, rpcMode: "failing" });
     await page.goto("/factory");
     await dismissCookieBanner(page);
-    await expect(page.getByText("Could not load north-star outcomes")).toBeVisible();
-    await expect(page.getByTestId("factory-attention-line")).toContainText("Could not check what needs attention.");
+    await expect(page.getByText("North-star outcomes couldn’t load")).toBeVisible();
+    await expect(page.getByTestId("factory-attention-line")).toContainText("What needs attention couldn’t load.");
     await page.goto("/factory/operations");
-    await expect(page.getByText("Could not load the attention list")).toBeVisible();
+    await expect(page.getByText("The attention list couldn’t load")).toBeVisible();
     await expect(page.getByRole("button", { name: "Try again" }).first()).toBeVisible();
-    await expect(page.getByText("Could not load processors")).toBeVisible();
+    await expect(page.getByText("Processors couldn’t load")).toBeVisible();
 
     await installOperator(page, { canOperate: true, rpcMode: "denied" });
     await page.goto("/factory/datasets");

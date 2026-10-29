@@ -1,4 +1,4 @@
-import { Alert, Button, Form, Input, message, Spin } from "antd";
+import { Alert, Button, Form, Input, message } from "antd";
 import { useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 
@@ -6,6 +6,7 @@ import { useAuth } from "../../hooks/useAuthProvider";
 import { supabase } from "../../hooks/useSupabase";
 import { trackAppEvent } from "../../utils/analytics";
 import AuthCard, { AuthLink, MIN_PASSWORD_LENGTH } from "./AuthCard";
+import { SectionSkeleton } from "../../components/SectionStates";
 
 type ResetPasswordFormValues = {
   confirmPassword: string;
@@ -152,10 +153,7 @@ const ResetPassword = () => {
   return (
     <AuthCard title="Choose your password">
       {status === "checking" ? (
-        <div className="flex items-center justify-center gap-3 py-8 text-gray-600">
-          <Spin />
-          <span>Checking reset link...</span>
-        </div>
+        <SectionSkeleton rows={3} label="Checking your reset link" />
       ) : null}
       {status === "anonymous" ? (
         <Alert

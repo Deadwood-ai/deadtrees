@@ -80,10 +80,33 @@ test("while a page's code loads, the footer stays below the screen", async ({ pa
     await route.continue();
   });
   await page.goto("/");
-  await expect(page.getByRole("status").filter({ hasText: "Loading…" })).toBeVisible();
+  await expect(page.getByTestId("page-skeleton")).toBeVisible();
   const footer = await page.locator("footer").boundingBox();
   expect(footer!.y).toBeGreaterThanOrEqual(page.viewportSize()!.height);
 
   release();
   await expect(page.getByTestId("home-page")).toBeVisible();
+});
+
+test("while the drone archive loads, list and map show their shape instead of loading text", async ({ page }) => {
+  // Hold every data request so the archive stays on its way.
+  await page.route("**/rest/v1/**", () => {});
+  await page.goto("/dataset");
+  await expect(page.getByRole("status", { name: "Loading map" })).toBeVisible();
+  await expect(page.getByRole("status", { name: "Loading datasets" }).first()).toBeVisible();
+  await expect(page.getByText(/Loading/)).toHaveCount(0);
+});
+
+test("an archive outage shows one retry beside the map", async ({ page }) => {
+  await page.route("**/rest/v1/**", (route) => route.abort("connectionrefused"));
+  await page.goto("/dataset");
+  await expect(page.getByRole("heading", { name: "The drone archive couldn’t load" })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(1);
+});
+
+test("a dataset page on its way shows the map and sidebar outline", async ({ page }) => {
+  await page.route("**/rest/v1/**", () => {});
+  await page.goto("/dataset/91001");
+  await expect(page.getByRole("status", { name: "Loading dataset" })).toBeVisible();
+  await expect(page.getByText(/Loading/)).toHaveCount(0);
 });

@@ -11,6 +11,7 @@ import {
 import { Button, Card, Form, Typography } from "antd";
 
 import type { AOIToolbarState } from "../DatasetDetailsMap/hooks/useAOIEditor";
+import { InlineSkeleton } from "../SectionStates";
 import type { AuditMapWithControlsHandle } from "./AuditMapWithControls";
 
 const { Text } = Typography;
@@ -39,7 +40,7 @@ export default function AuditAOICard({
 			</div>
 
 			{aoiToolbarState.isAOILoading ? (
-				<div className="text-xs text-gray-500">Loading AOI...</div>
+				<InlineSkeleton label="Loading area of interest" className="h-8 w-full" />
 			) : (
 				<div className="space-y-2">
 					{isIdle && aoiToolbarState.hasAOI && (

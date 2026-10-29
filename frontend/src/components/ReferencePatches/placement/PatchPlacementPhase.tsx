@@ -11,6 +11,7 @@ import {
 import { useDatasetAOI } from "../../../hooks/useDatasetAudit";
 import { polygon as turfPolygon, multiPolygon as turfMultiPolygon, centroid } from "@turf/turf";
 import GeoJSON from "ol/format/GeoJSON";
+import { InlineEmpty, SectionSkeleton } from "../../SectionStates";
 
 interface Props {
   dataset: IDataset;
@@ -155,8 +156,13 @@ export default function PatchPlacementPhase({ dataset, onUnsavedChanges, onNavig
       <List
         bordered
         dataSource={patches}
-        loading={isLoading}
-        locale={{ emptyText: "No patches placed yet." }}
+        locale={{
+          emptyText: isLoading ? (
+            <SectionSkeleton rows={3} label="Loading patches" />
+          ) : (
+            <InlineEmpty>No patches placed yet.</InlineEmpty>
+          ),
+        }}
         renderItem={(patch) => (
           <List.Item
             actions={[

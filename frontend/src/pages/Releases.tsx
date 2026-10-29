@@ -3,7 +3,7 @@ import {
   GlobalOutlined,
   ReadOutlined,
 } from "@ant-design/icons";
-import { Alert, Button, Skeleton, Tag } from "antd";
+import { Button, Tag } from "antd";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -18,6 +18,7 @@ import {
   type PublicRelease,
 } from "../data/releases";
 import { ReleasePreviewStrip } from "../components/Releases/ReleasePreviewStrip";
+import { SectionLoadError, SectionSkeleton } from "../components/SectionStates";
 import { usePrepackagedDatasets } from "../hooks/usePrepackagedDatasets";
 import { getPrepackagedDatasetPreviewTiles } from "../utils/prepackagedDatasetPreviews";
 import {
@@ -222,7 +223,7 @@ function buildPrepackagedStats(pkg: IPrepackagedDatasetPackage): ReleaseStat[] {
 
 export default function Releases() {
   const navigate = useNavigate();
-  const { data: dataPackages, isLoading, error } = usePrepackagedDatasets();
+  const { data: dataPackages, isLoading, error, refetch } = usePrepackagedDatasets();
   const availableDataPackages =
     dataPackages
       ?.filter((pkg) => pkg.versions.length > 0)
@@ -259,16 +260,12 @@ export default function Releases() {
             />
           ))}
 
-          {isLoading && (
-            <Skeleton active paragraph={{ rows: 6 }} className="p-2" />
-          )}
+          {isLoading && <SectionSkeleton rows={6} label="Loading data packages" />}
 
           {error && (
-            <Alert
-              type="error"
-              showIcon
-              message="Could not load dataset packages"
-              description={error instanceof Error ? error.message : undefined}
+            <SectionLoadError
+              title="The data packages couldn’t load"
+              onRetry={() => void refetch()}
             />
           )}
 

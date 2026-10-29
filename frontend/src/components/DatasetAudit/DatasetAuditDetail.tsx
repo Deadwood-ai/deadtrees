@@ -12,6 +12,7 @@ import { useAuth } from "../../hooks/useAuthProvider";
 
 // Sub-components
 import AuditHeader from "./AuditHeader";
+import { MapPageSkeleton } from "../PageSkeletons";
 import { AuditFooterFormItem } from "./AuditFooter";
 import {
 	UserFlagsCard,
@@ -280,14 +281,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 
 	// Show loading state
 	if (isLoading) {
-		return (
-			<div className="flex h-full w-full items-center justify-center">
-				<div className="text-center">
-					<div className="mb-2">Loading audit...</div>
-					{isLockingAudit && <div className="text-sm text-gray-500">Securing audit lock...</div>}
-				</div>
-			</div>
-		);
+		return <MapPageSkeleton label={isLockingAudit ? "Securing the audit lock" : "Loading audit"} />;
 	}
 
 	if (auditLockError) {

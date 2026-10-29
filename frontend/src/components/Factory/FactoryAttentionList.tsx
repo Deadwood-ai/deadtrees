@@ -1,10 +1,11 @@
-import { Skeleton, Table, Tag, Tooltip, Typography } from "antd";
+import { Table, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { Link } from "react-router-dom";
 import { stageLabel } from "../DatasetStatus/status";
 import { factoryDatasetsPath } from "./factoryFilters";
 import { ATTENTION_DESCRIPTIONS, ATTENTION_SINCE_LABELS, attentionLabel, attentionTone, linearFailureSearchUrl, stateLabel, type FactoryTone } from "./factoryFormat";
-import { EmptyNote, FactoryError, SectionCard, TimeCell } from "./FactoryPrimitives";
+import { FactoryError, SectionCard, TimeCell } from "./FactoryPrimitives";
+import { InlineEmpty, SectionSkeleton } from "../SectionStates";
 import type { FactoryAttentionGroup, FactoryOperations, FactoryRow } from "./factoryTypes";
 
 const { Text } = Typography;
@@ -164,9 +165,9 @@ export default function FactoryAttentionList({ operations, isLoading, error, onR
 			}
 		>
 			{error && !operations ? (
-				<FactoryError error={error} onRetry={onRetry} title="Could not load the attention list" />
+				<FactoryError error={error} onRetry={onRetry} title="The attention list couldn’t load" />
 			) : isLoading || !operations ? (
-				<Skeleton active paragraph={{ rows: 4 }} />
+				<SectionSkeleton rows={4} label="Loading the attention list" />
 			) : (
 				<>
 					<Text type="secondary" className="mb-2 block text-xs" data-testid="factory-attention-summary">
@@ -182,7 +183,7 @@ export default function FactoryAttentionList({ operations, isLoading, error, onR
 						)}
 					</Text>
 					{operations.attention_groups.length === 0 ? (
-						<EmptyNote>Nothing needs attention right now by these reasons. Waiting work and running claims are listed below.</EmptyNote>
+						<InlineEmpty>Nothing needs attention right now by these reasons. Waiting work and running claims are listed below.</InlineEmpty>
 					) : (
 						<Table
 							size="small"

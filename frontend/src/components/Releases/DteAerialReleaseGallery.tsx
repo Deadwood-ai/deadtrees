@@ -20,6 +20,7 @@ import {
 import { SegmentationMaskPreview } from "./SegmentationMaskPreview";
 import { MASK_COLORS } from "./maskRendering";
 import { useNearViewport } from "./useNearViewport";
+import { InlineSkeleton } from "../SectionStates";
 
 type SortKey = "dataset" | "biome" | "west-east" | "north-south";
 type GalleryResolutionFilter = "all" | "20" | "10" | "5";
@@ -65,14 +66,8 @@ interface DatasetLocationLabels {
 
 const formatDatasetLocationLabels = (
   adminInfo: DteAerialDatasetAdminInfo | undefined,
-  isLoading: boolean,
 ): DatasetLocationLabels => {
-  if (!adminInfo) {
-    return {
-      primary: isLoading ? "Loading metadata" : "Location unavailable",
-      secondary: null,
-    };
-  }
+  if (!adminInfo) return { primary: "Location unavailable", secondary: null };
 
   const country = normalizeMetadataValue(adminInfo.admin_level_1);
   const region = normalizeMetadataValue(adminInfo.admin_level_2);
@@ -96,10 +91,8 @@ const formatDatasetLocationLabels = (
 
 const formatAcquisitionDate = (
   adminInfo: DteAerialDatasetAdminInfo | undefined,
-  isLoading: boolean,
 ) => {
-  if (!adminInfo) return isLoading ? "Loading" : "Unknown";
-  if (!adminInfo.aquisition_year) return "Unknown";
+  if (!adminInfo?.aquisition_year) return "Unknown";
 
   const year = Number(adminInfo.aquisition_year);
   const month = adminInfo.aquisition_month
@@ -119,12 +112,9 @@ const formatAcquisitionDate = (
   );
 };
 
-const formatPlatform = (
-  platform: string | null | undefined,
-  isLoading: boolean,
-) => {
+const formatPlatform = (platform: string | null | undefined) => {
   const normalized = normalizeMetadataValue(platform);
-  if (!normalized) return isLoading ? "Loading" : "Unknown";
+  if (!normalized) return "Unknown";
   return normalized.slice(0, 1).toUpperCase() + normalized.slice(1);
 };
 
@@ -231,9 +221,9 @@ function PatchModalViewer({
   if (!selection) return null;
 
   const { site, patch } = selection;
-  const location = formatDatasetLocationLabels(adminInfo, false);
+  const location = formatDatasetLocationLabels(adminInfo);
   const coarseBiome = getCoarseBiomeGroup(site.biome);
-  const capturedDate = formatAcquisitionDate(adminInfo, false);
+  const capturedDate = formatAcquisitionDate(adminInfo);
   const subtitleParts = [
     location.primary !== "Location unavailable" ? location.primary : null,
     location.secondary,
@@ -380,9 +370,10 @@ function DatasetAdminCell({
   resolutionFilter: GalleryResolutionFilter;
   onResolutionChange: (value: GalleryResolutionFilter) => void;
 }) {
-  const location = formatDatasetLocationLabels(adminInfo, isAdminInfoLoading);
-  const capturedDate = formatAcquisitionDate(adminInfo, isAdminInfoLoading);
-  const platform = formatPlatform(adminInfo?.platform, isAdminInfoLoading);
+  const metadataPending = !adminInfo && isAdminInfoLoading;
+  const location = formatDatasetLocationLabels(adminInfo);
+  const capturedDate = formatAcquisitionDate(adminInfo);
+  const platform = formatPlatform(adminInfo?.platform);
   const coarseBiome = getCoarseBiomeGroup(site.biome);
   const authors = (adminInfo?.authors ?? []).filter(
     (author): author is string => Boolean(author && author.trim().length > 0),
@@ -410,47 +401,62 @@ function DatasetAdminCell({
       </div>
 
       <div className="flex flex-1 flex-col pt-3">
-        <div>
-          <p
-            className="m-0 text-[13px] font-semibold leading-[18px] text-gray-950"
-            title={location.primary}
-          >
-            {location.primary}
-          </p>
-          {location.secondary && (
-            <p
-              className="m-0 mt-0.5 text-[11px] leading-[14px] text-gray-500"
-              title={location.secondary}
-            >
-              {location.secondary}
-            </p>
-          )}
-        </div>
-
-        <div className="mt-2.5 space-y-1 text-[11px] leading-4 text-gray-700">
-          <div className="flex items-center gap-1.5">
-            <CalendarOutlined
-              aria-hidden
-              className="shrink-0 text-[12px] text-gray-400"
+        {metadataPending ? (
+          <div className="flex flex-col gap-2">
+            <InlineSkeleton label="Loading location" className="h-4 w-3/4" />
+            <InlineSkeleton
+              label="Loading capture date"
+              className="h-3 w-1/2"
             />
-            <span className="truncate font-medium">{capturedDate}</span>
-            <span aria-hidden className="text-gray-300">
-              ·
-            </span>
-            <span className="truncate font-medium">{platform}</span>
           </div>
-          {authorsLabel && (
-            <div className="flex items-start gap-1.5">
-              <TeamOutlined
-                aria-hidden
-                className="mt-[2px] shrink-0 text-[12px] text-gray-400"
-              />
-              <span className="line-clamp-2 font-medium" title={authorsLabel}>
-                {authorsLabel}
-              </span>
+        ) : (
+          <>
+            <div>
+              <p
+                className="m-0 text-[13px] font-semibold leading-[18px] text-gray-950"
+                title={location.primary}
+              >
+                {location.primary}
+              </p>
+              {location.secondary && (
+                <p
+                  className="m-0 mt-0.5 text-[11px] leading-[14px] text-gray-500"
+                  title={location.secondary}
+                >
+                  {location.secondary}
+                </p>
+              )}
             </div>
-          )}
-        </div>
+
+            <div className="mt-2.5 space-y-1 text-[11px] leading-4 text-gray-700">
+              <div className="flex items-center gap-1.5">
+                <CalendarOutlined
+                  aria-hidden
+                  className="shrink-0 text-[12px] text-gray-400"
+                />
+                <span className="truncate font-medium">{capturedDate}</span>
+                <span aria-hidden className="text-gray-300">
+                  ·
+                </span>
+                <span className="truncate font-medium">{platform}</span>
+              </div>
+              {authorsLabel && (
+                <div className="flex items-start gap-1.5">
+                  <TeamOutlined
+                    aria-hidden
+                    className="mt-[2px] shrink-0 text-[12px] text-gray-400"
+                  />
+                  <span
+                    className="line-clamp-2 font-medium"
+                    title={authorsLabel}
+                  >
+                    {authorsLabel}
+                  </span>
+                </div>
+              )}
+            </div>
+          </>
+        )}
 
         <div className="mt-3 border-t border-gray-100 pt-3">
           <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500">

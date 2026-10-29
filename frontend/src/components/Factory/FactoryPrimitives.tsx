@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Button, Result, Tag, Tooltip, Typography } from "antd";
+import { Button, Result, Tag, Tooltip } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 import { isFactoryPermissionError } from "../../hooks/useFactory";
@@ -12,8 +12,8 @@ import {
 	type FactoryTone,
 } from "./factoryFormat";
 import type { FactoryState } from "./factoryTypes";
+import { SectionLoadError } from "../SectionStates";
 
-const { Text } = Typography;
 
 /** Re-renders relative timestamps without refetching. */
 export function useNow(intervalMs = 30_000): number {
@@ -133,10 +133,6 @@ export function SectionCard({
 	);
 }
 
-export function EmptyNote({ children }: { children: ReactNode }) {
-	return <p className="m-0 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-500">{children}</p>;
-}
-
 export function FactoryDenied() {
 	return (
 		<div className="flex min-h-[60vh] items-center justify-center">
@@ -154,25 +150,19 @@ export function FactoryDenied() {
 	);
 }
 
+// Operators see the failure reason; everyone else gets the generic sentence.
 export function FactoryError({
 	error,
 	onRetry,
-	title = "Could not load Factory data",
+	title = "Factory data couldn’t load",
 }: {
 	error: unknown;
-	onRetry?: () => void;
+	onRetry: () => void;
 	title?: string;
 }) {
 	if (isFactoryPermissionError(error)) return <FactoryDenied />;
 	const message = error instanceof Error ? error.message : typeof error === "string" ? error : undefined;
-	return (
-		<Result
-			status="error"
-			title={title}
-			subTitle={message ? <Text type="secondary">{message}</Text> : "The request failed. Nothing has been changed."}
-			extra={onRetry ? <Button onClick={onRetry}>Try again</Button> : undefined}
-		/>
-	);
+	return <SectionLoadError title={title} description={message} onRetry={onRetry} />;
 }
 
 export function ReadOnlyBadge() {

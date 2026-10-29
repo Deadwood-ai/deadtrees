@@ -1,7 +1,7 @@
 import { Table, Tooltip } from "antd";
+import { InlineEmpty } from "../SectionStates";
 import type { ColumnsType } from "antd/es/table";
 import { formatUtc, truncate } from "./factoryFormat";
-import { EmptyNote } from "./FactoryPrimitives";
 import type { FactoryRecord } from "./factoryTypes";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
@@ -66,7 +66,7 @@ export default function FactoryRecordTable({
 	maxTextLength = 160,
 	testId,
 }: FactoryRecordTableProps) {
-	if (records.length === 0) return <EmptyNote>{emptyText}</EmptyNote>;
+	if (records.length === 0) return <InlineEmpty>{emptyText}</InlineEmpty>;
 
 	const keys =
 		columns ??

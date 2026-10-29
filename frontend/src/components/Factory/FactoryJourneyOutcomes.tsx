@@ -1,9 +1,10 @@
-import { Skeleton, Table, Typography } from "antd";
+import { Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { formatUtc } from "./factoryFormat";
 import { TREND_COLORS, bucketLongLabel, bucketShortLabel, formatCount, formatShare } from "./factoryTrends";
 import FactoryTrendChart from "./FactoryTrendChart";
-import { EmptyNote, FactoryError, SectionCard } from "./FactoryPrimitives";
+import { FactoryError, SectionCard } from "./FactoryPrimitives";
+import { InlineEmpty, SectionSkeleton } from "../SectionStates";
 import type { FactoryJourney, FactoryJourneyCohort } from "./factoryTypes";
 
 const { Text } = Typography;
@@ -20,14 +21,14 @@ export default function FactoryJourneyOutcomes({ journey, isLoading, error, onRe
 	if (error && !journey) {
 		return (
 			<SectionCard title="After the result" testId="factory-journey-outcomes">
-				<FactoryError error={error} onRetry={onRetry} title="Could not load journey outcomes" />
+				<FactoryError error={error} onRetry={onRetry} title="Journey outcomes couldn’t load" />
 			</SectionCard>
 		);
 	}
 	if (isLoading || !journey) {
 		return (
 			<SectionCard title="After the result" testId="factory-journey-outcomes">
-				<Skeleton active paragraph={{ rows: 5 }} />
+				<SectionSkeleton rows={5} label="Loading journey outcomes" />
 			</SectionCard>
 		);
 	}
@@ -80,7 +81,7 @@ export default function FactoryJourneyOutcomes({ journey, isLoading, error, onRe
 				results{journey.tracking_since ? ` since ${formatUtc(journey.tracking_since)}` : " from an unknown date"}; earlier weeks show “?”.
 			</Text>
 			{weekly.length === 0 ? (
-				<EmptyNote>No weekly journey rows were returned.</EmptyNote>
+				<InlineEmpty>No weekly journey rows were returned.</InlineEmpty>
 			) : (
 				<FactoryTrendChart
 					kind="grouped"
@@ -103,7 +104,7 @@ export default function FactoryJourneyOutcomes({ journey, isLoading, error, onRe
 				elapsed, so the same people are compared over the same time. A share appears once at least five are eligible.
 			</Text>
 			{journey.cohorts.length === 0 ? (
-				<EmptyNote>No contributor cohorts yet. Cohorts start with the first contributor tracked after measurement began.</EmptyNote>
+				<InlineEmpty>No contributor cohorts yet. Cohorts start with the first contributor tracked after measurement began.</InlineEmpty>
 			) : (
 				<Table size="small" pagination={false} dataSource={journey.cohorts} columns={cohortColumns} rowKey="week" scroll={{ x: 560 }} data-testid="factory-journey-cohorts" />
 			)}

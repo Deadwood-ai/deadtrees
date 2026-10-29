@@ -3,6 +3,7 @@ import { Button, Space, Tooltip, Typography } from "antd";
 import { useNavigate } from "react-router-dom";
 import { IDataset } from "../../types/dataset";
 import { useDatasetDetailsMap } from "../../hooks/useDatasetDetailsMapProvider";
+import { InlineSkeleton } from "../SectionStates";
 
 interface DatasetNavigationProps {
   currentDatasetId: number;
@@ -21,7 +22,7 @@ export default function DatasetNavigation({
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-2">
-        <Typography.Text className="text-gray-500">Loading related datasets...</Typography.Text>
+        <InlineSkeleton label="Loading related datasets" className="h-8 w-56" />
       </div>
     );
   }

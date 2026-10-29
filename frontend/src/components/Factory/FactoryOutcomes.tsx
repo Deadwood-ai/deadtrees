@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { Segmented, Skeleton, Typography } from "antd";
+import { Segmented, Typography } from "antd";
 import { Link } from "react-router-dom";
 import { factoryDatasetsPath } from "./factoryFilters";
 import { formatUtc } from "./factoryFormat";
 import { TREND_COLORS, evidenceNote, formatCount, formatGib, formatHours, toTrendBuckets } from "./factoryTrends";
 import FactoryTrendChart, { type TrendMarker } from "./FactoryTrendChart";
-import { EmptyNote, FactoryError, SectionCard, Unknown } from "./FactoryPrimitives";
+import { FactoryError, SectionCard, Unknown } from "./FactoryPrimitives";
+import { InlineEmpty, SectionSkeleton } from "../SectionStates";
 import type { FactoryFilters, FactoryMetricFilter, FactoryTrendPoint, FactoryTrends } from "./factoryTypes";
 
 const { Text } = Typography;
@@ -121,7 +122,7 @@ function SelectedBucketPanel({ trends, point }: { trends: FactoryTrends; point: 
 
 function SummaryStrip({ trends }: { trends: FactoryTrends }) {
 	const summary = trends.summary;
-	if (!summary) return <EmptyNote>No current summary was returned.</EmptyNote>;
+	if (!summary) return <InlineEmpty>No current summary was returned.</InlineEmpty>;
 	const pending = summary.waiting !== null && summary.waiting_failed !== null ? Math.max(0, summary.waiting - summary.waiting_failed) : null;
 	const known = trends.series;
 	const results = sum(known.map((point) => point.first_ready));
@@ -179,14 +180,14 @@ export default function FactoryOutcomes({ trends, isLoading, error, onRetry, sel
 	if (error && !trends) {
 		return (
 			<SectionCard title="Uploads and complete results" testId="factory-outcomes">
-				<FactoryError error={error} onRetry={onRetry} title="Could not load outcomes" />
+				<FactoryError error={error} onRetry={onRetry} title="Outcomes couldn’t load" />
 			</SectionCard>
 		);
 	}
 	if (isLoading || !trends) {
 		return (
 			<SectionCard title="Uploads and complete results" testId="factory-outcomes">
-				<Skeleton active paragraph={{ rows: 6 }} />
+				<SectionSkeleton rows={6} label="Loading outcomes" />
 			</SectionCard>
 		);
 	}
@@ -246,7 +247,7 @@ export default function FactoryOutcomes({ trends, isLoading, error, onRetry, sel
 					reruns). The two bars are separate events, not a success rate. Select a period to open its datasets.
 				</Text>
 				{points.length === 0 ? (
-					<EmptyNote>No periods were returned.</EmptyNote>
+					<InlineEmpty>No periods were returned.</InlineEmpty>
 				) : (
 					<FactoryTrendChart
 						kind="grouped"

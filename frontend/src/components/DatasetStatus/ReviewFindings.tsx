@@ -1,8 +1,8 @@
-import { Alert, Spin } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../../hooks/useSupabase";
 import { useAuth } from "../../hooks/useAuthProvider";
 import type { DatasetAuditUserInfo } from "../../hooks/useDatasetAudit";
+import { InlineLoadError, InlineSkeleton } from "../SectionStates";
 
 type OwnerReview = Pick<
   DatasetAuditUserInfo,
@@ -24,7 +24,7 @@ type OwnerReview = Pick<
 >;
 export default function ReviewFindings({ datasetId }: { datasetId: number }) {
   const { user } = useAuth();
-  const { data, isPending, isError } = useQuery({
+  const { data, isPending, isError, refetch } = useQuery({
     queryKey: ["owner-review-details", user?.id, datasetId],
     enabled: !!user,
     queryFn: async () => {
@@ -37,12 +37,14 @@ export default function ReviewFindings({ datasetId }: { datasetId: number }) {
     staleTime: 15_000,
   });
   if (isPending)
-    return <Spin size="small" aria-label="Loading review details" />;
+    return (
+      <InlineSkeleton label="Loading review details" className="h-4 w-48" />
+    );
   if (isError)
     return (
-      <Alert
-        type="warning"
-        message="Review details could not be loaded. Please reopen to try again."
+      <InlineLoadError
+        message="Review details couldn’t load."
+        onRetry={() => void refetch()}
       />
     );
   if (!data)

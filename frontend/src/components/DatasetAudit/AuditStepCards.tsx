@@ -10,6 +10,7 @@ import { OrthoMetadata } from "../../hooks/useDatasetAudit";
 import { DatasetFlag, FlagStatus } from "../../types/flags";
 import type { PhenologyMetadata } from "../../types/phenology";
 import PhenologyBar from "../PhenologyBar/PhenologyBar";
+import { InlineEmpty, InlineSkeleton } from "../SectionStates";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -154,9 +155,9 @@ export function UserFlagsCard({ flags, isFlagsLoading, isUpdatingFlag, datasetId
 				<Text type="secondary" className="text-[11px]">Only visible to auditors and the reporter</Text>
 			</div>
 			{isFlagsLoading ? (
-				<div className="text-xs text-gray-500">Loading flags...</div>
+				<InlineSkeleton label="Loading user-reported issues" className="h-8 w-full" />
 			) : flags.length === 0 ? (
-				<div className="text-xs text-gray-500">No issues reported by users for this dataset.</div>
+				<InlineEmpty>No issues reported by users for this dataset.</InlineEmpty>
 			) : (
 				<div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
 					{flags.map((f) => (
@@ -207,7 +208,7 @@ export function PhenologyCard({ dataset, phenologyData, isPhenologyLoading, onCo
 
 			{/* Phenology bar */}
 			{isPhenologyLoading ? (
-				<div className="mb-2 text-xs text-gray-500">Loading phenology data...</div>
+				<InlineSkeleton label="Loading phenology data" className="mb-2 h-6 w-full" />
 			) : phenologyData?.phenology_curve ? (
 				<div className="mb-8 mt-3 overflow-visible">
 					<PhenologyBar
@@ -437,7 +438,7 @@ export function FinalAssessmentCard({
 			{/* Technical Metadata */}
 			<div className="mb-3">
 				{isOrthoLoading ? (
-					<div className="text-xs text-gray-500">Loading metadata...</div>
+					<InlineSkeleton label="Loading technical metadata" className="h-8 w-full" />
 				) : orthoMetadata?.ortho_info ? (
 					<Collapse size="small">
 						<Panel header="📋 Technical Metadata" key="1">

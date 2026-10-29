@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Modal, Spin, Alert, Segmented } from "antd";
+import { Modal, Alert, Segmented } from "antd";
 import {
   AreaChartOutlined,
   ArrowUpOutlined,
@@ -13,6 +13,7 @@ import type {
 } from "../../hooks/usePolygonStats";
 import { palette } from "../../theme/palette";
 import { useIsMobile } from "../../hooks/useIsMobile";
+import { SectionLoadError, SectionSkeleton } from "../SectionStates";
 
 type ViewMode = "threshold" | "continuous";
 
@@ -22,6 +23,7 @@ interface PolygonStatsModalProps {
   data: PolygonStatsResponse | null;
   loading: boolean;
   error: string | null;
+  onRetry: () => void;
 }
 
 function computeChange(
@@ -93,6 +95,7 @@ const PolygonStatsModal = ({
   data,
   loading,
   error,
+  onRetry,
 }: PolygonStatsModalProps) => {
   const [viewMode, setViewMode] = useState<ViewMode>("threshold");
   const isMobile = useIsMobile();
@@ -179,20 +182,13 @@ const PolygonStatsModal = ({
         },
       }}
     >
-      {loading && (
-        <div className="flex flex-col items-center justify-center gap-3 py-16 text-gray-500">
-          <Spin size="large" />
-          <span>Computing statistics from COG data...</span>
-        </div>
-      )}
+      {loading && <SectionSkeleton rows={8} label="Computing statistics for this area" />}
 
       {error && (
-        <Alert
-          type="error"
-          message="Error"
+        <SectionLoadError
+          title="The statistics couldn’t be computed"
           description={error}
-          showIcon
-          className="mb-4"
+          onRetry={onRetry}
         />
       )}
 

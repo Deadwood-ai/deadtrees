@@ -5,7 +5,8 @@ import { Navigate } from "react-router-dom";
 import { fetchBenchmarkFiles } from "../../api/disturbanceBenchmark";
 import { useAuth } from "../../hooks/useAuthProvider";
 import { useCanAudit } from "../../hooks/useUserPrivileges";
-import StatusPage, { StatusPageLoading } from "../StatusPage";
+import StatusPage from "../StatusPage";
+import { PageSkeleton } from "../PageSkeletons";
 
 const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000;
 const BenchmarkFilesContext = createContext<string | null>(null);
@@ -63,7 +64,7 @@ export default function BenchmarkAccess({
   });
 
   if (privileges.isLoading || (privileges.canAudit && grant.isPending))
-    return <StatusPageLoading label="Checking access…" />;
+    return <PageSkeleton label="Checking access" />;
   if (privileges.isError)
     return <RetryPage onRetry={() => void privileges.refetch()} />;
   if (!privileges.canAudit) return <Navigate to="/releases" replace />;

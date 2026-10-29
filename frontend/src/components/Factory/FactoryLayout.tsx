@@ -1,12 +1,14 @@
 import { Suspense } from "react";
-import { Button, Segmented, Spin, Typography } from "antd";
+import { Button, Segmented, Typography } from "antd";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { RequireAuth } from "../AuthGate";
 import { useCanOperate } from "../../hooks/useUserPrivileges";
 import { FactorySelectionProvider } from "./FactorySelectionContext";
 import FactorySelectionTray from "./FactorySelectionTray";
 import { ReadOnlyBadge } from "./FactoryPrimitives";
-import StatusPage, { StatusPageLoading } from "../StatusPage";
+import StatusPage from "../StatusPage";
+import { PageSkeleton } from "../PageSkeletons";
+import { SectionSkeleton } from "../SectionStates";
 
 const { Title, Text } = Typography;
 
@@ -31,7 +33,7 @@ function FactoryShell() {
 	const location = useLocation();
 	const navigate = useNavigate();
 
-	if (isLoading) return <StatusPageLoading label="Checking access…" />;
+	if (isLoading) return <PageSkeleton label="Checking access" />;
 
 	if (isError) {
 		return (
@@ -95,15 +97,7 @@ function FactoryShell() {
 							]}
 						/>
 					</header>
-					{/* The shell fills the screen and keeps the footer below the fold, so a
-					    section loader stays bounded under the header. */}
-					<Suspense
-						fallback={
-							<div className="flex min-h-60 items-center justify-center">
-								<Spin size="large" />
-							</div>
-						}
-					>
+					<Suspense fallback={<SectionSkeleton rows={8} label="Loading section" />}>
 						<Outlet />
 					</Suspense>
 				</div>

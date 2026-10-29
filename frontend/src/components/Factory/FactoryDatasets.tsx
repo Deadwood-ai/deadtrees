@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from "react";
+import { SearchOutlined } from "@ant-design/icons";
 import { Alert, Button, Segmented, Table, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { Link, useSearchParams } from "react-router-dom";
@@ -10,6 +11,8 @@ import { AttentionReasonTag, AttentionSince } from "./FactoryAttentionList";
 import FactoryDatasetFilters from "./FactoryDatasetFilters";
 import { useFactorySelection } from "./FactorySelectionContext";
 import { FactoryError, FactoryStateTag, Freshness, TimeCell, Unknown, useNow } from "./FactoryPrimitives";
+import { InlineSkeleton, SectionSkeleton } from "../SectionStates";
+import EmptyStatePanel from "../EmptyStatePanel";
 import type { FactoryFilters, FactoryRow } from "./factoryTypes";
 import { useFactoryListPosition } from "./useFactoryListPosition";
 
@@ -208,7 +211,7 @@ export default function FactoryDatasets() {
 		return (
 			<div className="space-y-4">
 				<FactoryDatasetFilters filters={filters} onChange={applyFilters} onReset={() => setParams(new URLSearchParams())} />
-				<FactoryError error={query.error} onRetry={() => void query.refetch()} title="Could not load datasets" />
+				<FactoryError error={query.error} onRetry={() => void query.refetch()} title="Datasets couldn’t load" />
 			</div>
 		);
 	}
@@ -237,7 +240,7 @@ export default function FactoryDatasets() {
 								</>
 							)
 						) : (
-							"Loading datasets…"
+							<InlineSkeleton label="Loading the dataset count" className="h-4 w-48" />
 						)}
 					</Text>
 					<div className="flex flex-wrap items-center gap-3">
@@ -259,7 +262,7 @@ export default function FactoryDatasets() {
 					dataSource={rows}
 					columns={columns}
 					rowKey="dataset_id"
-					loading={query.isLoading || query.isPlaceholderData}
+					loading={query.isPlaceholderData}
 					size="middle"
 					rowClassName={query.isPlaceholderData ? "opacity-50" : undefined}
 					rowSelection={{
@@ -275,13 +278,16 @@ export default function FactoryDatasets() {
 						columnTitle: (originNode) => <Tooltip title="Selection persists across pages and filters">{originNode}</Tooltip>,
 					}}
 					locale={{
-						emptyText: (
-							<div className="py-8 text-center text-gray-500">
-								<p className="m-0">No datasets match these filters.</p>
-								<Button type="link" onClick={() => setParams(new URLSearchParams())}>
-									Clear filters
-								</Button>
-							</div>
+						// The first page arrives as rows in place; afterwards an empty table means no match.
+						emptyText: query.isLoading ? (
+							<SectionSkeleton rows={8} label="Loading datasets" />
+						) : (
+							<EmptyStatePanel
+								icon={<SearchOutlined />}
+								title="No datasets match these filters"
+								description="Clear a filter to see more datasets."
+								action={<Button onClick={() => setParams(new URLSearchParams())}>Clear filters</Button>}
+							/>
 						),
 					}}
 					pagination={{
