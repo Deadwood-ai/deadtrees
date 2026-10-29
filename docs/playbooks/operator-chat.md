@@ -212,6 +212,14 @@ Each tick:
    Janusch, a new coverage gap, a failed tick), it also writes the digest as a
    note to `outbox/`.
 
+The model calls use the processing server's own Claude login
+(`~/.claude/.credentials.json`). When it expires, the journal shows `OAuth session
+expired`, the inbox read and Linear filing stop, and the digest only shows a
+`[gap]` line while the verdict stays as it was (28 Oct 2026, 05:07-09:07 UTC).
+Only Janusch can sign in again (`claude` on the host); the next tick then
+catches up, because the inbox window and the baseline advance only after
+success.
+
 A relay session in the Deadtrees project, running on the processing server,
 waits for notes in `~/.local/state/deadtrees-monitor/outbox/` (for example a
 background shell loop that ends when a `*.md` file appears, re-armed every two
