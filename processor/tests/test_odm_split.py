@@ -45,7 +45,7 @@ def test_split_command_turns_on_split_merge_without_alignment():
 
 	split = split_odm_command(command, SplitPlan(area_km2=7.9, pieces=4, shots_per_piece=314), 150.0)
 
-	assert split == ['--split', '314', '--split-overlap', '150', '--sm-no-align', *command]
+	assert split == ['--split', '314', '--split-overlap', '150', '--sm-no-align', '--rerun-from', 'merge', *command]
 
 
 def test_missing_piece_orthophotos_names_pieces_without_orthophoto_or_cutline(monkeypatch):
@@ -131,7 +131,9 @@ def test_main_hands_every_submodel_its_part_of_the_reconstruction(tmp_path, monk
 	tracks = types.SimpleNamespace(get_shot_observations=lambda shot: {f'p_{shot}': object()})
 	modules = {
 		'opensfm': types.ModuleType('opensfm'),
-		'opensfm.dataset': types.SimpleNamespace(DataSet=lambda path: types.SimpleNamespace(load_tracks_manager=lambda: tracks)),
+		'opensfm.dataset': types.SimpleNamespace(
+			DataSet=lambda path: types.SimpleNamespace(load_tracks_manager=lambda: tracks)
+		),
 		'opensfm.large': types.ModuleType('opensfm.large'),
 		'opensfm.large.tools': types.SimpleNamespace(
 			kmeans=lambda positions, k: (0, (positions[:, 0] > 0).astype(np.int32).reshape(-1, 1), None)

@@ -86,7 +86,9 @@ def piece_reconstructions(reconstructions: list, shot_ids: set, observed_track_i
 		observed = set()
 		for shot_id in shots:
 			observed.update(observed_track_ids(shot_id))
-		points = {point_id: point for point_id, point in reconstruction.get('points', {}).items() if point_id in observed}
+		points = {
+			point_id: point for point_id, point in reconstruction.get('points', {}).items() if point_id in observed
+		}
 		result.append({**reconstruction, 'shots': shots, 'points': points})
 	return result
 
@@ -111,7 +113,11 @@ def main(opensfm_dir: str, pieces: int, overlap_m: float) -> None:
 		reconstructions = json.load(reconstruction_file)
 	shot_ids = [shot_id for reconstruction in reconstructions for shot_id in reconstruction.get('shots', {})]
 	positions = np.array(
-		[camera_center(shot)[:2] for reconstruction in reconstructions for shot in reconstruction.get('shots', {}).values()],
+		[
+			camera_center(shot)[:2]
+			for reconstruction in reconstructions
+			for shot in reconstruction.get('shots', {}).values()
+		],
 		dtype=np.float32,
 	)
 	if pieces < 2 or len(shot_ids) < pieces * MIN_PIECE_SHOTS:
@@ -136,7 +142,9 @@ def main(opensfm_dir: str, pieces: int, overlap_m: float) -> None:
 	for index, cluster in enumerate(clusters):
 		submodel_dir = meta_data._submodel_path(index)
 		piece = piece_reconstructions(
-			reconstructions, {shot_ids[i] for i in cluster}, lambda shot: tracks_manager.get_shot_observations(shot).keys()
+			reconstructions,
+			{shot_ids[i] for i in cluster},
+			lambda shot: tracks_manager.get_shot_observations(shot).keys(),
 		)
 		with open(os.path.join(submodel_dir, 'reconstruction.json'), 'w') as reconstruction_file:
 			json.dump(piece, reconstruction_file)

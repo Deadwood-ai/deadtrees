@@ -50,9 +50,22 @@ def split_odm_command(odm_command: list[str], plan: SplitPlan, overlap_m: float)
 
 	ODM only enters split-merge when the mission has more images than ``--split``; it then
 	finds the submodels already there and does not cluster again, so the value only has
-	to stay below the image count.
+	to stay below the image count. Without an explicit ``--rerun-from``, ODM sees options
+	that differ from pass 1 together with ``--split`` and reruns everything from the dataset
+	stage, including feature matching and clustering (opendm/arghelpers.py
+	``find_rerun_stage``). Rerunning from the merge stage keeps pass 1's features and the
+	prepared submodels, and the split stage still renders every piece that is not done.
 	"""
-	return ['--split', str(plan.shots_per_piece), '--split-overlap', f'{overlap_m:g}', '--sm-no-align', *odm_command]
+	return [
+		'--split',
+		str(plan.shots_per_piece),
+		'--split-overlap',
+		f'{overlap_m:g}',
+		'--sm-no-align',
+		'--rerun-from',
+		'merge',
+		*odm_command,
+	]
 
 
 def submodel_name(index: int) -> str:
@@ -65,7 +78,9 @@ def missing_piece_orthophotos(volume_name: str, project_name: str, plan: SplitPl
 		submodel_name(index)
 		for index in range(plan.pieces)
 		if not all(
-			path_exists_on_shared_volume(volume_name, f'{project_name}/submodels/{submodel_name(index)}/{path}', dataset_id)
+			path_exists_on_shared_volume(
+				volume_name, f'{project_name}/submodels/{submodel_name(index)}/{path}', dataset_id
+			)
 			for path in PIECE_ORTHOPHOTOS
 		)
 	]
