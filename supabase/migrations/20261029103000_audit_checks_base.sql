@@ -310,10 +310,13 @@ create view public.audit_disagreements
 with (security_invoker = true)
 as
 with counted as (
-	select a.*
-	from public.audit_latest_assessments a
+	-- filter to the current run first, so a newer run that is not current yet
+	-- cannot hide the current run's answers
+	select distinct on (a.check_key, a.dataset_id, a.crop_id, a.layer, a.assessor) a.*
+	from public.audit_assessments a
 	left join public.audit_current_runs c on c.dataset_id = a.dataset_id and c.check_key = a.check_key
 	where a.assessor_kind = 'person' or a.run_id = c.run_id
+	order by a.check_key, a.dataset_id, a.crop_id, a.layer, a.assessor, a.created_at desc, a.id desc
 ), targets as (
 	select
 		check_key, dataset_id, crop_id, layer,
@@ -375,6 +378,13 @@ alter table public.audit_images enable row level security;
 alter table public.audit_assessments enable row level security;
 alter table public.audit_benchmark_pins enable row level security;
 
+-- Supabase's default privileges give the API roles TRUNCATE, REFERENCES and
+-- TRIGGER (all privileges on older projects); TRUNCATE bypasses RLS and the
+-- append-only triggers, so start from nothing and grant only what is used.
+revoke all on public.audit_checks, public.audit_check_versions, public.audit_check_runs,
+	public.audit_current_runs, public.audit_crops, public.audit_images, public.audit_assessments,
+	public.audit_benchmark_pins, public.audit_latest_assessments, public.audit_disagreements
+	from public, anon, authenticated;
 grant select on public.audit_checks, public.audit_check_versions, public.audit_check_runs,
 	public.audit_current_runs, public.audit_crops, public.audit_images, public.audit_assessments,
 	public.audit_benchmark_pins, public.audit_latest_assessments, public.audit_disagreements

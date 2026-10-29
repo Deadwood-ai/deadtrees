@@ -320,6 +320,61 @@ def test_latest_answers_and_disagreements_follow_the_current_run(db):
 	assert db.execute('SELECT count(*) FROM public.audit_assessments WHERE run_id=%s', (old_run,)).fetchone() == (1,)
 
 
+def test_a_newer_run_that_is_not_current_does_not_hide_the_current_answers(db):
+	auditor = create_user(db, can_audit=True)
+	dataset = create_dataset(db, create_user(db))
+	version_id = register_version(db)
+	run = create_run(db, dataset, version_id)
+	crop = create_crop(db, dataset)
+	model_row(db, dataset, run, crop, 'major')
+	person_row(db, auditor, dataset, crop, 'ok', run)
+	# a rerun writes an answer but fails before it becomes the current run
+	rerun = create_run(db, dataset, version_id, current=False)
+	model_row(db, dataset, rerun, crop, 'ok')
+	act_as(db, auditor)
+	assert db.execute('SELECT verdicts FROM public.audit_disagreements WHERE crop_id=%s', (crop,)).fetchall() == [
+		({str(auditor): 'ok', 'luna-medium/v4': 'major'},)
+	]
+
+
+def test_api_roles_get_only_the_privileges_the_policies_use(db):
+	tables = (
+		'audit_checks',
+		'audit_check_versions',
+		'audit_check_runs',
+		'audit_current_runs',
+		'audit_crops',
+		'audit_images',
+		'audit_assessments',
+		'audit_benchmark_pins',
+		'audit_latest_assessments',
+		'audit_disagreements',
+	)
+	granted = {
+		(role, table): set(privileges)
+		for role, table, privileges in db.execute(
+			'SELECT grantee,table_name,array_agg(privilege_type::text) FROM information_schema.role_table_grants '
+			"WHERE table_schema='public' AND table_name=ANY(%s) AND grantee IN ('anon','authenticated') GROUP BY 1,2",
+			(list(tables),),
+		)
+	}
+	writes = {
+		'audit_check_versions': {'INSERT'},
+		'audit_check_runs': {'INSERT'},
+		'audit_current_runs': {'INSERT', 'UPDATE', 'DELETE'},
+		'audit_crops': {'INSERT'},
+		'audit_images': {'INSERT'},
+		'audit_assessments': {'INSERT'},
+	}
+	assert granted == {('authenticated', t): {'SELECT'} | writes.get(t, set()) for t in tables}
+	# the remaining updates are column grants: run state, crop sets, version mode
+	assert db.execute(
+		"SELECT has_column_privilege('authenticated','public.audit_crops','pixel_x0','UPDATE'), "
+		"has_column_privilege('authenticated','public.audit_crops','crop_sets','UPDATE'), "
+		"has_column_privilege('authenticated','public.audit_check_versions','config','UPDATE')"
+	).fetchone() == (False, True, False)
+
+
 def test_benchmark_split_is_fixed_by_hash_or_pin(db):
 	dataset = create_dataset(db, create_user(db))
 	auditor = create_user(db, can_audit=True)
