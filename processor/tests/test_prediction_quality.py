@@ -164,8 +164,8 @@ def test_store_rows_follow_the_audit_base_tables():
 	result = CheckResult(dataset_id=42, epsg=EPSG, crops=[r], verdicts={'deadwood': {}, 'forest': {}}, tiles_total=9, seconds=1)
 	labels = {'deadwood': 11, 'forest': 12}
 	crops = store.crop_rows(result, 'abc', lambda tile: {'type': 'Polygon', 'coordinates': []})
-	assert [c['crop_set'] for c in crops] == ['exclude', 'training']
-	assert crops[0]['selection']['weight'] is None and crops[1]['selection']['weight'] == 0.2
+	assert len(crops) == 1 and crops[0]['crop_sets'] == ['exclude', 'training']
+	assert 'weight' not in crops[0]['selection']['exclude'] and crops[0]['selection']['training']['weight'] == 0.2
 	images = store.image_rows(result, labels)
 	assert [(i['kind'], i['label_id']) for i in images] == [
 		('raw', None), ('deadwood_overlay', 11), ('forest_cover_overlay', 12)
@@ -174,6 +174,7 @@ def test_store_rows_follow_the_audit_base_tables():
 	assert [(x['layer'], x['label_id'], x['verdict']) for x in rows] == [
 		('image', None, 'ok'), ('deadwood', 11, 'major'), ('forest_cover', 12, 'major')
 	]
+	assert rows[0]['modes'] == {'m0_not_assessable': {'likelihood': 0}}
 	assert rows[1]['modes']['m1_dead_missed'] == {'likelihood': 5.0, 'area_pct': 1.0}
 	run = store.run_row(result, 'abc', labels, {'luna-medium': 'gpt-6-luna'})
 	assert run['check_key'] == 'prediction_quality' and run['coverage']['training_set'] == 1

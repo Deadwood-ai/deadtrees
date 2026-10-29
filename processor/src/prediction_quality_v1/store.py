@@ -48,32 +48,37 @@ def run_row(result: CheckResult, ortho_sha256: str, label_ids: dict, judges: dic
 
 
 def crop_rows(result: CheckResult, ortho_sha256: str, footprint) -> list[dict]:
-	"""One row per crop and set; footprint(tile) -> WGS84 polygon as GeoJSON."""
+	"""One row per crop window with every set it belongs to; footprint(tile) -> WGS84 GeoJSON polygon.
+
+	Picker details are kept per set in selection, so a later picker can append its set to the row.
+	"""
 	rows = []
 	for r in result.crops:
-		for crop_set in r.tile.sets:
-			x0, y0, x1, y1 = r.tile.pixel_window
-			rows.append(
-				{
-					'dataset_id': result.dataset_id,
-					'ortho_sha256': ortho_sha256,
-					'crop_set': crop_set,
-					'selected_by': SELECTED_BY,
-					'pixel_x0': x0,
-					'pixel_y0': y0,
-					'pixel_x1': x1,
-					'pixel_y1': y1,
-					'geometry': footprint(r.tile),
-					'mpp': r.crop.mpp,
-					'size_px': CROP_PX,
-					'selection': {
-						'predicted': {'deadwood': r.tile.deadwood_share, 'forest_cover': r.tile.forest_share},
-						'stratum': list(r.tile.stratum),
-						'weight': r.tile.weight if crop_set == 'training' else None,
-					},
-					'_tile_id': r.tile.tile_id,  # worker-side key to attach images and assessments
-				}
-			)
+		x0, y0, x1, y1 = r.tile.pixel_window
+		common = {
+			'predicted': {'deadwood': r.tile.deadwood_share, 'forest_cover': r.tile.forest_share},
+			'stratum': list(r.tile.stratum),
+		}
+		rows.append(
+			{
+				'dataset_id': result.dataset_id,
+				'ortho_sha256': ortho_sha256,
+				'crop_sets': list(r.tile.sets),
+				'selected_by': SELECTED_BY,
+				'pixel_x0': x0,
+				'pixel_y0': y0,
+				'pixel_x1': x1,
+				'pixel_y1': y1,
+				'geometry': footprint(r.tile),
+				'mpp': r.crop.mpp,
+				'size_px': CROP_PX,
+				'selection': {
+					s: {**common, 'picker': SELECTED_BY, **({'weight': r.tile.weight} if s == 'training' else {})}
+					for s in r.tile.sets
+				},
+				'_tile_id': r.tile.tile_id,  # worker-side key to attach images and assessments
+			}
+		)
 	return rows
 
 
@@ -123,7 +128,8 @@ def assessment_rows(result: CheckResult, label_ids: dict) -> list[dict]:
 					'label_id': None,
 					'verdict': 'ok' if a.assessable else 'major',
 					'major_likelihood': None,
-					'modes': {'m0_assessable': {'likelihood': 100 if a.assessable else 0}},
+					# Every mode names a problem, so a high likelihood always means one (base tables convention).
+					'modes': {'m0_not_assessable': {'likelihood': 0 if a.assessable else 100}},
 					'details': {},
 					'raw': {'text': a.raw},
 				}
