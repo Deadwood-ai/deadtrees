@@ -40,13 +40,19 @@ RUN grep -E '^(torch|torchvision)==' /app/processor/requirements.txt > /tmp/torc
     rm /tmp/torch-requirements.txt /tmp/docker-requirements.txt && \
     python -m pip check
 
-FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.3@sha256:b50822a4059629f6a579908584e25e6adccfc70a57914290dd01217f19871d08 AS runtime
+FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.3@sha256:b50822a4059629f6a579908584e25e6adccfc70a57914290dd01217f19871d08 AS runtime-os
 
+# Take Ubuntu security fixes newer than the pinned base image, e.g. libbrotli1
+# for CVE-2026-111497 (DT-1473). The security audit scans this stage.
 RUN rm -f /etc/apt/sources.list.d/apache-arrow*.list /etc/apt/sources.list.d/apache-arrow*.sources && \
-    apt-get update && apt-get install -y --no-install-recommends \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -o Dpkg::Options::=--force-confold && \
+    apt-get install -y --no-install-recommends \
     python3 \
     openssh-client \
     && rm -rf /var/lib/apt/lists/*
+
+FROM runtime-os AS runtime
 
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"

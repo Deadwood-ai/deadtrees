@@ -7,7 +7,7 @@ with the CISA Known Exploited Vulnerabilities feed and
 scripts/security_stack.toml, prints a Markdown report and exits 1 when
 something needs a decision:
 
-- a Python or base-image finding that is on the KEV list (npm audit only
+- a Python or image finding that is on the KEV list (npm audit only
   gives GHSA ids, so npm findings can't be matched)
 - a Python advisory that is not accepted in security_stack.toml
 - an npm high or critical advisory that is not accepted
@@ -315,7 +315,7 @@ def render(report: Report, today: dt.date, kev: dict | None) -> str:
 
 	if report.image_counts:
 		counts = ', '.join(f'{k} {v}' for k, v in sorted(report.image_counts.items()))
-		lines += ['## Base image (OS packages)', '', f'High and critical CVEs: {counts}. Red only if on CISA KEV.', '']
+		lines += ['## Images (OS packages)', '', f'High and critical CVEs: {counts}. Red only if on CISA KEV.', '']
 
 	if report.workflow:
 		lines += ['## Workflow audit (zizmor)', '']
@@ -363,12 +363,18 @@ def build_report(results: Path, skip: set[str] = frozenset()) -> Report:
 		if data is not None:
 			report.findings += parse_npm_audit(data, 'frontend')
 	if 'image' not in skip:
-		data = read_result(results / 'trivy-base-image.json', 'image', report)
-		if data is not None:
-			image = parse_trivy(data, 'gdal base image')
+		image_files = sorted(results.glob('trivy-*-image.json'))
+		if not image_files:
+			report.missing.append('image')
+		for path in image_files:
+			target = f'{path.stem.removeprefix("trivy-").removesuffix("-image")} image'
+			data = read_result(path, target, report)
+			if data is None:
+				continue
+			image = parse_trivy(data, target)
 			report.findings += image
 			for f in image:
-				label = f'{f.severity}{" fixable" if f.fix else ""}'
+				label = f'{target}: {f.severity}{" fixable" if f.fix else ""}'
 				report.image_counts[label] = report.image_counts.get(label, 0) + 1
 	if 'workflows' not in skip:
 		data = read_result(results / 'zizmor.json', 'workflows', report)
