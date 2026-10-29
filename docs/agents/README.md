@@ -27,6 +27,8 @@ folders are intentionally retired.
     local-only `docs/ops/*` files when present. For which hosts run a production
     worker and how each one auto-deploys, use `docs/playbooks/processor-hosts.md`.
 13. For manual QA runs, use `.agents/skills/run-deadtrees-qa/SKILL.md`.
+14. For security-audit findings, Dependabot alerts or accepting a risk, use
+    `docs/playbooks/security-audit.md`.
     Repository skills live in `.agents/skills/`; `.claude/skills/` links to the
     same folders so Claude Code discovers them. Add new skills under
     `.agents/skills/` and link them from `.claude/skills/`.

@@ -13,6 +13,7 @@ it). Start here, then open the linked docs that match the task.
 - Frontend changes: `frontend/AGENTS.md`
 - Platform monitoring: `docs/playbooks/platform-status-check.md`
 - Failed or stuck processing: `docs/playbooks/dataset-debugging.md`
+- Security audit findings and risk acceptance: `docs/playbooks/security-audit.md`
 - Routine production database reads: `docs/playbooks/analyst-database-access.md`
 - Local code review: `docs/agents/local-review-instructions.md`
 - Manual QA (production read-only and isolated local write):

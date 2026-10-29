@@ -159,7 +159,8 @@ For adding another processor host, use
 [`processor-worker-setup.md`](processor-worker-setup.md). Keep this release
 playbook focused on verifying the existing production deployment path.
 
-Useful verification commands:
+Useful verification commands (from the Mac; on the processing server itself, run
+the quoted command locally):
 
 ```bash
 ssh processing-server 'crontab -l | grep -E "processor_auto_deploy|processor_docker_maintenance"'

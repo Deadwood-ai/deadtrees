@@ -197,8 +197,10 @@ Healthy signs:
   connection or switch back to automatic host-key acceptance.
 - Missing Docker socket or NVIDIA runtime: ODM/model child containers may fail
   even though the processor container starts.
-- Permanently dead worker with an owned active row: manual queue intervention is
-  still required until the processor has heartbeat or lease recovery.
+- Permanently dead worker with an owned active row: workers write heartbeats, but
+  nothing uses them for recovery yet, and `requeue_dataset_processing` refuses a
+  claimed row. Releasing the claim is a manual production write that needs
+  Janusch (DT-1471).
 
 ## Disable Or Roll Back A Worker
 
