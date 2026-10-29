@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 
-const requestedTables: string[] = [];
+const { requestedTables } = vi.hoisted(() => ({ requestedTables: [] as string[] }));
 
 vi.mock("./useAuthProvider", () => ({
   useAuth: () => ({ status: "anonymous", user: null, session: null }),
@@ -71,7 +71,8 @@ describe("DataProvider", () => {
   it("requests nothing on other pages", async () => {
     renderAt("/");
 
-    await waitFor(() => expect(screen.getByText("loading")).toBeTruthy());
+    expect(screen.getByText("loading")).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(requestedTables).toEqual([]);
   });
 });

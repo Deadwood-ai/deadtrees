@@ -23,7 +23,7 @@ const DataProvider = ({ children }: DataProviderProps) => {
   const location = useLocation();
   const shouldFetchAuthors = useMemo(() => {
     const pathname = location.pathname;
-    // About, account and archive pages offer the author list (credits, upload and edit forms, filters).
+    // About, account and archive pages read the author list.
     // Authors come from the narrow archive read model; never prefetch the full public dataset view here,
     // it times out for anonymous visitors.
     if (pathname === "/about") return true;
