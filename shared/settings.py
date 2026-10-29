@@ -224,6 +224,12 @@ class Settings(BaseSettings):
 	# largest successful ODM ortho is 8.25 Gpx (9510), while 9654 (5.4 km² at fine GSD) ran out at 100 GB (DT-915).
 	# Kept just above that so every mission that has rendered before keeps its resolution.
 	ODM_MAX_ORTHO_PIXELS: float = 8.5e9
+	# Above this extent ODM's texturing outgrows the 100 GB container (8463, 8935, 8936, 9212 and 9251
+	# failed at 4.4-7.9 km², the largest success covers 4.2 km²), so the orthophoto pass runs in pieces
+	# of about the target area that overlap by ODM_SPLIT_OVERLAP_M (DT-1491).
+	ODM_SPLIT_MIN_AREA_KM2: float = 4.0
+	ODM_SPLIT_TARGET_AREA_KM2: float = 2.5
+	ODM_SPLIT_OVERLAP_M: float = 150.0
 
 	# Linear integration for processing failure notifications
 	LINEAR_ENABLED: bool = False

@@ -47,7 +47,13 @@ from processor.src.utils.debug_artifacts import (
 	write_debug_bundle,
 )
 from processor.src.utils.odm_inputs import select_odm_images
-from processor.src.utils.ortho_resolution import budgeted_resolution_cm, mission_extent, reduced_resolution_note
+from processor.src.utils.ortho_resolution import (
+	MissionExtent,
+	budgeted_resolution_cm,
+	mission_extent,
+	reduced_resolution_note,
+)
+from processor.src.utils.odm_split import SplitPlan, missing_piece_orthophotos, plan_split, split_odm_command
 from shared.exif_utils import extract_camera_nadir_deviation_degrees, extract_comprehensive_exif
 
 # RTK file extensions as specified in requirements
@@ -69,6 +75,7 @@ SKIP_SEAM_LEVELING_NOTE = (
 )
 PRUNE_POINTS_SCRIPT = Path(__file__).parent / 'utils' / 'odm_prune_points.py'
 CHECK_PHOTOS_SCRIPT = Path(__file__).parent / 'utils' / 'odm_check_photos.py'
+SPLIT_SUBMODELS_SCRIPT = Path(__file__).parent / 'utils' / 'odm_split_submodels.py'
 # Several DJI cameras write exactly 0 into these tags for nadir shots (DT-951).
 PLACEHOLDER_ZERO_PITCH_TAGS = {'GimbalPitchDegree', 'CameraPitchDegree'}
 # Fewer nadir images than this among oblique ones cannot make an orthophoto (e.g. one take-off frame).
@@ -194,19 +201,34 @@ def _filter_reconstruction_by_orientation(
 	return shots_dropped
 
 
-def _with_budgeted_ortho_resolution(
+def _plan_orthophoto_pass(
 	odm_command: list[str], volume_name: str, project_name: str, dataset_id: int, token: str
-) -> tuple[list[str], str | None]:
-	"""Return ``odm_command`` with a resolution whose orthophoto fits ``ODM_MAX_ORTHO_PIXELS``.
+) -> tuple[list[str], str | None, SplitPlan | None]:
+	"""Size the orthophoto pass from the filtered reconstruction, which already shows the mission's extent.
 
-	Runs between the two ODM passes, when the reconstruction already shows the mission's
-	extent. Missions that fit are left unchanged; otherwise also returns the note for the
-	dataset's additional information.
+	Returns the command with a resolution that fits ``ODM_MAX_ORTHO_PIXELS``, the note for the
+	dataset when that resolution is coarser than the native GSD, and the pieces to render a
+	mission too large to texture at once (odm_split.py), or None.
 	"""
 	raw_reconstruction = read_file_from_shared_volume(volume_name, f'{project_name}/{RECONSTRUCTION_FILE}', dataset_id)
-	extent = mission_extent(json.loads(raw_reconstruction)) if raw_reconstruction else None
+	reconstructions = json.loads(raw_reconstruction) if raw_reconstruction else []
+	extent = mission_extent(reconstructions) if reconstructions else None
 	if extent is None:
-		return odm_command, None
+		return odm_command, None, None
+	odm_command, note = _with_budgeted_ortho_resolution(odm_command, extent, dataset_id, token)
+	shot_count = sum(len(reconstruction.get('shots', {})) for reconstruction in reconstructions)
+	plan = plan_split(extent, shot_count, settings.ODM_SPLIT_MIN_AREA_KM2, settings.ODM_SPLIT_TARGET_AREA_KM2)
+	return odm_command, note, plan
+
+
+def _with_budgeted_ortho_resolution(
+	odm_command: list[str], extent: MissionExtent, dataset_id: int, token: str
+) -> tuple[list[str], str | None]:
+	"""Return ``odm_command`` with a resolution whose orthophoto fits ``ODM_MAX_ORTHO_PIXELS``, and the dataset note.
+
+	Missions that fit are left unchanged and get no note. A split mission merges its pieces
+	into one raster of the same extent, so the budget holds for it as well.
+	"""
 	index = odm_command.index('--orthophoto-resolution') + 1
 	requested_cm = float(odm_command[index])
 	resolution_cm = budgeted_resolution_cm(requested_cm, extent, settings.ODM_MAX_ORTHO_PIXELS)
@@ -301,6 +323,38 @@ def _prune_unobserved_points(
 		f'Pruned sparse points seen only by excluded shots: {summary}',
 		LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
 	)
+
+
+def _split_into_pieces(
+	client,
+	odm_command: list[str],
+	plan: SplitPlan,
+	volume_name: str,
+	project_name: str,
+	resource_labels: dict,
+	dataset_id: int,
+	token: str,
+) -> list[str]:
+	"""Cut the filtered reconstruction into ODM submodels and return the command that renders them (odm_split.py)."""
+	overlap_m = settings.ODM_SPLIT_OVERLAP_M
+	log_context = LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id)
+	logger.info(
+		f'Mission covers {plan.area_km2:.1f} km², more than ODM can texture at once '
+		f'({settings.ODM_SPLIT_MIN_AREA_KM2:g} km²); rendering the orthophoto in {plan.pieces} pieces '
+		f'that overlap by {overlap_m:g} m',
+		log_context,
+	)
+	summary = _run_script_in_odm_image(
+		client,
+		SPLIT_SUBMODELS_SCRIPT,
+		[f'/odm_data/{project_name}/opensfm', str(plan.pieces), f'{overlap_m:g}'],
+		volume_name,
+		resource_labels,
+		dataset_id,
+		'split',
+	)
+	logger.info(f'Orthophoto pieces (shots, own shots, points): {summary}', log_context)
+	return split_odm_command(odm_command, plan, overlap_m)
 
 
 def _check_photos_for_odm(
@@ -1087,11 +1141,15 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 				remove_file_from_shared_volume(
 					volume_name, f'{project_name}/{STOP_AFTER_RECONSTRUCTION_FLAG}', dataset_id
 				)
-				odm_command, reduced_resolution = _with_budgeted_ortho_resolution(
+				odm_command, reduced_resolution, split_plan = _plan_orthophoto_pass(
 					odm_command, volume_name, project_name, dataset_id, token
 				)
 				if reduced_resolution:
 					notes.append(reduced_resolution)
+				if split_plan:
+					odm_command = _split_into_pieces(
+						client, odm_command, split_plan, volume_name, project_name, resource_labels, dataset_id, token
+					)
 				odm_container, exit_status, stdout_logs = _run_odm_pass(
 					client, odm_command, volume_name, resource_labels, dataset_id, token, pass_name='orthophoto'
 				)
@@ -1107,6 +1165,13 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 						client, odm_command, volume_name, resource_labels, dataset_id, token, pass_name='texturing'
 					)
 					notes.append(SKIP_SEAM_LEVELING_NOTE)
+				if exit_status == 0 and split_plan:
+					missing = missing_piece_orthophotos(volume_name, project_name, split_plan, dataset_id)
+					if missing:
+						raise Exception(
+							f'ODM produced no orthophoto for {len(missing)} of {split_plan.pieces} pieces '
+							f'({", ".join(missing)}); the merged orthophoto would have holes'
+						)
 
 			if exit_status == 0:
 				odm_success = True

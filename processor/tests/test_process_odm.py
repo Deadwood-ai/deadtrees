@@ -636,7 +636,7 @@ def test_complete_odm_processing_with_real_images(odm_task, auth_token, zip_sour
 
 @pytest.mark.unit
 def test_orthophoto_pass_gets_a_coarser_resolution_when_the_raster_would_not_fit(fake_volume, monkeypatch):
-	from processor.src.process_odm import _with_budgeted_ortho_resolution
+	from processor.src.process_odm import _plan_orthophoto_pass
 
 	down = [3.141592653589793, 0.0, 0.0]
 	fake_volume(
@@ -654,7 +654,7 @@ def test_orthophoto_pass_gets_a_coarser_resolution_when_the_raster_would_not_fit
 	monkeypatch.setattr(settings, 'ODM_MAX_ORTHO_PIXELS', 8.5e9)
 	command = ['--fast-orthophoto', '--orthophoto-resolution', '1.0', '--project-path', '/odm_data', 'dataset_1']
 
-	budgeted, note = _with_budgeted_ortho_resolution(command, 'odm_processing_1', 'dataset_1', dataset_id=1, token='t')
+	budgeted, note, _ = _plan_orthophoto_pass(command, 'odm_processing_1', 'dataset_1', dataset_id=1, token='t')
 
 	assert budgeted[2] == '2.8'
 	assert budgeted[:2] + budgeted[3:] == command[:2] + command[3:]
@@ -664,7 +664,7 @@ def test_orthophoto_pass_gets_a_coarser_resolution_when_the_raster_would_not_fit
 
 @pytest.mark.unit
 def test_orthophoto_pass_keeps_the_resolution_when_the_raster_fits(fake_volume, monkeypatch):
-	from processor.src.process_odm import _with_budgeted_ortho_resolution
+	from processor.src.process_odm import _plan_orthophoto_pass
 
 	down = [3.141592653589793, 0.0, 0.0]
 	fake_volume(
@@ -682,10 +682,38 @@ def test_orthophoto_pass_keeps_the_resolution_when_the_raster_fits(fake_volume, 
 	monkeypatch.setattr(settings, 'ODM_MAX_ORTHO_PIXELS', 8.5e9)
 	command = ['--orthophoto-resolution', '1.0', 'dataset_1']
 
-	assert _with_budgeted_ortho_resolution(command, 'odm_processing_1', 'dataset_1', dataset_id=1, token='t') == (
+	assert _plan_orthophoto_pass(command, 'odm_processing_1', 'dataset_1', dataset_id=1, token='t') == (
 		command,
 		None,
+		None,
 	)
+
+
+@pytest.mark.unit
+def test_orthophoto_pass_of_a_mission_too_large_to_texture_is_planned_in_pieces(fake_volume, monkeypatch):
+	from processor.src.process_odm import _plan_orthophoto_pass
+
+	down = [3.141592653589793, 0.0, 0.0]
+	shots = {
+		f's{x}_{y}': {'camera': 'c', 'rotation': down, 'translation': [-x * 600, -y * 600, 60]}
+		for x in range(5)
+		for y in range(4)
+	}
+	fake_volume(
+		[
+			{
+				'cameras': {'c': {'width': 5000, 'height': 3750, 'focal_x': 0.75}},
+				'shots': shots,
+				'points': {'p': {'coordinates': [0, 0, 0]}},
+			}
+		]
+	)
+	monkeypatch.setattr(settings, 'ODM_SPLIT_MIN_AREA_KM2', 4.0)
+	monkeypatch.setattr(settings, 'ODM_SPLIT_TARGET_AREA_KM2', 2.5)
+
+	_, _, plan = _plan_orthophoto_pass(['--orthophoto-resolution', '1.0'], 'odm_processing_1', 'dataset_1', 1, 't')
+
+	assert (plan.pieces, plan.shots_per_piece) == (2, 10)
 
 
 @pytest.mark.unit
