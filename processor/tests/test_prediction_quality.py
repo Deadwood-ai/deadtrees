@@ -147,3 +147,33 @@ def test_attach_cover_measures_shares_on_the_tile_square():
 	tiles.attach_cover([t], EPSG, [half], [])
 	assert t.square_utm[0] == pytest.approx(sq[0], abs=0.5)
 	assert t.deadwood_share == pytest.approx(0.5, abs=0.05) and t.forest_share == 0
+
+
+def test_store_rows_follow_the_audit_base_tables():
+	from processor.src.prediction_quality_v1 import store
+	from processor.src.prediction_quality_v1.check import CheckResult, CropResult
+
+	mem = _ortho()
+	square = (X0 + 5, Y0 + 5, X0 + 5 + tiles.TILE_M, Y0 + 5 + tiles.TILE_M)
+	with mem.open() as src:
+		crop = render_crop(src, EPSG, square, {'deadwood': [], 'forest': []})
+	t = _tile(7, dw=0.1, fc=0.5)
+	t.sets, t.weight = ['exclude', 'training'], 0.2
+	answers = [judge.parse('luna-medium', _answer(dw_major=70, verdict='major'))]
+	r = CropResult(tile=t, crop=crop, answers=answers, combined={'deadwood': judge.combined(answers, 'deadwood')})
+	result = CheckResult(dataset_id=42, epsg=EPSG, crops=[r], verdicts={'deadwood': {}, 'forest': {}}, tiles_total=9, seconds=1)
+	labels = {'deadwood': 11, 'forest': 12}
+	crops = store.crop_rows(result, 'abc', lambda tile: {'type': 'Polygon', 'coordinates': []})
+	assert [c['crop_set'] for c in crops] == ['exclude', 'training']
+	assert crops[0]['selection']['weight'] is None and crops[1]['selection']['weight'] == 0.2
+	images = store.image_rows(result, labels)
+	assert [(i['kind'], i['label_id']) for i in images] == [
+		('raw', None), ('deadwood_overlay', 11), ('forest_cover_overlay', 12)
+	]
+	rows = store.assessment_rows(result, labels)
+	assert [(x['layer'], x['label_id'], x['verdict']) for x in rows] == [
+		('image', None, 'ok'), ('deadwood', 11, 'major'), ('forest_cover', 12, 'major')
+	]
+	assert rows[1]['modes']['m1_dead_missed'] == {'likelihood': 5.0, 'area_pct': 1.0}
+	run = store.run_row(result, 'abc', labels, {'luna-medium': 'gpt-6-luna'})
+	assert run['check_key'] == 'prediction_quality' and run['coverage']['training_set'] == 1
