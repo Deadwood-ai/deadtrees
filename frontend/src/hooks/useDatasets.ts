@@ -27,23 +27,6 @@ export function useDatasets(options: DatasetQueryOptions = {}) {
   });
 }
 
-// Public datasets hook - excludes datasets marked as "exclude_completely"
-export function usePublicDatasets(options: DatasetQueryOptions = {}) {
-  const { status, user } = useAuth();
-
-  return useQuery({
-    queryKey: ["public-datasets", status, user?.id ?? "anonymous"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from(Settings.DATA_TABLE_PUBLIC).select("*");
-      if (error) throw error;
-      return data;
-    },
-    enabled: (options.enabled ?? true) && status !== "checking",
-    staleTime: 5 * 60 * 1000, // 5 minutes - data is fresh for 5 minutes
-    gcTime: 10 * 60 * 1000, // 10 minutes - keep in cache for 10 minutes
-  });
-}
-
 // Public archive hook - narrow rows for the /dataset archive list, timeline, filters, and map
 export function usePublicDatasetArchiveItems(options: DatasetQueryOptions = {}) {
   const { status, user } = useAuth();
