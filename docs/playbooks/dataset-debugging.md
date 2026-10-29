@@ -162,6 +162,16 @@ Only requeue after approval.
   `scripts/requeue_datasets_via_api.py --env-file ~/.config/deadtrees/requeue.env`.
   Always pass `--env-file`: the default `.env` is a checkout's own file, which
   agents must not use. Never print or copy `requeue.env`.
+- A dataset stuck on a worker that went offline (host down, hard kill) keeps its
+  queue claim, and requeueing refuses it. Release it with
+  `scripts/release_stale_queue_claim.py --env-file ~/.config/deadtrees/requeue.env --dataset-ids <id>`.
+  It frees the claim and sets the status back to idle in one transaction, but
+  only after the claiming worker has sent no heartbeat for 15 minutes (workers
+  send one every minute, also while processing); otherwise it changes nothing.
+  A worker on a release older than DT-1471 beats only between tasks, so its
+  claim is always refused; check that host directly instead.
+  The task keeps its stages and priority, and the next free worker takes it. It
+  is a production write, so it needs approval like any requeue.
 - Record exactly which dataset IDs and task types were changed.
 
 ## Report Shape

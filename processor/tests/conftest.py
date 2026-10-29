@@ -186,10 +186,10 @@ def reset_process_log_fields(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def skip_processor_heartbeat(monkeypatch):
-	"""background_process tests must not write heartbeats; heartbeat tests reset the clock."""
-	import processor.src.processor as processor_module
+	"""run_continuous tests must not start a real heartbeat thread."""
+	import processor.src.continuous_processor as continuous_processor_module
 
-	monkeypatch.setattr(processor_module, '_last_heartbeat_at', float('inf'))
+	monkeypatch.setattr(continuous_processor_module, 'start_heartbeat', lambda worker_id: None)
 
 
 # @test_environment_only

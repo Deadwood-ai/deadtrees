@@ -197,10 +197,10 @@ Healthy signs:
   connection or switch back to automatic host-key acceptance.
 - Missing Docker socket or NVIDIA runtime: ODM/model child containers may fail
   even though the processor container starts.
-- Permanently dead worker with an owned active row: workers write heartbeats, but
-  nothing uses them for recovery yet, and `requeue_dataset_processing` refuses a
-  claimed row. Releasing the claim is a manual production write that needs
-  Janusch (DT-1471).
+- Permanently dead worker with an owned active row: a restart with the same
+  worker ID recovers its own row. If the worker does not come back, release the
+  claim with `scripts/release_stale_queue_claim.py` (see
+  `dataset-debugging.md`, Requeue Rules).
 
 ## Disable Or Roll Back A Worker
 
