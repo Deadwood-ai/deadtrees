@@ -85,15 +85,23 @@ jobs:
       - name: Audit workflows
         run: zizmor --offline --format json .github/workflows > "$RESULTS/zizmor.json" || true
 
-      # The base image only changes through Dependabot, so PRs skip this pull.
-      - name: Scan GDAL base image
+      # Scan the OS layer the API and processor images actually ship: the
+      # pinned GDAL base plus the apt upgrade of each Dockerfile's runtime-os
+      # stage (DT-1473). PRs skip the GDAL pull.
+      - name: Scan image OS packages
         if: ${{ github.event_name != 'pull_request' }}
         run: |
-          image="$(grep -m1 -oP '^FROM \K\S+' api/Dockerfile)"
-          echo "Scanning $image"
-          docker run --rm -v "$RESULTS:/out" "$TRIVY_IMAGE" image --quiet --scanners vuln \
-            --severity HIGH,CRITICAL --format json --output /out/trivy-base-image.json "$image" \
-            || echo image >> "$RESULTS/missing.txt"
+          for name in api processor; do
+            if docker build --quiet --target runtime-os -t "audit-$name:os" -f "$name/Dockerfile" . \
+              && docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$RESULTS:/out" \
+                "$TRIVY_IMAGE" image --quiet --scanners vuln --pkg-types os --severity HIGH,CRITICAL \
+                --format json --output "/out/trivy-$name-image.json" "audit-$name:os"; then
+              echo "Scanned $name runtime-os"
+            else
+              rm -f "$RESULTS/trivy-$name-image.json"
+              echo "$name image" >> "$RESULTS/missing.txt"
+            fi
+          done
 
       - name: Download CISA KEV catalog
         run: curl -fsSL --retry 3 -o "$RUNNER_TEMP/kev.json" "$KEV_URL" || true

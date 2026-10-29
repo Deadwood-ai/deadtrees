@@ -16,7 +16,7 @@ The workflow runs:
 - **pip-audit** on each Python requirements file after resolving it with `uv pip compile` for Python 3.12 on linux x86_64. Most requirements are unpinned, so this audits what a rebuild today would install, which can differ from the running containers.
 - **npm audit** on `frontend/package-lock.json`.
 - **zizmor** on `.github/workflows`. These findings are listed only and never turn the run red.
-- **Trivy** on the pinned GDAL base image (OS packages, high and critical). This is skipped on PRs.
+- **Trivy** on the OS packages of the API and processor images (high and critical): the `runtime-os` stage of each Dockerfile, which is the pinned GDAL base plus `apt-get upgrade`. This is skipped on PRs.
 - **CISA KEV:** the catalog of known exploited vulnerabilities is cross-checked against the Python and image findings. npm audit only gives GHSA ids, so npm findings can't be matched. In scheduled runs it is also checked against `[[stack]]` in `scripts/security_stack.toml`, which covers the software the scans can't see (kernel, nginx, Kong, Postgres, Docker and so on).
 
 `scripts/security_audit.py` turns the scanner JSON into the run summary.
@@ -67,4 +67,4 @@ The workflow and `scripts/security_audit.py` don't depend on anything specific t
 2. the test `scripts/tests/test_security_audit.py`
 3. a `security_stack.toml` with that project's stack
 
-Then adjust the `audit` lines and the `FROM` lookup in the workflow.
+Then adjust the `audit` lines and the image names in the workflow.

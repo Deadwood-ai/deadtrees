@@ -126,8 +126,8 @@ class ClassifyTest(unittest.TestCase):
 		findings = security_audit.parse_pip_audit(
 			pip_result('torch', '2.6.0', 'PYSEC-4', aliases=['CVE-2026-1']), 'api'
 		)
-		findings += security_audit.parse_trivy(trivy_result('CVE-2026-2'), 'gdal base image')
-		findings += security_audit.parse_trivy(trivy_result('CVE-2026-3', 'CRITICAL', '3.0.14'), 'gdal base image')
+		findings += security_audit.parse_trivy(trivy_result('CVE-2026-2'), 'api image')
+		findings += security_audit.parse_trivy(trivy_result('CVE-2026-3', 'CRITICAL', '3.0.14'), 'api image')
 		report = classify(findings, kev(kev_entry('CVE-2026-1', '2025-01-01'), kev_entry('CVE-2026-2', '2025-01-01')))
 
 		self.assertEqual({f.advisory for f in report.findings if f.red}, {'PYSEC-4', 'CVE-2026-2'})
@@ -225,7 +225,7 @@ class ZizmorTest(unittest.TestCase):
 CLEAN = {
 	'pip-api.json': {'dependencies': []},
 	'npm-frontend.json': {'vulnerabilities': {}},
-	'trivy-base-image.json': {'Results': []},
+	'trivy-api-image.json': {'Results': []},
 	'zizmor.json': [],
 	'kev.json': kev(),
 }
@@ -282,10 +282,25 @@ class MainTest(unittest.TestCase):
 		self.assertIn('python processor', out)
 
 	def test_skipped_scan_is_not_missing(self):
-		files = {name: data for name, data in CLEAN.items() if name != 'trivy-base-image.json'}
+		files = {name: data for name, data in CLEAN.items() if name != 'trivy-api-image.json'}
 
 		self.assertEqual(self.run_main(files)[0], 1)
 		self.assertEqual(self.run_main(files, '--skip', 'image')[0], 0)
+
+	def test_each_scanned_image_is_reported_by_name(self):
+		files = {
+			**CLEAN,
+			'trivy-api-image.json': trivy_result('CVE-2026-2', fixed='3.0.14'),
+			'trivy-processor-image.json': trivy_result('CVE-2026-1'),
+			'kev.json': kev(kev_entry('CVE-2026-1', '2026-01-01', vendor='OpenSSL', product='OpenSSL')),
+		}
+
+		code, out = self.run_main(files)
+
+		self.assertEqual(code, 1, out)
+		self.assertIn('| image | processor image | openssl |', out)
+		self.assertIn('api image: high fixable 1', out)
+		self.assertNotIn('| image | api image |', out)
 
 
 class StackConfigTest(unittest.TestCase):
