@@ -90,7 +90,8 @@ grant execute on function audit.duplicate_candidates(bigint, bigint, text, integ
 -- Store a finished dataset evaluation run. p_result (built by the worker,
 -- processor/src/dataset_evaluation_v1/check.py store_payload):
 --   ortho_sha256, inputs, evidence, coverage, cost
---   crops        [{geometry (GeoJSON, EPSG:4326), mpp, size_px, selection}]
+--   crops        [{pixel_window ([x0, y0, x1, y1] on the 10 cm CLIP grid, or null),
+--                 geometry (GeoJSON, EPSG:4326), mpp, size_px, selection}]
 --   images       [{kind, crop_index (1-based into crops, null for the overview and
 --                 thumbnail), storage_path, content_type, width, height, mpp, bytes, sha256}]
 --   assessments  [{assessor_kind, model, prompt_version, verdict, major_likelihood,
@@ -120,20 +121,40 @@ begin
 		raise exception 'Run % is already %', p_run_id, v_run.status using errcode = '55000';
 	end if;
 
-	-- Crops are per ortho: a rerun on the same ortho finds its crops again.
+	-- Crops are per ortho: a rerun on the same ortho finds its crops again. A crop on the
+	-- 10 cm CLIP grid is keyed by its window, so a crop another check already stored
+	-- (prediction quality) joins the evaluation set instead of being duplicated.
 	for v_crop in select value from jsonb_array_elements(coalesce(p_result -> 'crops', '[]'::jsonb)) loop
-		insert into audit.crops (dataset_id, ortho_sha256, crop_sets, geometry, mpp, size_px, selection)
-		values (
-			v_run.dataset_id, v_sha, array['evaluation'],
-			public.st_setsrid(public.st_geomfromgeojson(v_crop ->> 'geometry'), 4326),
-			(v_crop ->> 'mpp')::real, (v_crop ->> 'size_px')::integer,
-			jsonb_build_object('evaluation', v_crop -> 'selection')
-		)
-		on conflict (dataset_id, ortho_sha256, md5(geometry::text)) where pixel_x0 is null
-		do update set
-			crop_sets = (select array_agg(distinct s order by s) from unnest(audit.crops.crop_sets || excluded.crop_sets) s),
-			selection = excluded.selection || audit.crops.selection
-		returning id into v_id;
+		if jsonb_typeof(v_crop -> 'pixel_window') = 'array' then
+			insert into audit.crops (dataset_id, ortho_sha256, crop_sets, pixel_x0, pixel_y0, pixel_x1, pixel_y1,
+				geometry, mpp, size_px, selection)
+			values (
+				v_run.dataset_id, v_sha, array['evaluation'],
+				(v_crop -> 'pixel_window' ->> 0)::integer, (v_crop -> 'pixel_window' ->> 1)::integer,
+				(v_crop -> 'pixel_window' ->> 2)::integer, (v_crop -> 'pixel_window' ->> 3)::integer,
+				public.st_setsrid(public.st_geomfromgeojson(v_crop ->> 'geometry'), 4326),
+				(v_crop ->> 'mpp')::real, (v_crop ->> 'size_px')::integer,
+				jsonb_build_object('evaluation', v_crop -> 'selection')
+			)
+			on conflict (dataset_id, ortho_sha256, pixel_x0, pixel_y0, pixel_x1, pixel_y1)
+			do update set
+				crop_sets = (select array_agg(distinct s order by s) from unnest(audit.crops.crop_sets || excluded.crop_sets) s),
+				selection = excluded.selection || audit.crops.selection
+			returning id into v_id;
+		else
+			insert into audit.crops (dataset_id, ortho_sha256, crop_sets, geometry, mpp, size_px, selection)
+			values (
+				v_run.dataset_id, v_sha, array['evaluation'],
+				public.st_setsrid(public.st_geomfromgeojson(v_crop ->> 'geometry'), 4326),
+				(v_crop ->> 'mpp')::real, (v_crop ->> 'size_px')::integer,
+				jsonb_build_object('evaluation', v_crop -> 'selection')
+			)
+			on conflict (dataset_id, ortho_sha256, md5(geometry::text)) where pixel_x0 is null
+			do update set
+				crop_sets = (select array_agg(distinct s order by s) from unnest(audit.crops.crop_sets || excluded.crop_sets) s),
+				selection = excluded.selection || audit.crops.selection
+			returning id into v_id;
+		end if;
 		v_crop_ids := v_crop_ids || v_id;
 	end loop;
 
@@ -177,3 +198,9 @@ end;
 $$;
 revoke all on function audit.store_dataset_evaluation(bigint, jsonb) from public, anon;
 grant execute on function audit.store_dataset_evaluation(bigint, jsonb) to authenticated, service_role;
+
+-- The evaluation crops are CLIP tiles. Tile rows are otherwise readable only for
+-- search-ready public datasets, so the worker could not place crops on private or
+-- unfinished ones. It already reads those datasets' COGs; now also their tile rows.
+create policy "Audit worker reads tile windows" on public.v2_tile_embeddings
+	for select to authenticated using (internal.is_audit_worker());

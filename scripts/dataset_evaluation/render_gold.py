@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dataset_evaluation.gold_set import analyst
 from processor.src.dataset_evaluation_v1.check import model_images
-from processor.src.dataset_evaluation_v1.inputs import read_inputs
+from processor.src.dataset_evaluation_v1.inputs import Tile, read_inputs
 from processor.src.utils.stored_inputs import select_aoi
 
 DATA_URL = 'https://data2.deadtrees.earth'
@@ -45,9 +45,18 @@ def sources(ids: list[int]) -> dict[int, dict]:
 			'SELECT dataset_id, geometry, is_whole_image, source, created_at FROM public.v2_aois WHERE dataset_id = ANY(%s)',
 			(ids,),
 		).fetchall()
-	out = {r['id']: dict(r, aois=[]) for r in rows}
+		tiles = db.execute(
+			'SELECT dataset_id, pixel_x0, pixel_y0, pixel_x1, pixel_y1, ST_X(ST_Centroid(geometry)) AS lon, '
+			'ST_Y(ST_Centroid(geometry)) AS lat FROM public.v2_tile_embeddings WHERE dataset_id = ANY(%s)',
+			(ids,),
+		).fetchall()
+	out = {r['id']: dict(r, aois=[], tiles=[]) for r in rows}
 	for a in aois:
 		out[a['dataset_id']]['aois'].append(dict(a, created_at=str(a['created_at'])))
+	for t in tiles:
+		out[t['dataset_id']]['tiles'].append(
+			Tile((t['pixel_x0'], t['pixel_y0'], t['pixel_x1'], t['pixel_y1']), (t['lon'], t['lat']))
+		)
 	return out
 
 
@@ -62,7 +71,7 @@ def render(dataset_id: int, source: dict, folder: Path, cog_dir: Path | None) ->
 	if source['thumbnail_path'] and source['data_access'] in SERVED:
 		with urlopen(f'{DATA_URL}/thumbnails/v1/{quote(source["thumbnail_path"], safe="/")}', timeout=60) as r:
 			thumbnail = r.read(5_000_000)
-	inputs = read_inputs(cog, select_aoi(source['aois']), seed=dataset_id)
+	inputs = read_inputs(cog, select_aoi(source['aois']), seed=dataset_id, tiles=source['tiles'])
 	folder.mkdir(parents=True, exist_ok=True)
 	images = model_images(inputs, thumbnail)
 	for image in images:
@@ -71,8 +80,10 @@ def render(dataset_id: int, source: dict, folder: Path, cog_dir: Path | None) ->
 		json.dumps(
 			{
 				'images': [i.name for i in images],
-				'mpp': {'overview': inputs.overview_mpp, 'crop': inputs.native_mpp},
-				'windows': [c.window for c in inputs.crops],
+				'mpp': {'overview': inputs.overview_mpp, 'crop': inputs.crops[0].mpp if inputs.crops else None},
+				'crops': [
+					{'grid_window': c.grid_window, 'cog_window': c.cog_window, 'picker': c.picker} for c in inputs.crops
+				],
 				'settings': inputs.settings,
 				'has_aoi': inputs.aoi is not None,
 			},

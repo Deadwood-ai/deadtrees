@@ -2,6 +2,9 @@ import hashlib
 import json
 from pathlib import Path
 
+from shapely import wkb
+from shapely.geometry import shape
+
 from shared.db import use_client
 from shared.logger import logger
 from shared.logging import LogCategory, LogContext
@@ -9,7 +12,7 @@ from shared.models import Cog, Ortho
 from shared.settings import settings
 
 from .dataset_evaluation_v1.check import evaluate, store_payload
-from .dataset_evaluation_v1.inputs import read_inputs
+from .dataset_evaluation_v1.inputs import Tile, read_inputs
 from .dataset_evaluation_v1.models import Model, default_models
 from .dataset_evaluation_v1.rules import PHASH_METHOD, phash
 from .utils.ssh import pull_file_from_storage_server, push_file_to_storage_server
@@ -34,7 +37,7 @@ def run_dataset_evaluation(
 		raise ValueError('The ortho has no sha256; the ortho stage must run first')
 	cog_file = local_cog(cog, temp_dir, token, dataset_id, ctx)
 	thumbnail = _local_thumbnail(thumbnail_path, temp_dir, token, dataset_id)
-	inputs = read_inputs(str(cog_file), aoi, seed=dataset_id)
+	inputs = read_inputs(str(cog_file), aoi, seed=dataset_id, tiles=_fetch_tiles(token, dataset_id))
 	image_hash = phash(inputs.overview, inputs.valid)
 	with use_client(token) as client:
 		candidates = (
@@ -87,6 +90,36 @@ def aoi_key(aoi: dict | None) -> str | None:
 	if not aoi:
 		return None
 	return hashlib.sha256(json.dumps(aoi, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def tile_of(row: dict) -> Tile:
+	"""A v2_tile_embeddings row as a Tile; PostgREST returns the footprint as GeoJSON or EWKB hex."""
+	g = row['geometry']
+	footprint = shape(g) if isinstance(g, dict) else wkb.loads(bytes.fromhex(g))
+	minx, miny, maxx, maxy = footprint.bounds
+	return Tile(
+		(row['pixel_x0'], row['pixel_y0'], row['pixel_x1'], row['pixel_y1']), ((minx + maxx) / 2, (miny + maxy) / 2)
+	)
+
+
+def _fetch_tiles(token: str, dataset_id: int, page: int = 1000) -> list[Tile]:
+	"""The dataset's CLIP tiles (none before the embedding stage has run)."""
+	tiles, start = [], 0
+	with use_client(token) as client:
+		while True:
+			rows = (
+				client.table(settings.tile_embeddings_table)
+				.select('pixel_x0,pixel_y0,pixel_x1,pixel_y1,geometry')
+				.eq('dataset_id', dataset_id)
+				.order('id')
+				.range(start, start + page - 1)
+				.execute()
+				.data
+			)
+			tiles += [tile_of(r) for r in rows]
+			if len(rows) < page:
+				return tiles
+			start += page
 
 
 def _fetch_inputs(token: str, dataset_id: int):
