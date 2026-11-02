@@ -547,26 +547,17 @@ def benchmark_exists(conn) -> bool:
 	)
 
 
-def copy_images(plan: list[dict], target: str) -> None:
+def copy_images(plan: list[dict], target: str, run=subprocess.run) -> None:
 	"""Copy every image to <target>/<storage path> before the rows that point at it exist.
 
-	A file already at its destination is never replaced: stored evidence stays exactly
-	what was judged. target is a local directory or an rsync host:path.
+	A file already at its destination must have the same content, else the import
+	stops: stored evidence stays exactly what was judged and never gets replaced.
+	target is a local directory or an rsync host:path.
 	"""
 	for item in plan:
 		for image in image_rows(item):
 			if ':' in target.split('/', 1)[0]:
-				subprocess.run(
-					[
-						'rsync',
-						'--ignore-existing',
-						'--mkpath',
-						'-a',
-						str(image['source']),
-						f'{target.rstrip("/")}/{image["storage_path"]}',
-					],
-					check=True,
-				)
+				copy_remote(image, f'{target.rstrip("/")}/{image["storage_path"]}', run)
 				continue
 			destination = Path(target) / image['storage_path']
 			destination.parent.mkdir(parents=True, exist_ok=True)
@@ -576,6 +567,21 @@ def copy_images(plan: list[dict], target: str) -> None:
 			except FileExistsError:
 				if hashlib.sha256(destination.read_bytes()).hexdigest() != image['sha256']:
 					raise SystemExit(f'{destination} exists with other content; refusing to replace stored evidence')
+
+
+def copy_remote(image: dict, destination: str, run) -> None:
+	"""Hash what is stored at the destination first: the same file, a new one, or a conflict."""
+	host, path = destination.split(':', 1)
+	stored = run(
+		['ssh', '-o', 'BatchMode=yes', host, 'sha256sum', '--', path], capture_output=True, text=True, check=False
+	)
+	if stored.returncode == 0:
+		if stored.stdout.split()[0] != image['sha256']:
+			raise SystemExit(f'{destination} exists with other content; refusing to replace stored evidence')
+		return  # already stored, same content
+	if 'No such file' not in stored.stderr:
+		raise SystemExit(f'could not check {destination}: {stored.stderr.strip()[:200]}')
+	run(['rsync', '-a', '--ignore-existing', '--mkpath', str(image['source']), destination], check=True)
 
 
 # ---------------------------------------------------------------------------

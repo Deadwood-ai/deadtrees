@@ -1,5 +1,6 @@
 """Importing the saved audits and the DT-1272 gold crops into the audit schema (scripts/audit_import.py)."""
 
+import hashlib
 import importlib.util
 import json
 import sqlite3
@@ -349,3 +350,33 @@ def test_test_crops_take_footprint_and_ortho_from_the_cog_when_the_pixels_match(
 	).fetchone()
 	assert (min(lons), max(lons), min(lats), max(lats)) == pytest.approx(expected)
 	assert entry['files']['raw'] == f'datasets/{dataset}/n1-raw.jpg'
+
+
+def test_remote_copies_stop_on_a_conflicting_stored_image(tmp_path):
+	raw = tmp_path / 'raw.jpg'
+	Image.new('RGB', (8, 8), 'green').save(raw)
+	digest = hashlib.sha256(raw.read_bytes()).hexdigest()
+	plan = [{'gold_id': 'gold-1', 'label_ids': {}, 'files': {'raw': raw}}]
+	destination = 'storage:/data/audit/benchmarks/pq-gold-dt1272/gold-1/raw.jpg'
+	calls = []
+
+	def remote(returncode, stdout='', stderr=''):
+		def run(command, **kwargs):
+			calls.append(command)
+			return type('Done', (), {'returncode': returncode, 'stdout': stdout, 'stderr': stderr})()
+
+		return run
+
+	# the same file is already stored: nothing is copied
+	audit_import.copy_images(plan, 'storage:/data', run=remote(0, f'{digest}  /data/x\n'))
+	assert [c[0] for c in calls] == ['ssh'] and calls[0][-1] == '/data/audit/benchmarks/pq-gold-dt1272/gold-1/raw.jpg'
+	# a new file is copied
+	calls.clear()
+	audit_import.copy_images(plan, 'storage:/data', run=remote(1, stderr='sha256sum: x: No such file or directory'))
+	assert [c[0] for c in calls] == ['ssh', 'rsync'] and calls[1][-1] == destination
+	# another file under that name, or a failed check, stops before anything is written
+	for run in (remote(0, f'{"0" * 64}  /data/x\n'), remote(255, stderr='ssh: connect to host storage: refused')):
+		calls.clear()
+		with pytest.raises(SystemExit):
+			audit_import.copy_images(plan, 'storage:/data', run=run)
+		assert [c[0] for c in calls] == ['ssh']
