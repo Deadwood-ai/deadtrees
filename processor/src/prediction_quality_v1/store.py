@@ -178,3 +178,62 @@ def rule_rows(result: CheckResult, label_ids: dict) -> list[dict]:
 		}
 		for layer, v in result.verdicts.items()
 	]
+
+
+def image_path(dataset_id: int, ortho_sha256: str, crop_id: int, kind: str, label_id: int | None) -> str:
+	"""Storage path relative to the storage server's data directory."""
+	label = f'-{label_id}' if label_id else ''
+	return f'audit/{dataset_id}/{ortho_sha256[:16]}/crop-{crop_id}/{kind}{label}.jpg'
+
+
+def write(client, run_id: int, result: CheckResult, *, ortho_sha256: str, label_ids: dict, footprint, put_image) -> dict:
+	"""Store one finished run's crops, images, model rows and rule rows.
+
+	client: a Supabase client of the audit worker; put_image(path, bytes) stores a file on the
+	storage server. Crops are shared across runs of the same ortho: an existing window only
+	gains new sets. The run's status and the current-run pointer stay with the worker.
+	"""
+	audit = client.schema(SCHEMA)
+	known = {
+		(r['pixel_x0'], r['pixel_y0'], r['pixel_x1'], r['pixel_y1']): r
+		for r in audit.table(TABLES['crop'])
+		.select('id, pixel_x0, pixel_y0, pixel_x1, pixel_y1, crop_sets, selection')
+		.eq('dataset_id', result.dataset_id)
+		.eq('ortho_sha256', ortho_sha256)
+		.execute()
+		.data
+	}
+	crop_ids = {}
+	for row in crop_rows(result, ortho_sha256, footprint):
+		tile_id = row.pop('_tile_id')
+		key = (row['pixel_x0'], row['pixel_y0'], row['pixel_x1'], row['pixel_y1'])
+		old = known.get(key)
+		if old is None:
+			crop_ids[tile_id] = audit.table(TABLES['crop']).insert(row).execute().data[0]['id']
+			continue
+		crop_ids[tile_id] = old['id']
+		sets = sorted(set(old['crop_sets']) | set(row['crop_sets']))
+		selection = {**row['selection'], **old['selection']}  # sets and selection only grow
+		if sets != sorted(old['crop_sets']) or selection != old['selection']:
+			audit.table(TABLES['crop']).update({'crop_sets': sets, 'selection': selection}).eq('id', old['id']).execute()
+	for row in image_rows(result, label_ids):
+		data, crop_id = row.pop('_data'), crop_ids[row.pop('_tile_id')]
+		row.update(
+			crop_id=crop_id,
+			ortho_sha256=ortho_sha256,
+			storage_path=image_path(result.dataset_id, ortho_sha256, crop_id, row['kind'], row['label_id']),
+		)
+		put_image(row['storage_path'], data)
+		audit.table(TABLES['image']).upsert(
+			row, on_conflict='dataset_id,ortho_sha256,crop_id,label_id,kind', ignore_duplicates=True
+		).execute()
+	rows = []
+	for row in assessment_rows(result, label_ids):
+		row['crop_id'] = crop_ids[row.pop('_tile_id')]
+		rows.append({**row, 'run_id': run_id})
+	rows += [{**row, 'run_id': run_id} for row in rule_rows(result, label_ids)]
+	if rows:
+		audit.table(TABLES['assessment']).insert(rows).execute()
+	run = run_row(result, ortho_sha256, label_ids, {})
+	audit.table(TABLES['run']).update({'evidence': run['evidence'], 'coverage': run['coverage']}).eq('id', run_id).execute()
+	return {'crops': len(crop_ids), 'assessments': len(rows)}
