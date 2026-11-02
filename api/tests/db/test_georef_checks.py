@@ -45,28 +45,29 @@ def write_check(db, dataset, decision, level, p90=None, queue='upload'):
 	as_admin(db)
 
 
-def test_each_check_is_an_audit_run_with_one_model_assessment(db):
+def test_each_check_is_an_audit_run_and_only_the_active_version_moves_the_current_run(db):
 	dataset = create_dataset(db, create_user(db))
 	write_check(db, dataset, 'poor', 'strong', 22.6, queue='backfill')
-	write_check(db, dataset, 'uncertain', 'conflict')
 
-	runs = db.execute(
-		"SELECT r.queue, r.status, v.version, v.mode, v.is_active, r.evidence ? 'reference_evidence'"
-		' FROM audit.runs r JOIN audit.check_versions v ON v.id = r.check_version_id'
-		" WHERE r.dataset_id=%s AND r.check_key='georef' ORDER BY r.id",
-		(dataset,),
-	).fetchall()
-	assert runs == [
-		('backfill', 'done', 'georef-rules-v1_romav2.0.1', 'review_all', False, True),
-		('upload', 'done', 'georef-rules-v1_romav2.0.1', 'review_all', False, True),
-	]
-	# every run keeps its row; the current one is the latest, judged unsure by the matcher
+	# a version that is not active shadow-runs: a run and an assessment, no current run
 	assert db.execute(
-		"SELECT a.verdict::text, a.model, a.prompt_version, a.details->>'evidence_level'"
-		' FROM audit.current_runs c JOIN audit.assessments a ON a.run_id = c.run_id'
+		"SELECT r.queue, r.status, v.version, v.mode, r.evidence ? 'reference_evidence', a.verdict::text"
+		' FROM audit.runs r JOIN audit.check_versions v ON v.id = r.check_version_id'
+		' JOIN audit.assessments a ON a.run_id = r.id'
+		" WHERE r.dataset_id=%s AND r.check_key='georef'",
+		(dataset,),
+	).fetchall() == [('backfill', 'done', 'georef-rules-v1_romav2.0.1', 'review_all', True, 'major')]
+	current = "SELECT count(*) FROM audit.current_runs WHERE dataset_id=%s AND check_key='georef'"
+	assert db.execute(current, (dataset,)).fetchone() == (0,)
+
+	db.execute("UPDATE audit.check_versions SET is_active = true WHERE check_key = 'georef'")
+	write_check(db, dataset, 'uncertain', 'conflict')
+	assert db.execute(
+		"SELECT a.verdict::text, a.model, a.prompt_version, a.details->>'evidence_level', r.queue"
+		' FROM audit.current_runs c JOIN audit.runs r ON r.id = c.run_id JOIN audit.assessments a ON a.run_id = c.run_id'
 		" WHERE c.dataset_id=%s AND c.check_key='georef'",
 		(dataset,),
-	).fetchall() == [('unsure', 'romav2.0.1', 'georef-rules-v1', 'conflict')]
+	).fetchall() == [('unsure', 'romav2.0.1', 'georef-rules-v1', 'conflict', 'upload')]
 	assert db.execute(
 		"SELECT verdict::text, needs_review FROM audit.review_queue WHERE dataset_id=%s AND check_key='georef'",
 		(dataset,),
