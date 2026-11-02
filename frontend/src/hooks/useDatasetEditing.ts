@@ -95,6 +95,7 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
     mapRef: mapRef as React.MutableRefObject<OLMap | null>,
     getOrthoLayer: () => orthoLayerRef.current ?? undefined,
     getTargetVectorSource: () => editor.getOverlayLayer()?.getSource() ?? undefined,
+    onBeforeAddFeatures: editor.saveHistorySnapshot,
   });
 
   // Derived state

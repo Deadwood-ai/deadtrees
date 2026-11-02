@@ -328,6 +328,69 @@ test.describe("auditor local write flows", () => {
     expect(await readSavedAudit()).toMatchObject({ reviewed_by: auditorUser.id });
     await secondTab.close();
   });
+
+  test("AI box reports an unreachable model and adds a returned outline", async ({ page }) => {
+    let samResponse: "fail" | "outline" = "fail";
+    let drawnBox = { x1: 0, y1: 0, x2: 0, y2: 0 };
+    await page.route("**/segment", async (route) => {
+      if (samResponse === "fail") {
+        await route.abort("connectionrefused");
+        return;
+      }
+      const { x1, y1, x2, y2 } = drawnBox;
+      await route.fulfill({
+        json: {
+          type: "FeatureCollection",
+          features: [{
+            type: "Feature",
+            properties: {},
+            geometry: {
+              type: "Polygon",
+              coordinates: [[[x1, -y1], [x2, -y1], [x2, -y2], [x1, -y2], [x1, -y1]]],
+            },
+          }],
+        },
+      });
+    });
+
+    await installAuditorSession(page);
+    await page.goto(`/dataset-audit/${datasetId}`);
+    await dismissCookieBanner(page);
+    await expect(page.getByRole("status", { name: "Securing the audit lock" })).toBeHidden({
+      timeout: 20_000,
+    });
+    await page.getByRole("button", { name: "Edit deadwood cover" }).click();
+    await expect(page.getByText("Editing deadwood cover", { exact: true })).toBeVisible();
+    const undo = page.getByRole("button", { name: /Undo/ });
+    await expect(undo).toBeDisabled();
+
+    const drawAiBox = async () => {
+      await page.getByRole("button", { name: /AI \(S\)/ }).click();
+      const map = page.getByTestId("dataset-audit-map");
+      const bounds = await map.boundingBox();
+      if (!bounds) throw new Error("Audit map is not visible for the AI box.");
+      drawnBox = {
+        x1: Math.round(bounds.width * 0.4),
+        y1: Math.round(bounds.height * 0.4),
+        x2: Math.round(bounds.width * 0.6),
+        y2: Math.round(bounds.height * 0.6),
+      };
+      await page.mouse.click(bounds.x + drawnBox.x1, bounds.y + drawnBox.y1);
+      await page.mouse.click(bounds.x + drawnBox.x2, bounds.y + drawnBox.y2);
+    };
+
+    await drawAiBox();
+    await expect(page.getByText("The AI segmentation service could not be reached")).toBeVisible();
+    await expect(page.getByRole("button", { name: /AI \(S\)/ })).toBeEnabled();
+    await expect(undo).toBeDisabled();
+
+    samResponse = "outline";
+    await expect(page.locator(".ant-message-notice")).toHaveCount(0, { timeout: 10_000 });
+    await drawAiBox();
+    await expect(undo).toBeEnabled({ timeout: 10_000 });
+
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  });
 });
 
 async function expectLocalService(url: string, name: string) {
