@@ -274,10 +274,15 @@ create table public.audit_assessments (
 	-- check-specific parsed answer (exclude reason, COG issue, suggested date, p90)
 	details jsonb not null default '{}'::jsonb check (jsonb_typeof(details) = 'object'),
 	raw jsonb,                     -- the model's reply as returned
+	-- set on person rows imported from an older record that is not benchmark
+	-- truth, e.g. 'dataset_audit' for the audits before the redo (DT-1487); null
+	-- for every judgement made in this system. Only the service role sets it.
+	imported_from text check (imported_from ~ '^[a-z][a-z0-9_]*$'),
 	created_at timestamptz not null default now(),
 	foreign key (crop_id, dataset_id) references public.audit_crops (id, dataset_id) on delete cascade,
 	foreign key (run_id, check_key, dataset_id) references public.audit_check_runs (id, check_key, dataset_id)
 		on delete cascade,
+	check (imported_from is null or assessor_kind = 'person'),
 	check (
 		case assessor_kind
 			when 'person' then assessor_user_id is not null and model is null and prompt_version is null and raw is null
@@ -289,22 +294,27 @@ create index audit_assessments_target_idx on public.audit_assessments (dataset_i
 create index audit_assessments_crop_idx on public.audit_assessments (crop_id) where crop_id is not null;
 create index audit_assessments_run_idx on public.audit_assessments (run_id) where run_id is not null;
 create index audit_assessments_person_idx on public.audit_assessments (assessor_user_id) where assessor_user_id is not null;
+create index audit_assessments_imported_idx on public.audit_assessments (dataset_id) where imported_from is not null;
 
 create trigger reject_audit_assessment_update
 before update on public.audit_assessments
 for each row execute function internal.reject_audit_row_update();
 
 -- Latest row per target, layer and assessor: a correction replaces the earlier
--- answer of the same assessor, while every answer stays in the table.
+-- answer of the same assessor, while every answer stays in the table. A native
+-- answer replaces the same person's imported one whatever its date. Benchmarks
+-- and agreement metrics filter on imported_from is null.
 create view public.audit_latest_assessments
 with (security_invoker = true)
 as
 select distinct on (check_key, dataset_id, crop_id, layer, assessor) *
 from public.audit_assessments
-order by check_key, dataset_id, crop_id, layer, assessor, created_at desc, id desc;
+order by check_key, dataset_id, crop_id, layer, assessor, imported_from is not null, created_at desc, id desc;
 
 -- Targets for the adjudication list: people disagree with each other, or a
 -- person disagrees with a model or rule answer in the dataset's current run.
+-- Imported answers never count as people disagreeing; where one differs from the
+-- current models, legacy_and_models_disagree puts the dataset up for an early look.
 -- Compares verdicts only, so it holds for every check's own modes.
 create view public.audit_disagreements
 with (security_invoker = true)
@@ -316,12 +326,13 @@ with counted as (
 	from public.audit_assessments a
 	left join public.audit_current_runs c on c.dataset_id = a.dataset_id and c.check_key = a.check_key
 	where a.assessor_kind = 'person' or a.run_id = c.run_id
-	order by a.check_key, a.dataset_id, a.crop_id, a.layer, a.assessor, a.created_at desc, a.id desc
+	order by a.check_key, a.dataset_id, a.crop_id, a.layer, a.assessor, a.imported_from is not null, a.created_at desc, a.id desc
 ), targets as (
 	select
 		check_key, dataset_id, crop_id, layer,
 		jsonb_object_agg(assessor, verdict order by assessor) as verdicts,
-		array_agg(distinct verdict) filter (where assessor_kind = 'person') as people,
+		array_agg(distinct verdict) filter (where assessor_kind = 'person' and imported_from is null) as people,
+		array_agg(distinct verdict) filter (where imported_from is not null) as legacy,
 		array_agg(distinct verdict) filter (where assessor_kind <> 'person') as models,
 		max(created_at) as last_assessed_at
 	from counted
@@ -329,11 +340,14 @@ with counted as (
 )
 select
 	check_key, dataset_id, crop_id, layer, verdicts,
-	cardinality(people) > 1 as people_disagree,
-	models is not null and people is distinct from models as people_and_models_disagree,
+	coalesce(cardinality(people) > 1, false) as people_disagree,
+	people is not null and models is not null and people is distinct from models as people_and_models_disagree,
+	legacy is not null and models is not null and legacy is distinct from models as legacy_and_models_disagree,
 	last_assessed_at
 from targets
-where people is not null and (cardinality(people) > 1 or (models is not null and people is distinct from models));
+where cardinality(people) > 1
+	or (models is not null and (people is distinct from models and people is not null
+		or legacy is distinct from models and legacy is not null));
 
 -- ---------------------------------------------------------------------------
 -- Benchmark split
@@ -441,7 +455,8 @@ create policy "Audit worker stores images" on public.audit_images
 
 create policy "Audit worker stores model and rule assessments" on public.audit_assessments
 	for insert to authenticated
-	with check (internal.is_audit_worker() and assessor_kind in ('model', 'rule'));
+	with check (internal.is_audit_worker() and assessor_kind in ('model', 'rule') and imported_from is null);
 create policy "Auditors store their own assessments" on public.audit_assessments
 	for insert to authenticated
-	with check (public.can_audit() and assessor_kind = 'person' and assessor_user_id = (select auth.uid()));
+	with check (public.can_audit() and assessor_kind = 'person' and assessor_user_id = (select auth.uid())
+		and imported_from is null);

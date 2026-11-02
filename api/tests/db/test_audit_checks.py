@@ -337,6 +337,78 @@ def test_a_newer_run_that_is_not_current_does_not_hide_the_current_answers(db):
 	]
 
 
+def import_legacy(db, auditor, dataset, verdict, created_at="now() - interval '1 year'"):
+	as_admin(db)
+	db.execute(
+		'INSERT INTO public.audit_assessments(check_key,dataset_id,layer,assessor_kind,assessor_user_id,verdict,imported_from,created_at) '
+		f"VALUES ('prediction_quality',%s,'deadwood','person',%s,%s,'dataset_audit',{created_at})",
+		(dataset, auditor, verdict),
+	)
+
+
+def test_imported_audits_never_count_as_people_agreeing_or_disagreeing(db):
+	janusch, clemens, teja = (create_user(db, can_audit=True) for _ in range(3))
+	dataset, quiet = (create_dataset(db, create_user(db)) for _ in range(2))
+	run = create_run(db, dataset, register_version(db))
+	as_worker(db)
+	db.execute(
+		'INSERT INTO public.audit_assessments(check_key,dataset_id,run_id,layer,assessor_kind,model,prompt_version,verdict) '
+		"VALUES ('prediction_quality',%s,%s,'deadwood','model','luna-medium','v4','major')",
+		(dataset, run),
+	)
+	as_admin(db)
+	# old audits: Clemens said fine, Teja said bad; a later re-review by Janusch is native
+	import_legacy(db, clemens, dataset, 'ok')
+	import_legacy(db, teja, dataset, 'major')
+	# imported rows that disagree only with each other are not an adjudication case
+	import_legacy(db, clemens, quiet, 'ok')
+	import_legacy(db, teja, quiet, 'major')
+
+	act_as(db, janusch)
+	assert db.execute(
+		'SELECT people_disagree,people_and_models_disagree,legacy_and_models_disagree FROM public.audit_disagreements '
+		'WHERE dataset_id=%s AND crop_id IS NULL',
+		(dataset,),
+	).fetchall() == [(False, False, True)]
+	assert db.execute('SELECT count(*) FROM public.audit_disagreements WHERE dataset_id=%s', (quiet,)).fetchone() == (
+		0,
+	)
+
+	# the same person's native answer replaces their imported one, even if the import is dated later
+	import_legacy(db, janusch, dataset, 'ok', created_at="now() + interval '1 day'")
+	person_row(db, janusch, dataset, None, 'major', run)
+	act_as(db, janusch)
+	assert db.execute(
+		'SELECT verdict,imported_from FROM public.audit_latest_assessments WHERE dataset_id=%s AND assessor=%s',
+		(dataset, str(janusch)),
+	).fetchone() == ('major', None)
+	assert db.execute(
+		'SELECT count(*) FROM public.audit_latest_assessments WHERE dataset_id=%s AND imported_from IS NULL', (dataset,)
+	).fetchone() == (2,)
+
+	# only the service role marks rows as imported, and only person rows
+	with pytest.raises(psycopg.errors.InsufficientPrivilege), db.transaction():
+		db.execute(
+			'INSERT INTO public.audit_assessments(check_key,dataset_id,layer,assessor_kind,assessor_user_id,verdict,imported_from) '
+			"VALUES ('prediction_quality',%s,'deadwood','person',%s,'ok','dataset_audit')",
+			(dataset, janusch),
+		)
+	as_worker(db)
+	with pytest.raises(psycopg.errors.InsufficientPrivilege), db.transaction():
+		db.execute(
+			'INSERT INTO public.audit_assessments(check_key,dataset_id,run_id,layer,assessor_kind,model,prompt_version,verdict,imported_from) '
+			"VALUES ('prediction_quality',%s,%s,'deadwood','model','luna-medium','v4','ok','dataset_audit')",
+			(dataset, run),
+		)
+	as_admin(db)
+	with pytest.raises(psycopg.errors.CheckViolation), db.transaction():
+		db.execute(
+			'INSERT INTO public.audit_assessments(check_key,dataset_id,run_id,layer,assessor_kind,model,prompt_version,verdict,imported_from) '
+			"VALUES ('prediction_quality',%s,%s,'deadwood','model','luna-medium','v4','ok','dataset_audit')",
+			(dataset, run),
+		)
+
+
 def test_api_roles_get_only_the_privileges_the_policies_use(db):
 	tables = (
 		'audit_checks',

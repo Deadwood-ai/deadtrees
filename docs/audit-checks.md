@@ -53,9 +53,18 @@ version.
   is stale and stays as history.
 - `reason_code` and `reason_text`: why a person marks a check wrong (the check's fixed
   choices plus text). `details`: the check's parsed answer. `raw`: the model reply.
+- `imported_from`: set (by the service role only) on person rows copied from an
+  older record that is not benchmark truth, e.g. `dataset_audit` for the audits made
+  before the redo. These rows keep history and old decisions and serve as an opt-in
+  weak label; benchmarks and agreement metrics use `imported_from is null`. Benchmark
+  truth is the graded DT-1272 crops plus new reviews and adjudications.
 - Rows are never updated. A correction is a new row; `audit_latest_assessments` shows
-  the latest row per target, layer and assessor. `audit_disagreements` lists targets
-  where people disagree with each other or with a model or rule in the current run.
+  the latest row per target, layer and assessor, where a native answer replaces the
+  same person's imported one. `audit_disagreements` lists targets where people
+  disagree with each other or with a model or rule in the current run
+  (`people_disagree`, `people_and_models_disagree`, native rows only), and where an
+  imported answer differs from the current models (`legacy_and_models_disagree`), so
+  that dataset gets an early look.
 
 ## How a check plugs in
 
@@ -82,5 +91,7 @@ change.
 
 `dataset_audit` stays the saved human audit. Renaming it to `dataset_audit_legacy`
 behind a compatible view follows in a separate migration once the old audits are
-imported as person rows (DT-1487): six views are compiled against the table and the
-audit page writes it through the lease trigger.
+imported as person rows marked `imported_from = 'dataset_audit'` (DT-1487): six views
+are compiled against the table and the audit page writes it through the lease
+trigger. Every historical dataset is re-run through the checks; the old audits are not
+ground truth.
