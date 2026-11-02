@@ -72,7 +72,7 @@ def read_ticket(value: str, resource: str) -> Optional[Ticket]:
 
 
 _TICKET_PATH = re.compile(
-	r'(/(?:datasets/\d+/files/(?:cog|thumbnail)|exports|disturbance-benchmark/files)/)[^/?\s]+'
+	r'(/(?:datasets/\d+/files/(?:cog|thumbnail)|exports|disturbance-benchmark/files|audit/images/files)/)[^/?\s]+'
 )
 
 

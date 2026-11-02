@@ -16,6 +16,7 @@ from .routers import (
 	dataset_access,
 	disturbance_benchmark,
 	labeling,
+	audit_images,
 )
 
 from .access.tickets import redact_file_tickets
@@ -87,6 +88,9 @@ app.include_router(disturbance_benchmark.router)
 
 # add the signed-in check for the AI labeling service
 app.include_router(labeling.router)
+
+# add the auditor-only images of the automated audit checks
+app.include_router(audit_images.router)
 
 # add the download routes to the app
 # app.include_router(download.download_app)

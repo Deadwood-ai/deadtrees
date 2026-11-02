@@ -30,8 +30,10 @@ or confirm AOI state where required, and persist final assessment locally.
 1. Sign in as auditor.
 2. Navigate to `/dataset-audit/91001`.
 3. Verify the audit detail page and `data-testid="dataset-audit-map"` render.
-4. Fill required audit fields: georeference, acquisition date, phenology,
-   deadwood quality, forest cover quality, COG/thumbnail checks, and final assessment.
+4. Open the sections and fill the saved-audit fields: COG and thumbnail (1 Dataset
+   evaluation), georeference, acquisition date, phenology and the deadwood and tree
+   cover ratings (6 Prediction quality). Then confirm the derived decision at the top
+   or choose another final assessment.
 5. Draw an AOI if the UI requires it.
 6. Save the audit.
 7. Verify the UI reports a successful save.

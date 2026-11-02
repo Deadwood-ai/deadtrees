@@ -25,6 +25,8 @@ import {
 	useAuditSuggestions,
 } from "../../hooks/useAcquisitionDateEstimate";
 import { suggestedAuditValues } from "../../utils/acquisitionDate";
+import { answeredFormValues } from "../../utils/auditChecks";
+import { useAuditChecks } from "../../hooks/useAuditChecks";
 import type { IAcquisitionDateDecision, IAuditReviewItem, IAuditSuggestion } from "../../types/acquisitionDate";
 import { useSeasonPrompt } from "../../hooks/useSeasonPrompt";
 import { supabase } from "../../hooks/useSupabase";
@@ -150,6 +152,8 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	const { data: acquisitionDateDecisions = NO_DECISIONS } = useAcquisitionDateDecisions(dataset.id);
 	const { data: auditSuggestionsData } = useAuditSuggestions(dataset.id);
 	const { data: reviewItems } = useAuditReviewQueue(dataset.id);
+	const auditChecksQuery = useAuditChecks(dataset.id);
+	const auditChecks = auditChecksQuery.data;
 	const auditReviewItems = reviewItems ?? NO_REVIEW_ITEMS;
 	// stable fallback: a fresh [] per render would re-run the prefill effect and reset edits
 	const auditSuggestions = auditSuggestionsData ?? NO_SUGGESTIONS;
@@ -240,23 +244,30 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	}, [auditData, form]);
 
 	// Machine suggestions prefill the form once per page load, after the saved
-	// audit, the suggestions and the re-review items have all arrived: fields
-	// the saved audit leaves empty, and the fields of items listed for re-review
-	// (newer evidence disagrees with the saved value). Later refetches never
-	// touch what the auditor is editing; nothing is saved until the auditor saves.
+	// audit, the suggestions, the re-review items and the automated checks have all
+	// arrived: fields the saved audit leaves empty, and the fields of items listed for
+	// re-review (newer evidence disagrees with the saved value). Where the saved audit
+	// is empty, the reviewer's own answers to the checks come before a suggestion.
+	// Later refetches never touch what the auditor is editing; nothing is saved until
+	// the auditor saves.
 	const prefilledForRef = useRef<number | null>(null);
 	useEffect(() => {
 		if (prefilledForRef.current === dataset.id) return;
 		if (auditData === undefined || auditSuggestionsData === undefined || reviewItems === undefined) return;
+		if (auditChecksQuery.isLoading) return;
 		prefilledForRef.current = dataset.id;
 		const { values: suggested, fields } = suggestedAuditValues(
 			auditData as Record<string, unknown> | null,
 			auditSuggestionsData,
 			reviewItems.flatMap((r) => r.fields),
 		);
-		form.setFieldsValue(suggested);
-		setPrefilledFields(fields);
-	}, [dataset.id, auditData, auditSuggestionsData, reviewItems, form]);
+		const saved = (auditData ?? {}) as Record<string, unknown>;
+		const answered = Object.fromEntries(
+			Object.entries(answeredFormValues(auditChecks, user?.id)).filter(([field]) => saved[field] === null || saved[field] === undefined),
+		);
+		form.setFieldsValue({ ...suggested, ...answered });
+		setPrefilledFields(fields.filter((field) => !(field in answered)));
+	}, [dataset.id, auditData, auditSuggestionsData, reviewItems, auditChecks, auditChecksQuery.isLoading, user?.id, form]);
 
 	// Track form changes
 	useEffect(() => {
@@ -467,6 +478,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		acquisitionDateDecisions,
 		auditSuggestions,
 		auditReviewItems,
+		auditChecks,
 		prefilledFields,
 
 		// Flags
