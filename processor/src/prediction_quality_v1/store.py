@@ -151,3 +151,30 @@ def assessment_rows(result: CheckResult, label_ids: dict) -> list[dict]:
 					}
 				)
 	return rows
+
+
+def rule_rows(result: CheckResult, label_ids: dict) -> list[dict]:
+	"""The dataset verdict per layer as rule rows (assessor_kind 'rule', dataset target).
+
+	The rule is Python in this check (rule.py), versioned like a prompt; a new rule version is
+	recomputed from the stored crop rows and written as new rows, no model calls needed.
+	"""
+	verdicts = {'bad': 'major', 'ok': 'ok', None: 'unsure'}
+	return [
+		{
+			'check_key': CHECK_KEY,
+			'dataset_id': result.dataset_id,
+			'crop_id': None,
+			'layer': LAYER_NAMES[layer],
+			'label_id': label_ids.get(layer),
+			'assessor_kind': 'rule',
+			'model': 'pq-rule',
+			'prompt_version': RULE_VERSION,
+			'verdict': verdicts[v['verdict']],
+			'major_likelihood': None,
+			'modes': {},
+			'details': v,
+			'raw': None,
+		}
+		for layer, v in result.verdicts.items()
+	]

@@ -178,3 +178,16 @@ def test_store_rows_follow_the_audit_base_tables():
 	assert rows[1]['modes']['m1_dead_missed'] == {'likelihood': 5.0, 'area_pct': 1.0}
 	run = store.run_row(result, 'abc', labels, {'luna-medium': 'gpt-6-luna'})
 	assert run['check_key'] == 'prediction_quality' and run['coverage']['training_set'] == 1
+
+
+def test_rule_rows_carry_the_dataset_verdict_per_layer():
+	from processor.src.prediction_quality_v1 import store
+	from processor.src.prediction_quality_v1.check import CheckResult
+
+	verdicts = {'deadwood': rule.dataset_verdict('deadwood', []), 'forest': {'rule': rule.RULE_VERSION, 'verdict': 'bad'}}
+	result = CheckResult(dataset_id=42, epsg=EPSG, crops=[], verdicts=verdicts, tiles_total=0, seconds=0)
+	rows = store.rule_rows(result, {'deadwood': 11, 'forest': 12})
+	assert [(r['layer'], r['verdict'], r['assessor_kind'], r['crop_id']) for r in rows] == [
+		('deadwood', 'unsure', 'rule', None), ('forest_cover', 'major', 'rule', None)
+	]
+	assert rows[1]['prompt_version'] == rule.RULE_VERSION and rows[1]['label_id'] == 12
