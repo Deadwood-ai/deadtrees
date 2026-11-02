@@ -17,9 +17,7 @@ routes:
 
 Verify label editing and public correction flows can be exercised locally with a
 map, layer controls, geometry creation/editing, and approval/revert paths.
-Corrections happen in the inline editor on the dataset page and in the audit map;
-the retired `/dataset-label/:id` and `/dataset-corrections/:id` routes redirect to
-`/dataset/:id`.
+Corrections happen in the inline editor on the dataset page and in the audit map.
 
 ## Preconditions
 
@@ -32,7 +30,7 @@ the retired `/dataset-label/:id` and `/dataset-corrections/:id` routes redirect 
 ## Steps
 
 1. Sign in as contributor.
-2. Navigate to `/dataset-corrections/91001` and verify it redirects to `/dataset/91001`.
+2. Navigate to `/dataset/91001`.
 3. Open the inline editor on the dataset page, or record missing fixture state.
 4. If available, create or edit a correction geometry.
 5. Save the correction and verify local DB side effect.
