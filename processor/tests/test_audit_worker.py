@@ -299,34 +299,95 @@ def test_the_worker_needs_a_memory_cap_of_its_cgroup(tmp_path):
 	assert worker.memory_limit(root, proc) is None
 
 
+def claude_events(result, is_error=False, tools=()):
+	lines = [
+		{'type': 'system', 'subtype': 'init', 'tools': list(tools)},
+		{'type': 'result', 'result': result, 'is_error': is_error},
+	]
+	return '\n'.join(json.dumps(line) for line in lines) + '\n'
+
+
 @pytest.mark.unit
-def test_claude_backend_reads_the_images_and_maps_login_problems():
+def test_claude_backend_sends_the_images_inline_without_any_tool_and_maps_login_problems():
 	seen = {}
 
-	def fake_run(command, cwd, **kwargs):
-		seen['command'], seen['files'] = command, sorted(p.name for p in __import__('pathlib').Path(cwd).iterdir())
-		return subprocess.CompletedProcess(command, 0, json.dumps({'result': '{"ok": true}', 'is_error': False}), '')
+	def fake_run(command, input, **kwargs):
+		seen['command'], seen['message'] = command, json.loads(input)
+		return subprocess.CompletedProcess(command, 0, claude_events('{"ok": true}'), '')
 
 	ask = models.claude_backend('claude-haiku-5-5', run=fake_run)
 	assert ask('judge', [Image.new('RGB', (8, 8)), Image.new('RGB', (8, 8))]) == '{"ok": true}'
-	assert seen['files'] == ['image1.jpg', 'image2.jpg']
-	assert seen['command'][seen['command'].index('--tools') + 1] == 'Read' and '--strict-mcp-config' in seen['command']
+	content = seen['message']['message']['content']
+	assert [c['type'] for c in content] == ['text', 'image', 'text', 'image', 'text']
+	command = seen['command']
+	# no tool at all, so a model can never read the worker's files
+	assert command[command.index('--tools') + 1] == '' and '--strict-mcp-config' in command
+	assert command[command.index('--input-format') + 1] == 'stream-json'
 
-	def expired(command, **kwargs):
-		return subprocess.CompletedProcess(
-			command, 1, json.dumps({'result': 'Invalid API key · Please run /login', 'is_error': True}), ''
-		)
+	def offered_tools(command, **kwargs):
+		return subprocess.CompletedProcess(command, 0, claude_events('{}', tools=['Read']), '')
 
-	with pytest.raises(models.LoginExpired):
-		models.claude_backend('claude-haiku-5-5', run=expired)('judge', [Image.new('RGB', (8, 8))])
+	with pytest.raises(models.ModelError, match='tools were offered'):
+		models.claude_backend('claude-haiku-5-5', run=offered_tools)('judge', [])
 
-	def limited(command, **kwargs):
-		return subprocess.CompletedProcess(
-			command, 1, json.dumps({'result': 'Claude usage limit reached', 'is_error': True}), ''
-		)
+	for reply, error in (
+		('Invalid API key · Please run /login', models.LoginExpired),
+		('Claude usage limit reached', models.LimitReached),
+	):
 
-	with pytest.raises(models.LimitReached):
-		models.claude_backend('claude-haiku-5-5', run=limited)('judge', [Image.new('RGB', (8, 8))])
+		def failing(command, reply=reply, **kwargs):
+			return subprocess.CompletedProcess(command, 1, claude_events(reply, is_error=True), '')
+
+		with pytest.raises(error):
+			models.claude_backend('claude-haiku-5-5', run=failing)('judge', [Image.new('RGB', (8, 8))])
+
+
+@pytest.mark.unit
+def test_a_run_left_running_by_a_stopped_worker_goes_back_to_the_queue():
+	client = Client()
+	v = version(client)
+	stranded = queued(client, v, 1)
+	runs.claim_next(client, ['prediction_quality'])
+	last = queued(client, v, 2, attempts=runs.MAX_ATTEMPTS, status='running')
+	assert runs.recover(client, ['prediction_quality']) == 2
+	assert (
+		run_row(client, stranded['id'])['status'] == 'queued'
+		and 'interrupted' in run_row(client, stranded['id'])['error']
+	)
+	assert run_row(client, last['id'])['status'] == 'failed'
+
+
+@pytest.mark.unit
+def test_the_sweep_points_datasets_at_their_newest_finished_run():
+	client = Client()
+	v = version(client)
+	older = queued(client, v, 1, status='done', finished_at='2026-11-02T08:00')
+	newer = queued(client, v, 1, status='done', finished_at='2026-11-02T09:00')
+	unpointed = queued(client, v, 2, status='done', finished_at='2026-11-02T09:00')
+	queued(client, v, 3, 'benchmark', status='done', finished_at='2026-11-02T09:00')
+	runs.point(client, older)  # the pointer to the newer run never landed
+	assert worker.sweep(client, {'prediction_quality': handler()}, '2026-11-01T00:00') == 2
+	assert sorted((r['dataset_id'], r['run_id']) for r in client.tables['current_runs'].rows) == [
+		(1, newer['id']),
+		(2, unpointed['id']),
+	]
+	assert worker.sweep(client, {'prediction_quality': handler()}, '2026-11-01T00:00') == 0
+
+
+@pytest.mark.unit
+def test_new_evidence_gets_a_new_run_and_benchmarks_are_scheduled_apart():
+	client = Client()
+	v = version(client)
+	first = {'ortho_sha256': 'a' * 64, 'label_ids': {'deadwood': 1}}
+	queued(client, v, 1, inputs=first)
+	queued(client, v, 2, 'benchmark', inputs={})
+	assert runs.enqueue(client, v, [1], 'upload', inputs={1: first}) == []
+	# predictions were rerun: same version, new labels, new run
+	assert runs.enqueue(client, v, [1], 'upload', inputs={1: {**first, 'label_ids': {'deadwood': 2}}}) == [1]
+	# a benchmark run does not stand in for a production one
+	assert runs.enqueue(client, v, [2], 'backfill') == [2]
+	assert runs.enqueue(client, v, [2], 'manual') == []
+	assert runs.enqueue(client, v, [2], 'manual', force=True) == [2]
 
 
 class FakeAppServer:

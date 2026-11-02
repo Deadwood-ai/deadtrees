@@ -93,36 +93,107 @@ def retry_or_fail(client, run: dict, error: str) -> str:
 
 
 def finish(client, run: dict, summary: dict, active: bool) -> None:
-	"""Done; the run counts for its dataset when its version is the active one."""
+	"""Done; the run counts for its dataset when its version is the active one.
+
+	The pointer is a second request. If it does not land, publish() puts it right on the
+	next sweep, because a done run of the active version newer than the pointer always wins.
+	"""
 	update = {'status': 'done', 'finished_at': now(), 'error': None}
 	for key in ('coverage', 'cost', 'evidence'):
 		if summary.get(key):
 			update[key] = summary[key]
 	audit(client).table('runs').update(update).eq('id', run['id']).execute()
 	if active and run['queue'] != 'benchmark':
-		audit(client).table('current_runs').upsert(
-			{'dataset_id': run['dataset_id'], 'check_key': run['check_key'], 'run_id': run['id'], 'updated_at': now()},
-			on_conflict='dataset_id,check_key',
-		).execute()
+		point(client, run)
 
 
-def enqueue(client, version_row: dict, dataset_ids, queue: str, inputs: dict | None = None) -> list[int]:
-	"""Queued runs of this version for the datasets that have none yet (in any state)."""
+def point(client, run: dict) -> None:
+	audit(client).table('current_runs').upsert(
+		{'dataset_id': run['dataset_id'], 'check_key': run['check_key'], 'run_id': run['id'], 'updated_at': now()},
+		on_conflict='dataset_id,check_key',
+	).execute()
+
+
+def publish(client, version_row: dict, since: str) -> int:
+	"""Point datasets at their newest done run of the active version where the pointer is missing or older."""
+	done = (
+		audit(client)
+		.table('runs')
+		.select('id, dataset_id, check_key, queue')
+		.eq('check_version_id', version_row['id'])
+		.eq('status', 'done')
+		.gte('finished_at', since)
+		.execute()
+		.data
+	)
+	newest = {}
+	for run in done:
+		if run['queue'] != 'benchmark' and run['id'] > newest.get(run['dataset_id'], {}).get('id', 0):
+			newest[run['dataset_id']] = run
+	if not newest:
+		return 0
+	pointers = {
+		row['dataset_id']: row['run_id']
+		for row in audit(client)
+		.table('current_runs')
+		.select('dataset_id, run_id')
+		.eq('check_key', version_row['check_key'])
+		.in_('dataset_id', sorted(newest))
+		.execute()
+		.data
+	}
+	fixed = [run for dataset, run in newest.items() if pointers.get(dataset, 0) < run['id']]
+	for run in fixed:
+		point(client, run)
+	return len(fixed)
+
+
+def recover(client, checks) -> int:
+	"""Runs left running by a worker that stopped: back to the queue, or failed after the last attempt.
+
+	There is one worker; at its start nothing of these checks can still be running. A handler
+	writes crops and images idempotently, and a repeated model answer only adds a newer row.
+	"""
+	stranded = (
+		audit(client).table('runs').select('*').eq('status', 'running').in_('check_key', list(checks)).execute().data
+	)
+	for run in stranded:
+		retry_or_fail(client, run, 'interrupted: the worker stopped during this run')
+	return len(stranded)
+
+
+def enqueue(
+	client, version_row: dict, dataset_ids, queue: str, inputs: dict | None = None, force: bool = False
+) -> list[int]:
+	"""Queued runs of this version for datasets without one on the same evidence.
+
+	Evidence is the run's inputs (ortho sha256, prediction label ids): a dataset whose
+	predictions were rerun gets a new run of the same version. Benchmark runs are scheduled
+	on their own and never stop a production run, nor the other way round. force queues
+	regardless, for an explicit rerun. inputs maps a dataset id to its inputs.
+	"""
 	ids = sorted(set(dataset_ids))
 	if not ids:
 		return []
+	inputs = inputs or {}
 	have = set()
-	for start in range(0, len(ids), 500):
-		rows = (
-			audit(client)
-			.table('runs')
-			.select('dataset_id')
-			.eq('check_version_id', version_row['id'])
-			.in_('dataset_id', ids[start : start + 500])
-			.execute()
-			.data
-		)
-		have |= {r['dataset_id'] for r in rows}
+	if not force:
+		for start in range(0, len(ids), 500):
+			rows = (
+				audit(client)
+				.table('runs')
+				.select('dataset_id, queue, inputs')
+				.eq('check_version_id', version_row['id'])
+				.in_('dataset_id', ids[start : start + 500])
+				.execute()
+				.data
+			)
+			have |= {
+				r['dataset_id']
+				for r in rows
+				if (r['queue'] == 'benchmark') == (queue == 'benchmark')
+				and (r.get('inputs') or {}) == inputs.get(r['dataset_id'], {})
+			}
 	new = [i for i in ids if i not in have]
 	rows = [
 		{
@@ -130,7 +201,7 @@ def enqueue(client, version_row: dict, dataset_ids, queue: str, inputs: dict | N
 			'check_version_id': version_row['id'],
 			'dataset_id': i,
 			'queue': queue,
-			'inputs': inputs or {},
+			'inputs': inputs.get(i, {}),
 		}
 		for i in new
 	]

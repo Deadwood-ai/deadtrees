@@ -67,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
 	enqueue.add_argument('--queue', choices=('backfill', 'manual', 'benchmark'), default='backfill')
 	enqueue.add_argument('--dataset-ids', help='comma separated')
 	enqueue.add_argument('--file', help='one dataset id per line')
+	enqueue.add_argument('--force', action='store_true', help='queue even where a run on the same evidence exists')
 	sub.add_parser('status')
 	probe = sub.add_parser('probe')
 	probe.add_argument('--serve', help='transport:model[:effort] to send one synthetic test image to')
@@ -108,7 +109,10 @@ def main(argv: list[str] | None = None) -> int:
 		active = runs.active_versions(client, [args.check]).get(args.check)
 		if active is None:
 			parser.error(f'{args.check} has no active version; an operator activates one first')
-		added = runs.enqueue(client, active, read_ids(args), args.queue)
+		ids = read_ids(args)
+		evidence = getattr(handlers[args.check], 'inputs', None)
+		inputs = {i: evidence(client, i) for i in ids} if evidence else None
+		added = runs.enqueue(client, active, ids, args.queue, inputs=inputs, force=args.force)
 		print(json.dumps({'check': args.check, 'version': active['version'], 'queue': args.queue, 'added': len(added)}))
 		return 0
 

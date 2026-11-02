@@ -2,7 +2,8 @@
 
 A backend is a function (prompt, images) -> answer text, the shape the checks' judges use
 (prediction_quality_v1.judge.Backend). Each call runs in an empty temporary folder with no
-project instructions, settings, tools beyond reading the given images, or plugins. A login
+project instructions, settings, plugins or tools: the images travel inline in the request,
+so a model can never read files of the worker's account. A login
 problem raises LoginExpired and a usage limit LimitReached, so the worker pauses instead of
 failing the run; any other problem raises ModelError.
 """
@@ -80,53 +81,62 @@ def _jpeg(image) -> bytes:
 
 
 def claude_backend(model: str, run=subprocess.run) -> Backend:
-	"""claude -p with only the Read tool, reading the images saved in an empty folder."""
+	"""claude -p with no tools at all: the images go inline in the one user message (stream-json)."""
 
 	def ask(prompt: str, images: Sequence) -> str:
-		with tempfile.TemporaryDirectory(prefix='deadtrees-audit-claude-') as folder:
-			names = []
-			for i, image in enumerate(images, 1):
-				name = f'image{i}.jpg'
-				Path(folder, name).write_bytes(_jpeg(image))
-				names.append(name)
-			listing = ', '.join(names)
-			command = [
-				shutil.which('claude') or 'claude',
-				'-p',
-				'--model',
-				model,
-				'--output-format',
-				'json',
-				'--tools',
-				'Read',
-				'--allowedTools',
-				'Read',
-				'--setting-sources',
-				'',
-				'--strict-mcp-config',
-				'--system-prompt',
-				'You assess aerial imagery for an audit. Use the Read tool only to view the image files named in the '
-				'request, then answer with the requested JSON only.',
-				f'Read {listing} in this folder; they are Image 1 to Image {len(names)} in that order.\n\n{prompt}',
+		content = []
+		for i, image in enumerate(images, 1):
+			data = base64.b64encode(_jpeg(image)).decode()
+			content += [
+				{'type': 'text', 'text': f'Image {i}'},
+				{'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': data}},
 			]
+		message = {'type': 'user', 'message': {'role': 'user', 'content': [*content, {'type': 'text', 'text': prompt}]}}
+		command = [
+			shutil.which('claude') or 'claude',
+			'-p',
+			'--model',
+			model,
+			'--input-format',
+			'stream-json',
+			'--output-format',
+			'stream-json',
+			'--verbose',
+			'--tools',
+			'',
+			'--setting-sources',
+			'',
+			'--strict-mcp-config',
+			'--system-prompt',
+			'You assess aerial imagery for an audit. Answer with the requested JSON only.',
+		]
+		with tempfile.TemporaryDirectory(prefix='deadtrees-audit-claude-') as folder:
 			try:
 				done = run(
 					command,
 					cwd=folder,
 					env=_clean_env(),
-					stdin=subprocess.DEVNULL,
+					input=json.dumps(message) + '\n',
 					capture_output=True,
 					text=True,
 					timeout=CALL_SECONDS,
 				)
 			except subprocess.TimeoutExpired as exc:
 				raise ModelError(f'claude: no answer within {CALL_SECONDS} s') from exc
-		try:
-			result = json.loads(done.stdout)
-		except json.JSONDecodeError:
-			raise classify('claude', f'{done.stdout} {done.stderr}') from None
+		events = []
+		for line in done.stdout.splitlines():
+			try:
+				events.append(json.loads(line))
+			except json.JSONDecodeError:
+				continue
+		init = next((e for e in events if e.get('type') == 'system' and e.get('subtype') == 'init'), {})
+		if init.get('tools'):
+			raise ModelError(f'claude: tools were offered: {init["tools"]}')
+		result = next((e for e in events if e.get('type') == 'result'), None)
+		if result is None:
+			raise classify('claude', f'{done.stdout[-300:]} {done.stderr[-300:]}')
 		if done.returncode or result.get('is_error'):
-			raise classify('claude', str(result.get('result') or done.stdout))
+			raise classify('claude', str(result.get('result') or done.stdout[-300:]))
 		return result['result']
 
 	return ask

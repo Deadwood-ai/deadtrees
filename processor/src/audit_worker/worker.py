@@ -7,6 +7,10 @@ A check plugs in with a handler module listed in HANDLERS:
 	recompute(ctx) -> dict   optional: a rule-only run (run.source_run_id) writes new rule rows
 	                         from the source run's stored model rows; it gets no judges
 	ready(status) -> bool    optional: whether a dataset's status row lets the check run
+	inputs(client, dataset_id) -> dict
+	                         optional: the evidence a run judges (ortho sha256, prediction label
+	                         ids); a dataset gets a new run when it changes. Without it, one run
+	                         per version and dataset.
 CONFIG['models'] names the judges ({"haiku-5.5": {"transport": "claude", "model": ...}}).
 """
 
@@ -166,10 +170,18 @@ def enqueue_ready(client, handlers: dict, since: str) -> dict[str, int]:
 	statuses = runs.recently_processed(client, since)
 	added = {}
 	for check, version_row in active.items():
-		ready = getattr(handlers[check], 'ready', default_ready)
+		handler = handlers[check]
+		ready = getattr(handler, 'ready', default_ready)
 		ids = [s['dataset_id'] for s in statuses if ready(s)]
-		added[check] = len(runs.enqueue(client, version_row, ids, 'upload'))
+		evidence = getattr(handler, 'inputs', None)
+		inputs = {i: evidence(client, i) for i in ids} if evidence else None
+		added[check] = len(runs.enqueue(client, version_row, ids, 'upload', inputs=inputs))
 	return added
+
+
+def sweep(client, handlers: dict, since: str) -> int:
+	"""Repair current pointers that a crash between finishing and pointing left behind."""
+	return sum(runs.publish(client, row, since) for row in runs.active_versions(client, handlers).values())
 
 
 def default_ready(status: dict) -> bool:
@@ -187,6 +199,8 @@ def run_forever(*, connect, handlers: dict, put_image, benchmark: bool = False, 
 	"""connect() -> (client, token), called every tick so the processor login stays fresh."""
 	since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
 	next_enqueue = 0.0
+	client, _ = connect()
+	runs.recover(client, handlers)
 	while True:
 		client, token = connect()
 		status = read_status()
@@ -199,6 +213,7 @@ def run_forever(*, connect, handlers: dict, put_image, benchmark: bool = False, 
 		if not benchmark and time.monotonic() >= next_enqueue:
 			started = runs.now()
 			enqueue_ready(client, handlers, since)
+			sweep(client, handlers, (datetime.now(timezone.utc) - timedelta(days=7)).isoformat())
 			since, next_enqueue = started, time.monotonic() + ENQUEUE_SECONDS
 		try:
 			result = tick(client=client, handlers=handlers, put_image=put_image, benchmark=benchmark, token=token)

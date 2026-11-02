@@ -142,19 +142,25 @@ The hash rule in `audit.benchmark_split` must never change.
 under Janusch's account, so the model calls use his subscription logins: Claude
 models through `claude -p`, OpenAI models (Luna, Sol) through the Codex login's
 app-server. Both were probed with a synthetic image on 2026-11-02. Every call runs in an
-empty temporary folder with no project instructions, settings, plugins or tools
-beyond reading the given images.
+empty temporary folder with no project instructions, settings, plugins or tools: the
+images travel inline in the request, so a model cannot read files of the account.
 
 - A check plugs in with a handler module listed in `worker.HANDLERS`: `VERSION` and
   `CONFIG` (registered once as `review_all`, inactive), `handle(ctx)` (writes the run's
   crops, images and model and rule rows), optional `recompute(ctx)` for rule-only runs
-  (no judges) and optional `ready(status)`. `CONFIG['models']` names the judges, e.g.
+  (no judges), optional `ready(status)` and optional `inputs(client, dataset_id)` (the
+  evidence a run judges: ortho sha256, prediction label ids). `CONFIG['models']` names the judges, e.g.
   `{"haiku-5.5": {"transport": "claude", "model": "claude-haiku-5-5"},
   "luna-medium": {"transport": "codex", "model": "gpt-6-luna", "effort": "medium"}}`.
 - Queues: new uploads first, then manual runs, then the backfill. Benchmark runs only in a
   `--benchmark` session. Every five minutes, datasets that finished processing get an
-  upload run of each active version. The backfill is queued explicitly with `enqueue`.
-- A finished run becomes current only when its version is the active one.
+  upload run of each active version unless a run of that version already judged the
+  same inputs, so rerun predictions get a new run. Benchmark runs never stand in for
+  production runs. The backfill is queued explicitly with `enqueue` (`--force` reruns).
+- A finished run becomes current only when its version is the active one. The same sweep
+  repairs a pointer that did not land after a run finished.
+- At start the worker puts runs left `running` by a stopped worker back in the queue
+  (there is one worker), or fails them after their last attempt.
 - An expired login or a usage limit puts the run back without spending an attempt and
   pauses the worker. The pause shows in its status file
   (`~/.local/state/deadtrees-audit-worker/status.json`), and the platform monitor turns
