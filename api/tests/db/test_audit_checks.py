@@ -811,6 +811,7 @@ def test_analyst_reads_every_audit_table_and_view_without_writing(db):
 
 # Later check migrations build on the base and come down first.
 LATER_CHECKS_DOWN = """
+DROP POLICY "Audit worker reads tile windows" ON public.v2_tile_embeddings;
 DROP FUNCTION audit.store_dataset_evaluation(bigint, jsonb);
 DROP FUNCTION audit.duplicate_candidates(bigint, bigint, text, integer, real);
 DROP TABLE audit.image_hashes;

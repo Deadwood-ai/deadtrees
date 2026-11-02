@@ -291,3 +291,50 @@ def test_the_migration_can_be_reverted_without_touching_the_base(db):
 		"SELECT to_regclass('audit.image_hashes'), to_regprocedure('audit.store_dataset_evaluation(bigint,jsonb)')"
 	).fetchone() == (None, None)
 	assert db.execute("SELECT to_regclass('audit.runs') IS NOT NULL").fetchone() == (True,)
+
+
+def test_a_crop_on_the_clip_grid_joins_the_crop_another_check_stored(db, evaluation):
+	_, dataset, version = evaluation
+	as_worker(db)
+	existing = db.execute(
+		'INSERT INTO audit.crops(dataset_id,ortho_sha256,crop_sets,pixel_x0,pixel_y0,pixel_x1,pixel_y1,geometry,mpp,size_px,selection) '
+		"VALUES (%s,%s,'{exclude}',512,0,1024,512,'SRID=4326;POLYGON((7.8 48,7.8007 48,7.8007 48.0005,7.8 48.0005,7.8 48))',"
+		'0.05,1024,%s) RETURNING id',
+		(dataset, SHA, json.dumps({'exclude': {'picker': 'top-cover-v1'}})),
+	).fetchone()[0]
+	as_admin(db)
+	payload = result(crops=2)
+	payload['crops'][0]['pixel_window'] = [512, 0, 1024, 512]
+	payload['crops'][0]['selection']['picker'] = 'clip-grid-kmeans-v1'
+	run = queued_run(db, dataset, version)
+	store(db, run, payload)
+
+	rows = db.execute(
+		'SELECT id, crop_sets, selection ? %s, pixel_x0 FROM audit.crops WHERE dataset_id=%s ORDER BY id',
+		('exclude', dataset),
+	).fetchall()
+	assert rows[0] == (existing, ['evaluation', 'exclude'], True, 512)
+	assert len(rows) == 2 and rows[1][3] is None  # the second crop stays off the grid
+	assert (
+		db.execute("SELECT count(*) FROM audit.images WHERE crop_id=%s AND kind='raw'", (existing,)).fetchone()[0] == 1
+	)
+
+
+def test_the_worker_reads_tile_windows_of_private_datasets_and_others_do_not(db, evaluation):
+	owner, _, _ = evaluation
+	private = create_dataset(db, owner, access='private')
+	dims = db.execute(
+		"SELECT atttypmod FROM pg_attribute WHERE attrelid='public.v2_tile_embeddings'::regclass AND attname='embedding'"
+	).fetchone()[0]
+	db.execute(
+		'INSERT INTO public.v2_tile_embeddings(dataset_id,geometry,embedding,pixel_x0,pixel_y0,pixel_x1,pixel_y1,nodata_fraction) '
+		"VALUES (%s,'SRID=4326;POLYGON((7.8 48,7.8007 48,7.8007 48.0005,7.8 48.0005,7.8 48))',%s,0,0,512,512,0)",
+		(private, '[' + ','.join(['0'] * dims) + ']'),
+	)
+	query = 'SELECT count(*) FROM public.v2_tile_embeddings WHERE dataset_id=%s'
+	stranger = create_user(db)
+	as_worker(db)
+	assert db.execute(query, (private,)).fetchone()[0] == 1
+	act_as(db, stranger)
+	assert db.execute(query, (private,)).fetchone()[0] == 0
+	as_admin(db)

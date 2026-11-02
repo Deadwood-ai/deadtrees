@@ -18,14 +18,17 @@ datasets work):
 | Image | Size | Purpose |
 |---|---|---|
 | Overview | at most 2048 px, about 30 cm/px | the whole flight; no-data black, the AOI edge in magenta |
-| 4 crops | 1024 px at native resolution | sharpness and artifacts; inside the data, centred by a seeded k-means split of the AOI (else the data), so a rerun judges the same crops |
+| 4 crops | CLIP tiles (51.2 m windows on the 10 cm UTM grid of `v2_tile_embeddings`) at 5 cm, 1024 px, or native when coarser | sharpness and artifacts; picked by a seeded k-means spread of the tiles in the AOI (else the data), so a rerun judges the same crops and prediction quality can reuse them. A dataset without tiles gets 1024 px native windows inside the data instead |
 | Thumbnail | the stored 256 px website thumbnail | thumbnail issues |
 
 Footprint padding without a mask (solid white or black connected to the image edge) is
 no-data, as in `utils/nodata.py`. The images the models judged are stored on the storage
 server under `audit/dataset_evaluation/<dataset>/<ortho sha256[:16]>/` and recorded in
 `audit.images` (kinds `overview`, `raw` for crops, `thumbnail`); crops are `audit.crops`
-rows in the `evaluation` set, off the CLIP grid.
+rows in the `evaluation` set, keyed by their grid window, so a tile another check
+already stored only joins the set (native fallback crops are off the grid). The worker
+reads tile windows of every dataset through its own policy on `v2_tile_embeddings`;
+other users still see only search-ready public tiles.
 
 ## Assessments per run
 

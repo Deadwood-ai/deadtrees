@@ -2,9 +2,12 @@
 
 One read at most `overview_px` on the long side through the COG overviews gives the
 overview, its valid-data mask, per-band statistics and the perceptual hash. Four
-native-resolution crops spread over the valid data (inside the AOI when there is
-one) show sharpness and artifacts the overview cannot. The crops sit wholly inside
-the data, at the centres of a seeded k-means split of it, so they spread over the
+crops spread over the data (inside the AOI when there is one) show sharpness and
+artifacts the overview cannot. They are CLIP tiles (v2_tile_embeddings: 51.2 m
+windows on the 10 cm UTM grid of the embedding stage), rendered at 5 cm or native
+when coarser, so the prediction quality check judges the same crops. A dataset
+without tiles gets native-resolution windows instead. Either way the crops are the
+centres of a seeded k-means split of the candidates, so they spread over the
 dataset without hugging its distorted edges, and a rerun judges the same crops.
 """
 
@@ -13,17 +16,25 @@ from dataclasses import dataclass, field
 import numpy as np
 import rasterio
 from pyproj import Geod, Transformer
+from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.features import rasterize
+from rasterio.transform import from_origin
+from rasterio.vrt import WarpedVRT
 from rasterio.warp import transform_geom
 from rasterio.windows import Window
 from scipy import ndimage
 from shapely.geometry import Polygon, box, mapping, shape
 
+from ..utils.crs import get_utm_string_from_latlon
+
 OVERVIEW_PX = 2048
 CROP_PX = 1024
 CROP_COUNT = 4
-CROP_PICKER = 'kmeans-inside-v1'
+CROP_PICKER = 'kmeans-inside-v1'  # native windows, for datasets without CLIP tiles
+GRID_PICKER = 'clip-grid-kmeans-v1'
+GRID_MPP = 0.10  # the CLIP tile grid of the embedding stage
+CROP_MPP = 0.05  # grid crops render at 5 cm, or native when coarser
 # The crop centres are found on a sample of the eligible overview pixels.
 MAX_CANDIDATES = 4000
 KMEANS_ROUNDS = 10
@@ -34,11 +45,21 @@ GEOD = Geod(ellps='WGS84')
 
 
 @dataclass
+class Tile:
+	"""A CLIP tile: its window on the 10 cm grid and the centre of its footprint."""
+
+	window: tuple[int, int, int, int]  # pixel_x0, pixel_y0, pixel_x1, pixel_y1
+	centre: tuple[float, float]  # lon, lat
+
+
+@dataclass
 class Crop:
-	image: np.ndarray  # H x W x 3 uint8 at native resolution
-	window: tuple[int, int, int, int]  # col_off, row_off, width, height in COG pixels
+	image: np.ndarray  # H x W x 3 uint8
 	footprint: Polygon  # EPSG:4326
-	mpp: float  # ground metres per pixel
+	mpp: float  # ground metres per pixel of the image
+	picker: str
+	grid_window: tuple[int, int, int, int] | None = None  # on the 10 cm grid; None off the grid
+	cog_window: tuple[int, int, int, int] | None = None  # col_off, row_off, width, height for native crops
 
 
 @dataclass
@@ -125,6 +146,69 @@ def spread_points(candidates: np.ndarray, count: int, seed: int) -> list[tuple[f
 	return sorted((tuple(candidates[i]) for i in dict.fromkeys(picked)), key=lambda p: (round(p[1], -2), p[0]))
 
 
+def grid_crops(src, tiles: list[Tile], where: np.ndarray, scale: float, native_mpp: float, count: int, seed: int):
+	"""Render `count` spread CLIP tiles whose centre lies in `where` (overview pixels)."""
+	to_cog = Transformer.from_crs(4326, src.crs, always_xy=True)
+	inverse = ~src.transform
+	h, w = where.shape
+	usable = []
+	for tile in tiles:
+		col, row = inverse @ to_cog.transform(*tile.centre)
+		x, y = int(col / scale), int(row / scale)
+		if 0 <= x < w and 0 <= y < h and where[y, x]:
+			usable.append((x, y, tile))
+	if not usable:
+		return []
+	by_point = {(float(x), float(y)): tile for x, y, tile in usable}
+	points = spread_points(np.array(list(by_point), float), count, seed)
+	lon, lat = Transformer.from_crs(src.crs, 4326, always_xy=True).transform(
+		*(src.transform @ (src.width / 2, src.height / 2))
+	)
+	utm = CRS.from_string(get_utm_string_from_latlon(lat, lon))
+	to_utm = Transformer.from_crs(4326, utm, always_xy=True)
+	mpp = max(CROP_MPP, native_mpp)
+	crops = []
+	for point in points:
+		tile = by_point[point]
+		x0, y0, x1, y1 = tile.window
+		cx, cy = to_utm.transform(*tile.centre)
+		half_w, half_h = (x1 - x0) * GRID_MPP / 2, (y1 - y0) * GRID_MPP / 2
+		bounds = (cx - half_w, cy - half_h, cx + half_w, cy + half_h)
+		width, height = max(1, round(2 * half_w / mpp)), max(1, round(2 * half_h / mpp))
+		# A VRT that is exactly the tile on the UTM grid at the crop resolution.
+		grid = from_origin(bounds[0], bounds[3], 2 * half_w / width, 2 * half_h / height)
+		with WarpedVRT(src, crs=utm, transform=grid, width=width, height=height, resampling=Resampling.bilinear) as vrt:
+			data = vrt.read(indexes=list(range(1, min(src.count, 3) + 1)))
+		footprint = shape(transform_geom(utm, 'EPSG:4326', mapping(box(*bounds))))
+		crops.append(Crop(rgb_of(data), footprint, mpp, GRID_PICKER, grid_window=tile.window))
+	return crops
+
+
+def native_crops(
+	src, valid: np.ndarray, where: np.ndarray, scale: float, native_mpp: float, crop_px: int, count: int, seed: int
+):
+	"""`count` native-resolution windows of up to `crop_px`, wholly inside the data where possible."""
+	cw, ch = min(crop_px, src.width), min(crop_px, src.height)
+	half = int(np.ceil(max(cw, ch) / 2 / scale))
+	eligible = where & inside(valid, half)
+	ys, xs = np.nonzero(eligible if eligible.any() else where)
+	crops = []
+	for x, y in spread_points(np.column_stack((xs, ys)).astype(float), count, seed):
+		col = int(np.clip((x + 0.5) * scale - cw / 2, 0, src.width - cw))
+		row = int(np.clip((y + 0.5) * scale - ch / 2, 0, src.height - ch))
+		window = Window(col, row, cw, ch)
+		crops.append(
+			Crop(
+				rgb_of(src.read(window=window)),
+				window_footprint(src, window),
+				native_mpp,
+				CROP_PICKER,
+				cog_window=(col, row, cw, ch),
+			)
+		)
+	return crops
+
+
 def read_inputs(
 	cog: str,
 	aoi_4326: dict | None = None,
@@ -132,8 +216,10 @@ def read_inputs(
 	overview_px: int = OVERVIEW_PX,
 	crop_px: int = CROP_PX,
 	crop_count: int = CROP_COUNT,
+	tiles: list[Tile] | None = None,
 ) -> Inputs:
-	"""Read the overview and crops of the COG at `cog` (path or URL)."""
+	"""Read the overview and crops of the COG at `cog` (path or URL); `tiles` are the
+	dataset's CLIP tiles, if the embedding stage has run."""
 	env = dict(
 		GDAL_DISABLE_READDIR_ON_OPEN='EMPTY_DIR', GDAL_HTTP_TIMEOUT='60', GDAL_HTTP_MAX_RETRY='2', GDAL_CACHEMAX=128
 	)
@@ -168,7 +254,11 @@ def read_inputs(
 			(rows.max() + 1 - rows.min()) * scale,
 		)
 		native_mpp = ground_mpp(src, src.width / 2, src.height / 2)
-		inputs = Inputs(
+		where = valid & aoi if aoi is not None else valid
+		crops = grid_crops(src, tiles or [], where, scale, native_mpp, crop_count, seed)
+		if not crops:
+			crops = native_crops(src, valid, where, scale, native_mpp, crop_px, crop_count, seed)
+		return Inputs(
 			overview=overview,
 			valid=valid,
 			aoi=aoi,
@@ -177,24 +267,12 @@ def read_inputs(
 			native_mpp=native_mpp,
 			size=(src.width, src.height),
 			footprint=window_footprint(src, valid_window),
+			crops=crops,
 			settings={
 				'overview_px': overview_px,
 				'crop_px': crop_px,
 				'crop_count': crop_count,
-				'crop_picker': CROP_PICKER,
+				'crop_picker': crops[0].picker if crops else None,
 				'seed': seed,
 			},
 		)
-		where = valid & aoi if aoi is not None else valid
-		cw, ch = min(crop_px, src.width), min(crop_px, src.height)
-		# Prefer centres whose whole crop is real data; small or ragged data falls back.
-		half = int(np.ceil(max(cw, ch) / 2 / scale))
-		eligible = where & inside(valid, half)
-		ys, xs = np.nonzero(eligible if eligible.any() else where)
-		for x, y in spread_points(np.column_stack((xs, ys)).astype(float), crop_count, seed):
-			col = int(np.clip((x + 0.5) * scale - cw / 2, 0, src.width - cw))
-			row = int(np.clip((y + 0.5) * scale - ch / 2, 0, src.height - ch))
-			window = Window(col, row, cw, ch)
-			data = src.read(window=window)
-			inputs.crops.append(Crop(rgb_of(data), (col, row, cw, ch), window_footprint(src, window), native_mpp))
-	return inputs

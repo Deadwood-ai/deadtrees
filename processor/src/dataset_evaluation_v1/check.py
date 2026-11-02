@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image
 from shapely.geometry import mapping
 
-from .inputs import CROP_COUNT, CROP_PICKER, CROP_PX, OVERVIEW_PX, Inputs
+from .inputs import CROP_COUNT, CROP_MPP, CROP_PICKER, CROP_PX, GRID_PICKER, OVERVIEW_PX, Inputs
 from .models import Model, ModelBusy
 from .prompt import PROMPT_VERSION, AnswerError, build_prompt, parse_answer
 from .rules import (
@@ -39,7 +39,13 @@ CONFIG = {
 	'rules': {'band': '/'.join(BAND_RULE), 'duplicates': '/'.join(DUPLICATE_RULE), 'dataset': '/'.join(DATASET_RULE)},
 	'rule_config': RULE_CONFIG,
 	'phash': PHASH_METHOD,
-	'inputs': {'overview_px': OVERVIEW_PX, 'crop_px': CROP_PX, 'crop_count': CROP_COUNT, 'crop_picker': CROP_PICKER},
+	'inputs': {
+		'overview_px': OVERVIEW_PX,
+		'crop_count': CROP_COUNT,
+		'crop_picker': GRID_PICKER,
+		'crop_mpp': CROP_MPP,
+		'fallback': {'crop_picker': CROP_PICKER, 'crop_px': CROP_PX},
+	},
 }
 
 
@@ -178,14 +184,16 @@ def store_payload(evaluation: Evaluation, inputs: Inputs, dataset_id: int, ortho
 	folder = storage_folder(dataset_id, ortho_sha256)
 	crops = [
 		{
+			# the 10 cm CLIP grid window audit.crops keys on; null for crops off the grid
+			'pixel_window': list(crop.grid_window) if crop.grid_window else None,
 			'geometry': mapping(crop.footprint),
 			'mpp': round(crop.mpp, 5),
 			'size_px': max(crop.image.shape[:2]),
 			'selection': {
-				'picker': inputs.settings['crop_picker'],
+				'picker': crop.picker,
 				'index': i + 1,
-				'window': list(crop.window),
 				'seed': inputs.settings['seed'],
+				**({'cog_window': list(crop.cog_window)} if crop.cog_window else {}),
 			},
 		}
 		for i, crop in enumerate(inputs.crops)

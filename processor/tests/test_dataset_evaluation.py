@@ -18,7 +18,7 @@ from rasterio.transform import from_origin
 
 from processor.src.dataset_evaluation_v1 import check as check_module
 from processor.src.dataset_evaluation_v1.check import evaluate, store_payload
-from processor.src.dataset_evaluation_v1.inputs import inside, padding, read_inputs
+from processor.src.dataset_evaluation_v1.inputs import Tile, inside, padding, read_inputs
 from processor.src.dataset_evaluation_v1.models import HaikuCLI, LunaResponses, ModelBusy, ModelUnavailable, Reply
 from processor.src.dataset_evaluation_v1.prompt import AnswerError, build_prompt, parse_answer
 from processor.src.dataset_evaluation_v1.rules import (
@@ -28,7 +28,7 @@ from processor.src.dataset_evaluation_v1.rules import (
 	hamming,
 	phash,
 )
-from processor.src.process_dataset_evaluation import aoi_key
+from processor.src.process_dataset_evaluation import aoi_key, tile_of
 
 SHA = 'b' * 64
 # EPSG:3857 metres near Freiburg (48.0 N): 0.05 m map pixels are about 3.3 cm on the ground
@@ -104,18 +104,18 @@ def test_inputs_read_a_bounded_overview_and_four_native_crops_inside_the_aoi(cog
 	assert inputs.native_mpp == pytest.approx(MAP_PX * np.cos(np.radians(48.06)), rel=0.02)
 	assert len(inputs.crops) == 4
 	for crop in inputs.crops:
-		col, row, w, h = crop.window
+		col, row, w, h = crop.cog_window
 		assert crop.image.shape == (512, 512, 3) and (w, h) == (512, 512)
 		assert col + w / 2 >= 1900  # centred in the AOI half
-	cols = sorted(c.window[0] for c in inputs.crops)
+	cols = sorted(c.cog_window[0] for c in inputs.crops)
 	assert cols[-1] - cols[0] > 600  # spread out, not clustered
 
 
 @pytest.mark.unit
 def test_crops_are_the_same_on_a_rerun_and_move_with_the_seed(cog):
-	first = [c.window for c in read_inputs(str(cog), seed=11, overview_px=512, crop_px=256).crops]
-	again = [c.window for c in read_inputs(str(cog), seed=11, overview_px=512, crop_px=256).crops]
-	other = [c.window for c in read_inputs(str(cog), seed=12, overview_px=512, crop_px=256).crops]
+	first = [c.cog_window for c in read_inputs(str(cog), seed=11, overview_px=512, crop_px=256).crops]
+	again = [c.cog_window for c in read_inputs(str(cog), seed=11, overview_px=512, crop_px=256).crops]
+	other = [c.cog_window for c in read_inputs(str(cog), seed=12, overview_px=512, crop_px=256).crops]
 
 	assert first == again
 	assert first != other
@@ -183,8 +183,86 @@ def test_crops_on_padded_orthos_stay_off_the_padding(tmp_path):
 	inputs = read_inputs(str(padded), overview_px=400, crop_px=256)
 
 	assert inputs.valid[:, :120].sum() == 0
-	assert all(c.window[0] >= 500 for c in inputs.crops)
+	assert all(c.cog_window[0] >= 500 for c in inputs.crops)
 	assert all((c.image < 250).any(axis=2).mean() > 0.95 for c in inputs.crops)
+
+
+def clip_tiles(cog_path):
+	"""CLIP tiles over the COG: 51.2 m squares on a 10 cm UTM 32N grid, as the embedding stage makes."""
+	from pyproj import Transformer
+
+	with rasterio.open(cog_path) as src:
+		left, bottom, right, top = src.bounds
+	to_utm = Transformer.from_crs(3857, 32632, always_xy=True)
+	to_wgs = Transformer.from_crs(32632, 4326, always_xy=True)
+	x_min, y_max = to_utm.transform(left, top)
+	x_max, y_min = to_utm.transform(right, bottom)
+	tiles = []
+	for j, y in enumerate(np.arange(y_max - 51.2, y_min, -51.2)):
+		for i, x in enumerate(np.arange(x_min, x_max - 51.2, 51.2)):
+			tiles.append(Tile((i * 512, j * 512, (i + 1) * 512, (j + 1) * 512), to_wgs.transform(x + 25.6, y + 25.6)))
+	return tiles
+
+
+@pytest.mark.unit
+def test_crops_are_spread_clip_tiles_rendered_at_5_cm(tmp_path):
+	from shapely.geometry import shape as to_shape
+
+	big = tmp_path / 'big.tif'
+	rgb = forest(4500, 6000)
+	with rasterio.open(
+		big,
+		'w',
+		driver='GTiff',
+		width=6000,
+		height=4500,
+		count=3,
+		dtype='uint8',
+		crs='EPSG:3857',
+		transform=from_origin(*ORIGIN, 0.07, 0.07),
+		tiled=True,
+		compress='deflate',
+	) as dst:
+		dst.write(rgb.transpose(2, 0, 1))
+		dst.build_overviews([2, 4, 8], rasterio.enums.Resampling.average)
+	tiles = clip_tiles(big)
+	# the east half, in this COG's 0.07 m pixels
+	aoi = aoi_box(3000 * 0.07 / MAP_PX, 0, 6000 * 0.07 / MAP_PX, 4500 * 0.07 / MAP_PX)
+	inputs = read_inputs(str(big), aoi, seed=4, overview_px=1024, tiles=tiles)
+
+	assert len(tiles) >= 16 and len(inputs.crops) == 4
+	assert inputs.settings['crop_picker'] == 'clip-grid-kmeans-v1'
+	by_window = {t.window: t for t in tiles}
+	for crop in inputs.crops:
+		assert crop.grid_window in by_window and crop.cog_window is None
+		assert crop.image.shape == (1024, 1024, 3) and crop.mpp == 0.05
+		centre = crop.footprint.centroid
+		assert centre.x == pytest.approx(by_window[crop.grid_window].centre[0], abs=1e-6)
+		assert to_shape(aoi).contains(centre)
+	assert len({c.grid_window for c in inputs.crops}) == 4
+	again = read_inputs(str(big), aoi, seed=4, overview_px=1024, tiles=tiles)
+	assert [c.grid_window for c in again.crops] == [c.grid_window for c in inputs.crops]
+
+
+@pytest.mark.unit
+def test_tiles_off_the_data_fall_back_to_native_windows(cog):
+	far = [Tile((0, 0, 512, 512), (10.0, 50.0))]
+	inputs = read_inputs(str(cog), overview_px=512, crop_px=256, tiles=far)
+
+	assert inputs.settings['crop_picker'] == 'kmeans-inside-v1'
+	assert all(c.grid_window is None and c.cog_window for c in inputs.crops)
+
+
+@pytest.mark.unit
+def test_a_tile_row_reads_as_geojson_or_ewkb():
+	from shapely.geometry import box as shapely_box
+
+	square = shapely_box(7.80, 48.00, 7.81, 48.01)
+	row = {'pixel_x0': 0, 'pixel_y0': 512, 'pixel_x1': 512, 'pixel_y1': 1024}
+	for geometry in ({'type': 'Polygon', 'coordinates': [list(square.exterior.coords)]}, square.wkb_hex):
+		tile = tile_of({**row, 'geometry': geometry})
+		assert tile.window == (0, 512, 512, 1024)
+		assert tile.centre == pytest.approx((7.805, 48.005))
 
 
 # ---------------------------------------------------------------------------
