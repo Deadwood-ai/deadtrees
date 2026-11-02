@@ -11,6 +11,7 @@ import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { message } from "antd";
 import { requestConcepts, requestSegmentation, warmUpSegmentation, type SamPrompt } from "../utils/samRequest";
 import { keepLargestPolygon, pixelPolygonsToFeatures, toPixelFeatureCollection } from "../utils/samGeometry";
+import { lockMapInteractions } from "../utils/mapInteractionLock";
 import { palette } from "../theme/palette";
 
 type GetOrthoLayerFn = () => TileLayerWebGL | undefined;
@@ -89,8 +90,15 @@ export const useAISegmentation = ({
     return (resultSourceRef.current = ownLayerRef.current.getSource()!);
   }, [getTargetVectorSource]);
 
+  // Undoes the current map lock; unlocking restores only what the lock switched off.
+  const unlockRef = useRef<(() => void) | null>(null);
   const setNavigationLocked = useCallback((map: Map, locked: boolean) => {
-    map.getInteractions().forEach((i) => i.setActive(!locked));
+    if (locked) {
+      unlockRef.current ??= lockMapInteractions(map);
+    } else {
+      unlockRef.current?.();
+      unlockRef.current = null;
+    }
   }, []);
 
   const endSession = useCallback(() => {
