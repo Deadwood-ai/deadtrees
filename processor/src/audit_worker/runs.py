@@ -96,7 +96,7 @@ def finish(client, run: dict, summary: dict, active: bool) -> None:
 	"""Done; the run counts for its dataset when its version is the active one.
 
 	The pointer is a second request. If it does not land, publish() puts it right on the
-	next sweep, because a done run of the active version newer than the pointer always wins.
+	next sweep with the same rule.
 	"""
 	update = {'status': 'done', 'finished_at': now(), 'error': None}
 	for key in ('coverage', 'cost', 'evidence'):
@@ -107,19 +107,66 @@ def finish(client, run: dict, summary: dict, active: bool) -> None:
 		point(client, run)
 
 
-def point(client, run: dict) -> None:
-	audit(client).table('current_runs').upsert(
-		{'dataset_id': run['dataset_id'], 'check_key': run['check_key'], 'run_id': run['id'], 'updated_at': now()},
-		on_conflict='dataset_id,check_key',
-	).execute()
+def replaces(pointed: dict | None, run: dict) -> bool:
+	"""The pointer rule, for a done run of the active version.
+
+	It replaces a missing pointer, or one at another version's run (a promotion wins
+	whatever the ids), and within its own version only an older run: the run created
+	later judged the later evidence, whichever finished first.
+	"""
+	if pointed is None or pointed['check_version_id'] != run['check_version_id']:
+		return True
+	return run['id'] > pointed['id']
+
+
+def point(client, run: dict) -> bool:
+	"""Apply the pointer rule. The update only lands if the pointer is still the one read,
+	so two writers cannot undo each other; on a lost race it reads again."""
+	pointers = audit(client).table('current_runs')
+	for _ in range(3):
+		current = (
+			pointers.select('run_id')
+			.eq('dataset_id', run['dataset_id'])
+			.eq('check_key', run['check_key'])
+			.execute()
+			.data
+		)
+		if not current:
+			try:
+				pointers.insert(
+					{
+						'dataset_id': run['dataset_id'],
+						'check_key': run['check_key'],
+						'run_id': run['id'],
+						'updated_at': now(),
+					}
+				).execute()
+				return True
+			except Exception:  # someone else pointed first: decide again on what is there now
+				continue
+		old = current[0]['run_id']
+		pointed = audit(client).table('runs').select('id, check_version_id').eq('id', old).execute().data
+		if not replaces(pointed[0] if pointed else None, run):
+			return False
+		moved = (
+			pointers.update({'run_id': run['id'], 'updated_at': now()})
+			.eq('dataset_id', run['dataset_id'])
+			.eq('check_key', run['check_key'])
+			.eq('run_id', old)
+			.execute()
+			.data
+		)
+		if moved:
+			return True
+	return False
 
 
 def publish(client, version_row: dict, since: str) -> int:
-	"""Point datasets at their newest done run of the active version where the pointer is missing or older."""
+	"""Apply the pointer rule to each dataset's newest done run of the active version."""
 	done = (
 		audit(client)
 		.table('runs')
-		.select('id, dataset_id, check_key, queue')
+		.select('id, dataset_id, check_key, check_version_id, queue')
 		.eq('check_version_id', version_row['id'])
 		.eq('status', 'done')
 		.gte('finished_at', since)
@@ -130,22 +177,7 @@ def publish(client, version_row: dict, since: str) -> int:
 	for run in done:
 		if run['queue'] != 'benchmark' and run['id'] > newest.get(run['dataset_id'], {}).get('id', 0):
 			newest[run['dataset_id']] = run
-	if not newest:
-		return 0
-	pointers = {
-		row['dataset_id']: row['run_id']
-		for row in audit(client)
-		.table('current_runs')
-		.select('dataset_id, run_id')
-		.eq('check_key', version_row['check_key'])
-		.in_('dataset_id', sorted(newest))
-		.execute()
-		.data
-	}
-	fixed = [run for dataset, run in newest.items() if pointers.get(dataset, 0) < run['id']]
-	for run in fixed:
-		point(client, run)
-	return len(fixed)
+	return sum(point(client, run) for run in newest.values())
 
 
 def recover(client, checks) -> int:

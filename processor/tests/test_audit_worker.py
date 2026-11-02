@@ -424,6 +424,10 @@ def test_a_run_left_running_by_a_stopped_worker_goes_back_to_the_queue():
 	assert run_row(client, last['id'])['status'] == 'failed'
 
 
+def pointer(client, dataset):
+	return next((r['run_id'] for r in client.tables['current_runs'].rows if r['dataset_id'] == dataset), None)
+
+
 @pytest.mark.unit
 def test_the_sweep_points_datasets_at_their_newest_finished_run():
 	client = Client()
@@ -434,11 +438,61 @@ def test_the_sweep_points_datasets_at_their_newest_finished_run():
 	queued(client, v, 3, 'benchmark', status='done', finished_at='2026-11-02T09:00')
 	runs.point(client, older)  # the pointer to the newer run never landed
 	assert worker.sweep(client, {'prediction_quality': handler()}, '2026-11-01T00:00') == 2
-	assert sorted((r['dataset_id'], r['run_id']) for r in client.tables['current_runs'].rows) == [
-		(1, newer['id']),
-		(2, unpointed['id']),
-	]
+	assert (pointer(client, 1), pointer(client, 2), pointer(client, 3)) == (newer['id'], unpointed['id'], None)
 	assert worker.sweep(client, {'prediction_quality': handler()}, '2026-11-01T00:00') == 0
+
+
+@pytest.mark.unit
+def test_an_older_backfill_finishing_after_a_newer_upload_leaves_the_pointer():
+	client = Client()
+	v = version(client)
+	backfill = queued(client, v, 1, 'backfill', created='2026-11-01T00:00')
+	upload = queued(client, v, 1, 'upload', created='2026-11-02T09:00')
+	h = {'prediction_quality': handler()}
+	assert worker.tick(client=client, handlers=h, put_image=None) == 'done'  # the upload goes first
+	assert worker.tick(client=client, handlers=h, put_image=None) == 'done'
+	assert run_row(client, backfill['id'])['status'] == 'done'
+	assert pointer(client, 1) == upload['id']
+	assert worker.sweep(client, h, '2026-11-01T00:00') == 0 and pointer(client, 1) == upload['id']
+
+
+@pytest.mark.unit
+def test_promotion_moves_pointers_from_the_old_version_whatever_the_ids():
+	client = Client()
+	old = version(client)
+	candidate = version(client, name='v2', active=False)
+	shadow = queued(client, candidate, 1, 'manual')  # the candidate ran first: lower id
+	current = queued(client, old, 1)
+	h = {'prediction_quality': handler()}
+	worker.tick(client=client, handlers=h, put_image=None)
+	worker.tick(client=client, handlers=h, put_image=None)
+	# a run of an inactive version never moves the pointer
+	assert pointer(client, 1) == current['id']
+	assert worker.sweep(client, h, '2026-11-01T00:00') == 0
+	# the operator activates the candidate; the sweep promotes its earlier run
+	for row in client.tables['check_versions'].rows:
+		row['is_active'] = row['id'] == candidate['id']
+	assert shadow['id'] < current['id']
+	assert worker.sweep(client, h, '2026-11-01T00:00') == 1 and pointer(client, 1) == shadow['id']
+
+
+@pytest.mark.unit
+def test_a_pointer_moved_by_someone_else_meanwhile_is_decided_again():
+	client = Client()
+	v = version(client)
+	first, second, third = (queued(client, v, 1, status='done') for _ in range(3))
+	runs.point(client, first)
+	original_update = client.tables['current_runs'].update
+
+	def racing_update(payload):
+		# another writer points at the third run between our read and our write
+		client.tables['current_runs'].rows[0]['run_id'] = third['id']
+		client.tables['current_runs'].update = original_update
+		return original_update(payload)
+
+	client.tables['current_runs'].update = racing_update
+	assert runs.point(client, second) is False
+	assert pointer(client, 1) == third['id']
 
 
 @pytest.mark.unit
