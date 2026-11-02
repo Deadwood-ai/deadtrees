@@ -3,7 +3,7 @@
  *
  * These components are used by both:
  * - ReferencePatchEditorView (for creating reference training data)
- * - CorrectionEditorView (for public labelling corrections)
+ * - useDatasetEditing (dataset page and audit map)
  */
 
 export { default as EditorToolbar } from "./EditorToolbar";

@@ -9,14 +9,17 @@ browser: browser
 parallel_safe: false
 mutation_level: local-write
 routes:
-  - /dataset-label/91001
-  - /dataset-corrections/91001
+  - /dataset/91001
+  - /dataset-audit/91001
 ```
 
 ## Purpose
 
 Verify label editing and public correction flows can be exercised locally with a
 map, layer controls, geometry creation/editing, and approval/revert paths.
+Corrections happen in the inline editor on the dataset page and in the audit map;
+the retired `/dataset-label/:id` and `/dataset-corrections/:id` routes redirect to
+`/dataset/:id`.
 
 ## Preconditions
 
@@ -29,13 +32,13 @@ map, layer controls, geometry creation/editing, and approval/revert paths.
 ## Steps
 
 1. Sign in as contributor.
-2. Navigate to `/dataset-corrections/91001`.
-3. Verify the corrections editor route loads or reports missing fixture state.
+2. Navigate to `/dataset-corrections/91001` and verify it redirects to `/dataset/91001`.
+3. Open the inline editor on the dataset page, or record missing fixture state.
 4. If available, create or edit a correction geometry.
 5. Save the correction and verify local DB side effect.
 6. Sign in as auditor.
-7. Navigate to `/dataset-label/91001`.
-8. Verify label editor/map/layer controls render.
+7. Navigate to `/dataset-audit/91001` and open the deadwood editor.
+8. Verify editor, map and layer controls render.
 9. Approve or revert a pending correction if the fixture exists.
 
 ## Expected Observations
