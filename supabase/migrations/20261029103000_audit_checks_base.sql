@@ -135,6 +135,9 @@ create table audit.runs (
 	-- out of the production queues and cost caps and never become the current run
 	queue text not null check (queue in ('upload', 'backfill', 'manual', 'benchmark')),
 	status audit.run_status not null default 'queued',
+	-- set on a rule-only run: a version that changes only the dataset rule
+	-- recomputes from this run's model rows and calls no model
+	source_run_id bigint,
 	-- what the run judged: ortho sha256, prediction label ids, crop settings
 	inputs jsonb not null default '{}'::jsonb check (jsonb_typeof(inputs) = 'object'),
 	-- check-specific evidence not tied to one assessor (reference matches, date
@@ -151,12 +154,32 @@ create table audit.runs (
 	finished_at timestamptz,
 	foreign key (check_version_id, check_key) references audit.check_versions (id, check_key),
 	unique (id, check_key, dataset_id),
+	foreign key (source_run_id, check_key, dataset_id) references audit.runs (id, check_key, dataset_id),
+	check (source_run_id is distinct from id),
 	check ((finished_at is not null) = (status in ('done', 'failed'))),
 	check (status <> 'failed' or error is not null)
 );
 create index runs_dataset_idx on audit.runs (dataset_id, check_key);
 create index runs_open_idx on audit.runs (queue, created_at) where status in ('queued', 'running');
 create index runs_version_idx on audit.runs (check_version_id);
+create index runs_source_idx on audit.runs (source_run_id) where source_run_id is not null;
+
+-- A rule-only run recomputes from a run that called the models itself.
+create function internal.check_audit_rule_only_run()
+returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+	if new.source_run_id is not null
+		and (select source_run_id from audit.runs where id = new.source_run_id) is not null then
+		raise exception 'A rule-only run recomputes from a run that called the models' using errcode = '23514';
+	end if;
+	return new;
+end;
+$$;
+create trigger check_audit_rule_only_run
+before insert on audit.runs
+for each row execute function internal.check_audit_rule_only_run();
 
 -- The run whose results count for a dataset and check.
 create table audit.current_runs (
@@ -337,6 +360,34 @@ create trigger reject_audit_assessment_update
 before update on audit.assessments
 for each row execute function internal.reject_audit_row_update();
 
+create function internal.reject_model_rows_on_rule_only_runs()
+returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+	if new.assessor_kind = 'model'
+		and (select source_run_id from audit.runs where id = new.run_id) is not null then
+		raise exception 'A rule-only run calls no model; it holds rule rows only' using errcode = '23514';
+	end if;
+	return new;
+end;
+$$;
+create trigger reject_model_rows_on_rule_only_runs
+before insert on audit.assessments
+for each row execute function internal.reject_model_rows_on_rule_only_runs();
+
+-- Model and rule rows that count now: those of each dataset's current run, plus
+-- the model rows of the run a rule-only run recomputed from (its old rule rows
+-- stay history).
+create view audit.current_assessments
+with (security_invoker = true)
+as
+select a.*
+from audit.current_runs c
+join audit.runs r on r.id = c.run_id
+join audit.assessments a on a.dataset_id = c.dataset_id and a.check_key = c.check_key
+	and (a.run_id = c.run_id or (a.run_id = r.source_run_id and a.assessor_kind = 'model'));
+
 -- Latest row per target, layer and assessor: a correction replaces the earlier
 -- answer of the same assessor, while every answer stays in the table. A native
 -- answer replaces the same person's imported one whatever its date. Benchmarks
@@ -360,9 +411,11 @@ with counted as (
 	-- filter to the current run first, so a newer run that is not current yet
 	-- cannot hide the current run's answers
 	select distinct on (a.check_key, a.dataset_id, a.crop_id, a.layer, a.assessor) a.*
-	from audit.assessments a
-	left join audit.current_runs c on c.dataset_id = a.dataset_id and c.check_key = a.check_key
-	where a.assessor_kind = 'person' or a.run_id = c.run_id
+	from (
+		select * from audit.assessments where assessor_kind = 'person'
+		union all
+		select * from audit.current_assessments
+	) a
 	order by a.check_key, a.dataset_id, a.crop_id, a.layer, a.assessor, a.imported_from is not null, a.created_at desc, a.id desc
 ), targets as (
 	select
@@ -385,6 +438,99 @@ from targets
 where cardinality(people) > 1
 	or (models is not null and (people is distinct from models and people is not null
 		or legacy is distinct from models and legacy is not null));
+
+-- What needs a person: one row per dataset, check and layer with a dataset-level
+-- verdict in the current run. The verdict comes from the run's dataset-level rule
+-- rows (a check's dataset rule, e.g. "deadwood bad when 2 of 10 crops are major"),
+-- else its dataset-level model rows (georef, date). The worst verdict counts. The
+-- version's mode decides:
+--   review_all        always, reason review_all
+--   review_uncertain  when a verdict is unsure or the assessors disagree
+--   auto_apply        only the spot-check sample (config spot_check_pct, default 5)
+-- A native person answer on the dataset for the judged prediction marks it reviewed.
+create view audit.review_queue
+with (security_invoker = true)
+as
+with dataset_rows as (
+	select a.*, bool_or(a.assessor_kind = 'rule') over (partition by a.dataset_id, a.check_key, a.layer) as has_rule
+	from audit.current_assessments a
+	where a.crop_id is null
+), verdicts as (
+	select
+		d.dataset_id, d.check_key, d.layer, c.run_id,
+		jsonb_object_agg(d.assessor, d.verdict order by d.assessor) as verdicts,
+		array_agg(distinct d.verdict) as distinct_verdicts,
+		array_remove(array_agg(distinct d.label_id), null) as label_ids
+	from dataset_rows d
+	join audit.current_runs c on c.dataset_id = d.dataset_id and c.check_key = d.check_key
+	where d.assessor_kind = 'rule' or not d.has_rule
+	group by d.dataset_id, d.check_key, d.layer, c.run_id
+), judged as (
+	select
+		v.*, r.check_version_id, cv.version, cv.mode,
+		case
+			when 'major' = any(v.distinct_verdicts) then 'major'
+			when 'unsure' = any(v.distinct_verdicts) then 'unsure'
+			when 'minor' = any(v.distinct_verdicts) then 'minor'
+			else 'ok'
+		end::audit.verdict as verdict,
+		case
+			when cv.mode = 'review_all' then 'review_all'
+			when 'unsure' = any(v.distinct_verdicts) then 'unsure'
+			when cardinality(v.distinct_verdicts) > 1 then 'models_disagree'
+			when cv.mode = 'auto_apply'
+				and ('x' || substr(md5('audit-spot-v1:' || v.dataset_id || ':' || r.check_version_id), 1, 8))::bit(32)::bigint % 100
+					< coalesce((cv.config ->> 'spot_check_pct')::integer, 5) then 'spot_check'
+		end as reason,
+		exists (
+			select 1 from audit.assessments p
+			where p.assessor_kind = 'person' and p.imported_from is null and p.crop_id is null
+				and p.dataset_id = v.dataset_id and p.check_key = v.check_key and p.layer = v.layer
+				and (p.label_id is null or p.label_id = any(v.label_ids))
+		) as reviewed
+	from verdicts v
+	join audit.runs r on r.id = v.run_id
+	join audit.check_versions cv on cv.id = r.check_version_id
+)
+select
+	dataset_id, check_key, layer, run_id, check_version_id, version, mode, verdict, verdicts,
+	reason is not null and not reviewed as needs_review,
+	reason, reviewed
+from judged;
+
+-- Activate a check version, optionally with the mode of the version it replaces,
+-- so a benchmark-approved change does not send everything back to review.
+create function audit.activate_version(p_version_id bigint, p_inherit_mode boolean default false)
+returns audit.check_versions
+language plpgsql set search_path = ''
+as $$
+declare
+	v_target audit.check_versions;
+	v_previous audit.check_versions;
+begin
+	if not public.can_operate() and current_setting('role', true) is distinct from 'service_role'
+		and (select auth.jwt() ->> 'role') is distinct from 'service_role' then
+		raise exception 'Only operators activate check versions' using errcode = '42501';
+	end if;
+	select * into v_target from audit.check_versions where id = p_version_id for update;
+	if not found then
+		raise exception 'Check version % does not exist', p_version_id using errcode = 'P0002';
+	end if;
+	select * into v_previous from audit.check_versions
+	where check_key = v_target.check_key and is_active and id <> p_version_id for update;
+	if found then
+		update audit.check_versions set is_active = false where id = v_previous.id;
+	end if;
+	update audit.check_versions
+	set is_active = true,
+		mode = case when p_inherit_mode and v_previous.id is not null then v_previous.mode else mode end
+	where id = p_version_id
+	returning * into v_target;
+	return v_target;
+end;
+$$;
+revoke all on function audit.activate_version(bigint, boolean) from public, anon;
+grant execute on function audit.activate_version(bigint, boolean) to authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- Benchmarks
@@ -549,7 +695,7 @@ revoke all on all tables in schema audit from public, anon, authenticated;
 grant select on audit.checks, audit.check_versions, audit.runs,
 	audit.current_runs, audit.crops, audit.images, audit.assessments,
 	audit.benchmarks, audit.benchmark_members, audit.benchmark_scores,
-	audit.latest_assessments, audit.disagreements
+	audit.latest_assessments, audit.current_assessments, audit.disagreements, audit.review_queue
 	to authenticated;
 grant insert on audit.check_versions, audit.runs, audit.crops,
 	audit.images, audit.assessments to authenticated;

@@ -30,7 +30,9 @@ audit.checks -> audit.check_versions -> audit.runs -> evidence -> audit.assessme
 Modes per version: `review_all` (default for every new version), `review_uncertain`,
 `auto_apply`. Only an operator (`can_operate`) changes the mode or the active version,
 and only one version per check is active. A changed prompt, rule or config is a new
-version.
+version. `audit.activate_version(version_id, inherit_mode)` switches the active version
+in one call and can keep the mode of the version it replaces, so a change approved on
+the benchmark does not send everything back to review.
 
 ## Assessments
 
@@ -93,8 +95,28 @@ A benchmark fixes which targets a check is scored on; truth stays in
    assessment per model or rule, and point `audit.current_runs` at the run. A check may
    do this in its own `SECURITY DEFINER` store function guarded by
    `internal.is_audit_worker()`.
-3. Derive the dataset verdict in the check's own versioned SQL rule and write it to
-   `dataset_audit_suggestions` with source `audit:<check>/<version>`.
+3. Derive the dataset verdict with the check's dataset rule, a small versioned function
+   in the worker next to the benchmark scorer that tunes it. Its thresholds live in the
+   version's `config`. It stores its result as a dataset-level `rule` row in the same
+   run (`model` = rule name, `prompt_version` = rule version), e.g.
+   `pq-dataset-rule/v1: deadwood major, 3 of 10 crops major`. Checks with one
+   dataset-level model row per model (georef, date) need no rule. The verdict also
+   goes to `dataset_audit_suggestions` with source `audit:<check>/<version>`.
+4. `audit.review_queue` decides what needs a person, for every check alike: per
+   dataset, check and layer it takes the current run's dataset-level rule rows (else
+   its dataset-level model rows), counts the worst verdict, and applies the version's
+   mode. `review_all` always needs review. `review_uncertain` needs review when a
+   verdict is `unsure` or the assessors disagree. `auto_apply` sends only the
+   spot-check sample (`config.spot_check_pct`, default 5). A native person answer on
+   the dataset for the judged prediction marks it reviewed; an imported old audit does
+   not. The review page and the monitor read this view only.
+
+A new rule version needs no model calls: a rule-only run (`source_run_id` = the run
+whose model rows it uses) stores only the new rule rows and becomes current.
+`audit.current_assessments` then combines the rule-only run's rows with the source run's
+model rows; the old rule rows stay as history. People's answers stay valid, because
+they judge the dataset, not the rule. Model rows are redone only when the prompt, the
+model, the prediction or the ortho changes.
 
 A worker that cannot reach a model (expired login) leaves its runs `queued`; it never
 fails them for that reason.
