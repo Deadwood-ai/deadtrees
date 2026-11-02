@@ -1,4 +1,4 @@
-import { Navigate, Outlet, Route, Routes, useLocation, useParams } from "react-router-dom";
+import { Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { App as AntdApp, ConfigProvider, Layout } from "antd";
 import { lazy, Suspense, useEffect } from "react";
 import { trackPageView, initializePostHog } from "./utils/analytics";
@@ -169,10 +169,6 @@ function AppWithTracking() {
             path="dataset-audit/:id/reference-patches"
             element={<DatasetReferencePatchEditor />}
           />
-          <Route
-            path="dataset-audit/:id/ml-tiles"
-            element={<RedirectWithId to="/dataset-audit/:id/reference-patches" />}
-          />
           {/* Internal read-only operations workspace; gated by can_operate */}
           <Route path="factory" element={<FactoryLayout />}>
             <Route index element={<FactoryOverview />} />
@@ -181,9 +177,6 @@ function AppWithTracking() {
             <Route path="datasets/:id" element={<FactoryDatasetDetail />} />
             <Route path="activity" element={<FactoryActivity />} />
           </Route>
-          {/* Retired editors: corrections now happen on the dataset page */}
-          <Route path="dataset-label/:id" element={<RedirectWithId to="/dataset/:id" />} />
-          <Route path="dataset-corrections/:id" element={<RedirectWithId to="/dataset/:id" />} />
           <Route path="deadtrees" element={<Deadtrees />} />
           <Route
             path="priwa-field"
@@ -251,10 +244,4 @@ export default function App() {
       </AntdApp>
     </ConfigProvider>
   );
-}
-
-/** Sends a retired route to its replacement, keeping the dataset id. */
-function RedirectWithId({ to }: { to: string }) {
-  const { id = "" } = useParams();
-  return <Navigate replace to={to.replace(":id", encodeURIComponent(id))} />;
 }
