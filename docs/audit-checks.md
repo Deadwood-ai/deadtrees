@@ -155,7 +155,9 @@ images travel inline in the request, so a model cannot read files of the account
 - Queues: new uploads first, then manual runs, then the backfill. Benchmark runs only in a
   `--benchmark` session. Every five minutes, datasets that finished processing get an
   upload run of each active version unless a run of that version already judged the
-  same inputs, so rerun predictions get a new run. Benchmark runs never stand in for
+  same inputs, so rerun predictions get a new run. The worker keeps how far it has looked
+  (`discovered-until` next to the status file), so datasets finished while it was down are
+  found after a restart. Benchmark runs never stand in for
   production runs. The backfill is queued explicitly with `enqueue` (`--force` reruns).
 - A finished run becomes current only when its version is the active one. The same sweep
   repairs a pointer that did not land after a run finished.

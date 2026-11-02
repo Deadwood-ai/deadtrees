@@ -86,6 +86,28 @@ def read_status(path: Path | None = None) -> dict | None:
 		return None
 
 
+def watermark_file() -> Path:
+	return STATUS_FILE.with_name('discovered-until')
+
+
+def read_watermark() -> str | None:
+	"""Up to when finished datasets were queued; kept across restarts so an outage leaves no gap."""
+	try:
+		value = watermark_file().read_text().strip()
+		datetime.fromisoformat(value)
+		return value
+	except (OSError, ValueError):
+		return None
+
+
+def write_watermark(value: str) -> None:
+	path = watermark_file()
+	path.parent.mkdir(parents=True, exist_ok=True)
+	with tempfile.NamedTemporaryFile('w', dir=path.parent, delete=False) as out:
+		out.write(value)
+	os.replace(out.name, path)
+
+
 def memory_limit(
 	cgroup_root: Path = Path('/sys/fs/cgroup'), proc_cgroup: Path = Path('/proc/self/cgroup')
 ) -> int | None:
@@ -196,8 +218,13 @@ def register(client, handlers: dict) -> dict[str, dict]:
 
 
 def run_forever(*, connect, handlers: dict, put_image, benchmark: bool = False, once: bool = False, sleep=time.sleep):
-	"""connect() -> (client, token), called every tick so the processor login stays fresh."""
-	since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+	"""connect() -> (client, token), called every tick so the processor login stays fresh.
+
+	Finished datasets are queued from the persisted watermark on, so datasets that finished
+	while the worker was down are still found. The very first start looks back one hour:
+	older datasets are backfill, queued explicitly.
+	"""
+	since = read_watermark() or (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
 	next_enqueue = 0.0
 	client, _ = connect()
 	runs.recover(client, handlers)
@@ -213,6 +240,7 @@ def run_forever(*, connect, handlers: dict, put_image, benchmark: bool = False, 
 		if not benchmark and time.monotonic() >= next_enqueue:
 			started = runs.now()
 			enqueue_ready(client, handlers, since)
+			write_watermark(started)
 			sweep(client, handlers, (datetime.now(timezone.utc) - timedelta(days=7)).isoformat())
 			since, next_enqueue = started, time.monotonic() + ENQUEUE_SECONDS
 		try:

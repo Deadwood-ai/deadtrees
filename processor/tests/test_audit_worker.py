@@ -286,6 +286,34 @@ def test_finished_datasets_are_queued_once_per_version():
 
 
 @pytest.mark.unit
+def test_datasets_finished_while_the_worker_was_down_are_still_queued(tmp_path, monkeypatch):
+	monkeypatch.setattr(worker, 'STATUS_FILE', tmp_path / 'status.json')
+	client = Client()
+	version(client)
+	# the worker last queued at 06:00, then stopped for hours
+	worker.write_watermark('2026-11-02T06:00:00+00:00')
+	client.tables['v2_statuses'].add(
+		{
+			'dataset_id': 7,
+			'updated_at': '2026-11-02T07:30:00+00:00',
+			'current_status': 'idle',
+			'has_error': False,
+			'is_cog_done': True,
+			'is_combined_model_done': True,
+		}
+	)
+	worker.run_forever(
+		connect=lambda: (client, 'token'),
+		handlers={'prediction_quality': handler()},
+		put_image=None,
+		once=True,
+		sleep=lambda s: None,
+	)
+	assert [r['dataset_id'] for r in client.tables['runs'].rows] == [7]
+	assert worker.read_watermark() > '2026-11-02T07:30:00+00:00'
+
+
+@pytest.mark.unit
 def test_the_worker_needs_a_memory_cap_of_its_cgroup(tmp_path):
 	root = tmp_path / 'cgroup'
 	scope = root / 'user.slice' / 'run-1.scope'
