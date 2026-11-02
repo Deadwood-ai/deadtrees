@@ -329,10 +329,16 @@ test.describe("auditor local write flows", () => {
     await secondTab.close();
   });
 
-  test("AI box reports an unreachable model and adds a returned outline", async ({ page }) => {
+  test("AI box reports an unreachable model, adds a returned outline and refines it with clicks", async ({
+    page,
+  }) => {
     let samResponse: "fail" | "outline" = "fail";
     let drawnBox = { x1: 0, y1: 0, x2: 0, y2: 0 };
+    const sentPoints: string[] = [];
     await page.route("**/segment", async (route) => {
+      const body = route.request().postData() ?? "";
+      const points = /name="points"\r\n\r\n([^\r]*)/.exec(body)?.[1];
+      if (points) sentPoints.push(points);
       if (samResponse === "fail") {
         await route.abort("connectionrefused");
         return;
@@ -388,6 +394,14 @@ test.describe("auditor local write flows", () => {
     await expect(page.locator(".ant-message-notice")).toHaveCount(0, { timeout: 10_000 });
     await drawAiBox();
     await expect(undo).toBeEnabled({ timeout: 10_000 });
+
+    // While AI stays on, a click refines the outline: it is sent as a point with the same box.
+    const bounds = (await page.getByTestId("dataset-audit-map").boundingBox())!;
+    await page.mouse.click(bounds.x + bounds.width * 0.5, bounds.y + bounds.height * 0.5);
+    await expect.poll(() => sentPoints.length).toBe(1);
+    expect(JSON.parse(sentPoints[0])).toHaveLength(1);
+    await page.getByRole("button", { name: /AI Active \(S\)/ }).click();
+    await expect(page.getByRole("button", { name: /AI \(S\)/ })).toBeVisible();
 
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
   });

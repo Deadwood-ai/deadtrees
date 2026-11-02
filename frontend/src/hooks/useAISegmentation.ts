@@ -169,10 +169,15 @@ export const useAISegmentation = ({
     sessionRef.current = session;
     await runSession(map, session);
     if (sessionRef.current !== session) return;
+    if (session.features.length === 0) {
+      // Nothing to refine: the request failed or found nothing. Unlock the map.
+      disable();
+      return;
+    }
     clickKeyRef.current = refine;
     map.on("click", refine);
     message.info(REFINE_HINT);
-  }, [getOrthoLayer, refine, resultSource, runSession, setNavigationLocked]);
+  }, [disable, getOrthoLayer, refine, resultSource, runSession, setNavigationLocked]);
 
   const enable = useCallback(() => {
     const map = mapRef.current;
