@@ -1,8 +1,8 @@
-"""Map a check result onto the audit check base tables (DT-1481 draft of 2026-10-29).
+"""Map a check result onto the audit schema tables (DT-1481, #793: audit.runs, audit.crops, ...).
 
 Pure functions: they return the rows to insert; the worker owns the connection, the storage
 upload and the run lifecycle. Layer names follow the base tables ('forest_cover'), and every
-model answer becomes one append-only audit_assessments row per crop and layer.
+model answer becomes one append-only audit.assessments row per crop and layer.
 """
 
 from __future__ import annotations
@@ -19,6 +19,9 @@ CHECK_KEY = 'prediction_quality'
 LAYER_NAMES = {'deadwood': 'deadwood', 'forest': 'forest_cover'}
 IMAGE_KINDS = (('raw', None), ('deadwood_overlay', 'deadwood'), ('forest_cover_overlay', 'forest'))
 SELECTED_BY = 'pq-picker-v1'
+# Where each row kind goes: client.schema(SCHEMA).table(TABLES[kind]).
+SCHEMA = 'audit'
+TABLES = {'run': 'runs', 'crop': 'crops', 'image': 'images', 'assessment': 'assessments'}
 
 
 def run_row(result: CheckResult, ortho_sha256: str, label_ids: dict, judges: dict) -> dict:
