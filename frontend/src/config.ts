@@ -31,9 +31,10 @@ const SUPABASE_ANON_KEY_PROD = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const SUPABASE_SENTINEL_URL = import.meta.env.VITE_SUPABASE_SENTINEL_PROCESSING_URL as string;
 const SUPABASE_SENTINEL_ANON_KEY = import.meta.env.VITE_SUPABASE_SENTINEL_PROCESSING_ANON_KEY as string;
 
-// AI Segmentation API — use the same remote base in dev and prod (no dev-only path)
+// AI labeling service (SAM 3 on the processing server), reached through the storage API's
+// /sam route for signed-in users. VITE_SAM_API_URL overrides it, for example for a local service.
 const SAM_API_URL =
-  (import.meta.env.VITE_SAM_API_URL as string | undefined) || "https://geosense--sam-api-fastapi-app.modal.run";
+  (import.meta.env.VITE_SAM_API_URL as string | undefined) || `${DEV ? API_URL_DEV : API_URL_PROD}/sam`;
 
 // Cloudflare Turnstile site key for the sign-up captcha; development uses Cloudflare's always-pass test key.
 const TURNSTILE_SITE_KEY =

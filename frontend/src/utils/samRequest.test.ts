@@ -1,4 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const session = vi.hoisted(() => ({ token: "session-token" as string | null }));
+vi.mock("../hooks/useSupabase", () => ({
+  supabase: {
+    auth: {
+      getSession: async () => ({ data: { session: session.token ? { access_token: session.token } : null } }),
+    },
+  },
+}));
 import {
   requestConcepts,
   requestSegmentation,
@@ -66,12 +75,25 @@ describe("request forms", () => {
   });
 });
 
+describe("authorization", () => {
+  it("sends the session token to the SAM route of our own API", async () => {
+    fetchMock.mockResolvedValue(new Response("{}"));
+    await requestSegmentation(prompt);
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer session-token");
+  });
+
+  it("asks to sign in again when the API refuses the session", async () => {
+    fetchMock.mockResolvedValue(new Response("{}", { status: 401 }));
+    await expect(requestSegmentation(prompt)).rejects.toThrow("Please sign in again");
+  });
+});
+
 describe("warmUpSegmentation", () => {
-  it("sends one warm-up per interval", () => {
+  it("sends one warm-up per interval", async () => {
     fetchMock.mockReturnValue(new Promise(() => undefined));
     expect(warmUpSegmentation(1_000_000)).toBe(true);
     expect(warmUpSegmentation(1_000_000 + SAM_WARMUP_INTERVAL_MS - 1)).toBe(false);
     expect(warmUpSegmentation(1_000_000 + SAM_WARMUP_INTERVAL_MS)).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 });

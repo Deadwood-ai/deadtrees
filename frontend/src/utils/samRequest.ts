@@ -1,4 +1,5 @@
 import { Settings } from "../config";
+import { supabase } from "../hooks/useSupabase";
 
 // The hosted model can take minutes to start after a pause. Modal answers requests that run
 // longer than 150 s with a redirect the browser cannot follow, so give up well before that.
@@ -48,18 +49,34 @@ async function postToSam(path: string, form: FormData, timeoutMs = SAM_REQUEST_T
   const response = await fetch(`${Settings.SAM_API_URL}${path}`, {
     method: "POST",
     mode: "cors",
-    headers: { Accept: "application/json" },
+    headers: await samHeaders(),
     body: form,
     signal: AbortSignal.timeout(timeoutMs),
   }).catch((e: unknown) => (isTimeout(e) ? SAM_STARTING_MESSAGE : SAM_UNREACHABLE_MESSAGE));
   if (typeof response === "string") {
     throw new Error(response);
   }
+  if (response.status === 401) {
+    throw new Error("Please sign in again to use the AI tools.");
+  }
   if (!response.ok) {
     throw new Error(`AI segmentation failed (${response.status}). Please try again.`);
   }
   lastWarmUpAt = Date.now();
   return response.json();
+}
+
+/**
+ * The service sits behind the storage API, which admits signed-in users only. The session
+ * token goes only to our own API, never to a SAM URL configured elsewhere.
+ */
+async function samHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (!Settings.SAM_API_URL.startsWith(`${Settings.API_URL}/`)) return headers;
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
 }
 
 /**
