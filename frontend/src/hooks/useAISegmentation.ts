@@ -11,7 +11,7 @@ import Polygon from "ol/geom/Polygon.js";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { message } from "antd";
 import { requestConcepts, requestSegmentation, warmUpSegmentation, type SamPrompt } from "../utils/samRequest";
-import { keepLargestPolygon, pixelPolygonsToFeatures, toPixelFeatureCollection } from "../utils/samGeometry";
+import { captureScale, keepLargestPolygon, pixelPolygonsToFeatures, toPixelFeatureCollection } from "../utils/samGeometry";
 import { lockMapInteractions } from "../utils/mapInteractionLock";
 import { palette } from "../theme/palette";
 
@@ -37,6 +37,8 @@ interface UseAISegmentationReturn {
 
 /** One AI outline being shaped: the frozen view image, its box and the refinement clicks so far. */
 interface Session extends Required<SamPrompt> {
+  /** Image pixels per map pixel; below 1 when a large view was shrunk for the service. */
+  scale: number;
   features: Feature[];
   boxFeature: Feature;
   /** Stops watching the editor layer for the outline being removed (Undo, Delete, Cancel). */
@@ -133,7 +135,8 @@ export const useAISegmentation = ({
     setIsProcessing(true);
     try {
       const fc = toPixelFeatureCollection(await requestSegmentation(session));
-      const outline = fc ? pixelPolygonsToFeatures(keepLargestPolygon(fc), (p) => map.getCoordinateFromPixel(p)) : [];
+      const toCoordinate = (p: [number, number]) => map.getCoordinateFromPixel([p[0] / session.scale, p[1] / session.scale]);
+      const outline = fc ? pixelPolygonsToFeatures(keepLargestPolygon(fc), toCoordinate) : [];
       if (sessionRef.current !== session) return; // ended while waiting
       const source = resultSource(map);
       if (session.features.length === 0 && outline.length) onBeforeAddFeatures?.();
@@ -155,15 +158,15 @@ export const useAISegmentation = ({
     const map = mapRef.current;
     const session = sessionRef.current;
     if (!map || !session || busyRef.current) return;
-    session.points.push([Math.round(e.pixel[0]), Math.round(e.pixel[1])]);
+    session.points.push([Math.round(e.pixel[0] * session.scale), Math.round(e.pixel[1] * session.scale)]);
     session.labels.push((e.originalEvent as MouseEvent).altKey ? 0 : 1);
     void runSession(map, session);
   }, [mapRef, runSession]);
 
   const startSession = useCallback(async (map: Map, boxGeometry: Polygon) => {
     setNavigationLocked(map, true);
-    const image = await captureOrthoView(map, getOrthoLayer());
-    if (!image) {
+    const capture = await captureOrthoView(map, getOrthoLayer());
+    if (!capture) {
       message.error("The map view could not be captured for AI segmentation.");
       setNavigationLocked(map, false);
       return;
@@ -183,8 +186,9 @@ export const useAISegmentation = ({
     boxLayerRef.current.getSource()!.addFeature(boxFeature);
 
     const session: Session = {
-      image,
-      box: [x1, y1, x2, y2].map(Math.round),
+      image: capture.image,
+      scale: capture.scale,
+      box: [x1, y1, x2, y2].map((v) => Math.round(v * capture.scale)),
       points: [],
       labels: [],
       features: [],
@@ -233,10 +237,11 @@ export const useAISegmentation = ({
     setIsProcessing(true);
     setNavigationLocked(map, true);
     try {
-      const image = await captureOrthoView(map, getOrthoLayer());
-      if (!image) throw new Error("The map view could not be captured for AI search.");
-      const fc = toPixelFeatureCollection(await requestConcepts(image, text));
-      const found = fc ? pixelPolygonsToFeatures(fc, (p) => map.getCoordinateFromPixel(p)) : [];
+      const capture = await captureOrthoView(map, getOrthoLayer());
+      if (!capture) throw new Error("The map view could not be captured for AI search.");
+      const fc = toPixelFeatureCollection(await requestConcepts(capture.image, text));
+      const { scale } = capture;
+      const found = fc ? pixelPolygonsToFeatures(fc, (p) => map.getCoordinateFromPixel([p[0] / scale, p[1] / scale])) : [];
       if (found.length === 0) {
         message.info(`No ${text} found in this view.`);
         return;
@@ -268,11 +273,14 @@ export const useAISegmentation = ({
 };
 
 /**
- * Captures what the map shows of the orthophoto as a JPEG, in the same pixel space as
- * map.getPixelFromCoordinate. Other layers are hidden for the capture only, so they neither
- * leak into the model input nor taint the canvas.
+ * Captures what the map shows of the orthophoto as a JPEG. Image pixels are map pixels times
+ * `scale`, which shrinks large views to the service's size limit. Other layers are hidden for
+ * the capture only, so they neither leak into the model input nor taint the canvas.
  */
-async function captureOrthoView(map: Map, ortho: TileLayerWebGL | undefined): Promise<Blob | null> {
+async function captureOrthoView(
+  map: Map,
+  ortho: TileLayerWebGL | undefined,
+): Promise<{ image: Blob; scale: number } | null> {
   if (!ortho) return null;
   const hidden = map
     .getLayers()
@@ -284,18 +292,20 @@ async function captureOrthoView(map: Map, ortho: TileLayerWebGL | undefined): Pr
   hidden.forEach((layer) => layer.setVisible(true));
   map.renderSync();
   if (!canvas) return null;
-  return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.92));
+  const image = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+  return image ? { image, scale: canvas.scale } : null;
 }
 
-function composeMapCanvas(map: Map): HTMLCanvasElement | null {
+function composeMapCanvas(map: Map): (HTMLCanvasElement & { scale: number }) | null {
   const target = map.getTargetElement();
   // The bottom-most canvas holds the orthophoto.
   const source = target?.querySelector("canvas");
   if (!target || !source || source.width === 0 || source.height === 0) return null;
   const rect = target.getBoundingClientRect();
-  const composite = document.createElement("canvas");
-  composite.width = Math.max(1, Math.round(rect.width));
-  composite.height = Math.max(1, Math.round(rect.height));
+  const scale = captureScale(rect.width, rect.height);
+  const composite = Object.assign(document.createElement("canvas"), { scale });
+  composite.width = Math.max(1, Math.round(rect.width * scale));
+  composite.height = Math.max(1, Math.round(rect.height * scale));
   const ctx = composite.getContext("2d");
   if (!ctx) return null;
   ctx.drawImage(source, 0, 0, source.width, source.height, 0, 0, composite.width, composite.height);

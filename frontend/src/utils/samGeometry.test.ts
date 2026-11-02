@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import Polygon from "ol/geom/Polygon.js";
-import { keepLargestPolygon, pixelPolygonsToFeatures, toPixelFeatureCollection } from "./samGeometry";
+import { captureScale, keepLargestPolygon, pixelPolygonsToFeatures, toPixelFeatureCollection } from "./samGeometry";
 
 const square = (x: number, y: number, size: number, sign = -1) => ({
   type: "Feature" as const,
@@ -40,5 +40,12 @@ describe("samGeometry", () => {
     const fc = toPixelFeatureCollection({ type: "FeatureCollection", features: [square(10, 20, 5, 1)] })!;
     const [feature] = pixelPolygonsToFeatures(fc, (p) => p);
     expect((feature.getGeometry() as Polygon).getCoordinates()[0][0]).toEqual([10, 20]);
+  });
+
+  it("shrinks views wider than the service limit and keeps smaller ones", () => {
+    expect(captureScale(1440, 900)).toBe(1);
+    expect(captureScale(2048, 1000)).toBe(1);
+    expect(captureScale(3200, 1800)).toBeCloseTo(0.64);
+    expect(Math.round(3200 * captureScale(3200, 1800))).toBe(2048);
   });
 });

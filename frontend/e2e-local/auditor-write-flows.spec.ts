@@ -417,6 +417,51 @@ test.describe("auditor local write flows", () => {
     await page.waitForTimeout(500);
     expect(sentPoints).toHaveLength(1);
   });
+
+  test("AI box on a screen wider than the service limit sends a shrunken view", async ({ page }) => {
+    await page.setViewportSize({ width: 2600, height: 1300 });
+    const sentBoxes: number[][] = [];
+    await page.route("**/segment", async (route) => {
+      const body = route.request().postData() ?? "";
+      const box = JSON.parse(/name="bboxes"\r\n\r\n([^\r]*)/.exec(body)?.[1] ?? "[0,0,1,1]") as number[];
+      if (box[2] - box[0] > 2) sentBoxes.push(box);
+      const [x1, y1, x2, y2] = box;
+      await route.fulfill({
+        json: {
+          type: "FeatureCollection",
+          features: [{
+            type: "Feature",
+            properties: {},
+            geometry: { type: "Polygon", coordinates: [[[x1, -y1], [x2, -y1], [x2, -y2], [x1, -y2], [x1, -y1]]] },
+          }],
+        },
+      });
+    });
+
+    await installAuditorSession(page);
+    await page.goto(`/dataset-audit/${datasetId}`);
+    await dismissCookieBanner(page);
+    await expect(page.getByRole("status", { name: "Securing the audit lock" })).toBeHidden({ timeout: 20_000 });
+    // The previous test's page may still hold this auditor's lease.
+    const continueHere = page.getByRole("button", { name: "Continue here" });
+    const editDeadwood = page.getByRole("button", { name: "Edit deadwood cover" });
+    await expect(editDeadwood.or(continueHere).first()).toBeVisible({ timeout: 20_000 });
+    if (await continueHere.isVisible()) await continueHere.click();
+    await editDeadwood.click();
+    const undo = page.getByRole("button", { name: /Undo/ });
+    await expect(undo).toBeDisabled();
+
+    await page.getByRole("button", { name: /AI \(S\)/ }).click();
+    const bounds = (await page.getByTestId("dataset-audit-map").boundingBox())!;
+    expect(bounds.width).toBeGreaterThan(2048);
+    await page.mouse.click(bounds.x + bounds.width * 0.8, bounds.y + bounds.height * 0.4);
+    await page.mouse.click(bounds.x + bounds.width * 0.9, bounds.y + bounds.height * 0.6);
+    await expect(undo).toBeEnabled({ timeout: 10_000 });
+    expect(sentBoxes).toHaveLength(1);
+    expect(Math.max(...sentBoxes[0])).toBeLessThanOrEqual(2048);
+
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  });
 });
 
 async function expectLocalService(url: string, name: string) {
