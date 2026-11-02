@@ -623,3 +623,17 @@ def test_a_failed_note_keeps_the_filing_state(tmp_path, monkeypatch):
 	assert monitor_tick.tick(args, NOON, tmp_path) == 1
 	state = json.loads((tmp_path / 'monitor.json').read_text())
 	assert state['issues'] == {'dt-status/api/a': 'DT-7'} and 'dt-status/api/a' in state['baseline']['active']
+
+
+def test_a_paused_or_silent_audit_worker_is_a_finding(tmp_path):
+	assert findings.audit_worker_findings(None, NOON) == []
+	paused = {'state': 'paused', 'reason': 'claude login expired: Please run /login', 'updated_at': NOON.isoformat()}
+	assert keys(findings.audit_worker_findings(paused, NOON)) == {'dt-status/audit-worker/paused'}
+	fresh = {'state': 'idle', 'updated_at': '2026-10-13T11:50:00+00:00'}
+	assert findings.audit_worker_findings(fresh, NOON) == []
+	stale = {'state': 'running', 'updated_at': '2026-10-13T11:00:00+00:00'}
+	assert [f['summary'] for f in findings.audit_worker_findings(stale, NOON)] == ['audit worker silent for 60 min']
+	# the status file is optional until the worker is set up
+	assert host_facts.audit_worker(tmp_path / 'missing.json') is None
+	(tmp_path / 'status.json').write_text(json.dumps(paused))
+	assert host_facts.audit_worker(tmp_path / 'status.json')['state'] == 'paused'
