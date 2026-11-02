@@ -50,6 +50,9 @@ export function useAreaTools({ mapRef, getTargetSource, onBeforeChange, findInAr
   const drawRef = useRef<Draw | null>(null);
   const previewLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const totalRef = useRef(0);
+  // Bumped whenever the session moves on (cancel, new area, layer switch), so a search that
+  // was still running cannot publish its results into the new session.
+  const generationRef = useRef(0);
 
   const applyEdit = useCallback((edit: AreaEdit) => {
     const source = getTargetSource();
@@ -91,6 +94,7 @@ export function useAreaTools({ mapRef, getTargetSource, onBeforeChange, findInAr
   }, [applyEdit, discardPreview, getTargetSource, onBeforeChange]);
 
   const cancel = useCallback(() => {
+    generationRef.current += 1;
     const map = mapRef.current;
     if (map && drawRef.current) map.removeInteraction(drawRef.current);
     drawRef.current = null;
@@ -101,8 +105,9 @@ export function useAreaTools({ mapRef, getTargetSource, onBeforeChange, findInAr
     const source = getTargetSource();
     if (!source) return;
     if (kind === "find") {
+      const generation = generationRef.current;
       const result = await findInArea(prompt, area);
-      if (!result) return;
+      if (!result || generation !== generationRef.current) return;
       if (result.features.length === 0) {
         message.info(`No "${prompt}" found in this area.`);
         return;
@@ -127,8 +132,13 @@ export function useAreaTools({ mapRef, getTargetSource, onBeforeChange, findInAr
     const draw = new Draw({ source: new VectorSource(), type: "Polygon", freehand: true, stopClick: true });
     draw.on("drawend", (evt) => {
       const geometry = evt.feature.getGeometry();
-      // Remove the interaction after OL has finished the drawend handling.
-      queueMicrotask(cancel);
+      // Remove the interaction after OL has finished the drawend handling, without counting
+      // as a cancel of the search that starts now.
+      queueMicrotask(() => {
+        map.removeInteraction(draw);
+        if (drawRef.current === draw) drawRef.current = null;
+        setAction(null);
+      });
       if (geometry instanceof Polygon) void finish(kind, geometry, prompt.trim() || "tree");
     });
     map.addInteraction(draw);

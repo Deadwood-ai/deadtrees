@@ -55,6 +55,7 @@ export default function AreaToolsPanel({
         block
         size="small"
         value={layer}
+        disabled={disabled}
         onChange={(value) => onSwitchLayer(value as LayerType)}
         options={[
           { label: "Dead (1)", value: "deadwood" },

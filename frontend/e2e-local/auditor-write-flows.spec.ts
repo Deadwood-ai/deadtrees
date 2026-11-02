@@ -517,6 +517,54 @@ test.describe("auditor local write flows", () => {
     await expect(page.getByText("Editing deadwood cover", { exact: true })).toBeHidden({ timeout: 15_000 });
     await expect.poll(() => countCorrections("add")).toBeGreaterThanOrEqual(addsBefore + 2);
   });
+
+  test("a search still running when the editor is cancelled publishes nothing", async ({ page }) => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/concepts", async (route) => {
+      await held;
+      await route.fulfill({
+        json: {
+          type: "FeatureCollection",
+          features: [{
+            type: "Feature",
+            properties: { score: 0.9 },
+            geometry: { type: "Polygon", coordinates: [[[10, -10], [60, -10], [60, -60], [10, -60], [10, -10]]] },
+          }],
+        },
+      });
+    });
+
+    await installAuditorSession(page);
+    await page.goto(`/dataset-audit/${datasetId}`);
+    await dismissCookieBanner(page);
+    const continueHere = page.getByRole("button", { name: "Continue here" });
+    const editDeadwood = page.getByRole("button", { name: "Edit deadwood cover" });
+    await expect(editDeadwood.or(continueHere).first()).toBeVisible({ timeout: 20_000 });
+    if (await continueHere.isVisible()) await continueHere.click();
+    await editDeadwood.click();
+
+    const bounds = (await page.getByTestId("dataset-audit-map").boundingBox())!;
+    const cx = bounds.x + bounds.width * 0.6;
+    const cy = bounds.y + bounds.height * 0.5;
+    await page.getByRole("button", { name: /Find in area/ }).click();
+    await page.mouse.move(cx + 80, cy);
+    await page.mouse.down();
+    for (let a = 0; a <= 2 * Math.PI + 0.01; a += Math.PI / 12) {
+      await page.mouse.move(cx + 80 * Math.cos(a), cy + 80 * Math.sin(a));
+    }
+    await page.mouse.up();
+
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(page.getByText("Editing deadwood cover", { exact: true })).toBeHidden();
+    release();
+    await page.waitForTimeout(1_000);
+    // Reopening the editor must not show the stale result as a preview.
+    await editDeadwood.click();
+    await expect(page.getByText("Editing deadwood cover", { exact: true })).toBeVisible();
+    await expect(page.getByText(/found/)).toHaveCount(0);
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  });
 });
 
 async function expectLocalService(url: string, name: string) {

@@ -280,6 +280,10 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
    */
   const switchLayer = useCallback(async (target: LayerType, copy: Geometry[] = []) => {
     if (!isEditing || isSaving || target === editingLayerType) return;
+    if (ai.isProcessing) {
+      message.info("Wait for the AI to finish before switching layers.");
+      return;
+    }
     if (target === "deadwood" ? !hasDeadwood : !hasForestCover) {
       message.info(`This dataset has no ${target === "deadwood" ? "deadwood" : "tree cover"} layer.`);
       return;
@@ -288,11 +292,12 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
     stopTools();
     pendingCopyRef.current = copy;
     hasLoadedFeatures.current = false;
-    editor.getOverlayLayer()?.getSource()?.clear();
+    // Start the new layer clean: no features, selection or undo steps from the old one.
+    editor.clearAll();
     setInitialFeatures([]);
     setFindPrompt("");
     setEditingLayerType(target);
-  }, [isEditing, isSaving, editingLayerType, hasDeadwood, hasForestCover, saveCurrentLayer, stopTools, editor]);
+  }, [isEditing, isSaving, editingLayerType, hasDeadwood, hasForestCover, ai.isProcessing, saveCurrentLayer, stopTools, editor]);
 
   /** Copies the selected polygons into the other layer and switches to it. */
   const copySelectionToOtherLayer = useCallback(() => {
