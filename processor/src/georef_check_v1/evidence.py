@@ -102,7 +102,8 @@ class ReferenceEvidence:
 	decides: bool = False
 	reason: str | None = None  # why it does not qualify or decide
 	matrix: list[list[float]] | None = None
-	sample_pairs: list[list[float]] = field(default_factory=list)  # [x_src, y_src, x_ref, y_ref] pixels
+	# up to 200 confident matches, [x_src, y_src, x_ref, y_ref, inlier] in pixels (inlier 1/0)
+	sample_pairs: list[list[float]] = field(default_factory=list)
 
 	def as_dict(self) -> dict:
 		return asdict(self)
@@ -148,6 +149,7 @@ def measure_reference(
 	strong = scores >= rules.min_score
 	a, b = a[strong], b[strong]
 	e.matches = int(len(a))
+	e.sample_pairs = _sample_pairs(a, b, np.zeros(len(a), dtype=bool))
 	if e.matches < rules.min_matches or not len(footprint):
 		e.reason = 'no_fit'
 		return e
@@ -158,6 +160,7 @@ def measure_reference(
 	residual = offsets_m(_apply(matrix, a), b, grid)
 	inliers = ransac[:, 0].astype(bool) & (residual <= rules.ransac_m)
 	anchors = a[inliers]
+	e.sample_pairs = _sample_pairs(a, b, inliers)
 	e.inliers = int(inliers.sum())
 	e.inlier_fraction = round(float(inliers.mean()), 3)
 	cols = np.clip((anchors[:, 0] / grid.width * 4).astype(int), 0, 3)
@@ -208,10 +211,19 @@ def measure_reference(
 		e.reason = 'low_support'
 	elif e.vote == 'unstable':
 		e.reason = 'unstable_near_threshold'
-
-	pick = np.linspace(0, len(anchors) - 1, min(len(anchors), 200)).astype(int)
-	e.sample_pairs = np.round(np.column_stack((anchors[pick], b[inliers][pick])), 1).tolist()
 	return e
+
+
+def _sample_pairs(a: np.ndarray, b: np.ndarray, inliers: np.ndarray, limit: int = 200) -> list[list[float]]:
+	"""Matches for the audit viewer, every reference alike: inliers first, then
+	the other confident matches, each spread evenly over its kind."""
+
+	def spread(idx: np.ndarray, n: int) -> np.ndarray:
+		return idx[np.linspace(0, len(idx) - 1, min(len(idx), n)).astype(int)] if len(idx) and n > 0 else idx[:0]
+
+	kept = spread(np.flatnonzero(inliers), limit)
+	pick = np.concatenate([kept, spread(np.flatnonzero(~inliers), limit - len(kept))])
+	return np.round(np.column_stack((a[pick], b[pick], inliers[pick].astype(float))), 1).tolist()
 
 
 @dataclass

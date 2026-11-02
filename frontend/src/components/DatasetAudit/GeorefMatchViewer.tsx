@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Modal, Segmented, Slider, Table, Tag, Typography } from "antd";
+import { Modal, Select, Slider, Table, Tag, Typography } from "antd";
 import { Map, View } from "ol";
 import Feature from "ol/Feature";
 import LineString from "ol/geom/LineString";
@@ -15,7 +15,7 @@ import { getDistance } from "ol/sphere";
 
 import { Settings } from "../../config";
 import { createOrthoCogSource } from "../../utils/cogSource";
-import { describeGeorefReason, describeReference, offsetColor, orderedReferences } from "../../utils/georefCheck";
+import { describeGeorefReason, describeReference, fillTileTemplate, offsetColor, orderedReferences } from "../../utils/georefCheck";
 import type { IGeorefCheck, IGeorefReferenceEvidence, IGeorefReferenceViewer } from "../../types/georefCheck";
 
 const { Text } = Typography;
@@ -30,8 +30,12 @@ interface GeorefMatchViewerProps {
 /** The tile source the viewer shows for a keyless reference (WMS as 256 px tiles). */
 function referenceSource(viewer: IGeorefReferenceViewer): XYZ | TileWMS {
 	if (viewer.kind === "xyz") {
-		// TMS row order ({-y}) is not offered to the viewer
-		return new XYZ({ url: viewer.url, maxZoom: viewer.max_zoom, crossOrigin: "anonymous", attributions: viewer.attribution });
+		return new XYZ({
+			tileUrlFunction: ([z, x, y]) => fillTileTemplate(viewer.url, z, x, y),
+			maxZoom: viewer.max_zoom,
+			crossOrigin: "anonymous",
+			attributions: viewer.attribution,
+		});
 	}
 	return new TileWMS({
 		url: viewer.url,
@@ -42,13 +46,14 @@ function referenceSource(viewer: IGeorefReferenceViewer): XYZ | TileWMS {
 }
 
 function matchFeatures(reference: IGeorefReferenceEvidence | undefined): Feature[] {
-	return (reference?.sample_pairs ?? []).map(([lonA, latA, lonB, latB]) => {
+	return (reference?.sample_pairs ?? []).map(([lonA, latA, lonB, latB, inlier = 1]) => {
 		const a = fromLonLat([lonA, latA]);
 		const b = fromLonLat([lonB, latB]);
 		const feature = new Feature(new LineString([a, b]));
-		const color = offsetColor(getDistance([lonA, latA], [lonB, latB]));
+		// matches the fit rejected are grey: they show where the matcher looked, not the offset
+		const color = inlier ? offsetColor(getDistance([lonA, latA], [lonB, latB])) : "#9ca3af";
 		feature.setStyle([
-			new Style({ stroke: new Stroke({ color, width: 2 }) }),
+			new Style({ stroke: new Stroke({ color, width: inlier ? 2 : 1 }) }),
 			new Style({ geometry: new Point(a), image: new Circle({ radius: 3, fill: new Fill({ color }), stroke: new Stroke({ color: "#fff", width: 1 }) }) }),
 		]);
 		return feature;
@@ -67,8 +72,10 @@ export default function GeorefMatchViewer({ open, onClose, check, cogPath }: Geo
 	const matchSource = useRef<VectorSource | null>(null);
 	const extentRef = useRef<number[] | null>(null);
 	const references = useMemo(() => orderedReferences(check), [check]);
-	const viewable = references.filter((r) => check.metadata.references?.[r.provider]?.viewer);
+	// every reference with imagery to show or matches to draw, in the table's order
+	const viewable = references.filter((r) => check.metadata.references?.[r.provider]?.viewer || r.sample_pairs.length > 0);
 	const [provider, setProvider] = useState<string | undefined>(viewable[0]?.provider);
+	const shownImagery = provider ? check.metadata.references?.[provider]?.viewer : null;
 	const [opacity, setOpacity] = useState(60);
 
 	const showReference = useCallback(
@@ -163,14 +170,21 @@ export default function GeorefMatchViewer({ open, onClose, check, cogPath }: Geo
 		>
 			<div className="mb-2 flex flex-wrap items-center gap-4">
 				{viewable.length > 0 ? (
-					<Segmented
+					<Select
 						size="small"
+						className="min-w-[260px]"
 						value={provider}
-						onChange={(v) => setProvider(String(v))}
-						options={viewable.map((r) => ({ label: describeReference(check, r.provider), value: r.provider }))}
+						onChange={setProvider}
+						options={viewable.map((r) => ({
+							label: `${describeReference(check, r.provider)}${r.decides && r.vote ? ` · ${r.vote}` : ""}`,
+							value: r.provider,
+						}))}
 					/>
 				) : (
-					<Text type="secondary" className="text-xs">No keyless reference to show; see the table below.</Text>
+					<Text type="secondary" className="text-xs">No reference imagery or matches to show; see the table below.</Text>
+				)}
+				{provider && !shownImagery && (
+					<Text type="secondary" className="text-xs">This reference's imagery cannot be shown here; its matches are drawn.</Text>
 				)}
 				<div className="flex min-w-[220px] items-center gap-2">
 					<Text className="text-xs">Drone opacity</Text>
@@ -179,7 +193,7 @@ export default function GeorefMatchViewer({ open, onClose, check, cogPath }: Geo
 			</div>
 			<div ref={setContainer} className="h-[460px] w-full rounded border border-gray-200" />
 			<Text type="secondary" className="mt-1 block text-xs">
-				Dots mark matched spots in the drone image; each line runs to the same spot in the reference. Green under 7.5 m, amber under 15 m, red over 15 m.
+				Dots mark matched spots in the drone image; each line runs to the same spot in the reference. Green under 7.5 m, amber under 15 m, red over 15 m; grey matches were rejected by the fit.
 			</Text>
 			<Table
 				className="mt-3"
@@ -188,7 +202,7 @@ export default function GeorefMatchViewer({ open, onClose, check, cogPath }: Geo
 				rowKey="provider"
 				dataSource={references}
 				columns={columns}
-				onRow={(r) => ({ onClick: () => check.metadata.references?.[r.provider]?.viewer && setProvider(r.provider) })}
+				onRow={(r) => ({ onClick: () => viewable.includes(r) && setProvider(r.provider) })}
 			/>
 			{Object.keys(check.reference_errors).length > 0 && (
 				<Text type="secondary" className="mt-2 block text-xs">

@@ -65,6 +65,9 @@ def test_matches_clustered_in_one_corner_do_not_qualify():
 	e = measure_reference('esri', 'esri', a, b, scores, footprint, edge, GRID)
 
 	assert not e.qualified and e.reason == 'clustered_matches'
+	# the viewer still gets its matches, with the fit's inliers marked
+	assert 0 < len(e.sample_pairs) <= 200 and {p[4] for p in e.sample_pairs} <= {0.0, 1.0}
+	assert sum(p[4] for p in e.sample_pairs) == min(e.inliers, 200)
 
 
 def _ref(provider, vote, p90, support=0.95, edge=0.95):
@@ -342,12 +345,20 @@ def test_provider_registry_is_well_formed():
 
 
 @pytest.mark.unit
-def test_tms_rows_are_flipped_and_keys_stay_out_of_the_viewer():
+def test_every_keyless_mercator_tile_template_reaches_the_viewer_and_keys_stay_out():
 	from processor.src.georef_check_v1.providers import REGISTRY
 	from processor.src.georef_check_v1.references import _viewer
 
-	es = next(p for p in REGISTRY if p.name == 'es-pnoa-ma')
-	assert _viewer(es) is None  # TMS row order is not offered to the browser
+	# TMS rows and Bing quadkeys are filled in by the viewer
+	for name in ('es-pnoa-ma', 'bing-aerial'):
+		provider = next(p for p in REGISTRY if p.name == name)
+		assert _viewer(provider) == {
+			'kind': 'xyz',
+			'url': provider.url,
+			'max_zoom': provider.max_zoom,
+			'attribution': provider.attribution,
+		}
+	assert _viewer(next(p for p in REGISTRY if p.name == 'yandex-sat')) is None  # EPSG:3395 tiles
 	assert all(_viewer(p) is None for p in REGISTRY if p.key_setting)
 	wms = next(p for p in REGISTRY if p.name == 'de-bw-dop20')
 	assert _viewer(wms)['kind'] == 'wms' and _viewer(wms)['layers'] == wms.wms_layers

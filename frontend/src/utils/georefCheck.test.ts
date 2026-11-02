@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { IGeorefCheck, IGeorefReferenceEvidence } from "../types/georefCheck";
-import { PROVIDER_NAMES, describeReference, offsetColor, orderedReferences, summarizeGeorefCheck } from "./georefCheck";
+import { PROVIDER_NAMES, describeReference, fillTileTemplate, offsetColor, orderedReferences, summarizeGeorefCheck } from "./georefCheck";
 
 const ref = (provider: string, decides: boolean, inliers: number): IGeorefReferenceEvidence => ({
   provider,
@@ -46,7 +46,7 @@ describe("georeferencing check display", () => {
     expect(summarizeGeorefCheck(check({}))).toEqual({
       tone: "success",
       verdict: "Good, 2.7 m off",
-      detail: "Strong evidence: 90% of the area is within this offset of Esri World Imagery (current), google.",
+      detail: "Strong evidence: 2.7 m off on 90% of the area (Esri World Imagery (current) and google).",
     });
     expect(summarizeGeorefCheck(check({ decision: "poor", evidence_level: "qualified", p90_m: 22.6 })).tone).toBe("error");
   });
@@ -72,6 +72,12 @@ describe("georeferencing check display", () => {
     const unnamed = registry.map((p) => p.name).filter((name) => name !== "esri" && !PROVIDER_NAMES[name]);
     expect(unnamed).toEqual([]);
     expect(describeReference(check({}), "se-lm-minkarta")).toBe("Lantmäteriet orthophoto (SE)");
+  });
+
+  it("fills TMS rows, two-digit zooms and Bing quadkeys into tile URLs", () => {
+    expect(fillTileTemplate("https://t/{z}/{x}/{-y}.jpg", 3, 5, 1)).toBe("https://t/3/5/6.jpg");
+    expect(fillTileTemplate("https://t/{zz}/{y}/{x}", 7, 1, 2)).toBe("https://t/07/2/1");
+    expect(fillTileTemplate("https://t/a{q}.jpeg", 3, 3, 5)).toBe("https://t/a213.jpeg"); // Bing's documented example
   });
 
   it("colours matches by the 15 m audit line", () => {

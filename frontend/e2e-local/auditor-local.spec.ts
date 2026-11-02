@@ -751,7 +751,7 @@ test.describe("auditor local e2e", () => {
 
     const georef = card(page, "1. Georeferencing Accuracy");
     await expect(georef.getByText("Poor, 22.6 m off")).toBeVisible({ timeout: 20_000 });
-    await expect(georef.getByText(/^Strong evidence: 90% of the area is within this offset of Esri World Imagery \(current\)/)).toBeVisible();
+    await expect(georef.getByText("Strong evidence: 22.6 m off on 90% of the area (Esri World Imagery (current) and DOP Baden-Württemberg (DE)).")).toBeVisible();
     // the unsaved audit is prefilled with the suggestion and marked as such
     await expect(georef.getByRole("radio", { name: /Poor/ })).toBeChecked();
     await expect(georef.getByText("suggested")).toBeVisible();

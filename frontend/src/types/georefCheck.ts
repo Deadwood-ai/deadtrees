@@ -39,8 +39,9 @@ export interface IGeorefReferenceEvidence {
   qualified: boolean;
   decides: boolean;
   reason: string | null;
-  /** inlier pairs [lon_drone, lat_drone, lon_reference, lat_reference] */
-  sample_pairs: [number, number, number, number][];
+  /** confident matches [lon_drone, lat_drone, lon_reference, lat_reference, inlier (1/0)];
+   * checks before 2 Nov 2026 hold inliers of deciding references only, without the flag */
+  sample_pairs: ([number, number, number, number] | [number, number, number, number, number])[];
 }
 
 /** How the check fetched a reference, and how the viewer can show it (keyless only). */
