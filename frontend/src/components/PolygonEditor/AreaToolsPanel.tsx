@@ -67,7 +67,12 @@ export default function AreaToolsPanel({
         size="small"
         value={findPrompt}
         onChange={(e) => onFindPromptChange(e.target.value)}
-        placeholder="What to find"
+        onPressEnter={(e) => {
+          // Enter in the field starts drawing the search area; keys go back to the map tools.
+          e.currentTarget.blur();
+          if (!disabled) onStart("find");
+        }}
+        placeholder="What to find (Enter)"
         aria-label="Text to find in area"
         maxLength={80}
       />
