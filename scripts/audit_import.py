@@ -57,6 +57,7 @@ COG_ROOT = 'https://data2.deadtrees.earth/cogs/v1/'
 PIXEL_MATCH = 0.8
 MIN_BLOCKS = 32
 OVERLAYS = {'deadwood': 'deadwood_overlay', 'forest_cover': 'forest_cover_overlay'}
+IMAGE_KINDS = ('raw', *OVERLAYS.values())
 # DT-1272 crop splits: tune and holdout were frozen by dataset; the later batches
 # take the split their dataset already has, else the hash split
 SPLITS = {'tune': 'dev', 'holdout': 'holdout'}
@@ -398,7 +399,12 @@ def plan_gold(conn, root: Path, manifest: list[dict], labels: dict[str, dict]) -
 					'labels_derived': not entry.get('label_ids'),
 					'files': files,
 					'split': splits[crop_id],
-					'selection': {'picker': 'dt1272-gold', 'view': crop['view'], 'source': crop['source']},
+					'selection': {
+						'picker': 'dt1272-gold',
+						'view': crop['view'],
+						'source': crop['source'],
+						**({'size_wh': entry['size_wh']} if entry.get('size_wh') else {}),
+					},
 					'label': label,
 				}
 			)
@@ -424,6 +430,8 @@ def image_rows(item: dict) -> list[dict]:
 
 	rows = []
 	for kind, path in item['files'].items():
+		if kind not in IMAGE_KINDS:
+			continue  # e.g. outline renders: the review shows the fill overlays
 		layer = next((layer for layer, k in OVERLAYS.items() if k == kind), None)
 		label_id = item['label_ids'].get(layer) if layer else None
 		if layer and label_id is None:

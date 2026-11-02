@@ -174,7 +174,10 @@ def gold_root(tmp_path, dataset, frozen='holdout'):
 				'raw': f'gold-crops/{dataset}/raw.jpg',
 				'deadwood_overlay': f'gold-crops/{dataset}/deadwood-fill.png',
 				'forest_cover_overlay': f'gold-crops/{dataset}/forest_cover-fill.png',
+				# outlines are rendered too but are not an image kind of the schema
+				'deadwood_outline': f'gold-crops/{dataset}/deadwood-fill.png',
 			},
+			'size_wh': [1024, 1000] if n else [1024, 1024],
 		}
 		for n, c in enumerate(crops)
 		if c['id'] in graded
@@ -218,9 +221,10 @@ def test_gold_crops_become_a_frozen_benchmark_of_truth_rows(db, tmp_path):
 		'SELECT split,count(*) FROM audit.benchmark_members WHERE benchmark_id=%s GROUP BY 1', (benchmark,)
 	).fetchall() == [('holdout', 2)]
 	assert db.execute(
-		"SELECT count(*),bool_and(pixel_x0 IS NULL),bool_and(crop_sets='{benchmark}') FROM audit.crops WHERE dataset_id=%s",
+		"SELECT count(*),bool_and(pixel_x0 IS NULL),bool_and(crop_sets='{benchmark}'),"
+		"count(*) FILTER (WHERE selection->'benchmark'->'size_wh' = '[1024, 1000]') FROM audit.crops WHERE dataset_id=%s",
 		(dataset,),
-	).fetchone() == (2, True, True)
+	).fetchone() == (2, True, True, 1)
 	assert db.execute(
 		"SELECT kind,label_id,storage_path LIKE 'audit/benchmarks/pq-gold-dt1272/%%' FROM audit.images "
 		'WHERE dataset_id=%s ORDER BY kind,label_id LIMIT 3',
