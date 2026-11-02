@@ -515,9 +515,17 @@ def test_the_review_queue_follows_the_mode_and_the_reviews(db):
 	assert queue(db, unsure) == [('image', 'v1', 'unsure', True, 'unsure', False)]
 	# a person's answer takes it off the list; an imported old audit does not
 	import_legacy(db, auditor, unsure, 'ok', layer='image')
-	person_row(db, auditor, disagreed, None, 'ok', layer='image')
+	person_row(db, auditor, disagreed, None, 'ok', layer='image')  # no run: not a review of these results
 	act_as(db, auditor)
+	assert queue(db, disagreed) == [('image', 'v1', 'major', True, 'models_disagree', False)]
+	disagreed_run = db.execute('SELECT run_id FROM audit.current_runs WHERE dataset_id=%s', (disagreed,)).fetchone()[0]
+	person_row(db, auditor, disagreed, None, 'ok', disagreed_run, layer='image')
+	act_as(db, auditor)
+	# the review on the run counts; the person's answer is not an automated result
 	assert queue(db, disagreed) == [('image', 'v1', 'major', False, 'models_disagree', True)]
+	assert db.execute(
+		"SELECT count(*) FROM audit.current_assessments WHERE dataset_id=%s AND assessor_kind='person'", (disagreed,)
+	).fetchone() == (0,)
 	assert queue(db, unsure) == [('image', 'v1', 'unsure', True, 'unsure', False)]
 
 	# auto_apply leaves only the spot-check sample
@@ -531,6 +539,47 @@ def test_the_review_queue_follows_the_mode_and_the_reviews(db):
 		model_row(db, dataset, create_run(db, dataset, version), None, 'ok', layer='image')
 		act_as(db, auditor)
 		assert [(r[4], r[3]) for r in queue(db, dataset)] == [(expected, expected is not None)]
+
+
+def test_a_review_holds_for_the_same_evidence_and_reopens_for_a_new_ortho(db):
+	auditor = create_user(db, can_audit=True)
+	dataset = create_dataset(db, create_user(db))
+	version_id = register_version(db)
+
+	def run_on(inputs, source=None, version=version_id, rule=None):
+		as_worker(db)
+		run = db.execute(
+			'INSERT INTO audit.runs(check_key,check_version_id,dataset_id,queue,status,finished_at,source_run_id,inputs) '
+			"VALUES ('prediction_quality',%s,%s,'upload','done',now(),%s,%s) RETURNING id",
+			(version, dataset, source, json.dumps(inputs)),
+		).fetchone()[0]
+		db.execute(
+			"INSERT INTO audit.current_runs(dataset_id,check_key,run_id) VALUES (%s,'prediction_quality',%s) "
+			'ON CONFLICT (dataset_id,check_key) DO UPDATE SET run_id=excluded.run_id',
+			(dataset, run),
+		)
+		if rule:
+			model_row(db, dataset, run, None, 'major', model='pq-dataset-rule', kind='rule', version=rule)
+		else:
+			model_row(db, dataset, run, None, 'major', layer='deadwood')
+		return run
+
+	ortho_a = {'ortho_sha256': 'a' * 64, 'labels': [42]}
+	first = run_on(ortho_a)
+	person_row(db, auditor, dataset, None, 'ok', first)
+	act_as(db, auditor)
+	assert queue(db, dataset)[0][3:] == (False, 'review_all', True)
+	# a rule-only recomputation and a new prompt on the same inputs keep the review
+	run_on({}, source=first, version=register_version(db, version='v2'), rule='v2')
+	act_as(db, auditor)
+	assert queue(db, dataset)[0][3:] == (False, 'review_all', True)
+	run_on(ortho_a, version=register_version(db, version='v3'))
+	act_as(db, auditor)
+	assert queue(db, dataset)[0][3:] == (False, 'review_all', True)
+	# a replaced ortho reopens it
+	run_on({'ortho_sha256': 'b' * 64, 'labels': [43]})
+	act_as(db, auditor)
+	assert queue(db, dataset)[0][3:] == (True, 'review_all', False)
 
 
 def test_operators_activate_a_version_and_can_keep_its_mode(db):

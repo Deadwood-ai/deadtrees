@@ -108,8 +108,16 @@ A benchmark fixes which targets a check is scored on; truth stays in
    mode. `review_all` always needs review. `review_uncertain` needs review when a
    verdict is `unsure` or the assessors disagree. `auto_apply` sends only the
    spot-check sample (`config.spot_check_pct`, default 5). A native person answer on
-   the dataset for the judged prediction marks it reviewed; an imported old audit does
-   not. The review page and the monitor read this view only.
+   the dataset marks it reviewed when it was given on a run (`run_id`) that judged the
+   same evidence: the same model run (a rule-only recomputation keeps the review) or a
+   run with the same non-empty `inputs`, so a prompt change keeps it and a new ortho or
+   prediction reopens it. The review page therefore always stores the run it reviewed.
+   Answers without a run and imported old audits never mark a dataset reviewed.
+   People's answers never count as automated results (`audit.current_assessments`
+   holds model and rule rows only). The review page and the monitor read this view
+   only.
+   Runs record the judged identity in `inputs` (ortho sha256, prediction label ids,
+   crop settings) and nothing that changes between identical runs.
 
 A new rule version needs no model calls: a rule-only run (`source_run_id` = the run
 whose model rows it uses) stores only the new rule rows and becomes current.
