@@ -42,6 +42,10 @@ class Query:
 		self.filters.append(lambda r: r.get(key) is not None and r.get(key) >= value)
 		return self
 
+	def neq(self, key, value):
+		self.filters.append(lambda r: r.get(key) != value)
+		return self
+
 	def gt(self, key, value):
 		self.filters.append(lambda r: r.get(key) is not None and r.get(key) > value)
 		return self
@@ -437,9 +441,9 @@ def test_the_sweep_points_datasets_at_their_newest_finished_run():
 	unpointed = queued(client, v, 2, status='done', finished_at='2026-11-02T09:00')
 	queued(client, v, 3, 'benchmark', status='done', finished_at='2026-11-02T09:00')
 	runs.point(client, older)  # the pointer to the newer run never landed
-	assert worker.sweep(client, {'prediction_quality': handler()}, '2026-11-01T00:00') == 2
+	assert worker.sweep(client, {'prediction_quality': handler()}) == 2
 	assert (pointer(client, 1), pointer(client, 2), pointer(client, 3)) == (newer['id'], unpointed['id'], None)
-	assert worker.sweep(client, {'prediction_quality': handler()}, '2026-11-01T00:00') == 0
+	assert worker.sweep(client, {'prediction_quality': handler()}) == 0
 
 
 @pytest.mark.unit
@@ -453,7 +457,7 @@ def test_an_older_backfill_finishing_after_a_newer_upload_leaves_the_pointer():
 	assert worker.tick(client=client, handlers=h, put_image=None) == 'done'
 	assert run_row(client, backfill['id'])['status'] == 'done'
 	assert pointer(client, 1) == upload['id']
-	assert worker.sweep(client, h, '2026-11-01T00:00') == 0 and pointer(client, 1) == upload['id']
+	assert worker.sweep(client, h) == 0 and pointer(client, 1) == upload['id']
 
 
 @pytest.mark.unit
@@ -468,12 +472,40 @@ def test_promotion_moves_pointers_from_the_old_version_whatever_the_ids():
 	worker.tick(client=client, handlers=h, put_image=None)
 	# a run of an inactive version never moves the pointer
 	assert pointer(client, 1) == current['id']
-	assert worker.sweep(client, h, '2026-11-01T00:00') == 0
+	assert worker.sweep(client, h) == 0
 	# the operator activates the candidate; the sweep promotes its earlier run
 	for row in client.tables['check_versions'].rows:
 		row['is_active'] = row['id'] == candidate['id']
 	assert shadow['id'] < current['id']
-	assert worker.sweep(client, h, '2026-11-01T00:00') == 1 and pointer(client, 1) == shadow['id']
+	assert worker.sweep(client, h) == 1 and pointer(client, 1) == shadow['id']
+
+
+@pytest.mark.unit
+def test_the_sweep_reconciles_every_dataset_beyond_one_page_of_runs():
+	client = Client()
+	v = version(client)
+	newest = {}
+	# 1,050 done runs over 700 datasets, some datasets with several runs across page edges
+	for n in range(1050):
+		dataset = n % 700
+		newest[dataset] = queued(client, v, dataset, status='done', finished_at='2026-01-01T00:00')['id']
+	assert len(client.tables['runs'].rows) > runs.PAGE  # more than a page of the discovery query too
+	assert worker.sweep(client, {'prediction_quality': handler()}) == 700
+	assert {r['dataset_id']: r['run_id'] for r in client.tables['current_runs'].rows} == newest
+	assert worker.sweep(client, {'prediction_quality': handler()}) == 0
+
+
+@pytest.mark.unit
+def test_promotion_takes_over_a_candidate_run_that_finished_long_ago():
+	client = Client()
+	old = version(client)
+	candidate = version(client, name='v2', active=False)
+	shadow = queued(client, candidate, 1, 'manual', status='done', finished_at='2026-09-01T00:00')
+	current = queued(client, old, 1, status='done', finished_at='2026-11-02T09:00')
+	runs.point(client, current)
+	for row in client.tables['check_versions'].rows:
+		row['is_active'] = row['id'] == candidate['id']
+	assert worker.sweep(client, {'prediction_quality': handler()}) == 1 and pointer(client, 1) == shadow['id']
 
 
 @pytest.mark.unit

@@ -161,23 +161,68 @@ def point(client, run: dict) -> bool:
 	return False
 
 
-def publish(client, version_row: dict, since: str) -> int:
-	"""Apply the pointer rule to each dataset's newest done run of the active version."""
-	done = (
-		audit(client)
-		.table('runs')
-		.select('id, dataset_id, check_key, check_version_id, queue')
-		.eq('check_version_id', version_row['id'])
-		.eq('status', 'done')
-		.gte('finished_at', since)
+def publish(client, version_row: dict) -> int:
+	"""Reconcile pointers with the active version's runs, by state and without an age limit.
+
+	Walks every done production run of the version by (dataset_id, id), takes each
+	dataset's newest one, and applies the pointer rule where the pointer is missing, at
+	another version, or at an older run of this version. Pointers are read per page.
+	"""
+
+	def base():
+		return (
+			audit(client)
+			.table('runs')
+			.select('id, dataset_id, check_key, check_version_id, queue')
+			.eq('check_version_id', version_row['id'])
+			.eq('status', 'done')
+			.neq('queue', 'benchmark')
+		)
+
+	fixed, held = 0, None
+	# 500 per page: the pointer lookups put the page's ids into the request URL
+	for rows in keyset_pages(base, 'dataset_id', 'id', page=500):
+		newest = {}
+		if held:
+			newest[held['dataset_id']] = held
+		for run in rows:
+			newest[run['dataset_id']] = run  # ascending ids: the last one wins
+		# the page's last dataset may continue on the next page
+		held = newest.pop(rows[-1]['dataset_id'])
+		fixed += reconcile(client, version_row['check_key'], newest)
+	if held:
+		fixed += reconcile(client, version_row['check_key'], {held['dataset_id']: held})
+	return fixed
+
+
+def reconcile(client, check_key: str, newest: dict[int, dict]) -> int:
+	if not newest:
+		return 0
+	pointed = {
+		row['dataset_id']: row['run_id']
+		for row in audit(client)
+		.table('current_runs')
+		.select('dataset_id, run_id')
+		.eq('check_key', check_key)
+		.in_('dataset_id', sorted(newest))
 		.execute()
 		.data
+	}
+	pointed_runs = (
+		{
+			row['id']: row
+			for row in audit(client)
+			.table('runs')
+			.select('id, check_version_id')
+			.in_('id', sorted(set(pointed.values())))
+			.execute()
+			.data
+		}
+		if pointed
+		else {}
 	)
-	newest = {}
-	for run in done:
-		if run['queue'] != 'benchmark' and run['id'] > newest.get(run['dataset_id'], {}).get('id', 0):
-			newest[run['dataset_id']] = run
-	return sum(point(client, run) for run in newest.values())
+	stale = [run for dataset, run in newest.items() if replaces(pointed_runs.get(pointed.get(dataset)), run)]
+	return sum(point(client, run) for run in stale)
 
 
 def recover(client, checks) -> int:
@@ -245,36 +290,38 @@ def enqueue(
 PAGE = 1000
 
 
-def processed_pages(client, since: str, until: str, page: int | None = None):
-	"""Status rows of idle, error-free datasets updated in [since, until), page by page.
+def keyset_pages(base, first: str, second: str, start=None, until=None, page: int | None = None):
+	"""All rows of base() ordered by (first, second), page by page, with a keyset cursor.
 
-	Ordered by (updated_at, dataset_id) with a keyset cursor, so no row is skipped when
-	many share one timestamp and nothing moves between pages.
+	first >= start and first < until when given. No row is skipped when many share a value
+	of first, and rows never shift between pages the way offsets do.
 	"""
 	page = page or PAGE
+	cursor = None  # (first, second) of the last row returned
+	while True:
+		rows = []
+		if cursor is not None:
+			# the rest of the rows that share the cursor's first value
+			rows = base().eq(first, cursor[0]).gt(second, cursor[1]).order(second).limit(page).execute().data
+		if len(rows) < page:
+			later = base()
+			if until is not None:
+				later = later.lt(first, until)
+			if cursor is not None:
+				later = later.gt(first, cursor[0])
+			elif start is not None:
+				later = later.gte(first, start)
+			rows += later.order(first).order(second).limit(page - len(rows)).execute().data
+		if not rows:
+			return
+		yield rows
+		cursor = (rows[-1][first], rows[-1][second])
+
+
+def processed_pages(client, since: str, until: str, page: int | None = None):
+	"""Status rows of idle, error-free datasets updated in [since, until), page by page."""
 
 	def base():
 		return client.table('v2_statuses').select('*').eq('current_status', 'idle').eq('has_error', False)
 
-	cursor_at, cursor_id = since, None
-	while True:
-		rows = []
-		if cursor_id is not None:
-			# the rest of the rows that share the cursor's timestamp
-			rows = (
-				base()
-				.eq('updated_at', cursor_at)
-				.gt('dataset_id', cursor_id)
-				.order('dataset_id')
-				.limit(page)
-				.execute()
-				.data
-			)
-		if len(rows) < page:
-			later = base().lt('updated_at', until)
-			later = later.gt('updated_at', cursor_at) if cursor_id is not None else later.gte('updated_at', cursor_at)
-			rows += later.order('updated_at').order('dataset_id').limit(page - len(rows)).execute().data
-		if not rows:
-			return
-		yield rows
-		cursor_at, cursor_id = rows[-1]['updated_at'], rows[-1]['dataset_id']
+	yield from keyset_pages(base, 'updated_at', 'dataset_id', start=since, until=until, page=page)

@@ -206,9 +206,10 @@ def enqueue_ready(client, handlers: dict, since: str, until: str, done=lambda at
 	return added
 
 
-def sweep(client, handlers: dict, since: str) -> int:
-	"""Repair current pointers that a crash between finishing and pointing left behind."""
-	return sum(runs.publish(client, row, since) for row in runs.active_versions(client, handlers).values())
+def sweep(client, handlers: dict) -> int:
+	"""Bring current pointers in line with the active versions' runs: after a crash between
+	finishing and pointing, and after an operator promotes a version."""
+	return sum(runs.publish(client, row) for row in runs.active_versions(client, handlers).values())
 
 
 def default_ready(status: dict) -> bool:
@@ -246,7 +247,7 @@ def run_forever(*, connect, handlers: dict, put_image, benchmark: bool = False, 
 			started = runs.now()
 			enqueue_ready(client, handlers, since, started, done=write_watermark)
 			write_watermark(started)
-			sweep(client, handlers, (datetime.now(timezone.utc) - timedelta(days=7)).isoformat())
+			sweep(client, handlers)
 			since, next_enqueue = started, time.monotonic() + ENQUEUE_SECONDS
 		try:
 			result = tick(client=client, handlers=handlers, put_image=put_image, benchmark=benchmark, token=token)

@@ -159,8 +159,11 @@ images travel inline in the request, so a model cannot read files of the account
   (`discovered-until` next to the status file), so datasets finished while it was down are
   found after a restart. Benchmark runs never stand in for
   production runs. The backfill is queued explicitly with `enqueue` (`--force` reruns).
-- A finished run becomes current only when its version is the active one. The same sweep
-  repairs a pointer that did not land after a run finished.
+- A finished run becomes current only when its version is the active one. A run replaces a
+  missing pointer or one at another version's run (promotion), and within its version
+  only an older run. The write lands only if the pointer is still the one read. A sweep
+  applies the same rule to every done run of each active version, with no age limit,
+  which repairs a pointer that did not land and carries out a promotion.
 - At start the worker puts runs left `running` by a stopped worker back in the queue
   (there is one worker), or fails them after their last attempt.
 - An expired login or a usage limit puts the run back without spending an attempt and
