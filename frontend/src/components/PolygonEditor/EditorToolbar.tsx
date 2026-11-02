@@ -131,7 +131,7 @@ export default function EditorToolbar({
             title="AI Segmentation (S) - Draw a box to run AI"
             htmlType="button"
           >
-            {isAIActive ? "AI Active (S)" : "AI (S)"}
+            {isAIActive ? "Finish AI (S)" : "AI (S)"}
           </Button>
 
           {type === "forest_cover" && onFindTrees && (
