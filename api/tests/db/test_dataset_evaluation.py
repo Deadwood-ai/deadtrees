@@ -336,3 +336,32 @@ def test_the_worker_reads_tile_windows_of_private_datasets_and_others_do_not(db,
 	act_as(db, stranger)
 	assert db.execute(query, (private,)).fetchone()[0] == 0
 	as_admin(db)
+
+
+def test_an_empty_cog_stores_one_rule_row_that_sends_the_exclusion_to_review(db, evaluation):
+	_, dataset, version = evaluation
+	run = queued_run(db, dataset, version)
+	empty = {
+		'ortho_sha256': SHA,
+		'crops': [],
+		'images': [result()['images'][0]],
+		'assessments': [
+			{
+				**call('empty_cog', 'major', 100, 'rule'),
+				'modes': {'broken_ortho': {'likelihood': 100}},
+				'details': {'reason': 'broken_ortho', 'valid_share': 0.0},
+			}
+		],
+	}
+	store(db, run, empty)
+	finish(db, run, dataset)
+
+	assert db.execute('SELECT assessor FROM audit.assessments WHERE run_id=%s', (run,)).fetchall() == [
+		('empty_cog/v1',)
+	]
+	assert db.execute('SELECT count(*) FROM audit.image_hashes WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 0
+	queue = db.execute(
+		"SELECT verdict, needs_review FROM audit.review_queue WHERE dataset_id=%s AND check_key='dataset_evaluation'",
+		(dataset,),
+	).fetchone()
+	assert queue == ('major', True)
