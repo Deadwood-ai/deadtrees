@@ -159,6 +159,28 @@ To check it, request `/rest/v1/checks` with the header `Accept-Profile: audit` a
 auditor; it lists the four checks. To roll back, restore the backup and run the same
 `docker compose up -d rest`.
 
+## Importing earlier judgements
+
+`scripts/audit_import.py` (dry run by default; `--execute` writes and needs approval):
+
+- `audits`: saved `dataset_audit` rows become person rows marked
+  `imported_from = 'dataset_audit'`, one per answered field: georef, acquisition date,
+  deadwood and forest cover quality (great/sentinel_ok/bad as ok/minor/major, judged
+  on the newest prediction made before the audit) and the final assessment as the
+  dataset evaluation (no_issues ok, fixable_issues minor, exclude_completely major,
+  COG/thumbnail/major issue flags as modes). Rows without an auditor are skipped.
+  Phenology is not imported yet: `dataset_audit` keeps it until the phenology check
+  exists. A second run adds nothing.
+- `derive`: writes the crop manifest for the DT-1272 crops the database can place
+  (earlier test crops from the COG window and geotransform, reference patch crops
+  from the patch footprint).
+- `gold`: the graded DT-1272 crops become the frozen benchmark `pq-gold-dt1272` v1:
+  off-grid crops, their images (copied to the storage server first), the grader's
+  person rows as truth and members with the frozen split (tune as dev, holdout as
+  holdout; later batches follow their dataset, else the hash). Crops without a
+  footprint in a manifest, or whose ortho was replaced after grading, are left out
+  and listed.
+
 ## Not yet
 
 `dataset_audit` stays the saved human audit. Renaming it to `dataset_audit_legacy`

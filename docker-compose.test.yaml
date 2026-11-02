@@ -107,6 +107,7 @@ services:
       - ./supabase/migrations:/app/supabase/migrations:ro # migration guard tests
       - ./nginx:/app/nginx:ro # storage configuration tests
       - ./shared:/app/shared # dev only, no rebuild needed
+      - ./scripts:/app/scripts:ro # import script tests
       - ./assets:/app/assets
       - ./pytest.ini:/app/pytest.ini:ro
       - ./nginx:/app/nginx:ro # nginx config contract tests
