@@ -244,9 +244,9 @@ stored images.
   through nginx and never statically.
 
 Local QA: `scripts/qa/seed-audit-checks.py` seeds one dataset with all three checks
-(`docs/qa/playbooks/auditor-check-review.md`). Until production exposes the `audit`
-schema (API exposure above), the page says the results can't be read and the
-sections fall back to the saved-audit fields.
+(`docs/qa/playbooks/auditor-check-review.md`). Where the `audit` schema is not exposed
+(API exposure above), the page says the results can't be read and the sections fall
+back to the saved-audit fields.
 
 ## Importing earlier judgements
 
