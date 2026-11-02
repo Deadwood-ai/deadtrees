@@ -10,7 +10,8 @@ import Geometry from "ol/geom/Geometry.js";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 // import { GeoTIFF } from "ol/source";
 // import View from "ol/View";
-import { Settings } from "../config";
+import { message } from "antd";
+import { requestSegmentation, warmUpSegmentation } from "../utils/samRequest";
 import Overlay from "ol/Overlay";
 import { palette } from "../theme/palette";
 
@@ -86,6 +87,13 @@ export const useAISegmentation = ({
       spinnerRef.current = null;
     }
   }, [mapRef]);
+
+  const restoreHiddenLayers = useCallback((map: Map) => {
+    if (hiddenLayersRef.current.length === 0) return;
+    hiddenLayersRef.current.forEach(({ layer, prevVisible }) => layer.setVisible(prevVisible));
+    hiddenLayersRef.current = [];
+    map.renderSync();
+  }, []);
 
   const canUse = useMemo(() => !!getOrthoLayer(), [getOrthoLayer]);
 
@@ -173,16 +181,9 @@ export const useAISegmentation = ({
       map.getInteractions().forEach((i) => i.setActive(true));
       disabledInteractionsRef.current = false;
     }
-    // Restore hidden layers
-    if (hiddenLayersRef.current.length > 0) {
-      hiddenLayersRef.current.forEach(({ layer, prevVisible }) => {
-        layer.setVisible(prevVisible);
-      });
-      hiddenLayersRef.current = [];
-      map.renderSync();
-    }
+    restoreHiddenLayers(map);
     removeTempUI();
-  }, [mapRef, removeTempUI]);
+  }, [mapRef, removeTempUI, restoreHiddenLayers]);
 
   const enable = useCallback(() => {
     const map = mapRef.current;
@@ -190,6 +191,7 @@ export const useAISegmentation = ({
     setError(null);
     setIsActive(true);
     ensureResultLayer();
+    warmUpSegmentation();
 
     // Create an invisible target vector layer to host the draw interaction geometry (not added to map)
     const draw = new Draw({
@@ -259,6 +261,9 @@ export const useAISegmentation = ({
           if (!composite) {
             throw new Error("Failed to access map canvas for cropping.");
           }
+          // The capture is done: show the labels again while the model works. Interactions stay
+          // off so the view cannot move before the returned pixels are mapped back.
+          restoreHiddenLayers(map);
           // Show temporary bbox and spinner (use OL overlay for pixel-perfect centering)
           const rectCoords = [
             [minX, minY],
@@ -312,16 +317,7 @@ export const useAISegmentation = ({
           form.append("bboxes", JSON.stringify([x1, y1, x2, y2]));
           form.append("labels", JSON.stringify([1]));
 
-          const response = await fetch(`${Settings.SAM_API_URL}/segment`, {
-            method: "POST",
-            mode: "cors",
-            headers: { Accept: "application/json" },
-            body: form,
-          });
-          if (!response.ok) {
-            throw new Error(`Segmentation failed (${response.status})`);
-          }
-          const raw = await response.json();
+          const raw = await requestSegmentation(form);
           const fc = normalizeToFeatureCollection(raw);
           const filtered = fc ? keepLargestPolygon(fc) : null;
           const created = filtered ? convertPixelGeoJSONToMapFeatures(filtered, map) : [];
@@ -345,22 +341,16 @@ export const useAISegmentation = ({
           }
           if (created.length) setFeatures((prev) => [...prev, ...created]);
 
-          // After rendering features, restore layers and interactions
-          if (hiddenLayersRef.current.length > 0) {
-            hiddenLayersRef.current.forEach(({ layer, prevVisible }) => {
-              layer.setVisible(prevVisible);
-            });
-            hiddenLayersRef.current = [];
-            map.renderSync();
-          }
           removeTempUI();
         }
       } catch (e) {
-        const message = e instanceof Error ? e.message : "Unknown error";
-        setError(message);
+        const text = e instanceof Error ? e.message : "AI segmentation failed.";
+        setError(text);
+        message.error(text);
       } finally {
         const mapFinal = mapRef.current;
         if (mapFinal) {
+          restoreHiddenLayers(mapFinal);
           mapFinal.getInteractions().forEach((i) => i.setActive(true));
         }
         disabledInteractionsRef.current = false;
@@ -376,7 +366,7 @@ export const useAISegmentation = ({
 
     map.addInteraction(draw);
     drawInteractionRef.current = draw;
-  }, [canUse, ensureResultLayer, getOrthoLayer, mapRef, removeTempUI, onBeforeAddFeatures]);
+  }, [canUse, ensureResultLayer, getOrthoLayer, mapRef, removeTempUI, restoreHiddenLayers, onBeforeAddFeatures]);
 
   // Clean up on unmount
   useEffect(() => {
