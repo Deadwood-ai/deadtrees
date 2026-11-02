@@ -23,6 +23,8 @@ DISK_WATCH_PCT = 85
 HELICON_URGENT_DISK_PCT = 97
 BACKUP_MAX_AGE_HOURS = 36
 DRAIN_MAX_AGE_HOURS = 12
+# The audit worker writes its status at least every few minutes while it runs.
+AUDIT_WORKER_SILENT_MINUTES = 30
 # A processor only activates a release once its running task ends, so a host
 # may trail main for as long as a drain may last before it counts.
 RELEASE_LAG_HOURS = DRAIN_MAX_AGE_HOURS
@@ -230,6 +232,24 @@ def local_findings(facts: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
 	return found, gaps, unobserved
 
 
+def audit_worker_findings(status: dict[str, Any] | None, now: datetime) -> list[dict[str, Any]]:
+	"""A paused audit worker (expired login, usage limit) or one that stopped writing its status."""
+	if not status:
+		return []
+	if status.get('state') == 'paused':
+		return [finding('yellow', 'audit-worker', 'paused', f'audit worker paused: {str(status.get("reason"))[:160]}')]
+	if status.get('state') == 'unreadable':
+		return [finding('yellow', 'audit-worker', 'status', f'audit worker status file unreadable: {status.get("reason")}')]
+	try:
+		updated = datetime.fromisoformat(str(status.get('updated_at')))
+	except ValueError:
+		return [finding('yellow', 'audit-worker', 'status', 'audit worker status has no time')]
+	minutes = (now - updated).total_seconds() / 60
+	if minutes > AUDIT_WORKER_SILENT_MINUTES:
+		return [finding('yellow', 'audit-worker', 'silent', f'audit worker silent for {minutes:.0f} min')]
+	return []
+
+
 def build_findings(
 	snapshot: dict[str, Any], facts: dict[str, Any], now: datetime
 ) -> tuple[list[dict[str, Any]], list[str], list[str]]:
@@ -237,6 +257,7 @@ def build_findings(
 	found, gaps, unobserved = platform_findings(snapshot, now, facts.get('origin_main'), facts.get('main_history'))
 	deploy, deploy_gaps, deploy_unobserved = deploy_findings(facts.get('deploy') or {})
 	local, local_gaps, local_unobserved = local_findings(facts)
+	local += audit_worker_findings(facts.get('audit_worker'), now)
 	unique = {item['fingerprint']: item for item in found + deploy + local}
 	ordered = sorted(unique.values(), key=lambda item: (item['severity'] != 'red', item['fingerprint']))
 	return ordered, gaps + deploy_gaps + local_gaps, unobserved + deploy_unobserved + local_unobserved

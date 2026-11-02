@@ -36,6 +36,10 @@ WORKER_NAMES = {
 }
 LOCAL_WORKER = 'processing-server'
 SILENT_HOURS = 3
+# The audit worker's own status file (processor/src/audit_worker); absent while it is not set up.
+AUDIT_WORKER_STATUS = Path(
+	os.environ.get('DEADTREES_AUDIT_WORKER_STATUS', str(Path.home() / '.local/state/deadtrees-audit-worker/status.json'))
+)
 # Kills since the previous tick (2 hours apart at night) plus some overlap, so
 # none falls between two ticks; capped for a first run or a long outage.
 OOM_OVERLAP = timedelta(minutes=5)
@@ -193,6 +197,16 @@ def workers() -> tuple[list[dict[str, Any]] | None, str | None]:
 	], None
 
 
+def audit_worker(path: Path = AUDIT_WORKER_STATUS) -> dict[str, Any] | None:
+	"""The audit worker's last status (state, reason, updated_at), or None when it never ran here."""
+	try:
+		return json.loads(path.read_text())
+	except FileNotFoundError:
+		return None
+	except (OSError, json.JSONDecodeError) as exc:
+		return {'state': 'unreadable', 'reason': type(exc).__name__}
+
+
 def http_status(url: str, timeout: int = 15) -> int | str:
 	try:
 		with urllib.request.urlopen(urllib.request.Request(url, method='GET'), timeout=timeout) as response:
@@ -215,4 +229,5 @@ def collect(now: datetime | None = None, last_tick: datetime | None = None) -> d
 		'workers': worker_rows,
 		'workers_error': worker_error,
 		'frontend': {url: http_status(url) for url in FRONTEND_URLS},
+		'audit_worker': audit_worker(),
 	}

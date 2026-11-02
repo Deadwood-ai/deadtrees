@@ -136,6 +136,42 @@ read everything. Dataset owners and the public see nothing, so model results sta
 with auditors. Operators define benchmarks; the worker and operators record scores.
 The hash rule in `audit.benchmark_split` must never change.
 
+## Audit worker
+
+`processor/src/audit_worker` runs the checks on the processing server, as one process
+under Janusch's account, so the model calls use his subscription logins: Claude
+models through `claude -p`, OpenAI models (Luna, Sol) through the Codex login's
+app-server. Both were probed with a synthetic image on 2026-11-02. Every call runs in an
+empty temporary folder with no project instructions, settings, plugins or tools
+beyond reading the given images.
+
+- A check plugs in with a handler module listed in `worker.HANDLERS`: `VERSION` and
+  `CONFIG` (registered once as `review_all`, inactive), `handle(ctx)` (writes the run's
+  crops, images and model and rule rows), optional `recompute(ctx)` for rule-only runs
+  (no judges) and optional `ready(status)`. `CONFIG['models']` names the judges, e.g.
+  `{"haiku-5.5": {"transport": "claude", "model": "claude-haiku-5-5"},
+  "luna-medium": {"transport": "codex", "model": "gpt-6-luna", "effort": "medium"}}`.
+- Queues: new uploads first, then manual runs, then the backfill. Benchmark runs only in a
+  `--benchmark` session. Every five minutes, datasets that finished processing get an
+  upload run of each active version. The backfill is queued explicitly with `enqueue`.
+- A finished run becomes current only when its version is the active one.
+- An expired login or a usage limit puts the run back without spending an attempt and
+  pauses the worker. The pause shows in its status file
+  (`~/.local/state/deadtrees-audit-worker/status.json`), and the platform monitor turns
+  it into a finding, as it does for a worker that stops writing that file. Other errors
+  are retried up to three times, then the run fails with its error.
+- The worker refuses to start without a memory cap of at most 10 GB, because production
+  ODM runs on this host.
+
+```bash
+python -m processor.src.audit_worker probe            # logins only, no model call
+systemd-run --user --scope -p MemoryMax=10G -- python -m processor.src.audit_worker run
+python -m processor.src.audit_worker enqueue --check prediction_quality --queue backfill --file ids.txt
+python -m processor.src.audit_worker status
+```
+
+Starting the worker for real, and any backfill, needs approval.
+
 ## API exposure
 
 The app reaches these tables through PostgREST, which serves only the schemas it is
