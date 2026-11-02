@@ -3,29 +3,29 @@
 The audit is moving from form filling to oversight of automated checks (DT-1470).
 Every check stores what it looked at and every answer, people's and models'.
 Dataset verdicts are derived from those rows by versioned rules, so thresholds
-and model combinations can change without new model calls. Schema:
-`supabase/migrations/20261029103000_audit_checks_base.sql`.
+and model combinations can change without new model calls. Everything lives in the
+`audit` schema: `supabase/migrations/20261029103000_audit_checks_base.sql`.
 
 ## Model
 
 ```text
-audit_checks -> audit_check_versions -> audit_check_runs -> evidence -> audit_assessments
+audit.checks -> audit.check_versions -> audit.runs -> evidence -> audit.assessments
                                               |
-                                     audit_current_runs (one per dataset and check)
+                                     audit.current_runs (one per dataset and check)
 ```
 
 | Table | One row per | Written by |
 |---|---|---|
-| `audit_checks` | check (`dataset_evaluation`, `georef`, `acquisition_date`, `prediction_quality`) | migrations |
-| `audit_check_versions` | check version, with `mode`, `is_active` and free-form `config` | worker registers; operators switch mode and active version |
-| `audit_check_runs` | run of a version on a dataset; every run is kept; queue `upload`, `backfill`, `manual` or `benchmark` | worker |
-| `audit_current_runs` | dataset and check: the run whose results count | worker |
-| `audit_crops` | area of one ortho version (by `ortho_sha256`): a window on the 10 cm CLIP grid, or a footprint only for crops made off the grid (DT-1272 gold); in one or more crop sets | worker; only `crop_sets` and `selection` grow |
-| `audit_images` | stored image a check judged: raw crop per ortho, overlay per prediction label, overview and thumbnail per ortho | worker |
-| `audit_assessments` | assessor, target (crop or dataset) and layer; append-only | worker (model and rule rows), auditors (their own person rows) |
-| `audit_benchmarks` | named, versioned set of targets for one check; frozen once final | operators |
-| `audit_benchmark_members` | crop or dataset in a benchmark, with its `dev` or `holdout` split | operators, until frozen |
-| `audit_benchmark_scores` | scoring of a check version on a frozen benchmark; append-only | worker, operators |
+| `audit.checks` | check (`dataset_evaluation`, `georef`, `acquisition_date`, `prediction_quality`) | migrations |
+| `audit.check_versions` | check version, with `mode`, `is_active` and free-form `config` | worker registers; operators switch mode and active version |
+| `audit.runs` | run of a version on a dataset; every run is kept; queue `upload`, `backfill`, `manual` or `benchmark` | worker |
+| `audit.current_runs` | dataset and check: the run whose results count | worker |
+| `audit.crops` | area of one ortho version (by `ortho_sha256`): a window on the 10 cm CLIP grid, or a footprint only for crops made off the grid (DT-1272 gold); in one or more crop sets | worker; only `crop_sets` and `selection` grow |
+| `audit.images` | stored image a check judged: raw crop per ortho, overlay per prediction label, overview and thumbnail per ortho | worker |
+| `audit.assessments` | assessor, target (crop or dataset) and layer; append-only | worker (model and rule rows), auditors (their own person rows) |
+| `audit.benchmarks` | named, versioned set of targets for one check; frozen once final | operators |
+| `audit.benchmark_members` | crop or dataset in a benchmark, with its `dev` or `holdout` split | operators, until frozen |
+| `audit.benchmark_scores` | scoring of a check version on a frozen benchmark; append-only | worker, operators |
 
 Modes per version: `review_all` (default for every new version), `review_uncertain`,
 `auto_apply`. Only an operator (`can_operate`) changes the mode or the active version,
@@ -60,9 +60,9 @@ version.
   before the redo. These rows keep history and old decisions and serve as an opt-in
   weak label; benchmarks and agreement metrics use `imported_from is null`. Benchmark
   truth is the graded DT-1272 crops plus new reviews and adjudications.
-- Rows are never updated. A correction is a new row; `audit_latest_assessments` shows
+- Rows are never updated. A correction is a new row; `audit.latest_assessments` shows
   the latest row per target, layer and assessor, where a native answer replaces the
-  same person's imported one. `audit_disagreements` lists targets where people
+  same person's imported one. `audit.disagreements` lists targets where people
   disagree with each other or with a model or rule in the current run
   (`people_disagree`, `people_and_models_disagree`, native rows only), and where an
   imported answer differs from the current models (`legacy_and_models_disagree`), so
@@ -71,10 +71,10 @@ version.
 ## Benchmarks
 
 A benchmark fixes which targets a check is scored on; truth stays in
-`audit_assessments` (native person rows, `imported_from is null`).
+`audit.assessments` (native person rows, `imported_from is null`).
 
 1. An operator creates a benchmark (e.g. `pq-gold-dt1272` v1) and adds members. A
-   member's split defaults to `audit_benchmark_split(dataset_id)`, a fixed hash of the
+   member's split defaults to `audit.benchmark_split(dataset_id)`, a fixed hash of the
    id with 1 in 5 held out; a set frozen earlier (the DT-1272 gold split) gives its own.
    All members from one dataset share one split.
 2. Freezing (`frozen_at`) makes the members and the benchmark final; a bigger set is a
@@ -82,7 +82,7 @@ A benchmark fixes which targets a check is scored on; truth stays in
 3. A candidate version runs on the members in the `benchmark` queue. Benchmark runs
    stay out of the production queues and cost caps and never become the current run.
 4. The check's scorer compares the candidate's rows with the truth rows and records
-   the result in `audit_benchmark_scores` (split, metrics such as n, AUC, catch rate,
+   the result in `audit.benchmark_scores` (split, metrics such as n, AUC, catch rate,
    false exclude rate, the runs used, scorer and version). Tuning uses `dev`;
    promotion uses `holdout` only.
 
@@ -90,7 +90,7 @@ A benchmark fixes which targets a check is scored on; truth stays in
 
 1. Register a version (the worker inserts it as `review_all`, inactive).
 2. Per dataset, create a run, store its crops, images and run `evidence`, add one
-   assessment per model or rule, and point `audit_current_runs` at the run. A check may
+   assessment per model or rule, and point `audit.current_runs` at the run. A check may
    do this in its own `SECURITY DEFINER` store function guarded by
    `internal.is_audit_worker()`.
 3. Derive the dataset verdict in the check's own versioned SQL rule and write it to
@@ -104,7 +104,30 @@ fails them for that reason.
 Auditors, operators, the audit worker (the processor account) and the analyst role
 read everything. Dataset owners and the public see nothing, so model results stay
 with auditors. Operators define benchmarks; the worker and operators record scores.
-The hash rule in `audit_benchmark_split` must never change.
+The hash rule in `audit.benchmark_split` must never change.
+
+## API exposure
+
+The app reaches these tables through PostgREST, which serves only the schemas it is
+configured for. Locally and in CI, `supabase/config.toml` lists `audit` under
+`api.schemas`. Clients name the schema, e.g. `client.schema('audit').table('runs')`
+(supabase-py and supabase-js).
+
+Production (self-hosted Supabase on data2) still needs `audit` added to the PostgREST
+setting before the audit worker or the review page goes live. That is a production
+config change and needs explicit approval. On data2, in the Supabase Docker
+directory:
+
+```bash
+cp .env .env.bak-$(date -u +%Y%m%dT%H%M%SZ)
+grep '^PGRST_DB_SCHEMAS=' .env   # expected: public,storage,graphql_public
+sed -i '/^PGRST_DB_SCHEMAS=/ s/$/,audit/' .env
+docker compose up -d rest
+```
+
+To check it, request `/rest/v1/checks` with the header `Accept-Profile: audit` as an
+auditor; it lists the four checks. To roll back, restore the backup and run the same
+`docker compose up -d rest`.
 
 ## Not yet
 

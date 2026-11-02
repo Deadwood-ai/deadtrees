@@ -128,22 +128,24 @@ def test_role_inventory_reads_and_effective_privileges(db):
 		assert not db.execute("SELECT pg_has_role(%s,'analyst','MEMBER')", (role,)).fetchone()[0]
 	settings = db.execute("SELECT rolconfig FROM pg_roles WHERE rolname='team_analyst'").fetchone()[0]
 	assert {'default_transaction_read_only=on', 'statement_timeout=30s', 'lock_timeout=3s'} <= set(settings)
-	tables = db.execute("SELECT tablename,cmd FROM pg_policies WHERE policyname='analyst_select'").fetchall()
+	tables = db.execute("SELECT schemaname,tablename,cmd FROM pg_policies WHERE policyname='analyst_select'").fetchall()
 	# + v2_acquisition_date_estimates, dataset_audit_suggestions, acquisition_date_decisions
 	# + dataset_access_grants, dataset_access_events, v2_georef_checks, processor_hosts, processor_heartbeats
-	# + the ten audit_* check and benchmark tables
+	# + the ten tables of the audit schema
 	assert len(tables) == 72
-	for table, command in tables:
+	for schema, table, command in tables:
 		assert command == 'SELECT'
 		for privilege in ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'TRIGGER', 'REFERENCES'):
 			assert not db.execute(
-				'SELECT has_table_privilege(%s,%s,%s)', ('team_analyst', 'public.' + table, privilege)
+				'SELECT has_table_privilege(%s,%s,%s)', ('team_analyst', f'{schema}.{table}', privilege)
 			).fetchone()[0]
 		with db.transaction():
 			db.execute('SET LOCAL ROLE team_analyst')
 			columns = 'id' if table == 'prepackaged_dataset_download_grants' else '*'
 			db.execute(
-				sql.SQL('SELECT {} FROM public.{} LIMIT 1').format(sql.SQL(columns), sql.Identifier(table))
+				sql.SQL('SELECT {} FROM {}.{} LIMIT 1').format(
+					sql.SQL(columns), sql.Identifier(schema), sql.Identifier(table)
+				)
 			).fetchall()
 			db.execute('RESET ROLE')
 	assert not db.execute(
