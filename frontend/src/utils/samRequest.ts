@@ -1,4 +1,5 @@
 import { Settings } from "../config";
+import { supabase } from "../hooks/useSupabase";
 
 // The hosted model can take minutes to start after a pause. Modal answers requests that run
 // longer than 150 s with a redirect the browser cannot follow, so give up well before that.
@@ -12,17 +13,51 @@ export const SAM_UNREACHABLE_MESSAGE = "The AI segmentation service could not be
 
 let lastWarmUpAt = 0;
 
-/** Posts a segmentation request and turns timeouts and network failures into readable errors. */
-export async function requestSegmentation(form: FormData, timeoutMs = SAM_REQUEST_TIMEOUT_MS): Promise<unknown> {
-  const response = await fetch(`${Settings.SAM_API_URL}/segment`, {
+export interface SamPrompt {
+  image: Blob;
+  /** Box in view-image pixels: [x1, y1, x2, y2]. */
+  box: number[];
+  /** Refinement clicks in view-image pixels; label 1 adds, 0 removes. */
+  points?: number[][];
+  labels?: number[];
+}
+
+/** Segments one object from a box, refined by optional clicks. */
+export function requestSegmentation({ image, box, points = [], labels = [] }: SamPrompt): Promise<unknown> {
+  const form = new FormData();
+  form.append("image", image, "view.jpg");
+  form.append("bboxes", JSON.stringify(box));
+  if (points.length) {
+    form.append("points", JSON.stringify(points));
+    form.append("labels", JSON.stringify(labels));
+  } else {
+    form.append("labels", JSON.stringify([1]));
+  }
+  return postToSam("/segment", form);
+}
+
+/** Finds every instance of a concept such as "tree" in the view image. */
+export function requestConcepts(image: Blob, text: string): Promise<unknown> {
+  const form = new FormData();
+  form.append("image", image, "view.jpg");
+  form.append("text", text);
+  return postToSam("/concepts", form);
+}
+
+/** Posts to the segmentation service and turns timeouts and network failures into readable errors. */
+async function postToSam(path: string, form: FormData, timeoutMs = SAM_REQUEST_TIMEOUT_MS): Promise<unknown> {
+  const response = await fetch(`${Settings.SAM_API_URL}${path}`, {
     method: "POST",
     mode: "cors",
-    headers: { Accept: "application/json" },
+    headers: await samHeaders(),
     body: form,
     signal: AbortSignal.timeout(timeoutMs),
   }).catch((e: unknown) => (isTimeout(e) ? SAM_STARTING_MESSAGE : SAM_UNREACHABLE_MESSAGE));
   if (typeof response === "string") {
     throw new Error(response);
+  }
+  if (response.status === 401) {
+    throw new Error("Please sign in again to use the AI tools.");
   }
   if (!response.ok) {
     throw new Error(`AI segmentation failed (${response.status}). Please try again.`);
@@ -32,17 +67,27 @@ export async function requestSegmentation(form: FormData, timeoutMs = SAM_REQUES
 }
 
 /**
+ * The service sits behind the storage API, which admits signed-in users only. The session
+ * token goes only to our own API, never to a SAM URL configured elsewhere.
+ */
+async function samHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (!Settings.SAM_API_URL.startsWith(`${Settings.API_URL}/`)) return headers;
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+/**
  * Starts the model in the background so it is ready by the time the user has drawn a box.
  * Throttled, fire-and-forget; failures are ignored because the real request reports them.
  */
 export function warmUpSegmentation(now = Date.now()): boolean {
   if (now - lastWarmUpAt < SAM_WARMUP_INTERVAL_MS) return false;
   lastWarmUpAt = now;
-  const form = new FormData();
-  form.append("image", new File([TINY_JPEG], "warmup.jpg", { type: "image/jpeg" }));
-  form.append("bboxes", JSON.stringify([0, 0, 1, 1]));
-  form.append("labels", JSON.stringify([1]));
-  void requestSegmentation(form, SAM_REQUEST_TIMEOUT_MS).catch(() => undefined);
+  const image = new Blob([TINY_JPEG], { type: "image/jpeg" });
+  void requestSegmentation({ image, box: [0, 0, 1, 1] }).catch(() => undefined);
   return true;
 }
 

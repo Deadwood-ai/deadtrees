@@ -97,6 +97,7 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
     getTargetVectorSource: () => editor.getOverlayLayer()?.getSource() ?? undefined,
     onBeforeAddFeatures: editor.saveHistorySnapshot,
   });
+  const disableAI = ai.disable;
 
   // Derived state
   const hasDeadwood = !!deadwoodLabel.data?.id;
@@ -155,13 +156,14 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
         layer_type: editingLayerType,
       });
     }
+    disableAI(); // ends an AI refine session and unlocks the map
     editor.stopEditing();
     editor.getOverlayLayer()?.getSource()?.clear();
     setIsEditing(false);
     setEditingLayerType(null);
     setInitialFeatures([]);
     message.info("Editing cancelled");
-  }, [datasetId, editingLayerType, editor]);
+  }, [datasetId, editingLayerType, editor, disableAI]);
 
   // Save edits
   const handleSaveEdits = useCallback(async () => {
@@ -219,6 +221,7 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
         dataset_id: datasetId,
         layer_type: editingLayerType,
       });
+      disableAI(); // ends an AI refine session and unlocks the map
       editor.stopEditing();
       editor.getOverlayLayer()?.getSource()?.clear();
       setIsEditing(false);
@@ -238,7 +241,7 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
     } finally {
       setIsSaving(false);
     }
-  }, [predictionLabel?.id, editingLayerType, user?.id, datasetId, editor, initialFeatures, geoJson, saveCorrections, emitDebugEvent, auditLeaseId]);
+  }, [predictionLabel?.id, editingLayerType, user?.id, datasetId, editor, initialFeatures, geoJson, saveCorrections, emitDebugEvent, auditLeaseId, disableAI]);
 
   // Load geometries into editor when editing starts
   useEffect(() => {

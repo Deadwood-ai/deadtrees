@@ -1,21 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map from "ol/Map.js";
+import type MapBrowserEvent from "ol/MapBrowserEvent.js";
 import Draw, { createBox } from "ol/interaction/Draw.js";
 import VectorSource from "ol/source/Vector.js";
 import VectorLayer from "ol/layer/Vector.js";
 import { Style, Fill, Stroke } from "ol/style";
 import Feature from "ol/Feature.js";
 import Polygon from "ol/geom/Polygon.js";
-import Geometry from "ol/geom/Geometry.js";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
-// import { GeoTIFF } from "ol/source";
-// import View from "ol/View";
 import { message } from "antd";
-import { requestSegmentation, warmUpSegmentation } from "../utils/samRequest";
-import Overlay from "ol/Overlay";
+import { requestConcepts, requestSegmentation, warmUpSegmentation, type SamPrompt } from "../utils/samRequest";
+import { keepLargestPolygon, pixelPolygonsToFeatures, toPixelFeatureCollection } from "../utils/samGeometry";
 import { palette } from "../theme/palette";
 
 type GetOrthoLayerFn = () => TileLayerWebGL | undefined;
+type MapClick = MapBrowserEvent<PointerEvent | KeyboardEvent | WheelEvent>;
 
 interface UseAISegmentationParams {
   mapRef: React.MutableRefObject<Map | null>;
@@ -27,20 +26,28 @@ interface UseAISegmentationParams {
 interface UseAISegmentationReturn {
   isActive: boolean;
   isProcessing: boolean;
-  error: string | null;
-  features: Feature<Geometry>[];
   enable: () => void;
   disable: () => void;
-  clear: () => void;
+  /** Adds an outline for every instance of `text` (for example "tree") in the current view. */
+  findConcept: (text: string) => Promise<void>;
   canUse: boolean;
 }
 
+/** One AI outline being shaped: the frozen view image, its box and the refinement clicks so far. */
+interface Session extends Required<SamPrompt> {
+  features: Feature[];
+  boxFeature: Feature;
+}
+
+const REFINE_HINT = "Click to add to the outline, Alt-click to remove. Press S when it fits.";
+
 /**
- * AI Segmentation hook (MVP):
- * - Adds a draw-box interaction
- * - Captures ortho-only image from an offscreen OL map (~1200 max dim)
- * - Sends JPEG and bbox (pixels) to SAM endpoint
- * - Converts returned pixel polygons to map coordinates and adds a temp vector layer
+ * AI segmentation for the polygon editors.
+ *
+ * Turning AI on lets the user draw a box. The view is captured once and sent with the box; the
+ * returned outline is added to the editor. Further clicks refine that outline until AI is turned
+ * off again. Map navigation stays locked during a session, because the outline is returned in
+ * the pixel space of the captured view.
  */
 export const useAISegmentation = ({
   mapRef,
@@ -50,534 +57,225 @@ export const useAISegmentation = ({
 }: UseAISegmentationParams): UseAISegmentationReturn => {
   const [isActive, setIsActive] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [features, setFeatures] = useState<Feature[]>([]);
 
-  // Store draw interaction and result layer/source
-  const drawInteractionRef = useRef<Draw | null>(null);
+  const drawRef = useRef<Draw | null>(null);
+  const sessionRef = useRef<Session | null>(null);
   const resultSourceRef = useRef<VectorSource | null>(null);
-  const resultLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
-  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null); // no longer used for rendering
-  const disabledInteractionsRef = useRef<boolean>(false);
-  type HideableLayer = { setVisible: (v: boolean) => void; getVisible: () => boolean };
-  const hiddenLayersRef = useRef<Array<{ layer: HideableLayer; prevVisible: boolean }>>([]);
-  const tempBboxFeatureRef = useRef<Feature | null>(null);
-  const spinnerRef = useRef<HTMLDivElement | null>(null);
-  const spinnerOverlayRef = useRef<Overlay | null>(null);
-  const removeTempUI = useCallback(() => {
-    if (overlayCanvasRef.current) {
-      const parent = overlayCanvasRef.current.parentElement;
-      if (parent) parent.removeChild(overlayCanvasRef.current);
-      overlayCanvasRef.current = null;
-    }
-    if (tempBboxFeatureRef.current && resultSourceRef.current) {
-      resultSourceRef.current.removeFeature(tempBboxFeatureRef.current);
-      tempBboxFeatureRef.current = null;
-    }
-    if (spinnerOverlayRef.current && mapRef.current) {
-      try {
-        mapRef.current.removeOverlay(spinnerOverlayRef.current);
-      } catch (e) {
-        // ignore overlay removal errors
-      }
-      spinnerOverlayRef.current = null;
-    }
-    if (spinnerRef.current && spinnerRef.current.parentElement) {
-      spinnerRef.current.parentElement.removeChild(spinnerRef.current);
-      spinnerRef.current = null;
-    }
-  }, [mapRef]);
-
-  const restoreHiddenLayers = useCallback((map: Map) => {
-    if (hiddenLayersRef.current.length === 0) return;
-    hiddenLayersRef.current.forEach(({ layer, prevVisible }) => layer.setVisible(prevVisible));
-    hiddenLayersRef.current = [];
-    map.renderSync();
-  }, []);
+  const ownLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  // The dashed box lives on its own layer so an editor save never picks it up.
+  const boxLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  const clickKeyRef = useRef<((e: MapClick) => void) | null>(null);
+  // A click while a refinement is running would race it; such clicks are ignored.
+  const busyRef = useRef(false);
 
   const canUse = useMemo(() => !!getOrthoLayer(), [getOrthoLayer]);
 
-  // Ensure result layer exists on the main map
-  const ensureResultLayer = useCallback(() => {
-    const map = mapRef.current;
-    if (!map) {
-      console.debug("[AI Seg] ensureResultLayer: no map");
-      return;
+  // AI outlines go to the editor's layer when there is one, otherwise to a layer owned here.
+  const resultSource = useCallback((map: Map): VectorSource => {
+    const target = getTargetVectorSource?.();
+    if (target) return (resultSourceRef.current = target);
+    if (!ownLayerRef.current) {
+      const source = new VectorSource();
+      ownLayerRef.current = new VectorLayer<VectorSource>({
+        source,
+        style: new Style({
+          fill: new Fill({ color: "rgba(0, 200, 255, 0.25)" }),
+          stroke: new Stroke({ color: palette.state.hover, width: 2 }),
+        }),
+        className: "ai-segmentation-layer",
+      });
+      map.addLayer(ownLayerRef.current);
     }
+    return (resultSourceRef.current = ownLayerRef.current.getSource()!);
+  }, [getTargetVectorSource]);
 
-    // If caller provides a target vector source (e.g., polygon editor overlay), always use it
-    const targetSource = getTargetVectorSource?.();
-    console.debug("[AI Seg] ensureResultLayer: targetSource =", !!targetSource);
-    if (targetSource) {
-      resultSourceRef.current = targetSource;
-      resultLayerRef.current = null; // not owned here
-      console.debug("[AI Seg] Using provided target source");
-      return;
-    }
-
-    // Early return only if we already have our own layer (not using target source)
-    if (resultLayerRef.current && resultSourceRef.current) {
-      console.debug("[AI Seg] Already have result layer");
-      return;
-    }
-
-    // Fallback: create a temporary result layer owned by this hook
-    console.debug("[AI Seg] Creating fallback AI layer");
-    const source = new VectorSource();
-    const layer = new VectorLayer<VectorSource>({
-      source,
-      style: new Style({
-        fill: new Fill({ color: "rgba(0, 200, 255, 0.25)" }),
-        stroke: new Stroke({ color: palette.state.hover, width: 2 }),
-      }),
-      className: "ai-segmentation-layer",
-    });
-    map.addLayer(layer);
-    resultSourceRef.current = source;
-    resultLayerRef.current = layer;
-  }, [getTargetVectorSource, mapRef]);
-
-  const removeResultLayer = useCallback(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    if (resultLayerRef.current) {
-      map.removeLayer(resultLayerRef.current);
-      // dispose and clear
-      const src = resultLayerRef.current.getSource();
-      if (src) {
-        src.clear();
-        const maybeDisposable = src as unknown as { dispose?: () => void };
-        if (typeof maybeDisposable.dispose === "function") {
-          maybeDisposable.dispose();
-        }
-      }
-      const maybeLayerDisposable = resultLayerRef.current as unknown as { dispose?: () => void };
-      if (typeof maybeLayerDisposable.dispose === "function") {
-        maybeLayerDisposable.dispose();
-      }
-      resultLayerRef.current = null;
-      resultSourceRef.current = null;
-    }
-  }, [mapRef]);
-
-  const clear = useCallback(() => {
-    setError(null);
-    setFeatures([]);
-    if (resultSourceRef.current) {
-      resultSourceRef.current.clear();
-    }
+  const setNavigationLocked = useCallback((map: Map, locked: boolean) => {
+    map.getInteractions().forEach((i) => i.setActive(!locked));
   }, []);
+
+  const endSession = useCallback(() => {
+    const map = mapRef.current;
+    const session = sessionRef.current;
+    sessionRef.current = null;
+    if (map && clickKeyRef.current) {
+      map.un("click", clickKeyRef.current);
+      clickKeyRef.current = null;
+    }
+    if (session) boxLayerRef.current?.getSource()?.removeFeature(session.boxFeature);
+    if (map) setNavigationLocked(map, false);
+  }, [mapRef, setNavigationLocked]);
 
   const disable = useCallback(() => {
     const map = mapRef.current;
-    if (!map) return;
+    if (map && drawRef.current) map.removeInteraction(drawRef.current);
+    drawRef.current = null;
+    endSession();
     setIsActive(false);
-    if (drawInteractionRef.current) {
-      map.removeInteraction(drawInteractionRef.current);
-      drawInteractionRef.current = null;
+  }, [endSession, mapRef]);
+
+  /** Runs the session's prompt and replaces its previous outline with the new one. */
+  const runSession = useCallback(async (map: Map, session: Session) => {
+    busyRef.current = true;
+    setIsProcessing(true);
+    try {
+      const fc = toPixelFeatureCollection(await requestSegmentation(session));
+      const outline = fc ? pixelPolygonsToFeatures(keepLargestPolygon(fc), (p) => map.getCoordinateFromPixel(p)) : [];
+      if (sessionRef.current !== session) return; // ended while waiting
+      const source = resultSource(map);
+      if (session.features.length === 0 && outline.length) onBeforeAddFeatures?.();
+      session.features.forEach((f) => source.removeFeature(f));
+      outline.forEach((f) => f.set("is_new", true));
+      source.addFeatures(outline);
+      session.features = outline;
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : "AI segmentation failed.");
+    } finally {
+      busyRef.current = false;
+      setIsProcessing(false);
     }
-    // Re-enable interactions if we disabled them
-    if (disabledInteractionsRef.current) {
-      map.getInteractions().forEach((i) => i.setActive(true));
-      disabledInteractionsRef.current = false;
+  }, [onBeforeAddFeatures, resultSource]);
+
+  const refine = useCallback((e: MapClick) => {
+    const map = mapRef.current;
+    const session = sessionRef.current;
+    if (!map || !session || busyRef.current) return;
+    session.points.push([Math.round(e.pixel[0]), Math.round(e.pixel[1])]);
+    session.labels.push((e.originalEvent as MouseEvent).altKey ? 0 : 1);
+    void runSession(map, session);
+  }, [mapRef, runSession]);
+
+  const startSession = useCallback(async (map: Map, boxGeometry: Polygon) => {
+    setNavigationLocked(map, true);
+    const image = await captureOrthoView(map, getOrthoLayer());
+    if (!image) {
+      message.error("The map view could not be captured for AI segmentation.");
+      setNavigationLocked(map, false);
+      return;
     }
-    restoreHiddenLayers(map);
-    removeTempUI();
-  }, [mapRef, removeTempUI, restoreHiddenLayers]);
+    const [minX, minY, maxX, maxY] = boxGeometry.getExtent();
+    const [x1, y1] = map.getPixelFromCoordinate([minX, maxY]);
+    const [x2, y2] = map.getPixelFromCoordinate([maxX, minY]);
+    const boxFeature = new Feature(boxGeometry);
+    if (!boxLayerRef.current) {
+      boxLayerRef.current = new VectorLayer<VectorSource>({
+        source: new VectorSource(),
+        style: new Style({ stroke: new Stroke({ color: palette.state.hover, width: 2, lineDash: [6, 4] }) }),
+        className: "ai-segmentation-box",
+      });
+      map.addLayer(boxLayerRef.current);
+    }
+    boxLayerRef.current.getSource()!.addFeature(boxFeature);
+
+    const session: Session = {
+      image,
+      box: [x1, y1, x2, y2].map(Math.round),
+      points: [],
+      labels: [],
+      features: [],
+      boxFeature,
+    };
+    sessionRef.current = session;
+    await runSession(map, session);
+    if (sessionRef.current !== session) return;
+    if (session.features.length === 0) {
+      // Nothing to refine: the request failed or found nothing. Unlock the map.
+      disable();
+      return;
+    }
+    clickKeyRef.current = refine;
+    map.on("click", refine);
+    message.info(REFINE_HINT);
+  }, [disable, getOrthoLayer, refine, runSession, setNavigationLocked]);
 
   const enable = useCallback(() => {
     const map = mapRef.current;
-    if (!map || !canUse) return;
-    setError(null);
+    if (!map || !canUse || drawRef.current) return;
     setIsActive(true);
-    ensureResultLayer();
     warmUpSegmentation();
-
-    // Create an invisible target vector layer to host the draw interaction geometry (not added to map)
-    const draw = new Draw({
-      source: new VectorSource(),
-      type: "Circle",
-      geometryFunction: createBox(),
-      stopClick: true,
+    const draw = new Draw({ source: new VectorSource(), type: "Circle", geometryFunction: createBox(), stopClick: true });
+    draw.on("drawend", (evt) => {
+      map.removeInteraction(draw);
+      drawRef.current = null;
+      const geometry = evt.feature.getGeometry();
+      if (geometry instanceof Polygon) void startSession(map, geometry);
     });
-
-    draw.on("drawend", async (evt) => {
-      try {
-        setIsProcessing(true);
-        setError(null);
-        removeTempUI();
-        // During processing: disable all map interactions
-        map.getInteractions().forEach((i) => i.setActive(false));
-        disabledInteractionsRef.current = true;
-
-        // Hide all non-ortho layers to avoid CORS taint. Keep our result/overlay visible.
-        const ortho = getOrthoLayer();
-        hiddenLayersRef.current = [];
-        const layers = map.getLayers().getArray();
-        layers.forEach((layer: unknown) => {
-          const l = layer as HideableLayer;
-          // Keep the editor overlay visible when using provided target source
-          let isTargetOverlay = false;
-          try {
-            if (resultSourceRef.current && layer instanceof VectorLayer) {
-              const src = (layer as VectorLayer<VectorSource>).getSource?.();
-              isTargetOverlay = src === resultSourceRef.current;
-            }
-          } catch (e) {
-            // ignore comparison errors
-          }
-
-          const shouldHide = layer !== ortho && layer !== resultLayerRef.current && !isTargetOverlay;
-          if (shouldHide && typeof l.setVisible === "function") {
-            hiddenLayersRef.current.push({ layer: l, prevVisible: l.getVisible() });
-            l.setVisible(false);
-          }
-        });
-        map.renderSync();
-
-        // Get extent in map coordinates from the drawn polygon
-        const geometry = evt.feature.getGeometry();
-        if (!(geometry instanceof Polygon)) {
-          setIsProcessing(false);
-          return;
-        }
-        const extent = geometry.getExtent();
-        const [minX, minY, maxX, maxY] = extent;
-
-        {
-          // Compute bbox pixels in the CURRENT MAP pixel space (CSS pixels)
-          const topLeft = map.getPixelFromCoordinate([minX, maxY]);
-          const bottomRight = map.getPixelFromCoordinate([maxX, minY]);
-          if (!topLeft || !bottomRight) {
-            throw new Error("Failed to compute bbox pixels.");
-          }
-          const x1 = Math.round(topLeft[0]);
-          const y1 = Math.round(topLeft[1]);
-          const x2 = Math.round(bottomRight[0]);
-          const y2 = Math.round(bottomRight[1]);
-
-          // Compose visible map into a single canvas (ortho-only) and crop the bbox
-          const composite = composeCurrentMapCanvas(map);
-          if (!composite) {
-            throw new Error("Failed to access map canvas for cropping.");
-          }
-          // The capture is done: show the labels again while the model works. Interactions stay
-          // off so the view cannot move before the returned pixels are mapped back.
-          restoreHiddenLayers(map);
-          // Show temporary bbox and spinner (use OL overlay for pixel-perfect centering)
-          const rectCoords = [
-            [minX, minY],
-            [maxX, minY],
-            [maxX, maxY],
-            [minX, maxY],
-            [minX, minY],
-          ];
-          const rect = new Polygon([rectCoords]);
-          const tempFeature = new Feature(rect);
-          // Mark as temporary bbox to avoid hover styling overrides
-          try {
-            tempFeature.set("dt_role", "bbox");
-          } catch (e) {
-            // ignore tempFeature property set error
-          }
-          tempFeature.setStyle(
-            new Style({
-              stroke: new Stroke({ color: palette.state.hover, width: 2, lineDash: [6, 4] }),
-              fill: new Fill({ color: "rgba(0,200,255,0.06)" }),
-            }),
-          );
-          ensureResultLayer();
-          resultSourceRef.current?.addFeature(tempFeature);
-          tempBboxFeatureRef.current = tempFeature;
-
-          ensureSpinnerKeyframes();
-          const spinner = document.createElement("div");
-          spinner.style.width = "16px";
-          spinner.style.height = "16px";
-          spinner.style.borderRadius = "50%";
-          spinner.style.background = "rgba(0,200,255,0.7)";
-          spinner.style.boxShadow = "0 0 8px rgba(0,200,255,0.8)";
-          spinner.style.animation = "aiPulse 0.9s ease-in-out infinite";
-          spinner.style.zIndex = "1000";
-          spinnerRef.current = spinner;
-
-          const overlay = new Overlay({ element: spinner, positioning: "center-center", stopEvent: false });
-          overlay.setPosition([(minX + maxX) / 2, (minY + maxY) / 2]);
-          map.addOverlay(overlay);
-          spinnerOverlayRef.current = overlay;
-
-          // No overlay image: we only use composite to build the API input
-          await new Promise((r) => requestAnimationFrame(() => r(null)));
-
-          // Now: send the SAME composite image and bbox to the API and render returned polygons
-          const imageBlob: Blob = await canvasToBlob(composite, "image/jpeg", 0.92);
-          const file = new File([imageBlob], "view.jpg", { type: "image/jpeg" });
-          const form = new FormData();
-          form.append("image", file);
-          form.append("bboxes", JSON.stringify([x1, y1, x2, y2]));
-          form.append("labels", JSON.stringify([1]));
-
-          const raw = await requestSegmentation(form);
-          const fc = normalizeToFeatureCollection(raw);
-          const filtered = fc ? keepLargestPolygon(fc) : null;
-          const created = filtered ? convertPixelGeoJSONToMapFeatures(filtered, map) : [];
-          console.debug("[AI Seg] Created features:", created.length);
-          ensureResultLayer();
-          console.debug("[AI Seg] resultSourceRef.current =", !!resultSourceRef.current);
-          if (resultSourceRef.current && created.length) {
-            // Save history before adding AI-generated features (for undo)
-            if (onBeforeAddFeatures) {
-              onBeforeAddFeatures();
-            }
-            // Mark all AI-generated features as new (for save detection)
-            created.forEach((f) => f.set("is_new", true));
-            console.debug("[AI Seg] Adding", created.length, "features to source");
-            resultSourceRef.current.addFeatures(created);
-            console.debug(
-              "[AI Seg] Features added. Source now has",
-              resultSourceRef.current.getFeatures().length,
-              "features",
-            );
-          }
-          if (created.length) setFeatures((prev) => [...prev, ...created]);
-
-          removeTempUI();
-        }
-      } catch (e) {
-        const text = e instanceof Error ? e.message : "AI segmentation failed.";
-        setError(text);
-        message.error(text);
-      } finally {
-        const mapFinal = mapRef.current;
-        if (mapFinal) {
-          restoreHiddenLayers(mapFinal);
-          mapFinal.getInteractions().forEach((i) => i.setActive(true));
-        }
-        disabledInteractionsRef.current = false;
-        removeTempUI();
-        if (drawInteractionRef.current && mapFinal) {
-          mapFinal.removeInteraction(drawInteractionRef.current);
-          drawInteractionRef.current = null;
-        }
-        setIsActive(false);
-        setIsProcessing(false);
-      }
-    });
-
     map.addInteraction(draw);
-    drawInteractionRef.current = draw;
-  }, [canUse, ensureResultLayer, getOrthoLayer, mapRef, removeTempUI, restoreHiddenLayers, onBeforeAddFeatures]);
+    drawRef.current = draw;
+  }, [canUse, mapRef, startSession]);
 
-  // Clean up on unmount
+  const findConcept = useCallback(async (text: string) => {
+    const map = mapRef.current;
+    if (!map || !canUse || isActive) return;
+    setIsProcessing(true);
+    setNavigationLocked(map, true);
+    try {
+      const image = await captureOrthoView(map, getOrthoLayer());
+      if (!image) throw new Error("The map view could not be captured for AI search.");
+      const fc = toPixelFeatureCollection(await requestConcepts(image, text));
+      const found = fc ? pixelPolygonsToFeatures(fc, (p) => map.getCoordinateFromPixel(p)) : [];
+      if (found.length === 0) {
+        message.info(`No ${text} found in this view.`);
+        return;
+      }
+      onBeforeAddFeatures?.();
+      found.forEach((f) => f.set("is_new", true));
+      resultSource(map).addFeatures(found);
+      message.success(`Added ${found.length} outlines. Check them before saving.`);
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : "AI search failed.");
+    } finally {
+      setNavigationLocked(map, false);
+      setIsProcessing(false);
+    }
+  }, [canUse, getOrthoLayer, isActive, mapRef, onBeforeAddFeatures, resultSource, setNavigationLocked]);
+
   useEffect(() => {
     return () => {
       disable();
-      removeResultLayer();
+      for (const ref of [ownLayerRef, boxLayerRef]) {
+        const layer = ref.current;
+        layer?.getMapInternal()?.removeLayer(layer);
+        ref.current = null;
+      }
     };
-  }, [disable, removeResultLayer]);
+  }, [disable]);
 
-  return {
-    isActive,
-    isProcessing,
-    error,
-    features,
-    enable,
-    disable,
-    clear,
-    canUse,
-  };
+  return { isActive, isProcessing, enable, disable, findConcept, canUse };
 };
 
-// Removed offscreen helpers (not used in MVP path)
-
-function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    try {
-      canvas.toBlob(
-        (blob) => {
-          if (!blob) {
-            reject(new Error("Failed to encode canvas"));
-          } else {
-            resolve(blob);
-          }
-        },
-        type,
-        quality,
-      );
-    } catch (e) {
-      reject(e);
-    }
-  });
+/**
+ * Captures what the map shows of the orthophoto as a JPEG, in the same pixel space as
+ * map.getPixelFromCoordinate. Other layers are hidden for the capture only, so they neither
+ * leak into the model input nor taint the canvas.
+ */
+async function captureOrthoView(map: Map, ortho: TileLayerWebGL | undefined): Promise<Blob | null> {
+  if (!ortho) return null;
+  const hidden = map
+    .getLayers()
+    .getArray()
+    .filter((layer) => layer !== ortho && layer.getVisible());
+  hidden.forEach((layer) => layer.setVisible(false));
+  map.renderSync();
+  const canvas = composeMapCanvas(map);
+  hidden.forEach((layer) => layer.setVisible(true));
+  map.renderSync();
+  if (!canvas) return null;
+  return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.92));
 }
 
-function composeCurrentMapCanvas(map: Map): HTMLCanvasElement | null {
+function composeMapCanvas(map: Map): HTMLCanvasElement | null {
   const target = map.getTargetElement();
-  if (!target) return null;
-  // Draw only the bottom-most map canvas (expected to be the ortho raster)
-  const canvasesAll = Array.from(target.querySelectorAll("canvas"));
-  const canvases = canvasesAll.length ? [canvasesAll[0]] : [];
-  if (!canvases.length) return null;
-
+  // The bottom-most canvas holds the orthophoto.
+  const source = target?.querySelector("canvas");
+  if (!target || !source || source.width === 0 || source.height === 0) return null;
   const rect = target.getBoundingClientRect();
   const composite = document.createElement("canvas");
   composite.width = Math.max(1, Math.round(rect.width));
   composite.height = Math.max(1, Math.round(rect.height));
   const ctx = composite.getContext("2d");
   if (!ctx) return null;
-
-  canvases.forEach((canvas: HTMLCanvasElement) => {
-    if (canvas.width > 0 && canvas.height > 0) {
-      ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, composite.width, composite.height);
-    }
-  });
-
+  ctx.drawImage(source, 0, 0, source.width, source.height, 0, 0, composite.width, composite.height);
   return composite;
 }
 
-function ensureSpinnerKeyframes() {
-  const id = "ai-pulse-keyframes";
-  if (document.getElementById(id)) return;
-  const style = document.createElement("style");
-  style.id = id;
-  style.textContent = `@keyframes aiPulse { 0% { transform: scale(0.9); opacity: 0.6; } 50% { transform: scale(1.08); opacity: 1; } 100% { transform: scale(0.9); opacity: 0.6; } }`;
-  document.head.appendChild(style);
-}
-
-// (intentionally left out) previously attempted layer-specific canvas detection
-
-type PixelPolygon = { type: "Polygon"; coordinates: number[][][] };
-type PixelFeature = { type: "Feature"; geometry: PixelPolygon; properties?: Record<string, unknown> };
-type PixelFeatureCollection = { type: "FeatureCollection"; features: PixelFeature[] };
-
-function convertPixelGeoJSONToMapFeatures(geojson: unknown, map: Map): Feature[] {
-  const created: Feature[] = [];
-  const collection = normalizeToFeatureCollection(geojson);
-  if (!collection) return created;
-  const sign = getYSign(collection);
-  for (const feature of collection.features) {
-    const geometry = feature.geometry;
-    if (!geometry || geometry.type !== "Polygon" || !Array.isArray(geometry.coordinates)) continue;
-    const rings = geometry.coordinates;
-    const transformedRings: number[][][] = [];
-    for (const ring of rings) {
-      const transformedRing: number[][] = [];
-      for (const coord of ring) {
-        const [x, y] = coord as [number, number];
-        const tx = x;
-        const ty = sign * y;
-        const mapCoord = map.getCoordinateFromPixel([tx, ty]);
-        if (mapCoord) transformedRing.push(mapCoord);
-      }
-      if (transformedRing.length > 2) transformedRings.push(transformedRing);
-    }
-    if (transformedRings.length > 0) {
-      const poly = new Polygon(transformedRings);
-      const f = new Feature(poly);
-      created.push(f);
-    }
-  }
-  return created;
-}
-
 export default useAISegmentation;
-
-// Remove overlay renderer (kept here for reference, but commented out)
-/*
-function drawPixelGeoJSONOnCanvas(
-  geojson: PixelFeatureCollection,
-  canvas: HTMLCanvasElement,
-  offsetX: number,
-  offsetY: number,
-) {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-
-  const sign = getYSign(geojson);
-
-  ctx.save();
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.strokeStyle = palette.state.hover;
-  ctx.lineWidth = 2;
-  ctx.fillStyle = "rgba(0,200,255,0.15)";
-
-  for (const feature of geojson.features) {
-    const geometry = feature.geometry;
-    if (!geometry || geometry.type !== "Polygon" || !Array.isArray(geometry.coordinates)) continue;
-    for (const ring of geometry.coordinates as number[][][]) {
-      ctx.beginPath();
-      let first = true;
-      for (const coord of ring) {
-        const [x, y] = coord as [number, number];
-        const sx = x - offsetX;
-        const sy = sign * y - offsetY;
-        if (first) {
-          ctx.moveTo(sx, sy);
-          first = false;
-        } else {
-          ctx.lineTo(sx, sy);
-        }
-      }
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-    }
-  }
-  ctx.restore();
-}
-*/
-
-function getYSign(fc: PixelFeatureCollection): 1 | -1 {
-  let neg = 0;
-  let pos = 0;
-  outer: for (const f of fc.features) {
-    const g = f.geometry;
-    if (!g || g.type !== "Polygon") continue;
-    for (const ring of g.coordinates as number[][][]) {
-      for (const c of ring) {
-        const y = c[1] as number;
-        if (y < 0) neg++;
-        else if (y > 0) pos++;
-        if (neg + pos > 200) break outer; // sample first ~200 points
-      }
-    }
-  }
-  return neg > pos ? -1 : 1;
-}
-
-function normalizeToFeatureCollection(raw: unknown): PixelFeatureCollection | null {
-  // Some responses wrap the segmentation under a 'segmentation' key
-  const maybe = raw as Record<string, unknown> | null | undefined;
-  const direct = maybe as Partial<PixelFeatureCollection> | null | undefined;
-  const nested = maybe && typeof maybe === "object" ? (maybe["segmentation"] as Partial<PixelFeatureCollection>) : null;
-  const fc = direct && direct.type === "FeatureCollection" ? direct : nested;
-  if (fc && fc.type === "FeatureCollection" && Array.isArray(fc.features)) return fc as PixelFeatureCollection;
-  return null;
-}
-
-function keepLargestPolygon(fc: PixelFeatureCollection): PixelFeatureCollection | null {
-  let best: PixelFeature | null = null;
-  let bestArea = -1;
-  for (const f of fc.features) {
-    const g = f.geometry;
-    if (!g || g.type !== "Polygon" || !Array.isArray(g.coordinates) || g.coordinates.length === 0) continue;
-    const ring = g.coordinates[0] as number[][];
-    const area = Math.abs(shoelaceArea(ring));
-    if (area > bestArea) {
-      bestArea = area;
-      best = f;
-    }
-  }
-  if (!best) return null;
-  return { type: "FeatureCollection", features: [best] } as PixelFeatureCollection;
-}
-
-function shoelaceArea(points: number[][]): number {
-  if (points.length < 3) return 0;
-  let sum = 0;
-  for (let i = 0; i < points.length; i++) {
-    const [x1, y1] = points[i] as [number, number];
-    const [x2, y2] = points[(i + 1) % points.length] as [number, number];
-    sum += x1 * y2 - x2 * y1;
-  }
-  return 0.5 * sum;
-}

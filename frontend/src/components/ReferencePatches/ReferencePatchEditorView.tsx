@@ -82,6 +82,7 @@ export default function ReferencePatchEditorView({
     getTargetVectorSource: () => editor.getOverlayLayer()?.getSource() || null,
     onBeforeAddFeatures: editor.saveHistorySnapshot, // Save history before AI adds features (for undo)
   });
+  const disableAI = ai.disable;
 
   const geoJson = useMemo(() => new GeoJSON(), []);
 
@@ -435,6 +436,7 @@ export default function ReferencePatchEditorView({
 
       // NOW clean up and exit editing mode
       // This ensures the reference geometry useEffect fires with the NEW patch data
+      disableAI(); // ends an AI refine session and unlocks the map
       editor.stopEditing();
       editor.getOverlayLayer()?.getSource()?.clear();
       setEditingMode(null);
@@ -450,6 +452,7 @@ export default function ReferencePatchEditorView({
     selectedPatchId,
     allPatches,
     editor,
+    disableAI,
     geoJson,
     saveGeometries,
     dataset.id,
@@ -460,11 +463,12 @@ export default function ReferencePatchEditorView({
 
   // Handle cancel editing
   const handleCancelEditing = useCallback(() => {
+    disableAI(); // ends an AI refine session and unlocks the map
     editor.stopEditing();
     editor.getOverlayLayer()?.getSource()?.clear();
     setEditingMode(null);
     message.info("Editing cancelled - no changes saved");
-  }, [editor]);
+  }, [editor, disableAI]);
 
   // Control overlay visibility based on layer selection during editing
   useEffect(() => {
@@ -786,6 +790,7 @@ export default function ReferencePatchEditorView({
             onMerge={editor.mergeSelected}
             onClip={editor.clipSelected}
             onToggleAI={() => (ai.isActive ? ai.disable() : ai.enable())}
+            onFindTrees={() => void ai.findConcept("tree")}
             onDeleteSelected={editor.deleteSelected}
             onUndo={editor.undo}
             canUndo={editor.canUndo}

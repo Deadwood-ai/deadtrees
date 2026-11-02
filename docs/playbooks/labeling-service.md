@@ -39,10 +39,11 @@ The tunnel key `~/.ssh/deadtrees-sam-tunnel` is used for nothing else. On data2
 its `authorized_keys` line for the no-shell account `sam-tunnel` reads:
 
 ```text
-restrict,port-forwarding,permitlisten="127.0.0.1:18731",permitopen="none",command="/usr/sbin/nologin" ssh-ed25519 <key> deadtrees-sam-tunnel
+restrict,port-forwarding,permitlisten="127.0.0.1:18731",command="/usr/sbin/nologin" ssh-ed25519 <key> deadtrees-sam-tunnel
 ```
 
-`permitlisten` only limits remote forwards, so sshd also gets a rule for this
+`permitlisten` only limits remote forwards, and `permitopen="none"` is not valid in
+`authorized_keys` (sshd then rejects the whole key), so sshd also gets a rule for this
 account in `/etc/ssh/sshd_config.d/deadtrees-sam-tunnel.conf`:
 
 ```text
