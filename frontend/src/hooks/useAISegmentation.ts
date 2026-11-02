@@ -62,6 +62,8 @@ export const useAISegmentation = ({
   const sessionRef = useRef<Session | null>(null);
   const resultSourceRef = useRef<VectorSource | null>(null);
   const ownLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  // The dashed box lives on its own layer so an editor save never picks it up.
+  const boxLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const clickKeyRef = useRef<((e: MapClick) => void) | null>(null);
   // A click while a refinement is running would race it; such clicks are ignored.
   const busyRef = useRef(false);
@@ -99,7 +101,7 @@ export const useAISegmentation = ({
       map.un("click", clickKeyRef.current);
       clickKeyRef.current = null;
     }
-    if (session) resultSourceRef.current?.removeFeature(session.boxFeature);
+    if (session) boxLayerRef.current?.getSource()?.removeFeature(session.boxFeature);
     if (map) setNavigationLocked(map, false);
   }, [mapRef, setNavigationLocked]);
 
@@ -154,9 +156,15 @@ export const useAISegmentation = ({
     const [x1, y1] = map.getPixelFromCoordinate([minX, maxY]);
     const [x2, y2] = map.getPixelFromCoordinate([maxX, minY]);
     const boxFeature = new Feature(boxGeometry);
-    boxFeature.set("dt_role", "bbox");
-    boxFeature.setStyle(new Style({ stroke: new Stroke({ color: palette.state.hover, width: 2, lineDash: [6, 4] }) }));
-    resultSource(map).addFeature(boxFeature);
+    if (!boxLayerRef.current) {
+      boxLayerRef.current = new VectorLayer<VectorSource>({
+        source: new VectorSource(),
+        style: new Style({ stroke: new Stroke({ color: palette.state.hover, width: 2, lineDash: [6, 4] }) }),
+        className: "ai-segmentation-box",
+      });
+      map.addLayer(boxLayerRef.current);
+    }
+    boxLayerRef.current.getSource()!.addFeature(boxFeature);
 
     const session: Session = {
       image,
@@ -177,7 +185,7 @@ export const useAISegmentation = ({
     clickKeyRef.current = refine;
     map.on("click", refine);
     message.info(REFINE_HINT);
-  }, [disable, getOrthoLayer, refine, resultSource, runSession, setNavigationLocked]);
+  }, [disable, getOrthoLayer, refine, runSession, setNavigationLocked]);
 
   const enable = useCallback(() => {
     const map = mapRef.current;
@@ -224,9 +232,11 @@ export const useAISegmentation = ({
   useEffect(() => {
     return () => {
       disable();
-      const layer = ownLayerRef.current;
-      layer?.getMapInternal()?.removeLayer(layer);
-      ownLayerRef.current = null;
+      for (const ref of [ownLayerRef, boxLayerRef]) {
+        const layer = ref.current;
+        layer?.getMapInternal()?.removeLayer(layer);
+        ref.current = null;
+      }
     };
   }, [disable]);
 
