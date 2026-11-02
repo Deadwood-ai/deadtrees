@@ -400,7 +400,17 @@ test.describe("auditor local write flows", () => {
     await page.mouse.click(bounds.x + bounds.width * 0.5, bounds.y + bounds.height * 0.5);
     await expect.poll(() => sentPoints.length).toBe(1);
     expect(JSON.parse(sentPoints[0])).toHaveLength(1);
-    // Cancelling while AI is still on ends the session: further map clicks reach no model.
+    // Undo removes the outline and ends AI mode: later map clicks reach no model.
+    await expect(page.getByRole("button", { name: /Finish AI \(S\)/ })).toBeVisible();
+    await undo.click();
+    await expect(page.getByRole("button", { name: /Finish AI/ })).toHaveCount(0);
+    await page.mouse.click(bounds.x + bounds.width * 0.45, bounds.y + bounds.height * 0.45);
+    await page.waitForTimeout(500);
+    expect(sentPoints).toHaveLength(1);
+
+    // Cancelling while AI is on ends the session too.
+    await drawAiBox();
+    await expect(page.getByRole("button", { name: /Finish AI \(S\)/ })).toBeVisible();
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(page.getByText("Editing deadwood cover", { exact: true })).toBeHidden();
     await page.mouse.click(bounds.x + bounds.width * 0.45, bounds.y + bounds.height * 0.45);

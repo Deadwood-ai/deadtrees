@@ -6,6 +6,7 @@ import VectorSource from "ol/source/Vector.js";
 import VectorLayer from "ol/layer/Vector.js";
 import { Style, Fill, Stroke } from "ol/style";
 import Feature from "ol/Feature.js";
+import { unByKey } from "ol/Observable.js";
 import Polygon from "ol/geom/Polygon.js";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { message } from "antd";
@@ -38,9 +39,11 @@ interface UseAISegmentationReturn {
 interface Session extends Required<SamPrompt> {
   features: Feature[];
   boxFeature: Feature;
+  /** Stops watching the editor layer for the outline being removed (Undo, Delete, Cancel). */
+  unwatch?: () => void;
 }
 
-const REFINE_HINT = "Click to add to the outline, Alt-click to remove. Press S when it fits.";
+const REFINE_HINT = "Click to add to the outline, Alt-click to remove. Press S or Finish AI when it fits.";
 
 /**
  * AI segmentation for the polygon editors.
@@ -68,6 +71,8 @@ export const useAISegmentation = ({
   const clickKeyRef = useRef<((e: MapClick) => void) | null>(null);
   // A click while a refinement is running would race it; such clicks are ignored.
   const busyRef = useRef(false);
+  // Set while the hook swaps its own outline, so that removal does not end the session.
+  const replacingRef = useRef(false);
 
   const canUse = useMemo(() => !!getOrthoLayer(), [getOrthoLayer]);
 
@@ -109,6 +114,7 @@ export const useAISegmentation = ({
       map.un("click", clickKeyRef.current);
       clickKeyRef.current = null;
     }
+    session?.unwatch?.();
     if (session) boxLayerRef.current?.getSource()?.removeFeature(session.boxFeature);
     if (map) setNavigationLocked(map, false);
   }, [mapRef, setNavigationLocked]);
@@ -131,7 +137,9 @@ export const useAISegmentation = ({
       if (sessionRef.current !== session) return; // ended while waiting
       const source = resultSource(map);
       if (session.features.length === 0 && outline.length) onBeforeAddFeatures?.();
+      replacingRef.current = true;
       session.features.forEach((f) => source.removeFeature(f));
+      replacingRef.current = false;
       outline.forEach((f) => f.set("is_new", true));
       source.addFeatures(outline);
       session.features = outline;
@@ -190,10 +198,18 @@ export const useAISegmentation = ({
       disable();
       return;
     }
+    // Undo, Delete or Cancel removing the outline ends the session and unlocks the map.
+    const source = resultSource(map);
+    const onRemoved = (e: { feature?: Feature }) => {
+      if (!replacingRef.current && (!e.feature || session.features.includes(e.feature))) disable();
+    };
+    const removeKey = source.on("removefeature", onRemoved);
+    const clearKey = source.on("clear", onRemoved);
+    session.unwatch = () => unByKey([removeKey, clearKey]);
     clickKeyRef.current = refine;
     map.on("click", refine);
     message.info(REFINE_HINT);
-  }, [disable, getOrthoLayer, refine, runSession, setNavigationLocked]);
+  }, [disable, getOrthoLayer, refine, resultSource, runSession, setNavigationLocked]);
 
   const enable = useCallback(() => {
     const map = mapRef.current;
