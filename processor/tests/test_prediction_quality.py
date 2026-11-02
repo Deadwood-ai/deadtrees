@@ -191,3 +191,90 @@ def test_rule_rows_carry_the_dataset_verdict_per_layer():
 		('deadwood', 'unsure', 'rule', None), ('forest_cover', 'major', 'rule', None)
 	]
 	assert rows[1]['prompt_version'] == rule.RULE_VERSION and rows[1]['label_id'] == 12
+
+
+class _FakeTable:
+	"""Just enough of the Supabase query builder to record what the writer sends."""
+
+	def __init__(self, db, name):
+		self.db, self.name, self.op, self.payload, self.filters = db, name, None, None, []
+
+	def select(self, *_):
+		self.op = 'select'
+		return self
+
+	def insert(self, payload):
+		self.op, self.payload = 'insert', payload
+		return self
+
+	def upsert(self, payload, **_):
+		self.op, self.payload = 'upsert', payload
+		return self
+
+	def update(self, payload):
+		self.op, self.payload = 'update', payload
+		return self
+
+	def eq(self, column, value):
+		self.filters.append((column, value))
+		return self
+
+	def execute(self):
+		from types import SimpleNamespace
+
+		rows = self.db.setdefault(self.name, [])
+		if self.op == 'select':
+			return SimpleNamespace(data=[r for r in rows if all(r.get(c) == v for c, v in self.filters)])
+		if self.op in ('insert', 'upsert'):
+			batch = self.payload if isinstance(self.payload, list) else [self.payload]
+			for r in batch:
+				rows.append({'id': len(rows) + 1, **r})
+			return SimpleNamespace(data=rows[-len(batch):])
+		self.db.setdefault('updates', []).append((self.name, self.payload, self.filters))
+		return SimpleNamespace(data=[])
+
+
+class _FakeClient:
+	def __init__(self):
+		self.db = {}
+
+	def schema(self, name):
+		assert name == 'audit'
+		return self
+
+	def table(self, name):
+		return _FakeTable(self.db, name)
+
+
+def test_write_stores_crops_once_and_links_every_row():
+	from processor.src.prediction_quality_v1 import store
+	from processor.src.prediction_quality_v1.check import CheckResult, CropResult
+
+	mem = _ortho()
+	square = (X0 + 5, Y0 + 5, X0 + 5 + tiles.TILE_M, Y0 + 5 + tiles.TILE_M)
+	with mem.open() as src:
+		crop = render_crop(src, EPSG, square, {'deadwood': [], 'forest': []})
+	t = _tile(7, dw=0.1, fc=0.5)
+	t.sets, t.weight = ['exclude'], None
+	answers = [judge.parse('luna-medium', _answer())]
+	result = CheckResult(
+		dataset_id=42, epsg=EPSG, crops=[CropResult(tile=t, crop=crop, answers=answers)],
+		verdicts={'deadwood': {'verdict': 'ok'}, 'forest': {'verdict': None}}, tiles_total=1, seconds=1,
+	)
+	client, stored = _FakeClient(), {}
+	sha = 'a' * 64
+	kw = dict(ortho_sha256=sha, label_ids={'deadwood': 11, 'forest': 12}, footprint=lambda tile: {}, put_image=stored.__setitem__)
+	out = store.write(client, 5, result, **kw)
+	assert out == {'crops': 1, 'assessments': 5}  # gate + 2 layers + 2 rule rows
+	assert len(stored) == 3 and all(p.startswith(f'audit/42/{sha[:16]}/crop-1/') for p in stored)
+	assert {r['run_id'] for r in client.db['assessments']} == {5}
+	assert {r['crop_id'] for r in client.db['assessments'] if r['assessor_kind'] == 'model'} == {1}
+	# A second run on the same ortho reuses the crop and adds its new set.
+	t.sets = ['exclude', 'training']
+	t.weight = 0.5
+	store.write(client, 6, result, **kw)
+	assert len(client.db['crops']) == 1
+	crop_updates = [u for u in client.db['updates'] if u[0] == 'crops']
+	assert len(crop_updates) == 1 and crop_updates[0][2] == [('id', 1)]
+	assert crop_updates[0][1]['crop_sets'] == ['exclude', 'training']
+	assert set(crop_updates[0][1]['selection']) == {'exclude', 'training'}
