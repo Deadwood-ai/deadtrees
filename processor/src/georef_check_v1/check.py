@@ -41,7 +41,7 @@ def _to_lonlat(pairs: list[list[float]], grid) -> list[list[float]]:
 	p = np.asarray(pairs)
 	lon_a, lat_a = grid.lonlat(p[:, :2])
 	lon_b, lat_b = grid.lonlat(p[:, 2:])
-	return np.round(np.column_stack((lon_a, lat_a, lon_b, lat_b)), 7).tolist()
+	return np.round(np.column_stack((lon_a, lat_a, lon_b, lat_b, p[:, 4:])), 7).tolist()
 
 
 def run_georef_check(cog_path: str, aoi_4326: dict | None, flight: date | None) -> GeorefCheck:

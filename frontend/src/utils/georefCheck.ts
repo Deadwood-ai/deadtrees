@@ -122,13 +122,32 @@ export function summarizeGeorefCheck(check: IGeorefCheck): GeorefSummary {
   }
   const deciding = orderedReferences(check).filter((r) => r.decides);
   const names = deciding.slice(0, 2).map((r) => describeReference(check, r.provider));
-  const more = deciding.length > 2 ? ` and ${deciding.length - 2} more` : "";
+  const on =
+    deciding.length === 1
+      ? `${names[0]} only`
+      : deciding.length === 2
+        ? names.join(" and ")
+        : `${names.join(", ")} and ${deciding.length - 2} more`;
   const strength = check.evidence_level === "strong" ? "Strong" : "Moderate";
   return {
     tone: check.decision === "good" ? "success" : "error",
     verdict: `${check.decision === "good" ? "Good" : "Poor"}${check.p90_m === null ? "" : `, ${check.p90_m.toFixed(1)} m off`}`,
-    detail: `${strength} evidence: 90% of the area is within this offset of ${names.join(", ")}${more}.`,
+    detail: `${strength} evidence: ${check.p90_m === null ? "" : `${check.p90_m.toFixed(1)} m off on 90% of the area `}(${on}).`,
   };
+}
+
+/** Tile URL of a viewer template for one XYZ tile: {z}/{x}/{y}, {-y} (TMS row
+ * order), {zz} (two-digit zoom) and {q} (Bing quadkey). */
+export function fillTileTemplate(template: string, z: number, x: number, y: number): string {
+  let quadkey = "";
+  for (let i = z; i > 0; i--) quadkey += String(((x >> (i - 1)) & 1) | (((y >> (i - 1)) & 1) << 1));
+  return template
+    .replace("{-y}", String(2 ** z - 1 - y))
+    .replace("{zz}", String(z).padStart(2, "0"))
+    .replace("{q}", quadkey)
+    .replace("{z}", String(z))
+    .replace("{x}", String(x))
+    .replace("{y}", String(y));
 }
 
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);

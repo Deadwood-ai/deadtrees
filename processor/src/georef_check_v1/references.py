@@ -258,7 +258,8 @@ def _viewer(provider: Provider) -> dict | None:
 	if provider.key_setting or provider.kind == 'arcgis_export' or provider.wms_crs != 'EPSG:3857':
 		return None
 	if provider.kind == 'xyz':
-		if any(t in provider.url for t in ('{-y}', '{zz}', '{q}')) or provider.tile_crs != 'EPSG:3857':
+		# the viewer fills {-y} (TMS rows), {zz} (two-digit zoom) and {q} (Bing quadkey) too
+		if provider.tile_crs != 'EPSG:3857':
 			return None
 		return {'kind': 'xyz', 'url': provider.url, 'max_zoom': provider.max_zoom, 'attribution': provider.attribution}
 	return {
