@@ -99,6 +99,16 @@ def person_row(db, auditor, dataset, crop, verdict, run=None, layer='deadwood'):
 	as_admin(db)
 
 
+def create_off_grid_crop(db, dataset):
+	"""A DT-1272 gold crop: centred on a prediction, native resolution, no CLIP grid window."""
+	as_admin(db)
+	return db.execute(
+		'INSERT INTO public.audit_crops(dataset_id,ortho_sha256,crop_sets,geometry,mpp,size_px,selection) '
+		'VALUES (%s,%s,\'{benchmark}\',%s,0.036,1400,\'{"benchmark": {"picker": "dt1272-gold"}}\') RETURNING id',
+		(dataset, SHA, SQUARE),
+	).fetchone()[0]
+
+
 def count(db, table, dataset):
 	return db.execute(f'SELECT count(*) FROM public.{table} WHERE dataset_id=%s', (dataset,)).fetchone()[0]
 
@@ -418,7 +428,9 @@ def test_api_roles_get_only_the_privileges_the_policies_use(db):
 		'audit_crops',
 		'audit_images',
 		'audit_assessments',
-		'audit_benchmark_pins',
+		'audit_benchmarks',
+		'audit_benchmark_members',
+		'audit_benchmark_scores',
 		'audit_latest_assessments',
 		'audit_disagreements',
 	)
@@ -437,6 +449,9 @@ def test_api_roles_get_only_the_privileges_the_policies_use(db):
 		'audit_crops': {'INSERT'},
 		'audit_images': {'INSERT'},
 		'audit_assessments': {'INSERT'},
+		'audit_benchmarks': {'INSERT', 'DELETE'},
+		'audit_benchmark_members': {'INSERT', 'DELETE'},
+		'audit_benchmark_scores': {'INSERT'},
 	}
 	assert granted == {('authenticated', t): {'SELECT'} | writes.get(t, set()) for t in tables}
 	# the remaining updates are column grants: run state, crop sets, version mode
@@ -447,25 +462,127 @@ def test_api_roles_get_only_the_privileges_the_policies_use(db):
 	).fetchone() == (False, True, False)
 
 
-def test_benchmark_split_is_fixed_by_hash_or_pin(db):
-	dataset = create_dataset(db, create_user(db))
-	auditor = create_user(db, can_audit=True)
+def test_the_hash_split_holds_one_in_five_out_and_never_moves(db):
 	assert db.execute(
 		"SELECT count(*) FILTER (WHERE public.audit_benchmark_split(g)='holdout') FROM generate_series(1,5000) g"
 	).fetchone()[0] in range(900, 1100)
+	assert db.execute('SELECT public.audit_benchmark_split(14747), public.audit_benchmark_split(14747)').fetchone() in {
+		('dev', 'dev'),
+		('holdout', 'holdout'),
+	}
+
+
+def create_benchmark(db, operator, name='pq-gold-dt1272'):
+	act_as(db, operator)
+	benchmark = db.execute(
+		"INSERT INTO public.audit_benchmarks(check_key,name,version) VALUES ('prediction_quality',%s,'v1') RETURNING id",
+		(name,),
+	).fetchone()[0]
+	as_admin(db)
+	return benchmark
+
+
+def test_operators_freeze_a_benchmark_and_its_members_stay_put(db):
+	operator, auditor = create_operator(db), create_user(db, can_audit=True)
+	dataset, other, late = (create_dataset(db, create_user(db)) for _ in range(3))
+	gold = create_off_grid_crop(db, dataset)
+	benchmark = create_benchmark(db, operator)
 	hashed = db.execute('SELECT public.audit_benchmark_split(%s)', (dataset,)).fetchone()[0]
-	pinned = 'dev' if hashed == 'holdout' else 'holdout'
-	db.execute(
-		"INSERT INTO public.audit_benchmark_pins(dataset_id,split,reason) VALUES (%s,%s,'dt-1272-gold')",
-		(dataset, pinned),
-	)
+	frozen_earlier = 'dev' if hashed == 'holdout' else 'holdout'
+
 	act_as(db, auditor)
-	assert db.execute('SELECT public.audit_benchmark_split(%s)', (dataset,)).fetchone() == (pinned,)
 	with pytest.raises(psycopg.errors.InsufficientPrivilege), db.transaction():
-		db.execute("INSERT INTO public.audit_benchmark_pins(dataset_id,split,reason) VALUES (%s,'dev','x')", (dataset,))
+		db.execute(
+			'INSERT INTO public.audit_benchmark_members(benchmark_id,dataset_id) VALUES (%s,%s)', (benchmark, other)
+		)
+	act_as(db, operator)
+	# the split defaults to the hash; a split frozen earlier (DT-1272) is given explicitly
+	db.execute('INSERT INTO public.audit_benchmark_members(benchmark_id,dataset_id) VALUES (%s,%s)', (benchmark, other))
+	db.execute(
+		'INSERT INTO public.audit_benchmark_members(benchmark_id,dataset_id,crop_id,split) VALUES (%s,%s,%s,%s)',
+		(benchmark, dataset, gold, frozen_earlier),
+	)
+	assert db.execute(
+		'SELECT split FROM public.audit_benchmark_members WHERE benchmark_id=%s AND dataset_id=%s', (benchmark, other)
+	).fetchone() == (db.execute('SELECT public.audit_benchmark_split(%s)', (other,)).fetchone()[0],)
+	with pytest.raises(psycopg.errors.CheckViolation), db.transaction():
+		# a dataset never sits on both sides
+		db.execute(
+			'INSERT INTO public.audit_benchmark_members(benchmark_id,dataset_id,split) VALUES (%s,%s,%s)',
+			(benchmark, dataset, hashed),
+		)
+	version_id = register_version(db)
+	act_as(db, operator)
+	with pytest.raises(psycopg.errors.ObjectNotInPrerequisiteState), db.transaction():
+		db.execute(
+			'INSERT INTO public.audit_benchmark_scores(benchmark_id,check_key,check_version_id,split,metrics,scorer) '
+			"VALUES (%s,'prediction_quality',%s,'holdout','{}','eval_gold.py/v1')",
+			(benchmark, version_id),
+		)
+	db.execute('UPDATE public.audit_benchmarks SET frozen_at=now() WHERE id=%s', (benchmark,))
+	for statement, args in (
+		('INSERT INTO public.audit_benchmark_members(benchmark_id,dataset_id) VALUES (%s,%s)', (benchmark, late)),
+		('DELETE FROM public.audit_benchmark_members WHERE benchmark_id=%s AND dataset_id=%s', (benchmark, other)),
+		("UPDATE public.audit_benchmarks SET description='bigger' WHERE id=%s", (benchmark,)),
+		('DELETE FROM public.audit_benchmarks WHERE id=%s', (benchmark,)),
+	):
+		with pytest.raises(psycopg.errors.ObjectNotInPrerequisiteState), db.transaction():
+			db.execute(statement, args)
+
+	# the worker records scores on the frozen benchmark; they never change
+	as_worker(db)
+	run = db.execute(
+		'INSERT INTO public.audit_check_runs(check_key,check_version_id,dataset_id,queue) '
+		"VALUES ('prediction_quality',%s,%s,'benchmark') RETURNING id",
+		(version_id, dataset),
+	).fetchone()[0]
+	db.execute(
+		'INSERT INTO public.audit_benchmark_scores(benchmark_id,check_key,check_version_id,split,metrics,run_ids,scorer) '
+		"VALUES (%s,'prediction_quality',%s,'holdout','{\"n\": 2, \"auc\": 0.93}',%s,'eval_gold.py/v1')",
+		(benchmark, version_id, [run]),
+	)
+	with pytest.raises(psycopg.errors.CheckViolation), db.transaction():
+		# a benchmark run never moves the current pointer
+		db.execute(
+			"INSERT INTO public.audit_current_runs(dataset_id,check_key,run_id) VALUES (%s,'prediction_quality',%s)",
+			(dataset, run),
+		)
+	with pytest.raises(psycopg.errors.ForeignKeyViolation), db.transaction():
+		# a score belongs to a version of the benchmark's own check
+		db.execute(
+			'INSERT INTO public.audit_benchmark_scores(benchmark_id,check_key,check_version_id,split,metrics,scorer) '
+			"VALUES (%s,'georef',%s,'holdout','{}','eval_gold.py/v1')",
+			(benchmark, version_id),
+		)
 	as_admin(db)
 	with pytest.raises(psycopg.errors.ObjectNotInPrerequisiteState), db.transaction():
-		db.execute('UPDATE public.audit_benchmark_pins SET split=%s WHERE dataset_id=%s', (hashed, dataset))
+		db.execute("UPDATE public.audit_benchmark_scores SET notes='x' WHERE benchmark_id=%s", (benchmark,))
+	# a deleted dataset still leaves a frozen benchmark
+	db.execute('DELETE FROM public.v2_datasets WHERE id=%s', (other,))
+	assert db.execute(
+		'SELECT count(*) FROM public.audit_benchmark_members WHERE benchmark_id=%s', (benchmark,)
+	).fetchone() == (1,)
+
+
+def test_crops_made_off_the_grid_keep_their_own_footprint_and_size(db):
+	dataset = create_dataset(db, create_user(db))
+	crop = create_off_grid_crop(db, dataset)
+	as_worker(db)
+	with pytest.raises(psycopg.errors.UniqueViolation), db.transaction():
+		create_off_grid_crop(db, dataset)
+	as_worker(db)
+	with pytest.raises(psycopg.errors.CheckViolation), db.transaction():
+		db.execute(
+			'INSERT INTO public.audit_crops(dataset_id,ortho_sha256,crop_sets,pixel_x0,geometry,mpp,size_px) '
+			"VALUES (%s,%s,'{benchmark}',5,%s,0.036,1400)",
+			(dataset, SHA, SQUARE),
+		)
+	as_admin(db)
+	assert db.execute('SELECT mpp,size_px,pixel_x0 FROM public.audit_crops WHERE id=%s', (crop,)).fetchone() == (
+		pytest.approx(0.036),
+		1400,
+		None,
+	)
 
 
 def test_a_check_owned_definer_function_can_store_a_run_in_one_call(db):
@@ -513,7 +630,9 @@ def test_analyst_reads_every_audit_table_and_view_without_writing(db):
 		'audit_crops',
 		'audit_images',
 		'audit_assessments',
-		'audit_benchmark_pins',
+		'audit_benchmarks',
+		'audit_benchmark_members',
+		'audit_benchmark_scores',
 		'audit_latest_assessments',
 		'audit_disagreements',
 	):
@@ -527,10 +646,13 @@ def test_analyst_reads_every_audit_table_and_view_without_writing(db):
 DOWN = """
 DROP VIEW public.audit_disagreements;
 DROP VIEW public.audit_latest_assessments;
-DROP TABLE public.audit_assessments, public.audit_images, public.audit_crops, public.audit_current_runs,
-	public.audit_check_runs, public.audit_check_versions, public.audit_checks, public.audit_benchmark_pins;
+DROP TABLE public.audit_benchmark_scores, public.audit_benchmark_members, public.audit_benchmarks,
+	public.audit_assessments, public.audit_images, public.audit_crops, public.audit_current_runs,
+	public.audit_check_runs, public.audit_check_versions, public.audit_checks;
 DROP FUNCTION public.audit_benchmark_split(bigint), internal.can_read_audit_checks(), internal.is_audit_worker(),
-	internal.reject_audit_row_update(), internal.stamp_audit_check_version(), internal.append_only_audit_crop_sets();
+	internal.reject_audit_row_update(), internal.stamp_audit_check_version(), internal.append_only_audit_crop_sets(),
+	internal.reject_benchmark_current_run(), internal.guard_audit_benchmark(),
+	internal.guard_audit_benchmark_member(), internal.require_frozen_audit_benchmark();
 DROP TYPE public.audit_check_mode, public.audit_run_status, public.audit_assessor_kind, public.audit_verdict;
 """
 

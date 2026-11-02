@@ -18,12 +18,14 @@ audit_checks -> audit_check_versions -> audit_check_runs -> evidence -> audit_as
 |---|---|---|
 | `audit_checks` | check (`dataset_evaluation`, `georef`, `acquisition_date`, `prediction_quality`) | migrations |
 | `audit_check_versions` | check version, with `mode`, `is_active` and free-form `config` | worker registers; operators switch mode and active version |
-| `audit_check_runs` | run of a version on a dataset; every run is kept | worker |
+| `audit_check_runs` | run of a version on a dataset; every run is kept; queue `upload`, `backfill`, `manual` or `benchmark` | worker |
 | `audit_current_runs` | dataset and check: the run whose results count | worker |
-| `audit_crops` | window of one ortho version (by `ortho_sha256`) on the 10 cm CLIP grid, in one or more crop sets | worker; only `crop_sets` and `selection` grow |
+| `audit_crops` | area of one ortho version (by `ortho_sha256`): a window on the 10 cm CLIP grid, or a footprint only for crops made off the grid (DT-1272 gold); in one or more crop sets | worker; only `crop_sets` and `selection` grow |
 | `audit_images` | stored image a check judged: raw crop per ortho, overlay per prediction label, overview and thumbnail per ortho | worker |
 | `audit_assessments` | assessor, target (crop or dataset) and layer; append-only | worker (model and rule rows), auditors (their own person rows) |
-| `audit_benchmark_pins` | dataset whose dev/holdout split was frozen earlier | service role (imports) |
+| `audit_benchmarks` | named, versioned set of targets for one check; frozen once final | operators |
+| `audit_benchmark_members` | crop or dataset in a benchmark, with its `dev` or `holdout` split | operators, until frozen |
+| `audit_benchmark_scores` | scoring of a check version on a frozen benchmark; append-only | worker, operators |
 
 Modes per version: `review_all` (default for every new version), `review_uncertain`,
 `auto_apply`. Only an operator (`can_operate`) changes the mode or the active version,
@@ -66,6 +68,24 @@ version.
   imported answer differs from the current models (`legacy_and_models_disagree`), so
   that dataset gets an early look.
 
+## Benchmarks
+
+A benchmark fixes which targets a check is scored on; truth stays in
+`audit_assessments` (native person rows, `imported_from is null`).
+
+1. An operator creates a benchmark (e.g. `pq-gold-dt1272` v1) and adds members. A
+   member's split defaults to `audit_benchmark_split(dataset_id)`, a fixed hash of the
+   id with 1 in 5 held out; a set frozen earlier (the DT-1272 gold split) gives its own.
+   All members from one dataset share one split.
+2. Freezing (`frozen_at`) makes the members and the benchmark final; a bigger set is a
+   new version. Only a deleted dataset or crop still takes its members along.
+3. A candidate version runs on the members in the `benchmark` queue. Benchmark runs
+   stay out of the production queues and cost caps and never become the current run.
+4. The check's scorer compares the candidate's rows with the truth rows and records
+   the result in `audit_benchmark_scores` (split, metrics such as n, AUC, catch rate,
+   false exclude rate, the runs used, scorer and version). Tuning uses `dev`;
+   promotion uses `holdout` only.
+
 ## How a check plugs in
 
 1. Register a version (the worker inserts it as `review_all`, inactive).
@@ -83,9 +103,8 @@ fails them for that reason.
 
 Auditors, operators, the audit worker (the processor account) and the analyst role
 read everything. Dataset owners and the public see nothing, so model results stay
-with auditors. `audit_benchmark_split(dataset_id)` returns `dev` or `holdout`: a pin
-if one exists, else a fixed hash of the id (1 in 5 held out). The hash rule must never
-change.
+with auditors. Operators define benchmarks; the worker and operators record scores.
+The hash rule in `audit_benchmark_split` must never change.
 
 ## Not yet
 
