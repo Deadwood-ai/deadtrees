@@ -462,6 +462,61 @@ test.describe("auditor local write flows", () => {
 
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
   });
+
+  test("area tools add an area and AI finds in an area, and both save as corrections", async ({ page }) => {
+    await page.route("**/concepts", async (route) => {
+      // Two outlines in the pixel space of the crop the editor sent.
+      const square = (x: number, y: number) => [[x, -y], [x + 40, -y], [x + 40, -y - 40], [x, -y - 40], [x, -y]];
+      await route.fulfill({
+        json: {
+          type: "FeatureCollection",
+          features: [
+            { type: "Feature", properties: { score: 0.9 }, geometry: { type: "Polygon", coordinates: [square(10, 10)] } },
+            { type: "Feature", properties: { score: 0.6 }, geometry: { type: "Polygon", coordinates: [square(80, 80)] } },
+          ],
+        },
+      });
+    });
+    const addsBefore = await countCorrections("add");
+
+    await installAuditorSession(page);
+    await page.goto(`/dataset-audit/${datasetId}`);
+    await dismissCookieBanner(page);
+    const continueHere = page.getByRole("button", { name: "Continue here" });
+    const editDeadwood = page.getByRole("button", { name: "Edit deadwood cover" });
+    await expect(editDeadwood.or(continueHere).first()).toBeVisible({ timeout: 20_000 });
+    if (await continueHere.isVisible()) await continueHere.click();
+    await editDeadwood.click();
+    await expect(page.getByText("Editing deadwood cover", { exact: true })).toBeVisible();
+
+    const bounds = (await page.getByTestId("dataset-audit-map").boundingBox())!;
+    const lasso = async (cx: number, cy: number, r: number) => {
+      await page.mouse.move(cx + r, cy);
+      await page.mouse.down();
+      for (let a = 0; a <= 2 * Math.PI + 0.01; a += Math.PI / 12) {
+        await page.mouse.move(cx + r * Math.cos(a), cy + r * Math.sin(a));
+      }
+      await page.mouse.up();
+    };
+
+    // Add area: drag a lasso; it becomes a polygon of this layer.
+    await page.keyboard.press("q");
+    await lasso(bounds.x + bounds.width * 0.35, bounds.y + bounds.height * 0.5, 60);
+    await expect(page.getByRole("button", { name: /Undo/ })).toBeEnabled();
+
+    // Find in area: custom prompt, preview, then Enter adds the candidates.
+    await page.getByLabel("Text to find in area").fill("dead tree");
+    await page.getByRole("button", { name: /Find in area/ }).click();
+    await lasso(bounds.x + bounds.width * 0.65, bounds.y + bounds.height * 0.5, 90);
+    // The second outline lies outside the drawn area and is clipped away.
+    await expect(page.getByText("1 found (best of 2)", { exact: false })).toBeVisible();
+    await page.keyboard.press("Enter");
+    await expect(page.getByText(/found \(best of/)).toBeHidden();
+
+    await page.getByRole("button", { name: /Save/ }).click();
+    await expect(page.getByText("Editing deadwood cover", { exact: true })).toBeHidden({ timeout: 15_000 });
+    await expect.poll(() => countCorrections("add")).toBeGreaterThanOrEqual(addsBefore + 2);
+  });
 });
 
 async function expectLocalService(url: string, name: string) {
@@ -710,6 +765,16 @@ async function drawAuditAoi(page: Page) {
   await page.mouse.click(points[1].x, points[1].y);
   await page.mouse.click(points[2].x, points[2].y);
   await page.mouse.dblclick(points[3].x, points[3].y);
+}
+
+async function countCorrections(operation: string): Promise<number> {
+  const { count, error } = await adminClient
+    .from("v2_geometry_corrections")
+    .select("id", { count: "exact", head: true })
+    .eq("dataset_id", datasetId)
+    .eq("operation", operation);
+  expect(error).toBeNull();
+  return count ?? 0;
 }
 
 async function expectManualCorrectionSaved(
@@ -965,6 +1030,7 @@ async function cleanupDataset() {
   await deleteRows("dataset_audit_locks", "dataset_id", datasetId);
   await deleteRows("dataset_audit", "dataset_id", datasetId);
   await deleteRows("v2_aois", "dataset_id", datasetId);
+  await deleteRows("v2_geometry_corrections", "dataset_id", datasetId);
   await deleteRows("v2_labels", "dataset_id", datasetId);
   await deleteRows("v2_cogs", "dataset_id", datasetId);
   await deleteRows("v2_thumbnails", "dataset_id", datasetId);
