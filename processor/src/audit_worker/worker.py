@@ -29,7 +29,9 @@ from typing import Any, Callable
 from . import models, runs
 
 # check key -> handler module; each check's PR adds its line
-HANDLERS: dict[str, str] = {}
+HANDLERS: dict[str, str] = {
+	'dataset_evaluation': 'processor.src.dataset_evaluation_v1.handler',
+}
 STATUS_FILE = Path(
 	os.environ.get('DEADTREES_AUDIT_WORKER_STATUS', Path.home() / '.local/state/deadtrees-audit-worker/status.json')
 )

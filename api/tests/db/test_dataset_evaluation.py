@@ -121,19 +121,25 @@ def evaluation(db):
 	return owner, dataset, version
 
 
-def test_a_stored_run_lands_whole_and_becomes_current(db, evaluation):
+def finish(db, run, dataset):
+	"""What the audit worker does after the handler: run done, dataset pointed at it."""
+	as_worker(db)
+	db.execute("UPDATE audit.runs SET status='done', finished_at=now() WHERE id=%s", (run,))
+	db.execute(
+		"INSERT INTO audit.current_runs(dataset_id,check_key,run_id) VALUES (%s,'dataset_evaluation',%s) "
+		'ON CONFLICT (dataset_id,check_key) DO UPDATE SET run_id=excluded.run_id',
+		(dataset, run),
+	)
+	as_admin(db)
+
+
+def test_a_stored_run_lands_whole_and_leaves_the_lifecycle_to_the_worker(db, evaluation):
 	_, dataset, version = evaluation
 	run = queued_run(db, dataset, version)
 	store(db, run, result())
 
-	status, inputs, cost = db.execute('SELECT status, inputs, cost FROM audit.runs WHERE id=%s', (run,)).fetchone()
-	assert status == 'done' and inputs['crop_count'] == 2 and cost['haiku-5.5']['input_tokens'] == 9000
-	assert (
-		db.execute(
-			"SELECT run_id FROM audit.current_runs WHERE dataset_id=%s AND check_key='dataset_evaluation'", (dataset,)
-		).fetchone()[0]
-		== run
-	)
+	assert db.execute('SELECT status FROM audit.runs WHERE id=%s', (run,)).fetchone()[0] == 'running'
+	assert db.execute('SELECT count(*) FROM audit.current_runs WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 0
 	rows = db.execute(
 		'SELECT assessor, verdict, layer, crop_id FROM audit.assessments WHERE run_id=%s ORDER BY id', (run,)
 	).fetchall()
@@ -154,6 +160,7 @@ def test_a_stored_run_lands_whole_and_becomes_current(db, evaluation):
 		== [(['evaluation'],)] * 2
 	)
 	assert db.execute('SELECT hash FROM audit.image_hashes WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 1234
+	finish(db, run, dataset)
 	# The review queue reads the rule rows: the dataset rule excludes, so a person reviews it.
 	queue = db.execute(
 		"SELECT verdict, needs_review FROM audit.review_queue WHERE dataset_id=%s AND check_key='dataset_evaluation'",
@@ -166,19 +173,20 @@ def test_a_rerun_on_the_same_ortho_reuses_its_crops_and_images(db, evaluation):
 	_, dataset, version = evaluation
 	first = queued_run(db, dataset, version)
 	store(db, first, result())
+	finish(db, first, dataset)
 	second = queued_run(db, dataset, version)
 	store(db, second, result())
 
 	assert db.execute('SELECT count(*) FROM audit.crops WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 2
 	assert db.execute('SELECT count(*) FROM audit.images WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 3
 	assert db.execute('SELECT count(*) FROM audit.assessments WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 10
-	assert db.execute('SELECT run_id FROM audit.current_runs WHERE dataset_id=%s', (dataset,)).fetchone()[0] == second
 
 
 def test_a_finished_run_or_another_check_is_refused_and_nothing_lands(db, evaluation):
 	_, dataset, version = evaluation
 	run = queued_run(db, dataset, version)
 	store(db, run, result())
+	finish(db, run, dataset)
 	db.execute('SAVEPOINT again')
 	with pytest.raises(psycopg.errors.ObjectNotInPrerequisiteState):
 		store(db, run, result())
@@ -211,16 +219,6 @@ def test_a_bad_row_rolls_back_the_whole_run(db, evaluation):
 
 	assert db.execute('SELECT status FROM audit.runs WHERE id=%s', (run,)).fetchone()[0] == 'running'
 	assert db.execute('SELECT count(*) FROM audit.crops WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 0
-	assert db.execute('SELECT count(*) FROM audit.current_runs WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 0
-
-
-def test_a_benchmark_run_is_stored_but_never_current(db, evaluation):
-	_, dataset, version = evaluation
-	run = queued_run(db, dataset, version, queue='benchmark')
-	store(db, run, result())
-
-	assert db.execute('SELECT status FROM audit.runs WHERE id=%s', (run,)).fetchone()[0] == 'done'
-	assert db.execute('SELECT count(*) FROM audit.current_runs WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 0
 
 
 def test_only_the_audit_worker_stores_runs(db, evaluation):

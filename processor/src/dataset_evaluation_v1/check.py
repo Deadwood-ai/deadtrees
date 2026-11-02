@@ -1,18 +1,22 @@
 """One dataset evaluation run: the images the models see, the model calls, the rules
-and the result as the payload of audit.store_dataset_evaluation."""
+and the result as the payload of audit.store_dataset_evaluation.
+
+The judges are the audit worker's backends (audit_worker.models): a function
+(prompt, images) -> answer text per model name, images inline, no tools. Their login
+and usage-limit errors propagate, so the worker pauses instead of failing the run."""
 
 import hashlib
 import io
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from typing import Callable, Sequence
 
 import numpy as np
 from PIL import Image
 from shapely.geometry import mapping
 
 from .inputs import CROP_COUNT, CROP_MPP, CROP_PICKER, CROP_PX, GRID_PICKER, OVERVIEW_PX, Inputs
-from .models import Model, ModelBusy
 from .prompt import PROMPT_VERSION, AnswerError, build_prompt, parse_answer
 from .rules import (
 	BAND_RULE,
@@ -27,14 +31,19 @@ from .rules import (
 )
 from .vocabulary import CHECK_KEY
 
-VERSION = 'v1'
 JPEG_QUALITY = 90
 AOI_COLOUR = (255, 0, 255)
-BUSY_PAUSES_S = (10, 30, 90)
 
-# audit.check_versions.config of this version: everything that changes the result.
+# A judge: (prompt, PIL images) -> answer text (audit_worker.models.Backend).
+Judge = Callable[[str, Sequence], str]
+
+# audit.check_versions.config of v1: everything that changes the result. `models` is
+# the worker's judge spec: Haiku through claude -p, Luna through the Codex login.
 CONFIG = {
-	'models': ['luna-medium', 'haiku-5.5'],
+	'models': {
+		'luna-medium': {'transport': 'codex', 'model': 'gpt-6-luna', 'effort': 'medium'},
+		'haiku-5.5': {'transport': 'claude', 'model': 'claude-haiku-5-5'},
+	},
 	'prompt_version': PROMPT_VERSION,
 	'rules': {'band': '/'.join(BAND_RULE), 'duplicates': '/'.join(DUPLICATE_RULE), 'dataset': '/'.join(DATASET_RULE)},
 	'rule_config': RULE_CONFIG,
@@ -109,30 +118,25 @@ def model_images(inputs: Inputs, thumbnail: bytes | None) -> list[ImageFile]:
 	return files
 
 
-def ask(model: Model, prompt: str, images: list[tuple[str, bytes]]) -> Call:
-	"""One model's answer; capacity errors wait and retry, a malformed reply is asked once more.
-	ModelUnavailable propagates so the worker keeps the run queued."""
-	malformed = 0
-	for pause in (*BUSY_PAUSES_S, None):
+def ask(name: str, judge: Judge, prompt: str, images: Sequence) -> Call:
+	"""One judge's answer; a malformed reply is asked once more. Model errors propagate:
+	the worker pauses on login and usage-limit errors and retries the run on others."""
+	for attempt in (1, 2):
+		started = time.monotonic()
+		text = judge(prompt, images)
 		try:
-			reply = model(prompt, images)
-			call = parse_answer(reply.text, model.name)
-			call.raw = {'text': reply.text[:20000], 'usage': reply.usage, 'seconds': reply.seconds}
-			return call
-		except ModelBusy:
-			if pause is None:
-				raise
-			time.sleep(pause)
+			call = parse_answer(text, name)
 		except AnswerError:
-			malformed += 1
-			if malformed > 1:
+			if attempt == 2:
 				raise
-	raise ModelBusy(f'{model.name} stayed busy')
+			continue
+		call.raw = {'text': text[:20000], 'seconds': round(time.monotonic() - started, 1), 'attempt': attempt}
+		return call
 
 
 def evaluate(
 	inputs: Inputs,
-	models: list[Model],
+	judges: dict[str, Judge],
 	*,
 	ortho_sha256: str,
 	source_profile: dict | None,
@@ -146,10 +150,11 @@ def evaluate(
 	images = model_images(inputs, thumbnail)
 	crop_mpp = inputs.crops[0].mpp if inputs.crops else inputs.native_mpp
 	prompt = build_prompt(inputs.overview_mpp, crop_mpp, inputs.aoi is not None, thumbnail is not None)
-	named = [(f'image{i + 1}.jpg', f.data) for i, f in enumerate(images)]
+	# Decoded here: the judges run in threads and must not share lazily loading files.
+	pictures = [Image.open(io.BytesIO(f.data)).convert('RGB') for f in images]
 	# Independent calls: the slower model sets the run time.
-	with ThreadPoolExecutor(max_workers=len(models)) as pool:
-		answers = list(pool.map(lambda m: ask(m, prompt, named), models))
+	with ThreadPoolExecutor(max_workers=len(judges)) as pool:
+		answers = list(pool.map(lambda item: ask(*item, prompt, pictures), judges.items()))
 	band = band_check(source_profile, inputs.bands, inputs.valid)
 	duplicates = duplicate_check(duplicate_candidates)
 	verdict = dataset_rule(answers, band, duplicates)
@@ -169,7 +174,8 @@ def evaluate(
 			'phash': {'method': PHASH_METHOD, 'value': str(image_hash)},
 			'prompt_version': PROMPT_VERSION,
 		},
-		cost={a.model: a.raw.get('usage', {}) | {'seconds': a.raw.get('seconds')} for a in answers},
+		# Subscription calls report no tokens or dollars; time and calls are what is known.
+		cost={a.model: {'seconds': a.raw['seconds'], 'calls': a.raw['attempt'], 'cost_usd': None} for a in answers},
 	)
 
 
@@ -180,7 +186,8 @@ def storage_folder(dataset_id: int, ortho_sha256: str) -> str:
 
 
 def store_payload(evaluation: Evaluation, inputs: Inputs, dataset_id: int, ortho_sha256: str) -> dict:
-	"""The p_result argument of audit.store_dataset_evaluation."""
+	"""The p_result argument of audit.store_dataset_evaluation: the run's evidence rows.
+	The run row itself (status, evidence, coverage, cost) is the worker's to finish."""
 	folder = storage_folder(dataset_id, ortho_sha256)
 	crops = [
 		{
@@ -200,10 +207,6 @@ def store_payload(evaluation: Evaluation, inputs: Inputs, dataset_id: int, ortho
 	]
 	return {
 		'ortho_sha256': ortho_sha256,
-		'inputs': evaluation.inputs,
-		'evidence': evaluation.evidence,
-		'coverage': {'crops': len(inputs.crops), 'overview_px': max(inputs.overview.shape[:2])},
-		'cost': evaluation.cost,
 		'crops': crops,
 		'images': [
 			{

@@ -4,11 +4,8 @@ process and HTTP boundaries)."""
 
 import io
 import json
-import os
-import stat
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -16,10 +13,12 @@ import rasterio
 from PIL import Image, ImageDraw
 from rasterio.transform import from_origin
 
+from processor.src.audit_worker.models import LoginExpired
 from processor.src.dataset_evaluation_v1 import check as check_module
+from processor.src.dataset_evaluation_v1 import handler
 from processor.src.dataset_evaluation_v1.check import evaluate, store_payload
+from processor.src.dataset_evaluation_v1.handler import aoi_key, tile_of
 from processor.src.dataset_evaluation_v1.inputs import Tile, inside, padding, read_inputs
-from processor.src.dataset_evaluation_v1.models import HaikuCLI, LunaResponses, ModelBusy, ModelUnavailable, Reply
 from processor.src.dataset_evaluation_v1.prompt import AnswerError, build_prompt, parse_answer
 from processor.src.dataset_evaluation_v1.rules import (
 	band_check,
@@ -28,7 +27,6 @@ from processor.src.dataset_evaluation_v1.rules import (
 	hamming,
 	phash,
 )
-from processor.src.process_dataset_evaluation import aoi_key, tile_of
 
 SHA = 'b' * 64
 # EPSG:3857 metres near Freiburg (48.0 N): 0.05 m map pixels are about 3.3 cm on the ground
@@ -465,8 +463,10 @@ def test_fix_flags_keep_the_dataset_but_mark_it_for_fixing():
 
 
 class Fake:
-	def __init__(self, name, *replies):
-		self.name, self.replies, self.prompts, self.images = name, list(replies), [], []
+	"""A judge as the audit worker hands it over: (prompt, PIL images) -> answer text."""
+
+	def __init__(self, *replies):
+		self.replies, self.prompts, self.images = list(replies), [], []
 
 	def __call__(self, prompt, images):
 		self.prompts.append(prompt)
@@ -474,7 +474,7 @@ class Fake:
 		reply = self.replies.pop(0)
 		if isinstance(reply, Exception):
 			raise reply
-		return Reply(reply, {'input_tokens': 1000, 'output_tokens': 100}, 2.5)
+		return reply
 
 
 def thumbnail_bytes():
@@ -486,11 +486,11 @@ def thumbnail_bytes():
 @pytest.mark.unit
 def test_a_run_judges_six_images_and_stores_every_answer(cog):
 	inputs = read_inputs(str(cog), aoi_box(0, 0, 4000, 1500), seed=3, overview_px=1024, crop_px=512)
-	luna, haiku = Fake('luna-medium', answer()), Fake('haiku-5.5', answer('fix', 20, reprocess=60))
+	luna, haiku = Fake(answer()), Fake(answer('fix', 20, reprocess=60))
 	image_hash = phash(inputs.overview, inputs.valid)
 	evaluation = evaluate(
 		inputs,
-		[luna, haiku],
+		{'luna-medium': luna, 'haiku-5.5': haiku},
 		ortho_sha256=SHA,
 		source_profile=RGB_PROFILE,
 		image_hash=image_hash,
@@ -499,7 +499,8 @@ def test_a_run_judges_six_images_and_stores_every_answer(cog):
 		aoi_key='abc',
 	)
 
-	assert [n for n, _ in luna.images[0]] == [f'image{i}.jpg' for i in range(1, 7)]
+	assert len(luna.images[0]) == 6 and all(isinstance(i, Image.Image) for i in luna.images[0])
+	assert luna.images[0][0].size == (1024, 768)
 	assert 'magenta line' in luna.prompts[0] and 'Image 6 is the 256 px thumbnail' in luna.prompts[0]
 	assert [c.model for c in evaluation.calls] == [
 		'luna-medium',
@@ -509,22 +510,15 @@ def test_a_run_judges_six_images_and_stores_every_answer(cog):
 		'dataset-evaluation-rule',
 	]
 	assert evaluation.verdict.verdict == 'minor'
-	assert evaluation.calls[1].raw['usage']['input_tokens'] == 1000
-	assert evaluation.inputs == {
-		'ortho_sha256': SHA,
-		'aoi': 'abc',
-		'overview_px': 1024,
-		'crop_px': 512,
-		'crop_count': 4,
-		'crop_picker': 'kmeans-inside-v1',
-		'seed': 3,
-	}
+	assert evaluation.calls[1].raw['attempt'] == 1 and evaluation.cost['haiku-5.5']['cost_usd'] is None
+	assert evaluation.inputs['ortho_sha256'] == SHA and evaluation.inputs['aoi'] == 'abc'
 
 	payload = store_payload(evaluation, inputs, 42, SHA)
 	assert [i['kind'] for i in payload['images']] == ['overview', 'raw', 'raw', 'raw', 'raw', 'thumbnail']
 	assert [i['crop_index'] for i in payload['images']] == [None, 1, 2, 3, 4, None]
 	assert payload['images'][0]['storage_path'] == f'audit/dataset_evaluation/42/{SHA[:16]}/overview.jpg'
-	assert len(payload['crops']) == 4 and payload['crops'][0]['geometry']['type'] == 'Polygon'
+	assert len(payload['crops']) == 4 and payload['crops'][0]['pixel_window'] is None
+	assert payload['crops'][0]['selection']['picker'] == 'kmeans-inside-v1'
 	assert payload['phash'] == {'method': 'phash-dct64-v1', 'value': image_hash}
 	json.dumps(payload)  # the RPC argument must serialise
 
@@ -539,19 +533,22 @@ def test_the_overview_shows_the_aoi_edge_and_hides_no_data(cog):
 
 
 @pytest.mark.unit
-def test_a_malformed_reply_is_asked_again_once_and_busy_models_wait(cog, monkeypatch):
-	monkeypatch.setattr(check_module.time, 'sleep', lambda s: None)
+def test_a_malformed_reply_is_asked_again_once_and_login_errors_reach_the_worker(cog):
 	inputs = read_inputs(str(cog), overview_px=512, crop_px=256)
 	common = dict(ortho_sha256=SHA, source_profile=RGB_PROFILE, image_hash=0, duplicate_candidates=[])
 
-	luna = Fake('luna-medium', 'not json', answer())
-	haiku = Fake('haiku-5.5', ModelBusy('overloaded'), answer())
-	assert evaluate(inputs, [luna, haiku], **common).verdict.verdict == 'ok'
+	luna = Fake('not json', answer())
+	assert evaluate(inputs, {'luna-medium': luna, 'haiku-5.5': Fake(answer())}, **common).verdict.verdict == 'ok'
+	assert len(luna.prompts) == 2
 
 	with pytest.raises(AnswerError):
-		evaluate(inputs, [Fake('luna-medium', 'no', 'still no'), Fake('haiku-5.5', answer())], **common)
-	with pytest.raises(ModelUnavailable):
-		evaluate(inputs, [Fake('luna-medium', answer()), Fake('haiku-5.5', ModelUnavailable('login'))], **common)
+		evaluate(inputs, {'luna-medium': Fake('no', 'still no'), 'haiku-5.5': Fake(answer())}, **common)
+	with pytest.raises(LoginExpired):
+		evaluate(
+			inputs,
+			{'luna-medium': Fake(answer()), 'haiku-5.5': Fake(LoginExpired('claude', 'Please run /login'))},
+			**common,
+		)
 
 
 @pytest.mark.unit
@@ -571,114 +568,116 @@ def test_the_aoi_key_is_stable():
 
 
 # ---------------------------------------------------------------------------
-# Model transports at their boundaries
+# The worker handler, with PostgREST, storage and the judges faked at their boundaries
 # ---------------------------------------------------------------------------
 
 
-def fake_claude(tmp_path, stdout: str, code: int = 0) -> str:
-	"""A `claude` executable that records its arguments and the files it was given."""
-	script = tmp_path / 'claude'
-	(tmp_path / 'stdout.txt').write_text(stdout)
-	script.write_text(
-		'#!/bin/sh\n'
-		f'printf "%s\\n" "$@" > {tmp_path}/args.txt\n'
-		f'ls > {tmp_path}/files.txt\n'
-		f'cat {tmp_path}/stdout.txt\n'
-		f'exit {code}\n'
+class Rows:
+	"""Enough of a PostgREST table: select / eq / order / range / execute."""
+
+	def __init__(self, rows):
+		self.rows, self.filters, self.span = rows, [], None
+
+	def select(self, *_):
+		return Rows(self.rows)
+
+	def eq(self, key, value):
+		self.filters.append((key, value))
+		return self
+
+	def order(self, *_):
+		return self
+
+	def range(self, start, end):
+		self.span = (start, end)
+		return self
+
+	def execute(self):
+		rows = [r for r in self.rows if all(r.get(k) == v for k, v in self.filters)]
+		if self.span:
+			rows = rows[self.span[0] : self.span[1] + 1]
+		return SimpleNamespace(data=rows)
+
+
+class FakeClient:
+	def __init__(self, tables):
+		self.tables, self.calls = tables, []
+
+	def table(self, name):
+		return Rows(self.tables.get(name, []))
+
+	def schema(self, name):
+		assert name == 'audit'
+		return self
+
+	def rpc(self, name, args):
+		self.calls.append((name, args))
+		data = (
+			[{'dataset_id': 9, 'kind': 'same_flight_day', 'hamming': 30, 'overlap': 0.9}]
+			if name == 'duplicate_candidates'
+			else None
+		)
+		return SimpleNamespace(execute=lambda: SimpleNamespace(data=data))
+
+
+@pytest.mark.unit
+def test_the_handler_uploads_the_images_before_it_stores_the_rows(cog, tmp_path, monkeypatch):
+	monkeypatch.setattr(handler, 'local_cog', lambda *args: cog)
+	monkeypatch.setattr(
+		handler, 'pull_file_from_storage_server', lambda remote, local, *a: Path(local).write_bytes(thumbnail_bytes())
 	)
-	script.chmod(script.stat().st_mode | stat.S_IEXEC)
-	return str(script)
-
-
-@pytest.mark.unit
-def test_haiku_runs_headless_with_only_the_read_tool(tmp_path):
-	result = {
-		'result': answer(),
-		'num_turns': 7,
-		'is_error': False,
-		'modelUsage': {'claude-haiku-5-5': {'inputTokens': 100, 'cacheReadInputTokens': 9000, 'outputTokens': 300}},
-	}
-	haiku = HaikuCLI(binary=fake_claude(tmp_path, json.dumps(result)))
-	reply = haiku('the prompt', [('image1.jpg', b'a'), ('image2.jpg', b'b')])
-
-	assert parse_answer(reply.text, haiku.name).verdict == 'ok'
-	assert reply.usage == {'input_tokens': 9100, 'output_tokens': 300, 'turns': 7, 'cost_usd': None}
-	args = (tmp_path / 'args.txt').read_text().splitlines()
-	assert args[args.index('--model') + 1] == 'claude-haiku-5-5'
-	assert args[args.index('--tools') + 1] == 'Read' and '--strict-mcp-config' in args
-	assert (tmp_path / 'files.txt').read_text().split() == ['image1.jpg', 'image2.jpg']
-
-
-@pytest.mark.unit
-def test_an_expired_claude_login_leaves_the_run_for_later(tmp_path):
-	expired = {'is_error': True, 'result': 'OAuth token has expired. Please run /login'}
-	with pytest.raises(ModelUnavailable):
-		HaikuCLI(binary=fake_claude(tmp_path, json.dumps(expired), code=1))('p', [])
-	with pytest.raises(ModelUnavailable):
-		HaikuCLI(binary=str(tmp_path / 'missing'))('p', [])
-	busy = {'is_error': True, 'result': 'API Error: 529 Overloaded'}
-	with pytest.raises(ModelBusy):
-		HaikuCLI(binary=fake_claude(tmp_path, json.dumps(busy), code=1))('p', [])
-
-
-class OpenAIStub(BaseHTTPRequestHandler):
-	status = 200
-	seen = []
-
-	def log_message(self, *args):
-		pass
-
-	def do_POST(self):
-		body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-		OpenAIStub.seen.append((self.headers['Authorization'], body))
-		reply = {
-			'output': [
-				{'type': 'message', 'content': [{'type': 'output_text', 'text': answer('exclude', 75, 'blurry')}]}
+	client = FakeClient(
+		{
+			'v2_cogs': [
+				{'dataset_id': 42, 'cog_file_size': 1, 'cog_file_name': 'c.tif', 'cog_path': 'u/c.tif', 'version': 1}
 			],
-			'usage': {'input_tokens': 4400, 'output_tokens': 900},
+			'v2_orthos': [
+				{
+					'dataset_id': 42,
+					'ortho_file_name': 'o.tif',
+					'version': 1,
+					'ortho_file_size': 1,
+					'sha256': SHA,
+					'ortho_info': {'Profile': RGB_PROFILE},
+				}
+			],
+			'v2_thumbnails': [{'dataset_id': 42, 'thumbnail_path': 'u/t.jpg'}],
+			'v2_aois': [],
+			'v2_tile_embeddings': [],
 		}
-		data = json.dumps(reply).encode()
-		self.send_response(OpenAIStub.status)
-		self.send_header('Content-Length', str(len(data)))
-		self.end_headers()
-		self.wfile.write(data)
+	)
+	events = []
+	client.rpc = (lambda rpc: lambda name, args: (events.append(name), rpc(name, args))[1])(client.rpc)
+	ctx = SimpleNamespace(
+		run={'id': 7, 'dataset_id': 42},
+		client=client,
+		token='t',
+		judges={
+			'luna-medium': Fake(answer('exclude', 90, 'blurry')),
+			'haiku-5.5': Fake(answer('exclude', 80, 'blurry')),
+		},
+		put_image=lambda path, data, dataset_id: events.append(path),
+	)
+	summary = handler.handle(ctx)
 
-
-@pytest.fixture
-def openai_stub():
-	server = HTTPServer(('127.0.0.1', 0), OpenAIStub)
-	threading.Thread(target=server.serve_forever, daemon=True).start()
-	OpenAIStub.status, OpenAIStub.seen = 200, []
-	yield f'http://127.0.0.1:{server.server_port}/v1/responses'
-	server.shutdown()
-
-
-@pytest.mark.unit
-def test_luna_sends_every_image_at_original_detail(tmp_path, openai_stub):
-	key_file = tmp_path / 'openai.env'
-	key_file.write_text('OPENAI_API_KEY=sk-test-not-real\n')
-	os.chmod(key_file, 0o600)
-	luna = LunaResponses(key_file, url=openai_stub)
-	reply = luna('the prompt', [('image1.jpg', b'\xff\xd8a'), ('image2.jpg', b'\xff\xd8b')])
-
-	assert parse_answer(reply.text, luna.name).verdict == 'major'
-	assert reply.usage['input_tokens'] == 4400
-	auth, body = OpenAIStub.seen[0]
-	assert auth == 'Bearer sk-test-not-real'
-	assert body['model'] == 'gpt-6-luna' and body['reasoning'] == {'effort': 'medium'}
-	images = [c for c in body['input'][0]['content'] if c['type'] == 'input_image']
-	assert len(images) == 2 and all(c['detail'] == 'original' for c in images)
+	assert events[0] == 'duplicate_candidates' and events[-1] == 'store_dataset_evaluation'
+	assert len(events) == 8 and events[1].endswith('/overview.jpg') and events[6].endswith('/thumbnail.jpg')
+	stored = dict(client.calls)['store_dataset_evaluation']
+	assert stored['p_run_id'] == 7
+	assert [a['model'] for a in stored['p_result']['assessments']][-1] == 'dataset-evaluation-rule'
+	assert stored['p_result']['assessments'][-1]['verdict'] == 'major'
+	assert stored['p_result']['assessments'][3]['verdict'] == 'unsure'  # the same-day duplicate flag
+	assert summary['coverage'] == {'crops': 4, 'crop_picker': 'kmeans-inside-v1'}
+	assert set(summary) == {'evidence', 'coverage', 'cost'}
 
 
 @pytest.mark.unit
-def test_luna_errors_map_to_retry_or_wait_for_login(tmp_path, openai_stub):
-	key_file = tmp_path / 'openai.env'
-	key_file.write_text('OPENAI_API_KEY=sk-test-not-real\n')
-	OpenAIStub.status = 401
-	with pytest.raises(ModelUnavailable):
-		LunaResponses(key_file, url=openai_stub)('p', [])
-	OpenAIStub.status = 429
-	with pytest.raises(ModelBusy):
-		LunaResponses(key_file, url=openai_stub)('p', [])
-	with pytest.raises(ModelUnavailable):
-		LunaResponses(tmp_path / 'missing.env', url=openai_stub)('p', [])
+def test_the_handler_runs_after_the_cog_thumbnail_and_tiles_and_is_registered():
+	from processor.src.audit_worker import worker
+
+	assert worker.HANDLERS['dataset_evaluation'] == 'processor.src.dataset_evaluation_v1.handler'
+	handlers, missing = worker.load_handlers()
+	assert not missing and handlers['dataset_evaluation'].VERSION == 'v1'
+	assert set(handlers['dataset_evaluation'].CONFIG['models']) == {'luna-medium', 'haiku-5.5'}
+	assert handler.ready({'is_cog_done': True, 'is_thumbnail_done': True, 'is_embeddings_done': True})
+	assert not handler.ready({'is_cog_done': True, 'is_thumbnail_done': True, 'is_embeddings_done': False})

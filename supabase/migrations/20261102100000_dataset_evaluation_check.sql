@@ -1,6 +1,6 @@
 -- Dataset evaluation check v1 (DT-1483): perceptual hashes for the duplicate rule,
--- the duplicate lookup, and one store function so a run's crops, images, assessments
--- and current-run pointer land together or not at all. See docs/dataset-evaluation.md.
+-- the duplicate lookup, and one store function so a run's crops, images and
+-- assessments land together or not at all. See docs/dataset-evaluation.md.
 --
 -- Both functions run with the caller's rights: the audit worker's existing grants
 -- and policies on the audit tables decide what it may write.
@@ -87,9 +87,9 @@ revoke all on function audit.duplicate_candidates(bigint, bigint, text, integer,
 grant execute on function audit.duplicate_candidates(bigint, bigint, text, integer, real)
 	to authenticated, service_role, analyst;
 
--- Store a finished dataset evaluation run. p_result (built by the worker,
+-- Store what a dataset evaluation run judged, in one transaction. p_result (built by
 -- processor/src/dataset_evaluation_v1/check.py store_payload):
---   ortho_sha256, inputs, evidence, coverage, cost
+--   ortho_sha256
 --   crops        [{pixel_window ([x0, y0, x1, y1] on the 10 cm CLIP grid, or null),
 --                 geometry (GeoJSON, EPSG:4326), mpp, size_px, selection}]
 --   images       [{kind, crop_index (1-based into crops, null for the overview and
@@ -98,7 +98,8 @@ grant execute on function audit.duplicate_candidates(bigint, bigint, text, integ
 --                 modes, details, raw}], dataset level, layer image
 --   phash        {method, value}
 -- The run must be a queued or running dataset_evaluation run that calls the models.
--- It becomes done and, outside the benchmark queue, the dataset's current run.
+-- The audit worker then finishes the run row (status, evidence, coverage, cost) and
+-- points the dataset at it when the version is active (docs/audit-checks.md).
 create function audit.store_dataset_evaluation(p_run_id bigint, p_result jsonb)
 returns void
 language plpgsql set search_path = ''
@@ -176,23 +177,6 @@ begin
 		insert into audit.image_hashes (dataset_id, ortho_sha256, method, hash, run_id)
 		values (v_run.dataset_id, v_sha, p_result -> 'phash' ->> 'method', (p_result -> 'phash' ->> 'value')::bigint, p_run_id)
 		on conflict do nothing;
-	end if;
-
-	update audit.runs set
-		status = 'done',
-		inputs = coalesce(p_result -> 'inputs', inputs),
-		evidence = coalesce(p_result -> 'evidence', evidence),
-		coverage = coalesce(p_result -> 'coverage', coverage),
-		cost = coalesce(p_result -> 'cost', cost),
-		error = null,
-		started_at = coalesce(started_at, now()),
-		finished_at = now()
-	where id = p_run_id;
-
-	if v_run.queue <> 'benchmark' then
-		insert into audit.current_runs (dataset_id, check_key, run_id)
-		values (v_run.dataset_id, 'dataset_evaluation', p_run_id)
-		on conflict (dataset_id, check_key) do update set run_id = excluded.run_id, updated_at = now();
 	end if;
 end;
 $$;

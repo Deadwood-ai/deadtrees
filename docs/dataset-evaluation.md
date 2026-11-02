@@ -6,8 +6,9 @@ plugs into the audit framework like every check ([audit-checks.md](audit-checks.
 one `audit.runs` row per dataset, one dataset-level `audit.assessments` row per model and
 rule, layer `image`.
 
-Code: `processor/src/dataset_evaluation_v1/`, entry point
-`processor/src/process_dataset_evaluation.py` (`run_dataset_evaluation`), migration
+Code: `processor/src/dataset_evaluation_v1/`; the audit worker runs it through
+`handler.py` (`worker.HANDLERS['dataset_evaluation']`, see the audit worker section of
+[audit-checks.md](audit-checks.md)). Migration:
 `supabase/migrations/20261102100000_dataset_evaluation_check.sql`.
 
 ## What it looks at
@@ -61,22 +62,24 @@ is written to `dataset_audit` or `dataset_audit_suggestions` yet.
 
 ## Store and duplicates
 
-`audit.store_dataset_evaluation(run_id, result)` stores a queued or running run in one
-transaction: crops, images, assessments, the overview hash (`audit.image_hashes`), the
-run's evidence and cost, status `done`, and the current-run pointer (not for benchmark
-runs). A bad row rolls everything back. `audit.duplicate_candidates(dataset_id, hash)`
-lists possible duplicates for the duplicate rule. Both run with the caller's rights, so
-only the audit worker writes.
+`handle(ctx)` uploads the judged images with the worker's `put_image`, then calls
+`audit.store_dataset_evaluation(run_id, result)`, which writes the crops, images,
+assessments and overview hash (`audit.image_hashes`) in one transaction; a bad row rolls
+everything back. The worker then finishes the run with the returned evidence, coverage
+and cost and points the dataset at it when the version is active. A run is ready once
+the COG, thumbnail and CLIP tiles exist (`ready`); its `inputs` are the ortho sha256 and
+the AOI. `audit.duplicate_candidates(dataset_id, hash)` lists possible duplicates for
+the duplicate rule. Both functions run with the caller's rights, so only the audit
+worker writes.
 
 ## Models
 
-`models.py` puts every model behind one call: prompt plus named JPEGs in, reply text and
-usage out. `HaikuCLI` runs `claude -p --model claude-haiku-5-5` with only the Read tool;
-`LunaResponses` uses the OpenAI Responses API with `~/.config/deadtrees/openai.env`
-(`DATASET_EVALUATION_OPENAI_KEY_FILE` overrides it). An expired login or missing key raises
-`ModelUnavailable` (the worker keeps the run queued); capacity errors wait and retry; a
-malformed reply is asked once more. One run is two parallel calls, about 11 s, about
-10k input tokens for Luna and 16k for Haiku (7 turns).
+The judges are the audit worker's subscription backends (`audit_worker.models`), named
+in the version's `CONFIG['models']`: `luna-medium` through the Codex login (gpt-6-luna,
+medium effort) and `haiku-5.5` through `claude -p`. Each call runs without tools and
+gets the six images inline. A malformed reply is asked once more; login and usage-limit
+errors reach the worker, which pauses instead of failing the run. Cost records seconds
+and calls per model; subscription calls report no tokens or dollars.
 
 ## Gold set and labeling
 
