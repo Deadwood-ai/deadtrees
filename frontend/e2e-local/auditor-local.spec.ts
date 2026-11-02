@@ -714,7 +714,7 @@ test.describe("auditor local e2e", () => {
       }),
     ).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(reporter.email)).toBeVisible();
-    await expect(page.getByText("1. Georeferencing Accuracy")).toBeVisible();
+    await expect(page.getByRole("button", { name: /^3\. Georeferencing/ })).toBeVisible();
     await expect(
       page.getByRole("button", { name: /^save Save$/i }),
     ).toBeVisible();
@@ -749,22 +749,22 @@ test.describe("auditor local e2e", () => {
     await page.goto(`/dataset-audit/${completeDataset.id}`);
     await dismissCookieBanner(page);
 
-    const georef = card(page, "1. Georeferencing Accuracy");
+    const georef = await section(page, "Georeferencing");
     await expect(georef.getByText("Poor, 22.6 m off")).toBeVisible({ timeout: 20_000 });
     await expect(georef.getByText("Strong evidence: 22.6 m off on 90% of the area (Esri World Imagery (current) and DOP Baden-Württemberg (DE)).")).toBeVisible();
     // the unsaved audit is prefilled with the suggestion and marked as such
     await expect(georef.getByRole("radio", { name: /Poor/ })).toBeChecked();
     await expect(georef.getByText("suggested")).toBeVisible();
 
-    await georef.getByRole("button", { name: /Show matching/ }).click();
-    const viewer = page.getByRole("dialog", { name: "Georeferencing check: matching" });
-    await expect(viewer).toBeVisible();
-    await expect(viewer.getByText("Esri World Imagery (current)").first()).toBeVisible();
-    await expect(viewer.getByText("Esri Wayback, captured 2019-06-02").first()).toBeVisible();
-    await expect(viewer.getByRole("cell", { name: "22.7 m" })).toBeVisible();
-    await expect(viewer.getByText("no confident matches (uniform canopy, season or blank imagery)")).toBeVisible();
-    await expect(viewer.getByText("Unavailable: maptiler (blank imagery)")).toBeVisible();
-    await expect(viewer.getByRole("slider")).toBeVisible();
+    // opening the section puts the map into georeferencing mode: reference picker, match lines, opacity
+    const panel = page.getByText("Map mode: Georeferencing").locator("..");
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText(/Esri World Imagery \(current\).*22\.7 m/)).toBeVisible();
+    await expect(panel.getByText("Unavailable: maptiler (blank imagery)")).toBeVisible();
+    await expect(panel.getByRole("slider")).toBeVisible();
+    await panel.locator(".ant-select").click();
+    await expect(page.getByText(/Esri Wayback, captured 2019-06-02/).first()).toBeVisible();
+    await expect(page.getByText(/no confident matches \(uniform canopy, season or blank imagery\)/).first()).toBeVisible();
   });
 
   test("a saved audit the georeferencing check disagrees with is marked for re-review", async ({ page }) => {
@@ -775,7 +775,7 @@ test.describe("auditor local e2e", () => {
     await dismissCookieBanner(page);
 
     await expect(page.getByText("Re-review Georeferencing:")).toBeVisible({ timeout: 20_000 });
-    const georef = card(page, "1. Georeferencing Accuracy");
+    const georef = await section(page, "Georeferencing");
     await expect(georef.getByText("re-review")).toBeVisible();
     await expect(georef.getByText(/Saved audit: Good\. Now suggested: Poor/)).toBeVisible();
     await expect(georef.getByRole("radio", { name: /Poor/ })).toBeChecked();
@@ -818,16 +818,16 @@ test.describe("auditor local e2e", () => {
       page.locator('[data-testid="dataset-audit-map"] .ol-viewport'),
     ).toBeVisible({ timeout: 20_000 });
 
-    await card(page, "1. Georeferencing Accuracy").getByText(/Good/).click();
-    await card(page, "2. Acquisition Date").getByText(/Valid/).click();
+    await (await section(page, "Georeferencing")).getByText(/Good/).click();
+    await (await section(page, "Acquisition date")).getByText(/Valid/).click();
 
-    const phenologyCard = card(page, "3. Phenology / Season");
+    const phenologyCard = await section(page, "Phenology");
     await phenologyCard.getByText(/In Season/).click();
     await phenologyCard
       .getByPlaceholder("Seasonal observations...")
       .fill("Leaf-on season confirmed in local workflow smoke.");
 
-    const predictionCard = card(page, "4. Prediction Quality");
+    const predictionCard = await section(page, "Prediction quality");
     await predictionCard.getByText("🟡 OK").nth(0).click();
     await predictionCard
       .getByPlaceholder("Deadwood cover notes...")
@@ -837,13 +837,13 @@ test.describe("auditor local e2e", () => {
       .getByPlaceholder("Forest cover notes...")
       .fill("Tree cover looks consistent.");
 
-    const cogCard = card(page, "5. Cloud-Optimized GeoTIFF");
+    const cogCard = (await section(page, "Dataset evaluation")).getByTestId("audit-cog");
     await cogCard.getByText(/Good/).click();
     await cogCard
       .getByPlaceholder(/COG issue details/)
       .fill("COG renders correctly in the audit map.");
 
-    const thumbnailCard = card(page, "6. Thumbnail");
+    const thumbnailCard = (await section(page, "Dataset evaluation")).getByTestId("audit-thumbnail");
     await thumbnailCard.getByText(/Good/).click();
     await thumbnailCard
       .getByPlaceholder(/Thumbnail issue details/)
@@ -857,10 +857,12 @@ test.describe("auditor local e2e", () => {
       .toBe(1);
     await expect(page.getByText("Unsaved AOI edits")).toBeHidden();
 
-    const finalAssessmentCard = card(page, "8. Final Assessment");
-    await finalAssessmentCard.getByText(/Ready/).click();
+    const finalAssessmentCard = page.getByTestId("audit-decision");
+    // every section is answered, so the derived decision is Ready; confirm it
+    await expect(finalAssessmentCard.getByText("Ready", { exact: true }).first()).toBeVisible();
+    await finalAssessmentCard.getByRole("button", { name: "Confirm" }).click();
     await finalAssessmentCard
-      .getByPlaceholder("Additional observations...")
+      .getByPlaceholder("Notes on the decision...")
       .fill("Audit workflow local smoke completed.");
 
     await page.getByRole("button", { name: /^save Save$/i }).click();
@@ -903,8 +905,12 @@ test.describe("auditor local e2e", () => {
   });
 });
 
-const card = (page: Page, title: string) =>
-  page.locator(".ant-card").filter({ hasText: title });
+/** Opens an audit section (one is open at a time) and returns it. */
+const section = async (page: Page, title: string) => {
+  const header = page.getByRole("button", { name: new RegExp(`^\\d\\. ${title}`) });
+  if ((await header.getAttribute("aria-expanded")) !== "true") await header.click();
+  return page.locator("section").filter({ has: header });
+};
 
 const dismissCookieBanner = async (page: Page) => {
   await page
@@ -914,13 +920,13 @@ const dismissCookieBanner = async (page: Page) => {
 };
 
 const drawAuditAoi = async (page: Page) => {
-  await card(page, "7. Area of Interest (AOI)")
+  await (await section(page, "Area of interest"))
     .getByRole("button", { name: "Draw AOI Polygon" })
     .click();
 
   const map = page.getByTestId("dataset-audit-map");
   await expect(
-    card(page, "7. Area of Interest (AOI)").getByRole("button", {
+    (await section(page, "Area of interest")).getByRole("button", {
       name: "Cancel Drawing",
     }),
   ).toBeVisible();

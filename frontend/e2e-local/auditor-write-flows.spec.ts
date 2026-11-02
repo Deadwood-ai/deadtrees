@@ -112,20 +112,20 @@ test.describe("auditor local write flows", () => {
     await page.getByRole("button", { name: "Acknowledge" }).click();
     await expectFlagStatus("acknowledged");
 
-    await card(page, "1. Georeferencing Accuracy")
+    await (await section(page, "Georeferencing"))
       .getByText(/Good/)
       .click();
-    await card(page, "2. Acquisition Date")
+    await (await section(page, "Acquisition date"))
       .getByText(/Valid/)
       .click();
 
-    const phenologyCard = card(page, "3. Phenology / Season");
+    const phenologyCard = await section(page, "Phenology");
     await phenologyCard.getByText(/In Season/).click();
     await phenologyCard
       .getByPlaceholder("Seasonal observations...")
       .fill("Local write suite confirms phenology.");
 
-    const predictionCard = card(page, "4. Prediction Quality");
+    const predictionCard = await section(page, "Prediction quality");
     await predictionCard.getByText(/Great/).nth(0).click();
     await predictionCard
       .getByPlaceholder("Deadwood cover notes...")
@@ -135,13 +135,13 @@ test.describe("auditor local write flows", () => {
       .getByPlaceholder("Forest cover notes...")
       .fill("Tree cover is usable.");
 
-    const cogCard = card(page, "5. Cloud-Optimized GeoTIFF");
+    const cogCard = (await section(page, "Dataset evaluation")).getByTestId("audit-cog");
     await cogCard.getByText(/Good/).click();
     await cogCard
       .getByPlaceholder(/COG issue details/)
       .fill("COG loads from local nginx.");
 
-    const thumbnailCard = card(page, "6. Thumbnail");
+    const thumbnailCard = (await section(page, "Dataset evaluation")).getByTestId("audit-thumbnail");
     await thumbnailCard.getByText(/Good/).click();
     await thumbnailCard
       .getByPlaceholder(/Thumbnail issue details/)
@@ -157,7 +157,7 @@ test.describe("auditor local write flows", () => {
     await addManualCorrectionMetadata();
 
     await drawAuditAoi(page);
-    const aoiCard = card(page, "7. Area of Interest (AOI)");
+    const aoiCard = await section(page, "Area of interest");
     await expect(aoiCard.getByText(/AOI defined \(3 polygons\)/)).toBeVisible();
 
     await page.getByRole("button", { name: "Edit deadwood cover" }).click();
@@ -194,10 +194,12 @@ test.describe("auditor local write flows", () => {
       notes: "Auditor metadata to preserve",
     });
 
-    const finalAssessmentCard = card(page, "8. Final Assessment");
-    await finalAssessmentCard.getByText(/Ready/).click();
+    const finalAssessmentCard = page.getByTestId("audit-decision");
+    // every section is answered, so the derived decision is Ready; confirm it
+    await expect(finalAssessmentCard.getByText("Ready", { exact: true }).first()).toBeVisible();
+    await finalAssessmentCard.getByRole("button", { name: "Confirm" }).click();
     await finalAssessmentCard
-      .getByPlaceholder("Additional observations...")
+      .getByPlaceholder("Notes on the decision...")
       .fill("Auditor local write integration completed.");
 
     await page.getByRole("button", { name: /^save Save$/i }).click();
@@ -661,8 +663,12 @@ async function installAuditorSession(page: Page) {
   }, login.data.session);
 }
 
-const card = (page: Page, title: string) =>
-  page.locator(".ant-card").filter({ hasText: title });
+/** Opens an audit section (one is open at a time) and returns it. */
+const section = async (page: Page, title: string) => {
+  const header = page.getByRole("button", { name: new RegExp(`^\\d\\. ${title}`) });
+  if ((await header.getAttribute("aria-expanded")) !== "true") await header.click();
+  return page.locator("section").filter({ has: header });
+};
 
 async function dismissCookieBanner(page: Page) {
   await page
@@ -679,7 +685,7 @@ async function drawAuditAoi(page: Page) {
     page.locator('[data-testid="dataset-audit-map"] .ol-viewport').first(),
   ).toBeVisible({ timeout: 20_000 });
 
-  const aoiCard = card(page, "7. Area of Interest (AOI)");
+  const aoiCard = await section(page, "Area of interest");
   const drawButton = aoiCard.getByRole("button", { name: "Draw AOI Polygon" });
   if (await drawButton.isVisible()) {
     await drawButton.click();

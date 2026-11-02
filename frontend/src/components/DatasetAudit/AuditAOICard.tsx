@@ -8,13 +8,12 @@ import {
 	ScissorOutlined,
 	UndoOutlined,
 } from "@ant-design/icons";
-import { Button, Card, Form, Typography } from "antd";
+import { Button, Form } from "antd";
 
 import type { AOIToolbarState } from "../DatasetDetailsMap/hooks/useAOIEditor";
 import { InlineSkeleton } from "../SectionStates";
 import type { AuditMapWithControlsHandle } from "./AuditMapWithControls";
 
-const { Text } = Typography;
 
 interface AuditAOICardProps {
 	aoiToolbarState: AOIToolbarState;
@@ -34,10 +33,7 @@ export default function AuditAOICard({
 	const isIdle = !aoiToolbarState.isDrawing && !aoiToolbarState.isEditing;
 
 	return (
-		<Card size="small" className="mb-3 shadow-sm">
-			<div className="mb-2 flex items-center">
-				<Text strong className="text-xs">7. Area of Interest (AOI)</Text>
-			</div>
+		<div>
 
 			{aoiToolbarState.isAOILoading ? (
 				<InlineSkeleton label="Loading area of interest" className="h-8 w-full" />
@@ -216,6 +212,6 @@ export default function AuditAOICard({
 					);
 				}}
 			</Form.Item>
-		</Card>
+		</div>
 	);
 }

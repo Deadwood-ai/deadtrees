@@ -1,4 +1,4 @@
-import { Alert, Card, Form, Input, Radio, Space, Tag, Tooltip, Typography } from "antd";
+import { Alert, Form, Input, Radio, Space, Tag, Tooltip, Typography } from "antd";
 import { RobotOutlined } from "@ant-design/icons";
 import { createConditionalRule, formatAcquisitionDate } from "./auditConstants";
 import type { IDataset } from "../../types/dataset";
@@ -97,11 +97,8 @@ export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledF
 		.join(", ");
 
 	return (
-		<Card size="small" className="mb-3 shadow-sm">
-			<div className="mb-2 flex items-center">
-				<Text strong className="text-xs">2. Acquisition Date</Text>
-				<ReviewTag item="acquisition_date" items={reviewItems} />
-			</div>
+		<div>
+			<ReviewTag item="acquisition_date" items={reviewItems} />
 			<div className="mb-1 text-xs">
 				<Text type="secondary">{applied ? "Date: " : "Reported date: "}</Text>
 				<Text strong>{formatAcquisitionDate(dataset)}</Text>
@@ -195,6 +192,6 @@ export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledF
 			<Form.Item name="acquisition_date_notes" className="mb-0">
 				<TextArea rows={2} placeholder="Date notes..." className="text-xs" />
 			</Form.Item>
-		</Card>
+		</div>
 	);
 }

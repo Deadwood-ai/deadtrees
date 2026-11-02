@@ -210,6 +210,44 @@ To check it, request `/rest/v1/checks` with the header `Accept-Profile: audit` a
 auditor; it lists the four checks. To roll back, restore the backup and run the same
 `docker compose up -d rest`.
 
+The review page's images need one change to the host nginx on data2
+(`/apps/deadtrees/nginx/conf/storage-server.conf`, not this repository; see
+`docs/playbooks/dataset-access-rollout.md`): add `audit/images/files/` to the ticket
+location `^/api/v1/(datasets/[0-9]+/files/|exports/|disturbance-benchmark/files/)` so
+signed image links stay out of the access log, then `nginx -t` and reload. The images
+work without it through `/api/v1/`; only the log hygiene is missing.
+
+## Review page
+
+The audit page (`/dataset-audit/<id>`, `frontend/src/components/DatasetAudit/checks/`)
+shows the checks as sections in the sidebar: user reports, then 1 Dataset evaluation
+(COG and thumbnail folded in), 2 AOI, 3 Georeferencing, 4 Acquisition date, 5 Phenology
+(manual) and 6 Prediction quality. Opening a section puts the map into that check's
+mode: the reference and match lines for georeferencing, the judged crops for the
+dataset evaluation and prediction quality, and "Show what the model saw" loads the
+stored images.
+
+- A reviewer answers a check with Agree or Check wrong (the check's fixed reasons plus
+  a note). Each answer is a new person row on the current run (`run_id`), so it marks
+  the result reviewed in `audit.review_queue`; crop answers carry `crop_id`.
+- Each reviewer answers on their own: a section under review needs you until you
+  answered, whoever else did. Others' and the models' answers show after your answer
+  (or "Show now").
+- An answer also sets the matching `dataset_audit` field in the form; the derived
+  decision at the top adds the sections up (evaluation exclude, any fix finding, else
+  ready) and the reviewer confirms it or chooses another. `dataset_audit` is still
+  what Save stores.
+- The queue's To review tab lists every result under review that you have not
+  answered; Disagreements reads `audit.disagreements`.
+- Images come from `POST /api/v1/audit/images/access`, a signed link prefix for
+  auditors (`can_audit`); files are served from the data directory's `audit/` folder
+  through nginx and never statically.
+
+Local QA: `scripts/qa/seed-audit-checks.py` seeds one dataset with all three checks
+(`docs/qa/playbooks/auditor-check-review.md`). Until production exposes the `audit`
+schema (API exposure above), the page says the results can't be read and the
+sections fall back to the saved-audit fields.
+
 ## Importing earlier judgements
 
 `scripts/audit_import.py` (dry run by default; `--execute` writes and needs approval):
