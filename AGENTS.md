@@ -21,6 +21,7 @@ it). Start here, then open the linked docs that match the task.
 - Signed-in checks as the agent account (`dt-agent-session`): `docs/playbooks/agent-login.md`
 - Releases and team announcements: `docs/playbooks/create-release.md`
 - Production processor hosts and how each auto-deploys: `docs/playbooks/processor-hosts.md`
+- AI labeling service (SAM 3) and its tunnel to data2: `docs/playbooks/labeling-service.md`
 - Diagrams, including Mermaid validation: `docs/playbooks/technical-diagrams.md`
 - Reporting friction in the agent workflow: `docs/agents/rules.md#agent-feedback`
 

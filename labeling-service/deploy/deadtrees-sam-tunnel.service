@@ -1,0 +1,14 @@
+# systemd user unit on the processing server: ~/.config/systemd/user/deadtrees-sam-tunnel.service
+# Opens 127.0.0.1:18731 on the storage server and forwards it to the local service.
+# The key may only open this one forward (see docs/playbooks/labeling-service.md).
+[Unit]
+Description=Reverse SSH tunnel for the AI labeling service to data2
+After=network-online.target deadtrees-sam.service
+
+[Service]
+ExecStart=/usr/bin/ssh -N -T -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o IdentitiesOnly=yes -i %h/.ssh/deadtrees-sam-tunnel -R 127.0.0.1:18731:127.0.0.1:18731 sam-tunnel@data2.deadtrees.earth
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=default.target

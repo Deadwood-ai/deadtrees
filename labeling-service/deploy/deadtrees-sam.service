@@ -1,0 +1,19 @@
+# systemd user unit on the processing server: ~/.config/systemd/user/deadtrees-sam.service
+[Unit]
+Description=DeadTrees AI labeling service (SAM 3), localhost only
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/prod/deadtrees/labeling-service
+Environment=SAM_CHECKPOINT=%h/models/sam3
+Environment=HF_HUB_OFFLINE=1
+Environment=SAM_IDLE_UNLOAD_S=900
+Environment=SAM_GPU_FRACTION=0.35
+ExecStart=%h/.local/share/deadtrees-sam/venv/bin/uvicorn sam_service.app:create_app --factory --host 127.0.0.1 --port 18731
+Restart=on-failure
+RestartSec=10
+Nice=5
+MemoryMax=16G
+
+[Install]
+WantedBy=default.target
