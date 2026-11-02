@@ -1,4 +1,4 @@
-import { Outlet, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Outlet, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { App as AntdApp, ConfigProvider, Layout } from "antd";
 import { lazy, Suspense, useEffect } from "react";
 import { trackPageView, initializePostHog } from "./utils/analytics";
@@ -22,12 +22,9 @@ const HomePage = lazy(() => import("./pages/Home"));
 const ProfilePage = lazy(() => import("./pages/Profile"));
 const Dataset = lazy(() => import("./pages/Dataset"));
 const DatasetAudit = lazy(() => import("./pages/DatasetAudit"));
-const DatasetMLTiles = lazy(() => import("./pages/DatasetMLTiles"));
 const DatasetReferencePatchEditor = lazy(
   () => import("./pages/DatasetReferencePatchEditor"),
 );
-const DatasetLabelEditor = lazy(() => import("./pages/DatasetLabelEditor"));
-const DatasetCorrections = lazy(() => import("./pages/DatasetCorrections"));
 const Deadtrees = lazy(() => import("./pages/Deadtrees"));
 const PriwaField = lazy(() => import("./pages/PriwaField"));
 const Releases = lazy(() => import("./pages/Releases"));
@@ -75,8 +72,6 @@ function LayoutWrapper() {
     "/deadtrees",
     "/priwa-field",
     "/dataset-audit",
-    "/dataset-label",
-    "/dataset-corrections",
     "/sign-in",
     "/sign-up",
     "/forgot-password",
@@ -174,10 +169,9 @@ function AppWithTracking() {
             path="dataset-audit/:id/reference-patches"
             element={<DatasetReferencePatchEditor />}
           />
-          {/* Old route kept for backward compatibility */}
           <Route
             path="dataset-audit/:id/ml-tiles"
-            element={<DatasetMLTiles />}
+            element={<RedirectWithId to="/dataset-audit/:id/reference-patches" />}
           />
           {/* Internal read-only operations workspace; gated by can_operate */}
           <Route path="factory" element={<FactoryLayout />}>
@@ -187,12 +181,9 @@ function AppWithTracking() {
             <Route path="datasets/:id" element={<FactoryDatasetDetail />} />
             <Route path="activity" element={<FactoryActivity />} />
           </Route>
-          <Route path="dataset-label/:id" element={<DatasetLabelEditor />} />
-          {/* Public labelling / corrections editor */}
-          <Route
-            path="dataset-corrections/:id"
-            element={<DatasetCorrections />}
-          />
+          {/* Retired editors: corrections now happen on the dataset page */}
+          <Route path="dataset-label/:id" element={<RedirectWithId to="/dataset/:id" />} />
+          <Route path="dataset-corrections/:id" element={<RedirectWithId to="/dataset/:id" />} />
           <Route path="deadtrees" element={<Deadtrees />} />
           <Route
             path="priwa-field"
@@ -260,4 +251,10 @@ export default function App() {
       </AntdApp>
     </ConfigProvider>
   );
+}
+
+/** Sends a retired route to its replacement, keeping the dataset id. */
+function RedirectWithId({ to }: { to: string }) {
+  const { id = "" } = useParams();
+  return <Navigate replace to={to.replace(":id", encodeURIComponent(id))} />;
 }
