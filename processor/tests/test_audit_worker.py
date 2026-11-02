@@ -42,6 +42,14 @@ class Query:
 		self.filters.append(lambda r: r.get(key) is not None and r.get(key) >= value)
 		return self
 
+	def gt(self, key, value):
+		self.filters.append(lambda r: r.get(key) is not None and r.get(key) > value)
+		return self
+
+	def lt(self, key, value):
+		self.filters.append(lambda r: r.get(key) is not None and r.get(key) < value)
+		return self
+
 	def order(self, key):
 		self.orders.append(key)
 		return self
@@ -280,9 +288,40 @@ def test_finished_datasets_are_queued_once_per_version():
 		)
 	queued(client, v, 2, 'backfill')  # already has a run of this version
 	h = handler()
-	assert worker.enqueue_ready(client, {'prediction_quality': h}, '2026-11-02T08:00') == {'prediction_quality': 1}
+	assert worker.enqueue_ready(client, {'prediction_quality': h}, '2026-11-02T08:00', '2026-11-02T10:00') == {
+		'prediction_quality': 1
+	}
 	assert sorted((r['dataset_id'], r['queue']) for r in client.tables['runs'].rows) == [(1, 'upload'), (2, 'backfill')]
-	assert worker.enqueue_ready(client, {'prediction_quality': h}, '2026-11-02T08:00') == {'prediction_quality': 0}
+	assert worker.enqueue_ready(client, {'prediction_quality': h}, '2026-11-02T08:00', '2026-11-02T10:00') == {
+		'prediction_quality': 0
+	}
+
+
+@pytest.mark.unit
+def test_every_finished_dataset_is_queued_however_many_pages_and_shared_timestamps(monkeypatch):
+	monkeypatch.setattr(runs, 'PAGE', 3)
+	client = Client()
+	version(client)
+	# seven datasets, five of them finished in the same second, more than two pages
+	times = ['2026-11-02T09:00'] * 5 + ['2026-11-02T09:01', '2026-11-02T09:02']
+	for dataset, at in zip((14, 3, 9, 1, 22, 5, 8), times):
+		client.tables['v2_statuses'].add(
+			{
+				'dataset_id': dataset,
+				'updated_at': at,
+				'current_status': 'idle',
+				'has_error': False,
+				'is_cog_done': True,
+				'is_combined_model_done': True,
+			}
+		)
+	marks = []
+	added = worker.enqueue_ready(
+		client, {'prediction_quality': handler()}, '2026-11-02T08:00', '2026-11-02T10:00', done=marks.append
+	)
+	assert added == {'prediction_quality': 7}
+	assert sorted(r['dataset_id'] for r in client.tables['runs'].rows) == [1, 3, 5, 8, 9, 14, 22]
+	assert marks == ['2026-11-02T09:00', '2026-11-02T09:01', '2026-11-02T09:02']
 
 
 @pytest.mark.unit

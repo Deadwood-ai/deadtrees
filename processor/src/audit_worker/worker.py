@@ -186,18 +186,23 @@ def tick(*, client, handlers: dict, put_image, benchmark: bool = False, token=''
 	)
 
 
-def enqueue_ready(client, handlers: dict, since: str) -> dict[str, int]:
-	"""Upload-queue runs of each active version for datasets that finished processing since `since`."""
+def enqueue_ready(client, handlers: dict, since: str, until: str, done=lambda at: None) -> dict[str, int]:
+	"""Upload-queue runs of each active version for datasets that finished processing in [since, until).
+
+	done(updated_at) is called after each page with its last row's time, so a stop between
+	pages resumes there (repeating a page only finds its runs already queued).
+	"""
 	active = runs.active_versions(client, handlers)
-	statuses = runs.recently_processed(client, since)
-	added = {}
-	for check, version_row in active.items():
-		handler = handlers[check]
-		ready = getattr(handler, 'ready', default_ready)
-		ids = [s['dataset_id'] for s in statuses if ready(s)]
-		evidence = getattr(handler, 'inputs', None)
-		inputs = {i: evidence(client, i) for i in ids} if evidence else None
-		added[check] = len(runs.enqueue(client, version_row, ids, 'upload', inputs=inputs))
+	added = dict.fromkeys(active, 0)
+	for statuses in runs.processed_pages(client, since, until):
+		for check, version_row in active.items():
+			handler = handlers[check]
+			ready = getattr(handler, 'ready', default_ready)
+			ids = [s['dataset_id'] for s in statuses if ready(s)]
+			evidence = getattr(handler, 'inputs', None)
+			inputs = {i: evidence(client, i) for i in ids} if evidence else None
+			added[check] += len(runs.enqueue(client, version_row, ids, 'upload', inputs=inputs))
+		done(statuses[-1]['updated_at'])
 	return added
 
 
@@ -239,7 +244,7 @@ def run_forever(*, connect, handlers: dict, put_image, benchmark: bool = False, 
 				continue
 		if not benchmark and time.monotonic() >= next_enqueue:
 			started = runs.now()
-			enqueue_ready(client, handlers, since)
+			enqueue_ready(client, handlers, since, started, done=write_watermark)
 			write_watermark(started)
 			sweep(client, handlers, (datetime.now(timezone.utc) - timedelta(days=7)).isoformat())
 			since, next_enqueue = started, time.monotonic() + ENQUEUE_SECONDS

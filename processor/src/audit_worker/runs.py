@@ -210,16 +210,39 @@ def enqueue(
 	return new
 
 
-def recently_processed(client, since: str, limit: int = 1000) -> list[dict]:
-	"""Status rows of datasets that finished a processing step since `since` and are idle without error."""
-	return (
-		client.table('v2_statuses')
-		.select('*')
-		.gte('updated_at', since)
-		.eq('current_status', 'idle')
-		.eq('has_error', False)
-		.order('updated_at')
-		.limit(limit)
-		.execute()
-		.data
-	)
+PAGE = 1000
+
+
+def processed_pages(client, since: str, until: str, page: int | None = None):
+	"""Status rows of idle, error-free datasets updated in [since, until), page by page.
+
+	Ordered by (updated_at, dataset_id) with a keyset cursor, so no row is skipped when
+	many share one timestamp and nothing moves between pages.
+	"""
+	page = page or PAGE
+
+	def base():
+		return client.table('v2_statuses').select('*').eq('current_status', 'idle').eq('has_error', False)
+
+	cursor_at, cursor_id = since, None
+	while True:
+		rows = []
+		if cursor_id is not None:
+			# the rest of the rows that share the cursor's timestamp
+			rows = (
+				base()
+				.eq('updated_at', cursor_at)
+				.gt('dataset_id', cursor_id)
+				.order('dataset_id')
+				.limit(page)
+				.execute()
+				.data
+			)
+		if len(rows) < page:
+			later = base().lt('updated_at', until)
+			later = later.gt('updated_at', cursor_at) if cursor_id is not None else later.gte('updated_at', cursor_at)
+			rows += later.order('updated_at').order('dataset_id').limit(page - len(rows)).execute().data
+		if not rows:
+			return
+		yield rows
+		cursor_at, cursor_id = rows[-1]['updated_at'], rows[-1]['dataset_id']
