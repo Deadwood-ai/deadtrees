@@ -10,6 +10,15 @@ type PixelPolygon = { type: "Polygon"; coordinates: number[][][] };
 type PixelFeature = { type: "Feature"; geometry: PixelPolygon; properties?: Record<string, unknown> };
 export type PixelFeatureCollection = { type: "FeatureCollection"; features: PixelFeature[] };
 
+/** The service accepts view images up to this many pixels on the longest side. */
+export const MAX_CAPTURE_SIDE = 2048;
+
+/** Factor that shrinks a map view of this size to fit the service's limit (never enlarges). */
+export function captureScale(width: number, height: number, maxSide = MAX_CAPTURE_SIDE): number {
+  const longest = Math.max(width, height);
+  return longest > maxSide ? maxSide / longest : 1;
+}
+
 type PixelToCoordinate = (pixel: [number, number]) => number[] | null;
 
 export function toPixelFeatureCollection(raw: unknown): PixelFeatureCollection | null {
