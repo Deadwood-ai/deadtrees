@@ -1,0 +1,14 @@
+# Versions tested on the processing server (RTX 3090, CUDA 12.6) on 2 Nov 2026.
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch==2.7.1
+torchvision==0.22.1
+transformers==5.18.0
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+python-multipart==0.0.33
+opencv-python-headless==5.0.0.93
+pillow==13.0.0
+numpy==2.5.4
+# tests
+pytest
+httpx==0.28.1

@@ -15,6 +15,7 @@ from .routers import (
 	priwa_warnkarte,
 	dataset_access,
 	disturbance_benchmark,
+	labeling,
 )
 
 from .access.tickets import redact_file_tickets
@@ -83,6 +84,9 @@ app.include_router(dataset_access.router)
 
 # add the core-team disturbance benchmark files
 app.include_router(disturbance_benchmark.router)
+
+# add the signed-in check for the AI labeling service
+app.include_router(labeling.router)
 
 # add the download routes to the app
 # app.include_router(download.download_app)
