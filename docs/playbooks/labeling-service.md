@@ -39,11 +39,27 @@ The tunnel key `~/.ssh/deadtrees-sam-tunnel` is used for nothing else. On data2
 its `authorized_keys` line for the no-shell account `sam-tunnel` reads:
 
 ```text
-restrict,port-forwarding,permitlisten="127.0.0.1:18731",command="/usr/sbin/nologin" ssh-ed25519 <key> deadtrees-sam-tunnel
+restrict,port-forwarding,permitlisten="127.0.0.1:18731",permitopen="none",command="/usr/sbin/nologin" ssh-ed25519 <key> deadtrees-sam-tunnel
 ```
 
-It can open that one listener on data2's loopback and nothing else: no shell,
-no other forwards.
+`permitlisten` only limits remote forwards, so sshd also gets a rule for this
+account in `/etc/ssh/sshd_config.d/deadtrees-sam-tunnel.conf`:
+
+```text
+Match User sam-tunnel
+    AllowTcpForwarding remote
+    PermitOpen none
+    PermitListen 127.0.0.1:18731
+    AllowAgentForwarding no
+    AllowStreamLocalForwarding no
+    X11Forwarding no
+    PermitTTY no
+    ForceCommand /usr/sbin/nologin
+```
+
+Together they allow one listener on data2's loopback and nothing else: no
+local forwards into data2, no shell, no agent or socket forwarding. Check with
+`sshd -T -C user=sam-tunnel,host=x,addr=127.0.0.2`.
 
 ## data2
 
