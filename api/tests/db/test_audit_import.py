@@ -106,7 +106,7 @@ def shifted(footprint, n):
 	return {'type': 'Polygon', 'coordinates': [ring]}
 
 
-def gold_root(tmp_path, dataset):
+def gold_root(tmp_path, dataset, frozen='holdout'):
 	root = tmp_path / 'bench'
 	(root / 'gold-crops' / str(dataset)).mkdir(parents=True)
 	for name, color in (('raw.jpg', 'green'), ('deadwood-fill.png', 'blue'), ('forest_cover-fill.png', 'yellow')):
@@ -119,7 +119,7 @@ def gold_root(tmp_path, dataset):
 			'mpp': 0.05,
 			'prefix': f'gold-crops/{dataset}/',
 			'source': 'gold crop',
-			'split': 'holdout',
+			'split': 'batch3',
 		},
 		{
 			'id': f'gold-{dataset}-2',
@@ -131,6 +131,9 @@ def gold_root(tmp_path, dataset):
 			'split': 'batch3',
 		},
 	]
+	graded = {c['id'] for c in crops}
+	# an earlier crop of the dataset that was never graded still fixes its split
+	crops.append({**crops[0], 'id': f'gold-{dataset}-old', 'split': frozen})
 	(root / 'gold-test.json').write_text(json.dumps(crops))
 	labels = sqlite3.connect(root / 'gold-labels.sqlite3')
 	labels.execute('CREATE TABLE labels (crop_id TEXT PRIMARY KEY, payload TEXT, updated_at TEXT)')
@@ -161,6 +164,7 @@ def gold_root(tmp_path, dataset):
 		{
 			'gold_id': c['id'],
 			'dataset_id': dataset,
+			'ortho_sha256': SHA,
 			'footprint': shifted(footprint, n),
 			'mpp': 0.05,
 			'size_px': 1024,
@@ -172,13 +176,24 @@ def gold_root(tmp_path, dataset):
 			},
 		}
 		for n, c in enumerate(crops)
+		if c['id'] in graded
 	]
 	return root, manifest
 
 
+def dataset_with_split(db, split):
+	"""A dataset whose id hashes to the given side, to tell a frozen split from the hash."""
+	dataset = next(i for i in range(9_000_000, 9_001_000) if audit_import.hash_split(i) == split)
+	db.execute(
+		"INSERT INTO public.v2_datasets(id,user_id,file_name,license,platform) VALUES (%s,%s,'g.tif','CC BY','drone')",
+		(dataset, create_user(db)),
+	)
+	return dataset
+
+
 def test_gold_crops_become_a_frozen_benchmark_of_truth_rows(db, tmp_path):
 	grader = create_user(db, can_audit=True)
-	dataset = create_dataset(db, create_user(db))
+	dataset = dataset_with_split(db, 'dev')
 	db.execute(
 		'INSERT INTO public.v2_orthos(dataset_id,ortho_file_name,version,ortho_file_size,sha256,created_at) '
 		"VALUES (%s,'o.tif',1,1,%s,'2026-01-01')",
@@ -237,14 +252,27 @@ def test_gold_crops_become_a_frozen_benchmark_of_truth_rows(db, tmp_path):
 	]
 	with pytest.raises(SystemExit):
 		audit_import.import_gold(db, plan, str(grader))
+	assert audit_import.benchmark_exists(db)
+
+	# copies never replace stored evidence: the same file again is fine, another one is refused
+	target = tmp_path / 'storage'
+	audit_import.copy_images(plan, str(target))
+	stored = target / 'audit/benchmarks/pq-gold-dt1272' / f'gold-{dataset}' / 'raw.jpg'
+	before = stored.read_bytes()
+	audit_import.copy_images(plan, str(target))
+	Image.new('RGB', (64, 64), 'red').save(plan[0]['files']['raw'])
+	with pytest.raises(SystemExit):
+		audit_import.copy_images(plan, str(target))
+	assert stored.read_bytes() == before
 
 
 def test_gold_crops_on_a_replaced_ortho_or_without_a_footprint_are_left_out(db, tmp_path):
 	dataset = create_dataset(db, create_user(db))
+	# the ortho row kept its creation date when its content was replaced
 	db.execute(
 		'INSERT INTO public.v2_orthos(dataset_id,ortho_file_name,version,ortho_file_size,sha256,created_at) '
-		"VALUES (%s,'o.tif',1,1,%s,'2026-10-20')",
-		(dataset, SHA),
+		"VALUES (%s,'o.tif',1,1,%s,'2026-01-01')",
+		(dataset, 'd' * 64),
 	)
 	root, manifest = gold_root(tmp_path, dataset)
 	manifest[1]['footprint'] = None
@@ -252,39 +280,67 @@ def test_gold_crops_on_a_replaced_ortho_or_without_a_footprint_are_left_out(db, 
 	assert plan == []
 	assert sorted(problems) == [
 		f'gold-{dataset}-2: manifest lacks footprint',
-		f'gold-{dataset}: the ortho was replaced after grading',
+		f'gold-{dataset}: the ortho was replaced since the crop was cut',
 	]
 
 
-def test_test_crops_get_their_footprint_from_the_cog_window(db, tmp_path):
-	dataset = create_dataset(db, create_user(db))
-	geo = {'CRS': 'EPSG:3857', 'Origin': [868_000.0, 6_100_000.0], 'Resolution': [0.05, -0.05]}
-	db.execute(
-		'INSERT INTO public.v2_cogs(dataset_id,cog_file_size,cog_file_name,version,cog_path,cog_info) '
-		"VALUES (%s,1,'c.tif',1,'x/c.tif',%s)",
-		(dataset, json.dumps({'GEO': geo})),
-	)
-	root = tmp_path / 'bench'
-	(root / 'datasets' / str(dataset)).mkdir(parents=True)
-	(root / 'datasets' / str(dataset) / 'evidence.json').write_text(
-		json.dumps(
-			{
-				'cog': {'path': 'x/c.tif', 'version': 1},
-				'label_ids': {'deadwood': 5, 'forest_cover': 6},
-				'views': [{'name': 'n1', 'window': [200, 100, 1024, 1024], 'size': [1024, 1024]}],
-			}
-		)
-	)
-	crop = {
-		'id': f'{dataset}-N1',
-		'dataset_id': dataset,
-		'view': 'n1',
-		'mpp': 0.05,
-		'prefix': f'datasets/{dataset}/n1-',
+def test_test_crops_take_footprint_and_ortho_from_the_cog_when_the_pixels_match(db, tmp_path):
+	import numpy as np
+	import rasterio
+	from rasterio.transform import from_origin
+
+	dataset, moved = (create_dataset(db, create_user(db)) for _ in range(2))
+	root, cogs = tmp_path / 'bench', tmp_path / 'cogs'
+	(cogs / 'x').mkdir(parents=True)
+	rng = np.random.default_rng(7)
+	# structure at the scale of the comparison, as in an orthophoto, not pixel noise
+	pixels = np.kron(rng.integers(0, 255, (3, 64, 64)), np.ones((1, 32, 32))).astype(np.uint8)
+	profile = {
+		'driver': 'GTiff',
+		'width': 2048,
+		'height': 2048,
+		'count': 3,
+		'dtype': 'uint8',
+		'crs': 'EPSG:3857',
+		'transform': from_origin(868_000.0, 6_100_000.0, 0.05, 0.05),
 	}
-	entries, problems = audit_import.test_crop_entries(db, root, [crop])
-	assert problems == []
-	ring = entries[0]['footprint']['coordinates'][0]
+	with rasterio.open(cogs / 'x' / 'c.tif', 'w', **profile) as dst:
+		dst.write(pixels)
+	window = [200, 100, 1024, 1024]  # column, row, width, height
+	for ds in (dataset, moved):
+		db.execute(
+			"INSERT INTO public.v2_cogs(dataset_id,cog_file_size,cog_file_name,version,cog_path) VALUES (%s,1,'c.tif',1,'x/c.tif')",
+			(ds,),
+		)
+		db.execute(
+			"INSERT INTO public.v2_orthos(dataset_id,ortho_file_name,version,ortho_file_size,sha256) VALUES (%s,'o.tif',1,1,%s)",
+			(ds, SHA),
+		)
+		(root / 'datasets' / str(ds)).mkdir(parents=True)
+		(root / 'datasets' / str(ds) / 'evidence.json').write_text(
+			json.dumps(
+				{
+					'cog': {'path': 'x/c.tif', 'version': 1},
+					'label_ids': {'deadwood': 5, 'forest_cover': 6},
+					'views': [{'name': 'n1', 'window': window, 'size': [1024, 1024]}],
+				}
+			)
+		)
+	cut = pixels[:, 100:1124, 200:1224].transpose(1, 2, 0)
+	Image.fromarray(cut).save(root / 'datasets' / str(dataset) / 'n1-raw.jpg', quality=85)
+	# a crop whose stored image shows another place no longer matches the ortho
+	Image.fromarray(pixels[:, 900:1924, 900:1924].transpose(1, 2, 0)).save(
+		root / 'datasets' / str(moved) / 'n1-raw.jpg'
+	)
+	crops = [
+		{'id': f'{ds}-N1', 'dataset_id': ds, 'view': 'n1', 'mpp': 0.05, 'prefix': f'datasets/{ds}/n1-'}
+		for ds in (dataset, moved)
+	]
+	entries, problems = audit_import.test_crop_entries(db, root, crops, cog_root=str(cogs))
+	assert problems == [f'{moved}-N1: the stored image does not match the current ortho']
+	(entry,) = entries
+	assert entry['ortho_sha256'] == SHA and entry['label_ids'] == {'deadwood': 5, 'forest_cover': 6}
+	ring = entry['footprint']['coordinates'][0]
 	lons, lats = [p[0] for p in ring], [p[1] for p in ring]
 	# column 200, row 100, then 1024 px at 5 cm = 51.2 m on the 3857 grid
 	expected = db.execute(
@@ -292,5 +348,4 @@ def test_test_crops_get_their_footprint_from_the_cog_window(db, tmp_path):
 		'(SELECT ST_Transform(ST_MakeEnvelope(868010,6099943.8,868061.2,6099995,3857),4326) g) e'
 	).fetchone()
 	assert (min(lons), max(lons), min(lats), max(lats)) == pytest.approx(expected)
-	assert entries[0]['label_ids'] == {'deadwood': 5, 'forest_cover': 6}
-	assert entries[0]['files']['raw'] == f'datasets/{dataset}/n1-raw.jpg'
+	assert entry['files']['raw'] == f'datasets/{dataset}/n1-raw.jpg'

@@ -7,12 +7,16 @@ audits  Saved dataset_audit rows become person rows marked
         but never count as benchmark truth: the audit is redone for every dataset.
         Rows without an auditor are skipped, and so is phenology until its check
         exists (dataset_audit keeps both).
-derive  Writes a crop manifest for the DT-1272 crops whose footprint the database
-        can give: the earlier test crops (COG window plus the COG's geotransform)
-        and the reference patch crops (the patch footprint). Read-only.
+derive  Writes a crop manifest for the DT-1272 crops whose place is known: the
+        earlier test crops (their COG window) and the reference patch crops (the
+        patch footprint). A crop is kept only when its stored image shows the
+        current COG's pixels; then the current ortho sha256 is its identity.
+        Reads the database and the COGs only.
 gold    The graded DT-1272 crops become the frozen benchmark pq-gold-dt1272 v1:
         off-grid crops, their stored images, the grader's person rows (benchmark
-        truth) and the members with their dev/holdout split.
+        truth) and the members with their dev/holdout split. Each manifest entry
+        names the ortho sha256 its crop was cut from; crops on a replaced or
+        unknown ortho are left out. Stored images are never replaced.
 
 Every command is a dry run that reads the production database read-only and
 reports counts, unless --execute is given. --execute writes in one transaction
@@ -38,7 +42,7 @@ import sqlite3
 import subprocess
 import sys
 from collections import Counter
-from datetime import datetime
+from urllib.parse import quote
 from pathlib import Path
 
 import psycopg
@@ -47,6 +51,11 @@ ANALYST_ENV = 'DEADTREES_ANALYST_DATABASE_URL'
 LEGACY = 'dataset_audit'
 BENCHMARK = ('pq-gold-dt1272', 'v1')
 STORAGE_PREFIX = 'audit/benchmarks/pq-gold-dt1272'
+COG_ROOT = 'https://data2.deadtrees.earth/cogs/v1/'
+# a stored crop matches the current COG window when its median 16 px block correlation
+# reaches this (same place 0.94-0.998 on the DT-1272 test crops, other places about 0)
+PIXEL_MATCH = 0.8
+MIN_BLOCKS = 32
 OVERLAYS = {'deadwood': 'deadwood_overlay', 'forest_cover': 'forest_cover_overlay'}
 # DT-1272 crop splits: tune and holdout were frozen by dataset; the later batches
 # take the split their dataset already has, else the hash split
@@ -173,57 +182,96 @@ def import_audits(conn) -> int:
 # ---------------------------------------------------------------------------
 
 
-def test_crop_entries(conn, root: Path, crops: list[dict]) -> tuple[list[dict], list[str]]:
-	"""Earlier test crops (datasets/<id>/<view>-*) and reference patch crops (patch-truth/<id>/)."""
+def same_pixels(src, window, raw_path: Path) -> bool:
+	"""Whether the stored crop shows the COG's current pixels in that window.
+
+	Luminance at 256 px is compared block by block (16 px): the median block
+	correlation is high for the same place and near zero for another, while JPEG
+	loss and the darkening outside the AOI, which scale whole blocks, do not matter.
+	Too few blocks with texture leave the crop unverified.
+	"""
+	import numpy as np
+	from PIL import Image
+	from rasterio.enums import Resampling
+
+	data = src.read([1, 2, 3], window=window, out_shape=(3, 256, 256), resampling=Resampling.average, boundless=True)
+	current = 0.299 * data[0] + 0.587 * data[1] + 0.114 * data[2]
+	with Image.open(raw_path) as image:
+		stored = np.asarray(image.convert('L').resize((256, 256)), dtype=float)
+	scores = []
+	for y in range(0, 256, 16):
+		for x in range(0, 256, 16):
+			a, b = current[y : y + 16, x : x + 16].ravel(), stored[y : y + 16, x : x + 16].ravel()
+			if a.std() > 2 and b.std() > 2:
+				scores.append(np.corrcoef(a, b)[0, 1])
+	return len(scores) >= MIN_BLOCKS and float(np.median(scores)) >= PIXEL_MATCH
+
+
+def test_crop_entries(conn, root: Path, crops: list[dict], cog_root: str = COG_ROOT) -> tuple[list[dict], list[str]]:
+	"""Earlier test crops (datasets/<id>/<view>-*) and reference patch crops (patch-truth/<id>/).
+
+	The footprint comes from the window on the dataset's current COG. A crop counts as cut
+	from the current ortho only when its stored image shows the same pixels; then the
+	ortho's current sha256 is its identity.
+	"""
+	import rasterio
+	from rasterio.warp import transform_geom
+	from rasterio.windows import Window, bounds, from_bounds
+
 	entries, problems = [], []
 	for crop in crops:
 		prefix = crop['prefix']
+		if not prefix.startswith(('datasets/', 'patch-truth/')):
+			continue
 		files = {
 			'raw': f'{prefix}raw.jpg',
 			'deadwood_overlay': f'{prefix}deadwood-fill.png',
 			'forest_cover_overlay': f'{prefix}forest_cover-fill.png',
 		}
-		if prefix.startswith('datasets/'):
-			evidence = json.loads((root / 'datasets' / str(crop['dataset_id']) / 'evidence.json').read_text())
-			view = next((v for v in evidence['views'] if v['name'] == crop['view']), None)
-			cog = conn.execute(
-				"SELECT cog_path, version, cog_info->'GEO' FROM public.v2_cogs WHERE dataset_id = %s",
-				(crop['dataset_id'],),
-			).fetchone()
-			if view is None or cog is None or (cog[0], cog[1]) != (evidence['cog']['path'], evidence['cog']['version']):
-				problems.append(f'{crop["id"]}: the COG changed since the crop was cut')
-				continue
-			geo = cog[2]
-			x0, y0, width, height = view['window']  # rasterio Window: column, row, width, height
-			x1, y1 = x0 + width, y0 + height
-			ox, oy = geo['Origin']
-			rx, ry = geo['Resolution']
-			srid = int(geo['CRS'].split(':')[1])
-			footprint = conn.execute(
-				'SELECT ST_AsGeoJSON(ST_Transform(ST_MakeEnvelope(%s, %s, %s, %s, %s), 4326))::jsonb',
-				(ox + x0 * rx, oy + y1 * ry, ox + x1 * rx, oy + y0 * ry, srid),
-			).fetchone()[0]
-			labels = evidence['label_ids']
-			size = view['size'][0]
-		elif prefix.startswith('patch-truth/'):
-			patch_id = int(prefix.split('/')[1])
-			truth = json.loads((root / prefix / 'truth.json').read_text())
-			row = conn.execute(
-				'SELECT ST_AsGeoJSON(ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON(geometry::text), epsg_code), 4326))::jsonb '
-				'FROM public.reference_patches WHERE id = %s AND dataset_id = %s',
-				(patch_id, crop['dataset_id']),
-			).fetchone()
-			if row is None:
-				problems.append(f'{crop["id"]}: reference patch {patch_id} is missing')
-				continue
-			footprint, labels, size = row[0], None, truth['size'][0]
-		else:
+		row = conn.execute(
+			'SELECT c.cog_path, c.version, o.sha256 FROM public.v2_cogs c JOIN public.v2_orthos o USING (dataset_id) '
+			'WHERE c.dataset_id = %s',
+			(crop['dataset_id'],),
+		).fetchone()
+		if row is None:
+			problems.append(f'{crop["id"]}: the dataset has no COG')
 			continue
+		cog_path, cog_version, ortho_sha256 = row
+		labels = None
+		with rasterio.open(f'{cog_root.rstrip("/")}/{quote(cog_path, safe="/")}') as src:
+			if prefix.startswith('datasets/'):
+				evidence = json.loads((root / 'datasets' / str(crop['dataset_id']) / 'evidence.json').read_text())
+				view = next((v for v in evidence['views'] if v['name'] == crop['view']), None)
+				if view is None or (cog_path, cog_version) != (evidence['cog']['path'], evidence['cog']['version']):
+					problems.append(f'{crop["id"]}: the COG changed since the crop was cut')
+					continue
+				window = Window(*view['window'])  # column, row, width, height
+				labels, size = evidence['label_ids'], view['size'][0]
+			else:
+				patch_id = int(prefix.split('/')[1])
+				patch = conn.execute(
+					'SELECT ST_XMin(g), ST_YMin(g), ST_XMax(g), ST_YMax(g) FROM (SELECT ST_Transform('
+					'ST_SetSRID(ST_GeomFromGeoJSON(geometry::text), epsg_code), %s) g FROM public.reference_patches '
+					'WHERE id = %s AND dataset_id = %s) p',
+					(src.crs.to_epsg(), patch_id, crop['dataset_id']),
+				).fetchone()
+				if patch is None:
+					problems.append(f'{crop["id"]}: reference patch {patch_id} is missing')
+					continue
+				window = from_bounds(*patch, transform=src.transform)
+				size = json.loads((root / prefix / 'truth.json').read_text())['size'][0]
+			if not same_pixels(src, window, root / files['raw']):
+				problems.append(f'{crop["id"]}: the stored image does not match the current ortho')
+				continue
+			left, bottom, right, top = bounds(window, src.transform)
+			ring = [(left, bottom), (right, bottom), (right, top), (left, top), (left, bottom)]
+			footprint = transform_geom(src.crs, 'EPSG:4326', {'type': 'Polygon', 'coordinates': [ring]})
 		entries.append(
 			{
 				'gold_id': crop['id'],
 				'dataset_id': crop['dataset_id'],
-				'footprint': footprint,
+				'ortho_sha256': ortho_sha256,
+				'footprint': {'type': 'Polygon', 'coordinates': [[list(p) for p in footprint['coordinates'][0]]]},
 				'mpp': crop['mpp'],
 				'size_px': size,
 				'label_ids': labels,
@@ -303,25 +351,31 @@ def load_labels(path: Path) -> dict[str, dict]:
 
 
 def plan_gold(conn, root: Path, manifest: list[dict], labels: dict[str, dict]) -> tuple[list[dict], list[str]]:
-	"""Graded crops with everything an import needs; problems name the crops left out."""
-	crops = {c['id']: c for c in json.loads((root / 'gold-test.json').read_text())}
+	"""Graded crops with everything an import needs; problems name the crops left out.
+
+	Each manifest entry names the ortho (sha256) its crop was cut from; a crop whose
+	ortho has been replaced since, or whose ortho is unknown, is left out.
+	"""
+	inventory = json.loads((root / 'gold-test.json').read_text())
+	crops = {c['id']: c for c in inventory}
 	entries = {e['gold_id']: e for e in manifest}
-	splits = member_splits([crops[i] for i in labels if i in crops])
+	# the frozen split follows every crop of a dataset, graded or not
+	splits = member_splits(inventory)
 	plan, problems = [], []
 	for crop_id, label in sorted(labels.items()):
 		entry, crop = entries.get(crop_id), crops.get(crop_id)
 		if crop is None or entry is None:
 			problems.append(f'{crop_id}: not in the manifest')
 			continue
-		missing = [k for k in ('footprint', 'mpp', 'size_px', 'files') if not entry.get(k)]
+		missing = [k for k in ('ortho_sha256', 'footprint', 'mpp', 'size_px', 'files') if not entry.get(k)]
 		if missing:
 			problems.append(f'{crop_id}: manifest lacks {", ".join(missing)}')
 			continue
 		ortho = conn.execute(
-			'SELECT sha256, created_at FROM public.v2_orthos WHERE dataset_id = %s', (crop['dataset_id'],)
+			'SELECT sha256 FROM public.v2_orthos WHERE dataset_id = %s', (crop['dataset_id'],)
 		).fetchone()
-		if ortho is None or ortho[1] > datetime.fromisoformat(label['graded_at']):
-			problems.append(f'{crop_id}: the ortho was replaced after grading')
+		if ortho is None or ortho[0] != entry['ortho_sha256']:
+			problems.append(f'{crop_id}: the ortho was replaced since the crop was cut')
 			continue
 		label_ids = entry.get('label_ids') or derived_labels(conn, crop['dataset_id'], label['graded_at'])
 		files = {}
@@ -336,7 +390,7 @@ def plan_gold(conn, root: Path, manifest: list[dict], labels: dict[str, dict]) -
 				{
 					'gold_id': crop_id,
 					'dataset_id': crop['dataset_id'],
-					'ortho_sha256': ortho[0],
+					'ortho_sha256': entry['ortho_sha256'],
 					'footprint': entry['footprint'],
 					'mpp': entry['mpp'],
 					'size_px': entry['size_px'],
@@ -412,7 +466,7 @@ def summarize_gold(plan: list[dict], problems: list[str]) -> dict:
 
 def import_gold(conn, plan: list[dict], assessor: str) -> int:
 	"""Benchmark, crops, images, person rows and members in the caller's transaction, then freeze."""
-	if conn.execute('SELECT 1 FROM audit.benchmarks WHERE name = %s AND version = %s', BENCHMARK).fetchone():
+	if benchmark_exists(conn):
 		raise SystemExit(f'benchmark {BENCHMARK[0]} {BENCHMARK[1]} already exists')
 	benchmark = conn.execute(
 		'INSERT INTO audit.benchmarks (check_key, name, version, description, created_by) '
@@ -486,12 +540,42 @@ def import_gold(conn, plan: list[dict], assessor: str) -> int:
 	return benchmark
 
 
+def benchmark_exists(conn) -> bool:
+	return (
+		conn.execute('SELECT 1 FROM audit.benchmarks WHERE name = %s AND version = %s', BENCHMARK).fetchone()
+		is not None
+	)
+
+
 def copy_images(plan: list[dict], target: str) -> None:
-	"""Copy every image to <target>/<storage path> before the rows that point at it exist."""
+	"""Copy every image to <target>/<storage path> before the rows that point at it exist.
+
+	A file already at its destination is never replaced: stored evidence stays exactly
+	what was judged. target is a local directory or an rsync host:path.
+	"""
 	for item in plan:
 		for image in image_rows(item):
-			destination = f'{target.rstrip("/")}/{image["storage_path"]}'
-			subprocess.run(['rsync', '-a', '--mkpath', str(image['source']), destination], check=True)
+			if ':' in target.split('/', 1)[0]:
+				subprocess.run(
+					[
+						'rsync',
+						'--ignore-existing',
+						'--mkpath',
+						'-a',
+						str(image['source']),
+						f'{target.rstrip("/")}/{image["storage_path"]}',
+					],
+					check=True,
+				)
+				continue
+			destination = Path(target) / image['storage_path']
+			destination.parent.mkdir(parents=True, exist_ok=True)
+			try:
+				with destination.open('xb') as out:
+					out.write(image['source'].read_bytes())
+			except FileExistsError:
+				if hashlib.sha256(destination.read_bytes()).hexdigest() != image['sha256']:
+					raise SystemExit(f'{destination} exists with other content; refusing to replace stored evidence')
 
 
 # ---------------------------------------------------------------------------
@@ -511,6 +595,7 @@ def main(argv: list[str] | None = None) -> int:
 		if name != 'audits':
 			p.add_argument('--root', type=Path, required=True, help='the DT-1272 benchmark folder')
 	sub.choices['derive'].add_argument('--output', type=Path, required=True)
+	sub.choices['derive'].add_argument('--cog-root', default=COG_ROOT, help='where the COGs are read from')
 	gold = sub.choices['gold']
 	gold.add_argument('--manifest', type=Path, action='append', required=True)
 	gold.add_argument('--labels', type=Path, help='defaults to <root>/gold-labels.sqlite3')
@@ -532,7 +617,7 @@ def main(argv: list[str] | None = None) -> int:
 				report['inserted'] = import_audits(conn)
 		elif args.command == 'derive':
 			crops = json.loads((args.root / 'gold-test.json').read_text())
-			entries, problems = test_crop_entries(conn, args.root, crops)
+			entries, problems = test_crop_entries(conn, args.root, crops, args.cog_root)
 			args.output.write_text(json.dumps(entries, indent=1))
 			report = {'entries': len(entries), 'problems': problems, 'output': str(args.output)}
 		else:
@@ -541,6 +626,8 @@ def main(argv: list[str] | None = None) -> int:
 			plan, problems = plan_gold(conn, args.root, manifest, labels)
 			report = summarize_gold(plan, problems)
 			if writing:
+				if benchmark_exists(conn):
+					raise SystemExit(f'benchmark {BENCHMARK[0]} {BENCHMARK[1]} already exists; nothing copied')
 				copy_images(plan, args.image_target)
 				report['benchmark_id'] = import_gold(conn, plan, args.assessor_user_id)
 		if writing:
