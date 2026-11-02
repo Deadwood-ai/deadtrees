@@ -785,7 +785,14 @@ def test_analyst_reads_every_audit_table_and_view_without_writing(db):
 		db.execute('DELETE FROM audit.assessments WHERE dataset_id=%s', (dataset,))
 
 
-DOWN = """
+# Later check migrations build on the base and come down first.
+LATER_CHECKS_DOWN = """
+DROP FUNCTION audit.store_dataset_evaluation(bigint, jsonb);
+DROP FUNCTION audit.duplicate_candidates(bigint, bigint, text, integer, real);
+DROP TABLE audit.image_hashes;
+"""
+
+DOWN = LATER_CHECKS_DOWN + """
 DROP VIEW audit.review_queue;
 DROP VIEW audit.disagreements;
 DROP VIEW audit.current_assessments;
