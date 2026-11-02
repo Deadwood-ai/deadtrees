@@ -79,17 +79,27 @@ nothing counts as an audit until an auditor saves.
 
 ## What it stores
 
-The stage writes both through `store_georef_check`, in one transaction.
+The stage writes everything through `store_georef_check`, in one transaction.
 
-- `v2_georef_checks`, one row per dataset, replaced on rerun:
+- `v2_georef_checks`, one row per dataset, replaced on rerun (the audit page reads
+  it until it moves to the `audit` schema):
   - the decision and evidence level, with the median p90
   - for each reference: inliers, coverage, p90 and holdout p90s, its vote, and
     up to 200 matched point pairs in lon/lat
   - the keyless tile URL of each reference, for the audit viewer
   - provider errors
+- The audit check base (`docs/audit-checks.md`), check `georef`:
+  - a check version per rules and matcher version
+    (`georef-rules-v1_romav2.0.1`), registered on first use as `review_all`;
+  - a `done` run per check, every run kept, with the reference evidence and the
+    judged ortho (`inputs.ortho_sha256`); queue `backfill` for a check-only task,
+    else `upload`;
+  - `audit.current_runs` pointing at it;
+  - one dataset-level model assessment, layer `georef`: Good is `ok`, Poor is
+    `major`, uncertain is `unsure`. Georef needs no dataset rule.
 - A Good or Poor call becomes the `is_georeferenced` row in
-  `dataset_audit_suggestions` (source `georef_check_v1`, reason = evidence
-  level). An uncertain call removes it.
+  `dataset_audit_suggestions` (source `audit:georef/<version>`, reason =
+  evidence level). An uncertain call removes it.
 
 ## How it reaches auditors
 

@@ -165,15 +165,20 @@ def _check(decision, level, p90=3.0):
 @pytest.mark.unit
 def test_good_or_poor_becomes_the_is_georeferenced_suggestion_and_uncertain_none():
 	good = suggestion_row(7, _check('good', 'strong'))
-	assert (good['field'], good['value'], good['reason'], good['source']) == (
-		'is_georeferenced',
-		True,
-		'strong',
-		'georef_check_v1',
-	)
+	assert (good['field'], good['value'], good['reason']) == ('is_georeferenced', True, 'strong')
 	assert good['details']['references'] == ['esri']
 	assert suggestion_row(7, _check('poor', 'qualified', 22.0))['value'] is False
 	assert suggestion_row(7, _check('uncertain', 'insufficient')) is None
+
+
+@pytest.mark.unit
+def test_a_check_only_task_is_an_audit_backfill_and_processing_an_upload():
+	from types import SimpleNamespace
+
+	from processor.src.process_georef_check import audit_queue
+
+	assert audit_queue(SimpleNamespace(task_types=['georef_check_v1'])) == 'backfill'
+	assert audit_queue(SimpleNamespace(task_types=['geotiff', 'cog', 'georef_check_v1'])) == 'upload'
 
 
 @pytest.mark.unit
@@ -301,7 +306,7 @@ def test_stage_stores_the_check_and_a_matching_audit_suggestion(georef_task, aut
 			client.table(settings.audit_suggestions_table)
 			.select('*')
 			.eq('dataset_id', georef_task.dataset_id)
-			.eq('source', 'georef_check_v1')
+			.eq('field', 'is_georeferenced')
 			.execute()
 			.data
 		)

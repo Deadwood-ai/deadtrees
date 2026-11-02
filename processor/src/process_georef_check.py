@@ -51,7 +51,7 @@ def process_georef_check(task: QueueTask, token: str, temp_dir: Path):
 		cog_path = _local_cog(cog, Path(temp_dir), token, task.dataset_id, ctx())
 		check = run_georef_check(str(cog_path), aoi, flight_date(dataset))
 		token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
-		_store(token, task.dataset_id, check)
+		_store(token, task, check)
 		a = check.assessment
 		logger.info(
 			'Georeferencing check completed',
@@ -136,7 +136,6 @@ def suggestion_row(dataset_id: int, check) -> dict | None:
 		'dataset_id': dataset_id,
 		'field': SUGGESTED_FIELD,
 		'value': a.decision == 'good',
-		'source': GEOREF_CHECK_TASK_TYPE,
 		'reason': a.evidence_level,  # strong / qualified / gross
 		'details': {
 			'p90_m': a.p90_m,
@@ -148,10 +147,21 @@ def suggestion_row(dataset_id: int, check) -> dict | None:
 	}
 
 
-def _store(token: str, dataset_id: int, check) -> None:
-	"""Check row and audit suggestion in one transaction (store_georef_check)."""
+def _store(token: str, task: QueueTask, check) -> None:
+	"""Check row, audit run with its model assessment, and audit suggestion in one
+	transaction (store_georef_check)."""
 	with use_client(token) as client:
 		client.rpc(
 			'store_georef_check',
-			{'p_check': check_row(dataset_id, check), 'p_suggestion': suggestion_row(dataset_id, check)},
+			{
+				'p_check': check_row(task.dataset_id, check),
+				'p_suggestion': suggestion_row(task.dataset_id, check),
+				'p_queue': audit_queue(task),
+			},
 		).execute()
+
+
+def audit_queue(task: QueueTask) -> str:
+	"""The audit run's queue: a task that runs only this check is a (re)check of a
+	stored dataset, anything else is part of processing an upload."""
+	return 'backfill' if list(task.task_types) == [GEOREF_CHECK_TASK_TYPE] else 'upload'

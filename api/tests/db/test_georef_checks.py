@@ -32,17 +32,45 @@ def check_json(dataset, decision, level, p90=None):
 	}
 
 
-def write_check(db, dataset, decision, level, p90=None):
+def write_check(db, dataset, decision, level, p90=None, queue='upload'):
 	"""Store a check and its suggestion the way the processor stage does."""
 	act_as(db, processor_user(db), PROCESSOR_EMAIL)
 	suggestion = (
 		None if decision == 'uncertain' else {'value': decision == 'good', 'reason': level, 'details': {'p90_m': p90}}
 	)
 	db.execute(
-		'SELECT public.store_georef_check(%s::jsonb, %s::jsonb)',
-		(json.dumps(check_json(dataset, decision, level, p90)), json.dumps(suggestion)),
+		'SELECT public.store_georef_check(%s::jsonb, %s::jsonb, %s)',
+		(json.dumps(check_json(dataset, decision, level, p90)), json.dumps(suggestion), queue),
 	)
 	as_admin(db)
+
+
+def test_each_check_is_an_audit_run_with_one_model_assessment(db):
+	dataset = create_dataset(db, create_user(db))
+	write_check(db, dataset, 'poor', 'strong', 22.6, queue='backfill')
+	write_check(db, dataset, 'uncertain', 'conflict')
+
+	runs = db.execute(
+		"SELECT r.queue, r.status, v.version, v.mode, v.is_active, r.evidence ? 'reference_evidence'"
+		' FROM audit.runs r JOIN audit.check_versions v ON v.id = r.check_version_id'
+		" WHERE r.dataset_id=%s AND r.check_key='georef' ORDER BY r.id",
+		(dataset,),
+	).fetchall()
+	assert runs == [
+		('backfill', 'done', 'georef-rules-v1_romav2.0.1', 'review_all', False, True),
+		('upload', 'done', 'georef-rules-v1_romav2.0.1', 'review_all', False, True),
+	]
+	# every run keeps its row; the current one is the latest, judged unsure by the matcher
+	assert db.execute(
+		"SELECT a.verdict::text, a.model, a.prompt_version, a.details->>'evidence_level'"
+		' FROM audit.current_runs c JOIN audit.assessments a ON a.run_id = c.run_id'
+		" WHERE c.dataset_id=%s AND c.check_key='georef'",
+		(dataset,),
+	).fetchall() == [('unsure', 'romav2.0.1', 'georef-rules-v1', 'conflict')]
+	assert db.execute(
+		"SELECT verdict::text, needs_review FROM audit.review_queue WHERE dataset_id=%s AND check_key='georef'",
+		(dataset,),
+	).fetchall() == [('unsure', True)]
 
 
 def audit_georeferencing(db, auditor, dataset, good):
@@ -66,7 +94,7 @@ def test_a_check_disagreeing_with_a_saved_audit_goes_to_re_review(db):
 
 	assert db.execute(QUEUE, (agrees,)).fetchall() == []
 	assert db.execute(QUEUE, (disagrees,)).fetchall() == [
-		('is_georeferenced', ['is_georeferenced'], 'suggestion_changed:georef_check_v1')
+		('is_georeferenced', ['is_georeferenced'], 'suggestion_changed:audit:georef/georef-rules-v1_romav2.0.1')
 	]
 	assert db.execute(QUEUE, (uncertain,)).fetchall() == []
 
