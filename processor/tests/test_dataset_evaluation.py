@@ -681,3 +681,68 @@ def test_the_handler_runs_after_the_cog_thumbnail_and_tiles_and_is_registered():
 	assert set(handlers['dataset_evaluation'].CONFIG['models']) == {'luna-medium', 'haiku-5.5'}
 	assert handler.ready({'is_cog_done': True, 'is_thumbnail_done': True, 'is_embeddings_done': True})
 	assert not handler.ready({'is_cog_done': True, 'is_thumbnail_done': True, 'is_embeddings_done': False})
+
+
+# ---------------------------------------------------------------------------
+# Empty COG
+# ---------------------------------------------------------------------------
+
+
+def never(prompt, images):
+	raise AssertionError('no model may be asked about an empty COG')
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('kept', [0, 6])
+def test_a_cog_without_a_usable_image_is_excluded_by_rule_without_a_model(tmp_path, kept):
+	rgb = np.zeros((1200, 1600, 3), np.uint8)
+	rgb[:kept, :kept] = forest(max(kept, 1), max(kept, 1))[:kept, :kept]  # a few stray pixels at most
+	empty = write_cog(tmp_path / 'empty.tif', rgb)
+	inputs = read_inputs(str(empty), overview_px=512, tiles=[Tile((0, 0, 512, 512), (7.8157, 48.0185))])
+
+	assert inputs.empty and inputs.crops == [] and inputs.settings['crop_picker'] is None
+	evaluation = evaluate(
+		inputs,
+		{'luna-medium': never, 'haiku-5.5': never},
+		ortho_sha256=SHA,
+		source_profile=RGB_PROFILE,
+		image_hash=None,
+		duplicate_candidates=[],
+		thumbnail=thumbnail_bytes(),
+	)
+	(call,) = evaluation.calls
+	assert (call.assessor_kind, call.model, call.prompt_version, call.verdict) == ('rule', 'empty_cog', 'v1', 'major')
+	assert call.modes == {'broken_ortho': {'likelihood': 100.0}} and call.details['reason'] == 'broken_ortho'
+	payload = store_payload(evaluation, inputs, 3327, SHA)
+	assert 'phash' not in payload and payload['crops'] == []
+	assert [i['kind'] for i in payload['images']] == ['overview', 'thumbnail']
+	json.dumps(payload)
+
+
+@pytest.mark.unit
+def test_the_handler_skips_the_duplicate_lookup_for_an_empty_cog(tmp_path, monkeypatch):
+	empty = write_cog(tmp_path / 'empty.tif', np.zeros((800, 800, 3), np.uint8))
+	monkeypatch.setattr(handler, 'local_cog', lambda *args: empty)
+	client = FakeClient(
+		{
+			'v2_cogs': [
+				{'dataset_id': 42, 'cog_file_size': 1, 'cog_file_name': 'c.tif', 'cog_path': 'u/c.tif', 'version': 1}
+			],
+			'v2_orthos': [
+				{'dataset_id': 42, 'ortho_file_name': 'o.tif', 'version': 1, 'ortho_file_size': 1, 'sha256': SHA}
+			],
+		}
+	)
+	uploaded = []
+	ctx = SimpleNamespace(
+		run={'id': 8, 'dataset_id': 42},
+		client=client,
+		token='t',
+		judges={'luna-medium': never, 'haiku-5.5': never},
+		put_image=lambda path, data, dataset_id: uploaded.append(path),
+	)
+	summary = handler.handle(ctx)
+
+	assert [name for name, _ in client.calls] == ['store_dataset_evaluation']
+	assert uploaded == [f'audit/dataset_evaluation/42/{SHA[:16]}/overview.jpg']
+	assert summary['coverage'] == {'crops': 0, 'crop_picker': None} and summary['cost'] == {}

@@ -57,13 +57,15 @@ def handle(ctx) -> dict:
 		cog_file = local_cog(Cog(**cogs[0]), Path(folder), ctx.token, dataset_id, log)
 		thumbnail = _thumbnail(client, dataset_id, Path(folder), ctx.token)
 		seen = read_inputs(str(cog_file), aoi, seed=dataset_id, tiles=tiles(client, dataset_id))
-	image_hash = phash(seen.overview, seen.valid)
-	candidates = (
-		client.schema('audit')
-		.rpc('duplicate_candidates', {'p_dataset_id': dataset_id, 'p_hash': image_hash, 'p_method': PHASH_METHOD})
-		.execute()
-		.data
-	)
+	image_hash, candidates = None, []
+	if not seen.empty:  # an empty COG is excluded by rule; there is nothing to compare
+		image_hash = phash(seen.overview, seen.valid)
+		candidates = (
+			client.schema('audit')
+			.rpc('duplicate_candidates', {'p_dataset_id': dataset_id, 'p_hash': image_hash, 'p_method': PHASH_METHOD})
+			.execute()
+			.data
+		)
 	evaluation = evaluate(
 		seen,
 		ctx.judges,

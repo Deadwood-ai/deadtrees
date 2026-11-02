@@ -16,18 +16,20 @@ import numpy as np
 from PIL import Image
 from shapely.geometry import mapping
 
-from .inputs import CROP_COUNT, CROP_MPP, CROP_PICKER, CROP_PX, GRID_PICKER, OVERVIEW_PX, Inputs
+from .inputs import CROP_COUNT, CROP_MPP, CROP_PICKER, CROP_PX, GRID_PICKER, MIN_VALID_SHARE, OVERVIEW_PX, Inputs
 from .prompt import PROMPT_VERSION, AnswerError, build_prompt, parse_answer
 from .rules import (
 	BAND_RULE,
 	DATASET_RULE,
 	DUPLICATE_RULE,
+	EMPTY_COG_RULE,
 	PHASH_METHOD,
 	RULE_CONFIG,
 	Call,
 	band_check,
 	dataset_rule,
 	duplicate_check,
+	empty_cog,
 )
 from .vocabulary import CHECK_KEY
 
@@ -45,8 +47,14 @@ CONFIG = {
 		'haiku-5.5': {'transport': 'claude', 'model': 'claude-haiku-5-5'},
 	},
 	'prompt_version': PROMPT_VERSION,
-	'rules': {'band': '/'.join(BAND_RULE), 'duplicates': '/'.join(DUPLICATE_RULE), 'dataset': '/'.join(DATASET_RULE)},
+	'rules': {
+		'band': '/'.join(BAND_RULE),
+		'duplicates': '/'.join(DUPLICATE_RULE),
+		'dataset': '/'.join(DATASET_RULE),
+		'empty_cog': '/'.join(EMPTY_COG_RULE),
+	},
 	'rule_config': RULE_CONFIG,
+	'min_valid_share': MIN_VALID_SHARE,
 	'phash': PHASH_METHOD,
 	'inputs': {
 		'overview_px': OVERVIEW_PX,
@@ -77,7 +85,7 @@ class ImageFile:
 class Evaluation:
 	images: list[ImageFile]
 	calls: list[Call]  # models first, then band, duplicates and the dataset rule
-	phash: int
+	phash: int | None  # None when there was no image to hash
 	inputs: dict
 	evidence: dict
 	cost: dict = field(default_factory=dict)
@@ -140,7 +148,7 @@ def evaluate(
 	*,
 	ortho_sha256: str,
 	source_profile: dict | None,
-	image_hash: int,
+	image_hash: int | None,
 	duplicate_candidates: list[dict],
 	thumbnail: bytes | None = None,
 	aoi_key: str | None = None,
@@ -148,6 +156,21 @@ def evaluate(
 	"""Run the rules and the models on one dataset's inputs. `image_hash` is the
 	overview's phash, which the caller needs first to look up duplicate candidates."""
 	images = model_images(inputs, thumbnail)
+	identity = {'ortho_sha256': ortho_sha256, 'aoi': aoi_key, **inputs.settings}
+	evidence = {
+		'native_mpp': round(inputs.native_mpp, 4),
+		'overview_mpp': round(inputs.overview_mpp, 4),
+		'size_px': list(inputs.size),
+		'valid_share': round(inputs.valid_share, 4),
+		'aoi_share': None if inputs.aoi is None else round(float(inputs.aoi.mean()), 4),
+		'footprint': mapping(inputs.footprint),
+		'prompt_version': PROMPT_VERSION,
+	}
+	if inputs.empty:
+		# Nothing to look at: the rule decides, no model is asked.
+		return Evaluation(
+			images=images, calls=[empty_cog(inputs.valid_share)], phash=None, inputs=identity, evidence=evidence
+		)
 	crop_mpp = inputs.crops[0].mpp if inputs.crops else inputs.native_mpp
 	prompt = build_prompt(inputs.overview_mpp, crop_mpp, inputs.aoi is not None, thumbnail is not None)
 	# Decoded here: the judges run in threads and must not share lazily loading files.
@@ -162,18 +185,8 @@ def evaluate(
 		images=images,
 		calls=[*answers, band, duplicates, verdict],
 		phash=image_hash,
-		# The judged identity: a prompt change keeps reviews, a new ortho or AOI reopens them.
-		inputs={'ortho_sha256': ortho_sha256, 'aoi': aoi_key, **inputs.settings},
-		evidence={
-			'native_mpp': round(inputs.native_mpp, 4),
-			'overview_mpp': round(inputs.overview_mpp, 4),
-			'size_px': list(inputs.size),
-			'valid_share': round(float(inputs.valid.mean()), 4),
-			'aoi_share': None if inputs.aoi is None else round(float(inputs.aoi.mean()), 4),
-			'footprint': mapping(inputs.footprint),
-			'phash': {'method': PHASH_METHOD, 'value': str(image_hash)},
-			'prompt_version': PROMPT_VERSION,
-		},
+		inputs=identity,
+		evidence={**evidence, 'phash': {'method': PHASH_METHOD, 'value': str(image_hash)}},
 		# Subscription calls report no tokens or dollars; time and calls are what is known.
 		cost={a.model: {'seconds': a.raw['seconds'], 'calls': a.raw['attempt'], 'cost_usd': None} for a in answers},
 	)
@@ -223,5 +236,5 @@ def store_payload(evaluation: Evaluation, inputs: Inputs, dataset_id: int, ortho
 			for f in evaluation.images
 		],
 		'assessments': [c.row() for c in evaluation.calls],
-		'phash': {'method': PHASH_METHOD, 'value': evaluation.phash},
+		**({'phash': {'method': PHASH_METHOD, 'value': evaluation.phash}} if evaluation.phash is not None else {}),
 	}

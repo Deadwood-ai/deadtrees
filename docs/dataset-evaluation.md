@@ -39,6 +39,7 @@ other users still see only search-ready public tiles.
 | `band_check/v1` | rule | wrong bands from the upload's raster profile (`v2_orthos.ortho_info`) and the COG band statistics: one or two colour bands or identical bands `major`; red or purple dominance (near-infrared or mis-decoded multispectral) `unsure` |
 | `duplicates/v1` | rule | `unsure` when another dataset has the same file, a near-identical overview (64-bit DCT hash within 10 bits) or the same uploader and day, each with 50%+ footprint overlap; never excludes |
 | `dataset-evaluation-rule/v1` | rule | the dataset verdict (below) |
+| `empty_cog/v1` | rule | instead of all rows above when under 0.5% of the overview is valid data: `major`, flag `broken_ortho`; no model is asked and no duplicate lookup runs |
 
 Model `modes` carry a 0-100 likelihood for `blurry`, `not_rgb`, `no_trees`,
 `broken_ortho`, `too_dark`, `artifacts` (exclude reasons) and `cog_issue`,

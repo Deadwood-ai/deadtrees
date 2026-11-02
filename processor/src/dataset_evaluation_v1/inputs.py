@@ -38,6 +38,8 @@ CROP_MPP = 0.05  # grid crops render at 5 cm, or native when coarser
 # The crop centres are found on a sample of the eligible overview pixels.
 MAX_CANDIDATES = 4000
 KMEANS_ROUNDS = 10
+# Below this share of valid overview pixels the COG holds no usable image (empty_cog rule).
+MIN_VALID_SHARE = 0.005
 # Footprint padding without a mask: solid white or black (the thresholds of utils/nodata.py)
 WHITE_FILL_MIN = 250
 BLACK_FILL_MAX = 1
@@ -74,6 +76,15 @@ class Inputs:
 	footprint: Polygon  # EPSG:4326 bounds of the valid data
 	crops: list[Crop] = field(default_factory=list)
 	settings: dict = field(default_factory=dict)
+
+	@property
+	def valid_share(self) -> float:
+		return float(self.valid.mean())
+
+	@property
+	def empty(self) -> bool:
+		"""No usable image: nothing for the models or the band rule to judge."""
+		return self.valid_share < MIN_VALID_SHARE
 
 
 def ground_mpp(src, col: float, row: float, step: float = 1.0) -> float:
@@ -234,8 +245,6 @@ def read_inputs(
 		overview = rgb_of(bands)
 		valid = src.dataset_mask(out_shape=(h, w), resampling=Resampling.nearest) > 0
 		valid &= ~padding(overview, valid)
-		if not valid.any():
-			raise ValueError('The COG overview has no valid pixels')
 		scale = src.width / w
 		aoi = None
 		if aoi_4326 and aoi_4326.get('type') == 'Feature':
@@ -247,17 +256,23 @@ def read_inputs(
 			if not (aoi & valid).any():
 				aoi = None  # an AOI off the data says nothing about where to look
 		rows, cols = np.nonzero(valid)
-		valid_window = Window(
-			cols.min() * scale,
-			rows.min() * scale,
-			(cols.max() + 1 - cols.min()) * scale,
-			(rows.max() + 1 - rows.min()) * scale,
+		valid_window = (
+			Window(
+				cols.min() * scale,
+				rows.min() * scale,
+				(cols.max() + 1 - cols.min()) * scale,
+				(rows.max() + 1 - rows.min()) * scale,
+			)
+			if valid.any()
+			else Window(0, 0, src.width, src.height)
 		)
 		native_mpp = ground_mpp(src, src.width / 2, src.height / 2)
 		where = valid & aoi if aoi is not None else valid
-		crops = grid_crops(src, tiles or [], where, scale, native_mpp, crop_count, seed)
-		if not crops:
-			crops = native_crops(src, valid, where, scale, native_mpp, crop_px, crop_count, seed)
+		crops = []
+		if valid.mean() >= MIN_VALID_SHARE:
+			crops = grid_crops(src, tiles or [], where, scale, native_mpp, crop_count, seed)
+			if not crops:
+				crops = native_crops(src, valid, where, scale, native_mpp, crop_px, crop_count, seed)
 		return Inputs(
 			overview=overview,
 			valid=valid,

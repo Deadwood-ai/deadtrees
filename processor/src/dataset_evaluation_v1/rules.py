@@ -16,6 +16,7 @@ from .vocabulary import EXCLUDE_FLAGS, FIX_FLAGS, FLAGS
 BAND_RULE = ('band_check', 'v1')
 DUPLICATE_RULE = ('duplicates', 'v1')
 DATASET_RULE = ('dataset-evaluation-rule', 'v1')
+EMPTY_COG_RULE = ('empty_cog', 'v1')
 PHASH_METHOD = 'phash-dct64-v1'
 
 
@@ -174,6 +175,24 @@ def duplicate_check(candidates: list[dict]) -> Call:
 		major_likelihood=likelihood,
 		modes={'duplicate': {'likelihood': likelihood}},
 		details={'candidates': scored[:20]},
+	)
+
+
+# ---------------------------------------------------------------------------
+# Empty COG
+# ---------------------------------------------------------------------------
+
+
+def empty_cog(valid_share: float) -> Call:
+	"""A COG without a usable image is a broken ortho: excluded by rule, no model asked."""
+	return Call(
+		assessor_kind='rule',
+		model=EMPTY_COG_RULE[0],
+		prompt_version=EMPTY_COG_RULE[1],
+		verdict='major',
+		major_likelihood=100.0,
+		modes={'broken_ortho': {'likelihood': 100.0}},
+		details={'reason': 'broken_ortho', 'valid_share': round(valid_share, 5), 'why': ['no_valid_pixels']},
 	)
 
 
