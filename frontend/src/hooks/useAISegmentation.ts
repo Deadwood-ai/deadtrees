@@ -6,12 +6,14 @@ import VectorSource from "ol/source/Vector.js";
 import VectorLayer from "ol/layer/Vector.js";
 import { Style, Fill, Stroke } from "ol/style";
 import Feature from "ol/Feature.js";
+import type Geometry from "ol/geom/Geometry.js";
 import { unByKey } from "ol/Observable.js";
 import Polygon from "ol/geom/Polygon.js";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { message } from "antd";
 import { requestConcepts, requestSegmentation, warmUpSegmentation, type SamPrompt } from "../utils/samRequest";
 import { captureScale, keepLargestPolygon, pixelPolygonsToFeatures, toPixelFeatureCollection } from "../utils/samGeometry";
+import { clipToArea } from "../utils/areaEdits";
 import { lockMapInteractions } from "../utils/mapInteractionLock";
 import { palette } from "../theme/palette";
 
@@ -30,10 +32,18 @@ interface UseAISegmentationReturn {
   isProcessing: boolean;
   enable: () => void;
   disable: () => void;
-  /** Adds an outline for every instance of `text` (for example "tree") in the current view. */
-  findConcept: (text: string) => Promise<void>;
+  /** Outlines every instance of `text` inside `area`, best first; nothing is added to the map. */
+  findInArea: (text: string, area: Polygon) => Promise<AreaSearch | null>;
   canUse: boolean;
 }
+
+/** Candidates from a text search in an area, clipped to it; `total` counts them before the cap. */
+export interface AreaSearch {
+  features: Feature<Geometry>[];
+  total: number;
+}
+
+export const MAX_AREA_RESULTS = 100;
 
 /** One AI outline being shaped: the frozen view image, its box and the refinement clicks so far. */
 interface Session extends Required<SamPrompt> {
@@ -231,32 +241,31 @@ export const useAISegmentation = ({
     drawRef.current = draw;
   }, [canUse, mapRef, startSession]);
 
-  const findConcept = useCallback(async (text: string) => {
+  const findInArea = useCallback(async (text: string, area: Polygon): Promise<AreaSearch | null> => {
     const map = mapRef.current;
-    if (!map || !canUse || isActive) return;
+    if (!map || !canUse || isActive) return null;
     setIsProcessing(true);
     setNavigationLocked(map, true);
     try {
-      const capture = await captureOrthoView(map, getOrthoLayer());
+      const crop = areaPixelRect(map, area);
+      if (!crop) throw new Error("Mark an area inside the map view.");
+      const capture = await captureOrthoView(map, getOrthoLayer(), crop);
       if (!capture) throw new Error("The map view could not be captured for AI search.");
       const fc = toPixelFeatureCollection(await requestConcepts(capture.image, text));
-      const { scale } = capture;
-      const found = fc ? pixelPolygonsToFeatures(fc, (p) => map.getCoordinateFromPixel([p[0] / scale, p[1] / scale])) : [];
-      if (found.length === 0) {
-        message.info(`No ${text} found in this view.`);
-        return;
-      }
-      onBeforeAddFeatures?.();
-      found.forEach((f) => f.set("is_new", true));
-      resultSource(map).addFeatures(found);
-      message.success(`Added ${found.length} outlines. Check them before saving.`);
+      const { scale, origin } = capture;
+      const toCoordinate = (p: [number, number]) =>
+        map.getCoordinateFromPixel([p[0] / scale + origin[0], p[1] / scale + origin[1]]);
+      const found = fc ? pixelPolygonsToFeatures(fc, toCoordinate) : [];
+      const best = found.sort((a, b) => (b.get("score") ?? 0) - (a.get("score") ?? 0)).slice(0, MAX_AREA_RESULTS);
+      return { features: clipToArea(best, area), total: found.length };
     } catch (e) {
       message.error(e instanceof Error ? e.message : "AI search failed.");
+      return null;
     } finally {
       setNavigationLocked(map, false);
       setIsProcessing(false);
     }
-  }, [canUse, getOrthoLayer, isActive, mapRef, onBeforeAddFeatures, resultSource, setNavigationLocked]);
+  }, [canUse, getOrthoLayer, isActive, mapRef, setNavigationLocked]);
 
   useEffect(() => {
     return () => {
@@ -269,18 +278,42 @@ export const useAISegmentation = ({
     };
   }, [disable]);
 
-  return { isActive, isProcessing, enable, disable, findConcept, canUse };
+  return { isActive, isProcessing, enable, disable, findInArea, canUse };
 };
 
+/** The area's bounding box in map pixels, clamped to the view; null when it is off screen. */
+function areaPixelRect(map: Map, area: Polygon): PixelRect | null {
+  const [minX, minY, maxX, maxY] = area.getExtent();
+  const [x1, y1] = map.getPixelFromCoordinate([minX, maxY]);
+  const [x2, y2] = map.getPixelFromCoordinate([maxX, minY]);
+  const [width, height] = map.getSize() ?? [0, 0];
+  const left = Math.max(0, Math.floor(x1));
+  const top = Math.max(0, Math.floor(y1));
+  const right = Math.min(width, Math.ceil(x2));
+  const bottom = Math.min(height, Math.ceil(y2));
+  return right - left > 4 && bottom - top > 4 ? [left, top, right - left, bottom - top] : null;
+}
+
+/** A captured view: image pixel = (map pixel - origin) * scale. */
+interface ViewCapture {
+  image: Blob;
+  scale: number;
+  origin: [number, number];
+}
+
+/** Map pixel rectangle to capture instead of the whole view: [x, y, width, height]. */
+type PixelRect = [number, number, number, number];
+
 /**
- * Captures what the map shows of the orthophoto as a JPEG. Image pixels are map pixels times
- * `scale`, which shrinks large views to the service's size limit. Other layers are hidden for
- * the capture only, so they neither leak into the model input nor taint the canvas.
+ * Captures what the map shows of the orthophoto (or a rectangle of it) as a JPEG, scaled to the
+ * service's size limit. Other layers are hidden for the capture only, so they neither leak into
+ * the model input nor taint the canvas.
  */
 async function captureOrthoView(
   map: Map,
   ortho: TileLayerWebGL | undefined,
-): Promise<{ image: Blob; scale: number } | null> {
+  crop?: PixelRect,
+): Promise<ViewCapture | null> {
   if (!ortho) return null;
   const hidden = map
     .getLayers()
@@ -288,28 +321,32 @@ async function captureOrthoView(
     .filter((layer) => layer !== ortho && layer.getVisible());
   hidden.forEach((layer) => layer.setVisible(false));
   map.renderSync();
-  const canvas = composeMapCanvas(map);
+  const composed = composeMapCanvas(map, crop);
   hidden.forEach((layer) => layer.setVisible(true));
   map.renderSync();
-  if (!canvas) return null;
+  if (!composed) return null;
+  const { canvas, scale, origin } = composed;
   const image = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
-  return image ? { image, scale: canvas.scale } : null;
+  return image ? { image, scale, origin } : null;
 }
 
-function composeMapCanvas(map: Map): (HTMLCanvasElement & { scale: number }) | null {
+function composeMapCanvas(map: Map, crop?: PixelRect) {
   const target = map.getTargetElement();
   // The bottom-most canvas holds the orthophoto.
   const source = target?.querySelector("canvas");
   if (!target || !source || source.width === 0 || source.height === 0) return null;
-  const rect = target.getBoundingClientRect();
-  const scale = captureScale(rect.width, rect.height);
-  const composite = Object.assign(document.createElement("canvas"), { scale });
-  composite.width = Math.max(1, Math.round(rect.width * scale));
-  composite.height = Math.max(1, Math.round(rect.height * scale));
-  const ctx = composite.getContext("2d");
+  const view = target.getBoundingClientRect();
+  const [x, y, width, height] = crop ?? [0, 0, view.width, view.height];
+  // A small area may be enlarged (up to 2x) so the model sees more detail; a whole view never is.
+  const scale = captureScale(width, height, crop ? 2 : 1);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+  const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  ctx.drawImage(source, 0, 0, source.width, source.height, 0, 0, composite.width, composite.height);
-  return composite;
+  const ratio = source.width / view.width; // device pixels per map pixel
+  ctx.drawImage(source, x * ratio, y * ratio, width * ratio, height * ratio, 0, 0, canvas.width, canvas.height);
+  return { canvas, scale, origin: [x, y] as [number, number] };
 }
 
 export default useAISegmentation;
