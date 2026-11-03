@@ -71,6 +71,11 @@ test.describe("label editor AI and area tools", () => {
     // The AI options show under the button only while AI is on, and the tool line names AI.
     await expect(page.getByTestId("ai-tool-panel")).toBeVisible();
     await expect(page.getByTestId("editor-active-tool")).toContainText("AI outline");
+    // Holding Alt (⌥) shows what the next click does.
+    await page.keyboard.down("Alt");
+    await expect(page.getByTestId("editor-active-tool")).toContainText("AI cut out");
+    await page.keyboard.up("Alt");
+    await expect(page.getByTestId("editor-active-tool")).toContainText("AI outline");
     await clickTree(0.5, 0.5);
     await expect(page.getByText("The AI segmentation service could not be reached")).toBeVisible();
     await expect(undo).toBeDisabled();
@@ -88,6 +93,8 @@ test.describe("label editor AI and area tools", () => {
     await expect.poll(() => sentPoints.at(-1)?.length).toBe(2);
 
     // Alt-click is an AI cut: the outline under the click is cut out of the layer's polygons.
+    // Clicks wait for the running request; the panel says when the model is busy.
+    await expect(page.getByTestId("ai-tool-now")).not.toHaveText(/Working/);
     const beforeCut = segmentRequests;
     await clickTree(0.5, 0.5, "Alt");
     await expect.poll(() => segmentRequests).toBe(beforeCut + 1);

@@ -11,6 +11,7 @@ import {
 } from "@ant-design/icons";
 import AreaToolsPanel, { type AreaToolsPanelProps } from "./AreaToolsPanel";
 import AIToolPanel from "./AIToolPanel";
+import { useHeldModifiers } from "../../hooks/useHeldModifiers";
 import type { AIMode } from "../../hooks/useAISegmentation";
 
 interface Props {
@@ -66,10 +67,14 @@ export default function EditorToolbar({
 }: Props) {
   const displayTitle = title || `Editing ${type === "deadwood" ? "deadwood cover" : "tree cover"}`;
   const AREA_TOOL_NAMES = { add: "Add area", remove: "Remove area", find: "Find in area" } as const;
+  const held = useHeldModifiers(isAIActive);
+  const cutNow = (aiMode === "cut") !== held.alt;
   const activeTool = isAIActive
-    ? aiMode === "cut"
-      ? "AI cut out"
-      : "AI outline"
+    ? held.shift && !held.alt
+      ? "AI box / add to outline"
+      : cutNow
+        ? "AI cut out"
+        : "AI outline"
     : isDrawing
       ? "Draw"
       : areaTools?.action
@@ -161,7 +166,7 @@ export default function EditorToolbar({
             {isAIActive ? "Stop AI (S)" : "AI (S)"}
           </Button>
           {isAIActive && aiMode && onAIModeChange && (
-            <AIToolPanel mode={aiMode} onModeChange={onAIModeChange} isProcessing={isAIProcessing} />
+            <AIToolPanel mode={aiMode} onModeChange={onAIModeChange} isProcessing={isAIProcessing} held={held} />
           )}
 
           {areaTools && (
