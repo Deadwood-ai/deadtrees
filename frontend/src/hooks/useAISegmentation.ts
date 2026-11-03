@@ -94,9 +94,6 @@ interface Outline {
   features: Feature[];
 }
 
-const AI_HINT =
-  "AI is on: click a tree to outline it. The panel under the AI button lists the other actions.";
-
 /**
  * AI segmentation for the polygon editors.
  *
@@ -342,7 +339,6 @@ export const useAISegmentation = ({
     if (!map || !canUse || detachRef.current) return;
     setIsActive(true);
     warmUpSegmentation();
-    message.info(AI_HINT);
 
     const onClick = (
       e: MapBrowserEvent<PointerEvent | KeyboardEvent | WheelEvent>,
