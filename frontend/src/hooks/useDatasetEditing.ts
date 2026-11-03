@@ -398,16 +398,20 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
           e.preventDefault();
           void switchLayer("forest_cover");
           break;
+        // An area tool ends AI first: AI owns map clicks, and a search would not run beside it.
         case "q":
           e.preventDefault();
+          ai.disable();
           areaTools.start("add");
           break;
         case "e":
           e.preventDefault();
+          ai.disable();
           areaTools.start("remove");
           break;
         case "f":
           e.preventDefault();
+          ai.disable();
           areaTools.start("find", findPromptText);
           break;
         case "t":

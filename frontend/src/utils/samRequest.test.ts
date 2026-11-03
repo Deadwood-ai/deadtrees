@@ -72,6 +72,7 @@ describe("request forms", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toMatch(/\/concepts$/);
     expect((init.body as FormData).get("text")).toBe("tree");
+    expect((init.body as FormData).get("threshold")).toBe("0.1");
   });
 });
 

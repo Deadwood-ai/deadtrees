@@ -35,10 +35,18 @@ export function requestSegmentation({ image, box, points = [], labels = [] }: Sa
 }
 
 /** Finds every instance of a concept such as "tree" in the view image. */
+/**
+ * Lowest score a concept match needs. The service default (0.3) dropped most brown or burnt
+ * crowns; in the October SAM 3 test, 0.1 found "tree" with median recall 0.98 and precision 0.91
+ * (0.94 and 0.95 at 0.3). Results stay a preview the user thins out, capped at 100.
+ */
+export const CONCEPT_THRESHOLD = 0.1;
+
 export function requestConcepts(image: Blob, text: string): Promise<unknown> {
   const form = new FormData();
   form.append("image", image, "view.jpg");
   form.append("text", text);
+  form.append("threshold", String(CONCEPT_THRESHOLD));
   return postToSam("/concepts", form);
 }
 
