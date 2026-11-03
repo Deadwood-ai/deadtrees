@@ -27,7 +27,7 @@ import {
   pixelPolygonsToFeatures,
   toPixelFeatureCollection,
 } from "../utils/samGeometry";
-import { clipToArea } from "../utils/areaEdits";
+import { clipToArea, removeArea } from "../utils/areaEdits";
 import { lockMapInteractions } from "../utils/mapInteractionLock";
 import { palette } from "../theme/palette";
 
@@ -90,13 +90,14 @@ interface Outline {
 }
 
 const AI_HINT =
-  "Click a tree to outline it, or Shift-drag a box. Shift-click adds to the last outline, Alt-click removes from it.";
+  "Click a tree to outline it, or Shift-drag a box. Shift-click adds to the last outline. Alt-click cuts what you click out of the layer.";
 
 /**
  * AI segmentation for the polygon editors.
  *
  * While AI is on, a click outlines the tree under it and Shift-drag outlines what is inside a box.
- * Shift-click and Alt-click refine the last outline. The map is locked only while the view is
+ * Shift-click adds to the last outline; Alt-click cuts what is under it out of the layer (a gap
+ * in tree cover, a live branch in deadwood). The map is locked only while the view is
  * captured; outlines are placed through the capture's frame, so panning and zooming keep working.
  */
 export const useAISegmentation = ({
@@ -168,9 +169,17 @@ export const useAISegmentation = ({
     setIsActive(false);
   }, []);
 
-  /** Asks the model for one outline and puts it in place of `replace` (a refined outline). */
+  /**
+   * Asks the model for one outline. It replaces `replace` (a refined outline), or with `cut` it
+   * is cut out of every polygon of the layer it overlaps.
+   */
   const runPrompt = useCallback(
-    async (map: Map, prompt: Omit<Outline, "features">, replace: Feature[]) => {
+    async (
+      map: Map,
+      prompt: Omit<Outline, "features">,
+      replace: Feature[],
+      cut = false,
+    ) => {
       const run = runRef.current;
       busyRef.current = true;
       setIsProcessing(true);
@@ -187,6 +196,22 @@ export const useAISegmentation = ({
           return;
         }
         const source = resultSource(map);
+        if (cut) {
+          const edit = removeArea(
+            source.getFeatures() as Feature<Geometry>[],
+            outline[0].getGeometry()!,
+          );
+          if (edit.removed.length === 0) {
+            message.info(
+              "Nothing to cut there: no polygon of this layer covers that spot.",
+            );
+            return;
+          }
+          onBeforeAddFeatures?.();
+          edit.removed.forEach((f) => source.removeFeature(f));
+          source.addFeatures(edit.added);
+          return;
+        }
         onBeforeAddFeatures?.();
         replace
           .filter((f) => source.hasFeature(f))
@@ -208,9 +233,16 @@ export const useAISegmentation = ({
     [onBeforeAddFeatures, resultSource],
   );
 
-  /** Captures the view (the only moment the map is locked) and outlines a click or a box in it. */
+  /**
+   * Captures the view (the only moment the map is locked) and outlines a click or a box in it;
+   * with `cut` the outline is cut out of the layer instead of added.
+   */
   const outlineNew = useCallback(
-    async (map: Map, target: { pixel: number[] } | { box: Polygon }) => {
+    async (
+      map: Map,
+      target: { pixel: number[] } | { box: Polygon },
+      cut = false,
+    ) => {
       if (busyRef.current) return;
       busyRef.current = true;
       const unlock = lockMapInteractions(map);
@@ -249,19 +281,20 @@ export const useAISegmentation = ({
           labels: points.map(() => 1),
         },
         [],
+        cut,
       );
     },
     [boxSource, getOrthoLayer, runPrompt],
   );
 
-  /** Adds (label 1) or removes (label 0) the clicked spot from the last outline. */
+  /** Adds the clicked spot to the last outline (label 1); label 0 would remove it. */
   const refineLast = useCallback(
     async (map: Map, coordinate: number[], label: 0 | 1) => {
       const last = lastRef.current;
       const source = resultSource(map);
       if (!last || !last.features.some((f) => source.hasFeature(f))) {
         message.info(
-          "Click a tree first; Shift-click and Alt-click then change that outline.",
+          "Click a tree first; Shift-click then adds to that outline.",
         );
         return;
       }
@@ -302,7 +335,7 @@ export const useAISegmentation = ({
     ) => {
       if (busyRef.current) return;
       const event = e.originalEvent as MouseEvent;
-      if (event.altKey) void refineLast(map, e.coordinate, 0);
+      if (event.altKey) void outlineNew(map, { pixel: e.pixel }, true);
       // A Shift-click reaches the box interaction as a cancelled box (handled there).
       else if (!event.shiftKey) void outlineNew(map, { pixel: e.pixel });
     };

@@ -15,7 +15,7 @@ test.describe("label editor AI and area tools", () => {
   test.beforeAll(() => editor.setup());
   test.afterAll(() => editor.teardown());
 
-  test("AI outlines a clicked tree, refines it with Shift-click and stops on S", async ({
+  test("AI outlines a clicked tree, refines it with Shift-click, cuts with Alt-click and stops on S", async ({
     page,
   }) => {
     let samResponse: "fail" | "outline" = "fail";
@@ -83,6 +83,12 @@ test.describe("label editor AI and area tools", () => {
     // Shift-click refines that outline: the same image with both points.
     await clickTree(0.55, 0.55, "Shift");
     await expect.poll(() => sentPoints.at(-1)?.length).toBe(2);
+
+    // Alt-click is an AI cut: the outline under the click is cut out of the layer's polygons.
+    const beforeCut = segmentRequests;
+    await clickTree(0.5, 0.5, "Alt");
+    await expect.poll(() => segmentRequests).toBe(beforeCut + 1);
+    await expect(page.getByText("Nothing to cut there")).toHaveCount(0);
 
     // Stopping AI frees the map: clicks reach no model.
     await page.getByRole("button", { name: /Stop AI \(S\)/ }).click();
