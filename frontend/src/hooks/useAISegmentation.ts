@@ -40,8 +40,13 @@ interface UseAISegmentationParams {
   onBeforeAddFeatures?: () => void; // Called before adding AI-generated features (for undo history)
 }
 
+/** What a plain click does while AI is on: outline what is clicked, or cut it out of the layer. */
+export type AIMode = "outline" | "cut";
+
 interface UseAISegmentationReturn {
   isActive: boolean;
+  mode: AIMode;
+  setMode: (mode: AIMode) => void;
   isProcessing: boolean;
   enable: () => void;
   disable: () => void;
@@ -90,7 +95,7 @@ interface Outline {
 }
 
 const AI_HINT =
-  "Click a tree to outline it, or Shift-drag a box. Shift-click adds to the last outline. Alt-click cuts what you click out of the layer.";
+  "AI is on: click a tree to outline it. The panel under the AI button lists the other actions.";
 
 /**
  * AI segmentation for the polygon editors.
@@ -108,6 +113,13 @@ export const useAISegmentation = ({
 }: UseAISegmentationParams): UseAISegmentationReturn => {
   const [isActive, setIsActive] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [mode, setModeState] = useState<AIMode>("outline");
+  // Read by the map click listener, which is attached once per AI session.
+  const modeRef = useRef<AIMode>("outline");
+  const setMode = useCallback((next: AIMode) => {
+    modeRef.current = next;
+    setModeState(next);
+  }, []);
 
   const ownLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   // The dashed box lives on its own layer so an editor save never picks it up.
@@ -166,6 +178,8 @@ export const useAISegmentation = ({
     detachRef.current = null;
     lastRef.current = null;
     boxLayerRef.current?.getSource()?.clear();
+    modeRef.current = "outline";
+    setModeState("outline");
     setIsActive(false);
   }, []);
 
@@ -335,9 +349,11 @@ export const useAISegmentation = ({
     ) => {
       if (busyRef.current) return;
       const event = e.originalEvent as MouseEvent;
-      if (event.altKey) void outlineNew(map, { pixel: e.pixel }, true);
-      // A Shift-click reaches the box interaction as a cancelled box (handled there).
-      else if (!event.shiftKey) void outlineNew(map, { pixel: e.pixel });
+      // Alt (⌥) flips the mode for one click.
+      const cut = (modeRef.current === "cut") !== event.altKey;
+      // A plain Shift-click reaches the box interaction as a cancelled box (handled there).
+      if (event.altKey || !event.shiftKey)
+        void outlineNew(map, { pixel: e.pixel }, cut);
     };
     // While AI is on, clicks belong to it: editing interactions pause (panning and zooming stay),
     // and Shift-drag draws an AI box instead of zooming to it.
@@ -420,7 +436,16 @@ export const useAISegmentation = ({
     };
   }, [disable]);
 
-  return { isActive, isProcessing, enable, disable, findInArea, canUse };
+  return {
+    isActive,
+    mode,
+    setMode,
+    isProcessing,
+    enable,
+    disable,
+    findInArea,
+    canUse,
+  };
 };
 
 /** The area's bounding box in map pixels, clamped to the view; null when it is off screen. */

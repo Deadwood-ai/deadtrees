@@ -1,5 +1,8 @@
 import { Button } from "antd";
 import { CloseOutlined, QuestionCircleOutlined } from "@ant-design/icons";
+import { keyLabels } from "../../utils/keyLabels";
+
+const { mod, alt, shift } = keyLabels;
 
 const EXPLORE_KEYS: [string, string][] = [
   ["1", "No labels"],
@@ -18,17 +21,17 @@ const EDIT_KEYS: [string, string][] = [
   ["Space", "Hold to hide labels"],
   ["B", "Map or satellite background"],
   ["S", "AI on/off: click a tree to outline it"],
-  ["Shift-drag", "AI box (while AI is on)"],
-  ["Shift-click", "Add to the last AI outline"],
-  ["Alt-click", "AI cut: remove what you click from the layer"],
+  [`${shift} drag`, "AI box (while AI is on)"],
+  [`${shift} click`, "Add to the last AI outline"],
+  [`${alt} click`, "AI cut out once (or switch the AI panel to Cut out)"],
   ["A", "Draw a polygon"],
   ["Q / E", "Add / remove an area"],
   ["F", "Find in area"],
   ["T", "Copy selection to the other layer"],
   ["D", "Delete selection"],
   ["G / X / C", "Merge / clip / cut hole"],
-  ["Ctrl Z", "Undo"],
-  ["Ctrl S", "Save and go back to exploring"],
+  [`${mod} Z`, "Undo"],
+  [`${mod} S`, "Save and go back to exploring"],
 ];
 
 interface LabelEditorHelpProps {

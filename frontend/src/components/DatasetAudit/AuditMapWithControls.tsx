@@ -346,6 +346,8 @@ const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWith
 						onMerge={editor.mergeSelected}
 						onClip={editor.clipSelected}
 						onToggleAI={() => (ai.isActive ? ai.disable() : ai.enable())}
+						aiMode={ai.mode}
+						onAIModeChange={ai.setMode}
 						areaTools={{
 						  layer: editing.editingLayerType ?? "deadwood",
 						  onSwitchLayer: (layer) => void editing.switchLayer(layer),

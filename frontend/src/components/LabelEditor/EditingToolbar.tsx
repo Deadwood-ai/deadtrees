@@ -22,6 +22,8 @@ export default function EditingToolbar({ editing }: EditingToolbarProps) {
       onMerge={editor.mergeSelected}
       onClip={editor.clipSelected}
       onToggleAI={() => (ai.isActive ? ai.disable() : ai.enable())}
+      aiMode={ai.mode}
+      onAIModeChange={ai.setMode}
       areaTools={{
         layer,
         action: areaTools.action,

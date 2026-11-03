@@ -68,6 +68,9 @@ test.describe("label editor AI and area tools", () => {
 
     await page.getByRole("button", { name: /AI \(S\)/ }).click();
     await expect(page.getByRole("button", { name: /Stop AI \(S\)/ })).toBeVisible();
+    // The AI options show under the button only while AI is on, and the tool line names AI.
+    await expect(page.getByTestId("ai-tool-panel")).toBeVisible();
+    await expect(page.getByTestId("editor-active-tool")).toContainText("AI outline");
     await clickTree(0.5, 0.5);
     await expect(page.getByText("The AI segmentation service could not be reached")).toBeVisible();
     await expect(undo).toBeDisabled();
@@ -92,6 +95,8 @@ test.describe("label editor AI and area tools", () => {
 
     // Stopping AI frees the map: clicks reach no model.
     await page.getByRole("button", { name: /Stop AI \(S\)/ }).click();
+    await expect(page.getByTestId("ai-tool-panel")).toHaveCount(0);
+    await expect(page.getByTestId("editor-active-tool")).toContainText("Select");
     const requestsAfterStop = segmentRequests;
     await clickTree(0.45, 0.45);
     await page.waitForTimeout(500);

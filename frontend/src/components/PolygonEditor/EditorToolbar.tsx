@@ -10,6 +10,8 @@ import {
   UndoOutlined,
 } from "@ant-design/icons";
 import AreaToolsPanel, { type AreaToolsPanelProps } from "./AreaToolsPanel";
+import AIToolPanel from "./AIToolPanel";
+import type { AIMode } from "../../hooks/useAISegmentation";
 
 interface Props {
   type: "deadwood" | "forest_cover";
@@ -25,6 +27,9 @@ interface Props {
   onToggleAI: () => void;
   /** Layer switch, area tools and copy between layers; editors without them leave this out. */
   areaTools?: AreaToolsPanelProps;
+  /** What a click does while AI is on; with it, AI's options show under the AI button. */
+  aiMode?: AIMode;
+  onAIModeChange?: (mode: AIMode) => void;
   onDeleteSelected: () => void;
   onUndo: () => void;
   canUndo: boolean;
@@ -48,6 +53,8 @@ export default function EditorToolbar({
   onClip,
   onToggleAI,
   areaTools,
+  aiMode,
+  onAIModeChange,
   onDeleteSelected,
   onUndo,
   canUndo,
@@ -58,16 +65,36 @@ export default function EditorToolbar({
   className,
 }: Props) {
   const displayTitle = title || `Editing ${type === "deadwood" ? "deadwood cover" : "tree cover"}`;
+  const AREA_TOOL_NAMES = { add: "Add area", remove: "Remove area", find: "Find in area" } as const;
+  const activeTool = isAIActive
+    ? aiMode === "cut"
+      ? "AI cut out"
+      : "AI outline"
+    : isDrawing
+      ? "Draw"
+      : areaTools?.action
+        ? AREA_TOOL_NAMES[areaTools.action]
+        : selectionCount > 0
+          ? `Select (${selectionCount} selected)`
+          : "Select";
 
   return (
     <div className={`absolute ${position === "top-right" ? "right-4" : "left-4"} ${className || "top-32"} z-20`}>
       <Card
         title={displayTitle}
         className="shadow-lg"
-        style={{ width: areaTools ? 200 : 180 }}
+        style={{ width: areaTools ? 220 : 180 }}
         size="small"
       >
         <Space direction="vertical" size="small" className="w-full">
+          <div
+            className="flex items-center justify-between rounded-md bg-gray-100 px-2 py-1 text-xs"
+            data-testid="editor-active-tool"
+            aria-live="polite"
+          >
+            <span className="text-gray-500">Tool</span>
+            <span className="font-semibold text-gray-800">{activeTool}</span>
+          </div>
           {/* Draw Toggle */}
           <Button
             icon={isDrawing ? <StopOutlined /> : <EditOutlined />}
@@ -128,11 +155,14 @@ export default function EditorToolbar({
             loading={isAIProcessing}
             block
             type={isAIActive ? "primary" : "default"}
-            title="AI Segmentation (S) - Draw a box to run AI"
+            title="AI (S): click a tree to outline it"
             htmlType="button"
           >
             {isAIActive ? "Stop AI (S)" : "AI (S)"}
           </Button>
+          {isAIActive && aiMode && onAIModeChange && (
+            <AIToolPanel mode={aiMode} onModeChange={onAIModeChange} isProcessing={isAIProcessing} />
+          )}
 
           {areaTools && (
             <>
