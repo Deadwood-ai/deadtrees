@@ -78,7 +78,7 @@ const QualityIcon = ({ quality }: { quality: QualityRating }) => {
 // Basemap options matching DeadtreesMap
 const basemapOptions = [
   { value: "streets-v12", label: "Streets" },
-  { value: "satellite-streets-v12", label: "Imagery" },
+  { value: "satellite-streets-v12", label: "Satellite" },
 ];
 
 // Label a model-prediction variant by its module + checkpoint so auditors can

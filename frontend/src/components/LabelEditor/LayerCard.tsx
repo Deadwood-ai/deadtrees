@@ -1,4 +1,4 @@
-import { Button, Checkbox, Slider, Tooltip } from "antd";
+import { Button, Checkbox, Segmented, Slider, Tooltip } from "antd";
 import { EditOutlined } from "@ant-design/icons";
 import { mapColors } from "../../theme/mapColors";
 import { palette } from "../../theme/palette";
@@ -6,6 +6,8 @@ import { palette } from "../../theme/palette";
 /** What the map shows: one label layer, both, or the imagery alone. */
 export type LayerView = "imagery" | "deadwood" | "forest_cover" | "both";
 export type EditableLayer = "deadwood" | "forest_cover";
+/** What shows around and under the drone image. */
+export type Background = "map" | "satellite";
 
 export interface LayerCardRow {
   view: LayerView;
@@ -22,6 +24,8 @@ export interface LayerCardProps {
   onViewChange: (view: LayerView) => void;
   opacity: number;
   onOpacityChange: (value: number) => void;
+  background: Background;
+  onBackgroundChange: (background: Background) => void;
   hasAOI: boolean;
   showAOI: boolean;
   onShowAOIChange: (show: boolean) => void;
@@ -49,6 +53,8 @@ export default function LayerCard({
   onViewChange,
   opacity,
   onOpacityChange,
+  background,
+  onBackgroundChange,
   hasAOI,
   showAOI,
   onShowAOIChange,
@@ -75,7 +81,7 @@ export default function LayerCard({
         <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
           {editing ? "Layer you edit" : "Layers"}
         </span>
-        <span className="text-[11px] text-gray-400">Space: imagery</span>
+        <span className="text-[11px] text-gray-400">Hold Space: no labels</span>
       </div>
       <div
         className="flex flex-col gap-1"
@@ -153,6 +159,19 @@ export default function LayerCard({
           />
         </div>
       )}
+      <div className="mt-2 flex flex-col gap-1">
+        <span className="text-xs text-gray-500">Background (B)</span>
+        <Segmented
+          size="small"
+          block
+          value={background}
+          onChange={(v) => onBackgroundChange(v as Background)}
+          options={[
+            { value: "map", label: "Map" },
+            { value: "satellite", label: "Satellite" },
+          ]}
+        />
+      </div>
       {hasAOI && (
         <Checkbox
           checked={showAOI}

@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { mapColors } from "../../theme/mapColors";
-import type { LayerCardProps, EditableLayer, LayerCardRow, LayerView } from "./LayerCard";
+import type {
+  Background,
+  LayerCardProps,
+  EditableLayer,
+  LayerCardRow,
+  LayerView,
+} from "./LayerCard";
 import { useLayerCardKeys } from "./useLayerCardKeys";
 
 interface LayerVisibility {
@@ -8,6 +14,7 @@ interface LayerVisibility {
   showForestCover: boolean;
   showAOI: boolean;
   layerOpacity: number;
+  mapStyle: string;
 }
 
 interface UseLayerCardParams {
@@ -17,6 +24,7 @@ interface UseLayerCardParams {
   setShowForestCover: (show: boolean) => void;
   setShowAOI: (show: boolean) => void;
   setLayerOpacity: (value: number) => void;
+  setMapStyle: (style: string) => void;
   hasDeadwood: boolean;
   hasForestCover: boolean;
   /** A layer rated "bad" stays hidden for people who cannot audit. */
@@ -31,6 +39,10 @@ interface UseLayerCardParams {
   /** Shows or hides the layer being edited while Space is held. */
   setEditOverlayVisible: (visible: boolean) => void;
 }
+
+// Basemap styles of the dataset map (useBaseLayers): OpenFreeMap streets or Esri Wayback satellite.
+const MAP_STYLE = "streets-v12";
+const SATELLITE_STYLE = "satellite-streets-v12";
 
 function viewOf(deadwood: boolean, forest: boolean): LayerView {
   if (deadwood && forest) return "both";
@@ -47,7 +59,10 @@ export function useLayerCard(p: UseLayerCardParams) {
   const [peek, setPeek] = useState(false);
   const deadwoodOk = p.hasDeadwood && !p.deadwoodBlocked;
   const forestOk = p.hasForestCover && !p.forestBlocked;
-  const view = viewOf(p.layers.showDeadwood && deadwoodOk, p.layers.showForestCover && forestOk);
+  const view = viewOf(
+    p.layers.showDeadwood && deadwoodOk,
+    p.layers.showForestCover && forestOk,
+  );
 
   const { setShowDeadwood, setShowForestCover } = p;
   const setView = useCallback(
@@ -80,18 +95,33 @@ export function useLayerCard(p: UseLayerCardParams) {
     if (isEditing) setEditOverlayVisible(!peek);
   }, [isEditing, peek, setEditOverlayVisible]);
 
+  const background: Background =
+    p.layers.mapStyle === SATELLITE_STYLE ? "satellite" : "map";
+  const { setMapStyle } = p;
+  const setBackground = useCallback(
+    (next: Background) =>
+      setMapStyle(next === "satellite" ? SATELLITE_STYLE : MAP_STYLE),
+    [setMapStyle],
+  );
+
   useLayerCardKeys({
     enabled: p.enabled,
     isEditing,
     onView: setView,
     onStartEdit: startEdit,
+    onToggleBackground: () =>
+      setBackground(background === "satellite" ? "map" : "satellite"),
     onPeek: setPeek,
   });
 
   const unavailable = (has: boolean, blocked: boolean, name: string) =>
-    !has ? `This dataset has no ${name} prediction.` : blocked ? `The ${name} prediction did not pass the audit.` : undefined;
+    !has
+      ? `This dataset has no ${name} prediction.`
+      : blocked
+        ? `The ${name} prediction did not pass the audit.`
+        : undefined;
   const rows: LayerCardRow[] = [
-    { view: "imagery", key: "1", label: "Imagery only", swatch: null },
+    { view: "imagery", key: "1", label: "No labels", swatch: null },
     {
       view: "deadwood",
       key: "2",
@@ -104,14 +134,19 @@ export function useLayerCard(p: UseLayerCardParams) {
       key: "3",
       label: "Tree cover",
       swatch: mapColors.forest.fill,
-      disabledReason: unavailable(p.hasForestCover, p.forestBlocked, "tree cover"),
+      disabledReason: unavailable(
+        p.hasForestCover,
+        p.forestBlocked,
+        "tree cover",
+      ),
     },
     {
       view: "both",
       key: "4",
       label: "Both",
       swatch: `linear-gradient(135deg, ${mapColors.deadwood.fill} 50%, ${mapColors.forest.fill} 50%)`,
-      disabledReason: !deadwoodOk || !forestOk ? "Needs both predictions." : undefined,
+      disabledReason:
+        !deadwoodOk || !forestOk ? "Needs both predictions." : undefined,
     },
   ];
 
@@ -121,6 +156,8 @@ export function useLayerCard(p: UseLayerCardParams) {
     onViewChange: setView,
     opacity: p.layers.layerOpacity,
     onOpacityChange: p.setLayerOpacity,
+    background,
+    onBackgroundChange: setBackground,
     hasAOI: p.hasAOI,
     showAOI: p.layers.showAOI,
     onShowAOIChange: p.setShowAOI,

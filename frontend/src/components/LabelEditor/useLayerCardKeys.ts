@@ -6,29 +6,50 @@ interface UseLayerCardKeysParams {
   isEditing: boolean;
   onView: (view: LayerView) => void;
   onStartEdit: () => void;
+  onToggleBackground: () => void;
   /** Called with true while Space is held, false when released. */
   onPeek: (peek: boolean) => void;
 }
 
-const VIEW_KEYS: Record<string, LayerView> = { "1": "imagery", "2": "deadwood", "3": "forest_cover", "4": "both" };
+const VIEW_KEYS: Record<string, LayerView> = {
+  "1": "imagery",
+  "2": "deadwood",
+  "3": "forest_cover",
+  "4": "both",
+};
 
 function isTyping(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
-  if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return true;
-  return target instanceof HTMLInputElement && !["checkbox", "radio", "range", "button"].includes(target.type);
+  if (
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement
+  )
+    return true;
+  return (
+    target instanceof HTMLInputElement &&
+    !["checkbox", "radio", "range", "button"].includes(target.type)
+  );
 }
 
 /**
- * Keys of the layer card. Exploring: 1 imagery, 2 deadwood, 3 tree cover, 4 both, E edit.
+ * Keys of the layer card. Exploring: 1 no labels, 2 deadwood, 3 tree cover, 4 both, E edit.
+ * B switches the background between map and satellite in both modes.
  * Editing, 2 and 3 belong to the editor (useDatasetEditing). Holding Space hides the labels in
  * both modes.
  */
-export function useLayerCardKeys({ enabled, isEditing, onView, onStartEdit, onPeek }: UseLayerCardKeysParams) {
+export function useLayerCardKeys({
+  enabled,
+  isEditing,
+  onView,
+  onStartEdit,
+  onToggleBackground,
+  onPeek,
+}: UseLayerCardKeysParams) {
   // Handlers change every render; the listener reads the latest ones without re-subscribing.
-  const handlers = useRef({ onView, onStartEdit, onPeek });
+  const handlers = useRef({ onView, onStartEdit, onToggleBackground, onPeek });
   useEffect(() => {
-    handlers.current = { onView, onStartEdit, onPeek };
+    handlers.current = { onView, onStartEdit, onToggleBackground, onPeek };
   });
 
   useEffect(() => {
@@ -50,7 +71,13 @@ export function useLayerCardKeys({ enabled, isEditing, onView, onStartEdit, onPe
         }
         return;
       }
-      if (e.repeat || isEditing) return;
+      if (e.repeat) return;
+      if (e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        handlers.current.onToggleBackground();
+        return;
+      }
+      if (isEditing) return;
       const view = VIEW_KEYS[e.key];
       if (view) {
         e.preventDefault();
