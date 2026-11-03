@@ -436,7 +436,7 @@ export default function ReferencePatchEditorView({
 
       // NOW clean up and exit editing mode
       // This ensures the reference geometry useEffect fires with the NEW patch data
-      disableAI(); // ends an AI refine session and unlocks the map
+      disableAI(); // stops a waiting AI box and drops its result
       editor.stopEditing();
       editor.getOverlayLayer()?.getSource()?.clear();
       setEditingMode(null);
@@ -463,7 +463,7 @@ export default function ReferencePatchEditorView({
 
   // Handle cancel editing
   const handleCancelEditing = useCallback(() => {
-    disableAI(); // ends an AI refine session and unlocks the map
+    disableAI(); // stops a waiting AI box and drops its result
     editor.stopEditing();
     editor.getOverlayLayer()?.getSource()?.clear();
     setEditingMode(null);

@@ -1,24 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map from "ol/Map.js";
-import type MapBrowserEvent from "ol/MapBrowserEvent.js";
 import Draw, { createBox } from "ol/interaction/Draw.js";
 import VectorSource from "ol/source/Vector.js";
 import VectorLayer from "ol/layer/Vector.js";
 import { Style, Fill, Stroke } from "ol/style";
 import Feature from "ol/Feature.js";
 import type Geometry from "ol/geom/Geometry.js";
-import { unByKey } from "ol/Observable.js";
 import Polygon from "ol/geom/Polygon.js";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { message } from "antd";
-import { requestConcepts, requestSegmentation, warmUpSegmentation, type SamPrompt } from "../utils/samRequest";
+import { requestConcepts, requestSegmentation, warmUpSegmentation } from "../utils/samRequest";
 import { captureScale, keepLargestPolygon, pixelPolygonsToFeatures, toPixelFeatureCollection } from "../utils/samGeometry";
 import { clipToArea } from "../utils/areaEdits";
 import { lockMapInteractions } from "../utils/mapInteractionLock";
 import { palette } from "../theme/palette";
 
 type GetOrthoLayerFn = () => TileLayerWebGL | undefined;
-type MapClick = MapBrowserEvent<PointerEvent | KeyboardEvent | WheelEvent>;
 
 interface UseAISegmentationParams {
   mapRef: React.MutableRefObject<Map | null>;
@@ -45,39 +42,15 @@ export interface AreaSearch {
 
 export const MAX_AREA_RESULTS = 100;
 
-/** One AI outline being shaped: the frozen view image, its box and the refinement clicks so far. */
-interface Session extends Required<SamPrompt> {
-  /** Image pixels per map pixel; below 1 when a large view was shrunk for the service. */
-  scale: number;
-  features: Feature[];
-  /** The dashed box, shown until the first outline arrives. */
-  boxFeature: Feature | null;
-  /** Converts between map coordinates and pixels of the captured image. */
-  frame: CaptureFrame;
-  /** Stops watching the editor layer for the outline being removed (Undo, Delete, Cancel). */
-  unwatch?: () => void;
-}
-
-const REFINE_HINT =
-  "Click to add to the outline, Alt-click to remove; you can pan and zoom meanwhile. Press S or Finish AI when it fits.";
-
 /**
  * Where the captured image sits on the map: the coordinate of its top-left pixel and the map
- * units per map pixel at capture time. Clicks and outlines are converted through it, so the map
- * can move while an outline is refined.
+ * units per map pixel at capture time. The outline is converted through it, so the map can move
+ * while the model works.
  */
 interface CaptureFrame {
   origin: [number, number];
   resolution: number;
   scale: number;
-  width: number;
-  height: number;
-}
-
-function toImagePixel(frame: CaptureFrame, coordinate: number[]): [number, number] | null {
-  const x = ((coordinate[0] - frame.origin[0]) / frame.resolution) * frame.scale;
-  const y = ((frame.origin[1] - coordinate[1]) / frame.resolution) * frame.scale;
-  return x >= 0 && y >= 0 && x <= frame.width && y <= frame.height ? [Math.round(x), Math.round(y)] : null;
 }
 
 function toMapCoordinate(frame: CaptureFrame, pixel: [number, number]): number[] {
@@ -90,10 +63,9 @@ function toMapCoordinate(frame: CaptureFrame, pixel: [number, number]): number[]
 /**
  * AI segmentation for the polygon editors.
  *
- * Turning AI on lets the user draw a box. The view is captured once and sent with the box; the
- * returned outline is added to the editor. Further clicks refine that outline until AI is turned
- * off again. The map is locked only while the view is captured; afterwards clicks and outlines
- * are converted through the capture's frame, so panning and zooming stay possible.
+ * Turning AI on lets the user draw one box. The view is captured with it (the map is locked only
+ * for that moment), the model's outline is added to the editor, and AI turns off again. Undo
+ * removes an outline that does not fit.
  */
 export const useAISegmentation = ({
   mapRef,
@@ -105,27 +77,21 @@ export const useAISegmentation = ({
   const [isProcessing, setIsProcessing] = useState(false);
 
   const drawRef = useRef<Draw | null>(null);
-  const sessionRef = useRef<Session | null>(null);
-  const resultSourceRef = useRef<VectorSource | null>(null);
   const ownLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   // The dashed box lives on its own layer so an editor save never picks it up.
   const boxLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
-  const clickKeyRef = useRef<((e: MapClick) => void) | null>(null);
-  // A click while a refinement is running would race it; such clicks are ignored.
-  const busyRef = useRef(false);
-  // Set while the hook swaps its own outline, so that removal does not end the session.
-  const replacingRef = useRef(false);
+  // Bumped when AI is turned off, so a request still running cannot add its outline afterwards.
+  const runRef = useRef(0);
 
   const canUse = useMemo(() => !!getOrthoLayer(), [getOrthoLayer]);
 
   // AI outlines go to the editor's layer when there is one, otherwise to a layer owned here.
   const resultSource = useCallback((map: Map): VectorSource => {
     const target = getTargetVectorSource?.();
-    if (target) return (resultSourceRef.current = target);
+    if (target) return target;
     if (!ownLayerRef.current) {
-      const source = new VectorSource();
       ownLayerRef.current = new VectorLayer<VectorSource>({
-        source,
+        source: new VectorSource(),
         style: new Style({
           fill: new Fill({ color: "rgba(0, 200, 255, 0.25)" }),
           stroke: new Stroke({ color: palette.state.hover, width: 2 }),
@@ -134,101 +100,10 @@ export const useAISegmentation = ({
       });
       map.addLayer(ownLayerRef.current);
     }
-    return (resultSourceRef.current = ownLayerRef.current.getSource()!);
+    return ownLayerRef.current.getSource()!;
   }, [getTargetVectorSource]);
 
-  // Undoes the current map lock; unlocking restores only what the lock switched off.
-  const unlockRef = useRef<(() => void) | null>(null);
-  const setNavigationLocked = useCallback((map: Map, locked: boolean) => {
-    if (locked) {
-      unlockRef.current ??= lockMapInteractions(map);
-    } else {
-      unlockRef.current?.();
-      unlockRef.current = null;
-    }
-  }, []);
-
-  const removeBox = useCallback((session: Session) => {
-    if (session.boxFeature) boxLayerRef.current?.getSource()?.removeFeature(session.boxFeature);
-    session.boxFeature = null;
-  }, []);
-
-  const endSession = useCallback(() => {
-    const map = mapRef.current;
-    const session = sessionRef.current;
-    sessionRef.current = null;
-    if (map && clickKeyRef.current) {
-      map.un("click", clickKeyRef.current);
-      clickKeyRef.current = null;
-    }
-    session?.unwatch?.();
-    if (session) removeBox(session);
-    if (map) setNavigationLocked(map, false);
-  }, [mapRef, removeBox, setNavigationLocked]);
-
-  const disable = useCallback(() => {
-    const map = mapRef.current;
-    if (map && drawRef.current) map.removeInteraction(drawRef.current);
-    drawRef.current = null;
-    endSession();
-    setIsActive(false);
-  }, [endSession, mapRef]);
-
-  /** Runs the session's prompt and replaces its previous outline with the new one. */
-  const runSession = useCallback(async (map: Map, session: Session) => {
-    busyRef.current = true;
-    setIsProcessing(true);
-    try {
-      const fc = toPixelFeatureCollection(await requestSegmentation(session));
-      const toCoordinate = (p: [number, number]) => toMapCoordinate(session.frame, p);
-      const outline = fc ? pixelPolygonsToFeatures(keepLargestPolygon(fc), toCoordinate) : [];
-      if (sessionRef.current !== session) return; // ended while waiting
-      const source = resultSource(map);
-      if (session.features.length === 0 && outline.length) onBeforeAddFeatures?.();
-      replacingRef.current = true;
-      session.features.forEach((f) => source.removeFeature(f));
-      replacingRef.current = false;
-      outline.forEach((f) => f.set("is_new", true));
-      source.addFeatures(outline);
-      session.features = outline;
-      removeBox(session);
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : "AI segmentation failed.");
-    } finally {
-      busyRef.current = false;
-      setIsProcessing(false);
-    }
-  }, [onBeforeAddFeatures, removeBox, resultSource]);
-
-  const refine = useCallback((e: MapClick) => {
-    const map = mapRef.current;
-    const session = sessionRef.current;
-    if (!map || !session || busyRef.current) return;
-    const point = toImagePixel(session.frame, e.coordinate);
-    if (!point) {
-      message.info("That spot was outside the view when you drew the box. Press S and draw a new box there.");
-      return;
-    }
-    session.points.push(point);
-    session.labels.push((e.originalEvent as MouseEvent).altKey ? 0 : 1);
-    void runSession(map, session);
-  }, [mapRef, runSession]);
-
-  const startSession = useCallback(async (map: Map, boxGeometry: Polygon) => {
-    setNavigationLocked(map, true);
-    const origin = map.getCoordinateFromPixel([0, 0]) as [number, number];
-    const resolution = map.getView().getResolution() ?? 1;
-    const capture = await captureOrthoView(map, getOrthoLayer());
-    // The capture's frame now fixes every conversion, so the map may move again.
-    setNavigationLocked(map, false);
-    if (!capture) {
-      message.error("The map view could not be captured for AI segmentation.");
-      return;
-    }
-    const [minX, minY, maxX, maxY] = boxGeometry.getExtent();
-    const [x1, y1] = map.getPixelFromCoordinate([minX, maxY]);
-    const [x2, y2] = map.getPixelFromCoordinate([maxX, minY]);
-    const boxFeature = new Feature(boxGeometry);
+  const boxSource = useCallback((map: Map): VectorSource => {
     if (!boxLayerRef.current) {
       boxLayerRef.current = new VectorLayer<VectorSource>({
         source: new VectorSource(),
@@ -237,48 +112,70 @@ export const useAISegmentation = ({
       });
       map.addLayer(boxLayerRef.current);
     }
-    boxLayerRef.current.getSource()!.addFeature(boxFeature);
+    return boxLayerRef.current.getSource()!;
+  }, []);
 
-    const session: Session = {
-      image: capture.image,
-      scale: capture.scale,
-      box: [x1, y1, x2, y2].map((v) => Math.round(v * capture.scale)),
-      points: [],
-      labels: [],
-      features: [],
-      boxFeature,
-      frame: {
-        origin,
-        resolution,
-        scale: capture.scale,
-        width: capture.width,
-        height: capture.height,
-      },
+  const disable = useCallback(() => {
+    runRef.current += 1;
+    const map = mapRef.current;
+    if (map && drawRef.current) map.removeInteraction(drawRef.current);
+    drawRef.current = null;
+    boxLayerRef.current?.getSource()?.clear();
+    setIsActive(false);
+  }, [mapRef]);
+
+  /** Sends the box with the captured view and adds the returned outline; then AI is off. */
+  const segmentBox = useCallback(async (map: Map, box: Polygon) => {
+    const run = runRef.current;
+    const unlock = lockMapInteractions(map);
+    const frameBase = {
+      origin: map.getCoordinateFromPixel([0, 0]) as [number, number],
+      resolution: map.getView().getResolution() ?? 1,
     };
-    sessionRef.current = session;
-    await runSession(map, session);
-    if (sessionRef.current !== session) return;
-    if (session.features.length === 0) {
-      // Nothing to refine: the request failed or found nothing.
+    const [minX, minY, maxX, maxY] = box.getExtent();
+    const [x1, y1] = map.getPixelFromCoordinate([minX, maxY]);
+    const [x2, y2] = map.getPixelFromCoordinate([maxX, minY]);
+    const capture = await captureOrthoView(map, getOrthoLayer());
+    // The frame fixes the conversion now, so the map may move while the model works.
+    unlock();
+    if (!capture) {
+      message.error("The map view could not be captured for AI segmentation.");
       disable();
       return;
     }
-    // Undo, Delete or Cancel removing the outline ends the session.
-    const source = resultSource(map);
-    const onRemoved = (e: { feature?: Feature }) => {
-      if (!replacingRef.current && (!e.feature || session.features.includes(e.feature))) disable();
-    };
-    const removeKey = source.on("removefeature", onRemoved);
-    const clearKey = source.on("clear", onRemoved);
-    session.unwatch = () => unByKey([removeKey, clearKey]);
-    clickKeyRef.current = refine;
-    map.on("click", refine);
-    message.info(REFINE_HINT);
-  }, [disable, getOrthoLayer, refine, resultSource, runSession, setNavigationLocked]);
+    const boxFeature = new Feature(box);
+    boxSource(map).addFeature(boxFeature);
+    setIsProcessing(true);
+    try {
+      const fc = toPixelFeatureCollection(
+        await requestSegmentation({
+          image: capture.image,
+          box: [x1, y1, x2, y2].map((v) => Math.round(v * capture.scale)),
+          points: [],
+          labels: [],
+        }),
+      );
+      if (run !== runRef.current) return; // AI was turned off while waiting
+      const frame: CaptureFrame = { ...frameBase, scale: capture.scale };
+      const outline = fc ? pixelPolygonsToFeatures(keepLargestPolygon(fc), (p) => toMapCoordinate(frame, p)) : [];
+      if (outline.length === 0) {
+        message.info("The AI found no outline in this box. Try a tighter box.");
+        return;
+      }
+      onBeforeAddFeatures?.();
+      outline.forEach((f) => f.set("is_new", true));
+      resultSource(map).addFeatures(outline);
+    } catch (e) {
+      if (run === runRef.current) message.error(e instanceof Error ? e.message : "AI segmentation failed.");
+    } finally {
+      setIsProcessing(false);
+      if (run === runRef.current) disable();
+    }
+  }, [boxSource, disable, getOrthoLayer, onBeforeAddFeatures, resultSource]);
 
   const enable = useCallback(() => {
     const map = mapRef.current;
-    if (!map || !canUse || drawRef.current) return;
+    if (!map || !canUse || isActive) return;
     setIsActive(true);
     warmUpSegmentation();
     const draw = new Draw({ source: new VectorSource(), type: "Circle", geometryFunction: createBox(), stopClick: true });
@@ -286,17 +183,17 @@ export const useAISegmentation = ({
       map.removeInteraction(draw);
       drawRef.current = null;
       const geometry = evt.feature.getGeometry();
-      if (geometry instanceof Polygon) void startSession(map, geometry);
+      if (geometry instanceof Polygon) void segmentBox(map, geometry);
     });
     map.addInteraction(draw);
     drawRef.current = draw;
-  }, [canUse, mapRef, startSession]);
+  }, [canUse, isActive, mapRef, segmentBox]);
 
   const findInArea = useCallback(async (text: string, area: Polygon): Promise<AreaSearch | null> => {
     const map = mapRef.current;
     if (!map || !canUse || isActive) return null;
     setIsProcessing(true);
-    setNavigationLocked(map, true);
+    const unlock = lockMapInteractions(map);
     try {
       const crop = areaPixelRect(map, area);
       if (!crop) throw new Error("Mark an area inside the map view.");
@@ -313,10 +210,10 @@ export const useAISegmentation = ({
       message.error(e instanceof Error ? e.message : "AI search failed.");
       return null;
     } finally {
-      setNavigationLocked(map, false);
+      unlock();
       setIsProcessing(false);
     }
-  }, [canUse, getOrthoLayer, isActive, mapRef, setNavigationLocked]);
+  }, [canUse, getOrthoLayer, isActive, mapRef]);
 
   useEffect(() => {
     return () => {
@@ -350,9 +247,6 @@ interface ViewCapture {
   image: Blob;
   scale: number;
   origin: [number, number];
-  /** Size of the image in pixels. */
-  width: number;
-  height: number;
 }
 
 /** Map pixel rectangle to capture instead of the whole view: [x, y, width, height]. */
@@ -381,7 +275,7 @@ async function captureOrthoView(
   if (!composed) return null;
   const { canvas, scale, origin } = composed;
   const image = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
-  return image ? { image, scale, origin, width: canvas.width, height: canvas.height } : null;
+  return image ? { image, scale, origin } : null;
 }
 
 function composeMapCanvas(map: Map, crop?: PixelRect) {

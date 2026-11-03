@@ -15,16 +15,14 @@ test.describe("label editor AI and area tools", () => {
   test.beforeAll(() => editor.setup());
   test.afterAll(() => editor.teardown());
 
-  test("AI box reports an unreachable model, adds a returned outline and refines it with clicks", async ({
+  test("AI box reports an unreachable model, adds a returned outline and turns itself off", async ({
     page,
   }) => {
     let samResponse: "fail" | "outline" = "fail";
     let drawnBox = { x1: 0, y1: 0, x2: 0, y2: 0 };
-    const sentPoints: string[] = [];
+    let segmentRequests = 0;
     await page.route("**/segment", async (route) => {
-      const body = route.request().postData() ?? "";
-      const points = /name="points"\r\n\r\n([^\r]*)/.exec(body)?.[1];
-      if (points) sentPoints.push(points);
+      segmentRequests += 1;
       if (samResponse === "fail") {
         await route.abort("connectionrefused");
         return;
@@ -74,27 +72,25 @@ test.describe("label editor AI and area tools", () => {
     await drawAiBox();
     await expect(undo).toBeEnabled({ timeout: 10_000 });
 
-    // While AI stays on, a click refines the outline: it is sent as a point with the same box.
+    // One box, one outline: AI turns itself off, so map clicks reach no model.
+    await expect(page.getByRole("button", { name: /Cancel AI/ })).toHaveCount(0);
+    const requestsAfterOutline = segmentRequests;
     const bounds = (await page.getByTestId("dataset-audit-map").boundingBox())!;
-    await page.mouse.click(bounds.x + bounds.width * 0.5, bounds.y + bounds.height * 0.5);
-    await expect.poll(() => sentPoints.length).toBe(1);
-    expect(JSON.parse(sentPoints[0])).toHaveLength(1);
-    // Undo removes the outline and ends AI mode: later map clicks reach no model.
-    await expect(page.getByRole("button", { name: /Finish AI \(S\)/ })).toBeVisible();
-    await undo.click();
-    await expect(page.getByRole("button", { name: /Finish AI/ })).toHaveCount(0);
     await page.mouse.click(bounds.x + bounds.width * 0.45, bounds.y + bounds.height * 0.45);
     await page.waitForTimeout(500);
-    expect(sentPoints).toHaveLength(1);
+    expect(segmentRequests).toBe(requestsAfterOutline);
+    // Undo removes an outline that does not fit.
+    await undo.click();
+    await expect(undo).toBeDisabled();
 
-    // Cancelling while AI is on ends the session too.
-    await drawAiBox();
-    await expect(page.getByRole("button", { name: /Finish AI \(S\)/ })).toBeVisible();
+    // Cancelling the editor while AI waits for a box turns AI off too.
+    await page.getByRole("button", { name: /AI \(S\)/ }).click();
+    await expect(page.getByRole("button", { name: /Cancel AI \(S\)/ })).toBeVisible();
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(page.getByText("Editing deadwood cover", { exact: true })).toBeHidden();
     await page.mouse.click(bounds.x + bounds.width * 0.45, bounds.y + bounds.height * 0.45);
     await page.waitForTimeout(500);
-    expect(sentPoints).toHaveLength(1);
+    expect(segmentRequests).toBe(requestsAfterOutline);
   });
 
   test("AI box on a screen wider than the service limit sends a shrunken view", async ({ page }) => {
