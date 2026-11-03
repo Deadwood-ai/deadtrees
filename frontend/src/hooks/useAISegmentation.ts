@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map from "ol/Map.js";
-import Draw, { createBox } from "ol/interaction/Draw.js";
+import DragBox from "ol/interaction/DragBox.js";
+import DragZoom from "ol/interaction/DragZoom.js";
+import Draw from "ol/interaction/Draw.js";
+import Modify from "ol/interaction/Modify.js";
+import Select from "ol/interaction/Select.js";
+import Translate from "ol/interaction/Translate.js";
+import { shiftKeyOnly } from "ol/events/condition.js";
+import type MapBrowserEvent from "ol/MapBrowserEvent.js";
 import VectorSource from "ol/source/Vector.js";
 import VectorLayer from "ol/layer/Vector.js";
 import { Style, Fill, Stroke } from "ol/style";
@@ -9,8 +16,17 @@ import type Geometry from "ol/geom/Geometry.js";
 import Polygon from "ol/geom/Polygon.js";
 import TileLayerWebGL from "ol/layer/WebGLTile.js";
 import { message } from "antd";
-import { requestConcepts, requestSegmentation, warmUpSegmentation } from "../utils/samRequest";
-import { captureScale, keepLargestPolygon, pixelPolygonsToFeatures, toPixelFeatureCollection } from "../utils/samGeometry";
+import {
+  requestConcepts,
+  requestSegmentation,
+  warmUpSegmentation,
+} from "../utils/samRequest";
+import {
+  captureScale,
+  keepLargestPolygon,
+  pixelPolygonsToFeatures,
+  toPixelFeatureCollection,
+} from "../utils/samGeometry";
 import { clipToArea } from "../utils/areaEdits";
 import { lockMapInteractions } from "../utils/mapInteractionLock";
 import { palette } from "../theme/palette";
@@ -53,19 +69,35 @@ interface CaptureFrame {
   scale: number;
 }
 
-function toMapCoordinate(frame: CaptureFrame, pixel: [number, number]): number[] {
+function toMapCoordinate(
+  frame: CaptureFrame,
+  pixel: [number, number],
+): number[] {
   return [
     frame.origin[0] + (pixel[0] / frame.scale) * frame.resolution,
     frame.origin[1] - (pixel[1] / frame.scale) * frame.resolution,
   ];
 }
 
+/** The last AI outline: what the model saw and was asked, so Shift/Alt-clicks can refine it. */
+interface Outline {
+  image: Blob;
+  frame: CaptureFrame;
+  box: number[] | null;
+  points: number[][];
+  labels: number[];
+  features: Feature[];
+}
+
+const AI_HINT =
+  "Click a tree to outline it, or Shift-drag a box. Shift-click adds to the last outline, Alt-click removes from it.";
+
 /**
  * AI segmentation for the polygon editors.
  *
- * Turning AI on lets the user draw one box. The view is captured with it (the map is locked only
- * for that moment), the model's outline is added to the editor, and AI turns off again. Undo
- * removes an outline that does not fit.
+ * While AI is on, a click outlines the tree under it and Shift-drag outlines what is inside a box.
+ * Shift-click and Alt-click refine the last outline. The map is locked only while the view is
+ * captured; outlines are placed through the capture's frame, so panning and zooming keep working.
  */
 export const useAISegmentation = ({
   mapRef,
@@ -76,38 +108,50 @@ export const useAISegmentation = ({
   const [isActive, setIsActive] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const drawRef = useRef<Draw | null>(null);
   const ownLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   // The dashed box lives on its own layer so an editor save never picks it up.
   const boxLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  const lastRef = useRef<Outline | null>(null);
   // Bumped when AI is turned off, so a request still running cannot add its outline afterwards.
   const runRef = useRef(0);
+  const busyRef = useRef(false);
+  // Undoes what enable() attached: the click listener, the box interaction, Shift-drag zoom.
+  const detachRef = useRef<(() => void) | null>(null);
 
   const canUse = useMemo(() => !!getOrthoLayer(), [getOrthoLayer]);
 
   // AI outlines go to the editor's layer when there is one, otherwise to a layer owned here.
-  const resultSource = useCallback((map: Map): VectorSource => {
-    const target = getTargetVectorSource?.();
-    if (target) return target;
-    if (!ownLayerRef.current) {
-      ownLayerRef.current = new VectorLayer<VectorSource>({
-        source: new VectorSource(),
-        style: new Style({
-          fill: new Fill({ color: "rgba(0, 200, 255, 0.25)" }),
-          stroke: new Stroke({ color: palette.state.hover, width: 2 }),
-        }),
-        className: "ai-segmentation-layer",
-      });
-      map.addLayer(ownLayerRef.current);
-    }
-    return ownLayerRef.current.getSource()!;
-  }, [getTargetVectorSource]);
+  const resultSource = useCallback(
+    (map: Map): VectorSource => {
+      const target = getTargetVectorSource?.();
+      if (target) return target;
+      if (!ownLayerRef.current) {
+        ownLayerRef.current = new VectorLayer<VectorSource>({
+          source: new VectorSource(),
+          style: new Style({
+            fill: new Fill({ color: "rgba(0, 200, 255, 0.25)" }),
+            stroke: new Stroke({ color: palette.state.hover, width: 2 }),
+          }),
+          className: "ai-segmentation-layer",
+        });
+        map.addLayer(ownLayerRef.current);
+      }
+      return ownLayerRef.current.getSource()!;
+    },
+    [getTargetVectorSource],
+  );
 
   const boxSource = useCallback((map: Map): VectorSource => {
     if (!boxLayerRef.current) {
       boxLayerRef.current = new VectorLayer<VectorSource>({
         source: new VectorSource(),
-        style: new Style({ stroke: new Stroke({ color: palette.state.hover, width: 2, lineDash: [6, 4] }) }),
+        style: new Style({
+          stroke: new Stroke({
+            color: palette.state.hover,
+            width: 2,
+            lineDash: [6, 4],
+          }),
+        }),
         className: "ai-segmentation-box",
       });
       map.addLayer(boxLayerRef.current);
@@ -117,103 +161,220 @@ export const useAISegmentation = ({
 
   const disable = useCallback(() => {
     runRef.current += 1;
-    const map = mapRef.current;
-    if (map && drawRef.current) map.removeInteraction(drawRef.current);
-    drawRef.current = null;
+    detachRef.current?.();
+    detachRef.current = null;
+    lastRef.current = null;
     boxLayerRef.current?.getSource()?.clear();
     setIsActive(false);
-  }, [mapRef]);
+  }, []);
 
-  /** Sends the box with the captured view and adds the returned outline; then AI is off. */
-  const segmentBox = useCallback(async (map: Map, box: Polygon) => {
-    const run = runRef.current;
-    const unlock = lockMapInteractions(map);
-    const frameBase = {
-      origin: map.getCoordinateFromPixel([0, 0]) as [number, number],
-      resolution: map.getView().getResolution() ?? 1,
-    };
-    const [minX, minY, maxX, maxY] = box.getExtent();
-    const [x1, y1] = map.getPixelFromCoordinate([minX, maxY]);
-    const [x2, y2] = map.getPixelFromCoordinate([maxX, minY]);
-    const capture = await captureOrthoView(map, getOrthoLayer());
-    // The frame fixes the conversion now, so the map may move while the model works.
-    unlock();
-    if (!capture) {
-      message.error("The map view could not be captured for AI segmentation.");
-      disable();
-      return;
-    }
-    const boxFeature = new Feature(box);
-    boxSource(map).addFeature(boxFeature);
-    setIsProcessing(true);
-    try {
-      const fc = toPixelFeatureCollection(
-        await requestSegmentation({
-          image: capture.image,
-          box: [x1, y1, x2, y2].map((v) => Math.round(v * capture.scale)),
-          points: [],
-          labels: [],
-        }),
-      );
-      if (run !== runRef.current) return; // AI was turned off while waiting
-      const frame: CaptureFrame = { ...frameBase, scale: capture.scale };
-      const outline = fc ? pixelPolygonsToFeatures(keepLargestPolygon(fc), (p) => toMapCoordinate(frame, p)) : [];
-      if (outline.length === 0) {
-        message.info("The AI found no outline in this box. Try a tighter box.");
+  /** Asks the model for one outline and puts it in place of `replace` (a refined outline). */
+  const runPrompt = useCallback(
+    async (map: Map, prompt: Omit<Outline, "features">, replace: Feature[]) => {
+      const run = runRef.current;
+      busyRef.current = true;
+      setIsProcessing(true);
+      try {
+        const fc = toPixelFeatureCollection(await requestSegmentation(prompt));
+        if (run !== runRef.current) return; // AI was turned off while waiting
+        const outline = fc
+          ? pixelPolygonsToFeatures(keepLargestPolygon(fc), (p) =>
+              toMapCoordinate(prompt.frame, p),
+            )
+          : [];
+        if (outline.length === 0) {
+          message.info("The AI found no outline there. Try a box around it.");
+          return;
+        }
+        const source = resultSource(map);
+        onBeforeAddFeatures?.();
+        replace
+          .filter((f) => source.hasFeature(f))
+          .forEach((f) => source.removeFeature(f));
+        outline.forEach((f) => f.set("is_new", true));
+        source.addFeatures(outline);
+        lastRef.current = { ...prompt, features: outline };
+      } catch (e) {
+        if (run === runRef.current)
+          message.error(
+            e instanceof Error ? e.message : "AI segmentation failed.",
+          );
+      } finally {
+        busyRef.current = false;
+        setIsProcessing(false);
+        boxLayerRef.current?.getSource()?.clear();
+      }
+    },
+    [onBeforeAddFeatures, resultSource],
+  );
+
+  /** Captures the view (the only moment the map is locked) and outlines a click or a box in it. */
+  const outlineNew = useCallback(
+    async (map: Map, target: { pixel: number[] } | { box: Polygon }) => {
+      if (busyRef.current) return;
+      busyRef.current = true;
+      const unlock = lockMapInteractions(map);
+      const origin = map.getCoordinateFromPixel([0, 0]) as [number, number];
+      const resolution = map.getView().getResolution() ?? 1;
+      let box: number[] | null = null;
+      let points: number[][] = [];
+      if ("box" in target) {
+        const [minX, minY, maxX, maxY] = target.box.getExtent();
+        box = [
+          ...map.getPixelFromCoordinate([minX, maxY]),
+          ...map.getPixelFromCoordinate([maxX, minY]),
+        ];
+        boxSource(map).addFeature(new Feature(target.box));
+      } else {
+        points = [target.pixel];
+      }
+      const capture = await captureOrthoView(map, getOrthoLayer());
+      unlock();
+      busyRef.current = false;
+      if (!capture) {
+        message.error(
+          "The map view could not be captured for AI segmentation.",
+        );
+        boxLayerRef.current?.getSource()?.clear();
         return;
       }
-      onBeforeAddFeatures?.();
-      outline.forEach((f) => f.set("is_new", true));
-      resultSource(map).addFeatures(outline);
-    } catch (e) {
-      if (run === runRef.current) message.error(e instanceof Error ? e.message : "AI segmentation failed.");
-    } finally {
-      setIsProcessing(false);
-      if (run === runRef.current) disable();
-    }
-  }, [boxSource, disable, getOrthoLayer, onBeforeAddFeatures, resultSource]);
+      const toImage = (v: number) => Math.round(v * capture.scale);
+      await runPrompt(
+        map,
+        {
+          image: capture.image,
+          frame: { origin, resolution, scale: capture.scale },
+          box: box && box.map(toImage),
+          points: points.map((p) => p.map(toImage)),
+          labels: points.map(() => 1),
+        },
+        [],
+      );
+    },
+    [boxSource, getOrthoLayer, runPrompt],
+  );
+
+  /** Adds (label 1) or removes (label 0) the clicked spot from the last outline. */
+  const refineLast = useCallback(
+    async (map: Map, coordinate: number[], label: 0 | 1) => {
+      const last = lastRef.current;
+      const source = resultSource(map);
+      if (!last || !last.features.some((f) => source.hasFeature(f))) {
+        message.info(
+          "Click a tree first; Shift-click and Alt-click then change that outline.",
+        );
+        return;
+      }
+      const { frame } = last;
+      const x =
+        ((coordinate[0] - frame.origin[0]) / frame.resolution) * frame.scale;
+      const y =
+        ((frame.origin[1] - coordinate[1]) / frame.resolution) * frame.scale;
+      const [width, height] = await imageSize(last.image);
+      if (x < 0 || y < 0 || x > width || y > height) {
+        message.info(
+          "That spot was off screen when the outline was made. Click the tree again instead.",
+        );
+        return;
+      }
+      await runPrompt(
+        map,
+        {
+          ...last,
+          points: [...last.points, [Math.round(x), Math.round(y)]],
+          labels: [...last.labels, label],
+        },
+        last.features,
+      );
+    },
+    [resultSource, runPrompt],
+  );
 
   const enable = useCallback(() => {
     const map = mapRef.current;
-    if (!map || !canUse || isActive) return;
+    if (!map || !canUse || detachRef.current) return;
     setIsActive(true);
     warmUpSegmentation();
-    const draw = new Draw({ source: new VectorSource(), type: "Circle", geometryFunction: createBox(), stopClick: true });
-    draw.on("drawend", (evt) => {
-      map.removeInteraction(draw);
-      drawRef.current = null;
-      const geometry = evt.feature.getGeometry();
-      if (geometry instanceof Polygon) void segmentBox(map, geometry);
-    });
-    map.addInteraction(draw);
-    drawRef.current = draw;
-  }, [canUse, isActive, mapRef, segmentBox]);
+    message.info(AI_HINT);
 
-  const findInArea = useCallback(async (text: string, area: Polygon): Promise<AreaSearch | null> => {
-    const map = mapRef.current;
-    if (!map || !canUse || isActive) return null;
-    setIsProcessing(true);
-    const unlock = lockMapInteractions(map);
-    try {
-      const crop = areaPixelRect(map, area);
-      if (!crop) throw new Error("Mark an area inside the map view.");
-      const capture = await captureOrthoView(map, getOrthoLayer(), crop);
-      if (!capture) throw new Error("The map view could not be captured for AI search.");
-      const fc = toPixelFeatureCollection(await requestConcepts(capture.image, text));
-      const { scale, origin } = capture;
-      const toCoordinate = (p: [number, number]) =>
-        map.getCoordinateFromPixel([p[0] / scale + origin[0], p[1] / scale + origin[1]]);
-      const found = fc ? pixelPolygonsToFeatures(fc, toCoordinate) : [];
-      const best = found.sort((a, b) => (b.get("score") ?? 0) - (a.get("score") ?? 0)).slice(0, MAX_AREA_RESULTS);
-      return { features: clipToArea(best, area), total: found.length };
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : "AI search failed.");
-      return null;
-    } finally {
-      unlock();
-      setIsProcessing(false);
-    }
-  }, [canUse, getOrthoLayer, isActive, mapRef]);
+    const onClick = (
+      e: MapBrowserEvent<PointerEvent | KeyboardEvent | WheelEvent>,
+    ) => {
+      if (busyRef.current) return;
+      const event = e.originalEvent as MouseEvent;
+      if (event.altKey) void refineLast(map, e.coordinate, 0);
+      // A Shift-click reaches the box interaction as a cancelled box (handled there).
+      else if (!event.shiftKey) void outlineNew(map, { pixel: e.pixel });
+    };
+    // While AI is on, clicks belong to it: editing interactions pause (panning and zooming stay),
+    // and Shift-drag draws an AI box instead of zooming to it.
+    const paused = map
+      .getInteractions()
+      .getArray()
+      .filter(
+        (i) =>
+          i.getActive() &&
+          (i instanceof DragZoom ||
+            i instanceof Select ||
+            i instanceof Modify ||
+            i instanceof Draw ||
+            i instanceof Translate),
+      );
+    paused.forEach((i) => i.setActive(false));
+    const boxDraw = new DragBox({ condition: shiftKeyOnly });
+    boxDraw.on(
+      "boxend",
+      () => void outlineNew(map, { box: boxDraw.getGeometry() }),
+    );
+    // A Shift-click is a box too small to count: it adds the spot to the last outline.
+    boxDraw.on("boxcancel", (e) => {
+      if (!busyRef.current) void refineLast(map, e.coordinate, 1);
+    });
+    map.addInteraction(boxDraw);
+    map.on("click", onClick);
+    detachRef.current = () => {
+      map.un("click", onClick);
+      map.removeInteraction(boxDraw);
+      paused.forEach((i) => i.setActive(true));
+    };
+  }, [canUse, mapRef, outlineNew, refineLast]);
+
+  const findInArea = useCallback(
+    async (text: string, area: Polygon): Promise<AreaSearch | null> => {
+      const map = mapRef.current;
+      if (!map || !canUse || isActive) return null;
+      setIsProcessing(true);
+      const unlock = lockMapInteractions(map);
+      try {
+        const crop = areaPixelRect(map, area);
+        if (!crop) throw new Error("Mark an area inside the map view.");
+        const capture = await captureOrthoView(map, getOrthoLayer(), crop);
+        if (!capture)
+          throw new Error("The map view could not be captured for AI search.");
+        const fc = toPixelFeatureCollection(
+          await requestConcepts(capture.image, text),
+        );
+        const { scale, origin } = capture;
+        const toCoordinate = (p: [number, number]) =>
+          map.getCoordinateFromPixel([
+            p[0] / scale + origin[0],
+            p[1] / scale + origin[1],
+          ]);
+        const found = fc ? pixelPolygonsToFeatures(fc, toCoordinate) : [];
+        const best = found
+          .sort((a, b) => (b.get("score") ?? 0) - (a.get("score") ?? 0))
+          .slice(0, MAX_AREA_RESULTS);
+        return { features: clipToArea(best, area), total: found.length };
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : "AI search failed.");
+        return null;
+      } finally {
+        unlock();
+        setIsProcessing(false);
+      }
+    },
+    [canUse, getOrthoLayer, isActive, mapRef],
+  );
 
   useEffect(() => {
     return () => {
@@ -239,7 +400,9 @@ function areaPixelRect(map: Map, area: Polygon): PixelRect | null {
   const top = Math.max(0, Math.floor(y1));
   const right = Math.min(width, Math.ceil(x2));
   const bottom = Math.min(height, Math.ceil(y2));
-  return right - left > 4 && bottom - top > 4 ? [left, top, right - left, bottom - top] : null;
+  return right - left > 4 && bottom - top > 4
+    ? [left, top, right - left, bottom - top]
+    : null;
 }
 
 /** A captured view: image pixel = (map pixel - origin) * scale. */
@@ -247,6 +410,14 @@ interface ViewCapture {
   image: Blob;
   scale: number;
   origin: [number, number];
+}
+
+/** Width and height of a captured image, read back from the image itself. */
+async function imageSize(image: Blob): Promise<[number, number]> {
+  const bitmap = await createImageBitmap(image);
+  const size: [number, number] = [bitmap.width, bitmap.height];
+  bitmap.close();
+  return size;
 }
 
 /** Map pixel rectangle to capture instead of the whole view: [x, y, width, height]. */
@@ -274,7 +445,9 @@ async function captureOrthoView(
   map.renderSync();
   if (!composed) return null;
   const { canvas, scale, origin } = composed;
-  const image = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+  const image = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/jpeg", 0.92),
+  );
   return image ? { image, scale, origin } : null;
 }
 
@@ -282,7 +455,8 @@ function composeMapCanvas(map: Map, crop?: PixelRect) {
   const target = map.getTargetElement();
   // The bottom-most canvas holds the orthophoto.
   const source = target?.querySelector("canvas");
-  if (!target || !source || source.width === 0 || source.height === 0) return null;
+  if (!target || !source || source.width === 0 || source.height === 0)
+    return null;
   const view = target.getBoundingClientRect();
   const [x, y, width, height] = crop ?? [0, 0, view.width, view.height];
   // A small area may be enlarged (up to 2x) so the model sees more detail; a whole view never is.
@@ -293,7 +467,17 @@ function composeMapCanvas(map: Map, crop?: PixelRect) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
   const ratio = source.width / view.width; // device pixels per map pixel
-  ctx.drawImage(source, x * ratio, y * ratio, width * ratio, height * ratio, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(
+    source,
+    x * ratio,
+    y * ratio,
+    width * ratio,
+    height * ratio,
+    0,
+    0,
+    canvas.width,
+    canvas.height,
+  );
   return { canvas, scale, origin: [x, y] as [number, number] };
 }
 

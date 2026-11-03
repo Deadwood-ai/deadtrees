@@ -131,7 +131,7 @@ export default function EditorToolbar({
             title="AI Segmentation (S) - Draw a box to run AI"
             htmlType="button"
           >
-            {isAIActive ? "Cancel AI (S)" : "AI (S)"}
+            {isAIActive ? "Stop AI (S)" : "AI (S)"}
           </Button>
 
           {areaTools && (

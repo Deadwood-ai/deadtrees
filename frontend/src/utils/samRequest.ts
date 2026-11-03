@@ -15,23 +15,21 @@ let lastWarmUpAt = 0;
 
 export interface SamPrompt {
   image: Blob;
-  /** Box in view-image pixels: [x1, y1, x2, y2]. */
-  box: number[];
-  /** Refinement clicks in view-image pixels; label 1 adds, 0 removes. */
+  /** Box in view-image pixels: [x1, y1, x2, y2]; null when the clicks alone say what to outline. */
+  box: number[] | null;
+  /** Clicks in view-image pixels; label 1 adds, 0 removes. */
   points?: number[][];
   labels?: number[];
 }
 
-/** Segments one object from a box, refined by optional clicks. */
+/** Segments one object from a box and/or clicks. */
 export function requestSegmentation({ image, box, points = [], labels = [] }: SamPrompt): Promise<unknown> {
   const form = new FormData();
   form.append("image", image, "view.jpg");
-  form.append("bboxes", JSON.stringify(box));
+  if (box) form.append("bboxes", JSON.stringify(box));
   if (points.length) {
     form.append("points", JSON.stringify(points));
     form.append("labels", JSON.stringify(labels));
-  } else {
-    form.append("labels", JSON.stringify([1]));
   }
   return postToSam("/segment", form);
 }

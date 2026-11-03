@@ -15,14 +15,18 @@ test.describe("label editor AI and area tools", () => {
   test.beforeAll(() => editor.setup());
   test.afterAll(() => editor.teardown());
 
-  test("AI box reports an unreachable model, adds a returned outline and turns itself off", async ({
+  test("AI outlines a clicked tree, refines it with Shift-click and stops on S", async ({
     page,
   }) => {
     let samResponse: "fail" | "outline" = "fail";
     let drawnBox = { x1: 0, y1: 0, x2: 0, y2: 0 };
     let segmentRequests = 0;
+    const sentPoints: number[][][] = [];
     await page.route("**/segment", async (route) => {
       segmentRequests += 1;
+      const body = route.request().postData() ?? "";
+      const points = /name="points"\r\n\r\n([^\r]*)/.exec(body)?.[1];
+      if (points) sentPoints.push(JSON.parse(points));
       if (samResponse === "fail") {
         await route.abort("connectionrefused");
         return;
@@ -47,53 +51,50 @@ test.describe("label editor AI and area tools", () => {
     const undo = page.getByRole("button", { name: /Undo/ });
     await expect(undo).toBeDisabled();
 
-    const drawAiBox = async () => {
-      await page.getByRole("button", { name: /AI \(S\)/ }).click();
-      const map = page.getByTestId("dataset-audit-map");
-      const bounds = await map.boundingBox();
-      if (!bounds) throw new Error("Audit map is not visible for the AI box.");
-      drawnBox = {
-        x1: Math.round(bounds.width * 0.4),
-        y1: Math.round(bounds.height * 0.4),
-        x2: Math.round(bounds.width * 0.6),
-        y2: Math.round(bounds.height * 0.6),
-      };
-      await page.mouse.click(bounds.x + drawnBox.x1, bounds.y + drawnBox.y1);
-      await page.mouse.click(bounds.x + drawnBox.x2, bounds.y + drawnBox.y2);
+    const map = page.getByTestId("dataset-audit-map");
+    const bounds = (await map.boundingBox())!;
+    // The mocked model answers with this square (view pixels) for any prompt.
+    drawnBox = {
+      x1: Math.round(bounds.width * 0.4),
+      y1: Math.round(bounds.height * 0.4),
+      x2: Math.round(bounds.width * 0.6),
+      y2: Math.round(bounds.height * 0.6),
+    };
+    const clickTree = async (fx: number, fy: number, modifier?: "Shift" | "Alt") => {
+      if (modifier) await page.keyboard.down(modifier);
+      await page.mouse.click(bounds.x + bounds.width * fx, bounds.y + bounds.height * fy);
+      if (modifier) await page.keyboard.up(modifier);
     };
 
-    await drawAiBox();
+    await page.getByRole("button", { name: /AI \(S\)/ }).click();
+    await expect(page.getByRole("button", { name: /Stop AI \(S\)/ })).toBeVisible();
+    await clickTree(0.5, 0.5);
     await expect(page.getByText("The AI segmentation service could not be reached")).toBeVisible();
-    await expect(page.getByRole("button", { name: /AI \(S\)/ })).toBeEnabled();
     await expect(undo).toBeDisabled();
 
+    // A click on a tree sends that one point, without a box, and adds the outline; AI stays on.
     samResponse = "outline";
     await expect(page.locator(".ant-message-notice")).toHaveCount(0, { timeout: 10_000 });
-    await drawAiBox();
+    await clickTree(0.5, 0.5);
     await expect(undo).toBeEnabled({ timeout: 10_000 });
+    expect(sentPoints.at(-1)).toHaveLength(1);
+    await expect(page.getByRole("button", { name: /Stop AI \(S\)/ })).toBeVisible();
 
-    // One box, one outline: AI turns itself off, so map clicks reach no model.
-    await expect(page.getByRole("button", { name: /Cancel AI/ })).toHaveCount(0);
-    const requestsAfterOutline = segmentRequests;
-    const bounds = (await page.getByTestId("dataset-audit-map").boundingBox())!;
-    await page.mouse.click(bounds.x + bounds.width * 0.45, bounds.y + bounds.height * 0.45);
+    // Shift-click refines that outline: the same image with both points.
+    await clickTree(0.55, 0.55, "Shift");
+    await expect.poll(() => sentPoints.at(-1)?.length).toBe(2);
+
+    // Stopping AI frees the map: clicks reach no model.
+    await page.getByRole("button", { name: /Stop AI \(S\)/ }).click();
+    const requestsAfterStop = segmentRequests;
+    await clickTree(0.45, 0.45);
     await page.waitForTimeout(500);
-    expect(segmentRequests).toBe(requestsAfterOutline);
-    // Undo removes an outline that does not fit.
-    await undo.click();
-    await expect(undo).toBeDisabled();
-
-    // Cancelling the editor while AI waits for a box turns AI off too.
-    await page.getByRole("button", { name: /AI \(S\)/ }).click();
-    await expect(page.getByRole("button", { name: /Cancel AI \(S\)/ })).toBeVisible();
+    expect(segmentRequests).toBe(requestsAfterStop);
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(page.getByText("Editing deadwood cover", { exact: true })).toBeHidden();
-    await page.mouse.click(bounds.x + bounds.width * 0.45, bounds.y + bounds.height * 0.45);
-    await page.waitForTimeout(500);
-    expect(segmentRequests).toBe(requestsAfterOutline);
   });
 
-  test("AI box on a screen wider than the service limit sends a shrunken view", async ({ page }) => {
+  test("AI box (Shift-drag) on a screen wider than the service limit sends a shrunken view", async ({ page }) => {
     await page.setViewportSize({ width: 2600, height: 1300 });
     const sentBoxes: number[][] = [];
     await page.route("**/segment", async (route) => {
@@ -120,8 +121,13 @@ test.describe("label editor AI and area tools", () => {
     await page.getByRole("button", { name: /AI \(S\)/ }).click();
     const bounds = (await page.getByTestId("dataset-audit-map").boundingBox())!;
     expect(bounds.width).toBeGreaterThan(2048);
-    await page.mouse.click(bounds.x + bounds.width * 0.8, bounds.y + bounds.height * 0.4);
-    await page.mouse.click(bounds.x + bounds.width * 0.9, bounds.y + bounds.height * 0.6);
+    // Shift-drag draws the AI box.
+    await page.keyboard.down("Shift");
+    await page.mouse.move(bounds.x + bounds.width * 0.8, bounds.y + bounds.height * 0.4);
+    await page.mouse.down();
+    await page.mouse.move(bounds.x + bounds.width * 0.9, bounds.y + bounds.height * 0.6, { steps: 8 });
+    await page.mouse.up();
+    await page.keyboard.up("Shift");
     await expect(undo).toBeEnabled({ timeout: 10_000 });
     expect(sentBoxes).toHaveLength(1);
     expect(Math.max(...sentBoxes[0])).toBeLessThanOrEqual(2048);
