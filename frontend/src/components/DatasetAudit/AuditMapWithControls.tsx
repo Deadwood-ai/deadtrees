@@ -323,8 +323,10 @@ const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWith
 							opacity={layerControl.layerOpacity}
 							setOpacity={setLayerOpacity}
 							onReportClick={() => { }}
-							onEditForestCover={startForestCoverEdit}
-							onEditDeadwood={startDeadwoodEdit}
+							// Opens the layer on screen; the editor switches layers with 2 and 3.
+							onEditLabels={
+								layerControl.showForestCover && !layerControl.showDeadwood ? startForestCoverEdit : startDeadwoodEdit
+							}
 							isLoggedIn={true}
 						/>
 					</div>

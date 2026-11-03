@@ -16,7 +16,7 @@ export interface LayerCardRow {
   disabledReason?: string;
 }
 
-export interface DatasetLayerCardProps {
+export interface LayerCardProps {
   rows: LayerCardRow[];
   view: LayerView;
   onViewChange: (view: LayerView) => void;
@@ -43,7 +43,7 @@ const LAYER_NAME: Record<EditableLayer, string> = {
  * what the map shows (explore) or which layer you edit (edit mode). Keys live in
  * useLayerCardKeys; this component only draws the card.
  */
-export default function DatasetLayerCard({
+export default function LayerCard({
   rows,
   view,
   onViewChange,
@@ -56,7 +56,7 @@ export default function DatasetLayerCard({
   onEditLayer,
   editTarget,
   onStartEdit,
-}: DatasetLayerCardProps) {
+}: LayerCardProps) {
   const editing = editingLayer !== null;
   const visibleRows = editing
     ? rows.filter((r) => r.view === "deadwood" || r.view === "forest_cover")
@@ -67,7 +67,7 @@ export default function DatasetLayerCard({
   return (
     <div
       className="pointer-events-auto w-60 rounded-xl border border-gray-200/70 bg-white/95 p-3 shadow-xl backdrop-blur-sm"
-      data-testid="dataset-layer-card"
+      data-testid="label-editor-layer-card"
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
     >

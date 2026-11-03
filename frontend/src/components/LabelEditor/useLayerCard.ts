@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { mapColors } from "../../../theme/mapColors";
-import type { DatasetLayerCardProps, EditableLayer, LayerCardRow, LayerView } from "../DatasetLayerCard";
+import { mapColors } from "../../theme/mapColors";
+import type { LayerCardProps, EditableLayer, LayerCardRow, LayerView } from "./LayerCard";
 import { useLayerCardKeys } from "./useLayerCardKeys";
 
 interface LayerVisibility {
@@ -10,7 +10,7 @@ interface LayerVisibility {
   layerOpacity: number;
 }
 
-interface UseDatasetLayerCardParams {
+interface UseLayerCardParams {
   enabled: boolean;
   layers: LayerVisibility;
   setShowDeadwood: (show: boolean) => void;
@@ -43,7 +43,7 @@ function viewOf(deadwood: boolean, forest: boolean): LayerView {
  * State and keys behind the dataset map's layer card. Exploring, the card picks what the map
  * shows; editing, it picks the layer you edit. Holding Space hides labels in both modes.
  */
-export function useDatasetLayerCard(p: UseDatasetLayerCardParams) {
+export function useLayerCard(p: UseLayerCardParams) {
   const [peek, setPeek] = useState(false);
   const deadwoodOk = p.hasDeadwood && !p.deadwoodBlocked;
   const forestOk = p.hasForestCover && !p.forestBlocked;
@@ -115,7 +115,7 @@ export function useDatasetLayerCard(p: UseDatasetLayerCardParams) {
     },
   ];
 
-  const cardProps: DatasetLayerCardProps = {
+  const cardProps: LayerCardProps = {
     rows,
     view,
     onViewChange: setView,

@@ -157,7 +157,7 @@ export function createAuditEditorFixture(label: string) {
       await page.getByRole("button", { name: "Accept" }).click({ timeout: 2_000 }).catch(() => undefined);
       // A previous test's page may still hold this auditor's lease.
       const continueHere = page.getByRole("button", { name: "Continue here" });
-      const editDeadwood = page.getByRole("button", { name: "Edit deadwood cover" });
+      const editDeadwood = page.getByRole("button", { name: "Edit labels" });
       await expect(editDeadwood.or(continueHere).first()).toBeVisible({ timeout: 20_000 });
       if (await continueHere.isVisible()) await continueHere.click();
       await editDeadwood.click();

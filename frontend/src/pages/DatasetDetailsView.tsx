@@ -20,7 +20,7 @@ import { useDatasetDetailsMap } from "../hooks/useDatasetDetailsMapProvider";
 import { usePhenologyData } from "../hooks/usePhenologyData";
 import { useAuth } from "../hooks/useAuthProvider";
 import { useCreateFlag } from "../hooks/useDatasetFlags";
-import { useDatasetEditing } from "../hooks/useDatasetEditing";
+import { useDatasetLabelTypes } from "../hooks/useDatasetLabelTypes";
 import { useDatasetAOI } from "../hooks/useDatasetAudit";
 import { useCanAudit } from "../hooks/useUserPrivileges";
 import { useIsMobile } from "../hooks/useIsMobile";
@@ -29,16 +29,12 @@ import { hasForestCoverPredictionOutput } from "../utils/predictionAvailability"
 import { observeOwnedResult } from "../utils/observeOwnedResult";
 
 import DatasetLayerControlPanel from "../components/DatasetDetailsMap/DatasetLayerControlPanel";
-import DatasetLayerCard from "../components/DatasetDetailsMap/DatasetLayerCard";
-import { useDatasetLayerCard } from "../components/DatasetDetailsMap/hooks/useDatasetLayerCard";
 import { useSidebarCollapse } from "../components/DatasetDetailsMap/hooks/useSidebarCollapse";
-import EditingSidebar from "../components/DatasetDetailsMap/EditingSidebar";
 import DatasetInfoSidebar from "../components/DatasetDetailsMap/DatasetInfoSidebar";
 import DownloadSection from "../components/DatasetDetailsMap/DownloadSection";
 import ReportIssueModal from "../components/DatasetDetailsMap/ReportIssueModal";
 import OrthoTileSearch from "../components/DatasetDetailsMap/OrthoTileSearch";
 import { hasMapImage } from "../utils/datasetFileUrls";
-import { EditorToolbar } from "../components/PolygonEditor";
 
 import DatasetDetailsMap from "../components/DatasetDetailsMap/DatasetDetailsMap";
 
@@ -88,8 +84,15 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
   const { isDownloading, startDownload, finishDownload, currentDownloadId } =
     useDownload();
 
-  // Editing hook
-  const editing = useDatasetEditing({ datasetId: dataset?.id, user });
+  const { deadwood: deadwoodLabelType, forestCover: forestLabelType } = useDatasetLabelTypes({
+    datasetId: dataset?.id,
+    enabled: !!dataset?.id,
+  });
+  const openEditor = useCallback(
+    (layer?: "deadwood" | "forest_cover") =>
+      navigate(`/dataset/${dataset.id}/edit${layer ? `?layer=${layer}` : ""}`),
+    [navigate, dataset.id],
+  );
 
   // AOI presence drives whether the Area of Interest layer toggle is shown
   const { data: aoiData } = useDatasetAOI(dataset?.id);
@@ -206,22 +209,11 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
     void observeOwnedResult(dataset, user?.id);
   }, [dataset, user?.id]);
 
-  const {
-    isEditing,
-    editingLayerType,
-    editor,
-    ai,
-    hasDeadwood,
-    hasForestCover,
-    refreshKey,
-  } = editing;
+  const hasDeadwood = !!deadwoodLabelType.data?.id;
+  const hasForestCover = !!forestLabelType.data?.id;
   const hasDisplayableForestCover =
     hasForestCover && hasForestCoverPredictionOutput(dataset);
-  const { collapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebarCollapse(isEditing);
-  const setEditOverlayVisible = useCallback(
-    (visible: boolean) => editor.getOverlayLayer()?.setVisible(visible),
-    [editor],
-  );
+  const { collapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebarCollapse("dt-dataset-sidebar-collapsed");
   const hasExportableLabels = [preferredDeadwoodLabel, preferredForestLabel].some(
     (label) =>
       label?.label_source === ILabelSource.MODEL_PREDICTION ||
@@ -231,26 +223,6 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
   // Without a viewable image there is no map, so basemap/layer controls and the
   // in-image search would be dead weight next to the empty state.
   const showMapImage = hasMapImage(dataset);
-  const { cardProps: layerCardProps, peek } = useDatasetLayerCard({
-    // The details page keeps its layer switches in the right panel; the card belongs to editing.
-    enabled: showMapImage && !isMobile && isEditing,
-    layers: layerControl,
-    setShowDeadwood,
-    setShowForestCover,
-    setShowAOI,
-    setLayerOpacity,
-    hasDeadwood,
-    hasForestCover: hasDisplayableForestCover,
-    deadwoodBlocked: auditInfo?.deadwood_quality === "bad" && !canAudit,
-    forestBlocked: auditInfo?.forest_cover_quality === "bad" && !canAudit,
-    hasAOI,
-    canEdit: !!user,
-    isEditing,
-    editingLayer: editingLayerType,
-    startEditing: editing.handleStartEditing,
-    switchEditLayer: (layer) => void editing.switchLayer(layer),
-    setEditOverlayVisible,
-  });
   const SIDEBAR_LEFT_PX = 16;
   const SIDEBAR_WIDTH_PX = 384;
   const SIDEBAR_BUTTON_TOP_PX = 112;
@@ -259,19 +231,15 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
     <div
       className={`flex-1 overflow-y-auto ${isMobile ? "p-4" : "p-4 pr-5 pt-20"}`}
     >
-      {isEditing && editingLayerType ? (
-        <EditingSidebar layerType={editingLayerType} />
-      ) : (
-        <DatasetInfoSidebar
-          dataset={dataset}
-          phenologyData={phenologyData}
-          isPhenologyLoading={isPhenologyLoading}
-          auditInfo={auditInfo}
-          overlappingDatasets={overlappingDatasets || []}
-          isLoadingOverlapping={isLoadingOverlapping}
-        />
-      )}
-      {!showMapImage && canAudit && !isEditing && (
+      <DatasetInfoSidebar
+        dataset={dataset}
+        phenologyData={phenologyData}
+        isPhenologyLoading={isPhenologyLoading}
+        auditInfo={auditInfo}
+        overlappingDatasets={overlappingDatasets || []}
+        isLoadingOverlapping={isLoadingOverlapping}
+      />
+      {!showMapImage && canAudit && (
         <Button className="mt-4" onClick={() => navigate(`/dataset-audit/${dataset.id}`)}>
           Audit dataset
         </Button>
@@ -279,7 +247,7 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
     </div>
   );
 
-  const downloadSectionContent = !isEditing && (
+  const downloadSectionContent = (
     <div className="shrink-0 border-t border-slate-300/90 bg-slate-100/95 px-4 pb-4 pt-3 shadow-[0_-10px_24px_rgba(15,23,42,0.12)] backdrop-blur-sm">
       <DownloadSection
         dataset={dataset}
@@ -315,15 +283,13 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
       <div className="absolute left-2 right-2 top-20 z-50 flex items-center justify-between pointer-events-none lg:hidden">
         {/* Left side: Back Button */}
         <div className="pointer-events-auto">
-          {!isEditing && (
-            <Button
-              data-testid="dataset-detail-back-mobile"
-              shape="circle"
-              onClick={handleBackClick}
-              icon={<ArrowLeftOutlined />}
-              className="bg-white shadow-md border-gray-200 text-gray-700 hover:text-gray-900"
-            />
-          )}
+          <Button
+            data-testid="dataset-detail-back-mobile"
+            shape="circle"
+            onClick={handleBackClick}
+            icon={<ArrowLeftOutlined />}
+            className="bg-white shadow-md border-gray-200 text-gray-700 hover:text-gray-900"
+          />
         </div>
 
         {/* Right side: Details & Controls */}
@@ -347,8 +313,8 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
         </div>
       </div>
 
-      {/* Back Button - hidden when editing */}
-      {!isEditing && !isMobile && (
+      {/* Back Button */}
+      {!isMobile && (
         <div
           className="absolute z-20 transition-all duration-300 hidden lg:block"
           style={{
@@ -375,7 +341,7 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
           className="absolute z-20 hidden transition-all duration-300 lg:block"
           style={
             sidebarCollapsed
-              ? { top: `${SIDEBAR_BUTTON_TOP_PX}px`, left: `${SIDEBAR_LEFT_PX + (isEditing ? 0 : 56)}px` }
+              ? { top: `${SIDEBAR_BUTTON_TOP_PX}px`, left: `${SIDEBAR_LEFT_PX + 56}px` }
               : { top: "50%", left: `${SIDEBAR_LEFT_PX + SIDEBAR_WIDTH_PX - 2}px` }
           }
         >
@@ -387,7 +353,7 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
               title="Show dataset details (I)"
               className="bg-white shadow-md border-gray-200 text-gray-700 hover:text-gray-900"
             >
-              {isEditing ? "Help" : "Details"}
+              Details
             </Button>
           ) : (
             <button
@@ -405,8 +371,7 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
 
       {/* Map Column */}
       <div className="absolute inset-0 z-0">
-        {/* Layer Control Panel - hidden when editing on desktop */}
-        {!isEditing && showMapImage && (
+        {showMapImage && (
           <div className="absolute right-4 top-24 z-10 hidden lg:block">
             <DatasetLayerControlPanel
               mapStyle={layerControl.mapStyle}
@@ -447,76 +412,29 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
               opacity={layerControl.layerOpacity}
               setOpacity={setLayerOpacity}
               onReportClick={() => setReportModalOpen(true)}
-              onEditForestCover={() =>
-                editing.handleStartEditing("forest_cover")
-              }
-              onEditDeadwood={() => editing.handleStartEditing("deadwood")}
+              onEditLabels={() => openEditor()}
               onAuditClick={dataset ? () => navigate(`/dataset-audit/${dataset.id}`) : undefined}
               isLoggedIn={!!user}
             />
           </div>
         )}
 
-        {/* Editor Toolbar - visible when editing */}
-        {isEditing && (
-          <EditorToolbar
-            type={editingLayerType || "deadwood"}
-            isDrawing={editor.isDrawing}
-            hasSelection={editor.selection.length > 0}
-            selectionCount={editor.selection.length}
-            isAIActive={ai.isActive}
-            isAIProcessing={ai.isProcessing}
-            onToggleDraw={() => editor.toggleDraw()}
-            onCutHole={editor.cutHoleWithDrawn}
-            onMerge={editor.mergeSelected}
-            onClip={editor.clipSelected}
-            onToggleAI={() => (ai.isActive ? ai.disable() : ai.enable())}
-            areaTools={{
-              layer: editing.editingLayerType ?? "deadwood",
-              action: editing.areaTools.action,
-              preview: editing.areaTools.preview,
-              onStart: (action) => editing.areaTools.start(action, editing.findPrompt),
-              findPrompt: editing.findPrompt,
-              onFindPromptChange: editing.setFindPrompt,
-              onAcceptPreview: editing.areaTools.acceptPreview,
-              onDiscardPreview: editing.areaTools.discardPreview,
-              canCopy: editor.selection.length > 0,
-              onCopyToOtherLayer: editing.copySelectionToOtherLayer,
-              disabled: ai.isActive || ai.isProcessing || editing.isSaving,
-            }}
-            onDeleteSelected={editor.deleteSelected}
-            onUndo={editor.undo}
-            canUndo={editor.canUndo}
-            onSave={editing.handleSaveEdits}
-            onCancel={editing.handleCancelEditing}
-            position="top-right"
-            title={`Editing ${editingLayerType === "deadwood" ? "deadwood cover" : "tree cover"}`}
-          />
-        )}
-
         <DatasetDetailsMap
           data={dataset}
-          onMapReady={(map) => {
-            editing.handleMapReady(map);
-            setMapInstance(map);
-          }}
-          onOrthoLayerReady={editing.handleOrthoLayerReady}
+          onMapReady={setMapInstance}
           onFirstMapInteraction={() =>
             track("dataset_map_interacted", {
               dataset_id: dataset.id,
               interaction_type: "move",
             })
           }
-          hideDeadwoodLayer={isEditing}
-          hideForestCoverLayer={isEditing}
-          refreshKey={refreshKey}
-          showDeadwood={isEditing || peek ? false : layerControl.showDeadwood}
-          showForestCover={isEditing || peek ? false : layerControl.showForestCover}
+          showDeadwood={layerControl.showDeadwood}
+          showForestCover={layerControl.showForestCover}
           showDroneImagery={layerControl.showDroneImagery}
           showAOI={layerControl.showAOI}
           layerOpacity={layerControl.layerOpacity}
-          onEditDeadwood={() => editing.handleStartEditing("deadwood")}
-          onEditForestCover={() => editing.handleStartEditing("forest_cover")}
+          onEditDeadwood={() => openEditor("deadwood")}
+          onEditForestCover={() => openEditor("forest_cover")}
           isLoggedIn={!!user}
           allowBadQualityLayers={canAudit}
           deadwoodLabelIdOverride={
@@ -531,16 +449,7 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
           }
         />
 
-        {showMapImage && !isMobile && isEditing && (
-          <div
-            className="absolute bottom-6 z-20 hidden transition-all duration-300 lg:block"
-            style={{ left: sidebarCollapsed ? SIDEBAR_LEFT_PX : SIDEBAR_LEFT_PX + SIDEBAR_WIDTH_PX + 24 }}
-          >
-            <DatasetLayerCard {...layerCardProps} />
-          </div>
-        )}
-
-        {!isEditing && showMapImage && (
+        {showMapImage && (
           <div className="pointer-events-none absolute left-1/2 top-[7.5rem] z-30 -translate-x-1/2 lg:top-24">
             <div className="pointer-events-auto">
               <OrthoTileSearch
@@ -617,8 +526,7 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
             opacity={layerControl.layerOpacity}
             setOpacity={setLayerOpacity}
             onReportClick={() => setReportModalOpen(true)}
-            onEditForestCover={() => editing.handleStartEditing("forest_cover")}
-            onEditDeadwood={() => editing.handleStartEditing("deadwood")}
+            onEditLabels={() => openEditor()}
             onAuditClick={dataset ? () => navigate(`/dataset-audit/${dataset.id}`) : undefined}
             isLoggedIn={!!user}
           />

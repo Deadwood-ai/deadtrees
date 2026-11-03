@@ -8,6 +8,7 @@ import StatusPage from "../components/StatusPage";
 import { MapPageSkeleton } from "../components/PageSkeletons";
 
 const DatasetDetailsView = lazy(() => import("./DatasetDetailsView"));
+const DatasetLabelEditorView = lazy(() => import("./DatasetLabelEditorView"));
 
 const archiveButton = (
   <Link to="/dataset">
@@ -17,7 +18,12 @@ const archiveButton = (
 
 // Start the existing auth-scoped query while the map screen downloads, and own
 // every state that is not a loaded dataset.
-export default function DatasetDetails() {
+interface DatasetDetailsProps {
+  /** Opens the dataset in the label editor instead of the details page. */
+  editor?: boolean;
+}
+
+export default function DatasetDetails({ editor = false }: DatasetDetailsProps) {
   const { id } = useParams();
   const { status } = useAuth();
   const datasetId = id && /^\d+$/.test(id) ? Number(id) : undefined;
@@ -41,7 +47,7 @@ export default function DatasetDetails() {
   if (data) {
     return (
       <Suspense fallback={loading}>
-        <DatasetDetailsView dataset={data} />
+        {editor ? <DatasetLabelEditorView dataset={data} /> : <DatasetDetailsView dataset={data} />}
       </Suspense>
     );
   }

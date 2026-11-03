@@ -162,6 +162,14 @@ function AppWithTracking() {
           />
           <Route path="dataset" element={<Dataset />} />
           <Route path="dataset/:id" element={<DatasetDetails />} />
+          <Route
+            path="dataset/:id/edit"
+            element={
+              <RequireAuth>
+                <DatasetDetails editor />
+              </RequireAuth>
+            }
+          />
           <Route path="dataset-audit" element={<DatasetAudit />} />
           <Route path="dataset-audit/:id" element={<DatasetAudit />} />
           {/* New route for Reference Patch Editor */}

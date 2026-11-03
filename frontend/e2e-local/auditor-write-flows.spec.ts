@@ -160,7 +160,7 @@ test.describe("auditor local write flows", () => {
     const aoiCard = card(page, "7. Area of Interest (AOI)");
     await expect(aoiCard.getByText(/AOI defined \(3 polygons\)/)).toBeVisible();
 
-    await page.getByRole("button", { name: "Edit deadwood cover" }).click();
+    await page.getByRole("button", { name: "Edit labels" }).click();
     await expect(page.getByText("Editing deadwood cover", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
 
@@ -250,7 +250,7 @@ test.describe("auditor local write flows", () => {
     await seedDeadwoodPrediction();
     await openAuditDetail(page);
     await expectAuditLeaseHolder(auditorUser.id);
-    await expect(page.getByRole("button", { name: "Edit deadwood cover" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("button", { name: "Edit labels" })).toBeVisible({ timeout: 20_000 });
 
     // This page was inactive past expiry and someone else claimed the dataset.
     await setAuditLease(reporterUser.id, 600);
@@ -258,7 +258,7 @@ test.describe("auditor local write flows", () => {
     await expect(page.getByText("Saving is turned off on this page")).toBeVisible();
     await expect(page.getByRole("button", { name: /^save Save$/i })).toHaveCount(0);
     // Prediction edits are not offered from a page that lost the lease.
-    await expect(page.getByRole("button", { name: "Edit deadwood cover" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Edit labels" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Acknowledge" })).toBeDisabled();
     await page.getByRole("button", { name: "Back to queue" }).click();
     await page.getByRole("button", { name: "Leave Audit" }).click();

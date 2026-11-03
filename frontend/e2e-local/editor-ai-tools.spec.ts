@@ -215,7 +215,7 @@ test.describe("label editor AI and area tools", () => {
     release();
     await page.waitForTimeout(1_000);
     // Reopening the editor must not show the stale result as a preview.
-    await page.getByRole("button", { name: "Edit deadwood cover" }).click();
+    await page.getByRole("button", { name: "Edit labels" }).click();
     await expect(page.getByText("Editing deadwood cover", { exact: true })).toBeVisible();
     await expect(page.getByText(/found/)).toHaveCount(0);
     await page.getByRole("button", { name: "Cancel", exact: true }).click();

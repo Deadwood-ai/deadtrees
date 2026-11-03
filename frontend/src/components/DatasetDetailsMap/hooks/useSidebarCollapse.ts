@@ -1,46 +1,32 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-const STORAGE_KEY = "dt-dataset-sidebar-collapsed";
-
-function readStored(): boolean {
+function readStored(storageKey: string, fallback: boolean): boolean {
   try {
-    return window.localStorage.getItem(STORAGE_KEY) === "1";
+    const value = window.localStorage.getItem(storageKey);
+    return value === null ? fallback : value === "1";
   } catch {
-    return false;
+    return fallback;
   }
 }
 
 /**
- * Collapsed state of the dataset info sidebar: remembered between visits, toggled with I, and
- * folded away while editing so the map gets the room (restored when editing ends).
+ * Collapsed state of a map page's side panel: remembered between visits under `storageKey`
+ * and toggled with the I key.
  */
-export function useSidebarCollapse(isEditing: boolean) {
-  const [collapsed, setCollapsed] = useState(readStored);
-  const beforeEditRef = useRef<boolean | null>(null);
+export function useSidebarCollapse(storageKey: string, defaultCollapsed = false) {
+  const [collapsed, setCollapsed] = useState(() => readStored(storageKey, defaultCollapsed));
 
   const toggle = useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev;
       try {
-        window.localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
+        window.localStorage.setItem(storageKey, next ? "1" : "0");
       } catch {
         // Storage can be blocked; the toggle still works for this visit.
       }
       return next;
     });
-  }, []);
-
-  useEffect(() => {
-    if (isEditing) {
-      beforeEditRef.current = collapsed;
-      setCollapsed(true);
-    } else if (beforeEditRef.current !== null) {
-      setCollapsed(beforeEditRef.current);
-      beforeEditRef.current = null;
-    }
-    // Only an edit start or end moves the sidebar; `collapsed` is read, not tracked.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditing]);
+  }, [storageKey]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

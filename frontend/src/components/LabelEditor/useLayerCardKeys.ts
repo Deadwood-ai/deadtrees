@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { LayerView } from "../DatasetLayerCard";
+import type { LayerView } from "./LayerCard";
 
 interface UseLayerCardKeysParams {
   enabled: boolean;
