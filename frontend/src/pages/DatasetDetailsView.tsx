@@ -232,7 +232,8 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
   // in-image search would be dead weight next to the empty state.
   const showMapImage = hasMapImage(dataset);
   const { cardProps: layerCardProps, peek } = useDatasetLayerCard({
-    enabled: showMapImage && !isMobile,
+    // The details page keeps its layer switches in the right panel; the card belongs to editing.
+    enabled: showMapImage && !isMobile && isEditing,
     layers: layerControl,
     setShowDeadwood,
     setShowForestCover,
@@ -408,7 +409,6 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
         {!isEditing && showMapImage && (
           <div className="absolute right-4 top-24 z-10 hidden lg:block">
             <DatasetLayerControlPanel
-              showLayerToggles={false}
               mapStyle={layerControl.mapStyle}
               onMapStyleChange={setMapStyle}
               showForestCover={layerControl.showForestCover}
@@ -531,7 +531,7 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
           }
         />
 
-        {showMapImage && !isMobile && (
+        {showMapImage && !isMobile && isEditing && (
           <div
             className="absolute bottom-6 z-20 hidden transition-all duration-300 lg:block"
             style={{ left: sidebarCollapsed ? SIDEBAR_LEFT_PX : SIDEBAR_LEFT_PX + SIDEBAR_WIDTH_PX + 24 }}
