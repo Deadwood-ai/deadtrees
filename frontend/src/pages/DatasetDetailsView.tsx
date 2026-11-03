@@ -3,8 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import type { Map as OLMap } from "ol";
 import {
   ArrowLeftOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
+  LeftOutlined,
+  RightOutlined,
   InfoCircleOutlined,
   SlidersOutlined,
 } from "@ant-design/icons";
@@ -29,6 +29,9 @@ import { hasForestCoverPredictionOutput } from "../utils/predictionAvailability"
 import { observeOwnedResult } from "../utils/observeOwnedResult";
 
 import DatasetLayerControlPanel from "../components/DatasetDetailsMap/DatasetLayerControlPanel";
+import DatasetLayerCard from "../components/DatasetDetailsMap/DatasetLayerCard";
+import { useDatasetLayerCard } from "../components/DatasetDetailsMap/hooks/useDatasetLayerCard";
+import { useSidebarCollapse } from "../components/DatasetDetailsMap/hooks/useSidebarCollapse";
 import EditingSidebar from "../components/DatasetDetailsMap/EditingSidebar";
 import DatasetInfoSidebar from "../components/DatasetDetailsMap/DatasetInfoSidebar";
 import DownloadSection from "../components/DatasetDetailsMap/DownloadSection";
@@ -68,8 +71,6 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
     setLayerOpacity,
   } = useDatasetDetailsMap();
 
-  // Sidebar state
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [labelsOnly, setLabelsOnly] = useState(false);
   const isMobile = useIsMobile("lg");
 
@@ -216,6 +217,11 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
   } = editing;
   const hasDisplayableForestCover =
     hasForestCover && hasForestCoverPredictionOutput(dataset);
+  const { collapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebarCollapse(isEditing);
+  const setEditOverlayVisible = useCallback(
+    (visible: boolean) => editor.getOverlayLayer()?.setVisible(visible),
+    [editor],
+  );
   const hasExportableLabels = [preferredDeadwoodLabel, preferredForestLabel].some(
     (label) =>
       label?.label_source === ILabelSource.MODEL_PREDICTION ||
@@ -225,11 +231,28 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
   // Without a viewable image there is no map, so basemap/layer controls and the
   // in-image search would be dead weight next to the empty state.
   const showMapImage = hasMapImage(dataset);
+  const { cardProps: layerCardProps, peek } = useDatasetLayerCard({
+    enabled: showMapImage && !isMobile,
+    layers: layerControl,
+    setShowDeadwood,
+    setShowForestCover,
+    setShowAOI,
+    setLayerOpacity,
+    hasDeadwood,
+    hasForestCover: hasDisplayableForestCover,
+    deadwoodBlocked: auditInfo?.deadwood_quality === "bad" && !canAudit,
+    forestBlocked: auditInfo?.forest_cover_quality === "bad" && !canAudit,
+    hasAOI,
+    canEdit: !!user,
+    isEditing,
+    editingLayer: editingLayerType,
+    startEditing: editing.handleStartEditing,
+    switchEditLayer: (layer) => void editing.switchLayer(layer),
+    setEditOverlayVisible,
+  });
   const SIDEBAR_LEFT_PX = 16;
   const SIDEBAR_WIDTH_PX = 384;
   const SIDEBAR_BUTTON_TOP_PX = 112;
-  const FLOAT_BUTTON_SIZE_PX = 36;
-  const TOGGLE_INSET_EXPANDED_PX = 24;
 
   const sidebarContent = (
     <div
@@ -345,26 +368,37 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
         </div>
       )}
 
-      {/* Sidebar Toggle */}
+      {/* Sidebar collapse: a tab on the panel edge, or a "Details" button when folded (key I) */}
       {!isMobile && (
         <div
-          className="absolute z-20 transition-all duration-300 hidden lg:block"
-          style={{
-            top: `${SIDEBAR_BUTTON_TOP_PX}px`,
-            left: sidebarCollapsed
-              ? `${SIDEBAR_LEFT_PX + 56}px`
-              : `${SIDEBAR_LEFT_PX + SIDEBAR_WIDTH_PX - FLOAT_BUTTON_SIZE_PX - TOGGLE_INSET_EXPANDED_PX}px`,
-          }}
+          className="absolute z-20 hidden transition-all duration-300 lg:block"
+          style={
+            sidebarCollapsed
+              ? { top: `${SIDEBAR_BUTTON_TOP_PX}px`, left: `${SIDEBAR_LEFT_PX + (isEditing ? 0 : 56)}px` }
+              : { top: "50%", left: `${SIDEBAR_LEFT_PX + SIDEBAR_WIDTH_PX - 2}px` }
+          }
         >
-          <Button
-            size="large"
-            shape="circle"
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            icon={
-              sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />
-            }
-            className="bg-white shadow-md border-gray-200 text-gray-700 hover:text-gray-900"
-          />
+          {sidebarCollapsed ? (
+            <Button
+              size="large"
+              icon={<RightOutlined />}
+              onClick={toggleSidebar}
+              title="Show dataset details (I)"
+              className="bg-white shadow-md border-gray-200 text-gray-700 hover:text-gray-900"
+            >
+              {isEditing ? "Help" : "Details"}
+            </Button>
+          ) : (
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              title="Hide dataset details (I)"
+              aria-label="Hide dataset details"
+              className="flex h-14 w-6 -translate-y-1/2 items-center justify-center rounded-r-lg border border-l-0 border-gray-200 bg-white text-gray-500 shadow-md hover:text-gray-900"
+            >
+              <LeftOutlined className="text-xs" />
+            </button>
+          )}
         </div>
       )}
 
@@ -374,6 +408,7 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
         {!isEditing && showMapImage && (
           <div className="absolute right-4 top-24 z-10 hidden lg:block">
             <DatasetLayerControlPanel
+              showLayerToggles={false}
               mapStyle={layerControl.mapStyle}
               onMapStyleChange={setMapStyle}
               showForestCover={layerControl.showForestCover}
@@ -438,7 +473,6 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
             onToggleAI={() => (ai.isActive ? ai.disable() : ai.enable())}
             areaTools={{
               layer: editing.editingLayerType ?? "deadwood",
-              onSwitchLayer: (layer) => void editing.switchLayer(layer),
               action: editing.areaTools.action,
               preview: editing.areaTools.preview,
               onStart: (action) => editing.areaTools.start(action, editing.findPrompt),
@@ -476,8 +510,8 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
           hideDeadwoodLayer={isEditing}
           hideForestCoverLayer={isEditing}
           refreshKey={refreshKey}
-          showDeadwood={isEditing ? false : layerControl.showDeadwood}
-          showForestCover={isEditing ? false : layerControl.showForestCover}
+          showDeadwood={isEditing || peek ? false : layerControl.showDeadwood}
+          showForestCover={isEditing || peek ? false : layerControl.showForestCover}
           showDroneImagery={layerControl.showDroneImagery}
           showAOI={layerControl.showAOI}
           layerOpacity={layerControl.layerOpacity}
@@ -496,6 +530,15 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
               : undefined
           }
         />
+
+        {showMapImage && !isMobile && (
+          <div
+            className="absolute bottom-6 z-20 hidden transition-all duration-300 lg:block"
+            style={{ left: sidebarCollapsed ? SIDEBAR_LEFT_PX : SIDEBAR_LEFT_PX + SIDEBAR_WIDTH_PX + 24 }}
+          >
+            <DatasetLayerCard {...layerCardProps} />
+          </div>
+        )}
 
         {!isEditing && showMapImage && (
           <div className="pointer-events-none absolute left-1/2 top-[7.5rem] z-30 -translate-x-1/2 lg:top-24">

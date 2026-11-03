@@ -6,7 +6,8 @@ type LayerType = "deadwood" | "forest_cover";
 
 export interface AreaToolsPanelProps {
   layer: LayerType;
-  onSwitchLayer: (layer: LayerType) => void;
+  /** Shows a layer switch in the panel; left out where a layer card does that job. */
+  onSwitchLayer?: (layer: LayerType) => void;
   action: AreaAction | null;
   preview: { count: number; total: number } | null;
   onStart: (action: AreaAction) => void;
@@ -51,17 +52,17 @@ export default function AreaToolsPanel({
 
   return (
     <Space direction="vertical" size="small" className="w-full">
-      <Segmented
+      {onSwitchLayer && <Segmented
         block
         size="small"
         value={layer}
         disabled={disabled}
         onChange={(value) => onSwitchLayer(value as LayerType)}
         options={[
-          { label: "Dead (1)", value: "deadwood" },
-          { label: "Trees (2)", value: "forest_cover" },
+          { label: "Dead (2)", value: "deadwood" },
+          { label: "Trees (3)", value: "forest_cover" },
         ]}
-      />
+      />}
       {areaButton("add", "Add area (Q)", <PlusSquareOutlined />, "Drag to outline an area and merge it into this layer")}
       {areaButton("remove", "Remove area (E)", <MinusSquareOutlined />, "Drag to outline an area and cut it out of this layer")}
       <Input

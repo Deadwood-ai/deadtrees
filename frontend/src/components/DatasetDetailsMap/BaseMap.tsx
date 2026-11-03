@@ -265,6 +265,12 @@ export default function BaseMap({
 		setForestCoverVisible(showForestCover);
 	}, [showForestCover, setForestCoverVisible]);
 
+	// A popover about a polygon that is no longer shown (layer switched, editing started) would
+	// point at nothing, so it closes with the layer.
+	useEffect(() => {
+		hidePopover();
+	}, [showDeadwood, showForestCover, hidePopover]);
+
 	useEffect(() => {
 		setLayerOpacity(layerOpacity);
 	}, [layerOpacity, setLayerOpacity]);

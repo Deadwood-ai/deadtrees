@@ -90,11 +90,14 @@ export const createStandardMapControls = ({
   includeAttribution = true,
   includeScaleLine = false,
   collapsibleAttribution = false,
+  compactAttribution = false,
 }: {
   includeZoom?: boolean;
   includeAttribution?: boolean;
   includeScaleLine?: boolean;
   collapsibleAttribution?: boolean;
+  /** A small "i" in the bottom-right corner that opens the credits on click. */
+  compactAttribution?: boolean;
 } = {}) => {
   const controls: Control[] = [];
 
@@ -109,8 +112,14 @@ export const createStandardMapControls = ({
   if (includeAttribution) {
     controls.push(
       new Attribution({
-        className: "dt-map-attribution-control",
-        collapsible: collapsibleAttribution,
+        className: compactAttribution
+          ? "dt-map-attribution-control dt-map-attribution-compact"
+          : "dt-map-attribution-control",
+        collapsible: collapsibleAttribution || compactAttribution,
+        // OL derives these from className; with two classes the label spans would pick up the
+        // control's own box styles.
+        expandClassName: "dt-map-attribution-expand",
+        collapseClassName: "dt-map-attribution-collapse",
         tipLabel: "Kartenquellen",
       }),
     );

@@ -278,7 +278,8 @@ export function useMapCore({
 					layers: displayOrthoLayer ? [displayOrthoLayer] : [],
 					view: mapView,
 					maxTilesLoading: MAP_MAX_TILES_LOADING,
-					controls: createStandardMapControls(),
+					// Wheel, pinch and drag zoom; no buttons. Credits fold into a small "i".
+					controls: createStandardMapControls({ includeZoom: false, compactAttribution: true }),
 					interactions: createMapInteractions({
 						doubleClickZoom: false,
 						disableRotation: disableRotationRef.current,

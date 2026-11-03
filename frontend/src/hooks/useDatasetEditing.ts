@@ -390,11 +390,11 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       switch (e.key.toLowerCase()) {
-        case "1":
+        case "2":
           e.preventDefault();
           void switchLayer("deadwood");
           break;
-        case "2":
+        case "3":
           e.preventDefault();
           void switchLayer("forest_cover");
           break;

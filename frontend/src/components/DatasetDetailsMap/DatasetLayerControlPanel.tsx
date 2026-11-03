@@ -53,6 +53,11 @@ interface DatasetLayerControlPanelProps {
   onEditDeadwood?: () => void;
   onAuditClick?: () => void;
   isLoggedIn: boolean;
+  /**
+   * Label layer switches, opacity and edit buttons. Off where the map's layer card owns them
+   * (desktop dataset page); on in the mobile drawer.
+   */
+  showLayerToggles?: boolean;
 }
 
 // Quality indicator component
@@ -72,6 +77,47 @@ const QualityIcon = ({ quality }: { quality: QualityRating }) => {
     <Tooltip title={tooltip} placement="left">
       <span className={`ml-1 ${color}`}>{icon}</span>
     </Tooltip>
+  );
+};
+
+// Model version pickers for auditors, used where the layer card owns the layer switches.
+const ModelVersionSelects = ({
+  deadwoodVariants,
+  forestVariants,
+  selectedDeadwoodLabelId,
+  onDeadwoodVariantChange,
+  selectedForestLabelId,
+  onForestVariantChange,
+}: {
+  deadwoodVariants?: ILabel[];
+  forestVariants?: ILabel[];
+  selectedDeadwoodLabelId?: number | null;
+  onDeadwoodVariantChange?: (id: number) => void;
+  selectedForestLabelId?: number | null;
+  onForestVariantChange?: (id: number) => void;
+}) => {
+  const pickers = [
+    { name: "Deadwood model", variants: deadwoodVariants, value: selectedDeadwoodLabelId, onChange: onDeadwoodVariantChange },
+    { name: "Tree cover model", variants: forestVariants, value: selectedForestLabelId, onChange: onForestVariantChange },
+  ].filter((p) => p.variants && p.variants.length >= 1);
+  if (pickers.length === 0) return null;
+  return (
+    <>
+      <Divider className="my-3" />
+      {pickers.map((p) => (
+        <div key={p.name} className="mb-2">
+          <div className="mb-1 text-xs font-medium text-gray-500">{p.name}</div>
+          <Select
+            size="small"
+            value={p.value ?? p.variants![0]?.id}
+            onChange={p.onChange}
+            className="w-full text-xs"
+            popupMatchSelectWidth={false}
+            options={p.variants!.map((l) => ({ value: l.id, label: variantOptionLabel(l) }))}
+          />
+        </div>
+      ))}
+    </>
   );
 };
 
@@ -125,6 +171,7 @@ const DatasetLayerControlPanel = ({
   onEditDeadwood,
   onAuditClick,
   isLoggedIn,
+  showLayerToggles = true,
 }: DatasetLayerControlPanelProps) => {
   const [showAttributions, setShowAttributions] = useState(false);
   const hasModelInfo = hasDeadwood || hasForestCover;
@@ -150,9 +197,9 @@ const DatasetLayerControlPanel = ({
       <Divider className="my-3" />
 
       {/* Data Layers */}
-      <div className="mb-2 text-xs font-medium text-gray-500">Data Layers</div>
+      <div className="mb-2 text-xs font-medium text-gray-500">{showLayerToggles ? "Data Layers" : "Imagery"}</div>
       <div className="flex flex-col gap-1">
-        {hasForestCover && (
+        {showLayerToggles && hasForestCover && (
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
               <Checkbox
@@ -182,7 +229,7 @@ const DatasetLayerControlPanel = ({
             )}
           </div>
         )}
-        {hasDeadwood && (
+        {showLayerToggles && hasDeadwood && (
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
               <Checkbox
@@ -226,7 +273,7 @@ const DatasetLayerControlPanel = ({
             <span className="text-xs text-gray-600">Drone Imagery</span>
           </span>
         </Checkbox>
-        {hasAOI && setShowAOI && (
+        {showLayerToggles && hasAOI && setShowAOI && (
           <Checkbox
             checked={showAOI}
             onChange={(e) => setShowAOI(e.target.checked)}
@@ -247,19 +294,34 @@ const DatasetLayerControlPanel = ({
         )}
       </div>
 
-      <Divider className="my-3" />
+      {!showLayerToggles && canAudit && (
+        <ModelVersionSelects
+          deadwoodVariants={hasDeadwood ? deadwoodVariants : undefined}
+          forestVariants={hasForestCover ? forestVariants : undefined}
+          selectedDeadwoodLabelId={selectedDeadwoodLabelId}
+          onDeadwoodVariantChange={onDeadwoodVariantChange}
+          selectedForestLabelId={selectedForestLabelId}
+          onForestVariantChange={onForestVariantChange}
+        />
+      )}
 
-      {/* Opacity - only affects forest cover and deadwood layers */}
-      <div className="mb-1 text-xs font-medium text-gray-500">Layer Opacity</div>
-      <Slider
-        min={0}
-        max={1}
-        step={0.01}
-        value={opacity}
-        onChange={setOpacity}
-        tooltip={{ formatter: (v) => `${Math.round((v || 0) * 100)}%` }}
-        disabled={!showForestCover && !showDeadwood}
-      />
+      {showLayerToggles && (
+        <>
+          <Divider className="my-3" />
+
+          {/* Opacity - only affects forest cover and deadwood layers */}
+          <div className="mb-1 text-xs font-medium text-gray-500">Layer Opacity</div>
+          <Slider
+            min={0}
+            max={1}
+            step={0.01}
+            value={opacity}
+            onChange={setOpacity}
+            tooltip={{ formatter: (v) => `${Math.round((v || 0) * 100)}%` }}
+            disabled={!showForestCover && !showDeadwood}
+          />
+        </>
+      )}
 
       {hasModelInfo && (
         <>
@@ -331,7 +393,7 @@ const DatasetLayerControlPanel = ({
           )}
 
           {/* Contextual edit buttons - only show when corresponding layer is checked */}
-          {isLoggedIn && showForestCover && hasForestCover && onEditForestCover && (
+          {showLayerToggles && isLoggedIn && showForestCover && hasForestCover && onEditForestCover && (
             <Button
               size="small"
               icon={<EditOutlined />}
@@ -342,7 +404,7 @@ const DatasetLayerControlPanel = ({
             </Button>
           )}
 
-          {isLoggedIn && showDeadwood && hasDeadwood && onEditDeadwood && (
+          {showLayerToggles && isLoggedIn && showDeadwood && hasDeadwood && onEditDeadwood && (
             <Button
               size="small"
               icon={<EditOutlined />}
