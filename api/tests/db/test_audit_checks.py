@@ -41,6 +41,15 @@ def register_version(db, check='prediction_quality', version='v1', **config):
 	return version_id
 
 
+def activate(db, check, version_id):
+	as_admin(db)
+	db.execute(
+		'UPDATE audit.check_versions SET is_active=false WHERE check_key=%s AND id<>%s AND is_active',
+		(check, version_id),
+	)
+	db.execute('UPDATE audit.check_versions SET is_active=true WHERE id=%s AND NOT is_active', (version_id,))
+
+
 def create_run(db, dataset, version_id, check='prediction_quality', current=True, source=None):
 	as_worker(db)
 	run = db.execute(
@@ -49,6 +58,9 @@ def create_run(db, dataset, version_id, check='prediction_quality', current=True
 		(check, version_id, dataset, source),
 	).fetchone()[0]
 	if current:
+		# only a run of the active version becomes current
+		activate(db, check, version_id)
+		as_worker(db)
 		db.execute(
 			'INSERT INTO audit.current_runs(dataset_id,check_key,run_id) VALUES (%s,%s,%s) '
 			'ON CONFLICT (dataset_id,check_key) DO UPDATE SET run_id=excluded.run_id,updated_at=now()',
@@ -547,6 +559,7 @@ def test_a_review_holds_for_the_same_evidence_and_reopens_for_a_new_ortho(db):
 	version_id = register_version(db)
 
 	def run_on(inputs, source=None, version=version_id, rule=None):
+		activate(db, 'prediction_quality', version)
 		as_worker(db)
 		run = db.execute(
 			'INSERT INTO audit.runs(check_key,check_version_id,dataset_id,queue,status,finished_at,source_run_id,inputs) '
@@ -729,6 +742,7 @@ def test_a_check_owned_definer_function_can_store_a_run_in_one_call(db):
 	"""Checks may store a run, its pointer and model rows through their own SECURITY DEFINER function."""
 	dataset = create_dataset(db, create_user(db))
 	version_id = register_version(db, check='georef')
+	activate(db, 'georef', version_id)
 	db.execute("""
 		CREATE FUNCTION public.audit_store_probe(p_dataset bigint, p_version bigint) RETURNS bigint
 		LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
@@ -812,3 +826,50 @@ def test_the_migration_can_be_reverted_without_touching_other_objects(db):
 	).fetchone() == (None, None, None)
 	# objects that existed before the migration are untouched
 	assert db.execute("SELECT to_regclass('public.audit_review_queue') IS NOT NULL").fetchone() == (True,)
+
+
+def test_only_a_run_of_the_active_version_becomes_current(db):
+	dataset = create_dataset(db, create_user(db))
+	waiting = register_version(db, check='georef', version='v1')
+	run = create_run(db, dataset, waiting, check='georef', current=False)
+	as_worker(db)
+	# a writer may point unconditionally: the pointer to an inactive version is simply not written
+	db.execute(
+		"INSERT INTO audit.current_runs(dataset_id,check_key,run_id) VALUES (%s,'georef',%s) "
+		'ON CONFLICT (dataset_id,check_key) DO UPDATE SET run_id=excluded.run_id',
+		(dataset, run),
+	)
+	as_admin(db)
+	assert db.execute('SELECT count(*) FROM audit.current_runs WHERE dataset_id=%s', (dataset,)).fetchone() == (0,)
+	activate(db, 'georef', waiting)
+	as_worker(db)
+	db.execute("INSERT INTO audit.current_runs(dataset_id,check_key,run_id) VALUES (%s,'georef',%s)", (dataset, run))
+	as_admin(db)
+	assert db.execute('SELECT run_id FROM audit.current_runs WHERE dataset_id=%s', (dataset,)).fetchone() == (run,)
+
+
+def test_pointers_set_before_the_guard_survive_activation_and_can_be_deleted(db):
+	"""Existing rows are not checked again: activating their version and deleting them both work."""
+	dataset, other = (create_dataset(db, create_user(db)) for _ in range(2))
+	waiting = register_version(db, check='georef', version='v1')
+	runs = [create_run(db, d, waiting, check='georef', current=False) for d in (dataset, other)]
+	# pointers written before the guard existed, e.g. the georef backfill
+	db.execute('ALTER TABLE audit.current_runs DISABLE TRIGGER reject_benchmark_current_run')
+	for d, run in zip((dataset, other), runs):
+		db.execute("INSERT INTO audit.current_runs(dataset_id,check_key,run_id) VALUES (%s,'georef',%s)", (d, run))
+	db.execute('ALTER TABLE audit.current_runs ENABLE TRIGGER reject_benchmark_current_run')
+	operator = create_operator(db)
+	act_as(db, operator)
+	assert db.execute('SELECT is_active FROM audit.activate_version(%s)', (waiting,)).fetchone() == (True,)
+	as_admin(db)
+	assert db.execute(
+		"SELECT count(*) FROM audit.current_runs WHERE check_key='georef' AND dataset_id IN (%s,%s)", (dataset, other)
+	).fetchone() == (2,)
+	as_worker(db)
+	assert (
+		db.execute("DELETE FROM audit.current_runs WHERE dataset_id=%s AND check_key='georef'", (other,)).rowcount == 1
+	)
+	as_admin(db)
+	assert db.execute(
+		"SELECT count(*) FROM audit.current_runs WHERE check_key='georef' AND dataset_id=%s", (dataset,)
+	).fetchone() == (1,)

@@ -74,7 +74,8 @@ def test_monitor_reads_private_workflows_without_changing_app_visibility(db):
 		'JOIN public.jt_data_publication_datasets j ON j.publication_id = p.id '
 		'WHERE p.id = %s GROUP BY p.status', (publication,)
 	).fetchall() == [('pending', 1)]
-	assert db.execute('SELECT dataset_id FROM public.dataset_audit WHERE dataset_id = %s', (dataset,)).fetchone()
+	# the monitor reads its audit columns from the table behind the dataset_audit view
+	assert db.execute('SELECT dataset_id FROM public.dataset_audit_legacy WHERE dataset_id = %s', (dataset,)).fetchone()
 	assert db.execute('SELECT status FROM public.dataset_flags WHERE id = %s', (flag,)).fetchone() == ('open',)
 	assert db.execute('SELECT status FROM public.processing_notification_events WHERE dataset_id = %s', (dataset,)).fetchone() == ('pending',)
 	assert db.execute('SELECT id FROM public.priwa_kaeferbaeume WHERE id = %s', (tree,)).fetchone() == (tree,)
@@ -101,6 +102,7 @@ def test_monitor_reads_private_workflows_without_changing_app_visibility(db):
 	'SELECT camera_metadata FROM public.v2_raw_images',
 	'SELECT description FROM public.dataset_flags',
 	'SELECT notes FROM public.dataset_audit',
+	'SELECT notes FROM public.dataset_audit_legacy',
 	'SELECT authors FROM public.v2_datasets',
 	'SELECT * FROM auth.users',
 	'SELECT * FROM public.user_info',
