@@ -23,7 +23,7 @@ export default function DatasetAccessSection({ dataset }: { dataset: IDataset })
 
   if (!access || !(access.is_owner || access.role || access.can_manage_access || canViewAllPrivate)) return null;
   const tag = VISIBILITY_TAGS[dataset.data_access] ?? VISIBILITY_TAGS[IDataAccess.public];
-  const accountLink = datasetAccountLink(access, dataset.id);
+  const accountLink = datasetAccountLink(access, dataset);
 
   return (
     <div className="rounded-2xl border border-gray-200/60 bg-white p-5 shadow-sm space-y-3" data-testid="dataset-access-section">
