@@ -224,6 +224,11 @@ class Settings(BaseSettings):
 	# largest successful ODM ortho is 8.25 Gpx (9510), while 9654 (5.4 km² at fine GSD) ran out at 100 GB (DT-915).
 	# Kept just above that so every mission that has rendered before keeps its resolution.
 	ODM_MAX_ORTHO_PIXELS: float = 8.5e9
+	# A mission over both limits runs out of the 100 GB container while texturing (DT-1516): 8463, 8935, 8936,
+	# 9212 and 9251 failed from 4.4 km² and 25.8 Gpx. The largest success over the area limit has 25.3 Gpx
+	# (8937), and neither limit alone separates them (9064 succeeded at 46 km², 11544 with 65 Gpx at 2 km²).
+	ODM_MAX_TEXTURE_AREA_KM2: float = 4.3
+	ODM_MAX_TEXTURE_SOURCE_GPX: float = 25.5
 
 	# Linear integration for processing failure notifications
 	LINEAR_ENABLED: bool = False

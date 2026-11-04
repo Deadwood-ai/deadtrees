@@ -1,4 +1,4 @@
-"""Keep the ODM orthophoto raster within a pixel budget (DT-915).
+"""Size the ODM orthophoto pass from the reconstruction: pixel budget (DT-915) and texturing limit (DT-1516).
 
 ODM's orthophoto step holds the whole output raster in memory (colour bands, alpha and a
 float depth buffer, about 8 bytes per pixel) next to every texture. A large mission flown
@@ -30,9 +30,15 @@ class MissionExtent:
 	height_m: float
 	gsd_cm: float
 
+	@property
+	def area_km2(self) -> float:
+		return self.width_m * self.height_m / 1e6
+
 
 # Never project a footprint edge further out than this angle from straight down.
 MAX_EDGE_ANGLE_DEGREES = 80.0
+# ODM halves the images it textures from once the orthophoto resolution reaches this multiple of the GSD.
+TEXTURE_HALVING_RESOLUTION_RATIO = 3.0
 
 
 def mission_extent(reconstructions: list[dict]) -> MissionExtent | None:
@@ -80,6 +86,29 @@ def mission_extent(reconstructions: list[dict]) -> MissionExtent | None:
 		height_m=float(max_y - min_y),
 		gsd_cm=float(statistics.median(gsd_cm)),
 	)
+
+
+def source_gigapixels(reconstructions: list[dict]) -> float:
+	"""Pixels of all reconstructed images, the input ODM's texturing draws its patches from."""
+	pixels = 0
+	for reconstruction in reconstructions:
+		cameras = reconstruction.get('cameras', {})
+		for shot in reconstruction.get('shots', {}).values():
+			camera = cameras.get(shot.get('camera'), {})
+			pixels += camera.get('width', 0) * camera.get('height', 0)
+	return pixels / 1e9
+
+
+def too_large_to_texture(
+	extent: MissionExtent, source_gpx: float, resolution_cm: float, max_area_km2: float, max_source_gpx: float
+) -> bool:
+	"""Whether ODM's texturing would run out of memory on this mission, judged by what such missions did so far.
+
+	ODM textures from images at full size unless the orthophoto resolution reaches 3 times the
+	GSD; it then halves them (opendm/gsd.py ``image_scale_factor``), which needs far less memory.
+	"""
+	textures_full_size = resolution_cm < TEXTURE_HALVING_RESOLUTION_RATIO * extent.gsd_cm
+	return textures_full_size and source_gpx > max_source_gpx and extent.area_km2 > max_area_km2
 
 
 def budgeted_resolution_cm(requested_cm: float, extent: MissionExtent, max_pixels: float) -> float:
