@@ -1,4 +1,4 @@
-# Acquisition-date estimation (`doy_estimation_v1`)
+# Acquisition-date estimation (`doy_estimation_v1` stage, model `doy_estimation_v2`)
 
 A processing stage that predicts, for every dataset, a probability distribution
 over the day of the flight year from the orthophoto itself and, where the
@@ -6,14 +6,32 @@ Sentinel pipeline has processed the site, the Sentinel-2 weekly series of the
 flight year. The distribution feeds the audit (prefilled, never auto-saved) and
 a suggested date on the dataset page.
 
-The model is the research model `doy_estimation/deploy/v1` (report:
-`side_projects/doy_estimation/report.pdf` in the sentinel-mortality repo).
-Cross-validated on the database's own dates:
+The stage is still called `doy_estimation_v1`; the model it runs is versioned
+separately by its asset directory, and every estimate records that version in
+`model_version`.
 
-| model | used for | MAE | median | 80 % set coverage / width |
-|---|---|---|---|---|
-| S2 | datasets with S2 weeks in the flight year | 27.9 d | 17.0 d | 0.81 / 87 d |
-| no-S2 | everything else | 40.9 d (47.1 d on non-S2 sites) | 26.9 d | 0.82 / 126 d |
+The deployed model `doy_estimation_v2` is the platform build of the AerialStamp
+paper model: the paper's recipe, refit on all public and private dated
+orthophotos with a Sentinel-2 series (8,825). Because it learned from private
+orthophotos, its weights are not public (see [Model assets](#model-assets)).
+Its image-only model is the processor's `nos2` model type. Spatial block
+cross-validation of the same recipe on 8,777 clean dates:
+
+| model | used for | MAE | block-weighted MAE | median | 80 % set coverage / width |
+|---|---|---|---|---|---|
+| S2 | datasets with S2 weeks in the flight year | 31.5 d | 33.3 d | 18.5 d | 0.81 / 96 d |
+| no-S2 (image only) | everything else | 40.3 d | 42.4 d | 25.9 d | 0.82 / 126 d |
+
+These numbers are not comparable one to one with v1's (S2: MAE 27.9 d on S2
+sites; no-S2: 40.9 d): v2 is evaluated with spatial blocks and on a different
+date set. Two changes matter for the processor:
+
+- The site facts "S2 weeks available" and "match features available" (static
+  columns 7 and 8) leaked the label into v1 and are zeroed in v2. The converted
+  configs list them as `static_masked`, and the model zeroes them itself.
+- Both models use one calibration (T = 2, no smoothing); v1's per-biome
+  calibration of the no-S2 model is gone, so `inputs.calibration.biome` is
+  null for v2 estimates.
 
 ## Pipeline
 
@@ -57,13 +75,25 @@ gets the no-S2 model.
 
 ### Model assets
 
-`assets/models/doy_estimation_v1/` (360 MB): `manifest.json` (recipe,
+`assets/models/doy_estimation_v2/` (360 MB): `manifest.json` (recipe,
 calibration, cross-validated metrics, hashes), `{s2,nos2}_seed{0-4}.safetensors`
-and the DINOv2 backbone `dinov2_vitb14_reg4.safetensors`. Built from the
-research package by `scripts/package_doy_estimation_model.py` (no pickles in
-the processor), downloaded by `make download-doy-model` from
-`$(ASSETS_BASE_URL)/models/doy_estimation_v1.tar.gz`, and part of the processor
-asset preflight.
+and the DINOv2 backbone `dinov2_vitb14_reg4.safetensors` (the same file as in
+v1). Built from the AerialStamp weights by
+`scripts/package_doy_estimation_model.py ... --version doy_estimation_v2
+--backbone <v1 backbone>` (no pickles in the processor) and part of the
+processor asset preflight.
+
+**The v2 weights are not public.** They must never go into git, CI artifacts or
+the public asset URL (`ASSETS_BASE_URL`, which lists its directory). The archive
+lives on the storage server outside the web root; `make download-doy-model`
+copies it over SSH, with your own storage access or the processor's key
+(`STORAGE_SSH_KEY=<PROCESSOR_SSH_KEY_PATH>`). Hosts without the model (CI, most
+dev checkouts) skip the model test, and `download-processor-assets` no longer
+includes it. Stage it on every processor host before a release that needs it,
+as [`processor-hosts.md`](playbooks/processor-hosts.md#prs-that-add-or-change-a-required-asset) describes.
+
+v1 (`doy_estimation_v1`, public archive) is no longer required. The loader still
+reads it, so a rollback is a revert plus the v1 directory on each host.
 
 ## Storage
 
@@ -76,8 +106,9 @@ Readable like the dataset; written by the processor.
 
 ## Rules
 
-Calibrated on out-of-fold predictions of the deployed recipes
-(`n = 8,987` dated orthophotos).
+Thresholds calibrated on out-of-fold predictions of the v1 recipes
+(`n = 8,987` dated orthophotos); the AerialStamp paper uses the same rule, so
+v2 keeps them. The flag rates and accuracies quoted below are v1's.
 
 - **Modes ("bumps")**: arcs of the 90 % highest-density set holding >= 10 %
   probability each. Evergreen tropics and spring/autumn confusions give two;
@@ -150,7 +181,7 @@ Methods write-up with examples: section 8 of the research report
 
 ```bash
 python3 scripts/requeue_doy_estimation.py --dry-run          # counts per reason
-python3 scripts/requeue_doy_estimation.py                    # missing / old model version / date changed
+python3 scripts/requeue_doy_estimation.py                    # missing / older model version (v1) / date changed
 python3 scripts/requeue_doy_estimation.py --retry-s2         # + no-S2 estimates whose S2 may exist now
 python3 scripts/requeue_doy_estimation.py --all              # everything with a COG
 ```
