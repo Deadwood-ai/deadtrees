@@ -226,7 +226,9 @@ auditor; it lists the four checks. To roll back, restore the backup and run the 
   person rows as truth and members with the frozen split (tune as dev, holdout as
   holdout; later batches follow their dataset, else the hash). Crops without a
   footprint in a manifest, or whose ortho was replaced after grading, are left out
-  and listed.
+  and listed. A window graded twice is one crop with both gradings; where the gradings differ the
+  run stops and lists them, unless `--accept-later-answers` keeps both and lets the later
+  one count.
 
 ## Not yet
 
