@@ -159,7 +159,11 @@ images travel inline in the request, so a model cannot read files of the account
   (`discovered-until` next to the status file), so datasets finished while it was down are
   found after a restart. Benchmark runs never stand in for
   production runs. The backfill is queued explicitly with `enqueue` (`--force` reruns).
-- A finished run becomes current only when its version is the active one. A run replaces a
+- A finished run becomes current only when its version is the active one. The database
+  enforces this: a pointer to a run of an inactive version is skipped, not refused, so a
+  check may point unconditionally while its version waits for activation; a benchmark run
+  is refused. Pointers set before this guard, activating a version and deleting pointers
+  are not affected. A run replaces a
   missing pointer or one at another version's run (promotion), and within its version
   only an older run. The write lands only if the pointer is still the one read. A sweep
   applies the same rule to every done run of each active version, with no age limit,
@@ -230,11 +234,16 @@ auditor; it lists the four checks. To roll back, restore the backup and run the 
   run stops and lists them, unless `--accept-later-answers` keeps both and lets the later
   one count.
 
-## Not yet
+## The saved audits
 
-`dataset_audit` stays the saved human audit. Renaming it to `dataset_audit_legacy`
-behind a compatible view follows in a separate migration once the old audits are
-imported as person rows marked `imported_from = 'dataset_audit'` (DT-1487): six views
-are compiled against the table and the audit page writes it through the lease
-trigger. Every historical dataset is re-run through the checks; the old audits are not
-ground truth.
+The saved human audits live in `dataset_audit_legacy`; `dataset_audit` is a view with the
+same columns over it (migration `20261103103000_audit_legacy_compat.sql`). The view runs
+as the caller and is updated automatically, so readers, the audit page's saves (insert,
+update, upsert with RETURNING), the lease guard, the date decision trigger and the row
+policies work as before. The six views compiled against the table stay bound to it and
+read the same rows. The monitoring role reads its ten audit columns from
+`dataset_audit_legacy`, because a caller-rights view needs every column of the table and
+the notes stay closed to it. Later the view can read from the audit tables instead,
+without touching a reader. Every historical dataset is re-run through the checks; the
+old audits are imported as person rows marked `imported_from = 'dataset_audit'`
+(DT-1487) and are not ground truth.

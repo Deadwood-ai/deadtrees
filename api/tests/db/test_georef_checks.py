@@ -60,13 +60,18 @@ def test_each_check_is_an_audit_run_with_one_model_assessment(db):
 		('backfill', 'done', 'georef-rules-v1_romav2.0.1', 'review_all', False, True),
 		('upload', 'done', 'georef-rules-v1_romav2.0.1', 'review_all', False, True),
 	]
-	# every run keeps its row; the current one is the latest, judged unsure by the matcher
-	assert db.execute(
+	# every run keeps its row, but none counts while the version waits for activation
+	current = (
 		"SELECT a.verdict::text, a.model, a.prompt_version, a.details->>'evidence_level'"
 		' FROM audit.current_runs c JOIN audit.assessments a ON a.run_id = c.run_id'
-		" WHERE c.dataset_id=%s AND c.check_key='georef'",
-		(dataset,),
-	).fetchall() == [('unsure', 'romav2.0.1', 'georef-rules-v1', 'conflict')]
+		" WHERE c.dataset_id=%s AND c.check_key='georef'"
+	)
+	assert db.execute(current, (dataset,)).fetchall() == []
+	assert db.execute('SELECT count(*) FROM audit.review_queue WHERE dataset_id=%s', (dataset,)).fetchone() == (0,)
+	# once an operator activates it, the next check becomes current and goes to review
+	db.execute("UPDATE audit.check_versions SET is_active=true WHERE version='georef-rules-v1_romav2.0.1'")
+	write_check(db, dataset, 'uncertain', 'conflict')
+	assert db.execute(current, (dataset,)).fetchall() == [('unsure', 'romav2.0.1', 'georef-rules-v1', 'conflict')]
 	assert db.execute(
 		"SELECT verdict::text, needs_review FROM audit.review_queue WHERE dataset_id=%s AND check_key='georef'",
 		(dataset,),
