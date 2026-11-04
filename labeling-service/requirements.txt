@@ -1,6 +1,6 @@
 # Versions tested on the processing server (RTX 3090, CUDA 12.6) on 2 Nov 2026.
 --extra-index-url https://download.pytorch.org/whl/cu126
-torch==2.7.1
+torch==2.12.1+cu126
 torchvision==0.22.1
 transformers==5.18.0
 fastapi==0.162.0
