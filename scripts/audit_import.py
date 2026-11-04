@@ -526,6 +526,7 @@ def import_gold(conn, plan: list[dict], assessor: str) -> int:
 		crop = crops.get(item['crop_key'])
 		if crop is None:
 			crop = crops[item['crop_key']] = store_crop(conn, item, benchmark)
+		store_images(conn, item, crop)
 		label = item['label']
 		for row in person_rows(label['answers'], item['label_ids']):
 			details = {
@@ -558,7 +559,7 @@ def import_gold(conn, plan: list[dict], assessor: str) -> int:
 
 
 def store_crop(conn, item: dict, benchmark: int) -> int:
-	"""The crop row, reused when this footprint is already stored, with its images and benchmark membership."""
+	"""The crop row, reused when this footprint is already stored, and its benchmark membership."""
 	selection = {'benchmark': {**item['selection'], 'gold_id': item['gold_id']}}
 	existing = conn.execute(
 		'SELECT id, selection FROM audit.crops WHERE dataset_id = %s AND ortho_sha256 = %s AND pixel_x0 IS NULL '
@@ -585,6 +586,15 @@ def store_crop(conn, item: dict, benchmark: int) -> int:
 				json.dumps(selection),
 			),
 		).fetchone()[0]
+	conn.execute(
+		'INSERT INTO audit.benchmark_members (benchmark_id, dataset_id, crop_id, split) VALUES (%s, %s, %s, %s)',
+		(benchmark, item['dataset_id'], crop, item['split']),
+	)
+	return crop
+
+
+def store_images(conn, item: dict, crop: int) -> None:
+	"""One row per crop, label and kind: a second grading of a window adds only overlays of another label."""
 	for image in image_rows(item):
 		conn.execute(
 			'INSERT INTO audit.images (dataset_id, ortho_sha256, crop_id, label_id, kind, storage_path, content_type, '
@@ -605,11 +615,6 @@ def store_crop(conn, item: dict, benchmark: int) -> int:
 				image['sha256'],
 			),
 		)
-	conn.execute(
-		'INSERT INTO audit.benchmark_members (benchmark_id, dataset_id, crop_id, split) VALUES (%s, %s, %s, %s)',
-		(benchmark, item['dataset_id'], crop, item['split']),
-	)
-	return crop
 
 
 def benchmark_exists(conn) -> bool:
@@ -626,14 +631,16 @@ def copy_images(plan: list[dict], target: str, run=subprocess.run) -> None:
 	stops: stored evidence stays exactly what was judged and never gets replaced.
 	target is a local directory or an rsync host:path.
 	"""
-	# the images of a crop graded twice are stored once, under its first grading
-	first = {}
+	# one file per crop, label and kind: the same rule as the image rows
+	seen = set()
 	for item in sorted(
 		plan, key=lambda i: (i['label']['graded_at'], i['gold_id']) if 'label' in i else ('', i['gold_id'])
 	):
-		first.setdefault(item.get('crop_key', item['gold_id']), item)
-	for item in first.values():
 		for image in image_rows(item):
+			key = (item.get('crop_key', item['gold_id']), image['label_id'], image['kind'])
+			if key in seen:
+				continue
+			seen.add(key)
 			if ':' in target.split('/', 1)[0]:
 				copy_remote(image, f'{target.rstrip("/")}/{image["storage_path"]}', run)
 				continue

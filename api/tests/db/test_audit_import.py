@@ -371,6 +371,36 @@ def test_a_crop_already_stored_with_that_footprint_is_reused(db, tmp_path):
 	)
 
 
+def test_a_second_grading_on_another_prediction_keeps_its_overlays(db, tmp_path):
+	grader = create_user(db, can_audit=True)
+	dataset, plan = gold_entry_twice(db, tmp_path)
+	later = next(i for i in plan if i['gold_id'].endswith('-2'))
+	later['label_ids'] = {'deadwood': 911, 'forest_cover': 912}
+	audit_import.import_gold(db, plan, str(grader))
+	# one raw image, and both overlays for each of the two predictions
+	assert db.execute(
+		'SELECT kind,label_id FROM audit.images WHERE dataset_id=%s ORDER BY kind,label_id', (dataset,)
+	).fetchall() == [
+		('deadwood_overlay', 901),
+		('deadwood_overlay', 911),
+		('forest_cover_overlay', 902),
+		('forest_cover_overlay', 912),
+		('raw', None),
+	]
+	target = tmp_path / 'storage'
+	audit_import.copy_images(plan, str(target))
+	root = target / 'audit/benchmarks/pq-gold-dt1272'
+	assert sorted(p.name for p in (root / f'gold-{dataset}').iterdir()) == [
+		'deadwood-fill.png',
+		'forest_cover-fill.png',
+		'raw.jpg',
+	]
+	assert sorted(p.name for p in (root / f'gold-{dataset}-2').iterdir()) == [
+		'deadwood-fill.png',
+		'forest_cover-fill.png',
+	]
+
+
 def test_the_images_of_a_window_graded_twice_are_copied_once(db, tmp_path):
 	dataset, plan = gold_entry_twice(db, tmp_path)
 	target = tmp_path / 'storage'
