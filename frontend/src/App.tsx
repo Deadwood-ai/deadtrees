@@ -11,6 +11,7 @@ import Footer from "./components/Footer";
 import { PublicOnly, RequireAuth } from "./components/AuthGate";
 import BenchmarkAccess from "./components/DisturbanceBenchmark/BenchmarkAccess";
 import { antdTheme } from "./theme/antdTheme";
+import { RouteMeta } from "./seo/usePageMeta";
 
 import DatasetDetails from "./pages/DatasetDetails";
 import RouteErrorBoundary from "./components/RouteErrorBoundary";
@@ -149,6 +150,8 @@ function AppWithTracking() {
   return (
     <>
       <RouteScrollRestoration />
+      {/* Before the routes: a page's own override runs after the route default. */}
+      <RouteMeta />
       <Routes>
         <Route path="/" element={<LayoutWrapper />}>
           <Route path="/" element={<HomePage />} />
