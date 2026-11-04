@@ -31,11 +31,17 @@ describe("visibilityReductionNotice", () => {
 });
 
 describe("datasetAccountLink", () => {
+  const dataset = { id: 7, archived: false };
+
   it("sends the owner to their row in My datasets", () => {
-    expect(datasetAccountLink({ is_owner: true, role: null }, 7)).toEqual({
+    expect(datasetAccountLink({ is_owner: true, role: null }, dataset)).toEqual({
       to: "/profile?highlight=7",
       label: "Manage in My datasets",
     });
+  });
+
+  it("gives the owner of an archived dataset no link, because My datasets hides it", () => {
+    expect(datasetAccountLink({ is_owner: true, role: null }, { id: 7, archived: true })).toBeNull();
   });
 
   it.each([
@@ -43,10 +49,13 @@ describe("datasetAccountLink", () => {
     ["editor", "Manage in Shared with me"],
     ["admin", "Manage in Shared with me"],
   ] as const)("sends a %s to their row in Shared with me", (role, label) => {
-    expect(datasetAccountLink({ is_owner: false, role }, 7)).toEqual({ to: "/profile?tab=shared&highlight=7", label });
+    expect(datasetAccountLink({ is_owner: false, role }, dataset)).toEqual({
+      to: "/profile?tab=shared&highlight=7",
+      label,
+    });
   });
 
   it("gives operators without a stake in the dataset no link", () => {
-    expect(datasetAccountLink({ is_owner: false, role: null }, 7)).toBeNull();
+    expect(datasetAccountLink({ is_owner: false, role: null }, dataset)).toBeNull();
   });
 });
