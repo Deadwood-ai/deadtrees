@@ -8,6 +8,7 @@ import uuid
 
 import pytest
 
+from api.tests.db.test_dataset_access import _grant
 from api.tests.db.test_priwa_field_schema import create_processed_priwa_flight
 from shared.db import use_client, use_service_client
 from shared.settings import settings
@@ -148,13 +149,15 @@ def test_uploaders_in_several_projects_share_with_none(access_accounts, project,
 			client.table('priwa_projects').delete().eq('id', other_project).execute()
 
 
-def _shared_with(account: dict) -> list[dict]:
+def _shared_rows(account: dict, dataset_id: int) -> list[dict]:
+	"""This dataset's rows in the account's Shared with me list."""
 	with use_client(account['token']) as client:
-		return client.rpc('list_datasets_shared_with_me').execute().data
+		rows = client.rpc('list_datasets_shared_with_me').execute().data
+	return [row for row in rows if row['dataset_id'] == dataset_id]
 
 
 def test_shared_with_me_lists_a_project_flight_as_reader_without_end_date(access_accounts, project, private_flight):
-	rows = [row for row in _shared_with(access_accounts['reader']) if row['dataset_id'] == private_flight]
+	rows = _shared_rows(access_accounts['reader'], private_flight)
 	assert len(rows) == 1
 	assert rows[0]['role'] == 'reader'
 	assert rows[0]['can_download'] is False
@@ -165,43 +168,30 @@ def test_shared_with_me_lists_a_project_flight_as_reader_without_end_date(access
 
 
 def test_shared_with_me_leaves_out_own_flights_and_other_people(access_accounts, project, private_flight):
-	assert private_flight not in [row['dataset_id'] for row in _shared_with(access_accounts['owner'])]
-	assert private_flight not in [row['dataset_id'] for row in _shared_with(access_accounts['stranger'])]
+	assert _shared_rows(access_accounts['owner'], private_flight) == []
+	assert _shared_rows(access_accounts['stranger'], private_flight) == []
 
 
 def test_shared_with_me_shows_a_named_grant_instead_of_project_sharing(access_accounts, project, private_flight):
 	reader = access_accounts['reader']
-	with use_service_client() as client:
-		client.table('dataset_access_grants').insert(
-			{
-				'dataset_id': private_flight,
-				'grantee_user_id': reader['id'],
-				'role': 'editor',
-				'can_download': True,
-				'granted_by': access_accounts['owner']['id'],
-			}
-		).execute()
-	try:
-		rows = [row for row in _shared_with(reader) if row['dataset_id'] == private_flight]
-		assert [(row['role'], row['can_download']) for row in rows] == [('editor', True)]
+	_grant(access_accounts['owner']['token'], private_flight, reader['email'], 'editor', can_download=True)
+	rows = _shared_rows(reader, private_flight)
+	assert [(row['role'], row['can_download']) for row in rows] == [('editor', True)]
 
-		# An expired grant no longer counts, so project sharing applies again.
-		with use_service_client() as client:
-			client.table('dataset_access_grants').update({'expires_at': '2020-01-01T00:00:00Z'}).eq(
-				'dataset_id', private_flight
-			).eq('grantee_user_id', reader['id']).execute()
-		rows = [row for row in _shared_with(reader) if row['dataset_id'] == private_flight]
-		assert [(row['role'], row['can_download'], row['expires_at']) for row in rows] == [('reader', False, None)]
-	finally:
-		with use_service_client() as client:
-			client.table('dataset_access_grants').delete().eq('dataset_id', private_flight).execute()
+	# An expired grant no longer counts, so project sharing applies again.
+	with use_service_client() as client:
+		client.table('dataset_access_grants').update({'expires_at': '2020-01-01T00:00:00Z'}).eq(
+			'dataset_id', private_flight
+		).eq('grantee_user_id', reader['id']).execute()
+	rows = _shared_rows(reader, private_flight)
+	assert [(row['role'], row['can_download'], row['expires_at']) for row in rows] == [('reader', False, None)]
 
 
 def test_shared_with_me_drops_archived_flights(access_accounts, project, private_flight):
 	with use_service_client() as client:
 		client.table(settings.datasets_table).update({'archived': True}).eq('id', private_flight).execute()
 
-	assert private_flight not in [row['dataset_id'] for row in _shared_with(access_accounts['reader'])]
+	assert _shared_rows(access_accounts['reader'], private_flight) == []
 
 
 def test_shared_with_me_gives_private_data_viewers_the_download_the_dataset_page_shows(
@@ -213,10 +203,9 @@ def test_shared_with_me_gives_private_data_viewers_the_download_the_dataset_page
 			{'user_id': reader['id'], 'can_view_all_private': True}, on_conflict='user_id'
 		).execute()
 	try:
-		rows = [row for row in _shared_with(reader) if row['dataset_id'] == private_flight]
+		rows = _shared_rows(reader, private_flight)
 		access = _sees(reader, project, private_flight)['access']
 		assert rows[0]['can_download'] is access['can_download'] is True
 	finally:
 		with use_service_client() as client:
 			client.table('privileged_users').delete().eq('user_id', reader['id']).execute()
-
