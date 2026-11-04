@@ -6,7 +6,7 @@ import { Link } from "react-router-dom";
 import type { ISharedDataset } from "../../api/datasetAccess";
 import { useSharedWithMe } from "../../hooks/useDatasetAccess";
 import { usePublicDatasetById } from "../../hooks/useDatasets";
-import { HIGHLIGHTED_ROW_CLASS, useHighlightedRow } from "../Account/useHighlightedRow";
+import { useHighlightedRow } from "../Account/useHighlightedRow";
 import EditDatasetModal from "../EditDatasetModal";
 import EmptyStatePanel from "../EmptyStatePanel";
 import { SectionLoadError, SectionSkeleton, TableSkeleton } from "../SectionStates";
@@ -81,9 +81,8 @@ export default function SharedWithMeTable() {
         dataSource={data}
         rowKey="dataset_id"
         scroll={{ x: "max-content" }}
-        pagination={{ pageSize: PAGE_SIZE, hideOnSinglePage: true, current: highlight.page, onChange: highlight.setPage }}
-        onRow={(row) => ({ "aria-current": row.dataset_id === highlight.highlightId || undefined })}
-        rowClassName={(row) => (row.dataset_id === highlight.highlightId ? HIGHLIGHTED_ROW_CLASS : "")}
+        pagination={{ pageSize: PAGE_SIZE, hideOnSinglePage: true, defaultCurrent: highlight.defaultPage }}
+        onRow={(row) => highlight.rowProps(row.dataset_id)}
         columns={[
           {
             title: "Dataset",

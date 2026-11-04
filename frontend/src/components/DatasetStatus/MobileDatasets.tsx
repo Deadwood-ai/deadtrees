@@ -16,7 +16,7 @@ interface MobileDatasetsProps {
   queueFor: (id: number) => QueueState;
   onDetails: (id: number, trigger: HTMLElement) => void;
   onViewMap: (id: number) => void;
-  highlightId?: number;
+  highlightId: number;
 }
 
 /**

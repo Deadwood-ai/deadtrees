@@ -42,7 +42,7 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import ChangeVisibilityModal from "./DatasetAccess/ChangeVisibilityModal";
 import ShareDatasetModal from "./DatasetAccess/ShareDatasetModal";
 import { openDatasetDetail } from "../utils/datasetDetailNavigation";
-import { HIGHLIGHTED_ROW_CLASS, useHighlightedRow } from "./Account/useHighlightedRow";
+import { useHighlightedRow } from "./Account/useHighlightedRow";
 
 const PAGE_SIZE = 50;
 
@@ -599,10 +599,9 @@ const DataTable: React.FC<DataTableProps> = ({
           dataSource={sortedUserData}
           columns={columns}
           scroll={{ x: "max-content" }}
-          pagination={{ pageSize: PAGE_SIZE, current: highlight.page, onChange: highlight.setPage }}
-          onRow={(record) => ({ "aria-current": record.id === highlight.highlightId || undefined })}
+          pagination={{ pageSize: PAGE_SIZE, defaultCurrent: highlight.defaultPage }}
+          onRow={(record) => highlight.rowProps(record.id)}
           rowClassName={(record) => {
-            if (record.id === highlight.highlightId) return HIGHLIGHTED_ROW_CLASS;
             const isSelected = selectedRowKeys.includes(record.id);
             return isSelected ? "bg-blue-50 hover:bg-blue-100" : "";
           }}
