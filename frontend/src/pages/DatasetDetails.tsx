@@ -6,6 +6,8 @@ import { usePublicDatasetById } from "../hooks/useDatasets";
 import { useAuth } from "../hooks/useAuthProvider";
 import StatusPage from "../components/StatusPage";
 import { MapPageSkeleton } from "../components/PageSkeletons";
+import { datasetPageMeta } from "../seo/datasetMeta";
+import { usePageMetaOverride } from "../seo/usePageMeta";
 
 const DatasetDetailsView = lazy(() => import("./DatasetDetailsView"));
 
@@ -22,6 +24,7 @@ export default function DatasetDetails() {
   const { status } = useAuth();
   const datasetId = id && /^\d+$/.test(id) ? Number(id) : undefined;
   const { data, isLoading, isError, refetch } = usePublicDatasetById(datasetId);
+  usePageMetaOverride(data ? datasetPageMeta(data) : null);
   const loading = <MapPageSkeleton label="Loading dataset" />;
 
   if (datasetId === undefined) {

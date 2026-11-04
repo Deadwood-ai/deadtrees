@@ -39,6 +39,14 @@ frontend work.
 - Treat large React components, duplicated data-fetching logic, unstable query keys, missing cleanup of OpenLayers resources, and hidden side effects as review issues when they create concrete regression risk.
 - Do not flag subjective UI style preferences unless they affect accessibility, data integrity, security, testability, or a documented product requirement.
 
+## Search And Link Previews
+
+`src/seo/pageMeta.ts` owns each URL's title, description, robots rule and
+structured data. Add new public routes there, and new private routes to its
+noindex list. A page refines its metadata with `usePageMetaOverride`, never by
+setting `document.title`. The build writes static HTML and the sitemap from the
+same module.
+
 ## Loading, Empty And Error States
 
 Use the shared kit instead of spinners, "Loading…" strings or antd `Empty`,

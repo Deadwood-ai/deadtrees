@@ -130,6 +130,7 @@ const ListItem = ({
       <div className="relative h-16 w-16 min-h-16 min-w-16 shrink-0 overflow-hidden rounded-lg">
         <img
           src={thumbnailUrl ?? "/assets/tree-icon.png"}
+          alt={`Thumbnail of the orthophoto of ${adminLevel3 || `dataset ${item.id}`}`}
           className="m-0 h-full w-full scale-150 object-cover transition-transform hover:z-10"
           loading="lazy"
         />

@@ -6,6 +6,19 @@
       "**/.*",
       "**/node_modules/**"
     ],
+    "trailingSlash": false,
+    "redirects": [
+      {
+        "source": "/benchmark-datasets/dte-aerial-bench",
+        "destination": "/releases/dte-aerial-bench",
+        "type": 301
+      },
+      {
+        "source": "/dte-aerial-bench",
+        "destination": "/releases/dte-aerial-bench",
+        "type": 301
+      }
+    ],
     "headers": [
       {
         "source": "**",
