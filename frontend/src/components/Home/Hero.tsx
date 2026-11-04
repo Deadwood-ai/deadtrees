@@ -254,7 +254,7 @@ const Hero = () => {
                 controls={true}
                 playsinline
                 loop={true}
-                light="https://data2.deadtrees.earth/assets/v1/trailer/deadtrees_trailer_2026-09-28_poster_v2.jpg"
+                light="/assets/trailer-poster.webp"
                 config={heroVideoConfig}
               />
             </div>

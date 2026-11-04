@@ -1,3 +1,5 @@
+import { DeferredVideo } from "./DeferredUntilVisible";
+
 const DOI_BADGES = [
   "10.60493/4mn6a-8zx75",
   "10.60493/ftw67-pnd16",
@@ -35,7 +37,7 @@ const PlatformFeatures = () => {
           </div>
           <div className="relative w-full px-8 pb-8 md:w-1/2 md:p-10 md:pl-0">
             <div className="overflow-hidden rounded-2xl shadow-xl ring-1 ring-black/5">
-              <video src={ADDING_AI_VIDEO_URL} autoPlay loop muted playsInline preload="metadata" className="w-full object-cover" />
+              <DeferredVideo src={ADDING_AI_VIDEO_URL} width={1188} height={720} className="w-full object-cover" />
             </div>
           </div>
         </div>
@@ -124,7 +126,7 @@ const PlatformFeatures = () => {
           </div>
           <div className="relative mt-2 w-full px-8 pb-8 md:mt-0 md:w-1/2 md:p-10 md:pl-0">
             <div className="overflow-hidden rounded-2xl shadow-xl ring-1 ring-black/5">
-              <video src={SATELLITE_ANALYSIS_VIDEO_URL} autoPlay loop muted playsInline preload="metadata" className="w-full object-cover" />
+              <DeferredVideo src={SATELLITE_ANALYSIS_VIDEO_URL} width={1668} height={1080} className="w-full object-cover" />
             </div>
           </div>
         </div>

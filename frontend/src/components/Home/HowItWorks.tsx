@@ -1,54 +1,15 @@
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "antd";
 import { CloudUploadOutlined, GlobalOutlined, DatabaseOutlined } from "@ant-design/icons";
 import { useDesktopOnlyFeature } from "../../hooks/useDesktopOnlyFeature";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import DataGallery from "./DataGallery";
+import { DeferredUntilVisible, DeferredVideo } from "./DeferredUntilVisible";
 
 const UPLOAD_VIDEO_URL = "https://data2.deadtrees.earth/assets/v1/videos/upload.mp4";
 
 const MiniSatelliteMap = lazy(() => import("./MiniSatelliteMap"));
-
-const DeferredUntilVisible = ({
-  children,
-  className,
-  placeholder,
-  rootMargin,
-  testId,
-}: {
-  children: ReactNode;
-  className?: string;
-  placeholder: ReactNode;
-  rootMargin: string;
-  testId?: string;
-}) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [isVisible, setIsVisible] = useState(false);
-
-  useEffect(() => {
-    if (isVisible || !containerRef.current) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setIsVisible(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin },
-    );
-
-    observer.observe(containerRef.current);
-    return () => observer.disconnect();
-  }, [isVisible, rootMargin]);
-
-  return (
-    <div ref={containerRef} className={className} data-testid={testId}>
-      {isVisible ? children : placeholder}
-    </div>
-  );
-};
 
 const DeferredMiniSatelliteMap = () => (
   <DeferredUntilVisible
@@ -130,15 +91,7 @@ const HowItWorks = () => {
           </div>
           <div className="w-full flex-1 order-1 md:order-2">
             <div className="relative w-full overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-black/5">
-              <video
-                src={UPLOAD_VIDEO_URL}
-                autoPlay
-                loop
-                muted
-                playsInline
-                preload="metadata"
-                className="w-full rounded-2xl object-contain"
-              />
+              <DeferredVideo src={UPLOAD_VIDEO_URL} width={1188} height={720} className="w-full rounded-2xl object-contain" />
             </div>
           </div>
         </div>
