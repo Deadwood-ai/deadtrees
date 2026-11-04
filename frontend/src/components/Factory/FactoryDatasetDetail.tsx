@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { Alert, Button, Descriptions, Space, Table, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { CheckCircleFilled, FileTextOutlined, MinusCircleOutlined, SearchOutlined } from "@ant-design/icons";
+import { CheckCircleFilled, FileTextOutlined, MinusCircleOutlined, SearchOutlined, ShareAltOutlined } from "@ant-design/icons";
 import { Link, useLocation, useParams } from "react-router-dom";
+import { useMyDatasetAccess } from "../../hooks/useDatasetAccess";
 import { useFactoryDataset } from "../../hooks/useFactory";
 import { useCanAudit } from "../../hooks/useUserPrivileges";
+import ShareDatasetModal from "../DatasetAccess/ShareDatasetModal";
 import { stageLabel } from "../DatasetStatus/status";
 import { contributorLabel, formatTaskTypes, formatUtc, intentLabel, notificationLabel, publicationLabel } from "./factoryFormat";
 import FactoryRecordTable, { formatRecordValue, humanizeKey } from "./FactoryRecordTable";
@@ -110,6 +112,8 @@ function DetailHeader({ detail, now }: { detail: FactoryDatasetDetailData; now: 
 	const { canAudit } = useCanAudit();
 	const selection = useFactorySelection();
 	const [snapshotOpen, setSnapshotOpen] = useState(false);
+	const [sharing, setSharing] = useState(false);
+	const { data: access } = useMyDatasetAccess(row.dataset_id);
 	const selected = selection.isSelected(row.dataset_id);
 
 	return (
@@ -145,6 +149,11 @@ function DetailHeader({ detail, now }: { detail: FactoryDatasetDetailData; now: 
 							<Button>Audit</Button>
 						</Link>
 					)}
+					{access?.can_manage_access && (
+						<Button icon={<ShareAltOutlined />} onClick={() => setSharing(true)}>
+							Share
+						</Button>
+					)}
 				</Space>
 			</div>
 			<Descriptions
@@ -172,6 +181,7 @@ function DetailHeader({ detail, now }: { detail: FactoryDatasetDetailData; now: 
 				</div>
 			)}
 			<FactorySnapshotModal open={snapshotOpen} ids={[row.dataset_id]} onClose={() => setSnapshotOpen(false)} />
+			<ShareDatasetModal datasetId={sharing ? row.dataset_id : null} datasetName={row.file_name ?? undefined} onClose={() => setSharing(false)} />
 		</section>
 	);
 }

@@ -38,6 +38,7 @@ export function useUpdateDatasetMetadata() {
     },
     onSuccess: (_data, payload) => {
       queryClient.invalidateQueries({ queryKey: ["datasets", payload.dataset_id] });
+      queryClient.invalidateQueries({ queryKey: ["public-dataset-by-id", payload.dataset_id] });
 
       // Invalidate only the user's datasets (not global datasets)
       queryClient.invalidateQueries({

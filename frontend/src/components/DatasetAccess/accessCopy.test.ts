@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { IDataAccess } from "../../types/dataset";
-import { visibilityReductionNotice } from "./accessCopy";
+import { datasetAccountLink, visibilityReductionNotice } from "./accessCopy";
 
 const { public: Public, viewonly: ViewOnly, private: Private } = IDataAccess;
 
@@ -27,5 +27,26 @@ describe("visibilityReductionNotice", () => {
     [null, Private],
   ])("stays silent when %s becomes %s", (current, next) => {
     expect(visibilityReductionNotice(current, next)).toBeNull();
+  });
+});
+
+describe("datasetAccountLink", () => {
+  it("sends the owner to their row in My datasets", () => {
+    expect(datasetAccountLink({ is_owner: true, role: null }, 7)).toEqual({
+      to: "/profile?highlight=7",
+      label: "Manage in My datasets",
+    });
+  });
+
+  it.each([
+    ["reader", "Find in Shared with me"],
+    ["editor", "Manage in Shared with me"],
+    ["admin", "Manage in Shared with me"],
+  ] as const)("sends a %s to their row in Shared with me", (role, label) => {
+    expect(datasetAccountLink({ is_owner: false, role }, 7)).toEqual({ to: "/profile?tab=shared&highlight=7", label });
+  });
+
+  it("gives operators without a stake in the dataset no link", () => {
+    expect(datasetAccountLink({ is_owner: false, role: null }, 7)).toBeNull();
   });
 });

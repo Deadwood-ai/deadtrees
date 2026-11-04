@@ -9,6 +9,10 @@ export const ACCOUNT_TABS = [
 
 export type AccountTab = (typeof ACCOUNT_TABS)[number]["key"];
 
+/** Account page address that opens a tab with one dataset's row highlighted. */
+export const accountDatasetPath = (tab: "datasets" | "shared", datasetId: number) =>
+  `/profile?${tab === "shared" ? "tab=shared&" : ""}highlight=${datasetId}`;
+
 const isAccountTab = (value: string | null): value is AccountTab => ACCOUNT_TABS.some((tab) => tab.key === value);
 
 /** The open account tab, kept in `?tab=` so links and the back button work. My Datasets is the default. */
@@ -20,6 +24,7 @@ export function useAccountTab() {
   const setTab = (next: AccountTab) =>
     setParams((current) => {
       const updated = new URLSearchParams(current);
+      updated.delete("highlight");
       if (next === "datasets") updated.delete("tab");
       else {
         updated.set("tab", next);

@@ -97,13 +97,20 @@ export default function ProfilePage() {
             <ProcessingEmailPreference userId={user?.id} />
           </div>
 
-          <section aria-label="My datasets">
-            <h2 className="mb-1 text-lg font-semibold">My datasets</h2>
-            <p className="mb-3 text-xs text-slate-500" data-testid="mobile-desktop-only-note">
-              Uploads, publishing and dataset management are available on a desktop browser.
-            </p>
-            <DataTable />
-          </section>
+          {activeTab === "shared" ? (
+            <section aria-label="Shared with me" className="rounded-lg border border-gray-200 bg-white p-3">
+              <h2 className="mb-3 text-lg font-semibold">Shared with me</h2>
+              <SharedWithMeTable />
+            </section>
+          ) : (
+            <section aria-label="My datasets">
+              <h2 className="mb-1 text-lg font-semibold">My datasets</h2>
+              <p className="mb-3 text-xs text-slate-500" data-testid="mobile-desktop-only-note">
+                Uploads, publishing and dataset management are available on a desktop browser.
+              </p>
+              <DataTable />
+            </section>
+          )}
         </div>
       </div>
     );
