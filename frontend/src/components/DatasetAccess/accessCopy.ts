@@ -1,4 +1,4 @@
-import type { DatasetAccessRole } from "../../api/datasetAccess";
+import type { DatasetAccessRole, IMyDatasetAccess } from "../../api/datasetAccess";
 import { IDataAccess } from "../../types/dataset";
 
 export interface IVisibilityOption {
@@ -70,3 +70,11 @@ export const roleLabel = (role: DatasetAccessRole | null | undefined) =>
 
 /** Editors and admins always download; a reader only when the grant allows it. */
 export const roleAlwaysDownloads = (role: DatasetAccessRole) => role !== "reader";
+
+/** Where the dataset page sends someone to manage or find this dataset; nothing for people without a stake in it. */
+export function datasetAccountLink(access: Pick<IMyDatasetAccess, "is_owner" | "role">, datasetId: number) {
+  if (access.is_owner) return { to: `/profile?highlight=${datasetId}`, label: "Manage in My datasets" };
+  if (!access.role) return null;
+  const label = access.role === "reader" ? "Find in Shared with me" : "Manage in Shared with me";
+  return { to: `/profile?tab=shared&highlight=${datasetId}`, label };
+}

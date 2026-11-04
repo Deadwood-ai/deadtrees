@@ -8,7 +8,7 @@ export function getPublicDatasetByIdQueryKey(
   authStatus: AuthStatus,
   userId?: string | null,
 ) {
-  return ["public-dataset-by-id", datasetId, authStatus, userId ?? "anonymous"] as const;
+  return ["datasets", datasetId, "public", authStatus, userId ?? "anonymous"] as const;
 }
 
 export function openDatasetDetail({

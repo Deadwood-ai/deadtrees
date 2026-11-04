@@ -16,6 +16,7 @@ interface MobileDatasetsProps {
   queueFor: (id: number) => QueueState;
   onDetails: (id: number, trigger: HTMLElement) => void;
   onViewMap: (id: number) => void;
+  highlightId: number;
 }
 
 /**
@@ -24,7 +25,7 @@ interface MobileDatasetsProps {
  * desktop-only. Rows themselves are not clickable, so the two buttons are the
  * only interactive elements and keep full-size touch targets.
  */
-export default function MobileDatasets({ datasets, queueFor, onDetails, onViewMap }: MobileDatasetsProps) {
+export default function MobileDatasets({ datasets, queueFor, onDetails, onViewMap, highlightId }: MobileDatasetsProps) {
   if (!datasets.length) return <MyDatasetsEmpty isMobile />;
   return (
     <ul
@@ -35,7 +36,12 @@ export default function MobileDatasets({ datasets, queueFor, onDetails, onViewMa
         const queue = queueFor(dataset.id);
         const attention = needsAttention(processingStatus(dataset, queue), reviewStatus(dataset));
         return (
-          <li key={dataset.id} className="flex items-start gap-3 px-4 py-3">
+          <li
+            key={dataset.id}
+            data-row-key={dataset.id}
+            aria-current={dataset.id === highlightId || undefined}
+            className={`flex items-start gap-3 px-4 py-3${dataset.id === highlightId ? " bg-emerald-50" : ""}`}
+          >
             <div className="min-w-0 flex-1">
               <p className="mb-1 truncate text-sm font-medium text-slate-800" title={dataset.file_name}>
                 {dataset.file_name}

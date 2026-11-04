@@ -1,13 +1,10 @@
-import { useState } from "react";
-import { Button, Tag, Typography } from "antd";
-import { EditOutlined, EyeOutlined, GlobalOutlined, LockOutlined, ShareAltOutlined } from "@ant-design/icons";
+import { Tag, Typography } from "antd";
+import { EyeOutlined, GlobalOutlined, LockOutlined } from "@ant-design/icons";
+import { Link } from "react-router-dom";
 import { IDataAccess, type IDataset } from "../../types/dataset";
 import { useMyDatasetAccess } from "../../hooks/useDatasetAccess";
 import { useCanViewAllPrivate } from "../../hooks/useUserPrivileges";
-import ChangeVisibilityModal from "./ChangeVisibilityModal";
-import EditDatasetModal from "../EditDatasetModal";
-import ShareDatasetModal from "./ShareDatasetModal";
-import { roleLabel, visibilityLabel } from "./accessCopy";
+import { datasetAccountLink, roleLabel, visibilityLabel } from "./accessCopy";
 
 const VISIBILITY_TAGS: Record<IDataAccess, { color: string; icon: React.ReactNode }> = {
   [IDataAccess.public]: { color: "green", icon: <GlobalOutlined /> },
@@ -16,18 +13,17 @@ const VISIBILITY_TAGS: Record<IDataAccess, { color: string; icon: React.ReactNod
 };
 
 /**
- * Visibility and sharing for one dataset, shown to people with a stake in it:
- * the owner, people it is shared with and operators who can see private data.
+ * Who can see one dataset, shown to people with a stake in it: the owner, people it
+ * is shared with and operators who can see private data. It only informs; details
+ * and sharing are managed from the account page.
  */
 export default function DatasetAccessSection({ dataset }: { dataset: IDataset }) {
   const { data: access } = useMyDatasetAccess(dataset.id);
   const { canView: canViewAllPrivate } = useCanViewAllPrivate();
-  const [sharing, setSharing] = useState(false);
-  const [changingVisibility, setChangingVisibility] = useState(false);
-  const [editing, setEditing] = useState(false);
 
   if (!access || !(access.is_owner || access.role || access.can_manage_access || canViewAllPrivate)) return null;
   const tag = VISIBILITY_TAGS[dataset.data_access] ?? VISIBILITY_TAGS[IDataAccess.public];
+  const accountLink = datasetAccountLink(access, dataset.id);
 
   return (
     <div className="rounded-2xl border border-gray-200/60 bg-white p-5 shadow-sm space-y-3" data-testid="dataset-access-section">
@@ -46,32 +42,11 @@ export default function DatasetAccessSection({ dataset }: { dataset: IDataset })
           </Typography.Text>
         </div>
       )}
-      {(access.can_manage_access || access.can_edit_details || access.is_owner) && (
-        <div className="flex flex-wrap gap-2 pt-1">
-          {access.can_edit_details && (
-            <Button icon={<EditOutlined />} onClick={() => setEditing(true)}>
-              Edit details
-            </Button>
-          )}
-          {access.can_manage_access && (
-            <Button icon={<ShareAltOutlined />} onClick={() => setSharing(true)}>
-              Share
-            </Button>
-          )}
-          {access.is_owner && <Button onClick={() => setChangingVisibility(true)}>Change visibility</Button>}
+      {accountLink && (
+        <div>
+          <Link to={accountLink.to}>{accountLink.label}</Link>
         </div>
       )}
-      <ShareDatasetModal
-        datasetId={sharing ? dataset.id : null}
-        datasetName={dataset.file_name}
-        onClose={() => setSharing(false)}
-      />
-      <EditDatasetModal visible={editing} onClose={() => setEditing(false)} dataset={dataset} />
-      <ChangeVisibilityModal
-        datasetId={changingVisibility ? dataset.id : null}
-        current={dataset.data_access}
-        onClose={() => setChangingVisibility(false)}
-      />
     </div>
   );
 }

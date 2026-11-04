@@ -80,8 +80,8 @@ function FactoryShell() {
 								<ReadOnlyBadge />
 							</div>
 							<Text type="secondary" className="mt-1 block max-w-2xl">
-								Whether DeadTrees turns contributions into trusted, reused data, and where work waits. Nothing on
-								these pages triggers an action; copy the facts and hand them on.
+								Whether DeadTrees turns contributions into trusted, reused data, and where work waits. These pages
+								are read-only apart from sharing a dataset; copy the facts and hand them on.
 							</Text>
 						</div>
 						<Segmented<FactorySection>

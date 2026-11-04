@@ -26,6 +26,7 @@ const accounts = {
   owner: { email: `sharing-owner-${runId}@example.com`, password: `Owner-${runId}!` },
   colleague: { email: `sharing-colleague-${runId}@example.com`, password: `Colleague-${runId}!` },
   stranger: { email: `sharing-stranger-${runId}@example.com`, password: `Stranger-${runId}!` },
+  support: { email: `sharing-support-${runId}@example.com`, password: `Support-${runId}!` },
 };
 const cogRelativePath = `sharing-${runId}/${runId}_cog.tif`;
 const privateCogFile = path.join(localDataRoot, "cogs", cogRelativePath);
@@ -61,6 +62,10 @@ test.describe("private dataset sharing (local write)", () => {
       users[name as keyof typeof accounts] = data.user;
     }
     datasetId = await createPrivateDatasetWithCog(users.owner!.id);
+    const privilege = await adminClient
+      .from("privileged_users")
+      .insert({ user_id: users.support!.id, can_manage_access: true, can_view_all_private: true, can_operate: true });
+    expect(privilege.error).toBeNull();
   });
 
   test.afterAll(async () => {
@@ -70,6 +75,7 @@ test.describe("private dataset sharing (local write)", () => {
       fs.rmSync(path.join(localDataRoot, "archive", `${uploadedDatasetId}_ortho.tif`), { force: true });
     }
     if (datasetId) await adminClient.from("v2_datasets").delete().eq("id", datasetId);
+    if (users.support) await adminClient.from("privileged_users").delete().eq("user_id", users.support.id);
     for (const user of Object.values(users)) if (user) await adminClient.auth.admin.deleteUser(user.id);
     fs.rmSync(path.dirname(privateCogFile), { recursive: true, force: true });
     fs.rmSync(path.dirname(publicCogFile), { recursive: true, force: true });
@@ -157,8 +163,9 @@ test.describe("private dataset sharing (local write)", () => {
     await page.screenshot({ path: test.info().outputPath("2-colleague-shared-with-me.png") });
 
     await shared.getByRole("link", { name: `sharing-${runId}.tif` }).click();
-    await expect(page.getByTestId("dataset-access-section")).toContainText("Reader");
-    await expect(page.getByRole("button", { name: "Edit details" })).toHaveCount(0);
+    const access = page.getByTestId("dataset-access-section");
+    await expect(access).toContainText("Reader");
+    await expect(access.getByRole("button")).toHaveCount(0);
     await expect.poll(() => privateRanges.filter((status) => status === 206).length, { timeout: 30_000 }).toBeGreaterThan(0);
     expect(staticRequests).toEqual([]);
     await expect(page.getByTestId("dataset-download-section").getByRole("button", { name: "Download unavailable" })).toBeDisabled();
@@ -170,6 +177,32 @@ test.describe("private dataset sharing (local write)", () => {
       clip: { x: 430, y: 180, width: 420, height: 360 },
     })).byteLength, { timeout: 20_000 }).toBeGreaterThan(15_000);
     await page.screenshot({ path: test.info().outputPath("3-colleague-private-map.png") });
+
+    await access.getByRole("link", { name: "Find in Shared with me" }).click();
+    await expect(page).toHaveURL(new RegExp(`/profile\\?tab=shared&highlight=${datasetId}$`));
+    const highlighted = page.locator('tr[aria-current="true"]');
+    await expect(highlighted).toContainText(`sharing-${runId}.tif`);
+    await expect(highlighted.getByRole("button", { name: /Actions/ })).toHaveCount(0);
+  });
+
+  test("the owner's dataset page only informs and links to the row in My datasets", async ({ page }) => {
+    await signIn(page, "owner");
+    await page.goto(`/dataset/${datasetId}`);
+    const access = page.getByTestId("dataset-access-section");
+    await expect(access).toContainText("Private");
+    await expect(access.getByRole("button")).toHaveCount(0);
+    await access.getByRole("link", { name: "Manage in My datasets" }).click();
+    await expect(page).toHaveURL(new RegExp(`/profile\\?highlight=${datasetId}$`));
+    const highlighted = page.locator('tr[aria-current="true"]');
+    await expect(highlighted).toContainText(`sharing-${runId}.tif`);
+    await expect(highlighted).toBeInViewport();
+    // The status drawer has its own `dataset` link parameter and stays closed.
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await highlighted.getByRole("button", { name: /Actions/ }).click();
+    for (const item of ["Edit Metadata", "Change Visibility", "Share"]) {
+      await expect(page.getByRole("menuitem", { name: item })).toBeVisible();
+    }
+    await page.screenshot({ path: test.info().outputPath("3b-owner-highlighted-row.png") });
   });
 
   test("a stranger and an anonymous visitor see no more than for a missing dataset", async ({ page }) => {
@@ -210,8 +243,13 @@ test.describe("private dataset sharing (local write)", () => {
     await page.goto(`/dataset/${datasetId}`);
     const access = page.getByTestId("dataset-access-section");
     await expect(access).toContainText("Editor");
-    await expect(access.getByRole("button", { name: "Change visibility" })).toHaveCount(0);
-    await access.getByRole("button", { name: "Edit details" }).click();
+    await expect(access.getByRole("button")).toHaveCount(0);
+    await access.getByRole("link", { name: "Manage in Shared with me" }).click();
+    const highlighted = page.locator('tr[aria-current="true"]');
+    await expect(highlighted).toContainText(`sharing-${runId}.tif`);
+    await highlighted.getByRole("button", { name: /Actions/ }).click();
+    await expect(page.getByRole("menuitem", { name: "Share" })).toHaveCount(0);
+    await page.getByRole("menuitem", { name: "Edit details" }).click();
     const edit = page.getByRole("dialog", { name: /Edit/ });
     await edit.getByLabel("DOI").fill(`https://doi.org/10.5555/editor-${runId}`);
     await page.screenshot({ path: test.info().outputPath("7-editor-edits-details.png") });
@@ -219,10 +257,42 @@ test.describe("private dataset sharing (local write)", () => {
     await expect.poll(async () => (await adminClient.from("v2_datasets").select("citation_doi").eq("id", datasetId).single()).data?.citation_doi).toBe(`https://doi.org/10.5555/editor-${runId}`);
   });
 
+  test("an admin grantee shares the dataset from Shared with me", async ({ page }) => {
+    const { error } = await (await ownerRpcClient()).rpc("set_dataset_access", {
+      p_dataset_id: datasetId,
+      p_email: accounts.colleague.email,
+      p_role: "admin",
+      p_can_download: true,
+      p_expires_at: null,
+    });
+    expect(error).toBeNull();
+
+    await signIn(page, "colleague");
+    await page.goto(`/profile?tab=shared&highlight=${datasetId}`);
+    const highlighted = page.locator('tr[aria-current="true"]');
+    await highlighted.getByRole("button", { name: /Actions/ }).click();
+    await expect(page.getByRole("menuitem", { name: "Edit details" })).toBeVisible();
+    await page.getByRole("menuitem", { name: "Share" }).click();
+    await expect(page.getByRole("dialog", { name: /Share/ }).getByText(accounts.owner.email)).toBeVisible();
+  });
+
+  test("a support account has no sidebar buttons and shares from the Factory page", async ({ page }) => {
+    await signIn(page, "support");
+    await page.goto(`/dataset/${datasetId}`);
+    const access = page.getByTestId("dataset-access-section");
+    await expect(access).toBeVisible();
+    await expect(access.getByRole("button")).toHaveCount(0);
+    await expect(access.getByRole("link")).toHaveCount(0);
+
+    await page.goto(`/factory/datasets/${datasetId}`);
+    const header = page.getByTestId("factory-detail-header");
+    await header.getByRole("button", { name: "Share" }).click();
+    await expect(page.getByRole("dialog", { name: /Share/ }).getByText(accounts.owner.email)).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath("8-support-factory-share.png") });
+  });
+
   test("revoking access ends the colleague's view immediately", async ({ page }) => {
-    const owner = await anonClient.auth.signInWithPassword(accounts.owner);
-    const ownerClient = localClient(process.env.VITE_SUPABASE_ANON_KEY || requireEnv("SUPABASE_ANON_KEY"), owner.data.session!.access_token);
-    const { error } = await ownerClient.rpc("revoke_dataset_access", { p_dataset_id: datasetId, p_user_id: users.colleague!.id });
+    const { error } = await (await ownerRpcClient()).rpc("revoke_dataset_access", { p_dataset_id: datasetId, p_user_id: users.colleague!.id });
     expect(error).toBeNull();
 
     await signIn(page, "colleague");
@@ -279,6 +349,11 @@ function localClient(key: string, accessToken?: string) {
     auth: { autoRefreshToken: false, persistSession: false },
     global: accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : undefined,
   });
+}
+
+async function ownerRpcClient() {
+  const owner = await anonClient.auth.signInWithPassword(accounts.owner);
+  return localClient(process.env.VITE_SUPABASE_ANON_KEY || requireEnv("SUPABASE_ANON_KEY"), owner.data.session!.access_token);
 }
 
 async function signIn(page: Page, who: keyof typeof accounts) {

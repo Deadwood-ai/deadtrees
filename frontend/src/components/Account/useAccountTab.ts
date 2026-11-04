@@ -20,6 +20,7 @@ export function useAccountTab() {
   const setTab = (next: AccountTab) =>
     setParams((current) => {
       const updated = new URLSearchParams(current);
+      updated.delete("highlight");
       if (next === "datasets") updated.delete("tab");
       else {
         updated.set("tab", next);

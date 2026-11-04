@@ -42,6 +42,9 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import ChangeVisibilityModal from "./DatasetAccess/ChangeVisibilityModal";
 import ShareDatasetModal from "./DatasetAccess/ShareDatasetModal";
 import { openDatasetDetail } from "../utils/datasetDetailNavigation";
+import { useHighlightedRow } from "./Account/useHighlightedRow";
+
+const PAGE_SIZE = 50;
 
 interface Dataset extends ContributorDataset {
   id: number;
@@ -125,6 +128,7 @@ const DataTable: React.FC<DataTableProps> = ({
   // Queue positions for user datasets
   const datasetIds = useMemo(() => (userData ? (userData as Dataset[]).map((d) => d.id) : []), [userData]);
   const selection = useStatusSelection(sortedUserData);
+  const highlight = useHighlightedRow(sortedUserData.map((dataset) => dataset.id), PAGE_SIZE);
   const queue = useQueuePositions(selection.datasetId ? [...datasetIds, selection.datasetId] : datasetIds);
   const queueFor = (id: number): QueueState => queue.isError ? { state: "error" } : queue.isPending ? { state: "loading" } : { state: "loaded", item: queue.data[id] };
 
@@ -589,13 +593,14 @@ const DataTable: React.FC<DataTableProps> = ({
         <SectionLoadError title="Your datasets couldn’t load" onRetry={() => void retryUserData()} testId="my-datasets-error" />
       ) : isLoadingData ? (
         <TableSkeleton label="Loading your datasets" />
-      ) : isMobile ? <MobileDatasets datasets={sortedUserData} queueFor={queueFor} onDetails={openDetails} onViewMap={viewMap} /> : sortedUserData.length === 0 ? <MyDatasetsEmpty /> : <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+      ) : isMobile ? <MobileDatasets datasets={sortedUserData} queueFor={queueFor} onDetails={openDetails} onViewMap={viewMap} highlightId={highlight.highlightId} /> : sortedUserData.length === 0 ? <MyDatasetsEmpty /> : <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
         <Table
           rowKey={"id"}
           dataSource={sortedUserData}
           columns={columns}
           scroll={{ x: "max-content" }}
-          pagination={{ pageSize: 50 }}
+          pagination={{ pageSize: PAGE_SIZE, defaultCurrent: highlight.defaultPage }}
+          onRow={(record) => highlight.rowProps(record.id)}
           rowClassName={(record) => {
             const isSelected = selectedRowKeys.includes(record.id);
             return isSelected ? "bg-blue-50 hover:bg-blue-100" : "";
