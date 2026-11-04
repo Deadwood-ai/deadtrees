@@ -289,6 +289,96 @@ def test_gold_crops_on_a_replaced_ortho_or_without_a_footprint_are_left_out(db, 
 	]
 
 
+def gold_entry_twice(db, tmp_path, later_answers=None):
+	"""One window graded twice: two manifest entries with the same footprint."""
+	dataset = create_dataset(db, create_user(db))
+	db.execute(
+		'INSERT INTO public.v2_orthos(dataset_id,ortho_file_name,version,ortho_file_size,sha256) '
+		"VALUES (%s,'o.tif',1,1,%s)",
+		(dataset, SHA),
+	)
+	root, manifest = gold_root(tmp_path, dataset)
+	manifest[1]['footprint'] = manifest[0]['footprint']
+	labels = sqlite3.connect(root / 'gold-labels.sqlite3')
+	first = json.loads(labels.execute('SELECT payload FROM labels WHERE crop_id=?', (f'gold-{dataset}',)).fetchone()[0])
+	answers = {**first['answers'], **(later_answers or {})}
+	labels.execute(
+		'UPDATE labels SET payload=?, updated_at=? WHERE crop_id=?',
+		(json.dumps({**first, 'answers': answers}), '2026-10-13T08:20:00+00:00', f'gold-{dataset}-2'),
+	)
+	labels.commit()
+	labels.close()
+	plan, problems = audit_import.plan_gold(db, root, manifest, audit_import.load_labels(root / 'gold-labels.sqlite3'))
+	assert problems == []
+	return dataset, plan
+
+
+def test_a_window_graded_twice_alike_is_one_crop_with_both_gradings(db, tmp_path):
+	grader = create_user(db, can_audit=True)
+	dataset, plan = gold_entry_twice(db, tmp_path)
+	summary = audit_import.summarize_gold(plan, [])
+	assert (summary['graded_entries'], summary['crops'], summary['conflicts']) == (2, 1, [])
+	assert summary['same_crop_graded_twice'] == [[f'gold-{dataset}', f'gold-{dataset}-2']]
+	benchmark = audit_import.import_gold(db, plan, str(grader))
+	assert db.execute('SELECT count(*) FROM audit.crops WHERE dataset_id=%s', (dataset,)).fetchone() == (1,)
+	assert db.execute(
+		'SELECT count(*) FROM audit.benchmark_members WHERE benchmark_id=%s', (benchmark,)
+	).fetchone() == (1,)
+	assert db.execute('SELECT count(*) FROM audit.images WHERE dataset_id=%s', (dataset,)).fetchone() == (3,)
+	# both gradings are kept; for one person the later one is the latest answer
+	assert db.execute(
+		"SELECT count(*) FROM audit.assessments WHERE dataset_id=%s AND layer='deadwood'", (dataset,)
+	).fetchone() == (2,)
+	assert db.execute(
+		"SELECT count(*) FROM audit.latest_assessments WHERE dataset_id=%s AND layer='deadwood'", (dataset,)
+	).fetchone() == (1,)
+
+
+def test_gradings_that_differ_are_reported_and_the_later_one_counts_when_accepted(db, tmp_path):
+	grader = create_user(db, can_audit=True)
+	dataset, plan = gold_entry_twice(db, tmp_path, later_answers={'v_forest': 'minor', 'm5_fc_trees_missed': True})
+	found = audit_import.conflicts(plan)
+	assert [(c['dataset_id'], c['layer']) for c in found] == [(dataset, 'forest_cover')]
+	assert found[0]['answers'][f'gold-{dataset}']['verdict'] == 'ok'
+	assert found[0]['answers'][f'gold-{dataset}-2']['verdict'] == 'minor'
+	audit_import.import_gold(db, plan, str(grader))
+	assert db.execute(
+		"SELECT verdict::text FROM audit.latest_assessments WHERE dataset_id=%s AND layer='forest_cover'", (dataset,)
+	).fetchall() == [('minor',)]
+	assert db.execute(
+		"SELECT count(*) FROM audit.assessments WHERE dataset_id=%s AND layer='forest_cover'", (dataset,)
+	).fetchone() == (2,)
+
+
+def test_a_crop_already_stored_with_that_footprint_is_reused(db, tmp_path):
+	grader = create_user(db, can_audit=True)
+	dataset, plan = gold_entry_twice(db, tmp_path)
+	stored = db.execute(
+		'INSERT INTO audit.crops(dataset_id,ortho_sha256,crop_sets,geometry,mpp,size_px,selection) '
+		'VALUES (%s,%s,\'{evaluation}\',ST_SetSRID(ST_GeomFromGeoJSON(%s),4326),0.05,1024,\'{"evaluation": {"picker": "eval-v1"}}\') RETURNING id',
+		(dataset, SHA, json.dumps(plan[0]['footprint'])),
+	).fetchone()[0]
+	audit_import.import_gold(db, plan, str(grader))
+	row = db.execute(
+		'SELECT id,crop_sets,selection ? %s,selection ? %s FROM audit.crops WHERE dataset_id=%s',
+		('evaluation', 'benchmark', dataset),
+	).fetchall()
+	assert (
+		len(row) == 1
+		and row[0][0] == stored
+		and sorted(row[0][1]) == ['benchmark', 'evaluation']
+		and row[0][2:] == (True, True)
+	)
+
+
+def test_the_images_of_a_window_graded_twice_are_copied_once(db, tmp_path):
+	dataset, plan = gold_entry_twice(db, tmp_path)
+	target = tmp_path / 'storage'
+	audit_import.copy_images(plan, str(target))
+	stored = sorted(p.parent.name for p in (target / 'audit/benchmarks/pq-gold-dt1272').rglob('raw.jpg'))
+	assert stored == [f'gold-{dataset}']
+
+
 def test_test_crops_take_footprint_and_ortho_from_the_cog_when_the_pixels_match(db, tmp_path):
 	import numpy as np
 	import rasterio

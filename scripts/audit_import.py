@@ -392,6 +392,7 @@ def plan_gold(conn, root: Path, manifest: list[dict], labels: dict[str, dict]) -
 					'gold_id': crop_id,
 					'dataset_id': crop['dataset_id'],
 					'ortho_sha256': entry['ortho_sha256'],
+					'crop_key': crop_key(conn, crop['dataset_id'], entry),
 					'footprint': entry['footprint'],
 					'mpp': entry['mpp'],
 					'size_px': entry['size_px'],
@@ -409,6 +410,41 @@ def plan_gold(conn, root: Path, manifest: list[dict], labels: dict[str, dict]) -
 				}
 			)
 	return plan, problems
+
+
+def crop_key(conn, dataset_id: int, entry: dict) -> tuple:
+	"""What makes an off-grid crop one row: the expression of the crops_off_grid_idx index."""
+	digest = conn.execute(
+		'SELECT md5(ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326)::geometry(Polygon, 4326)::text)',
+		(json.dumps(entry['footprint']),),
+	).fetchone()[0]
+	return dataset_id, entry['ortho_sha256'], digest
+
+
+def crop_groups(plan: list[dict]) -> dict[tuple, list[dict]]:
+	"""Graded entries per distinct crop, oldest grading first."""
+	groups: dict[tuple, list[dict]] = {}
+	for item in sorted(plan, key=lambda i: (i['label']['graded_at'], i['gold_id'])):
+		groups.setdefault(item['crop_key'], []).append(item)
+	return groups
+
+
+def conflicts(plan: list[dict]) -> list[dict]:
+	"""Layers on which the gradings of one crop differ. Nobody picks among them silently."""
+	found = []
+	for items in crop_groups(plan).values():
+		answers: dict[str, dict] = {}
+		for item in items:
+			for row in person_rows(item['label']['answers'], item['label_ids']):
+				answers.setdefault(row['layer'], {})[item['gold_id']] = {
+					'verdict': row['verdict'],
+					'modes': sorted(row['modes']),
+					'graded_at': item['label']['graded_at'],
+				}
+		for layer, by_id in answers.items():
+			if len({(a['verdict'], tuple(a['modes'])) for a in by_id.values()}) > 1:
+				found.append({'dataset_id': items[0]['dataset_id'], 'layer': layer, 'answers': by_id})
+	return found
 
 
 def derived_labels(conn, dataset_id: int, graded_at: str) -> dict:
@@ -461,10 +497,14 @@ def summarize_gold(plan: list[dict], problems: list[str]) -> dict:
 		for item in plan
 		for r in person_rows(item['label']['answers'], item['label_ids'])
 	)
+	groups = crop_groups(plan)
 	return {
-		'crops': len(plan),
+		'graded_entries': len(plan),
+		'crops': len(groups),
 		'datasets': len({i['dataset_id'] for i in plan}),
-		'splits': dict(Counter(i['split'] for i in plan)),
+		'splits': dict(Counter(items[0]['split'] for items in groups.values())),
+		'same_crop_graded_twice': [[i['gold_id'] for i in items] for items in groups.values() if len(items) > 1],
+		'conflicts': conflicts(plan),
 		'labels_derived_from_time': sum(i['labels_derived'] for i in plan),
 		'person_rows': dict(sorted(rows.items())),
 		'skipped': len(problems),
@@ -481,38 +521,11 @@ def import_gold(conn, plan: list[dict], assessor: str) -> int:
 		"VALUES ('prediction_quality', %s, %s, %s, %s) RETURNING id",
 		(*BENCHMARK, 'Crops graded on the DT-1272 labeling page (tune/holdout frozen by dataset)', assessor),
 	).fetchone()[0]
-	for item in plan:
-		crop = conn.execute(
-			'INSERT INTO audit.crops (dataset_id, ortho_sha256, crop_sets, geometry, mpp, size_px, selection) '
-			"VALUES (%s, %s, '{benchmark}', ST_GeomFromGeoJSON(%s), %s, %s, %s) RETURNING id",
-			(
-				item['dataset_id'],
-				item['ortho_sha256'],
-				json.dumps(item['footprint']),
-				item['mpp'],
-				item['size_px'],
-				json.dumps({'benchmark': {**item['selection'], 'gold_id': item['gold_id']}}),
-			),
-		).fetchone()[0]
-		for image in image_rows(item):
-			conn.execute(
-				'INSERT INTO audit.images (dataset_id, ortho_sha256, crop_id, label_id, kind, storage_path, content_type, '
-				'width, height, mpp, bytes, sha256) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
-				(
-					item['dataset_id'],
-					item['ortho_sha256'],
-					crop,
-					image['label_id'],
-					image['kind'],
-					image['storage_path'],
-					image['content_type'],
-					image['width'],
-					image['height'],
-					item['mpp'],
-					image['bytes'],
-					image['sha256'],
-				),
-			)
+	crops: dict[tuple, int] = {}
+	for item in sorted(plan, key=lambda i: (i['label']['graded_at'], i['gold_id'])):
+		crop = crops.get(item['crop_key'])
+		if crop is None:
+			crop = crops[item['crop_key']] = store_crop(conn, item, benchmark)
 		label = item['label']
 		for row in person_rows(label['answers'], item['label_ids']):
 			details = {
@@ -540,12 +553,63 @@ def import_gold(conn, plan: list[dict], assessor: str) -> int:
 					label['graded_at'],
 				),
 			)
-		conn.execute(
-			'INSERT INTO audit.benchmark_members (benchmark_id, dataset_id, crop_id, split) VALUES (%s, %s, %s, %s)',
-			(benchmark, item['dataset_id'], crop, item['split']),
-		)
 	conn.execute('UPDATE audit.benchmarks SET frozen_at = now() WHERE id = %s', (benchmark,))
 	return benchmark
+
+
+def store_crop(conn, item: dict, benchmark: int) -> int:
+	"""The crop row, reused when this footprint is already stored, with its images and benchmark membership."""
+	selection = {'benchmark': {**item['selection'], 'gold_id': item['gold_id']}}
+	existing = conn.execute(
+		'SELECT id, selection FROM audit.crops WHERE dataset_id = %s AND ortho_sha256 = %s AND pixel_x0 IS NULL '
+		'AND md5(geometry::text) = %s',
+		item['crop_key'],
+	).fetchone()
+	if existing:
+		crop = existing[0]
+		conn.execute(
+			"UPDATE audit.crops SET crop_sets = (SELECT array_agg(DISTINCT s) FROM unnest(crop_sets || '{benchmark}') s), "
+			'selection = %s WHERE id = %s',
+			(json.dumps({**selection, **existing[1]}), crop),
+		)
+	else:
+		crop = conn.execute(
+			'INSERT INTO audit.crops (dataset_id, ortho_sha256, crop_sets, geometry, mpp, size_px, selection) '
+			"VALUES (%s, %s, '{benchmark}', ST_GeomFromGeoJSON(%s), %s, %s, %s) RETURNING id",
+			(
+				item['dataset_id'],
+				item['ortho_sha256'],
+				json.dumps(item['footprint']),
+				item['mpp'],
+				item['size_px'],
+				json.dumps(selection),
+			),
+		).fetchone()[0]
+	for image in image_rows(item):
+		conn.execute(
+			'INSERT INTO audit.images (dataset_id, ortho_sha256, crop_id, label_id, kind, storage_path, content_type, '
+			'width, height, mpp, bytes, sha256) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) '
+			'ON CONFLICT DO NOTHING',
+			(
+				item['dataset_id'],
+				item['ortho_sha256'],
+				crop,
+				image['label_id'],
+				image['kind'],
+				image['storage_path'],
+				image['content_type'],
+				image['width'],
+				image['height'],
+				item['mpp'],
+				image['bytes'],
+				image['sha256'],
+			),
+		)
+	conn.execute(
+		'INSERT INTO audit.benchmark_members (benchmark_id, dataset_id, crop_id, split) VALUES (%s, %s, %s, %s)',
+		(benchmark, item['dataset_id'], crop, item['split']),
+	)
+	return crop
 
 
 def benchmark_exists(conn) -> bool:
@@ -562,7 +626,13 @@ def copy_images(plan: list[dict], target: str, run=subprocess.run) -> None:
 	stops: stored evidence stays exactly what was judged and never gets replaced.
 	target is a local directory or an rsync host:path.
 	"""
-	for item in plan:
+	# the images of a crop graded twice are stored once, under its first grading
+	first = {}
+	for item in sorted(
+		plan, key=lambda i: (i['label']['graded_at'], i['gold_id']) if 'label' in i else ('', i['gold_id'])
+	):
+		first.setdefault(item.get('crop_key', item['gold_id']), item)
+	for item in first.values():
 		for image in image_rows(item):
 			if ':' in target.split('/', 1)[0]:
 				copy_remote(image, f'{target.rstrip("/")}/{image["storage_path"]}', run)
@@ -615,6 +685,11 @@ def main(argv: list[str] | None = None) -> int:
 	gold.add_argument('--labels', type=Path, help='defaults to <root>/gold-labels.sqlite3')
 	gold.add_argument('--assessor-user-id', required=True, help='the person who graded the crops')
 	gold.add_argument('--image-target', help='rsync destination of the storage data directory, required with --execute')
+	gold.add_argument(
+		'--accept-later-answers',
+		action='store_true',
+		help='import crops whose gradings differ: every answer is stored and the later one counts',
+	)
 	args = parser.parse_args(argv)
 
 	if getattr(args, 'execute', False):
@@ -639,6 +714,11 @@ def main(argv: list[str] | None = None) -> int:
 			labels = load_labels(args.labels or args.root / 'gold-labels.sqlite3')
 			plan, problems = plan_gold(conn, args.root, manifest, labels)
 			report = summarize_gold(plan, problems)
+			if report['conflicts'] and not args.accept_later_answers:
+				conn.rollback()
+				print(json.dumps(report, indent=1, default=str))
+				print('Gradings of the same crop differ (see conflicts); nothing imported.', file=sys.stderr)
+				return 3
 			if writing:
 				if benchmark_exists(conn):
 					raise SystemExit(f'benchmark {BENCHMARK[0]} {BENCHMARK[1]} already exists; nothing copied')
