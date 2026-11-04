@@ -208,7 +208,7 @@ def _with_budgeted_ortho_resolution(
 	Runs between the two ODM passes, when the reconstruction already shows the mission's
 	extent. Missions that fit are left unchanged; otherwise also returns the note for the
 	dataset's additional information. A mission too large to texture fails here instead of
-	hours later in the orthophoto pass.
+	about an hour later in the orthophoto pass.
 	"""
 	raw_reconstruction = read_file_from_shared_volume(volume_name, f'{project_name}/{RECONSTRUCTION_FILE}', dataset_id)
 	reconstructions = json.loads(raw_reconstruction) if raw_reconstruction else []
