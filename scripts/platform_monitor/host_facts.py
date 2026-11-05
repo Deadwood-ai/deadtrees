@@ -49,9 +49,13 @@ DEPLOY_NORMAL_RE = re.compile(r'already holds processor-runtime\.lock|keeping th
 DEPLOY_ERROR_RE = re.compile(r'refus|error|fatal|traceback', re.IGNORECASE)
 LIVENESS_SQL = """
 select q.claimed_by, q.id, q.dataset_id,
-	round((extract(epoch from now() - (select max(created_at) from v2_logs l where l.dataset_id = q.dataset_id)) / 3600)::numeric, 1)
+	round((extract(epoch from now() - (select max(created_at) from v2_logs l where l.dataset_id = q.dataset_id)) / 3600)::numeric, 1),
+	(select s.current_status from v2_statuses s where s.dataset_id = q.dataset_id)
 from v2_queue q where q.is_processing order by q.claimed_by, q.claimed_at
 """
+GITHUB_REPO = 'Deadwood-ai/deadtrees'
+# Main's jobs that change production; a red one is a finding at once.
+MAIN_JOBS = {'migrate': 'supabase-migrate-on-merge.yml', 'frontend deploy': 'frontend-hosting-merge.yml'}
 
 
 def run(args: list[str], timeout: int = 30, cwd: Path | None = None) -> tuple[int, str]:
@@ -192,9 +196,29 @@ def workers() -> tuple[list[dict[str, Any]] | None, str | None]:
 			'last_log_age_h': None if age is None else float(age),
 			'silent': age is not None and float(age) > SILENT_HOURS,
 			'odm_running': dataset in local_odm if local_odm is not None and WORKER_NAMES.get(host) == LOCAL_WORKER else None,
+			'step': step,
 		}
-		for host, task, dataset, age in rows
+		for host, task, dataset, age, step in rows
 	], None
+
+
+def main_ci() -> dict[str, dict[str, Any]] | None:
+	"""The newest finished run of each production job on main, or None when any
+	could not be read. A job that never ran maps to an empty dict."""
+	jobs: dict[str, dict[str, Any]] = {}
+	for job, workflow in MAIN_JOBS.items():
+		code, out = run([
+			'gh', 'run', 'list', '--repo', GITHUB_REPO, '--workflow', workflow, '--branch', 'main',
+			'--status', 'completed', '--limit', '1', '--json', 'conclusion,headSha,url',
+		])
+		if code != 0:
+			return None
+		try:
+			runs = json.loads(out)
+		except ValueError:
+			return None
+		jobs[job] = runs[0] if runs else {}
+	return jobs
 
 
 def audit_worker(path: Path = AUDIT_WORKER_STATUS) -> dict[str, Any] | None:
@@ -224,6 +248,7 @@ def collect(now: datetime | None = None, last_tick: datetime | None = None) -> d
 		'origin_main': origin_main(),
 		'main_history': main_history(),
 		'deploy': deploy_health(now),
+		'main_ci': main_ci(),
 		'prod_oom_kills': prod_oom_kills(oom_since(now, last_tick)),
 		'gpu': gpu(),
 		'workers': worker_rows,

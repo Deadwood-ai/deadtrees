@@ -167,8 +167,8 @@ visible.
 
 A systemd user timer on the processing server runs
 `scripts/platform_monitor/monitor_tick.py` on a Europe/Berlin schedule: every
-30 minutes in working hours (06:00-18:00, at `:07` and `:37`) and every two
-hours at `:07` otherwise. Linear is the source of truth for platform state. The
+15 minutes in working hours (06:00-18:00, at `:07`, `:22`, `:37` and `:52`) and
+every two hours at `:07` otherwise. Linear is the source of truth for platform state. The
 monitor records findings and tells the coordinator about changes; it never
 fixes anything. The unit templates and the host wrapper are in
 `scripts/platform_monitor/systemd/`.
@@ -211,6 +211,27 @@ Each tick:
    something changed or failed (a filed or cleared finding, an inbox item for
    Janusch, a new coverage gap, a failed tick), it also writes the digest as a
    note to `outbox/`.
+6. Rebuilds the Platform board in `scripts/platform_monitor/platform_board.py`
+   and writes it to `~/.local/state/deadtrees-monitor/platform-board.md`. The
+   eight rows are always shown: data2, processing server, helicon, deepl1,
+   backups, website, deploys and app errors. A row takes the worst confirmed
+   finding observed this tick. A source that could not be read is ⚪, never 🟢,
+   and its earlier findings count as unknown, not cleared. Main's newest
+   `supabase-migrate-on-merge.yml` and `frontend-hosting-merge.yml` runs are read
+   with `gh`; a failed one is a red finding at once.
+
+The board is sent, inside the tick's outbox note, when a row changes colour or
+issue link, a row is red on two ticks, or on the first tick after 06:00 Berlin.
+Counts moving inside a colour stay quiet, and a row going ⚪ waits for a second
+unread tick because SSH banner timeouts flap. A row newly red on two ticks and a
+failed job on main also get a `- [finding]` line above the board, which the
+coordinator turns into one read-only thread per Linear issue.
+
+App errors are coloured by script from the inbox call's proven PostHog read: 🟡
+for 24 hours after a new or spiking error, ⚪ when PostHog was not read. The
+board's headline carries the changed time and the factory counts. The north star
+and the risk counts are not on it: the analyst role cannot run
+`factory_north_star`, and the coordinator keeps both.
 
 The model calls use the processing server's own Claude login
 (`~/.claude/.credentials.json`). When it expires, the journal shows `OAuth session
@@ -220,12 +241,18 @@ Only Janusch can sign in again (`claude` on the host); the next tick then
 catches up, because the inbox window and the baseline advance only after
 success.
 
-A relay session in the Deadtrees project, running on the processing server,
-waits for notes in `~/.local/state/deadtrees-monitor/outbox/` (for example a
-background shell loop that ends when a `*.md` file appears, re-armed every two
-hours). It forwards each note, oldest first, with `send_message` to `@parent`,
-which always reaches the current coordinator, then deletes it. A quiet tick
-writes no note, so the relay wakes only for changes.
+The Platform board thread in the Deadtrees project, running on the processing
+server, waits with `scripts/platform_monitor/board_wait.py wait` from the monitor
+checkout as a background command. It costs no tokens and exits with one JSON line
+when a note waits in `~/.local/state/deadtrees-monitor/outbox/` or the two-hour
+reconcile is due. The thread forwards each note, oldest first, with `send_message`
+to `@parent`, which always reaches the current coordinator, then deletes it. When
+`reconcile_due` is true it compares the overview's other sections with
+`list_threads`, sends the changed lines or nothing, and runs `board_wait.py
+reconciled`. A quiet tick writes no note. A tick cannot report its own stall, so
+the wait leaves a note once per stalled tick when the last tick is older than 45
+minutes by day or 150 minutes at night. If the thread itself is down, nothing
+detects it yet (DT-1475).
 
 A model result counts only when the session's own tool calls prove the reads
 or writes; a call that stops early gets up to four attempts in total (efforts

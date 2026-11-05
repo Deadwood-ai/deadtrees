@@ -46,8 +46,8 @@ def keys(items):
 
 def test_healthy_platform_has_no_findings_or_gaps():
 	facts = {
-		'origin_main': 'abc', 'deploy': {'paused': False}, 'prod_oom_kills': [], 'gpu': {'ok': True}, 'workers': [],
-		'frontend': {'https://deadtrees.earth/': 200},
+		'origin_main': 'abc', 'deploy': {'paused': False}, 'main_ci': {'migrate': {'conclusion': 'success'}},
+		'prod_oom_kills': [], 'gpu': {'ok': True}, 'workers': [], 'frontend': {'https://deadtrees.earth/': 200},
 	}
 	assert findings.build_findings(snapshot(processing=running()), facts, NOON) == ([], [], [])
 
@@ -188,6 +188,7 @@ def test_unchecked_local_surfaces_are_gaps_never_green():
 	_, gaps, unobserved = findings.build_findings(snapshot(), {'workers_error': 'OperationalError'}, NOON)
 	assert gaps == [
 		'deploy health: not checked',
+		'main CI: not checked',
 		'processing-server OOM kills: not checked',
 		'processing-server GPU: not checked',
 		'worker liveness: OperationalError',
@@ -585,6 +586,60 @@ def test_a_quiet_tick_leaves_no_note(tmp_path, monkeypatch):
 	args = monitor_tick.parse_args(['--state-dir', str(tmp_path), '--zuliprc', str(tmp_path / 'missing')])
 	assert monitor_tick.tick(args, NOON.replace(minute=30), tmp_path) == 0
 	assert list((tmp_path / 'outbox').glob('*.md')) == []
+
+
+def test_the_first_tick_writes_the_board_and_sends_it_in_the_note(tmp_path, monkeypatch):
+	_, state = run_tick(tmp_path, monkeypatch)
+	board = (tmp_path / 'platform-board.md').read_text()
+	assert board.startswith('**Platform** · changed 12:00 UTC · ')
+	# The finding of this run colours data2 and carries the issue filed in the same tick.
+	assert '🔴 data2 · ' in board and 'issue/DT-7' in board
+	# Sources the test did not read are white, never green.
+	assert '⚪ helicon · ' in board and '🟢 helicon' not in board
+	note = next((tmp_path / 'outbox').glob('*.md')).read_text()
+	assert 'new red: a failed' in note
+	assert 'Board sent because: first board' in note
+	assert note.endswith(board)
+	assert state['board']['sent']['data2']['state'] == '🔴'
+
+
+def test_a_board_change_alone_leaves_a_note_with_no_digest_lines(tmp_path, monkeypatch):
+	run_tick(tmp_path, monkeypatch)
+	(tmp_path / 'outbox' / '20261013T120000Z.md').unlink()
+	clean = ([], 'linear=0 gmail=0 posthog=0 project=13440', True, True, 0.0)
+	monkeypatch.setattr(monitor_tick, 'read_inbox', lambda *args: clean)
+	yellow = findings.finding('yellow', 'deepl1', 'disk:/', 'deepl1 is 87% full')
+	monkeypatch.setattr(monitor_tick.findings_module, 'build_findings', lambda *args: ([red('a'), yellow], [], []))
+	monkeypatch.setattr(monitor_tick, 'file_findings', lambda *args: (True, '[filed] ok', {yellow['fingerprint']: 'DT-8'}, set(), 0.0))
+	args = monitor_tick.parse_args(['--state-dir', str(tmp_path), '--zuliprc', str(tmp_path / 'missing')])
+	assert monitor_tick.tick(args, NOON.replace(minute=15), tmp_path) == 0
+	note = next((tmp_path / 'outbox').glob('*.md')).read_text()
+	assert 'Board sent because: deepl1 ⚪ to 🟡' in note
+	assert '🟡 deepl1 · ' in note and 'issue/DT-8' in note
+
+
+def test_a_failed_main_job_is_marked_as_a_finding_in_the_note(tmp_path, monkeypatch):
+	run_tick(tmp_path, monkeypatch)
+	(tmp_path / 'outbox' / '20261013T120000Z.md').unlink()
+	clean = ([], 'linear=0 gmail=0 posthog=0 project=13440', True, True, 0.0)
+	monkeypatch.setattr(monitor_tick, 'read_inbox', lambda *args: clean)
+	job = findings.finding('red', 'deploy', 'ci:migrate', 'main migrate job failure at abc1234: https://example.org/1')
+	monkeypatch.setattr(monitor_tick.findings_module, 'build_findings', lambda *args: ([red('a'), job], [], []))
+	monkeypatch.setattr(monitor_tick, 'file_findings', lambda *args: (True, '[filed] ok', {job['fingerprint']: 'DT-8'}, set(), 0.0))
+	args = monitor_tick.parse_args(['--state-dir', str(tmp_path), '--zuliprc', str(tmp_path / 'missing')])
+	assert monitor_tick.tick(args, NOON.replace(minute=15), tmp_path) == 0
+	note = next((tmp_path / 'outbox').glob('*.md')).read_text()
+	assert '- [finding] deploys: main migrate job failure at abc1234' in note and 'issue/DT-8' in note
+
+
+def test_a_board_that_cannot_be_built_is_a_gap_and_the_tick_goes_on(tmp_path, monkeypatch):
+	def boom(*args):
+		raise ValueError('bad row')
+	monkeypatch.setattr(monitor_tick.platform_board, 'build_rows', boom)
+	_, state = run_tick(tmp_path, monkeypatch)
+	assert state['board'] == {}
+	assert '[gap] board not built: ValueError' in (tmp_path / 'digest-latest.md').read_text()
+	assert not (tmp_path / 'platform-board.md').exists()
 
 
 def test_a_failed_tick_leaves_a_note(tmp_path, monkeypatch):

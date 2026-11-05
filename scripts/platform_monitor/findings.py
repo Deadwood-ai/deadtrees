@@ -31,6 +31,7 @@ RELEASE_LAG_HOURS = DRAIN_MAX_AGE_HOURS
 # Flaky surfaces (SSH banner timeouts, one slow page) count only after this
 # many runs in a row, and clear only after as many quiet runs.
 CONFIRM_RUNS = 2
+CI_FAILED = ('failure', 'timed_out', 'startup_failure')
 # Findings that come from a host's own status probe; unobserved while it fails.
 HOST_KEYS = ('disk:*', 'processor', 'restarts', 'oom-killed', 'release', 'api-*', 'cron:*', 'age:*')
 
@@ -191,6 +192,18 @@ def deploy_findings(deploy: dict[str, Any]) -> tuple[list[dict[str, Any]], list[
 	return found, [], []
 
 
+def main_ci_findings(jobs: dict[str, Any] | None) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+	"""Main's migrate or deploy job going red acts at once, without a second run."""
+	if jobs is None:
+		return [], ['main CI: not checked'], ['dt-status/deploy/ci:*']
+	found = []
+	for job, run in sorted(jobs.items()):
+		if (run or {}).get('conclusion') in CI_FAILED:
+			key = job.replace(' ', '-')
+			found.append(finding('red', 'deploy', f'ci:{key}', f"main {job} job {run['conclusion']} at {str(run.get('headSha'))[:7]}: {run.get('url')}"))
+	return found, [], []
+
+
 def local_findings(facts: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str], list[str]]:
 	found: list[dict[str, Any]] = []
 	gaps: list[str] = []
@@ -256,11 +269,12 @@ def build_findings(
 	"""Findings, coverage gaps and the fingerprint patterns not observed."""
 	found, gaps, unobserved = platform_findings(snapshot, now, facts.get('origin_main'), facts.get('main_history'))
 	deploy, deploy_gaps, deploy_unobserved = deploy_findings(facts.get('deploy') or {})
+	ci, ci_gaps, ci_unobserved = main_ci_findings(facts.get('main_ci'))
 	local, local_gaps, local_unobserved = local_findings(facts)
 	local += audit_worker_findings(facts.get('audit_worker'), now)
-	unique = {item['fingerprint']: item for item in found + deploy + local}
+	unique = {item['fingerprint']: item for item in found + deploy + ci + local}
 	ordered = sorted(unique.values(), key=lambda item: (item['severity'] != 'red', item['fingerprint']))
-	return ordered, gaps + deploy_gaps + local_gaps, unobserved + deploy_unobserved + local_unobserved
+	return ordered, gaps + deploy_gaps + ci_gaps + local_gaps, unobserved + deploy_unobserved + ci_unobserved + local_unobserved
 
 
 def verdict(findings: list[dict[str, Any]]) -> str:

@@ -11,6 +11,8 @@ on the processing server; see docs/playbooks/operator-chat.md).
 3. A model call files the platform delta and new PostHog errors in Linear. The
    baseline advances only after filing succeeded, so a failed tick retries.
 4. The digest is written to the state folder (latest copy plus two days).
+5. `platform_board.py` rebuilds the fixed rows into `platform-board.md`. A tick
+   that has a digest line or a reason to send the board leaves one outbox note.
 
 The model never decides what counts as a finding, and a model receipt counts
 only when the session's own tool calls prove the reads or writes.
@@ -42,12 +44,14 @@ sys.path.insert(0, str(HERE))
 
 import findings as findings_module  # noqa: E402
 import host_facts  # noqa: E402
+import platform_board  # noqa: E402
 
 DEFAULT_STATE_DIR = Path.home() / '.local/state/deadtrees-monitor'
 DEFAULT_ZULIPRC = Path.home() / '.config/deadtrees/zuliprc'
 DEFAULT_ZULIP_STREAM = 'project_deadtree.earth'
 TICK_STATE = 'monitor.json'
 TICK_LOG = 'ticks.jsonl'
+BOARD_FILE = 'platform-board.md'
 # A relay session forwards each note here to the project coordinator and
 # deletes it; the tick writes one only when something changed or failed.
 OUTBOX = 'outbox'
@@ -718,6 +722,25 @@ def post_outbox(state_dir: Path, now: datetime, text: str) -> None:
 	write_atomic(outbox / f"{now.strftime('%Y%m%dT%H%M%SZ')}.md", text)
 
 
+def board_update(
+	previous: dict[str, Any], snapshot: dict[str, Any], facts: dict[str, Any], scorecard: dict[str, Any],
+	active: dict[str, Any], unobserved: list[str], known: dict[str, str], posthog_ok: bool, error_ids: list[str],
+	new_findings: list[dict[str, Any]], now: datetime,
+) -> tuple[str, str, dict[str, Any]]:
+	"""The board, the note section when it goes out (empty otherwise) and the next board state."""
+	recent = platform_board.recent_errors(previous.get('posthog_recent'), error_ids, now)
+	posthog = {'read': posthog_ok, 'recent': recent, 'issue': known.get(f'dt-status/posthog/{posthog_week(now)}')}
+	rows = platform_board.build_rows(snapshot, facts, active, unobserved, known, posthog)
+	reasons, found, next_board = platform_board.wake(previous, rows, now)
+	markdown = platform_board.render(rows, next_board.get('changed_at'), scorecard)
+	ci_items = [item for item in new_findings if platform_board.CI_MARK in str(item.get('fingerprint'))]
+	lines = platform_board.finding_lines(found, ci_items, known)
+	if ci_items:
+		reasons.append('main job red')
+	section = '\n'.join([f"Board sent because: {'; '.join(reasons)}", *lines, '', markdown]) if reasons else ''
+	return markdown, section, {**next_board, 'posthog_recent': recent}
+
+
 def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 	tick_file = args.state_dir / TICK_STATE
 	state = load_json(tick_file)
@@ -748,6 +771,7 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 	cost += inbox_cost
 	seen_posthog: dict[str, int] = dict(state.get('posthog_seen') or {})
 	posthog, next_posthog = posthog_delta(posthog_items(items), seen_posthog) if posthog_ok else ({}, seen_posthog)
+	error_ids = [item['fingerprint'].rsplit(':', 1)[-1] for group in posthog.values() for item in group]
 	posthog = posthog_weekly(posthog, now)
 	items = [item for item in items if not item.startswith('- [posthog]')]
 	filing = {
@@ -779,6 +803,17 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 	if not args.dry_run and shadow_due(args, now):
 		cost += run_shadow(prompt, since, args, workdir, now, {'items': items, 'checked': checked, 'ok': inbox_ok})
 
+	# Colours follow the confirmed findings, whether or not filing them worked.
+	next_board = state.get('board') or {}
+	board_text, board_section = '', ''
+	try:
+		board_text, board_section, next_board = board_update(
+			next_board, snapshot, facts, scorecard, next_baseline.get('active') or {}, unobserved, known, posthog_ok,
+			error_ids, delta.get('new', []), now,
+		)
+	except Exception as exc:  # noqa: BLE001 - Linear may already be changed, so the tick goes on
+		digest.append(f'- [gap] board not built: {type(exc).__name__}: {clip(exc)}')
+
 	digest = platform_lines(filing, known) + [f'- [gap] {gap}' for gap in gaps] + digest + items
 	if not zulip_ok:
 		digest.append(f'- [gap] {zulip_state}')
@@ -795,15 +830,17 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 	)
 	header, body = redact(header), redact('\n'.join(digest) or 'no changes')
 	write_atomic(args.state_dir / ('digest-dry-run.md' if args.dry_run else 'digest-latest.md'), f'{header}\n\n{body}\n')
-	print(f'{header}\n\n{body}')
+	print(f'{header}\n\n{body}\n\n{board_text}')
 	print(f'\n(model cost ${cost:.4f})', file=sys.stderr)
 	if args.dry_run:
 		return 0
 
 	if digest:
 		keep_digest(args.state_dir, now, f'{header}\n\n{body}\n')
+	if board_text:
+		write_best_effort(args.state_dir / BOARD_FILE, board_text)
 	append_best_effort(args.state_dir / TICK_LOG, {
-		'at': iso(now), 'model': args.model, 'outbox': bool(digest),
+		'at': iso(now), 'model': args.model, 'outbox': bool(digest or board_section),
 		'verdict': findings_module.verdict(current), 'checked': checked,
 		'inbox_ok': inbox_ok, 'posthog_ok': posthog_ok, 'filed': sorted(filing), 'cost_usd': round(cost, 4),
 	})
@@ -815,13 +852,15 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 		'issues': known,
 		'posthog_seen': seen_posthog,
 		'gaps': quiet_gaps,
+		'board': next_board,
 		'cost_usd': round(cost, 4),
 	}, indent=2) + '\n')
 	# Only after the state is saved: a failed note must never make the next
 	# tick repeat Linear writes that already happened.
-	if digest:
+	if digest or board_section:
+		note = f'{header}\n\n' + (f'{body}\n\n' if digest else '') + (redact(board_section) if board_section else '')
 		try:
-			post_outbox(args.state_dir, now, f'{header}\n\n{body}\n')
+			post_outbox(args.state_dir, now, note.rstrip('\n') + '\n')
 		except OSError as exc:
 			print(f'outbox note not written: {type(exc).__name__}', file=sys.stderr)
 			return 1
