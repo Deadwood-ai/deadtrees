@@ -29,6 +29,14 @@ folders are intentionally retired.
 13. For manual QA runs, use `.agents/skills/run-deadtrees-qa/SKILL.md`.
 14. For security-audit findings, Dependabot alerts or accepting a risk, use
     `docs/playbooks/security-audit.md`.
+15. For the unattended monitor and its data coverage, use
+    `docs/playbooks/operator-chat.md` and `docs/playbooks/operator-data-coverage.md`.
+16. For backups and restores, use `docs/playbooks/database-backups.md`.
+17. For upload retries, prepackaged dataset releases and the storage nginx rollout,
+    use `docs/playbooks/upload-retry-contract.md`,
+    `docs/playbooks/prepackaged-dataset-release-deploy.md` and
+    `docs/playbooks/storage-nginx-http2-rollout.md`.
+
     Repository skills live in `.agents/skills/`; `.claude/skills/` links to the
     same folders so Claude Code discovers them. Add new skills under
     `.agents/skills/` and link them from `.claude/skills/`.
