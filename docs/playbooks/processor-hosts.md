@@ -165,12 +165,25 @@ A host is current when `HEAD`, `processor-activated-sha` and `origin/main` are
 the same SHA, there is no pause file, and the log's last line is `No changes`.
 On `helicon`, also check that `/opt/deadtrees_prod/processor.paused` is absent.
 
+From a thread on the processing server, the monitor's last snapshot gives the
+release of each processor without opening a production checkout. It is as old as
+the last monitor tick (30 minutes to 2 hours), so it does not prove a deploy that
+happened minutes ago:
+
+```bash
+rg -o 'release activated=[0-9a-f]+ head=[0-9a-f]+' ~/dev/deadtrees/.local/operator/latest.md
+```
+
 The API runs on the storage host, not on these processor hosts. To confirm an API
 deploy from the processing server, run `ssh dt-storage-status`. Its key is
 limited to one status script: it prints the deployed API commit, the API container
 state, disk usage and which cleanup crons are installed, and it refuses any other
 command. The other read-only routes to that host, and what none of them reach,
 are in [`platform-status-check.md`](platform-status-check.md#storage-and-api-host).
+
+File uploads from the processing server to the storage host use the SSH alias
+`dt-storage-upload` (account `dendro`, key `~/.ssh/processing-to-storage`). This
+login can write to production, so each use needs the user's approval.
 
 ## When A Host Stops Deploying
 
