@@ -367,6 +367,7 @@ export default function Dataset() {
       className="relative h-full w-full overflow-hidden bg-slate-50"
       data-testid="dataset-archive-page"
     >
+      <h1 className="sr-only">Drone orthophoto archive of forests worldwide</h1>
       {/* Floating Sidebar */}
       <div
         className={`absolute left-4 top-24 bottom-6 z-10 hidden md:flex transition-all duration-300 ${

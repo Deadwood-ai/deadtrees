@@ -11,6 +11,7 @@ import {
 import { useState, useCallback, useEffect } from "react";
 
 import type { IDataset } from "../types/dataset";
+import { datasetHeading } from "../seo/datasetMeta";
 import { useDatasetLabels } from "../hooks/useDatasetLabels";
 import { useModelVariantLabels } from "../hooks/useModelVariantLabels";
 import { ILabelData, ILabelSource } from "../types/labels";
@@ -275,6 +276,7 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
       className="relative h-full w-full bg-slate-50 overflow-hidden"
       data-testid="dataset-detail-page"
     >
+      <h1 className="sr-only">{datasetHeading(dataset)}</h1>
       {/* Collapsible Sidebar (Desktop) */}
       <div
         className={`hidden lg:flex absolute left-4 top-24 bottom-6 z-10 flex-col rounded-2xl border border-gray-200/60 bg-white/95 shadow-xl backdrop-blur-sm pointer-events-auto transition-all duration-300 ${

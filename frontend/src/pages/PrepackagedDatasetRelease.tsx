@@ -16,6 +16,8 @@ import { ReleasePreviewStrip } from "../components/Releases/ReleasePreviewStrip"
 import EmptyStatePanel from "../components/EmptyStatePanel";
 import { SectionLoadError, SectionSkeleton } from "../components/SectionStates";
 import { usePrepackagedDatasets } from "../hooks/usePrepackagedDatasets";
+import { SITE_NAME } from "../seo/pageMeta";
+import { usePageMetaOverride } from "../seo/usePageMeta";
 import { getPrepackagedDatasetPreviewTiles } from "../utils/prepackagedDatasetPreviews";
 import {
   formatPrepackagedBytes,
@@ -48,6 +50,16 @@ export default function PrepackagedDatasetRelease() {
   const datasetPackage = useMemo(
     () => data?.find((candidate) => candidate.slug === slug),
     [data, slug],
+  );
+  usePageMetaOverride(
+    datasetPackage
+      ? {
+          title: `${datasetPackage.title} | ${SITE_NAME}`,
+          description: datasetPackage.summary ?? undefined,
+        }
+      : !isLoading && !error
+        ? { noindex: true }
+        : null,
   );
   const latestVersion = datasetPackage
     ? getLatestPrepackagedVersion(datasetPackage)
