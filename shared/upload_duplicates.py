@@ -37,12 +37,18 @@ class DuplicateUploadError(Exception):
 		}
 
 
-def reject_duplicate_upload(file_path: Path, token: str) -> None:
-	"""Raise DuplicateUploadError when a non-archived dataset already holds this file.
+def find_existing_upload(file_path: Path, token: str) -> Optional[dict]:
+	"""Return the non-archived dataset that already holds this file, or None.
 
-	`existing_dataset_id` is None when the caller may not see that dataset.
+	The row's `dataset_id` is None when the caller may not see that dataset.
 	"""
 	with use_client(token) as client:
 		response = client.rpc('find_duplicate_upload', {'p_fingerprint': get_file_identifier(file_path)}).execute()
-	if response.data:
-		raise DuplicateUploadError(response.data[0]['dataset_id'])
+	return response.data[0] if response.data else None
+
+
+def reject_duplicate_upload(file_path: Path, token: str) -> None:
+	"""Raise DuplicateUploadError when a non-archived dataset already holds this file."""
+	existing = find_existing_upload(file_path, token)
+	if existing:
+		raise DuplicateUploadError(existing['dataset_id'])

@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 from typing import Optional, List, Dict, Any, Union
 import time
 import httpx
@@ -25,7 +26,12 @@ from shared.models import (
 )
 from shared.labels import create_label_with_geometries
 from shared.processing_tasks import UPLOAD_TASK_TYPES
-from shared.upload_duplicates import DUPLICATE_UPLOAD_CODE, DuplicateUploadError, reject_duplicate_upload
+from shared.upload_duplicates import (
+	DUPLICATE_UPLOAD_CODE,
+	DuplicateUploadError,
+	find_existing_upload,
+	reject_duplicate_upload,
+)
 from shared.logger import logger
 
 
@@ -55,6 +61,31 @@ class DataCommands:
 				except Exception as e:
 					raise ValueError('Authentication failed')
 		return self._token
+
+	def check_upload(self, *file_paths: str) -> None:
+		"""Report which local files are already on the platform; uploads and deletes nothing.
+
+		Prints one tab-separated line per file: `uploaded`, the dataset ID (`hidden`
+		for a dataset this login may not see) and the path, or `not_uploaded`, `-` and
+		the path. Exits with status 1 when any file is not uploaded.
+
+		A match means the same fingerprint (shared/hash.py: file size, first and last
+		10 MB). It does not prove the whole file is identical or that the dataset
+		processed successfully, so it is not enough on its own to delete a local copy.
+		"""
+		if not file_paths:
+			raise ValueError('Name at least one file')
+		token = self._ensure_auth()
+		all_uploaded = True
+		for file_path in file_paths:
+			existing = find_existing_upload(Path(file_path), token)
+			if existing is None:
+				all_uploaded = False
+				print(f'not_uploaded\t-\t{file_path}')
+			else:
+				print(f'uploaded\t{existing["dataset_id"] or "hidden"}\t{file_path}')
+		if not all_uploaded:
+			sys.exit(1)
 
 	def upload(
 		self,

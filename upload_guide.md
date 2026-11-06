@@ -204,6 +204,26 @@ python upload_your_data.py
 python upload_your_data.py
 ```
 
+## Check What Is Already Uploaded
+
+Ask whether local files are already on the platform. This uploads and deletes nothing:
+
+```bash
+deadtrees data check_upload your_orthos/*.tif
+```
+
+It prints one tab-separated line per file:
+
+```
+uploaded	12345	your_orthos/dataset_001.tif
+uploaded	hidden	your_orthos/dataset_002.tif
+not_uploaded	-	your_orthos/dataset_003.tif
+```
+
+`hidden` means the file is on the platform in a private dataset your login may not see. The command exits with status 1 when any file is not uploaded.
+
+A match means the same file size and the same first and last 10 MB. It does not prove the whole file is identical or that the dataset processed successfully, so don't delete a local copy based on this check alone.
+
 ## Data Requirements
 
 - **Format**: GeoTIFF (`.tif`) with spatial reference

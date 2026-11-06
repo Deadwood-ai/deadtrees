@@ -315,6 +315,40 @@ def test_upload_of_a_file_already_on_the_platform_sends_nothing(data_commands, t
 			client.table(settings.datasets_table).delete().eq('id', first['id']).execute()
 
 
+def test_check_upload_reports_each_file_and_uploads_nothing(data_commands, test_file, tmp_path, monkeypatch, capsys):
+	"""Files on the platform and files that are not get one line each; any missing file means exit 1."""
+	first = data_commands.upload(file_path=str(test_file), authors=['Test Author'])
+	token = data_commands._ensure_auth()
+	not_uploaded = tmp_path / 'not-uploaded.tif'
+	not_uploaded.write_bytes(b'not on the platform')
+	try:
+		monkeypatch.setattr(
+			data_commands, '_chunked_upload', lambda **_kwargs: pytest.fail('check_upload uploaded a file')
+		)
+		capsys.readouterr()
+
+		data_commands.check_upload(str(test_file))
+		assert capsys.readouterr().out == f'uploaded\t{first["id"]}\t{test_file}\n'
+
+		with pytest.raises(SystemExit) as exit_info:
+			data_commands.check_upload(str(test_file), str(not_uploaded))
+		assert exit_info.value.code == 1
+		assert capsys.readouterr().out == (f'uploaded\t{first["id"]}\t{test_file}\nnot_uploaded\t-\t{not_uploaded}\n')
+	finally:
+		with use_client(token) as client:
+			client.table(settings.statuses_table).delete().eq('dataset_id', first['id']).execute()
+			client.table(settings.datasets_table).delete().eq('id', first['id']).execute()
+
+
+def test_check_upload_marks_a_dataset_the_login_may_not_see(data_commands, tmp_path, monkeypatch, capsys):
+	monkeypatch.setattr(data_commands, '_ensure_auth', lambda: 'token')
+	monkeypatch.setattr('deadtrees_cli.data.find_existing_upload', lambda *_args: {'dataset_id': None, 'is_own': False})
+
+	data_commands.check_upload(str(tmp_path / 'private.tif'))
+
+	assert capsys.readouterr().out == f'uploaded\thidden\t{tmp_path / "private.tif"}\n'
+
+
 def test_allow_duplicate_uploads_a_second_copy(data_commands, test_file):
 	"""The explicit override passes both the pre-check and the API's finalisation check."""
 	first = data_commands.upload(file_path=str(test_file), authors=['Test Author'])
