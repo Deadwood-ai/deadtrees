@@ -34,6 +34,10 @@ from shared.upload_duplicates import (
 )
 from shared.logger import logger
 
+# Python exits 1 on an uncaught exception and Fire exits 2 on a usage error, so
+# neither can mean "not uploaded".
+NOT_UPLOADED_EXIT_STATUS = 3
+
 
 def _raise_for_duplicate_upload(response: httpx.Response) -> None:
 	"""The API also rejects duplicates at finalisation, e.g. when another upload finished meanwhile."""
@@ -66,26 +70,38 @@ class DataCommands:
 		"""Report which local files are already on the platform; uploads and deletes nothing.
 
 		Prints one tab-separated line per file: `uploaded`, the dataset ID (`hidden`
-		for a dataset this login may not see) and the path, or `not_uploaded`, `-` and
-		the path. Exits with status 1 when any file is not uploaded.
+		for a dataset this login may not see) and the path; `not_uploaded`, `-` and the
+		path; or `error`, the reason and the path for a file it cannot read.
+
+		Exit status: 0 when every file is uploaded, 3 when all could be checked and any
+		is not uploaded. Anything else means the check failed.
 
 		A match means the same fingerprint (shared/hash.py: file size, first and last
-		10 MB). It does not prove the whole file is identical or that the dataset
-		processed successfully, so it is not enough on its own to delete a local copy.
+		10 MB), in a dataset that may belong to someone else. It does not prove the whole
+		file is identical or that the dataset processed successfully, so it is not enough
+		on its own to delete a local copy.
 		"""
 		if not file_paths:
 			raise ValueError('Name at least one file')
 		token = self._ensure_auth()
-		all_uploaded = True
+		failed = not_uploaded = False
 		for file_path in file_paths:
-			existing = find_existing_upload(Path(file_path), token)
+			try:
+				# Fire turns a file name like 2023 into an int.
+				existing = find_existing_upload(Path(str(file_path)), token)
+			except OSError as error:
+				failed = True
+				print(f'error\t{error.strerror}\t{file_path}')
+				continue
 			if existing is None:
-				all_uploaded = False
+				not_uploaded = True
 				print(f'not_uploaded\t-\t{file_path}')
 			else:
 				print(f'uploaded\t{existing["dataset_id"] or "hidden"}\t{file_path}')
-		if not all_uploaded:
+		if failed:
 			sys.exit(1)
+		if not_uploaded:
+			sys.exit(NOT_UPLOADED_EXIT_STATUS)
 
 	def upload(
 		self,

@@ -1,4 +1,7 @@
+from contextlib import contextmanager
 import shutil
+from unittest.mock import MagicMock
+import fire
 import pytest
 from pathlib import Path
 from shared.db import use_client
@@ -315,6 +318,13 @@ def test_upload_of_a_file_already_on_the_platform_sends_nothing(data_commands, t
 			client.table(settings.datasets_table).delete().eq('id', first['id']).execute()
 
 
+@contextmanager
+def _client_finding_nothing(_token):
+	client = MagicMock()
+	client.rpc.return_value.execute.return_value.data = []
+	yield client
+
+
 def test_check_upload_reports_each_file_and_uploads_nothing(data_commands, test_file, tmp_path, monkeypatch, capsys):
 	"""Files on the platform and files that are not get one line each; any missing file means exit 1."""
 	first = data_commands.upload(file_path=str(test_file), authors=['Test Author'])
@@ -332,7 +342,7 @@ def test_check_upload_reports_each_file_and_uploads_nothing(data_commands, test_
 
 		with pytest.raises(SystemExit) as exit_info:
 			data_commands.check_upload(str(test_file), str(not_uploaded))
-		assert exit_info.value.code == 1
+		assert exit_info.value.code == 3
 		assert capsys.readouterr().out == (f'uploaded\t{first["id"]}\t{test_file}\nnot_uploaded\t-\t{not_uploaded}\n')
 	finally:
 		with use_client(token) as client:
@@ -342,11 +352,37 @@ def test_check_upload_reports_each_file_and_uploads_nothing(data_commands, test_
 
 def test_check_upload_marks_a_dataset_the_login_may_not_see(data_commands, tmp_path, monkeypatch, capsys):
 	monkeypatch.setattr(data_commands, '_ensure_auth', lambda: 'token')
-	monkeypatch.setattr('deadtrees_cli.data.find_existing_upload', lambda *_args: {'dataset_id': None, 'is_own': False})
+	monkeypatch.setattr('deadtrees_cli.data.find_existing_upload', lambda *_args: {'dataset_id': None})
 
 	data_commands.check_upload(str(tmp_path / 'private.tif'))
 
 	assert capsys.readouterr().out == f'uploaded\thidden\t{tmp_path / "private.tif"}\n'
+
+
+def test_check_upload_through_the_command_line_reports_unreadable_files_and_continues(tmp_path, monkeypatch, capsys):
+	"""Runs the Fire entry point, which parses a file name like 2023 as an int."""
+	monkeypatch.setattr(DataCommands, '_ensure_auth', lambda _self: 'token')
+	monkeypatch.chdir(tmp_path)
+	(tmp_path / '2023').write_bytes(b'not on the platform')
+	monkeypatch.setattr('shared.upload_duplicates.use_client', _client_finding_nothing)
+
+	with pytest.raises(SystemExit) as exit_info:
+		fire.Fire(DataCommands, command=['check_upload', 'missing.tif', '2023'])
+
+	assert exit_info.value.code == 1
+	assert capsys.readouterr().out == ('error\tNo such file or directory\tmissing.tif\nnot_uploaded\t-\t2023\n')
+
+
+def test_check_upload_uses_its_own_exit_status_for_not_uploaded(tmp_path, monkeypatch):
+	monkeypatch.setattr(DataCommands, '_ensure_auth', lambda _self: 'token')
+	not_uploaded = tmp_path / 'not-uploaded.tif'
+	not_uploaded.write_bytes(b'not on the platform')
+	monkeypatch.setattr('shared.upload_duplicates.use_client', _client_finding_nothing)
+
+	with pytest.raises(SystemExit) as exit_info:
+		fire.Fire(DataCommands, command=['check_upload', str(not_uploaded)])
+
+	assert exit_info.value.code == 3
 
 
 def test_allow_duplicate_uploads_a_second_copy(data_commands, test_file):
