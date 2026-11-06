@@ -2,6 +2,7 @@ interface LogoBannerProps {
   logos: Array<{
     path?: string;
     text?: string;
+    alt?: string;
     url?: string;
     height?: string;
   }>;
@@ -35,7 +36,7 @@ export default function LogoBannerBand({ logos, title, compact }: LogoBannerProp
                 <>
                   <img
                     src={logo.path}
-                    alt={logo.text || "Partner logo"}
+                    alt={logo.alt || logo.text || "Partner logo"}
                     className={`${compact ? (logo.height ? "h-14" : logoHeight) : (logo.height || "h-16")} w-full object-contain transition-all duration-300 group-hover:opacity-100 grayscale opacity-90 group-hover:grayscale-0`}
                   />
                   {logo.text && (
@@ -65,7 +66,7 @@ export default function LogoBannerBand({ logos, title, compact }: LogoBannerProp
                 <>
                   <img
                     src={logo.path}
-                    alt={logo.text || "Partner logo"}
+                    alt={logo.alt || logo.text || "Partner logo"}
                     className={`${compact ? (logo.height ? "h-14" : logoHeight) : (logo.height || "h-16")} w-full object-contain transition-all duration-300 group-hover:opacity-100 grayscale opacity-90 group-hover:grayscale-0`}
                   />
                   {logo.text && (
