@@ -202,9 +202,17 @@ Useful follow-up commands:
 
 ```bash
 scripts/qa/env.sh status
+scripts/qa/env.sh preview /dataset-audit/91090
 scripts/qa/run-agent-qa.sh --dry-run --parallel 4
 scripts/qa/env.sh down
 ```
+
+`preview` prints what a person needs to open a running stack from their Mac: one
+tunnel command with all the ports the browser calls, the URL and a test login. The
+tunnel fails at once if a port is taken and opens no shell on the server. Each
+worktree has its own ports and session storage, so several stacks can be open side
+by side, each tunnel in its own terminal tab. Set `DEADTREES_TUNNEL_HOST` if your
+SSH alias for the server isn't `processing-server`.
 
 The stack's slug comes from `.local/server-env.sh` when a host allocator wrote
 one, otherwise from the worktree path; worktrees under a shared `worktrees` or

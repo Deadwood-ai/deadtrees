@@ -66,6 +66,9 @@ scripts/qa/validate-isolated-env.sh
 - Use the generated `.local/supabase/current.env` endpoints for frontend, API,
   Supabase, Mailpit, Docker Compose, Playwright, and QA agents. Do not use the
   default shared Supabase ports for full QA/test work.
+- To test a running stack from the Mac, run `scripts/qa/env.sh preview [path]` and
+  give the person its tunnel, URL and login, each in its own code block. Don't write
+  tunnels by hand. Each worktree has its own ports, so several can run side by side.
 - See `docs/agents/environment-and-access.md` for the routing table, manual
   `source` command, and teardown guidance.
 - Production exploration must not run local-write QA playbooks or create data
