@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 from typing import Optional, List, Dict, Any, Union
 import time
 import httpx
@@ -25,8 +26,17 @@ from shared.models import (
 )
 from shared.labels import create_label_with_geometries
 from shared.processing_tasks import UPLOAD_TASK_TYPES
-from shared.upload_duplicates import DUPLICATE_UPLOAD_CODE, DuplicateUploadError, reject_duplicate_upload
+from shared.upload_duplicates import (
+	DUPLICATE_UPLOAD_CODE,
+	DuplicateUploadError,
+	find_existing_upload,
+	reject_duplicate_upload,
+)
 from shared.logger import logger
+
+# Python exits 1 on an uncaught exception and Fire exits 2 on a usage error, so
+# neither can mean "not uploaded".
+NOT_UPLOADED_EXIT_STATUS = 3
 
 
 def _raise_for_duplicate_upload(response: httpx.Response) -> None:
@@ -55,6 +65,43 @@ class DataCommands:
 				except Exception as e:
 					raise ValueError('Authentication failed')
 		return self._token
+
+	def check_upload(self, *file_paths: str) -> None:
+		"""Report which local files are already on the platform; uploads and deletes nothing.
+
+		Prints one tab-separated line per file: `uploaded`, the dataset ID (`hidden`
+		for a dataset this login may not see) and the path; `not_uploaded`, `-` and the
+		path; or `error`, the reason and the path for a file it cannot read.
+
+		Exit status: 0 when every file is uploaded, 3 when all could be checked and any
+		is not uploaded. Anything else means the check failed.
+
+		A match means the same fingerprint (shared/hash.py: file size, first and last
+		10 MB), in a dataset that may belong to someone else. It does not prove the whole
+		file is identical or that the dataset processed successfully, so it is not enough
+		on its own to delete a local copy.
+		"""
+		if not file_paths:
+			raise ValueError('Name at least one file')
+		token = self._ensure_auth()
+		failed = not_uploaded = False
+		for file_path in file_paths:
+			try:
+				# Fire turns a file name like 2023 into an int.
+				existing = find_existing_upload(Path(str(file_path)), token)
+			except OSError as error:
+				failed = True
+				print(f'error\t{error.strerror}\t{file_path}')
+				continue
+			if existing is None:
+				not_uploaded = True
+				print(f'not_uploaded\t-\t{file_path}')
+			else:
+				print(f'uploaded\t{existing["dataset_id"] or "hidden"}\t{file_path}')
+		if failed:
+			sys.exit(1)
+		if not_uploaded:
+			sys.exit(NOT_UPLOADED_EXIT_STATUS)
 
 	def upload(
 		self,

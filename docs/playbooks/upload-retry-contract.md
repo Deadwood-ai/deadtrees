@@ -46,7 +46,8 @@ this step is the enforcement. A client that deliberately wants a second copy
 sends the form field `allow_duplicate=true` with every chunk (it is part of the
 upload contract); the step then accepts the file as a new dataset. Clients keep
 it off by default and set it only on an explicit user choice such as the CLI's
-`--allow-duplicates`.
+`--allow_duplicate`. To ask the same question without uploading, run
+`deadtrees data check_upload` (see `upload_guide.md`).
 
 Before database/file finalization, a durable `finalizing` receipt prevents a
 second attempt from repeating side effects. Normal successful finalization saves

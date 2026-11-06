@@ -45,8 +45,7 @@ import pandas as pd
 from datetime import datetime
 from deadtrees_cli.data import DataCommands
 from tqdm import tqdm
-from shared.db import use_client
-from shared.settings import settings
+from shared.upload_duplicates import DuplicateUploadError
 
 # Configure these paths for your data
 ORTHOS_PATH = Path('your_orthos/')
@@ -72,17 +71,6 @@ def mark_as_failed(filename, reason):
     """Track failed uploads"""
     with open(FAILED_FILE, 'a') as f:
         f.write(f'{filename}: {reason}\n')
-
-def file_exists_in_db(data_commands, filename):
-    """Check if file already exists (prevents duplicates)"""
-    try:
-        token = data_commands._ensure_auth()
-        with use_client(token) as client:
-            response = client.table(settings.datasets_table).select('id').eq('file_name', filename).execute()
-            return len(response.data) > 0
-    except Exception as e:
-        print(f'Error checking file existence: {str(e)}')
-        return False
 
 def main():
     print('Starting upload process...')
@@ -117,13 +105,6 @@ def main():
             failed += 1
             continue
         
-        # Skip if already in database
-        if file_exists_in_db(data_commands, filename):
-            print(f'Skipping {filename} - already in database')
-            mark_as_processed(filename)
-            skipped += 1
-            continue
-        
         try:
             # Parse acquisition date
             dt = datetime.fromisoformat(row['captured_date'])
@@ -155,6 +136,11 @@ def main():
                 mark_as_failed(filename, 'Upload failed')
                 failed += 1
                 
+        except DuplicateUploadError:
+            # upload() checks this before sending any bytes
+            print(f'Skipping {filename} - already on the platform')
+            mark_as_processed(filename)
+            skipped += 1
         except Exception as e:
             print(f'Error with {filename}: {str(e)}')
             mark_as_failed(filename, str(e))
@@ -203,6 +189,29 @@ python upload_your_data.py
 # If it fails, fix issues and re-run - it will skip completed files
 python upload_your_data.py
 ```
+
+## Check What Is Already Uploaded
+
+Ask whether local files are already on the platform. This uploads and deletes nothing:
+
+```bash
+deadtrees data check_upload your_orthos/*.tif
+```
+
+It prints one tab-separated line per file:
+
+```
+uploaded	12345	your_orthos/dataset_001.tif
+uploaded	hidden	your_orthos/dataset_002.tif
+not_uploaded	-	your_orthos/dataset_003.tif
+error	No such file or directory	your_orthos/dataset_004.tif
+```
+
+`hidden` means the file is on the platform in a private dataset your login may not see. A dataset ID may also belong to someone else, not only to you.
+
+The exit status is 0 when every file is uploaded, and 3 when all files could be checked and any is not uploaded. Anything else means the check failed, including a file it could not read.
+
+A match means the same file size and the same first and last 10 MB. It does not prove the whole file is identical or that the dataset processed successfully, so don't delete a local copy based on this check alone.
 
 ## Data Requirements
 
