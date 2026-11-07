@@ -47,7 +47,13 @@ from processor.src.utils.debug_artifacts import (
 	write_debug_bundle,
 )
 from processor.src.utils.odm_inputs import select_odm_images
-from processor.src.utils.ortho_resolution import budgeted_resolution_cm, mission_extent, reduced_resolution_note
+from processor.src.utils.ortho_resolution import (
+	budgeted_resolution_cm,
+	mission_extent,
+	reduced_resolution_note,
+	source_gigapixels,
+	too_large_to_texture,
+)
 from shared.exif_utils import extract_camera_nadir_deviation_degrees, extract_comprehensive_exif
 
 # RTK file extensions as specified in requirements
@@ -201,15 +207,26 @@ def _with_budgeted_ortho_resolution(
 
 	Runs between the two ODM passes, when the reconstruction already shows the mission's
 	extent. Missions that fit are left unchanged; otherwise also returns the note for the
-	dataset's additional information.
+	dataset's additional information. A mission too large to texture fails here instead of
+	about an hour later in the orthophoto pass.
 	"""
 	raw_reconstruction = read_file_from_shared_volume(volume_name, f'{project_name}/{RECONSTRUCTION_FILE}', dataset_id)
-	extent = mission_extent(json.loads(raw_reconstruction)) if raw_reconstruction else None
+	reconstructions = json.loads(raw_reconstruction) if raw_reconstruction else []
+	extent = mission_extent(reconstructions) if reconstructions else None
 	if extent is None:
 		return odm_command, None
 	index = odm_command.index('--orthophoto-resolution') + 1
 	requested_cm = float(odm_command[index])
 	resolution_cm = budgeted_resolution_cm(requested_cm, extent, settings.ODM_MAX_ORTHO_PIXELS)
+	source_gpx = source_gigapixels(reconstructions)
+	if too_large_to_texture(
+		extent, source_gpx, resolution_cm, settings.ODM_MAX_TEXTURE_AREA_KM2, settings.ODM_MAX_TEXTURE_SOURCE_GPX
+	):
+		raise Exception(
+			f'Mission too large to texture in one piece: {extent.area_km2:.1f} km² at ~{extent.gsd_cm:.1f} cm GSD with '
+			f'{source_gpx:.1f} Gpx of images (limits {settings.ODM_MAX_TEXTURE_AREA_KM2:g} km² and '
+			f'{settings.ODM_MAX_TEXTURE_SOURCE_GPX:g} Gpx); ODM would run out of memory (DT-1491)'
+		)
 	if resolution_cm == requested_cm:
 		return odm_command, None
 	logger.warning(

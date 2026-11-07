@@ -689,6 +689,30 @@ def test_orthophoto_pass_keeps_the_resolution_when_the_raster_fits(fake_volume, 
 
 
 @pytest.mark.unit
+def test_a_mission_too_large_to_texture_fails_after_reconstruction(fake_volume, monkeypatch):
+	from processor.src.process_odm import _with_budgeted_ortho_resolution
+
+	down = [3.141592653589793, 0.0, 0.0]
+	shots = {f's{i}': {'camera': 'c', 'rotation': down, 'translation': [-i * 2000, 0, 120]} for i in range(4)}
+	shots['far'] = {'camera': 'c', 'rotation': down, 'translation': [0, -3000, 120]}
+	fake_volume(
+		[
+			{
+				'cameras': {'c': {'width': 5000, 'height': 3750, 'focal_x': 0.75}},
+				'shots': shots,
+				'points': {'p': {'coordinates': [0, 0, 0]}},
+			}
+		]
+	)
+	monkeypatch.setattr(settings, 'ODM_MAX_TEXTURE_AREA_KM2', 4.3)
+	monkeypatch.setattr(settings, 'ODM_MAX_TEXTURE_SOURCE_GPX', 0.05)
+	command = ['--orthophoto-resolution', '1.0', 'dataset_1']
+
+	with pytest.raises(Exception, match=r'too large to texture in one piece: \d+\.\d km².*DT-1491'):
+		_with_budgeted_ortho_resolution(command, 'odm_processing_1', 'dataset_1', dataset_id=1, token='t')
+
+
+@pytest.mark.unit
 def test_a_failed_reduced_resolution_note_does_not_fail_the_odm_run(monkeypatch):
 	import processor.src.process_odm as process_odm_module
 
