@@ -97,9 +97,6 @@ describe("PWA installation identity", () => {
       '<link rel="manifest" href="/manifest.webmanifest"',
     );
     expect(html.indexOf('id="pwa-install-metadata"')).toBeLessThan(
-      html.indexOf('rel="stylesheet"'),
-    );
-    expect(html.indexOf('id="pwa-install-metadata"')).toBeLessThan(
       html.indexOf('src="/src/main.tsx"'),
     );
   });

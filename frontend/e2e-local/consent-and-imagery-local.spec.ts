@@ -12,12 +12,17 @@ test("the consent banner leaves room for the Sign up button", async ({ page }) =
   // the banner kept covering the button.
   await page.mouse.move(640, 300);
   await page.mouse.wheel(0, 2000);
-  const box = (await button.boundingBox())!;
-  const hit = await page.evaluate(
-    ([x, y]) => document.elementFromPoint(x, y)?.closest("button")?.textContent ?? "",
-    [box.x + box.width / 2, box.y + box.height / 2],
-  );
-  expect(hit).toMatch(/sign up/i);
+  // The wheel scroll finishes after the call returns, so read the settled spot.
+  await expect
+    .poll(async () => {
+      const box = (await button.boundingBox())!;
+      return page.evaluate(
+        ([x, y]) =>
+          document.elementFromPoint(x, y)?.closest("button")?.textContent ?? "",
+        [box.x + box.width / 2, box.y + box.height / 2],
+      );
+    })
+    .toMatch(/sign up/i);
 });
 
 // /dataset/91001 is the seeded public QA dataset (docs/qa/fixtures.md).
