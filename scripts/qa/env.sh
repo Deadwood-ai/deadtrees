@@ -16,7 +16,7 @@ vite_session_name() {
 
 usage() {
 	cat >&2 <<'USAGE'
-Usage: scripts/qa/env.sh <render|up|status|reset|down|cleanup>
+Usage: scripts/qa/env.sh <render|up|status|preview [path]|reset|down|cleanup>
 
 Manages the local isolated QA environment for this worktree.
 
@@ -24,6 +24,7 @@ Commands:
   render  Render isolated Supabase/app env files and write QA env summary.
   up      Start isolated Supabase, app services, and Vite.
   status  Check Supabase/Auth, API, Mailpit, and frontend readiness.
+  preview Print the tunnel, URL and test login to open this stack from the Mac.
   reset   Reseed qa-full and refresh fixture assets.
   down    Stop Vite, app services, and isolated Supabase; reclaim root-owned files.
   cleanup Stop an already-rendered QA stack without creating new runtime state;
@@ -280,6 +281,36 @@ status() {
 	fi
 }
 
+preview() {
+	local page="${1:-/}"
+	if ! source_existing_isolated_env; then
+		echo "No QA environment in this worktree. Run: scripts/qa/env.sh up" >&2
+		return 1
+	fi
+	if ! { check_url "Supabase Auth" "${SUPABASE_URL}/auth/v1/settings" \
+		&& check_url "Local API" "${VITE_LOCAL_API_URL}/" \
+		&& check_url "Frontend" "${PLAYWRIGHT_BASE_URL}/"; } >/dev/null; then
+		echo "QA stack is not running. Run: scripts/qa/env.sh up" >&2
+		return 1
+	fi
+	local port forwards=""
+	# The browser on the Mac calls these three directly, so all must be forwarded.
+	for port in "$LOCAL_FRONTEND_PORT" "${VITE_SUPABASE_URL##*:}" "$LOCAL_NGINX_HTTP_PORT"; do
+		forwards+=" -L ${port}:127.0.0.1:${port}"
+	done
+	cat <<PREVIEW
+Tunnel (run on the Mac, VPN on, one terminal tab per thread):
+ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30${forwards} ${DEADTREES_TUNNEL_HOST:-processing-server}
+
+URL:
+${PLAYWRIGHT_BASE_URL}${page}
+
+Test login (other roles: docs/qa/fixtures.md):
+qa-auditor-local@example.com
+DeadTreesQA-Local-1!
+PREVIEW
+}
+
 reset() {
 	source_isolated_env
 	"$REPO_ROOT/scripts/qa/seed.sh" qa-full
@@ -322,6 +353,9 @@ case "$COMMAND" in
 		;;
 	status)
 		status
+		;;
+	preview)
+		preview "${2:-/}"
 		;;
 	reset)
 		reset
