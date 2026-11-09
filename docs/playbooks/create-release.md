@@ -166,7 +166,7 @@ the quoted command locally):
 ssh processing-server 'crontab -l | grep -E "processor_auto_deploy|processor_docker_maintenance"'
 ssh processing-server 'cd /home/jj1049/prod/deadtrees && git log -1 --oneline --decorate'
 ssh processing-server 'cd /home/jj1049/prod/deadtrees && tail -80 auto-deploy.log'
-ssh processing-server 'cd /home/jj1049/prod/deadtrees && python3 scripts/processor_runtime_control.py status'
+ssh processing-server 'cd /home/jj1049/prod/deadtrees && cat .local/processor-control/*.json 2>/dev/null'
 ssh processing-server 'snap refresh --time'
 ssh processing-server 'docker ps --format "{{.Names}}\t{{.Status}}\t{{.Image}}" | grep deadtrees-processor'
 ssh processing-server 'docker inspect deadtrees-processor-1 --format "Cmd={{json .Config.Cmd}} RestartPolicy={{.HostConfig.RestartPolicy.Name}}"'

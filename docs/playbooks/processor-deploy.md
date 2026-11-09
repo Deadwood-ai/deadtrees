@@ -108,7 +108,7 @@ the worker or proving it is idle.
 ## Manual Checks
 
 ```bash
-python3 scripts/processor_runtime_control.py status
+cat .local/processor-control/*.json 2>/dev/null   # drain request and ack, if any
 tail -80 auto-deploy.log
 tail -80 processor-maintenance.log
 docker inspect deadtrees-processor-1 --format 'Cmd={{json .Config.Cmd}} RestartPolicy={{.HostConfig.RestartPolicy.Name}} StartedAt={{.State.StartedAt}}'
