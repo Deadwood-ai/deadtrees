@@ -28,8 +28,9 @@ patterns. Preserve that assumption when changing processor or storage code.
 - Do not merge while the latest `main` run of the migrate
   (`supabase-migrate-on-merge.yml`) or deploy job is red; fix or rerun it first.
 - Do not add PR-time workflows that mutate production services or the production DB.
-- Do not edit `/home/jj1049/prod/deadtrees` directly unless the user explicitly asks
-  for a manual production operation.
+- In `/home/jj1049/prod/deadtrees`, only plain reads: `git log`, release markers,
+  pause and drain files, logs. Do not run its scripts or write there unless the
+  user explicitly asks for a manual production operation.
 
 ## Python And Backend
 

@@ -127,8 +127,8 @@ full platform check inside that broader operator cadence.
 5. Check deploy health read-only on the production checkout, never writing there:
    the tail of `auto-deploy.log`, `git status --porcelain` (a dirty checkout makes
    auto-deploy refuse), HEAD against `origin/main`, the `processor-deploy-paused`
-   marker, and `scripts/processor_runtime_control.py status` for the drain and
-   active task. A lock or "keeping the drain" message is normal while a deploy
+   marker, and the drain files in `.local/processor-control/`. Don't run its
+   scripts: they load the production environment. A lock or "keeping the drain" message is normal while a deploy
    drains; a refusal, error, pause marker, or a drain older than about 12 hours
    is a finding. See [operator-chat.md](operator-chat.md#unattended-platform-monitor)
    for the scheduled version.

@@ -150,13 +150,14 @@ is a production change; drain first as `processor-deploy.md` describes.
 
 ## Checking All Hosts
 
-All of these are read-only. Run them from the host's checkout.
+All of these are plain reads. Run them from the host's checkout, but don't run its
+scripts there: they load the production environment.
 
 ```bash
 git log -1 --oneline                          # deployed code
 cat .local/processor-activated-sha            # last successfully activated release
 ls .local/processor-deploy-paused 2>/dev/null && cat .local/processor-deploy-paused
-python3 scripts/processor_runtime_control.py status   # drain state and active task
+cat .local/processor-control/*.json 2>/dev/null       # drain request and ack, if any
 tail -40 auto-deploy.log
 docker inspect deadtrees-processor-1 --format '{{.State.Status}} StartedAt={{.State.StartedAt}}'
 ```
